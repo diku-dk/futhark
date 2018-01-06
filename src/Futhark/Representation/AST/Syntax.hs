@@ -51,8 +51,6 @@ module Futhark.Representation.AST.Syntax
   , Safety (..)
   , LambdaT(..)
   , Lambda
-  , ExtLambdaT (..)
-  , ExtLambda
 
   -- * Definitions
   , ParamT (..)
@@ -326,11 +324,10 @@ data IfSort = IfNormal -- ^ An ordinary branch.
 type Exp = ExpT
 
 -- | Anonymous function for use in a SOAC.
-data LambdaT lore =
-  Lambda { lambdaParams     :: [LParam lore]
-         , lambdaBody       :: BodyT lore
-         , lambdaReturnType :: [Type]
-         }
+data LambdaT lore = Lambda { lambdaParams     :: [LParam lore]
+                           , lambdaBody       :: BodyT lore
+                           , lambdaReturnType :: [Type]
+                           }
 
 deriving instance Annotations lore => Eq (LambdaT lore)
 deriving instance Annotations lore => Show (LambdaT lore)
@@ -338,20 +335,6 @@ deriving instance Annotations lore => Ord (LambdaT lore)
 
 -- | Type alias for namespacing reasons.
 type Lambda = LambdaT
-
--- | Anonymous function for use in a SOAC, with an existential return
--- type.
-data ExtLambdaT lore =
-  ExtLambda { extLambdaParams     :: [LParam lore]
-            , extLambdaBody       :: BodyT lore
-            , extLambdaReturnType :: [ExtType]
-            }
-
-deriving instance Annotations lore => Eq (ExtLambdaT lore)
-deriving instance Annotations lore => Show (ExtLambdaT lore)
-deriving instance Annotations lore => Ord (ExtLambdaT lore)
-
-type ExtLambda = ExtLambdaT
 
 type FParam lore = ParamT (FParamAttr lore)
 

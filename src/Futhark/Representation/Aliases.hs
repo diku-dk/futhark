@@ -30,7 +30,6 @@ module Futhark.Representation.Aliases
        , removeBodyAliases
        , removeStmAliases
        , removeLambdaAliases
-       , removeExtLambdaAliases
        , removePatternAliases
        , removeScopeAliases
        -- * Tracking aliases
@@ -234,10 +233,6 @@ removeStmAliases = runIdentity . rephraseStm removeAliases
 removeLambdaAliases :: CanBeAliased (Op lore) =>
                        Lambda (Aliases lore) -> Lambda lore
 removeLambdaAliases = runIdentity . rephraseLambda removeAliases
-
-removeExtLambdaAliases :: CanBeAliased (Op lore) =>
-                          ExtLambda (Aliases lore) -> ExtLambda lore
-removeExtLambdaAliases = runIdentity . rephraseExtLambda removeAliases
 
 removePatternAliases :: PatternT (Names', a)
                      -> PatternT a

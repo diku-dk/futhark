@@ -273,12 +273,6 @@ instance PrettyLore lore => Pretty (Lambda lore) where
     parens (commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
 
-instance PrettyLore lore => Pretty (ExtLambda lore) where
-  ppr (ExtLambda params body rettype) =
-    text "fn" <+> ppTuple' rettype <+>
-    parens (commasep (map ppr params)) <+>
-    text "=>" </> indent 2 (ppr body)
-
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry name rettype fparams body) =
     annot (mapMaybe ppAnnot fparams) $

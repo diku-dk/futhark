@@ -8,7 +8,6 @@ module Futhark.Analysis.Rephrase
        , rephraseBody
        , rephraseStm
        , rephraseLambda
-       , rephraseExtLambda
        , rephrasePattern
        , rephrasePatElem
        , Rephraser (..)
@@ -80,12 +79,6 @@ rephraseLambda rephraser lam = do
   body' <- rephraseBody rephraser $ lambdaBody lam
   params' <- mapM (rephraseParam $ rephraseLParamLore rephraser) $ lambdaParams lam
   return lam { lambdaBody = body', lambdaParams = params' }
-
-rephraseExtLambda :: Monad m => Rephraser m from to -> ExtLambda from -> m (ExtLambda to)
-rephraseExtLambda rephraser lam = do
-  body' <- rephraseBody rephraser $ extLambdaBody lam
-  params' <- mapM (rephraseParam $ rephraseLParamLore rephraser) $ extLambdaParams lam
-  return lam { extLambdaBody = body', extLambdaParams = params' }
 
 mapper :: Monad m => Rephraser m from to -> Mapper from to m
 mapper rephraser = identityMapper {

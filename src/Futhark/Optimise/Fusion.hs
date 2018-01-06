@@ -583,11 +583,10 @@ fusionGatherBody fres (Body blore (stmsToList ->
            DoLoop [] merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
            pure $
            BasicOp $ BinOp (Add Int32) (Futhark.Var offset) (Futhark.Var chunk_size)]
-  let lam = ExtLambda { extLambdaParams = lam_params
-                      , extLambdaBody = lam_body
-                      , extLambdaReturnType =
-                          staticShapes $ map paramType $ acc_params ++ [offset_param]
-                      }
+  let lam = Lambda { lambdaParams = lam_params
+                   , lambdaBody = lam_body
+                   , lambdaReturnType = map paramType $ acc_params ++ [offset_param]
+                   }
       stream = Futhark.Stream w (Sequential $ merge_init ++ [intConst it 0]) lam loop_arrs
 
   -- It is important that the (discarded) final-offset is not the
@@ -785,22 +784,14 @@ fuseInExp e = mapExpM fuseIn e
 
 fuseIn :: Mapper SOACS SOACS FusionGM
 fuseIn = identityMapper {
-           mapOnBody    = const fuseInBody
-         , mapOnOp      = mapSOACM identitySOACMapper
-                          { mapOnSOACLambda = fuseInLambda
-                          , mapOnSOACExtLambda = fuseInExtLambda
-                          }
+           mapOnBody = const fuseInBody
+         , mapOnOp = mapSOACM identitySOACMapper { mapOnSOACLambda = fuseInLambda }
          }
 
 fuseInLambda :: Lambda -> FusionGM Lambda
 fuseInLambda (Lambda params body rtp) = do
   body' <- binding (map paramIdent params) $ fuseInBody body
   return $ Lambda params body' rtp
-
-fuseInExtLambda :: ExtLambda -> FusionGM ExtLambda
-fuseInExtLambda (ExtLambda params body rtp) = do
-  body' <- binding (map paramIdent params) $ fuseInBody body
-  return $ ExtLambda params body' rtp
 
 replaceSOAC :: Pattern -> StmAux () -> Exp -> FusionGM (Stms SOACS)
 replaceSOAC (Pattern _ []) _ _ = return mempty

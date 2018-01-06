@@ -483,10 +483,8 @@ toSOAC (Redomap w comm l1 l2 es as) =
 toSOAC (Scanomap w l1 l2 es as) =
   Futhark.Scanomap w l1 l2 es <$> inputsToSubExps as
 toSOAC (Stream w form lam inps) = do
-  let extrtp = staticShapes $ lambdaReturnType lam
-      extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
   inpexp <- inputsToSubExps inps
-  return $ Futhark.Stream w form extlam inpexp
+  return $ Futhark.Stream w form lam inpexp
 toSOAC (Scatter len lam ivs as) = do
   ivs' <- inputsToSubExps ivs
   return $ Futhark.Scatter len lam ivs' as
@@ -514,15 +512,8 @@ fromExp (Op (Futhark.Redomap w comm l1 l2 es as)) =
   Right . Redomap w comm l1 l2 es <$> traverse varInput as
 fromExp (Op (Futhark.Scanomap w l1 l2 es as)) =
   Right . Scanomap w l1 l2 es <$> traverse varInput as
-fromExp (Op (Futhark.Stream w form extlam as)) = do
-  let mrtps = map hasStaticShape $ extLambdaReturnType extlam
-      rtps  = catMaybes mrtps
-  if length mrtps == length rtps
-  then Right <$> do let lam = Lambda (extLambdaParams extlam)
-                                     (extLambdaBody extlam)
-                                     rtps
-                    Stream w form lam <$> traverse varInput as
-  else pure $ Left NotSOAC
+fromExp (Op (Futhark.Stream w form lam as)) =
+  Right . Stream w form lam <$> traverse varInput as
 fromExp (Op (Futhark.Scatter len lam ivs as)) = do
   ivs' <- traverse varInput ivs
   return $ Right $ Scatter len lam ivs' as

@@ -2,8 +2,8 @@
 module Futhark.Internalise.Lambdas
   ( InternaliseLambda
   , internaliseMapLambda
+  , internaliseStreamMapLambda
   , internaliseFoldLambda
-  , internaliseRedomapInnerLambda
   , internaliseStreamLambda
   , internalisePartitionLambdas
   )
@@ -30,19 +30,52 @@ internaliseMapLambda :: InternaliseLambda
                      -> E.Exp
                      -> [I.SubExp]
                      -> InternaliseM I.Lambda
-internaliseMapLambda internaliseLambda lam args = do
+internaliseMapLambda =
+  internaliseSomeMapLambda index0 id I.rowType
+  where index0 arg = do
+          arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
+          arg_t <- lookupType arg'
+          letSubExp "elem" $ I.BasicOp $ I.Index arg' $ fullSlice arg_t [I.DimFix zero]
+        zero = constant (0::I.Int32)
+
+internaliseStreamMapLambda :: InternaliseLambda
+                           -> E.Exp
+                           -> [I.SubExp]
+                           -> InternaliseM I.Lambda
+internaliseStreamMapLambda internaliseLambda lam args = do
+  chunk_size <- newVName "chunk_size"
+  lam' <- internaliseSomeMapLambda slice0 (`setOuterSize` I.Var chunk_size) id
+          internaliseLambda lam args
+  return lam' { lambdaParams = I.Param chunk_size (I.Prim int32) : lambdaParams lam' }
+  where slice0 arg = do
+          arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
+          arg_t <- lookupType arg'
+          let w = arraySize 0 arg_t
+          letSubExp "elem" $ I.BasicOp $ I.Index arg' $
+            fullSlice arg_t [I.DimSlice zero w one]
+        zero = constant (0::I.Int32)
+        one = constant (1::I.Int32)
+
+internaliseSomeMapLambda :: (SubExp -> InternaliseM SubExp)
+                         -> (Type -> Type)
+                         -> (Type -> Type)
+                         -> InternaliseLambda
+                         -> E.Exp
+                         -> [I.SubExp]
+                         -> InternaliseM I.Lambda
+internaliseSomeMapLambda indexArg extReturn rowType' internaliseLambda lam args = do
   argtypes <- mapM I.subExpType args
-  let rowtypes = map I.rowType argtypes
+  let rowtypes = map rowType' argtypes
   (params, body, rettype) <- internaliseLambda lam rowtypes
   (rettype', inner_shapes) <- instantiateShapes' rettype
   let outer_shape = arraysSize 0 argtypes
   shape_body <- bindingParamTypes params $
                 shapeBody (map I.identName inner_shapes) rettype' body
   shapefun <- makeShapeFun params shape_body (length inner_shapes)
-  bindMapShapes inner_shapes shapefun args outer_shape
+  bindMapShapes indexArg inner_shapes shapefun args outer_shape
   body' <- bindingParamTypes params $
            ensureResultShape asserting "not all iterations produce same shape"
-           (srclocOf lam) rettype' body
+           (srclocOf lam) (map extReturn rettype') body
   return $ I.Lambda params body' rettype'
 
 makeShapeFun :: [I.LParam] -> I.Body -> Int
@@ -57,9 +90,10 @@ makeShapeFun params body n = do
   return $ I.Lambda params' (insertStms copybnds body) rettype
   where rettype = replicate n $ I.Prim int32
 
-bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
+bindMapShapes :: (SubExp -> InternaliseM SubExp)
+              -> [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
               -> InternaliseM ()
-bindMapShapes inner_shapes sizefun args outer_shape
+bindMapShapes indexArg inner_shapes sizefun args outer_shape
   | null $ I.lambdaReturnType sizefun = return ()
   | otherwise = do
       let size_args = replicate (length $ lambdaParams sizefun) Nothing
@@ -79,16 +113,12 @@ bindMapShapes inner_shapes sizefun args outer_shape
   where emptybranch =
           pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun)
         nonemptybranch = insertStmsM $
-          resultBody <$> (eLambda sizefun =<< mapM index0 args)
+          resultBody <$> (eLambda sizefun =<< mapM indexArg args)
 
         isnonempty = eNot $ eCmpOp (I.CmpEq I.int32)
                      (pure $ I.BasicOp $ I.SubExp outer_shape)
                      (pure $ I.BasicOp $ SubExp zero)
         zero = constant (0::I.Int32)
-        index0 arg = do
-          arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
-          arg_t <- lookupType arg'
-          letSubExp "elem" $ I.BasicOp $ I.Index arg' $ fullSlice arg_t [I.DimFix zero]
 
 internaliseFoldLambda :: InternaliseLambda
                       -> E.Exp
@@ -107,66 +137,17 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
            "shape of result does not match shape of initial value" (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
 
-
-internaliseRedomapInnerLambda :: InternaliseLambda
-                              -> E.Exp
-                              -> [I.SubExp]
-                              -> [I.SubExp]
-                              -> InternaliseM I.Lambda
-internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
-  arrtypes <- mapM I.subExpType arr_args
-  acctypes <- mapM I.subExpType nes
-  let rowtypes = map I.rowType arrtypes
-  --
-  (params, body, rettype) <- internaliseLambda lam $ acctypes ++ rowtypes
-  -- split rettype into (i) accummulator types && (ii) result-array-elem types
-  let acc_len = length acctypes
-      (acc_tps, res_el_tps) = (take acc_len rettype, drop acc_len rettype)
-  -- For the map part:  for shape computation we build
-  -- a map lambda from the inner lambda by dropping from
-  -- the result the accumular and binding the accumulating
-  -- param to their corresponding neutral-element subexp.
-  -- Troels: would this be correct?
-  (rettypearr', inner_shapes) <- instantiateShapes' res_el_tps
-  let outer_shape = arraysSize 0 arrtypes
-      acc_params  = take acc_len params
-      map_bodyres = drop acc_len $ I.bodyResult body
-      acc_bindings= map (\(ac_var,ac_val) ->
-                            mkLet' [] [paramIdent ac_var] (BasicOp $ SubExp ac_val)
-                        ) (zip acc_params nes)
-
-      map_bindings= stmsFromList acc_bindings <> bodyStms body
-      map_lore    = bodyAttr body
-      map_body = I.Body map_lore map_bindings map_bodyres
-  shape_body <- bindingParamTypes params $
-                shapeBody (map I.identName inner_shapes) rettypearr' map_body
-  shapefun <- makeShapeFun (drop acc_len params) shape_body (length inner_shapes)
-  bindMapShapes inner_shapes shapefun arr_args outer_shape
-  --
-  -- for the reduce part
-  let acctype' = [ t `I.setArrayShape` I.arrayShape shape
-                   | (t,shape) <- zip acc_tps acctypes ]
-  -- The reduce-part result of the body must have the exact same
-  -- shape as the initial accumulator.  We accomplish this with
-  -- an assertion and reshape().
-  --
-  -- finally, place assertions and return result
-  body' <- bindingParamTypes params $
-           ensureResultShape asserting "shape of result does not match shape of initial value"
-           (srclocOf lam) (acctype'++rettypearr') body
-  return $ I.Lambda params body' (acctype'++rettypearr')
-
 internaliseStreamLambda :: InternaliseLambda
                         -> E.Exp
                         -> [I.Type]
-                        -> InternaliseM I.ExtLambda
+                        -> InternaliseM ([LParam], Body)
 internaliseStreamLambda internaliseLambda lam rowts = do
   chunk_size <- newVName "chunk_size"
   let chunk_param = I.Param chunk_size $ I.Prim int32
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
-  (params, body, rettype) <- localScope (scopeOfLParams [chunk_param]) $
-                             internaliseLambda lam chunktypes
-  return $ I.ExtLambda (chunk_param:params) body rettype
+  (params, body, _) <- localScope (scopeOfLParams [chunk_param]) $
+                       internaliseLambda lam chunktypes
+  return (chunk_param:params, body)
 
 -- Given @k@ lambdas, this will return a lambda that returns an
 -- (k+2)-element tuple of integers.  The first element is the

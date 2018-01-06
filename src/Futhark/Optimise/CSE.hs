@@ -83,12 +83,6 @@ cseInLambda lam = do
   body' <- cseInBody $ lambdaBody lam
   return lam { lambdaBody = body' }
 
-cseInExtLambda :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
-                  ExtLambda lore -> CSEM lore (ExtLambda lore)
-cseInExtLambda lam = do
-  body' <- cseInBody $ extLambdaBody lam
-  return lam { extLambdaBody = body' }
-
 cseInStms :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
              Names -> [Stm lore]
           -> CSEM lore (Body lore)
@@ -214,5 +208,4 @@ instance (Attributes lore,
           CanBeAliased (Op lore),
           CSEInOp (OpWithAliases (Op lore))) =>
          CSEInOp (SOAC.SOAC (Aliases lore)) where
-  cseInOp = subCSE . SOAC.mapSOACM
-            (SOAC.SOACMapper return cseInLambda cseInExtLambda return)
+  cseInOp = subCSE . SOAC.mapSOACM (SOAC.SOACMapper return cseInLambda return)

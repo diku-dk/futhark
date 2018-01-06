@@ -18,7 +18,6 @@ import Control.Monad
 import Data.Foldable
 import Data.Either
 import Data.List
-import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
@@ -36,7 +35,6 @@ import Futhark.Optimise.Simplify.Lore
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import qualified Futhark.Analysis.ScalExp as SE
 
 simpleSOACS :: Simplify.SimpleOps SOACS
 simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
@@ -80,15 +78,7 @@ simplifySOAC (Stream outerdim form lam arr) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form
   arr' <- mapM Engine.simplify arr
-  vtable <- Engine.askVtable
-  let (chunk:_) = extLambdaParams lam
-      se_outer = case outerdim of
-                    Var idd    -> fromMaybe (SE.Id idd int32) (ST.lookupScalExp idd vtable)
-                    Constant c -> SE.Val c
-      -- extension: one may similarly treat iota stream-array case,
-      -- by setting the bounds to [0, se_outer-1]
-      parbnds  = [ (chunk, 0, se_outer) ]
-  (lam', _, lam_hoisted) <- Engine.simplifyExtLambda lam (getStreamAccums form) parbnds
+  (lam', lam_hoisted) <- Engine.simplifyLambda lam (map Just arr)
   return (Stream outerdim' form' lam' arr', form_hoisted <> lam_hoisted)
   where simplifyStreamForm (Parallel o comm lam0 acc) = do
           acc'  <- mapM Engine.simplify acc
@@ -161,7 +151,6 @@ topDownRules = [RuleOp removeReplicateMapping,
                 RuleOp removeUnusedMapInput,
                 RuleOp simplifyClosedFormRedomap,
                 RuleOp simplifyClosedFormReduce,
-                RuleOp simplifyStream,
                 RuleOp simplifyKnownIterationSOAC
                ]
 
@@ -346,98 +335,6 @@ simplifyClosedFormReduce vtable pat _ (Reduce _ _ fun args) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ _ _ = cannotSimplify
-
--- The simplifyStream stuff is something that Cosmin left lodged in
--- the simplification engine itself at some point.  I moved it here
--- and turned it into a rule, but I don't really understand what's
--- going on.
-
-simplifyStream :: TopDownRuleOp (Wise SOACS)
-simplifyStream vtable pat _ (lss@(Stream outerdim form lam arr)) = do
-  lss' <- frobStream vtable outerdim form lam arr
-  rtp <- expExtType $ Op lss
-  rtp' <- expExtType $ Op lss'
-  if rtp == rtp' then cannotSimplify
-    else do
-    let patels      = patternElements pat
-        argpattps   = map patElemType $ drop (length patels - length rtp) patels
-    (newpats,newsubexps) <- unzip . reverse <$>
-                            foldM gatherPat [] (zip3 rtp rtp' argpattps)
-    let newexps' = map (BasicOp . SubExp) newsubexps
-        rmvdpatels = concatMap patternElements newpats
-        patels' = concatMap (\p-> if p `elem` rmvdpatels then [] else [p]) patels
-        (ctx,vals) = splitAt (length patels' - length rtp') patels'
-        pat' = Pattern ctx vals
-        newpatexps' = zip newpats newexps' ++ [(pat',Op lss')]
-        newpats' = newpats ++ [pat']
-        (_,newexps'') = unzip newpatexps'
-        newpatexps''= zip newpats' newexps''
-    forM_ newpatexps'' $ \(p,e) -> addStm =<< mkLetM p e
-      where gatherPat acc (_, Prim _, _) = return acc
-            gatherPat acc (_, Mem {}, _) = return acc
-            gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
-              foldM gatherShape acc (zip3 (shapeDims shp) (shapeDims shp') (shapeDims pshp))
-            gatherPat _ _ =
-              fail $ "In simplifyStm \"let pat = stream()\": "++
-                     " reached unreachable case!"
-            gatherShape acc (Ext i, Free se', Var pid) = do
-              let patind  = elemIndex pid $
-                            map patElemName $ patternElements pat
-              case patind of
-                Just k -> return $ (Pattern [] [patternElements pat !! k], se') : acc
-                Nothing-> fail $ "In simplifyStm \"let pat = stream()\": pat "++
-                                 "element of known dim not found: "++pretty pid++" "++show i++" "++pretty se'++"."
-            gatherShape _ (Free se, Ext i', _) =
-              fail $ "In simplifyStm \"let pat = stream()\": "++
-                     " previous known dimension: " ++ pretty se ++
-                     " becomes existential: ?" ++ show i' ++ "!"
-            gatherShape acc _ = return acc
-simplifyStream _ _ _ _ = cannotSimplify
-
-frobStream :: (Op (Lore m) ~ SOAC (Lore m), MonadBinder m) =>
-              ST.SymbolTable (Lore m)
-           -> SubExp -> StreamForm (Lore m)
-           -> AST.ExtLambda (Lore m) -> [VName]
-           -> m (Op (Lore m))
-frobStream vtab outerdim form lam arr = do
-  lam' <- frobExtLambda vtab lam
-  return $ Stream outerdim form lam' arr
-
-frobExtLambda :: (MonadBinder m, LocalScope (Lore m) m) =>
-                 ST.SymbolTable (Lore m)
-              -> AST.ExtLambda (Lore m)
-              -> m (AST.ExtLambda (Lore m))
-frobExtLambda vtable (ExtLambda params body rettype) = do
-  let bodyres = bodyResult body
-      bodyenv = scopeOf $ bodyStms body
-      vtable' = foldr ST.insertLParam vtable params
-  rettype' <- localScope (scopeOfLParams params) $
-              zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
-  return $ ExtLambda params body rettype'
-    where refineArrType vtable' bodyenv pars x (Array btp shp u) = do
-            let vtab = ST.bindings vtable'
-            dsx <- localScope bodyenv $
-                   shapeDims . arrayShape <$> subExpType x
-            let parnms = map paramName pars
-                dsrtpx = shapeDims shp
-                (resdims,_) =
-                    foldl (\ (lst,i) el ->
-                            case el of
-                              (Free (Constant c), _) -> (lst++[Free (Constant c)], i)
-                              ( _,      Constant c ) -> (lst++[Free (Constant c)], i)
-                              (Free (Var tid), Var pid) ->
-                                if not (M.member tid vtab) &&
-                                        M.member pid vtab
-                                then (lst++[Free (Var pid)], i)
-                                else (lst++[Free (Var tid)], i)
-                              (Ext _, Var pid) ->
-                                if M.member pid vtab ||
-                                   pid `elem` parnms
-                                then (lst ++ [Free (Var pid)], i)
-                                else (lst ++ [Ext i],        i+1)
-                          ) ([],0) (zip dsrtpx dsx)
-            return $ Array btp (Shape resdims) u
-          refineArrType _ _ _ _ tp = return tp
 
 -- For now we just remove singleton maps.
 simplifyKnownIterationSOAC :: (BinderOps lore, Op lore ~ SOAC lore) =>

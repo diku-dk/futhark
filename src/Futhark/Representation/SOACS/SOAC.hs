@@ -26,7 +26,6 @@ import Control.Monad.Identity
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.List
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
@@ -37,11 +36,9 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplify.Lore
-import Futhark.Representation.Ranges
-  (Ranges, removeLambdaRanges, removeExtLambdaRanges)
+import Futhark.Representation.Ranges (Ranges, removeLambdaRanges)
 import Futhark.Representation.AST.Attributes.Ranges
-import Futhark.Representation.Aliases
-  (Aliases, removeLambdaAliases, removeExtLambdaAliases)
+import Futhark.Representation.Aliases (Aliases, removeLambdaAliases)
 import Futhark.Analysis.Usage
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.PrimExp.Convert
@@ -64,7 +61,7 @@ data SOAC lore =
   -- will be @[xs[0], xs[0] op xs[1], ..., x0 op x1 op ... op x[w-1] ]@
   | Redomap SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Scanomap SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
-  | Stream SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
+  | Stream SubExp (StreamForm lore) (LambdaT lore) [VName]
   | Scatter SubExp (LambdaT lore) [VName] [(SubExp, VName)]
     -- Scatter <cs> <length> <lambda> <original index and value arrays>
     -- <input/output arrays along with their sizes>
@@ -92,7 +89,6 @@ data StreamForm lore  =
 data SOACMapper flore tlore m = SOACMapper {
     mapOnSOACSubExp :: SubExp -> m SubExp
   , mapOnSOACLambda :: Lambda flore -> m (Lambda tlore)
-  , mapOnSOACExtLambda :: ExtLambda flore -> m (ExtLambda tlore)
   , mapOnSOACVName :: VName -> m VName
   }
 
@@ -100,7 +96,6 @@ data SOACMapper flore tlore m = SOACMapper {
 identitySOACMapper :: Monad m => SOACMapper lore lore m
 identitySOACMapper = SOACMapper { mapOnSOACSubExp = return
                                 , mapOnSOACLambda = return
-                                , mapOnSOACExtLambda = return
                                 , mapOnSOACVName = return
                                 }
 
@@ -131,7 +126,7 @@ mapSOACM tv (Scanomap w lam0 lam1 nes arrs) =
   mapM (mapOnSOACSubExp tv) nes <*> mapM (mapOnSOACVName tv) arrs
 mapSOACM tv (Stream size form lam arrs) =
   Stream <$> mapOnSOACSubExp tv size <*>
-  mapOnStreamForm form <*> mapOnSOACExtLambda tv lam <*>
+  mapOnStreamForm form <*> mapOnSOACLambda tv lam <*>
   mapM (mapOnSOACVName tv) arrs
   where mapOnStreamForm (Parallel o comm lam0 acc) =
             Parallel <$> pure o  <*> pure comm <*>
@@ -151,7 +146,6 @@ instance Attributes lore => FreeIn (SOAC lore) where
     where walk f x = tell (f x) >> return x
           free = SOACMapper { mapOnSOACSubExp = walk freeIn
                             , mapOnSOACLambda = walk freeInLambda
-                            , mapOnSOACExtLambda = walk freeInExtLambda
                             , mapOnSOACVName = walk freeIn
                             }
 
@@ -161,13 +155,12 @@ instance Attributes lore => Substitute (SOAC lore) where
     where substitute =
             SOACMapper { mapOnSOACSubExp = return . substituteNames subst
                        , mapOnSOACLambda = return . substituteNames subst
-                       , mapOnSOACExtLambda = return . substituteNames subst
                        , mapOnSOACVName = return . substituteNames subst
                        }
 
 instance Attributes lore => Rename (SOAC lore) where
   rename = mapSOACM renamer
-    where renamer = SOACMapper rename rename rename rename
+    where renamer = SOACMapper rename rename rename
 
 soacType :: SOAC lore -> [ExtType]
 soacType (Map size f _) =
@@ -193,10 +186,10 @@ soacType (Scanomap outersize outerfun innerfun _ _) =
         [] -> acc_tp
         _  -> acc_tp ++ map (`arrayOfRow` outersize) res_el_tp
 soacType (Stream outersize form lam _) =
-  map (substNamesInExtType substs) rtp
+  staticShapes $ map (substNamesInType substs) rtp
   where nms = map paramName $ take (1 + length accs) params
         substs = M.fromList $ zip nms (outersize:accs)
-        ExtLambda params _ rtp = lam
+        Lambda params _ rtp = lam
         accs = case form of
                 Parallel _ _ _ acc -> acc
                 Sequential  acc -> acc
@@ -224,7 +217,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
     let a1 = case form of
                Parallel _ _ lam0 _ -> map (const mempty) $ lambdaReturnType lam0
                Sequential _       -> []
-    in a1 ++ map (const mempty) (extLambdaReturnType lam)
+    in a1 ++ map (const mempty) (lambdaReturnType lam)
   opAliases (Scatter _len lam _ivs _as) =
     map (const mempty) $ lambdaReturnType lam
 
@@ -241,13 +234,13 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   consumedInOp (Stream _ form lam arrs) =
     S.fromList $ subExpVars $
     case form of Sequential accs ->
-                   map (consumedArray accs) $ S.toList $ consumedByExtLambda lam
+                   map (consumedArray accs) $ S.toList $ consumedByLambda lam
                  Parallel _ _ _ accs ->
-                   map (consumedArray accs) $ S.toList $ consumedByExtLambda lam
+                   map (consumedArray accs) $ S.toList $ consumedByLambda lam
     where consumedArray accs v = fromMaybe (Var v) $ lookup v $ paramsToInput accs
           -- Drop the chunk parameter, which cannot alias anything.
           paramsToInput accs = zip
-                               (map paramName $ drop 1 $ extLambdaParams lam)
+                               (map paramName $ drop 1 $ lambdaParams lam)
                                (accs++map Var arrs)
   consumedInOp (Scatter _ _ _ as) =
     S.fromList $ map snd as
@@ -276,7 +269,7 @@ instance (Attributes lore,
      acc arr
   addOpAliases (Stream size form lam arr) =
     Stream size (analyseStreamForm form)
-    (Alias.analyseExtLambda lam) arr
+    (Alias.analyseLambda lam) arr
     where analyseStreamForm (Parallel o comm lam0 acc) =
               Parallel o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
@@ -284,27 +277,24 @@ instance (Attributes lore,
     Scatter len (Alias.analyseLambda lam) ivs as
 
   removeOpAliases = runIdentity . mapSOACM remove
-    where remove = SOACMapper return (return . removeLambdaAliases)
-                   (return . removeExtLambdaAliases) return
+    where remove = SOACMapper return (return . removeLambdaAliases) return
 
 instance Attributes lore => IsOp (SOAC lore) where
   safeOp _ = False
   cheapOp _ = True
 
-substNamesInExtType :: M.Map VName SubExp -> ExtType -> ExtType
-substNamesInExtType _ tp@(Prim _) = tp
-substNamesInExtType subs (Mem se space) =
+substNamesInType :: M.Map VName SubExp -> Type -> Type
+substNamesInType _ tp@(Prim _) = tp
+substNamesInType subs (Mem se space) =
   Mem (substNamesInSubExp subs se) space
-substNamesInExtType subs (Array btp shp u) =
-  let shp' = Shape $ map (substNamesInExtSize subs) (shapeDims shp)
+substNamesInType subs (Array btp shp u) =
+  let shp' = Shape $ map (substNamesInSubExp subs) (shapeDims shp)
   in  Array btp shp' u
+
 substNamesInSubExp :: M.Map VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
 substNamesInSubExp subs (Var idd) =
   M.findWithDefault (Var idd) idd subs
-substNamesInExtSize :: M.Map VName SubExp -> ExtSize -> ExtSize
-substNamesInExtSize _ (Ext o) = Ext o
-substNamesInExtSize subs (Free o) = Free $ substNamesInSubExp subs o
 
 instance (Ranged inner) => RangedOp (SOAC inner) where
   opRanges op = replicate (length $ soacType op) unknownRange
@@ -313,8 +303,7 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
   type OpWithRanges (SOAC lore) = SOAC (Ranges lore)
 
   removeOpRanges = runIdentity . mapSOACM remove
-    where remove = SOACMapper return (return . removeLambdaRanges)
-                   (return . removeExtLambdaRanges) return
+    where remove = SOACMapper return (return . removeLambdaRanges) return
   addOpRanges (Map w lam args) =
     Map w (Range.runRangeM $ Range.analyseLambda lam) args
   addOpRanges (Reduce w comm lam input) =
@@ -334,7 +323,7 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
   addOpRanges (Stream w form lam arr) =
     Stream w
     (Range.runRangeM $ analyseStreamForm form)
-    (Range.runRangeM $ Range.analyseExtLambda lam)
+    (Range.runRangeM $ Range.analyseLambda lam)
     arr
     where analyseStreamForm (Sequential acc) =
             return $ Sequential acc
@@ -348,10 +337,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
 
   removeOpWisdom = runIdentity . mapSOACM remove
-    where remove = SOACMapper return
-                   (return . removeLambdaWisdom)
-                   (return . removeExtLambdaWisdom)
-                   return
+    where remove = SOACMapper return (return . removeLambdaWisdom) return
 
 instance Annotations lore => ST.IndexOp (SOAC lore) where
   indexOp vtable k soac [i] = do
@@ -415,13 +401,13 @@ typeCheckSOAC (Stream size form lam arrexps) = do
   accargs <- mapM TC.checkArg accexps
   arrargs <- mapM lookupType arrexps
   _ <- TC.checkSOACArrayArgs size arrexps
-  let chunk = head $ extLambdaParams lam
+  let chunk = head $ lambdaParams lam
   let asArg t = (t, mempty)
       inttp   = Prim int32
       lamarrs'= map (`setOuterSize` Var (paramName chunk)) arrargs
   let acc_len= length accexps
-  let lamrtp = take acc_len $ extLambdaReturnType lam
-  unless (staticShapes (map TC.argType accargs) == lamrtp) $
+  let lamrtp = take acc_len $ lambdaReturnType lam
+  unless (map TC.argType accargs == lamrtp) $
     TC.bad $ TC.TypeError "Stream with inconsistent accumulator type in lambda."
   -- check reduce's lambda, if any
   _ <- case form of
@@ -437,42 +423,7 @@ typeCheckSOAC (Stream size form lam arrexps) = do
   -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
-  TC.checkExtLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
-
-  -- check outerdim of Lambda's streamed-in array params are NOT specified,
-  -- and that return type inner dimens are all specified but not as other
-  -- lambda parameters!
-  let lamarr_rtp = drop acc_len $ extLambdaReturnType lam
-      lamarr_ptp = map paramType $ drop (acc_len+1) $ extLambdaParams lam
-      names_lamparams = S.fromList $ map paramName $ extLambdaParams lam
-  mapM_ (checkOuterDim (paramName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
-  mapM_ (checkInnerDim names_lamparams   . tail . shapeDims . arrayShape) lamarr_rtp
-  return ()
-    where checkOuterDim chunknm outdim = do
-            let chunk_str = pretty chunknm
-            case outdim of
-                    Constant _ ->
-                      TC.bad $ TC.TypeError
-                      ("Stream: outer dimension of stream should NOT"++
-                       " be specified since it is "++chunk_str++"by default.")
-                    Var idd    ->
-                      unless (idd == chunknm) $
-                      TC.bad $ TC.TypeError
-                      ("Stream: outer dimension of stream should NOT"++
-                       " be specified since it is "++chunk_str++"by default.")
-          boundDim (Free (Var idd)) = return $ Just idd
-          boundDim (Free _        ) = return Nothing
-          boundDim (Ext  _        ) =
-            TC.bad $ TC.TypeError $
-            "Stream's lambda: inner dimensions of the"++
-            " streamed-out arrays MUST be specified!"
-          checkInnerDim lamparnms innerdims = do
-            rtp_iner_syms <- catMaybes <$> mapM boundDim innerdims
-            case find (`S.member` lamparnms) rtp_iner_syms of
-                Just name -> TC.bad $ TC.TypeError $
-                             "Stream's lambda: " ++ pretty name ++
-                             " cannot specify an inner result shape"
-                _ -> return True
+  TC.checkLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
 
 typeCheckSOAC (Scatter w lam ivs as) = do
   -- Requirements:
@@ -603,12 +554,9 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
   opMetrics (Scanomap _ fun1 fun2 _ _) =
     inside "Scanomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ lam _) =
-    inside "Stream" $ extLambdaMetrics lam
+    inside "Stream" $ lambdaMetrics lam
   opMetrics (Scatter _len lam _ivs _as) =
     inside "Scatter" $ lambdaMetrics lam
-
-extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
-extLambdaMetrics = bodyMetrics . extLambdaBody
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Map size lam as) =

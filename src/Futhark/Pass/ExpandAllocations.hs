@@ -19,7 +19,7 @@ import Futhark.Pass
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
        hiding (Prog, Body, Stm, Pattern, PatElem,
-               BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
+               BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 
 expandAllocations :: Pass ExplicitMemory ExplicitMemory

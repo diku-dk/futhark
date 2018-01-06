@@ -40,7 +40,7 @@ import           Futhark.Tools (intraproceduralTransformation)
 import           Futhark.Representation.AST
 import           Futhark.Representation.ExplicitMemory
                  hiding (Prog, Body, Stm, Pattern, PatElem,
-                         BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
+                         BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
 import           Futhark.Pass
 
 doubleBuffer :: Pass ExplicitMemory ExplicitMemory

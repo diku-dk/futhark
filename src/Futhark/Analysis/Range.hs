@@ -5,7 +5,6 @@ module Futhark.Analysis.Range
        , RangeM
        , analyseExp
        , analyseLambda
-       , analyseExtLambda
        , analyseBody
        , analyseStms
        )
@@ -86,15 +85,6 @@ analyseLambda lam = do
   body <- analyseBody $ lambdaBody lam
   return $ lam { lambdaBody = body
                , lambdaParams = lambdaParams lam
-               }
-
-analyseExtLambda :: (Attributes lore, CanBeRanged (Op lore)) =>
-                    ExtLambda lore
-                 -> RangeM (ExtLambda (Ranges lore))
-analyseExtLambda lam = do
-  body <- analyseBody $ extLambdaBody lam
-  return $ lam { extLambdaBody = body
-               , extLambdaParams = extLambdaParams lam
                }
 
 -- Monad and utility definitions
