@@ -8,7 +8,6 @@ module Futhark.Tools
   , redomapToMapAndReduce
   , scanomapToMapAndReduce
   , sequentialStreamWholeArray
-  , singletonChunkRedLikeStreamLambda
   , partitionChunkedFoldParameters
   , partitionChunkedKernelLambdaParameters
   , partitionChunkedKernelFoldParameters
@@ -169,32 +168,6 @@ sequentialStreamWholeArray pat width nes fun arrs = do
     when (name `elem` patternContextNames pat) $
       addStm =<< mkLetNames' [name] (BasicOp $ SubExp se)
   addStms $ stmsFromList res_bnds
-
-singletonChunkRedLikeStreamLambda :: (Bindable lore, MonadFreshNames m) =>
-                                     [Type] -> Lambda lore -> m (Lambda lore)
-singletonChunkRedLikeStreamLambda acc_ts lam = do
-  -- The accumulator params are OK, but we need array params without
-  -- the chunk part.
-  let (chunk_param, acc_params, arr_params) =
-        partitionChunkedFoldParameters (length acc_ts) $ lambdaParams lam
-  unchunked_arr_params <- forM arr_params $ \arr_param ->
-    Param <$>
-    newVName (baseString (paramName arr_param) <> "_unchunked") <*>
-    pure (rowType $ paramType arr_param)
-  let chunk_name = paramName chunk_param
-      chunk_bnd = mkLet' [] [paramIdent chunk_param] $
-                  BasicOp $ SubExp $ intConst Int32 1
-      arr_bnds = stmsFromList
-                 [ mkLet' [] [paramIdent arr_param] $
-                   BasicOp $ Replicate (Shape [Var chunk_name]) $
-                   Var $ paramName unchunked_arr_param |
-                   (arr_param, unchunked_arr_param) <-
-                     zip arr_params unchunked_arr_params ]
-      unchunked_body = chunk_bnd `insertStm` (arr_bnds `insertStms` lambdaBody lam)
-  return Lambda { lambdaBody = unchunked_body
-                , lambdaParams = acc_params <> unchunked_arr_params
-                , lambdaReturnType = acc_ts
-                }
 
 partitionChunkedFoldParameters :: Int -> [Param attr]
                                -> (Param attr, [Param attr], [Param attr])
