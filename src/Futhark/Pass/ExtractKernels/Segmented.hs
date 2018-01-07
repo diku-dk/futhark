@@ -838,7 +838,7 @@ addFlagToLambda nes lam = do
     let rhs = map (Var . paramName) y_params
 
     lam' <- renameLambda lam -- avoid shadowing
-    res <- eLambda lam' $ lhs ++ rhs
+    res <- eLambda lam' $ map eSubExp $ lhs ++ rhs
 
     return $ resultBody $ new_flag : res
 

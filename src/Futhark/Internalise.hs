@@ -755,23 +755,9 @@ internaliseExp desc (E.Partition lams arr _) = do
 internaliseExp desc (E.Stream (E.MapLike o) lam arr _) = do
   arrs <- internaliseExpToVars "stream_input" arr
   lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
-  let (chunk_param, _, _) =
-        partitionChunkedFoldParameters 0 $ I.lambdaParams lam'
-      ts = map (`setOuterSize` I.Var (I.paramName chunk_param)) $
-           lambdaReturnType lam'
-
-  body <- localScope (scopeOfLParams $ I.lambdaParams lam') $
-          ensureResultShape asserting
-          "size of result not equal to chunk size" (srclocOf lam) ts $
-          lambdaBody lam'
-
-  let lam'' = lam' { lambdaReturnType = ts
-                   , lambdaBody = body
-                   }
-
   w <- arraysSize 0 <$> mapM lookupType arrs
   let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) []) []
-  letTupExp' desc $ I.Op $ I.Stream w form lam'' arrs
+  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
 
 -- If the stream form is a reduce, we also have to fiddle with the
 -- lambda to incorporate the reduce function.  FIXME: can't we just
@@ -815,7 +801,7 @@ internaliseExp desc (E.Stream (E.RedLike o comm lam0) lam arr _) = do
           copyIfConsumed _ x = return x
 
       accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
-      new_lam_res <- eLambda lam0' $ accs' ++ lam_res
+      new_lam_res <- eLambda lam0' $ map eSubExp $ accs' ++ lam_res
       return $ resultBody new_lam_res
 
   -- Make sure the chunk size parameter comes first.

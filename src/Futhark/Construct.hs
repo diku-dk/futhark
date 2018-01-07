@@ -258,12 +258,10 @@ eBody es = insertStmsM $ do
              mkBodyM mempty $ map Var $ concat xs
 
 eLambda :: MonadBinder m =>
-           Lambda (Lore m) -> [SubExp] -> m [SubExp]
-eLambda lam args = do zipWithM_ letBindNames params $
-                        map (BasicOp . SubExp) args
+           Lambda (Lore m) -> [m (Exp (Lore m))] -> m [SubExp]
+eLambda lam args = do zipWithM_ bindParam (lambdaParams lam) args
                       bodyBind $ lambdaBody lam
-  where params = [ [(param, BindVar)] |
-                   param <- map paramName $ lambdaParams lam ]
+  where bindParam param arg = letBindNames'_ [paramName param] =<< arg
 
 -- | Note: unsigned division.
 eDivRoundingUp :: MonadBinder m =>
