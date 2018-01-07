@@ -48,12 +48,9 @@ transformFunDef :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                     CanBeAliased (Op tolore)) =>
                    FunDef -> m (AST.FunDef tolore)
 transformFunDef (FunDef entry fname rettype params body) = do
-  (body',_) <-
-    runBinderEmptyEnv $
-    localScope (scopeOfFParams params) $
-    insertStmsM $
-    transformBody body
+  (body',_) <- modifyNameSource $ runState $ runBinderT m mempty
   return $ FunDef entry fname rettype params body'
+  where m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
 
 -- | The constraints that a monad must uphold in order to be used for
 -- first-order transformation.
