@@ -11,7 +11,6 @@ module Futhark.CodeGen.ImpGen.Kernels
 import Control.Arrow ((&&&))
 import Control.Monad.Except
 import Control.Monad.Reader
-import Control.Applicative
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M

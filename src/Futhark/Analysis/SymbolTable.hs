@@ -51,7 +51,6 @@ module Futhark.Analysis.SymbolTable
   where
 
 import Control.Arrow (second, (&&&))
-import Control.Applicative hiding (empty)
 import Control.Monad
 import Control.Monad.Reader
 import Data.Ord
