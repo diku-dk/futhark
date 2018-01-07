@@ -25,6 +25,7 @@ module Futhark.Binder
   )
 where
 
+import Control.Arrow (second)
 import Control.Monad.Writer
 import Control.Monad.State.Strict
 import Control.Monad.Reader
@@ -82,9 +83,9 @@ instance (Attributes lore, Monad m) =>
 instance (Attributes lore, Monad m) =>
          LocalScope lore (BinderT lore m) where
   localScope types (BinderT m) = BinderT $ do
-    modify $ \(stms, scope) -> (stms, scope `M.union` types)
+    modify $ second (M.union types)
     x <- m
-    modify $ \(stms, scope) -> (stms, scope `M.difference` types)
+    modify $ second (`M.difference` types)
     return x
 
 instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
