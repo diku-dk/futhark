@@ -335,22 +335,22 @@ foldBinOp bop ne (e:es) =
 -- operation to its arguments.  It is assumed that both argument and
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
-binOpLambda :: (MonadFreshNames m, BinderOps lore, Bindable lore) =>
-               BinOp -> PrimType -> m (Lambda lore)
+binOpLambda :: (MonadBinder m, Bindable (Lore m)) =>
+               BinOp -> PrimType -> m (Lambda (Lore m))
 binOpLambda bop t = binLambda (BinOp bop) t t
 
 -- | As 'binOpLambda', but for 'CmpOp's.
-cmpOpLambda :: (MonadFreshNames m, BinderOps lore, Bindable lore) =>
-               CmpOp -> PrimType -> m (Lambda lore)
+cmpOpLambda :: (MonadBinder m, Bindable (Lore m)) =>
+               CmpOp -> PrimType -> m (Lambda (Lore m))
 cmpOpLambda cop t = binLambda (CmpOp cop) t Bool
 
-binLambda :: (MonadFreshNames m, BinderOps lore, Bindable lore) =>
-             (SubExp -> SubExp -> BasicOp lore) -> PrimType -> PrimType
-          -> m (Lambda lore)
+binLambda :: (MonadBinder m, Bindable (Lore m)) =>
+             (SubExp -> SubExp -> BasicOp (Lore m)) -> PrimType -> PrimType
+          -> m (Lambda (Lore m))
 binLambda bop arg_t ret_t = do
   x   <- newVName "x"
   y   <- newVName "y"
-  (body, _) <- runBinderEmptyEnv $ insertStmsM $ do
+  body <- insertStmsM $ do
     res <- letSubExp "res" $ BasicOp $ bop (Var x) (Var y)
     return $ resultBody [res]
   return Lambda {
