@@ -20,7 +20,6 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        )
        where
 
-import Control.Applicative
 import Control.Monad
 import Data.Maybe
 import Data.Monoid

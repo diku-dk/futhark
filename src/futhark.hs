@@ -4,7 +4,6 @@ module Main (main) where
 
 import Data.Maybe
 import Control.Category (id)
-import Control.Applicative
 import Control.Monad
 import Control.Monad.State
 import Data.Monoid

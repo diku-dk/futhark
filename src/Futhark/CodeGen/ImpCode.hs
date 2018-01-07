@@ -55,7 +55,6 @@ module Futhark.CodeGen.ImpCode
   )
   where
 
-import Control.Applicative
 import Data.Monoid
 import Data.List hiding (foldr)
 import Data.Loc

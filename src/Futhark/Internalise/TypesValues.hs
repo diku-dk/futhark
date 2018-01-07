@@ -24,7 +24,6 @@ module Futhark.Internalise.TypesValues
   )
   where
 
-import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Array as A
@@ -33,8 +32,6 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
 import Data.Monoid
-
-import Prelude hiding (mapM)
 
 import qualified Language.Futhark as E
 import qualified Language.Futhark.TypeChecker.Types as E

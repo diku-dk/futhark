@@ -15,13 +15,11 @@ module Language.Futhark.Parser.Parser
   )
   where
 
-import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Trans.State
-import Control.Applicative ((<$>), (<*>))
 import Control.Arrow
 import Data.Array
 import qualified Data.Text as T

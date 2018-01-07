@@ -18,7 +18,6 @@ module Futhark.Pipeline
        )
        where
 
-import Control.Applicative
 import Control.Category
 import Control.Monad
 import Control.Monad.Writer.Strict hiding (pass)

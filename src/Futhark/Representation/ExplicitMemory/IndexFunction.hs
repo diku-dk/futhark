@@ -25,7 +25,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        where
 
 import Control.Arrow (first)
-import Control.Applicative
 import Data.Maybe
 import Data.Monoid
 import Data.List hiding (repeat)

@@ -13,7 +13,6 @@ module Language.Futhark.TypeChecker
   )
   where
 
-import Control.Applicative
 import Control.Monad.Except hiding (mapM)
 import Control.Monad.Writer hiding (mapM)
 import Data.List

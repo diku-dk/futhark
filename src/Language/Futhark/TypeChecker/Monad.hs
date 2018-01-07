@@ -45,7 +45,6 @@ module Language.Futhark.TypeChecker.Monad
   )
 where
 
-import Control.Applicative
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Writer
