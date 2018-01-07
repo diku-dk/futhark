@@ -53,7 +53,7 @@ bindingParams tparams params m = do
   let named_shape_params = map nonuniqueParamFromIdent (M.elems shape_ctx')
       shape_params = named_shape_params ++ concat unnamed_shape_params
   bindingFlatPattern params_idents (concat params_ts') $ \valueparams ->
-    bindingIdentTypes (map I.paramIdent $ shape_params++concat valueparams) $
+    I.localScope (I.scopeOfFParams $ shape_params++concat valueparams) $
     substitutingVars shapesubst $ m cm shape_params $
     chunks num_param_ts (concat valueparams)
 
@@ -72,7 +72,7 @@ bindingLambdaParams tparams params ts m = do
 
   bindingFlatPattern params_idents ts $ \params' ->
     local (\env -> env { envSubsts = ascript_substs `M.union` envSubsts env }) $
-    bindingIdentTypes (map I.paramIdent $ concat params') $ m cm $ concat params'
+    I.localScope (I.scopeOfLParams $ concat params') $ m cm $ concat params'
 
 processFlatPattern :: [(E.Ident,VName)] -> [t]
                    -> InternaliseM ([[I.Param t]], VarSubstitutions)
