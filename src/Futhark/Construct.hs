@@ -35,7 +35,6 @@ module Futhark.Construct
   , resultBody
   , resultBodyM
   , insertStmsM
-  , mapResultM
   , mapResult
 
   , foldBinOp
@@ -406,17 +405,8 @@ insertStmsM m = do
   (Body _ bnds res, otherbnds) <- collectStms m
   mkBodyM (otherbnds <> bnds) res
 
--- | Change that subexpression where evaluation of the body would
--- stop.
-mapResultM :: MonadBinder m =>
-              (Result -> m (Body (Lore m))) -> Body (Lore m) -> m (Body (Lore m))
-mapResultM f (Body _ bnds res) = do
-  Body _ bnds2 res' <- f res
-  mkBodyM (bnds<>bnds2) res'
-
 -- | Change that result where evaluation of the body would stop.  Also
--- change type annotations at branches.  This a non-monadic variant of
--- @mapResultM@.
+-- change type annotations at branches.
 mapResult :: Bindable lore =>
              (Result -> Body lore) -> Body lore -> Body lore
 mapResult f (Body _ bnds res) =
