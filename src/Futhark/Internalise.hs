@@ -482,6 +482,22 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
     return $ map I.Var $ dropCond loop_res
 
   where
+    forLoop nested_mergepat shapepat mergeinit form' =
+      inScopeOf form' $ internaliseBodyStms loopbody $ \ses -> do
+      sets <- mapM subExpType ses
+      let mergepat' = concat nested_mergepat
+          shapeargs = argShapes
+                      (map I.paramName shapepat)
+                      (map I.paramType mergepat')
+                      sets
+      return (resultBody $ shapeargs ++ ses,
+              (form',
+               shapepat,
+               mergepat',
+               mergeinit,
+               mempty))
+
+
     handleForm mergeinit (E.ForIn x arr) = do
       arr' <- internaliseExpToVars "for_in_arr" arr
       arr_ts <- mapM lookupType arr'
@@ -489,25 +505,12 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
 
       i <- newVName "i"
 
-      bindingIdentTypes [I.Ident i $ I.Prim $ IntType Int32] $
-        bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat ->
+      bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat ->
         bindingLambdaParams [] [x] (map rowType arr_ts) $ \x_cm x_params -> do
           mapM_ (uncurry (internaliseDimConstant loc)) x_cm
           mapM_ (uncurry (internaliseDimConstant loc)) mergecm
           let loopvars = zip x_params arr'
-          internaliseBodyStms loopbody $ \ses -> do
-            sets <- mapM subExpType ses
-            let mergepat' = concat nested_mergepat
-                shapeargs = argShapes
-                            (map I.paramName shapepat)
-                            (map I.paramType mergepat')
-                            sets
-            return (resultBody $ shapeargs ++ ses,
-                    (I.ForLoop i Int32 w loopvars,
-                     shapepat,
-                     mergepat',
-                     mergeinit,
-                     mempty))
+          forLoop nested_mergepat shapepat mergeinit $ I.ForLoop i Int32 w loopvars
 
     handleForm mergeinit (E.For i num_iterations) = do
       num_iterations' <- internaliseExp1 "upper_bound" num_iterations
@@ -517,24 +520,9 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
               I.Prim (IntType it) -> return it
               _                   -> fail "internaliseExp DoLoop: invalid type"
 
-      let i_ident = I.Ident i' $ I.Prim $ IntType it
-
-      bindingIdentTypes [i_ident] $ bindingParams tparams [mergepat] $
-        \mergecm shapepat nested_mergepat -> do
+      bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
         mapM_ (uncurry (internaliseDimConstant loc)) mergecm
-        internaliseBodyStms loopbody $ \ses -> do
-          sets <- mapM subExpType ses
-          let mergepat' = concat nested_mergepat
-              shapeargs = argShapes
-                          (map I.paramName shapepat)
-                          (map I.paramType mergepat')
-                          sets
-          return (resultBody $ shapeargs ++ ses,
-                  (I.ForLoop i' it num_iterations' [],
-                   shapepat,
-                   mergepat',
-                   mergeinit,
-                   mempty))
+        forLoop nested_mergepat shapepat mergeinit $ I.ForLoop i' it num_iterations' []
 
     handleForm mergeinit (E.While cond) =
       bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do

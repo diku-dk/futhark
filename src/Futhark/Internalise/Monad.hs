@@ -19,8 +19,6 @@ module Futhark.Internalise.Monad
   , lookupFunction
   , lookupFunction'
 
-  , bindingIdentTypes
-  , bindingParamTypes
   , bindingFunction
   , bindingType
   , bindingTypes
@@ -189,19 +187,6 @@ maybeSpecialiseEarly fname fname' params rettype = do
               params,
               applyRetType rettype params)
   modify $ \s -> s { stateFunSpecs = M.insert (fname, []) info $ stateFunSpecs s }
-
-bindingIdentTypes :: [Ident] -> InternaliseM a
-                  -> InternaliseM a
-bindingIdentTypes idents (InternaliseM m) =
-  InternaliseM $ localScope (typeScopeFromIdents idents) m
-
-typeScopeFromIdents :: [Ident] -> Scope SOACS
-typeScopeFromIdents = M.fromList . map assoc
-  where assoc ident = (identName ident, LetInfo $ identType ident)
-
-bindingParamTypes :: [LParam] -> InternaliseM a
-                  -> InternaliseM a
-bindingParamTypes = bindingIdentTypes . map paramIdent
 
 bindingFunction :: VName -> (SpecArgs -> InternaliseM FunInfo)
                 -> InternaliseM a -> InternaliseM a
