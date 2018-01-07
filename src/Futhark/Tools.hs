@@ -31,17 +31,14 @@ import Futhark.MonadFreshNames
 import Futhark.Construct
 import Futhark.Analysis.PrimExp.Convert
 
-nonuniqueParams :: (MonadFreshNames m, Bindable lore, BinderOps lore) =>
+nonuniqueParams :: (MonadFreshNames m, Bindable lore, HasScope lore m, BinderOps lore) =>
                    [LParam lore] -> m ([LParam lore], Stms lore)
-nonuniqueParams params =
-  modifyNameSource $ runState $ fmap fst $ runBinderEmptyEnv $
-  collectStms $ forM params $ \param ->
+nonuniqueParams params = runBinder $ forM params $ \param ->
     if not $ primType $ paramType param then do
       param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
       let param' = Param param_name $ paramType param
       localScope (scopeOfLParams [param']) $
-        letBindNames_ [(paramName param,BindVar)] $
-        BasicOp $ Copy $ paramName param'
+        letBindNames'_ [paramName param] $ BasicOp $ Copy $ paramName param'
       return param'
     else
       return param
