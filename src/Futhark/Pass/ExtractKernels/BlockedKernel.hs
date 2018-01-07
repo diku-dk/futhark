@@ -497,7 +497,8 @@ scanKernel1 w scan_sizes lam foldlam nes arrs = do
               letSubExp (baseString arr ++ "_elem") $ BasicOp $ Index arr slice
 
             -- Apply the body of the fold function.
-            fold_res <- eLambda foldlam $ j : map (Var . paramName) acc_params ++ arr_elems
+            fold_res <-
+              eLambda foldlam $ map eSubExp $ j : map (Var . paramName) acc_params ++ arr_elems
 
             -- Scatter the to_map parts to the mapout arrays using
             -- in-place updates, and return the to_scan parts.

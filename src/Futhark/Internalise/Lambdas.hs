@@ -30,11 +30,22 @@ internaliseMapLambda :: InternaliseLambda
                      -> E.Exp
                      -> [I.SubExp]
                      -> InternaliseM I.Lambda
-internaliseMapLambda = internaliseSomeMapLambda index0 id I.rowType
+internaliseMapLambda internaliseLambda lam args = do
+  argtypes <- mapM I.subExpType args
+  let rowtypes = map I.rowType argtypes
+  (params, body, rettype) <- internaliseLambda lam rowtypes
+  (rettype', inner_shapes) <- instantiateShapes' rettype
+  let outer_shape = arraysSize 0 argtypes
+  shapefun <- makeShapeFun params body rettype' inner_shapes
+  bindMapShapes index0 [] inner_shapes shapefun args outer_shape
+  body' <- bindingParamTypes params $
+           ensureResultShape asserting "not all iterations produce same shape"
+           (srclocOf lam) rettype' body
+  return $ I.Lambda params body' rettype'
   where index0 arg = do
           arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
           arg_t <- lookupType arg'
-          letSubExp "elem" $ I.BasicOp $ I.Index arg' $ fullSlice arg_t [I.DimFix zero]
+          return $ I.BasicOp $ I.Index arg' $ fullSlice arg_t [I.DimFix zero]
         zero = constant (0::I.Int32)
 
 internaliseStreamMapLambda :: InternaliseLambda
@@ -45,56 +56,44 @@ internaliseStreamMapLambda internaliseLambda lam args = do
   chunk_size <- newVName "chunk_size"
   let chunk_param = I.Param chunk_size (I.Prim int32)
       outer = (`setOuterSize` I.Var chunk_size)
-  lam' <- localScope (scopeOfLParams [chunk_param]) $
-          internaliseSomeMapLambda slice0 outer outer internaliseLambda lam args
-  return lam' { lambdaParams = chunk_param : lambdaParams lam' }
-  where slice0 arg = do
+  localScope (scopeOfLParams [chunk_param]) $ do
+    argtypes <- mapM I.subExpType args
+    (params, body, rettype) <- internaliseLambda lam $ map outer argtypes
+    (rettype', inner_shapes) <- instantiateShapes' rettype
+    let outer_shape = arraysSize 0 argtypes
+    shapefun <- makeShapeFun (chunk_param:params) body rettype' inner_shapes
+    bindMapShapes (slice0 chunk_size) [zero] inner_shapes shapefun args outer_shape
+    body' <- bindingParamTypes params $
+             ensureResultShape asserting "not all iterations produce same shape"
+             (srclocOf lam) (map outer rettype') body
+    return $ I.Lambda (chunk_param:params) body' (map outer rettype')
+  where slice0 chunk_size arg = do
           arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
           arg_t <- lookupType arg'
-          let w = arraySize 0 arg_t
-          letSubExp "elem" $ I.BasicOp $ I.Index arg' $
-            fullSlice arg_t [I.DimSlice zero w one]
+          return $ I.BasicOp $ I.Index arg' $
+            fullSlice arg_t [I.DimSlice zero (I.Var chunk_size) one]
         zero = constant (0::I.Int32)
         one = constant (1::I.Int32)
 
-internaliseSomeMapLambda :: (SubExp -> InternaliseM SubExp)
-                         -> (Type -> Type)
-                         -> (Type -> Type)
-                         -> InternaliseLambda
-                         -> E.Exp
-                         -> [I.SubExp]
-                         -> InternaliseM I.Lambda
-internaliseSomeMapLambda indexArg extReturn rowType' internaliseLambda lam args = do
-  argtypes <- mapM I.subExpType args
-  let rowtypes = map rowType' argtypes
-  (params, body, rettype) <- internaliseLambda lam rowtypes
-  (rettype', inner_shapes) <- instantiateShapes' rettype
-  let outer_shape = arraysSize 0 argtypes
-  shape_body <- bindingParamTypes params $
-                shapeBody (map I.identName inner_shapes) rettype' body
-  shapefun <- makeShapeFun params shape_body (length inner_shapes)
-  bindMapShapes indexArg inner_shapes shapefun args outer_shape
-  body' <- bindingParamTypes params $
-           ensureResultShape asserting "not all iterations produce same shape"
-           (srclocOf lam) (map extReturn rettype') body
-  return $ I.Lambda params body' rettype'
-
-makeShapeFun :: [I.LParam] -> I.Body -> Int
+makeShapeFun :: [I.LParam] -> I.Body -> [Type] -> [I.Ident]
              -> InternaliseM I.Lambda
-makeShapeFun params body n = do
+makeShapeFun params body val_rettype inner_shapes = do
   -- Some of 'params' may be unique, which means that the shape slice
   -- would consume its input.  This is not acceptable - that input is
   -- needed for the value function!  Hence, for all unique parameters,
   -- we create a substitute non-unique parameter, and insert a
   -- copy-binding in the body of the function.
-  (params', copybnds) <- nonuniqueParams params
-  return $ I.Lambda params' (insertStms copybnds body) rettype
-  where rettype = replicate n $ I.Prim int32
+  (params', copystms) <- nonuniqueParams params
+  shape_body <- runBodyBinder $ localScope (scopeOfLParams params') $ do
+    mapM_ addStm copystms
+    shapeBody (map I.identName inner_shapes) val_rettype body
+  return $ I.Lambda params' shape_body rettype
+  where rettype = replicate (length inner_shapes) $ I.Prim int32
 
-bindMapShapes :: (SubExp -> InternaliseM SubExp)
+bindMapShapes :: (SubExp -> InternaliseM I.Exp) -> [SubExp]
               -> [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
               -> InternaliseM ()
-bindMapShapes indexArg inner_shapes sizefun args outer_shape
+bindMapShapes indexArg extra_args inner_shapes sizefun args outer_shape
   | null $ I.lambdaReturnType sizefun = return ()
   | otherwise = do
       let size_args = replicate (length $ lambdaParams sizefun) Nothing
@@ -114,7 +113,7 @@ bindMapShapes indexArg inner_shapes sizefun args outer_shape
   where emptybranch =
           pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun)
         nonemptybranch = insertStmsM $
-          resultBody <$> (eLambda sizefun =<< mapM indexArg args)
+          resultBody <$> (eLambda sizefun . (map eSubExp extra_args++) $ map indexArg args)
 
         isnonempty = eNot $ eCmpOp (I.CmpEq I.int32)
                      (pure $ I.BasicOp $ I.SubExp outer_shape)
