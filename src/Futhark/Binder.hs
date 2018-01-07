@@ -15,7 +15,6 @@ module Futhark.Binder
   , runBinder_
   , joinBinder
   , runBodyBinder
-  , runBinderEmptyEnv
   -- * Non-class interface
   , addBinderStms
   , collectBinderStms
@@ -139,11 +138,6 @@ runBodyBinder :: (Bindable lore, BinderOps lore, MonadFreshNames m,
                   HasScope somelore m, SameScope somelore lore) =>
                  Binder lore (Body lore) -> m (Body lore)
 runBodyBinder = fmap (uncurry $ flip insertStms) . runBinder
-
-runBinderEmptyEnv :: (MonadFreshNames m, BinderOps lore) =>
-                     Binder lore a -> m (a, Stms lore)
-runBinderEmptyEnv m =
-  modifyNameSource $ runState $ runBinderT m mempty
 
 addBinderStms :: Monad m =>
                  Stms lore -> BinderT lore m ()
