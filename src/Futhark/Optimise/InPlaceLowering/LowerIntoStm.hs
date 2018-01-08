@@ -66,15 +66,6 @@ lowerUpdate
                     mkLet [] [(Ident bindee_nm $ typeOf bindee_attr, BindVar)] $
                     Op $ Kernel debug kspace ts kbody',
                    mkLet' [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
-lowerUpdate
-  (Let (Pattern [] [PatElem v BindVar v_attr]) aux e)
-  [DesiredUpdate bindee_nm bindee_attr cs src is val]
-  | v == val =
-    let is' = fullSlice (typeOf bindee_attr) is
-    in Just $ return [certify (stmAuxCerts aux <> cs) $
-                      mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
-                                 BindInPlace src is')] e,
-                      mkLet' [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
 lowerUpdate _ _ =
   Nothing
 
