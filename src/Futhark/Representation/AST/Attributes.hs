@@ -213,4 +213,4 @@ class (Annotations lore,
 expExtTypesFromPattern :: Typed attr => PatternT attr -> [ExtType]
 expExtTypesFromPattern pat =
   existentialiseExtTypes (patternContextNames pat) $
-  staticShapes $ map patElemRequires $ patternValueElements pat
+  staticShapes $ map patElemType $ patternValueElements pat

@@ -47,10 +47,10 @@ transformOutput ts names = descend ts
           case SOAC.viewf ts' of
             SOAC.EmptyF ->
               forM_ (zip names validents) $ \(k, valident) ->
-              letBindNames' [k] $ BasicOp $ SubExp $ Var $ identName valident
+              letBindNames [k] $ BasicOp $ SubExp $ Var $ identName valident
             t SOAC.:< ts'' -> do
               let (es,css) = unzip $ map (applyTransform t) validents
-                  mkPat (Ident nm tp) = Pattern [] [PatElem nm BindVar tp]
+                  mkPat (Ident nm tp) = Pattern [] [PatElem nm tp]
               opts <- concat <$> mapM primOpType es
               newIds <- forM (zip names opts) $ \(k, opt) ->
                 newIdent (baseString k) opt
@@ -501,7 +501,7 @@ toNestedSeqStream   (SOAC.Stream w form lam arrs) = do
   let nes      = getStreamAccums form
       instrm_inarrs = drop (1 + length nes) $ map paramName $ lambdaParams lam
       insoac   = Futhark.Stream w form innerlam instrm_inarrs
-      lam_bind = mkLet' [] instrm_resids $ Op insoac
+      lam_bind = mkLet [] instrm_resids $ Op insoac
       lam_body = mkBody (oneStm lam_bind) $ map (Futhark.Var . identName) instrm_resids
       lam' = lam { lambdaBody = lam_body }
   return $ SOAC.Stream w (Sequential nes) lam' arrs

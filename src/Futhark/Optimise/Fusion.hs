@@ -93,9 +93,7 @@ binding :: [Ident] -> FusionGM a -> FusionGM a
 binding vs = local (`bindVars` vs)
 
 gatherStmPattern :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
-gatherStmPattern pat m = do
-  res <- binding (patternIdents pat) m
-  checkForUpdates pat res
+gatherStmPattern = binding . patternIdents
 
 bindingPat :: Pattern -> FusionGM a -> FusionGM a
 bindingPat = binding . patternIdents
@@ -112,18 +110,16 @@ bindingFamilyVar faml env (Ident nm t) =
                       varsInScope env
       }
 
-checkForUpdates :: Pattern -> FusedRes -> FusionGM FusedRes
-checkForUpdates pat res = foldM checkForUpdate res $ patternElements pat
-  where checkForUpdate res' (PatElem _ BindVar _) =
-          return res'
-        checkForUpdate res' (PatElem _ (BindInPlace src is) _) = do
-          res'' <- foldM addVarToInfusible res' $
-                   src : S.toList (mconcat $ map freeIn is)
-          let aliases = [src]
-              inspectKer k =
-                let inplace' = foldl (flip S.insert) (inplace k) aliases
-                in  k { inplace = inplace' }
-          return $ res'' { kernels = M.map inspectKer $ kernels res'' }
+checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
+checkForUpdates res (BasicOp (Update src is _)) = do
+  res' <- foldM addVarToInfusible res $
+          src : S.toList (mconcat $ map freeIn is)
+  let aliases = [src]
+      inspectKer k =
+        let inplace' = foldl (flip S.insert) (inplace k) aliases
+        in  k { inplace = inplace' }
+  return res' { kernels = M.map inspectKer $ kernels res' }
+checkForUpdates res _ = return res
 
 -- | Updates the environment: (i) the @soacs@ (map) by binding each pattern
 --   element identifier to all pattern elements (identifiers) and (ii) the
@@ -131,9 +127,7 @@ checkForUpdates pat res = foldM checkForUpdate res $ patternElements pat
 --   Finally, if the binding is an in-place update, then the @inplace@ field
 --   of each (result) kernel is updated with the new in-place updates.
 bindingFamily :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
-bindingFamily pat m = do
-  res <- local bind m
-  checkForUpdates pat res
+bindingFamily pat = local bind
   where idents = patternIdents pat
         family = patternNames pat
         bind env = foldl (bindingFamilyVar family) env idents
@@ -587,9 +581,9 @@ fusionGatherBody fres (Body blore (stmsToList ->
     j <- newVName "j"
     loop_body <- runBodyBinder $ do
       forM_ (zip loop_params chunked_params) $ \(p,a_p) ->
-        letBindNames'_ [paramName p] $ BasicOp $ Index (paramName a_p) $
-         fullSlice (paramType a_p) [DimFix $ Futhark.Var j]
-      letBindNames'_ [i] $ BasicOp $ BinOp (Add it) (Futhark.Var offset) (Futhark.Var j)
+        letBindNames_ [paramName p] $ BasicOp $ Index (paramName a_p) $
+        fullSlice (paramType a_p) [DimFix $ Futhark.Var j]
+      letBindNames_ [i] $ BasicOp $ BinOp (Add it) (Futhark.Var offset) (Futhark.Var j)
       return body
     eBody [pure $
            DoLoop [] merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
@@ -605,7 +599,7 @@ fusionGatherBody fres (Body blore (stmsToList ->
   -- first element in the pattern, as we use the first element to
   -- identify the SOAC in the second phase of fusion.
   discard <- newVName "discard"
-  let discard_pe = PatElem discard BindVar $ Prim int32
+  let discard_pe = PatElem discard $ Prim int32
 
   fusionGatherBody fres $ Body blore
     (oneStm (Let (Pattern [] (pes<>[discard_pe])) bndtp (Op stream))<>stmsFromList bnds) res
@@ -652,7 +646,8 @@ fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
       | otherwise -> do
           let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
           bres <- gatherStmPattern pat $ fusionGatherBody fres body
-          foldM fusionGatherExp bres (e:pat_vars)
+          bres' <- checkForUpdates bres e
+          foldM fusionGatherExp bres' (e:pat_vars)
 
   where body = mkBody (stmsFromList bnds) res
         cs = stmCerts bnd
@@ -835,7 +830,7 @@ insertKerSOAC names ker = do
     -- issue #224).  We insert copy expressions to fix it.
     f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases f_soac
     validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf new_soac'
-    letBind_ (basicPattern' [] validents) $ Op f_soac'
+    letBind_ (basicPattern [] validents) $ Op f_soac'
     transformOutput (outputTransform ker) names validents
 
 copyNewlyConsumed :: Names
@@ -889,7 +884,7 @@ copyNewlyConsumed was_consumed soac =
 
         copyFree (bnds, subst) v = do
           v_copy <- newVName $ baseString v <> "_copy"
-          copy <- mkLetNamesM' [v_copy] $ BasicOp $ Copy v
+          copy <- mkLetNamesM [v_copy] $ BasicOp $ Copy v
           return (oneStm copy<>bnds, M.insert v v_copy subst)
 
 ---------------------------------------------------

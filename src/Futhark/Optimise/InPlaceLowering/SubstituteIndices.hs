@@ -66,14 +66,7 @@ substituteIndicesInPattern substs pat = do
   (substs', context) <- mapAccumLM sub substs $ patternContextElements pat
   (substs'', values) <- mapAccumLM sub substs' $ patternValueElements pat
   return (substs'', Pattern context values)
-  where sub substs' (PatElem name (BindInPlace src is) attr)
-          | Just (cs2, src2, src2attr, is2) <- lookup src substs = do
-              let attr' = attr `setType` typeOf src2attr
-              return (update src name (cs2, name, attr', is2) substs',
-                      PatElem name (BindInPlace src2 $
-                                    fullSlice (typeOf src2attr) $ is2++is) attr')
-        sub substs' patElem =
-          return (substs', patElem)
+  where sub substs' patElem = return (substs', patElem)
 
 substituteIndicesInExp :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
                            LocalScope (Lore m) m,

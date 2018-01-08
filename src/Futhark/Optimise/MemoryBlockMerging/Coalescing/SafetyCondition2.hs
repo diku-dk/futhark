@@ -85,7 +85,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
     tell $ M.singleton x cur_allocated_blocks
 
   case patvalelems of
-    [PatElem mem _ _] ->
+    [PatElem mem _] ->
       when (isAlloc e) $ modify $ S.insert mem
     _ -> return ()
 

@@ -746,20 +746,14 @@ bodyReturnsFromPattern pat =
             MemPrim pt -> MemPrim pt
             MemMem size space -> MemMem (Free size) space
             MemArray pt shape u (ArrayIn mem ixfun)
-              | Prim _ <- patElemRequires pe -> MemPrim pt
+              | Prim _ <- patElemType pe -> MemPrim pt
               | otherwise ->
-                  case patElemBindage pe of
-                    BindInPlace _ slice ->
-                      MemArray pt (Shape $ map ext $ sliceDims slice) u $
-                      ReturnsInBlock mem $ existentialiseIxFun [] $
-                      IxFun.slice ixfun $ map (fmap (primExpFromSubExp int32)) slice
-                    BindVar ->
-                      MemArray pt (Shape $ map ext $ shapeDims shape) u $
-                      case find ((==mem) . patElemName . snd) $ zip [0..] ctx  of
-                        Just (i, PatElem _ _ (MemMem size space)) ->
-                          ReturnsNewBlock space i (ext size) $
-                          existentialiseIxFun (map patElemName ctx) ixfun
-                        _ -> ReturnsInBlock mem $ existentialiseIxFun [] ixfun
+                  MemArray pt (Shape $ map ext $ shapeDims shape) u $
+                  case find ((==mem) . patElemName . snd) $ zip [0..] ctx  of
+                    Just (i, PatElem _ (MemMem size space)) ->
+                      ReturnsNewBlock space i (ext size) $
+                      existentialiseIxFun (map patElemName ctx) ixfun
+                    _ -> ReturnsInBlock mem $ existentialiseIxFun [] ixfun
 
 instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (PatElemT (MemInfo SubExp u r)) where
   ppAnnot = bindeeAnnot patElemName patElemAttr
@@ -882,6 +876,9 @@ expReturns (BasicOp (Index v slice)) = do
              Just $ ReturnsInBlock mem $
              existentialiseIxFun [] $ IxFun.slice ixfun
              (map (fmap (primExpFromSubExp int32)) slice)]
+
+expReturns (BasicOp (Update v _ _)) =
+  pure <$> varReturns v
 
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op

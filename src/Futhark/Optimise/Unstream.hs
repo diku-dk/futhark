@@ -56,11 +56,11 @@ optimiseInKernelStm :: Stm InKernel -> InKernelM ()
 optimiseInKernelStm (Let pat aux (Op (GroupStream w max_chunk lam accs arrs)))
   | max_chunk == w = do
       let GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
-      letBindNames'_ [chunk_size] $ BasicOp $ SubExp $ constant (1::Int32)
+      letBindNames_ [chunk_size] $ BasicOp $ SubExp $ constant (1::Int32)
 
       loop_body <- insertStmsM $ do
         forM_ (zip arr_params arrs) $ \(p,a) ->
-          letBindNames'_ [paramName p] $
+          letBindNames_ [paramName p] $
           BasicOp $ Index a $ fullSlice (paramType p)
           [DimSlice (Var chunk_offset) (Var chunk_size) (constant (1::Int32))]
         optimiseInBody body

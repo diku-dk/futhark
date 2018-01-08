@@ -128,7 +128,6 @@ cseInStm consumed (Let pat (StmAux cs eattr) e) m = do
           | Mem{} <- patElemType pe = True
           | Array{} <- patElemType pe, not cse_arrays = True
           | patElemName pe `S.member` consumed = True
-          | BindInPlace{} <- patElemBindage pe = True
           | otherwise = False
 
 type ExpressionSubstitutions lore = M.Map

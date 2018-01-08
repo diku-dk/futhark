@@ -74,9 +74,9 @@ inlineInBody inlcallees (Body attr stms res) = Body attr stms' res
         reshapeIfNecessary ident se
           | t@Array{} <- identType ident,
             Var v <- se =
-              mkLet' [] [ident] $ shapeCoerce (arrayDims t) v
+              mkLet [] [ident] $ shapeCoerce (arrayDims t) v
           | otherwise =
-            mkLet' [] [ident] $ BasicOp $ SubExp se
+            mkLet [] [ident] $ BasicOp $ SubExp se
 
 inliner :: Monad m => [FunDef] -> Mapper SOACS SOACS m
 inliner funs = identityMapper { mapOnBody = const $ return . inlineInBody funs

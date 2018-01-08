@@ -169,7 +169,6 @@ data LetBoundEntry lore =
                 , letBoundStm      :: Stm lore
                 , letBoundStmDepth :: Int
                 , letBoundScalExp  :: Maybe ScalExp
-                , letBoundBindage  :: Bindage
                 , letBoundIndex    :: Int -> IndexArray
                 -- ^ Index a delayed array, if possible.
                 }
@@ -206,11 +205,8 @@ entryType :: Attributes lore => Entry lore -> Type
 entryType = typeOf . entryInfo
 
 isVarBound :: Entry lore -> Maybe (LetBoundEntry lore)
-isVarBound (LetBound entry)
-  | BindVar <- letBoundBindage entry =
-    Just entry
-isVarBound _ =
-  Nothing
+isVarBound (LetBound entry) = Just entry
+isVarBound _ = Nothing
 
 asScalExp :: Entry lore -> Maybe ScalExp
 asScalExp = letBoundScalExp <=< isVarBound
@@ -433,7 +429,6 @@ defBndEntry vtable patElem range bnd =
     , letBoundScalExp =
       runReader (toScalExp (`lookupScalExp` vtable) (stmExp bnd)) types
     , letBoundStmDepth = 0
-    , letBoundBindage = patElemBindage patElem
     , letBoundIndex = \k -> fmap (second (<>(stmAuxCerts $ stmAux bnd))) .
                             indexExp vtable (stmExp bnd) k
     }

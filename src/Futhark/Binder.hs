@@ -41,7 +41,7 @@ class Attributes lore => BinderOps lore where
   mkBodyB :: (MonadBinder m, Lore m ~ lore) =>
              Stms lore -> Result -> m (Body lore)
   mkLetNamesB :: (MonadBinder m, Lore m ~ lore) =>
-                 [(VName,Bindage)] -> Exp lore -> m (Stm lore)
+                 [VName] -> Exp lore -> m (Stm lore)
 
 bindableMkExpAttrB :: (MonadBinder m, Bindable (Lore m)) =>
                       Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
@@ -52,7 +52,7 @@ bindableMkBodyB :: (MonadBinder m, Bindable (Lore m)) =>
 bindableMkBodyB stms res = return $ mkBody stms res
 
 bindableMkLetNamesB :: (MonadBinder m, Bindable (Lore m)) =>
-                       [(VName,Bindage)] -> Exp (Lore m) -> m (Stm (Lore m))
+                       [VName] -> Exp (Lore m) -> m (Stm (Lore m))
 bindableMkLetNamesB = mkLetNames
 
 newtype BinderT lore m a = BinderT (StateT (Stms lore, Scope lore) m a)

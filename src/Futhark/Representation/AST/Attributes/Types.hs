@@ -547,8 +547,8 @@ instance SetType b => SetType (a, b) where
   setType (a, b) t = (a, setType b t)
 
 instance SetType attr => SetType (PatElemT attr) where
-  setType (PatElem name bindage attr) t =
-    PatElem name bindage $ setType attr t
+  setType (PatElem name attr) t =
+    PatElem name $ setType attr t
 
 -- | Something with an existential context that can be (partially)
 -- fixed.

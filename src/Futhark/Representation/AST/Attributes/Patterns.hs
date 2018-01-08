@@ -11,7 +11,6 @@ module Futhark.Representation.AST.Attributes.Patterns
          -- * Pattern elements
        , patElemIdent
        , patElemType
-       , patElemRequires
        , setPatElemLore
        , patternElements
        , patternIdents
@@ -24,18 +23,14 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patternValueTypes
        , patternExtTypes
        , patternSize
-         -- * Bindage
-       , bindageRequires
-         -- *
+       -- * Pattern construction
        , basicPattern
-       , basicPattern'
        )
        where
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
-  (elemType, arrayOfShape, existentialiseExtTypes, staticShapes,
-   Typed(..), DeclTyped(..))
+  (existentialiseExtTypes, staticShapes, Typed(..), DeclTyped(..))
 
 -- | The 'Type' of a parameter.
 paramType :: Typed attr => ParamT attr -> Type
@@ -57,23 +52,9 @@ patElemIdent pelem = Ident (patElemName pelem) (typeOf pelem)
 patElemType :: Typed attr => PatElemT attr -> Type
 patElemType = typeOf
 
--- | The type of the value being bound by a 'PatElem'.
-patElemRequires :: Typed attr => PatElemT attr -> Type
-patElemRequires (PatElem _ bindage attr) =
-  bindageRequires (typeOf attr) bindage
-
--- | The type of the value being bound by an pattern element with the
--- given result 'Type' and 'Bindage'.
-bindageRequires :: Type -> Bindage -> Type
-bindageRequires t BindVar =
-  t
-bindageRequires t (BindInPlace _ slice) =
-  Prim (elemType t) `arrayOfShape` Shape (sliceDims slice)
-
 -- | Set the lore of a 'PatElem'.
 setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr
-setPatElemLore (PatElem ident bindage _) =
-  PatElem ident bindage
+setPatElemLore pe x = fmap (const x) pe
 
 -- | All pattern elements in the pattern - context first, then values.
 patternElements :: PatternT attr -> [PatElemT attr]
@@ -124,14 +105,7 @@ patternSize :: PatternT attr -> Int
 patternSize (Pattern context values) = length context + length values
 
 -- | Create a pattern using 'Type' as the attribute.
-basicPattern :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> PatternT Type
+basicPattern :: [Ident] -> [Ident] -> PatternT Type
 basicPattern context values =
   Pattern (map patElem context) (map patElem values)
-  where patElem (Ident name t,bindage) = PatElem name bindage t
-
--- | Like 'basicPattern', but all 'Bindage's are assumed to be
--- 'BindVar'.
-basicPattern' :: [Ident] -> [Ident] -> PatternT Type
-basicPattern' context values =
-  basicPattern (map addBindVar context) (map addBindVar values)
-    where addBindVar name = (name, BindVar)
+  where patElem (Ident name t) = PatElem name t

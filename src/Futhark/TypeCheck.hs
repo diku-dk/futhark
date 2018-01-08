@@ -701,6 +701,15 @@ checkBasicOp (Index ident idxes) = do
     bad $ SlicingError (arrayRank vt) (length idxes)
   mapM_ checkDimIndex idxes
 
+checkBasicOp (Update src idxes se) = do
+  src_t <- checkArrIdent src
+  when (arrayRank src_t /= length idxes) $
+    bad $ SlicingError (arrayRank src_t) (length idxes)
+
+  mapM_ checkDimIndex idxes
+  require [Prim (elemType src_t) `arrayOfShape` Shape (sliceDims idxes)] se
+  consume =<< lookupAliases src
+
 checkBasicOp (Iota e x s et) = do
   require [Prim int32] e
   require [Prim $ IntType et] x
@@ -911,26 +920,12 @@ checkBinOpArgs t e1 e2 = do
 
 checkPatElem :: Checkable lore =>
                 PatElemT (LetAttr lore) -> TypeM lore ()
-checkPatElem (PatElem name bindage attr) = do
-  checkBindage bindage
-  checkLetBoundLore name attr
+checkPatElem (PatElem name attr) = checkLetBoundLore name attr
 
 checkDimIndex :: Checkable lore =>
                  DimIndex SubExp -> TypeM lore ()
 checkDimIndex (DimFix i) = require [Prim int32] i
 checkDimIndex (DimSlice i n s) = mapM_ (require [Prim int32]) [i,n,s]
-
-checkBindage :: Checkable lore =>
-                Bindage -> TypeM lore ()
-checkBindage BindVar = return ()
-checkBindage (BindInPlace src is) = do
-  srct <- lookupType src
-  mapM_ checkDimIndex is
-
-  consume =<< lookupAliases src
-
-  when (arrayRank srct /= length is) $
-    bad $ SlicingError (arrayRank srct) (length is)
 
 checkStm :: Checkable lore =>
             Stm (Aliases lore)

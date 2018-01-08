@@ -594,6 +594,25 @@ defCompileBasicOp (Destination [target]) (Index src slice)
 defCompileBasicOp _ Index{} =
   return ()
 
+defCompileBasicOp (Destination [ArrayDestination (Just memloc)]) (Update _ slice se)
+  | MemLocation mem shape ixfun <- memloc = do
+    bt <- elemType <$> subExpType se
+    target' <-
+      case sliceIndices slice of
+        Just is -> do
+          (_, space, elemOffset) <-
+            fullyIndexArray'
+            (MemLocation mem shape ixfun)
+            (map (primExpFromSubExp int32) is)
+            bt
+          return $ ArrayElemDestination mem bt space elemOffset
+        Nothing ->
+          let memdest = sliceArray (MemLocation mem shape ixfun) $
+                        map (fmap (primExpFromSubExp int32)) slice
+          in return $ ArrayDestination $ Just memdest
+
+    copyDWIMDest target' [] se []
+
 defCompileBasicOp (Destination [dest]) (Replicate (Shape ds) se) = do
   is <- replicateM (length ds) (newVName "i")
   ds' <- mapM compileSubExp ds
@@ -963,27 +982,11 @@ destinationFromPattern pat = fmap Destination . mapM inspect . patternElements $
           let name = patElemName patElem
           entry <- lookupVar name
           case entry of
-            ArrayVar _ (ArrayEntry (MemLocation mem shape ixfun) bt) ->
-              case patElemBindage patElem of
-                BindVar ->
-                  return $ ArrayDestination $
-                  if mem `elem` ctx_names
-                  then Nothing
-                  else Just $ MemLocation mem shape ixfun
-                BindInPlace _ slice ->
-                  case sliceIndices slice of
-                    Just is -> do
-                      (_, space, elemOffset) <-
-                        fullyIndexArray'
-                        (MemLocation mem shape ixfun)
-                        (map (primExpFromSubExp int32) is)
-                        bt
-                      return $ ArrayElemDestination mem bt space elemOffset
-                    Nothing ->
-                      let memdest = sliceArray (MemLocation mem shape ixfun) $
-                                    map (fmap (primExpFromSubExp int32)) slice
-                      in return $ ArrayDestination $ Just memdest
-
+            ArrayVar _ (ArrayEntry (MemLocation mem shape ixfun) _) ->
+              return $ ArrayDestination $
+              if mem `elem` ctx_names
+              then Nothing
+              else Just $ MemLocation mem shape ixfun
             MemVar{} ->
               return $ MemoryDestination name
 

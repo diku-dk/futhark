@@ -89,6 +89,8 @@ primOpType (Index ident slice) =
         shape = Shape $ mapMaybe dimSize slice
         dimSize (DimSlice _ d _) = Just d
         dimSize DimFix{}         = Nothing
+primOpType (Update src _ _) =
+  pure <$> lookupType src
 primOpType (Iota n _ _ et) =
   pure [arrayOf (Prim (IntType et)) (Shape [n]) NoUniqueness]
 primOpType (Replicate (Shape []) e) =
