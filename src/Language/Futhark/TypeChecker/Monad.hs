@@ -317,7 +317,6 @@ recursionPermitted :: TypeM Bool
 recursionPermitted = asks contextPermitRecursion
 
 class MonadError TypeError m => MonadTypeChecker m where
-  bad :: TypeError -> m a
   warn :: SrcLoc -> String -> m ()
 
   newName :: VName -> m VName
@@ -342,8 +341,7 @@ checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
 require :: MonadTypeChecker m => [TypeBase () ()] -> Exp -> m Exp
 require ts e
   | any (typeOf e `similarTo`) ts = return e
-  | otherwise = bad $ UnexpectedType (srclocOf e)
-                      (toStructural $ typeOf e) ts
+  | otherwise = throwError $ UnexpectedType (srclocOf e) (toStructural $ typeOf e) ts
 
 bindSpaced :: MonadTypeChecker m => [(Namespace, Name)] -> m a -> m a
 bindSpaced names body = do
@@ -352,8 +350,6 @@ bindSpaced names body = do
   bindNameMap mapping body
 
 instance MonadTypeChecker TypeM where
-  bad = throwError
-
   warn loc problem = tell $ singleWarning loc problem
 
   newName s = do src <- get
@@ -377,26 +373,26 @@ instance MonadTypeChecker TypeM where
     outer_env <- askRootEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
-      Nothing -> bad $ UndefinedType loc qn
+      Nothing -> throwError $ UndefinedType loc qn
       Just (TypeAbbr ps def) -> return (qn', ps, qualifyTypeVars outer_env mempty qs def)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envModTable scope of
-      Nothing -> bad $ UnknownVariableError Term qn loc
+      Nothing -> throwError $ UnknownVariableError Term qn loc
       Just m  -> return (qn', m)
 
   lookupMTy loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Signature qn loc
     (qn',) <$> maybe explode return (M.lookup name $ envSigTable scope)
-    where explode = bad $ UnknownVariableError Signature qn loc
+    where explode = throwError $ UnknownVariableError Signature qn loc
 
   lookupImport loc file = do
     imports <- asks contextImportTable
     my_path <- asks contextFilePath
     let abs_path = my_path Posix.</> file
     case M.lookup abs_path imports of
-      Nothing    -> bad $ TypeError loc $ "Unknown import \"" ++ file ++ "\"" ++ extra
+      Nothing    -> throwError $ TypeError loc $ "Unknown import \"" ++ file ++ "\"" ++ extra
       Just scope -> return (abs_path, scope)
       where extra | ".." `elem` Posix.splitDirectories file =
                       "\nNote: '..' is not supported in file imports."
@@ -407,12 +403,12 @@ instance MonadTypeChecker TypeM where
     outer_env <- askRootEnv
     (env, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envVtable env of
-      Nothing -> bad $ UnknownVariableError Term qn loc
+      Nothing -> throwError $ UnknownVariableError Term qn loc
       Just (BoundV _ t)
-        | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
+        | "_" `isPrefixOf` pretty name -> throwError $ UnderscoreUse loc qn
         | otherwise -> do
             r <- getType loc t
-            case r of Left{} -> bad $ FunctionIsNotValue loc qn
+            case r of Left{} -> throwError $ FunctionIsNotValue loc qn
                       Right t' -> return (qn', removeShapeAnnotations $ fromStruct $
                                            qualifyTypeVars outer_env mempty qs t')
 
@@ -440,7 +436,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
           | Just name' <- M.lookup (space, name) $ envNameMap scope =
               return (scope, name')
           | otherwise =
-              bad $ UnknownVariableError space qn loc
+              throwError $ UnknownVariableError space qn loc
 
         descend scope (q:qs)
           | Just (QualName _ q') <- M.lookup (Term, q) $ envNameMap scope,
@@ -449,9 +445,9 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
                 ModEnv q_scope -> do
                   (scope', QualName qs' name') <- descend q_scope qs
                   return (scope', QualName (q':qs') name')
-                ModFun{} -> bad $ UnappliedFunctor loc
+                ModFun{} -> throwError $ UnappliedFunctor loc
           | otherwise =
-              bad $ UnknownVariableError space qn loc
+              throwError $ UnknownVariableError space qn loc
 
 -- Try to prepend qualifiers to the type names such that they
 -- represent how to access the type in some scope.
@@ -478,7 +474,7 @@ qualifyTypeVars outer_env except qs = runIdentity . astMap mapper
           | otherwise = False
 
 badOnLeft :: MonadTypeChecker m => Either TypeError a -> m a
-badOnLeft = either bad return
+badOnLeft = either throwError return
 
 anySignedType :: [TypeBase () ()]
 anySignedType = map (Prim . Signed) [minBound .. maxBound]

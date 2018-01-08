@@ -91,7 +91,7 @@ checkForDuplicateDecs =
   where check namespace name loc known =
           case M.lookup (namespace, name) known of
             Just loc' ->
-              bad $ DupDefinitionError namespace name loc loc'
+              throwError $ DupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
         f (ValDec (ValBind _ name _ _ _ _ _ _ loc)) =
@@ -235,7 +235,7 @@ checkSigExpToEnv e = do
   (MTy abs mod, e') <- checkSigExp e
   case mod of
     ModEnv env -> return (abs, env, e')
-    ModFun{}   -> bad $ UnappliedFunctor $ srclocOf e
+    ModFun{}   -> throwError $ UnappliedFunctor $ srclocOf e
 
 checkSigBind :: SigBindBase NoInfo Name -> TypeM (Env, SigBindBase Info VName)
 checkSigBind (SigBind name e doc loc) = do
@@ -273,7 +273,7 @@ checkModExp (ModVar v loc) = do
   (v', env) <- lookupMod loc v
   when (baseName (qualLeaf v') == nameFromString "intrinsics" &&
         baseTag (qualLeaf v') <= maxIntrinsicTag) $
-    bad $ TypeError loc "The 'intrinsics' module may not be used in module expressions."
+    throwError $ TypeError loc "The 'intrinsics' module may not be used in module expressions."
   return (MTy mempty env, ModVar v' loc)
 checkModExp (ModImport name NoInfo loc) = do
   (name', env) <- lookupImport loc name
@@ -287,7 +287,7 @@ checkModExp (ModApply f e NoInfo NoInfo loc) = do
       (mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
       return (mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
     _ ->
-      bad $ TypeError loc "Cannot apply non-parametric module."
+      throwError $ TypeError loc "Cannot apply non-parametric module."
 checkModExp (ModAscript me se NoInfo loc) = do
   (me_mod, me') <- checkModExp me
   (se_mty, se') <- checkSigExp se
@@ -304,7 +304,7 @@ checkModExpToEnv e = do
   (MTy abs mod, e') <- checkModExp e
   case mod of
     ModEnv env -> return (abs, env, e')
-    ModFun{}   -> bad $ UnappliedFunctor $ srclocOf e
+    ModFun{}   -> throwError $ UnappliedFunctor $ srclocOf e
 
 withModParam :: ModParamBase NoInfo Name
              -> (ModParamBase Info VName -> TySet -> Mod -> TypeM a)
@@ -391,7 +391,7 @@ checkForDuplicateSpecs =
   where check namespace name loc known =
           case M.lookup (namespace, name) known of
             Just loc' ->
-              bad $ DupDefinitionError namespace name loc loc'
+              throwError $ DupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
         f (ValSpec name _ _ _ loc) =
@@ -442,7 +442,7 @@ checkValBind (ValBind entry name maybe_tdecl NoInfo tparams [] e doc loc) = do
 
       let t_structural = toStructural tdecl_type
       when (anythingUnique t_structural) $
-        bad $ UniqueConstType loc name t_structural
+        throwError $ UniqueConstType loc name t_structural
       e' <- require [t_structural] =<< checkOneExp e
       return (Just tdecl, e')
     Nothing -> do
@@ -885,5 +885,5 @@ refineEnv loc tset env tname t
                              (v, TypeSub $ TypeAbbr [] t)])
               env)
   | otherwise =
-      bad $ TypeError loc $
+      throwError $ TypeError loc $
       pretty tname ++ " is not an abstract type in the module type."
