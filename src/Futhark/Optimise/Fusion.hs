@@ -57,8 +57,7 @@ arrsInScope = M.fromList . mapMaybe asArray . M.toList . varsInScope
 newtype Error = Error String
 
 instance Show Error where
-  show (Error msg) =
-    "Fusion error:\n" ++ msg
+  show (Error msg) = "Fusion error:\n" ++ msg
 
 newtype FusionGM a = FusionGM (ExceptT Error (StateT VNameSource (Reader FusionGEnv)) a)
   deriving (Monad, Applicative, Functor,
@@ -157,9 +156,6 @@ runFusionGatherM :: MonadFreshNames m =>
                     FusionGM a -> FusionGEnv -> m (Either Error a)
 runFusionGatherM (FusionGM a) env =
   modifyNameSource $ \src -> runReader (runStateT (runExceptT a) src) env
-
-badFusionGM :: Error -> FusionGM a
-badFusionGM = throwError
 
 ------------------------------------------------------------------------
 --- Fusion Entry Points: gather the to-be-fused kernels@pgm level    ---
@@ -415,7 +411,7 @@ prodconsGreedyFuse res (out_idds, cs, soac, consumed) = do
       to_fuse_knmSet = getKersWithInpArrs res out_nms  -- Find kernels which consume outputs
       to_fuse_knms   = S.toList to_fuse_knmSet
       lookup_kern k  = case M.lookup k (kernels res) of
-                         Nothing  -> badFusionGM $ Error
+                         Nothing  -> throwError $ Error
                                      ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
                                       ++ "kernel name not found in kernels field!")
                          Just ker -> return ker
@@ -446,7 +442,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
       to_fuse_knms2  = getKersWithSameInpSize (SOAC.width soac) res
       to_fuse_knms   = S.toList $ S.fromList $ to_fuse_knms1 ++ to_fuse_knms2
       lookup_kern k  = case M.lookup k (kernels res) of
-                         Nothing  -> badFusionGM $ Error
+                         Nothing  -> throwError $ Error
                                      ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
                                       ++ "kernel name not found in kernels field!")
                          Just ker -> return ker
@@ -804,12 +800,12 @@ replaceSOAC pat@(Pattern _ (patElem : _)) aux e = do
       return $ oneStm $ Let pat aux e'
     Just knm ->
       case M.lookup knm (kernels fres) of
-        Nothing  -> badFusionGM $ Error
+        Nothing  -> throwError $ Error
                                    ("In Fusion.hs, replaceSOAC, outArr in ker_name "
                                     ++"which is not in Res: "++pretty (unKernName knm))
         Just ker -> do
           when (null $ fusedVars ker) $
-            badFusionGM $ Error
+            throwError $ Error
             ("In Fusion.hs, replaceSOAC, unfused kernel "
              ++"still in result: "++pretty names)
           insertKerSOAC (outNames ker) ker
@@ -939,5 +935,5 @@ cleanFusionResult fres =
 
 errorIllegal :: String -> FusionGM FusedRes
 errorIllegal soac_name =
-    badFusionGM $ Error
+    throwError $ Error
                   ("In Fusion.hs, soac "++soac_name++" appears illegally in pgm!")
