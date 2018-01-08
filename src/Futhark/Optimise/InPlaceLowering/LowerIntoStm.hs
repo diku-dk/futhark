@@ -14,7 +14,8 @@ import Data.Either
 import qualified Data.Set as S
 
 import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.AST
+import Futhark.Representation.Aliases
+import Futhark.Representation.Kernels
 import Futhark.Construct
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 import Futhark.Tools (fullSlice)
@@ -35,10 +36,9 @@ instance Functor DesiredUpdate where
 updateHasValue :: VName -> DesiredUpdate attr -> Bool
 updateHasValue name = (name==) . updateValue
 
-lowerUpdate :: (Bindable lore, BinderOps lore,
-                LetAttr lore ~ (als, Type), Aliased lore,
-                MonadFreshNames m) =>
-               Stm lore -> [DesiredUpdate (LetAttr lore)] -> Maybe (m [Stm lore])
+lowerUpdate :: MonadFreshNames m => Stm (Aliases Kernels)
+            -> [DesiredUpdate (LetAttr (Aliases Kernels))]
+            -> Maybe (m [Stm (Aliases Kernels)])
 lowerUpdate (Let pat aux (DoLoop ctx val form body)) updates = do
   canDo <- lowerUpdateIntoLoop updates pat ctx val body
   Just $ do
@@ -57,6 +57,16 @@ lowerUpdate
                           BindInPlace v is')] $
                BasicOp $ SubExp $ Var val]
 lowerUpdate
+  (Let (Pattern [] [PatElem v BindVar v_attr]) aux (Op (Kernel debug kspace ts kbody)))
+  [update@(DesiredUpdate bindee_nm bindee_attr cs _src is val)]
+  | v == val = do
+    kbody' <- lowerUpdateIntoKernel update kspace kbody
+    let is' = fullSlice (typeOf bindee_attr) is
+    Just $ return [certify (stmAuxCerts aux <> cs) $
+                    mkLet [] [(Ident bindee_nm $ typeOf bindee_attr, BindVar)] $
+                    Op $ Kernel debug kspace ts kbody',
+                   mkLet' [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
+lowerUpdate
   (Let (Pattern [] [PatElem v BindVar v_attr]) aux e)
   [DesiredUpdate bindee_nm bindee_attr cs src is val]
   | v == val =
@@ -67,6 +77,17 @@ lowerUpdate
                       mkLet' [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
 lowerUpdate _ _ =
   Nothing
+
+lowerUpdateIntoKernel :: DesiredUpdate (LetAttr (Aliases Kernels))
+                      -> KernelSpace -> KernelBody (Aliases InKernel)
+                      -> Maybe (KernelBody (Aliases InKernel))
+lowerUpdateIntoKernel update kspace kbody = do
+  [ThreadsReturn ThreadsInSpace se] <- Just $ kernelBodyResult kbody
+  is' <- mapM dimFix is
+  let ret = WriteReturn (arrayDims $ snd bindee_attr) src (is'++map Var gtids) se
+  return kbody { kernelBodyResult = [ret] }
+  where DesiredUpdate _bindee_nm bindee_attr _cs src is _val = update
+        gtids = map fst $ spaceDimensions kspace
 
 lowerUpdateIntoLoop :: (Bindable lore, BinderOps lore,
                         Aliased lore, LetAttr lore ~ (als, Type),
