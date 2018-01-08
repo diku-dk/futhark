@@ -101,9 +101,9 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
   when (createsNewArray e) $ do
     let e_free_vars = freeInExp e
     e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
-    forM_ patvalelems $ \(PatElem x bindage membound) ->
-      case (bindage, membound) of
-        (BindVar, ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _)) -> do
+    forM_ patvalelems $ \(PatElem x membound) ->
+      case membound of
+        ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _) -> do
           x_mems <- varMems xmem
 
           -- For the first use to be a proper first use, it must write to
@@ -160,7 +160,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
 
 lookInPatCtxElem :: LoreConstraints lore =>
                     VName -> PatElem lore -> FindM lore ()
-lookInPatCtxElem x (PatElem xmem _bindage ExpMem.MemMem{}) =
+lookInPatCtxElem x (PatElem xmem ExpMem.MemMem{}) =
   recordMapping x xmem
 lookInPatCtxElem _ _ = return ()
 

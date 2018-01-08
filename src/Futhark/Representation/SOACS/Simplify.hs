@@ -173,7 +173,7 @@ liftIdentityMapping (_, usages) pat _ (Map outersize fun arrs) =
                      , lambdaReturnType = rettype'
                      }
       mapM_ (uncurry letBind) invariant
-      letBindNames'_ (map patElemName pat') $ Op $ Map outersize fun' arrs
+      letBindNames_ (map patElemName pat') $ Op $ Map outersize fun' arrs
   where inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -203,7 +203,7 @@ liftIdentityMapping _ _ _ _ = cannotSimplify
 removeReplicateMapping :: TopDownRuleOp (Wise SOACS)
 removeReplicateMapping vtable pat _ (Map outersize fun arrs)
   | Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = do
-      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames' vs e
+      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
       letBind_ pat $ Op $ Map outersize fun' arrs'
 removeReplicateMapping _ _ _ _ = cannotSimplify
 
@@ -211,7 +211,7 @@ removeReplicateMapping _ _ _ _ = cannotSimplify
 removeReplicateRedomap :: TopDownRuleOp (Wise SOACS)
 removeReplicateRedomap vtable pat _ (Redomap w comm redfun foldfun nes arrs)
   | Just (bnds, foldfun', arrs') <- removeReplicateInput vtable foldfun arrs = do
-      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames' vs e
+      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
       letBind_ pat $ Op $ Redomap w comm redfun foldfun' nes arrs'
 removeReplicateRedomap _ _ _ _ = cannotSimplify
 
@@ -219,7 +219,7 @@ removeReplicateRedomap _ _ _ _ = cannotSimplify
 removeReplicateWrite :: TopDownRuleOp (Wise SOACS)
 removeReplicateWrite vtable pat _ (Scatter len lam ivs as)
   | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = do
-      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames' vs e
+      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
       letBind_ pat $ Op $ Scatter len lam' ivs' as
 removeReplicateWrite _ _ _ _ = cannotSimplify
 
@@ -346,9 +346,9 @@ simplifyKnownIterationSOAC _ pat _ (Map (Constant k) fun arrs)
       zipWithM_ bindResult (patternValueElements pat) ses
         where bindParam p a = do
                 a_t <- lookupType a
-                letBindNames'_ [paramName p] $
+                letBindNames_ [paramName p] $
                   BasicOp $ Index a $ fullSlice a_t [DimFix $ constant (0::Int32)]
               bindResult pe se =
-                letBindNames'_ [patElemName pe] $
+                letBindNames_ [patElemName pe] $
                 BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
 simplifyKnownIterationSOAC _ _ _ _ = cannotSimplify

@@ -174,7 +174,7 @@ unExistentialise substs et t = do
   new_dims <- zipWithM inspectDim (I.shapeDims $ I.arrayShape et) (I.arrayDims t)
   return $ t `I.setArrayShape` I.Shape new_dims
   where inspectDim (I.Ext i) d | Just v <- M.lookup i substs = do
-          letBindNames'_ [v] $ I.BasicOp $ I.SubExp d
+          letBindNames_ [v] $ I.BasicOp $ I.SubExp d
           return $ I.Free $ I.Var v
         inspectDim ed _ = return ed
 

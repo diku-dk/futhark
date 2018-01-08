@@ -62,7 +62,7 @@ blockedReductionStream pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
       num_chunks = kernelWorkgroups step_one_size
 
   let (acc_idents, arr_idents) = splitAt (length nes) $ patternIdents pat
-  step_one_pat <- basicPattern' [] <$>
+  step_one_pat <- basicPattern [] <$>
                   ((++) <$>
                    mapM (mkIntermediateIdent num_chunks) acc_idents <*>
                    pure arr_idents)
@@ -92,7 +92,7 @@ blockedReductionStream pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   step_one <- chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' nes arrs_copies
   addStm =<< renameStm (Let step_one_pat (defAux ()) $ Op step_one)
 
-  step_two_pat <- basicPattern' [] <$>
+  step_two_pat <- basicPattern [] <$>
                   mapM (mkIntermediateIdent $ constant (1 :: Int32)) acc_idents
 
   let step_two_size = KernelSize one max_step_one_num_groups one num_chunks max_step_one_num_groups
@@ -102,7 +102,7 @@ blockedReductionStream pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   addStm $ Let step_two_pat (defAux ()) $ Op step_two
 
   forM_ (zip (patternIdents step_two_pat) (patternIdents pat)) $ \(arr, x) ->
-    addStm $ mkLet' [] [x] $ BasicOp $ Index (identName arr) $
+    addStm $ mkLet [] [x] $ BasicOp $ Index (identName arr) $
     fullSlice (identType arr) [DimFix $ constant (0 :: Int32)]
   where mkIntermediateIdent chunk_size ident =
           newIdent (baseString $ identName ident) $
@@ -137,7 +137,7 @@ chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' nes arrs = do
 
   chunk_red_pes' <- forM red_ts $ \red_t -> do
     pe_name <- newVName "chunk_fold_red"
-    return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
+    return $ PatElem pe_name $ red_t `arrayOfRow` group_size
   let combine_reds = [ Let (Pattern [] [pe']) (defAux ()) $ Op $
                        Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
                        Body () mempty [Var $ patElemName pe]
@@ -145,7 +145,7 @@ chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' nes arrs = do
 
   final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
     pe_name <- newVName "final_result"
-    return $ PatElem pe_name BindVar t
+    return $ PatElem pe_name t
   let reduce_chunk = Let (Pattern [] final_red_pes) (defAux ()) $ Op $
                      GroupReduce group_size reduce_lam' $
                      zip nes $ map patElemName chunk_red_pes'
@@ -188,7 +188,7 @@ reduceKernel step_two_size reduce_lam' nes arrs = do
 
     combine_pat <- fmap (Pattern []) $ forM (zip arrs red_ts) $ \(arr, red_t) -> do
       arr' <- newVName $ baseString arr ++ "_combined"
-      return $ PatElem arr' BindVar $ red_t `arrayOfRow` group_size
+      return $ PatElem arr' $ red_t `arrayOfRow` group_size
 
     letBind_ combine_pat $
       Op $ Combine [(spaceLocalId space, group_size)]
@@ -198,7 +198,7 @@ reduceKernel step_two_size reduce_lam' nes arrs = do
 
     final_res_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
       pe_name <- newVName "final_result"
-      return $ PatElem pe_name BindVar t
+      return $ PatElem pe_name t
     letBind_ (Pattern [] final_res_pes) $
       Op $ GroupReduce group_size reduce_lam' $ zip nes arrs'
 
@@ -239,7 +239,7 @@ chunkLambda pat nes fold_lam = do
   seq_loop_stms <-
     runBinder_ $ localScope param_scope $
     Kernelise.groupStreamMapAccumL
-    (patternElements (basicPattern' [] res_idents))
+    (patternElements (basicPattern [] res_idents))
     (Var chunk_size) fold_lam (map (Var . paramName) fold_acc_params')
     (map paramName arr_chunk_params)
 
@@ -269,8 +269,8 @@ kerneliseLambda nes lam = do
 
       mkAccInit p (Var v)
         | not $ primType $ paramType p =
-            mkLet' [] [paramIdent p] $ BasicOp $ Copy v
-      mkAccInit p x = mkLet' [] [paramIdent p] $ BasicOp $ SubExp x
+            mkLet [] [paramIdent p] $ BasicOp $ Copy v
+      mkAccInit p x = mkLet [] [paramIdent p] $ BasicOp $ SubExp x
       acc_init_bnds = stmsFromList $ zipWith mkAccInit fold_acc_params nes
   return lam { lambdaBody = insertStms acc_init_bnds $
                             lambdaBody lam
@@ -321,7 +321,7 @@ blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
   nonconcat_pat <-
     fmap (Pattern []) $ forM (take num_nonconcat $ lambdaReturnType lam) $ \t -> do
       name <- newVName "nonconcat"
-      return $ PatElem name BindVar $ t `arrayOfRow` num_threads
+      return $ PatElem name $ t `arrayOfRow` num_threads
 
   let pat = nonconcat_pat <> concat_pat
       ts = map patElemType chunk_red_pes ++
@@ -354,10 +354,10 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
 
   chunk_red_pes <- forM red_ts $ \red_t -> do
     pe_name <- newVName "chunk_fold_red"
-    return $ PatElem pe_name BindVar red_t
+    return $ PatElem pe_name red_t
   chunk_map_pes <- forM map_ts $ \map_t -> do
     pe_name <- newVName "chunk_fold_map"
-    return $ PatElem pe_name BindVar $ map_t `arrayOfRow` Var (paramName chunk_size)
+    return $ PatElem pe_name $ map_t `arrayOfRow` Var (paramName chunk_size)
 
   let (chunk_red_ses, chunk_map_ses) =
         splitAt num_nonconcat $ bodyResult $ lambdaBody lam
@@ -378,7 +378,7 @@ splitArrays :: (MonadBinder m, Lore m ~ InKernel) =>
             -> SplitOrdering -> SubExp -> SubExp -> SubExp -> [VName]
             -> m ()
 splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
-  letBindNames'_ [chunk_size] $ Op $ SplitSpace ordering w i elems_per_i
+  letBindNames_ [chunk_size] $ Op $ SplitSpace ordering w i elems_per_i
   case ordering of
     SplitContiguous     -> do
       offset <- letSubExp "slice_offset" $ BasicOp $ BinOp (Mul Int32) i elems_per_i
@@ -387,12 +387,12 @@ splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
   where contiguousSlice offset slice_name arr = do
           arr_t <- lookupType arr
           let slice = fullSlice arr_t [DimSlice offset (Var chunk_size) (constant (1::Int32))]
-          letBindNames'_ [slice_name] $ BasicOp $ Index arr slice
+          letBindNames_ [slice_name] $ BasicOp $ Index arr slice
 
         stridedSlice stride slice_name arr = do
           arr_t <- lookupType arr
           let slice = fullSlice arr_t [DimSlice i (Var chunk_size) stride]
-          letBindNames'_ [slice_name] $ BasicOp $ Index arr slice
+          letBindNames_ [slice_name] $ BasicOp $ Index arr slice
 
 data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              , kernelWorkgroupSize :: SubExp
@@ -658,7 +658,7 @@ blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
       other_index_param = Param other_index (Prim int32)
 
   let foldlam_scope = scopeOfLParams $ my_index_param : lambdaParams foldlam
-      bindIndex i v = letBindNames'_ [i] =<< toExp v
+      bindIndex i v = letBindNames_ [i] =<< toExp v
   compute_segments <- runBinder_ $ localScope foldlam_scope $
                       zipWithM_ bindIndex (map fst ispace) $
                       unflattenIndex (map (primExpFromSubExp int32 . snd) ispace)
@@ -679,7 +679,7 @@ blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
 
   let (scan_idents, arr_idents) = splitAt (length nes) $ patternIdents pat
       final_res_pat = Pattern [] $ take (length nes) $ patternValueElements pat
-  first_scan_pat <- basicPattern' [] <$>
+  first_scan_pat <- basicPattern [] <$>
     (((.).(.)) (++) (++) <$> -- Dammit Haskell
      mapM (mkIntermediateIdent "seq_scanned" [w]) scan_idents <*>
      mapM (mkIntermediateIdent "group_sums" [num_groups]) scan_idents <*>
@@ -723,7 +723,7 @@ blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
               letSubExp "carry_in_index" $
               BasicOp $ BinOp (Sub Int32) group_id one
             arr_t <- lookupType arr
-            letBindNames'_ [paramName p] $
+            letBindNames_ [paramName p] $
               BasicOp $ Index arr $ fullSlice arr_t [DimFix carry_in_index]
           return $ lambdaBody lam'''
     group_lasts <-
@@ -809,7 +809,7 @@ kernelInputParam p = Param (kernelInputName p) (kernelInputType p)
 readKernelInput :: (HasScope Kernels m, Monad m) =>
                    KernelInput -> m (Stm InKernel)
 readKernelInput inp = do
-  let pe = PatElem (kernelInputName inp) BindVar $ kernelInputType inp
+  let pe = PatElem (kernelInputName inp) $ kernelInputType inp
   arr_t <- lookupType $ kernelInputArray inp
   return $ Let (Pattern [] [pe]) (defAux ()) $
     BasicOp $ Index (kernelInputArray inp) $

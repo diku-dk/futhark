@@ -26,7 +26,7 @@ import Data.Maybe
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 
 import Futhark.Representation.AST
-import Futhark.Binder (Bindable(..), insertStm, insertStms, mkLet')
+import Futhark.Binder (Bindable(..), insertStm, insertStms, mkLet)
 import Futhark.Construct (mapResult)
 
 -- | @fuseMaps lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
@@ -65,7 +65,7 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
                                 | Ident name t <- lam2redparams ++ M.keys inputmap ]
                , lambdaBody   = new_body2'
                }
-        new_body2 = let bnds res = [ mkLet' [] [p] $ BasicOp $ SubExp e
+        new_body2 = let bnds res = [ mkLet [] [p] $ BasicOp $ SubExp e
                                    | (p,e) <- zip pat res]
                         bindLambda res =
                             stmsFromList (bnds res) `insertStms` makeCopiesInner (lambdaBody lam2)
@@ -147,7 +147,7 @@ removeDuplicateInputs = fst . M.foldlWithKey' comb ((M.empty, id), M.empty)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         forward to from b =
-          mkLet' [] [to] (BasicOp $ SubExp $ Var from)
+          mkLet [] [to] (BasicOp $ SubExp $ Var from)
           `insertStm` b
 
 fuseRedomap :: Bindable lore =>

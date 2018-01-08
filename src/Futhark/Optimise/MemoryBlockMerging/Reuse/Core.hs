@@ -285,7 +285,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           | otherwise = return ()
   eqs
 
-  forM_ patvalelems $ \(PatElem var _ membound) -> do
+  forM_ patvalelems $ \(PatElem var membound) -> do
     -- For every declaration with a first memory use, check (through
     -- handleNewArray) if it can reuse some earlier memory block.
     first_uses_var <- lookupEmptyable var <$> asks ctxFirstUses
@@ -788,7 +788,7 @@ maxsToReplacement vs = do
   Replacement m1 es1 <- maxsToReplacement vs1
   vmax <- newVName "max"
   let emax = BasicOp $ BinOp (SMax Int64) (Var m0) (Var m1)
-      new_stm = Let (Pattern [] [PatElem vmax BindVar
+      new_stm = Let (Pattern [] [PatElem vmax
                                  (ExpMem.MemPrim (IntType Int64))]) (defAux ()) emax
       prev_stms = es0 ++ es1 ++ [new_stm]
   return $ Replacement vmax prev_stms
@@ -808,14 +808,14 @@ insertAndReplace replaces0 fundef =
 
         transformStm :: Stm ExplicitMemory ->
                         State (M.Map VName Replacement) [Stm ExplicitMemory]
-        transformStm stm@(Let (Pattern [] [PatElem mem_name BindVar
+        transformStm stm@(Let (Pattern [] [PatElem mem_name
                                            (ExpMem.MemMem _ pat_space)]) _
                           (Op (ExpMem.Alloc _ space))) = do
           replaces <- get
           case M.lookup mem_name replaces of
             Just repl -> do
               let prev = replStms repl
-                  new = Let (Pattern [] [PatElem mem_name BindVar
+                  new = Let (Pattern [] [PatElem mem_name
                                          (ExpMem.MemMem (Var (replName repl))
                                           pat_space)]) (defAux ())
                         (Op (ExpMem.Alloc (Var (replName repl)) space))
@@ -873,7 +873,7 @@ transformFromKernelMaxSizedMappings
           (alloc_size_var, alloc_size_stms) <-
             modifyNameSource $ runState $ runBinderT new_full_size_m mempty
           let alloc_size_fd_stm =
-                Let (Pattern [] [PatElem final_dim_max_v BindVar
+                Let (Pattern [] [PatElem final_dim_max_v
                                  (ExpMem.MemPrim (IntType Int32))]) (defAux ()) final_dim_max_e
               alloc_size_stms' = oneStm alloc_size_fd_stm <> alloc_size_stms
 

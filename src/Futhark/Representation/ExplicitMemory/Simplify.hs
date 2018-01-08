@@ -119,7 +119,7 @@ unExistentialiseMemory _ pat _ (cond, tbranch, fbranch, ifattr)
             | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
               (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemAttr pat_elem = do
                 v_copy <- newVName $ baseString v <> "_nonext_copy"
-                let v_pat = Pattern [] [PatElem v_copy BindVar $
+                let v_pat = Pattern [] [PatElem v_copy $
                                         MemArray pt shape u $ ArrayIn mem ixfun]
                 addStm $ mkWiseLetStm v_pat (defAux ()) $ BasicOp (Copy v)
                 return $ Var v_copy

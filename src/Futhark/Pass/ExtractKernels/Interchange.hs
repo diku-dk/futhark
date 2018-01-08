@@ -94,8 +94,8 @@ interchangeLoop
           return (expanded_param, expanded_init)
             where param_name = baseString $ paramName merge_param
 
-        expandPatElem (PatElem name bindage t) =
-          PatElem name bindage $ arrayOfRow t w
+        expandPatElem (PatElem name t) =
+          PatElem name $ arrayOfRow t w
 
 -- | Given a (parallel) map nesting and an inner sequential loop, move
 -- the maps inside the sequential loop.  The result is several
@@ -148,7 +148,7 @@ interchangeBranch1
       IfAttr ret' if_sort
   where dummyBind se = do
           dummy <- newVName "dummy"
-          letBindNames'_ [dummy] (BasicOp $ SubExp se)
+          letBindNames_ [dummy] (BasicOp $ SubExp se)
           return $ Var dummy
 
 interchangeBranch :: (MonadFreshNames m, HasScope SOACS m) =>

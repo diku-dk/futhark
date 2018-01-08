@@ -73,23 +73,12 @@ instance Substitutable lore => Substitute (Exp lore) where
   substituteNames substs = mapExp $ replace substs
 
 instance Substitute attr => Substitute (PatElemT attr) where
-  substituteNames substs (PatElem ident bindage attr) =
-    PatElem
-    (substituteNames substs ident)
-    (substituteNames substs bindage)
-    (substituteNames substs attr)
+  substituteNames substs (PatElem ident attr) =
+    PatElem (substituteNames substs ident) (substituteNames substs attr)
 
 instance Substitute attr => Substitute (StmAux attr) where
   substituteNames substs (StmAux cs attr) =
     StmAux (substituteNames substs cs) (substituteNames substs attr)
-
-instance Substitute Bindage where
-  substituteNames _ BindVar =
-    BindVar
-  substituteNames substs (BindInPlace src is) =
-    BindInPlace
-    (substituteNames substs src)
-    (map (substituteNames substs) is)
 
 instance Substitute attr => Substitute (ParamT attr) where
   substituteNames substs (Param name attr) =

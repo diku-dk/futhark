@@ -58,10 +58,8 @@ rephrasePattern f (Pattern context values) =
   where rephrase = mapM $ rephrasePatElem f
 
 rephrasePatElem :: Monad m => (from -> m to) -> PatElemT from -> m (PatElemT to)
-rephrasePatElem rephraser (PatElem ident BindVar from) =
-  PatElem ident BindVar <$> rephraser from
-rephrasePatElem rephraser (PatElem ident (BindInPlace src is) from) =
-  PatElem ident (BindInPlace src is) <$> rephraser from
+rephrasePatElem rephraser (PatElem ident from) =
+  PatElem ident <$> rephraser from
 
 rephraseParam :: Monad m => (from -> m to) -> ParamT from -> m (ParamT to)
 rephraseParam rephraser (Param name from) =

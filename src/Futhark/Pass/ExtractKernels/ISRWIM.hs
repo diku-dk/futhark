@@ -48,7 +48,7 @@ iswim res_pat w scan_fun scan_input
                              Op $ Scan w scan_fun' scan_input') $
                             map Var $ patternNames map_pat
 
-      res_pat' <- fmap (basicPattern' []) $
+      res_pat' <- fmap (basicPattern []) $
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
                   patternValueIdents res_pat
 
@@ -57,7 +57,7 @@ iswim res_pat w scan_fun scan_input
       forM_ (zip (patternValueIdents res_pat)
                  (patternValueIdents res_pat')) $ \(to, from) -> do
         let perm = [1,0] ++ [2..arrayRank (identType from)-1]
-        addStm $ Let (basicPattern' [] [to]) (defAux ()) $
+        addStm $ Let (basicPattern [] [to]) (defAux ()) $
                      BasicOp $ Rearrange perm $ identName from
   | otherwise = Nothing
 
@@ -150,7 +150,7 @@ setOuterDimTo w t =
 
 setPatternOuterDimTo :: SubExp -> Pattern -> Pattern
 setPatternOuterDimTo w pat =
-  basicPattern' [] $ map (setIdentOuterDimTo w) $ patternValueIdents pat
+  basicPattern [] $ map (setIdentOuterDimTo w) $ patternValueIdents pat
 
 transposeIdentType :: Ident -> Ident
 transposeIdentType ident =
@@ -162,4 +162,4 @@ stripIdentOuterDim ident =
 
 stripPatternOuterDim :: Pattern -> Pattern
 stripPatternOuterDim pat =
-  basicPattern' [] $ map stripIdentOuterDim $ patternValueIdents pat
+  basicPattern [] $ map stripIdentOuterDim $ patternValueIdents pat

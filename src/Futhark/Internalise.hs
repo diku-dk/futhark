@@ -442,7 +442,7 @@ internaliseExp desc (E.LetPat tparams pat e body loc) = do
     mapM_ (uncurry (internaliseDimConstant loc)) cm
     ses' <- match loc ses
     forM_ (zip pat_names ses') $ \(v,se) ->
-      letBindNames'_ [v] $ I.BasicOp $ I.SubExp se
+      letBindNames_ [v] $ I.BasicOp $ I.SubExp se
     internaliseExp desc body
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) =
@@ -459,7 +459,7 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
     mapM_ (uncurry (internaliseDimConstant loc)) cm
     ses' <- match (srclocOf mergepat) ses
     forM_ (zip mergepat_names ses') $ \(v,se) ->
-      letBindNames'_ [v] $ I.BasicOp $ I.SubExp se
+      letBindNames_ [v] $ I.BasicOp $ I.SubExp se
     let mergeinit = map I.Var mergepat_names
 
     (loopbody', (form', shapepat, mergepat', mergeinit', pre_stms)) <-
@@ -595,7 +595,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
     mapM_ (uncurry (internaliseDimConstant loc)) cm
     dsts' <- match loc $ map I.Var dsts
     forM_ (zip pat_names dsts') $ \(v,dst) ->
-      letBindNames'_ [v] $ I.BasicOp $ I.SubExp dst
+      letBindNames_ [v] $ I.BasicOp $ I.SubExp dst
     internaliseExp desc body
 
 internaliseExp desc (E.Update src slice ve loc) = do
@@ -760,10 +760,10 @@ internaliseExp desc (E.Stream (E.RedLike o comm lam0) lam arr _) = do
 
   -- Synthesize neutral elements by applying the fold function
   -- to an empty chunk.
-  letBindNames'_ [I.paramName chunk_param] $
+  letBindNames_ [I.paramName chunk_param] $
     I.BasicOp $ I.SubExp $ constant (0::Int32)
   forM_ lam_val_params $ \p ->
-    letBindNames'_ [I.paramName p] $
+    letBindNames_ [I.paramName p] $
     I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
     I.arrayDims $ I.paramType p
   accs <- bodyBind =<< renameBody lam_body
@@ -1172,7 +1172,7 @@ binOpCurriedToLambda op paramtype rettype e swap = do
 
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()
 internaliseDimConstant loc fname name =
-  letBind_ (basicPattern' [] [I.Ident name $ I.Prim I.int32]) $
+  letBind_ (basicPattern [] [I.Ident name $ I.Prim I.int32]) $
   I.Apply fname [] [I.Prim I.int32] (Safe, loc, mempty)
 
 -- | Some operators and functions are overloaded or otherwise special
@@ -1483,7 +1483,7 @@ shadowIdentsInExp substs bnds res = do
           | otherwise =
             return $ M.insert name v nameSubsts
         handleSubst nameSubsts (name, se) = do
-          letBindNames'_ [name] $ BasicOp $ SubExp se
+          letBindNames_ [name] $ BasicOp $ SubExp se
           return nameSubsts
     nameSubsts <- foldM handleSubst M.empty substs
     addStms $ substituteNames nameSubsts bnds

@@ -88,7 +88,7 @@ letExp _ (BasicOp (SubExp (Var v))) =
 letExp desc e = do
   n <- length <$> expExtType e
   vs <- replicateM n $ newVName desc
-  idents <- letBindNames' vs e
+  idents <- letBindNames vs e
   case idents of
     [ident] -> return $ identName ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
@@ -97,11 +97,8 @@ letInPlace :: MonadBinder m =>
               String -> VName -> Slice SubExp -> Exp (Lore m)
            -> m VName
 letInPlace desc src slice e = do
-  v <- newVName desc
-  idents <- letBindNames [(v,BindInPlace src slice)] e
-  case idents of
-    [ident] -> return $ identName ident
-    _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
+  tmp <- letSubExp (desc ++ "_tmp") e
+  letExp desc $ BasicOp $ Update src slice tmp
 
 letSubExps :: MonadBinder m =>
               String -> [Exp (Lore m)] -> m [SubExp]
@@ -119,7 +116,7 @@ letTupExp _ (BasicOp (SubExp (Var v))) =
 letTupExp name e = do
   numValues <- length <$> expExtType e
   names <- replicateM numValues $ newVName name
-  map identName <$> letBindNames' names e
+  map identName <$> letBindNames names e
 
 letTupExp' :: (MonadBinder m) =>
               String -> Exp (Lore m)
@@ -260,7 +257,7 @@ eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [m (Exp (Lore m))] -> m [SubExp]
 eLambda lam args = do zipWithM_ bindParam (lambdaParams lam) args
                       bodyBind $ lambdaBody lam
-  where bindParam param arg = letBindNames'_ [paramName param] =<< arg
+  where bindParam param arg = letBindNames_ [paramName param] =<< arg
 
 -- | Note: unsigned division.
 eDivRoundingUp :: MonadBinder m =>
@@ -491,19 +488,12 @@ removeExistentials t1 t2 =
 -- instance for simple representations.
 simpleMkLetNames :: (ExpAttr lore ~ (), LetAttr lore ~ Type,
                      MonadFreshNames m, TypedOp (Op lore), HasScope lore m) =>
-                    [(VName, Bindage)] -> Exp lore -> m (Stm lore)
+                    [VName] -> Exp lore -> m (Stm lore)
 simpleMkLetNames names e = do
   et <- expExtType e
   (ts, shapes) <- instantiateShapes' et
-  let shapeElems = [ PatElem shape BindVar shapet
-                   | Ident shape shapet <- shapes
-                   ]
-      mkValElem (name, BindVar) t =
-        return $ PatElem name BindVar t
-      mkValElem (name, bindage@(BindInPlace src _)) _ = do
-        srct <- lookupType src
-        return $ PatElem name bindage srct
-  valElems <- zipWithM mkValElem names ts
+  let shapeElems = [ PatElem shape shapet | Ident shape shapet <- shapes ]
+  let valElems = zipWith PatElem names ts
   return $ Let (Pattern shapeElems valElems) (StmAux mempty ()) e
 
 -- | Instances of this class can be converted to Futhark expressions

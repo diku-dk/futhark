@@ -198,8 +198,7 @@ instance Rename attr => Rename (PatternT attr) where
   rename (Pattern context values) = Pattern <$> rename context <*> rename values
 
 instance Rename attr => Rename (PatElemT attr) where
-  rename (PatElem ident bindage attr) =
-    PatElem <$> rename ident <*> rename bindage <*> rename attr
+  rename (PatElem ident attr) = PatElem <$> rename ident <*> rename attr
 
 instance Rename Certificates where
   rename (Certificates cs) = Certificates <$> rename cs
@@ -207,12 +206,6 @@ instance Rename Certificates where
 instance Rename attr => Rename (StmAux attr) where
   rename (StmAux cs attr) =
     StmAux <$> rename cs <*> rename attr
-
-instance Rename Bindage where
-  rename BindVar =
-    return BindVar
-  rename (BindInPlace src is) =
-    BindInPlace <$> rename src <*> mapM rename is
 
 instance Renameable lore => Rename (Body lore) where
   rename (Body attr stms res) = do

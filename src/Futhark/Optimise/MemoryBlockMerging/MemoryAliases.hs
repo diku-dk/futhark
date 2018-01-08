@@ -93,7 +93,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
       var_to_mem <- ask
       let mems = map memSrcName $ mapMaybe (`M.lookup` var_to_mem) ress
       forM_ patctxelems $ \case
-          (PatElem patmem _ (_, ExpMem.MemMem{})) ->
+          (PatElem patmem (_, ExpMem.MemMem{})) ->
             recordMapping patmem $ S.fromList mems
           _ -> return ()
     _ -> return ()
@@ -111,7 +111,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
 lookInCtx :: LoreConstraints lore =>
              PatElem (Aliases lore) -> (FParam (Aliases lore), SubExp)
           -> FindM lore ()
-lookInCtx (PatElem patmem _ (_, ExpMem.MemMem{})) (Param parammem ExpMem.MemMem{}, _) = do
+lookInCtx (PatElem patmem (_, ExpMem.MemMem{})) (Param parammem ExpMem.MemMem{}, _) = do
   recordMapping patmem (S.singleton parammem)
   recordMapping parammem (S.singleton patmem)
 lookInCtx _ _ = return ()
@@ -144,7 +144,7 @@ lookInBodyTuples :: LoreConstraints lore =>
 -- which return memory in the loop that the existential memory refers
 -- to.
 lookInBodyTuples patctxelems body_params body_results
-  (PatElem _ _ (_, ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _))) = do
+  (PatElem _ (_, ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _))) = do
   let zipped = zip3 patctxelems body_params body_results
   case L.find ((== mem) . patElemName . (\(x, _, _) -> x)) zipped of
     Just (_, Var param_mem, Var res_mem) ->
@@ -154,10 +154,10 @@ lookInBodyTuples _ _ _ _ = return ()
 
 lookInPatElem :: LoreConstraints lore =>
                  PatElem (Aliases lore) -> FindM lore ()
-lookInPatElem (PatElem _ _ (names', ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _))) = do
+lookInPatElem (PatElem _ (names', ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _))) = do
   aliases <- lookupMems $ unNames names'
   recordMapping xmem aliases
-lookInPatElem (PatElem xmem _ (names', ExpMem.MemMem {})) = do
+lookInPatElem (PatElem xmem (names', ExpMem.MemMem {})) = do
   aliases <- lookupMems $ unNames names'
   recordMapping xmem aliases
 lookInPatElem _ = return ()

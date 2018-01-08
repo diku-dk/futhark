@@ -55,8 +55,7 @@ transformStm (Let pat aux (Op (Redomap w _ _ fold_lam nes arrs)))
         scopeOfLParams $ fold_acc_params' ++ arr_chunk_params ++ map_arr_params
 
   redomap_pes <- forM (patternValueElements pat) $ \pe ->
-    PatElem <$> newVName (baseString $ patElemName pe) <*>
-    pure BindVar <*> pure (patElemType pe)
+    PatElem <$> newVName (baseString $ patElemName pe) <*> pure (patElemType pe)
 
   redomap_kstms <- collectStms_ $ localScope param_scope $ do
     fold_lam' <- transformLambda fold_lam
@@ -213,7 +212,7 @@ groupStreamMapAccumL pes w fold_lam accexps arrexps = do
   let index_bnds = do
         (p, arr, arr_t) <- zip3 arr_params (map paramName arr_params_chunked)
                            (map paramType arr_params_chunked)
-        return $ mkLet' [] [paramIdent p] $
+        return $ mkLet [] [paramIdent p] $
           BasicOp $ Index arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
 
   let redomap_kbody = stmsFromList index_bnds `insertStms` redomap_loop
@@ -258,15 +257,14 @@ mapIsh pat cs w params (Out.Body () kstms kres) arrs = do
     fmap unzip $ forM (zip outarr_params kres) $ \(outarr_param, se) -> do
       outarr_param_new <- newParam' (<>"_new") outarr_param
       return (outarr_param_new,
-              mkLet [] [(paramIdent outarr_param_new,
-                         BindInPlace (paramName outarr_param) $
-                         fullSlice (paramType outarr_param) [DimFix $ Var i])] $
-              BasicOp $ SubExp se)
+              mkLet [] [paramIdent outarr_param_new] $ BasicOp $
+               Update (paramName outarr_param)
+               (fullSlice (paramType outarr_param) [DimFix $ Var i]) se)
 
   let index_stms = do
         (p, arr, arr_t) <- zip3 params (map paramName params_chunked) $
                            map paramType params_chunked
-        return $ mkLet' [] [paramIdent p] $
+        return $ mkLet [] [paramIdent p] $
           BasicOp $ Index arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
       kbody' = Out.Body () (stmsFromList index_stms <> kstms <> stmsFromList write_elems) $
                map (Var . paramName) outarr_params_new

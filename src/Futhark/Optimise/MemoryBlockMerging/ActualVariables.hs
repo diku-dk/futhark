@@ -103,14 +103,13 @@ lookInKernelBody (KernelBody _ bnds _res) =
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
-  forM_ patvalelems $ \(PatElem var bindage _) ->
-    case bindage of
-      BindInPlace orig _ -> do
-        -- Record that when coalescing an in-place update statement, also look
-        -- at the original array.
-        let actuals = S.fromList [var, orig]
-        recordActuals var actuals
-      _ -> return ()
+  case (patvalelems, e) of
+    ([PatElem var _], BasicOp (Update orig _ _)) -> do
+      -- Record that when coalescing an in-place update statement, also look
+      -- at the original array.
+      let actuals = S.fromList [var, orig]
+      recordActuals var actuals
+    _ -> return ()
 
   -- Special handling of loops, ifs, etc.
   case e of
@@ -119,7 +118,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
           body_vars1 = map (paramName . fst) mergevalparams
           body_vars2 = S.toList $ findAllExpVars e
           body_vars = body_vars0 ++ body_vars1 ++ body_vars2
-      forM_ patvalelems $ \(PatElem var _ membound) -> do
+      forM_ patvalelems $ \(PatElem var membound) -> do
         case membound of
           ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) -> do
             -- If mem is existential, we need to find the return memory that it
@@ -164,7 +163,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
       -- However, if a branch result has a memory block that is firstly used
       -- inside the branch, it is okay to coalesce that in a future statement.
       forM_ (zip3 patvalelems (bodyResult body_then) (bodyResult body_else))
-        $ \(PatElem var _ membound, res_then, res_else) -> do
+        $ \(PatElem var membound, res_then, res_else) -> do
         let body_vars = S.toList $ findAllExpVars e
         case membound of
           ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) ->
@@ -249,7 +248,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
     BasicOp (Opaque (Var orig)) ->
       aliasOpHandle orig patvalelems
 
-    _ -> forM_ patvalelems $ \(PatElem var _ membound) -> do
+    _ -> forM_ patvalelems $ \(PatElem var membound) -> do
       let body_vars = S.toList $ findAllExpVars e
       case membound of
         ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) -> do
@@ -320,7 +319,7 @@ class LookInKernelExp lore where
 instance LookInKernelExp ExplicitMemory where
   lookInKernelExp (Let (Pattern _ patvalelems) _ e) = case e of
     Op (ExpMem.Inner (Kernel _ _ _ (KernelBody _ _ ress))) ->
-      zipWithM_ (\(PatElem var _ _) res -> case res of
+      zipWithM_ (\(PatElem var _) res -> case res of
                     WriteReturn _ arr _ _ ->
                       recordActuals arr $ S.singleton var
                     _ -> return ()

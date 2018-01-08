@@ -12,7 +12,6 @@ import Control.Monad.RWS
 import Control.Monad.Writer
 
 import Futhark.Representation.AST
-import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
@@ -115,10 +114,11 @@ bodyBindingMap stms =
 
   where createBindingStmt :: (Line, Stm ExplicitMemory)
                           -> BindingMap
-        createBindingStmt (line, stmt@(Let pat@(Pattern patctxelems patvalelems) _ e)) =
+        createBindingStmt (line, stmt@(Let (Pattern patctxelems patvalelems) _ e)) =
           let stmt_vars = S.fromList (map patElemName (patctxelems ++ patvalelems))
               frees = freeInStm stmt
-              consumed = consumedInPattern pat
+              consumed = case e of BasicOp (Update src _ _) -> S.singleton src
+                                   _ -> mempty
               bound_extra = boundInExpExtra e
               frees' = frees `S.difference` bound_extra
               vars_binding = (stmt_vars, PrimBinding frees' consumed (FromLine line e))
@@ -144,7 +144,7 @@ bodyBindingMap stms =
                 putStrLn $ replicate 70 '~'
           in withDebug debug bmap
 
-        shapeSizes (PatElem _ _ (ExpMem.MemArray _ shape _ _)) =
+        shapeSizes (PatElem _ (ExpMem.MemArray _ shape _ _)) =
           mapMaybe fromVar $ shapeDims shape
         shapeSizes _ = []
 

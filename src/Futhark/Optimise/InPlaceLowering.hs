@@ -124,10 +124,10 @@ optimiseStms (bnd:bnds) m = do
 
   where boundHere = patternNames $ stmPattern bnd
 
-        checkIfForwardableUpdate bnd'@(Let pat (StmAux cs _) e) bnds'
-            | [PatElem v (BindInPlace src (DimFix i:slice)) attr] <- patternElements pat,
-              slice == drop 1 (fullSlice (typeOf attr) [DimFix i]),
-              BasicOp (SubExp (Var ve)) <- e = do
+        checkIfForwardableUpdate bnd'@(Let (Pattern [] [PatElem v attr])
+                                       (StmAux cs _) e) bnds'
+            | BasicOp (Update src (DimFix i:slice) (Var ve)) <- e,
+              slice == drop 1 (fullSlice (typeOf attr) [DimFix i]) = do
                 forwarded <- maybeForward ve v attr cs src i
                 return $ if forwarded
                          then bnds'
@@ -180,11 +180,10 @@ instance Monoid BottomUp where
 
 updateStm :: DesiredUpdate (LetAttr (Aliases Kernels)) -> Stm (Aliases Kernels)
 updateStm fwd =
-  mkLet [] [(Ident (updateName fwd) $ typeOf $ updateType fwd,
-             BindInPlace
-             (updateSource fwd)
-             (fullSlice (typeOf $ updateType fwd) $ updateIndices fwd))] $
-  BasicOp $ SubExp $ Var $ updateValue fwd
+  mkLet [] [Ident (updateName fwd) $ typeOf $ updateType fwd] $
+  BasicOp $ Update (updateSource fwd)
+  (fullSlice (typeOf $ updateType fwd) $ updateIndices fwd) $
+  Var $ updateValue fwd
 
 newtype ForwardingM a = ForwardingM (RWS TopDown BottomUp VNameSource a)
                       deriving (Monad, Applicative, Functor,

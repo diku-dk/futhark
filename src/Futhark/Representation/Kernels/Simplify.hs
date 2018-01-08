@@ -266,7 +266,7 @@ fuseStreamIota vtable pat _ (GroupStream w max_chunk lam accs arrs)
           BasicOp $ BinOp (Mul iota_t) offset' iota_stride
         start <- letSubExp "iota_start" $
             BasicOp $ BinOp (Add iota_t) offset'' iota_start
-        letBindNames'_ [paramName iota_param] $
+        letBindNames_ [paramName iota_param] $
           BasicOp $ Iota (Var chunk_size) start iota_stride iota_t
         return $ groupStreamLambdaBody lam
       let lam' = lam { groupStreamArrParams = arr_params',
@@ -307,12 +307,12 @@ removeInvariantKernelResults vtable (Pattern [] kpes) attr
           | isInvariant se =
               case threads of
                 AllThreads -> do
-                  letBindNames'_ [patElemName pe] $ BasicOp $
+                  letBindNames_ [patElemName pe] $ BasicOp $
                     Replicate (Shape [num_threads]) se
                   return False
                 ThreadsInSpace -> do
                   let rep a d = BasicOp . Replicate (Shape [d]) <$> letSubExp "rep" a
-                  letBindNames'_ [patElemName pe] =<<
+                  letBindNames_ [patElemName pe] =<<
                     foldM rep (BasicOp (SubExp se)) (reverse space_dims)
                   return False
                 _ -> return True
@@ -383,21 +383,21 @@ simplifyKnownIterationStream _ pat _ (GroupStream (Constant v) _ lam accs arrs)
   | oneIsh v = do
       let GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
 
-      letBindNames'_ [chunk_size] $ BasicOp $ SubExp $ constant (1::Int32)
+      letBindNames_ [chunk_size] $ BasicOp $ SubExp $ constant (1::Int32)
 
-      letBindNames'_ [chunk_offset] $ BasicOp $ SubExp $ constant (0::Int32)
+      letBindNames_ [chunk_offset] $ BasicOp $ SubExp $ constant (0::Int32)
 
       forM_ (zip acc_params accs) $ \(p,a) ->
-        letBindNames'_ [paramName p] $ BasicOp $ SubExp a
+        letBindNames_ [paramName p] $ BasicOp $ SubExp a
 
       forM_ (zip arr_params arrs) $ \(p,a) ->
-        letBindNames'_ [paramName p] $ BasicOp $ Index a $
+        letBindNames_ [paramName p] $ BasicOp $ Index a $
         fullSlice (paramType p)
         [DimSlice (Var chunk_offset) (Var chunk_size) (constant (1::Int32))]
 
       res <- bodyBind body
       forM_ (zip (patternElements pat) res) $ \(pe,r) ->
-        letBindNames'_ [patElemName pe] $ BasicOp $ SubExp r
+        letBindNames_ [patElemName pe] $ BasicOp $ SubExp r
 simplifyKnownIterationStream _ _ _ _ = cannotSimplify
 
 removeUnusedStreamInputs :: TopDownRuleOp (Wise InKernel)

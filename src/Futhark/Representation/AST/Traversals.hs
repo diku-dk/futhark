@@ -116,7 +116,10 @@ mapExpM tv (Apply fname args ret loc) = do
   Apply fname <$> pure args' <*> mapM (mapOnRetType tv) ret <*> pure loc
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp <$> (Index <$> mapOnVName tv arr <*>
-              mapM (Data.Traversable.traverse (mapOnSubExp tv)) slice)
+               mapM (traverse (mapOnSubExp tv)) slice)
+mapExpM tv (BasicOp (Update arr slice se)) =
+  BasicOp <$> (Update <$> mapOnVName tv arr <*>
+               mapM (traverse (mapOnSubExp tv)) slice <*> mapOnSubExp tv se)
 mapExpM tv (BasicOp (Iota n x s et)) =
   BasicOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s <*> pure et)
 mapExpM tv (BasicOp (Replicate shape vexp)) =
