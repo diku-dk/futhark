@@ -9,11 +9,10 @@ module Futhark.Optimise.Fusion ( fuseSOACs )
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Except
-
+import qualified Data.Semigroup as Sem
 import Data.Hashable
 import Data.Maybe
 import Data.Monoid
-
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
 import qualified Data.List         as L
@@ -184,7 +183,7 @@ fuseProg :: Prog -> PassM Prog
 fuseProg prog = do
   let env  = FusionGEnv { soacs = M.empty
                         , varsInScope = M.empty
-                        , fusedRes = mkFreshFusionRes
+                        , fusedRes = mempty
                         }
       funs = progFunctions prog
   ks <- liftEitherM $ runFusionGatherM (mapM fusionGatherFun funs) env
@@ -199,7 +198,7 @@ fuseProg prog = do
 fusionGatherFun :: FunDef -> FusionGM FusedRes
 fusionGatherFun fundec =
   bindingFParams (funDefParams fundec) $
-  fusionGatherBody mkFreshFusionRes $ funDefBody fundec
+  fusionGatherBody mempty $ funDefBody fundec
 
 fuseInFun :: FusedRes -> FunDef -> FusionGM FunDef
 fuseInFun res fundec = do
@@ -249,6 +248,19 @@ data FusedRes = FusedRes {
   , kernels    :: M.Map KernName FusedKer
   -- ^ The map recording the uses
   }
+
+instance Sem.Semigroup FusedRes where
+  res1 <> res2 =
+    FusedRes (rsucc     res1       ||      rsucc     res2)
+             (outArr    res1    `M.union`  outArr    res2)
+             (M.unionWith S.union (inpArr res1) (inpArr res2) )
+             (infusible res1    `S.union`  infusible res2)
+             (kernels   res1    `M.union`  kernels   res2)
+
+instance Monoid FusedRes where
+  mempty = FusedRes { rsucc     = False,   outArr = M.empty, inpArr  = M.empty,
+                      infusible = S.empty, kernels = M.empty }
+  mappend = (Sem.<>)
 
 isInpArrInResModKers :: FusedRes -> S.Set KernName -> VName -> Bool
 isInpArrInResModKers ress kers nm =
@@ -668,36 +680,26 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 -----------------------------------------
 
 fusionGatherExp fres (DoLoop ctx val form loop_body) = do
-  let (merge_pat, ini_val) = unzip merge
+  fres' <- addNamesToInfusible fres $ freeIn form <> freeIn ctx <> freeIn val
+  let form_idents =
+        case form of
+          ForLoop i _ _ loopvars ->
+            Ident i (Prim int32) : map (paramIdent . fst) loopvars
+          WhileLoop{} -> []
 
-  let pat_vars = map (Var . paramName)  merge_pat
-  fres' <- foldM fusionGatherSubExp fres (ini_val++pat_vars)
-  (fres'', form_idents) <- case form of
-    ForLoop i _ bound loopvars ->
-      (,) <$> foldM fusionGatherSubExp fres' (bound:map (Var . snd) loopvars) <*>
-      pure (Ident i (Prim int32) : map (paramIdent . fst) loopvars)
-    WhileLoop cond ->
-      (,) <$> fusionGatherSubExp fres' (Var cond) <*> pure []
-
-  let null_res = mkFreshFusionRes
-  new_res <- binding (form_idents ++ map paramIdent merge_pat) $
-    fusionGatherBody null_res loop_body
+  new_res <- binding (form_idents ++ map (paramIdent . fst) (ctx<>val)) $
+    fusionGatherBody mempty loop_body
   -- make the inpArr infusible, so that they
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ M.toList $ inpArr new_res
   let new_res' = new_res { infusible = foldl (flip S.insert) (infusible new_res) inp_arrs }
-  -- merge new_res with fres''
-  return $ unionFusionRes new_res' fres''
-  where merge = ctx ++ val
-
-fusionGatherExp fres (BasicOp (Index idd inds)) =
-  foldM addVarToInfusible fres $ idd : S.toList (mconcat $ map freeIn inds)
+  -- merge new_res with fres'
+  return $ new_res' <> fres'
 
 fusionGatherExp fres (If cond e_then e_else _) = do
-    let null_res = mkFreshFusionRes
-    then_res <- fusionGatherBody null_res e_then
-    else_res <- fusionGatherBody null_res e_else
-    let both_res = unionFusionRes then_res else_res
+    then_res <- fusionGatherBody mempty e_then
+    else_res <- fusionGatherBody mempty e_else
+    let both_res = then_res <> else_res
     fres'    <- fusionGatherSubExp fres cond
     mergeFusionRes fres' both_res
 
@@ -718,11 +720,14 @@ fusionGatherExp _ (Op Futhark.Scatter{}) = errorIllegal "write"
 -----------------------------------
 
 fusionGatherExp fres e =
-  foldM addVarToInfusible fres $ freeInExp e
+  addNamesToInfusible fres $ freeInExp e
 
 fusionGatherSubExp :: FusedRes -> SubExp -> FusionGM FusedRes
 fusionGatherSubExp fres (Var idd) = addVarToInfusible fres idd
 fusionGatherSubExp fres _         = return fres
+
+addNamesToInfusible :: FusedRes -> Names -> FusionGM FusedRes
+addNamesToInfusible fres = foldM addVarToInfusible fres . S.toList
 
 addVarToInfusible :: FusedRes -> VName -> FusionGM FusedRes
 addVarToInfusible fres name = do
@@ -736,9 +741,8 @@ addVarToInfusible fres name = do
 -- adding inp_arrs to the infusible set.
 fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (S.Set VName, FusedRes)
 fusionGatherLam (u_set,fres) (Lambda idds body _) = do
-    let null_res = mkFreshFusionRes
     new_res <- binding (map paramIdent idds) $
-               fusionGatherBody null_res body
+               fusionGatherBody mempty body
     -- make the inpArr infusible, so that they
     -- cannot be fused from outside the lambda:
     let inp_arrs = S.fromList $ M.keys $ inpArr new_res
@@ -748,7 +752,7 @@ fusionGatherLam (u_set,fres) (Lambda idds body _) = do
     -- merge fres with new_res'
     let new_res' = new_res { infusible = unfus' }
     -- merge new_res with fres'
-    return (u_set `S.union` unfus', unionFusionRes new_res' fres)
+    return (u_set `S.union` unfus', new_res' <> fres)
 
 -------------------------------------------------------------
 -------------------------------------------------------------
@@ -900,14 +904,6 @@ mkFreshFusionRes :: FusedRes
 mkFreshFusionRes =
     FusedRes { rsucc     = False,   outArr = M.empty, inpArr  = M.empty,
                infusible = S.empty, kernels = M.empty }
-
-unionFusionRes :: FusedRes -> FusedRes -> FusedRes
-unionFusionRes res1 res2 =
-    FusedRes  (rsucc     res1       ||      rsucc     res2)
-              (outArr    res1    `M.union`  outArr    res2)
-              (M.unionWith S.union (inpArr res1) (inpArr res2) )
-              (infusible res1    `S.union`  infusible res2)
-              (kernels   res1    `M.union`  kernels   res2)
 
 mergeFusionRes :: FusedRes -> FusedRes -> FusionGM FusedRes
 mergeFusionRes res1 res2 = do
