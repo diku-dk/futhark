@@ -179,7 +179,6 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap
         addIntrinsicF _ = Nothing
 
 instance MonadTypeChecker TermTypeM where
-  bad = liftTypeM . bad
   warn loc problem = liftTypeM $ warn loc problem
   newName = liftTypeM . newName
   newID = liftTypeM . newID
@@ -202,7 +201,7 @@ instance MonadTypeChecker TermTypeM where
     outer_env <- liftTypeM askRootEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ scopeTypeTable scope of
-      Nothing -> bad $ UndefinedType loc qn
+      Nothing -> throwError $ UndefinedType loc qn
       Just (TypeAbbr ps def) ->
         return (qn', ps, qualifyTypeVars outer_env (map typeParamName ps) qs def)
 
@@ -214,15 +213,15 @@ instance MonadTypeChecker TermTypeM where
     outer_env <- liftTypeM askRootEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeVtable scope of
-      Nothing -> bad $ UnknownVariableError Term qn loc
-      Just (BoundV _ Arrow{}) -> bad $ FunctionIsNotValue loc qn
-      Just (BoundV _ t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
+      Nothing -> throwError $ UnknownVariableError Term qn loc
+      Just (BoundV _ Arrow{}) -> throwError $ FunctionIsNotValue loc qn
+      Just (BoundV _ t) | "_" `isPrefixOf` pretty name -> throwError $ UnderscoreUse loc qn
                         | otherwise -> return (qn', qualifyTypeVars outer_env [] qs $
                                                     removeShapeAnnotations t)
-      Just EqualityF -> bad $ FunctionIsNotValue loc qn
-      Just OpaqueF -> bad $ FunctionIsNotValue loc qn
-      Just OverloadedF{} -> bad $ FunctionIsNotValue loc qn
-      Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
+      Just EqualityF -> throwError $ FunctionIsNotValue loc qn
+      Just OpaqueF -> throwError $ FunctionIsNotValue loc qn
+      Just OverloadedF{} -> throwError $ FunctionIsNotValue loc qn
+      Just (WasConsumed wloc) -> throwError $ UseAfterConsume (baseName name) loc wloc
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName [q] _) loc
@@ -246,7 +245,7 @@ checkIntrinsic space qn@(QualName _ name) loc
       scope <- ask
       return (scope, v)
   | otherwise =
-      bad $ UnknownVariableError space qn loc
+      throwError $ UnknownVariableError space qn loc
 
 checkReallyQualName :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkReallyQualName space qn loc = do
@@ -261,15 +260,15 @@ lookupFunction qn argtypes loc = do
   outer_env <- liftTypeM askRootEnv
   (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
   case M.lookup name $ scopeVtable scope of
-    Nothing -> bad $ UnknownVariableError Term qn loc
-    Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
+    Nothing -> throwError $ UnknownVariableError Term qn loc
+    Just (WasConsumed wloc) -> throwError $ UseAfterConsume (baseName name) loc wloc
     Just (BoundV tparams t@Arrow{}) -> do
       let qual = qualifyTypeVars outer_env (map typeParamName tparams) qs
       return (qn', (tparams, qual t))
-    Just (BoundV _ t) -> bad $ ValueIsNotFunction loc qn $ removeShapeAnnotations t
+    Just (BoundV _ t) -> throwError $ ValueIsNotFunction loc qn $ removeShapeAnnotations t
     Just (OverloadedF overloads) ->
       case lookup (map toStructural argtypes) overloads of
-        Nothing -> bad $ TypeError loc $ "Overloaded function " ++ pretty qn ++
+        Nothing -> throwError $ TypeError loc $ "Overloaded function " ++ pretty qn ++
                    " not defined for arguments of types " ++
                    intercalate ", " (map pretty argtypes)
         Just f -> return (qn', ([], f))
@@ -281,7 +280,7 @@ lookupFunction qn argtypes loc = do
                       Arrow mempty Nothing (t' `setUniqueness` Nonunique)
                       (t' `setUniqueness` Nonunique)))
       | otherwise ->
-          bad $ TypeError loc "Opaque function takes just a single argument."
+          throwError $ TypeError loc "Opaque function takes just a single argument."
     Just EqualityF
       | [t1,t2] <- argtypes,
         concreteType t1,
@@ -291,7 +290,7 @@ lookupFunction qn argtypes loc = do
                         vacuousShapeAnnotations $
                         Arrow mempty Nothing t1 $ Arrow mempty Nothing t2 $ Prim Bool))
       | otherwise ->
-          bad $ TypeError loc $ "Equality not defined for arguments of types " ++
+          throwError $ TypeError loc $ "Equality not defined for arguments of types " ++
           intercalate ", " (map pretty argtypes)
 
 --- Basic checking
@@ -301,7 +300,7 @@ lookupFunction qn argtypes loc = do
 -- one of them.
 unifyExpTypes :: Exp -> Exp -> TermTypeM CompType
 unifyExpTypes e1 e2 =
-  maybe (bad $ UnifyError
+  maybe (throwError $ UnifyError
          (srclocOf e1) (toStructural t1)
          (srclocOf e2) (toStructural t2)) return $
   unifyTypes (typeOf e1) (typeOf e2)
@@ -528,13 +527,13 @@ checkExp (ArrayLit es _ loc) = do
   es' <- mapM checkExp es
   -- Find the universal type of the array arguments.
   et <- case es' of
-          [] -> bad $ TypeError loc "Empty array literal"
+          [] -> throwError $ TypeError loc "Empty array literal"
           e:es'' ->
             let check elemt eleme
                   | Just elemt' <- elemt `unifyTypes` typeOf eleme =
                     return elemt'
                   | otherwise =
-                    bad $ TypeError loc $ pretty eleme ++ " is not of expected type " ++ pretty elemt ++ "."
+                    throwError $ TypeError loc $ pretty eleme ++ " is not of expected type " ++ pretty elemt ++ "."
             in foldM check (typeOf e) es''
 
   t <- arrayOfM loc et (rank 1) Unique
@@ -590,7 +589,7 @@ checkExp (Project k e NoInfo loc) = do
   case typeOf e' of
     Record fs | Just t <- M.lookup k fs ->
                 return $ Project k e' (Info t) loc
-    _ -> bad $ InvalidField loc (typeOf e') (pretty k)
+    _ -> throwError $ InvalidField loc (typeOf e') (pretty k)
 
 checkExp (If e1 e2 e3 _ pos) =
   sequentially (require [Prim Bool] =<< checkExp e1) $ \e1' _ -> do
@@ -609,7 +608,7 @@ checkExp (QualParens modname e loc) = do
       e' <- checkExp e
       return $ QualParens modname' e' loc
     ModFun{} ->
-      bad $ TypeError loc $ "Module " ++ pretty modname ++ " is a parametric module."
+      throwError $ TypeError loc $ "Module " ++ pretty modname ++ " is a parametric module."
   where qualifyEnv modname' env =
           env { envNameMap = M.map (qualify' modname') $ envNameMap env }
         qualify' modname' (QualName qs name) =
@@ -640,7 +639,7 @@ checkExp (Var qn NoInfo loc) = do
           case typeOf e of
             Record fs | Just t <- M.lookup k fs ->
                         return $ Project k e (Info t) loc
-            _ -> bad $ InvalidField loc (typeOf e) (pretty k)
+            _ -> throwError $ InvalidField loc (typeOf e) (pretty k)
 
 checkExp (Negate arg loc) = do
   arg' <- require anyNumberType =<< checkExp arg
@@ -683,17 +682,17 @@ checkExp (LetWith dest src idxes ve body pos) = do
   src' <- checkIdent src
 
   unless (unique $ unInfo $ identType src') $
-    bad $ TypeError pos $ "Source '" ++ pretty (identName src) ++
+    throwError $ TypeError pos $ "Source '" ++ pretty (identName src) ++
     "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
 
   idxes' <- mapM checkDimIndex idxes
   case peelArray (length $ filter isFix idxes') (unInfo $ identType src') of
-    Nothing -> bad $ IndexingError
+    Nothing -> throwError $ IndexingError
                (arrayRank $ unInfo $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
       sequentially (require [toStructural elemt] =<< checkExp ve) $ \ve' _ -> do
         when (identName src' `S.member` aliases (typeOf ve')) $
-          bad $ BadLetWithValue pos
+          throwError $ BadLetWithValue pos
 
         bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
           body' <- consuming src' $ checkExp body
@@ -707,17 +706,17 @@ checkExp (Update src idxes ve loc) =
         src_als = aliases src_t
 
     unless (unique src_t) $
-      bad $ TypeError loc $ "Source '" ++ pretty src ++
+      throwError $ TypeError loc $ "Source '" ++ pretty src ++
       "' has type " ++ pretty src_t ++ ", which is not unique"
 
     idxes' <- mapM checkDimIndex idxes
     case peelArray (length $ filter isFix idxes') src_t of
-      Nothing -> bad $ IndexingError (arrayRank src_t) (length idxes) (srclocOf src)
+      Nothing -> throwError $ IndexingError (arrayRank src_t) (length idxes) (srclocOf src)
       Just elemt -> do
         ve' <- require [toStructural elemt] =<< checkExp ve
 
         unless (S.null $ aliases (typeOf src') `S.intersection` aliases (typeOf ve')) $
-          bad $ BadLetWithValue loc
+          throwError $ BadLetWithValue loc
 
         consume loc src_als
         return $ Update src' idxes' ve' loc
@@ -728,7 +727,7 @@ checkExp (Index e idxes pos) = do
   e' <- checkExp e
   let vt = typeOf e'
   when (arrayRank vt < length idxes) $
-    bad $ IndexingError (arrayRank vt) (length idxes) pos
+    throwError $ IndexingError (arrayRank vt) (length idxes) pos
   idxes' <- mapM checkDimIndex idxes
   return $ Index e' idxes' pos
 
@@ -741,12 +740,12 @@ checkExp (Reshape shapeexp arrexp loc) = do
         all ((`elem` anyIntType) . toStruct) ts -> return ()
     Prim Signed{} -> return ()
     Prim Unsigned{} -> return ()
-    t -> bad $ TypeError loc $ "Shape argument " ++ pretty shapeexp ++
+    t -> throwError $ TypeError loc $ "Shape argument " ++ pretty shapeexp ++
       " to reshape must be integer or tuple of integers, but is " ++ pretty t
 
   case typeOf arrexp' of
     Array{} -> return ()
-    t -> bad $ TypeError loc $
+    t -> throwError $ TypeError loc $
          "Array argument to reshape must be an array, but has type " ++ pretty t
 
   return $ Reshape shapeexp' arrexp' loc
@@ -755,7 +754,7 @@ checkExp (Rearrange perm arrexp pos) = do
   arrexp' <- checkExp arrexp
   let r = arrayRank $ typeOf arrexp'
   when (length perm /= r || sort perm /= [0..r-1]) $
-    bad $ PermutationError pos perm r
+    throwError $ PermutationError pos perm r
   return $ Rearrange perm arrexp' pos
 
 checkExp (Rotate d offexp arrexp loc) = do
@@ -763,7 +762,7 @@ checkExp (Rotate d offexp arrexp loc) = do
   offexp' <- require [Prim $ Signed Int32] =<< checkExp offexp
   let r= arrayRank (typeOf arrexp')
   when (r <= d) $
-    bad $ TypeError loc $ "Attempting to rotate dimension " ++ show d ++
+    throwError $ TypeError loc $ "Attempting to rotate dimension " ++ show d ++
     " of array " ++ pretty arrexp ++
     " which has only " ++ show r ++ " dimensions."
   return $ Rotate d offexp' arrexp' loc
@@ -776,7 +775,7 @@ checkExp (Zip i e es NoInfo NoInfo loc) = do
     let arr_e_t = typeOf arr_e
     in case typeToRecordArrayElem =<< peelArray (i+1) arr_e_t of
          Just t -> return t
-         Nothing -> bad $ TypeError (srclocOf arr_e) $
+         Nothing -> throwError $ TypeError (srclocOf arr_e) $
                     "Expected array with at least " ++ show (1+i) ++
                     " dimensions, but got " ++ pretty arr_e_t ++ "."
 
@@ -790,7 +789,7 @@ checkExp (Unzip e _ loc) = do
       | Just ets <- map (componentType shape u) <$> areTupleFields fs ->
           return $ Unzip e' (map Info ets) loc
     t ->
-      bad $ TypeError loc $
+      throwError $ TypeError loc $
       "Argument to unzip is not an array of tuples, but " ++
       pretty t ++ "."
   where componentType shape u et =
@@ -814,9 +813,9 @@ checkExp (Reduce comm fun startexp arrexp pos) = do
   (arrexp', arrarg) <- checkSOACArrayArg arrexp
   (fun', redtype) <- checkFunExp fun [startarg, arrarg]
   unless (typeOf startexp' `subtypeOf` redtype) $
-    bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but reduce function returns type " ++ pretty redtype ++ "."
+    throwError $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but reduce function returns type " ++ pretty redtype ++ "."
   unless (argType arrarg `subtypeOf` redtype) $
-    bad $ TypeError pos $ "Array element value is of type " ++ pretty (argType arrarg) ++ ", but reduce function returns type " ++ pretty redtype ++ "."
+    throwError $ TypeError pos $ "Array element value is of type " ++ pretty (argType arrarg) ++ ", but reduce function returns type " ++ pretty redtype ++ "."
   return $ Reduce comm fun' startexp' arrexp' pos
 
 checkExp (Scan fun startexp arrexp pos) = do
@@ -824,9 +823,9 @@ checkExp (Scan fun startexp arrexp pos) = do
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
   (fun', scantype) <- checkFunExp fun [startarg, arrarg]
   unless (typeOf startexp' `subtypeOf` scantype) $
-    bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but scan function returns type " ++ pretty scantype ++ "."
+    throwError $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but scan function returns type " ++ pretty scantype ++ "."
   unless (inrowt `subtypeOf` scantype) $
-    bad $ TypeError pos $ "Array element value is of type " ++ pretty inrowt ++ ", but scan function returns type " ++ pretty scantype ++ "."
+    throwError $ TypeError pos $ "Array element value is of type " ++ pretty inrowt ++ ", but scan function returns type " ++ pretty scantype ++ "."
   return $ Scan fun' startexp' arrexp' pos
 
 checkExp (Filter fun arrexp loc) = do
@@ -835,7 +834,7 @@ checkExp (Filter fun arrexp loc) = do
                        argflow, argloc)
   (fun', lam_t) <- checkFunExp fun [nonunique_arg]
   when (lam_t /= Prim Bool) $
-    bad $ TypeError loc $ "Filter function must return bool, but returns " ++ pretty lam_t ++ "."
+    throwError $ TypeError loc $ "Filter function must return bool, but returns " ++ pretty lam_t ++ "."
 
   return $ Filter fun' arrexp' loc
 
@@ -846,7 +845,7 @@ checkExp (Partition funs arrexp pos) = do
   funs' <- forM funs $ \fun -> do
     (fun', fun_t) <- checkFunExp fun [nonunique_arg]
     when (fun_t /= Prim Bool) $
-      bad $ TypeError (srclocOf fun') "Partition function does not return bool."
+      throwError $ TypeError (srclocOf fun') "Partition function does not return bool."
     return fun'
 
   return $ Partition funs' arrexp' pos
@@ -855,7 +854,7 @@ checkExp (Stream form lam arr pos) = do
   (arr',arrarg) <- checkArg arr
   -- arr must have an array type
   unless (arrayRank (typeOf arr') > 0) $
-    bad $ TypeError pos $ "Stream with input array of non-array type " ++ pretty (typeOf arr') ++ "."
+    throwError $ TypeError pos $ "Stream with input array of non-array type " ++ pretty (typeOf arr') ++ "."
 
   macctup <- case form of
                MapLike{} -> return Nothing
@@ -871,7 +870,7 @@ checkExp (Stream form lam arr pos) = do
   let arr_aliasses = S.toList $ aliases $ typeOf arr'
   let usages = usageMap dflow
   when (any (`M.member` usages) arr_aliasses) $
-     bad $ TypeError pos "Stream with input array used inside lambda."
+     throwError $ TypeError pos "Stream with input array used inside lambda."
 
   -- (i) properly check the lambda on its parameter and
   --(ii) make some fake arguments, which do not alias `arr', and
@@ -882,10 +881,10 @@ checkExp (Stream form lam arr pos) = do
       case lam_t of
         t | Just (acctp:_) <- isTupleRecord t ->
           unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
-          bad $ TypeError pos ("Stream with accumulator-type missmatch"++
+          throwError $ TypeError pos ("Stream with accumulator-type missmatch"++
                                 "or result arrays of non-array type.")
         rtp' -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
-          bad $ TypeError pos "Stream with accumulator-type missmatch."
+          throwError $ TypeError pos "Stream with accumulator-type missmatch."
     Nothing -> return ()
 
   -- typecheck stream form lambdas
@@ -898,7 +897,7 @@ checkExp (Stream form lam arr pos) = do
 
         (lam0', redtype) <- checkFunExp lam0 [accarg, accarg]
         unless (argType accarg `subtypeOf` redtype) $
-            bad $ TypeError pos $ "Stream's fold fun: Fold function returns type type " ++
+            throwError $ TypeError pos $ "Stream's fold fun: Fold function returns type type " ++
                   pretty (argType accarg) ++ ", but reduce fun returns type "++pretty redtype++"."
         return $ RedLike o comm lam0'
 
@@ -911,26 +910,26 @@ checkExp (Concat i arr1exp arr2exps loc) = do
   return $ Concat i arr1exp' arr2exps' loc
   where ofProperRank e
           | arrayRank t <= i =
-              bad $ TypeError loc $ "Cannot concat array " ++ pretty e
+              throwError $ TypeError loc $ "Cannot concat array " ++ pretty e
               ++ " of type " ++ pretty t
               ++ " across dimension " ++ pretty i ++ "."
           | otherwise = return ()
           where t = typeOf e
 
 checkExp e@Lambda{} =
-  bad $ TypeError (srclocOf e)
+  throwError $ TypeError (srclocOf e)
   "Lambda expressions are only permitted directly in applications."
 
 checkExp e@OpSection{} =
-  bad $ TypeError (srclocOf e)
+  throwError $ TypeError (srclocOf e)
   "Operator sections are only permitted directly in applications."
 
 checkExp e@OpSectionLeft{} =
-  bad $ TypeError (srclocOf e)
+  throwError $ TypeError (srclocOf e)
   "Operator sections are only permitted directly in applications."
 
 checkExp e@OpSectionRight{} =
-  bad $ TypeError (srclocOf e)
+  throwError $ TypeError (srclocOf e)
   "Operator sections are only permitted directly in applications."
 
 checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
@@ -974,7 +973,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
                           ForIn xpat' e',
                           loopbody')
             | otherwise ->
-                bad $ TypeError (srclocOf e) $
+                throwError $ TypeError (srclocOf e) $
                 "Iteratee of a for-in loop must be an array, but expression has type " ++ pretty t
 
       While cond ->
@@ -1031,7 +1030,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
 
       -- Now check that the loop returned the right type.
       unless (body_t `subtypeOf` patternType pat') $
-        bad $ UnexpectedType body_loc
+        throwError $ UnexpectedType body_loc
         (toStructural body_t)
         [toStructural $ patternType pat']
 
@@ -1043,16 +1042,16 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       let checkMergeReturn (Id pat_v (Info pat_t) _) t
             | unique pat_t,
               v:_ <- S.toList $ aliases t `S.intersection` bound_outside =
-                lift $ bad $ TypeError loc $ "Loop return value corresponding to merge parameter " ++
+                lift $ throwError $ TypeError loc $ "Loop return value corresponding to merge parameter " ++
                 pretty pat_v ++ " aliases " ++ pretty v ++ "."
             | otherwise = do
                 (cons,obs) <- get
                 unless (S.null $ aliases t `S.intersection` cons) $
-                  lift $ bad $ TypeError loc $ "Loop return value for merge parameter " ++
+                  lift $ throwError $ TypeError loc $ "Loop return value for merge parameter " ++
                   pretty pat_v ++ " aliases other consumed merge parameter."
                 when (unique pat_t &&
                       not (S.null (aliases t `S.intersection` (cons<>obs)))) $
-                  lift $ bad $ TypeError loc $ "Loop return value for consuming merge parameter " ++
+                  lift $ throwError $ TypeError loc $ "Loop return value for consuming merge parameter " ++
                   pretty pat_v ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
                 if unique pat_t
                   then put (cons<>aliases t, obs)
@@ -1072,7 +1071,7 @@ checkSOACArrayArg :: ExpBase NoInfo Name
 checkSOACArrayArg e = do
   (e', (t, dflow, argloc)) <- checkArg e
   case peelArray 1 t of
-    Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
+    Nothing -> throwError $ TypeError argloc "SOAC argument is not an array"
     Just rt -> return (e', (rt, dflow, argloc))
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
@@ -1105,7 +1104,7 @@ findFuncall (Apply f arg _ _ _) = do
   (fname, args) <- findFuncall f
   return (fname, args ++ [arg])
 findFuncall e =
-  bad $ TypeError (srclocOf e) "Invalid function expression in application."
+  throwError $ TypeError (srclocOf e) "Invalid function expression in application."
 
 constructFuncall :: SrcLoc -> QualName VName
                  -> [Exp] -> [StructType] -> TypeBase dim Names
@@ -1212,10 +1211,10 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
   fname' <- checkName Term fname loc
 
   when (baseString fname' == "&&") $
-    bad $ TypeError loc "The && operator may not be redefined."
+    throwError $ TypeError loc "The && operator may not be redefined."
 
   when (baseString fname' == "||") $
-    bad $ TypeError loc "The || operator may not be redefined."
+    throwError $ TypeError loc "The || operator may not be redefined."
 
   bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
     maybe_retdecl' <- traverse checkTypeExp maybe_retdecl
@@ -1237,13 +1236,13 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           foldM_ (checkReturnAlias' params') S.empty . returnAliasing rettp
         checkReturnAlias' params' seen (Unique, names)
           | any (`S.member` S.map snd seen) $ S.toList names =
-            bad $ UniqueReturnAliased fname loc
+            throwError $ UniqueReturnAliased fname loc
           | otherwise = do
             notAliasingParam params' names
             return $ seen `S.union` tag Unique names
         checkReturnAlias' _ seen (Nonunique, names)
           | any (`S.member` seen) $ S.toList $ tag Unique names =
-            bad $ UniqueReturnAliased fname loc
+            throwError $ UniqueReturnAliased fname loc
           | otherwise = return $ seen `S.union` tag Nonunique names
 
         notAliasingParam params' names =
@@ -1252,7 +1251,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
                 not (unique $ unInfo $ identType p') && (identName p' `S.member` names)
           in case find consumedNonunique $ S.toList $ patIdentSet p of
                Just p' ->
-                 bad $ ReturnAliased fname (baseName $ identName p') loc
+                 throwError $ ReturnAliased fname (baseName $ identName p') loc
                Nothing ->
                  return ()
 
@@ -1274,7 +1273,7 @@ checkFunBody fname body maybe_rettype loc = do
     Just rettype -> do
       let rettype_structural = toStructural rettype
       unless (toStructural (typeOf body') `subtypeOf` rettype_structural) $
-        bad $ ReturnTypeError loc fname rettype_structural $ toStructural $ typeOf body'
+        throwError $ ReturnTypeError loc fname rettype_structural $ toStructural $ typeOf body'
     Nothing -> return ()
 
   return body'
@@ -1302,7 +1301,7 @@ checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
       (_, ret'') <- checkFuncall Nothing loc lamt args
       return (Lambda tparams' params' body' maybe_ret' (Info $ toStruct ret'') loc,
               removeShapeAnnotations $ toStruct ret'')
-  | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++
+  | otherwise = throwError $ TypeError loc $ "Anonymous function defined with " ++
                 show (length params) ++ " parameters, but expected to take " ++
                 show (length args) ++ " arguments."
 
@@ -1321,7 +1320,7 @@ checkFunExp (OpSection op NoInfo NoInfo NoInfo loc) args
       fail "Internal type checker error: BinOpFun got bad parameter type."
 
   | otherwise =
-      bad $ ParameterMismatch (Just op) loc (Left 2) $
+      throwError $ ParameterMismatch (Just op) loc (Left 2) $
       map (toStructural . argType) args
 
 checkFunExp (OpSectionLeft binop x _ _ loc) args
@@ -1331,7 +1330,7 @@ checkFunExp (OpSectionLeft binop x _ _ loc) args
               x' (Info xt, Info yt) (Info ret) loc,
               ret `setAliases` mempty)
   | otherwise =
-      bad $ ParameterMismatch (Just binop) loc (Left 1) $
+      throwError $ ParameterMismatch (Just binop) loc (Left 1) $
       map (toStructural . argType) args
 
 checkFunExp (OpSectionRight binop x _ _ loc) args
@@ -1341,7 +1340,7 @@ checkFunExp (OpSectionRight binop x _ _ loc) args
                x' (Info xt, Info yt) (Info ret) loc,
               ret `setAliases` mempty)
   | otherwise =
-      bad $ ParameterMismatch (Just binop) loc (Left 1) $
+      throwError $ ParameterMismatch (Just binop) loc (Left 1) $
       map (toStructural . argType) args
 
 checkFunExp e args = do
@@ -1352,7 +1351,7 @@ checkFunExp e args = do
   (paramtypes', rettype') <- checkFuncall Nothing loc ftype (curryargs ++ args)
 
   case find (unique . snd) $ zip curryargexps paramtypes' of
-    Just (arg, _) -> bad $ CurriedConsumption fname $ srclocOf arg
+    Just (arg, _) -> throwError $ CurriedConsumption fname $ srclocOf arg
     _             -> return ()
 
   let rettype'' = removeShapeAnnotations rettype'
