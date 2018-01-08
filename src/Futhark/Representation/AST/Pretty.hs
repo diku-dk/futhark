@@ -150,16 +150,7 @@ instance Pretty (PatElemT b) => Pretty (PatElemT (a,b)) where
   ppr = ppr . fmap snd
 
 instance Pretty (PatElemT Type) where
-  ppr (PatElem name BindVar t) =
-    ppr t <+>
-    ppr name
-
-  ppr (PatElem name (BindInPlace src is) t) =
-    parens (ppr t <+>
-            ppr name <+>
-            text "<-" <+>
-            ppr src) <>
-    brackets (commasep $ map ppr is)
+  ppr (PatElem name t) = ppr t <+> ppr name
 
 instance Pretty (ParamT b) => Pretty (ParamT (a,b)) where
   ppr = ppr . fmap snd
@@ -209,6 +200,9 @@ instance Pretty (BasicOp lore) where
   ppr (UnOp op e) = ppr op <+> pprPrec 9 e
   ppr (Index v idxs) =
     ppr v <> brackets (commasep (map ppr idxs))
+  ppr (Update src idxs se) =
+    ppr src <+> text "with" <+> brackets (commasep (map ppr idxs)) <+>
+    text "<-" <+> ppr se
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where et' = text $ show $ primBitSize $ IntType et
   ppr (Replicate ne ve) =

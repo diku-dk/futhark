@@ -88,7 +88,7 @@ lookInKernelBody (KernelBody _ bnds res) = do
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern _ patvalelems) _ e) = do
-  forM_ patvalelems $ \(PatElem x _ _) ->
+  forM_ patvalelems $ \(PatElem x _) ->
     tell $ S.singleton x
   lookInExp e
 

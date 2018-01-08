@@ -11,7 +11,6 @@ module Futhark.Representation.AST.Attributes.Aliases
          -- * Consumption
        , consumedInStm
        , consumedInExp
-       , consumedInPattern
        , consumedByLambda
        -- * Extensibility
        , AliasedOp (..)
@@ -51,6 +50,8 @@ primOpAliases UnOp{} = [mempty]
 
 primOpAliases (Index ident _) =
   [vnameAliases ident]
+primOpAliases Update{} =
+  [mempty]
 primOpAliases Iota{} =
   [mempty]
 primOpAliases Replicate{} =
@@ -120,8 +121,7 @@ maskAliases _   Consume = mempty
 maskAliases als Observe = als
 
 consumedInStm :: Aliased lore => Stm lore -> Names
-consumedInStm binding = consumedInPattern (stmPattern binding) <>
-                            consumedInExp (stmExp binding)
+consumedInStm = consumedInExp . stmExp
 
 consumedInExp :: (Aliased lore) => Exp lore -> Names
 consumedInExp (Apply _ args _ _) =
@@ -133,6 +133,7 @@ consumedInExp (If _ tb fb _) =
 consumedInExp (DoLoop _ merge _ _) =
   mconcat (map (subExpAliases . snd) $
            filter (unique . paramDeclType . fst) merge)
+consumedInExp (BasicOp (Update src _ _)) = S.singleton src
 consumedInExp (Op op) = consumedInOp op
 consumedInExp _ = mempty
 
@@ -141,13 +142,6 @@ consumedByLambda = consumedInBody . lambdaBody
 
 patternAliases :: AliasesOf attr => PatternT attr -> [Names]
 patternAliases = map (aliasesOf . patElemAttr) . patternElements
-
-consumedInPattern :: PatternT attr -> Names
-consumedInPattern pat =
-  mconcat (map (consumedInBindage . patElemBindage) $
-           patternContextElements pat ++ patternValueElements pat)
-  where consumedInBindage BindVar = mempty
-        consumedInBindage (BindInPlace src _) = vnameAliases src
 
 -- | Something that contains alias information.
 class AliasesOf a where

@@ -25,7 +25,6 @@ module Futhark.Representation.AST.Syntax
   -- * Abstract syntax tree
   , Ident (..)
   , SubExp(..)
-  , Bindage (..)
   , PatElem
   , PatElemT (..)
   , PatternT (..)
@@ -218,6 +217,10 @@ data BasicOp lore
 
   | Index VName (Slice SubExp)
   -- ^ The certificates for bounds-checking are part of the 'Stm'.
+
+  | Update VName (Slice SubExp) SubExp
+  -- ^ An in-place update of the given array at the given position.
+  -- Consumes the array.
 
   | Concat Int VName [VName] SubExp
   -- ^ @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.

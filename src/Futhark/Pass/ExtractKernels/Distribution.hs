@@ -201,7 +201,7 @@ pushInnerKernelNesting target newnest (nest, nests) =
 
 fixNestingPatternOrder :: LoopNesting -> Target -> Pattern Kernels -> LoopNesting
 fixNestingPatternOrder nest (_,res) inner_pat =
-  nest { loopNestingPattern = basicPattern' [] pat' }
+  nest { loopNestingPattern = basicPattern [] pat' }
   where pat = loopNestingPattern nest
         pat' = map fst fixed_target
         fixed_target = sortBy (comparing posInInnerPat) $ zip (patternValueIdents pat) res
@@ -277,7 +277,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   (w_bnds, w, ispace, inps, returns) <- flatKernel (nest, nests)
 
   w' <- newVName "nesting_size"
-  let w_bnd = mkLet' [] [Ident w' $ Prim int32] $
+  let w_bnd = mkLet [] [Ident w' $ Prim int32] $
               BasicOp $ BinOp (Mul Int32) w nesting_w
 
   let inps' = map fixupInput inps
@@ -393,7 +393,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
                           False)
 
           let free_arrs_pat =
-                basicPattern [] $ map ((,BindVar) . snd) $
+                basicPattern [] $ map snd $
                 filter fst $ zip bind_in_target free_arrs
               free_params_pat =
                 map snd $ filter fst $ zip bind_in_target free_params

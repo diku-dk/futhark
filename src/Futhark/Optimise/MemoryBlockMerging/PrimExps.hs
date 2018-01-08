@@ -88,11 +88,11 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
       varUse _ = Nothing
 
   case patvalelems of
-    [PatElem dst _ _] ->
+    [PatElem dst _] ->
       onJust (primExpFromExp varUse e) $ tell . M.singleton dst
     _ -> return ()
 
-  forM_ patvalelems $ \(PatElem var _ membound) ->
+  forM_ patvalelems $ \(PatElem var membound) ->
     case typeOf membound of
       Prim pt ->
         modify $ M.insert var pt

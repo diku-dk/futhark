@@ -47,7 +47,7 @@ findAllocHoistees body params =
         stms = stmsToList $ bodyStms body
 
         findThemStm :: Stm ExplicitMemory -> Maybe (VName, [VName])
-        findThemStm (Let (Pattern _ [PatElem xmem _ _]) _ (Op ExpMem.Alloc{})) =
+        findThemStm (Let (Pattern _ [PatElem xmem _]) _ (Op ExpMem.Alloc{})) =
           usedByCopyOrConcat xmem
         findThemStm _ = Nothing
 
@@ -82,23 +82,15 @@ findAllocHoistees body params =
           where checkStm :: Stm ExplicitMemory -> Maybe [VName]
                 checkStm (Let
                           (Pattern _
-                           [PatElem _ bindage
-                            (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem_pat _))])
+                           [PatElem _ (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem_pat _))])
                            _
-                           (BasicOp bop))
+                           (BasicOp (Update v slice _)))
                   | xmem_pat == xmem_alloc =
-                      let vs = Just $ case bindage of
-                            BindVar -> []
-
-                             -- The source array must also be hoisted so that it
-                             -- is initialized before it is used by the
-                             -- coalesced party.  Any index variables are also
-                             -- hoisted.
-                            BindInPlace v slice -> v : S.toList (freeIn slice)
-                      in case bop of
-                        Copy{} -> vs
-                        Concat{} -> vs
-                        _ -> Nothing
+                      -- The source array must also be hoisted so that it
+                      -- is initialized before it is used by the
+                      -- coalesced party.  Any index variables are also
+                      -- hoisted.
+                      Just $ v : S.toList (freeIn slice)
                 checkStm _ = Nothing
 
 hoistAllocsFunDef :: FunDef ExplicitMemory

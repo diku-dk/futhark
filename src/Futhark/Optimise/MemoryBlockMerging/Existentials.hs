@@ -54,7 +54,7 @@ lookInKernelBody (KernelBody _ bnds _res) =
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
-  forM_ patvalelems $ \(PatElem var _ membound) ->
+  forM_ patvalelems $ \(PatElem var membound) ->
     case membound of
       ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) ->
         when (mem `L.elem` map patElemName patctxelems)

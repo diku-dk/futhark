@@ -174,17 +174,10 @@ instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn (Prim _)          = mempty
 
 instance FreeIn attr => FreeIn (ParamT attr) where
-  freeIn (Param _ attr) =
-    freeIn attr
+  freeIn (Param _ attr) = freeIn attr
 
 instance FreeIn attr => FreeIn (PatElemT attr) where
-  freeIn (PatElem _ bindage attr) =
-    freeIn bindage <> freeIn attr
-
-instance FreeIn Bindage where
-  freeIn BindVar = mempty
-  freeIn (BindInPlace src is) =
-    freeIn src <> freeIn is
+  freeIn (PatElem _ attr) = freeIn attr
 
 instance FreeIn (LParamAttr lore) => FreeIn (LoopForm lore) where
   freeIn (ForLoop _ _ bound loop_vars) = freeIn bound <> freeIn loop_vars

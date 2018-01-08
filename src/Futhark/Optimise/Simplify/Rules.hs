@@ -61,8 +61,8 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , letRule improveReshape
                , RuleBasicOp removeScratchValue
                , RuleIf simplifyFallbackBranch
-               , RuleGeneric removeIdentityInPlace
-               , RuleGeneric removeFullInPlace
+               , RuleBasicOp removeIdentityInPlace
+               , RuleBasicOp removeFullInPlace
                , RuleBasicOp simplifyBranchResultComparison
                , RuleBasicOp simplifyReplicate
                , RuleBasicOp arrayLitToReplicate
@@ -143,8 +143,8 @@ removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
        -- removal will eventually get rid of them.  Some care is
        -- necessary to handle unique bindings.
        body'' <- insertStmsM $ do
-         mapM_ (uncurry letBindNames') $ dummyStms discard_ctx
-         mapM_ (uncurry letBindNames') $ dummyStms discard_val
+         mapM_ (uncurry letBindNames) $ dummyStms discard_ctx
+         mapM_ (uncurry letBindNames) $ dummyStms discard_val
          return body'
        letBind_ pat' $ DoLoop ctx' val' form body''
   where pat_used = map (`UT.used` used) $ patternValueNames pat
@@ -205,7 +205,7 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
           explpat'' = map fst explpat'
           (ctx', val') = splitAt (length implpat') merge'
       forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
-        letBindNames'_ [identName v1] $ BasicOp $ SubExp v2
+        letBindNames_ [identName v1] $ BasicOp $ SubExp v2
       letBind_ (Pattern implpat'' explpat'') $
         DoLoop ctx' val' form loopbody'
   where merge = ctx ++ val
@@ -332,7 +332,7 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
               | all (safeExp . stmExp) x_stms -> do
                   x_stms' <- collectStms_ $ certifying cs $ do
                     addStms x_stms
-                    letBindNames'_ [paramName p] $ BasicOp $ SubExp se
+                    letBindNames_ [paramName p] $ BasicOp $ SubExp se
                   return (Nothing, x_stms')
 
             _ -> return (Just (p,arr), mempty)
@@ -341,19 +341,19 @@ simplifyLoopVariables _ _ _ _ = cannotSimplify
 simplifKnownIterationLoop :: BinderOps lore => TopDownRuleDoLoop lore
 simplifKnownIterationLoop _ pat _ (ctx, val, ForLoop i it (Constant iters) loop_vars, body)
   | zeroIsh iters = do
-      let bindResult p r = letBindNames' [patElemName p] $ BasicOp $ SubExp r
+      let bindResult p r = letBindNames [patElemName p] $ BasicOp $ SubExp r
       zipWithM_ bindResult (patternContextElements pat) (map snd ctx)
       zipWithM_ bindResult (patternValueElements pat) (map snd val)
 
   | oneIsh iters = do
 
   forM_ (ctx++val) $ \(mergevar, mergeinit) ->
-    letBindNames' [paramName mergevar] $ BasicOp $ SubExp mergeinit
+    letBindNames [paramName mergevar] $ BasicOp $ SubExp mergeinit
 
-  letBindNames'_ [i] $ BasicOp $ SubExp $ intConst it 0
+  letBindNames_ [i] $ BasicOp $ SubExp $ intConst it 0
 
   forM_ loop_vars $ \(p,arr) ->
-    letBindNames'_ [paramName p] $ BasicOp $ Index arr $
+    letBindNames_ [paramName p] $ BasicOp $ Index arr $
     DimFix (intConst Int32 0) : fullSlice (paramType p) []
 
   (loop_body_ctx, loop_body_val) <- splitAt (length ctx) <$> (mapM asVar =<< bodyBind body)
@@ -667,11 +667,11 @@ simplifyIndex (vtable, used) (pat@(Pattern [] [pe])) (StmAux cs _) (Index idd in
       res <- m
       case res of
         SubExpResult cs' se ->
-          certifying (cs<>cs') $ letBindNames'_ (patternNames pat) $
+          certifying (cs<>cs') $ letBindNames_ (patternNames pat) $
           BasicOp $ SubExp se
         IndexResult extra_cs idd' inds' ->
           certifying (cs<>extra_cs) $
-          letBindNames'_ (patternNames pat) $ BasicOp $ Index idd' inds'
+          letBindNames_ (patternNames pat) $ BasicOp $ Index idd' inds'
   where consumed = patElemName pe `UT.isConsumed` used
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Prim $ primValueType v
@@ -1076,37 +1076,35 @@ copyScratchToScratch defOf seType (Copy src) = do
 copyScratchToScratch _ _ _ =
   Nothing
 
-removeIdentityInPlace :: BinderOps lore => TopDownRuleGeneric lore
-removeIdentityInPlace vtable (Let (Pattern [] [d]) _ e)
-  | BindInPlace dest destis <- patElemBindage d,
-    arrayFrom e dest destis =
-    letBind_ (Pattern [] [d { patElemBindage = BindVar}]) $ BasicOp $ SubExp $ Var dest
-  where arrayFrom (BasicOp (Copy v)) dest destis
-          | Just (e',_) <- ST.lookupExp v vtable =
-              arrayFrom e' dest destis
-        arrayFrom (BasicOp (Index src srcis)) dest destis =
+removeIdentityInPlace :: BinderOps lore => TopDownRuleBasicOp lore
+removeIdentityInPlace vtable pat _ (Update dest destis (Var v))
+  | Just (e, _) <- ST.lookupExp v vtable,
+    arrayFrom e =
+      letBind_ pat $ BasicOp $ SubExp $ Var dest
+  where arrayFrom (BasicOp (Copy copy_v))
+          | Just (e',_) <- ST.lookupExp copy_v vtable =
+              arrayFrom e'
+        arrayFrom (BasicOp (Index src srcis)) =
           src == dest && destis == srcis
-        arrayFrom _ _ _ =
+        arrayFrom _ =
           False
-removeIdentityInPlace _ _ =
+removeIdentityInPlace _ _ _ _ =
   cannotSimplify
 
 -- | Turn in-place updates that replace an entire array into just
 -- array literals.
-removeFullInPlace :: BinderOps lore => TopDownRuleGeneric lore
-removeFullInPlace vtable (Let (Pattern [] [d]) _ e)
-  | BindInPlace dest is <- patElemBindage d,
-    Just dest_t <- ST.lookupType dest vtable,
-    isFullSlice (arrayShape dest_t) is  = do
-      in_place_val <- letSubExp "in_place_val" e
-      letBind_ (Pattern [] [d { patElemBindage = BindVar}]) $
-        BasicOp $ ArrayLit [in_place_val] $ rowType dest_t
-removeFullInPlace _ _ =
+removeFullInPlace :: BinderOps lore => TopDownRuleBasicOp lore
+removeFullInPlace vtable pat _ (Update dest is se)
+  | Just dest_t <- ST.lookupType dest vtable,
+    isFullSlice (arrayShape dest_t) is =
+      letBind_ pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
+removeFullInPlace _ _ _ _ =
   cannotSimplify
 
 removeScratchValue :: BinderOps lore => TopDownRuleBasicOp lore
-removeScratchValue _ (Pattern [] [PatElem v (BindInPlace src _) _]) _ Scratch{} =
-    letBindNames'_ [v] $ BasicOp $ SubExp $ Var src
+removeScratchValue vtable pat _ (Update src _ (Var v))
+  | Just (BasicOp Scratch{}, _) <- ST.lookupExp v vtable =
+      letBind_ pat $ BasicOp $ SubExp $ Var src
 removeScratchValue _ _ _ _ =
   cannotSimplify
 

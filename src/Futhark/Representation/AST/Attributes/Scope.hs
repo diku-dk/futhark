@@ -158,8 +158,7 @@ scopeOfPattern =
   mconcat . map scopeOfPatElem . patternElements
 
 scopeOfPatElem :: LetAttr lore ~ attr => PatElemT attr -> Scope lore
-scopeOfPatElem (PatElem name _ attr) =
-  M.singleton name $ LetInfo attr
+scopeOfPatElem (PatElem name attr) = M.singleton name $ LetInfo attr
 
 scopeOfLParams :: LParamAttr lore ~ attr =>
                   [ParamT attr] -> Scope lore

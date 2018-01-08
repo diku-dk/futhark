@@ -27,13 +27,8 @@ usageInStm (Let pat lore e) =
           UT.usages (mconcat (map freeIn $ patternElements pat)
                      `S.difference`
                      S.fromList (patternNames pat))
-          <> mconcat (map consumptionInPatElem $ patternElements pat)
         usageInExpLore =
           UT.usages $ freeIn lore
-        consumptionInPatElem (PatElem _ (BindInPlace src _) _) =
-          UT.consumedUsage src
-        consumptionInPatElem _ =
-          mempty
 
 usageInExp :: (Aliased lore, UsageInOp (Op lore)) => Exp lore -> UT.UsageTable
 usageInExp (Apply _ args _ _) =
@@ -47,6 +42,8 @@ usageInExp (DoLoop _ merge _ _) =
 usageInExp (If _ tbranch fbranch _) =
   fold $ map UT.consumedUsage $ S.toList $
   consumedInBody tbranch <> consumedInBody fbranch
+usageInExp (BasicOp (Update src _ _)) =
+  UT.consumedUsage src
 usageInExp (Op op) =
   mconcat $ usageInOp op : map UT.consumedUsage (S.toList $ consumedInOp op)
 usageInExp _ = UT.empty

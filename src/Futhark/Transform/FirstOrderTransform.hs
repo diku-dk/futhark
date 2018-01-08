@@ -327,7 +327,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
       accxis <- bodyBind =<< do
           -- for accumulators:
           forM_ (zip accpars argsacc) $ \(param, arg) ->
-              letBindNames' [paramName param] arg
+              letBindNames [paramName param] arg
           -- ilam := i*chunk_glb, the local chunk inside the loop
           ilamexp <- eBinOp (Mul Int32)
                             (pure $ BasicOp $ SubExp $ Var loopind)
@@ -376,7 +376,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                 id3 <- letExp (anm++"_chgu") =<<
                        eCopy (pure (BasicOp $ SubExp $ Var id2))
                 -- (_,a_cl) = split((diff,cg-diff), a_cg*)
-                letBindNames'_ [paramName param] =<<
+                letBindNames_ [paramName param] =<<
                   eSliceArray 0 id3 (eSubExp $ Var $ identName diffid) (eSubExp $ Var $ paramName chunkloc)
 
           mkBodyM (bodyStms lambody) (bodyResult lambody)
@@ -394,7 +394,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
   -- 4.) Build the loop
   let loopres = DoLoop ctxmerge valmerge
                        (ForLoop loopind Int32 (Var $ identName loopcnt) []) loopbody
-      loopbnd = mkLet' exszarres (indvarres++strmresacc++strmresarrl) loopres
+      loopbnd = mkLet exszarres (indvarres++strmresacc++strmresarrl) loopres
   -- 5.) A stream needs prologue-loop-epilogue bindings, so we make a dummy
   --     IF exp to return one expression
   outarrrshpbnds <-
@@ -403,10 +403,10 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
     case (malocsz,msz) of
       (Nothing, Nothing)    ->
         -- regular array case!
-        return $ mkLet' [] [arr] $ BasicOp $ SubExp $ Var $ identName arrl
+        return $ mkLet [] [arr] $ BasicOp $ SubExp $ Var $ identName arrl
       (_, Just (_,indvar,_)) ->
         -- array with known upper bound case!
-        mkLetNamesM' [identName arr] =<<
+        mkLetNamesM [identName arr] =<<
         eSliceArray 0 (identName arrl) (eSubExp $ intConst Int32 0) (eSubExp $ Var $ identName indvar)
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
@@ -418,20 +418,20 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                    (pure $ BasicOp $ SubExp $ Var chunkglb)
   myLetBind lUBexp loopcnt
   let outinibds= zipWith (\ idd tp ->
-                            mkLet' [] [idd] $ BasicOp $
+                            mkLet [] [idd] $ BasicOp $
                             Scratch (elemType tp) (arrayDims tp)
                          ) outarrinit initrtps
   addStms $ stmsFromList $ outinibds++allbnds
   forM_ (zip (patternValueNames respat) $ strmresacc ++ strmresarr) $ \(p, v) ->
-    letBindNames'_ [p] $ BasicOp $ SubExp $ Var $ identName v
+    letBindNames_ [p] $ BasicOp $ SubExp $ Var $ identName v
   let mapping = shapeMapping (patternValueTypes respat) $
                 map identType $ strmresacc ++ strmresarr
   forM_ (M.toList mapping) $ \(p, se) ->
     when (p `elem` patternContextNames respat) $
-    letBindNames'_ [p] $ BasicOp $ SubExp se
+    letBindNames_ [p] $ BasicOp $ SubExp se
   where myLetBind :: Transformer m =>
                      AST.Exp (Lore m) -> Ident -> m ()
-        myLetBind e idd = addStm $ mkLet' [] [idd] e
+        myLetBind e idd = addStm $ mkLet [] [idd] e
 
         exToNormShapeDim :: SubExp -> M.Map VName SubExp -> SubExp -> SubExp
         exToNormShapeDim _ _ c@(Constant _) = c
@@ -555,7 +555,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                         bnew'' <- newIdent (baseString (identName glboutid)++"_res") $
                                            Array (elemType oldbtp)
                                            (Shape $ Var (identName resallocid):olddims) NoUniqueness
-                        let patresbnd = mkLet' [resallocid] [bnew''] allocifexp
+                        let patresbnd = mkLet [resallocid] [bnew''] allocifexp
                         addStm patresbnd
                         return (Var $ identName k, bnew'', Just newszid, Just resallocid)
             glboutLid <- newIdent (baseString (identName glboutid)++"_loop") $ identType glboutid'
@@ -698,8 +698,8 @@ bindLambda :: Transformer m =>
 bindLambda (Lambda params body _) args = do
   forM_ (zip params args) $ \(param, arg) ->
     if primType $ paramType param
-    then letBindNames' [paramName param] arg
-    else letBindNames' [paramName param] =<< eCopy (pure arg)
+    then letBindNames [paramName param] arg
+    else letBindNames [paramName param] =<< eCopy (pure arg)
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(Param DeclType, SubExp)]
@@ -712,7 +712,7 @@ loopMerge' vars vals = [ (Param pname $ toDecl ptype u, val)
 discardPattern :: (MonadFreshNames m, LetAttr (Lore m) ~ LetAttr SOACS) =>
                   [Type] -> AST.Pattern (Lore m) -> m (AST.Pattern (Lore m))
 discardPattern discard pat = do
-  discard_pat <- basicPattern' [] <$> mapM (newIdent "discard") discard
+  discard_pat <- basicPattern [] <$> mapM (newIdent "discard") discard
   return $ discard_pat <> pat
 
 data MEQType = ExactBd SubExp

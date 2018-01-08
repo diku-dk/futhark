@@ -191,7 +191,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         _ -> local $ \ctx -> ctx { ctxCurFirstUsesOuter = cur_first_uses }
 
   -- First handle all pattern elements by themselves.
-  forM_ patvalelems $ \(PatElem x _ membound) ->
+  forM_ patvalelems $ \(PatElem x membound) ->
     case membound of
       ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _) -> do
         first_uses_x <- lookupEmptyable x <$> asks ctxFirstUses
@@ -209,7 +209,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   mem_aliases <- asks ctxMemAliases
   first_uses_outer <- asks ctxCurFirstUsesOuter
   -- Then handle the pattern elements by themselves again.
-  forM_ patvalelems $ \(PatElem x _ _) ->
+  forM_ patvalelems $ \(PatElem x _) ->
     -- Set all memory blocks being used as optimistic last uses.
     forM_ (S.toList e_mems) $ \mem -> do
       -- If the memory has its first use outside the current body, it is

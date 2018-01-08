@@ -133,7 +133,7 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw:ns) inps) = do
   let nparams = zipWith Param npnames $ map SOAC.inputRowType inps
   (e,bnds) <- runBinder $ localScope (scopeOfLParams nparams) $ SOAC.toExp =<<
     toSOAC (MapNest nw lam ns $ map (SOAC.identInput . paramIdent) nparams)
-  bnd <- mkLetNames' nres e
+  bnd <- mkLetNames nres e
   let outerlam = Lambda { lambdaParams = nparams
                         , lambdaBody = mkBody (bnds<>oneStm bnd) $ map Var nres
                         , lambdaReturnType = nrettype

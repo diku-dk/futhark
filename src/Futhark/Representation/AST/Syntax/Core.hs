@@ -39,7 +39,6 @@ module Futhark.Representation.AST.Syntax.Core
          , SubExp(..)
          , ParamT (..)
          , Param
-         , Bindage (..)
          , DimIndex (..)
          , Slice
          , dimFix
@@ -297,32 +296,19 @@ sliceDims = mapMaybe dimSlice
 unitSlice :: Num d => d -> d -> DimIndex d
 unitSlice offset n = DimSlice offset n 1
 
--- | How a name in a let-binding is bound - either as a plain
--- variable, or in the form of an in-place update.
-data Bindage = BindVar -- ^ Bind as normal.
-             | BindInPlace VName (Slice SubExp)
-               -- ^ Perform an in-place update, in which the value
-               -- being bound is inserted at the given index in the
-               -- array referenced by the 'VName'.  Note that the
-               -- result of the binding is the entire array, not just
-               -- the value that has been inserted.
-                  deriving (Ord, Show, Eq)
-
 -- | An element of a pattern - consisting of an name (essentially a
 -- pair of the name andtype), a 'Bindage', and an addditional
 -- parametric attribute.  This attribute is what is expected to
 -- contain the type of the resulting variable.
 data PatElemT attr = PatElem { patElemName :: VName
                                -- ^ The name being bound.
-                             , patElemBindage :: Bindage
-                               -- ^ How the name is bound.
                              , patElemAttr :: attr
                                -- ^ Pattern element attribute.
                              }
                    deriving (Ord, Show, Eq)
 
 instance Functor PatElemT where
-  fmap f (PatElem name bindage attr) = PatElem name bindage (f attr)
+  fmap f (PatElem name attr) = PatElem name (f attr)
 
 -- | A set of names.
 type Names = S.Set VName

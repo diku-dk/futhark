@@ -71,7 +71,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
 
 lookInPatValElem :: LoreConstraints lore =>
                     PatElem (Aliases lore) -> FindM lore ()
-lookInPatValElem (PatElem x _bindage (names', ExpMem.MemArray{})) = do
+lookInPatValElem (PatElem x (names', ExpMem.MemArray{})) = do
   let aliases = unNames names'
   recordMapping x aliases
 lookInPatValElem _ = return ()

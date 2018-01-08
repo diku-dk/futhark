@@ -99,7 +99,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
     case patElemType pat_e of
       Array ty (Shape (dim0:_)) u -> do
           vn' <- newName $ patElemName pat_e
-          return $ PatElem vn' BindVar $ Array ty (Shape [dim0]) u
+          return $ PatElem vn' $ Array ty (Shape [dim0]) u
       _ -> fail $ "segmentedRedomap: result pattern is not array " ++ pretty pat_e
 
   chunk_fold_lam <- chunkLambda chunk_pat nes fold_lam
@@ -168,7 +168,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
 
   redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
     vn' <- newName $ patElemName pe
-    return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_segments]
+    return $ PatElem vn' $ patElemType pe `setArrayDims` [num_segments]
   let mapres_pes = drop num_redres $ patternValueElements flat_pat
   let unreshaped_pat = Pattern [] $ redres_pes ++ mapres_pes
 
@@ -199,7 +199,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
     useLargeOnePerSeg group_size all_arrs reduce_lam' kern_chunk_fold_lam = do
       mapres_pes <- forM (drop num_redres $ patternValueElements flat_pat) $ \pe -> do
         vn' <- newName $ patElemName pe
-        return $ PatElem vn' BindVar $ patElemType pe
+        return $ PatElem vn' $ patElemType pe
 
       (kernel, _, _) <-
         largeKernel group_size segment_size num_segments nest_sizes
@@ -209,7 +209,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
 
       kernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
-        return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_segments]
+        return $ PatElem vn' $ patElemType pe `setArrayDims` [num_segments]
 
       let kernel_pat = Pattern [] $ kernel_redres_pes ++ mapres_pes
 
@@ -220,7 +220,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
     useLargeMultiRecursiveReduce group_size all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam flag_reduce_lam' = do
       mapres_pes <- forM (drop num_redres $ patternValueElements flat_pat) $ \pe -> do
         vn' <- newName $ patElemName pe
-        return $ PatElem vn' BindVar $ patElemType pe
+        return $ PatElem vn' $ patElemType pe
 
       (firstkernel, num_groups_used, num_groups_per_segment) <-
         largeKernel group_size segment_size num_segments nest_sizes
@@ -230,7 +230,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
 
       firstkernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
-        return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_groups_used]
+        return $ PatElem vn' $ patElemType pe `setArrayDims` [num_groups_used]
 
       let first_pat = Pattern [] $ firstkernel_redres_pes ++ mapres_pes
       addStm =<< renameStm (Let first_pat (defAux ()) $ Op firstkernel)
@@ -379,9 +379,9 @@ largeKernel group_size segment_size num_segments nest_sizes all_arrs comm
 
         patelems_res_of_split <- forM arr_params $ \arr_param -> do
           let chunk_t = paramType arr_param `setOuterSize` Var (paramName chunksize)
-          return $ PatElem (paramName arr_param) BindVar chunk_t
+          return $ PatElem (paramName arr_param) chunk_t
 
-        letBind_ (Pattern [] [PatElem (paramName chunksize) BindVar $ paramType chunksize]) $
+        letBind_ (Pattern [] [PatElem (paramName chunksize) $ paramType chunksize]) $
           Op $ SplitSpace ordering segment_size index_within_segment elements_per_thread
 
         addKernelInputStms inps
@@ -398,10 +398,10 @@ largeKernel group_size segment_size num_segments nest_sizes all_arrs comm
 
         red_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
-          return $ PatElem pe_name BindVar red_t
+          return $ PatElem pe_name red_t
         map_pes <- forM map_ts $ \map_t -> do
           pe_name <- newVName "chunk_fold_map"
-          return $ PatElem pe_name BindVar $ map_t `arrayOfRow` chunksize_se
+          return $ PatElem pe_name $ map_t `arrayOfRow` chunksize_se
 
         -- we add the lets here, as we practially don't know if the resulting subexp
         -- is a Constant or a Var, so better be safe (?)
@@ -415,7 +415,7 @@ largeKernel group_size segment_size num_segments nest_sizes all_arrs comm
         -- local memory, so a GroupReduce can be performed on them
         combine_red_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
-          return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
+          return $ PatElem pe_name $ red_t `arrayOfRow` group_size
         addStms $ stmsFromList
           [ Let (Pattern [] [pe']) (defAux ()) $
             Op $ Combine [(gtid_ln, group_size)] [patElemType pe] [] $
@@ -424,7 +424,7 @@ largeKernel group_size segment_size num_segments nest_sizes all_arrs comm
 
         final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
           pe_name <- newVName "final_result"
-          return $ PatElem pe_name BindVar t
+          return $ PatElem pe_name t
         letBind_ (Pattern [] final_red_pes) $
           Op $ GroupReduce group_size reduce_lam' $
           zip nes (map patElemName combine_red_pes)
@@ -597,10 +597,10 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
 
         red_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "fold_red"
-          return $ PatElem pe_name BindVar red_t
+          return $ PatElem pe_name red_t
         map_pes <- forM map_ts $ \map_t -> do
           pe_name <- newVName "fold_map"
-          return $ PatElem pe_name BindVar map_t
+          return $ PatElem pe_name map_t
 
         addManualIspaceCalcStms segment_index ispace
 
@@ -609,7 +609,7 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
         -- Index input array to get arguments to fold_lam
         let arr_params = drop num_redres $ lambdaParams fold_lam
         let nonred_lamparam_pes = map
-              (\p -> PatElem (paramName p) BindVar (paramType p)) arr_params
+              (\p -> PatElem (paramName p) (paramType p)) arr_params
         forM_ (zip in_arrs nonred_lamparam_pes) $ \(arr, pe) -> do
           tp <- lookupType arr
           let slice = fullSlice tp [DimFix offset]
@@ -617,7 +617,7 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
 
         -- Bind neutral element (serves as the reduction arguments to fold_lam)
         forM_ (zip nes (take num_redres $ lambdaParams fold_lam)) $ \(ne,param) -> do
-          let pe = PatElem (paramName param) BindVar (paramType param)
+          let pe = PatElem (paramName param) (paramType param)
           letBind_ (Pattern [] [pe]) $ BasicOp $ SubExp ne
 
         addStms $ bodyStms $ lambdaBody fold_lam
@@ -641,14 +641,14 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
 
         -- We will perform a segmented-scan, so all the prime variables here
         -- include the flag, which is the first argument to flag_reduce_lam
-        let red_pes_wflag = PatElem isfirstinsegment BindVar (Prim Bool) : red_pes
+        let red_pes_wflag = PatElem isfirstinsegment (Prim Bool) : red_pes
         let red_ts_wflag = Prim Bool : red_ts
 
         -- Combine the reduction results from each thread. This will put results in
         -- local memory, so a GroupReduce/GroupScan can be performed on them
         combine_red_pes' <- forM red_ts_wflag $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
-          return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
+          return $ PatElem pe_name $ red_t `arrayOfRow` group_size
         addStms $ stmsFromList [ Let (Pattern [] [pe']) (defAux ()) $ Op $
                                  Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
                                  Body () mempty [Var $ patElemName pe]
@@ -656,7 +656,7 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
 
         scan_red_pes_wflag <- forM red_ts_wflag $ \red_t -> do
           pe_name <- newVName "scanned"
-          return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
+          return $ PatElem pe_name $ red_t `arrayOfRow` group_size
         let scan_red_pes = drop 1 scan_red_pes_wflag
         letBind_ (Pattern [] scan_red_pes_wflag) $ Op $
           GroupScan group_size flag_reduce_lam' $
@@ -709,13 +709,13 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
 
         -- we could just have used letTupExp, but this would not give as nice
         -- names in the generated code
-        mapoffset_pe <- (\vn -> PatElem vn BindVar i32) <$> newVName "mapoffset"
+        mapoffset_pe <- (`PatElem` i32) <$> newVName "mapoffset"
         redtmp_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "redtmp_res"
-          return $ PatElem pe_name BindVar red_t
+          return $ PatElem pe_name red_t
         map_pes <- forM map_ts $ \map_t -> do
           pe_name <- newVName "map_res"
-          return $ PatElem pe_name BindVar map_t
+          return $ PatElem pe_name map_t
 
         e1 <- eIf (eSubExp isactive)
             (mkBodyM normal_stms1 normal_res1)
@@ -729,10 +729,10 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
         -- write the element from local memory to the output array
         (normal_res2, normal_stms2) <- runBinder $ normal_thread_part2 scan_red_pes
 
-        redoffset_pe <- (\vn -> PatElem vn BindVar i32) <$> newVName "redoffset"
+        redoffset_pe <- (`PatElem` i32) <$> newVName "redoffset"
         red_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "red_res"
-          return $ PatElem pe_name BindVar red_t
+          return $ PatElem pe_name red_t
 
         e2 <- eIf (eSubExp isactive)
             (mkBodyM normal_stms2 normal_res2)
@@ -788,7 +788,7 @@ addKernelInputStms :: (HasScope InKernel m, MonadBinder m, Lore m ~ InKernel) =>
                      [KernelInput]
                      -> m ()
 addKernelInputStms = mapM_ $ \kin -> do
-        let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
+        let pe = PatElem (kernelInputName kin) (kernelInputType kin)
         let arr = kernelInputArray kin
         arrtp <- lookupType arr
         let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
@@ -812,7 +812,7 @@ addManualIspaceCalcStms outer_index ispace = do
         -- would have been done if the ThreadSpace was used. However, this
         -- works. Maybe ask Troels if doing it the other way has some benefit?
         let calc_ispace_index prev_val (vn,size) = do
-              let pe = PatElem vn BindVar (Prim $ IntType Int32)
+              let pe = PatElem vn (Prim $ IntType Int32)
               letBind_ (Pattern [] [pe]) $ BasicOp $ BinOp (SRem Int32) prev_val size
               letSubExp "tmp_val" $ BasicOp $ BinOp (SQuot Int32) prev_val size
         foldM_ calc_ispace_index outer_index (reverse ispace)
@@ -875,7 +875,7 @@ regularSegmentedScan segment_size pat w lam fold_lam ispace inps nes arrs = do
   lam' <- addFlagToLambda nes lam
   fold_lam' <- addFlagToLambda nes fold_lam
 
-  let pat' = pat { patternValueElements = PatElem unused_flag_array BindVar
+  let pat' = pat { patternValueElements = PatElem unused_flag_array
                                           (arrayOf (Prim Bool) (Shape [w]) NoUniqueness) :
                                           patternValueElements pat
                  }

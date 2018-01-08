@@ -138,7 +138,7 @@ lookInKernelBody (KernelBody _ bnds res) = do
 
 awakenFirstUses :: [PatElem lore] -> FindM lore ()
 awakenFirstUses patvalelems =
-  forM_ patvalelems $ \(PatElem var _ _) -> do
+  forM_ patvalelems $ \(PatElem var _) -> do
     first_uses_var <- lookupEmptyable var <$> asks ctxFirstUses
     mapM_ awaken $ S.toList first_uses_var
 
@@ -218,7 +218,7 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
       onJust potential_kernel_interferences addPotentialKernelInterferenceGroup
 
       current <- gets curAlive
-      forM_ patvalelems $ \(PatElem var _ _) -> do
+      forM_ patvalelems $ \(PatElem var _) -> do
         last_uses_var <- lookupEmptyable (FromStm var) <$> asks ctxLastUses
         mapM_ kill last_uses_var
 
@@ -254,21 +254,18 @@ findLoopCorrespondingVar :: LoreConstraints lore =>
 findLoopCorrespondingVar ctx (Let (Pattern _patctxelems patvalelems) _
                          (DoLoop _ _ _ (Body _ stms res))) =
   M.fromList $ catMaybes $ zipWith findIt patvalelems res
-  where findIt (PatElem pat_v _ (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn pat_mem _))) (Var res_v)
+  where findIt (PatElem pat_v (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn pat_mem _))) (Var _)
           | not (null stms) = case L.last $ stmsToList stms of
               -- This is how the program looks after coalescing.
               Let (Pattern _ [PatElem _last_v
-                              (BindInPlace _ (DimFix slice_part : _))
                               (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn last_stm_mem _))]) _
-                                (BasicOp bop) ->
+                              (BasicOp (Update _ (DimFix slice_part : _) (Var copy_v))) ->
                 if pat_mem == last_stm_mem
-                then let res_v'
-                           | Copy copy_v <- bop =
-                               if (memSrcName <$> M.lookup copy_v (ctxVarToMem ctx))
-                                  == Just last_stm_mem
-                               then Just copy_v
-                               else Nothing
-                           | otherwise = Just res_v
+                then let res_v' =
+                           if (memSrcName <$> M.lookup copy_v (ctxVarToMem ctx))
+                              == Just last_stm_mem
+                           then Just copy_v
+                           else Nothing
                      in res_v' >>= \t -> Just (t, (pat_v, slice_part))
                 -- Fix this mess.
                 else Nothing
@@ -316,7 +313,7 @@ firstUsesInExp e = do
 lookFUInStm :: LoreConstraints lore =>
                Stm lore -> RWS FirstUses [KernelFirstUse] () ()
 lookFUInStm (Let (Pattern _patctxelems patvalelems) _ e_stm) = do
-  forM_ patvalelems $ \(PatElem patname _ membound) ->
+  forM_ patvalelems $ \(PatElem patname membound) ->
     case membound of
       ExpMem.MemArray pt _ _ (ExpMem.ArrayIn _ ixfun) -> do
         fus <- lookupEmptyable patname <$> ask
@@ -384,9 +381,9 @@ interferenceExceptions ctx stms res indices output_mems_may =
                         $ concatMap (firstUsesInStm (ctxFirstUses ctx)) stms
       results =
         concat $ flip map (stmsToList stms) $ \(Let (Pattern _patctxelems patvalelems) _ e) ->
-        flip map patvalelems $ \(PatElem v bindage membound) ->
-        let fromread = case (bindage, e) of
-              (BindVar, BasicOp (Index orig slice)) -> do
+        flip map patvalelems $ \(PatElem v membound) ->
+        let fromread = case e of
+              BasicOp (Index orig slice) -> do
                 orig_mem <- M.lookup orig $ ctxVarToMem ctx
                 if
                   -- These two extra requirements might be superfluous.
@@ -395,10 +392,9 @@ interferenceExceptions ctx stms res indices output_mems_may =
                   then return (v, typeOf membound, orig_mem, slice)
                   else Nothing
               _ -> Nothing
-            fromwrite
-              | (BindInPlace _orig _slice,
-                 ExpMem.MemArray pt _ _ _) <- (bindage, membound)
-              = do
+            fromwrite = case e of
+              BasicOp Update{}
+                | ExpMem.MemArray pt _ _ _ <- membound -> do
                   -- The coalescing pass can have created a program where some
                   -- dependencies are a bit indirect.  We find the core index function.
                   let (orig', slice') =
@@ -415,7 +411,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
                     not (memSrcName orig_mem `S.member` ctxExistentials ctx)
                     then return (v, Prim pt, orig_mem, slice')
                     else Nothing
-              | otherwise = Nothing
+              _ -> Nothing
         in (fromread, fromwrite)
       fromreads = mapMaybe fst results
       fromwrites = mapMaybe snd results

@@ -86,7 +86,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
 
 lookInPatValElem :: LoreConstraints lore =>
                     PatElem lore -> FindM lore ()
-lookInPatValElem (PatElem x _bindage (ExpMem.MemArray _ shape _ (ExpMem.ArrayIn xmem xixfun))) = do
+lookInPatValElem (PatElem x (ExpMem.MemArray _ shape _ (ExpMem.ArrayIn xmem xixfun))) = do
   let memloc = MemorySrc xmem xixfun shape
   recordMapping x memloc
 lookInPatValElem _ = return ()

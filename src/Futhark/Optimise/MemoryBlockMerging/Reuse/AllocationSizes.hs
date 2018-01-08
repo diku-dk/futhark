@@ -84,11 +84,10 @@ lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
   case patvalelems of
-    [PatElem mem _ _] ->
-      case lookForAllocSize e of
-        Just (size, space) ->
-          recordMapping mem (size, space)
-        Nothing -> return ()
+    [PatElem mem _] -> case lookForAllocSize e of
+                         Just (size, space) ->
+                           recordMapping mem (size, space)
+                         Nothing -> return ()
     _ -> return ()
   mapM_ lookInPatCtxElem patctxelems
 
@@ -112,7 +111,7 @@ lookInStmRec stm@(Let _ _ e) = do
 
 lookInPatCtxElem :: LoreConstraints lore =>
                     PatElem lore -> FindM lore ()
-lookInPatCtxElem (PatElem mem _bindage (ExpMem.MemMem size space)) =
+lookInPatCtxElem (PatElem mem (ExpMem.MemMem size space)) =
   recordMapping mem (size, space)
 lookInPatCtxElem _ = return ()
 
