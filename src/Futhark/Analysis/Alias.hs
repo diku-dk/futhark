@@ -16,8 +16,6 @@ module Futhark.Analysis.Alias
        )
        where
 
-import Data.Monoid
-
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.Aliases
 
@@ -44,8 +42,7 @@ analyseStm :: (Attributes lore, CanBeAliased (Op lore)) =>
 analyseStm (Let pat (StmAux cs attr) e) =
   let e' = analyseExp e
       pat' = addAliasesToPattern pat e'
-      lore' = (Names' $ consumedInPattern pat' <> consumedInExp e',
-               attr)
+      lore' = (Names' $ consumedInExp e', attr)
   in Let pat' (StmAux cs lore') e'
 
 analyseExp :: (Attributes lore, CanBeAliased (Op lore)) =>

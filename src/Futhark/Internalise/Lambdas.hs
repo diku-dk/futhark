@@ -106,8 +106,8 @@ bindMapShapes indexArg extra_args inner_shapes sizefun args outer_shape
       if sizefun_safe && sizefun_arg_invariant
         then do ses <- bodyBind $ lambdaBody sizefun'
                 forM_ (zip inner_shapes ses) $ \(v, se) ->
-                  letBind_ (basicPattern' [] [v]) $ I.BasicOp $ I.SubExp se
-        else letBind_ (basicPattern' [] inner_shapes) =<<
+                  letBind_ (basicPattern [] [v]) $ I.BasicOp $ I.SubExp se
+        else letBind_ (basicPattern [] inner_shapes) =<<
              eIf' isnonempty nonemptybranch emptybranch IfFallback
 
   where emptybranch =
@@ -187,9 +187,9 @@ internalisePartitionLambdas internaliseLambda lams args = do
               next_lam_body <-
                 mkCombinedLambdaBody (map paramIdent lam_params) (i+1) lams'
               let parambnds =
-                    [ mkLet' [] [paramIdent top] $ I.BasicOp $ I.SubExp $ I.Var $ I.identName fromp
+                    [ mkLet [] [paramIdent top] $ I.BasicOp $ I.SubExp $ I.Var $ I.identName fromp
                     | (top,fromp) <- zip lam_params params ]
-                  branchbnd = mkLet' [] intres $ I.If boolres
+                  branchbnd = mkLet [] intres $ I.If boolres
                               (result i)
                               next_lam_body $
                               ifCommon rettype

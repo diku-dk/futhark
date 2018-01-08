@@ -38,7 +38,7 @@ nonuniqueParams params = runBinder $ forM params $ \param ->
       param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
       let param' = Param param_name $ paramType param
       localScope (scopeOfLParams [param']) $
-        letBindNames'_ [paramName param] $ BasicOp $ Copy $ paramName param'
+        letBindNames_ [paramName param] $ BasicOp $ Copy $ paramName param'
       return param'
     else
       return param
@@ -94,7 +94,7 @@ splitScanOrRedomap :: (Typed attr, MonadFreshNames m,
                        Bindable lore) =>
                       [PatElemT attr]
                    -> SubExp -> LambdaT lore -> [SubExp]
-                   -> m (([(Ident, Bindage)], LambdaT lore),
+                   -> m (([Ident], LambdaT lore),
                          (PatternT attr, [(SubExp, VName)]))
 splitScanOrRedomap patelems w redmap_lam accs = do
   let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
@@ -102,21 +102,18 @@ splitScanOrRedomap patelems w redmap_lam accs = do
   map_accpat <- zipWithM accMapPatElem acc_patelems acc_ts
   map_arrpat <- mapM arrMapPatElem arr_patelems
   let map_pat = map_accpat ++ map_arrpat
-      red_args = zip accs $ map (identName . fst) map_accpat
+      red_args = zip accs $ map identName map_accpat
   return ((map_pat, newmap_lam),
           (Pattern [] acc_patelems, red_args))
   where
-    accMapPatElem pe acc_t = do
-      i <- newIdent (baseString (patElemName pe) ++ "_map_acc") $
-           acc_t `arrayOfRow` w
-      return (i, patElemBindage pe)
-    arrMapPatElem pe =
-      return (patElemIdent pe, patElemBindage pe)
+    accMapPatElem pe acc_t =
+      newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w
+    arrMapPatElem = return . patElemIdent
 
     newmap_lam =
       let tobnd = take (length accs) $ map paramIdent $ lambdaParams redmap_lam
           params' = drop (length accs) $ lambdaParams redmap_lam
-          bndaccs = zipWith (\i acc -> mkLet' []  [i] (BasicOp $ SubExp acc))
+          bndaccs = zipWith (\i acc -> mkLet [] [i] (BasicOp $ SubExp acc))
                             tobnd accs
           body = lambdaBody redmap_lam
           bnds' = stmsFromList bndaccs <> bodyStms body
@@ -130,10 +127,10 @@ sequentialStreamWholeArrayStms :: Bindable lore =>
 sequentialStreamWholeArrayStms width accs lam arrs =
   let (chunk_param, acc_params, arr_params) =
         partitionChunkedFoldParameters (length accs) $ lambdaParams lam
-      chunk_bnd = mkLet' [] [paramIdent chunk_param] $ BasicOp $ SubExp width
-      acc_bnds = [ mkLet' [] [paramIdent acc_param] $ BasicOp $ SubExp acc
+      chunk_bnd = mkLet [] [paramIdent chunk_param] $ BasicOp $ SubExp width
+      acc_bnds = [ mkLet [] [paramIdent acc_param] $ BasicOp $ SubExp acc
                  | (acc_param, acc) <- zip acc_params accs ]
-      arr_bnds = [ mkLet' [] [paramIdent arr_param] $
+      arr_bnds = [ mkLet [] [paramIdent arr_param] $
                    BasicOp $ Reshape (map DimCoercion $ arrayDims $ paramType arr_param) arr
                  | (arr_param, arr) <- zip arr_params arrs ]
 
@@ -156,14 +153,14 @@ sequentialStreamWholeArray pat width nes fun arrs = do
         | otherwise          = shapeCoerce (arrayDims t) v
       reshapeRes _ se        = BasicOp $ SubExp se
       res_bnds =
-        [ mkLet' [] [ident] $ reshapeRes (identType ident) se
+        [ mkLet [] [ident] $ reshapeRes (identType ident) se
         | (ident,se) <- zip (patternValueIdents pat) res]
 
   addStms body_bnds
   shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
   forM_ (M.toList shapemap) $ \(name,se) ->
     when (name `elem` patternContextNames pat) $
-      addStm =<< mkLetNames' [name] (BasicOp $ SubExp se)
+      addStm =<< mkLetNames [name] (BasicOp $ SubExp se)
   addStms $ stmsFromList res_bnds
 
 partitionChunkedFoldParameters :: Int -> [Param attr]

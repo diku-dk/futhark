@@ -115,7 +115,7 @@ data SimpleOps lore =
                       -> Stms (Wise lore) -> Result
                       -> SimpleM lore (Body (Wise lore))
             , mkLetNamesS :: ST.SymbolTable (Wise lore)
-                          -> [(VName,Bindage)] -> Exp (Wise lore)
+                          -> [VName] -> Exp (Wise lore)
                           -> SimpleM lore (Stm (Wise lore), Stms (Wise lore))
             , simplifyOpS :: SimplifyOp lore
             }
@@ -421,8 +421,9 @@ isNotSafe :: Attributes lore => BlockPred lore
 isNotSafe _ = not . safeExp . stmExp
 
 isInPlaceBound :: BlockPred m
-isInPlaceBound _ = not . all ((==BindVar) . patElemBindage) .
-                   patternElements . stmPattern
+isInPlaceBound _ = isUpdate . stmExp
+  where isUpdate (BasicOp Update{}) = True
+        isUpdate _ = False
 
 isNotCheap :: Attributes lore => BlockPred lore
 isNotCheap _ = not . cheapStm
@@ -682,16 +683,7 @@ simplifyPattern pat =
   Pattern <$>
   mapM inspect (patternContextElements pat) <*>
   mapM inspect (patternValueElements pat)
-  where inspect (PatElem name bindage lore) = do
-          bindage' <- simplify bindage
-          lore'  <- simplify lore
-          return $ PatElem name bindage' lore'
-
-instance Simplifiable Bindage where
-  simplify BindVar =
-    return BindVar
-  simplify (BindInPlace src is) =
-    BindInPlace <$> simplify src <*> simplify is
+  where inspect (PatElem name lore) = PatElem name <$> simplify lore
 
 simplifyParam :: (attr -> SimpleM lore attr) -> ParamT attr -> SimpleM lore (ParamT attr)
 simplifyParam simplifyAttribute (Param name attr) = do

@@ -55,7 +55,7 @@ transformExp (Op (Inner (Kernel desc space ts kbody)))
   | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
 
       num_threads64 <- newVName "num_threads64"
-      let num_threads64_pat = Pattern [] [PatElem num_threads64 BindVar $ MemPrim int64]
+      let num_threads64_pat = Pattern [] [PatElem num_threads64 $ MemPrim int64]
           num_threads64_bnd = Let num_threads64_pat (defAux ()) $ BasicOp $
                               ConvOp (SExt Int32 Int64) (spaceNumThreads space)
 
@@ -125,7 +125,7 @@ expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, grou
                   }
   return (mconcat alloc_bnds, alloc_offsets)
   where expand (mem, (per_thread_size, Space "local")) = do
-          let allocpat = Pattern [] [PatElem mem BindVar $
+          let allocpat = Pattern [] [PatElem mem $
                                      MemMem per_thread_size $ Space "local"]
           return (oneStm $ Let allocpat (defAux ()) $
                    Op $ Alloc per_thread_size $ Space "local",
@@ -133,8 +133,8 @@ expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, grou
 
         expand (mem, (per_thread_size, space)) = do
           total_size <- newVName "total_size"
-          let sizepat = Pattern [] [PatElem total_size BindVar $ MemPrim int64]
-              allocpat = Pattern [] [PatElem mem BindVar $
+          let sizepat = Pattern [] [PatElem total_size $ MemPrim int64]
+              allocpat = Pattern [] [PatElem mem $
                                      MemMem (Var total_size) space]
           return (stmsFromList
                   [Let sizepat (defAux ()) $

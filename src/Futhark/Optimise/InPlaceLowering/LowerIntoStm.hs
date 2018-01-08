@@ -45,7 +45,7 @@ lowerUpdate (Let pat aux (DoLoop ctx val form body)) updates = do
     (prebnds, postbnds, ctxpat, valpat, ctx', val', body') <- canDo
     return $
       prebnds ++ [certify (stmAuxCerts aux) $
-                  mkLet' ctxpat valpat $ DoLoop ctx' val' form body'] ++ postbnds
+                  mkLet ctxpat valpat $ DoLoop ctx' val' form body'] ++ postbnds
 lowerUpdate
   (Let pat aux (BasicOp (SubExp (Var v))))
   [DesiredUpdate bindee_nm bindee_attr cs src is val]
@@ -53,19 +53,18 @@ lowerUpdate
     let is' = fullSlice (typeOf bindee_attr) is
     in Just $
        return [certify (stmAuxCerts aux <> cs) $
-               mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
-                          BindInPlace v is')] $
-               BasicOp $ SubExp $ Var val]
+               mkLet [] [Ident bindee_nm $ typeOf bindee_attr] $
+               BasicOp $ Update v is' $ Var val]
 lowerUpdate
-  (Let (Pattern [] [PatElem v BindVar v_attr]) aux (Op (Kernel debug kspace ts kbody)))
+  (Let (Pattern [] [PatElem v v_attr]) aux (Op (Kernel debug kspace ts kbody)))
   [update@(DesiredUpdate bindee_nm bindee_attr cs _src is val)]
   | v == val = do
     kbody' <- lowerUpdateIntoKernel update kspace kbody
     let is' = fullSlice (typeOf bindee_attr) is
     Just $ return [certify (stmAuxCerts aux <> cs) $
-                    mkLet [] [(Ident bindee_nm $ typeOf bindee_attr, BindVar)] $
+                    mkLet [] [Ident bindee_nm $ typeOf bindee_attr] $
                     Op $ Kernel debug kspace ts kbody',
-                   mkLet' [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
+                   mkLet [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
 lowerUpdate _ _ =
   Nothing
 
@@ -146,13 +145,12 @@ lowerUpdateIntoLoop updates pat ctx val body = do
           | Just (update, mergename, mergeattr) <- relatedUpdate summary = do
             source <- newVName "modified_source"
             let source_t = snd $ updateType update
-                updpat = [(Ident source source_t,
-                           BindInPlace
-                           (updateSource update)
-                           (fullSlice source_t $ updateIndices update))]
                 elmident = Ident (updateValue update) $ rowType source_t
-            tell ([mkLet [] updpat $ BasicOp $ SubExp $ snd $ mergeParam summary],
-                  [mkLet' [] [elmident] $ BasicOp $ Index
+            tell ([mkLet [] [Ident source source_t] $ BasicOp $ Update
+                   (updateSource update)
+                   (fullSlice source_t $ updateIndices update) $
+                   snd $ mergeParam summary],
+                  [mkLet [] [elmident] $ BasicOp $ Index
                    (updateName update) (fullSlice (typeOf $ updateType update) $ updateIndices update)])
             return $ Right (Param
                             mergename
@@ -237,6 +235,6 @@ manipulateResult summaries substs = do
         return $ Var nm
     substRes res_se (_, (cs, nm, attr, is)) = do
       v' <- newIdent' (++"_updated") $ Ident nm $ typeOf attr
-      let is' = fullSlice (typeOf attr) is
-      tell [certify cs $ mkLet [] [(v', BindInPlace nm is')] $ BasicOp $ SubExp res_se]
+      tell [certify cs $ mkLet [] [v'] $ BasicOp $
+            Update nm (fullSlice (typeOf attr) is) res_se]
       return $ Var $ identName v'

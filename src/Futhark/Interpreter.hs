@@ -109,48 +109,18 @@ asInt :: String -> Value -> FutharkM Int
 asInt _ (PrimVal (IntValue (Int32Value v))) = return $ fromIntegral v
 asInt w _ = bad $ TypeError $ w ++ " asInt"
 
-bindVar :: Bindage -> Value
-        -> FutharkM Value
-
-bindVar BindVar val =
-  return val
-
-bindVar (BindInPlace src slice) val = do
-  srcv <- lookupVar src
-  slice' <- mapM evalDimIndex slice
-  case srcv of
-    ArrayVal arr bt shape -> do
-      is <- indexArray (pretty src) slice' shape
-      case (is, val) of
-        ([i], PrimVal bv) ->
-          return $ ArrayVal (arr // [(i, bv)]) bt shape
-        (_, ArrayVal valarr _ _) ->
-          let updates = zip is $ elems valarr
-          in return $ ArrayVal (arr // updates) bt shape
-        (_, PrimVal _) ->
-          bad $ TypeError "bindVar BindInPlace, incomplete indices given, but replacement value is not array"
-    _ ->
-      bad $ TypeError "bindVar BindInPlace, source is not array"
-
-bindVars :: [(Ident, Bindage, Value)]
-         -> FutharkM VTable
-bindVars bnds = do
-  let (idents, bindages, vals) = unzip3 bnds
-  M.fromList . zip (map identName idents) <$>
-    zipWithM bindVar bindages vals
-
-binding :: [(Ident, Bindage, Value)]
+binding :: [(Ident, Value)]
         -> FutharkM a
         -> FutharkM a
 binding bnds m = do
-  vtable <- bindVars bnds
-  local (extendVtable vtable) $ do
+  let (idents, vals) = unzip bnds
+  local (extendVtable $ M.fromList $ zip (map identName idents) vals) $ do
     checkBoundShapes bnds
     m
   where extendVtable vtable env = env { envVtable = vtable <> envVtable env }
 
         checkBoundShapes = mapM_ checkShape
-        checkShape (ident, BindVar, val) = do
+        checkShape (ident, val) = do
           let valshape = map (PrimVal . value) $ valueShape val
               vardims = arrayDims $ identType ident
           varshape <- mapM evalSubExp vardims
@@ -161,7 +131,6 @@ binding bnds m = do
             intercalate "," (zipWith ppDim vardims varshape) ++
             "], but is being bound to value " ++ pretty val ++
             " of shape [" ++ intercalate "," (map pretty valshape) ++ "]."
-        checkShape _ = return ()
 
         ppDim (Constant v) _ = pretty v
         ppDim e            v = pretty e ++ "=" ++ pretty v
@@ -297,8 +266,8 @@ buildFunTable = foldl expand builtins . progFunctions
   where -- We assume that the program already passed the type checker, so
         -- we don't check for duplicate definitions.
         expand ftable' (FunDef _ name _ params body) =
-          let fun funargs = binding (zip3 (map paramIdent params) (repeat BindVar) funargs) $
-                            evalBody body
+          let fun funargs =
+                binding (zip (map paramIdent params) funargs) $ evalBody body
           in M.insert name fun ftable'
 
 --------------------------------------------
@@ -345,10 +314,7 @@ evalBody (Body () stms res) =
     Let pat _ e:bnds -> do
       let patElems = patternElements pat
       v <- evalExp e
-      binding (zip3
-               (map patElemIdent patElems)
-               (map patElemBindage patElems)
-               v) $
+      binding (zip (map patElemIdent patElems) v) $
         evalBody $ Body () (stmsFromList bnds) res
 
 evalExp :: Exp -> FutharkM [Value]
@@ -372,7 +338,7 @@ evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar it boundexp loopvars) loopbod
     PrimVal (IntValue bound_iv) -> do
       let n = valueIntegral bound_iv
       vs <- foldM iteration mergestart [0::Int .. n-1]
-      binding (zip3 (map paramIdent mergepat) (repeat BindVar) vs) $
+      binding (zip (map paramIdent mergepat) vs) $
         mapM (lookupVar . paramName) $
         loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
     _ -> bad $ TypeError "evalBody DoLoop for"
@@ -383,10 +349,9 @@ evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar it boundexp loopvars) loopbod
           let slice v = indexArrayValue v $ fullSliceNum (valueShape v) [DimFix i]
           vs <- mapM (slice <=< lookupVar) loop_arrs
           binding ((Ident loopvar $ Prim $ IntType it,
-                    BindVar,
                     PrimVal $ IntValue $ intValue it i) :
-                    zip3 (map paramIdent loop_params) (repeat BindVar) vs) $
-            binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $
+                    zip (map paramIdent loop_params) vs) $
+            binding (zip (map paramIdent mergepat) mergeval) $
               evalBody loopbody
 
 evalExp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) = do
@@ -395,7 +360,7 @@ evalExp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) = do
   where merge = ctxmerge ++ valmerge
         (mergepat, mergeexp) = unzip merge
         iteration mergeval =
-          binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $ do
+          binding (zip (map paramIdent mergepat) mergeval) $ do
             condv <- lookupVar cond
             case condv of
               PrimVal (BoolValue False) ->
@@ -454,6 +419,23 @@ evalBasicOp (Index ident slice) = do
   v <- lookupVar ident
   slice' <- mapM evalDimIndex slice
   pure <$> indexArrayValue v slice'
+
+evalBasicOp (Update src slice se) = do
+  val <- evalSubExp se
+  srcv <- lookupVar src
+  slice' <- mapM evalDimIndex slice
+  case srcv of
+    ArrayVal arr bt shape -> do
+      is <- indexArray (pretty src) slice' shape
+      case (is, val) of
+        ([i], PrimVal bv) ->
+          return  [ArrayVal (arr // [(i, bv)]) bt shape]
+        (_, ArrayVal valarr _ _) ->
+          let updates = zip is $ elems valarr
+          in return [ArrayVal (arr // updates) bt shape]
+        (_, PrimVal _) ->
+          bad $ TypeError "bindVar BindInPlace, incomplete indices given, but replacement value is not array"
+    _ -> bad $ TypeError "bindVar BindInPlace, source is not array"
 
 evalBasicOp (Iota e x s et) = do
   v1 <- evalSubExp e
@@ -575,9 +557,7 @@ evalSOAC (Stream w form elam arrs) = do
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
   let Lambda elam_params elam_body _ = elam
-      fun funargs = binding (zip3 (map paramIdent elam_params)
-                                  (repeat BindVar)
-                                  funargs) $
+      fun funargs = binding (zip (map paramIdent elam_params) funargs) $
                     evalBody elam_body
   -- get the outersize of the input array(s), and use it as chunk!
   chunkval <- evalSubExp w
@@ -705,7 +685,7 @@ evalFuncall fname args = do
 
 applyLambda :: Lambda -> [Value] -> FutharkM [Value]
 applyLambda (Lambda params body rettype) args = do
-  v <- binding (zip3 (map paramIdent params) (repeat BindVar) args) $
+  v <- binding (zip (map paramIdent params) args) $
        evalBody body
   checkReturnShapes (staticShapes rettype) v
   return v

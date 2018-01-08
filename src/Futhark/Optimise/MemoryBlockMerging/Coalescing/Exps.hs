@@ -58,7 +58,7 @@ lookInKernelBody (KernelBody _ bnds _res) =
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
-  forM_ (zip patvalelems [0..]) $ \(PatElem var _ _, i) ->
+  forM_ (zip patvalelems [0..]) $ \(PatElem var _, i) ->
     tell $ M.singleton var $ Exp i e
 
   -- Recursive body walk.

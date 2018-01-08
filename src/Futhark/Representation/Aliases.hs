@@ -136,9 +136,9 @@ instance (Attributes lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) whe
 instance PrettyAnnot (PatElemT attr) =>
   PrettyAnnot (PatElemT (VarAliases, attr)) where
 
-  ppAnnot (PatElem name bindage (Names' als, attr)) =
+  ppAnnot (PatElem name (Names' als, attr)) =
     let alias_comment = PP.oneLine <$> aliasComment name als
-    in case (alias_comment, ppAnnot (PatElem name bindage attr)) of
+    in case (alias_comment, ppAnnot (PatElem name attr)) of
          (_, Nothing) ->
            alias_comment
          (Just alias_comment', Just inner_comment) ->
@@ -266,11 +266,10 @@ mkPatternAliases pat e =
   where annotateBindee bindee names =
             bindee `setPatElemLore` (Names' names', patElemAttr bindee)
           where names' =
-                  case (patElemBindage bindee, patElemRequires bindee) of
-                    (BindInPlace {}, _) -> mempty
-                    (_, Array {})       -> names
-                    (_, Mem _ _)        -> names
-                    _                   -> mempty
+                  case patElemType bindee of
+                    Array {} -> names
+                    Mem _ _  -> names
+                    _        -> mempty
 
 mkContextAliases :: (Attributes lore, Aliased lore) =>
                     PatternT attr -> Exp lore
@@ -350,13 +349,13 @@ mkAliasedLetStm :: (Attributes lore, CanBeAliased (Op lore)) =>
                 -> Stm (Aliases lore)
 mkAliasedLetStm pat (StmAux cs attr) e =
   Let (addAliasesToPattern pat e)
-  (StmAux cs (Names' $ consumedInPattern pat <> consumedInExp e, attr))
+  (StmAux cs (Names' $ consumedInExp e, attr))
   e
 
 instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) where
   mkExpAttr pat e =
     let attr = mkExpAttr (removePatternAliases pat) $ removeExpAliases e
-    in (Names' $ consumedInPattern pat <> consumedInExp e, attr)
+    in (Names' $ consumedInExp e, attr)
 
   mkExpPat ctx val e =
     addAliasesToPattern (mkExpPat ctx val $ removeExpAliases e) e

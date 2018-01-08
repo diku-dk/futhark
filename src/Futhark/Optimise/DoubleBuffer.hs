@@ -237,7 +237,7 @@ allocStms :: LoreConstraints lore inner =>
           -> DoubleBufferM lore ([(FParam lore, SubExp)], [Stm lore])
 allocStms merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
-          tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) (defAux ()) $
+          tell [Let (Pattern [] [PatElem name $ MemMem size space]) (defAux ()) $
                 Op $ Alloc size space]
           if b then return (Param pname $ MemMem size space, Var name)
                else return m
@@ -247,7 +247,7 @@ allocStms merge = runWriterT . zipWithM allocation merge
           let bt = elemType $ paramType f
               shape = arrayShape $ paramType f
               bound = MemArray bt shape NoUniqueness $ ArrayIn mem v_ixfun
-          tell [Let (Pattern [] [PatElem v_copy BindVar bound]) (defAux ()) $
+          tell [Let (Pattern [] [PatElem v_copy bound]) (defAux ()) $
                 BasicOp $ Copy v]
           return (f, Var v_copy)
         allocation (f, se) _ =
@@ -270,7 +270,7 @@ doubleBufferResult valparams buffered (Body () bnds res) =
           -- based on the type of the function parameter.
           let t = resultType $ paramType fparam
               summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname ixfun
-              copybnd = Let (Pattern [] [PatElem copyname BindVar summary]) (defAux ()) $
+              copybnd = Let (Pattern [] [PatElem copyname summary]) (defAux ()) $
                         BasicOp $ Copy v
           in (Just copybnd, Var copyname)
 

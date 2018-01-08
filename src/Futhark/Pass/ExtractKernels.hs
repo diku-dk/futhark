@@ -972,7 +972,7 @@ maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d:ds)) v))) acc
       tmp <- newVName "tmp"
       let rowt = rowType t
           newbnd = Let pat aux $ Op $ Map d lam []
-          tmpbnd = Let (Pattern [] [PatElem tmp BindVar rowt]) aux $
+          tmpbnd = Let (Pattern [] [PatElem tmp rowt]) aux $
                    BasicOp $ Replicate (Shape ds) v
           lam = Lambda { lambdaReturnType = [rowt]
                        , lambdaParams = []
@@ -1135,10 +1135,8 @@ segmentedScanomapKernel nest perm segment_size lam fold_lam nes arrs =
     forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
       \(dst_pat_elem, flat) -> do
         let ident = patElemIdent dst_pat_elem
-            bindage = patElemBindage dst_pat_elem
             dims = arrayDims $ identType ident
-        addStm $ mkLet [] [(ident, bindage)] $
-          BasicOp $ Reshape (map DimNew dims) flat
+        addStm $ mkLet [] [ident] $ BasicOp $ Reshape (map DimNew dims) flat
 
 regularSegmentedRedomapKernel :: KernelNest
                               -> [Int]
@@ -1236,10 +1234,8 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
         flatPatElem pat_elem t = do
           let t' = arrayOfRow t total_num_elements
           name <- newVName $ baseString (patElemName pat_elem) ++ "_flat"
-          return $ PatElem name BindVar t'
-    flat_pat <- Pattern [] <$>
-                zipWithM flatPatElem
-                (patternValueElements pat) ret
+          return $ PatElem name t'
+    flat_pat <- Pattern [] <$> zipWithM flatPatElem (patternValueElements pat) ret
 
     m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
 
@@ -1297,7 +1293,7 @@ kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
 kernelAlternatives pat default_body [] = runBinder_ $ do
   ses <- bodyBind default_body
   forM_ (zip (patternNames pat) ses) $ \(name, se) ->
-    letBindNames'_ [name] $ BasicOp $ SubExp se
+    letBindNames_ [name] $ BasicOp $ SubExp se
 kernelAlternatives pat default_body ((cond,alt):alts) = runBinder_ $ do
   alts_pat <- fmap (Pattern []) $ forM (patternElements pat) $ \pe -> do
     name <- newVName $ baseString $ patElemName pe

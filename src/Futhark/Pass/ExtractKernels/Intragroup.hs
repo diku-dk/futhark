@@ -83,7 +83,7 @@ intraGroupParallelise knest body = runMaybeT $ do
       flatPatElem pat_elem = do
         let t' = arrayOfRow (length ispace `stripArray` patElemType pat_elem) num_groups
         name <- newVName $ baseString (patElemName pat_elem) ++ "_flat"
-        return $ PatElem name BindVar t'
+        return $ PatElem name t'
   flat_pat <- lift $ Pattern [] <$> mapM flatPatElem (patternValueElements nested_pat)
 
   let kstm = Let flat_pat (StmAux cs ()) $ Op $
@@ -152,7 +152,7 @@ intraGroupStm stm@(Let pat _ e) = do
       body_stms <- collectStms_ $ do
         forM_ (zip (lambdaParams fun) arrs) $ \(p, arr) -> do
           arr_t <- lookupType arr
-          letBindNames' [paramName p] $ BasicOp $ Index arr $
+          letBindNames [paramName p] $ BasicOp $ Index arr $
             fullSlice arr_t [DimFix $ Var ltid]
         Kernelise.transformStms $ bodyStms $ lambdaBody fun
       let comb_body = mkBody body_stms $ bodyResult $ lambdaBody fun
@@ -238,18 +238,18 @@ intraGroupStm stm@(Let pat _ e) = do
                   splitAt (length nes) $ lambdaParams foldfun
 
             forM_ (zip fold_acc_params nes) $ \(p, ne) ->
-              letBindNames'_ [paramName p] $ BasicOp $ SubExp ne
+              letBindNames_ [paramName p] $ BasicOp $ SubExp ne
 
             forM_ (zip fold_arr_params arrs) $ \(p, arr) -> do
               arr_t <- lookupType arr
-              letBindNames' [paramName p] $ BasicOp $ Index arr $
+              letBindNames_ [paramName p] $ BasicOp $ Index arr $
                 fullSlice arr_t [DimFix $ Var ltid]
 
             Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
           let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
 
           op_inps <- replicateM (length nes) (newVName "op_input")
-          letBindNames'_ (op_inps ++ patternNames map_pat) $ Op $
+          letBindNames_ (op_inps ++ patternNames map_pat) $ Op $
             Out.Combine [(ltid,w)] (lambdaReturnType foldfun) [] fold_body
           return op_inps
 

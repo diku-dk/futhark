@@ -77,8 +77,8 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
       -- record that the memory block in the body result also needs to change.
       let zipped = zip [(0::Int)..] (patctxelems ++ patvalelems)
 
-          findMemLinks (i, PatElem _x _binding (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _))) =
-            case L.find (\(_, PatElem ymem _ _) -> ymem == xmem) zipped of
+          findMemLinks (i, PatElem _x (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _))) =
+            case L.find (\(_, PatElem ymem _) -> ymem == xmem) zipped of
               Just (j, _) -> Just (j, i)
               Nothing -> Nothing
           findMemLinks _ = Nothing
@@ -150,9 +150,9 @@ transformMergeValParam (Param x membound, se) = do
 
 transformPatValElem :: LoreConstraints lore =>
                        PatElem ExplicitMemory -> FindM lore (PatElem ExplicitMemory)
-transformPatValElem (PatElem x bindage membound) = do
+transformPatValElem (PatElem x membound) = do
   membound' <- newMemBound membound x
-  return $ PatElem x bindage membound'
+  return $ PatElem x membound'
 
 transformFParam :: LoreConstraints lore =>
                    FParam lore -> FindM lore (FParam lore)

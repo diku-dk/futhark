@@ -177,6 +177,9 @@ withMemAliases mem = do
   mem_aliases <- lookupEmptyable mem <$> asks ctxMemAliases
   return $ S.union (S.singleton mem) mem_aliases
 
+data Bindage = BindInPlace VName (Slice SubExp)
+             | BindVar
+
 recordOptimisticCoalescing :: LoreConstraints lore =>
                               VName -> PrimExp VName
                            -> [Slice (PrimExp VName)]
@@ -258,22 +261,21 @@ lookInStm :: LoreConstraints lore =>
 lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   -- COALESCING-SPECIFIC HANDLING for Copy and Concat.
   case patvalelems of
-    [PatElem dst bindage ExpMem.MemArray{}] -> do
+    [PatElem dst ExpMem.MemArray{}] ->
       -- We create a function and pass it around instead of just applying it to
       -- the memory of the MemBound.  We do this, since any source variables
       -- might have more actual variables with different index functions that
       -- also need to be fixed -- e.g. in the case of reshape, where both the
       -- reshaped array and the original array need to get their index functions
       -- updated.
-      let ixfun_slices = case bindage of
-            BindVar -> []
-            BindInPlace _ slice ->
-              let slice' = map (primExpFromSubExp (IntType Int32) <$>) slice
-              in [slice']
       case e of
         -- Copy.
-        BasicOp (Copy src) ->
-          tryCoalesce dst ixfun_slices bindage src zeroOffset
+        BasicOp (Update dest slice (Var src)) ->
+          let ixfun_slices =
+                  let slice' = map (primExpFromSubExp (IntType Int32) <$>) slice
+                  in [slice']
+              bindage = BindInPlace dest slice
+          in tryCoalesce dst ixfun_slices bindage src zeroOffset
 
         -- Concat.
         BasicOp (Concat 0 src0 src0s _) -> do
@@ -285,7 +287,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
                     offset_new = BinOpExp (Add Int32) offset_prev len
                 in offset_new
               offsets = init (scanl getOffsets zeroOffset shapes)
-          zipWithM_ (tryCoalesce dst ixfun_slices bindage) srcs offsets
+          zipWithM_ (tryCoalesce dst [] BindVar) srcs offsets
 
         _ -> return ()
     _ -> return ()
