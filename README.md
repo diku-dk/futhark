@@ -1,4 +1,4 @@
-Futhark
+<img src="assets/logo.svg" height="50px"/> The Futhark Programming Language
 ==========
 
 Futhark is a purely functional data-parallel programming language.
