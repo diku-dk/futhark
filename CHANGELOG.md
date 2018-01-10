@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-test` and `futhark-bench` will no longer append `.bin` to
     executables.
 
+  * `futhark-test` and `futhark-bench` now replaces actual/expected
+    files from previous runs, rather than increasing the litter.
+
 ### Fixed
 
   * Fusion would sometimes remove safety checks on e.g. `reshape`

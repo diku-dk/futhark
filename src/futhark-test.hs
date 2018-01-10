@@ -18,7 +18,6 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Map.Strict as M
 import System.Console.GetOpt
-import System.Directory
 import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import System.IO
@@ -171,8 +170,9 @@ runResult :: FilePath -> ExitCode -> SBS.ByteString -> SBS.ByteString -> TestM R
 runResult program ExitSuccess stdout_s _ =
   case valuesFromByteString "stdout" $ LBS.fromStrict stdout_s of
     Left e   -> do
-      actual <- io $ writeOutFile program "actual" stdout_s
-      throwError $ T.pack (show e) <> "\n(See " <> T.pack actual <> ")"
+      let actualf = program `addExtension` "actual"
+      io $ SBS.writeFile actualf stdout_s
+      throwError $ T.pack (show e) <> "\n(See " <> T.pack actualf <> ")"
     Right vs -> return $ SuccessResult vs
 runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
@@ -234,11 +234,11 @@ compareResult _ (Succeeds Nothing) SuccessResult{} =
 compareResult program (Succeeds (Just expectedResult)) (SuccessResult actualResult) =
   case compareValues actualResult expectedResult of
     Just mismatch -> do
-      actualf <-
-        io $ writeOutFile program "actual" $
+      let actualf = program `addExtension` "actual"
+          expectedf = program `addExtension` "expected"
+      io $ SBS.writeFile actualf $
         T.encodeUtf8 $ T.unlines $ map prettyText actualResult
-      expectedf <-
-        io $ writeOutFile program "expected" $
+      io $ SBS.writeFile expectedf $
         T.encodeUtf8 $ T.unlines $ map prettyText expectedResult
       throwError $ T.pack actualf <> " and " <> T.pack expectedf <>
         " do not match:\n" <> T.pack (show mismatch)
@@ -251,18 +251,6 @@ compareResult _ (Succeeds _) (ErrorResult code err) =
   T.pack (show code) <> " and stderr:\n  " <> T.decodeUtf8 err
 compareResult _ (RunTimeFailure f) (SuccessResult _) =
   throwError $ "Program succeeded, but expected failure:\n  " <> T.pack (show f)
-
-writeOutFile :: FilePath -> String -> SBS.ByteString -> IO FilePath
-writeOutFile base ext content =
-  attempt (0::Int)
-  where template = base `replaceExtension` ext
-        attempt i = do
-          let filename = template ++ "-" ++ show i
-          exists <- doesFileExist filename
-          if exists
-            then attempt $ i+1
-            else do SBS.writeFile filename content
-                    return filename
 
 ---
 --- Test manager
