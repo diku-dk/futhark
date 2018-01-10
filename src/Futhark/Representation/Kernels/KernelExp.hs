@@ -261,8 +261,7 @@ instance Renameable lore => Rename (KernelExp lore) where
 
 instance Renameable lore => Rename (GroupStreamLambda lore) where
   rename (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
-    bindingForRename (chunk_size : chunk_offset :
-                       map paramName (acc_params++arr_params)) $
+    bindingForRename (chunk_size : chunk_offset : map paramName (acc_params++arr_params)) $
     GroupStreamLambda <$>
     rename chunk_size <*>
     rename chunk_offset <*>
