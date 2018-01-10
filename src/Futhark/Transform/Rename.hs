@@ -141,9 +141,6 @@ instance Rename VName where
 instance Rename a => Rename [a] where
   rename = mapM rename
 
-instance Rename (Stm lore) => Rename (Stms lore) where
-  rename = fmap stmsFromList . mapM rename . stmsToList
-
 instance (Rename a, Rename b) => Rename (a,b) where
   rename (a,b) = (,) <$> rename a <*> rename b
 
