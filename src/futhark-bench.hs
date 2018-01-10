@@ -240,24 +240,13 @@ runResult :: (MonadError T.Text m, MonadIO m) =>
 runResult program ExitSuccess stdout_s _ =
   case valuesFromByteString "stdout" $ LBS.fromStrict stdout_s of
     Left e   -> do
-      actual <- liftIO $ writeOutFile program "actual" stdout_s
-      itWentWrong $ T.pack $ show e <> "\n(See " <> actual <> ")"
+      let actualf = program `replaceExtension` "actual"
+      liftIO $ SBS.writeFile actualf stdout_s
+      itWentWrong $ T.pack $ show e <> "\n(See " <> actualf <> ")"
     Right vs -> return (stdout_s, vs)
 runResult program (ExitFailure code) _ stderr_s =
   itWentWrong $ T.pack $ program ++ " failed with error code " ++ show code ++
   " and output:\n" ++ T.unpack (T.decodeUtf8 stderr_s)
-
-writeOutFile :: FilePath -> String -> SBS.ByteString -> IO FilePath
-writeOutFile base ext content =
-  attempt (0::Int)
-  where template = base `replaceExtension` ext
-        attempt i = do
-          let filename = template ++ "-" ++ show i
-          exists <- doesFileExist filename
-          if exists
-            then attempt $ i+1
-            else do SBS.writeFile filename content
-                    return filename
 
 compareResult :: (MonadError T.Text m, MonadIO m) =>
                  FilePath -> (SBS.ByteString, [Value]) -> (SBS.ByteString, [Value])
@@ -265,10 +254,12 @@ compareResult :: (MonadError T.Text m, MonadIO m) =>
 compareResult program (expected_bs, expected_vs) (actual_bs, actual_vs) =
   case compareValues actual_vs expected_vs of
     Just mismatch -> do
-      actualf <- liftIO $ writeOutFile program "actual" actual_bs
-      expectedf <- liftIO $ writeOutFile program "expected" expected_bs
-      itWentWrong $ T.pack $
-        actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
+      let actualf = program `replaceExtension` "actual"
+          expectedf = program `replaceExtension` "expected"
+      liftIO $ SBS.writeFile actualf actual_bs
+      liftIO $ SBS.writeFile expectedf expected_bs
+      throwError $ T.pack actualf <> " and " <> T.pack expectedf <>
+        " do not match:\n" <> T.pack (show mismatch)
     Nothing ->
       return ()
 
