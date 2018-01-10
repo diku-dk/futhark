@@ -352,14 +352,8 @@ instance Attributes lore => Substitute (Kernel lore) where
 instance Attributes lore => Rename (KernelBody lore) where
   rename (KernelBody attr stms res) = do
     attr' <- rename attr
-    (stms', res') <- descend $ stmsToList stms
-    return $ KernelBody attr' (stmsFromList stms') res'
-    where descend [] = (,) [] <$> rename res
-          descend (stm:stms') =
-            bindingForRename (patternNames $ stmPattern stm) $ do
-              stm' <- rename stm
-              (stms'', res') <- descend stms'
-              return (stm':stms'', res')
+    renamingStms stms $ \stms' ->
+      KernelBody attr' stms' <$> rename res
 
 instance Rename KernelResult where
   rename = substituteRename

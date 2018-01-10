@@ -26,6 +26,7 @@ module Futhark.Transform.Rename
   , RenameM
   , substituteRename
   , bindingForRename
+  , renamingStms
   , Rename (..)
   , Renameable
   )
@@ -36,13 +37,13 @@ import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
+import Data.Monoid
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.FreshNames
-import Futhark.MonadFreshNames (MonadFreshNames(..),
-                                modifyNameSource)
+import Futhark.MonadFreshNames (MonadFreshNames(..), modifyNameSource)
 import Futhark.Transform.Substitute
 
 runRenamer :: RenameM a -> VNameSource -> (a, VNameSource)
@@ -176,6 +177,14 @@ bind vars body = do
   where bind' vars' env = env { envNameMap = M.fromList (zip vars vars')
                                              `M.union` envNameMap env }
 
+renamingStms :: Renameable lore => Stms lore -> (Stms lore -> RenameM a) -> RenameM a
+renamingStms stms m = descend mempty stms
+  where descend stms' rem_stms = case stmsHead rem_stms of
+          Nothing -> m stms'
+          Just (stm, rem_stms') -> bind (patternNames $ stmPattern stm) $ do
+            stm' <- rename stm
+            descend (stms' <> oneStm stm') rem_stms'
+
 instance Renameable lore => Rename (FunDef lore) where
   rename (FunDef entry fname ret params body) =
     bind (map paramName params) $ do
@@ -207,14 +216,8 @@ instance Rename attr => Rename (StmAux attr) where
 instance Renameable lore => Rename (Body lore) where
   rename (Body attr stms res) = do
     attr' <- rename attr
-    (stms', res') <- descend $ stmsToList stms
-    return $ Body attr' (stmsFromList stms') res'
-    where descend [] = (,) [] <$> rename res
-          descend (stm:stms') =
-            bind (patternNames $ stmPattern stm) $ do
-              stm' <- rename stm
-              (stms'', res') <- descend stms'
-              return (stm':stms'', res')
+    renamingStms stms $ \stms' ->
+      Body attr' stms' <$> rename res
 
 instance Renameable lore => Rename (Stm lore) where
   rename (Let pat elore e) = Let <$> rename pat <*> rename elore <*> rename e
