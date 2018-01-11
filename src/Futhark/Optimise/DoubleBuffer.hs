@@ -24,7 +24,6 @@ module Futhark.Optimise.DoubleBuffer
        ( doubleBuffer )
        where
 
-import           Control.Applicative
 import           Control.Monad.State
 import           Control.Monad.Writer
 import           Control.Monad.Reader

@@ -10,7 +10,6 @@ import Futhark.Pass
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
-import Futhark.Tools
 
 import Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo
 import Futhark.Optimise.MemoryBlockMerging.Types
