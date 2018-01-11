@@ -9,7 +9,6 @@ module Futhark.Pass
        , liftEitherM
        , Pass (..)
        , passLongOption
-       , simplePass
        , intraproceduralTransformation
        ) where
 
@@ -76,20 +75,6 @@ passLongOption :: Pass fromlore tolore -> String
 passLongOption = map (spaceToDash . toLower) . passName
   where spaceToDash ' ' = '-'
         spaceToDash c   = c
-
--- | Turn a simple function on programs into a pass that produces no
--- log output.
-simplePass :: String -> String
-           -> (Prog fromlore -> StateT VNameSource (Except T.Text) (Prog tolore))
-           -> Pass fromlore tolore
-simplePass name desc f =
-  Pass { passName = name
-       , passDescription = desc
-       , passFunction = liftEither <=< runPass
-       }
-  where runPass x = modifyNameSource $ \src -> case runExcept $ runStateT (f x) src of
-          Left err -> (Left err, src)
-          Right (prog', src') -> (Right prog', src')
 
 intraproceduralTransformation :: (FunDef fromlore -> PassM (FunDef tolore))
                               -> Prog fromlore -> PassM (Prog tolore)

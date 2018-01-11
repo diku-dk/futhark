@@ -81,7 +81,6 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
 import Futhark.Construct
 import Futhark.Optimise.Simplify.Lore
-import Futhark.Transform.Rename
 
 data HoistBlockers lore = HoistBlockers
                           { blockHoistPar :: BlockPred (Wise lore)
