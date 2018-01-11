@@ -5,6 +5,8 @@ module Futhark.Optimise.MemoryBlockMerging.Coalescing
   ( coalesceInProg
   ) where
 
+import Futhark.Pass
+
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
@@ -18,9 +20,7 @@ import Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationHoisting
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
 
 
-coalesceInProg :: MonadFreshNames m
-               => Prog ExplicitMemory
-               -> m (Prog ExplicitMemory)
+coalesceInProg :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
 coalesceInProg = intraproceduralTransformation coalesceInFunDef
 
 coalesceInFunDef :: MonadFreshNames m

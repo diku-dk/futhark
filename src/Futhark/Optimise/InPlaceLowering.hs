@@ -73,18 +73,18 @@ import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Pass
-import Futhark.Tools (intraproceduralTransformation, fullSlice)
+import Futhark.Tools (fullSlice)
 
 -- | Apply the in-place lowering optimisation to the given program.
 inPlaceLowering :: Pass Kernels Kernels
-inPlaceLowering = simplePass
-                  "In-place lowering"
-                  "Lower in-place updates into loops" $
-                  fmap removeProgAliases .
-                  intraproceduralTransformation optimiseFunDef .
-                  aliasAnalysis
+inPlaceLowering =
+  Pass "In-place lowering" "Lower in-place updates into loops" $
+  fmap removeProgAliases .
+  intraproceduralTransformation optimiseFunDef .
+  aliasAnalysis
 
-optimiseFunDef :: MonadFreshNames m => FunDef (Aliases Kernels) -> m (FunDef (Aliases Kernels))
+optimiseFunDef :: MonadFreshNames m => FunDef (Aliases Kernels)
+               -> m (FunDef (Aliases Kernels))
 optimiseFunDef fundec =
   modifyNameSource $ runForwardingM $
   bindingFParams (funDefParams fundec) $ do

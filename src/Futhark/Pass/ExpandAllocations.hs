@@ -23,10 +23,9 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
-expandAllocations = simplePass
-                    "expand allocations"
-                    "Expand allocations" $
-                    intraproceduralTransformation transformFunDef
+expandAllocations =
+  Pass "expand allocations" "Expand allocations" $
+  intraproceduralTransformation transformFunDef
 
 transformFunDef :: MonadFreshNames m => FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
 transformFunDef fundec = do

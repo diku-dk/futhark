@@ -7,7 +7,7 @@
 -- and - it's certainly worth considering when we can express such
 -- transformations in-place.
 module Futhark.Transform.FirstOrderTransform
-  ( transformProg
+  ( transformFunDef
 
   , Transformer
   , transformStmRecursively
@@ -21,6 +21,7 @@ module Futhark.Transform.FirstOrderTransform
   )
   where
 
+import Control.Monad.Except
 import Control.Monad.State
 import Data.Maybe
 import Data.Monoid
@@ -35,13 +36,6 @@ import Futhark.Tools
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Representation.Aliases (Aliases, removeLambdaAliases)
 import Futhark.Representation.AST.Attributes.Aliases
-
--- | Perform the first-order transformation on an Futhark program.
-transformProg :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
-                  LetAttr SOACS ~ LetAttr tolore,
-                  CanBeAliased (Op tolore)) =>
-                 Prog -> m (AST.Prog tolore)
-transformProg = intraproceduralTransformation transformFunDef
 
 transformFunDef :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                     LetAttr SOACS ~ LetAttr tolore,

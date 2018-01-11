@@ -48,16 +48,13 @@ import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Transform.Substitute
 import Futhark.Pass
-import Futhark.Tools
 
 -- | Perform CSE on every functioon in a program.
 performCSE :: (Attributes lore, CanBeAliased (Op lore),
                CSEInOp (OpWithAliases (Op lore))) =>
               Bool -> Pass lore lore
 performCSE cse_arrays =
-  simplePass
-  "CSE"
-  "Combine common subexpressions." $
+  Pass "CSE" "Combine common subexpressions." $
   intraproceduralTransformation $
   return . removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 

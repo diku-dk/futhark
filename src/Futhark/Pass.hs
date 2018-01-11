@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- | Definition of a polymorphic (generic) pass that can work with programs of any
 -- lore.
 module Futhark.Pass
@@ -9,13 +10,18 @@ module Futhark.Pass
        , Pass (..)
        , passLongOption
        , simplePass
+       , intraproceduralTransformation
        ) where
 
 import Control.Monad.Writer.Strict
 import Control.Monad.Except
-import Control.Monad.State
+import Control.Monad.State.Strict
+import Control.Parallel.Strategies
 import Data.Char
+import Data.Either
 import qualified Data.Text as T
+
+import Prelude hiding (log)
 
 import Futhark.Representation.AST
 import Futhark.Util.Log
@@ -71,12 +77,31 @@ passLongOption = map (spaceToDash . toLower) . passName
   where spaceToDash ' ' = '-'
         spaceToDash c   = c
 
--- | Turn a simple function on programs into a pass that cannot fail
--- and produces no log output.
+-- | Turn a simple function on programs into a pass that produces no
+-- log output.
 simplePass :: String -> String
-           -> (Prog fromlore -> State VNameSource (Prog tolore))
+           -> (Prog fromlore -> StateT VNameSource (Except T.Text) (Prog tolore))
            -> Pass fromlore tolore
-simplePass name desc f = Pass { passName = name
-                              , passDescription = desc
-                              , passFunction = modifyNameSource . runState . f
-                              }
+simplePass name desc f =
+  Pass { passName = name
+       , passDescription = desc
+       , passFunction = liftEither <=< runPass
+       }
+  where runPass x = modifyNameSource $ \src -> case runExcept $ runStateT (f x) src of
+          Left err -> (Left err, src)
+          Right (prog', src') -> (Right prog', src')
+
+intraproceduralTransformation :: (FunDef fromlore -> PassM (FunDef tolore))
+                              -> Prog fromlore -> PassM (Prog tolore)
+intraproceduralTransformation ft prog =
+  either onError onSuccess <=< modifyNameSource $ \src ->
+  case partitionEithers $ parMap rpar (onFunction src) (progFunctions prog) of
+    ([], rs) -> let (funs, logs, srcs) = unzip3 rs
+                in (Right (Prog funs, mconcat logs), mconcat srcs)
+    ((err,log,src'):_, _) -> (Left (err, log), src')
+  where onFunction src f = case runState (runPassM (ft f)) src of
+          ((Left x, log), src') -> Left (x, log, src')
+          ((Right x, log), src') -> Right (x, log, src')
+
+        onError (err, log) = addLog log >> throwError err
+        onSuccess (x, log) = addLog log >> return x

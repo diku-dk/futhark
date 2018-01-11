@@ -6,7 +6,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 module Futhark.Representation.Kernels.Simplify
        ( simplifyKernels
-       , simplifyFun
 
        , simpleKernels
 
@@ -31,6 +30,7 @@ import Futhark.Optimise.Simplify.Rules
 import Futhark.Optimise.Simplify.Lore
 import Futhark.MonadFreshNames
 import Futhark.Tools
+import Futhark.Pass
 import qualified Futhark.Optimise.Simplify as Simplify
 import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -43,13 +43,9 @@ simpleKernels = Simplify.bindableSimpleOps (simplifyKernelOp simpleInKernel inKe
 simpleInKernel :: Simplify.SimpleOps InKernel
 simpleInKernel = Simplify.bindableSimpleOps simplifyKernelExp
 
-simplifyKernels :: MonadFreshNames m => Prog Kernels -> m (Prog Kernels)
+simplifyKernels :: Prog Kernels -> PassM (Prog Kernels)
 simplifyKernels =
   Simplify.simplifyProg simpleKernels kernelRules Simplify.noExtraHoistBlockers
-
-simplifyFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
-simplifyFun =
-  Simplify.simplifyFun simpleKernels kernelRules Simplify.noExtraHoistBlockers
 
 simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      Engine.SimplifiableLore outerlore,

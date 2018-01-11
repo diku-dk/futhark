@@ -26,11 +26,9 @@ import Futhark.Pass
 import Futhark.Util
 
 babysitKernels :: Pass Kernels Kernels
-babysitKernels =
-  Pass { passName = "babysit kernels"
-       , passDescription = "Transpose kernel input arrays for better performance."
-       , passFunction = intraproceduralTransformation transformFunDef
-       }
+babysitKernels = Pass "babysit kernels"
+                 "Transpose kernel input arrays for better performance." $
+                 intraproceduralTransformation transformFunDef
 
 transformFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 transformFunDef fundec = do

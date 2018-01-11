@@ -25,17 +25,17 @@ import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Lore
-import Futhark.Tools (intraproceduralTransformation)
+import Futhark.Pass
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProg :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
+simplifyProg :: Engine.SimplifiableLore lore =>
                 Engine.SimpleOps lore
              -> RuleBook (Engine.Wise lore)
              -> Engine.HoistBlockers lore
              -> Prog lore
-             -> m (Prog lore)
+             -> PassM (Prog lore)
 simplifyProg simpl rules blockers =
   intraproceduralTransformation $ simplifyFun simpl rules blockers
 

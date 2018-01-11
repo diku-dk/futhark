@@ -12,16 +12,12 @@ module Futhark.Tools
   , partitionChunkedKernelLambdaParameters
   , partitionChunkedKernelFoldParameters
 
-  , intraproceduralTransformation
-
   -- * Primitive expressions
   , module Futhark.Analysis.PrimExp.Convert
   )
 where
 
 import Control.Monad.Identity
-import Control.Monad.State
-import Control.Parallel.Strategies
 import Data.Monoid
 import qualified Data.Map.Strict as M
 
@@ -185,13 +181,3 @@ partitionChunkedKernelLambdaParameters (i_param : chunk_param : params) =
   (paramName i_param, chunk_param, params)
 partitionChunkedKernelLambdaParameters _ =
   error "partitionChunkedKernelLambdaParameters: lambda takes too few parameters"
-
-intraproceduralTransformation :: MonadFreshNames m =>
-                                 (FunDef fromlore -> State VNameSource (FunDef tolore))
-                              -> Prog fromlore -> m (Prog tolore)
-intraproceduralTransformation ft prog =
-  modifyNameSource $ \src ->
-  let (funs, srcs) = unzip $ parMap rpar (onFunction src) (progFunctions prog)
-  in (Prog funs, mconcat srcs)
-  where onFunction src f = let (x, src') = runState (ft f) src
-                           in src' `seq` (x, src')

@@ -503,10 +503,9 @@ linearFuncallArg _ _ arg =
   return arg
 
 explicitAllocations :: Pass Kernels ExplicitMemory
-explicitAllocations = simplePass
-                      "explicit allocations"
-                      "Transform program to explicit memory representation" $
-                      intraproceduralTransformation allocInFun
+explicitAllocations =
+  Pass "explicit allocations" "Transform program to explicit memory representation" $
+  intraproceduralTransformation allocInFun
 
 memoryInRetType :: [RetType Kernels] -> [RetType ExplicitMemory]
 memoryInRetType ts = evalState (mapM addAttr ts) $ startOfFreeIDRange ts
