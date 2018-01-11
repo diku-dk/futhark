@@ -191,6 +191,7 @@ intraproceduralTransformation :: MonadFreshNames m =>
                               -> Prog fromlore -> m (Prog tolore)
 intraproceduralTransformation ft prog =
   modifyNameSource $ \src ->
-  let (funs, srcs) = unzip $ parMap rseq (onFunction src) (progFunctions prog)
+  let (funs, srcs) = unzip $ parMap rpar (onFunction src) (progFunctions prog)
   in (Prog funs, mconcat srcs)
-  where onFunction src f = runState (ft f) src
+  where onFunction src f = let (x, src') = runState (ft f) src
+                           in src' `seq` (x, src')
