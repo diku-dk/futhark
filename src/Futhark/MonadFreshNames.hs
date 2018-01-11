@@ -22,6 +22,7 @@ module Futhark.MonadFreshNames
   , module Futhark.FreshNames
   ) where
 
+import Control.Monad.Except
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
 import qualified Control.Monad.Writer.Lazy
@@ -156,5 +157,10 @@ instance (MonadFreshNames m, Monoid s) =>
 
 instance MonadFreshNames m =>
          MonadFreshNames (Control.Monad.Trans.Maybe.MaybeT m) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
+
+instance MonadFreshNames m =>
+         MonadFreshNames (ExceptT e m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
