@@ -44,16 +44,20 @@ externalError = throwError . ExternalError
 externalErrorS :: MonadError CompilerError m => String -> m a
 externalErrorS = externalError . T.pack
 
-type InternalError = (T.Text,ErrorClass)
+-- | An error that is not the users fault, but a bug (or limitation)
+-- in the compiler.  Compiler passes should only ever report this
+-- error - any problems after the type checker are *our* fault, not
+-- the users.
+data InternalError = Error ErrorClass T.Text
 
 compilerBug :: MonadError InternalError m => T.Text -> m a
-compilerBug s = throwError (s, CompilerBug)
+compilerBug = throwError . Error CompilerBug
 
 compilerLimitation :: MonadError InternalError m => T.Text -> m a
-compilerLimitation s = throwError (s, CompilerLimitation)
+compilerLimitation = throwError . Error CompilerLimitation
 
 internalError :: MonadError CompilerError m => InternalError -> T.Text -> m a
-internalError (s,c) t = throwError $ InternalError s t c
+internalError (Error c s) t = throwError $ InternalError s t c
 
 compilerBugS :: MonadError InternalError m => String -> m a
 compilerBugS = compilerBug . T.pack

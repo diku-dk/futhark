@@ -18,18 +18,18 @@ import Control.Monad.State.Strict
 import Control.Parallel.Strategies
 import Data.Char
 import Data.Either
-import qualified Data.Text as T
 
 import Prelude hiding (log)
 
+import Futhark.Error
 import Futhark.Representation.AST
 import Futhark.Util.Log
 import Futhark.MonadFreshNames
 
 -- | The monad in which passes execute.
-newtype PassM a = PassM (ExceptT T.Text (WriterT Log (State VNameSource)) a)
+newtype PassM a = PassM (ExceptT InternalError (WriterT Log (State VNameSource)) a)
               deriving (Functor, Applicative, Monad,
-                        MonadError T.Text)
+                        MonadError InternalError)
 
 instance MonadLogger PassM where
   addLog = PassM . tell
@@ -41,14 +41,14 @@ instance MonadFreshNames PassM where
 -- | Execute a 'PassM' action, yielding logging information and either
 -- an error text or a result.
 runPassM :: MonadFreshNames m =>
-            PassM a -> m (Either T.Text a, Log)
+            PassM a -> m (Either InternalError a, Log)
 runPassM (PassM m) = modifyNameSource $ \src ->
   runState (runWriterT $ runExceptT m) src
 
 -- | Turn an 'Either' computation into a 'PassM'.  If the 'Either' is
--- 'Left', the result is an exception.
+-- 'Left', the result is a 'CompilerBug'.
 liftEither :: Show err => Either err a -> PassM a
-liftEither (Left e)  = throwError $ T.pack $ show e
+liftEither (Left e)  = compilerBugS $ show e
 liftEither (Right v) = return v
 
 -- | Turn an 'Either' monadic computation into a 'PassM'.  If the 'Either' is

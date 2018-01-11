@@ -12,6 +12,7 @@ import Data.Maybe
 import Data.List
 import Data.Monoid
 
+import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util
@@ -27,13 +28,13 @@ expandAllocations =
   Pass "expand allocations" "Expand allocations" $
   intraproceduralTransformation transformFunDef
 
-transformFunDef :: MonadFreshNames m => FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
+transformFunDef :: FunDef ExplicitMemory -> PassM (FunDef ExplicitMemory)
 transformFunDef fundec = do
-  body' <- modifyNameSource $ runState m
+  body' <- either throwError return <=< modifyNameSource $ runState $ runExceptT m
   return fundec { funDefBody = body' }
   where m = transformBody $ funDefBody fundec
 
-type ExpandM = State VNameSource
+type ExpandM = ExceptT InternalError (State VNameSource)
 
 transformBody :: Body ExplicitMemory -> ExpandM (Body ExplicitMemory)
 transformBody (Body () bnds res) = do
@@ -50,9 +51,10 @@ transformStm (Let pat aux e) = do
 
 transformExp :: Exp ExplicitMemory -> ExpandM (Stms ExplicitMemory, Exp ExplicitMemory)
 
-transformExp (Op (Inner (Kernel desc space ts kbody)))
-  | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
-
+transformExp (Op (Inner (Kernel desc space ts kbody))) =
+  case extractKernelBodyAllocations bound_in_kernel kbody of
+    Left err -> compilerLimitationS err
+    Right (kbody', thread_allocs) -> do
       num_threads64 <- newVName "num_threads64"
       let num_threads64_pat = Pattern [] [PatElem num_threads64 $ MemPrim int64]
           num_threads64_bnd = Let num_threads64_pat (defAux ()) $ BasicOp $
