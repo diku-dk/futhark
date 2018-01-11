@@ -472,7 +472,7 @@ checkProg prog = do
           ftable <- buildFtable
           local (\env -> env { envFtable = ftable }) $
             checkFun fun
-  sequence_ $ parMap rseq onFunction $ progFunctions prog'
+  sequence_ $ parMap rpar onFunction $ progFunctions prog'
   where
     prog' = aliasAnalysis prog
     -- To build the ftable we loop through the list of function
