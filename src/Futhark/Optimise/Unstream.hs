@@ -18,11 +18,8 @@ import Futhark.Pass
 import Futhark.Tools
 
 unstream :: Pass Kernels Kernels
-unstream =
-  Pass { passName = "unstream"
-       , passDescription = "Remove whole-array streams in kernels"
-       , passFunction = intraproceduralTransformation optimiseFunDef
-       }
+unstream = Pass "unstream" "Remove whole-array streams in kernels" $
+           intraproceduralTransformation optimiseFunDef
 
 optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 optimiseFunDef fundec = do

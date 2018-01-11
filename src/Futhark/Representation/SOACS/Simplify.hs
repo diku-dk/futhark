@@ -6,7 +6,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 module Futhark.Representation.SOACS.Simplify
        ( simplifySOACS
-       , simplifyFun
        , simplifyLambda
        , simplifyStms
 
@@ -33,13 +32,14 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.ClosedForm
 import Futhark.Optimise.Simplify.Lore
 import Futhark.Tools
+import Futhark.Pass
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 
 simpleSOACS :: Simplify.SimpleOps SOACS
 simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
 
-simplifySOACS :: MonadFreshNames m => Prog -> m Prog
+simplifySOACS :: Prog -> PassM Prog
 simplifySOACS =
   Simplify.simplifyProg simpleSOACS soacRules blockers
   where blockers =
@@ -58,10 +58,6 @@ getShapeNames bnd =
   let tps1 = map patElemType $ patternElements $ stmPattern bnd
       tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
   in  S.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
-
-simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
-simplifyFun =
-  Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
                   Lambda -> [Maybe VName] -> m Lambda

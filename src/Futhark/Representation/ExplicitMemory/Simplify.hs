@@ -29,6 +29,7 @@ import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Optimise.Simplify as Simplify
 import Futhark.Construct
+import Futhark.Pass
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Lore
@@ -40,7 +41,7 @@ simpleExplicitMemory = simplifiable (simplifyKernelOp simpleInKernel inKernelEnv
 simpleInKernel :: Simplify.SimpleOps InKernel
 simpleInKernel = simplifiable simplifyKernelExp
 
-simplifyExplicitMemory :: MonadFreshNames m => Prog ExplicitMemory -> m (Prog ExplicitMemory)
+simplifyExplicitMemory :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
 simplifyExplicitMemory =
   Simplify.simplifyProg simpleExplicitMemory callKernelRules blockers
 

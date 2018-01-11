@@ -18,7 +18,7 @@ import Futhark.Optimise.MemoryBlockMerging.OverviewPrint (overviewPrintProg)
 -- | Apply the coalescing part of the memory block merging optimisation.
 memoryBlockMergingCoalescing :: Pass ExplicitMemory ExplicitMemory
 memoryBlockMergingCoalescing =
-  simplePass
+  Pass
   "Memory block merging (coalescing)"
   "Coalesce the memory blocks of arrays"
   coalesceInProg
@@ -26,7 +26,7 @@ memoryBlockMergingCoalescing =
 -- | Apply the coalescing part of the memory block merging optimisation.
 memoryBlockMergingReuse :: Pass ExplicitMemory ExplicitMemory
 memoryBlockMergingReuse =
-  simplePass
+  Pass
   "Memory block merging (reuse)"
   "Reuse the memory blocks of arrays"
   (maybeOverviewPrint reuseInProg)

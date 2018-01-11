@@ -22,11 +22,8 @@ import Futhark.Tools
 import Futhark.Util (mapAccumLM)
 
 tileLoops :: Pass Kernels Kernels
-tileLoops =
-  Pass { passName = "tile loops"
-       , passDescription = "Tile stream loops inside kernels"
-       , passFunction = intraproceduralTransformation optimiseFunDef
-       }
+tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
+            intraproceduralTransformation optimiseFunDef
 
 optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 optimiseFunDef fundec = do

@@ -33,10 +33,7 @@ import qualified Data.Set as S
 import           Data.Maybe
 import           Data.List
 
-import           Prelude
-
 import           Futhark.MonadFreshNames
-import           Futhark.Tools (intraproceduralTransformation)
 import           Futhark.Representation.AST
 import           Futhark.Representation.ExplicitMemory
                  hiding (Prog, Body, Stm, Pattern, PatElem,
@@ -56,7 +53,7 @@ doubleBuffer =
 -- Thus, the environment is parametrised by the lore and contains the
 -- function used to transform 'Op's for the lore.
 
-optimiseFunDef :: MonadFreshNames m => FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
+optimiseFunDef :: FunDef ExplicitMemory -> PassM (FunDef ExplicitMemory)
 optimiseFunDef fundec = modifyNameSource $ \src ->
   let m = runDoubleBufferM $ inScopeOf fundec $ optimiseBody $ funDefBody fundec
       (body', src') = runState (runReaderT m env) src
