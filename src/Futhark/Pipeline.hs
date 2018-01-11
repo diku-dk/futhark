@@ -133,5 +133,5 @@ runPass :: PrettyLore fromlore =>
 runPass pass prog = do
   (res, logged) <- runPassM (passFunction pass prog)
   addLog logged
-  case res of Left err -> throwError $ InternalError err (prettyText prog) CompilerBug
+  case res of Left err -> internalError err $ prettyText prog
               Right x  -> return x
