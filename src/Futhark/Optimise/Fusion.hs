@@ -166,24 +166,20 @@ fuseSOACs :: Pass SOACS SOACS
 fuseSOACs =
   Pass { passName = "Fuse SOACs"
        , passDescription = "Perform higher-order optimisation, i.e., fusion."
-       , passFunction = fuseProg
+       , passFunction = simplifySOACS <=< renameProg <=< intraproceduralTransformation fuseFun
        }
 
-fuseProg :: Prog -> PassM Prog
-fuseProg prog = do
+fuseFun :: FunDef -> PassM FunDef
+fuseFun fun = do
   let env  = FusionGEnv { soacs = M.empty
                         , varsInScope = M.empty
                         , fusedRes = mempty
                         }
-      funs = progFunctions prog
-  ks <- liftEitherM $ runFusionGatherM (mapM fusionGatherFun funs) env
-  let ks'    = map cleanFusionResult ks
-  let succc = any rsucc ks'
-  if not succc
-  then return prog
-  else do funs' <- liftEitherM $ runFusionGatherM (zipWithM fuseInFun ks' funs) env
-          cleanup =<< renameProg (Prog funs')
-  where cleanup = simplifySOACS <=< simplifySOACS
+  k <- cleanFusionResult <$>
+       liftEitherM (runFusionGatherM (fusionGatherFun fun) env)
+  if not $ rsucc k
+  then return fun
+  else liftEitherM $ runFusionGatherM (fuseInFun k fun) env
 
 fusionGatherFun :: FunDef -> FusionGM FusedRes
 fusionGatherFun fundec =
