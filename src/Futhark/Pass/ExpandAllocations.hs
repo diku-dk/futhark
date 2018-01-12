@@ -15,7 +15,6 @@ import Data.Monoid
 import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Util
 import Futhark.Pass
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
@@ -51,23 +50,30 @@ transformStm (Let pat aux e) = do
 
 transformExp :: Exp ExplicitMemory -> ExpandM (Stms ExplicitMemory, Exp ExplicitMemory)
 
-transformExp (Op (Inner (Kernel desc space ts kbody))) =
-  case extractKernelBodyAllocations bound_in_kernel kbody of
-    Left err -> compilerLimitationS err
-    Right (kbody', thread_allocs) -> do
-      num_threads64 <- newVName "num_threads64"
-      let num_threads64_pat = Pattern [] [PatElem num_threads64 $ MemPrim int64]
-          num_threads64_bnd = Let num_threads64_pat (defAux ()) $ BasicOp $
-                              ConvOp (SExt Int32 Int64) (spaceNumThreads space)
+transformExp (Op (Inner (Kernel desc space ts kbody))) = do
+  let (kbody', allocs) = extractKernelBodyAllocations kbody
+      variantAlloc (Var v) = v `S.member` bound_in_kernel
+      variantAlloc _ = False
+      (variant_allocs, invariant_allocs) = M.partition (variantAlloc . fst) allocs
 
-      (alloc_bnds, alloc_offsets) <-
-        expandedAllocations
-        (Var num_threads64, spaceNumGroups space, spaceGroupSize space)
-        (spaceGlobalId space, spaceGroupId space, spaceLocalId space) thread_allocs
-      let kbody'' = offsetMemoryInKernelBody alloc_offsets kbody'
+  case M.toList variant_allocs of
+    (m, (Var v, _)) : _ -> compilerLimitationS $ "Size " ++ pretty v ++
+                           " for block " ++ pretty m ++ " is not lambda-invariant"
+    _ -> return ()
 
-      return (oneStm num_threads64_bnd <> alloc_bnds,
-              Op $ Inner $ Kernel desc space ts kbody'')
+  num_threads64 <- newVName "num_threads64"
+  let num_threads64_pat = Pattern [] [PatElem num_threads64 $ MemPrim int64]
+      num_threads64_bnd = Let num_threads64_pat (defAux ()) $ BasicOp $
+                          ConvOp (SExt Int32 Int64) (spaceNumThreads space)
+
+  (alloc_bnds, alloc_offsets) <-
+    expandedAllocations
+    (Var num_threads64, spaceNumGroups space, spaceGroupSize space)
+    (spaceGlobalId space, spaceGroupId space, spaceLocalId space) invariant_allocs
+  let kbody'' = offsetMemoryInKernelBody alloc_offsets kbody'
+
+  return (oneStm num_threads64_bnd <> alloc_bnds,
+          Op $ Inner $ Kernel desc space ts kbody'')
 
   where bound_in_kernel =
           S.fromList $ M.keys $ scopeOfKernelSpace space <>
@@ -78,35 +84,27 @@ transformExp e =
 
 -- | Extract allocations from 'Thread' statements with
 -- 'extractThreadAllocations'.
-extractKernelBodyAllocations :: Names -> KernelBody InKernel
-                             -> Either String (KernelBody InKernel,
-                                               M.Map VName (SubExp, Space))
-extractKernelBodyAllocations bound_before_body kbody = do
-  (allocs, stms) <- mapAccumLM extract M.empty $ stmsToList $ kernelBodyStms kbody
-  return (kbody { kernelBodyStms = mconcat stms }, allocs)
-  where extract allocs bnd = do
-          (bnds, body_allocs) <- extractThreadAllocations bound_before_body $ oneStm bnd
-          return (allocs <> body_allocs, bnds)
+extractKernelBodyAllocations :: KernelBody InKernel
+                             -> (KernelBody InKernel,
+                                 M.Map VName (SubExp, Space))
+extractKernelBodyAllocations kbody =
+  let (allocs, stms) = mapAccumL extract M.empty $ stmsToList $ kernelBodyStms kbody
+  in (kbody { kernelBodyStms = mconcat stms }, allocs)
+  where extract allocs bnd =
+          let (bnds, body_allocs) = extractThreadAllocations $ oneStm bnd
+          in (allocs <> body_allocs, bnds)
 
-extractThreadAllocations :: Names -> Stms InKernel
-                         -> Either String (Stms InKernel, M.Map VName (SubExp, Space))
-extractThreadAllocations bound_before_body bnds = do
-  (allocs, bnds') <- mapAccumLM isAlloc M.empty $ stmsToList bnds
-  return (stmsFromList $ catMaybes bnds', allocs)
-  where bound_here = bound_before_body `S.union` boundByStms bnds
-
-        isAlloc _ (Let (Pattern [] [patElem]) _ (Op (Alloc (Var v) _)))
-          | v `S.member` bound_here =
-            throwError $ "Size " ++ pretty v ++
-            " for block " ++ pretty patElem ++
-            " is not lambda-invariant"
-
-        isAlloc allocs (Let (Pattern [] [patElem]) _ (Op (Alloc size space))) =
-          return (M.insert (patElemName patElem) (size, space) allocs,
-                  Nothing)
+extractThreadAllocations :: Stms InKernel
+                         -> (Stms InKernel, M.Map VName (SubExp, Space))
+extractThreadAllocations bnds =
+  let (allocs, bnds') = mapAccumL isAlloc M.empty $ stmsToList bnds
+  in (stmsFromList $ catMaybes bnds', allocs)
+  where isAlloc allocs (Let (Pattern [] [patElem]) _ (Op (Alloc size space))) =
+          (M.insert (patElemName patElem) (size, space) allocs,
+           Nothing)
 
         isAlloc allocs bnd =
-          return (allocs, Just bnd)
+          (allocs, Just bnd)
 
 expandedAllocations :: (SubExp,SubExp, SubExp)
                     -> (VName, VName, VName)
