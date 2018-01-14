@@ -52,6 +52,7 @@ module Futhark.CodeGen.ImpGen
   , withPrimVar
   , everythingVolatile
   , compileBody
+  , compileLoopBody
   , defCompileBody
   , compileStms
   , compileExp
