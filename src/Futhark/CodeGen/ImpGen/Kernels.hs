@@ -891,7 +891,8 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
         Just stms' | ValueExp x <- max_block_size, oneIsh x -> do
           let body' = body { bodyStms = stmsFromList stms' }
           body'' <- ImpGen.withPrimVar block_offset int32 $
-                    allThreads constants $ ImpGen.compileBody acc_dest body'
+                    allThreads constants $ ImpGen.emit =<<
+                    ImpGen.compileLoopBody (map paramName acc_params) body'
           ImpGen.emit $ Imp.SetScalar block_size 1
 
           -- Check if loop is candidate for unrolling.
