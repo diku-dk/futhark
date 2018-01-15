@@ -59,6 +59,7 @@ import Data.Monoid
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.Semigroup as Sem
+import Data.Traversable
 
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
@@ -248,9 +249,14 @@ data ParamT attr = Param
 -- | A type alias for namespace control.
 type Param = ParamT
 
-instance Functor ParamT where
-  fmap f (Param name attr) = Param name (f attr)
+instance Foldable ParamT where
+  foldMap = foldMapDefault
 
+instance Functor ParamT where
+  fmap = fmapDefault
+
+instance Traversable ParamT where
+  traverse f (Param name attr) = Param name <$> f attr
 
 -- | How to index a single dimension of an array.
 data DimIndex d = DimFix
