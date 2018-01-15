@@ -879,6 +879,6 @@ regularSegmentedScan segment_size pat w lam fold_lam ispace inps nes arrs = do
                                           (arrayOf (Prim Bool) (Shape [w]) NoUniqueness) :
                                           patternValueElements pat
                  }
-  blockedScan pat' w lam' fold_lam' segment_size ispace inps (false:nes) (flags:arrs)
+  void $ blockedScan pat' w lam' fold_lam' segment_size ispace inps (false:nes) (flags:arrs)
   where zero = constant (0 :: Int32)
         false = constant False
