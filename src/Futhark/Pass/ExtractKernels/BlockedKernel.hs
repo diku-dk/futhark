@@ -702,6 +702,11 @@ blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
     scanKernel2 second_scan_size
     second_scan_lam (zip nes group_carry_out)
 
+  last_group <- letSubExp "last_group" $ BasicOp $ BinOp (Sub Int32) num_groups one
+  carries <- forM group_carry_out_scanned $ \carry_outs -> do
+    arr_t <- lookupType carry_outs
+    letExp "carry_out" $ BasicOp $ Index carry_outs $ fullSlice arr_t [DimFix last_group]
+
   lam''' <- renameLambda lam
   j <- newVName "j"
   let (acc_params, arr_params) =
@@ -735,15 +740,13 @@ blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
         do_nothing
         add_carry_in
     return $ resultBody $ map Var group_lasts
+
   (mapk_bnds, mapk) <- mapKernelFromBody w (FlatThreadSpace [(j, w)]) result_map_input
                        (lambdaReturnType lam) result_map_body
   addStms mapk_bnds
   letBind_ final_res_pat $ Op mapk
 
-  last_group <- letSubExp "last_group" $ BasicOp $ BinOp (Sub Int32) num_groups one
-  forM group_carry_out_scanned $ \carry_outs -> do
-    arr_t <- lookupType carry_outs
-    letExp "carry_out" $ BasicOp $ Index carry_outs $ fullSlice arr_t [DimFix last_group]
+  return carries
   where one = constant (1 :: Int32)
         zero = constant (0 :: Int32)
 
