@@ -641,12 +641,15 @@ scanKernel2 scan_sizes lam input = do
   return $ Kernel (KernelDebugHints "scan2" []) kspace (lambdaReturnType lam) $ KernelBody () stms res
   where group_size = kernelWorkgroupSize scan_sizes
 
+-- | The 'VName's returned are the names of variables bound to the
+-- carry-out of the last thread.  You can ignore them if you don't
+-- need them.
 blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                Pattern Kernels
             -> SubExp -> Lambda InKernel -> Lambda InKernel
             -> SubExp -> [(VName, SubExp)] -> [KernelInput]
             -> [SubExp] -> [VName]
-            -> m ()
+            -> m [VName]
 blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
   (_, first_scan_size) <- blockedKernelSize w
   my_index <- newVName "my_index"
@@ -736,6 +739,11 @@ blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
                        (lambdaReturnType lam) result_map_body
   addStms mapk_bnds
   letBind_ final_res_pat $ Op mapk
+
+  last_group <- letSubExp "last_group" $ BasicOp $ BinOp (Sub Int32) num_groups one
+  forM group_carry_out_scanned $ \carry_outs -> do
+    arr_t <- lookupType carry_outs
+    letExp "carry_out" $ BasicOp $ Index carry_outs $ fullSlice arr_t [DimFix last_group]
   where one = constant (1 :: Int32)
         zero = constant (0 :: Int32)
 
