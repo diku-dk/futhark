@@ -32,6 +32,7 @@ module Futhark.Representation.AST.Attributes.Scope
        , extendedScope
        ) where
 
+import Control.Monad.Except
 import Control.Monad.Reader
 import qualified Control.Monad.RWS.Strict
 import qualified Control.Monad.RWS.Lazy
@@ -94,6 +95,9 @@ instance (Applicative m, Monad m, Annotations lore) =>
          HasScope lore (ReaderT (Scope lore) m) where
   askScope = ask
 
+instance (Monad m, HasScope lore m) => HasScope lore (ExceptT e m) where
+  askScope = lift askScope
+
 instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
          HasScope lore (Control.Monad.RWS.Strict.RWST (Scope lore) w s m) where
   askScope = ask
@@ -110,6 +114,9 @@ class (HasScope lore m, Monad m) => LocalScope lore m where
   -- this is intended to *add* to the current type environment, it
   -- does not replace it.
   localScope :: Scope lore -> m a -> m a
+
+instance (Monad m, LocalScope lore m) => LocalScope lore (ExceptT e m) where
+  localScope = mapExceptT . localScope
 
 instance (Applicative m, Monad m, Annotations lore) =>
          LocalScope lore (ReaderT (Scope lore) m) where
