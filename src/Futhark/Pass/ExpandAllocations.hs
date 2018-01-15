@@ -117,12 +117,7 @@ expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, grou
 
   -- Fix every reference to the memory blocks to be offset by the
   -- thread number.
-  let alloc_offsets =
-        RebaseMap { rebaseMap = mconcat rebase_map
-                  , indexVariable = (group_id, local_id)
-                  , kernelWidth = (num_groups, group_size)
-                  }
-  return (mconcat alloc_bnds, alloc_offsets)
+  return (mconcat alloc_bnds, mconcat rebase_map)
   where expand (mem, (per_thread_size, Space "local")) = do
           let allocpat = Pattern [] [PatElem mem $
                                      MemMem per_thread_size $ Space "local"]
@@ -155,15 +150,10 @@ expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, grou
                              map untouched old_shape
           in offset_ixfun
 
-data RebaseMap = RebaseMap {
-    rebaseMap :: M.Map VName ([PrimExp VName] -> IxFun)
-    -- ^ A map from memory block names to new index function bases.
-  , indexVariable :: (VName, VName)
-  , kernelWidth :: (SubExp, SubExp)
-  }
+type RebaseMap = M.Map VName ([PrimExp VName] -> IxFun)
 
 lookupNewBase :: VName -> [PrimExp VName] -> RebaseMap -> Maybe IxFun
-lookupNewBase name dims = fmap ($dims) . M.lookup name . rebaseMap
+lookupNewBase name dims = fmap ($dims) . M.lookup name
 
 offsetMemoryInKernelBody :: RebaseMap -> KernelBody InKernel
                          -> KernelBody InKernel
