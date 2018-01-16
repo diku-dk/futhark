@@ -93,11 +93,14 @@ blockers = Engine.HoistBlockers {
 
 callKernelRules :: RuleBook (Wise ExplicitMemory)
 callKernelRules = standardRules <>
-                  ruleBook [RuleBasicOp copyCopyToCopy] []
+                  ruleBook [RuleBasicOp copyCopyToCopy,
+                            RuleBasicOp removeIdentityCopy] []
 
 inKernelRules :: RuleBook (Wise InKernel)
 inKernelRules = standardRules <>
-                ruleBook [RuleBasicOp copyCopyToCopy, RuleIf unExistentialiseMemory] []
+                ruleBook [RuleBasicOp copyCopyToCopy,
+                          RuleBasicOp removeIdentityCopy,
+                          RuleIf unExistentialiseMemory] []
 
 -- | If a branch is returning some existential memory, but the size of
 -- the array is existential, then we can create a block of the proper
@@ -190,3 +193,17 @@ copyCopyToCopy vtable pat _ (Copy v0)
       letBind_ pat $ BasicOp $ Copy v0'
 
 copyCopyToCopy _ _ _ _ = cannotSimplify
+
+-- | If the destination of a copy is the same as the source, just
+-- remove it.
+removeIdentityCopy :: (BinderOps lore,
+                       LetAttr lore ~ (VarWisdom, MemBound u)) =>
+                      TopDownRuleBasicOp lore
+removeIdentityCopy vtable (pat@(Pattern [] [pe])) _ (Copy v)
+  | (_, MemArray _ _ _ (ArrayIn dest_mem dest_ixfun)) <- patElemAttr pe,
+    Just (_, MemArray _ _ _ (ArrayIn src_mem src_ixfun)) <-
+      ST.entryLetBoundAttr =<< ST.lookup v vtable,
+    dest_mem == src_mem, dest_ixfun == src_ixfun =
+      letBind_ pat $ BasicOp $ SubExp $ Var v
+
+removeIdentityCopy _ _ _ _ = cannotSimplify
