@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase #-}
 module Futhark.Representation.ExplicitMemory.Simplify
        ( simplifyExplicitMemory
+       , simplifyStms
        )
 where
 
@@ -44,6 +45,11 @@ simpleInKernel = simplifiable simplifyKernelExp
 simplifyExplicitMemory :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
 simplifyExplicitMemory =
   Simplify.simplifyProg simpleExplicitMemory callKernelRules blockers
+
+simplifyStms :: (HasScope ExplicitMemory m, MonadFreshNames m) =>
+                Stms ExplicitMemory -> m (Stms ExplicitMemory)
+simplifyStms =
+  Simplify.simplifyStms simpleExplicitMemory callKernelRules Engine.noExtraHoistBlockers
 
 isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
 isAlloc _ (Let _ _ (Op Alloc{})) = True

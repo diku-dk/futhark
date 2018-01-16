@@ -6,8 +6,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 module Futhark.Representation.Kernels.Simplify
        ( simplifyKernels
-
-       , simpleKernels
+       , simplifyLambda
 
        -- * Building blocks
        , simplifyKernelOp
@@ -47,6 +46,11 @@ simplifyKernels :: Prog Kernels -> PassM (Prog Kernels)
 simplifyKernels =
   Simplify.simplifyProg simpleKernels kernelRules Simplify.noExtraHoistBlockers
 
+simplifyLambda :: (HasScope InKernel m, MonadFreshNames m) =>
+                  Lambda InKernel -> [Maybe VName] -> m (Lambda InKernel)
+simplifyLambda =
+  Simplify.simplifyLambda simpleInKernel inKernelRules Engine.noExtraHoistBlockers
+
 simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      Engine.SimplifiableLore outerlore,
                      BodyAttr outerlore ~ (), BodyAttr lore ~ (),
@@ -68,7 +72,7 @@ simplifyKernelOp ops env (Kernel desc space ts kbody) = do
                         `Engine.orIf` Engine.isOp
                         `Engine.orIf` par_blocker
                         `Engine.orIf` Engine.isConsumed) $
-        simplifyKernelBody kbody
+        simplifyKernelBodyM kbody
   when again Engine.changed
   kbody_hoisted' <- mapM processHoistedStm kbody_hoisted
   return (Kernel desc space' ts' $ mkWiseKernelBody () kbody_stms kbody_res,
@@ -156,10 +160,10 @@ simplifyKernelExp (GroupStream w maxchunk lam accs arrs) = do
   (lam', hoisted) <- simplifyGroupStreamLambda lam w' maxchunk' arrs'
   return (GroupStream w' maxchunk' lam' accs' arrs', hoisted)
 
-simplifyKernelBody :: Engine.SimplifiableLore lore =>
-                      KernelBody lore
-                   -> Engine.SimpleM lore (Engine.SimplifiedBody lore [KernelResult])
-simplifyKernelBody (KernelBody _ stms res) =
+simplifyKernelBodyM :: Engine.SimplifiableLore lore =>
+                       KernelBody lore
+                    -> Engine.SimpleM lore (Engine.SimplifiedBody lore [KernelResult])
+simplifyKernelBodyM (KernelBody _ stms res) =
   Engine.simplifyStms stms $ do res' <- mapM Engine.simplify res
                                 return ((res', UT.usages $ freeIn res'), mempty)
 
