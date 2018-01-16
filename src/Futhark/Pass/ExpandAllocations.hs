@@ -203,7 +203,7 @@ expandedVariantAllocations kspace kbody variant_allocs = do
           let pt_size = fromInt32 $ primByteSize pt
               offset' = ConvOpExp (SExt Int64 Int32) (primExpFromSubExp int64 offset)
                         `quot` pt_size
-              total_size' = ConvOpExp (SExt Int64 Int32) $ primExpFromSubExp int32 total_size
+              total_size' = ConvOpExp (SExt Int64 Int32) $ primExpFromSubExp int64 total_size
               ixfun_root = IxFun.iota [total_size' `quot` pt_size]
               ixfun_sliced = IxFun.offsetIndex ixfun_root offset'
               shape_change = if length old_shape == 1
