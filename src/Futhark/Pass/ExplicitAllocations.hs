@@ -4,6 +4,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Futhark.Pass.ExplicitAllocations
        ( explicitAllocations
+       , explicitAllocationsInStms
        , simplifiable
 
        , arraySizeInBytesExp
@@ -507,6 +508,12 @@ explicitAllocations =
   Pass "explicit allocations" "Transform program to explicit memory representation" $
   intraproceduralTransformation allocInFun
 
+explicitAllocationsInStms :: (MonadFreshNames m, HasScope ExplicitMemory m) =>
+                             Stms Kernels -> m (Stms ExplicitMemory)
+explicitAllocationsInStms stms = do
+  scope <- askScope
+  runAllocM handleKernel $ localScope scope $ allocInStms stms return
+
 memoryInRetType :: [RetType Kernels] -> [RetType ExplicitMemory]
 memoryInRetType ts = evalState (mapM addAttr ts) $ startOfFreeIDRange ts
   where addAttr (Prim t) = return $ MemPrim t
@@ -524,40 +531,41 @@ startOfFreeIDRange = S.size . shapeContext
 
 allocInFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef ExplicitMemory)
 allocInFun (FunDef entry fname rettype params fbody) =
-  runAllocM handleOp $
+  runAllocM handleKernel $
   allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
     fbody' <- insertStmsM $ allocInFunBody (length rettype) fbody
     return $ FunDef entry fname (memoryInRetType rettype) params' fbody'
-    where handleOp (GetSize key size_class) =
-            return $ Inner $ GetSize key size_class
-          handleOp (GetSizeMax size_class) =
-            return $ Inner $ GetSizeMax size_class
-          handleOp (Kernel desc space ts kbody) = subAllocM handleKernelExp True $
-            Inner . Kernel desc space ts <$>
-            localScope (scopeOfKernelSpace space)
-            (allocInKernelBody kbody)
 
-          handleKernelExp (SplitSpace o w i elems_per_thread) =
-            return $ Inner $ SplitSpace o w i elems_per_thread
-          handleKernelExp (Combine cspace ts active body) =
-            Inner . Combine cspace ts active <$> allocInBodyNoDirect body
-          handleKernelExp (GroupReduce w lam input) = do
-            summaries <- mapM lookupArraySummary arrs
-            lam' <- allocInReduceLambda lam summaries
-            return $ Inner $ GroupReduce w lam' input
-            where arrs = map snd input
-          handleKernelExp (GroupScan w lam input) = do
-            summaries <- mapM lookupArraySummary arrs
-            lam' <- allocInReduceLambda lam summaries
-            return $ Inner $ GroupScan w lam' input
-            where arrs = map snd input
-          handleKernelExp (GroupStream w maxchunk lam accs arrs) = do
-            acc_summaries <- mapM accSummary accs
-            arr_summaries <- mapM lookupArraySummary arrs
-            lam' <- allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries
-            return $ Inner $ GroupStream w maxchunk lam' accs arrs
-            where accSummary (Constant v) = return $ MemPrim $ primValueType v
-                  accSummary (Var v) = lookupMemInfo v
+handleKernel :: Kernel InInKernel
+             -> AllocM fromlore2 ExplicitMemory (MemOp (Kernel OutInKernel))
+handleKernel (GetSize key size_class) =
+  return $ Inner $ GetSize key size_class
+handleKernel (GetSizeMax size_class) =
+  return $ Inner $ GetSizeMax size_class
+handleKernel (Kernel desc space kernel_ts kbody) = subAllocM handleKernelExp True $
+  Inner . Kernel desc space kernel_ts <$>
+  localScope (scopeOfKernelSpace space) (allocInKernelBody kbody)
+  where handleKernelExp (SplitSpace o w i elems_per_thread) =
+          return $ Inner $ SplitSpace o w i elems_per_thread
+        handleKernelExp (Combine cspace ts active body) =
+          Inner . Combine cspace ts active <$> allocInBodyNoDirect body
+        handleKernelExp (GroupReduce w lam input) = do
+          summaries <- mapM lookupArraySummary arrs
+          lam' <- allocInReduceLambda lam summaries
+          return $ Inner $ GroupReduce w lam' input
+          where arrs = map snd input
+        handleKernelExp (GroupScan w lam input) = do
+          summaries <- mapM lookupArraySummary arrs
+          lam' <- allocInReduceLambda lam summaries
+          return $ Inner $ GroupScan w lam' input
+          where arrs = map snd input
+        handleKernelExp (GroupStream w maxchunk lam accs arrs) = do
+          acc_summaries <- mapM accSummary accs
+          arr_summaries <- mapM lookupArraySummary arrs
+          lam' <- allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries
+          return $ Inner $ GroupStream w maxchunk lam' accs arrs
+          where accSummary (Constant v) = return $ MemPrim $ primValueType v
+                accSummary (Var v) = lookupMemInfo v
 
 allocInBodyNoDirect :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                        Body fromlore -> AllocM fromlore tolore (Body tolore)
