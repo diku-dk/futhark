@@ -52,10 +52,9 @@ blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                        -> SubExp
                        -> Commutativity
                        -> Lambda InKernel -> Lambda InKernel
-                       -> [SubExp]
-                       -> [VName]
+                       -> [(VName, SubExp)] -> [SubExp] -> [VName]
                        -> m (Stms Kernels)
-blockedReductionStream pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
+blockedReductionStream pat w comm reduce_lam fold_lam ispace nes arrs = runBinder_ $ do
   (max_step_one_num_groups, step_one_size) <- blockedKernelSize w
 
   let one = constant (1 :: Int32)
@@ -89,7 +88,8 @@ blockedReductionStream pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
       letExp (baseString arr <> "_copy") $ BasicOp $ Copy arr
     else return arr
 
-  step_one <- chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' nes arrs_copies
+  step_one <- chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam'
+              ispace nes arrs_copies
   addStm =<< renameStm (Let step_one_pat (defAux ()) $ Op step_one)
 
   step_two_pat <- basicPattern [] <$>
@@ -112,19 +112,16 @@ chunkedReduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
                        SubExp
                     -> KernelSize
                     -> Commutativity
-                    -> Lambda InKernel
-                    -> Lambda InKernel
-                    -> [SubExp]
-                    -> [VName]
+                    -> Lambda InKernel -> Lambda InKernel
+                    -> [(VName, SubExp)] -> [SubExp] -> [VName]
                     -> m (Kernel InKernel)
-chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' nes arrs = do
+chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' ispace nes arrs = do
   let ordering = case comm of Commutative -> Disorder
                               Noncommutative -> InOrder
       group_size = kernelWorkgroupSize step_one_size
       num_nonconcat = length nes
 
-  space <- newKernelSpace (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size) $
-           FlatThreadSpace []
+  space <- newKernelSpace (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size) $ FlatThreadSpace ispace
   ((chunk_red_pes, chunk_map_pes), chunk_and_fold) <-
     runBinder $ blockedPerThread (spaceGlobalId space)
     w step_one_size ordering fold_lam' num_nonconcat arrs
@@ -172,7 +169,7 @@ reduceKernel step_two_size reduce_lam' nes arrs = do
            FlatThreadSpace []
   let thread_id = spaceGlobalId space
 
-  (rets, kstms) <- runBinder $ do
+  (rets, kstms) <- runBinder $ localScope (scopeOfKernelSpace space) $ do
     in_bounds <- letSubExp "in_bounds" $ BasicOp $ CmpOp (CmpSlt Int32)
                  (Var $ spaceLocalId space)
                  (kernelTotalElements step_two_size)
@@ -284,10 +281,9 @@ blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                  -> SubExp
                  -> Commutativity
                  -> Lambda InKernel -> Lambda InKernel
-                 -> [SubExp]
-                 -> [VName]
+                 -> [(VName, SubExp)] -> [SubExp] -> [VName]
                  -> m (Stms Kernels)
-blockedReduction pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
+blockedReduction pat w comm reduce_lam fold_lam ispace nes arrs = runBinder_ $ do
   fold_lam' <- chunkLambda pat nes fold_lam
 
   let arr_idents = drop (length nes) $ patternIdents pat
@@ -296,8 +292,8 @@ blockedReduction pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
     BasicOp $ Scratch (elemType t) (arrayDims t)
 
   addStms =<<
-    blockedReductionStream pat w comm reduce_lam fold_lam' nes
-    (arrs ++ map_out_arrs)
+    blockedReductionStream pat w comm reduce_lam fold_lam'
+    ispace nes (arrs ++ map_out_arrs)
 
 blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
               Pattern Kernels -> SubExp

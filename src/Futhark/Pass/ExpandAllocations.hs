@@ -27,7 +27,7 @@ import qualified Futhark.Representation.ExplicitMemory.Simplify as ExplicitMemor
 import qualified Futhark.Representation.Kernels as Kernels
 import Futhark.Representation.Kernels.Simplify as Kernels
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
-import Futhark.Pass.ExtractKernels.BlockedKernel (blockedScan)
+import Futhark.Pass.ExtractKernels.BlockedKernel (blockedReduction)
 import Futhark.Pass.ExplicitAllocations (explicitAllocationsInStms)
 import Futhark.Util.IntegralExp
 
@@ -78,12 +78,12 @@ transformExp (Op (Inner (Kernel desc kspace ts kbody))) = do
     (Var num_threads64, spaceNumGroups kspace, spaceGroupSize kspace)
     (spaceGlobalId kspace, spaceGroupId kspace, spaceLocalId kspace) invariant_allocs
 
-  (variant_alloc_stms, kernel_prologue_stms, variant_alloc_offsets) <-
+  (variant_alloc_stms, variant_alloc_offsets) <-
     expandedVariantAllocations kspace kbody variant_allocs
 
   let alloc_offsets = invariant_alloc_offsets <> variant_alloc_offsets
       kbody'' = offsetMemoryInKernelBody alloc_offsets
-                kbody' { kernelBodyStms = kernel_prologue_stms <> kernelBodyStms kbody' }
+                kbody' { kernelBodyStms = kernelBodyStms kbody' }
       alloc_stms = invariant_alloc_stms <> variant_alloc_stms
 
   return (oneStm num_threads64_bnd <> alloc_stms,
@@ -166,14 +166,14 @@ expandedInvariantAllocations (num_threads64, num_groups, group_size)
 
 expandedVariantAllocations :: KernelSpace -> KernelBody InKernel
                            -> M.Map VName (SubExp, Space)
-                           -> ExpandM (Stms ExplicitMemory, Stms InKernel, RebaseMap)
+                           -> ExpandM (Stms ExplicitMemory, RebaseMap)
 expandedVariantAllocations _ _ variant_allocs
-  | null variant_allocs = return (mempty, mempty, mempty)
+  | null variant_allocs = return (mempty, mempty)
 expandedVariantAllocations kspace kbody variant_allocs = do
   let sizes_to_blocks = removeCommonSizes variant_allocs
       variant_sizes = map fst sizes_to_blocks
 
-  (slice_stms, offsets, size_sums, offset_stms) <-
+  (slice_stms, offsets, size_sums) <-
     sliceKernelSizes variant_sizes kspace kbody
   -- Note the recursive call to expand allocations inside the newly
   -- produced kernels.
@@ -190,26 +190,31 @@ expandedVariantAllocations kspace kbody variant_allocs = do
   -- equal to the sum of the sizes required by different threads.
   (alloc_bnds, rebases) <- unzip <$> mapM expand variant_allocs'
 
-  return (slice_stms' <> stmsFromList alloc_bnds, offset_stms, mconcat rebases)
+  return (slice_stms' <> stmsFromList alloc_bnds, mconcat rebases)
   where expand (mem, (offset, total_size, space)) = do
           let allocpat = Pattern [] [PatElem mem $
                                      MemMem total_size space]
           return (Let allocpat (defAux ()) $ Op $ Alloc total_size space,
-                  M.singleton mem $ newBase offset total_size)
+                  M.singleton mem $ newBase offset)
+
+        num_threads = primExpFromSubExp int32 $ spaceNumThreads kspace
+        gtid = LeafExp (spaceGlobalId kspace) int32
 
         -- For the variant allocations, we add an inner dimension,
         -- which is then offset by a thread-specific amount.
-        newBase offset total_size (old_shape, pt) =
+        newBase size_per_thread (old_shape, pt) =
           let pt_size = fromInt32 $ primByteSize pt
-              offset' = ConvOpExp (SExt Int64 Int32) (primExpFromSubExp int64 offset)
-                        `quot` pt_size
-              total_size' = ConvOpExp (SExt Int64 Int32) $ primExpFromSubExp int64 total_size
-              ixfun_root = IxFun.iota [total_size' `quot` pt_size]
-              ixfun_sliced = IxFun.offsetIndex ixfun_root offset'
-              shape_change = if length old_shape == 1
-                             then map DimCoercion old_shape
-                             else map DimNew old_shape
-          in IxFun.reshape ixfun_sliced shape_change
+              elems_per_thread = ConvOpExp (SExt Int64 Int32)
+                                 (primExpFromSubExp int64 size_per_thread)
+                                 `quot` pt_size
+              root_ixfun = IxFun.iota [elems_per_thread, num_threads]
+              offset_ixfun = IxFun.slice root_ixfun
+                             [DimSlice (fromInt32 0) num_threads (fromInt32 1),
+                              DimFix gtid]
+              shapechange = if length old_shape == 1
+                            then map DimCoercion old_shape
+                            else map DimNew old_shape
+          in IxFun.reshape offset_ixfun shapechange
 
 -- | A map from memory block names to new index function bases.
 
@@ -375,22 +380,8 @@ removeCommonSizes :: M.Map VName (SubExp, Space)
 removeCommonSizes = M.toList . foldl' comb mempty . M.toList
   where comb m (mem, (size, space)) = M.insertWith (++) size [(mem, space)] m
 
-memoryOffsetStms :: [VName] -> KernelSpace -> ExpandM ([VName], Stms InKernel)
-memoryOffsetStms offsets kspace = runBinder $ forM offsets $ \offset_array -> do
-  is_first <- letSubExp "cond" $ BasicOp $ CmpOp (CmpEq int32)
-              (intConst Int32 0) (Var gtid)
-  offset_index <- letSubExp "offset_index" $ BasicOp $
-                  BinOp (Sub Int32) (Var gtid) (intConst Int32 1)
-  offset <- newVName "offset"
-  let index_stm = Let (Pattern [] [PatElem offset $ MemPrim int64]) (defAux ()) $
-                  BasicOp $ Index offset_array [DimFix offset_index]
-  letExp "offset" $ If is_first (Body () mempty [intConst Int64 0])
-                                (Body () (oneStm index_stm) [Var offset]) $
-    IfAttr [primBodyType int64] IfNormal
-  where gtid = spaceGlobalId kspace
-
 sliceKernelSizes :: [SubExp] -> KernelSpace -> KernelBody InKernel
-                 -> ExpandM (Stms Kernels.Kernels, [VName], [VName], Stms InKernel)
+                 -> ExpandM (Stms Kernels.Kernels, [VName], [VName])
 sliceKernelSizes sizes kspace kbody = do
   let kbody' = unAllocInKernelBody kbody
       num_sizes = length sizes
@@ -399,35 +390,43 @@ sliceKernelSizes sizes kspace kbody = do
 
   let kernels_scope = castScope inkernels_scope
 
-  (sum_lam, _) <- flip runBinderT inkernels_scope $ do
+  (max_lam, _) <- flip runBinderT inkernels_scope $ do
     xs <- replicateM num_sizes $ newParam "x" (Prim int64)
     ys <- replicateM num_sizes $ newParam "y" (Prim int64)
     (zs, stms) <- localScope (scopeOfLParams $ xs ++ ys) $ collectStms $
                   forM (zip xs ys) $ \(x,y) ->
-      letSubExp "z" $ BasicOp $ BinOp (Add Int64) (Var $ paramName x) (Var $ paramName y)
+      letSubExp "z" $ BasicOp $ BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
     return $ Lambda (xs ++ ys) (mkBody stms zs) i64s
 
   (size_lam', _) <- flip runBinderT inkernels_scope $ do
     params <- replicateM num_sizes $ newParam "x" (Prim int64)
-    (zs, stms) <- localScope (scopeOfLParams params) $ collectStms $ do
+    (zs, stms) <- localScope (scopeOfLParams params <>
+                              scopeOfKernelSpace kspace) $ collectStms $ do
       mapM_ addStm $ kernelBodyStms kbody'
       forM (zip params sizes) $ \(p, se) ->
-        letSubExp "z" $ BasicOp $ BinOp (Add Int64) (Var (paramName p)) se
-    Kernels.simplifyLambda (Lambda params (Body () stms zs) i64s) []
+        letSubExp "z" $ BasicOp $ BinOp (SMax Int64) (Var (paramName p)) se
+    localScope (scopeOfKernelSpace kspace) $
+      Kernels.simplifyLambda (Lambda params (Body () stms zs) i64s) []
 
-  ((offsets, size_sums), slice_stms) <- flip runBinderT kernels_scope $ do
+  ((maxes_per_thread, size_sums), slice_stms) <- flip runBinderT kernels_scope $ do
     space_size <- letSubExp "space_size" =<<
                   foldBinOp (Mul Int32) (intConst Int32 1)
                   (map snd $ spaceDimensions kspace)
+    space_size_64 <- letSubExp "space_size" $
+                     BasicOp $ ConvOp (SExt Int32 Int64) space_size
 
     pat <- basicPattern [] <$> replicateM num_sizes
-           (newIdent "offsets" $ Prim int64 `arrayOfRow` space_size)
+           (newIdent "max_per_thread" $ Prim int64)
 
-    sums <- blockedScan pat space_size
-      sum_lam size_lam' (intConst Int64 1) (spaceDimensions kspace) []
+    addStms =<<
+      blockedReduction pat space_size Commutative
+      max_lam size_lam' (spaceDimensions kspace)
       (replicate num_sizes $ intConst Int64 0) []
-    return (patternNames pat, sums)
 
-  (offsets', offset_stms) <- memoryOffsetStms offsets kspace
+    size_sums <- forM (patternNames pat) $ \threads_max ->
+      letExp "size_sum" $
+      BasicOp $ BinOp (Mul Int64) (Var threads_max) space_size_64
 
-  return (slice_stms, offsets', size_sums, offset_stms)
+    return (patternNames pat, size_sums)
+
+  return (slice_stms, maxes_per_thread, size_sums)
