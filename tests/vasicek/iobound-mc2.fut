@@ -3,7 +3,6 @@
 -- Useful for verification with a "sequential" R implementation.
 --
 -- ==
--- tags { no_opencl }
 
 default(f32)
 

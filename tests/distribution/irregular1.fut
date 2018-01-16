@@ -2,7 +2,6 @@
 -- really subtle irregularity.
 --
 -- ==
--- tags { no_opencl }
 -- input {
 --   [ [ [ [1,2,3], [4,5,6] ]
 --     ]
@@ -38,7 +37,7 @@ let main (xssss: [][][][]i32, cs: []i32): [][][][]i32 =
                              -- An implicit reshape will go here that
                              -- cannot be distributed - this messed up
                              -- the compiler.
-                             addRows(xs,ys)
+                             unsafe addRows(xs,ys)
                           ) xss yss
                 ) xsss
          ) xssss cs
