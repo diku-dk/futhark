@@ -308,7 +308,7 @@ transformStm (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs)))
       lam1_sequential <- Kernelise.transformLambda lam1
       lam2_sequential <- Kernelise.transformLambda lam2
       fmap (certify cs) <$>
-        blockedReduction pat w comm' lam1_sequential lam2_sequential nes arrs
+        blockedReduction pat w comm' lam1_sequential lam2_sequential [] nes arrs
     outerParallelBody = renameBody =<<
                         (mkBody <$> paralleliseOuter <*> pure (map Var (patternNames pat)))
 
@@ -334,7 +334,7 @@ transformStm (Let pat (StmAux cs _) (Op (Reduce w comm red_fun red_input))) = do
   red_fun_sequential <- Kernelise.transformLambda red_fun
   red_fun_sequential' <- renameLambda red_fun_sequential
   fmap (certify cs) <$>
-    blockedReduction pat w comm' red_fun_sequential' red_fun_sequential nes arrs
+    blockedReduction pat w comm' red_fun_sequential' red_fun_sequential [] nes arrs
   where (nes, arrs) = unzip red_input
         comm' | commutativeLambda red_fun = Commutative
               | otherwise                 = comm
@@ -389,7 +389,7 @@ transformStm (Let pat _ (Op (Stream w (Parallel o comm red_fun nes) fold_fun arr
   -- Generate a kernel immediately.
   red_fun_sequential <- Kernelise.transformLambda red_fun
   fold_fun_sequential <- Kernelise.transformLambda fold_fun
-  blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential nes arrs
+  blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential [] nes arrs
   where comm' | commutativeLambda red_fun, o /= InOrder = Commutative
               | otherwise                               = comm
 
