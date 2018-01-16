@@ -157,8 +157,7 @@ expandedInvariantAllocations (num_threads64, num_groups, group_size)
               root_ixfun = IxFun.iota (primExpFromSubExp int32 num_groups : old_shape
                                        ++ [primExpFromSubExp int32 group_size])
               permuted_ixfun = IxFun.permute root_ixfun perm
-              untouched d = DimSlice (ValueExp $ value (0::Int32)) d
-                                     (ValueExp $ value (1::Int32))
+              untouched d = DimSlice (fromInt32 0) d (fromInt32 1)
               offset_ixfun = IxFun.slice permuted_ixfun $
                              [DimFix (LeafExp group_id int32),
                               DimFix (LeafExp local_id int32)] ++
@@ -201,7 +200,7 @@ expandedVariantAllocations kspace kbody variant_allocs = do
         -- For the variant allocations, we add an inner dimension,
         -- which is then offset by a thread-specific amount.
         newBase offset total_size (old_shape, pt) =
-          let pt_size = ValueExp (IntValue $ Int32Value $ primByteSize pt)
+          let pt_size = fromInt32 $ primByteSize pt
               offset' = ConvOpExp (SExt Int64 Int32) (primExpFromSubExp int64 offset)
                         `quot` pt_size
               total_size' = ConvOpExp (SExt Int64 Int32) $ primExpFromSubExp int32 total_size

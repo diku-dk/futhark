@@ -174,7 +174,7 @@ strideIndex :: (Eq num, IntegralExp num) =>
                IxFun num -> num -> IxFun num
 strideIndex ixfun s =
   case shape ixfun of
-    d:ds -> slice ixfun (DimSlice 0 d s : map (unitSlice 0) ds)
+    d:ds -> slice ixfun (DimSlice (fromInt32 0) d s : map (unitSlice (fromInt32 0)) ds)
     []   -> error "offsetIndex: underlying index function has rank zero"
 
 permute :: IntegralExp num =>
@@ -242,7 +242,7 @@ reshape (Index ixfun slicing) newshape
       -- Move the reshape beneath the slicing.
       let newshape' = map DimCoercion fixed_ds ++ newshape
       in Index (reshape ixfun newshape') $
-         map DimFix is ++ map (unitSlice 0) (newDims newshape)
+         map DimFix is ++ map (unitSlice (fromInt32 0)) (newDims newshape)
   where isSliceOf (DimSlice _ d1 _) d2 = d1 == d2
         isSliceOf _ _ = False
 

@@ -120,7 +120,7 @@ instance Pretty v => Num (PrimExp v) where
   signum x | IntType t <- primExpType x = UnOpExp (SSignum t) x
            | otherwise = numBad "signum" x
 
-  fromInteger = ValueExp . IntValue . Int64Value . fromInteger
+  fromInteger = fromInt32 . fromInteger
 
 instance Pretty v => IntegralExp (PrimExp v) where
   x `div` y | oneIshExp y = x
@@ -137,6 +137,10 @@ instance Pretty v => IntegralExp (PrimExp v) where
   x `rem` y | Just z <- msum [asIntOp SRem x y] = z
             | otherwise = numBad "rem" (x,y)
 
+  fromInt8  = ValueExp . IntValue . Int8Value
+  fromInt16 = ValueExp . IntValue . Int16Value
+  fromInt32 = ValueExp . IntValue . Int32Value
+  fromInt64 = ValueExp . IntValue . Int64Value
 
 asIntOp :: (IntType -> BinOp) -> PrimExp v -> PrimExp v -> Maybe (PrimExp v)
 asIntOp f x y
