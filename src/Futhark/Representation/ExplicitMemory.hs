@@ -716,7 +716,7 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
       pretty t ++ "."
 
   TC.context ("in index function " ++ pretty ixfun) $ do
-    traverse_ (TC.requireI [Prim int32]) $ freeIn ixfun
+    traverse_ (TC.requirePrimExp int32) ixfun
     let ixfun_rank = IxFun.rank ixfun
         ident_rank = shapeRank shape
     unless (ixfun_rank == ident_rank) $
