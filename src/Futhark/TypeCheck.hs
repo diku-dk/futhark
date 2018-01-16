@@ -23,6 +23,7 @@ module Futhark.TypeCheck
     -- * Checkers
   , require
   , requireI
+  , requirePrimExp
   , checkSubExp
   , checkExp
   , checkStms
@@ -59,6 +60,7 @@ import qualified Data.Set as S
 import Data.Maybe
 import qualified Data.Semigroup as Sem
 
+import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
 import Futhark.Representation.Aliases
 import Futhark.Analysis.Alias
@@ -1042,6 +1044,22 @@ checkLambda (Lambda params body rettype) args = do
       mapM_ checkType rettype
       checkLambdaBody rettype body
   else bad $ TypeError $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+
+checkPrimExp :: Checkable lore => PrimExp VName -> TypeM lore ()
+checkPrimExp ValueExp{} = return ()
+checkPrimExp (LeafExp v pt) = requireI [Prim pt] v
+checkPrimExp (BinOpExp op x y) = do requirePrimExp (binOpType op) x
+                                    requirePrimExp (binOpType op) y
+checkPrimExp (CmpOpExp op x y) = do requirePrimExp (cmpOpType op) x
+                                    requirePrimExp (cmpOpType op) y
+checkPrimExp (UnOpExp op x) = requirePrimExp (unOpType op) x
+checkPrimExp (ConvOpExp op x) = requirePrimExp (fst $ convOpType op) x
+
+requirePrimExp :: Checkable lore => PrimType -> PrimExp VName -> TypeM lore ()
+requirePrimExp t e = context ("in PrimExp " ++ pretty e) $ do
+  checkPrimExp e
+  unless (primExpType e == t) $ bad $ TypeError $
+    pretty e ++ " must have type " ++ pretty t
 
 -- | The class of lores that can be type-checked.
 class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where
