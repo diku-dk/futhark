@@ -21,11 +21,18 @@ module Futhark.Util.IntegralExp
        )
        where
 
+import Data.Int
+
 class Num e => IntegralExp e where
   quot :: e -> e -> e
   rem :: e -> e -> e
   div :: e -> e -> e
   mod :: e -> e -> e
+
+  fromInt8  :: Int8 -> e
+  fromInt16 :: Int16 -> e
+  fromInt32 :: Int32 -> e
+  fromInt64 :: Int64 -> e
 
 -- | This wrapper allows you to use a type that is an instance of the
 -- true class whenever the simile class is required.
@@ -54,6 +61,11 @@ instance Integral a => IntegralExp (Wrapped a) where
   rem = liftOp2 Prelude.rem
   div = liftOp2 Prelude.div
   mod = liftOp2 Prelude.mod
+
+  fromInt8  = fromInteger . toInteger
+  fromInt16 = fromInteger . toInteger
+  fromInt32 = fromInteger . toInteger
+  fromInt64 = fromInteger . toInteger
 
 -- | Like 'quot', but rounds up.
 quotRoundingUp :: IntegralExp num => num -> num -> num
