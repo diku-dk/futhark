@@ -747,9 +747,9 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
   -- To be able to only return elements from some threads, we exploit the fact
   -- that WriteReturn with offset=-1, won't do anything.
   red_returns <- forM (zip finalredvals $ take num_redres scratch_arrs) $ \(se, scarr) ->
-    return $ WriteReturn [num_segments] scarr [redoffset] se
+    return $ WriteReturn [num_segments] scarr [([redoffset], se)]
   map_returns <- forM (zip finalmapvals $ drop num_redres scratch_arrs) $ \(se, scarr) ->
-    return $ WriteReturn [w] scarr [mapoffset] se
+    return $ WriteReturn [w] scarr [([mapoffset], se)]
   let kernel_returns = red_returns ++ map_returns
 
   let kerneldebughints = KernelDebugHints kernelname

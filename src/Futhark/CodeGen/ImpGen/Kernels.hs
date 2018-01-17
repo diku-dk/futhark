@@ -1039,19 +1039,19 @@ compileKernelResult constants dest (ConcatReturns (SplitStrided stride) _ _ moff
                    Nothing -> ImpGen.varIndex (kernelGlobalThreadId constants)
                    Just se -> primExpFromSubExp int32 se
 
-compileKernelResult constants dest (WriteReturn rws _arr is e) = do
-  is' <- mapM ImpGen.compileSubExp is
+compileKernelResult constants dest (WriteReturn rws _arr dests) = do
   rws' <- mapM ImpGen.compileSubExp rws
-  let condInBounds0 = Imp.CmpOpExp (Imp.CmpSle Int32) $
-                      Imp.ValueExp (IntValue (Int32Value 0))
-      condInBounds1 = Imp.CmpOpExp (Imp.CmpSlt Int32)
-      condInBounds i rw = Imp.BinOpExp LogAnd (condInBounds0 i) (condInBounds1 i rw)
-      write = foldl (Imp.BinOpExp LogAnd) (kernelThreadActive constants) $
-              zipWith condInBounds is' rws'
-
-  actual_body' <- ImpGen.collect $
-    ImpGen.copyDWIMDest dest (map (primExpFromSubExp int32) is) e []
-  ImpGen.emit $ Imp.If write actual_body' Imp.Skip
+  forM_ dests $ \(is, e) -> do
+    is' <- mapM ImpGen.compileSubExp is
+    let condInBounds0 = Imp.CmpOpExp (Imp.CmpSle Int32) $
+                        Imp.ValueExp (IntValue (Int32Value 0))
+        condInBounds1 = Imp.CmpOpExp (Imp.CmpSlt Int32)
+        condInBounds i rw = Imp.BinOpExp LogAnd (condInBounds0 i) (condInBounds1 i rw)
+        write = foldl (Imp.BinOpExp LogAnd) (kernelThreadActive constants) $
+                zipWith condInBounds is' rws'
+    actual_body' <- ImpGen.collect $
+      ImpGen.copyDWIMDest dest (map (primExpFromSubExp int32) is) e []
+    ImpGen.emit $ Imp.If write actual_body' Imp.Skip
 
 compileKernelResult _ _ KernelInPlaceReturn{} =
   -- Already in its place... said it was a hack.

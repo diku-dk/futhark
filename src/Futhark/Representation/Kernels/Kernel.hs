@@ -132,8 +132,8 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                   | WriteReturn
                     [SubExp] -- Size of array.  Must match number of dims.
                     VName -- Which array
-                    [SubExp] -- The indexes
-                    SubExp -- The value
+                    [([SubExp], SubExp)]
+                    -- Arbitrary number of index/value pairs.
                   | ConcatReturns
                     SplitOrdering -- Permuted?
                     SubExp -- The final size.
@@ -145,7 +145,7 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
 
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (ThreadsReturn _ se) = se
-kernelResultSubExp (WriteReturn _ _ _ se) = se
+kernelResultSubExp (WriteReturn _ arr _) = Var arr
 kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
 kernelResultSubExp (KernelInPlaceReturn v) = Var v
 
@@ -268,7 +268,7 @@ walkKernelM f = void . mapKernelM m
 
 instance FreeIn KernelResult where
   freeIn (ThreadsReturn which what) = freeIn which <> freeIn what
-  freeIn (WriteReturn rws arr is e) = freeIn rws <> freeIn arr <> freeIn is <> freeIn e
+  freeIn (WriteReturn rws arr res) = freeIn rws <> freeIn arr <> freeIn res
   freeIn (ConcatReturns o w per_thread_elems moffset v) =
     freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn moffset <> freeIn v
   freeIn (KernelInPlaceReturn what) = freeIn what
@@ -296,10 +296,10 @@ instance Attributes lore => Substitute (KernelBody lore) where
 instance Substitute KernelResult where
   substituteNames subst (ThreadsReturn who se) =
     ThreadsReturn (substituteNames subst who) (substituteNames subst se)
-  substituteNames subst (WriteReturn rws arr is e) =
+  substituteNames subst (WriteReturn rws arr res) =
     WriteReturn
     (substituteNames subst rws) (substituteNames subst arr)
-    (substituteNames subst is) (substituteNames subst e)
+    (substituteNames subst res)
   substituteNames subst (ConcatReturns o w per_thread_elems moffset v) =
     ConcatReturns
     (substituteNames subst o)
@@ -380,7 +380,7 @@ kernelType (Kernel _ space ts body) =
   where dims = map snd $ spaceDimensions space
         num_groups = spaceNumGroups space
         num_threads = spaceNumThreads space
-        resultShape t (WriteReturn rws _ _ _) =
+        resultShape t (WriteReturn rws _ _) =
           t `arrayOfShape` Shape rws
         resultShape t (ThreadsReturn AllThreads _) =
           t `arrayOfRow` num_threads
@@ -413,8 +413,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   consumedInOp (Kernel _ _ _ kbody) =
     consumedInKernelBody kbody <>
     mconcat (map consumedByReturn (kernelBodyResult kbody))
-    where consumedByReturn (WriteReturn _ a _ _) = S.singleton a
-          consumedByReturn _                     = mempty
+    where consumedByReturn (WriteReturn _ a _) = S.singleton a
+          consumedByReturn _                   = mempty
   consumedInOp _ = mempty
 
 aliasAnalyseKernelBody :: (Attributes lore,
@@ -562,15 +562,16 @@ typeCheckKernel (Kernel _ space kts kbody) = do
         checkKernelResult (ThreadsReturn which what) t = do
           checkWhich which
           TC.require [t] what
-        checkKernelResult (WriteReturn rws arr is e) t = do
+        checkKernelResult (WriteReturn rws arr res) t = do
           mapM_ (TC.require [Prim int32]) rws
-          mapM_ (TC.require [Prim int32]) is
-          TC.require [t] e
           arr_t <- lookupType arr
-          unless (arr_t == t `arrayOfShape` Shape rws) $
-            TC.bad $ TC.TypeError $ "WriteReturn returning " ++
-            pretty e ++ " of type " ++ pretty t ++ ", shape=" ++ pretty rws ++
-            ", but destination array has type " ++ pretty arr_t
+          forM_ res $ \(is, e) -> do
+            mapM_ (TC.require [Prim int32]) is
+            TC.require [t] e
+            unless (arr_t == t `arrayOfShape` Shape rws) $
+              TC.bad $ TC.TypeError $ "WriteReturn returning " ++
+              pretty e ++ " of type " ++ pretty t ++ ", shape=" ++ pretty rws ++
+              ", but destination array has type " ++ pretty arr_t
           TC.consume =<< TC.lookupAliases arr
         checkKernelResult (ConcatReturns o w per_thread_elems moffset v) t = do
           case o of
@@ -646,10 +647,11 @@ instance Pretty KernelResult where
     text "thread <" <+> ppr limit <+> text "returns" <+> ppr what
   ppr (ThreadsReturn ThreadsInSpace what) =
     text "thread in space returns" <+> ppr what
-  ppr (WriteReturn rws arr is e) =
-    ppr arr <+> text "with" <+>
-    PP.brackets (PP.commasep $ zipWith f is rws) <+> text "<-" <+> ppr e
-    where f i rw =ppr i <+> text "<" <+> ppr rw
+  ppr (WriteReturn rws arr res) =
+    ppr arr <+> text "with" <+> PP.apply (map ppRes res)
+    where ppRes (is, e) =
+            PP.brackets (PP.commasep $ zipWith f is rws) <+> text "<-" <+> ppr e
+          f i rw = ppr i <+> text "<" <+> ppr rw
   ppr (ConcatReturns o w per_thread_elems offset v) =
     text "concat" <> suff <>
     parens (commasep [ppr w, ppr per_thread_elems] <> offset_text) <+>

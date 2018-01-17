@@ -35,6 +35,7 @@ import Futhark.Tools
 import Futhark.Pass
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Transform.Rename
 
 simpleSOACS :: Simplify.SimpleOps SOACS
 simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
@@ -147,7 +148,8 @@ topDownRules = [RuleOp removeReplicateMapping,
                 RuleOp removeUnusedMapInput,
                 RuleOp simplifyClosedFormRedomap,
                 RuleOp simplifyClosedFormReduce,
-                RuleOp simplifyKnownIterationSOAC
+                RuleOp simplifyKnownIterationSOAC,
+                RuleOp fuseConcatScatter
                ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -320,6 +322,38 @@ removeDeadWrite (_, used) pat _ (Scatter w fun arrs dests) =
      then letBind_ (Pattern [] pat') $ Op $ Scatter w fun' arrs dests'
      else cannotSimplify
 removeDeadWrite _ _ _ _ = cannotSimplify
+
+-- Future improvements: handle concatenations of more than two arrays.
+fuseConcatScatter :: TopDownRuleOp (Wise SOACS)
+fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
+  | Just (ws@(w':_), xs, ys, css) <- unzip4 <$> mapM isConcat arrs,
+    all (w'==) ws = do
+      fun2 <- renameLambda fun
+      let fun_n = length $ lambdaReturnType fun
+          (fun_is, fun_vs) = splitAt (fun_n `div` 2) $ bodyResult (lambdaBody fun)
+          (fun2_is, fun2_vs) = splitAt (fun_n `div` 2) $ bodyResult (lambdaBody fun2)
+          (its, vts) = splitAt (fun_n `div` 2) $ lambdaReturnType fun
+          (its2, vts2) = splitAt (fun_n `div` 2) $ lambdaReturnType fun
+      let fun' = Lambda
+                 { lambdaParams = lambdaParams fun <> lambdaParams fun2
+                 , lambdaBody = mkBody (bodyStms (lambdaBody fun) <>
+                                        bodyStms (lambdaBody fun2)) $
+                                fun_is <> fun2_is <> fun_vs <> fun2_vs
+                 , lambdaReturnType = its <> its2 <> vts <> vts2
+                 }
+      certifying (mconcat css) $
+        letBind_ pat $ Op $ Scatter w' fun' (xs++ys) $ map incWrites dests
+  where sizeOf :: VName -> Maybe SubExp
+        sizeOf x = fmap (arraySize 0 . ST.entryType) $ ST.lookup x vtable
+        incWrites (w, n, a) = (w, n+1, a)
+        isConcat v = case ST.lookupExp v vtable of
+          Just (BasicOp (Concat 0 x [y] _), cs) -> do
+            x_w <- sizeOf x
+            y_w <- sizeOf y
+            guard $ x_w == y_w
+            return (x_w, x, y, cs)
+          _ -> Nothing
+fuseConcatScatter _ _ _ _ = cannotSimplify
 
 simplifyClosedFormRedomap :: TopDownRuleOp (Wise SOACS)
 simplifyClosedFormRedomap vtable pat _ (Redomap _ _ _ innerfun acc arr) =

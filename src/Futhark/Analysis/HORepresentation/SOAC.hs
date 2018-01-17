@@ -362,7 +362,7 @@ data SOAC lore = Map SubExp (Lambda lore) [Input]
                | Redomap SubExp Commutativity (Lambda lore) (Lambda lore) [SubExp] [Input]
                | Scanomap SubExp (Lambda lore) (Lambda lore) [SubExp] [Input]
                | Stream SubExp (StreamForm lore) (Lambda lore) [Input]
-               | Scatter SubExp (Lambda lore) [Input] [(SubExp, VName)]
+               | Scatter SubExp (Lambda lore) [Input] [(SubExp, Int, VName)]
             deriving (Show)
 
 -- | Returns the inputs used in a SOAC.
@@ -445,11 +445,11 @@ typeOf (Stream w form lam _) =
       arrtps  = [ arrayOf (stripArray 1 t) (Shape [w]) NoUniqueness
                   | t <- drop (length nes) (lambdaReturnType lam) ]
   in  accrtps ++ arrtps
-typeOf (Scatter _w lam _ivs as) =
+typeOf (Scatter _w lam _ivs dests) =
   zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) aws
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
-        aws = map fst as
+        (aws, _, _) = unzip3 dests
 
 -- | The "width" of a SOAC is the expected outer size of its array
 -- inputs _after_ input-transforms have been carried out.
@@ -485,9 +485,9 @@ toSOAC (Scanomap w l1 l2 es as) =
 toSOAC (Stream w form lam inps) = do
   inpexp <- inputsToSubExps inps
   return $ Futhark.Stream w form lam inpexp
-toSOAC (Scatter len lam ivs as) = do
+toSOAC (Scatter len lam ivs dests) = do
   ivs' <- inputsToSubExps ivs
-  return $ Futhark.Scatter len lam ivs' as
+  return $ Futhark.Scatter len lam ivs' dests
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.

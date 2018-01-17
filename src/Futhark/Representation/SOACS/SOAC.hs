@@ -45,7 +45,7 @@ import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.Range as Range
-import Futhark.Util (maybeNth)
+import Futhark.Util (maybeNth, chunks)
 
 data SOAC lore =
     Map SubExp (LambdaT lore) [VName]
@@ -62,9 +62,11 @@ data SOAC lore =
   | Redomap SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Scanomap SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream SubExp (StreamForm lore) (LambdaT lore) [VName]
-  | Scatter SubExp (LambdaT lore) [VName] [(SubExp, VName)]
+  | Scatter SubExp (LambdaT lore) [VName] [(SubExp, Int, VName)]
     -- Scatter <cs> <length> <lambda> <original index and value arrays>
-    -- <input/output arrays along with their sizes>
+    --
+    -- <input/output arrays along with their sizes and number of
+    -- values to write for that array>
     --
     -- <length> is the length of each index array and value array, since they
     -- all must be the same length for any fusion to make sense.  If you have a
@@ -76,8 +78,6 @@ data SOAC lore =
     --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
     --
     -- This must be consistent along all Scatter-related optimisations.
-    --
-    -- The original index arrays and value arrays are concatenated.
     deriving (Eq, Ord, Show)
 
 data StreamForm lore  =
@@ -139,7 +139,8 @@ mapSOACM tv (Scatter len lam ivs as) =
   <$> mapOnSOACSubExp tv len
   <*> mapOnSOACLambda tv lam
   <*> mapM (mapOnSOACVName tv) ivs
-  <*> mapM (\(aw,a) -> (,) <$> mapOnSOACSubExp tv aw <*> mapOnSOACVName tv a) as
+  <*> mapM (\(aw,an,a) -> (,,) <$> mapOnSOACSubExp tv aw <*>
+                          pure an <*> mapOnSOACVName tv a) as
 
 instance Attributes lore => FreeIn (SOAC lore) where
   freeIn = execWriter . mapSOACM free
@@ -194,10 +195,10 @@ soacType (Stream outersize form lam _) =
                 Parallel _ _ _ acc -> acc
                 Sequential  acc -> acc
 soacType (Scatter _w lam _ivs as) =
-  staticShapes $ zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
-  where lam_ts = lambdaReturnType lam
-        n = length lam_ts
-        ws = map fst as
+  staticShapes $ zipWith arrayOfRow val_ts ws
+  where val_ts = concatMap (take 1) $ chunks ns $
+                 drop (sum ns) $ lambdaReturnType lam
+        (ws, ns, _) = unzip3 as
 
 instance TypedOp (SOAC lore) where
   opType = pure . soacType
@@ -243,7 +244,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                                (map paramName $ drop 1 $ lambdaParams lam)
                                (accs++map Var arrs)
   consumedInOp (Scatter _ _ _ as) =
-    S.fromList $ map snd as
+    S.fromList $ map (\(_, _, a) -> a) as
   consumedInOp _ =
     mempty
 
@@ -432,11 +433,11 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   --      [index types..., value types].
   --
   --   1. The number of index types must be equal to the number of value types
-  --      and the number of arrays in @as@.
+  --      and the number of writes to arrays in @as@.
   --
   --   2. Each index type must have the type i32.
   --
-  --   3. Each array pair in @as@ and the value types must have the same type
+  --   3. Each array in @as@ and the value types must have the same type
   --
   --   4. Each array in @as@ is consumed.  This is not really a check, but more
   --      of a requirement, so that e.g. the source is not hoisted out of a
@@ -451,25 +452,26 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   TC.require [Prim int32] w
 
   -- 0.
-  let rts = lambdaReturnType lam
+  let (_as_ws, as_ns, _as_vs) = unzip3 as
+      rts = lambdaReturnType lam
       rtsLen = length rts `div` 2
       rtsI = take rtsLen rts
       rtsV = drop rtsLen rts
 
   -- 1.
-  unless (rtsLen == length as)
-    $ TC.bad $ TC.TypeError "Scatter: Uneven number of index types, value types, and I/O arrays."
+  unless (rtsLen == sum as_ns)
+    $ TC.bad $ TC.TypeError "Scatter: Uneven number of index types, value types, and arrays outputs."
 
   -- 2.
-  forM_ rtsI $ \rtI -> unless (Prim int32 == rtI)
-                       $ TC.bad $ TC.TypeError "Scatter: Index return type must be i32."
+  forM_ rtsI $ \rtI -> unless (Prim int32 == rtI) $
+    TC.bad $ TC.TypeError "Scatter: Index return type must be i32."
 
-  forM_ (zip rtsV as) $ \(rtV, (aw, a)) -> do
+  forM_ (zip (chunks as_ns rtsV) as) $ \(rtVs, (aw, _, a)) -> do
     -- All lengths must have type i32.
     TC.require [Prim int32] aw
 
     -- 3.
-    TC.requireI [rtV `arrayOfRow` aw] a
+    forM_ rtVs $ \rtV -> TC.requireI [rtV `arrayOfRow` aw] a
 
     -- 4.
     TC.consume =<< TC.lookupAliases a
@@ -597,9 +599,10 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                ppr inner <> comma </>
                commasep (PP.braces (commasep $ map ppr es) : map ppr as))
   ppr (Scatter len lam ivs as) =
-    ppSOAC "write" len [lam] (Just (map Var ivs)) (map snd as)
+    ppSOAC "scatter" len [lam] (Just (map Var ivs)) (map (\(_,n,a) -> (n,a)) as)
 
-ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
+ppSOAC :: (Pretty fn, Pretty v) =>
+          String -> SubExp -> [fn] -> Maybe [SubExp] -> [v] -> Doc
 ppSOAC name size funs es as =
   text name <> parens (ppr size <> comma </>
                        ppList funs </>

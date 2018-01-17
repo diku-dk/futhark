@@ -403,10 +403,11 @@ transformStm (Let pat _ (Op (Stream w (Sequential nes) fold_fun arrs))) = do
 transformStm (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ $ do
   lam' <- Kernelise.transformLambda lam
   write_i <- newVName "write_i"
-  let (i_res, v_res) = splitAt (length as) $ bodyResult $ lambdaBody lam'
+  let (as_ws, as_ns, as_vs) = unzip3 as
+      (i_res, v_res) = splitAt (sum as_ns) $ bodyResult $ lambdaBody lam'
       kstms = bodyStms $ lambdaBody lam'
-      krets = do (i, v, (a_w, a)) <- zip3 i_res v_res as
-                 return $ WriteReturn [a_w] a [i] v
+      krets = do (a_w, a, is_vs) <- zip3 as_ws as_vs $ chunks as_ns $ zip i_res v_res
+                 return $ WriteReturn [a_w] a [ ([i],v) | (i,v) <- is_vs ]
       body = KernelBody () kstms krets
       inputs = do (p, p_a) <- zip (lambdaParams lam') ivs
                   return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
@@ -1074,9 +1075,9 @@ segmentedScatterKernel :: KernelNest
                        -> Certificates
                        -> SubExp
                        -> InKernelLambda
-                       -> [VName] -> [(SubExp,VName)]
+                       -> [VName] -> [(SubExp,Int,VName)]
                        -> KernelM KernelsStms
-segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs as = do
+segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   -- We replicate some of the checking done by 'isSegmentedOp', but
   -- things are different because a scatter is not a reduction or
   -- scan.
@@ -1088,19 +1089,22 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs as = do
               (MapNesting scatter_pat cs scatter_w $ zip (lambdaParams lam) ivs) nest
   (nest_bnds, w, ispace, kernel_inps, _rets) <- flatKernel nest'
 
+  let (as_ws, as_ns, as) = unzip3 dests
+
   -- The input/output arrays ('as') _must_ correspond to some kernel
   -- input, or else the original nested scatter would have been
   -- ill-typed.  Find them.
-  as_inps <- mapM (findInput kernel_inps . snd) as
+  as_inps <- mapM (findInput kernel_inps) as
 
   runBinder_ $ do
     addStms nest_bnds
 
-    let rts = drop (length as) $ lambdaReturnType lam
-        (is,vs) = splitAt (length as) $ bodyResult $ lambdaBody lam
+    let rts = concatMap (take 1) $ chunks as_ns $
+              drop (sum as_ns) $ lambdaReturnType lam
+        (is,vs) = splitAt (sum as_ns) $ bodyResult $ lambdaBody lam
         k_body = KernelBody () (bodyStms $ lambdaBody lam) $
-                 zipWith (inPlaceReturn ispace)
-                 (map fst as) $ zip3 as_inps is vs
+                 map (inPlaceReturn ispace) $
+                 zip3 as_ws as_inps $ chunks as_ns $ zip is vs
 
     (k_bnds, k) <-
       mapKernel w (FlatThreadSpace ispace) kernel_inps rts k_body
@@ -1115,8 +1119,9 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs as = do
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = fail "Ill-typed nested scatter encountered."
 
-        inPlaceReturn ispace aw (inp,i,v) =
-          WriteReturn (init ws++[aw]) (kernelInputArray inp) (map Var (init gtids)++[i]) v
+        inPlaceReturn ispace (aw, inp, is_vs) =
+          WriteReturn (init ws++[aw]) (kernelInputArray inp)
+          [ ((map Var (init gtids)++[i]), v) | (i,v) <- is_vs ]
           where (gtids,ws) = unzip ispace
 
 segmentedScanomapKernel :: KernelNest

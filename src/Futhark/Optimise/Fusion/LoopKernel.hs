@@ -337,10 +337,10 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
     ------------------
 
     -- Map-write fusion.
-    (SOAC.Scatter _len _lam _ivs as,
+    (SOAC.Scatter _len _lam _ivs dests,
      SOAC.Map _ map_lam map_inp)
       | -- 1. the to-be-written arrays are not used inside the map!
-        S.null (S.intersection (S.fromList $ map snd as) $
+        S.null (S.intersection (S.fromList as) $
                 S.fromList (map SOAC.inputArray map_inp) `S.union`
                 freeInLambda map_lam),
         -- 2. all arrays produced by the map are ONLY used (consumed)
@@ -350,7 +350,8 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
         mapWriteFusionOK outVars ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
           success (outNames ker ++ extra_nms) $
-            SOAC.Scatter w res_lam' new_inp as
+            SOAC.Scatter w res_lam' new_inp dests
+            where (_, _, as) = unzip3 dests
 
     -- Scatter-write fusion.
     (SOAC.Scatter _len2 _lam2 ivs2 as2,
