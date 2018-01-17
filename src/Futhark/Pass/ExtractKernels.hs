@@ -1121,7 +1121,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
         inPlaceReturn ispace (aw, inp, is_vs) =
           WriteReturn (init ws++[aw]) (kernelInputArray inp)
-          [ ((map Var (init gtids)++[i]), v) | (i,v) <- is_vs ]
+          [ (map Var (init gtids)++[i], v) | (i,v) <- is_vs ]
           where (gtids,ws) = unzip ispace
 
 segmentedScanomapKernel :: KernelNest
