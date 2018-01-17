@@ -621,24 +621,20 @@ evalSOAC (Scanomap w _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, res_acc:l, acc_arr)
 
-evalSOAC (Scatter len lam ivs as) = do
+evalSOAC (Scatter w lam ivs dests) = do
+  w' <- asInt32 "Scatter w" =<< evalSubExp w
 
-  let valInt :: Value -> FutharkM Int
-      valInt (PrimVal (IntValue (Int32Value l))) = return $ fromIntegral l
-      valInt _ = bad $ TypeError "evalSOAC Scatter: Wrong type for length"
-
-  len' <- valInt =<< evalSubExp len
-
-  as' <- mapM (lookupVar . snd) as
+  let (_as_ws, as_ns, as) = unzip3 dests
+  as' <- mapM lookupVar as
 
   -- Calculate all indexes and values.
-  ivs' <- soacArrays len ivs
+  ivs' <- soacArrays w ivs
   ivs'' <- mapM (applyLambda lam) ivs'
 
   let ivsLen = length (lambdaReturnType lam) `div` 2
       is = transpose $ map (take ivsLen) ivs''
       vs = transpose $ map (drop ivsLen) ivs''
-  is' <- mapM (mapM valInt) is
+  is' <- mapM (mapM $ asInt32 "Scatter is") is
 
   (aArrs, aPrimTypes, aShapes) <-
     unzip3 <$> mapM (toArrayVal "evalSOAC Scatter: Wrong type for 'array' array") as'
@@ -646,21 +642,19 @@ evalSOAC (Scatter len lam ivs as) = do
   let handleIteration :: [Array Int PrimValue] -> Int -> FutharkM [Array Int PrimValue]
       handleIteration arrs iter = do
         let updatess =
-              [ if idx < 0 || idx >= length (elems a)
-                then []
+              [ if idx < 0 || idx >= genericLength (elems a) then []
                 else case val of
-                  PrimVal pval -> [(idx, pval)]
+                  PrimVal pval -> [(fromIntegral idx, pval)]
                   ArrayVal arr _ _ ->
-                    zip [idx * fromIntegral (length (elems arr))..] (elems arr)
-              | (i, v, a) <- zip3 is' vs arrs,
+                    zip [fromIntegral idx * length (elems arr)..] (elems arr)
+              | (i, v, a) <- zip3 is' vs $ concat $ zipWith replicate as_ns arrs,
                 let idx = i !! iter
                     val = v !! iter
               ]
-        return [ arr // updates
-               | (arr, updates) <- zip arrs updatess
-               ]
+        return [ arr // concat updates'
+               | (arr, updates') <- zip arrs $ chunks as_ns updatess ]
 
-  ress <- foldM handleIteration aArrs [0..fromIntegral len' - 1]
+  ress <- foldM handleIteration aArrs [0..fromIntegral w' - 1]
   return $ zipWith3 ArrayVal ress aPrimTypes aShapes
 
 toArrayVal :: String -> Value -> FutharkM (Array Int PrimValue, PrimType, [Int])
