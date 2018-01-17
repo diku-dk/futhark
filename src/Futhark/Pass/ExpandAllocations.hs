@@ -412,8 +412,8 @@ sliceKernelSizes sizes kspace kbody = do
     space_size <- letSubExp "space_size" =<<
                   foldBinOp (Mul Int32) (intConst Int32 1)
                   (map snd $ spaceDimensions kspace)
-    space_size_64 <- letSubExp "space_size" $
-                     BasicOp $ ConvOp (SExt Int32 Int64) space_size
+    num_threads_64 <- letSubExp "num_threads" $
+                      BasicOp $ ConvOp (SExt Int32 Int64) $ spaceNumThreads kspace
 
     pat <- basicPattern [] <$> replicateM num_sizes
            (newIdent "max_per_thread" $ Prim int64)
@@ -425,7 +425,7 @@ sliceKernelSizes sizes kspace kbody = do
 
     size_sums <- forM (patternNames pat) $ \threads_max ->
       letExp "size_sum" $
-      BasicOp $ BinOp (Mul Int64) (Var threads_max) space_size_64
+      BasicOp $ BinOp (Mul Int64) (Var threads_max) num_threads_64
 
     return (patternNames pat, size_sums)
 
