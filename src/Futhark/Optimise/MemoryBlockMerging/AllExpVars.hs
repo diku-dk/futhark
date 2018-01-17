@@ -81,7 +81,7 @@ lookInKernelBody (KernelBody _ bnds res) = do
   mapM_ lookInStm bnds
   forM_ res $ \case
     ThreadsReturn{} -> return ()
-    WriteReturn _ arr _ _ -> tell $ S.singleton arr
+    WriteReturn _ arr _ -> tell $ S.singleton arr
     ConcatReturns{} -> return ()
     KernelInPlaceReturn v -> tell $ S.singleton v
 

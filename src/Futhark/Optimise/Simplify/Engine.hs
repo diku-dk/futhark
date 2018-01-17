@@ -650,10 +650,14 @@ class Simplifiable e where
   simplify :: SimplifiableLore lore => e -> SimpleM lore e
 
 instance (Simplifiable a, Simplifiable b) => Simplifiable (a, b) where
-  simplify (x,y) = do
-    x' <- simplify x
-    y' <- simplify y
-    return (x', y')
+  simplify (x,y) = (,) <$> simplify x <*> simplify y
+
+instance (Simplifiable a, Simplifiable b, Simplifiable c) => Simplifiable (a, b, c) where
+  simplify (x,y,z) = (,,) <$> simplify x <*> simplify y <*> simplify z
+
+-- Convenient for Scatter.
+instance Simplifiable Int where
+  simplify = pure
 
 instance Simplifiable a => Simplifiable (Maybe a) where
   simplify Nothing = return Nothing

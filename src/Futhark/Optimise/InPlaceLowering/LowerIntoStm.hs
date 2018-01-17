@@ -74,7 +74,7 @@ lowerUpdateIntoKernel :: DesiredUpdate (LetAttr (Aliases Kernels))
 lowerUpdateIntoKernel update kspace kbody = do
   [ThreadsReturn ThreadsInSpace se] <- Just $ kernelBodyResult kbody
   is' <- mapM dimFix is
-  let ret = WriteReturn (arrayDims $ snd bindee_attr) src (is'++map Var gtids) se
+  let ret = WriteReturn (arrayDims $ snd bindee_attr) src [((is'++map Var gtids), se)]
   return kbody { kernelBodyResult = [ret] }
   where DesiredUpdate _bindee_nm bindee_attr _cs src is _val = update
         gtids = map fst $ spaceDimensions kspace

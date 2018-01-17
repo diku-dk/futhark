@@ -36,6 +36,7 @@ import Futhark.Tools
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Representation.Aliases (Aliases, removeLambdaAliases)
 import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.Util (chunks)
 
 transformFunDef :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                     LetAttr SOACS ~ LetAttr tolore,
@@ -579,15 +580,14 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
 transformSOAC pat (Scatter len lam ivs as) = do
   iter <- newVName "write_iter"
 
-  ts <- mapM (lookupType . snd) as
+  let (_as_ws, as_ns, as_vs) = unzip3 as
+  ts <- mapM lookupType as_vs
   asOuts <- mapM (newIdent "write_out") ts
 
---  ivs' <- bindLambda lam (map (BasicOp . SubExp . Var) ivs)
---  ivs'' <- mapM subExpToVName ivs'
   let ivsLen = length (lambdaReturnType lam) `div` 2
 
   -- Scatter is in-place, so we use the input array as the output array.
-  let merge = loopMerge asOuts $ map (Var . snd) as
+  let merge = loopMerge asOuts $ map Var as_vs
   loopBody <- runBodyBinder $
     localScope (M.insert iter (IndexInfo Int32) $
                 scopeOfFParams $ map fst merge) $ do
@@ -596,31 +596,35 @@ transformSOAC pat (Scatter len lam ivs as) = do
       letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
     ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
 
-    let indexes = take ivsLen ivs''
-        values = drop ivsLen ivs''
+    let indexes = chunks as_ns $ take ivsLen ivs''
+        values = chunks as_ns $ drop ivsLen ivs''
 
-    ress <- forM (zip4 indexes values asOuts ts) $ \(indexCur, valueCur, arrayOut, t) -> do
-      let lenA = arraySize 0 t
-      less_than_zero <- letSubExp "less_than_zero" $
-        BasicOp $ CmpOp (CmpSlt Int32) indexCur (constant (0::Int32))
-      greater_than_size <- letSubExp "greater_than_size" $
-        BasicOp $ CmpOp (CmpSle Int32) lenA indexCur
-      outside_bounds <- letSubExp "outside_bounds" $
-        BasicOp $ BinOp LogOr less_than_zero greater_than_size
+    ress <- forM (zip3 indexes values (map identName asOuts)) $ \(indexes', values', arr) -> do
+      arr_t <- lookupType arr
+      let lenA = arraySize 0 arr_t
+          saveInArray arr' (indexCur, valueCur) = do
+            less_than_zero <- letSubExp "less_than_zero" $
+              BasicOp $ CmpOp (CmpSlt Int32) indexCur (constant (0::Int32))
+            greater_than_size <- letSubExp "greater_than_size" $
+              BasicOp $ CmpOp (CmpSle Int32) lenA indexCur
+            outside_bounds <- letSubExp "outside_bounds" $
+              BasicOp $ BinOp LogOr less_than_zero greater_than_size
 
-      outside_bounds_branch <- runBodyBinder $ do
-        res <- letExp "write_out_outside_bounds"
-          $ BasicOp $ SubExp $ Var $ identName arrayOut
-        return $ resultBody [Var res]
+            outside_bounds_branch <- runBodyBinder $ do
+              res <- letExp "write_out_outside_bounds" $
+                     BasicOp $ SubExp $ Var arr'
+              return $ resultBody [Var res]
 
-      in_bounds_branch <- runBodyBinder $ do
-        res <- letInPlace "write_out_inside_bounds" (identName arrayOut)
-          (fullSlice (identType arrayOut) [DimFix indexCur]) $ BasicOp $ SubExp valueCur
-        return $ resultBody [Var res]
+            in_bounds_branch <- runBodyBinder $ do
+              res <- letInPlace "write_out_inside_bounds" arr'
+                     (fullSlice arr_t [DimFix indexCur]) $ BasicOp $ SubExp valueCur
+              return $ resultBody [Var res]
 
-      letExp "write_out" $
-        If outside_bounds outside_bounds_branch in_bounds_branch $
-        ifCommon [t]
+            letExp "write_out" $
+              If outside_bounds outside_bounds_branch in_bounds_branch $
+              ifCommon [arr_t]
+
+      foldM saveInArray arr $ zip indexes' values'
     return $ resultBody (map Var ress)
   letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 

@@ -1402,7 +1402,7 @@ isOverloadedFunction qname args loc = do
           sivs = si' : svs'
 
       let sa_ws = map (arraySize 0) sa_ts
-      letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip sa_ws sas
+      letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip3 sa_ws (repeat 1) sas
 
 -- | Is the name a value constant?  If so, create the necessary
 -- function call and return the corresponding subexpressions.
@@ -1557,7 +1557,8 @@ partitionWithSOACS k lam arrs = do
                                      map (I.Var . I.paramName) value_params
                     }
   results <- letTupExp "partition_res" $ I.Op $ I.Scatter w
-             write_lam (classes : all_offsets ++ arrs) $ zip (repeat sum_of_partition_sizes) blanks
+             write_lam (classes : all_offsets ++ arrs) $
+             zip3 (repeat sum_of_partition_sizes) (repeat 1) blanks
   return (map I.Var sizes, results)
   where
     mkOffsetLambdaBody :: [SubExp]

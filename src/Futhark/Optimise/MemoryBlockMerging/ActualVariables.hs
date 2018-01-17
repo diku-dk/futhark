@@ -320,7 +320,7 @@ instance LookInKernelExp ExplicitMemory where
   lookInKernelExp (Let (Pattern _ patvalelems) _ e) = case e of
     Op (ExpMem.Inner (Kernel _ _ _ (KernelBody _ _ ress))) ->
       zipWithM_ (\(PatElem var _) res -> case res of
-                    WriteReturn _ arr _ _ ->
+                    WriteReturn _ arr _ ->
                       recordActuals arr $ S.singleton var
                     _ -> return ()
                 ) patvalelems ress
