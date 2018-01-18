@@ -131,6 +131,9 @@ instance Pretty Certificates where
   ppr (Certificates []) = empty
   ppr (Certificates cs) = text "<" <> commasep (map ppr cs) <> text ">"
 
+instance PrettyLore lore => Pretty (Stms lore) where
+  ppr = stack . map ppr . stmsToList
+
 instance PrettyLore lore => Pretty (Body lore) where
   ppr (Body _ stms res)
     | null stms = braces (commasep $ map ppr res)
