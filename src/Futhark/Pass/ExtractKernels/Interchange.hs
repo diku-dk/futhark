@@ -60,7 +60,9 @@ interchangeLoop
       runBinder $ localScope (scopeOfLParams new_params) $
       unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
-    let lam = Lambda (params'<>new_params) body rettype
+    body' <- mkDummyStms (params'<>new_params) body
+
+    let lam = Lambda (params'<>new_params) body' rettype
         map_bnd = Let loop_pat_expanded (StmAux cs ()) $
                   Op $ Map w lam $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
@@ -96,6 +98,22 @@ interchangeLoop
 
         expandPatElem (PatElem name t) =
           PatElem name $ arrayOfRow t w
+
+        -- | The kernel extractor cannot handle identity mappings, so
+        -- insert dummy statements for body results that are just a
+        -- lambda parameter.
+        mkDummyStms params (Body () stms res) = do
+          (res', extra_stms) <- unzip <$> mapM dummyStm res
+          return $ Body () (stms<>mconcat extra_stms) res'
+          where dummyStm (Var v)
+                  | Just p <- find ((==v) . paramName) params = do
+                      dummy <- newVName (baseString v ++ "_dummy")
+                      return (Var dummy,
+                              oneStm $
+                                Let (Pattern [] [PatElem dummy $ paramType p])
+                                    (defAux ()) $
+                                     BasicOp $ SubExp $ Var $ paramName p)
+                dummyStm se = return (se, mempty)
 
 -- | Given a (parallel) map nesting and an inner sequential loop, move
 -- the maps inside the sequential loop.  The result is several
