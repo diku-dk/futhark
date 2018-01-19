@@ -577,8 +577,10 @@ setMem dest src space = do
     else stm [C.cstm|$exp:dest = $exp:src;|]
 
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
-unRefMem mem space =
-  stm [C.cstm|$id:(fatMemUnRef space)(ctx, &$exp:mem, $string:(pretty $ C.toExp mem noLoc));|]
+unRefMem mem space = do
+  refcount <- asks envFatMemory
+  when refcount $
+    stm [C.cstm|$id:(fatMemUnRef space)(ctx, &$exp:mem, $string:(pretty $ C.toExp mem noLoc));|]
 
 allocMem :: (C.ToExp a, C.ToExp b) =>
             a -> b -> Space -> CompilerM op s ()
