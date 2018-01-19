@@ -478,6 +478,7 @@ hoistCommon ((res1, usages1), stms1) ((res2, usages2), stms2) = do
         hasPatName nms bnd = intersects nms $ S.fromList $
                              patternNames $ stmPattern bnd
         isNotHoistableBnd :: Names -> BlockPred m
+        isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit{})) = False
         isNotHoistableBnd nms _ bnd = not $ hasPatName nms bnd
 
 -- | Simplify a single 'Body'.

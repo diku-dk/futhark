@@ -92,6 +92,7 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp (BinOp UMod{} _ _) = False
         safeBasicOp (BinOp Pow{} _ (Constant y)) = not $ negativeIsh y
         safeBasicOp (BinOp Pow{} _ _) = False
+        safeBasicOp ArrayLit{} = True
         safeBasicOp BinOp{} = True
         safeBasicOp SubExp{} = True
         safeBasicOp UnOp{} = True
