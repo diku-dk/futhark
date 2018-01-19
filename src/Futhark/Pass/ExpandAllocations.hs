@@ -250,7 +250,8 @@ offsetMemoryInPattern offsets (Pattern ctx vals) =
                        offsetMemoryInMemBound offsets' $ patElemAttr patElem
                   }
         inspectCtx ctx_offsets patElem
-          | Mem _ _ <- patElemType patElem =
+          | Mem _ space <- patElemType patElem,
+            space /= Space "local" =
               error $ unwords ["Cannot deal with existential memory block",
                                pretty (patElemName patElem),
                                "when expanding inside kernels."]
@@ -307,60 +308,71 @@ offsetMemoryInExp offsets e = mapExp recurse e
 
 ---- Slicing allocation sizes out of a kernel.
 
-unAllocInKernelBody :: KernelBody InKernel -> KernelBody Kernels.InKernel
-unAllocInKernelBody = unAllocKernelBody
+unAllocInKernelBody :: KernelBody InKernel
+                    -> Either String (KernelBody Kernels.InKernel)
+unAllocInKernelBody = unAllocKernelBody False
   where
     unAllocBody (Body attr stms res) =
-      Body attr (unAllocStms stms) res
+      Body attr <$> unAllocStms True stms <*> pure res
 
-    unAllocKernelBody (KernelBody attr stms res) =
-      KernelBody attr (unAllocStms stms) res
+    unAllocKernelBody nested (KernelBody attr stms res) =
+      KernelBody attr <$> unAllocStms nested stms <*> pure res
 
-    unAllocStms = stmsFromList . mapMaybe unAlloc . stmsToList
+    unAllocStms nested =
+      fmap (stmsFromList . catMaybes) . mapM (unAllocStm nested) . stmsToList
+
+    unAllocStm nested stm@(Let _ _ (Op Alloc{}))
+      | nested = throwError $ "Cannot handle nested allocation: " ++ pretty stm
+      | otherwise = return Nothing
+    unAllocStm _ (Let pat attr e) =
+      Just <$> (Let <$> unAllocPattern pat <*> pure attr <*> mapExpM unAlloc' e)
 
     unAllocKernelExp (SplitSpace o w i elems_per_thread) =
-      SplitSpace o w i elems_per_thread
+      return $ SplitSpace o w i elems_per_thread
     unAllocKernelExp (Combine cspace ts active body) =
-      Combine cspace ts active $ unAllocBody body
+      Combine cspace ts active <$> unAllocBody body
     unAllocKernelExp (GroupReduce w lam input) =
-      GroupReduce w (unAllocLambda lam) input
+      GroupReduce w <$> unAllocLambda lam <*> pure input
     unAllocKernelExp (GroupScan w lam input) =
-      GroupScan w (unAllocLambda lam) input
+      GroupScan w <$> unAllocLambda lam <*> pure input
     unAllocKernelExp (GroupStream w maxchunk lam accs arrs) =
-      GroupStream w maxchunk (unAllocStreamLambda lam) accs arrs
+      GroupStream w maxchunk <$> unAllocStreamLambda lam <*> pure accs <*> pure arrs
 
     unAllocStreamLambda (GroupStreamLambda chunk_size chunk_offset
                          acc_params arr_params body) =
       GroupStreamLambda chunk_size chunk_offset
-                        (unParams acc_params) (unParams arr_params) $
+                        (unParams acc_params) (unParams arr_params) <$>
                         unAllocBody body
 
     unAllocLambda (Lambda params body ret) =
-      Lambda (unParams params) (unAllocBody body) ret
+      Lambda (unParams params) <$> unAllocBody body <*> pure ret
 
     unParams = mapMaybe $ traverse unAttr
 
-    unAllocPattern (Pattern ctx val) =
-      Pattern (mapMaybe (rephrasePatElem unAttr) ctx)
-              (mapMaybe (rephrasePatElem unAttr) val)
+    unAllocPattern pat@(Pattern ctx val) =
+      Pattern <$> maybe bad return (mapM (rephrasePatElem unAttr) ctx)
+              <*> maybe bad return (mapM (rephrasePatElem unAttr) val)
+      where bad = Left $ "Cannot handle memory in pattern " ++ pretty pat
 
-    unAllocOp :: Op InKernel -> Maybe (Op Kernels.InKernel)
-    unAllocOp Alloc{} = Nothing
-    unAllocOp (Inner op) = Just $ unAllocKernelExp op
+    unAllocOp Alloc{} = Left "unhandled Op"
+    unAllocOp (Inner op) = unAllocKernelExp op
 
-    unAlloc (Let pat attr e) =
-      Let (unAllocPattern pat) attr <$> mapExpM unAlloc' e
+    unParam p = maybe bad return $ traverse unAttr p
+      where bad = Left $ "Cannot handle memory-typed parameter '" ++ pretty p ++ "'"
 
-    unAlloc' :: Mapper InKernel Kernels.InKernel Maybe
-    unAlloc' = Mapper { mapOnBody = \_ -> Just . unAllocBody
-                      , mapOnRetType = unAttr
-                      , mapOnBranchType = unAttr
-                      , mapOnFParam = traverse unAttr
-                      , mapOnLParam = traverse unAttr
+    unT t = maybe bad return $ unAttr t
+      where bad = Left $ "Cannot handle memory type '" ++ pretty t ++ "'"
+
+    unAlloc' :: Mapper InKernel Kernels.InKernel (Either String)
+    unAlloc' = Mapper { mapOnBody = const unAllocBody
+                      , mapOnRetType = unT
+                      , mapOnBranchType = unT
+                      , mapOnFParam = unParam
+                      , mapOnLParam = unParam
                       , mapOnOp = unAllocOp
-                      , mapOnSubExp = Just
-                      , mapOnVName = Just
-                      , mapOnCertificates = Just
+                      , mapOnSubExp = Right
+                      , mapOnVName = Right
+                      , mapOnCertificates = Right
                       }
 
 unAttr :: MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)
@@ -383,8 +395,8 @@ removeCommonSizes = M.toList . foldl' comb mempty . M.toList
 sliceKernelSizes :: [SubExp] -> KernelSpace -> KernelBody InKernel
                  -> ExpandM (Stms Kernels.Kernels, [VName], [VName])
 sliceKernelSizes sizes kspace kbody = do
-  let kbody' = unAllocInKernelBody kbody
-      num_sizes = length sizes
+  kbody' <- either compilerLimitationS return $ unAllocInKernelBody kbody
+  let num_sizes = length sizes
       i64s = replicate num_sizes $ Prim int64
   inkernels_scope <- unAllocScope <$> ask
 

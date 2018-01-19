@@ -344,7 +344,7 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
       certifying (mconcat css) $
         letBind_ pat $ Op $ Scatter w' fun' (xs++ys) $ map incWrites dests
   where sizeOf :: VName -> Maybe SubExp
-        sizeOf x = fmap (arraySize 0 . ST.entryType) $ ST.lookup x vtable
+        sizeOf x = arraySize 0 . ST.entryType <$> ST.lookup x vtable
         incWrites (w, n, a) = (w, n+1, a)
         isConcat v = case ST.lookupExp v vtable of
           Just (BasicOp (Concat 0 x [y] _), cs) -> do

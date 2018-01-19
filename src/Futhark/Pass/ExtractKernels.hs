@@ -689,7 +689,7 @@ bodyContainsParallelism = any (isMap . stmExp) . bodyStms
 lambdaContainsParallelism :: Lambda -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 
--- | Returns the sizes of immediate nested parallelism.
+-- | Returns the sizes of nested parallelism.
 nestedParallelism :: Body -> [SubExp]
 nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
   where parallelism (Op (Reduce w _ _ _)) = [w]
@@ -697,11 +697,13 @@ nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
         parallelism (Op (Scanomap w _ _ _ _)) = [w]
         parallelism (Op (Redomap w _ _ _ _ _)) = [w]
         parallelism (Op (Map w _ _)) = [w]
+        parallelism (Op (Scatter w _ _ _)) = [w]
         parallelism (Op (Stream w Sequential{} lam _))
           | chunk_size_param : _ <- lambdaParams lam =
               let update (Var v) | v == paramName chunk_size_param = w
                   update se = se
               in map update $ nestedParallelism $ lambdaBody lam
+        parallelism (DoLoop _ _ _ body) = nestedParallelism body
         parallelism _ = []
 
 containsNestedParallelism :: Lambda -> Bool
@@ -1121,7 +1123,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
         inPlaceReturn ispace (aw, inp, is_vs) =
           WriteReturn (init ws++[aw]) (kernelInputArray inp)
-          [ ((map Var (init gtids)++[i]), v) | (i,v) <- is_vs ]
+          [ (map Var (init gtids)++[i], v) | (i,v) <- is_vs ]
           where (gtids,ws) = unzip ispace
 
 segmentedScanomapKernel :: KernelNest
