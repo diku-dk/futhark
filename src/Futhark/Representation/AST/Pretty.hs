@@ -54,7 +54,8 @@ class (Annotations lore,
        Pretty (Op lore)) => PrettyLore lore where
   ppExpLore :: ExpAttr lore -> Exp lore -> Maybe Doc
   ppExpLore _ (If _ _ _ (IfAttr ts _)) =
-    Just $ text "-- Branch returns:" <+> ppTuple' ts
+    Just $ stack $ map (text . ("-- "++)) $ lines $ pretty $
+    text "Branch returns:" <+> ppTuple' ts
   ppExpLore _ _ = Nothing
 
 commastack :: [Doc] -> Doc
