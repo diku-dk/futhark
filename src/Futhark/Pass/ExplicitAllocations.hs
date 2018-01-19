@@ -18,6 +18,7 @@ import Control.Monad.RWS.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Control.Monad.Fail as Fail
+import Data.Maybe
 
 import Futhark.Representation.Kernels
 import Futhark.Optimise.Simplify.Lore
@@ -34,7 +35,7 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
-import Futhark.Util (splitFromEnd)
+import Futhark.Util (splitFromEnd, takeLast)
 
 type InInKernel = Futhark.Representation.Kernels.InKernel
 type OutInKernel = Futhark.Representation.ExplicitMemory.InKernel
@@ -299,10 +300,13 @@ allocsForPattern sizeidents validents rts hints = do
             summary <- lift $ summaryForBindage (identType ident) hint
             return $ PatElem (identName ident) summary
 
-        MemArray bt _ u _ -> do
+        MemArray bt _ u ret -> do
+          let space = case ret of
+                        Just (ReturnsNewBlock mem_space _ _ _) -> mem_space
+                        _                                      -> DefaultSpace
           (memsize,mem,(ident',ixfun)) <- lift $ memForBindee ident
           tell ([PatElem (identName memsize) $ MemPrim int64,
-                 PatElem (identName mem)     $ MemMem (Var $ identName memsize) DefaultSpace],
+                 PatElem (identName mem)     $ MemMem (Var $ identName memsize) space],
                 [])
           return $ PatElem (identName ident') $ MemArray bt shape u $
             ArrayIn (identName mem) ixfun
@@ -413,7 +417,11 @@ allocInMergeParams variant merge m = do
               (mem, ixfun) <- lift $ lookupArraySummary v
               Mem _ space <- lift $ lookupType mem
               reuse <- asks aggressiveReuse
-              if reuse && u == Unique && loopInvariantShape mergeparam && IxFun.isLinear ixfun
+              if space /= Space "local" &&
+                 reuse &&
+                 u == Unique &&
+                 loopInvariantShape mergeparam &&
+                 IxFun.isLinear ixfun
                 then return (mergeparam { paramAttr = MemArray bt shape Unique $ ArrayIn mem ixfun },
                              lift . ensureArrayIn (paramType mergeparam) mem ixfun)
                 else doDefault mergeparam space
@@ -447,8 +455,8 @@ ensureArrayIn t mem ixfun (Var v) = do
 
 ensureDirectArray :: (Allocable fromlore tolore,
                       Allocator tolore (AllocM fromlore tolore)) =>
-                     Space -> VName -> AllocM fromlore tolore (SubExp, VName, SubExp)
-ensureDirectArray space v = do
+                     Maybe Space -> VName -> AllocM fromlore tolore (SubExp, VName, SubExp)
+ensureDirectArray space_ok v = do
   res <- lookupMemInfo v
   case res of
     MemArray _ _ _ (ArrayIn mem ixfun)
@@ -456,14 +464,15 @@ ensureDirectArray space v = do
         memt <- lookupType mem
         case memt of
           Mem size mem_space
-            | space == mem_space -> return (size, mem, Var v)
-            | otherwise          -> needCopy
+            | Just space <- space_ok,
+              space /= mem_space -> needCopy space
+            | otherwise -> return (size, mem, Var v)
           _          -> fail $
                         pretty mem ++
                         " should be a memory block but has type " ++
                         pretty memt
-    _ -> needCopy
-  where needCopy =
+    _ -> needCopy DefaultSpace
+  where needCopy space =
           -- We need to do a new allocation, copy 'v', and make a new
           -- binding for the size of the memory block.
           allocLinearArray space (baseString v) v
@@ -475,7 +484,7 @@ allocLinearArray :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlor
 allocLinearArray space s v = do
   t <- lookupType v
   (size, mem) <- allocForArray t space
-  v' <- newIdent s t
+  v' <- newIdent (s ++ "_linear") t
   let pat = Pattern [] [PatElem (identName v') $
                         directIndexFunction (elemType t) (arrayShape t)
                         NoUniqueness mem t]
@@ -497,7 +506,7 @@ linearFuncallArg :: (Allocable fromlore tolore,
                     Type -> Space -> SubExp
                  -> WriterT [SubExp] (AllocM fromlore tolore) SubExp
 linearFuncallArg Array{} space (Var v) = do
-  (size, mem, arg') <- lift $ ensureDirectArray space v
+  (size, mem, arg') <- lift $ ensureDirectArray (Just space) v
   tell [size, Var mem]
   return arg'
 linearFuncallArg _ _ arg =
@@ -533,7 +542,8 @@ allocInFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef ExplicitMemory)
 allocInFun (FunDef entry fname rettype params fbody) =
   runAllocM handleKernel $
   allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
-    fbody' <- insertStmsM $ allocInFunBody (length rettype) fbody
+    fbody' <- insertStmsM $ allocInFunBody
+              (map (const $ Just DefaultSpace) rettype) fbody
     return $ FunDef entry fname (memoryInRetType rettype) params' fbody'
 
 handleKernel :: Kernel InInKernel
@@ -587,21 +597,23 @@ bodyReturnMemCtx (Var v) = do
       return [size, Var mem]
 
 allocInFunBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-                  Int -> Body fromlore -> AllocM fromlore tolore (Body tolore)
-allocInFunBody num_vals (Body _ bnds res) =
+                  [Maybe Space] -> Body fromlore -> AllocM fromlore tolore (Body tolore)
+allocInFunBody space_oks (Body _ bnds res) =
   allocInStms bnds $ \bnds' -> do
     (res'', allocs) <- collectStms $ do
-      res' <- mapM ensureDirect res
+      res' <- zipWithM ensureDirect space_oks' res
       let (ctx_res, val_res) = splitFromEnd num_vals res'
       mem_ctx_res <- concat <$> mapM bodyReturnMemCtx val_res
       return $ ctx_res <> mem_ctx_res <> val_res
     return $ Body () (bnds'<>allocs) res''
-  where ensureDirect se@Constant{} = return se
-        ensureDirect (Var v) = do
+  where num_vals = length space_oks
+        space_oks' = replicate (length res - num_vals) Nothing ++ space_oks
+        ensureDirect _ se@Constant{} = return se
+        ensureDirect space_ok (Var v) = do
           bt <- primType <$> lookupType v
           if bt
             then return $ Var v
-            else do (_, _, v') <- ensureDirectArray DefaultSpace v
+            else do (_, _, v') <- ensureDirectArray space_ok v
                     return v'
 
 allocInStms :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
@@ -654,9 +666,10 @@ allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype) loc
 allocInExp (If cond tbranch fbranch (IfAttr rets ifsort)) = do
-  tbranch' <- allocInFunBody (length rets) tbranch
-  fbranch' <- allocInFunBody (length rets) fbranch
-  let rets' = createBodyReturns rets
+  tbranch' <- allocInFunBody (map (const Nothing) rets) tbranch
+  space_oks <- mkSpaceOks (length rets) tbranch'
+  fbranch' <- allocInFunBody space_oks fbranch
+  let rets' = createBodyReturns rets space_oks
   return $ If cond tbranch' fbranch' $ IfAttr rets' ifsort
 allocInExp e = mapExpM alloc e
   where alloc =
@@ -669,16 +682,31 @@ allocInExp e = mapExpM alloc e
                                                handle op
                          }
 
-createBodyReturns :: [ExtType] -> [BodyReturns]
-createBodyReturns ts =
-  evalState (mapM inspect ts) $ S.size $ shapeContext ts
-  where inspect (Array pt shape u) = do
+mkSpaceOks :: (ExplicitMemorish tolore, LocalScope tolore m, Monad m) =>
+              Int -> Body tolore -> m [Maybe Space]
+mkSpaceOks num_vals (Body _ stms res) =
+  inScopeOf stms $
+  mapM mkSpaceOK $ takeLast num_vals res
+  where mkSpaceOK (Var v) = do
+          v_info <- lookupMemInfo v
+          case v_info of MemArray _ _ _ (ArrayIn mem _) -> do
+                           mem_info <- lookupMemInfo mem
+                           case mem_info of MemMem _ space -> return $ Just space
+                                            _ -> return Nothing
+                         _ -> return Nothing
+        mkSpaceOK _ = return Nothing
+
+createBodyReturns :: [ExtType] -> [Maybe Space] -> [BodyReturns]
+createBodyReturns ts spaces =
+  evalState (zipWithM inspect ts spaces) $ S.size $ shapeContext ts
+  where inspect (Array pt shape u) space = do
           i <- get <* modify (+2)
-          return $ MemArray pt shape u $ ReturnsNewBlock DefaultSpace (i+1) (Ext i) $
+          let space' = fromMaybe DefaultSpace space
+          return $ MemArray pt shape u $ ReturnsNewBlock space' (i+1) (Ext i) $
             IxFun.iota $ map convert $ shapeDims shape
-        inspect (Prim pt) =
+        inspect (Prim pt) _ =
           return $ MemPrim pt
-        inspect (Mem size space) =
+        inspect (Mem size space) _ =
           return $ MemMem (Free size) space
 
         convert (Ext i) = LeafExp (Ext i) int32
