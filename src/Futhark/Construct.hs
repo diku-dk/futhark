@@ -30,6 +30,8 @@ module Futhark.Construct
   , eSliceArray
   , eSplitArray
 
+  , eWriteArray
+
   , asIntZ, asIntS
 
   , resultBody
@@ -297,6 +299,34 @@ eSplitArray arr sizes = do
   where increase offset size = do
           offset' <- letSubExp "offset" $ BasicOp $ BinOp (Add Int32) offset size
           return (offset', offset)
+
+-- | Write to an index of the array, if within bounds.  Otherwise,
+-- nothing.  Produces the updated array.
+eWriteArray :: (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
+               VName -> m (Exp (Lore m)) -> m (Exp (Lore m))
+            -> m (Exp (Lore m))
+eWriteArray arr i v = do
+  arr_t <- lookupType arr
+  let w = arraySize 0 arr_t
+  i' <- letSubExp "write_i" =<< i
+  v' <- letSubExp "write_v" =<< v
+  less_than_zero <- letSubExp "less_than_zero" $
+    BasicOp $ CmpOp (CmpSlt Int32) i' (constant (0::Int32))
+  greater_than_size <- letSubExp "greater_than_size" $
+    BasicOp $ CmpOp (CmpSle Int32) w i'
+  outside_bounds <- letSubExp "outside_bounds" $
+    BasicOp $ BinOp LogOr less_than_zero greater_than_size
+
+  outside_bounds_branch <- insertStmsM $ resultBodyM [Var arr]
+
+  in_bounds_branch <- insertStmsM $ do
+    res <- letInPlace "write_out_inside_bounds" arr
+           (fullSlice arr_t [DimFix i']) $ BasicOp $ SubExp v'
+    resultBodyM [Var res]
+
+  return $
+    If outside_bounds outside_bounds_branch in_bounds_branch $
+    ifCommon [arr_t]
 
 -- | Sign-extend to the given integer type.
 asIntS :: MonadBinder m => IntType -> SubExp -> m SubExp
