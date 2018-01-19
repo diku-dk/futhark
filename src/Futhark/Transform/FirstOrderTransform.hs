@@ -600,29 +600,8 @@ transformSOAC pat (Scatter len lam ivs as) = do
         values = chunks as_ns $ drop ivsLen ivs''
 
     ress <- forM (zip3 indexes values (map identName asOuts)) $ \(indexes', values', arr) -> do
-      arr_t <- lookupType arr
-      let lenA = arraySize 0 arr_t
-          saveInArray arr' (indexCur, valueCur) = do
-            less_than_zero <- letSubExp "less_than_zero" $
-              BasicOp $ CmpOp (CmpSlt Int32) indexCur (constant (0::Int32))
-            greater_than_size <- letSubExp "greater_than_size" $
-              BasicOp $ CmpOp (CmpSle Int32) lenA indexCur
-            outside_bounds <- letSubExp "outside_bounds" $
-              BasicOp $ BinOp LogOr less_than_zero greater_than_size
-
-            outside_bounds_branch <- runBodyBinder $ do
-              res <- letExp "write_out_outside_bounds" $
-                     BasicOp $ SubExp $ Var arr'
-              return $ resultBody [Var res]
-
-            in_bounds_branch <- runBodyBinder $ do
-              res <- letInPlace "write_out_inside_bounds" arr'
-                     (fullSlice arr_t [DimFix indexCur]) $ BasicOp $ SubExp valueCur
-              return $ resultBody [Var res]
-
-            letExp "write_out" $
-              If outside_bounds outside_bounds_branch in_bounds_branch $
-              ifCommon [arr_t]
+      let saveInArray arr' (indexCur, valueCur) =
+            letExp "write_out" =<< eWriteArray arr' (eSubExp indexCur) (eSubExp valueCur)
 
       foldM saveInArray arr $ zip indexes' values'
     return $ resultBody (map Var ress)
