@@ -307,6 +307,8 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       if (ctx->debugging) {
         fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
         $stms:(printKernelSize global_work_size)
+        fprintf(stderr, "] and local work size [");
+        $stms:(printKernelSize local_work_size)
         fprintf(stderr, "].\n");
         $id:time_start = get_wall_time();
       }
@@ -333,8 +335,8 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
         multExp x y = [C.cexp|$exp:x * $exp:y|]
 
         printKernelSize :: VName -> [C.Stm]
-        printKernelSize global_work_size =
+        printKernelSize work_size =
           intercalate [[C.cstm|fprintf(stderr, ", ");|]] $
-          map (printKernelDim global_work_size) [0..kernel_rank-1]
+          map (printKernelDim work_size) [0..kernel_rank-1]
         printKernelDim global_work_size i =
           [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]
