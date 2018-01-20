@@ -310,7 +310,7 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
           (DimFix (Var i) : fullSlice (paramType p) []) $
           paramName p `S.member` consumed_in_body
 
-        -- We only want this simplification it the result does not refer
+        -- We only want this simplification if the result does not refer
         -- to 'i' at all, or does not contain accesses.
         onLoopVar (p,arr) Nothing =
           return (Just (p,arr), mempty)
@@ -329,13 +329,16 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
                   return (Just (p, for_in_partial), mempty)
 
             SubExpResult cs se
-              | all (safeExp . stmExp) x_stms -> do
+              | all (notIndex . stmExp) x_stms -> do
                   x_stms' <- collectStms_ $ certifying cs $ do
                     addStms x_stms
                     letBindNames_ [paramName p] $ BasicOp $ SubExp se
                   return (Nothing, x_stms')
 
             _ -> return (Just (p,arr), mempty)
+
+        notIndex (BasicOp Index{}) = False
+        notIndex _                 = True
 simplifyLoopVariables _ _ _ _ = cannotSimplify
 
 simplifKnownIterationLoop :: BinderOps lore => TopDownRuleDoLoop lore
