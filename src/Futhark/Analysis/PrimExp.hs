@@ -10,11 +10,9 @@ module Futhark.Analysis.PrimExp
   , module Futhark.Representation.Primitive
   ) where
 
-import           Control.Applicative
 import           Data.Foldable
 import           Data.Traversable
-
-import           Prelude
+import qualified Data.Map as M
 
 import           Futhark.Representation.AST.Attributes.Names
 import           Futhark.Representation.Primitive
@@ -28,6 +26,7 @@ data PrimExp v = LeafExp v PrimType
                | CmpOpExp CmpOp (PrimExp v) (PrimExp v)
                | UnOpExp UnOp (PrimExp v)
                | ConvOpExp ConvOp (PrimExp v)
+               | FunExp String [PrimExp v] PrimType
                deriving (Ord, Show)
 
 -- The Eq instance upcoerces all integer constants to their largest
@@ -46,6 +45,8 @@ instance Eq v => Eq (PrimExp v) where
     xop == yop && x == y
   ConvOpExp xop x == ConvOpExp yop y =
     xop == yop && x == y
+  FunExp xf xargs _ == FunExp yf yargs _ =
+    xf == yf && xargs == yargs
   _ == _ = False
 
 instance Functor PrimExp where
@@ -67,6 +68,8 @@ instance Traversable PrimExp where
     ConvOpExp op <$> traverse f x
   traverse f (UnOpExp op x) =
     UnOpExp op <$> traverse f x
+  traverse f (FunExp h args t) =
+    FunExp h <$> traverse (traverse f) args <*> pure t
 
 instance FreeIn v => FreeIn (PrimExp v) where
   freeIn = foldMap freeIn
@@ -206,6 +209,10 @@ evalPrimExp f (UnOpExp op x) = do
 evalPrimExp f (ConvOpExp op x) = do
   x' <- evalPrimExp f x
   maybe (evalBad op x) return $ doConvOp op x'
+evalPrimExp f (FunExp h args _) = do
+  args' <- mapM (evalPrimExp f) args
+  maybe (evalBad h args) return $ do (_, _, fun) <- M.lookup h primFuns
+                                     fun args'
 
 evalBad :: (Pretty a, Pretty b, Monad m) => a -> b -> m c
 evalBad op arg = fail $ "evalPrimExp: Type error when applying " ++
@@ -220,6 +227,7 @@ primExpType (BinOpExp op _ _) = binOpType op
 primExpType CmpOpExp{}        = Bool
 primExpType (UnOpExp op _)    = unOpType op
 primExpType (ConvOpExp op _)  = snd $ convOpType op
+primExpType (FunExp _ _ t)    = t
 
 -- | Is the expression a constant zero of some sort?
 zeroIshExp :: PrimExp v -> Bool
@@ -252,3 +260,4 @@ instance Pretty v => Pretty (PrimExp v) where
   ppr (CmpOpExp op x y) = ppr op <+> parens (ppr x) <+> parens (ppr y)
   ppr (ConvOpExp op x)  = ppr op <+> parens (ppr x)
   ppr (UnOpExp op x)    = ppr op <+> parens (ppr x)
+  ppr (FunExp h args _) = text h <+> parens (commasep $ map ppr args)

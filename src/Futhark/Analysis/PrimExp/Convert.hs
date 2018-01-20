@@ -12,9 +12,7 @@ module Futhark.Analysis.PrimExp.Convert
     , module Futhark.Analysis.PrimExp
   ) where
 
-import           Control.Applicative
-
-import           Prelude
+import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 
@@ -40,6 +38,9 @@ primExpToExp f (ConvOpExp op x) =
   BasicOp <$> (ConvOp op <$> primExpToSubExp "convop_x" f x)
 primExpToExp _ (ValueExp v) =
   return $ BasicOp $ SubExp $ Constant v
+primExpToExp f (FunExp h args t) =
+  Apply (nameFromString h) <$> args' <*> pure [primRetType t] <*> pure (Safe, noLoc, [])
+  where args' = zip <$> mapM (primExpToSubExp "apply_arg" f) args <*> pure (repeat Observe)
 primExpToExp f (LeafExp v _) =
   f v
 
@@ -54,7 +55,7 @@ primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
 -- used to convert expressions that are not trivially 'PrimExp's.
 -- This includes constants and variable names, which are passed as
 -- 'SubExp's.
-primExpFromExp :: Monad m =>
+primExpFromExp :: (Monad m, Annotations lore) =>
                   (Exp lore -> m (PrimExp v)) -> Exp lore -> m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
   BinOpExp op <$> primExpFromSubExpM f x <*> primExpFromSubExpM f y
@@ -66,9 +67,12 @@ primExpFromExp f (BasicOp (ConvOp op x)) =
   ConvOpExp op <$> primExpFromSubExpM f x
 primExpFromExp _ (BasicOp (SubExp (Constant v))) =
   return $ ValueExp v
+primExpFromExp f (Apply fname args ts _)
+  | isBuiltInFunction fname, [Prim t] <- retTypeValues ts =
+      FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
 primExpFromExp f e = f e
 
-primExpFromSubExpM :: Monad m =>
+primExpFromSubExpM :: (Monad m, Annotations lore) =>
                      (Exp lore -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
 primExpFromSubExpM f = primExpFromExp f . BasicOp . SubExp
 
@@ -92,6 +96,8 @@ replaceInPrimExp f (UnOpExp uop pe) =
   UnOpExp uop $ replaceInPrimExp f pe
 replaceInPrimExp f (ConvOpExp cop pe) =
   ConvOpExp cop $ replaceInPrimExp f pe
+replaceInPrimExp f (FunExp h args t) =
+  FunExp h (map (replaceInPrimExp f) args) t
 
 -- | Substituting names in a PrimExp with other PrimExps
 substituteInPrimExp :: Ord v => M.Map v (PrimExp v)
