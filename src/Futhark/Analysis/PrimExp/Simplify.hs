@@ -45,3 +45,5 @@ simplifyAnyPrimExp f (UnOpExp op e) =
   UnOpExp op <$> simplifyAnyPrimExp f e
 simplifyAnyPrimExp f (ConvOpExp conv e) =
   ConvOpExp conv <$> simplifyAnyPrimExp f e
+simplifyAnyPrimExp f (FunExp h args t) =
+  FunExp h <$> mapM (simplifyAnyPrimExp f) args <*> pure t

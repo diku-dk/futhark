@@ -1054,6 +1054,16 @@ checkPrimExp (CmpOpExp op x y) = do requirePrimExp (cmpOpType op) x
                                     requirePrimExp (cmpOpType op) y
 checkPrimExp (UnOpExp op x) = requirePrimExp (unOpType op) x
 checkPrimExp (ConvOpExp op x) = requirePrimExp (fst $ convOpType op) x
+checkPrimExp (FunExp h args t) = do
+  (h_ts, h_ret, _) <- maybe (bad $ TypeError $ "Unknown function: " ++ h)
+                      return $ M.lookup h primFuns
+  when (length h_ts /= length args) $
+    bad $ TypeError $ "Function expects " ++ show (length h_ts) ++
+    " parameters, but given " ++ show (length args) ++ " arguments."
+  when (h_ret /= t) $
+    bad $ TypeError $ "Function return annotation is " ++ pretty t ++
+    ", but expected " ++ pretty h_ret
+  zipWithM_ requirePrimExp h_ts args
 
 requirePrimExp :: Checkable lore => PrimType -> PrimExp VName -> TypeM lore ()
 requirePrimExp t e = context ("in PrimExp " ++ pretty e) $ do

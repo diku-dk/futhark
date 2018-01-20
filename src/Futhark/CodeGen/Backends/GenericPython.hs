@@ -884,6 +884,9 @@ compileExp (Imp.UnOpExp op exp1) = do
   exp1' <- compileExp exp1
   return $ UnOp (compileUnOp op) exp1'
 
+compileExp (Imp.FunExp h args _) =
+  simpleCall (futharkFun (pretty h)) <$> mapM compileExp args
+
 compileCode :: Imp.Code op -> CompilerM op s ()
 
 compileCode Imp.DebugPrint{} =
