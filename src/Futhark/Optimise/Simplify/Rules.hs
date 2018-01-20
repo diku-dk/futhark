@@ -49,6 +49,7 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , letRule simplifyAssert
                , letRule copyScratchToScratch
                , RuleGeneric constantFoldPrimFun
+               , RuleBasicOp twoPowerToBitShift
                , RuleBasicOp simplifyIndexIntoReshape
                , RuleIf evaluateBranch
                , RuleIf simplifyBoolBranch
@@ -531,9 +532,6 @@ simplifyBinOp _ _ (BinOp SQuot{} e1 e2)
   | isCt1 e2 = subExpRes e1
   | isCt0 e2 = Nothing
 
-simplifyBinOp _ _ (BinOp (Pow t) e1 e2)
-  | e1 == intConst t 2 = Just (BinOp (Shl t) e1 e2, mempty)
-
 simplifyBinOp _ _ (BinOp (FPow t) e1 e2)
   | isCt0 e2 = subExpRes $ floatConst t 1
   | isCt0 e1 || isCt1 e1 || isCt1 e2 = subExpRes e1
@@ -666,6 +664,13 @@ constantFoldPrimFun _ (Let pat (StmAux cs _) (Apply fname args _ _))
   where isConst (Constant v) = Just v
         isConst _ = Nothing
 constantFoldPrimFun _ _ = cannotSimplify
+
+twoPowerToBitShift :: BinderOps lore => TopDownRuleBasicOp lore
+twoPowerToBitShift _ pat _ (BinOp (Pow t) e1 e2)
+  | e1 == intConst t 2 = do
+      e2' <- letSubExp "bitshift_p1" $ BasicOp $ BinOp (Sub t) e2 (intConst t 1)
+      letBind_ pat $ BasicOp $ BinOp (Shl t) e1 e2'
+twoPowerToBitShift _ _ _ _ = cannotSimplify
 
 simplifyIndex :: BinderOps lore => BottomUpRuleBasicOp lore
 simplifyIndex (vtable, used) (pat@(Pattern [] [pe])) (StmAux cs _) (Index idd inds)
