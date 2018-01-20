@@ -483,7 +483,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
             let Body attr' stms' _ = removeBodyWisdom $ Body attr stms []
             in KernelBody attr' stms' res
 
-instance ST.IndexOp (Kernel lore) where
+instance Attributes lore => ST.IndexOp (Kernel lore) where
   indexOp vtable k (Kernel _ space _ kbody) is = do
     ThreadsReturn which se <- maybeNth k $ kernelBodyResult kbody
 
