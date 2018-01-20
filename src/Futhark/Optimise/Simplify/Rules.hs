@@ -703,7 +703,8 @@ simplifyIndexing vtable seType idd inds consuming =
           Just $ pure $ SubExpResult mempty $ Var idd
 
       | Just inds' <- sliceIndices inds,
-        Just (e, cs) <- ST.index idd inds' vtable ->
+        Just (e, cs) <- ST.index idd inds' vtable,
+        worthInlining e ->
         Just $ SubExpResult cs <$> (letSubExp "index_primexp" =<< toExp e)
 
     Nothing -> Nothing
@@ -845,6 +846,20 @@ simplifyIndexing vtable seType idd inds consuming =
 
     where defOf v = do (BasicOp op, def_cs) <- ST.lookupExp v vtable
                        return (op, def_cs)
+
+          -- | A crude heuristic for determining when a PrimExp is
+          -- worth inlining over keeping it in an array and reading it
+          -- from memory.
+          worthInlining e
+            | length e > 10 = False -- totally ad-hoc.
+          worthInlining (BinOpExp Pow{} _ _) = False
+          worthInlining (BinOpExp FPow{} _ _) = False
+          worthInlining (BinOpExp _ x y) = worthInlining x && worthInlining y
+          worthInlining (CmpOpExp _ x y) = worthInlining x && worthInlining y
+          worthInlining (ConvOpExp _ x) = worthInlining x
+          worthInlining (UnOpExp _ x) = worthInlining x
+          worthInlining FunExp{} = False
+          worthInlining _ = True
 
 simplifyIndexIntoReshape :: BinderOps lore => TopDownRuleBasicOp lore
 simplifyIndexIntoReshape vtable pat (StmAux cs _) (Index idd slice)
