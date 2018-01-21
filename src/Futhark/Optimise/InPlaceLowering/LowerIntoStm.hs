@@ -2,7 +2,9 @@
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Optimise.InPlaceLowering.LowerIntoStm
        (
-         lowerUpdate
+         lowerUpdateInKernel
+       , lowerUpdateKernels
+       , LowerUpdate
        , DesiredUpdate (..)
        ) where
 
@@ -36,9 +38,12 @@ instance Functor DesiredUpdate where
 updateHasValue :: VName -> DesiredUpdate attr -> Bool
 updateHasValue name = (name==) . updateValue
 
-lowerUpdate :: MonadFreshNames m => Stm (Aliases Kernels)
-            -> [DesiredUpdate (LetAttr (Aliases Kernels))]
-            -> Maybe (m [Stm (Aliases Kernels)])
+type LowerUpdate lore m = Stm (Aliases lore)
+                          -> [DesiredUpdate (LetAttr (Aliases lore))]
+                          -> Maybe (m [Stm (Aliases lore)])
+
+lowerUpdate :: (MonadFreshNames m, Bindable lore,
+                LetAttr lore ~ Type, CanBeAliased (Op lore)) => LowerUpdate lore m
 lowerUpdate (Let pat aux (DoLoop ctx val form body)) updates = do
   canDo <- lowerUpdateIntoLoop updates pat ctx val body
   Just $ do
@@ -55,7 +60,11 @@ lowerUpdate
        return [certify (stmAuxCerts aux <> cs) $
                mkLet [] [Ident bindee_nm $ typeOf bindee_attr] $
                BasicOp $ Update v is' $ Var val]
-lowerUpdate
+lowerUpdate _ _ =
+  Nothing
+
+lowerUpdateKernels :: MonadFreshNames m => LowerUpdate Kernels m
+lowerUpdateKernels
   (Let (Pattern [] [PatElem v v_attr]) aux (Op (Kernel debug kspace ts kbody)))
   [update@(DesiredUpdate bindee_nm bindee_attr cs _src is val)]
   | v == val = do
@@ -65,8 +74,10 @@ lowerUpdate
                     mkLet [] [Ident bindee_nm $ typeOf bindee_attr] $
                     Op $ Kernel debug kspace ts kbody',
                    mkLet [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
-lowerUpdate _ _ =
-  Nothing
+lowerUpdateKernels stm updates = lowerUpdate stm updates
+
+lowerUpdateInKernel :: MonadFreshNames m => LowerUpdate InKernel m
+lowerUpdateInKernel = lowerUpdate
 
 lowerUpdateIntoKernel :: DesiredUpdate (LetAttr (Aliases Kernels))
                       -> KernelSpace -> KernelBody (Aliases InKernel)
