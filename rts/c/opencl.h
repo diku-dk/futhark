@@ -421,7 +421,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
     const char *size_class = ctx->cfg.size_classes[i];
     size_t *size_value = &ctx->cfg.size_values[i];
     const char* size_name = ctx->cfg.size_names[i];
-    int max_value, default_value;
+    size_t max_value, default_value;
     if (strcmp(size_class, "group_size") == 0) {
       max_value = max_group_size;
       default_value = ctx->cfg.default_group_size;
@@ -441,7 +441,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
       *size_value = default_value;
     } else if (max_value > 0 && *size_value > max_value) {
       fprintf(stderr, "Note: Device limits %s to %d (down from %d)\n",
-              size_name, max_value, (int)*size_value);
+              size_name, (int)max_value, (int)*size_value);
       *size_value = max_value;
     }
   }
