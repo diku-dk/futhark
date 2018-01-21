@@ -51,7 +51,7 @@ newtype BoundInTypes = BoundInTypes (S.Set VName)
 boundInTypes :: [E.TypeParam] -> BoundInTypes
 boundInTypes = BoundInTypes . S.fromList . mapMaybe isTypeParam
   where isTypeParam (E.TypeParamDim v _) = Just v
-        isTypeParam E.TypeParamType{} = Nothing
+        isTypeParam _ = Nothing
 
 internaliseParamTypes :: BoundInTypes
                       -> M.Map VName VName
@@ -158,6 +158,7 @@ internaliseTypeM orig_t =
       ets <- internaliseElemType et
       return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets ]
     E.Arrow{} -> fail "internaliseTypeM: cannot handle function type."
+    E.LiftedTypeVar{} -> fail "internaliseTypeM: cannot handle lifted type variable."
 
   where internaliseElemType (E.ArrayPolyElem v targs _) =
           map (`toDecl` Nonunique) <$> applyType v targs
@@ -181,6 +182,8 @@ internaliseTypeWithUniqueness :: E.TypeBase () ()
                               -> Maybe [I.TypeBase ExtShape Uniqueness]
 internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
   where internaliseType' E.TypeVar{} =
+          lift Nothing
+        internaliseType' E.LiftedTypeVar{} =
           lift Nothing
         internaliseType' (E.Prim bt) =
           return [I.Prim $ internalisePrimType bt]
@@ -277,6 +280,7 @@ fullyApplyTypeM (E.TypeVar tn targs) = do
   where typeSubst (E.TypeParamType p _) (E.TypeArgType t _) =
           M.singleton p $ E.TypeSub $ E.TypeAbbr [] $ E.vacuousShapeAnnotations t
         typeSubst _ _ = mempty
+fullyApplyTypeM (E.LiftedTypeVar tn) = return $ E.LiftedTypeVar tn
 fullyApplyTypeM (E.Prim t) = return $ E.Prim t
 fullyApplyTypeM (E.Record fs) = E.Record <$> traverse fullyApplyTypeM fs
 fullyApplyTypeM (E.Array at shape u) = inArray at

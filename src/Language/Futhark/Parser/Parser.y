@@ -133,6 +133,7 @@ import Language.Futhark.Parser.Lexer
       '@'             { L $$ AT }
       '\\'            { L $$ BACKSLASH }
       '\''            { L $$ APOSTROPHE }
+      '\'^'           { L $$ APOSTROPHE_THEN_HAT }
       entry           { L $$ ENTRY }
       '->'            { L $$ RIGHT_ARROW }
       '<-'            { L $$ LEFT_ARROW }
@@ -320,6 +321,7 @@ Specs :: { [SpecBase NoInfo Name] }
 TypeParam :: { TypeParamBase Name }
            : '[' id ']' { let L _ (ID name) = $2 in TypeParamDim name $1 }
            | '\'' id { let L _ (ID name) = $2 in TypeParamType name $1 }
+           | '\'^' id { let L _ (ID name) = $2 in TypeParamLiftedType name $1 }
 
 TypeParams :: { [TypeParamBase Name] }
             : TypeParam TypeParams { $1 : $2 }
