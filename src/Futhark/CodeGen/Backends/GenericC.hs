@@ -505,14 +505,14 @@ defineMemorySpace space = do
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
         pure [C.cexp|size|] <*> pure sid
   let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
-  $id:(fatMemUnRef space)(ctx, block, desc);
-  $items:alloc
-  block->references = (int*) malloc(sizeof(int));
-  *(block->references) = 1;
   if (size < 0) {
     panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
   }
+  $id:(fatMemUnRef space)(ctx, block, desc);
+  $items:alloc
+  block->references = (int*) malloc(sizeof(int));
+  *(block->references) = 1;
   block->size = size;
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
