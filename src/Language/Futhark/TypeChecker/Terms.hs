@@ -8,10 +8,10 @@ module Language.Futhark.TypeChecker.Terms
 where
 
 import Control.Monad.Except
-import Control.Monad.Reader
-import Control.Monad.Writer
 import Control.Monad.State
+import Control.Monad.RWS
 import qualified Control.Monad.Fail as Fail
+import Data.Bifunctor
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -22,6 +22,7 @@ import qualified Data.Set as S
 import Prelude hiding (mod)
 
 import Language.Futhark
+import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
 import Language.Futhark.TypeChecker.Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
@@ -108,7 +109,7 @@ altOccurences occurs1 occurs2 =
 data ValBinding = BoundV [TypeParam] PatternType
                 -- ^ Aliases in parameters indicate the lexical
                 -- closure.
-                | OverloadedF [([TypeBase () ()], PatternType)]
+                | OverloadedF [(TypeBase () (), PatternType)]
                 | EqualityF
                 | OpaqueF
                 | WasConsumed SrcLoc
@@ -135,15 +136,33 @@ envToTermScope env = TermScope vtable (envTypeTable env) (envNameMap env)
   where vtable = M.map valBinding $ envVtable env
         valBinding (TypeM.BoundV tps v) = BoundV tps $ v `setAliases` mempty
 
-newtype TermTypeM a = TermTypeM (ReaderT
+-- | Mapping from fresh type variables, instantiated from the type
+-- schemes of polymorphic functions, to specific types as determined
+-- on application and the location of that application.
+type Substs = M.Map VName (TypeBase () (), SrcLoc)
+
+addSubst :: SrcLoc -> VName -> TypeBase () () -> TermTypeM ()
+addSubst loc vn tp = do
+  substs <- gets $ M.map $ first $ applySubst (M.singleton vn tp')
+  case M.lookup vn substs of
+    Just (old_t, old_loc) | tp' /= old_t ->
+      throwError $ TypeError loc $ "Argument determines type parameter '" ++
+      pretty (baseName vn) ++ "' as " ++ pretty tp' ++ ", but it was previously " ++
+      "determined to be " ++ pretty old_t ++ " at " ++ locStr old_loc ++ "."
+    _ -> put $ M.insert vn (tp', loc) substs
+  where tp' = tp `setUniqueness` Nonunique
+
+
+newtype TermTypeM a = TermTypeM (RWST
                                  TermScope
-                                 (WriterT
-                                  Occurences
-                                  TypeM)
+                                 Occurences
+                                 Substs
+                                 TypeM
                                  a)
   deriving (Monad, Functor, Applicative,
             MonadReader TermScope,
             MonadWriter Occurences,
+            MonadState Substs,
             MonadError TypeError)
 
 instance Fail.MonadFail TermTypeM where
@@ -151,11 +170,11 @@ instance Fail.MonadFail TermTypeM where
 
 runTermTypeM :: TermTypeM a -> TypeM (a, Occurences)
 runTermTypeM (TermTypeM m) = do
-  initial_scope <- (initialTermScope<>) <$> (envToTermScope <$> askEnv)
-  runWriterT (runReaderT m initial_scope)
+  initial_scope <- (initialTermScope <>) <$> (envToTermScope <$> askEnv)
+  evalRWST m initial_scope mempty
 
 liftTypeM :: TypeM a -> TermTypeM a
-liftTypeM = TermTypeM . lift . lift
+liftTypeM = TermTypeM . lift
 
 initialTermScope :: TermScope
 initialTermScope = TermScope initialVtable mempty topLevelNameMap
@@ -167,7 +186,7 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap
           Just (name, BoundV [] $ funF ts t)
         addIntrinsicF (name, IntrinsicOverloadedFun variants) =
           Just (name, OverloadedF $ map frob variants)
-          where frob (pts, rt) = (map Prim pts, funF pts rt)
+          where frob (pt, (pts, rt)) = (Prim pt, funF pts rt)
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
           Just (name, BoundV tvs $
                       fromStruct $ vacuousShapeAnnotations $
@@ -189,12 +208,14 @@ instance MonadTypeChecker TermTypeM where
     scope { scopeNameMap = m <> scopeNameMap scope }
 
   localEnv env (TermTypeM m) = do
+    cur_state <- get
     cur_scope <- ask
     let cur_scope' =
           cur_scope { scopeNameMap = scopeNameMap cur_scope `M.difference` envNameMap env }
-    (x,occs) <- liftTypeM $ localTmpEnv env $
-                runWriterT (runReaderT m cur_scope')
+    (x,new_state,occs) <- liftTypeM $ localTmpEnv env $
+                          runRWST m cur_scope' cur_state
     tell occs
+    put new_state
     return x
 
   lookupType loc qn = do
@@ -214,10 +235,15 @@ instance MonadTypeChecker TermTypeM where
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeVtable scope of
       Nothing -> throwError $ UnknownVariableError Term qn loc
-      Just (BoundV _ Arrow{}) -> throwError $ FunctionIsNotValue loc qn
-      Just (BoundV _ t) | "_" `isPrefixOf` pretty name -> throwError $ UnderscoreUse loc qn
-                        | otherwise -> return (qn', qualifyTypeVars outer_env [] qs $
-                                                    removeShapeAnnotations t)
+      Just (BoundV tparams t)
+        | "_" `isPrefixOf` pretty name -> throwError $ UnderscoreUse loc qn
+        | Arrow{} <- t -> do
+            (tnames, inst_list, t') <- instantiateTypeScheme tparams t
+            let qual = qualifyTypeVars outer_env tnames qs
+            return (qn', inst_list, qual $ removeShapeAnnotations t')
+        | otherwise ->
+            return (qn', [], qualifyTypeVars outer_env [] qs $
+                             removeShapeAnnotations t)
       Just EqualityF -> throwError $ FunctionIsNotValue loc qn
       Just OpaqueF -> throwError $ FunctionIsNotValue loc qn
       Just OverloadedF{} -> throwError $ FunctionIsNotValue loc qn
@@ -254,44 +280,57 @@ checkReallyQualName space qn loc = do
 
 -- | In a few rare cases (overloaded builtin functions), the type of
 -- the parameters actually matters.
-lookupFunction :: QualName Name -> [CompType] -> SrcLoc
-               -> TermTypeM (QualName VName, ([TypeParam], PatternType))
-lookupFunction qn argtypes loc = do
+lookupFunction :: QualName Name -> CompType -> SrcLoc
+               -> TermTypeM (QualName VName, [TypeBase () ()], PatternType)
+lookupFunction qn argtype loc = do
   outer_env <- liftTypeM askRootEnv
   (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
   case M.lookup name $ scopeVtable scope of
     Nothing -> throwError $ UnknownVariableError Term qn loc
     Just (WasConsumed wloc) -> throwError $ UseAfterConsume (baseName name) loc wloc
     Just (BoundV tparams t@Arrow{}) -> do
-      let qual = qualifyTypeVars outer_env (map typeParamName tparams) qs
-      return (qn', (tparams, qual t))
+      (tnames, inst_list, t') <- instantiateTypeScheme tparams t
+      return (qn', inst_list, qualifyTypeVars outer_env tnames qs t')
     Just (BoundV _ t) -> throwError $ ValueIsNotFunction loc qn $ removeShapeAnnotations t
     Just (OverloadedF overloads) ->
-      case lookup (map toStructural argtypes) overloads of
+      -- Lookup the type of an overloaded function based on the type of its
+      -- first argument, since that's enough to uniquely determine its type.
+      case lookup (toStructural argtype) overloads of
         Nothing -> throwError $ TypeError loc $ "Overloaded function " ++ pretty qn ++
-                   " not defined for arguments of types " ++
-                   intercalate ", " (map pretty argtypes)
-        Just f -> return (qn', ([], f))
-    Just OpaqueF
-      | [t] <- argtypes ->
-          let t' = vacuousShapeAnnotations t
-          in return (qn',
-                     ([],
-                      Arrow mempty Nothing (t' `setUniqueness` Nonunique)
-                      (t' `setUniqueness` Nonunique)))
-      | otherwise ->
-          throwError $ TypeError loc "Opaque function takes just a single argument."
+                   " not defined for arguments of type " ++ pretty argtype
+        Just f -> return (qn', [], f)
+    Just OpaqueF ->
+      let t' = vacuousShapeAnnotations argtype
+      in return (qn', [], Arrow mempty Nothing (t' `setUniqueness` Nonunique)
+                          (t' `setUniqueness` Nonunique))
     Just EqualityF
-      | [t1,t2] <- argtypes,
-        concreteType t1,
-        concreteType t2,
-        t1 `similarTo` t2 ->
-          return (qn', ([],
-                        vacuousShapeAnnotations $
-                        Arrow mempty Nothing t1 $ Arrow mempty Nothing t2 $ Prim Bool))
+      | concreteType argtype ->
+          return (qn', [], vacuousShapeAnnotations $
+                           Arrow mempty Nothing argtype $
+                           Arrow mempty Nothing argtype $ Prim Bool)
       | otherwise ->
-          throwError $ TypeError loc $ "Equality not defined for arguments of types " ++
-          intercalate ", " (map pretty argtypes)
+          throwError $ TypeError loc $ "Equality not defined for arguments of type " ++
+          pretty argtype
+
+-- | Instantiate a type scheme with fresh type variables for its type
+-- parameters. Returns the names of the fresh type variables, the instance
+-- list, and the instantiated type.
+instantiateTypeScheme :: [TypeParam] -> PatternType
+                      -> TermTypeM ([VName], [TypeBase () ()], PatternType)
+instantiateTypeScheme tparams t = do
+  let tparams' = filter isTypeParam tparams
+      tnames = map typeParamName tparams'
+  fresh_tnames <- mapM newName tnames
+  let inst_list = zipWith instTypeParam tparams' fresh_tnames
+      substs = M.fromList $ zip tnames inst_list
+      t' = substTypesAny substs t
+  return (fresh_tnames, inst_list, t')
+
+  where instTypeParam tparam fresh_vn
+          | isLifted tparam = LiftedTypeVar (typeName fresh_vn)
+          | otherwise       = TypeVar (typeName fresh_vn) []
+        isLifted TypeParamLiftedType{} = True
+        isLifted _                     = False
 
 --- Basic checking
 
@@ -303,7 +342,7 @@ unifyExpTypes e1 e2 =
   maybe (throwError $ UnifyError
          (srclocOf e1) (toStructural t1)
          (srclocOf e2) (toStructural t2)) return $
-  unifyTypes (typeOf e1) (typeOf e2)
+  unifyTypes t1 t2
   where t1 = typeOf e1
         t2 = typeOf e2
 
@@ -365,14 +404,15 @@ bindingTypeParams tparams = binding (mapMaybe typeParamIdent tparams) .
                             bindingTypes (mapMaybe typeParamType tparams)
   where typeParamType (TypeParamType v _) =
           Just (v, TypeAbbr [] $ TypeVar (typeName v) [])
+        typeParamType (TypeParamLiftedType v _) =
+          Just (v, TypeAbbr [] $ LiftedTypeVar (typeName v))
         typeParamType TypeParamDim{} =
           Nothing
 
 typeParamIdent :: TypeParam -> Maybe Ident
 typeParamIdent (TypeParamDim v loc) =
   Just $ Ident v (Info (Prim (Signed Int32))) loc
-typeParamIdent TypeParamType{} =
-  Nothing
+typeParamIdent _ = Nothing
 
 bindingIdent :: IdentBase NoInfo Name -> CompType -> (Ident -> TermTypeM a)
              -> TermTypeM a
@@ -419,28 +459,30 @@ bindingPattern tps p t m = do
 checkTypeParamsUsed :: [TypeParam] -> [Pattern] -> TermTypeM ()
 checkTypeParamsUsed tps ps = do
   let uses = mconcat $ map patternUses ps
-      check (TypeParamType pv loc)
-        | qualName pv `elem` patternTypeUses uses = return ()
-        | otherwise =
-            throwError $ TypeError loc $
-            "Type parameter " ++ pretty (baseName pv) ++
-            " not used in value parameters."
       check (TypeParamDim pv loc)
         | qualName pv `elem` patternDimUses uses = return ()
         | otherwise =
             throwError $ TypeError loc $
             "Type parameter " ++ pretty (baseName pv) ++
             " not used in value parameters."
+      check tparam
+        | qualName pv `elem` patternTypeUses uses = return ()
+        | otherwise =
+            throwError $ TypeError loc $
+            "Type parameter " ++ pretty (baseName pv) ++
+            " not used in value parameters."
+        where pv = typeParamName tparam
+              loc = srclocOf tparam
 
   mapM_ check tps
 
 noTypeParamsPermitted :: [UncheckedTypeParam] -> TermTypeM ()
 noTypeParamsPermitted ps =
-  case mapMaybe isTypeParam ps of
+  case mapMaybe typeParamLoc ps of
     loc:_ -> throwError $ TypeError loc "Type parameters are not permitted here."
     []    -> return ()
-  where isTypeParam (TypeParamType _ loc) = Just loc
-        isTypeParam _                     = Nothing
+  where typeParamLoc (TypeParamDim _ _) = Nothing
+        typeParamLoc tparam             = Just $ srclocOf tparam
 
 patternDims :: Pattern -> [Ident]
 patternDims (PatternParens p _) = patternDims p
@@ -510,7 +552,7 @@ checkExp (RecordLit fs loc) = do
           RecordFieldExplicit f <$> lift (checkExp e) <*> pure rloc
         checkField (RecordFieldImplicit name NoInfo rloc) = do
           errIfAlreadySet name rloc
-          (QualName _ name', t) <- lift $ lookupVar rloc $ qualName name
+          (QualName _ name', _, t) <- lift $ lookupVar rloc $ qualName name
           modify $ M.insert name rloc
           lift $ observe $ Ident name' (Info t) rloc
           return $ RecordFieldImplicit name' (Info t) rloc
@@ -533,7 +575,8 @@ checkExp (ArrayLit es _ loc) = do
                   | Just elemt' <- elemt `unifyTypes` typeOf eleme =
                     return elemt'
                   | otherwise =
-                    throwError $ TypeError loc $ pretty eleme ++ " is not of expected type " ++ pretty elemt ++ "."
+                    throwError $ TypeError loc $ pretty eleme ++
+                    " is not of expected type " ++ pretty elemt ++ "."
             in foldM check (typeOf e) es''
 
   t <- arrayOfM loc et (rank 1) Unique
@@ -577,10 +620,10 @@ checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
 
-  (op', ftype) <- lookupFunction op (map argType [e1_arg,e2_arg]) loc
+  (op', _, ftype) <- lookupFunction op (argType e1_arg) loc
 
   ([e1_pt, e2_pt], rettype') <-
-    checkFuncall (Just op) loc ftype [e1_arg, e2_arg]
+    checkFuncall loc ftype [e1_arg, e2_arg]
   return $ BinOp op' (e1', diet e1_pt) (e2', diet e2_pt)
     (Info $ removeShapeAnnotations rettype') loc
 
@@ -591,12 +634,15 @@ checkExp (Project k e NoInfo loc) = do
                 return $ Project k e' (Info t) loc
     _ -> throwError $ InvalidField loc (typeOf e') (pretty k)
 
-checkExp (If e1 e2 e3 _ pos) =
+checkExp (If e1 e2 e3 _ loc) =
   sequentially (require [Prim Bool] =<< checkExp e1) $ \e1' _ -> do
   ((e2', e3'), dflow) <- tapOccurences $ checkExp e2 `alternative` checkExp e3
   brancht <- unifyExpTypes e2' e3'
+  unless (orderZero brancht) $
+    throwError $ TypeError loc $ "Branches of conditional have type " ++
+    pretty brancht ++ ", but they are only allowed to have base type."
   let t' = addAliases brancht (`S.difference` allConsumed dflow)
-  return $ If e1' e2' e3' (Info t') pos
+  return $ If e1' e2' e3' (Info t') loc
 
 checkExp (Parens e loc) =
   Parens <$> checkExp e <*> pure loc
@@ -621,19 +667,25 @@ checkExp (Var qn NoInfo loc) = do
   -- information to perform the split, by taking qualifiers off the
   -- end until we find a module.
 
-  (qn', t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
+  (qn', il, t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
   observe $ Ident (qualLeaf qn') (Info t) loc
+  let (ps, ret) = unfoldFunType t
+      ps' = map (vacuousShapeAnnotations . toStruct) ps
 
-  foldM checkField (Var qn' (Info ([], t)) loc) fields
+  foldM checkField (Var qn' (Info (il, ps', ret)) loc) fields
   where findRootVar qs name = do
           r <- (Right <$> lookupVar loc (QualName qs name))
-               `catchError` (return . Left)
+               `catchError` handler
           case r of
             Left err | null qs -> throwError err
                      | otherwise -> do
-                         (qn', t, fields) <- findRootVar (init qs) (last qs)
-                         return (qn', t, fields++[name])
-            Right (qn', t) -> return (qn', t, [])
+                         (qn', il, t, fields) <- findRootVar (init qs) (last qs)
+                         return (qn', il, t, fields++[name])
+            Right (qn', il, t) -> return (qn', il, t, [])
+
+        handler (UnknownVariableError ns qn' _)
+          | null (qualQuals qn') = return . Left $ UnknownVariableError ns qn loc
+        handler e = return $ Left e
 
         checkField e k =
           case typeOf e of
@@ -645,17 +697,31 @@ checkExp (Negate arg loc) = do
   arg' <- require anyNumberType =<< checkExp arg
   return $ Negate arg' loc
 
--- HACK: We fake the types and such on applications quite severely,
--- because Futhark does not have the capacity to express higher-order
--- types.  All type annotations simply become the final (first-order)
--- result of the application.
-checkExp e@Apply{} = do
-  (fname, args) <- findFuncall e
-  (args', argflows) <- unzip <$> mapM checkArg args
-  (fname', ftype) <- lookupFunction fname (map argType argflows) loc
-  (paramtypes, rettype) <- checkFuncall (Just fname) loc ftype argflows
-  constructFuncall loc fname' args' paramtypes rettype
-  where loc = srclocOf e
+checkExp (Apply e1 e2 NoInfo NoInfo loc) = do
+  (e2', arg) <- checkArg e2
+  let tp2 = argType arg
+  case e1 of
+    Var qn _ var_loc -> do
+      r <- (Right <$> lookupFunction qn tp2 loc)
+            `catchError` (return . Left)
+      case r of
+        Right (fname, il, ftype) -> do
+          let ftype' = removeShapeAnnotations ftype
+          (paramtypes@(t1 : rest), rettype) <- checkApply loc ftype' arg
+          return $ Apply (Var fname (Info (il, paramtypes, rettype)) var_loc)
+                   e2' (Info $ diet t1) (Info (rest, rettype)) loc
+
+        -- Even if the function lookup failed, the applied expression
+        -- may still be a record projection of a function.
+        Left _ -> checkGeneralApp e2' arg
+
+    _ -> checkGeneralApp e2' arg
+
+  where checkGeneralApp e2' arg = do
+          e1' <- checkExp e1
+          (t1 : paramtypes, rettype) <- checkApply loc (typeOf e1') arg
+          return $ Apply e1' e2' (Info $ diet t1)
+                   (Info (paramtypes, rettype)) loc
 
 checkExp (LetPat tparams pat e body pos) = do
   noTypeParamsPermitted tparams
@@ -918,9 +984,15 @@ checkExp (Concat i arr1exp arr2exps loc) = do
           | otherwise = return ()
           where t = typeOf e
 
-checkExp e@Lambda{} =
-  throwError $ TypeError (srclocOf e)
-  "Lambda expressions are only permitted directly in applications."
+checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
+  bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
+    maybe_retdecl' <- traverse checkTypeDecl maybe_retdecl
+    body' <- checkFunBody (nameFromString "<anonymous>") body
+                          (unInfo . expandedType <$> maybe_retdecl') loc
+    (maybe_retdecl'', rettype) <- case maybe_retdecl' of
+      Just retdecl'@(TypeDecl _ (Info st)) -> return (Just retdecl', st)
+      Nothing -> return (Nothing, vacuousShapeAnnotations . toStruct $ typeOf body')
+    return $ Lambda tparams' params' body' maybe_retdecl'' (Info rettype) loc
 
 checkExp e@OpSection{} =
   throwError $ TypeError (srclocOf e)
@@ -938,6 +1010,11 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
 
   noTypeParamsPermitted tparams
+
+  unless (orderZero $ typeOf mergeexp') $
+    throwError $ TypeError loc $
+    "The type of the merge expression in a do-loop must be of order 0, " ++
+    "but it has type " ++ pretty (typeOf mergeexp') ++ "."
 
   let merge_t =
         Ascribed $ vacuousShapeAnnotations $ typeOf mergeexp' `setAliases` mempty
@@ -1078,7 +1155,7 @@ checkSOACArrayArg e = do
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
-  (QualName _ name', vt) <- lookupVar loc (qualName name)
+  (QualName _ name', _, vt) <- lookupVar loc (qualName name)
   return $ Ident name' (Info vt) loc
 
 checkDimIndex :: DimIndexBase NoInfo Name -> TermTypeM DimIndex
@@ -1108,14 +1185,15 @@ findFuncall (Apply f arg _ _ _) = do
 findFuncall e =
   throwError $ TypeError (srclocOf e) "Invalid function expression in application."
 
-constructFuncall :: SrcLoc -> QualName VName
+constructFuncall :: SrcLoc -> QualName VName -> [TypeBase () ()]
                  -> [Exp] -> [StructType] -> TypeBase dim Names
                  -> TermTypeM Exp
-constructFuncall loc fname args paramtypes rettype = do
+constructFuncall loc fname il args paramtypes rettype = do
   let rettype' = removeShapeAnnotations rettype
   return $ foldl (\f (arg,d,remnant) -> Apply f arg (Info d) (Info (remnant, rettype')) loc)
-                 (Var fname (Info (paramtypes, rettype')) loc)
+                 (Var fname (Info (il, paramtypes, rettype')) loc)
                  (zip3 args (map diet paramtypes) $ drop 1 $ tails paramtypes)
+
 
 type Arg = (CompType, Occurences, SrcLoc)
 
@@ -1127,55 +1205,54 @@ checkArg arg = do
   (arg', dflow) <- collectOccurences $ checkExp arg
   return (arg', (typeOf arg', dflow, srclocOf arg'))
 
-checkFuncall :: Maybe (QualName Name) -> SrcLoc
-             -> ([TypeParam], PatternType) -> [Arg]
-             -> TermTypeM ([StructType],
-                            TypeBase (DimDecl VName) Names)
-checkFuncall fname loc funbind args = do
-  (closure, paramtypes, rettype) <- instantiatePolymorphicFunction fname loc funbind args
-  occur closure
+checkApply :: SrcLoc -> CompType -> Arg
+           -> TermTypeM ([StructType], CompType)
+checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
+  instantiate loc (toStruct tp1) (toStruct argtype)
+  let (paramtypes, rettype) = unfoldFunType tp2
 
-  let diets = map (diet . snd) paramtypes
-  forM_ (zip diets args) $ \(d, (t, dflow, argloc)) -> do
-    maybeCheckOccurences dflow
-    let occurs = consumeArg argloc t d
-    occur $ dflow `seqOccurences` occurs
+  -- Perform substitutions of instantiated variables in the types.
+  substs <- gets $ M.map fst
+  let rettype' = applySubst substs rettype
+      (tp1' : paramtypes') = map (vacuousShapeAnnotations . toStruct .
+                                  applySubst substs) (tp1 : paramtypes)
 
-  return (map snd paramtypes,
-          returnType rettype diets (map argType args))
+  occur [observation as loc]
 
--- | Find concrete types for a call to a polymorphic function.
-instantiatePolymorphicFunction :: MonadTypeChecker m =>
-                                  Maybe (QualName Name) -> SrcLoc
-                               -> ([TypeParam], PatternType) -> [Arg]
-                               -> m (Occurences, [(Maybe VName,StructType)], StructType)
-instantiatePolymorphicFunction maybe_fname call_loc (tparams, ftype) args = do
-  (pts, ret) <- either pure (const nope) =<< getType call_loc ftype
+  maybeCheckOccurences dflow
+  let occurs = consumeArg argloc argtype (diet tp1')
+  occur $ dflow `seqOccurences` occurs
 
-  unless (length pts == length args) $
-    throwError $ TypeError call_loc $ prefix $
-    "expecting " ++ pretty (length pts) ++ " arguments, but got " ++
-    pretty (length args) ++ " arguments."
+  return (tp1' : paramtypes',
+          returnType (toStruct rettype') [diet tp1'] [argtype])
 
-  substs <- foldM instantiateArg mempty $ zip (map (toStructural . snd) pts) args
-  let substs' = M.map (TypeSub . TypeAbbr [] . vacuousShapeAnnotations . fst) substs
-  return ([observation (aliases ftype) call_loc],
-          map (fmap $ substituteTypes substs' . toStruct) pts,
-          substituteTypes substs' $ toStruct ret)
-  where
-    nope = throwError $ TypeError call_loc "Not a function."
-    prefix = (("In call of function " ++ fname ++ ": ")++)
-    fname = maybe "anonymous function" pretty maybe_fname
-    tnames = map typeParamName tparams
+checkApply loc ftype arg =
+  throwError $ TypeError loc $
+  "Attempt to apply an expression of type " ++ pretty ftype ++
+  " to an argument of type " ++ pretty (argType arg) ++ "."
 
-    instantiateArg substs (pt, (arg_t, _, arg_loc)) =
-      case instantiatePolymorphic tnames arg_loc substs pt (toStructural arg_t) of
-        Left (Just e) -> throwError $ TypeError arg_loc $ prefix e
-        Left Nothing -> throwError $ TypeError arg_loc $ prefix $
-                        "argument of type " ++ pretty arg_t ++
-                        " passed for parameter of type " ++ pretty pt
-        Right v -> return v
+checkFuncall :: SrcLoc -> PatternType -> [Arg]
+             -> TermTypeM ([StructType], PatternType)
+checkFuncall _ ftype [] = return ([], ftype)
+checkFuncall loc ftype ((argtype, dflow, argloc) : args) =
+  case ftype of
+    Arrow as _ t1 t2 -> do
+      instantiate loc (toStructural t1) (toStruct argtype)
+      substs <- gets $ M.map fst
+      let t1' = toStruct $ applySubst substs t1
+          t2' = applySubst substs t2
 
+      occur [observation as loc]
+      maybeCheckOccurences dflow
+      let occurs = consumeArg argloc argtype (diet t1')
+      occur $ dflow `seqOccurences` occurs
+
+      (ps, ret) <- checkFuncall loc t2' args
+      return (t1' : ps, ret)
+
+    _ -> throwError $ TypeError loc $
+         "Attempt to apply an expression of type " ++ pretty ftype ++
+         " to an argument of type " ++ pretty argtype ++ "."
 
 consumeArg :: SrcLoc -> CompType -> Diet -> [Occurence]
 consumeArg loc (Record ets) (RecordDiet ds) =
@@ -1184,7 +1261,7 @@ consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
 
 checkOneExp :: UncheckedExp -> TypeM Exp
-checkOneExp = fmap fst . runTermTypeM . checkExp
+checkOneExp e = fmap fst . runTermTypeM $ updateExpTypes =<< checkExp e
 
 maybePermitRecursion :: VName -> [TypeParam] -> [Pattern] -> Maybe StructType
                      -> TermTypeM a -> TermTypeM a
@@ -1230,7 +1307,9 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         return (Just retdecl', retdecl_type)
       Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct $ typeOf body')
 
-    return (fname', tparams', params', maybe_retdecl'', rettype, body')
+    body'' <- updateExpTypes body'
+
+    return (fname', tparams', params', maybe_retdecl'', rettype, body'')
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -1299,8 +1378,8 @@ checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
       let ret' = case maybe_ret' of
                    Nothing -> vacuousShapeAnnotations $ typeOf body' `setAliases` ()
                    Just (TypeDecl _ (Info ret)) -> ret
-          lamt = ([], foldr (Arrow () Nothing . patternStructType) ret' params' `setAliases` mempty)
-      (_, ret'') <- checkFuncall Nothing loc lamt args
+          lamt = foldr (Arrow () Nothing . patternStructType) ret' params' `setAliases` mempty
+      (_, ret'') <- checkFuncall loc lamt args
       return (Lambda tparams' params' body' maybe_ret' (Info $ toStruct ret'') loc,
               removeShapeAnnotations $ toStruct ret'')
   | otherwise = throwError $ TypeError loc $ "Anonymous function defined with " ++
@@ -1309,8 +1388,8 @@ checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
 
 checkFunExp (OpSection op NoInfo NoInfo NoInfo loc) args
   | [x_arg,y_arg] <- args = do
-  (op', ftype) <- lookupFunction op (map argType [x_arg,y_arg]) loc
-  (paramtypes', rettype') <- checkFuncall Nothing loc ftype [x_arg,y_arg]
+  (op', _, ftype) <- lookupFunction op (argType x_arg) loc
+  (paramtypes', rettype') <- checkFuncall loc ftype [x_arg,y_arg]
 
   case paramtypes' of
     [x_t, y_t] ->
@@ -1348,17 +1427,20 @@ checkFunExp (OpSectionRight binop x _ _ loc) args
 checkFunExp e args = do
   (fname, curryargexps) <- findFuncall e
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
-  (fname', ftype) <- lookupFunction fname (map argType $ curryargs++args) loc
+  let all_args = curryargs ++ args
+  (fname', instance_list, ftype) <- case all_args of
+    [] -> error "Function expression in SOAC with no arguments."
+    (arg : _) -> lookupFunction fname (argType arg) loc
 
-  (paramtypes', rettype') <- checkFuncall Nothing loc ftype (curryargs ++ args)
+  (paramtypes, rettype) <- checkFuncall loc ftype all_args
 
-  case find (unique . snd) $ zip curryargexps paramtypes' of
+  case find (unique . snd) $ zip curryargexps paramtypes of
     Just (arg, _) -> throwError $ CurriedConsumption fname $ srclocOf arg
     _             -> return ()
 
-  let rettype'' = removeShapeAnnotations rettype'
-  e' <- constructFuncall loc fname' curryargexps' paramtypes' rettype''
-  return (e', rettype'' `setAliases` mempty)
+  let rettype' = removeShapeAnnotations rettype
+  e' <- constructFuncall loc fname' instance_list curryargexps' paramtypes rettype'
+  return (e', rettype' `setAliases` mempty)
   where loc = srclocOf e
 
 checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
@@ -1367,8 +1449,8 @@ checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
 checkCurryBinOp arg_ordering binop x loc y_arg = do
   (x', x_arg) <- checkArg x
   let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
-  (binop', fun) <- lookupFunction binop [argType first_arg, argType second_arg] loc
-  ([xt, yt], rettype) <- checkFuncall Nothing loc fun [first_arg,second_arg]
+  (binop', _, fun) <- lookupFunction binop (argType first_arg) loc
+  ([xt, yt], rettype) <- checkFuncall loc fun [first_arg,second_arg]
   return (x', binop', xt, yt, removeShapeAnnotations rettype)
 
 --- Consumption
@@ -1440,3 +1522,87 @@ onlySelfAliasing = local (\scope -> scope { scopeVtable = M.mapWithKey set $ sco
         set _ EqualityF          = EqualityF
         set _ OpaqueF            = OpaqueF
         set _ (WasConsumed loc)  = WasConsumed loc
+
+
+-- | Instantiates the type variables of a polymorphic function, and creates
+-- new bindings in the state for the substitutions that are determined.
+instantiate :: SrcLoc -> TypeBase () () -> TypeBase () () -> TermTypeM ()
+instantiate _ (Prim t1) (Prim t2)
+  | t1 == t2 = return ()
+instantiate loc (Record fs) (Record arg_fs)
+  | M.keys fs == M.keys arg_fs =
+      mapM_ (uncurry $ instantiate loc) $ M.intersectionWith (,) fs arg_fs
+instantiate loc (TypeVar (TypeName _ tn) targs) (TypeVar (TypeName _ arg_tn) arg_targs)
+  | tn == arg_tn, length targs == length arg_targs =
+      zipWithM_ instantiateTypeArg targs arg_targs
+
+  where instantiateTypeArg TypeArgDim{} TypeArgDim{} = return ()
+        instantiateTypeArg (TypeArgType t _) (TypeArgType arg_t _) =
+          instantiate loc t arg_t
+        instantiateTypeArg _ _ = throwError $ TypeError loc
+          "Cannot instantiate a type argument with a dimension argument (or vice versa)."
+
+instantiate loc param_t@(TypeVar (TypeName [] tn) []) arg_t
+  | orderZero arg_t = addSubst loc tn arg_t
+  | otherwise = throwError $ FunctionalValueTypeVariable loc param_t arg_t
+instantiate loc param_t arg_t@(TypeVar (TypeName [] tn) [])
+  | orderZero param_t = addSubst loc tn arg_t
+  | otherwise = throwError $ FunctionalValueTypeVariable loc arg_t param_t
+
+instantiate loc (LiftedTypeVar (TypeName [] tn)) arg_t =
+  addSubst loc tn arg_t
+instantiate loc param_t (LiftedTypeVar (TypeName [] tn)) =
+  addSubst loc tn param_t
+
+instantiate loc (Arrow _ _ t1 t1') (Arrow _ _ t2 t2') = do
+  instantiate loc t1 t2
+  subs <- gets $ M.map fst
+  instantiate loc (applySubst subs t1') (applySubst subs t2')
+instantiate loc (Array et shape u) arg_t@(Array _ _ p_u)
+  | Just arg_t' <- peelArray (shapeRank shape) arg_t,
+    p_u `subuniqueOf` u =
+      instantiateArrayElemType et arg_t'
+
+  where instantiateArrayElemType (ArrayPrimElem pt ()) (Prim arg_pt)
+          | pt == arg_pt = return ()
+        instantiateArrayElemType  (ArrayRecordElem fs) (Record arg_fs)
+          | M.keys fs == M.keys arg_fs =
+              mapM_ (uncurry instantiateRecordArrayElemType) $
+              M.intersectionWith (,) fs arg_fs
+        instantiateArrayElemType (ArrayPolyElem tn [] ()) arg_t' =
+          instantiate loc (TypeVar tn []) arg_t'
+        instantiateArrayElemType et' arg_t' =
+          throwError $ TypeError loc $
+          "Could not instantiate array element type " ++ pretty et' ++
+          " with argument type " ++ pretty arg_t'
+
+        instantiateRecordArrayElemType (RecordArrayElem et') arg_t' =
+          instantiateArrayElemType et' arg_t'
+        instantiateRecordArrayElemType (RecordArrayArrayElem et' shape' u') arg_t' =
+          instantiate loc (Array et' shape' u') arg_t'
+
+instantiate loc t arg_t = throwError $ TypeError loc $
+                          "Argument of type " ++ pretty arg_t ++
+                          " passed for parameter of type " ++ pretty t
+
+-- | Extract the parameter types and return type from a type.
+-- If the type is not an arrow type, the list of parameter types is empty.
+unfoldFunType :: TypeBase dim as -> ([TypeBase dim as], TypeBase dim as)
+unfoldFunType (Arrow _ _ t1 t2) = let (ps, r) = unfoldFunType t2
+                                  in (t1 : ps, r)
+unfoldFunType t = ([], t)
+
+-- | Perform substitutions of instantiated variables on the type
+-- annotations (including the instance lists) of an expression.
+updateExpTypes :: Exp -> TermTypeM Exp
+updateExpTypes e = do
+  substs <- gets $ M.map fst
+  let tv = ASTMapper { mapOnExp         = astMap tv
+                     , mapOnName        = pure
+                     , mapOnQualName    = pure
+                     , mapOnType        = pure . applySubst substs
+                     , mapOnCompType    = pure . applySubst substs
+                     , mapOnStructType  = pure . applySubst substs
+                     , mapOnPatternType = pure . applySubst substs
+                     }
+  astMap tv e

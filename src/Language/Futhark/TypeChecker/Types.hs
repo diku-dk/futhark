@@ -1,10 +1,11 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp
   , checkTypeDecl
 
   , unifyTypes
   , subtypeOf
+  , subuniqueOf
   , similarTo
   , require
 
@@ -22,6 +23,9 @@ module Language.Futhark.TypeChecker.Types
   , instantiatePolymorphic
 
   , arrayOfM
+
+  , Substitutable(..)
+  , substTypesAny
   )
 where
 
@@ -59,6 +63,8 @@ unifyTypesU uf (TypeVar t1 targs1) (TypeVar t2 targs2)
       targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
       Just $ TypeVar t1 targs3
   | otherwise = Nothing
+unifyTypesU _ (LiftedTypeVar t1) (LiftedTypeVar t2)
+  | t1 == t2 = Just $ LiftedTypeVar t1
 unifyTypesU uf (Array et1 shape1 u1) (Array et2 shape2 u2) =
   Array <$> unifyArrayElemTypes uf et1 et2 <*>
   unifyShapes shape1 shape2 <*> uf u1 u2
@@ -67,6 +73,8 @@ unifyTypesU uf (Record ts1) (Record ts2)
     sort (M.keys ts1) == sort (M.keys ts2) =
       Record <$> traverse (uncurry (unifyTypesU uf))
       (M.intersectionWith (,) ts1 ts2)
+unifyTypesU uf (Arrow as1 mn1 t1 t1') (Arrow as2 _ t2 t2') =
+  Arrow (as1 <> as2) mn1 <$> unifyTypesU uf t1 t2 <*> unifyTypesU uf t1' t2'
 unifyTypesU _ _ _ = Nothing
 
 unifyTypeArgs :: (Monoid als, Eq als, ArrayDim dim) =>
@@ -240,6 +248,11 @@ checkTypeExp ote@TEApply{} = do
           return (TypeArgExpType te',
                   M.singleton pv $ TypeSub $ TypeAbbr [] st)
 
+        checkArgApply (TypeParamLiftedType pv _) (TypeArgExpType te) = do
+          (te', st) <- checkTypeExp te
+          return (TypeArgExpType te',
+                  M.singleton pv $ TypeSub $ TypeAbbr [] st)
+
         checkArgApply p a =
           throwError $ TypeError tloc $ "Type argument " ++ pretty a ++
           " not valid for a type parameter " ++ pretty p
@@ -248,7 +261,7 @@ checkTypeExp ote@TEApply{} = do
 checkNamedDim :: MonadTypeChecker m =>
                  SrcLoc -> QualName Name -> m (QualName VName)
 checkNamedDim loc v = do
-  (v', t) <- lookupVar loc v
+  (v', _, t) <- lookupVar loc v
   case t of
     Prim (Signed Int32) -> return v'
     _                   -> throwError $ DimensionNotInteger loc v
@@ -296,7 +309,7 @@ checkPattern' (Wildcard _ loc) (Ascribed t) =
 
 checkPattern' (TuplePattern ps loc) (Inferred t)
   | Just ts <- isTupleRecord t, length ts == length ps =
-  TuplePattern <$> zipWithM checkPattern' ps (map Inferred ts) <*> pure loc
+      TuplePattern <$> zipWithM checkPattern' ps (map Inferred ts) <*> pure loc
 checkPattern' (TuplePattern ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t, length ts == length ps =
       TuplePattern <$> zipWithM checkPattern' ps (map Ascribed ts) <*> pure loc
@@ -326,11 +339,6 @@ checkPattern' (RecordPattern fs loc) NoneInferred =
 
 checkPattern' fullp@(PatternAscription p (TypeDecl t NoInfo)) maybe_outer_t = do
   (t', st) <- checkTypeExp t
-
-  r <- getType (srclocOf fullp) st
-  case r of
-    Left _ -> throwError $ TypeError (srclocOf fullp) "Cannot bind a function in a pattern."
-    Right _ -> return ()
 
   let maybe_outer_t' = case maybe_outer_t of
                          Inferred outer_t -> Just $ vacuousShapeAnnotations outer_t
@@ -401,6 +409,7 @@ checkTypeParams ps m =
   m =<< evalStateT (mapM checkTypeParam ps) mempty
   where typeParamSpace (TypeParamDim pv _) = (Term, pv)
         typeParamSpace (TypeParamType pv _) = (Type, pv)
+        typeParamSpace (TypeParamLiftedType pv _) = (Type, pv)
 
         checkParamName ns v loc = do
           seen <- M.lookup (ns,v) <$> get
@@ -416,6 +425,8 @@ checkTypeParams ps m =
           TypeParamDim <$> checkParamName Term pv loc <*> pure loc
         checkTypeParam (TypeParamType pv loc) =
           TypeParamType <$> checkParamName Type pv loc <*> pure loc
+        checkTypeParam (TypeParamLiftedType pv loc) =
+          TypeParamLiftedType <$> checkParamName Type pv loc <*> pure loc
 
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
@@ -433,6 +444,10 @@ substituteTypes substs ot = case ot of
         M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
         applyType ps t $ map substituteInTypeArg targs
     | otherwise -> TypeVar v $ map substituteInTypeArg targs
+  LiftedTypeVar v
+    | Just (TypeSub (TypeAbbr [] t)) <-
+        M.lookup (qualLeaf (qualNameFromTypeName v)) substs -> t
+    | otherwise -> LiftedTypeVar v
   Record ts ->
     Record $ fmap (substituteTypes substs) ts
   Arrow als v t1 t2 ->
@@ -522,6 +537,8 @@ instantiatePolymorphic tnames loc orig_substs x y =
           instantiateArrayElemType et arg_t'
     instantiate (Prim pt) (Prim p_pt)
       | pt == p_pt = return ()
+    instantiate (Arrow () _ t1 t2) (Arrow () _ t1' t2') =
+      instantiate t1 t1' >> instantiate t2 t2'
     instantiate _ _ =
       lift $ Left Nothing
 
@@ -558,3 +575,55 @@ arrayOfM :: (MonadTypeChecker m, Pretty (ShapeDecl dim), ArrayDim dim, Monoid as
 arrayOfM loc t shape u = maybe nope return $ arrayOf t shape u
   where nope = throwError $ TypeError loc $
                "Cannot form an array with elements of type " ++ pretty t
+
+-- | Class of types which allow for substitution of types with no
+-- annotations for type variable names.
+class Substitutable a where
+  applySubst :: M.Map VName (TypeBase () ()) -> a -> a
+
+instance Substitutable (TypeBase () ()) where
+  applySubst = substTypesAny
+
+instance Substitutable (TypeBase () Names) where
+  applySubst = substTypesAny . M.map fromStruct
+
+instance Substitutable (TypeBase (DimDecl VName) ()) where
+  applySubst = substTypesAny . M.map vacuousShapeAnnotations
+
+instance Substitutable (TypeBase (DimDecl VName) Names) where
+  applySubst = substTypesAny . M.map (vacuousShapeAnnotations . fromStruct)
+
+-- | Perform substitutions, from type names to types, on a type. Works
+-- regardless of what shape and uniqueness information is attached to the type.
+substTypesAny :: (ArrayDim dim, Monoid as) =>
+                 M.Map VName (TypeBase dim as)
+              -> TypeBase dim as -> TypeBase dim as
+substTypesAny substs ot = case ot of
+  Prim t -> Prim t
+  Array et shape u -> fromMaybe nope $
+                      uncurry arrayOfWithAliases (subsArrayElem et) shape u
+  -- We only substitute for a type variable with no arguments, since
+  -- type parameters cannot have higher kind.
+  TypeVar v []
+    | Just t <- M.lookup (qualLeaf (qualNameFromTypeName v)) substs -> t
+  TypeVar v targs -> TypeVar v $ map subsTypeArg targs
+  LiftedTypeVar v
+    | Just t <- M.lookup (qualLeaf (qualNameFromTypeName v)) substs -> t
+    | otherwise -> LiftedTypeVar v
+  Record ts ->  Record $ fmap (substTypesAny substs) ts
+  Arrow als v t1 t2 ->
+    Arrow als v (substTypesAny substs t1) (substTypesAny substs t2)
+
+  where nope = error "substituteTypes: Cannot create array after substitution."
+
+        subsArrayElem (ArrayPrimElem t as) = (Prim t, as)
+        subsArrayElem (ArrayPolyElem v [] as)
+          | Just t <- M.lookup (qualLeaf (qualNameFromTypeName v)) substs = (t, as)
+        subsArrayElem (ArrayPolyElem v targs as) =
+          (TypeVar v (map subsTypeArg targs), as)
+        subsArrayElem (ArrayRecordElem ts) =
+          (Record $ fmap (substTypesAny substs . recordArrayElemToType) ts, mempty)
+
+        subsTypeArg (TypeArgType t loc) =
+          TypeArgType (substTypesAny substs t) loc
+        subsTypeArg t = t

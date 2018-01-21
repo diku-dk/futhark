@@ -1,5 +1,6 @@
 -- ==
--- error: M1.M.f
+-- error: Argument of type M0.M.t passed for parameter of type M1.M.t
+
 
 module type MT = {
   module M: {type t val x: t val f: t -> t}

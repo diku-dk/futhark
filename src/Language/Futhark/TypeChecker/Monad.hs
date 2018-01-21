@@ -100,6 +100,7 @@ data TypeError =
   | UniqueConstType SrcLoc Name (TypeBase () ())
   | UndeclaredFunctionReturnType SrcLoc (QualName Name)
   | UnappliedFunctor SrcLoc
+  | FunctionalValueTypeVariable SrcLoc (TypeBase () ()) (TypeBase () ())
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -196,6 +197,9 @@ instance Show TypeError where
     locStr loc
   show (UnappliedFunctor loc) =
     "Cannot have parametric module at " ++ locStr loc ++ "."
+  show (FunctionalValueTypeVariable loc tvar t) =
+    "Cannot instantiate the value type variable " ++ pretty tvar ++
+    " with the functional type " ++ pretty t ++ " at " ++ locStr loc ++ "."
 
 -- | A set of abstract types and where their definition is expected.
 type TySet = S.Set (QualName VName)
@@ -329,7 +333,9 @@ class MonadError TypeError m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
   lookupImport :: SrcLoc -> FilePath -> m (FilePath, Env)
-  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, CompType)
+  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, [TypeBase () ()], CompType)
+  -- ^ Also returns the instance list for the type parameters, in case
+  -- this variables refers to a polymorphic function.
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
@@ -397,27 +403,22 @@ instance MonadTypeChecker TypeM where
       Nothing -> throwError $ UnknownVariableError Term qn loc
       Just (BoundV _ t)
         | "_" `isPrefixOf` pretty name -> throwError $ UnderscoreUse loc qn
-        | otherwise -> do
-            r <- getType loc t
-            case r of Left{} -> throwError $ FunctionIsNotValue loc qn
-                      Right t' -> return (qn', removeShapeAnnotations $ fromStruct $
+        | otherwise ->
+            case getType t of
+              Left{} -> throwError $ FunctionIsNotValue loc qn
+              Right t' -> return (qn', [], removeShapeAnnotations $ fromStruct $
                                            qualifyTypeVars outer_env mempty qs t')
 
 -- | Extract from a type either a function type comprising a list of
--- parameter types and a return type (all of which must be
--- first-order), or a first-order type.
-getType :: MonadTypeChecker m =>
-           SrcLoc -> TypeBase dim as
-        -> m (Either ([(Maybe VName, TypeBase dim as)], TypeBase dim as)
-                     (TypeBase dim as))
-getType loc (Arrow _ v t1 t2) = do
-  t1' <- getType loc t1
-  t2' <- getType loc t2
-  case (t1', t2') of
-    (Left _, _) -> throwError $ TypeError loc "Higher-order functions are not supported yet."
-    (Right t1'', Left (ps, r)) -> return $ Left ((v,t1'') : ps, r)
-    (Right t1'', Right t2'') -> return $ Left ([(v,t1'')], t2'')
-getType _ t = return $ Right t
+-- parameter types and a return type, or a first-order type.
+getType :: TypeBase dim as
+        -> Either ([(Maybe VName, TypeBase dim as)], TypeBase dim as)
+                  (TypeBase dim as)
+getType (Arrow _ v t1 t2) =
+  case getType t2 of
+    Left (ps, r) -> Left ((v, t1) : ps, r)
+    Right _ -> Left ([(v, t1)], t2)
+getType t = Right t
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -447,6 +448,10 @@ qualifyTypeVars outer_env except qs = runIdentity . astMap mapper
   where mapper = ASTMapper { mapOnExp = pure
                            , mapOnName = pure
                            , mapOnQualName = pure . qual
+                           , mapOnType = pure
+                           , mapOnCompType = pure
+                           , mapOnStructType = pure
+                           , mapOnPatternType = pure
                            }
         qual (QualName orig_qs name)
           | name `elem` except ||
