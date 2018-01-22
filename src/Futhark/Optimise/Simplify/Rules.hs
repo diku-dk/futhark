@@ -668,9 +668,8 @@ constantFoldPrimFun _ _ = cannotSimplify
 
 twoPowerToBitShift :: BinderOps lore => TopDownRuleBasicOp lore
 twoPowerToBitShift _ pat _ (BinOp (Pow t) e1 e2)
-  | e1 == intConst t 2 = do
-      e2' <- letSubExp "bitshift_p1" $ BasicOp $ BinOp (Sub t) e2 (intConst t 1)
-      letBind_ pat $ BasicOp $ BinOp (Shl t) e1 e2'
+  | e1 == intConst t 2 =
+      letBind_ pat $ BasicOp $ BinOp (Shl t) (intConst t 1) e2
 twoPowerToBitShift _ _ _ _ = cannotSimplify
 
 simplifyIndex :: BinderOps lore => BottomUpRuleBasicOp lore
