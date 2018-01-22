@@ -97,8 +97,8 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
                 case kspaces of
                   [] -> (kspace, mempty)
                   new_kspace : _ -> new_kspace
-              Body () lam_kstms lam_res = groupStreamLambdaBody lam
-              lam_kstms' = mconcat tile_kstms <> lam_kstms
+          Body () lam_kstms lam_res <- syncAtEnd $ groupStreamLambdaBody lam
+          let lam_kstms' = mconcat tile_kstms <> lam_kstms
               group_size = spaceGroupSize kspace
               lam' = lam { groupStreamLambdaBody = Body () lam_kstms' lam_res
                          , groupStreamArrParams = arr_chunk_params'
@@ -155,8 +155,8 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
             fmap unzip $ forM mk_tilings $ \mk_tiling ->
               mk_tiling tile_size local_ids
 
-          let Body () lam_kstms lam_res = groupStreamLambdaBody lam
-              lam_kstms' = mconcat tile_kstms <> lam_kstms
+          Body () lam_kstms lam_res <- syncAtEnd $ groupStreamLambdaBody lam
+          let lam_kstms' = mconcat tile_kstms <> lam_kstms
               lam' = lam { groupStreamLambdaBody = Body () lam_kstms' lam_res
                          , groupStreamArrParams = arr_chunk_params'
                          }
@@ -344,6 +344,13 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
             Just [1,0]
           else
             Nothing
+
+syncAtEnd :: MonadFreshNames m => Body InKernel -> m (Body InKernel)
+syncAtEnd (Body () stms res) = do
+  (res', stms') <- (`runBinderT` mempty) $ do
+    mapM_ addStm stms
+    map Var <$> letTupExp "sync" (Op $ Barrier res)
+  return $ Body () stms' res'
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices

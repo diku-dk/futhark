@@ -673,8 +673,8 @@ groupStmsByGuard constants bnds =
 compileKernelExp :: KernelConstants -> ImpGen.Destination -> KernelExp InKernel
                  -> InKernelGen ()
 
-compileKernelExp _ (ImpGen.Destination [dest]) (Barrier se) = do
-  ImpGen.compileSubExpTo dest se
+compileKernelExp _ (ImpGen.Destination dests) (Barrier ses) = do
+  zipWithM_ ImpGen.compileSubExpTo dests ses
   ImpGen.emit $ Imp.Op Imp.Barrier
 
 compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
