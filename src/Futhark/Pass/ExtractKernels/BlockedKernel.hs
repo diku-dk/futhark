@@ -565,7 +565,9 @@ scanKernel1 w scan_sizes lam foldlam nes arrs = do
                      ifCommon $ map paramType acc_params
 
 
-      return $ resultBody $ map Var $ scanout_arrs' ++ mapout_arrs' ++ new_carries
+      -- HACK
+      new_carries' <- mapM (letExp "new_carry_sync" . Op . Barrier . Var) new_carries
+      return $ resultBody $ map Var $ scanout_arrs' ++ mapout_arrs' ++ new_carries'
 
     result <- letTupExp "result" $ DoLoop [] merge form loop_body
     let (scanout_result, mapout_result, carry_result) =

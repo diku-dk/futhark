@@ -121,6 +121,9 @@ instance Engine.Simplifiable SplitOrdering where
 simplifyKernelExp :: Engine.SimplifiableLore lore =>
                      KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore), Stms (Wise lore))
 
+simplifyKernelExp (Barrier se) =
+  (,) <$> (Barrier <$> Engine.simplify se) <*> pure mempty
+
 simplifyKernelExp (SplitSpace o w i elems_per_thread) =
   (,) <$> (SplitSpace <$> Engine.simplify o <*> Engine.simplify w
            <*> Engine.simplify i <*> Engine.simplify elems_per_thread)
