@@ -1,8 +1,8 @@
 -- Concat-scatter fusion in a more complicated session.
 -- ==
 -- input { [0,5] }
--- output { [4, 1, 1, 1, 1, 4, 1, 1, 1, 1]
---          [2, 6, 2, 2, 2, 2, 6, 2, 2, 2] }
+-- output { [3, 5, 1, 1, 1, 3, 5, 1, 1, 1]
+--          [4, 6, 2, 2, 2, 4, 6, 2, 2, 2] }
 -- structure { Concat 0 Scatter 1 }
 
 let main (xs: []i32) =
