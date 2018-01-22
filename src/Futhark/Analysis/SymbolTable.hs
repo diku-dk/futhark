@@ -24,6 +24,7 @@ module Futhark.Analysis.SymbolTable
   , lookup
   , lookupStm
   , lookupExp
+  , lookupBasicOp
   , lookupType
   , lookupSubExp
   , lookupScalExp
@@ -279,6 +280,11 @@ lookupStm name vtable = asStm =<< lookup name vtable
 
 lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore, Certificates)
 lookupExp name vtable = (stmExp &&& stmCerts) <$> lookupStm name vtable
+
+lookupBasicOp :: VName -> SymbolTable lore -> Maybe (BasicOp lore, Certificates)
+lookupBasicOp name vtable = case lookupExp name vtable of
+  Just (BasicOp e, cs) -> Just (e, cs)
+  _                    -> Nothing
 
 lookupType :: Attributes lore => VName -> SymbolTable lore -> Maybe Type
 lookupType name vtable = entryType <$> lookup name vtable
