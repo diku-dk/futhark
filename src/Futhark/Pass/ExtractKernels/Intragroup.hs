@@ -21,6 +21,7 @@ import Futhark.Analysis.DataDependencies
 import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.BlockedKernel
+import Futhark.Util (chunks)
 
 -- | Convert the statements inside a map nest to kernel statements,
 -- attempting to parallelise any remaining (top-level) parallel
@@ -208,6 +209,36 @@ intraGroupStm stm@(Let pat _ e) = do
       let replace (Var v) | v == paramName chunk_size_param = w
           replace se = se
       censor (S.map $ map replace) $ mapM_ intraGroupStm stream_bnds
+
+    Op (Scatter w lam ivs dests) -> do
+      parallel w
+      let (_as_ws, as_ns, as_vs) = unzip3 dests
+          active = BasicOp $ CmpOp (CmpSlt Int32) (Var ltid) w
+      as_vs' <- letTupExp "scatter_inp" $ Op $ Out.Barrier $ map Var as_vs
+      (active_res, active_stms) <- collectStms $ do
+        forM_ (zip (lambdaParams lam) ivs) $ \(p, arr) -> do
+          arr_t <- lookupType arr
+          letBindNames [paramName p] $ BasicOp $ Index arr $
+            fullSlice arr_t [DimFix $ Var ltid]
+        Kernelise.transformStms $ bodyStms $ lambdaBody lam
+        let (is, vs) = splitAt (sum as_ns) $ bodyResult $ lambdaBody lam
+        forM (zip as_vs' (chunks as_ns $ zip is vs)) $ \(as_v, ivs'') -> do
+          let saveInArray as_v' (i, v) =
+                letExp "scatter_dest" =<<
+                eWriteArray as_v' (eSubExp i) (eSubExp v)
+          Var <$> foldM saveInArray as_v ivs''
+      sync <- letTupExp "scatter_res" =<< eIf (pure active)
+        (pure $ mkBody active_stms active_res)
+        (pure $ mkBody mempty $ map Var as_vs')
+      letBind_ pat $ Op $ Out.Barrier $ map Var sync
+
+    BasicOp (Copy arr) -> do
+      arr_t <- lookupType arr
+      let w = arraySize 0 arr_t
+      parallel w
+      letBind_ pat . Op . Out.Combine [(ltid,w)] [rowType arr_t] [] <=<
+        insertStmsM $ resultBodyM . pure <=< letSubExp "v" $
+        BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var ltid]
 
     BasicOp (Replicate (Shape outer_ws) se)
       | [inner_ws] <- map (drop (length outer_ws) . arrayDims) $ patternTypes pat -> do
