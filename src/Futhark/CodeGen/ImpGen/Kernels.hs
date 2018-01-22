@@ -683,7 +683,6 @@ compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
 compileKernelExp constants dest (Combine cspace ts aspace body)
   | Just dest' <- ImpGen.Destination <$> zipWithM index ts (ImpGen.valueDestinations dest) = do
       copy <- allThreads constants $ ImpGen.compileBody dest' body
-      ImpGen.emit $ Imp.Op Imp.Barrier
       ImpGen.emit $ Imp.If (Imp.BinOpExp LogAnd (isActive cspace) (isActive aspace)) copy mempty
       ImpGen.emit $ Imp.Op Imp.Barrier
         where index t (ImpGen.ArrayDestination (Just loc)) =
