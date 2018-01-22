@@ -338,13 +338,14 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
                  { lambdaParams = lambdaParams fun <> lambdaParams fun2
                  , lambdaBody = mkBody (bodyStms (lambdaBody fun) <>
                                         bodyStms (lambdaBody fun2)) $
-                                fun_is <> fun2_is <> fun_vs <> fun2_vs
-                 , lambdaReturnType = its <> its2 <> vts <> vts2
+                                mix [fun_is, fun2_is] <> mix [fun_vs, fun2_vs]
+                 , lambdaReturnType = mix [its, its2] <> mix [vts, vts2]
                  }
       certifying (mconcat css) $
         letBind_ pat $ Op $ Scatter w' fun' (xs++ys) $ map incWrites dests
   where sizeOf :: VName -> Maybe SubExp
         sizeOf x = arraySize 0 . ST.entryType <$> ST.lookup x vtable
+        mix = concat . transpose
         incWrites (w, n, a) = (w, n+1, a)
         isConcat v = case ST.lookupExp v vtable of
           Just (BasicOp (Concat 0 x [y] _), cs) -> do
