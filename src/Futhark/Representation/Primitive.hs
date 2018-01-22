@@ -594,15 +594,15 @@ doUMax v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `max` intToWord64 v2
 
 -- | Left-shift.
 doShl :: IntValue -> IntValue -> IntValue
-doShl v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `shiftL` intToInt v2
+doShl v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `shift` intToInt v2
 
 -- | Logical right-shift, zero-extended.
 doLShr :: IntValue -> IntValue -> IntValue
-doLShr v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `shiftR` intToInt v2
+doLShr v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `shift` negate (intToInt v2)
 
 -- | Arithmetic right-shift, sign-extended.
 doAShr :: IntValue -> IntValue -> IntValue
-doAShr v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `shiftR` intToInt v2
+doAShr v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `shift` negate (intToInt v2)
 
 -- | Bitwise and.
 doAnd :: IntValue -> IntValue -> IntValue
