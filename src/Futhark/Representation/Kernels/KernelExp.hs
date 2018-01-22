@@ -108,7 +108,7 @@ data KernelExp lore = SplitSpace SplitOrdering SubExp SubExp SubExp
                       -- First  SubExp is the outersize of the array
                       -- Second SubExp is the maximal chunk size
                       -- [SubExp] is the accumulator, [VName] are the input arrays
-                    | Barrier SubExp
+                    | Barrier [SubExp]
                       -- ^ HACK: Semantically identity, but inserts a
                       -- barrier afterwards.  This reflects a weakness
                       -- in our kernel representation.
@@ -142,7 +142,7 @@ instance Attributes lore => TypedOp (KernelExp lore) where
     pure $ staticShapes $ map (`arrayOfRow` w) (lambdaReturnType lam)
   opType (GroupStream _ _ lam _ _) =
     pure $ staticShapes $ map paramType $ groupStreamAccParams lam
-  opType (Barrier se) = staticShapes . pure <$> subExpType se
+  opType (Barrier ses) = staticShapes <$> traverse subExpType ses
 
 instance FreeIn SplitOrdering where
   freeIn SplitContiguous = mempty
@@ -159,7 +159,7 @@ instance Attributes lore => FreeIn (KernelExp lore) where
     freeIn w <> freeInLambda lam <> freeIn input
   freeIn (GroupStream w maxchunk lam accs arrs) =
     freeIn w <> freeIn maxchunk <> freeIn lam <> freeIn accs <> freeIn arrs
-  freeIn (Barrier se) = freeIn se
+  freeIn (Barrier ses) = freeIn ses
 
 instance Attributes lore => FreeIn (GroupStreamLambda lore) where
   freeIn (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
@@ -185,7 +185,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
     replicate (length (lambdaReturnType lam)) mempty
   opAliases (GroupStream _ _ lam _ _) =
     map (const mempty) $ groupStreamAccParams lam
-  opAliases (Barrier se) = [subExpAliases se]
+  opAliases (Barrier ses) = map subExpAliases ses
 
   consumedInOp (GroupReduce _ _ input) =
     S.fromList $ map snd input
@@ -233,7 +233,7 @@ instance Attributes lore => Substitute (KernelExp lore) where
     (substituteNames subst w) (substituteNames subst maxchunk)
     (substituteNames subst lam)
     (substituteNames subst accs) (substituteNames subst arrs)
-  substituteNames substs (Barrier se) = Barrier $ substituteNames substs se
+  substituteNames substs (Barrier ses) = Barrier $ substituteNames substs ses
 
 instance Attributes lore => Substitute (GroupStreamLambda lore) where
   substituteNames
@@ -267,7 +267,7 @@ instance Renameable lore => Rename (KernelExp lore) where
   rename (GroupStream w maxchunk lam accs arrs) =
     GroupStream <$> rename w <*> rename maxchunk <*>
     rename lam <*> rename accs <*> rename arrs
-  rename (Barrier se) = Barrier <$> rename se
+  rename (Barrier ses) = Barrier <$> mapM rename ses
 
 instance Renameable lore => Rename (GroupStreamLambda lore) where
   rename (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
@@ -298,7 +298,7 @@ instance (Attributes lore,
             Alias.analyseBody body
   addOpAliases (Combine ispace ts active body) =
     Combine ispace ts active $ Alias.analyseBody body
-  addOpAliases (Barrier se) = Barrier se
+  addOpAliases (Barrier ses) = Barrier ses
 
   removeOpAliases (GroupReduce w lam input) =
     GroupReduce w (removeLambdaAliases lam) input
@@ -314,7 +314,7 @@ instance (Attributes lore,
     Combine ispace ts active $ removeBodyAliases body
   removeOpAliases (SplitSpace o w i elems_per_thread) =
     SplitSpace o w i elems_per_thread
-  removeOpAliases (Barrier se) = Barrier se
+  removeOpAliases (Barrier ses) = Barrier ses
 
 instance (Attributes lore,
           Attributes (Ranges lore),
@@ -335,7 +335,7 @@ instance (Attributes lore,
           analyseGroupStreamLambda (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
             Range.runRangeM $ Range.analyseBody body
-  addOpRanges (Barrier se) = Barrier se
+  addOpRanges (Barrier ses) = Barrier ses
 
   removeOpRanges (GroupReduce w lam input) =
     GroupReduce w (removeLambdaRanges lam) input
@@ -350,7 +350,7 @@ instance (Attributes lore,
     Combine ispace ts active $ removeBodyRanges body
   removeOpRanges (SplitSpace o w i elems_per_thread) =
     SplitSpace o w i elems_per_thread
-  removeOpRanges (Barrier se) = Barrier se
+  removeOpRanges (Barrier ses) = Barrier ses
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) where
   type OpWithWisdom (KernelExp lore) = KernelExp (Wise lore)
@@ -369,7 +369,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
     Combine ispace ts active $ removeBodyWisdom body
   removeOpWisdom (SplitSpace o w i elems_per_thread) =
     SplitSpace o w i elems_per_thread
-  removeOpWisdom (Barrier se) = Barrier se
+  removeOpWisdom (Barrier ses) = Barrier ses
 
 instance ST.IndexOp (KernelExp lore) where
 
@@ -496,7 +496,7 @@ instance PrettyLore lore => Pretty (KernelExp lore) where
                       braces (commasep $ map ppr accs),
                       commasep $ map ppr arrs])
 
-  ppr (Barrier se) = text "barrier" <> parens (ppr se)
+  ppr (Barrier ses) = text "barrier" <> parens (commasep $ map ppr ses)
 
 instance PrettyLore lore => Pretty (GroupStreamLambda lore) where
   ppr (GroupStreamLambda block_size block_offset acc_params arr_params body) =
