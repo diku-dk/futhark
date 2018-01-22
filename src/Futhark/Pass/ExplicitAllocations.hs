@@ -555,7 +555,9 @@ handleKernel (GetSizeMax size_class) =
 handleKernel (Kernel desc space kernel_ts kbody) = subAllocM handleKernelExp True $
   Inner . Kernel desc space kernel_ts <$>
   localScope (scopeOfKernelSpace space) (allocInKernelBody kbody)
-  where handleKernelExp (SplitSpace o w i elems_per_thread) =
+  where handleKernelExp (Barrier se) =
+          return $ Inner $ Barrier se
+        handleKernelExp (SplitSpace o w i elems_per_thread) =
           return $ Inner $ SplitSpace o w i elems_per_thread
         handleKernelExp (Combine cspace ts active body) =
           Inner . Combine cspace ts active <$> allocInBodyNoDirect body

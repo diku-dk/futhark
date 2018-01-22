@@ -327,6 +327,8 @@ unAllocInKernelBody = unAllocKernelBody False
     unAllocStm _ (Let pat attr e) =
       Just <$> (Let <$> unAllocPattern pat <*> pure attr <*> mapExpM unAlloc' e)
 
+    unAllocKernelExp (Barrier se) =
+      return $ Barrier se
     unAllocKernelExp (SplitSpace o w i elems_per_thread) =
       return $ SplitSpace o w i elems_per_thread
     unAllocKernelExp (Combine cspace ts active body) =
