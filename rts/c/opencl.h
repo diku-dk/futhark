@@ -55,6 +55,113 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->size_classes = size_classes;
 }
 
+/* An entry in the free list.  May be invalid, to avoid having to
+   deallocate entries as soon as they are removed.  There is also a
+   tag, to help with memory reuse. */
+struct opencl_free_list_entry {
+  size_t size;
+  cl_mem mem;
+  const char *tag;
+  unsigned char valid;
+};
+
+struct opencl_free_list {
+  struct opencl_free_list_entry *entries; /* Pointer to entries. */
+  int capacity; /* Number of entries. */
+  int used; /* Number of valid entries. */
+};
+
+void free_list_init(struct opencl_free_list *l) {
+  l->capacity = 30; // Picked arbitrarily.
+  l->used = 0;
+  l->entries = malloc(sizeof(struct opencl_free_list_entry) * l->capacity);
+  for (int i = 0; i < l->capacity; i++) {
+    l->entries[i].valid = 0;
+  }
+}
+
+/* Remove invalid entries from the free list. */
+void free_list_pack(struct opencl_free_list *l) {
+  int p = 0;
+  for (int i = 0; i < l->capacity; i++) {
+    if (l->entries[i].valid) {
+      l->entries[p] = l->entries[i];
+      p++;
+    }
+  }
+  // Now p == l->used.
+  l->entries = realloc(l->entries, l->used * sizeof(struct opencl_free_list_entry));
+  l->capacity = l->used;
+}
+
+void free_list_destroy(struct opencl_free_list *l) {
+  assert(l->used == 0);
+  free(l->entries);
+}
+
+int free_list_find_invalid(struct opencl_free_list *l) {
+  int i;
+  for (i = 0; i < l->capacity; i++) {
+    if (!l->entries[i].valid) {
+      break;
+    }
+  }
+  return i;
+}
+
+void free_list_insert(struct opencl_free_list *l, size_t size, cl_mem mem, const char *tag) {
+  int i = free_list_find_invalid(l);
+
+  if (i == l->capacity) {
+    // List is full; so we have to grow it.
+    l->entries = realloc(l->entries, l->capacity * 2 * sizeof(struct opencl_free_list_entry));
+    for (int j = 0; j < l->capacity; j++) {
+      l->entries[j+l->capacity].valid = 0;
+    }
+    l->capacity *= 2;
+  }
+
+  // Now 'i' points to the first invalid entry.
+  l->entries[i].valid = 1;
+  l->entries[i].size = size;
+  l->entries[i].mem = mem;
+  l->entries[i].tag = tag;
+
+  l->used++;
+}
+
+/* Find and remove a memory block of at least the desired size and
+   tag.  Returns 0 on success.  */
+int free_list_find(struct opencl_free_list *l, const char *tag, size_t *size_out, cl_mem *mem_out) {
+  int i;
+  for (i = 0; i < l->capacity; i++) {
+    if (l->entries[i].valid && l->entries[i].tag == tag) {
+      l->entries[i].valid = 0;
+      *size_out = l->entries[i].size;
+      *mem_out = l->entries[i].mem;
+      l->used--;
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+/* Remove the first block in the free list.  Returns 0 if a block was
+   removed, and nonzero if the free list was already empty. */
+int free_list_first(struct opencl_free_list *l, cl_mem *mem_out) {
+  for (int i = 0; i < l->capacity; i++) {
+    if (l->entries[i].valid) {
+      l->entries[i].valid = 0;
+      *mem_out = l->entries[i].mem;
+      l->used--;
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 struct opencl_context {
   cl_platform_id platform;
   cl_device_id device;
@@ -62,6 +169,8 @@ struct opencl_context {
   cl_command_queue queue;
 
   struct opencl_config cfg;
+
+  struct opencl_free_list free_list;
 
   size_t max_group_size;
   size_t max_num_groups;
@@ -374,6 +483,8 @@ static cl_program setup_opencl(struct opencl_context *ctx,
 
   ctx->lockstep_width = 0;
 
+  free_list_init(&ctx->free_list);
+
   struct opencl_device_option device_option = get_preferred_device(&ctx->cfg);
 
   if (ctx->cfg.debugging) {
@@ -533,4 +644,72 @@ static cl_program setup_opencl(struct opencl_context *ctx,
   free(fut_opencl_src);
 
   return prog;
+}
+
+int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, cl_mem *mem_out) {
+  // clCreateBuffer fails with CL_INVALID_BUFFER_SIZE if we pass 0 as
+  // the size (unlike malloc()), so we make sure we always allocate at
+  // least a single byte.  The alternative is to protect this with a
+  // branch and leave the cl_mem variable uninitialised if the size is
+  // zero, but this would leave sort of a landmine around, that would
+  // blow up if we ever passed it to an OpenCL function.
+  if (min_size == 0) {
+    min_size = 1;
+  }
+
+  assert(min_size > 0);
+
+  size_t size;
+
+  if (free_list_find(&ctx->free_list, tag, &size, mem_out) == 0) {
+    // Successfully found a free block.  Is it big enough, but not too big?
+    if (size >= min_size && size <= min_size*2) {
+      return CL_SUCCESS;
+    } else {
+      // Not just right - free it.
+      int error = clReleaseMemObject(*mem_out);
+      if (error != CL_SUCCESS) {
+        return error;
+      }
+    }
+  }
+
+  // We have to allocate a new block from the driver.
+  int error;
+  *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, min_size, NULL, &error);
+  return error;
+}
+
+int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) {
+  size_t size;
+  cl_mem existing_mem;
+
+  // If there is already a block with this tag, then remove it.
+  if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0) {
+    int error = clReleaseMemObject(existing_mem);
+    if (error != CL_SUCCESS) {
+      return error;
+    }
+  }
+
+  int error = clGetMemObjectInfo(mem, CL_MEM_SIZE, sizeof(size_t), &size, NULL);
+
+  if (error == CL_SUCCESS) {
+    free_list_insert(&ctx->free_list, size, mem, tag);
+  }
+
+  return error;
+}
+
+int opencl_free_all(struct opencl_context *ctx) {
+  cl_mem mem;
+  free_list_pack(&ctx->free_list);
+  while (free_list_first(&ctx->free_list, &mem) == 0) {
+    int error = clReleaseMemObject(mem);
+    if (error != CL_SUCCESS) {
+      return error;
+    }
+  }
+
+  return CL_SUCCESS;
 }
