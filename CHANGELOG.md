@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
      condition and the size of its results is invariant to all
      enclosing parallel loops.
 
+   * A new OpenCL memory manager can in some cases dramatically
+     improve performance for repeated invocations of the same entry
+     point.
+
+   * Experimental support for incremental flattening.  Set the
+     environment variable `FUTHARK_VERSIONED_CODE` to any value to try
+     it out.
+
    * `futhark-dataset`: Add `-t`/`-type` option.  Useful for
      inspecting data files.
 
