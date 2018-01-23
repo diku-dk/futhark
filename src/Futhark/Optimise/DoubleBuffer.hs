@@ -57,13 +57,13 @@ optimiseFunDef fundec = modifyNameSource $ \src ->
   let m = runDoubleBufferM $ inScopeOf fundec $ optimiseBody $ funDefBody fundec
       (body', src') = runState (runReaderT m env) src
   in (fundec { funDefBody = body' }, src')
-  where env = Env mempty optimiseKernelOp optimiseLoopOutsideKernel
+  where env = Env mempty optimiseKernelOp doNotTouchLoop
 
         optimiseKernelOp (Inner k) = do
           scope <- castScope <$> askScope
           modifyNameSource $
             runState (runReaderT (runDoubleBufferM $ Inner <$> optimiseKernel k) $
-                      Env scope optimiseInKernelOp optimiseLoopInKernel)
+                      Env scope optimiseInKernelOp optimiseLoop)
           where optimiseKernel =
                   mapKernelM identityKernelMapper
                   { mapOnKernelBody = optimiseBody
@@ -76,6 +76,8 @@ optimiseFunDef fundec = modifyNameSource $ \src ->
           lam' <- optimiseGroupStreamLambda lam
           return $ Inner $ GroupStream w maxchunk lam' accs arrs
         optimiseInKernelOp op = return op
+
+        doNotTouchLoop ctx val body = return (mempty, ctx, val, body)
 
 data Env lore = Env { envScope :: Scope lore
                     , envOptimiseOp :: Op lore -> DoubleBufferM lore (Op lore)
@@ -154,14 +156,12 @@ type OptimiseLoop lore =
                          [(FParam lore, SubExp)],
                          Body lore)
 
-optimiseLoop :: LoreConstraints lore inner => Bool -> OptimiseLoop lore
-optimiseLoop copy_init ctx val body = do
+optimiseLoop :: LoreConstraints lore inner => OptimiseLoop lore
+optimiseLoop ctx val body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
   buffered <- doubleBufferMergeParams
-              copy_init
-              (zip (map fst ctx) (bodyResult body))
-              (map fst merge)
+              (zip (map fst ctx) (bodyResult body)) (map fst merge)
               (boundInBody body)
   -- Then create the allocations of the buffers and copies of the
   -- initial values.
@@ -173,12 +173,6 @@ optimiseLoop copy_init ctx val body = do
   return (allocs, ctx', val', body')
   where merge = ctx ++ val
 
-optimiseLoopOutsideKernel :: OptimiseLoop ExplicitMemory
-optimiseLoopOutsideKernel = optimiseLoop False
-
-optimiseLoopInKernel :: OptimiseLoop InKernel
-optimiseLoopInKernel = optimiseLoop True
-
 -- | The booleans indicate whether we should also play with the
 -- initial merge values.
 data DoubleBuffer lore = BufferAlloc VName SubExp Space Bool
@@ -189,16 +183,16 @@ data DoubleBuffer lore = BufferAlloc VName SubExp Space Bool
                     deriving (Show)
 
 doubleBufferMergeParams :: (ExplicitMemorish lore, MonadFreshNames m) =>
-                           Bool -> [(FParam lore,SubExp)]
+                           [(FParam lore,SubExp)]
                         -> [FParam lore] -> Names
                         -> m [DoubleBuffer lore]
-doubleBufferMergeParams copy_init ctx_and_res val_params bound_in_loop =
+doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
   evalStateT (mapM buffer val_params) M.empty
   where loopVariant v = v `S.member` bound_in_loop ||
                         v `elem` map (paramName . fst) ctx_and_res
 
         loopInvariantSize (Constant v) =
-          Just (Constant v, copy_init)
+          Just (Constant v, True)
         loopInvariantSize (Var v) =
           case find ((==v) . paramName . fst) ctx_and_res of
             Just (_, Constant val) ->
@@ -208,7 +202,7 @@ doubleBufferMergeParams copy_init ctx_and_res val_params bound_in_loop =
             Just _ ->
               Nothing
             Nothing ->
-              Just (Var v, copy_init)
+              Just (Var v, True)
 
         buffer fparam = case paramType fparam of
           Mem size space
