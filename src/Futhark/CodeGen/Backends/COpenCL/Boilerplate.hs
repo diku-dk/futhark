@@ -146,11 +146,13 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   new_ctx <- GC.publicName "context_new"
   free_ctx <- GC.publicName "context_free"
   sync_ctx <- GC.publicName "context_sync"
+  clear_caches_ctx <- GC.publicName "context_clear_caches"
 
   GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx;|]
   GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx);|]
   GC.headerDecl GC.InitDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|int $id:clear_caches_ctx(struct $id:ctx* ctx);|]
 
   (fields, init_fields) <- GC.contextContents
 
@@ -199,6 +201,11 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                                }|]
   GC.libDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx) {
                          OPENCL_SUCCEED(clFinish(ctx->opencl.queue));
+                         return 0;
+                       }|]
+
+  GC.libDecl [C.cedecl|int $id:clear_caches_ctx(struct $id:ctx* ctx) {
+                         OPENCL_SUCCEED(opencl_free_all(&ctx->opencl));
                          return 0;
                        }|]
 
