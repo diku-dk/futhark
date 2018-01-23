@@ -24,7 +24,8 @@ output.
 
 If no ``-g``/``--generate`` options are passed, values are read from
 standard input, and printed to standard output in the indicated
-format.
+format.  The input format (whether textual or binary) is automatically
+detected.
 
 OPTIONS
 =======
@@ -68,19 +69,14 @@ To generate binary data, the ``--binary`` must come before the ``--generate``::
 
   futhark-dataset --binary --generate=[42]i32
 
-It is possible to generate a single file containing a payload of
-values, and use custom headers to make different interpretations as
-e.g. a 2D array. For example we can generate a file only containing
-256 ``i32`` values by::
+Create a binary data file from a data file::
 
-  futhark-dataset --binary-no-header --generate=[256]i32 > 256.dat
+  futhark-dataset --binary < any_data > binary_data
 
-Then we can run our program with different 2D-array configurations, without
-generating the array elements for each of them::
+Determine the types of values contained in a data file::
 
-  futhark-dataset --binary-only-header --generate=[1][256]i32 | cat - 256.dat | <Futhark program>
-  futhark-dataset --binary-only-header --generate=[2][128]i32 | cat - 256.dat | <Futhark program>
-  futhark-dataset --binary-only-header --generate=[4][64]i32 | cat - 256.dat | <Futhark program>
+  futhark-dataset -t < any_data
+
 
 SEE ALSO
 ========
