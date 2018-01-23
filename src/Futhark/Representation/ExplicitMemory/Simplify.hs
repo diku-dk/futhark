@@ -44,12 +44,13 @@ simpleInKernel = simplifiable simplifyKernelExp
 
 simplifyExplicitMemory :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
 simplifyExplicitMemory =
-  Simplify.simplifyProg simpleExplicitMemory callKernelRules blockers
+  Simplify.simplifyProg simpleExplicitMemory callKernelRules
+  blockers { Engine.blockHoistBranch = isAlloc }
 
 simplifyStms :: (HasScope ExplicitMemory m, MonadFreshNames m) =>
                 Stms ExplicitMemory -> m (Stms ExplicitMemory)
 simplifyStms =
-  Simplify.simplifyStms simpleExplicitMemory callKernelRules Engine.noExtraHoistBlockers
+  Simplify.simplifyStms simpleExplicitMemory callKernelRules blockers
 
 isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
 isAlloc _ (Let _ _ (Op Alloc{})) = True
@@ -83,13 +84,12 @@ inKernelEnv = Engine.emptyEnv inKernelRules blockers
 
 blockers ::  (ExplicitMemorish lore, Op lore ~ MemOp op) =>
              Simplify.HoistBlockers lore
-blockers = Engine.HoistBlockers {
-    Engine.blockHoistPar = isAlloc
-  , Engine.blockHoistSeq = isResultAlloc
-  , Engine.getArraySizes = getShapeNames
-  , Engine.isAllocation  = isAlloc0
+blockers = Engine.noExtraHoistBlockers {
+    Engine.blockHoistPar    = isAlloc
+  , Engine.blockHoistSeq    = isResultAlloc
+  , Engine.getArraySizes    = getShapeNames
+  , Engine.isAllocation     = isAlloc0
   }
-
 
 callKernelRules :: RuleBook (Wise ExplicitMemory)
 callKernelRules = standardRules <>

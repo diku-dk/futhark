@@ -41,15 +41,8 @@ simpleSOACS :: Simplify.SimpleOps SOACS
 simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
 
 simplifySOACS :: Prog -> PassM Prog
-simplifySOACS =
-  Simplify.simplifyProg simpleSOACS soacRules blockers
-  where blockers =
-          Engine.HoistBlockers {
-            Engine.blockHoistPar = Engine.neverBlocks
-          , Engine.blockHoistSeq = Engine.neverBlocks
-          , Engine.getArraySizes = getShapeNames
-          , Engine.isAllocation  = const False
-          }
+simplifySOACS = Simplify.simplifyProg simpleSOACS soacRules blockers
+  where blockers = Engine.noExtraHoistBlockers { Engine.getArraySizes = getShapeNames }
 
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent shapes/sizes.
