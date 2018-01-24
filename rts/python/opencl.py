@@ -94,6 +94,7 @@ def initialise_opencl_object(self,
     self.max_tile_size = max_tile_size
     self.max_threshold = 0
     self.max_num_groups = 0
+    self.free_list = {}
 
     default_sizes = apply_size_heuristics(self, size_heuristics,
                                           {'group_size': default_group_size,
@@ -153,3 +154,37 @@ def initialise_opencl_object(self,
             ["-DFUT_BLOCK_DIM={}".format(transpose_block_dim),
              "-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
             + ["-D{}={}".format(s,v) for (s,v) in self.sizes.items()])
+
+def opencl_alloc(self, min_size, tag):
+    min_size = 1 if min_size == 0 else min_size
+    assert min_size > 0
+    cur = self.free_list.get(tag)
+
+    if cur != None:
+        (buf, size) = cur
+        if size >= min_size and size <= min_size*2:
+            return FutharkBuffer(self, tag, size, buf)
+    return FutharkBuffer(self, tag, min_size, cl.Buffer(self.ctx, cl.mem_flags.READ_WRITE, min_size))
+
+def opencl_free(self, buf, size, tag):
+    # If there is already a block with this tag, then remove it.
+    res = self.free_list.get(tag)
+    if res != None:
+        (existing_buf, size) = res
+
+    self.free_list[tag] = (buf, size)
+
+def opencl_free_all(self):
+    self.free_list = {}
+
+class FutharkBuffer:
+    def __init__(self, obj, tag, size, buf):
+        self.obj = obj
+        self.tag = tag
+        self.buf = buf
+        self.size = size
+
+    def __del__(self):
+        if self.buf is not None:
+            opencl_free(self.obj, self.buf, self.size, self.tag)
+            self.buf = None
