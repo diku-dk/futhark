@@ -164,27 +164,29 @@ def opencl_alloc(self, min_size, tag):
         (buf, size) = cur
         if size >= min_size and size <= min_size*2:
             return FutharkBuffer(self, tag, size, buf)
-    return FutharkBuffer(self, tag, min_size, cl.Buffer(self.ctx, cl.mem_flags.READ_WRITE, min_size))
+    return FutharkBuffer(self, min_size, tag, cl.Buffer(self.ctx, cl.mem_flags.READ_WRITE, min_size))
 
 def opencl_free(self, buf, size, tag):
-    # If there is already a block with this tag, then remove it.
-    res = self.free_list.get(tag)
-    if res != None:
-        (existing_buf, size) = res
-
     self.free_list[tag] = (buf, size)
 
 def opencl_free_all(self):
     self.free_list = {}
 
-class FutharkBuffer:
-    def __init__(self, obj, tag, size, buf):
+class FutharkBuffer(cl.MemoryObjectHolder):
+    _id = 'buffer'
+
+    def __init__(self, obj, size, tag, buf):
         self.obj = obj
-        self.tag = tag
         self.buf = buf
-        self.size = size
+        self.tag = tag
+        self._alloc_sz = size
+        self.ptr = buf.ptr
+
+    def release(self):
+        opencl_free(self.obj, self.buf, self._alloc_sz, self.tag)
+        self.buf = None
+        self.ptr = None
 
     def __del__(self):
         if self.buf is not None:
-            opencl_free(self.obj, self.buf, self.size, self.tag)
-            self.buf = None
+            self.release()
