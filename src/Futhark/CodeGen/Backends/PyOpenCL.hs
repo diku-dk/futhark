@@ -119,14 +119,14 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
         processKernelArg (Imp.ValueKArg e bt) = do
           e' <- Py.compileExp e
           return $ Py.simpleCall (Py.compilePrimToNp bt) [e']
-        processKernelArg (Imp.MemKArg v) = return $ Field (Var $ Py.compileName v) "buf"
+        processKernelArg (Imp.MemKArg v) = return $ Var $ Py.compileName v
         processKernelArg (Imp.SharedMemoryKArg (Imp.Count num_bytes)) = do
           num_bytes' <- Py.compileExp num_bytes
           return $ Py.simpleCall "cl.LocalMemory" [asLong num_bytes']
 
 writeOpenCLScalar :: Py.WriteScalar Imp.OpenCL ()
 writeOpenCLScalar mem i bt "device" val = do
-  let mem' = Field (Var $ Py.compileName mem) "buf"
+  let mem' = Var $ Py.compileName mem
   let nparr = Call (Var "np.array")
               [Arg val, ArgKeyword "dtype" $ Var $ Py.compilePrimType bt]
   Py.stm $ Exp $ Call (Var "cl.enqueue_copy")
@@ -141,7 +141,7 @@ readOpenCLScalar :: Py.ReadScalar Imp.OpenCL ()
 readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
   let val' = Var $ pretty val
-  let mem' = Field (Var $ Py.compileName mem) "buf"
+  let mem' = Var $ Py.compileName mem
   let nparr = Call (Var "np.empty")
               [Arg $ Integer 1,
                ArgKeyword "dtype" (Var $ Py.compilePrimType bt)]
@@ -166,7 +166,7 @@ allocateOpenCLBuffer _ _ space =
 copyOpenCLMemory :: Py.Copy Imp.OpenCL ()
 copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes bt = do
   let srcmem'  = Var $ Py.compileName srcmem
-  let destmem' = Field (Var $ Py.compileName destmem) "buf"
+  let destmem' = Var $ Py.compileName destmem
   let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
   let end = BinOp "+" destidx divide
   let dest = Index destmem' (IdxRange destidx end)
@@ -177,7 +177,7 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
      ArgKeyword "is_blocking" $ Var "synchronous"]
 
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes bt = do
-  let destmem' = Field (Var $ Py.compileName destmem) "buf"
+  let destmem' = Var $ Py.compileName destmem
   let srcmem'  = Var $ Py.compileName srcmem
   let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
   let end = BinOp "+" srcidx divide
@@ -189,8 +189,8 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultS
      ArgKeyword "is_blocking" $ Var "synchronous"]
 
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "device") nbytes _ = do
-  let destmem' = Field (Var $ Py.compileName destmem) "buf"
-  let srcmem'  = Field (Var $ Py.compileName srcmem) "buf"
+  let destmem' = Var $ Py.compileName destmem
+  let srcmem'  = Var $ Py.compileName srcmem
   Py.stm $ ifNotZeroSize nbytes $
     Exp $ Call (Var "cl.enqueue_copy")
     [Arg $ Var "self.queue", Arg destmem', Arg srcmem',
@@ -223,7 +223,7 @@ staticOpenCLArray name "device" t vs = do
     Py.stm $ ifNotZeroSize size $
       Exp $ Call (Var "cl.enqueue_copy")
       [Arg $ Var "self.queue",
-       Arg $ Field (Var $ Py.compileName static_mem) "buf",
+       Arg $ Var $ Py.compileName static_mem,
        Arg $ Call (Var "normaliseArray") [Arg (Var name')],
        ArgKeyword "is_blocking" $ Var "synchronous"]
 
@@ -242,7 +242,7 @@ packArrayOutput mem "device" bt ept dims =
   [Arg $ Var "self.queue",
    Arg $ Tuple $ map Py.compileDim dims,
    Arg $ Var $ Py.compilePrimTypeExt bt ept,
-   ArgKeyword "data" $ Field (Var $ Py.compileName mem) "buf"]
+   ArgKeyword "data" $ Var $ Py.compileName mem]
 packArrayOutput _ sid _ _ _ =
   fail $ "Cannot return array from " ++ sid ++ " space."
 
@@ -271,7 +271,7 @@ unpackArrayInput mem memsize "device" t s dims e = do
     Py.stm $ ifNotZeroSize memsize' $
       Exp $ Call (Var "cl.enqueue_copy")
       [Arg $ Var "self.queue",
-       Arg $ Field (Var $ Py.compileName mem) "buf",
+       Arg $ Var $ Py.compileName mem,
        Arg $ Call (Var "normaliseArray") [Arg e],
        ArgKeyword "is_blocking" $ Var "synchronous"]
 
