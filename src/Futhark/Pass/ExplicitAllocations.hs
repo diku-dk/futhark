@@ -461,7 +461,7 @@ ensureDirectArray space_ok v = do
   Mem size mem_space <- lookupType mem
   if IxFun.isDirect ixfun && maybe True (==mem_space) space_ok
     then return (size, mem, Var v)
-    else needCopy (fromMaybe mem_space space_ok)
+    else needCopy (fromMaybe DefaultSpace space_ok)
   where needCopy space =
           -- We need to do a new allocation, copy 'v', and make a new
           -- binding for the size of the memory block.
