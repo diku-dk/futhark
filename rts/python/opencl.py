@@ -161,6 +161,7 @@ def opencl_alloc(self, min_size, tag):
     cur = self.free_list.get(tag)
 
     if cur != None:
+        del self.free_list[tag]
         (buf, size) = cur
         if size >= min_size and size <= min_size*2:
             return FutharkBuffer(self, tag, size, buf)
