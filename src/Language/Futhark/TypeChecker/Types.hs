@@ -4,6 +4,9 @@ module Language.Futhark.TypeChecker.Types
   , checkTypeDecl
 
   , unifyTypes
+  , subtypeOf
+  , similarTo
+  , require
 
   , checkPattern
   , InferredType(..)
@@ -106,6 +109,35 @@ unifyRecordArrayElemTypes uf (RecordArrayArrayElem et1 shape1 u1) (RecordArrayAr
   unifyShapes shape1 shape2 <*> uf u1 u2
 unifyRecordArrayElemTypes _ _ _ =
   Nothing
+
+-- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
+-- @y@), meaning @x@ is valid whenever @y@ is.
+subtypeOf :: ArrayDim dim =>
+             TypeBase dim as1 -> TypeBase dim as2 -> Bool
+subtypeOf t1 t2 = isJust $ unifyTypesU unifyUniqueness (toStruct t1) (toStruct t2)
+  where unifyUniqueness u2 u1 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
+
+-- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
+-- ignoring uniqueness and aliasing.
+similarTo :: ArrayDim dim =>
+             TypeBase dim as1
+          -> TypeBase dim as2
+          -> Bool
+similarTo t1 t2 = t1' `subtypeOf` t2' || t2' `subtypeOf` t1'
+  where t1' = toStruct t1
+        t2' = toStruct t2
+
+-- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
+-- with one of the types in @ts@.  Otherwise, simply returns @e@.
+require :: MonadTypeChecker m => [TypeBase () ()] -> Exp -> m Exp
+require ts e
+  | any (typeOf e `subtypeOf`) ts = return e
+  | otherwise = throwError $ UnexpectedType (srclocOf e) (toStructural $ typeOf e) ts
+
+-- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
+subuniqueOf :: Uniqueness -> Uniqueness -> Bool
+subuniqueOf Nonunique Unique = False
+subuniqueOf _ _              = True
 
 data Bindage = BoundAsVar | UsedFree
              deriving (Show, Eq)

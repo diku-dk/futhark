@@ -18,8 +18,6 @@ module Language.Futhark.TypeChecker.Monad
   , checkName
   , badOnLeft
 
-  , require
-
   , Warnings
 
   , Env(..)
@@ -335,13 +333,6 @@ class MonadError TypeError m => MonadTypeChecker m where
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
-
--- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
--- with one of the types in @ts@.  Otherwise, simply returns @e@.
-require :: MonadTypeChecker m => [TypeBase () ()] -> Exp -> m Exp
-require ts e
-  | any (typeOf e `subtypeOf`) ts = return e
-  | otherwise = throwError $ UnexpectedType (srclocOf e) (toStructural $ typeOf e) ts
 
 bindSpaced :: MonadTypeChecker m => [(Namespace, Name)] -> m a -> m a
 bindSpaced names body = do

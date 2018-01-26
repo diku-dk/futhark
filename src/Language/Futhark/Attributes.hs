@@ -34,9 +34,6 @@ module Language.Futhark.Attributes
   , recordArrayElemUniqueness
   , aliases
   , diet
-  , subuniqueOf
-  , subtypeOf
-  , similarTo
   , arrayRank
   , nestedDims
   , returnType
@@ -160,59 +157,6 @@ modifyShapeAnnotations :: (oldshape -> newshape)
                        -> TypeBase oldshape as
                        -> TypeBase newshape as
 modifyShapeAnnotations f = bimap f id
-
--- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
-subuniqueOf :: Uniqueness -> Uniqueness -> Bool
-subuniqueOf Nonunique Unique = False
-subuniqueOf _ _              = True
-
--- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
--- @y@), meaning @x@ is valid whenever @y@ is.
-subtypeOf :: ArrayDim dim =>
-             TypeBase dim as1 -> TypeBase dim as2 -> Bool
-subtypeOf (Array e1 dims1 u1) (Array e2 dims2 u2) =
-  u1 `subuniqueOf` u2 &&
-  e1 `subArrayElemOf` e2 &&
-  dims1 == dims2
-subtypeOf (Record ts1) (Record ts2) =
-  sort (M.keys ts1) == sort (M.keys ts2) &&
-  length ts1 == length ts2 && and (M.intersectionWith subtypeOf ts1 ts2)
-subtypeOf (Prim bt1) (Prim bt2) = bt1 == bt2
-subtypeOf (TypeVar v1 targs1) (TypeVar v2 targs2) =
-  v1 == v2 && length targs1 == length targs2 &&
-  and (zipWith subargOf targs1 targs2)
-subtypeOf _ _ = False
-
-subArrayElemOf :: ArrayDim dim =>
-                  ArrayElemTypeBase dim as1 -> ArrayElemTypeBase dim as2 -> Bool
-subArrayElemOf (ArrayPrimElem t1 _) (ArrayPrimElem t2 _) =
-  t1 == t2
-subArrayElemOf (ArrayPolyElem t1 targs1 _) (ArrayPolyElem t2 targs2 _) =
-  length targs1 == length targs2 &&
-  and (zipWith subargOf targs1 targs2) &&
-  t1 == t2
-subArrayElemOf (ArrayRecordElem r1) (ArrayRecordElem r2) =
-  sort (M.keys r1) == sort (M.keys r2) &&
-  and (M.intersectionWith subtypeOf
-       (fmap recordArrayElemToType r1)
-       (fmap recordArrayElemToType r2))
-subArrayElemOf _ _ = False
-
-
-subargOf :: ArrayDim dim => TypeArg dim as1 -> TypeArg dim as2 -> Bool
-subargOf TypeArgDim{} TypeArgDim{} = True
-subargOf (TypeArgType t1 _) (TypeArgType t2 _) = t1 `subtypeOf` t2
-subargOf _ _ = False
-
--- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
--- ignoring uniqueness and aliasing.
-similarTo :: ArrayDim dim =>
-             TypeBase dim as1
-          -> TypeBase dim as2
-          -> Bool
-similarTo t1 t2 = t1' `subtypeOf` t2' || t2' `subtypeOf` t1'
-  where t1' = toStruct t1
-        t2' = toStruct t2
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
