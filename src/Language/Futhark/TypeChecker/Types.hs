@@ -42,63 +42,69 @@ import Futhark.Util.Pretty (Pretty)
 -- uniqueness of the resulting type will be the least of the
 -- uniqueness of @t1@ and @t2@.
 unifyTypes :: (Monoid als, Eq als, ArrayDim dim) =>
-              TypeBase dim als
-           -> TypeBase dim als
-           -> Maybe (TypeBase dim als)
-unifyTypes (Prim t1) (Prim t2)
+              TypeBase dim als -> TypeBase dim als -> Maybe (TypeBase dim als)
+unifyTypes = unifyTypesU $ \x y -> Just $ x <> y
+
+unifyTypesU :: (Monoid als, Eq als, ArrayDim dim) =>
+              (Uniqueness -> Uniqueness -> Maybe Uniqueness)
+           -> TypeBase dim als -> TypeBase dim als -> Maybe (TypeBase dim als)
+unifyTypesU _ (Prim t1) (Prim t2)
   | t1 == t2  = Just $ Prim t1
   | otherwise = Nothing
-unifyTypes (TypeVar t1 targs1) (TypeVar t2 targs2)
+unifyTypesU uf (TypeVar t1 targs1) (TypeVar t2 targs2)
   | t1 == t2 = do
-      targs3 <- zipWithM unifyTypeArgs targs1 targs2
+      targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
       Just $ TypeVar t1 targs3
   | otherwise = Nothing
-unifyTypes (Array et1 shape1 u1) (Array et2 shape2 u2) =
-  Array <$> unifyArrayElemTypes et1 et2 <*>
-  unifyShapes shape1 shape2 <*> pure (u1 <> u2)
-unifyTypes (Record ts1) (Record ts2)
+unifyTypesU uf (Array et1 shape1 u1) (Array et2 shape2 u2) =
+  Array <$> unifyArrayElemTypes uf et1 et2 <*>
+  unifyShapes shape1 shape2 <*> uf u1 u2
+unifyTypesU uf (Record ts1) (Record ts2)
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
-      Record <$> traverse (uncurry unifyTypes)
+      Record <$> traverse (uncurry (unifyTypesU uf))
       (M.intersectionWith (,) ts1 ts2)
-unifyTypes _ _ = Nothing
+unifyTypesU _ _ _ = Nothing
 
 unifyTypeArgs :: (Monoid als, Eq als, ArrayDim dim) =>
-                 TypeArg dim als -> TypeArg dim als -> Maybe (TypeArg dim als)
-unifyTypeArgs (TypeArgDim d1 loc) (TypeArgDim d2 _) =
+                 (Uniqueness -> Uniqueness -> Maybe Uniqueness)
+              -> TypeArg dim als -> TypeArg dim als -> Maybe (TypeArg dim als)
+unifyTypeArgs _ (TypeArgDim d1 loc) (TypeArgDim d2 _) =
   TypeArgDim <$> unifyDims d1 d2 <*> pure loc
-unifyTypeArgs (TypeArgType t1 loc) (TypeArgType t2 _) =
-  TypeArgType <$> unifyTypes t1 t2 <*> pure loc
-unifyTypeArgs _ _ =
+unifyTypeArgs uf (TypeArgType t1 loc) (TypeArgType t2 _) =
+  TypeArgType <$> unifyTypesU uf t1 t2 <*> pure loc
+unifyTypeArgs _ _ _ =
   Nothing
 
 unifyArrayElemTypes :: (Monoid als, Eq als, ArrayDim dim) =>
-                       ArrayElemTypeBase dim als
+                       (Uniqueness -> Uniqueness -> Maybe Uniqueness)
+                    -> ArrayElemTypeBase dim als
                     -> ArrayElemTypeBase dim als
                     -> Maybe (ArrayElemTypeBase dim als)
-unifyArrayElemTypes (ArrayPrimElem bt1 als1) (ArrayPrimElem bt2 als2)
+unifyArrayElemTypes _ (ArrayPrimElem bt1 als1) (ArrayPrimElem bt2 als2)
   | bt1 == bt2 =
       Just $ ArrayPrimElem bt1 (als1 <> als2)
-unifyArrayElemTypes (ArrayPolyElem bt1 targs1 als1) (ArrayPolyElem bt2 targs2 als2)
+unifyArrayElemTypes _ (ArrayPolyElem bt1 targs1 als1) (ArrayPolyElem bt2 targs2 als2)
   | bt1 == bt2, targs1 == targs2 =
       Just $ ArrayPolyElem bt1 targs1 (als1 <> als2)
-unifyArrayElemTypes (ArrayRecordElem et1) (ArrayRecordElem et2)
+unifyArrayElemTypes uf (ArrayRecordElem et1) (ArrayRecordElem et2)
   | sort (M.keys et1) == sort (M.keys et2) =
     ArrayRecordElem <$>
-    traverse (uncurry unifyRecordArrayElemTypes) (M.intersectionWith (,) et1 et2)
-unifyArrayElemTypes _ _ =
+    traverse (uncurry $ unifyRecordArrayElemTypes uf) (M.intersectionWith (,) et1 et2)
+unifyArrayElemTypes _ _ _ =
   Nothing
 
 unifyRecordArrayElemTypes :: (Monoid als, Eq als, ArrayDim dim) =>
-                             RecordArrayElemTypeBase dim als
+                             (Uniqueness -> Uniqueness -> Maybe Uniqueness)
+                          -> RecordArrayElemTypeBase dim als
                           -> RecordArrayElemTypeBase dim als
                           -> Maybe (RecordArrayElemTypeBase dim als)
-unifyRecordArrayElemTypes (RecordArrayElem et1) (RecordArrayElem et2) =
-  RecordArrayElem <$> unifyArrayElemTypes et1 et2
-unifyRecordArrayElemTypes (RecordArrayArrayElem et1 shape1 u1) (RecordArrayArrayElem et2 shape2 u2) =
-  RecordArrayArrayElem <$> unifyArrayElemTypes et1 et2 <*>
-  unifyShapes shape1 shape2 <*> pure (u1<>u2)
-unifyRecordArrayElemTypes _ _ =
+unifyRecordArrayElemTypes uf (RecordArrayElem et1) (RecordArrayElem et2) =
+  RecordArrayElem <$> unifyArrayElemTypes uf et1 et2
+unifyRecordArrayElemTypes uf (RecordArrayArrayElem et1 shape1 u1) (RecordArrayArrayElem et2 shape2 u2) =
+  RecordArrayArrayElem <$> unifyArrayElemTypes uf et1 et2 <*>
+  unifyShapes shape1 shape2 <*> uf u1 u2
+unifyRecordArrayElemTypes _ _ _ =
   Nothing
 
 data Bindage = BoundAsVar | UsedFree
@@ -301,7 +307,7 @@ checkPattern' fullp@(PatternAscription p (TypeDecl t NoInfo)) maybe_outer_t = do
       st' = fromStruct st
   case maybe_outer_t' of
     Just outer_t
-      | Just t'' <- unifyTypes outer_t st' ->
+      | Just t'' <- unifyTypesU unifyUniqueness st' outer_t ->
           PatternAscription <$> checkPattern' p (Ascribed t'') <*>
           pure (TypeDecl t' (Info st))
       | otherwise ->
@@ -310,6 +316,7 @@ checkPattern' fullp@(PatternAscription p (TypeDecl t NoInfo)) maybe_outer_t = do
           in throwError $ InvalidPatternError fullp outer_t_for_error Nothing $ srclocOf p
     _ -> PatternAscription <$> checkPattern' p (Ascribed st') <*>
          pure (TypeDecl t' (Info st))
+  where unifyUniqueness u1 u2 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
 
 checkPattern' p NoneInferred =
   throwError $ TypeError (srclocOf p) $ "Cannot determine type of " ++ pretty p

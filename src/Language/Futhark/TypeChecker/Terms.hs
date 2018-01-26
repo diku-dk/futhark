@@ -689,8 +689,9 @@ checkExp (LetWith dest src idxes ve body pos) = do
   case peelArray (length $ filter isFix idxes') (unInfo $ identType src') of
     Nothing -> throwError $ IndexingError
                (arrayRank $ unInfo $ identType src') (length idxes) (srclocOf src)
-    Just elemt ->
-      sequentially (require [toStructural elemt] =<< checkExp ve) $ \ve' _ -> do
+    Just elemt -> do
+      let elemt' = toStructural elemt `setUniqueness` Nonunique
+      sequentially (require [elemt'] =<< checkExp ve) $ \ve' _ -> do
         when (identName src' `S.member` aliases (typeOf ve')) $
           throwError $ BadLetWithValue pos
 
@@ -905,7 +906,8 @@ checkExp (Stream form lam arr pos) = do
 
 checkExp (Concat i arr1exp arr2exps loc) = do
   arr1exp'  <- checkExp arr1exp
-  arr2exps' <- mapM (require [toStructural $ typeOf arr1exp'] <=< checkExp) arr2exps
+  let arr1_t = toStructural (typeOf arr1exp') `setUniqueness` Nonunique
+  arr2exps' <- mapM (require [arr1_t] <=< checkExp) arr2exps
   mapM_ ofProperRank arr2exps'
   return $ Concat i arr1exp' arr2exps' loc
   where ofProperRank e
