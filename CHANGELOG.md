@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
    * `scatter` expressions nested in `map`s are now parallelised.
 
+   * futlib: an `fft` module has been added, thanks to David
+     P.H. Jørgensen and Kasper Abildtrup Hansen.
+
 ### Removed
 
    * `futhark-dataset`: Removed `--binary-no-header` and
