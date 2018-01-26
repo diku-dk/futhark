@@ -664,13 +664,7 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedStm _ (Op Scatter{}) =
           False
-        unbalancedStm bound (DoLoop _ merge (ForLoop i _ iterations _) body) =
-          iterations `subExpBound` bound ||
-          unbalancedBody bound' body
-          where bound' = foldr S.insert bound $
-                         i : map (paramName . fst) merge
-        unbalancedStm _ (DoLoop _ _ (WhileLoop _) _) =
-          False
+        unbalancedStm _ DoLoop{} = False
 
         unbalancedStm bound (If cond tbranch fbranch _) =
           cond `subExpBound` bound &&
