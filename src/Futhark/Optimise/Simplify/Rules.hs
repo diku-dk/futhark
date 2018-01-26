@@ -792,8 +792,9 @@ simplifyIndexing vtable seType idd inds consuming =
         Just $ pure $ IndexResult cs v2 inds
 
     Just (Concat d x xs _, cs)
-      | Just (ibef, DimFix i, iaft) <- focusNth d inds -> Just $ do
-      Prim res_t <- stripArray (length inds) <$> lookupType x
+      | Just (ibef, DimFix i, iaft) <- focusNth d inds,
+        Just (Prim res_t) <- (`setArrayDims` sliceDims inds) <$>
+                             ST.lookupType x vtable -> Just $ do
       x_len <- arraySize d <$> lookupType x
       xs_lens <- mapM (fmap (arraySize d) . lookupType) xs
 
