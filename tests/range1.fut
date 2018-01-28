@@ -38,6 +38,6 @@
 -- }
 
 let main(start: i32)(end: i32) =
-    ([start..start...end],
-    [start..start..<end],
-    [start..start..>end])
+    (start..start...end,
+    start..start..<end,
+    start..start..>end)

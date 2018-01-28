@@ -51,9 +51,9 @@
 -- }
 
 let main (start: i32) (step: i32) (end: i32) =
-  ([start...end],
-   [start..<end],
-   [start..>end],
-   [start..step...end],
-   [start..step..<end],
-   [start..step..>end])
+  (start...end,
+   start..<end,
+   start..>end,
+   start..step...end,
+   start..step..<end,
+   start..step..>end)
