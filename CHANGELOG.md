@@ -72,6 +72,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Only entry points defined directly in the file given to the
     compiler will be visible.
 
+  * Range literals are now written without brackets: `x...y`.
+
   * `futhark-test` and `futhark-bench` will no longer append `.bin` to
     executables.
 

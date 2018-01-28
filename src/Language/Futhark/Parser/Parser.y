@@ -175,6 +175,7 @@ import Language.Futhark.Parser.Lexer
 %left ifprec letprec unsafe
 %left ','
 %left ':'
+%right '...' '..<' '..>' '..'
 %left '<-'
 %left '||...'
 %left '&&...'
@@ -610,6 +611,14 @@ Exp2 :: { UncheckedExp }
      | Exp2 '<=' Exp2      { binOp $1 (L $2 (SYMBOL Leq [] (nameFromString "<="))) $3 }
      | Exp2 '<' Exp2       { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
 
+     | Exp2 '...' Exp2           { Range $1 Nothing (ToInclusive $3) NoInfo (srclocOf $1) }
+     | Exp2 '..<' Exp2           { Range $1 Nothing (UpToExclusive $3) NoInfo (srclocOf $1) }
+     | Exp2 '..>' Exp2           { Range $1 Nothing (DownToExclusive $3) NoInfo (srclocOf $1) }
+     | Exp2 '..' Exp2 '...' Exp2 { Range $1 (Just $3) (ToInclusive $5) NoInfo (srclocOf $1) }
+     | Exp2 '..' Exp2 '..<' Exp2 { Range $1 (Just $3) (UpToExclusive $5) NoInfo (srclocOf $1) }
+     | Exp2 '..' Exp2 '..>' Exp2 { Range $1 (Just $3) (DownToExclusive $5) NoInfo (srclocOf $1) }
+     | Exp2 '..' Atom            {% twoDotsRange $2 }
+     | Atom '..' Exp2            {% twoDotsRange $2 }
      | '-' Exp2
        { Negate $2 $1 }
 
@@ -645,13 +654,6 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '('      ')'                   { TupLit [] $1 }
      | '[' Exps1 ']'                  { ArrayLit (fst $2:snd $2) NoInfo $1 }
 
-     | '[' Exp '...' Exp ']'          { Range $2 Nothing (ToInclusive $4) NoInfo $1 }
-     | '[' Exp '..<' Exp ']'          { Range $2 Nothing (UpToExclusive $4) NoInfo $1 }
-     | '[' Exp '..>' Exp ']'          { Range $2 Nothing (DownToExclusive $4) NoInfo $1 }
-     | '[' Exp '..' Exp '...' Exp ']' { Range $2 (Just $4) (ToInclusive $6) NoInfo $1 }
-     | '[' Exp '..' Exp '..<' Exp ']' { Range $2 (Just $4) (UpToExclusive $6) NoInfo $1 }
-     | '[' Exp '..' Exp '..>' Exp ']' { Range $2 (Just $4) (DownToExclusive $6) NoInfo $1 }
-
      | QualVarSlice  { let (v,slice,loc) = $1
                        in Index (Var v NoInfo loc) slice loc }
      | QualName FieldAccesses
@@ -680,8 +682,6 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      -- Errors
      | '[' ']'
        {% emptyArrayError $1 }
-
-     | '[' Exp '..' Exp ']' {% twoDotsRange $1 }
 
 Atoms1 :: { (UncheckedExp, [UncheckedExp]) }
         : Atom Atoms1 { ($1, fst $2 : snd $2) }
