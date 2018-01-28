@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE  GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | Imperative intermediate language used as a stepping stone in code generation.
 --
 -- This is a generic representation parametrised on an extensible
@@ -56,14 +56,11 @@ module Futhark.CodeGen.ImpCode
   where
 
 import Data.Monoid
-import Data.List hiding (foldr)
+import Data.List
 import Data.Loc
 import Data.Traversable
-import Data.Foldable
 import qualified Data.Set as S
 import qualified Data.Semigroup as Sem
-
-import Prelude hiding (foldr)
 
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
@@ -72,7 +69,6 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
 import Futhark.Analysis.PrimExp
-
 import Futhark.Util.Pretty hiding (space)
 
 data Size = ConstSize Int64
