@@ -114,7 +114,8 @@ void free_list_insert(struct opencl_free_list *l, size_t size, cl_mem mem, const
 
   if (i == l->capacity) {
     // List is full; so we have to grow it.
-    l->entries = realloc(l->entries, l->capacity * 2 * sizeof(struct opencl_free_list_entry));
+    int new_capacity = l->capacity * 2 * sizeof(struct opencl_free_list_entry);
+    l->entries = realloc(l->entries, new_capacity);
     for (int j = 0; j < l->capacity; j++) {
       l->entries[j+l->capacity].valid = 0;
     }
@@ -647,17 +648,10 @@ static cl_program setup_opencl(struct opencl_context *ctx,
 }
 
 int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, cl_mem *mem_out) {
-  // clCreateBuffer fails with CL_INVALID_BUFFER_SIZE if we pass 0 as
-  // the size (unlike malloc()), so we make sure we always allocate at
-  // least a single byte.  The alternative is to protect this with a
-  // branch and leave the cl_mem variable uninitialised if the size is
-  // zero, but this would leave sort of a landmine around, that would
-  // blow up if we ever passed it to an OpenCL function.
-  if (min_size == 0) {
-    min_size = 1;
+  assert(min_size >= 0);
+  if (min_size < sizeof(int)) {
+    min_size = sizeof(int);
   }
-
-  assert(min_size > 0);
 
   size_t size;
 
