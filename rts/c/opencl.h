@@ -66,9 +66,9 @@ struct opencl_free_list_entry {
 };
 
 struct opencl_free_list {
-  struct opencl_free_list_entry *entries; /* Pointer to entries. */
-  int capacity; /* Number of entries. */
-  int used; /* Number of valid entries. */
+  struct opencl_free_list_entry *entries; // Pointer to entries.
+  int capacity;                           // Number of entries.
+  int used;                               // Number of valid entries.
 };
 
 void free_list_init(struct opencl_free_list *l) {
