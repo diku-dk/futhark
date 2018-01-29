@@ -216,7 +216,7 @@ The ``futhark-py`` and ``futhark-pyopencl`` compilers both support
 generating reusable Python code, although the latter of these
 generates code of sufficient performance to be worthwhile.  The
 following mentions options and parameters only available for
-``futhark-pyopencl``.
+``futhark-pyopencl``.  You will need at least PyOpenCL version 2015.2.
 
 We can use ``futhark-pyopencl`` to translate the program
 ``futlib.fut`` into a Python module ``futlib.py`` with the following

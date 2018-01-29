@@ -4,6 +4,10 @@ import pyopencl as cl
 import numpy as np
 import sys
 
+if cl.version.VERSION < (2015,2):
+    raise Exception('Futhark requires at least PyOpenCL version 2015.2.  Installed version is %s.' %
+                    cl.version.VERSION_TEXT)
+
 def parse_preferred_device(s):
     pref_num = 0
     if len(s) > 1 and s[0] == '#':
