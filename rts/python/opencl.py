@@ -59,7 +59,7 @@ def apply_size_heuristics(self, size_heuristics, sizes):
            and self.platform.name.find(platform_name) >= 0 \
            and self.device.type == device_type:
                if type(value) == str:
-                   size[size] = self.device.get_info(getattr(cl.device_info,value))
+                   sizes[size] = self.device.get_info(getattr(cl.device_info,value))
                else:
                    sizes[size] = value
     return sizes
