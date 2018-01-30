@@ -105,10 +105,13 @@ lookInStm :: LoreConstraints lore =>
 lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
   case (patvalelems, e) of
     ([PatElem var _], BasicOp (Update orig _ _)) -> do
-      -- Record that when coalescing an in-place update statement, also look
-      -- at the original array.
       let actuals = S.fromList [var, orig]
+      -- When coalescing an in-place update statement, also look at the original
+      -- array.
       recordActuals var actuals
+      -- When reusing a previous memory block, make sure to also update related
+      -- in-place updates.
+      recordActuals orig actuals
     _ -> return ()
 
   -- Ignore the existential memory blocks.
