@@ -28,6 +28,8 @@ have been compiled to OpenCL, and runs just as fast as when using
 however, so a good rule of thumb when using ``futhark-pyopencl`` is to
 aim for having fewer but longer-lasting parallel sections.
 
+The generated code requires at least PyOpenCL version 2015.2.
+
 OPTIONS
 =======
 

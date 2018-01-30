@@ -146,33 +146,19 @@ readOpenCLScalar _ _ _ space _ =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
-allocateOpenCLBuffer mem size "device" = do
-
-  errorname <- newVName "clCreateBuffer_succeeded"
-  -- clCreateBuffer fails with CL_INVALID_BUFFER_SIZE if we pass 0 as
-  -- the size (unlike malloc()), so we make sure we always allocate at
-  -- least a single byte.  The alternative is to protect this with a
-  -- branch and leave the cl_mem variable uninitialised if the size is
-  -- zero, but this would leave sort of a landmine around, that would
-  -- blow up if we ever passed it to an OpenCL function.
-  GC.stm [C.cstm|{
-    typename cl_int $id:errorname;
-    $exp:mem = clCreateBuffer(ctx->opencl.ctx, CL_MEM_READ_WRITE,
-                              $exp:size > 0 ? $exp:size : 1, NULL,
-                              &$id:errorname);
-    OPENCL_SUCCEED($id:errorname);
-  }|]
-allocateOpenCLBuffer _ _ "local" =
+allocateOpenCLBuffer mem size tag "device" =
+  GC.stm [C.cstm|OPENCL_SUCCEED(opencl_alloc(&ctx->opencl, $exp:size, $exp:tag, &$exp:mem));|]
+allocateOpenCLBuffer _ _ _ "local" =
   return () -- Hack - these memory blocks do not actually exist.
-allocateOpenCLBuffer _ _ space =
+allocateOpenCLBuffer _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
-deallocateOpenCLBuffer mem "device" =
-  GC.stm [C.cstm|OPENCL_SUCCEED(clReleaseMemObject($exp:mem));|]
-deallocateOpenCLBuffer _ "local" =
+deallocateOpenCLBuffer mem tag "device" =
+  GC.stm [C.cstm|OPENCL_SUCCEED(opencl_free(&ctx->opencl, $exp:mem, $exp:tag));|]
+deallocateOpenCLBuffer _ _ "local" =
   return () -- Hack - these memory blocks do not actually exist.
-deallocateOpenCLBuffer _ space =
+deallocateOpenCLBuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' space"
 
 
@@ -307,6 +293,8 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       if (ctx->debugging) {
         fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
         $stms:(printKernelSize global_work_size)
+        fprintf(stderr, "] and local work size [");
+        $stms:(printKernelSize local_work_size)
         fprintf(stderr, "].\n");
         $id:time_start = get_wall_time();
       }
@@ -333,8 +321,8 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
         multExp x y = [C.cexp|$exp:x * $exp:y|]
 
         printKernelSize :: VName -> [C.Stm]
-        printKernelSize global_work_size =
+        printKernelSize work_size =
           intercalate [[C.cstm|fprintf(stderr, ", ");|]] $
-          map (printKernelDim global_work_size) [0..kernel_rank-1]
+          map (printKernelDim work_size) [0..kernel_rank-1]
         printKernelDim global_work_size i =
           [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]

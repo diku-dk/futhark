@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
      condition and the size of its results is invariant to all
      enclosing parallel loops.
 
+   * A new OpenCL memory manager can in some cases dramatically
+     improve performance for repeated invocations of the same entry
+     point.
+
+   * Experimental support for incremental flattening.  Set the
+     environment variable `FUTHARK_VERSIONED_CODE` to any value to try
+     it out.
+
    * `futhark-dataset`: Add `-t`/`-type` option.  Useful for
      inspecting data files.
 
@@ -29,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * `futhark-bench`: Add ``--skip-compilation`` flag.
 
    * `scatter` expressions nested in `map`s are now parallelised.
+
+   * futlib: an `fft` module has been added, thanks to David
+     P.H. Jørgensen and Kasper Abildtrup Hansen.
 
 ### Removed
 
@@ -60,6 +71,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Only entry points defined directly in the file given to the
     compiler will be visible.
+
+  * Range literals are now written without brackets: `x...y`.
 
   * `futhark-test` and `futhark-bench` will no longer append `.bin` to
     executables.

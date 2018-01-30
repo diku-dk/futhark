@@ -144,14 +144,15 @@ type WriteScalar op s =
 type ReadScalar op s =
   C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> CompilerM op s C.Exp
 
--- | Allocate a memory block of the given size in the given memory
--- space, saving a reference in the given variable name.
-type Allocate op s = C.Exp -> C.Exp -> SpaceId
+-- | Allocate a memory block of the given size and with the given tag
+-- in the given memory space, saving a reference in the given variable
+-- name.
+type Allocate op s = C.Exp -> C.Exp -> C.Exp -> SpaceId
                      -> CompilerM op s ()
 
--- | De-allocate the given memory block which is in the given memory
--- space.
-type Deallocate op s = C.Exp -> SpaceId -> CompilerM op s ()
+-- | De-allocate the given memory block with the given tag, which is
+-- in the given memory space.
+type Deallocate op s = C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
 
 -- | Create a static array of values - initialised at load time.
 type StaticArray op s = VName -> SpaceId -> PrimType -> [PrimValue] -> CompilerM op s ()
@@ -463,7 +464,8 @@ defineMemorySpace space = do
   let structdef =
         [C.cedecl|struct $id:sname { int *references;
                                      $ty:rm mem;
-                                     typename int64_t size; };|]
+                                     typename int64_t size;
+                                     const char *desc; };|]
 
   contextField peakname [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   contextField usagename [C.cty|typename int64_t|] $ Just [C.cexp|0|]
@@ -473,15 +475,15 @@ defineMemorySpace space = do
   -- zero.
   free <- case space of
     Space sid -> do free_mem <- asks envDeallocate
-                    collect $ free_mem [C.cexp|block->mem|] sid
+                    collect $ free_mem [C.cexp|block->mem|] [C.cexp|block->desc|] sid
     DefaultSpace -> return [[C.citem|free(block->mem);|]]
   ctx_ty <- contextType
   let unrefdef = [C.cedecl|static void $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
-      fprintf(stderr, $string:("Unreferencing block %s in %s: %d references remaining.\n"),
-                               desc, $string:spacedesc, *(block->references));
+      fprintf(stderr, $string:("Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n"),
+                               desc, block->desc, $string:spacedesc, *(block->references));
     }
     if (*(block->references) == 0) {
       ctx->$id:usagename -= block->size;
@@ -503,17 +505,18 @@ defineMemorySpace space = do
         stm [C.cstm|block->mem = (char*) malloc(size);|]
       Space sid ->
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
-        pure [C.cexp|size|] <*> pure sid
+        pure [C.cexp|size|] <*> pure [C.cexp|desc|] <*> pure sid
   let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
-  $id:(fatMemUnRef space)(ctx, block, desc);
-  $items:alloc
-  block->references = (int*) malloc(sizeof(int));
-  *(block->references) = 1;
   if (size < 0) {
     panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
   }
+  $id:(fatMemUnRef space)(ctx, block, desc);
+  $items:alloc
+  block->references = (int*) malloc(sizeof(int));
+  *(block->references) = 1;
   block->size = size;
+  block->desc = desc;
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
     fprintf(stderr, "Allocated %lld bytes for %s in %s (now allocated: %lld bytes)",
@@ -595,7 +598,7 @@ allocMem name size space = do
             stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
           Space sid ->
             join $ asks envAllocate <*> rawMem name <*>
-            pure [C.cexp|$exp:size|] <*> pure sid
+            pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*> pure sid
 
 oneTypeToCType :: Type -> CompilerM op s C.Type
 oneTypeToCType (Scalar bt) = return $ primTypeToCType bt
@@ -1607,6 +1610,10 @@ compilePrimExp f (BinOpExp bop x y) = do
              LogAnd{} -> [C.cexp|$exp:x' && $exp:y'|]
              LogOr{} -> [C.cexp|$exp:x' || $exp:y'|]
              _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
+
+compilePrimExp f (FunExp h args _) = do
+  args' <- mapM (compilePrimExp f) args
+  return $ [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
 compileCode :: Code op -> CompilerM op s ()
 

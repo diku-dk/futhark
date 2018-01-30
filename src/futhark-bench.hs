@@ -259,7 +259,7 @@ compareResult program (expected_bs, expected_vs) (actual_bs, actual_vs) =
           expectedf = program `replaceExtension` "expected"
       liftIO $ SBS.writeFile actualf actual_bs
       liftIO $ SBS.writeFile expectedf expected_bs
-      throwError $ T.pack actualf <> " and " <> T.pack expectedf <>
+      itWentWrong $ T.pack actualf <> " and " <> T.pack expectedf <>
         " do not match:\n" <> T.pack (show mismatch)
     Nothing ->
       return ()

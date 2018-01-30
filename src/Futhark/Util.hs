@@ -26,14 +26,14 @@ module Futhark.Util
        where
 
 import Numeric
+import Control.Exception
 import Data.Char
 import Data.List
 import Data.Either
 import Data.Maybe
 import System.Environment
 import System.IO.Unsafe
-import System.Directory.Tree (readDirectoryWith, flattenDir,
-                              DirTree(File), AnchoredDirTree(..))
+import qualified System.Directory.Tree as Dir
 
 -- | Like 'mapAccumL', but monadic.
 mapAccumLM :: Monad m =>
@@ -120,10 +120,12 @@ isEnvVarSet name default_val = fromMaybe default_val $ do
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]
 directoryContents dir = do
-  _ :/ tree <- readDirectoryWith return dir
-  return $ mapMaybe isFile $ flattenDir tree
-  where isFile (File _ path) = Just path
-        isFile _             = Nothing
+  _ Dir.:/ tree <- Dir.readDirectoryWith return dir
+  case Dir.failures tree of
+    Dir.Failed _ err : _ -> throw err
+    _ -> return $ mapMaybe isFile $ Dir.flattenDir tree
+  where isFile (Dir.File _ path) = Just path
+        isFile _                 = Nothing
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

@@ -30,6 +30,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Pass.ExtractKernels.BlockedKernel (blockedReduction)
 import Futhark.Pass.ExplicitAllocations (explicitAllocationsInStms)
 import Futhark.Util.IntegralExp
+import Futhark.Util (mapAccumLM)
 
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
 expandAllocations =
@@ -82,9 +83,11 @@ transformExp (Op (Inner (Kernel desc kspace ts kbody))) = do
     expandedVariantAllocations kspace kbody variant_allocs
 
   let alloc_offsets = invariant_alloc_offsets <> variant_alloc_offsets
-      kbody'' = offsetMemoryInKernelBody alloc_offsets
-                kbody' { kernelBodyStms = kernelBodyStms kbody' }
       alloc_stms = invariant_alloc_stms <> variant_alloc_stms
+
+  kbody'' <-  either compilerLimitationS pure $
+              offsetMemoryInKernelBody alloc_offsets
+              kbody' { kernelBodyStms = kernelBodyStms kbody' }
 
   return (oneStm num_threads64_bnd <> alloc_stms,
           Op $ Inner $ Kernel desc kspace ts kbody'')
@@ -224,39 +227,38 @@ lookupNewBase :: VName -> ([PrimExp VName], PrimType) -> RebaseMap -> Maybe IxFu
 lookupNewBase name x = fmap ($x) . M.lookup name
 
 offsetMemoryInKernelBody :: RebaseMap -> KernelBody InKernel
-                         -> KernelBody InKernel
-offsetMemoryInKernelBody initial_offsets kbody =
-  kbody { kernelBodyStms = stmsFromList stms' }
-  where stms' = snd $ mapAccumL offsetMemoryInStm initial_offsets $
-                stmsToList $ kernelBodyStms kbody
+                         -> Either String (KernelBody InKernel)
+offsetMemoryInKernelBody initial_offsets kbody = do
+  stms' <- snd <$> mapAccumLM offsetMemoryInStm initial_offsets
+           (stmsToList $ kernelBodyStms kbody)
+  return kbody { kernelBodyStms = stmsFromList stms' }
 
-offsetMemoryInBody :: RebaseMap -> Body InKernel -> Body InKernel
-offsetMemoryInBody offsets (Body attr bnds res) =
-  Body attr (stmsFromList $ snd $ mapAccumL offsetMemoryInStm offsets $ stmsToList bnds) res
+offsetMemoryInBody :: RebaseMap -> Body InKernel -> Either String (Body InKernel)
+offsetMemoryInBody offsets (Body attr stms res) = do
+  stms' <- stmsFromList . snd <$> mapAccumLM offsetMemoryInStm offsets (stmsToList stms)
+  return $ Body attr stms' res
 
 offsetMemoryInStm :: RebaseMap -> Stm InKernel
-                      -> (RebaseMap, Stm InKernel)
-offsetMemoryInStm offsets (Let pat attr e) =
-  (offsets', Let pat' attr $ offsetMemoryInExp offsets e)
-  where (offsets', pat') = offsetMemoryInPattern offsets pat
+                  -> Either String (RebaseMap, Stm InKernel)
+offsetMemoryInStm offsets (Let pat attr e) = do
+  (offsets', pat') <- offsetMemoryInPattern offsets pat
+  e' <- offsetMemoryInExp offsets e
+  return (offsets', Let pat' attr e')
 
-offsetMemoryInPattern :: RebaseMap -> Pattern InKernel -> (RebaseMap, Pattern InKernel)
-offsetMemoryInPattern offsets (Pattern ctx vals) =
-  (offsets', Pattern ctx vals')
-  where offsets' = foldl inspectCtx offsets ctx
-        vals' = map inspectVal vals
-        inspectVal patElem =
-          patElem { patElemAttr =
-                       offsetMemoryInMemBound offsets' $ patElemAttr patElem
-                  }
+offsetMemoryInPattern :: RebaseMap -> Pattern InKernel
+                      -> Either String (RebaseMap, Pattern InKernel)
+offsetMemoryInPattern offsets (Pattern ctx vals) = do
+  offsets' <- foldM inspectCtx offsets ctx
+  return (offsets', Pattern ctx $ map (inspectVal offsets') vals)
+  where inspectVal offsets' = fmap $ offsetMemoryInMemBound offsets'
         inspectCtx ctx_offsets patElem
           | Mem _ space <- patElemType patElem,
             space /= Space "local" =
-              error $ unwords ["Cannot deal with existential memory block",
-                               pretty (patElemName patElem),
-                               "when expanding inside kernels."]
+              throwError $ unwords ["Cannot deal with existential memory block",
+                                    pretty (patElemName patElem),
+                                    "when expanding inside kernels."]
           | otherwise =
-              ctx_offsets
+              return ctx_offsets
 
 offsetMemoryInParam :: RebaseMap -> Param (MemBound u) -> Param (MemBound u)
 offsetMemoryInParam offsets fparam =
@@ -277,32 +279,32 @@ offsetMemoryInBodyReturns offsets (MemArray pt shape u (ReturnsInBlock mem ixfun
       IxFun.rebase (fmap (fmap Free) new_base) ixfun
 offsetMemoryInBodyReturns _ br = br
 
-offsetMemoryInExp :: RebaseMap -> Exp InKernel -> Exp InKernel
-offsetMemoryInExp offsets (DoLoop ctx val form body) =
-  DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form body'
+offsetMemoryInExp :: RebaseMap -> Exp InKernel -> Either String (Exp InKernel)
+offsetMemoryInExp offsets (DoLoop ctx val form body) = do
+  body' <- offsetMemoryInBody offsets body
+  return $ DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form body'
   where (ctxparams, ctxinit) = unzip ctx
         (valparams, valinit) = unzip val
-        body' = offsetMemoryInBody offsets body
         ctxparams' = map (offsetMemoryInParam offsets) ctxparams
         valparams' = map (offsetMemoryInParam offsets) valparams
-offsetMemoryInExp offsets (Op (Inner (GroupStream w max_chunk lam accs arrs))) =
-  Op (Inner (GroupStream w max_chunk lam' accs arrs))
-  where lam' =
-          lam { groupStreamLambdaBody = offsetMemoryInBody offsets $
-                                        groupStreamLambdaBody lam
-              , groupStreamAccParams = map (offsetMemoryInParam offsets) $
-                                       groupStreamAccParams lam
-              , groupStreamArrParams = map (offsetMemoryInParam offsets) $
-                                       groupStreamArrParams lam
-              }
-offsetMemoryInExp offsets (Op (Inner (GroupReduce w lam input))) =
-  Op (Inner (GroupReduce w lam' input))
-  where lam' = lam { lambdaBody = offsetMemoryInBody offsets $ lambdaBody lam }
+offsetMemoryInExp offsets (Op (Inner (GroupStream w max_chunk lam accs arrs))) = do
+  body <- offsetMemoryInBody offsets $ groupStreamLambdaBody lam
+  let lam' = lam { groupStreamLambdaBody = body
+                 , groupStreamAccParams = map (offsetMemoryInParam offsets) $
+                                          groupStreamAccParams lam
+                 , groupStreamArrParams = map (offsetMemoryInParam offsets) $
+                                          groupStreamArrParams lam
+                 }
+  return $ Op $ Inner $ GroupStream w max_chunk lam' accs arrs
+offsetMemoryInExp offsets (Op (Inner (GroupReduce w lam input))) = do
+  body <- offsetMemoryInBody offsets $ lambdaBody lam
+  let lam' = lam { lambdaBody = body }
+  return $ Op $ Inner $ GroupReduce w lam' input
 offsetMemoryInExp offsets (Op (Inner (Combine cspace ts active body))) =
-  Op $ Inner $ Combine cspace ts active $ offsetMemoryInBody offsets body
-offsetMemoryInExp offsets e = mapExp recurse e
+  Op . Inner . Combine cspace ts active <$> offsetMemoryInBody offsets body
+offsetMemoryInExp offsets e = mapExpM recurse e
   where recurse = identityMapper
-                  { mapOnBody = const $ return . offsetMemoryInBody offsets
+                  { mapOnBody = const $ offsetMemoryInBody offsets
                   , mapOnBranchType = return . offsetMemoryInBodyReturns offsets
                   }
 
@@ -327,6 +329,8 @@ unAllocInKernelBody = unAllocKernelBody False
     unAllocStm _ (Let pat attr e) =
       Just <$> (Let <$> unAllocPattern pat <*> pure attr <*> mapExpM unAlloc' e)
 
+    unAllocKernelExp (Barrier se) =
+      return $ Barrier se
     unAllocKernelExp (SplitSpace o w i elems_per_thread) =
       return $ SplitSpace o w i elems_per_thread
     unAllocKernelExp (Combine cspace ts active body) =

@@ -28,7 +28,7 @@ let main [n][m] (pss: [n][m]i32): ([n][m][m]i32, [n][m]i32) =
   let (asss, bss) =
     unzip(map (\(ps: []i32): ([m][m]i32, [m]i32)  ->
                 let ass = map (\(p: i32): [m]i32  ->
-                                let cs = scan (+) 0 [0..1..<p]
+                                let cs = scan (+) 0 (0..1..<p)
                                 let f = reduce (+) 0 cs
                                 let as = map (+f) ps
                                 in as) ps

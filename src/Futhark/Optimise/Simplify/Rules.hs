@@ -49,6 +49,7 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , letRule simplifyAssert
                , letRule copyScratchToScratch
                , RuleGeneric constantFoldPrimFun
+               , RuleBasicOp twoPowerToBitShift
                , RuleBasicOp simplifyIndexIntoReshape
                , RuleIf evaluateBranch
                , RuleIf simplifyBoolBranch
@@ -63,6 +64,7 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , RuleIf simplifyFallbackBranch
                , RuleBasicOp removeIdentityInPlace
                , RuleBasicOp removeFullInPlace
+               , RuleBasicOp removeInPlaceCopy
                , RuleBasicOp simplifyBranchResultComparison
                , RuleBasicOp simplifyReplicate
                , RuleBasicOp arrayLitToReplicate
@@ -310,7 +312,7 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
           (DimFix (Var i) : fullSlice (paramType p) []) $
           paramName p `S.member` consumed_in_body
 
-        -- We only want this simplification it the result does not refer
+        -- We only want this simplification if the result does not refer
         -- to 'i' at all, or does not contain accesses.
         onLoopVar (p,arr) Nothing =
           return (Just (p,arr), mempty)
@@ -329,13 +331,16 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
                   return (Just (p, for_in_partial), mempty)
 
             SubExpResult cs se
-              | all (safeExp . stmExp) x_stms -> do
+              | all (notIndex . stmExp) x_stms -> do
                   x_stms' <- collectStms_ $ certifying cs $ do
                     addStms x_stms
                     letBindNames_ [paramName p] $ BasicOp $ SubExp se
                   return (Nothing, x_stms')
 
             _ -> return (Just (p,arr), mempty)
+
+        notIndex (BasicOp Index{}) = False
+        notIndex _                 = True
 simplifyLoopVariables _ _ _ _ = cannotSimplify
 
 simplifKnownIterationLoop :: BinderOps lore => TopDownRuleDoLoop lore
@@ -661,6 +666,12 @@ constantFoldPrimFun _ (Let pat (StmAux cs _) (Apply fname args _ _))
         isConst _ = Nothing
 constantFoldPrimFun _ _ = cannotSimplify
 
+twoPowerToBitShift :: BinderOps lore => TopDownRuleBasicOp lore
+twoPowerToBitShift _ pat _ (BinOp (Pow t) e1 e2)
+  | e1 == intConst t 2 =
+      letBind_ pat $ BasicOp $ BinOp (Shl t) (intConst t 1) e2
+twoPowerToBitShift _ _ _ _ = cannotSimplify
+
 simplifyIndex :: BinderOps lore => BottomUpRuleBasicOp lore
 simplifyIndex (vtable, used) (pat@(Pattern [] [pe])) (StmAux cs _) (Index idd inds)
   | Just m <- simplifyIndexing vtable seType idd inds consumed = do
@@ -692,7 +703,8 @@ simplifyIndexing vtable seType idd inds consuming =
           Just $ pure $ SubExpResult mempty $ Var idd
 
       | Just inds' <- sliceIndices inds,
-        Just (e, cs) <- ST.index idd inds' vtable ->
+        Just (e, cs) <- ST.index idd inds' vtable,
+        worthInlining e ->
         Just $ SubExpResult cs <$> (letSubExp "index_primexp" =<< toExp e)
 
     Nothing -> Nothing
@@ -730,18 +742,7 @@ simplifyIndexing vtable seType idd inds consuming =
       IndexResult cs a <$> mapM adjust (zip3 inds offsets dims)
 
     Just (Index aa ais, cs) ->
-      Just $ fmap (IndexResult cs aa) $ do
-      let adjust (DimFix j:js') is' = (DimFix j:) <$> adjust js' is'
-          adjust (DimSlice j _ s:js') (DimFix i:is') = do
-            i_t_s <- letSubExp "j_t_s" $ BasicOp $ BinOp (Mul Int32) i s
-            j_p_i_t_s <- letSubExp "j_p_i_t_s" $ BasicOp $ BinOp (Add Int32) j i_t_s
-            (DimFix j_p_i_t_s:) <$> adjust js' is'
-          adjust (DimSlice j _ s0:js') (DimSlice i n s1:is') = do
-            s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ BinOp (Mul Int32) s0 i
-            j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ BinOp (Add Int32) j s0_t_i
-            (DimSlice j_p_s0_t_i n s1:) <$> adjust js' is'
-          adjust _ _ = return []
-      adjust ais inds
+      Just $ IndexResult cs aa <$> sliceSlice ais inds
 
     Just (Replicate (Shape [_]) (Var vv), cs)
       | [DimFix{}]   <- inds, not consuming -> Just $ pure $ SubExpResult cs $ Var vv
@@ -791,8 +792,9 @@ simplifyIndexing vtable seType idd inds consuming =
         Just $ pure $ IndexResult cs v2 inds
 
     Just (Concat d x xs _, cs)
-      | Just (ibef, DimFix i, iaft) <- focusNth d inds -> Just $ do
-      Prim res_t <- stripArray (length inds) <$> lookupType x
+      | Just (ibef, DimFix i, iaft) <- focusNth d inds,
+        Just (Prim res_t) <- (`setArrayDims` sliceDims inds) <$>
+                             ST.lookupType x vtable -> Just $ do
       x_len <- arraySize d <$> lookupType x
       xs_lens <- mapM (fmap (arraySize d) . lookupType) xs
 
@@ -834,6 +836,33 @@ simplifyIndexing vtable seType idd inds consuming =
 
     where defOf v = do (BasicOp op, def_cs) <- ST.lookupExp v vtable
                        return (op, def_cs)
+
+          -- | A crude heuristic for determining when a PrimExp is
+          -- worth inlining over keeping it in an array and reading it
+          -- from memory.
+          worthInlining e
+            | length e > 10 = False -- totally ad-hoc.
+          worthInlining (BinOpExp Pow{} _ _) = False
+          worthInlining (BinOpExp FPow{} _ _) = False
+          worthInlining (BinOpExp _ x y) = worthInlining x && worthInlining y
+          worthInlining (CmpOpExp _ x y) = worthInlining x && worthInlining y
+          worthInlining (ConvOpExp _ x) = worthInlining x
+          worthInlining (UnOpExp _ x) = worthInlining x
+          worthInlining FunExp{} = False
+          worthInlining _ = True
+
+sliceSlice :: MonadBinder m =>
+              [DimIndex SubExp] -> [DimIndex SubExp] -> m [DimIndex SubExp]
+sliceSlice (DimFix j:js') is' = (DimFix j:) <$> sliceSlice js' is'
+sliceSlice (DimSlice j _ s:js') (DimFix i:is') = do
+  i_t_s <- letSubExp "j_t_s" $ BasicOp $ BinOp (Mul Int32) i s
+  j_p_i_t_s <- letSubExp "j_p_i_t_s" $ BasicOp $ BinOp (Add Int32) j i_t_s
+  (DimFix j_p_i_t_s:) <$> sliceSlice js' is'
+sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') = do
+  s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ BinOp (Mul Int32) s0 i
+  j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ BinOp (Add Int32) j s0_t_i
+  (DimSlice j_p_s0_t_i n s1:) <$> sliceSlice js' is'
+sliceSlice _ _ = return []
 
 simplifyIndexIntoReshape :: BinderOps lore => TopDownRuleBasicOp lore
 simplifyIndexIntoReshape vtable pat (StmAux cs _) (Index idd slice)
@@ -1099,6 +1128,19 @@ removeFullInPlace vtable pat _ (Update dest is se)
     isFullSlice (arrayShape dest_t) is =
       letBind_ pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
 removeFullInPlace _ _ _ _ =
+  cannotSimplify
+
+-- | Simplify a chain of in-place updates and copies.  This chain is
+-- often produced by in-place lowering.
+removeInPlaceCopy :: BinderOps lore => TopDownRuleBasicOp lore
+removeInPlaceCopy vtable pat (StmAux cs1 _) (Update dest1 is1 (Var v1))
+  | Just (Update dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
+    Just (Copy v3, cs3) <- ST.lookupBasicOp dest2 vtable,
+    Just (Index v4 is4, cs4) <- ST.lookupBasicOp v3 vtable,
+    is4 == is1, v4 == dest1 = certifying (cs1 <> cs2 <> cs3 <> cs4) $ do
+      is5 <- sliceSlice is1 is2
+      letBind_ pat $ BasicOp $ Update dest1 is5 se2
+removeInPlaceCopy _ _ _ _ =
   cannotSimplify
 
 removeScratchValue :: BinderOps lore => TopDownRuleBasicOp lore

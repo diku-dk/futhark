@@ -304,15 +304,17 @@ commentBlocks = commentBlocks' . zip [0..] . T.lines
 
 -- | Read test specifications from the given path, which can be a file
 -- or directory containing @.fut@ files and further directories.
--- Calls 'error' on parse errors.
+-- Calls 'error' on parse errors, or if the given path name does not
+-- name a file that exists.
 testSpecsFromPath :: FilePath -> IO [(FilePath, ProgramTest)]
 testSpecsFromPath path = do
   programs <- testPrograms path
   zip programs <$> mapM testSpecFromFile programs
 
--- | Read test specifications from the given paths, which can be a files
--- or directories containing @.fut@ files and further directories.
--- Calls 'error' on parse errors.
+-- | Read test specifications from the given paths, which can be a
+-- files or directories containing @.fut@ files and further
+-- directories.  Calls 'error' on parse errors, or if any of the
+-- immediately passed path names do not name a file that exists.
 testSpecsFromPaths :: [FilePath] -> IO [(FilePath, ProgramTest)]
 testSpecsFromPaths = fmap concat . mapM testSpecsFromPath
 

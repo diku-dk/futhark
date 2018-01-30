@@ -457,26 +457,15 @@ ensureDirectArray :: (Allocable fromlore tolore,
                       Allocator tolore (AllocM fromlore tolore)) =>
                      Maybe Space -> VName -> AllocM fromlore tolore (SubExp, VName, SubExp)
 ensureDirectArray space_ok v = do
-  res <- lookupMemInfo v
-  case res of
-    MemArray _ _ _ (ArrayIn mem ixfun)
-      | IxFun.isDirect ixfun -> do
-        memt <- lookupType mem
-        case memt of
-          Mem size mem_space
-            | Just space <- space_ok,
-              space /= mem_space -> needCopy space
-            | otherwise -> return (size, mem, Var v)
-          _          -> fail $
-                        pretty mem ++
-                        " should be a memory block but has type " ++
-                        pretty memt
-    _ -> needCopy DefaultSpace
+  (mem, ixfun) <- lookupArraySummary v
+  Mem size mem_space <- lookupType mem
+  if IxFun.isDirect ixfun && maybe True (==mem_space) space_ok
+    then return (size, mem, Var v)
+    else needCopy (fromMaybe DefaultSpace space_ok)
   where needCopy space =
           -- We need to do a new allocation, copy 'v', and make a new
           -- binding for the size of the memory block.
           allocLinearArray space (baseString v) v
-
 
 allocLinearArray :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                     Space -> String -> VName
@@ -555,7 +544,9 @@ handleKernel (GetSizeMax size_class) =
 handleKernel (Kernel desc space kernel_ts kbody) = subAllocM handleKernelExp True $
   Inner . Kernel desc space kernel_ts <$>
   localScope (scopeOfKernelSpace space) (allocInKernelBody kbody)
-  where handleKernelExp (SplitSpace o w i elems_per_thread) =
+  where handleKernelExp (Barrier se) =
+          return $ Inner $ Barrier se
+        handleKernelExp (SplitSpace o w i elems_per_thread) =
           return $ Inner $ SplitSpace o w i elems_per_thread
         handleKernelExp (Combine cspace ts active body) =
           Inner . Combine cspace ts active <$> allocInBodyNoDirect body

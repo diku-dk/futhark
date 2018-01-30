@@ -87,13 +87,15 @@ data HoistBlockers lore = HoistBlockers
                             -- ^ Blocker for hoisting out of parallel loops.
                           , blockHoistSeq :: BlockPred (Wise lore)
                             -- ^ Blocker for hoisting out of sequential loops.
+                          , blockHoistBranch :: BlockPred (Wise lore)
+                            -- ^ Blocker for hoisting out of branches.
                           , getArraySizes :: Stm (Wise lore) -> Names
                             -- ^ gets the sizes of arrays from a binding.
                           , isAllocation  :: Stm (Wise lore) -> Bool
                           }
 
 noExtraHoistBlockers :: HoistBlockers lore
-noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks (const S.empty) (const False)
+noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks neverBlocks (const S.empty) (const False)
 
 data Env lore = Env { envRules         :: RuleBook (Wise lore)
                     , envHoistBlockers :: HoistBlockers lore
@@ -447,11 +449,12 @@ hoistCommon :: SimplifiableLore lore =>
 hoistCommon ((res1, usages1), stms1) ((res2, usages2), stms2) = do
   is_alloc_fun <- asksEngineEnv $ isAllocation  . envHoistBlockers
   getArrSz_fun <- asksEngineEnv $ getArraySizes . envHoistBlockers
+  branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
   let hoistbl_nms = filterBnds is_alloc_fun getArrSz_fun $
                     stmsToList $ stms1<>stms2
       -- "isNotHoistableBnd hoistbl_nms" ensures that only the (transitive closure)
       -- of the bindings used for allocations and shape computations are if-hoistable.
-      block = isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound `orIf`
+      block = branch_blocker `orIf` isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound `orIf`
               isNotHoistableBnd hoistbl_nms
   vtable <- askVtable
   rules <- asksEngineEnv envRules
@@ -478,6 +481,7 @@ hoistCommon ((res1, usages1), stms1) ((res2, usages2), stms2) = do
         hasPatName nms bnd = intersects nms $ S.fromList $
                              patternNames $ stmPattern bnd
         isNotHoistableBnd :: Names -> BlockPred m
+        isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit{})) = False
         isNotHoistableBnd nms _ bnd = not $ hasPatName nms bnd
 
 -- | Simplify a single 'Body'.

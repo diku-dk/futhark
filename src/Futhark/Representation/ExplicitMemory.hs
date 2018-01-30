@@ -955,6 +955,10 @@ instance OpReturns InKernel where
     mapM varReturns arrs
     where arrs = map snd input
 
+  opReturns (Inner (Barrier res)) = mapM f res
+    where f (Var v) = varReturns v
+          f (Constant v) = return $ MemPrim $ primValueType v
+
   opReturns k =
     extReturns <$> opType k
 

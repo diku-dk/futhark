@@ -182,6 +182,9 @@ literals and variables, but also more complicated forms.
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
       : | `exp` ":" `type`
+      : | `exp` [ ".." `exp` ] "..." `exp`
+      : | `exp` [ ".." `exp` ] "..<" `exp`
+      : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
       : | "let" `type_param`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
@@ -383,7 +386,7 @@ empty arrays must be constructed with the ``empty`` construct.  This
 restriction is due to limited type inference in the Futhark compiler,
 and will hopefully be fixed in the future.
 
-``[x..y...z]``
+``x..y...z``
 ..............
 
 Construct an integer array whose first element is ``x`` and which
@@ -392,8 +395,8 @@ proceeds stride of ``y-x`` until reaching ``z`` (inclusive).  The
 stride may not be zero.  An empty array is returned in cases where
 ``z`` would never be reached or ``x`` and ``y`` are the same value.
 
-``[x..y..<z]``
-...............
+``x..y..<z``
+............
 
 Construct an integer array whose first elements is ``x``, and which
 proceeds upwards with a stride of ``y`` until reaching ``z``
@@ -401,7 +404,7 @@ proceeds upwards with a stride of ``y`` until reaching ``z``
 1 is used.  An empty array is returned in cases where ``z`` would
 never be reached or ``x`` and ``y`` are the same value.
 
-``[x..y..>z]``
+``x..y..>z``
 ...............
 
 Construct an integer array whose first elements is ``x``, and which

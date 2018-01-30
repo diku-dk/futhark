@@ -156,13 +156,9 @@ readOpenCLScalar _ _ _ space =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
-allocateOpenCLBuffer mem size "device" = do
-  let cond' = Cond (BinOp ">" size (Integer 0)) (asLong size) (Integer 1)
-  let call' = Call (Var "cl.Buffer")
-              [Arg $ Var "self.ctx",
-               Arg $ Var "cl.mem_flags.READ_WRITE",
-               Arg $ asLong cond']
-  Py.stm $ Assign (Var $ Py.compileName mem) call'
+allocateOpenCLBuffer mem size "device" =
+  Py.stm $ Assign (Var $ Py.compileName mem) $
+  Py.simpleCall "opencl_alloc" [Var "self", size, String $ pretty mem]
 
 allocateOpenCLBuffer _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"

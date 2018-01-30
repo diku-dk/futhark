@@ -4,6 +4,10 @@ import pyopencl as cl
 import numpy as np
 import sys
 
+if cl.version.VERSION < (2015,2):
+    raise Exception('Futhark requires at least PyOpenCL version 2015.2.  Installed version is %s.' %
+                    cl.version.VERSION_TEXT)
+
 def parse_preferred_device(s):
     pref_num = 0
     if len(s) > 1 and s[0] == '#':
@@ -59,7 +63,7 @@ def apply_size_heuristics(self, size_heuristics, sizes):
            and self.platform.name.find(platform_name) >= 0 \
            and self.device.type == device_type:
                if type(value) == str:
-                   size[size] = self.device.get_info(getattr(cl.device_info,value))
+                   sizes[size] = self.device.get_info(getattr(cl.device_info,value))
                else:
                    sizes[size] = value
     return sizes
@@ -83,6 +87,7 @@ def initialise_opencl_object(self,
     self.device = self.ctx.get_info(cl.context_info.DEVICES)[0]
      # XXX: Assuming just a single device here.
     self.platform = self.ctx.get_info(cl.context_info.DEVICES)[0].platform
+    self.pool = cl.tools.MemoryPool(cl.tools.ImmediateAllocator(self.queue))
     device_type = self.device.type
 
     check_types(self, required_types)
@@ -94,6 +99,7 @@ def initialise_opencl_object(self,
     self.max_tile_size = max_tile_size
     self.max_threshold = 0
     self.max_num_groups = 0
+    self.free_list = {}
 
     default_sizes = apply_size_heuristics(self, size_heuristics,
                                           {'group_size': default_group_size,
@@ -153,3 +159,11 @@ def initialise_opencl_object(self,
             ["-DFUT_BLOCK_DIM={}".format(transpose_block_dim),
              "-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
             + ["-D{}={}".format(s,v) for (s,v) in self.sizes.items()])
+
+def opencl_alloc(self, min_size, tag):
+    min_size = 1 if min_size == 0 else min_size
+    assert min_size > 0
+    return self.pool.allocate(min_size)
+
+def opencl_free_all(self):
+    self.pool.free_held()

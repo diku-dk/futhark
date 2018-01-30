@@ -544,6 +544,7 @@ typesInExp (CmpOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
 typesInExp (ConvOpExp op e) = S.fromList [from, to] <> typesInExp e
   where (from, to) = convOpType op
 typesInExp (UnOpExp _ e) = typesInExp e
+typesInExp (FunExp _ args t) = S.singleton t <> mconcat (map typesInExp args)
 typesInExp (LeafExp (Index _ (Count e) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar{} _) = mempty
 typesInExp (LeafExp (SizeOf t) _) = S.singleton t

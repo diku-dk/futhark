@@ -85,4 +85,4 @@ let range (start: i32) (end: i32) (step: i32): []i32 =
 let and (xs: []bool): bool = reduce (&&) true xs
 
 -- | True if any of the input elements are true.
-let or (xs: []bool): bool = reduce (||) true xs
+let or (xs: []bool): bool = reduce (||) false xs
