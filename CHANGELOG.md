@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
      inspecting data files.
 
    * Better error message when ranges written with two dots
-     (`[x..y]`).
+     (`x..y`).
 
    * Type errors involving abstract types from modules now use
      qualified names (less "expected 't', got 't'", more "expected
