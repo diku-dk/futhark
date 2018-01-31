@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * Better error message when ranges written with two dots
      (`[x..y]`).
 
+   * Type errors involving abstract types from modules now use
+     qualified names (less "expected 't', got 't'", more "expected
+     'foo.t', got 'bar.t'").
+
    * Shorter compile times for most programs.
 
    * `futhark-bench`: Add ``--skip-compilation`` flag.
@@ -65,14 +69,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * futlib: The `linalg` module now has distinct convenience functions
     for multiplying matrices with row and column vectors.
 
-  * Type errors involving abstract types from modules now use
-    qualified names (less "expected 't', got 't'", more "expected
-    'foo.t', got 'bar.t'").
-
   * Only entry points defined directly in the file given to the
     compiler will be visible.
 
   * Range literals are now written without brackets: `x...y`.
+
+  * The syntax `(-x)` can no longer be used for a partial application
+    of subtraction.
 
   * `futhark-test` and `futhark-bench` will no longer append `.bin` to
     executables.
