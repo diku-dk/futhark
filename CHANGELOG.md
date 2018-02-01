@@ -91,6 +91,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Variables used as implicit fields in a record construction are now
     properly recognised as being used.
 
+  * futlib: the `num_bits` field for the integer modules in `math` now
+    have correct values.
+
 ## [0.2.0]
 
 ### Added
