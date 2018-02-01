@@ -151,9 +151,9 @@ lookupSize var =
   <$> asks ctxSizes
 
 lookupSpace :: MonadReader Context m =>
-               VName -> m Space
-lookupSpace var =
-  (snd . fromJust ("lookup space from " ++ pretty var) . M.lookup var)
+               MName -> m Space
+lookupSpace mem =
+  (snd . fromJust ("lookup space from " ++ pretty mem) . M.lookup mem)
   <$> asks ctxSizes
 
 -- Record that the existing old_mem now also "is the same as" new_mem.
@@ -226,7 +226,7 @@ coreReuseFunDef fundef first_uses interferences potential_kernel_interferences v
         lookInBody $ funDefBody fundef
       (res, proglog) = execRWS m context emptyCurrent
       var_to_mem_res = curVarToMemRes res
-      fundef' = transformFromVarMemMappings var_to_mem_res (M.map memSrcName var_to_mem) sizes sizes fundef
+  fundef' <- transformFromVarMemMappings var_to_mem_res (M.map memSrcName var_to_mem) (M.map fst sizes) (M.map fst sizes) False fundef
   let sizes' = memBlockSizesFunDef fundef'
   fundef'' <- transformFromVarMaxExpMappings (curVarToMaxExpRes res) fundef'
   fundef''' <- transformFromKernelMaxSizedMappings var_to_pe var_to_mem (M.map memLocName var_to_mem_res) sizes' actual_vars (curKernelMaxSizedRes res) fundef''
@@ -840,7 +840,7 @@ transformFromKernelMaxSizedMappings
 
       fundef' = insertAndReplace mem_to_size_var' fundef
       sizes = memBlockSizesFunDef fundef'
-      fundef'' = transformFromVarMemMappings arr_to_memloc var_to_mem_res sizes sizes_orig fundef'
+  fundef'' <- transformFromVarMemMappings arr_to_memloc (M.union var_to_mem_res (M.map memSrcName var_to_mem)) (M.map fst sizes) (M.map fst sizes_orig) True fundef'
   return fundef''
 
   where withNewMaxVar :: MonadFreshNames m =>

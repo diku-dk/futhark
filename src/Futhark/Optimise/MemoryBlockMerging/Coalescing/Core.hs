@@ -13,6 +13,7 @@ import Data.Maybe (maybe, fromMaybe, mapMaybe, isJust)
 import Control.Monad
 import Control.Monad.RWS
 
+import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (
   ExplicitMemory, ExplicitMemorish)
@@ -207,11 +208,12 @@ recordOptimisticCoalescing src offset ixfun_slices dst dst_memloc bindage = do
                  ]
   doDebug debug
 
-coreCoalesceFunDef :: FunDef ExplicitMemory -> VarMemMappings MemorySrc
+coreCoalesceFunDef :: MonadFreshNames m =>
+                      FunDef ExplicitMemory -> VarMemMappings MemorySrc
                    -> MemAliases -> VarAliases -> FirstUses -> LastUses
-                   -> ActualVariables -> Names -> FunDef ExplicitMemory
+                   -> ActualVariables -> Names -> m (FunDef ExplicitMemory)
 coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses
-  last_uses actual_vars existentials =
+  last_uses actual_vars existentials = do
   let primexps = findPrimExpsFunDef fundef
       exps = findExpsFunDef fundef
       cond2 = findSafetyCondition2FunDef fundef
@@ -233,9 +235,9 @@ coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses
       m = unFindM $ lookInBody $ funDefBody fundef
       var_to_mem_res = curMemsCoalesced $ fst $ execRWS m context emptyCurrent
       sizes = memBlockSizesFunDef fundef
-      fundef' = transformFromVarMemMappings var_to_mem_res (M.map memSrcName var_to_mem) sizes sizes fundef
+  fundef' <- transformFromVarMemMappings var_to_mem_res (M.map memSrcName var_to_mem) (M.map fst sizes) (M.map fst sizes) False fundef
 
-      debug = var_to_mem_res `seq`
+  let debug = var_to_mem_res `seq`
         putBlock [ "coreCoalesceFunDef coalescing results"
                  , L.intercalate "\n" $ flip map (M.assocs var_to_mem_res) $ \(src, dstmem) ->
                      "Source " ++ pretty src ++ " coalesces into "
@@ -243,7 +245,7 @@ coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses
                      ++ show (memLocIxFun dstmem)
                  , pretty fundef'
                  ]
-  in withDebug debug fundef'
+  withDebug debug $ return fundef'
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()

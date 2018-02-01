@@ -25,17 +25,17 @@ coalesceInProg = intraproceduralTransformation coalesceInFunDef
 coalesceInFunDef :: MonadFreshNames m
                  => FunDef ExplicitMemory
                  -> m (FunDef ExplicitMemory)
-coalesceInFunDef fundef0 =
+coalesceInFunDef fundef0 = do
   let aux0 = getAuxiliaryInfo fundef0
       debug0 = debugAuxiliaryInfo aux0 "Before coalescing"
       fundef1 = hoistAllocsFunDef fundef0
 
       aux1 = getAuxiliaryInfo fundef1
       debug1 = debugAuxiliaryInfo aux1 "After allocation hoisting"
-      fundef2 = coreCoalesceFunDef fundef1
-                (auxVarMemMappings aux1) (auxMemAliases aux1)
-                (auxVarAliases aux1) (auxFirstUses aux1) (auxLastUses aux1)
-                (auxActualVariables aux1) (auxExistentials aux1)
+  fundef2 <- coreCoalesceFunDef fundef1
+             (auxVarMemMappings aux1) (auxMemAliases aux1)
+             (auxVarAliases aux1) (auxFirstUses aux1) (auxLastUses aux1)
+             (auxActualVariables aux1) (auxExistentials aux1)
 
-      debug = debug0 >> debug1
-  in withDebug debug $ return fundef2
+  let debug = debug0 >> debug1
+  withDebug debug $ return fundef2

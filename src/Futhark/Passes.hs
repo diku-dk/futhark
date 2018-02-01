@@ -92,7 +92,11 @@ memoryBlockMergingReuseMaybe :: Pipeline ExplicitMemory ExplicitMemory
 memoryBlockMergingReuseMaybe =
   passes $ if usesMemoryBlockMergingReuse
            then [ memoryBlockMergingReuse
-                , simplifyExplicitMemory
+--                , simplifyExplicitMemory -- FIXME: When this is enabled,
+--                something goes haywire related to the existential memory block
+--                sizes produced when the max trick of the memory block reuse is
+--                enabled.  In any case the simplifier should not be able to do
+--                much after the previous pass.
                 ]
            else []
 

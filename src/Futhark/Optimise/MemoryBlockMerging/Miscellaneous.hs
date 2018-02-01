@@ -112,7 +112,7 @@ lookupEmptyable x m = fromMaybe mempty $ M.lookup x m
 -- Works for now.
 fromJust :: String -> Maybe a -> a
 fromJust _ (Just x) = x
-fromJust mistake Nothing = error mistake
+fromJust mistake Nothing = error ("error: " ++ mistake)
 
 maybeFromBoolM :: Monad m => (a -> m Bool) -> (a -> m (Maybe a))
 maybeFromBoolM f a = do

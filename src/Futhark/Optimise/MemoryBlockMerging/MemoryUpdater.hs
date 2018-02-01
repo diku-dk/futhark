@@ -14,9 +14,11 @@ module Futhark.Optimise.MemoryBlockMerging.MemoryUpdater
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
 import Data.Maybe (mapMaybe, fromMaybe)
+import Control.Applicative ((<|>))
 import Control.Monad
-import Control.Monad.Reader
+import Control.Monad.RWS
 
+import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
        (ExplicitMemorish, ExplicitMemory)
@@ -25,19 +27,19 @@ import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
-import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes (Sizes)
 
 
 data Context = Context { ctxVarToMem :: VarMemMappings MemoryLoc
                        , ctxVarToMemOrig :: VarMemMappings MName
-                       , ctxAllocSizes :: Sizes
-                       , ctxAllocSizesOrig :: Sizes
+                       , ctxAllocSizes :: M.Map MName SubExp
+                       , ctxAllocSizesOrig :: M.Map MName SubExp
+                       , ctxHasMaxedSize :: Bool
                        }
   deriving (Show)
 
-newtype FindM lore a = FindM { unFindM :: Reader Context a }
+newtype FindM lore a = FindM { unFindM :: RWS Context () VNameSource a }
   deriving (Monad, Functor, Applicative,
-            MonadReader Context)
+            MonadReader Context, MonadFreshNames)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullMap lore,
@@ -49,19 +51,24 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
 coerce = FindM . unFindM
 
 -- | Transform a function to use new memory blocks.
-transformFromVarMemMappings :: VarMemMappings MemoryLoc ->
+transformFromVarMemMappings :: MonadFreshNames m =>
+                               VarMemMappings MemoryLoc ->
                                VarMemMappings MName ->
-                               Sizes -> Sizes ->
-                               FunDef ExplicitMemory -> FunDef ExplicitMemory
-transformFromVarMemMappings var_to_mem var_to_mem_orig alloc_sizes alloc_sizes_orig fundef =
+                               M.Map MName SubExp -> M.Map MName SubExp -> Bool ->
+                               FunDef ExplicitMemory ->
+                               m (FunDef ExplicitMemory)
+transformFromVarMemMappings var_to_mem var_to_mem_orig alloc_sizes alloc_sizes_orig has_maxed_size fundef =
   let m = unFindM $ transformFunDefBody $ funDefBody fundef
       ctx = Context { ctxVarToMem = var_to_mem
                     , ctxVarToMemOrig = var_to_mem_orig
                     , ctxAllocSizes = alloc_sizes
                     , ctxAllocSizesOrig = alloc_sizes_orig
+                    , ctxHasMaxedSize = has_maxed_size
                     }
-      body' = runReader m ctx
-  in fundef { funDefBody = body' }
+  in modifyNameSource (\src ->
+                         let (body', src', ()) = runRWS m ctx src
+                         in (fundef { funDefBody = body' }, src')
+                      )
 
 transformFunDefBody :: LoreConstraints lore =>
                        Body lore -> FindM lore (Body lore)
@@ -77,13 +84,14 @@ transformFunDefBodyResult ses = do
   var_to_mem_orig <- asks ctxVarToMemOrig
   mem_to_size <- asks ctxAllocSizes
   mem_to_size_orig <- asks ctxAllocSizesOrig
+  has_maxed_size <- asks ctxHasMaxedSize
 
   let check se
         | Var v <- se
         , Just orig <- M.lookup v var_to_mem_orig
         , Just new <- memLocName <$> M.lookup v var_to_mem
-        = (Var orig, (Var new, [])) : case (fst <$> M.lookup orig mem_to_size_orig,
-                                            fst <$> M.lookup new mem_to_size) of
+        = (Var orig, (Var new, [])) : case (M.lookup orig mem_to_size_orig,
+                                            M.lookup new mem_to_size) of
             (Just size_orig, Just size_new) ->
               [(size_orig, (size_new, [Var orig]))]
             _ -> []
@@ -91,8 +99,8 @@ transformFunDefBodyResult ses = do
 
       check_size_only se
         | Var v <- se
-        , Just orig <- fst <$> M.lookup v mem_to_size_orig
-        , Just new <- fst <$> M.lookup v mem_to_size
+        , Just orig <- M.lookup v mem_to_size_orig
+        , Just new <- M.lookup v mem_to_size
         , orig /= new
         = [(orig, (new, [Var v]))]
         | otherwise = []
@@ -102,6 +110,7 @@ transformFunDefBodyResult ses = do
 
   let debug =
         putBlock [ "memory updater"
+                 , show has_maxed_size
                  , show var_to_mem
                  , show var_to_mem_orig
                  , show mem_to_size
@@ -140,6 +149,9 @@ transformMemInfo meminfo memloc = case meminfo of
        (ExpMem.ReturnsInBlock (memLocName memloc) extixfun)
   _ -> meminfo
 
+data BranchReturn = ExistingBranchReturn ExpMem.BodyReturns
+                  | NewBranchReturn (Int -> ExpMem.BodyReturns) VName VName
+
 transformStm :: LoreConstraints lore =>
                 Stm lore -> FindM lore (Stm lore)
 transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
@@ -147,7 +159,9 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
 
   e' <- fullMapExpM mapper mapper_kernel e
   var_to_mem <- asks ctxVarToMem
-  e'' <- case e' of
+  var_to_mem_orig <- asks ctxVarToMemOrig
+  mem_to_size <- asks ctxAllocSizes
+  (e'', patctxelems') <- case e' of
     If cond body_then body_else (IfAttr rets sort) -> do
       let bodyVarMemLocs body =
             map (flip M.lookup var_to_mem <=< fromVar)
@@ -186,10 +200,8 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
       let ms_then = bodyVarMemLocs body_then
           ms_else = bodyVarMemLocs body_else
 
-      let body_then' = fixBodyExistentials body_then
-          body_else' = fixBodyExistentials body_else
-
-      let rets_new =
+      -- Fix values.
+      let rets' =
             if ms_then == ms_else
             then zipWith (\r m -> case m of
                                     Nothing -> r
@@ -198,12 +210,74 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
                          ) rets ms_then
             else rets
 
+      let body_then' = fixBodyExistentials body_then
+          body_else' = fixBodyExistentials body_else
+
+
+      -- Fix existential memory blocks.
+      let v_size v = do
+            mem <- M.lookup v (M.map memLocName var_to_mem) <|> M.lookup v var_to_mem_orig
+            size_se <- M.lookup mem mem_to_size
+            fromVar size_se
+
+      has_maxed_size <- asks ctxHasMaxedSize
+      let rets_branch_returns =
+            L.zipWith3 (\r th el -> case (r, th, el) of
+                           (ExpMem.MemArray pt shape u
+                            (ExpMem.ReturnsNewBlock space n
+                             (Free (Var _size)) extixfun),
+                            Var v_th, Var v_el) ->
+                             case (v_size v_th, v_size v_el) of
+                               (Just s_th, Just s_el) ->
+                                 if s_th == s_el || not has_maxed_size
+                                 then ExistingBranchReturn r
+                                 else NewBranchReturn
+                                      (\nth_ctxelem ->
+                                         ExpMem.MemArray pt shape u
+                                         (ExpMem.ReturnsNewBlock space n
+                                          (Ext nth_ctxelem) extixfun))
+                                      s_th s_el
+                               _ -> error ("both branch return arrays should use a memory block with a size: " ++ show v_th ++ " and " ++ show v_el)
+                           _ -> ExistingBranchReturn r
+                       )
+            rets'
+            (drop (length patctxelems) (bodyResult body_then'))
+            (drop (length patctxelems) (bodyResult body_else'))
+
+      patctxelems_new <-
+        flip replicateM (newVName "new_memory_size")
+        (length (filter (\br -> case br of
+                            NewBranchReturn{} -> True
+                            ExistingBranchReturn{} -> False
+                        ) rets_branch_returns))
+      let (rets'', _, body_ext_new) =
+            foldl (\(prev, i, ext) rb -> case rb of
+                               ExistingBranchReturn r ->
+                                 (prev ++ [r], i, ext)
+                               NewBranchReturn rf s_th s_el ->
+                                 (prev ++ [rf i], i + 1, ext ++ [(s_th, s_el)])
+                           ) ([], length patctxelems, []) rets_branch_returns
+          (th_ext_new, el_ext_new) = unzip body_ext_new
+          body_then'' = body_then' { bodyResult =
+                                     take (length patctxelems) (bodyResult body_then') ++
+                                     map Var th_ext_new ++
+                                     drop (length patctxelems) (bodyResult body_then')
+                                   }
+          body_else'' = body_else' { bodyResult =
+                                     take (length patctxelems) (bodyResult body_else') ++
+                                     map Var el_ext_new ++
+                                     drop (length patctxelems) (bodyResult body_else')
+                                   }
+          patctxelems' = patctxelems ++ map (\v -> PatElem v (ExpMem.MemPrim (IntType Int64))) patctxelems_new
+
       let debug = putBlock [ "ifattr rets: " ++ show rets
-                           , "ifattr rets_new: " ++ show rets_new
+                           , "ifattr rets': " ++ show rets'
+                           , "ifattr rets'': " ++ show rets''
                            , "ifattr ms_then: " ++ show ms_then
                            , "ifattr ms_else: " ++ show ms_else
                            ]
-      withDebug debug $ return $ If cond body_then' body_else' (IfAttr rets_new sort)
+      withDebug debug $ return (If cond body_then'' body_else'' (IfAttr rets'' sort),
+                                patctxelems')
 
     DoLoop mergectxparams mergevalparams loopform body -> do
       -- More special loop handling because of its extra
@@ -243,9 +317,9 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
           loop_vars' <- mapM transformForLoopVar loop_vars
           return $ ForLoop i it bound loop_vars'
         WhileLoop _ -> return loopform
-      return $ DoLoop mergectxparams' mergevalparams' loopform' body'
-    _ -> return e'
-  return $ Let (Pattern patctxelems patvalelems') aux e''
+      return (DoLoop mergectxparams' mergevalparams' loopform' body', patctxelems)
+    _ -> return (e', patctxelems)
+  return $ Let (Pattern patctxelems' patvalelems') aux e''
   where mapper = identityMapper
           { mapOnBody = const transformBody
           , mapOnFParam = transformFParam
