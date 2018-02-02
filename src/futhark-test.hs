@@ -172,7 +172,7 @@ runResult program ExitSuccess stdout_s _ =
     Left e   -> do
       let actualf = program `addExtension` "actual"
       io $ SBS.writeFile actualf stdout_s
-      throwError $ T.pack (show e) <> "\n(See " <> T.pack actualf <> ")"
+      throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
     Right vs -> return $ SuccessResult vs
 runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s

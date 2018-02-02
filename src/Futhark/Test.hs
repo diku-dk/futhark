@@ -325,7 +325,8 @@ testPrograms dir = filter isFut <$> directoryContents dir
 -- | Try to parse a several values from a byte string.  The 'SourceName'
 -- parameter is used for error messages.
 valuesFromByteString :: SourceName -> BS.ByteString -> Either String [Value]
-valuesFromByteString srcname = maybe (Left srcname) Right . readValues
+valuesFromByteString srcname =
+  maybe (Left $ "Cannot parse values from " ++ srcname) Right . readValues
 
 -- | Get the actual core Futhark values corresponding to a 'Values'
 -- specification.  The 'FilePath' is the directory which file paths
