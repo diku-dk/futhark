@@ -63,8 +63,10 @@ opCompiler dest (Inner kernel) =
 
 compileInKernelOp :: KernelConstants -> ImpGen.Destination -> Op InKernel
                   -> InKernelGen ()
-compileInKernelOp _ _ Alloc{} =
-  compilerLimitationS "Cannot allocate memory in kernel."
+compileInKernelOp _ (ImpGen.Destination [ImpGen.MemoryDestination mem]) Alloc{} =
+  compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
+compileInKernelOp _ dest Alloc{} =
+  compilerBugS $ "Invalid target for in-kernel allocation: " ++ show dest
 compileInKernelOp constants dest (Inner op) =
   compileKernelExp constants dest op
 
