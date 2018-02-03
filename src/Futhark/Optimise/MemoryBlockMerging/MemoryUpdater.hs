@@ -90,10 +90,10 @@ transformFunDefBodyResult ses = do
         | Var v <- se
         , Just orig <- M.lookup v var_to_mem_orig
         , Just new <- memLocName <$> M.lookup v var_to_mem
-        = (Var orig, (Var new, [])) : case (M.lookup orig mem_to_size_orig,
-                                            M.lookup new mem_to_size) of
+        = ((Var orig, Nothing), Var new) : case (M.lookup orig mem_to_size_orig,
+                                                 M.lookup new mem_to_size) of
             (Just size_orig, Just size_new) ->
-              [(size_orig, (size_new, [Var orig]))]
+              [((size_orig, Just (Var orig)), size_new)]
             _ -> []
         | otherwise = []
 
@@ -102,7 +102,7 @@ transformFunDefBodyResult ses = do
         , Just orig <- M.lookup v mem_to_size_orig
         , Just new <- M.lookup v mem_to_size
         , orig /= new
-        = [(orig, (new, [Var v]))]
+        = [((orig, Just (Var v)), new)]
         | otherwise = []
       mem_orig_to_new1 = concatMap check ses
       mem_orig_to_new2 = concatMap check_size_only ses
@@ -121,10 +121,16 @@ transformFunDefBodyResult ses = do
                  ]
   withDebug debug $ return $ zipWith (
     \se ts -> fromMaybe se (do
-                               (se', reqts) <- se `L.lookup` mem_orig_to_new
-                               if reqts == take (length reqts) ts
-                                 then return se'
-                                 else Nothing
+                               se' <- (se, Nothing) `L.lookup` mem_orig_to_new
+                                      <|> case ts of
+                                            (ts0 : _) ->
+                                              (se, Just ts0) `L.lookup` mem_orig_to_new
+                                            _ -> Nothing
+                               -- FIXME: This assumes that a memory block always
+                               -- comes just after its size variable.  We ought
+                               -- to instead properly find this information from
+                               -- the funDefRetType 'ExtSize's.
+                               return se'
                            )
     ) ses (L.tail $ L.tails ses)
 
