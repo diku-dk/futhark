@@ -52,6 +52,7 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , RuleBasicOp twoPowerToBitShift
                , RuleBasicOp simplifyIndexIntoReshape
                , RuleIf evaluateBranch
+               , RuleIf simplifyFallbackBranch
                , RuleIf simplifyBoolBranch
                , RuleIf hoistBranchInvariant
                , RuleBasicOp simplifyScalExp
@@ -61,7 +62,6 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , letRule simplifyReshapeReplicate
                , letRule improveReshape
                , RuleBasicOp removeScratchValue
-               , RuleIf simplifyFallbackBranch
                , RuleBasicOp removeIdentityInPlace
                , RuleBasicOp removeFullInPlace
                , RuleBasicOp removeInPlaceCopy

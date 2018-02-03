@@ -114,6 +114,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.PrimExp.Simplify
 import Futhark.Util
+import Futhark.Util.IntegralExp
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Lore
@@ -1006,11 +1007,12 @@ applyFunReturns rets params args
 
 -- | Is an array of the given shape stored fully flat row-major with
 -- the given index function?
-fullyLinear :: Shape -> IxFun.IxFun (PrimExp VName) -> Bool
+fullyLinear :: (Eq num, IntegralExp num) =>
+               ShapeBase num -> IxFun.IxFun num -> Bool
 fullyLinear shape ixfun =
   IxFun.isLinear ixfun && ixFunMatchesInnerShape shape ixfun
 
-ixFunMatchesInnerShape :: Shape -> IxFun.IxFun (PrimExp VName) -> Bool
+ixFunMatchesInnerShape :: (Eq num, IntegralExp num) =>
+                          ShapeBase num -> IxFun.IxFun num -> Bool
 ixFunMatchesInnerShape shape ixfun =
-  drop 1 (IxFun.shape ixfun) == drop 1 shape'
-  where shape' = map (primExpFromSubExp int32) $ shapeDims shape
+  drop 1 (IxFun.shape ixfun) == drop 1 (shapeDims shape)

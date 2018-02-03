@@ -137,9 +137,11 @@ runBenchmark opts (program, cases) = do
   putStr $ "Results for " ++ program ++ ":\n"
   BenchResult program . catMaybes . concat <$> mapM forInputOutputs cases
   where forInputOutputs (InputOutputs "main" runs) =
-          mapM (runBenchmarkCase opts program) runs
+          mapM (runBenchmarkCase opts program $ padTo runs) runs
         forInputOutputs InputOutputs{} =
           return []
+
+        padTo = foldl max 0 . map (length . runDescription)
 
 reportResult :: [RunResult] -> IO ()
 reportResult [] =
@@ -148,7 +150,7 @@ reportResult results = do
   let runtimes = map (fromIntegral . runMicroseconds) results
       avg = sum runtimes / genericLength runtimes
       rel_dev = stddevp runtimes / mean runtimes :: Double
-  putStrLn $ printf "%.2f" avg ++ "us (average; relative standard deviation: " ++
+  putStrLn $ printf "%10.2f" avg ++ "us (average; relative standard deviation: " ++
     printf "%.2f" rel_dev ++ ")"
 
 progNotFound :: String -> String
@@ -162,12 +164,12 @@ runBenchM = runExceptT
 io :: IO a -> BenchM a
 io = liftIO
 
-runBenchmarkCase :: BenchOptions -> FilePath -> TestRun -> IO (Maybe DataResult)
-runBenchmarkCase _ _ (TestRun _ _ RunTimeFailure{} _) =
+runBenchmarkCase :: BenchOptions -> FilePath -> Int -> TestRun -> IO (Maybe DataResult)
+runBenchmarkCase _ _ _ (TestRun _ _ RunTimeFailure{} _) =
   return Nothing -- Not our concern, we are not a testing tool.
-runBenchmarkCase _ _ (TestRun NoBench _ _ _) =
+runBenchmarkCase _ _ _ (TestRun NoBench _ _ _) =
   return Nothing -- Too small to bother benchmarking.
-runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dataset_desc) =
+runBenchmarkCase opts program pad_to (TestRun _ input_spec (Succeeds expected_spec) dataset_desc) =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
@@ -181,7 +183,8 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
 
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
-  putStr $ "dataset " ++ dataset_desc ++ ": "
+  putStr $ "dataset " ++ dataset_desc ++ ": " ++
+    replicate (pad_to - length dataset_desc) ' '
   hFlush stdout
 
   -- Explicitly prefixing the current directory is necessary for

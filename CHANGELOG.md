@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.4.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+   * `futhark-bench` now tries to align benchmark results for better
+     legibility.
+
+### Fixed
+
+   * `futhark-test`: now handles CRLF linebreaks correctly (#471).
+
 ## [0.3.0]
 
 ### Added
@@ -30,7 +45,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
      inspecting data files.
 
    * Better error message when ranges written with two dots
-     (`[x..y]`).
+     (`x..y`).
+
+   * Type errors involving abstract types from modules now use
+     qualified names (less "expected 't', got 't'", more "expected
+     'foo.t', got 'bar.t'").
 
    * Shorter compile times for most programs.
 
@@ -65,14 +84,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * futlib: The `linalg` module now has distinct convenience functions
     for multiplying matrices with row and column vectors.
 
-  * Type errors involving abstract types from modules now use
-    qualified names (less "expected 't', got 't'", more "expected
-    'foo.t', got 'bar.t'").
-
   * Only entry points defined directly in the file given to the
     compiler will be visible.
 
   * Range literals are now written without brackets: `x...y`.
+
+  * The syntax `(-x)` can no longer be used for a partial application
+    of subtraction.
 
   * `futhark-test` and `futhark-bench` will no longer append `.bin` to
     executables.
@@ -87,6 +105,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Variables used as implicit fields in a record construction are now
     properly recognised as being used.
+
+  * futlib: the `num_bits` field for the integer modules in `math` now
+    have correct values.
 
 ## [0.2.0]
 

@@ -140,7 +140,8 @@ parseDescription :: Parser T.Text
 parseDescription = lexeme $ T.pack <$> (anyChar `manyTill` parseDescriptionSeparator)
 
 parseDescriptionSeparator :: Parser ()
-parseDescriptionSeparator = try (string descriptionSeparator >> void newline) <|> eof
+parseDescriptionSeparator = try (string descriptionSeparator >>
+                                 void (satisfy isSpace `manyTill` newline)) <|> eof
 
 descriptionSeparator :: String
 descriptionSeparator = "=="
@@ -208,7 +209,7 @@ parseValues = do s <- parseBlock
                  case valuesFromByteString "input" $ BS.fromStrict $ T.encodeUtf8 s of
                    Left err -> fail $ show err
                    Right vs -> return $ Values vs
-              <|> lexstr "@" *> lexeme (InFile . T.unpack <$> restOfLine)
+              <|> lexstr "@" *> lexeme (InFile . T.unpack <$> nextWord)
 
 parseBlock :: Parser T.Text
 parseBlock = lexeme $ braces (T.pack <$> parseBlockBody 0)
@@ -224,6 +225,9 @@ parseBlockBody n = do
 
 restOfLine :: Parser T.Text
 restOfLine = T.pack <$> (anyChar `manyTill` (void newline <|> eof))
+
+nextWord :: Parser T.Text
+nextWord = T.pack <$> (anyChar `manyTill` satisfy isSpace)
 
 parseExpectedStructure :: Parser StructureTest
 parseExpectedStructure =
@@ -325,7 +329,8 @@ testPrograms dir = filter isFut <$> directoryContents dir
 -- | Try to parse a several values from a byte string.  The 'SourceName'
 -- parameter is used for error messages.
 valuesFromByteString :: SourceName -> BS.ByteString -> Either String [Value]
-valuesFromByteString srcname = maybe (Left srcname) Right . readValues
+valuesFromByteString srcname =
+  maybe (Left $ "Cannot parse values from " ++ srcname) Right . readValues
 
 -- | Get the actual core Futhark values corresponding to a 'Values'
 -- specification.  The 'FilePath' is the directory which file paths
