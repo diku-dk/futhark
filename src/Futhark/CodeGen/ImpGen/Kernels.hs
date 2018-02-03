@@ -987,19 +987,19 @@ compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
       -- group.  TODO: also do this if the array is in global memory
       -- (but this is a bit more tricky, synchronisation-wise).
       w <- ImpGen.compileSubExp . arraySize 0 =<< subExpType what
-      let i' = ImpGen.varIndex i + ImpGen.varIndex (kernelLocalThreadId constants)
+      -- Compute how many elements this thread is responsible for.
+      -- Formula: (w - ltid) / group_size (rounded up).
+      let ltid = ImpGen.varIndex (kernelLocalThreadId constants)
+          group_size = Imp.sizeToExp (kernelGroupSize constants)
+          to_write = (w - ltid) `quotRoundingUp` group_size
+          i' = ImpGen.varIndex i * group_size + ltid
 
       write_result <-
         ImpGen.collect $
         ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants, i']
                             what [i']
 
-      -- num_iters may be too large, but we have a branch inside the body
-      -- to avoid out-of-bounds writes.
-      let num_iters = (w `quot` Imp.sizeToExp (kernelGroupSize constants)) +
-                      Imp.ValueExp (value (1::Int32))
-      ImpGen.emit $ Imp.For i Int32 num_iters $
-        Imp.If (CmpOpExp (CmpSlt Int32) (Imp.var i int32 + me) w) write_result mempty
+      ImpGen.emit $ Imp.For i Int32 to_write write_result
 
 compileKernelResult constants dest (ThreadsReturn AllThreads what) =
   ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
