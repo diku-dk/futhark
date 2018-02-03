@@ -7,7 +7,6 @@
 --       }
 -- output { [5, 8]
 --        }
-
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
