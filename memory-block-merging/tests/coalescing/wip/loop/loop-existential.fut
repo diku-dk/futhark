@@ -1,12 +1,16 @@
 -- A loop with an existential memory block.  The compiler should not coalesce
 -- the existential memory block, but instead coalesce the aliased body result
 -- memory (which is not existential).
+--
+-- This currently fails because of the conservative restriction that loops using
+-- existential memory are disabled.
 -- ==
 -- input { [3, 6]
 --         2
 --       }
 -- output { [5, 8]
 --        }
+
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 

@@ -1,11 +1,12 @@
--- Same as loop-existential.fut, except the inner map is manually transformed
--- into a loop.
+-- Same as loop-existential.fut, except the inner map has been manually
+-- transformed into a loop.
 -- ==
 -- input { [3, 6]
 --         2
 --       }
 -- output { [5, 8]
 --        }
+
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 

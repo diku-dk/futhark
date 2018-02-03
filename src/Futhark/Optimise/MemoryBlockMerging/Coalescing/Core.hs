@@ -400,28 +400,32 @@ tryCoalesce dst ixfun_slices bindage src offset = do
   -- Not everything supported yet.  This dials back the optimisation on areas
   -- where it fails.
   existentials <- asks ctxExistentials
-  let currentlyDisabled src_local offset_local ixfun_slices_local = do
-        -- This case covers the problem described in
-        -- tests/coalescing/wip/loop/loop-0.fut and ixfun-merge-param.fut.
+  let currentlyDisabled src_local = do
+        -- This case covers the problem described in several programs in
+        -- tests/coalescing/wip/loop/ (for programs where it is overly
+        -- conservative) and tests/coalescing/loop/replicate-in-loop.fut (where
+        -- it is absolutely needed to keep the program correct).  It is a
+        -- conservative requirement and could likely be loosened up.
 
         src_local_is_loop <- isLoopExp src_local
 
+        -- if the source contains the result a loop expression, and that result
+        -- is an array with existential memory, don't coalesce.  Since memory
+        -- can be allocated inside loops, coalescing with no further rules might
+        -- end up having the same arrays use memory allocated outside the loop,
+        -- which is not always okay.
         let res = src_local_is_loop
                   && src_local `L.elem` existentials
-                  && (not (L.null ixfun_slices_local)
-                      ||
-                      (offset_local /= zeroOffset))
 
             debug =
               putBlock [ "currentlyDisabled:"
                        , "var: " ++ pretty src_local
                        , "dst mem: " ++ show mem_dst
                        , "existentials: " ++ show existentials
-                       , "ixfun_slices: " ++ show ixfun_slices_local
                        ]
         withDebug debug $ return res
 
-  safe0 <- (not . or) <$> zipWithM3 currentlyDisabled srcs offsets ixfun_slicess
+  safe0 <- (not . or) <$> mapM currentlyDisabled srcs
 
   -- Safety condition 1 is the same for all eventual previous arrays from srcs
   -- that also need to be coalesced into dst, so we check it here instead of
