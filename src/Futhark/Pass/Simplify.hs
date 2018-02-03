@@ -4,6 +4,7 @@ module Futhark.Pass.Simplify
   , simplifySOACS
   , simplifyKernels
   , simplifyExplicitMemory
+  , simplifyExplicitMemory'
   )
   where
 
@@ -29,3 +30,7 @@ simplifyKernels = simplify R.simplifyKernels
 
 simplifyExplicitMemory :: Pass R.ExplicitMemory R.ExplicitMemory
 simplifyExplicitMemory = simplify R.simplifyExplicitMemory
+
+-- FIXME: Only used after memory block reuse.
+simplifyExplicitMemory' :: Pass R.ExplicitMemory R.ExplicitMemory
+simplifyExplicitMemory' = simplify R.simplifyExplicitMemory'
