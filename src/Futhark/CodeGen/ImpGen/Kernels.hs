@@ -192,7 +192,7 @@ expCompiler
   let thread_gid = kernelGlobalThreadId constants
       row_dims = arrayDims t
       dims = ds ++ row_dims
-      is' = unflattenIndex (map (primExpFromSubExp int32) dims) $
+      is' = unflattenIndex (map (ImpGen.compileSubExpOfType int32) dims) $
             ImpGen.varIndex thread_gid
   ds' <- mapM ImpGen.compileSubExp ds
 
@@ -241,14 +241,12 @@ callKernelCopy bt
 
   | bt_size <- primByteSize bt,
     ixFunMatchesInnerShape
-      (Shape $ map ImpGen.dimSizeToSubExp destshape) destIxFun,
+      (Shape $ map Imp.sizeToExp destshape) destIxFun,
     ixFunMatchesInnerShape
-      (Shape $ map ImpGen.dimSizeToSubExp srcshape) srcIxFun,
+      (Shape $ map Imp.sizeToExp srcshape) srcIxFun,
     Just destoffset <-
-      ImpGen.compilePrimExp <$>
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
-      ImpGen.compilePrimExp <$>
       IxFun.linearWithOffset srcIxFun bt_size = do
         let row_size = product $ map ImpGen.dimSizeToExp $ drop 1 srcshape
         srcspace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory srcmem
@@ -264,7 +262,7 @@ callKernelCopy bt
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
   let shape = map Imp.sizeToExp srcshape
-      shape_se = map ImpGen.dimSizeToPrimExp srcshape
+      shape_se = map (Imp.innerExp . ImpGen.dimSizeToExp) srcshape
       dest_is = unflattenIndex shape_se $ ImpGen.varIndex global_thread_index
       src_is = dest_is
 
@@ -427,28 +425,24 @@ isMapTransposeKernel bt
   (ImpGen.MemLocation _ _ srcIxFun)
   | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     (perm, destshape) <- unzip perm_and_destshape,
-    destshape' <- map ImpGen.compilePrimExp destshape,
-    srcshape' <- map ImpGen.compilePrimExp $ IxFun.shape srcIxFun,
+    srcshape' <- IxFun.shape srcIxFun,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk (product srcshape') (product destshape') destshape' swap r1 r2 dest_offset src_offset
+    isOk (product srcshape') (product destshape) destshape swap r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
     (perm, srcshape) <- unzip perm_and_srcshape,
-    srcshape' <- map ImpGen.compilePrimExp srcshape,
-    destshape' <- map ImpGen.compilePrimExp $ IxFun.shape destIxFun,
+    destshape' <- IxFun.shape destIxFun,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk (product srcshape') (product destshape') srcshape' id r1 r2 dest_offset src_offset
+    isOk (product srcshape) (product destshape') srcshape id r1 r2 dest_offset src_offset
   | otherwise =
     Nothing
   where bt_size = primByteSize bt
         swap (x,y) = (y,x)
 
         isOk src_elems dest_elems shape f r1 r2 dest_offset src_offset = do
-          let dest_offset' = ImpGen.compilePrimExp dest_offset
-              src_offset' = ImpGen.compilePrimExp src_offset
-              (num_arrays, size_x, size_y) = getSizes shape f r1 r2
-          return (dest_offset', src_offset',
+          let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
+          return (dest_offset, src_offset,
                   num_arrays, size_x, size_y,
                   src_elems, dest_elems)
 
@@ -693,7 +687,7 @@ compileKernelExp constants dest (Combine cspace ts aspace body)
       ImpGen.emit $ Imp.Op Imp.Barrier
         where index t (ImpGen.ArrayDestination (Just loc)) =
                 let space_dims = map (ImpGen.varIndex . fst) cspace
-                    t_dims = map (primExpFromSubExp int32) $ arrayDims t
+                    t_dims = map (ImpGen.compileSubExpOfType int32) $ arrayDims t
                 in Just $ ImpGen.ArrayDestination $
                    Just $ ImpGen.sliceArray loc $
                    fullSliceNum (space_dims++t_dims) $
@@ -1029,20 +1023,20 @@ compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_e
       dest' = ImpGen.ArrayDestination $ Just dest_loc_offset
   ImpGen.copyDWIMDest dest' [] (Var what) []
   where offset = case moffset of
-                   Nothing -> primExpFromSubExp int32 per_thread_elems *
+                   Nothing -> ImpGen.compileSubExpOfType int32 per_thread_elems *
                               ImpGen.varIndex (kernelGlobalThreadId constants)
-                   Just se -> primExpFromSubExp int32 se
+                   Just se -> ImpGen.compileSubExpOfType int32 se
 
 compileKernelResult constants dest (ConcatReturns (SplitStrided stride) _ _ moffset what) = do
   ImpGen.ArrayDestination (Just dest_loc) <- return dest
   let dest_loc' = ImpGen.strideArray
                   (ImpGen.offsetArray dest_loc offset) $
-                  primExpFromSubExp int32 stride
+                  ImpGen.compileSubExpOfType int32 stride
       dest' = ImpGen.ArrayDestination $ Just dest_loc'
   ImpGen.copyDWIMDest dest' [] (Var what) []
   where offset = case moffset of
                    Nothing -> ImpGen.varIndex (kernelGlobalThreadId constants)
-                   Just se -> primExpFromSubExp int32 se
+                   Just se -> ImpGen.compileSubExpOfType int32 se
 
 compileKernelResult constants dest (WriteReturn rws _arr dests) = do
   rws' <- mapM ImpGen.compileSubExp rws
@@ -1055,7 +1049,7 @@ compileKernelResult constants dest (WriteReturn rws _arr dests) = do
         write = foldl (Imp.BinOpExp LogAnd) (kernelThreadActive constants) $
                 zipWith condInBounds is' rws'
     actual_body' <- ImpGen.collect $
-      ImpGen.copyDWIMDest dest (map (primExpFromSubExp int32) is) e []
+      ImpGen.copyDWIMDest dest (map (ImpGen.compileSubExpOfType int32) is) e []
     ImpGen.emit $ Imp.If write actual_body' Imp.Skip
 
 compileKernelResult _ _ KernelInPlaceReturn{} =
