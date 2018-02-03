@@ -334,6 +334,13 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
 
+offsetIndex :: ExpMem.IxFun -> PrimExp VName -> ExpMem.IxFun
+offsetIndex ixfun offset = case ixfun of
+  IxFun.Index ixfun1 (DimFix i : dim_rest) ->
+    IxFun.Index ixfun1 (DimFix (i + offset) : dim_rest)
+  _ ->
+    IxFun.offsetIndex ixfun offset
+
 tryCoalesce :: LoreConstraints lore =>
                VName -> [Slice (PrimExp VName)] -> Bindage ->
                VName -> PrimExp VName -> FindM lore ()
@@ -367,15 +374,28 @@ tryCoalesce dst ixfun_slices bindage src offset = do
                 ++ map (\slices0 -> ixfun_slices ++ slices0) ixfun_slice0ss
 
   var_to_pe <- asks ctxVarPrimExps
-  let ixfuns' = zipWith (\offset_local islices ->
+  let ixfuns' = zipWith3 (\offset_local islices src_local ->
                            let ixfun0 = foldl IxFun.slice (memSrcIxFun mem_dst) islices
                                ixfun1 = if offset_local == zeroOffset
                                         then ixfun0 -- Should not be necessary,
                                                     -- but it makes the type
                                                     -- checker happy for now.
-                                        else IxFun.offsetIndex ixfun0 offset_local
-                           in expandIxFun var_to_pe ixfun1
-                        ) offsets ixfun_slicess
+                                        else offsetIndex ixfun0 offset_local
+                               ixfun2 = expandIxFun var_to_pe ixfun1
+
+                               debug =
+                                 putBlock [ "ixfun fix"
+                                          , pretty src_local
+                                          , pretty offset_local
+                                          , pretty islices
+                                          , pretty ixfun0
+                                          , show ixfun0
+                                          , pretty $ IxFun.shape ixfun0
+                                          , pretty ixfun1
+                                          , pretty ixfun2
+                                          ]
+                           in withDebug debug ixfun2
+                        ) offsets ixfun_slicess srcs
 
   -- Not everything supported yet.  This dials back the optimisation on areas
   -- where it fails.
