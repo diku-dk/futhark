@@ -300,11 +300,11 @@ lookInRes _ = return ()
 freeExcludes :: LoreConstraints lore =>
                 Exp lore -> [VName]
 freeExcludes e = case e of
-  DoLoop _ mergevalparams _ _ ->
-    -- FIXME: This can end up doing something wrong if the returned memory
-    -- block-associated mergevalparams do not come directly from a Scratch
-    -- creation.
-    mapMaybe (fromVar . snd) mergevalparams
+  DoLoop _ _mergevalparams _ _ ->
+    -- FIXME: If the returned memory block-associated mergevalparams do not come
+    -- directly from a Scratch creation, we should be able to ignore them and
+    -- thereby become less conservative.
+    []
 
   BasicOp (Update orig _ _) ->
     [orig]
