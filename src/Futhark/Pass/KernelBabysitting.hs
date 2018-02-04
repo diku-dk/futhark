@@ -35,13 +35,13 @@ transformFunDef fundec = do
   (body', _) <- modifyNameSource $ runState (runBinderT m M.empty)
   return fundec { funDefBody = body' }
   where m = inScopeOf fundec $
-            transformBody $ funDefBody fundec
+            transformBody mempty $ funDefBody fundec
 
 type BabysitM = Binder Kernels
 
-transformBody :: Body Kernels -> BabysitM (Body Kernels)
-transformBody (Body () bnds res) = insertStmsM $ do
-  foldM_ transformStm M.empty bnds
+transformBody :: ExpMap -> Body Kernels -> BabysitM (Body Kernels)
+transformBody expmap (Body () bnds res) = insertStmsM $ do
+  foldM_ transformStm expmap bnds
   return $ resultBody res
 
 -- | Map from variable names to defining expression.  We use this to
@@ -89,13 +89,14 @@ transformStm expmap (Let pat aux (Op (Kernel desc space ts kbody))) = do
   where num_threads = spaceNumThreads space
 
 transformStm expmap (Let pat aux e) = do
-  e' <- mapExpM transform e
+  e' <- mapExpM (transform expmap) e
   let bnd' = Let pat aux e'
   addStm bnd'
   return $ M.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
 
-transform :: Mapper Kernels Kernels BabysitM
-transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody }
+transform :: ExpMap -> Mapper Kernels Kernels BabysitM
+transform expmap =
+  identityMapper { mapOnBody = \scope -> localScope scope . transformBody expmap }
 
 type ArrayIndexTransform m =
   (VName -> Bool) ->           -- thread local?
