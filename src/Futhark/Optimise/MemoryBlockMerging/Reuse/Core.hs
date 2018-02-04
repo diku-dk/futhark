@@ -576,13 +576,22 @@ handleNewArray x xmem = do
       sizesCanBeMaxedKernelArray' kmem used_mems =
         isJust <$> sizesCanBeMaxedKernelArray kmem used_mems
 
+  let notCurrentlyDisabled :: FindM lore Bool
+      notCurrentlyDisabled = do
+        -- FIXME: We currently disable reusing memory of constant size.  This is
+        -- a problem in the misc/heston/heston32.fut benchmark (but not the
+        -- heston64.fut one).  It would be nice to not have to disable this
+        -- feature, as it works well for the most part.
+        new_size <- lookupSize xmem
+        return $ isJust (fromVar new_size)
+  
   let sizesWorkOut :: LoreConstraints lore =>
                       MName -> MNames -> FindM lore Bool
       sizesWorkOut kmem used_mems =
         -- The size of an allocation is okay to reuse if it is the same as the
         -- current memory size, or if it can be changed to be the maximum size
         -- of the two sizes.
-        (noneInterfereKernelArray used_mems <&&>
+        (notCurrentlyDisabled <&&> noneInterfereKernelArray used_mems <&&>
          (sizesMatch used_mems <||> sizesCanBeMaxed kmem))
         <||> sizesCanBeMaxedKernelArray' kmem used_mems
 
