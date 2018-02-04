@@ -2,11 +2,19 @@
 -- last use in the beginning of a loop and its first use in the end of the loop,
 -- and how that can be used to reuse memory.  The coalescing pass removes one
 -- allocation, and the reuse pass removes another allocation.
+--
+-- It *is* feasible to support this case, but requires a less conservative last
+-- use analysis.  In general, the last use analysis needs to check if a memory
+-- block has its first use outside whatever nested body it might be inside, in
+-- which case its last use is considered to be part of the entire outer body
+-- definition.  This currently conflicts with existential memory blocks; see the
+-- LastUse module.
 -- ==
 -- input { [1, 2]
 --       }
 -- output { [20, 21]
 --        }
+
 -- structure cpu { Alloc 3 }
 -- structure gpu { Alloc 3 }
 

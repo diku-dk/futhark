@@ -216,11 +216,14 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
       -- so we only set the last use of a memory to this statement if it also
       -- has its first use inside the current body.
       --
-      -- If it does have its first use outside the body, we remove any existing
-      -- optimistic last use, although only if such an optimistic last use was
-      -- added as a side effect of adding an existential optimistic last use
-      -- (i.e. it was aliased by the existential memory which had a last use).
-      if mem `S.member` first_uses_outer
+      -- If it (or any aliased memory) does have its first use outside the body,
+      -- we remove any existing optimistic last use, although only if such an
+      -- optimistic last use was added as a side effect of adding an existential
+      -- optimistic last use (i.e. it was aliased by the existential memory
+      -- which had a last use).
+      let from_outer = any (`S.member` first_uses_outer)
+          (mem : S.toList (lookupEmptyable mem mem_aliases))
+      if from_outer
         then removeIndirectOptimistic mem
         else setOptimistic mem (FromStm x) S.empty
 
@@ -239,7 +242,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         -- be necessary, since we would be outside the body by then, and it
         -- would result in a too conservative analysis.  As an example, see
         -- tests/mix/loop-interference-use.fut.
-        when (mem `S.member` first_uses_outer) $ do
+        when from_outer $ do
           -- If the memory has its first use outside the current body, we need
           -- to find its actual last use (if it occurs in the body) through
           -- memory aliases.
@@ -254,7 +257,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
             setOptimistic mem' (FromStm x) exclude
         else
         -- Just set the last use.
-        setOptimistic mem (FromStm x) S.empty
+        unless from_outer $ setOptimistic mem (FromStm x) S.empty
 
   cur_optis <- gets curOptimisticLastUses
   let debug =
