@@ -121,15 +121,15 @@ transformFunDefBodyResult ses = do
                  ]
   withDebug debug $ return $ zipWith (
     \se ts -> fromMaybe se (do
+                               -- FIXME: This assumes that a memory block always
+                               -- comes just after its size variable.  We ought
+                               -- to instead properly find this information from
+                               -- the funDefRetType 'ExtSize's.
                                se' <- (se, Nothing) `L.lookup` mem_orig_to_new
                                       <|> case ts of
                                             (ts0 : _) ->
                                               (se, Just ts0) `L.lookup` mem_orig_to_new
                                             _ -> Nothing
-                               -- FIXME: This assumes that a memory block always
-                               -- comes just after its size variable.  We ought
-                               -- to instead properly find this information from
-                               -- the funDefRetType 'ExtSize's.
                                return se'
                            )
     ) ses (L.tail $ L.tails ses)

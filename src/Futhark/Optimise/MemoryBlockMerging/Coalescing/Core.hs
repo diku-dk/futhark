@@ -334,12 +334,16 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
 
-offsetIndex :: ExpMem.IxFun -> PrimExp VName -> ExpMem.IxFun
-offsetIndex ixfun offset = case ixfun of
-  IxFun.Index ixfun1 (DimFix i : dim_rest) ->
-    IxFun.Index ixfun1 (DimFix (i + offset) : dim_rest)
-  _ ->
-    IxFun.offsetIndex ixfun offset
+offsetIndexDWIM :: Int -> ExpMem.IxFun -> PrimExp VName -> ExpMem.IxFun
+offsetIndexDWIM n_ignore_initial ixfun offset =
+  fromMaybe (IxFun.offsetIndex ixfun offset) $ case ixfun of
+  IxFun.Index ixfun1 dimindices ->
+    let (dim_first, dim_rest) = L.splitAt n_ignore_initial dimindices
+    in case dim_rest of
+      (DimFix i : dim_rest') ->
+        Just $ IxFun.Index ixfun1 (dim_first ++ DimFix (i + offset) : dim_rest')
+      _ -> Nothing
+  _ -> Nothing
 
 tryCoalesce :: LoreConstraints lore =>
                VName -> [Slice (PrimExp VName)] -> Bindage ->
@@ -375,24 +379,41 @@ tryCoalesce dst ixfun_slices bindage src offset = do
 
   var_to_pe <- asks ctxVarPrimExps
   let ixfuns' = zipWith3 (\offset_local islices src_local ->
-                           let ixfun0 = foldl IxFun.slice (memSrcIxFun mem_dst) islices
-                               ixfun1 = if offset_local == zeroOffset
-                                        then ixfun0 -- Should not be necessary,
+                           let ixfun0 = memSrcIxFun mem_dst
+                               ixfun1 = foldl IxFun.slice ixfun0 islices
+
+                               -- 'ixfun_slices' contain the slices that are the
+                               -- result of a new coalescing, contrary to the
+                               -- slices in 'ixfun_slice0ss' which contain
+                               -- previously registered slices.
+                               -- 'offsetIndexDWIM' handles the case that we
+                               -- want to offset a DimFix if it is the result of
+                               -- a previous coalescing, and not the current
+                               -- one.  We do that by counting the number of
+                               -- 'DimFix'es that originate in the new
+                               -- coalescing, and then ignore those for our
+                               -- heuristic.  This is a hack.
+                               initial_dimfixes = L.takeWhile (isJust . dimFix) (concat ixfun_slices)
+                               ixfun2 = if offset_local == zeroOffset
+                                        then ixfun1 -- Should not be necessary,
                                                     -- but it makes the type
                                                     -- checker happy for now.
-                                        else offsetIndex ixfun0 offset_local
-                               ixfun2 = expandIxFun var_to_pe ixfun1
+                                        else offsetIndexDWIM (length initial_dimfixes) ixfun1 offset_local
+                               ixfun3 = expandIxFun var_to_pe ixfun2
 
                                debug =
                                  putBlock [ "ixfun fix"
                                           , pretty src_local
                                           , pretty offset_local
                                           , pretty islices
+                                          , show initial_dimfixes
+                                          , show (length initial_dimfixes)
                                           , pretty ixfun0
-                                          , show ixfun0
-                                          , pretty $ IxFun.shape ixfun0
                                           , pretty ixfun1
                                           , pretty ixfun2
+                                          , pretty ixfun3
+                                          , show ixfun_slice0ss
+                                          , show ixfun_slices
                                           ]
                            in withDebug debug ixfun2
                         ) offsets ixfun_slicess srcs
