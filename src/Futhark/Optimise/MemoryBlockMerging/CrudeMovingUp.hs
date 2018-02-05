@@ -1,10 +1,6 @@
--- | Hoist variables as much as possible.
---
--- FIXME: Find a better name.  The "hoisting" happening here is really just
--- moving statements upwards *within* a body, i.e. no hoisting out of loop
--- bodies or anything like that.
-module Futhark.Optimise.MemoryBlockMerging.CrudeHoisting
-  ( hoistInFunDef
+-- | Move variables as much as possible upwards in a program.
+module Futhark.Optimise.MemoryBlockMerging.CrudeMovingUp
+  ( moveUpInFunDef
   ) where
 
 import qualified Data.Set as S
@@ -43,10 +39,10 @@ type BindingMap = [(Names, PrimBinding)]
 
 -- | Call 'findHoistees' for every body, and then hoist every one of the found
 -- hoistees (variables).
-hoistInFunDef :: FunDef ExplicitMemory
-              -> (Body ExplicitMemory -> Maybe [FParam ExplicitMemory] -> [VName])
-              -> FunDef ExplicitMemory
-hoistInFunDef fundef findHoistees =
+moveUpInFunDef :: FunDef ExplicitMemory
+               -> (Body ExplicitMemory -> Maybe [FParam ExplicitMemory] -> [VName])
+               -> FunDef ExplicitMemory
+moveUpInFunDef fundef findHoistees =
   let scope_new = scopeOf fundef
       bindingmap_cur = []
       body' = hoistInBody scope_new bindingmap_cur

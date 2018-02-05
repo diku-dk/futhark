@@ -3,8 +3,8 @@
 --
 -- This should be run *before* the coalescing pass, as it enables more
 -- optimisations.
-module Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationHoisting
-  ( hoistAllocsFunDef
+module Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationMovingUp
+  ( moveUpAllocsFunDef
   ) where
 
 import qualified Data.Set as S
@@ -15,7 +15,7 @@ import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
-import Futhark.Optimise.MemoryBlockMerging.CrudeHoisting
+import Futhark.Optimise.MemoryBlockMerging.CrudeMovingUp
 
 
 findAllocHoistees :: Body ExplicitMemory -> Maybe [FParam ExplicitMemory]
@@ -97,7 +97,7 @@ findAllocHoistees body params =
                       _ -> Nothing
                 checkStm _ = Nothing
 
-hoistAllocsFunDef :: FunDef ExplicitMemory
+moveUpAllocsFunDef :: FunDef ExplicitMemory
                   -> FunDef ExplicitMemory
-hoistAllocsFunDef fundef =
-  hoistInFunDef fundef findAllocHoistees
+moveUpAllocsFunDef fundef =
+  moveUpInFunDef fundef findAllocHoistees

@@ -15,7 +15,7 @@ import Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo
 import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
-import Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationHoisting
+import Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationMovingUp
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
 
 
@@ -28,7 +28,7 @@ coalesceInFunDef :: MonadFreshNames m
 coalesceInFunDef fundef0 = do
   let aux0 = getAuxiliaryInfo fundef0
       debug0 = debugAuxiliaryInfo aux0 "Before coalescing"
-      fundef1 = hoistAllocsFunDef fundef0
+      fundef1 = moveUpAllocsFunDef fundef0
 
       aux1 = getAuxiliaryInfo fundef1
       debug1 = debugAuxiliaryInfo aux1 "After allocation hoisting"
