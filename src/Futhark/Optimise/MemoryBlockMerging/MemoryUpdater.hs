@@ -80,11 +80,10 @@ transformFunDefBody (Body () bnds res) = do
 transformFunDefBodyResult :: LoreConstraints lore =>
                              [SubExp] -> FindM lore [SubExp]
 transformFunDefBodyResult ses = do
-  var_to_mem <- asks ctxVarToMem
   var_to_mem_orig <- asks ctxVarToMemOrig
-  mem_to_size <- asks ctxAllocSizes
+  var_to_mem <- asks ctxVarToMem
   mem_to_size_orig <- asks ctxAllocSizesOrig
-  has_maxed_size <- asks ctxHasMaxedSize
+  mem_to_size <- asks ctxAllocSizes
 
   let check se
         | Var v <- se
@@ -108,30 +107,18 @@ transformFunDefBodyResult ses = do
       mem_orig_to_new2 = concatMap check_size_only ses
       mem_orig_to_new = mem_orig_to_new1 ++ mem_orig_to_new2
 
-  let debug =
-        putBlock [ "memory updater"
-                 , show has_maxed_size
-                 , show var_to_mem
-                 , show var_to_mem_orig
-                 , show mem_to_size
-                 , show mem_to_size_orig
-                 , ""
-                 , show mem_orig_to_new1
-                 , show mem_orig_to_new2
-                 ]
-  withDebug debug $ return $ zipWith (
-    \se ts -> fromMaybe se (do
-                               -- FIXME: This assumes that a memory block always
-                               -- comes just after its size variable.  We ought
-                               -- to instead properly find this information from
-                               -- the funDefRetType 'ExtSize's.
-                               se' <- (se, Nothing) `L.lookup` mem_orig_to_new
-                                      <|> case ts of
-                                            (ts0 : _) ->
-                                              (se, Just ts0) `L.lookup` mem_orig_to_new
-                                            _ -> Nothing
-                               return se'
-                           )
+  return $ zipWith (
+    \se ts -> fromMaybe se (
+      -- FIXME: This assumes that a memory block always
+      -- comes just after its size variable.  We ought
+      -- to instead properly find this information from
+      -- the funDefRetType 'ExtSize's.
+      (se, Nothing) `L.lookup` mem_orig_to_new
+        <|> case ts of
+              (ts0 : _) ->
+                (se, Just ts0) `L.lookup` mem_orig_to_new
+              _ -> Nothing
+      )
     ) ses (L.tail $ L.tails ses)
 
 transformBody :: LoreConstraints lore =>
@@ -251,11 +238,12 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
             (drop (length patctxelems) (bodyResult body_else'))
 
       patctxelems_new <-
-        flip replicateM (newVName "new_memory_size")
+        replicateM
         (length (filter (\br -> case br of
                             NewBranchReturn{} -> True
                             ExistingBranchReturn{} -> False
                         ) rets_branch_returns))
+        (newVName "new_memory_size")
       let (rets'', _, body_ext_new) =
             foldl (\(prev, i, ext) rb -> case rb of
                                ExistingBranchReturn r ->
@@ -276,13 +264,7 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
                                    }
           patctxelems' = patctxelems ++ map (\v -> PatElem v (ExpMem.MemPrim (IntType Int64))) patctxelems_new
 
-      let debug = putBlock [ "ifattr rets: " ++ show rets
-                           , "ifattr rets': " ++ show rets'
-                           , "ifattr rets'': " ++ show rets''
-                           , "ifattr ms_then: " ++ show ms_then
-                           , "ifattr ms_else: " ++ show ms_else
-                           ]
-      withDebug debug $ return (If cond body_then'' body_else'' (IfAttr rets'' sort),
+      return (If cond body_then'' body_else'' (IfAttr rets'' sort),
                                 patctxelems')
 
     DoLoop mergectxparams mergevalparams loopform body -> do

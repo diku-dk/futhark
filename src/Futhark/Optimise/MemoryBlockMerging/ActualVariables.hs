@@ -358,14 +358,5 @@ extendActualVarsInKernel e arrs = forM_ arrs $ \var -> do
       let body_vars = findAllExpVars e
       body_vars' <- filterSetM (lookupGivesMem $ memSrcName mem) body_vars
       let actuals = S.insert var' body_vars'
-
-      dbg_body_vars_mems <- mapM (\v -> M.lookup v <$> asks ctxVarToMem) (S.toList body_vars)
-      let debug = putBlock [ "extendActualVarsInKernel:"
-                           , pretty var
-                           , pretty var'
-                           , prettySet body_vars
-                           , show dbg_body_vars_mems
-                           , prettySet body_vars'
-                           ]
-      withDebug debug $ recordActuals var' actuals
+      recordActuals var' actuals
     Nothing -> return ()

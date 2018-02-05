@@ -10,7 +10,6 @@ import qualified Data.List as L
 import Control.Monad
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Function (on)
-import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
@@ -20,37 +19,11 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Kernels.KernelExp
 import Futhark.Representation.Aliases
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Util (isEnvVarSet)
 import Futhark.Util.Pretty (Pretty)
 
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Optimise.MemoryBlockMerging.Types
 
-
-usesDebugging :: Bool
-usesDebugging = isEnvVarSet "FUTHARK_DEBUG" False &&
-                not (isEnvVarSet "MEMORY_BLOCK_MERGING_OVERVIEW_PRINT" False)
-
-usesDebuggingJSON :: Bool
-usesDebuggingJSON = isEnvVarSet "FUTHARK_DEBUG_JSON" False
-
-withDebug :: IO () -> a -> a
-withDebug debug x
-  | usesDebugging = unsafePerformIO debug `seq` x
-  | otherwise = x
-
-doDebug :: Monad m => IO () -> m ()
-doDebug debug = withDebug debug $ return ()
-
-withDebugJSON :: IO () -> a -> a
-withDebugJSON debug x
-  | usesDebuggingJSON = unsafePerformIO debug `seq` x
-  | otherwise = x
-
-putBlock :: [String] -> IO ();
-putBlock ss = putStrLn $ L.intercalate "\n" ss'
-  where ss' = ["", r] ++ ss ++ [r, ""]
-        r = replicate 70 '~'
 
 -- If a property is commutative in a map, build a map that reflects it.  A bit
 -- crude.  We could also just use a function that calculates this whenever

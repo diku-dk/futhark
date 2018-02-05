@@ -13,7 +13,6 @@ import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 
 import Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo
 import Futhark.Optimise.MemoryBlockMerging.Types
-import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationMovingUp
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
@@ -26,16 +25,9 @@ coalesceInFunDef :: MonadFreshNames m
                  => FunDef ExplicitMemory
                  -> m (FunDef ExplicitMemory)
 coalesceInFunDef fundef0 = do
-  let aux0 = getAuxiliaryInfo fundef0
-      debug0 = debugAuxiliaryInfo aux0 "Before coalescing"
-      fundef1 = moveUpAllocsFunDef fundef0
-
+  let fundef1 = moveUpAllocsFunDef fundef0
       aux1 = getAuxiliaryInfo fundef1
-      debug1 = debugAuxiliaryInfo aux1 "After allocation hoisting"
-  fundef2 <- coreCoalesceFunDef fundef1
-             (auxVarMemMappings aux1) (auxMemAliases aux1)
-             (auxVarAliases aux1) (auxFirstUses aux1) (auxLastUses aux1)
-             (auxActualVariables aux1) (auxExistentials aux1)
-
-  let debug = debug0 >> debug1
-  withDebug debug $ return fundef2
+  coreCoalesceFunDef fundef1
+    (auxVarMemMappings aux1) (auxMemAliases aux1)
+    (auxVarAliases aux1) (auxFirstUses aux1) (auxLastUses aux1)
+    (auxActualVariables aux1) (auxExistentials aux1)

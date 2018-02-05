@@ -14,7 +14,6 @@ import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
-import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.CrudeMovingUp
 
 
@@ -68,15 +67,7 @@ findAllocHoistees body params =
         usedByCopyOrConcat xmem_alloc =
           let vs = mapMaybe checkStm stms
               vs' = if null vs then Nothing else Just (xmem_alloc, concat vs)
-
-              debug =
-                putBlock [ "usedByCopyOrConcat:"
-                         , "xmem_alloc: " ++ pretty xmem_alloc
-                         , "vars: " ++ prettySet (S.fromList vs)
-                         , "vars': " ++ show vs'
-                         ]
-
-          in withDebug debug vs'
+          in vs'
 
           where checkStm :: Stm ExplicitMemory -> Maybe [VName]
                 checkStm (Let

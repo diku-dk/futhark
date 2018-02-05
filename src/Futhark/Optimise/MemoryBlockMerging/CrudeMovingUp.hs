@@ -48,12 +48,7 @@ moveUpInFunDef fundef findHoistees =
       body' = hoistInBody scope_new bindingmap_cur
               (Just (funDefParams fundef)) findHoistees (funDefBody fundef)
       fundef' = fundef { funDefBody = body' }
-
-      debug = fundef' `seq`
-        putBlock [ "Result of hoistInFunDef:"
-                 ,  pretty fundef
-                 ]
-  in withDebug debug fundef'
+  in fundef'
 
 lookupPrimBinding :: VName -> State BindingMap PrimBinding
 lookupPrimBinding vname = do
@@ -135,12 +130,7 @@ bodyBindingMap stms =
               params_binding = (param_vars, PrimBinding S.empty S.empty FromFParam)
 
               bmap = [vars_binding, sizes_binding, params_binding]
-
-              debug =
-                putBlock [ "createBindingStmt:"
-                         , show param_vars
-                         ]
-          in withDebug debug bmap
+          in bmap
 
         shapeSizes (PatElem _ (ExpMem.MemArray _ shape _ _)) =
           mapMaybe fromVar $ shapeDims shape
@@ -170,13 +160,7 @@ hoistInBody scope_new bindingmap_old params findHoistees body =
       bnds' = fmap (hoistRecursivelyStm bindingmap' findHoistees) bnds
       body' = Body () bnds' res
 
-      debug = hoistees `seq`
-        putBlock [ "Hoistees found in body:"
-                 , show bindingmap
-                 , L.intercalate "\n" $ map (\h -> "hoistee: " ++ pretty h) hoistees
-                 ]
-
-  in withDebug debug body'
+  in body'
 
 hoistRecursivelyStm :: BindingMap
                     -> (Body ExplicitMemory -> Maybe [FParam ExplicitMemory] -> [VName])
@@ -204,23 +188,13 @@ hoist bindingmap_cur body hoistee =
 
       body' = runState (moveLetUpwards hoistee body) bindingmap
 
-      debug =
-        putBlock [ "CrudeHoisting hoist:"
-                 , "Name: " ++ show hoistee
-                 ]
-
-  in withDebug debug body'
+  in body'
 
 -- Move a statement as much up as possible.
 moveLetUpwards :: VName -> Body ExplicitMemory
                -> State BindingMap (Body ExplicitMemory)
 moveLetUpwards letname body = do
-  let debug0 =
-        putBlock [ "moveLetUpwards 0:"
-                 , show letname
-                 ]
-
-  PrimBinding deps consumed letorig <- withDebug debug0 $ lookupPrimBinding letname
+  PrimBinding deps consumed letorig <- lookupPrimBinding letname
 
   -- Extend the dependencies with all those statements that use the consumed
   -- variables of this statement, except the current statement.
@@ -241,19 +215,11 @@ moveLetUpwards letname body = do
         DoLoop{} -> return body
         Op ExpMem.Inner{} -> return body
         _ -> do
-          let debug1 =
-                putBlock [ "moveLetUpwards 1:"
-                         , show letname
-                         , prettySet deps
-                         , prettySet consumed
-                         , show line_cur
-                         ]
-
           -- Sort by how close they are to the beginning of the body.  The closest
           -- one should be the first one to hoist, so that the other ones can maybe
           -- exploit it.
           deps'' <- sortByKeyM (fmap pbOrigin . lookupPrimBinding)
-                    $ withDebug debug1 $ S.toList deps'
+                    $ S.toList deps'
           body' <- foldM (flip moveLetUpwards) body deps''
           origins <- mapM (fmap pbOrigin . lookupPrimBinding) deps''
           let line_dest = case foldl max FromFParam origins of
@@ -286,12 +252,7 @@ moveLetToLine stm_cur_name line_cur line_dest stms
                                                (FromLine (l + 1) e))
                                      else t)
 
-  let debug =
-        putBlock [ "moveLetToLine:"
-                 , pretty stm_cur_name
-                 ]
-
-  r <- withDebug debug $ lookupPrimBinding stm_cur_name
+  r <- lookupPrimBinding stm_cur_name
   case r of
     PrimBinding frees consumed (FromLine _ exp_cur) ->
       modify $ replaceWhere stm_cur_name (PrimBinding frees consumed

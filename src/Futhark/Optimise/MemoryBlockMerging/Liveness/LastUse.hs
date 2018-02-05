@@ -124,15 +124,6 @@ setOptimistic mem x_lu exclude = do
     let is_indirect = mem' /= mem
     modifyCurOptimisticLastUses $ M.insert mem' (x_lu, is_indirect)
 
-  let debug =
-        putBlock [ "setOptimistic:"
-                 , pretty mem
-                 , show x_lu
-                 , "exclude: " ++ prettySet exclude
-                 , prettySet mems
-                 ]
-  doDebug debug
-
 -- If an optimistic last use 'mem' was added through a memory alias, forget
 -- about it.
 removeIndirectOptimistic :: MName -> FindM lore ()
@@ -148,14 +139,7 @@ commitOptimistic :: MName -> FindM lore ()
 commitOptimistic mem = do
   res <- M.lookup mem <$> gets curOptimisticLastUses
   case res of
-    Just (x_lu, _) -> do
-      let debug =
-            putBlock [ "commitOptimistic:"
-                     , pretty mem
-                     , show x_lu
-                     ]
-
-      withDebug debug $ recordMapping x_lu mem
+    Just (x_lu, _) -> recordMapping x_lu mem
     Nothing -> return ()
 
 lookInFunDefFParam :: LoreConstraints lore =>
@@ -259,17 +243,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         -- Just set the last use.
         unless from_outer $ setOptimistic mem (FromStm x) S.empty
 
-  cur_optis <- gets curOptimisticLastUses
-  let debug =
-        putBlock [ "LastUse lookInStm:"
-                 , "stm: " ++ show patvalelems
-                 , "first uses outer: " ++ prettySet first_uses_outer
-                 , "e free vars: " ++ prettySet e_free_vars
-                 , "e mems: " ++ prettySet e_mems
-                 , "cur optimistics: " ++ show cur_optis
-                 ]
-
-  withDebug debug $ withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
+  withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody }
         walker_kernel = identityKernelWalker
