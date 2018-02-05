@@ -40,7 +40,11 @@ data Current = Current
   { -- Coalescings state.  Also save offsets and slices in the case that an
     -- optimistic coalescing later becomes part of a chain of coalescings, where
     -- it is offset yet again, and where it should maintain its old relative
-    -- offset.
+    -- offset.  FIXME: This works, but is inefficient in the long run, as we
+    -- need to update it whenever we come across a coalescing that also affects
+    -- previous coalescings.  The directions of the coalescings is inherently
+    -- bottom-up, but our algorithm is top-down.  It should be possible to
+    -- rewrite it.
     curCoalescedIntos :: CoalescedIntos
   , curMemsCoalesced :: MemsCoalesced
   }
