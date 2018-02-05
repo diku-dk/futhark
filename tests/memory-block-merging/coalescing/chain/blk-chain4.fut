@@ -11,10 +11,10 @@
 --           [15, 15, 15]]
 --        }
 -- structure cpu { Alloc 1 }
--- structure gpu { Alloc 3 }
+-- structure gpu { Alloc 2 }
 
--- The GPU pipeline has additional allocations for the to 'replicate'
--- expressions.
+-- The GPU pipeline has additional allocations for the two 'replicate'
+-- expressions, though the reuse transformation merges them.
 
 let main [n] (a: [n]i32): [][n]i32 =
   let x    = map (\i -> replicate n (i + 10)) a

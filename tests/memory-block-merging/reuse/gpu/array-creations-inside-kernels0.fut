@@ -7,9 +7,7 @@
 -- The large number of allocations is due to many small kernel-supporting memory
 -- blocks.  It might change if the compiler changes.  This is also the case with
 -- the other tests in this directory.
--- ==
--- structure gpu { Alloc 20 }
-
+--
 -- If compiled with the GPU pipeline, this program will end up with these two
 -- array creations inside the same kernel:
 --
