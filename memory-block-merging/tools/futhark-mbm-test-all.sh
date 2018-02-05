@@ -14,11 +14,11 @@ with_opencl() {
 
 base="$(dirname "$0")/../../../futhark/memory-block-merging/tests/" # Makes assumption.
 
-# section Memory block merging tests, futhark-c.
-# time "$base"/test_all.sh
+section Memory block merging tests, futhark-c.
+time "$base"/test_all.sh
 
-# section Memory block merging tests, futhark-opencl.
-# with_opencl "$base"/test_all.sh
+section Memory block merging tests, futhark-opencl.
+with_opencl "$base"/test_all.sh
 
 
 base="$(dirname "$0")"
