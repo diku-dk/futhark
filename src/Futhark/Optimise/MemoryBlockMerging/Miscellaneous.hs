@@ -12,7 +12,6 @@ import Data.Maybe (fromMaybe, catMaybes)
 import Data.Function (on)
 import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
-import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
        (ExplicitMemory, InKernel)
@@ -203,15 +202,6 @@ filterSetM f xs = S.fromList <$> filterM f (S.toList xs)
 
 zipWithM3 :: Monad m => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
 zipWithM3 f as bs cs = sequence $ zipWith3 f as bs cs
-
--- Pretty bad.
-intraproceduralTransformationWithLog ::
-  MonadFreshNames m =>
-  (FunDef ExplicitMemory -> m (FunDef ExplicitMemory, Log)) ->
-  Prog ExplicitMemory -> m (Prog ExplicitMemory, Log)
-intraproceduralTransformationWithLog f (Prog fundefs) = do
-  (fundefs', logs) <- unzip <$> mapM f fundefs
-  return (Prog fundefs', mconcat logs)
 
 -- Map on both ExplicitMemory and InKernel.
 class FullMap lore where

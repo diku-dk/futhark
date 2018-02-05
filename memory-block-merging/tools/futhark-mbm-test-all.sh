@@ -23,11 +23,11 @@ base="$(dirname "$0")/../../../futhark/memory-block-merging/tests/" # Makes assu
 
 base="$(dirname "$0")"
 
-# section Futhark tests, futhark-c.
-# time "$base"/futhark-mbm-failures
+section Futhark tests, futhark-c.
+time "$base"/futhark-mbm-failures
 
-# section Futhark tests, futhark-opencl.
-# with_opencl "$base"/futhark-mbm-failures
+section Futhark tests, futhark-opencl.
+with_opencl "$base"/futhark-mbm-failures
 
 section Futhark benchmarks, futhark-c.
 time "$base"/futhark-mbm-failures-benchmarks

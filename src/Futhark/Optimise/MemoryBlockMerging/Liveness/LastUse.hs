@@ -11,7 +11,7 @@ module Futhark.Optimise.MemoryBlockMerging.Liveness.LastUse
 
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -222,7 +222,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
       -- optimistic last use (i.e. it was aliased by the existential memory
       -- which had a last use).
       let from_outer = any (`S.member` first_uses_outer)
-          (mem : S.toList (lookupEmptyable mem mem_aliases))
+                       (mem : S.toList (lookupEmptyable mem mem_aliases))
       if from_outer
         then removeIndirectOptimistic mem
         else setOptimistic mem (FromStm x) S.empty

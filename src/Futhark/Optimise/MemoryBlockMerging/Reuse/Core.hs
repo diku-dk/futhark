@@ -106,10 +106,9 @@ emptyCurrent = Current { curUses = M.empty
                        , curKernelMaxSizedRes = M.empty
                        }
 
-newtype FindM lore a = FindM { unFindM :: RWS Context Log Current a }
+newtype FindM lore a = FindM { unFindM :: RWS Context () Current a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
-            MonadWriter Log,
             MonadState Current)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
@@ -118,10 +117,6 @@ type LoreConstraints lore = (ExplicitMemorish lore,
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
-
-writeLog :: VName -> String -> String -> FindM lore ()
-writeLog var_at topic content =
-  tell $ Log $ M.singleton var_at [(topic, content)]
 
 -- Lookup the memory block statically associated with a variable.
 lookupVarMem :: MonadReader Context m =>
@@ -205,7 +200,7 @@ coreReuseFunDef :: MonadFreshNames m =>
                    FunDef ExplicitMemory -> FirstUses ->
                    Interferences -> PotentialKernelDataRaceInterferences ->
                    VarMemMappings MemorySrc -> ActualVariables -> Names ->
-                   m (FunDef ExplicitMemory, Log)
+                   m (FunDef ExplicitMemory)
 coreReuseFunDef fundef first_uses interferences potential_kernel_interferences var_to_mem actual_vars existentials = do
   let sizes = memBlockSizesFunDef fundef
       size_uses = findSizeUsesFunDef fundef
@@ -224,7 +219,7 @@ coreReuseFunDef fundef first_uses interferences potential_kernel_interferences v
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
         lookInBody $ funDefBody fundef
-      (res, proglog) = execRWS m context emptyCurrent
+      (res, ()) = execRWS m context emptyCurrent
       var_to_mem_res = curVarToMemRes res
   fundef' <- transformFromVarMemMappings var_to_mem_res (M.map memSrcName var_to_mem) (M.map fst sizes) (M.map fst sizes) False fundef
   let sizes' = memBlockSizesFunDef fundef'
@@ -254,7 +249,7 @@ coreReuseFunDef fundef first_uses interferences potential_kernel_interferences v
                  , pretty fundef'''
                  ]
 
-  withDebug debug $ return (fundef''', proglog)
+  withDebug debug $ return fundef'''
 
 lookInFParam :: LoreConstraints lore =>
                 FParam lore -> FindM lore ()
@@ -599,26 +594,6 @@ handleNewArray x xmem = do
                     [notTheSame, noneInterfere, sameSpace, sizesWorkOut]
   cur_uses <- gets curUses
   found_use <- catMaybes <$> mapM (maybeFromBoolM canBeUsed) (M.assocs cur_uses)
-
-  writeLog x "available for reuse" (prettyList found_use)
-  not_found_use <-
-    mapM (\(k, us) -> do
-             let t (s, f) = do
-                   r <- f k us
-                   return $ if r then [] else [s]
-             us' <- concat <$> mapM t [ ("interference", noneInterfere)
-                                      , ("different space", sameSpace)
-                                      , ("different size variables", \_ um -> sizesMatch um)
-                                      , ("size cannot be maxed", \k1 _ -> sizesCanBeMaxed k1)
-                                      ]
-             return (k, us'))
-    $ M.assocs $ M.filterWithKey (\k _ -> k `notElem` map fst found_use) cur_uses
-
-  zipWithM_ (\(t, ws) i ->
-               writeLog x ("not available for reuse (" ++ show i ++ ")")
-               (pretty t ++ " (failed on: " ++ L.intercalate ", " ws ++ ")"))
-    not_found_use [(1::Int)..]
-  writeLog x "base interferences" (prettySet $ lookupEmptyable xmem interferences)
 
   actual_vars <- lookupActualVars x
   case found_use of
