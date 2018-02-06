@@ -8,7 +8,8 @@
 module Futhark.Optimise.MemoryBlockMerging.Reuse.Core
   ( coreReuseFunDef
   ) where
-
+import System.IO.Unsafe (unsafePerformIO)
+import Futhark.Util
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
@@ -290,6 +291,7 @@ handleNewArray :: LoreConstraints lore =>
                   VName -> MName -> FindM lore ()
 handleNewArray x xmem = do
   interferences <- asks ctxInterferences
+  actual_vars <- lookupActualVars x
 
   let notTheSame :: Monad m => MName -> MNames -> m Bool
       notTheSame kmem _used_mems = return (kmem /= xmem)
@@ -502,6 +504,25 @@ handleNewArray x xmem = do
       sizesCanBeMaxedKernelArray' kmem used_mems =
         isJust <$> sizesCanBeMaxedKernelArray kmem used_mems
 
+  let noOtherUsesOfMemory :: LoreConstraints lore =>
+                             MName -> MNames -> FindM lore Bool
+      noOtherUsesOfMemory _kmem _used_mems = do
+        -- If the array in question 'x' is not the only array that uses the
+        -- memory (ignoring aliasing), then do not perform memory reuse.  We
+        -- only want to reuse memory if it means we can remove an allocation.
+        -- FIXME: If we can check that all arrays using the memory in question
+        -- 'xmem' can be set to reuse some other memory, so that 'xmem' does not
+        -- have to be allocated, then this restriction can go away.  It also
+        -- might be the case that the ActualVariables module does not find all
+        -- array connections, i.e. it concludes that two arrays are distinct
+        -- when they are actually not; this can happen with streams.
+        var_to_mem <- asks ctxVarToMem
+        return $ and $ M.elems $ M.mapWithKey (
+          \v m -> if memSrcName m == xmem
+                  then v `L.elem` actual_vars
+                  else True
+          ) var_to_mem
+
   let notCurrentlyDisabled :: FindM lore Bool
       notCurrentlyDisabled = do
         -- FIXME: We currently disable reusing memory of constant size.  This is
@@ -523,15 +544,17 @@ handleNewArray x xmem = do
         <||> sizesCanBeMaxedKernelArray' kmem used_mems
 
   let canBeUsed t = and <$> mapM (($ t) . uncurry)
-                    [notTheSame, noneInterfere, sameSpace, sizesWorkOut]
+                    [notTheSame, noneInterfere, sameSpace, noOtherUsesOfMemory,
+                     sizesWorkOut]
   cur_uses <- gets curUses
   found_use <- catMaybes <$> mapM (maybeFromBoolM canBeUsed) (M.assocs cur_uses)
 
-  actual_vars <- lookupActualVars x
   case found_use of
     (kmem, used_mems) : _ -> do
       -- There is a previous memory block that we can use.  Record the mapping.
-      insertUse kmem xmem
+      let dbg = pretty xmem ++ " reuses " ++ pretty kmem
+
+      (unsafePerformIO $ putStrLn dbg) `seq` insertUse kmem xmem
       forM_ actual_vars $ \var -> do
         ixfun <- memSrcIxFun <$> lookupVarMem var
         recordMemMapping var $ MemoryLoc kmem ixfun -- Only change the memory block.
