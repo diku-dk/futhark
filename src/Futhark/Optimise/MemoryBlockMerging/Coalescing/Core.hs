@@ -385,7 +385,8 @@ tryCoalesce dst ixfun_slices bindage src offset = do
                                                     -- but it makes the type
                                                     -- checker happy for now.
                                         else offsetIndexDWIM (length initial_dimfixes) ixfun1 offset_local
-                           in ixfun2
+                               ixfun3 = expandIxFun var_to_pe ixfun2
+                           in ixfun3
                         ) offsets ixfun_slicess
 
   -- Not everything supported yet.  This dials back the optimisation on areas
