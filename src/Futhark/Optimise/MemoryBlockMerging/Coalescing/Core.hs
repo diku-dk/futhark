@@ -5,7 +5,7 @@
 module Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
   ( coreCoalesceFunDef
   ) where
-
+import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.Set as S
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
@@ -350,6 +350,8 @@ tryCoalesce dst ixfun_slices bindage src offset = do
         unzip3 $ S.toList $ S.unions
         $ map (`lookupEmptyable` coalesced_intos) (src : src's)
 
+  var_to_pe <- asks ctxVarPrimExps
+
   let srcs = src's ++ src0s
                 -- The same number of base offsets as in src's.
       offsets = replicate (length src's) offset
@@ -467,6 +469,7 @@ canBeCoalesced dst src ixfun = do
   safe_if <- safetyIf src dst
 
   let safe_all = safe2 && safe3 && safe4 && safe5 && safe_if
+  -- unsafePerformIO (putStrLn ("CO " ++ pretty src ++ " " ++ pretty dst ++ " " ++ show [safe2, safe3, safe4, safe5])) `seq`
   return safe_all
 
 -- Safety conditions for each statement with a Copy or Concat:
@@ -526,7 +529,7 @@ safetyCond3 src dst mem_dst = do
   uses_after_src <- mapM (maybe (return S.empty) withMemAliases
                           <=< lookupCurrentVarMem) uses_after_src_vars
   let res = not $ S.member (memSrcName mem_dst) (S.unions uses_after_src)
-  return res
+  unsafePerformIO (putStrLn ("CO " ++ pretty src ++ " " ++ pretty dst ++ " " ++ pretty (memSrcName mem_dst) ++ "\n" ++ show uses_after_src_vars ++ "\n" ++ show uses_after_src ++ "\n" ++ show res ++ "\n" )) `seq` return res
 
 safetyCond4 :: MonadReader Context m =>
                VName -> m Bool
