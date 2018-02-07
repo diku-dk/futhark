@@ -150,8 +150,8 @@ reportResult results = do
   let runtimes = map (fromIntegral . runMicroseconds) results
       avg = sum runtimes / genericLength runtimes
       rel_dev = stddevp runtimes / mean runtimes :: Double
-  putStrLn $ printf "%10.2f" avg ++ "us (average; relative standard deviation: " ++
-    printf "%.2f" rel_dev ++ ")"
+  putStrLn $ printf "%10.2f" avg ++ "us (avg. of " ++ show (length runtimes) ++
+    " runs; RSD: " ++ printf "%.2f" rel_dev ++ ")"
 
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
