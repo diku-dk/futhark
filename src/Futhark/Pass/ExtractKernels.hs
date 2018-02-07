@@ -241,10 +241,6 @@ transformStms (bnd:bnds) =
       transformStms $ stmsToList bnds' <> bnds
 
 sequentialisedUnbalancedStm :: Stm -> DistribM (Maybe (Stms SOACS))
-sequentialisedUnbalancedStm (Let pat _ (Op soac@(Map _ lam _)))
-  | unbalancedLambda lam, lambdaContainsParallelism lam = do
-      types <- asksScope scopeForSOACs
-      Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedStm (Let pat _ (Op soac@(Redomap _ _ _ lam2 _ _)))
   | unbalancedLambda lam2, lambdaContainsParallelism lam2 = do
       types <- asksScope scopeForSOACs

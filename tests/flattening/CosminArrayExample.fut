@@ -11,7 +11,7 @@
 -- }
 let main (xs: []i32): []i32 =
   map (\(x: i32): i32  ->
-        let arr = iota(2 * x)
-        let arr' = reshape (2,x) arr in
+        let arr = 0..<(2 * x)
+        let arr' = unsafe reshape (2,x) arr in
             reduce (+) 0 (arr'[0]) + reduce (+) 0 (arr'[1])
      ) xs
