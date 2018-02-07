@@ -1,9 +1,0 @@
-# Ignore result of test suite.
-tests/*actual-*
-tests/**/*actual-*
-tests/*expected-*
-tests/**/*expected-*
-tests/*bin
-tests/**/*bin
-tests/*c
-tests/**/*.c
