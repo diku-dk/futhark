@@ -8,8 +8,7 @@
 module Futhark.Optimise.MemoryBlockMerging.Reuse.Core
   ( coreReuseFunDef
   ) where
-import System.IO.Unsafe (unsafePerformIO)
-import Futhark.Util
+
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
@@ -518,9 +517,8 @@ handleNewArray x xmem = do
         -- when they are actually not; this can happen with streams.
         var_to_mem <- asks ctxVarToMem
         return $ and $ M.elems $ M.mapWithKey (
-          \v m -> if memSrcName m == xmem
-                  then v `L.elem` actual_vars
-                  else True
+          \v m -> (memSrcName m /= xmem)
+                  || (v `L.elem` actual_vars)
           ) var_to_mem
 
   let notCurrentlyDisabled :: FindM lore Bool
@@ -552,9 +550,7 @@ handleNewArray x xmem = do
   case found_use of
     (kmem, used_mems) : _ -> do
       -- There is a previous memory block that we can use.  Record the mapping.
-      let dbg = pretty xmem ++ " reuses " ++ pretty kmem
-
-      (unsafePerformIO $ putStrLn dbg) `seq` insertUse kmem xmem
+      insertUse kmem xmem
       forM_ actual_vars $ \var -> do
         ixfun <- memSrcIxFun <$> lookupVarMem var
         recordMemMapping var $ MemoryLoc kmem ixfun -- Only change the memory block.

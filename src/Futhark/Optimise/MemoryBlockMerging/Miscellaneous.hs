@@ -81,7 +81,6 @@ prettyList = L.intercalate ", " . map pretty
 lookupEmptyable :: (Ord a, Monoid b) => a -> M.Map a b -> b
 lookupEmptyable x m = fromMaybe mempty $ M.lookup x m
 
--- Works for now.
 fromJust :: String -> Maybe a -> a
 fromJust _ (Just x) = x
 fromJust mistake Nothing = error ("error: " ++ mistake)
@@ -218,7 +217,7 @@ class FullWalk lore where
   fullWalkExpM :: Monad m => Walker lore m -> KernelWalker InKernel m
                -> Exp lore -> m ()
 
--- This can maybe be integrated into the above typeclass.
+-- FIXME: This can maybe be integrated into the above typeclass.
 class FullWalkAliases lore where
   fullWalkAliasesExpM :: Monad m => Walker (Aliases lore) m
                       -> KernelWalker (Aliases InKernel) m

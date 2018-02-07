@@ -1,3 +1,4 @@
+-- | Merge memory blocks.
 module Futhark.Optimise.MemoryBlockMerging
   ( memoryBlockMergingCoalescing
   , memoryBlockMergingReuse
@@ -18,7 +19,7 @@ memoryBlockMergingCoalescing =
   "Coalesce the memory blocks of arrays"
   coalesceInProg
 
--- | Apply the coalescing part of the memory block merging optimisation.
+-- | Apply the reuse part of the memory block merging optimisation.
 memoryBlockMergingReuse :: Pass ExplicitMemory ExplicitMemory
 memoryBlockMergingReuse =
   Pass
