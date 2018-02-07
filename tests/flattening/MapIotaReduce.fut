@@ -7,6 +7,6 @@
 -- }
 let main (xs: []i32): []i32 =
   map (\(x: i32): i32  ->
-         let tmp = iota(x) in
+         let tmp = 0..<x in
          reduce (+) 0 tmp
      ) xs
