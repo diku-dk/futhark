@@ -66,7 +66,7 @@ optimiseInKernelStm inv (Let pat aux (Op (GroupStream w max_chunk lam accs arrs)
           letBindNames_ [paramName p] $
           BasicOp $ Index a $ fullSlice (paramType p)
           [DimSlice (Var chunk_offset) (Var chunk_size) (constant (1::Int32))]
-        optimiseInBody inv body
+        localScope (scopeOfLParams acc_params) $ optimiseInBody inv body
 
       -- Some accumulators may be updated in-place and must hence be unique.
       let lam_consumed = consumedInBody $ Alias.analyseBody $ groupStreamLambdaBody lam
