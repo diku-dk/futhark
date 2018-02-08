@@ -1,19 +1,22 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
--- | Turn GroupStreams that operate on entire input into do-loops,
--- thus aiding subsequent optimisation.  It is very important that
--- this is run *after* any access-pattern-related optimisation,
--- because this pass will destroy information.
+-- | Turn GroupStreams that operate on entire input or thread-variant
+-- sizes into do-loops, thus aiding subsequent optimisation.  It is
+-- very important that this is run *after* any access-pattern-related
+-- optimisation, because this pass will destroy information.
 module Futhark.Optimise.Unstream
        ( unstream )
        where
 
 import Control.Monad.State
 import Control.Monad.Reader
+import qualified Data.Set as S
+import qualified Data.Map as M
 
+import Futhark.Representation.AST.Attributes.Aliases
+import qualified Futhark.Analysis.Alias as Alias
 import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels
-
 import Futhark.Pass
 import Futhark.Tools
 
@@ -37,21 +40,24 @@ optimiseBody (Body () stms res) =
 
 optimiseStm :: Stm Kernels -> UnstreamM [Stm Kernels]
 optimiseStm (Let pat aux (Op (Kernel desc space ts body))) = do
+  inv <- S.fromList . M.keys <$> askScope
   stms' <- localScope (scopeOfKernelSpace space) $
-           runBinder_ $ optimiseInKernelStms $ kernelBodyStms body
+           runBinder_ $ optimiseInKernelStms inv $ kernelBodyStms body
   return [Let pat aux $ Op $ Kernel desc space ts $ body { kernelBodyStms = stms' }]
 optimiseStm (Let pat aux e) =
   pure <$> (Let pat aux <$> mapExpM optimise e)
   where optimise = identityMapper { mapOnBody = \scope -> localScope scope . optimiseBody }
 
+type Invariant = S.Set VName
+
 type InKernelM = Binder InKernel
 
-optimiseInKernelStms :: Stms InKernel -> InKernelM ()
-optimiseInKernelStms = mapM_ optimiseInKernelStm . stmsToList
+optimiseInKernelStms :: Invariant -> Stms InKernel -> InKernelM ()
+optimiseInKernelStms inv = mapM_ (optimiseInKernelStm inv) . stmsToList
 
-optimiseInKernelStm :: Stm InKernel -> InKernelM ()
-optimiseInKernelStm (Let pat aux (Op (GroupStream w max_chunk lam accs arrs)))
-  | max_chunk == w = do
+optimiseInKernelStm :: Invariant -> Stm InKernel -> InKernelM ()
+optimiseInKernelStm inv (Let pat aux (Op (GroupStream w max_chunk lam accs arrs)))
+  | max_chunk == w || maybe False (`S.notMember` inv) (subExpVar w) = do
       let GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
       letBindNames_ [chunk_size] $ BasicOp $ SubExp $ constant (1::Int32)
 
@@ -60,18 +66,22 @@ optimiseInKernelStm (Let pat aux (Op (GroupStream w max_chunk lam accs arrs)))
           letBindNames_ [paramName p] $
           BasicOp $ Index a $ fullSlice (paramType p)
           [DimSlice (Var chunk_offset) (Var chunk_size) (constant (1::Int32))]
-        optimiseInBody body
+        optimiseInBody inv body
 
-      -- Accumulators are updated in-place and must hence be unique.
-      let merge = zip (map (fmap (`toDecl` Unique)) acc_params) accs
+      -- Some accumulators may be updated in-place and must hence be unique.
+      let lam_consumed = consumedInBody $ Alias.analyseBody $ groupStreamLambdaBody lam
+          uniqueIfConsumed p | paramName p `S.member` lam_consumed =
+                                 fmap (`toDecl` Unique) p
+                             | otherwise = fmap (`toDecl` Nonunique) p
+          merge = zip (map uniqueIfConsumed acc_params) accs
       certifying (stmAuxCerts aux) $
         letBind_ pat $ DoLoop [] merge (ForLoop chunk_offset Int32 w []) loop_body
-optimiseInKernelStm (Let pat aux e) =
+optimiseInKernelStm inv (Let pat aux e) =
   addStm =<< (Let pat aux <$> mapExpM optimise e)
   where optimise = identityMapper
-          { mapOnBody = \scope -> localScope scope . optimiseInBody }
+          { mapOnBody = \scope -> localScope scope . optimiseInBody inv }
 
-optimiseInBody :: Body InKernel -> InKernelM (Body InKernel)
-optimiseInBody body = do
-  stms' <- collectStms_ $ optimiseInKernelStms $ bodyStms body
+optimiseInBody :: Invariant -> Body InKernel -> InKernelM (Body InKernel)
+optimiseInBody inv body = do
+  stms' <- collectStms_ $ optimiseInKernelStms inv $ bodyStms body
   return body { bodyStms = stms' }
