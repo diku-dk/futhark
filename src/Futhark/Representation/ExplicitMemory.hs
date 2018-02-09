@@ -636,10 +636,10 @@ matchPatternToExp :: (ExplicitMemorish lore) =>
 matchPatternToExp pat e = do
   scope <- asksScope removeScopeAliases
   rt <- runReaderT (expReturns $ removeExpAliases e) scope
-  let pat_ts = bodyReturnsFromPattern $ removePatternAliases pat
-  unless (length pat_ts == length rt &&
-                      and (zipWith matches pat_ts rt)) $
-    TC.bad $ TC.TypeError $ "Cannot match result type: " ++ pretty rt
+  let (_ctx_ts, val_ts) = bodyReturnsFromPattern $ removePatternAliases pat
+  unless (length val_ts == length rt &&
+          and (zipWith matches val_ts rt)) $
+    TC.bad $ TC.TypeError $ "Cannot match result type: " ++ pretty rt ++ " (" ++ pretty val_ts ++ ")"
   where matches (MemPrim x) (MemPrim y) = x == y
         matches (MemMem x_size x_space) (MemMem y_size y_space) =
           x_size == y_size && x_space == y_space
@@ -649,7 +649,9 @@ matchPatternToExp pat e = do
             (ReturnsInBlock x_mem x_ixfun, Just (ReturnsInBlock y_mem y_ixfun)) ->
               x_mem == y_mem && x_ixfun == y_ixfun
             (ReturnsInBlock{}, Just ReturnsNewBlock{}) -> True
-            (ReturnsNewBlock{}, Just ReturnsNewBlock{}) -> True
+            (ReturnsNewBlock x_space x_i x_size _x_ixfun,
+             Just (ReturnsNewBlock y_space y_i y_size _y_ixfun)) ->
+              x_space == y_space && x_i == y_i && x_size == y_size
             (_, Nothing) -> True
             _ -> False
         matches _ _ = False
@@ -727,14 +729,16 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
       " (" ++ show ident_rank ++ ")"
 
 instance Attributes ExplicitMemory where
-  expTypesFromPattern = return . bodyReturnsFromPattern
+  expTypesFromPattern = return . snd . bodyReturnsFromPattern
 
 instance Attributes InKernel where
-  expTypesFromPattern = return . bodyReturnsFromPattern
+  expTypesFromPattern = return . snd . bodyReturnsFromPattern
 
-bodyReturnsFromPattern :: PatternT (MemBound NoUniqueness) -> [BodyReturns]
+bodyReturnsFromPattern :: PatternT (MemBound NoUniqueness)
+                       -> ([BodyReturns], [BodyReturns])
 bodyReturnsFromPattern pat =
-  map asReturns $ patternValueElements pat
+  (map asReturns $ patternContextElements pat,
+   map asReturns $ patternValueElements pat)
   where ctx = patternContextElements pat
 
         ext (Var v)
@@ -745,16 +749,14 @@ bodyReturnsFromPattern pat =
         asReturns pe =
           case patElemAttr pe of
             MemPrim pt -> MemPrim pt
-            MemMem size space -> MemMem (Free size) space
-            MemArray pt shape u (ArrayIn mem ixfun)
-              | Prim _ <- patElemType pe -> MemPrim pt
-              | otherwise ->
-                  MemArray pt (Shape $ map ext $ shapeDims shape) u $
-                  case find ((==mem) . patElemName . snd) $ zip [0..] ctx  of
-                    Just (i, PatElem _ (MemMem size space)) ->
-                      ReturnsNewBlock space i (ext size) $
-                      existentialiseIxFun (map patElemName ctx) ixfun
-                    _ -> ReturnsInBlock mem $ existentialiseIxFun [] ixfun
+            MemMem size space -> MemMem (ext size) space
+            MemArray pt shape u (ArrayIn mem ixfun) ->
+              MemArray pt (Shape $ map ext $ shapeDims shape) u $
+              case find ((==mem) . patElemName . snd) $ zip [0..] ctx  of
+                Just (i, PatElem _ (MemMem size space)) ->
+                  ReturnsNewBlock space i (ext size) $
+                  existentialiseIxFun (map patElemName ctx) ixfun
+                _ -> ReturnsInBlock mem $ existentialiseIxFun [] ixfun
 
 instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (PatElemT (MemInfo SubExp u r)) where
   ppAnnot = bindeeAnnot patElemName patElemAttr
