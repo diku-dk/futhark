@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
    * `futhark-test`: now handles CRLF linebreaks correctly (#471).
 
+   * A record field can be projected from an array index expression (#473).
+
 ## [0.3.0]
 
 ### Added
