@@ -294,7 +294,7 @@ transformStm (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs)))
       inner_stms <- innerParallelBody
 
       (outer_suff, suff_stms) <-
-        runBinder $ sufficientParallelism "redomap_outer_suff" w
+        runBinder $ sufficientParallelism "suff_outer_redomap" w
       (suff_stms<>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
 
   | otherwise = paralleliseOuter
@@ -424,7 +424,7 @@ mapLoopExp (MapLoop _ w lam arrs) = Op $ Map w lam arrs
 sufficientParallelism :: (Op (Lore m) ~ Kernel innerlore, MonadBinder m) =>
                          String -> SubExp -> m SubExp
 sufficientParallelism desc par = do
-  par_threshold <- getSize "par_threshold" Out.SizeThreshold
+  par_threshold <- getSize desc Out.SizeThreshold
   letSubExp desc $ BasicOp $ CmpOp (CmpSle Int32) par_threshold par
 
 distributeMap :: (HasScope Out.Kernels m,
@@ -483,7 +483,7 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
 
   types <- askScope
   (outer_suff, outer_suff_stms) <- runBinder $
-    sufficientParallelism "outer_suff" nest_w
+    sufficientParallelism "suff_outer_par" nest_w
 
   intra <- flip runReaderT types $
            localScope (scopeOfLParams (lambdaParams lam)) $
@@ -508,7 +508,7 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
           letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w intra_avail_par
         fits <- letSubExp "fits" $ BasicOp $
                 CmpOp (CmpSle Int32) group_size max_group_size
-        suff <- sufficientParallelism "group_suff_par" group_available_par
+        suff <- sufficientParallelism "suff_intra_par" group_available_par
         letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits suff
 
       group_par_body <- renameBody $ mkBody intra_stms res
