@@ -1326,6 +1326,10 @@ int main(int argc, char** argv) {
   argc -= parsed_options;
   argv += parsed_options;
 
+  if (argc != 0) {
+    panic(1, "Excess non-option: %s\n", argv[0]);
+  }
+
   struct futhark_context *ctx = futhark_context_new(cfg);
   assert (ctx != NULL);
 
