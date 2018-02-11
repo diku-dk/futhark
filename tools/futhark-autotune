@@ -96,9 +96,12 @@ class FutharkTuner(MeasurementInterface):
 
   def save_final_config(self, configuration):
     """called at the end of tuning"""
-    print "Optimal block size written to mmm_final_config.json:", configuration.data
-    self.manipulator().save_to_file(configuration.data,
-                                    'mmm_final_config.json')
+    filename = self.args.save_json
+    if filename != None:
+      print("Optimal parameter values written to %s: %s" % (filename, configuration.data))
+      self.manipulator().save_to_file(configuration.data, filename)
+    else:
+      print("--save-json not given, so not writing parameter values to file.")
     print "Reproduce with command:"
     print self.futhark_bench_cmd(configuration.data)
 
@@ -110,6 +113,7 @@ if __name__ == '__main__':
   argparser.add_argument('--compiler', type=str, metavar='COMPILER', default='futhark-opencl')
   argparser.add_argument('--timeout', type=int, metavar='TIMEOUT', default='60')
   argparser.add_argument('--only', choices=SIZE_CLASSES, metavar='CLASS', action='append', default=[])
+  argparser.add_argument('--save-json', type=str, metavar='FILENAME', default=None)
   args = argparser.parse_args()
 
   FutharkTuner.main(args)
