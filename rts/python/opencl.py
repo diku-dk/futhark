@@ -33,6 +33,9 @@ def get_prefered_context(interactive=False, platform_pref=None, device_pref=None
     if interactive:
         return cl.create_some_context(interactive=True)
 
+    def blacklisted(p, d):
+        return platform_pref == None and device_pref == None and \
+            p.name == "Apple" and d.name.find("Intel(R) Core(TM)") >= 0
     def platform_ok(p):
         return not platform_pref or p.name.find(platform_pref) >= 0
     def device_ok(d):
@@ -44,7 +47,7 @@ def get_prefered_context(interactive=False, platform_pref=None, device_pref=None
         if not platform_ok(p):
             continue
         for d in p.get_devices():
-            if not device_ok(d):
+            if blacklisted(p,d) or not device_ok(d):
                 continue
             if device_matches == device_num:
                 return cl.Context(devices=[d])

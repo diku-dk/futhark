@@ -393,6 +393,19 @@ static void opencl_all_device_options(struct opencl_device_option **devices_out,
   *num_devices_out = num_devices;
 }
 
+static int is_blacklisted(const char *platform_name, const char *device_name,
+                          const struct opencl_config *cfg) {
+  if (strcmp(cfg->preferred_platform, "") != 0 ||
+      strcmp(cfg->preferred_device, "") != 0) {
+    return 0;
+  } else if (strstr(platform_name, "Apple") != NULL &&
+             strstr(device_name, "Intel(R) Core(TM)") != NULL) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
 static struct opencl_device_option get_preferred_device(const struct opencl_config *cfg) {
   struct opencl_device_option *devices;
   size_t num_devices;
@@ -403,7 +416,8 @@ static struct opencl_device_option get_preferred_device(const struct opencl_conf
 
   for (size_t i = 0; i < num_devices; i++) {
     struct opencl_device_option device = devices[i];
-    if (strstr(device.platform_name, cfg->preferred_platform) != NULL &&
+    if (!is_blacklisted(device.platform_name, device.device_name, cfg) &&
+        strstr(device.platform_name, cfg->preferred_platform) != NULL &&
         strstr(device.device_name, cfg->preferred_device) != NULL &&
         num_device_matches++ == cfg->preferred_device_num) {
       // Free all the platform and device names, except the ones we have chosen.
