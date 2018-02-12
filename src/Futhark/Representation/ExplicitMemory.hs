@@ -639,7 +639,7 @@ matchPatternToExp pat e = do
   let (_ctx_ts, val_ts) = bodyReturnsFromPattern $ removePatternAliases pat
   unless (length val_ts == length rt &&
           and (zipWith matches val_ts rt)) $
-    TC.bad $ TC.TypeError $ "Cannot match result type: " ++ pretty rt ++ " (" ++ pretty val_ts ++ ")"
+    TC.bad $ TC.TypeError $ "Expression type:\n  " ++ prettyTuple rt ++ "\ncannot match pattern type:\n  " ++ prettyTuple val_ts
   where matches (MemPrim x) (MemPrim y) = x == y
         matches (MemMem x_size x_space) (MemMem y_size y_space) =
           x_size == y_size && x_space == y_space
