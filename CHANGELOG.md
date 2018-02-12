@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
    * A record field can be projected from an array index expression (#473).
 
+   * Futhark will now never automatically pick Apple's CPU device for
+     OpenCL, as it is rather broken.  You can still select it
+     manually.
+
 ## [0.3.0]
 
 ### Added
