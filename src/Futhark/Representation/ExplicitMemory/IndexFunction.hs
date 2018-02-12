@@ -317,8 +317,8 @@ rebase :: (Eq num, IntegralExp num) =>
        -> IxFun num
        -> IxFun num
 rebase new_base (Direct old_shape)
-  | length old_shape == rank new_base = new_base
-  | otherwise = error "IndexFunction.rebase: bad rank for new base."
+  | old_shape == shape new_base = new_base
+  | otherwise = Reshape new_base $ map DimNew old_shape
 rebase new_base (Permute ixfun perm) =
   permute (rebase new_base ixfun) perm
 rebase new_base (Rotate ixfun offsets) =
