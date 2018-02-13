@@ -80,12 +80,6 @@ module type colourspace = {
 
   -- | Grayness from 0-1.
   val gray: f32 -> colour
-
-  -- | Convert something corresponding to an array of pixels into an
-  -- array of channels in a way suitable for blitting onto (some)
-  -- screens.  This is a bit of an ad-hoc operation, but it lives here
-  -- for now.
-  val to_screen [n][m]: [n][m]colour -> [n][m][3]u8
 }
 
 -- | Given a colour representation, construct a colourspace with all
@@ -174,12 +168,6 @@ module colourspace(C: colour): colourspace with colour = C.colour = {
   let violet: colour = add magenta blue
 
   let gray (d: f32): colour = from_rgba d d d 1f32
-
-  let to_screen [n][m] (css: [n][m]colour): [n][m][3]u8 =
-    map (\cs -> map (\c -> let (r,g,b,_) = to_rgba c
-                           in [u8.f32 (r * 255f32),
-                               u8.f32 (g * 255f32),
-                               u8.f32 (b * 255f32)]) cs) css
 }
 
 -- | An ARGB colour space - simply colourspace applied to argb.
