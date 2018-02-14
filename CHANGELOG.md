@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
    * Futhark will now never automatically pick Apple's CPU device for
      OpenCL, as it is rather broken.  You can still select it
-     manually.
+     manually (#475).
+
+   * Fixes to `set_bit` functions in the math module (#476).
 
 ## [0.3.0]
 
