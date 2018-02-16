@@ -6,7 +6,8 @@ Installation
 There are two ways to install the Futhark compiler: using a
 precompiled tarball or compiling from source.  Both methods are
 discussed below.  If you are using Windows, make sure to read
-:ref:`windows-installation`.
+:ref:`windows-installation`.  If you are using macOS, read
+:ref:`macos-installation`.
 
 Compiling from source
 ---------------------
@@ -18,9 +19,9 @@ documentation about `installing Stack`_ on a multitude of operating
 systems.  If you're lucky, it may even be in your local package
 repository.
 
-We do not presently issue source releases of Futhark, so the only way
-to compile from source is to perform a checkout of our Git
-repository::
+You can either retrieve a `source release tarball
+<https://github.com/diku-dk/futhark/releases>` or perform a checkout
+of our Git repository::
 
   $ git clone https://github.com/diku-dk/futhark.git
 
@@ -75,6 +76,28 @@ we are limited by system availability.
 
 .. _`Haskell tool stack`: http://docs.haskellstack.org/
 .. _`installing Stack`: http://docs.haskellstack.org/#how-to-install
+
+.. _macos-installation:
+
+Installing Futhark on macOS
+---------------------------
+
+Futhark is available on `Homebrew`_, and the latest release can be
+installed via::
+
+  $ brew install futhark
+
+macOS ships with one OpenCL platform and various devices.  One of
+these devices is always the CPU, which is not fully functional, and is
+never picked by Futhark by default.  You can still select it manually
+with the usual mechanisms (see :ref:`executable-options`), but it is
+unlikely to be able to run most Futhark programs.  Depending on the
+system, there may also be one or more GPU devices, and Futhark will
+simply pick the first one as always.  On multi-GPU MacBooks, this is
+is the low-power integrated GPU.  It should work just fine, but you
+might have better performance if you use the dedicated GPU instead.
+
+.. _`Homebrew`: https://brew.sh/
 
 .. _windows-installation:
 
