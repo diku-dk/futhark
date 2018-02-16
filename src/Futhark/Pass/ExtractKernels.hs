@@ -702,6 +702,7 @@ containsNestedParallelism lam =
   not (onlyMaps $ bodyStms $ lambdaBody lam)
   where onlyMaps = all $ isMapOrSeq . stmExp
         isMapOrSeq (Op Map{}) = True
+        isMapOrSeq (Op Scatter{}) = True -- Basically a map.
         isMapOrSeq (DoLoop _ _ _ body) =
           null $ nestedParallelism body
         isMapOrSeq (Op _) = False
