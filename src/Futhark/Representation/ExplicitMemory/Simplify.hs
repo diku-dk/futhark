@@ -6,7 +6,6 @@
 {-# LANGUAGE LambdaCase #-}
 module Futhark.Representation.ExplicitMemory.Simplify
        ( simplifyExplicitMemory
-       , simplifyExplicitMemory'
        , simplifyStms
        )
 where
@@ -46,12 +45,6 @@ simpleInKernel = simplifiable simplifyKernelExp
 simplifyExplicitMemory :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
 simplifyExplicitMemory =
   Simplify.simplifyProg simpleExplicitMemory callKernelRules
-  blockers { Engine.blockHoistBranch = isAlloc }
-
--- FIXME: Only used after memory block reuse.
-simplifyExplicitMemory' :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
-simplifyExplicitMemory' =
-  Simplify.simplifyProg simpleExplicitMemory (ruleBook [] [])
   blockers { Engine.blockHoistBranch = isAlloc }
 
 simplifyStms :: (HasScope ExplicitMemory m, MonadFreshNames m) =>
