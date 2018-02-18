@@ -447,8 +447,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
   let par_stms = postKernelsStms postkernels <>
                  identityStms (outerTarget $ kernelTargets acc')
 
-  if not versionedCode || not (containsNestedParallelism lam)
-    then return par_stms
+  if not versionedCode then return par_stms
     else do
     seq_stms <- do
       soactypes <- asksScope scopeForSOACs
@@ -485,17 +484,17 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
   (outer_suff, outer_suff_stms) <- runBinder $
     sufficientParallelism "suff_outer_par" nest_w
 
-  intra <- flip runReaderT types $
-           localScope (scopeOfLParams (lambdaParams lam)) $
-           intraGroupParallelise loopnest $ lambdaBody lam
+  intra <- if worthIntraGroup lam then
+             flip runReaderT types $ intraGroupParallelise loopnest lam
+           else return Nothing
 
   seq_body <- renameBody $ mkBody seq_stms res
   par_body <- renameBody $ mkBody par_stms res
+  let seq_alts = [(outer_suff, seq_body) | worthSequentialising lam]
 
   case intra of
     Nothing ->
-      (outer_suff_stms<>) <$>
-      kernelAlternatives pat par_body [(outer_suff, seq_body)]
+      (outer_suff_stms<>) <$> kernelAlternatives pat par_body seq_alts
 
     Just (intra_avail_par, group_size, intra_prelude, intra_stms) -> do
       -- We must check that all intra-group parallelism fits in a group.
@@ -509,13 +508,16 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
         fits <- letSubExp "fits" $ BasicOp $
                 CmpOp (CmpSle Int32) group_size max_group_size
         suff <- sufficientParallelism "suff_intra_par" group_available_par
-        letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits suff
+        -- Avoid tiny workgroups.  TODO: this should be a tunable parameter.
+        group_large_enough <- letSubExp "group_large_enough" $
+          BasicOp $ CmpOp (CmpSle Int32) (intConst Int32 32) intra_avail_par
+        intra_suff <- letSubExp "intra_suff" $ BasicOp $ BinOp LogAnd group_large_enough suff
+        letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
 
       group_par_body <- renameBody $ mkBody intra_stms res
 
       ((outer_suff_stms<>intra_suff_stms)<>) <$>
-        kernelAlternatives pat par_body [(outer_suff, seq_body),
-                                         (intra_ok, group_par_body)]
+        kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
 
 data KernelEnv = KernelEnv { kernelNest :: Nestings
                            , kernelScope :: Scope Out.Kernels
@@ -696,11 +698,25 @@ nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
         parallelism (DoLoop _ _ _ body) = nestedParallelism body
         parallelism _ = []
 
-containsNestedParallelism :: Lambda -> Bool
-containsNestedParallelism lam =
-  not (null $ nestedParallelism $ lambdaBody lam) &&
-  not (onlyMaps $ bodyStms $ lambdaBody lam)
-  where onlyMaps = all $ isMapOrSeq . stmExp
+-- | A lambda is worth sequentialising if it contains nested
+-- parallelism of an interesting kind.
+worthSequentialising :: Lambda -> Bool
+worthSequentialising lam = interesting $ lambdaBody lam
+  where interesting body = any (interesting' . stmExp) $ bodyStms body
+        interesting' (Op Map{}) = False
+        interesting' (Op Scatter{}) = False -- Basically a map.
+        interesting' (DoLoop _ _ _ body) = interesting body
+        interesting' (Op _) = True
+        interesting' _ = False
+
+-- | Intra-group parallelism is worthwhile if the lambda contains
+-- non-map nested parallelism, or any nested parallelism inside a
+-- loop.
+worthIntraGroup :: Lambda -> Bool
+worthIntraGroup lam = interesting $ lambdaBody lam
+  where interesting body = not (null $ nestedParallelism body) &&
+                           not (onlyMaps $ bodyStms body)
+        onlyMaps = all $ isMapOrSeq . stmExp
         isMapOrSeq (Op Map{}) = True
         isMapOrSeq (Op Scatter{}) = True -- Basically a map.
         isMapOrSeq (DoLoop _ _ _ body) =
@@ -718,7 +734,7 @@ distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
 distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
       addStmToKernel (Let pat (StmAux cs ()) $ mapLoopExp maploop) acc
-  | not versionedCode || not (containsNestedParallelism lam) =
+  | not versionedCode =
       distributeNormally
   | otherwise =
       distributeSingleStm acc (Let pat (StmAux cs ()) $ mapLoopExp maploop) >>= \case
@@ -741,7 +757,7 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
           distribute =<< leavingNesting maploop =<< distribute =<<
           distributeMapBodyStms par_acc (stmsToList lam_bnds)
 
-        (parw_bnds, parw, sequentialised_kernel) <- localScope extra_scope $ do
+        (nestw_bnds, nestw, sequentialised_kernel) <- localScope extra_scope $ do
           sequentialised_map_body <-
             localScope (scopeOfLParams (lambdaParams lam)) $ runBinder_ $
             Kernelise.transformStms lam_bnds
@@ -750,10 +766,11 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
           constructKernel nest' kbody
 
         let outer_pat = loopNestingPattern $ fst nest
-        addKernel =<< (parw_bnds<>) <$>
-          localScope extra_scope (distributeMap' nest' (oneStm sequentialised_kernel)
+        addKernel =<< (nestw_bnds<>) <$>
+          localScope extra_scope (distributeMap' nest'
+                                  (oneStm sequentialised_kernel)
                                   (postKernelsStms distributed_kernels)
-                                  outer_pat parw lam)
+                                  outer_pat nestw lam)
 
         return acc'
       where lam_bnds = bodyStms $ lambdaBody lam

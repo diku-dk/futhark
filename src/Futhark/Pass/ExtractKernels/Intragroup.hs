@@ -30,17 +30,19 @@ import Futhark.Util (chunks)
 -- contain maps, scans or reduction.  In the future, we could probably
 -- do something more clever.  Make sure that the amount of parallelism
 -- to be exploited does not exceed the group size.
-intraGroupParallelise :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                         KernelNest -> Body
+intraGroupParallelise :: (MonadFreshNames m, LocalScope Out.Kernels m) =>
+                         KernelNest -> Lambda
                       -> m (Maybe (SubExp, SubExp,
                                    Out.Stms Out.Kernels, Out.Stms Out.Kernels))
-intraGroupParallelise knest body = runMaybeT $ do
+intraGroupParallelise knest lam = runMaybeT $ do
   (w_stms, w, ispace, inps, rts) <- lift $ flatKernel knest
   let num_groups = w
+      body = lambdaBody lam
 
   ltid <- newVName "ltid"
   let group_variant = S.fromList [ltid]
-  (wss, kbody) <- lift $ intraGroupParalleliseBody (dataDependencies body) group_variant ltid body
+  (wss, kbody) <- lift $ localScope (scopeOfLParams $ lambdaParams lam) $
+                  intraGroupParalleliseBody (dataDependencies body) group_variant ltid body
 
   known_outside <- lift $ M.keys <$> askScope
   unless (all (`elem` known_outside) $ freeIn wss) $
