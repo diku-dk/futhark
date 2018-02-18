@@ -21,9 +21,9 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
 -- | Describes the nth pattern and the statement expression.
-data Exp' = forall lore. Annotations lore => Exp Int (Exp lore)
+data Exp' = forall lore. Annotations lore => Exp Int Int (Exp lore)
 instance Show Exp' where
-  show (Exp _npattern e) = show e
+  show (Exp _nctxpatters _nthvalpattern e) = show e
 
 type Exps = M.Map VName Exp'
 
@@ -57,9 +57,9 @@ lookInKernelBody (KernelBody _ bnds _res) =
 
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
-lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
+lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
   forM_ (zip patvalelems [0..]) $ \(PatElem var _, i) ->
-    tell $ M.singleton var $ Exp i e
+    tell $ M.singleton var $ Exp (length patctxelems) i e
 
   -- Recursive body walk.
   fullWalkExpM walker walker_kernel e

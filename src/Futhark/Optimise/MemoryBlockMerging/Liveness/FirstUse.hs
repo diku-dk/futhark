@@ -180,7 +180,7 @@ createsNewArrayBase e = case e of
   BasicOp Replicate{} -> True
   BasicOp Iota{} -> True
   BasicOp Manifest{} -> True
-  BasicOp ExpMem.Copy{} -> True
+  BasicOp Copy{} -> True
   BasicOp Concat{} -> True
   BasicOp ArrayLit{} -> True
   BasicOp Scratch{} -> True

@@ -13,6 +13,7 @@ import Data.Maybe (maybe, fromMaybe, mapMaybe, isJust)
 import Control.Monad
 import Control.Monad.RWS
 
+import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (
   ExplicitMemory, ExplicitMemorish)
@@ -30,6 +31,7 @@ import Futhark.Optimise.MemoryBlockMerging.Coalescing.Exps
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition2
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition3
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition5
+import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes
 
 
 -- Some of these attributes could be split into separate Coalescing helper
@@ -38,7 +40,11 @@ data Current = Current
   { -- Coalescings state.  Also save offsets and slices in the case that an
     -- optimistic coalescing later becomes part of a chain of coalescings, where
     -- it is offset yet again, and where it should maintain its old relative
-    -- offset.
+    -- offset.  FIXME: This works, but is inefficient in the long run, as we
+    -- need to update it whenever we come across a coalescing that also affects
+    -- previous coalescings.  The directions of the coalescings is inherently
+    -- bottom-up, but our algorithm is top-down.  It should be possible to
+    -- rewrite it.
     curCoalescedIntos :: CoalescedIntos
   , curMemsCoalesced :: MemsCoalesced
   }
@@ -79,6 +85,8 @@ data Context = Context
     -- ^ Safety condition 2.
   , ctxVarsInUseBeforeMem :: M.Map MName Names
     -- ^ Safety condition 5.
+  , ctxCurSnapshot :: Current
+    -- ^ Keep a snapshot (used in 'tryCoalesce' for Concat).
   }
   deriving (Show)
 
@@ -107,7 +115,7 @@ ifExp :: MonadReader Context m =>
 ifExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
-    Just e@(Exp _ If{}) -> Just e
+    Just e@(Exp _ _ If{}) -> Just e
     _ -> Nothing
 
 isIfExp :: MonadReader Context m =>
@@ -121,7 +129,7 @@ isLoopExp :: MonadReader Context m =>
 isLoopExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
-    Just (Exp _ DoLoop{}) -> True
+    Just (Exp _ _ DoLoop{}) -> True
     _ -> False
 
 isReshapeExp :: MonadReader Context m =>
@@ -129,7 +137,7 @@ isReshapeExp :: MonadReader Context m =>
 isReshapeExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
-    Just (Exp _ (BasicOp Reshape{})) -> True
+    Just (Exp _ _ (BasicOp Reshape{})) -> True
     _ -> False
 
 -- Lookup the memory block statically associated with a variable.
@@ -156,7 +164,7 @@ lookupCurrentVarMem :: LoreConstraints lore =>
                        VName -> FindM lore (Maybe VName)
 lookupCurrentVarMem var = do
         -- Current result...
-        mem_cur <- M.lookup var <$> gets curMemsCoalesced
+        mem_cur <- (M.lookup var . curMemsCoalesced) <$> asks ctxCurSnapshot
         -- ... or original result.
         --
         -- This is why we save the variables after creation, not the memory
@@ -197,19 +205,12 @@ recordOptimisticCoalescing src offset ixfun_slices dst dst_memloc bindage = do
 
   modifyCurMemsCoalesced $ M.insert src dst_memloc
 
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "recordOptimisticCoalescing"
-        putStrLn ("dst: " ++ pretty dst ++ "; src: " ++ pretty src)
-        putStrLn ("slices: " ++ show ixfun_slices)
-        putStrLn $ replicate 70 '~'
-  doDebug debug
-
-coreCoalesceFunDef :: FunDef ExplicitMemory -> VarMemMappings MemorySrc
+coreCoalesceFunDef :: MonadFreshNames m =>
+                      FunDef ExplicitMemory -> VarMemMappings MemorySrc
                    -> MemAliases -> VarAliases -> FirstUses -> LastUses
-                   -> ActualVariables -> Names -> FunDef ExplicitMemory
+                   -> ActualVariables -> Names -> m (FunDef ExplicitMemory)
 coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses
-  last_uses actual_vars existentials =
+  last_uses actual_vars existentials = do
   let primexps = findPrimExpsFunDef fundef
       exps = findExpsFunDef fundef
       cond2 = findSafetyCondition2FunDef fundef
@@ -226,22 +227,12 @@ coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses
                         , ctxVarExps = exps
                         , ctxAllocatedBlocksBeforeCreation = cond2
                         , ctxVarsInUseBeforeMem = cond5
+                        , ctxCurSnapshot = emptyCurrent
                         }
       m = unFindM $ lookInBody $ funDefBody fundef
       var_to_mem_res = curMemsCoalesced $ fst $ execRWS m context emptyCurrent
-      fundef' = transformFromVarMemMappings var_to_mem_res fundef
-
-      debug = var_to_mem_res `seq` do
-        putStrLn $ replicate 70 '='
-        putStrLn "coreCoalesceFunDef coalescing results:"
-        forM_ (M.assocs var_to_mem_res) $ \(src, dstmem) ->
-          putStrLn ("Source " ++ pretty src ++ " coalesces into "
-                    ++ pretty (memLocName dstmem) ++ "; ixfun: "
-                    ++ show (memLocIxFun dstmem))
-        putStrLn $ pretty fundef'
-        putStrLn $ replicate 70 '='
-
-  in withDebug debug fundef'
+      sizes = memBlockSizesFunDef fundef
+  transformFromVarMemMappings var_to_mem_res (M.map memSrcName var_to_mem) (M.map fst sizes) (M.map fst sizes) False fundef
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
@@ -261,35 +252,62 @@ lookInStm :: LoreConstraints lore =>
 lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   -- COALESCING-SPECIFIC HANDLING for Copy and Concat.
   case patvalelems of
-    [PatElem dst ExpMem.MemArray{}] ->
+    [PatElem dst ExpMem.MemArray{}] -> do
       -- We create a function and pass it around instead of just applying it to
       -- the memory of the MemBound.  We do this, since any source variables
       -- might have more actual variables with different index functions that
       -- also need to be fixed -- e.g. in the case of reshape, where both the
       -- reshaped array and the original array need to get their index functions
       -- updated.
-      case e of
-        -- Copy.
-        BasicOp (Update dest slice (Var src)) ->
-          let ixfun_slices =
-                  let slice' = map (primExpFromSubExp (IntType Int32) <$>) slice
-                  in [slice']
-              bindage = BindInPlace dest slice
-          in tryCoalesce dst ixfun_slices bindage src zeroOffset
+      --
+      -- We take a snapshot of the current state of the curCoalescedIntos state
+      -- field.  We need this feature to avoid having fewer coalescings just
+      -- because of the placement of the sources.  For example, for
+      --
+      --     let b = ...
+      --     let a = ...
+      --     let c = concat a b
+      --
+      -- the coalescing pass will first coalesce m_a into m_c, which will
+      -- succeed.  Then it will to coalesce m_b into m_c, which will (naively)
+      -- fail because of safety condition 3 arguing that m_c is now in use after
+      -- the creation of 'b' and before its use, since 'a' now uses m_c.
+      --
+      -- (Alternatively, we could do some more general index function analysis
+      -- to check for things that will never overlap in merged memory, but this
+      -- seems easier.)
+      cur_snapshot <- get
+      var_to_mem <- asks ctxVarToMem
+      local (\ctx -> ctx { ctxCurSnapshot = cur_snapshot })
+        $ case e of
+            -- In-place update.
+            BasicOp (Update orig slice (Var src)) ->
+              case M.lookup src var_to_mem of
+                Just _ ->
+                  let ixfun_slices =
+                        let slice' = map (primExpFromSubExp (IntType Int32) <$>) slice
+                        in [slice']
+                      bindage = BindInPlace orig slice
+                  in tryCoalesce dst ixfun_slices bindage src zeroOffset
+                Nothing ->
+                  return ()
 
-        -- Concat.
-        BasicOp (Concat 0 src0 src0s _) -> do
-          let srcs = src0 : src0s
-          shapes <- mapM ((memSrcShape <$>) . lookupVarMem) srcs
-          let getOffsets offset_prev shape =
-                let se = head (shapeDims shape) -- Should work.
-                    len = primExpFromSubExp (IntType Int32) se
-                    offset_new = BinOpExp (Add Int32) offset_prev len
-                in offset_new
-              offsets = init (scanl getOffsets zeroOffset shapes)
-          zipWithM_ (tryCoalesce dst [] BindVar) srcs offsets
+            -- Copy.
+            BasicOp (Copy src) ->
+              tryCoalesce dst [] BindVar src zeroOffset
 
-        _ -> return ()
+            -- Concat.
+            BasicOp (Concat 0 src0 src0s _) -> do
+              let srcs = src0 : src0s
+              shapes <- mapM ((memSrcShape <$>) . lookupVarMem) srcs
+              let getOffsets offset_prev shape =
+                    let se = head (shapeDims shape) -- Should work.
+                        len = primExpFromSubExp (IntType Int32) se
+                        offset_new = offset_prev + len
+                    in offset_new
+                  offsets = init (scanl getOffsets zeroOffset shapes)
+              zipWithM_ (tryCoalesce dst [] BindVar) srcs offsets
+            _ -> return ()
     _ -> return ()
 
 
@@ -302,6 +320,17 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           , walkOnKernelKernelBody = coerce . lookInKernelBody
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
+
+offsetIndexDWIM :: Int -> ExpMem.IxFun -> PrimExp VName -> ExpMem.IxFun
+offsetIndexDWIM n_ignore_initial ixfun offset =
+  fromMaybe (IxFun.offsetIndex ixfun offset) $ case ixfun of
+  IxFun.Index ixfun1 dimindices ->
+    let (dim_first, dim_rest) = L.splitAt n_ignore_initial dimindices
+    in case dim_rest of
+      (DimFix i : dim_rest') ->
+        Just $ IxFun.Index ixfun1 (dim_first ++ DimFix (i + offset) : dim_rest')
+      _ -> Nothing
+  _ -> Nothing
 
 tryCoalesce :: LoreConstraints lore =>
                VName -> [Slice (PrimExp VName)] -> Bindage ->
@@ -316,9 +345,12 @@ tryCoalesce dst ixfun_slices bindage src offset = do
 
   -- From earlier optimistic coalescings.  Remember to also get the coalescings
   -- from the actual variables in e.g. loops.
-  coalesced_intos <- gets curCoalescedIntos
+  coalesced_intos <- curCoalescedIntos <$> asks ctxCurSnapshot
   let (src0s, offset0s, ixfun_slice0ss) =
-        unzip3 $ S.toList $ S.unions $ map (`lookupEmptyable` coalesced_intos) (src : src's)
+        unzip3 $ S.toList $ S.unions
+        $ map (`lookupEmptyable` coalesced_intos) (src : src's)
+
+  var_to_pe <- asks ctxVarPrimExps
 
   let srcs = src's ++ src0s
                 -- The same number of base offsets as in src's.
@@ -329,48 +361,58 @@ tryCoalesce dst ixfun_slices bindage src offset = do
                                     -- This should not be necessary, and maybe it
                                     -- is not (but there were some problems).
                                then zeroOffset
-                               else BinOpExp (Add Int32) offset o0) offset0s
+                               else offset + o0) offset0s
       ixfun_slicess = replicate (length src's) ixfun_slices
                 -- Same as above, kind of.
                 ++ map (\slices0 -> ixfun_slices ++ slices0) ixfun_slice0ss
 
-  var_to_pe <- asks ctxVarPrimExps
   let ixfuns' = zipWith (\offset_local islices ->
-                           let ixfun0 = foldl IxFun.slice (memSrcIxFun mem_dst) islices
-                               ixfun1 = if offset_local == zeroOffset
-                                        then ixfun0 -- Should not be necessary,
+                           let ixfun0 = memSrcIxFun mem_dst
+                               ixfun1 = foldl IxFun.slice ixfun0 islices
+
+                               -- 'ixfun_slices' contain the slices that are the
+                               -- result of a new coalescing, contrary to the
+                               -- slices in 'ixfun_slice0ss' which contain
+                               -- previously registered slices.
+                               -- 'offsetIndexDWIM' handles the case that we
+                               -- want to offset a DimFix if it is the result of
+                               -- a previous coalescing, and not the current
+                               -- one.  We do that by counting the number of
+                               -- 'DimFix'es that originate in the new
+                               -- coalescing, and then ignore those for our
+                               -- heuristic.  This is a hack.
+                               initial_dimfixes = L.takeWhile (isJust . dimFix) (concat ixfun_slices)
+                               ixfun2 = if offset_local == zeroOffset
+                                        then ixfun1 -- Should not be necessary,
                                                     -- but it makes the type
                                                     -- checker happy for now.
-                                        else IxFun.offsetIndex ixfun0 offset_local
-                           in expandIxFun var_to_pe ixfun1
+                                        else offsetIndexDWIM (length initial_dimfixes) ixfun1 offset_local
+                               ixfun3 = expandIxFun var_to_pe ixfun2
+                           in ixfun3
                         ) offsets ixfun_slicess
 
   -- Not everything supported yet.  This dials back the optimisation on areas
   -- where it fails.
   existentials <- asks ctxExistentials
-  let currentlyDisabled src_local offset_local ixfun_slices_local = do
-        -- This case covers the problem described in
-        -- tests/coalescing/wip/loop/loop-0.fut and ixfun-merge-param.fut.
+  let currentlyDisabled src_local = do
+        -- This case covers the problem described in several programs in
+        -- tests/coalescing/wip/loop/ (for programs where it is overly
+        -- conservative) and tests/coalescing/loop/replicate-in-loop.fut (where
+        -- it is absolutely needed to keep the program correct).  It is a
+        -- conservative requirement and could likely be loosened up.
 
         src_local_is_loop <- isLoopExp src_local
 
+        -- if the source contains the result a loop expression, and that result
+        -- is an array with existential memory, don't coalesce.  Since memory
+        -- can be allocated inside loops, coalescing with no further rules might
+        -- end up having the same arrays use memory allocated outside the loop,
+        -- which is not always okay.
         let res = src_local_is_loop
                   && src_local `L.elem` existentials
-                  && (not (L.null ixfun_slices_local)
-                      ||
-                      (offset_local /= zeroOffset))
+        return res
 
-            debug = do
-              putStrLn $ replicate 70 '~'
-              putStrLn "currentlyDisabled:"
-              putStrLn ("var: " ++ pretty src_local)
-              putStrLn ("dst mem: " ++ show mem_dst)
-              putStrLn ("existentials: " ++ show existentials)
-              putStrLn ("ixfun_slices: " ++ show ixfun_slices_local)
-              putStrLn $ replicate 70 '~'
-        withDebug debug $ return res
-
-  safe0 <- (not . or) <$> zipWithM3 currentlyDisabled srcs offsets ixfun_slicess
+  safe0 <- (not . or) <$> mapM currentlyDisabled srcs
 
   -- Safety condition 1 is the same for all eventual previous arrays from srcs
   -- that also need to be coalesced into dst, so we check it here instead of
@@ -393,11 +435,17 @@ tryCoalesce dst ixfun_slices bindage src offset = do
       forM_ (L.zip4 srcs offsets ixfun_slicess ixfuns')
         $ \(src_local, offset_local, ixfun_slices_local, ixfun_local) -> do
         denotes_existential <- S.member src_local <$> asks ctxExistentials
+        is_if <- isIfExp src_local
         dst_memloc <-
-          if denotes_existential
+          if denotes_existential && not is_if
           then do
             -- Only use the new index function.  Keep the existential memory
-            -- block.
+            -- block.  This means we have to make fewer changes to the program.
+            --
+            -- FIXME: However, if we are at an If expression with an existential
+            -- memory block, we ignore it.  This is due to some special handling
+            -- of If in MemoryUpdater, which is again due to branches having
+            -- explicit return types.  This might not be correct.
             mem_src <- lookupVarMem src_local
             return $ MemoryLoc (memSrcName mem_src) ixfun_local
           else
@@ -406,24 +454,6 @@ tryCoalesce dst ixfun_slices bindage src offset = do
         recordOptimisticCoalescing
           src_local offset_local ixfun_slices_local
           dst dst_memloc bindage
-
-  let debug = safe0 `seq` safe1 `seq` ixfun_slices `seq` coalesced_intos `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn ("tryCoalesce: src " ++ pretty src ++ ", dst " ++ pretty dst)
-        putStrLn ("actual vars for src " ++ pretty src ++ ": "
-                  ++ prettySet (S.fromList src's))
-        putStrLn ("safe0: " ++ show safe0)
-        putStrLn ("safe1: " ++ show safe1)
-        putStrLn ("input slices: " ++ show ixfun_slices)
-        putStrLn ("coalesced-intos full: " ++ show coalesced_intos)
-        putStrLn ("coalesced-into vars for " ++ pretty src ++ ": "
-                  ++ prettySet (S.fromList src0s))
-        putStrLn ("all srcs for " ++ pretty src ++ ": " ++ prettySet (S.fromList srcs))
-        putStrLn ("all slices for " ++ pretty src ++ ": " ++ show ixfun_slicess)
-        putStrLn ("all offsets for " ++ pretty src ++ ": " ++ show offsets)
-        putStrLn ("all ixfuns for " ++ pretty src ++ ":\n" ++ L.intercalate "\n" (map show ixfuns'))
-        putStrLn $ replicate 70 '~'
-  withDebug debug $ return ()
 
 canBeCoalesced :: LoreConstraints lore =>
                   VName -> VName -> ExpMem.IxFun -> FindM lore Bool
@@ -439,19 +469,7 @@ canBeCoalesced dst src ixfun = do
   safe_if <- safetyIf src dst
 
   let safe_all = safe2 && safe3 && safe4 && safe5 && safe_if
-
-      debug = safe_all `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn "canBeCoalesced:"
-        putStrLn ("dst: " ++ pretty dst ++ ", src: " ++ pretty src)
-        putStrLn ("mem_dst: " ++ show mem_dst)
-        putStrLn ("mem_src: " ++ show mem_src)
-        putStrLn ("safe (" ++ pretty src ++ "): " ++ L.intercalate ", "
-                  -- Safety condition 1 is true if canBeCoalesced is run.
-                  (map show [True, safe2, safe3, safe4, safe5])
-                  ++ "; safe If: " ++ show safe_if)
-        putStrLn $ replicate 70 '~'
-  withDebug debug $ return safe_all
+  return safe_all
 
 -- Safety conditions for each statement with a Copy or Concat:
 --
@@ -492,15 +510,7 @@ safetyCond1 :: MonadReader Context m =>
 safetyCond1 dst mem_src = do
   last_uses <- lookupEmptyable (FromStm dst) <$> asks ctxLastUses
   let res = S.member (memSrcName mem_src) last_uses
-
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "safetyCond1:"
-        putStrLn ("dst: " ++ pretty dst)
-        putStrLn ("mem src: " ++ show mem_src)
-        putStrLn ("last uses in dst: " ++ prettySet last_uses)
-        putStrLn $ replicate 70 '~'
-  withDebug debug $ return res
+  return res
 
 safetyCond2 :: MonadReader Context m =>
                VName -> MemorySrc -> m Bool
@@ -508,15 +518,7 @@ safetyCond2 src mem_dst = do
   allocs_before_src <- lookupEmptyable src
                        <$> asks ctxAllocatedBlocksBeforeCreation
   let res = S.member (memSrcName mem_dst) allocs_before_src
-
-  let debug = allocs_before_src `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn "safetyCond2:"
-        putStrLn ("mem_dst: " ++ show mem_dst)
-        putStrLn ("src: " ++ pretty src)
-        putStrLn ("allocs before src: " ++ prettySet allocs_before_src)
-        putStrLn $ replicate 70 '~'
-  withDebug debug $ return res
+  return res
 
 safetyCond3 :: LoreConstraints lore =>
                VName -> VName -> MemorySrc -> FindM lore Bool
@@ -525,22 +527,7 @@ safetyCond3 src dst mem_dst = do
   let uses_after_src_vars = S.toList $ getVarUsesBetween fundef src dst
   uses_after_src <- mapM (maybe (return S.empty) withMemAliases
                           <=< lookupCurrentVarMem) uses_after_src_vars
-  let res = not $ S.member (memSrcName mem_dst) (S.unions uses_after_src)
-
-      dbg_vars_causing_mem_use =
-        map fst
-        $ filter (\(_var, mems) -> memSrcName mem_dst `S.member` mems)
-        $ zip uses_after_src_vars uses_after_src
-      debug = uses_after_src `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn "safetyCond3:"
-        putStrLn ("mem_dst: " ++ show mem_dst)
-        putStrLn ("src: " ++ pretty src)
-        putStrLn ("uses after src vars: " ++ prettyList uses_after_src_vars)
-        putStrLn ("uses after src: " ++ prettySet (S.unions uses_after_src))
-        putStrLn ("vars causing mem use: " ++ prettyList dbg_vars_causing_mem_use)
-        putStrLn $ replicate 70 '~'
-  withDebug debug $ return res
+  return $ not $ S.member (memSrcName mem_dst) (S.unions uses_after_src)
 
 safetyCond4 :: MonadReader Context m =>
                VName -> m Bool
@@ -560,14 +547,7 @@ safetyCond4 src = do
   -- coalesce their aliased sources.
   src_aliases <- lookupEmptyable src <$> asks ctxVarAliases
   let res = if_handling || reshape_handling || S.null src_aliases
-
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "safetyCond4:"
-        putStrLn ("src: " ++ pretty src)
-        putStrLn ("src aliases: " ++ prettySet src_aliases)
-        putStrLn $ replicate 70 '~'
-  withDebug debug $ return res
+  return res
 
 safetyCond5 :: MonadReader Context m =>
                MemorySrc -> ExpMem.IxFun -> m Bool
@@ -576,17 +556,7 @@ safetyCond5 mem_src ixfun = do
                            <$> asks ctxVarsInUseBeforeMem
   let used_vars = freeIn ixfun
       res = all (`S.member` in_use_before_mem_src) $ S.toList used_vars
-
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "safetyCond5:"
-        putStrLn ("mem_src: " ++ show mem_src)
-        putStrLn ("ixfun: " ++ show ixfun)
-        putStrLn ("in use before mem_src: " ++ prettySet in_use_before_mem_src)
-        putStrLn ("used vars: " ++ prettySet used_vars)
-        putStrLn ("remaining vars: " ++ prettySet (used_vars `S.difference` in_use_before_mem_src))
-        putStrLn $ replicate 70 '~'
-  withDebug debug $ return res
+  return res
 
 safetyIf :: LoreConstraints lore =>
             VName -> VName -> FindM lore Bool
@@ -595,7 +565,7 @@ safetyIf src dst = do
   -- not just is mem_dst not used after src and before dst, but neither is any
   -- other memory that will be merged after the coalescing.  Normally this is
   -- not an issue, since a coalescing means changing just one memory block --
-  -- but in the case of an If expression, each branches can have its own memory
+  -- but in the case of an If expression, each branch can have its own memory
   -- block, and both of them will try to be coalesced.  This extra test only
   -- applies to the actual memory blocks in the branches, not any existential
   -- memory block in the If, which in any case will be "used" in both branches.
@@ -619,9 +589,9 @@ safetyIf src dst = do
        at_least_one_creation_inside) = case outer of
         -- This is the if expression of which we are currently looking at one of
         -- its branch results.
-        [Exp npat (If _ body0 body1 _)] ->
+        [Exp nctx nthpat (If _ body0 body1 _)] ->
           let results_from_outer = S.fromList $ mapMaybe fromVar
-                                   $ concatMap bodyResult
+                                   $ concatMap (drop nctx . bodyResult)
                                    $ filter (null . bodyStms) [body0, body1]
 
               resultCreatedInside body se = fromMaybe False $ do
@@ -633,8 +603,8 @@ safetyIf src dst = do
                                       body_vars
                 return $ S.member res_mem body_first_uses
 
-              at_least = resultCreatedInside body0 (bodyResult body0 !! npat)
-                         || resultCreatedInside body1 (bodyResult body1 !! npat)
+              at_least = resultCreatedInside body0 (bodyResult body0 !! (nctx + nthpat))
+                         || resultCreatedInside body1 (bodyResult body1 !! (nctx + nthpat))
           in (True, results_from_outer, at_least)
         _ -> (False, S.empty, False)
 
@@ -671,20 +641,4 @@ safetyIf src dst = do
 
   -- The full result.
   let res = res_general && res_current
-
-  let debug = res `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn "safeIf:"
-        putStrLn ("src: " ++ pretty src)
-        putStrLn ("actual_srcs: " ++ prettySet (S.fromList actual_srcs))
-        putStrLn ("reverse actual_srcs: " ++ prettySet (S.fromList reverse_actual_srcs))
-        putStrLn ("outer: " ++ show outer)
-        putStrLn ("if branch results from outer: "
-                  ++ prettySet if_branch_results_from_outer)
-        putStrLn ("at least one creation inside: "
-                  ++ show at_least_one_creation_inside)
-        putStrLn ("if handling: " ++ show if_handling
-                  ++ " (is in if: " ++ show is_in_if ++ ")")
-        putStrLn ("res safe: " ++ show res)
-        putStrLn $ replicate 70 '~'
-  withDebug debug $ return res
+  return res
