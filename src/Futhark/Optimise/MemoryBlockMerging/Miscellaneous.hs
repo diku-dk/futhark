@@ -10,9 +10,7 @@ import qualified Data.List as L
 import Control.Monad
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Function (on)
-import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
-import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
        (ExplicitMemory, InKernel)
@@ -21,32 +19,11 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Kernels.KernelExp
 import Futhark.Representation.Aliases
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Util (isEnvVarSet)
 import Futhark.Util.Pretty (Pretty)
 
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Optimise.MemoryBlockMerging.Types
 
-
-usesDebugging :: Bool
-usesDebugging = isEnvVarSet "FUTHARK_DEBUG" False &&
-                not (isEnvVarSet "MEMORY_BLOCK_MERGING_OVERVIEW_PRINT" False)
-
-usesDebuggingJSON :: Bool
-usesDebuggingJSON = isEnvVarSet "FUTHARK_DEBUG_JSON" False
-
-withDebug :: IO () -> a -> a
-withDebug debug x
-  | usesDebugging = unsafePerformIO debug `seq` x
-  | otherwise = x
-
-doDebug :: Monad m => IO () -> m ()
-doDebug debug = withDebug debug $ return ()
-
-withDebugJSON :: IO () -> a -> a
-withDebugJSON debug x
-  | usesDebuggingJSON = unsafePerformIO debug `seq` x
-  | otherwise = x
 
 -- If a property is commutative in a map, build a map that reflects it.  A bit
 -- crude.  We could also just use a function that calculates this whenever
@@ -104,10 +81,9 @@ prettyList = L.intercalate ", " . map pretty
 lookupEmptyable :: (Ord a, Monoid b) => a -> M.Map a b -> b
 lookupEmptyable x m = fromMaybe mempty $ M.lookup x m
 
--- Works for now.
 fromJust :: String -> Maybe a -> a
 fromJust _ (Just x) = x
-fromJust mistake Nothing = error mistake
+fromJust mistake Nothing = error ("error: " ++ mistake)
 
 maybeFromBoolM :: Monad m => (a -> m Bool) -> (a -> m (Maybe a))
 maybeFromBoolM f a = do
@@ -199,15 +175,6 @@ filterSetM f xs = S.fromList <$> filterM f (S.toList xs)
 zipWithM3 :: Monad m => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
 zipWithM3 f as bs cs = sequence $ zipWith3 f as bs cs
 
--- Pretty bad.
-intraproceduralTransformationWithLog ::
-  MonadFreshNames m =>
-  (FunDef ExplicitMemory -> m (FunDef ExplicitMemory, Log)) ->
-  Prog ExplicitMemory -> m (Prog ExplicitMemory, Log)
-intraproceduralTransformationWithLog f (Prog fundefs) = do
-  (fundefs', logs) <- unzip <$> mapM f fundefs
-  return (Prog fundefs', mconcat logs)
-
 -- Map on both ExplicitMemory and InKernel.
 class FullMap lore where
   fullMapExpM :: Monad m => Mapper lore lore m -> KernelMapper InKernel InKernel m
@@ -250,7 +217,7 @@ class FullWalk lore where
   fullWalkExpM :: Monad m => Walker lore m -> KernelWalker InKernel m
                -> Exp lore -> m ()
 
--- This can maybe be integrated into the above typeclass.
+-- FIXME: This can maybe be integrated into the above typeclass.
 class FullWalkAliases lore where
   fullWalkAliasesExpM :: Monad m => Walker (Aliases lore) m
                       -> KernelWalker (Aliases InKernel) m

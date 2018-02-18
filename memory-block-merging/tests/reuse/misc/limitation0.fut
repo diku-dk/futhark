@@ -25,10 +25,10 @@
 --   xs1 cannot use anything
 
 let interfering_map [n] (k: i32) (t: [n]i32): [n]i32 =
-  map (\i -> t[n - i - 1] + k) [0..<n]
+  map (\i -> t[n - i - 1] + k) (0..<n)
 
 let interfering_map2 [n] (k: i32) (t: [n]i32) (u: [n]i32): [n]i32 =
-  map (\i -> t[n - i - 1] + u[n - i - 1] + k) [0..<n]
+  map (\i -> t[n - i - 1] + u[n - i - 1] + k) (0..<n)
 
 let main [n] (ns: [n]i32): [n]i32 =
   let k0 = 1

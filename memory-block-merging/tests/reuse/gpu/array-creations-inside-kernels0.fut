@@ -7,9 +7,7 @@
 -- The large number of allocations is due to many small kernel-supporting memory
 -- blocks.  It might change if the compiler changes.  This is also the case with
 -- the other tests in this directory.
--- ==
--- structure gpu { Alloc 20 }
-
+--
 -- If compiled with the GPU pipeline, this program will end up with these two
 -- array creations inside the same kernel:
 --
@@ -44,7 +42,7 @@
 
 let main (m: i32, n: i32, o: i32): [o][m]f32 =
   let membership = map (% o) (iota n)
-  let values = map (\i -> map f32 (map (^ i) (iota m))) (iota n) in
+  let values = map (\i -> map f32.i32 (map (^ i) (iota m))) (iota n) in
 
   let f [o] [m]
     (acc: *[o][m]f32)

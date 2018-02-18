@@ -11,7 +11,7 @@
 
 let main (n: i32, o: i32): [o]f32 =
   let membership = map (% o) (iota n)
-  let values = map (\i -> f32 (2 ^ i)) (iota n) in
+  let values = map (\i -> f32.i32 (2 ^ i)) (iota n) in
 
   let f [o]
     (acc: *[o]f32)

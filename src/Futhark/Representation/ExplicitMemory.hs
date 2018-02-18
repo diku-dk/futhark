@@ -78,6 +78,7 @@ module Futhark.Representation.ExplicitMemory
        , lookupArraySummary
        , fullyLinear
        , ixFunMatchesInnerShape
+       , existentialiseIxFun
 
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
