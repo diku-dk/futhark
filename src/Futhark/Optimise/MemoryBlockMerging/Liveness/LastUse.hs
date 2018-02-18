@@ -124,16 +124,6 @@ setOptimistic mem x_lu exclude = do
     let is_indirect = mem' /= mem
     modifyCurOptimisticLastUses $ M.insert mem' (x_lu, is_indirect)
 
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "setOptimistic:"
-        putStrLn $ pretty mem
-        print x_lu
-        putStrLn ("exclude: " ++ prettySet exclude)
-        putStrLn $ prettySet mems
-        putStrLn $ replicate 70 '~'
-  doDebug debug
-
 -- If an optimistic last use 'mem' was added through a memory alias, forget
 -- about it.
 removeIndirectOptimistic :: MName -> FindM lore ()
@@ -149,15 +139,7 @@ commitOptimistic :: MName -> FindM lore ()
 commitOptimistic mem = do
   res <- M.lookup mem <$> gets curOptimisticLastUses
   case res of
-    Just (x_lu, _) -> do
-      let debug = do
-            putStrLn $ replicate 70 '~'
-            putStrLn "commitOptimistic:"
-            putStrLn $ pretty mem
-            print x_lu
-            putStrLn $ replicate 70 '~'
-
-      withDebug debug $ recordMapping x_lu mem
+    Just (x_lu, _) -> recordMapping x_lu mem
     Nothing -> return ()
 
 lookInFunDefFParam :: LoreConstraints lore =>
@@ -203,7 +185,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
       _ -> return ()
 
   -- Then find the new memory blocks.
-  let e_free_vars = freeInExp e
+  let e_free_vars = freeInExp e `S.difference` S.fromList (freeExcludes e)
   e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
 
   mem_aliases <- asks ctxMemAliases
@@ -218,11 +200,14 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
       -- so we only set the last use of a memory to this statement if it also
       -- has its first use inside the current body.
       --
-      -- If it does have its first use outside the body, we remove any existing
-      -- optimistic last use, although only if such an optimistic last use was
-      -- added as a side effect of adding an existential optimistic last use
-      -- (i.e. it was aliased by the existential memory which had a last use).
-      if mem `S.member` first_uses_outer
+      -- If it (or any aliased memory) does have its first use outside the body,
+      -- we remove any existing optimistic last use, although only if such an
+      -- optimistic last use was added as a side effect of adding an existential
+      -- optimistic last use (i.e. it was aliased by the existential memory
+      -- which had a last use).
+      let from_outer = any (`S.member` first_uses_outer)
+                       (mem : S.toList (lookupEmptyable mem mem_aliases))
+      if from_outer
         then removeIndirectOptimistic mem
         else setOptimistic mem (FromStm x) S.empty
 
@@ -241,7 +226,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         -- be necessary, since we would be outside the body by then, and it
         -- would result in a too conservative analysis.  As an example, see
         -- tests/mix/loop-interference-use.fut.
-        when (mem `S.member` first_uses_outer) $ do
+        when from_outer $ do
           -- If the memory has its first use outside the current body, we need
           -- to find its actual last use (if it occurs in the body) through
           -- memory aliases.
@@ -256,19 +241,9 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
             setOptimistic mem' (FromStm x) exclude
         else
         -- Just set the last use.
-        setOptimistic mem (FromStm x) S.empty
+        unless from_outer $ setOptimistic mem (FromStm x) S.empty
 
-  cur_optis <- gets curOptimisticLastUses
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "LastUse lookInStm:"
-        putStrLn ("stm: " ++ show patvalelems)
-        putStrLn ("first uses outer: " ++ prettySet first_uses_outer)
-        putStrLn ("e mems: " ++ prettySet e_mems)
-        putStrLn ("cur optimistics: " ++ show cur_optis)
-        putStrLn $ replicate 70 '~'
-
-  withDebug debug $ withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
+  withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody }
         walker_kernel = identityKernelWalker
@@ -293,3 +268,22 @@ lookInRes (Var v) = do
       Nothing ->
         return ()
 lookInRes _ = return ()
+
+-- Some freeInExp results are too limiting and give us too conservative last use
+-- results (especially in the CPU pipeline).  We only care about a free variable
+-- if we *read* from it.  If it only exists for *writing*, then we don't have to
+-- look at its memory, since whatever is there we overwrite, and so there cannot
+-- be any last *use*.
+freeExcludes :: LoreConstraints lore =>
+                Exp lore -> [VName]
+freeExcludes e = case e of
+  DoLoop _ _mergevalparams _ _ ->
+    -- FIXME: If the returned memory block-associated mergevalparams do not come
+    -- directly from a Scratch creation, we should be able to ignore them and
+    -- thereby become less conservative.
+    []
+
+  BasicOp (Update orig _ _) ->
+    [orig]
+
+  _ -> []

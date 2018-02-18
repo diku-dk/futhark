@@ -6,4 +6,4 @@
 -- structure gpu { Alloc 1 }
 
 let main (xs: *[]i32): []i64 =
-  map i64 xs
+  map i64.i32 xs
