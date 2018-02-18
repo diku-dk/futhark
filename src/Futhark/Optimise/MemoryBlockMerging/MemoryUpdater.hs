@@ -272,10 +272,6 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
                            ) ([], length patctxelems, [], patctxelems_new, []) rets_branch_returns
       modifyMemSizeMapping (++ patmem_to_new_size)
       let (th_ext_new, el_ext_new) = unzip body_ext_new
-          patmem_size_to_new_size = mapMaybe (\(mem, new) -> do
-                                                 cur <- mem_size mem
-                                                 return ((mem, cur), new))
-                                    patmem_to_new_size
           body_then'' = body_then' { bodyResult =
                                        take (length patctxelems) (bodyResult body_then') ++
                                        map Var th_ext_new ++
