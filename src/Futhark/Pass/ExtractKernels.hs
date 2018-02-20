@@ -289,7 +289,7 @@ transformStm (Let pat (StmAux cs _) (Op (Scanomap w lam1 lam2 nes arrs)))
 transformStm (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs)))
   | not $ lambdaContainsParallelism lam2 = paralleliseOuter
 
-  | versionedCode = do
+  | incrementalFlattening = do
       outer_stms <- outerParallelBody
       inner_stms <- innerParallelBody
 
@@ -447,7 +447,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
   let par_stms = postKernelsStms postkernels <>
                  identityStms (outerTarget $ kernelTargets acc')
 
-  if not versionedCode then return par_stms
+  if not incrementalFlattening then return par_stms
     else do
     seq_stms <- do
       soactypes <- asksScope scopeForSOACs
@@ -726,15 +726,15 @@ worthIntraGroup lam = interesting $ lambdaBody lam
 
 -- Enable if you want the cool new versioned code.  Beware: may be
 -- slower in practice.  Caveat emptor (and you are the emptor).
-versionedCode :: Bool
-versionedCode = isJust $ lookup "FUTHARK_VERSIONED_CODE" unixEnvironment
+incrementalFlattening :: Bool
+incrementalFlattening = isJust $ lookup "FUTHARK_INCREMENTAL_FLATTENING" unixEnvironment
 
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
 distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
       addStmToKernel (Let pat (StmAux cs ()) $ mapLoopExp maploop) acc
-  | not versionedCode =
+  | not incrementalFlattening =
       distributeNormally
   | otherwise =
       distributeSingleStm acc (Let pat (StmAux cs ()) $ mapLoopExp maploop) >>= \case
@@ -931,7 +931,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scanomap w lam fold_lam nes a
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Redomap w comm lam foldlam nes arrs))) acc | versionedCode =
+maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Redomap w comm lam foldlam nes arrs))) acc | incrementalFlattening =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
