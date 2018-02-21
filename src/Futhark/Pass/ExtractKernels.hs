@@ -357,37 +357,56 @@ transformStm (Let pat (StmAux cs _) (Op (Stream w (Parallel _ _ _ []) map_fun ar
   transformStms =<<
     (stmsToList . snd <$> runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types)
 
-transformStm (Let pat aux (Op (Stream w (Parallel _o comm red_fun nes) fold_fun arrs)))
-  | any (not . primType) $ lambdaReturnType red_fun = do
-  -- Split into a chunked map and a reduction, with the latter
-  -- distributed.
+transformStm (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs)))
+  | incrementalFlattening = do
+      outer_stms <- outerParallelBody
+      inner_stms <- innerParallelBody
 
-  fold_fun_sequential <- Kernelise.transformLambda fold_fun
+      (outer_suff, suff_stms) <-
+        runBinder $ sufficientParallelism "suff_outer_stream" w
+      (suff_stms<>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
 
-  let (red_pat_elems, concat_pat_elems) =
-        splitAt (length nes) $ patternValueElements pat
-      red_pat = Pattern [] red_pat_elems
-      concat_pat = Pattern [] concat_pat_elems
+  | otherwise = paralleliseOuter
 
-  (map_bnd, map_misc_bnds) <- blockedMap concat_pat w InOrder fold_fun_sequential nes arrs
-  let num_threads = arraysSize 0 $ patternTypes $ stmPattern map_bnd
-      red_input = zip nes $ patternNames $ stmPattern map_bnd
+  where
+    paralleliseOuter
+      | any (not . primType) $ lambdaReturnType red_fun = do
+          -- Split into a chunked map and a reduction, with the latter
+          -- further transformed.
+          fold_fun_sequential <- Kernelise.transformLambda fold_fun
 
-  ((map_misc_bnds<>oneStm map_bnd)<>) <$>
-    inScopeOf (map_misc_bnds<>oneStm map_bnd)
-    (transformStm $ Let red_pat aux $
-     Op (Reduce num_threads comm' red_fun red_input))
-    where comm' | commutativeLambda red_fun = Commutative
-                | otherwise                 = comm
+          let (red_pat_elems, concat_pat_elems) =
+                splitAt (length nes) $ patternValueElements pat
+              red_pat = Pattern [] red_pat_elems
+              concat_pat = Pattern [] concat_pat_elems
 
+          (map_bnd, map_misc_bnds) <- blockedMap concat_pat w InOrder fold_fun_sequential nes arrs
+          let num_threads = arraysSize 0 $ patternTypes $ stmPattern map_bnd
+              red_input = zip nes $ patternNames $ stmPattern map_bnd
 
-transformStm (Let pat _ (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs))) = do
-  -- Generate a kernel immediately.
-  red_fun_sequential <- Kernelise.transformLambda red_fun
-  fold_fun_sequential <- Kernelise.transformLambda fold_fun
-  blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential [] nes arrs
-  where comm' | commutativeLambda red_fun, o /= InOrder = Commutative
-              | otherwise                               = comm
+          ((map_misc_bnds<>oneStm map_bnd)<>) <$>
+            inScopeOf (map_misc_bnds<>oneStm map_bnd)
+            (transformStm $ Let red_pat aux $
+             Op (Reduce num_threads comm' red_fun red_input))
+
+      | otherwise = do
+          red_fun_sequential <- Kernelise.transformLambda red_fun
+          fold_fun_sequential <- Kernelise.transformLambda fold_fun
+          fmap (certify cs) <$>
+            blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential [] nes arrs
+
+    outerParallelBody = renameBody =<<
+                        (mkBody <$> paralleliseOuter <*> pure (map Var (patternNames pat)))
+
+    paralleliseInner = do
+      types <- asksScope scopeForSOACs
+      transformStms . fmap (certify cs) =<<
+        (stmsToList . snd <$> runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types)
+    innerParallelBody = renameBody =<<
+                        (mkBody <$> paralleliseInner <*> pure (map Var (patternNames pat)))
+
+    comm' | commutativeLambda red_fun, o /= InOrder = Commutative
+          | otherwise                               = comm
 
 transformStm (Let pat _ (Op (Stream w (Sequential nes) fold_fun arrs))) = do
   -- Remove the stream and leave the body parallel.  It will be
