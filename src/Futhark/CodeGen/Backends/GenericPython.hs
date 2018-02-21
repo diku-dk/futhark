@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, LambdaCase #-}
+-- | A generic Python code generator which is polymorphic in the type
+-- of the operations.  Concretely, we use this to handle both
+-- sequential and PyOpenCL Python code.
 module Futhark.CodeGen.Backends.GenericPython
   ( compileProg
   , Constructor (..)
@@ -503,7 +506,7 @@ readFun (IntType Int16) Imp.TypeDirect   = "read_i16"
 readFun (IntType Int32) Imp.TypeDirect   = "read_i32"
 readFun (IntType Int64) Imp.TypeDirect   = "read_i64"
 readFun Imp.Bool _      = "read_bool"
-readFun Cert _          = error "Cert is never used. ReaderElem doesn't handle this"
+readFun Cert _          = error "readFun: cert"
 
 -- The value returned will be used when reading binary arrays, to indicate what
 -- the expected type is
@@ -519,7 +522,7 @@ readTypeEnum (IntType Int64) Imp.TypeDirect   = "FUTHARK_INT64"
 readTypeEnum (FloatType Float32) _ = "FUTHARK_FLOAT32"
 readTypeEnum (FloatType Float64) _ = "FUTHARK_FLOAT64"
 readTypeEnum Imp.Bool _ = "FUTHARK_BOOL"
-readTypeEnum Cert _ = error "Cert is never used. readTypeEnum doesn't handle this"
+readTypeEnum Cert _ = error "readTypeEnum: cert"
 
 readInput :: Imp.ExternalValue -> PyStmt
 readInput (Imp.OpaqueValue desc _) =
@@ -749,6 +752,7 @@ compileBinOpLike x y = do
   let simple s = return $ BinOp s x' y'
   return (x', y', simple)
 
+-- | The ctypes type corresponding to a 'PrimType'.
 compilePrimType :: PrimType -> String
 compilePrimType t =
   case t of
@@ -761,6 +765,7 @@ compilePrimType t =
     Imp.Bool -> "ct.c_bool"
     Cert -> "ct.c_bool"
 
+-- | The ctypes type corresponding to a 'PrimType', taking sign into account.
 compilePrimTypeExt :: PrimType -> Imp.Signedness -> String
 compilePrimTypeExt t ept =
   case (t, ept) of
@@ -777,6 +782,7 @@ compilePrimTypeExt t ept =
     (Imp.Bool, _) -> "ct.c_bool"
     (Cert, _) -> "ct.c_byte"
 
+-- | The Numpy type corresponding to a 'PrimType'.
 compilePrimToNp :: Imp.PrimType -> String
 compilePrimToNp bt =
   case bt of
@@ -789,6 +795,7 @@ compilePrimToNp bt =
     Imp.Bool -> "np.byte"
     Cert -> "np.byte"
 
+-- | The Numpy type corresponding to a 'PrimType', taking sign into account.
 compilePrimToExtNp :: Imp.PrimType -> Imp.Signedness -> String
 compilePrimToExtNp bt ept =
   case (bt,ept) of
