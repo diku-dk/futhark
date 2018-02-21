@@ -754,16 +754,7 @@ compileBinOpLike x y = do
 
 -- | The ctypes type corresponding to a 'PrimType'.
 compilePrimType :: PrimType -> String
-compilePrimType t =
-  case t of
-    IntType Int8 -> "ct.c_int8"
-    IntType Int16 -> "ct.c_int16"
-    IntType Int32 -> "ct.c_int32"
-    IntType Int64 -> "ct.c_int64"
-    FloatType Float32 -> "ct.c_float"
-    FloatType Float64 -> "ct.c_double"
-    Imp.Bool -> "ct.c_bool"
-    Cert -> "ct.c_bool"
+compilePrimType t = compilePrimTypeExt t Imp.TypeDirect
 
 -- | The ctypes type corresponding to a 'PrimType', taking sign into account.
 compilePrimTypeExt :: PrimType -> Imp.Signedness -> String
@@ -784,16 +775,7 @@ compilePrimTypeExt t ept =
 
 -- | The Numpy type corresponding to a 'PrimType'.
 compilePrimToNp :: Imp.PrimType -> String
-compilePrimToNp bt =
-  case bt of
-    IntType Int8 -> "np.int8"
-    IntType Int16 -> "np.int16"
-    IntType Int32 -> "np.int32"
-    IntType Int64 -> "np.int64"
-    FloatType Float32 -> "np.float32"
-    FloatType Float64 -> "np.float64"
-    Imp.Bool -> "np.byte"
-    Cert -> "np.byte"
+compilePrimToNp bt = compilePrimToExtNp bt Imp.TypeDirect
 
 -- | The Numpy type corresponding to a 'PrimType', taking sign into account.
 compilePrimToExtNp :: Imp.PrimType -> Imp.Signedness -> String
