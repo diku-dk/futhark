@@ -217,27 +217,9 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
       potential_kernel_interferences <- findKernelDataRaceInterferences e
       onJust potential_kernel_interferences addPotentialKernelInterferenceGroup
 
-      current <- gets curAlive
       forM_ patvalelems $ \(PatElem var _) -> do
         last_uses_var <- lookupEmptyable (FromStm var) <$> asks ctxLastUses
         mapM_ kill last_uses_var
-
-      let debug = do
-            putStrLn $ replicate 70 '~'
-            putStrLn "Interference lookInStm:"
-            print stm
-            putStrLn ("current live: " ++ prettySet current)
-            putStrLn ("stm mems: " ++ prettySet stm_mems)
-            unless (L.null stm_exceptions)
-              $ putStrLn ("exceptions: " ++ show stm_exceptions)
-            putStrLn "interferences': "
-            forM_ (M.assocs $ getInterferencesMap stm_interferences') $ \(v, ns) ->
-              putStrLn ("  " ++ pretty v ++ ": " ++ prettySet ns)
-            onJust potential_kernel_interferences $ \is ->
-              unless (L.null is) $ putStrLn ("potential kernel interferences: " ++
-                                             show potential_kernel_interferences)
-            putStrLn $ replicate 70 '~'
-      doDebug debug
 
         where walker = identityWalker
                 { walkOnBody = lookInBody }
@@ -254,7 +236,7 @@ findLoopCorrespondingVar :: LoreConstraints lore =>
 findLoopCorrespondingVar ctx (Let (Pattern _patctxelems patvalelems) _
                          (DoLoop _ _ _ (Body _ stms res))) =
   M.fromList $ catMaybes $ zipWith findIt patvalelems res
-  where findIt (PatElem pat_v (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn pat_mem _))) (Var _)
+  where findIt (PatElem pat_v (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn pat_mem _))) (Var res_v)
           | not (null stms) = case L.last $ stmsToList stms of
               -- This is how the program looks after coalescing.
               Let (Pattern _ [PatElem _last_v
@@ -265,7 +247,7 @@ findLoopCorrespondingVar ctx (Let (Pattern _patctxelems patvalelems) _
                            if (memSrcName <$> M.lookup copy_v (ctxVarToMem ctx))
                               == Just last_stm_mem
                            then Just copy_v
-                           else Nothing
+                           else Just res_v
                      in res_v' >>= \t -> Just (t, (pat_v, slice_part))
                 -- Fix this mess.
                 else Nothing
@@ -438,19 +420,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
                          mapMaybe ((memSrcName <$>) . (`M.lookup` ctxVarToMem ctx))
                          (S.toList frees)
 
-                     debug0 = do
-                       putStrLn $ replicate 70 '~'
-                       putStrLn "interferenceExceptions check:"
-                       putStrLn ("v: " ++ pretty v)
-                       putStrLn ("mem: " ++ pretty (memSrcName mem))
-                       putStrLn ("typ: " ++ show typ)
-                       putStrLn "***"
-                       putStrLn ("stm exp: " ++ show e_pat)
-                       putStrLn ("frees: " ++ prettySet frees)
-                       putStrLn ("result: " ++ show b)
-                       putStrLn $ replicate 70 '~'
-
-                 in withDebug debug0 b
+                 in b
                check' (Let _ _ e) = check e
            in (\stm -> (FromStm $ patElemName $ head $ patternValueElements $ stmPattern stm,
                         S.singleton $ memSrcName mem)) <$>
@@ -506,30 +476,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
       exceptions = snd $ evalRWS (findExceptions fus fus_result lus
                                   mem_ins mem_outs mem_slices mem_ixfuns
                                   mem_primtypes output_vars) () S.empty
-
-      debug = lus_input_vars `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn "interferenceExceptions:"
-        unless (L.null stms)
-          $ putStrLn ("first stm: " ++ show (head $ stmsToList stms))
-        putStrLn ("indices: " ++ show indices)
-        putStrLn ("output vars: " ++ show output_vars)
-        putStrLn ("mem ins': " ++ prettySet mem_ins)
-        putStrLn ("mem outs': " ++ prettySet mem_outs)
-        putStrLn ("fromreads: " ++ show fromreads)
-        putStrLn ("first uses input vars: " ++ show fus_input_vars)
-        putStrLn ("first uses output vars: " ++ show fus_output_vars)
-        putStrLn ("last uses input vars: " ++ show lus_input_vars)
-        putStrLn ("first uses total: " ++ show fus)
-        putStrLn ("last uses total: " ++ show lus)
-        putStrLn ("mem slices: " ++ show mem_slices)
-        putStrLn ("mem ixfuns: " ++ show mem_ixfuns)
-        putStrLn ("mem primtypes: " ++ show mem_primtypes)
-        putStrLn ("ctxLoopCorrespondingVar: " ++ show (ctxLoopCorrespondingVar ctx))
-        unless (L.null exceptions)
-          $ putStrLn ("interference exception result: " ++ show exceptions)
-        putStrLn $ replicate 70 '~'
-  in withDebug debug exceptions
+  in exceptions
 
   where findExceptions :: FirstUses -> FirstUses -> LastUses -> Names -> Names ->
                           M.Map VName (Slice SubExp) -> M.Map VName ExpMem.IxFun ->
@@ -560,16 +507,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
             ixfun_killed <- M.lookup mem_killed mem_ixfuns
             pt_fu <- M.lookup mem_fu mem_primtypes
             pt_killed <- M.lookup mem_killed mem_primtypes
-
-            let debug = do
-                  putStrLn $ replicate 70 '~'
-                  putStrLn "recordNewExceptions:"
-                  putStrLn ("slice first use: " ++ pretty slice_fu)
-                  putStrLn ("slice killed: " ++ pretty slice_killed)
-                  putStrLn ("ixfun first use: " ++ pretty ixfun_fu)
-                  putStrLn ("ixfun killed: " ++ pretty ixfun_killed)
-                  putStrLn $ replicate 70 '~'
-            withDebug debug $ return $ when
+            return $ when
               ( -- Is the killed memory read from and the first use memory
                 -- written to?
                 mem_fu `S.member` mem_outs && mem_killed `S.member` mem_ins &&

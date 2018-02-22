@@ -15,7 +15,7 @@
 
 import sys
 import os
-import yaml
+import re
 from pygments.lexer import RegexLexer
 from pygments import token
 from sphinx.highlighting import lexers
@@ -59,7 +59,16 @@ copyright = '2013-2017, HIPERFIT'
 # built documents.
 #
 # The short X.Y version.
-version = yaml.load(open('../package.yaml', 'r'))['version']
+
+# No reason for a full YAML parser; let's just hack it.
+def get_version():
+    # Get lines
+    lines = open('../package.yaml', 'r').read().split('\n')
+    # Find version line.
+    version_line = lines[1]
+    return re.search('version: "(.*)"', version_line).group(1)
+
+version = get_version()
 # The full version, including alpha/beta/rc tags.
 release = version
 

@@ -12,7 +12,7 @@
 
 let main [n] (xs0: [n]i32, i: i32): [n]i32 =
   let xs = map (+ 1) xs0
-  let xs_length = (shape xs)[0]
+  let xs_length = length xs
 
   let k = xs[i]
   let ys = replicate xs_length k -- Can be allocated into 'xs'.

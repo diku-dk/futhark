@@ -3,8 +3,8 @@
 --
 -- This should be run *before* the coalescing pass, as it enables more
 -- optimisations.
-module Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationHoisting
-  ( hoistAllocsFunDef
+module Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationMovingUp
+  ( moveUpAllocsFunDef
   ) where
 
 import qualified Data.Set as S
@@ -14,8 +14,7 @@ import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
-import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
-import Futhark.Optimise.MemoryBlockMerging.CrudeHoisting
+import Futhark.Optimise.MemoryBlockMerging.CrudeMovingUp
 
 
 findAllocHoistees :: Body ExplicitMemory -> Maybe [FParam ExplicitMemory]
@@ -68,32 +67,28 @@ findAllocHoistees body params =
         usedByCopyOrConcat xmem_alloc =
           let vs = mapMaybe checkStm stms
               vs' = if null vs then Nothing else Just (xmem_alloc, concat vs)
-
-              debug = do
-                putStrLn $ replicate 70 '~'
-                putStrLn "usedByCopyOrConcat:"
-                putStrLn ("xmem_alloc: " ++ pretty xmem_alloc)
-                putStrLn ("vars: " ++ prettySet (S.fromList vs))
-                putStrLn ("vars': " ++ show vs')
-                putStrLn $ replicate 70 '~'
-
-          in withDebug debug vs'
+          in vs'
 
           where checkStm :: Stm ExplicitMemory -> Maybe [VName]
                 checkStm (Let
                           (Pattern _
                            [PatElem _ (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem_pat _))])
                            _
-                           (BasicOp (Update v slice _)))
+                           (BasicOp bop))
                   | xmem_pat == xmem_alloc =
-                      -- The source array must also be hoisted so that it
-                      -- is initialized before it is used by the
-                      -- coalesced party.  Any index variables are also
-                      -- hoisted.
-                      Just $ v : S.toList (freeIn slice)
+                    case bop of
+                      Update v slice _ ->
+                        -- The source array must also be hoisted so that it
+                        -- is initialized before it is used by the
+                        -- coalesced party.  Any index variables are also
+                        -- hoisted.
+                        Just $ v : S.toList (freeIn slice)
+                      Copy{} -> Just []
+                      Concat{} -> Just []
+                      _ -> Nothing
                 checkStm _ = Nothing
 
-hoistAllocsFunDef :: FunDef ExplicitMemory
+moveUpAllocsFunDef :: FunDef ExplicitMemory
                   -> FunDef ExplicitMemory
-hoistAllocsFunDef fundef =
-  hoistInFunDef fundef findAllocHoistees
+moveUpAllocsFunDef fundef =
+  moveUpInFunDef fundef findAllocHoistees

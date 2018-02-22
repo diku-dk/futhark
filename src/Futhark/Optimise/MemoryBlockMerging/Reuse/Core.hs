@@ -12,7 +12,7 @@ module Futhark.Optimise.MemoryBlockMerging.Reuse.Core
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
-import Data.Maybe (catMaybes, fromMaybe, isJust, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.State
@@ -106,10 +106,9 @@ emptyCurrent = Current { curUses = M.empty
                        , curKernelMaxSizedRes = M.empty
                        }
 
-newtype FindM lore a = FindM { unFindM :: RWS Context Log Current a }
+newtype FindM lore a = FindM { unFindM :: RWS Context () Current a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
-            MonadWriter Log,
             MonadState Current)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
@@ -118,10 +117,6 @@ type LoreConstraints lore = (ExplicitMemorish lore,
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
-
-writeLog :: VName -> String -> String -> FindM lore ()
-writeLog var_at topic content =
-  tell $ Log $ M.singleton var_at [(topic, content)]
 
 -- Lookup the memory block statically associated with a variable.
 lookupVarMem :: MonadReader Context m =>
@@ -151,9 +146,9 @@ lookupSize var =
   <$> asks ctxSizes
 
 lookupSpace :: MonadReader Context m =>
-               VName -> m Space
-lookupSpace var =
-  (snd . fromJust ("lookup space from " ++ pretty var) . M.lookup var)
+               MName -> m Space
+lookupSpace mem =
+  (snd . fromJust ("lookup space from " ++ pretty mem) . M.lookup mem)
   <$> asks ctxSizes
 
 -- Record that the existing old_mem now also "is the same as" new_mem.
@@ -205,7 +200,7 @@ coreReuseFunDef :: MonadFreshNames m =>
                    FunDef ExplicitMemory -> FirstUses ->
                    Interferences -> PotentialKernelDataRaceInterferences ->
                    VarMemMappings MemorySrc -> ActualVariables -> Names ->
-                   m (FunDef ExplicitMemory, Log)
+                   m (FunDef ExplicitMemory)
 coreReuseFunDef fundef first_uses interferences potential_kernel_interferences var_to_mem actual_vars existentials = do
   let sizes = memBlockSizesFunDef fundef
       size_uses = findSizeUsesFunDef fundef
@@ -224,35 +219,12 @@ coreReuseFunDef fundef first_uses interferences potential_kernel_interferences v
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
         lookInBody $ funDefBody fundef
-      (res, proglog) = execRWS m context emptyCurrent
-      fundef' = transformFromVarMemMappings (curVarToMemRes res) fundef
+      (res, ()) = execRWS m context emptyCurrent
+      var_to_mem_res = curVarToMemRes res
+  fundef' <- transformFromVarMemMappings var_to_mem_res (M.map memSrcName var_to_mem) (M.map fst sizes) (M.map fst sizes) False fundef
+  let sizes' = memBlockSizesFunDef fundef'
   fundef'' <- transformFromVarMaxExpMappings (curVarToMaxExpRes res) fundef'
-  fundef''' <- transformFromKernelMaxSizedMappings var_to_pe var_to_mem actual_vars
-               (curKernelMaxSizedRes res) fundef''
-
-  let all_mems = S.fromList $ map memSrcName $ M.elems var_to_mem
-      mems_changed = S.fromList $ map memSrcName
-                     $ mapMaybe (`M.lookup` var_to_mem) $ M.keys $ curVarToMemRes res
-      mems_unchanged = S.difference all_mems mems_changed
-      debug = fundef''' `seq` do
-        putStrLn $ replicate 70 '='
-        putStrLn "coreReuseFunDef reuse results:"
-        forM_ (M.assocs (curVarToMemRes res)) $ \(src, dstmem) ->
-          putStrLn ("Source " ++ pretty src ++ " (old: "
-                    ++ pretty (memSrcName $ fromJust "should exist" $ M.lookup src var_to_mem)
-                    ++ ") reuses " ++ pretty (memLocName dstmem) ++ ";\nixfun: "
-                    ++ pretty (memLocIxFun dstmem))
-        putStrLn ""
-        forM_ (M.assocs (curVarToMaxExpRes res)) $ \(src, maxs) ->
-          putStrLn ("Size of allocation of mem " ++ pretty src ++ " is now maximum of "
-                    ++ prettySet maxs)
-        putStrLn ""
-        putStrLn ("mems changed: " ++ prettySet mems_changed)
-        putStrLn ("mems unchanged: " ++ prettySet mems_unchanged)
-        putStrLn $ pretty fundef'''
-        putStrLn $ replicate 70 '='
-
-  withDebug debug $ return (fundef''', proglog)
+  transformFromKernelMaxSizedMappings var_to_pe var_to_mem (M.map memLocName var_to_mem_res) sizes' actual_vars (curKernelMaxSizedRes res) fundef''
 
 lookInFParam :: LoreConstraints lore =>
                 FParam lore -> FindM lore ()
@@ -304,14 +276,6 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
 
   fullWalkExpM walker walker_kernel e
 
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "Statement."
-        print patvalelems
-        print e
-        putStrLn $ replicate 70 '~'
-
-  withDebug debug $ return ()
   where walker = identityWalker
           { walkOnBody = withLocalUses . lookInBody }
         walker_kernel = identityKernelWalker
@@ -326,6 +290,7 @@ handleNewArray :: LoreConstraints lore =>
                   VName -> MName -> FindM lore ()
 handleNewArray x xmem = do
   interferences <- asks ctxInterferences
+  actual_vars <- lookupActualVars x
 
   let notTheSame :: Monad m => MName -> MNames -> m Bool
       notTheSame kmem _used_mems = return (kmem /= xmem)
@@ -381,21 +346,7 @@ handleNewArray x xmem = do
         -- already been set to use the target memory block.
         let eq_advanced = isJust new_size_pe && new_size_pe `L.elem` ok_sizes_pe
 
-        let debug = do
-              putStrLn $ replicate 70 '~'
-              putStrLn "sizesMatch:"
-              putStrLn ("new: " ++ pretty new_size)
-              forM_ ok_sizes $ \ok_size ->
-                putStrLn (" ok: " ++ pretty ok_size)
-              putStrLn $ replicate 30 '~'
-              putStrLn ("new: " ++ show new_size_pe)
-              forM_ ok_sizes_pe $ \ok_size_pe ->
-                putStrLn (" ok: " ++ show ok_size_pe)
-              putStrLn ("eq asserts: " ++ show eq_asserts)
-              putStrLn ("eq : " ++ show eq_simple ++ " " ++ show eq_advanced)
-              putStrLn $ replicate 70 '~'
-
-        withDebug debug $ return (eq_simple || eq_advanced)
+        return (eq_simple || eq_advanced)
 
   -- In case sizes do not match: Is it possible to change the size of the target
   -- memory block to be a maximum of itself and the new memory block?
@@ -411,14 +362,7 @@ handleNewArray x xmem = do
               return (xsize' `S.member` fromJust ("is recorded for all size variables "
                                                   ++ pretty ksize')
                       (M.lookup ksize' uses_before))
-            debug = do
-              putStrLn $ replicate 70 '~'
-              putStrLn "sizesCanBeMaxed:"
-              putStrLn $ pretty kmem
-              putStrLn $ pretty xmem
-              print ok
-              putStrLn $ replicate 70 '~'
-        withDebug debug $ return ok
+        return ok
 
   let sizesCanBeMaxedKernelArray :: LoreConstraints lore =>
         MName -> MNames ->
@@ -487,7 +431,8 @@ handleNewArray x xmem = do
         kmem_size <- (fromJust "should be a var" . fromVar) <$> lookupSize kmem
 
         return $ case (S.toList used_mems, first_usess) of
-          -- We only support the basic case for now.  FIXME.
+          -- We only support the basic case for now.  FIXME (or, at the very
+          -- least, manage to create a program where this will have an effect).
           --
           -- A used_mems list of size > 1 means that kmem has already been
           -- reused.  This is okay, but a bit harder to keep track of.
@@ -528,27 +473,7 @@ handleNewArray x xmem = do
                                       (xmem_array, xmem_final_dim)))
                         else Nothing
 
-                  debug = res `seq` do
-                    putStrLn $ replicate 70 '~'
-                    putStrLn "sizesCanBeMaxedKernelArray:"
-
-                    putStrLn ("kmem: " ++ pretty kmem)
-                    putStrLn ("kmem array: " ++ pretty kmem_array)
-                    putStrLn ("kmem prim type: " ++ pretty kmem_pt)
-                    putStrLn ("kmem indices start: " ++ show kmem_indices_start)
-                    putStrLn ("kmem final dim: " ++ pretty kmem_final_dim)
-
-                    putStrLn ("xmem: " ++ pretty xmem)
-                    putStrLn ("xmem array: " ++ pretty xmem_array)
-                    putStrLn ("xmem prim type: " ++ pretty xmem_pt)
-                    putStrLn ("xmem indices start: " ++ show xmem_indices_start)
-                    putStrLn ("xmem final dim: " ++ pretty xmem_final_dim)
-
-                    putStrLn ("xmem_final_dim_before_kmem_final_dim: " ++
-                              show xmem_final_dim_before_kmem_final_dim)
-                    putStrLn ("result: " ++ show res)
-                    putStrLn $ replicate 70 '~'
-                in withDebug debug res
+                in res
           _ -> Nothing
 
         where getInfo :: ExpMem.IxFun ->
@@ -578,42 +503,50 @@ handleNewArray x xmem = do
       sizesCanBeMaxedKernelArray' kmem used_mems =
         isJust <$> sizesCanBeMaxedKernelArray kmem used_mems
 
+  let noOtherUsesOfMemory :: LoreConstraints lore =>
+                             MName -> MNames -> FindM lore Bool
+      noOtherUsesOfMemory _kmem _used_mems = do
+        -- If the array in question 'x' is not the only array that uses the
+        -- memory (ignoring aliasing), then do not perform memory reuse.  We
+        -- only want to reuse memory if it means we can remove an allocation.
+        -- FIXME: If we can check that all arrays using the memory in question
+        -- 'xmem' can be set to reuse some other memory, so that 'xmem' does not
+        -- have to be allocated, then this restriction can go away.  It also
+        -- might be the case that the ActualVariables module does not find all
+        -- array connections, i.e. it concludes that two arrays are distinct
+        -- when they are actually not; this can happen with streams.
+        var_to_mem <- asks ctxVarToMem
+        return $ and $ M.elems $ M.mapWithKey (
+          \v m -> (memSrcName m /= xmem)
+                  || (v `L.elem` actual_vars)
+          ) var_to_mem
+
+  let notCurrentlyDisabled :: FindM lore Bool
+      notCurrentlyDisabled = do
+        -- FIXME: We currently disable reusing memory of constant size.  This is
+        -- a problem in the misc/heston/heston32.fut benchmark (but not the
+        -- heston64.fut one).  It would be nice to not have to disable this
+        -- feature, as it works well for the most part.  Why is this a problem?
+        -- Or is it maybe something else that causes heston32 to segfault?
+        new_size <- lookupSize xmem
+        return $ isJust (fromVar new_size)
+
   let sizesWorkOut :: LoreConstraints lore =>
                       MName -> MNames -> FindM lore Bool
       sizesWorkOut kmem used_mems =
         -- The size of an allocation is okay to reuse if it is the same as the
         -- current memory size, or if it can be changed to be the maximum size
         -- of the two sizes.
-        (noneInterfereKernelArray used_mems <&&>
+        (notCurrentlyDisabled <&&> noneInterfereKernelArray used_mems <&&>
          (sizesMatch used_mems <||> sizesCanBeMaxed kmem))
         <||> sizesCanBeMaxedKernelArray' kmem used_mems
 
   let canBeUsed t = and <$> mapM (($ t) . uncurry)
-                    [notTheSame, noneInterfere, sameSpace, sizesWorkOut]
+                    [notTheSame, noneInterfere, sameSpace, noOtherUsesOfMemory,
+                     sizesWorkOut]
   cur_uses <- gets curUses
   found_use <- catMaybes <$> mapM (maybeFromBoolM canBeUsed) (M.assocs cur_uses)
 
-  writeLog x "available for reuse" (prettyList found_use)
-  not_found_use <-
-    mapM (\(k, us) -> do
-             let t (s, f) = do
-                   r <- f k us
-                   return $ if r then [] else [s]
-             us' <- concat <$> mapM t [ ("interference", noneInterfere)
-                                      , ("different space", sameSpace)
-                                      , ("different size variables", \_ um -> sizesMatch um)
-                                      , ("size cannot be maxed", \k1 _ -> sizesCanBeMaxed k1)
-                                      ]
-             return (k, us'))
-    $ M.assocs $ M.filterWithKey (\k _ -> k `notElem` map fst found_use) cur_uses
-
-  zipWithM_ (\(t, ws) i ->
-               writeLog x ("not available for reuse (" ++ show i ++ ")")
-               (pretty t ++ " (failed on: " ++ L.intercalate ", " ws ++ ")"))
-    not_found_use [(1::Int)..]
-  writeLog x "base interferences" (prettySet $ lookupEmptyable xmem interferences)
-
-  actual_vars <- lookupActualVars x
   case found_use of
     (kmem, used_mems) : _ -> do
       -- There is a previous memory block that we can use.  Record the mapping.
@@ -638,30 +571,13 @@ handleNewArray x xmem = do
       -- memory block of another array if its size gets maximised, record this
       -- change.  The actual program transformation will happen later.
       kernel_maxing <- sizesCanBeMaxedKernelArray kmem used_mems
-      onJust kernel_maxing $ \info -> do
-        let debug = do
-              putStrLn $ replicate 70 '~'
-              putStrLn "kernel size maxing result"
-              putStrLn ("info: " ++ show info)
-              putStrLn $ replicate 70 '~'
-        withDebug debug $ recordKernelMaxMapping kmem info
+      onJust kernel_maxing $ \info ->
+        recordKernelMaxMapping kmem info
 
     _ ->
       -- There is no previous memory block available for use.  Record that this
       -- memory block is available.
       insertUse xmem xmem
-
-  let debug = found_use `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn "Handle new array."
-        putStrLn ("var: " ++ pretty x)
-        putStrLn ("actual vars: " ++ prettySet actual_vars)
-        putStrLn ("mem: " ++ pretty xmem)
-        putStrLn ("cur uses: " ++ show cur_uses)
-        putStrLn ("found use: " ++ show found_use)
-        putStrLn $ replicate 70 '~'
-
-  withDebug debug $ return ()
 
 data VarWithLooseEquality = VarWithLooseEquality VName Names
   deriving (Show)
@@ -719,22 +635,12 @@ ixFunHasIndex ixfun = case ixfun of
 -- relative to the beginning of their respective memory blocks?  FIXME: This can
 -- be less conservative, for example by handling that different reshapes of the
 -- same array can describe the same offset and space, but do we have any tests
--- or benchmarks where this occurs?
+-- or benchmarks where that occurs?
 ixFunsCompatible :: (Eq v, Show v) =>
                     (MName, IxFun.IxFun (PrimExp v)) -> (MName, IxFun.IxFun (PrimExp v)) ->
                     Bool
-ixFunsCompatible (mem0, ixfun0) (mem1, ixfun1) =
-  let res = ixFunsCompatibleRaw ixfun0 ixfun1
-
-      debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "ixFunsCompatible:"
-        putStrLn ("ixfun0 " ++ pretty mem0 ++ ": " ++ show ixfun0)
-        putStrLn ("ixfun1 " ++ pretty mem1 ++ ": " ++ show ixfun1)
-        putStrLn "---"
-        putStrLn ("res: " ++ show res)
-        putStrLn $ replicate 70 '~'
-  in withDebug debug res
+ixFunsCompatible (_mem0, ixfun0) (_mem1, ixfun1) =
+  ixFunsCompatibleRaw ixfun0 ixfun1
 
 -- Are two index functions *identical*?  (Silly approach, but the Eq instance is
 -- used for something else.)
@@ -831,12 +737,12 @@ insertAndReplace replaces0 fundef =
 
 -- Change certain allocation sizes in a program.
 transformFromKernelMaxSizedMappings :: MonadFreshNames m =>
-  M.Map VName (PrimExp VName) -> VarMemMappings MemorySrc -> ActualVariables ->
-  M.Map MName (VName, ((VName, VName),
-                       (VName, VName))) ->
+  M.Map VName (PrimExp VName) -> VarMemMappings MemorySrc -> VarMemMappings MName ->
+  Sizes -> ActualVariables -> M.Map MName (VName, ((VName, VName),
+                                                   (VName, VName))) ->
   FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
 transformFromKernelMaxSizedMappings
-  var_to_pe var_to_mem actual_vars mem_to_info fundef = do
+  var_to_pe var_to_mem var_to_mem_res sizes_orig actual_vars mem_to_info fundef = do
   (mem_to_size_var, arr_to_mem_ixfun) <-
     unzip <$> mapM (uncurry withNewMaxVar) (M.assocs mem_to_info)
   let mem_to_size_var' = M.fromList mem_to_size_var
@@ -845,8 +751,8 @@ transformFromKernelMaxSizedMappings
                       $ concat arr_to_mem_ixfun
 
       fundef' = insertAndReplace mem_to_size_var' fundef
-      fundef'' = transformFromVarMemMappings arr_to_memloc fundef'
-  return fundef''
+      sizes = memBlockSizesFunDef fundef'
+  transformFromVarMemMappings arr_to_memloc (M.union var_to_mem_res (M.map memSrcName var_to_mem)) (M.map fst sizes) (M.map fst sizes_orig) True fundef'
 
   where withNewMaxVar :: MonadFreshNames m =>
                          MName -> (VName,
