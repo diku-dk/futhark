@@ -66,8 +66,11 @@ class FutharkTuner(MeasurementInterface):
     def sizeOption(size):
         return '--pass-option --size={}={}'.format(size, cfg[size])
     size_options = ' '.join(map(sizeOption, cfg.keys()))
-    return 'futhark-bench --skip-compilation {} {}'.format(
-      self.program_name(), size_options)
+    def otherOption(opt):
+      return '--pass-option {}'.format(opt)
+    other_options = ' '.join(map(otherOption, self.args.pass_option))
+    return 'futhark-bench --skip-compilation {} {} {}'.format(
+      self.program_name(), size_options, other_options)
 
   def run(self, desired_result, input, limit):
     """
@@ -113,6 +116,7 @@ if __name__ == '__main__':
   argparser.add_argument('--compiler', type=str, metavar='COMPILER', default='futhark-opencl')
   argparser.add_argument('--timeout', type=int, metavar='TIMEOUT', default='60')
   argparser.add_argument('--only', choices=SIZE_CLASSES, metavar='CLASS', action='append', default=[])
+  argparser.add_argument('--pass-option', type=str, metavar='OPTION', action='append', default=[])
   argparser.add_argument('--save-json', type=str, metavar='FILENAME', default=None)
   args = argparser.parse_args()
 

@@ -1,6 +1,6 @@
--- | Hoist variables as much as possible.
-module Futhark.Optimise.MemoryBlockMerging.CrudeHoisting
-  ( hoistInFunDef
+-- | Move variables as much as possible upwards in a program.
+module Futhark.Optimise.MemoryBlockMerging.CrudeMovingUp
+  ( moveUpInFunDef
   ) where
 
 import qualified Data.Set as S
@@ -39,22 +39,16 @@ type BindingMap = [(Names, PrimBinding)]
 
 -- | Call 'findHoistees' for every body, and then hoist every one of the found
 -- hoistees (variables).
-hoistInFunDef :: FunDef ExplicitMemory
-              -> (Body ExplicitMemory -> Maybe [FParam ExplicitMemory] -> [VName])
-              -> FunDef ExplicitMemory
-hoistInFunDef fundef findHoistees =
+moveUpInFunDef :: FunDef ExplicitMemory
+               -> (Body ExplicitMemory -> Maybe [FParam ExplicitMemory] -> [VName])
+               -> FunDef ExplicitMemory
+moveUpInFunDef fundef findHoistees =
   let scope_new = scopeOf fundef
       bindingmap_cur = []
       body' = hoistInBody scope_new bindingmap_cur
               (Just (funDefParams fundef)) findHoistees (funDefBody fundef)
       fundef' = fundef { funDefBody = body' }
-
-      debug = fundef' `seq` do
-        putStrLn $ replicate 70 '='
-        putStrLn "Result of hoistInFunDef:"
-        putStrLn $ pretty fundef'
-        putStrLn $ replicate 70 '='
-  in withDebug debug fundef'
+  in fundef'
 
 lookupPrimBinding :: VName -> State BindingMap PrimBinding
 lookupPrimBinding vname = do
@@ -91,8 +85,8 @@ boundInKernelSpace space =
                       ++ mapMaybe (fromVar . (\(_, _, _, x) -> x)) ts
                  ))
 
--- FIXME: The results of this should maybe go in the core 'freeIn' function, and
--- not in this arbitrary module.
+-- FIXME: The results of this should maybe go in the core 'freeIn' function, or
+-- perhaps the ExplicitMemory module, instead of this arbitrary module.
 boundInExpExtra :: Exp ExplicitMemory -> Names
 boundInExpExtra = execWriter . inExp
   where inExp :: Exp ExplicitMemory -> Writer Names ()
@@ -136,13 +130,7 @@ bodyBindingMap stms =
               params_binding = (param_vars, PrimBinding S.empty S.empty FromFParam)
 
               bmap = [vars_binding, sizes_binding, params_binding]
-
-              debug = do
-                putStrLn $ replicate 70 '~'
-                putStrLn "createBindingStmt:"
-                print param_vars
-                putStrLn $ replicate 70 '~'
-          in withDebug debug bmap
+          in bmap
 
         shapeSizes (PatElem _ (ExpMem.MemArray _ shape _ _)) =
           mapMaybe fromVar $ shapeDims shape
@@ -172,14 +160,7 @@ hoistInBody scope_new bindingmap_old params findHoistees body =
       bnds' = fmap (hoistRecursivelyStm bindingmap' findHoistees) bnds
       body' = Body () bnds' res
 
-      debug = hoistees `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn "Hoistees found in body:"
-        print bindingmap
-        forM_ hoistees $ \h -> putStrLn ("hoistee: " ++ pretty h)
-        putStrLn $ replicate 70 '~'
-
-  in withDebug debug body'
+  in body'
 
 hoistRecursivelyStm :: BindingMap
                     -> (Body ExplicitMemory -> Maybe [FParam ExplicitMemory] -> [VName])
@@ -207,25 +188,13 @@ hoist bindingmap_cur body hoistee =
 
       body' = runState (moveLetUpwards hoistee body) bindingmap
 
-      debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "CrudeHoisting hoist:"
-        putStrLn ("Name: " ++ show hoistee)
-        putStrLn $ replicate 70 '~'
-
-  in withDebug debug body'
+  in body'
 
 -- Move a statement as much up as possible.
 moveLetUpwards :: VName -> Body ExplicitMemory
                -> State BindingMap (Body ExplicitMemory)
 moveLetUpwards letname body = do
-  let debug0 = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "moveLetUpwards 0:"
-        print letname
-        putStrLn $ replicate 70 '~'
-
-  PrimBinding deps consumed letorig <- withDebug debug0 $ lookupPrimBinding letname
+  PrimBinding deps consumed letorig <- lookupPrimBinding letname
 
   -- Extend the dependencies with all those statements that use the consumed
   -- variables of this statement, except the current statement.
@@ -241,27 +210,16 @@ moveLetUpwards letname body = do
         -- restrict the aggressive hoister to *stop* and not hoist loops and
         -- kernels, as hoisting these expressions might actually make a
         -- hoisting-dependent optimisation *poorer* because of some assumptions
-        -- about the structure.  FIXME: Do this nicer.
+        -- about the structure.  FIXME: Do this nicer in a way where it is easy
+        -- to argue for it.
         DoLoop{} -> return body
         Op ExpMem.Inner{} -> return body
         _ -> do
-          let debug1 = do
-                putStrLn $ replicate 70 '~'
-                putStrLn "moveLetUpwards 1:"
-                print letname
-                putStrLn $ prettySet deps'
-                putStrLn $ prettySet consumed
-                print line_cur
-                -- putStrLn $ replicate 70 '|'
-                -- putStrLn $ pretty body'
-                -- putStrLn $ replicate 70 '|'
-                putStrLn $ replicate 70 '~'
-
           -- Sort by how close they are to the beginning of the body.  The closest
           -- one should be the first one to hoist, so that the other ones can maybe
           -- exploit it.
           deps'' <- sortByKeyM (fmap pbOrigin . lookupPrimBinding)
-                    $ withDebug debug1 $ S.toList deps'
+                    $ S.toList deps'
           body' <- foldM (flip moveLetUpwards) body deps''
           origins <- mapM (fmap pbOrigin . lookupPrimBinding) deps''
           let line_dest = case foldl max FromFParam origins of
@@ -294,13 +252,7 @@ moveLetToLine stm_cur_name line_cur line_dest stms
                                                (FromLine (l + 1) e))
                                      else t)
 
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "moveLetToLine:"
-        putStrLn $ pretty stm_cur_name
-        putStrLn $ replicate 70 '~'
-
-  r <- withDebug debug $ lookupPrimBinding stm_cur_name
+  r <- lookupPrimBinding stm_cur_name
   case r of
     PrimBinding frees consumed (FromLine _ exp_cur) ->
       modify $ replaceWhere stm_cur_name (PrimBinding frees consumed

@@ -129,5 +129,5 @@ instance AllocSizeUtils ExplicitMemory where
   lookForAllocSize _ = Nothing
 
 instance AllocSizeUtils InKernel where
-  -- There can be no allocations inside kernels.
+  lookForAllocSize (Op (ExpMem.Alloc size space)) = Just (size, space)
   lookForAllocSize _ = Nothing

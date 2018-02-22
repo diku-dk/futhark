@@ -2,13 +2,13 @@
 -- ==
 -- input { [0, 3, 5, 7, 9, 11] }
 -- output { [0, 384, 640, 896, 1152, 1408, 14, 18, 22] }
--- structure cpu { Alloc 3 }
--- structure gpu { Alloc 3 }
+-- structure cpu { Alloc 4 }
+-- structure gpu { Alloc 4 }
 
--- This is the same test as the one in coalescing/loop/ (see that for coalescing
--- comments), but here we run it with both coalescing and reuse.
+-- This is the same test as the one in coalescing/wip/loop/ (see that for
+-- coalescing comments), but here we run it with both coalescing and reuse.
 --
--- The reuse pass adds two more memory block mergings (from 5 to 3).  These are
+-- The reuse pass adds two memory block mergings (from 6 to 4).  These are
 -- possible because we analyse the index access patterns in the arrays in the
 -- loop bodies.
 

@@ -37,6 +37,8 @@ instance Eq v => Eq (PrimExp v) where
   LeafExp x xt == LeafExp y yt = x == y && xt == yt
   ValueExp (IntValue x) == ValueExp (IntValue y) =
     intToInt64 x == intToInt64 y
+  ValueExp x == ValueExp y =
+    x == y
   BinOpExp xop x1 x2 == BinOpExp yop y1 y2 =
     xop == yop && x1 == y1 && x2 == y2
   CmpOpExp xop x1 x2 == CmpOpExp yop y1 y2 =
