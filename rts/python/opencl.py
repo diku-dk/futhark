@@ -73,6 +73,7 @@ def apply_size_heuristics(self, size_heuristics, sizes):
 
 def initialise_opencl_object(self,
                              program_src='',
+                             command_queue=None,
                              interactive=False,
                              platform_pref=None,
                              device_pref=None,
@@ -85,11 +86,14 @@ def initialise_opencl_object(self,
                              required_types=[],
                              all_sizes={},
                              user_sizes={}):
-    self.ctx = get_prefered_context(interactive, platform_pref, device_pref)
-    self.queue = cl.CommandQueue(self.ctx)
-    self.device = self.ctx.get_info(cl.context_info.DEVICES)[0]
-     # XXX: Assuming just a single device here.
-    self.platform = self.ctx.get_info(cl.context_info.DEVICES)[0].platform
+    if command_queue is None:
+        self.ctx = get_prefered_context(interactive, platform_pref, device_pref)
+        self.queue = cl.CommandQueue(self.ctx)
+    else:
+        self.ctx = command_queue.context
+        self.queue = command_queue
+    self.device = self.queue.device
+    self.platform = self.device.platform
     self.pool = cl.tools.MemoryPool(cl.tools.ImmediateAllocator(self.queue))
     device_type = self.device.type
 
