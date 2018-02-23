@@ -26,6 +26,7 @@ module Futhark.Representation.ExplicitMemory.Lmad
        , isContiguous
        , shape
        , rank
+       , getMonotonicity
 --       , linearWithOffset
 --       , rearrangeWithOffset
 --       , isDirect
@@ -41,7 +42,7 @@ import Data.List as L hiding (repeat)
 import Control.Monad.Identity
 --import Control.Monad.Writer
 
-import Prelude hiding (div, mod, quot, rem, repeat)
+import Prelude hiding (mod, repeat)
 
 --import qualified Data.Map.Strict as M
 
@@ -59,6 +60,8 @@ import Futhark.Util.Pretty
 --import Futhark.Analysis.PrimExp.Convert
 --import Futhark.Util
 
+--import Debug.Trace
+
 type Shape num   = [num]
 type Indices num = [num]
 type Permutation = [Int]
@@ -66,14 +69,8 @@ type Permutation = [Int]
 -- | TODO: should only be: Inc | Dec | Unknown
 --         because together with the contiguosness
 --         this is enough information
-data DimInfo = Inc1 | Dec1
-               -- ^ Inc1, Dec1 mean stride +1 or -1
-             | FullInc1 | FullDec1
-               -- ^ Full means all elements on that
-               --   original dimension remain.
-               --   In all cases rotations are not
-               --   accounted for.
-             | Unknown
+data DimInfo = Inc | Dec | Unknown
+               -- ^ monotonously increasing, decreasing or unknwon
              deriving (Show,Eq)
 
 -- | LMAD's representation consists of a permutation,
@@ -139,8 +136,8 @@ index0 lmad@(Lmad tau srnps) inds elm_size =
 
 
 -- | iota
-iota :: IntegralExp num => Shape num -> IxFun num
-iota ns = IxFun [makeRotIota FullInc1 0 $ zip rs ns] ns True
+iota :: (Pretty num, IntegralExp num) => Shape num -> IxFun num
+iota ns = IxFun [makeRotIota Inc 0 $ zip rs ns] ns True
   where rs = replicate (length ns) 0
 
 -- | permute dimensions
@@ -186,7 +183,7 @@ rotate  (IxFun (lmad@(Lmad off srnps) : lmads) oshp cg) offs =
 
 
 -- | Slicing an index function.
-slice :: (Eq num, IntegralExp num) =>
+slice :: (Pretty num, Eq num, IntegralExp num) =>
          IxFun num -> Slice num -> IxFun num
 slice (IxFun [] _ _) _ = error "slice: empty index function"
 slice _ [] = error "slice: empty slice ???"
@@ -201,7 +198,7 @@ slice (IxFun (lmad@(Lmad _ srnpfs):lmads) oshp cg) is =
       then let lmad' = foldl sliceOne (Lmad (getOffset lmad) [])
                          $ zip is' srnpfs
                -- need to remove the fixed dims from the permutation
-               perm' = updatePerm perm $ fst $ unzip $ filter isFixedDim $
+               perm' = updatePerm perm $ map fst $ filter isFixedDim $
                                   zip [0..length is' - 1] is'
            in  IxFun (setPermutation perm' lmad':lmads) oshp contig
       else -- falls outside LMAD formula, hence append a new LMAD
@@ -236,7 +233,7 @@ slice (IxFun (lmad@(Lmad _ srnpfs):lmads) oshp cg) is =
         harmlessRotation (Lmad _ srnps) iss =
             and $ zipWith harmlessRotation0 srnps iss
 
-        -- | TODO: cover the Inc1 and Dec1 strides, i.e., non-full!
+        -- | TODO: what happens to r on a negative-stride slice; is there a such case?
         sliceOne :: (Eq num, IntegralExp num) =>
                     Lmad num -> (DimIndex num, (num,num,num,Int,DimInfo)) -> Lmad num
         sliceOne (Lmad tau srns) (DimFix i, (s,r,n,_,_)) =
@@ -247,12 +244,17 @@ slice (IxFun (lmad@(Lmad _ srnpfs):lmads) oshp cg) is =
             | dmind == unitSlice 0 n = Lmad tau (srns ++ [srn])
         sliceOne (Lmad tau srns) (dmind, (s,r,n,p,f))
             | dmind == DimSlice (n-1) n (-1) =
-              Lmad tau' (srns ++ [(s*(-1),n-r,n,p, invertInfo f)])
+              let r' = if r == 0 then 0 else n-r
+              in  Lmad tau' (srns ++ [(s*(-1),r',n,p, invertInfo f)])
               where tau' = tau + flatOneDim (s,0,n) (n-1)
         sliceOne (Lmad tau srns) (DimSlice b ne 0, (s,r,n,p,_)) =
             Lmad (tau + flatOneDim (s,r,n) b) (srns ++ [(0,0,ne,p,Unknown)])
-        sliceOne (Lmad tau srns) (DimSlice bs ns ss, (s,0,_,p,_)) =
-            Lmad (tau + s*bs) (srns ++ [(ss*s,0,ns,p,Unknown)])
+        sliceOne (Lmad tau srns) (DimSlice bs ns ss, (s,0,_,p,f)) =
+            let f' = case sgn ss of
+                       Just 1    -> f
+                       Just (-1) -> invertInfo f
+                       _         -> Unknown
+            in  Lmad (tau + s*bs) (srns ++ [(ss*s,0,ns,p,f')])
         sliceOne _ _ = error "slice: reached impossible case!"
 
         normIndex :: (Eq num, IntegralExp num) =>
@@ -299,68 +301,90 @@ slice (IxFun (lmad@(Lmad _ srnpfs):lmads) oshp cg) is =
 --       refer only to the coerced-dimensions of the reshape operation.
 --   (3) similarly, the rotated dimensions must refer only to
 --       dimensions that are coerced by the reshape operation.
---   (4) finally, the underlying memory is contiguous (and monotonous).
+--   (4) finally, the underlying memory is contiguous (and monotonous)
 --
 --   If any of this conditions does not hold then the reshape operation
 --   will conservatively add a new Lmad to the list, leading to a
 --   representation that provides less opportunities for further analysis.
-reshape :: (Eq num, IntegralExp num) =>
+--
+--   Actually there are some special cases that need to be treated,
+--   for example if everything is a coercion, then it should succeed
+--   no matter what.
+reshape :: (Pretty num, Eq num, IntegralExp num) =>
            IxFun num -> ShapeChange num -> IxFun num
 reshape (IxFun [] _ _) _ =
   error "reshape: empty index function"
 
-reshape ixfn@(IxFun (lmad@(Lmad tau srnps):lmads) oshp cg) newshapeorig
+reshape ixfn@(IxFun (lmad@(Lmad tau srnps):lmads) oshp cg) newshape
   | perm <- getPermutation lmad,
-    newshape <- permuteInv perm newshapeorig,
+    --- WRONG: newshapeorig probably has less dimensions!!!
+    ---        instead of this, please permuteFwd the srnps
+    ---        and restart from there
     Just (head_coercions, reshapes, tail_coercions) <-
       splitCoercions newshape,
     hd_len <- length head_coercions,
     num_coercions <- hd_len + length tail_coercions,
+    srnps' <- permuteFwd perm srnps,
     mid_srnps <- take (length srnps - num_coercions) $
-                 drop hd_len srnps,
+                      drop hd_len srnps',
+    num_rshps <- length reshapes,
+    num_rshps == 0 || (num_rshps == 1 && length mid_srnps == 1),
+    srnps'' <- map snd $ L.sortBy sortGT $
+               zipWith (\(s,r,_,p,f) n -> (p,(s,r,n,p,f)))
+                       srnps' $ newDims newshape
+    = IxFun (Lmad tau srnps'':lmads) oshp cg
+
+  | perm <- getPermutation lmad,
+    Just (head_coercions, reshapes, tail_coercions) <-
+      splitCoercions newshape,
+    hd_len <- length head_coercions,
+    num_coercions <- hd_len + length tail_coercions,
+    srnps_perm <- permuteFwd perm srnps,
+    mid_srnps <- take (length srnps - num_coercions) $
+                      drop hd_len srnps_perm,
     -- checking conditions (2) and (3)
     all (\ (s,r,_,_,_) -> s /= 0 && r == 0) mid_srnps,
     -- checking condition (1)
     consecutive hd_len $ map (\(_,_,_,p,_)->p) mid_srnps,
     -- checking condition (4)
-    info <- getMonotonicity ixfn,
-    cg && (info == FullInc1 || info == FullDec1),
+    info <- getMonotonicityRots True ixfn,
+    cg && (info == Inc || info == Dec),
     -- make new permutation
     rsh_len <- length reshapes,
-    diff <- rsh_len - length srnps,
+    diff <- length newshape - length srnps,
+    iota_shape <- [0..length newshape-1],
     perm' <- map (\i -> let ind = if i < hd_len
                                   then i else i - diff
                         in  if (i>=hd_len) && (i < hd_len+rsh_len)
-                            then i
+                            then i -- already checked mid_srnps not affected
                             else let (_,_,_,p,_) = srnps !! ind
                                  in  if p < hd_len
                                      then p else p + diff
-               ) [0..length newshape],
+                 ) iota_shape,
     -- split the dimensions
     (suport_inds, repeat_inds) <-
-      foldl (\(sup,rpt) (i,shpdim) ->
+      foldl (\(sup,rpt) (i,shpdim,ip) ->
               case (i < hd_len, i >= hd_len+rsh_len, shpdim) of
                 (True,  _, DimCoercion n) ->
-                  case srnps !! i of
-                    (0,_,_,_,_) -> ( sup, (i,n) : rpt )
-                    (_,r,_,_,_) -> ( (i,(r,n)) : sup, rpt )
+                  case srnps_perm !! i of
+                    (0,_,_,_,_) -> ( sup, (ip,n) : rpt )
+                    (_,r,_,_,_) -> ( (ip,(r,n)) : sup, rpt )
                 (_,  True, DimCoercion n) ->
-                  case srnps !! (i-diff) of
-                    (0,_,_,_,_) -> ( sup, (i,n) : rpt )
-                    (_,r,_,_,_) -> ( (i,(r,n)) : sup, rpt )
+                  case srnps_perm !! (i-diff) of
+                    (0,_,_,_,_) -> ( sup, (ip,n) : rpt )
+                    (_,r,_,_,_) -> ( (ip,(r,n)) : sup, rpt )
                 (False, False, _) ->
-                    ( (i, (0, getDimNewSize shpdim)) : sup, rpt )
+                    ( (ip, (0, newDim shpdim)) : sup, rpt )
                     -- ^ already checked that the reshaped
                     --   dims cannot be repeats or rotates
                 _ -> error "reshape: reached impossible case!"
-            ) ([],[]) $ reverse $ zip [0..length newshape] newshape,
+            ) ([],[]) $ reverse $ zip3 iota_shape newshape perm',
 
-    (sup_inds, support) <- unzip suport_inds,
+    (sup_inds, support) <- unzip $ L.sortBy sortGT suport_inds,
     (rpt_inds, repeats) <- unzip repeat_inds,
     Lmad tau' srnps_sup <- makeRotIota info tau support,
-
     repeats' <- map (\n -> (0,0,n,0,Unknown)) repeats,
-    srnps'   <- snd $ unzip $ L.sortBy sortGT $
+    srnps'   <- map snd $ L.sortBy sortGT $
                 zip sup_inds srnps_sup ++ zip rpt_inds repeats'
     = IxFun (setPermutation perm' (Lmad tau' srnps') : lmads) oshp cg
   where splitCoercions newshape' = do
@@ -377,7 +401,7 @@ reshape ixfn@(IxFun (lmad@(Lmad tau srnps):lmads) oshp cg) newshapeorig
         consecutive i ps = and $ zipWith (==) ps [i, i+1..]
 
 reshape (IxFun lmads oshp cg) newshape =
-  let new_dims = map getDimNewSize newshape
+  let new_dims = newDims newshape
   in case iota new_dims of
        IxFun [lmad] _ _ -> IxFun (lmad : lmads) oshp cg
        _ -> error "reshape: impossible case reached"
@@ -389,24 +413,26 @@ rank (IxFun [] _ _) = error "rank: empty index function"
 rank (IxFun (Lmad _ sss : _) _ _) = length sss
 
 getMonotonicity :: (Eq num, IntegralExp num) => IxFun num -> DimInfo
-getMonotonicity (IxFun [] _ _) =
-  error "getMonotonicity: empty index function"
-getMonotonicity (IxFun (lmad:lmads) _ _) =
-  let mon1 = getLmadMonotonicity lmad
-  in  if all (==mon1) $ map getLmadMonotonicity lmads
+getMonotonicity = getMonotonicityRots False
+
+getMonotonicityRots :: (Eq num, IntegralExp num) => Bool -> IxFun num -> DimInfo
+getMonotonicityRots _ (IxFun [] _ _) =
+  error "getMonotonicityRots: empty index function"
+getMonotonicityRots ignore_rots (IxFun (lmad:lmads) _ _) =
+  let mon1 = getLmadMonotonicity ignore_rots lmad
+  in  if all (==mon1) $ map (getLmadMonotonicity ignore_rots) lmads
       then mon1 else Unknown
 
-getLmadMonotonicity :: (Eq num, IntegralExp num) => Lmad num -> DimInfo
-getLmadMonotonicity (Lmad _ dims)
-  | all (isMonDim FullInc1) dims = FullInc1
-  | all (isMonDim FullDec1) dims = FullDec1
-  | all (isMonDim Inc1    ) dims = Inc1
-  | all (isMonDim Dec1    ) dims = Dec1
-  | otherwise                    = Unknown
+getLmadMonotonicity :: (Eq num, IntegralExp num) => Bool -> Lmad num -> DimInfo
+getLmadMonotonicity ignore_rots (Lmad _ dims)
+  | all (isMonDim ignore_rots Inc) dims = Inc
+  | all (isMonDim ignore_rots Dec) dims = Dec
+  | otherwise                           = Unknown
 
-isMonDim :: (Eq num, IntegralExp num) => DimInfo ->
+isMonDim :: (Eq num, IntegralExp num) => Bool -> DimInfo ->
             (num, num, num, Int, DimInfo) -> Bool
-isMonDim mon (_,r,_,_,info) = r == 0 && mon == info
+isMonDim ignore_rots mon (s,r,_,_,info) =
+  s == 0 || ((ignore_rots || r == 0) && mon == info)
 
 ------------------------------------------
 --- COSMIN is here with the re-writing ---
@@ -452,10 +478,8 @@ rearrangeWithOffset _ _ =
 ------------------------
 
 invertInfo :: DimInfo -> DimInfo
-invertInfo Inc1 = Dec1
-invertInfo Dec1 = Inc1
-invertInfo FullInc1 = FullDec1
-invertInfo FullDec1 = FullInc1
+invertInfo Inc = Dec
+invertInfo Dec = Inc
 invertInfo Unknown = Unknown
 
 getOffset :: Lmad num -> num
@@ -488,33 +512,27 @@ flatOneDim (s,r,n) i
   | r == 0 = i*s
   | otherwise = ((i+r) `mod` n) * s
 
-getDimNewSize :: DimChange num -> num
-getDimNewSize (DimCoercion d) = d
-getDimNewSize (DimNew      d) = d
-
-makeRotIota :: IntegralExp num =>
+makeRotIota :: (Pretty num, IntegralExp num) =>
                DimInfo -> num -> [(num,num)] -> Lmad num
 makeRotIota info tau support
-  | info == FullInc1 || info == FullDec1 =
+  | info == Inc || info == Dec =
     let rk = length support
         (rs,ns) = unzip support
         ss0= L.reverse $ take rk $ scanl (*) 1 $ L.reverse ns
-        ss = if info == FullInc1 then ss0
+        ss = if info == Inc then ss0
              else map (*(-1)) ss0
         ps = map fromIntegral [0..rk-1]
         fi = replicate rk info
     in  Lmad tau $ zip5 ss rs ns ps fi
-  | otherwise = error "makeRotIota requires FullInc1 or FullDec1!"
+  | otherwise = error "makeRotIota requires Inc or Dec!"
 
 --------------------------------
 --- Instances Implementation ---
 --------------------------------
 
 instance Pretty DimInfo where
-  ppr Inc1 = text "i"
-  ppr Dec1 = text "d"
-  ppr FullInc1 = text "I"
-  ppr FullDec1 = text "D"
+  ppr Inc      = text "I"
+  ppr Dec      = text "D"
   ppr Unknown  = text "U"
 
 instance Pretty num => Pretty (Lmad num) where

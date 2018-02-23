@@ -246,7 +246,7 @@ reshape (Index ixfun slicing) newshape
       let newshape' = map DimCoercion fixed_ds ++ newshape
       in Index (reshape ixfun newshape') $
          map DimFix is ++ map (unitSlice (fromInt32 0)) (newDims newshape)
-  where isSliceOf (DimSlice _ d1 _) d2 = d1 == d2
+  where isSliceOf (DimSlice _ d1 1) d2 = d1 == d2
         isSliceOf _ _ = False
 
         findSlice (DimFix i:is) d = (DimFix i:) <$> findSlice is d
