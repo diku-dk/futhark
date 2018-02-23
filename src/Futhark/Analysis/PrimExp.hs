@@ -142,6 +142,9 @@ instance Pretty v => IntegralExp (PrimExp v) where
   x `rem` y | Just z <- msum [asIntOp SRem x y] = z
             | otherwise = numBad "rem" (x,y)
 
+  sgn (ValueExp (IntValue i)) = Just $ signum $ valueIntegral i
+  sgn _ = Nothing
+
   fromInt8  = ValueExp . IntValue . Int8Value
   fromInt16 = ValueExp . IntValue . Int16Value
   fromInt32 = ValueExp . IntValue . Int32Value

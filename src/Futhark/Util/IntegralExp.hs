@@ -28,6 +28,7 @@ class Num e => IntegralExp e where
   rem :: e -> e -> e
   div :: e -> e -> e
   mod :: e -> e -> e
+  sgn :: e -> Maybe Int
 
   fromInt8  :: Int8 -> e
   fromInt16 :: Int16 -> e
@@ -61,6 +62,7 @@ instance Integral a => IntegralExp (Wrapped a) where
   rem = liftOp2 Prelude.rem
   div = liftOp2 Prelude.div
   mod = liftOp2 Prelude.mod
+  sgn = Just . fromIntegral . signum . toInteger . wrappedValue
 
   fromInt8  = fromInteger . toInteger
   fromInt16 = fromInteger . toInteger
