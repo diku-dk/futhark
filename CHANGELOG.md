@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+   * The constructor for generated PyOpenCL classes now accepts a
+     `command_queue` parameter (#480).
+
 ### Removed
 
 ### Changed

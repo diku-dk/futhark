@@ -24,6 +24,7 @@ openClInit types assign sizes = T.unpack [text|
 size_heuristics=$size_heuristics
 program = initialise_opencl_object(self,
                                    program_src=fut_opencl_src,
+                                   command_queue=command_queue,
                                    interactive=interactive,
                                    platform_pref=platform_pref,
                                    device_pref=device_pref,

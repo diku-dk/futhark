@@ -47,6 +47,7 @@ compileProg module_name prog = do
                      Import "time" Nothing]
 
       let constructor = Py.Constructor [ "self"
+                                       , "command_queue=None"
                                        , "interactive=False"
                                        , "platform_pref=preferred_platform"
                                        , "device_pref=preferred_device"
