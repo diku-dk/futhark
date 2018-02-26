@@ -454,8 +454,9 @@ arrayLitToReplicate _ _ _ _ = cannotSimplify
 -- This simplistic rule is only valid before we introduce memory.
 removeUnnecessaryCopy :: BinderOps lore => BottomUpRuleBasicOp lore
 removeUnnecessaryCopy (vtable,used) (Pattern [] [d]) _ (Copy v)
-  | not (v `UT.used` used) && consumable =
-    letBind_ (Pattern [] [d]) $ BasicOp $ SubExp $ Var v
+  | not (v `UT.used` used),
+    consumable || not (patElemName d `UT.isConsumed` used) =
+      letBind_ (Pattern [] [d]) $ BasicOp $ SubExp $ Var v
   where -- We need to make sure we can even consume the original.
         -- This is currently a hacky check, much too conservative,
         -- because we don't have the information conveniently
