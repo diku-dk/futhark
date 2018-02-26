@@ -1025,7 +1025,13 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Rearrange perm _))) acc =
   distributeSingleUnaryStm acc bnd $ \nest outerpat arr -> do
     let r = length (snd nest) + 1
         perm' = [0..r-1] ++ map (+r) perm
-    addKernel $ oneStm $ Let outerpat aux $ BasicOp $ Rearrange perm' arr
+    -- We need to add a copy, because the original map nest
+    -- will have produced an array without aliases, and so must we.
+    arr' <- newVName $ baseString arr
+    arr_t <- lookupType arr
+    addKernel $ stmsFromList
+      [Let (Pattern [] [PatElem arr' arr_t]) aux $ BasicOp $ Copy arr,
+       Let outerpat aux $ BasicOp $ Rearrange perm' arr']
 
 maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
   distributeSingleUnaryStm acc bnd $ \nest outerpat arr -> do
@@ -1062,7 +1068,7 @@ distributeSingleUnaryStm acc bnd f =
         [(_, arr)] <- loopNestingParamsAndArrs outer -> do
           addKernels kernels
           let outerpat = loopNestingPattern $ fst nest
-          f nest outerpat arr
+          localScope (typeEnvFromKernelAcc acc') $ f nest outerpat arr
           return acc'
     _ -> addStmToKernel bnd acc
 
