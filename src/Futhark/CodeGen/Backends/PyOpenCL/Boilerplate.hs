@@ -16,9 +16,13 @@ import Futhark.CodeGen.OpenCL.Kernels
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.Util.Pretty (pretty, prettyText)
 
+-- | @rts/python/opencl.py@ embedded as a string.
 openClPrelude :: String
 openClPrelude = $(embedStringFile "rts/python/opencl.py")
 
+-- | Python code (as a string) that calls the
+-- @initiatialize_opencl_object@ procedure.  Should be put in the
+-- class constructor.
 openClInit :: [PrimType] -> String -> M.Map VName SizeClass -> String
 openClInit types assign sizes = T.unpack [text|
 size_heuristics=$size_heuristics

@@ -59,6 +59,8 @@ data Basis = Basis { basisImports :: E.Imports
                    }
            deriving (Lift)
 
+-- | A basis that contains no imports, and has a properly initialised
+-- name source.
 emptyBasis :: Basis
 emptyBasis = Basis { basisImports = mempty
                    , basisNameSource = src
@@ -66,9 +68,13 @@ emptyBasis = Basis { basisImports = mempty
                    }
   where src = newNameSource $ succ $ maximum $ map E.baseTag $ M.keys E.intrinsics
 
+-- | A collection of the import paths searched by the Futhark
+-- compiler.  A value constructed with 'mappend' will search in the
+-- left-hand argument first.
 newtype ImportPaths = ImportPaths [FilePath]
   deriving (Sem.Semigroup, Monoid)
 
+-- | Construct an 'ImportPaths' from a single path.
 importPath :: FilePath -> ImportPaths
 importPath = ImportPaths . pure
 
