@@ -154,6 +154,8 @@ pprArray (d:ds) vs =
   where slice_size = product ds
         slice i = UVec.slice (i*slice_size) slice_size vs
 
+-- | A textual description of the type of a value.  Follows Futhark
+-- type notation, and contains the exact dimension sizes if an array.
 valueType :: Value -> String
 valueType v = concatMap (\d -> "[" ++ show d ++ "]") (valueShape v) ++
               valueElemType v

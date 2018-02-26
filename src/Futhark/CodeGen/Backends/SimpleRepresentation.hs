@@ -27,28 +27,35 @@ import Futhark.CodeGen.ImpCode
 import Futhark.Util.Pretty (pretty)
 import Futhark.Util (zEncodeString)
 
+-- | The C type corresponding to a signed integer type.
 intTypeToCType :: IntType -> C.Type
 intTypeToCType Int8 = [C.cty|typename int8_t|]
 intTypeToCType Int16 = [C.cty|typename int16_t|]
 intTypeToCType Int32 = [C.cty|typename int32_t|]
 intTypeToCType Int64 = [C.cty|typename int64_t|]
 
+-- | The C type corresponding to an unsigned integer type.
 uintTypeToCType :: IntType -> C.Type
 uintTypeToCType Int8 = [C.cty|typename uint8_t|]
 uintTypeToCType Int16 = [C.cty|typename uint16_t|]
 uintTypeToCType Int32 = [C.cty|typename uint32_t|]
 uintTypeToCType Int64 = [C.cty|typename uint64_t|]
 
+-- | The C type corresponding to a float type.
 floatTypeToCType :: FloatType -> C.Type
 floatTypeToCType Float32 = [C.cty|float|]
 floatTypeToCType Float64 = [C.cty|double|]
 
+-- | The C type corresponding to a primitive type.  Integers are
+-- assumed to be unsigned.
 primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t) = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|char|]
 primTypeToCType Cert = [C.cty|char|]
 
+-- | The C type corresponding to a primitive type.  Integers are
+-- assumed to have the specified sign.
 signedPrimTypeToCType :: Signedness -> PrimType -> C.Type
 signedPrimTypeToCType TypeUnsigned (IntType t) = uintTypeToCType t
 signedPrimTypeToCType TypeDirect (IntType t) = intTypeToCType t
