@@ -11,6 +11,7 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Optimise.Simplify
 
+-- | Run copy propagation.
 copyPropagateInStms :: (MonadFreshNames m, SimplifiableLore lore, HasScope lore m) =>
                        SimpleOps lore
                     -> Stms lore

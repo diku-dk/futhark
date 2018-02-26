@@ -61,6 +61,7 @@ sizeHeuristicsTable =
   , SizeHeuristic "" DeviceCPU TileSize $ HeuristicConst 4
   ]
 
+-- | Which form of transposition to generate code for.
 data TransposeType = TransposeNormal
                    | TransposeLowWidth
                    | TransposeLowHeight
