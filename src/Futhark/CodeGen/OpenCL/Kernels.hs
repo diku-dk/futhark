@@ -200,11 +200,9 @@ mapTranspose kernel_name elem_type transpose_type =
            idata += our_array_offset;
 
            // Read and write the element.
-           uint index_in = x_index * height + y_index;
-           uint index_out = y_index * width + x_index;
-           if (x_index < width && y_index < height &&
-               index_in < input_size && index_out < output_size)
-           {
+           uint index_in = y_index * width + x_index;
+           uint index_out = x_index * height + y_index;
+           if (get_global_id(0) < input_size) {
                odata[index_out] = idata[index_in];
            }
          }|]
