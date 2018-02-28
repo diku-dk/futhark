@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * The constructor for generated PyOpenCL classes now accepts a
      `command_queue` parameter (#480).
 
+   * Transposing small arrays is now much faster when using OpenCL
+     backend (#478).
+
 ### Removed
 
 ### Changed
