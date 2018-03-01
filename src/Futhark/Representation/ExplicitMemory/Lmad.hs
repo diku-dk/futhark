@@ -374,8 +374,8 @@ reshape ixfn@(IxFun (lmad@(Lmad tau srnps):lmads) oshp cg) newshape
                     (_,r,_,_,_) -> ( (ip,(r,n)) : sup, rpt )
                 (False, False, _) ->
                     ( (ip, (0, newDim shpdim)) : sup, rpt )
-                    -- ^ already checked that the reshaped
-                    --   dims cannot be repeats or rotates
+                    -- already checked that the reshaped
+                    -- dims cannot be repeats or rotates
                 _ -> error "reshape: reached impossible case!"
             ) ([],[]) $ reverse $ zip3 iota_shape newshape perm',
 

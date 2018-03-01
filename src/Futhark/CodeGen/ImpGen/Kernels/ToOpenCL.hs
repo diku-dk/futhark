@@ -335,6 +335,8 @@ transposeKernelName bt Kernels.TransposeLowWidth =
   "fut_kernel_map_transpose_lowwidth_" ++ pretty bt
 transposeKernelName bt Kernels.TransposeLowHeight =
   "fut_kernel_map_transpose_lowheight_" ++ pretty bt
+transposeKernelName bt Kernels.TransposeSmall =
+  "fut_kernel_map_transpose_small_" ++ pretty bt
 
 transposeName :: PrimType -> Name
 transposeName bt = nameFromString $ "map_transpose_opencl_" ++ pretty bt
@@ -352,10 +354,11 @@ generateTransposeFunction bt =
         map (\tt -> let name = transposeKernelName bt tt
                     in (name, Kernels.mapTranspose name bt' tt))
         [Kernels.TransposeNormal, Kernels.TransposeLowWidth,
-         Kernels.TransposeLowHeight]
+         Kernels.TransposeLowHeight, Kernels.TransposeSmall]
 
     , clRequirements = mempty
     }
+
   where bt' = GenericC.primTypeToCType bt
         space = ImpOpenCL.Space "device"
         memparam s i = MemParam (VName (nameFromString s) i) space
@@ -422,6 +425,10 @@ generateTransposeFunction bt =
           (CmpOpExp (CmpSle Int32) (asExp y_p) transposeBlockDimDivTwo)
           (CmpOpExp (CmpSlt Int32) transposeBlockDim (asExp x_p))
 
+        should_use_small = BinOpExp LogAnd
+          (CmpOpExp (CmpSle Int32) (asExp x_p) transposeBlockDimDivTwo)
+          (CmpOpExp (CmpSle Int32) (asExp y_p) transposeBlockDimDivTwo)
+
         -- When an input array has either width==1 or height==1, performing a
         -- transpose will be the same as performing a copy.  If 'input_size' or
         -- 'output_size' is not equal to width*height, then this trick will not
@@ -449,7 +456,9 @@ generateTransposeFunction bt =
               lowwidth_transpose_code
               (ImpOpenCL.If should_use_lowheight
                 lowheight_transpose_code
-                normal_transpose_code))
+                (ImpOpenCL.If should_use_small
+                  small_transpose_code
+                  normal_transpose_code)))
 
         copy_code =
           let num_bytes =
@@ -464,6 +473,16 @@ generateTransposeFunction bt =
                 transposeKernelAndGroupSize (asExp num_arrays_p) (asExp x_p) (asExp y_p)
           in ImpOpenCL.Op $ LaunchKernel
              (transposeKernelName bt Kernels.TransposeNormal) normal_kernel_args kernel_size workgroup_size
+
+        small_transpose_code =
+          let group_size = (transposeBlockDim * transposeBlockDim)
+              kernel_size = (asExp num_arrays_p * asExp x_p * asExp y_p) `roundUpTo`
+                            group_size
+          in ImpOpenCL.Op $ LaunchKernel
+             (transposeKernelName bt Kernels.TransposeSmall)
+             (map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
+                         num_arrays_p, x_p, y_p, in_p, out_p])
+             [kernel_size] [group_size]
 
         lowwidth_transpose_code =
           let set_muly = DeclareScalar (paramName muly) (IntType Int32)
@@ -490,15 +509,14 @@ generateTransposeFunction bt =
 transposeKernelAndGroupSize :: ImpOpenCL.Exp -> ImpOpenCL.Exp -> ImpOpenCL.Exp
                             -> ([ImpOpenCL.Exp], [ImpOpenCL.Exp])
 transposeKernelAndGroupSize num_arrays x_elems y_elems =
-  ([roundedToBlockDim x_elems,
-    roundedToBlockDim y_elems,
+  ([x_elems `roundUpTo` transposeBlockDim ,
+    y_elems `roundUpTo` transposeBlockDim,
     num_arrays],
    [transposeBlockDim, transposeBlockDim, 1])
-  where roundedToBlockDim e =
-          e + ((transposeBlockDim -
-                (e `impRem` transposeBlockDim)) `impRem`
-               transposeBlockDim)
-        impRem = BinOpExp $ SRem Int32
+
+roundUpTo :: ImpOpenCL.Exp -> ImpOpenCL.Exp -> ImpOpenCL.Exp
+roundUpTo x y = x + ((y - (x `impRem` y)) `impRem` y)
+  where impRem = BinOpExp $ SRem Int32
 
 --- Checking requirements
 
