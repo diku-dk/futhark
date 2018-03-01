@@ -20,8 +20,8 @@ module Futhark.Representation.ExplicitMemory.Lmad
        , rotate
        , reshape
        , slice
---       , base
---       , rebase
+       , base
+       , rebase
        , repeat
        , isContiguous
        , shape
@@ -82,6 +82,7 @@ data DimInfo = Inc | Dec | Unknown
 --   on Lmad dimensions, but then it is difficult to
 --   extract the permutation back from an Lmad.
 data Lmad num = Lmad num [(num,num,num,Int,DimInfo)]
+                deriving (Show,Eq)
 
 -- | LMAD algebra is closed under composition w.r.t.
 --     operators such as permute, repeat, index and slice.
@@ -129,11 +130,11 @@ index (IxFun (lmad1:lmad2:lmads) oshp c) iis elm_size =
 index0 :: (Pretty num, Eq num, IntegralExp num) =>
           Lmad num -> Indices num -> num -> num
 index0 lmad@(Lmad tau srnps) inds elm_size =
-  let srns  = permuteFwd (getPermutation lmad) $
-                         map (\(s,r,n,_,_) -> (s,r,n)) srnps
-      prods = sum $ zipWith flatOneDim srns inds
-  in  (tau + prods) * elm_size
-
+  let prod = sum $ zipWith flatOneDim
+                     (map (\(s,r,n,_,_) -> (s,r,n)) srnps)
+                     (permuteInv (getPermutation lmad) inds)
+      ind  = tau + prod
+  in  if elm_size == 1 then ind else ind * elm_size
 
 -- | iota
 iota :: (Pretty num, IntegralExp num) => Shape num -> IxFun num
@@ -316,10 +317,8 @@ reshape (IxFun [] _ _) _ =
   error "reshape: empty index function"
 
 reshape ixfn@(IxFun (lmad@(Lmad tau srnps):lmads) oshp cg) newshape
-  | perm <- getPermutation lmad,
-    --- WRONG: newshapeorig probably has less dimensions!!!
-    ---        instead of this, please permuteFwd the srnps
-    ---        and restart from there
+  | -- first take care of the case when this is all a coercion!
+    perm <- getPermutation lmad,
     Just (head_coercions, reshapes, tail_coercions) <-
       splitCoercions newshape,
     hd_len <- length head_coercions,
@@ -412,27 +411,90 @@ rank :: IntegralExp num =>
 rank (IxFun [] _ _) = error "rank: empty index function"
 rank (IxFun (Lmad _ sss : _) _ _) = length sss
 
+base :: IxFun num -> Shape num
+base (IxFun [] _  _) = error "base: empty index function"
+base (IxFun _ osh _) = osh
+
+-- | Correctness assumption: the shape of the new base is
+--   equal to the base of the index function (to be rebased).
+rebase :: (Pretty num, Eq num, IntegralExp num) =>
+          IxFun num
+       -> IxFun num
+       -> IxFun num
+rebase (IxFun [] _  _) _ = error "base: empty index function 1"
+rebase _ (IxFun [] _  _) = error "base: empty index function 2"
+
+-- | Special Case: `x[i, (k1,m,s1), (k2,n,s2)] = orig`
+--   The new base would be the slice of x.
+--   If orig is full (contiguous) and monotonicity is known
+--       for all orig's dimensions (i.e., either Inc or Dec)
+--   Then we can compose the two into one lmad, the result
+--     mainly adapts the index function of the new base.
+--   How to handle repeated dimensions in the original?
+--      (a) Shave them off of the last lmad of original
+--      (b) Compose the result from (a) with the first
+--          lmad of the new base
+--      (c) apply a repeat operation on the result of (b).
+--   However, I strongly suspect that for in-place update
+--   what we need is actually the INVERSE of the rebase function,
+--   i.e., given an index function new-base and another one orig,
+--         compute the index function ixfn0 such that:
+--           new-base == rebase ixfn0 ixfn, or equivalently:
+--           new-base == ixfn o ixfn0
+--         because then I can go bottom up and compose with ixfn0
+--         all the index functions corresponding to the memory
+--         block associated with ixfn.
+rebase newbase@(IxFun (lmad_base:lmads_base) shp_base cg_base)
+       ixfn@(IxFun lmads shp cg)
+  | lmad_full <- last lmads,
+    (repeats, lmad) <- shaveoffRepeats lmad_full,
+    perm <- getPermutation lmad,
+    srnps<- getLmadDims lmad,
+    -- sanity condition
+    base ixfn == shape newbase,
+    -- TODO: handle repetitions in both lmads.
+    -- 1) orig is full and monotonicity is known for all dims
+    cg && length shp == length srnps,
+    and $ zipWith (\n2 (_,_,n1,_,i1) -> n1 == n2 && i1 /= Unknown)
+                  shp srnps,
+    -- Building the result srnps: compose permutations,
+    -- reverse strides and adjust offset if necessary.
+    perm_base <- getPermutation lmad_base,
+    perm' <- map (\p -> perm !! p) perm_base,
+    lmad_base' <- setPermutation perm' lmad_base,
+    (srnps_base, taus_contrib) <- unzip $
+      zipWith (\ (s1,r1,n1,p1,_) (_,r2,_,_,i2) ->
+                 -- assumes the monotonicity of all dimensions is known
+                 let (s', tau') = if i2 == Inc then (s1,0)
+                                  else (s1*(-1),s1*(n1-1))
+                     r' | i2 == Inc = if r2 == 0 then r1 else r1+r2
+                        | r1 == 0 = r2
+                        | r2 == 0 = n1-r1
+                        | otherwise = n1-r1+r2
+                 in ((s',r',n1,p1,Inc),tau')
+              ) (getLmadDims lmad_base') $
+                permuteInv perm_base srnps,
+    -- Make resulting lmads:
+    tau_base' <- getOffset lmad_base' + sum taus_contrib,
+    lmad_base'' <- Lmad tau_base' srnps_base,
+    -- Put the repeat back on top of the result
+    newbase' <- IxFun (lmad_base'':lmads_base) shp_base cg_base,
+    (reps, rep) <- repeats,
+    IxFun lmads_base'' _ _ <- repeat newbase' reps rep,
+    lmads' <- take (length lmads - 1) lmads ++ lmads_base''
+    = IxFun lmads' shp_base (cg && cg_base)
+
+-- | General case: just concatenate Lmads since this
+--   refers to index-function composition -- always safe!
+  | base ixfn == shape newbase =
+    IxFun (lmads ++ lmad_base:lmads_base) shp_base (cg && cg_base)
+
+  | otherwise =
+     let IxFun lmads' shp_base' _ = reshape newbase $ map DimCoercion shp
+     in  IxFun (lmads ++ lmads') shp_base' (cg && cg_base)
+
 getMonotonicity :: (Eq num, IntegralExp num) => IxFun num -> DimInfo
 getMonotonicity = getMonotonicityRots False
-
-getMonotonicityRots :: (Eq num, IntegralExp num) => Bool -> IxFun num -> DimInfo
-getMonotonicityRots _ (IxFun [] _ _) =
-  error "getMonotonicityRots: empty index function"
-getMonotonicityRots ignore_rots (IxFun (lmad:lmads) _ _) =
-  let mon1 = getLmadMonotonicity ignore_rots lmad
-  in  if all (==mon1) $ map (getLmadMonotonicity ignore_rots) lmads
-      then mon1 else Unknown
-
-getLmadMonotonicity :: (Eq num, IntegralExp num) => Bool -> Lmad num -> DimInfo
-getLmadMonotonicity ignore_rots (Lmad _ dims)
-  | all (isMonDim ignore_rots Inc) dims = Inc
-  | all (isMonDim ignore_rots Dec) dims = Dec
-  | otherwise                           = Unknown
-
-isMonDim :: (Eq num, IntegralExp num) => Bool -> DimInfo ->
-            (num, num, num, Int, DimInfo) -> Bool
-isMonDim ignore_rots mon (s,r,_,_,info) =
-  s == 0 || ((ignore_rots || r == 0) && mon == info)
 
 ------------------------------------------
 --- COSMIN is here with the re-writing ---
@@ -488,9 +550,46 @@ getOffset (Lmad tau _) = tau
 getPermutation :: Lmad num -> Permutation
 getPermutation (Lmad _ srns) = map (\(_,_,_,p,_) -> p) srns
 
+getLmadDims :: Lmad num -> [(num,num,num,Int,DimInfo)]
+getLmadDims (Lmad _ srnps) = srnps
+
 setPermutation :: Permutation -> Lmad num -> Lmad num
 setPermutation perm (Lmad tau srnps) =
   Lmad tau $ zipWith (\(s,r,n,_,i) p -> (s,r,n,p,i)) srnps perm
+
+--setOffset :: num -> Lmad num -> Lmad num
+--setOffset tau (Lmad _ srnps) = Lmad tau srnps
+
+shaveoffRepeats :: (Eq num, IntegralExp num) => Lmad num ->
+                   (([Shape num], Shape num), Lmad num)
+-- | Given an input lmad, this function computes a repetition `r`
+--   and a new lmad `res`, such that `repeat r res` is identical
+--   to the input lmad`.
+shaveoffRepeats lmad =
+  let perm  = getPermutation lmad
+      srnps = getLmadDims    lmad
+      -- compute the Repeat:
+      resacc= foldl (\acc (s,_,n,_,_) ->
+                      case acc of
+                        rpt:acc0 ->
+                            if s == 0 then (n:rpt) : acc0
+                            else [] : (rpt:acc0)
+                        _ -> error "shaveoffRepeats: empty accum!"
+                    ) [[]] $ L.reverse $ permuteFwd perm srnps
+      last_shape = last resacc
+      shapes = take (length resacc - 1) resacc
+      -- update permutation and lmad:
+      howManyRepLT k =
+        foldl (\i (s,_,_,p,_) ->
+                if s == 0 && p < k then i + 1 else i
+              ) 0 srnps
+      srnps' = foldl (\acc (s,r,n,p,info) ->
+                       if s == 0 then acc
+                       else let p' = p - howManyRepLT p
+                            in  (s,r,n,p',info):acc
+                     ) [] $ L.reverse srnps
+      lmad' = Lmad (getOffset lmad) srnps'
+  in  ((shapes,last_shape), lmad')
 
 permuteFwd :: Permutation -> [a] -> [a]
 permuteFwd [] _ = []
@@ -525,6 +624,25 @@ makeRotIota info tau support
         fi = replicate rk info
     in  Lmad tau $ zip5 ss rs ns ps fi
   | otherwise = error "makeRotIota requires Inc or Dec!"
+
+getMonotonicityRots :: (Eq num, IntegralExp num) => Bool -> IxFun num -> DimInfo
+getMonotonicityRots _ (IxFun [] _ _) =
+  error "getMonotonicityRots: empty index function"
+getMonotonicityRots ignore_rots (IxFun (lmad:lmads) _ _) =
+  let mon1 = getLmadMonotonicity ignore_rots lmad
+  in  if all (==mon1) $ map (getLmadMonotonicity ignore_rots) lmads
+      then mon1 else Unknown
+
+getLmadMonotonicity :: (Eq num, IntegralExp num) => Bool -> Lmad num -> DimInfo
+getLmadMonotonicity ignore_rots (Lmad _ dims)
+  | all (isMonDim ignore_rots Inc) dims = Inc
+  | all (isMonDim ignore_rots Dec) dims = Dec
+  | otherwise                           = Unknown
+
+isMonDim :: (Eq num, IntegralExp num) => Bool -> DimInfo ->
+            (num, num, num, Int, DimInfo) -> Bool
+isMonDim ignore_rots mon (s,r,_,_,info) =
+  s == 0 || ((ignore_rots || r == 0) && mon == info)
 
 --------------------------------
 --- Instances Implementation ---
