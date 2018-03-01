@@ -111,7 +111,7 @@
 -- -0.000443f32, 0.000283f32, -0.000084f32, 0.000129f32, 0.000419f32,
 -- -0.000178f32, -0.001124f32, -0.001211f32, 0.000297f32, 0.000291f32,
 -- 0.001163f32, 0.001455f32]]}
--- structure distributed { Kernel 6 }
+-- structure distributed { Kernel 7 }
 
 import "/futlib/math"
 
@@ -122,7 +122,7 @@ let main(nfeatures: i32, npoints: i32, nclusters: i32): [nclusters][nfeatures]f3
   let points = map (\(i: i32): [nfeatures]f32  ->
                      map (*100f32) (map f32.sin (map r32 (map (^i) (iota(nfeatures)))))
                   ) (iota(npoints)) in
-  stream_red_per (\(acc: *[nclusters][nfeatures]f32)
+  stream_red (\(acc: *[nclusters][nfeatures]f32)
                   (elem: *[nclusters][nfeatures]f32): *[nclusters][nfeatures]f32  ->
                  map (\(x: []f32) (y: []f32): [nfeatures]f32  ->
                            map (+) x y) acc elem) (

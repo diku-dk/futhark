@@ -177,6 +177,8 @@ bind vars body = do
   where bind' vars' env = env { envNameMap = M.fromList (zip vars vars')
                                              `M.union` envNameMap env }
 
+-- | Rename some statements, then execute an action with the name
+-- substitutions induced by the statements active.
 renamingStms :: Renameable lore => Stms lore -> (Stms lore -> RenameM a) -> RenameM a
 renamingStms stms m = descend mempty stms
   where descend stms' rem_stms = case stmsHead rem_stms of

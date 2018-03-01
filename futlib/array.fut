@@ -2,7 +2,7 @@
 
 import "/futlib/math"
 
--- | The size of the outer dimensionion of an array.
+-- | The size of the outer dimension of an array.
 let length [n] 't (_: [n]t) = n
 
 -- | Is the array empty?

@@ -565,7 +565,12 @@ simplifyExp (If cond tbranch fbranch (IfAttr ts ifsort)) = do
   -- across branches.
   cond' <- simplify cond
   ts' <- mapM simplify ts
-  let ds = map (const Observe) (bodyResult tbranch)
+  -- FIXME: we have to be conservative about the diet here, because we
+  -- lack proper ifnormation.  Something is wrong with the order in
+  -- which the simplifier does things - it should be purely bottom-up
+  -- (or else, If expressions should indicate explicitly the diet of
+  -- their return types).
+  let ds = map (const Consume) (bodyResult tbranch)
   tbranch' <- localVtable (ST.updateBounds True cond) $ simplifyBody ds tbranch
   fbranch' <- localVtable (ST.updateBounds False cond) $ simplifyBody ds fbranch
   (tbranch'',fbranch'', hoisted) <- hoistCommon tbranch' fbranch'
