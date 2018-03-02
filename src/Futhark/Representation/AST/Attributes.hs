@@ -90,6 +90,12 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp (BinOp SMod{} _ _) = False
         safeBasicOp (BinOp UMod{} _ (Constant y)) = not $ zeroIsh y
         safeBasicOp (BinOp UMod{} _ _) = False
+
+        safeBasicOp (BinOp SQuot{} _ (Constant y)) = not $ zeroIsh y
+        safeBasicOp (BinOp SQuot{} _ _) = False
+        safeBasicOp (BinOp SRem{} _ (Constant y)) = not $ zeroIsh y
+        safeBasicOp (BinOp SRem{} _ _) = False
+
         safeBasicOp (BinOp Pow{} _ (Constant y)) = not $ negativeIsh y
         safeBasicOp (BinOp Pow{} _ _) = False
         safeBasicOp ArrayLit{} = True
