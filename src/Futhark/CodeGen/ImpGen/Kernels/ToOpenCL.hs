@@ -449,8 +449,12 @@ generateTransposeFunction bt =
                  (BinOpExp LogOr onearr noprob_widthheight)
                  (BinOpExp LogOr width_is_one height_is_one))
 
+        input_is_empty = CmpOpExp (CmpEq $ IntType Int32)
+                         (asExp num_arrays_p * asExp x_p * asExp y_p) 0
+
         transpose_code =
-          ImpOpenCL.If can_use_copy
+          ImpOpenCL.If input_is_empty mempty
+          (ImpOpenCL.If can_use_copy
             copy_code
             (ImpOpenCL.If should_use_lowwidth
               lowwidth_transpose_code
@@ -458,7 +462,7 @@ generateTransposeFunction bt =
                 lowheight_transpose_code
                 (ImpOpenCL.If should_use_small
                   small_transpose_code
-                  normal_transpose_code)))
+                  normal_transpose_code))))
 
         copy_code =
           let num_bytes =
