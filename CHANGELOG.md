@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+   * Transpositions in generated OpenCL code no longer crashes on
+     large but empty arrays (#483).
+
 ## [0.3.1]
 
 ### Added
