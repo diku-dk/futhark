@@ -247,6 +247,27 @@ bindLoopVar var it bound =
                                    _     -> id
 
 -- | We are willing to hoist potentially unsafe statements out of
+-- branches, but they most be protected by adding a branch on top of
+-- them.  (This means such hoisting is not worth it unless they are in
+-- turn hoisted out of a loop somewhere.)
+protectIfHoisted :: SimplifiableLore lore =>
+                    SubExp -- ^ Branch condition.
+                 -> Bool -- ^ Which side of the branch are we
+                         -- protecting here?
+                 -> SimpleM lore (a, Stms (Wise lore))
+                 -> SimpleM lore (a, Stms (Wise lore))
+protectIfHoisted cond side m = do
+  (x, stms) <- m
+  runBinder $ do
+    if any (not . safeExp . stmExp) stms
+      then do cond' <- if side then return cond
+                       else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
+              mapM_ (protectIf unsafeOrCostly cond') stms
+      else addStms stms
+    return x
+  where unsafeOrCostly e = not (safeExp e) || not (cheapExp e)
+
+-- | We are willing to hoist potentially unsafe statements out of
 -- loops, but they most be protected by adding a branch on top of
 -- them.
 protectLoopHoisted :: SimplifiableLore lore =>
@@ -260,7 +281,7 @@ protectLoopHoisted ctx val form m = do
   runBinder $ do
     if any (not . safeExp . stmExp) stms
       then do is_nonempty <- checkIfNonEmpty
-              mapM_ (protectUnsafe is_nonempty) stms
+              mapM_ (protectIf (not . safeExp) is_nonempty) stms
       else addStms stms
     return x
   where checkIfNonEmpty =
@@ -274,27 +295,35 @@ protectLoopHoisted ctx val form m = do
               letSubExp "loop_nonempty" $
               BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
 
-        protectUnsafe is_nonempty (Let pat (StmAux cs _) e)
-          | not $ safeExp e = do
-              nonempty_body <- eBody [pure e]
-              empty_body <- eBody $ map (emptyOfType $ patternContextNames pat)
-                                        (patternValueTypes pat)
-              if_ts <- expTypesFromPattern pat
-              certifying cs $
-                letBind_ pat $ If is_nonempty nonempty_body empty_body $
-                IfAttr if_ts IfFallback
-        protectUnsafe _ stm =
-          addStm stm
+protectIf :: MonadBinder m => (Exp (Lore m) -> Bool) -> SubExp -> Stm (Lore m) -> m ()
+protectIf _ taken (Let pat (StmAux cs _)
+                   (If cond taken_body untaken_body (IfAttr if_ts IfFallback))) = do
+  cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
+  certifying cs $
+    letBind_ pat $ If cond' taken_body untaken_body $
+    IfAttr if_ts IfFallback
+protectIf f taken (Let pat (StmAux cs _) e)
+  | f e = do
+      taken_body <- eBody [pure e]
+      untaken_body <- eBody $ map (emptyOfType $ patternContextNames pat)
+                                  (patternValueTypes pat)
+      if_ts <- expTypesFromPattern pat
+      certifying cs $
+        letBind_ pat $ If taken taken_body untaken_body $
+        IfAttr if_ts IfFallback
+protectIf _ _ stm =
+  addStm stm
 
-        emptyOfType _ Mem{} =
-          fail "protectLoopHoisted: Cannot hoist non-existential memory."
-        emptyOfType _ (Prim pt) =
-          return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
-        emptyOfType ctx_names (Array pt shape _) = do
-          let dims = map zeroIfContext $ shapeDims shape
-          return $ BasicOp $ Scratch pt dims
-          where zeroIfContext (Var v) | v `elem` ctx_names = intConst Int32 0
-                zeroIfContext se = se
+emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
+emptyOfType _ Mem{} =
+  fail "emptyOfType: Cannot hoist non-existential memory."
+emptyOfType _ (Prim pt) =
+  return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
+emptyOfType ctx_names (Array pt shape _) = do
+  let dims = map zeroIfContext $ shapeDims shape
+  return $ BasicOp $ Scratch pt dims
+  where zeroIfContext (Var v) | v `elem` ctx_names = intConst Int32 0
+        zeroIfContext se = se
 
 -- | Statements that are not worth hoisting out of loops, because they
 -- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
@@ -385,6 +414,9 @@ isFalse b _ _ = not b
 orIf :: BlockPred lore -> BlockPred lore -> BlockPred lore
 orIf p1 p2 body need = p1 body need || p2 body need
 
+andAlso :: BlockPred lore -> BlockPred lore -> BlockPred lore
+andAlso p1 p2 body need = p1 body need && p2 body need
+
 isConsumed :: BlockPred lore
 isConsumed utable = any (`UT.isConsumed` utable) . patternNames . stmPattern
 
@@ -429,45 +461,76 @@ isInPlaceBound _ = isUpdate . stmExp
 
 isNotCheap :: Attributes lore => BlockPred lore
 isNotCheap _ = not . cheapStm
-  where cheapStm = cheap . stmExp
-        cheap (BasicOp BinOp{})        = True
-        cheap (BasicOp SubExp{})       = True
-        cheap (BasicOp UnOp{})         = True
-        cheap (BasicOp CmpOp{})        = True
-        cheap (BasicOp ConvOp{})       = True
-        cheap (BasicOp Copy{})         = False
-        cheap DoLoop{}                 = False
-        cheap (If _ tbranch fbranch _) = all cheapStm (bodyStms tbranch) &&
-                                         all cheapStm (bodyStms fbranch)
-        cheap (Op op)                  = cheapOp op
-        cheap _                        = True -- Used to be False, but
-                                              -- let's try it out.
+
+cheapStm :: Attributes lore => Stm lore -> Bool
+cheapStm = cheapExp . stmExp
+
+cheapExp :: Attributes lore => Exp lore -> Bool
+cheapExp (BasicOp BinOp{})        = True
+cheapExp (BasicOp SubExp{})       = True
+cheapExp (BasicOp UnOp{})         = True
+cheapExp (BasicOp CmpOp{})        = True
+cheapExp (BasicOp ConvOp{})       = True
+cheapExp (BasicOp Copy{})         = False
+cheapExp DoLoop{}                 = False
+cheapExp (If _ tbranch fbranch _) = all cheapStm (bodyStms tbranch) &&
+                                    all cheapStm (bodyStms fbranch)
+cheapExp (Op op)                  = cheapOp op
+cheapExp _                        = True -- Used to be False, but
+                                         -- let's try it out.
+
+stmIs :: (Stm lore -> Bool) -> BlockPred lore
+stmIs f _ = f
+
+loopInvariantStm :: Attributes lore => ST.SymbolTable lore -> Stm lore -> Bool
+loopInvariantStm vtable =
+  all (`S.member` ST.availableAtClosestLoop vtable) . freeInStm
+
 hoistCommon :: SimplifiableLore lore =>
-               SimplifiedBody lore Result
+               SubExp -> IfSort
+            -> SimplifiedBody lore Result
             -> SimplifiedBody lore Result
             -> SimpleM lore (Body (Wise lore), Body (Wise lore), Stms (Wise lore))
-hoistCommon ((res1, usages1), stms1) ((res2, usages2), stms2) = do
+hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
   is_alloc_fun <- asksEngineEnv $ isAllocation  . envHoistBlockers
   getArrSz_fun <- asksEngineEnv $ getArraySizes . envHoistBlockers
   branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
-  let hoistbl_nms = filterBnds is_alloc_fun getArrSz_fun $
-                    stmsToList $ stms1<>stms2
-      -- "isNotHoistableBnd hoistbl_nms" ensures that only the (transitive closure)
-      -- of the bindings used for allocations and shape computations are if-hoistable.
-      block = branch_blocker `orIf` isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound `orIf`
-              isNotHoistableBnd hoistbl_nms
   vtable <- askVtable
+  let -- We are unwilling to hoist things that are unsafe or costly,
+      -- *except* if they are invariant to the most enclosing loop,
+      -- because in that case they will also be hoisted past that
+      -- loop.
+      --
+      -- "isNotHoistableBnd hoistbl_nms" ensures that only the
+      -- (transitive closure) of the bindings used for allocations,
+      -- shape computations, and expensive loop-invariant operations
+      -- are if-hoistable.
+      cond_loop_invariant =
+        all (`S.member` ST.availableAtClosestLoop vtable) $ freeIn cond
+      desirableToHoist stm =
+          is_alloc_fun stm ||
+          (ST.loopDepth vtable > 0 &&
+           cond_loop_invariant &&
+           ifsort /= IfFallback &&
+           loopInvariantStm vtable stm)
+      hoistbl_nms = filterBnds desirableToHoist getArrSz_fun $
+                    stmsToList $ stms1<>stms2
+      block = branch_blocker `orIf`
+              ((isNotSafe `orIf` isNotCheap) `andAlso` stmIs (not . desirableToHoist))
+              `orIf` isInPlaceBound `orIf` isNotHoistableBnd hoistbl_nms
   rules <- asksEngineEnv envRules
-  (body1_bnds', safe1) <- hoistStms rules block vtable usages1 stms1
-  (body2_bnds', safe2) <- hoistStms rules block vtable usages2 stms2
+  (body1_bnds', safe1) <- protectIfHoisted cond True $
+                          hoistStms rules block vtable usages1 stms1
+  (body2_bnds', safe2) <- protectIfHoisted cond False $
+                          hoistStms rules block vtable usages2 stms2
   let hoistable = safe1 <> safe2
   body1' <- constructBody body1_bnds' res1
   body2' <- constructBody body2_bnds' res2
   return (body1', body2', hoistable)
-  where filterBnds is_alloc_fn getArrSz_fn all_bnds =
+  where filterBnds interesting getArrSz_fn all_bnds =
           let sz_nms     = mconcat $ map getArrSz_fn all_bnds
               sz_needs   = transClosSizes all_bnds sz_nms []
-              alloc_bnds = filter is_alloc_fn all_bnds
+              alloc_bnds = filter interesting all_bnds
               sel_nms    = S.fromList $
                            concatMap (patternNames . stmPattern)
                                      (sz_needs ++ alloc_bnds)
@@ -480,9 +543,8 @@ hoistCommon ((res1, usages1), stms1) ((res2, usages2), stms2) = do
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
         hasPatName nms bnd = intersects nms $ S.fromList $
                              patternNames $ stmPattern bnd
-        isNotHoistableBnd :: Names -> BlockPred m
         isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit{})) = False
-        isNotHoistableBnd nms _ bnd = not $ hasPatName nms bnd
+        isNotHoistableBnd nms _ stm = not (hasPatName nms stm)
 
 -- | Simplify a single 'Body'.
 simplifyBody :: SimplifiableLore lore =>
@@ -573,7 +635,7 @@ simplifyExp (If cond tbranch fbranch (IfAttr ts ifsort)) = do
   let ds = map (const Consume) (bodyResult tbranch)
   tbranch' <- localVtable (ST.updateBounds True cond) $ simplifyBody ds tbranch
   fbranch' <- localVtable (ST.updateBounds False cond) $ simplifyBody ds fbranch
-  (tbranch'',fbranch'', hoisted) <- hoistCommon tbranch' fbranch'
+  (tbranch'',fbranch'', hoisted) <- hoistCommon cond' ifsort tbranch' fbranch'
   return (If cond' tbranch'' fbranch'' $ IfAttr ts' ifsort, hoisted)
 
 simplifyExp (DoLoop ctx val form loopbody) = do
