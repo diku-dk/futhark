@@ -108,6 +108,8 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp Concat{} = True
         safeBasicOp Reshape{} = True
         safeBasicOp Manifest{} = True
+        safeBasicOp Iota{} = True
+        safeBasicOp Replicate{} = True
         safeBasicOp _ = False
 
 safeExp (DoLoop _ _ _ body) = safeBody body
