@@ -3,7 +3,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Analysis.SymbolTable
-  ( SymbolTable (bindings)
+  ( SymbolTable (bindings, loopDepth, availableAtClosestLoop)
   , empty
   , fromScope
   , toScope
@@ -80,12 +80,17 @@ import qualified Futhark.Representation.AST.Attributes.Ranges as Ranges
 data SymbolTable lore = SymbolTable {
     loopDepth :: Int
   , bindings :: M.Map VName (Entry lore)
+  , availableAtClosestLoop :: Names
+    -- ^ Which names are available just before the most enclosing
+    -- loop?
   }
 
 instance Sem.Semigroup (SymbolTable lore) where
   table1 <> table2 =
     SymbolTable { loopDepth = max (loopDepth table1) (loopDepth table2)
                 , bindings = bindings table1 <> bindings table2
+                , availableAtClosestLoop = availableAtClosestLoop table1 <>
+                                           availableAtClosestLoop table2
                 }
 
 instance Monoid (SymbolTable lore) where
@@ -93,7 +98,7 @@ instance Monoid (SymbolTable lore) where
   mappend = (Sem.<>)
 
 empty :: SymbolTable lore
-empty = SymbolTable 0 M.empty
+empty = SymbolTable 0 M.empty mempty
 
 fromScope :: Attributes lore => Scope lore -> SymbolTable lore
 fromScope = M.foldlWithKey' insertFreeVar' empty
@@ -138,8 +143,8 @@ genCastSymbolTable :: (LoopVarEntry fromlore -> Entry tolore)
                    -> (FreeVarEntry fromlore -> Entry tolore)
                    -> SymbolTable fromlore
                    -> SymbolTable tolore
-genCastSymbolTable loopVar letBound fParam lParam freeVar (SymbolTable depth entries) =
-  SymbolTable depth $ M.map onEntry entries
+genCastSymbolTable loopVar letBound fParam lParam freeVar (SymbolTable depth entries loopfree) =
+  SymbolTable depth (M.map onEntry entries) loopfree
   where onEntry (LoopVar entry) = loopVar entry
         onEntry (LetBound entry) = letBound entry
         onEntry (FParam entry) = fParam entry
@@ -147,7 +152,9 @@ genCastSymbolTable loopVar letBound fParam lParam freeVar (SymbolTable depth ent
         onEntry (FreeVar entry) = freeVar entry
 
 deepen :: SymbolTable lore -> SymbolTable lore
-deepen vtable = vtable { loopDepth = loopDepth vtable + 1 }
+deepen vtable = vtable { loopDepth = loopDepth vtable + 1,
+                         availableAtClosestLoop = S.fromList $ M.keys $ bindings vtable
+                       }
 
 -- | Indexing a delayed array if possible.
 type IndexArray = [PrimExp VName] -> Maybe (PrimExp VName, Certificates)
