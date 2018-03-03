@@ -484,8 +484,8 @@ rebase newbase@(IxFun (lmad_base:lmads_base) shp_base cg_base)
     lmads' <- take (length lmads - 1) lmads ++ lmads_base''
     = IxFun lmads' shp_base (cg && cg_base)
 
--- | General case: just concatenate Lmads since this
---   refers to index-function composition -- always safe!
+-- General case: just concatenate Lmads since this
+-- refers to index-function composition -- always safe!
   | base ixfn == shape newbase =
     IxFun (lmads ++ lmad_base:lmads_base) shp_base (cg && cg_base)
 
@@ -560,11 +560,11 @@ setPermutation perm (Lmad tau srnps) =
 --setOffset :: num -> Lmad num -> Lmad num
 --setOffset tau (Lmad _ srnps) = Lmad tau srnps
 
-shaveoffRepeats :: (Eq num, IntegralExp num) => Lmad num ->
-                   (([Shape num], Shape num), Lmad num)
 -- | Given an input lmad, this function computes a repetition `r`
 --   and a new lmad `res`, such that `repeat r res` is identical
 --   to the input lmad`.
+shaveoffRepeats :: (Eq num, IntegralExp num) => Lmad num ->
+                   (([Shape num], Shape num), Lmad num)
 shaveoffRepeats lmad =
   let perm  = getPermutation lmad
       srnps = getLmadDims    lmad
