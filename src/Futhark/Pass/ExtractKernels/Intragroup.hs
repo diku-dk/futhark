@@ -29,7 +29,9 @@ import Futhark.Util (chunks)
 -- simply be sequentialised.  This includes sequential loops that
 -- contain maps, scans or reduction.  In the future, we could probably
 -- do something more clever.  Make sure that the amount of parallelism
--- to be exploited does not exceed the group size.
+-- to be exploited does not exceed the group size.  Further, as a hack
+-- we also consider include the size of all intermediate arrays as
+-- "parallelism to be exploited" to avoid exploding local memory.
 intraGroupParallelise :: (MonadFreshNames m, LocalScope Out.Kernels m) =>
                          KernelNest -> Lambda
                       -> m (Maybe (SubExp, SubExp,
@@ -136,6 +138,9 @@ intraGroupStm stm@(Let pat _ e) = do
         S.null . S.intersection group_variant .
         flip (M.findWithDefault mempty) deps $ v
       groupInvariant Constant{} = True
+
+  mapM_ (parallels . arrayDims) $ patternTypes pat
+
   case e of
     DoLoop ctx val (ForLoop i it bound inps) loopbody
       | groupInvariant bound ->
