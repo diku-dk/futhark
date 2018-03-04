@@ -149,6 +149,162 @@ of ``i32`` values.  There is no ``char`` type in Futhark.
    stringlit: '"' `stringchar` '"'
    stringchar: <any source character except "\" or newline or quotes>
 
+Declarations
+------------
+
+A Futhark module consists of a sequence of declarations (see also
+`Module System`_).  Each declaration is processed in order, and a
+declaration can only refer to names bound by preceding declarations.
+
+.. productionlist::
+   dec:   `fun_bind` | `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
+      : | "open" `mod_exp`
+      : | `default_dec`
+      : | "import" `stringlit`
+
+Declaring Functions and Values
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. productionlist::
+   fun_bind:   ("let" | "entry") (`id` | "(" `binop` ")") `type_param`* `pat`+ [":" `type`] "=" `exp`
+           : | ("let" | "entry") `pat` `binop` `pat` [":" `type`] "=" `exp`
+
+.. productionlist::
+   val_bind: "let" `id` [":" `type`] "=" `exp`
+
+Functions and values must be defined before they are used.  A function
+declaration must specify the name, parameters, and body
+of the function::
+
+  let name params...: rettype = body
+
+Full type inference is not supported, but the return type can be
+elided.  A parameter is written as ``(name: type)``.  Functions may
+not be recursive.  Optionally, the programmer may put *shape
+declarations* in the return type and parameter types; see `Shape
+Declarations`_.  A function can be *polymorphic* by using type
+parameters, in the same way as for `Type Abbreviations`_::
+
+  let reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
+
+Shape and type parameters are not passed explicitly when calling
+function, but are automatically derived.
+
+User-Defined Operators
+~~~~~~~~~~~~~~~~~~~~~~
+
+Infix operators are defined much like functions::
+
+  let (p1: t1) op (p2: t2): rt = ...
+
+For example::
+
+  let (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
+
+A valid operator name is a non-empty sequence of characters chosen
+from the string ``"+-*/%=!><&^"``.  The fixity of an operator is
+determined by its first characters, which must correspond to a
+built-in operator.  Thus, ``+^`` binds like ``+``, whilst ``*^`` binds
+like ``*``.  The longest such prefix is used to determine fixity, so
+``>>=`` binds like ``>>``, not like ``>``.
+
+It is not permitted to define operators with the names ``&&`` or
+``||`` (although these as prefixes are accepted).  This is because a
+user-defined version of these operators would not be short-circuiting.
+User-defined operators behave exactly like functions, except for
+syntactically.
+
+A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
+This will result in the built-in polymorphic operator becoming
+inaccessible, except through the ``intrinsics`` module.
+
+An infix operator can also be defined with prefix notation, like an
+ordinary function, by enclosing it in parentheses::
+
+  let (+) (x: i32) (y: i32) = x - y
+
+This is necessary when defining operators that take type or shape
+parameters.
+
+.. _entry-points:
+
+Entry Points
+............
+
+Apart from declaring a function with the keyword ``let``, it can also
+be declared with ``entry``.  When the Futhark program is compiled any
+function declared with ``entry`` will be exposed as an entry point.
+If the Futhark program has been compiled as a library, these are the
+functions that will be exposed.  If compiled as an executable, you can
+use the ``--entry-point`` command line option of the generated
+executable to select the entry point you wish to run.
+
+Any function named ``main`` will always be considered an entry point,
+whether it is declared with ``entry`` or not.
+
+Value Declarations
+..................
+
+A named value/constant can be declared as follows::
+
+  let name: type = definition
+
+The definition can be an arbitrary expression, including function
+calls and other values, although they must be in scope before the
+value is defined.  The type annotation can be elided if the value is
+defined before it is used.
+
+Values can be used in shape declarations, except in the return value
+of entry points.
+
+Type Abbreviations
+~~~~~~~~~~~~~~~~~~
+
+.. productionlist::
+   type_bind: "type" `id` `type_param`* "=" `type`
+   type_param: "[" `id` "]" | "'" `id`
+
+Type abbreviations function as shorthands for purpose of documentation
+or brevity.  After a type binding ``type t1 = t2``, the name ``t1``
+can be used as a shorthand for the type ``t2``.  Type abbreviations do
+not create new unique types.  After the previous binding, the types
+``t1`` and ``t2`` are entirely interchangeable.
+
+A type abbreviation can have zero or more parameters.  A type
+parameter enclosed with square brackets is a *shape parameter*, and
+can be used in the definition as an array dimension size, or as a
+dimension argument to other type abbreviations.  When passing an
+argument for a shape parameter, it must be encloses in square
+brackets.  Example::
+
+  type two_intvecs [n] = ([n]i32, [n]i32)
+
+  let (a,b): two_intvecs [2] = (iota 2, replicate 2 0)
+
+Shape parameters work much like shape declarations for arrays.  Like
+shape declarations, they can be elided via square brackets containing
+nothing.
+
+A type parameter prefixed with a single quote is a *type parameter*.
+It is in scope as a type in the definition of the type abbreviation.
+Whenever the type abbreviation is used in a type expression, a type
+argument must be passed for the parameter.  Type arguments need not be
+prefixed with single quotes::
+
+  type two_vecs [n] 't = ([n]t, [n]t)
+  type two_intvecs [n] = two_vecs [n] i32
+  let (a,b): two_vecs [2] i32 = (iota 2, replicate 2 0)
+
+When using uniqueness attributes with type abbreviations, inner
+uniqueness attributes are overrided by outer ones::
+
+  type unique_ints = *[]i32
+  type nonunique_int_lists = []unique_ints
+  type unique_int_lists = *nonunique_int_lists
+
+  -- Error: using non-unique value for a unique return value.
+  let f (p: nonunique_int_lists): unique_int_lists = p
+
 Expressions
 -----------
 
@@ -731,7 +887,7 @@ with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
 Shape Declarations
-------------------
+~~~~~~~~~~~~~~~~~~
 
 Whenever a pattern occurs (in ``let``, ``loop``, and function
 parameters), as well as in return types, *shape declarations* may be
@@ -787,163 +943,6 @@ An *operator section* that is equivalent to ``\y -> x *binop* y``.
 ...............
 
 An *operator section* that is equivalent to ``\x -> x *binop* y``.
-
-Declarations
-------------
-
-A Futhark module consists of a sequence of declarations (see also
-`Module System`_).  Each declaration is processed in order, and a
-declaration can only refer to names bound by preceding declarations.
-
-.. productionlist::
-   dec:   `fun_bind` | `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
-      : | "open" `mod_exp`
-      : | `default_dec`
-      : | "import" `stringlit`
-
-Declaring Functions and Values
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. productionlist::
-   fun_bind:   ("let" | "entry") (`id` | "(" `binop` ")") `type_param`* `pat`+ [":" `type`] "=" `exp`
-           : | ("let" | "entry") `pat` `binop` `pat` [":" `type`] "=" `exp`
-
-.. productionlist::
-   val_bind: "let" `id` [":" `type`] "=" `exp`
-
-Functions and values must be defined before they are used.  A function
-declaration must specify the name, parameters, and body
-of the function::
-
-  let name params...: rettype = body
-
-Full type inference is not supported, but the return type can be
-elided.  A parameter is written as ``(name: type)``.  Functions may
-not be recursive.  Optionally, the programmer may put *shape
-declarations* in the return type and parameter types; see `Shape
-Declarations`_.  A function can be *polymorphic* by using type
-parameters, in the same way as for `Type Abbreviations`_::
-
-  let reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
-
-Shape and type parameters are not passed explicitly when calling
-function, but are automatically derived.
-
-User-Defined Operators
-~~~~~~~~~~~~~~~~~~~~~~
-
-Infix operators are defined much like functions::
-
-  let (p1: t1) op (p2: t2): rt = ...
-
-For example::
-
-  let (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
-
-A valid operator name is a non-empty sequence of characters chosen
-from the string ``"+-*/%=!><&^"``.  The fixity of an operator is
-determined by its first characters, which must correspond to a
-built-in operator.  Thus, ``+^`` binds like ``+``, whilst ``*^`` binds
-like ``*``.  The longest such prefix is used to determine fixity, so
-``>>=`` binds like ``>>``, not like ``>``.
-
-It is not permitted to define operators with the names ``&&`` or
-``||`` (although these as prefixes are accepted).  This is because a
-user-defined version of these operators would not be short-circuiting.
-User-defined operators behave exactly like functions, except for
-syntactically.
-
-A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
-This will result in the built-in polymorphic operator becoming
-inaccessible, except through the ``intrinsics`` module.
-
-An infix operator can also be defined with prefix notation, like an
-ordinary function, by enclosing it in parentheses::
-
-  let (+) (x: i32) (y: i32) = x - y
-
-This is necessary when defining operators that take type or shape
-parameters.
-
-.. _entry-points:
-
-Entry Points
-............
-
-Apart from declaring a function with the keyword ``let``, it can also
-be declared with ``entry``.  When the Futhark program is compiled any
-function declared with ``entry`` will be exposed as an entry point.
-If the Futhark program has been compiled as a library, these are the
-functions that will be exposed.  If compiled as an executable, you can
-use the ``--entry-point`` command line option of the generated
-executable to select the entry point you wish to run.
-
-Any function named ``main`` will always be considered an entry point,
-whether it is declared with ``entry`` or not.
-
-Value Declarations
-..................
-
-A named value/constant can be declared as follows::
-
-  let name: type = definition
-
-The definition can be an arbitrary expression, including function
-calls and other values, although they must be in scope before the
-value is defined.  The type annotation can be elided if the value is
-defined before it is used.
-
-Values can be used in shape declarations, except in the return value
-of entry points.
-
-Type Abbreviations
-~~~~~~~~~~~~~~~~~~
-
-.. productionlist::
-   type_bind: "type" `id` `type_param`* "=" `type`
-   type_param: "[" `id` "]" | "'" `id`
-
-Type abbreviations function as shorthands for purpose of documentation
-or brevity.  After a type binding ``type t1 = t2``, the name ``t1``
-can be used as a shorthand for the type ``t2``.  Type abbreviations do
-not create new unique types.  After the previous binding, the types
-``t1`` and ``t2`` are entirely interchangeable.
-
-A type abbreviation can have zero or more parameters.  A type
-parameter enclosed with square brackets is a *shape parameter*, and
-can be used in the definition as an array dimension size, or as a
-dimension argument to other type abbreviations.  When passing an
-argument for a shape parameter, it must be encloses in square
-brackets.  Example::
-
-  type two_intvecs [n] = ([n]i32, [n]i32)
-
-  let (a,b): two_intvecs [2] = (iota 2, replicate 2 0)
-
-Shape parameters work much like shape declarations for arrays.  Like
-shape declarations, they can be elided via square brackets containing
-nothing.
-
-A type parameter prefixed with a single quote is a *type parameter*.
-It is in scope as a type in the definition of the type abbreviation.
-Whenever the type abbreviation is used in a type expression, a type
-argument must be passed for the parameter.  Type arguments need not be
-prefixed with single quotes::
-
-  type two_vecs [n] 't = ([n]t, [n]t)
-  type two_intvecs [n] = two_vecs [n] i32
-  let (a,b): two_vecs [2] i32 = (iota 2, replicate 2 0)
-
-When using uniqueness attributes with type abbreviations, inner
-uniqueness attributes are overrided by outer ones::
-
-  type unique_ints = *[]i32
-  type nonunique_int_lists = []unique_ints
-  type unique_int_lists = *nonunique_int_lists
-
-  -- Error: using non-unique value for a unique return value.
-  let f (p: nonunique_int_lists): unique_int_lists = p
-
 
 Module System
 -------------
