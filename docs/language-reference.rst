@@ -308,12 +308,12 @@ A type abbreviation can have zero or more parameters.  A type
 parameter enclosed with square brackets is a *shape parameter*, and
 can be used in the definition as an array dimension size, or as a
 dimension argument to other type abbreviations.  When passing an
-argument for a shape parameter, it must be encloses in square
+argument for a shape parameter, it must be enclosed in square
 brackets.  Example::
 
   type two_intvecs [n] = ([n]i32, [n]i32)
 
-  let (a,b): two_intvecs [2] = (iota 2, replicate 2 0)
+  let x: two_intvecs [2] = (iota 2, replicate 2 0)
 
 Shape parameters work much like shape declarations for arrays.  Like
 shape declarations, they can be elided via square brackets containing
@@ -327,7 +327,7 @@ prefixed with single quotes::
 
   type two_vecs [n] 't = ([n]t, [n]t)
   type two_intvecs [n] = two_vecs [n] i32
-  let (a,b): two_vecs [2] i32 = (iota 2, replicate 2 0)
+  let x: two_vecs [2] i32 = (iota 2, replicate 2 0)
 
 When using uniqueness attributes with type abbreviations, inner
 uniqueness attributes are overrided by outer ones::
