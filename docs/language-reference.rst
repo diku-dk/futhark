@@ -791,6 +791,10 @@ An *operator section* that is equivalent to ``\x -> x *binop* y``.
 Declarations
 ------------
 
+A Futhark module consists of a sequence of declarations (see also
+`Module System`_).  Each declaration is processed in order, and a
+declaration can only refer to names bound by preceding declarations.
+
 .. productionlist::
    dec:   `fun_bind` | `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
       : | "open" `mod_exp`
@@ -801,24 +805,24 @@ Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   fun_bind:   ("let" | "entry") `id` `type_param`* `pat`+ [":" `type`] "=" `exp`
+   fun_bind:   ("let" | "entry") (`id` | "(" `binop` ")") `type_param`* `pat`+ [":" `type`] "=" `exp`
            : | ("let" | "entry") `pat` `binop` `pat` [":" `type`] "=" `exp`
 
 .. productionlist::
    val_bind: "let" `id` [":" `type`] "=" `exp`
 
 Functions and values must be defined before they are used.  A function
-declaration must specify the name, parameters, return type, and body
+declaration must specify the name, parameters, and body
 of the function::
 
   let name params...: rettype = body
 
-Type inference is not supported, and functions are fully monomorphic.
-A parameter is written as ``(name: type)``.  Functions may not be
-recursive.  Optionally, the programmer may put *shape declarations* in
-the return type and parameter types; see `Shape Declarations`_.  A
-function can be *polymorphic* by using type parameters, in the same
-way as for `Type Abbreviations`_::
+Full type inference is not supported, but the return type can be
+elided.  A parameter is written as ``(name: type)``.  Functions may
+not be recursive.  Optionally, the programmer may put *shape
+declarations* in the return type and parameter types; see `Shape
+Declarations`_.  A function can be *polymorphic* by using type
+parameters, in the same way as for `Type Abbreviations`_::
 
   let reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
@@ -851,14 +855,22 @@ syntactically.
 
 A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
 This will result in the built-in polymorphic operator becoming
-inaccessible, except through the ``Intrinsics`` module.
+inaccessible, except through the ``intrinsics`` module.
+
+An infix operator can also be defined with prefix notation, like an
+ordinary function, by enclosing it in parentheses::
+
+  let (+) (x: i32) (y: i32) = x - y
+
+This is necessary when defining operators that take type or shape
+parameters.
 
 .. _entry-points:
 
 Entry Points
 ............
 
-Apart from declaring a function with the keyword ``fun``, it can also
+Apart from declaring a function with the keyword ``let``, it can also
 be declared with ``entry``.  When the Futhark program is compiled any
 function declared with ``entry`` will be exposed as an entry point.
 If the Futhark program has been compiled as a library, these are the
