@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * Transposing small arrays is now much faster when using OpenCL
      backend (#478).
 
+   * Infix operators can now be defined in prefix notation, e.g.:
+
+         let (+) (x: i32) (y: i32) = x - y
+
+     This permits them to have type- and shape parameters.
+
 ### Removed
 
 ### Changed

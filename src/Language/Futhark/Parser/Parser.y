@@ -380,16 +380,20 @@ BindingBinOp :: { Name }
                    return name }
       | '-'   { nameFromString "-" }
 
+BindingId :: { (Name, SrcLoc) }
+     : id                   { let L loc (ID name) = $1 in (name, loc) }
+     | '(' BindingBinOp ')' { ($2, $1) }
+     | '(' BindingUnOp ')'  { ($2, $1) }
 
 Val    :: { ValBindBase NoInfo Name }
-Val     : let id TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
-          { let L loc (ID name) = $2
+Val     : let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+          { let (name, loc) = $2
             in ValBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
                $3 $4 $7 Nothing loc
           }
 
-        | entry id TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
-          { let L loc (ID name) = $2
+        | entry BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+          { let (name, loc) = $2
             in ValBind True name (fmap declaredType $5) NoInfo
                $3 $4 $7 Nothing loc }
 
