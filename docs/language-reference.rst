@@ -330,7 +330,7 @@ prefixed with single quotes::
   let x: two_vecs [2] i32 = (iota 2, replicate 2 0)
 
 When using uniqueness attributes with type abbreviations, inner
-uniqueness attributes are overrided by outer ones::
+uniqueness attributes are overridden by outer ones::
 
   type unique_ints = *[]i32
   type nonunique_int_lists = []unique_ints
