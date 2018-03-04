@@ -229,7 +229,7 @@ parameters.
 .. _entry-points:
 
 Entry Points
-............
+~~~~~~~~~~~~
 
 Apart from declaring a function with the keyword ``let``, it can also
 be declared with ``entry``.  When the Futhark program is compiled any
@@ -243,7 +243,7 @@ Any function named ``main`` will always be considered an entry point,
 whether it is declared with ``entry`` or not.
 
 Value Declarations
-..................
+~~~~~~~~~~~~~~~~~~
 
 A named value/constant can be declared as follows::
 
@@ -256,6 +256,40 @@ defined before it is used.
 
 Values can be used in shape declarations, except in the return value
 of entry points.
+
+Shape Declarations
+~~~~~~~~~~~~~~~~~~
+
+Whenever a pattern occurs (in ``let``, ``loop``, and function
+parameters), as well as in return types, *shape declarations* may be
+used to express invariants about the shapes of arrays
+that are accepted or produced by the function.  For example::
+
+  let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
+    map (+) a b
+
+We use a *shape parameter*, ``[n]``, to explicitly quantify the names
+of shapes.  The ``[n]`` parameter need not be explicitly passed when
+calling ``f``.  Rather, its value is implicitly deduced from the
+arguments passed for the value parameters.  Any size parameter must be
+used in a value parameter.  This is an error::
+
+  let f [n] (x: i32) = n
+
+A shape declaration can also be an integer constant (with no suffix).
+The dimension names bound can be used as ordinary variables within the
+scope of the parameters.  If a function is called with arguments, or
+returns a value, that does not fulfill the shape constraints, the
+program will fail with a runtime error.  Likewise, if a pattern with
+shape declarations is attempted bound to a value that does not fulfill
+the invariants, the program will fail with a runtime error.  For
+example, this will fail::
+
+  let x: [3]i32 = iota 2
+
+While this will succeed and bind ``n`` to ``2``::
+
+  let [n] x: [n]i32 = iota 2
 
 Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
@@ -885,40 +919,6 @@ If none of the functions return ``True``, the element is added to a
 catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
-
-Shape Declarations
-~~~~~~~~~~~~~~~~~~
-
-Whenever a pattern occurs (in ``let``, ``loop``, and function
-parameters), as well as in return types, *shape declarations* may be
-used to express invariants about the shapes of arrays
-that are accepted or produced by the function.  For example::
-
-  let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
-    map (+) a b
-
-We use a *shape parameter*, ``[n]``, to explicitly quantify the names
-of shapes.  The ``[n]`` parameter need not be explicitly passed when
-calling ``f``.  Rather, its value is implicitly deduced from the
-arguments passed for the value parameters.  Any size parameter must be
-used in a value parameter.  This is an error::
-
-  let f [n] (x: i32) = n
-
-A shape declaration can also be an integer constant (with no suffix).
-The dimension names bound can be used as ordinary variables within the
-scope of the parameters.  If a function is called with arguments, or
-returns a value, that does not fulfill the shape constraints, the
-program will fail with a runtime error.  Likewise, if a pattern with
-shape declarations is attempted bound to a value that does not fulfill
-the invariants, the program will fail with a runtime error.  For
-example, this will fail::
-
-  let x: [3]i32 = iota 2
-
-While this will succeed and bind ``n`` to ``2``::
-
-  let [n] x: [n]i32 = iota 2
 
 Function Expressions
 ~~~~~~~~~~~~~~~~~~~~
