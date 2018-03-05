@@ -42,10 +42,10 @@ def umodN(x,y):
   return signed(unsigned(x) % unsigned(y))
 
 def squotN(x,y):
-  return np.int32(float(x) / float(y))
+  return np.floor_divide(np.abs(x), np.abs(y)) * np.sign(x) * np.sign(y)
 
 def sremN(x,y):
-  return np.fmod(x,y)
+  return np.remainder(np.abs(x), np.abs(y)) * np.sign(x)
 
 def sminN(x,y):
   return min(x,y)
