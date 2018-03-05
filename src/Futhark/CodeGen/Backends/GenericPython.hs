@@ -939,13 +939,19 @@ compileCode (Imp.DeclareScalar v Cert) =
 compileCode Imp.DeclareScalar{} = return ()
 
 compileCode (Imp.DeclareArray name DefaultSpace t vs) = do
-  atInit $ Assign (Field (Var "self") name') $
-    simpleCall "unwrapArray"
-    [Call (Var "np.array")
-      [Arg $ List $ map compilePrimValue vs,
-       ArgKeyword "dtype" $ Var $ compilePrimToNp t]]
+  -- It is important to store the Numpy array in a temporary variable
+  -- to prevent it from going "out-of-scope" before calling
+  -- unwrapArray (which internally uses the .ctype method); see
+  -- https://docs.scipy.org/doc/numpy/reference/generated/numpy.ndarray.ctypes.html
+  atInit $ Assign (Field (Var "self") arr_name) $ Call (Var "np.array")
+    [Arg $ List $ map compilePrimValue vs,
+     ArgKeyword "dtype" $ Var $ compilePrimToNp t]
+  atInit $
+    Assign (Field (Var "self") name') $
+    simpleCall "unwrapArray" [Field (Var "self") arr_name]
   stm $ Assign (Var name') $ Field (Var "self") name'
   where name' = compileName name
+        arr_name = name' <> "_arr"
 
 compileCode (Imp.DeclareArray name (Space space) t vs) =
   join $ asks envStaticArray <*>
