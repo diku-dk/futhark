@@ -105,7 +105,7 @@ def sext_T_i32(x):
   return np.int32(x)
 
 def sext_T_i64(x):
-  return np.int32(x)
+  return np.int64(x)
 
 def zext_i8_i8(x):
   return np.int8(np.uint8(x))
