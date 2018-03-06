@@ -601,7 +601,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
     ress <- forM (zip3 indexes values (map identName asOuts)) $ \(indexes', values', arr) -> do
       let saveInArray arr' (indexCur, valueCur) =
-            letExp "write_out" =<< eWriteArray arr' (eSubExp indexCur) (eSubExp valueCur)
+            letExp "write_out" =<< eWriteArray arr' [eSubExp indexCur] (eSubExp valueCur)
 
       foldM saveInArray arr $ zip indexes' values'
     return $ resultBody (map Var ress)
