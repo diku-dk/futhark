@@ -232,12 +232,34 @@ intraGroupStm stm@(Let pat _ e) = do
         forM (zip as_vs' (chunks as_ns $ zip is vs)) $ \(as_v, ivs'') -> do
           let saveInArray as_v' (i, v) =
                 letExp "scatter_dest" =<<
-                eWriteArray as_v' (eSubExp i) (eSubExp v)
+                eWriteArray as_v' [eSubExp i] (eSubExp v)
           Var <$> foldM saveInArray as_v ivs''
       sync <- letTupExp "scatter_res" =<< eIf (pure active)
         (pure $ mkBody active_stms active_res)
         (pure $ mkBody mempty $ map Var as_vs')
       letBind_ pat $ Op $ Out.Barrier $ map Var sync
+
+    BasicOp (Update dest slice (Var v)) -> do
+      let ws = sliceDims slice
+          activeForDim w i = BasicOp $ CmpOp (CmpSlt Int32) i w
+      parallels ws
+      dest' <- letExp "update_inp" $ Op $ Out.Barrier [Var dest]
+      let new_inds = unflattenIndex (map (primExpFromSubExp int32) ws)
+                                    (primExpFromSubExp int32 $ Var ltid)
+      new_inds' <- mapM (letSubExp "i" <=< toExp) new_inds
+      active <- letSubExp "active" =<<
+                foldBinOp LogAnd (constant True) =<<
+                mapM (letSubExp "active") (zipWith activeForDim ws new_inds')
+      (active_res, active_stms) <- collectStms $ do
+        slice' <-
+          mapM (letSubExp "j" <=< toExp) $
+          fixSlice (map (fmap $ primExpFromSubExp int32) slice) new_inds
+        letInPlace "update_res" dest' (map DimFix slice') $
+          BasicOp $ Index v $ map DimFix new_inds'
+      sync <- letSubExp "update_res" =<< eIf (eSubExp active)
+        (pure $ mkBody active_stms [Var active_res])
+        (pure $ mkBody mempty [Var dest'])
+      letBind_ pat $ Op $ Out.Barrier [sync]
 
     BasicOp (Copy arr) -> do
       arr_t <- lookupType arr

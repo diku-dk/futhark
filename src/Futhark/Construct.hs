@@ -303,25 +303,31 @@ eSplitArray arr sizes = do
 -- | Write to an index of the array, if within bounds.  Otherwise,
 -- nothing.  Produces the updated array.
 eWriteArray :: (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
-               VName -> m (Exp (Lore m)) -> m (Exp (Lore m))
+               VName -> [m (Exp (Lore m))] -> m (Exp (Lore m))
             -> m (Exp (Lore m))
-eWriteArray arr i v = do
+eWriteArray arr is v = do
   arr_t <- lookupType arr
-  let w = arraySize 0 arr_t
-  i' <- letSubExp "write_i" =<< i
+  let ws = arrayDims arr_t
+  is' <- mapM (letSubExp "write_i") =<< sequence is
   v' <- letSubExp "write_v" =<< v
-  less_than_zero <- letSubExp "less_than_zero" $
-    BasicOp $ CmpOp (CmpSlt Int32) i' (constant (0::Int32))
-  greater_than_size <- letSubExp "greater_than_size" $
-    BasicOp $ CmpOp (CmpSle Int32) w i'
-  outside_bounds <- letSubExp "outside_bounds" $
-    BasicOp $ BinOp LogOr less_than_zero greater_than_size
+  let checkDim w i = do
+        less_than_zero <- letSubExp "less_than_zero" $
+          BasicOp $ CmpOp (CmpSlt Int32) i (constant (0::Int32))
+        greater_than_size <- letSubExp "greater_than_size" $
+          BasicOp $ CmpOp (CmpSle Int32) w i
+        letSubExp "outside_bounds_dim" $
+          BasicOp $ BinOp LogOr less_than_zero greater_than_size
+
+  outside_bounds <-
+    letSubExp "outside_bounds" =<<
+    foldBinOp LogOr (constant False) =<<
+    zipWithM checkDim ws is'
 
   outside_bounds_branch <- insertStmsM $ resultBodyM [Var arr]
 
   in_bounds_branch <- insertStmsM $ do
     res <- letInPlace "write_out_inside_bounds" arr
-           (fullSlice arr_t [DimFix i']) $ BasicOp $ SubExp v'
+           (fullSlice arr_t (map DimFix is')) $ BasicOp $ SubExp v'
     resultBodyM [Var res]
 
   return $

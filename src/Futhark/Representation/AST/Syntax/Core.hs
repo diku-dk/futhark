@@ -45,6 +45,7 @@ module Futhark.Representation.AST.Syntax.Core
          , sliceIndices
          , sliceDims
          , unitSlice
+         , fixSlice
          , PatElemT (..)
 
          -- * Miscellaneous
@@ -301,6 +302,15 @@ sliceDims = mapMaybe dimSlice
 -- | A slice with a stride of one.
 unitSlice :: Num d => d -> d -> DimIndex d
 unitSlice offset n = DimSlice offset n 1
+
+-- | Fix the 'DimSlice's of a slice.  The number of indexes must equal
+-- the length of 'sliceDims' for the slice.
+fixSlice :: Num d => Slice d -> [d] -> [d]
+fixSlice (DimFix j:mis') is' =
+  j : fixSlice mis' is'
+fixSlice (DimSlice orig_k _ orig_s:mis') (i:is') =
+  (orig_k+i*orig_s) : fixSlice mis' is'
+fixSlice _ _ = []
 
 -- | An element of a pattern - consisting of an name (essentially a
 -- pair of the name andtype), a 'Bindage', and an addditional
