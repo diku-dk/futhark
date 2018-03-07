@@ -86,3 +86,23 @@ let and (xs: []bool): bool = reduce (&&) true xs
 
 -- | True if any of the input elements are true.
 let or (xs: []bool): bool = reduce (||) false xs
+
+-- | Apply the given function to each element of a single array.
+let map1 'a [n] 'x (f: a -> x) (as: [n]a): [n]x =
+  map f as
+
+-- | As 'map1', but with one more array.
+let map2 'a 'b [n] 'x (f: a -> b -> x) (as: [n]a) (bs: [n]a): [n]x =
+  map (\(a, b) -> f a b) (zip as bs)
+
+-- | As 'map2', but with one more array.
+let map3 'a 'b 'c [n] 'x (f: a -> b -> c -> x) (as: [n]a) (bs: [n]a) (cs: [n]a): [n]x =
+  map (\(a, b, c) -> f a b c) (zip as bs cs)
+
+-- | As 'map3', but with one more array.
+let map4 'a 'b 'c 'd [n] 'x (f: a -> b -> c -> d -> x) (as: [n]a) (bs: [n]a) (cs: [n]a) (ds: [n]a): [n]x =
+  map (\(a, b, c, d) -> f a b c d) (zip as bs cs ds)
+
+-- | As 'map4', but with one more array.
+let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [n]a) (cs: [n]a) (ds: [n]a) (es: [n]a): [n]x =
+  map (\(a, b, c, d, e) -> f a b c d e) (zip as bs cs ds es)
