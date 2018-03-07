@@ -1039,11 +1039,13 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
                    map DimNew (newDims reshape)
     addKernel $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
 
-maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d _ _ w))) acc =
+maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d _y ys w))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, _, nest, acc')
       | (outer, _) <- nest,
-        x:xs <- map snd $ loopNestingParamsAndArrs outer ->
+        x:xs <- map snd $ loopNestingParamsAndArrs outer,
+        length xs == length ys -> -- Cannot do this when concat'ing
+                                  -- with literals.
         localScope (typeEnvFromKernelAcc acc') $ do
           let d' = d + length (snd nest) + 1
               outerpat = loopNestingPattern $ fst nest
