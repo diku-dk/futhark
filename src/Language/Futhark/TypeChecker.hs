@@ -120,6 +120,9 @@ bindingTypeParams tparams = localEnv env
         typeParamEnv (TypeParamType v _) =
           mempty { envTypeTable =
                      M.singleton v $ TypeAbbr [] $ TypeVar (typeName v) [] }
+        typeParamEnv (TypeParamLiftedType v _) =
+          mempty { envTypeTable =
+                     M.singleton v $ TypeAbbr [] $ LiftedTypeVar (typeName v) }
 
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName])
 
@@ -132,7 +135,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
       checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
         vtype' <- checkTypeDecl vtype
         return (tparams', vtype')
-    rettype'' <- getType (srclocOf rettype') $ unInfo $ expandedType rettype'
+    let rettype'' = getType $ unInfo $ expandedType rettype'
     binding <- case rettype'' of
                  Left (params, rt) ->
                    return $ BoundV tparams' $ foldr (uncurry $ Arrow ()) rt params
@@ -176,6 +179,8 @@ checkSpecs (TypeSpec name ps doc loc : specs) =
               TypeArgDim (NamedDim $ qualName v) ploc
             paramToArg (TypeParamType v ploc) =
               TypeArgType (TypeVar (typeName v) []) ploc
+            paramToArg (TypeParamLiftedType v ploc) =
+              TypeArgType (LiftedTypeVar (typeName v)) ploc
 
 checkSpecs (ModSpec name sig loc : specs) =
   bindSpaced [(Term, name)] $ do
@@ -416,11 +421,6 @@ checkTypeBind (TypeBind name ps td doc loc) =
     td' <- bindingTypeParams ps' $ checkTypeDecl td
     bindSpaced [(Type, name)] $ do
       name' <- checkName Type name loc
-      r <- getType loc $ unInfo $ expandedType td'
-      case r of
-        Left _ -> throwError $ TypeError loc
-                  "Function types are not permitted in type abbreviations."
-        Right _ -> return ()
       return (mempty { envTypeTable =
                          M.singleton name' $ TypeAbbr ps' $ unInfo $ expandedType td',
                        envNameMap =
@@ -466,6 +466,9 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
   when (entry && any isTypeParam tparams) $
     throwError $ TypeError loc "Entry point functions may not be polymorphic."
 
+  when (entry && (any (not . patternOrderZero) params' || not (orderZero rettype))) $
+    throwError $ TypeError loc "Entry point functions may not be higher-order."
+
   return (mempty { envVtable =
                      M.singleton fname' $
                      BoundV tparams' $ foldr (uncurry (Arrow ()) . patternParam) rettype params'
@@ -473,9 +476,6 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                      M.singleton (Term, fname) $ qualName fname'
                  },
            ValBind entry fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
-
-  where isTypeParam TypeParamType{} = True
-        isTypeParam _ = False
 
 checkDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
 checkDec (ModDec struct) = do
@@ -636,6 +636,8 @@ matchMTys = matchMTys' mempty
                 pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
               matchTypeParam (TypeParamType x _) (TypeParamType y _) =
                 pure $ M.singleton x $ TypeSub $ TypeAbbr [] $ TypeVar (typeName y) []
+              matchTypeParam (TypeParamLiftedType x _) (TypeParamLiftedType y _) =
+                pure $ M.singleton x $ TypeSub $ TypeAbbr [] $ LiftedTypeVar (typeName y)
               matchTypeParam _ _ =
                 nomatch
 
@@ -818,10 +820,14 @@ newNamesForMTy orig_mty = do
           TypeParamDim (substitute p) loc
         substituteInTypeParam (TypeParamType p loc) =
           TypeParamType (substitute p) loc
+        substituteInTypeParam (TypeParamLiftedType p loc) =
+          TypeParamLiftedType (substitute p) loc
 
         substituteInType :: StructType -> StructType
         substituteInType (TypeVar (TypeName qs v) targs) =
           TypeVar (TypeName (map substitute qs) $ substitute v) $ map substituteInTypeArg targs
+        substituteInType (LiftedTypeVar (TypeName qs v)) =
+          LiftedTypeVar (TypeName (map substitute qs) $ substitute v)
         substituteInType (Prim t) =
           Prim t
         substituteInType (Record ts) =

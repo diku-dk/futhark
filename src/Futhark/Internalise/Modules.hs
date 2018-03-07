@@ -200,6 +200,10 @@ transformNames x = do
                         return $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope
                     , mapOnQualName = \v ->
                         return $ fst $ lookupSubstInScope v scope
+                    , mapOnType = pure
+                    , mapOnCompType = pure
+                    , mapOnStructType = pure
+                    , mapOnPatternType = pure
                     }
         onExp scope e =
           -- One expression is tricky, because it interacts with scoping rules.

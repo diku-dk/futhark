@@ -24,6 +24,7 @@ module Language.Futhark.Traversals
   , ASTMappable(..)
   ) where
 
+import           Control.Monad
 import qualified Data.Set                as S
 
 import           Language.Futhark.Syntax
@@ -32,9 +33,13 @@ import           Language.Futhark.Syntax
 -- of this structure expresses the operation to be performed on a
 -- given child.
 data ASTMapper m = ASTMapper {
-    mapOnExp      :: ExpBase Info VName -> m (ExpBase Info VName)
-  , mapOnName     :: VName -> m VName
-  , mapOnQualName :: QualName VName -> m (QualName VName)
+    mapOnExp         :: ExpBase Info VName -> m (ExpBase Info VName)
+  , mapOnName        :: VName -> m VName
+  , mapOnQualName    :: QualName VName -> m (QualName VName)
+  , mapOnType        :: TypeBase () () -> m (TypeBase () ())
+  , mapOnCompType    :: CompType -> m CompType
+  , mapOnStructType  :: StructType -> m StructType
+  , mapOnPatternType :: PatternType -> m PatternType
   }
 
 class ASTMappable x where
@@ -211,6 +216,7 @@ traverseType f g h (Array et shape u) =
   Array <$> traverseArrayElemType f g h et <*> traverse g shape <*> pure u
 traverseType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseType f g h (TypeVar t args) = TypeVar <$> f t <*> traverse (traverseTypeArg f g h) args
+traverseType f _ _ (LiftedTypeVar t) = LiftedTypeVar <$> f t
 traverseType f g h (Arrow als v t1 t2) =
   Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
 
@@ -236,16 +242,20 @@ traverseTypeArg :: Applicative f =>
 traverseTypeArg _ g _ (TypeArgDim d loc) = TypeArgDim <$> g d <*> pure loc
 traverseTypeArg f g h (TypeArgType t loc) = TypeArgType <$> traverseType f g h t <*> pure loc
 
+instance ASTMappable (TypeBase () ()) where
+  astMap tv = mapOnType tv <=< traverseType f pure pure
+    where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
+
 instance ASTMappable CompType where
-  astMap tv = traverseType f pure (astMap tv)
+  astMap tv = mapOnCompType tv <=< traverseType f pure (astMap tv)
     where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
 
 instance ASTMappable StructType where
-  astMap tv = traverseType f (astMap tv) pure
+  astMap tv = mapOnStructType tv <=< traverseType f (astMap tv) pure
     where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
 
 instance ASTMappable PatternType where
-  astMap tv = traverseType f (astMap tv) (astMap tv)
+  astMap tv = mapOnPatternType tv <=< traverseType f (astMap tv) (astMap tv)
     where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
 
 instance ASTMappable (RecordArrayElemTypeBase () Names) where
@@ -288,3 +298,6 @@ instance ASTMappable a => ASTMappable [a] where
 
 instance (ASTMappable a, ASTMappable b) => ASTMappable (a,b) where
   astMap tv (x,y) = (,) <$> astMap tv x <*> astMap tv y
+
+instance (ASTMappable a, ASTMappable b, ASTMappable c) => ASTMappable (a,b,c) where
+  astMap tv (x,y,z) = (,,) <$> astMap tv x <*> astMap tv y <*> astMap tv z

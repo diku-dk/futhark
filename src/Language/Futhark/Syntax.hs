@@ -114,6 +114,7 @@ class (Show vn,
        Show (f [TypeBase () ()]),
        Show (f StructType),
        Show (f ([StructType], CompType)),
+       Show (f ([TypeBase () ()], [StructType], CompType)),
        Show (f (M.Map VName VName)),
        Show (f [RecordArrayElemTypeBase () Names]),
        Show (f Uniqueness),
@@ -330,6 +331,7 @@ data TypeBase dim as = Prim PrimType
                      | Array (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
                      | Record (M.Map Name (TypeBase dim as))
                      | TypeVar TypeName [TypeArg dim as]
+                     | LiftedTypeVar TypeName
                      | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
                      -- ^ The aliasing corresponds to the lexical
                      -- closure of the function.
@@ -341,6 +343,7 @@ instance Bitraversable TypeBase where
     Array <$> bitraverse f g a <*> traverse f shape <*> pure u
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar t args) = TypeVar t <$> traverse (bitraverse f g) args
+  bitraverse _ _ (LiftedTypeVar t) = pure $ LiftedTypeVar t
   bitraverse f g (Arrow als v t1 t2) =
     Arrow <$> g als <*> pure v <*> bitraverse f g t1 <*> bitraverse f g t2
 
@@ -561,9 +564,11 @@ data ExpBase f vn =
 
             | Empty (TypeDeclBase f vn) (f CompType) SrcLoc
 
-            | Var    (QualName vn) (f ([StructType], CompType)) SrcLoc
-            -- ^ The @[StructType]@ list indicates the type of any
-            -- remaining parameters, if this is the name of a function.
+            | Var (QualName vn) (f ([TypeBase () ()], [StructType], CompType)) SrcLoc
+            -- ^ The @[TypeBase () ()]@ list is the instantiation list, which
+            -- contains the instantiated types for any type parameters. The
+            -- @[StructType]@ list indicates the type of any remaining
+            -- parameters, if this is the name of a function.
 
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
             -- ^ Type ascription: @e : t@.
@@ -813,6 +818,8 @@ data TypeParamBase vn = TypeParamDim vn SrcLoc
                         -- ^ A type parameter that must be a size.
                       | TypeParamType vn SrcLoc
                         -- ^ A type parameter that must be a type.
+                      | TypeParamLiftedType vn SrcLoc
+                        -- ^ A type parameter which may be a function type.
   deriving (Eq, Show)
 
 instance Functor TypeParamBase where
@@ -824,14 +831,17 @@ instance Foldable TypeParamBase where
 instance Traversable TypeParamBase where
   traverse f (TypeParamDim v loc) = TypeParamDim <$> f v <*> pure loc
   traverse f (TypeParamType v loc) = TypeParamType <$> f v <*> pure loc
+  traverse f (TypeParamLiftedType v loc) = TypeParamLiftedType <$> f v <*> pure loc
 
 instance Located (TypeParamBase vn) where
-  locOf (TypeParamDim _ loc)  = locOf loc
-  locOf (TypeParamType _ loc) = locOf loc
+  locOf (TypeParamDim _ loc)        = locOf loc
+  locOf (TypeParamType _ loc)       = locOf loc
+  locOf (TypeParamLiftedType _ loc) = locOf loc
 
 typeParamName :: TypeParamBase vn -> vn
-typeParamName (TypeParamDim v _)  = v
-typeParamName (TypeParamType v _) = v
+typeParamName (TypeParamDim v _)        = v
+typeParamName (TypeParamType v _)       = v
+typeParamName (TypeParamLiftedType v _) = v
 
 data SpecBase f vn = ValSpec  { specName       :: vn
                               , specTypeParams :: [TypeParamBase vn]

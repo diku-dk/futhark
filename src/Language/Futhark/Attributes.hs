@@ -27,6 +27,7 @@ module Language.Futhark.Attributes
   , patternStructType
   , patternParam
   , patternNoShapeAnnotations
+  , patternOrderZero
 
   -- * Queries on types
   , uniqueness
@@ -38,11 +39,13 @@ module Language.Futhark.Attributes
   , nestedDims
   , returnType
   , concreteType
+  , orderZero
 
   -- * Operations on types
   , rank
   , peelArray
   , arrayOf
+  , arrayOfWithAliases
   , toStructural
   , toStruct
   , fromStruct
@@ -59,6 +62,7 @@ module Language.Futhark.Attributes
   , isTupleRecord
   , areTupleFields
   , sortFields
+  , isTypeParam
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -119,6 +123,7 @@ nestedDims t =
             Record fs       -> nub $ fold $ fmap nestedDims fs
             Prim{}          -> mempty
             TypeVar _ targs -> concatMap typeArgDims targs
+            LiftedTypeVar{} -> mempty
             Arrow _ v t1 t2 -> filter (notV v) $ nestedDims t1 <> nestedDims t2
   where arrayNestedDims ArrayPrimElem{} =
           mempty
@@ -182,6 +187,7 @@ diet :: TypeBase shape as -> Diet
 diet (Record ets)          = RecordDiet $ fmap diet ets
 diet (Prim _)              = Observe
 diet TypeVar{}             = Observe
+diet LiftedTypeVar{}       = Observe
 diet Arrow{}               = Observe
 diet (Array _ _ Unique)    = Consume
 diet (Array _ _ Nonunique) = Observe
@@ -258,29 +264,45 @@ arrayOf :: (ArrayDim dim, Monoid as) =>
         -> ShapeDecl dim
         -> Uniqueness
         -> Maybe (TypeBase dim as)
-arrayOf (Array et shape1 _) shape2 u =
-  Just $ Array et (shape2 <> shape1) u
-arrayOf (Prim et) shape u =
-  Just $ Array (ArrayPrimElem et mempty) shape u
-arrayOf (TypeVar x targs) shape u =
-  Just $ Array (ArrayPolyElem x targs mempty) shape u
-arrayOf (Record ts) shape u = do
-  ts' <- traverse typeToRecordArrayElem ts
+arrayOf t = arrayOfWithAliases t mempty
+
+arrayOfWithAliases :: (ArrayDim dim, Monoid as) =>
+                      TypeBase dim as
+                   -> as
+                   -> ShapeDecl dim
+                   -> Uniqueness
+                   -> Maybe (TypeBase dim as)
+arrayOfWithAliases (Array et shape1 _) as shape2 u =
+  Just $ Array et (shape2 <> shape1) u `setAliases` as
+arrayOfWithAliases (Prim et) as shape u =
+  Just $ Array (ArrayPrimElem et as) shape u
+arrayOfWithAliases (TypeVar x targs) as shape u =
+  Just $ Array (ArrayPolyElem x targs as) shape u
+arrayOfWithAliases LiftedTypeVar{} _ _ _ = Nothing
+arrayOfWithAliases (Record ts) as shape u = do
+  ts' <- traverse (typeToRecordArrayElem' as) ts
   return $ Array (ArrayRecordElem ts') shape u
-arrayOf Arrow{} _ _ = Nothing
+arrayOfWithAliases Arrow{} _ _ _ = Nothing
 
 typeToRecordArrayElem :: Monoid as =>
                          TypeBase dim as
                       -> Maybe (RecordArrayElemTypeBase dim as)
-typeToRecordArrayElem (Prim bt) =
-  Just $ RecordArrayElem $ ArrayPrimElem bt mempty
-typeToRecordArrayElem (TypeVar bt targs) =
-  Just $ RecordArrayElem $ ArrayPolyElem bt targs mempty
-typeToRecordArrayElem (Record ts') =
-  RecordArrayElem . ArrayRecordElem <$> traverse typeToRecordArrayElem ts'
-typeToRecordArrayElem (Array et shape u) =
+typeToRecordArrayElem = typeToRecordArrayElem' mempty
+
+typeToRecordArrayElem' :: Monoid as =>
+                          as -> TypeBase dim as
+                       -> Maybe (RecordArrayElemTypeBase dim as)
+typeToRecordArrayElem' as (Prim bt) =
+  Just $ RecordArrayElem $ ArrayPrimElem bt as
+typeToRecordArrayElem' as (TypeVar bt targs) =
+  Just $ RecordArrayElem $ ArrayPolyElem bt targs as
+typeToRecordArrayElem' _ LiftedTypeVar{} = Nothing
+typeToRecordArrayElem' as (Record ts') =
+  RecordArrayElem . ArrayRecordElem <$>
+  traverse (typeToRecordArrayElem' as) ts'
+typeToRecordArrayElem' _ (Array et shape u) =
   Just $ RecordArrayArrayElem et shape u
-typeToRecordArrayElem Arrow{} = Nothing
+typeToRecordArrayElem' _ Arrow{} = Nothing
 
 recordArrayElemToType :: RecordArrayElemTypeBase dim as
                      -> TypeBase dim as
@@ -332,6 +354,11 @@ sortFields l = map snd $ sortBy (comparing fst) $ zip (map (fieldish . fst) l') 
         fieldish s = case reads $ nameToString s of
           [(x, "")] -> Left (x::Int)
           _         -> Right s
+
+isTypeParam :: TypeParamBase vn -> Bool
+isTypeParam TypeParamType{}       = True
+isTypeParam TypeParamLiftedType{} = True
+isTypeParam TypeParamDim{}        = False
 
 
 -- | Set the uniqueness attribute of a type.  If the type is a tuple,
@@ -395,11 +422,6 @@ rank n = ShapeDecl $ replicate n ()
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
---
--- HACK: For terms that are really in a function position (such as the
--- functional argument to a @Map@), the type will be the *return
--- type*, even if the function is not fully applied.  This will change
--- once Futhark gets proper support for higher-order functions.
 typeOf :: ExpBase Info VName -> CompType
 typeOf (Literal val _) = Prim $ primValueType val
 typeOf (Parens e _) = typeOf e
@@ -416,10 +438,13 @@ typeOf (Empty _ (Info t) _) = t
 typeOf (BinOp _ _ _ (Info t) _) = t
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
-typeOf (Var _ (Info (_, Record ets)) _) = Record ets
-typeOf (Var qn (Info (_, t)) _) = t `addAliases` S.insert (qualLeaf qn)
+typeOf (Var _ (Info (_, ts, ret@Record{})) _) =
+  foldFunType ts ret
+typeOf (Var qn (Info (_, ts, ret)) _) =
+  foldFunType ts (ret `addAliases` S.insert (qualLeaf qn))
 typeOf (Ascript e _ _) = typeOf e
-typeOf (Apply _ _ _ (Info (_, t)) _) = t
+typeOf (Apply _ _ _ (Info (ts, ret)) _) =
+  foldFunType ts ret
 typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ _ _ body _) = typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
@@ -439,26 +464,31 @@ typeOf (Zip i _ _ (Info ts) (Info u) _) =
   Array (ArrayRecordElem $ M.fromList $ zip tupleFieldNames ts) (rank (1+i)) u
 typeOf (Unzip _ ts _) =
   tupleRecord $ map unInfo ts
-typeOf (Unsafe e _) =
-  typeOf e
+typeOf (Unsafe e _) = typeOf e
 typeOf (Map _ _ (Info t) _) = t
-typeOf (Reduce _ fun _ _ _) = typeOf fun
+typeOf (Reduce _ _ _ arr _) =
+  stripArray 1 (typeOf arr) `setAliases` mempty
 typeOf (Scan _ _ arr _) = typeOf arr `setAliases` mempty
 typeOf (Filter _ arr _) = typeOf arr
 typeOf (Partition funs arr _) =
   tupleRecord $ replicate (length funs + 1) $ typeOf arr
-typeOf (Stream form lam _ _) =
-  case form of
-    MapLike{}    -> typeOf lam `setUniqueness` Unique
-    RedLike{}    -> typeOf lam `setUniqueness` Unique
+typeOf (Stream _ lam _ _) =
+  rettype (typeOf lam) `setUniqueness` Unique
+  where rettype (Arrow _ _ _ t) = rettype t
+        rettype t = t
 typeOf (Concat _ x _ _) =
-  typeOf x `setUniqueness` Unique `setAliases` S.empty
+  typeOf x `setUniqueness` Unique `setAliases` mempty
 typeOf (DoLoop _ pat _ _ _ _) = patternType pat
-typeOf (Lambda _ _ _ _ (Info t) _) =
-  removeShapeAnnotations t `setAliases` mempty
+typeOf (Lambda _ params _ _ (Info t) _) =
+  removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
+  `setAliases` mempty
 typeOf (OpSection _ _ _ (Info t) _)      = toStruct t `setAliases` mempty
 typeOf (OpSectionLeft _ _ _ (Info t) _)  = toStruct t `setAliases` mempty
 typeOf (OpSectionRight _ _ _ (Info t) _) = toStruct t `setAliases` mempty
+
+foldFunType :: [StructType] -> CompType -> CompType
+foldFunType ps ret =
+  foldr (Arrow mempty Nothing . removeShapeAnnotations . fromStruct) ret ps
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
@@ -476,6 +506,7 @@ returnType (Record fs) ds args =
 returnType (Prim t) _ _ = Prim t
 returnType (TypeVar t targs) ds args =
   TypeVar t $ map (\arg -> typeArgReturnType arg ds args) targs
+returnType (LiftedTypeVar t) _ _ = LiftedTypeVar t
 returnType (Arrow _ v t1 t2) ds args =
   Arrow mempty v (bimap id (const mempty) t1) (returnType t2 ds args)
 
@@ -512,6 +543,7 @@ recordArrayElemReturnType (RecordArrayArrayElem et shape u) ds args =
 concreteType :: TypeBase f vn -> Bool
 concreteType Prim{} = True
 concreteType TypeVar{} = False
+concreteType LiftedTypeVar{} = False
 concreteType Arrow{} = False
 concreteType (Record ts) = all concreteType ts
 concreteType (Array at _ _) = concreteArrayType at
@@ -521,6 +553,28 @@ concreteType (Array at _ _) = concreteArrayType at
 
         concreteRecordArrayElem (RecordArrayElem et) = concreteArrayType et
         concreteRecordArrayElem (RecordArrayArrayElem et _ _) = concreteArrayType et
+
+-- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
+-- a function type, does not contain a function type as a subcomponent, and may
+-- not be instantiated with a function type.
+orderZero :: TypeBase dim as -> Bool
+orderZero (Prim _)        = True
+orderZero Array{}         = True
+orderZero (Record fs)     = all orderZero $ M.elems fs
+orderZero TypeVar{}       = True
+orderZero LiftedTypeVar{} = False
+orderZero Arrow{}         = False
+
+-- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
+-- have order 0.
+patternOrderZero :: PatternBase Info vn -> Bool
+patternOrderZero pat = case pat of
+  TuplePattern ps _     -> all patternOrderZero ps
+  RecordPattern fs _    -> all (patternOrderZero . snd) fs
+  PatternParens p _     -> patternOrderZero p
+  Id _ (Info t) _       -> orderZero t
+  Wildcard (Info t) _   -> orderZero t
+  PatternAscription p _ -> patternOrderZero p
 
 -- | The set of identifiers bound in a pattern.
 patIdentSet :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
@@ -549,7 +603,7 @@ patternStructType (TuplePattern ps _) = tupleRecord $ map patternStructType ps
 patternStructType (RecordPattern fs _) = Record $ patternStructType <$> M.fromList fs
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 
--- | When viewed as a function parameter, this this pattern correspond
+-- | When viewed as a function parameter, does this pattern correspond
 -- to a named parameter of some type?
 patternParam :: PatternBase Info VName -> (Maybe VName, StructType)
 patternParam (PatternParens p _) =
@@ -590,7 +644,7 @@ namesToPrimTypes = M.fromList
 -- or overloaded.  An overloaded builtin is a mapping from valid
 -- parameter types to the result type.
 data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
-               | IntrinsicOverloadedFun [([PrimType], PrimType)]
+               | IntrinsicOverloadedFun [(PrimType, ([PrimType], PrimType))]
                | IntrinsicPolyFun [TypeParamBase VName] [TypeBase () ()] (TypeBase () ())
                | IntrinsicType PrimType
                | IntrinsicEquality -- Special cased.
@@ -603,8 +657,8 @@ intrinsics = M.fromList $ zipWith namify [10..] $
              map primFun (M.toList Primitive.primFuns) ++
 
              [ ("~", IntrinsicOverloadedFun $
-                     [([Signed t], Signed t) | t <- [minBound..maxBound] ] ++
-                     [([Unsigned t], Unsigned t) | t <- [minBound..maxBound] ])
+                     [(Signed t, ([Signed t], Signed t)) | t <- [minBound..maxBound] ] ++
+                     [(Unsigned t, ([Unsigned t], Unsigned t)) | t <- [minBound..maxBound] ])
              , ("!", IntrinsicMonoFun [Bool] Bool)] ++
 
              [("opaque", IntrinsicOpaque)] ++
@@ -678,7 +732,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         mkIntrinsicBinOp op = (pretty op, intrinsicBinOp op)
 
         binOp :: [PrimType] -> Intrinsic
-        binOp ts = IntrinsicOverloadedFun [ ([t,t], t) | t <- ts ]
+        binOp ts = IntrinsicOverloadedFun [ (t, ([t,t], t)) | t <- ts ]
 
         intrinsicBinOp Plus     = binOp anyNumberType
         intrinsicBinOp Minus    = binOp anyNumberType
@@ -703,7 +757,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         intrinsicBinOp Greater  = ordering
         intrinsicBinOp Geq      = ordering
 
-        ordering = IntrinsicOverloadedFun [ ([t,t], Bool) | t <- anyPrimType ]
+        ordering = IntrinsicOverloadedFun [ (t, ([t,t], Bool)) | t <- anyPrimType ]
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
