@@ -180,7 +180,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
       DownToExclusive end' -> text "..>" <> ppr end'
       ToInclusive     end' -> text "..." <> ppr end'
       UpToExclusive   end' -> text "..<" <> ppr end'
-  pprPrec p (BinOp bop (x,_) (y,_) _ _) = prettyBinOp p bop x y
+  pprPrec p (BinOp bop _ (x,_) (y,_) _ _) = prettyBinOp p bop x y
   pprPrec _ (Project k e _ _) = ppr e <> text "." <> ppr k
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
@@ -265,11 +265,11 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     text "\\" <>
     apply (map ppr tparams ++ map ppr params) <> ppAscription ascript <+>
     text "->" </> indent 2 (ppr body)
-  pprPrec _ (OpSection binop _ _ _ _) =
+  pprPrec _ (OpSection binop _ _ _ _ _) =
     parens $ ppr binop
-  pprPrec _ (OpSectionLeft binop x _ _ _) =
+  pprPrec _ (OpSectionLeft binop _ x _ _ _) =
     parens $ ppr x <+> ppr binop
-  pprPrec _ (OpSectionRight binop x _ _ _) =
+  pprPrec _ (OpSectionRight binop _ x _ _ _) =
     parens $ ppr binop <+> ppr x
   pprPrec _ (DoLoop tparams pat initexp form loopbody _) =
     text "loop" <+> parens (spread (map ppr tparams ++ [ppr pat]) <+> equals

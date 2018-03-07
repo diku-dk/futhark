@@ -435,7 +435,8 @@ typeOf (RecordLit fs _) =
 typeOf (ArrayLit _ (Info t) _) = t
 typeOf (Range _ _ _ (Info t) _) = t
 typeOf (Empty _ (Info t) _) = t
-typeOf (BinOp _ _ _ (Info t) _) = t
+typeOf (BinOp _ _ _ _ (Info (ts, ret)) _) =
+  foldFunType ts ret
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var _ (Info (_, ts, ret@Record{})) _) =
@@ -482,9 +483,9 @@ typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 typeOf (Lambda _ params _ _ (Info t) _) =
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
   `setAliases` mempty
-typeOf (OpSection _ _ _ (Info t) _)      = toStruct t `setAliases` mempty
-typeOf (OpSectionLeft _ _ _ (Info t) _)  = toStruct t `setAliases` mempty
-typeOf (OpSectionRight _ _ _ (Info t) _) = toStruct t `setAliases` mempty
+typeOf (OpSection _ _ _ _ (Info t) _)      = toStruct t `setAliases` mempty
+typeOf (OpSectionLeft _ _ _ _ (Info t) _)  = toStruct t `setAliases` mempty
+typeOf (OpSectionRight _ _ _ _ (Info t) _) = toStruct t `setAliases` mempty
 
 foldFunType :: [StructType] -> CompType -> CompType
 foldFunType ps ret =

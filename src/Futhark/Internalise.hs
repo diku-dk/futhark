@@ -815,15 +815,15 @@ internaliseExp desc (E.If ce te fe _ _) =
 
 -- Builtin operators are handled specially because they are
 -- overloaded.
-internaliseExp desc (E.BinOp op (xe,_) (ye,_) _ loc)
+internaliseExp desc (E.BinOp op _ (xe,_) (ye,_) _ loc)
   | Just internalise <- isOverloadedFunction op [xe, ye] loc =
       internalise desc
 
 -- User-defined operators are just the same as a function call.
-internaliseExp desc (E.BinOp op (xarg,xd) (yarg,yd) (Info ret) loc) =
+internaliseExp desc (E.BinOp op (Info il) (xarg, Info xt) (yarg, Info yt) (Info (paramts, ret)) loc) =
   internaliseExp desc $
-  E.Apply (E.Apply (E.Var op (Info ([], [], ret)) loc) xarg (Info xd) (Info ([], ret)) loc)
-          yarg (Info yd) (Info ([], ret)) loc
+  E.Apply (E.Apply (E.Var op (Info (il, [], ret)) loc) xarg (Info $ E.diet xt) (Info (xt : paramts, ret)) loc)
+          yarg (Info $ E.diet yt) (Info (paramts, ret)) loc
 
 internaliseExp desc (E.Project k e (Info rt) _) = do
   n <- internalisedTypeSize $ rt `setAliases` ()
@@ -1112,19 +1112,19 @@ internaliseLambda (E.Lambda tparams params body _ (Info rettype) loc) rowtypes =
     mapM_ (uncurry (internaliseDimConstant loc)) $ pcm<>rcm
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.OpSection unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
+internaliseLambda (E.OpSection unop (Info il) (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
-    binOpFunToLambda unop xtype ytype rettype
+    binOpFunToLambda unop il xtype ytype rettype
   internaliseLambda (E.Lambda [] params body Nothing (Info rettype') loc) rowts
 
-internaliseLambda (E.OpSectionLeft binop e (Info paramtype, Info _) (Info rettype) loc) rowts = do
+internaliseLambda (E.OpSectionLeft binop (Info il) e (Info paramtype, Info _) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
-    binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
+    binOpCurriedToLambda binop il paramtype rettype e $ uncurry $ flip (,)
   internaliseLambda (E.Lambda [] params body Nothing (Info rettype') loc) rowts
 
-internaliseLambda (E.OpSectionRight binop e (Info _, Info paramtype) (Info rettype) loc) rowts = do
+internaliseLambda (E.OpSectionRight binop (Info il) e (Info _, Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
-    binOpCurriedToLambda binop paramtype rettype e id
+    binOpCurriedToLambda binop il paramtype rettype e id
   internaliseLambda (E.Lambda [] params body Nothing (Info rettype') loc) rowts
 
 internaliseLambda e rowtypes = do
@@ -1142,10 +1142,10 @@ internaliseLambda e rowtypes = do
   internaliseLambda (E.Lambda [] params body Nothing (Info rettype') loc) rowtypes
   where loc = srclocOf e
 
-binOpFunToLambda :: E.QualName VName
+binOpFunToLambda :: E.QualName VName -> [E.TypeBase () ()]
                  -> E.StructType -> E.StructType -> E.CompType
                  -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
-binOpFunToLambda op xtype ytype rettype = do
+binOpFunToLambda op il xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
   let xtype' = xtype `setAliases` mempty
@@ -1154,24 +1154,26 @@ binOpFunToLambda op xtype ytype rettype = do
       ytype'' = removeShapeAnnotations ytype'
   return ([E.Id x_name (Info xtype') noLoc,
            E.Id y_name (Info xtype') noLoc],
-          E.BinOp op
-           (E.Var (qualName x_name) (Info ([], [], xtype'')) noLoc, E.Observe)
-           (E.Var (qualName y_name) (Info ([], [], ytype'')) noLoc, E.Observe)
-           (Info rettype) noLoc,
+          E.BinOp op (Info il)
+           (E.Var (qualName x_name) (Info ([], [], xtype'')) noLoc, Info xtype)
+           (E.Var (qualName y_name) (Info ([], [], ytype'')) noLoc, Info ytype)
+           (Info ([], rettype)) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
-binOpCurriedToLambda :: E.QualName VName
+binOpCurriedToLambda :: E.QualName VName -> [E.TypeBase () ()]
                      -> E.StructType -> E.CompType
                      -> E.Exp
                      -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
                      -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
-binOpCurriedToLambda op paramtype rettype e swap = do
+binOpCurriedToLambda op il paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
   let paramtype' = E.removeShapeAnnotations $ paramtype `setAliases` mempty
       (x', y') = swap (E.Var (qualName paramname) (Info ([], [], paramtype')) noLoc, e)
+      x_t = E.vacuousShapeAnnotations $ E.toStruct $ E.typeOf x'
+      y_t = E.vacuousShapeAnnotations $ E.toStruct $ E.typeOf y'
   return ([E.Id paramname (Info $ E.vacuousShapeAnnotations $
                            paramtype `setAliases` mempty) noLoc],
-          E.BinOp op (x',E.Observe) (y',E.Observe) (Info rettype) noLoc,
+          E.BinOp op (Info il) (x', Info x_t) (y', Info y_t) (Info ([], rettype)) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()

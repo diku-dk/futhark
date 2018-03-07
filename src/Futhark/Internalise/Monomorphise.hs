@@ -85,6 +85,22 @@ lookupLifted fname il = do
   lifts <- getLifts
   return $ lookup (fname, il) lifts
 
+transformFName :: VName -> [TypeBase () ()] -> SrcLoc -> MonoM VName
+transformFName fname il loc
+  | null il = return fname -- If the instance list is empty, the variable
+                           -- does not refer to a polymorphic function.
+  | baseTag fname <= maxIntrinsicTag = return fname
+  | otherwise = do
+      funbind <- lookupVar loc fname
+      maybe_fname <- lookupLifted fname il
+      case maybe_fname of
+        Just x -> return x  -- The function has alread been
+                            -- monomorphized for the given il.
+        Nothing -> do
+          (fname', funbind') <- monomorphizeBinding funbind il
+          tell [(fname, funbind')]
+          addLifted fname il fname'
+          return fname'
 
 -- | Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
@@ -117,22 +133,9 @@ transformExp (Range e1 me incl tp loc) = do
 
 transformExp e@Empty{} = return e
 
-transformExp e@(Var (QualName qs fname) (Info (il, ps, ret)) loc)
-  | null il = return e  -- If the instance list is empty, the variable
-                        -- does not refer to a polymorphic function.
-  | baseTag fname <= maxIntrinsicTag = return e
-  | otherwise = do
-      funbind <- lookupVar loc fname
-      maybe_fname <- lookupLifted fname il
-      fname' <- case maybe_fname of
-                  Just x -> return x  -- The function has alread been
-                                      -- monomorphized for the given il.
-                  Nothing -> do
-                    (fname', funbind') <- monomorphizeBinding funbind il
-                    tell [(fname, funbind')]
-                    addLifted fname il fname'
-                    return fname'
-      return $ Var (QualName qs fname') (Info (il, ps, ret)) loc
+transformExp (Var (QualName qs fname) (Info (il, ps, ret)) loc) = do
+  fname' <- transformFName fname il loc
+  return $ Var (QualName qs fname') (Info (il, ps, ret)) loc
 
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
@@ -174,15 +177,19 @@ transformExp (Lambda tparams params e0 decl tp loc) = do
   e0' <- transformExp e0
   return $ Lambda tparams params e0' decl tp loc
 
-transformExp e@OpSection{} = return e
+transformExp (OpSection (QualName qs fname) (Info il) xtype ytype rettype loc) = do
+  fname' <- transformFName fname il loc
+  return $ OpSection (QualName qs fname') (Info il) xtype ytype rettype loc
 
-transformExp (OpSectionLeft qn e argtypes rettype loc) = do
+transformExp (OpSectionLeft (QualName qs fname) (Info il) e argtypes rettype loc) = do
+  fname' <- transformFName fname il loc
   e' <- transformExp e
-  return $ OpSectionLeft qn e' argtypes rettype loc
+  return $ OpSectionLeft (QualName qs fname') (Info il) e' argtypes rettype loc
 
-transformExp (OpSectionRight qn e argtypes rettype loc) = do
+transformExp (OpSectionRight (QualName qs fname) (Info il) e argtypes rettype loc) = do
+  fname' <- transformFName fname il loc
   e' <- transformExp e
-  return $ OpSectionRight qn e' argtypes rettype loc
+  return $ OpSectionRight (QualName qs fname') (Info il) e' argtypes rettype loc
 
 transformExp (DoLoop tparams pat e1 form e3 loc) = do
   e1' <- transformExp e1
@@ -193,10 +200,11 @@ transformExp (DoLoop tparams pat e1 form e3 loc) = do
   e3' <- transformExp e3
   return $ DoLoop tparams pat e1' form' e3' loc
 
-transformExp (BinOp qn (e1, d1) (e2, d2) tp loc) = do
+transformExp (BinOp (QualName qs fname) (Info il) (e1, d1) (e2, d2) tp loc) = do
+  fname' <- transformFName fname il loc
   e1' <- transformExp e1
   e2' <- transformExp e2
-  return $ BinOp qn (e1', d1) (e2', d2) tp loc
+  return $ BinOp (QualName qs fname') (Info il) (e1', d1) (e2', d2) tp loc
 
 transformExp (Project n e tp loc) = do
   e' <- transformExp e
