@@ -548,7 +548,7 @@ dynamicFunType sv _ = ([], typeFromSV sv)
 -- | Match a pattern with its static value. Returns an environment with
 -- the identifier components of the pattern mapped to the corresponding
 -- subcomponents of the static value.
-matchPatternSV :: PatternBase f VName -> StaticVal -> Env
+matchPatternSV :: PatternBase Info VName -> StaticVal -> Env
 matchPatternSV (TuplePattern ps _) (RecordSV ls) =
   concat $ zipWith (\p (_, sv) -> matchPatternSV p sv) ps ls
 matchPatternSV (RecordPattern ps _) (RecordSV ls)
