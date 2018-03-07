@@ -616,16 +616,16 @@ checkExp (Ascript e decl loc) = do
         =<< checkExp e
   return $ Ascript e' decl' loc
 
-checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
+checkExp (BinOp op NoInfo (e1,_) (e2,_) NoInfo loc) = do
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
 
-  (op', _, ftype) <- lookupFunction op (argType e1_arg) loc
+  (op', il, ftype) <- lookupFunction op (argType e1_arg) loc
 
-  ([e1_pt, e2_pt], rettype') <-
+  (e1_pt : e2_pt : pts, rettype') <-
     checkFuncall loc ftype [e1_arg, e2_arg]
-  return $ BinOp op' (e1', diet e1_pt) (e2', diet e2_pt)
-    (Info $ removeShapeAnnotations rettype') loc
+  return $ BinOp op' (Info il) (e1', Info e1_pt) (e2', Info e2_pt)
+    (Info (pts, removeShapeAnnotations rettype')) loc
 
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
@@ -1386,14 +1386,14 @@ checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
                 show (length params) ++ " parameters, but expected to take " ++
                 show (length args) ++ " arguments."
 
-checkFunExp (OpSection op NoInfo NoInfo NoInfo loc) args
+checkFunExp (OpSection op NoInfo NoInfo NoInfo NoInfo loc) args
   | [x_arg,y_arg] <- args = do
-  (op', _, ftype) <- lookupFunction op (argType x_arg) loc
+  (op', il, ftype) <- lookupFunction op (argType x_arg) loc
   (paramtypes', rettype') <- checkFuncall loc ftype [x_arg,y_arg]
 
   case paramtypes' of
     [x_t, y_t] ->
-      return (OpSection op'
+      return (OpSection op' (Info il)
               (Info x_t) (Info y_t)
               (Info $ removeShapeAnnotations rettype') loc,
               removeShapeAnnotations rettype' `setAliases` mempty)
@@ -1404,20 +1404,20 @@ checkFunExp (OpSection op NoInfo NoInfo NoInfo loc) args
       throwError $ ParameterMismatch (Just op) loc (Left 2) $
       map (toStructural . argType) args
 
-checkFunExp (OpSectionLeft binop x _ _ loc) args
+checkFunExp (OpSectionLeft binop NoInfo x _ _ loc) args
   | [arg] <- args = do
-      (x', binop', xt, yt, ret) <- checkCurryBinOp id binop x loc arg
-      return (OpSectionLeft binop'
+      (x', binop', il, xt, yt, ret) <- checkCurryBinOp id binop x loc arg
+      return (OpSectionLeft binop' (Info il)
               x' (Info xt, Info yt) (Info ret) loc,
               ret `setAliases` mempty)
   | otherwise =
       throwError $ ParameterMismatch (Just binop) loc (Left 1) $
       map (toStructural . argType) args
 
-checkFunExp (OpSectionRight binop x _ _ loc) args
+checkFunExp (OpSectionRight binop NoInfo x _ _ loc) args
   | [arg] <- args = do
-      (x', binop', xt, yt, ret) <- checkCurryBinOp (uncurry $ flip (,)) binop x loc arg
-      return (OpSectionRight binop'
+      (x', binop', il, xt, yt, ret) <- checkCurryBinOp (uncurry $ flip (,)) binop x loc arg
+      return (OpSectionRight binop' (Info il)
                x' (Info xt, Info yt) (Info ret) loc,
               ret `setAliases` mempty)
   | otherwise =
@@ -1445,13 +1445,14 @@ checkFunExp e args = do
 
 checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
                 -> QualName Name -> ExpBase NoInfo Name -> SrcLoc -> Arg
-                -> TermTypeM (Exp, QualName VName, StructType, StructType, CompType)
+                -> TermTypeM (Exp, QualName VName, [TypeBase () ()],
+                              StructType, StructType, CompType)
 checkCurryBinOp arg_ordering binop x loc y_arg = do
   (x', x_arg) <- checkArg x
   let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
-  (binop', _, fun) <- lookupFunction binop (argType first_arg) loc
+  (binop', il, fun) <- lookupFunction binop (argType first_arg) loc
   ([xt, yt], rettype) <- checkFuncall loc fun [first_arg,second_arg]
-  return (x', binop', xt, yt, removeShapeAnnotations rettype)
+  return (x', binop', il, xt, yt, removeShapeAnnotations rettype)
 
 --- Consumption
 

@@ -71,8 +71,8 @@ instance ASTMappable (ExpBase Info VName) where
     Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
   astMap tv (Empty tdecl t loc) =
     Empty <$> astMap tv tdecl <*> traverse (astMap tv) t <*> pure loc
-  astMap tv (BinOp fname (x,xd) (y,yd) t loc) =
-    BinOp <$> mapOnQualName tv fname <*>
+  astMap tv (BinOp fname il (x,xd) (y,yd) t loc) =
+    BinOp <$> mapOnQualName tv fname <*> astMap tv il <*>
     ((,) <$> mapOnExp tv x <*> pure xd) <*> ((,) <$> mapOnExp tv y <*> pure yd)  <*>
     traverse (astMap tv) t <*> pure loc
   astMap tv (Negate x loc) =
@@ -148,15 +148,15 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Lambda tparams params body ret t loc) =
     Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*> astMap tv t <*> pure loc
-  astMap tv (OpSection name t1 t2 t3 loc) =
-    OpSection <$> mapOnQualName tv name <*>
+  astMap tv (OpSection name il t1 t2 t3 loc) =
+    OpSection <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
     astMap tv t1 <*> astMap tv t2 <*> astMap tv t3 <*> pure loc
-  astMap tv (OpSectionLeft name arg t1 t2 loc) =
-    OpSectionLeft <$> mapOnQualName tv name <*> mapOnExp tv arg <*>
-    astMap tv t1 <*> astMap tv t2 <*> pure loc
-  astMap tv (OpSectionRight name arg t1 t2 loc) =
-    OpSectionRight <$> mapOnQualName tv name <*> mapOnExp tv arg <*>
-    astMap tv t1 <*> astMap tv t2 <*> pure loc
+  astMap tv (OpSectionLeft name il arg t1 t2 loc) =
+    OpSectionLeft <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
+    mapOnExp tv arg <*> astMap tv t1 <*> astMap tv t2 <*> pure loc
+  astMap tv (OpSectionRight name il arg t1 t2 loc) =
+    OpSectionRight <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
+    mapOnExp tv arg <*> astMap tv t1 <*> astMap tv t2 <*> pure loc
   astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =
     DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
     mapOnExp tv mergeexp <*> astMap tv form <*>

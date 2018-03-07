@@ -192,13 +192,13 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
 -- assuming that they will only occur as function arguments to SOACs.
 defuncExp e@OpSection{} = return (e, Dynamic $ typeOf e)
 
-defuncExp expr@(OpSectionLeft qn e tps tp loc) = do
+defuncExp expr@(OpSectionLeft qn il e tps tp loc) = do
   e' <- defuncExp' e
-  return (OpSectionLeft qn e' tps tp loc, Dynamic $ typeOf expr)
+  return (OpSectionLeft qn il e' tps tp loc, Dynamic $ typeOf expr)
 
-defuncExp expr@(OpSectionRight qn e tps tp loc) = do
+defuncExp expr@(OpSectionRight qn il e tps tp loc) = do
   e' <- defuncExp' e
-  return (OpSectionRight qn e' tps tp loc, Dynamic $ typeOf expr)
+  return (OpSectionRight qn il e' tps tp loc, Dynamic $ typeOf expr)
 
 defuncExp (DoLoop tparams pat e1 form e3 loc) = do
   let env_dim = envFromShapeParams tparams
@@ -215,10 +215,10 @@ defuncExp (DoLoop tparams pat e1 form e3 loc) = do
   return (DoLoop tparams pat e1' form' e3' loc, sv)
   where envFromIdent (Ident vn (Info tp) _) = [(vn, Dynamic tp)]
 
-defuncExp (BinOp qn (e1, d1) (e2, d2) t@(Info t') loc) = do
+defuncExp (BinOp qn il (e1, pt1) (e2, pt2) t@(Info (_rem_pts, t')) loc) = do
   e1' <- defuncExp' e1
   e2' <- defuncExp' e2
-  return (BinOp qn (e1', d1) (e2', d2) t loc, Dynamic t')
+  return (BinOp qn il (e1', pt1) (e2', pt2) t loc, Dynamic t')
 
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
   (e0', sv0) <- defuncExp e0
@@ -624,9 +624,9 @@ freeVars expr = case expr of
   Negate e _                -> freeVars e
   Lambda tps pats e0 _ _ _  -> freeVars e0 S.\\ (foldMap patternVars pats <>
                                                  S.fromList (map typeParamName tps))
-  OpSection{}               -> mempty
-  OpSectionLeft  _ e _ _ _  -> freeVars e
-  OpSectionRight _ e _ _ _  -> freeVars e
+  OpSection{}                 -> mempty
+  OpSectionLeft _  _ e _ _ _  -> freeVars e
+  OpSectionRight _ _ e _ _ _  -> freeVars e
 
   DoLoop _ pat e1 form e3 _ -> let (e2fv, e2ident) = formVars form
                                in freeVars e1 <> e2fv <>
@@ -635,8 +635,8 @@ freeVars expr = case expr of
           formVars (ForIn p e2)   = (freeVars e2, patternVars p)
           formVars (While e2)     = (freeVars e2, S.empty)
 
-  BinOp _ (e1, _) (e2, _) _ _  -> freeVars e1 <> freeVars e2
-  Project _ e _ _              -> freeVars e
+  BinOp _ _ (e1, _) (e2, _) _ _  -> freeVars e1 <> freeVars e2
+  Project _ e _ _                -> freeVars e
 
   LetWith id1 id2 idxs e1 e2 _ ->
     S.singleton (identName id2) <> foldMap freeDimIndex idxs <> freeVars e1 <>

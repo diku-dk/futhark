@@ -677,16 +677,16 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' UnOp ')'
         { Var (fst $2) NoInfo (snd $2) }
      | '(' '-' ')'
-        { OpSection (QualName [] (nameFromString "-")) NoInfo NoInfo NoInfo $1 }
+        { OpSection (QualName [] (nameFromString "-")) NoInfo NoInfo NoInfo NoInfo $1 }
      | '(' Exp2 '-' ')'
         { OpSectionLeft (QualName [] (nameFromString "-"))
-          $2 (NoInfo, NoInfo) NoInfo (srclocOf $1) }
+           NoInfo $2 (NoInfo, NoInfo) NoInfo (srclocOf $1) }
      | '(' BinOp Exp2 ')'
-       { OpSectionRight $2 $3 (NoInfo, NoInfo) NoInfo $1 }
+       { OpSectionRight $2 NoInfo $3 (NoInfo, NoInfo) NoInfo $1 }
      | '(' Exp2 BinOp ')'
-       { OpSectionLeft $3 $2 (NoInfo, NoInfo) NoInfo $1 }
+       { OpSectionLeft $3 NoInfo $2 (NoInfo, NoInfo) NoInfo $1 }
      | '(' BinOp ')'
-       { OpSection $2 NoInfo NoInfo NoInfo $1 }
+       { OpSection $2 NoInfo NoInfo NoInfo NoInfo $1 }
 
      -- Errors
      | '[' ']'
@@ -1037,7 +1037,7 @@ eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF
 binOpName (L _ (SYMBOL _ qs op)) = QualName qs op
 
 binOp x (L loc (SYMBOL _ qs op)) y =
-  BinOp (QualName qs op) (x, Observe) (y, Observe) NoInfo loc
+  BinOp (QualName qs op) NoInfo (x, NoInfo) (y, NoInfo) NoInfo loc
 
 getTokens :: ParserMonad [L Token]
 getTokens = lift $ lift get

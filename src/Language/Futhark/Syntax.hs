@@ -590,13 +590,13 @@ data ExpBase f vn =
             | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
               (Maybe (TypeDeclBase f vn)) (f StructType) SrcLoc
 
-            | OpSection (QualName vn)
+            | OpSection (QualName vn) (f [TypeBase () ()])
               (f StructType) (f StructType) (f CompType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.
-            | OpSectionLeft (QualName vn)
+            | OpSectionLeft (QualName vn) (f [TypeBase () ()])
               (ExpBase f vn) (f StructType, f StructType) (f CompType) SrcLoc
               -- ^ @2+@; first type is operand, second is result.
-            | OpSectionRight (QualName vn)
+            | OpSectionRight (QualName vn) (f [TypeBase () ()])
               (ExpBase f vn) (f StructType, f StructType) (f CompType) SrcLoc
               -- ^ @+2@; first type is operand, second is result.
 
@@ -608,8 +608,10 @@ data ExpBase f vn =
               (ExpBase f vn) -- Loop body.
               SrcLoc
 
-            | BinOp (QualName vn)
-              (ExpBase f vn, Diet) (ExpBase f vn, Diet) (f CompType) SrcLoc
+            | BinOp (QualName vn) (f [TypeBase () ()])
+              (ExpBase f vn, f StructType) (ExpBase f vn, f StructType)
+              (f ([StructType], CompType)) SrcLoc
+            -- ^ The first annotation is the instantiation list.
 
             | Project Name (ExpBase f vn) (f CompType) SrcLoc
 
@@ -712,44 +714,44 @@ data StreamForm f vn = MapLike    StreamOrd
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
-  locOf (Literal _ loc)              = locOf loc
-  locOf (Parens _ loc)               = locOf loc
-  locOf (QualParens _ _ loc)         = locOf loc
-  locOf (TupLit _ pos)               = locOf pos
-  locOf (RecordLit _ pos)            = locOf pos
-  locOf (Project _ _ _ pos)          = locOf pos
-  locOf (ArrayLit _ _ pos)           = locOf pos
-  locOf (Range _ _ _ _ pos)          = locOf pos
-  locOf (Empty _ _ pos)              = locOf pos
-  locOf (BinOp _ _ _ _ pos)          = locOf pos
-  locOf (If _ _ _ _ pos)             = locOf pos
-  locOf (Var _ _ loc)                = locOf loc
-  locOf (Ascript _ _ loc)            = locOf loc
-  locOf (Negate _ pos)               = locOf pos
-  locOf (Apply _ _ _ _ pos)          = locOf pos
-  locOf (LetPat _ _ _ _ pos)         = locOf pos
-  locOf (LetFun _ _ _ loc)           = locOf loc
-  locOf (LetWith _ _ _ _ _ pos)      = locOf pos
-  locOf (Index _ _ pos)              = locOf pos
-  locOf (Update _ _ _ pos)           = locOf pos
-  locOf (Reshape _ _ pos)            = locOf pos
-  locOf (Rearrange _ _ pos)          = locOf pos
-  locOf (Rotate _ _ _ pos)           = locOf pos
-  locOf (Map _ _ _ pos)              = locOf pos
-  locOf (Reduce _ _ _ _ pos)         = locOf pos
-  locOf (Zip _ _ _ _ _ loc)          = locOf loc
-  locOf (Unzip _ _ pos)              = locOf pos
-  locOf (Scan _ _ _ pos)             = locOf pos
-  locOf (Filter _ _ pos)             = locOf pos
-  locOf (Partition _ _ pos)          = locOf pos
-  locOf (Concat _ _ _ pos)           = locOf pos
-  locOf (Lambda _ _ _ _ _ loc)       = locOf loc
-  locOf (OpSection _ _ _ _ loc)      = locOf loc
-  locOf (OpSectionLeft _ _ _ _ loc)  = locOf loc
-  locOf (OpSectionRight _ _ _ _ loc) = locOf loc
-  locOf (DoLoop _ _ _ _ _ pos)       = locOf pos
-  locOf (Stream _ _ _  pos)          = locOf pos
-  locOf (Unsafe _ loc)               = locOf loc
+  locOf (Literal _ loc)                = locOf loc
+  locOf (Parens _ loc)                 = locOf loc
+  locOf (QualParens _ _ loc)           = locOf loc
+  locOf (TupLit _ pos)                 = locOf pos
+  locOf (RecordLit _ pos)              = locOf pos
+  locOf (Project _ _ _ pos)            = locOf pos
+  locOf (ArrayLit _ _ pos)             = locOf pos
+  locOf (Range _ _ _ _ pos)            = locOf pos
+  locOf (Empty _ _ pos)                = locOf pos
+  locOf (BinOp _ _ _ _ _ pos)          = locOf pos
+  locOf (If _ _ _ _ pos)               = locOf pos
+  locOf (Var _ _ loc)                  = locOf loc
+  locOf (Ascript _ _ loc)              = locOf loc
+  locOf (Negate _ pos)                 = locOf pos
+  locOf (Apply _ _ _ _ pos)            = locOf pos
+  locOf (LetPat _ _ _ _ pos)           = locOf pos
+  locOf (LetFun _ _ _ loc)             = locOf loc
+  locOf (LetWith _ _ _ _ _ pos)        = locOf pos
+  locOf (Index _ _ pos)                = locOf pos
+  locOf (Update _ _ _ pos)             = locOf pos
+  locOf (Reshape _ _ pos)              = locOf pos
+  locOf (Rearrange _ _ pos)            = locOf pos
+  locOf (Rotate _ _ _ pos)             = locOf pos
+  locOf (Map _ _ _ pos)                = locOf pos
+  locOf (Reduce _ _ _ _ pos)           = locOf pos
+  locOf (Zip _ _ _ _ _ loc)            = locOf loc
+  locOf (Unzip _ _ pos)                = locOf pos
+  locOf (Scan _ _ _ pos)               = locOf pos
+  locOf (Filter _ _ pos)               = locOf pos
+  locOf (Partition _ _ pos)            = locOf pos
+  locOf (Concat _ _ _ pos)             = locOf pos
+  locOf (Lambda _ _ _ _ _ loc)         = locOf loc
+  locOf (OpSection _ _ _ _ _ loc)      = locOf loc
+  locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc
+  locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
+  locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
+  locOf (Stream _ _ _  pos)            = locOf pos
+  locOf (Unsafe _ loc)                 = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
