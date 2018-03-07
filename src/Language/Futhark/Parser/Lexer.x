@@ -368,7 +368,6 @@ data Token = ID Name
            | UNZIP
            | UNSAFE
            | SCAN
-           | SPLIT
            | CONCAT
            | FILTER
            | PARTITION
