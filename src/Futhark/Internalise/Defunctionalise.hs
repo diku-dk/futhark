@@ -181,12 +181,17 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
           in (pat', Lambda dims pats' e0 decl tp loc)
 
   -- Construct a record literal that closes over the environment of the lambda.
-  -- Do not close over shape parameters if they occur in the type of the
+  -- Closed-over 'DynamicFun's are converted to their closure representation.
+  -- Does not close over shape parameters if they occur in the type of the
   -- parameter since they will be added as explicit shape parameters later.
   env <- restrictEnv $ freeVars e S.\\ patternDimNames pat
-  let fields = map (\(vn, sv) -> RecordFieldImplicit vn
-                                 (Info $ typeFromSV sv) noLoc) env
-  return (RecordLit fields loc, LambdaSV pat e0' env)
+  let (fields, env') = unzip $ map closureFromDynamicFun env
+  return (RecordLit fields loc, LambdaSV pat e0' env')
+
+  where closureFromDynamicFun (vn, (DynamicFun (clsr_env, sv) _)) =
+          (RecordFieldExplicit (baseName vn) clsr_env noLoc, (vn, sv))
+        closureFromDynamicFun (vn, sv) =
+          (RecordFieldImplicit vn (Info $ typeFromSV sv) noLoc, (vn, sv))
 
 -- We leave the operator section expressions mostly unaffected for now,
 -- assuming that they will only occur as function arguments to SOACs.
