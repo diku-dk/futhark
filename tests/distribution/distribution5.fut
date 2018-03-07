@@ -13,7 +13,7 @@
 -- ==
 --
 -- structure distributed {
---   Kernel 7
+--   Kernel 8
 -- }
 
 let main [n][an][bn] (a: [n][an][]i32, b: [n][bn]i32): ([][]i32,[][]i32) =
