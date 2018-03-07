@@ -82,6 +82,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr (Prim et) = ppr et
   ppr (TypeVar et targs) = ppr (baseName <$> qualNameFromTypeName et) <+> spread (map ppr targs)
+  ppr (LiftedTypeVar et) = ppr (baseName <$> qualNameFromTypeName et)
   ppr (Array at shape u) = ppr u <> ppr shape <> ppr at
   ppr (Record fs)
     | Just ts <- areTupleFields fs =
@@ -314,6 +315,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ ppr name
   ppr (TypeParamType name _) = text "'" <> ppr name
+  ppr (TypeParamLiftedType name _) = text "'^" <> ppr name
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
   ppr (ValBind entry name retdecl _ tparams args body _ _) =
