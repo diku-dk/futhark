@@ -188,7 +188,7 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
   let (fields, env') = unzip $ map closureFromDynamicFun env
   return (RecordLit fields loc, LambdaSV pat e0' env')
 
-  where closureFromDynamicFun (vn, (DynamicFun (clsr_env, sv) _)) =
+  where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
           (RecordFieldExplicit (baseName vn) clsr_env noLoc, (vn, sv))
         closureFromDynamicFun (vn, sv) =
           (RecordFieldImplicit vn (Info $ typeFromSV sv) noLoc, (vn, sv))
