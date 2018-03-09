@@ -1064,21 +1064,20 @@ maybeDistributeStm (Let pat aux (BasicOp (Update arr [DimFix i] v))) acc
         amortises Op{} = True
         amortises _ = False
 
-maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d _y ys w))) acc =
+maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d x xs w))) acc =
   distributeSingleStm acc stm >>= \case
-    Just (kernels, _, nest, acc')
-      | (outer, _) <- nest,
-        x:xs <- map snd $ loopNestingParamsAndArrs outer,
-        length xs == length ys -> -- Cannot do this when concat'ing
-                                  -- with literals.
-        localScope (typeEnvFromKernelAcc acc') $ do
-          let d' = d + length (snd nest) + 1
-              outerpat = loopNestingPattern $ fst nest
-          addKernels kernels
-          addKernel $ oneStm $ Let outerpat aux $ BasicOp $ Concat d' x xs w
-          return acc'
+    Just (kernels, _, nest, acc') ->
+      localScope (typeEnvFromKernelAcc acc') $
+      segmentedConcat nest >>=
+      kernelOrNot (stmAuxCerts aux) stm acc kernels acc'
     _ ->
       addStmToKernel stm acc
+
+  where segmentedConcat nest =
+          isSegmentedOp nest [0] w [] mempty mempty [] (x:xs) $
+          \pat _ _ _ _ _ _ (x':xs') _ ->
+            let d' = d + length (snd nest) + 1
+            in addStm $ Let pat aux $ BasicOp $ Concat d' x' xs' w
 
 maybeDistributeStm bnd acc =
   addStmToKernel bnd acc
@@ -1195,7 +1194,7 @@ segmentedScanomapKernel :: KernelNest
 segmentedScanomapKernel nest perm segment_size lam fold_lam nes arrs =
   isSegmentedOp nest perm segment_size
   (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
-  \pat flat_pat _num_segments total_num_elements ispace inps nes' arrs' -> do
+  \pat flat_pat _num_segments total_num_elements ispace inps nes' _ arrs' -> do
     regularSegmentedScan segment_size flat_pat total_num_elements
       lam fold_lam ispace inps nes' arrs'
 
@@ -1213,7 +1212,7 @@ regularSegmentedRedomapKernel :: KernelNest
 regularSegmentedRedomapKernel nest perm segment_size comm lam fold_lam nes arrs =
   isSegmentedOp nest perm segment_size
     (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
-    \pat flat_pat num_segments total_num_elements ispace inps nes' arrs' ->
+    \pat flat_pat num_segments total_num_elements ispace inps nes' _ arrs' ->
       regularSegmentedRedomap
         segment_size num_segments (kernelNestWidths nest)
         flat_pat pat total_num_elements comm lam fold_lam ispace inps nes' arrs'
@@ -1230,7 +1229,7 @@ isSegmentedOp :: KernelNest
                   -> SubExp
                   -> [(VName, SubExp)]
                   -> [KernelInput]
-                  -> [SubExp] -> [VName]
+                  -> [SubExp] -> [VName]  -> [VName]
                   -> Binder Out.Kernels ())
               -> KernelM (Maybe KernelsStms)
 isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
@@ -1304,7 +1303,7 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
           return $ PatElem name t'
     flat_pat <- Pattern [] <$> zipWithM flatPatElem (patternValueElements pat) ret
 
-    m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
+    m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' nested_arrs arrs'
 
   where replicateMissing ispace inp = do
           t <- lookupType $ kernelInputArray inp
