@@ -1039,6 +1039,31 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
                    map DimNew (newDims reshape)
     addKernel $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
 
+-- XXX?  This rule is present to avoid the case where an in-place
+-- update is distributed as its own kernel, as this would mean thread
+-- then writes the entire array that it updated.  This is problematic
+-- because the in-place updates is O(1), but writing the array is
+-- O(n).  It is OK if the in-place update is preceded, followed, or
+-- nested inside a sequential loop or similar, because that will
+-- probably be O(n) by itself.  As a hack, we only distribute if there
+-- does not appear to be a loop following.  The better solution is to
+-- depend on memory block merging for this optimisation, but it is not
+-- ready yet.
+maybeDistributeStm (Let pat aux (BasicOp (Update arr [DimFix i] v))) acc
+  | incrementalFlattening,
+    [t] <- patternTypes pat,
+    arrayRank t == 1,
+    not $ any (amortises . stmExp) $ kernelStms acc = do
+      let w = arraySize 0 t
+          et = stripArray 1 t
+          lam = Lambda { lambdaParams = []
+                       , lambdaReturnType = [Prim int32, et]
+                       , lambdaBody = mkBody mempty [i, v] }
+      maybeDistributeStm (Let pat aux $ Op $ Scatter (intConst Int32 1) lam [] [(w, 1, arr)]) acc
+  where amortises DoLoop{} = True
+        amortises Op{} = True
+        amortises _ = False
+
 maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d _y ys w))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, _, nest, acc')
