@@ -139,8 +139,6 @@ intraGroupStm stm@(Let pat _ e) = do
         flip (M.findWithDefault mempty) deps $ v
       groupInvariant Constant{} = True
 
-  mapM_ (parallels . arrayDims) $ patternTypes pat
-
   case e of
     DoLoop ctx val (ForLoop i it bound inps) loopbody
       | groupInvariant bound ->
@@ -166,6 +164,7 @@ intraGroupStm stm@(Let pat _ e) = do
       let comb_body = mkBody body_stms $ bodyResult $ lambdaBody fun
       letBind_ pat $ Op $
         Out.Combine [(ltid,w)] (lambdaReturnType fun) [] comb_body
+      mapM_ (parallels . arrayDims) $ patternTypes pat
       parallel w
 
     Op (Scanomap w scanfun foldfun nes arrs) -> do
@@ -284,6 +283,7 @@ intraGroupStm stm@(Let pat _ e) = do
       body <- runBodyBinder $ eBody [pure index]
       letBind_ pat $ Op $
         Out.Combine space (map (Prim . elemType) $ patternTypes pat) [] body
+      mapM_ (parallels . arrayDims) $ patternTypes pat
 
     _ ->
       Kernelise.transformStm stm
