@@ -994,17 +994,42 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
       Nothing -> return (Nothing, vacuousShapeAnnotations . toStruct $ typeOf body')
     return $ Lambda tparams' params' body' maybe_retdecl'' (Info rettype) loc
 
-checkExp e@OpSection{} =
-  throwError $ TypeError (srclocOf e)
-  "Operator sections are only permitted directly in applications."
+checkExp (OpSection op _ _ _ _ loc) = do
+  (op', il, ftype) <- lookupVar loc op
+  let (paramtypes, rettype) = unfoldFunType ftype
+  case paramtypes of
+    t1 : t2 : rest -> do
+      let t1' = vacuousShapeAnnotations $ toStruct t1
+          t2' = vacuousShapeAnnotations $ toStruct t2
+      return $ OpSection op' (Info il) (Info t1') (Info t2')
+                 (Info $ foldr (Arrow mempty Nothing) rettype rest ) loc
+    _ -> throwError $ TypeError loc $
+         "Operator section with invalid operator of type " ++ pretty ftype
 
-checkExp e@OpSectionLeft{} =
-  throwError $ TypeError (srclocOf e)
-  "Operator sections are only permitted directly in applications."
+checkExp (OpSectionLeft op _ e _ _ loc) = do
+  (op', il, ftype) <- lookupVar loc op
+  (e', e_arg) <- checkArg e
+  (paramtypes, rettype) <- checkApply loc ftype e_arg
+  case paramtypes of
+    t1 : t2 : rest ->
+      let rettype' = foldr (Arrow mempty Nothing .
+                             removeShapeAnnotations . fromStruct) rettype rest
+      in return $ OpSectionLeft op' (Info il) e' (Info t1, Info t2) (Info rettype') loc
+    _ -> throwError $ TypeError loc $
+         "Operator section with invalid operator of type " ++ pretty ftype
 
-checkExp e@OpSectionRight{} =
-  throwError $ TypeError (srclocOf e)
-  "Operator sections are only permitted directly in applications."
+checkExp (OpSectionRight op _ e _ _ loc) = do
+  (op', il, ftype) <- lookupVar loc op
+  (e', e_arg) <- checkArg e
+  case ftype of
+    Arrow as1 m1 t1 (Arrow as2 m2 t2 ret) -> do
+      (t2' : t1' : rest, rettype) <-
+        checkApply loc (Arrow as2 m2 t2 (Arrow as1 m1 t1 ret)) e_arg
+      let rettype' = foldr (Arrow mempty Nothing .
+                             removeShapeAnnotations . fromStruct) rettype rest
+      return $ OpSectionRight op' (Info il) e' (Info t1', Info t2') (Info rettype') loc
+    _ -> throwError $ TypeError loc $
+         "Operator section with invalid operator of type " ++ pretty ftype
 
 checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
@@ -1585,13 +1610,6 @@ instantiate loc (Array et shape u) arg_t@(Array _ _ p_u)
 instantiate loc t arg_t = throwError $ TypeError loc $
                           "Argument of type " ++ pretty arg_t ++
                           " passed for parameter of type " ++ pretty t
-
--- | Extract the parameter types and return type from a type.
--- If the type is not an arrow type, the list of parameter types is empty.
-unfoldFunType :: TypeBase dim as -> ([TypeBase dim as], TypeBase dim as)
-unfoldFunType (Arrow _ _ t1 t2) = let (ps, r) = unfoldFunType t2
-                                  in (t1 : ps, r)
-unfoldFunType t = ([], t)
 
 -- | Perform substitutions of instantiated variables on the type
 -- annotations (including the instance lists) of an expression.
