@@ -885,6 +885,8 @@ compileExp (Imp.CmpOpExp cmp x y) = do
     CmpEq{} -> simple "=="
     FCmpLt{} -> simple "<"
     FCmpLe{} -> simple "<="
+    CmpLlt -> simple "<"
+    CmpLle -> simple "<="
     _ -> return $ simpleCall (pretty cmp) [x', y']
 
 compileExp (Imp.UnOpExp op exp1) = do

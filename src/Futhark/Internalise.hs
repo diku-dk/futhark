@@ -1073,6 +1073,17 @@ internaliseBinOp desc E.Greater x y (E.FloatType t) _ =
   simpleCmpOp desc (I.FCmpLt t) y x -- Note the swapped x and y
 internaliseBinOp desc E.Geq x y (E.FloatType t) _ =
   simpleCmpOp desc (I.FCmpLe t) y x -- Note the swapped x and y
+
+-- Relational operators for booleans.
+internaliseBinOp desc E.Less x y E.Bool _ =
+  simpleCmpOp desc I.CmpLlt x y
+internaliseBinOp desc E.Leq x y E.Bool _ =
+  simpleCmpOp desc I.CmpLle x y
+internaliseBinOp desc E.Greater x y E.Bool _ =
+  simpleCmpOp desc I.CmpLlt y x -- Note the swapped x and y
+internaliseBinOp desc E.Geq x y E.Bool _ =
+  simpleCmpOp desc I.CmpLle y x -- Note the swapped x and y
+
 internaliseBinOp _ op _ _ t1 t2 =
   fail $ "Invalid binary operator " ++ pretty op ++
   " with operand types " ++ pretty t1 ++ ", " ++ pretty t2
