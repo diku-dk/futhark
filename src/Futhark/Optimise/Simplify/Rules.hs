@@ -476,6 +476,8 @@ simplifyCmpOp _ _ (CmpOp cmp e1 e2)
                            CmpUle{} -> True
                            FCmpLt{} -> False
                            FCmpLe{} -> True
+                           CmpLlt -> False
+                           CmpLle -> True
 simplifyCmpOp _ _ (CmpOp cmp (Constant v1) (Constant v2)) =
   constRes =<< BoolValue <$> doCmpOp cmp v1 v2
 simplifyCmpOp _ _ _ = Nothing

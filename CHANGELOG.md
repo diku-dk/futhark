@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
      This permits them to have type- and shape parameters.
 
+   * Comparison operators (<=, <, >, >=) are now valid for boolean
+     operands.
+
 ### Removed
 
 ### Changed

@@ -1590,6 +1590,9 @@ compilePrimExp f (CmpOpExp cmp x y) = do
     FCmpLt{} -> [C.cexp|$exp:x' < $exp:y'|]
     FCmpLe{} -> [C.cexp|$exp:x' <= $exp:y'|]
 
+    CmpLlt{} -> [C.cexp|$exp:x' < $exp:y'|]
+    CmpLle{} -> [C.cexp|$exp:x' <= $exp:y'|]
+
     _ -> [C.cexp|$id:(pretty cmp)($exp:x', $exp:y')|]
 
 compilePrimExp f (ConvOpExp conv x) = do

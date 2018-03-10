@@ -343,6 +343,9 @@ data CmpOp = CmpEq PrimType -- ^ All types equality.
            | FCmpLt FloatType -- ^ Floating-point less than.
            | FCmpLe FloatType -- ^ Floating-point less than or equal.
 
+           -- Boolean comparison.
+           | CmpLlt -- ^ Boolean less than.
+           | CmpLle -- ^ Boolean less than or equal.
              deriving (Eq, Ord, Show)
 
 -- | Conversion operators try to generalise the @from t0 x to t1@
@@ -683,6 +686,8 @@ doCmpOp CmpSlt{} (IntValue v1) (IntValue v2)     = Just $ doCmpSlt v1 v2
 doCmpOp CmpSle{} (IntValue v1) (IntValue v2)     = Just $ doCmpSle v1 v2
 doCmpOp FCmpLt{} (FloatValue v1) (FloatValue v2) = Just $ doFCmpLt v1 v2
 doCmpOp FCmpLe{} (FloatValue v1) (FloatValue v2) = Just $ doFCmpLe v1 v2
+doCmpOp CmpLlt{} (BoolValue v1) (BoolValue v2)   = Just $ not v1 && v2
+doCmpOp CmpLle{} (BoolValue v1) (BoolValue v2)   = Just $ not (v1 && not v2)
 doCmpOp _ _ _                                    = Nothing
 
 -- | Compare any two primtive values for exact equality.
@@ -776,7 +781,8 @@ cmpOpType (CmpUlt t) = IntType t
 cmpOpType (CmpUle t) = IntType t
 cmpOpType (FCmpLt t) = FloatType t
 cmpOpType (FCmpLe t) = FloatType t
-
+cmpOpType CmpLlt = Bool
+cmpOpType CmpLle = Bool
 
 -- | The operand and result type of a unary operator.
 unOpType :: UnOp -> PrimType
@@ -1008,6 +1014,8 @@ instance Pretty CmpOp where
   ppr (CmpSle t) = taggedI "sle" t
   ppr (FCmpLt t) = taggedF "lt" t
   ppr (FCmpLe t) = taggedF "le" t
+  ppr CmpLlt = text "llt"
+  ppr CmpLle = text "lle"
 
 instance Pretty ConvOp where
   ppr op = convOp (convOpFun op) from to

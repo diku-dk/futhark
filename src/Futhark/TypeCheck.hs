@@ -913,6 +913,8 @@ checkCmpOp (CmpSlt t) x y = checkBinOpArgs (IntType t) x y
 checkCmpOp (CmpSle t) x y = checkBinOpArgs (IntType t) x y
 checkCmpOp (FCmpLt t) x y = checkBinOpArgs (FloatType t) x y
 checkCmpOp (FCmpLe t) x y = checkBinOpArgs (FloatType t) x y
+checkCmpOp CmpLlt x y = checkBinOpArgs Bool x y
+checkCmpOp CmpLle x y = checkBinOpArgs Bool x y
 
 checkBinOpArgs :: Checkable lore =>
                   PrimType -> SubExp -> SubExp -> TypeM lore ()
