@@ -158,7 +158,7 @@ parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> many1 (satisfy constitu
 parseRunTags :: Parser [String]
 parseRunTags = many parseTag
   where parseTag = try $ lexeme $ do s <- many1 $ satisfy isAlphaNum
-                                     guard $ s /= "input"
+                                     guard $ s `notElem` ["input", "structure"]
                                      return s
 
 parseRunCases :: Parser [TestRun]
