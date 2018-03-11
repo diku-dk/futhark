@@ -53,7 +53,8 @@ intraGroupParallelise knest lam = runMaybeT $ do
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
     let foldBinOp' _    []    = eSubExp $ intConst Int32 0
         foldBinOp' bop (x:xs) = foldBinOp bop x xs
-    ws <- mapM (letSubExp "one_intra_par" <=< foldBinOp' (Mul Int32)) wss
+    ws <- mapM (letSubExp "one_intra_par" <=< foldBinOp' (Mul Int32)) $
+          filter (not . null) wss
 
     -- Compute a group size that is the maximum of the inner
     -- parallelism exploited.
