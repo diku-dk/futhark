@@ -69,7 +69,7 @@ class FutharkTuner(MeasurementInterface):
     def otherOption(opt):
       return '--pass-option {}'.format(opt)
     other_options = ' '.join(map(otherOption, self.args.pass_option))
-    return 'futhark-bench --skip-compilation {} {} {}'.format(
+    return 'futhark-bench --skip-compilation {} --exclude-case notune {} {}'.format(
       self.program_name(), size_options, other_options)
 
   def run(self, desired_result, input, limit):
