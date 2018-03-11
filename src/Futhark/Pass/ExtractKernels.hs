@@ -1050,8 +1050,7 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
 -- depend on memory block merging for this optimisation, but it is not
 -- ready yet.
 maybeDistributeStm (Let pat aux (BasicOp (Update arr [DimFix i] v))) acc
-  | incrementalFlattening,
-    [t] <- patternTypes pat,
+  | [t] <- patternTypes pat,
     arrayRank t == 1,
     not $ any (amortises . stmExp) $ kernelStms acc = do
       let w = arraySize 0 t
