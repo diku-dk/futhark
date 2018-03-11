@@ -151,7 +151,7 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
       forM_ run_cases $ \run -> context ("Entry point: " <> entry <> "; dataset: " <>
                                          T.pack (runDescription run)) $ do
         let interpreter = configInterpreter progs
-        unless (mode == Compiled || runMode run == CompiledOnly) $
+        unless (mode == Compiled || "compiled" `elem` runTags run) $
           context ("Interpreting with " <> T.pack interpreter) $
             interpretTestProgram interpreter program entry run
 

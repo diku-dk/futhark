@@ -17,7 +17,6 @@ module Futhark.Test
        , ExpectedError (..)
        , InputOutputs (..)
        , TestRun (..)
-       , RunMode (..)
        , ExpectedResult (..)
        , Values (..)
        , Value
@@ -94,16 +93,9 @@ instance Show StructureTest where
   show (StructureTest _ metrics) =
     "StructureTest <config> " ++ show metrics
 
--- | The conditions under which a test case is to be run.
-data RunMode
-  = CompiledOnly -- ^ Cannot run with interpreter.
-  | NoBench -- ^ When benchmarking, don't run this.
-  | InterpretedAndCompiled -- ^ Can be interpreted or compiled.
-  deriving (Eq, Show)
-
 -- | A condition for execution, input, and expected result.
 data TestRun = TestRun
-               { runMode :: RunMode
+               { runTags :: [String]
                , runInput :: Values
                , runExpectedResult :: ExpectedResult Values
                , runDescription :: String
@@ -163,20 +155,21 @@ parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> many1 (satisfy constitu
                   pure (T.pack "main")
   where constituent c = not (isSpace c) && c /= '}'
 
-parseRunMode :: Parser RunMode
-parseRunMode = (lexstr "compiled" $> CompiledOnly) <|>
-               (lexstr "nobench" $> NoBench) <|>
-               pure InterpretedAndCompiled
+parseRunTags :: Parser [String]
+parseRunTags = many parseTag
+  where parseTag = try $ lexeme $ do s <- many1 $ satisfy isAlphaNum
+                                     guard $ s /= "input"
+                                     return s
 
 parseRunCases :: Parser [TestRun]
 parseRunCases = parseRunCases' (0::Int)
   where parseRunCases' i = (:) <$> parseRunCase i <*> parseRunCases' (i+1)
                            <|> pure []
         parseRunCase i = do
-          runmode <- parseRunMode
+          tags <- parseRunTags
           input <- parseInput
           expr <- parseExpectedResult
-          return $ TestRun runmode input expr $ desc i input
+          return $ TestRun tags input expr $ desc i input
         desc _ (InFile path) = path
         desc i (Values vs) =
           -- Turn linebreaks into spaces.

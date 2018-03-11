@@ -167,8 +167,9 @@ io = liftIO
 runBenchmarkCase :: BenchOptions -> FilePath -> Int -> TestRun -> IO (Maybe DataResult)
 runBenchmarkCase _ _ _ (TestRun _ _ RunTimeFailure{} _) =
   return Nothing -- Not our concern, we are not a testing tool.
-runBenchmarkCase _ _ _ (TestRun NoBench _ _ _) =
-  return Nothing -- Too small to bother benchmarking.
+runBenchmarkCase _ _ _ (TestRun tags _ _ _)
+  | "nobench" `elem` tags =
+      return Nothing -- Too small to bother benchmarking.
 runBenchmarkCase opts program pad_to (TestRun _ input_spec (Succeeds expected_spec) dataset_desc) =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
