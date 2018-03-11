@@ -208,6 +208,14 @@ intraGroupStm stm@(Let pat _ e) = do
         Op $ Out.GroupReduce w redfun'' $ zip nes red_input
       parallel w
 
+    Op (Reduce w comm lam args) ->
+      let (nes, arrs) = unzip args
+      in intraGroupStm stm { stmExp = Op $ Redomap w comm lam lam nes arrs }
+
+    Op (Scan w lam args) ->
+      let (nes, arrs) = unzip args
+      in intraGroupStm stm { stmExp = Op $ Scanomap w lam lam nes arrs }
+
     Op (Stream w (Sequential accs) lam arrs)
       | chunk_size_param : _ <- lambdaParams lam -> do
       types <- asksScope castScope
