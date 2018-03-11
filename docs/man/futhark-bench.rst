@@ -14,21 +14,16 @@ futhark-bench [--runs=count | --compiler=program | --json | --no-validate] progr
 DESCRIPTION
 ===========
 
-This program is used to benchmark Futhark programs.  In addition to
-the notation used by ``futhark-test(1)``, this program also supports
-the dataset keyword ``nobench``.  This is used to indicate datasets
-that are worthwhile for testing, but too small to be worth
-benchmarking.
-
+This tool is the recommended way to benchmark Futhark programs.
 Programs are compiled using the specified compiler (``futhark-c`` by
-default), then run a number of times for each data set, and the
+default), then run a number of times for each test case, and the
 average runtime printed on standard output.  A program will be ignored
-if it contains no data sets - it will not even be compiled.  Only data
-sets that use the default entry point (``main``) are considered.
+if it contains no data sets - it will not even be compiled.  Only test
+cases that use the default entry point (``main``) are considered.
 
 If compilation or running fails, an error message will be printed and
-benchmarking will continue, but a non-zero exit code will be returned
-at the end.
+benchmarking will continue (and ``--json`` will write the file), but a
+non-zero exit code will be returned at the end.
 
 OPTIONS
 =======
@@ -69,6 +64,11 @@ OPTIONS
 
   Do not run the compiler, and instead assume that each benchmark
   program has already been compiled.  Use with caution.
+
+--exclude-case=TAG
+
+  Do not run test cases that contain the given tag.  Cases marked with
+  "nobench" or "disable" are ignored by default.
 
 EXAMPLES
 ========
