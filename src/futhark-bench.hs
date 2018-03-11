@@ -37,10 +37,12 @@ data BenchOptions = BenchOptions
                    , optJSON :: Maybe FilePath
                    , optTimeout :: Int
                    , optSkipCompilation :: Bool
+                   , optExcludeCase :: [String]
                    }
 
 initialBenchOptions :: BenchOptions
 initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing (-1) False
+                      ["nobench", "disable"]
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -167,9 +169,9 @@ io = liftIO
 runBenchmarkCase :: BenchOptions -> FilePath -> Int -> TestRun -> IO (Maybe DataResult)
 runBenchmarkCase _ _ _ (TestRun _ _ RunTimeFailure{} _) =
   return Nothing -- Not our concern, we are not a testing tool.
-runBenchmarkCase _ _ _ (TestRun tags _ _ _)
-  | "nobench" `elem` tags =
-      return Nothing -- Too small to bother benchmarking.
+runBenchmarkCase opts _ _ (TestRun tags _ _ _)
+  | any (`elem` tags) $ optExcludeCase opts =
+      return Nothing
 runBenchmarkCase opts program pad_to (TestRun _ input_spec (Succeeds expected_spec) dataset_desc) =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
@@ -311,6 +313,11 @@ commandLineOptions = [
   , Option [] ["skip-compilation"]
     (NoArg $ Right $ \config -> config { optSkipCompilation = True })
     "Use already compiled program."
+  , Option [] ["exclude-case"]
+    (ReqArg (\s -> Right $ \config ->
+                config { optExcludeCase = s : optExcludeCase config })
+      "TAG")
+    "Do not run test cases with this tag."
   ]
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000
