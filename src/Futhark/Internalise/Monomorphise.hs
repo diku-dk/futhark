@@ -177,19 +177,22 @@ transformExp (Lambda tparams params e0 decl tp loc) = do
   e0' <- transformExp e0
   return $ Lambda tparams params e0' decl tp loc
 
-transformExp (OpSection (QualName qs fname) (Info il) xtype ytype rettype loc) = do
+transformExp (OpSection (QualName qs fname) (Info il)
+               (Info xtype) (Info ytype) (Info rettype) loc) = do
   fname' <- transformFName fname il loc
-  return $ OpSection (QualName qs fname') (Info il) xtype ytype rettype loc
+  desugarOpSection (QualName qs fname') Nothing Nothing il xtype ytype rettype loc
 
-transformExp (OpSectionLeft (QualName qs fname) (Info il) e argtypes rettype loc) = do
+transformExp (OpSectionLeft (QualName qs fname) (Info il) e
+               (Info xtype, Info ytype) (Info rettype) loc) = do
   fname' <- transformFName fname il loc
   e' <- transformExp e
-  return $ OpSectionLeft (QualName qs fname') (Info il) e' argtypes rettype loc
+  desugarOpSection (QualName qs fname') (Just e') Nothing il xtype ytype rettype loc
 
-transformExp (OpSectionRight (QualName qs fname) (Info il) e argtypes rettype loc) = do
+transformExp (OpSectionRight (QualName qs fname) (Info il) e
+               (Info xtype, Info ytype) (Info rettype) loc) = do
   fname' <- transformFName fname il loc
   e' <- transformExp e
-  return $ OpSectionRight (QualName qs fname') (Info il) e' argtypes rettype loc
+  desugarOpSection (QualName qs fname') Nothing (Just e') il xtype ytype rettype loc
 
 transformExp (DoLoop tparams pat e1 form e3 loc) = do
   e1' <- transformExp e1
@@ -273,6 +276,27 @@ transformDimIndex (DimFix e) = DimFix <$> transformExp e
 transformDimIndex (DimSlice me1 me2 me3) =
   DimSlice <$> trans me1 <*> trans me2 <*> trans me3
   where trans = mapM transformExp
+
+-- | Transform an operator section into a lambda.
+desugarOpSection :: QualName VName -> Maybe Exp -> Maybe Exp -> [TypeBase () ()]
+                 -> StructType -> StructType -> CompType -> SrcLoc -> MonoM Exp
+desugarOpSection qn e_left e_right il xtype ytype rettype loc = do
+  (e1, p1) <- makeVarParam e_left xtype
+  (e2, p2) <- makeVarParam e_right ytype
+  let (paramtypes, ret) = unfoldFunType rettype
+      paramtypes' = map (vacuousShapeAnnotations. toStruct) paramtypes
+      body = BinOp qn (Info il) (e1, Info xtype) (e2, Info ytype)
+                      (Info (paramtypes', ret)) loc
+      rettype' = vacuousShapeAnnotations $ toStruct rettype
+  return $ Lambda [] (p1 ++ p2) body Nothing (Info rettype') loc
+
+  where makeVarParam (Just e) _ = return (e, [])
+        makeVarParam Nothing argtype = do
+          x <- newNameFromString "x"
+          let (pts, ret) = unfoldFunType argtype
+              ret' = fromStruct $ removeShapeAnnotations ret
+          return (Var (qualName x) (Info ([], pts, ret')) noLoc,
+                  [Id x (Info $ fromStruct argtype) noLoc])
 
 -- | Convert a collection of 'MonoBinding's to a nested sequence of let-bound,
 -- monomorphic functions with the given expression at the bottom.

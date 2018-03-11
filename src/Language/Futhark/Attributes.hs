@@ -40,6 +40,7 @@ module Language.Futhark.Attributes
   , returnType
   , concreteType
   , orderZero
+  , unfoldFunType
 
   -- * Operations on types
   , rank
@@ -483,13 +484,23 @@ typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 typeOf (Lambda _ params _ _ (Info t) _) =
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
   `setAliases` mempty
-typeOf (OpSection _ _ _ _ (Info t) _)      = toStruct t `setAliases` mempty
-typeOf (OpSectionLeft _ _ _ _ (Info t) _)  = toStruct t `setAliases` mempty
-typeOf (OpSectionRight _ _ _ _ (Info t) _) = toStruct t `setAliases` mempty
+typeOf (OpSection _ _ (Info pt1) (Info pt2) (Info ret) _) =
+  foldFunType [pt1, pt2] ret `setAliases` mempty
+typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
+  foldFunType [pt2] ret `setAliases` mempty
+typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
+  foldFunType [pt1] ret `setAliases` mempty
 
 foldFunType :: [StructType] -> CompType -> CompType
 foldFunType ps ret =
   foldr (Arrow mempty Nothing . removeShapeAnnotations . fromStruct) ret ps
+
+-- | Extract the parameter types and return type from a type.
+-- If the type is not an arrow type, the list of parameter types is empty.
+unfoldFunType :: TypeBase dim as -> ([TypeBase dim as], TypeBase dim as)
+unfoldFunType (Arrow _ _ t1 t2) = let (ps, r) = unfoldFunType t2
+                                  in (t1 : ps, r)
+unfoldFunType t = ([], t)
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
