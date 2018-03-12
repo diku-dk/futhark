@@ -457,24 +457,15 @@ bindingPattern tps p t m = do
       m tps' p'
 
 checkTypeParamsUsed :: [TypeParam] -> [Pattern] -> TermTypeM ()
-checkTypeParamsUsed tps ps = do
-  let uses = mconcat $ map patternUses ps
-      check (TypeParamDim pv loc)
-        | qualName pv `elem` patternDimUses uses = return ()
-        | otherwise =
-            throwError $ TypeError loc $
-            "Type parameter " ++ pretty (baseName pv) ++
-            " not used in value parameters."
-      check tparam
-        | qualName pv `elem` patternTypeUses uses = return ()
-        | otherwise =
-            throwError $ TypeError loc $
-            "Type parameter " ++ pretty (baseName pv) ++
-            " not used in value parameters."
-        where pv = typeParamName tparam
-              loc = srclocOf tparam
-
-  mapM_ check tps
+checkTypeParamsUsed tps ps = mapM_ check tps
+  where uses = mconcat $ map patternUses ps
+        check (TypeParamDim pv loc)
+          | qualName pv `elem` patternDimUses uses = return ()
+          | otherwise =
+              throwError $ TypeError loc $
+              "Size parameter " ++ pretty (baseName pv) ++
+              " not used in value parameters."
+        check _ = return ()
 
 noTypeParamsPermitted :: [UncheckedTypeParam] -> TermTypeM ()
 noTypeParamsPermitted ps =
@@ -495,7 +486,7 @@ patternDims (PatternAscription p (TypeDecl _ (Info t))) =
 patternDims _ = []
 
 data PatternUses = PatternUses { patternDimUses :: [QualName VName]
-                               , patternTypeUses :: [QualName VName]
+                               , _patternTypeUses :: [QualName VName]
                                }
 
 instance Sem.Semigroup PatternUses where
