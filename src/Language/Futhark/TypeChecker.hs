@@ -430,34 +430,6 @@ checkTypeBind (TypeBind name ps td doc loc) =
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 
-checkValBind (ValBind entry name maybe_tdecl NoInfo tparams [] e doc loc) = do
-  unless (null tparams) $
-    throwError $ TypeError loc
-    "Value bindings without parameters may not have type parameters."
-
-  name' <- bindSpaced [(Term, name)] $ checkName Term name loc
-  (maybe_tdecl', e') <- case maybe_tdecl of
-    Just t  -> do
-      (tdecl, tdecl_type) <- checkTypeExp t
-
-      let t_structural = toStructural tdecl_type
-      when (anythingUnique t_structural) $
-        throwError $ UniqueConstType loc name t_structural
-      e' <- require [t_structural] =<< checkOneExp e
-      return (Just tdecl, e')
-    Nothing -> do
-      e' <- checkOneExp e
-      return (Nothing, e')
-  let e_t = vacuousShapeAnnotations $ toStructural $ typeOf e'
-  return (mempty { envVtable =
-                     M.singleton name' $ BoundV [] e_t
-                 , envNameMap =
-                     M.singleton (Term, name) $ qualName name'
-                 },
-          ValBind entry name' maybe_tdecl' (Info e_t) [] [] e' doc loc)
-  where anythingUnique (Record fs) = any anythingUnique fs
-        anythingUnique et          = unique et
-
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
   (fname', tparams', params', maybe_tdecl', rettype, body') <-
     bindSpaced [(Term, fname)] $
