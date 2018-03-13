@@ -74,7 +74,7 @@ internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params bod
         mapping <- fmap mconcat $ zipWithM mapTypeVariables param_ts $
                    map E.removeShapeAnnotations e_ts
 
-        let mkEntry (tp, et) = (tp, ([], E.vacuousShapeAnnotations et))
+        let mkEntry (tp, et) = (tp, E.vacuousShapeAnnotations et)
             types = map mkEntry $ M.toList mapping
         bindingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
           (rettype_bad, _, rcm) <- internaliseReturnType rettype
