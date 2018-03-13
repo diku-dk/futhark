@@ -288,8 +288,8 @@ instance ASTMappable (PatternBase Info VName) where
     PatternParens <$> astMap tv pat <*> pure loc
   astMap tv (PatternAscription pat t) =
     PatternAscription <$> astMap tv pat <*> astMap tv t
-  astMap tv (Wildcard t loc) =
-    Wildcard <$> astMap tv t <*> pure loc
+  astMap tv (Wildcard (Info t) loc) =
+    Wildcard <$> (Info <$> mapOnPatternType tv t) <*> pure loc
 
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =
