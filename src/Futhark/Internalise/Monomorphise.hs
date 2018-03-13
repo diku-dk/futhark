@@ -365,7 +365,8 @@ toValBinding (MonoBinding (name, shape_params, params, rettype, body)) =
 removeTypeVariables :: ValBind -> MonoM ValBind
 removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
-  let mapper = ASTMapper {
+  let substPatternType = fromStruct . substituteTypes subs . toStruct
+      mapper = ASTMapper {
           mapOnExp         = astMap mapper
         , mapOnName        = pure
         , mapOnQualName    = pure
@@ -375,14 +376,13 @@ removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
                              substituteTypes subs .
                              vacuousShapeAnnotations . toStruct
         , mapOnStructType  = pure . substituteTypes subs
-        , mapOnPatternType = pure . fromStruct . substituteTypes subs . toStruct
+        , mapOnPatternType = pure . substPatternType
         }
   rettype' <- astMap mapper rettype
-  pats' <- astMap mapper pats
   body' <- astMap mapper body
 
   return valbind { valBindRetType = Info rettype'
-                 , valBindParams  = pats'
+                 , valBindParams  = map (substPattern substPatternType) pats
                  , valBindBody    = body'
                  }
 
