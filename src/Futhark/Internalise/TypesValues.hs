@@ -32,8 +32,6 @@ import qualified Data.Set as S
 import Data.Maybe
 
 import qualified Language.Futhark as E
-import qualified Language.Futhark.TypeChecker.Types as E
-import qualified Language.Futhark.TypeChecker.Monad as E
 import Futhark.Representation.SOACS as I
 import Futhark.Internalise.Monad
 import Futhark.Util
@@ -148,8 +146,8 @@ internaliseTypeM :: E.StructType
 internaliseTypeM orig_t =
   case orig_t of
     E.Prim bt -> return [I.Prim $ internalisePrimType bt]
-    E.TypeVar v targs ->
-      map (`I.toDecl` Nonunique) <$> applyType v targs
+    E.TypeVar v _ ->
+      map (`I.toDecl` Nonunique) <$> applyType v
     E.Record ets ->
       concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
     E.Array et shape u -> do
@@ -159,8 +157,8 @@ internaliseTypeM orig_t =
     E.Arrow{} -> fail "internaliseTypeM: cannot handle function type."
     E.LiftedTypeVar{} -> fail "internaliseTypeM: cannot handle lifted type variable."
 
-  where internaliseElemType (E.ArrayPolyElem v targs _) =
-          map (`toDecl` Nonunique) <$> applyType v targs
+  where internaliseElemType (E.ArrayPolyElem v _ _) =
+          map (`toDecl` Nonunique) <$> applyType v
         internaliseElemType (E.ArrayPrimElem bt _) =
           return [I.Prim $ internalisePrimType bt]
         internaliseElemType (E.ArrayRecordElem elemts) =
@@ -211,34 +209,10 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
                     put $ i + 1
                     return i
 
-data TypeArg = TypeArgDim ExtSize | TypeArgType [I.ExtType]
-
-internaliseTypeArg :: E.StructTypeArg -> InternaliseTypeM TypeArg
-internaliseTypeArg (E.TypeArgDim d _) =
-  TypeArgDim <$> internaliseDim d
-internaliseTypeArg (E.TypeArgType t _) =
-  TypeArgType . map I.fromDecl <$> internaliseTypeM t
-
-internaliseTypeAbbr :: TypeEntry
-                    -> [E.StructTypeArg]
-                    -> InternaliseTypeM [I.ExtType]
-internaliseTypeAbbr (ps, tb_t) targs = do
-  targs' <- mapM internaliseTypeArg targs
-  let dims = M.fromList $ mapMaybe dimSubst $ zip ps targs'
-      types = M.fromList $ mapMaybe typeSubst $ zip ps targs
-  mapM (reExt . I.fromDecl) =<<
-    withDims dims (withTypes types $ internaliseTypeM tb_t)
-  where dimSubst (E.TypeParamDim p _, TypeArgDim d) = Just (p, d)
-        dimSubst _ = Nothing
-        typeSubst (E.TypeParamType p _, E.TypeArgType t _) =
-          Just (p, ([], t))
-        typeSubst _ = Nothing
-
-applyType :: E.TypeName -> [E.StructTypeArg]
-          -> InternaliseTypeM [I.ExtType]
-applyType (E.TypeName _ tname) targs = do
+applyType :: E.TypeName -> InternaliseTypeM [I.ExtType]
+applyType (E.TypeName _ tname) = do
   entry <- lookupTypeVar tname
-  internaliseTypeAbbr entry targs
+  mapM (reExt . I.fromDecl) =<< internaliseTypeM entry
 
 -- | Map type variables from the first argument to corresponding types
 -- in the second argument.
@@ -246,16 +220,8 @@ mapTypeVariables :: E.TypeBase () () -> E.TypeBase () ()
                  -> InternaliseM (M.Map VName (E.TypeBase () ()))
 mapTypeVariables _ y_t@E.TypeVar{} =
   fail $ "mapTypeVariables: Type variable \"" ++ pretty y_t ++ "\" in second argument."
-mapTypeVariables (E.TypeVar (E.TypeName _ tn) []) t =
+mapTypeVariables (E.TypeVar (E.TypeName _ tn) _) t =
   return $ M.singleton tn t
-mapTypeVariables (E.TypeVar (E.TypeName _ tn) targs) y_t = do
-  ((tn_ps, tn_t), _, _) <- runInternaliseTypeM mempty $ lookupTypeVar tn
-  substs <- mapTypeVariables (E.removeShapeAnnotations tn_t) y_t
-  mconcat <$> zipWithM (unify substs) tn_ps targs
-  where unify substs (E.TypeParamType pv _) (E.TypeArgType at _)
-          | Just t <- M.lookup pv substs =
-              mapTypeVariables at t
-        unify _ _ _ = return mempty
 mapTypeVariables x@E.Array{} y@E.Array{}
   | Just x' <- E.peelArray (E.arrayRank x) x,
     Just y' <- E.peelArray (E.arrayRank x) y =
@@ -272,13 +238,7 @@ fullyApplyType t = do
   return $ E.removeShapeAnnotations t'
 
 fullyApplyTypeM :: E.StructType -> InternaliseTypeM E.StructType
-fullyApplyTypeM (E.TypeVar tn targs) = do
-  (tn_ps, tn_t) <- lookupTypeVar $ E.typeLeaf tn
-  let tsubsts = mconcat $ zipWith typeSubst tn_ps targs
-  fullyApplyTypeM $ E.substituteTypes tsubsts tn_t
-  where typeSubst (E.TypeParamType p _) (E.TypeArgType t _) =
-          M.singleton p $ E.TypeSub $ E.TypeAbbr [] $ E.vacuousShapeAnnotations t
-        typeSubst _ _ = mempty
+fullyApplyTypeM (E.TypeVar tn _) = lookupTypeVar $ E.typeLeaf tn
 fullyApplyTypeM (E.LiftedTypeVar tn) = return $ E.LiftedTypeVar tn
 fullyApplyTypeM (E.Prim t) = return $ E.Prim t
 fullyApplyTypeM (E.Record fs) = E.Record <$> traverse fullyApplyTypeM fs

@@ -10,7 +10,6 @@ module Futhark.Internalise.Monad
   , FunInfo
   , SpecArgs
   , SpecParams
-  , TypeEntry
 
   , substitutingVars
   , addFunction
@@ -78,9 +77,7 @@ type FunTable = M.Map VName (SpecArgs -> InternaliseM FunInfo)
 
 type FunSpecs = M.Map (VName, SpecParams) FunInfo
 
-type TypeEntry = ([E.TypeParam], E.StructType)
-
-type TypeTable = M.Map VName TypeEntry
+type TypeTable = M.Map VName E.StructType
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
@@ -198,7 +195,7 @@ bindingFunction fname generate m = do
                    }
   local (\env -> env { envFunTable = M.insert fname generate $ envFunTable env }) m
 
-bindingTypes :: [(VName, TypeEntry)] -> InternaliseM a -> InternaliseM a
+bindingTypes :: [(VName, E.StructType)] -> InternaliseM a -> InternaliseM a
 bindingTypes types = local $ \env ->
   env { envTypeTable = M.fromList types <> envTypeTable env }
 
@@ -257,10 +254,10 @@ withDims dtable = local $ \env -> env { typeEnvDims = dtable <> typeEnvDims env 
 lookupDim :: VName -> InternaliseTypeM (Maybe ExtSize)
 lookupDim name = M.lookup name <$> asks typeEnvDims
 
-lookupTypeVar' :: VName -> InternaliseTypeM (Maybe TypeEntry)
+lookupTypeVar' :: VName -> InternaliseTypeM (Maybe E.StructType)
 lookupTypeVar' tname = M.lookup tname <$> asks typeEnvTypes
 
-lookupTypeVar :: VName -> InternaliseTypeM TypeEntry
+lookupTypeVar :: VName -> InternaliseTypeM E.StructType
 lookupTypeVar tname = do
   t <- lookupTypeVar' tname
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
