@@ -825,7 +825,7 @@ checkExp (Rotate d offexp arrexp loc) = do
     " which has only " ++ show r ++ " dimensions."
   return $ Rotate d offexp' arrexp' loc
 
-checkExp (Zip i e es NoInfo NoInfo loc) = do
+checkExp (Zip i e es NoInfo loc) = do
   e' <- checkExp e
   es' <- mapM checkExp es
 
@@ -838,7 +838,9 @@ checkExp (Zip i e es NoInfo NoInfo loc) = do
                     " dimensions, but got " ++ pretty arr_e_t ++ "."
 
   let u = mconcat $ map (uniqueness . typeOf) $ e':es'
-  return $ Zip i e' es' (Info ts) (Info u) loc
+      t = Array (ArrayRecordElem $ M.fromList $ zip tupleFieldNames ts)
+                (rank (1+i)) u
+  return $ Zip i e' es' (Info t) loc
 
 checkExp (Unzip e _ loc) = do
   e' <- checkExp e

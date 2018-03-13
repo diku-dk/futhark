@@ -563,10 +563,10 @@ Exp2 :: { UncheckedExp }
                       { Scan $2 $3 $4 $1 }
 
      | zip Atoms1
-                      { Zip 0 (fst $2) (snd $2) NoInfo NoInfo $1 }
+                      { Zip 0 (fst $2) (snd $2) NoInfo $1 }
 
      | zip '@' NaturalInt Atoms1
-                      { Zip $3 (fst $4) (snd $4) NoInfo NoInfo $1 }
+                      { Zip $3 (fst $4) (snd $4) NoInfo $1 }
 
      | unzip Atom  { Unzip $2 [] $1 }
 

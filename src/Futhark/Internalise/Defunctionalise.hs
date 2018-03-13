@@ -305,10 +305,10 @@ defuncExp e@(Stream form lam arr loc) = do
   arr' <- defuncExp' arr
   return (Stream form' lam' arr' loc, Dynamic $ typeOf e)
 
-defuncExp e@(Zip i e1 es tp uniq loc) = do
+defuncExp e@(Zip i e1 es t loc) = do
   e1' <- defuncExp' e1
   es' <- mapM defuncExp' es
-  return (Zip i e1' es' tp uniq loc, Dynamic $ typeOf e)
+  return (Zip i e1' es' t loc, Dynamic $ typeOf e)
 
 defuncExp e@(Unzip e0 tps loc) = do
   e0' <- defuncExp' e0
@@ -663,7 +663,7 @@ freeVars expr = case expr of
     where freeInForm (RedLike _ _ e) = freeVars e
           freeInForm _ = mempty
 
-  Zip _ e es _ _ _    -> freeVars e <> foldMap freeVars es
+  Zip _ e es _ _      -> freeVars e <> foldMap freeVars es
   Unzip e _ _         -> freeVars e
   Unsafe e _          -> freeVars e
 

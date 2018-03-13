@@ -694,7 +694,7 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
-            | Zip Int (ExpBase f vn) [ExpBase f vn] (f [RecordArrayElemTypeBase () Names]) (f Uniqueness) SrcLoc
+            | Zip Int (ExpBase f vn) [ExpBase f vn] (f CompType) SrcLoc
             -- ^ Conventional zip taking nonzero arrays as arguments.
             -- All arrays must have the exact same length.
 
@@ -739,7 +739,7 @@ instance Located (ExpBase f vn) where
   locOf (Rotate _ _ _ pos)             = locOf pos
   locOf (Map _ _ _ pos)                = locOf pos
   locOf (Reduce _ _ _ _ pos)           = locOf pos
-  locOf (Zip _ _ _ _ _ loc)            = locOf loc
+  locOf (Zip _ _ _ _ loc)              = locOf loc
   locOf (Unzip _ _ pos)                = locOf pos
   locOf (Scan _ _ _ pos)               = locOf pos
   locOf (Filter _ _ pos)               = locOf pos

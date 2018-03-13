@@ -623,7 +623,7 @@ internaliseExp desc (E.Unsafe e _) =
   local (\env -> env { envDoBoundsChecks = False }) $
   internaliseExp desc e
 
-internaliseExp _ (E.Zip _ e es _ _ loc) = do
+internaliseExp _ (E.Zip _ e es _ loc) = do
   e' <- internaliseExpToVars "zip_arg" $ TupLit (e:es) loc
   case e' of
     e_key:es_unchecked -> do
@@ -714,11 +714,11 @@ internaliseExp desc (E.Concat i x ys loc) = do
 
 internaliseExp _ (E.Map _ [] _ _) = return []
 
-internaliseExp desc (E.Map lam (arr:arrs) _ loc) = do
+internaliseExp desc (E.Map lam (arr:arrs) info loc) = do
   -- Pretend the arrs were zipped to get the necessary reshapes in.
   -- This would be a type error in the source language, but it's the
   -- same in the core language.
-  arrs' <- internaliseExpToVars "map_arr" (Zip 0 arr arrs (Info []) (Info Unique) loc)
+  arrs' <- internaliseExpToVars "map_arr" (Zip 0 arr arrs info loc)
   lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arrs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $ I.Op $ I.Map w lam' arrs'
