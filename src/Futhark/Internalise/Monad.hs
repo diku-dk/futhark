@@ -20,6 +20,7 @@ module Futhark.Internalise.Monad
   , lookupFunction'
 
   , bindingFunction
+  , bindingType
   , bindingTypes
 
   , asserting
@@ -201,6 +202,9 @@ bindingFunction fname generate m = do
 bindingTypes :: [(VName, TypeEntry)] -> InternaliseM a -> InternaliseM a
 bindingTypes types = local $ \env ->
   env { envTypeTable = M.fromList types <> envTypeTable env }
+
+bindingType :: VName -> TypeEntry -> InternaliseM a -> InternaliseM a
+bindingType name t = bindingTypes [(name, t)]
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

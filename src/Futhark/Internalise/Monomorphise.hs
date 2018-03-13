@@ -415,7 +415,8 @@ transformDecs (ValDec valbind : ds) = do
 
 transformDecs (TypeDec typebind : ds) = do
   env <- transformTypeBind typebind
-  localEnv env $ transformDecs ds
+  ds' <- localEnv env $ transformDecs ds
+  return $ TypeDec typebind : ds'
 
 transformDecs (dec : _) =
   error $ "The monomorphization module expects a module-free " ++

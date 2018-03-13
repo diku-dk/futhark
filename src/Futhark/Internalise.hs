@@ -59,6 +59,10 @@ internaliseDecs ds =
       return ()
     ValDec vdec : ds' ->
       internaliseValBind vdec $ internaliseDecs ds'
+    E.TypeDec tb : ds' ->
+      bindingType (E.typeAlias tb)
+      (E.typeParams tb, E.unInfo $ E.expandedType $ E.typeExp tb) $
+      internaliseDecs ds'
     _:ds' ->
       internaliseDecs ds'
 
