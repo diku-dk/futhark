@@ -62,6 +62,7 @@ module Language.Futhark.Attributes
   , tupleRecord
   , isTupleRecord
   , areTupleFields
+  , tupleFieldNames
   , sortFields
   , isTypeParam
 
@@ -462,8 +463,7 @@ typeOf (Reshape shape  e _) =
                                  _         -> 1
 typeOf (Rearrange _ e _) = typeOf e
 typeOf (Rotate _ _ e _) = typeOf e
-typeOf (Zip i _ _ (Info ts) (Info u) _) =
-  Array (ArrayRecordElem $ M.fromList $ zip tupleFieldNames ts) (rank (1+i)) u
+typeOf (Zip _ _ _ (Info t) _) = t
 typeOf (Unzip _ ts _) =
   tupleRecord $ map unInfo ts
 typeOf (Unsafe e _) = typeOf e

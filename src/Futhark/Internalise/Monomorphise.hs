@@ -260,10 +260,10 @@ transformExp (Stream form e1 e2 loc) = do
              RedLike so comm e -> RedLike so comm <$> transformExp e
   Stream form' <$> transformExp e1 <*> transformExp e2 <*> pure loc
 
-transformExp (Zip i e1 es tp uniq loc) = do
+transformExp (Zip i e1 es t loc) = do
   e1' <- transformExp e1
   es' <- mapM transformExp es
-  return $ Zip i e1' es' tp uniq loc
+  return $ Zip i e1' es' t loc
 
 transformExp (Unzip e0 tps loc) =
   Unzip <$> transformExp e0 <*> pure tps <*> pure loc
@@ -378,10 +378,10 @@ removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
         , mapOnStructType  = pure . substituteTypes subs
         , mapOnPatternType = pure . substPatternType
         }
-  rettype' <- astMap mapper rettype
+
   body' <- astMap mapper body
 
-  return valbind { valBindRetType = Info rettype'
+  return valbind { valBindRetType = Info $ substituteTypes subs rettype
                  , valBindParams  = map (substPattern substPatternType) pats
                  , valBindBody    = body'
                  }
