@@ -13,7 +13,6 @@ module Futhark.Internalise.TypesValues
   , internalisePrimType
   , internalisedTypeSize
   , internaliseTypeM
-  , internaliseTypeAbbr
 
   , mapTypeVariables
   , fullyApplyType
