@@ -12,7 +12,6 @@ module Futhark.Internalise.TypesValues
   , internaliseUniqueness
   , internalisePrimType
   , internalisedTypeSize
-  , internaliseTypeM
 
   , mapTypeVariables
   , fullyApplyType
@@ -239,7 +238,7 @@ fullyApplyType t = do
 
 fullyApplyTypeM :: E.StructType -> InternaliseTypeM E.StructType
 fullyApplyTypeM (E.TypeVar tn _) = lookupTypeVar $ E.typeLeaf tn
-fullyApplyTypeM (E.LiftedTypeVar tn) = return $ E.LiftedTypeVar tn
+fullyApplyTypeM (E.LiftedTypeVar tn) = lookupTypeVar $ E.typeLeaf tn
 fullyApplyTypeM (E.Prim t) = return $ E.Prim t
 fullyApplyTypeM (E.Record fs) = E.Record <$> traverse fullyApplyTypeM fs
 fullyApplyTypeM (E.Array at shape u) = inArray at
