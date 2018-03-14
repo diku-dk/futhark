@@ -394,11 +394,8 @@ unpackDim arr_name (Imp.ConstSize c) i = do
 
 unpackDim arr_name (Imp.VarSize var) i = do
   let shape_name = Field arr_name "shape"
-  let src = Index shape_name $ IdxExp $ Integer $ toInteger i
-  let dest = Var $ compileName var
-  let makeNumpy = simpleCall "np.int32" [src]
-  stm $ Try [Assert (BinOp "==" dest makeNumpy) "variant dimension wrong"]
-        [Catch (Var "NameError") [Assign dest makeNumpy]]
+      src = Index shape_name $ IdxExp $ Integer $ toInteger i
+  stm $ Assign (Var $ compileName var) $ simpleCall "np.int32" [src]
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
 entryPointOutput (Imp.OpaqueValue desc vs) =
