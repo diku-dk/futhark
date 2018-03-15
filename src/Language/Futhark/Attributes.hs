@@ -694,7 +694,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
              -- The reason for the loop formulation is to ensure that we
              -- get a missing case warning if we forget a case.
-             map mkIntrinsicBinOp [minBound..maxBound] ++
+             mapMaybe mkIntrinsicBinOp [minBound..maxBound] ++
 
              [("scatter", IntrinsicPolyFun [tp_a]
                           [Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique,
@@ -740,11 +740,12 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                         map FloatType [minBound..maxBound]
         anyPrimType = Bool : anyNumberType
 
-        mkIntrinsicBinOp :: BinOp -> (String, Intrinsic)
-        mkIntrinsicBinOp op = (pretty op, intrinsicBinOp op)
+        mkIntrinsicBinOp :: BinOp -> Maybe (String, Intrinsic)
+        mkIntrinsicBinOp op = do op' <- intrinsicBinOp op
+                                 return (pretty op, op')
 
-        binOp :: [PrimType] -> Intrinsic
-        binOp ts = IntrinsicOverloadedFun [ (t, ([t,t], t)) | t <- ts ]
+        binOp ts = Just $ IntrinsicOverloadedFun [ (t, ([t,t], t)) | t <- ts ]
+        ordering = Just $ IntrinsicOverloadedFun [ (t, ([t,t], Bool)) | t <- anyPrimType ]
 
         intrinsicBinOp Plus     = binOp anyNumberType
         intrinsicBinOp Minus    = binOp anyNumberType
@@ -760,16 +761,15 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         intrinsicBinOp Band     = binOp anyIntType
         intrinsicBinOp Xor      = binOp anyIntType
         intrinsicBinOp Bor      = binOp anyIntType
-        intrinsicBinOp LogAnd   = IntrinsicMonoFun [Bool,Bool] Bool
-        intrinsicBinOp LogOr    = IntrinsicMonoFun [Bool,Bool] Bool
-        intrinsicBinOp Equal    = IntrinsicEquality
-        intrinsicBinOp NotEqual = IntrinsicEquality
+        intrinsicBinOp LogAnd   = Just $ IntrinsicMonoFun [Bool,Bool] Bool
+        intrinsicBinOp LogOr    = Just $ IntrinsicMonoFun [Bool,Bool] Bool
+        intrinsicBinOp Equal    = Just $ IntrinsicEquality
+        intrinsicBinOp NotEqual = Just $ IntrinsicEquality
         intrinsicBinOp Less     = ordering
         intrinsicBinOp Leq      = ordering
         intrinsicBinOp Greater  = ordering
         intrinsicBinOp Geq      = ordering
-
-        ordering = IntrinsicOverloadedFun [ (t, ([t,t], Bool)) | t <- anyPrimType ]
+        intrinsicBinOp _        = Nothing
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.

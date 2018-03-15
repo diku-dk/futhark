@@ -481,6 +481,9 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Leq
            | Greater
            | Geq
+           -- Some functional ops.
+           | PipeRight -- ^ @|>@
+           | PipeLeft -- ^ @<|@
              deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Whether a bound for an end-point of a 'DimSlice' or a range
@@ -978,25 +981,27 @@ instance Pretty PrimType where
   ppr Bool             = text "bool"
 
 instance Pretty BinOp where
-  ppr Plus     = text "+"
-  ppr Minus    = text "-"
-  ppr Pow      = text "**"
-  ppr Times    = text "*"
-  ppr Divide   = text "/"
-  ppr Mod      = text "%"
-  ppr Quot     = text "//"
-  ppr Rem      = text "%%"
-  ppr ShiftR   = text ">>"
-  ppr ZShiftR  = text ">>>"
-  ppr ShiftL   = text "<<"
-  ppr Band     = text "&"
-  ppr Xor      = text "^"
-  ppr Bor      = text "|"
-  ppr LogAnd   = text "&&"
-  ppr LogOr    = text "||"
-  ppr Equal    = text "=="
-  ppr NotEqual = text "!="
-  ppr Less     = text "<"
-  ppr Leq      = text "<="
-  ppr Greater  = text ">"
-  ppr Geq      = text ">="
+  ppr Plus      = text "+"
+  ppr Minus     = text "-"
+  ppr Pow       = text "**"
+  ppr Times     = text "*"
+  ppr Divide    = text "/"
+  ppr Mod       = text "%"
+  ppr Quot      = text "//"
+  ppr Rem       = text "%%"
+  ppr ShiftR    = text ">>"
+  ppr ZShiftR   = text ">>>"
+  ppr ShiftL    = text "<<"
+  ppr Band      = text "&"
+  ppr Xor       = text "^"
+  ppr Bor       = text "|"
+  ppr LogAnd    = text "&&"
+  ppr LogOr     = text "||"
+  ppr Equal     = text "=="
+  ppr NotEqual  = text "!="
+  ppr Less      = text "<"
+  ppr Leq       = text "<="
+  ppr Greater   = text ">"
+  ppr Geq       = text ">="
+  ppr PipeLeft  = text "<|"
+  ppr PipeRight = text "|>"

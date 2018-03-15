@@ -115,6 +115,8 @@ import Language.Futhark.Parser.Lexer
       '<<...'         { L _ (SYMBOL ShiftL _ _) }
       '>>...'         { L _ (SYMBOL ShiftR _ _) }
       '>>>...'        { L _ (SYMBOL ZShiftR _ _) }
+      '|>...'         { L _ (SYMBOL PipeRight _ _) }
+      '<|...'         { L _ (SYMBOL PipeLeft _ _) }
       '|...'          { L _ (SYMBOL Bor _ _) }
       '&...'          { L _ (SYMBOL Band _ _) }
       '^...'          { L _ (SYMBOL Xor _ _) }
@@ -178,14 +180,14 @@ import Language.Futhark.Parser.Lexer
 %left ':'
 %right '...' '..<' '..>' '..'
 %left '<-'
+%left '|>...'
+%right '<|...'
 %left '||...'
 %left '&&...'
-%right '<=' '<=...' '>=' '>=...' '>' '>...' '<' '<...' '==...' '!=...'
+%left '<=' '<=...' '>=' '>=...' '>' '>...' '<' '<...' '==...' '!=...'
 %left '&...' '^...' '|...'
-%right '<<...'
-%left '>>...' '>>>...'
+%left '<<...' '>>...' '>>>...'
 %left '+...' '-...' '-'
-
 %left '*...' '*' '/...' '%...' '//...' '%%...'
 %left '**...'
 %right '->'
@@ -366,6 +368,8 @@ BinOp :: { QualName Name }
       | '>>...'    { binOpName $1 }
       | '>>>...'   { binOpName $1 }
       | '<<...'    { binOpName $1 }
+      | '<|...'    { binOpName $1 }
+      | '|>...'    { binOpName $1 }
 
       | '<'     { QualName [] (nameFromString "<") }
       | '<='    { QualName [] (nameFromString "<=") }
@@ -612,6 +616,8 @@ Exp2 :: { UncheckedExp }
      | Exp2 '<=...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '>...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '>=...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '|>...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '<|...' Exp2   { binOp $1 $2 $3 }
 
      | Exp2 '>=' Exp2      { binOp $1 (L $2 (SYMBOL Geq [] (nameFromString ">="))) $3 }
      | Exp2 '>' Exp2       { binOp $1 (L $2 (SYMBOL Greater [] (nameFromString ">"))) $3 }

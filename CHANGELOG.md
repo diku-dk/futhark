@@ -42,10 +42,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
    * `FUTHARK_VERSIONED_CODE` is now `FUTHARK_INCREMENTAL_FLATTENING`.
 
-   * Relational operators and the `<<` operator is now
-     right-associative.  This is to give nicer associativity to the
-     new function composition operators.
-
 ### Fixed
 
    * Transpositions in generated OpenCL code no longer crashes on
