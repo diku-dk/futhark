@@ -47,13 +47,10 @@
 
 import "/futlib/array"
 
-let min(a: i32) (b: i32): i32 = if(a<b) then a else b
+let min1(a: []i32, b: []i32): []i32 = map (uncurry i32.min) (zip a b)
 
-let min1(a: []i32, b: []i32): []i32 = map (\(x,y) -> min x y) (zip a b)
-
-
-let redmin1(a:  []i32): i32 = reduce min 1200 a
-let redmin2(a: [][]i32): []i32 = map    redmin1 a
+let redmin1(a:  []i32): i32 = reduce i32.min 1200 a
+let redmin2(a: [][]i32): []i32 = map redmin1 a
 
 let plus1(a:  []i32,  b: []i32): []i32 = map (+) a b
 let plus2(a: [][]i32, b: [][]i32): [][]i32 = map plus1 (zip a b)
