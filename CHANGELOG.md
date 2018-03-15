@@ -24,11 +24,27 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * Comparison operators (<=, <, >, >=) are now valid for boolean
      operands.
 
+   * Higher-order functions are now supported (#323).
+
+   * Added higher-order utility functions to the prelude:
+
+         val (|>) 'a '^b: a ->  (a -> b) -> b
+
+         let (<|) 'a '^b: (a -> b) -> a -> b
+
+         let (|>>) 'a 'b '^c: (a -> b) -> (b -> c) -> a -> c
+
+         let (<<|) 'a 'b '^c: (b -> c) -> (a -> b) a -> c
+
 ### Removed
 
 ### Changed
 
    * `FUTHARK_VERSIONED_CODE` is now `FUTHARK_INCREMENTAL_FLATTENING`.
+
+   * Relational operators and the `<<` operator is now
+     right-associative.  This is to give nicer associativity to the
+     new function composition operators.
 
 ### Fixed
 

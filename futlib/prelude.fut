@@ -15,3 +15,11 @@ let t32 (x: f32): i32 = i32.f32 x
 let r64 (x: i32): f64 = f64.i32 x
 -- | Create integer from double-precision float.
 let t64 (x: f64): i32 = i32.f64 x
+
+let (|>) 'a '^b (x: a) (f: a -> b): b = f x
+
+let (<|) 'a '^b (f: a -> b) (x: a) = f x
+
+let (|>>) 'a 'b '^c (f: a -> b) (g: b -> c) (x: a): c = g (f x)
+
+let (<<|) 'a 'b '^c (g: b -> c) (f: a -> b) (x: a): c = g (f x)
