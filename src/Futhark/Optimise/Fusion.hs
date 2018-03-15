@@ -31,14 +31,18 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Pass
 
-data VarEntry = IsArray VName (NameInfo SOACS) SOAC.Input
+data VarEntry = IsArray VName (NameInfo SOACS) Names SOAC.Input
               | IsNotArray VName (NameInfo SOACS)
 
 varEntryType :: VarEntry -> NameInfo SOACS
-varEntryType (IsArray _ attr _) =
+varEntryType (IsArray _ attr _ _) =
   attr
 varEntryType (IsNotArray _ attr) =
   attr
+
+varEntryAliases :: VarEntry -> Names
+varEntryAliases (IsArray _ _ x _) = x
+varEntryAliases _ = mempty
 
 data FusionGEnv = FusionGEnv {
     soacs      :: M.Map VName [VName]
@@ -49,7 +53,7 @@ data FusionGEnv = FusionGEnv {
 
 arrsInScope :: FusionGEnv -> M.Map VName SOAC.Input
 arrsInScope = M.fromList . mapMaybe asArray . M.toList . varsInScope
-  where asArray (name, IsArray _ _ input) =
+  where asArray (name, IsArray _ _ _ input) =
           Just (name, input)
         asArray (_, IsNotArray{}) =
           Nothing
@@ -78,45 +82,54 @@ instance HasScope SOACS FusionGM where
 ------------------------------------------------------------------------
 
 -- | Binds an array name to the set of used-array vars
-bindVar :: FusionGEnv -> Ident -> FusionGEnv
-bindVar env (Ident name t) =
+bindVar :: FusionGEnv -> (Ident, Names) -> FusionGEnv
+bindVar env (Ident name t, aliases) =
   env { varsInScope = M.insert name entry $ varsInScope env }
   where entry = case t of
-          Array {} -> IsArray name (LetInfo t) $ SOAC.identInput $ Ident name t
+          Array {} -> IsArray name (LetInfo t) aliases' $ SOAC.identInput $ Ident name t
           _        -> IsNotArray name $ LetInfo t
+        expand = maybe mempty varEntryAliases . flip M.lookup (varsInScope env)
+        aliases' = aliases <> mconcat (map expand $ S.toList aliases)
 
-bindVars :: FusionGEnv -> [Ident] -> FusionGEnv
+bindVars :: FusionGEnv -> [(Ident, Names)] -> FusionGEnv
 bindVars = foldl bindVar
 
-binding :: [Ident] -> FusionGM a -> FusionGM a
+binding :: [(Ident, Names)] -> FusionGM a -> FusionGM a
 binding vs = local (`bindVars` vs)
 
-gatherStmPattern :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
-gatherStmPattern = binding . patternIdents
+gatherStmPattern :: Pattern -> Exp -> FusionGM FusedRes -> FusionGM FusedRes
+gatherStmPattern pat e = binding $ zip idents aliases
+  where idents = patternIdents pat
+        aliases = expAliases $ Alias.analyseExp e
 
 bindingPat :: Pattern -> FusionGM a -> FusionGM a
-bindingPat = binding . patternIdents
+bindingPat = binding . (`zip` repeat mempty) . patternIdents
 
-bindingFParams :: [FParam] -> FusionGM a -> FusionGM a
-bindingFParams = binding  . map paramIdent
+bindingParams :: Typed t => [Param t] -> FusionGM a -> FusionGM a
+bindingParams = binding . (`zip` repeat mempty) . map paramIdent
 
 -- | Binds an array name to the set of soac-produced vars
 bindingFamilyVar :: [VName] -> FusionGEnv -> Ident -> FusionGEnv
 bindingFamilyVar faml env (Ident nm t) =
   env { soacs       = M.insert nm faml $ soacs env
-      , varsInScope = M.insert nm (IsArray nm (LetInfo t) $
-                                    SOAC.identInput $ Ident nm t) $
+      , varsInScope = M.insert nm (IsArray nm (LetInfo t) mempty $
+                                   SOAC.identInput $ Ident nm t) $
                       varsInScope env
       }
+
+varAliases :: VName -> FusionGM Names
+varAliases v = S.insert v . maybe mempty varEntryAliases .
+               M.lookup v . varsInScope <$> ask
+
+varsAliases :: Names -> FusionGM Names
+varsAliases = fmap mconcat . mapM varAliases . S.toList
 
 checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
 checkForUpdates res (BasicOp (Update src is _)) = do
   res' <- foldM addVarToInfusible res $
           src : S.toList (mconcat $ map freeIn is)
-  let aliases = [src]
-      inspectKer k =
-        let inplace' = foldl (flip S.insert) (inplace k) aliases
-        in  k { inplace = inplace' }
+  aliases <- varAliases src
+  let inspectKer k = k { inplace = aliases <> inplace k }
   return res' { kernels = M.map inspectKer $ kernels res' }
 checkForUpdates res _ = return res
 
@@ -134,13 +147,14 @@ bindingFamily pat = local bind
 bindingTransform :: PatElem -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
 bindingTransform pe srcname trns = local $ \env ->
   case M.lookup srcname $ varsInScope env of
-    Just (IsArray src' _ input) ->
+    Just (IsArray src' _ aliases input) ->
       env { varsInScope =
               M.insert vname
-              (IsArray src' (LetInfo attr) $ trns `SOAC.addTransform` input) $
+              (IsArray src' (LetInfo attr) (srcname `S.insert` aliases) $
+               trns `SOAC.addTransform` input) $
               varsInScope env
           }
-    _ -> bindVar env $ patElemIdent pe
+    _ -> bindVar env (patElemIdent pe, S.singleton vname)
   where vname = patElemName pe
         attr = patElemAttr pe
 
@@ -183,12 +197,12 @@ fuseFun fun = do
 
 fusionGatherFun :: FunDef -> FusionGM FusedRes
 fusionGatherFun fundec =
-  bindingFParams (funDefParams fundec) $
+  bindingParams (funDefParams fundec) $
   fusionGatherBody mempty $ funDefBody fundec
 
 fuseInFun :: FusedRes -> FunDef -> FusionGM FunDef
 fuseInFun res fundec = do
-  body' <- bindingFParams (funDefParams fundec) $
+  body' <- bindingParams (funDefParams fundec) $
            bindRes res $
            fuseInBody $ funDefBody fundec
   return $ fundec { funDefBody = body' }
@@ -637,7 +651,7 @@ fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
           bindingTransform pe src trns $ fusionGatherBody fres body
       | otherwise -> do
           let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
-          bres <- gatherStmPattern pat $ fusionGatherBody fres body
+          bres <- gatherStmPattern pat e $ fusionGatherBody fres body
           bres' <- checkForUpdates bres e
           foldM fusionGatherExp bres' (e:pat_vars)
 
@@ -650,12 +664,14 @@ fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
           (used_lam, lres)  <- foldM fusionGatherLam (S.empty, fres) lambdas
           bres  <- bindingFamily pat $ fusionGatherBody lres body
           bres' <- foldM fusionGatherSubExp bres nes
-          greedyFuse rem_bnds used_lam bres' (pat, cs, soac, consumed)
+          consumed' <- varsAliases consumed
+          greedyFuse rem_bnds used_lam bres' (pat, cs, soac, consumed')
 
         mapLike soac lambda = do
           bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (S.empty, bres) lambda
-          greedyFuse rem_bnds used_lam blres (pat, cs, soac, consumed)
+          consumed' <- varsAliases consumed
+          greedyFuse rem_bnds used_lam blres (pat, cs, soac, consumed')
 
 fusionGatherBody fres (Body _ _ res) =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
@@ -674,7 +690,8 @@ fusionGatherExp fres (DoLoop ctx val form loop_body) = do
             Ident i (Prim int32) : map (paramIdent . fst) loopvars
           WhileLoop{} -> []
 
-  new_res <- binding (form_idents ++ map (paramIdent . fst) (ctx<>val)) $
+  new_res <- binding (zip (form_idents ++ map (paramIdent . fst) (ctx<>val)) $
+                      repeat mempty) $
     fusionGatherBody mempty loop_body
   -- make the inpArr infusible, so that they
   -- cannot be fused from outside the loop:
@@ -728,8 +745,7 @@ addVarToInfusible fres name = do
 -- adding inp_arrs to the infusible set.
 fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (S.Set VName, FusedRes)
 fusionGatherLam (u_set,fres) (Lambda idds body _) = do
-    new_res <- binding (map paramIdent idds) $
-               fusionGatherBody mempty body
+    new_res <- bindingParams idds $ fusionGatherBody mempty body
     -- make the inpArr infusible, so that they
     -- cannot be fused from outside the lambda:
     let inp_arrs = S.fromList $ M.keys $ inpArr new_res
@@ -761,8 +777,8 @@ fuseInExp :: Exp -> FusionGM Exp
 -- Handle loop specially because we need to bind the types of the
 -- merge variables.
 fuseInExp (DoLoop ctx val form loopbody) =
-  binding form_idents $
-  bindingFParams (map fst $ ctx ++ val) $ do
+  binding (zip form_idents $ repeat mempty) $
+  bindingParams (map fst $ ctx ++ val) $ do
     loopbody' <- fuseInBody loopbody
     return $ DoLoop ctx val form loopbody'
   where form_idents = case form of
@@ -781,7 +797,7 @@ fuseIn = identityMapper {
 
 fuseInLambda :: Lambda -> FusionGM Lambda
 fuseInLambda (Lambda params body rtp) = do
-  body' <- binding (map paramIdent params) $ fuseInBody body
+  body' <- bindingParams params $ fuseInBody body
   return $ Lambda params body' rtp
 
 replaceSOAC :: Pattern -> StmAux () -> Exp -> FusionGM (Stms SOACS)
