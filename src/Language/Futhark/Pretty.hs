@@ -390,6 +390,8 @@ prettyBinOp p bop x y = parensIf (p > symPrecedence bop) $
                         pprPrec (symRPrecedence bop) y
   where symPrecedence = precedence . leadingOperator . nameFromString . pretty
         symRPrecedence = rprecedence . leadingOperator . nameFromString . pretty
+        precedence PipeRight = -1
+        precedence PipeLeft  = -1
         precedence LogAnd   = 0
         precedence LogOr    = 0
         precedence Band     = 1
