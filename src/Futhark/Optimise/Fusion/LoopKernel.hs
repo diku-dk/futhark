@@ -83,10 +83,10 @@ data FusedKer = FusedKer {
   -- ^ the SOAC expression, e.g., mapT( f(a,b), x, y )
 
   , inplace    :: Names
-  -- ^ every kernel maintains a set of variables
-  -- that alias vars used in in-place updates,
-  -- such that fusion is prevented to move
-  -- a use of an
+  -- ^ Variables used in in-place updates in the kernel itself, as
+  -- well as on the path to the kernel from the current position.
+  -- This is used to avoid fusion that would violate in-place
+  -- restrictions.
 
   , fusedVars :: [VName]
   -- ^ whether at least a fusion has been performed.
@@ -109,7 +109,7 @@ data FusedKer = FusedKer {
 newKernel :: Certificates -> SOAC -> Names -> [VName] -> Scope SOACS -> FusedKer
 newKernel cs soac consumed out_nms scope =
   FusedKer { fsoac = soac
-           , inplace = S.empty
+           , inplace = consumed
            , fusedVars = []
            , fusedConsumed = consumed
            , outputTransform = SOAC.noTransforms
@@ -250,6 +250,7 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
         uniq_lam <- renameLambda $ SOAC.lambda res_soac
         return $ ker { fsoac = uniq_lam `SOAC.setLambda` res_soac
                      , fusedVars = fusedVars_new
+                     , inplace = inplace ker <> soac1_consumed
                      , fusedConsumed = fusedConsumed ker <> soac1_consumed
                      , outNames = res_outnms
                      }
@@ -337,21 +338,20 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
     ------------------
 
     -- Map-write fusion.
+    --
+    -- The 'inplace' mechanism for kernels already takes care of
+    -- checking that the Scatter is not writing to any array used in
+    -- the Map.
     (SOAC.Scatter _len _lam _ivs dests,
-     SOAC.Map _ map_lam map_inp)
-      | -- 1. the to-be-written arrays are not used inside the map!
-        S.null (S.intersection (S.fromList as) $
-                S.fromList (map SOAC.inputArray map_inp) `S.union`
-                freeInLambda map_lam),
-        -- 2. all arrays produced by the map are ONLY used (consumed)
+     SOAC.Map{})
+      | -- 1. all arrays produced by the map are ONLY used (consumed)
         --    by the scatter, i.e., not used elsewhere.
         not (any (`S.member` unfus_set) outVars),
-        -- 3. all arrays produced by the map are input to the scatter.
+        -- 2. all arrays produced by the map are input to the scatter.
         mapWriteFusionOK outVars ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
           success (outNames ker ++ extra_nms) $
             SOAC.Scatter w res_lam' new_inp dests
-            where (_, _, as) = unzip3 dests
 
     -- Scatter-write fusion.
     (SOAC.Scatter _len2 _lam2 ivs2 as2,
