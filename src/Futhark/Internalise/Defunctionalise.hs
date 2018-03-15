@@ -193,17 +193,11 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
         closureFromDynamicFun (vn, sv) =
           (RecordFieldImplicit vn (Info $ typeFromSV sv) noLoc, (vn, sv))
 
--- We leave the operator section expressions mostly unaffected for now,
--- assuming that they will only occur as function arguments to SOACs.
-defuncExp e@OpSection{} = return (e, Dynamic $ typeOf e)
-
-defuncExp expr@(OpSectionLeft qn il e tps tp loc) = do
-  e' <- defuncExp' e
-  return (OpSectionLeft qn il e' tps tp loc, Dynamic $ typeOf expr)
-
-defuncExp expr@(OpSectionRight qn il e tps tp loc) = do
-  e' <- defuncExp' e
-  return (OpSectionRight qn il e' tps tp loc, Dynamic $ typeOf expr)
+-- Operator sections are expected to be converted to lambda-expressions
+-- by the monomorphizer, so they should no longer occur at this point.
+defuncExp OpSection{}      = error "defuncExp: unexpected operator section."
+defuncExp OpSectionLeft{}  = error "defuncExp: unexpected operator section."
+defuncExp OpSectionRight{} = error "defuncExp: unexpected operator section."
 
 defuncExp (DoLoop tparams pat e1 form e3 loc) = do
   let env_dim = envFromShapeParams tparams
@@ -220,10 +214,47 @@ defuncExp (DoLoop tparams pat e1 form e3 loc) = do
   return (DoLoop tparams pat e1' form' e3' loc, sv)
   where envFromIdent (Ident vn (Info tp) _) = [(vn, Dynamic tp)]
 
-defuncExp (BinOp qn il (e1, pt1) (e2, pt2) t@(Info (_rem_pts, t')) loc) = do
-  e1' <- defuncExp' e1
-  e2' <- defuncExp' e2
-  return (BinOp qn il (e1', pt1) (e2', pt2) t loc, Dynamic t')
+defuncExp e@(BinOp qn@(QualName qs op) il (e1, pt1) (e2, pt2) t loc) = do
+  (e1', sv1) <- defuncExp e1
+  (e2', sv2) <- defuncExp e2
+  sv0 <- lookupVar loc op
+  case sv0 of
+    IntrinsicSV ->
+      return (BinOp qn il (e1', pt1) (e2', pt2) t loc, Dynamic $ typeOf e)
+
+    DynamicFun _ (DynamicFun _ sv) ->
+      let rettype = typeFromSV sv
+      in return (BinOp qn il (e1', pt1) (e2', pt2) (Info ([], rettype)) loc, sv)
+
+    DynamicFun (_, LambdaSV pat1 _ _) (LambdaSV pat2 e0 closure_env) -> do
+      let env2 = matchPatternSV pat2 sv2
+      (e0', sv) <- local (const $ env2 <> closure_env) $ defuncExp e0
+      op' <- newName op
+      let params = [pat1, updatePattern pat2 sv2]
+          rettype = typeOf e0'
+      liftValDec op' rettype params e0'
+      let t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
+      return (BinOp (QualName qs op') il (e1', pt1) (e2', Info t2)
+               (Info ([], rettype)) loc, sv)
+
+    LambdaSV pat1 e0 closure_env1 -> do
+      let env1 = matchPatternSV pat1 sv1
+      (_, sv0') <- local (const $ env1 <> closure_env1) $ defuncExp e0
+      case sv0' of
+        LambdaSV pat2 e0' closure_env2 -> do
+          let env2 = matchPatternSV pat2 sv2
+          (body, sv) <- local (const $ env2 <> closure_env2) $ defuncExp e0'
+          op' <- newName op
+          let params = [updatePattern pat1 sv1, updatePattern pat2 sv2]
+              rettype = typeOf body
+          liftValDec op' rettype params body
+          let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
+              t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
+          return (BinOp (QualName qs op') il (e1', Info t1) (e2', Info t2)
+                  (Info ([], rettype)) loc, sv)
+
+        _ -> error "defuncExp: unexpected nesting of static values in BinOp."
+    _ -> error $ "defuncExp: received infix operator with static value " ++ show sv0
 
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
   (e0', sv0) <- defuncExp e0
@@ -446,24 +477,15 @@ defuncApply depth e@(Var qn (Info (_, argtypes, _)) loc) = do
         | otherwise -> do
             fname <- newName $ qualLeaf qn
             let (pats, e0, sv') = liftDynFun sv depth
-                sv'' = replNthDynFun sv sv' depth
-                (argtypes', rettype) = dynamicFunType sv'' argtypes
+                (argtypes', rettype) = dynamicFunType sv' argtypes
             liftValDec fname rettype pats e0
-            return (Var (qualName fname) (Info ([], argtypes', rettype)) loc, sv'')
+            return (Var (qualName fname) (Info ([], argtypes', rettype)) loc, sv')
 
       IntrinsicSV -> return (e, IntrinsicSV)
 
       _ -> return (Var qn (Info ([], [], typeFromSV sv)) loc, sv)
 
 defuncApply _ expr = defuncExp expr
-
--- | Replace the n'th StaticVal in a sequence of DynamicFun's.
-replNthDynFun :: StaticVal -> StaticVal -> Int -> StaticVal
-replNthDynFun _ sv' 0 = sv'
-replNthDynFun (DynamicFun clsr sv) sv' d
-  | d > 0 = DynamicFun clsr $ replNthDynFun sv sv' (d-1)
-replNthDynFun sv _ n = error $ "Tried to replace the " ++ show n
-                             ++ "'th StaticVal in " ++ show sv
 
 -- | Check if a 'StaticVal' and a given application depth corresponds
 -- to a fully applied dynamic function.
@@ -474,13 +496,13 @@ fullyApplied (DynamicFun _ sv) depth
 fullyApplied _ _ = True
 
 -- | Converts a dynamic function 'StaticVal' into a list of parameters,
--- a function body, and the static value that results from applying the
+-- a function body, and the appropriate static value for applying the
 -- function at the given depth of partial application.
 liftDynFun :: StaticVal -> Int -> ([Pattern], Exp, StaticVal)
 liftDynFun (DynamicFun (e, sv) _) 0 = ([], e, sv)
-liftDynFun (DynamicFun (_, LambdaSV pat _ _) sv) d
+liftDynFun (DynamicFun clsr@(_, LambdaSV pat _ _) sv) d
   | d > 0 =  let (pats, e', sv') = liftDynFun sv (d-1)
-             in (pat : pats, e', sv')
+             in (pat : pats, e', DynamicFun clsr sv')
 liftDynFun sv _ = error $ "Tried to lift a StaticVal " ++ show sv
                        ++ ", but expected a dynamic function."
 
@@ -640,7 +662,8 @@ freeVars expr = case expr of
           formVars (ForIn p e2)   = (freeVars e2, patternVars p)
           formVars (While e2)     = (freeVars e2, S.empty)
 
-  BinOp _ _ (e1, _) (e2, _) _ _  -> freeVars e1 <> freeVars e2
+  BinOp qn _ (e1, _) (e2, _) _ _ -> S.singleton (qualLeaf qn) <>
+                                    freeVars e1 <> freeVars e2
   Project _ e _ _                -> freeVars e
 
   LetWith id1 id2 idxs e1 e2 _ ->
