@@ -34,10 +34,10 @@ module mk_merge_sort(C: {
                in
                if (i & d) == 0
                then let a_iord = a[i | d] in
-                    if a_iord C.<= a_i == up1
+                    if (a_iord C.<= a_i) == up1
                     then a_iord else a_i
                else let a_ixord = a[i ^ d] in
-                        if a_i C.<= a_ixord == up1
+                        if (a_i C.<= a_ixord) == up1
                         then a_ixord else a_i)
         (iota n)
 
