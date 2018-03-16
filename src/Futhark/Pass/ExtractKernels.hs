@@ -757,55 +757,57 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
       distributeNormally
   | otherwise =
       distributeSingleStm acc (Let pat (StmAux cs ()) $ mapLoopExp maploop) >>= \case
-      Nothing ->
-        distributeNormally
-      Just (post_kernels, _, nest, acc') -> do
-        addKernels post_kernels
-        -- The kernel can be distributed by itself, so now we can
-        -- decide whether to just sequentialise, or exploit inner
-        -- parallelism.
-        let map_nesting = MapNesting pat cs w $ zip (lambdaParams lam) arrs
-            nest' = pushInnerKernelNesting (pat, lam_res) map_nesting nest
-            par_acc = KernelAcc { kernelTargets = pushInnerTarget
-                                  (pat, lam_res) $ kernelTargets acc
-                                , kernelStms = mempty
-                                }
-            extra_scope = targetsScope $ kernelTargets acc'
-        (_, distributed_kernels) <- collectKernels $
-          localScope extra_scope $ inNesting nest' $
-          distribute =<< leavingNesting maploop =<< distribute =<<
-          distributeMapBodyStms par_acc (stmsToList lam_bnds)
+      Just (post_kernels, res, nest, acc')
+        | Just (perm, _pat_unused) <- permutationAndMissing pat res -> do
+            addKernels post_kernels
+            multiVersion perm nest acc'
+      _ -> distributeNormally
+  where
+    lam_bnds = bodyStms $ lambdaBody lam
+    lam_res = bodyResult $ lambdaBody lam
 
-        (nestw_bnds, nestw, sequentialised_kernel) <- localScope extra_scope $ do
-          sequentialised_map_body <-
-            localScope (scopeOfLParams (lambdaParams lam)) $ runBinder_ $
-            Kernelise.transformStms lam_bnds
-          let kbody = KernelBody () sequentialised_map_body $
-                      map (ThreadsReturn ThreadsInSpace) lam_res
-          constructKernel nest' kbody
+    def_acc = KernelAcc { kernelTargets = pushInnerTarget
+                          (pat, bodyResult $ lambdaBody lam) $
+                          kernelTargets acc
+                        , kernelStms = mempty
+                        }
 
-        let outer_pat = loopNestingPattern $ fst nest
-        addKernel =<< (nestw_bnds<>) <$>
-          localScope extra_scope (distributeMap' nest'
-                                  (oneStm sequentialised_kernel)
-                                  (postKernelsStms distributed_kernels)
-                                  outer_pat nestw lam)
+    distributeNormally =
+      distribute =<<
+      leavingNesting maploop =<<
+      mapNesting pat cs w lam arrs
+      (distribute =<< distributeMapBodyStms def_acc (stmsToList lam_bnds))
 
-        return acc'
-      where lam_bnds = bodyStms $ lambdaBody lam
-            lam_res = bodyResult $ lambdaBody lam
+    multiVersion perm nest acc' = do
+      -- The kernel can be distributed by itself, so now we can
+      -- decide whether to just sequentialise, or exploit inner
+      -- parallelism.
+      let map_nesting = MapNesting pat cs w $ zip (lambdaParams lam) arrs
+          lam_res' = rearrangeShape perm lam_res
+          nest' = pushInnerKernelNesting (pat, lam_res') map_nesting nest
+          extra_scope = targetsScope $ kernelTargets acc'
+      (_, distributed_kernels) <- collectKernels $
+        localScope extra_scope $ inNesting nest' $
+        distribute =<< leavingNesting maploop =<< distribute =<<
+        distributeMapBodyStms def_acc (stmsToList lam_bnds)
 
-            def_acc = KernelAcc { kernelTargets = pushInnerTarget
-                                  (pat, bodyResult $ lambdaBody lam) $
-                                  kernelTargets acc
-                                , kernelStms = mempty
-                                }
+      (nestw_bnds, nestw, sequentialised_kernel) <- localScope extra_scope $ do
+        sequentialised_map_body <-
+          localScope (scopeOfLParams (lambdaParams lam)) $ runBinder_ $
+          Kernelise.transformStms lam_bnds
+        let kbody = KernelBody () sequentialised_map_body $
+                    map (ThreadsReturn ThreadsInSpace) lam_res'
+        constructKernel nest' kbody
 
-            distributeNormally =
-              distribute =<<
-              leavingNesting maploop =<<
-              mapNesting pat cs w lam arrs
-              (distribute =<< distributeMapBodyStms def_acc (stmsToList lam_bnds))
+      let outer_pat = loopNestingPattern $ fst nest
+      addKernel =<< (nestw_bnds<>) <$>
+        localScope extra_scope (distributeMap' nest'
+                                (oneStm sequentialised_kernel)
+                                (postKernelsStms distributed_kernels)
+                                outer_pat nestw
+                                lam { lambdaBody = (lambdaBody lam) { bodyResult = lam_res' }})
+
+      return acc'
 
 leavingNesting :: MapLoop -> KernelAcc -> KernelM KernelAcc
 leavingNesting (MapLoop cs w lam arrs) acc =

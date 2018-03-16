@@ -191,7 +191,8 @@ pushKernelNesting target newnest (nest, nests) =
    nest : nests)
 
 -- | Add new innermost nesting, pushing the current outermost to the
--- list.
+-- list.  It is important that the 'Target' has the right order
+-- (non-permuted compared to what is expected by the outer nests).
 pushInnerKernelNesting :: Target -> LoopNesting -> KernelNest -> KernelNest
 pushInnerKernelNesting target newnest (nest, nests) =
   (nest, nests ++ [fixNestingPatternOrder newnest target (loopNestingPattern innermost)])
