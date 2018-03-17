@@ -48,6 +48,7 @@ dependencies:
   - template-haskell
   - th-lift-instances
   - extra
+  - process
 
 when:
 - condition: "!impl(ghc >= 8.0)"
@@ -70,7 +71,6 @@ executables:
     main: src/futhark.hs
     dependencies:
       - futhark
-      - process
       - random
       - process-extras
       - temporary

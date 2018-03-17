@@ -20,6 +20,7 @@ module Futhark.Util
         focusNth,
         unixEnvironment,
         isEnvVarSet,
+        runProgramWithExitCode,
         directoryContents,
         zEncodeString
        )
@@ -34,6 +35,8 @@ import Data.Maybe
 import System.Environment
 import System.IO.Unsafe
 import qualified System.Directory.Tree as Dir
+import System.Process
+import System.Exit
 
 -- | Like 'mapAccumL', but monadic.
 mapAccumLM :: Monad m =>
@@ -116,6 +119,15 @@ isEnvVarSet name default_val = fromMaybe default_val $ do
     "0" -> return False
     "1" -> return True
     _ -> Nothing
+
+-- | Like 'readProcessWithExitCode', but also wraps exceptions when
+-- the indicated binary cannot be launched, or some other exception is
+-- thrown.
+runProgramWithExitCode :: FilePath -> [String] -> String
+                       -> IO (Either IOException (ExitCode, String, String))
+runProgramWithExitCode exe args inp =
+  (Right <$> readProcessWithExitCode exe args inp)
+  `catch` \e -> return (Left e)
 
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]

@@ -3,13 +3,13 @@ module Main (main) where
 
 import Control.Monad.IO.Class
 import System.FilePath
-import System.Process
 import System.Exit
 import qualified System.Info
 
 import Futhark.Pipeline
 import Futhark.Passes
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
+import Futhark.Util
 import Futhark.Util.Pretty (prettyText)
 import Futhark.Compiler.CLI
 
@@ -36,10 +36,13 @@ main = compilerMain () []
              liftIO $ writeFile cpath impl
            ToExecutable -> do
              liftIO $ writeFile cpath $ COpenCL.asExecutable cprog
-             (gccCode, _, gccerr) <-
-               liftIO $ readProcessWithExitCode "gcc"
-               ([cpath, "-O3", "-std=c99", "-lm", "-o", outpath] ++ extra_options) ""
-             case gccCode of
-               ExitFailure code -> externalErrorS $ "gcc failed with code " ++
-                                   show code ++ ":\n" ++ gccerr
-               ExitSuccess      -> return ()
+             ret <- liftIO $ runProgramWithExitCode "gcc"
+                    ([cpath, "-O3", "-std=c99", "-lm", "-o", outpath] ++ extra_options) ""
+             case ret of
+               Left err ->
+                 externalErrorS $ "Failed to run gcc: " ++ show err
+               Right (ExitFailure code, _, gccerr) ->
+                 externalErrorS $ "gcc failed with code " ++
+                 show code ++ ":\n" ++ gccerr
+               Right (ExitSuccess, _, _) ->
+                 return ()
