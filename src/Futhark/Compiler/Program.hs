@@ -160,6 +160,15 @@ handleFile permit_recursion search_path steps include file_contents file_name = 
           }
   where steps' = include:steps
 
+readFileSafely :: String -> IO (Maybe (Either String (String, T.Text)))
+readFileSafely filepath =
+  (Just . Right . (filepath,) <$> T.readFile filepath) `catch` couldNotRead
+  where couldNotRead e
+          | isDoesNotExistError e =
+              return Nothing
+          | otherwise             =
+              return $ Just $ Left $ show e
+
 readImportFile :: (MonadError CompilerError m, MonadIO m) =>
                   ImportPaths -> FutharkInclude -> m (T.Text, FilePath)
 readImportFile (ImportPaths dirs) include = do
@@ -176,14 +185,7 @@ readImportFile (ImportPaths dirs) include = do
 
          lookInDir dir = do
            let filepath = includeToFilePath dir include
-           (Just . Right . (filepath,) <$> T.readFile filepath) `catch` couldNotRead filepath
-
-         couldNotRead filepath e
-           | isDoesNotExistError e =
-               return Nothing
-           | otherwise             =
-               return $ Just $ Left $
-               "Could not read " ++ filepath ++ ": " ++ show e
+           readFileSafely filepath
 
          not_found =
            "Could not find import '" ++ includeToString include ++ "' at " ++
@@ -197,10 +199,13 @@ readProgram :: (MonadError CompilerError m, MonadIO m) =>
                   VNameSource)
 readProgram permit_recursion basis search_path fp =
   runCompilerM basis $ do
-    fs <- liftIO $ T.readFile fp
-
-    handleFile permit_recursion (importPath fp_dir <> search_path)
-      [] (mkInitialInclude fp_name) fs fp
+    r <- liftIO $ readFileSafely fp
+    case r of
+      Just (Right (_, fs)) ->
+        handleFile permit_recursion (importPath fp_dir <> search_path)
+        [] (mkInitialInclude fp_name) fs fp
+      Just (Left e) -> externalError $ T.pack e
+      Nothing -> externalErrorS $ fp ++ ": file not found."
   where (fp_dir, fp_file) = splitFileName fp
         (fp_name, _) = splitExtension fp_file
 
