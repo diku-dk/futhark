@@ -234,7 +234,7 @@ internaliseExp _ (E.Var (E.QualName _ name) (Info (_, _, t)) loc) = do
         Just ses -> return ses
         Nothing -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
 
-internaliseExp desc (E.Index e idxs loc) = do
+internaliseExp desc (E.Index e idxs _ loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
             [] -> return [] -- Will this happen?

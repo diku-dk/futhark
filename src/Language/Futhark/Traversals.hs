@@ -114,10 +114,11 @@ instance ASTMappable (ExpBase Info VName) where
     mapOnExp tv v <*> pure loc
   astMap tv (Project field e t loc) =
     Project field <$> mapOnExp tv e <*> traverse (mapOnCompType tv) t <*> pure loc
-  astMap tv (Index arr idxexps loc) =
+  astMap tv (Index arr idxexps t loc) =
     pure Index <*>
          astMap tv arr <*>
          mapM (astMap tv) idxexps <*>
+         traverse (mapOnCompType tv) t <*>
          pure loc
   astMap tv (Reshape shape arrexp t loc) =
     pure Reshape <*>

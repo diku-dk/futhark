@@ -993,11 +993,14 @@ checkExp (Update src idxes ve loc) =
   where isFix DimFix{} = True
         isFix _        = False
 
-checkExp (Index e idxes pos) = do
+checkExp (Index e idxes NoInfo loc) = do
   (t, _) <- newArrayType (srclocOf e) "e" $ length idxes
   e' <- unifies t =<< checkExp e
   idxes' <- mapM checkDimIndex idxes
-  return $ Index e' idxes' pos
+  t' <- stripArray (length $ filter isFix idxes) <$> normaliseType (typeOf e')
+  return $ Index e' idxes' (Info t') loc
+  where isFix DimFix{} = True
+        isFix _        = False
 
 checkExp (Reshape shapeexp arrexp NoInfo loc) = do
   shapeexp' <- checkExp shapeexp
@@ -1341,9 +1344,11 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
           pat' = uniquePat pat
 
       -- Now check that the loop returned the right type.
-      unless (body_t `subtypeOf` patternType pat') $
+      unify body_loc (toStruct body_t) $ toStruct $ patternType pat'
+      body_t' <- normaliseType body_t
+      unless (body_t' `subtypeOf` patternType pat') $
         throwError $ UnexpectedType body_loc
-        (toStructural body_t)
+        (toStructural body_t')
         [toStructural $ patternType pat']
 
       -- Check that the new values of consumed merge parameters do not
@@ -1372,11 +1377,11 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
             zipWithM_ checkMergeReturn pats ts
           checkMergeReturn _ _ =
             return ()
-      (pat_cons, _) <- execStateT (checkMergeReturn pat' body_t) (mempty, mempty)
+      (pat_cons, _) <- execStateT (checkMergeReturn pat' body_t') (mempty, mempty)
       let body_cons' = body_cons <> pat_cons
       if body_cons' == body_cons && patternType pat' == patternType pat
         then return pat'
-        else convergePattern pat' body_cons' body_t body_loc
+        else convergePattern pat' body_cons' body_t' body_loc
 
 checkSOACArrayArg :: ExpBase NoInfo Name
                   -> TermTypeM (Exp, Arg)

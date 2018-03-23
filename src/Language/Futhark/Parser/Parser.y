@@ -662,7 +662,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 $1)
                $4 }
-     | '(' Exp ')[' DimIndices ']'    { Index (Parens $2 $1) $4 $1 }
+     | '(' Exp ')[' DimIndices ']'    { Index (Parens $2 $1) $4 NoInfo $1 }
      | '(' Exp ',' Exps1 ')'          { TupLit ($2 : fst $4 : snd $4) $1 }
      | '('      ')'                   { TupLit [] $1 }
      | '[' Exps1 ']'                  { ArrayLit (fst $2:snd $2) NoInfo $1 }
@@ -671,7 +671,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | QualVarSlice FieldAccesses
        { let (v,slice,loc) = $1
          in foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
-                  (Index (Var v NoInfo loc) slice loc)
+                  (Index (Var v NoInfo loc) slice NoInfo loc)
                   $2 }
      | QualName FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))

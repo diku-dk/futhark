@@ -272,10 +272,10 @@ defuncExp (LetWith id1 id2 idxs e1 body loc) = do
   (body', sv) <- extendEnv (identName id1) sv1 $ defuncExp body
   return (LetWith id1 id2 idxs' e1' body' loc, sv)
 
-defuncExp expr@(Index e0 idxs loc) = do
+defuncExp expr@(Index e0 idxs info loc) = do
   e0' <- defuncExp' e0
   idxs' <- mapM defuncDimIndex idxs
-  return (Index e0' idxs' loc, Dynamic $ typeOf expr)
+  return (Index e0' idxs' info loc, Dynamic $ typeOf expr)
 
 defuncExp (Update e1 idxs e2 loc) = do
   (e1', sv) <- defuncExp e1
@@ -673,7 +673,7 @@ freeVars expr = case expr of
     S.singleton (identName id2) <> foldMap freeDimIndex idxs <> freeVars e1 <>
     (freeVars e2 S.\\ S.singleton (identName id1))
 
-  Index e idxs _      -> freeVars e  <> foldMap freeDimIndex idxs
+  Index e idxs _ _    -> freeVars e  <> foldMap freeDimIndex idxs
   Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2
   Concat _ e1 es _    -> freeVars e1 <> foldMap freeVars es
   Reshape e1 e2 _ _   -> freeVars e1 <> freeVars e2

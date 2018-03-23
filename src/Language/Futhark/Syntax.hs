@@ -621,7 +621,7 @@ data ExpBase f vn =
                       [DimIndexBase f vn] (ExpBase f vn)
                       (ExpBase f vn) SrcLoc
 
-            | Index (ExpBase f vn) [DimIndexBase f vn] SrcLoc
+            | Index (ExpBase f vn) [DimIndexBase f vn] (f CompType) SrcLoc
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
@@ -733,7 +733,7 @@ instance Located (ExpBase f vn) where
   locOf (LetPat _ _ _ _ pos)           = locOf pos
   locOf (LetFun _ _ _ loc)             = locOf loc
   locOf (LetWith _ _ _ _ _ pos)        = locOf pos
-  locOf (Index _ _ pos)                = locOf pos
+  locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
   locOf (Reshape _ _ _ loc)            = locOf loc
   locOf (Rearrange _ _ pos)            = locOf pos
