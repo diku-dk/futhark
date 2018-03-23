@@ -165,10 +165,29 @@ transformExp (If e1 e2 e3 tp loc) = do
   e3' <- transformExp e3
   return $ If e1' e2' e3' tp loc
 
-transformExp (Apply e1 e2 d tp loc) = do
-  e1' <- transformExp e1
-  e2' <- transformExp e2
-  return $ Apply e1' e2' d tp loc
+transformExp (Apply e1 e2 d tp loc) =
+  -- We handle on an ad-hoc basis certain polymorphic higher-order
+  -- intrinsics here.  They can only be used in very particular ways,
+  -- or the compiler will fail.  In practice they will only be used
+  -- once, in the basis library, to define normal functions.
+  case (e1, e2) of
+    (Var v _ _, TupLit [op, ne, arr] _)
+      | intrinsic "reduce" v ->
+          transformExp $ Reduce Noncommutative op ne arr loc
+      | intrinsic "reduce_comm" v ->
+          transformExp $ Reduce Commutative op ne arr loc
+      | intrinsic "scan" v ->
+          transformExp $ Scan op ne arr loc
+    (Var v _ _, TupLit [f, arr] _)
+      | intrinsic "filter" v ->
+          transformExp $ Filter f arr loc
+
+    _ -> do
+      e1' <- transformExp e1
+      e2' <- transformExp e2
+      return $ Apply e1' e2' d tp loc
+  where intrinsic s (QualName _ v) =
+          baseTag v <= maxIntrinsicTag && baseName v == nameFromString s
 
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc

@@ -1299,7 +1299,7 @@ isOverloadedFunction qname args loc = do
             internaliseBinOp desc bop x' y' t1 t2
           _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
-    handle [a, si, v] "scatter" = Just $ scatterF a si v
+    handle [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v
 
     handle _ _ = Nothing
 

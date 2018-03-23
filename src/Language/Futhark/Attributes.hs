@@ -435,7 +435,8 @@ typeOf (RecordLit fs _) =
   -- Reverse, because M.unions is biased to the left.
   Record $ M.unions $ reverse $ map record fs
   where record (RecordFieldExplicit name e _) = M.singleton name $ typeOf e
-        record (RecordFieldImplicit name (Info t) _) = M.singleton (baseName name) t
+        record (RecordFieldImplicit name (Info t) _) =
+          M.singleton (baseName name) $ t `addAliases` S.insert name
 typeOf (ArrayLit _ (Info t) _) = t
 typeOf (Range _ _ _ (Info t) _) = t
 typeOf (Empty _ (Info t) _) = t
@@ -470,7 +471,7 @@ typeOf (Map _ _ (Info t) _) = t
 typeOf (Reduce _ _ _ arr _) =
   stripArray 1 (typeOf arr) `setAliases` mempty
 typeOf (Scan _ _ arr _) = typeOf arr `setAliases` mempty
-typeOf (Filter _ arr _) = typeOf arr
+typeOf (Filter _ arr _) = typeOf arr `setAliases` mempty
 typeOf (Partition funs arr _) =
   tupleRecord $ replicate (length funs + 1) $ typeOf arr
 typeOf (Stream _ lam _ _) =
@@ -716,11 +717,27 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                           [Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique,
                            Array (ArrayPrimElem (Signed Int32) ()) (rank 1) Nonunique,
                            Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique] $
-                          Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique)]
+                          Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique),
+
+              ("reduce", IntrinsicPolyFun [tp_a]
+                         [t_a `arr` (t_a `arr` t_a), t_a, arr_a] t_a),
+
+              ("reduce_comm", IntrinsicPolyFun [tp_a]
+                              [t_a `arr` (t_a `arr` t_a), t_a, arr_a] t_a),
+
+              ("scan", IntrinsicPolyFun [tp_a]
+                       [t_a `arr` (t_a `arr` t_a), t_a, arr_a] uarr_a),
+
+              ("filter", IntrinsicPolyFun [tp_a]
+                         [t_a `arr` Prim Bool, arr_a] uarr_a)]
 
   where tv_a = VName (nameFromString "a") 0
         tv_a' = typeName tv_a
+        t_a = TypeVar tv_a' []
+        arr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique
+        uarr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique
         tp_a = TypeParamType tv_a noLoc
+        arr = Arrow mempty Nothing
 
         namify i (k,v) = (VName (nameFromString k) i, v)
 

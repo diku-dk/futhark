@@ -145,17 +145,13 @@ import Language.Futhark.Parser.Lexer
       do              { L $$ DO }
       with            { L $$ WITH }
       map             { L $$ MAP }
-      reduce          { L $$ REDUCE }
-      reduceComm      { L $$ REDUCECOMM }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
       rotate          { L $$ ROTATE }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       unsafe          { L $$ UNSAFE }
-      scan            { L $$ SCAN }
       concat          { L $$ CONCAT }
-      filter          { L $$ FILTER }
       partition       { L $$ PARTITION }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
@@ -193,7 +189,7 @@ import Language.Futhark.Parser.Lexer
 %right '->'
 %left juxtprec
 %nonassoc with
-%left indexprec rotate rearrange reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per
+%left indexprec rotate rearrange map partition stream_red stream_red_per stream_map stream_map_per
 %%
 
 -- The main parser.
@@ -554,18 +550,8 @@ Exp2 :: { UncheckedExp }
      | concat '@' NaturalInt Atoms1
                       { Concat $3 (fst $4) (snd $4) $1 }
 
-
-     | reduce Atom Atom Atom
-                      { Reduce Noncommutative $2 $3 $4 $1 }
-
-     | reduceComm Atom Atom Atom
-                      { Reduce Commutative $2 $3 $4 $1 }
-
      | map Atom Atoms1
                       { Map $2 (fst $3:snd $3) NoInfo $1 }
-
-     | scan Atom Atom Atom
-                      { Scan $2 $3 $4 $1 }
 
      | zip Atoms1
                       { Zip 0 (fst $2) (snd $2) NoInfo $1 }
@@ -576,9 +562,6 @@ Exp2 :: { UncheckedExp }
      | unzip Atom  { Unzip $2 [] $1 }
 
      | unsafe Exp2     { Unsafe $2 $1 }
-
-     | filter Atom Atom
-                      { Filter $2 $3 $1 }
 
      | partition '(' CommaAtoms1 ')' Atom
                       { Partition (fst $3 : snd $3) $5 $1 }

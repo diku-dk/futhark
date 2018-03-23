@@ -438,7 +438,7 @@ defuncApply depth e@(Apply e1 e2 d (Info (argtypes, _)) loc) = do
       fname <- newNameFromString "lifted"
       let params = [ buildEnvPattern closure_env
                    , updatePattern pat sv2 ]
-          rettype = typeOf e0' `setUniqueness` Nonunique
+          rettype = buildRetType closure_env pat $ typeOf e0'
       liftValDec fname rettype params e0'
 
       let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
@@ -553,7 +553,22 @@ buildEnvPattern :: Env -> Pattern
 buildEnvPattern env = RecordPattern (map buildField env) noLoc
   where buildField (vn, sv) = let tp = vacuousShapeAnnotations (typeFromSV sv)
                                        `setUniqueness` Nonunique
-                              in (baseName vn, Id vn (Info tp) noLoc)
+                              in (nameFromString (pretty vn),
+                                  Id vn (Info tp) noLoc)
+
+-- | Given a closure environment pattern and the type of a term,
+-- construct the type of that term, where uniqueness is set to
+-- `Nonunique` for those arrays that are bound in the environment or
+-- pattern.  This ensures that a lifted function can create unique
+-- arrays as long as they do not alias any of its parameters.  XXX: it
+-- is not clear that this is a sufficient property, unfortunately.
+buildRetType :: Env -> Pattern -> CompType -> CompType
+buildRetType env pat = descend
+  where bound = S.fromList (map fst env) <> S.map identName (patIdentSet pat)
+        descend t@Array{}
+          | any (`S.member` bound) (aliases t) = t `setUniqueness` Nonunique
+        descend (Record t) = Record $ fmap descend t
+        descend t = t
 
 -- | Compute the corresponding type for a given static value.
 typeFromSV :: StaticVal -> CompType
@@ -606,7 +621,8 @@ updatePattern (PatternParens pat loc) sv =
   PatternParens (updatePattern pat sv) loc
 updatePattern pat@(Id vn (Info tp) loc) sv
   | orderZero tp = pat
-  | otherwise = Id vn (Info . vacuousShapeAnnotations $ typeFromSV sv) loc
+  | otherwise = Id vn (Info . vacuousShapeAnnotations $
+                       typeFromSV sv `setUniqueness` Nonunique) loc
 updatePattern pat@(Wildcard (Info tp) loc) sv
   | orderZero tp = pat
   | otherwise = Wildcard (Info . vacuousShapeAnnotations $ typeFromSV sv) loc

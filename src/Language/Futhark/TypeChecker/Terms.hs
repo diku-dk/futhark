@@ -239,7 +239,7 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap mempty
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
           Just (name, BoundV tvs $
                       fromStruct $ vacuousShapeAnnotations $
-                      foldr (Arrow mempty Nothing) rt pts)
+                      Arrow mempty Nothing (tupleRecord pts) rt)
         addIntrinsicF (name, IntrinsicEquality) =
           Just (name, EqualityF)
         addIntrinsicF (name, IntrinsicOpaque) =
@@ -1086,31 +1086,9 @@ checkExp (Map fun arrexps NoInfo loc) = do
   t <- arrayOfM loc rt (rank 1) Unique
   return $ Map fun' arrexps' (Info $ t `setAliases` mempty) loc
 
-checkExp (Reduce comm fun startexp arrexp pos) = do
-  (startexp', startarg) <- checkArg startexp
-  (arrexp', arrarg) <- checkSOACArrayArg arrexp
-  (fun', redtype) <- checkFunExp fun [startarg, arrarg]
-  unify (srclocOf startexp') (toStruct $ argType startarg) redtype
-  unify (srclocOf startexp') (toStruct $ argType arrarg) redtype
-  return $ Reduce comm fun' startexp' arrexp' pos
-
-checkExp (Scan fun startexp arrexp pos) = do
-  (startexp', startarg) <- checkArg startexp
-  (arrexp', arrarg) <- checkSOACArrayArg arrexp
-  (fun', scantype) <- checkFunExp fun [startarg, arrarg]
-  unify (srclocOf startexp') (toStruct $ argType startarg) scantype
-  unify (srclocOf startexp') (toStruct $ argType arrarg) scantype
-  return $ Scan fun' startexp' arrexp' pos
-
-checkExp (Filter fun arrexp loc) = do
-  (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
-  let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
-                       argflow, argloc)
-  (fun', lam_t) <- checkFunExp fun [nonunique_arg]
-  when (lam_t /= Prim Bool) $
-    typeError loc $ "Filter function must return bool, but returns " ++ pretty lam_t ++ "."
-
-  return $ Filter fun' arrexp' loc
+checkExp Reduce{} = error "Reduce nodes should not appear in source program"
+checkExp Scan{} = error "Scan nodes should not appear in source program"
+checkExp Filter{} = error "Filter nodes should not appear in source program"
 
 checkExp (Partition funs arrexp pos) = do
   (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
@@ -1957,6 +1935,8 @@ equalityType loc t = do
               | otherwise -> return ()
             Just (NoConstraint _ _) ->
               modify $ M.insert vn (Equality loc)
+            Just (Overloaded _ _) ->
+              return () -- All primtypes support equality.
             _ ->
               typeError loc $ "Type " ++ pretty vn ++
               " does not support equality."
