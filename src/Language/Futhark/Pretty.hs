@@ -207,13 +207,13 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
                         If{}       -> True
                         ArrayLit{} -> False
                         _          -> hasArrayLit e
-  pprPrec _ (LetFun fname (tparams, params, retdecl, _, e) body _) =
+  pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
     text "let" <+> ppr fname <+> spread (map ppr tparams ++ map ppr params) <>
     retdecl' <+> equals </> indent 2 (ppr e) <+> text "in" </>
     ppr body
-    where retdecl' = case retdecl of
-                       Just rettype -> text ":" <+> ppr rettype
-                       Nothing      -> mempty
+    where retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
+                       Just rettype' -> text ":" <+> rettype'
+                       Nothing       -> mempty
   pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
       text "let" <+> ppr dest <+> list (map ppr idxs) <+>
