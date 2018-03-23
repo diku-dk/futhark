@@ -729,7 +729,19 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                        [t_a `arr` (t_a `arr` t_a), t_a, arr_a] uarr_a),
 
               ("filter", IntrinsicPolyFun [tp_a]
-                         [t_a `arr` Prim Bool, arr_a] uarr_a)]
+                         [t_a `arr` Prim Bool, arr_a] uarr_a),
+
+              ("stream_map",
+               IntrinsicPolyFun [tp_a, tp_b] [arr_a `arr` arr_b, arr_a] uarr_b),
+
+              ("stream_map_per",
+               IntrinsicPolyFun [tp_a, tp_b] [arr_a `arr` arr_b, arr_a] uarr_b),
+
+              ("stream_red",
+               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b),
+
+              ("stream_red_per",
+               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b)]
 
   where tv_a = VName (nameFromString "a") 0
         tv_a' = typeName tv_a
@@ -737,6 +749,14 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         arr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique
         uarr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique
         tp_a = TypeParamType tv_a noLoc
+
+        tv_b = VName (nameFromString "b") 1
+        tv_b' = typeName tv_b
+        t_b = TypeVar tv_b' []
+        arr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Nonunique
+        uarr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Unique
+        tp_b = TypeParamType tv_b noLoc
+
         arr = Arrow mempty Nothing
 
         namify i (k,v) = (VName (nameFromString k) i, v)

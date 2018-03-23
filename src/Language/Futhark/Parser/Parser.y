@@ -157,10 +157,6 @@ import Language.Futhark.Parser.Lexer
       false           { L $$ FALSE }
       empty           { L $$ EMPTY }
       while           { L $$ WHILE }
-      stream_map      { L $$ STREAM_MAP }
-      stream_map_per  { L $$ STREAM_MAPPER }
-      stream_red      { L $$ STREAM_RED }
-      stream_red_per  { L $$ STREAM_REDPER }
       include         { L $$ INCLUDE }
       import          { L $$ IMPORT }
       type            { L $$ TYPE }
@@ -189,7 +185,7 @@ import Language.Futhark.Parser.Lexer
 %right '->'
 %left juxtprec
 %nonassoc with
-%left indexprec rotate rearrange map partition stream_red stream_red_per stream_map stream_map_per
+%left indexprec rotate rearrange map partition
 %%
 
 -- The main parser.
@@ -565,15 +561,6 @@ Exp2 :: { UncheckedExp }
 
      | partition '(' CommaAtoms1 ')' Atom
                       { Partition (fst $3 : snd $3) $5 $1 }
-
-     | stream_map       Atom Atom
-                         { Stream (MapLike InOrder)  $2 $3 $1 }
-     | stream_map_per    Atom Atom
-                         { Stream (MapLike Disorder) $2 $3 $1 }
-     | stream_red       Atom Atom Atom
-                         { Stream (RedLike InOrder Noncommutative $2) $3 $4 $1 }
-     | stream_red_per    Atom Atom Atom
-                         { Stream (RedLike Disorder Commutative $2) $3 $4 $1 }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }

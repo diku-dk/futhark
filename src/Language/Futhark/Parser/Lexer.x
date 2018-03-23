@@ -156,10 +156,6 @@ keyword s =
     "unzip"        -> UNZIP
     "concat"       -> CONCAT
     "partition"    -> PARTITION
-    "stream_map"     -> STREAM_MAP
-    "stream_map_per" -> STREAM_MAPPER
-    "stream_red"     -> STREAM_RED
-    "stream_red_per" -> STREAM_REDPER
 
     _              -> ID $ nameFromText s
 
@@ -367,10 +363,6 @@ data Token = ID Name
            | FALSE
            | EMPTY
            | WHILE
-           | STREAM_MAP
-           | STREAM_MAPPER
-           | STREAM_RED
-           | STREAM_REDPER
            | INCLUDE
            | IMPORT
            | ENTRY
