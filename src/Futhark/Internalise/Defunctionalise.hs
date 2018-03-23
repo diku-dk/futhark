@@ -438,7 +438,7 @@ defuncApply depth e@(Apply e1 e2 d (Info (argtypes, _)) loc) = do
       fname <- newNameFromString "lifted"
       let params = [ buildEnvPattern closure_env
                    , updatePattern pat sv2 ]
-          rettype = typeOf e0'
+          rettype = typeOf e0' `setUniqueness` Nonunique
       liftValDec fname rettype params e0'
 
       let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
@@ -546,10 +546,13 @@ liftValDec fname rettype pats body = tell [dec]
           }
 
 -- | Given a closure environment, construct a record pattern that
--- binds the closed over variables.
+-- binds the closed over variables.  We set the type to be nonunique,
+-- no matter what it was in the original environment, because there is
+-- no way for a function to exploit uniqueness in its lexical scope.
 buildEnvPattern :: Env -> Pattern
 buildEnvPattern env = RecordPattern (map buildField env) noLoc
-  where buildField (vn, sv) = let tp = vacuousShapeAnnotations $ typeFromSV sv
+  where buildField (vn, sv) = let tp = vacuousShapeAnnotations (typeFromSV sv)
+                                       `setUniqueness` Nonunique
                               in (baseName vn, Id vn (Info tp) noLoc)
 
 -- | Compute the corresponding type for a given static value.

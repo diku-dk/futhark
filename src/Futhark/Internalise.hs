@@ -223,17 +223,16 @@ internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 
 internaliseExp _ (E.Var (E.QualName _ name) (Info (_, _, t)) loc) = do
-  -- If this identifier is the name of a constant, we have to turn it
-  -- into a call to the corresponding function.
-  is_const <- lookupConstant loc name
-  case is_const of
-    Just ses ->
-      return ses
-    _ -> do
-      subst <- asks $ M.lookup name . envSubsts
-      case subst of
-        Nothing     -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
-        Just substs -> return substs
+  subst <- asks $ M.lookup name . envSubsts
+  case subst of
+    Just substs -> return substs
+    Nothing     -> do
+      -- If this identifier is the name of a constant, we have to turn it
+      -- into a call to the corresponding function.
+      is_const <- lookupConstant loc name
+      case is_const of
+        Just ses -> return ses
+        Nothing -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
 
 internaliseExp desc (E.Index e idxs loc) = do
   vs <- internaliseExpToVars "indexed" e
@@ -1422,16 +1421,20 @@ isOverloadedFunction qname args loc = do
 lookupConstant :: SrcLoc -> VName -> InternaliseM (Maybe [SubExp])
 lookupConstant loc name = do
   is_const <- lookupFunction' name
+  scope <- askScope
   case is_const of
-    Just (fname, constparams, _, _, _, _, mk_rettype) -> do
+    Just (fname, constparams, _, _, _, _, mk_rettype)
+      | name `M.notMember` scope -> do
       (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs loc constparams
       safety <- askSafety
       case mk_rettype $ zip constargs $ map I.fromDecl const_ts of
-        Nothing -> fail $ "lookupConstant: " ++ pretty name ++ " failed"
+        Nothing -> fail $ "lookupConstant: " ++
+                   unwords (pretty name : zipWith (curry pretty) constargs const_ts) ++
+                   " failed"
         Just rettype ->
           fmap (Just . map I.Var) $ letTupExp (baseString name) $
           I.Apply fname (zip constargs const_ds) rettype (safety, loc, mempty)
-    Nothing -> return Nothing
+    _ -> return Nothing
 
 constFunctionArgs :: SrcLoc -> ConstParams -> InternaliseM [(SubExp, I.Diet, I.DeclType)]
 constFunctionArgs loc = mapM arg
