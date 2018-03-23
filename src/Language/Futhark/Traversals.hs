@@ -119,9 +119,10 @@ instance ASTMappable (ExpBase Info VName) where
          astMap tv arr <*>
          mapM (astMap tv) idxexps <*>
          pure loc
-  astMap tv (Reshape shape arrexp loc) =
-    pure Reshape <*> mapOnExp tv shape <*>
-                     mapOnExp tv arrexp <*> pure loc
+  astMap tv (Reshape shape arrexp t loc) =
+    pure Reshape <*>
+    mapOnExp tv shape <*> mapOnExp tv arrexp <*>
+    traverse (mapOnCompType tv) t <*> pure loc
   astMap tv (Rotate d e a loc) =
     Rotate d <$> mapOnExp tv e <*> mapOnExp tv a <*> pure loc
   astMap tv (Rearrange perm e loc) =
@@ -161,13 +162,16 @@ instance ASTMappable (ExpBase Info VName) where
     traverse (mapOnStructType tv) t <*> pure loc
   astMap tv (OpSection name il t1 t2 t3 loc) =
     OpSection <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
-    astMap tv t1 <*> astMap tv t2 <*> astMap tv t3 <*> pure loc
+    traverse (mapOnStructType tv) t1 <*> traverse (mapOnStructType tv) t2 <*>
+    traverse (mapOnCompType tv) t3 <*> pure loc
   astMap tv (OpSectionLeft name il arg t1 t2 loc) =
     OpSectionLeft <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
-    mapOnExp tv arg <*> astMap tv t1 <*> astMap tv t2 <*> pure loc
+    mapOnExp tv arg <*> astMap tv t1 <*>
+    traverse (mapOnCompType tv) t2 <*> pure loc
   astMap tv (OpSectionRight name il arg t1 t2 loc) =
     OpSectionRight <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
-    mapOnExp tv arg <*> astMap tv t1 <*> astMap tv t2 <*> pure loc
+    mapOnExp tv arg <*> astMap tv t1 <*>
+    traverse (mapOnCompType tv) t2 <*> pure loc
   astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =
     DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
     mapOnExp tv mergeexp <*> astMap tv form <*>
@@ -227,7 +231,6 @@ traverseType f g h (Array et shape u) =
   Array <$> traverseArrayElemType f g h et <*> traverse g shape <*> pure u
 traverseType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseType f g h (TypeVar t args) = TypeVar <$> f t <*> traverse (traverseTypeArg f g h) args
-traverseType f _ _ (LiftedTypeVar t) = LiftedTypeVar <$> f t
 traverseType f g h (Arrow als v t1 t2) =
   Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
 

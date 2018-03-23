@@ -270,7 +270,7 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
       let flat_lit = E.ArrayLit (e' ++ concatMap snd es') (Info basetype) loc
           new_shape = E.TupLit [E.Literal (E.primValue k) loc
                                | k <- length es:eshape] loc
-      in internaliseExp desc $ E.Reshape new_shape flat_lit loc
+      in internaliseExp desc $ E.Reshape new_shape flat_lit (Info basetype) loc
 
   | otherwise = do
   es' <- mapM (internaliseExp "arr_elem") es
@@ -657,7 +657,7 @@ internaliseExp _ (E.Rotate d offset e _) = do
         offsets = replicate d zero ++ [offset'] ++ replicate (r-d-1) zero
     return $ I.Rotate offsets v
 
-internaliseExp _ (E.Reshape shape e loc) = do
+internaliseExp _ (E.Reshape shape e _ loc) = do
   shape' <- internaliseShapeExp "shape" shape
   vs <- internaliseExpToVars "reshape_arg" e
   forM vs $ \v -> do

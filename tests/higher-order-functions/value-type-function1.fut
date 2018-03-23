@@ -1,7 +1,7 @@
 -- We should not be able to instantiate a value type parameter of a
 -- polymorphic function with a function type.
 -- ==
--- error: Cannot instantiate the value type variable .* with .*
+-- error: functional
 
 let mkArray 'a (x : a) : []a = [x]
 

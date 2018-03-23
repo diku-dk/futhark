@@ -122,7 +122,7 @@ bindingTypeParams tparams = localEnv env
                      M.singleton v $ TypeAbbr [] $ TypeVar (typeName v) [] }
         typeParamEnv (TypeParamLiftedType v _) =
           mempty { envTypeTable =
-                     M.singleton v $ TypeAbbr [] $ LiftedTypeVar (typeName v) }
+                     M.singleton v $ TypeAbbr [] $ TypeVar (typeName v) [] }
 
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName])
 
@@ -180,7 +180,7 @@ checkSpecs (TypeSpec name ps doc loc : specs) =
             paramToArg (TypeParamType v ploc) =
               TypeArgType (TypeVar (typeName v) []) ploc
             paramToArg (TypeParamLiftedType v ploc) =
-              TypeArgType (LiftedTypeVar (typeName v)) ploc
+              TypeArgType (TypeVar (typeName v) []) ploc
 
 checkSpecs (ModSpec name sig loc : specs) =
   bindSpaced [(Term, name)] $ do
@@ -435,7 +435,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
     bindSpaced [(Term, fname)] $
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
-  when (entry && any isTypeParam tparams) $
+  when (entry && any isTypeParam tparams') $
     throwError $ TypeError loc "Entry point functions may not be polymorphic."
 
   when (entry && (any (not . patternOrderZero) params' || not (orderZero rettype))) $
@@ -609,7 +609,7 @@ matchMTys = matchMTys' mempty
               matchTypeParam (TypeParamType x _) (TypeParamType y _) =
                 pure $ M.singleton x $ TypeSub $ TypeAbbr [] $ TypeVar (typeName y) []
               matchTypeParam (TypeParamLiftedType x _) (TypeParamLiftedType y _) =
-                pure $ M.singleton x $ TypeSub $ TypeAbbr [] $ LiftedTypeVar (typeName y)
+                pure $ M.singleton x $ TypeSub $ TypeAbbr [] $ TypeVar (typeName y) []
               matchTypeParam _ _ =
                 nomatch
 
@@ -798,8 +798,6 @@ newNamesForMTy orig_mty = do
         substituteInType :: StructType -> StructType
         substituteInType (TypeVar (TypeName qs v) targs) =
           TypeVar (TypeName (map substitute qs) $ substitute v) $ map substituteInTypeArg targs
-        substituteInType (LiftedTypeVar (TypeName qs v)) =
-          LiftedTypeVar (TypeName (map substitute qs) $ substitute v)
         substituteInType (Prim t) =
           Prim t
         substituteInType (Record ts) =
@@ -812,7 +810,7 @@ newNamesForMTy orig_mty = do
                  (map substituteInTypeArg targs) ())
                 (substituteInShape shape) u
         substituteInType (Array (ArrayRecordElem ts) shape u) =
-          let ts' = fmap (substituteInType . recordArrayElemToType) ts
+          let ts' = fmap (substituteInType . fst . recordArrayElemToType) ts
           in case arrayOf (Record ts') (substituteInShape shape) u of
             Just t' -> t'
             _ -> error "substituteInType: Cannot create array after substitution."
