@@ -54,18 +54,44 @@ let replicate 't (n: i32) (x: t): *[n]t =
 let copy [n] 't (a: [n]t): *[n]t =
   map (\x -> x) a
 
+-- | Reduce the array ``as`` with ``op``, with ``ne`` as the neutral
+-- element for ``op``.  The function ``op`` must be associative.  If
+-- it is not, the return value is unspecified.
 let reduce 'a (op: a -> a -> a) (ne: a) (as: []a): a =
   intrinsics.reduce (op, ne, as)
 
+-- | As ``reduce``, but the operator must also be commutative.  This
+-- is potentially faster than ``reduce``.  For simple built-in
+-- operators, like addition, the compiler already knows that the
+-- operator is associative.
 let reduce_comm 'a (op: a -> a -> a) (ne: a) (as: []a): a =
   intrinsics.reduce_comm (op, ne, as)
 
+-- | Inclusive prefix scan.  Has the same caveats with respect to
+-- associativity as ``reduce``.
 let scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
   intrinsics.scan (op, ne, as)
 
+-- | Remove all those elements of ``as`` that do not satisfy the
+-- predicate ``p``.
 let filter 'a (p: a -> bool) (as: []a): *[]a =
   intrinsics.filter (p, as)
 
+-- | The ``scatter as is vs`` expression calculates the equivalent of
+-- this imperative code::
+--
+--   for index in 0..length is-1:
+--     i = is[index]
+--     v = vs[index]
+--     as[i] = v
+--
+-- The ``is`` and ``vs`` arrays must have the same outer size.  ``scatter``
+-- acts in-place and consumes the ``as`` array, returning a new array
+-- that has the same type and elements as ``as``, except for the indices
+-- in ``is``.  If ``is`` contains duplicates (i.e. several writes are
+-- performed to the same location), the result is unspecified.  It is not
+-- guaranteed that one of the duplicate writes will complete atomically -
+-- they may be interleaved.
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs)
 
