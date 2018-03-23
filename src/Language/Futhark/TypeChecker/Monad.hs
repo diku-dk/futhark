@@ -472,23 +472,23 @@ qualifyTypeVars outer_env except qs = runIdentity . astMap mapper
 badOnLeft :: MonadTypeChecker m => Either TypeError a -> m a
 badOnLeft = either throwError return
 
-anySignedType :: [TypeBase () ()]
-anySignedType = map (Prim . Signed) [minBound .. maxBound]
+anySignedType :: [PrimType]
+anySignedType = map Signed [minBound .. maxBound]
 
-anyUnsignedType :: [TypeBase () ()]
-anyUnsignedType = map (Prim . Unsigned) [minBound .. maxBound]
+anyUnsignedType :: [PrimType]
+anyUnsignedType = map Unsigned [minBound .. maxBound]
 
-anyIntType :: [TypeBase () ()]
+anyIntType :: [PrimType]
 anyIntType = anySignedType ++ anyUnsignedType
 
-anyFloatType :: [TypeBase () ()]
-anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
+anyFloatType :: [PrimType]
+anyFloatType = map FloatType [minBound .. maxBound]
 
-anyNumberType :: [TypeBase () ()]
+anyNumberType :: [PrimType]
 anyNumberType = anyIntType ++ anyFloatType
 
-anyPrimType :: [TypeBase () ()]
-anyPrimType = Prim Bool : anyIntType ++ anyFloatType
+anyPrimType :: [PrimType]
+anyPrimType = Bool : anyIntType ++ anyFloatType
 
 --- Name handling
 

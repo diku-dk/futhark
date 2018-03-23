@@ -178,7 +178,6 @@ prettyType t = case t of
             toHtml (nameToString name) <> ":" <> prettyType tp
   TypeVar et targs ->
     prettyTypeName et <> foldMap ((<> " ") . prettyTypeArg) targs
-  LiftedTypeVar et -> prettyTypeName et
   Array et shape u -> prettyU u <> prettyShapeDecl shape <> prettyElem et
   Arrow _ (Just v) t1 t2 ->
     parens (vnameHtml v <> ": " <> prettyType t1) <> " -> " <> prettyType t2

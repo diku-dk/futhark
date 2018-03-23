@@ -3,7 +3,7 @@
 -- uses its (value type) polymorphic arguments in the branches of a
 -- conditional, with a function type.
 -- ==
--- error: Cannot instantiate the value type variable .* with the functional type .*
+-- error: functional
 
 let cond 'a (b : bool) (x : a) (y : a) : a =
   if b then x else y

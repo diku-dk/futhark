@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
          let (<<|) 'a 'b '^c: (b -> c) -> (a -> b) a -> c
 
+   * Type inference is now supported, although with some limitations
+     around records, in-place updates, and `unzip`. (#503)
+
 ### Removed
 
 ### Changed

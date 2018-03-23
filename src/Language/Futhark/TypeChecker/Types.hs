@@ -4,13 +4,10 @@ module Language.Futhark.TypeChecker.Types
   , checkTypeDecl
 
   , unifyTypes
+  , unifyTypesU
   , subtypeOf
   , subuniqueOf
   , similarTo
-  , require
-
-  , checkPattern
-  , InferredType(..)
 
   , checkForDuplicateNames
   , checkTypeParams
@@ -21,8 +18,6 @@ module Language.Futhark.TypeChecker.Types
   , substituteTypesInBoundV
 
   , instantiatePolymorphic
-
-  , arrayOfM
 
   , Substitutable(..)
   , substTypesAny
@@ -37,11 +32,9 @@ import Data.Loc
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad
-import Futhark.Util.Pretty (Pretty)
 
 -- | @t1 `unifyTypes` t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
@@ -63,8 +56,6 @@ unifyTypesU uf (TypeVar t1 targs1) (TypeVar t2 targs2)
       targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
       Just $ TypeVar t1 targs3
   | otherwise = Nothing
-unifyTypesU _ (LiftedTypeVar t1) (LiftedTypeVar t2)
-  | t1 == t2 = Just $ LiftedTypeVar t1
 unifyTypesU uf (Array et1 shape1 u1) (Array et2 shape2 u2) =
   Array <$> unifyArrayElemTypes uf et1 et2 <*>
   unifyShapes shape1 shape2 <*> uf u1 u2
@@ -134,13 +125,6 @@ similarTo :: ArrayDim dim =>
 similarTo t1 t2 = t1' `subtypeOf` t2' || t2' `subtypeOf` t1'
   where t1' = toStruct t1
         t2' = toStruct t2
-
--- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
--- with one of the types in @ts@.  Otherwise, simply returns @e@.
-require :: MonadTypeChecker m => [TypeBase () ()] -> Exp -> m Exp
-require ts e
-  | any (typeOf e `subtypeOf`) ts = return e
-  | otherwise = throwError $ UnexpectedType (srclocOf e) (toStructural $ typeOf e) ts
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -266,101 +250,6 @@ checkNamedDim loc v = do
     Prim (Signed Int32) -> return v'
     _                   -> throwError $ DimensionNotInteger loc v
 
-data InferredType = NoneInferred
-                  | Inferred CompType
-                  | Ascribed PatternType
-
-bindPatternNames :: MonadTypeChecker m =>
-                    PatternBase NoInfo Name -> m a -> m a
-bindPatternNames = bindSpaced . map asTerm . S.toList . patIdentSet
-  where asTerm v = (Term, identName v)
-
-checkPattern :: MonadTypeChecker m =>
-                UncheckedPattern -> InferredType -> (Pattern -> m a)
-             -> m a
-checkPattern p t m = do
-  checkForDuplicateNames [p]
-  bindPatternNames p $
-    m =<< checkPattern' p t
-
-checkPattern' :: MonadTypeChecker m =>
-                 UncheckedPattern -> InferredType
-              -> m Pattern
-
-checkPattern' (PatternParens p loc) t =
-  PatternParens <$> checkPattern' p t <*> pure loc
-
-checkPattern' (Id name NoInfo loc) (Inferred t) = do
-  name' <- checkName Term name loc
-  let t' = vacuousShapeAnnotations $
-           case t of Record{} -> t
-                     _        -> t `addAliases` S.insert name'
-  return $ Id name' (Info $ t' `setUniqueness` Nonunique) loc
-checkPattern' (Id name NoInfo loc) (Ascribed t) = do
-  name' <- checkName Term name loc
-  let t' = case t of Record{} -> t
-                     _        -> t `addAliases` S.insert name'
-  return $ Id name' (Info t') loc
-
-checkPattern' (Wildcard _ loc) (Inferred t) =
-  return $ Wildcard (Info $ vacuousShapeAnnotations $ t `setUniqueness` Nonunique) loc
-checkPattern' (Wildcard _ loc) (Ascribed t) =
-  return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
-
-checkPattern' (TuplePattern ps loc) (Inferred t)
-  | Just ts <- isTupleRecord t, length ts == length ps =
-      TuplePattern <$> zipWithM checkPattern' ps (map Inferred ts) <*> pure loc
-checkPattern' (TuplePattern ps loc) (Ascribed t)
-  | Just ts <- isTupleRecord t, length ts == length ps =
-      TuplePattern <$> zipWithM checkPattern' ps (map Ascribed ts) <*> pure loc
-checkPattern' p@TuplePattern{} (Inferred t) =
-  throwError $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
-checkPattern' p@TuplePattern{} (Ascribed t) =
-  throwError $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
-checkPattern' (TuplePattern ps loc) NoneInferred =
-  TuplePattern <$> mapM (`checkPattern'` NoneInferred) ps <*> pure loc
-
-checkPattern' (RecordPattern p_fs loc) (Inferred (Record t_fs))
-  | sort (map fst p_fs) == sort (M.keys t_fs) =
-    RecordPattern . M.toList <$> check <*> pure loc
-    where check = traverse (uncurry checkPattern') $ M.intersectionWith (,)
-                  (M.fromList p_fs) (fmap Inferred t_fs)
-checkPattern' (RecordPattern p_fs loc) (Ascribed (Record t_fs))
-  | sort (map fst p_fs) == sort (M.keys t_fs) =
-    RecordPattern . M.toList <$> check <*> pure loc
-    where check = traverse (uncurry checkPattern') $ M.intersectionWith (,)
-                  (M.fromList p_fs) (fmap Ascribed t_fs)
-checkPattern' p@RecordPattern{} (Inferred t) =
-  throwError $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
-checkPattern' p@RecordPattern{} (Ascribed t) =
-  throwError $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
-checkPattern' (RecordPattern fs loc) NoneInferred =
-  RecordPattern . M.toList <$> traverse (`checkPattern'` NoneInferred) (M.fromList fs) <*> pure loc
-
-checkPattern' fullp@(PatternAscription p (TypeDecl t NoInfo)) maybe_outer_t = do
-  (t', st) <- checkTypeExp t
-
-  let maybe_outer_t' = case maybe_outer_t of
-                         Inferred outer_t -> Just $ vacuousShapeAnnotations outer_t
-                         Ascribed outer_t -> Just outer_t
-                         NoneInferred -> Nothing
-      st' = fromStruct st
-  case maybe_outer_t' of
-    Just outer_t
-      | Just t'' <- unifyTypesU unifyUniqueness st' outer_t ->
-          PatternAscription <$> checkPattern' p (Ascribed t'') <*>
-          pure (TypeDecl t' (Info st))
-      | otherwise ->
-          let outer_t_for_error =
-                modifyShapeAnnotations (fmap baseName) $ outer_t `setAliases` ()
-          in throwError $ InvalidPatternError fullp outer_t_for_error Nothing $ srclocOf p
-    _ -> PatternAscription <$> checkPattern' p (Ascribed st') <*>
-         pure (TypeDecl t' (Info st))
-  where unifyUniqueness u1 u2 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
-
-checkPattern' p NoneInferred =
-  throwError $ TypeError (srclocOf p) $ "Cannot determine type of " ++ pretty p
-
 -- | Check for duplication of names inside a pattern group.  Produces
 -- a description of all names used in the pattern group.
 checkForDuplicateNames :: MonadTypeChecker m =>
@@ -444,10 +333,6 @@ substituteTypes substs ot = case ot of
         M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
         applyType ps t $ map substituteInTypeArg targs
     | otherwise -> TypeVar v $ map substituteInTypeArg targs
-  LiftedTypeVar v
-    | Just (TypeSub (TypeAbbr [] t)) <-
-        M.lookup (qualLeaf (qualNameFromTypeName v)) substs -> t
-    | otherwise -> LiftedTypeVar v
   Record ts ->
     Record $ fmap (substituteTypes substs) ts
   Arrow als v t1 t2 ->
@@ -465,7 +350,7 @@ substituteTypes substs ot = case ot of
         substituteTypesInArrayElem (ArrayRecordElem ts) =
           Record ts'
           where ts' = fmap (substituteTypes substs .
-                            recordArrayElemToType) ts
+                            fst . recordArrayElemToType) ts
 
         substituteInTypeArg (TypeArgDim d loc) =
           TypeArgDim (substituteInDim d) loc
@@ -566,16 +451,6 @@ instantiatePolymorphic tnames loc orig_substs x y =
     instantiateTypeArg _ _ =
       lift $ Left Nothing
 
-arrayOfM :: (MonadTypeChecker m, Pretty (ShapeDecl dim), ArrayDim dim, Monoid as) =>
-            SrcLoc
-         -> TypeBase dim as
-         -> ShapeDecl dim
-         -> Uniqueness
-         -> m (TypeBase dim as)
-arrayOfM loc t shape u = maybe nope return $ arrayOf t shape u
-  where nope = throwError $ TypeError loc $
-               "Cannot form an array with elements of type " ++ pretty t
-
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
 class Substitutable a where
@@ -607,14 +482,11 @@ substTypesAny substs ot = case ot of
   TypeVar v []
     | Just t <- M.lookup (qualLeaf (qualNameFromTypeName v)) substs -> t
   TypeVar v targs -> TypeVar v $ map subsTypeArg targs
-  LiftedTypeVar v
-    | Just t <- M.lookup (qualLeaf (qualNameFromTypeName v)) substs -> t
-    | otherwise -> LiftedTypeVar v
   Record ts ->  Record $ fmap (substTypesAny substs) ts
   Arrow als v t1 t2 ->
     Arrow als v (substTypesAny substs t1) (substTypesAny substs t2)
 
-  where nope = error "substituteTypes: Cannot create array after substitution."
+  where nope = error "substTypesAny: Cannot create array after substitution."
 
         subsArrayElem (ArrayPrimElem t as) = (Prim t, as)
         subsArrayElem (ArrayPolyElem v [] as)
@@ -622,7 +494,8 @@ substTypesAny substs ot = case ot of
         subsArrayElem (ArrayPolyElem v targs as) =
           (TypeVar v (map subsTypeArg targs), as)
         subsArrayElem (ArrayRecordElem ts) =
-          (Record $ fmap (substTypesAny substs . recordArrayElemToType) ts, mempty)
+          let ts' = fmap recordArrayElemToType ts
+          in (Record $ fmap (substTypesAny substs . fst) ts', foldMap snd ts')
 
         subsTypeArg (TypeArgType t loc) =
           TypeArgType (substTypesAny substs t) loc

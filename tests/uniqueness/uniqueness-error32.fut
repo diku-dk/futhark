@@ -1,6 +1,6 @@
--- Ensure tha zipping/unzipping does not remove aliases.
+-- Ensure that zipping/unzipping does not remove aliases.
 -- ==
--- error: xs'
+-- error: consumed
 
 let main [n] (xs: *[n]i32, ys: *[n]i32) =
   let arrays = zip xs ys

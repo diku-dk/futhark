@@ -538,7 +538,7 @@ Exp2 :: { UncheckedExp }
      | LetExp %prec letprec { $1 }
 
      | reshape Atom Atom
-                      { Reshape $2 $3 $1 }
+                      { Reshape $2 $3 NoInfo $1 }
 
      | rearrange '(' NaturalInts ')' Atom
                       { Rearrange $3 $5 $1 }
@@ -666,6 +666,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' Exp ',' Exps1 ')'          { TupLit ($2 : fst $4 : snd $4) $1 }
      | '('      ')'                   { TupLit [] $1 }
      | '[' Exps1 ']'                  { ArrayLit (fst $2:snd $2) NoInfo $1 }
+     | '['       ']'                  { ArrayLit [] NoInfo $1 }
 
      | QualVarSlice FieldAccesses
        { let (v,slice,loc) = $1
@@ -694,10 +695,6 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
        { OpSectionLeft $3 NoInfo $2 (NoInfo, NoInfo) NoInfo $1 }
      | '(' BinOp ')'
        { OpSection $2 NoInfo NoInfo NoInfo NoInfo $1 }
-
-     -- Errors
-     | '[' ']'
-       {% emptyArrayError $1 }
 
 Atoms1 :: { (UncheckedExp, [UncheckedExp]) }
         : Atom Atoms1 { ($1, fst $2 : snd $2) }
