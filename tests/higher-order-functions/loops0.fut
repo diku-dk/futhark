@@ -1,6 +1,6 @@
 -- The merge parameter in a loop cannot have function type.
 -- ==
--- error: The type of the merge expression in a do-loop must be of order 0.*
+-- error: used as loop variable
 
 let id 'a (x : a) : a = x
 

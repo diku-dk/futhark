@@ -229,8 +229,8 @@ transformExp (Update e1 idxs e2 loc) =
 transformExp (Concat i e1 es loc) =
   Concat i <$> transformExp e1 <*> mapM transformExp es <*> pure loc
 
-transformExp (Reshape e1 e2 loc) =
-  Reshape <$> transformExp e1 <*> transformExp e2 <*> pure loc
+transformExp (Reshape e1 e2 t loc) =
+  Reshape <$> transformExp e1 <*> transformExp e2 <*> pure t <*> pure loc
 
 transformExp (Rearrange is e0 loc) =
   Rearrange is <$> transformExp e0 <*> pure loc

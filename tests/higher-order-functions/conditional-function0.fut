@@ -1,6 +1,6 @@
 -- We cannot return a function from a conditional.
 -- ==
--- error: Branches of conditional .* only allowed to have base type.
+-- error: returned from branch
 
 let f (x:i32) : i32 = x+x
 let g (x:i32) : i32 = x+1

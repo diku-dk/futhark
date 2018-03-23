@@ -1,6 +1,6 @@
 -- Polymorphic function called incorrectly.
 -- ==
--- error: bool.*i32
+-- error: Couldn't match
 
 let f 't (x: t) (y: t) = (x,y)
 

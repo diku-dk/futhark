@@ -154,7 +154,6 @@ internaliseTypeM orig_t =
       ets <- internaliseElemType et
       return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets ]
     E.Arrow{} -> fail "internaliseTypeM: cannot handle function type."
-    E.LiftedTypeVar{} -> fail "internaliseTypeM: cannot handle lifted type variable."
 
   where internaliseElemType (E.ArrayPolyElem v _ _) =
           map (`toDecl` Nonunique) <$> applyType v
@@ -178,8 +177,6 @@ internaliseTypeWithUniqueness :: E.TypeBase () ()
                               -> Maybe [I.TypeBase ExtShape Uniqueness]
 internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
   where internaliseType' E.TypeVar{} =
-          lift Nothing
-        internaliseType' E.LiftedTypeVar{} =
           lift Nothing
         internaliseType' (E.Prim bt) =
           return [I.Prim $ internalisePrimType bt]
@@ -238,7 +235,6 @@ fullyApplyType t = do
 
 fullyApplyTypeM :: E.StructType -> InternaliseTypeM E.StructType
 fullyApplyTypeM (E.TypeVar tn _) = lookupTypeVar $ E.typeLeaf tn
-fullyApplyTypeM (E.LiftedTypeVar tn) = lookupTypeVar $ E.typeLeaf tn
 fullyApplyTypeM (E.Prim t) = return $ E.Prim t
 fullyApplyTypeM (E.Record fs) = E.Record <$> traverse fullyApplyTypeM fs
 fullyApplyTypeM (E.Array at shape u) = inArray at
@@ -248,7 +244,7 @@ fullyApplyTypeM (E.Array at shape u) = inArray at
           t <- fullyApplyTypeM (E.TypeVar tn targs)
           maybe nope return $ E.arrayOf t shape u
         inArray (E.ArrayRecordElem fs) = do
-          fs' <- traverse (fullyApplyTypeM . E.recordArrayElemToType) fs
+          fs' <- traverse (fullyApplyTypeM . fst . E.recordArrayElemToType) fs
           maybe nope return $ E.arrayOf (E.Record fs') shape u
         nope = fail "fullyApplyTypeM: cannot construct array."
 fullyApplyTypeM E.Arrow{} =

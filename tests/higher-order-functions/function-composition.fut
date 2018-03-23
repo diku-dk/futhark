@@ -12,4 +12,5 @@ let replicate3 'a (x : a) : []a = [x, x, x]
 let main (x : i32) =
   (compose isEven add1 x,
    compose replicate3 add1 x,
-   compose replicate3 isEven x)
+   compose replicate3 isEven x
+)
