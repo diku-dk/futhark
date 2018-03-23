@@ -227,7 +227,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     ppr src <+> text "with" <+>
     brackets (commasep (map ppr idxs)) <+>
     text "<-" <+> align (ppr ve)
-  pprPrec _ (Index e idxs _) =
+  pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Reshape shape e _ _) =
     text "reshape" <+> ppr shape <+> ppr e

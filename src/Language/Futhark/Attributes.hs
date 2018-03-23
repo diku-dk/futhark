@@ -46,6 +46,7 @@ module Language.Futhark.Attributes
   -- * Operations on types
   , rank
   , peelArray
+  , stripArray
   , arrayOf
   , arrayOfWithAliases
   , toStructural
@@ -453,10 +454,7 @@ typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ _ _ body _) = typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
-typeOf (Index ident idx _) =
-  stripArray (length $ filter isFix idx) (typeOf ident)
-  where isFix DimFix{} = True
-        isFix _        = False
+typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (Reshape shape _ (Info et) _) =
   et `setArrayShape` rank n

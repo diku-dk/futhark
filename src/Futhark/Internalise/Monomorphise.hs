@@ -219,8 +219,8 @@ transformExp (LetWith id1 id2 idxs e1 body loc) = do
   body' <- transformExp body
   return $ LetWith id1 id2 idxs' e1' body' loc
 
-transformExp (Index e0 idxs loc) =
-  Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc
+transformExp (Index e0 idxs info loc) =
+  Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure info <*> pure loc
 
 transformExp (Update e1 idxs e2 loc) =
   Update <$> transformExp e1 <*> mapM transformDimIndex idxs
