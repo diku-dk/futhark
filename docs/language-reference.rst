@@ -390,16 +390,7 @@ literals and variables, but also more complicated forms.
       : | "unsafe" `exp`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
       : | "map" `fun` `exp`+
-      : | "reduce" `fun` `exp` `exp`
-      : | "reduce_comm" `fun` `exp` `exp`
-      : | "scan" `fun` `exp` `exp`
-      : | "filter" `fun` `exp`
       : | "partition" "(" `fun`+ ")" `exp`
-      : | "stream_map" `fun` `exp`
-      : | "stream_map_per" `fun` `exp`
-      : | "stream_red" `fun` `exp` `exp`
-      : | "stream_red_per" `fun` `exp` `exp`
-      : | "stream_seq" `fun` `exp` `exp`
    field:   `fieldid` "=" `exp`
         : | `id`
    pat:   `id`
@@ -784,25 +775,6 @@ do not want them here.
 Return ``a``, but with the element at position ``i`` changed to
 contain the result of evaluating ``e``.  Consumes ``a``.
 
-``scatter as is vs``
-....................
-
-This ``scatter`` expression calculates the equivalent of this imperative
-code::
-
-  for index in 0..length is-1:
-    i = is[index]
-    v = vs[index]
-    as[i] = v
-
-The ``is`` and ``vs`` arrays must have the same outer size.  ``scatter``
-acts in-place and consumes the ``as`` array, returning a new array
-that has the same type and elements as ``as``, except for the indices
-in ``is``.  If ``is`` contains duplicates (i.e. several writes are
-performed to the same location), the result is unspecified.  It is not
-guaranteed that one of the duplicate writes will complete atomically -
-they may be interleaved.
-
 ``if c then a else b``
 ......................
 
@@ -880,35 +852,6 @@ resulting array.  Differs from ``map f (zip a_1 ... a_n)`` in that
 ``f`` is called with ``n`` arguments, where in the latter case it is
 called with a single ``n``-tuple argument.  In other languages, this
 form of ``map`` is often called ``zipWith``.
-
-``reduce f x a``
-...................
-
-Left-reduction with ``f`` across the elements of ``a``, with ``x`` as
-the neutral element for ``f``.  The function ``f`` must be
-associative.  If it is not, the return value is unspecified.
-
-``reduce_comm f x a``
-.....................
-
-Like ``reduce``, but with the added guarantee that the function ``f``
-is *commutative*.  This lets the compiler generate more efficient
-code.  If ``f`` is not commutative, the return value is unspecified.
-You do not need to explicitly use ``reduce_comm`` with built-in
-operators like ``+`` - the compiler already knows that these are
-commutative.
-
-``scan f x a``
-...................
-
-Inclusive prefix scan.  Has the same caveats with respect to
-associativity as ``reduce``.
-
-``filter f a``
-................
-
-Remove all those elements of ``a`` that do not satisfy the predicate
-``f``.
 
 ``partition (f_1, ..., f_n) a``
 ...............................
