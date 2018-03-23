@@ -181,6 +181,16 @@ transformExp (Apply e1 e2 d tp loc) =
     (Var v _ _, TupLit [f, arr] _)
       | intrinsic "filter" v ->
           transformExp $ Filter f arr loc
+    (Var v _ _, TupLit [op, f, arr] _)
+      | intrinsic "stream_red" v ->
+          transformExp $ Stream (RedLike InOrder Noncommutative op) f arr loc
+      | intrinsic "stream_red_per" v ->
+          transformExp $ Stream (RedLike Disorder Commutative op) f arr loc
+    (Var v _ _, TupLit [f, arr] _)
+      | intrinsic "stream_map" v ->
+          transformExp $ Stream (MapLike InOrder) f arr loc
+      | intrinsic "stream_map_per" v ->
+          transformExp $ Stream (MapLike Disorder) f arr loc
 
     _ -> do
       e1' <- transformExp e1

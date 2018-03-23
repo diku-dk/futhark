@@ -69,6 +69,18 @@ let filter 'a (p: a -> bool) (as: []a): *[]a =
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs)
 
+let stream_red 'a 'b (op: b -> b -> b) (f: []a -> b) (as: []a): b =
+  intrinsics.stream_red (op, f, as)
+
+let stream_red_per 'a 'b (op: b -> b -> b) (f: []a -> b) (as: []a): b =
+  intrinsics.stream_red_per (op, f, as)
+
+let stream_map 'a 'b (f: []a -> []b) (as: []a): *[]b =
+  intrinsics.stream_map (f, as)
+
+let stream_map_per 'a 'b (f: []a -> []b) (as: []a): *[]b =
+  intrinsics.stream_map_per (f, as)
+
 let pick [n] 't (flags: [n]bool) (xs: [n]t) (ys: [n]t): *[n]t =
   map (\flag x y -> if flag then x else y) flags xs ys
 
