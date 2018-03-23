@@ -152,13 +152,9 @@ keyword s =
     "rearrange"    -> REARRANGE
     "rotate"       -> ROTATE
     "map"          -> MAP
-    "reduce"       -> REDUCE
-    "reduce_comm"  -> REDUCECOMM
     "zip"          -> ZIP
     "unzip"        -> UNZIP
-    "scan"         -> SCAN
     "concat"       -> CONCAT
-    "filter"       -> FILTER
     "partition"    -> PARTITION
     "stream_map"     -> STREAM_MAP
     "stream_map_per" -> STREAM_MAPPER
@@ -359,17 +355,13 @@ data Token = ID Name
            | DO
            | WITH
            | MAP
-           | REDUCE
-           | REDUCECOMM
            | RESHAPE
            | REARRANGE
            | ROTATE
            | ZIP
            | UNZIP
            | UNSAFE
-           | SCAN
            | CONCAT
-           | FILTER
            | PARTITION
            | TRUE
            | FALSE

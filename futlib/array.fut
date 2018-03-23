@@ -54,8 +54,20 @@ let replicate 't (n: i32) (x: t): *[n]t =
 let copy [n] 't (a: [n]t): *[n]t =
   map (\x -> x) a
 
+let reduce 'a (op: a -> a -> a) (ne: a) (as: []a): a =
+  intrinsics.reduce (op, ne, as)
+
+let reduce_comm 'a (op: a -> a -> a) (ne: a) (as: []a): a =
+  intrinsics.reduce_comm (op, ne, as)
+
+let scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
+  intrinsics.scan (op, ne, as)
+
+let filter 'a (p: a -> bool) (as: []a): *[]a =
+  intrinsics.filter (p, as)
+
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
-  intrinsics.scatter dest is vs
+  intrinsics.scatter (dest, is, vs)
 
 let pick [n] 't (flags: [n]bool) (xs: [n]t) (ys: [n]t): *[n]t =
   map (\flag x y -> if flag then x else y) flags xs ys
