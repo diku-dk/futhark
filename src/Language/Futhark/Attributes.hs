@@ -41,6 +41,7 @@ module Language.Futhark.Attributes
   , concreteType
   , orderZero
   , unfoldFunType
+  , typeVars
 
   -- * Operations on types
   , rank
@@ -58,6 +59,7 @@ module Language.Futhark.Attributes
   , removeShapeAnnotations
   , vacuousShapeAnnotations
   , typeToRecordArrayElem
+  , typeToRecordArrayElem'
   , recordArrayElemToType
   , tupleRecord
   , isTupleRecord
@@ -125,7 +127,6 @@ nestedDims t =
             Record fs       -> nub $ fold $ fmap nestedDims fs
             Prim{}          -> mempty
             TypeVar _ targs -> concatMap typeArgDims targs
-            LiftedTypeVar{} -> mempty
             Arrow _ v t1 t2 -> filter (notV v) $ nestedDims t1 <> nestedDims t2
   where arrayNestedDims ArrayPrimElem{} =
           mempty
@@ -189,7 +190,6 @@ diet :: TypeBase shape as -> Diet
 diet (Record ets)          = RecordDiet $ fmap diet ets
 diet (Prim _)              = Observe
 diet TypeVar{}             = Observe
-diet LiftedTypeVar{}       = Observe
 diet Arrow{}               = Observe
 diet (Array _ _ Unique)    = Consume
 diet (Array _ _ Nonunique) = Observe
@@ -280,7 +280,6 @@ arrayOfWithAliases (Prim et) as shape u =
   Just $ Array (ArrayPrimElem et as) shape u
 arrayOfWithAliases (TypeVar x targs) as shape u =
   Just $ Array (ArrayPolyElem x targs as) shape u
-arrayOfWithAliases LiftedTypeVar{} _ _ _ = Nothing
 arrayOfWithAliases (Record ts) as shape u = do
   ts' <- traverse (typeToRecordArrayElem' as) ts
   return $ Array (ArrayRecordElem ts') shape u
@@ -298,7 +297,6 @@ typeToRecordArrayElem' as (Prim bt) =
   Just $ RecordArrayElem $ ArrayPrimElem bt as
 typeToRecordArrayElem' as (TypeVar bt targs) =
   Just $ RecordArrayElem $ ArrayPolyElem bt targs as
-typeToRecordArrayElem' _ LiftedTypeVar{} = Nothing
 typeToRecordArrayElem' as (Record ts') =
   RecordArrayElem . ArrayRecordElem <$>
   traverse (typeToRecordArrayElem' as) ts'
@@ -306,25 +304,28 @@ typeToRecordArrayElem' _ (Array et shape u) =
   Just $ RecordArrayArrayElem et shape u
 typeToRecordArrayElem' _ Arrow{} = Nothing
 
-recordArrayElemToType :: RecordArrayElemTypeBase dim as
-                     -> TypeBase dim as
+recordArrayElemToType :: Monoid as =>
+                         RecordArrayElemTypeBase dim as
+                      -> (TypeBase dim as, as)
 recordArrayElemToType (RecordArrayElem et)              = arrayElemToType et
-recordArrayElemToType (RecordArrayArrayElem et shape u) = Array et shape u
+recordArrayElemToType (RecordArrayArrayElem et shape u) = (Array et shape u, mempty)
 
-arrayElemToType :: ArrayElemTypeBase dim as -> TypeBase dim as
-arrayElemToType (ArrayPrimElem bt _)       = Prim bt
-arrayElemToType (ArrayPolyElem bt targs _) = TypeVar bt targs
-arrayElemToType (ArrayRecordElem ts)       = Record $ fmap recordArrayElemToType ts
+arrayElemToType :: Monoid as => ArrayElemTypeBase dim as -> (TypeBase dim as, as)
+arrayElemToType (ArrayPrimElem bt als)       = (Prim bt, als)
+arrayElemToType (ArrayPolyElem bt targs als) = (TypeVar bt targs, als)
+arrayElemToType (ArrayRecordElem ts) =
+  let ts' = fmap recordArrayElemToType ts
+  in (Record $ fmap fst ts', foldMap snd ts')
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
-stripArray :: ArrayDim dim =>
+stripArray :: (ArrayDim dim, Monoid as) =>
               Int -> TypeBase dim as -> TypeBase dim as
 stripArray n (Array et shape u)
   | Just shape' <- stripDims n shape =
     Array et shape' u
-  | otherwise = arrayElemToType et
+  | otherwise = fst $ arrayElemToType et
 stripArray _ t = t
 
 -- | Create a record type corresponding to a tuple with the given
@@ -457,8 +458,8 @@ typeOf (Index ident idx _) =
   where isFix DimFix{} = True
         isFix _        = False
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
-typeOf (Reshape shape  e _) =
-  typeOf e `setArrayShape` rank n
+typeOf (Reshape shape _ (Info et) _) =
+  et `setArrayShape` rank n
   where n = case typeOf shape of Record ts -> length ts
                                  _         -> 1
 typeOf (Rearrange _ e _) = typeOf e
@@ -502,6 +503,24 @@ unfoldFunType (Arrow _ _ t1 t2) = let (ps, r) = unfoldFunType t2
                                   in (t1 : ps, r)
 unfoldFunType t = ([], t)
 
+-- | The type names mentioned in a type.
+typeVars :: Monoid as => TypeBase dim as -> Names
+typeVars t =
+  case t of
+    Prim{} -> mempty
+    TypeVar tn targs ->
+      mconcat $ typeVarFree tn : map typeArgFree targs
+    Arrow _ _ t1 t2 -> typeVars t1 <> typeVars t2
+    Record fields -> foldMap typeVars fields
+    Array ArrayPrimElem{} _ _ -> mempty
+    Array (ArrayPolyElem tn targs _) _ _ ->
+      mconcat $ typeVarFree tn : map typeArgFree targs
+    Array (ArrayRecordElem fields) _ _ ->
+      foldMap (typeVars . fst . recordArrayElemToType) fields
+  where typeVarFree = S.singleton . typeLeaf
+        typeArgFree (TypeArgType ta _) = typeVars ta
+        typeArgFree TypeArgDim{} = mempty
+
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
 -- the given diets.
@@ -518,7 +537,6 @@ returnType (Record fs) ds args =
 returnType (Prim t) _ _ = Prim t
 returnType (TypeVar t targs) ds args =
   TypeVar t $ map (\arg -> typeArgReturnType arg ds args) targs
-returnType (LiftedTypeVar t) _ _ = LiftedTypeVar t
 returnType (Arrow _ v t1 t2) ds args =
   Arrow mempty v (bimap id (const mempty) t1) (returnType t2 ds args)
 
@@ -555,7 +573,6 @@ recordArrayElemReturnType (RecordArrayArrayElem et shape u) ds args =
 concreteType :: TypeBase f vn -> Bool
 concreteType Prim{} = True
 concreteType TypeVar{} = False
-concreteType LiftedTypeVar{} = False
 concreteType Arrow{} = False
 concreteType (Record ts) = all concreteType ts
 concreteType (Array at _ _) = concreteArrayType at
@@ -574,7 +591,6 @@ orderZero (Prim _)        = True
 orderZero Array{}         = True
 orderZero (Record fs)     = all orderZero $ M.elems fs
 orderZero TypeVar{}       = True
-orderZero LiftedTypeVar{} = False
 orderZero Arrow{}         = False
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
@@ -652,11 +668,12 @@ namesToPrimTypes = M.fromList
                           map Unsigned [minBound..maxBound] ++
                           map FloatType [minBound..maxBound] ]
 
--- | The nature of something predefined.  These can either be monomorphic
--- or overloaded.  An overloaded builtin is a mapping from valid
--- parameter types to the result type.
+-- | The nature of something predefined.  These can either be
+-- monomorphic or overloaded.  An overloaded builtin is a list valid
+-- types it can be instantiated with, to the parameter and result
+-- type, with 'Nothing' representing the overloaded parameter type.
 data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
-               | IntrinsicOverloadedFun [(PrimType, ([PrimType], PrimType))]
+               | IntrinsicOverloadedFun [PrimType] [Maybe PrimType] (Maybe PrimType)
                | IntrinsicPolyFun [TypeParamBase VName] [TypeBase () ()] (TypeBase () ())
                | IntrinsicType PrimType
                | IntrinsicEquality -- Special cased.
@@ -668,9 +685,10 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
              map primFun (M.toList Primitive.primFuns) ++
 
-             [ ("~", IntrinsicOverloadedFun $
-                     [(Signed t, ([Signed t], Signed t)) | t <- [minBound..maxBound] ] ++
-                     [(Unsigned t, ([Unsigned t], Unsigned t)) | t <- [minBound..maxBound] ])
+             [ ("~", IntrinsicOverloadedFun
+                     (map Signed [minBound..maxBound] ++
+                      map Unsigned [minBound..maxBound])
+                     [Nothing] Nothing)
              , ("!", IntrinsicMonoFun [Bool] Bool)] ++
 
              [("opaque", IntrinsicOpaque)] ++
@@ -744,8 +762,8 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         mkIntrinsicBinOp op = do op' <- intrinsicBinOp op
                                  return (pretty op, op')
 
-        binOp ts = Just $ IntrinsicOverloadedFun [ (t, ([t,t], t)) | t <- ts ]
-        ordering = Just $ IntrinsicOverloadedFun [ (t, ([t,t], Bool)) | t <- anyPrimType ]
+        binOp ts = Just $ IntrinsicOverloadedFun ts [Nothing, Nothing] Nothing
+        ordering = Just $ IntrinsicOverloadedFun anyPrimType [Nothing, Nothing] (Just Bool)
 
         intrinsicBinOp Plus     = binOp anyNumberType
         intrinsicBinOp Minus    = binOp anyNumberType

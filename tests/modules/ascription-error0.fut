@@ -1,6 +1,6 @@
 -- Abstract types must be abstract.
 -- ==
--- error: type i32.*type Struct.t
+-- error: Couldn't match
 
 module type SIG = {
 type t

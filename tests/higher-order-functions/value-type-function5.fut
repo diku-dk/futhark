@@ -2,7 +2,7 @@
 -- function composition. Without them, we are limited in which functions can be
 -- composed.
 -- ==
--- error: Cannot instantiate the value type variable c with the functional type
+-- error: functional
 
 let compose 'a 'b 'c (f : b -> c) (g : a -> b) : a -> c =
   \(x : a) -> f (g x)

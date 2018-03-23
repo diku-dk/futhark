@@ -331,7 +331,6 @@ data TypeBase dim as = Prim PrimType
                      | Array (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
                      | Record (M.Map Name (TypeBase dim as))
                      | TypeVar TypeName [TypeArg dim as]
-                     | LiftedTypeVar TypeName
                      | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
                      -- ^ The aliasing corresponds to the lexical
                      -- closure of the function.
@@ -343,7 +342,6 @@ instance Bitraversable TypeBase where
     Array <$> bitraverse f g a <*> traverse f shape <*> pure u
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar t args) = TypeVar t <$> traverse (bitraverse f g) args
-  bitraverse _ _ (LiftedTypeVar t) = pure $ LiftedTypeVar t
   bitraverse f g (Arrow als v t1 t2) =
     Arrow <$> g als <*> pure v <*> bitraverse f g t1 <*> bitraverse f g t2
 
@@ -633,7 +631,7 @@ data ExpBase f vn =
             -- across.
 
             -- Array index space transformation.
-            | Reshape (ExpBase f vn) (ExpBase f vn) SrcLoc
+            | Reshape (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array.
 
             | Rearrange [Int] (ExpBase f vn) SrcLoc
@@ -737,7 +735,7 @@ instance Located (ExpBase f vn) where
   locOf (LetWith _ _ _ _ _ pos)        = locOf pos
   locOf (Index _ _ pos)                = locOf pos
   locOf (Update _ _ _ pos)             = locOf pos
-  locOf (Reshape _ _ pos)              = locOf pos
+  locOf (Reshape _ _ _ loc)            = locOf loc
   locOf (Rearrange _ _ pos)            = locOf pos
   locOf (Rotate _ _ _ pos)             = locOf pos
   locOf (Map _ _ _ pos)                = locOf pos

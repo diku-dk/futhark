@@ -88,7 +88,7 @@ instance Pretty (ShapeDecl dim) => Pretty (RecordArrayElemTypeBase dim as) where
 instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
   ppr (ArrayPrimElem pt _) = ppr pt
   ppr (ArrayPolyElem v args _) =
-    ppr (baseName <$> qualNameFromTypeName v) <+> spread (map ppr args)
+    ppr (qualNameFromTypeName v) <+> spread (map ppr args)
   ppr (ArrayRecordElem fs)
     | Just ts <- areTupleFields fs =
         parens (commasep $ map ppr ts)
@@ -98,8 +98,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr (Prim et) = ppr et
-  ppr (TypeVar et targs) = ppr (baseName <$> qualNameFromTypeName et) <+> spread (map ppr targs)
-  ppr (LiftedTypeVar et) = ppr (baseName <$> qualNameFromTypeName et)
+  ppr (TypeVar et targs) = ppr (qualNameFromTypeName et) <+> spread (map ppr targs)
   ppr (Array at shape u) = ppr u <> ppr shape <> ppr at
   ppr (Record fs)
     | Just ts <- areTupleFields fs =
@@ -158,7 +157,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Var name _ _) = ppr name
   pprPrec _ (Parens e _) = align $ parens $ ppr e
   pprPrec _ (QualParens v e _) = ppr v <> text "." <> align (parens $ ppr e)
-  pprPrec _ (Ascript e t _) = pprPrec 0 e <> pprPrec 0 t
+  pprPrec _ (Ascript e t _) = pprPrec 0 e <> colon <+> pprPrec 0 t
   pprPrec _ (Literal v _) = ppr v
   pprPrec _ (TupLit es _)
     | any hasArrayLit es = parens $ commastack $ map ppr es
@@ -230,7 +229,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     text "<-" <+> align (ppr ve)
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Reshape shape e _) =
+  pprPrec _ (Reshape shape e _ _) =
     text "reshape" <+> ppr shape <+> ppr e
   pprPrec _ (Rearrange perm e _) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
@@ -291,13 +290,15 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (LoopFormBase f vn) 
 instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (PatternBase f vn) where
   ppr (PatternAscription p t) = ppr p <> text ":" <+> ppr t
   ppr (PatternParens p _)     = parens $ ppr p
-  ppr (Id v t _)              = ppr v <> case unAnnot t of
-                                           Just t' -> colon <+> ppr t'
-                                           Nothing -> mempty
+  ppr (Id v t _)              = case unAnnot t of
+                                  Just t' -> parens $ ppr v <> colon <+> ppr t'
+                                  Nothing -> ppr v
   ppr (TuplePattern pats _)   = parens $ commasep $ map ppr pats
   ppr (RecordPattern fs _)    = braces $ commasep $ map ppField fs
     where ppField (name, t) = text (nameToString name) <> equals <> ppr t
-  ppr (Wildcard _ _)          = text "_"
+  ppr (Wildcard t _)          = case unAnnot t of
+                                  Just t' -> parens $ text "_" <> colon <+> ppr t'
+                                  Nothing -> text "_"
 
 ppAscription :: (Eq vn, Hashable vn, Pretty vn, Annot f) => Maybe (TypeDeclBase f vn) -> Doc
 ppAscription Nothing  = mempty

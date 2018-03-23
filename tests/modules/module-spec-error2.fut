@@ -1,5 +1,5 @@
 -- ==
--- error: Argument of type M0.M.t passed for parameter of type M1.M.t
+-- error: Couldn't match type `M1.*with `M0
 
 
 module type MT = {
