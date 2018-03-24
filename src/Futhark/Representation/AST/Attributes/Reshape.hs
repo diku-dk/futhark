@@ -12,6 +12,7 @@ module Futhark.Representation.AST.Attributes.Reshape
          -- * Execution
        , reshapeOuter
        , reshapeInner
+       , repeatDims
 
          -- * Inspection
        , shapeCoercion
@@ -56,7 +57,7 @@ shapeCoerce :: [SubExp] -> VName -> Exp lore
 shapeCoerce newdims arr =
   BasicOp $ Reshape (map DimCoercion newdims) arr
 
--- | Construct a pair suitable for a @Repeat@.
+-- | Construct a pair suitable for a 'Repeat'.
 repeatShapes :: [Shape] -> Type -> ([Shape], Shape)
 repeatShapes shapes t =
   case splitAt t_rank shapes of
@@ -65,6 +66,13 @@ repeatShapes shapes t =
     _ ->
       (shapes ++ replicate (length shapes - t_rank) (Shape []), Shape [])
   where t_rank = arrayRank t
+
+-- | Modify the shape of an array type as 'Repeat' would do
+repeatDims :: [Shape] -> Shape -> Type -> Type
+repeatDims shape innershape = modifyArrayShape repeatDims
+  where repeatDims (Shape ds) =
+          Shape $ concat (zipWith (++) (map shapeDims shape) (map pure ds)) ++
+          shapeDims innershape
 
 -- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
 -- that replaces the outer @n@ dimensions of @oldshape@ with @newshape@.
