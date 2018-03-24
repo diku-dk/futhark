@@ -42,7 +42,7 @@ let mc2step (wqs: []f32) (r1: f32): f32 =
 
 let mc2sim [tn] (arg: ([tn][]f32, f32)): f32 =
   let ( wqss, r1 ) = arg
-  let sum_r = map mc2step wqss (replicate tn r1) in
+  let sum_r = map2 mc2step wqss (replicate tn r1) in
   mean(sum_r)
 
 let mc2(wqsss: [][][]f32, r1s: []f32): []f32 =

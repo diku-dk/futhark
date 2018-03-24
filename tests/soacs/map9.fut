@@ -10,9 +10,9 @@
 --   [[3, 12, 33], [54, 324, 1254], [2754, 21384, 104082], [5508, 64152, 624492], [60588, 1154736, 16861284]]
 -- }
 let combineVs(n_row: []i32): []i32 =
-  map (*) n_row n_row
+  map2 (*) n_row n_row
 
 let main(md_starts: []i32, md_vols: [][]i32, md_drifts: [][]i32): [][]i32 =
   let e_rows = map (\(x: []i32): []i32  -> map (+2) x) (
                    map combineVs (md_vols))
-  in  scan (\(x: []i32) (y: []i32): []i32 -> map (*) x y) (md_starts) (e_rows )
+  in  scan (\(x: []i32) (y: []i32): []i32 -> map2 (*) x y) (md_starts) (e_rows )

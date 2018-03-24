@@ -4,6 +4,6 @@
 -- output { [9, 12] }
 let main [m] (as: [][m]i32): []i32 =
   reduce_comm(\(acc: []i32) (r: []i32): []i32  ->
-               map (+) acc r)
+               map2 (+) acc r)
              (replicate m 0)
              as

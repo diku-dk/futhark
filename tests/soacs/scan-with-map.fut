@@ -11,6 +11,6 @@
 
 let main [n] (a: [n]i32, m: i32): i32 =
   let contribs = replicate m a
-  let res = scan (\(x: []i32) (y: []i32): []i32 -> map (+) x y
+  let res = scan (\(x: []i32) (y: []i32): []i32 -> map2 (+) x y
                 ) a contribs in
   reduce (^) 0 (reshape (n*m) res)
