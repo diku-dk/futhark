@@ -780,14 +780,10 @@ contain the result of evaluating ``e``.  Consumes ``a``.
 
 If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
 
-``map f a_1 ... a_n``
-.....................
+``map f a``
+...........
 
-Apply ``f`` to every element of ``a_1 ... a_n`` and return the
-resulting array.  Differs from ``map f (zip a_1 ... a_n)`` in that
-``f`` is called with ``n`` arguments, where in the latter case it is
-called with a single ``n``-tuple argument.  In other languages, this
-form of ``map`` is often called ``zipWith``.
+Apply ``f`` to every element of ``a`` and return the resulting array.
 
 Binding Expressions
 ~~~~~~~~~~~~~~~~~~~
