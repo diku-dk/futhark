@@ -75,7 +75,21 @@ let scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
 -- | Remove all those elements of ``as`` that do not satisfy the
 -- predicate ``p``.
 let filter 'a (p: a -> bool) (as: []a): *[]a =
-  intrinsics.filter (p, as)
+  let (as', is) = intrinsics.partition (1, \x -> if p x then 0 else 1, as)
+  in as'[:is[0]]
+
+-- | Split an array into those elements that satisfy the given
+-- predicate, and those that do not.
+let partition 'a (p: a -> bool) (as: []a): ([]a, []a) =
+  let p' x = if p x then 0 else 1
+  let (as', is) = intrinsics.partition (2, p', as)
+  in (as'[:is[0]], as'[is[0]:])
+
+-- | Split an array by two predicates, producing three arrays.
+let partition2 'a (p1: a -> bool) (p2: a -> bool) (as: []a): ([]a, []a, []a) =
+  let p' x = if p1 x then 0 else if p2 x then 1 else 2
+  let (as', is) = intrinsics.partition (3, p', as)
+  in (as'[:is[0]], as'[is[0]:is[0]+is[1]], as'[is[0]+is[1]:])
 
 -- | The ``scatter as is vs`` expression calculates the equivalent of
 -- this imperative code::

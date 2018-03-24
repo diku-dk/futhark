@@ -155,7 +155,6 @@ keyword s =
     "zip"          -> ZIP
     "unzip"        -> UNZIP
     "concat"       -> CONCAT
-    "partition"    -> PARTITION
 
     _              -> ID $ nameFromText s
 

@@ -14,4 +14,4 @@ let divisible_by_two(x: i32): bool = x % 2 == 0
 let divisible_by_three(x: i32): bool = x % 3 == 0
 
 let main(a: []i32): ([]i32, []i32, []i32) =
-  partition (divisible_by_two, divisible_by_three) a
+  partition2 divisible_by_two divisible_by_three a

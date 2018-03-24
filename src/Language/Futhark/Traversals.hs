@@ -147,8 +147,8 @@ instance ASTMappable (ExpBase Info VName) where
          pure loc
   astMap tv (Filter fun arrexp loc) =
     pure Filter <*> mapOnExp tv fun <*> mapOnExp tv arrexp <*> pure loc
-  astMap tv (Partition funs arrexp loc) =
-    pure Partition <*> mapM (mapOnExp tv) funs <*> mapOnExp tv arrexp <*> pure loc
+  astMap tv (Partition k fun arrexp loc) =
+    Partition k <$> mapOnExp tv fun <*> mapOnExp tv arrexp <*> pure loc
   astMap tv (Stream form fun arr loc) =
     pure Stream <*> mapOnStreamForm form <*> mapOnExp tv fun <*>
          mapOnExp tv arr <*> pure loc

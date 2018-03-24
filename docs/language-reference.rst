@@ -780,6 +780,15 @@ contain the result of evaluating ``e``.  Consumes ``a``.
 
 If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
 
+``map f a_1 ... a_n``
+.....................
+
+Apply ``f`` to every element of ``a_1 ... a_n`` and return the
+resulting array.  Differs from ``map f (zip a_1 ... a_n)`` in that
+``f`` is called with ``n`` arguments, where in the latter case it is
+called with a single ``n``-tuple argument.  In other languages, this
+form of ``map`` is often called ``zipWith``.
+
 Binding Expressions
 ~~~~~~~~~~~~~~~~~~~
 
@@ -840,30 +849,6 @@ Equivalent to ``loop (pat = initial) for x in [0..1..<n] do loopbody``.
 3. Return the final value of ``pat``.
 
 See also `Shape Declarations`_.
-
-SOACs
-~~~~~
-
-``map f a_1 ... a_n``
-.....................
-
-Apply ``f`` to every element of ``a_1 ... a_n`` and return the
-resulting array.  Differs from ``map f (zip a_1 ... a_n)`` in that
-``f`` is called with ``n`` arguments, where in the latter case it is
-called with a single ``n``-tuple argument.  In other languages, this
-form of ``map`` is often called ``zipWith``.
-
-``partition (f_1, ..., f_n) a``
-...............................
-
-Divide the array ``a`` into disjoint partitions based on the given
-predicates.  Each element of ``a`` is called with the predicates
-``f_1`` to ``f_n`` in sequence, and as soon as one as one of them
-returns ``True``, the element is added to the corresponding partition.
-If none of the functions return ``True``, the element is added to a
-catch-all partition that is returned last.  Always returns a tuple
-with *n+1* components.  The partitioning is stable, meaning that
-elements of the partitions retain their original relative positions.
 
 Function Expressions
 ~~~~~~~~~~~~~~~~~~~~

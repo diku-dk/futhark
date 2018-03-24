@@ -1089,19 +1089,8 @@ checkExp (Map fun arrexps NoInfo loc) = do
 checkExp Reduce{} = error "Reduce nodes should not appear in source program"
 checkExp Scan{} = error "Scan nodes should not appear in source program"
 checkExp Filter{} = error "Filter nodes should not appear in source program"
+checkExp Partition{} = error "Partition nodes should not appear in source program"
 checkExp Stream{} = error "Stream nodes should not appear in source program"
-
-checkExp (Partition funs arrexp pos) = do
-  (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
-  let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
-                       argflow, argloc)
-  funs' <- forM funs $ \fun -> do
-    (fun', fun_t) <- checkFunExp fun [nonunique_arg]
-    when (fun_t /= Prim Bool) $
-      typeError (srclocOf fun') "Partition function does not return bool."
-    return fun'
-
-  return $ Partition funs' arrexp' pos
 
 checkExp (Concat i arr1exp arr2exps loc) = do
   arr1exp'  <- checkExp arr1exp

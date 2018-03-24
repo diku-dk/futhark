@@ -152,7 +152,6 @@ import Language.Futhark.Parser.Lexer
       unzip           { L $$ UNZIP }
       unsafe          { L $$ UNSAFE }
       concat          { L $$ CONCAT }
-      partition       { L $$ PARTITION }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
       empty           { L $$ EMPTY }
@@ -185,7 +184,7 @@ import Language.Futhark.Parser.Lexer
 %right '->'
 %left juxtprec
 %nonassoc with
-%left indexprec rotate rearrange map partition
+%left indexprec rotate rearrange map
 %%
 
 -- The main parser.
@@ -558,9 +557,6 @@ Exp2 :: { UncheckedExp }
      | unzip Atom  { Unzip $2 [] $1 }
 
      | unsafe Exp2     { Unsafe $2 $1 }
-
-     | partition '(' CommaAtoms1 ')' Atom
-                      { Partition (fst $3 : snd $3) $5 $1 }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }

@@ -724,20 +724,15 @@ internaliseExp desc (E.Reduce comm lam ne arr loc) =
 internaliseExp desc (E.Scan lam ne arr loc) =
   internaliseScanOrReduce desc "scan" I.Scan (lam, ne, arr, loc)
 
-internaliseExp desc (E.Filter lam arr _) = do
+internaliseExp _ (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
-  lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
-  (partition_sizes, partitioned) <- partitionWithSOACS 1 lam' arrs
-  fmap (map I.Var . concat . transpose) $ forM partitioned $ \arr' ->
-    mapM (letExp desc) =<< eSplitArray arr' (map eSubExp partition_sizes)
+  lam' <- internalisePartitionLambda internaliseLambda 1 lam $ map I.Var arrs
+  uncurry (++) <$> partitionWithSOACS 1 lam' arrs
 
-internaliseExp desc (E.Partition lams arr _) = do
+internaliseExp _ (E.Partition k lam arr _) = do
   arrs <- internaliseExpToVars "partition_input" arr
-  lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
-  (partition_sizes, partitioned) <- partitionWithSOACS (k+1) lam' arrs
-  fmap (map I.Var . concat . transpose) $ forM partitioned $ \arr' ->
-    mapM (letExp desc) =<< eSplitArray arr' (map eSubExp partition_sizes)
-  where k = length lams
+  lam' <- internalisePartitionLambda internaliseLambda k lam $ map I.Var arrs
+  uncurry (++) <$> partitionWithSOACS k lam' arrs
 
 internaliseExp desc (E.Stream (E.MapLike o) lam arr _) = do
   arrs <- internaliseExpToVars "stream_input" arr
@@ -1510,7 +1505,7 @@ shadowIdentsInExp substs bnds res = do
     _    -> fail "Internalise.shadowIdentsInExp: something went very wrong"
 
 -- Implement partitioning using maps, scans and writes.
-partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], [I.VName])
+partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], [I.SubExp])
 partitionWithSOACS k lam arrs = do
   arr_ts <- mapM lookupType arrs
   let w = arraysSize 0 arr_ts
@@ -1575,7 +1570,9 @@ partitionWithSOACS k lam arrs = do
   results <- letTupExp "partition_res" $ I.Op $ I.Scatter w
              write_lam (classes : all_offsets ++ arrs) $
              zip3 (repeat sum_of_partition_sizes) (repeat 1) blanks
-  return (map I.Var sizes, results)
+  sizes' <- letSubExp "partition_sizes" $ I.BasicOp $
+            I.ArrayLit (map I.Var sizes) $ I.Prim int32
+  return (map I.Var results, [sizes'])
   where
     mkOffsetLambdaBody :: [SubExp]
                        -> SubExp
