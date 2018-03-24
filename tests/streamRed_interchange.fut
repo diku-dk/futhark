@@ -124,10 +124,10 @@ let main(nfeatures: i32, npoints: i32, nclusters: i32): [nclusters][nfeatures]f3
                   ) (iota(npoints)) in
   stream_red (\(acc: *[nclusters][nfeatures]f32)
                   (elem: *[nclusters][nfeatures]f32): *[nclusters][nfeatures]f32  ->
-                 map (\(x: []f32) (y: []f32): [nfeatures]f32  ->
-                           map (+) x y) acc elem) (
+                 map2 (\(x: []f32) (y: []f32): [nfeatures]f32  ->
+                           map2 (+) x y) acc elem) (
                  \[chunk] (inp: [chunk]([nfeatures]f32,i32)): *[nclusters][nfeatures]f32  ->
                    loop acc = replicate nclusters (replicate nfeatures 0.0f32) for i < chunk do
                      let (point, c) = inp[i] in
-                     unsafe let acc[c] = map (+) (acc[c]) (map (/r32(features_in_cluster[c])) point) in
+                     unsafe let acc[c] = map2 (+) (acc[c]) (map (/r32(features_in_cluster[c])) point) in
                      acc) (zip points membership)

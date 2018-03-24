@@ -9,5 +9,4 @@ let add_if_smaller (const : i32) (acc : i32) (x : i32) : i32 =
   else acc
 
 let main [m][n] (xss : [m][n]i32, consts : [m]i32): [m]i32 =
---  let xss = map (\xs -> map (2*) xs) xss in
-  map (\c xs -> reduce (add_if_smaller c) 0 xs) consts xss
+  map2 (\c xs -> reduce (add_if_smaller c) 0 xs) consts xss

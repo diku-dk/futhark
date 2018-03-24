@@ -11,4 +11,4 @@ let add_then_reduce [m][n] (xss : [m][n]f32) (y : f32): [m]f32 =
   in  map (\xs -> reduce_comm (+) 0.0f32 xs) xss'
 
 let main [l][m][n] (xsss : [l][m][n]f32, ys : [l]f32): [l][m]f32 =
-  map add_then_reduce xsss ys
+  map2 add_then_reduce xsss ys

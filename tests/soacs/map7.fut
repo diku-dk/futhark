@@ -9,6 +9,6 @@
 let main(a1: [][]i32, a2: [][]i32): [][]i32 =
   let b = map (\(row: ([]i32,[]i32)): []i32  ->
                 let (x,y) = row in
-                map (+) x y) (
+                map2 (+) x y) (
               zip a1 a2) in
   b

@@ -1,7 +1,7 @@
 -- The reduction operator works on lists
 
 let vec_add [k] (xs : [k]i32) (ys : [k]i32) : [k]i32 =
-  map (\x y -> x + y) xs ys
+  map2 (\x y -> x + y) xs ys
 
 let main [l][m][n] (xsss : [l][m][n]i32): [l][n]i32 =
   let zeros = replicate n 0 in

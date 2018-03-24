@@ -14,7 +14,7 @@ let step [n] (xs: [n]i32): [n]i32 =
   let ps1 = scan (+) 0 bits
   let bits_sum = reduce (+) 0 bits
   let ps1' = map (+bits_sum) ps1
-  let xs' = map (+) (ps1') xs
+  let xs' = map2 (+) (ps1') xs
   in xs'
 
 let main [n] (xs: [n]i32): [n]i32 =
