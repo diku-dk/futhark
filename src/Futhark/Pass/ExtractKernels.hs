@@ -1014,14 +1014,14 @@ maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d:ds)) v))) acc
 
 maybeDistributeStm bnd@(Let _ aux (BasicOp Copy{})) acc =
   distributeSingleUnaryStm acc bnd $ \_ outerpat arr ->
-  addKernel $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr
+  return $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr
 
 -- Opaques are applied to the full array, because otherwise they can
 -- drastically inhibit parallelisation in some cases.
 maybeDistributeStm bnd@(Let (Pattern [] [pe]) aux (BasicOp Opaque{})) acc
   | not $ primType $ typeOf pe =
       distributeSingleUnaryStm acc bnd $ \_ outerpat arr ->
-      addKernel $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr
+      return $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr
 
 maybeDistributeStm bnd@(Let _ aux (BasicOp (Rearrange perm _))) acc =
   distributeSingleUnaryStm acc bnd $ \nest outerpat arr -> do
@@ -1031,7 +1031,7 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Rearrange perm _))) acc =
     -- will have produced an array without aliases, and so must we.
     arr' <- newVName $ baseString arr
     arr_t <- lookupType arr
-    addKernel $ stmsFromList
+    return $ stmsFromList
       [Let (Pattern [] [PatElem arr' arr_t]) aux $ BasicOp $ Copy arr,
        Let outerpat aux $ BasicOp $ Rearrange perm' arr']
 
@@ -1039,7 +1039,7 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
   distributeSingleUnaryStm acc bnd $ \nest outerpat arr -> do
     let reshape' = map DimNew (kernelNestWidths nest) ++
                    map DimNew (newDims reshape)
-    addKernel $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
+    return $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
 
 -- XXX?  This rule is present to avoid the case where an in-place
 -- update is distributed as its own kernel, as this would mean thread
@@ -1085,19 +1085,48 @@ maybeDistributeStm bnd acc =
 
 distributeSingleUnaryStm :: KernelAcc
                              -> Stm
-                             -> (KernelNest -> Pattern -> VName -> KernelM ())
+                             -> (KernelNest -> Pattern -> VName -> KernelM (Stms Out.Kernels))
                              -> KernelM KernelAcc
 distributeSingleUnaryStm acc bnd f =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | res == map Var (patternNames $ stmPattern bnd),
-        (outer, _) <- nest,
+        (outer, inners) <- nest,
         [(_, arr)] <- loopNestingParamsAndArrs outer -> do
           addKernels kernels
           let outerpat = loopNestingPattern $ fst nest
-          localScope (typeEnvFromKernelAcc acc') $ f nest outerpat arr
-          return acc'
+          localScope (typeEnvFromKernelAcc acc') $ do
+            (arr', pre_stms) <- repeatMissing arr (outer:inners)
+            f_stms <- inScopeOf pre_stms $ f nest outerpat arr'
+            addKernel $ pre_stms <> f_stms
+            return acc'
     _ -> addStmToKernel bnd acc
+  where -- | For an imperfectly mapped array, repeat the missing
+        -- dimensions to make it look like it was in fact perfectly
+        -- mapped.
+        repeatMissing arr inners = do
+          arr_t <- lookupType arr
+          let shapes = determineRepeats arr arr_t inners
+          if all (==Shape []) shapes then return (arr, mempty)
+            else do
+            let (outer_shapes, inner_shape) = repeatShapes shapes arr_t
+                arr_t' = repeatDims outer_shapes inner_shape arr_t
+            arr' <- newVName $ baseString arr
+            return (arr', oneStm $ Let (Pattern [] [PatElem arr' arr_t']) (defAux ()) $
+                          BasicOp $ Repeat outer_shapes inner_shape arr)
+
+        determineRepeats arr arr_t nests
+          | (skipped, arr_nest:nests') <- break (hasInput arr) nests,
+            [(arr_p, _)] <- loopNestingParamsAndArrs arr_nest =
+              Shape (map loopNestingWidth skipped) :
+              determineRepeats (paramName arr_p) (rowType arr_t) nests'
+          | otherwise =
+              Shape (map loopNestingWidth nests) : replicate (arrayRank arr_t) (Shape [])
+
+        hasInput arr nest
+          | [(_, arr')] <- loopNestingParamsAndArrs nest, arr' == arr = True
+          | otherwise = False
+
 
 distribute :: KernelAcc -> KernelM KernelAcc
 distribute acc =
