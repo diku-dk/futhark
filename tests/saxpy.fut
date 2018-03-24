@@ -11,4 +11,4 @@
 -- }
 
 let main(a: f32, x: []f32, y: []f32): []f32 =
-  map (+) (map (a*) x) y
+  map2 (+) (map (a*) x) y

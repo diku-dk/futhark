@@ -13,6 +13,6 @@
 let main [k][n] (indexes: [k]i32,
                  values: [k]i32,
                  array: *[n]i32): [n]i32 =
-  let values' = map (+) indexes values
+  let values' = map2 (+) indexes values
   let array' = scatter array indexes values'
   in array'

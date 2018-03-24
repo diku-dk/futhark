@@ -71,7 +71,7 @@ let sobolChunk [len][num_bits] (dir_vs: [len][num_bits]i32, n: i32, chunk: i32, 
                         else recM(dir_vs, k+n)
                    ) (iota(chunk) )
   let vct_ints= scan (\(x: []i32) (y: []i32): []i32  ->
-                        map (^) x y
+                        map2 (^) x y
                     ) (replicate len 0) contrbs in
   map (\(xs: []i32): [len]f32  ->
              map  (\(x: i32): f32  ->

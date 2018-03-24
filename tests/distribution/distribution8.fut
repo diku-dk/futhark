@@ -18,7 +18,7 @@
 import "/futlib/math"
 
 let combineVs(n_row: []f64, vol_row: []f64, dr_row: []f64): []f64 =
-    map (+) dr_row (map (*) n_row vol_row)
+    map2 (+) dr_row (map2 (*) n_row vol_row)
 
 let mkPrices [num_und][num_dates]
           (md_starts: [num_und]f64, md_vols: [num_dates][num_und]f64,
@@ -27,7 +27,7 @@ let mkPrices [num_und][num_dates]
                       map f64.exp x
                   ) (map combineVs (zip noises (md_vols) (md_drifts)))
   in  scan (\(x: []f64) (y: []f64): []f64  ->
-              map (*) x y)
+              map2 (*) x y)
               md_starts e_rows
 
 let main(n: i32,

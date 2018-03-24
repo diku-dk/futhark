@@ -20,5 +20,5 @@ let reverse [n] (a: [n]i32): [n]i32 =
 let main(a: []i32): i32 =
   let highestToTheLeft = scan max 0 a
   let highestToTheRight = reverse(scan max 0 (reverse(a)))
-  let waterLevels = map min highestToTheLeft highestToTheRight in
-  reduce (+) 0 (map (-) waterLevels a)
+  let waterLevels = map2 min highestToTheLeft highestToTheRight in
+  reduce (+) 0 (map2 (-) waterLevels a)

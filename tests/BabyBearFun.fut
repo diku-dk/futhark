@@ -52,14 +52,14 @@ let min1(a: []i32, b: []i32): []i32 = map (uncurry i32.min) (zip a b)
 let redmin1(a:  []i32): i32 = reduce i32.min 1200 a
 let redmin2(a: [][]i32): []i32 = map redmin1 a
 
-let plus1(a:  []i32,  b: []i32): []i32 = map (+) a b
+let plus1(a:  []i32,  b: []i32): []i32 = map2 (+) a b
 let plus2(a: [][]i32, b: [][]i32): [][]i32 = map plus1 (zip a b)
 
 let replin(len: i32) (a: []i32): [][]i32 = replicate len a
 
 let floydSbsFun(n: i32, d: [][]i32 ): [][]i32 =
     let d3  = replicate n <| transpose d
-    let d2  = map       (replin(n)) d
+    let d2  = map        (replin(n)) d
     let abr = map plus2 (zip d3 d2)
     let partial = map redmin2 abr        in
         map min1 (zip partial d )

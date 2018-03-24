@@ -25,19 +25,19 @@ let main [h][w][n] (grid:*[h][w]i32) (lines:[n]line) (nn: i32) (idxs: []i32) =
   let ys1 = map (\i -> ys1[i]) idxs
   let xs2 = map (\i -> xs2[i]) idxs
   let ys2 = map (\i -> ys2[i]) idxs
-  let dirxs = map (\x1 x2 ->
+  let dirxs = map2 (\x1 x2 ->
                         if x2 > x1 then 1
                         else if x1 > x2 then -1
                         else 0) xs1 xs2
-  let slops = map (\x1 y1 x2 y2 ->
+  let slops = map4 (\x1 y1 x2 y2 ->
                         if x2 == x1 then
                         if y2 > y1 then r32(1) else r32(-1)
                         else r32(y2-y1) / f32.abs(r32(x2-x1))) xs1 ys1 xs2 ys2
   let iotas = sgmIota flags
-  let xs = map (\x1 dirx i ->
+  let xs = map3 (\x1 dirx i ->
                      x1+dirx*i) xs1 dirxs iotas
-  let ys = map (\y1 slop i ->
+  let ys = map3 (\y1 slop i ->
                      y1+t32(slop*r32(i))) ys1 slops iotas
-  let is = map (\x y -> w*y+x) xs ys
+  let is = map2 (\x y -> w*y+x) xs ys
   let flatgrid = reshape (h*w) grid
   in scatter flatgrid is (replicate nn 1)

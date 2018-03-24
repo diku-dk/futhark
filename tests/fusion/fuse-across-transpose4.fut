@@ -7,6 +7,6 @@ let main [n][m] (a: [n][m]i32, b: [n][m]i32): [][]i32 =
   let b2 = map (\r: [n]i32  -> map (+1) r) (rearrange (1,0) b)
   let c  = map (\rp: [n]i32  ->
                  let (rx,ry) = rp in
-                 map (+) rx ry)
+                 map2 (+) rx ry)
                  (zip a2 b2) in
   c

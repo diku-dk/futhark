@@ -9,12 +9,12 @@ let min(a: i32) (b: i32): i32 = if(a<b) then a else b
 let plus1(a:  []i32,  b: []i32): []i32 = [1]
 
 module M0 = {
-    let min1(a: []i32, b: []i32): []i32 = map min a b
+    let min1(a: []i32, b: []i32): []i32 = map2 min a b
     let redmin1(a:  []i32): i32 = reduce min 1200 a
     let redmin2(a: [][]i32): []i32 = map redmin1 a
 
     module M1 = {
-        let plus1(a:  []i32,  b: []i32): []i32 = map (+) a b
+        let plus1(a:  []i32,  b: []i32): []i32 = map2 (+) a b
         let plus2(a: [][]i32, b: [][]i32): [][]i32 = map plus1 (zip a b)
       }
 

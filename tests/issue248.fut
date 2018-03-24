@@ -17,9 +17,9 @@ entry main (nucleotides: []i32): bool =
   let t_v9 = reshape (4, 8, 6) (reshape_int (4*8*6) (reshape (8 * 6) t_v2)) in
   let t_v12 = let x = t_v8 in
               let y = t_v9 in
-              map (\(x: [][]i32) (y: [][]i32): [][]bool ->
-                       map (\(x: []i32) (y: []i32): []bool ->
-                                map (==) (x) (y)) (x) (y)) (x) (y) in
+              map2 (\(x: [][]i32) (y: [][]i32): [][]bool ->
+                       map2 (\(x: []i32) (y: []i32): []bool ->
+                                map2 (==) (x) (y)) (x) (y)) (x) (y) in
   let t_v15 = map (\(x: [][]bool): []bool ->
                    map (\(x: []bool): bool ->
                         reduce (||) (false) (x)) (x)) (t_v12) in
@@ -31,5 +31,5 @@ entry main (nucleotides: []i32): bool =
   let t_v26 = reduce (&&) (true) (let x = t_v21 in
                                   let y = [false, false, false, true, false,
                                            true, false, false] in
-                                  map eqb (x) (y)) in
+                                  map2 eqb (x) (y)) in
   t_v26

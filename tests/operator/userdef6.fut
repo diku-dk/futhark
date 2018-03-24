@@ -7,5 +7,5 @@
 let (++) 't (xs: []t) (ys: []t) = concat xs ys
 
 let main (xss: [][]i32) (yss: [][]i32) (ass: [][]bool) (bss: [][]bool) =
-  (map (++) xss yss, map (++) ass bss,
+  (map2 (++) xss yss, map2 (++) ass bss,
    map (++[1]) xss, map ([true]++) bss)

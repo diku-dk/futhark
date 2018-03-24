@@ -11,7 +11,7 @@
 -- }
 
 let main [n][m] (ass: [n][m]i32, bss: [n][m]f32): ([][]f32, [][]i32) =
-  unzip(map (\(as: []i32) (bs: []f32): ([m]f32, [m]i32)  ->
+  unzip(map2 (\(as: []i32) (bs: []f32): ([m]f32, [m]i32)  ->
                   let (asum, bsum) =
                     unzip(scan (\(x_a,x_b) (y_a,y_b)  ->
                                  (x_a + y_a, x_b + y_b)) (0, 0f32) (zip as bs))

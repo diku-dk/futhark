@@ -57,7 +57,7 @@ let f [n] (a: [n]f32) (j: i32): complex =
                        (complexMult (0.0, 1.0)
                         (toComplex (1.0/r32 n)))))
   in reduce complexAdd (0.0, 0.0)
-  (map complexMult
+  (map2 complexMult
    (map toComplex a)
    (map (complexPow x) (map (j*) (iota n))))
 

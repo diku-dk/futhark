@@ -38,10 +38,10 @@
 default(f32)
 
 let dotV [d] (x: [d]f32) (y: [d]f32): f32 =
-  reduce (+) 0.0 (map (*) x y)
+  reduce (+) 0.0 (map2 (*) x y)
 
 let addV [d] (x: [d]f32) (y: [d]f32): [d]f32 =
-  map (+) x y
+  map2 (+) x y
 
 let scaleV [d] (x: [d]f32) (a: f32): [d]f32 =
   map (*a) x
@@ -50,10 +50,10 @@ let checkClass [d] (w: [d]f32) (x: [d]f32): f32 =
   if dotV x w > 0.0 then 1.0 else -1.0
 
 let checkList [d][m] (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): bool =
-  reduce (&&) true (map (\x y -> checkClass w x * y != -1.0) xs ys)
+  reduce (&&) true (map2 (\x y -> checkClass w x * y != -1.0) xs ys)
 
 let accuracy [d][m] (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): f32 =
-  reduce (+) 0.0 (map (\x y -> f32.bool (checkClass w x * y != -1.0)) xs ys)
+  reduce (+) 0.0 (map2 (\x y -> f32.bool (checkClass w x * y != -1.0)) xs ys)
 
 let train [d] (w: [d]f32) (x: [d]f32) (y: f32) (eta: f32): [d]f32 =
   if checkClass w x == y then w

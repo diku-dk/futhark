@@ -74,11 +74,11 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
     unsafe (x ^ dirvec[index_of_least_significant_0 i])
 
   let recurrent (i:i32) (xs:[D]u32) : [D]u32 =
-    map (recSob i) dirvecs xs
+    map2 (recSob i) dirvecs xs
 
   let indSob (n:i32) (dirvec:[L]u32) : u32 =
-    let reldv_vals = map (\dv i -> if testBit (grayCode n) i then dv
-                                   else 0u32)
+    let reldv_vals = map2 (\dv i -> if testBit (grayCode n) i then dv
+                                    else 0u32)
                          dirvec (iota L)
     in reduce (^) 0u32 reldv_vals
 
@@ -97,7 +97,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
                        if k==0 then sob_beg
                        else recM (k+offs-1))
                     (iota n)
-    let vct_ints = scan (\x y -> map (^) x y) (replicate D 0u32) contrbs
+    let vct_ints = scan (\x y -> map2 (^) x y) (replicate D 0u32) contrbs
     in map (\xs -> map (\x -> f64.u32 x/norm) xs) vct_ints
 
   module Reduce (X : { include monoid

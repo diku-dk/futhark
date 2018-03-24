@@ -24,5 +24,5 @@ let main [n][m][k] (a: [n][m][k]i32): [n][k]i32 =
   let acc = replicate k 0 in
   map (\(a_r: [m][k]i32): [k]i32  ->
         loop(acc) for i < m do
-          map (+) acc (a_r[i])
+          map2 (+) acc (a_r[i])
      ) a

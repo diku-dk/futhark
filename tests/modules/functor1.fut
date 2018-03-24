@@ -29,7 +29,7 @@ module Float32 = {
 
 module DotProd(T: NUMERIC) = {
   let dotprod [n] (xs: [n]T.num) (ys: [n]T.num): T.num =
-    reduce T.mult T.one (map T.plus xs ys)
+    reduce T.mult T.one (map2 T.plus xs ys)
 }
 
 module IntDotProd = DotProd(Int)
