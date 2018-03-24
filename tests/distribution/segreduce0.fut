@@ -6,7 +6,7 @@
 -- output { [11.0f32, 15.0f32] [3i32, 7i32] }
 
 let main [n][m] (ass: [n][m]i32, bss: [n][m]f32): ([]f32, []i32) =
-  unzip(map (\(as: []i32) (bs: []f32): (f32, i32)  ->
+  unzip(map2 (\(as: []i32) (bs: []f32): (f32, i32)  ->
                   let (asum, bsum) =
                     reduce (\(x: (i32, f32)) (y: (i32, f32)): (i32, f32)  ->
                              let (x_a, x_b) = x

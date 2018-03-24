@@ -21,7 +21,7 @@ module linalg(T: numeric): {
   open T
   type t = T.t
   let dotprod [n] (xs: [n]t) (ys: [n]t): t =
-    reduce (+) (i32 0) (map (*) xs ys)
+    reduce (+) (i32 0) (map2 (*) xs ys)
 
   let matmul [n][p][m] (xss: [n][p]t) (yss: [p][m]t): [n][m]t =
     map (\xs -> map (dotprod xs) (transpose yss)) xss
@@ -41,13 +41,13 @@ module linalg(T: numeric): {
       let irow = map (/v1) irow
       let Ap = map (\jrow ->
                     let scale = jrow[i]
-                    in map (\x y -> y - scale * x) irow jrow)
+                    in map2 (\x y -> y - scale * x) irow jrow)
                 Ap
       in concat Ap [irow]
 
   let inv [n] (A: [n][n]t): [n][n]t =
     -- Pad the matrix with the identity matrix.
-    let Ap = map (\row i ->
+    let Ap = map2 (\row i ->
                   let padding = replicate n (i32 0)
                   let padding[i] = i32 1
                   in concat row padding)

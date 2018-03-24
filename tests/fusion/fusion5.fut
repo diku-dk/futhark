@@ -20,14 +20,14 @@ let main(t_v1: []i32, t_v3: [][]i32): [][]bool =
   let t_v18 = rearrange (1,0) (replicate 30 t_v6)
   let t_v19 = replicate n t_v12
   let t_v27 = map (\(x: []i32,y: []i32): []i32  ->
-                    map (^) x y) (
+                    map2 (^) x y) (
                   zip (t_v18) (
                       map (\(x: []i32): []i32  -> map (<<1) x) (t_v18)))
   let t_v33 = map (\(x: []i32): []bool  ->
                     map (\(t_v32: i32): bool  ->
                           ((0 != t_v32))) x) (
                     map (\(x: []i32,y: []i32): []i32  ->
-                          map (&) x y) (
+                          map2 (&) x y) (
                         zip (t_v27) (
                             map (\(x: []i32): []i32  ->
                                   map (\(t_v29: i32): i32  ->

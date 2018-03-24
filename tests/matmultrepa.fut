@@ -11,7 +11,7 @@
 let redplus1(a: []i32): i32 = reduce (+) 0 a
 let redplus2 [n] (a: [n][]i32): [n]i32 = map redplus1 a
 
-let mul1 [m]    (a: [m]i32, b: [m]i32): [m]i32 = map (*) a b
+let mul1 [m]    (a: [m]i32, b: [m]i32): [m]i32 = map2 (*) a b
 let mul2 [n][m] (a: [n][m]i32, b: [n][m]i32): [n][m]i32 = map mul1 (zip a b)
 
 let replin [m] (n: i32) (a: [m]i32): [n][m]i32 = replicate n a

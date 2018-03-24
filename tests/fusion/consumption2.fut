@@ -10,5 +10,5 @@ let main [n][m] (as: [n]i32, bs: [m]bool): [n]i32 =
                    let cs[0] = 42
                    in cs) css
   in reduce (\(ds0: []i32) (ds1: []i32): [n]i32  ->
-              map (+) ds0 ds1) (
+              map2 (+) ds0 ds1) (
             replicate n 0) dss

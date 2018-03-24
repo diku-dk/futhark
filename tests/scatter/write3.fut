@@ -13,4 +13,4 @@ let main(n: i32): bool =
   let values = map (+2) indexes
   let array = map (+5) indexes
   let array' = scatter array indexes values
-  in reduce (&&) true (map (==) array' values)
+  in reduce (&&) true (map2 (==) array' values)

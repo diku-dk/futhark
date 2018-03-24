@@ -45,7 +45,7 @@ let correlateDeltas [num_und][num_dates]
                     zds: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   map (\(zi: [num_und]f64): [num_und]f64  ->
          map (\(j: i32): f64  ->
-                let x = map (*) (unsafe take (j+1) zi) (unsafe take (j+1) md_c[j])
+                let x = map2 (*) (unsafe take (j+1) zi) (unsafe take (j+1) md_c[j])
                 in  reduce (+) (0.0) x
             ) (iota(num_und) )
      ) zds
@@ -54,7 +54,7 @@ let combineVs [num_und]
              (n_row:   [num_und]f64,
               vol_row: [num_und]f64,
               dr_row: [num_und]f64 ): [num_und]f64 =
-  map (+) dr_row (map (*) n_row vol_row)
+  map2 (+) dr_row (map2 (*) n_row vol_row)
 
 let mkPrices [num_dates][num_und]
             (md_vols: [num_dates][num_und]f64,
@@ -64,7 +64,7 @@ let mkPrices [num_dates][num_und]
   let e_rows = map (\(x: []f64): [num_und]f64  -> map f64.exp x
                   ) (c_rows
                   )
-  in  scan (\(x: []f64) (y: []f64): []f64  -> map (*) x y
+  in  scan (\(x: []f64) (y: []f64): []f64  -> map2 (*) x y
           ) (replicate num_und 1.0) (e_rows )
 
   -- Formerly blackScholes.

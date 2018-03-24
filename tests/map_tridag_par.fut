@@ -23,7 +23,7 @@
 -- 2.170000f32] }
 default (f32)
 
-let tridagPar [n] (a:  [n]f32, b: *[]f32, c: []f32, y: *[]f32 ): *[]f32 =
+let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[]f32 =
   unsafe
 ----------------------------------------------------
   -- Recurrence 1: b[i] = b[i] - a[i]*c[i-1]/b[i-1] --
@@ -96,9 +96,9 @@ let map_tridag_par
         [inner][outer]
         (myD:  [inner][3]f32, myDD: [inner][3]f32,
          myMu: [outer][inner]f32,  myVar: [outer][inner]f32,
-         u:   *[outer][inner]f32,  dtInv: f32  ): *[][]f32 =
-  map (\mu_row var_row (u_row: *[]f32): *[inner]f32  ->
-             let (a,b,c) = unzip (map (\mu var d dd: (f32,f32,f32)  ->
+         u:    [outer][inner]f32,  dtInv: f32  ): *[][]f32 =
+  map3 (\mu_row var_row u_row  ->
+             let (a,b,c) = unzip (map4 (\mu var d dd: (f32,f32,f32)  ->
                                        ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
                                        , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
                                        , 0.0   - 0.5*(mu*d[2] + 0.5*var*dd[2])
@@ -118,9 +118,9 @@ let main (outer: i32) (inner: i32) =
         r32 (s+x) / r32 inner
   let scale_row (s: i32) (i: i32) (row: [inner]i32) =
         map (scale (s+i)) row
-  let myMu = map (scale_row 1) (iota outer) (replicate outer (iota inner))
-  let myVar = map (scale_row 2) (iota outer) (replicate outer (iota inner))
-  let u = map (scale_row 3) (iota outer) (replicate outer (iota inner))
+  let myMu = map2 (scale_row 1) (iota outer) (replicate outer (iota inner))
+  let myVar = map2 (scale_row 2) (iota outer) (replicate outer (iota inner))
+  let u = map2 (scale_row 3) (iota outer) (replicate outer (iota inner))
   let dtInv = 0.8874528f32
   let res = map_tridag_par (myD, myDD, myMu, myVar, u, dtInv)
   in map (\i -> unsafe trunc2dec (res[i*(outer/10), i*(inner/10)])) (iota 10)

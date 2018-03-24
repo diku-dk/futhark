@@ -61,8 +61,8 @@ let all_neighbours [n] [m] (board: [n][m]bool): [n][m]i32 =
 
 let iteration [n][m] (board: [n][m]bool): [n][m]bool =
   let lives = all_neighbours(board) in
-  map (\(lives_r: []i32) (board_r: []bool): []bool  ->
-            map (\(neighbors: i32) (alive: bool): bool  ->
+  map2 (\(lives_r: []i32) (board_r: []bool): []bool  ->
+            map2 (\(neighbors: i32) (alive: bool): bool  ->
                       if neighbors < 2
                       then false
                       else if neighbors == 3 then true

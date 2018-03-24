@@ -14,7 +14,7 @@ default(f32)
 let main(n_histo: i32, n_image: i32): *[n_histo]f32 =
   let as = iota(n_image) in
   stream_red_per (\(a: []f32) (b: []f32): *[]f32  ->
-                     map (+) a b
+                     map2 (+) a b
               ) (\[chunk] (a: [chunk]i32): *[]f32  ->
                      loop acc = replicate n_histo 0.0 for i < chunk do
                          let ind = a[i] % n_histo      in

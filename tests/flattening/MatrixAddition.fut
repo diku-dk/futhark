@@ -7,7 +7,7 @@
 --   [[4,4,4],[7,9,11]]
 -- }
 let addRows (xs: []i32, ys: []i32): []i32 =
-  map (+) xs ys
+  map2 (+) xs ys
 
 let addMatricies (a: [][]i32, b: [][]i32): [][]i32 =
   map  addRows (zip  a b)

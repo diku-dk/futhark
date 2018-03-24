@@ -22,4 +22,4 @@ module Struct: SIG = {
 }
 
 let main(xs: []i32, ys: []i32): (i32,i32) =
-  Struct.extract (Struct.f (map Struct.inject xs ys))
+  Struct.extract (Struct.f (map2 Struct.inject xs ys))
