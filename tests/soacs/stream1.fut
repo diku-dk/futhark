@@ -4,8 +4,8 @@
 -- input { [[1,2,3], [4,5,6], [6,7,8]] }
 -- output { [11i32, 14i32, 17i32] }
 
-let vecadd [m] (xs: *[m]i32) (ys: [m]i32): *[m]i32 =
-  loop (xs) for i < m do
+let vecadd [m] (xs: [m]i32) (ys: [m]i32): [m]i32 =
+  loop xs = copy xs for i < m do
     let xs[i] = xs[i] + ys[i]
     in xs
 
