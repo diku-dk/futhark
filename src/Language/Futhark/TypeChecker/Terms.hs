@@ -1089,6 +1089,7 @@ checkExp (Map fun arrexps NoInfo loc) = do
 checkExp Reduce{} = error "Reduce nodes should not appear in source program"
 checkExp Scan{} = error "Scan nodes should not appear in source program"
 checkExp Filter{} = error "Filter nodes should not appear in source program"
+checkExp Stream{} = error "Stream nodes should not appear in source program"
 
 checkExp (Partition funs arrexp pos) = do
   (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
@@ -1101,60 +1102,6 @@ checkExp (Partition funs arrexp pos) = do
     return fun'
 
   return $ Partition funs' arrexp' pos
-
-checkExp (Stream form lam arr pos) = do
-  (arr',arrarg) <- checkArg arr
-  -- arr must have an array type
-  arr_t <- expType arr'
-  unless (arrayRank arr_t > 0) $
-    typeError pos $ "Stream with input array of non-array type " ++ pretty arr_t ++ "."
-
-  macctup <- case form of
-               MapLike{} -> return Nothing
-               RedLike{} -> return Nothing
-
-  let fakearg = (fromStruct arr_t, mempty, srclocOf pos)
-      (aas,faas) = case macctup of
-                    Nothing        -> ([arrarg],        [fakearg])
-                    Just(_,accarg) -> ([accarg, arrarg],[accarg, fakearg])
-
-  (lam', lam_t) <- checkFunExp lam aas
-  (_, dflow)<- collectOccurences $ checkFunExp lam faas
-  let arr_aliasses = S.toList $ aliases arr_t
-  let usages = usageMap dflow
-  when (any (`M.member` usages) arr_aliasses) $
-     typeError pos "Stream with input array used inside lambda."
-
-  -- (i) properly check the lambda on its parameter and
-  --(ii) make some fake arguments, which do not alias `arr', and
-  --     check that aliases of `arr' are not used inside lam.
-  -- check that the result type of lambda matches the accumulator part
-  case macctup of
-    Just (acc',_) ->
-      case lam_t of
-        t | Just (acctp:_) <- isTupleRecord t ->
-          unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
-          typeError pos ("Stream with accumulator-type missmatch"++
-                                "or result arrays of non-array type.")
-        rtp' -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
-          typeError pos "Stream with accumulator-type missmatch."
-    Nothing -> return ()
-
-  -- typecheck stream form lambdas
-  form' <-
-    case form of
-      MapLike o -> return $ MapLike o
-      RedLike o comm lam0 -> do
-        let accarg :: Arg
-            accarg = (fromStruct lam_t, mempty, srclocOf lam')
-
-        (lam0', redtype) <- checkFunExp lam0 [accarg, accarg]
-        unless (argType accarg `subtypeOf` redtype) $
-            typeError pos $ "Stream's fold fun: Fold function returns type type " ++
-                  pretty (argType accarg) ++ ", but reduce fun returns type "++pretty redtype++"."
-        return $ RedLike o comm lam0'
-
-  return $ Stream form' lam' arr' pos
 
 checkExp (Concat i arr1exp arr2exps loc) = do
   arr1exp'  <- checkExp arr1exp
