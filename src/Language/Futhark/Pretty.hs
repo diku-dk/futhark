@@ -252,7 +252,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
             ppr lam0 </> ppr lam </> pprPrec 10 arr
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
-  pprPrec _ (Partition lams a _) = ppSOAC "partition" lams [a]
+  pprPrec _ (Partition k lam a _) = text "partition" <+> ppr k <+> spread (map (pprPrec 10) [lam, a])
   pprPrec _ (Zip 0 e es _ _) = text "zip" <+> spread (map (pprPrec 10) (e:es))
   pprPrec _ (Zip i e es _ _) = text "zip@" <> ppr i <+> spread (map (pprPrec 10) (e:es))
   pprPrec _ (Unzip e _ _) = text "unzip" <+> pprPrec 10 e

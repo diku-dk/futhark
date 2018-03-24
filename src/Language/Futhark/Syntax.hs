@@ -663,12 +663,12 @@ data ExpBase f vn =
             -- ^ Return those elements of the array that satisfy the
             -- predicate.
 
-            | Partition [ExpBase f vn] (ExpBase f vn) SrcLoc
-            -- ^ @partition (f_1, ..., f_n) a@ returns @n+1@ arrays, with
-            -- the @i@th array consisting of those elements for which
-            -- function @f_1@ returns 'True', and no previous function
-            -- has returned 'True'.  The @n+1@th array contains those
-            -- elements for which no function returns 'True'.
+            | Partition Int (ExpBase f vn) (ExpBase f vn) SrcLoc
+            -- ^ @partition k f a@, where @f@ returns an integer,
+            -- returns a tuple @(a', is)@ that describes a
+            -- partitioning of @a@ into @n@ equivalence classes.
+            -- Here, @a'@ is a re-ordering of @a@, and @is@ is an
+            -- array of @k@ offsets into @a'@.
 
             | Stream (StreamForm f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
             -- ^ Streaming: intuitively, this gives a size-parameterized
@@ -744,7 +744,7 @@ instance Located (ExpBase f vn) where
   locOf (Unzip _ _ pos)                = locOf pos
   locOf (Scan _ _ _ pos)               = locOf pos
   locOf (Filter _ _ pos)               = locOf pos
-  locOf (Partition _ _ pos)            = locOf pos
+  locOf (Partition _ _ _ loc)          = locOf loc
   locOf (Concat _ _ _ pos)             = locOf pos
   locOf (Lambda _ _ _ _ _ loc)         = locOf loc
   locOf (OpSection _ _ _ _ _ loc)      = locOf loc

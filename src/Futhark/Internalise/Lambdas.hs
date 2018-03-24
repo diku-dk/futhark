@@ -5,12 +5,11 @@ module Futhark.Internalise.Lambdas
   , internaliseStreamMapLambda
   , internaliseFoldLambda
   , internaliseStreamLambda
-  , internalisePartitionLambdas
+  , internalisePartitionLambda
   )
   where
 
 import Control.Monad
-import Data.Monoid
 import Data.Loc
 import qualified Data.Set as S
 
@@ -153,47 +152,30 @@ internaliseStreamLambda internaliseLambda lam rowts = do
 -- (k+2)-element tuple of integers.  The first element is the
 -- equivalence class ID in the range [0,k].  The remaining are all zero
 -- except for possibly one element.
-internalisePartitionLambdas :: InternaliseLambda
-                            -> [E.Exp]
-                            -> [I.SubExp]
-                            -> InternaliseM I.Lambda
-internalisePartitionLambdas internaliseLambda lams args = do
+internalisePartitionLambda :: InternaliseLambda
+                           -> Int
+                           -> E.Exp
+                           -> [I.SubExp]
+                           -> InternaliseM I.Lambda
+internalisePartitionLambda internaliseLambda k lam args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
-  lams' <- forM lams $ \lam -> do
-    (params, body, _) <- internaliseLambda lam rowtypes
-    return (params, body)
-  params <- newIdents "partition_param" rowtypes
-  let params' = [ I.Param name t
-                | I.Ident name t <- params]
-  body <- mkCombinedLambdaBody params 0 lams'
-  return $ I.Lambda params' body rettype
-  where k = length lams
-        rettype = replicate (k+2) $ I.Prim int32
-        result i = resultBody $
-                   map constant $ (fromIntegral i :: Int32) :
+  (params, body, _) <- internaliseLambda lam rowtypes
+  body' <- localScope (scopeOfLParams params) $
+           lambdaWithIncrement body
+  return $ I.Lambda params body' rettype
+  where rettype = replicate (k+2) $ I.Prim int32
+        result i = map constant $ (fromIntegral i :: Int32) :
                    (replicate i 0 ++ [1::Int32] ++ replicate (k-i) 0)
-        mkCombinedLambdaBody :: [I.Ident]
-                             -> Int
-                             -> [([I.LParam], I.Body)]
-                             -> InternaliseM I.Body
-        mkCombinedLambdaBody _      i [] =
-          return $ result i
-        mkCombinedLambdaBody params i ((lam_params,lam_body):lams') =
-          case lam_body of
-            Body () bodybnds [boolres] -> do
-              intres <- (:) <$> newIdent "eq_class" (I.Prim int32) <*>
-                        replicateM (k+1) (newIdent "partition_incr" $ I.Prim int32)
-              next_lam_body <-
-                mkCombinedLambdaBody (map paramIdent lam_params) (i+1) lams'
-              let parambnds =
-                    [ mkLet [] [paramIdent top] $ I.BasicOp $ I.SubExp $ I.Var $ I.identName fromp
-                    | (top,fromp) <- zip lam_params params ]
-                  branchbnd = mkLet [] intres $ I.If boolres
-                              (result i)
-                              next_lam_body $
-                              ifCommon rettype
-              return $ mkBody (stmsFromList parambnds <> bodybnds <> oneStm branchbnd) $
-                map (I.Var . I.identName) intres
-            _ ->
-              fail "Partition lambda returns too many values."
+
+        mkResult _ i | i >= k = return $ result i
+        mkResult eq_class i = do
+          is_i <- letSubExp "is_i" $ BasicOp $ CmpOp (CmpEq int32) eq_class (constant i)
+          fmap (map I.Var) . letTupExp "part_res" =<<
+            eIf (eSubExp is_i) (pure $ resultBody $ result i)
+                               (resultBody <$> mkResult eq_class (i+1))
+
+        lambdaWithIncrement :: I.Body -> InternaliseM I.Body
+        lambdaWithIncrement lam_body = runBodyBinder $ do
+          [eq_class] <- bodyBind lam_body
+          resultBody <$> mkResult eq_class 0

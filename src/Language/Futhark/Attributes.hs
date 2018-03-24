@@ -472,8 +472,9 @@ typeOf (Reduce _ _ _ arr _) =
   stripArray 1 (typeOf arr) `setAliases` mempty
 typeOf (Scan _ _ arr _) = typeOf arr `setAliases` mempty
 typeOf (Filter _ arr _) = typeOf arr `setAliases` mempty
-typeOf (Partition funs arr _) =
-  tupleRecord $ replicate (length funs + 1) $ typeOf arr
+typeOf (Partition _ _ arr _) =
+  tupleRecord [typeOf arr `setAliases` mempty `setUniqueness` Unique,
+               Array (ArrayPrimElem (Signed Int32) mempty) (rank 1) Unique]
 typeOf (Stream _ lam _ _) =
   rettype (typeOf lam) `setUniqueness` Unique
   where rettype (Arrow _ _ _ t) = rettype t
@@ -730,6 +731,11 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
               ("filter", IntrinsicPolyFun [tp_a]
                          [t_a `arr` Prim Bool, arr_a] uarr_a),
+
+              ("partition",
+               IntrinsicPolyFun [tp_a]
+               [Prim (Signed Int32), t_a `arr` Prim (Signed Int32), arr_a] $
+               tupleRecord [uarr_a, Array (ArrayPrimElem (Signed Int32) ()) (rank 1) Unique]),
 
               ("stream_map",
                IntrinsicPolyFun [tp_a, tp_b] [arr_a `arr` arr_b, arr_a] uarr_b),

@@ -323,10 +323,10 @@ defuncExp e@(Filter fun arr loc) = do
   arr' <- defuncExp' arr
   return (Filter fun' arr' loc, Dynamic $ typeOf e)
 
-defuncExp e@(Partition funs arr loc) = do
-  funs' <- mapM defuncSoacExp funs
+defuncExp e@(Partition k fun arr loc) = do
+  fun' <- defuncSoacExp fun
   arr' <- defuncExp' arr
-  return (Partition funs' arr' loc, Dynamic $ typeOf e)
+  return (Partition k fun' arr' loc, Dynamic $ typeOf e)
 
 defuncExp e@(Stream form lam arr loc) = do
   form' <- case form of
@@ -700,7 +700,7 @@ freeVars expr = case expr of
   Reduce _ e1 e2 e3 _ -> freeVars e1 <> freeVars e2 <> freeVars e3
   Scan e1 e2 e3 _     -> freeVars e1 <> freeVars e2 <> freeVars e3
   Filter e1 e2 _      -> freeVars e1 <> freeVars e2
-  Partition es e _    -> foldMap freeVars es <> freeVars e
+  Partition _ e1 e2 _ -> freeVars e1 <> freeVars e2
   Stream form e1 e2 _ -> freeInForm form <> freeVars e1 <> freeVars e2
     where freeInForm (RedLike _ _ e) = freeVars e
           freeInForm _ = mempty

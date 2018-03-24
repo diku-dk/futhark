@@ -181,6 +181,9 @@ transformExp (Apply e1 e2 d tp loc) =
     (Var v _ _, TupLit [f, arr] _)
       | intrinsic "filter" v ->
           transformExp $ Filter f arr loc
+    (Var v _ _, TupLit [Literal (SignedValue (Int32Value k)) _, f, arr] _)
+      | intrinsic "partition" v ->
+          transformExp $ Partition (fromIntegral k) f arr loc
     (Var v _ _, TupLit [op, f, arr] _)
       | intrinsic "stream_red" v ->
           transformExp $ Stream (RedLike InOrder Noncommutative op) f arr loc
@@ -280,8 +283,8 @@ transformExp (Scan e1 e2 e3 loc) =
 transformExp (Filter e1 e2 loc) =
   Filter <$> transformExp e1 <*> transformExp e2 <*> pure loc
 
-transformExp (Partition es e0 loc) =
-  Partition <$> mapM transformExp es <*> transformExp e0 <*> pure loc
+transformExp (Partition k f e0 loc) =
+  Partition k <$> transformExp f <*> transformExp e0 <*> pure loc
 
 transformExp (Stream form e1 e2 loc) = do
   form' <- case form of
