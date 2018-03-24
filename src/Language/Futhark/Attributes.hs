@@ -470,8 +470,8 @@ typeOf (Unsafe e _) = typeOf e
 typeOf (Map _ _ (Info t) _) = t
 typeOf (Reduce _ _ _ arr _) =
   stripArray 1 (typeOf arr) `setAliases` mempty
-typeOf (Scan _ _ arr _) = typeOf arr `setAliases` mempty
-typeOf (Filter _ arr _) = typeOf arr `setAliases` mempty
+typeOf (Scan _ _ arr _) = typeOf arr `setAliases` mempty `setUniqueness` Unique
+typeOf (Filter _ arr _) = typeOf arr `setAliases` mempty `setUniqueness` Unique
 typeOf (Partition _ _ arr _) =
   tupleRecord [typeOf arr `setAliases` mempty `setUniqueness` Unique,
                Array (ArrayPrimElem (Signed Int32) mempty) (rank 1) Unique]

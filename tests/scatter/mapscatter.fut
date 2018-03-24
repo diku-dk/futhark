@@ -4,4 +4,4 @@
 -- output { [[1,0,3],[0,0,6]] }
 
 let main (as: *[][]i32) (is: [][]i32) (vs: [][]i32) =
-  map3 scatter as is vs
+  map (\(x: *[]i32, y, z) -> scatter x y z) (zip as is vs)
