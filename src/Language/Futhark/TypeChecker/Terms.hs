@@ -1084,6 +1084,9 @@ checkExp (Map fun arrexps NoInfo loc) = do
   (arrexps', args) <- unzip <$> mapM checkSOACArrayArg arrexps
   (fun', rt) <- checkFunExp fun args
   t <- arrayOfM loc rt (rank 1) Unique
+  when (length arrexps > 1) $
+    warn loc $ "Multi-array maps are deprecated. " ++
+    "Use `zip' or one of `map2'/`map3'/`map4'/`map5'."
   return $ Map fun' arrexps' (Info $ t `setAliases` mempty) loc
 
 checkExp Reduce{} = error "Reduce nodes should not appear in source program"
