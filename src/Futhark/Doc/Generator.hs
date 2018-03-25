@@ -257,10 +257,10 @@ specHtml spec = case spec of
     "val " <> vnameHtml name <>
     foldMap (" " <>) (map prettyTypeParam tparams) <> " : " <>
     typeDeclHtml rettype
-  ModSpec name sig _ ->
-    do m <- vnameHtmlM Term name
-       s <- renderSigExp sig
-       return $ "module " <> m <> ": "<> s
+  ModSpec name sig _ -> do
+    m <- vnameHtmlM Term name
+    s <- renderSigExp sig
+    return $ H.div $ "module " <> m <> ": "<> s
   IncludeSpec e _ -> H.div . ("include " <>) <$> renderSigExp e
 
 typeDeclHtml :: TypeDeclBase f VName -> Html
