@@ -189,9 +189,14 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
   return (RecordLit fields loc, LambdaSV pat e0' env')
 
   where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
-          (RecordFieldExplicit (baseName vn) clsr_env noLoc, (vn, sv))
+          let name = nameFromString $ pretty vn
+          in (RecordFieldExplicit name clsr_env noLoc, (vn, sv))
+
         closureFromDynamicFun (vn, sv) =
-          (RecordFieldImplicit vn (Info $ typeFromSV sv) noLoc, (vn, sv))
+          let name = nameFromString $ pretty vn
+              tp' = typeFromSV sv
+          in (RecordFieldExplicit name
+               (Var (qualName vn) (Info ([], [], tp')) noLoc) noLoc, (vn, sv))
 
 -- Operator sections are expected to be converted to lambda-expressions
 -- by the monomorphizer, so they should no longer occur at this point.
@@ -214,47 +219,11 @@ defuncExp (DoLoop tparams pat e1 form e3 loc) = do
   return (DoLoop tparams pat e1' form' e3' loc, sv)
   where envFromIdent (Ident vn (Info tp) _) = [(vn, Dynamic tp)]
 
-defuncExp e@(BinOp qn@(QualName qs op) il (e1, pt1) (e2, pt2) t loc) = do
-  (e1', sv1) <- defuncExp e1
-  (e2', sv2) <- defuncExp e2
-  sv0 <- lookupVar loc op
-  case sv0 of
-    IntrinsicSV ->
-      return (BinOp qn il (e1', pt1) (e2', pt2) t loc, Dynamic $ typeOf e)
-
-    DynamicFun _ (DynamicFun _ sv) ->
-      let rettype = typeFromSV sv
-      in return (BinOp qn il (e1', pt1) (e2', pt2) (Info ([], rettype)) loc, sv)
-
-    DynamicFun (_, LambdaSV pat1 _ _) (LambdaSV pat2 e0 closure_env) -> do
-      let env2 = matchPatternSV pat2 sv2
-      (e0', sv) <- local (const $ env2 <> closure_env) $ defuncExp e0
-      op' <- newName op
-      let params = [pat1, updatePattern pat2 sv2]
-          rettype = typeOf e0'
-      liftValDec op' rettype params e0'
-      let t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
-      return (BinOp (QualName qs op') il (e1', pt1) (e2', Info t2)
-               (Info ([], rettype)) loc, sv)
-
-    LambdaSV pat1 e0 closure_env1 -> do
-      let env1 = matchPatternSV pat1 sv1
-      (_, sv0') <- local (const $ env1 <> closure_env1) $ defuncExp e0
-      case sv0' of
-        LambdaSV pat2 e0' closure_env2 -> do
-          let env2 = matchPatternSV pat2 sv2
-          (body, sv) <- local (const $ env2 <> closure_env2) $ defuncExp e0'
-          op' <- newName op
-          let params = [updatePattern pat1 sv1, updatePattern pat2 sv2]
-              rettype = typeOf body
-          liftValDec op' rettype params body
-          let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
-              t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
-          return (BinOp (QualName qs op') il (e1', Info t1) (e2', Info t2)
-                  (Info ([], rettype)) loc, sv)
-
-        _ -> error "defuncExp: unexpected nesting of static values in BinOp."
-    _ -> error $ "defuncExp: received infix operator with static value " ++ show sv0
+-- We handle BinOps by turning them into ordinary function applications.
+defuncExp (BinOp qn (Info il) (e1, Info pt1) (e2, Info pt2) (Info (pts, ret)) loc) =
+  defuncExp $ Apply (Apply (Var qn (Info (il, pt1:pt2:pts, ret)) loc)
+                     e1 (Info (diet pt1)) (Info (pt2:pts, ret)) loc)
+                    e2 (Info (diet pt2)) (Info (pts, ret)) loc
 
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
   (e0', sv0) <- defuncExp e0
@@ -424,9 +393,10 @@ defuncLet _ [] body _ = do
 -- but a new lifted function is created if a dynamic function is only partially
 -- applied.
 defuncApply :: Int -> Exp -> DefM (Exp, StaticVal)
-defuncApply depth e@(Apply e1 e2 d (Info (argtypes, _)) loc) = do
+defuncApply depth e@(Apply e1 e2 d t@(Info (argtypes, _)) loc) = do
   (e1', sv1) <- defuncApply (depth+1) e1
   (e2', sv2) <- defuncExp e2
+  let e' = Apply e1' e2' d t loc
   case sv1 of
     LambdaSV pat e0 closure_env -> do
       let env' = matchPatternSV pat sv2
@@ -458,8 +428,8 @@ defuncApply depth e@(Apply e1 e2 d (Info (argtypes, _)) loc) = do
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.
     IntrinsicSV
-      | depth == 0 -> return (e, Dynamic $ typeOf e)
-      | otherwise  -> return (e, IntrinsicSV)
+      | depth == 0 -> return (e', Dynamic $ typeOf e)
+      | otherwise  -> return (e', IntrinsicSV)
 
     _ -> error $ "Application of an expression that is neither a static lambda "
               ++ "nor a dynamic function, but has static value: " ++ show sv1
@@ -581,7 +551,8 @@ typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
                                          ++ "static value of an intrinsic."
 
 typeFromEnv :: Env -> CompType
-typeFromEnv = Record . M.fromList . map (bimap baseName typeFromSV)
+typeFromEnv = Record . M.fromList .
+              map (bimap (nameFromString . pretty) typeFromSV)
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
