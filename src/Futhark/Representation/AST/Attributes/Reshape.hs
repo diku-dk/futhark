@@ -69,8 +69,8 @@ repeatShapes shapes t =
 
 -- | Modify the shape of an array type as 'Repeat' would do
 repeatDims :: [Shape] -> Shape -> Type -> Type
-repeatDims shape innershape = modifyArrayShape repeatDims
-  where repeatDims (Shape ds) =
+repeatDims shape innershape = modifyArrayShape repeatDims'
+  where repeatDims' (Shape ds) =
           Shape $ concat (zipWith (++) (map shapeDims shape) (map pure ds)) ++
           shapeDims innershape
 
