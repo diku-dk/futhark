@@ -26,18 +26,18 @@ data StaticVal = Dynamic CompType
   deriving (Show)
 
 -- | Environment mapping variable names to their associated static value.
-type Env = [(VName, StaticVal)]
+type Env = M.Map VName StaticVal
 
 localEnv :: Env -> DefM a -> DefM a
 localEnv env = local (env <>)
 
 extendEnv :: VName -> StaticVal -> DefM a -> DefM a
-extendEnv vn sv = local ((vn, sv) :)
+extendEnv vn sv = local (M.insert vn sv)
 
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names.
 restrictEnv :: Names -> DefM Env
-restrictEnv names = reader $ filter ((`S.member` names) . fst)
+restrictEnv names = reader $ M.filterWithKey $ \k _ -> k `S.member` names
 
 -- | Defunctionalization monad.
 newtype DefM a = DefM (RWS Env [Dec] VNameSource a)
@@ -55,7 +55,7 @@ runDefM src (DefM m) = runRWS m mempty src
 lookupVar :: SrcLoc -> VName -> DefM StaticVal
 lookupVar loc x = do
   env <- ask
-  case lookup x env of
+  case M.lookup x env of
     Just sv -> return sv
     Nothing -- If the variable is unknown, it may refer to the 'intrinsics'
             -- module, which we will have to treat specially.
@@ -185,8 +185,8 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
   -- Does not close over shape parameters if they occur in the type of the
   -- parameter since they will be added as explicit shape parameters later.
   env <- restrictEnv $ freeVars e S.\\ patternDimNames pat
-  let (fields, env') = unzip $ map closureFromDynamicFun env
-  return (RecordLit fields loc, LambdaSV pat e0' env')
+  let (fields, env') = unzip $ map closureFromDynamicFun $ M.toList env
+  return (RecordLit fields loc, LambdaSV pat e0' $ M.fromList env')
 
   where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
           let name = nameFromString $ pretty vn
@@ -214,10 +214,10 @@ defuncExp (DoLoop tparams pat e1 form e3 loc) = do
     ForIn pat2 e2 -> do e2' <- defuncExp' e2
                         return (ForIn pat2 e2', envFromPattern pat2)
     While e2      -> do e2' <- localEnv (env1 <> env_dim) $ defuncExp' e2
-                        return (While e2', [])
+                        return (While e2', mempty)
   (e3', sv) <- localEnv (env1 <> env2 <> env_dim) $ defuncExp e3
   return (DoLoop tparams pat e1' form' e3' loc, sv)
-  where envFromIdent (Ident vn (Info tp) _) = [(vn, Dynamic tp)]
+  where envFromIdent (Ident vn (Info tp) _) = M.singleton vn $ Dynamic tp
 
 -- We handle BinOps by turning them into ordinary function applications.
 defuncExp (BinOp qn (Info il) (e1, Info pt1) (e2, Info pt2) (Info (pts, ret)) loc) =
@@ -483,13 +483,13 @@ envFromPattern pat = case pat of
   TuplePattern ps _     -> foldMap envFromPattern ps
   RecordPattern fs _    -> foldMap (envFromPattern . snd) fs
   PatternParens p _     -> envFromPattern p
-  Id vn (Info t) _      -> [(vn, Dynamic $ removeShapeAnnotations t)]
+  Id vn (Info t) _      -> M.singleton vn $ Dynamic $ removeShapeAnnotations t
   Wildcard _ _          -> mempty
   PatternAscription p _ -> envFromPattern p
 
 -- | Create an environment that binds the shape parameters.
 envFromShapeParams :: [TypeParamBase VName] -> Env
-envFromShapeParams = map envEntry
+envFromShapeParams = M.fromList . map envEntry
   where envEntry (TypeParamDim vn _) = (vn, Dynamic $ Prim $ Signed Int32)
         envEntry tparam = error $
           "The defunctionalizer expects a monomorphic input program,\n" ++
@@ -520,7 +520,7 @@ liftValDec fname rettype pats body = tell [dec]
 -- no matter what it was in the original environment, because there is
 -- no way for a function to exploit uniqueness in its lexical scope.
 buildEnvPattern :: Env -> Pattern
-buildEnvPattern env = RecordPattern (map buildField env) noLoc
+buildEnvPattern env = RecordPattern (map buildField $ M.toList env) noLoc
   where buildField (vn, sv) = let tp = vacuousShapeAnnotations (typeFromSV sv)
                                        `setUniqueness` Nonunique
                               in (nameFromString (pretty vn),
@@ -534,7 +534,7 @@ buildEnvPattern env = RecordPattern (map buildField env) noLoc
 -- is not clear that this is a sufficient property, unfortunately.
 buildRetType :: Env -> Pattern -> CompType -> CompType
 buildRetType env pat = descend
-  where bound = S.fromList (map fst env) <> S.map identName (patIdentSet pat)
+  where bound = S.fromList (M.keys env) <> S.map identName (patIdentSet pat)
         descend t@Array{}
           | any (`S.member` bound) (aliases t) = t `setUniqueness` Nonunique
         descend (Record t) = Record $ fmap descend t
@@ -544,15 +544,14 @@ buildRetType env pat = descend
 typeFromSV :: StaticVal -> CompType
 typeFromSV (Dynamic tp)           = tp
 typeFromSV (LambdaSV _ _ env)     = typeFromEnv env
-typeFromSV (RecordSV ls)          = Record . M.fromList $
-                                    map (second typeFromSV) ls
+typeFromSV (RecordSV ls)          = Record $ M.fromList $ map (fmap typeFromSV) ls
 typeFromSV (DynamicFun (_, sv) _) = typeFromSV sv
 typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
                                          ++ "static value of an intrinsic."
 
 typeFromEnv :: Env -> CompType
 typeFromEnv = Record . M.fromList .
-              map (bimap (nameFromString . pretty) typeFromSV)
+              map (bimap (nameFromString . pretty) typeFromSV) . M.toList
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
@@ -566,14 +565,14 @@ dynamicFunType sv _ = ([], typeFromSV sv)
 -- subcomponents of the static value.
 matchPatternSV :: PatternBase Info VName -> StaticVal -> Env
 matchPatternSV (TuplePattern ps _) (RecordSV ls) =
-  concat $ zipWith (\p (_, sv) -> matchPatternSV p sv) ps ls
+  mconcat $ zipWith (\p (_, sv) -> matchPatternSV p sv) ps ls
 matchPatternSV (RecordPattern ps _) (RecordSV ls)
   | ps' <- sortOn fst ps, ls' <- sortOn fst ls,
     map fst ps' == map fst ls' =
-      concat $ zipWith (\(_, p) (_, sv) -> matchPatternSV p sv) ps' ls'
+      mconcat $ zipWith (\(_, p) (_, sv) -> matchPatternSV p sv) ps' ls'
 matchPatternSV (PatternParens pat _) sv = matchPatternSV pat sv
-matchPatternSV (Id vn _ _) sv = [(vn, sv)]
-matchPatternSV (Wildcard _ _) _ = []
+matchPatternSV (Id vn _ _) sv = M.singleton vn sv
+matchPatternSV (Wildcard _ _) _ = mempty
 matchPatternSV (PatternAscription pat _) sv = matchPatternSV pat sv
 matchPatternSV pat (Dynamic t) = matchPatternSV pat $ svFromType t
 matchPatternSV pat sv = error $ "Tried to match pattern " ++ pretty pat
@@ -770,7 +769,7 @@ defuncValBind valbind@(ValBind _ name _ rettype tparams params body _ _) = do
                    , valBindParams     = params'
                    , valBindBody       = body'
                    }
-         , [(name, sv)])
+         , M.singleton name sv)
 
 -- | Defunctionalize a list of top-level declarations.
 defuncDecs :: [Dec] -> DefM [Dec]
