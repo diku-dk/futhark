@@ -184,8 +184,8 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
-  pprPrec _ (Apply f arg _ _ _) =
-    ppr f <+> pprPrec 10 arg
+  pprPrec p (Apply f arg _ _ _) =
+    parensIf (p >= 10) $ ppr f <+> pprPrec 10 arg
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec p (LetPat tparams pat e body _) =
     mparens $ align $
