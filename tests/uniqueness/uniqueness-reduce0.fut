@@ -1,6 +1,9 @@
 -- If the reduction function accumulator type is unique, consume the
 -- initial value, but only as much as is actually unique!
+--
+-- Disabled due to #501.
 -- ==
+-- tags { disable }
 -- input {
 --   [0,0,0,0,0,0,0,0,0,0]
 --   [1,1,1,1,1,1,1,1,1,1]

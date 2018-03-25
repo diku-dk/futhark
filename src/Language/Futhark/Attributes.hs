@@ -444,8 +444,6 @@ typeOf (BinOp _ _ _ _ (Info (ts, ret)) _) =
   foldFunType ts ret
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
-typeOf (Var _ (Info (_, ts, ret@Record{})) _) =
-  foldFunType ts ret
 typeOf (Var qn (Info (_, ts, ret)) _) =
   foldFunType ts (ret `addAliases` S.insert (qualLeaf qn))
 typeOf (Ascript e _ _) = typeOf e
