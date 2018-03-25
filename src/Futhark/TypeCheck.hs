@@ -469,27 +469,21 @@ checkProg prog = do
                     , envFtable = mempty
                     , envContext = []
                     }
-  let onFunction fun =
-        fmap fst $ runTypeM typeenv $ do
-          ftable <- buildFtable
-          local (\env -> env { envFtable = ftable }) $
-            checkFun fun
-  sequence_ $ parMap rpar onFunction $ progFunctions prog'
+  let onFunction ftable fun =
+        fmap fst $ runTypeM typeenv $
+        local (\env -> env { envFtable = ftable }) $
+        checkFun fun
+  (ftable, _) <- runTypeM typeenv buildFtable
+  sequence_ $ parMap rpar (onFunction ftable) $ progFunctions prog'
   where
     prog' = aliasAnalysis prog
-    -- To build the ftable we loop through the list of function
-    -- definitions.  In addition to the normal ftable information
-    -- (name, return type, argument types), we also keep track of
-    -- position information, in order to report both locations of
-    -- duplicate function definitions.  The position information is
-    -- removed at the end.
     buildFtable = do table <- initialFtable prog'
                      foldM expand table $ progFunctions prog'
     expand ftable (FunDef _ name ret params _)
       | M.member name ftable =
-        bad $ DupDefinitionError name
+          bad $ DupDefinitionError name
       | otherwise =
-        return $ M.insert name (ret,params) ftable
+          return $ M.insert name (ret,params) ftable
 
 -- The prog argument is just to disambiguate the lore.
 initialFtable :: Checkable lore =>
