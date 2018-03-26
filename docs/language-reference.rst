@@ -104,10 +104,13 @@ although they are not very useful-these are written ``()`` and are of
 type ``()``.
 
 .. productionlist::
-   type: `qualid` | `array_type` | `tuple_type` | `record_type` | `type` `type_arg`
+   type: `qualid` | `array_type` | `tuple_type`
+       : | `record_type` | `function_type` | `type` `type_arg`
    array_type: "[" [`dim`] "]" `type`
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
+   function_type: `param_type` "->" `type`
+   param_type: `type` | "(" `id` ":" `type` ")"
    type_arg: "[" [`dim`] "]" | `type`
    dim: `qualid` | `decimal`
 
@@ -144,6 +147,9 @@ presently not allowed.  See `Type Abbreviations`_ for further details.
 
 String literals are supported, but only as syntactic sugar for arrays
 of ``i32`` values.  There is no ``char`` type in Futhark.
+
+Functions are classified via function types, but they are not fully
+first class.  See `Higher-order functions`_ for the details.
 
 .. productionlist::
    stringlit: '"' `stringchar` '"'
@@ -296,7 +302,7 @@ Type Abbreviations
 
 .. productionlist::
    type_bind: "type" `id` `type_param`* "=" `type`
-   type_param: "[" `id` "]" | "'" `id`
+   type_param: "[" `id` "]" | "'" `id` | "'^" `id`
 
 Type abbreviations function as shorthands for purpose of documentation
 or brevity.  After a type binding ``type t1 = t2``, the name ``t1``
@@ -869,6 +875,81 @@ An *operator section* that is equivalent to ``\y -> x *binop* y``.
 ...............
 
 An *operator section* that is equivalent to ``\x -> x *binop* y``.
+
+Higher-order functions
+----------------------
+
+At a high level, Futhark functions are values, and can be used as any
+other value.  However, to ensure that the compiler is able to compile
+the higher-order functions efficiently via *defunctionalisation*,
+certain type-driven restrictions exist on how functions can be used.
+These also apply to any record or tuple containing a function (a
+*functional type*):.
+
+* Arrays of functions are not permitted.
+
+* A function cannot be returned from an `if` expression.
+
+* A loop parameter cannot be a function.
+
+Further, *type parameters* are divided into *non-lifted* (bound with
+an apostrophe, e.g. ``'t``), and *lifted* (``'^t``).  Only lifted type
+parameters may be instantiated with a functional type.  Within a
+function, a lifted type parameter is treated as a functional type.
+All abstract types declared in modules (see `Module System`) are
+considered non-lifted, and may not be functional.
+
+See also `In-place updates` for details on how uniqueness types
+interact with higher-order functions.
+
+Type Inference
+--------------
+
+Futhark supports Hindley-Milner-style type inference, so in many cases
+explicit type annotations can be left off.  Some built-in language
+constructs cannot currently be fully inferred, and may need type
+annotations where their inputs are bound.  The problematic constructs
+are ``rotate``, ``reshape``, ``zip``, ``unzip``, and field projection.
+Further, unique types (see ``In-place updates``) must be explicitly
+annotated.
+
+In-place updates
+----------------
+
+In-place updates do not provide observable side effects, but they do
+provide a way to efficiently update an array in-place, with the
+guarantee that the cost is proportional to the size of the value(s)
+being written, not the size of the full array.
+
+The ``a with [i] <- v`` language construct, and derived forms,
+performs an in-place update.  The compiler verifies that the original
+array (``a``) is not used on any execution path following the in-place
+update.  This involves also checking that no *alias* of ``a`` is used.
+Generally, most language constructs produce new arrays, but some
+(``rearrange``, ``reshape``, ``rotate``, ``zip``, ``unzip``) create
+arrays that alias their input arrays.
+
+When defining a function parameter or return type, we can mark it as
+*unique* by prefixing it with an asterisk.  For example::
+
+  let modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
+    a with [i] <- a[i] + x
+
+For bulk in-place updates with multiple values, use the ``scatter``
+function in the basis library.  In the parameter declaration ``a:
+*[i32]``, the asterisk means that the function ``modify`` has been
+given "ownership" of the array ``a``, meaning that any caller of
+``modify`` will never reference array ``a`` after the call again.
+This allows the ``with`` expression to perform an in-place update.
+
+After a call ``modify a i x``, neither ``a`` or any variable that
+*aliases* ``a`` may be used on any following execution path.
+
+Uniqueness typing generally interacts poorly with higher-order
+functions.  The issue is that we cannot control how many times a
+function argument is applied, or to what, so it is not safe to pass a
+function that consumes its argument.  In general, do not pass
+functions with unique parameter types to a higher-order function.
 
 Module System
 -------------
