@@ -701,9 +701,9 @@ combineTypeShapes :: ArrayDim dim =>
                      TypeBase dim as -> TypeBase dim as -> TypeBase dim as
 combineTypeShapes (Record ts1) (Record ts2) =
   Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
-combineTypeShapes (Array et1 shape1 u1) (Array et2 shape2 u2)
+combineTypeShapes (Array et1 shape1 u1) (Array et2 shape2 _u2)
   | Just new_shape <- unifyShapes shape1 shape2 =
-      Array (combineElemTypeInfo et1 et2) new_shape (u1 <> u2)
+      Array (combineElemTypeInfo et1 et2) new_shape u1
 combineTypeShapes (TypeVar _ targs1) (TypeVar tn targs2) =
   TypeVar tn $ zipWith combineArgs targs1 targs2
   where combineArgs (TypeArgDim d1 _) (TypeArgDim d2 loc)
