@@ -213,9 +213,6 @@ symbol [] q
   | nameToText q == "*" = ASTERISK
   | nameToText q == "-" = NEGATE
   | nameToText q == "<" = LTH
-  | nameToText q == ">" = GTH
-  | nameToText q == "<=" = LEQ
-  | nameToText q == ">=" = GEQ
   | otherwise = SYMBOL (leadingOperator q) [] q
 symbol qs q = SYMBOL (leadingOperator q) qs q
 
@@ -334,9 +331,6 @@ data Token = ID Name
            | ASTERISK
            | NEGATE
            | LTH
-           | GTH
-           | LEQ
-           | GEQ
 
            | DEFAULT
            | IF

@@ -94,9 +94,6 @@ import Language.Futhark.Parser.Lexer
       '*'             { L $$ ASTERISK }
       '-'             { L $$ NEGATE }
       '<'             { L $$ LTH }
-      '>'             { L $$ GTH }
-      '<='            { L $$ LEQ }
-      '>='            { L $$ GEQ }
 
       '+...'          { L _ (SYMBOL Plus _ _) }
       '-...'          { L _ (SYMBOL Minus _ _) }
@@ -175,7 +172,7 @@ import Language.Futhark.Parser.Lexer
 %right '<|...'
 %left '||...'
 %left '&&...'
-%left '<=' '<=...' '>=' '>=...' '>' '>...' '<' '<...' '==...' '!=...'
+%left '<=...' '>=...' '>...' '<' '<...' '==...' '!=...'
 %left '&...' '^...' '|...'
 %left '<<...' '>>...' '>>>...'
 %left '+...' '-...' '-'
@@ -361,11 +358,7 @@ BinOp :: { QualName Name }
       | '<<...'    { binOpName $1 }
       | '<|...'    { binOpName $1 }
       | '|>...'    { binOpName $1 }
-
-      | '<'     { QualName [] (nameFromString "<") }
-      | '<='    { QualName [] (nameFromString "<=") }
-      | '>'     { QualName [] (nameFromString ">") }
-      | '>='    { QualName [] (nameFromString ">=") }
+      | '<'        { QualName [] (nameFromString "<") }
 
 BindingUnOp :: { Name }
       : UnOp {% let (QualName qs name, _) = $1 in do
@@ -585,9 +578,6 @@ Exp2 :: { UncheckedExp }
      | Exp2 '|>...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '<|...' Exp2   { binOp $1 $2 $3 }
 
-     | Exp2 '>=' Exp2      { binOp $1 (L $2 (SYMBOL Geq [] (nameFromString ">="))) $3 }
-     | Exp2 '>' Exp2       { binOp $1 (L $2 (SYMBOL Greater [] (nameFromString ">"))) $3 }
-     | Exp2 '<=' Exp2      { binOp $1 (L $2 (SYMBOL Leq [] (nameFromString "<="))) $3 }
      | Exp2 '<' Exp2       { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
 
      | Exp2 '...' Exp2           { Range $1 Nothing (ToInclusive $3) NoInfo (srclocOf $1) }
@@ -665,10 +655,6 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
 Atoms1 :: { (UncheckedExp, [UncheckedExp]) }
         : Atom Atoms1 { ($1, fst $2 : snd $2) }
         | Atom        { ($1, []) }
-
-CommaAtoms1 :: { (UncheckedExp, [UncheckedExp]) }
-             : Atom ',' CommaAtoms1 { ($1, fst $3 : snd $3) }
-             | Atom                 { ($1, []) }
 
 Exps1 :: { (UncheckedExp, [UncheckedExp]) }
         : Exp ',' Exps1 { ($1, fst $3 : snd $3) }
