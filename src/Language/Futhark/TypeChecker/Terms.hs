@@ -1367,7 +1367,7 @@ checkArg arg = do
 checkApply :: SrcLoc -> CompType -> Arg
            -> TermTypeM ([StructType], CompType)
 checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
-  unify loc (toStruct tp1) (toStruct argtype)
+  unify argloc (toStruct tp1) (toStruct argtype)
   let (paramtypes, rettype) = unfoldFunType tp2
 
   -- Perform substitutions of instantiated variables in the types.
