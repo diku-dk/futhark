@@ -417,11 +417,12 @@ deriving instance Showable f vn => Show (TypeDeclBase f vn)
 instance Located (TypeDeclBase f vn) where
   locOf = locOf . declaredType
 
--- | Information about which parts of a value/type are consumed.  For
--- example, we might say that a function taking an argument of type
--- @([int], *[int], [int])@ has diet @ConsumeTuple [Observe, Consume,
--- Observe]@.
+-- | Information about which parts of a value/type are consumed.
 data Diet = RecordDiet (M.Map Name Diet) -- ^ Consumes these fields in the record.
+          | FuncDiet Diet Diet
+            -- ^ A function that consumes its argument(s) like this.
+            -- The final 'Diet' should always be 'Observe', as there
+            -- is no way for a function to consume its return value.
           | Consume -- ^ Consumes this value.
           | Observe -- ^ Only observes value in this position, does
                     -- not consume.

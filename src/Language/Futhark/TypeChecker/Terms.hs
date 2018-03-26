@@ -1423,6 +1423,19 @@ consumeArg loc (Record ets) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
 consumeArg loc (Array _ _ Nonunique) Consume =
   typeError loc "Consuming parameter passed non-unique argument."
+consumeArg loc (Arrow _ _ t1 _) (FuncDiet d _)
+  | not $ contravariantArg t1 d =
+      typeError loc "Non-consuming higher-order parameter passed consuming argument."
+  where contravariantArg (Array _ _ Unique) Observe =
+          False
+        contravariantArg (Record ets) (RecordDiet ds) =
+          and (M.intersectionWith contravariantArg ets ds)
+        contravariantArg (Arrow _ _ tp tr) (FuncDiet dp dr) =
+          contravariantArg tp dp && contravariantArg tr dr
+        contravariantArg _ _ =
+          True
+consumeArg loc (Arrow _ _ _ t2) (FuncDiet _ pd) =
+  consumeArg loc t2 pd
 consumeArg loc at Consume = return [consumption (aliases at) loc]
 consumeArg loc at _       = return [observation (aliases at) loc]
 

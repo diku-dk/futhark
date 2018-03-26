@@ -191,7 +191,7 @@ diet :: TypeBase shape as -> Diet
 diet (Record ets)          = RecordDiet $ fmap diet ets
 diet (Prim _)              = Observe
 diet TypeVar{}             = Observe
-diet Arrow{}               = Observe
+diet (Arrow _ _ t1 t2)     = FuncDiet (diet t1) (diet t2)
 diet (Array _ _ Unique)    = Consume
 diet (Array _ _ Nonunique) = Observe
 
