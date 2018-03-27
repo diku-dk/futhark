@@ -630,8 +630,7 @@ internaliseExp _ (E.Zip _ e es _ loc) = do
       let reshapeToOuter e_unchecked' = do
             unchecked_t <- lookupType e_unchecked'
             case I.arrayDims unchecked_t of
-              []      -> return e_unchecked' -- Probably type error
-              outer:inner -> do
+              outer:inner | w /= outer -> do
                 cmp <- letSubExp "zip_cmp" $ I.BasicOp $
                        I.CmpOp (I.CmpEq I.int32) w outer
                 c   <- assertingOne $
@@ -639,6 +638,7 @@ internaliseExp _ (E.Zip _ e es _ loc) = do
                        I.Assert cmp "arrays differ in length" (loc, mempty)
                 certifying c $ letExp (postfix e_unchecked' "_zip_res") $
                   shapeCoerce (w:inner) e_unchecked'
+              _ -> return e_unchecked'
       es' <- mapM reshapeToOuter es_unchecked
       return $ map I.Var $ e_key : es'
     [] -> return []
