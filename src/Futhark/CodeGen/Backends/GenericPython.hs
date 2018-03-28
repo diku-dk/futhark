@@ -323,9 +323,11 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
 
           case module_name of
             Just name -> do
-              entry_points <- mapM compileEntryFun $ filter (Imp.functionEntry . snd) funs
-              return [ClassDef $ Class name $ map FunDef $
-                      constructor' : definitions ++ entry_points]
+              (entry_points, entry_point_types) <-
+                unzip <$> mapM compileEntryFun (filter (Imp.functionEntry . snd) funs)
+              return [ClassDef $ Class name $
+                       Assign (Var "entry_points") (Dict entry_point_types) :
+                       map FunDef (constructor' : definitions ++ entry_points)]
             Nothing -> do
               let classinst = Assign (Var "self") $ simpleCall "internal" []
               (entry_point_defs, entry_point_names, entry_points) <-
@@ -590,12 +592,22 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes = do
   stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, nbytes]
 
 compileEntryFun :: (Name, Imp.Function op)
-                -> CompilerM op s PyFunDef
+                -> CompilerM op s (PyFunDef, (PyExp, PyExp))
 compileEntryFun entry = do
   (fname', params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
   let ret = Return $ tupleOrSingle $ map snd res
-  return $ Def fname' ("self" : params) $
-    prepareIn ++ body_lib ++ prepareOut ++ [ret]
+      (pts, rts) = entryTypes $ snd entry
+  return (Def fname' ("self" : params) $
+           prepareIn ++ body_lib ++ prepareOut ++ [ret],
+          (String fname', Tuple [List (map String pts), List (map String rts)]))
+
+entryTypes :: Imp.Function op -> ([String], [String])
+entryTypes func = (map desc $ Imp.functionResult func,
+                   map desc $ Imp.functionResult func)
+  where desc (Imp.OpaqueValue d _) = d
+        desc (Imp.TransparentValue (Imp.ScalarValue pt s _)) = readTypeEnum pt s
+        desc (Imp.TransparentValue (Imp.ArrayValue _ _ _ pt s dims)) =
+          concat (replicate (length dims) "[]") ++ readTypeEnum pt s
 
 callEntryFun :: [PyStmt] -> (Name, Imp.Function op)
              -> CompilerM op s (PyFunDef, String, PyExp)
