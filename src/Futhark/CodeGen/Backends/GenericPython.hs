@@ -491,34 +491,19 @@ valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
 valueDescVName (Imp.ArrayValue vname _ _ _ _ _) = vname
 
-readFun :: PrimType -> Imp.Signedness -> String
-readFun (FloatType Float32) _ = "read_f32"
-readFun (FloatType Float64) _ = "read_f64"
-readFun (IntType Int8)  Imp.TypeUnsigned = "read_u8"
-readFun (IntType Int16) Imp.TypeUnsigned = "read_u16"
-readFun (IntType Int32) Imp.TypeUnsigned = "read_u32"
-readFun (IntType Int64) Imp.TypeUnsigned = "read_u64"
-readFun (IntType Int8)  Imp.TypeDirect   = "read_i8"
-readFun (IntType Int16) Imp.TypeDirect   = "read_i16"
-readFun (IntType Int32) Imp.TypeDirect   = "read_i32"
-readFun (IntType Int64) Imp.TypeDirect   = "read_i64"
-readFun Imp.Bool _      = "read_bool"
-readFun Cert _          = error "readFun: cert"
-
--- The value returned will be used when reading binary arrays, to indicate what
--- the expected type is
+-- Key into the FUTHARK_PRIMTYPES dict.
 readTypeEnum :: PrimType -> Imp.Signedness -> String
-readTypeEnum (IntType Int8)  Imp.TypeUnsigned = "FUTHARK_UINT8"
-readTypeEnum (IntType Int16) Imp.TypeUnsigned = "FUTHARK_UINT16"
-readTypeEnum (IntType Int32) Imp.TypeUnsigned = "FUTHARK_UINT32"
-readTypeEnum (IntType Int64) Imp.TypeUnsigned = "FUTHARK_UINT64"
-readTypeEnum (IntType Int8)  Imp.TypeDirect   = "FUTHARK_INT8"
-readTypeEnum (IntType Int16) Imp.TypeDirect   = "FUTHARK_INT16"
-readTypeEnum (IntType Int32) Imp.TypeDirect   = "FUTHARK_INT32"
-readTypeEnum (IntType Int64) Imp.TypeDirect   = "FUTHARK_INT64"
-readTypeEnum (FloatType Float32) _ = "FUTHARK_FLOAT32"
-readTypeEnum (FloatType Float64) _ = "FUTHARK_FLOAT64"
-readTypeEnum Imp.Bool _ = "FUTHARK_BOOL"
+readTypeEnum (IntType Int8)  Imp.TypeUnsigned = "u8"
+readTypeEnum (IntType Int16) Imp.TypeUnsigned = "u16"
+readTypeEnum (IntType Int32) Imp.TypeUnsigned = "u32"
+readTypeEnum (IntType Int64) Imp.TypeUnsigned = "u64"
+readTypeEnum (IntType Int8)  Imp.TypeDirect   = "i8"
+readTypeEnum (IntType Int16) Imp.TypeDirect   = "i16"
+readTypeEnum (IntType Int32) Imp.TypeDirect   = "i32"
+readTypeEnum (IntType Int64) Imp.TypeDirect   = "i64"
+readTypeEnum (FloatType Float32) _ = "f32"
+readTypeEnum (FloatType Float64) _ = "f64"
+readTypeEnum Imp.Bool _ = "bool"
 readTypeEnum Cert _ = error "readTypeEnum: cert"
 
 readInput :: Imp.ExternalValue -> PyStmt
@@ -527,18 +512,13 @@ readInput (Imp.OpaqueValue desc _) =
   [String $ "Cannot read argument of type " ++ desc ++ "."]
 
 readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
-  let reader' = readFun bt ept
-  in Assign (Var $ extValueDescName decl) $ simpleCall reader' [Var "input_reader"]
+  let type_name = readTypeEnum bt ept
+  in Assign (Var $ extValueDescName decl) $ simpleCall "read_value" [String type_name]
 
--- TODO: If the type identifier of 'Float32' is changed, currently the error
--- messages for reading binary input will not use this new name. This is also a
--- problem for the C runtime system.
 readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
-  let rank' = Var $ show $ length dims
-      type_enum = Var $ readTypeEnum bt ept
-      ct = Var $ compilePrimToExtNp bt ept
-  in Assign (Var $ extValueDescName decl) $ simpleCall "read_array"
-     [Var "input_reader", type_enum, rank', ct]
+  let type_name = readTypeEnum bt ept
+  in Assign (Var $ extValueDescName decl) $ simpleCall "read_value"
+     [String $ concat (replicate (length dims) "[]") ++ type_name]
 
 printPrimStm :: PyExp -> PrimType -> Imp.Signedness -> PyStmt
 printPrimStm val t ept =
