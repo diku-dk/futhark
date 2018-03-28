@@ -7,59 +7,56 @@ import string
 import struct
 import sys
 
-lookahead_buffer = []
+class ReaderInput:
+    def __init__(self, f):
+        self.f = f
+        self.lookahead_buffer = []
 
-def reset_lookahead():
-    global lookahead_buffer
-    lookahead_buffer = []
+    def get_char(self):
+        if len(self.lookahead_buffer) == 0:
+            return self.f.read(1)
+        else:
+            c = self.lookahead_buffer[0]
+            self.lookahead_buffer = self.lookahead_buffer[1:]
+            return c
 
-def get_char(f):
-    global lookahead_buffer
-    if len(lookahead_buffer) == 0:
-        return f.read(1)
-    else:
-        c = lookahead_buffer[0]
-        lookahead_buffer = lookahead_buffer[1:]
+    def unget_char(self, c):
+        self.lookahead_buffer = [c] + self.lookahead_buffer
+
+    def get_chars(self, n):
+        s = b''
+        for _ in range(n):
+            s += self.get_char()
+        return s
+
+    def peek_char(self):
+        c = self.get_char()
+        if c:
+            self.unget_char(c)
         return c
 
-def get_chars(f, n):
-    s = b''
-    for _ in range(n):
-        s += get_char(f)
-    return s
-
-def unget_char(f, c):
-    global lookahead_buffer
-    lookahead_buffer = [c] + lookahead_buffer
-
-def peek_char(f):
-    c = get_char(f)
-    if c:
-        unget_char(f, c)
-    return c
-
 def skip_spaces(f):
-    c = get_char(f)
+    c = f.get_char()
     while c != None:
         if c.isspace():
-            c = get_char(f)
+            c = f.get_char()
         elif c == b'-':
           # May be line comment.
-          if peek_char(f) == b'-':
+          if f.peek_char() == b'-':
             # Yes, line comment. Skip to end of line.
             while (c != b'\n' and c != None):
-              c = get_char(f)
+              c = f.get_char()
           else:
             break
         else:
           break
     if c:
-        unget_char(f, c)
+        f.unget_char(c)
 
 def parse_specific_char(f, expected):
-    got = get_char(f)
+    got = f.get_char()
     if got != expected:
-        unget_char(f, got)
+        f.unget_char(got)
         raise ValueError
     return True
 
@@ -80,7 +77,7 @@ def optional(p, *args):
         return None
 
 def optional_specific_string(f, s):
-    c = peek_char(f)
+    c = f.peek_char()
     # This funky mess is intended, and is caused by the fact that if `type(b) ==
     # bytes` then `type(b[0]) == int`, but we need to match each element with a
     # `bytes`, so therefore we make each character an array element
@@ -104,34 +101,34 @@ def sepBy(p, sep, *args):
 # Assumes '0x' has already been read
 def parse_hex_int(f):
     s = b''
-    c = get_char(f)
+    c = f.get_char()
     while c != None:
         if c in string.hexdigits:
             s += c
-            c = get_char(f)
+            c = f.get_char()
         elif c == '_':
-            c = get_char(f) # skip _
+            c = f.get_char() # skip _
         else:
-            unget_char(f, c)
+            f.unget_char(c)
             break
     return str(int(s, 16))
 
 
 def parse_int(f):
     s = b''
-    c = get_char(f)
-    if c == b'0' and peek_char(f) in [b'x', b'X']:
-        c = get_char(f) # skip X
+    c = f.get_char()
+    if c == b'0' and f.peek_char() in [b'x', b'X']:
+        c = f.get_char() # skip X
         s += parse_hex_int(f)
     else:
         while c != None:
             if c.isdigit():
                 s += c
-                c = get_char(f)
+                c = f.get_char()
             elif c == '_':
-                c = get_char(f) # skip _
+                c = f.get_char() # skip _
             else:
-                unget_char(f, c)
+                f.unget_char(c)
                 break
     if len(s) == 0:
         raise ValueError
@@ -139,13 +136,13 @@ def parse_int(f):
 
 def parse_int_signed(f):
     s = b''
-    c = get_char(f)
+    c = f.get_char()
 
-    if c == b'-' and peek_char(f).isdigit():
+    if c == b'-' and f.peek_char().isdigit():
       s = c + parse_int(f)
     else:
       if c != b'+':
-          unget_char(f, c)
+          f.unget_char(c)
       s = parse_int(f)
 
     return s
@@ -188,7 +185,7 @@ def read_str_u64(f):
 def read_char(f):
     skip_spaces(f)
     parse_specific_char(f, b'\'')
-    c = get_char(f)
+    c = f.get_char()
     parse_specific_char(f, b'\'')
     return c
 
@@ -212,20 +209,20 @@ def read_str_hex_float(f, sign):
 
 def read_str_decimal(f):
     skip_spaces(f)
-    c = get_char(f)
+    c = f.get_char()
     if (c == b'-'):
       sign = b'-'
     else:
-      unget_char(f,c)
+      f.unget_char(c)
       sign = b''
 
     # Check for hexadecimal float
-    c = get_char(f)
-    if (c == '0' and (peek_char(f) in ['x', 'X'])):
-        get_char(f)
+    c = f.get_char()
+    if (c == '0' and (f.peek_char() in ['x', 'X'])):
+        f.get_char()
         return read_str_hex_float(f, sign)
     else:
-        unget_char(f, c)
+        f.unget_char(c)
 
     bef = optional(parse_int, f)
     if bef == None:
@@ -255,10 +252,10 @@ def read_str_f64(f):
 
 def read_str_bool(f):
     skip_spaces(f)
-    if peek_char(f) == b't':
+    if f.peek_char() == b't':
         parse_specific_string(f, 'true')
         return True
-    elif peek_char(f) == b'f':
+    elif f.peek_char() == b'f':
         parse_specific_string(f, 'false')
         return False
     else:
@@ -346,7 +343,7 @@ def mk_bin_scalar_reader(t):
     def bin_reader(f):
         fmt = FUTHARK_PRIMTYPES[t]['bin_format']
         size = FUTHARK_PRIMTYPES[t]['size']
-        return struct.unpack('<' + fmt, get_chars(f, size))[0]
+        return struct.unpack('<' + fmt, f.get_chars(size))[0]
     return bin_reader
 
 read_bin_i8 = mk_bin_scalar_reader(FUTHARK_INT8)
@@ -366,7 +363,7 @@ read_bin_bool = mk_bin_scalar_reader(FUTHARK_BOOL)
 
 def read_is_binary(f):
     skip_spaces(f)
-    c = get_char(f)
+    c = f.get_char()
     if c == b'b':
         bin_version = read_bin_u8(f)
         if bin_version != READ_BINARY_VERSION:
@@ -374,7 +371,7 @@ def read_is_binary(f):
                   bin_version, READ_BINARY_VERSION)
         return True
     else:
-        unget_char(f, c)
+        f.unget_char(c)
         return False
 
 FUTHARK_PRIMTYPES = {}
@@ -564,9 +561,9 @@ def read_array(f, expected_type, rank, ctype):
     return arr
 
 if sys.version_info >= (3,0):
-    input_stream = sys.stdin.buffer
+    input_reader = ReaderInput(sys.stdin.buffer)
 else:
-    input_stream = sys.stdin
+    input_reader = ReaderInput(sys.stdin)
 
 ################################################################################
 ### end of reader.py
