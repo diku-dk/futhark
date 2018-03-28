@@ -528,8 +528,7 @@ readInput (Imp.OpaqueValue desc _) =
 
 readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
   let reader' = readFun bt ept
-      stdin = Var "input_stream"
-  in Assign (Var $ extValueDescName decl) $ simpleCall reader' [stdin]
+  in Assign (Var $ extValueDescName decl) $ simpleCall reader' [Var "input_reader"]
 
 -- TODO: If the type identifier of 'Float32' is changed, currently the error
 -- messages for reading binary input will not use this new name. This is also a
@@ -538,9 +537,8 @@ readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
   let rank' = Var $ show $ length dims
       type_enum = Var $ readTypeEnum bt ept
       ct = Var $ compilePrimToExtNp bt ept
-      stdin = Var "input_stream"
   in Assign (Var $ extValueDescName decl) $ simpleCall "read_array"
-     [stdin, type_enum, rank', ct]
+     [Var "input_reader", type_enum, rank', ct]
 
 printPrimStm :: PyExp -> PrimType -> Imp.Signedness -> PyStmt
 printPrimStm val t ept =
