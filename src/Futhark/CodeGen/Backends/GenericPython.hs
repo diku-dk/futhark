@@ -520,61 +520,6 @@ readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
   in Assign (Var $ extValueDescName decl) $ simpleCall "read_value"
      [String $ concat (replicate (length dims) "[]") ++ type_name]
 
-printPrimStm :: PyExp -> PrimType -> Imp.Signedness -> PyStmt
-printPrimStm val t ept =
-  case (t, ept) of
-    (IntType Int8, Imp.TypeUnsigned) -> p "%uu8"
-    (IntType Int16, Imp.TypeUnsigned) -> p "%uu16"
-    (IntType Int32, Imp.TypeUnsigned) -> p "%uu32"
-    (IntType Int64, Imp.TypeUnsigned) -> p "%uu64"
-    (IntType Int8, _) -> p "%di8"
-    (IntType Int16, _) -> p "%di16"
-    (IntType Int32, _) -> p "%di32"
-    (IntType Int64, _) -> p "%di64"
-    (Imp.Bool, _) -> If val
-                     [Exp $ simpleCall "sys.stdout.write" [String "true"]]
-                     [Exp $ simpleCall "sys.stdout.write" [String "false"]]
-    (Cert, _) -> Exp $ simpleCall "sys.stdout.write" [String "Checked"]
-    (FloatType Float32, _) -> p "%.6ff32"
-    (FloatType Float64, _) -> p "%.6ff64"
-  where p s =
-          Exp $ simpleCall "sys.stdout.write"
-          [BinOp "%" (String s) val]
-
-printStm :: Imp.ValueDesc -> PyExp -> CompilerM op s PyStmt
-printStm (Imp.ScalarValue bt ept _) e =
-  return $ printPrimStm e bt ept
-printStm (Imp.ArrayValue _ _ _ bt ept []) e =
-  return $ printPrimStm e bt ept
-printStm (Imp.ArrayValue mem memsize space bt ept (outer:shape)) e = do
-  v <- newVName "print_elem"
-  first <- newVName "print_first"
-  let size = simpleCall "np.product" [List $ map compileDim $ outer:shape]
-      emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
-  printelem <- printStm (Imp.ArrayValue mem memsize space bt ept shape) $ Var $ compileName v
-  return $ If (BinOp "==" size (Integer 0))
-    [puts emptystr]
-    [Assign (Var $ pretty first) $ Var "True",
-     puts "[",
-     For (pretty v) e [
-        If (simpleCall "not" [Var $ pretty first])
-        [puts ", "] [],
-        printelem,
-        Assign (Var $ pretty first) $ Var "False"
-    ],
-    puts "]"]
-    where ppArrayType :: PrimType -> Int -> String
-          ppArrayType t 0 = prettyPrimType ept t
-          ppArrayType t n = "[]" ++ ppArrayType t (n-1)
-
-          prettyPrimType Imp.TypeUnsigned (IntType Int8) = "u8"
-          prettyPrimType Imp.TypeUnsigned (IntType Int16) = "u16"
-          prettyPrimType Imp.TypeUnsigned (IntType Int32) = "u32"
-          prettyPrimType Imp.TypeUnsigned (IntType Int64) = "u64"
-          prettyPrimType _ t = pretty t
-
-          puts s = Exp $ simpleCall "sys.stdout.write" [String s]
-
 printValue :: [(Imp.ExternalValue, PyExp)] -> CompilerM op s [PyStmt]
 printValue = fmap concat . mapM (uncurry printValue')
   -- We copy non-host arrays to the host before printing.  This is
@@ -588,9 +533,9 @@ printValue = fmap concat . mapM (uncurry printValue')
         printValue' (Imp.TransparentValue (Imp.ArrayValue mem memsize (Space _) bt ept shape)) e =
           printValue' (Imp.TransparentValue (Imp.ArrayValue mem memsize DefaultSpace bt ept shape)) $
           simpleCall (pretty e ++ ".get") []
-        printValue' (Imp.TransparentValue r) e = do
-          p <- printStm r e
-          return [p, Exp $ simpleCall "sys.stdout.write" [String "\n"]]
+        printValue' (Imp.TransparentValue _) e =
+          return [Exp $ simpleCall "write_value" [e],
+                  Exp $ simpleCall "sys.stdout.write" [String "\n"]]
 
 prepareEntry :: (Name, Imp.Function op) -> CompilerM op s
                 (String, [String], [PyStmt], [PyStmt], [PyStmt], [PyStmt],

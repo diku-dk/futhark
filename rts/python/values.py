@@ -1,6 +1,6 @@
-# Hacky parser/reader for values written in Futhark syntax.  Used for
-# reading stdin when compiling standalone programs with the Python
-# code generator.
+# Hacky parser/reader/writer for values written in Futhark syntax.
+# Used for reading stdin when compiling standalone programs with the
+# Python code generator.
 
 import numpy as np
 import string
@@ -165,22 +165,22 @@ def read_str_uint(f, s):
     return x
 
 def read_str_i8(f):
-    return read_str_int(f, 'i8')
+    return np.int8(read_str_int(f, 'i8'))
 def read_str_i16(f):
-    return read_str_int(f, 'i16')
+    return np.int16(read_str_int(f, 'i16'))
 def read_str_i32(f):
-    return read_str_int(f, 'i32')
+    return np.int32(read_str_int(f, 'i32'))
 def read_str_i64(f):
-    return read_str_int(f, 'i64')
+    return np.int64(read_str_int(f, 'i64'))
 
 def read_str_u8(f):
-    return read_str_int(f, 'u8')
+    return np.uint8(read_str_int(f, 'u8'))
 def read_str_u16(f):
-    return read_str_int(f, 'u16')
+    return np.uint16(read_str_int(f, 'u16'))
 def read_str_u32(f):
-    return read_str_int(f, 'u32')
+    return np.uint32(read_str_int(f, 'u32'))
 def read_str_u64(f):
-    return read_str_int(f, 'u64')
+    return np.uint64(read_str_int(f, 'u64'))
 
 def read_char(f):
     skip_spaces(f)
@@ -449,6 +449,12 @@ def read_bin_read_type(f):
             return k
     panic(1, "binary-input: Did not recognize the type '%s'.\n", read_binname)
 
+def numpy_type_to_type_name(t):
+    for (k,v) in FUTHARK_PRIMTYPES.items():
+        if v['numpy_type'] == t:
+            return k
+    raise Exception('Unknown Numpy type: {}'.format(t))
+
 def read_bin_ensure_scalar(f, expected_type):
   dims = read_bin_i8(f)
 
@@ -522,6 +528,47 @@ representation of the Futhark type."""
             return read_scalar(reader, basetype)
         return (dims, basetype)
 
+def write_value(v, out=sys.stdout):
+    if type(v) == np.uint8:
+        out.write("%uu8" % v)
+    elif type(v) == np.uint16:
+        out.write("%uu16" % v)
+    elif type(v) == np.uint32:
+        out.write("%uu32" % v)
+    elif type(v) == np.uint64:
+        out.write("%uu64" % v)
+    elif type(v) == np.int8:
+        out.write("%di8" % v)
+    elif type(v) == np.int16:
+        out.write("%di16" % v)
+    elif type(v) == np.int32:
+        out.write("%di32" % v)
+    elif type(v) == np.int64:
+        out.write("%di64" % v)
+    elif type(v) in [np.bool, np.bool_]:
+        if v:
+            out.write("true")
+        else:
+            out.write("false")
+    elif type(v) == np.float32:
+        out.write("%.6ff32" % v)
+    elif type(v) == np.float64:
+        out.write("%.6ff64" % v)
+    elif type(v) == np.ndarray:
+        if np.product(v.shape) == 0:
+            tname = numpy_type_to_type_name(v.dtype)
+            out.write('empty({}{})'.format(''.join(['[]' for _ in v.shape[1:]]), tname))
+        else:
+            first = True
+            out.write('[')
+            for x in v:
+                if not first: out.write(', ')
+                first = False
+                write_value(x, out=out)
+            out.write(']')
+    else:
+        raise Exception("Cannot print value of type {}: {}".format(type(v), v))
+
 ################################################################################
-### end of reader.py
+### end of values.py
 ################################################################################
