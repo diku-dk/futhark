@@ -141,8 +141,21 @@ let stream_map 'a 'b (f: []a -> []b) (as: []a): *[]b =
 let stream_map_per 'a 'b (f: []a -> []b) (as: []a): *[]b =
   intrinsics.stream_map_per (f, as)
 
-let flatten [n] [m] 't (xs: [n][m]t): []t =
+-- | Combines the outer two dimensions of an array.
+let flatten [n][m] 't (xs: [n][m]t): []t =
   reshape (n*m) xs
+
+-- | Combines the outer three dimensions of an array.
+let flatten_3d [n][m][l] 't (xs: [n][m][l]t): []t =
+  reshape (n*m*l) xs
+
+-- | Splits the outer dimension of an array in two.
+let unflatten 't (n: i32) (m: i32) (xs: []t): [n][m]t =
+  reshape (n,m) xs
+
+-- | Splits the outer dimension of an array in three.
+let unflatten_3d 't (n: i32) (m: i32) (l: i32) (xs: []t): [n][m][l]t =
+  reshape (n,m,l) xs
 
 let intersperse [n] 't (x: t) (xs: [n]t): *[]t =
   map (\i -> if i % 2 == 1 && i != 2*n then x
