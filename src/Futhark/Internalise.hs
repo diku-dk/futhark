@@ -630,8 +630,7 @@ internaliseExp _ (E.Zip _ e es _ loc) = do
       let reshapeToOuter e_unchecked' = do
             unchecked_t <- lookupType e_unchecked'
             case I.arrayDims unchecked_t of
-              []      -> return e_unchecked' -- Probably type error
-              outer:inner -> do
+              outer:inner | w /= outer -> do
                 cmp <- letSubExp "zip_cmp" $ I.BasicOp $
                        I.CmpOp (I.CmpEq I.int32) w outer
                 c   <- assertingOne $
@@ -639,6 +638,7 @@ internaliseExp _ (E.Zip _ e es _ loc) = do
                        I.Assert cmp "arrays differ in length" (loc, mempty)
                 certifying c $ letExp (postfix e_unchecked' "_zip_res") $
                   shapeCoerce (w:inner) e_unchecked'
+              _ -> return e_unchecked'
       es' <- mapM reshapeToOuter es_unchecked
       return $ map I.Var $ e_key : es'
     [] -> return []
@@ -773,7 +773,7 @@ internaliseExp desc (E.Stream (E.RedLike o comm lam0) lam arr _) = do
 
   body_with_lam0 <-
     ensureResultShape asserting "shape of result does not match shape of initial value"
-    (srclocOf lam) acctps <=< runBodyBinder $ do
+    (srclocOf lam0) acctps <=< insertStmsM $ do
       lam_res <- bodyBind lam_body
 
       let consumed = consumedByLambda $ Alias.analyseLambda lam0'
@@ -783,7 +783,10 @@ internaliseExp desc (E.Stream (E.RedLike o comm lam0) lam arr _) = do
           copyIfConsumed _ x = return x
 
       accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
-      new_lam_res <- eLambda lam0' $ map eSubExp $ accs' ++ lam_res
+      lam_res' <- ensureArgShapes asserting
+                  "shape of chunk function result does not match shape of initial value"
+                  (srclocOf lam) [] (map I.typeOf $ I.lambdaParams lam0') lam_res
+      new_lam_res <- eLambda lam0' $ map eSubExp $ accs' ++ lam_res'
       return $ resultBody new_lam_res
 
   -- Make sure the chunk size parameter comes first.
