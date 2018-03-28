@@ -442,7 +442,7 @@ FUTHARK_PRIMTYPES = {
 }
 
 def read_bin_read_type(f):
-    read_binname = get_chars(f, 4)
+    read_binname = f.get_chars(f, 4)
 
     for (k,v) in FUTHARK_PRIMTYPES.items():
         if v['binname'] == read_binname:
