@@ -36,7 +36,7 @@ compileProg module_name prog = do
              Assign (Var "preferred_platform") None,
              Assign (Var "preferred_device") None,
              Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
-             Escape pyReader,
+             Escape pyValues,
              Escape pyFunctions,
              Escape pyPanic]
       let imports = [Import "sys" Nothing,
