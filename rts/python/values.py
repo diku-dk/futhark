@@ -442,7 +442,7 @@ FUTHARK_PRIMTYPES = {
 }
 
 def read_bin_read_type(f):
-    read_binname = f.get_chars(f, 4)
+    read_binname = f.get_chars(4)
 
     for (k,v) in FUTHARK_PRIMTYPES.items():
         if v['binname'] == read_binname:
@@ -462,7 +462,7 @@ def read_bin_ensure_scalar(f, expected_type):
       panic(1, "binary-input: Expected scalar (0 dimensions), but got array with %i dimensions.\n", dims)
 
   bin_type = read_bin_read_type(f)
-  if bin_type_enum != expected_type:
+  if bin_type != expected_type:
       panic(1, "binary-input: Expected scalar of type %s but got scalar of type %s.\n",
             expected_type, bin_type)
 
@@ -488,7 +488,7 @@ def read_array(f, expected_type, rank):
         panic(1, "binary-input: Expected %i dimensions, but got array with %i dimensions.\n",
               rank, bin_rank)
 
-    bin_type_enum = read_bin_read_type_enum(f)
+    bin_type_enum = read_bin_read_type(f)
     if expected_type != bin_type_enum:
         panic(1, "binary-input: Expected %iD-array with element type '%s' but got %iD-array with element type '%s'.\n",
               rank, expected_type, bin_rank, bin_type_enum)
@@ -502,7 +502,7 @@ def read_array(f, expected_type, rank):
 
     bin_fmt = FUTHARK_PRIMTYPES[bin_type_enum]['bin_format']
 
-    arr = np.fromfile(f, dtype='<'+bin_fmt, count=elem_count, sep='')
+    arr = np.fromfile(f.f, dtype='<'+bin_fmt, count=elem_count, sep='')
     arr.shape = shape
 
     return arr
