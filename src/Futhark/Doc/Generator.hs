@@ -285,7 +285,7 @@ typeExpHtml e = case e of
 qualNameHtml :: QualName VName -> Html
 qualNameHtml (QualName names (VName name tag)) =
   if tag <= maxIntrinsicTag
-      then prefix <> renderName name
+      then renderName name
       else prefix <> (a ! A.href (fromString ("#" ++ show tag)) $ renderName name)
   where prefix :: Html
         prefix = foldMap ((<> ".") . renderName . baseName) names
