@@ -519,7 +519,7 @@ def read_value(type_desc, reader=input_reader):
 representation of the Futhark type."""
     m = re.match(r'((?:\[\])*)([a-z0-9]+)$', type_desc)
     if m:
-        dims = len(m.group(1))/2
+        dims = int(len(m.group(1))/2)
         basetype = m.group(2)
         assert basetype in FUTHARK_PRIMTYPES, "Unknown type: {}".format(type_desc)
         if dims > 0:
