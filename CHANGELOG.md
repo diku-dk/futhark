@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * Multi-array `map`s are now deprecated and will be removed in the
      next release.
 
+   * The futlib/mss and futlib/lss modules have been rewritten to use
+     higher-order functions instead of modules.
+
 ### Fixed
 
    * Transpositions in generated OpenCL code no longer crashes on
