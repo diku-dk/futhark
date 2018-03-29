@@ -602,7 +602,7 @@ compileEntryFun entry = do
           (String fname', Tuple [List (map String pts), List (map String rts)]))
 
 entryTypes :: Imp.Function op -> ([String], [String])
-entryTypes func = (map desc $ Imp.functionResult func,
+entryTypes func = (map desc $ Imp.functionArgs func,
                    map desc $ Imp.functionResult func)
   where desc (Imp.OpaqueValue d _) = d
         desc (Imp.TransparentValue (Imp.ScalarValue pt s _)) = readTypeEnum pt s
