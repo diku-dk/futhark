@@ -26,7 +26,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
    * Higher-order functions are now supported (#323).
 
-   * Added higher-order utility functions to the prelude:
+   * Type inference is now supported, although with some limitations
+     around records, in-place updates, and `unzip`. (#503)
+
+   * Added a range of higher-order utility functions to the prelude:
 
          val (|>) 'a '^b: a ->  (a -> b) -> b
 
@@ -36,19 +39,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
          let (<<|) 'a 'b '^c: (b -> c) -> (a -> b) a -> c
 
-   * Type inference is now supported, although with some limitations
-     around records, in-place updates, and `unzip`. (#503)
-
 ### Removed
 
 ### Changed
 
    * `FUTHARK_VERSIONED_CODE` is now `FUTHARK_INCREMENTAL_FLATTENING`.
 
+   * The SOACs `reduce`, `filter`, `partition`, `scan`, `stream_red,`
+     and `stream_map` have been replaced with library functions.
+
+   * Multi-array `map`s are now deprecated and will be removed in the
+     next release.
+
 ### Fixed
 
    * Transpositions in generated OpenCL code no longer crashes on
      large but empty arrays (#483).
+
+   * Booleans can now be compared with relational operators without
+     crashing the compiler (#499).
 
 ## [0.3.1]
 
