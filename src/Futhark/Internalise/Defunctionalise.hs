@@ -699,7 +699,8 @@ patternVars (PatternAscription pat _) = patternVars pat
 -- information (e.g., shape restrictions) from the user given annotation.
 combineTypeShapes :: ArrayDim dim =>
                      TypeBase dim as -> TypeBase dim as -> TypeBase dim as
-combineTypeShapes (Record ts1) (Record ts2) =
+combineTypeShapes (Record ts1) (Record ts2)
+  | M.keys ts1 == M.keys ts2 =
   Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
 combineTypeShapes (Array et1 shape1 u1) (Array et2 shape2 _u2)
   | Just new_shape <- unifyShapes shape1 shape2 =
