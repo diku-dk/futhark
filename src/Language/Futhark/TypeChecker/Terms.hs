@@ -1401,7 +1401,7 @@ checkFuncall _ ftype [] = return ([], ftype)
 checkFuncall loc ftype ((argtype, dflow, argloc) : args) =
   case ftype of
     Arrow as _ t1 t2 -> do
-      unify loc (toStructural t1) (toStruct argtype)
+      unify argloc (toStructural t1) (toStruct argtype)
       substs <- gets constraintSubsts
       let t1' = toStruct $ applySubst substs t1
           t2' = applySubst substs t2
