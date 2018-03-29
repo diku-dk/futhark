@@ -1908,12 +1908,8 @@ zeroOrderType loc desc t = do
                 typeError loc $ "Type " ++ desc ++
                 " must be non-function, but inferred to be " ++
                 pretty vn_t ++ " at " ++ locStr old_loc ++ "."
-            Just (NoConstraint Nothing _) ->
+            Just (NoConstraint _ _) ->
               modify $ M.insert vn (NoConstraint (Just Unlifted) loc)
-            Just (NoConstraint (Just Lifted) old_loc) ->
-              typeError loc $ "Type " ++ desc ++
-              " must be non-function, but inferred functional at "
-              ++ locStr old_loc ++ "."
             Just (ParamType Lifted ploc) ->
               typeError loc $ "Type " ++ desc ++
               " must be non-function, but type parameter " ++ pretty vn ++ " at " ++
