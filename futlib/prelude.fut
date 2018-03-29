@@ -32,3 +32,9 @@ let curry '^a '^b '^c (f: (a, b) -> c) (a: a) (b: b): c =
 
 let uncurry '^a '^b '^c (f: a -> b -> c) (a: a, b: b): c =
   f a b
+
+-- | The constant function.
+let const '^a '^b (x: a) (_: b): a = x
+
+-- | The identity function.
+let id '^a (x: a) = x
