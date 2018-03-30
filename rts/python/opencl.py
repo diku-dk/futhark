@@ -108,6 +108,8 @@ def initialise_opencl_object(self,
     self.max_num_groups = 0
     self.free_list = {}
 
+    default_group_size_set = default_group_size != None
+    default_tile_size_set = default_tile_size != None
     default_sizes = apply_size_heuristics(self, size_heuristics,
                                           {'group_size': default_group_size,
                                            'tile_size': default_tile_size,
@@ -120,12 +122,12 @@ def initialise_opencl_object(self,
     default_tile_size = default_sizes['tile_size']
     lockstep_width = default_sizes['lockstep_width']
 
-    if default_group_size > max_group_size:
+    if default_group_size > max_group_size and default_group_size_set:
         sys.stderr.write('Note: Device limits group size to {} (down from {})\n'.
                          format(max_tile_size, default_group_size))
         default_group_size = max_group_size
 
-    if default_tile_size > max_tile_size:
+    if default_tile_size > max_tile_size and default_tile_size_set:
         sys.stderr.write('Note: Device limits tile size to {} (down from {})\n'.
                          format(max_tile_size, default_tile_size))
         default_tile_size = max_tile_size

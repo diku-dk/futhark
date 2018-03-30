@@ -25,6 +25,9 @@ struct opencl_config {
   size_t default_threshold;
   size_t transpose_block_dim;
 
+  int default_group_size_changed;
+  int default_tile_size_changed;
+
   int num_sizes;
   const char **size_names;
   size_t *size_values;
@@ -48,6 +51,9 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->default_tile_size = 32;
   cfg->default_threshold = 32*1024;
   cfg->transpose_block_dim = 16;
+
+  cfg->default_group_size_changed = 0;
+  cfg->default_tile_size_changed = 0;
 
   cfg->num_sizes = num_sizes;
   cfg->size_names = size_names;
@@ -526,14 +532,18 @@ static cl_program setup_opencl(struct opencl_context *ctx,
   size_t max_tile_size = sqrt(max_group_size);
 
   if (max_group_size < ctx->cfg.default_group_size) {
-    fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
-            max_group_size, ctx->cfg.default_group_size);
+    if (ctx->cfg.default_group_size_changed) {
+      fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
+              max_group_size, ctx->cfg.default_group_size);
+    }
     ctx->cfg.default_group_size = max_group_size;
   }
 
   if (max_tile_size < ctx->cfg.default_tile_size) {
-    fprintf(stderr, "Note: Device limits default tile size to %zu (down from %zu).\n",
-            max_tile_size, ctx->cfg.default_tile_size);
+    if (ctx->cfg.default_tile_size_changed) {
+      fprintf(stderr, "Note: Device limits default tile size to %zu (down from %zu).\n",
+              max_tile_size, ctx->cfg.default_tile_size);
+    }
     ctx->cfg.default_tile_size = max_tile_size;
   }
 
