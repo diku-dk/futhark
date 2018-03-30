@@ -502,7 +502,12 @@ def read_array(f, expected_type, rank):
 
     bin_fmt = FUTHARK_PRIMTYPES[bin_type_enum]['bin_format']
 
-    arr = np.fromfile(f.f, dtype='<'+bin_fmt, count=elem_count, sep='')
+    # We first read the expected number of types into a bytestring,
+    # then use np.fromstring.  This is because np.fromfile does not
+    # work on things that are insufficiently file-like, like a network
+    # stream.
+    bytes = f.get_chars(elem_count * FUTHARK_PRIMTYPES[expected_type]['size'])
+    arr = np.fromstring(bytes, dtype='<'+bin_fmt)
     arr.shape = shape
 
     return arr
