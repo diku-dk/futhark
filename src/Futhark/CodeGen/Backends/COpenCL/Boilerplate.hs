@@ -121,12 +121,14 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                        }|]
   GC.libDecl [C.cedecl|void $id:cfg_set_default_group_size(struct $id:cfg* cfg, int size) {
                          cfg->opencl.default_group_size = size;
+                         cfg->opencl.default_group_size_changed = 1;
                        }|]
   GC.libDecl [C.cedecl|void $id:cfg_set_default_num_groups(struct $id:cfg* cfg, int num) {
                          cfg->opencl.default_num_groups = num;
                        }|]
   GC.libDecl [C.cedecl|void $id:cfg_set_default_tile_size(struct $id:cfg* cfg, int size) {
                          cfg->opencl.default_tile_size = size;
+                         cfg->opencl.default_tile_size_changed = 1;
                        }|]
   GC.libDecl [C.cedecl|void $id:cfg_set_default_threshold(struct $id:cfg* cfg, int size) {
                          cfg->opencl.default_threshold = size;
