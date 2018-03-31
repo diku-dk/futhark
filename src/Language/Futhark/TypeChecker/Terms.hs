@@ -999,6 +999,7 @@ checkExp (LetWith dest src idxes ve body pos) = do
         isFix _        = False
 
 checkExp (Update src idxes ve loc) =
+  sequentially (checkExp ve) $ \ve' _ ->
   sequentially (checkExp src) $ \src' _ -> do
     src_t <- expType src'
     let src_als = aliases src_t
@@ -1011,8 +1012,8 @@ checkExp (Update src idxes ve loc) =
     case peelArray (length $ filter isFix idxes') src_t of
       Nothing -> throwError $ IndexingError (arrayRank src_t) (length idxes) (srclocOf src)
       Just elemt -> do
-        ve' <- unifies (toStructural elemt) =<< checkExp ve
         ve_t <- expType ve'
+        unify (srclocOf ve') (toStruct elemt) $ toStruct ve_t
         unless (S.null $ src_als `S.intersection` aliases ve_t) $
           throwError $ BadLetWithValue loc
 
