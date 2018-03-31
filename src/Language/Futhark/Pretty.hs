@@ -261,8 +261,8 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     text "concat" <> text "@" <> ppr i <+> pprPrec 10 x <+> pprPrec 10 y
   pprPrec p (Lambda tparams params body ascript _ _) =
     parensIf (p /= -1) $
-    text "\\" <>
-    apply (map ppr tparams ++ map ppr params) <> ppAscription ascript <+>
+    text "\\" <> spread (map ppr tparams ++ map ppr params) <>
+    ppAscription ascript <+>
     text "->" </> indent 2 (ppr body)
   pprPrec _ (OpSection binop _ _ _ _ _) =
     parens $ ppr binop
