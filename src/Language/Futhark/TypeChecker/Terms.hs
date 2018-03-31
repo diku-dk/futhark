@@ -169,6 +169,13 @@ data Constraint = NoConstraint (Maybe Liftedness) SrcLoc
                 | Equality SrcLoc
                 deriving Show
 
+instance Located Constraint where
+  locOf (NoConstraint _ loc) = locOf loc
+  locOf (ParamType _ loc) = locOf loc
+  locOf (Constraint _ loc) = locOf loc
+  locOf (Overloaded _ loc) = locOf loc
+  locOf (Equality loc) = locOf loc
+
 -- | Is the given type variable actually the name of an abstract type
 -- or type parameter, which we cannot substitute?
 isRigid :: VName -> Constraints -> Bool
@@ -194,7 +201,7 @@ applySubstInConstraint _ _ (Equality loc) = Equality loc
 applySubstInConstraint _ _ (ParamType l loc) = ParamType l loc
 
 normaliseType :: Substitutable a => a -> TermTypeM a
-normaliseType t = do subst <- gets constraintSubsts
+normaliseType t = do subst <- constraintSubsts <$> getConstraints
                      return $ applySubst subst t
 
 -- | Get the type of an expression, with all type variables
@@ -203,16 +210,21 @@ normaliseType t = do subst <- gets constraintSubsts
 expType :: Exp -> TermTypeM CompType
 expType = normaliseType . typeOf
 
+-- | The state is a set of constraints and a counter for generating
+-- type names.  This is distinct from the usual counter we use for
+-- generating unique names, as these will be user-visible.
+type TermTypeState = (Constraints, Int)
+
 newtype TermTypeM a = TermTypeM (RWST
                                  TermScope
                                  Occurences
-                                 Constraints
+                                 TermTypeState
                                  TypeM
                                  a)
   deriving (Monad, Functor, Applicative,
             MonadReader TermScope,
             MonadWriter Occurences,
-            MonadState Constraints,
+            MonadState TermTypeState,
             MonadError TypeError)
 
 instance Fail.MonadFail TermTypeM where
@@ -221,10 +233,24 @@ instance Fail.MonadFail TermTypeM where
 runTermTypeM :: TermTypeM a -> TypeM (a, Occurences)
 runTermTypeM (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) <$> (envToTermScope <$> askEnv)
-  evalRWST m initial_scope mempty
+  evalRWST m initial_scope (mempty, 0)
 
 liftTypeM :: TypeM a -> TermTypeM a
 liftTypeM = TermTypeM . lift
+
+getConstraints :: TermTypeM Constraints
+getConstraints = gets fst
+
+putConstraints :: Constraints -> TermTypeM ()
+putConstraints c = modify $ \(_, x) -> (c, x)
+
+modifyConstraints :: (Constraints -> Constraints) -> TermTypeM ()
+modifyConstraints f = modify $ \s -> (f $ fst s, snd s)
+
+incCounter :: TermTypeM Int
+incCounter = do (x, i) <- get
+                put (x, i+1)
+                return i
 
 initialTermScope :: TermScope
 initialTermScope = TermScope initialVtable mempty topLevelNameMap mempty
@@ -364,22 +390,24 @@ instantiateTypeScheme loc tparams t = do
 -- substitution map.
 instantiateTypeParam :: SrcLoc -> TypeParam -> TermTypeM (VName, TypeBase dim as)
 instantiateTypeParam loc tparam = do
-  v <- newName $ typeParamName tparam
-  modify $ M.insert v $ NoConstraint (Just l) loc
+  i <- incCounter
+  v <- newID $ nameFromString $ baseString (typeParamName tparam) ++ show i
+  modifyConstraints $ M.insert v $ NoConstraint (Just l) loc
   return (v, TypeVar (typeName v) [])
   where l = case tparam of TypeParamType{} -> Unlifted
                            _               -> Lifted
 
 newTypeVar :: SrcLoc -> String -> TermTypeM (TypeBase dim als)
 newTypeVar loc desc = do
-  v <- newID $ nameFromString desc
-  modify $ M.insert v $ NoConstraint Nothing loc
+  i <- incCounter
+  v <- newID $ nameFromString $ desc ++ show i
+  modifyConstraints $ M.insert v $ NoConstraint Nothing loc
   return $ TypeVar (typeName v) []
 
 newArrayType :: SrcLoc -> String -> Int -> TermTypeM (TypeBase () (), TypeBase () ())
 newArrayType loc desc r = do
   v <- newID $ nameFromString desc
-  modify $ M.insert v $ NoConstraint Nothing loc
+  modifyConstraints $ M.insert v $ NoConstraint Nothing loc
   return (Array (ArrayPolyElem (typeName v) [] ())
                 (ShapeDecl $ replicate r ()) Nonunique,
           TypeVar (typeName v) [])
@@ -584,7 +612,7 @@ binding bnds = check . local (`bindVars` bnds)
 
 bindingTypes :: [(VName, (TypeBinding, Constraint))] -> TermTypeM a -> TermTypeM a
 bindingTypes types m = do
-  modify (<>M.map snd (M.fromList types))
+  modifyConstraints (<>M.map snd (M.fromList types))
   local extend m
   where extend scope = scope {
           scopeTypeTable = M.map fst (M.fromList types) <> scopeTypeTable scope
@@ -1387,7 +1415,7 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
 checkApply loc tfun@TypeVar{} arg = do
   tv <- newTypeVar loc "b"
   unify loc (toStruct tfun) $ Arrow mempty Nothing (toStruct (argType arg)) tv
-  substs <- gets constraintSubsts
+  substs <- constraintSubsts <$> getConstraints
   checkApply loc (applySubst substs tfun) arg
 
 checkApply loc ftype arg =
@@ -1402,7 +1430,7 @@ checkFuncall loc ftype ((argtype, dflow, argloc) : args) =
   case ftype of
     Arrow as _ t1 t2 -> do
       unify argloc (toStructural t1) (toStruct argtype)
-      substs <- gets constraintSubsts
+      substs <- constraintSubsts <$> getConstraints
       let t1' = toStruct $ applySubst substs t1
           t2' = applySubst substs t2
 
@@ -1474,7 +1502,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
   when (baseString fname' == "||") $
     typeError loc "The || operator may not be redefined."
 
-  then_substs <- get
+  then_substs <- getConstraints
 
   bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
     maybe_retdecl' <- traverse checkTypeExp maybe_retdecl
@@ -1495,11 +1523,11 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         return (Just retdecl', retdecl_type)
       Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
 
-    now_substs <- get
+    now_substs <- getConstraints
     let new_substs = now_substs `M.difference` then_substs
     tparams'' <- closeOverTypes new_substs tparams' $
                  rettype : map patternStructType params''
-    put $ then_substs `M.intersection` now_substs
+    putConstraints $ then_substs `M.intersection` now_substs
 
     return (fname', tparams'', params'', maybe_retdecl'', rettype, body'')
 
@@ -1567,12 +1595,14 @@ closeOverTypes substs tparams ts = do
   where substs' = M.filterWithKey (\k _ -> k `S.member` visible) substs
         visible = mconcat (map typeVars ts)
 
-        checkClosedOver (k, _v)
+        checkClosedOver (k, v)
           | k `elem` map typeParamName tparams = return ()
           | otherwise =
-              typeError noLoc $
-              "Type variable " ++ pretty k ++ " not closed over by type parameters " ++
-              intercalate ", " (map pretty tparams) ++ "."
+              typeError (srclocOf v) $
+              unlines ["Type variable `" ++ baseString k ++
+                        "' not closed over by type parameters " ++
+                        intercalate ", " (map pretty tparams) ++ ".",
+                        "This is usually because a parameter needs a type annotation."]
 
         closeOver (k, NoConstraint (Just Unlifted) loc) = return $ Just $ TypeParamType k loc
         closeOver (k, NoConstraint _ loc) = return $ Just $ TypeParamLiftedType k loc
@@ -1580,15 +1610,18 @@ closeOverTypes substs tparams ts = do
         closeOver (_, Constraint{}) = return Nothing
         closeOver (_, Overloaded ots loc) =
           typeError loc $
-          "Type is ambiguous (could be one of " ++ intercalate ", " (map pretty ots) ++ ")."
+          unlines ["Type is ambiguous (could be one of " ++ intercalate ", " (map pretty ots) ++ ").",
+                   "Add a type annotation to disambiguate the type."]
         closeOver (_, Equality loc) =
-          typeError loc "Type is ambiguous (must be equality type)."
+          typeError loc $ unlines ["Type is ambiguous (must be equality type).",
+                                   "Add a type annotation to disambiguate the type."]
 
         constrained (NoConstraint _ loc) = ambiguous loc
         constrained (Overloaded _ loc) = ambiguous loc
         constrained (Equality loc) = ambiguous loc
         constrained _ = return ()
-        ambiguous loc = typeError loc "Type of expression is ambiguous."
+        ambiguous loc = typeError loc $ unlines ["Type of expression is ambiguous.",
+                                                 "Add a type annotation to disambiguate the type."]
 
 -- | Checking an expression that is in function position, like the
 -- functional argument to a map.
@@ -1764,7 +1797,7 @@ unify loc orig_t1 orig_t2 = do
   breadCrumb (MatchingTypes orig_t1' orig_t2') $ subunify orig_t1 orig_t2
   where
     subunify t1 t2 = do
-      constraints <- get
+      constraints <- getConstraints
 
       let isRigid' v = isRigid v constraints
           substs = constraintSubsts constraints
@@ -1824,11 +1857,11 @@ unify loc orig_t1 orig_t2 = do
 
 linkVarToType :: SrcLoc -> VName -> TypeBase () () -> TermTypeM ()
 linkVarToType loc vn tp = do
-  constraints <- get
+  constraints <- getConstraints
   if vn `S.member` typeVars tp
     then typeError loc $ "Occurs check: cannot instantiate " ++
          pretty vn ++ " with " ++ pretty tp'
-    else do modify $ M.insert vn $ Constraint tp' loc
+    else do modifyConstraints $ M.insert vn $ Constraint tp' loc
             case M.lookup vn constraints of
               Just (NoConstraint (Just Unlifted) unlift_loc) ->
                 zeroOrderType loc ("used at " ++ locStr unlift_loc) tp'
@@ -1844,12 +1877,12 @@ linkVarToType loc vn tp = do
                         pretty tp ++ "\" (must be one of " ++ intercalate ", " (map pretty ts) ++
                         " due to use at " ++ locStr old_loc ++ ")."
               _ -> return ()
-            modify $ M.map $ applySubstInConstraint vn tp'
+            modifyConstraints $ M.map $ applySubstInConstraint vn tp'
   where tp' = tp `setUniqueness` Nonunique
 
 mustBeOneOf :: [PrimType] -> SrcLoc -> TypeBase () () -> TermTypeM ()
 mustBeOneOf ts loc t = do
-  constraints <- get
+  constraints <- getConstraints
   let substs = constraintSubsts constraints
       t' = applySubst substs t
       isRigid' v = isRigid v constraints
@@ -1866,7 +1899,7 @@ mustBeOneOf ts loc t = do
                   "\" with any of " ++ intercalate "," (map pretty ts) ++ "."
 
 linkVarToTypes :: SrcLoc -> VName -> [PrimType] -> TermTypeM ()
-linkVarToTypes loc vn ts = modify $ M.insert vn $ Overloaded ts loc
+linkVarToTypes loc vn ts = modifyConstraints $ M.insert vn $ Overloaded ts loc
 
 equalityType :: (ArrayDim dim, Pretty (ShapeDecl dim), Monoid as) =>
                 SrcLoc -> TypeBase dim as -> TermTypeM ()
@@ -1876,7 +1909,7 @@ equalityType loc t = do
     "Type \"" ++ pretty t ++ "\" does not support equality."
   mapM_ mustBeEquality $ typeVars t
   where mustBeEquality vn = do
-          constraints <- get
+          constraints <- getConstraints
           case M.lookup vn constraints of
             Just (Constraint (TypeVar (TypeName [] vn') []) _) ->
               mustBeEquality vn'
@@ -1886,11 +1919,11 @@ equalityType loc t = do
                   "\" does not support equality."
               | otherwise -> return ()
             Just (NoConstraint _ _) ->
-              modify $ M.insert vn (Equality loc)
+              modifyConstraints $ M.insert vn (Equality loc)
             Just (Overloaded _ _) ->
               return () -- All primtypes support equality.
             _ ->
-              typeError loc $ "Type " ++ pretty vn ++
+              typeError loc $ "Type " ++ pretty (baseString vn) ++
               " does not support equality."
 
 zeroOrderType :: (ArrayDim dim, Pretty (ShapeDecl dim), Monoid as) =>
@@ -1901,7 +1934,7 @@ zeroOrderType loc desc t = do
     " must not be functional, but is " ++ pretty t ++ "."
   mapM_ mustBeZeroOrder . S.toList . typeVars $ t
   where mustBeZeroOrder vn = do
-          constraints <- get
+          constraints <- getConstraints
           case M.lookup vn constraints of
             Just (Constraint vn_t old_loc)
               | not $ orderZero t ->
@@ -1909,7 +1942,7 @@ zeroOrderType loc desc t = do
                 " must be non-function, but inferred to be " ++
                 pretty vn_t ++ " at " ++ locStr old_loc ++ "."
             Just (NoConstraint _ _) ->
-              modify $ M.insert vn (NoConstraint (Just Unlifted) loc)
+              modifyConstraints $ M.insert vn (NoConstraint (Just Unlifted) loc)
             Just (ParamType Lifted ploc) ->
               typeError loc $ "Type " ++ desc ++
               " must be non-function, but type parameter " ++ pretty vn ++ " at " ++
@@ -1931,7 +1964,7 @@ arrayOfM loc t shape u = do
 -- something else.
 updateExpTypes :: (ASTMappable e, Show e) => e -> TermTypeM e
 updateExpTypes e = do
-  substs <- gets constraintSubsts
+  substs <-  constraintSubsts <$> getConstraints
   let tv = ASTMapper { mapOnExp         = astMap tv
                      , mapOnName        = pure
                      , mapOnQualName    = pure

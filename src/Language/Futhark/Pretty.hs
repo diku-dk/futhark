@@ -88,7 +88,7 @@ instance Pretty (ShapeDecl dim) => Pretty (RecordArrayElemTypeBase dim as) where
 instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
   ppr (ArrayPrimElem pt _) = ppr pt
   ppr (ArrayPolyElem v args _) =
-    ppr (qualNameFromTypeName v) <+> spread (map ppr args)
+    ppr (baseName <$> qualNameFromTypeName v) <+> spread (map ppr args)
   ppr (ArrayRecordElem fs)
     | Just ts <- areTupleFields fs =
         parens (commasep $ map ppr ts)
@@ -98,7 +98,8 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr (Prim et) = ppr et
-  ppr (TypeVar et targs) = ppr (qualNameFromTypeName et) <+> spread (map ppr targs)
+  ppr (TypeVar et targs) = ppr (baseName <$> qualNameFromTypeName et) <+>
+                           spread (map ppr targs)
   ppr (Array at shape u) = ppr u <> ppr shape <> ppr at
   ppr (Record fs)
     | Just ts <- areTupleFields fs =
@@ -107,7 +108,7 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
         braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
   ppr (Arrow _ (Just v) t1 t2) =
-    parens (ppr v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
+    parens (ppr (baseName v) <> colon <+> ppr t1) <+> text "->" <+> ppr t2
   ppr (Arrow _ Nothing t1 t2) =
     ppr t1 <+> text "->" <+> ppr t2
 
