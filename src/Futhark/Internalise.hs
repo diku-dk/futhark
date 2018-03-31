@@ -77,7 +77,7 @@ internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params bod
         let mkEntry (tp, et) = (tp, E.vacuousShapeAnnotations et)
             types = map mkEntry $ M.toList mapping
         bindingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
-          (rettype_bad, _, rcm) <- internaliseReturnType rettype
+          (rettype_bad, rcm) <- internaliseReturnType rettype
           let rettype' = zeroExts rettype_bad
 
           let mkConstParam name = Param name $ I.Prim int32
@@ -142,8 +142,7 @@ generateEntryPoint (E.ValBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
   -- parameters here.
   bindingParams [] (map E.patternNoShapeAnnotations params) $
   \_ shapeparams params' -> do
-    (entry_rettype, _, _) <- internaliseEntryReturnType $
-                             E.vacuousShapeAnnotations rettype
+    (entry_rettype, _) <- internaliseEntryReturnType $ E.vacuousShapeAnnotations rettype
     let entry' = entryPoint (zip params params') (rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
         e_ts = map (flip setAliases () . E.patternType) orig_params
@@ -388,7 +387,7 @@ internaliseExp desc (E.Range start maybe_second end _ _) = do
   pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) _ _) = do
-  (ts, _, _) <- internaliseReturnType et
+  (ts, _) <- internaliseReturnType et
   let ts' = map (fromDecl . modifyArrayShape extToZero) ts
   letSubExps desc $ map (I.BasicOp . I.ArrayLit []) ts'
   where extToZero (I.Shape dims) = I.Shape $ map extDimToZero dims
@@ -397,7 +396,7 @@ internaliseExp desc (E.Empty (TypeDecl _(Info et)) _ _) = do
 
 internaliseExp desc (E.Ascript e (TypeDecl _ (Info et)) loc) = do
   es <- internaliseExp desc e
-  (ts, _, cm) <- internaliseReturnType et
+  (ts, cm) <- internaliseReturnType et
   mapM_ (uncurry (internaliseDimConstant loc)) cm
   forM (zip es ts) $ \(e',t') ->
     ensureExtShape asserting "value does not match shape in type"
@@ -1111,7 +1110,7 @@ internaliseLambda (E.Parens e _) rowtypes =
 
 internaliseLambda (E.Lambda tparams params body _ (Info rettype) loc) rowtypes =
   bindingLambdaParams tparams params rowtypes $ \pcm params' -> do
-    (rettype', _, rcm) <- internaliseReturnType rettype
+    (rettype', rcm) <- internaliseReturnType rettype
     body' <- internaliseBody body
     mapM_ (uncurry (internaliseDimConstant loc)) $ pcm<>rcm
     return (params', body', map I.fromDecl rettype')

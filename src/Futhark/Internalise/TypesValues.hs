@@ -1,9 +1,11 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
     BoundInTypes
   , boundInTypes
+  , boundInPatterns
   , internaliseReturnType
   , internaliseEntryReturnType
   , internaliseParamTypes
@@ -29,6 +31,7 @@ import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
+import Data.Semigroup
 
 import qualified Language.Futhark as E
 import Futhark.Representation.SOACS as I
@@ -42,6 +45,7 @@ internaliseUniqueness E.Unique = I.Unique
 -- | The names that are bound for some types, either implicitly or
 -- explicitly.
 newtype BoundInTypes = BoundInTypes (S.Set VName)
+                       deriving (Semigroup, Monoid)
 
 -- | Determine the names bound for some types.
 boundInTypes :: [E.TypeParam] -> BoundInTypes
@@ -49,54 +53,51 @@ boundInTypes = BoundInTypes . S.fromList . mapMaybe isTypeParam
   where isTypeParam (E.TypeParamDim v _) = Just v
         isTypeParam _ = Nothing
 
+-- | Determine the names bound for some patterns.
+boundInPatterns :: [E.Pattern] -> BoundInTypes
+boundInPatterns = BoundInTypes . S.map E.identName . foldMap E.patIdentSet
+
 internaliseParamTypes :: BoundInTypes
                       -> M.Map VName VName
                       -> [E.TypeBase (E.DimDecl VName) ()]
                       -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
-                                       M.Map VName Int,
                                        ConstParams)
-internaliseParamTypes (BoundInTypes bound) pnames ts = do
-  (ts', subst, cm) <- runInternaliseTypeM bound $
-                      withDims (M.map (Free . Var) pnames) $
-                      mapM internaliseTypeM ts
-  return (ts', subst, cm)
+internaliseParamTypes (BoundInTypes bound) pnames ts =
+  runInternaliseTypeM $ withDims (bound' <> M.map (Free . Var) pnames) $
+    mapM internaliseTypeM ts
+  where bound' = M.fromList (zip (S.toList bound)
+                                 (map (Free . Var) $ S.toList bound))
 
 internaliseReturnType :: E.TypeBase (E.DimDecl VName) ()
                       -> InternaliseM ([I.TypeBase ExtShape Uniqueness],
-                                       M.Map VName Int,
                                        ConstParams)
 internaliseReturnType t = do
-  (ts', subst', cm') <- internaliseEntryReturnType t
-  return (concat ts', subst', cm')
+  (ts', cm') <- internaliseEntryReturnType t
+  return (concat ts', cm')
 
 -- | As 'internaliseReturnType', but returns components of a top-level
 -- tuple type piecemeal.
 internaliseEntryReturnType :: E.TypeBase (E.DimDecl VName) ()
                            -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
-                                            M.Map VName Int,
                                             ConstParams)
 internaliseEntryReturnType t = do
   let ts = case E.isTupleRecord t of Just tts -> tts
                                      _        -> [t]
-  (ts', subst', cm') <-
-    runInternaliseTypeM mempty $ mapM internaliseTypeM ts
-  return (ts', subst', cm')
+  runInternaliseTypeM $ mapM internaliseTypeM ts
 
 internaliseTypes :: E.ArrayDim dim =>
                     [E.TypeBase dim ()]
                  -> InternaliseM [[I.TypeBase I.ExtShape Uniqueness]]
 internaliseTypes ts = do
-  (st', _, _) <-
-    runInternaliseTypeM mempty $
+  (st', _) <-
+    runInternaliseTypeM $
     mapM (internaliseTypeM . E.vacuousShapeAnnotations) ts
   return st'
 
 internaliseType :: E.TypeBase () ()
                 -> InternaliseM [I.TypeBase I.ExtShape Uniqueness]
 internaliseType t = do
-  (t', _, _) <-
-    runInternaliseTypeM mempty $
-    internaliseTypeM $ E.vacuousShapeAnnotations t
+  (t', _) <- runInternaliseTypeM $ internaliseTypeM $ E.vacuousShapeAnnotations t
   return t'
 
 reExt :: ExtType -> InternaliseTypeM ExtType
@@ -114,8 +115,8 @@ reExt (Array t (Shape ds) u) = do
 reExt t = return t
 
 newId :: InternaliseTypeM Int
-newId = do (i,m,cm) <- get
-           put (i + 1, m, cm)
+newId = do (i,cm) <- get
+           put (i + 1, cm)
            return i
 
 internaliseDim :: E.DimDecl VName
@@ -133,11 +134,11 @@ internaliseDim d =
             (Nothing, Just [v]) -> return $ I.Free v
             _ -> do -- Then it must be a constant.
               let fname = nameFromString $ pretty name ++ "f"
-              (i,m,cm) <- get
+              (i,cm) <- get
               case find ((==fname) . fst) cm of
                 Just (_, known) -> return $ I.Free $ I.Var known
                 Nothing -> do new <- liftInternaliseM $ newVName $ baseString name
-                              put (i, m, (fname,new):cm)
+                              put (i, (fname,new):cm)
                               return $ I.Free $ I.Var new
 
 internaliseTypeM :: E.StructType
@@ -230,7 +231,7 @@ mapTypeVariables _ _ =
 
 fullyApplyType :: E.TypeBase () () -> InternaliseM (E.TypeBase () ())
 fullyApplyType t = do
-  (t', _, _) <- runInternaliseTypeM mempty $ fullyApplyTypeM $ E.vacuousShapeAnnotations t
+  (t', _) <- runInternaliseTypeM $ fullyApplyTypeM $ E.vacuousShapeAnnotations t
   return $ E.removeShapeAnnotations t'
 
 fullyApplyTypeM :: E.StructType -> InternaliseTypeM E.StructType

@@ -48,7 +48,6 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Control.Monad.Fail as Fail
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import qualified Data.Semigroup as Sem
 
 import qualified Language.Futhark as E
@@ -221,7 +220,7 @@ data TypeEnv = TypeEnv { typeEnvTypes :: TypeTable
                        , typeEnvDims  :: DimTable
                        }
 
-type TypeState = (Int, M.Map VName Int, ConstParams)
+type TypeState = (Int, ConstParams)
 
 newtype InternaliseTypeM a =
   InternaliseTypeM (ReaderT TypeEnv (StateT TypeState InternaliseM) a)
@@ -233,17 +232,14 @@ newtype InternaliseTypeM a =
 liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
 liftInternaliseM = InternaliseTypeM . lift . lift
 
-runInternaliseTypeM :: S.Set VName
-                    -> InternaliseTypeM a
-                    -> InternaliseM (a, M.Map VName Int, ConstParams)
-runInternaliseTypeM bound (InternaliseTypeM m) = do
+runInternaliseTypeM :: InternaliseTypeM a
+                    -> InternaliseM (a, ConstParams)
+runInternaliseTypeM (InternaliseTypeM m) = do
   types <- asks envTypeTable
-  let bound' = M.fromList $ zip (S.toList bound) [0..]
-      dims = M.map Ext bound'
-      new_env = TypeEnv types dims
-      new_state = (S.size bound, bound', mempty)
-  (x, (_, substs, cm)) <- runStateT (runReaderT m new_env) new_state
-  return (x, substs, cm)
+  let new_env = TypeEnv types mempty
+      new_state = (0, mempty)
+  (x, (_, cm)) <- runStateT (runReaderT m new_env) new_state
+  return (x, cm)
 
 withTypes :: TypeTable -> InternaliseTypeM a -> InternaliseTypeM a
 withTypes ttable = local $ \env -> env { typeEnvTypes = ttable <> typeEnvTypes env }
