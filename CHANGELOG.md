@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * Comparison operators (<=, <, >, >=) are now valid for boolean
      operands.
 
+   * Ordinary functions can be used as infix by enclosing them in
+     backticks, as in Haskell.  They are left-associative and have
+     lowest priority.
+
    * Higher-order functions are now supported (#323).
 
    * Type inference is now supported, although with some limitations

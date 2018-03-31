@@ -457,7 +457,12 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
 
 -- | Default binary operators.
-data BinOp = Plus -- Binary Ops for Numbers
+data BinOp =  Backtick
+              -- ^ A pseudo-operator standing in for any normal
+              -- identifier used as an operator (they all have the
+              -- same fixity).
+           -- Binary Ops for Numbers
+           | Plus
            | Minus
            | Pow
            | Times
@@ -483,6 +488,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            -- Some functional ops.
            | PipeRight -- ^ @|>@
            | PipeLeft -- ^ @<|@
+           -- Misc
              deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Whether a bound for an end-point of a 'DimSlice' or a range
@@ -980,6 +986,7 @@ instance Pretty PrimType where
   ppr Bool             = text "bool"
 
 instance Pretty BinOp where
+  ppr Backtick  = text "``"
   ppr Plus      = text "+"
   ppr Minus     = text "-"
   ppr Pow       = text "**"

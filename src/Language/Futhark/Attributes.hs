@@ -867,7 +867,7 @@ progImports = concatMap decImports . progDecs
 -- | Given an operator name, return the operator that determines its
 -- syntactical properties.
 leadingOperator :: Name -> BinOp
-leadingOperator s = maybe LogAnd snd $ find ((`isPrefixOf` s') . fst) $
+leadingOperator s = maybe Backtick snd $ find ((`isPrefixOf` s') . fst) $
                     sortBy (flip $ comparing $ length . fst) $
                     zip (map pretty operators) operators
   where s' = nameToString s

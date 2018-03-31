@@ -386,12 +386,15 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ModBindBase f vn) w
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, Annot f) =>
                Int -> QualName vn -> ExpBase f vn -> ExpBase f vn -> Doc
-prettyBinOp p bop x y = parensIf (p > symPrecedence bop) $
-                        pprPrec (symPrecedence bop) x <+/>
-                        ppr bop <+>
-                        pprPrec (symRPrecedence bop) y
-  where symPrecedence = precedence . leadingOperator . nameFromString . pretty
-        symRPrecedence = rprecedence . leadingOperator . nameFromString . pretty
+prettyBinOp p bop x y = parensIf (p > symPrecedence) $
+                        pprPrec symPrecedence x <+/>
+                        bop' <+>
+                        pprPrec symRPrecedence y
+  where bop' = case leading of Backtick -> text "`" <> ppr bop <> text "`"
+                               _        -> ppr bop
+        leading = leadingOperator $ nameFromString $ pretty bop
+        symPrecedence = precedence leading
+        symRPrecedence = rprecedence leading
         precedence PipeRight = -1
         precedence PipeLeft  = -1
         precedence LogAnd   = 0
@@ -416,6 +419,7 @@ prettyBinOp p bop x y = parensIf (p > symPrecedence bop) $
         precedence Quot     = 5
         precedence Rem      = 5
         precedence Pow      = 6
+        precedence Backtick = 9
         rprecedence Minus  = 10
         rprecedence Divide = 10
         rprecedence op     = precedence op

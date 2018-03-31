@@ -133,6 +133,7 @@ import Language.Futhark.Parser.Lexer
       '\\'            { L $$ BACKSLASH }
       '\''            { L $$ APOSTROPHE }
       '\'^'           { L $$ APOSTROPHE_THEN_HAT }
+      '`'             { L $$ BACKTICK }
       entry           { L $$ ENTRY }
       '->'            { L $$ RIGHT_ARROW }
       '<-'            { L $$ LEFT_ARROW }
@@ -167,6 +168,7 @@ import Language.Futhark.Parser.Lexer
 %left ','
 %left ':'
 %right '...' '..<' '..>' '..'
+%left '`'
 %left '<-'
 %left '|>...'
 %right '<|...'
@@ -578,7 +580,8 @@ Exp2 :: { UncheckedExp }
      | Exp2 '|>...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '<|...' Exp2   { binOp $1 $2 $3 }
 
-     | Exp2 '<' Exp2       { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
+     | Exp2 '<' Exp2              { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
+     | Exp2 '`' QualName '`' Exp2 { BinOp (fst $3) NoInfo ($1, NoInfo) ($5, NoInfo) NoInfo (srclocOf $1) }
 
      | Exp2 '...' Exp2           { Range $1 Nothing (ToInclusive $3) NoInfo (srclocOf $1) }
      | Exp2 '..<' Exp2           { Range $1 Nothing (UpToExclusive $3) NoInfo (srclocOf $1) }
