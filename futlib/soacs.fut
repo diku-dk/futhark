@@ -75,6 +75,15 @@ let stream_map 'a 'b (f: []a -> []b) (as: []a): *[]b =
 let stream_map_per 'a 'b (f: []a -> []b) (as: []a): *[]b =
   intrinsics.stream_map_per (f, as)
 
+-- | Return `true` if the given function returns `true` for all
+-- elements in the array.
+let all 'a (f: a -> bool) (as: []a): bool =
+  reduce (&&) true (map f as)
+
+-- | Return `true` if the given function returns `true` for any
+-- elements in the array.
+let any 'a (f: a -> bool) (as: []a): bool =
+  reduce (||) false (map f as)
 
 -- | The ``scatter as is vs`` expression calculates the equivalent of
 -- this imperative code::
