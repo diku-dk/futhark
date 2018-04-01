@@ -915,6 +915,8 @@ are ``rotate``, ``reshape``, ``zip``, ``unzip``, and field projection.
 Further, unique types (see ``In-place updates``) must be explicitly
 annotated.
 
+.. _in-place-updates:
+
 In-place updates
 ----------------
 
