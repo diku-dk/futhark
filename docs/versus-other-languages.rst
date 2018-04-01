@@ -12,15 +12,15 @@ data-parallelism, so of its concepts and syntax are taken directly
 from established functional languages; mostly from Haskell and the
 members of the ML familiy.  While Futhark does add a few small
 conveniences (built-in array types) and one complicated and unusual
-feature (in-place updates via uniqueness types, see `In-place
-updates`), a programmer familiar with a common functional language
-should be able to easily deduce the meaning of a Futhark program, and
-quickly start writing their own programs.  To speed up this process,
-the following describes some of the various quirks and unexpected
-limitations imposed by Futhark.  It is recommended to read some of the
-`example programs`_ along this guide.  This is *not* a list of all
-Futhark features worth knowing, so do also skim the `Language
-Reference`.
+feature (in-place updates via uniqueness types, see
+:ref:`in-place-updates`), a programmer familiar with a common
+functional language should be able to easily deduce the meaning of a
+Futhark program, and quickly start writing their own programs.  To
+speed up this process, the following describes some of the various
+quirks and unexpected limitations imposed by Futhark.  It is
+recommended to read some of the `example programs`_ along this guide.
+This is *not* a list of all Futhark features worth knowing, so do also
+skim the `Language Reference`.
 
 .. _`example programs`: https://github.com/diku-dk/futhark/tree/master/examples
 
