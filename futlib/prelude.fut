@@ -3,6 +3,7 @@
 -- it does not depend on anything too big to be serialised
 -- efficiently.
 
+open import "/futlib/soacs"
 open import "/futlib/array"
 open import "/futlib/math"
 

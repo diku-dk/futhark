@@ -28,7 +28,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
      backticks, as in Haskell.  They are left-associative and have
      lowest priority.
 
-   * Numeric modules now have largest/smallest values.
+   * Numeric modules now have `largest`/`smallest` values.
+
+   * Numeric modules now have `sum`, `product`, `maximum`, and
+     `minimum` functions.
 
    * Higher-order functions are now supported (#323).
 
