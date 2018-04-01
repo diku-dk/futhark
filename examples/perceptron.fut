@@ -1,5 +1,8 @@
 -- An implementation of the venerable Perceptron algorithm.
 --
+-- For clarity, uses very few library functions; in practice the
+-- /futlib/linalg module would probably be useful here.
+--
 -- ==
 -- input {
 --
