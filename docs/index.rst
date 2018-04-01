@@ -31,6 +31,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    usage.rst
    language-reference.rst
    c-porting-guide.rst
+   versus-other-languages.rst
    hacking.rst
    binary-data-format.rst
 

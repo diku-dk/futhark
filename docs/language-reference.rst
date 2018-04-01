@@ -38,6 +38,8 @@ number.  Futhark has three distinct name spaces: terms, module types,
 and types.  Modules (including parametric modules) and values both
 share the term namespace.
 
+.. _primitives:
+
 Primitive Types and Values
 --------------------------
 
@@ -950,6 +952,8 @@ functions.  The issue is that we cannot control how many times a
 function argument is applied, or to what, so it is not safe to pass a
 function that consumes its argument.  In general, do not pass
 functions with unique parameter types to a higher-order function.
+
+.. _module-system:
 
 Module System
 -------------
