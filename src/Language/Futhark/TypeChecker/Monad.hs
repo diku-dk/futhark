@@ -256,7 +256,7 @@ instance Monoid Env where
 
 -- | The warnings produced by the type checker.  The 'Show' instance
 -- produces a human-readable description.
-newtype Warnings = Warnings [(SrcLoc, String)]
+newtype Warnings = Warnings [(SrcLoc, String)] deriving (Eq)
 
 instance Sem.Semigroup Warnings where
   Warnings ws1 <> Warnings ws2 = Warnings $ ws1 <> ws2

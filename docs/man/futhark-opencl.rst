@@ -39,6 +39,9 @@ OPTIONS
   Add directory to the list of directories searched when locating
   imported files.
 
+--Werror
+  Treat warnings as errors.
+
 -v verbose
   Enable debugging output.  If compilation fails due to a compiler
   error, the result of the last successful compiler step will be
