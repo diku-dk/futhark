@@ -20,7 +20,7 @@ let quickmedian [n] (xs: [n]i32): i32 =
   let (_, ys) =
     loop (i, ys) = (0, xs) while length ys > 1 do
       let pivot = ys[length ys/2]
-      let (lt, gte) = partition ((<pivot)) ys
+      let (lt, gte) = partition (<pivot) ys
       in if null lt then (i + 1, tail gte)
          else if i + length lt > n/2 then (i, lt)
          else (i + length lt, gte)
