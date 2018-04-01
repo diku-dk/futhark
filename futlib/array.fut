@@ -38,6 +38,10 @@ let split2 't (i: i32) (j: i32) (xs: []t): ([i]t, []t, []t) =
 -- | Return the elements of the array in reverse order.
 let reverse [n] 't (x: [n]t): [n]t = x[::-1]
 
+-- | Concatenate two arrays.  Warning: never try to perform a reduction
+-- with this operator; it will not work.
+let (++) 't (xs: []t) (ys: []t): *[]t = concat xs ys
+
 -- | Replace an element of the array with a new value.
 let update [n] 't (xs: *[n]t) (i: i32) (x: t): *[n]t = xs with [i] <- x
 
