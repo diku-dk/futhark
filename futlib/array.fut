@@ -2,6 +2,7 @@
 
 import "/futlib/math"
 import "/futlib/soacs"
+import "/futlib/functional"
 
 -- | The size of the outer dimension of an array.
 let length [n] 't (_: [n]t) = n
@@ -94,10 +95,10 @@ let range (start: i32) (end: i32) (step: i32): []i32 =
   in steps start w step
 
 -- | True if all of the input elements are true.
-let and (xs: []bool): bool = reduce (&&) true xs
+let and: []bool -> bool = all id
 
 -- | True if any of the input elements are true.
-let or (xs: []bool): bool = reduce (||) false xs
+let or: []bool -> bool = any id
 
 let pick [n] 't (flags: [n]bool) (xs: [n]t) (ys: [n]t): *[n]t =
   map3 (\flag x y -> if flag then x else y) flags xs ys
