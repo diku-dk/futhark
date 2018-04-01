@@ -8,7 +8,7 @@
 
 let kprime(n: i32, k: i32): bool =
   let (p,f) = (2, 0)
-  let (n,p,f) = loop (n, p, f) while f < k && p*p <= n do
+  let (n,_,f) = loop (n, p, f) while f < k && p*p <= n do
     let (n,f) = loop (n, f) while 0 == n % p do
       (n/p, f+1)
     in (n, p+1, f)
@@ -17,7 +17,7 @@ let kprime(n: i32, k: i32): bool =
 let main(m: i32): [][]i32 =
   let f k =
     let ps = replicate 10 0
-    let (i,c,ps) = loop (i,c,ps) = (2,0,ps) while c < 10 do
+    let (_,_,ps) = loop (i,c,ps) = (2,0,ps) while c < 10 do
       if kprime(i,k) then
         unsafe let ps[c] = i
                in (i+1, c+1, ps)
