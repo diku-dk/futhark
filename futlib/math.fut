@@ -53,6 +53,17 @@ module type numeric = {
 
   val largest: t
   val smallest: t
+
+  -- | Returns zero on empty input.
+  val sum: []t -> t
+
+  -- | Returns one on empty input.
+  val product: []t -> t
+
+  -- | Returns `smallest` on empty input.
+  val maximum: []t -> t
+  -- | Returns `largest` on empty input.
+  val minimum: []t -> t
 }
 
 module type integral = {
@@ -74,17 +85,6 @@ module type integral = {
   val num_bits: i32
   val get_bit: i32 -> t -> i32
   val set_bit: i32 -> t -> i32 -> t
-
-  -- | Returns zero on empty input.
-  val sum: []t -> t
-
-  -- | Returns one on empty input.
-  val product: []t -> t
-
-  -- | Returns `smallest` on empty input.
-  val maximum: []t -> t
-  -- | Returns `largest` on empty input.
-  val minimum: []t -> t
 }
 
 module type size = {
