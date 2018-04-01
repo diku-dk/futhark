@@ -75,4 +75,4 @@ let main(int_board: [][]i32, iterations: i32): [][]i32 =
   -- We accept the board as integers for convenience, and then we
   -- convert to booleans here.
   let board = to_bool_board int_board
-  in to_int_board (loop (board) for i < iterations do iteration board)
+  in to_int_board (loop board for _i < iterations do iteration board)

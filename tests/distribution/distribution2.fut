@@ -9,7 +9,7 @@
 
 import "/futlib/math"
 
-let take(n: i32, a: []f64): []f64 = let (first, rest) = unsafe split (n) a in first
+let take(n: i32, a: []f64): []f64 = let (first, _) = unsafe split (n) a in first
 
 let fftmp(num_paths: i32, md_c: [][]f64) (zi: []f64): []f64 =
     map (\(j: i32): f64  ->

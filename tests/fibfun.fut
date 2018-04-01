@@ -18,7 +18,7 @@ let computefibs [n] (arr: *[n]i32): *[]i32 =
                  in arr
 
 let fibs(arr: []i32, n: i32): *[][]i32 =
-    map (\(i: i32): *[]i32  -> computefibs(copy(arr))) (iota(n))
+    map (\_: *[]i32  -> computefibs(copy(arr))) (iota(n))
 
 -- Read an integer from the user, then compute that number of fibonacci numbers.
 let main(n: i32): []i32 =
