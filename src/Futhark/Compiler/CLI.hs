@@ -78,6 +78,9 @@ commandLineOptions =
                            importPath path } )
     "DIR")
     "Add directory to search path."
+  , Option [] ["Werror"]
+    (NoArg $ Right $ \config -> config { compilerWerror = True })
+    "Treat warnings as errors."
   ]
 
 wrapOption :: CompilerOption cfg -> CoreCompilerOption cfg
@@ -91,6 +94,7 @@ data CompilerConfig cfg =
                  , compilerVerbose :: Maybe (Maybe FilePath)
                  , compilerMode :: CompilerMode
                  , compilerImportPaths :: ImportPaths
+                 , compilerWerror :: Bool
                  , compilerConfig :: cfg
                  }
 
@@ -103,6 +107,7 @@ newCompilerConfig x = CompilerConfig { compilerOutput = Nothing
                                      , compilerVerbose = Nothing
                                      , compilerMode = ToExecutable
                                      , compilerImportPaths = mempty
+                                     , compilerWerror = False
                                      , compilerConfig = x
                                      }
 
@@ -114,4 +119,5 @@ futharkConfig :: CompilerConfig cfg -> FutharkConfig
 futharkConfig config =
   newFutharkConfig { futharkVerbose = compilerVerbose config
                    , futharkImportPaths = compilerImportPaths config
+                   , futharkWerror = compilerWerror config
                    }

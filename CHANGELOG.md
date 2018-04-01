@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * Numeric modules now have `sum`, `product`, `maximum`, and
      `minimum` functions.
 
+   * Added ``--Werror`` command line option to compilers.
+
    * Higher-order functions are now supported (#323).
 
    * Type inference is now supported, although with some limitations

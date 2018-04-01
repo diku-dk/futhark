@@ -49,6 +49,9 @@ OPTIONS
   Add directory to the list of directories searched when locating
   imported files.
 
+--Werror
+  Treat warnings as errors.
+
 -h
   Print help text to standard output and exit.
 

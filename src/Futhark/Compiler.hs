@@ -41,6 +41,7 @@ import Futhark.Util.Log
 data FutharkConfig = FutharkConfig
                      { futharkVerbose :: Maybe (Maybe FilePath)
                      , futharkWarn :: Bool -- ^ Warn if True.
+                     , futharkWerror :: Bool -- ^ If true, error on any warnings.
                      , futharkImportPaths :: ImportPaths
                      , futharkPermitRecursion :: Bool
                      }
@@ -48,6 +49,7 @@ data FutharkConfig = FutharkConfig
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
                                  , futharkWarn = True
+                                 , futharkWerror = False
                                  , futharkImportPaths = mempty
                                  , futharkPermitRecursion = True
                                  }
@@ -121,8 +123,11 @@ runPipelineOnProgram config b pipeline file = do
   (ws, prog_imports, namesrc) <-
     readProgram (futharkPermitRecursion config) b (futharkImportPaths config) file
 
-  when (futharkWarn config) $
+  when (futharkWarn config) $ do
     liftIO $ hPutStr stderr $ show ws
+    when (futharkWerror config && ws /= mempty) $
+      externalErrorS "Treating above warnings as errors due to --Werror."
+
   putNameSource namesrc
   when (pipelineVerbose pipeline_config) $
     logMsg ("Internalising program" :: String)
