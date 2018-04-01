@@ -20,7 +20,7 @@ speed up this process, the following describes some of the various
 quirks and unexpected limitations imposed by Futhark.  It is
 recommended to read some of the `example programs`_ along this guide.
 This is *not* a list of all Futhark features worth knowing, so do also
-skim the `Language Reference`.
+skim :ref:`language-reference`.
 
 .. _`example programs`: https://github.com/diku-dk/futhark/tree/master/examples
 
