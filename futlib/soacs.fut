@@ -1,6 +1,7 @@
 -- | Various Second-Order Array Combinators that are operationally
 -- parallel in a way that can be exploited by the compiler.  The
--- functions here are all recognised specially by the compiler.
+-- functions here are all recognised specially by the compiler (or
+-- built on those that are).
 
 -- | Apply the given function to each element of a single array.
 let map1 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
@@ -24,7 +25,10 @@ let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [
 
 -- | Reduce the array ``as`` with ``op``, with ``ne`` as the neutral
 -- element for ``op``.  The function ``op`` must be associative.  If
--- it is not, the return value is unspecified.
+-- it is not, the return value is unspecified.  If the value returned
+-- by the operator is an array, it must have the exact same size as
+-- the neutral element, and that must again have the same size as the
+-- elements of the input array.
 let reduce 'a (op: a -> a -> a) (ne: a) (as: []a): a =
   intrinsics.reduce (op, ne, as)
 
