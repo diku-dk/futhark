@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
      backticks, as in Haskell.  They are left-associative and have
      lowest priority.
 
+   * Numeric modules now have largest/smallest values.
+
    * Higher-order functions are now supported (#323).
 
    * Type inference is now supported, although with some limitations
