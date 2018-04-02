@@ -480,9 +480,9 @@ typeOf (Stream _ lam _ _) =
 typeOf (Concat _ x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` mempty
 typeOf (DoLoop _ pat _ _ _ _) = patternType pat
-typeOf (Lambda _ params _ _ (Info t) _) =
+typeOf (Lambda _ params _ _ (Info (als, t)) _) =
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
-  `setAliases` mempty
+  `setAliases` als
 typeOf (OpSection _ _ (Info pt1) (Info pt2) (Info ret) _) =
   foldFunType [pt1, pt2] ret `setAliases` mempty
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =

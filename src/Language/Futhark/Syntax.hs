@@ -113,6 +113,7 @@ class (Show vn,
        Show (f CompType),
        Show (f [TypeBase () ()]),
        Show (f StructType),
+       Show (f (Names, StructType)),
        Show (f ([StructType], CompType)),
        Show (f ([TypeBase () ()], [StructType], CompType)),
        Show (f (M.Map VName VName)),
@@ -596,7 +597,7 @@ data ExpBase f vn =
               -- ^ Numeric negation (ugly special case; Haskell did it first).
 
             | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
-              (Maybe (TypeDeclBase f vn)) (f StructType) SrcLoc
+              (Maybe (TypeDeclBase f vn)) (f (Names, StructType)) SrcLoc
 
             | OpSection (QualName vn) (f [TypeBase () ()])
               (f StructType) (f StructType) (f CompType) SrcLoc
