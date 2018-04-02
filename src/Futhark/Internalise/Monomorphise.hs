@@ -320,7 +320,7 @@ desugarOpSection qn e_left e_right il xtype ytype rettype loc = do
       body = BinOp qn (Info il) (e1, Info xtype) (e2, Info ytype)
                       (Info (paramtypes', ret)) loc
       rettype' = vacuousShapeAnnotations $ toStruct rettype
-  return $ Lambda [] (p1 ++ p2) body Nothing (Info rettype') loc
+  return $ Lambda [] (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
 
   where makeVarParam (Just e) _ = return (e, [])
         makeVarParam Nothing argtype = do

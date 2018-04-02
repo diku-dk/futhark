@@ -160,7 +160,7 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Lambda tparams params body ret t loc) =
     Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*>
-    traverse (mapOnStructType tv) t <*> pure loc
+    traverse (traverse $ mapOnStructType tv) t <*> pure loc
   astMap tv (OpSection name il t1 t2 t3 loc) =
     OpSection <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
     traverse (mapOnStructType tv) t1 <*> traverse (mapOnStructType tv) t2 <*>

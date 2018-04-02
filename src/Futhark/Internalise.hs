@@ -1108,7 +1108,7 @@ internaliseLambda :: InternaliseLambda
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
 
-internaliseLambda (E.Lambda tparams params body _ (Info rettype) loc) rowtypes =
+internaliseLambda (E.Lambda tparams params body _ (Info (_, rettype)) loc) rowtypes =
   bindingLambdaParams tparams params rowtypes $ \pcm params' -> do
     (rettype', rcm) <- internaliseReturnType rettype
     body' <- internaliseBody body
@@ -1118,17 +1118,17 @@ internaliseLambda (E.Lambda tparams params body _ (Info rettype) loc) rowtypes =
 internaliseLambda (E.OpSection unop (Info il) (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpFunToLambda unop il xtype ytype rettype
-  internaliseLambda (E.Lambda [] params body Nothing (Info rettype') loc) rowts
+  internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowts
 
 internaliseLambda (E.OpSectionLeft binop (Info il) e (Info paramtype, Info _) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop il paramtype rettype e $ uncurry $ flip (,)
-  internaliseLambda (E.Lambda [] params body Nothing (Info rettype') loc) rowts
+  internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowts
 
 internaliseLambda (E.OpSectionRight binop (Info il) e (Info _, Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop il paramtype rettype e id
-  internaliseLambda (E.Lambda [] params body Nothing (Info rettype') loc) rowts
+  internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowts
 
 internaliseLambda e rowtypes = do
   (_, _, remaining_params_ts) <- findFuncall e
@@ -1142,7 +1142,7 @@ internaliseLambda e rowtypes = do
                    e
                    param_args
       rettype' = E.vacuousShapeAnnotations $ rettype `E.setAliases` ()
-  internaliseLambda (E.Lambda [] params body Nothing (Info rettype') loc) rowtypes
+  internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowtypes
   where loc = srclocOf e
 
 binOpFunToLambda :: E.QualName VName -> [E.TypeBase () ()]

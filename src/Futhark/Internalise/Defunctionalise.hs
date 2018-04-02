@@ -346,7 +346,7 @@ defuncSoacExp e
       (pats, body, tp) <- etaExpand e
       let env = foldMap envFromPattern pats
       body' <- localEnv env $ defuncExp' body
-      return $ Lambda [] pats body' Nothing (Info tp) noLoc
+      return $ Lambda [] pats body' Nothing (Info (mempty, tp)) noLoc
   | otherwise = defuncExp' e
 
 etaExpand :: Exp -> DefM ([Pattern], Exp, StructType)
@@ -378,16 +378,16 @@ defuncDimIndex (DimSlice me1 me2 me3) =
 -- that have order 0 types (i.e., non-functional).
 defuncLet :: [TypeParam] -> [Pattern] -> Exp -> Info StructType
           -> DefM ([Pattern], Exp, StaticVal)
-defuncLet dims ps@(pat:pats) body rettype
+defuncLet dims ps@(pat:pats) body (Info rettype)
   | patternOrderZero pat = do
       let env = envFromPattern pat
           bound_by_pat = (`S.member` patternDimNames pat) . typeParamName
           (_pat_dims, rest_dims) = partition bound_by_pat dims
-      (pats', body', sv) <- localEnv env $ defuncLet rest_dims pats body rettype
-      closure <- defuncExp $ Lambda dims ps body Nothing rettype noLoc
+      (pats', body', sv) <- localEnv env $ defuncLet rest_dims pats body (Info rettype)
+      closure <- defuncExp $ Lambda dims ps body Nothing (Info (mempty, rettype)) noLoc
       return (pat : pats', body', DynamicFun closure sv)
   | otherwise = do
-      (e, sv) <- defuncExp $ Lambda dims ps body Nothing rettype noLoc
+      (e, sv) <- defuncExp $ Lambda dims ps body Nothing (Info (mempty, rettype)) noLoc
       return ([], e, sv)
 defuncLet _ [] body _ = do
   (body', sv) <- defuncExp body
