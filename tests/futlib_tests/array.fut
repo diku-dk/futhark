@@ -110,3 +110,13 @@ entry test_intersperse (x: i32) (xs: []i32) = intersperse x xs
 -- input { [1,0] [[1,2],[3,4],[5,6]] } output { [1,2,1,0,3,4,1,0,5,6] }
 
 entry test_intercalate [m] (x: [m]i32) (xs: [][m]i32) = intercalate x xs
+
+-- ==
+-- entry: test_foldl
+-- input { 10 } output { -45 }
+entry test_foldl (n: i32) = foldl (-) 0 (iota n)
+
+-- ==
+-- entry: test_foldr
+-- input { 10 } output { -5 }
+entry test_foldr (n: i32) = foldr (-) 0 (iota n)
