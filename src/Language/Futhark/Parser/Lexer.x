@@ -53,7 +53,8 @@ import Language.Futhark.Syntax (BinOp(..))
 @binop = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^") @opchar*
 @qualbinop = (@identifier ".")+ @binop
 
-@doc = "-- |"[^\n]*(\n$white*"--"[^\n]*)*
+@space = [\ \t\f\v]
+@doc = "-- |"[^\n]*(\n@space*"--"[^\n]*)*
 
 tokens :-
 
