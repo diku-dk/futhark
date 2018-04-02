@@ -1575,6 +1575,15 @@ checkFunBody body maybe_rettype _loc = do
     Just rettype -> do
       let rettype_structural = toStructural rettype
       void $ unifies rettype_structural body'
+      -- We also have to make sure that uniqueness matches.  This is done
+      -- explicitly, because uniqueness is ignored by unification.
+      rettype_structural' <- normaliseType rettype_structural
+      body_t <- expType body'
+      unless (body_t `subtypeOf` rettype_structural') $
+        typeError (srclocOf body) $ "Body type `" ++ pretty body_t ++
+        "' is not a subtype of annotated type `" ++
+        pretty rettype_structural' ++ "'."
+
     Nothing -> return ()
 
   return body'
