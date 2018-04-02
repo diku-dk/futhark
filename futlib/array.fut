@@ -110,3 +110,11 @@ let or: []bool -> bool = any id
 
 let pick [n] 't (flags: [n]bool) (xs: [n]t) (ys: [n]t): *[n]t =
   map3 (\flag x y -> if flag then x else y) flags xs ys
+
+-- | Perform a *sequential* left-fold of an array.
+let foldl 'a 'b (f: a -> b -> a) (acc: a) (bs: []b): a =
+  loop acc for b in bs do f acc b
+
+-- | Perform a *sequential* right-fold of an array.
+let foldr 'a 'b (f: b -> a -> a) (acc: a) (bs: []b): a =
+  foldl (flip f) acc (reverse bs)
