@@ -118,3 +118,11 @@ let foldl 'a 'b (f: a -> b -> a) (acc: a) (bs: []b): a =
 -- | Perform a *sequential* right-fold of an array.
 let foldr 'a 'b (f: b -> a -> a) (acc: a) (bs: []b): a =
   foldl (flip f) acc (reverse bs)
+
+-- | Create a value for each point in a one-dimensional index space.
+let tabulate 'a (n: i32) (f: i32 -> a): *[n]a =
+  map1 f (iota n)
+
+-- | Create a value for each point in a two-dimensional index space.
+let tabulate_2d 'a (n: i32) (m: i32) (f: i32 -> i32 -> a): *[n][m]a =
+  map1 (tabulate m <<| f) (iota n)
