@@ -214,11 +214,11 @@ checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
   (abstypes, env, specs') <- checkSpecs specs
   return (MTy abstypes $ ModEnv env, SigSpecs specs' loc)
-checkSigExp (SigWith s (TypeRef tname td) loc) = do
+checkSigExp (SigWith s (TypeRef tname td trloc) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
   td' <- checkTypeDecl td
   (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname $ unInfo $ expandedType td'
-  return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' td') loc)
+  return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' td' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
   (MTy s_abs e1_mod, e1') <- checkSigExp e1
   (env_for_e2, maybe_pname') <-

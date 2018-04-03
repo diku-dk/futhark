@@ -363,7 +363,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (SigExpBase f vn) wh
   ppr (SigVar v _) = ppr v
   ppr (SigParens e _) = parens $ ppr e
   ppr (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ss)
-  ppr (SigWith s (TypeRef v td) _) =
+  ppr (SigWith s (TypeRef v td _) _) =
     ppr s <+> text "with" <+> ppr v <> text " =" <+> ppr td
   ppr (SigArrow (Just v) e1 e2 _) =
     parens (ppr v <> colon <+> ppr e1) <+> text "->" <+> ppr e2
