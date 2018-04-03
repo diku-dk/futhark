@@ -133,9 +133,9 @@ transformExp (Range e1 me incl tp loc) = do
 
 transformExp e@Empty{} = return e
 
-transformExp (Var (QualName qs fname) (Info (il, ps, ret)) loc) = do
+transformExp (Var (QualName qs fname) (Info (il, t)) loc) = do
   fname' <- transformFName fname il loc
-  return $ Var (QualName qs fname') (Info (il, ps, ret)) loc
+  return $ Var (QualName qs fname') (Info (il, t)) loc
 
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
@@ -311,23 +311,18 @@ transformDimIndex (DimSlice me1 me2 me3) =
 
 -- | Transform an operator section into a lambda.
 desugarOpSection :: QualName VName -> Maybe Exp -> Maybe Exp -> [TypeBase () ()]
-                 -> StructType -> StructType -> CompType -> SrcLoc -> MonoM Exp
+                 -> StructType -> StructType -> PatternType -> SrcLoc -> MonoM Exp
 desugarOpSection qn e_left e_right il xtype ytype rettype loc = do
-  (e1, p1) <- makeVarParam e_left xtype
-  (e2, p2) <- makeVarParam e_right ytype
-  let (paramtypes, ret) = unfoldFunType rettype
-      paramtypes' = map (vacuousShapeAnnotations. toStruct) paramtypes
-      body = BinOp qn (Info il) (e1, Info xtype) (e2, Info ytype)
-                      (Info (paramtypes', ret)) loc
+  (e1, p1) <- makeVarParam e_left $ fromStruct xtype
+  (e2, p2) <- makeVarParam e_right $ fromStruct ytype
+  let body = BinOp qn (Info il) (e1, Info xtype) (e2, Info ytype) (Info rettype) loc
       rettype' = vacuousShapeAnnotations $ toStruct rettype
   return $ Lambda [] (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
 
   where makeVarParam (Just e) _ = return (e, [])
         makeVarParam Nothing argtype = do
           x <- newNameFromString "x"
-          let (pts, ret) = unfoldFunType argtype
-              ret' = fromStruct $ removeShapeAnnotations ret
-          return (Var (qualName x) (Info ([], pts, ret')) noLoc,
+          return (Var (qualName x) (Info ([], argtype)) noLoc,
                   [Id x (Info $ fromStruct argtype) noLoc])
 
 -- | Convert a collection of 'MonoBinding's to a nested sequence of let-bound,

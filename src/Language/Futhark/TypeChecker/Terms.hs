@@ -850,8 +850,9 @@ checkExp (BinOp op NoInfo (e1,_) (e2,_) NoInfo loc) = do
 
   (e1_pt : e2_pt : pts, rettype') <-
     checkFuncall loc ftype [e1_arg, e2_arg]
-  return $ BinOp op' (Info il) (e1', Info e1_pt) (e2', Info e2_pt)
-    (Info (pts, rettype')) loc
+  return $ BinOp op' (Info il) (e1', Info $ toStruct e1_pt)
+                               (e2', Info $ toStruct e2_pt)
+    (Info (foldr (Arrow mempty Nothing) rettype' pts)) loc
 
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
@@ -898,10 +899,7 @@ checkExp (Var qn NoInfo loc) = do
 
   (qn', il, t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
   observe $ Ident (qualLeaf qn') (Info t) loc
-  let (ps, ret) = unfoldFunType t
-      ps' = map (vacuousShapeAnnotations . toStruct) ps
-
-  foldM checkField (Var qn' (Info (il, ps', ret)) loc) fields
+  foldM checkField (Var qn' (Info (il, vacuousShapeAnnotations t)) loc) fields
   where findRootVar qs name = do
           r <- (Right <$> lookupVar loc (QualName qs name))
                `catchError` handler
@@ -936,8 +934,8 @@ checkExp (Apply e1 e2 NoInfo NoInfo loc) = do
         Right (fname, il, ftype) -> do
           let ftype' = removeShapeAnnotations ftype
           (paramtypes@(t1 : rest), rettype) <- checkApply loc ftype' arg
-          return $ Apply (Var fname (Info (il, paramtypes, rettype)) var_loc)
-                   e2' (Info $ diet t1) (Info (rest, rettype)) loc
+          return $ Apply (Var fname (Info (il, foldr (Arrow mempty Nothing) rettype paramtypes)) var_loc)
+                   e2' (Info $ diet t1) (Info $ foldr (Arrow mempty Nothing) rettype rest) loc
 
         -- Even if the function lookup failed, the applied expression
         -- may still be a record projection of a function.
@@ -950,7 +948,7 @@ checkExp (Apply e1 e2 NoInfo NoInfo loc) = do
           t <- expType e1'
           (t1 : paramtypes, rettype) <- checkApply loc t arg
           return $ Apply e1' e2' (Info $ diet t1)
-                   (Info (paramtypes, rettype)) loc
+                   (Info $ foldr (Arrow mempty Nothing) rettype paramtypes) loc
 
 checkExp (LetPat tparams pat e body pos) = do
   noTypeParamsPermitted tparams
@@ -1153,13 +1151,13 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
 
 checkExp (OpSection op _ _ _ _ loc) = do
   (op', il, ftype) <- lookupVar loc op
-  let (paramtypes, rettype) = unfoldFunType ftype
+  let (paramtypes, rettype) = unfoldFunType $ vacuousShapeAnnotations ftype
   case paramtypes of
     t1 : t2 : rest -> do
       let t1' = vacuousShapeAnnotations $ toStruct t1
           t2' = vacuousShapeAnnotations $ toStruct t2
-      return $ OpSection op' (Info il) (Info t1') (Info t2')
-                 (Info $ foldr (Arrow mempty Nothing) rettype rest ) loc
+          rettype' = foldFunType rest rettype
+      return $ OpSection op' (Info il) (Info t1') (Info t2') (Info rettype') loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
 
@@ -1169,9 +1167,9 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
   (paramtypes, rettype) <- checkApply loc ftype e_arg
   case paramtypes of
     t1 : t2 : rest ->
-      let rettype' = foldr (Arrow mempty Nothing .
-                             removeShapeAnnotations . fromStruct) rettype rest
-      in return $ OpSectionLeft op' (Info il) e' (Info t1, Info t2) (Info rettype') loc
+      let rettype' = foldFunType rest rettype
+      in return $ OpSectionLeft op' (Info il) e'
+         (Info $ toStruct t1, Info $ toStruct t2) (Info rettype') loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
 
@@ -1182,9 +1180,9 @@ checkExp (OpSectionRight op _ e _ _ loc) = do
     Arrow as1 m1 t1 (Arrow as2 m2 t2 ret) -> do
       (t2' : t1' : rest, rettype) <-
         checkApply loc (Arrow as2 m2 t2 (Arrow as1 m1 t1 ret)) e_arg
-      let rettype' = foldr (Arrow mempty Nothing .
-                             removeShapeAnnotations . fromStruct) rettype rest
-      return $ OpSectionRight op' (Info il) e' (Info t1', Info t2') (Info rettype') loc
+      let rettype' = foldFunType rest rettype
+      return $ OpSectionRight op' (Info il) e'
+        (Info $ toStruct t1', Info $ toStruct t2') (Info rettype') loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
 
@@ -1377,12 +1375,15 @@ findFuncall e =
 constructFuncall :: SrcLoc -> QualName VName -> [TypeBase () ()]
                  -> [Exp] -> [StructType] -> TypeBase dim Names
                  -> TermTypeM Exp
-constructFuncall loc fname il args paramtypes rettype = do
-  let rettype' = removeShapeAnnotations rettype
-  return $ foldl (\f (arg,d,remnant) -> Apply f arg (Info d) (Info (remnant, rettype')) loc)
-                 (Var fname (Info (il, paramtypes, rettype')) loc)
-                 (zip3 args (map diet paramtypes) $ drop 1 $ tails paramtypes)
-
+constructFuncall loc fname il args paramtypes rettype =
+  return $ foldl (\f (arg,d,remnant) ->
+                     Apply f arg (Info d)
+                     (Info (comb rettype' remnant)) loc)
+                 (Var fname (Info (il, comb rettype' paramtypes')) loc)
+                 (zip3 args (map diet paramtypes') $ drop 1 $ tails paramtypes')
+  where comb = foldr (Arrow mempty Nothing)
+        paramtypes' = map fromStruct paramtypes
+        rettype' = vacuousShapeAnnotations rettype
 
 type Arg = (CompType, Occurences, SrcLoc)
 
@@ -1396,7 +1397,7 @@ checkArg arg = do
   return (arg', (arg_t, dflow, srclocOf arg'))
 
 checkApply :: SrcLoc -> CompType -> Arg
-           -> TermTypeM ([StructType], CompType)
+           -> TermTypeM ([PatternType], PatternType)
 checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
   unify argloc (toStruct tp1) (toStruct argtype)
   let (paramtypes, rettype) = unfoldFunType tp2
@@ -1412,8 +1413,9 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
   occurs <- consumeArg argloc argtype (diet tp1')
   occur $ dflow `seqOccurences` occurs
 
-  return (map (vacuousShapeAnnotations . toStruct) $ tp1' : paramtypes',
-          returnType (toStruct rettype') [diet tp1'] [argtype])
+  return (map vacuousShapeAnnotations $ tp1' : paramtypes',
+          returnType (toStruct $ vacuousShapeAnnotations rettype')
+           [diet tp1'] [argtype])
 
 checkApply loc tfun@TypeVar{} arg = do
   tv <- newTypeVar loc "b"
@@ -1427,8 +1429,8 @@ checkApply loc ftype arg =
   " to an argument of type " ++ pretty (argType arg) ++ "."
 
 checkFuncall :: SrcLoc -> CompType -> [Arg]
-             -> TermTypeM ([StructType], CompType)
-checkFuncall _ ftype [] = return ([], ftype)
+             -> TermTypeM ([PatternType], PatternType)
+checkFuncall _ ftype [] = return ([], vacuousShapeAnnotations ftype)
 checkFuncall loc ftype ((argtype, dflow, argloc) : args) =
   case ftype of
     Arrow as _ t1 t2 -> do
@@ -1443,7 +1445,7 @@ checkFuncall loc ftype ((argtype, dflow, argloc) : args) =
       occur $ dflow `seqOccurences` occurs
 
       (ps, ret) <- checkFuncall loc t2' args
-      return (vacuousShapeAnnotations t1' : ps, ret)
+      return (fromStruct (vacuousShapeAnnotations t1') : ps, ret)
 
     _ -> typeError loc $
          "Attempt to apply an expression of type " ++ pretty ftype ++
@@ -1654,8 +1656,7 @@ checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
       ret' <- case maybe_ret' of
                 Nothing -> vacuousShapeAnnotations . (`setAliases` ()) <$> expType body'
                 Just (TypeDecl _ (Info ret)) -> return ret
-      let lamt = foldr (Arrow () Nothing . toStruct . patternType)
-                 (removeShapeAnnotations ret') params' `setAliases` mempty
+      let lamt = foldFunType (map patternType params') (removeShapeAnnotations $ fromStruct ret')
       void $ checkFuncall loc lamt args
       return (Lambda tparams' params' body' maybe_ret' (Info (mempty, toStruct ret')) loc,
               removeShapeAnnotations $ toStruct ret')
@@ -1671,8 +1672,8 @@ checkFunExp (OpSection op NoInfo NoInfo NoInfo NoInfo loc) args
   case paramtypes' of
     [x_t, y_t] ->
       return (OpSection op' (Info il)
-              (Info x_t) (Info y_t)
-              (Info $ removeShapeAnnotations rettype') loc,
+              (Info $ toStruct x_t) (Info $ toStruct y_t)
+              (Info rettype') loc,
               removeShapeAnnotations rettype' `setAliases` mempty)
     _ ->
       fail "Internal type checker error: BinOpFun got bad parameter type."
@@ -1685,8 +1686,8 @@ checkFunExp (OpSectionLeft binop NoInfo x _ _ loc) args
   | [arg] <- args = do
       (x', binop', il, xt, yt, ret) <- checkCurryBinOp id binop x loc arg
       return (OpSectionLeft binop' (Info il)
-              x' (Info xt, Info yt) (Info ret) loc,
-              ret `setAliases` mempty)
+              x' (Info $ toStruct xt, Info $ toStruct yt) (Info ret) loc,
+              toStructural ret)
   | otherwise =
       throwError $ ParameterMismatch (Just binop) loc (Left 1) $
       map (toStructural . argType) args
@@ -1696,7 +1697,7 @@ checkFunExp (OpSectionRight binop NoInfo x _ _ loc) args
       (x', binop', il, xt, yt, ret) <- checkCurryBinOp (uncurry $ flip (,)) binop x loc arg
       return (OpSectionRight binop' (Info il)
                x' (Info xt, Info yt) (Info ret) loc,
-              ret `setAliases` mempty)
+              toStructural ret)
   | otherwise =
       throwError $ ParameterMismatch (Just binop) loc (Left 1) $
       map (toStructural . argType) args
@@ -1714,20 +1715,20 @@ checkFunExp e args = do
     _             -> return ()
 
   let rettype' = removeShapeAnnotations rettype
-  e' <- constructFuncall loc fname' instance_list curryargexps' paramtypes rettype'
+  e' <- constructFuncall loc fname' instance_list curryargexps' (map toStruct paramtypes) rettype'
   return (e', rettype' `setAliases` mempty)
   where loc = srclocOf e
 
 checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
                 -> QualName Name -> ExpBase NoInfo Name -> SrcLoc -> Arg
                 -> TermTypeM (Exp, QualName VName, [TypeBase () ()],
-                              StructType, StructType, CompType)
+                              StructType, StructType, PatternType)
 checkCurryBinOp arg_ordering binop x loc y_arg = do
   (x', x_arg) <- checkArg x
   let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
   (binop', il, fun) <- lookupVar loc binop
   ([xt, yt], rettype) <- checkFuncall loc fun [first_arg,second_arg]
-  return (x', binop', il, xt, yt, removeShapeAnnotations rettype)
+  return (x', binop', il, toStruct xt, toStruct yt, rettype)
 
 --- Consumption
 

@@ -114,8 +114,7 @@ class (Show vn,
        Show (f [TypeBase () ()]),
        Show (f StructType),
        Show (f (Names, StructType)),
-       Show (f ([StructType], CompType)),
-       Show (f ([TypeBase () ()], [StructType], CompType)),
+       Show (f ([TypeBase () ()], PatternType)),
        Show (f (M.Map VName VName)),
        Show (f [RecordArrayElemTypeBase () Names]),
        Show (f Uniqueness),
@@ -573,11 +572,9 @@ data ExpBase f vn =
 
             | Empty (TypeDeclBase f vn) (f CompType) SrcLoc
 
-            | Var (QualName vn) (f ([TypeBase () ()], [StructType], CompType)) SrcLoc
+            | Var (QualName vn) (f ([TypeBase () ()], PatternType)) SrcLoc
             -- ^ The @[TypeBase () ()]@ list is the instantiation list, which
-            -- contains the instantiated types for any type parameters. The
-            -- @[StructType]@ list indicates the type of any remaining
-            -- parameters, if this is the name of a function.
+            -- contains the instantiated types for any type parameters.
 
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
             -- ^ Type ascription: @e : t@.
@@ -589,9 +586,7 @@ data ExpBase f vn =
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
 
-            | Apply (ExpBase f vn) (ExpBase f vn) (f Diet) (f ([StructType], CompType)) SrcLoc
-            -- ^ The @[StructType]@ list indicates the type of any
-            -- remaining parameters.
+            | Apply (ExpBase f vn) (ExpBase f vn) (f Diet) (f PatternType) SrcLoc
 
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
@@ -600,13 +595,13 @@ data ExpBase f vn =
               (Maybe (TypeDeclBase f vn)) (f (Names, StructType)) SrcLoc
 
             | OpSection (QualName vn) (f [TypeBase () ()])
-              (f StructType) (f StructType) (f CompType) SrcLoc
+              (f StructType) (f StructType) (f PatternType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.
             | OpSectionLeft (QualName vn) (f [TypeBase () ()])
-              (ExpBase f vn) (f StructType, f StructType) (f CompType) SrcLoc
+              (ExpBase f vn) (f StructType, f StructType) (f PatternType) SrcLoc
               -- ^ @2+@; first type is operand, second is result.
             | OpSectionRight (QualName vn) (f [TypeBase () ()])
-              (ExpBase f vn) (f StructType, f StructType) (f CompType) SrcLoc
+              (ExpBase f vn) (f StructType, f StructType) (f PatternType) SrcLoc
               -- ^ @+2@; first type is operand, second is result.
 
             | DoLoop
@@ -619,7 +614,7 @@ data ExpBase f vn =
 
             | BinOp (QualName vn) (f [TypeBase () ()])
               (ExpBase f vn, f StructType) (ExpBase f vn, f StructType)
-              (f ([StructType], CompType)) SrcLoc
+              (f PatternType) SrcLoc
             -- ^ The first annotation is the instantiation list.
 
             | Project Name (ExpBase f vn) (f CompType) SrcLoc
