@@ -39,8 +39,11 @@ data Usage = Consumed SrcLoc
            | Observed SrcLoc
            deriving (Eq, Ord, Show)
 
+-- | The consumption set is a Maybe so we can distinguish whether a
+-- consumption took place, but the variable went out of scope since,
+-- or no consumption at all took place.
 data Occurence = Occurence { observed :: Names
-                           , consumed :: Names
+                           , consumed :: Maybe Names
                            , location :: SrcLoc
                            }
              deriving (Eq, Show)
@@ -49,13 +52,15 @@ instance Located Occurence where
   locOf = locOf . location
 
 observation :: Names -> SrcLoc -> Occurence
-observation = flip Occurence S.empty
+observation = flip Occurence Nothing
 
 consumption :: Names -> SrcLoc -> Occurence
-consumption = Occurence S.empty
+consumption = Occurence S.empty . Just
 
+-- | A null occurence is one that we can remove without affecting
+-- anything.
 nullOccurence :: Occurence -> Bool
-nullOccurence occ = S.null (observed occ) && S.null (consumed occ)
+nullOccurence occ = S.null (observed occ) && isNothing (consumed occ)
 
 type Occurences = [Occurence]
 
@@ -65,7 +70,7 @@ usageMap :: Occurences -> UsageMap
 usageMap = foldl comb M.empty
   where comb m (Occurence obs cons loc) =
           let m' = S.foldl' (ins $ Observed loc) m obs
-          in S.foldl' (ins $ Consumed loc) m' cons
+          in S.foldl' (ins $ Consumed loc) m' $ fromMaybe mempty cons
         ins v m k = M.insertWith (++) k [v] m
 
 combineOccurences :: VName -> Usage -> Usage -> Either TypeError Usage
@@ -86,10 +91,13 @@ allObserved :: Occurences -> Names
 allObserved = S.unions . map observed
 
 allConsumed :: Occurences -> Names
-allConsumed = S.unions . map consumed
+allConsumed = S.unions . map (fromMaybe mempty . consumed)
 
 allOccuring :: Occurences -> Names
 allOccuring occs = allConsumed occs <> allObserved occs
+
+anyConsumption :: Occurences -> Maybe Occurence
+anyConsumption = find (isJust . consumed)
 
 seqOccurences :: Occurences -> Occurences -> Occurences
 seqOccurences occurs1 occurs2 =
@@ -102,7 +110,7 @@ altOccurences :: Occurences -> Occurences -> Occurences
 altOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt1 occurs1 ++ map filt2 occurs2
   where filt1 occ =
-          occ { consumed = consumed occ `S.difference` cons2
+          occ { consumed = S.difference <$> consumed occ <*> pure cons2
               , observed = observed occ `S.difference` cons2 }
         filt2 occ =
           occ { consumed = consumed occ
@@ -604,7 +612,9 @@ binding bnds = check . local (`bindVars` bnds)
           where split = unzip .
                         map (\occ ->
                              let (obs1, obs2) = divide $ observed occ
-                                 (con1, con2) = divide $ consumed occ
+                                 occ_cons = divide <$> consumed occ
+                                 con1 = fst <$> occ_cons
+                                 con2 = snd <$> occ_cons
                              in (occ { observed = obs1, consumed = con1 },
                                  occ { observed = obs2, consumed = con2 }))
                 names = S.fromList $ map identName bnds
@@ -933,9 +943,9 @@ checkExp (Apply e1 e2 NoInfo NoInfo loc) = do
       case r of
         Right (fname, il, ftype) -> do
           let ftype' = removeShapeAnnotations ftype
-          (paramtypes@(t1 : rest), rettype) <- checkApply loc ftype' arg
-          return $ Apply (Var fname (Info (il, foldr (Arrow mempty Nothing) rettype paramtypes)) var_loc)
-                   e2' (Info $ diet t1) (Info $ foldr (Arrow mempty Nothing) rettype rest) loc
+          (t1, rt) <- checkApply loc ftype' arg
+          return $ Apply (Var fname (Info (il, Arrow mempty Nothing t1 rt)) var_loc)
+                   e2' (Info $ diet t1) (Info rt) loc
 
         -- Even if the function lookup failed, the applied expression
         -- may still be a record projection of a function.
@@ -946,19 +956,23 @@ checkExp (Apply e1 e2 NoInfo NoInfo loc) = do
   where checkGeneralApp e2' arg = do
           e1' <- checkExp e1
           t <- expType e1'
-          (t1 : paramtypes, rettype) <- checkApply loc t arg
-          return $ Apply e1' e2' (Info $ diet t1)
-                   (Info $ foldr (Arrow mempty Nothing) rettype paramtypes) loc
+          (t1, rt) <- checkApply loc t arg
+          return $ Apply e1' e2' (Info $ diet t1) (Info rt) loc
 
-checkExp (LetPat tparams pat e body pos) = do
+checkExp (LetPat tparams pat e body loc) = do
   noTypeParamsPermitted tparams
-  sequentially (checkExp e) $ \e' _ -> do
+  sequentially (checkExp e) $ \e' e_occs -> do
     -- Not technically an ascription, but we want the pattern to have
     -- exactly the type of 'e'.
     t <- expType e'
+    case anyConsumption e_occs of
+      Just c ->
+        let msg = "of value computed with consumption at " ++ locStr (location c)
+        in zeroOrderType loc msg t
+      _ -> return ()
     bindingPattern tparams pat (Ascribed $ vacuousShapeAnnotations t) $ \tparams' pat' -> do
       body' <- checkExp body
-      return $ LetPat tparams' pat' e' body' pos
+      return $ LetPat tparams' pat' e' body' loc
 
 checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   bindSpaced [(Term, name)] $
@@ -1156,20 +1170,18 @@ checkExp (OpSection op _ _ _ _ loc) = do
     t1 : t2 : rest -> do
       let t1' = vacuousShapeAnnotations $ toStruct t1
           t2' = vacuousShapeAnnotations $ toStruct t2
-          rettype' = foldFunType rest rettype
-      return $ OpSection op' (Info il) (Info t1') (Info t2') (Info rettype') loc
+      return $ OpSection op' (Info il) (Info t1') (Info t2') (Info $ foldFunType rest rettype) loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
 
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', il, ftype) <- lookupVar loc op
   (e', e_arg) <- checkArg e
-  (paramtypes, rettype) <- checkApply loc ftype e_arg
-  case paramtypes of
-    t1 : t2 : rest ->
-      let rettype' = foldFunType rest rettype
-      in return $ OpSectionLeft op' (Info il) e'
-         (Info $ toStruct t1, Info $ toStruct t2) (Info rettype') loc
+  (t1, rt) <- checkApply loc ftype e_arg
+  case rt of
+    Arrow _ _ t2 rettype ->
+      return $ OpSectionLeft op' (Info il) e'
+      (Info $ toStruct t1, Info $ toStruct t2) (Info rettype) loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
 
@@ -1178,11 +1190,10 @@ checkExp (OpSectionRight op _ e _ _ loc) = do
   (e', e_arg) <- checkArg e
   case ftype of
     Arrow as1 m1 t1 (Arrow as2 m2 t2 ret) -> do
-      (t2' : t1' : rest, rettype) <-
+      (t2', Arrow _ _ t1' rettype) <-
         checkApply loc (Arrow as2 m2 t2 (Arrow as1 m1 t1 ret)) e_arg
-      let rettype' = foldFunType rest rettype
       return $ OpSectionRight op' (Info il) e'
-        (Info $ toStruct t1', Info $ toStruct t2') (Info rettype') loc
+        (Info $ toStruct t1', Info $ toStruct t2') (Info rettype) loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
 
@@ -1397,15 +1408,12 @@ checkArg arg = do
   return (arg', (arg_t, dflow, srclocOf arg'))
 
 checkApply :: SrcLoc -> CompType -> Arg
-           -> TermTypeM ([PatternType], PatternType)
+           -> TermTypeM (PatternType, PatternType)
 checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
   unify argloc (toStruct tp1) (toStruct argtype)
-  let (paramtypes, rettype) = unfoldFunType tp2
 
   -- Perform substitutions of instantiated variables in the types.
-  rettype' <- normaliseType rettype
   tp1' <- normaliseType tp1
-  paramtypes' <- mapM normaliseType paramtypes
 
   occur [observation as loc]
 
@@ -1413,9 +1421,9 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
   occurs <- consumeArg argloc argtype (diet tp1')
   occur $ dflow `seqOccurences` occurs
 
-  return (map vacuousShapeAnnotations $ tp1' : paramtypes',
-          returnType (toStruct $ vacuousShapeAnnotations rettype')
-           [diet tp1'] [argtype])
+  return (vacuousShapeAnnotations tp1',
+          vacuousShapeAnnotations $
+           returnType (toStruct tp2) [diet tp1'] [argtype])
 
 checkApply loc tfun@TypeVar{} arg = do
   tv <- newTypeVar loc "b"
