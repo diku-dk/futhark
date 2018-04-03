@@ -206,6 +206,7 @@ maskAliases t Consume = t `setAliases` mempty
 maskAliases t Observe = t
 maskAliases (Record ets) (RecordDiet ds) =
   Record $ M.intersectionWith maskAliases ets ds
+maskAliases t FuncDiet{} = t
 maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
 -- | Convert any type to one that has rank information, no alias
@@ -533,7 +534,8 @@ returnType (Prim t) _ _ = Prim t
 returnType (TypeVar t targs) ds args =
   TypeVar t $ map (\arg -> typeArgReturnType arg ds args) targs
 returnType (Arrow _ v t1 t2) ds args =
-  Arrow mempty v (bimap id (const mempty) t1) (returnType t2 ds args)
+  Arrow als v (bimap id (const mempty) t1) (returnType t2 ds args)
+  where als = foldMap aliases $ zipWith maskAliases args ds
 
 typeArgReturnType :: TypeArg shape () -> [Diet] -> [CompType]
                   -> TypeArg shape Names
