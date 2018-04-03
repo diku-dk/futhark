@@ -41,6 +41,7 @@ module Language.Futhark.Attributes
   , concreteType
   , orderZero
   , unfoldFunType
+  , foldFunType
   , typeVars
 
   -- * Operations on types
@@ -440,15 +441,12 @@ typeOf (RecordLit fs _) =
 typeOf (ArrayLit _ (Info t) _) = t
 typeOf (Range _ _ _ (Info t) _) = t
 typeOf (Empty _ (Info t) _) = t
-typeOf (BinOp _ _ _ _ (Info (ts, ret)) _) =
-  foldFunType ts ret
+typeOf (BinOp _ _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
-typeOf (Var qn (Info (_, ts, ret)) _) =
-  foldFunType ts (ret `addAliases` S.insert (qualLeaf qn))
+typeOf (Var qn (Info (_, t)) _) = removeShapeAnnotations t `addAliases` S.insert (qualLeaf qn)
 typeOf (Ascript e _ _) = typeOf e
-typeOf (Apply _ _ _ (Info (ts, ret)) _) =
-  foldFunType ts ret
+typeOf (Apply _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ _ _ body _) = typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
@@ -484,15 +482,14 @@ typeOf (Lambda _ params _ _ (Info (als, t)) _) =
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
   `setAliases` als
 typeOf (OpSection _ _ (Info pt1) (Info pt2) (Info ret) _) =
-  foldFunType [pt1, pt2] ret `setAliases` mempty
+  removeShapeAnnotations $ foldFunType [fromStruct pt1, fromStruct pt2] ret
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
-  foldFunType [pt2] ret `setAliases` mempty
+  removeShapeAnnotations $ foldFunType [fromStruct pt2] ret
 typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
-  foldFunType [pt1] ret `setAliases` mempty
+  removeShapeAnnotations $ foldFunType [fromStruct pt1] ret
 
-foldFunType :: [StructType] -> CompType -> CompType
-foldFunType ps ret =
-  foldr (Arrow mempty Nothing . removeShapeAnnotations . fromStruct) ret ps
+foldFunType :: Monoid as => [TypeBase dim as] -> TypeBase dim as -> TypeBase dim as
+foldFunType ps ret = foldr (Arrow mempty Nothing) ret ps
 
 -- | Extract the parameter types and return type from a type.
 -- If the type is not an arrow type, the list of parameter types is empty.

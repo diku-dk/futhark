@@ -221,7 +221,7 @@ internaliseExp desc (E.Parens e _) =
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 
-internaliseExp _ (E.Var (E.QualName _ name) (Info (_, _, t)) loc) = do
+internaliseExp _ (E.Var (E.QualName _ name) (Info (_, t)) loc) = do
   subst <- asks $ M.lookup name . envSubsts
   case subst of
     Just substs -> return substs
@@ -231,7 +231,8 @@ internaliseExp _ (E.Var (E.QualName _ name) (Info (_, _, t)) loc) = do
       is_const <- lookupConstant loc name
       case is_const of
         Just ses -> return ses
-        Nothing -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
+        Nothing -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t') loc)
+  where t' = removeShapeAnnotations t
 
 internaliseExp desc (E.Index e idxs _ loc) = do
   vs <- internaliseExpToVars "indexed" e
@@ -254,7 +255,7 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           M.singleton name <$> internaliseExp desc e
         internaliseField (E.RecordFieldImplicit name t loc) =
           internaliseField $ E.RecordFieldExplicit (baseName name)
-          (E.Var (E.qualName name) (([], [],) <$> t) loc) loc
+          (E.Var (E.qualName name) (([],) . vacuousShapeAnnotations <$> t) loc) loc
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
   -- If this is a multidimensional array literal of primitives, we
@@ -570,7 +571,8 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   srcs <- internaliseExpToVars "src" $
-          E.Var (qualName (E.identName src)) (([], [],) <$> E.identType src) (srclocOf src)
+          E.Var (qualName (E.identName src)) (([],) . vacuousShapeAnnotations <$> E.identType src)
+          (srclocOf src)
   ves <- internaliseExp "lw_val" ve
   dims <- case srcs of
             [] -> return [] -- Will this happen?
@@ -606,7 +608,7 @@ internaliseExp desc (E.Update src slice ve loc) = do
   internaliseExp desc $
     E.LetPat [] (E.Id src_name (E.Info $ E.vacuousShapeAnnotations src_t) loc) src
     (E.LetWith dest_ident src_ident slice ve
-      (E.Var (E.qualName dest_name) (E.Info ([], [], src_t)) loc)
+      (E.Var (E.qualName dest_name) (E.Info ([], E.vacuousShapeAnnotations src_t)) loc)
       loc)
     loc
 
@@ -812,10 +814,12 @@ internaliseExp desc (E.BinOp op _ (xe,_) (ye,_) _ loc)
       internalise desc
 
 -- User-defined operators are just the same as a function call.
-internaliseExp desc (E.BinOp op (Info il) (xarg, Info xt) (yarg, Info yt) (Info (paramts, ret)) loc) =
+internaliseExp desc (E.BinOp op (Info il) (xarg, Info xt) (yarg, Info yt) (Info t) loc) =
   internaliseExp desc $
-  E.Apply (E.Apply (E.Var op (Info (il, [], ret)) loc) xarg (Info $ E.diet xt) (Info (xt : paramts, ret)) loc)
-          yarg (Info $ E.diet yt) (Info (paramts, ret)) loc
+  E.Apply (E.Apply (E.Var op (Info (il, foldFunType [E.fromStruct xt,
+                                                     E.fromStruct yt] t)) loc) xarg (Info $ E.diet xt)
+           (Info $ foldFunType [E.fromStruct yt] t) loc)
+          yarg (Info $ E.diet yt) (Info t) loc
 
 internaliseExp desc (E.Project k e (Info rt) _) = do
   n <- internalisedTypeSize $ rt `setAliases` ()
@@ -1095,11 +1099,13 @@ simpleCmpOp desc op x y =
   letTupExp' desc $ I.BasicOp $ I.CmpOp op x y
 
 findFuncall :: E.Exp -> InternaliseM (E.QualName VName, [E.Exp], [E.StructType])
-findFuncall (E.Var fname (Info (_, remaining, _)) _) =
-  return (fname, [], remaining)
-findFuncall (E.Apply f arg _ (Info (remaining, _)) _) = do
+findFuncall (E.Var fname (Info (_, t)) _) =
+  let (remaining, _) = unfoldFunType t
+  in return (fname, [], map E.toStruct remaining)
+findFuncall (E.Apply f arg _ (Info t) _) = do
+  let (remaining, _) = unfoldFunType t
   (fname, args, _) <- findFuncall f
-  return (fname, args ++ [arg], remaining)
+  return (fname, args ++ [arg], map E.toStruct remaining)
 findFuncall e =
   fail $ "Invalid function expression in application: " ++ pretty e
 
@@ -1115,20 +1121,11 @@ internaliseLambda (E.Lambda tparams params body _ (Info (_, rettype)) loc) rowty
     mapM_ (uncurry (internaliseDimConstant loc)) $ pcm<>rcm
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.OpSection unop (Info il) (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
-  (params, body, rettype') <-
-    binOpFunToLambda unop il xtype ytype rettype
-  internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowts
+internaliseLambda E.OpSection{} _ = fail "internaliseLambda: unexpected OpSection"
 
-internaliseLambda (E.OpSectionLeft binop (Info il) e (Info paramtype, Info _) (Info rettype) loc) rowts = do
-  (params, body, rettype') <-
-    binOpCurriedToLambda binop il paramtype rettype e $ uncurry $ flip (,)
-  internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowts
+internaliseLambda E.OpSectionLeft{} _ = fail "internaliseLambda: unexpected OpSectionLeft"
 
-internaliseLambda (E.OpSectionRight binop (Info il) e (Info _, Info paramtype) (Info rettype) loc) rowts = do
-  (params, body, rettype') <-
-    binOpCurriedToLambda binop il paramtype rettype e id
-  internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowts
+internaliseLambda E.OpSectionRight{} _ = fail "internaliseLambda: unexpected OpSectionRight"
 
 internaliseLambda e rowtypes = do
   (_, _, remaining_params_ts) <- findFuncall e
@@ -1136,48 +1133,15 @@ internaliseLambda e rowtypes = do
     name <- newVName "not_curried"
     return (E.Id name (Info $ E.vacuousShapeAnnotations $ et `setAliases` mempty) loc,
             E.Var (E.qualName name)
-             (Info ([], [], E.removeShapeAnnotations $ et `setAliases` mempty)) loc)
+             (Info ([], et `setAliases` mempty)) loc)
   let rettype = E.typeOf e
-      body = foldl (\f arg -> E.Apply f arg (Info E.Observe) (Info ([], rettype)) loc)
+      body = foldl (\f arg -> E.Apply f arg (Info E.Observe)
+                              (Info $ E.vacuousShapeAnnotations rettype) loc)
                    e
                    param_args
       rettype' = E.vacuousShapeAnnotations $ rettype `E.setAliases` ()
   internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowtypes
   where loc = srclocOf e
-
-binOpFunToLambda :: E.QualName VName -> [E.TypeBase () ()]
-                 -> E.StructType -> E.StructType -> E.CompType
-                 -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
-binOpFunToLambda op il xtype ytype rettype = do
-  x_name <- newNameFromString "binop_param_x"
-  y_name <- newNameFromString "binop_param_y"
-  let xtype' = xtype `setAliases` mempty
-      ytype' = ytype `setAliases` mempty
-      xtype'' = removeShapeAnnotations xtype'
-      ytype'' = removeShapeAnnotations ytype'
-  return ([E.Id x_name (Info xtype') noLoc,
-           E.Id y_name (Info xtype') noLoc],
-          E.BinOp op (Info il)
-           (E.Var (qualName x_name) (Info ([], [], xtype'')) noLoc, Info xtype)
-           (E.Var (qualName y_name) (Info ([], [], ytype'')) noLoc, Info ytype)
-           (Info ([], rettype)) noLoc,
-          E.vacuousShapeAnnotations $ E.toStruct rettype)
-
-binOpCurriedToLambda :: E.QualName VName -> [E.TypeBase () ()]
-                     -> E.StructType -> E.CompType
-                     -> E.Exp
-                     -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
-                     -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
-binOpCurriedToLambda op il paramtype rettype e swap = do
-  paramname <- newNameFromString "binop_param_noncurried"
-  let paramtype' = E.removeShapeAnnotations $ paramtype `setAliases` mempty
-      (x', y') = swap (E.Var (qualName paramname) (Info ([], [], paramtype')) noLoc, e)
-      x_t = E.vacuousShapeAnnotations $ E.toStruct $ E.typeOf x'
-      y_t = E.vacuousShapeAnnotations $ E.toStruct $ E.typeOf y'
-  return ([E.Id paramname (Info $ E.vacuousShapeAnnotations $
-                           paramtype `setAliases` mempty) noLoc],
-          E.BinOp op (Info il) (x', Info x_t) (y', Info y_t) (Info ([], rettype)) noLoc,
-          E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()
 internaliseDimConstant loc fname name =

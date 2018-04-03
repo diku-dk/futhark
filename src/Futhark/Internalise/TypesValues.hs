@@ -154,7 +154,7 @@ internaliseTypeM orig_t =
       dims <- internaliseShape shape
       ets <- internaliseElemType et
       return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets ]
-    E.Arrow{} -> fail "internaliseTypeM: cannot handle function type."
+    E.Arrow{} -> fail $ "internaliseTypeM: cannot handle function type: " ++ pretty orig_t
 
   where internaliseElemType (E.ArrayPolyElem v _ _) =
           map (`toDecl` Nonunique) <$> applyType v
@@ -248,8 +248,8 @@ fullyApplyTypeM (E.Array at shape u) = inArray at
           fs' <- traverse (fullyApplyTypeM . fst . E.recordArrayElemToType) fs
           maybe nope return $ E.arrayOf (E.Record fs') shape u
         nope = fail "fullyApplyTypeM: cannot construct array."
-fullyApplyTypeM E.Arrow{} =
-  fail "fullyApplyTypeM: cannot handle function type."
+fullyApplyTypeM t@E.Arrow{} =
+  fail $ "fullyApplyTypeM: cannot handle function type: " ++ pretty t
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?

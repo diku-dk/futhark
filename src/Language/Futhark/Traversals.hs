@@ -50,10 +50,9 @@ class ASTMappable x where
   astMap :: Monad m => ASTMapper m -> x -> m x
 
 instance ASTMappable (ExpBase Info VName) where
-  astMap tv (Var name (Info (il, remt, t)) loc) =
+  astMap tv (Var name (Info (il, t)) loc) =
     Var <$> mapOnQualName tv name <*>
-    (Info <$> ((,,) <$> mapM onType il <*>
-               mapM (mapOnStructType tv) remt <*> mapOnCompType tv t)) <*>
+    (Info <$> ((,) <$> mapM onType il <*> mapOnPatternType tv t)) <*>
     pure loc
     where onType = fmap removeShapeAnnotations . mapOnStructType tv .
                    vacuousShapeAnnotations
@@ -76,12 +75,11 @@ instance ASTMappable (ExpBase Info VName) where
     Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
   astMap tv (Empty tdecl t loc) =
     Empty <$> astMap tv tdecl <*> traverse (astMap tv) t <*> pure loc
-  astMap tv (BinOp fname il (x,xt) (y,yt) (Info (rem_t, t)) loc) =
+  astMap tv (BinOp fname il (x,xt) (y,yt) (Info t) loc) =
     BinOp <$> mapOnQualName tv fname <*> traverse (mapM onType) il <*>
     ((,) <$> mapOnExp tv x <*> traverse (mapOnStructType tv) xt) <*>
     ((,) <$> mapOnExp tv y <*> traverse (mapOnStructType tv) yt) <*>
-    (Info <$> ((,) <$> mapM (mapOnStructType tv) rem_t <*>
-               mapOnCompType tv t)) <*> pure loc
+    (Info <$> mapOnPatternType tv t) <*> pure loc
     where onType = fmap removeShapeAnnotations . mapOnStructType tv .
                    vacuousShapeAnnotations
   astMap tv (Negate x loc) =
@@ -89,10 +87,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (If c texp fexp t loc) =
     If <$> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
     traverse (mapOnCompType tv) t <*> pure loc
-  astMap tv (Apply f arg d (Info (remnant, t)) loc) =
+  astMap tv (Apply f arg d (Info t) loc) =
     Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*>
-    pure d <*> (Info <$> ((,) <$> mapM (mapOnStructType tv) remnant <*>
-                                  mapOnCompType tv t)) <*>
+    pure d <*> (Info <$> mapOnPatternType tv t) <*>
     pure loc
   astMap tv (LetPat tparams pat e body loc) =
     LetPat <$> mapM (astMap tv) tparams <*>
@@ -164,15 +161,15 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (OpSection name il t1 t2 t3 loc) =
     OpSection <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
     traverse (mapOnStructType tv) t1 <*> traverse (mapOnStructType tv) t2 <*>
-    traverse (mapOnCompType tv) t3 <*> pure loc
+    traverse (mapOnPatternType tv) t3 <*> pure loc
   astMap tv (OpSectionLeft name il arg t1 t2 loc) =
     OpSectionLeft <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
     mapOnExp tv arg <*> astMap tv t1 <*>
-    traverse (mapOnCompType tv) t2 <*> pure loc
+    traverse (mapOnPatternType tv) t2 <*> pure loc
   astMap tv (OpSectionRight name il arg t1 t2 loc) =
     OpSectionRight <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
     mapOnExp tv arg <*> astMap tv t1 <*>
-    traverse (mapOnCompType tv) t2 <*> pure loc
+    traverse (mapOnPatternType tv) t2 <*> pure loc
   astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =
     DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
     mapOnExp tv mergeexp <*> astMap tv form <*>
