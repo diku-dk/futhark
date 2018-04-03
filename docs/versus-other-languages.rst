@@ -6,7 +6,7 @@ Futhark Compared to Other Functional Languages
 This guide is intended to quickly get programmers familiar with other
 functional languages acquainted with Futhark.
 
-Futhark is a a simple language with a complex compiler.
+Futhark is a simple language with a complex compiler.
 Functional programming is fundamentally well suited to
 data-parallelism, so Futhark's syntax and underlying concepts are taken directly
 from established functional languages; mostly from Haskell and the
