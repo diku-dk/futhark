@@ -936,28 +936,11 @@ checkExp (Negate arg loc) = do
   return $ Negate arg' loc
 
 checkExp (Apply e1 e2 NoInfo NoInfo loc) = do
+  e1' <- checkExp e1
   (e2', arg) <- checkArg e2
-  case e1 of
-    Var qn _ var_loc -> do
-      r <- (Right <$> lookupVar loc qn) `catchError` (return . Left)
-      case r of
-        Right (fname, il, ftype) -> do
-          let ftype' = removeShapeAnnotations ftype
-          (t1, rt) <- checkApply loc ftype' arg
-          return $ Apply (Var fname (Info (il, Arrow mempty Nothing t1 rt)) var_loc)
-                   e2' (Info $ diet t1) (Info rt) loc
-
-        -- Even if the function lookup failed, the applied expression
-        -- may still be a record projection of a function.
-        Left _ -> checkGeneralApp e2' arg
-
-    _ -> checkGeneralApp e2' arg
-
-  where checkGeneralApp e2' arg = do
-          e1' <- checkExp e1
-          t <- expType e1'
-          (t1, rt) <- checkApply loc t arg
-          return $ Apply e1' e2' (Info $ diet t1) (Info rt) loc
+  t <- expType e1'
+  (t1, rt) <- checkApply loc t arg
+  return $ Apply e1' e2' (Info $ diet t1) (Info rt) loc
 
 checkExp (LetPat tparams pat e body loc) = do
   noTypeParamsPermitted tparams
