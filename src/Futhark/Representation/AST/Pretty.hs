@@ -242,7 +242,9 @@ instance PrettyLore lore => Pretty (Exp lore) where
                       | otherwise         = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args _ _) =
-    text (nameToString fname) <> apply (map (align . ppr . fst) args)
+    text (nameToString fname) <> apply (map (align . pprArg) args)
+    where pprArg (arg, Consume) = text "*" <> ppr arg
+          pprArg (arg, Observe) = ppr arg
   ppr (Op op) = ppr op
   ppr (DoLoop ctx val form loopbody) =
     annot (mapMaybe ppAnnot (ctxparams++valparams)) $

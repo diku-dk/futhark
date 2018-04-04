@@ -80,10 +80,10 @@ let md5 [n] (ms: [n][16]u32): md5 =
 let main [n] (ms: [n]u8): [16]u8 =
   let padding = 64 - (n % 64)
   let n_padded = n + padding
-  let ms_padded = concat ms
-                         (bytes 0x80u32)
-                         (replicate (padding-12) 0x0u8)
-                         (bytes (u32.i32(n*8)))
-                         [0u8,0u8,0u8,0u8]
+  let ms_padded = ms ++
+                  bytes 0x80u32 ++
+                  replicate (padding-12) 0x0u8 ++
+                  bytes (u32.i32(n*8)) ++
+                  [0u8,0u8,0u8,0u8]
   let (a,b,c,d) = md5 (map unbytes_block (reshape (n_padded / 64, 64) ms_padded))
   in reshape 16 (map bytes [a,b,c,d])

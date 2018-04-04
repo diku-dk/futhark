@@ -365,8 +365,8 @@ module pcg32: rng_engine with int.t = u32 = {
     map (\i -> (rand {state = state * u64.i32 (hash (i^n)), inc}).1) (iota n)
 
   let join_rng (rngs: []rng) =
-    let states = map (\x -> x.state) rngs
-    let incs = map (\x -> x.inc) rngs
+    let states = map (\(x: rng) -> x.state) rngs
+    let incs = map (\(x: rng) -> x.inc) rngs
     let state = reduce (*) 1u64 states
     let inc = reduce (|) 0u64 incs
     in {state, inc}

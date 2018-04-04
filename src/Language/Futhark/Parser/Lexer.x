@@ -153,7 +153,6 @@ keyword s =
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
     "rotate"       -> ROTATE
-    "map"          -> MAP
     "zip"          -> ZIP
     "unzip"        -> UNZIP
     "concat"       -> CONCAT
@@ -346,7 +345,6 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | MAP
            | RESHAPE
            | REARRANGE
            | ROTATE
