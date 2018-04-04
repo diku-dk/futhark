@@ -2,10 +2,10 @@
 -- that loop interchange produced identity maps.
 
 let main [n][m] (xss: *[n][m]i32) (n: i32) =
-  map (\(xs: *[]i32) ->
+  map (\(xs: []i32) ->
          let ys = copy xs
          let (xs, _) =
-           loop (zs: *[m]i32, ys: *[m]i32) = (xs, ys) for i < n do
-             let xs' = scatter ys (iota m) (rotate 1 zs)
+           loop (zs: [m]i32, ys: [m]i32) = (xs, ys) for i < n do
+             let xs' = scatter (copy ys) (iota m) (rotate 1 zs)
              in (xs', zs)
          in xs) xss

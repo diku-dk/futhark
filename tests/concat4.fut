@@ -8,5 +8,5 @@
 -- structure { Concat 0 }
 
 let main(as: []i32, bs: []i32, cs: []i32, i: i32): i32 =
-  let ds = concat as bs cs
+  let ds = concat (concat as bs) cs
   in ds[i]

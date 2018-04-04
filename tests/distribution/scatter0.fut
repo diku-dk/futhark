@@ -3,4 +3,4 @@
 -- output { [[1337, 2, 42], [1337, 5, 42]] }
 
 let main (xss: *[][]i32) (is: []i32) (vs: []i32) =
-  map (\(xs: *[]i32) -> scatter xs is vs) xss
+  map (\(xs: []i32) -> scatter (copy xs) is vs) xss
