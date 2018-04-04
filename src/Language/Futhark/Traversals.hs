@@ -126,7 +126,7 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Rearrange perm e loc) =
     pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
   astMap tv (Map fun e t loc) =
-    pure Map <*> mapOnExp tv fun <*> mapM (mapOnExp tv) e <*>
+    Map <$> mapOnExp tv fun <*> mapOnExp tv e <*>
     traverse (mapOnCompType tv) t <*> pure loc
   astMap tv (Reduce comm fun startexp arrexp loc) =
     Reduce comm <$> mapOnExp tv fun <*>
@@ -152,22 +152,22 @@ instance ASTMappable (ExpBase Info VName) where
     where mapOnStreamForm (MapLike o) = pure $ MapLike o
           mapOnStreamForm (RedLike o comm lam) =
               RedLike o comm <$> mapOnExp tv lam
-  astMap tv (Concat i x ys loc) =
-    Concat i <$> mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
+  astMap tv (Concat i x y loc) =
+    Concat i <$> mapOnExp tv x <*> mapOnExp tv y <*> pure loc
   astMap tv (Lambda tparams params body ret t loc) =
     Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*>
     traverse (traverse $ mapOnStructType tv) t <*> pure loc
   astMap tv (OpSection name il t1 t2 t3 loc) =
-    OpSection <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
+    OpSection <$> mapOnQualName tv name <*> traverse (mapM $ mapOnType tv) il <*>
     traverse (mapOnStructType tv) t1 <*> traverse (mapOnStructType tv) t2 <*>
     traverse (mapOnPatternType tv) t3 <*> pure loc
   astMap tv (OpSectionLeft name il arg t1 t2 loc) =
-    OpSectionLeft <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
+    OpSectionLeft <$> mapOnQualName tv name <*> traverse (mapM $ mapOnType tv) il <*>
     mapOnExp tv arg <*> astMap tv t1 <*>
     traverse (mapOnPatternType tv) t2 <*> pure loc
   astMap tv (OpSectionRight name il arg t1 t2 loc) =
-    OpSectionRight <$> mapOnQualName tv name <*> traverse (astMap tv) il <*>
+    OpSectionRight <$> mapOnQualName tv name <*> traverse (mapM $ mapOnType tv) il <*>
     mapOnExp tv arg <*> astMap tv t1 <*>
     traverse (mapOnPatternType tv) t2 <*> pure loc
   astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =

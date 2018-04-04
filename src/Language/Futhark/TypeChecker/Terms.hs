@@ -447,8 +447,8 @@ unifyExpTypes e1 e2 = do
 unifyTypeAliases :: CompType -> CompType -> CompType
 unifyTypeAliases t1 t2 =
   case (t1, t2) of
-    (Array et1 shape1 u1, Array et2 _ _) ->
-      Array (unifyArrayElems et1 et2) shape1 u1
+    (Array et1 shape1 u1, Array et2 _ u2) ->
+      Array (unifyArrayElems et1 et2) shape1 $ min u1 u2
     (Record f1, Record f2) ->
       Record $ M.intersectionWith unifyTypeAliases f1 f2
     (TypeVar v targs1, TypeVar _ targs2) ->
@@ -464,8 +464,8 @@ unifyTypeAliases t1 t2 =
 
         unifyRecordArray (RecordArrayElem at1) (RecordArrayElem at2) =
           RecordArrayElem $ unifyArrayElems at1 at2
-        unifyRecordArray (RecordArrayArrayElem at1 shape1 u) (RecordArrayArrayElem at2 _ _) =
-          RecordArrayArrayElem (unifyArrayElems at1 at2) shape1 u
+        unifyRecordArray (RecordArrayArrayElem at1 shape1 u1) (RecordArrayArrayElem at2 _ u2) =
+          RecordArrayArrayElem (unifyArrayElems at1 at2) shape1 $ min u1 u2
         unifyRecordArray x _ = x
 
         unifyTypeArg (TypeArgType t1' loc) (TypeArgType t2' _) =
@@ -1104,34 +1104,18 @@ checkExp (Unzip e _ loc) = do
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc
 
-checkExp (Map fun arrexps NoInfo loc) = do
-  (arrexps', args) <- unzip <$> mapM checkSOACArrayArg arrexps
-  (fun', rt) <- checkFunExp fun args
-  t <- arrayOfM loc rt (rank 1) Unique
-  when (length arrexps > 1) $
-    warn loc $ "Multi-array maps are deprecated. " ++
-    "Use `zip' or one of `map2'/`map3'/`map4'/`map5'."
-  return $ Map fun' arrexps' (Info $ t `setAliases` mempty) loc
-
+checkExp Map{} = error "Map nodes should not appear in source program"
 checkExp Reduce{} = error "Reduce nodes should not appear in source program"
 checkExp Scan{} = error "Scan nodes should not appear in source program"
 checkExp Filter{} = error "Filter nodes should not appear in source program"
 checkExp Partition{} = error "Partition nodes should not appear in source program"
 checkExp Stream{} = error "Stream nodes should not appear in source program"
 
-checkExp (Concat i arr1exp arr2exps loc) = do
-  arr1exp'  <- checkExp arr1exp
-  let arr1_t = toStructural (typeOf arr1exp') `setUniqueness` Nonunique
-  arr2exps' <- mapM (unifies arr1_t <=< checkExp) arr2exps
-  mapM_ ofProperRank arr2exps'
-  return $ Concat i arr1exp' arr2exps' loc
-  where ofProperRank e
-          | arrayRank t <= i =
-              typeError loc $ "Cannot concat array " ++ pretty e
-              ++ " of type " ++ pretty t
-              ++ " across dimension " ++ pretty i ++ "."
-          | otherwise = return ()
-          where t = typeOf e
+checkExp (Concat i e1 e2 loc) = do
+  (t, _) <- newArrayType loc "e" (i+1)
+  e1'  <- unifies t =<< checkExp e1
+  e2' <- unifies t =<< checkExp e2
+  return $ Concat i e1' e2' loc
 
 checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
   bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
@@ -1286,18 +1270,19 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       -- Now check that the loop returned the right type.
       unify body_loc (toStruct body_t) $ toStruct $ patternType pat'
       body_t' <- normaliseType body_t
-      unless (body_t' `subtypeOf` patternType pat') $
+      pat_t <- normaliseType $ patternType pat'
+      unless (body_t' `subtypeOf` pat_t) $
         throwError $ UnexpectedType body_loc
         (toStructural body_t')
-        [toStructural $ patternType pat']
+        [toStructural pat_t]
 
       -- Check that the new values of consumed merge parameters do not
       -- alias something bound outside the loop, AND that anything
       -- returned for a unique merge parameter does not alias anything
       -- else returned.
       bound_outside <- asks $ S.fromList . M.keys . scopeVtable
-      let checkMergeReturn (Id pat_v (Info pat_t) _) t
-            | unique pat_t,
+      let checkMergeReturn (Id pat_v (Info pat_v_t) _) t
+            | unique pat_v_t,
               v:_ <- S.toList $ aliases t `S.intersection` bound_outside =
                 lift $ typeError loc $ "Loop return value corresponding to merge parameter " ++
                 pretty pat_v ++ " aliases " ++ pretty v ++ "."
@@ -1306,11 +1291,11 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
                 unless (S.null $ aliases t `S.intersection` cons) $
                   lift $ typeError loc $ "Loop return value for merge parameter " ++
                   pretty pat_v ++ " aliases other consumed merge parameter."
-                when (unique pat_t &&
+                when (unique pat_v_t &&
                       not (S.null (aliases t `S.intersection` (cons<>obs)))) $
                   lift $ typeError loc $ "Loop return value for consuming merge parameter " ++
                   pretty pat_v ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
-                if unique pat_t
+                if unique pat_v_t
                   then put (cons<>aliases t, obs)
                   else put (cons, obs<>aliases t)
           checkMergeReturn (TuplePattern pats _) t | Just ts <- isTupleRecord t =
@@ -1322,17 +1307,6 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       if body_cons' == body_cons && patternType pat' == patternType pat
         then return pat'
         else convergePattern pat' body_cons' body_t' body_loc
-
-checkSOACArrayArg :: ExpBase NoInfo Name
-                  -> TermTypeM (Exp, Arg)
-checkSOACArrayArg e = do
-  (e', (t, dflow, argloc)) <- checkArg e
-  (arr_t, _) <- newArrayType argloc "e" 1
-  unify (srclocOf e) arr_t (toStruct t)
-  t' <- normaliseType t
-  case peelArray 1 t' of
-    Nothing -> typeError argloc "SOAC argument is not an array"
-    Just rt -> return (e', (rt, dflow, argloc))
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
@@ -1354,30 +1328,6 @@ sequentially m1 m2 = do
   (b, m2flow) <- collectOccurences $ m2 a m1flow
   occur $ m1flow `seqOccurences` m2flow
   return b
-
-findFuncall :: UncheckedExp -> TermTypeM (QualName Name, [UncheckedExp])
-findFuncall (Parens e _) =
-  findFuncall e
-findFuncall (Var fname _ _) =
-  return (fname, [])
-findFuncall (Apply f arg _ _ _) = do
-  (fname, args) <- findFuncall f
-  return (fname, args ++ [arg])
-findFuncall e =
-  typeError (srclocOf e) "Invalid function expression in application."
-
-constructFuncall :: SrcLoc -> QualName VName -> [TypeBase () ()]
-                 -> [Exp] -> [StructType] -> TypeBase dim Names
-                 -> TermTypeM Exp
-constructFuncall loc fname il args paramtypes rettype =
-  return $ foldl (\f (arg,d,remnant) ->
-                     Apply f arg (Info d)
-                     (Info (comb rettype' remnant)) loc)
-                 (Var fname (Info (il, comb rettype' paramtypes')) loc)
-                 (zip3 args (map diet paramtypes') $ drop 1 $ tails paramtypes')
-  where comb = foldr (Arrow mempty Nothing)
-        paramtypes' = map fromStruct paramtypes
-        rettype' = vacuousShapeAnnotations rettype
 
 type Arg = (CompType, Occurences, SrcLoc)
 
@@ -1629,99 +1579,6 @@ closeOverTypes substs tparams ts = do
         constrained _ = return ()
         ambiguous loc = typeError loc $ unlines ["Type of expression is ambiguous.",
                                                  "Add a type annotation to disambiguate the type."]
-
--- | Checking an expression that is in function position, like the
--- functional argument to a map.
-checkFunExp :: UncheckedExp -> [Arg] -> TermTypeM (Exp, TypeBase () ())
-checkFunExp (Parens e loc) args = do
-  (e', t) <- checkFunExp e args
-  return (Parens e' loc, t)
-
-checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
-  | length params == length args = do
-      let params_with_ts = zip params $ map (Inferred . fromStruct . argType) args
-      (maybe_ret', tparams', params', body') <-
-        noUnique $ bindingPatternGroup tparams params_with_ts $ \tparams' params' -> do
-        maybe_ret' <- traverse checkTypeDecl maybe_ret
-        body' <- checkFunBody body (unInfo . expandedType <$> maybe_ret') loc
-        return (maybe_ret', tparams', params', body')
-
-      ret' <- case maybe_ret' of
-                Nothing -> vacuousShapeAnnotations . (`setAliases` ()) <$> expType body'
-                Just (TypeDecl _ (Info ret)) -> return ret
-      let lamt = foldFunType (map patternType params') (removeShapeAnnotations $ fromStruct ret')
-      void $ checkFuncall loc lamt args
-      return (Lambda tparams' params' body' maybe_ret' (Info (mempty, toStruct ret')) loc,
-              removeShapeAnnotations $ toStruct ret')
-  | otherwise = typeError loc $ "Anonymous function defined with " ++
-                show (length params) ++ " parameters, but expected to take " ++
-                show (length args) ++ " arguments."
-
-checkFunExp (OpSection op NoInfo NoInfo NoInfo NoInfo loc) args
-  | [x_arg,y_arg] <- args = do
-  (op', il, ftype) <- lookupVar loc op
-  (paramtypes', rettype') <- checkFuncall loc ftype [x_arg,y_arg]
-
-  case paramtypes' of
-    [x_t, y_t] ->
-      return (OpSection op' (Info il)
-              (Info $ toStruct x_t) (Info $ toStruct y_t)
-              (Info rettype') loc,
-              removeShapeAnnotations rettype' `setAliases` mempty)
-    _ ->
-      fail "Internal type checker error: BinOpFun got bad parameter type."
-
-  | otherwise =
-      throwError $ ParameterMismatch (Just op) loc (Left 2) $
-      map (toStructural . argType) args
-
-checkFunExp (OpSectionLeft binop NoInfo x _ _ loc) args
-  | [arg] <- args = do
-      (x', binop', il, xt, yt, ret) <- checkCurryBinOp id binop x loc arg
-      return (OpSectionLeft binop' (Info il)
-              x' (Info $ toStruct xt, Info $ toStruct yt) (Info ret) loc,
-              toStructural ret)
-  | otherwise =
-      throwError $ ParameterMismatch (Just binop) loc (Left 1) $
-      map (toStructural . argType) args
-
-checkFunExp (OpSectionRight binop NoInfo x _ _ loc) args
-  | [arg] <- args = do
-      (x', binop', il, xt, yt, ret) <- checkCurryBinOp (uncurry $ flip (,)) binop x loc arg
-      return (OpSectionRight binop' (Info il)
-               x' (Info xt, Info yt) (Info ret) loc,
-              toStructural ret)
-  | otherwise =
-      throwError $ ParameterMismatch (Just binop) loc (Left 1) $
-      map (toStructural . argType) args
-
-checkFunExp e args = do
-  (fname, curryargexps) <- findFuncall e
-  (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
-  let all_args = curryargs ++ args
-  (fname', instance_list, ftype) <- lookupVar loc fname
-
-  (paramtypes, rettype) <- checkFuncall loc ftype all_args
-
-  case find (unique . snd) $ zip curryargexps paramtypes of
-    Just (arg, _) -> throwError $ CurriedConsumption fname $ srclocOf arg
-    _             -> return ()
-
-  let rettype' = removeShapeAnnotations rettype
-  e' <- constructFuncall loc fname' instance_list curryargexps' (map toStruct paramtypes) rettype'
-  return (e', rettype' `setAliases` mempty)
-  where loc = srclocOf e
-
-checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
-                -> QualName Name -> ExpBase NoInfo Name -> SrcLoc -> Arg
-                -> TermTypeM (Exp, QualName VName, [TypeBase () ()],
-                              StructType, StructType, PatternType)
-checkCurryBinOp arg_ordering binop x loc y_arg = do
-  (x', x_arg) <- checkArg x
-  let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
-  (binop', il, fun) <- lookupVar loc binop
-  ([xt, yt], rettype) <- checkFuncall loc fun [first_arg,second_arg]
-  return (x', binop', il, toStruct xt, toStruct yt, rettype)
 
 --- Consumption
 

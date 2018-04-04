@@ -628,7 +628,7 @@ data ExpBase f vn =
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
-            | Concat Int (ExpBase f vn) [ExpBase f vn] SrcLoc
+            | Concat Int (ExpBase f vn) (ExpBase f vn) SrcLoc
             -- ^ @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.  The
             -- static integer indicates which dimension to concatenate
             -- across.
@@ -649,12 +649,8 @@ data ExpBase f vn =
 
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
-            | Map (ExpBase f vn) [ExpBase f vn] (f CompType) SrcLoc
-             -- ^ @map (+1) ([1, 2, ..., n]) = [2, 3, ..., n+1]@.
-             -- OR
-             -- ^ @zipWith (+) ([1, 2, ..., n]) ([1, 2, ..., n]) = [2, 4, ... , 2*n]@.
-             --
-             -- @map@ when exactly one array argument, otherwise @zipWith@.
+            | Map (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
+             -- ^ @map (+1) [1, 2, ..., n] = [2, 3, ..., n+1]@.
 
             | Reduce Commutativity (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
              -- ^ @reduce (+) 0 ([1,2,...,n]) = (0+1+2+...+n)@.
@@ -741,7 +737,7 @@ instance Located (ExpBase f vn) where
   locOf (Reshape _ _ _ loc)            = locOf loc
   locOf (Rearrange _ _ pos)            = locOf pos
   locOf (Rotate _ _ _ pos)             = locOf pos
-  locOf (Map _ _ _ pos)                = locOf pos
+  locOf (Map _ _ _ loc)                = locOf loc
   locOf (Reduce _ _ _ _ pos)           = locOf pos
   locOf (Zip _ _ _ _ loc)              = locOf loc
   locOf (Unzip _ _ pos)                = locOf pos

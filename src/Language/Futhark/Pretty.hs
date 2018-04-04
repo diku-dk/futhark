@@ -236,7 +236,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   pprPrec _ (Rotate d x e _) =
     text "rotate@" <> ppr d <> apply [ppr x, ppr e]
-  pprPrec _ (Map lam as _ _) = ppSOAC "map" [lam] as
+  pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduce_comm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Stream form lam arr _) =

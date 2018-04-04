@@ -5,4 +5,4 @@
 -- structure distributed { Kernel 0 }
 
 let main (xss: [][]i32) (yss: [][]i32) (zss: [][]i32) =
-  map (\(xs, ys, zs) -> concat xs ys zs) (zip xss yss zss)
+  map (\(xs, ys, zs) -> concat xs (concat ys zs)) (zip xss yss zss)

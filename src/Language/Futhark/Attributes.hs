@@ -464,7 +464,7 @@ typeOf (Zip _ _ _ (Info t) _) = t
 typeOf (Unzip _ ts _) =
   tupleRecord $ map unInfo ts
 typeOf (Unsafe e _) = typeOf e
-typeOf (Map _ _ (Info t) _) = t
+typeOf (Map _ _ (Info t) _) = t `setUniqueness` Unique
 typeOf (Reduce _ _ _ arr _) =
   stripArray 1 (typeOf arr) `setAliases` mempty
 typeOf (Scan _ _ arr _) = typeOf arr `setAliases` mempty `setUniqueness` Unique
@@ -716,6 +716,8 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                            Array (ArrayPrimElem (Signed Int32) ()) (rank 1) Nonunique,
                            Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique] $
                           Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique),
+
+              ("map", IntrinsicPolyFun [tp_a, tp_b] [t_a `arr` t_b, arr_a] uarr_b),
 
               ("reduce", IntrinsicPolyFun [tp_a]
                          [t_a `arr` (t_a `arr` t_a), t_a, arr_a] t_a),
