@@ -179,6 +179,8 @@ transformExp (Apply e1 e2 d tp loc) =
       | intrinsic "scan" v ->
           transformExp $ Scan op ne arr loc
     (Var v _ _, TupLit [f, arr] _)
+      | intrinsic "map" v ->
+          transformExp $ Map f arr (removeShapeAnnotations <$> tp) loc
       | intrinsic "filter" v ->
           transformExp $ Filter f arr loc
     (Var v _ _, TupLit [Literal (SignedValue (Int32Value k)) _, f, arr] _)
@@ -258,8 +260,8 @@ transformExp (Update e1 idxs e2 loc) =
   Update <$> transformExp e1 <*> mapM transformDimIndex idxs
          <*> transformExp e2 <*> pure loc
 
-transformExp (Concat i e1 es loc) =
-  Concat i <$> transformExp e1 <*> mapM transformExp es <*> pure loc
+transformExp (Concat i e1 e2 loc) =
+  Concat i <$> transformExp e1 <*> transformExp e2 <*> pure loc
 
 transformExp (Reshape e1 e2 t loc) =
   Reshape <$> transformExp e1 <*> transformExp e2 <*> pure t <*> pure loc
@@ -270,8 +272,8 @@ transformExp (Rearrange is e0 loc) =
 transformExp (Rotate i e1 e2 loc) =
   Rotate i <$> transformExp e1 <*> transformExp e2 <*> pure loc
 
-transformExp (Map e1 es tp loc) =
-  Map <$> transformExp e1 <*> mapM transformExp es <*> pure tp <*> pure loc
+transformExp (Map e1 es t loc) =
+  Map <$> transformExp e1 <*> transformExp es <*> pure t <*> pure loc
 
 transformExp (Reduce comm e1 e2 e3 loc) =
   Reduce comm <$> transformExp e1 <*> transformExp e2

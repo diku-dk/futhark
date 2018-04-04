@@ -12,6 +12,7 @@ import           Data.List
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import qualified Data.Semigroup as Sem
 
 import           Futhark.MonadFreshNames
 import           Language.Futhark
@@ -37,9 +38,23 @@ extendEnv :: VName -> StaticVal -> DefM a -> DefM a
 extendEnv vn sv = local (M.insert vn sv)
 
 -- | Returns the defunctionalization environment restricted
--- to the given set of variable names.
-restrictEnvTo :: Names -> DefM Env
-restrictEnvTo names = asks $ M.filterWithKey $ \k _ -> k `S.member` names
+-- to the given set of variable names and types.
+restrictEnvTo :: NameSet -> DefM Env
+restrictEnvTo (NameSet m) = asks restrict
+  where restrict = M.mapMaybeWithKey $ \k sv -> do
+          u <- M.lookup k m
+          Just $ restrict' u sv
+        restrict' Nonunique (Dynamic t) =
+          Dynamic $ t `setUniqueness`  Nonunique
+        restrict' _ (Dynamic t) =
+          Dynamic t
+        restrict' u (LambdaSV dims pat e env) =
+          LambdaSV dims pat e $ M.map (restrict' u) env
+        restrict' u (RecordSV fields) =
+          RecordSV $ map (fmap $ restrict' u) fields
+        restrict' u (DynamicFun (e, sv1) sv2) =
+          DynamicFun (e, restrict' u sv1) $ restrict' u sv2
+        restrict' _ IntrinsicSV = IntrinsicSV
 
 -- | Defunctionalization monad.
 newtype DefM a = DefM (RWS Env [Dec] VNameSource a)
@@ -187,7 +202,7 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
   -- Construct a record literal that closes over the environment of
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
-  env <- restrictEnvTo $ freeVars e
+  env <- restrictEnvTo (freeVars e)
   let (fields, env') = unzip $ map closureFromDynamicFun $ M.toList env
   return (RecordLit fields loc, LambdaSV dims pat e0' $ M.fromList env')
 
@@ -212,8 +227,8 @@ defuncExp (DoLoop tparams pat e1 form e3 loc) = do
   (e1', sv1) <- defuncExp e1
   let env1 = matchPatternSV pat sv1
   (form', env2) <- case form of
-    For ident e2  -> do e2' <- defuncExp' e2
-                        return (For ident e2', envFromIdent ident)
+    For v e2      -> do e2' <- defuncExp' e2
+                        return (For v e2', envFromIdent v)
     ForIn pat2 e2 -> do e2' <- defuncExp' e2
                         return (ForIn pat2 e2', envFromPattern pat2)
     While e2      -> do e2' <- localEnv (env1 <> env_dim) $ defuncExp' e2
@@ -256,10 +271,10 @@ defuncExp (Update e1 idxs e2 loc) = do
   e2' <- defuncExp' e2
   return (Update e1' idxs' e2' loc, sv)
 
-defuncExp e@(Concat i e1 es loc) = do
+defuncExp e@(Concat i e1 e2 loc) = do
   e1' <- defuncExp' e1
-  es' <- mapM defuncExp' es
-  return (Concat i e1' es' loc, Dynamic $ typeOf e)
+  e2' <- defuncExp' e2
+  return (Concat i e1' e2' loc, Dynamic $ typeOf e)
 
 defuncExp e@(Reshape e1 e2 info loc) = do
   e1' <- defuncExp' e1
@@ -275,10 +290,10 @@ defuncExp e@(Rotate i e1 e2 loc) = do
   e2' <- defuncExp' e2
   return (Rotate i e1' e2' loc, Dynamic $ typeOf e)
 
-defuncExp e@(Map fun es tp loc) = do
+defuncExp e@(Map fun arr t loc) = do
   fun' <- defuncSoacExp fun
-  es' <- mapM defuncExp' es
-  return (Map fun' es' tp loc, Dynamic $ typeOf e)
+  arr' <- defuncExp' arr
+  return (Map fun' arr' t loc, Dynamic $ typeOf e)
 
 defuncExp e@(Reduce comm fun ne arr loc) = do
   fun' <- defuncSoacExp fun
@@ -411,20 +426,28 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
           env_dim = envFromDimNames dims
       (e0', sv) <- local (const $ env' <> closure_env <> env_dim) $ defuncExp e0
 
-      -- Lift lambda to top-level function definition.
-      fname <- newNameFromString "lifted"
-      let params = [ buildEnvPattern closure_env
-                   , updatePattern pat sv2 ]
-          rettype = buildRetType closure_env pat $ typeOf e0'
-      liftValDec fname rettype dims params e0'
+      let closure_pat = buildEnvPattern closure_env
+          pat' = updatePattern pat sv2
 
-      let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
-          t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
-          fname' = qualName fname
-      return (Parens (Apply (Apply (Var fname' (Info ([], Arrow mempty Nothing (fromStruct t1) $
-                                                          Arrow mempty Nothing (fromStruct t2) rettype)) loc)
-                             e1' (Info Observe) (Info $ Arrow mempty Nothing (fromStruct t2) rettype) loc)
-                      e2' d (Info rettype) loc) noLoc, sv)
+      -- Inline certain trivial lifted functions immediately.
+      case e0' of
+        RecordLit{} | null dims ->
+          return (LetPat [] closure_pat e1' (LetPat [] pat' e2' e0' noLoc) noLoc,
+                  sv)
+        _ -> do
+          -- Lift lambda to top-level function definition.
+          let params = [closure_pat, pat']
+              rettype = buildRetType closure_env params $ typeOf e0'
+          fname <- newNameFromString "lifted"
+          liftValDec fname rettype dims params e0'
+
+          let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
+              t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
+              fname' = qualName fname
+          return (Parens (Apply (Apply (Var fname' (Info ([], Arrow mempty Nothing (fromStruct t1) $
+                                                              Arrow mempty Nothing (fromStruct t2) rettype)) loc)
+                                 e1' (Info Observe) (Info $ Arrow mempty Nothing (fromStruct t2) rettype) loc)
+                          e2' d (Info rettype) loc) noLoc, sv)
 
     -- If e1 is a dynamic function, we just leave the application in place,
     -- but we update the types since it may be partially applied or return
@@ -529,27 +552,29 @@ liftValDec fname rettype dims pats body = tell [dec]
           }
 
 -- | Given a closure environment, construct a record pattern that
--- binds the closed over variables.  We set the type to be nonunique,
--- no matter what it was in the original environment, because there is
--- no way for a function to exploit uniqueness in its lexical scope.
+-- binds the closed over variables.
 buildEnvPattern :: Env -> Pattern
 buildEnvPattern env = RecordPattern (map buildField $ M.toList env) noLoc
   where buildField (vn, sv) = let tp = vacuousShapeAnnotations (typeFromSV sv)
-                                       `setUniqueness` Nonunique
                               in (nameFromString (pretty vn),
                                   Id vn (Info tp) noLoc)
 
 -- | Given a closure environment pattern and the type of a term,
 -- construct the type of that term, where uniqueness is set to
 -- `Nonunique` for those arrays that are bound in the environment or
--- pattern.  This ensures that a lifted function can create unique
--- arrays as long as they do not alias any of its parameters.  XXX: it
--- is not clear that this is a sufficient property, unfortunately.
-buildRetType :: Env -> Pattern -> CompType -> PatternType
-buildRetType env pat = vacuousShapeAnnotations . descend
-  where bound = S.fromList (M.keys env) <> patternVars pat
+-- pattern (except if they are unique there).  This ensures that a
+-- lifted function can create unique arrays as long as they do not
+-- alias any of its parameters.  XXX: it is not clear that this is a
+-- sufficient property, unfortunately.
+buildRetType :: Env -> [Pattern] -> CompType -> PatternType
+buildRetType env pats = vacuousShapeAnnotations . descend
+  where bound = foldMap oneName (M.keys env) <> foldMap patternVars pats
+        boundAsUnique v =
+          maybe False (unique . unInfo . identType) $
+          find ((==v) . identName) $ S.toList $ foldMap patIdentSet pats
+        problematic v = (v `member` bound) && not (boundAsUnique v)
         descend t@Array{}
-          | any (`S.member` bound) (aliases t) = t `setUniqueness` Nonunique
+          | any problematic (aliases t) = t `setUniqueness` Nonunique
         descend (Record t) = Record $ fmap descend t
         descend t = t
 
@@ -624,8 +649,33 @@ svFromType :: CompType -> StaticVal
 svFromType (Record fs) = RecordSV . M.toList $ M.map svFromType fs
 svFromType t           = Dynamic t
 
+-- A set of names where we also track uniqueness.
+newtype NameSet = NameSet (M.Map VName Uniqueness)
+
+instance Sem.Semigroup NameSet where
+  NameSet x <> NameSet y = NameSet $ M.unionWith max x y
+
+instance Monoid NameSet where
+  mempty = NameSet mempty
+  mappend = (Sem.<>)
+
+without :: NameSet -> NameSet -> NameSet
+without (NameSet x) (NameSet y) = NameSet $ x `M.difference` y
+
+member :: VName -> NameSet -> Bool
+member v (NameSet m) = v `M.member` m
+
+ident :: Ident -> NameSet
+ident v = NameSet $ M.singleton (identName v) (uniqueness $ unInfo $ identType v)
+
+oneName :: VName -> NameSet
+oneName v = NameSet $ M.singleton v Nonunique
+
+names :: Names -> NameSet
+names = foldMap oneName
+
 -- | Compute the set of free variables of an expression.
-freeVars :: Exp -> Names
+freeVars :: Exp -> NameSet
 freeVars expr = case expr of
   Literal{}            -> mempty
   Parens e _           -> freeVars e
@@ -634,55 +684,55 @@ freeVars expr = case expr of
 
   RecordLit fs _       -> foldMap freeVarsField fs
     where freeVarsField (RecordFieldExplicit _ e _)  = freeVars e
-          freeVarsField (RecordFieldImplicit vn _ _) = S.singleton vn
+          freeVarsField (RecordFieldImplicit vn t _) = ident $ Ident vn t noLoc
 
   ArrayLit es _ _      -> foldMap freeVars es
   Range e me incl _ _  -> freeVars e <> foldMap freeVars me <>
                           foldMap freeVars incl
-  Empty t _ _          -> foldMap dimName $ nestedDims $ unInfo $ expandedType t
-  Var qn _ _           -> S.singleton $ qualLeaf qn
+  Empty t _ _          -> names $ foldMap dimName $ nestedDims $ unInfo $ expandedType t
+  Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness $ snd t
   Ascript e _ _        -> freeVars e
-  LetPat _ pat e1 e2 _ -> freeVars e1 <> ((patternDimNames pat <> freeVars e2)
-                                          S.\\ patternVars pat)
+  LetPat _ pat e1 e2 _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
+                                          `without` patternVars pat)
 
   LetFun vn (_, pats, _, _, e1) e2 _ ->
-    ((freeVars e1 <> foldMap patternDimNames pats)
-      S.\\ foldMap patternVars pats) <>
-    (freeVars e2 S.\\ S.singleton vn)
+    ((freeVars e1 <> names (foldMap patternDimNames pats))
+      `without` foldMap patternVars pats) <>
+    (freeVars e2 `without` oneName vn)
 
   If e1 e2 e3 _ _           -> freeVars e1 <> freeVars e2 <> freeVars e3
   Apply e1 e2 _ _ _         -> freeVars e1 <> freeVars e2
   Negate e _                -> freeVars e
-  Lambda tps pats e0 _ _ _  -> (foldMap patternDimNames pats <> freeVars e0)
-                               S.\\ (foldMap patternVars pats <>
-                                     S.fromList (map typeParamName tps))
+  Lambda tps pats e0 _ _ _  -> (names (foldMap patternDimNames pats) <> freeVars e0)
+                               `without` (foldMap patternVars pats <>
+                                          mconcat (map (oneName . typeParamName) tps))
   OpSection{}                 -> mempty
   OpSectionLeft _  _ e _ _ _  -> freeVars e
   OpSectionRight _ _ e _ _ _  -> freeVars e
 
   DoLoop _ pat e1 form e3 _ -> let (e2fv, e2ident) = formVars form
                                in freeVars e1 <> e2fv <>
-                               (freeVars e3 S.\\ (patternVars pat <> e2ident))
-    where formVars (For ident e2) = (freeVars e2, S.singleton $ identName ident)
+                               (freeVars e3 `without` (patternVars pat <> e2ident))
+    where formVars (For v e2) = (freeVars e2, ident v)
           formVars (ForIn p e2)   = (freeVars e2, patternVars p)
-          formVars (While e2)     = (freeVars e2, S.empty)
+          formVars (While e2)     = (freeVars e2, mempty)
 
-  BinOp qn _ (e1, _) (e2, _) _ _ -> S.singleton (qualLeaf qn) <>
+  BinOp qn _ (e1, _) (e2, _) _ _ -> oneName (qualLeaf qn) <>
                                     freeVars e1 <> freeVars e2
   Project _ e _ _                -> freeVars e
 
   LetWith id1 id2 idxs e1 e2 _ ->
-    S.singleton (identName id2) <> foldMap freeDimIndex idxs <> freeVars e1 <>
-    (freeVars e2 S.\\ S.singleton (identName id1))
+    ident id2 <> foldMap freeDimIndex idxs <> freeVars e1 <>
+    (freeVars e2 `without` ident id1)
 
   Index e idxs _ _    -> freeVars e  <> foldMap freeDimIndex idxs
   Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2
-  Concat _ e1 es _    -> freeVars e1 <> foldMap freeVars es
+  Concat _ e1 e2 _    -> freeVars e1 <> freeVars e2
   Reshape e1 e2 _ _   -> freeVars e1 <> freeVars e2
   Rearrange _ e _     -> freeVars e
   Rotate _ e1 e2 _    -> freeVars e1 <> freeVars e2
 
-  Map e1 es _ _       -> freeVars e1 <> foldMap freeVars es
+  Map e1 e2 _ _       -> freeVars e1 <> freeVars e2
   Reduce _ e1 e2 e3 _ -> freeVars e1 <> freeVars e2 <> freeVars e3
   Scan e1 e2 e3 _     -> freeVars e1 <> freeVars e2 <> freeVars e3
   Filter e1 e2 _      -> freeVars e1 <> freeVars e2
@@ -695,14 +745,14 @@ freeVars expr = case expr of
   Unzip e _ _         -> freeVars e
   Unsafe e _          -> freeVars e
 
-freeDimIndex :: DimIndexBase Info VName -> Names
+freeDimIndex :: DimIndexBase Info VName -> NameSet
 freeDimIndex (DimFix e) = freeVars e
 freeDimIndex (DimSlice me1 me2 me3) =
   foldMap (foldMap freeVars) [me1, me2, me3]
 
 -- | Extract all the variable names bound in a pattern.
-patternVars :: Pattern -> Names
-patternVars = S.map identName . patIdentSet
+patternVars :: Pattern -> NameSet
+patternVars = mconcat . map ident . S.toList . patIdentSet
 
 -- | Combine the shape information of types as much as possible. The first
 -- argument is the orignal type and the second is the type of the transformed

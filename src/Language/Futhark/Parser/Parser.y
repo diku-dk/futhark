@@ -142,7 +142,6 @@ import Language.Futhark.Parser.Lexer
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
-      map             { L $$ MAP }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
       rotate          { L $$ ROTATE }
@@ -183,7 +182,7 @@ import Language.Futhark.Parser.Lexer
 %right '->'
 %left juxtprec
 %nonassoc with
-%left indexprec rotate rearrange map
+%left indexprec rotate rearrange
 %%
 
 -- The main parser.
@@ -534,17 +533,11 @@ Exp2 :: { UncheckedExp }
      | rotate Atom Atom
                       { Rotate 0 $2 $3 (srcspan $1 $>) }
 
-     | concat Atoms1
-                      { Concat 0 (fst $2) (snd $2)
-                        (srcspan $1 (mconcat (map srclocOf (snd $>)))) }
+     | concat Atom Atom
+                      { Concat 0 $2 $3 (srcspan $1 $>) }
 
-     | concat '@' NaturalInt Atoms1
-                      { Concat $3 (fst $4) (snd $4)
-                        (srcspan $1 (mconcat (map srclocOf (snd $>)))) }
-
-     | map Atom Atoms1
-                      { Map $2 (fst $3:snd $3) NoInfo
-                        (srcspan $1 (mconcat (map srclocOf (snd $>)))) }
+     | concat '@' NaturalInt Atom Atom
+                      { Concat $3 $4 $5 (srcspan $1 $>) }
 
      | zip Atoms1
                       { Zip 0 (fst $2) (snd $2) NoInfo

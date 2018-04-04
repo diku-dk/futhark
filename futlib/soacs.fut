@@ -3,6 +3,10 @@
 -- functions here are all recognised specially by the compiler (or
 -- built on those that are).
 
+-- | Apply the given function to each element of an array.
+let map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
+  intrinsics.map (f, as)
+
 -- | Apply the given function to each element of a single array.
 let map1 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
   map f as

@@ -5,4 +5,4 @@
 
 let main (n: i32) (accs: []i32) =
   let ys = map (2**) (iota n)
-  in map (\acc -> loop acc for y in ys do acc * y) accs
+  in map (\(acc:i32) -> loop acc for y in ys do acc * y) accs

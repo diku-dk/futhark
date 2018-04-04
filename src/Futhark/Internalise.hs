@@ -675,7 +675,8 @@ internaliseExp _ (E.Reshape shape e _ loc) = do
   where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
         orig_rank = E.arrayRank $ E.typeOf e
 
-internaliseExp desc (E.Concat i x ys loc) = do
+internaliseExp desc (E.Concat i x y loc) = do
+  let ys = [y]
   xs  <- internaliseExpToVars "concat_x" x
   yss <- mapM (internaliseExpToVars "concat_y") ys
   outer_size <- arraysSize i <$> mapM lookupType xs
@@ -708,16 +709,11 @@ internaliseExp desc (E.Concat i x ys loc) = do
         sumdims xsize ysize = letSubExp "conc_tmp" $ I.BasicOp $
                                         I.BinOp (I.Add I.Int32) xsize ysize
 
-internaliseExp _ (E.Map _ [] _ _) = return []
-
-internaliseExp desc (E.Map lam (arr:arrs) info loc) = do
-  -- Pretend the arrs were zipped to get the necessary reshapes in.
-  -- This would be a type error in the source language, but it's the
-  -- same in the core language.
-  arrs' <- internaliseExpToVars "map_arr" (Zip 0 arr arrs info loc)
-  lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arrs'
-  w <- arraysSize 0 <$> mapM lookupType arrs'
-  letTupExp' desc $ I.Op $ I.Map w lam' arrs'
+internaliseExp desc (E.Map lam arr _ _) = do
+  arr' <- internaliseExpToVars "map_arr" arr
+  lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
+  w <- arraysSize 0 <$> mapM lookupType arr'
+  letTupExp' desc $ I.Op $ I.Map w lam' arr'
 
 internaliseExp desc (E.Reduce comm lam ne arr loc) =
   internaliseScanOrReduce desc "reduce" (`I.Reduce` comm) (lam, ne, arr, loc)

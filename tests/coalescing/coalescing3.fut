@@ -7,7 +7,7 @@
 --           [4i32, 3i32, 6i32, 11i32, 1i32, 6i32, 1i32]] }
 
 let main [n][m] (rss: *[n][m]i32): [][]i32 =
-  map (\(rs: *[]i32)  ->
-        loop (rs) for i < m do
+  map (\(rs: []i32)  ->
+        loop rs = copy rs for i < m do
           let rs[i] = rs[i] + 1
           in rs) rss
