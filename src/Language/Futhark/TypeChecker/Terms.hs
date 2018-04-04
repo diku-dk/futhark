@@ -1414,6 +1414,8 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
 
   -- Perform substitutions of instantiated variables in the types.
   tp1' <- normaliseType tp1
+  tp2' <- normaliseType tp2
+  argtype' <- normaliseType argtype
 
   occur [observation as loc]
 
@@ -1423,7 +1425,7 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
 
   return (vacuousShapeAnnotations tp1',
           vacuousShapeAnnotations $
-           returnType (toStruct tp2) [diet tp1'] [argtype])
+           returnType (toStruct tp2') [diet tp1'] [argtype'])
 
 checkApply loc tfun@TypeVar{} arg = do
   tv <- newTypeVar loc "b"
