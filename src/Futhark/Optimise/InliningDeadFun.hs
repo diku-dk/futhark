@@ -105,10 +105,15 @@ addLocations caller_safety more_locs = fmap onStm
           case caller_safety of
             Safe -> BasicOp $ Assert cond desc (loc,locs++more_locs)
             Unsafe -> BasicOp $ SubExp $ Constant Checked
+        onExp (Op soac) = Op $ runIdentity $ mapSOACM
+                          identitySOACMapper { mapOnSOACLambda = return . onLambda
+                                             } soac
         onExp e = mapExp identityMapper { mapOnBody = const $ return . onBody
                                         } e
         onBody body =
           body { bodyStms = addLocations caller_safety more_locs $ bodyStms body }
+        onLambda :: Lambda -> Lambda
+        onLambda lam = lam { lambdaBody = onBody $ lambdaBody lam }
 
 -- | A composition of 'inlineAggressively' and 'removeDeadFunctions',
 -- to avoid the cost of type-checking the intermediate stage.
