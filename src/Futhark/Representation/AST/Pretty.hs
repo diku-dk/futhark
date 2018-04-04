@@ -241,10 +241,12 @@ instance PrettyLore lore => Pretty (Exp lore) where
           maybeNest b | null $ bodyStms b = ppr b
                       | otherwise         = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
-  ppr (Apply fname args _ _) =
-    text (nameToString fname) <> apply (map (align . pprArg) args)
+  ppr (Apply fname args _ (safety, _, _)) =
+    text (nameToString fname) <> safety' <> apply (map (align . pprArg) args)
     where pprArg (arg, Consume) = text "*" <> ppr arg
           pprArg (arg, Observe) = ppr arg
+          safety' = case safety of Unsafe -> text "<unsafe>"
+                                   Safe   -> mempty
   ppr (Op op) = ppr op
   ppr (DoLoop ctx val form loopbody) =
     annot (mapMaybe ppAnnot (ctxparams++valparams)) $
