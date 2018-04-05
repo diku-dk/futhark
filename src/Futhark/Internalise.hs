@@ -270,7 +270,7 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
       let flat_lit = E.ArrayLit (e' ++ concatMap snd es') (Info basetype) loc
           new_shape = E.TupLit [E.Literal (E.primValue k) loc
                                | k <- length es:eshape] loc
-      in internaliseExp desc $ E.Reshape new_shape flat_lit (Info basetype) loc
+      in internaliseExp desc $ E.Reshape new_shape flat_lit (Info 1) loc
 
   | otherwise = do
   es' <- mapM (internaliseExp "arr_elem") es
@@ -658,7 +658,7 @@ internaliseExp _ (E.Rotate d offset e _) = do
         offsets = replicate d zero ++ [offset'] ++ replicate (r-d-1) zero
     return $ I.Rotate offsets v
 
-internaliseExp _ (E.Reshape shape e _ loc) = do
+internaliseExp _ (E.Reshape shape e (Info d) loc) = do
   shape' <- internaliseShapeExp "shape" shape
   vs <- internaliseExpToVars "reshape_arg" e
   forM vs $ \v -> do
@@ -671,7 +671,7 @@ internaliseExp _ (E.Reshape shape e _ loc) = do
                eAssert (eCmpOp (I.CmpEq I.int32) (prod changed_dims) (prod shape'))
                "new shape has different number of elements than old shape" loc
     certifying shapeOk $ letSubExp "reshape" $
-      I.BasicOp $ I.Reshape (reshapeOuter (DimNew <$> shape') orig_rank old_shape) v
+      I.BasicOp $ I.Reshape (reshapeOuter (DimNew <$> shape') d old_shape) v
   where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
         orig_rank = E.arrayRank $ E.typeOf e
 

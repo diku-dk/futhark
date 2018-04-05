@@ -806,7 +806,8 @@ checkExp (ArrayLit es _ loc) = do
     e' <- checkExp e
     unify (srclocOf e') (toStructural et) . toStructural =<< expType e'
     return e'
-  return $ ArrayLit es' (Info t) loc
+  t' <- normaliseType t
+  return $ ArrayLit es' (Info t') loc
 
 checkExp (Range start maybe_step end NoInfo loc) = do
   start' <- require anyIntType =<< checkExp start
@@ -1045,7 +1046,7 @@ checkExp (Reshape shapeexp arrexp NoInfo loc) = do
     t -> typeError loc $
          "Array argument to reshape must be an array, but has type " ++ pretty t
 
-  return $ Reshape shapeexp' arrexp' (Info arr_t) loc
+  return $ Reshape shapeexp' arrexp' (Info $ arrayRank arr_t) loc
 
 checkExp (Rearrange perm arrexp pos) = do
   arrexp' <- checkExp arrexp
