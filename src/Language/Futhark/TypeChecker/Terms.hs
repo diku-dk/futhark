@@ -29,7 +29,8 @@ import Prelude hiding (mod)
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
-import Language.Futhark.TypeChecker.Types
+import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
+import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
 import Futhark.Util.Pretty (Pretty)
 
@@ -379,6 +380,16 @@ checkReallyQualName :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermSc
 checkReallyQualName space qn loc = do
   (env, name') <- liftTypeM $ TypeM.checkQualNameWithEnv space qn loc
   return (envToTermScope env, name')
+
+-- | Wrap 'checkTypeDecl' to also perform an observation of every size
+-- in the type.
+checkTypeDecl :: TypeDeclBase NoInfo Name -> TermTypeM (TypeDeclBase Info VName)
+checkTypeDecl tdecl = do
+  tdecl' <- Types.checkTypeDecl tdecl
+  mapM_ observeDim $ nestedDims $ unInfo $ expandedType tdecl'
+  return tdecl'
+  where observeDim (NamedDim v) = observe $ Ident (qualLeaf v) (Info $ Prim $ Signed Int32) noLoc
+        observeDim _ = return ()
 
 -- | Instantiate a type scheme with fresh type variables for its type
 -- parameters. Returns the names of the fresh type variables, the instance
