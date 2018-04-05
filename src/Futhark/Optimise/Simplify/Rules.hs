@@ -496,8 +496,22 @@ simplifyBinOp _ _ (BinOp FAdd{} e1 e2)
   | isCt0 e1 = subExpRes e2
   | isCt0 e2 = subExpRes e1
 
-simplifyBinOp _ _ (BinOp Sub{} e1 e2)
+
+simplifyBinOp look _ (BinOp Sub{} e1 e2)
   | isCt0 e2 = subExpRes e1
+  -- Cases for simplifying (a+b)-b and permutations.
+  | Var v1 <- e1,
+    Just (BasicOp (BinOp Add{} e1_a e1_b), cs) <- look v1,
+    e1_a == e2 = Just (SubExp e1_b, cs)
+  | Var v1 <- e1,
+    Just (BasicOp (BinOp Add{} e1_a e1_b), cs) <- look v1,
+    e1_b == e2 = Just (SubExp e1_a, cs)
+  | Var v2 <- e2,
+    Just (BasicOp (BinOp Add{} e2_a e2_b), cs) <- look v2,
+    e2_a == e1 = Just (SubExp e2_b, cs)
+  | Var v2 <- e1,
+    Just (BasicOp (BinOp Add{} e2_a e2_b), cs) <- look v2,
+    e2_b == e1 = Just (SubExp e2_a, cs)
 
 simplifyBinOp _ _ (BinOp FSub{} e1 e2)
   | isCt0 e2 = subExpRes e1
