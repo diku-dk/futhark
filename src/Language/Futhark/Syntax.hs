@@ -111,6 +111,7 @@ class (Show vn,
        Show (f [VName]),
        Show (f PatternType),
        Show (f CompType),
+       Show (f Int),
        Show (f [TypeBase () ()]),
        Show (f StructType),
        Show (f (Names, StructType)),
@@ -634,7 +635,7 @@ data ExpBase f vn =
             -- across.
 
             -- Array index space transformation.
-            | Reshape (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
+            | Reshape (ExpBase f vn) (ExpBase f vn) (f Int) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array.
 
             | Rearrange [Int] (ExpBase f vn) SrcLoc

@@ -1,0 +1,9 @@
+-- Reshape with a polymorphic type, where only the outer dimensions
+-- are reshaped.
+
+let flatten [n][m] 't (xs: [n][m]t): []t =
+  reshape (n*m) xs
+
+let main [n][m][k] (A: [n][m][k]f32): []i32 =
+  let A' = flatten A
+  in map (\_ -> 0) A'
