@@ -142,7 +142,7 @@ defuncExp (Var qn _ loc) = do
     -- and a 'LambdaSV' static value) instead of the variable itself.
     DynamicFun closure _ -> return closure
     _ -> let tp = typeFromSV sv
-         in return (Var qn (Info ([], vacuousShapeAnnotations tp)) loc, sv)
+         in return (Var qn (Info (vacuousShapeAnnotations tp)) loc, sv)
 
 defuncExp (Ascript e0 tydecl loc)
   | orderZero (typeOf e0) = do (e0', sv) <- defuncExp e0
@@ -214,7 +214,7 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
           let name = nameFromString $ pretty vn
               tp' = vacuousShapeAnnotations $ typeFromSV sv
           in (RecordFieldExplicit name
-               (Var (qualName vn) (Info ([], tp')) noLoc) noLoc, (vn, sv))
+               (Var (qualName vn) (Info tp') noLoc) noLoc, (vn, sv))
 
 -- Operator sections are expected to be converted to lambda-expressions
 -- by the monomorphizer, so they should no longer occur at this point.
@@ -238,9 +238,8 @@ defuncExp (DoLoop tparams pat e1 form e3 loc) = do
   where envFromIdent (Ident vn (Info tp) _) = M.singleton vn $ Dynamic tp
 
 -- We handle BinOps by turning them into ordinary function applications.
-defuncExp (BinOp qn (Info il) (e1, Info pt1) (e2, Info pt2) (Info ret) loc) =
-  defuncExp $ Apply (Apply (Var qn (Info (il, Arrow mempty Nothing (fromStruct pt1)
-                                              (Arrow mempty Nothing (fromStruct pt2) ret))) loc)
+defuncExp (BinOp qn (Info t) (e1, Info pt1) (e2, Info pt2) (Info ret) loc) =
+  defuncExp $ Apply (Apply (Var qn (Info t) loc)
                      e1 (Info (diet pt1)) (Info (Arrow mempty Nothing (fromStruct pt2) ret)) loc)
                     e2 (Info (diet pt2)) (Info ret) loc
 
@@ -372,7 +371,7 @@ etaExpand e = do
     x <- newNameFromString "x"
     let t' = vacuousShapeAnnotations t
     return (Id x (Info t') noLoc,
-            Var (qualName x) (Info ([], t')) noLoc)
+            Var (qualName x) (Info t') noLoc)
   let ps_st = map vacuousShapeAnnotations ps
       e' = foldl' (\e1 (e2, t2, argtypes) ->
                      Apply e1 e2 (Info $ diet t2)
@@ -444,8 +443,8 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
           let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
               t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
               fname' = qualName fname
-          return (Parens (Apply (Apply (Var fname' (Info ([], Arrow mempty Nothing (fromStruct t1) $
-                                                              Arrow mempty Nothing (fromStruct t2) rettype)) loc)
+          return (Parens (Apply (Apply (Var fname' (Info (Arrow mempty Nothing (fromStruct t1) $
+                                                          Arrow mempty Nothing (fromStruct t2) rettype)) loc)
                                  e1' (Info Observe) (Info $ Arrow mempty Nothing (fromStruct t2) rettype) loc)
                           e2' d (Info rettype) loc) noLoc, sv)
 
@@ -465,7 +464,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
     _ -> error $ "Application of an expression that is neither a static lambda "
               ++ "nor a dynamic function, but has static value: " ++ show sv1
 
-defuncApply depth e@(Var qn (Info (_, t)) loc) = do
+defuncApply depth e@(Var qn (Info t) loc) = do
     let (argtypes, _) = unfoldFunType t
     sv <- lookupVar loc (qualLeaf qn)
     case sv of
@@ -474,7 +473,7 @@ defuncApply depth e@(Var qn (Info (_, t)) loc) = do
             -- We still need to update the types in case the dynamic
             -- function returns a higher-order term.
             let (argtypes', rettype) = dynamicFunType sv argtypes
-            in return (Var qn (Info ([], foldFunType argtypes' rettype)) loc, sv)
+            in return (Var qn (Info (foldFunType argtypes' rettype)) loc, sv)
 
         | otherwise -> do
             fname <- newName $ qualLeaf qn
@@ -482,11 +481,11 @@ defuncApply depth e@(Var qn (Info (_, t)) loc) = do
                 (argtypes', rettype) = dynamicFunType sv' argtypes
             liftValDec fname rettype dims pats e0
             return (Var (qualName fname)
-                    (Info ([], foldFunType argtypes' rettype)) loc, sv')
+                    (Info (foldFunType argtypes' rettype)) loc, sv')
 
       IntrinsicSV -> return (e, IntrinsicSV)
 
-      _ -> return (Var qn (Info ([], vacuousShapeAnnotations $ typeFromSV sv)) loc, sv)
+      _ -> return (Var qn (Info (vacuousShapeAnnotations $ typeFromSV sv)) loc, sv)
 
 defuncApply _ expr = defuncExp expr
 
@@ -690,7 +689,7 @@ freeVars expr = case expr of
   Range e me incl _ _  -> freeVars e <> foldMap freeVars me <>
                           foldMap freeVars incl
   Empty t _ _          -> names $ foldMap dimName $ nestedDims $ unInfo $ expandedType t
-  Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness $ snd t
+  Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
   Ascript e _ _        -> freeVars e
   LetPat _ pat e1 e2 _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
                                           `without` patternVars pat)

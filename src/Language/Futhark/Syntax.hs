@@ -573,9 +573,7 @@ data ExpBase f vn =
 
             | Empty (TypeDeclBase f vn) (f CompType) SrcLoc
 
-            | Var (QualName vn) (f ([TypeBase () ()], PatternType)) SrcLoc
-            -- ^ The @[TypeBase () ()]@ list is the instantiation list, which
-            -- contains the instantiated types for any type parameters.
+            | Var (QualName vn) (f PatternType) SrcLoc
 
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
             -- ^ Type ascription: @e : t@.
@@ -595,13 +593,13 @@ data ExpBase f vn =
             | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
               (Maybe (TypeDeclBase f vn)) (f (Names, StructType)) SrcLoc
 
-            | OpSection (QualName vn) (f [TypeBase () ()])
+            | OpSection (QualName vn) (f PatternType)
               (f StructType) (f StructType) (f PatternType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.
-            | OpSectionLeft (QualName vn) (f [TypeBase () ()])
+            | OpSectionLeft (QualName vn) (f PatternType)
               (ExpBase f vn) (f StructType, f StructType) (f PatternType) SrcLoc
               -- ^ @2+@; first type is operand, second is result.
-            | OpSectionRight (QualName vn) (f [TypeBase () ()])
+            | OpSectionRight (QualName vn) (f PatternType)
               (ExpBase f vn) (f StructType, f StructType) (f PatternType) SrcLoc
               -- ^ @+2@; first type is operand, second is result.
 
@@ -613,7 +611,7 @@ data ExpBase f vn =
               (ExpBase f vn) -- Loop body.
               SrcLoc
 
-            | BinOp (QualName vn) (f [TypeBase () ()])
+            | BinOp (QualName vn) (f PatternType)
               (ExpBase f vn, f StructType) (ExpBase f vn, f StructType)
               (f PatternType) SrcLoc
             -- ^ The first annotation is the instantiation list.

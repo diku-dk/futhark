@@ -27,7 +27,6 @@ module Language.Futhark.Traversals
 import qualified Data.Set                as S
 
 import           Language.Futhark.Syntax
-import           Language.Futhark.Attributes
 
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
@@ -50,12 +49,9 @@ class ASTMappable x where
   astMap :: Monad m => ASTMapper m -> x -> m x
 
 instance ASTMappable (ExpBase Info VName) where
-  astMap tv (Var name (Info (il, t)) loc) =
-    Var <$> mapOnQualName tv name <*>
-    (Info <$> ((,) <$> mapM onType il <*> mapOnPatternType tv t)) <*>
+  astMap tv (Var name t loc) =
+    Var <$> mapOnQualName tv name <*> traverse (mapOnPatternType tv) t <*>
     pure loc
-    where onType = fmap removeShapeAnnotations . mapOnStructType tv .
-                   vacuousShapeAnnotations
   astMap _ (Literal val loc) =
     pure $ Literal val loc
   astMap tv (Parens e loc) =
@@ -75,13 +71,11 @@ instance ASTMappable (ExpBase Info VName) where
     Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
   astMap tv (Empty tdecl t loc) =
     Empty <$> astMap tv tdecl <*> traverse (astMap tv) t <*> pure loc
-  astMap tv (BinOp fname il (x,xt) (y,yt) (Info t) loc) =
-    BinOp <$> mapOnQualName tv fname <*> traverse (mapM onType) il <*>
+  astMap tv (BinOp fname t (x,xt) (y,yt) (Info rt) loc) =
+    BinOp <$> mapOnQualName tv fname <*> traverse (mapOnPatternType tv) t <*>
     ((,) <$> mapOnExp tv x <*> traverse (mapOnStructType tv) xt) <*>
     ((,) <$> mapOnExp tv y <*> traverse (mapOnStructType tv) yt) <*>
-    (Info <$> mapOnPatternType tv t) <*> pure loc
-    where onType = fmap removeShapeAnnotations . mapOnStructType tv .
-                   vacuousShapeAnnotations
+    (Info <$> mapOnPatternType tv rt) <*> pure loc
   astMap tv (Negate x loc) =
     Negate <$> mapOnExp tv x <*> pure loc
   astMap tv (If c texp fexp t loc) =
@@ -156,16 +150,19 @@ instance ASTMappable (ExpBase Info VName) where
     Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*>
     traverse (traverse $ mapOnStructType tv) t <*> pure loc
-  astMap tv (OpSection name il t1 t2 t3 loc) =
-    OpSection <$> mapOnQualName tv name <*> traverse (mapM $ mapOnType tv) il <*>
+  astMap tv (OpSection name t t1 t2 t3 loc) =
+    OpSection <$> mapOnQualName tv name <*>
+    traverse (mapOnPatternType tv) t <*>
     traverse (mapOnStructType tv) t1 <*> traverse (mapOnStructType tv) t2 <*>
     traverse (mapOnPatternType tv) t3 <*> pure loc
-  astMap tv (OpSectionLeft name il arg t1 t2 loc) =
-    OpSectionLeft <$> mapOnQualName tv name <*> traverse (mapM $ mapOnType tv) il <*>
+  astMap tv (OpSectionLeft name t arg t1 t2 loc) =
+    OpSectionLeft <$> mapOnQualName tv name <*>
+    traverse (mapOnPatternType tv) t <*>
     mapOnExp tv arg <*> astMap tv t1 <*>
     traverse (mapOnPatternType tv) t2 <*> pure loc
-  astMap tv (OpSectionRight name il arg t1 t2 loc) =
-    OpSectionRight <$> mapOnQualName tv name <*> traverse (mapM $ mapOnType tv) il <*>
+  astMap tv (OpSectionRight name t arg t1 t2 loc) =
+    OpSectionRight <$> mapOnQualName tv name <*>
+    traverse (mapOnPatternType tv) t <*>
     mapOnExp tv arg <*> astMap tv t1 <*>
     traverse (mapOnPatternType tv) t2 <*> pure loc
   astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =

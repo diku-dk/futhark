@@ -245,7 +245,7 @@ checkTypeExp ote@TEApply{} = do
 checkNamedDim :: MonadTypeChecker m =>
                  SrcLoc -> QualName Name -> m (QualName VName)
 checkNamedDim loc v = do
-  (v', _, t) <- lookupVar loc v
+  (v', t) <- lookupVar loc v
   case t of
     Prim (Signed Int32) -> return v'
     _                   -> throwError $ DimensionNotInteger loc v

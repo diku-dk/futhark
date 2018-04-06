@@ -221,7 +221,7 @@ internaliseExp desc (E.Parens e _) =
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 
-internaliseExp _ (E.Var (E.QualName _ name) (Info (_, t)) loc) = do
+internaliseExp _ (E.Var (E.QualName _ name) (Info t) loc) = do
   subst <- asks $ M.lookup name . envSubsts
   case subst of
     Just substs -> return substs
@@ -255,7 +255,7 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           M.singleton name <$> internaliseExp desc e
         internaliseField (E.RecordFieldImplicit name t loc) =
           internaliseField $ E.RecordFieldExplicit (baseName name)
-          (E.Var (E.qualName name) (([],) . vacuousShapeAnnotations <$> t) loc) loc
+          (E.Var (E.qualName name) (vacuousShapeAnnotations <$> t) loc) loc
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
   -- If this is a multidimensional array literal of primitives, we
@@ -571,7 +571,7 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   srcs <- internaliseExpToVars "src" $
-          E.Var (qualName (E.identName src)) (([],) . vacuousShapeAnnotations <$> E.identType src)
+          E.Var (qualName (E.identName src)) (vacuousShapeAnnotations <$> E.identType src)
           (srclocOf src)
   ves <- internaliseExp "lw_val" ve
   dims <- case srcs of
@@ -608,7 +608,7 @@ internaliseExp desc (E.Update src slice ve loc) = do
   internaliseExp desc $
     E.LetPat [] (E.Id src_name (E.Info $ E.vacuousShapeAnnotations src_t) loc) src
     (E.LetWith dest_ident src_ident slice ve
-      (E.Var (E.qualName dest_name) (E.Info ([], E.vacuousShapeAnnotations src_t)) loc)
+      (E.Var (E.qualName dest_name) (E.Info (E.vacuousShapeAnnotations src_t)) loc)
       loc)
     loc
 
@@ -810,10 +810,9 @@ internaliseExp desc (E.BinOp op _ (xe,_) (ye,_) _ loc)
       internalise desc
 
 -- User-defined operators are just the same as a function call.
-internaliseExp desc (E.BinOp op (Info il) (xarg, Info xt) (yarg, Info yt) (Info t) loc) =
+internaliseExp desc (E.BinOp op (Info t) (xarg, Info xt) (yarg, Info yt) _ loc) =
   internaliseExp desc $
-  E.Apply (E.Apply (E.Var op (Info (il, foldFunType [E.fromStruct xt,
-                                                     E.fromStruct yt] t)) loc) xarg (Info $ E.diet xt)
+  E.Apply (E.Apply (E.Var op (Info t) loc) xarg (Info $ E.diet xt)
            (Info $ foldFunType [E.fromStruct yt] t) loc)
           yarg (Info $ E.diet yt) (Info t) loc
 
@@ -1095,7 +1094,7 @@ simpleCmpOp desc op x y =
   letTupExp' desc $ I.BasicOp $ I.CmpOp op x y
 
 findFuncall :: E.Exp -> InternaliseM (E.QualName VName, [E.Exp], [E.StructType])
-findFuncall (E.Var fname (Info (_, t)) _) =
+findFuncall (E.Var fname (Info t) _) =
   let (remaining, _) = unfoldFunType t
   in return (fname, [], map E.toStruct remaining)
 findFuncall (E.Apply f arg _ (Info t) _) = do
@@ -1129,7 +1128,7 @@ internaliseLambda e rowtypes = do
     name <- newVName "not_curried"
     return (E.Id name (Info $ E.vacuousShapeAnnotations $ et `setAliases` mempty) loc,
             E.Var (E.qualName name)
-             (Info ([], et `setAliases` mempty)) loc)
+             (Info (et `setAliases` mempty)) loc)
   let rettype = E.typeOf e
       body = foldl (\f arg -> E.Apply f arg (Info E.Observe)
                               (Info $ E.vacuousShapeAnnotations rettype) loc)

@@ -25,8 +25,6 @@ import           Language.Futhark.TypeChecker.Types
 newtype PolyBinding = PolyBinding (VName, [TypeParam], [Pattern], StructType, Exp)
 newtype MonoBinding = MonoBinding (VName, [TypeParam], [Pattern], StructType, Exp)
 
-type InstanceList = [TypeBase () ()]
-
 -- | Monomorphization environment mapping names of polymorphic functions to a
 -- representation of their corresponding function bindings.
 data Env = Env { envPolyBindings :: M.Map VName PolyBinding
@@ -59,16 +57,16 @@ runMonoM :: VNameSource -> MonoM a -> (a, VNameSource)
 runMonoM src (MonoM m) = (a, src')
   where (a, src', _) = evalState (runRWST m mempty src) mempty
 
-lookupVar :: SrcLoc -> VName -> MonoM PolyBinding
-lookupVar loc vn = do
+lookupFun :: VName -> MonoM (Maybe PolyBinding)
+lookupFun vn = do
   env <- asks envPolyBindings
   case M.lookup vn env of
-    Just valbind -> return valbind
-    Nothing -> error $ "Unknown variable " ++ pretty vn ++ " at " ++ locStr loc
+    Just valbind -> return $ Just valbind
+    Nothing -> return Nothing
 
 -- | Mapping from function name and instance list to a new function name in case
 -- the function has already been instantiated with those concrete types.
-type Lifts = [((VName, InstanceList), VName)]
+type Lifts = [((VName, TypeBase () ()), VName)]
 
 getLifts :: MonoM Lifts
 getLifts = MonoM $ lift get
@@ -76,30 +74,31 @@ getLifts = MonoM $ lift get
 modifyLifts :: (Lifts -> Lifts) -> MonoM ()
 modifyLifts = MonoM . lift . modify
 
-addLifted :: VName -> InstanceList -> VName -> MonoM ()
+addLifted :: VName -> TypeBase () () -> VName -> MonoM ()
 addLifted fname il lifted_fname =
   modifyLifts (((fname, il), lifted_fname) :)
 
-lookupLifted :: VName -> InstanceList -> MonoM (Maybe VName)
-lookupLifted fname il = do
+lookupLifted :: VName -> TypeBase () () -> MonoM (Maybe VName)
+lookupLifted fname t = do
   lifts <- getLifts
-  return $ lookup (fname, il) lifts
+  return $ lookup (fname, t) lifts
 
-transformFName :: VName -> [TypeBase () ()] -> SrcLoc -> MonoM VName
-transformFName fname il loc
-  | null il = return fname -- If the instance list is empty, the variable
-                           -- does not refer to a polymorphic function.
+transformFName :: VName -> TypeBase () () -> MonoM VName
+transformFName fname t
   | baseTag fname <= maxIntrinsicTag = return fname
   | otherwise = do
-      funbind <- lookupVar loc fname
-      maybe_fname <- lookupLifted fname il
-      case maybe_fname of
-        Just x -> return x  -- The function has alread been
-                            -- monomorphized for the given il.
-        Nothing -> do
-          (fname', funbind') <- monomorphizeBinding funbind il
+      maybe_funbind <- lookupFun fname
+      maybe_fname <- lookupLifted fname t
+      case (maybe_fname, maybe_funbind) of
+        -- The function has alreadr been monomorphized.
+        (Just fname', _) -> return fname'
+        -- A monomorphic function.
+        (Nothing, Nothing) -> return fname
+        -- A polymorphic function.
+        (Nothing, Just funbind) -> do
+          (fname', funbind') <- monomorphizeBinding funbind t
           tell [(fname, funbind')]
-          addLifted fname il fname'
+          addLifted fname t fname'
           return fname'
 
 -- | Monomorphization of expressions.
@@ -133,9 +132,9 @@ transformExp (Range e1 me incl tp loc) = do
 
 transformExp e@Empty{} = return e
 
-transformExp (Var (QualName qs fname) (Info (il, t)) loc) = do
-  fname' <- transformFName fname il loc
-  return $ Var (QualName qs fname') (Info (il, t)) loc
+transformExp (Var (QualName qs fname) (Info t) loc) = do
+  fname' <- transformFName fname (toStructural t)
+  return $ Var (QualName qs fname') (Info t) loc
 
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
@@ -211,22 +210,22 @@ transformExp (Lambda tparams params e0 decl tp loc) = do
   e0' <- transformExp e0
   return $ Lambda tparams params e0' decl tp loc
 
-transformExp (OpSection (QualName qs fname) (Info il)
+transformExp (OpSection (QualName qs fname) (Info t)
                (Info xtype) (Info ytype) (Info rettype) loc) = do
-  fname' <- transformFName fname il loc
-  desugarOpSection (QualName qs fname') Nothing Nothing il xtype ytype rettype loc
+  fname' <- transformFName fname (toStructural t)
+  desugarOpSection (QualName qs fname') Nothing Nothing t xtype ytype rettype loc
 
-transformExp (OpSectionLeft (QualName qs fname) (Info il) e
+transformExp (OpSectionLeft (QualName qs fname) (Info t) e
                (Info xtype, Info ytype) (Info rettype) loc) = do
-  fname' <- transformFName fname il loc
+  fname' <- transformFName fname (toStructural t)
   e' <- transformExp e
-  desugarOpSection (QualName qs fname') (Just e') Nothing il xtype ytype rettype loc
+  desugarOpSection (QualName qs fname') (Just e') Nothing t xtype ytype rettype loc
 
-transformExp (OpSectionRight (QualName qs fname) (Info il) e
+transformExp (OpSectionRight (QualName qs fname) (Info t) e
                (Info xtype, Info ytype) (Info rettype) loc) = do
-  fname' <- transformFName fname il loc
+  fname' <- transformFName fname (toStructural t)
   e' <- transformExp e
-  desugarOpSection (QualName qs fname') Nothing (Just e') il xtype ytype rettype loc
+  desugarOpSection (QualName qs fname') Nothing (Just e') t xtype ytype rettype loc
 
 transformExp (DoLoop tparams pat e1 form e3 loc) = do
   e1' <- transformExp e1
@@ -237,11 +236,11 @@ transformExp (DoLoop tparams pat e1 form e3 loc) = do
   e3' <- transformExp e3
   return $ DoLoop tparams pat e1' form' e3' loc
 
-transformExp (BinOp (QualName qs fname) (Info il) (e1, d1) (e2, d2) tp loc) = do
-  fname' <- transformFName fname il loc
+transformExp (BinOp (QualName qs fname) (Info t) (e1, d1) (e2, d2) tp loc) = do
+  fname' <- transformFName fname (toStructural t)
   e1' <- transformExp e1
   e2' <- transformExp e2
-  return $ BinOp (QualName qs fname') (Info il) (e1', d1) (e2', d2) tp loc
+  return $ BinOp (QualName qs fname') (Info t) (e1', d1) (e2', d2) tp loc
 
 transformExp (Project n e tp loc) = do
   e' <- transformExp e
@@ -312,19 +311,19 @@ transformDimIndex (DimSlice me1 me2 me3) =
   where trans = mapM transformExp
 
 -- | Transform an operator section into a lambda.
-desugarOpSection :: QualName VName -> Maybe Exp -> Maybe Exp -> [TypeBase () ()]
-                 -> StructType -> StructType -> PatternType -> SrcLoc -> MonoM Exp
-desugarOpSection qn e_left e_right il xtype ytype rettype loc = do
+desugarOpSection :: QualName VName -> Maybe Exp -> Maybe Exp
+                 -> PatternType -> StructType -> StructType -> PatternType -> SrcLoc -> MonoM Exp
+desugarOpSection qn e_left e_right t xtype ytype rettype loc = do
   (e1, p1) <- makeVarParam e_left $ fromStruct xtype
   (e2, p2) <- makeVarParam e_right $ fromStruct ytype
-  let body = BinOp qn (Info il) (e1, Info xtype) (e2, Info ytype) (Info rettype) loc
+  let body = BinOp qn (Info t) (e1, Info xtype) (e2, Info ytype) (Info rettype) loc
       rettype' = vacuousShapeAnnotations $ toStruct rettype
   return $ Lambda [] (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
 
   where makeVarParam (Just e) _ = return (e, [])
         makeVarParam Nothing argtype = do
           x <- newNameFromString "x"
-          return (Var (qualName x) (Info ([], argtype)) noLoc,
+          return (Var (qualName x) (Info argtype) noLoc,
                   [Id x (Info $ fromStruct argtype) noLoc])
 
 -- | Convert a collection of 'MonoBinding's to a nested sequence of let-bound,
@@ -338,29 +337,51 @@ unfoldLetFuns (MonoBinding (fname, dim_params, params, rettype, body) : rest) e 
 -- | Monomorphize a polymorphic function at the types given in the instance
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'MonoBinding' representation.
-monomorphizeBinding :: PolyBinding -> InstanceList -> MonoM (VName, MonoBinding)
-monomorphizeBinding (PolyBinding (name, tparams, params, rettype, body)) il = do
-  let rettype' = applySubst substs rettype
+monomorphizeBinding :: PolyBinding -> TypeBase () () -> MonoM (VName, MonoBinding)
+monomorphizeBinding (PolyBinding (name, tparams, params, rettype, body)) t = do
+  t' <- removeTypeVariablesInType t
+  let bind_t = foldFunType (map (toStructural . patternType) params) $
+               toStructural rettype
+      substs = typeSubsts bind_t t'
+      rettype' = applySubst substs rettype
       params' = map (substPattern $ applySubst substs) params
-  body' <- updateExpTypes body
+  body' <- updateExpTypes substs body
   body'' <- transformExp body'
   name' <- newName name
   let monobind = MonoBinding (name', shape_params, params', rettype', body'')
   return (name', monobind)
 
-  where (type_params, shape_params) = partition isTypeParam tparams
-        tnames = map typeParamName type_params
-        substs = M.fromList $ zip tnames il
+  where shape_params = filter (not . isTypeParam) tparams
 
-        updateExpTypes = astMap mapper
-        mapper = ASTMapper { mapOnExp         = astMap mapper
-                           , mapOnName        = pure
-                           , mapOnQualName    = pure
-                           , mapOnType        = pure . applySubst substs
-                           , mapOnCompType    = pure . applySubst substs
-                           , mapOnStructType  = pure . applySubst substs
-                           , mapOnPatternType = pure . applySubst substs
-                           }
+        updateExpTypes substs = astMap $ mapper substs
+        mapper substs = ASTMapper { mapOnExp         = astMap $ mapper substs
+                                  , mapOnName        = pure
+                                  , mapOnQualName    = pure
+                                  , mapOnType        = pure . applySubst substs
+                                  , mapOnCompType    = pure . applySubst substs
+                                  , mapOnStructType  = pure . applySubst substs
+                                  , mapOnPatternType = pure . applySubst substs
+                                  }
+
+typeSubsts :: TypeBase () () -> TypeBase () ()
+           -> M.Map VName (TypeBase () ())
+typeSubsts (Record fields1) (Record fields2) =
+  mconcat $ zipWith typeSubsts
+  (map snd $ sortFields fields1) (map snd $ sortFields fields2)
+typeSubsts (TypeVar v _) t =
+  M.singleton (typeLeaf v) t
+typeSubsts Prim{} Prim{} = mempty
+typeSubsts (Arrow _ _ t1a t1b) (Arrow _ _ t2a t2b) =
+  typeSubsts t1a t2a <> typeSubsts t1b t2b
+typeSubsts (Array ArrayPrimElem{} _ _) (Array ArrayPrimElem{} _ _) =
+  mempty
+typeSubsts (Array (ArrayPolyElem v _ _) shape _) t =
+  M.singleton (typeLeaf v) $ stripArray (shapeRank shape) t
+typeSubsts (Array (ArrayRecordElem fields1) _ _) (Array (ArrayRecordElem fields2) _ _) =
+  mconcat $ zipWith typeSubsts
+  (map (fst . recordArrayElemToType . snd) $ sortFields fields1)
+  (map (fst . recordArrayElemToType . snd) $ sortFields fields2)
+typeSubsts t1 t2 = error $ unlines ["typeSubsts: mismatched types:", pretty t1, pretty t2]
 
 -- | Perform a given substitution on the types in a pattern.
 substPattern :: (PatternType -> PatternType) -> Pattern -> Pattern
@@ -414,6 +435,11 @@ removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
                  , valBindParams  = map (substPattern substPatternType) pats
                  , valBindBody    = body'
                  }
+
+removeTypeVariablesInType :: TypeBase dim () -> MonoM (TypeBase () ())
+removeTypeVariablesInType t = do
+  subs <- asks $ M.map TypeSub . envTypeBindings
+  return $ removeShapeAnnotations $ substituteTypes subs $ vacuousShapeAnnotations t
 
 transformValBind :: ValBind -> MonoM ([ValBind], Env)
 transformValBind valbind@(ValBind _ name _ _ tparams _ body _ _)
