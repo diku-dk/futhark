@@ -155,15 +155,17 @@ instance ASTMappable (ExpBase Info VName) where
     traverse (mapOnPatternType tv) t <*>
     traverse (mapOnStructType tv) t1 <*> traverse (mapOnStructType tv) t2 <*>
     traverse (mapOnPatternType tv) t3 <*> pure loc
-  astMap tv (OpSectionLeft name t arg t1 t2 loc) =
+  astMap tv (OpSectionLeft name t arg (t1a, t1b) t2 loc) =
     OpSectionLeft <$> mapOnQualName tv name <*>
-    traverse (mapOnPatternType tv) t <*>
-    mapOnExp tv arg <*> astMap tv t1 <*>
+    traverse (mapOnPatternType tv) t <*> mapOnExp tv arg <*>
+    ((,) <$> traverse (mapOnStructType tv) t1a <*>
+      traverse (mapOnStructType tv) t1b) <*>
     traverse (mapOnPatternType tv) t2 <*> pure loc
-  astMap tv (OpSectionRight name t arg t1 t2 loc) =
+  astMap tv (OpSectionRight name t arg (t1a, t1b) t2 loc) =
     OpSectionRight <$> mapOnQualName tv name <*>
-    traverse (mapOnPatternType tv) t <*>
-    mapOnExp tv arg <*> astMap tv t1 <*>
+    traverse (mapOnPatternType tv) t <*> mapOnExp tv arg <*>
+    ((,) <$> traverse (mapOnStructType tv) t1a <*>
+     traverse (mapOnStructType tv) t1b) <*>
     traverse (mapOnPatternType tv) t2 <*> pure loc
   astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =
     DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
