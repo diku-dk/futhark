@@ -333,9 +333,7 @@ class MonadError TypeError m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
   lookupImport :: SrcLoc -> FilePath -> m (FilePath, Env)
-  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, [TypeBase () ()], CompType)
-  -- ^ Also returns the instance list for the type parameters, in case
-  -- this variables refers to a polymorphic function.
+  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, CompType)
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
@@ -406,8 +404,8 @@ instance MonadTypeChecker TypeM where
         | otherwise ->
             case getType t of
               Left{} -> throwError $ FunctionIsNotValue loc qn
-              Right t' -> return (qn', [], removeShapeAnnotations $ fromStruct $
-                                           qualifyTypeVars outer_env mempty qs t')
+              Right t' -> return (qn', removeShapeAnnotations $ fromStruct $
+                                       qualifyTypeVars outer_env mempty qs t')
 
 -- | Extract from a type either a function type comprising a list of
 -- parameter types and a return type, or a first-order type.

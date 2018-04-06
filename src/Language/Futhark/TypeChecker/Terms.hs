@@ -325,19 +325,19 @@ instance MonadTypeChecker TermTypeM where
       Just (BoundV tparams t)
         | "_" `isPrefixOf` pretty name -> throwError $ UnderscoreUse loc qn
         | otherwise -> do
-            (tnames, inst_list, t') <- instantiateTypeScheme loc tparams t
+            (tnames, t') <- instantiateTypeScheme loc tparams t
             let qual = qualifyTypeVars outer_env tnames qs
             t'' <- qual . removeShapeAnnotations <$> normaliseType t'
-            return (qn', inst_list, t'')
+            return (qn', t'')
 
       Just OpaqueF -> do
         argtype <- newTypeVar loc "t"
-        return (qn', [], Arrow mempty Nothing argtype argtype)
+        return (qn', Arrow mempty Nothing argtype argtype)
 
       Just EqualityF -> do
         argtype <- newTypeVar loc "t"
         equalityType loc argtype
-        return (qn', [toStruct argtype],
+        return (qn',
                 Arrow mempty Nothing argtype $
                 Arrow mempty Nothing argtype $ Prim Bool)
 
@@ -345,7 +345,7 @@ instance MonadTypeChecker TermTypeM where
         argtype <- newTypeVar loc "t"
         mustBeOneOf ts loc $ toStruct argtype
         let (pts', rt') = instOverloaded argtype pts rt
-        return (qn', [toStruct argtype],
+        return (qn',
                 fromStruct $ foldr (Arrow mempty Nothing) rt' pts')
 
       where instOverloaded argtype pts rt =
@@ -395,7 +395,7 @@ checkTypeDecl tdecl = do
 -- parameters. Returns the names of the fresh type variables, the instance
 -- list, and the instantiated type.
 instantiateTypeScheme :: SrcLoc -> [TypeParam] -> PatternType
-                      -> TermTypeM ([VName], [TypeBase () ()], PatternType)
+                      -> TermTypeM ([VName], PatternType)
 instantiateTypeScheme loc tparams t = do
   let tparams' = filter isTypeParam tparams
       tnames = map typeParamName tparams'
@@ -403,7 +403,7 @@ instantiateTypeScheme loc tparams t = do
   let substs = M.fromList $ zip tnames $
                map (vacuousShapeAnnotations . fromStruct) inst_list
       t' = substTypesAny substs t
-  return (fresh_tnames, inst_list, t')
+  return (fresh_tnames, t')
 
 -- | Create a new type name and insert it (unconstrained) in the
 -- substitution map.
@@ -796,7 +796,7 @@ checkExp (RecordLit fs loc) = do
           RecordFieldExplicit f <$> lift (checkExp e) <*> pure rloc
         checkField (RecordFieldImplicit name NoInfo rloc) = do
           errIfAlreadySet name rloc
-          (QualName _ name', _, t) <- lift $ lookupVar rloc $ qualName name
+          (QualName _ name', t) <- lift $ lookupVar rloc $ qualName name
           modify $ M.insert name rloc
           lift $ observe $ Ident name' (Info t) rloc
           return $ RecordFieldImplicit name' (Info t) rloc
@@ -868,12 +868,12 @@ checkExp (BinOp op NoInfo (e1,_) (e2,_) NoInfo loc) = do
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
 
-  (op', il, ftype) <- lookupVar loc op
+  (op', ftype) <- lookupVar loc op
 
   (e1_pt : e2_pt : pts, rettype') <-
     checkFuncall loc ftype [e1_arg, e2_arg]
-  return $ BinOp op' (Info il) (e1', Info $ toStruct e1_pt)
-                               (e2', Info $ toStruct e2_pt)
+  return $ BinOp op' (Info (vacuousShapeAnnotations ftype))
+    (e1', Info $ toStruct e1_pt) (e2', Info $ toStruct e2_pt)
     (Info (foldr (Arrow mempty Nothing) rettype' pts)) loc
 
 checkExp (Project k e NoInfo loc) = do
@@ -919,18 +919,18 @@ checkExp (Var qn NoInfo loc) = do
   -- information to perform the split, by taking qualifiers off the
   -- end until we find a module.
 
-  (qn', il, t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
+  (qn', t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
   observe $ Ident (qualLeaf qn') (Info t) loc
-  foldM checkField (Var qn' (Info (il, vacuousShapeAnnotations t)) loc) fields
+  foldM checkField (Var qn' (Info (vacuousShapeAnnotations t)) loc) fields
   where findRootVar qs name = do
           r <- (Right <$> lookupVar loc (QualName qs name))
                `catchError` handler
           case r of
             Left err | null qs -> throwError err
                      | otherwise -> do
-                         (qn', il, t, fields) <- findRootVar (init qs) (last qs)
-                         return (qn', il, t, fields++[name])
-            Right (qn', il, t) -> return (qn', il, t, [])
+                         (qn', t, fields) <- findRootVar (init qs) (last qs)
+                         return (qn', t, fields++[name])
+            Right (qn', t) -> return (qn', t, [])
 
         handler (UnknownVariableError ns qn' _)
           | null (qualQuals qn') = return . Left $ UnknownVariableError ns qn loc
@@ -1143,35 +1143,36 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
       (Info (allOccuring closure, rettype)) loc
 
 checkExp (OpSection op _ _ _ _ loc) = do
-  (op', il, ftype) <- lookupVar loc op
+  (op', ftype) <- lookupVar loc op
   let (paramtypes, rettype) = unfoldFunType $ vacuousShapeAnnotations ftype
   case paramtypes of
     t1 : t2 : rest -> do
       let t1' = vacuousShapeAnnotations $ toStruct t1
           t2' = vacuousShapeAnnotations $ toStruct t2
-      return $ OpSection op' (Info il) (Info t1') (Info t2') (Info $ foldFunType rest rettype) loc
+      return $ OpSection op' (Info (vacuousShapeAnnotations ftype))
+        (Info t1') (Info t2') (Info $ foldFunType rest rettype) loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
 
 checkExp (OpSectionLeft op _ e _ _ loc) = do
-  (op', il, ftype) <- lookupVar loc op
+  (op', ftype) <- lookupVar loc op
   (e', e_arg) <- checkArg e
   (t1, rt) <- checkApply loc ftype e_arg
   case rt of
     Arrow _ _ t2 rettype ->
-      return $ OpSectionLeft op' (Info il) e'
+      return $ OpSectionLeft op' (Info (vacuousShapeAnnotations ftype)) e'
       (Info $ toStruct t1, Info $ toStruct t2) (Info rettype) loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
 
 checkExp (OpSectionRight op _ e _ _ loc) = do
-  (op', il, ftype) <- lookupVar loc op
+  (op', ftype) <- lookupVar loc op
   (e', e_arg) <- checkArg e
   case ftype of
     Arrow as1 m1 t1 (Arrow as2 m2 t2 ret) -> do
       (t2', Arrow _ _ t1' rettype) <-
         checkApply loc (Arrow as2 m2 t2 (Arrow as1 m1 t1 ret)) e_arg
-      return $ OpSectionRight op' (Info il) e'
+      return $ OpSectionRight op' (Info (vacuousShapeAnnotations ftype)) e'
         (Info $ toStruct t1', Info $ toStruct t2') (Info rettype) loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
@@ -1322,7 +1323,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
-  (QualName _ name', _, vt) <- lookupVar loc (qualName name)
+  (QualName _ name', vt) <- lookupVar loc (qualName name)
   return $ Ident name' (Info vt) loc
 
 checkDimIndex :: DimIndexBase NoInfo Name -> TermTypeM DimIndex
