@@ -32,6 +32,8 @@ import Futhark.TypeCheck (Checkable)
 import qualified Futhark.Util.Pretty as PP
 
 import Futhark.Internalise.Defunctorise as Defunctorise
+import Futhark.Internalise.Monomorphise as Monomorphise
+import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -54,8 +56,12 @@ data FutharkPipeline = PrettyPrint
                      -- ^ Run the type checker; print type errors.
                      | Pipeline [UntypedPass]
                      -- ^ Run this pipeline.
-                     | Demodularise
+                     | Defunctorise
                      -- ^ Partially evaluate away the module language.
+                     | Monomorphise
+                     -- ^ Defunctorise and monomorphise.
+                     | Defunctionalise
+                     -- ^ Defunctorise, monomorphise, and defunctionalise.
 
 data Config = Config { futharkConfig :: FutharkConfig
                      , futharkPipeline :: FutharkPipeline
@@ -266,9 +272,15 @@ commandLineOptions =
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
-  , Option "m" ["print"]
-    (NoArg $ Right $ \opts -> opts { futharkPipeline = Demodularise })
+  , Option [] ["defunctorise"]
+    (NoArg $ Right $ \opts -> opts { futharkPipeline = Defunctorise })
     "Partially evaluate all module constructs and print the residual program."
+  , Option [] ["monomorphise"]
+    (NoArg $ Right $ \opts -> opts { futharkPipeline = Monomorphise })
+    "Monomorphise the program."
+  , Option [] ["defunctionalise"]
+    (NoArg $ Right $ \opts -> opts { futharkPipeline = Defunctionalise })
+    "Defunctionalise the program."
   , Option "I" ["include"]
     (ReqArg (\path -> Right $ changeFutharkConfig $ \opts ->
                 opts { futharkImportPaths =
@@ -326,10 +338,21 @@ main = mainWithOptions newConfig commandLineOptions compile
               case maybe_prog of
                 Left err  -> fail $ show err
                 Right prog-> putStrLn $ pretty prog
-            Demodularise -> do
+            Defunctorise -> do
               (_, imports, src) <- readProgram False preludeBasis mempty file
               liftIO $ mapM_ (putStrLn . pretty) $
                 evalState (Defunctorise.transformProg imports) src
+            Monomorphise -> do
+              (_, imports, src) <- readProgram False preludeBasis mempty file
+              liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
+                Defunctorise.transformProg imports
+                >>= Monomorphise.transformProg
+            Defunctionalise -> do
+              (_, imports, src) <- readProgram False preludeBasis mempty file
+              liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
+                Defunctorise.transformProg imports
+                >>= Monomorphise.transformProg
+                >>= Defunctionalise.transformProg
             Pipeline{} -> do
               prog <- runPipelineOnProgram (futharkConfig config) preludeBasis id file
               runPolyPasses config prog
