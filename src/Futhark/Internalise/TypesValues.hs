@@ -33,7 +33,6 @@ import Data.Semigroup
 import qualified Language.Futhark as E
 import Futhark.Representation.SOACS as I
 import Futhark.Internalise.Monad
-import Futhark.Util
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
