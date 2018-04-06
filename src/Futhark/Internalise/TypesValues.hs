@@ -5,13 +5,10 @@ module Futhark.Internalise.TypesValues
    -- * Internalising types
     BoundInTypes
   , boundInTypes
-  , boundInPatterns
   , internaliseReturnType
   , internaliseEntryReturnType
   , internaliseParamTypes
   , internaliseType
-  , internaliseTypes
-  , internaliseUniqueness
   , internalisePrimType
   , internalisedTypeSize
 
@@ -49,10 +46,6 @@ boundInTypes = BoundInTypes . S.fromList . mapMaybe isTypeParam
   where isTypeParam (E.TypeParamDim v _) = Just v
         isTypeParam _ = Nothing
 
--- | Determine the names bound for some patterns.
-boundInPatterns :: [E.Pattern] -> BoundInTypes
-boundInPatterns = BoundInTypes . S.map E.identName . foldMap E.patIdentSet
-
 internaliseParamTypes :: BoundInTypes
                       -> M.Map VName VName
                       -> [E.TypeBase (E.DimDecl VName) ()]
@@ -80,12 +73,6 @@ internaliseEntryReturnType t = do
   let ts = case E.isTupleRecord t of Just tts -> tts
                                      _        -> [t]
   runInternaliseTypeM $ mapM internaliseTypeM ts
-
-internaliseTypes :: E.ArrayDim dim =>
-                    [E.TypeBase dim ()]
-                 -> InternaliseM [[I.TypeBase I.ExtShape Uniqueness]]
-internaliseTypes ts =
-  fst <$> runInternaliseTypeM (mapM (internaliseTypeM . E.vacuousShapeAnnotations) ts)
 
 internaliseType :: E.TypeBase () ()
                 -> InternaliseM [I.TypeBase I.ExtShape Uniqueness]
