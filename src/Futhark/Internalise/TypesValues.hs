@@ -15,9 +15,6 @@ module Futhark.Internalise.TypesValues
   , internalisePrimType
   , internalisedTypeSize
 
-  , mapTypeVariables
-  , fullyApplyType
-
   -- * Internalising values
   , internalisePrimValue
   , internaliseValue
@@ -64,7 +61,7 @@ internaliseParamTypes :: BoundInTypes
                                        ConstParams)
 internaliseParamTypes (BoundInTypes bound) pnames ts =
   runInternaliseTypeM $ withDims (bound' <> M.map (Free . Var) pnames) $
-    mapM internaliseTypeM ts
+  mapM internaliseTypeM ts
   where bound' = M.fromList (zip (S.toList bound)
                                  (map (Free . Var) $ S.toList bound))
 
@@ -88,31 +85,14 @@ internaliseEntryReturnType t = do
 internaliseTypes :: E.ArrayDim dim =>
                     [E.TypeBase dim ()]
                  -> InternaliseM [[I.TypeBase I.ExtShape Uniqueness]]
-internaliseTypes ts = do
-  (st', _) <-
-    runInternaliseTypeM $
-    mapM (internaliseTypeM . E.vacuousShapeAnnotations) ts
-  return st'
+internaliseTypes ts =
+  fst <$> runInternaliseTypeM (mapM (internaliseTypeM . E.vacuousShapeAnnotations) ts)
 
 internaliseType :: E.TypeBase () ()
                 -> InternaliseM [I.TypeBase I.ExtShape Uniqueness]
 internaliseType t = do
   (t', _) <- runInternaliseTypeM $ internaliseTypeM $ E.vacuousShapeAnnotations t
   return t'
-
-reExt :: ExtType -> InternaliseTypeM ExtType
-reExt (Array t (Shape ds) u) = do
-  (_, ds') <- mapAccumLM update mempty ds
-  return $ Array t (Shape ds') u
-  where update seen (Ext x)
-          | Just x' <- M.lookup x seen =
-              return (seen, Ext x')
-          | otherwise = do
-              x' <- newId
-              return (M.insert x x' seen, Ext x')
-        update seen d =
-          return (seen, d)
-reExt t = return t
 
 newId :: InternaliseTypeM Int
 newId = do (i,cm) <- get
@@ -146,8 +126,8 @@ internaliseTypeM :: E.StructType
 internaliseTypeM orig_t =
   case orig_t of
     E.Prim bt -> return [I.Prim $ internalisePrimType bt]
-    E.TypeVar v _ ->
-      map (`I.toDecl` Nonunique) <$> applyType v
+    E.TypeVar{} ->
+      fail "internaliseTypeM: cannot handle type variable."
     E.Record ets ->
       concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
     E.Array et shape u -> do
@@ -156,8 +136,8 @@ internaliseTypeM orig_t =
       return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets ]
     E.Arrow{} -> fail $ "internaliseTypeM: cannot handle function type: " ++ pretty orig_t
 
-  where internaliseElemType (E.ArrayPolyElem v _ _) =
-          map (`toDecl` Nonunique) <$> applyType v
+  where internaliseElemType E.ArrayPolyElem{} =
+          fail "internaliseElemType: cannot handle type variable."
         internaliseElemType (E.ArrayPrimElem bt _) =
           return [I.Prim $ internalisePrimType bt]
         internaliseElemType (E.ArrayRecordElem elemts) =
@@ -205,51 +185,6 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
         newId' = do i <- get
                     put $ i + 1
                     return i
-
-applyType :: E.TypeName -> InternaliseTypeM [I.ExtType]
-applyType (E.TypeName _ tname) = do
-  entry <- lookupTypeVar tname
-  mapM (reExt . I.fromDecl) =<< internaliseTypeM entry
-
--- | Map type variables from the first argument to corresponding types
--- in the second argument.
-mapTypeVariables :: E.TypeBase () () -> E.TypeBase () ()
-                 -> InternaliseM (M.Map VName (E.TypeBase () ()))
-mapTypeVariables _ y_t@E.TypeVar{} =
-  fail $ "mapTypeVariables: Type variable \"" ++ pretty y_t ++ "\" in second argument."
-mapTypeVariables (E.TypeVar (E.TypeName _ tn) _) t =
-  return $ M.singleton tn t
-mapTypeVariables x@E.Array{} y@E.Array{}
-  | Just x' <- E.peelArray (E.arrayRank x) x,
-    Just y' <- E.peelArray (E.arrayRank x) y =
-      mapTypeVariables x' y'
-mapTypeVariables (E.Record fs_x) (E.Record fs_y) =
-  mconcat <$> zipWithM mapTypeVariables
-    (map snd $ M.toList fs_x) (map snd $ M.toList fs_y)
-mapTypeVariables _ _ =
-  return mempty
-
-fullyApplyType :: E.TypeBase () () -> InternaliseM (E.TypeBase () ())
-fullyApplyType t = do
-  (t', _) <- runInternaliseTypeM $ fullyApplyTypeM $ E.vacuousShapeAnnotations t
-  return $ E.removeShapeAnnotations t'
-
-fullyApplyTypeM :: E.StructType -> InternaliseTypeM E.StructType
-fullyApplyTypeM (E.TypeVar tn _) = lookupTypeVar $ E.typeLeaf tn
-fullyApplyTypeM (E.Prim t) = return $ E.Prim t
-fullyApplyTypeM (E.Record fs) = E.Record <$> traverse fullyApplyTypeM fs
-fullyApplyTypeM (E.Array at shape u) = inArray at
-  where inArray (E.ArrayPrimElem t ()) =
-          return $ E.Array (E.ArrayPrimElem t ()) shape u
-        inArray (E.ArrayPolyElem tn targs ()) = do
-          t <- fullyApplyTypeM (E.TypeVar tn targs)
-          maybe nope return $ E.arrayOf t shape u
-        inArray (E.ArrayRecordElem fs) = do
-          fs' <- traverse (fullyApplyTypeM . fst . E.recordArrayElemToType) fs
-          maybe nope return $ E.arrayOf (E.Record fs') shape u
-        nope = fail "fullyApplyTypeM: cannot construct array."
-fullyApplyTypeM t@E.Arrow{} =
-  fail $ "fullyApplyTypeM: cannot handle function type: " ++ pretty t
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?

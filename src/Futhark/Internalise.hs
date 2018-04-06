@@ -68,68 +68,54 @@ internaliseFunName ofname _  = nameFromString . pretty <$> newVName (baseString 
 
 internaliseValBind :: E.ValBind -> InternaliseM a -> InternaliseM a
 internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params body _ loc) m = do
-  let specialise (e_ts,_) = do
-        let param_ts = map (E.removeShapeAnnotations . E.patternStructType) params
+  info <- bindingParams tparams params $ \pcm shapeparams params' -> do
+    (rettype_bad, rcm) <- internaliseReturnType rettype
+    let rettype' = zeroExts rettype_bad
 
-        mapping <- fmap mconcat $ zipWithM mapTypeVariables param_ts $
-                   map E.removeShapeAnnotations e_ts
+    let mkConstParam name = Param name $ I.Prim int32
+        constparams = map (mkConstParam . snd) $ pcm<>rcm
+        constnames = map I.paramName constparams
+        constscope = M.fromList $ zip constnames $ repeat $
+                     FParamInfo $ I.Prim $ IntType Int32
 
-        let mkEntry (tp, et) = (tp, E.vacuousShapeAnnotations et)
-            types = map mkEntry $ M.toList mapping
-        bindingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
-          (rettype_bad, rcm) <- internaliseReturnType rettype
-          let rettype' = zeroExts rettype_bad
+        shapenames = map I.paramName shapeparams
+        normal_params = map I.paramName constparams ++ shapenames ++
+                        map I.paramName (concat params')
+        normal_param_names = S.fromList normal_params
 
-          let mkConstParam name = Param name $ I.Prim int32
-              constparams = map (mkConstParam . snd) $ pcm<>rcm
-              constnames = map I.paramName constparams
-              constscope = M.fromList $ zip constnames $ repeat $
-                           FParamInfo $ I.Prim $ IntType Int32
+    fname' <- internaliseFunName fname params
 
-              shapenames = map I.paramName shapeparams
-              normal_params = map I.paramName constparams ++ shapenames ++
-                              map I.paramName (concat params')
-              normal_param_names = S.fromList normal_params
+    body' <- localScope constscope $
+             ensureResultExtShape asserting
+             "shape of function result does not match shapes in return type"
+             loc (map I.fromDecl rettype')
+             =<< internaliseBody body
 
-          fname' <- internaliseFunName fname params
-          when (null tparams) $
-            maybeSpecialiseEarly fname fname' (concat params') rettype'
-          body' <- localScope constscope $
-                   ensureResultExtShape asserting
-                   "shape of function result does not match shapes in return type"
-                   loc (map I.fromDecl rettype')
-                   =<< internaliseBody body
+    let free_in_fun = freeInBody body' `S.difference` normal_param_names
 
-          let free_in_fun = freeInBody body' `S.difference` normal_param_names
+    used_free_params <- forM (S.toList free_in_fun) $ \v -> do
+      v_t <- lookupType v
+      return $ Param v $ toDecl v_t Nonunique
 
-          used_free_params <- forM (S.toList free_in_fun) $ \v -> do
-            v_t <- lookupType v
-            return $ Param v $ toDecl v_t Nonunique
+    let free_shape_params = map (`Param` I.Prim int32) $
+                            concatMap (I.shapeVars . I.arrayShape . I.paramType) used_free_params
+        free_params = nub $ free_shape_params ++ used_free_params
+        all_params = constparams ++ free_params ++ shapeparams ++ concat params'
 
-          let free_shape_params = map (`Param` I.Prim int32) $
-                                  concatMap (I.shapeVars . I.arrayShape . I.paramType) used_free_params
-              free_params = nub $ free_shape_params ++ used_free_params
-              all_params = constparams ++ free_params ++ shapeparams ++ concat params'
+    addFunction $ I.FunDef Nothing fname' rettype' all_params body'
 
-          addFunction $ I.FunDef Nothing fname' rettype' all_params body'
+    return (fname',
+            pcm<>rcm,
+            map I.paramName free_params,
+            shapenames,
+            map declTypeOf $ concat params',
+            all_params,
+            applyRetType rettype' all_params)
 
-          return (fname',
-                  pcm<>rcm,
-                  map I.paramName free_params,
-                  shapenames,
-                  map declTypeOf $ concat params',
-                  all_params,
-                  applyRetType rettype' all_params)
-
-  bindingFunction fname specialise $ do
-    -- For any nullary function we force immediate generation.  Note
-    -- that this means value declarations are also generated here - this
-    -- is important!
-    when (null params) $ void $ lookupFunction fname ([],[])
-
+  bindingFunction fname info $ do
     when entry $ generateEntryPoint fb
-
     m
+
   where
     -- | Recompute existential sizes to start from zero.
     -- Necessary because some convoluted constructions will start
@@ -145,12 +131,9 @@ generateEntryPoint (E.ValBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
     (entry_rettype, _) <- internaliseEntryReturnType $ E.vacuousShapeAnnotations rettype
     let entry' = entryPoint (zip params params') (rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
-        e_ts = map (flip setAliases () . E.patternType) orig_params
-        i_ts = staticShapes $ map I.paramType $ concat params'
 
     entry_body <- insertStmsM $ do
-      vals <- fst <$> funcall "entry_result" (E.qualName ofname)
-              (e_ts,map rankShaped i_ts) args loc
+      vals <- fst <$> funcall "entry_result" (E.qualName ofname) args loc
       ctx <- extractShapeContext (concat entry_rettype) <$>
              mapM (fmap I.arrayDims . subExpType) vals
       resultBodyM (ctx ++ vals)
@@ -432,9 +415,7 @@ internaliseExp desc e@E.Apply{} = do
            letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
        | otherwise -> do
            args' <- concat <$> mapM (internaliseExp "arg") args
-           i_ts <- staticShapes <$> mapM subExpType args'
-           let e_ts = map (flip setAliases () . E.typeOf) args
-           fst <$> funcall desc qfname (e_ts, map I.rankShaped i_ts) args' loc
+           fst <$> funcall desc qfname args' loc
 
 internaliseExp desc (E.LetPat tparams pat e body loc) = do
   ses <- internaliseExp desc e
@@ -1402,12 +1383,11 @@ constFunctionArgs loc = mapM arg
                 I.Apply fname [] [I.Prim I.int32] (safety, loc, [])
           return (se, I.Observe, I.Prim I.int32)
 
-funcall :: String -> QualName VName -> SpecArgs -> [SubExp] -> SrcLoc
+funcall :: String -> QualName VName -> [SubExp] -> SrcLoc
         -> InternaliseM ([SubExp], [I.ExtType])
-funcall desc (QualName _ fname) (e_ts, i_ts) args loc = do
-  e_ts' <- mapM fullyApplyType e_ts
+funcall desc (QualName _ fname) args loc = do
   (fname', constparams, closure, shapes, value_paramts, fun_params, rettype_fun) <-
-    lookupFunction fname (e_ts', i_ts)
+    lookupFunction fname
   (constargs, const_ds, _) <- unzip3 <$> constFunctionArgs loc constparams
   argts <- mapM subExpType args
   closure_ts <- mapM lookupType closure
