@@ -373,14 +373,10 @@ typeSubsts (TypeVar v _) t =
 typeSubsts Prim{} Prim{} = mempty
 typeSubsts (Arrow _ _ t1a t1b) (Arrow _ _ t2a t2b) =
   typeSubsts t1a t2a <> typeSubsts t1b t2b
-typeSubsts (Array ArrayPrimElem{} _ _) (Array ArrayPrimElem{} _ _) =
-  mempty
-typeSubsts (Array (ArrayPolyElem v _ _) shape _) t =
-  M.singleton (typeLeaf v) $ stripArray (shapeRank shape) t
-typeSubsts (Array (ArrayRecordElem fields1) _ _) (Array (ArrayRecordElem fields2) _ _) =
-  mconcat $ zipWith typeSubsts
-  (map (fst . recordArrayElemToType . snd) $ sortFields fields1)
-  (map (fst . recordArrayElemToType . snd) $ sortFields fields2)
+typeSubsts t1@Array{} t2@Array{}
+  | Just t1' <- peelArray (arrayRank t1) t1,
+    Just t2' <- peelArray (arrayRank t1) t2 =
+      typeSubsts t1' t2'
 typeSubsts t1 t2 = error $ unlines ["typeSubsts: mismatched types:", pretty t1, pretty t2]
 
 -- | Perform a given substitution on the types in a pattern.
