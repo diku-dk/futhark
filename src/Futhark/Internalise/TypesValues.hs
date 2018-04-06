@@ -76,9 +76,8 @@ internaliseEntryReturnType t = do
 
 internaliseType :: E.TypeBase () ()
                 -> InternaliseM [I.TypeBase I.ExtShape Uniqueness]
-internaliseType t = do
-  (t', _) <- runInternaliseTypeM $ internaliseTypeM $ E.vacuousShapeAnnotations t
-  return t'
+internaliseType =
+  fmap fst . runInternaliseTypeM . internaliseTypeM . E.vacuousShapeAnnotations
 
 newId :: InternaliseTypeM Int
 newId = do (i,cm) <- get
