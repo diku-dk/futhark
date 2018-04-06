@@ -257,7 +257,7 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           internaliseField $ E.RecordFieldExplicit (baseName name)
           (E.Var (E.qualName name) (vacuousShapeAnnotations <$> t) loc) loc
 
-internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
+internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   -- If this is a multidimensional array literal of primitives, we
   -- treat it specially by flattening it out followed by a reshape.
   -- This cuts down on the amount of statements that are produced, and
@@ -286,7 +286,9 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
                          loc rt "elem_reshaped") ks
             return $ I.BasicOp $ I.ArrayLit ks' rt
       letSubExps desc =<< zipWithM arraylit (transpose es') rowtypes
-  where zeroDim t = t `I.setArrayShape`
+  where rowtype = E.stripArray 1 arr_t
+
+        zeroDim t = t `I.setArrayShape`
                     I.Shape (replicate (I.arrayRank t) (constant (0::Int32)))
 
         isArrayLiteral :: E.Exp -> Maybe ([Int],[E.Exp])
