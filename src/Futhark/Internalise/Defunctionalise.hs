@@ -68,6 +68,11 @@ newtype DefM a = DefM (RWS Env [Dec] VNameSource a)
 runDefM :: VNameSource -> DefM a -> (a, VNameSource, [Dec])
 runDefM src (DefM m) = runRWS m mempty src
 
+collectFuns :: DefM a -> DefM (a, [Dec])
+collectFuns m = pass $ do
+  (x, decs) <- listen m
+  return ((x, decs), const mempty)
+
 -- | Looks up the associated static value for a given name in the environment.
 lookupVar :: SrcLoc -> VName -> DefM StaticVal
 lookupVar loc x = do
@@ -836,9 +841,9 @@ defuncValBind valbind@(ValBind _ name _ rettype tparams params body _ _) = do
 defuncDecs :: [Dec] -> DefM [Dec]
 defuncDecs [] = return []
 defuncDecs (ValDec valbind : ds) = do
-  (valbind', env) <- defuncValBind valbind
+  ((valbind', env), defs) <- collectFuns $ defuncValBind valbind
   ds' <- localEnv env $ defuncDecs ds
-  return $ ValDec valbind' : ds'
+  return $ defs ++ ValDec valbind' : ds'
 defuncDecs (TypeDec dec : ds) =
   (TypeDec dec :) <$> defuncDecs ds
 defuncDecs (dec : _) =
