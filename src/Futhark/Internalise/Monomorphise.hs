@@ -443,9 +443,10 @@ removeTypeVariablesInType t = do
 
 transformValBind :: ValBind -> MonoM ([ValBind], Env)
 transformValBind valbind@(ValBind _ name _ _ tparams _ body _ _)
-  | any isTypeParam tparams =
+  | any isTypeParam tparams = do
+      valbind' <- removeTypeVariables valbind
       return ([], mempty { envPolyBindings =
-                             M.singleton name $ toPolyBinding valbind })
+                             M.singleton name $ toPolyBinding valbind' })
   | otherwise = do
       (body', binds) <- censor (const mempty) $ listen $ transformExp body
       valbind' <- removeTypeVariables valbind { valBindBody = body' }
