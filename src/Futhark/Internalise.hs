@@ -36,7 +36,7 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
-import Futhark.Internalise.Modules as Modules
+import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Util (dropAt)
@@ -46,7 +46,7 @@ import Futhark.Util (dropAt)
 internaliseProg :: MonadFreshNames m =>
                    E.Imports -> m (Either String I.Prog)
 internaliseProg prog = do
-  prog_decs <- Modules.transformProg prog
+  prog_decs <- Defunctorise.transformProg prog
   prog_decs' <- Monomorphise.transformProg prog_decs
   prog_decs'' <- Defunctionalise.transformProg prog_decs'
   prog' <- fmap (fmap I.Prog) $ runInternaliseM $ internaliseDecs prog_decs''

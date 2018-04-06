@@ -31,7 +31,7 @@ import Futhark.Representation.AST (Prog, pretty, nameFromString)
 import Futhark.TypeCheck (Checkable)
 import qualified Futhark.Util.Pretty as PP
 
-import Futhark.Internalise.Modules as Modules
+import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -329,7 +329,7 @@ main = mainWithOptions newConfig commandLineOptions compile
             Demodularise -> do
               (_, imports, src) <- readProgram False preludeBasis mempty file
               liftIO $ mapM_ (putStrLn . pretty) $
-                evalState (Modules.transformProg imports) src
+                evalState (Defunctorise.transformProg imports) src
             Pipeline{} -> do
               prog <- runPipelineOnProgram (futharkConfig config) preludeBasis id file
               runPolyPasses config prog

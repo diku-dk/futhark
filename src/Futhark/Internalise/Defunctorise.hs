@@ -1,7 +1,7 @@
 -- | Partially evaluate all modules away from a source Futhark
 -- program.  This is implemented as a source-to-source transformation.
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Futhark.Internalise.Modules (transformProg) where
+module Futhark.Internalise.Defunctorise (transformProg) where
 
 import Control.Monad.RWS.Strict
 import Control.Monad.Identity
