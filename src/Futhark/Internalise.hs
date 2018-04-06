@@ -266,7 +266,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   | Just ((eshape,e'):es') <- mapM isArrayLiteral es,
     not $ null eshape,
     all ((eshape==) . fst) es',
-    Just basetype <- E.peelArray (length eshape) rowtype =
+    Just basetype <- E.peelArray (length eshape) arr_t =
       let flat_lit = E.ArrayLit (e' ++ concatMap snd es') (Info basetype) loc
           new_shape = E.TupLit [E.Literal (E.primValue k) loc
                                | k <- length es:eshape] loc
