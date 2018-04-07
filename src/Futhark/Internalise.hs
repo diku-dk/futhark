@@ -49,18 +49,11 @@ internaliseProg prog = do
   prog_decs <- Defunctorise.transformProg prog
   prog_decs' <- Monomorphise.transformProg prog_decs
   prog_decs'' <- Defunctionalise.transformProg prog_decs'
-  prog' <- fmap (fmap I.Prog) $ runInternaliseM $ internaliseDecs prog_decs''
+  prog' <- fmap (fmap I.Prog) $ runInternaliseM $ internaliseValBinds prog_decs''
   traverse I.renameProg prog'
 
-internaliseDecs :: [E.Dec] -> InternaliseM ()
-internaliseDecs ds =
-  case ds of
-    [] ->
-      return ()
-    ValDec vdec : ds' ->
-      internaliseValBind vdec $ internaliseDecs ds'
-    _:ds' ->
-      internaliseDecs ds'
+internaliseValBinds :: [E.ValBind] -> InternaliseM ()
+internaliseValBinds = foldr internaliseValBind (return ())
 
 internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
 internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
