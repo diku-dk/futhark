@@ -9,10 +9,11 @@ module Futhark.Internalise.Monomorphise
 
 import           Control.Monad.RWS
 import           Control.Monad.State
-import           Data.List
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import qualified Data.Semigroup as Sem
+import qualified Data.Sequence as Seq
+import           Data.Foldable
 
 import           Futhark.MonadFreshNames
 import           Language.Futhark
@@ -20,10 +21,9 @@ import           Language.Futhark.Traversals
 import           Language.Futhark.TypeChecker.Monad (TypeBinding(..))
 import           Language.Futhark.TypeChecker.Types
 
--- | The monomorphization monad reads 'PolyBinding's and writes 'MonoBinding's.
--- The 'TypeParam's in a 'MonoBinding' can only be shape parameters.
+-- | The monomorphization monad reads 'PolyBinding's and writes 'ValBinding's.
+-- The 'TypeParam's in a 'ValBinding' can only be shape parameters.
 newtype PolyBinding = PolyBinding (VName, [TypeParam], [Pattern], StructType, Exp)
-newtype MonoBinding = MonoBinding (VName, [TypeParam], [Pattern], StructType, Exp)
 
 -- | Monomorphization environment mapping names of polymorphic functions to a
 -- representation of their corresponding function bindings.
@@ -46,16 +46,16 @@ extendEnv vn binding = localEnv
   mempty { envPolyBindings = M.singleton vn binding }
 
 -- | The monomorphization monad.
-newtype MonoM a = MonoM (RWST Env [(VName, MonoBinding)] VNameSource
-                          (State Lifts) a)
+newtype MonoM a = MonoM (RWST Env (Seq.Seq (VName, ValBind)) VNameSource
+                         (State Lifts) a)
   deriving (Functor, Applicative, Monad,
             MonadReader Env,
-            MonadWriter [(VName, MonoBinding)],
+            MonadWriter (Seq.Seq (VName, ValBind)),
             MonadFreshNames)
 
-runMonoM :: VNameSource -> MonoM a -> (a, VNameSource)
-runMonoM src (MonoM m) = (a, src')
-  where (a, src', _) = evalState (runRWST m mempty src) mempty
+runMonoM :: VNameSource -> MonoM a -> ((a, Seq.Seq (VName, ValBind)), VNameSource)
+runMonoM src (MonoM m) = ((a, defs), src')
+  where (a, src', defs) = evalState (runRWST m mempty src) mempty
 
 lookupFun :: VName -> MonoM (Maybe PolyBinding)
 lookupFun vn = do
@@ -87,8 +87,8 @@ transformFName :: VName -> TypeBase () () -> MonoM VName
 transformFName fname t
   | baseTag fname <= maxIntrinsicTag = return fname
   | otherwise = do
-      maybe_funbind <- lookupFun fname
       maybe_fname <- lookupLifted fname t
+      maybe_funbind <- lookupFun fname
       case (maybe_fname, maybe_funbind) of
         -- The function has alreadr been monomorphized.
         (Just fname', _) -> return fname'
@@ -97,7 +97,7 @@ transformFName fname t
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
           (fname', funbind') <- monomorphizeBinding funbind t
-          tell [(fname, funbind')]
+          tell $ Seq.singleton (fname, funbind')
           addLifted fname t fname'
           return fname'
 
@@ -150,8 +150,8 @@ transformExp (LetFun fname (tparams, params, _, Info ret, body) e loc)
       let funbind = PolyBinding (fname, tparams, params, ret, body)
       pass $ do
         (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
-        let (bs_local, bs_prop) = partition ((== fname) . fst) bs
-        return (unfoldLetFuns (map snd bs_local) e', const bs_prop)
+        let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
+        return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
 
   | otherwise =
       transformExp $ LetPat [] (Id fname (Info ft) loc) lam e loc
@@ -326,18 +326,23 @@ desugarOpSection qn e_left e_right t xtype ytype rettype loc = do
           return (Var (qualName x) (Info argtype) noLoc,
                   [Id x (Info $ fromStruct argtype) noLoc])
 
--- | Convert a collection of 'MonoBinding's to a nested sequence of let-bound,
+noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()
+noticeDims = mapM_ notice . nestedDims
+  where notice (NamedDim v) = void $ transformFName (qualLeaf v) $ Prim $ Signed Int32
+        notice _            = return ()
+
+-- | Convert a collection of 'ValBind's to a nested sequence of let-bound,
 -- monomorphic functions with the given expression at the bottom.
-unfoldLetFuns :: [MonoBinding] -> Exp -> Exp
+unfoldLetFuns :: [ValBind] -> Exp -> Exp
 unfoldLetFuns [] e = e
-unfoldLetFuns (MonoBinding (fname, dim_params, params, rettype, body) : rest) e =
-  LetFun fname (dim_params, params, Nothing, Info rettype, body) e' noLoc
+unfoldLetFuns (ValBind _ fname _ rettype dim_params params body _ loc : rest) e =
+  LetFun fname (dim_params, params, Nothing, rettype, body) e' loc
   where e' = unfoldLetFuns rest e
 
 -- | Monomorphize a polymorphic function at the types given in the instance
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
--- of the generated monomorphic function and its 'MonoBinding' representation.
-monomorphizeBinding :: PolyBinding -> TypeBase () () -> MonoM (VName, MonoBinding)
+-- of the generated monomorphic function and its 'ValBind' representation.
+monomorphizeBinding :: PolyBinding -> TypeBase () () -> MonoM (VName, ValBind)
 monomorphizeBinding (PolyBinding (name, tparams, params, rettype, body)) t = do
   t' <- removeTypeVariablesInType t
   let bind_t = foldFunType (map (toStructural . patternType) params) $
@@ -345,11 +350,13 @@ monomorphizeBinding (PolyBinding (name, tparams, params, rettype, body)) t = do
       substs = typeSubsts bind_t t'
       rettype' = applySubst substs rettype
       params' = map (substPattern $ applySubst substs) params
+
+  mapM_ noticeDims $ rettype : map patternStructType params'
+
   body' <- updateExpTypes substs body
   body'' <- transformExp body'
-  name' <- newName name
-  let monobind = MonoBinding (name', shape_params, params', rettype', body'')
-  return (name', monobind)
+  name' <- if null tparams then return name else newName name
+  return (name', toValBinding name' params' rettype' body'')
 
   where shape_params = filter (not . isTypeParam) tparams
 
@@ -362,6 +369,18 @@ monomorphizeBinding (PolyBinding (name, tparams, params, rettype, body)) t = do
                                   , mapOnStructType  = pure . applySubst substs
                                   , mapOnPatternType = pure . applySubst substs
                                   }
+
+        toValBinding name' params' rettype' body'' =
+          ValBind { valBindEntryPoint = False
+                  , valBindName       = name'
+                  , valBindRetDecl    = Nothing
+                  , valBindRetType    = Info rettype'
+                  , valBindTypeParams = shape_params
+                  , valBindParams     = params'
+                  , valBindBody       = body''
+                  , valBindDoc        = Nothing
+                  , valBindLocation   = noLoc
+                  }
 
 typeSubsts :: TypeBase () () -> TypeBase () ()
            -> M.Map VName (TypeBase () ())
@@ -394,19 +413,6 @@ toPolyBinding :: ValBind -> PolyBinding
 toPolyBinding (ValBind _ name _ (Info rettype) tparams params body _ _) =
   PolyBinding (name, tparams, params, rettype, body)
 
-toValBinding :: MonoBinding -> ValBind
-toValBinding (MonoBinding (name, shape_params, params, rettype, body)) =
-  ValBind { valBindEntryPoint = False
-          , valBindName       = name
-          , valBindRetDecl    = Nothing
-          , valBindRetType    = Info rettype
-          , valBindTypeParams = shape_params
-          , valBindParams     = params
-          , valBindBody       = body
-          , valBindDoc        = Nothing
-          , valBindLocation   = noLoc
-          }
-
 -- | Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: ValBind -> MonoM ValBind
 removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
@@ -437,33 +443,33 @@ removeTypeVariablesInType t = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   return $ removeShapeAnnotations $ substituteTypes subs $ vacuousShapeAnnotations t
 
-transformValBind :: ValBind -> MonoM ([ValBind], Env)
-transformValBind valbind@(ValBind _ name _ _ tparams _ body _ _)
-  | any isTypeParam tparams = do
-      valbind' <- removeTypeVariables valbind
-      return ([], mempty { envPolyBindings =
-                             M.singleton name $ toPolyBinding valbind' })
-  | otherwise = do
-      (body', binds) <- censor (const mempty) $ listen $ transformExp body
-      valbind' <- removeTypeVariables valbind { valBindBody = body' }
-      valbinds <- mapM (removeTypeVariables . toValBinding . snd) binds
-      return (valbinds ++ [valbind'], mempty)
+transformValBind :: ValBind -> MonoM Env
+transformValBind valbind = do
+  valbind' <- toPolyBinding <$> removeTypeVariables valbind
+  when (valBindEntryPoint valbind) $ do
+    let t = removeShapeAnnotations $ foldFunType
+            (map patternStructType (valBindParams valbind)) $
+            unInfo $ valBindRetType valbind
+    (name, valbind'') <- monomorphizeBinding valbind' t
+    tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = True})
+    addLifted (valBindName valbind) t name
+  return mempty { envPolyBindings = M.singleton (valBindName valbind) valbind' }
 
 transformTypeBind :: TypeBind -> MonoM Env
 transformTypeBind (TypeBind name tparams tydecl _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
+  noticeDims $ unInfo $ expandedType tydecl
   let tp = substituteTypes subs . unInfo $ expandedType tydecl
       tbinding = TypeAbbr tparams tp
   return mempty { envTypeBindings = M.singleton name tbinding }
 
 -- | Monomorphize a list of top-level declarations. A module-free input program
 -- is expected, so only value declarations and type declaration are accepted.
-transformDecs :: [Dec] -> MonoM [Dec]
-transformDecs [] = return []
+transformDecs :: [Dec] -> MonoM ()
+transformDecs [] = return ()
 transformDecs (ValDec valbind : ds) = do
-  (valbinds, env) <- transformValBind valbind
-  ds' <- localEnv env $ transformDecs ds
-  return $ map ValDec valbinds ++ ds'
+  env <- transformValBind valbind
+  localEnv env $ transformDecs ds
 
 transformDecs (TypeDec typebind : ds) = do
   env <- transformTypeBind typebind
@@ -473,6 +479,7 @@ transformDecs (dec : _) =
   error $ "The monomorphization module expects a module-free " ++
   "input program, but received: " ++ pretty dec
 
-transformProg :: MonadFreshNames m => [Dec] -> m [Dec]
-transformProg decs = modifyNameSource $ \namesrc ->
+transformProg :: MonadFreshNames m => [Dec] -> m [ValBind]
+transformProg decs =
+  fmap (toList . fmap snd . snd) $ modifyNameSource $ \namesrc ->
   runMonoM namesrc $ transformDecs decs

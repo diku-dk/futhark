@@ -1,18 +1,17 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
 module Futhark.Internalise.Defunctionalise
-  ( transformProg
-  , runDefM
-  , defuncDecs
-  ) where
+  ( transformProg ) where
 
 import           Control.Monad.RWS
 import           Data.Bifunctor
+import           Data.Foldable
 import           Data.List
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Semigroup as Sem
+import qualified Data.Sequence as Seq
 
 import           Futhark.MonadFreshNames
 import           Language.Futhark
@@ -57,18 +56,18 @@ restrictEnvTo (NameSet m) = asks restrict
         restrict' _ IntrinsicSV = IntrinsicSV
 
 -- | Defunctionalization monad.
-newtype DefM a = DefM (RWS Env [Dec] VNameSource a)
+newtype DefM a = DefM (RWS Env (Seq.Seq ValBind) VNameSource a)
   deriving (Functor, Applicative, Monad,
             MonadReader Env,
-            MonadWriter [Dec],
+            MonadWriter (Seq.Seq ValBind),
             MonadFreshNames)
 
 -- | Run a computation in the defunctionalization monad. Returns the result of
 -- the computation, a new name source, and a list of lifted function declations.
-runDefM :: VNameSource -> DefM a -> (a, VNameSource, [Dec])
+runDefM :: VNameSource -> DefM a -> (a, VNameSource, Seq.Seq ValBind)
 runDefM src (DefM m) = runRWS m mempty src
 
-collectFuns :: DefM a -> DefM (a, [Dec])
+collectFuns :: DefM a -> DefM (a, Seq.Seq ValBind)
 collectFuns m = pass $ do
   (x, decs) <- listen m
   return ((x, decs), const mempty)
@@ -540,10 +539,10 @@ envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Prim $ Signed Int32)
 -- | Create a new top-level value declaration with the given function name,
 -- return type, list of parameters, and body expression.
 liftValDec :: VName -> PatternType -> [VName] -> [Pattern] -> Exp -> DefM ()
-liftValDec fname rettype dims pats body = tell [dec]
+liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
   where dims' = map (flip TypeParamDim noLoc) dims
         rettype_st = vacuousShapeAnnotations $ toStruct rettype
-        dec = ValDec ValBind
+        dec = ValBind
           { valBindEntryPoint = False
           , valBindName       = fname
           , valBindRetDecl    = Nothing
@@ -838,21 +837,17 @@ defuncValBind valbind@(ValBind _ name _ rettype tparams params body _ _) = do
          , M.singleton name sv)
 
 -- | Defunctionalize a list of top-level declarations.
-defuncDecs :: [Dec] -> DefM [Dec]
-defuncDecs [] = return []
-defuncDecs (ValDec valbind : ds) = do
+defuncVals :: [ValBind] -> DefM (Seq.Seq ValBind)
+defuncVals [] = return mempty
+defuncVals (valbind : ds) = do
   ((valbind', env), defs) <- collectFuns $ defuncValBind valbind
-  ds' <- localEnv env $ defuncDecs ds
-  return $ defs ++ ValDec valbind' : ds'
-defuncDecs (TypeDec dec : ds) =
-  (TypeDec dec :) <$> defuncDecs ds
-defuncDecs (dec : _) =
-  error $ "Defunctionalizer received declaration " ++ pretty dec
-       ++ ", but can only handle value declarations at this point."
+  ds' <- localEnv env $ defuncVals ds
+  return $ defs <> Seq.singleton valbind' <> ds'
 
--- | Transform a list of top-level declarations. May produce new lifted function
--- definitions, which are placed in front of the resulting list of declarations.
-transformProg :: MonadFreshNames m => [Dec] -> m [Dec]
+-- | Transform a list of top-level value bindings. May produce new
+-- lifted function definitions, which are placed in front of the
+-- resulting list of declarations.
+transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
 transformProg decs = modifyNameSource $ \namesrc ->
-  let (decs', namesrc', liftedDecs) = runDefM namesrc $ defuncDecs decs
-  in (liftedDecs ++ decs', namesrc')
+  let (decs', namesrc', liftedDecs) = runDefM namesrc $ defuncVals decs
+  in (toList $ liftedDecs <> decs', namesrc')
