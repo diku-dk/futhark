@@ -432,12 +432,38 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
       let closure_pat = buildEnvPattern closure_env
           pat' = updatePattern pat sv2
 
-      -- Inline certain trivial lifted functions immediately.
-      case e0' of
-        RecordLit{} | null dims ->
-          return (LetPat [] closure_pat e1' (LetPat [] pat' e2' e0' noLoc) noLoc,
-                  sv)
-        _ -> do
+      -- Inline certain trivial lifted functions immediately.  This is
+      -- purely an optimisation to avoid having the rest of the
+      -- compiler spend a lot if time processing them (they will end
+      -- up being inlined later anyway).  We also try to simplify away
+      -- some let-bindings, to make the generated code look slightly
+      -- more comprehensible.
+      --
+      -- If you are debugging the defunctionaliser, you may want to
+      -- turn this off to see the original structure of the generated
+      -- code instead.
+      let letPat (RecordPattern [] _) _ pbody = pbody
+          letPat (PatternParens pp _) pe pbody = letPat pp pe pbody
+          letPat (Id v1 _ _) pe (RecordLit [RecordFieldExplicit f (Var v2 _ _) floc] rloc)
+            | v1 == qualLeaf v2 =
+                RecordLit [RecordFieldExplicit f pe floc] rloc
+          letPat (RecordPattern [(pf,p)] _) (RecordLit [RecordFieldExplicit f pe _] _) pbody
+            | pf == f =
+                letPat p pe pbody
+          letPat pp pe pbody = LetPat [] pp pe pbody noLoc
+
+          inline RecordLit{} = True
+          inline TupLit{} = True
+          inline (Apply x y _ _ _) = inline x && inline y
+          inline (BinOp _ _ (x, _) (y, _) _ _) = inline x && inline y
+          inline Var{} = True
+          inline Literal{} = True
+          inline (LetPat _ _ x y _) = inline x && inline y
+          inline Negate{} = True
+          inline _ = False
+      if inline e0' && null dims
+        then return (letPat closure_pat e1' $ letPat pat' e2' e0', sv)
+        else do
           -- Lift lambda to top-level function definition.
           let params = [closure_pat, pat']
               rettype = buildRetType closure_env params $ typeOf e0'
