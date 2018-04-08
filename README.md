@@ -1,7 +1,7 @@
 <img src="assets/logo.svg" height="50px"/> The Futhark Programming Language
 ==========
 
-[![Join the chat at https://gitter.im/futhark-lang/Lobby](https://badges.gitter.im/futhark-lang/Lobby.svg)](https://gitter.im/futhark-lang/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![Join the chat at https://gitter.im/futhark-lang/Lobby](https://badges.gitter.im/futhark-lang/Lobby.svg)](https://gitter.im/futhark-lang/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)[![Build Status](https://travis-ci.org/diku-dk/futhark.svg?branch=master)](https://travis-ci.org/diku-dk/futhark) [![Project Stats](https://www.openhub.net/p/futharkcompiler/widgets/project_thin_badge.gif)](https://www.openhub.net/p/futharkcompiler)
 
 Futhark is a purely functional data-parallel programming language.
 Its optimising compiler is able to compile it to typically very
@@ -18,16 +18,6 @@ documentation](http://futhark.readthedocs.io) and the [basis library
 documentation](https://futhark-lang.org/docs).
 
 [Installation instructions here.](http://futhark.readthedocs.io/en/latest/installation.html)
-
-Statistics
-==========
-
-[![Build Status](https://travis-ci.org/diku-dk/futhark.svg?branch=master)](https://travis-ci.org/diku-dk/futhark) [![Project Stats](https://www.openhub.net/p/futharkcompiler/widgets/project_thin_badge.gif)](https://www.openhub.net/p/futharkcompiler)
-
-Installation
-============
-
-Please see our [installation instructions](https://futhark.readthedocs.io/en/latest/installation.html).
 
 Usage
 =====
@@ -61,4 +51,4 @@ Testing
 
 Run the `futhark-test tests` to check how well we're doing.  Use
 `futhark-test -t` if you're in a hurry and only want to check that all
-the tests compile.
+the tests type-check.
