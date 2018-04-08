@@ -1,6 +1,8 @@
 <img src="assets/logo.svg" height="50px"/> The Futhark Programming Language
 ==========
 
+[![Join the chat at https://gitter.im/futhark-lang/Lobby](https://badges.gitter.im/futhark-lang/Lobby.svg)](https://gitter.im/futhark-lang/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 Futhark is a purely functional data-parallel programming language.
 Its optimising compiler is able to compile it to typically very
 performant GPU code.  The language and compiler is developed as part
