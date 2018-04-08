@@ -22,3 +22,17 @@ let const '^a '^b (x: a) (_: b): a = x
 
 -- | The identity function.
 let id '^a (x: a) = x
+
+-- | Apply a function some number of times.
+let iterate 'a (n: i32) (f: a -> a) (x: a) =
+  loop x for _i < n do f x
+
+-- | Keep applying a function until some property holds of the value.
+-- May apply zero times.  Note: may not terminate.
+let iterate_until 'a (p: a -> bool) (f: a -> a) (x: a) =
+  loop x while ! (p x) do f x
+
+-- | Keep applying a function while some property holds of the value.
+-- May apply zero times.  Note: may not terminate.
+let iterate_while 'a (p: a -> bool) (f: a -> a) (x: a) =
+  loop x while p x do f x
