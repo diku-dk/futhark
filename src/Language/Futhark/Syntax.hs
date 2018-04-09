@@ -327,7 +327,8 @@ instance Bifoldable ArrayElemTypeBase where
 
 -- | An expanded Futhark type is either an array, a prim type, a
 -- tuple, or a type variable.  When comparing types for equality with
--- '==', aliases are ignored, but dimensions much match.
+-- '==', aliases are ignored, but dimensions much match.  Function
+-- parameter names are ignored.
 data TypeBase dim as = Prim PrimType
                      | Array (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
                      | Record (M.Map Name (TypeBase dim as))
@@ -335,7 +336,15 @@ data TypeBase dim as = Prim PrimType
                      | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
                      -- ^ The aliasing corresponds to the lexical
                      -- closure of the function.
-                     deriving (Eq, Show)
+                     deriving (Show)
+
+instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
+  Prim x1 == Prim y1 = x1 == y1
+  Array x1 y1 z1 == Array x2 y2 z2 = x1 == x2 && y1 == y2 && z1 == z2
+  Record x1 == Record x2 = x1 == x2
+  TypeVar x1 y1 == TypeVar x2 y2 = x1 == x2 && y1 == y2
+  Arrow _ _ x1 y1 == Arrow _ _ x2 y2 = x1 == x2 && y1 == y2
+  _ == _ = False
 
 instance Bitraversable TypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
