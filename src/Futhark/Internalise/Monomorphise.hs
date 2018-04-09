@@ -118,8 +118,9 @@ transformExp (RecordLit fs loc) =
   RecordLit <$> mapM transformField fs <*> pure loc
   where transformField (RecordFieldExplicit name e loc') =
           RecordFieldExplicit name <$> transformExp e <*> pure loc'
-        transformField f@RecordFieldImplicit{} =
-          return f  -- TODO: What if this is a polymorphic function?
+        transformField (RecordFieldImplicit v (Info t) _) =
+          RecordFieldImplicit <$> transformFName v (toStruct t) <*>
+          pure (Info t) <*> pure loc
 
 transformExp (ArrayLit es tp loc) =
   ArrayLit <$> mapM transformExp es <*> pure tp <*> pure loc
