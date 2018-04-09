@@ -424,7 +424,7 @@ compileOutParams orig_rts orig_epts = do
           (memseen, arrseen) <- get
           case M.lookup x memseen of
             Nothing -> do sizeout <- imp $ newVName "out_memsize"
-                          tell ([Imp.ScalarParam sizeout int32],
+                          tell ([Imp.ScalarParam sizeout int64],
                                 M.singleton x $ ScalarDestination sizeout)
                           put (M.insert x sizeout memseen, arrseen)
                           return $ Imp.VarSize sizeout
