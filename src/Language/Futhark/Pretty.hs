@@ -392,7 +392,7 @@ prettyBinOp p bop x y = parensIf (p > symPrecedence) $
                         pprPrec symRPrecedence y
   where bop' = case leading of Backtick -> text "`" <> ppr bop <> text "`"
                                _        -> ppr bop
-        leading = leadingOperator $ nameFromString $ pretty bop
+        leading = leadingOperator $ nameFromString $ pretty $ qualLeaf bop
         symPrecedence = precedence leading
         symRPrecedence = rprecedence leading
         precedence PipeRight = -1
