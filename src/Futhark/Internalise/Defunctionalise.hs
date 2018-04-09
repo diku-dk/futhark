@@ -795,15 +795,6 @@ combineTypeShapes (Record ts1) (Record ts2)
 combineTypeShapes (Array et1 shape1 u1) (Array et2 shape2 _u2)
   | Just new_shape <- unifyShapes shape1 shape2 =
       Array (combineElemTypeInfo et1 et2) new_shape u1
-combineTypeShapes (TypeVar _ targs1) (TypeVar tn targs2) =
-  TypeVar tn $ zipWith combineArgs targs1 targs2
-  where combineArgs (TypeArgDim d1 _) (TypeArgDim d2 loc)
-          | Just new_dim <- unifyDims d1 d2 = TypeArgDim new_dim loc
-        combineArgs _ targ = targ
--- Keep the original type if the type of the transformed expression is a type
--- variable. This is to avoid types becomming opaque when they should not be and
--- relies on the assumption that a type variable cannot (yet) be an arrow.
-combineTypeShapes orig_tp TypeVar{} = orig_tp
 combineTypeShapes _ new_tp = new_tp
 
 combineElemTypeInfo :: ArrayDim dim =>
@@ -812,7 +803,6 @@ combineElemTypeInfo :: ArrayDim dim =>
 combineElemTypeInfo (ArrayRecordElem et1) (ArrayRecordElem et2) =
   ArrayRecordElem $ M.map (uncurry combineRecordArrayTypeInfo)
                           (M.intersectionWith (,) et1 et2)
-combineElemTypeInfo orig_tp ArrayPolyElem{} = orig_tp
 combineElemTypeInfo _ new_tp = new_tp
 
 combineRecordArrayTypeInfo :: ArrayDim dim =>
