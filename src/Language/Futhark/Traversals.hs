@@ -294,7 +294,7 @@ instance ASTMappable (FieldBase Info VName) where
     RecordFieldExplicit name <$> mapOnExp tv e <*> pure loc
   astMap tv (RecordFieldImplicit name t loc) =
     RecordFieldImplicit <$> mapOnName tv name
-    <*> traverse (astMap tv) t <*> pure loc
+    <*> traverse (mapOnCompType tv) t <*> pure loc
 
 instance ASTMappable a => ASTMappable (Info a) where
   astMap tv = traverse $ astMap tv
