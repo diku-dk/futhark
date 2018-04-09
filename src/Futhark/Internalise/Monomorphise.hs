@@ -23,7 +23,7 @@ import           Language.Futhark.TypeChecker.Types
 
 -- | The monomorphization monad reads 'PolyBinding's and writes 'ValBinding's.
 -- The 'TypeParam's in a 'ValBinding' can only be shape parameters.
-newtype PolyBinding = PolyBinding (VName, [TypeParam], [Pattern], StructType, Exp)
+newtype PolyBinding = PolyBinding (VName, [TypeParam], [Pattern], StructType, Exp, SrcLoc)
 
 -- | Monomorphization environment mapping names of polymorphic functions to a
 -- representation of their corresponding function bindings.
@@ -147,7 +147,7 @@ transformExp (LetFun fname (tparams, params, _, Info ret, body) e loc)
       -- Retrieve the lifted monomorphic function bindings that are produced,
       -- filter those that are monomorphic versions of the current let-bound
       -- function and insert them at this point, and propagate the rest.
-      let funbind = PolyBinding (fname, tparams, params, ret, body)
+      let funbind = PolyBinding (fname, tparams, params, ret, body, loc)
       pass $ do
         (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
@@ -343,7 +343,7 @@ unfoldLetFuns (ValBind _ fname _ rettype dim_params params body _ loc : rest) e 
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
 monomorphizeBinding :: PolyBinding -> TypeBase () () -> MonoM (VName, ValBind)
-monomorphizeBinding (PolyBinding (name, tparams, params, rettype, body)) t = do
+monomorphizeBinding (PolyBinding (name, tparams, params, rettype, body, loc)) t = do
   t' <- removeTypeVariablesInType t
   let bind_t = foldFunType (map (toStructural . patternType) params) $
                toStructural rettype
@@ -379,7 +379,7 @@ monomorphizeBinding (PolyBinding (name, tparams, params, rettype, body)) t = do
                   , valBindParams     = params'
                   , valBindBody       = body''
                   , valBindDoc        = Nothing
-                  , valBindLocation   = noLoc
+                  , valBindLocation   = loc
                   }
 
 typeSubsts :: TypeBase () () -> TypeBase () ()
@@ -410,8 +410,8 @@ substPattern f pat = case pat of
   PatternAscription p _  -> substPattern f p
 
 toPolyBinding :: ValBind -> PolyBinding
-toPolyBinding (ValBind _ name _ (Info rettype) tparams params body _ _) =
-  PolyBinding (name, tparams, params, rettype, body)
+toPolyBinding (ValBind _ name _ (Info rettype) tparams params body _ loc) =
+  PolyBinding (name, tparams, params, rettype, body, loc)
 
 -- | Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: ValBind -> MonoM ValBind
