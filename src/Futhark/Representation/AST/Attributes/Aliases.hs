@@ -96,10 +96,8 @@ expAliases (If _ tb fb attr) =
                       (bodyAliases fb, consumedInBody fb)
 expAliases (BasicOp op) = primOpAliases op
 expAliases (DoLoop ctxmerge valmerge _ loopbody) =
-  map (`S.difference` merge_names) val_aliases
-  where (_ctx_aliases, val_aliases) =
-          splitAt (length ctxmerge) $ bodyAliases loopbody
-        merge_names = S.fromList $
+  map (`S.difference` merge_names) $ bodyAliases loopbody
+  where merge_names = S.fromList $
                       map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t _) =
   funcallAliases args $ retTypeValues t
