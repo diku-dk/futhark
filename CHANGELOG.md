@@ -56,11 +56,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
    * `FUTHARK_VERSIONED_CODE` is now `FUTHARK_INCREMENTAL_FLATTENING`.
 
-   * The SOACs `reduce`, `filter`, `partition`, `scan`, `stream_red,`
-     and `stream_map` have been replaced with library functions.
-
-   * Multi-array `map`s are now deprecated and will be removed in the
-     next release.
+   * The SOACs `map`, `reduce`, `filter`, `partition`, `scan`,
+     `stream_red,` and `stream_map` have been replaced with library
+     functions.
 
    * The futlib/mss and futlib/lss modules have been rewritten to use
      higher-order functions instead of modules.
