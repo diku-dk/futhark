@@ -100,7 +100,8 @@ binding vs = local (`bindVars` vs)
 gatherStmPattern :: Pattern -> Exp -> FusionGM FusedRes -> FusionGM FusedRes
 gatherStmPattern pat e = binding $ zip idents aliases
   where idents = patternIdents pat
-        aliases = expAliases $ Alias.analyseExp e
+        aliases = replicate (length (patternContextNames pat)) mempty ++
+                  expAliases (Alias.analyseExp e)
 
 bindingPat :: Pattern -> FusionGM a -> FusionGM a
 bindingPat = binding . (`zip` repeat mempty) . patternIdents
