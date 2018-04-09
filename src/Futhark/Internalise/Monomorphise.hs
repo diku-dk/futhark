@@ -90,7 +90,7 @@ transformFName fname t
       maybe_fname <- lookupLifted fname t
       maybe_funbind <- lookupFun fname
       case (maybe_fname, maybe_funbind) of
-        -- The function has alreadr been monomorphized.
+        -- The function has already been monomorphized.
         (Just fname', _) -> return fname'
         -- A monomorphic function.
         (Nothing, Nothing) -> return fname
