@@ -57,7 +57,7 @@ internaliseValBinds = foldr internaliseValBind (return ())
 
 internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
 internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
-internaliseFunName ofname _  = nameFromString . pretty <$> newVName (baseString ofname)
+internaliseFunName ofname _  = return $ nameFromString $ pretty ofname
 
 internaliseValBind :: E.ValBind -> InternaliseM a -> InternaliseM a
 internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params body _ loc) m = do
