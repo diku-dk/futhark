@@ -4,6 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | The simplification engine is only willing to hoist allocations
 -- out of loops if the memory block resulting from the allocation is
 -- dead at the end of the loop.  If it is not, we may cause data
@@ -113,7 +114,8 @@ optimiseStms (e:es) = do
   es' <- localScope (castScope $ scopeOf e_es) $ optimiseStms es
   return $ e_es ++ es'
 
-optimiseStm :: LoreConstraints lore inner =>
+optimiseStm :: forall lore inner.
+               LoreConstraints lore inner =>
                Stm lore -> DoubleBufferM lore [Stm lore]
 optimiseStm (Let pat aux (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOf form <> scopeOfFParams (map fst $ ctx++val)) $
@@ -123,7 +125,12 @@ optimiseStm (Let pat aux (DoLoop ctx val form body)) = do
   return $ bnds ++ [Let pat aux $ DoLoop ctx' val' form body'']
 optimiseStm (Let pat aux e) =
   pure . Let pat aux <$> mapExpM optimise e
-  where optimise = identityMapper { mapOnBody = const optimiseBody
+  where optimise = identityMapper { mapOnBody = \_ x ->
+                                      -- This type annotation is
+                                      -- necessary to prevent the GHC
+                                      -- 8.4 type checker from going
+                                      -- nuts.
+                                      (optimiseBody x :: DoubleBufferM lore (Body lore))
                                   , mapOnOp = optimiseOp
                                   }
 
