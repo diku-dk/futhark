@@ -40,17 +40,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * Type inference is now supported, although with some limitations
      around records, in-place updates, and `unzip`. (#503)
 
-   * Added a range of higher-order utility functions to the prelude:
+   * Added a range of higher-order utility functions to the prelude,
+     including (among others):
 
-         val (|>) 'a '^b: a ->  (a -> b) -> b
+         val (|>) '^a '^b: a ->  (a -> b) -> b
 
-         let (<|) 'a '^b: (a -> b) -> a -> b
+         val (<|) '^a '^b: (a -> b) -> a -> b
 
-         let (|>>) 'a 'b '^c: (a -> b) -> (b -> c) -> a -> c
+         val (|>>) '^a 'b '^c: (a -> b) -> (b -> c) -> a -> c
 
-         let (<<|) 'a 'b '^c: (b -> c) -> (a -> b) a -> c
-
-### Removed
+         val (<<|) '^a 'b '^c: (b -> c) -> (a -> b) a -> c
 
 ### Changed
 
