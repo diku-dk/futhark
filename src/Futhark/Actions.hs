@@ -10,6 +10,7 @@ where
 
 import Control.Monad.IO.Class
 import Data.List
+import Data.Monoid
 import Data.Word
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -27,7 +28,7 @@ import Futhark.Interpreter
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
-import Futhark.Util.Pretty (text, ppr, prettyDoc, prettyText, brackets, (<>))
+import Futhark.Util.Pretty (text, ppr, prettyDoc, prettyText, brackets)
 
 printAction :: (Attributes lore, CanBeAliased (Op lore)) => Action lore
 printAction =
