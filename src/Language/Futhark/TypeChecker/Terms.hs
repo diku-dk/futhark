@@ -527,8 +527,15 @@ checkPattern' (RecordPattern p_fs loc) (Ascribed (Record t_fs))
     RecordPattern . M.toList <$> check <*> pure loc
     where check = traverse (uncurry checkPattern') $ M.intersectionWith (,)
                   (M.fromList p_fs) (fmap Ascribed t_fs)
-checkPattern' p@RecordPattern{} (Ascribed t) =
-  typeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
+checkPattern' p@(RecordPattern fields loc) (Ascribed t) = do
+  fields' <- traverse (const $ newTypeVar loc "t") $ M.fromList fields
+
+  when (sort (M.keys fields') /= sort (map fst fields)) $
+    typeError loc $ "Duplicate fields in record pattern " ++ pretty p
+
+  unify loc (Record fields') $ toStructural t
+  t' <- normaliseType t
+  checkPattern' p $ Ascribed t'
 checkPattern' (RecordPattern fs loc) NoneInferred =
   RecordPattern . M.toList <$> traverse (`checkPattern'` NoneInferred) (M.fromList fs) <*> pure loc
 
