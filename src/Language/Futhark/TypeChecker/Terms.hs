@@ -486,7 +486,6 @@ unifyTypeAliases t1 t2 =
 --- General binding.
 
 data InferredType = NoneInferred
-                  | Inferred CompType
                   | Ascribed PatternType
 
 
@@ -496,12 +495,6 @@ checkPattern' :: UncheckedPattern -> InferredType
 checkPattern' (PatternParens p loc) t =
   PatternParens <$> checkPattern' p t <*> pure loc
 
-checkPattern' (Id name NoInfo loc) (Inferred t) = do
-  name' <- checkName Term name loc
-  let t' = vacuousShapeAnnotations $
-           case t of Record{} -> t
-                     _        -> t `addAliases` S.insert name'
-  return $ Id name' (Info $ t' `setUniqueness` Nonunique) loc
 checkPattern' (Id name NoInfo loc) (Ascribed t) = do
   name' <- checkName Term name loc
   let t' = case t of Record{} -> t
@@ -512,17 +505,12 @@ checkPattern' (Id name NoInfo loc) NoneInferred = do
   t <- newTypeVar loc "t"
   return $ Id name' (Info t) loc
 
-checkPattern' (Wildcard _ loc) (Inferred t) =
-  return $ Wildcard (Info $ vacuousShapeAnnotations $ t `setUniqueness` Nonunique) loc
 checkPattern' (Wildcard _ loc) (Ascribed t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
 checkPattern' (Wildcard NoInfo loc) NoneInferred = do
   t <- newTypeVar loc "t"
   return $ Wildcard (Info t) loc
 
-checkPattern' (TuplePattern ps loc) (Inferred t)
-  | Just ts <- isTupleRecord t, length ts == length ps =
-      TuplePattern <$> zipWithM checkPattern' ps (map Inferred ts) <*> pure loc
 checkPattern' (TuplePattern ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t, length ts == length ps =
       TuplePattern <$> zipWithM checkPattern' ps (map Ascribed ts) <*> pure loc
@@ -531,23 +519,14 @@ checkPattern' p@(TuplePattern ps loc) (Ascribed t) = do
   unify loc (tupleRecord ps_t) $ toStructural t
   t' <- normaliseType t
   checkPattern' p $ Ascribed t'
-checkPattern' p@TuplePattern{} (Inferred t) =
-  typeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
 checkPattern' (TuplePattern ps loc) NoneInferred =
   TuplePattern <$> mapM (`checkPattern'` NoneInferred) ps <*> pure loc
 
-checkPattern' (RecordPattern p_fs loc) (Inferred (Record t_fs))
-  | sort (map fst p_fs) == sort (M.keys t_fs) =
-    RecordPattern . M.toList <$> check <*> pure loc
-    where check = traverse (uncurry checkPattern') $ M.intersectionWith (,)
-                  (M.fromList p_fs) (fmap Inferred t_fs)
 checkPattern' (RecordPattern p_fs loc) (Ascribed (Record t_fs))
   | sort (map fst p_fs) == sort (M.keys t_fs) =
     RecordPattern . M.toList <$> check <*> pure loc
     where check = traverse (uncurry checkPattern') $ M.intersectionWith (,)
                   (M.fromList p_fs) (fmap Ascribed t_fs)
-checkPattern' p@RecordPattern{} (Inferred t) =
-  typeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
 checkPattern' p@RecordPattern{} (Ascribed t) =
   typeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
 checkPattern' (RecordPattern fs loc) NoneInferred =
@@ -557,7 +536,6 @@ checkPattern' fullp@(PatternAscription p (TypeDecl t NoInfo)) maybe_outer_t = do
   (t', st) <- checkTypeExp t
 
   let maybe_outer_t' = case maybe_outer_t of
-                         Inferred outer_t -> Just $ vacuousShapeAnnotations outer_t
                          Ascribed outer_t -> Just outer_t
                          NoneInferred -> Nothing
       st' = fromStruct st
