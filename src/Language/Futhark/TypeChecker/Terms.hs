@@ -526,9 +526,12 @@ checkPattern' (TuplePattern ps loc) (Inferred t)
 checkPattern' (TuplePattern ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t, length ts == length ps =
       TuplePattern <$> zipWithM checkPattern' ps (map Ascribed ts) <*> pure loc
+checkPattern' p@(TuplePattern ps loc) (Ascribed t) = do
+  ps_t <- replicateM (length ps) (newTypeVar loc "t")
+  unify loc (tupleRecord ps_t) $ toStructural t
+  t' <- normaliseType t
+  checkPattern' p $ Ascribed t'
 checkPattern' p@TuplePattern{} (Inferred t) =
-  typeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
-checkPattern' p@TuplePattern{} (Ascribed t) =
   typeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
 checkPattern' (TuplePattern ps loc) NoneInferred =
   TuplePattern <$> mapM (`checkPattern'` NoneInferred) ps <*> pure loc
