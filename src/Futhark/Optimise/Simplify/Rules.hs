@@ -166,24 +166,6 @@ removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
 removeRedundantMergeVariables _ _ _ _ =
   cannotSimplify
 
-findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
-                         -> M.Map VName Names
-                         -> Names
-findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =
-  iterateNecessary mempty
-  where iterateNecessary prev_necessary
-          | necessary == prev_necessary = necessary
-          | otherwise                   = iterateNecessary necessary
-          where necessary = mconcat $ map dependencies returnedResultSubExps
-                usedAfterLoopOrNecessary param =
-                  usedAfterLoop param || paramName param `S.member` prev_necessary
-                returnedResultSubExps =
-                  map snd $ filter (usedAfterLoopOrNecessary . fst) merge_and_res
-                dependencies (Constant _) =
-                  S.empty
-                dependencies (Var v)      =
-                  M.findWithDefault (S.singleton v) v allDependencies
-
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
 hoistLoopInvariantMergeVariables :: BinderOps lore => TopDownRuleDoLoop lore
