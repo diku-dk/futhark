@@ -17,6 +17,7 @@ import Control.Monad
 import Data.Foldable
 import Data.Either
 import Data.List
+import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
@@ -35,6 +36,7 @@ import Futhark.Tools
 import Futhark.Pass
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.DataDependencies
 import Futhark.Transform.Rename
 
 simpleSOACS :: Simplify.SimpleOps SOACS
@@ -131,6 +133,28 @@ instance BinderOps (Wise SOACS) where
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 
+fixLambdaParams :: (MonadBinder m, Bindable (Lore m), BinderOps (Lore m)) =>
+                   AST.Lambda (Lore m) -> [Maybe SubExp] -> m (AST.Lambda (Lore m))
+fixLambdaParams lam fixes = do
+  body <- runBodyBinder $ localScope (scopeOfLParams $ lambdaParams lam) $ do
+    zipWithM_ maybeFix (lambdaParams lam) fixes'
+    return $ lambdaBody lam
+  return lam { lambdaBody = body
+             , lambdaParams = map fst $ filter (isNothing . snd) $
+                              zip (lambdaParams lam) fixes' }
+  where fixes' = fixes ++ repeat Nothing
+        maybeFix p (Just x) = letBindNames_ [paramName p] $ BasicOp $ SubExp x
+        maybeFix _ Nothing = return ()
+
+removeLambdaResults :: [Bool] -> AST.Lambda lore -> AST.Lambda lore
+removeLambdaResults keep lam = lam { lambdaBody = lam_body'
+                                   , lambdaReturnType = ret }
+  where keep' :: [a] -> [a]
+        keep' = map snd . filter fst . zip (keep ++ repeat True)
+        lam_body = lambdaBody lam
+        lam_body' = lam_body { bodyResult = keep' $ bodyResult lam_body }
+        ret = keep' $ lambdaReturnType lam
+
 soacRules :: RuleBook (Wise SOACS)
 soacRules = standardRules <> ruleBook topDownRules bottomUpRules
 
@@ -147,6 +171,7 @@ topDownRules = [RuleOp removeReplicateMapping,
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
 bottomUpRules = [RuleOp removeDeadMapping,
+                 RuleOp removeDeadReduction,
                  RuleOp removeDeadWrite,
                  RuleBasicOp removeUnnecessaryCopy,
                  RuleOp liftIdentityMapping,
@@ -298,6 +323,46 @@ removeDuplicateMapOutput (_, used) pat _ (Map width fun arrs) =
               (ses_ts_pes', (pe', pe) : copies)
           | otherwise = (ses_ts_pes' ++ [(se,t,pe)], copies)
 removeDuplicateMapOutput _ _ _ _ = cannotSimplify
+
+-- | Some of the results of a reduction (or really: Redomap) may be
+-- dead.  We remove them here.  The trick is that we need to look at
+-- the data dependencies to see that the "dead" result is not
+-- actually used for computing one of the live ones.
+removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
+removeDeadReduction (_, used) pat (StmAux cs _) (Redomap w comm redlam maplam nes arrs)
+  | not $ all (`UT.used` used) $ patternNames pat, -- Quick/cheap check
+    not $ all (==True) alive_mask = do
+  let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
+      dead_fix = zipWith fixDeadToNeutral alive_mask nes
+      (used_pes, _, used_nes) =
+        unzip3 $ filter (\(_,x,_) -> paramName x `S.member` necessary) $
+        zip3 (patternElements pat) redlam_params nes
+
+  maplam' <- removeLambdaResults alive_mask <$> fixLambdaParams maplam dead_fix
+  redlam' <- removeLambdaResults alive_mask <$> fixLambdaParams redlam (dead_fix++dead_fix)
+
+  certifying cs $ letBind_ (Pattern [] used_pes) $
+    Op $ Redomap w comm redlam' maplam' used_nes arrs
+  where redlam_deps = dataDependencies $ lambdaBody redlam
+        redlam_res = bodyResult $ lambdaBody redlam
+        redlam_params = lambdaParams redlam
+        used_after = map snd $ filter ((`UT.used` used) . patElemName . fst) $
+                     zip (patternElements pat) redlam_params
+
+        necessary = findNecessaryForReturned (`elem` used_after)
+                    (zip redlam_params $ redlam_res <> redlam_res) redlam_deps
+        alive_mask = map ((`S.member` necessary) . paramName) redlam_params
+
+removeDeadReduction tables pat aux (Reduce w comm redlam inp) =
+  -- We handle reductions by converting them to Redomap.  We rename
+  -- the result if it succeeds, because we are just duplicating the
+  -- lambda here.
+  mapM_ (addStm <=< renameStm) =<<
+  collectStms_ (removeDeadReduction tables pat aux $
+                Redomap w comm redlam redlam nes arrs)
+  where (nes, arrs) = unzip inp
+
+removeDeadReduction _ _ _ _ = cannotSimplify
 
 -- | If we are writing to an array that is never used, get rid of it.
 removeDeadWrite :: BottomUpRuleOp (Wise SOACS)

@@ -3,6 +3,7 @@
 module Futhark.Analysis.DataDependencies
   ( Dependencies
   , dataDependencies
+  , findNecessaryForReturned
   )
   where
 
@@ -50,3 +51,21 @@ depsOf deps (Var v)   = depsOfVar deps v
 
 depsOfVar :: Dependencies -> VName -> Names
 depsOfVar deps name = S.insert name $ M.findWithDefault S.empty name deps
+
+findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
+                         -> M.Map VName Names
+                         -> Names
+findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =
+  iterateNecessary mempty
+  where iterateNecessary prev_necessary
+          | necessary == prev_necessary = necessary
+          | otherwise                   = iterateNecessary necessary
+          where necessary = mconcat $ map dependencies returnedResultSubExps
+                usedAfterLoopOrNecessary param =
+                  usedAfterLoop param || paramName param `S.member` prev_necessary
+                returnedResultSubExps =
+                  map snd $ filter (usedAfterLoopOrNecessary . fst) merge_and_res
+                dependencies (Constant _) =
+                  S.empty
+                dependencies (Var v)      =
+                  M.findWithDefault (S.singleton v) v allDependencies

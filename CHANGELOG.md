@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Unused-result elimination for reductions; particularly useful when
+    computing with dual numbers for automatic differentiation.
+
 ### Removed
 
 ### Changed
