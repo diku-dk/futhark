@@ -337,6 +337,12 @@ prefixed with single quotes::
   type two_intvecs [n] = two_vecs [n] i32
   let x: two_vecs [2] i32 = (iota 2, replicate 2 0)
 
+A type parameter prefixed with ``'^`` is a *lifted type parameter*.
+These may be instantiated with types that may be functions.  On the
+other hand, values of such types are subject to the same restrictions
+as function types (cannot be put in an arrays, returned from ``if``,
+or used as a ``loop`` parameter; see `Higher-order functions`_).
+
 When using uniqueness attributes with type abbreviations, inner
 uniqueness attributes are overridden by outer ones::
 
@@ -898,10 +904,10 @@ Further, *type parameters* are divided into *non-lifted* (bound with
 an apostrophe, e.g. ``'t``), and *lifted* (``'^t``).  Only lifted type
 parameters may be instantiated with a functional type.  Within a
 function, a lifted type parameter is treated as a functional type.
-All abstract types declared in modules (see `Module System`) are
+All abstract types declared in modules (see `Module System`_) are
 considered non-lifted, and may not be functional.
 
-See also `In-place updates` for details on how uniqueness types
+See also `In-place updates`_ for details on how uniqueness types
 interact with higher-order functions.
 
 Type Inference
@@ -912,7 +918,7 @@ explicit type annotations can be left off.  Some built-in language
 constructs cannot currently be fully inferred, and may need type
 annotations where their inputs are bound.  The problematic constructs
 are ``rotate``, ``reshape``, ``zip``, ``unzip``, and field projection.
-Further, unique types (see ``In-place updates``) must be explicitly
+Further, unique types (see `In-place updates`_) must be explicitly
 annotated.
 
 .. _in-place-updates:
@@ -952,8 +958,16 @@ After a call ``modify a i x``, neither ``a`` or any variable that
 Uniqueness typing generally interacts poorly with higher-order
 functions.  The issue is that we cannot control how many times a
 function argument is applied, or to what, so it is not safe to pass a
-function that consumes its argument.  In general, do not pass
-functions with unique parameter types to a higher-order function.
+function that consumes its argument.  The following two conservative
+rules govern the interaction between uniqueness types and higher-order
+functions:
+
+1. In the expression ``let p = e1 in ...``, if *any* in-place update
+   takes place in the expression ``e1``, the value bound by ``p`` must
+   not be or contain a function.
+
+2. A function that consumes one of its arguments may not be passed as
+   a higher-order argument to another function.
 
 .. _module-system:
 
