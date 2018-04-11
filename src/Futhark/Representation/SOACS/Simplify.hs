@@ -162,7 +162,7 @@ topDownRules :: [TopDownRule (Wise SOACS)]
 topDownRules = [RuleOp removeReplicateMapping,
                 RuleOp removeReplicateRedomap,
                 RuleOp removeReplicateWrite,
-                RuleOp removeUnusedMapInput,
+                RuleOp removeUnusedSOACInput,
                 RuleOp simplifyClosedFormRedomap,
                 RuleOp simplifyClosedFormReduce,
                 RuleOp simplifyKnownIterationSOAC,
@@ -269,9 +269,9 @@ removeReplicateInput vtable fun arrs
           | otherwise =
               Left (p, v)
 
--- | Remove inputs that are not used inside the @map@.
-removeUnusedMapInput :: TopDownRuleOp (Wise SOACS)
-removeUnusedMapInput _ pat _ (Map width fun arrs)
+-- | Remove inputs that are not used inside the SOAC.
+removeUnusedSOACInput :: TopDownRuleOp (Wise SOACS)
+removeUnusedSOACInput _ pat _ (Map width fun arrs)
   | (used,unused) <- partition usedInput params_and_arrs,
     not (null unused) = do
       let (used_params, used_arrs) = unzip used
@@ -280,7 +280,17 @@ removeUnusedMapInput _ pat _ (Map width fun arrs)
   where params_and_arrs = zip (lambdaParams fun) arrs
         used_in_body = freeInBody $ lambdaBody fun
         usedInput (param, _) = paramName param `S.member` used_in_body
-removeUnusedMapInput _ _ _ _ = cannotSimplify
+removeUnusedSOACInput _ pat _ (Redomap w comm redfun mapfun nes arrs)
+  | (used,unused) <- partition usedInput params_and_arrs,
+    not (null unused) = do
+      let (used_params, used_arrs) = unzip used
+          mapfun' =
+            mapfun { lambdaParams = take (length nes) (lambdaParams mapfun) ++ used_params }
+      letBind_ pat $ Op $ Redomap w comm redfun mapfun' nes used_arrs
+  where params_and_arrs = zip (drop (length nes) $ lambdaParams mapfun) arrs
+        used_in_body = freeInBody $ lambdaBody mapfun
+        usedInput (param, _) = paramName param `S.member` used_in_body
+removeUnusedSOACInput _ _ _ _ = cannotSimplify
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
 removeDeadMapping (_, used) pat _ (Map width fun arrs) =
