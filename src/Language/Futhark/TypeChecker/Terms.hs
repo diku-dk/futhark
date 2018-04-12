@@ -175,6 +175,7 @@ data Constraint = NoConstraint (Maybe Liftedness) SrcLoc
                 | ParamType Liftedness SrcLoc
                 | Constraint (TypeBase () ()) SrcLoc
                 | Overloaded [PrimType] SrcLoc
+                | HasFields (M.Map Name (TypeBase () ())) SrcLoc
                 | Equality SrcLoc
                 deriving Show
 
@@ -183,6 +184,7 @@ instance Located Constraint where
   locOf (ParamType _ loc) = locOf loc
   locOf (Constraint _ loc) = locOf loc
   locOf (Overloaded _ loc) = locOf loc
+  locOf (HasFields _ loc) = locOf loc
   locOf (Equality loc) = locOf loc
 
 -- | Is the given type variable actually the name of an abstract type
@@ -195,15 +197,14 @@ isRigid v constraints = case M.lookup v constraints of
 
 constraintSubsts :: Constraints -> M.Map VName (TypeBase () ())
 constraintSubsts = M.mapMaybe constraintSubst
-  where constraintSubst NoConstraint{} = Nothing
-        constraintSubst ParamType{} = Nothing
-        constraintSubst Overloaded{} = Nothing
-        constraintSubst Equality{} = Nothing
-        constraintSubst (Constraint t _) = Just t
+  where constraintSubst (Constraint t _) = Just t
+        constraintSubst _ = Nothing
 
 applySubstInConstraint :: VName -> TypeBase () () -> Constraint -> Constraint
 applySubstInConstraint vn tp (Constraint t loc) =
   Constraint (applySubst (M.singleton vn tp) t) loc
+applySubstInConstraint vn tp (HasFields fs loc) =
+  HasFields (M.map (applySubst (M.singleton vn tp)) fs) loc
 applySubstInConstraint _ _ (NoConstraint l loc) = NoConstraint l loc
 applySubstInConstraint _ _ (Overloaded ts loc) = Overloaded ts loc
 applySubstInConstraint _ _ (Equality loc) = Equality loc
@@ -539,25 +540,31 @@ checkPattern' p@(RecordPattern fields loc) (Ascribed t) = do
 checkPattern' (RecordPattern fs loc) NoneInferred =
   RecordPattern . M.toList <$> traverse (`checkPattern'` NoneInferred) (M.fromList fs) <*> pure loc
 
-checkPattern' fullp@(PatternAscription p (TypeDecl t NoInfo)) maybe_outer_t = do
+checkPattern' (PatternAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
   (t', st) <- checkTypeExp t
 
-  let maybe_outer_t' = case maybe_outer_t of
-                         Ascribed outer_t -> Just outer_t
-                         NoneInferred -> Nothing
-      st' = fromStruct st
-  case maybe_outer_t' of
-    Just outer_t
-      | Just t'' <- unifyTypesU unifyUniqueness st' outer_t ->
-          PatternAscription <$> checkPattern' p (Ascribed t'') <*>
-          pure (TypeDecl t' (Info st))
-      | otherwise ->
-          let outer_t_for_error =
-                modifyShapeAnnotations (fmap baseName) $ outer_t `setAliases` ()
-          in throwError $ InvalidPatternError fullp outer_t_for_error Nothing $ srclocOf p
-    _ -> PatternAscription <$> checkPattern' p (Ascribed st') <*>
-         pure (TypeDecl t' (Info st))
-  where unifyUniqueness u1 u2 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
+  let st' = fromStruct st
+  case maybe_outer_t of
+    Ascribed outer_t -> do
+      unify loc (toStructural st) (toStructural outer_t)
+
+      -- We also have to make sure that uniqueness and shapes match.
+      -- This is done explicitly, because they are ignored by
+      -- unification.
+      st'' <- normaliseType st'
+      outer_t' <- normaliseType outer_t
+      case unifyTypesU unifyUniqueness st' outer_t' of
+        Just outer_t'' ->
+          PatternAscription <$> checkPattern' p (Ascribed outer_t'') <*>
+          pure (TypeDecl t' (Info st)) <*> pure loc
+        Nothing ->
+          typeError loc $ "Cannot match type `" ++ pretty outer_t' ++ "' with expected type `" ++
+          pretty st'' ++ "'."
+
+    NoneInferred ->
+      PatternAscription <$> checkPattern' p (Ascribed st') <*>
+      pure (TypeDecl t' (Info st)) <*> pure loc
+ where unifyUniqueness u1 u2 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
 
 bindPatternNames :: PatternBase NoInfo Name -> TermTypeM a -> TermTypeM a
 bindPatternNames = bindSpaced . map asTerm . S.toList . patIdentSet
@@ -708,7 +715,7 @@ noTypeParamsPermitted ps =
 patternDims :: Pattern -> [Ident]
 patternDims (PatternParens p _) = patternDims p
 patternDims (TuplePattern pats _) = concatMap patternDims pats
-patternDims (PatternAscription p (TypeDecl _ (Info t))) =
+patternDims (PatternAscription p (TypeDecl _ (Info t)) _) =
   patternDims p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims t)
   where dimIdent _ AnyDim            = Nothing
         dimIdent _ (ConstDim _)      = Nothing
@@ -733,7 +740,7 @@ patternUses Wildcard{} = mempty
 patternUses (PatternParens p _) = patternUses p
 patternUses (TuplePattern ps _) = mconcat $ map patternUses ps
 patternUses (RecordPattern fs _) = mconcat $ map (patternUses . snd) fs
-patternUses (PatternAscription p (TypeDecl declte _)) =
+patternUses (PatternAscription p (TypeDecl declte _) _) =
   patternUses p <> typeExpUses declte
   where typeExpUses (TEVar qn _) = PatternUses [] [qn]
         typeExpUses (TETuple tes _) = mconcat $ map typeExpUses tes
@@ -867,10 +874,8 @@ checkExp (BinOp op NoInfo (e1,_) (e2,_) NoInfo loc) = do
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   t <- expType e'
-  case t of
-    Record fs | Just kt <- M.lookup k fs ->
-                return $ Project k e' (Info kt) loc
-    _ -> throwError $ InvalidField loc t (pretty k)
+  kt <- mustHaveField loc k t
+  return $ Project k e' (Info kt) loc
 
 checkExp (If e1 e2 e3 _ loc) =
   sequentially checkCond $ \e1' _ -> do
@@ -926,10 +931,8 @@ checkExp (Var qn NoInfo loc) = do
 
         checkField e k = do
           t <- expType e
-          case t of
-            Record fs | Just kt <- M.lookup k fs ->
-                        return $ Project k e (Info kt) loc
-            _ -> throwError $ InvalidField loc t (pretty k)
+          kt <- mustHaveField loc k t
+          return $ Project k e (Info kt) loc
 
 checkExp (Negate arg loc) = do
   arg' <- require anyNumberType =<< checkExp arg
@@ -1235,7 +1238,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         zipWithM_ consumeMerge pats ts
       consumeMerge (PatternParens pat _) t =
         consumeMerge pat t
-      consumeMerge (PatternAscription pat _) t =
+      consumeMerge (PatternAscription pat _ _) t =
         consumeMerge pat t
       consumeMerge _ _ =
         return ()
@@ -1262,8 +1265,8 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
             TuplePattern (map uniquePat pats) ploc
           uniquePat (RecordPattern fs ploc) =
             RecordPattern (map (fmap uniquePat) fs) ploc
-          uniquePat (PatternAscription p t) =
-            PatternAscription p t
+          uniquePat (PatternAscription p t ploc) =
+            PatternAscription p t ploc
 
           -- Make the pattern unique where needed.
           pat' = uniquePat pat
@@ -1573,6 +1576,11 @@ closeOverTypes substs tparams ts = do
         closeOver (_, Equality loc) =
           typeError loc $ unlines ["Type is ambiguous (must be equality type).",
                                    "Add a type annotation to disambiguate the type."]
+        closeOver (_, HasFields fs loc) =
+          typeError loc $ unlines ["Type is ambiguous (must be record with fields {" ++ fs' ++ "}).",
+                                   "Add a type annotation to disambiguate the type."]
+          where fs' = intercalate ", " $ map field $ M.toList fs
+                field (l, t) = pretty l ++ ": " ++ pretty t
 
         constrained (NoConstraint _ loc) = ambiguous loc
         constrained (Overloaded _ loc) = ambiguous loc
@@ -1726,6 +1734,7 @@ linkVarToType loc vn tp = do
     then typeError loc $ "Occurs check: cannot instantiate " ++
          pretty vn ++ " with " ++ pretty tp'
     else do modifyConstraints $ M.insert vn $ Constraint tp' loc
+            modifyConstraints $ M.map $ applySubstInConstraint vn tp'
             case M.lookup vn constraints of
               Just (NoConstraint (Just Unlifted) unlift_loc) ->
                 zeroOrderType loc ("used at " ++ locStr unlift_loc) tp'
@@ -1737,11 +1746,29 @@ linkVarToType loc vn tp = do
                       TypeVar (TypeName [] v) []
                         | not $ isRigid v constraints -> linkVarToTypes loc v ts
                       _ ->
-                        typeError loc $ "Cannot unify \"" ++ pretty vn ++ "\" with type \"" ++
-                        pretty tp ++ "\" (must be one of " ++ intercalate ", " (map pretty ts) ++
+                        typeError loc $ "Cannot unify `" ++ pretty vn ++ "' with type `" ++
+                        pretty tp ++ "' (must be one of " ++ intercalate ", " (map pretty ts) ++
                         " due to use at " ++ locStr old_loc ++ ")."
+              Just (HasFields required_fields old_loc) ->
+                case tp of
+                  Record tp_fields
+                    | all (`M.member` tp_fields) $ M.keys required_fields ->
+                        mapM_ (uncurry $ unify loc) $ M.elems $
+                        M.intersectionWith (,) required_fields tp_fields
+                  TypeVar (TypeName [] v) []
+                    | not $ isRigid v constraints ->
+                        modifyConstraints $ M.insert v $
+                        HasFields required_fields old_loc
+                  _ ->
+                    let required_fields' =
+                          intercalate ", " $ map field $ M.toList required_fields
+                        field (l, t) = pretty l ++ ": " ++ pretty t
+                    in typeError loc $
+                       "Cannot unify `" ++ pretty vn ++ "' with type `" ++
+                       pretty tp ++ "' (must be a record with fields {" ++
+                       required_fields' ++
+                       "} due to use at " ++ locStr old_loc ++ ")."
               _ -> return ()
-            modifyConstraints $ M.map $ applySubstInConstraint vn tp'
   where tp' = tp `setUniqueness` Nonunique
 
 mustBeOneOf :: [PrimType] -> SrcLoc -> TypeBase () () -> TermTypeM ()
@@ -1812,6 +1839,32 @@ zeroOrderType loc desc t = do
               " must be non-function, but type parameter " ++ pretty vn ++ " at " ++
               locStr ploc ++ " may be a function."
             _ -> return ()
+
+mustHaveField :: (ArrayDim dim, Pretty (ShapeDecl dim), Monoid as) =>
+                 SrcLoc -> Name -> TypeBase dim as -> TermTypeM (TypeBase dim as)
+mustHaveField loc l t = do
+  constraints <- getConstraints
+  l_type <- newTypeVar loc "t"
+  let l_type' = toStructural l_type
+  case t of
+    TypeVar (TypeName _ tn) []
+      | Just NoConstraint{} <- M.lookup tn constraints -> do
+          modifyConstraints $ M.insert tn $ HasFields (M.singleton l l_type') loc
+          return l_type
+      | Just (HasFields fields _) <- M.lookup tn constraints -> do
+          case M.lookup l fields of
+            Just t' -> unify loc (toStructural t) t'
+            Nothing -> modifyConstraints $ M.insert tn $
+                       HasFields (M.insert l l_type' fields) loc
+          return l_type
+    Record fields
+      | Just t' <- M.lookup l fields -> do
+          unify loc l_type' (toStructural t')
+          return t'
+      | otherwise ->
+          throwError $ InvalidField loc (toStructural t) $ nameToString l
+    _ -> do unify loc (toStructural t) $ Record $ M.singleton l l_type'
+            return l_type
 
 arrayOfM :: (ArrayDim dim, Pretty (ShapeDecl dim), Monoid as) =>
             SrcLoc

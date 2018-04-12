@@ -784,16 +784,16 @@ data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
                       | PatternParens (PatternBase f vn) SrcLoc
                       | Id vn (f PatternType) SrcLoc
                       | Wildcard (f PatternType) SrcLoc -- Nothing, i.e. underscore.
-                      | PatternAscription (PatternBase f vn) (TypeDeclBase f vn)
+                      | PatternAscription (PatternBase f vn) (TypeDeclBase f vn) SrcLoc
 deriving instance Showable f vn => Show (PatternBase f vn)
 
 instance Located (PatternBase f vn) where
-  locOf (TuplePattern _ loc)    = locOf loc
-  locOf (RecordPattern _ loc)   = locOf loc
-  locOf (PatternParens _ loc)   = locOf loc
-  locOf (Id _ _ loc)            = locOf loc
-  locOf (Wildcard _ loc)        = locOf loc
-  locOf (PatternAscription p _) = locOf p
+  locOf (TuplePattern _ loc)        = locOf loc
+  locOf (RecordPattern _ loc)       = locOf loc
+  locOf (PatternParens _ loc)       = locOf loc
+  locOf (Id _ _ loc)                = locOf loc
+  locOf (Wildcard _ loc)            = locOf loc
+  locOf (PatternAscription _ _ loc) = locOf loc
 
 -- | Function Declarations
 data ValBindBase f vn = ValBind { valBindEntryPoint :: Bool

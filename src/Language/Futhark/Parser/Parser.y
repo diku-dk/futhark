@@ -744,7 +744,7 @@ FieldId :: { (Name, SrcLoc) }
          | declit { let L loc (DECLIT n) = $1 in (nameFromString (show n), loc) }
 
 Pattern :: { PatternBase NoInfo Name }
-Pattern : InnerPattern ':' TypeExpDecl { PatternAscription $1 $3 }
+Pattern : InnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
         | InnerPattern                 { $1 }
 
 Patterns1 :: { [PatternBase NoInfo Name] }
@@ -763,7 +763,7 @@ FieldPattern :: { (Name, PatternBase NoInfo Name) }
               : FieldId '=' Pattern
                 { (fst $1, $3) }
               | FieldId ':' TypeExpDecl
-                { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3) }
+              { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
               | FieldId
                 { (fst $1, Id (fst $1) NoInfo (snd $1)) }
 
@@ -983,7 +983,7 @@ patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id v _ loc) = return $ Var (QualName [] v) NoInfo loc
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
-patternExp (PatternAscription pat _) = patternExp pat
+patternExp (PatternAscription pat _ _) = patternExp pat
 patternExp (PatternParens pat _) = patternExp pat
 patternExp (RecordPattern fs loc) = RecordLit <$> mapM field fs <*> pure loc
   where field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc

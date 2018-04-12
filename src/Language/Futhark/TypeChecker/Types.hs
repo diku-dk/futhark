@@ -260,7 +260,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
         check Wildcard{} = return ()
         check (TuplePattern ps _) = mapM_ check ps
         check (RecordPattern fs _) = mapM_ (check . snd) fs
-        check (PatternAscription p _) = check p
+        check (PatternAscription p _ _) = check p
 
         seen v loc = do
           already <- gets $ M.lookup v

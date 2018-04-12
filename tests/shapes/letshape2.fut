@@ -2,7 +2,7 @@
 -- in a let-binding.
 --
 -- ==
--- error: cannot match
+-- error: Cannot match
 
 let main (x: i32, y: []i32): i32 =
   let [n][m] ((_, elems: [n]i32): (i32,[m]i32)) = (x,y)

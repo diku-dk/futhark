@@ -289,17 +289,17 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (LoopFormBase f vn) 
     text "while" <+> ppr cond
 
 instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (PatternBase f vn) where
-  ppr (PatternAscription p t) = ppr p <> text ":" <+> ppr t
-  ppr (PatternParens p _)     = parens $ ppr p
-  ppr (Id v t _)              = case unAnnot t of
-                                  Just t' -> parens $ ppr v <> colon <+> ppr t'
-                                  Nothing -> ppr v
-  ppr (TuplePattern pats _)   = parens $ commasep $ map ppr pats
-  ppr (RecordPattern fs _)    = braces $ commasep $ map ppField fs
+  ppr (PatternAscription p t _) = ppr p <> text ":" <+> ppr t
+  ppr (PatternParens p _)       = parens $ ppr p
+  ppr (Id v t _)                = case unAnnot t of
+                                    Just t' -> parens $ ppr v <> colon <+> ppr t'
+                                    Nothing -> ppr v
+  ppr (TuplePattern pats _)     = parens $ commasep $ map ppr pats
+  ppr (RecordPattern fs _)      = braces $ commasep $ map ppField fs
     where ppField (name, t) = text (nameToString name) <> equals <> ppr t
-  ppr (Wildcard t _)          = case unAnnot t of
-                                  Just t' -> parens $ text "_" <> colon <+> ppr t'
-                                  Nothing -> text "_"
+  ppr (Wildcard t _)            = case unAnnot t of
+                                    Just t' -> parens $ text "_" <> colon <+> ppr t'
+                                    Nothing -> text "_"
 
 ppAscription :: (Eq vn, Hashable vn, Pretty vn, Annot f) => Maybe (TypeDeclBase f vn) -> Doc
 ppAscription Nothing  = mempty

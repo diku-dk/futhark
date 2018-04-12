@@ -594,34 +594,34 @@ orderZero Arrow{}         = False
 -- have order 0.
 patternOrderZero :: PatternBase Info vn -> Bool
 patternOrderZero pat = case pat of
-  TuplePattern ps _     -> all patternOrderZero ps
-  RecordPattern fs _    -> all (patternOrderZero . snd) fs
-  PatternParens p _     -> patternOrderZero p
-  Id _ (Info t) _       -> orderZero t
-  Wildcard (Info t) _   -> orderZero t
-  PatternAscription p _ -> patternOrderZero p
+  TuplePattern ps _       -> all patternOrderZero ps
+  RecordPattern fs _      -> all (patternOrderZero . snd) fs
+  PatternParens p _       -> patternOrderZero p
+  Id _ (Info t) _         -> orderZero t
+  Wildcard (Info t) _     -> orderZero t
+  PatternAscription p _ _ -> patternOrderZero p
 
 -- | The set of identifiers bound in a pattern.
 patIdentSet :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
 patIdentSet (Id v t loc)            = S.singleton $ Ident v (removeShapeAnnotations <$> t) loc
-patIdentSet (PatternParens p _)     = patIdentSet p
-patIdentSet (TuplePattern pats _)   = mconcat $ map patIdentSet pats
-patIdentSet (RecordPattern fs _)    = mconcat $ map (patIdentSet . snd) fs
-patIdentSet Wildcard{}              = mempty
-patIdentSet (PatternAscription p _) = patIdentSet p
+patIdentSet (PatternParens p _)       = patIdentSet p
+patIdentSet (TuplePattern pats _)     = mconcat $ map patIdentSet pats
+patIdentSet (RecordPattern fs _)      = mconcat $ map (patIdentSet . snd) fs
+patIdentSet Wildcard{}                = mempty
+patIdentSet (PatternAscription p _ _) = patIdentSet p
 
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> CompType
-patternType (Wildcard (Info t) _)   = removeShapeAnnotations t
-patternType (PatternParens p _)     = patternType p
-patternType (Id _ (Info t) _)       = removeShapeAnnotations t
-patternType (TuplePattern pats _)   = tupleRecord $ map patternType pats
-patternType (RecordPattern fs _)    = Record $ patternType <$> M.fromList fs
-patternType (PatternAscription p _) = patternType p
+patternType (Wildcard (Info t) _)     = removeShapeAnnotations t
+patternType (PatternParens p _)       = patternType p
+patternType (Id _ (Info t) _)         = removeShapeAnnotations t
+patternType (TuplePattern pats _)     = tupleRecord $ map patternType pats
+patternType (RecordPattern fs _)      = Record $ patternType <$> M.fromList fs
+patternType (PatternAscription p _ _) = patternType p
 
 -- | The type matched by the pattern, including shape declarations if present.
 patternStructType :: PatternBase Info VName -> StructType
-patternStructType (PatternAscription _ td) = unInfo $ expandedType td
+patternStructType (PatternAscription _ td _) = unInfo $ expandedType td
 patternStructType (PatternParens p _) = patternStructType p
 patternStructType (Id _ (Info t) _) = t `setAliases` ()
 patternStructType (TuplePattern ps _) = tupleRecord $ map patternStructType ps
@@ -633,7 +633,7 @@ patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 patternParam :: PatternBase Info VName -> (Maybe VName, StructType)
 patternParam (PatternParens p _) =
   patternParam p
-patternParam (PatternAscription (Id v _ _) td) =
+patternParam (PatternAscription (Id v _ _) td _) =
   (Just v, unInfo $ expandedType td)
 patternParam p =
   (Nothing, patternStructType p)
@@ -641,9 +641,9 @@ patternParam p =
 -- | Remove all shape annotations from a pattern, leaving them unnamed
 -- instead.
 patternNoShapeAnnotations :: PatternBase Info VName -> PatternBase Info VName
-patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t))) =
-  PatternAscription (patternNoShapeAnnotations p) $
-  TypeDecl te $ Info $ vacuousShapeAnnotations t
+patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t)) loc) =
+  PatternAscription (patternNoShapeAnnotations p)
+  (TypeDecl te $ Info $ vacuousShapeAnnotations t) loc
 patternNoShapeAnnotations (PatternParens p loc) =
   PatternParens (patternNoShapeAnnotations p) loc
 patternNoShapeAnnotations (Id v (Info t) loc) =

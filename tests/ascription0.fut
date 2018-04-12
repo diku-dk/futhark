@@ -1,7 +1,7 @@
 -- Make sure type errors due to invalid type ascriptions are caught.
 --
 -- ==
--- error: .*cannot match.*
+-- error: match
 
 let main(x: i32, y:i32): i32 =
   let (((a): i32), b: i32) : (bool,bool) = (x,y)
