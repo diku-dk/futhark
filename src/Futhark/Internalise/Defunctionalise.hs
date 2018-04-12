@@ -543,12 +543,12 @@ liftDynFun sv _ = error $ "Tried to lift a StaticVal " ++ show sv
 -- pattern to their corresponding types wrapped in a 'Dynamic' static value.
 envFromPattern :: Pattern -> Env
 envFromPattern pat = case pat of
-  TuplePattern ps _     -> foldMap envFromPattern ps
-  RecordPattern fs _    -> foldMap (envFromPattern . snd) fs
-  PatternParens p _     -> envFromPattern p
-  Id vn (Info t) _      -> M.singleton vn $ Dynamic $ removeShapeAnnotations t
-  Wildcard _ _          -> mempty
-  PatternAscription p _ -> envFromPattern p
+  TuplePattern ps _       -> foldMap envFromPattern ps
+  RecordPattern fs _      -> foldMap (envFromPattern . snd) fs
+  PatternParens p _       -> envFromPattern p
+  Id vn (Info t) _        -> M.singleton vn $ Dynamic $ removeShapeAnnotations t
+  Wildcard _ _            -> mempty
+  PatternAscription p _ _ -> envFromPattern p
 
 -- | Create an environment that binds the shape parameters.
 envFromShapeParams :: [TypeParamBase VName] -> Env
@@ -640,7 +640,7 @@ matchPatternSV (RecordPattern ps _) (RecordSV ls)
 matchPatternSV (PatternParens pat _) sv = matchPatternSV pat sv
 matchPatternSV (Id vn _ _) sv = M.singleton vn sv
 matchPatternSV (Wildcard _ _) _ = mempty
-matchPatternSV (PatternAscription pat _) sv = matchPatternSV pat sv
+matchPatternSV (PatternAscription pat _ _) sv = matchPatternSV pat sv
 matchPatternSV pat (Dynamic t) = matchPatternSV pat $ svFromType t
 matchPatternSV pat sv = error $ "Tried to match pattern " ++ pretty pat
                              ++ " with static value " ++ show sv ++ "."
@@ -663,9 +663,9 @@ updatePattern pat@(Id vn (Info tp) loc) sv
 updatePattern pat@(Wildcard (Info tp) loc) sv
   | orderZero tp = pat
   | otherwise = Wildcard (Info . vacuousShapeAnnotations $ typeFromSV sv) loc
-updatePattern (PatternAscription pat tydecl) sv
+updatePattern (PatternAscription pat tydecl loc) sv
   | orderZero . unInfo $ expandedType tydecl =
-      PatternAscription (updatePattern pat sv) tydecl
+      PatternAscription (updatePattern pat sv) tydecl loc
   | otherwise = updatePattern pat sv
 updatePattern pat (Dynamic t) = updatePattern pat (svFromType t)
 updatePattern pat sv =
@@ -824,7 +824,7 @@ patternDimNames (RecordPattern fs _)   = foldMap (patternDimNames . snd) fs
 patternDimNames (PatternParens p _)    = patternDimNames p
 patternDimNames (Id _ (Info tp) _)     = foldMap dimName $ nestedDims tp
 patternDimNames (Wildcard (Info tp) _) = foldMap dimName $ nestedDims tp
-patternDimNames (PatternAscription p (TypeDecl _ (Info t))) =
+patternDimNames (PatternAscription p (TypeDecl _ (Info t)) _) =
   patternDimNames p <> foldMap dimName (nestedDims t)
 
 dimName :: DimDecl VName -> Names

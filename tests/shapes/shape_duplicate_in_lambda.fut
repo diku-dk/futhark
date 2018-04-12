@@ -2,7 +2,7 @@
 -- in a lambda.
 --
 -- ==
--- error: cannot match
+-- error: Cannot match
 
 let main (xss: [][]i32): []i32 =
   map (\[m][n] ((_xs: [m]i32): [n]i32): i32 -> n + m) xss

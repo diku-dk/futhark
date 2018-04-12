@@ -93,7 +93,7 @@ data TypeError =
   | DimensionNotInteger SrcLoc (QualName Name)
   | InvalidUniqueness SrcLoc (TypeBase () ())
   | UndefinedType SrcLoc (QualName Name)
-  | InvalidField SrcLoc CompType String
+  | InvalidField SrcLoc (TypeBase () ()) String
   | UnderscoreUse SrcLoc (QualName Name)
   | ValueIsNotFunction SrcLoc (QualName Name) CompType
   | FunctionIsNotValue SrcLoc (QualName Name)

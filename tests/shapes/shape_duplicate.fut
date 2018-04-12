@@ -2,7 +2,7 @@
 -- in a function parameter.
 --
 -- ==
--- error: cannot match
+-- error: Cannot match
 
 let f [n][m] ((_, elems: [n]i32): (i32,[m]i32)): i32 =
   n + m + elems[0]

@@ -138,7 +138,7 @@ flattenPattern = flattenPattern'
           concat <$> mapM flattenPattern' pats
         flattenPattern' (E.RecordPattern fs loc) =
           flattenPattern' $ E.TuplePattern (map snd $ sortFields $ M.fromList fs) loc
-        flattenPattern' (E.PatternAscription p _) =
+        flattenPattern' (E.PatternAscription p _ _) =
           flattenPattern' p
 
 type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
