@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Unused-result elimination for reductions; particularly useful when
     computing with dual numbers for automatic differentiation.
+
   * Record field projection is now possible for variables of (then)
     unknown types.  A function parameter must still have an
     unambiguous (complete) type by the time it finishes checking.
@@ -22,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 
   * Fixed interaction between type ascription and type inference (#529).
+
+  * Fixed duplication when an entry point was also called as a function.
 
 ## [0.4.0]
 

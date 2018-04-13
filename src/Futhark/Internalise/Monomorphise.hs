@@ -448,9 +448,9 @@ transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   valbind' <- toPolyBinding <$> removeTypeVariables valbind
   when (valBindEntryPoint valbind) $ do
-    let t = removeShapeAnnotations $ foldFunType
-            (map patternStructType (valBindParams valbind)) $
-            unInfo $ valBindRetType valbind
+    t <- removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
+         (map patternStructType (valBindParams valbind)) $
+         unInfo $ valBindRetType valbind
     (name, valbind'') <- monomorphizeBinding valbind' t
     tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = True})
     addLifted (valBindName valbind) t name
