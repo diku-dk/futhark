@@ -16,7 +16,7 @@ cache:
 # We test against different Stackage snapshots.
 matrix:
   include:
-    - env: BUILD=stack STACK_YAML=stack.yaml
+#    - env: BUILD=stack STACK_YAML=stack.yaml
     - env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
     - env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
 
