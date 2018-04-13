@@ -8,7 +8,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Data.FileEmbed
 import Data.List
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Map as M
 import System.FilePath ((<.>), takeDirectory, takeExtension)
 import System.Directory (createDirectoryIfMissing)

@@ -17,7 +17,7 @@ module Futhark.Representation.Kernels.KernelExp
   where
 
 import Control.Monad
-import Data.Monoid
+import Data.Monoid ((<>))
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M

@@ -56,7 +56,7 @@ import Control.Monad.State
 import Data.Array
 import Data.Hashable
 import Data.Maybe
-import Data.Monoid
+import Data.Monoid ((<>))
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.Semigroup as Sem

@@ -36,7 +36,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import qualified Data.Set as S
 import Data.Hashable
-import Data.Monoid
+import Data.Monoid ((<>))
 import Data.Foldable
 
 import Futhark.Representation.AST.Syntax

@@ -12,7 +12,7 @@ module Futhark.Analysis.Range
 
 import qualified Data.Map.Strict as M
 import Control.Monad.Reader
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Data.List
 
 import qualified Futhark.Analysis.ScalExp as SE

@@ -16,7 +16,7 @@ import Control.Monad
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Monoid
+import Data.Semigroup ((<>))
 
 import Futhark.Construct
 import Futhark.Representation.AST

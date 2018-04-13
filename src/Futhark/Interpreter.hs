@@ -15,13 +15,13 @@ module Futhark.Interpreter
 where
 
 import Control.Monad.Reader
-import Control.Monad.Writer
 import Control.Monad.Except
 import Data.Array
 import Data.List
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import Data.Monoid ((<>))
 
 import Futhark.Construct (fullSliceNum)
 import Futhark.Representation.SOACS

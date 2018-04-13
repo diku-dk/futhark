@@ -11,7 +11,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Data.List
 
 import Futhark.MonadFreshNames

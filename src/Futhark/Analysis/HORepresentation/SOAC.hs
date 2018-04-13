@@ -68,7 +68,7 @@ module Futhark.Analysis.HORepresentation.SOAC
 
 import Data.Foldable as Foldable
 import Data.Maybe
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Sequence as Seq
 import qualified Data.Semigroup as Sem
 

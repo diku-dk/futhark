@@ -23,7 +23,7 @@ module Futhark.Representation.AST.Attributes.Ranges
        )
        where
 
-import Data.Monoid
+import Data.Monoid ((<>))
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 

@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed duplication when an entry point was also called as a function.
 
+  * Futhark now compiles cleanly with GHC 8.4.1 (this is also the new default).
+
 ## [0.4.0]
 
 ### Added

@@ -21,7 +21,7 @@ import Control.Monad
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Data.List
 
 import Futhark.Representation.SOACS hiding (SOAC(..))

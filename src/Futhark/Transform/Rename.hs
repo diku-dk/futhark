@@ -37,7 +37,7 @@ import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.Monoid
+import Data.Semigroup ((<>))
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
