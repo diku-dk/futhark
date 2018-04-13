@@ -84,7 +84,31 @@ extra-deps:
 - tf-random-0.5
 - xml-1.3.14
 - colour-2.3.4
+- aeson-1.3.1.0
+- cmdargs-0.10.20
+- haskell-src-exts-util-0.2.2
+- hscolour-1.24.4
+- refact-0.3.0.2
+- uniplate-1.6.12
+- unordered-containers-0.2.9.0
+- yaml-0.8.29
+- attoparsec-0.13.2.2
+- conduit-1.3.0.2
+- resourcet-1.2.1
+- scientific-0.3.5.3
+- time-locale-compat-0.1.1.4
+- uuid-types-1.0.3
+- integer-logarithms-1.0.2.1
+- mono-traversable-1.0.8.1
+- time-1.5.0.1
+- unliftio-core-0.1.1.0
+- deepseq-1.4.3.0
+- split-0.2.3.3
+- vector-algorithms-0.7.0.1
+- array-0.5.2.0
 
-flags: {}
+flags:
+  time-locale-compat:
+    old-locale: false
 
 extra-package-dbs: []
