@@ -20,7 +20,7 @@ module Futhark.Representation.AST.Pretty
 import           Data.Array                                     (elems,
                                                                  listArray)
 import           Data.Maybe
-import           Data.Monoid
+import           Data.Monoid                                    ((<>))
 
 import           Futhark.Util.Pretty
 

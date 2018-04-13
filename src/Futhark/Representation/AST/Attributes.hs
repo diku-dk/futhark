@@ -40,7 +40,7 @@ module Futhark.Representation.AST.Attributes
 
 import Data.List
 import Data.Maybe (mapMaybe, isJust)
-import Data.Monoid
+import Data.Monoid ((<>))
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST.Attributes.Reshape

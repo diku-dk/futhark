@@ -43,7 +43,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Data.Foldable
 import Data.Maybe
-import Data.Monoid
+import Data.Monoid ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Semigroup as Sem

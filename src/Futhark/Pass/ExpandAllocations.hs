@@ -12,7 +12,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
 import Data.List
-import Data.Monoid
+import Data.Semigroup ((<>))
 
 import Prelude hiding (quot)
 

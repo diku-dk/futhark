@@ -30,7 +30,7 @@ import Control.Monad.State
 import Data.List
 import Data.Loc
 import Data.Maybe
-import Data.Monoid
+import Data.Monoid ((<>))
 import qualified Data.Map.Strict as M
 
 import Language.Futhark

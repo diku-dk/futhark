@@ -51,7 +51,7 @@ module Futhark.Optimise.Simplify.Rule
        , bottomUpSimplifyStm
        ) where
 
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Control.Monad.State
 import qualified Data.Semigroup as Sem
 import qualified Control.Monad.Fail as Fail

@@ -9,7 +9,7 @@ module Futhark.Pass.ExtractKernels.Segmented
 
 import Control.Monad
 import qualified Data.Map.Strict as M
-import Data.Monoid
+import Data.Semigroup ((<>))
 
 import Futhark.Transform.Rename
 import Futhark.Representation.Kernels

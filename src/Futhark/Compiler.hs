@@ -14,7 +14,7 @@ module Futhark.Compiler
        )
 where
 
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Control.Exception
 import Control.Monad
 import Control.Monad.Reader

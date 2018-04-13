@@ -18,7 +18,7 @@ module Futhark.Optimise.Simplify
   )
   where
 
-import Data.Monoid
+import Data.Semigroup ((<>))
 
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames

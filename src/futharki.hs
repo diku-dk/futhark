@@ -12,7 +12,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)

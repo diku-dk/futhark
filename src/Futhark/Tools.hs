@@ -18,7 +18,7 @@ module Futhark.Tools
 where
 
 import Control.Monad.Identity
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST

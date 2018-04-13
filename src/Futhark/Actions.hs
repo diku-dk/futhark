@@ -10,7 +10,7 @@ where
 
 import Control.Monad.IO.Class
 import Data.List
-import Data.Monoid
+import Data.Monoid ((<>))
 import Data.Word
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
