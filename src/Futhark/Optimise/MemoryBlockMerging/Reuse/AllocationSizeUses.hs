@@ -10,7 +10,7 @@ module Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeUses
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (mapMaybe)
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.Writer
