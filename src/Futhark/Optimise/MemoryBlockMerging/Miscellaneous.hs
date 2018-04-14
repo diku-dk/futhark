@@ -2,7 +2,35 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Miscellaneous helper functions.  Perpetually in need of a cleanup.
-module Futhark.Optimise.MemoryBlockMerging.Miscellaneous where
+module Futhark.Optimise.MemoryBlockMerging.Miscellaneous
+  ( makeCommutativeMap
+  , insertOrUpdate
+  , insertOrUpdateMany
+  , insertOrNew
+  , removeEmptyMaps
+  , removeKeyFromMapElems
+  , newDeclarationsStm
+  , lookupEmptyable
+  , fromJust
+  , maybeFromBoolM
+  , sortByKeyM
+  , mapMaybeM
+  , anyM
+  , whenM
+  , expandPrimExp
+  , expandIxFun
+  , mapFromListSetUnion
+  , fixpointIterateMay
+  , filterSetM
+  , (<&&>), (<||>)
+
+  , expandWithAliases
+  , FullWalk(..)
+  , fullWalkAliasesExpM
+  , FullWalkAliases
+  , FullMap
+  , fullMapExpM
+  ) where
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -19,7 +47,6 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Kernels.KernelExp
 import Futhark.Representation.Aliases
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Util.Pretty (Pretty)
 
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Optimise.MemoryBlockMerging.Types
@@ -72,12 +99,6 @@ newDeclarationsStm (Let (Pattern patctxelems patvalelems) _ e) =
       new_decls = new_decls0 ++ new_decls1
   in new_decls
 
-prettySet :: Pretty a => S.Set a -> String
-prettySet = L.intercalate ", " . map pretty . S.toList
-
-prettyList :: Pretty a => [a] -> String
-prettyList = L.intercalate ", " . map pretty
-
 lookupEmptyable :: (Ord a, Monoid b) => a -> M.Map a b -> b
 lookupEmptyable x m = fromMaybe mempty $ M.lookup x m
 
@@ -92,9 +113,6 @@ maybeFromBoolM f a = do
            then Just a
            else Nothing
 
-onJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
-onJust = forM_
-
 expandWithAliases :: forall v. Ord v => MemAliases -> M.Map v Names -> M.Map v Names
 expandWithAliases mem_aliases = fixpointIterate expand
   where expand :: M.Map v Names -> M.Map v Names
@@ -104,12 +122,6 @@ expandWithAliases mem_aliases = fixpointIterate expand
                                            (S.toList mems))))
                       (M.assocs mems_map))
 
-expandWithAliases' :: MemAliases -> MName -> MNames
-expandWithAliases' mem_aliases = fixpointIterate expand . S.singleton
-  where expand :: MNames -> MNames
-        expand mems =
-          S.unions (mems : map (`lookupEmptyable` mem_aliases) (S.toList mems))
-
 fixpointIterate :: Eq a => (a -> a) -> a -> a
 fixpointIterate f x
   | f x == x = x
@@ -117,10 +129,6 @@ fixpointIterate f x
 
 fixpointIterateMay :: (a -> Maybe a) -> a -> a
 fixpointIterateMay f x = maybe x (fixpointIterateMay f) (f x)
-
-fromVar :: SubExp -> Maybe VName
-fromVar (Var v) = Just v
-fromVar _ = Nothing
 
 mapFromListSetUnion :: (Ord k, Ord v) => [(k, S.Set v)] -> M.Map k (S.Set v)
 mapFromListSetUnion = M.unionsWith S.union . map (uncurry M.singleton)
@@ -150,13 +158,6 @@ whenM b m = do
   b' <- b
   when b' m
 
-findM :: Monad m => (a -> m Bool) -> [a] -> m (Maybe a)
-findM f xs = do
-  xs' <- filterM f xs
-  return $ case xs' of
-    x' : _ -> Just x'
-    _ -> Nothing
-
 mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
 mapMaybeM f xs = catMaybes <$> mapM f xs
 
@@ -166,9 +167,6 @@ sortByKeyM f xs =
 
 filterSetM :: (Ord a, Monad m) => (a -> m Bool) -> S.Set a -> m (S.Set a)
 filterSetM f xs = S.fromList <$> filterM f (S.toList xs)
-
-zipWithM3 :: Monad m => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
-zipWithM3 f as bs cs = sequence $ zipWith3 f as bs cs
 
 -- Map on both ExplicitMemory and InKernel.
 class FullMap lore where

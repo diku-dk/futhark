@@ -55,7 +55,7 @@ addUsesBefore var declarations_so_far =
 
 findSizeUsesFunDef :: FunDef ExplicitMemory -> UsesBefore
 findSizeUsesFunDef fundef =
-  let size_vars = mapMaybe (fromVar . fst) $ M.elems $ memBlockSizesFunDef fundef
+  let size_vars = mapMaybe (subExpVar . fst) $ M.elems $ memBlockSizesFunDef fundef
       var_to_pe = findPrimExpsFunDef fundef
       -- We want to find 'uses before' for all size vars *and* which variables
       -- they depend on.  This is a compromise between recording the
