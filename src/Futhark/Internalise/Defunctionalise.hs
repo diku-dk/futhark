@@ -720,7 +720,7 @@ freeVars expr = case expr of
                           foldMap freeVars incl
   Empty t _ _          -> names $ foldMap dimName $ nestedDims $ unInfo $ expandedType t
   Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
-  Ascript e _ _        -> freeVars e
+  Ascript e t _        -> freeVars e <> names (foldMap dimName $ nestedDims $ unInfo $ expandedType t)
   LetPat _ pat e1 e2 _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
                                           `without` patternVars pat)
 
