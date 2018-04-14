@@ -329,9 +329,8 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
           body' = body { bodyResult = res' }
 
       loopform' <- case loopform of
-        ForLoop i it bound loop_vars -> do
-          loop_vars' <- mapM transformForLoopVar loop_vars
-          return $ ForLoop i it bound loop_vars'
+        ForLoop i it bound loop_vars ->
+          ForLoop i it bound <$> mapM transformForLoopVar loop_vars
         WhileLoop _ -> return loopform
       return (DoLoop mergectxparams' mergevalparams' loopform' body',
               patctxelems)
@@ -383,21 +382,18 @@ transformMergeValParam (Param x membound, se) = do
 
 transformPatValElem :: LoreConstraints lore =>
                        PatElem ExplicitMemory -> FindM lore (PatElem ExplicitMemory)
-transformPatValElem (PatElem x membound) = do
-  membound' <- newMemBound membound x
-  return $ PatElem x membound'
+transformPatValElem (PatElem x membound) =
+  PatElem x <$> newMemBound membound x
 
 transformFParam :: LoreConstraints lore =>
                    FParam lore -> FindM lore (FParam lore)
-transformFParam (Param x membound) = do
-  membound' <- newMemBound membound x
-  return $ Param x membound'
+transformFParam (Param x membound) =
+  Param x <$> newMemBound membound x
 
 transformLParam :: LoreConstraints lore =>
                    LParam lore -> FindM lore (LParam lore)
-transformLParam (Param x membound) = do
-  membound' <- newMemBound membound x
-  return $ Param x membound'
+transformLParam (Param x membound) =
+  Param x <$> newMemBound membound x
 
 transformLambda :: LoreConstraints lore =>
                    Lambda lore -> FindM lore (Lambda lore)

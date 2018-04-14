@@ -11,7 +11,6 @@ module Futhark.Optimise.MemoryBlockMerging.Liveness.LastUse
 
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -64,11 +63,8 @@ coerce = FindM . unFindM
 
 -- Find the memory blocks used or aliased by a variable.
 varMems :: VName -> FindM lore MNames
-varMems var = do
-  var_to_mem <- asks ctxVarToMem
-  return $ fromMaybe S.empty $ do
-    mem <- memSrcName <$> M.lookup var var_to_mem
-    return $ S.singleton mem
+varMems var =
+  maybe S.empty (S.singleton . memSrcName) <$> asks (M.lookup var . ctxVarToMem)
 
 modifyCurOptimisticLastUses :: (OptimisticLastUses -> OptimisticLastUses) -> FindM lore ()
 modifyCurOptimisticLastUses f =

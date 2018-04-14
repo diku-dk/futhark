@@ -51,18 +51,14 @@ moveUpInFunDef fundef findHoistees =
   in fundef'
 
 lookupPrimBinding :: VName -> State BindingMap PrimBinding
-lookupPrimBinding vname = do
-  bm <- get
-  return $ snd $
-    fromJust (pretty vname ++ " was not found in BindingMap."
-              ++ "  This should not happen!")
-    $ L.find ((vname `S.member`) . fst) bm
+lookupPrimBinding vname =
+  gets $ snd . fromJust (pretty vname ++ " was not found in BindingMap."
+                         ++ "  This should not happen!")
+  . L.find ((vname `S.member`) . fst)
 
 namesDependingOn :: VName -> State BindingMap Names
-namesDependingOn v = do
-  bm <- get
-  return $ S.unions $ map fst
-    $ filter (\(_, pb) -> v `S.member` pbFrees pb) bm
+namesDependingOn v =
+  gets $ S.unions . map fst . filter (\(_, pb) -> v `S.member` pbFrees pb)
 
 scopeBindingMap :: (VName, NameInfo ExplicitMemory)
                 -> BindingMap

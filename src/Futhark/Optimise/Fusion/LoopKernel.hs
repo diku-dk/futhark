@@ -630,7 +630,7 @@ mapDepth (MapNest.MapNest _ lam levels _) =
 pullRearrange :: SOAC -> SOAC.ArrayTransforms
               -> TryFusion (SOAC, SOAC.ArrayTransforms)
 pullRearrange soac ots = do
-  nest <- join $ liftMaybe <$> MapNest.fromSOAC soac
+  nest <- liftMaybe =<< MapNest.fromSOAC soac
   SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
   if rearrangeReach perm <= mapDepth nest then do
     let -- Expand perm to cover the full extent of the input dimensionality
@@ -646,7 +646,7 @@ pullRearrange soac ots = do
 pushRearrange :: [VName] -> SOAC -> SOAC.ArrayTransforms
               -> TryFusion (SOAC, SOAC.ArrayTransforms)
 pushRearrange inpIds soac ots = do
-  nest <- join $ liftMaybe <$> MapNest.fromSOAC soac
+  nest <- liftMaybe =<< MapNest.fromSOAC soac
   (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest
   if rearrangeReach perm <= mapDepth nest then do
     let invertRearrange = SOAC.Rearrange mempty $ rearrangeInverse perm

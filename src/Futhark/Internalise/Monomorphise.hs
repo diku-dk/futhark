@@ -79,9 +79,7 @@ addLifted fname il lifted_fname =
   modifyLifts (((fname, il), lifted_fname) :)
 
 lookupLifted :: VName -> TypeBase () () -> MonoM (Maybe VName)
-lookupLifted fname t = do
-  lifts <- getLifts
-  return $ lookup (fname, t) lifts
+lookupLifted fname t = lookup (fname, t) <$> getLifts
 
 transformFName :: VName -> TypeBase () () -> MonoM VName
 transformFName fname t

@@ -124,7 +124,7 @@ lookupVarMem :: MonadReader Context m =>
 lookupVarMem var =
   -- This should always be called from a place where it is certain that 'var'
   -- refers to a statement with an array expression.
-  (fromJust ("lookup memory block from " ++ pretty var) . M.lookup var)
+  fromJust ("lookup memory block from " ++ pretty var) . M.lookup var
   <$> asks ctxVarToMem
 
 lookupActualVars' :: ActualVariables -> VName -> Names
@@ -135,20 +135,18 @@ lookupActualVars' actual_vars var =
 
 lookupActualVars :: MonadReader Context m =>
                     VName -> m Names
-lookupActualVars var = do
-  actual_vars <- asks ctxActualVars
-  return $ lookupActualVars' actual_vars var
+lookupActualVars var = asks $ flip lookupActualVars' var . ctxActualVars
 
 lookupSize :: MonadReader Context m =>
               VName -> m SubExp
 lookupSize var =
-  (fst . fromJust ("lookup size from " ++ pretty var) . M.lookup var)
+  fst . fromJust ("lookup size from " ++ pretty var) . M.lookup var
   <$> asks ctxSizes
 
 lookupSpace :: MonadReader Context m =>
                MName -> m Space
 lookupSpace mem =
-  (snd . fromJust ("lookup space from " ++ pretty mem) . M.lookup mem)
+  snd . fromJust ("lookup space from " ++ pretty mem) . M.lookup mem
   <$> asks ctxSizes
 
 -- Record that the existing old_mem now also "is the same as" new_mem.
@@ -428,7 +426,7 @@ handleNewArray x xmem = do
                                     let pot_mems = map (\(m, _, _, _) -> m) p
                                     in kmem `elem` pot_mems && xmem `elem` pot_mems)
                           potentials
-        kmem_size <- (fromJust "should be a var" . fromVar) <$> lookupSize kmem
+        kmem_size <- fromJust "should be a var" . fromVar <$> lookupSize kmem
 
         return $ case (S.toList used_mems, first_usess) of
           -- We only support the basic case for now.  FIXME (or, at the very
@@ -505,7 +503,7 @@ handleNewArray x xmem = do
 
   let noOtherUsesOfMemory :: LoreConstraints lore =>
                              MName -> MNames -> FindM lore Bool
-      noOtherUsesOfMemory _kmem _used_mems = do
+      noOtherUsesOfMemory _kmem _used_mems =
         -- If the array in question 'x' is not the only array that uses the
         -- memory (ignoring aliasing), then do not perform memory reuse.  We
         -- only want to reuse memory if it means we can remove an allocation.
@@ -515,21 +513,19 @@ handleNewArray x xmem = do
         -- might be the case that the ActualVariables module does not find all
         -- array connections, i.e. it concludes that two arrays are distinct
         -- when they are actually not; this can happen with streams.
-        var_to_mem <- asks ctxVarToMem
-        return $ and $ M.elems $ M.mapWithKey (
+        and . M.elems . M.mapWithKey (
           \v m -> (memSrcName m /= xmem)
                   || (v `L.elem` actual_vars)
-          ) var_to_mem
+          ) <$> asks ctxVarToMem
 
   let notCurrentlyDisabled :: FindM lore Bool
-      notCurrentlyDisabled = do
+      notCurrentlyDisabled =
         -- FIXME: We currently disable reusing memory of constant size.  This is
         -- a problem in the misc/heston/heston32.fut benchmark (but not the
         -- heston64.fut one).  It would be nice to not have to disable this
         -- feature, as it works well for the most part.  Why is this a problem?
         -- Or is it maybe something else that causes heston32 to segfault?
-        new_size <- lookupSize xmem
-        return $ isJust (fromVar new_size)
+        isJust . fromVar <$> lookupSize xmem
 
   let sizesWorkOut :: LoreConstraints lore =>
                       MName -> MNames -> FindM lore Bool
