@@ -482,9 +482,8 @@ toSOAC (Redomap w comm l1 l2 es as) =
   Futhark.Redomap w comm l1 l2 es <$> inputsToSubExps as
 toSOAC (Scanomap w l1 l2 es as) =
   Futhark.Scanomap w l1 l2 es <$> inputsToSubExps as
-toSOAC (Stream w form lam inps) = do
-  inpexp <- inputsToSubExps inps
-  return $ Futhark.Stream w form lam inpexp
+toSOAC (Stream w form lam inps) =
+  Futhark.Stream w form lam <$> inputsToSubExps inps
 toSOAC (Scatter len lam ivs dests) = do
   ivs' <- inputsToSubExps ivs
   return $ Futhark.Scatter len lam ivs' dests

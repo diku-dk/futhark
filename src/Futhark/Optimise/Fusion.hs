@@ -119,8 +119,8 @@ bindingFamilyVar faml env (Ident nm t) =
       }
 
 varAliases :: VName -> FusionGM Names
-varAliases v = S.insert v . maybe mempty varEntryAliases .
-               M.lookup v . varsInScope <$> ask
+varAliases v = asks $ S.insert v . maybe mempty varEntryAliases .
+                      M.lookup v . varsInScope
 
 varsAliases :: Names -> FusionGM Names
 varsAliases = fmap mconcat . mapM varAliases . S.toList
@@ -779,9 +779,8 @@ fuseInExp :: Exp -> FusionGM Exp
 -- merge variables.
 fuseInExp (DoLoop ctx val form loopbody) =
   binding (zip form_idents $ repeat mempty) $
-  bindingParams (map fst $ ctx ++ val) $ do
-    loopbody' <- fuseInBody loopbody
-    return $ DoLoop ctx val form loopbody'
+  bindingParams (map fst $ ctx ++ val) $
+  DoLoop ctx val form <$> fuseInBody loopbody
   where form_idents = case form of
           WhileLoop{} -> []
           ForLoop i it _ loopvars ->
@@ -808,9 +807,8 @@ replaceSOAC pat@(Pattern _ (patElem : _)) aux e = do
   let pat_nm = patElemName patElem
       names  = patternIdents pat
   case M.lookup pat_nm (outArr fres) of
-    Nothing  -> do
-      e'    <- fuseInExp e
-      return $ oneStm $ Let pat aux e'
+    Nothing  ->
+      oneStm . Let pat aux <$> fuseInExp e
     Just knm ->
       case M.lookup knm (kernels fres) of
         Nothing  -> throwError $ Error

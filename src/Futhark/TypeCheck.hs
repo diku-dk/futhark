@@ -403,9 +403,7 @@ lookupVar name = do
     Just attr -> return attr
 
 lookupAliases :: VName -> TypeM lore Names
-lookupAliases name = do
-  als <- aliases <$> lookupVar name
-  return $ S.insert name als
+lookupAliases name = S.insert name . aliases <$> lookupVar name
 
 aliases :: NameInfo (Aliases lore) -> Names
 aliases (LetInfo (als, _)) = unNames als
@@ -584,7 +582,7 @@ subCheck :: forall lore newlore a.
             TypeM newlore a ->
             TypeM lore a
 subCheck m = do
-  typeenv <- newEnv <$> ask
+  typeenv <- asks newEnv
   case runTypeM typeenv m of
     Left err -> bad $ TypeError $ show err
     Right (x, cons) -> tell cons >> return x

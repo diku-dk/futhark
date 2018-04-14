@@ -152,9 +152,8 @@ evalModExp (ModVar qn _) = lookupMod qn
 evalModExp (ModParens e _) = evalModExp e
 evalModExp (ModDecs decs _) = ModMod <$> transformDecs decs
 evalModExp (ModImport _ (Info fpath) _) = ModMod <$> lookupImport fpath
-evalModExp (ModAscript me _ (Info ascript_substs) _) = do
-  mod <- evalModExp me
-  return $ substituteInMod ascript_substs mod
+evalModExp (ModAscript me _ (Info ascript_substs) _) =
+  substituteInMod ascript_substs <$> evalModExp me
 evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
   f_mod <- evalModExp f
   arg_mod <- evalModExp arg

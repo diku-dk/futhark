@@ -280,9 +280,9 @@ offsetMemoryInBodyReturns offsets (MemArray pt shape u (ReturnsInBlock mem ixfun
 offsetMemoryInBodyReturns _ br = br
 
 offsetMemoryInExp :: RebaseMap -> Exp InKernel -> Either String (Exp InKernel)
-offsetMemoryInExp offsets (DoLoop ctx val form body) = do
-  body' <- offsetMemoryInBody offsets body
-  return $ DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form body'
+offsetMemoryInExp offsets (DoLoop ctx val form body) =
+  DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form <$>
+  offsetMemoryInBody offsets body
   where (ctxparams, ctxinit) = unzip ctx
         (valparams, valinit) = unzip val
         ctxparams' = map (offsetMemoryInParam offsets) ctxparams
@@ -402,7 +402,7 @@ sliceKernelSizes sizes kspace kbody = do
   kbody' <- either compilerLimitationS return $ unAllocInKernelBody kbody
   let num_sizes = length sizes
       i64s = replicate num_sizes $ Prim int64
-  inkernels_scope <- unAllocScope <$> ask
+  inkernels_scope <- asks unAllocScope
 
   let kernels_scope = castScope inkernels_scope
 

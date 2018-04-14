@@ -301,7 +301,7 @@ checkTypeParams ps m =
         typeParamSpace (TypeParamLiftedType pv _) = (Type, pv)
 
         checkParamName ns v loc = do
-          seen <- M.lookup (ns,v) <$> get
+          seen <- gets $ M.lookup (ns,v)
           case seen of
             Just prev ->
               throwError $ TypeError loc $

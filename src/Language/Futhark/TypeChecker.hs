@@ -581,9 +581,8 @@ matchMTys = matchMTys' mempty
       -- Check for correct modules.
       mod_substs <- fmap M.unions $ forM (M.toList $ envModTable sig) $ \(name, modspec) ->
         case findBinding envModTable Term (baseName name) env of
-          Just (name', mod) -> do
-            mod_substs <- matchMods abs_subst_to_type mod modspec loc
-            return (M.insert name name' mod_substs)
+          Just (name', mod) ->
+            M.insert name name' <$> matchMods abs_subst_to_type mod modspec loc
           Nothing ->
             missingMod loc $ baseName name
 

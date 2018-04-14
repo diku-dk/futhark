@@ -93,9 +93,7 @@ maybeFromBoolM f a = do
            else Nothing
 
 onJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
-onJust may f = case may of
-  Just x -> f x
-  Nothing -> return ()
+onJust = forM_
 
 expandWithAliases :: forall v. Ord v => MemAliases -> M.Map v Names -> M.Map v Names
 expandWithAliases mem_aliases = fixpointIterate expand
@@ -160,14 +158,11 @@ findM f xs = do
     _ -> Nothing
 
 mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
-mapMaybeM f xs = do
-  xs' <- mapM f xs
-  return $ catMaybes xs'
+mapMaybeM f xs = catMaybes <$> mapM f xs
 
 sortByKeyM :: (Ord t, Monad m) => (a -> m t) -> [a] -> m [a]
-sortByKeyM f xs = do
-  rs <- mapM f xs
-  return $ map fst $ L.sortBy (compare `on` snd) $ zip xs rs
+sortByKeyM f xs =
+  map fst . L.sortBy (compare `on` snd) . zip xs <$> mapM f xs
 
 filterSetM :: (Ord a, Monad m) => (a -> m Bool) -> S.Set a -> m (S.Set a)
 filterSetM f xs = S.fromList <$> filterM f (S.toList xs)
@@ -183,9 +178,8 @@ class FullMap lore where
 instance FullMap ExplicitMemory where
   fullMapExpM mapper mapper_kernel e =
     case e of
-      Op (ExpMem.Inner kernel) -> do
-        kernel' <- mapKernelM mapper_kernel kernel
-        return $ Op (ExpMem.Inner kernel')
+      Op (ExpMem.Inner kernel) ->
+        Op . ExpMem.Inner <$> mapKernelM mapper_kernel kernel
       _ -> mapExpM mapper e
 
 instance FullMap InKernel where
