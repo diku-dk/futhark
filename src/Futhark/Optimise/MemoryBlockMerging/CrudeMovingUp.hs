@@ -73,12 +73,12 @@ boundInKernelSpace space =
               , ExpMem.spaceGroupId space]
               ++ (case ExpMem.spaceStructure space of
                     ExpMem.FlatThreadSpace ts ->
-                      map fst ts ++ mapMaybe (fromVar . snd) ts
+                      map fst ts ++ mapMaybe (subExpVar . snd) ts
                     ExpMem.NestedThreadSpace ts ->
                       map (\(x, _, _, _) -> x) ts
-                      ++ mapMaybe (fromVar . (\(_, x, _, _) -> x)) ts
+                      ++ mapMaybe (subExpVar . (\(_, x, _, _) -> x)) ts
                       ++ map (\(_, _, x, _) -> x) ts
-                      ++ mapMaybe (fromVar . (\(_, _, _, x) -> x)) ts
+                      ++ mapMaybe (subExpVar . (\(_, _, _, x) -> x)) ts
                  ))
 
 -- FIXME: The results of this should maybe go in the core 'freeIn' function, or
@@ -129,7 +129,7 @@ bodyBindingMap stms =
           in bmap
 
         shapeSizes (PatElem _ (ExpMem.MemArray _ shape _ _)) =
-          mapMaybe fromVar $ shapeDims shape
+          mapMaybe subExpVar $ shapeDims shape
         shapeSizes _ = []
 
 hoistInBody :: Scope ExplicitMemory

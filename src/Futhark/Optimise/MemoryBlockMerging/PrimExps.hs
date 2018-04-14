@@ -88,7 +88,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
 
   case patvalelems of
     [PatElem dst _] ->
-      onJust (primExpFromExp varUse e) $ tell . M.singleton dst
+      forM_ (primExpFromExp varUse e) $ tell . M.singleton dst
     _ -> return ()
 
   forM_ patvalelems $ \(PatElem var membound) ->

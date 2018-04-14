@@ -588,12 +588,12 @@ safetyIf src dst = do
         -- This is the if expression of which we are currently looking at one of
         -- its branch results.
         [Exp nctx nthpat (If _ body0 body1 _)] ->
-          let results_from_outer = S.fromList $ mapMaybe fromVar
+          let results_from_outer = S.fromList $ mapMaybe subExpVar
                                    $ concatMap (drop nctx . bodyResult)
                                    $ filter (null . bodyStms) [body0, body1]
 
               resultCreatedInside body se = fromMaybe False $ do
-                res <- fromVar se
+                res <- subExpVar se
                 res_mem <- memSrcName <$> M.lookup res var_to_mem
                 let body_vars = concatMap (map patElemName . patternValueElements
                                            . stmPattern) $ bodyStms body

@@ -329,7 +329,7 @@ handleNewArray x xmem = do
         var_to_pe <- asks ctxVarPrimExps
         eq_asserts <- gets curEqAsserts
         let sePrimExp se = do
-              v <- fromVar se
+              v <- subExpVar se
               pe <- M.lookup v var_to_pe
               let pe_expanded = expandPrimExp var_to_pe pe
               traverse (\v_inner -> -- Has custom Eq instance.
@@ -355,8 +355,8 @@ handleNewArray x xmem = do
         xsize <- lookupSize xmem
         uses_before <- asks ctxSizeVarsUsesBefore
         let ok = fromMaybe False $ do
-              ksize' <- fromVar ksize
-              xsize' <- fromVar xsize
+              ksize' <- subExpVar ksize
+              xsize' <- subExpVar xsize
               return (xsize' `S.member` fromJust ("is recorded for all size variables "
                                                   ++ pretty ksize')
                       (M.lookup ksize' uses_before))
@@ -426,7 +426,7 @@ handleNewArray x xmem = do
                                     let pot_mems = map (\(m, _, _, _) -> m) p
                                     in kmem `elem` pot_mems && xmem `elem` pot_mems)
                           potentials
-        kmem_size <- fromJust "should be a var" . fromVar <$> lookupSize kmem
+        kmem_size <- fromJust "should be a var" . subExpVar <$> lookupSize kmem
 
         return $ case (S.toList used_mems, first_usess) of
           -- We only support the basic case for now.  FIXME (or, at the very
@@ -525,7 +525,7 @@ handleNewArray x xmem = do
         -- heston64.fut one).  It would be nice to not have to disable this
         -- feature, as it works well for the most part.  Why is this a problem?
         -- Or is it maybe something else that causes heston32 to segfault?
-        isJust . fromVar <$> lookupSize xmem
+        isJust . subExpVar <$> lookupSize xmem
 
   let sizesWorkOut :: LoreConstraints lore =>
                       MName -> MNames -> FindM lore Bool
@@ -557,8 +557,8 @@ handleNewArray x xmem = do
         ksize <- lookupSize kmem
         xsize <- lookupSize xmem
         fromMaybe (return ()) $ do
-          ksize' <- fromVar ksize
-          xsize' <- fromVar xsize
+          ksize' <- subExpVar ksize
+          xsize' <- subExpVar xsize
           return $ do
             recordMaxMapping kmem ksize'
             recordMaxMapping kmem xsize'
@@ -567,7 +567,7 @@ handleNewArray x xmem = do
       -- memory block of another array if its size gets maximised, record this
       -- change.  The actual program transformation will happen later.
       kernel_maxing <- sizesCanBeMaxedKernelArray kmem used_mems
-      onJust kernel_maxing $ \info ->
+      forM_ kernel_maxing $ \info ->
         recordKernelMaxMapping kmem info
 
     _ ->
