@@ -835,6 +835,15 @@ dimName _             = mempty
 -- as well as an environment that binds the name of the value binding to the
 -- static value of the transformed body.
 defuncValBind :: ValBind -> DefM (ValBind, Env)
+
+-- Eta-expand entry points with a functional return type.
+defuncValBind (ValBind True name _ (Info rettype) tparams params body _ loc)
+  | (rettype_ps, rettype') <- unfoldFunType rettype,
+    not $ null rettype_ps = do
+      (body_pats, body', _) <- etaExpand body
+      defuncValBind $ ValBind True name Nothing (Info rettype')
+        tparams (params <> body_pats) body' Nothing loc
+
 defuncValBind valbind@(ValBind _ name _ rettype tparams params body _ _) = do
   let env = envFromShapeParams tparams
   (params', body', sv) <- localEnv env $ defuncLet tparams params body rettype

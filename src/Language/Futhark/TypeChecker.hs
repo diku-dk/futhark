@@ -438,7 +438,10 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
   when (entry && any isTypeParam tparams') $
     throwError $ TypeError loc "Entry point functions may not be polymorphic."
 
-  when (entry && (any (not . patternOrderZero) params' || not (orderZero rettype))) $
+  let (rettype_params, rettype') = unfoldFunType rettype
+  when (entry && (any (not . patternOrderZero) params' ||
+                  any (not . orderZero) rettype_params ||
+                  not (orderZero rettype'))) $
     throwError $ TypeError loc "Entry point functions may not be higher-order."
 
   return (mempty { envVtable =
