@@ -5,7 +5,7 @@ description: See the website at https://futhark-lang.org
 homepage: https://futhark-lang.org
 maintainer: Troels Henriksen athas@sigkill.dk
 license: ISC
-github: HIPERFIT/futhark
+github: diku-dk/futhark
 category: Language
 
 ghc-options: -Wall -Wcompat
