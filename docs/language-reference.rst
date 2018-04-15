@@ -703,7 +703,7 @@ Logical negation of ``x``, which must be of type ``bool``.
 
 Numerical negation of ``x``, which must be of numeric type.
 
-``. x``
+``~ x``
 .......
 
 Bitwise negation of ``x``, which must be of integral type.
