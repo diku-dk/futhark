@@ -11,7 +11,7 @@ free to report it is an an issue on the `Github page`_.  Documentation
 bugs are bugs too.
 
 .. _`documentation of the compiler internals`: https://futhark-lang.org/haddock/
-.. _`Github page`: https://github.com/HIPERFIT/futhark
+.. _`Github page`: https://github.com/diku-dk/futhark
 
 The Futhark compiler is built using `Stack`_.  It's a good idea to
 familiarise yourself with how it works.  As a starting point, here are
