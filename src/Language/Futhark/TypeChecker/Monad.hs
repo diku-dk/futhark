@@ -496,7 +496,7 @@ data Namespace = Term -- ^ Functions and values.
                deriving (Eq, Ord, Show, Enum)
 
 ppSpace :: Namespace -> String
-ppSpace Term = "value"
+ppSpace Term = "name"
 ppSpace Type = "type"
 ppSpace Signature = "module type"
 
