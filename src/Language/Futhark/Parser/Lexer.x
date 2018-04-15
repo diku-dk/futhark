@@ -351,7 +351,6 @@ data Token = ID Name
            | UNZIP
            | UNSAFE
            | CONCAT
-           | PARTITION
            | TRUE
            | FALSE
            | EMPTY
