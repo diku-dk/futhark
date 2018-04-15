@@ -33,8 +33,6 @@
 
 import "/futlib/radix_sort"
 
-module radix_sort_f32 = mk_radix_sort f32
-
 let main [n][m] (xss: [n][m]f32): [n]f32 =
-  let xss' = map radix_sort_f32.radix_sort xss
+  let xss' = map (radix_sort f32.num_bits f32.get_bit) xss
   in xss'[:,m/2]
