@@ -51,9 +51,8 @@ main = reportingIOErrors $
 repl :: IO ()
 repl = do
   putStr banner
-  putStrLn $ "Version " ++ showVersion version
-  putStrLn "(C) HIPERFIT research centre"
-  putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
+  putStrLn $ "Version " ++ showVersion version ++ "."
+  putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
   putStrLn ""
   putStrLn "Run :help for a list of commands."
   putStrLn ""
