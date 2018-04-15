@@ -341,7 +341,6 @@ data Token = ID Name
            | LET
            | LOOP
            | IN
-           | FUN
            | FOR
            | DO
            | WITH
