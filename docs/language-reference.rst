@@ -792,11 +792,6 @@ contain the result of evaluating ``e``.  Consumes ``a``.
 
 If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
 
-``map f a``
-...........
-
-Apply ``f`` to every element of ``a`` and return the resulting array.
-
 Binding Expressions
 ~~~~~~~~~~~~~~~~~~~
 
