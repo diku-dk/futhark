@@ -411,7 +411,7 @@ literals and variables, but also more complicated forms.
       : | "(" `pat` ")"
       : | "(" `pat` ("," `pat`)+ ")"
       : | "{" "}"
-      : | "{" `fieldid` "=" `pat` ["," `fieldid` "=" `pat`] "}"
+      : | "{" `fieldid` ["=" `pat`] ["," `fieldid` ["=" `pat`]] "}"
       : | `pat` ":" `type`
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
