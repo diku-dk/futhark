@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Better type inference for `rearrange` and `rotate`.
+
 ## [0.4.1]
 
 ### Added
