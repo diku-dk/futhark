@@ -375,7 +375,7 @@ literals and variables, but also more complicated forms.
        : | "{" field ("," `field`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
-       : | `quals`."(" `exp` ")"
+       : | `quals` "." "(" `exp` ")"
        : | "[" `exp` ("," `exp`)* "]"
        : | "[" `exp` [".." `exp`] "..." `exp` "]"
        : | "(" `qualid` `atom`+ ")"
@@ -398,13 +398,11 @@ literals and variables, but also more complicated forms.
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
       : | "rotate" ["@" `nat_int`] `exp` `exp`
-      : | "concat" ["@" `nat_int`] `exp`+
+      : | "concat" ["@" `nat_int`] `exp` `exp`
       : | "zip" ["@" `nat_int`] `exp`+
       : | "unzip" `exp`
       : | "unsafe" `exp`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
-      : | "map" `fun` `exp`+
-      : | "partition" "(" `fun`+ ")" `exp`
    field:   `fieldid` "=" `exp`
         : | `id`
    pat:   `id`
