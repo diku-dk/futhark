@@ -56,7 +56,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Data.Ord
 import Data.Maybe
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Data.List hiding (elem, lookup)
 import qualified Data.List as L
 import qualified Data.Set        as S

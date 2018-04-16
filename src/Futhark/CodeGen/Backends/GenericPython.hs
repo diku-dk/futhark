@@ -821,9 +821,8 @@ compileExp (Imp.CmpOpExp cmp x y) = do
     CmpLle -> simple "<="
     _ -> return $ simpleCall (pretty cmp) [x', y']
 
-compileExp (Imp.UnOpExp op exp1) = do
-  exp1' <- compileExp exp1
-  return $ UnOp (compileUnOp op) exp1'
+compileExp (Imp.UnOpExp op exp1) =
+  UnOp (compileUnOp op) <$> compileExp exp1
 
 compileExp (Imp.FunExp h args _) =
   simpleCall (futharkFun (pretty h)) <$> mapM compileExp args

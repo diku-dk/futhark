@@ -14,7 +14,7 @@ import qualified Data.Set as S
 import Data.Foldable
 import Data.List
 import Data.Maybe
-import Data.Monoid
+import Data.Semigroup ((<>))
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST

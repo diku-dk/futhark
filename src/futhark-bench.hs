@@ -11,7 +11,7 @@ import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
 import Data.Maybe
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Data.List
 import qualified Data.Text as T
 import qualified Data.Text.IO as T

@@ -124,8 +124,7 @@ letTupExp' :: (MonadBinder m) =>
               String -> Exp (Lore m)
            -> m [SubExp]
 letTupExp' _ (BasicOp (SubExp se)) = return [se]
-letTupExp' name ses = do vs <- letTupExp name ses
-                         return $ map Var vs
+letTupExp' name ses = map Var <$> letTupExp name ses
 
 eSubExp :: MonadBinder m =>
            SubExp -> m (Exp (Lore m))
@@ -191,9 +190,7 @@ eNegate em = do
 
 eNot :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
-eNot e = do
-  e' <- letSubExp "not_arg" =<< e
-  return $ BasicOp $ UnOp Not e'
+eNot e = BasicOp . UnOp Not <$> (letSubExp "not_arg" =<< e)
 
 eAbs :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
@@ -223,8 +220,7 @@ eSignum em = do
 
 eCopy :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
-eCopy e = do e' <- letExp "copy_arg" =<< e
-             return $ BasicOp $ Copy e'
+eCopy e = BasicOp . Copy <$> (letExp "copy_arg" =<< e)
 
 eAssert :: MonadBinder m =>
          m (Exp (Lore m)) -> String -> SrcLoc -> m (Exp (Lore m))

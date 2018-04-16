@@ -11,23 +11,20 @@ module Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeMovingUp
   ) where
 
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 
-import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.CrudeMovingUp
-
 import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes
-
 
 findAllocSizeHoistees :: Body ExplicitMemory -> Maybe [FParam ExplicitMemory]
                       -> [VName]
 findAllocSizeHoistees body params =
   let subexps = map fst $ M.elems
                 $ memBlockSizesParamsBodyNonRec (fromMaybe [] params) body
-  in mapMaybe fromVar subexps
+  in subExpVars subexps
 
 moveUpAllocSizesFunDef :: FunDef ExplicitMemory
                       -> FunDef ExplicitMemory

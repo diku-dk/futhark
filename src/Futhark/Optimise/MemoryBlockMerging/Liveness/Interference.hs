@@ -215,7 +215,7 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
       tell stm_interferences'
 
       potential_kernel_interferences <- findKernelDataRaceInterferences e
-      onJust potential_kernel_interferences addPotentialKernelInterferenceGroup
+      forM_ potential_kernel_interferences addPotentialKernelInterferenceGroup
 
       forM_ patvalelems $ \(PatElem var _) -> do
         last_uses_var <- lookupEmptyable (FromStm var) <$> asks ctxLastUses
@@ -272,7 +272,7 @@ innermostLoopNestBody ctx body = case stmsToList $ bodyStms body of
 lookInRes :: LoreConstraints lore =>
              [SubExp] -> FindM lore ()
 lookInRes ses = do
-  let vs = mapMaybe fromVar ses
+  let vs = subExpVars ses
   last_uses <- asks ctxLastUses
   let last_uses_v =
         S.unions $ map (\v -> lookupEmptyable (FromRes v) last_uses) vs
@@ -357,7 +357,7 @@ interferenceExceptions :: LoreConstraints lore =>
                           Context -> Stms lore -> [SubExp] -> [MName] ->
                           Maybe [(MName, ExpMem.IxFun, PrimType)] -> [(MName, MName)]
 interferenceExceptions ctx stms res indices output_mems_may =
-  let output_vars = mapMaybe fromVar res
+  let output_vars = subExpVars res
       indices_slice = map (DimFix . Var) indices
       stms_first_uses = map (\(mem, _, _, _) -> mem)
                         $ concatMap (firstUsesInStm (ctxFirstUses ctx)) stms

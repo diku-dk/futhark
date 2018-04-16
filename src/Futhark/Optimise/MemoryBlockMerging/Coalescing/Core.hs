@@ -120,9 +120,7 @@ ifExp var = do
 
 isIfExp :: MonadReader Context m =>
            VName -> m Bool
-isIfExp var = do
-  found <- ifExp var
-  return $ isJust found
+isIfExp var = isJust <$> ifExp var
 
 isLoopExp :: MonadReader Context m =>
              VName -> m Bool
@@ -146,7 +144,7 @@ lookupVarMem :: MonadReader Context m =>
 lookupVarMem var =
   -- This should always be called from a place where it is certain that 'var'
   -- refers to a statement with an array expression.
-  (fromJust ("lookup memory block from " ++ pretty var) . M.lookup var)
+  fromJust ("lookup memory block from " ++ pretty var) . M.lookup var
   <$> asks ctxVarToMem
 
 lookupActualVars :: MonadReader Context m =>
@@ -164,7 +162,7 @@ lookupCurrentVarMem :: LoreConstraints lore =>
                        VName -> FindM lore (Maybe VName)
 lookupCurrentVarMem var = do
         -- Current result...
-        mem_cur <- (M.lookup var . curMemsCoalesced) <$> asks ctxCurSnapshot
+        mem_cur <- M.lookup var . curMemsCoalesced <$> asks ctxCurSnapshot
         -- ... or original result.
         --
         -- This is why we save the variables after creation, not the memory
@@ -178,12 +176,12 @@ lookupCurrentVarMem var = do
 
 withMemAliases :: MonadReader Context m =>
                   VName -> m Names
-withMemAliases mem = do
+withMemAliases mem =
   -- The only memory blocks with memory aliases are the existiential ones, so
   -- using a static ctxMemAliases should be okay, as they will not change during
   -- the transformation in this module.
-  mem_aliases <- lookupEmptyable mem <$> asks ctxMemAliases
-  return $ S.union (S.singleton mem) mem_aliases
+  S.union (S.singleton mem) . lookupEmptyable mem
+  <$> asks ctxMemAliases
 
 data Bindage = BindInPlace VName (Slice SubExp)
              | BindVar
@@ -412,7 +410,7 @@ tryCoalesce dst ixfun_slices bindage src offset = do
                   && src_local `L.elem` existentials
         return res
 
-  safe0 <- (not . or) <$> mapM currentlyDisabled srcs
+  safe0 <- not . or <$> mapM currentlyDisabled srcs
 
   -- Safety condition 1 is the same for all eventual previous arrays from srcs
   -- that also need to be coalesced into dst, so we check it here instead of
@@ -581,7 +579,7 @@ safetyIf src dst = do
   -- Find all variables that have 'src' as an actual var, and then check if one
   -- of those is an If expression.
   reverse_actual_srcs <-
-    (S.toList . S.unions . M.elems . M.filter (src `S.member`))
+    S.toList . S.unions . M.elems . M.filter (src `S.member`)
     <$> asks ctxActualVars
   outer <- mapMaybeM ifExp reverse_actual_srcs
   let (is_in_if,
@@ -590,12 +588,12 @@ safetyIf src dst = do
         -- This is the if expression of which we are currently looking at one of
         -- its branch results.
         [Exp nctx nthpat (If _ body0 body1 _)] ->
-          let results_from_outer = S.fromList $ mapMaybe fromVar
+          let results_from_outer = S.fromList $ mapMaybe subExpVar
                                    $ concatMap (drop nctx . bodyResult)
                                    $ filter (null . bodyStms) [body0, body1]
 
               resultCreatedInside body se = fromMaybe False $ do
-                res <- fromVar se
+                res <- subExpVar se
                 res_mem <- memSrcName <$> M.lookup res var_to_mem
                 let body_vars = concatMap (map patElemName . patternValueElements
                                            . stmPattern) $ bodyStms body

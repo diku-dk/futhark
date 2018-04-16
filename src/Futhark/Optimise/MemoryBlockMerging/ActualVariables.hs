@@ -120,7 +120,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
   -- Special handling of loops, ifs, etc.
   case e of
     DoLoop _mergectxparams mergevalparams loopform body -> do
-      let body_vars0 = mapMaybe (fromVar . snd) mergevalparams
+      let body_vars0 = mapMaybe (subExpVar . snd) mergevalparams
           body_vars1 = map (paramName . fst) mergevalparams
           body_vars2 = S.toList $ findAllExpVars e
           body_vars = body_vars0 ++ body_vars1 ++ body_vars2
@@ -178,7 +178,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
               -- If the memory block is existential, we say that the If result
               -- refers to all results in the If.
               recordActuals var
-              $ S.fromList (var : catMaybes [fromVar res_then, fromVar res_else])
+              $ S.fromList (var : catMaybes [subExpVar res_then, subExpVar res_else])
 
               else do
               -- If the memory block is not existential, we need to find all the

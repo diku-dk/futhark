@@ -141,16 +141,14 @@ optimiseStms (bnd:bnds) m = do
           return $ bnd' : bnds'
 
 optimiseInStm :: Constraints lore => Stm (Aliases lore) -> ForwardingM lore (Stm (Aliases lore))
-optimiseInStm (Let pat attr e) = do
-  e' <- optimiseExp e
-  return $ Let pat attr e'
+optimiseInStm (Let pat attr e) =
+  Let pat attr <$> optimiseExp e
 
 optimiseExp :: Constraints lore => Exp (Aliases lore) -> ForwardingM lore (Exp (Aliases lore))
 optimiseExp (DoLoop ctx val form body) =
   bindingScope (scopeOf form) $
-  bindingFParams (map fst $ ctx ++ val) $ do
-    body' <- optimiseBody body
-    return $ DoLoop ctx val form body'
+  bindingFParams (map fst $ ctx ++ val) $
+  DoLoop ctx val form <$> optimiseBody body
 optimiseExp (Op op) = do
   f <- asks onOp
   Op <$> f op

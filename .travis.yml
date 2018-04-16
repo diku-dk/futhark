@@ -4,6 +4,9 @@ sudo: false
 
 dist: trusty
 
+git:
+  submodules: false
+
 cache:
   directories:
     - $HOME/.stack
@@ -14,7 +17,7 @@ cache:
 matrix:
   include:
     - env: BUILD=stack STACK_YAML=stack.yaml
-    - env: BUILD=stack STACK_YAML=stack-ghc-8.4.yaml
+    - env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
     - env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
 
 addons:
@@ -22,7 +25,6 @@ addons:
     sources:
       - sourceline: 'ppa:adrozdoff/emacs'
     packages:
-    - hlint
     - python
     - python-numpy
     - libgmp-dev

@@ -11,7 +11,7 @@ import Control.Exception
 import Control.Monad.Except
 
 import Data.List
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.IO as T

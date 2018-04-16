@@ -88,7 +88,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
     If _ body_then body_else _ -> do
       -- Alias everything.  FIXME: This is maybe more conservative than
       -- necessary if the If works on tuples of arrays.
-      let ress = mapMaybe fromVar
+      let ress = mapMaybe subExpVar
                  (bodyResult body_then ++ bodyResult body_else)
       var_to_mem <- ask
       let mems = map memSrcName $ mapMaybe (`M.lookup` var_to_mem) ress

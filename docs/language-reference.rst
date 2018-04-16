@@ -375,7 +375,7 @@ literals and variables, but also more complicated forms.
        : | "{" field ("," `field`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
-       : | `quals`."(" `exp` ")"
+       : | `quals` "." "(" `exp` ")"
        : | "[" `exp` ("," `exp`)* "]"
        : | "[" `exp` [".." `exp`] "..." `exp` "]"
        : | "(" `qualid` `atom`+ ")"
@@ -398,13 +398,11 @@ literals and variables, but also more complicated forms.
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
       : | "rotate" ["@" `nat_int`] `exp` `exp`
-      : | "concat" ["@" `nat_int`] `exp`+
+      : | "concat" ["@" `nat_int`] `exp` `exp`
       : | "zip" ["@" `nat_int`] `exp`+
       : | "unzip" `exp`
       : | "unsafe" `exp`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
-      : | "map" `fun` `exp`+
-      : | "partition" "(" `fun`+ ")" `exp`
    field:   `fieldid` "=" `exp`
         : | `id`
    pat:   `id`
@@ -413,7 +411,7 @@ literals and variables, but also more complicated forms.
       : | "(" `pat` ")"
       : | "(" `pat` ("," `pat`)+ ")"
       : | "{" "}"
-      : | "{" `fieldid` "=" `pat` ["," `fieldid` "=" `pat`] "}"
+      : | "{" `fieldid` ["=" `pat`] ["," `fieldid` ["=" `pat`]] "}"
       : | `pat` ":" `type`
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
@@ -705,7 +703,7 @@ Logical negation of ``x``, which must be of type ``bool``.
 
 Numerical negation of ``x``, which must be of numeric type.
 
-``. x``
+``~ x``
 .......
 
 Bitwise negation of ``x``, which must be of integral type.
@@ -793,11 +791,6 @@ contain the result of evaluating ``e``.  Consumes ``a``.
 ......................
 
 If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
-
-``map f a``
-...........
-
-Apply ``f`` to every element of ``a`` and return the resulting array.
 
 Binding Expressions
 ~~~~~~~~~~~~~~~~~~~
