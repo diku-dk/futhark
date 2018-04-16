@@ -1,0 +1,9 @@
+resolver: lts-10.0
+packages:
+- .
+
+extra-deps: []
+
+flags: {}
+
+extra-package-dbs: []

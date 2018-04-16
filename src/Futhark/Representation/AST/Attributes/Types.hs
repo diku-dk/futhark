@@ -73,7 +73,7 @@ module Futhark.Representation.AST.Attributes.Types
 
 import Control.Monad.State
 import Data.Maybe
-import Data.Monoid
+import Data.Monoid ((<>))
 import Data.List (elemIndex)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M

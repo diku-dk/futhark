@@ -82,14 +82,13 @@ lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   prim_types <- get
-  let varUse (BasicOp (SubExp (Var v))) = do
-        pt <- M.lookup v prim_types
-        return $ ExpMem.LeafExp v pt
+  let varUse (BasicOp (SubExp (Var v))) =
+        ExpMem.LeafExp v <$> M.lookup v prim_types
       varUse _ = Nothing
 
   case patvalelems of
     [PatElem dst _] ->
-      onJust (primExpFromExp varUse e) $ tell . M.singleton dst
+      forM_ (primExpFromExp varUse e) $ tell . M.singleton dst
     _ -> return ()
 
   forM_ patvalelems $ \(PatElem var membound) ->

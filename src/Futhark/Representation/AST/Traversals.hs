@@ -47,8 +47,8 @@ module Futhark.Representation.AST.Traversals
 
 import Control.Monad
 import Control.Monad.Identity
-import Control.Monad.Writer
 import qualified Data.Traversable
+import Data.Monoid ((<>))
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Scope

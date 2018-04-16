@@ -30,7 +30,7 @@ import Control.Monad.State
 import Data.List
 import Data.Loc
 import Data.Maybe
-import Data.Monoid
+import Data.Monoid ((<>))
 import qualified Data.Map.Strict as M
 
 import Language.Futhark
@@ -301,7 +301,7 @@ checkTypeParams ps m =
         typeParamSpace (TypeParamLiftedType pv _) = (Type, pv)
 
         checkParamName ns v loc = do
-          seen <- M.lookup (ns,v) <$> get
+          seen <- gets $ M.lookup (ns,v)
           case seen of
             Just prev ->
               throwError $ TypeError loc $

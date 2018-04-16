@@ -5,7 +5,7 @@ import Control.Monad
 import Control.Monad.State
 import Control.Monad.Reader
 import Data.List (sort)
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Data.Maybe
 import qualified Data.Map as M
 import System.FilePath (splitPath, (-<.>), makeRelative)

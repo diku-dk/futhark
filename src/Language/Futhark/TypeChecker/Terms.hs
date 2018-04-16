@@ -1050,21 +1050,18 @@ checkExp (Reshape shapeexp arrexp NoInfo loc) = do
 
   return $ Reshape shapeexp' arrexp' (Info $ arrayRank arr_t) loc
 
-checkExp (Rearrange perm arrexp pos) = do
-  arrexp' <- checkExp arrexp
+checkExp (Rearrange perm arrexp loc) = do
+  (arr_t, _) <- newArrayType (srclocOf arrexp) "e" (length perm)
+  arrexp' <- unifies arr_t =<< checkExp arrexp
   r <- arrayRank <$> expType arrexp'
   when (length perm /= r || sort perm /= [0..r-1]) $
-    throwError $ PermutationError pos perm r
-  return $ Rearrange perm arrexp' pos
+    throwError $ PermutationError loc perm r
+  return $ Rearrange perm arrexp' loc
 
 checkExp (Rotate d offexp arrexp loc) = do
-  arrexp' <- checkExp arrexp
+  (arr_t, _) <- newArrayType (srclocOf arrexp) "e" (1+d)
+  arrexp' <- unifies arr_t =<< checkExp arrexp
   offexp' <- unifies (Prim $ Signed Int32) =<< checkExp offexp
-  r <- arrayRank <$> expType arrexp'
-  when (r <= d) $
-    typeError loc $ "Attempting to rotate dimension " ++ show d ++
-    " of array " ++ pretty arrexp ++
-    " which has only " ++ show r ++ " dimensions."
   return $ Rotate d offexp' arrexp' loc
 
 checkExp (Zip i e es NoInfo loc) = do

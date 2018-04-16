@@ -438,7 +438,10 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
   when (entry && any isTypeParam tparams') $
     throwError $ TypeError loc "Entry point functions may not be polymorphic."
 
-  when (entry && (any (not . patternOrderZero) params' || not (orderZero rettype))) $
+  let (rettype_params, rettype') = unfoldFunType rettype
+  when (entry && (any (not . patternOrderZero) params' ||
+                  any (not . orderZero) rettype_params ||
+                  not (orderZero rettype'))) $
     throwError $ TypeError loc "Entry point functions may not be higher-order."
 
   return (mempty { envVtable =
@@ -581,9 +584,8 @@ matchMTys = matchMTys' mempty
       -- Check for correct modules.
       mod_substs <- fmap M.unions $ forM (M.toList $ envModTable sig) $ \(name, modspec) ->
         case findBinding envModTable Term (baseName name) env of
-          Just (name', mod) -> do
-            mod_substs <- matchMods abs_subst_to_type mod modspec loc
-            return (M.insert name name' mod_substs)
+          Just (name', mod) ->
+            M.insert name name' <$> matchMods abs_subst_to_type mod modspec loc
           Nothing ->
             missingMod loc $ baseName name
 

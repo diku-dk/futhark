@@ -1,6 +1,6 @@
 module Futhark.Doc.Html where
 
-import Data.Monoid
+import Data.Semigroup ((<>))
 
 import Language.Futhark
 import Futhark.Util.Pretty (Doc,ppr)

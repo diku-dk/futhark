@@ -14,7 +14,7 @@ module Futhark.Compiler
        )
 where
 
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Control.Exception
 import Control.Monad
 import Control.Monad.Reader
@@ -88,7 +88,7 @@ reportingIOErrors = flip catches [Handler onExit, Handler onError]
               return () -- This corresponds to CTRL-C, which is not an error.
           | otherwise = do
               T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
-              T.hPutStrLn stderr "Please report this at https://github.com/HIPERFIT/futhark/issues."
+              T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
               T.hPutStrLn stderr $ T.pack $ show e
               exitWith $ ExitFailure 1
 

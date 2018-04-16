@@ -12,7 +12,7 @@ module Futhark.Analysis.Range
 
 import qualified Data.Map.Strict as M
 import Control.Monad.Reader
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Data.List
 
 import qualified Futhark.Analysis.ScalExp as SE
@@ -32,9 +32,8 @@ rangeAnalysis = Prog . map analyseFun . progFunctions
 analyseFun :: (Attributes lore, CanBeRanged (Op lore)) =>
               FunDef lore -> FunDef (Ranges lore)
 analyseFun (FunDef entry fname restype params body) =
-  runRangeM $ bindFunParams params $ do
-    body' <- analyseBody body
-    return $ FunDef entry fname restype params body'
+  runRangeM $ bindFunParams params $
+  FunDef entry fname restype params <$> analyseBody body
 
 analyseBody :: (Attributes lore, CanBeRanged (Op lore)) =>
                Body lore
@@ -210,6 +209,6 @@ betterUpperBound bound =
 -- range.  We just put a zero because I don't think it's used for
 -- anything in this case.
 rangesRep :: RangeM AS.RangesRep
-rangesRep = M.map addLeadingZero <$> ask
+rangesRep = asks $ M.map addLeadingZero
   where addLeadingZero (x,y) =
           (0, boundToScalExp =<< x, boundToScalExp =<< y)

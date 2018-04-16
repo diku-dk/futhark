@@ -17,7 +17,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Monoid
+import Data.Semigroup ((<>))
 import Data.List
 import Data.Loc
 
@@ -178,9 +178,7 @@ internaliseIdent (E.Ident name (Info tp) loc) =
                        " at " ++ locStr loc ++ "."
 
 internaliseBody :: E.Exp -> InternaliseM Body
-internaliseBody e = insertStmsM $ do
-  ses <- internaliseExp "res" e
-  return $ resultBody ses
+internaliseBody e = insertStmsM $ resultBody <$> internaliseExp "res" e
 
 internaliseBodyStms :: E.Exp -> ([SubExp] -> InternaliseM (Body, a))
                     -> InternaliseM (Body, a)

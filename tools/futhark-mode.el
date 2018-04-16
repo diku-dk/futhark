@@ -2,7 +2,7 @@
 
 ;; Copyright (C) DIKU 2013-2017, University of Copenhagen
 ;;
-;; URL: https://github.com/HIPERFIT/futhark
+;; URL: https://github.com/diku-dk/futhark
 ;; Keywords: languages
 ;; Version: 0.1
 ;; Package-Requires: ((cl-lib "0.5"))
@@ -10,7 +10,7 @@
 ;; This file is not part of GNU Emacs.
 
 ;;; License:
-;; ICS <https://github.com/HIPERFIT/futhark/blob/master/LICENSE>
+;; ICS <https://github.com/diku-dk/futhark/blob/master/LICENSE>
 
 ;;; Commentary:
 ;; Futhark is a small programming language designed to be compiled to

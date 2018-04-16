@@ -12,7 +12,7 @@ import Control.Arrow ((&&&))
 import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Maybe
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List

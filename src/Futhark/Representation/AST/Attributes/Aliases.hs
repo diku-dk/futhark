@@ -19,7 +19,7 @@ module Futhark.Representation.AST.Attributes.Aliases
        where
 
 import Control.Arrow (first)
-import Data.Monoid
+import Data.Monoid ((<>))
 import qualified Data.Set as S
 
 import Futhark.Representation.AST.Attributes (IsOp)

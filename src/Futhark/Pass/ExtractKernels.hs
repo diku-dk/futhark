@@ -263,9 +263,8 @@ transformStm (Let pat aux (If c tb fb rt)) = do
 
 transformStm (Let pat aux (DoLoop ctx val form body)) =
   localScope (castScope (scopeOf form) <>
-              scopeOfFParams mergeparams) $ do
-    body' <- transformBody body
-    return $ oneStm $ Let pat aux $ DoLoop ctx val form' body'
+              scopeOfFParams mergeparams) $
+    oneStm . Let pat aux . DoLoop ctx val form' <$> transformBody body
   where mergeparams = map fst $ ctx ++ val
         form' = case form of
                   WhileLoop cond ->

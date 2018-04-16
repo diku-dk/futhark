@@ -78,5 +78,6 @@ commonOptions options =
   ]
   where header = do
           putStrLn $ "Futhark " ++ versionString
-          putStrLn "(C) HIPERFIT research centre"
-          putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
+          putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
+          putStrLn "This is free software: you are free to change and redistribute it."
+          putStrLn "There is NO WARRANTY, to the extent permitted by law."

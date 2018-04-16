@@ -209,7 +209,7 @@ instance (HasScope lore m, Monad m) =>
   lookupType name = do
     res <- asks $ fmap typeOf . M.lookup name
     maybe (ExtendedScope $ lift $ lookupType name) return res
-  askScope = M.union <$> ask <*> ExtendedScope (lift askScope)
+  askScope = asks M.union <*> ExtendedScope (lift askScope)
 
 -- | Run a computation in the extended type environment.
 extendedScope :: ExtendedScope lore m a

@@ -290,10 +290,9 @@ allocsForPattern sizeidents validents rts hints = do
           return $ PatElem (identName ident) $
           MemMem (intConst Int32 0) space
 
-        MemArray bt _ u (Just (ReturnsInBlock mem ixfun)) -> do
-          ixfun' <- instantiateIxFun ixfun
-          return $ PatElem (identName ident) $
-            MemArray bt shape u $ ArrayIn mem ixfun'
+        MemArray bt _ u (Just (ReturnsInBlock mem ixfun)) ->
+          PatElem (identName ident) . MemArray bt shape u .
+          ArrayIn mem <$> instantiateIxFun ixfun
 
         MemArray _ extshape _ Nothing
           | Just _ <- knownShape extshape -> do

@@ -37,7 +37,7 @@ module Futhark.Representation.ExplicitMemory.Lmad
 --import Control.Applicative
 --import Data.Maybe
 import Data.List as L hiding (repeat)
---import Data.Monoid
+--import Data.Semigroup ((<>))
 --import Data.List hiding (repeat)
 import Control.Monad.Identity
 --import Control.Monad.Writer

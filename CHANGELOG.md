@@ -5,15 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+
 ## [0.5.0]
 
 ### Added
 
-  * Unused-result elimination for reductions; particularly useful when
-    computing with dual numbers for automatic differentiation.
-  * Record field projection is now possible for variables of (then)
-    unknown types.  A function parameter must still have an
-    unambiguous (complete) type by the time it finishes checking.
+  * Entry points need no longer be syntactically first-order.
 
 ### Removed
 
@@ -21,7 +18,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Better type inference for `rearrange` and `rotate`.
+
+## [0.4.1]
+
+### Added
+
+  * Unused-result elimination for reductions; particularly useful when
+    computing with dual numbers for automatic differentiation.
+
+  * Record field projection is now possible for variables of (then)
+    unknown types.  A function parameter must still have an
+    unambiguous (complete) type by the time it finishes checking.
+
+### Fixed
+
   * Fixed interaction between type ascription and type inference (#529).
+
+  * Fixed duplication when an entry point was also called as a function.
+
+  * Futhark now compiles cleanly with GHC 8.4.1 (this is also the new default).
 
 ## [0.4.0]
 

@@ -52,7 +52,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'Futhark'
-copyright = '2013-2017, HIPERFIT'
+copyright = '2013-2018, DIKU, University of Copenhagen'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -228,7 +228,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
   ('index', 'Futhark.tex', 'Futhark Documentation',
-   'HIPERFIT', 'manual'),
+   'DIKU', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -290,7 +290,7 @@ man_pages = [
 #  dir menu entry, description, category)
 texinfo_documents = [
   ('index', 'Futhark', 'Futhark Documentation',
-   'HIPERFIT', 'Futhark', 'One line description of project.',
+   'DIKU', 'Futhark', 'One line description of project.',
    'Miscellaneous'),
 ]
 

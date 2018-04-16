@@ -14,7 +14,7 @@ module Futhark.Pass.ExtractKernels.Kernelise
        where
 
 import Control.Monad
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Set as S
 
 import qualified Futhark.Analysis.Alias as Alias

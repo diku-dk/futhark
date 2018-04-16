@@ -6,7 +6,7 @@ import Data.Maybe
 import Control.Category (id)
 import Control.Monad
 import Control.Monad.State
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Text.IO as T
 import System.IO
 import System.Exit

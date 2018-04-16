@@ -16,7 +16,7 @@ import Data.Either
 import Data.Foldable (all)
 import Data.List hiding (all)
 import Data.Maybe
-import Data.Monoid
+import Data.Semigroup ((<>))
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
@@ -906,6 +906,18 @@ simplifyConcat (vtable, _) pat _ (Concat i x xs new_d)
             Just (BasicOp (Rearrange perm2 v'), vcs)
               | perm1 == perm2 -> Just (v', vcs)
             _ -> Nothing
+
+-- concat xs (concat ys zs) == concat xs ys zs
+simplifyConcat (vtable, _) pat (StmAux cs _) (Concat i x xs new_d)
+  | x' /= x || concat xs' /= xs =
+      certifying (cs<>x_cs<>mconcat xs_cs) $
+      letBind_ pat $ BasicOp $ Concat i x' (zs++concat xs') new_d
+  where (x':zs, x_cs) = isConcat x
+        (xs', xs_cs) = unzip $ map isConcat xs
+        isConcat v = case ST.lookupBasicOp v vtable of
+                       Just (Concat j y ys _, v_cs) | j == i -> (y : ys, v_cs)
+                       _ -> ([v], mempty)
+
 simplifyConcat _ _ _  _ = cannotSimplify
 
 evaluateBranch :: BinderOps lore => TopDownRuleIf lore

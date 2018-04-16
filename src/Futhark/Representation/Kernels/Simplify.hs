@@ -19,7 +19,7 @@ import Data.Either
 import Data.Foldable
 import Data.List
 import Data.Maybe
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
 

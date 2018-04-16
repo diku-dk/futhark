@@ -79,9 +79,7 @@ addLifted fname il lifted_fname =
   modifyLifts (((fname, il), lifted_fname) :)
 
 lookupLifted :: VName -> TypeBase () () -> MonoM (Maybe VName)
-lookupLifted fname t = do
-  lifts <- getLifts
-  return $ lookup (fname, t) lifts
+lookupLifted fname t = lookup (fname, t) <$> getLifts
 
 transformFName :: VName -> TypeBase () () -> MonoM VName
 transformFName fname t
@@ -448,9 +446,9 @@ transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   valbind' <- toPolyBinding <$> removeTypeVariables valbind
   when (valBindEntryPoint valbind) $ do
-    let t = removeShapeAnnotations $ foldFunType
-            (map patternStructType (valBindParams valbind)) $
-            unInfo $ valBindRetType valbind
+    t <- removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
+         (map patternStructType (valBindParams valbind)) $
+         unInfo $ valBindRetType valbind
     (name, valbind'') <- monomorphizeBinding valbind' t
     tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = True})
     addLifted (valBindName valbind) t name

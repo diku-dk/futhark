@@ -24,7 +24,7 @@ module Futhark.Analysis.UsageTable
 
 import Control.Arrow (first)
 import qualified Data.Foldable as Foldable
-import Data.Monoid
+import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Semigroup as Sem

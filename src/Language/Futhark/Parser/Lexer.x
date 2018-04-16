@@ -341,7 +341,6 @@ data Token = ID Name
            | LET
            | LOOP
            | IN
-           | FUN
            | FOR
            | DO
            | WITH
@@ -352,7 +351,6 @@ data Token = ID Name
            | UNZIP
            | UNSAFE
            | CONCAT
-           | PARTITION
            | TRUE
            | FALSE
            | EMPTY

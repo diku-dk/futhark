@@ -9,7 +9,7 @@ module Futhark.Pass.ExtractKernels.ISRWIM
 
 import Control.Arrow (first)
 import Control.Monad.State
-import Data.Monoid
+import Data.Semigroup ((<>))
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.SOACS
