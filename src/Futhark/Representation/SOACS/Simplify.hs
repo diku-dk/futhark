@@ -391,37 +391,40 @@ removeDeadWrite (_, used) pat _ (Scatter w fun arrs dests) =
      else cannotSimplify
 removeDeadWrite _ _ _ _ = cannotSimplify
 
--- Future improvements: handle concatenations of more than two arrays.
+-- handles now concatenation of more than two arrays
 fuseConcatScatter :: TopDownRuleOp (Wise SOACS)
 fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
-  | Just (ws@(w':_), xs, ys, css) <- unzip4 <$> mapM isConcat arrs,
+  | Just (ws@(w':_), xss, css) <- unzip3 <$> mapM isConcat arrs,
+    xivs <- transpose xss,
     all (w'==) ws = do
-      fun2 <- renameLambda fun
+      let r = length xivs
+      fun2s <- mapM (\_ -> renameLambda fun) [1 .. r-1]
       let fun_n = length $ lambdaReturnType fun
-          (fun_is, fun_vs) = splitAt (fun_n `div` 2) $ bodyResult (lambdaBody fun)
-          (fun2_is, fun2_vs) = splitAt (fun_n `div` 2) $ bodyResult (lambdaBody fun2)
-          (its, vts) = splitAt (fun_n `div` 2) $ lambdaReturnType fun
-          (its2, vts2) = splitAt (fun_n `div` 2) $ lambdaReturnType fun
+          (fun_is, fun_vs) = unzip $ map (splitAt (fun_n `div` 2) .
+                             bodyResult . lambdaBody ) (fun:fun2s)
+          (its, vts) = unzip $ replicate r $
+                       splitAt (fun_n `div` 2) $ lambdaReturnType fun
+          new_stmts  = mconcat $ map (bodyStms . lambdaBody) (fun:fun2s)
       let fun' = Lambda
-                 { lambdaParams = lambdaParams fun <> lambdaParams fun2
-                 , lambdaBody = mkBody (bodyStms (lambdaBody fun) <>
-                                        bodyStms (lambdaBody fun2)) $
-                                mix [fun_is, fun2_is] <> mix [fun_vs, fun2_vs]
-                 , lambdaReturnType = mix [its, its2] <> mix [vts, vts2]
+                 { lambdaParams = mconcat $ map lambdaParams (fun:fun2s)
+                 , lambdaBody = mkBody new_stmts $
+                                mix fun_is <> mix fun_vs
+                 , lambdaReturnType = mix its <> mix vts
                  }
       certifying (mconcat css) $
-        letBind_ pat $ Op $ Scatter w' fun' (xs++ys) $ map incWrites dests
+        letBind_ pat $ Op $ Scatter w' fun' (concat xivs) $ map (incWrites r) dests
   where sizeOf :: VName -> Maybe SubExp
         sizeOf x = arraySize 0 . ST.entryType <$> ST.lookup x vtable
         mix = concat . transpose
-        incWrites (w, n, a) = (w, n+1, a)
+        incWrites r (w, n, a) = (w, n*r, a) -- ToDO: is it (n*r) or (n+r-1)??
         isConcat v = case ST.lookupExp v vtable of
-          Just (BasicOp (Concat 0 x [y] _), cs) -> do
+          Just (BasicOp (Concat 0 x ys _), cs) -> do
             x_w <- sizeOf x
-            y_w <- sizeOf y
-            guard $ x_w == y_w
-            return (x_w, x, y, cs)
+            y_ws<- mapM sizeOf ys
+            guard $ all (x_w==) y_ws
+            return (x_w, x:ys, cs)
           _ -> Nothing
+
 fuseConcatScatter _ _ _ _ = cannotSimplify
 
 simplifyClosedFormRedomap :: TopDownRuleOp (Wise SOACS)
