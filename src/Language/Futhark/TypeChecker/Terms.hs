@@ -673,9 +673,10 @@ bindingPatternGroup tps orig_ps m = do
           -- prevents unused-name warnings for otherwise unused
           -- dimensions.
           mapM_ observe $ mapMaybe typeParamIdent tps'
-          checkTypeParamsUsed tps' ps'
+          let ps'' = reverse ps'
+          checkShapeParamUses tps' ps''
 
-          m tps' $ reverse ps'
+          m tps' ps''
 
     descend [] orig_ps
 
@@ -689,20 +690,55 @@ bindingPattern tps p t m = do
       -- Perform an observation of every declared dimension.  This
       -- prevents unused-name warnings for otherwise unused dimensions.
       mapM_ observe $ patternDims p'
-      checkTypeParamsUsed tps' [p']
+      checkShapeParamUses tps' [p']
 
       m tps' p'
 
-checkTypeParamsUsed :: [TypeParam] -> [Pattern] -> TermTypeM ()
-checkTypeParamsUsed tps ps = mapM_ check tps
-  where uses = mconcat $ map patternUses ps
-        check (TypeParamDim pv loc)
-          | qualName pv `elem` patternDimUses uses = return ()
+-- | Ensure that every shape parameter is used in positive position at
+-- least once before being used in negative position.
+checkShapeParamUses :: [TypeParam] -> [Pattern] -> TermTypeM ()
+checkShapeParamUses tps ps = do
+  pos_uses <- foldM checkShapePositions [] ps
+  mapM_ (checkUsed pos_uses) tps
+  where checkShapePositions pos_uses p = do
+          let (pos, neg) = patternUses p
+              pos_uses' = pos <> pos_uses
+          forM_ neg (\pv -> unless (pv `elem` pos_uses') $
+                      typeError (srclocOf p) $ "Shape parameter " ++
+                      pretty (baseName pv) ++ " must first be given in " ++
+                      "a positive position (non-functional parameter).")
+          return pos_uses'
+        checkUsed uses (TypeParamDim pv loc)
+          | pv `elem` uses = return ()
           | otherwise =
-              typeError loc $
-              "Size parameter " ++ pretty (baseName pv) ++
-              " not used in value parameters."
-        check _ = return ()
+              typeError loc $ "Size parameter " ++
+              pretty (baseName pv) ++ " not used in any value parameters."
+        checkUsed _ _ = return ()
+
+-- | Return the shapes used in a given pattern in postive and negative
+-- position, respectively.
+patternUses :: Pattern -> ([VName], [VName])
+patternUses Id{} = mempty
+patternUses Wildcard{} = mempty
+patternUses (PatternParens p _) = patternUses p
+patternUses (TuplePattern ps _) = foldMap patternUses ps
+patternUses (RecordPattern fs _) = foldMap (patternUses . snd) fs
+patternUses (PatternAscription p (TypeDecl declte _) _) =
+  patternUses p <> typeExpUses declte
+  where typeExpUses (TEVar _ _) = mempty
+        typeExpUses (TETuple tes _) = foldMap typeExpUses tes
+        typeExpUses (TERecord fs _) = foldMap (typeExpUses . snd) fs
+        typeExpUses (TEArray te d _) = typeExpUses te <> dimDeclUses d
+        typeExpUses (TEUnique te _) = typeExpUses te
+        typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
+        typeExpUses (TEArrow _ t1 t2 _) =
+          let (pos, neg) = typeExpUses t1 <> typeExpUses t2
+          in (mempty, pos <> neg)
+        typeArgUses (TypeArgExpDim d _) = dimDeclUses d
+        typeArgUses (TypeArgExpType te) = typeExpUses te
+
+        dimDeclUses (NamedDim v) = ([qualLeaf v], [])
+        dimDeclUses _ = mempty
 
 noTypeParamsPermitted :: [UncheckedTypeParam] -> TermTypeM ()
 noTypeParamsPermitted ps =
@@ -721,40 +757,6 @@ patternDims (PatternAscription p (TypeDecl _ (Info t)) _) =
         dimIdent _ (ConstDim _)      = Nothing
         dimIdent _ NamedDim{}        = Nothing
 patternDims _ = []
-
-data PatternUses = PatternUses { patternDimUses :: [QualName VName]
-                               , _patternTypeUses :: [QualName VName]
-                               }
-
-instance Sem.Semigroup PatternUses where
-  PatternUses x1 y1 <> PatternUses x2 y2 =
-    PatternUses (x1<>x2) (y1<>y2)
-
-instance Monoid PatternUses where
-  mempty = PatternUses mempty mempty
-  mappend = (Sem.<>)
-
-patternUses :: Pattern -> PatternUses
-patternUses Id{} = mempty
-patternUses Wildcard{} = mempty
-patternUses (PatternParens p _) = patternUses p
-patternUses (TuplePattern ps _) = mconcat $ map patternUses ps
-patternUses (RecordPattern fs _) = mconcat $ map (patternUses . snd) fs
-patternUses (PatternAscription p (TypeDecl declte _) _) =
-  patternUses p <> typeExpUses declte
-  where typeExpUses (TEVar qn _) = PatternUses [] [qn]
-        typeExpUses (TETuple tes _) = mconcat $ map typeExpUses tes
-        typeExpUses (TERecord fs _) = mconcat $ map (typeExpUses . snd) fs
-        typeExpUses (TEArray te d _) = typeExpUses te <> dimDeclUses d
-        typeExpUses (TEUnique te _) = typeExpUses te
-        typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
-        typeExpUses (TEArrow _ t1 t2 _) = typeExpUses t1 <> typeExpUses t2
-
-        typeArgUses (TypeArgExpDim d _) = dimDeclUses d
-        typeArgUses (TypeArgExpType te) = typeExpUses te
-
-        dimDeclUses (NamedDim v) = PatternUses [v] []
-        dimDeclUses _ = mempty
 
 --- Main checkers
 
