@@ -3,8 +3,8 @@
 Futhark Compared to Other Functional Languages
 ==============================================
 
-This guide is intended to quickly get programmers familiar with other
-functional languages acquainted with Futhark.
+This guide is intended to quickly get programmers who are familiar
+with other functional languages acquainted with Futhark.
 
 Futhark is a simple language with a complex compiler.
 Functional programming is fundamentally well suited to
