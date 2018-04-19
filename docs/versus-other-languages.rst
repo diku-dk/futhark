@@ -14,7 +14,7 @@ members of the ML familiy.  While Futhark does add a few small
 conveniences (built-in array types) and one complicated and unusual
 feature (in-place updates via uniqueness types, see
 :ref:`in-place-updates`), a programmer familiar with a common
-functional language should be able to deduce easily the meaning of a
+functional language should be able to easily understand the meaning of a
 Futhark program, and quickly start writing their own programs.  To
 speed up this process, we describe, in the following, some of the various
 quirks and unexpected limitations imposed by Futhark.  It is
@@ -65,7 +65,7 @@ or anything of the sort.
 Evaluation is *eager* or *call-by-value*, like most non-Haskell
 languages.  However, there is no defined evaluation order.
 Furthermore, the Futhark compiler is permitted to turn non-terminating
-programs into terminating programms, for example by removing dead code
+programs into terminating programs, for example by removing dead code
 that might cause an error.  Moreover, there is no way to
 handle errors within a Futhark program (no exceptions or similar);
 although errors are gracefully reported to whatever invokes the
