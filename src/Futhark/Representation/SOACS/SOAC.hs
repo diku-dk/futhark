@@ -521,7 +521,7 @@ typeCheckScanomapRedomap size outerfun innerfun accexps arrexps = do
   TC.require [Prim int32] size
   arrargs <- TC.checkSOACArrayArgs size arrexps
   accargs <- mapM TC.checkArg accexps
-  TC.checkLambda innerfun $ map TC.noArgAliases accargs ++ arrargs
+  TC.checkLambda innerfun arrargs
   let innerRetType = lambdaReturnType innerfun
       innerAccType = take (length accexps) innerRetType
       asArg t = (t, mempty)

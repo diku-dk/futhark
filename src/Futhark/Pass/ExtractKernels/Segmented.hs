@@ -104,8 +104,6 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
 
   chunk_fold_lam <- chunkLambda chunk_pat nes fold_lam
 
-  -- kernliseLambda intializes the value of the merge pattern for the reduction
-  -- to the neutral element.
   kern_chunk_fold_lam <- kerneliseLambda nes chunk_fold_lam
 
   let chunk_red_pat = Pattern [] $ take num_redres $ patternValueElements chunk_pat
@@ -856,7 +854,7 @@ regularSegmentedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                      -> [(VName, SubExp)] -> [KernelInput]
                      -> [SubExp] -> [VName]
                      -> m ()
-regularSegmentedScan segment_size pat w lam fold_lam ispace inps nes arrs = do
+regularSegmentedScan segment_size pat w lam map_lam ispace inps nes arrs = do
   flags_i <- newVName "flags_i"
 
   unused_flag_array <- newVName "unused_flag_array"
@@ -873,12 +871,18 @@ regularSegmentedScan segment_size pat w lam fold_lam ispace inps nes arrs = do
   flags <- letExp "flags" $ Op mapk
 
   lam' <- addFlagToLambda nes lam
-  fold_lam' <- addFlagToLambda nes fold_lam
+
+  flag_p <- newParam "flag" $ Prim Bool
+  let map_lam' = map_lam { lambdaParams = flag_p : lambdaParams map_lam
+                         , lambdaBody = (lambdaBody map_lam)
+                           { bodyResult = Var (paramName flag_p) : bodyResult (lambdaBody map_lam) }
+                         , lambdaReturnType = Prim Bool : lambdaReturnType map_lam
+                         }
 
   let pat' = pat { patternValueElements = PatElem unused_flag_array
                                           (arrayOf (Prim Bool) (Shape [w]) NoUniqueness) :
                                           patternValueElements pat
                  }
-  void $ blockedScan pat' w lam' fold_lam' segment_size ispace inps (false:nes) (flags:arrs)
+  void $ blockedScan pat' w lam' map_lam' segment_size ispace inps (false:nes) (flags:arrs)
   where zero = constant (0 :: Int32)
         false = constant False

@@ -55,13 +55,11 @@ redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
                          , [VName])
                       -> m (Stm lore, Stm lore)
 redomapToMapAndReduce (Pattern [] patelems)
-                      (w, comm, redlam, redmap_lam, accs, arrs) = do
-  ((map_pat, newmap_lam), (red_pat, red_args)) <-
-    splitScanOrRedomap patelems w redmap_lam accs
-  let map_bnd = mkLet [] map_pat $
-                Op $ Map w newmap_lam arrs
-      red_bnd = Let red_pat (defAux ()) $
-                Op $ Reduce w comm redlam red_args
+                      (w, comm, redlam, map_lam, accs, arrs) = do
+  (map_pat, red_pat, red_args) <-
+    splitScanOrRedomap patelems w map_lam accs
+  let map_bnd = mkLet [] map_pat $ Op $ Map w map_lam arrs
+      red_bnd = Let red_pat (defAux ()) $ Op $ Reduce w comm redlam red_args
   return (map_bnd, red_bnd)
 redomapToMapAndReduce _ _ =
   error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
@@ -75,13 +73,11 @@ scanomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
                          , [VName])
                       -> m (Stm lore, Stm lore)
 scanomapToMapAndReduce (Pattern [] patelems)
-                      (w, scanlam, scanmap_lam, accs, arrs) = do
-  ((map_pat, newmap_lam), (scan_pat, scan_args)) <-
-    splitScanOrRedomap patelems w scanmap_lam accs
-  let map_bnd = mkLet [] map_pat $
-                Op $ Map w newmap_lam arrs
-      scan_bnd = Let scan_pat (defAux ()) $
-                 Op $ Scan w scanlam scan_args
+                      (w, scanlam, map_lam, accs, arrs) = do
+  (map_pat, scan_pat, scan_args) <-
+    splitScanOrRedomap patelems w map_lam accs
+  let map_bnd = mkLet [] map_pat $ Op $ Map w map_lam arrs
+      scan_bnd = Let scan_pat (defAux ()) $ Op $ Scan w scanlam scan_args
   return (map_bnd, scan_bnd)
 scanomapToMapAndReduce _ _ =
   error "scanomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
@@ -90,31 +86,19 @@ splitScanOrRedomap :: (Typed attr, MonadFreshNames m,
                        Bindable lore) =>
                       [PatElemT attr]
                    -> SubExp -> LambdaT lore -> [SubExp]
-                   -> m (([Ident], LambdaT lore),
-                         (PatternT attr, [(SubExp, VName)]))
-splitScanOrRedomap patelems w redmap_lam accs = do
+                   -> m ([Ident], PatternT attr, [(SubExp, VName)])
+splitScanOrRedomap patelems w map_lam accs = do
   let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
-      (acc_ts, _arr_ts) = splitAt (length accs) $ lambdaReturnType redmap_lam
+      (acc_ts, _arr_ts) = splitAt (length accs) $ lambdaReturnType map_lam
   map_accpat <- zipWithM accMapPatElem acc_patelems acc_ts
   map_arrpat <- mapM arrMapPatElem arr_patelems
   let map_pat = map_accpat ++ map_arrpat
       red_args = zip accs $ map identName map_accpat
-  return ((map_pat, newmap_lam),
-          (Pattern [] acc_patelems, red_args))
+  return (map_pat, Pattern [] acc_patelems, red_args)
   where
     accMapPatElem pe acc_t =
       newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w
     arrMapPatElem = return . patElemIdent
-
-    newmap_lam =
-      let tobnd = take (length accs) $ map paramIdent $ lambdaParams redmap_lam
-          params' = drop (length accs) $ lambdaParams redmap_lam
-          bndaccs = zipWith (\i acc -> mkLet [] [i] (BasicOp $ SubExp acc))
-                            tobnd accs
-          body = lambdaBody redmap_lam
-          bnds' = stmsFromList bndaccs <> bodyStms body
-          body' = body {bodyStms = bnds'}
-      in redmap_lam { lambdaBody = body', lambdaParams = params' }
 
 sequentialStreamWholeArrayStms :: Bindable lore =>
                                   SubExp -> [SubExp]
