@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * When defining a module type, a module of the same name is no
+    longer defined (#538).
+
 ### Fixed
 
   * Better type inference for `rearrange` and `rotate`.
