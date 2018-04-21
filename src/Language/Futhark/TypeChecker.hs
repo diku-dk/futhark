@@ -247,23 +247,10 @@ checkSigBind (SigBind name e doc loc) = do
   (env, e') <- checkSigExp e
   bindSpaced [(Signature, name)] $ do
     name' <- checkName Signature name loc
-    -- As a small convenience(?), binding a signature also implicitly
-    -- binds a structure of the same name, which contains the type
-    -- abbreviations in the signature.
-    let sigmod = typeAbbrEnvFromSig env
     return (mempty { envSigTable = M.singleton name' env
-                   , envModTable = M.singleton name' $ ModEnv sigmod
-                   , envNameMap = M.fromList [((Signature, name), qualName name'),
-                                               ((Term, name), qualName name')]
+                   , envNameMap = M.singleton (Signature, name) (qualName name')
                    },
             SigBind name' e' doc loc)
-  where typeAbbrEnvFromSig (MTy _ (ModEnv env)) =
-          let types = envTypeAbbrs env
-              names = M.fromList $ map nameMapping $ M.toList types
-          in mempty { envNameMap = names
-                    , envTypeTable = types }
-        typeAbbrEnvFromSig _ = mempty
-        nameMapping (v, _) = ((Type, baseName v), qualName v)
 
 checkModExp :: ModExpBase NoInfo Name -> TypeM (MTy, ModExpBase Info VName)
 checkModExp (ModParens e loc) = do
