@@ -3,7 +3,7 @@
 -- requires a little more context to track uniqueness and such.
 --
 -- Type inference is implemented through a variation of
--- Hindler-Milney.  The main complication is supporting the rich
+-- Hindley-Milner.  The main complication is supporting the rich
 -- number of built-in language constructs, as well as uniqueness
 -- types.  This is mostly done in an ad hoc way, and many programs
 -- will require the programmer to fall back on type annotations.
