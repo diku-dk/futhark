@@ -1791,7 +1791,7 @@ mustBeOneOf ts loc t = do
 linkVarToTypes :: SrcLoc -> VName -> [PrimType] -> TermTypeM ()
 linkVarToTypes loc vn ts = modifyConstraints $ M.insert vn $ Overloaded ts loc
 
-equalityType :: (ArrayDim dim, Pretty (ShapeDecl dim), Monoid as) =>
+equalityType :: (Pretty (ShapeDecl dim), Monoid as) =>
                 SrcLoc -> TypeBase dim as -> TermTypeM ()
 equalityType loc t = do
   unless (orderZero t) $
@@ -1816,7 +1816,7 @@ equalityType loc t = do
               typeError loc $ "Type " ++ pretty (baseString vn) ++
               " does not support equality."
 
-zeroOrderType :: (ArrayDim dim, Pretty (ShapeDecl dim), Monoid as) =>
+zeroOrderType :: (Pretty (ShapeDecl dim), Monoid as) =>
                  SrcLoc -> String -> TypeBase dim as -> TermTypeM ()
 zeroOrderType loc desc t = do
   unless (orderZero t) $
@@ -1839,8 +1839,7 @@ zeroOrderType loc desc t = do
               locStr ploc ++ " may be a function."
             _ -> return ()
 
-mustHaveField :: (ArrayDim dim, Pretty (ShapeDecl dim), Monoid as) =>
-                 SrcLoc -> Name -> TypeBase dim as -> TermTypeM (TypeBase dim as)
+mustHaveField :: SrcLoc -> Name -> TypeBase dim as -> TermTypeM (TypeBase dim as)
 mustHaveField loc l t = do
   constraints <- getConstraints
   l_type <- newTypeVar loc "t"
@@ -1865,7 +1864,7 @@ mustHaveField loc l t = do
     _ -> do unify loc (toStructural t) $ Record $ M.singleton l l_type'
             return l_type
 
-arrayOfM :: (ArrayDim dim, Pretty (ShapeDecl dim), Monoid as) =>
+arrayOfM :: (Pretty (ShapeDecl dim), Monoid as) =>
             SrcLoc
          -> TypeBase dim as -> ShapeDecl dim -> Uniqueness
          -> TermTypeM (TypeBase dim as)
@@ -1878,7 +1877,7 @@ arrayOfM loc t shape u = do
 -- | Perform substitutions of instantiated variables on the type
 -- annotations (including the instance lists) of an expression, or
 -- something else.
-updateExpTypes :: (ASTMappable e, Show e) => e -> TermTypeM e
+updateExpTypes :: ASTMappable e => e -> TermTypeM e
 updateExpTypes e = do
   substs <-  constraintSubsts <$> getConstraints
   let tv = ASTMapper { mapOnExp         = astMap tv

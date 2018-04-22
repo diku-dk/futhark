@@ -39,15 +39,13 @@ substituteIndices substs bnds =
   runBinderT (substituteIndicesInStms substs bnds) types
   where types = typeEnvFromSubstitutions substs
 
-substituteIndicesInStms :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
-                             LocalScope (Lore m) m) =>
+substituteIndicesInStms :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m)) =>
                            IndexSubstitutions (LetAttr (Lore m))
                         -> Stms (Lore m)
                         -> m (IndexSubstitutions (LetAttr (Lore m)))
 substituteIndicesInStms = foldM substituteIndicesInStm
 
-substituteIndicesInStm :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
-                            LocalScope (Lore m) m) =>
+substituteIndicesInStm :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m)) =>
                           IndexSubstitutions (LetAttr (Lore m))
                        -> Stm (Lore m)
                        -> m (IndexSubstitutions (LetAttr (Lore m)))
@@ -57,8 +55,7 @@ substituteIndicesInStm substs (Let pat lore e) = do
   addStm $ Let pat' lore e'
   return substs'
 
-substituteIndicesInPattern :: (MonadBinder m, SetType attr,
-                               LetAttr (Lore m) ~ attr) =>
+substituteIndicesInPattern :: (MonadBinder m, LetAttr (Lore m) ~ attr) =>
                               IndexSubstitutions (LetAttr (Lore m))
                            -> PatternT attr
                            -> m (IndexSubstitutions (LetAttr (Lore m)), PatternT attr)
@@ -69,7 +66,6 @@ substituteIndicesInPattern substs pat = do
   where sub substs' patElem = return (substs', patElem)
 
 substituteIndicesInExp :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
-                           LocalScope (Lore m) m,
                            LetAttr (Lore m) ~ attr) =>
                           IndexSubstitutions (LetAttr (Lore m))
                        -> Exp (Lore m)
@@ -119,8 +115,7 @@ substituteIndicesInVar substs v
   | otherwise =
     return v
 
-substituteIndicesInBody :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
-                            LocalScope (Lore m) m) =>
+substituteIndicesInBody :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m)) =>
                            IndexSubstitutions (LetAttr (Lore m))
                         -> Body (Lore m)
                         -> m (Body (Lore m))

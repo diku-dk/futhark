@@ -34,8 +34,7 @@ newtype FindM lore a = FindM { unFindM :: RWS () PrimExps CurrentTypes a }
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 -- Find/construct all 'PrimExp's in a function definition.

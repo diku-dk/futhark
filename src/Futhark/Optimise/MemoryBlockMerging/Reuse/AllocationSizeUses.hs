@@ -42,8 +42,7 @@ newtype FindM lore a = FindM { unFindM :: RWS SizeVars
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 addDeclarations :: Names -> FindM lore ()
@@ -74,13 +73,11 @@ findSizeUsesFunDef fundef =
       res = snd $ evalRWS m size_vars' S.empty
   in res
 
-lookInFParam :: LoreConstraints lore =>
-                FParam lore -> FindM lore ()
+lookInFParam :: FParam lore -> FindM lore ()
 lookInFParam (Param x _) =
   lookAtNewDecls $ S.singleton x
 
-lookInLParam :: LoreConstraints lore =>
-                LParam lore -> FindM lore ()
+lookInLParam :: LParam lore -> FindM lore ()
 lookInLParam (Param x _) =
   lookAtNewDecls $ S.singleton x
 
@@ -120,8 +117,7 @@ lookInLambda (Lambda params body _) = do
   forM_ params lookInLParam
   lookInBody body
 
-lookAtNewDecls :: LoreConstraints lore =>
-                  Names -> FindM lore ()
+lookAtNewDecls :: Names -> FindM lore ()
 lookAtNewDecls new_decls = do
   all_size_vars <- ask
   declarations_so_far <- get

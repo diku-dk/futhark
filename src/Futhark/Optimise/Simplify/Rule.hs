@@ -88,7 +88,7 @@ instance (Attributes lore, BinderOps lore) => MonadBinder (RuleM lore) where
 -- list of new bindings.  Even if the action fail, there may still be
 -- a monadic effect - particularly, the name source may have been
 -- modified.
-simplify :: (MonadFreshNames m, HasScope lore m, BinderOps lore) =>
+simplify :: (MonadFreshNames m, HasScope lore m) =>
             RuleM lore a
          -> m (Maybe (a, Stms lore))
 simplify (RuleM m) = do

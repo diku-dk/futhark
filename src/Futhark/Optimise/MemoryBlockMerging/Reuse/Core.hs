@@ -114,8 +114,7 @@ newtype FindM lore a = FindM { unFindM :: RWS Context () Current a }
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 -- Lookup the memory block statically associated with a variable.
@@ -150,25 +149,21 @@ lookupSpace mem =
   <$> asks ctxSizes
 
 -- Record that the existing old_mem now also "is the same as" new_mem.
-insertUse :: LoreConstraints lore =>
-             VName -> VName -> FindM lore ()
+insertUse :: VName -> VName -> FindM lore ()
 insertUse old_mem new_mem =
   modify $ \cur -> cur { curUses = insertOrUpdate old_mem new_mem $ curUses cur }
 
-recordMemMapping :: LoreConstraints lore =>
-                    VName -> MemoryLoc -> FindM lore ()
+recordMemMapping :: VName -> MemoryLoc -> FindM lore ()
 recordMemMapping x mem =
   modify $ \cur -> cur { curVarToMemRes = M.insert x mem $ curVarToMemRes cur }
 
-recordMaxMapping :: LoreConstraints lore =>
-                    MName -> VName -> FindM lore ()
+recordMaxMapping :: MName -> VName -> FindM lore ()
 recordMaxMapping mem y =
   modify $ \cur -> cur { curVarToMaxExpRes = insertOrUpdate mem y
                                              $ curVarToMaxExpRes cur }
 
-recordKernelMaxMapping :: LoreConstraints lore =>
-  MName -> (VName, ((VName, VName),
-                    (VName, VName))) -> FindM lore ()
+recordKernelMaxMapping :: MName -> (VName, ((VName, VName), (VName, VName)))
+                       -> FindM lore ()
 recordKernelMaxMapping mem info =
   modify $ \cur -> cur { curKernelMaxSizedRes =
                            M.insert mem info $ curKernelMaxSizedRes cur
@@ -180,8 +175,7 @@ modifyCurEqAsserts f = modify $ \c -> c { curEqAsserts = f $ curEqAsserts c }
 -- Run a monad with a local copy of the uses.  We don't want any new uses in
 -- nested bodies to be available for merging into when we are back in the main
 -- body, but we do want updates to existing uses to be propagated.
-withLocalUses :: LoreConstraints lore =>
-                 FindM lore a -> FindM lore a
+withLocalUses :: FindM lore a -> FindM lore a
 withLocalUses m = do
   uses_before <- gets curUses
   res <- m
@@ -284,8 +278,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
 
 -- Check if a new array declaration x with a first use of the memory xmem can be
 -- set to use a previously encountered memory block.
-handleNewArray :: LoreConstraints lore =>
-                  VName -> MName -> FindM lore ()
+handleNewArray :: VName -> MName -> FindM lore ()
 handleNewArray x xmem = do
   interferences <- asks ctxInterferences
   actual_vars <- lookupActualVars x
@@ -314,8 +307,7 @@ handleNewArray x xmem = do
 
   -- Is the size of the new memory block (xmem) equal to any of the memory
   -- blocks (used_mems) using an already used memory block?
-  let sizesMatch :: LoreConstraints lore =>
-                    MNames -> FindM lore Bool
+  let sizesMatch :: MNames -> FindM lore Bool
       sizesMatch used_mems = do
         ok_sizes <- mapM lookupSize $ S.toList used_mems
         new_size <- lookupSize xmem
@@ -348,8 +340,7 @@ handleNewArray x xmem = do
 
   -- In case sizes do not match: Is it possible to change the size of the target
   -- memory block to be a maximum of itself and the new memory block?
-  let sizesCanBeMaxed :: LoreConstraints lore =>
-                         MName -> FindM lore Bool
+  let sizesCanBeMaxed :: MName -> FindM lore Bool
       sizesCanBeMaxed kmem = do
         ksize <- lookupSize kmem
         xsize <- lookupSize xmem
@@ -362,10 +353,9 @@ handleNewArray x xmem = do
                       (M.lookup ksize' uses_before))
         return ok
 
-  let sizesCanBeMaxedKernelArray :: LoreConstraints lore =>
-        MName -> MNames ->
-        FindM lore (Maybe (VName, ((VName, VName),
-                                   (VName, VName))))
+  let sizesCanBeMaxedKernelArray :: MName -> MNames ->
+                                    FindM lore (Maybe (VName, ((VName, VName),
+                                                               (VName, VName))))
       sizesCanBeMaxedKernelArray kmem used_mems = do
         -- Let a kernel body have two indexed array creations result_0 and
         -- result_1 with the index functions
@@ -496,13 +486,11 @@ handleNewArray x xmem = do
                       $ maybe S.empty S.singleton $ M.lookup name_inner others
                 in runIdentity $ traverse (traverse loose_eq_map) ixfun
 
-  let sizesCanBeMaxedKernelArray' :: LoreConstraints lore =>
-                                    MName -> MNames -> FindM lore Bool
+  let sizesCanBeMaxedKernelArray' :: MName -> MNames -> FindM lore Bool
       sizesCanBeMaxedKernelArray' kmem used_mems =
         isJust <$> sizesCanBeMaxedKernelArray kmem used_mems
 
-  let noOtherUsesOfMemory :: LoreConstraints lore =>
-                             MName -> MNames -> FindM lore Bool
+  let noOtherUsesOfMemory :: MName -> MNames -> FindM lore Bool
       noOtherUsesOfMemory _kmem _used_mems =
         -- If the array in question 'x' is not the only array that uses the
         -- memory (ignoring aliasing), then do not perform memory reuse.  We
@@ -527,8 +515,7 @@ handleNewArray x xmem = do
         -- Or is it maybe something else that causes heston32 to segfault?
         isJust . subExpVar <$> lookupSize xmem
 
-  let sizesWorkOut :: LoreConstraints lore =>
-                      MName -> MNames -> FindM lore Bool
+  let sizesWorkOut :: MName -> MNames -> FindM lore Bool
       sizesWorkOut kmem used_mems =
         -- The size of an allocation is okay to reuse if it is the same as the
         -- current memory size, or if it can be changed to be the maximum size
@@ -632,7 +619,7 @@ ixFunHasIndex ixfun = case ixfun of
 -- be less conservative, for example by handling that different reshapes of the
 -- same array can describe the same offset and space, but do we have any tests
 -- or benchmarks where that occurs?
-ixFunsCompatible :: (Eq v, Show v) =>
+ixFunsCompatible :: Eq v =>
                     (MName, IxFun.IxFun (PrimExp v)) -> (MName, IxFun.IxFun (PrimExp v)) ->
                     Bool
 ixFunsCompatible (_mem0, ixfun0) (_mem1, ixfun1) =

@@ -955,8 +955,7 @@ matchExtBranchType rettype (Body _ stms res) = do
   matchExtReturns rettype res ts
   where stmscope = scopeOf stms
 
-matchExtReturns :: Checkable lore =>
-                   [ExtType] -> Result -> [Type] -> TypeM lore ()
+matchExtReturns :: [ExtType] -> Result -> [Type] -> TypeM lore ()
 matchExtReturns rettype res ts = do
   let problem :: TypeM lore a
       problem = bad $ TypeError $ unlines [ "Type annotation is"

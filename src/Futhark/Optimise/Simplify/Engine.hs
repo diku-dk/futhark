@@ -68,7 +68,6 @@ module Futhark.Optimise.Simplify.Engine
 import Control.Monad.Writer
 import Control.Monad.RWS.Strict
 import Data.Either
-import Data.Hashable
 import Data.List
 import Data.Maybe
 import qualified Data.Set as S
@@ -165,8 +164,7 @@ runSimpleM (SimpleM m) simpl env src =
   let (x, (src', b), _) = runRWS m (simpl, env) (src, False)
   in ((x, b), src')
 
-subSimpleM :: (SimplifiableLore lore,
-               MonadFreshNames m,
+subSimpleM :: (MonadFreshNames m,
                SameScope outerlore lore,
                ExpAttr outerlore ~ ExpAttr lore,
                BodyAttr outerlore ~ BodyAttr lore,
@@ -194,12 +192,11 @@ asksEngineEnv f = f <$> askEngineEnv
 askVtable :: SimpleM lore (ST.SymbolTable (Wise lore))
 askVtable = asksEngineEnv envVtable
 
-localVtable :: SimplifiableLore lore =>
-               (ST.SymbolTable (Wise lore) -> ST.SymbolTable (Wise lore))
+localVtable :: (ST.SymbolTable (Wise lore) -> ST.SymbolTable (Wise lore))
             -> SimpleM lore a -> SimpleM lore a
 localVtable f = local $ \(ops, env) -> (ops, env { envVtable = f $ envVtable env })
 
-collectCerts :: SimplifiableLore lore => SimpleM lore a -> SimpleM lore (a, Certificates)
+collectCerts :: SimpleM lore a -> SimpleM lore (a, Certificates)
 collectCerts m = pass $ do (x, cs) <- listen m
                            return ((x, cs), const mempty)
 
@@ -211,7 +208,7 @@ changed = modify $ \(src, _) -> (src, True)
 usedCerts :: Certificates -> SimpleM lore ()
 usedCerts = tell
 
-enterLoop :: SimplifiableLore lore => SimpleM lore a -> SimpleM lore a
+enterLoop :: SimpleM lore a -> SimpleM lore a
 enterLoop = localVtable ST.deepen
 
 bindFParams :: SimplifiableLore lore =>
@@ -400,7 +397,7 @@ expandUsage utable bnd = utable <> usageInStm bnd <> usageThroughAliases
           uses <- UT.lookup name utable
           return $ mconcat $ map (`UT.usage` uses) $ S.toList aliases
 
-intersects :: (Ord a, Hashable a) => S.Set a -> S.Set a -> Bool
+intersects :: Ord a => S.Set a -> S.Set a -> Bool
 intersects a b = not $ S.null $ a `S.intersection` b
 
 type BlockPred lore = UT.UsageTable -> Stm lore -> Bool
@@ -554,8 +551,7 @@ simplifyBody ds (Body _ bnds res) =
                          return (res', mempty)
 
 -- | Simplify a single 'Result'.
-simplifyResult :: SimplifiableLore lore =>
-                  [Diet] -> Result -> SimpleM lore (Result, UT.UsageTable)
+simplifyResult :: [Diet] -> Result -> SimpleM lore (Result, UT.UsageTable)
 simplifyResult ds es = do
   -- Use a special copy propagation function to avoid copy propagation
   -- when certificates are involved - there is nowhere to put them!
