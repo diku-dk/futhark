@@ -595,30 +595,23 @@ evalSOAC (Redomap w _ redfun foldfun accexp arrexps) = do
                  map (unitSlice 0) (drop 1 $ valueShape acc_arr)
   return $ accs++arrs
 
-evalSOAC (Scanomap w _ innerfun accexp arrexps) = do
+evalSOAC (Scanomap w scan_fun innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
-  if res_len == acc_len
-  then do (acc, vals) <- foldM foldfun (startaccs, []) =<< soacArrays w arrexps
-          arrays (map valueType acc) $ reverse vals
-  else do let startaccs'= (startaccs, [], replicate (res_len - acc_len) [])
-          (acc_res, vals,  arr_res) <- foldM foldfun' startaccs' =<<
-                                       soacArrays w arrexps
-          vals' <- arrays (map valueType acc_res) $ reverse vals
-          arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
-          return $ vals' ++ arr_res_fut
+  let startaccs'= (startaccs, [], replicate (res_len - acc_len) [])
+  (acc_res, vals,  arr_res) <- foldM foldfun startaccs' =<<
+                               soacArrays w arrexps
+  vals' <- arrays (map valueType acc_res) $ reverse vals
+  arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
+  return $ vals' ++ arr_res_fut
     where
         lam_ret_tp     = lambdaReturnType innerfun
         res_len        = length lam_ret_tp
         acc_len        = length accexp
         lam_ret_arr_tp = drop acc_len lam_ret_tp
-        foldfun  (acc, l) x = do
-            acc' <- applyLambda innerfun $ acc ++ x
-            return (acc', acc':l)
-        foldfun' (acc, l, arr) x = do
-            res_lam <- applyLambda innerfun $ acc ++ x
-            let res_acc = take acc_len res_lam
-                res_arr = drop acc_len res_lam
-                acc_arr = zipWith (:) res_arr arr
+        foldfun (acc, l, arr) x = do
+            (scan_res, res_arr) <- splitAt acc_len <$> applyLambda innerfun x
+            res_acc <- applyLambda scan_fun $ acc ++ scan_res
+            let acc_arr = zipWith (:) res_arr arr
             return (res_acc, res_acc:l, acc_arr)
 
 evalSOAC (Scatter w lam ivs dests) = do

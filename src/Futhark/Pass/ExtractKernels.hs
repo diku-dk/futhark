@@ -132,7 +132,7 @@
 --
 -- @
 -- redomap(op,
---         fn (acc,v) =>
+--         fn (v) =>
 --           map(f)
 --           map(g),
 --         e,a)
@@ -146,7 +146,7 @@
 --               map(f),
 --               a)
 -- redomap(op,
---         fn (acc,v,dist) =>
+--         fn (v,dist) =>
 --           map(g),
 --         e,a,b)
 -- @
@@ -327,9 +327,9 @@ transformStm (Let res_pat (StmAux cs _) (Op (Reduce w comm red_fun red_input)))
 
 transformStm (Let pat (StmAux cs _) (Op (Reduce w comm red_fun red_input))) = do
   red_fun_sequential <- Kernelise.transformLambda red_fun
-  red_fun_sequential' <- renameLambda red_fun_sequential
+  map_lam <- mkIdentityLambda $ lambdaReturnType red_fun
   fmap (certify cs) <$>
-    blockedReduction pat w comm' red_fun_sequential' red_fun_sequential [] nes arrs
+    blockedReduction pat w comm' red_fun_sequential map_lam [] nes arrs
   where (nes, arrs) = unzip red_input
         comm' | commutativeLambda red_fun = Commutative
               | otherwise                 = comm
@@ -342,9 +342,9 @@ transformStm (Let res_pat (StmAux cs _) (Op (Scan w scan_fun scan_input)))
 
 transformStm (Let pat (StmAux cs _) (Op (Scan w fun input))) = do
   fun_sequential <- Kernelise.transformLambda fun
-  fun_sequential_renamed <- renameLambda fun_sequential
+  map_lam <- mkIdentityLambda $ lambdaReturnType fun_sequential
   runBinder_ $ certifying cs $
-    blockedScan pat w fun_sequential fun_sequential_renamed (intConst Int32 1) [] [] nes arrs
+    blockedScan pat w fun_sequential map_lam (intConst Int32 1) [] [] nes arrs
   where (nes, arrs) = unzip input
 
 -- Streams can be handled in two different ways - either we
@@ -930,7 +930,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) acc =
 --
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scanomap w lam fold_lam nes arrs))) acc =
+maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scanomap w lam map_lam nes arrs))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -938,10 +938,10 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scanomap w lam fold_lam nes a
           -- it to the kernel nest.
           localScope (typeEnvFromKernelAcc acc') $ do
           nest' <- expandKernelNest pat_unused nest
+          map_lam' <- Kernelise.transformLambda map_lam
           lam' <- Kernelise.transformLambda lam
-          fold_lam' <- Kernelise.transformLambda fold_lam
           localScope (typeEnvFromKernelAcc acc') $
-            segmentedScanomapKernel nest' perm w lam' fold_lam' nes arrs >>=
+            segmentedScanomapKernel nest' perm w lam' map_lam' nes arrs >>=
             kernelOrNot cs bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
@@ -951,7 +951,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scanomap w lam fold_lam nes a
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Redomap w comm lam foldlam nes arrs))) acc | incrementalFlattening =
+maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Redomap w comm lam map_lam nes arrs))) acc | incrementalFlattening =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -960,8 +960,8 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Redomap w comm lam foldlam ne
           localScope (typeEnvFromKernelAcc acc') $ do
           nest' <- expandKernelNest pat_unused nest
           lam' <- Kernelise.transformLambda lam
-          foldlam' <- Kernelise.transformLambda foldlam
-          regularSegmentedRedomapKernel nest' perm w comm' lam' foldlam' nes arrs >>=
+          map_lam' <- Kernelise.transformLambda map_lam
+          regularSegmentedRedomapKernel nest' perm w comm' lam' map_lam' nes arrs >>=
             kernelOrNot cs bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
@@ -981,8 +981,8 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Reduce w comm lam input))) ac
           let (nes, arrs) = unzip input
           nest' <- expandKernelNest pat_unused nest
           lam' <- Kernelise.transformLambda lam
-          foldlam' <- renameLambda lam'
-          regularSegmentedRedomapKernel nest' perm w comm' lam' foldlam' nes arrs >>=
+          map_lam <- mkIdentityLambda $ lambdaReturnType lam'
+          regularSegmentedRedomapKernel nest' perm w comm' lam' map_lam nes arrs >>=
             kernelOrNot cs bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
@@ -991,8 +991,8 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Reduce w comm lam input))) ac
 
 maybeDistributeStm (Let pat aux (Op (Scan w lam input))) acc = do
   let (nes, arrs) = unzip input
-  lam_renamed <- renameLambda lam
-  let bnd = Let pat aux $ Op $ Scanomap w lam lam_renamed nes arrs
+  map_lam <- mkIdentityLambda $ lambdaReturnType lam
+  let bnd = Let pat aux $ Op $ Scanomap w lam map_lam nes arrs
   maybeDistributeStm bnd acc
 
 maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d:ds)) v))) acc
@@ -1220,12 +1220,12 @@ segmentedScanomapKernel :: KernelNest
                         -> InKernelLambda -> InKernelLambda
                         -> [SubExp] -> [VName]
                         -> KernelM (Maybe KernelsStms)
-segmentedScanomapKernel nest perm segment_size lam fold_lam nes arrs =
+segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs =
   isSegmentedOp nest perm segment_size
-  (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
+  (lambdaReturnType map_lam) (freeInLambda lam) (freeInLambda map_lam) nes arrs $
   \pat flat_pat _num_segments total_num_elements ispace inps nes' _ arrs' -> do
     regularSegmentedScan segment_size flat_pat total_num_elements
-      lam fold_lam ispace inps nes' arrs'
+      lam map_lam ispace inps nes' arrs'
 
     forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
       \(dst_pat_elem, flat) -> do
@@ -1238,10 +1238,11 @@ regularSegmentedRedomapKernel :: KernelNest
                               -> SubExp -> Commutativity
                               -> InKernelLambda -> InKernelLambda -> [SubExp] -> [VName]
                               -> KernelM (Maybe KernelsStms)
-regularSegmentedRedomapKernel nest perm segment_size comm lam fold_lam nes arrs =
+regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
   isSegmentedOp nest perm segment_size
-    (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
-    \pat flat_pat num_segments total_num_elements ispace inps nes' _ arrs' ->
+    (lambdaReturnType map_lam) (freeInLambda lam) (freeInLambda map_lam) nes arrs $
+    \pat flat_pat num_segments total_num_elements ispace inps nes' _ arrs' -> do
+      fold_lam <- composeLambda lam map_lam
       regularSegmentedRedomap
         segment_size num_segments (kernelNestWidths nest)
         flat_pat pat total_num_elements comm lam fold_lam ispace inps nes' arrs'

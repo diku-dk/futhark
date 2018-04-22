@@ -140,7 +140,7 @@ transformSOAC pat (Scan width fun args) = do
   where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
-transformSOAC pat (Scanomap width _ fun accexps arrexps) = do
+transformSOAC pat (Scanomap width scan_fun innerfun accexps arrexps) = do
   i <- newVName "i"
   -- Name accumulators, do something with the corresponding expressions
   (acc, initacc, _) <- newFold "scanomap" (zip accexps accts) arrexps
@@ -155,6 +155,9 @@ transformSOAC pat (Scanomap width _ fun accexps arrexps) = do
   let arr_names = map identName arr
       map_names = map identName mapoutarrs
       merge = loopMerge (acc++arr++mapoutarrs) (initacc++map Var initarr ++ map Var initmaparrs)
+
+  fun <- composeLambda scan_fun innerfun
+
   loopbody <- insertStmsM $ localScope (scopeOfFParams $ map fst merge) $ do
     -- Bind function parameters to arguments.
     x <- bindLambda fun . (map (BasicOp . SubExp . Var . identName) acc ++) =<<
@@ -169,29 +172,33 @@ transformSOAC pat (Scanomap width _ fun accexps arrexps) = do
     return $ resultBody $ rowcopies ++ map Var dests ++ map Var mapdests
   pat' <- discardPattern (map identType acc) pat
   letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
-  where accts = map paramType $ take (length accexps) $  lambdaParams fun
+  where accts = lambdaReturnType scan_fun
         scan_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
-                     | t <- take (length accexps) (lambdaReturnType fun)]
+                     | t <- accts ]
         map_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
-                     | t <- drop (length accexps) (lambdaReturnType fun)]
+                     | t <- drop (length accts) $ lambdaReturnType innerfun ]
 
 
-transformSOAC pat (Redomap width _ _ innerfun accexps arrexps) = do
+transformSOAC pat (Redomap width _ red_fun innerfun accexps arrexps) = do
   let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun
   arr_ts <- mapM lookupType arrexps
   maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness
                          | t <- map_arr_tps ]
-  let innerfun' = Alias.analyseLambda innerfun
-      consumed = consumedInBody $ lambdaBody innerfun'
+
+  -- Inject red_fun into innerfun.
+  innerfun' <- composeLambda red_fun innerfun
+
+  let innerfun'' = Alias.analyseLambda innerfun'
+      consumed = consumedInBody $ lambdaBody innerfun''
   arrexps' <- forM (zip
-                    (drop (length accexps) (lambdaParams innerfun))
+                    (drop (length accexps) (lambdaParams innerfun''))
                     arrexps) $ \(p,a) ->
     if paramName p `S.member` consumed then
       letExp (baseString a ++ "_fot_redomap_copy") $ BasicOp $ Copy a
     else return a
   pat' <- discardPattern arr_ts pat
   letBind_ pat' =<<
-    doLoopMapAccumL width innerfun' accexps arrexps' maparrs
+    doLoopMapAccumL width innerfun'' accexps arrexps' maparrs
 
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!

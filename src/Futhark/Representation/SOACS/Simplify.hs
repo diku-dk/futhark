@@ -284,10 +284,9 @@ removeUnusedSOACInput _ pat _ (Redomap w comm redfun mapfun nes arrs)
   | (used,unused) <- partition usedInput params_and_arrs,
     not (null unused) = do
       let (used_params, used_arrs) = unzip used
-          mapfun' =
-            mapfun { lambdaParams = take (length nes) (lambdaParams mapfun) ++ used_params }
+          mapfun' = mapfun { lambdaParams = used_params }
       letBind_ pat $ Op $ Redomap w comm redfun mapfun' nes used_arrs
-  where params_and_arrs = zip (drop (length nes) $ lambdaParams mapfun) arrs
+  where params_and_arrs = zip (lambdaParams mapfun) arrs
         used_in_body = freeInBody $ lambdaBody mapfun
         usedInput (param, _) = paramName param `S.member` used_in_body
 removeUnusedSOACInput _ _ _ _ = cannotSimplify
@@ -348,7 +347,7 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Redomap w comm redlam maplam ne
         unzip3 $ filter (\(_,x,_) -> paramName x `S.member` necessary) $
         zip3 (patternElements pat) redlam_params nes
 
-  maplam' <- removeLambdaResults alive_mask <$> fixLambdaParams maplam dead_fix
+  let maplam' = removeLambdaResults alive_mask maplam
   redlam' <- removeLambdaResults alive_mask <$> fixLambdaParams redlam (dead_fix++dead_fix)
 
   certifying cs $ letBind_ (Pattern [] used_pes) $
@@ -363,13 +362,14 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Redomap w comm redlam maplam ne
                     (zip redlam_params $ redlam_res <> redlam_res) redlam_deps
         alive_mask = map ((`S.member` necessary) . paramName) redlam_params
 
-removeDeadReduction tables pat aux (Reduce w comm redlam inp) =
+removeDeadReduction tables pat aux (Reduce w comm redlam inp) = do
   -- We handle reductions by converting them to Redomap.  We rename
   -- the result if it succeeds, because we are just duplicating the
   -- lambda here.
+  map_lam <- mkIdentityLambda $ lambdaReturnType redlam
   mapM_ (addStm <=< renameStm) =<<
-  collectStms_ (removeDeadReduction tables pat aux $
-                Redomap w comm redlam redlam nes arrs)
+    collectStms_ (removeDeadReduction tables pat aux $
+                  Redomap w comm redlam map_lam nes arrs)
   where (nes, arrs) = unzip inp
 
 removeDeadReduction _ _ _ _ = cannotSimplify
@@ -428,8 +428,9 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
 fuseConcatScatter _ _ _ _ = cannotSimplify
 
 simplifyClosedFormRedomap :: TopDownRuleOp (Wise SOACS)
-simplifyClosedFormRedomap vtable pat _ (Redomap _ _ _ innerfun acc arr) =
-  foldClosedForm (`ST.lookupExp` vtable) pat innerfun acc arr
+simplifyClosedFormRedomap vtable pat _ (Redomap _ _ outerfun innerfun acc arr)
+  | isIdentityLambda innerfun =
+    foldClosedForm (`ST.lookupExp` vtable) pat outerfun acc arr
 simplifyClosedFormRedomap _ _ _ _ = cannotSimplify
 
 simplifyClosedFormReduce :: TopDownRuleOp (Wise SOACS)

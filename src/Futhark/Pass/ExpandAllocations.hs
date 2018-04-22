@@ -419,10 +419,9 @@ sliceKernelSizes sizes kspace kbody = do
     (zs, stms) <- localScope (scopeOfLParams params <>
                               scopeOfKernelSpace kspace) $ collectStms $ do
       mapM_ addStm $ kernelBodyStms kbody'
-      forM (zip params sizes) $ \(p, se) ->
-        letSubExp "z" $ BasicOp $ BinOp (SMax Int64) (Var (paramName p)) se
+      return sizes
     localScope (scopeOfKernelSpace kspace) $
-      Kernels.simplifyLambda (Lambda params (Body () stms zs) i64s) []
+      Kernels.simplifyLambda (Lambda mempty (Body () stms zs) i64s) []
 
   ((maxes_per_thread, size_sums), slice_stms) <- flip runBinderT kernels_scope $ do
     space_size <- letSubExp "space_size" =<<
