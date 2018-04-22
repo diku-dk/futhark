@@ -26,8 +26,7 @@ newtype FindM lore a = FindM { unFindM :: Writer Names a }
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 -- Find all the variables (both free and bound) that occur in a statement and
@@ -60,13 +59,11 @@ lookInExp = fullWalkExpM walker walker_kernel
           , walkOnKernelLParam = lookInLParam
           }
 
-lookInFParam :: LoreConstraints lore =>
-                FParam lore -> FindM lore ()
+lookInFParam :: FParam lore -> FindM lore ()
 lookInFParam (Param x _) =
   tell $ S.singleton x
 
-lookInLParam :: LoreConstraints lore =>
-                LParam lore -> FindM lore ()
+lookInLParam :: LParam lore -> FindM lore ()
 lookInLParam (Param x _) =
   tell $ S.singleton x
 

@@ -562,7 +562,7 @@ matchBranchReturnType rettype (Body _ stms res) = do
   ts <- runReaderT (mapM subExpMemInfo res) $ removeScopeAliases (scope <> scopeOf stms)
   matchReturnType rettype res ts
 
-matchReturnType :: (ExplicitMemorish lore, PP.Pretty u) =>
+matchReturnType :: PP.Pretty u =>
                    [MemInfo ExtSize u MemReturn]
                 -> [SubExp]
                 -> [MemInfo SubExp NoUniqueness MemBind]
@@ -676,7 +676,7 @@ nameInfoToMemInfo info =
     LetInfo summary -> summary
     IndexInfo it -> MemPrim $ IntType it
 
-lookupMemInfo :: (HasScope lore m, Monad m, ExplicitMemorish lore) =>
+lookupMemInfo :: (HasScope lore m, ExplicitMemorish lore) =>
                   VName -> m (MemInfo SubExp NoUniqueness MemBind)
 lookupMemInfo = fmap nameInfoToMemInfo . lookupInfo
 
@@ -695,7 +695,7 @@ lookupArraySummary name = do
     _ ->
       fail $ "Variable " ++ pretty name ++ " does not look like an array."
 
-lookupMemSize :: (ExplicitMemorish lore, HasScope lore m, Monad m) =>
+lookupMemSize :: (HasScope lore m, Monad m) =>
                  VName -> m SubExp
 lookupMemSize v = do
   t <- lookupType v

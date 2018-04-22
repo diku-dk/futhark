@@ -98,8 +98,7 @@ newtype FindM lore a = FindM { unFindM :: RWS Context () Current a }
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 modifyCurCoalescedIntos :: (CoalescedIntos -> CoalescedIntos) -> FindM lore ()
@@ -158,8 +157,7 @@ lookupActualVars var = do
 -- Lookup the memory block currenty associated with a variable.  In most cases
 -- (maybe all) this could probably replace 'lookupVarMem', though it would not
 -- always be necessary.
-lookupCurrentVarMem :: LoreConstraints lore =>
-                       VName -> FindM lore (Maybe VName)
+lookupCurrentVarMem :: VName -> FindM lore (Maybe VName)
 lookupCurrentVarMem var = do
         -- Current result...
         mem_cur <- M.lookup var . curMemsCoalesced <$> asks ctxCurSnapshot
@@ -186,8 +184,7 @@ withMemAliases mem =
 data Bindage = BindInPlace VName (Slice SubExp)
              | BindVar
 
-recordOptimisticCoalescing :: LoreConstraints lore =>
-                              VName -> PrimExp VName
+recordOptimisticCoalescing :: VName -> PrimExp VName
                            -> [Slice (PrimExp VName)]
                            -> VName -> MemoryLoc -> Bindage -> FindM lore ()
 recordOptimisticCoalescing src offset ixfun_slices dst dst_memloc bindage = do
@@ -330,8 +327,7 @@ offsetIndexDWIM n_ignore_initial ixfun offset =
       _ -> Nothing
   _ -> Nothing
 
-tryCoalesce :: LoreConstraints lore =>
-               VName -> [Slice (PrimExp VName)] -> Bindage ->
+tryCoalesce :: VName -> [Slice (PrimExp VName)] -> Bindage ->
                VName -> PrimExp VName -> FindM lore ()
 tryCoalesce dst ixfun_slices bindage src offset = do
   mem_dst <- lookupVarMem dst
@@ -453,8 +449,7 @@ tryCoalesce dst ixfun_slices bindage src offset = do
           src_local offset_local ixfun_slices_local
           dst dst_memloc bindage
 
-canBeCoalesced :: LoreConstraints lore =>
-                  VName -> VName -> ExpMem.IxFun -> FindM lore Bool
+canBeCoalesced :: VName -> VName -> ExpMem.IxFun -> FindM lore Bool
 canBeCoalesced dst src ixfun = do
   mem_dst <- lookupVarMem dst
   mem_src <- lookupVarMem src
@@ -518,8 +513,7 @@ safetyCond2 src mem_dst = do
   let res = S.member (memSrcName mem_dst) allocs_before_src
   return res
 
-safetyCond3 :: LoreConstraints lore =>
-               VName -> VName -> MemorySrc -> FindM lore Bool
+safetyCond3 :: VName -> VName -> MemorySrc -> FindM lore Bool
 safetyCond3 src dst mem_dst = do
   fundef <- asks ctxFunDef
   let uses_after_src_vars = S.toList $ getVarUsesBetween fundef src dst
@@ -556,8 +550,7 @@ safetyCond5 mem_src ixfun = do
       res = all (`S.member` in_use_before_mem_src) $ S.toList used_vars
   return res
 
-safetyIf :: LoreConstraints lore =>
-            VName -> VName -> FindM lore Bool
+safetyIf :: VName -> VName -> FindM lore Bool
 safetyIf src dst = do
   -- Special handling: If src refers to an If expression, we need to check that
   -- not just is mem_dst not used after src and before dst, but neither is any

@@ -40,8 +40,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
 recordMapping :: MName -> MNames -> FindM lore ()
 recordMapping mem mems = tell [M.singleton mem (S.delete mem mems)]
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 lookupMems :: Names -> FindM lore MNames

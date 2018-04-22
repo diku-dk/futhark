@@ -34,8 +34,7 @@ newtype FindM lore a = FindM { unFindM :: Writer Exps a }
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 findExpsFunDef :: LoreConstraints lore =>

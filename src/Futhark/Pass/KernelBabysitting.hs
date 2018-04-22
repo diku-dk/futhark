@@ -172,7 +172,7 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
 -- Not a hashmap, as SubExp is not hashable.
 type Replacements = M.Map (VName, Slice SubExp) VName
 
-ensureCoalescedAccess :: (MonadBinder m, Lore m ~ Kernels) =>
+ensureCoalescedAccess :: MonadBinder m =>
                          ExpMap
                       -> [(VName,SubExp)]
                       -> SubExp

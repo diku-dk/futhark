@@ -250,8 +250,7 @@ bindingFParams :: [FParam (Aliases lore)]
                -> ForwardingM lore a
 bindingFParams = bindingParams FParamInfo
 
-bindingScope :: Constraints lore =>
-                Scope (Aliases lore)
+bindingScope :: Scope (Aliases lore)
              -> ForwardingM lore a
              -> ForwardingM lore a
 bindingScope scope = local $ \(TopDown n vtable d x y) ->

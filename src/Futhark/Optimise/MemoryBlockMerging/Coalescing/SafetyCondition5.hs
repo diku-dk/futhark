@@ -36,8 +36,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
                              ExtractKernelDefVars lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 findSafetyCondition5FunDef :: FunDef ExplicitMemory -> FirstUses
@@ -49,28 +48,23 @@ findSafetyCondition5FunDef fundef first_uses =
       res = snd $ evalRWS m first_uses S.empty
   in res
 
-lookInFParam :: LoreConstraints lore =>
-                FParam lore -> FindM lore ()
+lookInFParam :: FParam lore -> FindM lore ()
 lookInFParam (Param x _) =
   modify $ S.insert x
 
-lookInLParam :: LoreConstraints lore =>
-                LParam lore -> FindM lore ()
+lookInLParam :: LParam lore -> FindM lore ()
 lookInLParam (Param x _) =
   modify $ S.insert x
 
-lookInBody :: LoreConstraints lore =>
-              Body lore -> FindM lore ()
+lookInBody :: LoreConstraints lore => Body lore -> FindM lore ()
 lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
 
-lookInKernelBody :: LoreConstraints lore =>
-                    KernelBody lore -> FindM lore ()
+lookInKernelBody :: LoreConstraints lore => KernelBody lore -> FindM lore ()
 lookInKernelBody (KernelBody _ bnds _res) =
   mapM_ lookInStm bnds
 
-lookInStm :: LoreConstraints lore =>
-             Stm lore -> FindM lore ()
+lookInStm :: LoreConstraints lore => Stm lore -> FindM lore ()
 lookInStm stm@(Let _ _ e) = do
   let new_decls = newDeclarationsStm stm
 

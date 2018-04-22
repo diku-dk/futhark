@@ -56,8 +56,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
                              BodyAttr lore ~ (),
                              ExpAttr lore ~ ())
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 -- | Transform a function to use new memory blocks.
@@ -87,8 +86,7 @@ transformFunDefBody (Body () bnds res) = do
   res' <- transformFunDefBodyResult res
   return $ Body () (stmsFromList bnds') res'
 
-transformFunDefBodyResult :: LoreConstraints lore =>
-                             [SubExp] -> FindM lore [SubExp]
+transformFunDefBodyResult :: [SubExp] -> FindM lore [SubExp]
 transformFunDefBodyResult ses = do
   var_to_mem_orig <- asks ctxVarToMemOrig
   var_to_mem <- asks ctxVarToMem
@@ -352,8 +350,7 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
 
 -- Update the actual memory block referred to by a context (existential) memory
 -- block in a loop.
-transformMergeCtxParam :: LoreConstraints lore =>
-                          [(FParam ExplicitMemory, SubExp)] ->
+transformMergeCtxParam :: [(FParam ExplicitMemory, SubExp)] ->
                           (FParam ExplicitMemory, SubExp)
                        -> FindM lore (FParam ExplicitMemory, SubExp)
 transformMergeCtxParam mergevalparams (param@(Param ctxmem ExpMem.MemMem{}), mem) = do
@@ -373,15 +370,13 @@ transformMergeCtxParam mergevalparams (param@(Param ctxmem ExpMem.MemMem{}), mem
   return (param, mem')
 transformMergeCtxParam _ t = return t
 
-transformMergeValParam :: LoreConstraints lore =>
-                          (FParam ExplicitMemory, SubExp)
+transformMergeValParam :: (FParam ExplicitMemory, SubExp)
                        -> FindM lore (FParam ExplicitMemory, SubExp)
 transformMergeValParam (Param x membound, se) = do
   membound' <- newMemBound membound x
   return (Param x membound', se)
 
-transformPatValElem :: LoreConstraints lore =>
-                       PatElem ExplicitMemory -> FindM lore (PatElem ExplicitMemory)
+transformPatValElem :: PatElem ExplicitMemory -> FindM lore (PatElem ExplicitMemory)
 transformPatValElem (PatElem x membound) =
   PatElem x <$> newMemBound membound x
 

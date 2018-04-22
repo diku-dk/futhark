@@ -93,7 +93,7 @@ loopClosedForm pat merge i bound body = do
         mergenames = map paramName mergepat
         knownBnds = M.fromList $ zip mergenames mergeexp
 
-checkResults :: (Attributes lore, BinderOps lore) =>
+checkResults :: BinderOps lore =>
                 [VName]
              -> SubExp
              -> Names

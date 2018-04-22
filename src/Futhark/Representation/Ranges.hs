@@ -35,7 +35,6 @@ where
 import Control.Monad.Identity
 import Control.Monad.Reader
 import qualified Data.Set as S
-import Data.Hashable
 import Data.Monoid ((<>))
 import Data.Foldable
 
@@ -178,7 +177,7 @@ mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
         removeUnknownBound Nothing =
           Nothing
 
-intersects :: (Ord a, Hashable a) => S.Set a -> S.Set a -> Bool
+intersects :: Ord a => S.Set a -> S.Set a -> Bool
 intersects a b = not $ S.null $ a `S.intersection` b
 
 mkRangedLetStm :: (Attributes lore, CanBeRanged (Op lore)) =>

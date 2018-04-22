@@ -174,8 +174,7 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
-internalisedTypeSize :: E.ArrayDim dim =>
-                        E.TypeBase dim () -> InternaliseM Int
+internalisedTypeSize :: E.TypeBase dim () -> InternaliseM Int
 internalisedTypeSize = fmap length . internaliseType . E.removeShapeAnnotations
 
 -- | Transform an external value to a number of internal values.

@@ -63,7 +63,7 @@ iswim res_pat w scan_fun scan_input
 
 -- | Interchange Reduce With Inner Map. Tries to turn a @reduce(map)@ into a
 -- @map(reduce)
-irwim :: (MonadBinder m, Lore m ~ SOACS, LocalScope SOACS m) =>
+irwim :: (MonadBinder m, Lore m ~ SOACS) =>
          Pattern
       -> SubExp
       -> Commutativity -> Lambda

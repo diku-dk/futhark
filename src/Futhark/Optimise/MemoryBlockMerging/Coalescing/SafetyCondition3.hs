@@ -41,8 +41,7 @@ newtype FindM lore a = FindM { unFindM :: RWS Context () Current a }
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 modifyCurVars :: (Names -> Names) -> FindM lore ()

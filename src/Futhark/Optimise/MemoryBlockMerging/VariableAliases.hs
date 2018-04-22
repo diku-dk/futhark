@@ -36,8 +36,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
 recordMapping :: VName -> Names -> FindM lore ()
 recordMapping var names = tell [M.singleton var names]
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 -- | Find all variable aliases in a function definition.
