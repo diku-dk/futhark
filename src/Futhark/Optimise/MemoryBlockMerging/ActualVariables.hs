@@ -50,8 +50,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore,
                              LookInKernelExp lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 recordActuals :: VName -> Names -> FindM lore ()
@@ -74,18 +73,15 @@ findActualVariables var_mem_mappings first_uses fundef =
       actual_variables = fst $ execRWS m context M.empty
   in actual_variables
 
-lookInFParam :: LoreConstraints lore =>
-                FParam lore -> FindM lore ()
+lookInFParam :: FParam lore -> FindM lore ()
 lookInFParam (Param v _) =
   recordActuals v $ S.singleton v
 
-lookInLParam :: LoreConstraints lore =>
-                LParam lore -> FindM lore ()
+lookInLParam :: LParam lore -> FindM lore ()
 lookInLParam (Param v _) =
   recordActuals v $ S.singleton v
 
-lookInLambda :: LoreConstraints lore =>
-                Lambda lore -> FindM lore ()
+lookInLambda :: LoreConstraints lore => Lambda lore -> FindM lore ()
 lookInLambda (Lambda params body _) = do
   forM_ params lookInLParam
   lookInBody body

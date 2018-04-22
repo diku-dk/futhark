@@ -57,8 +57,7 @@ newtype FindM lore a = FindM { unFindM :: RWS Context LastUsesList Current a }
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 -- Find the memory blocks used or aliased by a variable.
@@ -138,8 +137,7 @@ commitOptimistic mem = do
     Just (x_lu, _) -> recordMapping x_lu mem
     Nothing -> return ()
 
-lookInFunDefFParam :: LoreConstraints lore =>
-                      FParam lore -> FindM lore ()
+lookInFunDefFParam :: FParam lore -> FindM lore ()
 lookInFunDefFParam (Param x _) = do
   first_uses_x <- lookupEmptyable x <$> asks ctxFirstUses
   modifyCurFirstUses $ S.union first_uses_x
@@ -249,8 +247,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           }
 
 -- Look in body results.
-lookInRes :: LoreConstraints lore =>
-             SubExp -> FindM lore ()
+lookInRes :: SubExp -> FindM lore ()
 lookInRes (Var v) = do
   exis <- asks ctxExistentials
   -- If v is a existential variable, there is no reason to record its last use,
@@ -270,8 +267,7 @@ lookInRes _ = return ()
 -- if we *read* from it.  If it only exists for *writing*, then we don't have to
 -- look at its memory, since whatever is there we overwrite, and so there cannot
 -- be any last *use*.
-freeExcludes :: LoreConstraints lore =>
-                Exp lore -> [VName]
+freeExcludes :: Exp lore -> [VName]
 freeExcludes e = case e of
   DoLoop _ _mergevalparams _ _ ->
     -- FIXME: If the returned memory block-associated mergevalparams do not come

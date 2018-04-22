@@ -95,7 +95,7 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (Repeat fun outer_shapes inner_shape) =
     ppr fun <> text "->repeat" <> parens (commasep (map ppr $ outer_shapes++ [inner_shape]))
 
-instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) where
+instance Substitute num => Substitute (IxFun num) where
   substituteNames substs = fmap $ substituteNames substs
 
 instance FreeIn num => FreeIn (IxFun num) where
@@ -123,7 +123,7 @@ instance Traversable IxFun where
     traverse (traverse f) outer_shapes <*>
     traverse f inner_shape
 
-instance (Eq num, IntegralExp num, Substitute num) => Rename (IxFun num) where
+instance Substitute num => Rename (IxFun num) where
   rename = substituteRename
 
 index :: (Pretty num, IntegralExp num) =>
@@ -192,8 +192,7 @@ rotate (Rotate ixfun old_offsets) offsets =
   Rotate ixfun $ zipWith (+) old_offsets offsets
 rotate ixfun offsets = Rotate ixfun offsets
 
-repeat :: (Eq num, IntegralExp num) =>
-          IxFun num -> [Shape num] -> Shape num -> IxFun num
+repeat :: IxFun num -> [Shape num] -> Shape num -> IxFun num
 repeat = Repeat
 
 reshape :: (Eq num, IntegralExp num) =>

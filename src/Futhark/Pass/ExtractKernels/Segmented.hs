@@ -782,9 +782,9 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
              (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
       letSubExp "offset" e
 
-addKernelInputStms :: (HasScope InKernel m, MonadBinder m, Lore m ~ InKernel) =>
-                     [KernelInput]
-                     -> m ()
+addKernelInputStms :: (MonadBinder m, Lore m ~ InKernel) =>
+                      [KernelInput]
+                   -> m ()
 addKernelInputStms = mapM_ $ \kin -> do
         let pe = PatElem (kernelInputName kin) (kernelInputType kin)
         let arr = kernelInputArray kin
@@ -801,7 +801,7 @@ addKernelInputStms = mapM_ $ \kin -> do
 -- >  c_vn = i % c
 -- >  b_vn = (i/c) % b
 -- >  a_vn = ((i/c)/b) % a
-addManualIspaceCalcStms :: (HasScope InKernel m, MonadBinder m, Lore m ~ InKernel) =>
+addManualIspaceCalcStms :: (MonadBinder m, Lore m ~ InKernel) =>
                            SubExp
                         -> [(VName, SubExp)]
                         -> m ()

@@ -8,7 +8,7 @@ license: ISC
 github: diku-dk/futhark
 category: Language
 
-ghc-options: -Wall -Wcompat
+ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates
 
 extra-source-files:
   - rts/python/*.py

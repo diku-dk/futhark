@@ -175,14 +175,14 @@ instance Allocable fromlore OutInKernel =>
 
   expHints = inKernelExpHints
 
-runAllocM :: (MonadFreshNames m, BinderOps tolore) =>
+runAllocM :: MonadFreshNames m =>
              (Op fromlore -> AllocM fromlore tolore (Op tolore))
           -> AllocM fromlore tolore a -> m a
 runAllocM handleOp (AllocM m) =
   fmap fst $ modifyNameSource $ runState $ runReaderT (runBinderT m mempty) env
   where env = AllocEnv mempty False handleOp
 
-subAllocM :: (SameScope tolore1 tolore2, ExplicitMemorish tolore2, BinderOps tolore1) =>
+subAllocM :: (SameScope tolore1 tolore2, ExplicitMemorish tolore2) =>
              (Op fromlore1 -> AllocM fromlore1 tolore1 (Op tolore1)) -> Bool
           -> AllocM fromlore1 tolore1 a
           -> AllocM fromlore2 tolore2 a
@@ -322,7 +322,7 @@ instantiateIxFun = traverse $ traverse inst
   where inst Ext{} = fail "instantiateIxFun: not yet"
         inst (Free x) = return x
 
-summaryForBindage :: (ExplicitMemorish lore, Allocator lore m) =>
+summaryForBindage :: Allocator lore m =>
                      Type -> ExpHint
                   -> m (MemBound NoUniqueness)
 summaryForBindage (Prim bt) _ =
@@ -672,7 +672,7 @@ allocInExp e = mapExpM alloc e
                                                handle op
                          }
 
-mkSpaceOks :: (ExplicitMemorish tolore, LocalScope tolore m, Monad m) =>
+mkSpaceOks :: (ExplicitMemorish tolore, LocalScope tolore m) =>
               Int -> Body tolore -> m [Maybe Space]
 mkSpaceOks num_vals (Body _ stms res) =
   inScopeOf stms $

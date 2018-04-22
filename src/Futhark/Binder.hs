@@ -99,7 +99,7 @@ instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
 
   certifying = certifyingBinder
 
-runBinderT :: (MonadFreshNames m, BinderOps lore) =>
+runBinderT :: MonadFreshNames m =>
               BinderT lore m a
            -> Scope lore
            -> m (a, Stms lore)
@@ -108,8 +108,7 @@ runBinderT (BinderT m) scope = do
   return (x, stms)
 
 runBinder :: (MonadFreshNames m,
-              HasScope somelore m, SameScope somelore lore,
-              BinderOps lore) =>
+              HasScope somelore m, SameScope somelore lore) =>
               Binder lore a
            -> m (a, Stms lore)
 runBinder m = do
@@ -119,22 +118,19 @@ runBinder m = do
 -- | Like 'runBinder', but throw away the result and just return the
 -- added bindings.
 runBinder_ :: (MonadFreshNames m,
-               HasScope somelore m, SameScope somelore lore,
-               BinderOps lore) =>
+               HasScope somelore m, SameScope somelore lore) =>
               Binder lore a
            -> m (Stms lore)
 runBinder_ = fmap snd . runBinder
 
 -- | As 'runBinder', but uses 'addStm' to add the returned
 -- bindings to the surrounding monad.
-joinBinder :: (MonadBinder m, BinderOps (Lore m)) =>
-              Binder (Lore m) a
-           -> m a
+joinBinder :: MonadBinder m => Binder (Lore m) a -> m a
 joinBinder m = do (x, bnds) <- runBinder m
                   addStms bnds
                   return x
 
-runBodyBinder :: (Bindable lore, BinderOps lore, MonadFreshNames m,
+runBodyBinder :: (Bindable lore, MonadFreshNames m,
                   HasScope somelore m, SameScope somelore lore) =>
                  Binder lore (Body lore) -> m (Body lore)
 runBodyBinder = fmap (uncurry $ flip insertStms) . runBinder

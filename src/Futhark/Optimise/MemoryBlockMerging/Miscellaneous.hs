@@ -81,7 +81,7 @@ insertOrNew xs m = Just $ case m of
   Just s -> S.union xs s
   Nothing -> xs
 
-removeEmptyMaps :: Ord k => M.Map k (S.Set v) -> M.Map k (S.Set v)
+removeEmptyMaps :: M.Map k (S.Set v) -> M.Map k (S.Set v)
 removeEmptyMaps = M.filter (not . S.null)
 
 removeKeyFromMapElems :: (Ord k) => M.Map k (S.Set k) -> M.Map k (S.Set k)

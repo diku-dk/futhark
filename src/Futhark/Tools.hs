@@ -82,8 +82,7 @@ scanomapToMapAndReduce (Pattern [] patelems)
 scanomapToMapAndReduce _ _ =
   error "scanomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
 
-splitScanOrRedomap :: (Typed attr, MonadFreshNames m,
-                       Bindable lore) =>
+splitScanOrRedomap :: (Typed attr, MonadFreshNames m) =>
                       [PatElemT attr]
                    -> SubExp -> LambdaT lore -> [SubExp]
                    -> m ([Ident], PatternT attr, [(SubExp, VName)])

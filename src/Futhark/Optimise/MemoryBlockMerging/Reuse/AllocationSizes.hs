@@ -33,8 +33,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
                              AllocSizeUtils lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 recordMapping :: VName -> (SubExp, Space) -> FindM lore ()
