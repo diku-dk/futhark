@@ -48,7 +48,7 @@ simplifySOACS = Simplify.simplifyProg simpleSOACS soacRules blockers
 
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent shapes/sizes.
-getShapeNames :: (Attributes lore, LetAttr lore ~ (VarWisdom, Type)) =>
+getShapeNames :: (LetAttr lore ~ (VarWisdom, Type)) =>
                  AST.Stm lore -> Names
 getShapeNames bnd =
   let tps1 = map patElemType $ patternElements $ stmPattern bnd

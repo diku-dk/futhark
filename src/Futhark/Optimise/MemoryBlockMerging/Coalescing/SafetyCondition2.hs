@@ -35,8 +35,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
                              IsAlloc lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 findSafetyCondition2FunDef :: FunDef ExplicitMemory
@@ -48,8 +47,7 @@ findSafetyCondition2FunDef fundef =
       res = snd $ evalRWS m () S.empty
   in res
 
-lookInFParam :: LoreConstraints lore =>
-                FParam ExplicitMemory -> FindM lore ()
+lookInFParam :: FParam ExplicitMemory -> FindM lore ()
 lookInFParam (Param _ membound) =
   -- Unique array function parameters also count as "allocations" in which
   -- memory can be coalesced.

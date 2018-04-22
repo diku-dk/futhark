@@ -30,8 +30,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
 record :: VName -> FindM lore ()
 record = tell . S.singleton
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 findExistentials :: LoreConstraints lore =>

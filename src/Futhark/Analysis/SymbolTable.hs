@@ -422,7 +422,7 @@ indexExp table (BasicOp (Index v slice)) _ is =
 
 indexExp _ _ _ _ = Nothing
 
-indexChunk :: Attributes lore => SymbolTable lore -> VName -> VName -> IndexArray
+indexChunk :: SymbolTable lore -> VName -> VName -> IndexArray
 indexChunk table offset array (i:is) =
   index' array (offset'+i:is) table
   where offset' = primExpFromSubExp (IntType Int32) (Var offset)

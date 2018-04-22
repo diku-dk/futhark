@@ -61,8 +61,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
                              SpecialBodyExceptions lore,
                              FullWalk lore)
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 awaken :: MName -> FindM lore ()
@@ -117,8 +116,7 @@ findInterferences var_to_mem mem_aliases first_uses last_uses existentials funde
       potential_kernel_interferences = curResPotentialKernelInterferences cur
   in (interferences, potential_kernel_interferences)
 
-lookInFunDefFParam :: LoreConstraints lore =>
-                      FParam lore -> FindM lore ()
+lookInFunDefFParam :: FParam lore -> FindM lore ()
 lookInFunDefFParam (Param var _) = do
   first_uses_var <- lookupEmptyable var <$> asks ctxFirstUses
   mapM_ awaken $ S.toList first_uses_var
@@ -269,8 +267,7 @@ innermostLoopNestBody ctx body = case stmsToList $ bodyStms body of
                 loop_corresponding_var)
   _ -> (body, M.empty)
 
-lookInRes :: LoreConstraints lore =>
-             [SubExp] -> FindM lore ()
+lookInRes :: [SubExp] -> FindM lore ()
 lookInRes ses = do
   let vs = subExpVars ses
   last_uses <- asks ctxLastUses

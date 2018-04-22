@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 -- | An index function represents a mapping from an array index space
 -- to a flat byte offset.   This implements a representation for the
 -- index function based on linear-memory accessor descriptors, see

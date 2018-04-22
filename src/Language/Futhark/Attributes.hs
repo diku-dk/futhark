@@ -112,8 +112,7 @@ import qualified Futhark.Representation.Primitive as Primitive
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayRank :: ArrayDim dim =>
-             TypeBase dim as -> Int
+arrayRank :: TypeBase dim as -> Int
 arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
@@ -211,8 +210,7 @@ maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
-toStructural :: ArrayDim dim =>
-                TypeBase dim as
+toStructural :: TypeBase dim as
              -> TypeBase () ()
 toStructural = removeNames . removeShapeAnnotations
 
@@ -229,8 +227,7 @@ fromStruct t = t `setAliases` S.empty
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
 -- than @n@ dimensions.
-peelArray :: ArrayDim dim =>
-             Int -> TypeBase dim as -> Maybe (TypeBase dim as)
+peelArray :: Int -> TypeBase dim as -> Maybe (TypeBase dim as)
 peelArray 0 t = Just t
 peelArray n (Array (ArrayPrimElem et _) shape _)
   | shapeRank shape == n =
@@ -252,8 +249,7 @@ peelArray _ _ = Nothing
 
 -- | Remove names from a type - this involves removing all size
 -- annotations from arrays, as well as all aliasing.
-removeNames :: ArrayDim dim =>
-               TypeBase dim as
+removeNames :: TypeBase dim as
             -> TypeBase () ()
 removeNames = flip setAliases () . removeShapeAnnotations
 
@@ -264,14 +260,14 @@ removeNames = flip setAliases () . removeShapeAnnotations
 -- The uniqueness of the new array will be @u@, no matter the
 -- uniqueness of @t@.  The function returns 'Nothing' in case an
 -- attempt is made to create an array of functions.
-arrayOf :: (ArrayDim dim, Monoid as) =>
+arrayOf :: Monoid as =>
            TypeBase dim as
         -> ShapeDecl dim
         -> Uniqueness
         -> Maybe (TypeBase dim as)
 arrayOf t = arrayOfWithAliases t mempty
 
-arrayOfWithAliases :: (ArrayDim dim, Monoid as) =>
+arrayOfWithAliases :: Monoid as =>
                       TypeBase dim as
                    -> as
                    -> ShapeDecl dim
@@ -323,8 +319,7 @@ arrayElemToType (ArrayRecordElem ts) =
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
-stripArray :: (ArrayDim dim, Monoid as) =>
-              Int -> TypeBase dim as -> TypeBase dim as
+stripArray :: Monoid as => Int -> TypeBase dim as -> TypeBase dim as
 stripArray n (Array et shape u)
   | Just shape' <- stripDims n shape =
     Array et shape' u

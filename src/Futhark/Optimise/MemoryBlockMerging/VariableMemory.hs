@@ -30,8 +30,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
 recordMapping :: VName -> MemorySrc -> FindM lore ()
 recordMapping var memloc = tell $ M.singleton var memloc
 
-coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
-          FindM flore a -> FindM tlore a
+coerce :: FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
 -- | Find all variable-memory block mappings in a function definition.
