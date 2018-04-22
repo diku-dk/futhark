@@ -34,9 +34,12 @@ transformStms = mapM_ transformStm . stmsToList
 
 transformStm :: Transformer m => Stm -> m ()
 
-transformStm (Let pat aux (Op (Redomap w _ _ fold_lam nes arrs)))
+transformStm (Let pat aux (Op (Redomap w _ red_lam map_lam nes arrs)))
   -- No map-out part
   | patternSize pat == length nes = do
+
+  fold_lam <- composeLambda red_lam map_lam
+
   chunk_size <- newVName "chunk_size"
   chunk_offset <- newVName "chunk_offset"
   let arr_idents = drop (length nes) $ patternIdents pat

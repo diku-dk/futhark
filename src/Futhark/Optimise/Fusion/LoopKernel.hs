@@ -287,7 +287,7 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
           unfus_accs  = take (length nes) outVars
           unfus_arrs  = returned_outvars \\ unfus_accs
       success (unfus_accs ++ outNames ker ++ unfus_arrs) $
-              SOAC.Redomap w comm1 lam11 res_lam' nes new_inp
+               SOAC.Redomap w comm1 lam11 res_lam' nes new_inp
 
     (SOAC.Redomap _ comm2 lam2r _ nes2 _, SOAC.Redomap _ comm1 lam1r _ nes1 _)
       | mapFusionOK (drop (length nes1) outVars) ker || horizFuse -> do
@@ -459,10 +459,9 @@ fuseStreamHelper out_kernms unfus_set outVars outPairs
                  (SOAC.Stream _ form1 lam1 inp1_arr) =
   if getStreamOrder form2 /= getStreamOrder form1
   then fail "fusion conditions not met!"
-  else do -- very similar to redomap o redomap composition,
-          -- but need to remove first the `chunk' and `i'
-          -- parameters of streams' lambdas and put them
-          -- lab in the resulting stream lambda.
+  else do -- very similar to redomap o redomap composition, but need
+          -- to remove first the `chunk' parameters of streams'
+          -- lambdas and put them in the resulting stream lambda.
           let nes1    = getStreamAccums form1
               chunk1  = head $ lambdaParams lam1
               chunk2  = head $ lambdaParams lam2
@@ -476,8 +475,8 @@ fuseStreamHelper out_kernms unfus_set outVars outPairs
               unfus_accs  = take (length nes1) outVars
               unfus_arrs  = filter (`S.member` unfus_set) outVars
           res_form <- mergeForms form2 form1
-          return (  unfus_accs ++ out_kernms ++ unfus_arrs,
-                    SOAC.Stream w2 res_form res_lam'' new_inp )
+          return (unfus_accs ++ out_kernms ++ unfus_arrs,
+                  SOAC.Stream w2 res_form res_lam'' new_inp )
   where mergeForms (Sequential acc2) (Sequential acc1) = return $ Sequential (acc1++acc2)
         mergeForms (Parallel _ comm2 lam2r acc2) (Parallel o1 comm1 lam1r acc1) =
             return $ Parallel o1 (comm1<>comm2) (mergeReduceOps lam1r lam2r) (acc1++acc2)
@@ -490,7 +489,7 @@ toSeqStream :: SOAC -> TryFusion SOAC
 toSeqStream s@(SOAC.Stream _ (Sequential _) _ _) = return s
 toSeqStream (SOAC.Stream w (Parallel _ _ _ acc) l inps) =
     return $ SOAC.Stream w (Sequential acc) l inps
-toSeqStream _ = fail "toSeqStream expects a string, but given a SOAC."
+toSeqStream _ = fail "toSeqStream expects a stream, but given a SOAC."
 
 -- | This is not currently used, but it might be useful in the future,
 --   so I am going to export it in order not to complain about it.
@@ -579,8 +578,9 @@ iswim _ _ _ =
 scanToScanomap :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
                -> TryFusion (SOAC, SOAC.ArrayTransforms)
 scanToScanomap _ (SOAC.Scan w scan_fun scan_input) ots = do
-  let (nes, array_inputs) =  unzip scan_input
-  return (SOAC.Scanomap w scan_fun scan_fun nes array_inputs, ots)
+  let (nes, array_inputs) = unzip scan_input
+  map_lam <- mkIdentityLambda $ lambdaReturnType scan_fun
+  return (SOAC.Scanomap w scan_fun map_lam nes array_inputs, ots)
 scanToScanomap _ _ _ =
   fail "Only turn scan into scanomaps"
 

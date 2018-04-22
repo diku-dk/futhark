@@ -205,6 +205,7 @@ reduceKernel step_two_size reduce_lam' nes arrs = do
   return $ Kernel (KernelDebugHints "reduce" []) space (lambdaReturnType reduce_lam')  $
     KernelBody () kstms rets
 
+-- | Requires a fold lambda that includes accumulator parameters.
 chunkLambda :: (MonadFreshNames m, HasScope Kernels m) =>
                Pattern Kernels -> [SubExp] -> Lambda InKernel -> m (Lambda InKernel)
 chunkLambda pat nes fold_lam = do
@@ -283,7 +284,8 @@ blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                  -> Lambda InKernel -> Lambda InKernel
                  -> [(VName, SubExp)] -> [SubExp] -> [VName]
                  -> m (Stms Kernels)
-blockedReduction pat w comm reduce_lam fold_lam ispace nes arrs = runBinder_ $ do
+blockedReduction pat w comm reduce_lam map_lam ispace nes arrs = runBinder_ $ do
+  fold_lam <- composeLambda reduce_lam map_lam
   fold_lam' <- chunkLambda pat nes fold_lam
 
   let arr_idents = drop (length nes) $ patternIdents pat
@@ -648,7 +650,9 @@ blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
             -> SubExp -> [(VName, SubExp)] -> [KernelInput]
             -> [SubExp] -> [VName]
             -> m [VName]
-blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
+blockedScan pat w lam map_lam segment_size ispace inps nes arrs = do
+  foldlam <- composeLambda lam map_lam
+
   (_, first_scan_size) <- blockedKernelSize w
   my_index <- newVName "my_index"
   other_index <- newVName "other_index"
