@@ -17,6 +17,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , chunkLambda
        , splitArrays
        , getSize
+       , cmpSizeLe
        )
        where
 
@@ -46,6 +47,12 @@ getSize :: (MonadBinder m, Op (Lore m) ~ Kernel innerlore) =>
 getSize desc size_class = do
   size_key <- newVName desc
   letSubExp desc $ Op $ GetSize size_key size_class
+
+cmpSizeLe :: (MonadBinder m, Op (Lore m) ~ Kernel innerlore) =>
+           String -> SizeClass -> SubExp -> m SubExp
+cmpSizeLe desc size_class to_what = do
+  size_key <- newVName desc
+  letSubExp desc $ Op $ CmpSizeLe size_key size_class to_what
 
 blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                           Pattern Kernels

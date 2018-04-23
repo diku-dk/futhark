@@ -81,6 +81,8 @@ data KernelDebugHints =
 data Kernel lore =
     GetSize VName SizeClass -- ^ Produce some runtime-configurable size.
   | GetSizeMax SizeClass -- ^ The maximum size of some class.
+  | CmpSizeLe VName SizeClass SubExp
+    -- ^ Compare size (likely a threshold) with some Int32 value.
   | Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
     deriving (Eq, Show, Ord)
 
@@ -184,6 +186,8 @@ mapKernelM _ (GetSize name size_class) =
   pure $ GetSize name size_class
 mapKernelM _ (GetSizeMax size_class) =
   pure $ GetSizeMax size_class
+mapKernelM tv (CmpSizeLe name size_class x) =
+  CmpSizeLe name size_class <$> mapOnKernelSubExp tv x
 mapKernelM tv (Kernel desc space ts kernel_body) =
   Kernel <$> mapOnKernelDebugHints desc <*>
   mapOnKernelSpace space <*>
@@ -397,6 +401,7 @@ kernelType (Kernel _ space ts body) =
 
 kernelType GetSize{} = [Prim int32]
 kernelType GetSizeMax{} = [Prim int32]
+kernelType CmpSizeLe{} = [Prim Bool]
 
 chunkedKernelNonconcatOutputs :: Lambda lore -> Int
 chunkedKernelNonconcatOutputs fun =
@@ -524,6 +529,7 @@ instance Aliased lore => UsageInOp (Kernel lore) where
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
   usageInOp GetSize{} = mempty
   usageInOp GetSizeMax{} = mempty
+  usageInOp CmpSizeLe{} = mempty
 
 consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
@@ -534,6 +540,7 @@ typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore (
 
 typeCheckKernel GetSize{} = return ()
 typeCheckKernel GetSizeMax{} = return ()
+typeCheckKernel (CmpSizeLe _ _ x) = TC.require [Prim int32] x
 
 typeCheckKernel (Kernel _ space kts kbody) = do
   checkSpace space
@@ -601,6 +608,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
           kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
   opMetrics GetSize{} = seen "GetSize"
   opMetrics GetSizeMax{} = seen "GetSizeMax"
+  opMetrics CmpSizeLe{} = seen "CmpSizeLe"
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr (GetSize name size_class) =
@@ -608,6 +616,10 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
 
   ppr (GetSizeMax size_class) =
     text "get_size_max" <> parens (ppr size_class)
+
+  ppr (CmpSizeLe name size_class x) =
+    text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
+    text "<" <+> ppr x
 
   ppr (Kernel desc space ts body) =
     text "kernel" <+> text (kernelName desc) <>

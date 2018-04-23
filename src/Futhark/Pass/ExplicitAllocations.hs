@@ -540,6 +540,8 @@ handleKernel (GetSize key size_class) =
   return $ Inner $ GetSize key size_class
 handleKernel (GetSizeMax size_class) =
   return $ Inner $ GetSizeMax size_class
+handleKernel (CmpSizeLe key size_class x) =
+  return $ Inner $ CmpSizeLe key size_class x
 handleKernel (Kernel desc space kernel_ts kbody) = subAllocM handleKernelExp True $
   Inner . Kernel desc space kernel_ts <$>
   localScope (scopeOfKernelSpace space) (allocInKernelBody kbody)

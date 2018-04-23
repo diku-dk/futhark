@@ -83,6 +83,9 @@ simplifyKernelOp ops env (Kernel desc space ts kbody) = do
 
 simplifyKernelOp _ _ (GetSize key size_class) = return (GetSize key size_class, mempty)
 simplifyKernelOp _ _ (GetSizeMax size_class) = return (GetSizeMax size_class, mempty)
+simplifyKernelOp _ _ (CmpSizeLe key size_class x) = do
+  x' <- Engine.simplify x
+  return (CmpSizeLe key size_class x', mempty)
 
 processHoistedStm :: (Monad m,
                       PrettyLore from,

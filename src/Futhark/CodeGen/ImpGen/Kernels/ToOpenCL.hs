@@ -90,6 +90,9 @@ onHostOp (CallKernel k) = onKernel k
 onHostOp (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
+onHostOp (ImpKernels.CmpSizeLe v key size_class x) = do
+  tell mempty { clSizes = M.singleton key size_class }
+  return $ ImpOpenCL.CmpSizeLe v key x
 onHostOp (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
 
