@@ -62,6 +62,7 @@ data KernelArg = ValueKArg Exp PrimType
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
             | HostCode Code
             | GetSize VName VName
+            | CmpSizeLe VName VName Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
 

@@ -92,6 +92,10 @@ callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) =
   Py.stm $ Assign (Var (Py.compileName v)) $
   Index (Var "self.sizes") (IdxExp $ String $ pretty key)
+callKernel (Imp.CmpSizeLe v key x) = do
+  x' <- Py.compileExp x
+  Py.stm $ Assign (Var (Py.compileName v)) $
+    BinOp "<=" (Index (Var "self.sizes") (IdxExp $ String $ pretty key)) x'
 callKernel (Imp.GetSizeMax v size_class) =
   Py.stm $ Assign (Var (Py.compileName v)) $
   Var $ "self.max_" ++ pretty size_class

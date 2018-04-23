@@ -441,9 +441,7 @@ mapLoopExp (MapLoop _ w lam arrs) = Op $ Map w lam arrs
 
 sufficientParallelism :: (Op (Lore m) ~ Kernel innerlore, MonadBinder m) =>
                          String -> SubExp -> m SubExp
-sufficientParallelism desc par = do
-  par_threshold <- getSize desc Out.SizeThreshold
-  letSubExp desc $ BasicOp $ CmpOp (CmpSle Int32) par_threshold par
+sufficientParallelism desc = cmpSizeLe desc Out.SizeThreshold
 
 distributeMap :: (HasScope Out.Kernels m,
                   MonadFreshNames m, MonadLogger m) =>

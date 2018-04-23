@@ -50,6 +50,7 @@ type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel CallKernel
             | GetSize VName VName SizeClass
+            | CmpSizeLe VName VName SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
 
@@ -126,6 +127,10 @@ instance Pretty HostOp where
     text "get_size" <> parens (commasep [ppr key, ppr size_class])
   ppr (GetSizeMax dest size_class) =
     ppr dest <+> text "<-" <+> text "get_size_max" <> parens (ppr size_class)
+  ppr (CmpSizeLe dest name size_class x) =
+    ppr dest <+> text "<-" <+>
+    text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
+    text "<" <+> ppr x
   ppr (CallKernel c) =
     ppr c
 

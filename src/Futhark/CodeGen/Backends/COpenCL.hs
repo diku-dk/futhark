@@ -13,7 +13,7 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.Error
-import Futhark.Representation.ExplicitMemory hiding (GetSize, GetSizeMax)
+import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -248,6 +248,12 @@ staticOpenCLArray _ space _ _ =
 callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
+callKernel (CmpSizeLe v key x) = do
+  x' <- GC.compileExp x
+  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
+  GC.stm [C.cstm|if (ctx->debugging) {
+    fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
+    }|]
 callKernel (GetSizeMax v size_class) =
   GC.stm [C.cstm|$id:v = ctx->opencl.$id:("max_" ++ pretty size_class);|]
 callKernel (HostCode c) =

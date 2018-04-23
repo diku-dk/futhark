@@ -78,6 +78,10 @@ kernelCompiler dest (GetSize key size_class) = do
   [v] <- ImpGen.funcallTargets dest
   ImpGen.emit $ Imp.Op $ Imp.GetSize v key size_class
 
+kernelCompiler dest (CmpSizeLe key size_class x) = do
+  [v] <- ImpGen.funcallTargets dest
+  ImpGen.emit =<< Imp.Op . Imp.CmpSizeLe v key size_class <$> ImpGen.compileSubExp x
+
 kernelCompiler dest (GetSizeMax size_class) = do
   [v] <- ImpGen.funcallTargets dest
   ImpGen.emit $ Imp.Op $ Imp.GetSizeMax v size_class
