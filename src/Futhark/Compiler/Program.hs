@@ -113,8 +113,8 @@ includePath :: FutharkInclude -> String
 includePath (FutharkInclude s _) = Posix.takeDirectory s
 
 readImport :: (MonadError CompilerError m, MonadIO m) =>
-              Bool -> ImportPaths -> [FutharkInclude] -> FutharkInclude -> CompilerM m ()
-readImport permit_recursion search_path steps include
+              ImportPaths -> [FutharkInclude] -> FutharkInclude -> CompilerM m ()
+readImport search_path steps include
   | include `elem` steps =
       throwError $ ExternalError $ T.pack $
       "Import cycle: " ++ intercalate " -> "
@@ -123,23 +123,22 @@ readImport permit_recursion search_path steps include
       already_done <- gets $ isJust . lookup (includeToString include) . alreadyImported
 
       unless already_done $
-        uncurry (handleFile permit_recursion search_path steps include) =<<
+        uncurry (handleFile search_path steps include) =<<
         readImportFile search_path include
 
 handleFile :: (MonadIO m, MonadError CompilerError m) =>
-              Bool
-           -> ImportPaths
+              ImportPaths
            -> [FutharkInclude]
            -> FutharkInclude
            -> T.Text
            -> FilePath
            -> CompilerM m ()
-handleFile permit_recursion search_path steps include file_contents file_name = do
+handleFile search_path steps include file_contents file_name = do
   prog <- case parseFuthark file_name file_contents of
     Left err -> externalErrorS $ show err
     Right prog -> return prog
 
-  mapM_ (readImport permit_recursion search_path steps' . uncurry (mkInclude include)) $
+  mapM_ (readImport search_path steps' . uncurry (mkInclude include)) $
     E.progImports prog
 
   -- It is important to not read these before the above calls to
@@ -148,7 +147,7 @@ handleFile permit_recursion search_path steps include file_contents file_name = 
   src <- gets nameSource
   prelude <- ask
 
-  case E.checkProg permit_recursion imports src (includePath include) $
+  case E.checkProg imports src (includePath include) $
        prependPrelude prelude prog of
     Left err ->
       externalError $ T.pack $ show err
@@ -193,16 +192,16 @@ readImportFile (ImportPaths dirs) include = do
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
-               Bool -> Basis -> ImportPaths -> FilePath
+               Basis -> ImportPaths -> FilePath
             -> m (E.Warnings,
                   E.Imports,
                   VNameSource)
-readProgram permit_recursion basis search_path fp =
+readProgram basis search_path fp =
   runCompilerM basis $ do
     r <- liftIO $ readFileSafely fp
     case r of
       Just (Right (_, fs)) ->
-        handleFile permit_recursion (importPath fp_dir <> search_path)
+        handleFile (importPath fp_dir <> search_path)
         [] (mkInitialInclude fp_name) fs fp
       Just (Left e) -> externalError $ T.pack e
       Nothing -> externalErrorS $ fp ++ ": file not found."
@@ -212,17 +211,17 @@ readProgram permit_recursion basis search_path fp =
 -- | Read and type-check a Futhark library (multiple files, relative
 -- to the same search path), including all imports.
 readLibrary :: (MonadError CompilerError m, MonadIO m) =>
-               Bool -> Basis -> ImportPaths -> [FilePath]
+               Basis -> ImportPaths -> [FilePath]
             -> m (E.Warnings,
                   E.Imports,
                   VNameSource)
-readLibrary permit_recursion basis search_path fps =
+readLibrary basis search_path fps =
   runCompilerM basis (mapM onFile fps)
   where onFile fp =  do
 
           fs <- liftIO $ T.readFile fp
 
-          handleFile permit_recursion search_path [] (mkInitialInclude fp_name) fs fp
+          handleFile search_path [] (mkInitialInclude fp_name) fs fp
             where (fp_name, _) = splitExtension fp
 
 runCompilerM :: Monad m =>
