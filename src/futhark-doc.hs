@@ -53,7 +53,7 @@ main = mainWithOptions initialDocConfig commandLineOptions f
                 mapM_ (hPutStrLn stderr . ("Found source file "<>)) files
                 hPutStrLn stderr "Reading files..."
               (_w, imports, _vns) <-
-                readLibrary False preludeBasis mempty files
+                readLibrary preludeBasis mempty files
               liftIO $ printDecs config outdir (nubBy sameImport imports) $
                 concatMap (progDecs . fileProg . snd) imports
 

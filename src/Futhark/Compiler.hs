@@ -43,7 +43,6 @@ data FutharkConfig = FutharkConfig
                      , futharkWarn :: Bool -- ^ Warn if True.
                      , futharkWerror :: Bool -- ^ If true, error on any warnings.
                      , futharkImportPaths :: ImportPaths
-                     , futharkPermitRecursion :: Bool
                      }
 
 newFutharkConfig :: FutharkConfig
@@ -51,7 +50,6 @@ newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
                                  , futharkWarn = True
                                  , futharkWerror = False
                                  , futharkImportPaths = mempty
-                                 , futharkPermitRecursion = True
                                  }
 
 dumpError :: FutharkConfig -> CompilerError -> IO ()
@@ -121,7 +119,7 @@ runPipelineOnProgram config b pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
   (ws, prog_imports, namesrc) <-
-    readProgram (futharkPermitRecursion config) b (futharkImportPaths config) file
+    readProgram b (futharkImportPaths config) file
 
   when (futharkWarn config) $ do
     liftIO $ hPutStr stderr $ show ws

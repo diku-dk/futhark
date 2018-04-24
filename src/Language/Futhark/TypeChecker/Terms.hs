@@ -1421,19 +1421,6 @@ consumeArg loc at _       = return [observation (aliases at) loc]
 checkOneExp :: UncheckedExp -> TypeM Exp
 checkOneExp e = fmap fst . runTermTypeM $ updateExpTypes =<< checkExp e
 
-maybePermitRecursion :: VName -> [TypeParam] -> [Pattern] -> Maybe StructType
-                     -> TermTypeM a -> TermTypeM a
-maybePermitRecursion fname tparams params (Just rettype) m = do
-  permit <- liftTypeM recursionPermitted
-  if permit then
-    let patternType' = toStruct . vacuousShapeAnnotations . patternType
-        entry = BoundV tparams $
-                foldr (Arrow () Nothing . patternType') rettype params `setAliases` mempty
-        bindF scope = scope { scopeVtable = M.insert fname entry $ scopeVtable scope }
-    in local bindF m
-    else m
-maybePermitRecursion _ _ _ Nothing m = m
-
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
                 [UncheckedTypeParam], [UncheckedPattern],
                 UncheckedExp, SrcLoc)
@@ -1458,8 +1445,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
   bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
     maybe_retdecl' <- traverse checkTypeExp maybe_retdecl
 
-    body' <- maybePermitRecursion fname' tparams' params' (snd <$> maybe_retdecl') $
-             checkFunBody body (snd <$> maybe_retdecl') (maybe loc srclocOf maybe_retdecl)
+    body' <- checkFunBody body (snd <$> maybe_retdecl') (maybe loc srclocOf maybe_retdecl)
 
     -- We are now done inferring types.  Replace all inferred types in
     -- the body and parameters.

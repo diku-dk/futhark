@@ -331,7 +331,7 @@ main = mainWithOptions newConfig commandLineOptions compile
           case futharkPipeline config of
             TypeCheck -> do
               -- No pipeline; just read the program and type check
-              (warnings, _, _) <- readProgram False preludeBasis mempty file
+              (warnings, _, _) <- readProgram preludeBasis mempty file
               liftIO $ hPutStr stderr $ show warnings
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file
@@ -339,16 +339,16 @@ main = mainWithOptions newConfig commandLineOptions compile
                 Left err  -> fail $ show err
                 Right prog-> putStrLn $ pretty prog
             Defunctorise -> do
-              (_, imports, src) <- readProgram False preludeBasis mempty file
+              (_, imports, src) <- readProgram preludeBasis mempty file
               liftIO $ mapM_ (putStrLn . pretty) $
                 evalState (Defunctorise.transformProg imports) src
             Monomorphise -> do
-              (_, imports, src) <- readProgram False preludeBasis mempty file
+              (_, imports, src) <- readProgram preludeBasis mempty file
               liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
             Defunctionalise -> do
-              (_, imports, src) <- readProgram False preludeBasis mempty file
+              (_, imports, src) <- readProgram preludeBasis mempty file
               liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
