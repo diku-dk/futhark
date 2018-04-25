@@ -53,14 +53,22 @@ internaliseProg prog = do
   traverse I.renameProg prog'
 
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
-internaliseValBinds = foldr internaliseValBind (return ())
+internaliseValBinds = mapM_ internaliseValBind
 
 internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
 internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
-internaliseFunName ofname _  = return $ nameFromString $ pretty ofname
+internaliseFunName ofname _  = do
+  info <- lookupFunction' ofname
+  -- In some rare cases involving local functions, the same function
+  -- name may be re-used in multiple places.  We check whether the
+  -- function name has already been used, and generate a new one if
+  -- so.
+  case info of
+    Just _ -> nameFromString . pretty <$> newNameFromString (baseString ofname)
+    Nothing -> return $ nameFromString $ pretty ofname
 
-internaliseValBind :: E.ValBind -> InternaliseM a -> InternaliseM a
-internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params body _ loc) m = do
+internaliseValBind :: E.ValBind -> InternaliseM ()
+internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params body _ loc) = do
   info <- bindingParams tparams params $ \pcm shapeparams params' -> do
     (rettype_bad, rcm) <- internaliseReturnType rettype
     let rettype' = zeroExts rettype_bad
@@ -105,9 +113,8 @@ internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params bod
             all_params,
             applyRetType rettype' all_params)
 
-  bindingFunction fname info $ do
-    when entry $ generateEntryPoint fb
-    m
+  bindFunction fname info
+  when entry $ generateEntryPoint fb
 
   where
     -- | Recompute existential sizes to start from zero.
@@ -418,8 +425,8 @@ internaliseExp desc (E.LetPat tparams pat e body loc) = do
       letBindNames_ [v] $ I.BasicOp $ I.SubExp se
     internaliseExp desc body
 
-internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) =
-  internaliseValBind (E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc) $
+internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
+  internaliseValBind $ E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc
   internaliseExp desc letbody
 
 internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do

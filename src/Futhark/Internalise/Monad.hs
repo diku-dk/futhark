@@ -15,7 +15,7 @@ module Futhark.Internalise.Monad
   , lookupFunction
   , lookupFunction'
 
-  , bindingFunction
+  , bindFunction
 
   , asserting
   , assertingOne
@@ -66,11 +66,12 @@ type VarSubstitutions = M.Map VName [SubExp]
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
-  , envFunTable :: FunTable
   }
 
-newtype InternaliseState =
-  InternaliseState { stateNameSource :: VNameSource }
+data InternaliseState = InternaliseState {
+    stateNameSource :: VNameSource
+  , stateFunTable :: FunTable
+  }
 
 newtype InternaliseResult = InternaliseResult [FunDef]
   deriving (Sem.Semigroup, Monoid)
@@ -120,10 +121,11 @@ runInternaliseM (InternaliseM m) =
   where newEnv = InternaliseEnv {
                    envSubsts = mempty
                  , envDoBoundsChecks = True
-                 , envFunTable = mempty
                  }
         newState src =
-          InternaliseState { stateNameSource = src }
+          InternaliseState { stateNameSource = src
+                           , stateFunTable = mempty
+                           }
 
 substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
 substitutingVars substs = local $ \env -> env { envSubsts = substs <> envSubsts env }
@@ -133,16 +135,15 @@ addFunction :: FunDef -> InternaliseM ()
 addFunction = InternaliseM . lift . tell . InternaliseResult . pure
 
 lookupFunction' :: VName -> InternaliseM (Maybe FunInfo)
-lookupFunction' fname = asks $ M.lookup fname . envFunTable
+lookupFunction' fname = gets $ M.lookup fname . stateFunTable
 
 lookupFunction :: VName -> InternaliseM FunInfo
 lookupFunction fname = maybe bad return =<< lookupFunction' fname
   where bad = fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
-bindingFunction :: VName -> FunInfo
-                -> InternaliseM a -> InternaliseM a
-bindingFunction fname info =
-  local (\env -> env { envFunTable = M.insert fname info $ envFunTable env })
+bindFunction :: VName -> FunInfo -> InternaliseM ()
+bindFunction fname info =
+  modify $ \s -> s { stateFunTable = M.insert fname info $ stateFunTable s }
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
