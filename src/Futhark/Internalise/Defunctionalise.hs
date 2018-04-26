@@ -91,6 +91,12 @@ defuncExp :: Exp -> DefM (Exp, StaticVal)
 defuncExp e@Literal{} =
   return (e, Dynamic $ typeOf e)
 
+defuncExp e@IntLit{} =
+  return (e, Dynamic $ typeOf e)
+
+defuncExp e@FloatLit{} =
+  return (e, Dynamic $ typeOf e)
+
 defuncExp (Parens e loc) = do
   (e', sv) <- defuncExp e
   return (Parens e' loc, sv)
@@ -707,6 +713,8 @@ names = foldMap oneName
 freeVars :: Exp -> NameSet
 freeVars expr = case expr of
   Literal{}            -> mempty
+  IntLit{}             -> mempty
+  FloatLit{}           -> mempty
   Parens e _           -> freeVars e
   QualParens _ e _     -> freeVars e
   TupLit es _          -> foldMap freeVars es

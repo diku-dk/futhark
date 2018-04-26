@@ -425,6 +425,8 @@ rank n = ShapeDecl $ replicate n ()
 -- the term is a non-tuple-typed variable.
 typeOf :: ExpBase Info VName -> CompType
 typeOf (Literal val _) = Prim $ primValueType val
+typeOf (IntLit _ (Info t) _) = fromStruct t
+typeOf (FloatLit _ (Info t) _) = fromStruct t
 typeOf (Parens e _) = typeOf e
 typeOf (QualParens _ e _) = typeOf e
 typeOf (TupLit es _) = tupleRecord $ map typeOf es

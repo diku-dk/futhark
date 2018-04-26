@@ -14,8 +14,6 @@
 
 import "/futlib/math"
 
-default(f32)
-
 let dirvcts(): [2][30]i32 =
     [
             [

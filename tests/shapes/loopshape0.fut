@@ -4,8 +4,6 @@
 -- input { [1,2,3,4,5,6] }
 -- output { 3 [0,1,2] }
 
-default (f32)
-
 let even(x: i32): bool = x % 2 == 0
 
 let main [n] (xs: [n]i32): (i32, []i32) =

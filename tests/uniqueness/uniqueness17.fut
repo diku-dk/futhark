@@ -6,8 +6,6 @@
 -- ==
 -- structure distributed { Kernel 4 }
 
-default(f32)
-
 let max(a: f32) (b: f32): f32 = if(a < b) then b else a
 
 let exactYhat(xs: []f32, x: f32): f32 =

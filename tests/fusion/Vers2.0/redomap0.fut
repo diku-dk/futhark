@@ -12,8 +12,6 @@
 -- }
 --
 
-default(f32)
-
 let main(arr: []f32): (f32,[]f32,[]f32) =
     let x = map (+1.0) arr
     let y = map2 (+) x arr

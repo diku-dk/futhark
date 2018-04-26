@@ -6,8 +6,6 @@
 -- input { [[1.0f32, 2.0f32, 1.0f32], [2.0f32, 1.0f32, 1.0f32], [1.0f32, 1.0f32, 2.0f32]] }
 -- output { [[-0.25f32, 0.75f32, -0.25f32], [0.75f32, -0.25f32, -0.25f32], [-0.25f32, -0.25f32, 0.75f32]] }
 
-default (f32)
-
 let Gauss_Jordan [n][m] (A: [n][m]f32): [n][m]f32 =
   loop A for i < n do
     let irow = A[0]
@@ -23,7 +21,7 @@ let Gauss_Jordan [n][m] (A: [n][m]f32): [n][m]f32 =
 let matrix_inverse [n] (A: [n][n]f32): [n][n]f32 =
   -- Pad the matrix with the identity matrix.
   let on_row row i = let padding = replicate n 0.0
-                     let padding[i] = 1.0
+                     let padding[i] = 1f32
                      in concat row padding
   let Ap = map2 on_row A (0..<n)
   let Ap' = Gauss_Jordan Ap

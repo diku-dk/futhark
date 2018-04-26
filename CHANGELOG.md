@@ -12,12 +12,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Entry points need no longer be syntactically first-order.
 
+  * Added overloaded numeric literals (#532).  This means type
+    suffixes are rarely required.
+
 ### Removed
 
 ### Changed
 
   * When defining a module type, a module of the same name is no
     longer defined (#538).
+
+  * The `default` keyword is no longer supported.
 
 ### Fixed
 

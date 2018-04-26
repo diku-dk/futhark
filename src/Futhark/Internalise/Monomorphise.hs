@@ -102,6 +102,8 @@ transformFName fname t
 -- | Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
 transformExp e@Literal{} = return e
+transformExp e@IntLit{} = return e
+transformExp e@FloatLit{} = return e
 
 transformExp (Parens e loc) =
   Parens <$> transformExp e <*> pure loc
@@ -181,9 +183,10 @@ transformExp (Apply e1 e2 d tp loc) =
           transformExp $ Map f arr (removeShapeAnnotations <$> tp) loc
       | intrinsic "filter" v ->
           transformExp $ Filter f arr loc
-    (Var v _ _, TupLit [Literal (SignedValue (Int32Value k)) _, f, arr] _)
-      | intrinsic "partition" v ->
-          transformExp $ Partition (fromIntegral k) f arr loc
+    (Var v _ _, TupLit [k, f, arr] _)
+      | intrinsic "partition" v,
+        Just k' <- isInt32 k ->
+          transformExp $ Partition (fromIntegral k') f arr loc
     (Var v _ _, TupLit [op, f, arr] _)
       | intrinsic "stream_red" v ->
           transformExp $ Stream (RedLike InOrder Noncommutative op) f arr loc
@@ -201,6 +204,10 @@ transformExp (Apply e1 e2 d tp loc) =
       return $ Apply e1' e2' d tp loc
   where intrinsic s (QualName _ v) =
           baseTag v <= maxIntrinsicTag && baseName v == nameFromString s
+
+        isInt32 (Literal (SignedValue (Int32Value k)) _) = Just k
+        isInt32 (IntLit k (Info (Prim (Signed Int32))) _) = Just $ fromInteger k
+        isInt32 _ = Nothing
 
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc

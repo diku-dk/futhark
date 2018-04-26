@@ -38,8 +38,6 @@
 -- 1.000000f32
 -- }
 
-default(f32)
-
 let dotV [d] (x: [d]f32) (y: [d]f32): f32 =
   reduce (+) 0.0 (map2 (*) x y)
 

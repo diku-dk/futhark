@@ -160,6 +160,8 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (QualParens v e _) = ppr v <> text "." <> align (parens $ ppr e)
   pprPrec _ (Ascript e t _) = pprPrec 0 e <> colon <+> pprPrec 0 t
   pprPrec _ (Literal v _) = ppr v
+  pprPrec _ (IntLit v _ _) = ppr v
+  pprPrec _ (FloatLit v _ _) = ppr v
   pprPrec _ (TupLit es _)
     | any hasArrayLit es = parens $ commastack $ map ppr es
     | otherwise          = parens $ commasep $ map ppr es

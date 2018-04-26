@@ -86,8 +86,6 @@ tokens :-
   "..."                    { tokenC THREE_DOTS }
   ".."                     { tokenC TWO_DOTS }
 
-  @declit                  { tokenM $ return . DECLIT . readIntegral . T.filter (/= '_') }
-
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i32              { tokenM $ return . I32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
@@ -97,12 +95,13 @@ tokens :-
   @intlit u32              { tokenM $ return . U32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
   @intlit u64              { tokenM $ return . U64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
   @intlit                  { tokenM $ return . INTLIT . readIntegral . T.filter (/= '_') }
+
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
+  @reallit                 { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
   @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit "f32" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f32") }
   @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f64") }
-  @hexreallit              { tokenM $ fmap REALLIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') }
+  @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f64") }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
 
@@ -131,7 +130,6 @@ keyword s =
     "let"          -> LET
     "loop"         -> LOOP
     "in"           -> IN
-    "default"      -> DEFAULT
     "val"          -> VAL
     "for"          -> FOR
     "do"           -> DO
@@ -176,7 +174,7 @@ suffZero s = if T.last s == '.' then s <> "0" else s
 tryRead :: Read a => String -> T.Text -> Alex a
 tryRead desc s = case reads s' of
   [(x, "")] -> return x
-  _         -> fail $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
+  _         -> fail $ "Invalid " ++ desc ++ " literal: `" ++ T.unpack s ++ "'."
   where s' = T.unpack s
 
 readIntegral :: Integral a => T.Text -> a
@@ -289,9 +287,8 @@ data Token = ID Name
            | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name
 
-           | DECLIT Integer
+           | INTLIT Integer
            | STRINGLIT String
-           | INTLIT Int64
            | I8LIT Int8
            | I16LIT Int16
            | I32LIT Int32
@@ -300,7 +297,7 @@ data Token = ID Name
            | U16LIT Word16
            | U32LIT Word32
            | U64LIT Word64
-           | REALLIT Double
+           | FLOATLIT Double
            | F32LIT Float
            | F64LIT Double
            | CHARLIT Char
@@ -334,7 +331,6 @@ data Token = ID Name
            | NEGATE
            | LTH
 
-           | DEFAULT
            | IF
            | THEN
            | ELSE

@@ -19,8 +19,6 @@
 
 import "/futlib/math"
 
-default (f32)
-
 let pi: f32 = f32.acos 0.0 * 2.0
 
 type complex = (f32, f32)
