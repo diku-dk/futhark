@@ -45,8 +45,6 @@
 
 import "/futlib/array"
 
-default(f32)
-
 let tridagSeq [n] (a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
     let (y,b) = loop ((y, b))
       for i < n-1 do

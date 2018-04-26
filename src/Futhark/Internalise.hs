@@ -780,6 +780,22 @@ internaliseExp desc (E.Stream (E.RedLike o comm lam0) lam arr _) = do
 internaliseExp _ (E.Literal v _) =
   return [I.Constant $ internalisePrimValue v]
 
+internaliseExp _ (E.IntLit v (Info t) _) =
+  case t of
+    E.Prim (E.Signed it) ->
+      return [I.Constant $ I.IntValue $ intValue it v]
+    E.Prim (E.Unsigned it) ->
+      return [I.Constant $ I.IntValue $ intValue it v]
+    E.Prim (E.FloatType ft) ->
+      return [I.Constant $ I.FloatValue $ floatValue ft v]
+    _ -> fail $ "internaliseExp: nonsensical type for integer literal: " ++ pretty t
+
+internaliseExp _ (E.FloatLit v (Info t) _) =
+  case t of
+    E.Prim (E.FloatType ft) ->
+      return [I.Constant $ I.FloatValue $ floatValue ft v]
+    _ -> fail $ "internaliseExp: nonsensical type for float literal: " ++ pretty t
+
 internaliseExp desc (E.If ce te fe _ _) =
   letTupExp' desc =<< eIf (BasicOp . SubExp <$> internaliseExp1 "cond" ce)
                           (internaliseBody te) (internaliseBody fe)

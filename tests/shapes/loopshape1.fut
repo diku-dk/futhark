@@ -5,8 +5,6 @@
 -- input { [1,2,3,4,5,6] 3 }
 -- output { 6 }
 
-default (f32)
-
 let even(x: i32): bool = x % 2 == 0
 
 let main [n] (xs: [n]i32, m: i32): i32 =

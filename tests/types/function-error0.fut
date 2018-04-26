@@ -1,6 +1,6 @@
 -- Polymorphic function called incorrectly.
 -- ==
--- error: Couldn't match
+-- error: Cannot unify
 
 let f 't (x: t) (y: t) = (x,y)
 

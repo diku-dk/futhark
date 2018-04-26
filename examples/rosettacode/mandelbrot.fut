@@ -14,8 +14,6 @@
 --    [2i32, 2i32, 2i32, 2i32, 2i32, 1i32, 1i32, 1i32, 1i32, 1i32]]
 -- }
 
-default(f32)
-
 type complex = (f32, f32)
 
 let dot(c: complex): f32 =

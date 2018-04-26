@@ -54,7 +54,6 @@ import Language.Futhark.Parser.Lexer
       let             { L $$ LET }
       loop            { L $$ LOOP }
       in              { L $$ IN }
-      default         { L $$ DEFAULT }
 
       id              { L _ (ID _) }
       'id['           { L _ (INDEXING _) }
@@ -67,7 +66,6 @@ import Language.Futhark.Parser.Lexer
       unop            { L _ (UNOP _) }
       qunop           { L _ (QUALUNOP _ _) }
 
-      declit          { L _ (DECLIT _) }
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
       i16lit          { L _ (I16LIT _) }
@@ -77,8 +75,7 @@ import Language.Futhark.Parser.Lexer
       u16lit          { L _ (U16LIT _) }
       u32lit          { L _ (U32LIT _) }
       u64lit          { L _ (U64LIT _) }
-      reallit         { L _ (REALLIT _) }
-      hexreallit      { L _ (REALLIT _) }
+      floatlit        { L _ (FLOATLIT _) }
       f32lit          { L _ (F32LIT _) }
       f64lit          { L _ (F64LIT _) }
       stringlit       { L _ (STRINGLIT _) }
@@ -218,7 +215,6 @@ Dec_ :: { [UncheckedDec] }
     | import stringlit
       { let L loc (STRINGLIT s) = $2 in [LocalDec (OpenDec (ModImport s NoInfo loc) [] NoInfo $1) (srcspan $1 $>)] }
     | local Dec         { map (`LocalDec` $1) $2 }
-    | DefaultDec        { [] }
 ;
 
 SigExp :: { UncheckedSigExp }
@@ -321,12 +317,6 @@ TypeParams :: { [TypeParamBase Name] }
 
 TypeParams1 :: { (TypeParamBase Name, [TypeParamBase Name]) }
             : TypeParam TypeParams { ($1, $2) }
-
-DefaultDec :: { () }
-           :  default '(' id ')' {% let L _ (ID s) = $3 in defaultType s  }
-           |  default '(' id ',' id ')'
-                {% let L _ (ID s1) = $3; L _ (ID s2) = $5 in defaultType s1 >> defaultType s2 }
-;
 
 UnOp :: { (QualName Name, SrcLoc) }
       : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }
@@ -473,9 +463,6 @@ TupleTypes :: { [UncheckedTypeExp] }
 DimDecl :: { (DimDecl Name, SrcLoc) }
         : QualName
           { (NamedDim (fst $1), snd $1) }
-        | declit
-          { let L loc (DECLIT n) = $1
-            in (ConstDim (fromIntegral n), loc) }
         | intlit
           { let L loc (INTLIT n) = $1
             in (ConstDim (fromIntegral n), loc) }
@@ -610,10 +597,10 @@ Apply :: { UncheckedExp }
 
 Atom :: { UncheckedExp }
 Atom : PrimLit        { Literal (fst $1) (snd $1) }
-     | stringlit      {% let L pos (STRINGLIT s) = $1 in do
-                             s' <- mapM (getIntValue . fromIntegral . ord) s
-                             t <- lift $ gets parserIntType
-                             return $ ArrayLit (map (flip Literal pos . SignedValue) s') NoInfo pos }
+     | intlit         { let L loc (INTLIT x) = $1 in IntLit x NoInfo loc }
+     | floatlit       { let L loc (FLOATLIT x) = $1 in FloatLit x NoInfo loc }
+     | stringlit      { let L loc (STRINGLIT s) = $1 in
+                        ArrayLit (map (flip Literal loc . SignedValue . Int32Value . fromIntegral . ord) s) NoInfo loc }
      | empty '(' TypeExpDecl ')'   { Empty $3 NoInfo (srcspan $1 $>) }
      | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
@@ -652,6 +639,26 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
        { OpSectionLeft $3 NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
      | '(' BinOp ')'
        { OpSection $2 NoInfo NoInfo NoInfo NoInfo (srcspan $1 $>) }
+
+PrimLit :: { (PrimValue, SrcLoc) }
+        : true   { (BoolValue True, $1) }
+        | false  { (BoolValue False, $1) }
+
+        | i8lit   { let L loc (I8LIT num)  = $1 in (SignedValue $ Int8Value num, loc) }
+        | i16lit  { let L loc (I16LIT num) = $1 in (SignedValue $ Int16Value num, loc) }
+        | i32lit  { let L loc (I32LIT num) = $1 in (SignedValue $ Int32Value num, loc) }
+        | i64lit  { let L loc (I64LIT num) = $1 in (SignedValue $ Int64Value num, loc) }
+
+        | u8lit  { let L loc (U8LIT num)  = $1 in (UnsignedValue $ Int8Value $ fromIntegral num, loc) }
+        | u16lit { let L loc (U16LIT num) = $1 in (UnsignedValue $ Int16Value $ fromIntegral num, loc) }
+        | u32lit { let L loc (U32LIT num) = $1 in (UnsignedValue $ Int32Value $ fromIntegral num, loc) }
+        | u64lit { let L loc (U64LIT num) = $1 in (UnsignedValue $ Int64Value $ fromIntegral num, loc) }
+
+        | f32lit { let L loc (F32LIT num) = $1 in (FloatValue $ Float32Value num, loc) }
+        | f64lit { let L loc (F64LIT num) = $1 in (FloatValue $ Float64Value num, loc) }
+
+        | charlit { let L loc (CHARLIT char) = $1
+                    in (SignedValue $ Int32Value $ fromIntegral $ ord char, loc) }
 
 Atoms1 :: { (UncheckedExp, [UncheckedExp]) }
         : Atom Atoms1 { ($1, fst $2 : snd $2) }
@@ -741,7 +748,7 @@ VarId : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
 
 FieldId :: { (Name, SrcLoc) }
          : id     { let L loc (ID name) = $1 in (name, loc) }
-         | declit { let L loc (DECLIT n) = $1 in (nameFromString (show n), loc) }
+         | intlit { let L loc (INTLIT n) = $1 in (nameFromString (show n), loc) }
 
 Pattern :: { PatternBase NoInfo Name }
 Pattern : InnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
@@ -791,8 +798,7 @@ CatValues : Value CatValues { $1 : $2 }
           |                 { [] }
 
 NaturalInt :: { Int }
-           : declit { let L _ (DECLIT num) = $1 in fromIntegral num  }
-           | intlit { let L _ (INTLIT num) = $1 in fromIntegral num  }
+           : intlit   { let L _ (INTLIT num) = $1 in fromIntegral num  }
 
 NaturalInts :: { [Int] }
            : NaturalInt                 { [$1] }
@@ -807,29 +813,24 @@ IntValue :: { Value }
          | UnsignedLit { PrimValue (UnsignedValue (fst $1)) }
 
 FloatValue :: { Value }
-         : FloatLit { PrimValue (FloatValue (fst $1)) }
+         : FloatLit     { PrimValue (FloatValue (fst $1)) }
          | '-' FloatLit { PrimValue (FloatValue (floatNegate (fst $2))) }
 
 StringValue :: { Value }
-StringValue : stringlit  {% let L pos (STRINGLIT s) = $1 in do
-                             s' <- mapM (getIntValue . fromIntegral . ord) s
-                             t <- lift $ gets parserIntType
-                             return $ ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t }
+StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in
+                           ArrayValue (arrayFromList $ map (PrimValue . SignedValue . Int32Value . fromIntegral . ord) s) $ Prim $ Signed Int32 }
 
 BoolValue :: { Value }
 BoolValue : true           { PrimValue $ BoolValue True }
           | false          { PrimValue $ BoolValue False }
 
 SignedLit :: { (IntValue, SrcLoc) }
-          : i8lit   { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
-          | i16lit  { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
-          | i32lit  { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
-          | i64lit  { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
-          | declit  {% let L pos (DECLIT num) = $1 in do num' <- getIntValue (toInteger num); return (num', pos) }
-          | intlit  {% let L pos (INTLIT num) = $1 in do num' <- getIntValue (toInteger num); return (num', pos) }
-          | charlit {% let L pos (CHARLIT char) = $1 in do
-                       num <- getIntValue $ fromIntegral $ ord char
-                       return (num, pos) }
+          : i8lit   { let L loc (I8LIT num)  = $1 in (Int8Value num, loc) }
+          | i16lit  { let L loc (I16LIT num) = $1 in (Int16Value num, loc) }
+          | i32lit  { let L loc (I32LIT num) = $1 in (Int32Value num, loc) }
+          | i64lit  { let L loc (I64LIT num) = $1 in (Int64Value num, loc) }
+          | intlit  { let L loc (INTLIT num) = $1 in (Int32Value $ fromInteger num, loc) }
+          | charlit { let L loc (CHARLIT char) = $1 in (Int32Value $ fromIntegral $ ord char, loc) }
 
 UnsignedLit :: { (IntValue, SrcLoc) }
             : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value $ fromIntegral num, pos) }
@@ -838,18 +839,9 @@ UnsignedLit :: { (IntValue, SrcLoc) }
             | u64lit { let L pos (U64LIT num) = $1 in (Int64Value $ fromIntegral num, pos) }
 
 FloatLit :: { (FloatValue, SrcLoc) }
-         : f32lit { let L pos (F32LIT num) = $1 in (Float32Value num, pos) }
-         | f64lit { let L pos (F64LIT num) = $1 in (Float64Value num, pos) }
-         | reallit {% let L pos (REALLIT num) = $1 in do num' <- getRealValue num; return (num', pos) }
-         | hexreallit {% let L pos (REALLIT num) = $1 in do num' <- getRealValue num; return (num', pos)}
-
-PrimLit :: { (PrimValue, SrcLoc) }
-        : SignedLit { let (x,loc) = $1 in (SignedValue x, loc) }
-        | UnsignedLit { let (x,loc) = $1 in (UnsignedValue x, loc) }
-        | FloatLit { let (x,loc) = $1 in (FloatValue x, loc) }
-
-        | true   { (BoolValue True, $1) }
-        | false  { (BoolValue False, $1) }
+         : f32lit { let L loc (F32LIT num) = $1 in (Float32Value num, loc) }
+         | f64lit { let L loc (F64LIT num) = $1 in (Float64Value num, loc) }
+         | floatlit { let L loc (FLOATLIT num) = $1 in (Float64Value num, loc) }
 
 ArrayValue :: { Value }
 ArrayValue :  '[' Value ']'
@@ -901,33 +893,7 @@ reverseNonempty (x, l) =
 
 data ParserEnv = ParserEnv {
                  parserFile :: FilePath
-               , parserIntType :: IntType
-               , parserRealType :: FloatType
-               , parserRealFun :: Double -> FloatValue
                }
-
-newParserEnv :: FilePath -> IntType -> FloatType -> ParserEnv
-newParserEnv path intType realType =
-  let s = ParserEnv path intType realType Float64Value
-  in modParserEnv s realType
-
-modParserEnv :: ParserEnv -> FloatType -> ParserEnv
-modParserEnv s realType =
-  case realType of
-    Float32 -> s {
-        parserRealType = Float32,
-        parserRealFun = float32RealFun
-      }
-    Float64 -> s {
-        parserRealType = Float64,
-        parserRealFun = float64RealFun
-      }
-  where
-
-    float32RealFun x =
-      let (m,n) = decodeFloat x
-      in Float32Value $ encodeFloat m n
-    float64RealFun = Float64Value
 
 type ParserMonad a =
   ExceptT String (
@@ -1007,33 +973,8 @@ primTypeFromName :: Name -> ParserMonad PrimType
 primTypeFromName s = maybe boom return $ M.lookup s namesToPrimTypes
   where boom = fail $ "No type named " ++ nameToString s
 
-defaultType :: Name -> ParserMonad ()
-defaultType name = do
-  t <- primTypeFromName name
-  s <- lift get
-  case t of
-    Signed t'    -> lift $ put s { parserIntType = t' }
-    Unsigned t'  -> lift $ put s { parserIntType = t' }
-    FloatType t' -> lift $ put $ modParserEnv s t'
-    _            -> fail $ "Cannot default literals to type " ++ pretty name
-
 getFilename :: ParserMonad FilePath
 getFilename = lift $ gets parserFile
-
-getIntValue :: Integer -> ParserMonad IntValue
-getIntValue x = do
-  t <- lift $ gets parserIntType
-  return $ getIntFun t x
-
-getIntFun :: IntType -> (Integer -> IntValue)
-getIntFun Int8  = Int8Value . fromInteger
-getIntFun Int16 = Int16Value . fromInteger
-getIntFun Int32 = Int32Value . fromInteger
-getIntFun Int64 = Int64Value . fromInteger
-
-getRealValue :: Double -> ParserMonad FloatValue
-getRealValue x = do f <- lift $ gets parserRealFun
-                    return $ f x
 
 intNegate :: IntValue -> IntValue
 intNegate (Int8Value v) = Int8Value (-v)
@@ -1103,7 +1044,7 @@ parseInMonad p file program =
   either (Left . ParseError) Right <$> either (return . Left)
   (evalStateT (evalStateT (runExceptT p) env))
   (scanTokensText file program)
-  where env = newParserEnv file Int32 Float64
+  where env = ParserEnv file
 
 parseIncrementalM :: Monad m =>
                      ParserMonad a

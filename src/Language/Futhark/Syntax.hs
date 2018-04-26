@@ -111,6 +111,7 @@ class (Show vn,
        Show (f [VName]),
        Show (f PatternType),
        Show (f CompType),
+       Show (f (TypeBase () ())),
        Show (f Int),
        Show (f [TypeBase () ()]),
        Show (f StructType),
@@ -563,6 +564,12 @@ instance Hashable vn => Hashable (QualName vn) where
 data ExpBase f vn =
               Literal PrimValue SrcLoc
 
+            | IntLit Integer (f (TypeBase () ())) SrcLoc
+            -- ^ A polymorphic integral literal.
+
+            | FloatLit Double (f (TypeBase () ())) SrcLoc
+            -- ^ A polymorphic decimal literal.
+
             | Parens (ExpBase f vn) SrcLoc
             -- ^ A parenthesized expression.
 
@@ -723,6 +730,8 @@ deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc)                = locOf loc
+  locOf (IntLit _ _ loc)               = locOf loc
+  locOf (FloatLit _ _ loc)             = locOf loc
   locOf (Parens _ loc)                 = locOf loc
   locOf (QualParens _ _ loc)           = locOf loc
   locOf (TupLit _ pos)                 = locOf pos

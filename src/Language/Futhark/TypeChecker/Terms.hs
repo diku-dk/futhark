@@ -251,9 +251,6 @@ liftTypeM = TermTypeM . lift
 getConstraints :: TermTypeM Constraints
 getConstraints = gets fst
 
-putConstraints :: Constraints -> TermTypeM ()
-putConstraints c = modify $ \(_, x) -> (c, x)
-
 modifyConstraints :: (Constraints -> Constraints) -> TermTypeM ()
 modifyConstraints f = modify $ \s -> (f $ fst s, snd s)
 
@@ -776,6 +773,16 @@ checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
   return $ Literal val loc
 
+checkExp (IntLit val NoInfo loc) = do
+  t <- newTypeVar loc "t"
+  mustBeOneOf anyNumberType loc t
+  return $ IntLit val (Info t) loc
+
+checkExp (FloatLit val NoInfo loc) = do
+  t <- newTypeVar loc "t"
+  mustBeOneOf anyFloatType loc t
+  return $ FloatLit val (Info t) loc
+
 checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
 
@@ -1038,12 +1045,10 @@ checkExp (Reshape shapeexp arrexp NoInfo loc) = do
   arr_t <- expType arrexp'
 
   case shape_t of
-    t | Just ts <- isTupleRecord t,
-        all ((`elem` map Prim anyIntType) . toStruct) ts -> return ()
-    Prim Signed{} -> return ()
-    Prim Unsigned{} -> return ()
-    t -> typeError loc $ "Shape argument " ++ pretty shapeexp ++
-      " to reshape must be integer or tuple of integers, but is " ++ pretty t
+    t | Just ts <- isTupleRecord t ->
+          mapM_ (unify (srclocOf shapeexp) (Prim $ Signed Int32) . toStruct) ts
+      | otherwise ->
+          unify (srclocOf shapeexp) (Prim $ Signed Int32) $ toStruct t
 
   case arr_t of
     Array{} -> return ()
@@ -1447,12 +1452,18 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
 
     body' <- checkFunBody body (snd <$> maybe_retdecl') (maybe loc srclocOf maybe_retdecl)
 
-    -- We are now done inferring types.  Replace all inferred types in
-    -- the body and parameters.
+    -- We are now done inferring types.  First we find any remaining
+    -- overloaded type variables that were created in this function
+    -- and determine them using defaults.
+    fixOverloadedTypes $ S.fromList $ M.keys then_substs
+
+    -- Then replace all inferred types in the body and parameters.
     body'' <- updateExpTypes body'
     params'' <- updateExpTypes params'
+    now_substs <- getConstraints
 
     body_t <- expType body''
+
     (maybe_retdecl'', rettype) <- case maybe_retdecl' of
       Just (retdecl', retdecl_type) -> do
         let rettype_structural = toStructural retdecl_type
@@ -1460,11 +1471,18 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         return (Just retdecl', retdecl_type)
       Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
 
-    now_substs <- getConstraints
     let new_substs = now_substs `M.difference` then_substs
     tparams'' <- closeOverTypes new_substs tparams' $
                  rettype : map patternStructType params''
-    putConstraints $ then_substs `M.intersection` now_substs
+
+    -- We keep only those type variables that existed before the
+    -- function, or which are used in the substitutions for those that
+    -- are.
+    let then_type_variables = S.fromList (M.keys then_substs)
+        then_type_substs = M.elems $ constraintSubsts $
+                           M.filterWithKey (\k _ -> k `S.member` then_type_variables) now_substs
+        keep_type_variables = then_type_variables <> foldMap typeVars then_type_substs
+    modifyConstraints $ M.filterWithKey $ \k _ -> k `S.member` keep_type_variables
 
     return (fname', tparams'', params'', maybe_retdecl'', rettype, body'')
 
@@ -1523,6 +1541,18 @@ checkFunBody body maybe_rettype _loc = do
     Nothing -> return ()
 
   return body'
+
+-- | This is "fixing" as in "setting them", not "correcting them".  We
+-- only make very conservative fixing.
+fixOverloadedTypes :: S.Set VName -> TermTypeM ()
+fixOverloadedTypes not_these = getConstraints >>= mapM_ fixOverloaded . M.toList
+  where fixOverloaded (v, Overloaded ots loc)
+          | v `S.member` not_these = return ()
+          | Signed Int32 `elem` ots =
+              unify loc (TypeVar (typeName v) []) $ Prim $ Signed Int32
+          | FloatType Float64 `elem` ots =
+              unify loc (TypeVar (typeName v) []) $ Prim $ FloatType Float64
+        fixOverloaded _ = return ()
 
 -- | Find at all type variables in the given type that are covered by
 -- the constraints, and produce type parameters that close over them.
@@ -1775,7 +1805,17 @@ mustBeOneOf ts loc t = do
                   "\" with any of " ++ intercalate "," (map pretty ts) ++ "."
 
 linkVarToTypes :: SrcLoc -> VName -> [PrimType] -> TermTypeM ()
-linkVarToTypes loc vn ts = modifyConstraints $ M.insert vn $ Overloaded ts loc
+linkVarToTypes loc vn ts = do
+  vn_constraint <- M.lookup vn <$> getConstraints
+  case vn_constraint of
+    Just (Overloaded vn_ts vn_loc) ->
+      case ts `intersect` vn_ts of
+        [] -> typeError loc $ "Type constrained to one of " ++
+              intercalate "," (map pretty ts) ++ " but also one of " ++
+              intercalate "," (map pretty vn_ts) ++ " at " ++ locStr vn_loc ++ "."
+        ts' -> modifyConstraints $ M.insert vn $ Overloaded ts' loc
+
+    _ -> modifyConstraints $ M.insert vn $ Overloaded ts loc
 
 equalityType :: (Pretty (ShapeDecl dim), Monoid as) =>
                 SrcLoc -> TypeBase dim as -> TermTypeM ()

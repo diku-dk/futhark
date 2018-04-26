@@ -54,6 +54,10 @@ instance ASTMappable (ExpBase Info VName) where
     pure loc
   astMap _ (Literal val loc) =
     pure $ Literal val loc
+  astMap tv (IntLit val t loc) =
+    IntLit val <$> traverse (mapOnType tv) t <*> pure loc
+  astMap tv (FloatLit val t loc) =
+    FloatLit val <$> traverse (mapOnType tv) t <*> pure loc
   astMap tv (Parens e loc) =
     Parens <$> mapOnExp tv e <*> pure loc
   astMap tv (QualParens name e loc) =

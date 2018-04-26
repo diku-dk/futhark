@@ -59,10 +59,11 @@ is a double-precision float.
 
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
-``f64``.  If no suffix is given, integer literals are of type ``i32``,
-and decimal literals are of type ``f64``.  Hexadecimal literals are
-supported by prefixing with ``0x``, and binary literals by prefixing
-with ``0b``.
+``f64``.  If no suffix is given, the type of the literal will be
+inferred based on its use.  If the use is not constrained, integral
+literals will be assigned type ``i32``, and decimal literals type
+``f64``.  Hexadecimal literals are supported by prefixing with ``0x``,
+and binary literals by prefixing with ``0b``.
 
 Floats can also be written in hexadecimal format such as ``0x1.fp3``,
 instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
@@ -167,7 +168,6 @@ declaration can only refer to names bound by preceding declarations.
 .. productionlist::
    dec:   `fun_bind` | `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
       : | "open" `mod_exp`
-      : | `default_dec`
       : | "import" `stringlit`
 
 Declaring Functions and Values
@@ -1116,30 +1116,3 @@ Qualified imports are also possible, where a module is created for the
 file::
 
   module M = import "module"
-
-Literal Defaults
-----------------
-
-.. productionlist::
-   default_dec:   "default" (`int_type`)
-              : | "default" (`float_type`)
-              : | "default" (`int_type`, `float_type`)
-
-By default, Futhark interprets integer literals as ``i32`` values, and decimal
-literals (integer literals containing a decimal point) as ``f64`` values. These
-defaults can be changed using the `Haskell-inspired
-<https://wiki.haskell.org/Keywords#default>`_ ``default`` keyword.
-
-To change the ``i32`` default to e.g. ``i64``, type the following at the top of
-your file::
-
-  default(i64)
-
-To change the ``f64`` default to ``f32``, type the following at the top of your
-file::
-
-  default(f32)
-
-To change both, type::
-
-  default(i64,f32)
