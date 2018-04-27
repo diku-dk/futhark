@@ -1,4 +1,21 @@
-module Futhark.Optimise.MemoryBlockMerging.Types where
+module Futhark.Optimise.MemoryBlockMerging.Types
+  ( MName
+  , MNames
+  , MemorySrc(..)
+  , MemoryLoc(..)
+  , VarMemMappings
+  , MemAliases
+  , VarAliases
+  , FirstUses
+  , StmOrRes(..)
+  , LastUses
+  , Interferences
+  , ActualVariables
+  , PotentialKernelDataRaceInterferences
+  , PotentialKernelDataRaceInterferenceGroup
+  , KernelFirstUse
+  )
+where
 
 import qualified Data.Map.Strict as M
 import qualified Data.Semigroup as Sem
@@ -61,22 +78,6 @@ type KernelFirstUse = (MName, VName, PrimType, ExpMem.IxFun)
 
 -- "Links" for handling how variables belong together.
 type ActualVariables = M.Map VName Names
-
--- Information needed by multiple transformations.
-data AuxiliaryInfo = AuxiliaryInfo
-  { auxName :: Name -- For debugging.
-  , auxVarMemMappings :: VarMemMappings MemorySrc
-  , auxMemAliases :: MemAliases
-  , auxVarAliases :: VarAliases
-  , auxFirstUses :: FirstUses
-  , auxLastUses :: LastUses
-  , auxInterferences :: Interferences
-  , auxPotentialKernelDataRaceInterferences
-    :: PotentialKernelDataRaceInterferences
-  , auxActualVariables :: ActualVariables
-  , auxExistentials :: Names
-  }
-  deriving (Show)
 
 -- Log keeping.  Statement variable names to a list of topic-content-mappings.
 newtype Log = Log (M.Map VName [(String, String)])

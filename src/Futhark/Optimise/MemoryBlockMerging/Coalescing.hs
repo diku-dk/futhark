@@ -12,8 +12,6 @@ import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 
 import Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo
-import Futhark.Optimise.MemoryBlockMerging.Types
-
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationMovingUp
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
 

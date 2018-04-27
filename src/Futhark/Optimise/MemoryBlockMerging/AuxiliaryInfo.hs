@@ -1,7 +1,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 -- | Helper information for the main optimisation passes.
-module Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo where
+module Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo
+  ( AuxiliaryInfo(..), getAuxiliaryInfo)
+where
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
@@ -17,6 +19,21 @@ import Futhark.Optimise.MemoryBlockMerging.Liveness.Interference
 import Futhark.Optimise.MemoryBlockMerging.ActualVariables
 import Futhark.Optimise.MemoryBlockMerging.Existentials
 
+-- Information needed by multiple transformations.
+data AuxiliaryInfo = AuxiliaryInfo
+  { auxName :: Name -- For debugging.
+  , auxVarMemMappings :: VarMemMappings MemorySrc
+  , auxMemAliases :: MemAliases
+  , auxVarAliases :: VarAliases
+  , auxFirstUses :: FirstUses
+  , auxLastUses :: LastUses
+  , auxInterferences :: Interferences
+  , auxPotentialKernelDataRaceInterferences
+    :: PotentialKernelDataRaceInterferences
+  , auxActualVariables :: ActualVariables
+  , auxExistentials :: Names
+  }
+  deriving (Show)
 
 getAuxiliaryInfo :: FunDef ExplicitMemory -> AuxiliaryInfo
 getAuxiliaryInfo fundef =

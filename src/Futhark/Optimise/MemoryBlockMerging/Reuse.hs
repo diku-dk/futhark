@@ -12,11 +12,8 @@ import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 
 import Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo
-import Futhark.Optimise.MemoryBlockMerging.Types
-
 import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeMovingUp
 import Futhark.Optimise.MemoryBlockMerging.Reuse.Core
-
 
 reuseInProg :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
 reuseInProg = intraproceduralTransformation reuseInFunDef
