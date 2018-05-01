@@ -522,8 +522,8 @@ Evaluates to the result of ``e``.
 ``(e1, e2, ..., eN)``
 .....................
 
-Evaluates to a tuple containing ``N`` values.  Equivalent to ``(1=e1,
-2=e2, ..., N=eN)``.
+Evaluates to a tuple containing ``N`` values.  Equivalent to the
+record literal ``{1=e1, 2=e2, ..., N=eN}``.
 
 ``{f1, f2, ..., fN}``
 .....................
@@ -694,7 +694,7 @@ Due to ambiguities, this syntactic form cannot appear as an array
 index expression unless it is first enclosed in parentheses.
 
 ``! x``
-.........
+.......
 
 Logical negation of ``x``, which must be of type ``bool``.
 
@@ -709,14 +709,14 @@ Numerical negation of ``x``, which must be of numeric type.
 Bitwise negation of ``x``, which must be of integral type.
 
 ``reshape (d_1, ..., d_n) a``
-...............................
+.............................
 
 Reshape the elements of ``a`` into an ``n``-dimensional array of the
 specified shape.  The number of elements in ``a`` must be equal to the
 product of the new dimensions.
 
 ``rearrange (d_1, ..., d_n) a``
-..................................
+...............................
 
 Permute the dimensions in the array, returning a new array.  The
 ``d_i`` must be *static* integers, and constitute a proper
@@ -734,22 +734,8 @@ Intuitively, you can think of it as subtracting ``i`` from every index
 
 For example, if ``b==rotate 1 i a``, then ``b[x,y+1] = a[x,y]``.
 
-``concat a_1 ..., a_n``
-.........................
-
-Concatenate the rows/elements of several arrays.  The shape of the
-arrays must be identical in all but the first dimension.  This is
-equivalent to ``concat@0`` (see below).
-
-``concat@i a_1 ... a_n``
-.........................
-
-Concatenate arrays across dimension ``i``, with the outermost
-dimension being ``0``.  The ``i`` must be a compile-time integer
-constant, i.e. ``i`` cannot be a variable.
-
 ``zip x y z``
-..................
+.............
 
 Zips together the elements of the outer dimensions of arrays ``x``,
 ``y``, and ``z``.  Static or runtime check is performed to check that
@@ -760,14 +746,14 @@ the result will be a single-dimensional array of *n*-tuples (where the
 the tuple components may themselves be arrays).
 
 ``zip@i x y z``
-..................
+...............
 
 Like ``zip``, but operates within ``i+1`` dimensions.  Thus, ``zip@0``
 is equivalent to unadorned ``zip``.  This form is useful when zipping
 multidimensional arrays along the innermost dimensions.
 
 ``unzip a``
-............
+...........
 
 If the type of ``a`` is ``[(t_1, ..., t_n)]``, the result is a tuple
 of *n* arrays, i.e., ``([t_1], ..., [t_n])``, and otherwise a type
