@@ -4,7 +4,7 @@ module Futhark.Doc.Generator (renderFile, indexPage) where
 import Control.Monad
 import Control.Monad.State
 import Control.Monad.Reader
-import Data.List (sort)
+import Data.List (sort, intersperse)
 import Data.Semigroup ((<>))
 import Data.Maybe
 import qualified Data.Map as M
@@ -26,13 +26,12 @@ type Context = (String,FileModule)
 type DocEnv = M.Map (Namespace,VName) String
 type DocM = ReaderT Context (State DocEnv)
 
-renderFile :: [Dec] -> DocM Html
-renderFile ds = do
-  current <- asks fst
-  file_comment <- asks $ progDoc . fileProg . snd
+renderFile :: String -> FileModule -> State DocEnv Html
+renderFile current fm = flip runReaderT (current, fm) $ do
+  let file_comment = progDoc $ fileProg fm
   moduleBoilerplate current .
     ((H.div ! A.id "file_comment" $ renderDoc file_comment) <>) <$>
-    renderDecs ds
+    renderDecs (progDecs $ fileProg fm)
 
 indexPage :: [(String, String)] -> Html
 indexPage pages = docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $
@@ -71,14 +70,26 @@ prettyDec fileModule dec = case dec of
   ModDec m -> prettyMod fileModule m
   ValDec v -> return <$> prettyVal fileModule v
   TypeDec t -> renderType fileModule t
-  OpenDec _x _xs (Info _names) _ -> Nothing
-                            --Just $ prettyOpen fileModule (x:xs) names
+  OpenDec x xs (Info _names) _
+    | Just opened <- mapM prettyOpened (x:xs) -> Just $ do
+        opened' <- sequence opened
+        return $ "open " <> mconcat (intersperse " " opened')
+    | otherwise ->
+        Just $ return $ fromString $ "open <" <> unwords (map pretty $ x:xs) ++ ">"
   LocalDec _ _ -> Nothing
 
---prettyOpen :: FileModule -> [ModExpBase Info VName] -> [VName] -> DocM Html
---prettyOpen fm xs (Info names) = mconcat <$> mapM (renderModExp fm) xs
---  where FileModule (Env { envModTable = modtable }) = fm
-    --envs = foldMap (renderEnv . (\(ModEnv e) -> e) . (modtable M.!)) names
+prettyOpened :: ModExp -> Maybe (DocM Html)
+prettyOpened (ModVar qn _) = Just $ vnameHtmlM Term $ qualLeaf qn
+prettyOpened (ModParens me _) = do me' <- prettyOpened me
+                                   Just $ parens <$> me'
+prettyOpened (ModImport _ (Info file) _) = Just $ do
+  current <- asks fst
+  let dest = fromString $ relativise file current <> ".html"
+  return $ "import " <> (a ! A.href dest) (fromString $ show file)
+prettyOpened (ModAscript _ se _ _) = Just $ do
+  se' <- renderSigExp se
+  return $ "... : " <> se'
+prettyOpened _ = Nothing
 
 prettyVal :: FileModule -> ValBindBase t VName -> Maybe Html
 prettyVal fm (ValBind _ name _retdecl _rettype _tparams _args _ doc _)
