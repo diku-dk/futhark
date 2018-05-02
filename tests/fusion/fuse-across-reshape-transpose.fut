@@ -4,7 +4,7 @@
 -- output {
 --   [[2, 8, 14], [4, 10, 16], [6, 12, 18]]
 -- }
--- structure { Map 2 }
+-- structure { /Screma 1 }
 let main(): [][]i32 =
   let n = 9
   let a = map (+1) (iota(n))

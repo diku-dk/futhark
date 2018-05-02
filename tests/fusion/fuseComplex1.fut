@@ -1,7 +1,7 @@
 -- ==
 -- input { [1.0, 2.0] [[1.0, 2.0], [-4.0, 1.5]] }
 -- output { 8.0 -1.0 0.0 -1.0 5.5 }
--- structure { Redomap 1 Reduce 0 Map 0 }
+-- structure { Screma 1 }
 
 let f1(p:  (f64,f64) ): (f64,f64,f64) =
     let (a1, a2) = p in (a1 * a2, a1 + a2, a1 - a2)

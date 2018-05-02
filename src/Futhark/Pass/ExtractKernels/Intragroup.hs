@@ -155,7 +155,7 @@ intraGroupStm stm@(Let pat _ e) = do
           fbody' <- intraGroupBody fbody
           letBind_ pat $ If cond tbody' fbody' ifattr
 
-    Op (Map w fun arrs) -> do
+    Op (Screma w form arrs) | Just fun <- isMapSOAC form -> do
       body_stms <- collectStms_ $ do
         forM_ (zip (lambdaParams fun) arrs) $ \(p, arr) -> do
           arr_t <- lookupType arr
@@ -168,7 +168,8 @@ intraGroupStm stm@(Let pat _ e) = do
       mapM_ (parallels . arrayDims) $ patternTypes pat
       parallel w
 
-    Op (Scanomap w scanfun foldfun nes arrs) -> do
+    Op (Screma w form arrs)
+      | Just (scanfun, nes, foldfun) <- isScanomapSOAC form -> do
       let (scan_pes, map_pes) =
             splitAt (length nes) $ patternElements pat
       scan_input <- procInput ltid (Pattern [] map_pes) w foldfun nes arrs
@@ -188,7 +189,8 @@ intraGroupStm stm@(Let pat _ e) = do
         Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
       parallel w
 
-    Op (Redomap w _ redfun foldfun nes arrs) -> do
+    Op (Screma w form arrs)
+      | Just (_, redfun, nes, foldfun) <- isRedomapSOAC form -> do
       let (red_pes, map_pes) =
             splitAt (length nes) $ patternElements pat
       red_input <- procInput ltid (Pattern [] map_pes) w foldfun nes arrs
@@ -207,14 +209,6 @@ intraGroupStm stm@(Let pat _ e) = do
       letBind_ (Pattern [] red_pes) $
         Op $ Out.GroupReduce w redfun'' $ zip nes red_input
       parallel w
-
-    Op (Reduce w comm lam args) ->
-      let (nes, arrs) = unzip args
-      in intraGroupStm stm { stmExp = Op $ Redomap w comm lam lam nes arrs }
-
-    Op (Scan w lam args) ->
-      let (nes, arrs) = unzip args
-      in intraGroupStm stm { stmExp = Op $ Scanomap w lam lam nes arrs }
 
     Op (Stream w (Sequential accs) lam arrs)
       | chunk_size_param : _ <- lambdaParams lam -> do

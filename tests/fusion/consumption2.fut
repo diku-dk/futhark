@@ -1,7 +1,7 @@
 -- After fusion, consumes a free variable.  Fixed with copy().
 --
 -- ==
--- structure { Redomap 1 }
+-- structure { /Screma 1 }
 
 let main [n][m] (as: [n]i32, bs: [m]bool): [n]i32 =
   let css = map (\(b: bool): [n]i32  ->

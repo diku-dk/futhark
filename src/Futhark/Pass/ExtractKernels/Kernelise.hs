@@ -34,11 +34,12 @@ transformStms = mapM_ transformStm . stmsToList
 
 transformStm :: Transformer m => Stm -> m ()
 
-transformStm (Let pat aux (Op (Redomap w _ red_lam map_lam nes arrs)))
+transformStm (Let pat aux (Op (Screma w form arrs)))
   -- No map-out part
-  | patternSize pat == length nes = do
+  | Just (_, red_lam, nes, map_lam) <- isRedomapSOAC form,
+    patternSize pat == length nes = do
 
-  fold_lam <- composeLambda red_lam map_lam
+  fold_lam <- composeLambda nilFn red_lam map_lam
 
   chunk_size <- newVName "chunk_size"
   chunk_offset <- newVName "chunk_offset"

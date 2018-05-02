@@ -11,8 +11,7 @@
 --   [0.0,1.0,2.0]
 -- }
 -- structure {
---      Map 1
---      Redomap 1
+--      /Screma 2
 -- }
 --
 let mul2(x: []f64) (i: i32): f64 = x[i]*2.0

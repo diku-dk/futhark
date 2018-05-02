@@ -563,56 +563,29 @@ evalSOAC (Stream w form elam arrs) = do
   chunkval <- evalSubExp w
   fun (chunkval:accvals++arrvals)
 
-evalSOAC (Map w fun arrexps) = do
-  vss' <- mapM (applyLambda fun) =<< soacArrays w arrexps
-  arrays (lambdaReturnType fun) vss'
+evalSOAC (Screma w (ScremaForm (scan_lam, scan_nes) (_, red_lam, red_nes) map_lam) arrs) = do
+  scan_nes' <- mapM evalSubExp scan_nes
+  red_nes' <- mapM evalSubExp red_nes
 
-evalSOAC (Reduce w _ fun inputs) = do
-  let (accexps, arrexps) = unzip inputs
-  startaccs <- mapM evalSubExp accexps
-  let foldfun acc x = applyLambda fun $ acc ++ x
-  foldM foldfun startaccs =<< soacArrays w arrexps
+  let initial = ([], red_nes', [], scan_nes')
 
-evalSOAC (Scan w fun inputs) = do
-  let (accexps, arrexps) = unzip inputs
-  startvals <- mapM evalSubExp accexps
-  (acc, vals') <- foldM scanfun (startvals, []) =<<
-                  soacArrays w arrexps
-  arrays (map valueType acc) $ reverse vals'
-    where scanfun (acc, l) x = do
-            acc' <- applyLambda fun $ acc ++ x
-            return (acc', acc' : l)
+  (scan_res, red_res, map_res, _) <-
+    foldM applyMapLam initial =<< soacArrays w arrs
 
-evalSOAC (Redomap w _ redfun foldfun accexp arrexps) = do
-  -- SO LAZY: redomap is scanomap, after which we index the last elements.
-  w' <- asInt "evalBasicOp Redomap" =<< evalSubExp w
-  vs <- evalSOAC $  Scanomap w redfun foldfun accexp arrexps
-  let (acc_arrs, arrs) = splitAt (length accexp) vs
-  accs <- if w' == 0
-          then mapM evalSubExp accexp
-          else forM acc_arrs $ \acc_arr ->
-                 indexArrayValue acc_arr $ DimFix (w' - 1) :
-                 map (unitSlice 0) (drop 1 $ valueShape acc_arr)
-  return $ accs++arrs
+  scan_res' <- arrays scan_ts $ reverse scan_res
+  map_res' <- arrays map_ts $ reverse map_res
 
-evalSOAC (Scanomap w scan_fun innerfun accexp arrexps) = do
-  startaccs <- mapM evalSubExp accexp
-  let startaccs'= (startaccs, [], replicate (res_len - acc_len) [])
-  (acc_res, vals,  arr_res) <- foldM foldfun startaccs' =<<
-                               soacArrays w arrexps
-  vals' <- arrays (map valueType acc_res) $ reverse vals
-  arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
-  return $ vals' ++ arr_res_fut
-    where
-        lam_ret_tp     = lambdaReturnType innerfun
-        res_len        = length lam_ret_tp
-        acc_len        = length accexp
-        lam_ret_arr_tp = drop acc_len lam_ret_tp
-        foldfun (acc, l, arr) x = do
-            (scan_res, res_arr) <- splitAt acc_len <$> applyLambda innerfun x
-            res_acc <- applyLambda scan_fun $ acc ++ scan_res
-            let acc_arr = zipWith (:) res_arr arr
-            return (res_acc, res_acc:l, acc_arr)
+  return $ scan_res' ++ red_res ++ map_res'
+  where (scan_ts, _red_ts, map_ts) =
+          splitAt3 (length scan_nes) (length red_nes) $ lambdaReturnType map_lam
+
+        applyMapLam (scan_out, red_acc, map_out, scan_acc) x = do
+          (to_scan, to_red, map_res) <-
+            splitAt3 (length scan_nes) (length red_nes) <$>
+            applyLambda map_lam x
+          scan_acc' <- applyLambda scan_lam $ scan_acc ++ to_scan
+          red_acc' <- applyLambda red_lam $ red_acc ++ to_red
+          return (scan_acc' : scan_out, red_acc', map_res : map_out, scan_acc')
 
 evalSOAC (Scatter w lam ivs dests) = do
   w' <- asInt32 "Scatter w" =<< evalSubExp w

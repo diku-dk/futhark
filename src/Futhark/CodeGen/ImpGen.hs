@@ -216,6 +216,7 @@ instance MonadFreshNames (ImpM lore op) where
   getNameSource = get
   putNameSource = put
 
+
 instance HasScope SOACS (ImpM lore op) where
   askScope = M.map (LetInfo . entryType) <$> asks envVtable
     where entryType (MemVar _ memEntry) =

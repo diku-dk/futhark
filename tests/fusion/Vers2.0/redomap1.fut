@@ -10,7 +10,7 @@
 --   [9.0f32, -6.0f32, -1.2f32]
 -- }
 -- structure {
---      Redomap 1
+--      Screma 1
 -- }
 --
 

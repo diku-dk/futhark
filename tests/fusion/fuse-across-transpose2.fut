@@ -1,5 +1,5 @@
 -- ==
--- structure { Map 2 }
+-- structure { /Screma 1 }
 let main (a_1: [][]i32, a_2: [][]i32): [][]i32 =
   let a = map2 (\(a_1r: []i32) (a_2r: []i32)  -> zip a_1r a_2r) (
                   a_1) (a_2)
