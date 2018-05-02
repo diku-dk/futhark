@@ -9,7 +9,7 @@
 --   [0.7, -2.8, -1.68]
 -- }
 -- structure {
---      Redomap 1
+--      Screma 1
 -- }
 --
 let main(arr: []f64): (f64,[]f64,[]f64,[]f64) =

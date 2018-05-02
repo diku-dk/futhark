@@ -12,7 +12,7 @@
 --            false, false, false, false, false, false, false, false, false, false, false,
 --            false, false, false, false, false, false, false, false]]
 -- }
--- structure { Map 3 Map/Map 1 }
+-- structure { /Screma 2 /Screma/Screma 1 }
 let main(t_v1: []i32, t_v3: [][]i32): [][]bool =
   let n = 3
   let t_v6 = map (\(x: i32): i32  -> (x + 1)) (iota(n))

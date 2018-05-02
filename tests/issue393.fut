@@ -1,5 +1,5 @@
 -- ==
--- structure { /Map 1 /Map/Map 1 /Map/Redomap 1 }
+-- structure { /Screma 1 /Screma/Screma 2 }
 
 let dotprod [n] (xs: [n]f64) (ys: [n]f64): f64 =
   reduce (+) 0.0 (map2 (*) xs ys)

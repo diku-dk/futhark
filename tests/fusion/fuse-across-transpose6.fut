@@ -36,7 +36,7 @@
 --    [2.326897180853236f64, 2.372540501622419f64, 2.135902194722964f64],
 --    [2.6295904397262726f64, 2.8264486916069096f64, 2.4935049184863627f64]]
 -- }
--- structure { Map/Scanomap 1 Map 1 }
+-- structure { /Screma 1 /Screma/Screma 1 /Screma/Screma/Screma 1 }
 
 import "/futlib/math"
 

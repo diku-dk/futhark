@@ -7,7 +7,7 @@
 -- output {
 --    [  [ 19 , 22  ] ,  [ 43 , 50  ]  ]
 -- }
--- structure { Map 2 Map/Map/Redomap 1 }
+-- structure { /Screma 1 /Screma/Screma 1 Screma/Screma/Screma 1 }
 let redplus1(a: []i32): i32 = reduce (+) 0 a
 let redplus2 [n] (a: [n][]i32): [n]i32 = map redplus1 a
 

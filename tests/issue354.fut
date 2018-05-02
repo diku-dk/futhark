@@ -1,5 +1,5 @@
 -- ==
--- structure { Map 6 }
+-- structure { Screma 6 }
 
 let linerp2D (image: [][]f32) (p: [2]i32): f32 =
   unsafe

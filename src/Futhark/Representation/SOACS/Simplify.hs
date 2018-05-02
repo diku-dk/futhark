@@ -38,6 +38,7 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.DataDependencies
 import Futhark.Transform.Rename
+import Futhark.Util
 
 simpleSOACS :: Simplify.SimpleOps SOACS
 simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
@@ -81,52 +82,26 @@ simplifySOAC (Stream outerdim form lam arr) = do
           acc' <- mapM Engine.simplify acc
           return (Sequential acc', mempty)
 
-simplifySOAC (Map w fun arrs) = do
-  w' <- Engine.simplify w
-  arrs' <- mapM Engine.simplify arrs
-  (fun', hoisted) <- Engine.simplifyLambda fun $ map Just arrs'
-  return (Map w' fun' arrs', hoisted)
-
-simplifySOAC (Reduce w comm fun input) = do
-  (fun', hoisted) <- Engine.simplifyLambda fun (map (const Nothing) arrs)
-  (,) <$> (Reduce <$> Engine.simplify w <*> pure comm <*> pure fun' <*>
-           (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs))
-      <*> pure hoisted
-  where (acc, arrs) = unzip input
-
-simplifySOAC (Scan w fun input) = do
-  (fun', hoisted) <- Engine.simplifyLambda fun (map (const Nothing) arrs)
-  (,) <$> (Scan <$> Engine.simplify w <*> pure fun' <*>
-           (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs))
-      <*> pure hoisted
-  where (acc, arrs) = unzip input
-
-simplifySOAC (Redomap w comm outerfun innerfun acc arrs) = do
-  (outerfun', outerfun_hoisted) <-
-    Engine.simplifyLambda outerfun (map (const Nothing) arrs)
-  (innerfun', innerfun_hoisted) <-
-    Engine.simplifyLambda innerfun (map Just arrs)
-  (,) <$> (Redomap <$> Engine.simplify w <*> pure comm <*>
-           pure outerfun' <*> pure innerfun' <*>
-           mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
-      <*> pure (outerfun_hoisted <> innerfun_hoisted)
-
-simplifySOAC (Scanomap w outerfun innerfun acc arrs) = do
-  (outerfun', outerfun_hoisted) <-
-    Engine.simplifyLambda outerfun (map (const Nothing) arrs)
-  (innerfun', innerfun_hoisted) <-
-    Engine.simplifyLambda innerfun (map Just arrs)
-  (,) <$> (Scanomap <$> Engine.simplify w <*>
-           pure outerfun' <*> pure innerfun' <*>
-           mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
-      <*> pure (outerfun_hoisted <> innerfun_hoisted)
-
 simplifySOAC (Scatter len lam ivs as) = do
   len' <- Engine.simplify len
   (lam', hoisted) <- Engine.simplifyLambda lam $ map Just ivs
   ivs' <- mapM Engine.simplify ivs
   as' <- mapM Engine.simplify as
   return (Scatter len' lam' ivs' as', hoisted)
+
+simplifySOAC (Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs) = do
+  (scan_lam', scan_lam_hoisted) <-
+    Engine.simplifyLambda scan_lam $ replicate (length scan_nes) Nothing
+  (red_lam', red_lam_hoisted) <-
+    Engine.simplifyLambda red_lam $ replicate (length red_nes) Nothing
+  (map_lam', map_lam_hoisted) <- Engine.simplifyLambda map_lam $ map Just arrs
+  (,) <$> (Screma <$> Engine.simplify w <*>
+           (ScremaForm <$>
+             ((,) scan_lam' <$> Engine.simplify scan_nes) <*>
+             ((,,) comm red_lam' <$> Engine.simplify red_nes) <*>
+             pure map_lam') <*>
+            Engine.simplify arrs) <*>
+    pure (scan_lam_hoisted <> red_lam_hoisted <> map_lam_hoisted)
 
 instance BinderOps (Wise SOACS) where
   mkExpAttrB = bindableMkExpAttrB
@@ -160,10 +135,8 @@ soacRules = standardRules <> ruleBook topDownRules bottomUpRules
 
 topDownRules :: [TopDownRule (Wise SOACS)]
 topDownRules = [RuleOp removeReplicateMapping,
-                RuleOp removeReplicateRedomap,
                 RuleOp removeReplicateWrite,
                 RuleOp removeUnusedSOACInput,
-                RuleOp simplifyClosedFormRedomap,
                 RuleOp simplifyClosedFormReduce,
                 RuleOp simplifyKnownIterationSOAC,
                 RuleOp fuseConcatScatter
@@ -180,7 +153,31 @@ bottomUpRules = [RuleOp removeDeadMapping,
                 ]
 
 liftIdentityMapping :: BottomUpRuleOp (Wise SOACS)
-liftIdentityMapping (_, usages) pat _ (Map outersize fun arrs) =
+liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
+  | Just fun <- isMapSOAC form = do
+  let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
+      free = freeInBody $ lambdaBody fun
+      rettype = lambdaReturnType fun
+      ses = bodyResult $ lambdaBody fun
+
+      freeOrConst (Var v)    = v `S.member` free
+      freeOrConst Constant{} = True
+
+      checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
+        | Just inp <- M.lookup v inputMap =
+            let e | patElemName outId `UT.isConsumed` usages = Copy inp
+                  | otherwise                                = SubExp $ Var inp
+            in ((Pattern [] [outId], BasicOp e) : invariant,
+                mapresult,
+                rettype')
+      checkInvariance (outId, e, t) (invariant, mapresult, rettype')
+        | freeOrConst e = ((Pattern [] [outId], BasicOp $ Replicate (Shape [w]) e) : invariant,
+                           mapresult,
+                           rettype')
+        | otherwise = (invariant,
+                       (outId, e) : mapresult,
+                       t : rettype')
+
   case foldr checkInvariance ([], [], []) $
        zip3 (patternElements pat) ses rettype of
     ([], _, _) -> cannotSimplify
@@ -190,47 +187,18 @@ liftIdentityMapping (_, usages) pat _ (Map outersize fun arrs) =
                      , lambdaReturnType = rettype'
                      }
       mapM_ (uncurry letBind) invariant
-      letBindNames_ (map patElemName pat') $ Op $ Map outersize fun' arrs
-  where inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
-        free = freeInBody $ lambdaBody fun
-        rettype = lambdaReturnType fun
-        ses = bodyResult $ lambdaBody fun
-
-        freeOrConst (Var v)    = v `S.member` free
-        freeOrConst Constant{} = True
-
-        checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
-          | Just inp <- M.lookup v inputMap =
-              let e | patElemName outId `UT.isConsumed` usages = Copy inp
-                    | otherwise                                = SubExp $ Var inp
-              in ((Pattern [] [outId], BasicOp e) : invariant,
-                  mapresult,
-                  rettype')
-        checkInvariance (outId, e, t) (invariant, mapresult, rettype')
-          | freeOrConst e = ((Pattern [] [outId], BasicOp $ Replicate (Shape [outersize]) e) : invariant,
-                             mapresult,
-                             rettype')
-          | otherwise = (invariant,
-                         (outId, e) : mapresult,
-                         t : rettype')
+      letBindNames_ (map patElemName pat') $ Op $ Screma w (mapSOAC fun') arrs
 liftIdentityMapping _ _ _ _ = cannotSimplify
 
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping :: TopDownRuleOp (Wise SOACS)
-removeReplicateMapping vtable pat _ (Map outersize fun arrs)
-  | Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = do
+removeReplicateMapping vtable pat _ (Screma w form arrs)
+  | Just fun <- isMapSOAC form,
+    Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = do
       forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
-      letBind_ pat $ Op $ Map outersize fun' arrs'
+      letBind_ pat $ Op $ Screma w (mapSOAC fun') arrs'
 removeReplicateMapping _ _ _ _ = cannotSimplify
-
--- | Like 'removeReplicateMapping', but for 'Redomap'.
-removeReplicateRedomap :: TopDownRuleOp (Wise SOACS)
-removeReplicateRedomap vtable pat _ (Redomap w comm redfun foldfun nes arrs)
-  | Just (bnds, foldfun', arrs') <- removeReplicateInput vtable foldfun arrs = do
-      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
-      letBind_ pat $ Op $ Redomap w comm redfun foldfun' nes arrs'
-removeReplicateRedomap _ _ _ _ = cannotSimplify
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
 removeReplicateWrite :: TopDownRuleOp (Wise SOACS)
@@ -272,28 +240,20 @@ removeReplicateInput vtable fun arrs
 
 -- | Remove inputs that are not used inside the SOAC.
 removeUnusedSOACInput :: TopDownRuleOp (Wise SOACS)
-removeUnusedSOACInput _ pat _ (Map width fun arrs)
+removeUnusedSOACInput _ pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
   | (used,unused) <- partition usedInput params_and_arrs,
     not (null unused) = do
       let (used_params, used_arrs) = unzip used
-          fun' = fun { lambdaParams = used_params }
-      letBind_ pat $ Op $ Map width fun' used_arrs
-  where params_and_arrs = zip (lambdaParams fun) arrs
-        used_in_body = freeInBody $ lambdaBody fun
-        usedInput (param, _) = paramName param `S.member` used_in_body
-removeUnusedSOACInput _ pat _ (Redomap w comm redfun mapfun nes arrs)
-  | (used,unused) <- partition usedInput params_and_arrs,
-    not (null unused) = do
-      let (used_params, used_arrs) = unzip used
-          mapfun' = mapfun { lambdaParams = used_params }
-      letBind_ pat $ Op $ Redomap w comm redfun mapfun' nes used_arrs
-  where params_and_arrs = zip (lambdaParams mapfun) arrs
-        used_in_body = freeInBody $ lambdaBody mapfun
+          map_lam' = map_lam { lambdaParams = used_params }
+      letBind_ pat $ Op $ Screma w (ScremaForm scan reduce map_lam') used_arrs
+  where params_and_arrs = zip (lambdaParams map_lam) arrs
+        used_in_body = freeInBody $ lambdaBody map_lam
         usedInput (param, _) = paramName param `S.member` used_in_body
 removeUnusedSOACInput _ _ _ _ = cannotSimplify
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
-removeDeadMapping (_, used) pat _ (Map width fun arrs) =
+removeDeadMapping (_, used) pat _ (Screma w form arrs)
+  | Just fun <- isMapSOAC form =
   let ses = bodyResult $ lambdaBody fun
       isUsed (bindee, _, _) = (`UT.used` used) $ patElemName bindee
       (pat',ses', ts') = unzip3 $ filter isUsed $
@@ -302,12 +262,13 @@ removeDeadMapping (_, used) pat _ (Map width fun arrs) =
                  , lambdaReturnType = ts'
                  }
   in if pat /= Pattern [] pat'
-     then letBind_ (Pattern [] pat') $ Op $ Map width fun' arrs
+     then letBind_ (Pattern [] pat') $ Op $ Screma w (mapSOAC fun') arrs
      else cannotSimplify
 removeDeadMapping _ _ _ _ = cannotSimplify
 
 removeDuplicateMapOutput :: BottomUpRuleOp (Wise SOACS)
-removeDuplicateMapOutput (_, used) pat _ (Map width fun arrs) =
+removeDuplicateMapOutput (_, used) pat _ (Screma w form arrs)
+  | Just fun <- isMapSOAC form =
   let ses = bodyResult $ lambdaBody fun
       ts = lambdaReturnType fun
       pes = patternValueElements pat
@@ -320,7 +281,7 @@ removeDuplicateMapOutput (_, used) pat _ (Map width fun arrs) =
            pat' = Pattern [] pes'
            fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = ses' }
                       , lambdaReturnType = ts' }
-       letBind_ pat' $ Op $ Map width fun' arrs
+       letBind_ pat' $ Op $ Screma w (mapSOAC fun') arrs
        forM_ copies $ \(from,to) ->
          if UT.isConsumed (patElemName to) used then
            letBind_ (Pattern [] [to]) $ BasicOp $ Copy $ patElemName from
@@ -367,7 +328,8 @@ isMapWithOp :: PatternT attr
                       AST.Exp (Wise SOACS), [ParamT Type], [VName])
 isMapWithOp pat e
   | Pattern [] [map_pe] <- pat,
-    Map w map_lam arrs <- e,
+    Screma w form arrs <- e,
+    Just map_lam <- isMapSOAC form,
     [Let (Pattern [] [pe]) aux2 e'] <-
       stmsToList $ bodyStms $ lambdaBody map_lam,
     [Var r] <- bodyResult $ lambdaBody map_lam,
@@ -380,9 +342,21 @@ isMapWithOp pat e
 -- the data dependencies to see that the "dead" result is not
 -- actually used for computing one of the live ones.
 removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
-removeDeadReduction (_, used) pat (StmAux cs _) (Redomap w comm redlam maplam nes arrs)
-  | not $ all (`UT.used` used) $ patternNames pat, -- Quick/cheap check
+removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
+  | Just (comm, redlam, nes, maplam) <- isRedomapSOAC form,
+    not $ all (`UT.used` used) $ patternNames pat, -- Quick/cheap check
+
+    let redlam_deps = dataDependencies $ lambdaBody redlam,
+    let redlam_res = bodyResult $ lambdaBody redlam,
+    let redlam_params = lambdaParams redlam,
+    let used_after = map snd $ filter ((`UT.used` used) . patElemName . fst) $
+                     zip (patternElements pat) redlam_params,
+    let necessary = findNecessaryForReturned (`elem` used_after)
+                    (zip redlam_params $ redlam_res <> redlam_res) redlam_deps,
+    let alive_mask = map ((`S.member` necessary) . paramName) redlam_params,
+
     not $ all (==True) alive_mask = do
+
   let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
       dead_fix = zipWith fixDeadToNeutral alive_mask nes
       (used_pes, _, used_nes) =
@@ -393,26 +367,7 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Redomap w comm redlam maplam ne
   redlam' <- removeLambdaResults alive_mask <$> fixLambdaParams redlam (dead_fix++dead_fix)
 
   certifying cs $ letBind_ (Pattern [] used_pes) $
-    Op $ Redomap w comm redlam' maplam' used_nes arrs
-  where redlam_deps = dataDependencies $ lambdaBody redlam
-        redlam_res = bodyResult $ lambdaBody redlam
-        redlam_params = lambdaParams redlam
-        used_after = map snd $ filter ((`UT.used` used) . patElemName . fst) $
-                     zip (patternElements pat) redlam_params
-
-        necessary = findNecessaryForReturned (`elem` used_after)
-                    (zip redlam_params $ redlam_res <> redlam_res) redlam_deps
-        alive_mask = map ((`S.member` necessary) . paramName) redlam_params
-
-removeDeadReduction tables pat aux (Reduce w comm redlam inp) = do
-  -- We handle reductions by converting them to Redomap.  We rename
-  -- the result if it succeeds, because we are just duplicating the
-  -- lambda here.
-  map_lam <- mkIdentityLambda $ lambdaReturnType redlam
-  mapM_ (addStm <=< renameStm) =<<
-    collectStms_ (removeDeadReduction tables pat aux $
-                  Redomap w comm redlam map_lam nes arrs)
-  where (nes, arrs) = unzip inp
+    Op $ Screma w (redomapSOAC comm redlam' used_nes maplam') arrs
 
 removeDeadReduction _ _ _ _ = cannotSimplify
 
@@ -469,31 +424,40 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
 
 fuseConcatScatter _ _ _ _ = cannotSimplify
 
-simplifyClosedFormRedomap :: TopDownRuleOp (Wise SOACS)
-simplifyClosedFormRedomap vtable pat _ (Redomap _ _ outerfun innerfun acc arr)
-  | isIdentityLambda innerfun =
-    foldClosedForm (`ST.lookupExp` vtable) pat outerfun acc arr
-simplifyClosedFormRedomap _ _ _ _ = cannotSimplify
-
 simplifyClosedFormReduce :: TopDownRuleOp (Wise SOACS)
-simplifyClosedFormReduce vtable pat _ (Reduce _ _ fun args) =
-  foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
-  where (acc, arr) = unzip args
+simplifyClosedFormReduce vtable pat _ (Screma _ form arrs)
+  | Just (_, red_fun, nes) <- isReduceSOAC form =
+      foldClosedForm (`ST.lookupExp` vtable) pat red_fun nes arrs
 simplifyClosedFormReduce _ _ _ _ = cannotSimplify
 
--- For now we just remove singleton maps.
+-- For now we just remove singleton SOACs.
 simplifyKnownIterationSOAC :: (BinderOps lore, Op lore ~ SOAC lore) =>
                               TopDownRuleOp lore
-simplifyKnownIterationSOAC _ pat _ (Map (Constant k) fun arrs)
+simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
+                                    (ScremaForm (scan_lam, scan_nes)
+                                                  (_, red_lam, red_nes)
+                                                  map_lam)
+                                    arrs)
   | oneIsh k = do
-      zipWithM_ bindParam (lambdaParams fun) arrs
-      ses <- bodyBind $ lambdaBody fun
-      zipWithM_ bindResult (patternValueElements pat) ses
-        where bindParam p a = do
+      zipWithM_ bindMapParam (lambdaParams map_lam) arrs
+      (to_scan, to_red, map_res) <- splitAt3 (length scan_nes) (length red_nes) <$>
+                                    bodyBind (lambdaBody map_lam)
+      scan_res <- eLambda scan_lam $ map eSubExp $ scan_nes ++ to_scan
+      red_res <- eLambda red_lam $ map eSubExp $ red_nes ++ to_red
+
+      zipWithM_ bindArrayResult scan_pes scan_res
+      zipWithM_ bindResult red_pes red_res
+      zipWithM_ bindArrayResult map_pes map_res
+
+        where (scan_pes, red_pes, map_pes) = splitAt3 (length scan_nes) (length red_nes) $
+                                             patternElements pat
+              bindMapParam p a = do
                 a_t <- lookupType a
                 letBindNames_ [paramName p] $
                   BasicOp $ Index a $ fullSlice a_t [DimFix $ constant (0::Int32)]
-              bindResult pe se =
+              bindArrayResult pe se =
                 letBindNames_ [patElemName pe] $
                 BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
+              bindResult pe se =
+                letBindNames_ [patElemName pe] $ BasicOp $ SubExp se
 simplifyKnownIterationSOAC _ _ _ _ = cannotSimplify

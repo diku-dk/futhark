@@ -17,6 +17,7 @@ module Futhark.Util
         maybeNth,
         splitFromEnd,
         splitAt3,
+        splitAt4,
         focusNth,
         unixEnvironment,
         isEnvVarSet,
@@ -97,6 +98,14 @@ splitAt3 n m l =
   let (xs, l') = splitAt n l
       (ys, zs) = splitAt m l'
   in (xs, ys, zs)
+
+-- | Like 'splitAt', but produces four lists.
+splitAt4 :: Int -> Int -> Int -> [a] -> ([a], [a], [a], [a])
+splitAt4 n m k l =
+  let (xs, l') = splitAt n l
+      (ys, l'') = splitAt m l'
+      (zs, vs) = splitAt k l''
+  in (xs, ys, zs, vs)
 
 -- | Return the list element at the given index, if the index is
 -- valid, along with the elements before and after.

@@ -28,6 +28,7 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Representation.AST
 import Futhark.Binder (Bindable(..), insertStm, insertStms, mkLet)
 import Futhark.Construct (mapResult)
+import Futhark.Util (splitAt3, takeLast, dropLast)
 
 -- | @fuseMaps lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
 -- @lam2@.  Both functions must be mapping functions, although @lam2@
@@ -151,42 +152,53 @@ removeDuplicateInputs = fst . M.foldlWithKey' comb ((M.empty, id), M.empty)
           `insertStm` b
 
 fuseRedomap :: Bindable lore =>
-               Names  -> [VName]
-            -> [SubExp] -> Lambda lore -> [SOAC.Input] -> [(VName,Ident)]
-            -> Lambda lore -> [SOAC.Input]
+               Names -> [VName]
+            -> Lambda lore -> [SubExp] -> [SubExp] -> [SOAC.Input]
+            -> [(VName,Ident)]
+            -> Lambda lore -> [SubExp] -> [SubExp] -> [SOAC.Input]
             -> (Lambda lore, [SOAC.Input])
-fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
+fuseRedomap unfus_nms outVars p_lam p_scan_nes p_red_nes p_inparr outPairs
+                              c_lam c_scan_nes c_red_nes c_inparr =
   -- We hack the implementation of map o redomap to handle this case:
   --   (i) we remove the accumulator formal paramter and corresponding
   --       (body) result from from redomap's fold-lambda body
-  let acc_len     = length p_nes
-      num_fold_ps = length (lambdaParams p_lam) - length p_inparr
+  let p_num_nes   = length p_scan_nes + length p_red_nes
       unfus_arrs  = filter (`S.member` unfus_nms) outVars
-      lam1_body   = lambdaBody p_lam
-      lam1_accres = take acc_len $ bodyResult lam1_body
-      lam1_arrres = drop acc_len $ bodyResult lam1_body
-      lam1_hacked = p_lam { lambdaParams = drop num_fold_ps $ lambdaParams p_lam
-                          , lambdaBody   = lam1_body { bodyResult = lam1_arrres }
-                          , lambdaReturnType = drop acc_len $ lambdaReturnType p_lam }
+      p_lam_body   = lambdaBody p_lam
+      (p_lam_scan_ts, p_lam_red_ts, p_lam_map_ts) =
+        splitAt3 (length p_scan_nes) (length p_red_nes) $ lambdaReturnType p_lam
+      (p_lam_scan_res, p_lam_red_res, p_lam_map_res) =
+        splitAt3 (length p_scan_nes) (length p_red_nes) $ bodyResult p_lam_body
+      p_lam_hacked = p_lam { lambdaParams = takeLast (length p_inparr) $ lambdaParams p_lam
+                           , lambdaBody   = p_lam_body { bodyResult = p_lam_map_res }
+                           , lambdaReturnType = p_lam_map_ts }
+
   --  (ii) we remove the accumulator's (global) output result from
   --       @outPairs@, then ``map o redomap'' fuse the two lambdas
   --       (in the usual way), and construct the extra return types
   --       for the arrays that fall through.
-      (res_lam, new_inp) = fuseMaps (S.fromList unfus_arrs) lam1_hacked p_inparr
-                                    (drop acc_len outPairs) c_lam c_inparr
-      (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_arrs) $
-                       zip (drop acc_len outVars) $ drop acc_len $
-                       lambdaReturnType p_lam
+      (res_lam, new_inp) = fuseMaps (S.fromList unfus_arrs) p_lam_hacked p_inparr
+                                    (drop p_num_nes outPairs) c_lam c_inparr
+      (res_lam_scan_ts, res_lam_red_ts, res_lam_map_ts) =
+        splitAt3 (length c_scan_nes) (length c_red_nes) $ lambdaReturnType res_lam
+      (_,extra_map_ts) = unzip $ filter (\(nm,_)->elem nm unfus_arrs) $
+                         zip (drop p_num_nes outVars) $ drop p_num_nes $
+                         lambdaReturnType p_lam
+
   -- (iii) Finally, we put back the accumulator's formal parameter and
   --       (body) result in the first position of the obtained lambda.
-      (accrtps, accpars)  = ( take acc_len $ lambdaReturnType p_lam
-                            , take num_fold_ps $ lambdaParams p_lam )
+      accpars  = dropLast (length p_inparr) $ lambdaParams p_lam
       res_body = lambdaBody res_lam
-      res_rses = bodyResult res_body
-      res_body'= res_body { bodyResult = lam1_accres ++ res_rses }
+      (res_lam_scan_res, res_lam_red_res, res_lam_map_res) =
+        splitAt3 (length c_scan_nes) (length c_red_nes) $ bodyResult res_body
+      res_body'= res_body { bodyResult = p_lam_scan_res ++ res_lam_scan_res ++
+                                         p_lam_red_res ++ res_lam_red_res ++
+                                         res_lam_map_res }
       res_lam' = res_lam { lambdaParams     = accpars ++ lambdaParams res_lam
                          , lambdaBody       = res_body'
-                         , lambdaReturnType = accrtps ++ lambdaReturnType res_lam ++ extra_rtps
+                         , lambdaReturnType = p_lam_scan_ts ++ res_lam_scan_ts ++
+                                              p_lam_red_ts ++ res_lam_red_ts ++
+                                              res_lam_map_ts ++ extra_map_ts
                          }
   in  (res_lam', new_inp)
 

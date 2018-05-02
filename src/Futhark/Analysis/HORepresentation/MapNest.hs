@@ -75,7 +75,7 @@ fromSOAC' :: (Bindable lore, MonadFreshNames m,
           -> SOAC lore
           -> m (Maybe (MapNest lore))
 
-fromSOAC' bound (SOAC.Map w lam inps) = do
+fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm (_, []) (_, _, []) lam) inps) = do
   maybenest <- case (stmsToList $ bodyStms $ lambdaBody lam,
                      bodyResult $ lambdaBody lam) of
     ([Let pat _ e], res) | res == map Var (patternNames pat) ->
@@ -128,7 +128,7 @@ toSOAC :: (MonadFreshNames m, HasScope lore m,
            Bindable lore, BinderOps lore, Op lore ~ Futhark.SOAC lore) =>
           MapNest lore -> m (SOAC lore)
 toSOAC (MapNest w lam [] inps) =
-  return $ SOAC.Map w lam inps
+  return $ SOAC.Screma w (Futhark.mapSOAC lam) inps
 toSOAC (MapNest w lam (Nesting npnames nres nrettype nw:ns) inps) = do
   let nparams = zipWith Param npnames $ map SOAC.inputRowType inps
   (e,bnds) <- runBinder $ localScope (scopeOfLParams nparams) $ SOAC.toExp =<<
@@ -138,7 +138,7 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw:ns) inps) = do
                         , lambdaBody = mkBody (bnds<>oneStm bnd) $ map Var nres
                         , lambdaReturnType = nrettype
                         }
-  return $ SOAC.Map w outerlam inps
+  return $ SOAC.Screma w (Futhark.mapSOAC outerlam) inps
 
 fixInputs :: MonadFreshNames m =>
              SubExp -> [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]

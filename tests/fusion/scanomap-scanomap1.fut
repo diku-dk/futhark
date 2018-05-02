@@ -8,7 +8,7 @@
 --   [2, 6, 24, 120, 720, 5040, 40320]
 -- }
 -- structure {
---   Scanomap 1
+--   Screma 1
 -- }
 let main(inp: []i32): ([]i32, []i32, []i32) =
   let a = map (+1) inp
