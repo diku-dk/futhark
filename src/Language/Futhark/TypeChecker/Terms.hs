@@ -195,6 +195,10 @@ isRigid v constraints = case M.lookup v constraints of
                              Just ParamType{} -> True
                              _ -> False
 
+lookupSubst :: VName -> Constraints -> Maybe (TypeBase () ())
+lookupSubst v constraints = do Constraint t _ <- M.lookup v constraints
+                               Just t
+
 constraintSubsts :: Constraints -> M.Map VName (TypeBase () ())
 constraintSubsts = M.mapMaybe constraintSubst
   where constraintSubst (Constraint t _) = Just t
@@ -202,17 +206,17 @@ constraintSubsts = M.mapMaybe constraintSubst
 
 applySubstInConstraint :: VName -> TypeBase () () -> Constraint -> Constraint
 applySubstInConstraint vn tp (Constraint t loc) =
-  Constraint (applySubst (M.singleton vn tp) t) loc
+  Constraint (applySubst (`M.lookup` (M.singleton vn tp)) t) loc
 applySubstInConstraint vn tp (HasFields fs loc) =
-  HasFields (M.map (applySubst (M.singleton vn tp)) fs) loc
+  HasFields (M.map (applySubst (`M.lookup` (M.singleton vn tp))) fs) loc
 applySubstInConstraint _ _ (NoConstraint l loc) = NoConstraint l loc
 applySubstInConstraint _ _ (Overloaded ts loc) = Overloaded ts loc
 applySubstInConstraint _ _ (Equality loc) = Equality loc
 applySubstInConstraint _ _ (ParamType l loc) = ParamType l loc
 
 normaliseType :: Substitutable a => a -> TermTypeM a
-normaliseType t = do subst <- constraintSubsts <$> getConstraints
-                     return $ applySubst subst t
+normaliseType t = do constraints <- getConstraints
+                     return $ applySubst (`lookupSubst` constraints) t
 
 -- | Get the type of an expression, with all type variables
 -- substituted.  Never call 'typeOf' directly (except in a few
@@ -400,7 +404,7 @@ instantiateTypeScheme loc tparams t = do
   (fresh_tnames, inst_list) <- unzip <$> mapM (instantiateTypeParam loc) tparams'
   let substs = M.fromList $ zip tnames $
                map (vacuousShapeAnnotations . fromStruct) inst_list
-      t' = substTypesAny substs t
+      t' = substTypesAny (`M.lookup` substs) t
   return (fresh_tnames, t')
 
 -- | Create a new type name and insert it (unconstrained) in the
@@ -1371,8 +1375,8 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
 checkApply loc tfun@TypeVar{} arg = do
   tv <- newTypeVar loc "b"
   unify loc (toStruct tfun) $ Arrow mempty Nothing (toStruct (argType arg)) tv
-  substs <- constraintSubsts <$> getConstraints
-  checkApply loc (applySubst substs tfun) arg
+  constraints <- getConstraints
+  checkApply loc (applySubst (`lookupSubst` constraints) tfun) arg
 
 checkApply loc ftype arg =
   typeError loc $
@@ -1386,9 +1390,9 @@ checkFuncall loc ftype ((argtype, dflow, argloc) : args) =
   case ftype of
     Arrow as _ t1 t2 -> do
       unify argloc (toStructural t1) (toStruct argtype)
-      substs <- constraintSubsts <$> getConstraints
-      let t1' = toStruct $ applySubst substs t1
-          t2' = applySubst substs t2
+      constraints <- getConstraints
+      let t1' = toStruct $ applySubst (`lookupSubst` constraints) t1
+          t2' = applySubst (`lookupSubst` constraints) t2
 
       occur [observation as loc]
       maybeCheckOccurences dflow
@@ -1687,9 +1691,8 @@ unify loc orig_t1 orig_t2 = do
       constraints <- getConstraints
 
       let isRigid' v = isRigid v constraints
-          substs = constraintSubsts constraints
-          t1' = applySubst substs t1
-          t2' = applySubst substs t2
+          t1' = applySubst (`lookupSubst` constraints) t1
+          t2' = applySubst (`lookupSubst` constraints) t2
 
           failure =
             typeError loc $ "Couldn't match type `" ++
@@ -1789,8 +1792,7 @@ linkVarToType loc vn tp = do
 mustBeOneOf :: [PrimType] -> SrcLoc -> TypeBase () () -> TermTypeM ()
 mustBeOneOf ts loc t = do
   constraints <- getConstraints
-  let substs = constraintSubsts constraints
-      t' = applySubst substs t
+  let t' = applySubst (`lookupSubst` constraints) t
       isRigid' v = isRigid v constraints
 
   case t' of
@@ -1905,13 +1907,14 @@ arrayOfM loc t shape u = do
 -- something else.
 updateExpTypes :: ASTMappable e => e -> TermTypeM e
 updateExpTypes e = do
-  substs <-  constraintSubsts <$> getConstraints
-  let tv = ASTMapper { mapOnExp         = astMap tv
+  constraints <- getConstraints
+  let look = (`lookupSubst` constraints)
+      tv = ASTMapper { mapOnExp         = astMap tv
                      , mapOnName        = pure
                      , mapOnQualName    = pure
-                     , mapOnType        = pure . applySubst substs
-                     , mapOnCompType    = pure . applySubst substs
-                     , mapOnStructType  = pure . applySubst substs
-                     , mapOnPatternType = pure . applySubst substs
+                     , mapOnType        = pure . applySubst look
+                     , mapOnCompType    = pure . applySubst look
+                     , mapOnStructType  = pure . applySubst look
+                     , mapOnPatternType = pure . applySubst look
                      }
   astMap tv e

@@ -354,12 +354,12 @@ monomorphizeBinding (PolyBinding (name, tparams, params, rettype, body, loc)) t 
   let bind_t = foldFunType (map (toStructural . patternType) params) $
                toStructural rettype
       substs = typeSubsts bind_t t'
-      rettype' = applySubst substs rettype
-      params' = map (substPattern $ applySubst substs) params
+      rettype' = applySubst (`M.lookup` substs) rettype
+      params' = map (substPattern $ applySubst (`M.lookup` substs)) params
 
   mapM_ noticeDims $ rettype : map patternStructType params'
 
-  body' <- updateExpTypes substs body
+  body' <- updateExpTypes (`M.lookup` substs) body
   body'' <- transformExp body'
   name' <- if null tparams then return name else newName name
   return (name', toValBinding name' params' rettype' body'')
