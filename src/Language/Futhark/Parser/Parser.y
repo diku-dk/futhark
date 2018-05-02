@@ -665,8 +665,13 @@ Atoms1 :: { (UncheckedExp, [UncheckedExp]) }
         | Atom        { ($1, []) }
 
 Exps1 :: { (UncheckedExp, [UncheckedExp]) }
-        : Exp ',' Exps1 { ($1, fst $3 : snd $3) }
-        | Exp           { ($1, []) }
+       : Exps1_ { case reverse (snd $1 : fst $1) of
+                    []   -> (snd $1, [])
+                    y:ys -> (y, ys) }
+
+Exps1_ :: { ([UncheckedExp], UncheckedExp) }
+        : Exps1_ ',' Exp { (snd $1 : fst $1, $3) }
+        | Exp            { ([], $1) }
 
 FieldAccess :: { (Name, SrcLoc) }
              : '.' FieldId { (fst $2, srcspan $1 (snd $>)) }
