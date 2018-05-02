@@ -5,11 +5,9 @@ module Main (main) where
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State
-import Control.Monad.Reader
 import Data.FileEmbed
 import Data.List
 import Data.Semigroup ((<>))
-import qualified Data.Map as M
 import System.FilePath ((<.>), takeDirectory, takeExtension)
 import System.Directory (createDirectoryIfMissing)
 import System.Console.GetOpt
@@ -19,11 +17,8 @@ import System.Exit
 import Text.Blaze.Html5 (docTypeHtml)
 import Text.Blaze.Html.Renderer.String
 
-import Language.Futhark.TypeChecker (Imports, FileModule(..))
-import Language.Futhark.TypeChecker.Monad
-import Language.Futhark
 import Futhark.Doc.Generator
-import Futhark.Compiler (readLibrary, dumpError, newFutharkConfig)
+import Futhark.Compiler (readLibrary, dumpError, newFutharkConfig, Imports)
 import Futhark.Pipeline (runFutharkM, FutharkM)
 import Futhark.Util.Options
 import Futhark.Util (directoryContents)
@@ -54,8 +49,7 @@ main = mainWithOptions initialDocConfig commandLineOptions f
                 hPutStrLn stderr "Reading files..."
               (_w, imports, _vns) <-
                 readLibrary preludeBasis mempty files
-              liftIO $ printDecs config outdir (nubBy sameImport imports) $
-                concatMap (progDecs . fileProg . snd) imports
+              liftIO $ printDecs config outdir $ nubBy sameImport imports
 
         sameImport (x, _) (y, _) = x == y
 
@@ -63,27 +57,23 @@ futFiles :: FilePath -> IO [FilePath]
 futFiles dir = filter isFut <$> directoryContents dir
   where isFut = (==".fut") . takeExtension
 
-type DocEnv = M.Map (Namespace,VName) String
-
-printDecs :: DocConfig -> FilePath -> Imports -> [Dec] -> IO ()
-printDecs cfg dir imports decs = do
-  let to_write = evalState (mapM (f $ render decs) imports) mempty
+printDecs :: DocConfig -> FilePath -> Imports -> IO ()
+printDecs cfg dir imports = do
+  let to_write = evalState (mapM render imports) mempty
   mapM_ write to_write
 
   write ("index", renderHtml $ indexPage to_write)
   write' ("style.css", cssFile)
 
-  where f g x = (fst x,) <$> g x
+  where render (name, fm) =
+          (name,) . renderHtml . docTypeHtml <$> renderFile name fm
+
         write (name, content) = write' (name <.> "html", content)
         write' (name, content) = do let file = dir ++ "/" ++ name
                                     createDirectoryIfMissing True $ takeDirectory file
                                     when (docVerbose cfg) $
                                       hPutStrLn stderr $ "Writing " <> file
                                     writeFile file content
-
-render :: [Dec] -> (String, FileModule) -> State DocEnv String
-render decs (name,fm) = runReaderT m (name,fm)
-  where m = renderHtml . docTypeHtml <$> renderFile decs
 
 cssFile :: String
 cssFile = $(embedStringFile "rts/futhark-doc/style.css")
