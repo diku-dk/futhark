@@ -206,9 +206,9 @@ constraintSubsts = M.mapMaybe constraintSubst
 
 applySubstInConstraint :: VName -> TypeBase () () -> Constraint -> Constraint
 applySubstInConstraint vn tp (Constraint t loc) =
-  Constraint (applySubst (`M.lookup` (M.singleton vn tp)) t) loc
+  Constraint (applySubst (`M.lookup` M.singleton vn tp) t) loc
 applySubstInConstraint vn tp (HasFields fs loc) =
-  HasFields (M.map (applySubst (`M.lookup` (M.singleton vn tp))) fs) loc
+  HasFields (M.map (applySubst (`M.lookup` M.singleton vn tp)) fs) loc
 applySubstInConstraint _ _ (NoConstraint l loc) = NoConstraint l loc
 applySubstInConstraint _ _ (Overloaded ts loc) = Overloaded ts loc
 applySubstInConstraint _ _ (Equality loc) = Equality loc
