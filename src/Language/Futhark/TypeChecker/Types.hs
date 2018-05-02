@@ -454,49 +454,49 @@ instantiatePolymorphic tnames loc orig_substs x y =
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
 class Substitutable a where
-  applySubst :: M.Map VName (TypeBase () ()) -> a -> a
+  applySubst :: (VName -> Maybe (TypeBase () ())) -> a -> a
 
 instance Substitutable (TypeBase () ()) where
   applySubst = substTypesAny
 
 instance Substitutable (TypeBase () Names) where
-  applySubst = substTypesAny . M.map fromStruct
+  applySubst = substTypesAny . (fmap fromStruct.)
 
 instance Substitutable (TypeBase (DimDecl VName) ()) where
-  applySubst = substTypesAny . M.map vacuousShapeAnnotations
+  applySubst = substTypesAny . (fmap vacuousShapeAnnotations.)
 
 instance Substitutable (TypeBase (DimDecl VName) Names) where
-  applySubst = substTypesAny . M.map (vacuousShapeAnnotations . fromStruct)
+  applySubst = substTypesAny . (fmap (vacuousShapeAnnotations . fromStruct).)
 
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny :: (ArrayDim dim, Monoid as) =>
-                 M.Map VName (TypeBase dim as)
+                 (VName -> Maybe (TypeBase dim as))
               -> TypeBase dim as -> TypeBase dim as
-substTypesAny substs ot = case ot of
+substTypesAny lookupSubst ot = case ot of
   Prim t -> Prim t
   Array et shape u -> fromMaybe nope $
                       uncurry arrayOfWithAliases (subsArrayElem et) shape u
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
   TypeVar v []
-    | Just t <- M.lookup (qualLeaf (qualNameFromTypeName v)) substs -> t
+    | Just t <- lookupSubst $ qualLeaf (qualNameFromTypeName v) -> t
   TypeVar v targs -> TypeVar v $ map subsTypeArg targs
-  Record ts ->  Record $ fmap (substTypesAny substs) ts
+  Record ts ->  Record $ fmap (substTypesAny lookupSubst) ts
   Arrow als v t1 t2 ->
-    Arrow als v (substTypesAny substs t1) (substTypesAny substs t2)
+    Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
 
   where nope = error "substTypesAny: Cannot create array after substitution."
 
         subsArrayElem (ArrayPrimElem t as) = (Prim t, as)
         subsArrayElem (ArrayPolyElem v [] as)
-          | Just t <- M.lookup (qualLeaf (qualNameFromTypeName v)) substs = (t, as)
+          | Just t <-  lookupSubst $ qualLeaf (qualNameFromTypeName v) = (t, as)
         subsArrayElem (ArrayPolyElem v targs as) =
           (TypeVar v (map subsTypeArg targs), as)
         subsArrayElem (ArrayRecordElem ts) =
           let ts' = fmap recordArrayElemToType ts
-          in (Record $ fmap (substTypesAny substs . fst) ts', foldMap snd ts')
+          in (Record $ fmap (substTypesAny lookupSubst . fst) ts', foldMap snd ts')
 
         subsTypeArg (TypeArgType t loc) =
-          TypeArgType (substTypesAny substs t) loc
+          TypeArgType (substTypesAny lookupSubst t) loc
         subsTypeArg t = t
