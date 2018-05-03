@@ -765,6 +765,8 @@ Patterns1 :: { [PatternBase NoInfo Name] }
 
 InnerPattern :: { PatternBase NoInfo Name }
 InnerPattern : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
+             | '(' BindingBinOp ')'             { Id $2 NoInfo (srcspan $1 $>) }
+             | '(' BindingUnOp ')'              { Id $2 NoInfo (srcspan $1 $>) }
              | '_'                              { Wildcard NoInfo $1 }
              | '(' ')'                          { TuplePattern [] (srcspan $1 $>) }
              | '(' Pattern ')'                  { PatternParens $2 (srcspan $1 $>) }
