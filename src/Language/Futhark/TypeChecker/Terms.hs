@@ -813,16 +813,23 @@ checkExp (RecordLit fs loc) = do
               " previously defined at " ++ locStr sloc ++ "."
             Nothing -> return ()
 
-checkExp (ArrayLit es _ loc) = do
-  -- Construct the result type and unify all elements with it.
-  et <- newTypeVar loc "t"
-  t <- arrayOfM loc et (rank 1) Unique
-  es' <- forM es $ \e -> do
-    e' <- checkExp e
-    unify (srclocOf e') (toStructural et) . toStructural =<< expType e'
-    return e'
-  t' <- normaliseType t
-  return $ ArrayLit es' (Info t') loc
+checkExp (ArrayLit all_es _ loc) =
+  -- Construct the result type and unify all elements with it.  We
+  -- only create a type variable for empty arrays; otherwise we use
+  -- the type of the first element.  This significantly cuts down on
+  -- the number of type variables generated for pathologically large
+  -- multidimensional array literals.
+  case all_es of
+    [] -> do et <- newTypeVar loc "t"
+             t <- arrayOfM loc et (rank 1) Unique
+             return $ ArrayLit [] (Info t) loc
+    e:es -> do
+      e' <- checkExp e
+      et <- expType e'
+      es' <- mapM (unifies (toStructural et) <=< checkExp) es
+      et' <- normaliseType et
+      t <- arrayOfM loc et' (rank 1) Unique
+      return $ ArrayLit (e':es') (Info t) loc
 
 checkExp (Range start maybe_step end NoInfo loc) = do
   start' <- require anyIntType =<< checkExp start
