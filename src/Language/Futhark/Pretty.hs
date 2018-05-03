@@ -267,7 +267,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     text "\\" <> spread (map ppr tparams ++ map ppr params) <>
     ppAscription ascript <+>
     text "->" </> indent 2 (ppr body)
-  pprPrec _ (OpSection binop _ _ _ _ _) =
+  pprPrec _ (OpSection binop _ _) =
     parens $ ppr binop
   pprPrec _ (OpSectionLeft binop _ x _ _ _) =
     parens $ ppr x <+> ppr binop

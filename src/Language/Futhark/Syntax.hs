@@ -609,8 +609,7 @@ data ExpBase f vn =
             | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
               (Maybe (TypeDeclBase f vn)) (f (Names, StructType)) SrcLoc
 
-            | OpSection (QualName vn) (f PatternType)
-              (f StructType) (f StructType) (f PatternType) SrcLoc
+            | OpSection (QualName vn) (f PatternType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.
             | OpSectionLeft (QualName vn) (f PatternType)
               (ExpBase f vn) (f StructType, f StructType) (f PatternType) SrcLoc
@@ -763,7 +762,7 @@ instance Located (ExpBase f vn) where
   locOf (Partition _ _ _ loc)          = locOf loc
   locOf (Concat _ _ _ pos)             = locOf pos
   locOf (Lambda _ _ _ _ _ loc)         = locOf loc
-  locOf (OpSection _ _ _ _ _ loc)      = locOf loc
+  locOf (OpSection _ _ loc)            = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
   locOf (DoLoop _ _ _ _ _ pos)         = locOf pos

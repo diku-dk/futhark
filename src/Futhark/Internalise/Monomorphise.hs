@@ -90,7 +90,7 @@ transformFName fname t
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphized.
         (Just fname', _) -> return fname'
-        -- A monomorphic function.
+        -- An intrinsic function.
         (Nothing, Nothing) -> return fname
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
@@ -216,22 +216,20 @@ transformExp (Lambda tparams params e0 decl tp loc) = do
   e0' <- transformExp e0
   return $ Lambda tparams params e0' decl tp loc
 
-transformExp (OpSection (QualName qs fname) (Info t)
-               (Info xtype) (Info ytype) (Info rettype) loc) = do
-  fname' <- transformFName fname (toStructural t)
-  desugarOpSection (QualName qs fname') Nothing Nothing t xtype ytype rettype loc
+transformExp (OpSection qn t loc) =
+  transformExp $ Var qn t loc
 
 transformExp (OpSectionLeft (QualName qs fname) (Info t) e
                (Info xtype, Info ytype) (Info rettype) loc) = do
   fname' <- transformFName fname (toStructural t)
   e' <- transformExp e
-  desugarOpSection (QualName qs fname') (Just e') Nothing t xtype ytype rettype loc
+  desugarBinOpSection (QualName qs fname') (Just e') Nothing t xtype ytype rettype loc
 
 transformExp (OpSectionRight (QualName qs fname) (Info t) e
                (Info xtype, Info ytype) (Info rettype) loc) = do
   fname' <- transformFName fname (toStructural t)
   e' <- transformExp e
-  desugarOpSection (QualName qs fname') Nothing (Just e') t xtype ytype rettype loc
+  desugarBinOpSection (QualName qs fname') Nothing (Just e') t xtype ytype rettype loc
 
 transformExp (DoLoop tparams pat e1 form e3 loc) = do
   e1' <- transformExp e1
@@ -317,9 +315,9 @@ transformDimIndex (DimSlice me1 me2 me3) =
   where trans = mapM transformExp
 
 -- | Transform an operator section into a lambda.
-desugarOpSection :: QualName VName -> Maybe Exp -> Maybe Exp
+desugarBinOpSection :: QualName VName -> Maybe Exp -> Maybe Exp
                  -> PatternType -> StructType -> StructType -> PatternType -> SrcLoc -> MonoM Exp
-desugarOpSection qn e_left e_right t xtype ytype rettype loc = do
+desugarBinOpSection qn e_left e_right t xtype ytype rettype loc = do
   (e1, p1) <- makeVarParam e_left $ fromStruct xtype
   (e2, p2) <- makeVarParam e_right $ fromStruct ytype
   let body = BinOp qn (Info t) (e1, Info xtype) (e2, Info ytype) (Info rettype) loc

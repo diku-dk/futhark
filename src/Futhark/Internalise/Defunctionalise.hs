@@ -144,13 +144,18 @@ defuncExp (Range e1 me incl t@(Info t') loc) = do
 defuncExp e@Empty{} =
   return (e, Dynamic $ typeOf e)
 
-defuncExp (Var qn _ loc) = do
+defuncExp e@(Var qn _ loc) = do
   sv <- lookupVar loc (qualLeaf qn)
   case sv of
     -- If the variable refers to a dynamic function, we return its closure
     -- representation (i.e., a record expression capturing the free variables
     -- and a 'LambdaSV' static value) instead of the variable itself.
     DynamicFun closure _ -> return closure
+    -- Intrinsic functions used as variables are eta-expanded, so we
+    -- can get rid of them.
+    IntrinsicSV -> do
+      (pats, body, tp) <- etaExpand e
+      defuncExp $ Lambda [] pats body Nothing (Info (mempty, tp)) noLoc
     _ -> let tp = typeFromSV sv
          in return (Var qn (Info (vacuousShapeAnnotations tp)) loc, sv)
 
