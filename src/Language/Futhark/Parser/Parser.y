@@ -629,7 +629,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' UnOp ')'
         { Var (fst $2) NoInfo (srcspan (snd $2) $>) }
      | '(' '-' ')'
-        { OpSection (QualName [] (nameFromString "-")) NoInfo NoInfo NoInfo NoInfo (srcspan $1 $>) }
+        { OpSection (QualName [] (nameFromString "-")) NoInfo (srcspan $1 $>) }
      | '(' Exp2 '-' ')'
         { OpSectionLeft (QualName [] (nameFromString "-"))
            NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
@@ -638,7 +638,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' Exp2 BinOp ')'
        { OpSectionLeft $3 NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
      | '(' BinOp ')'
-       { OpSection $2 NoInfo NoInfo NoInfo NoInfo (srcspan $1 $>) }
+       { OpSection $2 NoInfo (srcspan $1 $>) }
 
 PrimLit :: { (PrimValue, SrcLoc) }
         : true   { (BoolValue True, $1) }

@@ -319,7 +319,8 @@ instance MonadTypeChecker TermTypeM where
   lookupVar loc qn = do
     outer_env <- liftTypeM askRootEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
-    case M.lookup name $ scopeVtable scope of
+
+    t <- case M.lookup name $ scopeVtable scope of
       Nothing -> throwError $ UnknownVariableError Term qn loc
 
       Just (WasConsumed wloc) -> throwError $ UseAfterConsume (baseName name) loc wloc
@@ -329,26 +330,26 @@ instance MonadTypeChecker TermTypeM where
         | otherwise -> do
             (tnames, t') <- instantiateTypeScheme loc tparams t
             let qual = qualifyTypeVars outer_env tnames qs
-            t'' <- qual . removeShapeAnnotations <$> normaliseType t'
-            return (qn', t'')
+            qual . removeShapeAnnotations <$> normaliseType t'
 
       Just OpaqueF -> do
         argtype <- newTypeVar loc "t"
-        return (qn', Arrow mempty Nothing argtype argtype)
+        return $ Arrow mempty Nothing argtype argtype
 
       Just EqualityF -> do
         argtype <- newTypeVar loc "t"
         equalityType loc argtype
-        return (qn',
-                Arrow mempty Nothing argtype $
-                Arrow mempty Nothing argtype $ Prim Bool)
+        return $ Arrow mempty Nothing argtype $
+                 Arrow mempty Nothing argtype $ Prim Bool
 
       Just (OverloadedF ts pts rt) -> do
         argtype <- newTypeVar loc "t"
         mustBeOneOf ts loc $ toStruct argtype
         let (pts', rt') = instOverloaded argtype pts rt
-        return (qn',
-                fromStruct $ foldr (Arrow mempty Nothing) rt' pts')
+        return $ fromStruct $ foldr (Arrow mempty Nothing) rt' pts'
+
+    observe $ Ident name (Info t) loc
+    return (qn', t)
 
       where instOverloaded argtype pts rt =
               (map (maybe (toStruct argtype) Prim) pts,
@@ -806,7 +807,6 @@ checkExp (RecordLit fs loc) = do
           errIfAlreadySet name rloc
           (QualName _ name', t) <- lift $ lookupVar rloc $ qualName name
           modify $ M.insert name rloc
-          lift $ observe $ Ident name' (Info t) rloc
           return $ RecordFieldImplicit name' (Info t) rloc
 
         errIfAlreadySet f rloc = do
@@ -926,7 +926,6 @@ checkExp (Var qn NoInfo loc) = do
   -- end until we find a module.
 
   (qn', t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
-  observe $ Ident (qualLeaf qn') (Info t) loc
   foldM checkField (Var qn' (Info (vacuousShapeAnnotations t)) loc) fields
   where findRootVar qs name = do
           r <- (Right <$> lookupVar loc (QualName qs name))
@@ -985,9 +984,7 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
 
     return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
 
-checkExp (LetWith dest src idxes ve body pos) = do
-  src' <- checkIdent src
-
+checkExp (LetWith dest src idxes ve body pos) = sequentially (checkIdent src) $ \src' _ -> do
   unless (unique $ unInfo $ identType src') $
     typeError pos $ "Source '" ++ pretty (identName src) ++
     "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
@@ -1141,17 +1138,9 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
     return $ Lambda tparams' params' body' maybe_retdecl''
       (Info (allOccuring closure, rettype)) loc
 
-checkExp (OpSection op _ _ _ _ loc) = do
+checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
-  let (paramtypes, rettype) = unfoldFunType $ vacuousShapeAnnotations ftype
-  case paramtypes of
-    t1 : t2 : rest -> do
-      let t1' = vacuousShapeAnnotations $ toStruct t1
-          t2' = vacuousShapeAnnotations $ toStruct t2
-      return $ OpSection op' (Info (vacuousShapeAnnotations ftype))
-        (Info t1') (Info t2') (Info $ foldFunType rest rettype) loc
-    _ -> typeError loc $
-         "Operator section with invalid operator of type " ++ pretty ftype
+  return $ OpSection op' (Info (vacuousShapeAnnotations ftype)) loc
 
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op

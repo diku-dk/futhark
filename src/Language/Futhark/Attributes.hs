@@ -479,8 +479,8 @@ typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 typeOf (Lambda _ params _ _ (Info (als, t)) _) =
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
   `setAliases` als
-typeOf (OpSection _ _ (Info pt1) (Info pt2) (Info ret) _) =
-  removeShapeAnnotations $ foldFunType [fromStruct pt1, fromStruct pt2] ret
+typeOf (OpSection _ (Info t) _) =
+  removeShapeAnnotations t
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
   removeShapeAnnotations $ foldFunType [fromStruct pt2] ret
 typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
