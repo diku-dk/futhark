@@ -792,10 +792,6 @@ checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
 
 checkExp (RecordLit fs loc) = do
-  -- It is easy for programmers to forget that record literals are
-  -- right-biased.  Hence, emit a warning if we encounter literal
-  -- fields whose values would never be used.
-
   fs' <- evalStateT (mapM checkField fs) mempty
 
   return $ RecordLit fs' loc
