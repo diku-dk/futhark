@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Added overloaded numeric literals (#532).  This means type
     suffixes are rarely required.
 
+  * Binary and unary operators may now be bound in patterns by
+    enclosing them in parenthesis.
+
 ### Removed
 
 ### Changed
