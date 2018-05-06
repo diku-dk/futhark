@@ -1,7 +1,7 @@
 -- | Colour manipulation library.
 --
--- Adapted from the gloss library by Ben Lippmeier:
--- https://hackage.haskell.org/package/gloss
+-- Adapted from the [Gloss](https://hackage.haskell.org/package/gloss)
+-- library by Ben Lippmeier.
 
 import "/futlib/math"
 
@@ -15,8 +15,8 @@ module type colour = {
   -- | Construct a colour from R, G, B and A channels, each of which
   -- must be a floating-point number between 0.0 and 1.0.  The
   -- concrete representation need not be able to handle the full
-  -- precision of each channel.  Thus, from_rgba and to_rgba need not
-  -- be inverse of each other (but should be close).
+  -- precision of each channel.  Thus, `from_rgba` and `to_rgba` need
+  -- not be inverse of each other (but should be close).
   val from_rgba: f32 -> f32 -> f32 -> f32 -> colour
 
   -- | Convert a colour to four R, G, B and A channels, each of which
@@ -170,5 +170,6 @@ module colourspace(C: colour): colourspace with colour = C.colour = {
   let gray (d: f32): colour = from_rgba d d d 1f32
 }
 
--- | An ARGB colour space - simply colourspace applied to argb.
+-- | An ARGB colour space - simply `colourspace`@term applied to
+-- `argb_colour`@term.
 module argb: colourspace with colour = argb_colour.colour = colourspace argb_colour

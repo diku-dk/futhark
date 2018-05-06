@@ -181,7 +181,7 @@ checkSpecs (TypeSpec name ps doc loc : specs) =
             paramToArg (TypeParamLiftedType v ploc) =
               TypeArgType (TypeVar (typeName v) []) ploc
 
-checkSpecs (ModSpec name sig loc : specs) =
+checkSpecs (ModSpec name sig doc loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
     (mty, sig') <- checkSigExp sig
@@ -191,7 +191,7 @@ checkSpecs (ModSpec name sig loc : specs) =
     (abstypes, env, specs') <- localEnv senv $ checkSpecs specs
     return (S.map (qualify name') (mtyAbs mty) <> abstypes,
             senv <> env,
-            ModSpec name' sig' loc : specs')
+            ModSpec name' sig' doc loc : specs')
 
 checkSpecs (IncludeSpec e loc : specs) = do
   (e_abs, e_env, e') <- checkSigExpToEnv e
@@ -394,7 +394,7 @@ checkForDuplicateSpecs =
         f (TypeSpec name _ _ loc) =
           check Type name loc
 
-        f (ModSpec name _ loc) =
+        f (ModSpec name _ _ loc) =
           check Term name loc
 
         f IncludeSpec{} =

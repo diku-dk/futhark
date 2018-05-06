@@ -5,8 +5,8 @@ module Language.Futhark
   , module Language.Futhark.Pretty
 
   , Ident, DimIndex, Exp, Pattern
-  , ModExp, ModParam, SigExp, ModBind
-  , ValBind, Dec, Prog
+  , ModExp, ModParam, SigExp, ModBind, SigBind
+  , ValBind, Dec, Spec, Prog
   , TypeBind, TypeDecl
   , StructTypeArg, ArrayElemType
   , TypeParam
@@ -41,6 +41,9 @@ type TypeBind = TypeBindBase Info VName
 -- | A type-checked module binding.
 type ModBind = ModBindBase Info VName
 
+-- | A type-checked module type binding.
+type SigBind = SigBindBase Info VName
+
 -- | A type-checked module expression.
 type ModExp = ModExpBase Info VName
 
@@ -52,6 +55,9 @@ type SigExp = SigExpBase Info VName
 
 -- | A type-checked declaration.
 type Dec = DecBase Info VName
+
+-- | A type-checked specification.
+type Spec = SpecBase Info VName
 
 -- | An Futhark program with type information.
 type Prog = ProgBase Info VName
