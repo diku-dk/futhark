@@ -316,7 +316,8 @@ synopsisSpec spec = case spec of
     return $ fullRow $ "type " <> vnameSynopsisDef name <> joinBy " " (map typeParamHtml ps)
   ValSpec name tparams rettype _ _ -> do
     let tparams' = map typeParamHtml tparams
-    rettype' <- typeDeclHtml rettype
+    rettype' <- noLink (map typeParamName tparams) $
+                typeDeclHtml rettype
     return . H.tr $
       H.td ("val " <> vnameSynopsisDef name <>
             mconcat (map (" "<>) tparams')) <>
