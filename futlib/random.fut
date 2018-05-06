@@ -1,10 +1,19 @@
--- | Random number generation inspired by <random> in C++.
+-- | Random number generation inspired by `<random>` in C++.  The
+-- overall idea is that you pass a low-level `rng_engine`@mtype, that
+-- knows how to generate random integers, to a parametric module that
+-- maps said integers to the desired distribution.  Since Futhark is a
+-- pure language, the final random number function(s) will return both
+-- the random number and the new state of the engine.  It is the
+-- programmer's responsibility to ensure that the same state is not
+-- used more than once (unless that is what is desired).
 --
 -- Example usage:
 --
+-- ```
 -- module dist = uniform_real_distribution f32 minstd_rand
 -- let rng = minstd_rand.rng_from_seed [123]
 -- let (rng, x) = dist.rand (1,6)
+-- ```
 
 import "/futlib/math"
 import "/futlib/array"
@@ -15,8 +24,8 @@ local
 let hash(x: i32): i32 =
   let x = ((x >>> 16) ^ x) * 0x45d9f3b
   let x = ((x >>> 16) ^ x) * 0x45d9f3b
-  let x = ((x >>> 16) ^ x) in
-  x
+  let x = ((x >>> 16) ^ x)
+  in x
 
 -- | Low-level modules that act as sources of random numbers in some
 -- uniform distribution.
@@ -38,7 +47,7 @@ module type rng_engine = {
   val split_rng: i32 -> rng -> []rng
 
   -- | Combine several RNG states into a single state - typically done
-  -- with the result of 'split_rng'.
+  -- with the result of `split_rng`@term.
   val join_rng: []rng -> rng
 
   -- | Generate a single random element, and a new RNG state.
@@ -65,6 +74,20 @@ module type rng_distribution = {
   val rand: distribution -> engine.rng -> (engine.rng, num.t)
 }
 
+-- | A linear congruential random number generator produces numbers by
+-- the recurrence relation
+--
+-- > X(n+1) = (a × X(n) + c) mod m
+--
+-- where *X* is the sequence of pseudorandom values, and
+--
+-- * *m, 0 < m* — "modulus"
+--
+-- * *a, 0 < a < m* — "multiplier"
+--
+-- * *c, 0 ≤ c < m* — "increment"
+--
+-- * *X(0), 0 ≤ X(0) < m* — "seed" or "initial value"
 module linear_congruential_engine (T: integral) (P: {
   val a: T.t
   val c: T.t
@@ -96,17 +119,17 @@ module linear_congruential_engine (T: integral) (P: {
   let max = P.m
 }
 
--- | A random number engine that uses the "subtract with carry"
+-- | A random number engine that uses the *subtract with carry*
 -- algorithm.  Presently quite slow.  The size of the state is
 -- proportional to the long lag.
 module subtract_with_carry_engine (T: integral) (P: {
   -- | Word size: number of bits in each word of the state sequence.
-  -- Should be positive and less than the number of bits in T.t.
+  -- Should be positive and less than the number of bits in `T.t`.
   val w: i32
   -- | Long lag: distance between operand values.
   val r: i32
   -- | Short lag: number of elements between advances.  Should be
-  -- positive and less than 'r'.
+  -- positive and less than `r`.
   val s: i32
 }): rng_engine with int.t = T.t = {
   let long_lag = P.r
@@ -163,9 +186,10 @@ module subtract_with_carry_engine (T: integral) (P: {
   let max = T.(modulus - i32 1)
 }
 
--- | An engine adaptor class template that adapts a pseudo-random
--- number generator Engine type by using only r elements of each block
--- of p elements from the sequence it produces, discarding the rest.
+-- | An engine adaptor parametric module that adapts a pseudo-random
+-- number generator Engine type by using only `r` elements of
+-- each block of `p` elements from the sequence it produces,
+-- discarding the rest.
 --
 -- The adaptor keeps and internal counter of how many elements have
 -- been produced in the current block.
@@ -174,8 +198,8 @@ module discard_block_engine (K: {
   -- positive.
   val p: i32
   -- | Used block: number of elements in the block that are used (not
-  -- discarded). The rest (p-r) are discarded. This parameter should
-  -- be greater than zero and lower than or equal to p.
+  -- discarded). The rest `p-r` are discarded. This parameter should
+  -- be greater than zero and lower than or equal to `p`.
   val r: i32}) (E: rng_engine): rng_engine with int.t = E.int.t = {
   type t = E.int.t
   module int = E.int
@@ -202,10 +226,10 @@ module discard_block_engine (K: {
     in ((rng, i), x)
 }
 
--- | An engine adaptor that adapts an 'rng_engine' so that the
+-- | An engine adaptor that adapts an `rng_engine` so that the
 -- elements are delivered in a different sequence.
 --
--- The RNG keeps a buffer of 'k' generated numbers internally, and
+-- The RNG keeps a buffer of `k` generated numbers internally, and
 -- when requested, returns a randomly selected number within the
 -- buffer, replacing it with a value obtained from its base engine.
 module shuffle_order_engine (K: {val k: i32}) (E: rng_engine)
@@ -240,9 +264,9 @@ module shuffle_order_engine (K: {val k: i32}) (E: rng_engine)
   let max = E.max
 }
 
--- | A 'linear_congruential_engine' producing 'u32' values and
--- initialised with a=48271, c=u and m=2147483647.  This is the same
--- configuration as in C++.
+-- | A `linear_congruential_engine`@term producing `u32` values and
+-- initialised with `a=48271`, `c=0` and
+-- `m=2147483647`.  This is the same configuration as in C++.
 module minstd_rand: rng_engine with int.t = u32 =
   linear_congruential_engine u32 {
     let a = 48271u32
@@ -250,9 +274,9 @@ module minstd_rand: rng_engine with int.t = u32 =
     let m = 2147483647u32
 }
 
--- | A 'linear_congruential_engine' producing 'u32' values and
--- initialised with a=16807, c=u and m=2147483647.  This is the same
--- configuration as in C++.
+-- | A `linear_congruential_engine`@term producing `u32` values and
+-- initialised with `a=16807`, `c=0` and
+-- `m=2147483647`.  This is the same configuration as in C++.
 module minstd_rand0: rng_engine with int.t = u32 =
   linear_congruential_engine u32 {
     let a = 16807u32
@@ -261,9 +285,9 @@ module minstd_rand0: rng_engine with int.t = u32 =
 }
 
 -- | A subtract-with-carry pseudo-random generator of 24-bit numbers,
--- generally used as the base engine for the ranlux24 generator.  It
--- is an instantiation of subtract_with_carry_engine with w=24, s=10,
--- r=24.
+-- generally used as the base engine for the `ranlux24`@term generator.
+-- It is an instantiation of `subtract_with_carry_engine`@term with
+-- `w=24`, `s=10`, `r=24`.
 module ranlux24_base: rng_engine with int.t = u32 =
   subtract_with_carry_engine u32 {
     let w = 24
@@ -272,9 +296,9 @@ module ranlux24_base: rng_engine with int.t = u32 =
   }
 
 -- | A subtract-with-carry pseudo-random generator of 48-bit numbers,
--- generally used as the base engine for the ranlux24 generator.  It
--- is an instantiation of subtract_with_carry_engine with w=48, s=5,
--- r=12.
+-- generally used as the base engine for the `ranlux48`@term generator.
+-- It is an instantiation of `subtract_with_carry_engine`@term with
+-- `w=48`, `s=5`, `r=12`.
 module ranlux48_base: rng_engine with int.t = u64 =
   subtract_with_carry_engine u64 {
     let w = 48
@@ -285,27 +309,28 @@ module ranlux48_base: rng_engine with int.t = u64 =
 -- | A subtract-with-carry pseudo-random generator of 24-bit numbers
 -- with accelerated advancement.
 --
--- It is an instantiation of a discard_block_engine with
--- ranlux24_base, with parameters p=223 and r=23.
+-- It is an instantiation of a `discard_block_engine`@term with
+-- `ranlux24_base`@term, with parameters `p=223` and `r=23`.
 module ranlux24: rng_engine with int.t = u32 =
   discard_block_engine {let p = 223 let r = 23} ranlux24_base
 
 -- | A subtract-with-carry pseudo-random generator of 48-bit numbers
 -- with accelerated advancement.
 --
--- It is an instantiation of a discard_block_engine with
--- ranlux48_base, with parameters p=223 and r=23.
+-- It is an instantiation of a `discard_block_engine`@term with
+-- `ranlux48_base`@term, with parameters `p=223` and `r=23`.
 module ranlux48: rng_engine with int.t = u64 =
   discard_block_engine {let p = 389 let r = 11} ranlux48_base
 
 -- | An engine adaptor that returns shuffled sequences generated with
--- minstd_rand0.  It is not a good idea to use this RNG in a parallel
--- setting, as the state size is fairly large.
+-- `minstd_rand0`@term.  It is not a good idea to use this RNG in a
+-- parallel setting, as the state size is fairly large.
 module knuth_b: rng_engine with int.t = u32 =
   shuffle_order_engine {let k = 256} minstd_rand0
 
-
--- | The xorshift128+ engine.  Uses two 64-bit words as state.
+-- | The `xorshift128+
+-- <https://en.wikipedia.org/wiki/Xorshift#xorshift+>`_ engine.  Uses
+-- two 64-bit words as state.
 module xorshift128plus: rng_engine with int.t = u64 = {
   module int = u64
   type rng = (u64,u64)
@@ -339,8 +364,8 @@ module xorshift128plus: rng_engine with int.t = u64 = {
 }
 
 
--- | PCG32.  Has a state space of 128 bits, and produces uniformly
--- distributed 32-bit integers.
+-- | `PCG32 <http://www.pcg-random.org/>`_.  Has a state space of 128
+-- bits, and produces uniformly distributed 32-bit integers.
 module pcg32: rng_engine with int.t = u32 = {
   module int = u32
   type rng = {state: u64, inc: u64}
@@ -376,7 +401,8 @@ module pcg32: rng_engine with int.t = u32 = {
 }
 
 -- | This uniform integer distribution generates integers in a given
--- range with equal probability for each.
+-- range with equal probability for each, assuming the passed
+-- `rng_engine`@term generates uniformly distributed integers.
 module uniform_int_distribution (D: integral) (E: rng_engine):
   rng_distribution with num.t = D.t
                    with engine.rng = E.rng
@@ -424,6 +450,7 @@ module uniform_real_distribution (R: real) (E: rng_engine):
     in (rng', R.(min_r + x' * (max_r - min_r)))
 }
 
+-- | Normally distributed floats.
 module normal_distribution (R: real) (E: rng_engine):
   rng_distribution with num.t = R.t
                    with engine.rng = E.rng

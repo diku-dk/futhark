@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -8,14 +9,17 @@ import Control.Monad.State
 import Data.FileEmbed
 import Data.List
 import Data.Semigroup ((<>))
-import System.FilePath ((<.>), takeDirectory, takeExtension)
+import System.FilePath ((</>), (<.>), takeDirectory, takeExtension, makeRelative)
 import System.Directory (createDirectoryIfMissing)
 import System.Console.GetOpt
 import System.IO
 import System.Exit
+import qualified Data.Text.Lazy as T
+import qualified Data.Text.Lazy.IO as T
 
-import Text.Blaze.Html5 (docTypeHtml)
-import Text.Blaze.Html.Renderer.String
+import Text.Blaze.Html5 (docTypeHtml, (!))
+import qualified Text.Blaze.Html5.Attributes as A
+import Text.Blaze.Html.Renderer.Text
 
 import Futhark.Doc.Generator
 import Futhark.Compiler (readLibrary, dumpError, newFutharkConfig, Imports)
@@ -66,16 +70,18 @@ printDecs cfg dir imports = do
   write' ("style.css", cssFile)
 
   where render (name, fm) =
-          (name,) . renderHtml . docTypeHtml <$> renderFile name fm
+          (name,) . renderHtml . (docTypeHtml ! A.lang "en") <$> renderFile name fm
 
         write (name, content) = write' (name <.> "html", content)
-        write' (name, content) = do let file = dir ++ "/" ++ name
-                                    createDirectoryIfMissing True $ takeDirectory file
+
+        write' :: (String, T.Text) -> IO ()
+        write' (name, content) = do let file = dir </> makeRelative "/" name
                                     when (docVerbose cfg) $
                                       hPutStrLn stderr $ "Writing " <> file
-                                    writeFile file content
+                                    createDirectoryIfMissing True $ takeDirectory file
+                                    T.writeFile file content
 
-cssFile :: String
+cssFile :: T.Text
 cssFile = $(embedStringFile "rts/futhark-doc/style.css")
 
 data DocConfig = DocConfig { docOutput :: Maybe FilePath

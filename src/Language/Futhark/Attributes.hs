@@ -17,6 +17,8 @@ module Language.Futhark.Attributes
   , valueType
   , leadingOperator
   , progImports
+  , identifierReference
+  , identifierReferences
 
   -- * Queries on expressions
   , typeOf
@@ -92,9 +94,10 @@ module Language.Futhark.Attributes
   where
 
 import           Control.Monad.Writer
+import           Data.Char
 import           Data.Foldable
 import qualified Data.Map.Strict       as M
-import qualified Data.Set            as S
+import qualified Data.Set              as S
 import           Data.List
 import           Data.Loc
 import           Data.Maybe
@@ -861,6 +864,27 @@ progImports = concatMap decImports . progDecs
         modExpImports (ModApply _ me _ _ _) = modExpImports me
         modExpImports (ModAscript me _ _ _) = modExpImports me
         modExpImports ModLambda{}           = []
+
+-- | Extract a leading @(name, namespace, remainder)@ from a
+-- documentation comment string.  These are formatted as
+-- \`name\`\@namespace.  Let us hope that this pattern does not occur
+-- anywhere else.
+identifierReference :: String -> Maybe (String, String, String)
+identifierReference ('`' : s)
+  | (identifier, '`' : '@' : s') <- break (=='`') s,
+    (namespace, s'') <- span isAlpha s',
+    not $ null namespace =
+      Just (identifier, namespace, s'')
+identifierReference _ = Nothing
+
+-- | Find all the identifier references in a string.
+identifierReferences :: String -> [(String, String)]
+identifierReferences [] = []
+identifierReferences s
+  | Just (name, namespace, s') <- identifierReference s =
+      (name, namespace) : identifierReferences s'
+identifierReferences (_:s') =
+  identifierReferences s'
 
 -- | Given an operator name, return the operator that determines its
 -- syntactical properties.

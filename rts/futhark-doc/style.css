@@ -11,11 +11,13 @@ body {
 }
 
 h1 {
+    margin-top: 0;
     font-size: 3em;
     color: #5f021f;
 }
 
 h2 {
+    margin-bottom: 1ex;
     font-size: 2em;
     color: #5f021f;
 }
@@ -25,7 +27,11 @@ h3 {
     color: #5f021f;
 }
 
-#file_comment {
+p {
+    max-width: 65em;
+}
+
+#abstract {
     margin-bottom: 2ex;
 }
 
@@ -38,11 +44,37 @@ h3 {
     padding-left: 2ex;
 }
 
-.decs {
-    padding-left: 2ex;
+.decl_description {
+    margin-bottom: 2ex;
 }
 
-.module {
+.decl_name {
+    font-weight: bold;
+}
+
+.desc_header {
+    background: #ffcc7a;
+    font-family: monospace;
+    border-top: 1px solid #5f021f;
+}
+
+.desc_doc {
+    margin-left: 2ex;
+}
+
+.synopsis_link {
+    font-weight: bold;
+    text-decoration: none;
+    font-size: 1.3em;
+    width: 2ex;
+    display: inline-block;
+}
+
+.self_link {
+    text-decoration: none;
+}
+
+#module {
     font-family: monospace;
     white-space: pre;
     display: block;
