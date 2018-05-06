@@ -3,36 +3,41 @@
 
 import "/futlib/complex"
 
+module type fft = {
+  type real
+
+  -- | Perform a forward FFT on an array of numbers, each being
+  -- represented as the pair of the real and imaginary part of a
+  -- complex number.
+  val fft [n]: [n](real, real) -> [n](real, real)
+  -- | The inverse of `fft`@term.
+  val ifft [n]: [n](real, real) -> [n](real, real)
+
+  -- | Perform a forward FFT of an array of numbers, each representing
+  -- the real part of a complex number.
+  val fft_re [n]: [n]real -> [n](real, real)
+  -- | The inverse of `fft_re`@term.
+  val ifft_re [n]: [n]real -> [n](real, real)
+
+  -- | Perform a forward 2D FFT using the row-column algorithm.
+  val fft2 [n][m]: [n][m](real, real) -> [n][m](real, real)
+  -- | The inverse of `fft2`@term.
+  val ifft2 [n][m]: [n][m](real, real) -> [n][m](real, real)
+
+  -- | Perform a forward 2D FFT of an array of numbers, each representing
+  -- the real part of a complex number.
+  val fft2_re [n][m]: [n][m]real -> [n][m](real, real)
+  -- | The inverse of `2fft_re`@term.
+  val ifft2_re [n][m]: [n][m]real -> [n][m](real, real)
+}
+
 -- | Given a module describing real numbers, produce a module for
 -- performing FFTs using Stockham's algorithm.  All of these will pad
 -- with zeroes up to the next power of two before carrying out the
 -- computation, and return the truncated array.
-module mk_fft (R: real): {
-  -- | Perform a forward FFT on an array of numbers, each being
-  -- represented as the pair of the real and imaginary part of a
-  -- complex number.
-  val fft [n]: [n](R.t, R.t) -> [n](R.t, R.t)
-  -- | The inverse of 'fft'.
-  val ifft [n]: [n](R.t, R.t) -> [n](R.t, R.t)
-
-  -- | Perform a forward FFT of an array of numbers, each representing
-  -- the real part of a complex number.
-  val fft_re [n]: [n]R.t -> [n](R.t, R.t)
-  -- | The inverse of 'fft_re'.
-  val ifft_re [n]: [n]R.t -> [n](R.t, R.t)
-
-  -- | Perform a forward 2D FFT using the row-column algorithm.
-  val fft2 [n][m]: [n][m](R.t, R.t) -> [n][m](R.t, R.t)
-  -- | The inverse of 'fft2'.
-  val ifft2 [n][m]: [n][m](R.t, R.t) -> [n][m](R.t, R.t)
-
-  -- | Perform a forward 2D FFT of an array of numbers, each representing
-  -- the real part of a complex number.
-  val fft2_re [n][m]: [n][m]R.t -> [n][m](R.t, R.t)
-  -- | The inverse of '2fft_re'.
-  val ifft2_re [n][m]: [n][m]R.t -> [n][m](R.t, R.t)
-} = {
+module mk_fft (R: real): fft with real = R.t = {
   module complex = complex R
+  type real = R.t
   type complex = complex.complex
 
   let radix = 2
