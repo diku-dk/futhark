@@ -27,12 +27,12 @@ let id '^a (x: a) = x
 let iterate 'a (n: i32) (f: a -> a) (x: a) =
   loop x for _i < n do f x
 
--- | Keep applying a function until some property holds of the value.
--- May apply zero times.  Note: may not terminate.
+-- | Keep applying `f` until `p` returns true for the input value.
+-- May apply zero times.  *Note*: may not terminate.
 let iterate_until 'a (p: a -> bool) (f: a -> a) (x: a) =
   loop x while ! (p x) do f x
 
--- | Keep applying a function while some property holds of the value.
--- May apply zero times.  Note: may not terminate.
+-- | Keep applying `f` while `p` returns true for the input value.
+-- May apply zero times.  *Note*: may not terminate.
 let iterate_while 'a (p: a -> bool) (f: a -> a) (x: a) =
   loop x while p x do f x

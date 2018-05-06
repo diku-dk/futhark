@@ -869,16 +869,16 @@ data SpecBase f vn = ValSpec  { specName       :: vn
                               }
                    | TypeAbbrSpec (TypeBindBase f vn)
                    | TypeSpec vn [TypeParamBase vn] (Maybe String) SrcLoc -- ^ Abstract type.
-                   | ModSpec vn (SigExpBase f vn) SrcLoc
+                   | ModSpec vn (SigExpBase f vn) (Maybe String) SrcLoc
                    | IncludeSpec (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
-  locOf (ValSpec _ _ _ _ loc)   = locOf loc
-  locOf (TypeAbbrSpec tbind)    = locOf tbind
-  locOf (TypeSpec _ _ _ loc)    = locOf loc
-  locOf (ModSpec _ _ loc)       = locOf loc
-  locOf (IncludeSpec _ loc)     = locOf loc
+  locOf (ValSpec _ _ _ _ loc) = locOf loc
+  locOf (TypeAbbrSpec tbind)  = locOf tbind
+  locOf (TypeSpec _ _ _ loc)  = locOf loc
+  locOf (ModSpec _ _ _ loc)   = locOf loc
+  locOf (IncludeSpec _ loc)   = locOf loc
 
 data SigExpBase f vn = SigVar (QualName vn) SrcLoc
                      | SigParens (SigExpBase f vn) SrcLoc

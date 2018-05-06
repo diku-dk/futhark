@@ -356,7 +356,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (SpecBase f vn) wher
   ppr (TypeSpec name ps _ _) = text "type" <+> ppr name <+> spread (map ppr ps)
   ppr (ValSpec name tparams vtype _ _) =
     text "val" <+> ppr name <+> spread (map ppr tparams) <> colon <+> ppr vtype
-  ppr (ModSpec name sig _) =
+  ppr (ModSpec name sig _ _) =
     text "module" <+> ppr name <> colon <+> ppr sig
   ppr (IncludeSpec e _) =
     text "include" <+> ppr e
