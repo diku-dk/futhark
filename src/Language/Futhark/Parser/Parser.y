@@ -296,7 +296,7 @@ Spec :: { SpecBase NoInfo Name }
           in TypeSpec name (TypeParamDim pname ploc : $5) Nothing (srcspan $1 $>) }
       | module id ':' SigExp
         { let L _ (ID name) = $2
-          in ModSpec name $4 (srcspan $1 $>) }
+          in ModSpec name $4 Nothing (srcspan $1 $>) }
       | include SigExp
         { IncludeSpec $2 (srcspan $1 $>) }
       | Doc Spec
@@ -890,6 +890,7 @@ addDocSpec :: String -> SpecBase NoInfo Name -> SpecBase NoInfo Name
 addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig { typeDoc = Just doc })
 addDocSpec doc val@(ValSpec {}) = val { specDoc = Just doc }
 addDocSpec doc (TypeSpec name ps _ loc) = TypeSpec name ps (Just doc) loc
+addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
 addDocSpec _ spec = spec
 
 reverseNonempty :: (a, [a]) -> (a, [a])

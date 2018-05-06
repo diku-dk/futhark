@@ -59,7 +59,10 @@ import Language.Futhark.Syntax (BinOp(..))
 tokens :-
 
   $white+                               ;
-  @doc                     { tokenM $ return . DOC . T.unpack . T.unlines . map (T.drop 2 . T.stripStart) . T.split (== '\n') . T.drop 2 }
+  @doc                     { tokenM $ return . DOC . T.unpack . T.unlines .
+                                      map (T.drop 3 . T.stripStart) .
+                                           T.split (== '\n') . ("--"<>) .
+                                           T.drop 4 }
   "--"[^\n]*                            ;
   "="                      { tokenC EQU }
   "("                      { tokenC LPAR }
