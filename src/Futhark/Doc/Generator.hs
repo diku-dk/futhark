@@ -46,7 +46,10 @@ selfLink :: AttributeValue -> Html -> Html
 selfLink s = H.a ! A.id s ! A.href ("#" <> s) ! A.class_ "self_link"
 
 fullRow :: Html -> Html
-fullRow = H.tr . (H.td ! A.colspan "2")
+fullRow = H.tr . (H.td ! A.colspan "3")
+
+emptyRow :: Html
+emptyRow = H.tr $ H.td mempty <> H.td mempty <> H.td mempty
 
 renderFile :: String -> FileModule -> State DocEnv Html
 renderFile current fm = flip runReaderT (Context current fm mempty) $ do
@@ -99,9 +102,8 @@ synopsisDecs decs = do
   fm <- asks ctxFileMod
   -- We add an empty row to avoid generating invalid HTML in cases
   -- where all rows are otherwise colspan=2.
-  (H.table ! A.class_ "specs") . (empty_row<>) . mconcat <$>
+  (H.table ! A.class_ "specs") . (emptyRow<>) . mconcat <$>
     sequence (mapMaybe (synopsisDec fm) decs)
-  where empty_row = H.tr (H.td mempty <> H.td mempty)
 
 synopsisDec :: FileModule -> Dec -> Maybe (DocM Html)
 synopsisDec fm dec = case dec of
@@ -135,7 +137,7 @@ synopsisValBind :: ValBind -> Maybe (DocM Html)
 synopsisValBind vb = Just $ do
   let name' = vnameSynopsisDef $ valBindName vb
   (lhs, rhs) <- valBindHtml name' vb
-  return $ H.tr $ H.td lhs <> H.td rhs
+  return $ H.tr $ H.td lhs <> H.td ": " <> H.td rhs
 
 valBindHtml :: Html -> ValBind -> DocM (Html, Html)
 valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _) = do
@@ -145,7 +147,7 @@ valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _) = do
   rettype' <- noLink' $ maybe (typeHtml rettype) typeExpHtml retdecl
   params' <- noLink' $ mapM patternHtml params
   return ("val " <> (H.span ! A.class_ "decl_name") name <> tparams',
-          ": " <> mconcat (intersperse " -> " $ params' ++ [rettype']))
+          mconcat (intersperse " -> " $ params' ++ [rettype']))
 
 synopsisModType :: SigBind -> Maybe (DocM Html)
 synopsisModType sb = Just $ do
@@ -161,7 +163,7 @@ synopsisMod fm (ModBind name ps sig _ _ _) =
   where proceed sig' = do
           let name' = vnameSynopsisDef name
           ps' <- modParamHtml ps
-          return $ H.tr $ H.td ("module " <> name') <> H.td (": " <> ps' <> sig')
+          return $ H.tr $ H.td ("module " <> name') <> H.td ": " <> H.td (ps' <> sig')
 
         FileModule _abs Env { envModTable = modtable} _ = fm
         envSig (ModEnv e) = renderEnv e
@@ -217,7 +219,7 @@ typeHtml t = case t of
         braces . commas <$> mapM ppField (M.toList fs)
     where ppField (name, tp) = do
             tp' <- typeHtml tp
-            return $ toHtml (nameToString name) <> ":" <> tp'
+            return $ toHtml (nameToString name) <> ": " <> tp'
   TypeVar et targs -> do
     targs' <- mapM typeArgHtml targs
     et' <- typeNameHtml et
@@ -247,7 +249,7 @@ prettyElem (ArrayRecordElem fs)
       braces . commas <$> mapM ppField (M.toList fs)
   where ppField (name, tp) = do
           tp' <- prettyRecordElem tp
-          return $ toHtml (nameToString name) <> ":" <> tp'
+          return $ toHtml (nameToString name) <> ": " <> tp'
 
 prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) () -> DocM Html
 prettyRecordElem (RecordArrayElem et) = prettyElem et
@@ -321,10 +323,11 @@ synopsisSpec spec = case spec of
     return . H.tr $
       H.td ("val " <> vnameSynopsisDef name <>
             mconcat (map (" "<>) tparams')) <>
-      H.td (" : " <> rettype')
+      H.td ": " <>
+      H.td rettype'
   ModSpec name sig _ _ -> do
     s <- synopsisSigExp sig
-    return $ H.tr $ H.td ("module " <> vnameSynopsisDef name) <> H.td (": "<> s)
+    return $ H.tr $ H.td ("module " <> vnameSynopsisDef name) <> H.td ": " <> H.td s
   IncludeSpec e _ -> fullRow . ("include " <>) <$> synopsisSigExp e
 
 typeDeclHtml :: TypeDeclBase f VName -> DocM Html
