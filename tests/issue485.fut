@@ -5,7 +5,7 @@
 
 
 let main (n: i32) (m: i32) =
-  let xss = map (\i -> map (\j -> i * j) (iota m)) (iota n)
-  let xs = reshape (n*m) xss -- now xs aliases xss
-  let vs = map (\i -> xss[i%n,i%m]) (iota (n*m)) -- read from xss
-  in scatter xs (iota (n*m)) vs -- consume xs
+  let xs = iota n
+  let ys = xs : [m]i32 -- now ys aliases xs
+  let vs = map (\i -> xs[i+2%n]) (iota m) -- read from xss
+  in scatter ys (iota n) vs -- consume xs

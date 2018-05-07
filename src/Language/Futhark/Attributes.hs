@@ -711,7 +711,16 @@ intrinsics = M.fromList $ zipWith namify [10..] $
              -- get a missing case warning if we forget a case.
              mapMaybe mkIntrinsicBinOp [minBound..maxBound] ++
 
-             [("scatter", IntrinsicPolyFun [tp_a]
+             [("flatten", IntrinsicPolyFun [tp_a]
+                          [Array (ArrayPolyElem tv_a' [] ()) (rank 2) Nonunique] $
+                          Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique),
+              ("unflatten", IntrinsicPolyFun [tp_a]
+                            [Prim $ Signed Int32,
+                             Prim $ Signed Int32,
+                             Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique] $
+                            Array (ArrayPolyElem tv_a' [] ()) (rank 2) Nonunique),
+
+               ("scatter", IntrinsicPolyFun [tp_a]
                           [Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique,
                            Array (ArrayPrimElem (Signed Int32) ()) (rank 1) Nonunique,
                            Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique] $

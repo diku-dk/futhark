@@ -8,7 +8,7 @@
 let main(): ([]i32,[][]i32) =
   let n = 9
   let a = map (+1) (iota(n))
-  let b = reshape (3,3) a
+  let b = unflatten 3 3 a
   let c = map  (\(row: []i32): []i32  ->
                     map  (\(x: i32): i32  -> x*2) row
               ) b

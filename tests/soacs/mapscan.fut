@@ -12,4 +12,4 @@ let main(n: i32, m: i32): i32 =
               iota(n))
   let b = map  (\(a_r: [m]i32): [m]i32  ->
                  scan (+) 0 (a_r)) a in
-  reduce (^) 0 (reshape (n*m) b)
+  reduce (^) 0 (flatten b)

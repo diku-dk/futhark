@@ -9,4 +9,4 @@ let main(n: i32): i32 =
   let y  = replicate n x
   -- Hack to force manifestation.
   let y[0,0] = 10
-  in reduce (+) 0 (reshape (n*n) y)
+  in reduce (+) 0 (flatten y)

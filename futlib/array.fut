@@ -62,27 +62,27 @@ let copy [n] 't (a: [n]t): *[n]t =
 
 -- | Combines the outer two dimensions of an array.
 let flatten [n][m] 't (xs: [n][m]t): []t =
-  reshape (n*m) xs
+  intrinsics.flatten xs
 
 -- | Combines the outer three dimensions of an array.
 let flatten_3d [n][m][l] 't (xs: [n][m][l]t): []t =
-  reshape (n*m*l) xs
+  flatten (flatten xs)
 
 -- | Combines the outer four dimensions of an array.
 let flatten_4d [n][m][l][k] 't (xs: [n][m][l][k]t): []t =
-  reshape (n*m*l*k) xs
+  flatten (flatten_3d xs)
 
 -- | Splits the outer dimension of an array in two.
 let unflatten 't (n: i32) (m: i32) (xs: []t): [n][m]t =
-  reshape (n,m) xs
+  intrinsics.unflatten (n, m, xs)
 
 -- | Splits the outer dimension of an array in three.
 let unflatten_3d 't (n: i32) (m: i32) (l: i32) (xs: []t): [n][m][l]t =
-  reshape (n,m,l) xs
+  unflatten n m (unflatten (n*m) l xs)
 
 -- | Splits the outer dimension of an array in four.
 let unflatten_4d 't (n: i32) (m: i32) (l: i32) (k: i32) (xs: []t): [n][m][l][k]t =
-  reshape (n,m,l,k) xs
+  unflatten n m (unflatten_3d (n*m) l k xs)
 
 let intersperse [n] 't (x: t) (xs: [n]t): *[]t =
   map (\i -> if i % 2 == 1 && i != 2*n then x
