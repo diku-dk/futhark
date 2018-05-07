@@ -328,8 +328,7 @@ module ranlux48: rng_engine with int.t = u64 =
 module knuth_b: rng_engine with int.t = u32 =
   shuffle_order_engine {let k = 256} minstd_rand0
 
--- | The `xorshift128+
--- <https://en.wikipedia.org/wiki/Xorshift#xorshift+>`_ engine.  Uses
+-- | The [xorshift128+](https://en.wikipedia.org/wiki/Xorshift#xorshift+) engine.  Uses
 -- two 64-bit words as state.
 module xorshift128plus: rng_engine with int.t = u64 = {
   module int = u64
@@ -364,7 +363,7 @@ module xorshift128plus: rng_engine with int.t = u64 = {
 }
 
 
--- | `PCG32 <http://www.pcg-random.org/>`_.  Has a state space of 128
+-- | [PCG32](http://www.pcg-random.org/).  Has a state space of 128
 -- bits, and produces uniformly distributed 32-bit integers.
 module pcg32: rng_engine with int.t = u32 = {
   module int = u32
