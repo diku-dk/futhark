@@ -53,8 +53,8 @@ module mk_fft (R: real): fft with real = R.t = {
     in (idxD, v0, idxD+ns, v1)
 
   let fft' [n] (forward: R.t) (input: [n]complex) (bits: i32) : []complex =
-    let input = flatten (copy (unflatten (n/2) 2 input))
-    let output = flatten (copy (unflatten (n/2) 2 input))
+    let input = copy input
+    let output = copy input
     let ix = iota(n/radix)
     let NS = map (radix**) (iota bits)
     let (res,_) =
