@@ -319,7 +319,9 @@ main = mainWithOptions newConfig commandLineOptions compile
   where compile [file] config =
           Just $ do
             res <- runFutharkM (m file config) $
-                   isJust $ futharkVerbose $ futharkConfig config
+                   case futharkVerbose $ futharkConfig config of
+                     Just _ -> Verbose
+                     Nothing -> NotVerbose
             case res of
               Left err -> do
                 dumpError (futharkConfig config) err

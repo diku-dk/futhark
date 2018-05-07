@@ -86,7 +86,7 @@ optimisedProgramMetrics pipeline program =
                    GpuPipeline ->
                      check gpuPipeline
   where check pipeline' = do
-          res <- io $ runFutharkM (runPipelineOnProgram structTestConfig preludeBasis pipeline' program) False
+          res <- io $ runFutharkM (runPipelineOnProgram structTestConfig preludeBasis pipeline' program) NotVerbose
           case res of
             Left err ->
               throwError $ T.pack $ show err
