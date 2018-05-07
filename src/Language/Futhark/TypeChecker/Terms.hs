@@ -1687,8 +1687,8 @@ unify loc orig_t1 orig_t2 = do
           t2' = applySubst (`lookupSubst` constraints) t2
 
           failure =
-            typeError loc $ "Couldn't match type `" ++
-            pretty t1' ++ "' with type `" ++ pretty t2' ++ "'."
+            typeError loc $ "Couldn't match expected type `" ++
+            pretty t1' ++ "' with actual type `" ++ pretty t2' ++ "'."
 
       case (t1', t2') of
         _ | t1' == t2' -> return ()
