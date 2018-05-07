@@ -73,18 +73,11 @@ data TypeError =
   | UnifyError SrcLoc (TypeBase () ()) SrcLoc (TypeBase () ())
   | UnexpectedType SrcLoc
     (TypeBase () ()) [TypeBase () ()]
-  | ReturnTypeError SrcLoc Name (TypeBase () ()) (TypeBase () ())
   | DupDefinitionError Namespace Name SrcLoc SrcLoc
-  | DupPatternError Name SrcLoc SrcLoc
-  | InvalidPatternError (PatternBase NoInfo Name)
-    (TypeBase (DimDecl Name) ()) (Maybe String) SrcLoc
   | UnknownVariableError Namespace (QualName Name) SrcLoc
-  | ParameterMismatch (Maybe (QualName Name)) SrcLoc
-    (Either Int [TypeBase () ()]) [TypeBase () ()]
   | UseAfterConsume Name SrcLoc SrcLoc
   | ConsumeAfterConsume Name SrcLoc SrcLoc
   | IndexingError Int Int SrcLoc
-  | CurriedConsumption (QualName Name) SrcLoc
   | BadLetWithValue SrcLoc
   | ReturnAliased Name Name SrcLoc
   | UniqueReturnAliased Name SrcLoc
@@ -94,12 +87,8 @@ data TypeError =
   | UndefinedType SrcLoc (QualName Name)
   | InvalidField SrcLoc (TypeBase () ()) String
   | UnderscoreUse SrcLoc (QualName Name)
-  | ValueIsNotFunction SrcLoc (QualName Name) CompType
-  | FunctionIsNotValue SrcLoc (QualName Name)
-  | UniqueConstType SrcLoc Name (TypeBase () ())
-  | UndeclaredFunctionReturnType SrcLoc (QualName Name)
   | UnappliedFunctor SrcLoc
-  | FunctionalValueTypeVariable SrcLoc (TypeBase () ()) (TypeBase () ())
+  | FunctionIsNotValue SrcLoc (QualName Name)
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -116,34 +105,11 @@ instance Show TypeError where
     "Type of expression at " ++ locStr loc ++ " must be one of " ++
     intercalate ", " (map pretty ts) ++ ", but is " ++
     pretty t ++ "."
-  show (ReturnTypeError pos fname rettype bodytype) =
-    "Declaration of function " ++ nameToString fname ++ " at " ++ locStr pos ++
-    " declares return type " ++ pretty rettype ++ ", but body has type " ++
-    pretty bodytype
   show (DupDefinitionError space name pos1 pos2) =
     "Duplicate definition of " ++ ppSpace space ++ " " ++ nameToString name ++ ".  Defined at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
-  show (DupPatternError name pos1 pos2) =
-    "Duplicate binding of '" ++ pretty name ++ "'; at " ++
-    locStr pos1 ++ " and " ++ locStr pos2 ++ "."
-  show (InvalidPatternError pat t desc loc) =
-    "Pattern " ++ pretty pat ++
-    " cannot match value of type " ++ pretty t ++ " at " ++ locStr loc ++ end
-    where end = case desc of Nothing -> "."
-                             Just desc' -> ":\n" ++ desc'
   show (UnknownVariableError space name pos) =
     "Unknown " ++ ppSpace space ++ " " ++ pretty name ++ " referenced at " ++ locStr pos ++ "."
-  show (ParameterMismatch fname pos expected got) =
-    "In call of " ++ fname' ++ " at position " ++ locStr pos ++ ":\n" ++
-    "expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
-     expected' ++ ", but got " ++ show ngot ++
-    " arguments of types " ++ intercalate ", " (map pretty got) ++ "."
-    where (nexpected, expected') =
-            case expected of
-              Left i -> (i, "(polymorphic)")
-              Right ts -> (length ts, intercalate ", " $ map pretty ts)
-          ngot = length got
-          fname' = maybe "anonymous function" (("function "++) . pretty) fname
   show (UseAfterConsume name rloc wloc) =
     "Variable " ++ pretty name ++ " used at " ++ locStr rloc ++
     ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
@@ -153,9 +119,6 @@ instance Show TypeError where
   show (IndexingError dims got pos) =
     show got ++ " indices given at " ++ locStr pos ++
     ", but type of indexee  has " ++ show dims ++ " dimension(s)."
-  show (CurriedConsumption fname loc) =
-    "Function " ++ pretty fname ++
-    " curried over a consuming parameter at " ++ locStr loc ++ "."
   show (BadLetWithValue loc) =
     "New value for elements in let-with shares data with source array at " ++
     locStr loc ++ ".  This is illegal, as it prevents in-place modification."
@@ -183,22 +146,10 @@ instance Show TypeError where
   show (UnderscoreUse loc name) =
     "Use of " ++ pretty name ++ " at " ++ locStr loc ++
     ": variables prefixed with underscore must not be accessed."
-  show (ValueIsNotFunction loc name t) =
-    "Attempt to use value " ++ pretty name ++ " of type " ++ pretty t ++
-    " as function at " ++ locStr loc ++ "."
   show (FunctionIsNotValue loc name) =
     "Attempt to use function " ++ pretty name ++ " as value at " ++ locStr loc ++ "."
-  show (UniqueConstType loc name t) =
-    "Constant " ++ pretty name ++ " defined with unique type " ++ pretty t ++ " at " ++
-    locStr loc ++ ", which is not allowed."
-  show (UndeclaredFunctionReturnType loc fname) =
-    "Function '" ++ pretty fname ++ "' with no return type declaration called at " ++
-    locStr loc
   show (UnappliedFunctor loc) =
     "Cannot have parametric module at " ++ locStr loc ++ "."
-  show (FunctionalValueTypeVariable loc tvar t) =
-    "Cannot instantiate the value type variable " ++ pretty tvar ++
-    " with the functional type " ++ pretty t ++ " at " ++ locStr loc ++ "."
 
 -- | A set of abstract types and where their definition is expected.
 type TySet = S.Set (QualName VName)
