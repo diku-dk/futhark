@@ -161,7 +161,7 @@ synopsisMod fm (ModBind name ps sig _ _ _) =
   where proceed sig' = do
           let name' = vnameSynopsisDef name
           ps' <- modParamHtml ps
-          return $ fullRow $ "module " <> name' <> ": " <> ps' <> sig'
+          return $ H.tr $ H.td ("module " <> name') <> H.td (": " <> ps' <> sig')
 
         FileModule _abs Env { envModTable = modtable} _ = fm
         envSig (ModEnv e) = renderEnv e
@@ -324,7 +324,7 @@ synopsisSpec spec = case spec of
       H.td (" : " <> rettype')
   ModSpec name sig _ _ -> do
     s <- synopsisSigExp sig
-    return $ fullRow $ "module " <> vnameSynopsisDef name <> ": "<> s
+    return $ H.tr $ H.td ("module " <> vnameSynopsisDef name) <> H.td (": "<> s)
   IncludeSpec e _ -> fullRow . ("include " <>) <$> synopsisSigExp e
 
 typeDeclHtml :: TypeDeclBase f VName -> DocM Html
