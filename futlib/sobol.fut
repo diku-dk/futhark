@@ -11,15 +11,15 @@ module type sobol_dir = {
 module type sobol = {
   -- | Dimensionality of sequence.
   val D : i32
-  -- | The value 2**32.
+  -- | The value `2**32`.
   val norm : f64
-  -- | [independent i] returns the i'th sobol vector (in u32)
+  -- | `independent i` returns the `i`'th sobol vector (in u32)
   val independent : i32 -> [D]u32
-  -- | [recurrent i v] returns the i'th sobol vector given v is the
-  -- (i-1)'th sobol vector
+  -- | `recurrent i v` returns the `i`'th sobol vector given `v` is the
+  -- `i-1`'th sobol vector
   val recurrent : i32 -> [D]u32 -> [D]u32
-  -- | [chunk i n] returns the array [v_i,...,v_(i+n-1)] of sobol
-  -- vectors where v_j is the j'th D-dimensional sobol vector
+  -- | `chunk i n` returns the array `[v(i),...,v(i+n-1)]` of sobol
+  -- vectors where `v(j)` is the `j`'th D-dimensional sobol vector
   val chunk : i32 -> (n:i32) -> [n][D]f64
   module Reduce :
       (X : { include monoid
