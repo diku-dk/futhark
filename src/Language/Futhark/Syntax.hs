@@ -647,10 +647,6 @@ data ExpBase f vn =
             -- static integer indicates which dimension to concatenate
             -- across.
 
-            -- Array index space transformation.
-            | Reshape (ExpBase f vn) (ExpBase f vn) (f Int) SrcLoc
-             -- ^ 1st arg is the new shape, 2nd arg is the input array.
-
             | Rearrange [Int] (ExpBase f vn) SrcLoc
             -- ^ Permute the dimensions of the input array.  The list
             -- of integers is a list of dimensions (0-indexed), which
@@ -750,7 +746,6 @@ instance Located (ExpBase f vn) where
   locOf (LetWith _ _ _ _ _ pos)        = locOf pos
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
-  locOf (Reshape _ _ _ loc)            = locOf loc
   locOf (Rearrange _ _ pos)            = locOf pos
   locOf (Rotate _ _ _ pos)             = locOf pos
   locOf (Map _ _ _ loc)                = locOf loc

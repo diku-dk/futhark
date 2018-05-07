@@ -454,10 +454,6 @@ typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
-typeOf (Reshape shape e (Info d) _) =
-  typeOf e `setArrayShape` rank (n + arrayRank (typeOf e) - d)
-  where n = case typeOf shape of Record ts -> length ts
-                                 _         -> 1
 typeOf (Rearrange _ e _) = typeOf e
 typeOf (Rotate _ _ e _) = typeOf e
 typeOf (Zip _ _ _ (Info t) _) = t

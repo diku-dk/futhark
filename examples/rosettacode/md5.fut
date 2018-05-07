@@ -52,7 +52,7 @@ let unbytes(bs: [4]u8): u32 =
   u32.u8(bs[3]) * 0x1000000u32
 
 let unbytes_block(block: [64]u8): [16]u32 =
-  map unbytes (reshape (16,4) block)
+  map unbytes (unflatten 16 4 block)
 
 -- Process 512 bits of the input.
 let md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
@@ -85,5 +85,5 @@ let main [n] (ms: [n]u8): [16]u8 =
                   replicate (padding-12) 0x0u8 ++
                   bytes (u32.i32(n*8)) ++
                   [0u8,0u8,0u8,0u8]
-  let (a,b,c,d) = md5 (map unbytes_block (reshape (n_padded / 64, 64) ms_padded))
-  in reshape 16 (map bytes [a,b,c,d])
+  let (a,b,c,d) = md5 (map unbytes_block (unflatten (n_padded / 64) 64 ms_padded))
+  in flatten (map bytes [a,b,c,d])

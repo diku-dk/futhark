@@ -59,7 +59,7 @@ let brownianBridge [num_dates]
                 bb_data: [3][num_dates]f64,
                  gaussian_arr: []f64
             ): [][]f64 =
-    let gauss2d  = reshape (num_dates,num_und) gaussian_arr
+    let gauss2d  = unflatten num_dates num_und gaussian_arr
     let gauss2dT = rearrange (1,0) gauss2d in
       rearrange (1,0) (
         map (brownianBridgeDates bb_inds bb_data) gauss2dT
@@ -69,7 +69,8 @@ let main [num_dates] (num_und: i32,
                       bb_inds: [3][num_dates]i32,
                       arr_usz: []f64
                      ): [][]f64 =
-  let arr    = reshape (num_dates*num_und) arr_usz
+  let n = num_dates*num_und
+  let arr    = arr_usz : [n]f64
   let bb_data= map (\(row: []i32): []f64  ->
                         map r64 row
                   ) (bb_inds )

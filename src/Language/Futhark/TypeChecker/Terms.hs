@@ -1044,25 +1044,6 @@ checkExp (Index e idxes NoInfo loc) = do
   where isFix DimFix{} = True
         isFix _        = False
 
-checkExp (Reshape shapeexp arrexp NoInfo loc) = do
-  shapeexp' <- checkExp shapeexp
-  arrexp' <- checkExp arrexp
-  shape_t <- expType shapeexp'
-  arr_t <- expType arrexp'
-
-  case shape_t of
-    t | Just ts <- isTupleRecord t ->
-          mapM_ (unify (srclocOf shapeexp) (Prim $ Signed Int32) . toStruct) ts
-      | otherwise ->
-          unify (srclocOf shapeexp) (Prim $ Signed Int32) $ toStruct t
-
-  case arr_t of
-    Array{} -> return ()
-    t -> typeError loc $
-         "Array argument to reshape must be an array, but has type " ++ pretty t
-
-  return $ Reshape shapeexp' arrexp' (Info $ arrayRank arr_t) loc
-
 checkExp (Rearrange perm arrexp loc) = do
   (arr_t, _) <- newArrayType (srclocOf arrexp) "e" (length perm)
   arrexp' <- unifies arr_t =<< checkExp arrexp

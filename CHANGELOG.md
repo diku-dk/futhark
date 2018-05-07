@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+  * The `reshape` construct has been removed.  Use the
+    `flatten`/`unflatten` functions instead.
+
 ### Changed
 
   * When defining a module type, a module of the same name is no

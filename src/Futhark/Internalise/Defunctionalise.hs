@@ -290,11 +290,6 @@ defuncExp e@(Concat i e1 e2 loc) = do
   e2' <- defuncExp' e2
   return (Concat i e1' e2' loc, Dynamic $ typeOf e)
 
-defuncExp e@(Reshape e1 e2 info loc) = do
-  e1' <- defuncExp' e1
-  e2' <- defuncExp' e2
-  return (Reshape e1' e2' info loc, Dynamic $ typeOf e)
-
 defuncExp e@(Rearrange is e0 loc) = do
   e0' <- defuncExp' e0
   return (Rearrange is e0' loc, Dynamic $ typeOf e)
@@ -770,7 +765,6 @@ freeVars expr = case expr of
   Index e idxs _ _    -> freeVars e  <> foldMap freeDimIndex idxs
   Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2
   Concat _ e1 e2 _    -> freeVars e1 <> freeVars e2
-  Reshape e1 e2 _ _   -> freeVars e1 <> freeVars e2
   Rearrange _ e _     -> freeVars e
   Rotate _ e1 e2 _    -> freeVars e1 <> freeVars e2
 

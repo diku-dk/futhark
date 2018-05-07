@@ -139,7 +139,6 @@ import Language.Futhark.Parser.Lexer
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
-      reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
       rotate          { L $$ ROTATE }
       zip             { L $$ ZIP }
@@ -508,9 +507,6 @@ Exp2 :: { UncheckedExp }
          { DoLoop $2 $3 $5 $6 $8 (srcspan $1 $>) }
 
      | LetExp %prec letprec { $1 }
-
-     | reshape Atom Atom
-                      { Reshape $2 $3 NoInfo (srcspan $1 $>) }
 
      | rearrange '(' NaturalInts ')' Atom
                       { Rearrange $3 $5 (srcspan $1 $>) }
