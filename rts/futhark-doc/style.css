@@ -31,6 +31,10 @@ p {
     max-width: 65em;
 }
 
+td {
+    vertical-align: top;
+}
+
 #abstract {
     margin-bottom: 2ex;
 }
