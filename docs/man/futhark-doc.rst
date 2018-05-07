@@ -20,6 +20,15 @@ given directory, as well as any file reachable through ``import``
 expressions.  The given Futhark code will be considered as one
 cohesive whole, and must be type-correct.
 
+Futhark definitions may be documented by prefixing them with a block
+of line comments starting with :literal:`-- |` (see example below).
+Simple Markdown syntax is supported within these comments.  A link to
+another identifier is possible with the notation
+:literal:`\`name\`@namespace`, where ``namespace`` must be either
+``term``, ``type``, or ``mtype`` (module names are in the ``term``
+namespace).  A file may contain a leading documentation comment, which
+will be considered the file *abstract*.
+
 OPTIONS
 =======
 
@@ -35,6 +44,16 @@ OPTIONS
 
 -V
   Print version information on standard output and exit.
+
+EXAMPLES
+========
+
+.. code-block:: futhark
+
+ -- | Gratuitous re-implementation of `map`@term.
+ --
+ -- Does exactly the same.
+ let mymap = ...
 
 SEE ALSO
 ========
