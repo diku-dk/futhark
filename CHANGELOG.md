@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-doc` now produces much nicer documentation.  Markdown is
     now supported in documentation comments.
 
+  * `/futlib/functional` now has operators `>->` and `<-<` for
+    function composition.  `<<|` are `|>>` are deprecated.
+
 ### Removed
 
 ### Changed
