@@ -115,8 +115,6 @@ instance ASTMappable (ExpBase Info VName) where
          mapM (astMap tv) idxexps <*>
          traverse (mapOnCompType tv) t <*>
          pure loc
-  astMap tv (Reshape shape arrexp info loc) =
-    Reshape <$> mapOnExp tv shape <*> mapOnExp tv arrexp <*> pure info <*> pure loc
   astMap tv (Rotate d e a loc) =
     Rotate d <$> mapOnExp tv e <*> mapOnExp tv a <*> pure loc
   astMap tv (Rearrange perm e loc) =

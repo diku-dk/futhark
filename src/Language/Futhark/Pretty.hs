@@ -232,8 +232,6 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     text "<-" <+> align (ppr ve)
   pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Reshape shape e _ _) =
-    text "reshape" <+> ppr shape <+> ppr e
   pprPrec _ (Rearrange perm e _) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   pprPrec _ (Rotate d x e _) =

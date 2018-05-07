@@ -247,11 +247,15 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   | Just ((eshape,e'):es') <- mapM isArrayLiteral es,
     not $ null eshape,
     all ((eshape==) . fst) es',
-    Just basetype <- E.peelArray (length eshape) arr_t =
+    Just basetype <- E.peelArray (length eshape) arr_t = do
       let flat_lit = E.ArrayLit (e' ++ concatMap snd es') (Info basetype) loc
-          new_shape = E.TupLit [E.Literal (E.primValue k) loc
-                               | k <- length es:eshape] loc
-      in internaliseExp desc $ E.Reshape new_shape flat_lit (Info 1) loc
+          new_shape = length es:eshape
+      flat_arrs <- internaliseExpToVars "flat_literal" flat_lit
+      forM flat_arrs $ \flat_arr -> do
+        flat_arr_t <- lookupType flat_arr
+        let new_shape' = reshapeOuter (map (DimNew . constant) new_shape)
+                         (length new_shape) $ arrayShape flat_arr_t
+        letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
 
   | otherwise = do
   es' <- mapM (internaliseExp "arr_elem") es
@@ -639,23 +643,6 @@ internaliseExp _ (E.Rotate d offset e _) = do
         offsets = replicate d zero ++ [offset'] ++ replicate (r-d-1) zero
     return $ I.Rotate offsets v
 
-internaliseExp _ (E.Reshape shape e (Info d) loc) = do
-  shape' <- internaliseShapeExp "shape" shape
-  vs <- internaliseExpToVars "reshape_arg" e
-  forM vs $ \v -> do
-    -- The resulting shape needs to have the same number of elements
-    -- as the original shape.
-    old_shape <- I.arrayShape <$> lookupType v
-    let changed_dims = take orig_rank $ I.shapeDims old_shape
-    shapeOk <- assertingOne $
-               letExp "shape_ok" =<<
-               eAssert (eCmpOp (I.CmpEq I.int32) (prod changed_dims) (prod shape'))
-               "new shape has different number of elements than old shape" loc
-    certifying shapeOk $ letSubExp "reshape" $
-      I.BasicOp $ I.Reshape (reshapeOuter (DimNew <$> shape') d old_shape) v
-  where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
-        orig_rank = E.arrayRank $ E.typeOf e
-
 internaliseExp desc (E.Concat i x y loc) = do
   let ys = [y]
   xs  <- internaliseExpToVars "concat_x" x
@@ -933,17 +920,6 @@ internaliseDimExp s e = do
     E.Prim (Signed it)   -> (,it) <$> asIntS Int32 e'
     E.Prim (Unsigned it) -> (,it) <$> asIntZ Int32 e'
     _                    -> fail "internaliseDimExp: bad type"
-
-internaliseShapeExp :: String -> E.Exp -> InternaliseM [I.SubExp]
-internaliseShapeExp s e =
-  case E.typeOf e of
-    t | Just ts <- isTupleRecord t ->
-          zipWithM promote ts =<< internaliseExp s e
-      | otherwise ->
-          fmap pure . promote t =<< internaliseExp1 s e
-  where promote (E.Prim Signed{}) se = asIntS Int32 se
-        promote (E.Prim Unsigned{}) se = asIntZ Int32 se
-        promote _ _ = fail "internaliseShapeExp.promote: bad type"
 
 internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =

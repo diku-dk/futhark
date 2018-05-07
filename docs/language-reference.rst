@@ -395,7 +395,6 @@ literals and variables, but also more complicated forms.
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `type_param`* `pat` [("=" `exp`)] `loopform` "do" `exp`
-      : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
       : | "rotate" ["@" `nat_int`] `exp` `exp`
       : | "concat" ["@" `nat_int`] `exp` `exp`
@@ -708,13 +707,6 @@ Numerical negation of ``x``, which must be of numeric type.
 
 Bitwise negation of ``x``, which must be of integral type.
 
-``reshape (d_1, ..., d_n) a``
-.............................
-
-Reshape the elements of ``a`` into an ``n``-dimensional array of the
-specified shape.  The number of elements in ``a`` must be equal to the
-product of the new dimensions.
-
 ``rearrange (d_1, ..., d_n) a``
 ...............................
 
@@ -896,9 +888,8 @@ Futhark supports Hindley-Milner-style type inference, so in many cases
 explicit type annotations can be left off.  Some built-in language
 constructs cannot currently be fully inferred, and may need type
 annotations where their inputs are bound.  The problematic constructs
-are ``rotate``, ``reshape``, ``zip``, ``unzip``, and field projection.
-Further, unique types (see `In-place updates`_) must be explicitly
-annotated.
+are ``rotate``, ``zip``, ``unzip``, and field projection.  Further,
+unique types (see `In-place updates`_) must be explicitly annotated.
 
 .. _in-place-updates:
 
@@ -915,8 +906,8 @@ performs an in-place update.  The compiler verifies that the original
 array (``a``) is not used on any execution path following the in-place
 update.  This involves also checking that no *alias* of ``a`` is used.
 Generally, most language constructs produce new arrays, but some
-(``rearrange``, ``reshape``, ``rotate``, ``zip``, ``unzip``) create
-arrays that alias their input arrays.
+(``rearrange``, ``rotate``, ``zip``, ``unzip``) create arrays that
+alias their input arrays.
 
 When defining a function parameter or return type, we can mark it as
 *unique* by prefixing it with an asterisk.  For example::

@@ -151,7 +151,6 @@ keyword s =
 -- In a perfect language, the remaining tokens would all be functions.
 -- Perhaps we can eventually permit their use as variable names anyway.
 
-    "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
     "rotate"       -> ROTATE
     "zip"          -> ZIP
