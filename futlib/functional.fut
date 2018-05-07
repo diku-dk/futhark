@@ -4,9 +4,18 @@ let (|>) '^a '^b (x: a) (f: a -> b): b = f x
 
 let (<|) '^a '^b (f: a -> b) (x: a) = f x
 
-let (|>>) '^a '^b '^c (f: a -> b) (g: b -> c) (x: a): c = g (f x)
+-- | Function composition, with values flowing from left to right.
+let (>->) '^a '^b '^c (f: a -> b) (g: b -> c) (x: a): c = g (f x)
 
-let (<<|) '^a '^b '^c (g: b -> c) (f: a -> b) (x: a): c = g (f x)
+-- | Function composition, with values flowing from right to left.
+-- This is the same as the `∘` operator known from mathematics.
+let (<-<) '^a '^b '^c (g: b -> c) (f: a -> b) (x: a): c = g (f x)
+
+-- | Deprecated alias for `>->`@term.
+let (|>>) = (>->)
+
+-- | Deprecated alias for `<-<`@term.
+let (<<|) = (<-<)
 
 let flip '^a '^b '^c (f: a -> b -> c) (b: b) (a: a): c =
   f a b
