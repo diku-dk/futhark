@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Binary and unary operators may now be bound in patterns by
     enclosing them in parenthesis.
 
+  * `futhark-doc` now produces much nicer documentation.  Markdown is
+    now supported in documentation comments.
+
 ### Removed
 
 ### Changed
