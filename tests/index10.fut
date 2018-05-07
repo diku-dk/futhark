@@ -7,5 +7,5 @@
 let main(x: i32) =
   let a = iota x
   let b = replicate x a
-  let c = reshape (x*x) b
+  let c = flatten b
   in c[3]

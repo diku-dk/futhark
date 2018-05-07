@@ -276,7 +276,9 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap mempty
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
           Just (name, BoundV tvs $
                       fromStruct $ vacuousShapeAnnotations $
-                      Arrow mempty Nothing (tupleRecord pts) rt)
+                      Arrow mempty Nothing pts' rt)
+          where pts' = case pts of [pt] -> pt
+                                   _    -> tupleRecord pts
         addIntrinsicF (name, IntrinsicEquality) =
           Just (name, EqualityF)
         addIntrinsicF (name, IntrinsicOpaque) =

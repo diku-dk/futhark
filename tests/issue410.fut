@@ -39,5 +39,5 @@ let main [h][w][n] (grid:*[h][w]i32) (lines:[n]line) (nn: i32) (idxs: []i32) =
   let ys = map3 (\y1 slop i ->
                      y1+t32(slop*r32(i))) ys1 slops iotas
   let is = map2 (\x y -> w*y+x) xs ys
-  let flatgrid = reshape (h*w) grid
-  in scatter flatgrid is (replicate nn 1)
+  let flatgrid = flatten grid
+  in scatter (copy flatgrid) is (replicate nn 1)

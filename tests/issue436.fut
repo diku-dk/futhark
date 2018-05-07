@@ -6,4 +6,4 @@
 -- error:
 
 let main (n: i32) (xs: []i32) =
-  map (+2) (map (+1) (reshape n xs))
+  map (+2) (map (+1) (xs: [n]i32))

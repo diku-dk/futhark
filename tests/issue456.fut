@@ -10,6 +10,6 @@ let main [n] (datas: *[][n]i32) (is: []i32) =
        let (data, _) =
          loop (data: *[n]i32, old_data: *[n]i32) = (copy data, copy old_data) for i in [1,2,3] do
            let new_data = scatter old_data is (replicate n data[0])
-           in (reshape n new_data, reshape n data)
+           in (new_data : *[n]i32, data : *[n]i32)
        in data)
       (zip datas (copy datas))

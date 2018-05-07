@@ -23,15 +23,13 @@ let take_arrint (l: i32) (x: [][]i32): [][]i32 =
   else concat (replicate ((i32.abs (l) - length x)) (replicate (dim_2 1 x) (0))) (x)
 let reshape_int (l: i32) (x: []i32): []i32 =
   let roundUp = ((l + (length x - 1)) / length x) in
-  let extend = reshape (((length x * roundUp))) (replicate (roundUp) (x)) in
+  let extend = flatten (replicate (roundUp) (x)) in
   let (v1, _) = split (l) (extend) in
   v1
 entry main (n: i32, m: i32): []i32 =
-  let t_v1 = reshape ((n,
-                       m)) (reshape_int ((n * (m * 1))) (reshape (((length (map (\(x: i32): i32 ->
-                                                                                (x + 1)) (iota (n*m)))) * 1)) (map (\(x: i32): i32 ->
+  let t_v1 = unflatten n m (reshape_int ((n * (m * 1))) ((map (\(x: i32): i32 ->
                                                                                                                       (x + 1)) (iota (12))))) in
   let t_v2 = rearrange (1, 0) (t_v1) in
   let t_v3 = take_arrint (2) (t_v2) in
   let t_v4 = rearrange (1, 0) (t_v3) in
-  reshape ((length t_v4 * ((dim_2 1 t_v4) * 1))) (t_v4)
+  flatten (t_v4)

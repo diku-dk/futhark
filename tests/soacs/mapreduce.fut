@@ -7,5 +7,5 @@
 -- structure distributed { Kernel 5 }
 
 let main(n: i32, m: i32): [n]i32 =
-  let a = reshape (n,m) (iota (n*m))
+  let a = unflatten n m (iota (n*m))
   in map (\a_r -> reduce (+) 0 a_r) a

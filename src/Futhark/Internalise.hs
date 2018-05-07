@@ -1254,6 +1254,33 @@ isOverloadedFunction qname args loc = do
 
     handle [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v
 
+    handle [E.TupLit [n, m, arr] _] "unflatten" = Just $ \desc -> do
+      arrs <- internaliseExpToVars "unflatten_arr" arr
+      n' <- internaliseExp1 "n" n
+      m' <- internaliseExp1 "m" m
+      -- The unflattened dimension needs to have the same number of elements
+      -- as the original dimension.
+      old_dim <- I.arraysSize 0 <$> mapM lookupType arrs
+      dim_ok <- assertingOne $ letExp "dim_ok" =<<
+                eAssert (eCmpOp (I.CmpEq I.int32)
+                         (eBinOp (I.Mul Int32) (eSubExp n') (eSubExp m'))
+                         (eSubExp old_dim))
+                "new shape has different number of elements than old shape" loc
+      certifying dim_ok $ forM arrs $ \arr' -> do
+        arr_t <- lookupType arr'
+        letSubExp desc $ I.BasicOp $
+          I.Reshape (reshapeOuter [DimNew n', DimNew m'] 1 $ arrayShape arr_t) arr'
+
+    handle [arr] "flatten" = Just $ \desc -> do
+      arrs <- internaliseExpToVars "flatten_arr" arr
+      forM arrs $ \arr' -> do
+        arr_t <- lookupType arr'
+        let n = arraySize 0 arr_t
+            m = arraySize 1 arr_t
+        k <- letSubExp "flat_dim" $ I.BasicOp $ I.BinOp (Mul Int32) n m
+        letSubExp desc $ I.BasicOp $
+          I.Reshape (reshapeOuter [DimNew k] 2 $ arrayShape arr_t) arr'
+
     handle _ _ = Nothing
 
     toSigned int_to e desc = do
