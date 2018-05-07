@@ -97,7 +97,9 @@ runCompilerOnProgram :: FutharkConfig
                      -> FilePath
                      -> IO ()
 runCompilerOnProgram config b pipeline action file = do
-  res <- runFutharkM compile $ isJust $ futharkVerbose config
+  res <- runFutharkM compile $ case futharkVerbose config of
+                                 Just _ -> Verbose
+                                 Nothing -> NotVerbose
   case res of
     Left err -> liftIO $ do
       dumpError config err

@@ -6,6 +6,7 @@ module Futhark.Pipeline
 
        , FutharkM
        , runFutharkM
+       , Verbosity(..)
 
        , internalErrorS
 
@@ -38,9 +39,11 @@ import Futhark.Util.Log
 import Futhark.Util.Pretty (Pretty, prettyText)
 import Futhark.MonadFreshNames
 
+-- | If verbose, print log messages to standard error.
+data Verbosity = Verbose | NotVerbose deriving (Eq)
+
 newtype FutharkEnv = FutharkEnv {
-  futharkVerbose :: Bool
-  -- ^ If true, print log messages to standard error.
+  futharkVerbose :: Verbosity
   }
 
 newtype FutharkM a = FutharkM (ExceptT CompilerError (StateT VNameSource (ReaderT FutharkEnv IO)) a)
@@ -55,10 +58,10 @@ instance MonadFreshNames FutharkM where
   putNameSource = put
 
 instance MonadLogger FutharkM where
-  addLog msg = do verb <- asks futharkVerbose
+  addLog msg = do verb <- asks $ (==Verbose) . futharkVerbose
                   when verb $ liftIO $ T.hPutStr stderr $ toText msg
 
-runFutharkM :: FutharkM a -> Bool -> IO (Either CompilerError a)
+runFutharkM :: FutharkM a -> Verbosity -> IO (Either CompilerError a)
 runFutharkM (FutharkM m) verbose =
   runReaderT (evalStateT (runExceptT m) blankNameSource) newEnv
   where newEnv = FutharkEnv verbose

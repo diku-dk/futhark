@@ -23,7 +23,7 @@ import Text.Blaze.Html.Renderer.Text
 
 import Futhark.Doc.Generator
 import Futhark.Compiler (readLibrary, dumpError, newFutharkConfig, Imports)
-import Futhark.Pipeline (runFutharkM, FutharkM)
+import Futhark.Pipeline (runFutharkM, FutharkM, Verbosity(..))
 import Futhark.Util.Options
 import Futhark.Util (directoryContents)
 import Language.Futhark.Futlib.Prelude
@@ -31,7 +31,7 @@ import Language.Futhark.Futlib.Prelude
 main :: IO ()
 main = mainWithOptions initialDocConfig commandLineOptions f
   where f [dir] config = Just $ do
-          res <- runFutharkM (m config dir) True
+          res <- runFutharkM (m config dir) Verbose
           case res of
             Left err -> liftIO $ do
               dumpError newFutharkConfig err
