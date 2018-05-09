@@ -644,7 +644,12 @@ matchPatternSV (RecordPattern ps _) (RecordSV ls)
     map fst ps' == map fst ls' =
       mconcat $ zipWith (\(_, p) (_, sv) -> matchPatternSV p sv) ps' ls'
 matchPatternSV (PatternParens pat _) sv = matchPatternSV pat sv
-matchPatternSV (Id vn _ _) sv = M.singleton vn sv
+matchPatternSV (Id vn (Info t) _) sv =
+  -- When matching a pattern with a Dynamic StaticVal, the type of the
+  -- pattern wins out.  This is important when matching a nonunique
+  -- pattern with a unique value.
+  case sv of Dynamic _ -> M.singleton vn $ Dynamic $ removeShapeAnnotations t
+             _         -> M.singleton vn sv
 matchPatternSV (Wildcard _ _) _ = mempty
 matchPatternSV (PatternAscription pat _ _) sv = matchPatternSV pat sv
 matchPatternSV pat (Dynamic t) = matchPatternSV pat $ svFromType t
