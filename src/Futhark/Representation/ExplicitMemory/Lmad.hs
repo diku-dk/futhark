@@ -108,7 +108,7 @@ isContiguous (IxFun _ _ cg) = cg
 
 -- | Shape of an Lmad
 shape0 :: (Eq num, IntegralExp num) => Lmad num -> Shape num
-shape0 (lmad@(Lmad _ srns)) =
+shape0 lmad@(Lmad _ srns) =
   map (\(_,_,z,_,_)->z) $ permuteInv (getPermutation lmad) srns
 
 -- | Shape of an index function

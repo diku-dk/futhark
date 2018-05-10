@@ -30,7 +30,7 @@ hlintable() {
 
 hlint_check() {
     # Some hlint-suggestions are terrible, so ignore them here.
-    hlint -i "Use import/export shortcut" "$1"
+    hlint -i "Use import/export shortcut" -i "Use const" "$1"
 }
 
 no_trailing_blank_lines() {

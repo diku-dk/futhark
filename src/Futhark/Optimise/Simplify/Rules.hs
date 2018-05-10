@@ -675,7 +675,7 @@ twoPowerToBitShift _ pat _ (BinOp (Pow t) e1 e2)
 twoPowerToBitShift _ _ _ _ = cannotSimplify
 
 simplifyIndex :: BinderOps lore => BottomUpRuleBasicOp lore
-simplifyIndex (vtable, used) (pat@(Pattern [] [pe])) (StmAux cs _) (Index idd inds)
+simplifyIndex (vtable, used) pat@(Pattern [] [pe]) (StmAux cs _) (Index idd inds)
   | Just m <- simplifyIndexing vtable seType idd inds consumed = do
       res <- m
       case res of
@@ -1036,7 +1036,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = do
           ses <- bodyBind body
           let (ctx_ses, val_ses) = splitFromEnd (length rets) ses
           resultBodyM . (ctx_ses++) =<< zipWithM reshapeResult val_ses rets
-        reshapeResult (Var v) (t@Array{}) = do
+        reshapeResult (Var v) t@Array{} = do
           v_t <- lookupType v
           let newshape = arrayDims $ removeExistentials t v_t
           if newshape /= arrayDims v_t

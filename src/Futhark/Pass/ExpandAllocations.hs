@@ -224,7 +224,7 @@ expandedVariantAllocations kspace kbody variant_allocs = do
 type RebaseMap = M.Map VName (([PrimExp VName], PrimType) -> IxFun)
 
 lookupNewBase :: VName -> ([PrimExp VName], PrimType) -> RebaseMap -> Maybe IxFun
-lookupNewBase name x = fmap ($x) . M.lookup name
+lookupNewBase name x = fmap ($ x) . M.lookup name
 
 offsetMemoryInKernelBody :: RebaseMap -> KernelBody InKernel
                          -> Either String (KernelBody InKernel)
