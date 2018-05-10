@@ -63,6 +63,13 @@ consumption = Occurence S.empty . Just
 nullOccurence :: Occurence -> Bool
 nullOccurence occ = S.null (observed occ) && isNothing (consumed occ)
 
+-- | A seminull occurence is one that does not contain references to
+-- any variables in scope.  The big difference is that a seminull
+-- occurence may denote a consumption, as long as the array that was
+-- consumed is now out of scope.
+seminullOccurence :: Occurence -> Bool
+seminullOccurence occ = S.null (observed occ) && maybe True S.null (consumed occ)
+
 type Occurences = [Occurence]
 
 type UsageMap = M.Map VName [Usage]
@@ -1112,6 +1119,7 @@ checkExp (Concat i e1 e2 loc) = do
   return $ Concat i e1' e2' loc
 
 checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
+  removeSeminullOccurences $
   bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
     maybe_retdecl' <- traverse checkTypeDecl maybe_retdecl
     (body', closure) <- tapOccurences $ noUnique $
@@ -1341,6 +1349,13 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
 
   maybeCheckOccurences dflow
   occurs <- consumeArg argloc argtype (diet tp1')
+
+  case anyConsumption dflow of
+    Just c ->
+      let msg = "of value computed with consumption at " ++ locStr (location c)
+      in zeroOrderType argloc msg tp1
+    _ -> return ()
+
   occur $ dflow `seqOccurences` occurs
 
   return (vacuousShapeAnnotations tp1',
@@ -1618,6 +1633,9 @@ tapOccurences = listen
 
 maybeCheckOccurences :: Occurences -> TermTypeM ()
 maybeCheckOccurences = badOnLeft . checkOccurences
+
+removeSeminullOccurences :: TermTypeM a -> TermTypeM a
+removeSeminullOccurences = censor $ filter $ not . seminullOccurence
 
 checkIfUsed :: Occurences -> Ident -> TermTypeM ()
 checkIfUsed occs v
