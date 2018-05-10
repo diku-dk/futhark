@@ -301,25 +301,19 @@ intraGroupStm stm@(Let pat _ e) = do
                   -> Out.Pattern Out.InKernel
                   -> SubExp -> Lambda -> [SubExp] -> [VName]
                   -> IntraGroupM [VName]
-        procInput ltid map_pat w foldfun nes arrs = do
+        procInput ltid map_pat w map_fun nes arrs = do
           fold_stms <- collectStms_ $ do
-            let (fold_acc_params, fold_arr_params) =
-                  splitAt (length nes) $ lambdaParams foldfun
-
-            forM_ (zip fold_acc_params nes) $ \(p, ne) ->
-              letBindNames_ [paramName p] $ BasicOp $ SubExp ne
-
-            forM_ (zip fold_arr_params arrs) $ \(p, arr) -> do
+            forM_ (zip (lambdaParams map_fun) arrs) $ \(p, arr) -> do
               arr_t <- lookupType arr
               letBindNames_ [paramName p] $ BasicOp $ Index arr $
                 fullSlice arr_t [DimFix $ Var ltid]
 
-            Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
-          let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
+            Kernelise.transformStms $ bodyStms $ lambdaBody map_fun
+          let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody map_fun
 
           op_inps <- replicateM (length nes) (newVName "op_input")
           letBindNames_ (op_inps ++ patternNames map_pat) $ Op $
-            Out.Combine [(ltid,w)] (lambdaReturnType foldfun) [] fold_body
+            Out.Combine [(ltid,w)] (lambdaReturnType map_fun) [] fold_body
           return op_inps
 
 intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
