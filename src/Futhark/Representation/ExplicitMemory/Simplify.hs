@@ -169,7 +169,7 @@ unExistentialiseMemory _ _ _ _ = cannotSimplify
 copyCopyToCopy :: (BinderOps lore,
                    LetAttr lore ~ (VarWisdom, MemBound u)) =>
                   TopDownRuleBasicOp lore
-copyCopyToCopy vtable (pat@(Pattern [] [pat_elem])) _ (Copy v1)
+copyCopyToCopy vtable pat@(Pattern [] [pat_elem]) _ (Copy v1)
   | Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable,
 
     Just (_, MemArray _ _ _ (ArrayIn srcmem src_ixfun)) <-
@@ -199,7 +199,7 @@ copyCopyToCopy _ _ _ _ = cannotSimplify
 removeIdentityCopy :: (BinderOps lore,
                        LetAttr lore ~ (VarWisdom, MemBound u)) =>
                       TopDownRuleBasicOp lore
-removeIdentityCopy vtable (pat@(Pattern [] [pe])) _ (Copy v)
+removeIdentityCopy vtable pat@(Pattern [] [pe]) _ (Copy v)
   | (_, MemArray _ _ _ (ArrayIn dest_mem dest_ixfun)) <- patElemAttr pe,
     Just (_, MemArray _ _ _ (ArrayIn src_mem src_ixfun)) <-
       ST.entryLetBoundAttr =<< ST.lookup v vtable,

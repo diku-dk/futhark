@@ -1620,7 +1620,7 @@ compilePrimExp f (BinOpExp bop x y) = do
 
 compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
-  return $ [C.cexp|$id:(funName (nameFromString h))($args:args')|]
+  return [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
 compileCode :: Code op -> CompilerM op s ()
 

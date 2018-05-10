@@ -668,7 +668,7 @@ defCompileBasicOp
 
 defCompileBasicOp (Destination [dest]) (ArrayLit es _)
   | ArrayDestination (Just dest_mem) <- dest,
-    Just (vs@(v:_)) <- mapM isLiteral es = do
+    Just vs@(v:_) <- mapM isLiteral es = do
       dest_space <- entryMemSpace <$> lookupMemory (memLocationName dest_mem)
       let t = primValueType v
       static_array <- newVName "static_array"
