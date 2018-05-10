@@ -1780,7 +1780,14 @@ linkVarToType loc vn tp = do
                        required_fields' ++
                        "} due to use at " ++ locStr old_loc ++ ")."
               _ -> return ()
-  where tp' = tp `setUniqueness` Nonunique
+  where tp' = removeUniqueness tp
+
+removeUniqueness :: TypeBase dim as -> TypeBase dim as
+removeUniqueness (Record ets) =
+  Record $ fmap removeUniqueness ets
+removeUniqueness (Arrow als p t1 t2) =
+  Arrow als p (removeUniqueness t1) (removeUniqueness t2)
+removeUniqueness t = t `setUniqueness` Nonunique
 
 mustBeOneOf :: [PrimType] -> SrcLoc -> TypeBase () () -> TermTypeM ()
 mustBeOneOf ts loc t = do
