@@ -26,7 +26,7 @@ case "$BUILD" in
       travis_retry fetch_stack_linux
     fi;
 
-    travis_retry stack --no-terminal setup;
+    travis_retry stack --no-terminal setup --verbose;
     ;;
   cabal)
 mkdir -p $HOME/.cabal

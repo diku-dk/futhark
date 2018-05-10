@@ -13,7 +13,7 @@ module Futhark.Pass
        ) where
 
 import Control.Monad.Writer.Strict
-import Control.Monad.Except
+import Control.Monad.Except hiding (liftEither)
 import Control.Monad.State.Strict
 import Control.Parallel.Strategies
 import Data.Char
