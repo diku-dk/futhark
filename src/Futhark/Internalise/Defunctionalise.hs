@@ -3,8 +3,9 @@
 module Futhark.Internalise.Defunctionalise
   ( transformProg ) where
 
+import           Control.Arrow (first, second)
 import           Control.Monad.RWS
-import           Data.Bifunctor
+import           Data.Bifunctor hiding (first, second)
 import           Data.Foldable
 import           Data.List
 import           Data.Loc
@@ -31,18 +32,31 @@ data StaticVal = Dynamic CompType
 type Env = M.Map VName StaticVal
 
 localEnv :: Env -> DefM a -> DefM a
-localEnv env = local (env <>)
+localEnv env = local $ second (env<>)
+
+-- Even when using a "new" environment (for evaluating closures) we
+-- still ram the global environment of DynamicFuns in there.
+localNewEnv :: Env -> DefM a -> DefM a
+localNewEnv env = local $ \(globals, old_env) ->
+  (globals, M.filterWithKey (\k _ -> k `S.member` globals) old_env <> env)
 
 extendEnv :: VName -> StaticVal -> DefM a -> DefM a
-extendEnv vn sv = local (M.insert vn sv)
+extendEnv vn sv = localEnv (M.singleton vn sv)
+
+askEnv :: DefM Env
+askEnv = asks snd
+
+isGlobal :: VName -> DefM a -> DefM a
+isGlobal v = local $ first (S.insert v)
 
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names and types.
 restrictEnvTo :: NameSet -> DefM Env
-restrictEnvTo (NameSet m) = asks restrict
-  where restrict = M.mapMaybeWithKey $ \k sv -> do
-          u <- M.lookup k m
-          Just $ restrict' u sv
+restrictEnvTo (NameSet m) = restrict <$> ask
+  where restrict (globals, env) = M.mapMaybeWithKey keep env
+          where keep k sv = do guard $ not $ k `S.member` globals
+                               u <- M.lookup k m
+                               Just $ restrict' u sv
         restrict' Nonunique (Dynamic t) =
           Dynamic $ t `setUniqueness`  Nonunique
         restrict' _ (Dynamic t) =
@@ -55,10 +69,13 @@ restrictEnvTo (NameSet m) = asks restrict
           DynamicFun (e, restrict' u sv1) $ restrict' u sv2
         restrict' _ IntrinsicSV = IntrinsicSV
 
--- | Defunctionalization monad.
-newtype DefM a = DefM (RWS Env (Seq.Seq ValBind) VNameSource a)
+-- | Defunctionalization monad.  The Reader environment tracks both
+-- the current Env as well as the set of globally defined dynamic
+-- functions.  This is used to avoid unnecessarily large closure
+-- environments.
+newtype DefM a = DefM (RWS (Names, Env) (Seq.Seq ValBind) VNameSource a)
   deriving (Functor, Applicative, Monad,
-            MonadReader Env,
+            MonadReader (Names, Env),
             MonadWriter (Seq.Seq ValBind),
             MonadFreshNames)
 
@@ -75,7 +92,7 @@ collectFuns m = pass $ do
 -- | Looks up the associated static value for a given name in the environment.
 lookupVar :: SrcLoc -> VName -> DefM StaticVal
 lookupVar loc x = do
-  env <- ask
+  env <- askEnv
   case M.lookup x env of
     Just sv -> return sv
     Nothing -- If the variable is unknown, it may refer to the 'intrinsics'
@@ -415,9 +432,11 @@ defuncLet dims ps@(pat:pats) body (Info rettype)
   | otherwise = do
       (e, sv) <- defuncExp $ Lambda dims ps body Nothing (Info (mempty, rettype)) noLoc
       return ([], e, sv)
-defuncLet _ [] body _ = do
+defuncLet _ [] body (Info rettype) = do
   (body', sv) <- defuncExp body
-  return ([], body', sv)
+  case sv of
+    Dynamic _ -> return ([], body', Dynamic $ fromStruct $ removeShapeAnnotations rettype)
+    _         -> return ([], body', sv)
 
 -- | Defunctionalize an application expression at a given depth of application.
 -- Calls to dynamic (first-order) functions are preserved at much as possible,
@@ -433,7 +452,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
     LambdaSV dims pat e0 closure_env -> do
       let env' = matchPatternSV pat sv2
           env_dim = envFromDimNames dims
-      (e0', sv) <- local (const $ env' <> closure_env <> env_dim) $ defuncExp e0
+      (e0', sv) <- localNewEnv (env' <> closure_env <> env_dim) $ defuncExp e0
 
       let closure_pat = buildEnvPattern closure_env
           pat' = updatePattern pat sv2
@@ -489,7 +508,8 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
     -- a higher-order term.
     DynamicFun _ sv ->
       let (argtypes', rettype) = dynamicFunType sv argtypes
-      in return (Apply e1' e2' d (Info $ foldFunType argtypes' rettype) loc, sv)
+          apply_e = Apply e1' e2' d (Info $ foldFunType argtypes' rettype) loc
+      in return (apply_e, sv)
 
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.
@@ -645,16 +665,22 @@ matchPatternSV (RecordPattern ps _) (RecordSV ls)
       mconcat $ zipWith (\(_, p) (_, sv) -> matchPatternSV p sv) ps' ls'
 matchPatternSV (PatternParens pat _) sv = matchPatternSV pat sv
 matchPatternSV (Id vn (Info t) _) sv =
-  -- When matching a pattern with a Dynamic StaticVal, the type of the
-  -- pattern wins out.  This is important when matching a nonunique
-  -- pattern with a unique value.
-  case sv of Dynamic _ -> M.singleton vn $ Dynamic $ removeShapeAnnotations t
-             _         -> M.singleton vn sv
+  -- When matching a pattern with a zero-order STaticVal, the type of
+  -- the pattern wins out.  This is important when matching a
+  -- nonunique pattern with a unique value.
+  if orderZeroSV sv
+  then M.singleton vn $ Dynamic $ removeShapeAnnotations t
+  else M.singleton vn sv
 matchPatternSV (Wildcard _ _) _ = mempty
 matchPatternSV (PatternAscription pat _ _) sv = matchPatternSV pat sv
 matchPatternSV pat (Dynamic t) = matchPatternSV pat $ svFromType t
 matchPatternSV pat sv = error $ "Tried to match pattern " ++ pretty pat
                              ++ " with static value " ++ show sv ++ "."
+
+orderZeroSV :: StaticVal -> Bool
+orderZeroSV Dynamic{} = True
+orderZeroSV (RecordSV fields) = all (orderZeroSV . snd) fields
+orderZeroSV _ = False
 
 -- | Given a pattern and the static value for the defunctionalized argument,
 -- update the pattern to reflect the changes in the types.
@@ -843,10 +869,11 @@ dimName :: DimDecl VName -> Names
 dimName (NamedDim qn) = S.singleton $ qualLeaf qn
 dimName _             = mempty
 
--- | Defunctionalize a top-level value binding. Returns the transformed result
--- as well as an environment that binds the name of the value binding to the
--- static value of the transformed body.
-defuncValBind :: ValBind -> DefM (ValBind, Env)
+-- | Defunctionalize a top-level value binding. Returns the
+-- transformed result as well as an environment that binds the name of
+-- the value binding to the static value of the transformed body.  The
+-- boolean is true if the function is a 'DynamicFun'.
+defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 
 -- Eta-expand entry points with a functional return type.
 defuncValBind (ValBind True name _ (Info rettype) tparams params body _ loc)
@@ -871,14 +898,18 @@ defuncValBind valbind@(ValBind _ name _ rettype tparams params body _ _) = do
                    , valBindParams     = params'
                    , valBindBody       = body'
                    }
-         , M.singleton name sv)
+         , M.singleton name sv
+         , case sv of DynamicFun{} -> True
+                      _            -> False)
 
 -- | Defunctionalize a list of top-level declarations.
 defuncVals :: [ValBind] -> DefM (Seq.Seq ValBind)
 defuncVals [] = return mempty
 defuncVals (valbind : ds) = do
-  ((valbind', env), defs) <- collectFuns $ defuncValBind valbind
-  ds' <- localEnv env $ defuncVals ds
+  ((valbind', env, dyn), defs) <- collectFuns $ defuncValBind valbind
+  ds' <- localEnv env $ if dyn
+                        then isGlobal (valBindName valbind') $ defuncVals ds
+                        else defuncVals ds
   return $ defs <> Seq.singleton valbind' <> ds'
 
 -- | Transform a list of top-level value bindings. May produce new
