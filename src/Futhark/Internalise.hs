@@ -459,10 +459,21 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
                   mergeinit_ts'
         ctxmerge = zip shapepat ctxinit
         valmerge = zip mergepat' mergeinit'
+        merge = ctxmerge ++ valmerge
         dropCond = case form of E.While{} -> drop 1
                                 _         -> id
 
-    loop_res <- letTupExp desc $ I.DoLoop ctxmerge valmerge form' loopbody'
+    -- Ensure that the result of the loop matches the shapes of the
+    -- merge parameters, if any have been annotated by programmer.
+    let merge_names = map (I.paramName . fst) merge
+        merge_ts = existentialiseExtTypes merge_names $
+                   staticShapes $ map (I.paramType . fst) merge
+    loopbody'' <- localScope (scopeOfFParams $ map fst merge) $
+                  ensureResultExtShapeNoCtx asserting
+                  "shape of loop result does not match shapes in loop parameters"
+                  loc merge_ts loopbody'
+
+    loop_res <- letTupExp desc $ I.DoLoop ctxmerge valmerge form' loopbody''
     return $ map I.Var $ dropCond loop_res
 
   where

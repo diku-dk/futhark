@@ -5,6 +5,7 @@ module Futhark.Internalise.AccurateSizes
   , argShapes
   , ensureResultShape
   , ensureResultExtShape
+  , ensureResultExtShapeNoCtx
   , ensureExtShape
   , ensureShape
   , ensureArgShapes
@@ -54,6 +55,18 @@ ensureResultExtShape :: MonadBinder m =>
                      -> m (Body (Lore m))
 ensureResultExtShape asserting msg loc rettype body =
   insertStmsM $ do
+    reses <- bodyBind =<<
+             ensureResultExtShapeNoCtx asserting msg loc rettype body
+    ts <- mapM subExpType reses
+    let ctx = extractShapeContext rettype $ map arrayDims ts
+    mkBodyM mempty $ ctx ++ reses
+
+ensureResultExtShapeNoCtx :: MonadBinder m =>
+                             (m Certificates -> m Certificates)
+                          -> String -> SrcLoc -> [ExtType] -> Body (Lore m)
+                          -> m (Body (Lore m))
+ensureResultExtShapeNoCtx asserting msg loc rettype body =
+  insertStmsM $ do
     es <- bodyBind body
     es_ts <- mapM subExpType es
     let ext_mapping = shapeExtMapping rettype es_ts
@@ -61,10 +74,7 @@ ensureResultExtShape asserting msg loc rettype body =
         assertProperShape t se =
           let name = "result_proper_shape"
           in ensureExtShape asserting msg loc t name se
-    reses <- zipWithM assertProperShape rettype' es
-    ts <- mapM subExpType reses
-    let ctx = extractShapeContext rettype $ map arrayDims ts
-    mkBodyM mempty $ ctx ++ reses
+    resultBodyM =<< zipWithM assertProperShape rettype' es
 
 ensureExtShape :: MonadBinder m =>
                   (m Certificates -> m Certificates)
