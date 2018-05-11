@@ -54,7 +54,6 @@ module Futhark.Representation.AST.Syntax.Core
 
 import Control.Monad.State
 import Data.Array
-import Data.Hashable
 import Data.Maybe
 import Data.Monoid ((<>))
 import qualified Data.Set as S
@@ -216,9 +215,6 @@ instance Eq Ident where
 
 instance Ord Ident where
   x `compare` y = identName x `compare` identName y
-
-instance Hashable Ident where
-  hashWithSalt salt = hashWithSalt salt . identName
 
 -- | A list of names used for certificates in some expressions.
 newtype Certificates = Certificates { unCertificates :: [VName] }

@@ -31,7 +31,6 @@ module Language.Futhark.Core
 
 where
 
-import Data.Hashable
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Loc
@@ -59,10 +58,6 @@ instance Monoid Uniqueness where
 instance Pretty Uniqueness where
   ppr Unique = star
   ppr Nonunique = empty
-
-instance Hashable Uniqueness where
-  hashWithSalt salt Unique    = salt
-  hashWithSalt salt Nonunique = salt * 2
 
 data StreamOrd  = InOrder
                 | Disorder
@@ -93,9 +88,6 @@ newtype Name = Name T.Text
 
 instance Pretty Name where
   ppr = text . nameToString
-
-instance Hashable Name where
-  hashWithSalt salt (Name t) = hashWithSalt salt t
 
 instance Sem.Semigroup Name where
   Name t1 <> Name t2 = Name $ t1 <> t2
@@ -151,6 +143,3 @@ instance Ord VName where
 
 instance Pretty VName where
   ppr (VName vn i) = ppr vn <> text "_" <> text (show i)
-
-instance Hashable VName where
-  hashWithSalt salt (VName _ i) = salt * i

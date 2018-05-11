@@ -87,7 +87,6 @@ import           Data.Bifoldable
 import           Data.Bifunctor
 import           Data.Bitraversable
 import           Data.Foldable
-import           Data.Hashable
 import           Data.Loc
 import qualified Data.Map.Strict                  as M
 import           Data.Monoid
@@ -464,9 +463,6 @@ instance Ord vn => Ord (IdentBase ty vn) where
 instance Located (IdentBase ty vn) where
   locOf = locOf . identSrcLoc
 
-instance Hashable vn => Hashable (IdentBase ty vn) where
-  hashWithSalt salt = hashWithSalt salt . identName
-
 -- | Default binary operators.
 data BinOp =  Backtick
               -- ^ A pseudo-operator standing in for any normal
@@ -546,10 +542,6 @@ instance Foldable QualName where
 
 instance Traversable QualName where
   traverse f (QualName qs v) = QualName <$> traverse f qs <*> f v
-
-instance Hashable vn => Hashable (QualName vn) where
-  hashWithSalt salt (QualName quals leaf) =
-    hashWithSalt salt (quals, leaf)
 
 -- | The Futhark expression language.
 --

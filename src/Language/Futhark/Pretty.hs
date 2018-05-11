@@ -14,7 +14,6 @@ where
 import           Control.Monad
 import           Data.Array
 import           Data.Functor
-import           Data.Hashable
 import qualified Data.Map.Strict       as M
 import           Data.List
 import           Data.Maybe
@@ -116,7 +115,7 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim as) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
   ppr (TypeArgType t _) = ppr t
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
+instance (Eq vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
   ppr (TEArray at d _) = ppr (ShapeDecl [d]) <> ppr at
   ppr (TETuple ts _) = parens $ commasep $ map ppr ts
@@ -128,11 +127,11 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
     where v' = ppr v <> colon <+> ppr t1
   ppr (TEArrow Nothing t1 t2 _) = ppr t1 <+> text "->" <+> ppr t2
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeArgExp vn) where
+instance (Eq vn, Pretty vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = ppr $ ShapeDecl [d]
   ppr (TypeArgExpType d) = ppr d
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (TypeDeclBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (TypeDeclBase f vn) where
   ppr x = pprAnnot (declaredType x) (expandedType x)
 
 instance Pretty vn => Pretty (QualName vn) where
@@ -147,13 +146,13 @@ hasArrayLit ArrayLit{}     = True
 hasArrayLit (TupLit es2 _) = any hasArrayLit es2
 hasArrayLit _              = False
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (DimIndexBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (DimIndexBase f vn) where
   ppr (DimFix e)       = ppr e
   ppr (DimSlice i j s) = maybe mempty ppr i <> text ":" <>
                          maybe mempty ppr j <> text ":" <>
                          maybe mempty ppr s
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
   ppr = pprPrec (-1)
   pprPrec _ (Var name _ _) = ppr name
   pprPrec _ (Parens e _) = align $ parens $ ppr e
@@ -276,11 +275,11 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
                             <+> ppr initexp) <+> equals <+>
     ppr form <+> text "do" </> indent 2 (ppr loopbody)
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (FieldBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e
   ppr (RecordFieldImplicit name _ _) = ppr name
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (LoopFormBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (LoopFormBase f vn) where
   ppr (For i ubound) =
     text "for" <+> ppr i <+> text "<" <+> align (ppr ubound)
   ppr (ForIn x e) =
@@ -288,7 +287,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (LoopFormBase f vn) 
   ppr (While cond) =
     text "while" <+> ppr cond
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (PatternBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (PatternBase f vn) where
   ppr (PatternAscription p t _) = ppr p <> text ":" <+> ppr t
   ppr (PatternParens p _)       = parens $ ppr p
   ppr (Id v t _)                = case unAnnot t of
@@ -301,14 +300,14 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (PatternBase f vn) w
                                     Just t' -> parens $ text "_" <> colon <+> ppr t'
                                     Nothing -> text "_"
 
-ppAscription :: (Eq vn, Hashable vn, Pretty vn, Annot f) => Maybe (TypeDeclBase f vn) -> Doc
+ppAscription :: (Eq vn, Pretty vn, Annot f) => Maybe (TypeDeclBase f vn) -> Doc
 ppAscription Nothing  = mempty
 ppAscription (Just t) = text ":" <> ppr t
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ProgBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (ProgBase f vn) where
   ppr = stack . punctuate line . map ppr . progDecs
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (DecBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (DecBase f vn) where
   ppr (ValDec dec)       = ppr dec
   ppr (TypeDec dec)      = ppr dec
   ppr (SigDec sig)       = ppr sig
@@ -316,7 +315,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (DecBase f vn) where
   ppr (OpenDec x xs _ _) = text "open" <+> spread (map ppr (x:xs))
   ppr (LocalDec dec _)   = text "local" <+> ppr dec
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ModExpBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (ModExpBase f vn) where
   ppr (ModVar v _) = ppr v
   ppr (ModParens e _) = parens $ ppr e
   ppr (ModImport v _ _) = text "import" <+> ppr (show v)
@@ -329,16 +328,16 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ModExpBase f vn) wh
     where maybe_sig' = case maybe_sig of Nothing       -> mempty
                                          Just (sig, _) -> colon <+> ppr sig
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (TypeBindBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (TypeBindBase f vn) where
   ppr (TypeBind name params usertype _ _) =
     text "type" <+> ppr name <+> spread (map ppr params) <+> equals <+> ppr usertype
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
+instance (Eq vn, Pretty vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ ppr name
   ppr (TypeParamType name _) = text "'" <> ppr name
   ppr (TypeParamLiftedType name _) = text "'^" <> ppr name
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ValBindBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (ValBindBase f vn) where
   ppr (ValBind entry name retdecl rettype tparams args body _ _) =
     text fun <+> ppr name <+>
     spread (map ppr tparams ++ map ppr args) <> retdecl' <> text " =" </>
@@ -349,7 +348,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ValBindBase f vn) w
                        Just rettype' -> text ":" <+> rettype'
                        Nothing       -> mempty
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (SpecBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (SpecBase f vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
   ppr (TypeSpec name ps _ _) = text "type" <+> ppr name <+> spread (map ppr ps)
   ppr (ValSpec name tparams vtype _ _) =
@@ -359,7 +358,7 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (SpecBase f vn) wher
   ppr (IncludeSpec e _) =
     text "include" <+> ppr e
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (SigExpBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (SigExpBase f vn) where
   ppr (SigVar v _) = ppr v
   ppr (SigParens e _) = parens $ ppr e
   ppr (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ss)
@@ -370,21 +369,21 @@ instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (SigExpBase f vn) wh
   ppr (SigArrow Nothing e1 e2 _) =
     ppr e1 <+> text "->" <+> ppr e2
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (SigBindBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (SigBindBase f vn) where
   ppr (SigBind name e _ _) =
     text "module type" <+> ppr name <+> equals <+> ppr e
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ModParamBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (ModParamBase f vn) where
   ppr (ModParam pname psig _ _) =
     parens (ppr pname <> colon <+> ppr psig)
 
-instance (Eq vn, Hashable vn, Pretty vn, Annot f) => Pretty (ModBindBase f vn) where
+instance (Eq vn, Pretty vn, Annot f) => Pretty (ModBindBase f vn) where
   ppr (ModBind name ps sig e _ _) =
     text "module" <+> ppr name <+> spread (map ppr ps) <+> sig' <> text " =" <+> ppr e
     where sig' = case sig of Nothing    -> mempty
                              Just (s,_) -> colon <+> ppr s <> text " "
 
-prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, Annot f) =>
+prettyBinOp :: (Eq vn, Pretty vn, Annot f) =>
                Int -> QualName vn -> ExpBase f vn -> ExpBase f vn -> Doc
 prettyBinOp p bop x y = parensIf (p > symPrecedence) $
                         pprPrec symPrecedence x <+/>
@@ -424,7 +423,7 @@ prettyBinOp p bop x y = parensIf (p > symPrecedence) $
         rprecedence Divide = 10
         rprecedence op     = precedence op
 
-ppSOAC :: (Eq vn, Hashable vn, Pretty vn, Pretty fn, Annot f) =>
+ppSOAC :: (Eq vn, Pretty vn, Pretty fn, Annot f) =>
           String -> [fn] -> [ExpBase f vn] -> Doc
 ppSOAC name funs es =
   text name <+> align (spread (map (parens . ppr) funs) </>

@@ -72,7 +72,6 @@ import Data.List
 import Data.Loc
 import Data.Maybe
 import Data.FileEmbed
-import Data.Hashable
 import qualified Data.Semigroup as Sem
 
 import qualified Language.C.Syntax as C
@@ -660,7 +659,7 @@ arrayName pt signed rank =
   prettySigned (signed==TypeUnsigned) pt ++ "_" ++ show rank ++ "d"
 
 opaqueName :: String -> [ValueDesc] -> String
-opaqueName s vds = "opaque_" ++ zEncodeString (show (hash $ s ++ concatMap p vds)) -- FIXME
+opaqueName s vds = "opaque_" ++ zEncodeString (show (s ++ concatMap p vds)) -- FIXME
   where p (ScalarValue pt signed _) =
           show (pt, signed)
         p (ArrayValue _ _ space pt signed dims) =
