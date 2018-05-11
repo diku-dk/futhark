@@ -53,7 +53,6 @@ import Data.Loc
 import Data.Maybe
 import Data.Either
 import Data.Ord
-import Data.Hashable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Semigroup as Sem
@@ -445,9 +444,6 @@ ppSpace :: Namespace -> String
 ppSpace Term = "name"
 ppSpace Type = "type"
 ppSpace Signature = "module type"
-
-instance Hashable Namespace where
-  hashWithSalt salt = hashWithSalt salt . fromEnum
 
 intrinsicsNameMap :: NameMap
 intrinsicsNameMap = M.fromList $ map mapping $ M.toList intrinsics

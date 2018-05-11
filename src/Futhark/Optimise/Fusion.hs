@@ -10,7 +10,6 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Except
 import qualified Data.Semigroup as Sem
-import Data.Hashable
 import Data.Maybe
 import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
@@ -219,9 +218,6 @@ fuseInFun res fundec = do
 -- returned from the SOAC.
 newtype KernName = KernName { unKernName :: VName }
   deriving (Eq, Ord, Show)
-
-instance Hashable KernName where
-  hashWithSalt salt = hashWithSalt salt . unKernName
 
 data FusedRes = FusedRes {
     rsucc :: Bool

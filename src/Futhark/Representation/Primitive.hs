@@ -79,7 +79,6 @@ module Futhark.Representation.Primitive
 import           Control.Applicative
 import           Data.Binary.IEEE754 (floatToWord, wordToFloat, doubleToWord, wordToDouble)
 import           Data.Bits
-import           Data.Hashable
 import           Data.Int            (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
 import           Data.Word
@@ -97,9 +96,6 @@ data IntType = Int8
              | Int64
              deriving (Eq, Ord, Show, Enum, Bounded)
 
-instance Hashable IntType where
-  hashWithSalt salt = hashWithSalt salt . fromEnum
-
 instance Pretty IntType where
   ppr Int8  = text "i8"
   ppr Int16 = text "i16"
@@ -114,9 +110,6 @@ allIntTypes = [minBound..maxBound]
 data FloatType = Float32
                | Float64
                deriving (Eq, Ord, Show, Enum, Bounded)
-
-instance Hashable FloatType where
-  hashWithSalt salt = hashWithSalt salt . fromEnum
 
 instance Pretty FloatType where
   ppr Float32 = text "f32"
@@ -155,9 +148,6 @@ instance Enum PrimType where
 instance Bounded PrimType where
   minBound = IntType Int8
   maxBound = Cert
-
-instance Hashable PrimType where
-  hashWithSalt salt = hashWithSalt salt . fromEnum
 
 instance Pretty PrimType where
   ppr (IntType t)   = ppr t
