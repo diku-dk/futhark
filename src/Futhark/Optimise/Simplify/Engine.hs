@@ -80,6 +80,7 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
 import Futhark.Construct
 import Futhark.Optimise.Simplify.Lore
+import Futhark.Util (splitFromEnd)
 
 data HoistBlockers lore = HoistBlockers
                           { blockHoistPar :: BlockPred (Wise lore)
@@ -543,21 +544,32 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
         isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit{})) = False
         isNotHoistableBnd nms _ stm = not (hasPatName nms stm)
 
--- | Simplify a single 'Body'.
+-- | Simplify a single 'Body'.  The @[Diet]@ only covers the value
+-- elements, because the context cannot be consumed.
 simplifyBody :: SimplifiableLore lore =>
                 [Diet] -> Body lore -> SimpleM lore (SimplifiedBody lore Result)
 simplifyBody ds (Body _ bnds res) =
   simplifyStms bnds $ do res' <- simplifyResult ds res
                          return (res', mempty)
 
--- | Simplify a single 'Result'.
-simplifyResult :: [Diet] -> Result -> SimpleM lore (Result, UT.UsageTable)
-simplifyResult ds es = do
-  -- Use a special copy propagation function to avoid copy propagation
-  -- when certificates are involved - there is nowhere to put them!
-  es' <- mapM simplify' es
-  let usages = consumeResult $ zip ds es'
-  return (es', usages)
+-- | Simplify a single 'Result'.  The @[Diet]@ only covers the value
+-- elements, because the context cannot be consumed.
+simplifyResult :: SimplifiableLore lore =>
+                  [Diet] -> Result -> SimpleM lore (Result, UT.UsageTable)
+simplifyResult ds res = do
+  let (ctx_res, val_res) = splitFromEnd (length ds) res
+  -- Copy propagation is a little trickier here, because there is no
+  -- place to put the certificates when copy-propagating a certified
+  -- statement.  However, for results in the *context*, it is OK to
+  -- just throw away the certificates, because for the program to be
+  -- type-correct, those statements must anyway be used (or
+  -- copy-propagated into) the statements producing the value result.
+  (ctx_res', _ctx_res_cs) <- collectCerts $ mapM simplify ctx_res
+  val_res' <- mapM simplify' val_res
+
+  let usages = consumeResult $ zip ds val_res'
+  return (ctx_res' <> val_res', usages)
+
   where simplify' (Var name) = do
           bnd <- ST.lookupSubExp name <$> askVtable
           case bnd of
@@ -628,7 +640,7 @@ simplifyExp (If cond tbranch fbranch (IfAttr ts ifsort)) = do
   -- which the simplifier does things - it should be purely bottom-up
   -- (or else, If expressions should indicate explicitly the diet of
   -- their return types).
-  let ds = map (const Consume) (bodyResult tbranch)
+  let ds = map (const Consume) ts
   tbranch' <- localVtable (ST.updateBounds True cond) $ simplifyBody ds tbranch
   fbranch' <- localVtable (ST.updateBounds False cond) $ simplifyBody ds fbranch
   (tbranch'',fbranch'', hoisted) <- hoistCommon cond' ifsort tbranch' fbranch'
@@ -643,7 +655,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
   valinit' <- mapM simplify valinit
   let ctx' = zip ctxparams' ctxinit'
       val' = zip valparams' valinit'
-      diets = map (diet . paramDeclType) $ ctxparams' ++ valparams'
+      diets = map (diet . paramDeclType) valparams'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar it boundexp loopvars -> do
       boundexp' <- simplify boundexp
@@ -847,7 +859,6 @@ instance Simplifiable Certificates where
 simplifyFun :: SimplifiableLore lore => FunDef lore -> SimpleM lore (FunDef (Wise lore))
 simplifyFun (FunDef entry fname rettype params body) = do
   rettype' <- simplify rettype
-  let ds = replicate (length (bodyResult body) - length rettype) Observe ++
-           map diet (retTypeValues rettype')
+  let ds = map diet (retTypeValues rettype')
   body' <- bindFParams params $ insertAllStms $ simplifyBody ds body
   return $ FunDef entry fname rettype' params body'

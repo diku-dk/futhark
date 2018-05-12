@@ -188,7 +188,7 @@ simplifyGroupStreamLambda lam w max_chunk arrs = do
     Engine.bindLParams acc_params $
     Engine.bindChunkLParams block_offset (zip arr_params arrs) $
     Engine.blockIf (Engine.hasFree bound_here `Engine.orIf` Engine.isConsumed) $
-    Engine.simplifyBody (repeat Observe) body
+    Engine.simplifyBody (replicate (length (bodyResult body)) Observe) body
   acc_params' <- mapM (Engine.simplifyParam Engine.simplify) acc_params
   arr_params' <- mapM (Engine.simplifyParam Engine.simplify) arr_params
   body' <- Engine.constructBody body_stms' body_res'
