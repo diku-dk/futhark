@@ -489,8 +489,9 @@ describeDecs decs = do
 
 describeDec :: FileModule -> Dec -> Maybe (DocM Html)
 describeDec _ (ValDec vb) = Just $
-  describeGeneric (valBindName vb) (valBindDoc vb) $
-  fmap (uncurry (<>)) . flip valBindHtml vb
+  describeGeneric (valBindName vb) (valBindDoc vb) $ \name -> do
+  (lhs, rhs) <- valBindHtml name vb
+  return $ lhs <> ": " <> rhs
 
 describeDec _ (TypeDec vb) = Just $
   describeGeneric (typeAlias vb) (typeDoc vb) (`typeBindHtml` vb)
