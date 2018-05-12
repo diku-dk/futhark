@@ -125,7 +125,7 @@ inlineAndRemoveDeadFunctions =
        }
   where pass prog = do
           let cg = buildCallGraph prog
-          renameProg $ Prog $ aggInlining cg $ progFunctions prog
+          renameProg . Prog . aggInlining cg . progFunctions =<< renameProg prog
 
 -- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.
