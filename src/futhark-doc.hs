@@ -70,7 +70,7 @@ printDecs cfg dir imports = do
   write' ("style.css", cssFile)
 
   where render (name, fm) =
-          (name,) . renderHtml . (docTypeHtml ! A.lang "en") <$> renderFile name fm
+          (name,) . renderHtml . (docTypeHtml ! A.lang "en") <$> renderFile name fm imports
 
         write (name, content) = write' (name <.> "html", content)
 
