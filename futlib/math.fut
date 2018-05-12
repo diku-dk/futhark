@@ -366,7 +366,7 @@ module i32: (size with t = i32) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.~(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
 
-  let iota (n: i32): *[n]i32 = 0..1..<n
+  let iota (n: i32) = 0..1..<n
   let replicate 'v (n: i32) (x: v) = map (const x) (iota n)
 
   let sum = reduce (+) (i32 0)
