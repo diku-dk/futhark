@@ -127,10 +127,10 @@ synopsisOpened (ModParens me _) = do me' <- synopsisOpened me
 synopsisOpened (ModImport _ (Info file) _) = Just $ do
   current <- asks ctxCurrent
   let dest = fromString $ relativise file current <> ".html"
-  return $ fullRow $ "import " <> (H.a ! A.href dest) (fromString $ show file)
+  return $ "import " <> (H.a ! A.href dest) (fromString $ show file)
 synopsisOpened (ModAscript _ se _ _) = Just $ do
   se' <- synopsisSigExp se
-  return $ fullRow $ "... : " <> se'
+  return $ "... : " <> se'
 synopsisOpened _ = Nothing
 
 synopsisValBind :: ValBind -> Maybe (DocM Html)
