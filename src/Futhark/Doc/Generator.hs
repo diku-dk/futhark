@@ -21,7 +21,7 @@ import Text.Markdown
 
 import Prelude
 
-import Language.Futhark.TypeChecker (FileModule(..))
+import Language.Futhark.TypeChecker (FileModule(..), Imports)
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark
 import Futhark.Doc.Html
@@ -33,6 +33,7 @@ type NoLink = S.Set VName
 
 data Context = Context { ctxCurrent :: String
                        , ctxFileMod :: FileModule
+                       , ctxImports :: Imports
                        , ctxNoLink :: NoLink
                        }
 type DocEnv = M.Map VName String
@@ -51,8 +52,8 @@ fullRow = H.tr . (H.td ! A.colspan "3")
 emptyRow :: Html
 emptyRow = H.tr $ H.td mempty <> H.td mempty <> H.td mempty
 
-renderFile :: String -> FileModule -> State DocEnv Html
-renderFile current fm = flip runReaderT (Context current fm mempty) $ do
+renderFile :: String -> FileModule -> Imports -> State DocEnv Html
+renderFile current fm imports = flip runReaderT (Context current fm imports mempty) $ do
   maybe_abstract <-
     if isJust $ progDoc $ fileProg fm then do
       doc <- docHtml $ progDoc $ fileProg fm
@@ -423,12 +424,12 @@ docHtml Nothing = return mempty
 identifierLinks :: String -> DocM String
 identifierLinks [] = return []
 identifierLinks s
-  | Just (name, namespace, s') <- identifierReference s = do
+  | Just ((name, namespace, file), s') <- identifierReference s = do
       let proceed x = (x<>) <$> identifierLinks s'
           unknown = proceed $ "`" ++ name ++ "`"
       case knownNamespace namespace of
         Just namespace' -> do
-          maybe_v <- lookupName (namespace', name)
+          maybe_v <- lookupName (namespace', name, file)
           case maybe_v of
             Nothing -> unknown
             Just v' -> do
@@ -441,12 +442,18 @@ identifierLinks s
         knownNamespace _ = Nothing
 identifierLinks (c:s') = (c:) <$> identifierLinks s'
 
-lookupName :: (Namespace, String) -> DocM (Maybe VName)
-lookupName (namespace, name) = do
-  env <- asks $ fileEnv . ctxFileMod
+lookupName :: (Namespace, String, Maybe FilePath) -> DocM (Maybe VName)
+lookupName (namespace, name, file) = do
+  env <- lookupEnvForFile file
   case M.lookup (namespace, nameFromString name) $ envNameMap env of
     Nothing -> return Nothing
     Just qn -> return $ Just $ qualLeaf qn
+
+lookupEnvForFile :: Maybe FilePath -> DocM Env
+lookupEnvForFile Nothing = asks $ fileEnv . ctxFileMod
+lookupEnvForFile (Just file) =
+  asks $ \ctx -> fileEnv $ fromMaybe (ctxFileMod ctx) $
+                 lookup file $ ctxImports ctx
 
 describeGeneric :: VName
                    -> Maybe String

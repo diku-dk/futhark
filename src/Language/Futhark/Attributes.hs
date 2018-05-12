@@ -870,24 +870,29 @@ progImports = concatMap decImports . progDecs
         modExpImports (ModAscript me _ _ _) = modExpImports me
         modExpImports ModLambda{}           = []
 
--- | Extract a leading @(name, namespace, remainder)@ from a
+-- | Extract a leading @((name, namespace, file), remainder)@ from a
 -- documentation comment string.  These are formatted as
 -- \`name\`\@namespace.  Let us hope that this pattern does not occur
 -- anywhere else.
-identifierReference :: String -> Maybe (String, String, String)
+identifierReference :: String -> Maybe ((String, String, Maybe FilePath), String)
 identifierReference ('`' : s)
   | (identifier, '`' : '@' : s') <- break (=='`') s,
     (namespace, s'') <- span isAlpha s',
     not $ null namespace =
-      Just (identifier, namespace, s'')
+      case s'' of
+        '@' : '"' : s'''
+          | (file, '"' : s'''') <- span (/= '"') s''' ->
+            Just ((identifier, namespace, Just file), s'''')
+        _ -> Just ((identifier, namespace, Nothing), s'')
+
 identifierReference _ = Nothing
 
 -- | Find all the identifier references in a string.
-identifierReferences :: String -> [(String, String)]
+identifierReferences :: String -> [(String, String, Maybe FilePath)]
 identifierReferences [] = []
 identifierReferences s
-  | Just (name, namespace, s') <- identifierReference s =
-      (name, namespace) : identifierReferences s'
+  | Just (ref, s') <- identifierReference s =
+      ref : identifierReferences s'
 identifierReferences (_:s') =
   identifierReferences s'
 
