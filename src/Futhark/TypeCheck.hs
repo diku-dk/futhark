@@ -854,12 +854,20 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                  loopbody) consumable $ do
           checkFunParams mergepat
           checkBody loopbody
-          bodyt <- map (`toDecl` Unique) <$> bodyExtType loopbody
-          unless (map rankShaped bodyt `subtypesOf`
-                  map rankShaped (staticShapes rettype)) $
-            bad $ ReturnTypeError (nameFromString "<loop body>")
-            (map fromDecl $ staticShapes rettype)
-            (map fromDecl bodyt)
+
+          let rettype_ext = existentialiseExtTypes (map paramName mergepat) $
+                            staticShapes $ map fromDecl rettype
+
+          bodyt <- extendedScope (traverse subExpType $ bodyResult loopbody) $
+                   scopeOf $ bodyStms loopbody
+
+          case instantiateShapes (`maybeNth` bodyResult loopbody) rettype_ext of
+            Nothing -> bad $ ReturnTypeError (nameFromString "<loop body>")
+                       (staticShapes $ map fromDecl rettype) (staticShapes bodyt)
+            Just rettype' ->
+              unless (bodyt `subtypesOf` rettype') $
+              bad $ ReturnTypeError (nameFromString "<loop body>")
+              (staticShapes rettype') (staticShapes bodyt)
 
 checkExp (Op op) = checkOp op
 
