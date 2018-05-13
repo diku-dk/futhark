@@ -16,9 +16,6 @@ import System.IO
 import System.Exit
 import qualified Data.Text.Lazy as T
 import qualified Data.Text.Lazy.IO as T
-
-import Text.Blaze.Html5 (docTypeHtml, (!))
-import qualified Text.Blaze.Html5.Attributes as A
 import Text.Blaze.Html.Renderer.Text
 
 import Futhark.Doc.Generator
@@ -63,16 +60,13 @@ futFiles dir = filter isFut <$> directoryContents dir
 
 printDecs :: DocConfig -> FilePath -> Imports -> IO ()
 printDecs cfg dir imports = do
-  let to_write = evalState (mapM render imports) mempty
+  let to_write = map (fmap renderHtml) $ renderFiles imports
   mapM_ write to_write
 
   write ("index", renderHtml $ indexPage to_write)
   write' ("style.css", cssFile)
 
-  where render (name, fm) =
-          (name,) . renderHtml . (docTypeHtml ! A.lang "en") <$> renderFile name fm imports
-
-        write (name, content) = write' (name <.> "html", content)
+  where write (name, content) = write' (name <.> "html", content)
 
         write' :: (String, T.Text) -> IO ()
         write' (name, content) = do let file = dir </> makeRelative "/" name

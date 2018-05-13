@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Futhark.Doc.Generator (renderFile, indexPage) where
+module Futhark.Doc.Generator (renderFiles, indexPage) where
 
 import Control.Monad
-import Control.Monad.State
 import Control.Monad.Reader
 import Data.List (sortBy, intersperse)
 import Data.Maybe
@@ -19,10 +18,10 @@ import Data.Version
 import qualified Data.Text.Lazy as LT
 import Text.Markdown
 
-import Prelude
+import Prelude hiding (abs)
 
 import Language.Futhark.TypeChecker (FileModule(..), Imports)
-import Language.Futhark.TypeChecker.Monad
+import Language.Futhark.TypeChecker.Monad hiding (NameMap)
 import Language.Futhark
 import Futhark.Doc.Html
 import Futhark.Version
@@ -35,9 +34,10 @@ data Context = Context { ctxCurrent :: String
                        , ctxFileMod :: FileModule
                        , ctxImports :: Imports
                        , ctxNoLink :: NoLink
+                       , ctxNameMap :: NameMap
                        }
-type DocEnv = M.Map VName String
-type DocM = ReaderT Context (State DocEnv)
+type NameMap = M.Map VName String
+type DocM = Reader Context
 
 noLink :: [VName] -> DocM a -> DocM a
 noLink names = local $ \ctx ->
@@ -57,8 +57,23 @@ specRow a b c = H.tr $ (H.td ! A.class_ "spec_lhs") a <>
                        (H.td ! A.class_ "spec_eql") b <>
                        (H.td ! A.class_ "spec_rhs") c
 
-renderFile :: String -> FileModule -> Imports -> State DocEnv Html
-renderFile current fm imports = flip runReaderT (Context current fm imports mempty) $ do
+vnameToFileMap :: Imports -> NameMap
+vnameToFileMap = mconcat . map forFile
+  where forFile (file, FileModule abs file_env _prog) =
+          mconcat (map vname (S.toList abs)) <>
+          forEnv file_env
+          where vname = flip M.singleton file . qualLeaf
+
+                forEnv env =
+                  mconcat (map vname $ M.elems $ envNameMap env) <>
+                  mconcat (map forMod $ M.elems $ envModTable env)
+                forMod (ModEnv env) = forEnv env
+                forMod ModFun{} = mempty
+
+renderFiles :: Imports -> [(FilePath, Html)]
+renderFiles imports = flip map imports $ \(current, fm) ->
+  let ctx = Context current fm imports mempty $ vnameToFileMap imports in
+  flip runReader ctx $ do
   maybe_abstract <-
     if isJust $ progDoc $ fileProg fm then do
       doc <- docHtml $ progDoc $ fileProg fm
@@ -69,10 +84,12 @@ renderFile current fm imports = flip runReaderT (Context current fm imports memp
 
   description <- describeDecs $ progDecs $ fileProg fm
 
-  return $ addBoilerplate current current $
-    maybe_abstract <>
-    selfLink "synopsis" (H.h2 "Synopsis") <> (H.div ! A.id "overview") synopsis <>
-    selfLink "description" (H.h2 "Description") <> description
+  return (current,
+          H.docTypeHtml ! A.lang "en" $
+          addBoilerplate current current $
+          maybe_abstract <>
+          selfLink "synopsis" (H.h2 "Synopsis") <> (H.div ! A.id "overview") synopsis <>
+          selfLink "description" (H.h2 "Description") <> description)
 
 indexPage :: [(String, a)] -> Html
 indexPage pages = H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $
@@ -302,9 +319,7 @@ vnameHtml (VName name tag) =
   H.span ! A.id (fromString (show tag)) $ renderName name
 
 vnameDescDef :: VName -> DocM Html
-vnameDescDef v = do
-  file <- asks ctxCurrent
-  modify $ M.insert v file
+vnameDescDef v =
   return $ H.a ! A.id (fromString (show (baseTag v))) $ renderName (baseName v)
 
 vnameSynopsisDef :: VName -> Html
@@ -381,7 +396,7 @@ qualNameHtml (QualName names vname@(VName name tag)) =
 vnameLink :: VName -> DocM String
 vnameLink vname@(VName _ tag) = do
   current <- asks ctxCurrent
-  file <- fromMaybe current <$> gets (M.lookup vname)
+  file <- fromMaybe current <$> asks (M.lookup vname . ctxNameMap)
   if file == current
     then return $ "#" ++ show tag
     else return $ relativise file current ++ ".html#" ++ show tag
@@ -448,15 +463,13 @@ identifierLinks (c:s') = (c:) <$> identifierLinks s'
 lookupName :: (Namespace, String, Maybe FilePath) -> DocM (Maybe VName)
 lookupName (namespace, name, file) = do
   env <- lookupEnvForFile file
-  case M.lookup (namespace, nameFromString name) $ envNameMap env of
+  case M.lookup (namespace, nameFromString name) . envNameMap =<< env of
     Nothing -> return Nothing
     Just qn -> return $ Just $ qualLeaf qn
 
-lookupEnvForFile :: Maybe FilePath -> DocM Env
-lookupEnvForFile Nothing = asks $ fileEnv . ctxFileMod
-lookupEnvForFile (Just file) =
-  asks $ \ctx -> fileEnv $ fromMaybe (ctxFileMod ctx) $
-                 lookup file $ ctxImports ctx
+lookupEnvForFile :: Maybe FilePath -> DocM (Maybe Env)
+lookupEnvForFile Nothing     = asks $ Just . fileEnv . ctxFileMod
+lookupEnvForFile (Just file) = asks $ fmap fileEnv . lookup file . ctxImports
 
 describeGeneric :: VName
                    -> Maybe String
