@@ -53,6 +53,10 @@ td {
     background: #ccc;
 }
 
+.spec_eql {
+    text-align: right;
+}
+
 .decl_description {
     margin-bottom: 2ex;
 }

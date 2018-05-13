@@ -53,7 +53,9 @@ emptyRow :: Html
 emptyRow = H.tr $ H.td mempty <> H.td mempty <> H.td mempty
 
 specRow :: Html -> Html -> Html -> Html
-specRow a b c = H.tr $ H.td a <> H.td b <> H.td c
+specRow a b c = H.tr $ (H.td ! A.class_ "spec_lhs") a <>
+                       (H.td ! A.class_ "spec_eql") b <>
+                       (H.td ! A.class_ "spec_rhs") c
 
 renderFile :: String -> FileModule -> Imports -> State DocEnv Html
 renderFile current fm imports = flip runReaderT (Context current fm imports mempty) $ do
@@ -140,17 +142,18 @@ synopsisOpened _ = Nothing
 synopsisValBind :: ValBind -> Maybe (DocM Html)
 synopsisValBind vb = Just $ do
   let name' = vnameSynopsisDef $ valBindName vb
-  (lhs, rhs) <- valBindHtml name' vb
-  return $ specRow lhs ": " rhs
+  (lhs, mhs, rhs) <- valBindHtml name' vb
+  return $ specRow lhs (mhs <> " : ") rhs
 
-valBindHtml :: Html -> ValBind -> DocM (Html, Html)
+valBindHtml :: Html -> ValBind -> DocM (Html, Html, Html)
 valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _) = do
   let tparams' = mconcat $ map ((" "<>) . typeParamHtml) tparams
       noLink' = noLink $ map typeParamName tparams ++
                 map identName (S.toList $ mconcat $ map patIdentSet params)
   rettype' <- noLink' $ maybe (typeHtml rettype) typeExpHtml retdecl
   params' <- noLink' $ mapM patternHtml params
-  return ("val " <> (H.span ! A.class_ "decl_name") name <> tparams',
+  return ("val " <> (H.span ! A.class_ "decl_name") name,
+          tparams',
           mconcat (intersperse " -> " $ params' ++ [rettype']))
 
 synopsisModType :: SigBind -> Maybe (DocM Html)
@@ -325,9 +328,8 @@ synopsisSpec spec = case spec of
     rettype' <- noLink (map typeParamName tparams) $
                 typeDeclHtml rettype
     return $ specRow
-      ("val " <> vnameSynopsisDef name <>
-        mconcat (map (" "<>) tparams'))
-      ": " rettype'
+      ("val " <> vnameSynopsisDef name)
+      (mconcat (map (" "<>) tparams') <> ": ") rettype'
   ModSpec name sig _ _ ->
     specRow ("module " <> vnameSynopsisDef name) ": " <$> synopsisSigExp sig
   IncludeSpec e _ -> fullRow . ("include " <>) <$> synopsisSigExp e
@@ -498,8 +500,8 @@ describeDecs decs = do
 describeDec :: FileModule -> Dec -> Maybe (DocM Html)
 describeDec _ (ValDec vb) = Just $
   describeGeneric (valBindName vb) (valBindDoc vb) $ \name -> do
-  (lhs, rhs) <- valBindHtml name vb
-  return $ lhs <> ": " <> rhs
+  (lhs, mhs, rhs) <- valBindHtml name vb
+  return $ lhs <> mhs <> ": " <> rhs
 
 describeDec _ (TypeDec vb) = Just $
   describeGeneric (typeAlias vb) (typeDoc vb) (`typeBindHtml` vb)
