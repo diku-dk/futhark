@@ -29,7 +29,7 @@ joinBy _ [x] = x
 joinBy sep (x:xs) = x <> foldMap (sep <>) xs
 
 commas :: [Html] -> Html
-commas = joinBy (toHtml ",")
+commas = joinBy (toHtml ", ")
 
 parens :: Html -> Html
 parens x = toHtml "(" <> x <> toHtml ")"
