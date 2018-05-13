@@ -45,7 +45,12 @@ td {
 }
 
 .specs {
-    padding-left: 2ex;
+    margin-left: 2ex;
+    border-collapse: collapse;
+}
+
+.specs tr:hover td {
+    background: #ccc;
 }
 
 .decl_description {
