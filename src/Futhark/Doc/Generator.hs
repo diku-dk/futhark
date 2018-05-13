@@ -52,6 +52,9 @@ fullRow = H.tr . (H.td ! A.colspan "3")
 emptyRow :: Html
 emptyRow = H.tr $ H.td mempty <> H.td mempty <> H.td mempty
 
+specRow :: Html -> Html -> Html -> Html
+specRow a b c = H.tr $ H.td a <> H.td b <> H.td c
+
 renderFile :: String -> FileModule -> Imports -> State DocEnv Html
 renderFile current fm imports = flip runReaderT (Context current fm imports mempty) $ do
   maybe_abstract <-
@@ -138,7 +141,7 @@ synopsisValBind :: ValBind -> Maybe (DocM Html)
 synopsisValBind vb = Just $ do
   let name' = vnameSynopsisDef $ valBindName vb
   (lhs, rhs) <- valBindHtml name' vb
-  return $ H.tr $ H.td lhs <> H.td ": " <> H.td rhs
+  return $ specRow lhs ": " rhs
 
 valBindHtml :: Html -> ValBind -> DocM (Html, Html)
 valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _) = do
@@ -164,7 +167,7 @@ synopsisMod fm (ModBind name ps sig _ _ _) =
   where proceed sig' = do
           let name' = vnameSynopsisDef name
           ps' <- modParamHtml ps
-          return $ H.tr $ H.td ("module " <> name') <> H.td ": " <> H.td (ps' <> sig')
+          return $ specRow ("module " <> name') ": " (ps' <> sig')
 
         FileModule _abs Env { envModTable = modtable} _ = fm
         envSig (ModEnv e) = renderEnv e
@@ -321,14 +324,12 @@ synopsisSpec spec = case spec of
     let tparams' = map typeParamHtml tparams
     rettype' <- noLink (map typeParamName tparams) $
                 typeDeclHtml rettype
-    return . H.tr $
-      H.td ("val " <> vnameSynopsisDef name <>
-            mconcat (map (" "<>) tparams')) <>
-      H.td ": " <>
-      H.td rettype'
-  ModSpec name sig _ _ -> do
-    s <- synopsisSigExp sig
-    return $ H.tr $ H.td ("module " <> vnameSynopsisDef name) <> H.td ": " <> H.td s
+    return $ specRow
+      ("val " <> vnameSynopsisDef name <>
+        mconcat (map (" "<>) tparams'))
+      ": " rettype'
+  ModSpec name sig _ _ ->
+    specRow ("module " <> vnameSynopsisDef name) ": " <$> synopsisSigExp sig
   IncludeSpec e _ -> fullRow . ("include " <>) <$> synopsisSigExp e
 
 typeDeclHtml :: TypeDeclBase f VName -> DocM Html
