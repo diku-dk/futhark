@@ -25,6 +25,8 @@ module type from_prim = {
   val bool: bool -> t
 }
 
+-- | A basic numeric module type that can be implemented for both
+-- integers and rational numbers.
 module type numeric = {
   include from_prim
 
@@ -51,7 +53,10 @@ module type numeric = {
 
   val sgn: t -> t
 
+  -- | The largest representable number.
   val largest: t
+
+  -- | The smallest representable number.
   val smallest: t
 
   -- | Returns zero on empty input.
@@ -66,6 +71,8 @@ module type numeric = {
   val minimum: []t -> t
 }
 
+-- | An extension of `numeric`@mtype that provides facilities that are
+-- only meaningful for integral types.
 module type integral = {
   include numeric
 
@@ -87,6 +94,9 @@ module type integral = {
   val set_bit: i32 -> t -> i32 -> t
 }
 
+-- | An extension of `size`@mtype that further includes facilities for
+-- constructing arrays where the size is provides as a value of the
+-- given integral type.
 module type size = {
   include integral
 
@@ -94,6 +104,7 @@ module type size = {
   val replicate 'v: t -> v -> *[]v
 }
 
+-- | Numbers that model real numbers to some degree.
 module type real = {
   include numeric
 
@@ -128,6 +139,9 @@ module type real = {
   val e: t
 }
 
+-- | An extension of `real`@mtype that further gives access to the
+-- bitwise representation of the underlying number.  It is presumed
+-- that this will be some form of IEEE float.
 module type float = {
   include real
 
@@ -143,6 +157,8 @@ module type float = {
   val set_bit: i32 -> t -> i32 -> t
 }
 
+-- | Boolean numbers.  When converting from a number to `bool`, 0 is
+-- considered `false` and any other value is `true`.
 module bool: from_prim with t = bool = {
   type t = bool
 
