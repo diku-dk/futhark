@@ -5,6 +5,10 @@
 -- programs, although note the remarks below about floating-point
 -- numbers.  If you need a comparison-based sort, consider
 -- `merge_sort`@term@"/futlib/merge_sort".
+--
+-- ## See Also
+--
+-- * `merge_sort`@term@"/futlib/merge_sort"
 
 local let radix_sort_step [n] 't (xs: [n]t) (get_bit: i32 -> t -> i32)
                                  (digit_n: i32): [n]t =

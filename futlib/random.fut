@@ -5,15 +5,76 @@
 -- pure language, the final random number function(s) will return both
 -- the random number and the new state of the engine.  It is the
 -- programmer's responsibility to ensure that the same state is not
--- used more than once (unless that is what is desired).
+-- used more than once (unless that is what is desired).  See the
+-- [Examples](#examples) below.
 --
--- Example usage:
+-- ## Examples
+--
+-- This program constructs a uniform distribution of single precision
+-- floats using the `minstd_rand`@term as the underlying RNG engine.
+-- The `dist` module is constructed at the program top level, while we
+-- use it at the expression level.  We use the `minstd_rand` module
+-- for initialising the random number state using a seed, and then we
+-- pass that state to the `rand` function in the generated
+-- distribution module, along with a description of the distribution
+-- we desire.  We get back not just the random number, but also the
+-- new state of the engine.
 --
 -- ```
 -- module dist = uniform_real_distribution f32 minstd_rand
+--
 -- let rng = minstd_rand.rng_from_seed [123]
 -- let (rng, x) = dist.rand (1,6)
 -- ```
+--
+-- The `rand` function of `uniform_real_distribution`@term simply
+-- takes a pair of numbers describing the range.  In contrast,
+-- `normal_distribution`@term takes a record specifying the mean and
+-- standard deviation:
+--
+-- ```
+-- module norm_dist = normal_distribution f32 minstd_rand
+--
+-- let (rng, y) = norm_dist.rand {mean=50, stddev=25}
+-- ```
+--
+-- Since both `dist` and `norm_dist` have been initialised with the
+-- same underlying `rng_engine`@mtype (`minstd_rand`@term), we can
+-- re-use the same RNG state.  This is often convenient when a program
+-- needs to generate random numbers from several different
+-- distributions, as we still only have to manage a single RNG state.
+--
+-- ### Parallel random numbers
+--
+-- Random number generation is inherently sequential.  The `rand`
+-- functions take an RNG state as input and produce a new RNG state.
+-- This creates challenges when we wish to `map` a function `f` across
+-- some array `xs`, and each application of the function must produce
+-- some random numbers.  We generally don't want to pass the exact
+-- same state to every application, as that means each element will
+-- see the exact same stream of random numbers.  Common procedure is
+-- to use `split_rng`, which creates any number of RNG states from
+-- one, and then pass one to each application of `f`:
+--
+-- ```
+-- let rngs = minstd_rand.split_rng n rng
+-- let (rngs, ys) = unzip (map2 f rngs xs)
+-- let rng = minstd.rand.join_rngs rngs
+-- ```
+--
+-- We assume here that the function `f` returns not just the result,
+-- but also the new RNG state.  Generally, all functions that accept
+-- random number states should behave like this.  We subsequently use
+-- `join_rngs` to combine all resulting states back into a single
+-- state.  Thus, parallel programming with random numbers involves
+-- frequently splitting and re-joining RNG states.  For most RNG
+-- engines, these operations are generally very cheap.
+--
+-- ## See also
+--
+-- The `Sobol`@term@"/futlib/sobol" module provides a very different
+-- (and inherently parallel) way of generating random numbers, which
+-- may be more suited for Monte Carlo applications.
 
 import "/futlib/math"
 import "/futlib/array"
