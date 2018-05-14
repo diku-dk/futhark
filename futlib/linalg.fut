@@ -48,10 +48,15 @@ module linalg(T: numeric): {
   let inv [n] (A: [n][n]t): [n][n]t =
     -- Pad the matrix with the identity matrix.
     let Ap = map2 (\row i ->
-                  let padding = replicate n (i32 0)
-                  let padding[i] = i32 1
-                  in concat row padding)
-                 A (iota n)
+                    --map (\j -> if j < n then row[j]
+                    --           else if j == n+i 
+                    --                then (i32 1)
+                    --                else (i32 0)
+                    --    ) (iota (2*n))
+                    let padding = replicate n (i32 0)
+                    let padding[i] = i32 1
+                    in concat row padding
+                  ) A (iota n)
     let Ap' = gauss_jordan Ap
     -- Drop the identity matrix at the front.
     in Ap'[0:n,n:n intrinsics.* 2]
