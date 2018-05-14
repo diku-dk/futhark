@@ -18,10 +18,10 @@ module linalg(T: numeric): {
   -- | Solve linear system.
   val ols [n][m]: [n][m]t -> [n]t -> [m]t
 } = {
-  open T
+
   type t = T.t
   let dotprod [n] (xs: [n]t) (ys: [n]t): t =
-    reduce (+) (i32 0) (map2 (*) xs ys)
+    T.(reduce (+) (i32 0) (map2 (*) xs ys))
 
   let matmul [n][p][m] (xss: [n][p]t) (yss: [p][m]t): [n][m]t =
     map (\xs -> map (dotprod xs) (transpose yss)) xss
@@ -38,23 +38,18 @@ module linalg(T: numeric): {
       let irow = A[0]
       let Ap = A[1:n]
       let v1 = irow[i]
-      let irow = map (/v1) irow
+      let irow = T.(map (/v1) irow)
       let Ap = map (\jrow ->
                     let scale = jrow[i]
-                    in map2 (\x y -> y - scale * x) irow jrow)
+                    in map2 T.(\x y -> y - scale * x) irow jrow)
                 Ap
       in concat Ap [irow]
 
   let inv [n] (A: [n][n]t): [n][n]t =
     -- Pad the matrix with the identity matrix.
     let Ap = map2 (\row i ->
-                    --map (\j -> if j < n then row[j]
-                    --           else if j == n+i 
-                    --                then (i32 1)
-                    --                else (i32 0)
-                    --    ) (iota (2*n))
-                    let padding = replicate n (i32 0)
-                    let padding[i] = i32 1
+                    let padding = replicate n (T.i32 0)
+                    let padding[i] = T.i32 1
                     in concat row padding
                   ) A (iota n)
     let Ap' = gauss_jordan Ap
