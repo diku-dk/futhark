@@ -3,7 +3,7 @@ module Futhark.Doc.Generator (renderFiles, indexPage) where
 
 import Control.Monad
 import Control.Monad.Reader
-import Data.List (sortBy, intersperse)
+import Data.List (sortBy, intersperse, inits, tails, isPrefixOf, find)
 import Data.Maybe
 import Data.Monoid
 import Data.Ord
@@ -74,11 +74,8 @@ renderFiles :: Imports -> [(FilePath, Html)]
 renderFiles imports = flip map imports $ \(current, fm) ->
   let ctx = Context current fm imports mempty $ vnameToFileMap imports in
   flip runReader ctx $ do
-  maybe_abstract <-
-    if isJust $ progDoc $ fileProg fm then do
-      doc <- docHtml $ progDoc $ fileProg fm
-      return $ selfLink "abstract" (H.h2 "Abstract") <> doc
-    else return mempty
+
+  (maybe_abstract, maybe_sections) <- headerDoc $ fileProg fm
 
   synopsis <- (H.div ! A.id "module") <$> synopsisDecs (progDecs $ fileProg fm)
 
@@ -89,7 +86,23 @@ renderFiles imports = flip map imports $ \(current, fm) ->
           addBoilerplate current current $
           maybe_abstract <>
           selfLink "synopsis" (H.h2 "Synopsis") <> (H.div ! A.id "overview") synopsis <>
-          selfLink "description" (H.h2 "Description") <> description)
+          selfLink "description" (H.h2 "Description") <> description <>
+          maybe_sections)
+
+-- | The header documentation (which need not be present) can contain
+-- an abstract and further sections.
+headerDoc :: Prog -> DocM (Html, Html)
+headerDoc prog =
+  case splitHeaderDoc <$> progDoc prog of
+    Just (abstract, more_sections) -> do
+      abstract' <- docHtml $ Just abstract
+      more_sections' <- docHtml $ Just more_sections
+      return (selfLink "abstract" (H.h2 "Abstract") <> abstract',
+              more_sections')
+    _ -> return (mempty, mempty)
+  where splitHeaderDoc s = fromMaybe (s, mempty) $
+                           find (("\n##" `isPrefixOf`) . snd) $
+                           zip (inits s) (tails s)
 
 indexPage :: [(String, a)] -> Html
 indexPage pages = H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $
@@ -436,7 +449,7 @@ typeAbbrevHtml name params =
 
 docHtml :: Maybe String -> DocM Html
 docHtml (Just doc) =
-  markdown def . LT.pack <$> identifierLinks doc
+  markdown def { msAddHeadingId = True } . LT.pack <$> identifierLinks doc
 docHtml Nothing = return mempty
 
 identifierLinks :: String -> DocM String
