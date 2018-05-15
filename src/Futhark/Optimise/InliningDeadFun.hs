@@ -66,8 +66,10 @@ inlineInBody inlcallees (Body attr stms res) = Body attr stms' res
         inline (Let pat _ (Apply fname args _ (safety,loc,locs)))
           | fun:_ <- filter ((== fname) . funDefName) inlcallees =
               let param_stms = zipWith reshapeIfNecessary (map paramIdent $ funDefParams fun) (map fst args)
-                  body_stms = stmsToList $ addLocations safety (loc:locs) $ bodyStms $ funDefBody fun
-                  res_stms = zipWith reshapeIfNecessary (patternIdents pat) (bodyResult $ funDefBody fun)
+                  body_stms = stmsToList $ addLocations safety
+                              (filter notNoLoc (loc:locs)) $ bodyStms $ funDefBody fun
+                  res_stms = zipWith reshapeIfNecessary (patternIdents pat)
+                             (bodyResult $ funDefBody fun)
               in param_stms ++ body_stms ++ res_stms
         inline stm = [inlineInStm inlcallees stm]
 
@@ -77,6 +79,9 @@ inlineInBody inlcallees (Body attr stms res) = Body attr stms' res
               mkLet [] [ident] $ shapeCoerce (arrayDims t) v
           | otherwise =
             mkLet [] [ident] $ BasicOp $ SubExp se
+
+notNoLoc :: SrcLoc -> Bool
+notNoLoc = (/=NoLoc) . locOf
 
 inliner :: Monad m => [FunDef] -> Mapper SOACS SOACS m
 inliner funs = identityMapper { mapOnBody = const $ return . inlineInBody funs
