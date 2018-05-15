@@ -1059,12 +1059,6 @@ checkExp (Rearrange perm arrexp loc) = do
     throwError $ PermutationError loc perm r
   return $ Rearrange perm arrexp' loc
 
-checkExp (Rotate d offexp arrexp loc) = do
-  (arr_t, _) <- newArrayType (srclocOf arrexp) "e" (1+d)
-  arrexp' <- unifies arr_t =<< checkExp arrexp
-  offexp' <- unifies (Prim $ Signed Int32) =<< checkExp offexp
-  return $ Rotate d offexp' arrexp' loc
-
 checkExp (Zip i e es NoInfo loc) = do
   let checkInput inp = do (arr_t, _) <- newArrayType (srclocOf e) "e" (1+i)
                           unifies arr_t =<< checkExp inp
@@ -1111,12 +1105,6 @@ checkExp Scan{} = error "Scan nodes should not appear in source program"
 checkExp Filter{} = error "Filter nodes should not appear in source program"
 checkExp Partition{} = error "Partition nodes should not appear in source program"
 checkExp Stream{} = error "Stream nodes should not appear in source program"
-
-checkExp (Concat i e1 e2 loc) = do
-  (t, _) <- newArrayType loc "e" (i+1)
-  e1'  <- unifies t =<< checkExp e1
-  e2' <- unifies t =<< checkExp e2
-  return $ Concat i e1' e2' loc
 
 checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
   removeSeminullOccurences $

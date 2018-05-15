@@ -6,5 +6,5 @@
 -- structure { Concat 0 }
 
 let main(as: [][]i32, bs: [][]i32, i: i32, j: i32): i32 =
-  let cs = concat@1 as bs
+  let cs = map2 (++) as bs
   in cs[i,j]

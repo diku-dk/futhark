@@ -263,14 +263,8 @@ transformExp (Update e1 idxs e2 loc) =
   Update <$> transformExp e1 <*> mapM transformDimIndex idxs
          <*> transformExp e2 <*> pure loc
 
-transformExp (Concat i e1 e2 loc) =
-  Concat i <$> transformExp e1 <*> transformExp e2 <*> pure loc
-
 transformExp (Rearrange is e0 loc) =
   Rearrange is <$> transformExp e0 <*> pure loc
-
-transformExp (Rotate i e1 e2 loc) =
-  Rotate i <$> transformExp e1 <*> transformExp e2 <*> pure loc
 
 transformExp (Map e1 es t loc) =
   Map <$> transformExp e1 <*> transformExp es <*> pure t <*> pure loc

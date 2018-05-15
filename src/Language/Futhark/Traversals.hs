@@ -115,8 +115,6 @@ instance ASTMappable (ExpBase Info VName) where
          mapM (astMap tv) idxexps <*>
          traverse (mapOnCompType tv) t <*>
          pure loc
-  astMap tv (Rotate d e a loc) =
-    Rotate d <$> mapOnExp tv e <*> mapOnExp tv a <*> pure loc
   astMap tv (Rearrange perm e loc) =
     pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
   astMap tv (Map fun e t loc) =
@@ -146,8 +144,6 @@ instance ASTMappable (ExpBase Info VName) where
     where mapOnStreamForm (MapLike o) = pure $ MapLike o
           mapOnStreamForm (RedLike o comm lam) =
               RedLike o comm <$> mapOnExp tv lam
-  astMap tv (Concat i x y loc) =
-    Concat i <$> mapOnExp tv x <*> mapOnExp tv y <*> pure loc
   astMap tv (Lambda tparams params body ret t loc) =
     Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*>

@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `reshape` construct has been removed.  Use the
     `flatten`/`unflatten` functions instead.
 
+  * `concat` and `rotate` no longer support the `@` notation.  Use
+    `map` nests instead.
+
 ### Changed
 
   * When defining a module type, a module of the same name is no

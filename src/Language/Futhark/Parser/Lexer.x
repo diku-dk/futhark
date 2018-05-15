@@ -152,10 +152,8 @@ keyword s =
 -- Perhaps we can eventually permit their use as variable names anyway.
 
     "rearrange"    -> REARRANGE
-    "rotate"       -> ROTATE
     "zip"          -> ZIP
     "unzip"        -> UNZIP
-    "concat"       -> CONCAT
 
     _              -> ID $ nameFromText s
 
@@ -342,13 +340,10 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | RESHAPE
            | REARRANGE
-           | ROTATE
            | ZIP
            | UNZIP
            | UNSAFE
-           | CONCAT
            | TRUE
            | FALSE
            | EMPTY

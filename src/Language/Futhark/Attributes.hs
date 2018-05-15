@@ -455,7 +455,6 @@ typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (Rearrange _ e _) = typeOf e
-typeOf (Rotate _ _ e _) = typeOf e
 typeOf (Zip _ _ _ (Info t) _) = t
 typeOf (Unzip _ ts _) =
   tupleRecord $ map unInfo ts
@@ -472,8 +471,6 @@ typeOf (Stream _ lam _ _) =
   rettype (typeOf lam) `setUniqueness` Unique
   where rettype (Arrow _ _ _ t) = rettype t
         rettype t = t
-typeOf (Concat _ x _ _) =
-  typeOf x `setUniqueness` Unique `setAliases` mempty
 typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 typeOf (Lambda _ params _ _ (Info (als, t)) _) =
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
@@ -715,6 +712,11 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                              Prim $ Signed Int32,
                              Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique] $
                             Array (ArrayPolyElem tv_a' [] ()) (rank 2) Nonunique),
+
+              ("concat", IntrinsicPolyFun [tp_a]
+                         [arr_a, arr_a] uarr_a),
+              ("rotate", IntrinsicPolyFun [tp_a]
+                         [Prim $ Signed Int32, arr_a] arr_a),
 
               ("cosmin_flatten", IntrinsicPolyFun [tp_a]
                                  [Array (ArrayPolyElem tv_a' [] ()) (rank 2) Unique] $

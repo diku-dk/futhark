@@ -41,7 +41,16 @@ let reverse [n] 't (x: [n]t): [n]t = x[::-1]
 
 -- | Concatenate two arrays.  Warning: never try to perform a reduction
 -- with this operator; it will not work.
-let (++) 't (xs: []t) (ys: []t): *[]t = concat xs ys
+let (++) 't (xs: []t) (ys: []t): *[]t = intrinsics.concat (xs, ys)
+
+-- | An old-fashioned way of saying `++`.
+let concat 't (xs: []t) (ys: []t): *[]t = xs ++ ys
+
+-- | Rotate an array some number of elements to the left.  A negative
+-- rotation amount is also supported.
+--
+-- For example, if `b==rotate 1 i a`, then `b[x,y+1] = a[x,y]`.
+let rotate 't (r: i32) (xs: []t) = intrinsics.rotate (r, xs)
 
 -- | Replace an element of the array with a new value.
 let update [n] 't (xs: *[n]t) (i: i32) (x: t): *[n]t = xs with [i] <- x

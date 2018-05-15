@@ -634,20 +634,11 @@ data ExpBase f vn =
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
-            | Concat Int (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.  The
-            -- static integer indicates which dimension to concatenate
-            -- across.
-
             | Rearrange [Int] (ExpBase f vn) SrcLoc
             -- ^ Permute the dimensions of the input array.  The list
             -- of integers is a list of dimensions (0-indexed), which
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
-
-            | Rotate Int (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ Rotate the given dimension of the given array by the
-            -- given amount.  The last expression is the array.
 
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
@@ -739,7 +730,6 @@ instance Located (ExpBase f vn) where
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
   locOf (Rearrange _ _ pos)            = locOf pos
-  locOf (Rotate _ _ _ pos)             = locOf pos
   locOf (Map _ _ _ loc)                = locOf loc
   locOf (Reduce _ _ _ _ pos)           = locOf pos
   locOf (Zip _ _ _ _ loc)              = locOf loc
@@ -747,7 +737,6 @@ instance Located (ExpBase f vn) where
   locOf (Scan _ _ _ pos)               = locOf pos
   locOf (Filter _ _ pos)               = locOf pos
   locOf (Partition _ _ _ loc)          = locOf loc
-  locOf (Concat _ _ _ pos)             = locOf pos
   locOf (Lambda _ _ _ _ _ loc)         = locOf loc
   locOf (OpSection _ _ loc)            = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc

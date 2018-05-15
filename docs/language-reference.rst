@@ -396,8 +396,6 @@ literals and variables, but also more complicated forms.
       : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `type_param`* `pat` [("=" `exp`)] `loopform` "do" `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
-      : | "rotate" ["@" `nat_int`] `exp` `exp`
-      : | "concat" ["@" `nat_int`] `exp` `exp`
       : | "zip" ["@" `nat_int`] `exp`+
       : | "unzip" `exp`
       : | "unsafe" `exp`
@@ -716,15 +714,6 @@ length-``n`` permutation.
 
 For example, if ``b==rearrange (2,0,1) a``, then ``b[x,y,z] =
 a[y,z,x]``.
-
-``rotate@d i a``
-................
-
-Rotate dimension ``d`` of the array ``a`` left by ``i`` elements.
-Intuitively, you can think of it as subtracting ``i`` from every index
-(modulo the size of the array).
-
-For example, if ``b==rotate 1 i a``, then ``b[x,y+1] = a[x,y]``.
 
 ``zip x y z``
 .............
