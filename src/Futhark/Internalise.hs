@@ -646,48 +646,6 @@ internaliseExp _ (E.Rearrange perm e _) =
   internaliseOperation "rearrange" e $ \v ->
     return $ I.Rearrange perm v
 
-internaliseExp _ (E.Rotate d offset e _) = do
-  offset' <- internaliseExp1 "rotation_offset" offset
-  internaliseOperation "rotate" e $ \v -> do
-    r <- I.arrayRank <$> lookupType v
-    let zero = constant (0::Int32)
-        offsets = replicate d zero ++ [offset'] ++ replicate (r-d-1) zero
-    return $ I.Rotate offsets v
-
-internaliseExp desc (E.Concat i x y loc) = do
-  let ys = [y]
-  xs  <- internaliseExpToVars "concat_x" x
-  yss <- mapM (internaliseExpToVars "concat_y") ys
-  outer_size <- arraysSize i <$> mapM lookupType xs
-  ressize <- foldM sumdims outer_size =<<
-             mapM (fmap (arraysSize i) . mapM lookupType) yss
-
-  let conc xarr yarrs = do
-        -- All dimensions except for dimension 'i' must match.
-        xt  <- lookupType xarr
-        yts <- mapM lookupType yarrs
-        let matches n m =
-              letExp "match" =<<
-              eAssert (pure $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) n m)
-              "arguments do not have the same row shape" loc
-            x_inner_dims  = dropAt i 1 $ I.arrayDims xt
-            ys_inner_dims = map (dropAt i 1 . I.arrayDims) yts
-            updims = zipWith3 updims' [0..] (I.arrayDims xt)
-            updims' j xd yd | i == j    = yd
-                            | otherwise = xd
-        matchcs <- asserting $ Certificates . concat <$>
-                   mapM (zipWithM matches x_inner_dims) ys_inner_dims
-        yarrs'  <- forM yarrs $ \yarr -> do
-          yt <- lookupType yarr
-          certifying matchcs $ letExp "concat_y_reshaped" $
-            shapeCoerce (updims $ I.arrayDims yt) yarr
-        return $ I.BasicOp $ I.Concat i xarr yarrs' ressize
-  letSubExps desc =<< zipWithM conc xs (transpose yss)
-
-    where
-        sumdims xsize ysize = letSubExp "conc_tmp" $ I.BasicOp $
-                                        I.BinOp (I.Add I.Int32) xsize ysize
-
 internaliseExp desc (E.Map lam arr _ _) = do
   arr' <- internaliseExpToVars "map_arr" arr
   lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
@@ -1269,6 +1227,47 @@ isOverloadedFunction qname args loc = do
         k <- letSubExp "flat_dim" $ I.BasicOp $ I.BinOp (Mul Int32) n m
         letSubExp desc $ I.BasicOp $
           I.Reshape (reshapeOuter [DimNew k] 2 $ arrayShape arr_t) arr'
+
+    handle [TupLit [x, y] _] "concat" = Just $ \desc -> do
+      let ys = [y]
+          i = 0
+      xs  <- internaliseExpToVars "concat_x" x
+      yss <- mapM (internaliseExpToVars "concat_y") ys
+      outer_size <- arraysSize i <$> mapM lookupType xs
+      let sumdims xsize ysize = letSubExp "conc_tmp" $ I.BasicOp $
+                                I.BinOp (I.Add I.Int32) xsize ysize
+      ressize <- foldM sumdims outer_size =<<
+                 mapM (fmap (arraysSize i) . mapM lookupType) yss
+
+      let conc xarr yarrs = do
+            -- All dimensions except for dimension 'i' must match.
+            xt  <- lookupType xarr
+            yts <- mapM lookupType yarrs
+            let matches n m =
+                  letExp "match" =<<
+                  eAssert (pure $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) n m)
+                  "arguments do not have the same row shape" loc
+                x_inner_dims  = dropAt i 1 $ I.arrayDims xt
+                ys_inner_dims = map (dropAt i 1 . I.arrayDims) yts
+                updims = zipWith3 updims' [0..] (I.arrayDims xt)
+                updims' j xd yd | i == j    = yd
+                                | otherwise = xd
+            matchcs <- asserting $ Certificates . concat <$>
+                       mapM (zipWithM matches x_inner_dims) ys_inner_dims
+            yarrs'  <- forM yarrs $ \yarr -> do
+              yt <- lookupType yarr
+              certifying matchcs $ letExp "concat_y_reshaped" $
+                shapeCoerce (updims $ I.arrayDims yt) yarr
+            return $ I.BasicOp $ I.Concat i xarr yarrs' ressize
+      letSubExps desc =<< zipWithM conc xs (transpose yss)
+
+    handle [TupLit [offset, e] _] "rotate" = Just $ \desc -> do
+      offset' <- internaliseExp1 "rotation_offset" offset
+      internaliseOperation desc e $ \v -> do
+        r <- I.arrayRank <$> lookupType v
+        let zero = intConst Int32 0
+            offsets = offset' : replicate (r-1) zero
+        return $ I.Rotate offsets v
 
     handle _ _ = Nothing
 

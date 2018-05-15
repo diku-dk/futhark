@@ -233,8 +233,6 @@ instance (Eq vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Rearrange perm e _) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  pprPrec _ (Rotate d x e _) =
-    text "rotate@" <> ppr d <> apply [ppr x, ppr e]
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduce_comm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
@@ -257,8 +255,6 @@ instance (Eq vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Zip i e es _ _) = text "zip@" <> ppr i <+> spread (map (pprPrec 10) (e:es))
   pprPrec _ (Unzip e _ _) = text "unzip" <+> pprPrec 10 e
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 10 e
-  pprPrec _ (Concat i x y _) =
-    text "concat" <> text "@" <> ppr i <+> pprPrec 10 x <+> pprPrec 10 y
   pprPrec p (Lambda tparams params body ascript _ _) =
     parensIf (p /= -1) $
     text "\\" <> spread (map ppr tparams ++ map ppr params) <>

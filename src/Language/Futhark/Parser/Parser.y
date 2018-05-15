@@ -140,11 +140,9 @@ import Language.Futhark.Parser.Lexer
       do              { L $$ DO }
       with            { L $$ WITH }
       rearrange       { L $$ REARRANGE }
-      rotate          { L $$ ROTATE }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       unsafe          { L $$ UNSAFE }
-      concat          { L $$ CONCAT }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
       empty           { L $$ EMPTY }
@@ -510,17 +508,6 @@ Exp2 :: { UncheckedExp }
 
      | rearrange '(' NaturalInts ')' Atom
                       { Rearrange $3 $5 (srcspan $1 $>) }
-
-     | rotate '@' NaturalInt Atom Atom { Rotate $3 $4 $5 (srcspan $1 $>) }
-
-     | rotate Atom Atom
-                      { Rotate 0 $2 $3 (srcspan $1 $>) }
-
-     | concat Atom Atom
-                      { Concat 0 $2 $3 (srcspan $1 $>) }
-
-     | concat '@' NaturalInt Atom Atom
-                      { Concat $3 $4 $5 (srcspan $1 $>) }
 
      | zip Atoms1
                       { Zip 0 (fst $2) (snd $2) NoInfo
