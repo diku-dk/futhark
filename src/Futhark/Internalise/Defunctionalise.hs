@@ -492,7 +492,16 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
           -- Lift lambda to top-level function definition.
           let params = [closure_pat, pat']
               rettype = buildRetType closure_env params $ typeOf e0'
-          fname <- newNameFromString "lifted"
+
+              -- Embed some information about the original function
+              -- into the name of the lifted function, to make the
+              -- result slightly more human-readable.
+              liftedName i (Var f _ _) =
+                "lifted_" ++ show i ++ "_" ++ baseString (qualLeaf f)
+              liftedName i (Apply f _ _ _ _) =
+                liftedName (i+1) f
+              liftedName _ _ = "lifted"
+          fname <- newNameFromString $ liftedName (0::Int) e1
           liftValDec fname rettype dims params e0'
 
           let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
