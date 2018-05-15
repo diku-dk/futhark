@@ -38,19 +38,31 @@ module linalg(T: numeric): {
       let irow = A[0]
       let Ap = A[1:n]
       let v1 = irow[i]
-      let irow = T.(map (/v1) irow)
-      let Ap = map (\jrow ->
-                    let scale = jrow[i]
-                    in map2 T.(\x y -> y - scale * x) irow jrow)
-                Ap
-      in concat Ap [irow]
+      in  map (\k -> map (\j -> let x = unsafe( T.(irow[j] / v1) ) in
+                                if k < n-1  -- Ap case
+                                then unsafe( T.(Ap[k,j] - Ap[k,i] * x) ) 
+                                else x      -- irow case
+                         ) (iota m)
+              ) (iota n)
+
+      --let irow = T.(map (/v1) irow)
+      --let Ap = map (\jrow ->
+      --              let scale = jrow[i]
+      --              in map2 T.(\x y -> y - scale * x) irow jrow)
+      --          Ap
+      --in concat Ap [irow]
 
   let inv [n] (A: [n][n]t): [n][n]t =
     -- Pad the matrix with the identity matrix.
     let Ap = map2 (\row i ->
-                    let padding = replicate n (T.i32 0)
-                    let padding[i] = T.i32 1
-                    in concat row padding
+                    map (\j -> if j < n then unsafe( row[j] )
+                                     else if j == n+i
+                                          then (T.i32 1)
+                                          else (T.i32 0)
+                        ) (iota (2*n)) 
+                    --let padding = replicate n (T.i32 0)
+                    --let padding[i] = T.i32 1
+                    --in concat row padding
                   ) A (iota n)
     let Ap' = gauss_jordan Ap
     -- Drop the identity matrix at the front.
