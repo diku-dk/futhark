@@ -716,6 +716,15 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                              Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique] $
                             Array (ArrayPolyElem tv_a' [] ()) (rank 2) Nonunique),
 
+              ("cosmin_flatten", IntrinsicPolyFun [tp_a]
+                                 [Array (ArrayPolyElem tv_a' [] ()) (rank 2) Unique] $
+                                 Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique),
+              ("cosmin_unflatten", IntrinsicPolyFun [tp_a]
+                                   [Prim $ Signed Int32,
+                                    Prim $ Signed Int32,
+                                    Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique] $
+                                   Array (ArrayPolyElem tv_a' [] ()) (rank 2) Unique),
+
                ("scatter", IntrinsicPolyFun [tp_a]
                           [Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique,
                            Array (ArrayPrimElem (Signed Int32) ()) (rank 1) Nonunique,
