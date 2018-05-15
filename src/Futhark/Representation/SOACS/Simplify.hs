@@ -176,7 +176,7 @@ bottomUpRules = [RuleOp removeDeadMapping,
                  RuleBasicOp removeUnnecessaryCopy,
                  RuleOp liftIdentityMapping,
                  RuleOp removeDuplicateMapOutput,
-                 RuleOp mapReshapeToReshape
+                 RuleOp mapOpToOp
                 ]
 
 liftIdentityMapping :: BottomUpRuleOp (Wise SOACS)
@@ -334,18 +334,46 @@ removeDuplicateMapOutput (_, used) pat _ (Map width fun arrs) =
           | otherwise = (ses_ts_pes' ++ [(se,t,pe)], copies)
 removeDuplicateMapOutput _ _ _ _ = cannotSimplify
 
--- Mapping a reshape becomes a reshape.
-mapReshapeToReshape :: BottomUpRuleOp (Wise SOACS)
-mapReshapeToReshape (_, used) pat@(Pattern [] [map_pe]) aux1 (Map w map_lam [arr])
-  | [Let (Pattern [] [pe]) aux2 (BasicOp (Reshape newshape reshape_arr))] <-
+-- Mapping some operations becomes an extension of that operation.
+mapOpToOp :: BottomUpRuleOp (Wise SOACS)
+
+mapOpToOp (_, used) pat aux1 e
+  | Just (map_pe, cs, w, BasicOp (Reshape newshape reshape_arr), [p], [arr]) <-
+      isMapWithOp pat e,
+    paramName p == reshape_arr,
+    not $ UT.isConsumed (patElemName map_pe) used =
+      certifying (stmAuxCerts aux1 <> cs) $ letBind_ pat $
+      BasicOp $ Reshape (DimCoercion w : newshape) arr
+
+  | Just (_, cs, _,
+          BasicOp (Concat d arr arrs dw), ps, outer_arr : outer_arrs) <-
+      isMapWithOp pat e,
+    (arr:arrs) == map paramName ps =
+      certifying (stmAuxCerts aux1 <> cs) $ letBind_ pat $
+      BasicOp $ Concat (d+1) outer_arr outer_arrs dw
+
+  | Just (map_pe, cs, _, BasicOp (Rotate rots rotate_arr), [p], [arr]) <-
+      isMapWithOp pat e,
+    paramName p == rotate_arr,
+    not $ UT.isConsumed (patElemName map_pe) used =
+      certifying (stmAuxCerts aux1 <> cs) $ letBind_ pat $
+      BasicOp $ Rotate (intConst Int32 0 : rots) arr
+
+mapOpToOp _ _ _ _ = cannotSimplify
+
+isMapWithOp :: PatternT attr
+            -> SOAC (Wise SOACS)
+            -> Maybe (PatElemT attr, Certificates, SubExp,
+                      AST.Exp (Wise SOACS), [ParamT Type], [VName])
+isMapWithOp pat e
+  | Pattern [] [map_pe] <- pat,
+    Map w map_lam arrs <- e,
+    [Let (Pattern [] [pe]) aux2 e'] <-
       stmsToList $ bodyStms $ lambdaBody map_lam,
     [Var r] <- bodyResult $ lambdaBody map_lam,
-    [p] <- lambdaParams map_lam,
-    paramName p == reshape_arr, r == patElemName pe,
-    not $ UT.isConsumed (patElemName map_pe) used =
-      certifying (stmAuxCerts aux1 <> stmAuxCerts aux2) $ letBind_ pat $
-      BasicOp $ Reshape (DimCoercion w : newshape) arr
-mapReshapeToReshape _ _ _ _ = cannotSimplify
+    r == patElemName pe =
+      Just (map_pe, stmAuxCerts aux2, w, e', lambdaParams map_lam, arrs)
+  | otherwise = Nothing
 
 -- | Some of the results of a reduction (or really: Redomap) may be
 -- dead.  We remove them here.  The trick is that we need to look at
