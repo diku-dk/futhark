@@ -233,20 +233,22 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
 
   -- Construct a record literal that closes over the environment of
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
-  -- closure representation.
+  -- closure representation.  Empty closure environments are omitted.
   env <- restrictEnvTo (freeVars e)
-  let (fields, env') = unzip $ map closureFromDynamicFun $ M.toList env
-  return (RecordLit fields loc, LambdaSV dims pat e0' $ M.fromList env')
+  let env' = M.map convertSV env
+      fields = map convertField . M.toList $ M.filter (not . emptySV) env
+  return (RecordLit fields loc, LambdaSV dims pat e0' env')
 
-  where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
+  where convertSV (DynamicFun (_, sv) _) = sv
+        convertSV sv = sv
+
+        convertField (vn, DynamicFun (clsr_env, _) _) =
           let name = nameFromString $ pretty vn
-          in (RecordFieldExplicit name clsr_env noLoc, (vn, sv))
-
-        closureFromDynamicFun (vn, sv) =
+          in RecordFieldExplicit name clsr_env noLoc
+        convertField (vn, sv) =
           let name = nameFromString $ pretty vn
               tp' = vacuousShapeAnnotations $ typeFromSV sv
-          in (RecordFieldExplicit name
-               (Var (qualName vn) (Info tp') noLoc) noLoc, (vn, sv))
+          in RecordFieldExplicit name (Var (qualName vn) (Info tp') noLoc) noLoc
 
 -- Operator sections are expected to be converted to lambda-expressions
 -- by the monomorphizer, so they should no longer occur at this point.
@@ -383,7 +385,7 @@ defuncSoacExp e
 
 etaExpand :: Exp -> DefM ([Pattern], Exp, StructType)
 etaExpand e = do
-  let (ps, ret) = getType $ typeOf e
+  let (ps, ret) = unfoldFunType $ typeOf e
   (pats, vars) <- fmap unzip . forM ps $ \t -> do
     x <- newNameFromString "x"
     let t' = vacuousShapeAnnotations t
@@ -395,10 +397,6 @@ etaExpand e = do
                      (Info (foldFunType argtypes (vacuousShapeAnnotations ret))) noLoc)
            e $ zip3 vars ps (drop 1 $ tails ps_st)
   return (pats, e', vacuousShapeAnnotations $ toStruct ret)
-
-  where getType (Arrow _ _ t1 t2) =
-          let (ps, r) = getType t2 in (t1 : ps, r)
-        getType t = ([], t)
 
 -- | Defunctionalize an indexing of a single array dimension.
 defuncDimIndex :: DimIndexBase Info VName -> DefM (DimIndexBase Info VName)
@@ -444,12 +442,12 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
           env_dim = envFromDimNames dims
       (e0', sv) <- localNewEnv (env' <> closure_env <> env_dim) $ defuncExp e0
 
-      let closure_pat = buildEnvPattern closure_env
+      let closure_pat = buildEnvPattern $ M.filter (not . emptySV) closure_env
           pat' = updatePattern pat sv2
 
       -- Inline certain trivial lifted functions immediately.  This is
       -- purely an optimisation to avoid having the rest of the
-      -- compiler spend a lot if time processing them (they will end
+      -- compiler spend a lot of time processing them (they will end
       -- up being inlined later anyway).  We also try to simplify away
       -- some let-bindings, to make the generated code look slightly
       -- more comprehensible.
@@ -476,11 +474,12 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
           inline (LetPat _ _ x y _) = inline x && inline y
           inline Negate{} = True
           inline _ = False
-      if inline e0' && null dims
+      if inline e0' && null dims && not (emptySV sv || emptySV sv1 || emptySV sv2)
         then return (letPat closure_pat e1' $ letPat pat' e2' e0', sv)
         else do
           -- Lift lambda to top-level function definition.
-          let params = [closure_pat, pat']
+          let params = map fst $ filter (not . emptySV . snd)
+                       [(closure_pat, sv1), (pat', sv2)]
               rettype = buildRetType closure_env params $ typeOf e0'
 
               -- Embed some information about the original function
@@ -492,15 +491,31 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
                 liftedName (i+1) f
               liftedName _ _ = "lifted"
           fname <- newNameFromString $ liftedName (0::Int) e1
-          liftValDec fname rettype dims params e0'
+
+          -- Skip lifting if the function only captures empty closure environments.
+          unless (emptySV sv) $
+            liftValDec fname rettype dims params e0'
 
           let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
               t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
               fname' = qualName fname
-          return (Parens (Apply (Apply (Var fname' (Info (Arrow mempty Nothing (fromStruct t1) $
-                                                          Arrow mempty Nothing (fromStruct t2) rettype)) loc)
-                                 e1' (Info Observe) (Info $ Arrow mempty Nothing (fromStruct t2) rettype) loc)
-                          e2' d (Info rettype) loc) noLoc, sv)
+
+          -- Exclude either of e1' and e2' if they only represent
+          -- empty closure environments.
+          let t1to = Arrow mempty Nothing (fromStruct t1)
+              t2to = Arrow mempty Nothing (fromStruct t2)
+              ftype | emptySV sv1, emptySV sv2 = rettype
+                    | emptySV sv1 = t2to rettype
+                    | emptySV sv2 = t1to rettype
+                    | otherwise   = t1to $ t2to rettype
+              apply_e = Var fname' (Info ftype) loc
+              res_e | emptySV sv1, emptySV sv2 = apply_e
+                    | emptySV sv1 = Apply apply_e e2' d (Info rettype) loc
+                    | emptySV sv2 = Apply apply_e e1' (Info Observe) (Info rettype) loc
+                    | otherwise   = Apply (Apply apply_e e1' (Info Observe)
+                                           (Info $ t2to rettype) loc)
+                                    e2' d (Info rettype) loc
+          return (res_e, sv)
 
     -- If e1 is a dynamic function, we just leave the application in place,
     -- but we update the types since it may be partially applied or return
@@ -635,7 +650,7 @@ buildRetType env pats = vacuousShapeAnnotations . descend
 -- | Compute the corresponding type for a given static value.
 typeFromSV :: StaticVal -> CompType
 typeFromSV (Dynamic tp)           = tp
-typeFromSV (LambdaSV _ _ _ env)   = typeFromEnv env
+typeFromSV (LambdaSV _ _ _ env)   = typeFromEnv $ M.filter (not . emptySV) env
 typeFromSV (RecordSV ls)          = Record $ M.fromList $ map (fmap typeFromSV) ls
 typeFromSV (DynamicFun (_, sv) _) = typeFromSV sv
 typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
@@ -713,6 +728,15 @@ updatePattern pat sv =
 svFromType :: CompType -> StaticVal
 svFromType (Record fs) = RecordSV . M.toList $ M.map svFromType fs
 svFromType t           = Dynamic t
+
+-- | Returns true if the closure environments contained within a given static
+-- value are empty or only contains other empty closure environments.
+emptySV :: StaticVal -> Bool
+emptySV (Dynamic _)          = False
+emptySV (LambdaSV _ _ _ env) = all emptySV $ M.elems env
+emptySV (RecordSV fields)    = all (emptySV . snd) fields
+emptySV (DynamicFun _ _)     = False
+emptySV IntrinsicSV          = False
 
 -- A set of names where we also track uniqueness.
 newtype NameSet = NameSet (M.Map VName Uniqueness)
