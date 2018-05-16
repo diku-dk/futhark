@@ -39,7 +39,6 @@ import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Monomorphise as Monomorphise
-import Futhark.Util (dropAt)
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
@@ -1229,37 +1228,33 @@ isOverloadedFunction qname args loc = do
           I.Reshape (reshapeOuter [DimNew k] 2 $ arrayShape arr_t) arr'
 
     handle [TupLit [x, y] _] "concat" = Just $ \desc -> do
-      let ys = [y]
-          i = 0
-      xs  <- internaliseExpToVars "concat_x" x
-      yss <- mapM (internaliseExpToVars "concat_y") ys
-      outer_size <- arraysSize i <$> mapM lookupType xs
+      xs <- internaliseExpToVars "concat_x" x
+      ys <- internaliseExpToVars "concat_y" y
+      outer_size <- arraysSize 0 <$> mapM lookupType xs
       let sumdims xsize ysize = letSubExp "conc_tmp" $ I.BasicOp $
                                 I.BinOp (I.Add I.Int32) xsize ysize
       ressize <- foldM sumdims outer_size =<<
-                 mapM (fmap (arraysSize i) . mapM lookupType) yss
+                 mapM (fmap (arraysSize 0) . mapM lookupType) [ys]
 
-      let conc xarr yarrs = do
+      let conc xarr yarr = do
             -- All dimensions except for dimension 'i' must match.
-            xt  <- lookupType xarr
-            yts <- mapM lookupType yarrs
+            xt <- lookupType xarr
+            yt <- lookupType yarr
             let matches n m =
                   letExp "match" =<<
                   eAssert (pure $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) n m)
                   "arguments do not have the same row shape" loc
-                x_inner_dims  = dropAt i 1 $ I.arrayDims xt
-                ys_inner_dims = map (dropAt i 1 . I.arrayDims) yts
-                updims = zipWith3 updims' [0..] (I.arrayDims xt)
-                updims' j xd yd | i == j    = yd
+                x_inner_dims = drop 1 $ I.arrayDims xt
+                y_inner_dims = drop 1 $ I.arrayDims yt
+                updims = zipWith3 updims' [(0::Int)..] (I.arrayDims xt)
+                updims' j xd yd | j == 0    = yd
                                 | otherwise = xd
-            matchcs <- asserting $ Certificates . concat <$>
-                       mapM (zipWithM matches x_inner_dims) ys_inner_dims
-            yarrs'  <- forM yarrs $ \yarr -> do
-              yt <- lookupType yarr
-              certifying matchcs $ letExp "concat_y_reshaped" $
-                shapeCoerce (updims $ I.arrayDims yt) yarr
-            return $ I.BasicOp $ I.Concat i xarr yarrs' ressize
-      letSubExps desc =<< zipWithM conc xs (transpose yss)
+            matchcs <- asserting $ Certificates <$>
+                       zipWithM matches x_inner_dims y_inner_dims
+            yarr' <- certifying matchcs $ letExp "concat_y_reshaped" $
+                     shapeCoerce (updims $ I.arrayDims yt) yarr
+            return $ I.BasicOp $ I.Concat 0 xarr [yarr'] ressize
+      letSubExps desc =<< zipWithM conc xs ys
 
     handle [TupLit [offset, e] _] "rotate" = Just $ \desc -> do
       offset' <- internaliseExp1 "rotation_offset" offset
