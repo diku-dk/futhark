@@ -97,7 +97,7 @@ entry test_update (xs: *[]i32) (i: i32) (x: i32) = update xs i x
 entry test_or (xs: []bool) = or xs
 
 -- ==
--- entry: test_or
+-- entry: test_and
 -- input { [true, true] }
 -- output { true }
 -- input { [true, false] }
