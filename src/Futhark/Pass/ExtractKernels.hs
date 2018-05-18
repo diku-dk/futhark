@@ -221,24 +221,24 @@ runDistribM (DistribM m) = do
 transformFunDef :: FunDef -> DistribM (Out.FunDef Out.Kernels)
 transformFunDef (FunDef entry name rettype params body) = do
   body' <- localScope (scopeOfFParams params) $
-           transformBody body
+           transformBody mempty body
   return $ FunDef entry name rettype params body'
 
-transformBody :: Body -> DistribM (Out.Body Out.Kernels)
-transformBody body = do bnds <- transformStms $ stmsToList $ bodyStms body
-                        return $ mkBody bnds $ bodyResult body
+transformBody :: KernelPath -> Body -> DistribM (Out.Body Out.Kernels)
+transformBody path body = do bnds <- transformStms path $ stmsToList $ bodyStms body
+                             return $ mkBody bnds $ bodyResult body
 
-transformStms :: [Stm] -> DistribM KernelsStms
-transformStms [] =
+transformStms :: KernelPath -> [Stm] -> DistribM KernelsStms
+transformStms _ [] =
   return mempty
-transformStms (bnd:bnds) =
+transformStms path (bnd:bnds) =
   sequentialisedUnbalancedStm bnd >>= \case
     Nothing -> do
-      bnd' <- transformStm bnd
+      bnd' <- transformStm path bnd
       inScopeOf bnd' $
-        (bnd'<>) <$> transformStms bnds
+        (bnd'<>) <$> transformStms path bnds
     Just bnds' ->
-      transformStms $ stmsToList bnds' <> bnds
+      transformStms path $ stmsToList bnds' <> bnds
 
 sequentialisedUnbalancedStm :: Stm -> DistribM (Maybe (Stms SOACS))
 sequentialisedUnbalancedStm (Let pat _ (Op soac@(Redomap _ _ _ lam2 _ _)))
@@ -254,17 +254,17 @@ scopeForSOACs = castScope
 scopeForKernels :: Scope SOACS -> Scope Out.Kernels
 scopeForKernels = castScope
 
-transformStm :: Stm -> DistribM KernelsStms
+transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 
-transformStm (Let pat aux (If c tb fb rt)) = do
-  tb' <- transformBody tb
-  fb' <- transformBody fb
+transformStm path (Let pat aux (If c tb fb rt)) = do
+  tb' <- transformBody path tb
+  fb' <- transformBody path fb
   return $ oneStm $ Let pat aux $ If c tb' fb' rt
 
-transformStm (Let pat aux (DoLoop ctx val form body)) =
+transformStm path (Let pat aux (DoLoop ctx val form body)) =
   localScope (castScope (scopeOf form) <>
               scopeOfFParams mergeparams) $
-    oneStm . Let pat aux . DoLoop ctx val form' <$> transformBody body
+    oneStm . Let pat aux . DoLoop ctx val form' <$> transformBody path body
   where mergeparams = map fst $ ctx ++ val
         form' = case form of
                   WhileLoop cond ->
@@ -272,28 +272,29 @@ transformStm (Let pat aux (DoLoop ctx val form body)) =
                   ForLoop i it bound ps ->
                     ForLoop i it bound ps
 
-transformStm (Let pat (StmAux cs _) (Op (Map w lam arrs))) =
-  distributeMap pat $ MapLoop cs w lam arrs
+transformStm path (Let pat (StmAux cs _) (Op (Map w lam arrs))) =
+  distributeMap path pat $ MapLoop cs w lam arrs
 
-transformStm (Let pat (StmAux cs _) (Op (Scanomap w lam1 lam2 nes arrs)))
+transformStm path (Let pat (StmAux cs _) (Op (Scanomap w lam1 lam2 nes arrs)))
   | lambdaContainsParallelism lam2 = do
       (mapbnd, redbnd) <- scanomapToMapAndReduce pat (w, lam1, lam2, nes, arrs)
-      transformStms [certify cs mapbnd, certify cs redbnd]
+      transformStms path [certify cs mapbnd, certify cs redbnd]
   | otherwise = do
       lam1_sequential <- Kernelise.transformLambda lam1
       lam2_sequential <- Kernelise.transformLambda lam2
       runBinder_ $ certifying cs $
         blockedScan pat w lam1_sequential lam2_sequential (intConst Int32 1) [] [] nes arrs
 
-transformStm (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs)))
+transformStm path (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs)))
   | not $ lambdaContainsParallelism lam2 = paralleliseOuter
 
   | incrementalFlattening = do
-      outer_stms <- outerParallelBody
-      inner_stms <- innerParallelBody
+      ((outer_suff, outer_suff_key), suff_stms) <-
+        runBinder $ sufficientParallelism "suff_outer_redomap" w path
 
-      (outer_suff, suff_stms) <-
-        runBinder $ sufficientParallelism "suff_outer_redomap" w
+      outer_stms <- outerParallelBody
+      inner_stms <- innerParallelBody ((outer_suff_key, False):path)
+
       (suff_stms<>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
 
   | otherwise = paralleliseOuter
@@ -307,25 +308,26 @@ transformStm (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs)))
     outerParallelBody = renameBody =<<
                         (mkBody <$> paralleliseOuter <*> pure (map Var (patternNames pat)))
 
-    paralleliseInner = do
+    paralleliseInner path' = do
       (mapbnd, redbnd) <- redomapToMapAndReduce pat (w, comm', lam1, lam2, nes, arrs)
-      transformStms [certify cs mapbnd, certify cs redbnd]
-    innerParallelBody = renameBody =<<
-                        (mkBody <$> paralleliseInner <*> pure (map Var (patternNames pat)))
+      transformStms path' [certify cs mapbnd, certify cs redbnd]
+    innerParallelBody path' =
+      renameBody =<<
+      (mkBody <$> paralleliseInner path' <*> pure (map Var (patternNames pat)))
 
     comm' | commutativeLambda lam1 = Commutative
           | otherwise              = comm
 
-transformStm (Let res_pat (StmAux cs _) (Op (Reduce w comm red_fun red_input)))
+transformStm path (Let res_pat (StmAux cs _) (Op (Reduce w comm red_fun red_input)))
   | Just do_irwim <- irwim res_pat w comm' red_fun red_input = do
       types <- asksScope scopeForSOACs
       bnds <- fst <$> runBinderT (simplifyStms =<< collectStms_ (certifying cs do_irwim)) types
-      transformStms $ stmsToList bnds
+      transformStms path $ stmsToList bnds
         where comm' | commutativeLambda red_fun = Commutative
                     | otherwise                 = comm
 
 
-transformStm (Let pat (StmAux cs _) (Op (Reduce w comm red_fun red_input))) = do
+transformStm _ (Let pat (StmAux cs _) (Op (Reduce w comm red_fun red_input))) = do
   red_fun_sequential <- Kernelise.transformLambda red_fun
   map_lam <- mkIdentityLambda $ lambdaReturnType red_fun
   fmap (certify cs) <$>
@@ -335,12 +337,12 @@ transformStm (Let pat (StmAux cs _) (Op (Reduce w comm red_fun red_input))) = do
               | otherwise                 = comm
 
 
-transformStm (Let res_pat (StmAux cs _) (Op (Scan w scan_fun scan_input)))
+transformStm path (Let res_pat (StmAux cs _) (Op (Scan w scan_fun scan_input)))
   | Just do_iswim <- iswim res_pat w scan_fun scan_input = do
       types <- asksScope scopeForSOACs
-      transformStms =<< (stmsToList . snd <$> runBinderT (certifying cs do_iswim) types)
+      transformStms path =<< (stmsToList . snd <$> runBinderT (certifying cs do_iswim) types)
 
-transformStm (Let pat (StmAux cs _) (Op (Scan w fun input))) = do
+transformStm _ (Let pat (StmAux cs _) (Op (Scan w fun input))) = do
   fun_sequential <- Kernelise.transformLambda fun
   map_lam <- mkIdentityLambda $ lambdaReturnType fun_sequential
   runBinder_ $ certifying cs $
@@ -349,26 +351,27 @@ transformStm (Let pat (StmAux cs _) (Op (Scan w fun input))) = do
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
-transformStm (Let pat (StmAux cs _) (Op (Stream w (Parallel _ _ _ []) map_fun arrs))) = do
+transformStm path (Let pat (StmAux cs _) (Op (Stream w (Parallel _ _ _ []) map_fun arrs))) = do
   -- No reduction part.  Remove the stream and leave the body
   -- parallel.  It will be distributed.
   types <- asksScope scopeForSOACs
-  transformStms =<<
+  transformStms path =<<
     (stmsToList . snd <$> runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types)
 
-transformStm (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs)))
+transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs)))
   | incrementalFlattening = do
-      outer_stms <- outerParallelBody
-      inner_stms <- innerParallelBody
+      ((outer_suff, outer_suff_key), suff_stms) <-
+        runBinder $ sufficientParallelism "suff_outer_stream" w path
 
-      (outer_suff, suff_stms) <-
-        runBinder $ sufficientParallelism "suff_outer_stream" w
+      outer_stms <- outerParallelBody ((outer_suff_key, True) : path)
+      inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
+
       (suff_stms<>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
 
-  | otherwise = paralleliseOuter
+  | otherwise = paralleliseOuter path
 
   where
-    paralleliseOuter
+    paralleliseOuter path'
       | any (not . primType) $ lambdaReturnType red_fun = do
           -- Split into a chunked map and a reduction, with the latter
           -- further transformed.
@@ -385,7 +388,7 @@ transformStm (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_fun n
 
           ((map_misc_bnds<>oneStm map_bnd)<>) <$>
             inScopeOf (map_misc_bnds<>oneStm map_bnd)
-            (transformStm $ Let red_pat aux $
+            (transformStm path' $ Let red_pat aux $
              Op (Reduce num_threads comm' red_fun red_input))
 
       | otherwise = do
@@ -394,27 +397,30 @@ transformStm (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_fun n
           fmap (certify cs) <$>
             blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential [] nes arrs
 
-    outerParallelBody = renameBody =<<
-                        (mkBody <$> paralleliseOuter <*> pure (map Var (patternNames pat)))
+    outerParallelBody path' =
+      renameBody =<<
+      (mkBody <$> paralleliseOuter path' <*> pure (map Var (patternNames pat)))
 
-    paralleliseInner = do
+    paralleliseInner path' = do
       types <- asksScope scopeForSOACs
-      transformStms . fmap (certify cs) =<<
+      transformStms path' . fmap (certify cs) =<<
         (stmsToList . snd <$> runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types)
-    innerParallelBody = renameBody =<<
-                        (mkBody <$> paralleliseInner <*> pure (map Var (patternNames pat)))
+
+    innerParallelBody path' =
+      renameBody =<<
+      (mkBody <$> paralleliseInner path' <*> pure (map Var (patternNames pat)))
 
     comm' | commutativeLambda red_fun, o /= InOrder = Commutative
           | otherwise                               = comm
 
-transformStm (Let pat _ (Op (Stream w (Sequential nes) fold_fun arrs))) = do
+transformStm path (Let pat _ (Op (Stream w (Sequential nes) fold_fun arrs))) = do
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   types <- asksScope scopeForSOACs
-  transformStms =<<
+  transformStms path =<<
     (stmsToList . snd <$> runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types)
 
-transformStm (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ $ do
+transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ $ do
   lam' <- Kernelise.transformLambda lam
   write_i <- newVName "write_i"
   let (as_ws, as_ns, as_vs) = unzip3 as
@@ -431,7 +437,7 @@ transformStm (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ $ 
     addStms bnds
     letBind_ pat $ Op kernel
 
-transformStm bnd =
+transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
 
 data MapLoop = MapLoop Certificates SubExp Lambda [VName]
@@ -440,38 +446,42 @@ mapLoopExp :: MapLoop -> Exp
 mapLoopExp (MapLoop _ w lam arrs) = Op $ Map w lam arrs
 
 sufficientParallelism :: (Op (Lore m) ~ Kernel innerlore, MonadBinder m) =>
-                         String -> SubExp -> m SubExp
-sufficientParallelism desc = cmpSizeLe desc Out.SizeThreshold
+                         String -> SubExp -> KernelPath -> m (SubExp, VName)
+sufficientParallelism desc what path = cmpSizeLe desc (Out.SizeThreshold path) what
 
 distributeMap :: (HasScope Out.Kernels m,
                   MonadFreshNames m, MonadLogger m) =>
-                 Pattern -> MapLoop -> m KernelsStms
-distributeMap pat (MapLoop cs w lam arrs) = do
+                 KernelPath -> Pattern -> MapLoop -> m KernelsStms
+distributeMap path pat (MapLoop cs w lam arrs) = do
   types <- askScope
   let loopnest = MapNesting pat cs w $ zip (lambdaParams lam) arrs
-      env = KernelEnv { kernelNest =
-                        singleNesting (Nesting mempty loopnest)
-                      , kernelScope =
-                        scopeForKernels (scopeOf lam) <> types
-                      }
-  (acc', postkernels) <- runKernelM env $
-    distribute =<< distributeMapBodyStms acc (stmsToList $ bodyStms $ lambdaBody lam)
+      env path' = KernelEnv { kernelNest =
+                                singleNesting (Nesting mempty loopnest)
+                            , kernelScope =
+                                scopeForKernels (scopeOf lam) <> types
+                            , kernelPath =
+                                path'
+                            }
+      exploitInnerParallelism path' = do
+        (acc', postkernels) <- runKernelM (env path') $
+          distribute =<< distributeMapBodyStms acc (stmsToList $ bodyStms $ lambdaBody lam)
 
-  -- There may be a few final targets remaining - these correspond to
-  -- arrays that are identity mapped, and must have statements
-  -- inserted here.
-  let par_stms = postKernelsStms postkernels <>
-                 identityStms (outerTarget $ kernelTargets acc')
+        -- There may be a few final targets remaining - these correspond to
+        -- arrays that are identity mapped, and must have statements
+        -- inserted here.
+        return $ postKernelsStms postkernels <>
+          identityStms (outerTarget $ kernelTargets acc')
 
-  if not incrementalFlattening then return par_stms
+  if not incrementalFlattening then exploitInnerParallelism path
     else do
-    seq_stms <- do
-      soactypes <- asksScope scopeForSOACs
-      (seq_lam, _) <- runBinderT (Kernelise.transformLambda lam) soactypes
-      fmap (postKernelsStms . snd) $ runKernelM env $ distribute $
-        addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
 
-    distributeMap' (newKernel loopnest) seq_stms par_stms pat w lam
+    let exploitOuterParallelism path' = do
+          soactypes <- asksScope scopeForSOACs
+          (seq_lam, _) <- runBinderT (Kernelise.transformLambda lam) soactypes
+          fmap (postKernelsStms . snd) $ runKernelM (env path') $ distribute $
+            addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
+
+    distributeMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat w lam
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                           , kernelStms = mempty
                           }
@@ -486,26 +496,28 @@ distributeMap pat (MapLoop cs w lam arrs) = do
             Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Replicate (Shape [w]) se
 
 distributeMap' :: (HasScope Out.Kernels m, MonadFreshNames m) =>
-                  KernelNest
-               -> Out.Stms Out.Kernels
-               -> Out.Stms Out.Kernels
+                  KernelNest -> KernelPath
+               -> (KernelPath -> m (Out.Stms Out.Kernels))
+               -> (KernelPath -> m (Out.Stms Out.Kernels))
                -> PatternT Type
                -> SubExp
                -> LambdaT SOACS
                -> m (Out.Stms Out.Kernels)
-distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
+distributeMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
   let res = map Var $ patternNames pat
 
   types <- askScope
-  (outer_suff, outer_suff_stms) <- runBinder $
-    sufficientParallelism "suff_outer_par" nest_w
+  ((outer_suff, outer_suff_key), outer_suff_stms) <- runBinder $
+    sufficientParallelism "suff_outer_par" nest_w path
 
   intra <- if worthIntraGroup lam then
              flip runReaderT types $ intraGroupParallelise loopnest lam
            else return Nothing
 
-  seq_body <- renameBody $ mkBody seq_stms res
-  par_body <- renameBody $ mkBody par_stms res
+  seq_body <- renameBody =<< mkBody <$>
+              mk_seq_stms ((outer_suff_key, True) : path) <*> pure res
+  par_body <- renameBody =<< mkBody <$>
+              mk_par_stms ((outer_suff_key, False) : path) <*> pure res
   let seq_alts = [(outer_suff, seq_body) | worthSequentialising lam]
 
   case intra of
@@ -523,7 +535,8 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
           letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w intra_avail_par
         fits <- letSubExp "fits" $ BasicOp $
                 CmpOp (CmpSle Int32) group_size max_group_size
-        suff <- sufficientParallelism "suff_intra_par" group_available_par
+        (suff, _suff_key) <- sufficientParallelism "suff_intra_par" group_available_par $
+                             (outer_suff_key, False) : path
         -- Avoid tiny workgroups.  TODO: this should be a tunable parameter.
         group_large_enough <- letSubExp "group_large_enough" $
           BasicOp $ CmpOp (CmpSle Int32) (intConst Int32 32) intra_avail_par
@@ -537,6 +550,7 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
 
 data KernelEnv = KernelEnv { kernelNest :: Nestings
                            , kernelScope :: Scope Out.Kernels
+                           , kernelPath :: KernelPath
                            }
 
 data KernelAcc = KernelAcc { kernelTargets :: Targets
@@ -611,6 +625,12 @@ collectKernels m = pass $ do
   (x, res) <- listen m
   return ((x, accPostKernels res),
           const res { accPostKernels = mempty })
+
+collectKernels_ :: KernelM () -> KernelM PostKernels
+collectKernels_ = fmap snd . collectKernels
+
+localPath :: KernelPath -> KernelM a -> KernelM a
+localPath path = local $ \env -> env { kernelPath = path }
 
 addKernels :: PostKernels -> KernelM ()
 addKernels ks = tell $ mempty { accPostKernels = ks }
@@ -783,11 +803,17 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
           lam_res' = rearrangeShape perm lam_res
           nest' = pushInnerKernelNesting (pat, lam_res') map_nesting nest
           extra_scope = targetsScope $ kernelTargets acc'
-      (_, distributed_kernels) <- collectKernels $
-        localScope extra_scope $ inNesting nest' $
-        distribute =<< leavingNesting maploop =<< distribute =<<
-        distributeMapBodyStms def_acc (stmsToList lam_bnds)
 
+          exploitInnerParallelism path' =
+            fmap postKernelsStms $ collectKernels_ $ localPath path' $
+            localScope extra_scope $ inNesting nest' $ void $
+            distribute =<< leavingNesting maploop =<< distribute =<<
+            distributeMapBodyStms def_acc (stmsToList lam_bnds)
+
+      -- XXX: we do not construct a new KernelPath when
+      -- sequentialising.  This is only OK as long as further
+      -- versioning does not take place down that branch (it currently
+      -- does not).
       (nestw_bnds, nestw, sequentialised_kernel) <- localScope extra_scope $ do
         sequentialised_map_body <-
           localScope (scopeOfLParams (lambdaParams lam)) $ runBinder_ $
@@ -797,10 +823,11 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
         constructKernel nest' kbody
 
       let outer_pat = loopNestingPattern $ fst nest
+      path <- asks kernelPath
       addKernel =<< (nestw_bnds<>) <$>
-        localScope extra_scope (distributeMap' nest'
-                                (oneStm sequentialised_kernel)
-                                (postKernelsStms distributed_kernels)
+        localScope extra_scope (distributeMap' nest' path
+                                (const $ return $ oneStm sequentialised_kernel)
+                                exploitInnerParallelism
                                 outer_pat nestw
                                 lam { lambdaBody = (lambdaBody lam) { bodyResult = lam_res' }})
 
@@ -871,7 +898,8 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
                   (interchangeLoops nest' (SeqLoop perm pat val form body)) types
           -- runDistribM starts out with an empty scope, so we have to
           -- immmediately insert the real one.
-          bnds' <- runDistribM $ localScope scope $ transformStms $ stmsToList bnds
+          path <- asks kernelPath
+          bnds' <- runDistribM $ localScope scope $ transformStms path $ stmsToList bnds
           addKernel bnds'
           return acc'
     _ ->
@@ -897,7 +925,8 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             -- runDistribM starts out with an empty scope, so we have to
             -- immmediately insert the real one.
             scope <- askScope
-            stms' <- runDistribM $ localScope scope $ transformStms $ stmsToList stms
+            path <- asks kernelPath
+            stms' <- runDistribM $ localScope scope $ transformStms path $ stmsToList stms
             addKernel stms'
             return acc'
       _ ->

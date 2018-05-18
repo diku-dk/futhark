@@ -49,10 +49,11 @@ getSize desc size_class = do
   letSubExp desc $ Op $ GetSize size_key size_class
 
 cmpSizeLe :: (MonadBinder m, Op (Lore m) ~ Kernel innerlore) =>
-           String -> SizeClass -> SubExp -> m SubExp
+           String -> SizeClass -> SubExp -> m (SubExp, VName)
 cmpSizeLe desc size_class to_what = do
   size_key <- newVName desc
-  letSubExp desc $ Op $ CmpSizeLe size_key size_class to_what
+  cmp_res <- letSubExp desc $ Op $ CmpSizeLe size_key size_class to_what
+  return (cmp_res, size_key)
 
 blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                           Pattern Kernels
