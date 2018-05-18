@@ -35,11 +35,13 @@ compileProg =
           new_cfg <- GC.publicName "context_config_new"
           free_cfg <- GC.publicName "context_config_free"
           cfg_set_debugging <- GC.publicName "context_config_set_debugging"
+          cfg_set_logging <- GC.publicName "context_config_set_logging"
 
           GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg;|]
           GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg* $id:new_cfg();|]
           GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg);|]
           GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag);|]
+          GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int flag);|]
 
           GC.libDecl [C.cedecl|struct $id:cfg {
                                  int debugging;
@@ -57,6 +59,10 @@ compileProg =
                                }|]
           GC.libDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int detail) {
                                  cfg->debugging = detail;
+                               }|]
+          GC.libDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int detail) {
+                                 /* Does nothing for this backend. */
+                                 cfg = cfg; detail=detail;
                                }|]
 
           ctx <- GC.publicName "context"
