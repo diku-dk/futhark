@@ -111,10 +111,12 @@ let range (start: i32) (end: i32) (step: i32): []i32 =
   let w = (end-start)/step
   in steps start w step
 
--- | True if all of the input elements are true.
+-- | True if all of the input elements are true.  Produces true on an
+-- empty array.
 let and: []bool -> bool = all id
 
--- | True if any of the input elements are true.
+-- | True if any of the input elements are true.  Produces false on an
+-- empty array.
 let or: []bool -> bool = any id
 
 let pick [n] 't (flags: [n]bool) (xs: [n]t) (ys: [n]t): *[n]t =

@@ -1,3 +1,5 @@
+-- Tests of various array functions from the basis library.
+
 import "/futlib/array"
 
 -- ==
@@ -80,6 +82,32 @@ entry test_reverse (x: [][]i32) = reverse x
 -- input { [1,2,3] 3 4 } error: failed
 
 entry test_update (xs: *[]i32) (i: i32) (x: i32) = update xs i x
+
+-- ==
+-- entry: test_or
+-- input { [true, true] }
+-- output { true }
+-- input { [true, false] }
+-- output { true }
+-- input { [false, false] }
+-- output { false }
+-- input { empty(bool) }
+-- output { false }
+
+entry test_or (xs: []bool) = or xs
+
+-- ==
+-- entry: test_or
+-- input { [true, true] }
+-- output { true }
+-- input { [true, false] }
+-- output { false }
+-- input { [false, false] }
+-- output { false }
+-- input { empty(bool) }
+-- output { true }
+
+entry test_and (xs: []bool) = and xs
 
 -- ==
 -- entry: test_pick
