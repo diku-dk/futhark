@@ -56,6 +56,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   new_cfg <- GC.publicName "context_config_new"
   free_cfg <- GC.publicName "context_config_free"
   cfg_set_debugging <- GC.publicName "context_config_set_debugging"
+  cfg_set_logging <- GC.publicName "context_config_set_logging"
   cfg_set_device <- GC.publicName "context_config_set_device"
   cfg_set_platform <- GC.publicName "context_config_set_platform"
   cfg_dump_program_to <- GC.publicName "context_config_dump_program_to"
@@ -70,6 +71,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg* $id:new_cfg();|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int flag);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_device(struct $id:cfg* cfg, const char *s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_platform(struct $id:cfg* cfg, const char *s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_dump_program_to(struct $id:cfg* cfg, const char *path);|]
@@ -105,7 +107,10 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          free(cfg);
                        }|]
   GC.libDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag) {
-                         cfg->opencl.debugging = flag;
+                         cfg->opencl.logging = cfg->opencl.debugging = flag;
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int flag) {
+                         cfg->opencl.logging = flag;
                        }|]
   GC.libDecl [C.cedecl|void $id:cfg_set_device(struct $id:cfg* cfg, const char *s) {
                          set_preferred_device(&cfg->opencl, s);
@@ -161,6 +166,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.libDecl [C.cedecl|struct $id:ctx {
                          int detail_memory;
                          int debugging;
+                         int logging;
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
                          struct opencl_context opencl;
@@ -180,6 +186,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           }
                           ctx->detail_memory = cfg->opencl.debugging;
                           ctx->debugging = cfg->opencl.debugging;
+                          ctx->logging = cfg->opencl.logging;
                           ctx->opencl.cfg = cfg->opencl;
                           $stms:init_fields
                           $stms:ctx_opencl_inits

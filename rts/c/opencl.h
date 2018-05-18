@@ -12,6 +12,7 @@
 
 struct opencl_config {
   int debugging;
+  int logging;
   int preferred_device_num;
   const char *preferred_platform;
   const char *preferred_device;
@@ -40,6 +41,7 @@ void opencl_config_init(struct opencl_config *cfg,
                         size_t *size_values,
                         const char *size_classes[]) {
   cfg->debugging = 0;
+  cfg->logging = 0;
   cfg->preferred_device_num = 0;
   cfg->preferred_platform = "";
   cfg->preferred_device = "";
@@ -508,7 +510,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
 
   struct opencl_device_option device_option = get_preferred_device(&ctx->cfg);
 
-  if (ctx->cfg.debugging) {
+  if (ctx->cfg.logging) {
     describe_device_option(device_option);
   }
 
@@ -597,7 +599,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
-  if (ctx->cfg.debugging) {
+  if (ctx->cfg.logging) {
     fprintf(stderr, "Lockstep width: %d\n", (int)ctx->lockstep_width);
     fprintf(stderr, "Default group size: %d\n", (int)ctx->cfg.default_group_size);
     fprintf(stderr, "Default number of groups: %d\n", (int)ctx->cfg.default_num_groups);
