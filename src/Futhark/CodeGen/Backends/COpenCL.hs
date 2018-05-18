@@ -251,7 +251,7 @@ callKernel (GetSize v key) =
 callKernel (CmpSizeLe v key x) = do
   x' <- GC.compileExp x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
-  GC.stm [C.cstm|if (ctx->debugging) {
+  GC.stm [C.cstm|if (ctx->logging) {
     fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
     }|]
 callKernel (GetSizeMax v size_class) =

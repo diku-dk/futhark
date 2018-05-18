@@ -1191,6 +1191,11 @@ benchmarkOptions =
             , optionArgument = NoArgument
             , optionAction = [C.cstm|futhark_context_config_set_debugging(cfg, 1);|]
             }
+   , Option { optionLongName = "log"
+            , optionShortName = Just 'L'
+            , optionArgument = NoArgument
+            , optionAction = [C.cstm|futhark_context_config_set_logging(cfg, 1);|]
+            }
    , Option { optionLongName = "entry-point"
             , optionShortName = Just 'e'
             , optionArgument = RequiredArgument
