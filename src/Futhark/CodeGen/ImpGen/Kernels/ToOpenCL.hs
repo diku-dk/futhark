@@ -197,6 +197,8 @@ openClCode kernels =
 
 genOpenClPrelude :: OpenClRequirements -> [C.Definition]
 genOpenClPrelude (OpenClRequirements ts consts) =
+  -- Clang-based OpenCL implementations need this for 'static' to work.
+  [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable")|] :
   [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64] ++
   [C.cunit|
 /* Some OpenCL programs dislike empty progams, or programs with no kernels.
