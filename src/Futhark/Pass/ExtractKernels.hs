@@ -513,20 +513,20 @@ distributeMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
   intra <- if worthIntraGroup lam then
              flip runReaderT types $ intraGroupParallelise loopnest lam
            else return Nothing
-
   seq_body <- renameBody =<< mkBody <$>
               mk_seq_stms ((outer_suff_key, True) : path) <*> pure res
-  par_body <- renameBody =<< mkBody <$>
-              mk_par_stms ((outer_suff_key, False) : path) <*> pure res
   let seq_alts = [(outer_suff, seq_body) | worthSequentialising lam]
 
   case intra of
-    Nothing ->
+    Nothing -> do
+      par_body <- renameBody =<< mkBody <$>
+                  mk_par_stms ((outer_suff_key, False) : path) <*> pure res
+
       (outer_suff_stms<>) <$> kernelAlternatives pat par_body seq_alts
 
     Just (intra_avail_par, group_size, intra_prelude, intra_stms) -> do
       -- We must check that all intra-group parallelism fits in a group.
-      (intra_ok, intra_suff_stms) <- runBinder $ do
+      ((intra_ok, intra_suff_key), intra_suff_stms) <- runBinder $ do
         addStms intra_prelude
 
         max_group_size <-
@@ -535,15 +535,21 @@ distributeMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
           letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w intra_avail_par
         fits <- letSubExp "fits" $ BasicOp $
                 CmpOp (CmpSle Int32) group_size max_group_size
-        (suff, _suff_key) <- sufficientParallelism "suff_intra_par" group_available_par $
-                             (outer_suff_key, False) : path
+        (suff, suff_key) <- sufficientParallelism "suff_intra_par" group_available_par $
+                            (outer_suff_key, False) : path
         -- Avoid tiny workgroups.  TODO: this should be a tunable parameter.
         group_large_enough <- letSubExp "group_large_enough" $
           BasicOp $ CmpOp (CmpSle Int32) (intConst Int32 32) intra_avail_par
         intra_suff <- letSubExp "intra_suff" $ BasicOp $ BinOp LogAnd group_large_enough suff
-        letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
+        intra_ok <- letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
+        return (intra_ok, suff_key)
 
       group_par_body <- renameBody $ mkBody intra_stms res
+
+      par_body <- renameBody =<< mkBody <$>
+                  mk_par_stms ([(outer_suff_key, False),
+                                (intra_suff_key, False)]
+                                ++ path) <*> pure res
 
       ((outer_suff_stms<>intra_suff_stms)<>) <$>
         kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
