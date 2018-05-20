@@ -560,16 +560,16 @@ static cl_program setup_opencl(struct opencl_context *ctx,
     size_t *size_value = &ctx->cfg.size_values[i];
     const char* size_name = ctx->cfg.size_names[i];
     size_t max_value, default_value;
-    if (strcmp(size_class, "group_size") == 0) {
+    if (strstr(size_class, "group_size") == size_class) {
       max_value = max_group_size;
       default_value = ctx->cfg.default_group_size;
-    } else if (strcmp(size_class, "num_groups") == 0) {
+    } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = max_group_size; // Futhark assumes this constraint.
       default_value = ctx->cfg.default_num_groups;
-    } else if (strcmp(size_class, "tile_size") == 0) {
+    } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = sqrt(max_group_size);
       default_value = ctx->cfg.default_tile_size;
-    } else if (strcmp(size_class, "threshold") == 0) {
+    } else if (strstr(size_class, "threshold") == size_class) {
       max_value = 0; // No limit.
       default_value = ctx->cfg.default_threshold;
     } else {
