@@ -149,7 +149,7 @@ def initialise_opencl_object(self,
         elif v['class'] == 'tile_size':
             max_value = max_tile_size
             default_value = default_tile_size
-        elif v['class'] == 'threshold':
+        elif v['class'].startswith('threshold'):
             max_value = None
             default_value = default_threshold
         else:
