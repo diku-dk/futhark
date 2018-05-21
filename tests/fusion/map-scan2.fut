@@ -6,7 +6,7 @@
 --   [-1, -1, 0, 2, 5, 9, 14]
 -- }
 -- structure {
---   Scanomap 1
+--   Screma 1
 -- }
 let main(a: []i32): []i32 =
   let (_,b) = unzip(map (\(x: i32): (i32,i32)  -> (x+2,x-2)) a)

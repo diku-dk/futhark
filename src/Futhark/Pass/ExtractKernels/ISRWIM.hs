@@ -35,7 +35,6 @@ iswim res_pat w scan_fun scan_input
           map_params = map removeParamOuterDim scan_acc_params ++
                        map (setParamOuterDimTo w) scan_elem_params
           map_rettype = map (setOuterDimTo w) $ lambdaReturnType scan_fun
-          map_fun' = Lambda map_params map_body map_rettype
 
           scan_params = lambdaParams map_fun
           scan_body = lambdaBody map_fun
@@ -43,16 +42,20 @@ iswim res_pat w scan_fun scan_input
           scan_fun' = Lambda scan_params scan_body scan_rettype
           scan_input' = map (first Var) $
                         uncurry zip $ splitAt (length arrs') $ map paramName map_params
+          (nes', scan_arrs) = unzip scan_input'
 
-          map_body = mkBody (oneStm $ Let (setPatternOuterDimTo w map_pat) (defAux ()) $
-                             Op $ Scan w scan_fun' scan_input') $
+      scan_soac <- scanSOAC scan_fun' nes'
+      let map_body = mkBody (oneStm $ Let (setPatternOuterDimTo w map_pat) (defAux ()) $
+                             Op $ Screma w scan_soac scan_arrs) $
                             map Var $ patternNames map_pat
+          map_fun' = Lambda map_params map_body map_rettype
 
       res_pat' <- fmap (basicPattern []) $
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
                   patternValueIdents res_pat
 
-      addStm $ Let res_pat' (StmAux map_cs ()) $ Op $ Map map_w map_fun' map_arrs'
+      addStm $ Let res_pat' (StmAux map_cs ()) $ Op $ Screma map_w
+        (ScremaForm (nilFn, mempty) (mempty, nilFn, mempty) map_fun') map_arrs'
 
       forM_ (zip (patternValueIdents res_pat)
                  (patternValueIdents res_pat')) $ \(to, from) -> do
@@ -97,17 +100,18 @@ irwim res_pat w comm red_fun red_input
 
       map_body <-
         case irwim red_pat w comm red_fun' red_input' of
-          Nothing ->
+          Nothing -> do
+            reduce_soac <- reduceSOAC comm red_fun' $ map fst red_input'
             return $ mkBody (oneStm $ Let red_pat (defAux ()) $
-                              Op $ Reduce w comm red_fun' red_input') $
-            map Var $ patternNames map_pat
+                              Op $ Screma w reduce_soac $ map snd red_input') $
+              map Var $ patternNames map_pat
           Just m -> localScope (scopeOfLParams map_params) $ do
             map_body_bnds <- collectStms_ m
             return $ mkBody map_body_bnds $ map Var $ patternNames map_pat
 
       let map_fun' = Lambda map_params map_body map_rettype
 
-      addStm $ Let res_pat (StmAux map_cs ()) $ Op $ Map map_w map_fun' arrs'
+      addStm $ Let res_pat (StmAux map_cs ()) $ Op $ Screma map_w (mapSOAC map_fun') arrs'
   | otherwise = Nothing
 
 rwimPossible :: Lambda
@@ -117,7 +121,8 @@ rwimPossible fun
     [bnd] <- stmsToList stms, -- Body has a single binding
     map_pat <- stmPattern bnd,
     map Var (patternNames map_pat) == res, -- Returned verbatim
-    Op (Map map_w map_fun map_arrs) <- stmExp bnd,
+    Op (Screma map_w form map_arrs) <- stmExp bnd,
+    Just map_fun <- isMapSOAC form,
     map paramName (lambdaParams fun) == map_arrs =
       Just (map_pat, stmCerts bnd, map_w, map_fun)
   | otherwise =

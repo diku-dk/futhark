@@ -6,7 +6,7 @@
 -- output {
 --   [[5, 7, 9], [16, 20, 24], [24, 30, 36]]
 -- }
--- structure { Map 2 Scan 1 }
+-- structure { /Screma 1 }
 let main(input1: [][]i32, input2: [][]i32): [][]i32 =
   let input = map(\(r1: []i32, r2: []i32): [](i32,i32)  ->
                     zip r1 r2) (zip input1 input2)

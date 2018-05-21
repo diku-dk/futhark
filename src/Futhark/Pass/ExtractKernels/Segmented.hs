@@ -13,6 +13,7 @@ import Data.Semigroup ((<>))
 
 import Futhark.Transform.Rename
 import Futhark.Representation.Kernels
+import Futhark.Representation.SOACS.SOAC (nilFn)
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -883,6 +884,6 @@ regularSegmentedScan segment_size pat w lam map_lam ispace inps nes arrs = do
                                           (arrayOf (Prim Bool) (Shape [w]) NoUniqueness) :
                                           patternValueElements pat
                  }
-  void $ blockedScan pat' w lam' map_lam' segment_size ispace inps (false:nes) (flags:arrs)
+  void $ blockedScan pat' w (lam', false:nes) (Commutative, nilFn, mempty) map_lam' segment_size ispace inps (flags:arrs)
   where zero = constant (0 :: Int32)
         false = constant False

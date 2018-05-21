@@ -6,8 +6,10 @@ module Futhark.Tools
 
   , nonuniqueParams
   , redomapToMapAndReduce
-  , scanomapToMapAndReduce
+  , scanomapToMapAndScan
+  , dissectScrema
   , sequentialStreamWholeArray
+
   , partitionChunkedFoldParameters
   , partitionChunkedKernelLambdaParameters
   , partitionChunkedKernelFoldParameters
@@ -26,6 +28,7 @@ import Futhark.Representation.SOACS.SOAC
 import Futhark.MonadFreshNames
 import Futhark.Construct
 import Futhark.Analysis.PrimExp.Convert
+import Futhark.Util
 
 nonuniqueParams :: (MonadFreshNames m, Bindable lore, HasScope lore m, BinderOps lore) =>
                    [LParam lore] -> m ([LParam lore], Stms lore)
@@ -58,29 +61,32 @@ redomapToMapAndReduce (Pattern [] patelems)
                       (w, comm, redlam, map_lam, accs, arrs) = do
   (map_pat, red_pat, red_args) <-
     splitScanOrRedomap patelems w map_lam accs
-  let map_bnd = mkLet [] map_pat $ Op $ Map w map_lam arrs
-      red_bnd = Let red_pat (defAux ()) $ Op $ Reduce w comm redlam red_args
+  let map_bnd = mkLet [] map_pat $ Op $ Screma w (mapSOAC map_lam) arrs
+      (nes, red_arrs) = unzip red_args
+  red_bnd <- Let red_pat (defAux ()) . Op <$>
+             (Screma w <$> reduceSOAC comm redlam nes <*> pure red_arrs)
   return (map_bnd, red_bnd)
 redomapToMapAndReduce _ _ =
   error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
 
 -- | Like 'redomapToMapAndReduce', but for 'Scanomap'.
-scanomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
+scanomapToMapAndScan :: (MonadFreshNames m, Bindable lore,
                           ExpAttr lore ~ (), Op lore ~ SOAC lore) =>
-                         Pattern lore
-                      -> ( SubExp
-                         , LambdaT lore, LambdaT lore, [SubExp]
-                         , [VName])
-                      -> m (Stm lore, Stm lore)
-scanomapToMapAndReduce (Pattern [] patelems)
-                      (w, scanlam, map_lam, accs, arrs) = do
+                        Pattern lore
+                     -> ( SubExp
+                        , LambdaT lore, LambdaT lore, [SubExp]
+                        , [VName])
+                     -> m (Stm lore, Stm lore)
+scanomapToMapAndScan (Pattern [] patelems) (w, scanlam, map_lam, accs, arrs) = do
   (map_pat, scan_pat, scan_args) <-
     splitScanOrRedomap patelems w map_lam accs
-  let map_bnd = mkLet [] map_pat $ Op $ Map w map_lam arrs
-      scan_bnd = Let scan_pat (defAux ()) $ Op $ Scan w scanlam scan_args
+  let map_bnd = mkLet [] map_pat $ Op $ Screma w (mapSOAC map_lam) arrs
+      (nes, scan_arrs) = unzip scan_args
+  scan_bnd <- Let scan_pat (defAux ()) . Op <$>
+              (Screma w <$> scanSOAC scanlam nes <*> pure scan_arrs)
   return (map_bnd, scan_bnd)
-scanomapToMapAndReduce _ _ =
-  error "scanomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
+scanomapToMapAndScan _ _ =
+  error "scanomapToMapAndScan does not handle a non-empty 'patternContextElements'"
 
 splitScanOrRedomap :: (Typed attr, MonadFreshNames m) =>
                       [PatElemT attr]
@@ -98,6 +104,32 @@ splitScanOrRedomap patelems w map_lam accs = do
     accMapPatElem pe acc_t =
       newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w
     arrMapPatElem = return . patElemIdent
+
+-- | Turn a Screma into simpler Scremas that are all simple scans,
+-- reduces, and maps.  This is used to handle Scremas that are so
+-- complicated that we cannot directly generate efficient parallel
+-- code for them.  In essense, what happens is the opposite of
+-- horisontal fusion.
+dissectScrema :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
+                    Bindable (Lore m)) =>
+                   Pattern (Lore m) -> SubExp -> ScremaForm (Lore m) -> [VName]
+                -> m ()
+dissectScrema pat w (ScremaForm (scan_lam, scan_nes)
+                                    (comm, red_lam, red_nes)
+                                    map_lam) arrs = do
+  let (scan_res, red_res, map_res) = splitAt3 (length scan_nes) (length red_nes) $
+                                     patternNames pat
+  -- First we perform the Map, then we perform the Reduce, and finally
+  -- the Scan.
+  to_scan <- replicateM (length scan_nes) $ newVName "to_scan"
+  to_red <- replicateM (length red_nes) $ newVName "to_red"
+  letBindNames_ (to_scan <> to_red <> map_res) $ Op $ Screma w (mapSOAC map_lam) arrs
+
+  reduce <- reduceSOAC comm red_lam red_nes
+  letBindNames_ red_res $ Op $ Screma w reduce to_red
+
+  scan <- scanSOAC scan_lam scan_nes
+  letBindNames_ scan_res $ Op $ Screma w scan to_scan
 
 sequentialStreamWholeArrayStms :: Bindable lore =>
                                   SubExp -> [SubExp]

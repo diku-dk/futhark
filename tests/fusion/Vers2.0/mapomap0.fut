@@ -8,7 +8,7 @@
 --   [3.0, -7.0, -3.8]
 -- }
 -- structure {
---      Map 1
+--      Screma 1
 -- }
 --
 let main(arr: []f64): ([]f64,[]f64,[]f64) =

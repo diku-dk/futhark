@@ -269,6 +269,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
           pprLoopVar (p,a) = ppr p <+> text "in" <+> ppr a
 
 instance PrettyLore lore => Pretty (Lambda lore) where
+  ppr (Lambda [] _ []) = text "nilFn"
   ppr (Lambda params body rettype) =
     annot (mapMaybe ppAnnot params) $
     text "fn" <+> ppTuple' rettype <+>

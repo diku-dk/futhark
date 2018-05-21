@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | High-level representation of SOACs.  When performing
 -- SOAC-transformations, operating on normal 'Exp' values is somewhat
 -- of a nuisance, as they can represent terms that are not proper
@@ -23,6 +24,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   (
    -- * SOACs
     SOAC (..)
+  , Futhark.ScremaForm(..)
   , inputs
   , setInputs
   , lambda
@@ -68,19 +70,21 @@ module Futhark.Analysis.HORepresentation.SOAC
 
 import Data.Foldable as Foldable
 import Data.Maybe
-import Data.Semigroup ((<>))
+import Data.Monoid ((<>))
 import qualified Data.Sequence as Seq
 import qualified Data.Semigroup as Sem
 
 import qualified Futhark.Representation.AST as Futhark
-import Futhark.Representation.SOACS.SOAC (StreamForm(..), getStreamAccums)
+import Futhark.Representation.SOACS.SOAC
+  (StreamForm(..), ScremaForm(..), scremaType, getStreamAccums)
 import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.Representation.AST
-  hiding (Var, Iota, Rearrange, Reshape, Replicate,
-          typeOf)
+  hiding (Var, Iota, Rearrange, Reshape, Replicate, typeOf)
 import Futhark.Transform.Substitute
 import Futhark.Construct hiding (toExp)
 import Futhark.Transform.Rename (renameLambda)
+import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty (ppr, text)
 
 -- | A single, simple transformation.  If you want several, don't just
 -- create a list, use 'ArrayTransforms' instead.
@@ -356,41 +360,42 @@ transposeInput k n inp =
   addTransform (Rearrange mempty $ transposeIndex k n [0..inputRank inp-1]) inp
 
 -- | A definite representation of a SOAC expression.
-data SOAC lore = Map SubExp (Lambda lore) [Input]
-               | Reduce SubExp Commutativity (Lambda lore) [(SubExp,Input)]
-               | Scan SubExp (Lambda lore) [(SubExp,Input)]
-               | Redomap SubExp Commutativity (Lambda lore) (Lambda lore) [SubExp] [Input]
-               | Scanomap SubExp (Lambda lore) (Lambda lore) [SubExp] [Input]
-               | Stream SubExp (StreamForm lore) (Lambda lore) [Input]
+data SOAC lore = Stream SubExp (StreamForm lore) (Lambda lore) [Input]
                | Scatter SubExp (Lambda lore) [Input] [(SubExp, Int, VName)]
-            deriving (Show)
+               | Screma SubExp (ScremaForm lore) [Input]
+            deriving (Eq, Show)
+
+instance PP.Pretty Input where
+  ppr (Input (ArrayTransforms ts) arr _) = foldl f (ppr arr) ts
+    where f e (Rearrange cs perm) =
+            text "rearrange" <> ppr cs <> PP.apply [PP.apply (map ppr perm), e]
+          f e (Reshape cs shape) =
+            text "reshape" <> ppr cs <> PP.apply [PP.apply (map ppr shape), e]
+          f e (ReshapeOuter cs shape) =
+            text "reshape_outer" <> ppr cs <> PP.apply [PP.apply (map ppr shape), e]
+          f e (ReshapeInner cs shape) =
+            text "reshape_inner" <> ppr cs <> PP.apply [PP.apply (map ppr shape), e]
+          f e (Replicate cs ne) =
+            text "replicate" <> ppr cs <> PP.apply [ppr ne, e]
+
+instance PrettyLore lore => PP.Pretty (SOAC lore) where
+  ppr (Screma w form arrs) = Futhark.ppScrema w form arrs
+  ppr soac = text $ show soac
 
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC lore -> [Input]
-inputs (Map      _ _       arrs) = arrs
-inputs (Reduce   _ _ _     args) = map snd args
-inputs (Scan     _ _       args) = map snd args
-inputs (Redomap  _ _ _ _ _ arrs) = arrs
-inputs (Scanomap _ _ _ _  arrs) = arrs
 inputs (Stream   _ _ _     arrs) = arrs
 inputs (Scatter  _len _lam ivs _as) = ivs
+inputs (Screma _ _       arrs) = arrs
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC lore -> SOAC lore
-setInputs arrs (Map w lam _) =
-  Map (newWidth arrs w) lam arrs
-setInputs arrs (Reduce w comm lam args) =
-  Reduce (newWidth arrs w) comm lam (zip (map fst args) arrs)
-setInputs arrs (Scan w lam args) =
-  Scan (newWidth arrs w) lam (zip (map fst args) arrs)
-setInputs arrs (Redomap w comm lam1 lam ne _) =
-  Redomap (newWidth arrs w) comm lam1 lam ne arrs
-setInputs arrs (Scanomap w lam1 lam ne _) =
-  Scanomap (newWidth arrs w) lam1 lam ne arrs
 setInputs arrs (Stream w form lam _) =
   Stream (newWidth arrs w) form lam arrs
 setInputs arrs (Scatter w lam _ivs as) =
   Scatter (newWidth arrs w) lam arrs as
+setInputs arrs (Screma w form _) =
+  Screma w form arrs
 
 newWidth :: [Input] -> SubExp -> SubExp
 newWidth [] w = w
@@ -398,47 +403,21 @@ newWidth (inp:_) _ = arraySize 0 $ inputType inp
 
 -- | The lambda used in a given SOAC.
 lambda :: SOAC lore -> Lambda lore
-lambda (Map     _ lam _       ) = lam
-lambda (Reduce  _ _ lam _     ) = lam
-lambda (Scan    _ lam _       ) = lam
-lambda (Redomap  _ _ _ lam2 _ _) = lam2
-lambda (Scanomap _ _ lam2 _ _) = lam2
 lambda (Stream  _ _ lam      _) = lam
 lambda (Scatter _len lam _ivs _as) = lam
+lambda (Screma _ (ScremaForm _ _ lam) _) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda lore -> SOAC lore -> SOAC lore
-setLambda lam (Map w _ arrs) =
-  Map w lam arrs
-setLambda lam (Reduce w comm _ args) =
-  Reduce w comm lam args
-setLambda lam (Scan w _ args) =
-  Scan w lam args
-setLambda lam (Redomap w comm lam1 _ ne arrs) =
-  Redomap w comm lam1 lam ne arrs
-setLambda lam (Scanomap w lam1 _ ne arrs) =
-  Scanomap w lam1 lam ne arrs
 setLambda lam (Stream w form _ arrs) =
   Stream w form lam arrs
 setLambda lam (Scatter len _lam ivs as) =
   Scatter len lam ivs as
+setLambda lam (Screma w (ScremaForm scan red _) arrs) =
+  Screma w (ScremaForm scan red lam) arrs
 
 -- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
-typeOf (Map w lam _) =
-  mapType w lam
-typeOf (Reduce _ _ lam _) =
-  lambdaReturnType lam
-typeOf (Scan _ _ input) =
-  map (inputType . snd) input
-typeOf (Redomap w _ outlam inlam nes _) =
-  let accrtps = lambdaReturnType outlam
-      arrrtps = drop (length nes) $ mapType w inlam
-  in  accrtps ++ arrrtps
-typeOf (Scanomap w outlam inlam nes _) =
-  let accrtps = mapType w outlam
-      arrrtps = drop (length nes) $ mapType w inlam
-  in  accrtps ++ arrrtps
 typeOf (Stream w form lam _) =
   let nes     = getStreamAccums form
       accrtps = take (length nes) $ lambdaReturnType lam
@@ -450,17 +429,15 @@ typeOf (Scatter _w lam _ivs dests) =
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
         (aws, _, _) = unzip3 dests
+typeOf (Screma w form _) =
+  scremaType w form
 
 -- | The "width" of a SOAC is the expected outer size of its array
 -- inputs _after_ input-transforms have been carried out.
 width :: SOAC lore -> SubExp
-width (Map w _ _) = w
-width (Reduce w _ _ _) = w
-width (Scan w _ _) = w
-width (Redomap w _ _ _ _ _) = w
-width (Scanomap w _ _ _ _) = w
 width (Stream w _ _ _) = w
 width (Scatter len _lam _ivs _as) = len
+width (Screma w _ _) = w
 
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
@@ -470,23 +447,13 @@ toExp soac = Op <$> toSOAC soac
 -- | Convert a SOAC to a Futhark-level SOAC.
 toSOAC :: MonadBinder m =>
           SOAC (Lore m) -> m (Futhark.SOAC (Lore m))
-toSOAC (Map w l as) =
-  Futhark.Map w l <$> inputsToSubExps as
-toSOAC (Reduce w comm l args) =
-  Futhark.Reduce w comm l <$> (zip es <$> inputsToSubExps as)
-  where (es, as) = unzip args
-toSOAC (Scan w l args) =
-  Futhark.Scan w l <$> (zip es <$> inputsToSubExps as)
-  where (es, as) = unzip args
-toSOAC (Redomap w comm l1 l2 es as) =
-  Futhark.Redomap w comm l1 l2 es <$> inputsToSubExps as
-toSOAC (Scanomap w l1 l2 es as) =
-  Futhark.Scanomap w l1 l2 es <$> inputsToSubExps as
 toSOAC (Stream w form lam inps) =
   Futhark.Stream w form lam <$> inputsToSubExps inps
 toSOAC (Scatter len lam ivs dests) = do
   ivs' <- inputsToSubExps ivs
   return $ Futhark.Scatter len lam ivs' dests
+toSOAC (Screma w form arrs) =
+  Futhark.Screma w form <$> inputsToSubExps arrs
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -499,23 +466,13 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 fromExp :: (Op lore ~ Futhark.SOAC lore, HasScope t f, Monad f) =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
 
-fromExp (Op (Futhark.Map w l as)) =
-  Right . Map w l <$> traverse varInput as
-fromExp (Op (Futhark.Reduce w comm l args)) = do
-  let (es,as) = unzip args
-  Right . Reduce w comm l . zip es <$> traverse varInput as
-fromExp (Op (Futhark.Scan w l args)) = do
-  let (es,as) = unzip args
-  Right . Scan w l . zip es <$> traverse varInput as
-fromExp (Op (Futhark.Redomap w comm l1 l2 es as)) =
-  Right . Redomap w comm l1 l2 es <$> traverse varInput as
-fromExp (Op (Futhark.Scanomap w l1 l2 es as)) =
-  Right . Scanomap w l1 l2 es <$> traverse varInput as
 fromExp (Op (Futhark.Stream w form lam as)) =
   Right . Stream w form lam <$> traverse varInput as
 fromExp (Op (Futhark.Scatter len lam ivs as)) = do
   ivs' <- traverse varInput ivs
   return $ Right $ Scatter len lam ivs' as
+fromExp (Op (Futhark.Screma w form arrs)) =
+  Right . Screma w form <$> traverse varInput arrs
 fromExp _ = pure $ Left NotSOAC
 
 -- | To-Stream translation of SOACs.
@@ -537,12 +494,14 @@ soacToStream soac = do
   strm_inpids <- mapM (newParam "inp") lintps
   -- Treat each SOAC case individually:
   case soac of
-    -- Map(f,a) => is translated in strem's body to:
-    -- let strm_resids = map(f,a_ch) in strm_resids
-    Map{}  -> do
+    Screma _ form _
+      | Just _ <- Futhark.isMapSOAC form -> do
+      -- Map(f,a) => is translated in strem's body to:
+      -- let strm_resids = map(f,a_ch) in strm_resids
+      --
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
-      let insoac = Futhark.Map chvar lam' $ map paramName strm_inpids
+      let insoac = Futhark.Screma chvar (Futhark.mapSOAC lam') $ map paramName strm_inpids
           insbnd = mkLet [] strm_resids $ Op insoac
           strmbdy= mkBody (oneStm insbnd) $ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:strm_inpids
@@ -550,31 +509,36 @@ soacToStream soac = do
           empty_lam = Lambda [] (mkBody mempty []) []
       -- map(f,a) creates a stream with NO accumulators
       return (Stream w (Parallel Disorder Commutative empty_lam []) strmlam inps, [])
-    -- Scan(+,nes,a) => is translated in strem's body to:
-    -- 1. let scan0_ids   = scan(+, nes, a_ch)
-    -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
-    -- 3. let outerszm1id = sizeof(0,strm_resids) - 1
-    -- 4. let lasteel_ids = if outerszm1id < 0
-    --                      then nes
-    --                      else strm_resids[outerszm1id]
-    -- 5. let acc'        = acc + lasteel_ids
-    --    {acc', strm_resids}
-    Scan _ _ nesinps -> do
-      -- the array and accumulator result types
-      let (nes, _) = unzip nesinps
-          accrtps= lambdaReturnType lam
-      -- array result and input IDs of the stream's lambda
-      strm_resids <- mapM (newIdent "res") loutps
 
-      scan0_ids <- mapM (newIdent "resarr0") loutps
+      | Just (scan_lam, nes, _) <- Futhark.isScanomapSOAC form -> do
+      -- scanomap(scan_lam,nes,map_lam,a) => is translated in strem's body to:
+      -- 1. let (scan0_ids,map_resids)   = scanomap(scan_lam, nes, map_lam, a_ch)
+      -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
+      -- 3. let outerszm1id = sizeof(0,strm_resids) - 1
+      -- 4. let lasteel_ids = if outerszm1id < 0
+      --                      then nes
+      --                      else strm_resids[outerszm1id]
+      -- 5. let acc'        = acc + lasteel_ids
+      --    {acc', strm_resids, map_resids}
+      -- the array and accumulator result types
+      let scan_arr_ts = map (`arrayOfRow` chvar) $ lambdaReturnType scan_lam
+          map_arr_ts = drop (length nes) loutps
+          accrtps = lambdaReturnType scan_lam
+
+      -- array result and input IDs of the stream's lambda
+      strm_resids <- mapM (newIdent "res") scan_arr_ts
+      scan0_ids <- mapM (newIdent "resarr0") scan_arr_ts
+      map_resids <- mapM (newIdent "map_res") map_arr_ts
+
       lastel_ids <- mapM (newIdent "lstel") accrtps
       lastel_tmp_ids <- mapM (newIdent "lstel_tmp") accrtps
       empty_arr <- newIdent "empty_arr" $ Prim Bool
-      inpacc_ids <- mapM (newParam "inpacc")accrtps
+      inpacc_ids <- mapM (newParam "inpacc") accrtps
       outszm1id  <- newIdent "szm1" $ Prim int32
-      -- 1. let scan0_ids   = scan(+,nes,a_ch)
-      let insoac = Futhark.Scan chvar lam' $ zip nes (map paramName strm_inpids)
-          insbnd = mkLet [] scan0_ids $ Op insoac
+      -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
+      let insbnd = mkLet [] (scan0_ids++map_resids) $ Op $
+                   Futhark.Screma chvar (Futhark.scanomapSOAC scan_lam nes lam') $
+                   map paramName strm_inpids
       -- 2. let outerszm1id = chunksize - 1
           outszm1bnd = mkLet [] [outszm1id] $ BasicOp $
                        BinOp (Sub Int32)
@@ -596,50 +560,28 @@ soacToStream soac = do
                     map (Futhark.Var . identName) lastel_tmp_ids) $
                    ifCommon $ map identType lastel_tmp_ids
       -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
-      maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) lam
+      maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) scan_lam
       let mapbnd = mkLet [] strm_resids $ Op $
-                   Futhark.Map chvar maplam $ map identName scan0_ids
+                   Futhark.Screma chvar (Futhark.mapSOAC maplam) $
+                   map identName scan0_ids
       -- 5. let acc'        = acc + lasteel_ids
-      addlelbdy <- mkPlusBnds lam $ map Futhark.Var $
+      addlelbdy <- mkPlusBnds scan_lam $ map Futhark.Var $
                    map paramName inpacc_ids++map identName lastel_ids
       -- Finally, construct the stream
       let (addlelbnd,addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
           strmbdy= mkBody (stmsFromList [insbnd,outszm1bnd,empty_arr_bnd,lelbnd,mapbnd]<>addlelbnd) $
-                          addlelres ++ map (Futhark.Var . identName) strm_resids
+                          addlelres ++ map (Futhark.Var . identName) (strm_resids ++ map_resids)
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy (accrtps++loutps)
       return (Stream w (Sequential nes) strmlam inps,
               map paramIdent inpacc_ids)
-    -- Reduce(+,nes,a) => is translated in strem's body to:
-    -- 1. let acc0_ids = reduce(+,nes,a_ch) in
-    -- 2. let acc'     = acc + acc0_ids    in
-    --    {acc'}
-    Reduce _ comm _ nesinps -> do
-      -- the array and accumulator result types
-      let (nes,_) = unzip nesinps
-          accrtps= lambdaReturnType lam
-      -- array result and input IDs of the stream's lambda
-      inpacc_ids <- mapM (newParam "inpacc")  accrtps
-      acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
-      -- 1. let acc0_ids = reduce(+,nes,a_ch) in
-      let insoac = Futhark.Reduce chvar comm lam' $ zip nes (map paramName strm_inpids)
-          insbnd = mkLet [] acc0_ids $ Op insoac
-      -- 2. let acc'     = acc + acc0_ids    in
-      addaccbdy <- mkPlusBnds lam $ map Futhark.Var $
-                   map paramName inpacc_ids++map identName acc0_ids
-      -- Construct the stream
-      let (addaccbnd,addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
-          strmbdy= mkBody (oneStm insbnd <> addaccbnd) addaccres
-          strmpar= chunk_param:inpacc_ids++strm_inpids
-          strmlam= Lambda strmpar strmbdy accrtps
-      lam0 <- renameLambda lam
-      return (Stream w (Parallel InOrder comm lam0 nes) strmlam inps, [])
-    -- Redomap(+,lam,nes,a) => is translated in strem's body to:
-    -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-    -- 2. let acc'                   = acc + acc0_ids          in
-    --    {acc', strm_resids}
-    Redomap _ comm lamin _ nes _ -> do
-      -- the array and accumulator result types
+
+      | Just (comm, lamin, nes, _) <- Futhark.isRedomapSOAC form -> do
+      -- Redomap(+,lam,nes,a) => is translated in strem's body to:
+      -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
+      -- 2. let acc'                   = acc + acc0_ids          in
+      --    {acc', strm_resids}
+
       let accrtps= take (length nes) $ lambdaReturnType lam
           -- the chunked-outersize of the array result and input types
           loutps' = drop (length nes) loutps
@@ -650,7 +592,8 @@ soacToStream soac = do
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-      let insoac = Futhark.Redomap chvar comm lamin foldlam nes (map paramName strm_inpids)
+      let insoac = Futhark.Screma chvar (Futhark.redomapSOAC comm lamin nes foldlam) $
+                   map paramName strm_inpids
           insbnd = mkLet [] (acc0_ids++strm_resids) $ Op insoac
       -- 2. let acc'     = acc + acc0_ids    in
       addaccbdy <- mkPlusBnds lamin $ map Futhark.Var $
@@ -663,13 +606,9 @@ soacToStream soac = do
           strmlam= Lambda strmpar strmbdy (accrtps++loutps')
       lam0 <- renameLambda lamin
       return (Stream w (Parallel InOrder comm lam0 nes) strmlam inps, [])
-    -- FIXME? Scanomaps do not become seqstreams.
-    Scanomap{} -> return (soac,[])
-    -- If the soac is a stream then nothing to do, i.e., return it!
-    Stream{} -> return (soac,[])
-    -- If the soac is a write, don't try to do anything.
-    Scatter{} -> return (soac, [])
-    -- HELPER FUNCTIONS
+
+    -- Otherwise it cannot become a stream.
+    _ -> return (soac,[])
     where mkMapPlusAccLam :: (MonadFreshNames m, Bindable lore)
                           => [SubExp] -> Lambda lore -> m (Lambda lore)
           mkMapPlusAccLam accs plus = do

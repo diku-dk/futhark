@@ -14,7 +14,7 @@
 --    89i32, 90i32, 91i32, 92i32, 93i32, 94i32, 95i32, 96i32, 97i32, 98i32, 99i32]
 -- }
 -- output { 12 55 }
--- structure { Scan 0 Map 0 Scanomap 1 }
+-- structure { Screma 1 }
 
 let main(i: i32, a: []i32): (i32, i32) =
   let b = map (+2) a

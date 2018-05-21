@@ -649,13 +649,18 @@ internaliseExp desc (E.Map lam arr _ _) = do
   arr' <- internaliseExpToVars "map_arr" arr
   lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
   w <- arraysSize 0 <$> mapM lookupType arr'
-  letTupExp' desc $ I.Op $ I.Map w lam' arr'
+  letTupExp' desc $ I.Op $
+    I.Screma w (I.mapSOAC lam') arr'
 
 internaliseExp desc (E.Reduce comm lam ne arr loc) =
-  internaliseScanOrReduce desc "reduce" (`I.Reduce` comm) (lam, ne, arr, loc)
+  internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
+  where reduce w red_lam nes arrs =
+          I.Screma w <$> I.reduceSOAC comm red_lam nes <*> pure arrs
 
 internaliseExp desc (E.Scan lam ne arr loc) =
-  internaliseScanOrReduce desc "scan" I.Scan (lam, ne, arr, loc)
+  internaliseScanOrReduce desc "scan" scan (lam, ne, arr, loc)
+  where scan w scan_lam nes arrs =
+          I.Screma w <$> I.scanSOAC scan_lam nes <*> pure arrs
 
 internaliseExp _ (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
@@ -855,7 +860,7 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
         one = constant (1::Int32)
 
 internaliseScanOrReduce :: String -> String
-                        -> (SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)
+                        -> (SubExp -> I.Lambda -> [SubExp] -> [VName] -> InternaliseM (SOAC SOACS))
                         -> (E.Exp, E.Exp, E.Exp, SrcLoc)
                         -> InternaliseM [SubExp]
 internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
@@ -869,9 +874,8 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   nests <- mapM I.subExpType nes'
   arrts <- mapM lookupType arrs
   lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
-  let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ f w lam' input
+  letTupExp' desc . I.Op =<< f w lam' nes' arrs
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1174,12 +1178,13 @@ isOverloadedFunction qname args loc = do
 
                       -- Compare the elements.
                       cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
-                      cmps <- letExp "cmps" $ I.Op $ I.Map x_num_elems cmp_lam [x_flat, y_flat]
+                      cmps <- letExp "cmps" $ I.Op $
+                              I.Screma x_num_elems (I.mapSOAC cmp_lam) [x_flat, y_flat]
 
                       -- Check that all were equal.
                       and_lam <- binOpLambda I.LogAnd I.Bool
-                      all_equal <- letSubExp "all_equal" $ I.Op $
-                                   I.Reduce x_num_elems Commutative and_lam [(constant True,cmps)]
+                      reduce <- I.reduceSOAC Commutative and_lam [constant True]
+                      all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems reduce [cmps]
                       return $ resultBody [all_equal]
 
                     letSubExp "arrays_equal" $
@@ -1476,7 +1481,7 @@ partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], 
 partitionWithSOACS k lam arrs = do
   arr_ts <- mapM lookupType arrs
   let w = arraysSize 0 arr_ts
-  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Map w lam arrs
+  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Screma w (mapSOAC lam) arrs
   (classes, increments) <- case classes_and_increments of
                              classes : increments -> return (classes, take k increments)
                              _                    -> fail "partitionWithSOACS"
@@ -1494,9 +1499,10 @@ partitionWithSOACS k lam arrs = do
                          , I.lambdaParams = add_lam_x_params ++ add_lam_y_params
                          , I.lambdaReturnType = replicate k $ I.Prim int32
                          }
-      scan_input = zip (repeat $ constant (0::Int32)) increments
+      nes = replicate (length increments) $ constant (0::Int32)
 
-  all_offsets <- letTupExp "offsets" $ I.Op $ I.Scan w add_lam scan_input
+  scan <- I.scanSOAC add_lam nes
+  all_offsets <- letTupExp "offsets" $ I.Op $ I.Screma w scan increments
 
   -- We have the offsets for each of the partitions, but we also need
   -- the total sizes, which are the last elements in the offests.  We

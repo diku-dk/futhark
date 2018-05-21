@@ -5,6 +5,7 @@
 -- output {
 --   19.0
 -- }
+-- structure { Screma 1 }
 let f(a: f64        ): f64 = a + 3.0
 let g(a: f64        ): f64 = a * 3.0
 let h(x: f64, y: (f64,f64)): f64 = let (a,b) = y in a * b - (a + b) + x

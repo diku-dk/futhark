@@ -1,7 +1,7 @@
 -- After fusion, consumes a0s.  See issue #224.
 --
 -- ==
--- structure { Map 2 }
+-- structure { /Screma 1 }
 
 let main [m][b] (d: i32, a0s: [m][b][b]f32): *[m][b][b]f32 =
   let a1s = map (\(x: [][]f32): [b][b]f32  -> rearrange (1,0) x) a0s
