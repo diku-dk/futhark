@@ -27,7 +27,7 @@ module type fft = {
   -- | Perform a forward 2D FFT of an array of numbers, each representing
   -- the real part of a complex number.
   val fft2_re [n][m]: [n][m]real -> [n][m](real, real)
-  -- | The inverse of `2fft_re`@term.
+  -- | The inverse of `fft2_re`@term.
   val ifft2_re [n][m]: [n][m]real -> [n][m](real, real)
 }
 
