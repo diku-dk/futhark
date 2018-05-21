@@ -8,7 +8,7 @@
 -- output {
 --   [200, 2, 102, 6, 9]
 -- }
--- structure { Scatter 1 }
+-- structure { Screma 0 Scatter 1 }
 
 let main [k][n] (indexes: [k]i32,
                  values: [k]i32,

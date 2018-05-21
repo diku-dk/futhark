@@ -11,10 +11,7 @@
 -- }
 -- structure {
 --    Stream   0
---    Scan     1
---    Scanomap 1
---    Map      0
---    Redomap  1
+--    Screma 4
 -- }
 --
 let main(arr: []f64): (f64,[]f64,[]f64,[]f64,[]f64) =

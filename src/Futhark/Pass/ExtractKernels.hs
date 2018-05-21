@@ -241,8 +241,9 @@ transformStms path (bnd:bnds) =
       transformStms path $ stmsToList bnds' <> bnds
 
 sequentialisedUnbalancedStm :: Stm -> DistribM (Maybe (Stms SOACS))
-sequentialisedUnbalancedStm (Let pat _ (Op soac@(Redomap _ _ _ lam2 _ _)))
-  | unbalancedLambda lam2, lambdaContainsParallelism lam2 = do
+sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ form _)))
+  | Just (_, _, _, lam2) <- isRedomapSOAC form,
+    unbalancedLambda lam2, lambdaContainsParallelism lam2 = do
       types <- asksScope scopeForSOACs
       Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedStm _ =
@@ -272,82 +273,74 @@ transformStm path (Let pat aux (DoLoop ctx val form body)) =
                   ForLoop i it bound ps ->
                     ForLoop i it bound ps
 
-transformStm path (Let pat (StmAux cs _) (Op (Map w lam arrs))) =
-  distributeMap path pat $ MapLoop cs w lam arrs
+transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
+  | Just lam <- isMapSOAC form =
+      distributeMap path pat $ MapLoop cs w lam arrs
 
-transformStm path (Let pat (StmAux cs _) (Op (Scanomap w lam1 lam2 nes arrs)))
-  | lambdaContainsParallelism lam2 = do
-      (mapbnd, redbnd) <- scanomapToMapAndReduce pat (w, lam1, lam2, nes, arrs)
-      transformStms path [certify cs mapbnd, certify cs redbnd]
-  | otherwise = do
-      lam1_sequential <- Kernelise.transformLambda lam1
-      lam2_sequential <- Kernelise.transformLambda lam2
-      runBinder_ $ certifying cs $
-        blockedScan pat w lam1_sequential lam2_sequential (intConst Int32 1) [] [] nes arrs
-
-transformStm path (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs)))
-  | not $ lambdaContainsParallelism lam2 = paralleliseOuter
-
-  | incrementalFlattening = do
-      ((outer_suff, outer_suff_key), suff_stms) <-
-        runBinder $ sufficientParallelism "suff_outer_redomap" w path
-
-      outer_stms <- outerParallelBody
-      inner_stms <- innerParallelBody ((outer_suff_key, False):path)
-
-      (suff_stms<>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
-
-  | otherwise = paralleliseOuter
-
-  where
-    paralleliseOuter = do
-      lam1_sequential <- Kernelise.transformLambda lam1
-      lam2_sequential <- Kernelise.transformLambda lam2
-      fmap (certify cs) <$>
-        blockedReduction pat w comm' lam1_sequential lam2_sequential [] nes arrs
-    outerParallelBody = renameBody =<<
-                        (mkBody <$> paralleliseOuter <*> pure (map Var (patternNames pat)))
-
-    paralleliseInner path' = do
-      (mapbnd, redbnd) <- redomapToMapAndReduce pat (w, comm', lam1, lam2, nes, arrs)
-      transformStms path' [certify cs mapbnd, certify cs redbnd]
-    innerParallelBody path' =
-      renameBody =<<
-      (mkBody <$> paralleliseInner path' <*> pure (map Var (patternNames pat)))
-
-    comm' | commutativeLambda lam1 = Commutative
-          | otherwise              = comm
-
-transformStm path (Let res_pat (StmAux cs _) (Op (Reduce w comm red_fun red_input)))
-  | Just do_irwim <- irwim res_pat w comm' red_fun red_input = do
-      types <- asksScope scopeForSOACs
-      bnds <- fst <$> runBinderT (simplifyStms =<< collectStms_ (certifying cs do_irwim)) types
-      transformStms path $ stmsToList bnds
-        where comm' | commutativeLambda red_fun = Commutative
-                    | otherwise                 = comm
-
-
-transformStm _ (Let pat (StmAux cs _) (Op (Reduce w comm red_fun red_input))) = do
-  red_fun_sequential <- Kernelise.transformLambda red_fun
-  map_lam <- mkIdentityLambda $ lambdaReturnType red_fun
-  fmap (certify cs) <$>
-    blockedReduction pat w comm' red_fun_sequential map_lam [] nes arrs
-  where (nes, arrs) = unzip red_input
-        comm' | commutativeLambda red_fun = Commutative
-              | otherwise                 = comm
-
-
-transformStm path (Let res_pat (StmAux cs _) (Op (Scan w scan_fun scan_input)))
-  | Just do_iswim <- iswim res_pat w scan_fun scan_input = do
+transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
+  | Just (scan_fun, nes) <- isScanSOAC form,
+    Just do_iswim <- iswim res_pat w scan_fun $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       transformStms path =<< (stmsToList . snd <$> runBinderT (certifying cs do_iswim) types)
 
-transformStm _ (Let pat (StmAux cs _) (Op (Scan w fun input))) = do
-  fun_sequential <- Kernelise.transformLambda fun
-  map_lam <- mkIdentityLambda $ lambdaReturnType fun_sequential
-  runBinder_ $ certifying cs $
-    blockedScan pat w fun_sequential map_lam (intConst Int32 1) [] [] nes arrs
-  where (nes, arrs) = unzip input
+transformStm _ (Let pat (StmAux cs _) (Op (Screma w form arrs)))
+  | ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam <- form,
+    not $ null scan_nes,
+    not $ lambdaContainsParallelism map_lam = do
+      scan_lam_sequential <- Kernelise.transformLambda scan_lam
+      red_lam_sequential <- Kernelise.transformLambda red_lam
+      map_lam_sequential <- Kernelise.transformLambda map_lam
+      runBinder_ $ certifying cs $
+        blockedScan pat w
+        (scan_lam_sequential, scan_nes)
+        (comm, red_lam_sequential, red_nes)
+        map_lam_sequential (intConst Int32 1) [] [] arrs
+
+transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
+  | Just (comm, red_fun, nes) <- isReduceSOAC form,
+    let comm' | commutativeLambda red_fun = Commutative
+              | otherwise                 = comm,
+    Just do_irwim <- irwim res_pat w comm' red_fun $ zip nes arrs = do
+      types <- asksScope scopeForSOACs
+      bnds <- fst <$> runBinderT (simplifyStms =<< collectStms_ (certifying cs do_irwim)) types
+      transformStms path $ stmsToList bnds
+
+transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
+  | Just (comm, red_lam, nes, map_lam) <- isRedomapSOAC form = do
+
+  let paralleliseOuter = do
+        red_lam_sequential <- Kernelise.transformLambda red_lam
+        map_lam_sequential <- Kernelise.transformLambda map_lam
+        fmap (certify cs) <$>
+          blockedReduction pat w comm' red_lam_sequential map_lam_sequential [] nes arrs
+
+      outerParallelBody =
+        renameBody =<<
+        (mkBody <$> paralleliseOuter <*> pure (map Var (patternNames pat)))
+
+      paralleliseInner path' = do
+        (mapbnd, redbnd) <- redomapToMapAndReduce pat (w, comm', red_lam, map_lam, nes, arrs)
+        transformStms path' [certify cs mapbnd, certify cs redbnd]
+
+      innerParallelBody path' =
+        renameBody =<<
+        (mkBody <$> paralleliseInner path' <*> pure (map Var (patternNames pat)))
+
+
+      comm' | commutativeLambda red_lam = Commutative
+            | otherwise = comm
+
+  if not $ lambdaContainsParallelism map_lam
+    then paralleliseOuter
+    else if incrementalFlattening then do
+    ((outer_suff, outer_suff_key), suff_stms) <-
+      runBinder $ sufficientParallelism "suff_outer_redomap" w path
+
+    outer_stms <- outerParallelBody
+    inner_stms <- innerParallelBody ((outer_suff_key, False):path)
+
+    (suff_stms<>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
+    else paralleliseOuter
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
@@ -384,12 +377,13 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
 
           (map_bnd, map_misc_bnds) <- blockedMap concat_pat w InOrder fold_fun_sequential nes arrs
           let num_threads = arraysSize 0 $ patternTypes $ stmPattern map_bnd
-              red_input = zip nes $ patternNames $ stmPattern map_bnd
+
+          reduce_soac <- reduceSOAC comm' red_fun nes
 
           ((map_misc_bnds<>oneStm map_bnd)<>) <$>
             inScopeOf (map_misc_bnds<>oneStm map_bnd)
             (transformStm path' $ Let red_pat aux $
-             Op (Reduce num_threads comm' red_fun red_input))
+             Op (Screma num_threads reduce_soac $ patternNames $ stmPattern map_bnd))
 
       | otherwise = do
           red_fun_sequential <- Kernelise.transformLambda red_fun
@@ -412,6 +406,13 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
 
     comm' | commutativeLambda red_fun, o /= InOrder = Commutative
           | otherwise                               = comm
+
+transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs))) = do
+  -- This with-loop is too complicated for us to immediately do
+  -- anything, so split it up and try again.
+  scope <- asksScope scopeForSOACs
+  transformStms path . map (certify cs) . stmsToList . snd =<<
+    runBinderT (dissectScrema pat w form arrs) scope
 
 transformStm path (Let pat _ (Op (Stream w (Sequential nes) fold_fun arrs))) = do
   -- Remove the stream and leave the body parallel.  It will be
@@ -443,7 +444,7 @@ transformStm _ bnd =
 data MapLoop = MapLoop Certificates SubExp Lambda [VName]
 
 mapLoopExp :: MapLoop -> Exp
-mapLoopExp (MapLoop _ w lam arrs) = Op $ Map w lam arrs
+mapLoopExp (MapLoop _ w lam arrs) = Op $ Screma w (mapSOAC lam) arrs
 
 sufficientParallelism :: (Op (Lore m) ~ Kernel innerlore, MonadBinder m) =>
                          String -> SubExp -> KernelPath -> m (SubExp, VName)
@@ -690,17 +691,9 @@ unbalancedLambda lam =
           bodyStms body
 
         -- XXX - our notion of balancing is probably still too naive.
-        unbalancedStm bound (Op (Map w _ _)) =
-          w `subExpBound` bound
-        unbalancedStm bound (Op (Reduce w _ _ _)) =
-          w `subExpBound` bound
-        unbalancedStm bound (Op (Scan w _ _)) =
-          w `subExpBound` bound
-        unbalancedStm bound (Op (Redomap w _ _ _ _ _)) =
-          w `subExpBound` bound
-        unbalancedStm bound (Op (Scanomap w _ _ _ _)) =
-          w `subExpBound` bound
         unbalancedStm bound (Op (Stream w _ _ _)) =
+          w `subExpBound` bound
+        unbalancedStm bound (Op (Screma w _ _)) =
           w `subExpBound` bound
         unbalancedStm _ (Op Scatter{}) =
           False
@@ -726,12 +719,8 @@ lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 -- | Returns the sizes of nested parallelism.
 nestedParallelism :: Body -> [SubExp]
 nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
-  where parallelism (Op (Reduce w _ _ _)) = [w]
-        parallelism (Op (Scan w _ _)) = [w]
-        parallelism (Op (Scanomap w _ _ _ _)) = [w]
-        parallelism (Op (Redomap w _ _ _ _ _)) = [w]
-        parallelism (Op (Map w _ _)) = [w]
-        parallelism (Op (Scatter w _ _ _)) = [w]
+  where parallelism (Op (Scatter w _ _ _)) = [w]
+        parallelism (Op (Screma w _ _)) = [w]
         parallelism (Op (Stream w Sequential{} lam _))
           | chunk_size_param : _ <- lambdaParams lam =
               let update (Var v) | v == paramName chunk_size_param = w
@@ -745,7 +734,8 @@ nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
 worthSequentialising :: Lambda -> Bool
 worthSequentialising lam = interesting $ lambdaBody lam
   where interesting body = any (interesting' . stmExp) $ bodyStms body
-        interesting' (Op Map{}) = False
+        interesting' (Op (Screma _ form _))
+          | isJust $ isMapSOAC form = False
         interesting' (Op Scatter{}) = False -- Basically a map.
         interesting' (DoLoop _ _ _ body) = interesting body
         interesting' (Op _) = True
@@ -759,7 +749,8 @@ worthIntraGroup lam = interesting $ lambdaBody lam
   where interesting body = not (null $ nestedParallelism body) &&
                            not (onlyMaps $ bodyStms body)
         onlyMaps = all $ isMapOrSeq . stmExp
-        isMapOrSeq (Op Map{}) = True
+        isMapOrSeq (Op (Screma _ form _))
+          | isJust $ isMapSOAC form = True
         isMapOrSeq (Op Scatter{}) = True -- Basically a map.
         isMapOrSeq (DoLoop _ _ _ body) =
           null $ nestedParallelism body
@@ -880,7 +871,8 @@ distributeMapBodyStms acc (bnd:bnds) =
   distributeMapBodyStms acc bnds
 
 maybeDistributeStm :: Stm -> KernelAcc -> KernelM KernelAcc
-maybeDistributeStm bnd@(Let pat _ (Op (Map w lam arrs))) acc =
+maybeDistributeStm bnd@(Let pat _ (Op (Screma w form arrs))) acc
+  | Just lam <- isMapSOAC form =
   -- Only distribute inside the map if we can distribute everything
   -- following the map.
   distributeIfPossible acc >>= \case
@@ -938,8 +930,9 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
       _ ->
         addStmToKernel stm acc
 
-maybeDistributeStm (Let pat (StmAux cs _) (Op (Reduce w comm lam input))) acc
-  | Just m <- irwim pat w comm lam input = do
+maybeDistributeStm (Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
+  | Just (comm, lam, nes) <- isReduceSOAC form,
+    Just m <- irwim pat w comm lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       (_, bnds) <- runBinderT (certifying cs m) types
       distributeMapBodyStms acc $ stmsToList bnds
@@ -963,7 +956,8 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) acc =
 --
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scanomap w lam map_lam nes arrs))) acc =
+maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
+  | Just (lam, nes, map_lam) <- isScanomapSOAC form =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -984,7 +978,9 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scanomap w lam map_lam nes ar
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Redomap w comm lam map_lam nes arrs))) acc | incrementalFlattening =
+maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
+  | Just (comm, lam, nes, map_lam) <- isRedomapSOAC form,
+    isIdentityLambda map_lam || incrementalFlattening =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -994,39 +990,22 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Redomap w comm lam map_lam ne
           nest' <- expandKernelNest pat_unused nest
           lam' <- Kernelise.transformLambda lam
           map_lam' <- Kernelise.transformLambda map_lam
+
+          let comm' | commutativeLambda lam = Commutative
+                    | otherwise             = comm
+
           regularSegmentedRedomapKernel nest' perm w comm' lam' map_lam' nes arrs >>=
             kernelOrNot cs bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
-    where comm' | commutativeLambda lam = Commutative
-                | otherwise             = comm
 
--- Redomap and Scanomap are general cases, so pretend nested
--- reductions and scans are Redomap and Scanomap.  Well, not for
--- Reduce, because of a hack...
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Reduce w comm lam input))) acc =
-  distributeSingleStm acc bnd >>= \case
-    Just (kernels, res, nest, acc')
-      | Just (perm, pat_unused) <- permutationAndMissing pat res ->
-          -- We need to pretend pat_unused was used anyway, by adding
-          -- it to the kernel nest.
-          localScope (typeEnvFromKernelAcc acc') $ do
-          let (nes, arrs) = unzip input
-          nest' <- expandKernelNest pat_unused nest
-          lam' <- Kernelise.transformLambda lam
-          map_lam <- mkIdentityLambda $ lambdaReturnType lam'
-          regularSegmentedRedomapKernel nest' perm w comm' lam' map_lam nes arrs >>=
-            kernelOrNot cs bnd acc kernels acc'
-    _ ->
-      addStmToKernel bnd acc
-    where comm' | commutativeLambda lam = Commutative
-                | otherwise             = comm
-
-maybeDistributeStm (Let pat aux (Op (Scan w lam input))) acc = do
-  let (nes, arrs) = unzip input
-  map_lam <- mkIdentityLambda $ lambdaReturnType lam
-  let bnd = Let pat aux $ Op $ Scanomap w lam map_lam nes arrs
-  maybeDistributeStm bnd acc
+maybeDistributeStm (Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
+  | incrementalFlattening || isNothing (isRedomapSOAC form) = do
+  -- This with-loop is too complicated for us to immediately do
+  -- anything, so split it up and try again.
+  scope <- asksScope scopeForSOACs
+  distributeMapBodyStms acc . map (certify cs) . stmsToList . snd =<<
+    runBinderT (dissectScrema pat w form arrs) scope
 
 maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d:ds)) v))) acc
   | [t] <- patternTypes pat = do
@@ -1035,7 +1014,7 @@ maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d:ds)) v))) acc
       -- bodies.
       tmp <- newVName "tmp"
       let rowt = rowType t
-          newbnd = Let pat aux $ Op $ Map d lam []
+          newbnd = Let pat aux $ Op $ Screma d (mapSOAC lam) []
           tmpbnd = Let (Pattern [] [PatElem tmp rowt]) aux $
                    BasicOp $ Replicate (Shape ds) v
           lam = Lambda { lambdaReturnType = [rowt]
@@ -1275,7 +1254,7 @@ regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
   isSegmentedOp nest perm segment_size
     (lambdaReturnType map_lam) (freeInLambda lam) (freeInLambda map_lam) nes arrs $
     \pat flat_pat num_segments total_num_elements ispace inps nes' _ arrs' -> do
-      fold_lam <- composeLambda lam map_lam
+      fold_lam <- composeLambda nilFn lam map_lam
       regularSegmentedRedomap
         segment_size num_segments (kernelNestWidths nest)
         flat_pat pat total_num_elements comm lam fold_lam ispace inps nes' arrs'

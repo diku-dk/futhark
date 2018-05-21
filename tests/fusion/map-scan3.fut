@@ -17,7 +17,8 @@
 -- output { 16511385i32 }
 --
 -- structure {
---   /Map/Stream/Scanomap 1
+--   /Screma/Stream 1
+--   /Screma 1
 -- }
 let main(n: i32, m: i32): i32 =
   let factors = map (^123) (iota n)

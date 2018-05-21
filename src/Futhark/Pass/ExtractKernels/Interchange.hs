@@ -64,7 +64,7 @@ interchangeLoop
 
     let lam = Lambda (params'<>new_params) body' rettype
         map_bnd = Let loop_pat_expanded (StmAux cs ()) $
-                  Op $ Map w lam $ arrs' <> new_arrs
+                  Op $ Screma w (mapSOAC lam) $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 
@@ -157,7 +157,7 @@ interchangeBranch1
                      else return branch
           let lam = Lambda params branch' lam_ret
               res = map Var $ patternNames branch_pat'
-              map_bnd = Let branch_pat' (StmAux cs ()) $ Op $ Map w lam arrs
+              map_bnd = Let branch_pat' (StmAux cs ()) $ Op $ Screma w (mapSOAC lam) arrs
           return $ mkBody (oneStm map_bnd) res
 
     tbranch' <- mkBranch tbranch

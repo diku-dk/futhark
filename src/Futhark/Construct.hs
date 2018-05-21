@@ -46,9 +46,6 @@ module Futhark.Construct
   , fullSliceNum
   , isFullSlice
   , ifCommon
-  , mkIdentityLambda
-  , isIdentityLambda
-  , composeLambda
 
   , module Futhark.Binder
 
@@ -417,43 +414,6 @@ isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) slice
 
 ifCommon :: [Type] -> IfAttr ExtType
 ifCommon ts = IfAttr (staticShapes ts) IfNormal
-
--- | Construct a lambda that takes parameters of the given types and
--- simply returns them unchanged.
-mkIdentityLambda :: (Bindable lore, MonadFreshNames m) =>
-                    [Type] -> m (Lambda lore)
-mkIdentityLambda ts = do
-  params <- mapM (newParam "x") ts
-  return Lambda { lambdaParams = params
-                , lambdaBody = mkBody mempty $ map (Var . paramName) params
-                , lambdaReturnType = ts }
-
--- | Is the given lambda an identity lambda?
-isIdentityLambda :: Lambda lore -> Bool
-isIdentityLambda lam = bodyResult (lambdaBody lam) ==
-                       map (Var . paramName) (lambdaParams lam)
-
-composeLambda :: (Bindable lore, BinderOps lore, MonadFreshNames m,
-                  HasScope somelore m, SameScope somelore lore) =>
-                 Lambda lore
-              -> Lambda lore
-              -> m (Lambda lore)
-composeLambda red_fun map_fun = do
-  body <- runBodyBinder $ inScopeOf red_fun $ inScopeOf map_fun $ do
-    mapM_ addStm $ bodyStms $ lambdaBody map_fun
-    let (red_res, map_res) = splitAt n $ bodyResult $ lambdaBody map_fun
-
-    forM_ (zip y_params red_res) $ \(p,se) ->
-      letBindNames_ [paramName p] $ BasicOp $ SubExp se
-    mapM_ addStm $ bodyStms $ lambdaBody red_fun
-
-    resultBodyM $ bodyResult (lambdaBody red_fun) ++ map_res
-
-  return Lambda { lambdaParams = x_params ++ lambdaParams map_fun
-                , lambdaBody = body
-                , lambdaReturnType = lambdaReturnType map_fun }
-  where n = length $ lambdaReturnType red_fun
-        (x_params, y_params) = splitAt n $ lambdaParams red_fun
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore
