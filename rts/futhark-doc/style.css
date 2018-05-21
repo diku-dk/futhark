@@ -3,17 +3,19 @@ body {
     font-family: sans-serif;
     padding: 0px;
     margin: 0px;
-    margin-top: 1em;
-    margin-left: 1em;
-    margin-right: 1em;
+    margin-top: 0em;
+    margin-left: 0em;
+    margin-right: 0em;
     overflow-y: scroll;
     line-height: 1.4;
 }
 
 h1 {
     margin-top: 0;
+    margin-bottom: 0;
     font-size: 3em;
-    color: #5f021f;
+    color: #fff9e5;
+    background: #5f0220;
 }
 
 h2 {
@@ -35,8 +37,20 @@ td {
     vertical-align: top;
 }
 
+#content {
+    padding-left: 1em;
+    padding-right: 1em;
+}
+
 #abstract {
     margin-bottom: 2ex;
+}
+
+#footer {
+    color: #fff9e5;
+    background: #5f0220;
+    padding-left: 1em;
+    padding-right: 1em;
 }
 
 .comment {

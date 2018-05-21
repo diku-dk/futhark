@@ -1,3 +1,5 @@
+-- | Quasi-random Sobol number generation.
+
 import "/futlib/math"
 import "/futlib/monoid"
 
