@@ -462,7 +462,7 @@ module pcg32: rng_engine with int.t = u32 = {
 
 -- | This uniform integer distribution generates integers in a given
 -- range with equal probability for each, assuming the passed
--- `rng_engine`@term generates uniformly distributed integers.
+-- `rng_engine`@mtype generates uniformly distributed integers.
 module uniform_int_distribution (D: integral) (E: rng_engine):
   rng_distribution with num.t = D.t
                    with engine.rng = E.rng
