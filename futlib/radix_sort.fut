@@ -46,7 +46,8 @@ let radix_sort [n] 't (num_bits: i32) (get_bit: i32 -> t -> i32)
 
 -- | A thin wrapper around `radix_sort`@term that ensures floats are
 -- sorted as expected.  Simply pass the usual `num_bits` and `get_bit`
--- definitions from `f32`@term and `f64`@term.
+-- definitions from `f32`@term@"/futlib/math" and
+-- `f64`@term@"/futlib/math".
 let radix_sort_float [n] 't (num_bits: i32) (get_bit: i32 -> t -> i32)
                             (xs: [n]t): [n]t =
   let get_bit' i x =

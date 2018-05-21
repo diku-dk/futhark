@@ -134,7 +134,7 @@ runPipelineOnProgram config b pipeline file = do
   res <- internaliseProg prog_imports
   case res of
     Left err ->
-      internalErrorS ("During internalisation: " <> pretty err) $ E.Prog mempty $
+      internalErrorS ("During internalisation: " <> pretty err) $ E.Prog Nothing $
       concatMap (E.progDecs . E.fileProg . snd) prog_imports
     Right int_prog -> do
       when (pipelineVerbose pipeline_config) $
