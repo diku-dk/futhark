@@ -1,6 +1,8 @@
--- | Bitonic merge sort.  Runs in *O(n log(n))* work and *O(log(n))*
--- span.  Internally pads the array to the next power of two, so a
--- poor fit for some array sizes.
+-- | Bitonic merge sort.
+--
+-- Runs in *O(n log(n))* work and *O(log(n))* span.  Internally pads
+-- the array to the next power of two, so a poor fit for some array
+-- sizes.
 
 local let log2 (n: i32) : i32 =
   let r = 0

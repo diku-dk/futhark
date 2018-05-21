@@ -1,9 +1,10 @@
--- | Random number generation inspired by `<random>` in C++.  The
--- overall idea is that you pass a low-level `rng_engine`@mtype, that
--- knows how to generate random integers, to a parametric module that
--- maps said integers to the desired distribution.  Since Futhark is a
--- pure language, the final random number function(s) will return both
--- the random number and the new state of the engine.  It is the
+-- | Random number generation inspired by `<random>` in C++.
+--
+-- The overall idea is that you pass a low-level `rng_engine`@mtype,
+-- that knows how to generate random integers, to a parametric module
+-- that maps said integers to the desired distribution.  Since Futhark
+-- is a pure language, the final random number function(s) will return
+-- both the random number and the new state of the engine.  It is the
 -- programmer's responsibility to ensure that the same state is not
 -- used more than once (unless that is what is desired).  See the
 -- [Examples](#examples) below.

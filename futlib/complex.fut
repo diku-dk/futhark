@@ -1,6 +1,7 @@
--- | An implementation of complex numbers.  Divided into a module type
--- for modules that implement complex numbers, and a parametric module
--- that can construct such modules.
+-- | Complex numbers parameterised over the representation of their real parts.
+--
+-- Divided into a module type for modules that implement complex
+-- numbers, and a parametric module that can construct such modules.
 
 import "/futlib/math"
 

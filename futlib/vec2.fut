@@ -1,3 +1,5 @@
+-- | Vectors in two dimensions.
+
 import "/futlib/math"
 
 module type vec2 = {

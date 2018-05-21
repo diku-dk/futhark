@@ -9,7 +9,7 @@ import Control.Monad.State
 import Data.FileEmbed
 import Data.List
 import Data.Semigroup ((<>))
-import System.FilePath ((</>), (<.>), takeDirectory, takeExtension, makeRelative)
+import System.FilePath ((</>), takeDirectory, takeExtension, makeRelative)
 import System.Directory (createDirectoryIfMissing)
 import System.Console.GetOpt
 import System.IO
@@ -63,18 +63,14 @@ printDecs cfg dir imports = do
   let (file_htmls, warnings) = renderFiles imports
   hPrint stderr warnings
   mapM_ (write . fmap renderHtml) file_htmls
+  write ("style.css", cssFile)
 
-  write ("index", renderHtml $ indexPage file_htmls)
-  write' ("style.css", cssFile)
-
-  where write (name, content) = write' (name <.> "html", content)
-
-        write' :: (String, T.Text) -> IO ()
-        write' (name, content) = do let file = dir </> makeRelative "/" name
-                                    when (docVerbose cfg) $
-                                      hPutStrLn stderr $ "Writing " <> file
-                                    createDirectoryIfMissing True $ takeDirectory file
-                                    T.writeFile file content
+  where write :: (String, T.Text) -> IO ()
+        write (name, content) = do let file = dir </> makeRelative "/" name
+                                   when (docVerbose cfg) $
+                                     hPutStrLn stderr $ "Writing " <> file
+                                   createDirectoryIfMissing True $ takeDirectory file
+                                   T.writeFile file content
 
 cssFile :: T.Text
 cssFile = $(embedStringFile "rts/futhark-doc/style.css")
