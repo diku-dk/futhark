@@ -18,7 +18,7 @@ entry sort_u16 = radix_sort u16.num_bits u16.get_bit
 
 -- ==
 -- entry: sort_f32
--- input { [5f32,4f32,3f32,2f32,1f32] }
--- output { [1f32,2f32,3f32,4f32,5f32] }
+-- input { [5f32,4f32,3f32,2f32,-1f32] }
+-- output { [-1f32,2f32,3f32,4f32,5f32] }
 
-entry sort_f32 = radix_sort f32.num_bits f32.get_bit
+entry sort_f32 = radix_sort_float f32.num_bits f32.get_bit
