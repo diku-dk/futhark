@@ -47,6 +47,7 @@ deriving instance Lift Diet
 deriving instance Lift (TypeDeclBase Info VName)
 deriving instance Lift (IdentBase Info VName)
 deriving instance Lift (PatternBase Info VName)
+deriving instance Lift DocComment
 deriving instance Lift (ValBindBase Info VName)
 deriving instance Lift (FieldBase Info VName)
 deriving instance Lift (LoopFormBase Info VName)

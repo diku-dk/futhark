@@ -181,8 +181,8 @@ import Language.Futhark.Parser.Lexer
 
 -- The main parser.
 
-Doc :: { String }
-     : doc { let L _ (DOC s) = $1 in s }
+Doc :: { DocComment }
+     : doc { let L loc (DOC s) = $1 in DocComment s loc }
 
 -- Three cases to avoid ambiguities.
 Prog :: { UncheckedProg }
@@ -862,14 +862,14 @@ Values : Value ',' Values { $1 : $3 }
 
 {
 
-addDoc :: String -> UncheckedDec -> UncheckedDec
+addDoc :: DocComment -> UncheckedDec -> UncheckedDec
 addDoc doc (ValDec val) = ValDec (val { valBindDoc = Just doc })
 addDoc doc (TypeDec tp) = TypeDec (tp { typeDoc = Just doc })
 addDoc doc (SigDec sig) = SigDec (sig { sigDoc = Just doc })
 addDoc doc (ModDec mod) = ModDec (mod { modDoc = Just doc })
 addDoc _ dec = dec
 
-addDocSpec :: String -> SpecBase NoInfo Name -> SpecBase NoInfo Name
+addDocSpec :: DocComment -> SpecBase NoInfo Name -> SpecBase NoInfo Name
 addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig { typeDoc = Just doc })
 addDocSpec doc val@(ValSpec {}) = val { specDoc = Just doc }
 addDocSpec doc (TypeSpec name ps _ loc) = TypeSpec name ps (Just doc) loc

@@ -60,10 +60,11 @@ futFiles dir = filter isFut <$> directoryContents dir
 
 printDecs :: DocConfig -> FilePath -> Imports -> IO ()
 printDecs cfg dir imports = do
-  let to_write = map (fmap renderHtml) $ renderFiles imports
-  mapM_ write to_write
+  let (file_htmls, warnings) = renderFiles imports
+  hPrint stderr warnings
+  mapM_ (write . fmap renderHtml) file_htmls
 
-  write ("index", renderHtml $ indexPage to_write)
+  write ("index", renderHtml $ indexPage file_htmls)
   write' ("style.css", cssFile)
 
   where write (name, content) = write' (name <.> "html", content)

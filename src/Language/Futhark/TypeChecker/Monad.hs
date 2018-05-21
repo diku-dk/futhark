@@ -18,6 +18,7 @@ module Language.Futhark.TypeChecker.Monad
   , badOnLeft
 
   , Warnings
+  , singleWarning
 
   , Env(..)
   , TySet

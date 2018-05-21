@@ -3,9 +3,10 @@ module Futhark.Doc.Generator (renderFiles, indexPage) where
 
 import Control.Monad
 import Control.Monad.Reader
+import Control.Monad.Writer
 import Data.List (sortBy, intersperse, inits, tails, isPrefixOf, find)
+import Data.Loc
 import Data.Maybe
-import Data.Monoid
 import Data.Ord
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -21,7 +22,7 @@ import Text.Markdown
 import Prelude hiding (abs)
 
 import Language.Futhark.TypeChecker (FileModule(..), Imports)
-import Language.Futhark.TypeChecker.Monad hiding (NameMap)
+import Language.Futhark.TypeChecker.Monad hiding (NameMap, warn)
 import Language.Futhark
 import Futhark.Doc.Html
 import Futhark.Version
@@ -37,7 +38,10 @@ data Context = Context { ctxCurrent :: String
                        , ctxNameMap :: NameMap
                        }
 type NameMap = M.Map VName String
-type DocM = Reader Context
+type DocM = ReaderT Context (Writer Warnings)
+
+warn :: SrcLoc -> String -> DocM ()
+warn loc s = tell $ singleWarning loc s
 
 noLink :: [VName] -> DocM a -> DocM a
 noLink names = local $ \ctx ->
@@ -70,10 +74,10 @@ vnameToFileMap = mconcat . map forFile
                 forMod (ModEnv env) = forEnv env
                 forMod ModFun{} = mempty
 
-renderFiles :: Imports -> [(FilePath, Html)]
-renderFiles imports = flip map imports $ \(current, fm) ->
+renderFiles :: Imports -> ([(FilePath, Html)], Warnings)
+renderFiles imports = runWriter $ forM imports $ \(current, fm) ->
   let ctx = Context current fm imports mempty $ vnameToFileMap imports in
-  flip runReader ctx $ do
+  flip runReaderT ctx $ do
 
   (maybe_abstract, maybe_sections) <- headerDoc $ fileProg fm
 
@@ -93,10 +97,11 @@ renderFiles imports = flip map imports $ \(current, fm) ->
 -- an abstract and further sections.
 headerDoc :: Prog -> DocM (Html, Html)
 headerDoc prog =
-  case splitHeaderDoc <$> progDoc prog of
-    Just (abstract, more_sections) -> do
-      abstract' <- docHtml $ Just abstract
-      more_sections' <- docHtml $ Just more_sections
+  case progDoc prog of
+    Just (DocComment doc loc) -> do
+      let (abstract, more_sections) = splitHeaderDoc doc
+      abstract' <- docHtml $ Just $ DocComment abstract loc
+      more_sections' <- docHtml $ Just $ DocComment more_sections loc
       return (selfLink "abstract" (H.h2 "Abstract") <> abstract',
               more_sections')
     _ -> return (mempty, mempty)
@@ -447,31 +452,37 @@ typeAbbrevHtml :: Html -> [TypeParam] -> Html
 typeAbbrevHtml name params =
   "type " <> name <> joinBy " " (map typeParamHtml params)
 
-docHtml :: Maybe String -> DocM Html
-docHtml (Just doc) =
-  markdown def { msAddHeadingId = True } . LT.pack <$> identifierLinks doc
+docHtml :: Maybe DocComment -> DocM Html
+docHtml (Just (DocComment doc loc)) =
+  markdown def { msAddHeadingId = True } . LT.pack <$> identifierLinks loc doc
 docHtml Nothing = return mempty
 
-identifierLinks :: String -> DocM String
-identifierLinks [] = return []
-identifierLinks s
+identifierLinks :: SrcLoc -> String -> DocM String
+identifierLinks _ [] = return []
+identifierLinks loc s
   | Just ((name, namespace, file), s') <- identifierReference s = do
-      let proceed x = (x<>) <$> identifierLinks s'
-          unknown = proceed $ "`" ++ name ++ "`"
+      let proceed x = (x<>) <$> identifierLinks loc s'
+          unknown = proceed $ "`" <> name <> "`"
       case knownNamespace namespace of
         Just namespace' -> do
           maybe_v <- lookupName (namespace', name, file)
           case maybe_v of
-            Nothing -> unknown
+            Nothing -> do
+              warn loc $
+                "Identifier '" <> name <> "' not found in namespace '" <>
+                namespace <> "'" <> maybe "" (" in file "<>) file <> "."
+              unknown
             Just v' -> do
               link <- vnameLink v'
-              proceed $ "[`" ++ name ++ "`](" ++ link ++ ")"
-        _ -> unknown
+              proceed $ "[`" <> name <> "`](" <> link <> ")"
+        _ -> do
+          warn loc $ "Unknown namespace '" <> namespace <> "'."
+          unknown
   where knownNamespace "term" = Just Term
         knownNamespace "mtype" = Just Signature
         knownNamespace "type" = Just Type
         knownNamespace _ = Nothing
-identifierLinks (c:s') = (c:) <$> identifierLinks s'
+identifierLinks loc (c:s') = (c:) <$> identifierLinks loc s'
 
 lookupName :: (Namespace, String, Maybe FilePath) -> DocM (Maybe VName)
 lookupName (namespace, name, file) = do
@@ -485,9 +496,9 @@ lookupEnvForFile Nothing     = asks $ Just . fileEnv . ctxFileMod
 lookupEnvForFile (Just file) = asks $ fmap fileEnv . lookup file . ctxImports
 
 describeGeneric :: VName
-                   -> Maybe String
-                   -> (Html -> DocM Html)
-                   -> DocM Html
+                -> Maybe DocComment
+                -> (Html -> DocM Html)
+                -> DocM Html
 describeGeneric name doc f = do
   name' <- H.span ! A.class_ "decl_name" <$> vnameDescDef name
   decl_type <- f name'
@@ -499,7 +510,7 @@ describeGeneric name doc f = do
 
 describeGenericMod :: VName
                    -> SigExp
-                   -> Maybe String
+                   -> Maybe DocComment
                    -> (Html -> DocM Html)
                    -> DocM Html
 describeGenericMod name se doc f = do
@@ -566,7 +577,7 @@ describeSpec (ModSpec name se doc _) =
             return $ "module " <> name' <> ": " <> se'
 describeSpec (IncludeSpec sig _) = do
   sig' <- synopsisSigExp sig
-  doc' <- docHtml mempty
+  doc' <- docHtml Nothing
   let decl_header = (H.dt ! A.class_ "desc_header") $
                     (H.span ! A.class_ "synopsis_link") mempty <>
                     "include " <>

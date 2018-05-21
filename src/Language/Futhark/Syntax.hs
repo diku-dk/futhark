@@ -65,6 +65,7 @@ module Language.Futhark.Syntax
   , ModParamBase(..)
 
   -- * Definitions
+  , DocComment(..)
   , ValBindBase(..)
   , TypeBindBase(..)
   , TypeParamBase(..)
@@ -779,6 +780,13 @@ instance Located (PatternBase f vn) where
   locOf (Wildcard _ loc)            = locOf loc
   locOf (PatternAscription _ _ loc) = locOf loc
 
+-- | Documentation strings, including source location.
+data DocComment = DocComment String SrcLoc
+  deriving (Show)
+
+instance Located DocComment where
+  locOf (DocComment _ loc) = locOf loc
+
 -- | Function Declarations
 data ValBindBase f vn = ValBind { valBindEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
@@ -788,7 +796,7 @@ data ValBindBase f vn = ValBind { valBindEntryPoint :: Bool
                                 , valBindTypeParams :: [TypeParamBase vn]
                                 , valBindParams     :: [PatternBase f vn]
                                 , valBindBody       :: ExpBase f vn
-                                , valBindDoc        :: Maybe String
+                                , valBindDoc        :: Maybe DocComment
                                 , valBindLocation   :: SrcLoc
                                 }
 deriving instance Showable f vn => Show (ValBindBase f vn)
@@ -800,7 +808,7 @@ instance Located (ValBindBase f vn) where
 data TypeBindBase f vn = TypeBind { typeAlias        :: vn
                                   , typeParams       :: [TypeParamBase vn]
                                   , typeExp          :: TypeDeclBase f vn
-                                  , typeDoc          :: Maybe String
+                                  , typeDoc          :: Maybe DocComment
                                   , typeBindLocation :: SrcLoc
                                   }
 deriving instance Showable f vn => Show (TypeBindBase f vn)
@@ -840,12 +848,12 @@ typeParamName (TypeParamLiftedType v _) = v
 data SpecBase f vn = ValSpec  { specName       :: vn
                               , specTypeParams :: [TypeParamBase vn]
                               , specType       :: TypeDeclBase f vn
-                              , specDoc        :: Maybe String
+                              , specDoc        :: Maybe DocComment
                               , specLocation   :: SrcLoc
                               }
                    | TypeAbbrSpec (TypeBindBase f vn)
-                   | TypeSpec vn [TypeParamBase vn] (Maybe String) SrcLoc -- ^ Abstract type.
-                   | ModSpec vn (SigExpBase f vn) (Maybe String) SrcLoc
+                   | TypeSpec vn [TypeParamBase vn] (Maybe DocComment) SrcLoc -- ^ Abstract type.
+                   | ModSpec vn (SigExpBase f vn) (Maybe DocComment) SrcLoc
                    | IncludeSpec (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SpecBase f vn)
 
@@ -879,7 +887,7 @@ instance Located (SigExpBase f vn) where
 
 data SigBindBase f vn = SigBind { sigName :: vn
                                 , sigExp  :: SigExpBase f vn
-                                , sigDoc  :: Maybe String
+                                , sigDoc  :: Maybe DocComment
                                 , sigLoc  :: SrcLoc
                                 }
 deriving instance Showable f vn => Show (SigBindBase f vn)
@@ -915,7 +923,7 @@ data ModBindBase f vn =
           , modParams    :: [ModParamBase f vn]
           , modSignature :: Maybe (SigExpBase f vn, f (M.Map VName VName))
           , modExp       :: ModExpBase f vn
-          , modDoc       :: Maybe String
+          , modDoc       :: Maybe DocComment
           , modLocation  :: SrcLoc
           }
 deriving instance Showable f vn => Show (ModBindBase f vn)
@@ -952,7 +960,7 @@ instance Located (DecBase f vn) where
 
 -- | The program described by a single Futhark file.  May depend on
 -- other files.
-data ProgBase f vn = Prog { progDoc :: Maybe String
+data ProgBase f vn = Prog { progDoc :: Maybe DocComment
                           , progDecs :: [DecBase f vn]
                           }
 deriving instance Showable f vn => Show (ProgBase f vn)
