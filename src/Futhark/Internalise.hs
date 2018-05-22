@@ -777,7 +777,7 @@ internaliseExp desc (E.Project k e (Info rt) _) = do
   n <- internalisedTypeSize $ rt `setAliases` ()
   i' <- fmap sum $ mapM internalisedTypeSize $
         case E.typeOf e `setAliases` () of
-               Record fs -> map snd $ filter ((<k) . fst) $ sortFields fs
+               Record fs -> map snd $ takeWhile ((/=k) . fst) $ sortFields fs
                t         -> [t]
   take n . drop i' <$> internaliseExp desc e
 
