@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Futhark.Doc.Generator (renderFiles) where
 
+import Control.Arrow ((***))
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -87,7 +88,7 @@ renderFiles imports = runWriter $ do
 
     description <- describeDecs $ progDecs $ fileProg fm
 
-    return (current <.> "html",
+    return (current,
             (H.docTypeHtml ! A.lang "en" $
              addBoilerplate current current $
              maybe_abstract <>
@@ -98,7 +99,7 @@ renderFiles imports = runWriter $ do
 
   return $
     ("index.html", indexPage $ map (fmap snd) import_pages) :
-    map (fmap fst) import_pages
+    map ((<.> "html") *** fst) import_pages
 
 -- | The header documentation (which need not be present) can contain
 -- an abstract and further sections.
@@ -123,7 +124,8 @@ headerDoc prog =
 
 indexPage :: [(String, Html)] -> Html
 indexPage pages = H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $
-                  H.dl (mconcat $ map linkTo $ sortBy (comparing fst) pages)
+                  H.dl ! A.id "file_list" $
+                  mconcat $ map linkTo $ sortBy (comparing fst) pages
   where linkTo (name, maybe_abstract) =
           let file = makeRelative "/" $ name -<.> "html"
           in (H.dt ! A.class_ "desc_header") (H.a ! A.href (fromString file) $ fromString name) <>

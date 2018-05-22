@@ -53,9 +53,18 @@ td {
     padding-right: 1em;
 }
 
-.comment {
-    font-style: italic;
-    margin-top: 1ex;
+#footer a, #footer a:visited {
+    color: #fff9e5;
+}
+
+@media (min-width:950px) {
+    #file_list {
+        columns: 3;
+    }
+
+    #file_list > dd {
+        break-before: avoid;
+    }
 }
 
 .specs {
