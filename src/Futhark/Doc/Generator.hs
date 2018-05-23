@@ -5,8 +5,8 @@ import Control.Arrow ((***))
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Writer
-import Data.List (sortBy, intersperse, inits, tails, isPrefixOf, find)
-import Data.Char (isSpace)
+import Data.List (sortBy, intersperse, inits, tails, isPrefixOf, find, groupBy, partition)
+import Data.Char (isSpace, isAlpha, toUpper)
 import Data.Loc
 import Data.Maybe
 import Data.Ord
@@ -40,10 +40,17 @@ data Context = Context { ctxCurrent :: String
                        , ctxFileMap :: FileMap
                        }
 type FileMap = M.Map VName (String, Namespace)
-type DocM = ReaderT Context (Writer Warnings)
+type DocM = ReaderT Context (WriterT Documented (Writer Warnings))
+
+-- | We keep a set of the names we have actually documented, so we can
+-- fish out the ones from FileMap to generate an index.
+type Documented = S.Set VName
 
 warn :: SrcLoc -> String -> DocM ()
-warn loc s = tell $ singleWarning loc s
+warn loc s = lift $ lift $ tell $ singleWarning loc s
+
+document :: VName -> DocM ()
+document = tell . S.singleton
 
 noLink :: [VName] -> DocM a -> DocM a
 noLink names = local $ \ctx ->
@@ -73,13 +80,14 @@ vnameToFileMap = mconcat . map forFile
 
                 forEnv env =
                   mconcat (map vname' $ M.toList $ envNameMap env) <>
-                  mconcat (map forMod $ M.elems $ envModTable env)
+                  mconcat (map forMty $ M.elems $ envSigTable env)
                 forMod (ModEnv env) = forEnv env
                 forMod ModFun{} = mempty
+                forMty = forMod . mtyMod
 
 renderFiles :: Imports -> ([(FilePath, Html)], Warnings)
 renderFiles imports = runWriter $ do
-  import_pages <- forM imports $ \(current, fm) ->
+  (import_pages, documented) <- runWriterT $ forM imports $ \(current, fm) ->
     let ctx = Context current fm imports mempty file_map in
     flip runReaderT ctx $ do
 
@@ -100,7 +108,7 @@ renderFiles imports = runWriter $ do
 
   return $
     [("index.html", contentsPage $ map (fmap snd) import_pages),
-     ("doc-index.html", indexPage file_map)]
+     ("doc-index.html", indexPage documented file_map)]
     ++ map ((<.> "html") *** fst) import_pages
   where file_map = vnameToFileMap imports
 
@@ -134,12 +142,50 @@ contentsPage pages = H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documen
           in (H.dt ! A.class_ "desc_header") (H.a ! A.href (fromString file) $ fromString name) <>
              (H.dd ! A.class_ "desc_doc") maybe_abstract
 
-indexPage :: FileMap -> Html
-indexPage fm = H.docTypeHtml $ addBoilerplate "/doc-index.html" "Index" $
-               H.table ! A.id "doc_index" $
-               H.thead (H.tr $ H.td "Who" <> H.td "What" <> H.td "Where") <>
-               mconcat (map linkTo $ sortBy (comparing (baseString . fst)) $ M.toList fm)
-  where linkTo (name, (file, ns)) =
+indexPage :: Documented -> FileMap -> Html
+indexPage documented fm =
+  H.docTypeHtml $ addBoilerplate "/doc-index.html" "Index" $
+  (H.ul ! A.id "doc_index_list" $
+   mconcat $ map initialListEntry $
+   letter_group_links ++ [symbol_group_link]) <>
+  (H.table ! A.id "doc_index" $
+   H.thead (H.tr $ H.td "Who" <> H.td "What" <> H.td "Where") <>
+   mconcat (letter_groups ++ [symbol_group]))
+  where (letter_names, sym_names) =
+          partition (isLetterName . baseString . fst) $
+          sortBy (comparing (map toUpper . baseString . fst)) $
+          filter ((`S.member` documented) . fst) $ M.toList fm
+
+        (letter_groups, letter_group_links) =
+          unzip $ map tbodyForNames $ groupBy sameInitial letter_names
+        (symbol_group, symbol_group_link) =
+          tbodyForInitial "Symbols" sym_names
+
+        isLetterName [] = False
+        isLetterName (c:_) = isAlpha c
+
+        sameInitial (x, _) (y, _) =
+          case (baseString x, baseString y) of
+            (x':_, y':_) -> toUpper x' == toUpper y'
+            _            -> False
+
+        tbodyForNames names@((s,_):_) =
+          tbodyForInitial (map toUpper $ take 1 $ baseString s) names
+        tbodyForNames _ = mempty
+
+        tbodyForInitial initial names =
+          (H.tbody $ mconcat $ initial' : map linkTo names,
+           initial)
+          where initial' =
+                  H.tr $ H.td ! A.colspan "2" ! A.class_ "doc_index_initial" $
+                  H.a ! A.id (fromString initial)
+                      ! A.href (fromString $ '#' : initial)
+                      $ fromString initial
+
+        initialListEntry initial =
+          H.li $ H.a ! A.href (fromString $ '#' : initial) $ fromString initial
+
+        linkTo (name, (file, ns)) =
           let link = (H.a ! A.href (fromString (makeRelative "/" $ vnameLink' name "" file))) $
                      fromString $ baseString name
               ns' = case ns of Term -> "term"
@@ -374,7 +420,8 @@ vnameHtml (VName name tag) =
   H.span ! A.id (fromString (show tag)) $ renderName name
 
 vnameDescDef :: VName -> DocM Html
-vnameDescDef v =
+vnameDescDef v = do
+  document v
   return $ H.a ! A.id (fromString (show (baseTag v))) $ renderName (baseName v)
 
 vnameSynopsisDef :: VName -> Html

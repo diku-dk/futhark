@@ -157,3 +157,23 @@ td {
 .doc_index_namespace {
     font-style: italic;
 }
+
+.doc_index_initial {
+    font-size: 2em;
+    font-weight: bold;
+}
+
+.doc_index_initial a, .doc_index_initial a:visited {
+    color: #5f0220;
+}
+
+#doc_index_list li {
+  display: inline;
+  list-style-type: none;
+  padding-right: 1em;
+}
+
+#doc_index_list a, #doc_index_list a:visited {
+    color: #5f0220;
+    text-decoration: none;
+}
