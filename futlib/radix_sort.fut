@@ -1,5 +1,5 @@
 -- | A non-comparison-based sort that sorts an array in *O(k n)* work
--- and *O(k)* span, where *k* is the number of bits in each element.
+-- and *O(k log(n))* span, where *k* is the number of bits in each element.
 --
 -- Generally, this is the sorting function we recommend for Futhark
 -- programs, although note the remarks below about floating-point
