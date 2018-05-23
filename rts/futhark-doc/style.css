@@ -12,10 +12,7 @@ body {
 
 h1 {
     margin-top: 0;
-    margin-bottom: 0;
-    font-size: 3em;
-    color: #fff9e5;
-    background: #5f0220;
+    display: inline;
 }
 
 h2 {
@@ -35,6 +32,34 @@ p {
 
 td {
     vertical-align: top;
+}
+
+#header {
+    color: #fff9e5;
+    background: #5f0220;
+    padding-left: 1em;
+}
+
+#navigation {
+    float: right;
+    vertical-align: centre;
+}
+
+#navigation ol {
+    display: block;
+}
+
+#navigation li {
+  display: inline;
+  list-style-type: none;
+  border-left: 1px solid #fff9e5;
+  padding-left: 1em;
+  padding-right: 1em;
+}
+
+#navigation a, #navigation a:visited {
+    color: #fff9e5;
+    text-decoration: none;
 }
 
 #content {
@@ -115,4 +140,20 @@ td {
     white-space: pre;
     display: block;
     unicode-bidi: embed;
+}
+
+#doc_index thead {
+    font-weight: bold;
+}
+
+#doc_index td {
+    padding-right: 1em;
+}
+
+.doc_index_name {
+    font-family: monospace;
+}
+
+.doc_index_namespace {
+    font-style: italic;
 }

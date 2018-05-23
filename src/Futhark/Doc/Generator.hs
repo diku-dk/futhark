@@ -24,7 +24,7 @@ import Text.Markdown
 import Prelude hiding (abs)
 
 import Language.Futhark.TypeChecker (FileModule(..), Imports)
-import Language.Futhark.TypeChecker.Monad hiding (NameMap, warn)
+import Language.Futhark.TypeChecker.Monad hiding (warn)
 import Language.Futhark
 import Futhark.Doc.Html
 import Futhark.Version
@@ -37,9 +37,9 @@ data Context = Context { ctxCurrent :: String
                        , ctxFileMod :: FileModule
                        , ctxImports :: Imports
                        , ctxNoLink :: NoLink
-                       , ctxNameMap :: NameMap
+                       , ctxFileMap :: FileMap
                        }
-type NameMap = M.Map VName String
+type FileMap = M.Map VName (String, Namespace)
 type DocM = ReaderT Context (Writer Warnings)
 
 warn :: SrcLoc -> String -> DocM ()
@@ -63,15 +63,16 @@ specRow a b c = H.tr $ (H.td ! A.class_ "spec_lhs") a <>
                        (H.td ! A.class_ "spec_eql") b <>
                        (H.td ! A.class_ "spec_rhs") c
 
-vnameToFileMap :: Imports -> NameMap
+vnameToFileMap :: Imports -> FileMap
 vnameToFileMap = mconcat . map forFile
   where forFile (file, FileModule abs file_env _prog) =
-          mconcat (map vname (S.toList abs)) <>
+          mconcat (map (vname Type) (S.toList abs)) <>
           forEnv file_env
-          where vname = flip M.singleton file . qualLeaf
+          where vname ns v = M.singleton (qualLeaf v) (file, ns)
+                vname' ((ns, _), v) = vname ns v
 
                 forEnv env =
-                  mconcat (map vname $ M.elems $ envNameMap env) <>
+                  mconcat (map vname' $ M.toList $ envNameMap env) <>
                   mconcat (map forMod $ M.elems $ envModTable env)
                 forMod (ModEnv env) = forEnv env
                 forMod ModFun{} = mempty
@@ -79,7 +80,7 @@ vnameToFileMap = mconcat . map forFile
 renderFiles :: Imports -> ([(FilePath, Html)], Warnings)
 renderFiles imports = runWriter $ do
   import_pages <- forM imports $ \(current, fm) ->
-    let ctx = Context current fm imports mempty $ vnameToFileMap imports in
+    let ctx = Context current fm imports mempty file_map in
     flip runReaderT ctx $ do
 
     (first_paragraph, maybe_abstract, maybe_sections) <- headerDoc $ fileProg fm
@@ -98,8 +99,10 @@ renderFiles imports = runWriter $ do
              first_paragraph))
 
   return $
-    ("index.html", indexPage $ map (fmap snd) import_pages) :
-    map ((<.> "html") *** fst) import_pages
+    [("index.html", contentsPage $ map (fmap snd) import_pages),
+     ("doc-index.html", indexPage file_map)]
+    ++ map ((<.> "html") *** fst) import_pages
+  where file_map = vnameToFileMap imports
 
 -- | The header documentation (which need not be present) can contain
 -- an abstract and further sections.
@@ -122,14 +125,32 @@ headerDoc prog =
         paragraphSeparator = all isSpace
 
 
-indexPage :: [(String, Html)] -> Html
-indexPage pages = H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $
-                  H.dl ! A.id "file_list" $
-                  mconcat $ map linkTo $ sortBy (comparing fst) pages
+contentsPage :: [(String, Html)] -> Html
+contentsPage pages = H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $
+                     H.dl ! A.id "file_list" $
+                     mconcat $ map linkTo $ sortBy (comparing fst) pages
   where linkTo (name, maybe_abstract) =
           let file = makeRelative "/" $ name -<.> "html"
           in (H.dt ! A.class_ "desc_header") (H.a ! A.href (fromString file) $ fromString name) <>
              (H.dd ! A.class_ "desc_doc") maybe_abstract
+
+indexPage :: FileMap -> Html
+indexPage fm = H.docTypeHtml $ addBoilerplate "/doc-index.html" "Index" $
+               H.table ! A.id "doc_index" $
+               H.thead (H.tr $ H.td "Who" <> H.td "What" <> H.td "Where") <>
+               mconcat (map linkTo $ sortBy (comparing (baseString . fst)) $ M.toList fm)
+  where linkTo (name, (file, ns)) =
+          let link = (H.a ! A.href (fromString (makeRelative "/" $ vnameLink' name "" file))) $
+                     fromString $ baseString name
+              ns' = case ns of Term -> "term"
+                               Type -> "type"
+                               Signature -> "module type"
+              html_file = makeRelative "/" $ file -<.> "html"
+          in H.tr $
+             (H.td ! A.class_ "doc_index_name" $ link) <>
+             (H.td ! A.class_ "doc_index_namespace" $ ns') <>
+             (H.td ! A.class_ "doc_index_file" $
+              (H.a ! A.href (fromString html_file) $ fromString file))
 
 addBoilerplate :: String -> String -> Html -> Html
 addBoilerplate current titleText bodyHtml =
@@ -140,15 +161,17 @@ addBoilerplate current titleText bodyHtml =
                         ! A.rel "stylesheet"
                         ! A.type_ "text/css"
 
-      navigation = H.a ! A.href (fromString $ relativise "index.html" current) $ "[root]"
+      navigation = H.ul ! A.id "navigation" $
+                   H.li (H.a ! A.href (fromString $ relativise "index.html" current) $ "Contents") <>
+                   H.li (H.a ! A.href (fromString $ relativise "doc-index.html" current) $ "Index")
 
       madeByHtml =
         "Generated by " <> (H.a ! A.href futhark_doc_url) "futhark-doc"
         <> " " <> fromString (showVersion version)
-  in headHtml <> H.body (H.h1 (toHtml titleText) <>
-                         (H.div ! A.id "navigation") navigation <>
-                         (H.div ! A.id "content") bodyHtml <>
-                         (H.div ! A.id "footer") madeByHtml)
+  in headHtml <>
+     H.body ((H.div ! A.id "header") (H.h1 (toHtml titleText) <> navigation) <>
+             (H.div ! A.id "content") bodyHtml <>
+             (H.div ! A.id "footer") madeByHtml)
   where futhark_doc_url =
           "https://futhark.readthedocs.io/en/latest/man/futhark-doc.html"
 
@@ -425,13 +448,17 @@ qualNameHtml (QualName names vname@(VName name tag)) =
                    then return Nothing
                    else Just <$> vnameLink vname
 
+vnameLink' :: VName -> String -> String -> String
 vnameLink :: VName -> DocM String
-vnameLink vname@(VName _ tag) = do
+vnameLink vname = do
   current <- asks ctxCurrent
-  file <- fromMaybe current <$> asks (M.lookup vname . ctxNameMap)
+  file <- maybe current fst <$> asks (M.lookup vname . ctxFileMap)
+  return $ vnameLink' vname current file
+
+vnameLink' (VName _ tag) current file =
   if file == current
-    then return $ "#" ++ show tag
-    else return $ relativise file current ++ ".html#" ++ show tag
+    then "#" ++ show tag
+    else relativise file current ++ ".html#" ++ show tag
 
 typeNameHtml :: TypeName -> DocM Html
 typeNameHtml = qualNameHtml . qualNameFromTypeName
