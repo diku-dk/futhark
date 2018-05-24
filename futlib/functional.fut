@@ -1,7 +1,12 @@
 -- | Simple functional combinators.
 
+-- | Left-to-right application.  Particularly useful for describing
+-- computation pipelines:
+--
+--     x |> f |> g |> h
 let (|>) '^a '^b (x: a) (f: a -> b): b = f x
 
+-- | Right to left application.
 let (<|) '^a '^b (f: a -> b) (x: a) = f x
 
 -- | Function composition, with values flowing from left to right.
@@ -17,12 +22,19 @@ let (|>>) = (>->)
 -- | Deprecated alias for `<-<`@term.
 let (<<|) = (<-<)
 
+-- | Flip the arguments passed to a function.
+--
+--     f x y == flip f y x
 let flip '^a '^b '^c (f: a -> b -> c) (b: b) (a: a): c =
   f a b
 
+-- | Transform a function taking a pair into a function taking two
+-- arguments.
 let curry '^a '^b '^c (f: (a, b) -> c) (a: a) (b: b): c =
   f (a, b)
 
+-- | Transform a function taking two arguments in a function taking a
+-- pair.
 let uncurry '^a '^b '^c (f: a -> b -> c) (a: a, b: b): c =
   f a b
 
