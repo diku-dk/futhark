@@ -8,6 +8,21 @@
 -- substantial constant factors.  For example, `scan`@term is *much*
 -- slower than `reduce`@term, although they have the same asymptotic
 -- complexity.
+--
+-- *Reminder on terminology*: A function `op` is said to be
+-- *associative* if
+--
+--     (x `op` y) `op` z == x `op` (y `op` z)
+--
+-- for all `x`, `y`, `z`.  Similarly, it is *commutative* if
+--
+--     x `op` y == y `op` x
+--
+-- The value `o` is a *neutral element* if
+--
+--     x `op` o == o `op` x == x
+--
+-- for any `x`.
 
 -- | Apply the given function to each element of an array.
 --
@@ -121,15 +136,50 @@ let partition2 'a (p1: a -> bool) (p2: a -> bool) (as: []a): ([]a, []a, []a) =
   let (as', is) = intrinsics.partition (3, p', as)
   in (as'[:is[0]], as'[is[0]:is[0]+is[1]], as'[is[0]+is[1]:])
 
+-- | `stream_red op f as` splits `as` into chunks, applies `f` to each
+-- of these in parallel, and uses `op` (which must be associative) to
+-- combine the per-chunk results into a final result.  This SOAC is
+-- useful when `f` can be given a particularly work-efficient
+-- sequential implementation.  Operationally, we can imagine that `as`
+-- is divided among as many threads as necessary to saturate the
+-- machine, with each thread operating sequentially.
+--
+-- A chunk may be empty, `f []` must produce the neutral element for
+-- `op`.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let stream_red 'a 'b (op: b -> b -> b) (f: []a -> b) (as: []a): b =
   intrinsics.stream_red (op, f, as)
 
+-- | As `stream_red`@term, but the chunks do not necessarily
+-- correspond to subsequences of the original array (they may be
+-- interleaved).
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let stream_red_per 'a 'b (op: b -> b -> b) (f: []a -> b) (as: []a): b =
   intrinsics.stream_red_per (op, f, as)
 
+-- | Similar to `stream_red`@term, except that each chunk must produce
+-- an array *of the same size*.  The per-chunk results are
+-- concatenated.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
 let stream_map 'a 'b (f: []a -> []b) (as: []a): *[]b =
   intrinsics.stream_map (f, as)
 
+-- | Similar to `stream_map`@map, but the chunks do not necessarily
+-- correspond to subsequences of the original array (they may be
+-- interleaved).
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
 let stream_map_per 'a 'b (f: []a -> []b) (as: []a): *[]b =
   intrinsics.stream_map_per (f, as)
 
