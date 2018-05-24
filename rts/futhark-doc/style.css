@@ -82,6 +82,13 @@ td {
     color: #fff9e5;
 }
 
+.file_desc {
+    /* Hack to avoid breaking a file description across multiple columns
+       on the contents page. */
+    display: table;
+    width: 100%;
+}
+
 @media (min-width:950px) {
     #file_list {
         columns: 3;

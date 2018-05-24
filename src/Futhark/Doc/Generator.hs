@@ -139,7 +139,8 @@ contentsPage pages = H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documen
                      mconcat $ map linkTo $ sortBy (comparing fst) pages
   where linkTo (name, maybe_abstract) =
           let file = makeRelative "/" $ name -<.> "html"
-          in (H.dt ! A.class_ "desc_header") (H.a ! A.href (fromString file) $ fromString name) <>
+          in H.div ! A.class_ "file_desc" $
+             (H.dt ! A.class_ "desc_header") (H.a ! A.href (fromString file) $ fromString name) <>
              (H.dd ! A.class_ "desc_doc") maybe_abstract
 
 indexPage :: Documented -> FileMap -> Html
