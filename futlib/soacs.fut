@@ -1,29 +1,59 @@
 -- | Various Second-Order Array Combinators that are operationally
--- parallel in a way that can be exploited by the compiler.  The
--- functions here are all recognised specially by the compiler (or
--- built on those that are).
+-- parallel in a way that can be exploited by the compiler.
+--
+-- The functions here are all recognised specially by the compiler (or
+-- built on those that are).  The asymptotic [work and
+-- span](https://en.wikipedia.org/wiki/Analysis_of_parallel_algorithms)
+-- is provided for each function, but note that this easily hides very
+-- substantial constant factors.  For example, `scan`@term is *much*
+-- slower than `reduce`@term, although they have the same asymptotic
+-- complexity.
 
 -- | Apply the given function to each element of an array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
 let map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
   intrinsics.map (f, as)
 
 -- | Apply the given function to each element of a single array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
 let map1 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
   map f as
 
 -- | As `map1`@term, but with one more array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
 let map2 'a 'b [n] 'x (f: a -> b -> x) (as: [n]a) (bs: [n]b): *[n]x =
   map (\(a, b) -> f a b) (zip as bs)
 
 -- | As `map2`@term, but with one more array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
 let map3 'a 'b 'c [n] 'x (f: a -> b -> c -> x) (as: [n]a) (bs: [n]b) (cs: [n]c): *[n]x =
   map (\(a, b, c) -> f a b c) (zip as bs cs)
 
 -- | As `map3`@term, but with one more array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
 let map4 'a 'b 'c 'd [n] 'x (f: a -> b -> c -> d -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d): *[n]x =
   map (\(a, b, c, d) -> f a b c d) (zip as bs cs ds)
 
 -- | As `map4`@term, but with one more array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
 let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e): *[n]x =
   map (\(a, b, c, d, e) -> f a b c d e) (zip as bs cs ds es)
 
@@ -33,6 +63,10 @@ let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [
 -- by the operator is an array, it must have the exact same size as
 -- the neutral element, and that must again have the same size as the
 -- elements of the input array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let reduce 'a (op: a -> a -> a) (ne: a) (as: []a): a =
   intrinsics.reduce (op, ne, as)
 
@@ -40,28 +74,48 @@ let reduce 'a (op: a -> a -> a) (ne: a) (as: []a): a =
 -- is potentially faster than `reduce`.  For simple built-in
 -- operators, like addition, the compiler already knows that the
 -- operator is associative.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let reduce_comm 'a (op: a -> a -> a) (ne: a) (as: []a): a =
   intrinsics.reduce_comm (op, ne, as)
 
 -- | Inclusive prefix scan.  Has the same caveats with respect to
 -- associativity as `reduce`.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
   intrinsics.scan (op, ne, as)
 
 -- | Remove all those elements of `as` that do not satisfy the
 -- predicate `p`.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let filter 'a (p: a -> bool) (as: []a): *[]a =
   let (as', is) = intrinsics.partition (1, \x -> if p x then 0 else 1, as)
   in as'[:is[0]]
 
 -- | Split an array into those elements that satisfy the given
 -- predicate, and those that do not.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let partition 'a (p: a -> bool) (as: []a): ([]a, []a) =
   let p' x = if p x then 0 else 1
   let (as', is) = intrinsics.partition (2, p', as)
   in (as'[:is[0]], as'[is[0]:])
 
 -- | Split an array by two predicates, producing three arrays.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let partition2 'a (p1: a -> bool) (p2: a -> bool) (as: []a): ([]a, []a, []a) =
   let p' x = if p1 x then 0 else if p2 x then 1 else 2
   let (as', is) = intrinsics.partition (3, p', as)
@@ -81,11 +135,19 @@ let stream_map_per 'a 'b (f: []a -> []b) (as: []a): *[]b =
 
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let all 'a (f: a -> bool) (as: []a): bool =
   reduce (&&) true (map f as)
 
 -- | Return `true` if the given function returns `true` for any
 -- elements in the array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(log(n))*
 let any 'a (f: a -> bool) (as: []a): bool =
   reduce (||) false (map f as)
 
@@ -109,5 +171,9 @@ let any 'a (f: a -> bool) (as: []a): bool =
 --
 -- This is technically not a second-order operation, but it is defined
 -- here because it is closely related to the SOACs.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs)
