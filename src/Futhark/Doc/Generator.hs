@@ -476,7 +476,7 @@ typeExpHtml e = case e of
     t2' <- typeExpHtml t2
     return $ case pname of
       Just v ->
-        parens $ (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
+        parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
       Nothing ->
         t1' <> " -> " <> t2'
 
