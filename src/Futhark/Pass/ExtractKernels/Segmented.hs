@@ -415,11 +415,12 @@ largeKernel group_size segment_size num_segments nest_sizes all_arrs comm
         combine_red_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
           return $ PatElem pe_name $ red_t `arrayOfRow` group_size
+        cids <- replicateM (length red_pes) $ newVName "cid"
         addStms $ stmsFromList
           [ Let (Pattern [] [pe']) (defAux ()) $
-            Op $ Combine [(gtid_ln, group_size)] [patElemType pe] [] $
+            Op $ Combine [(cid, group_size)] [patElemType pe] [] $
             Body () mempty [Var $ patElemName pe]
-          | (pe', pe) <- zip combine_red_pes red_pes ]
+          | (cid, pe', pe) <- zip3 cids combine_red_pes red_pes ]
 
         final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
           pe_name <- newVName "final_result"
@@ -648,10 +649,11 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
         combine_red_pes' <- forM red_ts_wflag $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
           return $ PatElem pe_name $ red_t `arrayOfRow` group_size
+        cids <- replicateM (length red_pes_wflag) $ newVName "cid"
         addStms $ stmsFromList [ Let (Pattern [] [pe']) (defAux ()) $ Op $
-                                 Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
+                                 Combine [(cid, group_size)] [patElemType pe] [] $
                                  Body () mempty [Var $ patElemName pe]
-                               | (pe', pe) <- zip combine_red_pes' red_pes_wflag ]
+                               | (cid, pe', pe) <- zip3 cids combine_red_pes' red_pes_wflag ]
 
         scan_red_pes_wflag <- forM red_ts_wflag $ \red_t -> do
           pe_name <- newVName "scanned"

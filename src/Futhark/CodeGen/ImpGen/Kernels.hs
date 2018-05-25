@@ -685,11 +685,47 @@ compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
       computeThreadChunkSize o i' elems_per_thread' num_elements size
 
 compileKernelExp constants dest (Combine cspace ts aspace body)
-  | Just dest' <- ImpGen.Destination <$> zipWithM index ts (ImpGen.valueDestinations dest) = do
-      copy <- allThreads constants $ ImpGen.compileBody dest' body
-      ImpGen.emit $ Imp.If (Imp.BinOpExp LogAnd (isActive cspace) (isActive aspace)) copy mempty
+  | Just dest' <-
+      ImpGen.Destination <$>
+      zipWithM index ts (ImpGen.valueDestinations dest) = do
+      -- First we compute how many times we have to iterate to cover
+      -- cspace with our group size.  It is a fairly common case that
+      -- we statically know that this requires 1 iteration, so we
+      -- could detect it and not generate a loop in that case.
+      -- However, it seems to have no impact on performance (an extra
+      -- conditional jump), so for simplicity we just always generate
+      -- the loop.
+      let cspace_size = product $ map (ImpGen.compileSubExpOfType int32 . snd) cspace
+          num_iters = cspace_size `quotRoundingUp`
+                      Imp.sizeToExp (kernelGroupSize constants)
+
+      iter <- newVName "comb_iter"
+      cid <- newVName "flat_comb_id"
+
+      one_iteration <- ImpGen.collect $
+        ImpGen.declaringPrimVars (zip (map fst cspace) $ repeat int32) $
+        ImpGen.declaringPrimVar cid int32 $ do
+
+          -- Compute the *flat* array index.
+          ImpGen.emit $ Imp.SetScalar cid $
+            Imp.var iter int32 * Imp.sizeToExp (kernelGroupSize constants) +
+            Imp.var (kernelLocalThreadId constants) int32
+
+          -- Turn it into a nested array index.
+          forM_ (zip (map fst cspace) $ unflattenIndex ws (Imp.var cid int32)) $ \(v, x) ->
+            ImpGen.emit $ Imp.SetScalar v x
+
+          -- Execute the body if we are within bounds.
+          copy <- allThreads constants $ ImpGen.compileBody dest' body
+          ImpGen.emit $
+            Imp.If (Imp.BinOpExp LogAnd (isActive cspace) (isActive aspace)) copy mempty
+
+      ImpGen.emit $ Imp.For iter Int32 num_iters one_iteration
       ImpGen.emit $ Imp.Op Imp.Barrier
-        where index t (ImpGen.ArrayDestination (Just loc)) =
+
+        where ws = map (ImpGen.compileSubExpOfType int32 . snd) cspace
+
+              index t (ImpGen.ArrayDestination (Just loc)) =
                 let space_dims = map (ImpGen.varIndex . fst) cspace
                     t_dims = map (ImpGen.compileSubExpOfType int32) $ arrayDims t
                 in Just $ ImpGen.ArrayDestination $
