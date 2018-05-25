@@ -173,7 +173,7 @@ let stream_red_per 'a 'b (op: b -> b -> b) (f: []a -> b) (as: []a): b =
 let stream_map 'a 'b (f: []a -> []b) (as: []a): *[]b =
   intrinsics.stream_map (f, as)
 
--- | Similar to `stream_map`@map, but the chunks do not necessarily
+-- | Similar to `stream_map`@term, but the chunks do not necessarily
 -- correspond to subsequences of the original array (they may be
 -- interleaved).
 --
