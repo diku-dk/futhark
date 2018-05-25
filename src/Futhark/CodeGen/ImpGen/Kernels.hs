@@ -695,8 +695,8 @@ compileKernelExp constants dest (Combine cspace ts aspace body)
       -- However, it seems to have no impact on performance (an extra
       -- conditional jump), so for simplicity we just always generate
       -- the loop.
-      let cspace_size = product $ map (ImpGen.compileSubExpOfType int32 . snd) cspace
-          num_iters = cspace_size `quotRoundingUp`
+      let cspace_dims = map (streamBounded . snd) cspace
+          num_iters = product cspace_dims `quotRoundingUp`
                       Imp.sizeToExp (kernelGroupSize constants)
 
       iter <- newVName "comb_iter"
@@ -712,7 +712,7 @@ compileKernelExp constants dest (Combine cspace ts aspace body)
             Imp.var (kernelLocalThreadId constants) int32
 
           -- Turn it into a nested array index.
-          forM_ (zip (map fst cspace) $ unflattenIndex ws (Imp.var cid int32)) $ \(v, x) ->
+          forM_ (zip (map fst cspace) $ unflattenIndex cspace_dims (Imp.var cid int32)) $ \(v, x) ->
             ImpGen.emit $ Imp.SetScalar v x
 
           -- Execute the body if we are within bounds.
@@ -723,7 +723,10 @@ compileKernelExp constants dest (Combine cspace ts aspace body)
       ImpGen.emit $ Imp.For iter Int32 num_iters one_iteration
       ImpGen.emit $ Imp.Op Imp.Barrier
 
-        where ws = map (ImpGen.compileSubExpOfType int32 . snd) cspace
+        where streamBounded (Var v)
+                | Just x <- lookup v $ kernelStreamed constants =
+                    Imp.sizeToExp x
+              streamBounded se = ImpGen.compileSubExpOfType int32 se
 
               index t (ImpGen.ArrayDestination (Just loc)) =
                 let space_dims = map (ImpGen.varIndex . fst) cspace
