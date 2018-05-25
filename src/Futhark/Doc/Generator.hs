@@ -42,15 +42,17 @@ data Context = Context { ctxCurrent :: String
 type FileMap = M.Map VName (String, Namespace)
 type DocM = ReaderT Context (WriterT Documented (Writer Warnings))
 
--- | We keep a set of the names we have actually documented, so we can
--- fish out the ones from FileMap to generate an index.
-type Documented = S.Set VName
+data IndexWhat = IndexValue | IndexFunction | IndexModule | IndexModuleType | IndexType
+
+-- | We keep a mapping of the names we have actually documented, so we
+-- can generate an index.
+type Documented = M.Map VName IndexWhat
 
 warn :: SrcLoc -> String -> DocM ()
 warn loc s = lift $ lift $ tell $ singleWarning loc s
 
-document :: VName -> DocM ()
-document = tell . S.singleton
+document :: VName -> IndexWhat -> DocM ()
+document v what = tell $ M.singleton v what
 
 noLink :: [VName] -> DocM a -> DocM a
 noLink names = local $ \ctx ->
@@ -155,7 +157,11 @@ indexPage documented fm =
   where (letter_names, sym_names) =
           partition (isLetterName . baseString . fst) $
           sortBy (comparing (map toUpper . baseString . fst)) $
-          filter ((`S.member` documented) . fst) $ M.toList fm
+          mapMaybe isDocumented $ M.toList fm
+
+        isDocumented (k, (file, _)) = do
+          what <- M.lookup k documented
+          Just (k, (file, what))
 
         (letter_groups, letter_group_links) =
           unzip $ map tbodyForNames $ groupBy sameInitial letter_names
@@ -186,16 +192,18 @@ indexPage documented fm =
         initialListEntry initial =
           H.li $ H.a ! A.href (fromString $ '#' : initial) $ fromString initial
 
-        linkTo (name, (file, ns)) =
+        linkTo (name, (file, what)) =
           let link = (H.a ! A.href (fromString (makeRelative "/" $ vnameLink' name "" file))) $
                      fromString $ baseString name
-              ns' = case ns of Term -> "term"
-                               Type -> "type"
-                               Signature -> "module type"
+              what' = case what of IndexValue -> "value"
+                                   IndexFunction -> "function"
+                                   IndexType -> "type"
+                                   IndexModuleType -> "module type"
+                                   IndexModule -> "module"
               html_file = makeRelative "/" $ file -<.> "html"
           in H.tr $
              (H.td ! A.class_ "doc_index_name" $ link) <>
-             (H.td ! A.class_ "doc_index_namespace" $ ns') <>
+             (H.td ! A.class_ "doc_index_namespace" $ what') <>
              (H.td ! A.class_ "doc_index_file" $
               (H.a ! A.href (fromString html_file) $ fromString file))
 
@@ -246,7 +254,7 @@ synopsisDec fm dec = case dec of
   LocalDec _ _ -> Nothing
 
 synopsisOpened :: ModExp -> Maybe (DocM Html)
-synopsisOpened (ModVar qn _) = Just $ vnameDescDef $ qualLeaf qn
+synopsisOpened (ModVar qn _) = Just $ qualNameHtml qn
 synopsisOpened (ModParens me _) = do me' <- synopsisOpened me
                                      Just $ parens <$> me'
 synopsisOpened (ModImport _ (Info file) _) = Just $ do
@@ -411,18 +419,18 @@ synopsisSigExp e = case e of
     liftM2 f (synopsisSigExp e1) (synopsisSigExp e2)
     where f e1' e2' = e1' <> " -> " <> e2'
   SigArrow (Just v) e1 e2 _ ->
-    do name <- vnameDescDef v
+    do let name = vnameHtml v
        e1' <- synopsisSigExp e1
-       e2' <- synopsisSigExp e2
+       e2' <- noLink [v] $ synopsisSigExp e2
        return $ "(" <> name <> ": " <> e1' <> ") -> " <> e2'
 
 vnameHtml :: VName -> Html
 vnameHtml (VName name tag) =
   H.span ! A.id (fromString (show tag)) $ renderName name
 
-vnameDescDef :: VName -> DocM Html
-vnameDescDef v = do
-  document v
+vnameDescDef :: VName -> IndexWhat -> DocM Html
+vnameDescDef v what = do
+  document v what
   return $ H.a ! A.id (fromString (show (baseTag v))) $ renderName (baseName v)
 
 vnameSynopsisDef :: VName -> Html
@@ -585,11 +593,12 @@ lookupEnvForFile Nothing     = asks $ Just . fileEnv . ctxFileMod
 lookupEnvForFile (Just file) = asks $ fmap fileEnv . lookup file . ctxImports
 
 describeGeneric :: VName
+                -> IndexWhat
                 -> Maybe DocComment
                 -> (Html -> DocM Html)
                 -> DocM Html
-describeGeneric name doc f = do
-  name' <- H.span ! A.class_ "decl_name" <$> vnameDescDef name
+describeGeneric name what doc f = do
+  name' <- H.span ! A.class_ "decl_name" <$> vnameDescDef name what
   decl_type <- f name'
   doc' <- docHtml doc
   let decl_doc = H.dd ! A.class_ "desc_doc" $ doc'
@@ -598,12 +607,13 @@ describeGeneric name doc f = do
   return $ decl_header <> decl_doc
 
 describeGenericMod :: VName
+                   -> IndexWhat
                    -> SigExp
                    -> Maybe DocComment
                    -> (Html -> DocM Html)
                    -> DocM Html
-describeGenericMod name se doc f = do
-  name' <- H.span ! A.class_ "decl_name" <$> vnameDescDef name
+describeGenericMod name what se doc f = do
+  name' <- H.span ! A.class_ "decl_name" <$> vnameDescDef name what
 
   decl_type <- f name'
 
@@ -625,23 +635,29 @@ describeDecs decs = do
 
 describeDec :: FileModule -> Dec -> Maybe (DocM Html)
 describeDec _ (ValDec vb) = Just $
-  describeGeneric (valBindName vb) (valBindDoc vb) $ \name -> do
+  describeGeneric (valBindName vb) (valBindWhat vb) (valBindDoc vb) $ \name -> do
   (lhs, mhs, rhs) <- valBindHtml name vb
   return $ lhs <> mhs <> ": " <> rhs
 
 describeDec _ (TypeDec vb) = Just $
-  describeGeneric (typeAlias vb) (typeDoc vb) (`typeBindHtml` vb)
+  describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)
 
 describeDec _ (SigDec (SigBind name se doc _)) = Just $
-  describeGenericMod name se doc $ \name' ->
+  describeGenericMod name IndexModuleType se doc $ \name' ->
   return $ "module type " <> name'
 
 describeDec _ (ModDec mb) = Just $
-  describeGeneric (modName mb) (modDoc mb) $ \name' ->
+  describeGeneric (modName mb) IndexModule (modDoc mb) $ \name' ->
   return $ "module " <> name'
 
 describeDec _ OpenDec{} = Nothing
 describeDec _ LocalDec{} = Nothing
+
+valBindWhat :: ValBind -> IndexWhat
+valBindWhat vb =
+  if null (valBindParams vb) && orderZero (unInfo (valBindRetType vb))
+  then IndexValue
+  else IndexFunction
 
 describeSpecs :: [Spec] -> DocM Html
 describeSpecs specs =
@@ -649,17 +665,19 @@ describeSpecs specs =
 
 describeSpec :: Spec -> DocM Html
 describeSpec (ValSpec name tparams t doc _) =
-  describeGeneric name doc $ \name' -> do
+  describeGeneric name what doc $ \name' -> do
     let tparams' = mconcat $ map ((" "<>) . typeParamHtml) tparams
     t' <- noLink (map typeParamName tparams) $
           typeExpHtml $ declaredType t
     return $ "val " <>  name' <> tparams' <> ": " <> t'
+  where what = if orderZero (unInfo $ expandedType t)
+               then IndexValue else IndexFunction
 describeSpec (TypeAbbrSpec vb) =
-  describeGeneric (typeAlias vb) (typeDoc vb) (`typeBindHtml` vb)
+  describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)
 describeSpec (TypeSpec name tparams doc _) =
-  describeGeneric name doc $ return . (`typeAbbrevHtml` tparams)
+  describeGeneric name IndexType doc $ return . (`typeAbbrevHtml` tparams)
 describeSpec (ModSpec name se doc _) =
-  describeGenericMod name se doc $ \name' ->
+  describeGenericMod name IndexModule se doc $ \name' ->
   case se of
     SigSpecs{} -> return $ "module " <> name'
     _ -> do se' <- synopsisSigExp se
