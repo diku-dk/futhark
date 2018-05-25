@@ -144,10 +144,11 @@ chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' ispace nes arrs =
   chunk_red_pes' <- forM red_ts $ \red_t -> do
     pe_name <- newVName "chunk_fold_red"
     return $ PatElem pe_name $ red_t `arrayOfRow` group_size
-  let combine_reds = [ Let (Pattern [] [pe']) (defAux ()) $ Op $
-                       Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
-                       Body () mempty [Var $ patElemName pe]
-                     | (pe', pe) <- zip chunk_red_pes' chunk_red_pes ]
+  combine_reds <- forM (zip chunk_red_pes' chunk_red_pes) $ \(pe', pe) -> do
+    combine_id <- newVName "combine_id"
+    return $ Let (Pattern [] [pe']) (defAux ()) $ Op $
+      Combine [(combine_id, group_size)] [patElemType pe] [] $
+      Body () mempty [Var $ patElemName pe]
 
   final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
     pe_name <- newVName "final_result"
@@ -196,8 +197,9 @@ reduceKernel step_two_size reduce_lam' nes arrs = do
       arr' <- newVName $ baseString arr ++ "_combined"
       return $ PatElem arr' $ red_t `arrayOfRow` group_size
 
+    combine_id <- newVName "combine_id"
     letBind_ combine_pat $
-      Op $ Combine [(spaceLocalId space, group_size)]
+      Op $ Combine [(combine_id, group_size)]
       (map rowType $ patternTypes combine_pat) [] combine_body
 
     let arrs' = patternNames combine_pat
@@ -542,7 +544,7 @@ scanKernel1 w scan_sizes (scan_lam, scan_nes) (_comm, red_lam, red_nes) foldlam 
             letSubExp "carry" $ BasicOp $ Index arr slice
           return $ resultBody carries
 
-      red_res <- doReduce kspace to_red_res
+      red_res <- doReduce to_red_res
 
       new_red_carries <- resetCarries "red" lid red_acc_params red_nes' $
                          return $ resultBody $ map Var red_res
@@ -592,8 +594,9 @@ scanKernel1 w scan_sizes (scan_lam, scan_nes) (_comm, red_lam, red_nes) foldlam 
           let lid = spaceLocalId kspace
               scan_ts = map (rowType . paramType) scanout_arr_params
           -- Create an array of per-thread fold results and scan it.
+          combine_id <- newVName "combine_id"
           to_scan_arrs <- letTupExp "combined" $
-                          Op $ Combine [(spaceLocalId kspace, group_size)] scan_ts [] $
+                          Op $ Combine [(combine_id, group_size)] scan_ts [] $
                           Body () mempty $ map Var to_scan_res
           scanned_arrs <- letTupExp "scanned" $
                           Op $ GroupScan group_size scan_lam $ zip scan_nes to_scan_arrs
@@ -620,12 +623,13 @@ scanKernel1 w scan_sizes (scan_lam, scan_nes) (_comm, red_lam, red_nes) foldlam 
                      eIf in_bounds in_bounds_scan_branch not_in_bounds_scan_branch
           return (scanned_arrs, scanres)
 
-        doReduce kspace to_red_res = do
+        doReduce to_red_res = do
           red_ts <- mapM lookupType to_red_res
 
           -- Create an array of per-thread fold results and reduce it.
+          combine_id <- newVName "combine_id"
           to_red_arrs <- letTupExp "combined" $
-                         Op $ Combine [(spaceLocalId kspace, group_size)] red_ts [] $
+                         Op $ Combine [(combine_id, group_size)] red_ts [] $
                          Body () mempty $ map Var to_red_res
           letTupExp "reduced" $
             Op $ GroupReduce group_size red_lam $ zip red_nes to_red_arrs
@@ -664,22 +668,21 @@ scanKernel2 scan_sizes lam input = do
   kspace <- newKernelSpace (kernelWorkgroups scan_sizes,
                             group_size,
                             kernelNumThreads scan_sizes) (FlatThreadSpace [])
-  let lid = spaceLocalId kspace
-
   (res, stms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
     -- Create an array of the elements we are to scan.
-    let indexMine arr = do
+    let indexMine cid arr = do
           arr_t <- lookupType arr
-          let slice = fullSlice arr_t [DimFix $ Var lid]
+          let slice = fullSlice arr_t [DimFix $ Var cid]
           letSubExp (baseString arr <> "_elem") $ BasicOp $ Index arr slice
-    read_elements <- runBodyBinder $ resultBody <$> mapM indexMine arrs
+    combine_id <- newVName "combine_id"
+    read_elements <- runBodyBinder $ resultBody <$> mapM (indexMine combine_id) arrs
     to_scan_arrs <- letTupExp "combined" $
-                    Op $ Combine [(lid, group_size)] scan_ts [] read_elements
+                    Op $ Combine [(combine_id, group_size)] scan_ts [] read_elements
     scanned_arrs <- letTupExp "scanned" $
                     Op $ GroupScan group_size lam $ zip nes to_scan_arrs
 
     -- Each thread returns scanned_arrs[i].
-    res_elems <- mapM indexMine scanned_arrs
+    res_elems <- mapM (indexMine $ spaceLocalId kspace) scanned_arrs
     return $ map (ThreadsReturn AllThreads) res_elems
 
   return $ Kernel (KernelDebugHints "scan2" []) kspace (lambdaReturnType lam) $ KernelBody () stms res
