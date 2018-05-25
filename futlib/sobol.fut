@@ -26,6 +26,7 @@ module type sobol = {
   module Reduce :
       (X : { include monoid
              val f : [D]f64 -> t }) -> { val run : i32 -> X.t }
+  val redomap 't : ([D]f64 -> t) -> (t -> t -> t) -> t -> i32 -> t
 }
 
 module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
@@ -112,4 +113,11 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
                        else X.ne)
       (iota N)
   }
+
+  let redomap 't (f:[]f64->t) (g:t->t->t) (ne:t) (N:i32) : t =
+    stream_red g (\ [sz] (ns:[sz]i32) : t ->
+                  if sz > 0 then reduce g ne (map f (chunk (unsafe ns[0]) sz))
+                  else ne)
+      (iota N)
+
 }
