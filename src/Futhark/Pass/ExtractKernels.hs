@@ -525,19 +525,21 @@ distributeMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
 
       (outer_suff_stms<>) <$> kernelAlternatives pat par_body seq_alts
 
-    Just (intra_avail_par, group_size, intra_prelude, intra_stms) -> do
+    Just ((_intra_min_par, intra_avail_par), group_size, intra_prelude, intra_stms) -> do
       -- We must check that all intra-group parallelism fits in a group.
       ((intra_ok, intra_suff_key), intra_suff_stms) <- runBinder $ do
         addStms intra_prelude
 
         max_group_size <-
           letSubExp "max_group_size" $ Op $ Out.GetSizeMax Out.SizeGroup
-        group_available_par <-
-          letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w intra_avail_par
         fits <- letSubExp "fits" $ BasicOp $
                 CmpOp (CmpSle Int32) group_size max_group_size
+
+        group_available_par <-
+          letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w intra_avail_par
         (suff, suff_key) <- sufficientParallelism "suff_intra_par" group_available_par $
                             (outer_suff_key, False) : path
+
         -- Avoid tiny workgroups.  TODO: this should be a tunable parameter.
         group_large_enough <- letSubExp "group_large_enough" $
           BasicOp $ CmpOp (CmpSle Int32) (intConst Int32 32) intra_avail_par
