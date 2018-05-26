@@ -134,13 +134,15 @@ simplifyKernelExp (SplitSpace o w i elems_per_thread) =
 
 simplifyKernelExp (Combine cspace ts active body) = do
   ((body_stms', body_res'), hoisted) <-
-    Engine.blockIf Engine.isNotSafe $
+    Engine.blockIf (Engine.hasFree bound_here `Engine.orIf` Engine.isNotSafe) $
+    localScope (scopeOfCombineSpace cspace) $
     Engine.simplifyBody (map (const Observe) ts) body
   body' <- Engine.constructBody body_stms' body_res'
-  (,) <$> (Combine <$> mapM Engine.simplify cspace
+  (,) <$> (Combine <$> mapM (traverse Engine.simplify) cspace
            <*> mapM Engine.simplify ts
            <*> mapM Engine.simplify active
            <*> pure body') <*> pure hoisted
+  where bound_here = S.fromList $ map fst cspace
 
 simplifyKernelExp (GroupReduce w lam input) = do
   arrs' <- mapM Engine.simplify arrs
