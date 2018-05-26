@@ -168,6 +168,11 @@ composeLambda scan_fun red_fun map_fun = do
 nilFn :: Bindable lore => LambdaT lore
 nilFn = Lambda mempty (mkBody mempty mempty) mempty
 
+isNilFn :: LambdaT lore -> Bool
+isNilFn (Lambda ps body ts) =
+  null ps && null ts &&
+  null (bodyStms body) && null (bodyResult body)
+
 scanomapSOAC :: Bindable lore =>
                 Lambda lore -> [SubExp] -> Lambda lore -> ScremaForm lore
 scanomapSOAC lam nes = ScremaForm (lam, nes) (mempty, nilFn, mempty)
@@ -586,6 +591,28 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                         commasep ( PP.braces (commasep $ map ppr acc) : map ppr arrs ))
   ppr (Scatter len lam ivs as) =
     ppSOAC "scatter" len [lam] (Just (map Var ivs)) (map (\(_,n,a) -> (n,a)) as)
+
+  ppr (Screma w (ScremaForm (scan_lam, scan_nes) (_, red_lam, red_nes) map_lam) arrs)
+    | isNilFn scan_lam, null scan_nes,
+      isNilFn red_lam, null red_nes =
+        text "map" <> parens (ppr w <> comma </>
+                              ppr map_lam <> comma </>
+                              commasep (map ppr arrs))
+
+    | isNilFn scan_lam, null scan_nes =
+        text "redomap" <> parens (ppr w <> comma </>
+                                  ppr red_lam <> comma </>
+                                  commasep (map ppr red_nes) <> comma </>
+                                  ppr map_lam <> comma </>
+                                  commasep (map ppr arrs))
+
+    | isNilFn red_lam, null red_nes =
+        text "scanomap" <> parens (ppr w <> comma </>
+                                   ppr scan_lam <> comma </>
+                                   commasep (map ppr scan_nes) <> comma </>
+                                   ppr map_lam <> comma </>
+                                   commasep (map ppr arrs))
+
   ppr (Screma w form arrs) = ppScrema w form arrs
 
 ppScrema :: (PrettyLore lore, Pretty inp) =>
