@@ -2,10 +2,10 @@
 -- and *O(k log(n))* span, where *k* is the number of bits in each element.
 --
 -- Generally, this is the sorting function we recommend for Futhark
--- programs, although note the remarks below about floating-point
--- numbers (use `radix_sort_float`@term).  If you need a
--- comparison-based sort, consider
--- `merge_sort`@term@"/futlib/merge_sort".
+-- programs, but be careful about negative integers (use
+-- `radix_sort_int`@term) and floating-point numbers (use
+-- `radix_sort_float`@term).  If you need a comparison-based sort,
+-- consider `merge_sort`@term@"/futlib/merge_sort".
 --
 -- ## See Also
 --
@@ -33,16 +33,28 @@ local let radix_sort_step [n] 't (xs: [n]t) (get_bit: i32 -> t -> i32)
 -- are less than 100), then you can profitably pass a smaller
 -- `num_bits` value to reduce the number of sequential iterations.
 --
--- While radix sort can be used with floating-point numbers, the
--- bitwise representation of floats means that negative numbers are
--- sorted as *greater* than non-negative, and further sorted according
--- to their absolute value.  For example, radix-sorting `[-2.0, -1.0,
--- 0.0, 1.0, 2.0]` will produce `[0.0, 1.0, 2.0, -1.0, -2.0]`.  Use
--- `radix_sort_float`@term in the (likely) case that this is not what
+-- **Warning:** while radix sort can be used with numbers, the bitwise
+-- representation of of both integers and floats means that negative
+-- numbers are sorted as *greater* than non-negative.  Negative floats
+-- are further sorted according to their absolute value.  For example,
+-- radix-sorting `[-2.0, -1.0, 0.0, 1.0, 2.0]` will produce `[0.0,
+-- 1.0, 2.0, -1.0, -2.0]`.  Use `radix_sort_int`@term and
+-- `radix_sort_float`@term in the (likely) cases that this is not what
 -- you want.
 let radix_sort [n] 't (num_bits: i32) (get_bit: i32 -> t -> i32)
                       (xs: [n]t): [n]t =
   loop xs for i < num_bits do radix_sort_step xs get_bit i
+
+-- | A thin wrapper around `radix_sort`@term that ensures negative
+-- integers are sorted as expected.  Simply pass the usual `num_bits`
+-- and `get_bit` definitions from e.g. `i32`@term@"/futlib/math".
+let radix_sort_int [n] 't (num_bits: i32) (get_bit: i32 -> t -> i32)
+                          (xs: [n]t): [n]t =
+  let get_bit' i x =
+    -- Flip the most significant bit.
+    let b = get_bit i x
+    in if i == num_bits-1 then b ^ 1 else b
+  in radix_sort num_bits get_bit' xs
 
 -- | A thin wrapper around `radix_sort`@term that ensures floats are
 -- sorted as expected.  Simply pass the usual `num_bits` and `get_bit`
