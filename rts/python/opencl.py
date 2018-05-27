@@ -122,14 +122,16 @@ def initialise_opencl_object(self,
     default_tile_size = default_sizes['tile_size']
     lockstep_width = default_sizes['lockstep_width']
 
-    if default_group_size > max_group_size and default_group_size_set:
-        sys.stderr.write('Note: Device limits group size to {} (down from {})\n'.
-                         format(max_tile_size, default_group_size))
+    if default_group_size > max_group_size:
+        if default_group_size_set:
+            sys.stderr.write('Note: Device limits group size to {} (down from {})\n'.
+                             format(max_tile_size, default_group_size))
         default_group_size = max_group_size
 
-    if default_tile_size > max_tile_size and default_tile_size_set:
-        sys.stderr.write('Note: Device limits tile size to {} (down from {})\n'.
-                         format(max_tile_size, default_tile_size))
+    if default_tile_size > max_tile_size:
+        if default_tile_size_set:
+            sys.stderr.write('Note: Device limits tile size to {} (down from {})\n'.
+                             format(max_tile_size, default_tile_size))
         default_tile_size = max_tile_size
 
     for (k,v) in user_sizes.items():
