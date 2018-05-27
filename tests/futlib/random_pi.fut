@@ -1,6 +1,6 @@
 -- ==
 -- entry: main
--- input { 1000 } output { 3.124800f64 }
+-- input { 1000 } output { 3.144000f64 }
 
 import "/futlib/random"
 import "/futlib/array"
