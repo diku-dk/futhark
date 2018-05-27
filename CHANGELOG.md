@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `/futlib/functional` now has operators `>->` and `<-<` for
     function composition.  `<<|` are `|>>` are deprecated.
 
+  * `/futlib/segmented` now has a `segmented_reduce`.
+
   * Scans and reductions can now be horizontally fused.
 
 ### Removed
