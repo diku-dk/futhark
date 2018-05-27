@@ -7,7 +7,7 @@ import "/futlib/array"
 
 module rng_reduce (rng : rng_engine with int.t = u32) = {
 
-  let redomap 't (D:i32) (f:[]f64->t) (g:t->t->t) (ne:t) (N:i32) : t =
+  let simulate 't (D:i32) (f:[]f64->t) (g:t->t->t) (ne:t) (N:i32) : t =
     let seed = [61i32]
     let rng = rng.rng_from_seed seed
     let rngs = rng.split_rng N rng
@@ -24,7 +24,7 @@ module rng_reduce (rng : rng_engine with int.t = u32) = {
 module R = rng_reduce minstd_rand
 
 let pi (n:i32) : f64 =
-    let v = R.redomap 2 (\ (v:[2]f64) ->
+    let v = R.simulate 2 (\ (v:[2]f64) ->
                          let x = v[0]
 	                 let y = v[1]
 	                 in if x*x+y*y < 1f64 then 1.0 else 0.0 )

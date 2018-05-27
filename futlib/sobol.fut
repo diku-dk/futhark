@@ -23,10 +23,16 @@ module type sobol = {
   -- | `chunk i n` returns the array `[v(i),...,v(i+n-1)]` of sobol
   -- vectors where `v(j)` is the `j`'th D-dimensional sobol vector
   val chunk : i32 -> (n:i32) -> [n][D]f64
+  -- | `simulate f g ne n` runs the function `f` on `n`
+  -- `D`-dimensional point-vice normalised sobol vectors. The results
+  -- are reduced using the monoid defined by the (assumed) associate
+  -- function `g` with its neutral element `ne`.
+  val simulate 't : ([D]f64 -> t) -> (t -> t -> t) -> t -> i32 -> t
+  -- | The `Reduce` module implements a modularised version of
+  -- `simulate`.
   module Reduce :
       (X : { include monoid
              val f : [D]f64 -> t }) -> { val run : i32 -> X.t }
-  val redomap 't : ([D]f64 -> t) -> (t -> t -> t) -> t -> i32 -> t
 }
 
 module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
@@ -114,7 +120,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
       (iota N)
   }
 
-  let redomap 't (f:[]f64->t) (g:t->t->t) (ne:t) (N:i32) : t =
+  let simulate 't (f:[]f64->t) (g:t->t->t) (ne:t) (N:i32) : t =
     stream_red g (\ [sz] (ns:[sz]i32) : t ->
                   if sz > 0 then reduce g ne (map f (chunk (unsafe ns[0]) sz))
                   else ne)
