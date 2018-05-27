@@ -610,6 +610,8 @@ data ExpBase f vn =
             | OpSectionRight (QualName vn) (f PatternType)
               (ExpBase f vn) (f StructType, f StructType) (f PatternType) SrcLoc
               -- ^ @+2@; first type is operand, second is result.
+            | ProjectSection [Name] (f PatternType) SrcLoc
+              -- ^ Field projection as a section: @(.x.y.z)@.
 
             | DoLoop
               [TypeParamBase vn]
@@ -742,6 +744,7 @@ instance Located (ExpBase f vn) where
   locOf (OpSection _ _ loc)            = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
+  locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
   locOf (Stream _ _ _  pos)            = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc

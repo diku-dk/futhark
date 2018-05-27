@@ -378,10 +378,10 @@ literals and variables, but also more complicated forms.
        : | `quals` "." "(" `exp` ")"
        : | "[" `exp` ("," `exp`)* "]"
        : | "[" `exp` [".." `exp`] "..." `exp` "]"
-       : | "(" `qualid` `atom`+ ")"
        : | "(" `qualbinop` ")"
        : | "(" `exp` `qualbinop` ")"
        : | "(" `qualbinop` `exp` ")"
+       : | "(" ( "." `field` )+ ")"
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
