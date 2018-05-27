@@ -1148,9 +1148,9 @@ checkExp (OpSectionRight op _ e _ _ loc) = do
          "Operator section with invalid operator of type " ++ pretty ftype
 
 checkExp (ProjectSection fields NoInfo loc) = do
-  t <- newTypeVar loc "b"
-  t' <- foldM (flip $ mustHaveField loc) t fields
-  return $ ProjectSection fields (Info t') loc
+  a <- newTypeVar loc "a"
+  b <- foldM (flip $ mustHaveField loc) a fields
+  return $ ProjectSection fields (Info $ Arrow mempty Nothing a b) loc
 
 checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
