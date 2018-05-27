@@ -266,6 +266,9 @@ instance (Eq vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     parens $ ppr x <+> ppr binop
   pprPrec _ (OpSectionRight binop _ x _ _ _) =
     parens $ ppr binop <+> ppr x
+  pprPrec _ (ProjectSection fields _ _) =
+    parens $ mconcat $ map p fields
+    where p name = text "." <> ppr name
   pprPrec _ (DoLoop tparams pat initexp form loopbody _) =
     text "loop" <+> parens (spread (map ppr tparams ++ [ppr pat]) <+> equals
                             <+> ppr initexp) <+> equals <+>

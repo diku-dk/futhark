@@ -163,6 +163,8 @@ instance ASTMappable (ExpBase Info VName) where
     ((,) <$> traverse (mapOnStructType tv) t1a <*>
      traverse (mapOnStructType tv) t1b) <*>
     traverse (mapOnPatternType tv) t2 <*> pure loc
+  astMap tv (ProjectSection fields t loc) =
+    ProjectSection fields <$> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =
     DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
     mapOnExp tv mergeexp <*> astMap tv form <*>

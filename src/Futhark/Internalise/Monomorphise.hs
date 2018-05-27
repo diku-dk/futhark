@@ -231,6 +231,9 @@ transformExp (OpSectionRight (QualName qs fname) (Info t) e
   e' <- transformExp e
   desugarBinOpSection (QualName qs fname') Nothing (Just e') t xtype ytype rettype loc
 
+transformExp (ProjectSection fields (Info t) loc) =
+  desugarProjectSection fields t loc
+
 transformExp (DoLoop tparams pat e1 form e3 loc) = do
   e1' <- transformExp e1
   form' <- case form of
@@ -320,6 +323,19 @@ desugarBinOpSection qn e_left e_right t xtype ytype rettype loc = do
           x <- newNameFromString "x"
           return (Var (qualName x) (Info argtype) noLoc,
                   [Id x (Info $ fromStruct argtype) noLoc])
+
+desugarProjectSection :: [Name] -> PatternType -> SrcLoc -> MonoM Exp
+desugarProjectSection fields (Arrow _ _ t1 t2) loc = do
+  p <- newVName "project_p"
+  let body = foldl project (Var (qualName p) (Info t1) noLoc) fields
+  return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
+  where project e field =
+          case typeOf e of
+            Record fs | Just t <- M.lookup field fs ->
+                          Project field e (Info t) noLoc
+            t -> error $ "desugarOpSection: type " ++ pretty t ++
+                 " does not have field " ++ pretty field
+desugarProjectSection  _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()
 noticeDims = mapM_ notice . nestedDims

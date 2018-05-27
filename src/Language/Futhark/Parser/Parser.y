@@ -58,7 +58,6 @@ import Language.Futhark.Parser.Lexer
       id              { L _ (ID _) }
       'id['           { L _ (INDEXING _) }
 
-      qid             { L _ (QUALID _ _) }
       'qid['          { L _ (QUALINDEXING _ _) }
 
       'qid.('         { L _ (QUALPAREN _ _) }
@@ -483,8 +482,11 @@ FunParams :                     { [] }
            | FunParam FunParams { $1 : $2 }
 
 QualName :: { (QualName Name, SrcLoc) }
-          : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
-          | id  { let L loc (ID v) = $1 in (QualName [] v, loc) }
+          : id FieldAccesses
+            { let L vloc (ID v) = $1 in
+              foldl (\(QualName qs v', loc) (y, yloc) ->
+                      (QualName (qs ++ [v']) y, srcspan loc yloc))
+                    (QualName [] v, vloc) $2 }
 
 -- Expressions are divided into several layers.  The first distinction
 -- (between Exp and Exp2) is to factor out ascription, which we do not
@@ -600,10 +602,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
          in foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                   (Index (Var v NoInfo loc) slice NoInfo loc)
                   $2 }
-     | QualName FieldAccesses
-       { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
-               (Var (fst $1) NoInfo (snd $1))
-               $2 }
+     | QualName
+       { Var (fst $1) NoInfo (snd $1) }
      | '{' Fields '}' { RecordLit $2 (srcspan $1 $>) }
      | 'qid.(' Exp ')'
        { let L loc (QUALPAREN qs name) = $1 in QualParens (QualName qs name) $2 loc }
@@ -622,6 +622,9 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
        { OpSectionLeft $3 NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
      | '(' BinOp ')'
        { OpSection $2 NoInfo (srcspan $1 $>) }
+
+     | '(' FieldAccess FieldAccesses ')'
+       { ProjectSection (map fst ($2:$3)) NoInfo (srcspan $1 $>) }
 
 PrimLit :: { (PrimValue, SrcLoc) }
         : true   { (BoolValue True, $1) }

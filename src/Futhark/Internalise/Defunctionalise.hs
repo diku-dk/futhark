@@ -253,6 +253,7 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
 defuncExp OpSection{}      = error "defuncExp: unexpected operator section."
 defuncExp OpSectionLeft{}  = error "defuncExp: unexpected operator section."
 defuncExp OpSectionRight{} = error "defuncExp: unexpected operator section."
+defuncExp ProjectSection{} = error "defuncExp: unexpected projection section."
 
 defuncExp (DoLoop tparams pat e1 form e3 loc) = do
   let env_dim = envFromShapeParams tparams
@@ -363,6 +364,7 @@ defuncSoacExp :: Exp -> DefM Exp
 defuncSoacExp e@OpSection{}      = return e
 defuncSoacExp e@OpSectionLeft{}  = return e
 defuncSoacExp e@OpSectionRight{} = return e
+defuncSoacExp e@ProjectSection{} = return e
 
 defuncSoacExp (Parens e loc) =
   Parens <$> defuncSoacExp e <*> pure loc
@@ -776,6 +778,7 @@ freeVars expr = case expr of
   OpSection{}                 -> mempty
   OpSectionLeft _  _ e _ _ _  -> freeVars e
   OpSectionRight _ _ e _ _ _  -> freeVars e
+  ProjectSection{}            -> mempty
 
   DoLoop _ pat e1 form e3 _ -> let (e2fv, e2ident) = formVars form
                                in freeVars e1 <> e2fv <>
