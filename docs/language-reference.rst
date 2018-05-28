@@ -844,6 +844,11 @@ An *operator section* that is equivalent to ``\y -> x *binop* y``.
 
 An *operator section* that is equivalent to ``\x -> x *binop* y``.
 
+``(.a.b.c)``
+............
+
+An *operator section* that is equivalent to ``\x -> a.b.c``.
+
 Higher-order functions
 ----------------------
 
