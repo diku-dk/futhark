@@ -481,7 +481,8 @@ typeExpHtml e = case e of
     arg' <- typeArgExpHtml arg
     return $ t' <> " " <> arg'
   TEArrow pname t1 t2 _ -> do
-    t1' <- typeExpHtml t1
+    t1' <- case t1 of TEArrow{} -> parens <$> typeExpHtml t1
+                      _         -> typeExpHtml t1
     t2' <- typeExpHtml t2
     return $ case pname of
       Just v ->
