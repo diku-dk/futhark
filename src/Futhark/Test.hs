@@ -68,7 +68,8 @@ data TestAction
   deriving (Show)
 
 -- | Input and output pairs for some entry point.
-data InputOutputs = InputOutputs T.Text [TestRun]
+data InputOutputs = InputOutputs { iosEntryPoint :: T.Text
+                                 , iosTestRuns :: [TestRun] }
   deriving (Show)
 
 -- | The error expected for a negative test.
