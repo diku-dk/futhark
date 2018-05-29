@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Scans and reductions can now be horizontally fused.
 
+  * `futhark-bench` now supports multiple entry points, just like
+    `futhark-test`.
+
 ### Removed
 
   * The `reshape` construct has been removed.  Use the

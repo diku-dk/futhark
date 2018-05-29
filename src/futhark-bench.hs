@@ -83,7 +83,7 @@ runBenchmarks opts paths = do
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
 
-  results <- mapM (runBenchmark opts) compiled_benchmarks
+  results <- concat <$> mapM (runBenchmark opts) compiled_benchmarks
   case optJSON opts of
     Nothing -> return ()
     Just file -> writeFile file $ JSON.encode $ resultsToJSON results
@@ -134,16 +134,17 @@ compileBenchmark opts (program, spec) =
 
         hasRuns (InputOutputs _ runs) = not $ null runs
 
-runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO BenchResult
-runBenchmark opts (program, cases) = do
-  putStr $ "Results for " ++ program ++ ":\n"
-  BenchResult program . catMaybes . concat <$> mapM forInputOutputs cases
-  where forInputOutputs (InputOutputs "main" runs) =
-          mapM (runBenchmarkCase opts program $ padTo runs) runs
-        forInputOutputs InputOutputs{} =
-          return []
+runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO [BenchResult]
+runBenchmark opts (program, cases) = mapM forInputOutputs cases
+  where forInputOutputs (InputOutputs entry_name runs) = do
+          putStr $ "Results for " ++ program' ++ ":\n"
+          BenchResult program' . catMaybes <$>
+            mapM (runBenchmarkCase opts program entry_name pad_to) runs
+          where program' = if entry_name == "main"
+                           then program
+                           else program ++ ":" ++ T.unpack entry_name
 
-        padTo = foldl max 0 . map (length . runDescription)
+        pad_to = foldl max 0 $ concatMap (map (length . runDescription) . iosTestRuns) cases
 
 reportResult :: [RunResult] -> IO ()
 reportResult [] =
@@ -166,13 +167,14 @@ runBenchM = runExceptT
 io :: IO a -> BenchM a
 io = liftIO
 
-runBenchmarkCase :: BenchOptions -> FilePath -> Int -> TestRun -> IO (Maybe DataResult)
-runBenchmarkCase _ _ _ (TestRun _ _ RunTimeFailure{} _) =
+runBenchmarkCase :: BenchOptions -> FilePath -> T.Text -> Int -> TestRun
+                 -> IO (Maybe DataResult)
+runBenchmarkCase _ _ _ _ (TestRun _ _ RunTimeFailure{} _) =
   return Nothing -- Not our concern, we are not a testing tool.
-runBenchmarkCase opts _ _ (TestRun tags _ _ _)
+runBenchmarkCase opts _ _ _ (TestRun tags _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
       return Nothing
-runBenchmarkCase opts program pad_to (TestRun _ input_spec (Succeeds expected_spec) dataset_desc) =
+runBenchmarkCase opts program entry pad_to (TestRun _ input_spec (Succeeds expected_spec) dataset_desc) =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
@@ -182,7 +184,10 @@ runBenchmarkCase opts program pad_to (TestRun _ input_spec (Succeeds expected_sp
         bs <- getValuesBS dir vs
         return (LBS.toStrict bs, vs')
   maybe_expected <- maybe (return Nothing) (fmap Just . getValuesAndBS) expected_spec
-  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts, "-b"]
+  let options = optExtraOptions opts ++ ["-e", T.unpack entry,
+                                         "-t", tmpfile,
+                                         "-r", show $ optRuns opts,
+                                         "-b"]
 
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
