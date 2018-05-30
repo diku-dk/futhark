@@ -1,5 +1,5 @@
 -- ==
--- error: Couldn't match expected type `M1.*with `M0
+-- error: Couldn't match expected type `M1.*with.*`M0
 
 
 module type MT = {
