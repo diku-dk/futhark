@@ -90,11 +90,11 @@ td {
 }
 
 @media (min-width:950px) {
-    #file_list {
+    .file_list {
         columns: 3;
     }
 
-    #file_list > dd {
+    .file_list > dd {
         break-before: avoid;
     }
 }
