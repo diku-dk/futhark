@@ -22,6 +22,7 @@ module Language.Futhark.Semantic
   )
 where
 
+import Data.Semigroup ((<>))
 import Data.Loc
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
