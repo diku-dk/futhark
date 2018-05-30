@@ -140,10 +140,15 @@ data ValBinding = BoundV [TypeParam] PatternType
 -- A piece of information that describes what process the type checker
 -- currently performing.  This is used to give better error messages.
 data BreadCrumb = MatchingTypes (TypeBase () ()) (TypeBase () ())
+                | MatchingFields Name
 
 instance Show BreadCrumb where
   show (MatchingTypes t1 t2) =
-    "When matching type `" ++ pretty t1 ++ "' with `" ++ pretty t2 ++ "'."
+    "When matching type\n" ++ indent (pretty t1) ++
+    "\nwith\n" ++ indent (pretty t2)
+    where indent = intercalate "\n" . map ("  "++) . lines
+  show (MatchingFields field) =
+    "When matching types of record field `" ++ pretty field ++ "`."
 
 -- | Type checking happens with access to this environment.  The
 -- tables will be extended during type-checking as bindings come into
@@ -1690,8 +1695,8 @@ unify loc orig_t1 orig_t2 = do
         (Record fs,
          Record arg_fs)
           | M.keys fs == M.keys arg_fs ->
-              mapM_ (uncurry subunify) $
-              M.intersectionWith (,) fs arg_fs
+              forM_ (M.toList $ M.intersectionWith (,) fs arg_fs) $ \(k, (k_t1, k_t2)) ->
+              breadCrumb (MatchingFields k) $ subunify k_t1 k_t2
 
         (TypeVar (TypeName _ tn) targs,
          TypeVar (TypeName _ arg_tn) arg_targs)
