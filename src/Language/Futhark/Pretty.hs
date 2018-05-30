@@ -93,7 +93,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
         parens (commasep $ map ppr ts)
     | otherwise =
         braces (commasep $ map ppField $ M.toList fs)
-    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
+    where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr (Prim et) = ppr et
@@ -105,7 +105,7 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
         parens $ commasep $ map ppr ts
     | otherwise =
         braces $ commasep $ map ppField $ M.toList fs
-    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
+    where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
   ppr (Arrow _ (Just v) t1 t2) =
     parens (ppr (baseName v) <> colon <+> ppr t1) <+> text "->" <+> ppr t2
   ppr (Arrow _ Nothing t1 t2) =
@@ -120,7 +120,7 @@ instance (Eq vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TEArray at d _) = ppr (ShapeDecl [d]) <> ppr at
   ppr (TETuple ts _) = parens $ commasep $ map ppr ts
   ppr (TERecord fs _) = braces $ commasep $ map ppField fs
-    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
+    where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
   ppr (TEVar name _) = ppr name
   ppr (TEApply t arg _) = ppr t <+> ppr arg
   ppr (TEArrow (Just v) t1 t2 _) = parens v' <+> text "->" <+> ppr t2
