@@ -12,7 +12,7 @@ import Data.Maybe
 import Data.Ord
 import qualified Data.Map as M
 import qualified Data.Set as S
-import System.FilePath (splitPath, (-<.>), (<.>), makeRelative)
+import System.FilePath (splitPath, (</>), (-<.>), (<.>), makeRelative)
 import Text.Blaze.Html5 (AttributeValue, Html, (!), toHtml)
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
@@ -101,7 +101,7 @@ renderFiles important_imports imports = runWriter $ do
 
     return (current,
             (H.docTypeHtml ! A.lang "en" $
-             addBoilerplate current current $
+             addBoilerplate ("doc" </> current) current $
              maybe_abstract <>
              selfLink "synopsis" (H.h2 "Synopsis") <> (H.div ! A.id "overview") synopsis <>
              selfLink "description" (H.h2 "Description") <> description <>
@@ -111,8 +111,9 @@ renderFiles important_imports imports = runWriter $ do
   return $
     [("index.html", contentsPage important_imports $ map (fmap snd) import_pages),
      ("doc-index.html", indexPage documented file_map)]
-    ++ map ((<.> "html") *** fst) import_pages
+    ++ map (importHtml *** fst) import_pages
   where file_map = vnameToFileMap imports
+        importHtml import_name = "doc" </> import_name <.> "html"
 
 -- | The header documentation (which need not be present) can contain
 -- an abstract and further sections.
@@ -137,7 +138,7 @@ headerDoc prog =
 
 contentsPage :: [FilePath] -> [(String, Html)] -> Html
 contentsPage important_imports pages =
-  H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $
+  H.docTypeHtml $ addBoilerplate "index.html" "Futhark Library Documentation" $
   H.h2 "Main libraries" <>
   fileList important_pages <>
   if null unimportant_pages then mempty else
@@ -151,14 +152,14 @@ contentsPage important_imports pages =
           mconcat $ map linkTo $ sortBy (comparing fst) pages'
 
         linkTo (name, maybe_abstract) =
-          let file = makeRelative "/" $ name -<.> "html"
+          let file = makeRelative "/" $ "doc" </> name -<.> "html"
           in H.div ! A.class_ "file_desc" $
              (H.dt ! A.class_ "desc_header") (H.a ! A.href (fromString file) $ fromString name) <>
              (H.dd ! A.class_ "desc_doc") maybe_abstract
 
 indexPage :: Documented -> FileMap -> Html
 indexPage documented fm =
-  H.docTypeHtml $ addBoilerplate "/doc-index.html" "Index" $
+  H.docTypeHtml $ addBoilerplate "doc-index.html" "Index" $
   (H.ul ! A.id "doc_index_list" $
    mconcat $ map initialListEntry $
    letter_group_links ++ [symbol_group_link]) <>
