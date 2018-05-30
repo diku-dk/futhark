@@ -15,7 +15,8 @@ When making a release, we not only make a binary release, we also make
 a source release based on a specific Git commit.  A source release
 corresponds exactly to the state of the Git repository at some point.
 
- * Decide on a version number X.Y.Z.
+ * Decide on a version number X.Y.Z.  Remember that only unreleased
+   versions have Z=0.
 
  * Find a commit that would make for a good release.  Make sure it is
    at least minimally functional.
@@ -38,5 +39,5 @@ corresponds exactly to the state of the Git repository at some point.
    release notes from `CHANGELOG.md` and upload the binary tarball.
 
 You're done!  Congratulations!  Increment the version number in
-`package.yaml` and make room for a new release in `CHANGELOG.md` and
-go hack some more on the compiler.
+`package.yaml` (such that Z=0) and make room for a new release in
+`CHANGELOG.md` and go hack some more on the compiler.
