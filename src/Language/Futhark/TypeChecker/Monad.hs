@@ -57,11 +57,11 @@ import Data.Ord
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Semigroup as Sem
-import qualified System.FilePath.Posix as Posix
 
 import Prelude hiding (mapM, mod)
 
 import Language.Futhark
+import Language.Futhark.Semantic
 import Language.Futhark.Traversals
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
@@ -151,59 +151,6 @@ instance Show TypeError where
   show (UnappliedFunctor loc) =
     "Cannot have parametric module at " ++ locStr loc ++ "."
 
--- | A set of abstract types and where their definition is expected.
-type TySet = S.Set (QualName VName)
-
--- | Representation of a module, which is either a plain environment,
--- or a parametric module ("functor" in SML).
-data Mod = ModEnv Env
-         | ModFun FunSig
-         deriving (Show)
-
--- | A parametric functor consists of a set of abstract types, the
--- environment of its parameter, and the resulting module type.
-data FunSig = FunSig { funSigAbs :: TySet
-                     , funSigMod :: Mod
-                     , funSigMty :: MTy
-                     }
-            deriving (Show)
-
--- | Representation of a module type.
-data MTy = MTy { mtyAbs :: TySet
-                 -- ^ Abstract types in the module type.
-               , mtyMod :: Mod
-               }
-         deriving (Show)
-
--- | A binding from a name to its definition as a type.
-data TypeBinding = TypeAbbr [TypeParam] StructType
-                 deriving (Eq, Show)
-
--- | Type parameters, list of parameter types (optinally named), and
--- return type.  The type parameters are in scope in both parameter
--- types and the return type.  Non-functional values have only a
--- return type.
-data BoundV = BoundV [TypeParam] StructType
-                deriving (Show)
-
-type NameMap = M.Map (Namespace, Name) (QualName VName)
-
--- | Modules produces environment with this representation.
-data Env = Env { envVtable :: M.Map VName BoundV
-               , envTypeTable :: M.Map VName TypeBinding
-               , envSigTable :: M.Map VName MTy
-               , envModTable :: M.Map VName Mod
-               , envNameMap :: NameMap
-               } deriving (Show)
-
-instance Sem.Semigroup Env where
-  Env vt1 tt1 st1 mt1 nt1 <> Env vt2 tt2 st2 mt2 nt2 =
-    Env (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
-
-instance Monoid Env where
-  mempty = Env mempty mempty mempty mempty mempty
-  mappend = (Sem.<>)
-
 -- | The warnings produced by the type checker.  The 'Show' instance
 -- produces a human-readable description.
 newtype Warnings = Warnings [(SrcLoc, String)] deriving (Eq)
@@ -228,12 +175,12 @@ instance Show Warnings where
 singleWarning :: SrcLoc -> String -> Warnings
 singleWarning loc problem = Warnings [(loc, problem)]
 
-type ImportTable = M.Map FilePath Env
+type ImportTable = M.Map String Env
 
 data Context = Context { contextEnv :: Env
                        , contextRootEnv :: Env
                        , contextImportTable :: ImportTable
-                       , contextFilePath :: FilePath
+                       , contextImportName :: ImportName
                        }
 
 -- | The type checker runs in this monad.
@@ -249,7 +196,7 @@ newtype TypeM a = TypeM (RWST
             MonadState VNameSource,
             MonadError TypeError)
 
-runTypeM :: Env -> ImportTable -> FilePath -> VNameSource
+runTypeM :: Env -> ImportTable -> ImportName -> VNameSource
          -> TypeM a
          -> Either TypeError (a, Warnings, VNameSource)
 runTypeM env imports fpath src (TypeM m) = do
@@ -330,15 +277,13 @@ instance MonadTypeChecker TypeM where
 
   lookupImport loc file = do
     imports <- asks contextImportTable
-    my_path <- asks contextFilePath
-    let abs_path = my_path Posix.</> file
-    case M.lookup abs_path imports of
-      Nothing    -> throwError $ TypeError loc $ "Unknown import \"" ++ file ++ "\"" ++ extra
-      Just scope -> return (abs_path, scope)
-      where extra | ".." `elem` Posix.splitDirectories file =
-                      "\nNote: '..' is not supported in file imports."
-                  | otherwise =
-                      ""
+    my_path <- asks contextImportName
+    let canonical_import = includeToString $ mkImportFrom my_path file loc
+    case M.lookup canonical_import imports of
+      Nothing    -> throwError $ TypeError loc $
+                    unlines ["Unknown import \"" ++ canonical_import ++ "\"",
+                             "Known: " ++ intercalate ", " (M.keys imports)]
+      Just scope -> return (canonical_import, scope)
 
   lookupVar loc qn = do
     outer_env <- askRootEnv
@@ -435,11 +380,6 @@ anyPrimType :: [PrimType]
 anyPrimType = Bool : anyIntType ++ anyFloatType
 
 --- Name handling
-
-data Namespace = Term -- ^ Functions and values.
-               | Type
-               | Signature
-               deriving (Eq, Ord, Show, Enum)
 
 ppSpace :: Namespace -> String
 ppSpace Term = "name"

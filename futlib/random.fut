@@ -73,12 +73,9 @@
 --
 -- ## See also
 --
--- The `Sobol`@term@"/futlib/sobol" module provides a very different
+-- The `Sobol`@term@"sobol" module provides a very different
 -- (and inherently parallel) way of generating random numbers, which
 -- may be more suited for Monte Carlo applications.
-
-import "/futlib/math"
-import "/futlib/array"
 
 -- Quick and dirty hashing to mix in something that looks like entropy.
 -- From http://stackoverflow.com/a/12996028

@@ -17,7 +17,7 @@ import Prelude hiding (mod, abs)
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
-import Language.Futhark.TypeChecker (Imports, FileModule(..))
+import Language.Futhark.Semantic (Imports, FileModule(..))
 
 -- | A substitution from names in the original program to names in the
 -- generated/residual program.

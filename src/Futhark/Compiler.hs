@@ -34,7 +34,6 @@ import qualified Futhark.Representation.SOACS as I
 import qualified Futhark.TypeCheck as I
 import Futhark.Compiler.Program
 import qualified Language.Futhark as E
-import qualified Language.Futhark.TypeChecker as E
 import Language.Futhark.TH ()
 import Futhark.Util.Log
 
@@ -42,14 +41,12 @@ data FutharkConfig = FutharkConfig
                      { futharkVerbose :: Maybe (Maybe FilePath)
                      , futharkWarn :: Bool -- ^ Warn if True.
                      , futharkWerror :: Bool -- ^ If true, error on any warnings.
-                     , futharkImportPaths :: ImportPaths
                      }
 
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
                                  , futharkWarn = True
                                  , futharkWerror = False
-                                 , futharkImportPaths = mempty
                                  }
 
 dumpError :: FutharkConfig -> CompilerError -> IO ()
@@ -120,8 +117,7 @@ runPipelineOnProgram :: FutharkConfig
 runPipelineOnProgram config b pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
-  (ws, prog_imports, namesrc) <-
-    readProgram b (futharkImportPaths config) file
+  (ws, prog_imports, namesrc) <- readProgram b file
 
   when (futharkWarn config) $ do
     liftIO $ hPutStr stderr $ show ws
@@ -135,7 +131,7 @@ runPipelineOnProgram config b pipeline file = do
   case res of
     Left err ->
       internalErrorS ("During internalisation: " <> pretty err) $ E.Prog Nothing $
-      concatMap (E.progDecs . E.fileProg . snd) prog_imports
+      concatMap (E.progDecs . fileProg . snd) prog_imports
     Right int_prog -> do
       when (pipelineVerbose pipeline_config) $
         logMsg ("Type-checking internalised program" :: String)
