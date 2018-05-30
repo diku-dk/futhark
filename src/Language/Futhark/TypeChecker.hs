@@ -8,8 +8,6 @@ module Language.Futhark.TypeChecker
   ( checkProg
   , TypeError
   , Warnings
-  , FileModule(..)
-  , Imports
   )
   where
 
@@ -27,22 +25,13 @@ import qualified Data.Set as S
 import Prelude hiding (abs, mod)
 
 import Language.Futhark
+import Language.Futhark.Semantic
 import Futhark.FreshNames hiding (newName)
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark.TypeChecker.Terms
 import Language.Futhark.TypeChecker.Types
 
 --- The main checker
-
--- | The result of type checking some file.  Can be passed to further
--- invocations of the type checker.
-data FileModule = FileModule { fileAbs :: TySet -- ^ Abstract types.
-                             , fileEnv :: Env
-                             , fileProg :: Prog
-                             }
-
--- | A mapping from import names to imports.  The ordering is significant.
-type Imports = [(String, FileModule)]
 
 -- | Type check a program containing no type information, yielding
 -- either a type error or a program with complete type information.
@@ -51,11 +40,11 @@ type Imports = [(String, FileModule)]
 -- relative @import@s.
 checkProg :: Imports
           -> VNameSource
-          -> FilePath
+          -> ImportName
           -> UncheckedProg
           -> Either TypeError (FileModule, Warnings, VNameSource)
-checkProg files src fpath prog =
-  runTypeM initialEnv files' fpath src $ checkProgM prog
+checkProg files src name prog =
+  runTypeM initialEnv files' name src $ checkProgM prog
   where files' = M.map fileEnv $ M.fromList files
 
 initialEnv :: Env

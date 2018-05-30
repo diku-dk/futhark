@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-bench` now supports multiple entry points, just like
     `futhark-test`.
 
+  * ".." is now supported in `include` paths.
+
 ### Removed
 
   * The `reshape` construct has been removed.  Use the
@@ -38,6 +40,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `concat` and `rotate` no longer support the `@` notation.  Use
     `map` nests instead.
+
+  * Removed `-I`/`--library`.  These never worked with
+    `futhark-test`/`futhark-bench` anyway.
 
 ### Changed
 
@@ -52,6 +57,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 
   * Better type inference for `rearrange` and `rotate`.
+
+  * `import` path resolution is now much more robust.
 
 ## [0.4.1]
 

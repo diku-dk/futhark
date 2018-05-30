@@ -22,7 +22,7 @@ import Data.List
 import Data.Loc
 
 import Language.Futhark as E hiding (TypeArg)
-import Language.Futhark.TypeChecker as E (Imports)
+import Language.Futhark.Semantic (Imports)
 import Futhark.Representation.SOACS as I hiding (stmPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
@@ -43,7 +43,7 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
 internaliseProg :: MonadFreshNames m =>
-                   E.Imports -> m (Either String I.Prog)
+                   Imports -> m (Either String I.Prog)
 internaliseProg prog = do
   prog_decs <- Defunctorise.transformProg prog
   prog_decs' <- Monomorphise.transformProg prog_decs

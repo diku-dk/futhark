@@ -6,10 +6,10 @@
 -- it does not depend on anything too big to be serialised
 -- efficiently.
 
-open import "/futlib/soacs"
-open import "/futlib/array"
-open import "/futlib/math"
-open import "/futlib/functional"
+open import "soacs"
+open import "array"
+open import "math"
+open import "functional"
 
 -- | Create single-precision float from integer.
 let r32 (x: i32): f32 = f32.i32 x

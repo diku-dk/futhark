@@ -2,15 +2,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Compiler.Program
        ( readProgram
        , readLibrary
-       , E.Imports
-       , E.FileModule(..)
+       , Imports
+       , FileModule(..)
 
-       , ImportPaths
-       , importPath
        , Basis(..)
        , emptyBasis
        )
@@ -23,36 +20,34 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Except
-import Control.Monad.Extra (firstJustM)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.List
 import System.FilePath
-import qualified System.FilePath.Posix as Posix
 import System.IO.Error
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Language.Haskell.TH.Syntax (Lift)
-import qualified Data.Semigroup as Sem
 
 import Futhark.Error
 import Futhark.FreshNames
 import Language.Futhark.Parser
 import qualified Language.Futhark as E
 import qualified Language.Futhark.TypeChecker as E
+import Language.Futhark.Semantic
 import Language.Futhark.Futlib
 import Language.Futhark.TH ()
 
 -- | A little monad for reading and type-checking a Futhark program.
 type CompilerM m = ReaderT [FilePath] (StateT ReaderState m)
 
-data ReaderState = ReaderState { alreadyImported :: E.Imports
+data ReaderState = ReaderState { alreadyImported :: Imports
                                , nameSource :: VNameSource
                                , warnings :: E.Warnings
                                }
 
 -- | Pre-typechecked imports, including a starting point for the name source.
-data Basis = Basis { basisImports :: E.Imports
+data Basis = Basis { basisImports :: Imports
                    , basisNameSource :: VNameSource
                    , basisRoots :: [String]
                      -- ^ Files that should be implicitly opened.
@@ -68,53 +63,9 @@ emptyBasis = Basis { basisImports = mempty
                    }
   where src = newNameSource $ succ $ maximum $ map E.baseTag $ M.keys E.intrinsics
 
--- | A collection of the import paths searched by the Futhark
--- compiler.  A value constructed with 'mappend' will search in the
--- left-hand argument first.
-newtype ImportPaths = ImportPaths [FilePath]
-  deriving (Sem.Semigroup, Monoid)
-
--- | Construct an 'ImportPaths' from a single path.
-importPath :: FilePath -> ImportPaths
-importPath = ImportPaths . pure
-
--- | Absolute reference to a Futhark code file.  Does not include the
--- @.fut@ extension.  The 'FilePath' must be absolute.
-data FutharkInclude = FutharkInclude Posix.FilePath SrcLoc
-  deriving (Eq, Show)
-
-instance Located FutharkInclude where
-  locOf (FutharkInclude _ loc) = locOf loc
-
-mkInitialInclude :: String -> FutharkInclude
-mkInitialInclude s = FutharkInclude ("/" Posix.</> toPOSIX s) noLoc
-  where
-    toPOSIX :: FilePath -> Posix.FilePath
-    toPOSIX = Posix.joinPath . splitDirectories
-
-mkInclude :: FutharkInclude -> String -> SrcLoc -> FutharkInclude
-mkInclude (FutharkInclude includer _) includee =
-  FutharkInclude (takeDirectory includer Posix.</> includee)
-
-includeToFilePath :: FilePath -> FutharkInclude -> FilePath
-includeToFilePath dir (FutharkInclude fp _) =
-  dir </> fromPOSIX (Posix.makeRelative "/" fp) <.> "fut"
-  where
-    -- | Some bad operating systems do not use forward slash as
-    -- directory separator - this is where we convert Futhark includes
-    -- (which always use forward slash) to native paths.
-    fromPOSIX :: Posix.FilePath -> FilePath
-    fromPOSIX = joinPath . Posix.splitDirectories
-
-includeToString :: FutharkInclude -> String
-includeToString (FutharkInclude s _) = s
-
-includePath :: FutharkInclude -> String
-includePath (FutharkInclude s _) = Posix.takeDirectory s
-
 readImport :: (MonadError CompilerError m, MonadIO m) =>
-              ImportPaths -> [FutharkInclude] -> FutharkInclude -> CompilerM m ()
-readImport search_path steps include
+              [ImportName] -> ImportName -> CompilerM m ()
+readImport steps include
   | include `elem` steps =
       throwError $ ExternalError $ T.pack $
       "Import cycle: " ++ intercalate " -> "
@@ -123,22 +74,20 @@ readImport search_path steps include
       already_done <- gets $ isJust . lookup (includeToString include) . alreadyImported
 
       unless already_done $
-        uncurry (handleFile search_path steps include) =<<
-        readImportFile search_path include
+        uncurry (handleFile steps include) =<< readImportFile include
 
 handleFile :: (MonadIO m, MonadError CompilerError m) =>
-              ImportPaths
-           -> [FutharkInclude]
-           -> FutharkInclude
+              [ImportName]
+           -> ImportName
            -> T.Text
            -> FilePath
            -> CompilerM m ()
-handleFile search_path steps include file_contents file_name = do
+handleFile steps include file_contents file_name = do
   prog <- case parseFuthark file_name file_contents of
     Left err -> externalErrorS $ show err
     Right prog -> return prog
 
-  mapM_ (readImport search_path steps' . uncurry (mkInclude include)) $
+  mapM_ (readImport steps' . uncurry (mkImportFrom include)) $
     E.progImports prog
 
   -- It is important to not read these before the above calls to
@@ -147,8 +96,7 @@ handleFile search_path steps include file_contents file_name = do
   src <- gets nameSource
   prelude <- ask
 
-  case E.checkProg imports src (includePath include) $
-       prependPrelude prelude prog of
+  case E.checkProg imports src include $ prependPrelude prelude prog of
     Left err ->
       externalError $ T.pack $ show err
     Right (m, ws, src') ->
@@ -169,64 +117,52 @@ readFileSafely filepath =
               return $ Just $ Left $ show e
 
 readImportFile :: (MonadError CompilerError m, MonadIO m) =>
-                  ImportPaths -> FutharkInclude -> m (T.Text, FilePath)
-readImportFile (ImportPaths dirs) include = do
+                  ImportName -> m (T.Text, FilePath)
+readImportFile include = do
   -- First we try to find a file of the given name in the search path,
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
-  r <- liftIO $ firstJustM lookInDir dirs
+  r <- liftIO $ readFileSafely $ includeToFilePath include
   case (r, lookup abs_filepath futlib) of
     (Just (Right (filepath,s)), _) -> return (s, filepath)
     (Just (Left e), _)  -> externalErrorS e
-    (Nothing, Just t)   -> return (t, includeToFilePath "[builtin]" include)
+    (Nothing, Just t)   -> return (t, "[builtin]" </> includeToFilePath include)
     (Nothing, Nothing)  -> externalErrorS not_found
-   where abs_filepath = includeToFilePath "/" include
-
-         lookInDir dir = do
-           let filepath = includeToFilePath dir include
-           readFileSafely filepath
+   where abs_filepath = includeToFilePath include
 
          not_found =
            "Could not find import '" ++ includeToString include ++ "' at " ++
-           E.locStr (srclocOf include) ++ " in path '" ++ show dirs ++ "'."
+           E.locStr (srclocOf include) ++ "."
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
-               Basis -> ImportPaths -> FilePath
+               Basis -> FilePath
             -> m (E.Warnings,
-                  E.Imports,
+                  Imports,
                   VNameSource)
-readProgram basis search_path fp =
-  runCompilerM basis $ do
-    r <- liftIO $ readFileSafely fp
-    case r of
-      Just (Right (_, fs)) ->
-        handleFile (importPath fp_dir <> search_path)
-        [] (mkInitialInclude fp_name) fs fp
-      Just (Left e) -> externalError $ T.pack e
-      Nothing -> externalErrorS $ fp ++ ": file not found."
-  where (fp_dir, fp_file) = splitFileName fp
-        (fp_name, _) = splitExtension fp_file
+readProgram basis fp = readLibrary basis [fp]
 
 -- | Read and type-check a Futhark library (multiple files, relative
 -- to the same search path), including all imports.
 readLibrary :: (MonadError CompilerError m, MonadIO m) =>
-               Basis -> ImportPaths -> [FilePath]
+               Basis -> [FilePath]
             -> m (E.Warnings,
-                  E.Imports,
+                  Imports,
                   VNameSource)
-readLibrary basis search_path fps =
+readLibrary basis fps =
   runCompilerM basis (mapM onFile fps)
   where onFile fp =  do
-
-          fs <- liftIO $ T.readFile fp
-
-          handleFile search_path [] (mkInitialInclude fp_name) fs fp
+          r <- liftIO $ readFileSafely fp
+          case r of
+            Just (Right (_, fs)) ->
+              handleFile [] (mkInitialImport fp_name) fs fp
+            Just (Left e) -> externalError $ T.pack e
+            Nothing -> externalErrorS $ fp ++ ": file not found."
             where (fp_name, _) = splitExtension fp
 
 runCompilerM :: Monad m =>
                 Basis -> CompilerM m a
-             -> m (E.Warnings, [(String, E.FileModule)], VNameSource)
+             -> m (E.Warnings, [(String, FileModule)], VNameSource)
 runCompilerM (Basis imports src roots) m = do
   let s = ReaderState (reverse imports) src mempty
   s' <- execStateT (runReaderT m roots) s

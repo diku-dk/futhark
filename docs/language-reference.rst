@@ -1077,13 +1077,17 @@ is and make them available in the current Futhark program.  The
 
 You can also include files from subdirectories::
 
-  include "path/to/a/file"
+  import "path/to/a/file"
 
-The above will include the file ``path/to/a/file.fut``.  When
-importing a nonlocal file (such as the standard library or the
-compiler search path), the path must begin with a forward slash.
+The above will include the file ``path/to/a/file.fut`` relative to the
+including file.  When importing a nonlocal file (such as the basis
+library), the path must begin with a forward slash.
 
 Qualified imports are also possible, where a module is created for the
 file::
 
   module M = import "module"
+
+In fact, a plain ``import "module"`` is equivalent to::
+
+  local open import "module"

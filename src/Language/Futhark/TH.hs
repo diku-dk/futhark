@@ -13,8 +13,8 @@ import           Language.Haskell.TH.Syntax         (Lift)
 
 import           Language.Futhark.Core
 import           Language.Futhark.Syntax
-import           Language.Futhark.TypeChecker
 import           Language.Futhark.TypeChecker.Monad
+import           Language.Futhark.Semantic
 
 -- Instances for things from non-Futhark packages
 deriving instance Lift Pos

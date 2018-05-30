@@ -1,6 +1,6 @@
 -- | Basic mathematical modules and functions.
 
-import "/futlib/soacs"
+import "soacs"
 
 local let const 'a 'b (x: a) (_: b): a = x
 

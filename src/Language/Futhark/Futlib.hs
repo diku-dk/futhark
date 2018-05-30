@@ -16,4 +16,4 @@ import System.FilePath
 futlib :: [(FilePath, T.Text)]
 futlib = map fixup futlib_bs
   where futlib_bs = $(embedDir "futlib")
-        fixup (path, s) = ("/futlib" </> path, T.decodeUtf8 s)
+        fixup (path, s) = ("futlib" </> path, T.decodeUtf8 s)

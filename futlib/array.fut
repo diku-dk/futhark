@@ -1,8 +1,8 @@
 -- | Utility functions for arrays.
 
-import "/futlib/math"
-import "/futlib/soacs"
-import "/futlib/functional"
+import "math"
+import "soacs"
+import "functional"
 
 -- | The size of the outer dimension of an array.
 let length [n] 't (_: [n]t) = n

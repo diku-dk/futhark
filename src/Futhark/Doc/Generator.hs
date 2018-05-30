@@ -23,7 +23,7 @@ import Text.Markdown
 
 import Prelude hiding (abs)
 
-import Language.Futhark.TypeChecker (FileModule(..), Imports)
+import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad hiding (warn)
 import Language.Futhark
 import Futhark.Doc.Html
@@ -530,7 +530,7 @@ patternHtml pat = do
 
 relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
-  concat (replicate (length (splitPath src) - 2) "../") ++ dest
+  concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
 dimDeclHtml :: DimDecl VName -> DocM Html
 dimDeclHtml AnyDim = return mempty
@@ -584,7 +584,9 @@ identifierLinks loc (c:s') = (c:) <$> identifierLinks loc s'
 
 lookupName :: (Namespace, String, Maybe FilePath) -> DocM (Maybe VName)
 lookupName (namespace, name, file) = do
-  env <- lookupEnvForFile file
+  current <- asks ctxCurrent
+  let file' = includeToString . flip (mkImportFrom (mkInitialImport current)) noLoc <$> file
+  env <- lookupEnvForFile file'
   case M.lookup (namespace, nameFromString name) . envNameMap =<< env of
     Nothing -> return Nothing
     Just qn -> return $ Just $ qualLeaf qn
