@@ -12,7 +12,6 @@ import Control.Monad.Except
 
 import Data.List
 import Data.Semigroup ((<>))
-import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
@@ -268,11 +267,15 @@ makeTestCase :: TestConfig -> TestMode -> (FilePath, ProgramTest) -> TestCase
 makeTestCase config mode (file, spec) =
   TestCase mode file spec (configPrograms config) (configExtraOptions config)
 
-runTest :: MVar TestCase -> MVar (TestCase, TestResult) -> IO ()
+data ReportMsg = TestStarted TestCase
+               | TestDone TestCase TestResult
+
+runTest :: MVar TestCase -> MVar ReportMsg -> IO ()
 runTest testmvar resmvar = forever $ do
   test <- takeMVar testmvar
+  putMVar resmvar $ TestStarted test
   res <- doTest test
-  putMVar resmvar (test, res)
+  putMVar resmvar $ TestDone test res
 
 excludedTest :: TestConfig -> TestCase -> Bool
 excludedTest config =
@@ -281,23 +284,27 @@ excludedTest config =
 clearLine :: IO ()
 clearLine = putStr "\27[2K"
 
-reportInteractive :: Int -> String -> Int -> Int -> Int -> IO ()
-reportInteractive longest first failed passed remaining = do
+reportInteractive :: [String] -> Int -> Int -> Int -> IO ()
+reportInteractive running failed passed remaining = do
   clearLine
-  putStr $
-    "\rWaiting for " ++ first ++ replicate (1+longest - length first) ' '
-    ++ "(" ++
-    show failed ++ " failed, " ++
-    show passed ++ " passed, " ++
-    show remaining ++ " to go.)\r"
+  putStr $ atMostChars 160 line ++ "\r"
   hFlush stdout
+    where num_running = length running
+          line = show failed ++ " failed; " ++
+                 show passed ++ " passed; " ++
+                 show remaining ++ " to go; currently running " ++
+                 show num_running ++ " tests: " ++
+                 unwords (reverse running)
 
-reportText :: String -> Int -> Int -> Int -> IO ()
-reportText first failed passed remaining =
-  putStr $ "Waiting for " ++ first ++ " (" ++
-         show failed ++ " failed, " ++
-         show passed ++ " passed, " ++
-         show remaining ++ " to go.)\n"
+atMostChars :: Int -> String -> String
+atMostChars n s | length s > n = take (n-3) s ++ "..."
+                | otherwise    = s
+
+reportText :: [String] -> Int -> Int -> Int -> IO ()
+reportText _ failed passed remaining =
+  putStr $ "(" ++ show failed ++ " failed, " ++
+                  show passed ++ " passed, " ++
+                  show remaining ++ " to go).\n"
 
 runTests :: TestConfig -> [FilePath] -> IO ()
 runTests config paths = do
@@ -310,32 +317,40 @@ runTests config paths = do
   all_tests <- map (makeTestCase config mode) <$> testSpecsFromPaths paths
 
   testmvar <- newEmptyMVar
-  resmvar <- newEmptyMVar
+  reportmvar <- newEmptyMVar
   concurrency <- getNumCapabilities
-  replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
+  replicateM_ concurrency $ forkIO $ runTest testmvar reportmvar
 
   let (excluded, included) = partition (excludedTest config) all_tests
-      included_set = S.fromList included
-  _ <- forkIO $ mapM_ (putMVar testmvar) $ S.toList included_set
+  _ <- forkIO $ mapM_ (putMVar testmvar) included
   isTTY <- (&& not (configUnbufferOutput config)) <$> hIsTerminalDevice stdout
 
-  let longest = foldl' max 0 $ map (length . testCaseProgram) included
-      report = if isTTY then reportInteractive longest else reportText
+  let report = if isTTY then reportInteractive else reportText
       clear  = if isTTY then clearLine else putStr "\n"
-      getResults remaining failed passed =
-        case S.toList remaining of
-          []      -> clear >> return (failed, passed)
-          first:_ -> do
-            report (testCaseProgram first) failed passed $ S.size remaining
-            (test, res) <- takeMVar resmvar
-            let next = getResults $ test `S.delete` remaining
-            case res of
-              Success -> next failed (passed+1)
-              Failure s -> do clear
-                              T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
-                              next (failed+1) passed
 
-  (failed, passed) <- getResults included_set 0 0
+      getResults [] _ _ failed passed =
+        clear >> return (failed, passed)
+      getResults remaining num_remaining running failed passed = do
+        report (map testCaseProgram running) failed passed num_remaining
+        msg <- takeMVar reportmvar
+        case msg of
+          TestStarted test -> do
+            unless isTTY $
+              putStr $ "Started testing " <> testCaseProgram test <> " "
+            getResults remaining num_remaining (test : running) failed passed
+          TestDone test res -> do
+            let next = getResults (test `delete` remaining) (num_remaining-1) (test `delete` running)
+            case res of
+              Success -> do
+                unless isTTY $
+                  putStr $ "Finished testing " <> testCaseProgram test <> " "
+                next failed (passed+1)
+              Failure s -> do
+                clear
+                T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
+                next (failed+1) passed
+
+  (failed, passed) <- getResults included (length included) mempty 0 0
   let excluded_str = if null excluded
                      then ""
                      else " (" ++ show (length excluded) ++ " excluded)"
