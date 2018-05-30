@@ -9,7 +9,7 @@ import Control.Monad.State
 import Data.FileEmbed
 import Data.List
 import Data.Semigroup ((<>))
-import System.FilePath ((</>), takeDirectory, takeExtension, makeRelative)
+import System.FilePath
 import System.Directory (createDirectoryIfMissing)
 import System.Console.GetOpt
 import System.IO
@@ -49,7 +49,7 @@ main = mainWithOptions initialDocConfig commandLineOptions f
                 mapM_ (hPutStrLn stderr . ("Found source file "<>)) files
                 hPutStrLn stderr "Reading files..."
               (_w, imports, _vns) <- readLibrary preludeBasis files
-              liftIO $ printDecs config outdir $ nubBy sameImport imports
+              liftIO $ printDecs config outdir files $ nubBy sameImport imports
 
         sameImport (x, _) (y, _) = x == y
 
@@ -57,9 +57,10 @@ futFiles :: FilePath -> IO [FilePath]
 futFiles dir = filter isFut <$> directoryContents dir
   where isFut = (==".fut") . takeExtension
 
-printDecs :: DocConfig -> FilePath -> Imports -> IO ()
-printDecs cfg dir imports = do
-  let (file_htmls, warnings) = renderFiles imports
+printDecs :: DocConfig -> FilePath -> [FilePath] -> Imports -> IO ()
+printDecs cfg dir files imports = do
+  let direct_imports = map (normalise . dropExtension) files
+      (file_htmls, warnings) = renderFiles direct_imports imports
   hPrint stderr warnings
   mapM_ (write . fmap renderHtml) file_htmls
   write ("style.css", cssFile)

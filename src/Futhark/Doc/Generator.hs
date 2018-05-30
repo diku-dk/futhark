@@ -87,8 +87,8 @@ vnameToFileMap = mconcat . map forFile
                 forMod ModFun{} = mempty
                 forMty = forMod . mtyMod
 
-renderFiles :: Imports -> ([(FilePath, Html)], Warnings)
-renderFiles imports = runWriter $ do
+renderFiles :: [FilePath] -> Imports -> ([(FilePath, Html)], Warnings)
+renderFiles important_imports imports = runWriter $ do
   (import_pages, documented) <- runWriterT $ forM imports $ \(current, fm) ->
     let ctx = Context current fm imports mempty file_map in
     flip runReaderT ctx $ do
@@ -109,7 +109,7 @@ renderFiles imports = runWriter $ do
              first_paragraph))
 
   return $
-    [("index.html", contentsPage $ map (fmap snd) import_pages),
+    [("index.html", contentsPage important_imports $ map (fmap snd) import_pages),
      ("doc-index.html", indexPage documented file_map)]
     ++ map ((<.> "html") *** fst) import_pages
   where file_map = vnameToFileMap imports
@@ -135,11 +135,22 @@ headerDoc prog =
         paragraphSeparator = all isSpace
 
 
-contentsPage :: [(String, Html)] -> Html
-contentsPage pages = H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $
-                     H.dl ! A.id "file_list" $
-                     mconcat $ map linkTo $ sortBy (comparing fst) pages
-  where linkTo (name, maybe_abstract) =
+contentsPage :: [FilePath] -> [(String, Html)] -> Html
+contentsPage important_imports pages =
+  H.docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $
+  H.h2 "Main libraries" <>
+  fileList important_pages <>
+  if null unimportant_pages then mempty else
+    H.h2 "Supporting libraries" <>
+    fileList unimportant_pages
+  where (important_pages, unimportant_pages) =
+          partition ((`elem` important_imports) . fst) pages
+
+        fileList pages' =
+          H.dl ! A.class_ "file_list" $
+          mconcat $ map linkTo $ sortBy (comparing fst) pages'
+
+        linkTo (name, maybe_abstract) =
           let file = makeRelative "/" $ name -<.> "html"
           in H.div ! A.class_ "file_desc" $
              (H.dt ! A.class_ "desc_header") (H.a ! A.href (fromString file) $ fromString name) <>
