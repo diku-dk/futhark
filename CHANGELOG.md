@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * The index produced by `futhark-doc` now contains correct links.
+
 ## [0.5.1]
 
 ### Added

@@ -205,14 +205,14 @@ indexPage documented fm =
           H.li $ H.a ! A.href (fromString $ '#' : initial) $ fromString initial
 
         linkTo (name, (file, what)) =
-          let link = (H.a ! A.href (fromString (makeRelative "/" $ vnameLink' name "" file))) $
+          let link = (H.a ! A.href (fromString (makeRelative "/" $ "doc" </> vnameLink' name "" file))) $
                      fromString $ baseString name
               what' = case what of IndexValue -> "value"
                                    IndexFunction -> "function"
                                    IndexType -> "type"
                                    IndexModuleType -> "module type"
                                    IndexModule -> "module"
-              html_file = makeRelative "/" $ file -<.> "html"
+              html_file = makeRelative "/" $ "doc" </> file -<.> "html"
           in H.tr $
              (H.td ! A.class_ "doc_index_name" $ link) <>
              (H.td ! A.class_ "doc_index_namespace" $ what') <>
