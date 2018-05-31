@@ -188,8 +188,8 @@ parseExpectedResult =
 
 parseExpectedError :: Parser ExpectedError
 parseExpectedError = lexeme $ do
-  s <- restOfLine
-  if T.all isSpace s
+  s <- T.strip <$> restOfLine
+  if T.null s
     then return AnyError
          -- blankCompOpt creates a regular expression that treats
          -- newlines like ordinary characters, which is what we want.

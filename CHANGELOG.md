@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The index produced by `futhark-doc` now contains correct links.
 
+  * Windows linebreaks are now fully supported for test files (#558).
+
 ## [0.5.1]
 
 ### Added
