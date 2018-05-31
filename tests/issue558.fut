@@ -1,0 +1,8 @@
+-- This file is *intentionally* written with DOS linebreaks (\r\n).
+-- Don't change it to Unix linebreaks (\n)!
+-- ==
+-- input { [1,2,3] 4 }
+-- error: index out of bounds
+
+let main(a: []i32, i: i32): i32 =
+  a[i]
