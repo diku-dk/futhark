@@ -626,6 +626,10 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' FieldAccess FieldAccesses ')'
        { ProjectSection (map fst ($2:$3)) NoInfo (srcspan $1 $>) }
 
+     | '(' '.' '[' DimIndices ']' ')'
+       { IndexSection $4 NoInfo (srcspan $1 $>) }
+
+
 PrimLit :: { (PrimValue, SrcLoc) }
         : true   { (BoolValue True, $1) }
         | false  { (BoolValue False, $1) }

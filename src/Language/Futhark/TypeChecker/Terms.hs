@@ -1157,6 +1157,15 @@ checkExp (ProjectSection fields NoInfo loc) = do
   b <- foldM (flip $ mustHaveField loc) a fields
   return $ ProjectSection fields (Info $ Arrow mempty Nothing a b) loc
 
+checkExp (IndexSection idxes NoInfo loc) = do
+  (t, _) <- newArrayType loc "e" (length idxes)
+  idxes' <- mapM checkDimIndex idxes
+  let t' = stripArray (length $ filter isFix idxes) t
+  return $ IndexSection idxes' (Info $ vacuousShapeAnnotations $ fromStruct $
+                                Arrow mempty Nothing t t') loc
+  where isFix DimFix{} = True
+        isFix _        = False
+
 checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
 

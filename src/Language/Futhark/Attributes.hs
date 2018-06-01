@@ -483,6 +483,8 @@ typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
   removeShapeAnnotations $ foldFunType [fromStruct pt1] ret
 typeOf (ProjectSection _ (Info t) _) =
   removeShapeAnnotations t
+typeOf (IndexSection _ (Info t) _) =
+  removeShapeAnnotations t
 
 foldFunType :: Monoid as => [TypeBase dim as] -> TypeBase dim as -> TypeBase dim as
 foldFunType ps ret = foldr (Arrow mempty Nothing) ret ps

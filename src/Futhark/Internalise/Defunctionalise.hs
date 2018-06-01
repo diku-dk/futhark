@@ -254,6 +254,7 @@ defuncExp OpSection{}      = error "defuncExp: unexpected operator section."
 defuncExp OpSectionLeft{}  = error "defuncExp: unexpected operator section."
 defuncExp OpSectionRight{} = error "defuncExp: unexpected operator section."
 defuncExp ProjectSection{} = error "defuncExp: unexpected projection section."
+defuncExp IndexSection{}   = error "defuncExp: unexpected projection section."
 
 defuncExp (DoLoop tparams pat e1 form e3 loc) = do
   let env_dim = envFromShapeParams tparams
@@ -779,6 +780,7 @@ freeVars expr = case expr of
   OpSectionLeft _  _ e _ _ _  -> freeVars e
   OpSectionRight _ _ e _ _ _  -> freeVars e
   ProjectSection{}            -> mempty
+  IndexSection idxs _ _       -> foldMap freeDimIndex idxs
 
   DoLoop _ pat e1 form e3 _ -> let (e2fv, e2ident) = formVars form
                                in freeVars e1 <> e2fv <>

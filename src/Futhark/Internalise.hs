@@ -796,6 +796,9 @@ internaliseExp _ e@E.OpSectionRight{} =
 internaliseExp _ e@E.ProjectSection{} =
   fail $ "internaliseExp: Unexpected projection section at " ++ locStr (srclocOf e)
 
+internaliseExp _ e@E.IndexSection{} =
+  fail $ "internaliseExp: Unexpected index section at " ++ locStr (srclocOf e)
+
 internaliseDimIndex :: SrcLoc -> SubExp -> E.DimIndex
                     -> InternaliseM (I.DimIndex SubExp, Certificates)
 internaliseDimIndex loc w (E.DimFix i) = do

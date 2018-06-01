@@ -382,6 +382,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` `qualbinop` ")"
        : | "(" `qualbinop` `exp` ")"
        : | "(" ( "." `field` )+ ")"
+       : | "(" "." "[" `index` ("," `index`)* "]" ")"
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
@@ -848,6 +849,11 @@ An *operator section* that is equivalent to ``\x -> x *binop* y``.
 ............
 
 An *operator section* that is equivalent to ``\x -> a.b.c``.
+
+``(.[i,j])``
+............
+
+An *operator section* that is equivalent to ``\x -> x[i,j]``.
 
 Higher-order functions
 ----------------------
