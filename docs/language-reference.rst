@@ -396,7 +396,6 @@ literals and variables, but also more complicated forms.
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `type_param`* `pat` [("=" `exp`)] `loopform` "do" `exp`
-      : | "rearrange" "(" `nat_int`+ ")" `exp`
       : | "zip" ["@" `nat_int`] `exp`+
       : | "unzip" `exp`
       : | "unsafe" `exp`
@@ -706,16 +705,6 @@ Numerical negation of ``x``, which must be of numeric type.
 
 Bitwise negation of ``x``, which must be of integral type.
 
-``rearrange (d_1, ..., d_n) a``
-...............................
-
-Permute the dimensions in the array, returning a new array.  The
-``d_i`` must be *static* integers, and constitute a proper
-length-``n`` permutation.
-
-For example, if ``b==rearrange (2,0,1) a``, then ``b[x,y,z] =
-a[y,z,x]``.
-
 ``zip x y z``
 .............
 
@@ -906,8 +895,7 @@ performs an in-place update.  The compiler verifies that the original
 array (``a``) is not used on any execution path following the in-place
 update.  This involves also checking that no *alias* of ``a`` is used.
 Generally, most language constructs produce new arrays, but some
-(``rearrange``, ``rotate``, ``zip``, ``unzip``) create arrays that
-alias their input arrays.
+(``zip``, ``unzip``) create arrays that alias their input arrays.
 
 When defining a function parameter or return type, we can mark it as
 *unique* by prefixing it with an asterisk.  For example::
