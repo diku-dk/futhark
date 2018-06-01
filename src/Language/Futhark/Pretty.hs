@@ -148,9 +148,16 @@ hasArrayLit _              = False
 
 instance (Eq vn, Pretty vn, Annot f) => Pretty (DimIndexBase f vn) where
   ppr (DimFix e)       = ppr e
-  ppr (DimSlice i j s) = maybe mempty ppr i <> text ":" <>
-                         maybe mempty ppr j <> text ":" <>
-                         maybe mempty ppr s
+  ppr (DimSlice i j (Just s)) =
+    maybe mempty ppr i <> text ":" <>
+    maybe mempty ppr j <> text ":" <>
+    ppr s
+  ppr (DimSlice i (Just j) s) =
+    maybe mempty ppr i <> text ":" <>
+    ppr j <>
+    maybe mempty ((text ":" <>) . ppr) s
+  ppr (DimSlice i Nothing Nothing) =
+    maybe mempty ppr i <> text ":"
 
 instance (Eq vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
   ppr = pprPrec (-1)
