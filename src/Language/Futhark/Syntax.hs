@@ -612,6 +612,8 @@ data ExpBase f vn =
               -- ^ @+2@; first type is operand, second is result.
             | ProjectSection [Name] (f PatternType) SrcLoc
               -- ^ Field projection as a section: @(.x.y.z)@.
+            | IndexSection [DimIndexBase f vn] (f PatternType) SrcLoc
+              -- ^ Array indexing as a section: @(.[i,j])@.
 
             | DoLoop
               [TypeParamBase vn]
@@ -745,6 +747,7 @@ instance Located (ExpBase f vn) where
   locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
   locOf (ProjectSection _ _ loc)       = locOf loc
+  locOf (IndexSection _ _ loc)         = locOf loc
   locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
   locOf (Stream _ _ _  pos)            = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc

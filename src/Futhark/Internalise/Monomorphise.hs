@@ -234,6 +234,9 @@ transformExp (OpSectionRight (QualName qs fname) (Info t) e
 transformExp (ProjectSection fields (Info t) loc) =
   desugarProjectSection fields t loc
 
+transformExp (IndexSection idxs (Info t) loc) =
+  desugarIndexSection idxs t loc
+
 transformExp (DoLoop tparams pat e1 form e3 loc) = do
   e1' <- transformExp e1
   form' <- case form of
@@ -336,6 +339,14 @@ desugarProjectSection fields (Arrow _ _ t1 t2) loc = do
             t -> error $ "desugarOpSection: type " ++ pretty t ++
                  " does not have field " ++ pretty field
 desugarProjectSection  _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
+
+desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
+desugarIndexSection idxs (Arrow _ _ t1 t2) loc = do
+  p <- newVName "index_i"
+  let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2') loc
+  return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
+  where t2' = removeShapeAnnotations t2
+desugarIndexSection  _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()
 noticeDims = mapM_ notice . nestedDims

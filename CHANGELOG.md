@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Array index section: `(.[i])` is shorthand for `(\x -> x[i])`.
+    Full slice syntax supported. (#559)
+
 ### Removed
 
 ### Changed
