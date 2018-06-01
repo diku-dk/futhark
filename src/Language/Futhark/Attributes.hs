@@ -721,6 +721,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                          [arr_a, arr_a] uarr_a),
               ("rotate", IntrinsicPolyFun [tp_a]
                          [Prim $ Signed Int32, arr_a] arr_a),
+              ("transpose", IntrinsicPolyFun [tp_a] [arr_a] arr_a),
 
               ("cosmin_flatten", IntrinsicPolyFun [tp_a]
                                  [Array (ArrayPolyElem tv_a' [] ()) (rank 2) Unique] $

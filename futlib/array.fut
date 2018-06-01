@@ -102,7 +102,7 @@ let intercalate [n] [m] 't (x: [m]t) (xs: [n][m]t): []t =
   unsafe flatten (intersperse x xs)
 
 let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
-  rearrange (1,0) a
+  intrinsics.transpose a
 
 let steps (start: i32) (num_steps: i32) (step: i32): [num_steps]i32 =
   map (start+) (map (step*) (iota num_steps))

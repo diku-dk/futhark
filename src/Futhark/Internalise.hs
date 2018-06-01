@@ -1275,6 +1275,11 @@ isOverloadedFunction qname args loc = do
             offsets = offset' : replicate (r-1) zero
         return $ I.Rotate offsets v
 
+    handle [e] "transpose" = Just $ \desc ->
+      internaliseOperation desc e $ \v -> do
+        r <- I.arrayRank <$> lookupType v
+        return $ I.Rearrange ([1,0] ++ [2..r-1]) v
+
     handle _ _ = Nothing
 
     toSigned int_to e desc = do
