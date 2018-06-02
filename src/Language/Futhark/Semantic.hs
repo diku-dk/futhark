@@ -53,8 +53,9 @@ mkInitialImport s = ImportName (Posix.normalise $ toPOSIX s) noLoc
 -- going on with symbolic links.  If there is, too bad.  Don't do
 -- that.
 mkImportFrom :: ImportName -> String -> SrcLoc -> ImportName
-mkImportFrom (ImportName includer _) includee =
-  ImportName $ normalise $ joinPath $ includer' ++ includee'
+mkImportFrom (ImportName includer _) includee
+  | Posix.isAbsolute includee = ImportName $ normalise $ makeRelative "/" includee
+  | otherwise = ImportName $ normalise $ joinPath $ includer' ++ includee'
   where (dotdots, includee') = span ("../"==) $ splitPath includee
         includer_parts = splitPath $ takeDirectory includer
         includer'
@@ -65,7 +66,7 @@ mkImportFrom (ImportName includer _) includee =
 
 -- | Create a @.fut@ file corresponding to an 'ImportName'.
 includeToFilePath :: ImportName -> FilePath
-includeToFilePath imp = fromPOSIX $ includeToString imp <.> "fut"
+includeToFilePath (ImportName s _) = fromPOSIX $ Posix.normalise s <.> "fut"
   where -- | Some bad operating systems do not use forward slash as
         -- directory separator - this is where we convert Futhark includes
         -- (which always use forward slash) to native paths.
