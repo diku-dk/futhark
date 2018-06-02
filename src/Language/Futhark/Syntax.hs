@@ -702,8 +702,9 @@ data ExpBase f vn =
 
             | Unsafe (ExpBase f vn) SrcLoc
             -- ^ Explore the Danger Zone and elide safety checks on
-            -- array operations that are (lexically) within this
-            -- expression.  Make really sure the code is correct.
+            -- array operations and other assertions during execution
+            -- of this expression.  Make really sure the code is
+            -- correct.
 
 deriving instance Showable f vn => Show (ExpBase f vn)
 
