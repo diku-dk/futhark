@@ -355,6 +355,11 @@ defuncExp (Unsafe e1 loc) = do
   (e1', sv) <- defuncExp e1
   return (Unsafe e1' loc, sv)
 
+defuncExp (Assert e1 e2 desc loc) = do
+  (e1', _) <- defuncExp e1
+  (e2', sv) <- defuncExp e2
+  return (Assert e1' e2' desc loc, sv)
+
 -- | Same as 'defuncExp', except it ignores the static value.
 defuncExp' :: Exp -> DefM Exp
 defuncExp' = fmap fst . defuncExp
@@ -813,6 +818,7 @@ freeVars expr = case expr of
   Zip _ e es _ _      -> freeVars e <> foldMap freeVars es
   Unzip e _ _         -> freeVars e
   Unsafe e _          -> freeVars e
+  Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
 
 freeDimIndex :: DimIndexBase Info VName -> NameSet
 freeDimIndex (DimFix e) = freeVars e

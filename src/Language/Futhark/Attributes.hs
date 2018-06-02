@@ -459,6 +459,7 @@ typeOf (Zip _ _ _ (Info t) _) = t
 typeOf (Unzip _ ts _) =
   tupleRecord $ map unInfo ts
 typeOf (Unsafe e _) = typeOf e
+typeOf (Assert _ e _ _) = typeOf e
 typeOf (Map _ _ (Info t) _) = t `setUniqueness` Unique
 typeOf (Reduce _ _ _ arr _) =
   stripArray 1 (typeOf arr) `setAliases` mempty

@@ -706,6 +706,11 @@ data ExpBase f vn =
             -- of this expression.  Make really sure the code is
             -- correct.
 
+            | Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
+            -- ^ Fail if the first expression does not return true,
+            -- and return the value of the second expression if it
+            -- does.
+
 deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
@@ -752,6 +757,7 @@ instance Located (ExpBase f vn) where
   locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
   locOf (Stream _ _ _  pos)            = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc
+  locOf (Assert _ _ _ loc)             = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc

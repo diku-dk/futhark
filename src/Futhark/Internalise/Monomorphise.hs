@@ -305,6 +305,9 @@ transformExp (Unzip e0 tps loc) =
 transformExp (Unsafe e1 loc) =
   Unsafe <$> transformExp e1 <*> pure loc
 
+transformExp (Assert e1 e2 desc loc) =
+  Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
+
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
 transformDimIndex (DimFix e) = DimFix <$> transformExp e
 transformDimIndex (DimSlice me1 me2 me3) =

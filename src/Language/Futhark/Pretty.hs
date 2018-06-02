@@ -262,6 +262,7 @@ instance (Eq vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Zip i e es _ _) = text "zip@" <> ppr i <+> spread (map (pprPrec 10) (e:es))
   pprPrec _ (Unzip e _ _) = text "unzip" <+> pprPrec 10 e
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 10 e
+  pprPrec _ (Assert e1 e2 _ _) = text "assert" <+> pprPrec 10 e1 <+> pprPrec 10 e2
   pprPrec p (Lambda tparams params body ascript _ _) =
     parensIf (p /= -1) $
     text "\\" <> spread (map ppr tparams ++ map ppr params) <>
