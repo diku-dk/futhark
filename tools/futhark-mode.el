@@ -500,7 +500,8 @@ See URL `https://github.com/diku-dk/futhark'."
     :error-patterns
     ((error line-start "Error at " (file-name) ":" line ":" column "-"
             (one-or-more not-newline) ":" (message (one-or-more anything))
-            "If you find")))
+            "If you find")
+     (error (message "lexical error") " at line " line ", column " column)))
   (add-to-list 'flycheck-checkers 'futhark))
 
 ;;; The silly section
