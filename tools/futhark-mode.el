@@ -48,13 +48,12 @@
   ;; Emacs Lisp is stupid.
   (defconst futhark-keywords
     '("if" "then" "else" "let" "loop" "in" "with" "type"
-      "fun" "val" "entry" "for" "while" "do"
+      "val" "entry" "for" "while" "do"
       "empty" "unsafe" "default" "include" "import" "module" "open" "local" "assert")
     "All Futhark keywords.")
 
   (defconst futhark-builtin-functions
-    '("reshape" "rearrange" "rotate"
-      "split" "concat" "zip" "unzip" "unsafe" "copy" "map" "reduce"
+    '("zip" "unzip" "map" "reduce"
       "reduce_comm" "scan" "filter" "partition" "scatter" "stream_map"
       "stream_map_per" "stream_red" "stream_map_per" "stream_seq")
     "All Futhark builtin SOACs, functions, and non-symbolic operators.")
