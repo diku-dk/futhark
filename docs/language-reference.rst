@@ -733,10 +733,12 @@ error.
 ``unsafe e``
 ............
 
-Elide safety checks (such as bounds checking) for operations lexically
-with ``e``.  This is useful if the compiler is otherwise unable to
-avoid bounds checks (e.g. when using indirect indexes), but you really
-do not want them here.
+Elide safety checks and assertions (such as bounds checking) that
+occur during execution of ``e``.  This is useful if the compiler is
+otherwise unable to avoid bounds checks (e.g. when using indirect
+indexes), but you really do not want them there.  Make very sure that
+the code is correct; eliding such checks can lead to memory
+corruption.
 
 ``a with [i] <- e``
 ...................
