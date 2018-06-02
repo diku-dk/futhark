@@ -495,7 +495,7 @@ Ignore any program structure."
   (flycheck-define-checker futhark
     "A Futhark syntax and type checker.
 See URL `https://github.com/diku-dk/futhark'."
-    :command ("futhark" source)
+    :command ("futhark" "-t" source)
     :modes 'futhark-mode
     :error-patterns
     ((error line-start "Type error at " (file-name) ":" line ":" column "-"
