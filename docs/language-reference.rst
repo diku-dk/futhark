@@ -399,6 +399,7 @@ literals and variables, but also more complicated forms.
       : | "zip" ["@" `nat_int`] `exp`+
       : | "unzip" `exp`
       : | "unsafe" `exp`
+      : | "assert" `atom` `atom`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
    field:   `fieldid` "=" `exp`
         : | `id`
@@ -739,6 +740,15 @@ otherwise unable to avoid bounds checks (e.g. when using indirect
 indexes), but you really do not want them there.  Make very sure that
 the code is correct; eliding such checks can lead to memory
 corruption.
+
+``assert cond e``
+.................
+
+Terminate execution with an error if ``cond`` evaluates to false,
+otherwise produce the result of evaluating ``e``.  Make sure that
+``e`` produces a meaningful value that is used subsequently (it can
+just be a variable), or dead code elimination can easily remove the
+assertion.
 
 ``a with [i] <- e``
 ...................

@@ -1104,6 +1104,11 @@ checkExp (Unzip e _ loc) = do
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc
 
+checkExp (Assert e1 e2 NoInfo loc) = do
+  e1' <- require [Bool] =<< checkExp e1
+  e2' <- checkExp e2
+  return $ Assert e1' e2' (Info (pretty e1)) loc
+
 checkExp Map{} = error "Map nodes should not appear in source program"
 checkExp Reduce{} = error "Reduce nodes should not appear in source program"
 checkExp Scan{} = error "Scan nodes should not appear in source program"
@@ -1797,6 +1802,7 @@ removeUniqueness (Arrow als p t1 t2) =
 removeUniqueness t = t `setUniqueness` Nonunique
 
 mustBeOneOf :: [PrimType] -> SrcLoc -> TypeBase () () -> TermTypeM ()
+mustBeOneOf [req_t] loc t = unify loc (Prim req_t) t
 mustBeOneOf ts loc t = do
   constraints <- getConstraints
   let t' = applySubst (`lookupSubst` constraints) t

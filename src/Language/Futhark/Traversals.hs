@@ -130,6 +130,8 @@ instance ASTMappable (ExpBase Info VName) where
     Unzip <$> mapOnExp tv e <*> mapM (traverse $ mapOnCompType tv) ts <*> pure loc
   astMap tv (Unsafe e loc) =
     Unsafe <$> mapOnExp tv e <*> pure loc
+  astMap tv (Assert e1 e2 desc loc) =
+    Assert <$> mapOnExp tv e1 <*> mapOnExp tv e2 <*> pure desc <*> pure loc
   astMap tv (Scan fun startexp arrexp loc) =
     pure Scan <*> mapOnExp tv fun <*>
          mapOnExp tv startexp <*> mapOnExp tv arrexp <*>

@@ -142,6 +142,7 @@ import Language.Futhark.Parser.Lexer
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       unsafe          { L $$ UNSAFE }
+      assert          { L $$ ASSERT }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
       empty           { L $$ EMPTY }
@@ -522,6 +523,7 @@ Exp2 :: { UncheckedExp }
      | unzip Atom  { Unzip $2 [] (srcspan $1 $>) }
 
      | unsafe Exp2     { Unsafe $2 (srcspan $1 $>) }
+     | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }

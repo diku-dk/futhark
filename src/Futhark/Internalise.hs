@@ -614,6 +614,17 @@ internaliseExp desc (E.Unsafe e _) =
   local (\env -> env { envDoBoundsChecks = False }) $
   internaliseExp desc e
 
+internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
+  e1' <- internaliseExp1 "assert_cond" e1
+  c <- assertingOne $ letExp "assert_c" $
+       I.BasicOp $ I.Assert e1' check (loc, mempty)
+  -- Make sure there are some bindings to certify.
+  certifying c $ mapM rebind =<< internaliseExp desc e2
+  where rebind v = do
+          v' <- newVName "assert_res"
+          letBindNames_ [v'] $ I.BasicOp $ I.SubExp v
+          return $ I.Var v'
+
 internaliseExp _ (E.Zip _ e es _ loc) = do
   e' <- internaliseExpToVars "zip_arg" $ TupLit (e:es) loc
   case e' of

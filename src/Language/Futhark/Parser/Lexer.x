@@ -146,6 +146,7 @@ keyword s =
     "empty"        -> EMPTY
     "while"        -> WHILE
     "unsafe"       -> UNSAFE
+    "assert"       -> ASSERT
 
 -- In a perfect language, the remaining tokens would all be functions.
 -- Perhaps we can eventually permit their use as variable names anyway.
@@ -342,6 +343,7 @@ data Token = ID Name
            | ZIP
            | UNZIP
            | UNSAFE
+           | ASSERT
            | TRUE
            | FALSE
            | EMPTY
