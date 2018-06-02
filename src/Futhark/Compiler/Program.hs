@@ -131,8 +131,8 @@ readImportFile include = do
    where abs_filepath = includeToFilePath include
 
          not_found =
-           "Could not find import '" ++ includeToString include ++ "' at " ++
-           E.locStr (srclocOf include) ++ "."
+           "Error at " ++ E.locStr (srclocOf include) ++
+           ": could not find import '" ++ includeToString include ++ "'."
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
