@@ -81,18 +81,18 @@ usageMap = foldl comb M.empty
           in S.foldl' (ins $ Consumed loc) m' $ fromMaybe mempty cons
         ins v m k = M.insertWith (++) k [v] m
 
-combineOccurences :: VName -> Usage -> Usage -> Either TypeError Usage
-combineOccurences _ (Observed loc) (Observed _) = Right $ Observed loc
+combineOccurences :: MonadTypeChecker m => VName -> Usage -> Usage -> m Usage
+combineOccurences _ (Observed loc) (Observed _) = return $ Observed loc
 combineOccurences name (Consumed wloc) (Observed rloc) =
-  Left $ UseAfterConsume (baseName name) rloc wloc
+  useAfterConsume (baseName name) rloc wloc
 combineOccurences name (Observed rloc) (Consumed wloc) =
-  Left $ UseAfterConsume (baseName name) rloc wloc
+  useAfterConsume (baseName name) rloc wloc
 combineOccurences name (Consumed loc1) (Consumed loc2) =
-  Left $ ConsumeAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
+  consumeAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
 
-checkOccurences :: Occurences -> Either TypeError ()
+checkOccurences :: MonadTypeChecker m => Occurences -> m ()
 checkOccurences = void . M.traverseWithKey comb . usageMap
-  where comb _    []     = Right ()
+  where comb _    []     = return ()
         comb name (u:us) = foldM_ (combineOccurences name) u us
 
 allObserved :: Occurences -> Names
@@ -322,7 +322,7 @@ instance MonadTypeChecker TermTypeM where
     outer_env <- liftTypeM askRootEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ scopeTypeTable scope of
-      Nothing -> throwError $ UndefinedType loc qn
+      Nothing -> undefinedType loc qn
       Just (TypeAbbr ps def) ->
         return (qn', ps, qualifyTypeVars outer_env (map typeParamName ps) qs def)
 
@@ -335,12 +335,12 @@ instance MonadTypeChecker TermTypeM where
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
 
     t <- case M.lookup name $ scopeVtable scope of
-      Nothing -> throwError $ UnknownVariableError Term qn loc
+      Nothing -> unknownVariableError Term qn loc
 
-      Just (WasConsumed wloc) -> throwError $ UseAfterConsume (baseName name) loc wloc
+      Just (WasConsumed wloc) -> useAfterConsume (baseName name) loc wloc
 
       Just (BoundV tparams t)
-        | "_" `isPrefixOf` pretty name -> throwError $ UnderscoreUse loc qn
+        | "_" `isPrefixOf` pretty name -> underscoreUse loc qn
         | otherwise -> do
             (tnames, t') <- instantiateTypeScheme loc tparams t
             let qual = qualifyTypeVars outer_env tnames qs
@@ -391,7 +391,7 @@ checkIntrinsic space qn@(QualName _ name) loc
       scope <- ask
       return (scope, v)
   | otherwise =
-      throwError $ UnknownVariableError space qn loc
+      unknownVariableError space qn loc
 
 checkReallyQualName :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkReallyQualName space qn loc = do
@@ -458,6 +458,41 @@ typeError loc s = do
   let bc' | null bc = ""
           | otherwise = "\n" ++ unlines (map show bc)
   throwError $ TypeError loc $ s ++ bc'
+
+--- Errors
+
+useAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
+useAfterConsume name rloc wloc =
+  throwError $ TypeError rloc $
+  "Variable " ++ pretty name ++ " used," ++
+  "but previously consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
+
+consumeAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
+consumeAfterConsume name loc1 loc2 =
+  throwError $ TypeError loc2 $
+  "Variable " ++ pretty name ++ " previously consumed at " ++ locStr loc1 ++ "."
+
+indexingError :: MonadTypeChecker m => Int -> Int -> SrcLoc -> m a
+indexingError dims got loc =
+  throwError $ TypeError loc $
+  show got ++ " indices given, but type of indexee has " ++ show dims ++ " dimension(s)."
+
+badLetWithValue :: MonadTypeChecker m => SrcLoc -> m a
+badLetWithValue loc =
+  throwError $ TypeError loc
+  "New value for elements in let-with shares data with source array.  This is illegal, as it prevents in-place modification."
+
+returnAliased :: MonadTypeChecker m => Name -> Name -> SrcLoc -> m ()
+returnAliased fname name loc =
+  throwError $ TypeError loc $
+  "Unique return value of function " ++ nameToString fname ++
+  " is aliased to " ++ pretty name ++ ", which is not consumed."
+
+uniqueReturnAliased :: MonadTypeChecker m => Name -> SrcLoc -> m a
+uniqueReturnAliased fname loc =
+  throwError $ TypeError loc $
+  "A unique tuple element of return value of function " ++
+  nameToString fname ++ " is aliased to some other tuple component."
 
 --- Basic checking
 
@@ -619,7 +654,7 @@ binding bnds = check . local (`bindVars` bnds)
         -- within their scope.
         check m = do
           (a, usages) <- collectBindingsOccurences m
-          maybeCheckOccurences usages
+          checkOccurences usages
 
           mapM_ (checkIfUsed usages) bnds
 
@@ -944,19 +979,17 @@ checkExp (Var qn NoInfo loc) = do
 
   (qn', t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
   foldM checkField (Var qn' (Info (vacuousShapeAnnotations t)) loc) fields
-  where findRootVar qs name = do
-          r <- (Right <$> lookupVar loc (QualName qs name))
-               `catchError` handler
-          case r of
-            Left err | null qs -> throwError err
-                     | otherwise -> do
-                         (qn', t, fields) <- findRootVar (init qs) (last qs)
-                         return (qn', t, fields++[name])
-            Right (qn', t) -> return (qn', t, [])
+  where findRootVar qs name =
+          (whenFound <$> lookupVar loc (QualName qs name)) `catchError` notFound qs name
 
-        handler (UnknownVariableError ns qn' _)
-          | null (qualQuals qn') = return . Left $ UnknownVariableError ns qn loc
-        handler e = return $ Left e
+        whenFound (qn', t) = (qn', t, [])
+
+        notFound qs name err
+          | null qs = throwError err
+          | otherwise = do
+              (qn', t, fields) <- findRootVar (init qs) (last qs) `catchError`
+                                  const (throwError err)
+              return (qn', t, fields++[name])
 
         checkField e k = do
           t <- expType e
@@ -1008,14 +1041,14 @@ checkExp (LetWith dest src idxes ve body pos) = sequentially (checkIdent src) $ 
 
   idxes' <- mapM checkDimIndex idxes
   case peelArray (length $ filter isFix idxes') (unInfo $ identType src') of
-    Nothing -> throwError $ IndexingError
+    Nothing -> indexingError
                (arrayRank $ unInfo $ identType src') (length idxes) (srclocOf src)
     Just elemt -> do
       let elemt' = toStructural elemt `setUniqueness` Nonunique
       sequentially (unifies elemt' =<< checkExp ve) $ \ve' _ -> do
         ve_t <- expType ve'
         when (identName src' `S.member` aliases ve_t) $
-          throwError $ BadLetWithValue pos
+          badLetWithValue pos
 
         bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
           body' <- consuming src' $ checkExp body
@@ -1035,12 +1068,12 @@ checkExp (Update src idxes ve loc) =
 
     idxes' <- mapM checkDimIndex idxes
     case peelArray (length $ filter isFix idxes') src_t of
-      Nothing -> throwError $ IndexingError (arrayRank src_t) (length idxes) (srclocOf src)
+      Nothing -> indexingError (arrayRank src_t) (length idxes) (srclocOf src)
       Just elemt -> do
         ve_t <- expType ve'
         unify (srclocOf ve') (toStruct elemt) $ toStruct ve_t
         unless (S.null $ src_als `S.intersection` aliases ve_t) $
-          throwError $ BadLetWithValue loc
+          badLetWithValue loc
 
         consume loc src_als
         return $ Update src' idxes' ve' loc
@@ -1061,7 +1094,9 @@ checkExp (Rearrange perm arrexp loc) = do
   arrexp' <- unifies arr_t =<< checkExp arrexp
   r <- arrayRank <$> expType arrexp'
   when (length perm /= r || sort perm /= [0..r-1]) $
-    throwError $ PermutationError loc perm r
+    throwError $ TypeError loc $
+    "The permutation (" ++ intercalate ", " (map show perm) ++
+    ") is not valid for array argument of rank " ++ show r ++ "."
   return $ Rearrange perm arrexp' loc
 
 checkExp (Zip i e es NoInfo loc) = do
@@ -1279,7 +1314,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       body_t' <- normaliseType body_t
       pat_t <- normaliseType $ patternType pat'
       unless (body_t' `subtypeOf` pat_t) $
-        throwError $ UnexpectedType body_loc
+        unexpectedType body_loc
         (toStructural body_t')
         [toStructural pat_t]
 
@@ -1359,7 +1394,7 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
 
   occur [observation as loc]
 
-  maybeCheckOccurences dflow
+  checkOccurences dflow
   occurs <- consumeArg argloc argtype (diet tp1')
 
   case anyConsumption dflow of
@@ -1397,7 +1432,7 @@ checkFuncall loc ftype ((argtype, dflow, argloc) : args) =
           t2' = applySubst (`lookupSubst` constraints) t2
 
       occur [observation as loc]
-      maybeCheckOccurences dflow
+      checkOccurences dflow
       occurs <- consumeArg argloc argtype (diet t1')
       occur $ dflow `seqOccurences` occurs
 
@@ -1498,13 +1533,13 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           foldM_ (checkReturnAlias' params') S.empty . returnAliasing rettp
         checkReturnAlias' params' seen (Unique, names)
           | any (`S.member` S.map snd seen) $ S.toList names =
-            throwError $ UniqueReturnAliased fname loc
+            uniqueReturnAliased fname loc
           | otherwise = do
             notAliasingParam params' names
             return $ seen `S.union` tag Unique names
         checkReturnAlias' _ seen (Nonunique, names)
           | any (`S.member` seen) $ S.toList $ tag Unique names =
-            throwError $ UniqueReturnAliased fname loc
+            uniqueReturnAliased fname loc
           | otherwise = return $ seen `S.union` tag Nonunique names
 
         notAliasingParam params' names =
@@ -1513,7 +1548,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
                 not (unique $ unInfo $ identType p') && (identName p' `S.member` names)
           in case find consumedNonunique $ S.toList $ patIdentSet p of
                Just p' ->
-                 throwError $ ReturnAliased fname (baseName $ identName p') loc
+                 returnAliased fname (baseName $ identName p') loc
                Nothing ->
                  return ()
 
@@ -1643,9 +1678,6 @@ collectOccurences m = pass $ do
 tapOccurences :: TermTypeM a -> TermTypeM (a, Occurences)
 tapOccurences = listen
 
-maybeCheckOccurences :: Occurences -> TermTypeM ()
-maybeCheckOccurences = badOnLeft . checkOccurences
-
 removeSeminullOccurences :: TermTypeM a -> TermTypeM a
 removeSeminullOccurences = censor $ filter $ not . seminullOccurence
 
@@ -1661,8 +1693,8 @@ alternative :: TermTypeM a -> TermTypeM b -> TermTypeM (a,b)
 alternative m1 m2 = pass $ do
   (x, occurs1) <- listen m1
   (y, occurs2) <- listen m2
-  maybeCheckOccurences occurs1
-  maybeCheckOccurences occurs2
+  checkOccurences occurs1
+  checkOccurences occurs2
   let usage = occurs1 `altOccurences` occurs2
   return ((x, y), const usage)
 
@@ -1901,7 +1933,9 @@ mustHaveField loc l t = do
           unify loc l_type' (toStructural t')
           return t'
       | otherwise ->
-          throwError $ InvalidField loc (toStructural t) $ nameToString l
+          throwError $ TypeError loc $
+          "Attempt to access field '" ++ pretty l ++ "' of value of type " ++
+          pretty (toStructural t) ++ "."
     _ -> do unify loc (toStructural t) $ Record $ M.singleton l l_type'
             return l_type
 

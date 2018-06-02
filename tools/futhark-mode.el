@@ -498,7 +498,7 @@ See URL `https://github.com/diku-dk/futhark'."
     :command ("futhark" "-t" source)
     :modes 'futhark-mode
     :error-patterns
-    ((error line-start "Type error at " (file-name) ":" line ":" column "-"
+    ((error line-start "Error at " (file-name) ":" line ":" column "-"
             (one-or-more not-newline) ":" (message (one-or-more anything))
             "If you find")))
   (add-to-list 'flycheck-checkers 'futhark))

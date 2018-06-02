@@ -180,7 +180,8 @@ checkTypeExp (TEUnique t loc) = do
   (t', st) <- checkTypeExp t
   case st of
     Array{} -> return (t', st `setUniqueness` Unique)
-    _       -> throwError $ InvalidUniqueness loc $ toStructural st
+    _       -> throwError $ TypeError loc $
+               "Attempt to declare unique non-array " ++ pretty t ++ "."
 checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', st1) <- checkTypeExp t1
   bindSpaced [(Term, v)] $ do
@@ -248,7 +249,9 @@ checkNamedDim loc v = do
   (v', t) <- lookupVar loc v
   case t of
     Prim (Signed Int32) -> return v'
-    _                   -> throwError $ DimensionNotInteger loc v
+    _                   -> throwError $ TypeError loc $
+                           "Dimension declaration " ++ pretty v ++
+                           " should be of type `i32`."
 
 -- | Check for duplication of names inside a pattern group.  Produces
 -- a description of all names used in the pattern group.
