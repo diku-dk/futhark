@@ -1019,8 +1019,8 @@ parseError (L loc DOC{}) =
 parseError tok = parseErrorAt (srclocOf tok) Nothing
 
 parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
-parseErrorAt loc Nothing = throwError $ locStr loc ++ ": Parse error.\n"
-parseErrorAt loc (Just s) = throwError $ locStr loc ++ ": " ++ s
+parseErrorAt loc Nothing = throwError $ "Error at " ++ locStr loc ++ ": Parse error."
+parseErrorAt loc (Just s) = throwError $ "Error at " ++ locStr loc ++ ": " ++ s
 
 emptyArrayError :: SrcLoc -> ParserMonad a
 emptyArrayError loc =
