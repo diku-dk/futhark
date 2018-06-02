@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * New `assert` construct. (#464)
 
+  * `futhark-mode.el` now contains a definition for flycheck.
+
 ### Removed
 
 ### Changed
