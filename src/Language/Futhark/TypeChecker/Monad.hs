@@ -2,8 +2,7 @@
 -- | Main monad in which the type checker runs, as well as ancillary
 -- data definitions.
 module Language.Futhark.TypeChecker.Monad
-  ( TypeError(..)
-  , TypeM
+  ( TypeM
   , runTypeM
   , askEnv
   , askRootEnv
@@ -12,6 +11,14 @@ module Language.Futhark.TypeChecker.Monad
   , bindSpaced
   , qualifyTypeVars
   , getType
+
+  , TypeError(..)
+  , unexpectedType
+  , undefinedType
+  , unappliedFunctor
+  , unknownVariableError
+  , underscoreUse
+  , functionIsNotValue
 
   , MonadTypeChecker(..)
   , checkName
@@ -40,6 +47,7 @@ module Language.Futhark.TypeChecker.Monad
   , Namespace(..)
   , intrinsicsNameMap
   , topLevelNameMap
+  , ppSpace
   )
 where
 
@@ -68,88 +76,48 @@ import qualified Futhark.FreshNames
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
-data TypeError =
-    TypeError SrcLoc String
-  | UnifyError SrcLoc (TypeBase () ()) SrcLoc (TypeBase () ())
-  | UnexpectedType SrcLoc
-    (TypeBase () ()) [TypeBase () ()]
-  | DupDefinitionError Namespace Name SrcLoc SrcLoc
-  | UnknownVariableError Namespace (QualName Name) SrcLoc
-  | UseAfterConsume Name SrcLoc SrcLoc
-  | ConsumeAfterConsume Name SrcLoc SrcLoc
-  | IndexingError Int Int SrcLoc
-  | BadLetWithValue SrcLoc
-  | ReturnAliased Name Name SrcLoc
-  | UniqueReturnAliased Name SrcLoc
-  | PermutationError SrcLoc [Int] Int
-  | DimensionNotInteger SrcLoc (QualName Name)
-  | InvalidUniqueness SrcLoc (TypeBase () ())
-  | UndefinedType SrcLoc (QualName Name)
-  | InvalidField SrcLoc (TypeBase () ()) String
-  | UnderscoreUse SrcLoc (QualName Name)
-  | UnappliedFunctor SrcLoc
-  | FunctionIsNotValue SrcLoc (QualName Name)
+data TypeError = TypeError SrcLoc String
+
+unexpectedType :: MonadTypeChecker m => SrcLoc -> TypeBase () () -> [TypeBase () ()] -> m a
+unexpectedType loc _ [] =
+  throwError $ TypeError loc $
+  "Type of expression at " ++ locStr loc ++
+  "cannot have any type - possibly a bug in the type checker."
+unexpectedType loc t ts =
+  throwError $ TypeError loc $
+  "Type of expression at " ++ locStr loc ++ " must be one of " ++
+  intercalate ", " (map pretty ts) ++ ", but is " ++
+  pretty t ++ "."
+
+undefinedType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
+undefinedType loc name =
+  throwError $ TypeError loc $
+  "Unknown type " ++ pretty name ++ "."
+
+functionIsNotValue :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
+functionIsNotValue loc name =
+  throwError $ TypeError loc $
+  "Attempt to use function " ++ pretty name ++ " as value at " ++ locStr loc ++ "."
+
+unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
+unappliedFunctor loc =
+  throwError $ TypeError loc "Cannot have parametric module here."
+
+unknownVariableError :: MonadTypeChecker m =>
+                        Namespace -> QualName Name -> SrcLoc -> m a
+unknownVariableError space name loc =
+  throwError $ TypeError loc $
+  "Unknown " ++ ppSpace space ++ " " ++ pretty name
+
+underscoreUse :: MonadTypeChecker m =>
+                 SrcLoc -> QualName Name -> m a
+underscoreUse loc name =
+  throwError $ TypeError loc $
+  "Use of " ++ pretty name ++ ": variables prefixed with underscore must not be accessed."
 
 instance Show TypeError where
   show (TypeError pos msg) =
-    "Type error at " ++ locStr pos ++ ":\n" ++ msg
-  show (UnifyError e1loc t1 e2loc t2) =
-    "Cannot unify type " ++ pretty t1 ++
-    " of expression at " ++ locStr e1loc ++
-    "\nwith type " ++ pretty t2 ++
-    " of expression at " ++ locStr e2loc
-  show (UnexpectedType loc _ []) =
-    "Type of expression at " ++ locStr loc ++
-    "cannot have any type - possibly a bug in the type checker."
-  show (UnexpectedType loc t ts) =
-    "Type of expression at " ++ locStr loc ++ " must be one of " ++
-    intercalate ", " (map pretty ts) ++ ", but is " ++
-    pretty t ++ "."
-  show (DupDefinitionError space name pos1 pos2) =
-    "Duplicate definition of " ++ ppSpace space ++ " " ++ nameToString name ++ ".  Defined at " ++
-    locStr pos1 ++ " and " ++ locStr pos2 ++ "."
-  show (UnknownVariableError space name pos) =
-    "Unknown " ++ ppSpace space ++ " " ++ pretty name ++ " referenced at " ++ locStr pos ++ "."
-  show (UseAfterConsume name rloc wloc) =
-    "Variable " ++ pretty name ++ " used at " ++ locStr rloc ++
-    ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
-  show (ConsumeAfterConsume name loc1 loc2) =
-    "Variable " ++ pretty name ++ " consumed at both " ++ locStr loc1 ++
-    " and " ++ locStr loc2 ++ ".  (Possibly through aliasing)"
-  show (IndexingError dims got pos) =
-    show got ++ " indices given at " ++ locStr pos ++
-    ", but type of indexee  has " ++ show dims ++ " dimension(s)."
-  show (BadLetWithValue loc) =
-    "New value for elements in let-with shares data with source array at " ++
-    locStr loc ++ ".  This is illegal, as it prevents in-place modification."
-  show (ReturnAliased fname name loc) =
-    "Unique return value of function " ++ nameToString fname ++ " at " ++
-    locStr loc ++ " is aliased to " ++ pretty name ++ ", which is not consumed."
-  show (UniqueReturnAliased fname loc) =
-    "A unique tuple element of return value of function " ++
-    nameToString fname ++ " at " ++ locStr loc ++
-    " is aliased to some other tuple component."
-  show (PermutationError loc perm r) =
-    "The permutation (" ++ intercalate ", " (map show perm) ++
-    ") is not valid for array argument of rank " ++ show r ++ " at " ++
-    locStr loc ++ "."
-  show (DimensionNotInteger loc name) =
-    "Dimension declaration " ++ pretty name ++ " at " ++ locStr loc ++
-    " should be an integer."
-  show (InvalidUniqueness loc t) =
-    "Attempt to declare unique non-array " ++ pretty t ++ " at " ++ locStr loc ++ "."
-  show (UndefinedType loc name) =
-    "Unknown type " ++ pretty name ++ " referenced at " ++ locStr loc ++ "."
-  show (InvalidField loc t field) =
-    "Attempt to access field '" ++ field ++ "' of value of type " ++
-    pretty t ++ " at " ++ locStr loc ++ "."
-  show (UnderscoreUse loc name) =
-    "Use of " ++ pretty name ++ " at " ++ locStr loc ++
-    ": variables prefixed with underscore must not be accessed."
-  show (FunctionIsNotValue loc name) =
-    "Attempt to use function " ++ pretty name ++ " as value at " ++ locStr loc ++ "."
-  show (UnappliedFunctor loc) =
-    "Cannot have parametric module at " ++ locStr loc ++ "."
+    "Error at " ++ locStr pos ++ ":\n" ++ msg
 
 -- | The warnings produced by the type checker.  The 'Show' instance
 -- produces a human-readable description.
@@ -261,19 +229,19 @@ instance MonadTypeChecker TypeM where
     outer_env <- askRootEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
-      Nothing -> throwError $ UndefinedType loc qn
+      Nothing -> undefinedType loc qn
       Just (TypeAbbr ps def) -> return (qn', ps, qualifyTypeVars outer_env mempty qs def)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envModTable scope of
-      Nothing -> throwError $ UnknownVariableError Term qn loc
+      Nothing -> unknownVariableError Term qn loc
       Just m  -> return (qn', m)
 
   lookupMTy loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Signature qn loc
     (qn',) <$> maybe explode return (M.lookup name $ envSigTable scope)
-    where explode = throwError $ UnknownVariableError Signature qn loc
+    where explode = unknownVariableError Signature qn loc
 
   lookupImport loc file = do
     imports <- asks contextImportTable
@@ -289,12 +257,13 @@ instance MonadTypeChecker TypeM where
     outer_env <- askRootEnv
     (env, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envVtable env of
-      Nothing -> throwError $ UnknownVariableError Term qn loc
+      Nothing -> unknownVariableError Term qn loc
       Just (BoundV _ t)
-        | "_" `isPrefixOf` pretty name -> throwError $ UnderscoreUse loc qn
+        | "_" `isPrefixOf` pretty name -> underscoreUse loc qn
         | otherwise ->
             case getType t of
-              Left{} -> throwError $ FunctionIsNotValue loc qn
+              Left{} -> throwError $ TypeError loc $
+                        "Attempt to use function " ++ pretty name ++ " as value."
               Right t' -> return (qn', removeShapeAnnotations $ fromStruct $
                                        qualifyTypeVars outer_env mempty qs t')
 
@@ -317,7 +286,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
           | Just name' <- M.lookup (space, name) $ envNameMap scope =
               return (scope, name')
           | otherwise =
-              throwError $ UnknownVariableError space qn loc
+              unknownVariableError space qn loc
 
         descend scope (q:qs)
           | Just (QualName _ q') <- M.lookup (Term, q) $ envNameMap scope,
@@ -326,9 +295,9 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
                 ModEnv q_scope -> do
                   (scope', QualName qs' name') <- descend q_scope qs
                   return (scope', QualName (q':qs') name')
-                ModFun{} -> throwError $ UnappliedFunctor loc
+                ModFun{} -> unappliedFunctor loc
           | otherwise =
-              throwError $ UnknownVariableError space qn loc
+              unknownVariableError space qn loc
 
 -- Try to prepend qualifiers to the type names such that they
 -- represent how to access the type in some scope.

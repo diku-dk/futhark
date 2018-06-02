@@ -73,13 +73,20 @@ checkProgM (Prog doc decs) = do
   (abs, env, decs') <- checkDecs decs
   return (FileModule abs env $ Prog doc decs')
 
+dupDefinitionError :: MonadTypeChecker m =>
+                      Namespace -> Name -> SrcLoc -> SrcLoc -> m a
+dupDefinitionError space name pos1 pos2 =
+  throwError $ TypeError pos2 $
+  "Duplicate definition of " ++ ppSpace space ++ " " ++
+  nameToString name ++ ".  Previously defined at " ++ locStr pos1
+
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
   foldM_ (flip f) mempty
   where check namespace name loc known =
           case M.lookup (namespace, name) known of
             Just loc' ->
-              throwError $ DupDefinitionError namespace name loc loc'
+              dupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
         f (ValDec (ValBind _ name _ _ _ _ _ _ loc)) =
@@ -228,7 +235,7 @@ checkSigExpToEnv e = do
   (MTy abs mod, e') <- checkSigExp e
   case mod of
     ModEnv env -> return (abs, env, e')
-    ModFun{}   -> throwError $ UnappliedFunctor $ srclocOf e
+    ModFun{}   -> unappliedFunctor $ srclocOf e
 
 checkSigBind :: SigBindBase NoInfo Name -> TypeM (Env, SigBindBase Info VName)
 checkSigBind (SigBind name e doc loc) = do
@@ -284,7 +291,7 @@ checkModExpToEnv e = do
   (MTy abs mod, e') <- checkModExp e
   case mod of
     ModEnv env -> return (abs, env, e')
-    ModFun{}   -> throwError $ UnappliedFunctor $ srclocOf e
+    ModFun{}   -> unappliedFunctor $ srclocOf e
 
 withModParam :: ModParamBase NoInfo Name
              -> (ModParamBase Info VName -> TySet -> Mod -> TypeM a)
@@ -371,7 +378,7 @@ checkForDuplicateSpecs =
   where check namespace name loc known =
           case M.lookup (namespace, name) known of
             Just loc' ->
-              throwError $ DupDefinitionError namespace name loc loc'
+              dupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
         f (ValSpec name _ _ _ loc) =
