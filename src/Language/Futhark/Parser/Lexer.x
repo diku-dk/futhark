@@ -1,5 +1,6 @@
 {
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -w #-}
 -- | The Futhark lexer.  Takes a string, produces a list of tokens with position information.
 module Language.Futhark.Parser.Lexer
@@ -198,14 +199,24 @@ tokenC v  = tokenS $ const v
 
 tokenS f = tokenM $ return . f
 
+type Lexeme a = ((Int, Int, Int), (Int, Int, Int), a)
+
 tokenM :: (T.Text -> Alex a)
-       -> (AlexPosn, b, ByteString.ByteString, c)
+       -> (AlexPosn, Char, ByteString.ByteString, Int64)
        -> Int64
-       -> Alex ((Int, Int, Int), (Int, Int, Int), a)
+       -> Alex (Lexeme a)
 tokenM f (AlexPn addr line col, _, s, _) len = do
-  x <- f $ T.decodeUtf8 $ BS.toStrict $ BS.take len s
-  return (pos, pos, x)
+  x <- f $ T.decodeUtf8 $ BS.toStrict s'
+  return (pos, advance pos s', x)
   where pos = (line, col, addr)
+        s' = BS.take len s
+
+advance :: (Int, Int, Int) -> ByteString.ByteString -> (Int, Int, Int)
+advance orig_pos = foldl' advance' orig_pos . init . ByteString.unpack
+  where advance' (!line, !col, !addr) c
+          | c == nl   = (line + 1, 1, addr + 1)
+          | otherwise = (line, col + 1, addr + 1)
+        nl = fromIntegral $ ord '\n'
 
 symbol :: [Name] -> Name -> Token
 symbol [] q
