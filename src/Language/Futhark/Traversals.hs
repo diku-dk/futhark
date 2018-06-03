@@ -115,8 +115,6 @@ instance ASTMappable (ExpBase Info VName) where
          mapM (astMap tv) idxexps <*>
          traverse (mapOnCompType tv) t <*>
          pure loc
-  astMap tv (Rearrange perm e loc) =
-    pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
   astMap tv (Map fun e t loc) =
     Map <$> mapOnExp tv fun <*> mapOnExp tv e <*>
     traverse (mapOnCompType tv) t <*> pure loc

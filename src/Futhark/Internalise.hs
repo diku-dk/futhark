@@ -652,10 +652,6 @@ internaliseExp _ (E.Zip _ e es _ loc) = do
 
   where postfix i s = baseString i ++ s
 
-internaliseExp _ (E.Rearrange perm e _) =
-  internaliseOperation "rearrange" e $ \v ->
-    return $ I.Rearrange perm v
-
 internaliseExp desc (E.Map lam arr _ _) = do
   arr' <- internaliseExpToVars "map_arr" arr
   lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'

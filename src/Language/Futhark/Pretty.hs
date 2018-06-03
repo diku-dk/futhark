@@ -238,8 +238,6 @@ instance (Eq vn, Pretty vn, Annot f) => Pretty (ExpBase f vn) where
     text "<-" <+> align (ppr ve)
   pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Rearrange perm e _) =
-    text "rearrange" <> apply [apply (map ppr perm), ppr e]
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduce_comm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
