@@ -12,7 +12,8 @@ module Futhark.Representation.Kernels.KernelExp
   ( KernelExp(..)
   , GroupStreamLambda(..)
   , SplitOrdering(..)
-  , CombineSpace
+  , CombineSpace(..)
+  , combineSpace
   , scopeOfCombineSpace
   , typeCheckKernelExp
   )
@@ -39,16 +40,25 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Util.Pretty
   ((<+>), (</>), ppr, commasep, Pretty, parens, text, apply, braces, annot, indent)
 import qualified Futhark.TypeCheck as TC
+import Futhark.Util (chunks)
 
 -- | How an array is split into chunks.
 data SplitOrdering = SplitContiguous
                    | SplitStrided SubExp
                    deriving (Eq, Ord, Show)
 
-type CombineSpace = [(VName,SubExp)]
+-- | A combine can be fully or partially in-place.  The initial arrays
+-- here work like the ones from the Scatter SOAC.
+data CombineSpace = CombineSpace { cspaceScatter :: [(SubExp, Int, VName)]
+                                 , cspaceDims :: [(VName,SubExp)] }
+                  deriving (Eq, Ord, Show)
+
+combineSpace :: [(VName,SubExp)] -> CombineSpace
+combineSpace = CombineSpace []
 
 scopeOfCombineSpace :: CombineSpace -> Scope lore
-scopeOfCombineSpace cspace = M.fromList $ zip (map fst cspace) $ repeat $ IndexInfo Int32
+scopeOfCombineSpace (CombineSpace _ dims) =
+  M.fromList $ zip (map fst dims) $ repeat $ IndexInfo Int32
 
 data KernelExp lore = SplitSpace SplitOrdering SubExp SubExp SubExp
                       -- ^ @SplitSpace o w i elems_per_thread@.
@@ -147,9 +157,14 @@ instance Attributes lore => IsOp (KernelExp lore) where
 instance Attributes lore => TypedOp (KernelExp lore) where
   opType SplitSpace{} =
     pure $ staticShapes [Prim int32]
-  opType (Combine cspace ts _ _) =
-    pure $ staticShapes $ map (`arrayOfShape` shape) ts
+  opType (Combine (CombineSpace scatter cspace) ts _ _) =
+    pure $ staticShapes $
+    zipWith arrayOfRow val_ts ws ++
+    map (`arrayOfShape` shape) (drop (sum ns*2) ts)
     where shape = Shape $ map snd cspace
+          val_ts = concatMap (take 1) $ chunks ns $
+                   take (sum ns) $ drop (sum ns) ts
+          (ws, ns, _) = unzip3 scatter
   opType (GroupReduce _ lam _) =
     pure $ staticShapes $ lambdaReturnType lam
   opType (GroupScan w lam _) =
@@ -165,8 +180,8 @@ instance FreeIn SplitOrdering where
 instance Attributes lore => FreeIn (KernelExp lore) where
   freeIn (SplitSpace o w i elems_per_thread) =
     freeIn o <> freeIn [w, i, elems_per_thread]
-  freeIn (Combine cspace ts active body) =
-    freeIn (map snd cspace) <> freeIn ts <> freeIn active <> freeInBody body
+  freeIn (Combine (CombineSpace scatter cspace) ts active body) =
+    freeIn scatter <> freeIn (map snd cspace) <> freeIn ts <> freeIn active <> freeInBody body
   freeIn (GroupReduce w lam input) =
     freeIn w <> freeInLambda lam <> freeIn input
   freeIn (GroupScan w lam input) =
@@ -226,6 +241,12 @@ instance Substitute SplitOrdering where
   substituteNames subst (SplitStrided stride) =
     SplitStrided $ substituteNames subst stride
 
+instance Substitute CombineSpace where
+  substituteNames substs (CombineSpace scatter dims) =
+    CombineSpace (map sub scatter) (substituteNames substs dims)
+    where sub (w, n, a) =
+            (substituteNames substs w, n, substituteNames substs a)
+
 instance Attributes lore => Substitute (KernelExp lore) where
   substituteNames subst (SplitSpace o w i elems_per_thread) =
     SplitSpace
@@ -264,6 +285,9 @@ instance Rename SplitOrdering where
     pure SplitContiguous
   rename (SplitStrided stride) =
     SplitStrided <$> rename stride
+
+instance Rename CombineSpace where
+  rename = substituteRename
 
 instance Renameable lore => Rename (KernelExp lore) where
   rename (SplitSpace o w i elems_per_thread) =
@@ -413,14 +437,30 @@ typeCheckKernelExp (SplitSpace o w i elems_per_thread) = do
     SplitStrided stride -> TC.require [Prim int32] stride
   mapM_ (TC.require [Prim int32]) [w, i, elems_per_thread]
 
-typeCheckKernelExp (Combine cspace ts aspace body) = do
+typeCheckKernelExp (Combine cspace@(CombineSpace scatter dims) ts aspace body) = do
   mapM_ (TC.require [Prim int32]) ws
   TC.binding (scopeOfCombineSpace cspace) $ do
+    let (_as_ws, as_ns, _as_vs) = unzip3 scatter
+        num_scatters = sum as_ns
+        ts_is = take num_scatters ts
+        ts_vs = take num_scatters $ drop num_scatters ts
+
+    unless (length ts_is == num_scatters && length ts_vs == num_scatters) $
+      TC.bad $ TC.TypeError "Combine: inconsistent return type annotation."
+
+    forM_ ts_is $ \ts_i -> unless (Prim int32 == ts_i) $
+      TC.bad $ TC.TypeError "Combine: index return type must be i32."
+
+    forM_ (zip (chunks as_ns ts_vs) scatter) $ \(ts_vs', (aw, _, a)) -> do
+      TC.require [Prim int32] aw
+      forM_ ts_vs' $ \ts_v -> TC.requireI [ts_v `arrayOfRow` aw] a
+      TC.consume =<< TC.lookupAliases a
+
     mapM_ TC.checkType ts
     mapM_ (TC.requireI [Prim int32]) a_is
     mapM_ (TC.require [Prim int32]) a_ws
     TC.checkLambdaBody ts body
-  where ws = map snd cspace
+  where ws = map snd dims
         (a_is, a_ws) = unzip aspace
 
 typeCheckKernelExp (GroupReduce w lam input) =
@@ -484,12 +524,13 @@ instance PrettyLore lore => Pretty (KernelExp lore) where
     parens (commasep [ppr w, ppr i, ppr elems_per_thread])
     where suff = case o of SplitContiguous     -> mempty
                            SplitStrided stride -> text "Strided" <> parens (ppr stride)
-  ppr (Combine cspace ts active body) =
+  ppr (Combine (CombineSpace scatter cspace) ts active body) =
     text "combine" <>
-    apply (map f cspace ++ [apply (map ppr ts), ppr active]) <+> text "{" </>
+    apply (map (\(_,n,a) -> text "@" <> ppr (n,a)) scatter ++
+           map (\(i,w) -> ppr i <+> text "<" <+> ppr w) cspace ++
+           [apply (map ppr ts), ppr active]) <+> text "{" </>
     indent 2 (ppr body) </>
     text "}"
-    where f (i, w) = ppr i <+> text "<" <+> ppr w
   ppr (GroupReduce w lam input) =
     text "reduce" <> parens (commasep [ppr w,
                                        ppr lam,

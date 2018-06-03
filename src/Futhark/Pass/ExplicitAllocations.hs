@@ -985,12 +985,13 @@ kernelExpHints e =
 
 inKernelExpHints :: (Allocator lore m, Op lore ~ MemOp (KernelExp somelore)) =>
                     Exp lore -> m [ExpHint]
-inKernelExpHints (Op (Inner (Combine cspace ts _ _))) =
-  forM ts $ \t -> do
+inKernelExpHints (Op (Inner (Combine (CombineSpace scatter cspace) ts _ _))) =
+  fmap (replicate (sum ns) NoHint ++) $ forM (drop (sum ns*2) ts) $ \t -> do
     alloc_dims <- mapM dimAllocationSize $ dims ++ arrayDims t
     let ixfun = IxFun.iota $ map (primExpFromSubExp int32) alloc_dims
     return $ Hint ixfun $ Space "local"
   where dims = map snd cspace
+        (_, ns, _) = unzip3 scatter
 
 inKernelExpHints e =
   return $ replicate (expExtTypeSize e) NoHint

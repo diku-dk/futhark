@@ -121,6 +121,11 @@ instance Engine.Simplifiable SplitOrdering where
   simplify (SplitStrided stride) =
     SplitStrided <$> Engine.simplify stride
 
+instance Engine.Simplifiable CombineSpace where
+  simplify (CombineSpace scatter cspace) =
+    CombineSpace <$> mapM Engine.simplify scatter
+                 <*> mapM (traverse Engine.simplify) cspace
+
 simplifyKernelExp :: Engine.SimplifiableLore lore =>
                      KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore), Stms (Wise lore))
 
@@ -138,11 +143,11 @@ simplifyKernelExp (Combine cspace ts active body) = do
     localScope (scopeOfCombineSpace cspace) $
     Engine.simplifyBody (map (const Observe) ts) body
   body' <- Engine.constructBody body_stms' body_res'
-  (,) <$> (Combine <$> mapM (traverse Engine.simplify) cspace
+  (,) <$> (Combine <$> Engine.simplify cspace
            <*> mapM Engine.simplify ts
            <*> mapM Engine.simplify active
            <*> pure body') <*> pure hoisted
-  where bound_here = S.fromList $ map fst cspace
+  where bound_here = S.fromList $ M.keys $ scopeOfCombineSpace cspace
 
 simplifyKernelExp (GroupReduce w lam input) = do
   arrs' <- mapM Engine.simplify arrs

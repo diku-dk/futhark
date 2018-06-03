@@ -147,7 +147,7 @@ chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' ispace nes arrs =
   combine_reds <- forM (zip chunk_red_pes' chunk_red_pes) $ \(pe', pe) -> do
     combine_id <- newVName "combine_id"
     return $ Let (Pattern [] [pe']) (defAux ()) $ Op $
-      Combine [(combine_id, group_size)] [patElemType pe] [] $
+      Combine (combineSpace [(combine_id, group_size)]) [patElemType pe] [] $
       Body () mempty [Var $ patElemName pe]
 
   final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
@@ -199,7 +199,7 @@ reduceKernel step_two_size reduce_lam' nes arrs = do
 
     combine_id <- newVName "combine_id"
     letBind_ combine_pat $
-      Op $ Combine [(combine_id, group_size)]
+      Op $ Combine (combineSpace [(combine_id, group_size)])
       (map rowType $ patternTypes combine_pat) [] combine_body
 
     let arrs' = patternNames combine_pat
@@ -596,7 +596,7 @@ scanKernel1 w scan_sizes (scan_lam, scan_nes) (_comm, red_lam, red_nes) foldlam 
           -- Create an array of per-thread fold results and scan it.
           combine_id <- newVName "combine_id"
           to_scan_arrs <- letTupExp "combined" $
-                          Op $ Combine [(combine_id, group_size)] scan_ts [] $
+                          Op $ Combine (combineSpace [(combine_id, group_size)]) scan_ts [] $
                           Body () mempty $ map Var to_scan_res
           scanned_arrs <- letTupExp "scanned" $
                           Op $ GroupScan group_size scan_lam $ zip scan_nes to_scan_arrs
@@ -629,7 +629,7 @@ scanKernel1 w scan_sizes (scan_lam, scan_nes) (_comm, red_lam, red_nes) foldlam 
           -- Create an array of per-thread fold results and reduce it.
           combine_id <- newVName "combine_id"
           to_red_arrs <- letTupExp "combined" $
-                         Op $ Combine [(combine_id, group_size)] red_ts [] $
+                         Op $ Combine (combineSpace [(combine_id, group_size)]) red_ts [] $
                          Body () mempty $ map Var to_red_res
           letTupExp "reduced" $
             Op $ GroupReduce group_size red_lam $ zip red_nes to_red_arrs
@@ -677,7 +677,7 @@ scanKernel2 scan_sizes lam input = do
     combine_id <- newVName "combine_id"
     read_elements <- runBodyBinder $ resultBody <$> mapM (indexMine combine_id) arrs
     to_scan_arrs <- letTupExp "combined" $
-                    Op $ Combine [(combine_id, group_size)] scan_ts [] read_elements
+                    Op $ Combine (combineSpace [(combine_id, group_size)]) scan_ts [] read_elements
     scanned_arrs <- letTupExp "scanned" $
                     Op $ GroupScan group_size lam $ zip nes to_scan_arrs
 

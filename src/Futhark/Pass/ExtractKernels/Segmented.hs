@@ -418,7 +418,7 @@ largeKernel group_size segment_size num_segments nest_sizes all_arrs comm
         cids <- replicateM (length red_pes) $ newVName "cid"
         addStms $ stmsFromList
           [ Let (Pattern [] [pe']) (defAux ()) $
-            Op $ Combine [(cid, group_size)] [patElemType pe] [] $
+            Op $ Combine (combineSpace [(cid, group_size)]) [patElemType pe] [] $
             Body () mempty [Var $ patElemName pe]
           | (cid, pe', pe) <- zip3 cids combine_red_pes red_pes ]
 
@@ -651,7 +651,7 @@ smallKernel group_size segment_size num_segments in_arrs scratch_arrs
           return $ PatElem pe_name $ red_t `arrayOfRow` group_size
         cids <- replicateM (length red_pes_wflag) $ newVName "cid"
         addStms $ stmsFromList [ Let (Pattern [] [pe']) (defAux ()) $ Op $
-                                 Combine [(cid, group_size)] [patElemType pe] [] $
+                                 Combine (combineSpace [(cid, group_size)]) [patElemType pe] [] $
                                  Body () mempty [Var $ patElemName pe]
                                | (cid, pe', pe) <- zip3 cids combine_red_pes' red_pes_wflag ]
 
