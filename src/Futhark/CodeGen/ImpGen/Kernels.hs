@@ -30,6 +30,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedKernelLambdaParameters, fullSliceNum)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralExp)
+import Futhark.Util (splitAt3)
 
 type CallKernelGen = ImpGen.ImpM ExplicitMemory Imp.HostOp
 type InKernelGen = ImpGen.ImpM InKernel Imp.KernelOp
@@ -684,58 +685,85 @@ compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
       elems_per_thread' <- Imp.elements <$> ImpGen.compileSubExp elems_per_thread
       computeThreadChunkSize o i' elems_per_thread' num_elements size
 
-compileKernelExp constants dest (Combine cspace ts aspace body)
-  | Just dest' <-
-      ImpGen.Destination <$>
-      zipWithM index ts (ImpGen.valueDestinations dest) = do
-      -- First we compute how many times we have to iterate to cover
-      -- cspace with our group size.  It is a fairly common case that
-      -- we statically know that this requires 1 iteration, so we
-      -- could detect it and not generate a loop in that case.
-      -- However, it seems to have no impact on performance (an extra
-      -- conditional jump), so for simplicity we just always generate
-      -- the loop.
-      let cspace_dims = map (streamBounded . snd) cspace
-          num_iters = product cspace_dims `quotRoundingUp`
-                      Imp.sizeToExp (kernelGroupSize constants)
+compileKernelExp constants dest (Combine (CombineSpace scatter cspace) ts aspace body) = do
+  -- First we compute how many times we have to iterate to cover
+  -- cspace with our group size.  It is a fairly common case that
+  -- we statically know that this requires 1 iteration, so we
+  -- could detect it and not generate a loop in that case.
+  -- However, it seems to have no impact on performance (an extra
+  -- conditional jump), so for simplicity we just always generate
+  -- the loop.
+  let cspace_dims = map (streamBounded . snd) cspace
+      num_iters = product cspace_dims `quotRoundingUp`
+                  Imp.sizeToExp (kernelGroupSize constants)
 
-      iter <- newVName "comb_iter"
-      cid <- newVName "flat_comb_id"
+  iter <- newVName "comb_iter"
+  cid <- newVName "flat_comb_id"
 
-      one_iteration <- ImpGen.collect $
-        ImpGen.declaringPrimVars (zip (map fst cspace) $ repeat int32) $
-        ImpGen.declaringPrimVar cid int32 $ do
+  one_iteration <- ImpGen.collect $
+    ImpGen.declaringPrimVars (zip (map fst cspace) $ repeat int32) $
+    ImpGen.declaringPrimVar cid int32 $ do
 
-          -- Compute the *flat* array index.
-          ImpGen.emit $ Imp.SetScalar cid $
-            Imp.var iter int32 * Imp.sizeToExp (kernelGroupSize constants) +
-            Imp.var (kernelLocalThreadId constants) int32
+      -- Compute the *flat* array index.
+      ImpGen.emit $ Imp.SetScalar cid $
+        Imp.var iter int32 * Imp.sizeToExp (kernelGroupSize constants) +
+        Imp.var (kernelLocalThreadId constants) int32
 
-          -- Turn it into a nested array index.
-          forM_ (zip (map fst cspace) $ unflattenIndex cspace_dims (Imp.var cid int32)) $ \(v, x) ->
-            ImpGen.emit $ Imp.SetScalar v x
+      -- Turn it into a nested array index.
+      forM_ (zip (map fst cspace) $ unflattenIndex cspace_dims (Imp.var cid int32)) $ \(v, x) ->
+        ImpGen.emit $ Imp.SetScalar v x
 
-          -- Execute the body if we are within bounds.
-          copy <- allThreads constants $ ImpGen.compileBody dest' body
-          ImpGen.emit $
-            Imp.If (Imp.BinOpExp LogAnd (isActive cspace) (isActive aspace)) copy mempty
+      -- Construct the body.  This is mostly about the book-keeping
+      -- for the scatter-like part.
+      let (scatter_ws, scatter_ns, _scatter_vs) = unzip3 scatter
+          scatter_ws_repl = concat $ zipWith replicate scatter_ns scatter_ws
+          (scatter_dests, normal_dests) =
+            splitAt (sum scatter_ns) $ ImpGen.valueDestinations dest
+          (res_is, res_vs, res_normal) =
+            splitAt3 (sum scatter_ns) (sum scatter_ns) $ bodyResult body
+          scatter_is = map (pure . DimFix . ImpGen.compileSubExpOfType int32) res_is
+          scatter_dests_repl = concat $ zipWith replicate scatter_ns scatter_dests
+      (scatter_dests', normal_dests') <-
+        case (sequence $ zipWith3 index scatter_is ts scatter_dests_repl,
+              zipWithM (index local_index) (drop (sum scatter_ns*2) ts) normal_dests) of
+          (Just x, Just y) -> return (x, y)
+          _ -> fail "compileKernelExp combine: invalid destination."
+      body' <- allThreads constants $
+        ImpGen.compileStms (stmsToList $ bodyStms body) $ do
 
-      ImpGen.emit $ Imp.For iter Int32 num_iters one_iteration
-      ImpGen.emit $ Imp.Op Imp.Barrier
+        forM_ (zip4 scatter_ws_repl res_is res_vs scatter_dests') $
+          \(w, res_i, res_v, scatter_dest) -> do
+            let res_i' = ImpGen.compileSubExpOfType int32 res_i
+                w'     = ImpGen.compileSubExpOfType int32 w
+                -- We have to check that 'res_i' is in-bounds wrt. an array of size 'w'.
+                in_bounds = BinOpExp LogAnd (CmpOpExp (CmpSle Int32) 0 res_i')
+                                            (CmpOpExp (CmpSlt Int32) res_i' w')
+            when_in_bounds <- ImpGen.collect $ ImpGen.compileSubExpTo scatter_dest res_v
+            ImpGen.emit $ Imp.If in_bounds when_in_bounds mempty
 
-        where streamBounded (Var v)
-                | Just x <- lookup v $ kernelStreamed constants =
-                    Imp.sizeToExp x
-              streamBounded se = ImpGen.compileSubExpOfType int32 se
+        zipWithM_ ImpGen.compileSubExpTo normal_dests' res_normal
 
-              index t (ImpGen.ArrayDestination (Just loc)) =
-                let space_dims = map (ImpGen.varIndex . fst) cspace
-                    t_dims = map (ImpGen.compileSubExpOfType int32) $ arrayDims t
-                in Just $ ImpGen.ArrayDestination $
-                   Just $ ImpGen.sliceArray loc $
-                   fullSliceNum (space_dims++t_dims) $
-                   map (DimFix . ImpGen.varIndex . fst) cspace
-              index _ _ = Nothing
+      -- Execute the body if we are within bounds.
+      ImpGen.emit $
+        Imp.If (Imp.BinOpExp LogAnd (isActive cspace) (isActive aspace)) body' mempty
+
+  ImpGen.emit $ Imp.For iter Int32 num_iters one_iteration
+  ImpGen.emit $ Imp.Op Imp.Barrier
+
+    where streamBounded (Var v)
+            | Just x <- lookup v $ kernelStreamed constants =
+                Imp.sizeToExp x
+          streamBounded se = ImpGen.compileSubExpOfType int32 se
+
+          local_index = map (DimFix . ImpGen.varIndex . fst) cspace
+
+          index i t (ImpGen.ArrayDestination (Just loc)) =
+            let space_dims = map (ImpGen.varIndex . fst) cspace
+                t_dims = map (ImpGen.compileSubExpOfType int32) $ arrayDims t
+            in Just $ ImpGen.ArrayDestination $
+               Just $ ImpGen.sliceArray loc $
+               fullSliceNum (space_dims++t_dims) i
+          index _ _ _ = Nothing
 
 compileKernelExp constants (ImpGen.Destination dests) (GroupReduce w lam input) = do
   skip_waves <- newVName "skip_waves"

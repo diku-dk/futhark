@@ -130,6 +130,9 @@ class FreeIn a where
 instance FreeIn () where
   freeIn () = mempty
 
+instance FreeIn Int where
+  freeIn = const mempty
+
 instance (FreeIn a, FreeIn b) => FreeIn (a,b) where
   freeIn (a,b) = freeIn a <> freeIn b
 

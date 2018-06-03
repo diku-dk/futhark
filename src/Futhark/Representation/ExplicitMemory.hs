@@ -959,6 +959,12 @@ instance OpReturns InKernel where
     where f (Var v) = varReturns v
           f (Constant v) = return $ MemPrim $ primValueType v
 
+  opReturns (Inner (Combine (CombineSpace scatter cspace) ts _ _)) =
+    (++) <$> mapM varReturns as <*>
+    pure (extReturns $ staticShapes $ map (`arrayOfShape` shape) $ drop (sum ns*2) ts)
+    where (_, ns, as) = unzip3 scatter
+          shape = Shape $ map snd cspace
+
   opReturns k =
     extReturns <$> opType k
 

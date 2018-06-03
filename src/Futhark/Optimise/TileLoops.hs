@@ -274,7 +274,7 @@ tile1d kspace block_size block_param = do
       BasicOp $ Index (paramName outer_block_param) [DimFix $ Var ltid]
 
   cid <- newVName "cid"
-  let block_cspace = [(cid, block_size)]
+  let block_cspace = combineSpace [(cid, block_size)]
       block_pe =
         PatElem (paramName block_param) $ paramType outer_block_param
       write_block_stms =
@@ -312,7 +312,8 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
 
     cids <- replicateM (length local_is - num_outer) $ newVName "cid"
     let block_size_2d = Shape $ rearrangeShape inner_perm [tile_size, block_size]
-        block_cspace = zip cids $ rearrangeShape inner_perm [tile_size,block_size]
+        block_cspace = combineSpace $ zip cids $
+                       rearrangeShape inner_perm [tile_size,block_size]
 
     block_name_2d <- newVName $ baseString (paramName block_param) ++ "_2d"
     let block_pe =
