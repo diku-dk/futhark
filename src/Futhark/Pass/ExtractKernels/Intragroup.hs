@@ -72,7 +72,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
                   if null ws_min
                   then eBinOp (SMin Int32)
                        (eSubExp =<< getSize "intra_group_size" Out.SizeGroup)
-                       (foldBinOp' (SMax Int32) ws_avail)
+                       (eSubExp intra_avail_par)
                   else foldBinOp' (SMax Int32) ws_min
 
     let inputIsUsed input = kernelInputName input `S.member` freeInBody body
