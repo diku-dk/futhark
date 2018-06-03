@@ -454,7 +454,6 @@ typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
-typeOf (Rearrange _ e _) = typeOf e
 typeOf (Zip _ _ _ (Info t) _) = t
 typeOf (Unzip _ ts _) =
   tupleRecord $ map unInfo ts

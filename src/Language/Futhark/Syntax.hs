@@ -639,12 +639,6 @@ data ExpBase f vn =
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
-            | Rearrange [Int] (ExpBase f vn) SrcLoc
-            -- ^ Permute the dimensions of the input array.  The list
-            -- of integers is a list of dimensions (0-indexed), which
-            -- must be a permutation of @[0,n-1]@, where @n@ is the
-            -- number of dimensions in the input array.
-
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
@@ -740,7 +734,6 @@ instance Located (ExpBase f vn) where
   locOf (LetWith _ _ _ _ _ pos)        = locOf pos
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
-  locOf (Rearrange _ _ pos)            = locOf pos
   locOf (Map _ _ _ loc)                = locOf loc
   locOf (Reduce _ _ _ _ pos)           = locOf pos
   locOf (Zip _ _ _ _ loc)              = locOf loc

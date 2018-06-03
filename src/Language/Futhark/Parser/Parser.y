@@ -138,7 +138,6 @@ import Language.Futhark.Parser.Lexer
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
-      rearrange       { L $$ REARRANGE }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       unsafe          { L $$ UNSAFE }
@@ -176,7 +175,7 @@ import Language.Futhark.Parser.Lexer
 %right '->'
 %left juxtprec
 %nonassoc with
-%left indexprec rotate rearrange
+%left indexprec
 %%
 
 -- The main parser.
@@ -509,9 +508,6 @@ Exp2 :: { UncheckedExp }
 
      | LetExp %prec letprec { $1 }
 
-     | rearrange '(' NaturalInts ')' Atom
-                      { Rearrange $3 $5 (srcspan $1 $>) }
-
      | zip Atoms1
                       { Zip 0 (fst $2) (snd $2) NoInfo
                         (srcspan $1 (mconcat (map srclocOf (snd $>)))) }
@@ -798,10 +794,6 @@ CatValues : Value CatValues { $1 : $2 }
 
 NaturalInt :: { Int }
            : intlit   { let L _ (INTLIT num) = $1 in fromIntegral num  }
-
-NaturalInts :: { [Int] }
-           : NaturalInt                 { [$1] }
-           | NaturalInt ',' NaturalInts { $1 : $3  }
 
 PrimType :: { PrimType }
          : id {% let L _ (ID s) = $1 in primTypeFromName s }

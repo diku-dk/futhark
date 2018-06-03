@@ -1089,16 +1089,6 @@ checkExp (Index e idxes NoInfo loc) = do
   where isFix DimFix{} = True
         isFix _        = False
 
-checkExp (Rearrange perm arrexp loc) = do
-  (arr_t, _) <- newArrayType (srclocOf arrexp) "e" (length perm)
-  arrexp' <- unifies arr_t =<< checkExp arrexp
-  r <- arrayRank <$> expType arrexp'
-  when (length perm /= r || sort perm /= [0..r-1]) $
-    throwError $ TypeError loc $
-    "The permutation (" ++ intercalate ", " (map show perm) ++
-    ") is not valid for array argument of rank " ++ show r ++ "."
-  return $ Rearrange perm arrexp' loc
-
 checkExp (Zip i e es NoInfo loc) = do
   let checkInput inp = do (arr_t, _) <- newArrayType (srclocOf e) "e" (1+i)
                           unifies arr_t =<< checkExp inp
