@@ -25,7 +25,7 @@
   (princ "If FILE is '-', read from standard in (any -i is ignored).\n"))
 
 ;; Load futhark-mode.
-(add-to-list 'load-path (elt argv 0))
+(add-to-list 'load-path (concat (elt argv 0) "/emacs"))
 (require 'futhark-mode)
 
 ;; Read file and indent.

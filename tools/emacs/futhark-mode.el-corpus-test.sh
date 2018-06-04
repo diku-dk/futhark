@@ -9,7 +9,7 @@
 cd "$(dirname "$0")/futhark-mode.el-corpus"
 
 futhark_indent() {
-    ../futfmt "$file"
+    ../../futfmt "$file"
 }
 
 for file in *.fut; do
