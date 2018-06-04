@@ -274,7 +274,14 @@ readHexRealLit desc s =
     Just (n) -> return n
     Nothing -> fail $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
 
-alexEOF = return ((0,0,0), (0,0,0), EOF)
+alexGetPosn :: Alex (Int, Int, Int)
+alexGetPosn = Alex $ \s ->
+  let (AlexPn off line col) = alex_pos s
+  in Right (s, (line, col, off))
+
+alexEOF = do
+  posn <- alexGetPosn
+  return (posn, posn, EOF)
 
 -- | A value tagged with a source location.
 data L a = L SrcLoc a deriving (Show)
@@ -373,19 +380,29 @@ data Token = ID Name
 
              deriving (Show, Eq, Ord)
 
-scanTokensText :: FilePath -> T.Text -> Either String [L Token]
-scanTokensText file = scanTokens file . BS.fromStrict . T.encodeUtf8
+runAlex' :: AlexPosn -> ByteString.ByteString -> Alex a -> Either String a
+runAlex' start_pos input__ (Alex f) =
+  case f (AlexState { alex_pos = start_pos
+                    , alex_bpos = 0
+                    , alex_inp = input__
+                    , alex_chr = '\n'
+                    , alex_scd = 0}) of Left msg -> Left msg
+                                        Right ( _, a ) -> Right a
 
-scanTokens :: FilePath -> BS.ByteString -> Either String [L Token]
-scanTokens file str = runAlex str $ do
+scanTokensText :: Pos -> T.Text -> Either String ([L Token], Pos)
+scanTokensText pos = scanTokens pos . BS.fromStrict . T.encodeUtf8
+
+scanTokens :: Pos -> BS.ByteString -> Either String ([L Token], Pos)
+scanTokens (Pos file start_line start_col start_off) str =
+  runAlex' (AlexPn start_off start_line start_col) str $ do
   fix $ \loop -> do
     tok <- alexMonadScan
     case tok of
       (start, end, EOF) ->
-        return []
+        return ([], posnToPos end)
       (start, end, t) -> do
-        rest <- loop
-        return $ L (pos start end) t : rest
+        (rest, endpos) <- loop
+        return (L (pos start end) t : rest, endpos)
   where pos start end = SrcLoc $ Loc (posnToPos start) (posnToPos end)
-        posnToPos (line, col, addr) = Pos file line col addr
+        posnToPos (line, col, off) = Pos file line col off
 }
