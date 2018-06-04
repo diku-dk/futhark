@@ -18,5 +18,5 @@ let main [n][m] (a: [][n][m]i32): [][][]i32 =
                    ) (a_row) in
         map (\(b_col: []i32): []i32  ->
              scan (+) 0 (b_col))
-            (rearrange (1,0) b)
+            (transpose b)
      ) a

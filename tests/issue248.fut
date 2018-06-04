@@ -13,21 +13,18 @@ let reshape_int (l: i32) (x: []i32): []i32 =
   v1
 entry main (nucleotides: []i32): bool =
   let t_v2 = unflatten 8 6 (reshape_int (8*6) nucleotides) in
-  let t_v8 = rearrange (2, 0, 1) (unflatten_3d 8 6 4 (reshape_int (8*6*4) "ABCD")) in
+  let t_v8 = transpose (map transpose (unflatten_3d 8 6 4 (reshape_int (8*6*4) "ABCD"))) in
   let t_v9 = unflatten_3d 4 8 6 (reshape_int (4*8*6) (flatten t_v2)) in
   let t_v12 = let x = t_v8 in
               let y = t_v9 in
               map2 (\(x: [][]i32) (y: [][]i32): [][]bool ->
                        map2 (\(x: []i32) (y: []i32): []bool ->
                                 map2 (==) (x) (y)) (x) (y)) (x) (y) in
-  let t_v15 = map (\(x: [][]bool): []bool ->
-                   map (\(x: []bool): bool ->
-                        reduce (||) (false) (x)) (x)) (t_v12) in
   let t_v18 = map (\(x: [][]bool): []bool ->
                    map (\(x: []bool): bool ->
                         reduce (||) (false) (x)) (x)) (t_v12) in
-  let t_v21 = rearrange (0) (map (\(x: []bool): bool ->
-                                  reduce (&&) (true) (x)) (rearrange (1, 0) (t_v18))) in
+  let t_v21 = (map (\(x: []bool): bool ->
+                    reduce (&&) (true) (x)) (transpose (t_v18))) in
   let t_v26 = reduce (&&) (true) (let x = t_v21 in
                                   let y = [false, false, false, true, false,
                                            true, false, false] in

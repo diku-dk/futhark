@@ -2,5 +2,5 @@
 -- lambda body (mostly so that the type annotation is correct.
 
 let main [n][m] (x: i32, a: *[n][m]i32) =
-  let b = rearrange (1, 0) a
+  let b = transpose a
   in map1 (\x -> b[m - x - 1]) (iota m)

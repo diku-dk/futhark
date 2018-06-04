@@ -8,5 +8,5 @@ let main (a_1: [][]i32, a_2: [][]i32): [][]i32 =
                       (x+y,x-y)) row) a
   let c = map (\(row: [](i32,i32))  ->
                 map (\(x,y) -> x + y) row)
-              (rearrange (1,0) b)
+              (transpose b)
   in c
