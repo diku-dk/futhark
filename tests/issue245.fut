@@ -16,7 +16,7 @@ let reshape_int (l: i32) (x: []i32): []i32 =
 entry main (x: i32) (y: i32): [][]i32 =
   let t_v1 = unflatten x y (reshape_int ((x * (y * 1))) (map (\(x: i32): i32 ->
                                                                                                                      (x + 1)) (iota (6)))) in
-  let t_v2 = rearrange (1, 0) (t_v1) in
+  let t_v2 = transpose (t_v1) in
   let t_v3 = take_arrint (x) (t_v2) in
-  let t_v4 = rearrange (1, 0) (t_v3) in
+  let t_v4 = transpose (t_v3) in
   t_v4

@@ -8,4 +8,4 @@
 --                                                                           600]]]
 -- }
 let main(a: [][][]i32): [][][]i32 =
-  rearrange (0,2,1) a
+  map transpose a

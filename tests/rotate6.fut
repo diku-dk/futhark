@@ -11,7 +11,8 @@
 --   [[1i32, 3i32, 4i32, 2i32], [1i32, 1i32, 1i32, 4i32]], [[5i32,
 --   3i32, 4i32, 2i32], [2i32, 6i32, 8i32, 1i32]]]
 -- }
+-- structure { Rearrange 1 Rotate 1 }
 
 
 let main(i: i32, arr: [][][]i32): [][][]i32 =
-  map (map (rotate i)) (rearrange (2,1,0) (rotate i arr))
+  map (map (rotate i)) (rotate i arr |> transpose |> map transpose |> transpose)

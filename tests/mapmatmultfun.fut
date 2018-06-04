@@ -17,7 +17,7 @@
 let matmult [n][m][p] (x: [n][m]i32) (y: [m][p]i32): [n][p]i32 =
   map (\xr ->
          map (\yc -> reduce (+) 0 (map2 (*) xr yc))
-       (rearrange (1,0) y))
+       (transpose y))
   x
 
 

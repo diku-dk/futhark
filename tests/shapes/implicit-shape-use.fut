@@ -60,8 +60,8 @@ let brownianBridge [num_dates]
                  gaussian_arr: []f64
             ): [][]f64 =
     let gauss2d  = unflatten num_dates num_und gaussian_arr
-    let gauss2dT = rearrange (1,0) gauss2d in
-      rearrange (1,0) (
+    let gauss2dT = transpose gauss2d in
+      transpose (
         map (brownianBridgeDates bb_inds bb_data) gauss2dT
       )
 

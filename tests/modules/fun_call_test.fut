@@ -22,7 +22,7 @@ module M0 = {
   }
 
 let floydSbsFun(n: i32, d: [][]i32 ): [][]i32 =
-    let d3  = replicate n (rearrange (1,0) d)
+    let d3  = replicate n (transpose d)
     let d2  = map       (M0.replin(n)) d
     let abr = map M0.M1.plus2 (zip d3 d2)
     let partial = map M0.redmin2 abr        in

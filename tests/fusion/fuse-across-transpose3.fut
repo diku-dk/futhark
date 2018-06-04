@@ -5,6 +5,6 @@ let main [n][m] (a: [n][m]i32): i32 =
                 map (*3) z1) a
   let ravgs = map (\r: i32  ->
                    reduce (+) 0 r / n)
-                  (rearrange (1,0) b)
+                  (transpose b)
   let res = reduce (+) 0 ravgs in
   res
