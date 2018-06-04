@@ -313,6 +313,14 @@ mapOpToOp (_, used) pat aux1 e
       certifying (stmAuxCerts aux1 <> cs) $ letBind_ pat $
       BasicOp $ Concat (d+1) outer_arr outer_arrs dw
 
+  | Just (map_pe, cs, _,
+          BasicOp (Rearrange perm rearrange_arr), [p], [arr]) <-
+      isMapWithOp pat e,
+    paramName p == rearrange_arr,
+    not $ UT.isConsumed (patElemName map_pe) used =
+      certifying (stmAuxCerts aux1 <> cs) $ letBind_ pat $
+      BasicOp $ Rearrange (0 : map (1+) perm) arr
+
   | Just (map_pe, cs, _, BasicOp (Rotate rots rotate_arr), [p], [arr]) <-
       isMapWithOp pat e,
     paramName p == rotate_arr,
