@@ -33,6 +33,7 @@ import Data.Vector.Binary
 import qualified Data.Vector.Unboxed.Mutable as UMVec
 import qualified Data.Vector.Unboxed as UVec
 import Data.Vector.Generic (freeze)
+import Data.Loc (Pos(..))
 
 import qualified Language.Futhark.Syntax as F
 import Language.Futhark.Pretty()
@@ -282,7 +283,7 @@ constituent c = not $ isSpace c
 
 readIntegral :: Integral int => (Token -> Maybe int) -> ReadValue int
 readIntegral f t = do
-  v <- case scanTokens "" a of
+  v <- case fst <$> scanTokens (Pos "" 1 1 0) a of
          Right [L _ NEGATE, L _ (INTLIT x)] -> Just $ negate $ fromIntegral x
          Right [L _ (INTLIT x)] -> Just $ fromIntegral x
          Right [L _ tok] -> f tok
@@ -333,7 +334,7 @@ readWord64 = readIntegral f
 
 readFloat :: RealFloat float => (Token -> Maybe float) -> ReadValue float
 readFloat f t = do
-  v <- case scanTokens "" a of
+  v <- case fst <$> scanTokens (Pos "" 1 1 0) a of
          Right [L _ NEGATE, L _ (FLOATLIT x)] -> Just $ negate $ fromDouble x
          Right [L _ (FLOATLIT x)] -> Just $ fromDouble x
          Right [L _ tok] -> f tok
@@ -354,7 +355,7 @@ readFloat64 = readFloat lexFloat64
         lexFloat64 _          = Nothing
 
 readBool :: ReadValue Bool
-readBool t = do v <- case scanTokens "" a of
+readBool t = do v <- case fst <$> scanTokens (Pos "" 1 1 0) a of
                        Right [L _ TRUE]  -> Just True
                        Right [L _ FALSE] -> Just False
                        _                 -> Nothing
@@ -363,7 +364,7 @@ readBool t = do v <- case scanTokens "" a of
 
 readPrimType :: ReadValue String
 readPrimType t = do
-  pt <- case scanTokens "" a of
+  pt <- case fst <$> scanTokens (Pos "" 1 1 0) a of
           Right [L _ (ID s)] -> Just $ F.nameToString s
           _                  -> Nothing
   return (pt, dropSpaces b)

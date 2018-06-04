@@ -890,12 +890,12 @@ data ParserEnv = ParserEnv {
 type ParserMonad a =
   ExceptT String (
     StateT ParserEnv (
-       StateT [L Token] ReadLineMonad)) a
+       StateT ([L Token], Pos) ReadLineMonad)) a
 
 data ReadLineMonad a = Value a
-                     | GetLine (T.Text -> ReadLineMonad a)
+                     | GetLine (Maybe T.Text -> ReadLineMonad a)
 
-readLineFromMonad :: ReadLineMonad T.Text
+readLineFromMonad :: ReadLineMonad (Maybe T.Text)
 readLineFromMonad = GetLine Value
 
 instance Monad ReadLineMonad where
@@ -914,16 +914,16 @@ getLinesFromM :: Monad m => m T.Text -> ReadLineMonad a -> m a
 getLinesFromM _ (Value x) = return x
 getLinesFromM fetch (GetLine f) = do
   s <- fetch
-  getLinesFromM fetch $ f s
+  getLinesFromM fetch $ f $ Just s
 
 getLinesFromTexts :: [T.Text] -> ReadLineMonad a -> Either String a
 getLinesFromTexts _ (Value x) = Right x
-getLinesFromTexts (x : xs) (GetLine f) = getLinesFromTexts xs $ f x
-getLinesFromTexts [] (GetLine _) = Left "Ran out of input"
+getLinesFromTexts (x : xs) (GetLine f) = getLinesFromTexts xs $ f $ Just x
+getLinesFromTexts [] (GetLine f) = getLinesFromTexts [] $ f Nothing
 
 getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
-getNoLines (GetLine _) = Left "Unexpected end of input"
+getNoLines (GetLine f) = getNoLines $ f Nothing
 
 combArrayElements :: Value
                   -> [Value]
@@ -946,8 +946,8 @@ patternExp (PatternParens pat _) = patternExp pat
 patternExp (RecordPattern fs loc) = RecordLit <$> mapM field fs <*> pure loc
   where field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
 
-eof :: L Token
-eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF
+eof :: Pos -> L Token
+eof pos = L (SrcLoc $ Loc pos pos) EOF
 
 binOpName (L _ (SYMBOL _ qs op)) = QualName qs op
 
@@ -955,11 +955,11 @@ binOp x (L _ (SYMBOL _ qs op)) y =
   BinOp (QualName qs op) NoInfo (x, NoInfo) (y, NoInfo) NoInfo $
   srcspan x y
 
-getTokens :: ParserMonad [L Token]
+getTokens :: ParserMonad ([L Token], Pos)
 getTokens = lift $ lift get
 
-putTokens :: [L Token] -> ParserMonad ()
-putTokens ts = lift $ lift $ put ts
+putTokens :: ([L Token], Pos) -> ParserMonad ()
+putTokens = lift . lift . put
 
 primTypeFromName :: Name -> ParserMonad PrimType
 primTypeFromName s = maybe boom return $ M.lookup s namesToPrimTypes
@@ -978,28 +978,32 @@ floatNegate :: FloatValue -> FloatValue
 floatNegate (Float32Value v) = Float32Value (-v)
 floatNegate (Float64Value v) = Float64Value (-v)
 
-readLine :: ParserMonad T.Text
+readLine :: ParserMonad (Maybe T.Text)
 readLine = lift $ lift $ lift readLineFromMonad
 
 lexer :: (L Token -> ParserMonad a) -> ParserMonad a
 lexer cont = do
-  ts <- getTokens
+  (ts, pos) <- getTokens
   case ts of
     [] -> do
-      ended <- lift $ runExceptT $ cont eof
+      ended <- lift $ runExceptT $ cont $ eof pos
       case ended of
         Right x -> return x
-        Left _ -> do
-          ts' <- scanTokensText <$> getFilename <*> readLine
-          ts'' <- case ts' of Right x -> return x
-                              Left e  -> throwError e
+        Left parse_e -> do
+          line <- readLine
+          ts' <-
+            case line of Nothing -> throwError parse_e
+                         Just line' -> return $ scanTokensText (advancePos pos '\n') line'
+          (ts'', pos') <-
+            case ts' of Right x -> return x
+                        Left lex_e  -> throwError lex_e
           case ts'' of
-            [] -> cont eof
+            [] -> cont $ eof pos
             xs -> do
-              putTokens xs
+              putTokens (xs, pos')
               lexer cont
     (x : xs) -> do
-      putTokens xs
+      putTokens (xs, pos)
       cont x
 
 parseError :: L Token -> ParserMonad a
@@ -1035,7 +1039,7 @@ parseInMonad :: ParserMonad a -> FilePath -> T.Text
 parseInMonad p file program =
   either (Left . ParseError) Right <$> either (return . Left)
   (evalStateT (evalStateT (runExceptT p) env))
-  (scanTokensText file program)
+  (scanTokensText (Pos file 1 1 0) program)
   where env = ParserEnv file
 
 parseIncrementalM :: Monad m =>
