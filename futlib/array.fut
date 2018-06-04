@@ -136,4 +136,4 @@ let tabulate 'a (n: i32) (f: i32 -> a): *[n]a =
 
 -- | Create a value for each point in a two-dimensional index space.
 let tabulate_2d 'a (n: i32) (m: i32) (f: i32 -> i32 -> a): *[n][m]a =
-  map1 (tabulate m <<| f) (iota n)
+  map1 (f >-> tabulate m) (iota n)
