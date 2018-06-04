@@ -59,15 +59,30 @@
       "stream_map_per" "stream_red" "stream_map_per" "stream_seq")
     "All Futhark builtin SOACs, functions, and non-symbolic operators.")
 
-  (defconst futhark-builtin-types
+  (defconst futhark-numeric-types
     '("i8" "i16" "i32" "i64"
       "u8" "u16" "u32" "u64"
-      "f32" "f64" "bool")
+      "f32" "f64")
+    "A list of Futhark numeric types.")
+
+  (defconst futhark-builtin-types
+    (cons "bool" futhark-numeric-types)
     "A list of Futhark types.")
 
   (defconst futhark-booleans
     '("true" "false")
     "All Futhark booleans.")
+
+  (defconst futhark-number
+    (concat "-?"
+            "\\<\\(\\(?:"
+            "\\(?:0[xX]\\)?"
+            "[0-9a-fA-F]+"
+            "\\(?:\\.[0-9a-fA-F]+\\)?"
+            "\\(?:[pP][+-]?[0-9]+\\)?"
+            "\\(?:i8\\|i16\\|i32\\|i64\\|u8\\|u16\\|u32\\|u64\\|f32\\|f64\\)?"
+            "\\)\\)\\>")
+    "All numeric constants, including hex float literals.")
 
   (defconst futhark-var
     (concat "\\(?:" "[_'[:alnum:]]+" "\\)")
@@ -167,6 +182,9 @@
       ;; Constants.
       ;;; Booleans.
       (,(regexp-opt futhark-booleans 'words)
+       . font-lock-constant-face)
+
+      (,(concat "\\(" futhark-number "\\)")
        . font-lock-constant-face)
 
       )
