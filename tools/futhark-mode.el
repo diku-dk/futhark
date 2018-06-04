@@ -160,9 +160,6 @@
       ;;;; Builtin functions.
       (,(regexp-opt futhark-builtin-functions 'words)
        . font-lock-builtin-face)
-      ;;;; Tuple accessors.
-      (,(concat "#" "[[:digit:]]+")
-       . font-lock-builtin-face)
       ;;; Operators.
       (,futhark-operator
        . font-lock-builtin-face)
