@@ -96,7 +96,7 @@
 
   (defconst futhark-operator
     (concat "["
-            "+*\\-/%!<>=&|@"
+            "-+*/%!<>=&|@"
             "]" "+"))
 
   (defconst futhark-non-tuple-type
