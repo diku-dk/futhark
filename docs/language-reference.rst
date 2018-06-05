@@ -945,7 +945,7 @@ Module System
 -------------
 
 .. productionlist::
-   mod_bind: "module" `id` `mod_param`+ "=" [":" mod_type_exp] "=" `mod_exp`
+   mod_bind: "module" `id` `mod_param`* "=" [":" mod_type_exp] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
    mod_type_bind: "module" "type" `id` `type_param`* "=" `mod_type_exp`
 
