@@ -50,7 +50,7 @@ User-defined operators are possible, but the fixity of the operator
 depends on its name.  Specifically, the fixity of a user-defined
 operator *op* is equal to the fixity of the built-in operator that is
 the longest prefix of *op*.  So, for example, ``<<=`` would have the
-same fixity as ``<<``, and ``=<<`` the same as ``<``.  This rule is the
+same fixity as ``<<``, and ``=<<`` the same as ``=``.  This rule is the
 same as the rule found in OCaml and F#.
 
 Top-level functions and values are defined with ``let``, as in OCaml
