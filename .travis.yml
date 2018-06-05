@@ -22,13 +22,10 @@ matrix:
 
 addons:
   apt:
-    sources:
-      - sourceline: 'ppa:adrozdoff/emacs'
     packages:
     - python
     - python-numpy
     - libgmp-dev
-    - emacs25
 
 before_install:
  - export PATH=$HOME/.local/bin:$PATH
@@ -50,9 +47,5 @@ script:
 
  # Check for style issues.
  - if [ "$STACK_YAML" = stack.yaml ]; then stack install hlint --fast && tools/style-check.sh src; fi
-
- # Check the automatic indentation feature of the futhark-mode.el
- # Emacs editing mode.
- - if [ "$STACK_YAML" = stack.yaml ]; then cd tools/emacs && ./futhark-mode.el-corpus-test.sh; fi
 
 # EOF
