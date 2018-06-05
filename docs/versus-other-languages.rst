@@ -78,13 +78,12 @@ looking for parallelism.  Only certain special constructs and built-in
 library functions (in particular ``map``, ``reduce``, ``scan``, and
 ``filter``) may be executed in parallel.
 
-Currying and partial application work as usual (although functions
+Currying and partial application works as usual (although functions
 are not fully first class; see `Types`_).  Some Futhark language
 constructs look like functions, but are not (yet).  This means they
 cannot be partially applied, and may not interact well with type
-inference.  These include ``reshape``, ``rearrange``, ``rotate``,
-``concat``, ``unzip``, ``zip``, and ``map``.  Usually there are more
-well-behaved wrappers to be found in `the basis library
+inference.  These include ``unzip`` and ``zip``.  Usually there are
+more well-behaved wrappers to be found in `the basis library
 <https://futhark-lang.org/docs/>`_.
 
 Lambda terms are written as ``\x -> x + 2``, as in Haskell.
