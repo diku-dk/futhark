@@ -121,7 +121,7 @@ may optionally annotate it with a size as ``[n]t`` (see `Shape
 Declarations`).  Array values are written as ``[1,2,3]``.  Array
 indexing is written ``a[i]`` with *no* space allowed between the array
 name and the brace.  Indexing of multi-dimensional arrays is written
-``a[i,j]``.
+``a[i,j]``.  Arrays are 0-indexed.
 
 Function types are supported with the usual ``a -> b``, and functions can be
 passed as arguments to other functions.  However, there are some
