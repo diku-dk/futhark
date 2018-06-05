@@ -32,8 +32,8 @@ Futhark uses a keyword-based structure, with optional indentation
 
 Names are lexically divided into *identifiers* and *symbols*:
 
-* *Identifiers* begin with a letter and contain letters, numbers, underscores,
-  and apostrophes.
+* *Identifiers* begin with a letter or underscore and contain letters,
+  numbers, underscores, and apostrophes.
 
 * *Symbols* contain the characters found in the default operators
   (``+-*/%=!><|&^``)
