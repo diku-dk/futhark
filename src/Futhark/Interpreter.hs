@@ -552,6 +552,8 @@ evalBasicOp (Partition n flags arrs) = do
 
 evalSOAC :: SOAC SOACS -> FutharkM [Value]
 
+evalSOAC CmpThreshold{} = return [PrimVal $ value False]
+
 evalSOAC (Stream w form elam arrs) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs

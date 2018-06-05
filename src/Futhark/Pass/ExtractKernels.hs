@@ -257,6 +257,11 @@ scopeForKernels = castScope
 
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 
+transformStm path (Let pat aux (Op (CmpThreshold what s))) =
+  runBinder_ $ do
+    (r, _) <- cmpSizeLe s (Out.SizeThreshold path) what
+    addStm $ Let pat aux $ BasicOp $ SubExp r
+
 transformStm path (Let pat aux (If c tb fb rt)) = do
   tb' <- transformBody path tb
   fb' <- transformBody path fb
@@ -697,7 +702,7 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedStm bound (Op (Screma w _ _)) =
           w `subExpBound` bound
-        unbalancedStm _ (Op Scatter{}) =
+        unbalancedStm _ Op{} =
           False
         unbalancedStm _ DoLoop{} = False
 
@@ -873,6 +878,7 @@ distributeMapBodyStms acc (bnd:bnds) =
   distributeMapBodyStms acc bnds
 
 maybeDistributeStm :: Stm -> KernelAcc -> KernelM KernelAcc
+
 maybeDistributeStm bnd@(Let pat _ (Op (Screma w form arrs))) acc
   | Just lam <- isMapSOAC form =
   -- Only distribute inside the map if we can distribute everything

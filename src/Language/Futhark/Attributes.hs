@@ -731,6 +731,10 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                                     Prim $ Signed Int32,
                                     Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique] $
                                    Array (ArrayPolyElem tv_a' [] ()) (rank 2) Unique),
+              ("cmp_threshold", IntrinsicPolyFun []
+                                [Prim $ Signed Int32,
+                                 Array (ArrayPrimElem (Signed Int32) ()) (rank 1) Nonunique] $
+                                Prim Bool),
 
                ("scatter", IntrinsicPolyFun [tp_a]
                           [Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique,

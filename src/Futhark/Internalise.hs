@@ -20,6 +20,7 @@ import qualified Data.Set as S
 import Data.Semigroup ((<>))
 import Data.List
 import Data.Loc
+import Data.Char (chr)
 
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
@@ -1215,6 +1216,14 @@ isOverloadedFunction qname args loc = do
           _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
     handle [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v
+
+    handle [E.TupLit [e, E.ArrayLit vs _ _] _] "cmp_threshold" = do
+      s <- mapM isCharLit vs
+      Just $ \desc -> do
+        x <- internaliseExp1 "threshold_x" e
+        pure <$> letSubExp desc (Op $ CmpThreshold x s)
+      where isCharLit (Literal (SignedValue iv) _) = Just $ chr $ fromIntegral $ intToInt64 iv
+            isCharLit _                            = Nothing
 
     handle [E.TupLit [n, m, arr] _] f
       | f `elem` ["unflatten", "cosmin_unflatten"] = Just $ \desc -> do
