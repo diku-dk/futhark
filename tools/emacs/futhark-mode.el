@@ -140,11 +140,6 @@
   (defvar futhark-font-lock
     `(
 
-      ;; Function declarations.
-      (,(concat "\\(?:" "fun" "\\|" "val" "\\|" "entry" "\\)"
-                ws1 "\\(" futhark-var "\\)")
-       . '(1 font-lock-function-name-face))
-
       ;; Variable and tuple declarations.
       ;;; Lets.
       ;;;; Primitive values.
@@ -247,14 +242,12 @@ In general, prefer as little indentation as possible."
 
        ;; Align global definitions and headers to nearest module definition or
        ;; column 0.
-       (and (or (futhark-looking-at-word "fun")
-                (futhark-looking-at-word "entry")
+       (and (or (futhark-looking-at-word "entry")
                 (futhark-looking-at-word "type")
                 (futhark-looking-at-word "val")
                 (futhark-looking-at-word "module")
                 (futhark-looking-at-word "include")
-                (futhark-looking-at-word "import")
-                (futhark-looking-at-word "default"))
+                (futhark-looking-at-word "import"))
             (or
              (save-excursion
                (and
