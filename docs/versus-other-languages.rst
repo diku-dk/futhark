@@ -100,9 +100,9 @@ Types
 
 Futhark supports a range of integer types, floating point types, and
 booleans (see :ref:`primitives`).  A numeric literal can be suffixed
-with its desired type, such as ``1i8`` for an eight-bit signed integer.
-Un-adorned integers have type ``i32`` and un-adorned decimal numbers
-have type ``f64`` (double precision float).
+with its desired type, such as ``1i8`` for an eight-bit signed
+integer.  Un-adorned numerals have their type inferred based on use.
+This only works for built-in numeric types.
 
 All types can be combined in tuples as usual, as well as in
 *structurally typed records*, as in Standard ML.  There are not yet
