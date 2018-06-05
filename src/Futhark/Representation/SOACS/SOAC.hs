@@ -93,6 +93,7 @@ data SOAC lore =
     -- 'Lambda'/'SubExp' pair is for scan and its neutral elements.
     -- The second is for the reduction.  The final lambda is for the
     -- map part, and finally comes the input arrays.
+  | CmpThreshold SubExp String
     deriving (Eq, Ord, Show)
 
 data StreamForm lore  =
@@ -263,6 +264,7 @@ mapSOACM tv (Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) 
    ((,,) comm <$> mapOnSOACLambda tv red_lam <*> mapM (mapOnSOACSubExp tv) red_nes) <*>
    mapOnSOACLambda tv map_lam)
   <*> mapM (mapOnSOACVName tv) arrs
+mapSOACM tv (CmpThreshold what s) = CmpThreshold <$> mapOnSOACSubExp tv what <*> pure s
 
 instance Attributes lore => FreeIn (SOAC lore) where
   freeIn = execWriter . mapSOACM free
@@ -301,6 +303,7 @@ soacType (Scatter _w lam _ivs as) =
         (ws, ns, _) = unzip3 as
 soacType (Screma w form _arrs) =
   scremaType w form
+soacType CmpThreshold{} = [Prim Bool]
 
 instance TypedOp (SOAC lore) where
   opType = pure . staticShapes . soacType
@@ -327,6 +330,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                                (accs++map Var arrs)
   consumedInOp (Scatter _ _ _ as) =
     S.fromList $ map (\(_, _, a) -> a) as
+  consumedInOp CmpThreshold{} = mempty
 
 instance (Attributes lore,
           Attributes (Aliases lore),
@@ -347,11 +351,13 @@ instance (Attributes lore,
                 (comm, Alias.analyseLambda red_lam, red_nes)
                 (Alias.analyseLambda map_lam))
                arrs
+  addOpAliases (CmpThreshold what s) = CmpThreshold what s
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases) return
 
 instance Attributes lore => IsOp (SOAC lore) where
+  safeOp CmpThreshold{} = True
   safeOp _ = False
   cheapOp _ = True
 
@@ -394,6 +400,7 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
                 (comm, Range.runRangeM $ Range.analyseLambda red_lam, red_nes)
                 (Range.runRangeM $ Range.analyseLambda map_lam))
                arrs
+  addOpRanges (CmpThreshold what s) = CmpThreshold what s
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -445,6 +452,7 @@ instance Aliased lore => UsageInOp (SOAC lore) where
   usageInOp _ = mempty
 
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
+typeCheckSOAC (CmpThreshold what _) = TC.require [Prim int32] what
 typeCheckSOAC (Stream size form lam arrexps) = do
   let accexps = getStreamAccums form
   TC.require [Prim int32] size
@@ -574,6 +582,7 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
   opMetrics (Screma _ (ScremaForm (scan_lam, _) (_, red_lam, _) map_lam) _) =
     inside "Screma" $
     lambdaMetrics scan_lam >> lambdaMetrics red_lam >> lambdaMetrics map_lam
+  opMetrics CmpThreshold{} = seen "CmpThreshold"
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Stream size form lam arrs) =
@@ -614,6 +623,7 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                                    commasep (map ppr arrs))
 
   ppr (Screma w form arrs) = ppScrema w form arrs
+  ppr (CmpThreshold what s) = text "cmpThreshold(" <> ppr what <> comma PP.<+> text (show s) <> text ")"
 
 ppScrema :: (PrettyLore lore, Pretty inp) =>
               SubExp -> ScremaForm lore -> [inp] -> Doc
