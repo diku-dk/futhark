@@ -950,11 +950,13 @@ Module System
    mod_type_bind: "module" "type" `id` `type_param`* "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
-can contain types, functions, and other modules.  *Module types* are
-used to classify the contents of modules, and *parametric modules* are
-used to abstract over modules (essentially module-level functions).
-In Standard ML, modules, module types and parametric modules are
-called structs, signatures, and functors, respectively.
+can contain types, functions, and other modules and module types.
+*Module types* are used to classify the contents of modules, and
+*parametric modules* are used to abstract over modules (essentially
+module-level functions).  In Standard ML, modules, module types and
+parametric modules are called structs, signatures, and functors,
+respectively.  Module names exist in the same name space as values,
+but module types are their own name space.
 
 Named modules are declared as::
 
@@ -1022,7 +1024,7 @@ mean ``module M = e : S``.
 Parametric modules allow us to write definitions that abstract over
 modules.  For example::
 
-  module Times(M: Addable) = {
+  module Times = \(M: Addable) -> {
     let times (x: M.t) (k: int): M.t =
       loop (x' = x) for i < k do
         T.add x' x
@@ -1032,10 +1034,11 @@ We can instantiate ``Times`` with any module that fulfills the module
 type ``Addable`` and get back a module that defines a function
 ``times``::
 
-  module Vec3Times = Times(Vec3)
+  module Vec3Times = Times Vec3
 
 Now ``Vec3Times.times`` is a function of type ``Vec3.t -> int ->
-Vec3.t``.
+Vec3.t``.  As a derived form, we can write ``module M p = e`` to mean
+``module M = \p -> e``.
 
 Module Expressions
 ~~~~~~~~~~~~~~~~~~
@@ -1043,11 +1046,57 @@ Module Expressions
 .. productionlist::
    mod_exp:   `qualid`
           : | `mod_exp` ":" `mod_type_exp`
-          : | "\" "(" `id` ":" `mod_type_exp` ")" [":" `mod_type_exp`] "=" `mod_exp`
+          : | "\" "(" `id` ":" `mod_type_exp` ")" [":" `mod_type_exp`] "->" `mod_exp`
           : | `mod_exp` `mod_exp`
           : | "(" `mod_exp` ")"
           : | "{" `dec`* "}"
           : | "import" `stringlit`
+
+A module expression produces a module.  Modules are collections of
+bindings produced by declarations (`dec`).  In particular, a module
+may contain other modules or module types.
+
+``qualid``
+..........
+
+Evaluates to the module of the given name.
+
+``(mod_exp)``
+.............
+
+Evaluates to ``mod_exp``.
+
+``mod_exp : mod_type_exp``
+..........................
+
+*Module ascription* evaluates the module expression and the module
+type expression, verifies that the module implements the module type,
+then returns a module that exposes only the functionality described by
+the module type.  This is how internal details of a module can be
+hidden.
+
+``\(p: mt1): mt2 -> e``
+.......................
+
+Constructs a *parametric module* (a function at the module level) that
+accepts a parameter of module type ``mt1`` and returns a module of
+type ``mt2``.  The latter is optional, but the parameter type is not.
+
+``e1 e2``
+.........
+
+Apply the parametric module ``m1`` to the module ``m2``.
+
+``{ decs }``
+............
+
+Returns a module that contains the given definitions.
+
+``import "foo"``
+................
+
+Returns a module that contains the definitions of the file ``"foo"``
+relative to the current file.  See :ref:`other-files`.
 
 Module Type Expressions
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -1069,6 +1118,14 @@ Module Type Expressions
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
    spec_type: `type` | `type` "->" `spec_type`
+
+Module types classify modules, with the only (unimportant) difference
+in expressivity being that modules can contain module types, but
+module types cannot specify that a module must contain a specific
+module types. They can specify of course that a module contains a
+*submodule* of a specific module type.
+
+.. _other-files:
 
 Referring to Other Files
 ------------------------
