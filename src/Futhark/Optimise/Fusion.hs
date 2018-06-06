@@ -616,8 +616,12 @@ fusionGatherBody fres (Body blore (stmsToList ->
 fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
-    Right soac@(SOAC.Scatter _len lam _ivs _as) ->
-      mapLike soac lam
+    Right soac@(SOAC.Scatter _len lam _ivs _as) -> do
+      -- We put the variables produced by Scatter into the infusible
+      -- set to force horizontal fusion.  It is not possible to
+      -- producer/consumer-fuse Scatter anyway.
+      fres' <- addNamesToInfusible fres $ S.fromList $ patternNames pat
+      mapLike fres' soac lam
 
     Right soac@(SOAC.Screma _ (ScremaForm (scan_lam, scan_nes)
                                               (_, reduce_lam, reduce_nes)
@@ -656,8 +660,8 @@ fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
           consumed' <- varsAliases consumed
           greedyFuse rem_bnds used_lam bres' (pat, cs, soac, consumed')
 
-        mapLike soac lambda = do
-          bres  <- bindingFamily pat $ fusionGatherBody fres body
+        mapLike fres' soac lambda = do
+          bres  <- bindingFamily pat $ fusionGatherBody fres' body
           (used_lam, blres) <- fusionGatherLam (S.empty, bres) lambda
           consumed' <- varsAliases consumed
           greedyFuse rem_bnds used_lam blres (pat, cs, soac, consumed')
