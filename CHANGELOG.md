@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The `rearrange` construct has been removed.  Use `transpose` instead.
 
+  * `futhark-mode.el` has been moved to a [separate
+    repository](https://github.com/diku-dk/futhark-mode).
+
 ### Changed
 
 ### Fixed
