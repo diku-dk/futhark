@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TupleSections #-}
 -- | This module defines a translation from imperative code with
 -- kernels to imperative code with OpenCL calls.
 module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
@@ -9,6 +10,7 @@ module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
 import Control.Monad.State
 import Control.Monad.Identity
 import Control.Monad.Writer
+import Control.Monad.Reader
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
@@ -34,9 +36,10 @@ import Futhark.Util.IntegralExp (quotRoundingUp)
 -- | Translate a kernels-program to an OpenCL-program.
 kernelsToOpenCL :: ImpKernels.Program
                 -> Either InternalError ImpOpenCL.Program
-kernelsToOpenCL prog = do
+kernelsToOpenCL (ImpKernels.Functions funs) = do
   (prog', ToOpenCL extra_funs kernels requirements sizes) <-
-    runWriterT $ traverse onHostOp prog
+    runWriterT $ fmap Functions $ forM funs $ \(fname, fun) ->
+    (fname,) <$> runReaderT (traverse onHostOp fun) fname
   let kernel_names = M.keys kernels
       opencl_code = openClCode $ M.elems kernels
       opencl_prelude = pretty $ genOpenClPrelude requirements
@@ -72,7 +75,7 @@ instance Monoid OpenClRequirements where
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
                          , clRequirements :: OpenClRequirements
-                         , clSizes :: M.Map VName SizeClass
+                         , clSizes :: M.Map VName (SizeClass, Name)
                          }
 
 instance Sem.Semigroup ToOpenCL where
@@ -83,15 +86,17 @@ instance Monoid ToOpenCL where
   mempty = ToOpenCL mempty mempty mempty mempty
   mappend = (Sem.<>)
 
-type OnKernelM = WriterT ToOpenCL (Either InternalError)
+type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: HostOp -> OnKernelM OpenCL
 onHostOp (CallKernel k) = onKernel k
 onHostOp (ImpKernels.GetSize v key size_class) = do
-  tell mempty { clSizes = M.singleton key size_class }
+  fname <- ask
+  tell mempty { clSizes = M.singleton key (size_class, fname) }
   return $ ImpOpenCL.GetSize v key
 onHostOp (ImpKernels.CmpSizeLe v key size_class x) = do
-  tell mempty { clSizes = M.singleton key size_class }
+  fname <- ask
+  tell mempty { clSizes = M.singleton key (size_class, fname) }
   return $ ImpOpenCL.CmpSizeLe v key x
 onHostOp (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class

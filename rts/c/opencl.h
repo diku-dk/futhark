@@ -33,13 +33,15 @@ struct opencl_config {
   const char **size_names;
   size_t *size_values;
   const char **size_classes;
+  const char **size_entry_points;
 };
 
 void opencl_config_init(struct opencl_config *cfg,
                         int num_sizes,
                         const char *size_names[],
                         size_t *size_values,
-                        const char *size_classes[]) {
+                        const char *size_classes[],
+                        const char *size_entry_points[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
   cfg->preferred_device_num = 0;
@@ -61,6 +63,7 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->size_names = size_names;
   cfg->size_values = size_values;
   cfg->size_classes = size_classes;
+  cfg->size_entry_points = size_entry_points;
 }
 
 /* An entry in the free list.  May be invalid, to avoid having to
