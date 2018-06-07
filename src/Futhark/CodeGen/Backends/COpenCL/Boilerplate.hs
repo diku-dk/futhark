@@ -18,7 +18,7 @@ import Futhark.CodeGen.OpenCL.Kernels
 import Futhark.Util (chunk)
 
 generateBoilerplate :: String -> String -> [String] -> [PrimType]
-                    -> M.Map VName SizeClass
+                    -> M.Map VName (SizeClass, Name)
                     -> GC.CompilerM OpenCL () ()
 generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   final_inits <- GC.contextFinalInits
@@ -29,18 +29,22 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.earlyDecls top_decls
 
   let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
-      size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+      size_class_inits = map (\(c,_) -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+      size_entry_points_inits = map (\(_,e) -> [C.cinit|$string:(pretty e)|]) $ M.elems sizes
 
   GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
   GC.libDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
+  GC.libDecl [C.cedecl|static const char *size_entry_points[] = { $inits:size_entry_points_inits };|]
 
   get_num_sizes <- GC.publicName "get_num_sizes"
   get_size_name <- GC.publicName "get_size_name"
   get_size_class <- GC.publicName "get_size_class"
+  get_size_entry <- GC.publicName "get_size_entry"
 
   GC.headerDecl GC.InitDecl [C.cedecl|int $id:get_num_sizes();|]
   GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_name(int);|]
   GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_class(int);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_entry(int);|]
 
   GC.libDecl [C.cedecl|int $id:get_num_sizes() {
                 return $int:(M.size sizes);
@@ -50,6 +54,9 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
               }|]
   GC.libDecl [C.cedecl|const char* $id:get_size_class(int i) {
                 return size_classes[i];
+              }|]
+  GC.libDecl [C.cedecl|const char* $id:get_size_entry(int i) {
+                return size_entry_points[i];
               }|]
 
   cfg <- GC.publicName "context_config"
@@ -98,7 +105,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
 
                          $stms:size_value_inits
                          opencl_config_init(&cfg->opencl, $int:(M.size sizes),
-                                            size_names, cfg->sizes, size_classes);
+                                            size_names, cfg->sizes, size_classes, size_entry_points);
 
                          cfg->opencl.transpose_block_dim = $int:(transposeBlockDim::Int);
                          return cfg;

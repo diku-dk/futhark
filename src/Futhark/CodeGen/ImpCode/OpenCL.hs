@@ -35,7 +35,7 @@ data Program = Program { openClProgram :: String
                        , openClKernelNames :: [KernelName]
                        , openClUsedTypes :: [PrimType]
                          -- ^ So we can detect whether the device is capable.
-                       , openClSizes :: M.Map VName SizeClass
+                       , openClSizes :: M.Map VName (SizeClass, Name)
                          -- ^ Runtime-configurable constants.
                        , hostFunctions :: Functions OpenCL
                        }
