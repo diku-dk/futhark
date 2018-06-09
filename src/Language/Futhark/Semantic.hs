@@ -57,7 +57,7 @@ mkImportFrom (ImportName includer _) includee
   | Posix.isAbsolute includee = ImportName $ normalise $ makeRelative "/" includee
   | otherwise = ImportName $ normalise $ joinPath $ includer' ++ includee'
   where (dotdots, includee') = span ("../"==) $ splitPath includee
-        includer_parts = splitPath $ takeDirectory includer
+        includer_parts = init $ splitPath includer
         includer'
           | length dotdots > length includer_parts =
               replicate (length dotdots - length includer_parts) "../"
