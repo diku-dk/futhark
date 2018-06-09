@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Better error message on EOF.
 
+  * Fixed handling of `..` in `import` paths.
+
 ## [0.5.2]
 
 ### Added
