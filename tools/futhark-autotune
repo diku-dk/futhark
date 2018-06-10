@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 #
 # A simple autotuner for calibrating parameters of Futhark programs.
 # Based on OpenTuner.  Requires Python 2.  Still quite crude.
 
 import opentuner
 from opentuner import ConfigurationManipulator
-from opentuner.search.manipulator import IntegerParameter, LogIntegerParameter, PowerOfTwoParameter
+from opentuner.search.manipulator import EnumParameter
 from opentuner import MeasurementInterface
 from opentuner import Result
 
@@ -13,11 +13,21 @@ import tempfile
 import json
 import os
 import re
+import math
+import itertools
+from collections import OrderedDict, defaultdict
 
 class FutharkTuner(MeasurementInterface):
   def __init__(self, args, *pargs, **kwargs):
     kwargs['program_name'] = args.program
     super(FutharkTuner, self).__init__(args, *pargs, **kwargs)
+
+    self.branch_tree = []
+    self.thresholds = OrderedDict()
+    self.datasets = []
+    self.values = defaultdict(list)
+    self.covered_branches = {}
+    self.timeout_branches = defaultdict(list)
 
     # We only compile the program once, since the parameters we are
     # tuning can be given at run-time.  This saves a lot of time for
@@ -26,75 +36,302 @@ class FutharkTuner(MeasurementInterface):
     compile_res = self.call_program(compile_cmd)
     assert compile_res['returncode'] == 0
 
+    if self.args.calc_timeout:
+        self.args.timeout = self.get_base_timeout()
+    self.extract_thresholds()
+    self.yield_values()
+    self.build_branch_tree()
+    
+  def get_base_timeout(self):
+    """
+    Run a benchmark without specifying thresholds,
+    in order to use the runtime of the slowest dataset 
+    as timeout-value.
+    """
+    print('Calculating timeout-value based on a base benchmark..')
+    with tempfile.NamedTemporaryFile() as json_tmp:
+      base_cmd = 'futhark-bench {} --compiler=futhark-opencl --skip-compilation --json={}'.format(self.program_name(),
+                                                                                                  json_tmp.name)
+      base_res = self.call_program(base_cmd)
+      assert base_res['returncode'] == 0
+
+      json_data = json.load(json_tmp)
+      base_datasets = json_data[self.program_name()]['datasets']
+      high = 0
+      for dataset in base_datasets:
+        runtime = sum(base_datasets[dataset]['runtimes'])
+        high = runtime if high < runtime else high
+  
+    return int(math.ceil(high * (10**-6))) + 1
+
+  def extract_thresholds(self):
+    """
+    Extract the threshold parameters to be tuned
+    along with the different values, that each 
+    parameter are compared against for each dataset.
+    """
+    print('Extracting threshold-parameters and values...')
+    sizes_cmd = './{} --print-size'.format(self.program_bin_name())
+    sizes_res = self.call_program(sizes_cmd)
+    assert sizes_res['returncode'] == 0
+
+    # the tuner needs all params for all datasets,
+    # so extract and save all params, so we can add them
+    # later, if they are not used in comparison
+    all_params = []
+    size_p = re.compile('([^ ]*) \(threshold+ \((.*?)\)\)')
+    for line in sizes_res['stdout'].splitlines():
+      m = size_p.search(line)
+      if m:
+        all_params.append(m.group(1))
+
+    with tempfile.NamedTemporaryFile() as json_tmp:
+      # extract comparison values
+      val_cmd = 'futhark-bench {} --compiler=futhark-opencl --skip-compilation --pass-option=-L --runs=1 --json={}'.format(self.program_name(), json_tmp.name)
+      val_res = self.call_program(val_cmd)
+      assert val_res['returncode'] == 0
+
+      json_data = json.load(json_tmp, object_pairs_hook=OrderedDict)
+      datasets = json_data[self.program_name()]['datasets']
+
+      # search for parameters and values for each dataset
+      val_re = re.compile('Compared (\w+) <= (-?\d+)')
+      for dataset in datasets:
+        self.thresholds[dataset] = OrderedDict()
+        for line in datasets[dataset]['stderr'].splitlines():
+          match = val_re.search(line)
+          if match:
+            param, value = match.group(1), int(match.group(2))
+            # onlyd add param, if it has not already been added for this dataset
+            if param not in self.thresholds[dataset]:
+              self.thresholds[dataset][param] = value
+
+        # if a param has not been used in a comparison,
+        # and thus not added, add it now
+        for p in all_params:
+          if not p in self.thresholds[dataset]:
+            self.thresholds[dataset][p] = 0
+
+
+      # we need a list of datasets later
+      self.datasets = datasets.keys()
+
+  def yield_values(self):
+      """
+      Calculate all configurations based
+      on the threshold values such that
+      all possible combinations are tried.
+      """
+      def yield_prev_and_next(i, kl, name):
+        # return the threshold value for the previous
+        # and the next dataset
+        # returns 0 if it is the first dataset
+        # and none if current value is equal to previous/next
+        # and return the current value * 4 if it is the last
+        cv = self.thresholds[kl[i]][name]
+        if i == 0:
+          pv = 0
+        else:
+          if self.thresholds[kl[i - 1]][name] == cv:
+            pv = None
+          else:
+            pv = self.thresholds[kl[i - 1]][name]
+        if i == len(kl) - 1:
+          nv = self.thresholds[kl[i]][name] * 4
+        else:
+          if self.thresholds[kl[i + 1]][name] == cv:
+              nv = None
+          else:
+              nv = self.thresholds[kl[i + 1]][name]
+        return (pv, nv)
+
+      print('Calculating values for each threshold parameter..')
+      # list of keys are needed to calculate previous and next value
+      key_list = list(self.thresholds.keys())
+
+      # iterate over all thresholds for each dataset
+      # and calculate two values: 
+      # one making the comparison true and one making it false
+      # store values in a set to exclude duplicates
+      s = set()
+      for i, key in enumerate(key_list):
+        for name, value in self.thresholds[key].items():
+          prev_value, next_value = yield_prev_and_next(i, key_list, name)
+
+          # if a previous or next value has been generated
+          # and is not already added to the value list,
+          # add it
+          if not prev_value == None:
+            tv = int((value + prev_value) / 2)
+            if not tv in self.values[name]:
+              self.values[name].append(tv)
+          if not next_value == None:
+            fv = int((next_value + value) / 2)
+            if not fv in self.values[name]:
+              self.values[name].append(fv)
+  
+  def build_branch_tree(self):
+    """
+    Extract information about dependencies among the threshold
+    parameters, and build a branching-tree, which can be used
+    to exclude configurations that ends in the same branch etc.
+    """
+    def branch_dict(name, i):
+      d = {'name' : name, 
+           True : [{'name' : 'end', 'id' : i}], 
+           False : [{'name' : 'end', 'id' : i + 1}]}
+      return d
+
+    def walk_tree_and_add_param(start, name, deps, i):
+      start_copy = list(start)
+      for branch in start_copy:
+        cur_node = branch
+        # if the param depends on the current_node, down this branch
+        if any(dep == cur_node['name'] for dep, _ in deps.items()):
+          bl = deps[cur_node['name']]
+          del deps[cur_node['name']]
+          walk_tree_and_add_param(cur_node[bl], name, deps, i)
+        # else if this is the final dependency add the param to the tree
+        # if there are still dependencies to be resolved do nothing
+        elif len(deps) == 0:
+          if len(start_copy) == 1 and cur_node['name'] == 'end':
+            start[start.index(branch)] = branch_dict(name, i)
+          else:
+            start.append(branch_dict(name, i))
+
+    print('Building the branching-tree..')
+    # Run the program once to extract the configurable parameters.
+    sizes_cmd = './{} --print-size'.format(self.program_bin_name())
+    sizes_res = self.call_program(sizes_cmd)
+    assert sizes_res['returncode'] == 0
+
+    # extract all dependencies and their boolean value
+    branch_info = OrderedDict()
+    size_p = re.compile('([^ ]*) \(threshold+ \((.*?)\)\)')
+    for line in sizes_res['stdout'].splitlines():
+      m = size_p.search(line)
+      if m:
+        branch_info[m.group(1)] = dict(((i.strip('!'), not i.startswith('!')) for i in m.group(2).split(' ')))
+
+    # clean away non-used paramters
+    for k, _ in branch_info.items():
+        branch_info[k] = {n: ds for n, ds in branch_info[k].items() if n in branch_info}
+
+    branch_list = list(branch_info.items())
+    i = 0 # we need id to generate unique ids
+    # the list below keeps track of processed parameters,
+    # so we don't try to add parameters before all their dependencies
+    # has been added
+    processed = []
+    # as long as there are parameters to add, add them
+    while branch_list:
+        pname, pdeps = branch_list.pop(0)
+        # if no dependcies add parameter to root of tree
+        if not pdeps:
+            self.branch_tree.append(branch_dict(pname, i))
+            processed.append(pname)
+            i += 2
+
+        # if all dependencies have alredy been added to tree,
+        # add parameter to tree, else save parameter for 
+        # later processing
+        elif all(n.strip('!') in processed for n in pdeps):
+            walk_tree_and_add_param(self.branch_tree, pname, pdeps, i)
+            processed.append(pname)
+            i += 2
+        else:
+            branch_list.append((pname, pdeps))
+
   def program_bin_name(self):
-      return os.path.splitext(self.program_name())[0]
+    return os.path.splitext(self.program_name())[0]
 
   def interesting_class(self, p_class):
-      return len(self.args.only) == 0 or p_class in self.args.only
+    return len(self.args.only) == 0 or p_class in self.args.only
 
   def manipulator(self):
     """
     Define the search space by creating a
     ConfigurationManipulator
     """
-
-    # Run the program once to extract the configurable parameters.
-    sizes_cmd = './{} --print-sizes'.format(self.program_bin_name())
-    sizes_res = self.call_program(sizes_cmd)
-    assert sizes_res['returncode'] == 0
-
-    parameters = {}
-    size_p = re.compile('([^ ]*) \\(([^ ]*)\\)')
-    for line in sizes_res['stdout'].splitlines():
-        m = size_p.search(line)
-        parameters[m.group(1)] = m.group(2)
-
     manipulator = ConfigurationManipulator()
+    for k, v in self.values.items():
+      manipulator.add_parameter(EnumParameter(k,v))
 
-    for p_name in parameters:
-        p_class = parameters[p_name]
-        if self.interesting_class(p_class):
-          if p_class in ['group_size', 'num_groups']:
-            manipulator.add_parameter(PowerOfTwoParameter(p_name, 8, 1024))
-          elif p_class in ['tile_size']:
-            manipulator.add_parameter(IntegerParameter(p_name, 1, 32))
-          elif p_class in ['threshold']:
-            manipulator.add_parameter(LogIntegerParameter(p_name, 0, 1000000))
     return manipulator
 
   def futhark_bench_cmd(self, cfg):
     def sizeOption(size):
-        return '--pass-option --size={}={}'.format(size, cfg[size])
+      return '--pass-option --size={}={}'.format(size, cfg[size])
     size_options = ' '.join(map(sizeOption, cfg.keys()))
     def otherOption(opt):
       return '--pass-option {}'.format(opt)
     other_options = ' '.join(map(otherOption, self.args.pass_option))
-    return 'futhark-bench --skip-compilation {} --exclude-case notune {} {}'.format(
+    return 'futhark-bench --skip-compilation {} {} {}'.format(
       self.program_name(), size_options, other_options)
+
+  def get_branch(self, start, cfg, datasets, result):
+    """
+    Calculate the branch for a given cfg on datasets
+    """
+    for d in datasets:
+      for branch in start:
+        node = branch
+        if node['name'] != 'end':
+          bl = cfg[node['name']] <= self.thresholds[d][node['name']]
+          self.get_branch(node[bl], cfg, [d], result)
+        else:
+          result.append(node['id'])
+    return tuple(result)
 
   def run(self, desired_result, input, limit):
     """
     Compile and run a given configuration then
     return performance
     """
+    branches = []
+    # calculate the branch for every branch, to see if it is reported as a time-out
+    # if so, return a timeout
+    for d in self.datasets:
+      b = self.get_branch(self.branch_tree, desired_result.configuration.data, [d], [])
+      if b in self.timeout_branches[d]:
+        print('Timeout config')
+        return Result(state='TIMEOUT', time=float('inf'))
+      else:
+        branches.append(b) 
+    branches = tuple(branches)
+
+    # check if the combined execution path of all programs has already been tried
+    # if so return old result
+    # if not actually try configuration
+    if branches in self.covered_branches:
+      return Result(time=self.covered_branches[branches])
+
     with tempfile.NamedTemporaryFile() as bench_json:
-        bench_cmd = '{} --json {} --timeout {}'.format(
-          self.futhark_bench_cmd(desired_result.configuration.data),
-          bench_json.name, self.args.timeout)
-        run_res = self.call_program(bench_cmd)
+      bench_cmd = '{} --json {} --timeout {}'.format(
+        self.futhark_bench_cmd(desired_result.configuration.data),
+        bench_json.name, self.args.timeout)
 
-        if run_res['returncode'] != 0:
-          return Result(state='ERROR', time=float('inf'))
+      # we need to catch timeouts in order to blacklist 
+      # branches, thus we do not assert the result,
+      # but instead handle errors in a try-clause
+      run_res = self.call_program(bench_cmd)
 
-        # Sum all the runtimes together to quantify the performance of
-        # this configuration.  This may be too crude, as it heavily
-        # favours the longer-running data sets.
-        json_data = json.load(bench_json)
-        datasets = json_data[self.program_name()]['datasets']
-        runtime = 0
-        for dataset in datasets:
-            runtime += sum(datasets[dataset]['runtimes'])
+      # Sum all the runtimes together to quantify the performance of
+      # this configuration.  This may be too crude, as it heavily
+      # favours the longer-running data sets.
+      json_data = json.load(bench_json)
+      datasets = json_data[self.program_name()]['datasets']
+      runtime = 0
+      for dataset in datasets:
+        try:
+          runtime += sum(datasets[dataset]['runtimes'])
+      # if a timeout/error has occured add the offending branch to
+      # the pool of timeout branches
+        except TypeError:
+          self.timeout_branches[dataset].append(self.get_branch(self.branch_tree, desired_result.configuration.data, [dataset], []))
+          return Result(state='TIMEOUT', time=float('inf'))
 
+    self.covered_branches[branches] = runtime
     return Result(time=runtime)
 
   def save_final_config(self, configuration):
@@ -105,8 +342,8 @@ class FutharkTuner(MeasurementInterface):
       self.manipulator().save_to_file(configuration.data, filename)
     else:
       print("--save-json not given, so not writing parameter values to file.")
-    print "Reproduce with command:"
-    print self.futhark_bench_cmd(configuration.data)
+    print("Reproduce with command:")
+    print(self.futhark_bench_cmd(configuration.data))
 
 SIZE_CLASSES = ['group_size', 'num_groups', 'tile_size', 'threshold']
 
@@ -118,6 +355,13 @@ if __name__ == '__main__':
   argparser.add_argument('--only', choices=SIZE_CLASSES, metavar='CLASS', action='append', default=[])
   argparser.add_argument('--pass-option', type=str, metavar='OPTION', action='append', default=[])
   argparser.add_argument('--save-json', type=str, metavar='FILENAME', default=None)
+  argparser.add_argument('--calc-timeout', action='store_true')
+
   args = argparser.parse_args()
+
+  # we will see ALOT of duplicate warnings,
+  # these pollute the output quite a bit
+  # so just hide
+  args.no_dups = True
 
   FutharkTuner.main(args)
