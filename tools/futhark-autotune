@@ -1,13 +1,14 @@
 #!/usr/bin/env python2
 #
 # A simple autotuner for calibrating parameters of Futhark programs.
-# Based on OpenTuner.  Requires Python 2.  Still quite crude.
+# Based on OpenTuner.  Requires Python 2.
 
 import opentuner
 from opentuner import ConfigurationManipulator
-from opentuner.search.manipulator import EnumParameter
+from opentuner.search.manipulator import IntegerParameter
 from opentuner import MeasurementInterface
 from opentuner import Result
+from opentuner.search import technique, bandittechniques, simplextechniques
 
 import tempfile
 import json
@@ -17,9 +18,29 @@ import math
 import itertools
 from collections import OrderedDict, defaultdict
 
+technique.register(bandittechniques.AUCBanditMetaTechnique([
+    simplextechniques.RegularNelderMead(),
+    simplextechniques.RightNelderMead(),
+    simplextechniques.MultiNelderMead(),
+    simplextechniques.RandomTorczon(),
+    simplextechniques.RegularTorczon(),
+    simplextechniques.RightTorczon(),
+    simplextechniques.MultiTorczon()
+], name='FutharkMetaTechnique'))
+
 class FutharkTuner(MeasurementInterface):
   def __init__(self, args, *pargs, **kwargs):
     kwargs['program_name'] = args.program
+
+    # if no techniques are specified by the user
+    # stick to hill-climbing techniques
+    if args.technique == None:
+      args.technique = ['FutharkMetaTechnique']
+
+    # if calculating time-out only generate one config at the time
+    if args.calc_timeout:
+      args.parallelism = 1
+
     super(FutharkTuner, self).__init__(args, *pargs, **kwargs)
 
     self.branch_tree = []
@@ -37,15 +58,15 @@ class FutharkTuner(MeasurementInterface):
     assert compile_res['returncode'] == 0
 
     if self.args.calc_timeout:
-        self.args.timeout = self.get_base_timeout()
+      self.args.timeout = self.get_base_timeout()
     self.extract_thresholds()
     self.yield_values()
     self.build_branch_tree()
-    
+
   def get_base_timeout(self):
     """
     Run a benchmark without specifying thresholds,
-    in order to use the runtime of the slowest dataset 
+    in order to use the runtime of the slowest dataset
     as timeout-value.
     """
     print('Calculating timeout-value based on a base benchmark..')
@@ -61,13 +82,13 @@ class FutharkTuner(MeasurementInterface):
       for dataset in base_datasets:
         runtime = sum(base_datasets[dataset]['runtimes'])
         high = runtime if high < runtime else high
-  
+
     return int(math.ceil(high * (10**-6))) + 1
 
   def extract_thresholds(self):
     """
     Extract the threshold parameters to be tuned
-    along with the different values, that each 
+    along with the different values, that each
     parameter are compared against for each dataset.
     """
     print('Extracting threshold-parameters and values...')
@@ -112,10 +133,14 @@ class FutharkTuner(MeasurementInterface):
           if not p in self.thresholds[dataset]:
             self.thresholds[dataset][p] = 0
 
-
       # we need a list of datasets later
       self.datasets = datasets.keys()
 
+  # since we only need the min/max of the possible values,
+  # this function could be simplified, but as an possible
+  # exhaustive technique would need all the values,
+  # and since the calculations do not hurt performance,
+  # it is kept in this form for now
   def yield_values(self):
       """
       Calculate all configurations based
@@ -150,7 +175,7 @@ class FutharkTuner(MeasurementInterface):
       key_list = list(self.thresholds.keys())
 
       # iterate over all thresholds for each dataset
-      # and calculate two values: 
+      # and calculate two values:
       # one making the comparison true and one making it false
       # store values in a set to exclude duplicates
       s = set()
@@ -169,7 +194,7 @@ class FutharkTuner(MeasurementInterface):
             fv = int((next_value + value) / 2)
             if not fv in self.values[name]:
               self.values[name].append(fv)
-  
+
   def build_branch_tree(self):
     """
     Extract information about dependencies among the threshold
@@ -177,8 +202,8 @@ class FutharkTuner(MeasurementInterface):
     to exclude configurations that ends in the same branch etc.
     """
     def branch_dict(name, i):
-      d = {'name' : name, 
-           True : [{'name' : 'end', 'id' : i}], 
+      d = {'name' : name,
+           True : [{'name' : 'end', 'id' : i}],
            False : [{'name' : 'end', 'id' : i + 1}]}
       return d
 
@@ -219,6 +244,7 @@ class FutharkTuner(MeasurementInterface):
 
     branch_list = list(branch_info.items())
     i = 0 # we need id to generate unique ids
+
     # the list below keeps track of processed parameters,
     # so we don't try to add parameters before all their dependencies
     # has been added
@@ -233,7 +259,7 @@ class FutharkTuner(MeasurementInterface):
             i += 2
 
         # if all dependencies have alredy been added to tree,
-        # add parameter to tree, else save parameter for 
+        # add parameter to tree, else save parameter for
         # later processing
         elif all(n.strip('!') in processed for n in pdeps):
             walk_tree_and_add_param(self.branch_tree, pname, pdeps, i)
@@ -255,7 +281,7 @@ class FutharkTuner(MeasurementInterface):
     """
     manipulator = ConfigurationManipulator()
     for k, v in self.values.items():
-      manipulator.add_parameter(EnumParameter(k,v))
+      manipulator.add_parameter(IntegerParameter(k, min(v), max(v)))
 
     return manipulator
 
@@ -294,10 +320,9 @@ class FutharkTuner(MeasurementInterface):
     for d in self.datasets:
       b = self.get_branch(self.branch_tree, desired_result.configuration.data, [d], [])
       if b in self.timeout_branches[d]:
-        print('Timeout config')
         return Result(state='TIMEOUT', time=float('inf'))
       else:
-        branches.append(b) 
+        branches.append(b)
     branches = tuple(branches)
 
     # check if the combined execution path of all programs has already been tried
@@ -311,7 +336,7 @@ class FutharkTuner(MeasurementInterface):
         self.futhark_bench_cmd(desired_result.configuration.data),
         bench_json.name, self.args.timeout)
 
-      # we need to catch timeouts in order to blacklist 
+      # we need to catch timeouts in order to blacklist
       # branches, thus we do not assert the result,
       # but instead handle errors in a try-clause
       run_res = self.call_program(bench_cmd)
@@ -345,23 +370,15 @@ class FutharkTuner(MeasurementInterface):
     print("Reproduce with command:")
     print(self.futhark_bench_cmd(configuration.data))
 
-SIZE_CLASSES = ['group_size', 'num_groups', 'tile_size', 'threshold']
-
 if __name__ == '__main__':
   argparser = opentuner.default_argparser()
   argparser.add_argument('program', type=str, metavar='PROGRAM')
   argparser.add_argument('--compiler', type=str, metavar='COMPILER', default='futhark-opencl')
   argparser.add_argument('--timeout', type=int, metavar='TIMEOUT', default='60')
-  argparser.add_argument('--only', choices=SIZE_CLASSES, metavar='CLASS', action='append', default=[])
   argparser.add_argument('--pass-option', type=str, metavar='OPTION', action='append', default=[])
   argparser.add_argument('--save-json', type=str, metavar='FILENAME', default=None)
   argparser.add_argument('--calc-timeout', action='store_true')
 
   args = argparser.parse_args()
-
-  # we will see ALOT of duplicate warnings,
-  # these pollute the output quite a bit
-  # so just hide
-  args.no_dups = True
 
   FutharkTuner.main(args)
