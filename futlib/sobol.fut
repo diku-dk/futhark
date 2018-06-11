@@ -24,11 +24,11 @@ module type sobol = {
   -- vectors where `v(j)` is the `j`'th D-dimensional sobol vector
   val chunk : i32 -> (n:i32) -> [n][D]f64
   -- | `simulate f g ne n` runs the function `f` on `n`
-  -- `D`-dimensional point-vice normalised sobol vectors. The results
+  -- `D`-dimensional pointwise normalised sobol vectors. The results
   -- are reduced using the monoid defined by the (assumed) associate
   -- function `g` with its neutral element `ne`.
   val simulate 't : ([D]f64 -> t) -> (t -> t -> t) -> t -> i32 -> t
-  --| `sobol n` generates `n` `D`-dimensional point-vice normalised
+  --| `sobol n` generates `n` `D`-dimensional pointwise normalised
   -- sobol vectors.
   val sobol : (n:i32) -> [n][D]f64
   -- | The `Reduce` module implements a modularised version of
