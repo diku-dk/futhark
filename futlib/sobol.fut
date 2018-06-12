@@ -24,10 +24,13 @@ module type sobol = {
   -- vectors where `v(j)` is the `j`'th D-dimensional sobol vector
   val chunk : i32 -> (n:i32) -> [n][D]f64
   -- | `simulate f g ne n` runs the function `f` on `n`
-  -- `D`-dimensional point-vice normalised sobol vectors. The results
+  -- `D`-dimensional pointwise normalised sobol vectors. The results
   -- are reduced using the monoid defined by the (assumed) associate
   -- function `g` with its neutral element `ne`.
   val simulate 't : ([D]f64 -> t) -> (t -> t -> t) -> t -> i32 -> t
+  --| `sobol n` generates `n` `D`-dimensional pointwise normalised
+  -- sobol vectors.
+  val sobol : (n:i32) -> [n][D]f64
   -- | The `Reduce` module implements a modularised version of
   -- `simulate`.
   module Reduce :
@@ -99,15 +102,22 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
     let bit = index_of_least_significant_0 i
     in map (\row -> unsafe row[bit]) dirvecs
 
-  -- computes sobol numbers: offs,..,offs+chunk-1
+  -- computes sobol numbers: offs,..,offs+n-1
   let chunk (offs:i32) (n:i32) : [n][D]f64 =
     let sob_beg = independent offs
-    let contrbs = map (\(k:i32): [D]u32  ->
+    let contrbs = map (\(k:i32): [D]u32 ->
                        if k==0 then sob_beg
                        else recM (k+offs-1))
                     (iota n)
-    let vct_ints = scan (\x y -> map2 (^) x y) (replicate D 0u32) contrbs
-    in map (\xs -> map (\x -> f64.u32 x/norm) xs) vct_ints
+    let vct_ints = scan (\x y -> map2 (^) x y)
+                        (replicate D 0u32) contrbs
+    in map (\xs -> map (\x -> f64.u32 x/norm) xs)
+           vct_ints
+
+  let sobol (n:i32) : [n][D]f64 =
+    stream_map (\[c] (xs: [c]i32): [c][D]f64 ->
+                  unsafe chunk xs[0] c)
+               (iota n)
 
   module Reduce (X : { include monoid
                        val f : [D]f64 -> t }) : { val run : i32 -> X.t } =
