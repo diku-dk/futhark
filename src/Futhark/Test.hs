@@ -13,6 +13,7 @@ module Futhark.Test
        , ProgramTest (..)
        , StructureTest (..)
        , StructurePipeline (..)
+       , WarningTest (..)
        , TestAction (..)
        , ExpectedError (..)
        , InputOutputs (..)
@@ -58,6 +59,8 @@ data ProgramTest =
                    TestAction
               , testExpectedStructure ::
                    [StructureTest]
+              , testExpectedWarnings ::
+                   [WarningTest]
               }
   deriving (Show)
 
@@ -85,14 +88,19 @@ data StructurePipeline = KernelsPipeline
                        | SOACSPipeline
                        | SequentialCpuPipeline
                        | GpuPipeline
+                       deriving (Show)
 
 -- | A structure test specifies a compilation pipeline, as well as
 -- metrics for the program coming out the other end.
 data StructureTest = StructureTest StructurePipeline AstMetrics
+                     deriving (Show)
 
-instance Show StructureTest where
-  show (StructureTest _ metrics) =
-    "StructureTest <config> " ++ show metrics
+-- | A warning test requires that a warning matching the regular
+-- expression is produced.  The program must also compile succesfully.
+data WarningTest = ExpectedWarning T.Text Regex
+
+instance Show WarningTest where
+  show (ExpectedWarning r _) = "ExpectedWarning " ++ T.unpack r
 
 -- | A condition for execution, input, and expected result.
 data TestRun = TestRun
@@ -159,7 +167,7 @@ parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> many1 (satisfy constitu
 parseRunTags :: Parser [String]
 parseRunTags = many parseTag
   where parseTag = try $ lexeme $ do s <- many1 $ satisfy isAlphaNum
-                                     guard $ s `notElem` ["input", "structure"]
+                                     guard $ s `notElem` ["input", "structure", "warning"]
                                      return s
 
 parseRunCases :: Parser [TestRun]
@@ -223,6 +231,12 @@ restOfLine = T.pack <$> (anyChar `manyTill` (void newline <|> eof))
 nextWord :: Parser T.Text
 nextWord = T.pack <$> (anyChar `manyTill` satisfy isSpace)
 
+parseWarning :: Parser WarningTest
+parseWarning = lexstr "warning:" >> parseExpectedWarning
+  where parseExpectedWarning = lexeme $ do
+          s <- T.strip <$> restOfLine
+          ExpectedWarning s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
+
 parseExpectedStructure :: Parser StructureTest
 parseExpectedStructure =
   lexstr "structure" *>
@@ -241,7 +255,7 @@ parseMetrics = braces $ fmap M.fromList $ many $
 
 testSpec :: Parser ProgramTest
 testSpec =
-  ProgramTest <$> parseDescription <*> parseTags <*> parseAction <*> many parseExpectedStructure
+  ProgramTest <$> parseDescription <*> parseTags <*> parseAction <*> many parseExpectedStructure <*> many parseWarning
 
 readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
 readTestSpec = parse $ testSpec <* eof

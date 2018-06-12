@@ -108,10 +108,18 @@ testMetrics program (StructureTest pipeline expected) = context "Checking metric
               " times, but occured " <> T.pack (show actual_occurences) <> " times."
             _ -> return ()
 
+testWarnings :: [WarningTest] -> SBS.ByteString -> TestM ()
+testWarnings warnings futerr = mapM_ testWarning warnings
+  where testWarning (ExpectedWarning regex_s regex)
+          | not (match regex $ T.unpack $ T.decodeUtf8 futerr) =
+            throwError $ "Expected warning:\n  " <> regex_s <>
+            "\nGot warnings:\n  " <> T.decodeUtf8 futerr
+          | otherwise = return ()
+
 runTestCase :: TestCase -> TestM ()
 runTestCase (TestCase mode program testcase progs extra_options) = do
   unless (mode == TypeCheck) $
-    forM_ (testExpectedStructure testcase) $ testMetrics program
+    mapM_ (testMetrics program) $ testExpectedStructure testcase
 
   case testAction testcase of
 
@@ -131,6 +139,7 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
       context ("Type-checking with " <> T.pack typeChecker) $ do
         (code, _, err) <-
           io $ readProcessWithExitCode typeChecker ["-t", program] ""
+        testWarnings (testExpectedWarnings testcase) err
         case code of
          ExitSuccess -> return ()
          ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
@@ -141,7 +150,7 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
       let compiler = configCompiler progs
       unless (mode == Interpreted) $
         context ("Compiling with " <> T.pack compiler) $
-        compileTestProgram compiler program
+        compileTestProgram compiler program $ testExpectedWarnings testcase
       unless (mode == Compile) $
         mapM_ runInputOutputs ios
 
@@ -197,10 +206,11 @@ interpretTestProgram futharki program entry (TestRun _ inputValues expectedResul
       compareResult program expectedResult' =<< runResult program code output err
   where dir = takeDirectory program
 
-compileTestProgram :: String -> FilePath -> TestM ()
-compileTestProgram futharkc program = do
+compileTestProgram :: String -> FilePath -> [WarningTest] -> TestM ()
+compileTestProgram futharkc program warnings = do
   (futcode, _, futerr) <-
     io $ readProcessWithExitCode futharkc [program, "-o", binOutputf] ""
+  testWarnings warnings futerr
   case futcode of
     ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
     ExitFailure _   -> throwError $ T.decodeUtf8 futerr
