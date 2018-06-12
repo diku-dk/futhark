@@ -192,10 +192,17 @@ checkSpecs (ModSpec name sig doc loc : specs) =
 checkSpecs (IncludeSpec e loc : specs) = do
   (e_abs, e_env, e') <- checkSigExpToEnv e
 
+  mapM_ (warnIfShadowing . fmap baseName) e_abs
+
   (abstypes, env, specs') <- localEnv e_env $ checkSpecs specs
   return (e_abs <> abstypes,
           e_env <> env,
           IncludeSpec e' loc : specs')
+  where warnIfShadowing qn =
+          (lookupType loc qn >> warnAbout qn)
+          `catchError` \_ -> return ()
+        warnAbout qn =
+          warn loc $ "Inclusion shadows type `" ++ pretty qn ++ "`."
 
 checkSigExp :: SigExpBase NoInfo Name -> TypeM (MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
