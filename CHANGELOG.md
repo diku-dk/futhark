@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-mode.el` has been moved to a [separate
     repository](https://github.com/diku-dk/futhark-mode).
 
+  * Removed `|>>` and `<<|`.  Use `>->` and `<-<` instead.
+
 ### Changed
 
 ### Fixed

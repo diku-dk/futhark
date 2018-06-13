@@ -16,12 +16,6 @@ let (>->) '^a '^b '^c (f: a -> b) (g: b -> c) (x: a): c = g (f x)
 -- This is the same as the `∘` operator known from mathematics.
 let (<-<) '^a '^b '^c (g: b -> c) (f: a -> b) (x: a): c = g (f x)
 
--- | Deprecated alias for `>->`@term.
-let (|>>) = (>->)
-
--- | Deprecated alias for `<-<`@term.
-let (<<|) = (<-<)
-
 -- | Flip the arguments passed to a function.
 --
 --     f x y == flip f y x
