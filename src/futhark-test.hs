@@ -117,10 +117,7 @@ testWarnings warnings futerr = mapM_ testWarning warnings
           | otherwise = return ()
 
 runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase mode program testcase progs extra_options) = do
-  unless (mode == TypeCheck) $
-    mapM_ (testMetrics program) $ testExpectedStructure testcase
-
+runTestCase (TestCase mode program testcase progs extra_options) =
   case testAction testcase of
 
     CompileTimeFailure expected_error -> do
@@ -134,23 +131,24 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
          ExitFailure 1 -> throwError $ T.decodeUtf8 err
          ExitFailure _ -> checkError expected_error err
 
-    RunCases _ | mode == TypeCheck -> do
+    RunCases _ _ warnings | mode == TypeCheck -> do
       let typeChecker = configTypeChecker progs
       context ("Type-checking with " <> T.pack typeChecker) $ do
         (code, _, err) <-
           io $ readProcessWithExitCode typeChecker ["-t", program] ""
-        testWarnings (testExpectedWarnings testcase) err
+        testWarnings warnings err
         case code of
          ExitSuccess -> return ()
          ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
          ExitFailure _ -> throwError $ T.decodeUtf8 err
 
-    RunCases ios -> do
+    RunCases ios structures warnings -> do
       -- Compile up-front and reuse same executable for several entry points.
       let compiler = configCompiler progs
       unless (mode == Interpreted) $
-        context ("Compiling with " <> T.pack compiler) $
-        compileTestProgram compiler program $ testExpectedWarnings testcase
+        context ("Compiling with " <> T.pack compiler) $ do
+          compileTestProgram compiler program warnings
+          mapM_ (testMetrics program) structures
       unless (mode == Compile) $
         mapM_ runInputOutputs ios
 

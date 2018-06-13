@@ -106,9 +106,9 @@ compileBenchmark :: BenchOptions -> (FilePath, ProgramTest)
                  -> IO (Either SkipReason (FilePath, [InputOutputs]))
 compileBenchmark opts (program, spec) =
   case testAction spec of
-    RunCases cases | "nobench" `notElem` testTags spec,
-                     "disable" `notElem` testTags spec,
-                     any hasRuns cases ->
+    RunCases cases _ _ | "nobench" `notElem` testTags spec,
+                         "disable" `notElem` testTags spec,
+                         any hasRuns cases ->
       if optSkipCompilation opts
         then do
         exists <- doesFileExist $ binaryName program
