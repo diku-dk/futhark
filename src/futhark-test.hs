@@ -54,8 +54,6 @@ data TestCase = TestCase { _testCaseMode :: TestMode
                          , testCaseProgram :: FilePath
                          , testCaseTest :: ProgramTest
                          , _testCasePrograms :: ProgConfig
-                         , _testCaseOptions :: [String]
-                         -- ^ Extra options to pass to the program.
                          }
                 deriving (Show)
 
@@ -117,7 +115,7 @@ testWarnings warnings futerr = mapM_ testWarning warnings
           | otherwise = return ()
 
 runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase mode program testcase progs extra_options) =
+runTestCase (TestCase mode program testcase progs) =
   case testAction testcase of
 
     CompileTimeFailure expected_error -> do
@@ -133,9 +131,9 @@ runTestCase (TestCase mode program testcase progs extra_options) =
 
     RunCases _ _ warnings | mode == TypeCheck -> do
       let typeChecker = configTypeChecker progs
+          options = ["-t", program] ++ configExtraCompilerOptions progs
       context ("Type-checking with " <> T.pack typeChecker) $ do
-        (code, _, err) <-
-          io $ readProcessWithExitCode typeChecker ["-t", program] ""
+        (code, _, err) <- io $ readProcessWithExitCode typeChecker options ""
         testWarnings warnings err
         case code of
          ExitSuccess -> return ()
@@ -145,14 +143,16 @@ runTestCase (TestCase mode program testcase progs extra_options) =
     RunCases ios structures warnings -> do
       -- Compile up-front and reuse same executable for several entry points.
       let compiler = configCompiler progs
+          extra_options = configExtraCompilerOptions progs
       unless (mode == Interpreted) $
         context ("Compiling with " <> T.pack compiler) $ do
-          compileTestProgram compiler program warnings
+          compileTestProgram extra_options compiler program warnings
           mapM_ (testMetrics program) structures
       unless (mode == Compile) $
         mapM_ runInputOutputs ios
 
   where
+
     runInputOutputs (InputOutputs entry run_cases) =
       forM_ run_cases $ \run -> context ("Entry point: " <> entry <> "; dataset: " <>
                                          T.pack (runDescription run)) $ do
@@ -162,7 +162,7 @@ runTestCase (TestCase mode program testcase progs extra_options) =
             interpretTestProgram interpreter program entry run
 
         context "Running compiled program" $
-          runCompiledTestProgram extra_options program entry run
+          runCompiledTestProgram (configExtraOptions progs) program entry run
 
 checkError :: ExpectedError -> SBS.ByteString -> TestM ()
 checkError (ThisError regex_s regex) err
@@ -204,16 +204,16 @@ interpretTestProgram futharki program entry (TestRun _ inputValues expectedResul
       compareResult program expectedResult' =<< runResult program code output err
   where dir = takeDirectory program
 
-compileTestProgram :: String -> FilePath -> [WarningTest] -> TestM ()
-compileTestProgram futharkc program warnings = do
-  (futcode, _, futerr) <-
-    io $ readProcessWithExitCode futharkc [program, "-o", binOutputf] ""
+compileTestProgram :: [String] -> String -> FilePath -> [WarningTest] -> TestM ()
+compileTestProgram extra_options futharkc program warnings = do
+  (futcode, _, futerr) <- io $ readProcessWithExitCode futharkc options ""
   testWarnings warnings futerr
   case futcode of
     ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
     ExitFailure _   -> throwError $ T.decodeUtf8 futerr
     ExitSuccess     -> return ()
   where binOutputf = dropExtension program
+        options = [program, "-o", binOutputf] ++ extra_options
 
 runCompiledTestProgram :: [String] -> String -> T.Text -> TestRun -> TestM ()
 runCompiledTestProgram extra_options program entry (TestRun _ inputValues expectedResult _) = do
@@ -273,7 +273,7 @@ doTest = catching . runTestM . runTestCase
 
 makeTestCase :: TestConfig -> TestMode -> (FilePath, ProgramTest) -> TestCase
 makeTestCase config mode (file, spec) =
-  TestCase mode file spec (configPrograms config) (configExtraOptions config)
+  TestCase mode file spec $ configPrograms config
 
 data ReportMsg = TestStarted TestCase
                | TestDone TestCase TestResult
@@ -374,8 +374,6 @@ data TestConfig = TestConfig
                   { configTestMode :: TestMode
                   , configPrograms :: ProgConfig
                   , configExclude :: [T.Text]
-                  , configExtraOptions :: [String]
-                  -- ^ Extra options passed to the programs being run.
                   , configUnbufferOutput :: Bool
                   }
 
@@ -387,8 +385,9 @@ defaultConfig = TestConfig { configTestMode = Everything
                              { configCompiler = "futhark-c"
                              , configInterpreter = "futharki"
                              , configTypeChecker = "futhark"
+                             , configExtraOptions = []
+                             , configExtraCompilerOptions = []
                              }
-                           , configExtraOptions = []
                            , configUnbufferOutput = False
                            }
 
@@ -396,6 +395,9 @@ data ProgConfig = ProgConfig
                   { configCompiler :: FilePath
                   , configInterpreter :: FilePath
                   , configTypeChecker :: FilePath
+                  , configExtraCompilerOptions :: [String]
+                  , configExtraOptions :: [String]
+                  -- ^ Extra options passed to the programs being run.
                   }
                   deriving (Show)
 
@@ -413,6 +415,14 @@ setInterpreter interpreter config =
 setTypeChecker :: FilePath -> ProgConfig -> ProgConfig
 setTypeChecker typeChecker config =
   config { configTypeChecker = typeChecker }
+
+addCompilerOption :: String -> ProgConfig -> ProgConfig
+addCompilerOption option config =
+  config { configExtraCompilerOptions = configExtraCompilerOptions config ++ [option] }
+
+addOption :: String -> ProgConfig -> ProgConfig
+addOption option config =
+  config { configExtraOptions = configExtraOptions config ++ [option] }
 
 data TestMode = TypeCheck
               | Compile
@@ -439,16 +449,13 @@ commandLineOptions = [
     (NoArg $ Right $ \config -> config { configUnbufferOutput = True })
     "Do not buffer output, and write each result on a line by itself."
   , Option [] ["typechecker"]
-    (ReqArg (Right . changeProgConfig . setTypeChecker)
-     "PROGRAM")
+    (ReqArg (Right . changeProgConfig . setTypeChecker) "PROGRAM")
     "What to run for type-checking (defaults to 'futhark')."
   , Option [] ["compiler"]
-    (ReqArg (Right . changeProgConfig . setCompiler)
-     "PROGRAM")
+    (ReqArg (Right . changeProgConfig . setCompiler) "PROGRAM")
     "What to run for code generation (defaults to 'futhark-c')."
   , Option [] ["interpreter"]
-    (ReqArg (Right . changeProgConfig . setInterpreter)
-     "PROGRAM")
+    (ReqArg (Right . changeProgConfig . setInterpreter) "PROGRAM")
     "What to run for interpretation (defaults to 'futharki')."
   , Option [] ["exclude"]
     (ReqArg (\tag ->
@@ -457,11 +464,11 @@ commandLineOptions = [
      "TAG")
     "Exclude test programs that define this tag."
   , Option "p" ["pass-option"]
-    (ReqArg (\opt ->
-               Right $ \config ->
-               config { configExtraOptions = configExtraOptions config ++ [opt] })
-     "OPT")
+    (ReqArg (Right . changeProgConfig . addOption) "OPT")
     "Pass this option to programs being run."
+  , Option [] ["pass-compiler-option"]
+    (ReqArg (Right . changeProgConfig . addCompilerOption) "OPT")
+    "Pass this option to the compiler (or typechecker if in -t mode)."
   ]
 
 main :: IO ()
