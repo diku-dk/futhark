@@ -57,17 +57,13 @@ data ProgramTest =
                    [T.Text]
               , testAction ::
                    TestAction
-              , testExpectedStructure ::
-                   [StructureTest]
-              , testExpectedWarnings ::
-                   [WarningTest]
               }
   deriving (Show)
 
 -- | How to test a program.
 data TestAction
   = CompileTimeFailure ExpectedError
-  | RunCases [InputOutputs]
+  | RunCases [InputOutputs] [StructureTest] [WarningTest]
   deriving (Show)
 
 -- | Input and output pairs for some entry point.
@@ -154,7 +150,8 @@ parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
 
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
-              (RunCases . pure <$> parseInputOutputs)
+              (RunCases . pure <$> parseInputOutputs <*>
+               many parseExpectedStructure <*> many parseWarning)
 
 parseInputOutputs :: Parser InputOutputs
 parseInputOutputs = InputOutputs <$> parseEntryPoint <*> parseRunCases
@@ -255,7 +252,7 @@ parseMetrics = braces $ fmap M.fromList $ many $
 
 testSpec :: Parser ProgramTest
 testSpec =
-  ProgramTest <$> parseDescription <*> parseTags <*> parseAction <*> many parseExpectedStructure <*> many parseWarning
+  ProgramTest <$> parseDescription <*> parseTags <*> parseAction
 
 readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
 readTestSpec = parse $ testSpec <* eof
@@ -290,8 +287,8 @@ testSpecFromFile path = do
             Left err     -> error $ show $ fixPosition lineno err
             Right cases' ->
               case testAction test of
-                RunCases old_cases ->
-                  return test { testAction = RunCases $ old_cases ++ [cases'] }
+                RunCases old_cases structures warnings ->
+                  return test { testAction = RunCases (old_cases ++ [cases']) structures warnings }
                 _ -> fail "Secondary test block provided, but primary test block specifies compilation error."
 
 testBlocks :: T.Text -> [(Int, T.Text)]
