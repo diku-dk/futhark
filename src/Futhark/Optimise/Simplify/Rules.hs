@@ -212,8 +212,11 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
         checkInvariance
           ((mergeParam,mergeInit), resExp)
           (invariant, explpat', merge', resExps)
-          | not (unique (paramDeclType mergeParam)) || arrayRank (paramDeclType mergeParam) == 1,
-            isInvariant resExp =
+          | not (unique (paramDeclType mergeParam)) ||
+            arrayRank (paramDeclType mergeParam) == 1,
+            isInvariant resExp,
+            -- Also do not remove the condition in a while-loop.
+            not $ paramName mergeParam `S.member` freeIn form =
           let (bnd, explpat'') =
                 removeFromResult (mergeParam,mergeInit) explpat'
           in (maybe id (:) bnd $ (paramIdent mergeParam, mergeInit) : invariant,
