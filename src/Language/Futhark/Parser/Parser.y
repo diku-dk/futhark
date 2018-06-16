@@ -144,7 +144,6 @@ import Language.Futhark.Parser.Lexer
       assert          { L $$ ASSERT }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
-      empty           { L $$ EMPTY }
       while           { L $$ WHILE }
       include         { L $$ INCLUDE }
       import          { L $$ IMPORT }
@@ -842,10 +841,10 @@ ArrayValue :  '[' Value ']'
                   Left e -> throwError e
                   Right v -> return $ ArrayValue (arrayFromList $ $2:$4) $ valueType v
              }
-           | empty '(' PrimType ')'
-             { ArrayValue (listArray (0,-1) []) (Prim $3) }
-           | empty '(' RowType ')'
-             { ArrayValue (listArray (0,-1) []) $3 }
+           | id '(' PrimType ')'
+             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) (Prim $3)) }
+           | id '(' RowType ')'
+             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) $3) }
 
            -- Errors
            | '[' ']'
@@ -881,6 +880,12 @@ reverseNonempty (x, l) =
   case reverse (x:l) of
     x':rest -> (x', rest)
     []      -> (x, [])
+
+mustBe (L loc (ID got)) expected
+  | nameToString got == expected = return ()
+mustBe (L loc _) expected =
+  parseErrorAt loc $ Just $
+  "Only the keyword '" ++ expected ++ "' may appear here."
 
 data ParserEnv = ParserEnv {
                  parserFile :: FilePath

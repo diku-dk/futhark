@@ -144,7 +144,6 @@ keyword s =
     "type"         -> TYPE
     "entry"        -> ENTRY
     "module"       -> MODULE
-    "empty"        -> EMPTY
     "while"        -> WHILE
     "unsafe"       -> UNSAFE
     "assert"       -> ASSERT
@@ -363,7 +362,6 @@ data Token = ID Name
            | ASSERT
            | TRUE
            | FALSE
-           | EMPTY
            | WHILE
            | INCLUDE
            | IMPORT
