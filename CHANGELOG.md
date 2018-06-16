@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Removed `|>>` and `<<|`.  Use `>->` and `<-<` instead.
 
+  * The `empty` construct is no longer supported.  Just use empty
+    array literals.
+
 ### Changed
 
 ### Fixed

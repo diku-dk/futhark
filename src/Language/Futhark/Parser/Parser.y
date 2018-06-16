@@ -584,7 +584,6 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | floatlit       { let L loc (FLOATLIT x) = $1 in FloatLit x NoInfo loc }
      | stringlit      { let L loc (STRINGLIT s) = $1 in
                         ArrayLit (map (flip Literal loc . SignedValue . Int32Value . fromIntegral . ord) s) NoInfo loc }
-     | empty '(' TypeExpDecl ')'   { Empty $3 NoInfo (srcspan $1 $>) }
      | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 (srcspan $1 $3))
