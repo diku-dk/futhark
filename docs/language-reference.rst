@@ -117,14 +117,16 @@ type ``()``.
    type_arg: "[" [`dim`] "]" | `type`
    dim: `qualid` | `decimal`
 
-An array value is written as a nonempty sequence of comma-separated
-values enclosed in square brackets: ``[1,2,3]``.  An array type is
-written as ``[d]t``, where ``t`` is the element type of the array, and
-``d`` is an integer indicating the size.  We typically elide ``d``, in
-which case the size will be inferred.  As an example, an array of
-three integers could be written as ``[1,2,3]``, and has type
-``[3]i32``.  An empty array is written as ``empty(t)``, where ``t`` is
-the element type.
+An array value is written as a sequence of zero or more
+comma-separated values enclosed in square brackets: ``[1,2,3]``.  An
+array type is written as ``[d]t``, where ``t`` is the element type of
+the array, and ``d`` is an integer indicating the size.  We typically
+elide ``d``, in which case the size will be inferred.  As an example,
+an array of three integers could be written as ``[1,2,3]``, and has
+type ``[3]i32``.  An empty array is written as ``[]``, and its type is
+inferred from its use.  When writing Futhark values for such uses as
+``futhark-test`` (but not when writing programs), the syntax
+``empty(t)`` can be used to denote an empty array with row type ``t``.
 
 Multi-dimensional arrays are supported in Futhark, but they must be
 *regular*, meaning that all inner arrays must have the same shape.
@@ -367,7 +369,6 @@ literals and variables, but also more complicated forms.
    atom:   `literal`
        : | `qualid` ("." `fieldid`)*
        : | `stringlit`
-       : | "empty" "(" `type` ")"
        : | "(" ")"
        : | "(" `exp` ")" ("." `fieldid`)*
        : | "(" `exp` ("," `exp`)* ")"
@@ -498,15 +499,6 @@ A variable name; evaluates to its value in the current environment.
 Evaluates to an array of type ``[]i32`` that contains the string
 characters as integers.
 
-``empty(t)``
-............
-
-Create an empty array whose row type is ``t``.  For example,
-``empty(i32)`` creates a value of type ``[]i32``.  The row type can
-contain shape declarations, e.g., ``empty([2]i32)``.  Any dimension
-without an annotation will be of size 0, as will the outermost
-dimension.
-
 ``()``
 ......
 
@@ -574,10 +566,7 @@ the length of the array minus one, and ``j`` becomes minus one.  This means that
 .............
 
 Create an array containing the indicated elements.  Each element must
-have the same type and shape.  At least one element must be provided -
-empty arrays must be constructed with the ``empty`` construct.  This
-restriction is due to limited type inference in the Futhark compiler,
-and will hopefully be fixed in the future.
+have the same type and shape.
 
 ``x..y...z``
 ..............

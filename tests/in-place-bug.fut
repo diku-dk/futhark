@@ -40,9 +40,9 @@ let implicitMethod (myD:  [][]f64,  myDD: [][]f64,
 let main(numX: i32, numY: i32, numT: i32, s0: f64, strike: f64, t: f64, alpha: f64, nu: f64, beta: f64): f64 =
     let myX = map r64 (iota(numX))
     let myY = map r64 (iota(numY))
-    let (myDx, myDxx) = (empty([]f64), empty([]f64))
-    let (myDy, myDyy) = (empty([]f64), empty([]f64))
-    let myResult = copy(empty([]f64))
+    let (myDx, myDxx) = ([]:[][]f64, []:[][]f64)
+    let (myDy, myDyy) = ([]:[][]f64, []:[][]f64)
+    let myResult = copy([]:[][]f64)
     let myMuX  = replicate numY (replicate numX 0.0)
     let myVarX = map (\(yj: f64): []f64  -> map f64.exp myX) myY
 
