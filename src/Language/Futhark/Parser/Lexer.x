@@ -355,7 +355,6 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | REARRANGE
            | ZIP
            | UNZIP
            | UNSAFE
