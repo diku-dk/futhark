@@ -163,14 +163,24 @@ of ``i32`` values.  There is no character type in Futhark.
 Declarations
 ------------
 
-A Futhark module consists of a sequence of declarations (see also
-`Module System`_).  Each declaration is processed in order, and a
-declaration can only refer to names bound by preceding declarations.
+A Futhark file or module consists of a sequence of declarations.  Each
+declaration is processed in order, and a declaration can only refer to
+names bound by preceding declarations.
 
 .. productionlist::
    dec:   `fun_bind` | `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
       : | "open" `mod_exp`
       : | "import" `stringlit`
+      : | "local" `dec`
+
+The ``open`` declaration brings names defined in another module into
+scope (see also `Module System`_).  For the meaning of ``import``, see
+`Referring to Other Files`_.  If a declaration prefixed with
+``local``, whatever names it defines will *not* be visible outside the
+current module.  In particular ``local open`` is used to bring names
+from another module into scope, without making those names available
+to users of the module being defined.  In most cases, using module
+type ascription is a better idea.
 
 Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1079,7 +1089,10 @@ Apply the parametric module ``m1`` to the module ``m2``.
 ``{ decs }``
 ............
 
-Returns a module that contains the given definitions.
+Returns a module that contains the given definitions.  The resulting
+module defines any name defined by any declaration that is not
+``local``, *in particular* including names made available via
+``open``.
 
 ``import "foo"``
 ................
