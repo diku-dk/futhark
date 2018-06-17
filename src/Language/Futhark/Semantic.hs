@@ -54,7 +54,7 @@ mkInitialImport s = ImportName (Posix.normalise $ toPOSIX s) noLoc
 -- that.
 mkImportFrom :: ImportName -> String -> SrcLoc -> ImportName
 mkImportFrom (ImportName includer _) includee
-  | Posix.isAbsolute includee = ImportName $ normalise $ makeRelative "/" includee
+  | Posix.isAbsolute includee = ImportName includee
   | otherwise = ImportName $ normalise $ joinPath $ includer' ++ includee'
   where (dotdots, includee') = span ("../"==) $ splitPath includee
         includer_parts = init $ splitPath includer
