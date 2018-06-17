@@ -150,15 +150,15 @@ and its arguments.  The application must provide as many arguments as
 the type abbreviation has parameters - partial application is
 presently not allowed.  See `Type Abbreviations`_ for further details.
 
-String literals are supported, but only as syntactic sugar for arrays
-of ``i32`` values.  There is no ``char`` type in Futhark.
-
 Functions are classified via function types, but they are not fully
 first class.  See `Higher-order functions`_ for the details.
 
 .. productionlist::
    stringlit: '"' `stringchar` '"'
    stringchar: <any source character except "\" or newline or quotes>
+
+String literals are supported, but only as syntactic sugar for arrays
+of ``i32`` values.  There is no character type in Futhark.
 
 Declarations
 ------------
