@@ -12,8 +12,8 @@ For a basic introduction, please see `the Futhark website
 :ref:`installation`.  Once the compiler has been installed, you might
 want to take a look at :ref:`usage`.  This User's Guide contains a
 :ref:`language-reference`, but new Futhark programmers are probably
-better served by reading `the Futhark Book
-<https://github.com/diku-dk/futhark-book>`_ first.
+better served by reading `Parallel Programming in Futhark
+<https://futhark-book.readthedocs.io>`_ first.
 
 Documentation for the included basis library is also `available online
 <https://futhark-lang.org/docs/>`_.
