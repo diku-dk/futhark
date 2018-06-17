@@ -126,7 +126,7 @@ readImportFile include = do
   case (r, lookup abs_filepath futlib) of
     (Just (Right (filepath,s)), _) -> return (s, filepath)
     (Just (Left e), _)  -> externalErrorS e
-    (Nothing, Just t)   -> return (t, "[builtin]" </> includeToFilePath include)
+    (Nothing, Just t)   -> return (t, "[builtin]" </> abs_filepath)
     (Nothing, Nothing)  -> externalErrorS not_found
    where abs_filepath = includeToFilePath include
 
