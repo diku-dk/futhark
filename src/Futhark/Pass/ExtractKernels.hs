@@ -1060,6 +1060,12 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
                    map DimNew (newDims reshape)
     return $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
 
+maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots _))) acc =
+  distributeSingleUnaryStm acc stm $ \nest outerpat arr -> do
+    let rots' = map (const $ intConst Int32 0) (kernelNestWidths nest) ++
+                rots
+    return $ oneStm $ Let outerpat aux $ BasicOp $ Rotate rots' arr
+
 -- XXX?  This rule is present to avoid the case where an in-place
 -- update is distributed as its own kernel, as this would mean thread
 -- then writes the entire array that it updated.  This is problematic
