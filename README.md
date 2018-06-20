@@ -43,7 +43,7 @@ Hacking
 
 We try to make use of Github issues for organising our work.  Issues
 tagged with
-[newbie-friendly](https://github.com/diku-dk/futhark/issues?q=is%3Aissue+is%3Aopen+label%3Anewbie-friendly)
+[good first issue](https://github.com/diku-dk/futhark/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 do not require deep knowledge of the code base.
 
 Testing
