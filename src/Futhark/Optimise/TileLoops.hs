@@ -324,15 +324,12 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
           Op $ Combine block_cspace [Prim pt] [(global_i, global_d)] $
           Body () (oneStm read_elem_bnd) [Var elem_name]
 
-    block_param_aux_name <- newVName $ baseString $ paramName block_param
-    let block_param_aux = Ident block_param_aux_name $
-                          rearrangeType inner_perm $ patElemType block_pe
     let index_block_kstms =
-          [mkLet [] [block_param_aux] $
-            BasicOp $ Rearrange inner_perm block_name_2d,
-           mkLet [] [paramIdent block_param] $
-            BasicOp $ Index (identName block_param_aux) $
-            fullSlice (identType block_param_aux) [DimFix $ Var variant_i]]
+          [mkLet [] [paramIdent block_param] $
+            BasicOp $ Index block_name_2d $
+            rearrangeShape inner_perm $
+            fullSlice (rearrangeType inner_perm $ patElemType block_pe)
+            [DimFix $ Var variant_i]]
 
     return (outer_block_param,
             oneStm write_block_stm <> stmsFromList index_block_kstms)
