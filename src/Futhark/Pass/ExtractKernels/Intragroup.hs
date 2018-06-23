@@ -282,9 +282,7 @@ intraGroupStm stm@(Let pat _ e) = do
       | [inner_ws] <- map (drop (length outer_ws) . arrayDims) $ patternTypes pat -> do
       let ws = outer_ws ++ inner_ws
       parallelAvail ws
-      let new_inds = unflattenIndex (map (primExpFromSubExp int32) ws)
-                                    (primExpFromSubExp int32 $ Var ltid)
-      new_inds' <- mapM (letExp "new_local_index" <=< toExp) new_inds
+      new_inds' <- replicateM (length ws) $ newVName "new_local_index"
       let inner_inds' = drop (length outer_ws) new_inds'
           space = Out.combineSpace $ zip new_inds' ws
           index = case se of Var v -> BasicOp $ Index v $
