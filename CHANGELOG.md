@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Added `zipN`/`unzipN` functions for 2<=N<=5 to the basis library.
     These are useful for partial application.
 
+  * The `real` module type now specifies `tan`.
+
 ### Removed
 
   * The `rearrange` construct has been removed.  Use `transpose` instead.

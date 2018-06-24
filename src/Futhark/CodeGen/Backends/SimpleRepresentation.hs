@@ -272,6 +272,10 @@ cFloat32Funs = [C.cunit|
       return sin(x);
     }
 
+    static inline float $id:(funName' "tan32")(float x) {
+      return tan(x);
+    }
+
     static inline float $id:(funName' "acos32")(float x) {
       return acos(x);
     }
@@ -335,6 +339,10 @@ cFloat64Funs = [C.cunit|
 
     static inline double $id:(funName' "sin64")(double x) {
       return sin(x);
+    }
+
+    static inline double $id:(funName' "tan64")(double x) {
+      return tan(x);
     }
 
     static inline double $id:(funName' "acos64")(double x) {
