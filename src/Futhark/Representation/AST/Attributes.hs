@@ -110,6 +110,7 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp Manifest{} = True
         safeBasicOp Iota{} = True
         safeBasicOp Replicate{} = True
+        safeBasicOp Copy{} = True
         safeBasicOp _ = False
 
 safeExp (DoLoop _ _ _ body) = safeBody body
