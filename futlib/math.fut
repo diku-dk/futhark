@@ -117,6 +117,7 @@ module type real = {
   val exp: t -> t
   val cos: t -> t
   val sin: t -> t
+  val tan: t -> t
   val asin: t -> t
   val acos: t -> t
   val atan: t -> t
@@ -811,6 +812,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   let exp (x: f64) = intrinsics.exp64 x
   let cos (x: f64) = intrinsics.cos64 x
   let sin (x: f64) = intrinsics.sin64 x
+  let tan (x: f64) = intrinsics.tan64 x
   let acos (x: f64) = intrinsics.acos64 x
   let asin (x: f64) = intrinsics.asin64 x
   let atan (x: f64) = intrinsics.atan64 x
@@ -923,6 +925,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let exp (x: f32) = intrinsics.exp32 x
   let cos (x: f32) = intrinsics.cos32 x
   let sin (x: f32) = intrinsics.sin32 x
+  let tan (x: f32) = intrinsics.tan32 x
   let acos (x: f32) = intrinsics.acos32 x
   let asin (x: f32) = intrinsics.asin32 x
   let atan (x: f32) = intrinsics.atan32 x

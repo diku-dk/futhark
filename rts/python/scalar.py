@@ -258,6 +258,9 @@ def futhark_cos64(x):
 def futhark_sin64(x):
   return np.sin(x)
 
+def futhark_tan64(x):
+  return np.tan(x)
+
 def futhark_acos64(x):
   return np.arccos(x)
 
@@ -298,6 +301,9 @@ def futhark_cos32(x):
 
 def futhark_sin32(x):
   return np.sin(x)
+
+def futhark_tan32(x):
+  return np.tan(x)
 
 def futhark_acos32(x):
   return np.arccos(x)
