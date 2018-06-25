@@ -63,8 +63,13 @@ td {
 }
 
 #content {
+    display: flex;
+}
+
+main {
     padding-left: 1em;
     padding-right: 1em;
+    width: 100%;
 }
 
 #abstract {
@@ -80,6 +85,37 @@ td {
 
 #footer a, #footer a:visited {
     color: #fff9e5;
+}
+
+@media (max-width:950px) {
+    #filenav {
+        display: none;
+    }
+}
+
+#filenav {
+    color: #fff9e5;
+    background: #5f0220;
+    padding-left: 1em;
+    padding-right: 1em;
+}
+
+#filenav a:hover {
+    background: #fff9e5;
+    display: block;
+    color: #5f0220;
+}
+
+#filenav a, #footer a:visited {
+    color: #fff9e5;
+    text-decoration: none;
+}
+
+#filenav > ul {
+    list-style: none;
+    padding: 0;
+    font-family: monospace;
+    font-weight: bold;
 }
 
 .file_desc {
