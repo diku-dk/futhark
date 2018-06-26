@@ -39,8 +39,8 @@ import Futhark.Util
 simpleExplicitMemory :: Simplify.SimpleOps ExplicitMemory
 simpleExplicitMemory = simplifiable (simplifyKernelOp simpleInKernel inKernelEnv)
 
-simpleInKernel :: Simplify.SimpleOps InKernel
-simpleInKernel = simplifiable simplifyKernelExp
+simpleInKernel :: KernelSpace -> Simplify.SimpleOps InKernel
+simpleInKernel = simplifiable . simplifyKernelExp
 
 simplifyExplicitMemory :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
 simplifyExplicitMemory =
