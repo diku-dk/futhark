@@ -141,7 +141,8 @@ simplifyKernelExp _ (SplitSpace o w i elems_per_thread) =
 
 simplifyKernelExp kspace (Combine cspace ts active body) = do
   ((body_stms', body_res'), hoisted) <-
-    protectCombineHoisted $ Engine.blockIf (Engine.hasFree bound_here) $
+    wrapbody $ Engine.blockIf (Engine.hasFree bound_here `Engine.orIf`
+                               maybeBlockUnsafe) $
     localScope (scopeOfCombineSpace cspace) $
     Engine.simplifyBody (map (const Observe) ts) body
   body' <- Engine.constructBody body_stms' body_res'
@@ -151,7 +152,7 @@ simplifyKernelExp kspace (Combine cspace ts active body) = do
            <*> pure body') <*> pure hoisted
   where bound_here = S.fromList $ M.keys $ scopeOfCombineSpace cspace
 
-        protectCombineHoisted m = do
+        protectCombineHoisted checkIfActive m = do
           (x, stms) <- m
           runBinder $ do
             if any (not . safeExp . stmExp) stms
@@ -160,16 +161,19 @@ simplifyKernelExp kspace (Combine cspace ts active body) = do
               else addStms stms
             return x
 
-        checkIfActive
+        (maybeBlockUnsafe, wrapbody)
           | [d] <- map snd $ cspaceDims cspace,
             d == spaceGroupSize kspace =
-              return $ constant True
-          | otherwise = do
-              num_active <-
-                letSubExp "num_active" =<<
-                foldBinOp (Mul Int32) (intConst Int32 1) (map snd $ cspaceDims cspace)
-              letSubExp "active" $
-                BasicOp $ CmpOp (CmpSlt Int32) (Var $ spaceLocalId kspace) num_active
+            (Engine.isFalse True,
+             protectCombineHoisted $
+              letSubExp "active" =<<
+              foldBinOp LogAnd (constant True) =<<
+              mapM (uncurry check) active)
+          | otherwise =
+              (Engine.isNotSafe, id)
+
+        check v se =
+          letSubExp "is_active" $ BasicOp $ CmpOp (CmpSlt Int32) (Var v) se
 
 simplifyKernelExp _ (GroupReduce w lam input) = do
   arrs' <- mapM Engine.simplify arrs
