@@ -234,14 +234,14 @@ intraGroupStm stm@(Let pat _ e) = do
       censor replaceSets $ mapM_ intraGroupStm stream_bnds
 
     Op (Scatter w lam ivs dests) -> do
-      parallelAvail [w]
+      parallelMin [w]
       ctid <- newVName "ctid"
       let cspace = Out.CombineSpace dests [(ctid, w)]
       body_stms <- collectStms_ $ do
         forM_ (zip (lambdaParams lam) ivs) $ \(p, arr) -> do
           arr_t <- lookupType arr
           letBindNames [paramName p] $ BasicOp $ Index arr $
-            fullSlice arr_t [DimFix $ Var ctid]
+            fullSlice arr_t [DimFix $ Var ltid] -- ltid on purpose to enable hoisting.
         Kernelise.transformStms $ bodyStms $ lambdaBody lam
       let body = mkBody body_stms $ bodyResult $ lambdaBody lam
       letBind_ pat $ Op $ Out.Combine cspace (lambdaReturnType lam) mempty body

@@ -61,6 +61,7 @@ module Futhark.Optimise.Simplify.Engine
 
        , blockIf
        , constructBody
+       , protectIf
 
        , module Futhark.Optimise.Simplify.Lore
        ) where
