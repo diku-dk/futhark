@@ -163,7 +163,7 @@ simplifyKernelExp kspace (Combine cspace ts active body) = do
         checkIfActive = do
           num_active <-
             letSubExp "num_active" =<<
-            foldBinOp (Mul Int32) (intConst Int32 0) (map snd $ cspaceDims cspace)
+            foldBinOp (Mul Int32) (intConst Int32 1) (map snd $ cspaceDims cspace)
           letSubExp "active" $
             BasicOp $ CmpOp (CmpSlt Int32) (Var $ spaceLocalId kspace) num_active
 
