@@ -160,12 +160,16 @@ simplifyKernelExp kspace (Combine cspace ts active body) = do
               else addStms stms
             return x
 
-        checkIfActive = do
-          num_active <-
-            letSubExp "num_active" =<<
-            foldBinOp (Mul Int32) (intConst Int32 1) (map snd $ cspaceDims cspace)
-          letSubExp "active" $
-            BasicOp $ CmpOp (CmpSlt Int32) (Var $ spaceLocalId kspace) num_active
+        checkIfActive
+          | [d] <- map snd $ cspaceDims cspace,
+            d == spaceGroupSize kspace =
+              return $ constant True
+          | otherwise = do
+              num_active <-
+                letSubExp "num_active" =<<
+                foldBinOp (Mul Int32) (intConst Int32 1) (map snd $ cspaceDims cspace)
+              letSubExp "active" $
+                BasicOp $ CmpOp (CmpSlt Int32) (Var $ spaceLocalId kspace) num_active
 
 simplifyKernelExp _ (GroupReduce w lam input) = do
   arrs' <- mapM Engine.simplify arrs
