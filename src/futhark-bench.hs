@@ -151,7 +151,7 @@ reportResult [] =
   print (0::Int)
 reportResult results = do
   let runtimes = map (fromIntegral . runMicroseconds) results
-      avg = sum runtimes / genericLength runtimes
+      avg = sum runtimes / fromIntegral (length runtimes)
       rel_dev = stddevp runtimes / mean runtimes :: Double
   putStrLn $ printf "%10.2f" avg ++ "us (avg. of " ++ show (length runtimes) ++
     " runs; RSD: " ++ printf "%.2f" rel_dev ++ ")"

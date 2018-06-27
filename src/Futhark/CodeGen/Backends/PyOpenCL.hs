@@ -4,7 +4,6 @@ module Futhark.CodeGen.Backends.PyOpenCL
   ) where
 
 import Control.Monad
-import Data.List
 
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
@@ -221,7 +220,7 @@ staticOpenCLArray name "device" t vs = do
 
     -- Create memory block on the device.
     static_mem <- newVName "static_mem"
-    let size = Integer $ genericLength vs * Imp.primByteSize t
+    let size = Integer $ fromIntegral (length vs) * Imp.primByteSize t
     allocateOpenCLBuffer static_mem size "device"
 
     -- Copy Numpy array to the device memory block.
