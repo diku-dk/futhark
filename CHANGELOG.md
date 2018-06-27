@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Imports of the basis library must now use an absolute path
     (e.g. `/futlib/fft`, not simply `futlib/fft`).
 
+  * `/futlib/vec2` and `/futlib/vec3` have been replaced by a new
+    `/futlib/vector` file.
+
 ### Fixed
 
   * Better error message on EOF.
