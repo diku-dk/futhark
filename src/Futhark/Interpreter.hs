@@ -325,10 +325,9 @@ evalExp (If e1 e2 e3 info) = do
                   _                       -> bad $ TypeError "evalExp If"
   return $ valueShapeContext (bodyTypeValues $ ifReturns info) vs ++ vs
 
-evalExp (Apply fname args rettype _) = do
+evalExp (Apply fname args _ _) = do
   args' <- mapM (evalSubExp . fst) args
-  vs <- evalFuncall fname args'
-  return $ valueShapeContext (retTypeValues rettype) vs ++ vs
+  evalFuncall fname args'
 evalExp (BasicOp op) = evalBasicOp op
 
 evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar it boundexp loopvars) loopbody) = do
