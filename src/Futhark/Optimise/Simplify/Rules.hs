@@ -429,7 +429,7 @@ simplifyReplicate _ _ _ _ = cannotSimplify
 arrayLitToReplicate :: BinderOps lore => TopDownRuleBasicOp lore
 arrayLitToReplicate _ pat _ (ArrayLit (se:ses) _)
   | all (==se) ses =
-    let n = constant (genericLength ses + 1 :: Int32)
+    let n = constant (fromIntegral (length ses) + 1 :: Int32)
     in letBind_ pat $ BasicOp $ Replicate (Shape [n]) se
 arrayLitToReplicate _ _ _ _ = cannotSimplify
 

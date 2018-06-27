@@ -187,7 +187,7 @@ readIntegral s
   | otherwise =
       T.foldl (another decimal_digits) 0 s
       where another digits acc c = acc * base + maybe 0 fromIntegral (elemIndex (toLower c) digits)
-              where base = genericLength digits
+              where base = fromIntegral $ length digits
 
             binary_digits = ['0', '1']
             decimal_digits = ['0'..'9']

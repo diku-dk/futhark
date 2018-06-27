@@ -674,12 +674,12 @@ defCompileBasicOp (Destination [dest]) (ArrayLit es _)
       let t = primValueType v
       static_array <- newVName "static_array"
       emit $ Imp.DeclareArray static_array dest_space t vs
-      let static_src = MemLocation static_array [Imp.ConstSize $ genericLength es] $
-                       IxFun.iota [genericLength es]
-          num_bytes = Imp.ConstSize $ genericLength es * primByteSize t
+      let static_src = MemLocation static_array [Imp.ConstSize $ fromIntegral $ length es] $
+                       IxFun.iota [fromIntegral $ length es]
+          num_bytes = Imp.ConstSize $ fromIntegral (length es) * primByteSize t
           entry = MemVar Nothing $ MemEntry num_bytes dest_space
       local (insertInVtable static_array entry) $
-        copy t dest_mem static_src $ genericLength es
+        copy t dest_mem static_src $ fromIntegral $ length es
   | otherwise =
     forM_ (zip [0..] es) $ \(i,e) ->
       copyDWIMDest dest [constIndex i] e []
