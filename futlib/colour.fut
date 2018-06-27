@@ -50,7 +50,15 @@ module argb_colour: colour with colour = i32 = {
 module type colourspace = {
   include colour
 
+  -- | Add RGB components of a color component-wise, then normalise
+  -- them to the highest resulting one. The alpha components are
+  -- averaged.
   val add: colour -> colour -> colour
+
+  -- | Add RGBA components of a color component-wise, capping them at
+  -- the maximum.
+  val add_linear: colour -> colour -> colour
+
   val mult: colour -> colour -> colour
   val scale: colour -> f32 -> colour
   val mix: f32 -> colour -> f32 -> colour -> colour
@@ -104,6 +112,11 @@ module colourspace(C: colour): colourspace with colour = C.colour = {
        (f32.max g1 g2)
        (f32.max b1 b2)
        ((a1+a2)/2f32)
+
+  let add_linear (x: colour) (y: colour): colour =
+    let (r1,g1,b1,a1) = to_rgba x
+    let (r2,g2,b2,a2) = to_rgba y
+    in from_rgba (r1+r2) (g1+g2) (b1+b2) (a1+a2)
 
   let mult (x: colour) (y: colour): colour =
     let (r1,g1,b1,a1) = to_rgba x
