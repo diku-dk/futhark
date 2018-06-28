@@ -38,7 +38,7 @@ import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Util.Pretty
-  ((<+>), (</>), ppr, commasep, Pretty, parens, text, apply, braces, annot, indent)
+  ((<+>), (</>), ppr, comma, commasep, Pretty, parens, text, apply, braces, annot, indent)
 import qualified Futhark.TypeCheck as TC
 import Futhark.Util (chunks)
 
@@ -545,11 +545,10 @@ instance PrettyLore lore => Pretty (KernelExp lore) where
     where (nes,els) = unzip input
   ppr (GroupStream w maxchunk lam accs arrs) =
     text "stream" <>
-    parens (commasep [ppr w,
-                      ppr maxchunk,
-                      ppr lam,
-                      braces (commasep $ map ppr accs),
-                      commasep $ map ppr arrs])
+    parens (ppr w <> comma <+> ppr maxchunk <> comma </>
+            ppr lam <> comma </>
+            braces (commasep $ map ppr accs) <> comma </>
+            commasep (map ppr arrs))
 
   ppr (Barrier ses) = text "barrier" <> parens (commasep $ map ppr ses)
 
