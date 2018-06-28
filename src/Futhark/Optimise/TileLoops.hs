@@ -165,7 +165,8 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
                   Let pat attr $ Op $ GroupStream w tile_size lam' accs arrs)
 
         tileInKernelStatement (kspace, extra_bnds)
-          (Let pat attr (Op (GroupStream w maxchunk lam accs arrs))) = do
+          (Let pat attr (Op (GroupStream w maxchunk lam accs arrs)))
+          | maybe True S.null $ flip M.lookup variance =<< subExpVar w = do
           (bnds, kspace', lam') <- tileInStreamLambda branch_variant variance kspace lam
           return ((kspace', extra_bnds <> bnds),
                   Let pat attr $ Op $ GroupStream w maxchunk lam' accs arrs)
