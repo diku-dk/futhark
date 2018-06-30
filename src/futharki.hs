@@ -16,6 +16,7 @@ import Data.Semigroup ((<>))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
+import System.FilePath
 import System.Exit
 import System.Console.GetOpt
 import qualified System.Console.Haskeline as Haskeline
@@ -81,7 +82,9 @@ options = [ Option "e" ["entry-point"]
 
 data InterpreterState =
   InterpreterState { interpImports :: Imports
+                   , interpDecs :: [UncheckedDec]
                    , interpNameSource :: VNameSource
+                   , interpCount :: Int
                    }
 
 newInterpreterState :: IO InterpreterState
@@ -90,18 +93,25 @@ newInterpreterState = do
   case res of
     Right (_, imports, src) ->
       return InterpreterState { interpImports = imports
+                              , interpDecs = map mkOpen $ basisRoots preludeBasis
                               , interpNameSource = src
+                              , interpCount = 0
                               }
     Left err -> do
       putStrLn "Error when initialising interpreter state:"
       print err
       exitFailure
 
+mkOpen :: FilePath -> UncheckedDec
+mkOpen f = OpenDec (ModImport f NoInfo noLoc) [] NoInfo noLoc
+
 type FutharkiM = StateT InterpreterState (Haskeline.InputT IO)
 
 readEvalPrint :: FutharkiM ()
 readEvalPrint = do
-  line <- inputLine "> "
+  i <- gets interpCount
+  modify $ \s -> s { interpCount = i + 1 }
+  line <- inputLine $ "[" ++ show i ++ "]> "
   case T.uncons line of
     Just (':', command) -> do
       let (cmdname, rest) = T.break isSpace command
@@ -111,29 +121,25 @@ readEvalPrint = do
         Just (cmdf, _) -> cmdf arg
     _ -> do
       imports <- gets interpImports
+      decs <- gets interpDecs
       src <- gets interpNameSource
-      -- Read an expression.
-      maybe_e <- parseExpIncrM (inputLine "  ") "input" line
-      case maybe_e of
+      -- Read a declaration or expression.
+      maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") ("[" ++ show i ++ "]") line
+
+      case maybe_dec_or_e of
         Left err -> liftIO $ print err
-        Right e -> do
+        Right (Left d) -> do
+          -- See if it type checks with the new declaration.
+          let decs' = decs ++ [d]
+              prog' = mkProg decs' $ TupLit [] noLoc
+          ok <- runProgram imports src prog'
+          when ok $ modify $ \s -> s { interpDecs = decs' }
+        Right (Right e) -> do
           -- Generate a 0-ary function with empty name with the
           -- expression as its body, append it to the stored program,
           -- then run it.
-          let mkOpen f = OpenDec (ModImport f NoInfo noLoc) [] NoInfo noLoc
-              opens = map (mkOpen . fst) imports
-              mainfun = ValBind { valBindEntryPoint = True
-                                , valBindName = nameFromString ""
-                                , valBindRetType = NoInfo
-                                , valBindRetDecl = Nothing
-                                , valBindTypeParams = []
-                                , valBindParams = []
-                                , valBindBody = e
-                                , valBindLocation = noLoc
-                                , valBindDoc = Nothing
-                                }
-              prog' = Prog Nothing $ opens ++ [ValDec mainfun]
-          runProgram imports src prog'
+          let prog' = mkProg decs e
+          void $ runProgram imports src prog'
   where inputLine prompt = do
           inp <- lift $ Haskeline.getInputLine prompt
           case inp of
@@ -141,17 +147,31 @@ readEvalPrint = do
             Nothing -> liftIO $ do putStrLn "Leaving futharki."
                                    exitSuccess
 
-runProgram :: Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
+mkProg :: [UncheckedDec] -> UncheckedExp -> UncheckedProg
+mkProg decs e =
+  let mainfun = ValBind { valBindEntryPoint = True
+                        , valBindName = nameFromString ""
+                        , valBindRetType = NoInfo
+                        , valBindRetDecl = Nothing
+                        , valBindTypeParams = []
+                        , valBindParams = []
+                        , valBindBody = e
+                        , valBindLocation = noLoc
+                        , valBindDoc = Nothing
+                        }
+  in Prog Nothing $ decs ++ [ValDec mainfun]
+
+runProgram :: Imports -> VNameSource -> UncheckedProg -> FutharkiM Bool
 runProgram imports src prog = liftIO $
   case checkProg imports src (mkInitialImport "") prog of
-    Left err -> print err
+    Left err -> print err >> return False
     Right (imp, _, src') ->
       case evalState (internaliseProg $ imports ++ [("", imp)]) src' of
-        Left err -> print err
+        Left err -> print err >> return False
         Right prog'' ->
           case runFun (nameFromString "") [] prog'' of
-            Left err -> print err
-            Right vs -> mapM_ (putStrLn . pretty) vs
+            Left err -> print err >> return False
+            Right vs -> mapM_ (putStrLn . pretty) vs >> return True
 
 type Command = T.Text -> FutharkiM ()
 
@@ -185,6 +205,8 @@ Quit futharki.
             Left err -> liftIO $ dumpError newFutharkConfig err
             Right (_, imports, src) ->
               modify $ \env -> env { interpImports = imports
+                                   , interpDecs = map mkOpen $ basisRoots preludeBasis ++
+                                                  [dropExtension $ T.unpack file]
                                    , interpNameSource = src
                                    }
 

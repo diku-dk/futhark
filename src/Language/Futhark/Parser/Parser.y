@@ -1,5 +1,6 @@
 {
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
   ( prog
@@ -11,7 +12,7 @@ module Language.Futhark.Parser.Parser
   , ParserMonad
   , parse
   , ParseError(..)
-  , parseExpIncrM
+  , parseDecOrExpIncrM
   )
   where
 
@@ -39,6 +40,7 @@ import Language.Futhark.Parser.Lexer
 %name prog Prog
 %name futharkType TypeExp
 %name expression Exp
+%name declaration Dec
 %name anyValue Value
 %name anyValues CatValues
 
@@ -1046,13 +1048,6 @@ parseInMonad p file program =
   (scanTokensText (Pos file 1 1 0) program)
   where env = ParserEnv file
 
-parseIncrementalM :: Monad m =>
-                     ParserMonad a
-                   -> m T.Text -> FilePath -> T.Text
-                   -> m (Either ParseError a)
-parseIncrementalM p fetch file program =
-  getLinesFromM fetch $ parseInMonad p file program
-
 parseIncremental :: ParserMonad a -> FilePath -> T.Text
                  -> Either ParseError a
 parseIncremental p file program =
@@ -1069,8 +1064,21 @@ parse p file program =
 -- | Parse an Futhark expression incrementally from monadic actions, using the
 -- 'FilePath' as the source name for error messages.
 parseExpIncrM :: Monad m =>
-                  m T.Text -> FilePath -> T.Text
-               -> m (Either ParseError UncheckedExp)
-parseExpIncrM = parseIncrementalM expression
+                 m T.Text -> FilePath -> T.Text
+              -> m (Either ParseError UncheckedExp)
+parseExpIncrM fetch file program =
+  getLinesFromM fetch $ parseInMonad expression file program
 
+-- | Parse either an expression or a declaration incrementally;
+-- favouring declarations in case of ambiguity.
+parseDecOrExpIncrM :: Monad m =>
+                      m T.Text -> FilePath -> T.Text
+                   -> m (Either ParseError (Either UncheckedDec UncheckedExp))
+parseDecOrExpIncrM fetch file input =
+  case parseInMonad declaration file input of
+    Value Left{} -> fmap Right <$> parseExpIncrM fetch file input
+    Value (Right d) -> return $ Right $ Left d
+    GetLine c -> do
+      l <- fetch
+      parseDecOrExpIncrM fetch file $ input <> "\n" <> l
 }
