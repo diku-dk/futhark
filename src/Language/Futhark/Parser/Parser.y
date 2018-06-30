@@ -185,31 +185,31 @@ Doc :: { DocComment }
 -- Three cases to avoid ambiguities.
 Prog :: { UncheckedProg }
       -- File begins with a file comment, followed by a Dec with a comment.
-      : Doc Doc Dec_ Decs { Prog (Just $1) (map (addDoc $2) $3 ++ $4) }
+      : Doc Doc Dec_ Decs { Prog (Just $1) (addDoc $2 $3 : $4) }
       -- File begins with a file comment, followed by a Dec with no comment.
-      | Doc Dec_ Decs     { Prog (Just $1) ($2 ++ $3) }
+      | Doc Dec_ Decs     { Prog (Just $1) ($2 : $3) }
       -- File begins with a dec with no comment.
-      | Dec_ Decs         { Prog Nothing ($1 ++ $2) }
+      | Dec_ Decs         { Prog Nothing ($1 : $2) }
 ;
 
-Dec :: { [UncheckedDec] }
+Dec :: { UncheckedDec }
     : Dec_              { $1 }
-    | Doc Dec_          { map (addDoc $1) $2 }
+    | Doc Dec_          { addDoc $1 $2 }
 
 Decs :: { [UncheckedDec] }
       :          { [] }
-      | Dec Decs { $1 ++ $2 }
+      | Dec Decs { $1 : $2 }
 
-Dec_ :: { [UncheckedDec] }
-    : Val               { [ValDec $1] }
-    | TypeAbbr          { [TypeDec $1] }
-    | SigBind           { [SigDec $1 ] }
-    | ModBind           { [ModDec $1 ] }
+Dec_ :: { UncheckedDec }
+    : Val               { ValDec $1 }
+    | TypeAbbr          { TypeDec $1 }
+    | SigBind           { SigDec $1 }
+    | ModBind           { ModDec $1 }
     | open ModExp
-      { [OpenDec $2 [] NoInfo $1] }
+      { OpenDec $2 [] NoInfo $1 }
     | import stringlit
-      { let L loc (STRINGLIT s) = $2 in [LocalDec (OpenDec (ModImport s NoInfo loc) [] NoInfo $1) (srcspan $1 $>)] }
-    | local Dec         { map (`LocalDec` $1) $2 }
+      { let L loc (STRINGLIT s) = $2 in LocalDec (OpenDec (ModImport s NoInfo loc) [] NoInfo $1) (srcspan $1 $>) }
+    | local Dec         { LocalDec $2 (srcspan $1 $>) }
 ;
 
 SigExp :: { UncheckedSigExp }
