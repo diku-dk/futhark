@@ -219,14 +219,15 @@ data CompilerEnv op s = CompilerEnv {
 data CompilerAcc op s = CompilerAcc {
     accItems :: DL.DList C.BlockItem
   , accDeclaredMem :: [(VName,Space)]
+  , accFreedMem :: [VName]
   }
 
 instance Sem.Semigroup (CompilerAcc op s) where
-  CompilerAcc items1 declared1 <> CompilerAcc items2 declared2 =
-    CompilerAcc (items1<>items2) (declared1<>declared2)
+  CompilerAcc items1 declared1 freed1 <> CompilerAcc items2 declared2 freed2 =
+    CompilerAcc (items1<>items2) (declared1<>declared2) (freed1<>freed2)
 
 instance Monoid (CompilerAcc op s) where
-  mempty = CompilerAcc mempty mempty
+  mempty = CompilerAcc mempty mempty mempty
   mappend = (Sem.<>)
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
@@ -1667,8 +1668,9 @@ compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
   allocMem name size space
 
-compileCode (Free name space) =
+compileCode (Free name space) = do
   unRefMem name space
+  tell $ mempty { accFreedMem = [name] }
 
 compileCode (For i it bound body) = do
   let i' = C.toIdent i
@@ -1796,7 +1798,8 @@ blockScope' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
 blockScope' m = pass $ do
   (x, w) <- listen m
   let items = DL.toList $ accItems w
-  releases <- collect $ mapM_ (uncurry unRefMem) $ accDeclaredMem w
+      to_unref = filter (not . (`elem` accFreedMem w) . fst) $ accDeclaredMem w
+  releases <- collect $ mapM_ (uncurry unRefMem) to_unref
   return ((x, items ++ releases),
           const mempty)
 
