@@ -38,6 +38,8 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
 import System.FilePath
 import Codec.Compression.GZip
+import Codec.Compression.Zlib.Internal (DecompressError)
+import qualified Control.Exception.Base as E
 
 import Text.Parsec hiding ((<|>), many)
 import Text.Parsec.Text
@@ -367,6 +369,13 @@ getValuesBS _ (Values vs) =
   return $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map prettyText vs
 getValuesBS dir (InFile file) =
   case takeExtension file of
-    ".gz" -> liftIO $ decompress <$> BS.readFile file'
-    _     -> liftIO $ BS.readFile file'
+   ".gz" -> liftIO $ do
+     s <- E.try readAndDecompress
+     case s of
+       Left e   -> fail $ show file ++ ": " ++ show (e :: DecompressError)
+       Right s' -> return s'
+
+   _  -> liftIO $ BS.readFile file'
   where file' = dir </> file
+        readAndDecompress = do s <- BS.readFile file'
+                               E.evaluate $ decompress s
