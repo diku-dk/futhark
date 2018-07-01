@@ -125,7 +125,8 @@ data Operations lore op = Operations { opsExpCompiler :: ExpCompiler lore op
 
 -- | An operations set for which the expression compiler always
 -- returns 'CompileExp'.
-defaultOperations :: ExplicitMemorish lore => OpCompiler lore op -> Operations lore op
+defaultOperations :: (ExplicitMemorish lore, FreeIn op) =>
+                     OpCompiler lore op -> Operations lore op
 defaultOperations opc = Operations { opsExpCompiler = defCompileExp
                                    , opsOpCompiler = opc
                                    , opsBodyCompiler = defCompileBody
@@ -264,6 +265,11 @@ collect :: ImpM lore op () -> ImpM lore op (Imp.Code op)
 collect m = pass $ do
   ((), code) <- listen m
   return (code, const mempty)
+
+collect' :: ImpM lore op a -> ImpM lore op (a, Imp.Code op)
+collect' m = pass $ do
+  (x, code) <- listen m
+  return ((x, code), const mempty)
 
 -- | Execute a code generation action, wrapping the generated code
 -- within a 'Imp.Comment' with the given description.
@@ -458,11 +464,11 @@ compileBody dest body = do
   cb <- asks envBodyCompiler
   cb dest body
 
-defCompileBody :: ExplicitMemorish lore => Destination -> Body lore -> ImpM lore op ()
+defCompileBody :: (ExplicitMemorish lore, FreeIn op) => Destination -> Body lore -> ImpM lore op ()
 defCompileBody (Destination dest) (Body _ bnds ses) =
-  compileStms (stmsToList bnds) $ zipWithM_ compileSubExpTo dest ses
+  compileStms (freeIn ses) (stmsToList bnds) $ zipWithM_ compileSubExpTo dest ses
 
-compileLoopBody :: ExplicitMemorish lore =>
+compileLoopBody :: (ExplicitMemorish lore, FreeIn op) =>
                    [VName] -> Body lore -> ImpM lore op (Imp.Code op)
 compileLoopBody mergenames (Body _ bnds ses) = do
   -- We cannot write the results to the merge parameters immediately,
@@ -472,7 +478,7 @@ compileLoopBody mergenames (Body _ bnds ses) = do
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
   tmpnames <- mapM (newVName . (++"_tmp") . baseString) mergenames
-  collect $ compileStms (stmsToList bnds) $ do
+  collect $ compileStms (freeIn ses) (stmsToList bnds) $ do
     copy_to_merge_params <- forM (zip3 mergenames tmpnames ses) $ \(d,tmp,se) ->
       subExpType se >>= \case
         Prim bt  -> do
@@ -487,20 +493,46 @@ compileLoopBody mergenames (Body _ bnds ses) = do
         _ -> return $ return ()
     sequence_ copy_to_merge_params
 
-compileStms :: ExplicitMemorish lore => [Stm lore] -> ImpM lore op a -> ImpM lore op a
-compileStms []     m = m
-compileStms (Let pat _ e:bs) m =
-  declaringVars (Just e) (patternElements pat) $ do
-    dest <- destinationFromPattern pat
-    compileExp dest e $ compileStms bs m
+compileStms :: (ExplicitMemorish lore, FreeIn op) =>
+               Names -> [Stm lore] -> ImpM lore op () -> ImpM lore op ()
+compileStms alive_after_stms all_stms m =
+  -- We keep track of any memory blocks produced by the statements,
+  -- and after the last time that memory block is used, we insert a
+  -- Free.  This is very conservative, but can cut down on lifetimes
+  -- in some cases.
+  void $ compileStms' mempty all_stms
+  where compileStms' allocs (Let pat _ e:bs) =
+          declaringVars (Just e) (patternElements pat) $ do
+          dest <- destinationFromPattern pat
 
-compileExp :: Destination -> Exp lore -> ImpM lore op a -> ImpM lore op a
-compileExp targets e m = do
+          e_code <- collect $ compileExp dest e
+          (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
+          let dies_here v = not (v `S.member` live_after) &&
+                            v `S.member` freeIn e_code
+              to_free = S.filter (dies_here . fst) allocs
+
+          emit e_code
+          mapM_ (emit . uncurry Imp.Free) to_free
+          emit bs_code
+
+          return $ freeIn e_code <> live_after
+        compileStms' _ [] = do
+          code <- collect m
+          emit code
+          return $ freeIn code <> alive_after_stms
+
+        patternAllocs = S.fromList . mapMaybe isMemPatElem . patternElements
+        isMemPatElem pe = case patElemType pe of
+                            Mem _ space -> Just (patElemName pe, space)
+                            _           -> Nothing
+
+compileExp :: Destination -> Exp lore -> ImpM lore op ()
+compileExp targets e = do
   ec <- asks envExpCompiler
   ec targets e
-  m
 
-defCompileExp :: ExplicitMemorish lore => Destination -> Exp lore -> ImpM lore op ()
+defCompileExp :: (ExplicitMemorish lore, FreeIn op) =>
+                 Destination -> Exp lore -> ImpM lore op ()
 
 defCompileExp dest (If cond tbranch fbranch _) = do
   cond' <- compileSubExp cond

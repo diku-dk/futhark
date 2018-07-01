@@ -925,6 +925,9 @@ compileCode (Imp.Allocate name (Imp.Count e) DefaultSpace) = do
   let name' = Var (compileName name)
   stm $ Assign name' allocate'
 
+compileCode (Imp.Free name _) =
+  stm $ Assign (Var (compileName name)) None
+
 compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
   join $ asks envAllocate
     <*> pure name

@@ -553,6 +553,7 @@ typesInCode DeclareMem{} = mempty
 typesInCode (DeclareScalar _ t) = S.singleton t
 typesInCode (DeclareArray _ _ t _) = S.singleton t
 typesInCode (Allocate _ (Count e) _) = typesInExp e
+typesInCode Free{} = mempty
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (Write _ (Count e1) t _ _ e2) =
