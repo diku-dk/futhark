@@ -4,6 +4,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Main (main) where
 
+import Control.Exception
 import Data.Char
 import Data.Loc
 import Data.Version
@@ -29,6 +30,7 @@ import Futhark.Interpreter
 import Futhark.Version
 import Futhark.Passes
 import Futhark.Compiler
+import Futhark.Pipeline
 import Futhark.Internalise
 import Futhark.Util.Options
 import Language.Futhark.Futlib.Prelude
@@ -195,13 +197,42 @@ runProgram imports src prog = liftIO $
 type Command = T.Text -> FutharkiM ()
 
 commands :: [(T.Text, (Command, T.Text))]
-commands = [("help", (helpCommand, [text|
+commands = [("load", (loadCommand, [text|
+Load a Futhark source file.  Usage:
+
+  > :load foo.fut
+
+If the loading succeeds, any subsequentialy entered expressions entered
+subsequently will have access to the definition (such as function definitions)
+in the source file.
+
+Only one source file can be loaded at a time.  Using the :load command a
+second time will replace the previously loaded file.  It will also replace
+any declarations entered at the REPL.
+
+|])),
+            ("help", (helpCommand, [text|
 Print a list of commands and a description of their behaviour.
 |])),
             ("quit", (quitCommand, [text|
 Quit futharki.
 |]))]
-  where helpCommand :: Command
+  where loadCommand :: Command
+        loadCommand file = do
+          liftIO $ T.putStrLn $ "Reading " <> file
+          res <- liftIO $ runExceptT (readProgram preludeBasis (T.unpack file))
+                 `Haskeline.catch` \(err::IOException) ->
+                 return (Left (ExternalError (T.pack $ show err)))
+          case res of
+            Left err -> liftIO $ dumpError newFutharkConfig err
+            Right (_, imports, src) ->
+              modify $ \env -> env { interpImports = imports
+                                   , interpDecs = map mkOpen $ basisRoots preludeBasis ++
+                                                  [dropExtension $ T.unpack file]
+                                   , interpNameSource = src
+                                   }
+
+        helpCommand :: Command
         helpCommand _ = liftIO $ forM_ commands $ \(cmd, (_, desc)) -> do
             T.putStrLn $ ":" <> cmd
             T.putStrLn $ T.replicate (1+T.length cmd) "-"
