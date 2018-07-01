@@ -177,7 +177,15 @@ parseRunCases = parseRunCases' (0::Int)
           input <- parseInput
           expr <- parseExpectedResult
           return $ TestRun tags input expr $ desc i input
-        desc _ (InFile path) = path
+
+        -- If the file is gzipped, we strip the 'gz' extension from
+        -- the dataset name.  This makes it more convenient to rename
+        -- from 'foo.in' to 'foo.in.gz', as the reported dataset name
+        -- does not change (which would make comparisons to historical
+        -- data harder).
+        desc _ (InFile path)
+          | takeExtension path == ".gz" = dropExtension path
+          | otherwise                   = path
         desc i (Values vs) =
           -- Turn linebreaks into spaces.
           "#" ++ show i ++ " (\"" ++ unwords (lines vs') ++ "\")"
