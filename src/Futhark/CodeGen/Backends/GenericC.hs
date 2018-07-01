@@ -1667,6 +1667,9 @@ compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
   allocMem name size space
 
+compileCode (Free name space) =
+  unRefMem name space
+
 compileCode (For i it bound body) = do
   let i' = C.toIdent i
       it' = intTypeToCType it

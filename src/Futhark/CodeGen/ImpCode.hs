@@ -147,6 +147,14 @@ data Code a = Skip
             | Allocate VName (Count Bytes) Space
               -- ^ Memory space must match the corresponding
               -- 'DeclareMem'.
+            | Free VName Space
+              -- ^ Indicate that some memory block will never again be
+              -- referenced via the indicated variable.  However, it
+              -- may still be accessed through aliases.  It is only
+              -- safe to actually deallocate the memory block if this
+              -- is the last reference.  There is no guarantee that
+              -- all memory blocks will be freed with this statement.
+              -- Backends are free to ignore it entirely.
             | Copy VName (Count Bytes) Space VName (Count Bytes) Space (Count Bytes)
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
@@ -304,6 +312,8 @@ instance Pretty op => Pretty (Code op) where
     equals <+> braces (commasep $ map ppr vs)
   ppr (Allocate name e space) =
     ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
+  ppr (Free name space) =
+    text "free" <> parens (ppr name) <> ppr space
   ppr (Write name i bt space vol val) =
     ppr name <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr i) <+>
     text "<-" <+> ppr val
@@ -401,6 +411,8 @@ instance Traversable Code where
     pure $ DeclareArray name space t vs
   traverse _ (Allocate name size s) =
     pure $ Allocate name size s
+  traverse _ (Free name space) =
+    pure $ Free name space
   traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
     pure $ Copy dest destoffset destspace src srcoffset srcspace size
   traverse _ (Write name i bt val space vol) =
@@ -446,6 +458,8 @@ instance FreeIn a => FreeIn (Code a) where
     mempty
   freeIn (Allocate name size _) =
     freeIn name <> freeIn size
+  freeIn (Free name _) =
+    freeIn name
   freeIn (Copy dest x _ src y _ n) =
     freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
   freeIn (SetMem x y _) =

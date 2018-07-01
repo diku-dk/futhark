@@ -654,7 +654,7 @@ compileKernelStms constants ungrouped_bnds m =
 
         compileKernelStm (Let pat _ e) = do
           dest <- ImpGen.destinationFromPattern pat
-          ImpGen.compileExp dest e $ return ()
+          ImpGen.compileExp dest e
 
 groupStmsByGuard :: KernelConstants
                      -> [Stm InKernel]
@@ -729,7 +729,7 @@ compileKernelExp constants dest (Combine (CombineSpace scatter cspace) ts aspace
           (Just x, Just y) -> return (x, y)
           _ -> fail "compileKernelExp combine: invalid destination."
       body' <- allThreads constants $
-        ImpGen.compileStms (stmsToList $ bodyStms body) $ do
+        ImpGen.compileStms (freeIn $ bodyResult body) (stmsToList $ bodyStms body) $ do
 
         forM_ (zip4 scatter_ws_repl res_is res_vs scatter_dests') $
           \(w, res_i, res_v, scatter_dest) -> do

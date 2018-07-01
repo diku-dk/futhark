@@ -41,6 +41,8 @@ setValueSpace _ (ScalarValue bt ept v) =
 setBodySpace :: Space -> Code op -> Code op
 setBodySpace space (Allocate v e old_space) =
   Allocate v (setCountSpace space e) $ setSpace space old_space
+setBodySpace space (Free v old_space) =
+  Free v $ setSpace space old_space
 setBodySpace space (DeclareMem name old_space) =
   DeclareMem name $ setSpace space old_space
 setBodySpace space (DeclareArray name _ t vs) =
