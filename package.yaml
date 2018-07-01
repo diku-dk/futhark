@@ -49,6 +49,7 @@ dependencies:
   - extra
   - process
   - markdown
+  - zlib
 
 when:
 - condition: "!impl(ghc >= 8.0)"

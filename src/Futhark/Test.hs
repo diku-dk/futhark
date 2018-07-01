@@ -37,6 +37,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
 import System.FilePath
+import Codec.Compression.GZip
 
 import Text.Parsec hiding ((<|>), many)
 import Text.Parsec.Text
@@ -344,7 +345,7 @@ getValues :: MonadIO m => FilePath -> Values -> m [Value]
 getValues _ (Values vs) =
   return vs
 getValues dir (InFile file) = do
-  s <- liftIO $ BS.readFile file'
+  s <- getValuesBS dir (InFile file)
   case valuesFromByteString file' s of
     Left e   -> fail $ show e
     Right vs -> return vs
@@ -357,5 +358,7 @@ getValuesBS :: MonadIO m => FilePath -> Values -> m BS.ByteString
 getValuesBS _ (Values vs) =
   return $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map prettyText vs
 getValuesBS dir (InFile file) =
-  liftIO $ BS.readFile file'
+  case takeExtension file of
+    ".gz" -> liftIO $ decompress <$> BS.readFile file'
+    _     -> liftIO $ BS.readFile file'
   where file' = dir </> file
