@@ -1143,7 +1143,10 @@ removeFullInPlace :: BinderOps lore => TopDownRuleBasicOp lore
 removeFullInPlace vtable pat _ (Update dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
     isFullSlice (arrayShape dest_t) is =
-      letBind_ pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
+      letBind_ pat $ BasicOp $
+      case se of
+        Var v -> Reshape (map DimNew $ arrayDims dest_t) v
+        _     -> ArrayLit [se] $ rowType dest_t
 removeFullInPlace _ _ _ _ =
   cannotSimplify
 
