@@ -16,6 +16,7 @@ import os
 import re
 import math
 import itertools
+import bisect
 from collections import OrderedDict, defaultdict
 
 technique.register(bandittechniques.AUCBanditMetaTechnique([
@@ -147,53 +148,28 @@ class FutharkTuner(MeasurementInterface):
       on the threshold values such that
       all possible combinations are tried.
       """
-      def yield_prev_and_next(i, kl, name):
-        # return the threshold value for the previous
-        # and the next dataset
-        # returns 0 if it is the first dataset
-        # and none if current value is equal to previous/next
-        # and return the current value * 4 if it is the last
-        cv = self.thresholds[kl[i]][name]
-        if i == 0:
-          pv = 0
-        else:
-          if self.thresholds[kl[i - 1]][name] == cv:
-            pv = None
-          else:
-            pv = self.thresholds[kl[i - 1]][name]
-        if i == len(kl) - 1:
-          nv = self.thresholds[kl[i]][name] * 4
-        else:
-          if self.thresholds[kl[i + 1]][name] == cv:
-              nv = None
-          else:
-              nv = self.thresholds[kl[i + 1]][name]
-        return (pv, nv)
-
       print('Calculating values for each threshold parameter..')
-      # list of keys are needed to calculate previous and next value
-      key_list = list(self.thresholds.keys())
+      # extract threshold values for each parameter across all datasets
+      # and save to a dict with all threshold values for each parameter
+      # keeping the threshold values sorted
+      t = defaultdict(list)
+      for dataset, thresholds in self.thresholds.items():
+          for k, v in thresholds.items():
+              if v not in t[k]:
+                  bisect.insort(t[k], v)
 
-      # iterate over all thresholds for each dataset
-      # and calculate two values:
-      # one making the comparison true and one making it false
-      # store values in a set to exclude duplicates
-      s = set()
-      for i, key in enumerate(key_list):
-        for name, value in self.thresholds[key].items():
-          prev_value, next_value = yield_prev_and_next(i, key_list, name)
+      # iterate over all sorted threshold values of all parameters
+      # and calculate a value lying between the current and previous value
+      for name, values in t.items():
+        for i in range(0,len(values)):
+          current_value = values[i]
+          prev_value = values[i - 1] if i != 0 else 0
+          v = int((current_value + prev_value) / 2)
+          self.values[name].append(v)
 
-          # if a previous or next value has been generated
-          # and is not already added to the value list,
-          # add it
-          if not prev_value == None:
-            tv = int((value + prev_value) / 2)
-            if not tv in self.values[name]:
-              self.values[name].append(tv)
-          if not next_value == None:
-            fv = int((next_value + value) / 2)
-            if not fv in self.values[name]:
-              self.values[name].append(fv)
+        # for the last threshold value also calculate a larger value
+        v = int((values[len(values) - 1] * 2))
+        self.values[name].append(v)
 
   def build_branch_tree(self):
     """
@@ -369,6 +345,7 @@ class FutharkTuner(MeasurementInterface):
       print("--save-json not given, so not writing parameter values to file.")
     print("Reproduce with command:")
     print(self.futhark_bench_cmd(configuration.data))
+    print(len(self.covered_branches))
 
 if __name__ == '__main__':
   argparser = opentuner.default_argparser()
