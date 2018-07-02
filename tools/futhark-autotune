@@ -7,7 +7,7 @@ from __future__ import print_function
 
 import opentuner
 from opentuner import ConfigurationManipulator
-from opentuner.search.manipulator import IntegerParameter
+from opentuner.search.manipulator import IntegerParameter, LogIntegerParameter
 from opentuner import MeasurementInterface
 from opentuner import Result
 from opentuner.search import technique, bandittechniques, simplextechniques
@@ -262,7 +262,7 @@ class FutharkTuner(MeasurementInterface):
     """
     manipulator = ConfigurationManipulator()
     for k, v in self.values.items():
-      manipulator.add_parameter(IntegerParameter(k, min(v), max(v)))
+      manipulator.add_parameter(LogIntegerParameter(k, min(v), max(v)))
 
     return manipulator
 
