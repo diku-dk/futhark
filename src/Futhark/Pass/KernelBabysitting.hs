@@ -271,8 +271,7 @@ coalescedIndexes tgids is
       Just is
   -- Otherwise try fix coalescing
   | otherwise =
-      -- Hack: only look at the innermost dimension.
-      Just $ reverse $ foldl move (reverse is) $ take 1 $ zip [0..] (reverse tgids)
+      Just $ reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
   where num_is = length is
 
         move is_rev (i, tgid)
