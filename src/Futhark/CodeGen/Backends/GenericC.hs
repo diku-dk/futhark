@@ -1282,6 +1282,10 @@ $edecls:(miscDecls endstate)
   let utildefs = [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
+/* If NDEBUG is set, the assert() macro will do nothing. Since Futhark
+   (unfortunately) makes use of assert() for error detection (and even some
+   side effects), we want to avoid that. */
+$esc:("#undef NDEBUG")
 $esc:("#include <assert.h>")
 
 $esc:panic_h
