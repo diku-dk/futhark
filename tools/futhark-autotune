@@ -3,6 +3,8 @@
 # A simple autotuner for calibrating parameters of Futhark programs.
 # Based on OpenTuner.  Requires Python 2.
 
+from __future__ import print_function
+
 import opentuner
 from opentuner import ConfigurationManipulator
 from opentuner.search.manipulator import IntegerParameter
@@ -59,7 +61,9 @@ class FutharkTuner(MeasurementInterface):
     assert compile_res['returncode'] == 0
 
     if self.args.calc_timeout:
+      print('Calculating timeout-value based on a base benchmark... ', end='')
       self.args.timeout = self.get_base_timeout()
+      print('{} seconds.'.format(self.args.timeout))
     self.extract_thresholds()
     self.yield_values()
     self.build_branch_tree()
@@ -70,7 +74,6 @@ class FutharkTuner(MeasurementInterface):
     in order to use the runtime of the slowest dataset
     as timeout-value.
     """
-    print('Calculating timeout-value based on a base benchmark..')
     with tempfile.NamedTemporaryFile() as json_tmp:
       base_cmd = 'futhark-bench {} --compiler=futhark-opencl --skip-compilation --json={}'.format(self.program_name(),
                                                                                                   json_tmp.name)
