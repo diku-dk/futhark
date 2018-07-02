@@ -12,6 +12,7 @@ from opentuner import MeasurementInterface
 from opentuner import Result
 from opentuner.search import technique, bandittechniques, simplextechniques
 
+import sys
 import tempfile
 import json
 import os
@@ -61,7 +62,8 @@ class FutharkTuner(MeasurementInterface):
     assert compile_res['returncode'] == 0
 
     if self.args.calc_timeout:
-      print('Calculating timeout-value based on a base benchmark... ', end='')
+      print('Calculating --timeout based on untuned run... ', end='')
+      sys.stdout.flush()
       self.args.timeout = self.get_base_timeout()
       print('{} seconds.'.format(self.args.timeout))
     self.extract_thresholds()
