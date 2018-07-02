@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futharki` now supports entering declarations.
 
+  * `futhark-test` and `futhark-benchmark` now support gzipped data
+    files.  They must have a `.gz` extension.
+
+  * Generated code now frees memory much earlier, which can help
+    reduce the footprint.
+
 ### Removed
 
   * The `rearrange` construct has been removed.  Use `transpose` instead.
