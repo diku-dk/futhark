@@ -20,6 +20,7 @@ import re
 import math
 import itertools
 import bisect
+import time
 from collections import OrderedDict, defaultdict
 
 technique.register(bandittechniques.AUCBanditMetaTechnique([
@@ -74,22 +75,25 @@ class FutharkTuner(MeasurementInterface):
     """
     Run a benchmark without specifying thresholds,
     in order to use the runtime of the slowest dataset
-    as timeout-value.
+    as timeout-value, plus the (estimated) overhead of initialisation.
     """
     with tempfile.NamedTemporaryFile() as json_tmp:
       base_cmd = 'futhark-bench {} --compiler=futhark-opencl --skip-compilation --json={}'.format(self.program_name(),
                                                                                                   json_tmp.name)
+      wall_start = time.time()
       base_res = self.call_program(base_cmd)
+      wall_duration = time.time() - wall_start
       assert base_res['returncode'] == 0
 
       json_data = json.load(json_tmp)
       base_datasets = json_data[self.program_name()]['datasets']
       high = 0
-      for dataset in base_datasets:
-        runtime = sum(base_datasets[dataset]['runtimes'])
-        high = runtime if high < runtime else high
+      dataset_runtimes = [ sum(base_datasets[dataset]['runtimes']) / 1000000.0
+                           for dataset in base_datasets ]
+      high = max(dataset_runtimes)
+      overhead = (wall_duration - sum(dataset_runtimes)) / len(dataset_runtimes)
 
-    return int(math.ceil(high * (10**-6))) + 1
+    return int(math.ceil(high + overhead)) + 1 # Extra second for luck.
 
   def extract_thresholds(self):
     """
