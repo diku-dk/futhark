@@ -208,6 +208,7 @@ class FutharkTuner(MeasurementInterface):
             start[start.index(branch)] = branch_dict(name, i)
           else:
             start.append(branch_dict(name, i))
+          break
 
     print('Building the branching-tree..')
     # Run the program once to extract the configurable parameters.
@@ -225,7 +226,7 @@ class FutharkTuner(MeasurementInterface):
 
     # clean away non-used paramters
     for k, _ in branch_info.items():
-        branch_info[k] = {n: ds for n, ds in branch_info[k].items() if n in branch_info}
+      branch_info[k] = {n: ds for n, ds in branch_info[k].items() if n in branch_info}
 
     branch_list = list(branch_info.items())
     i = 0 # we need id to generate unique ids
@@ -236,22 +237,22 @@ class FutharkTuner(MeasurementInterface):
     processed = []
     # as long as there are parameters to add, add them
     while branch_list:
-        pname, pdeps = branch_list.pop(0)
-        # if no dependcies add parameter to root of tree
-        if not pdeps:
-            self.branch_tree.append(branch_dict(pname, i))
-            processed.append(pname)
-            i += 2
+      pname, pdeps = branch_list.pop(0)
+      # if no dependcies add parameter to root of tree
+      if not pdeps:
+        self.branch_tree.append(branch_dict(pname, i))
+        processed.append(pname)
+        i += 2
 
-        # if all dependencies have alredy been added to tree,
-        # add parameter to tree, else save parameter for
-        # later processing
-        elif all(n.strip('!') in processed for n in pdeps):
-            walk_tree_and_add_param(self.branch_tree, pname, pdeps, i)
-            processed.append(pname)
-            i += 2
-        else:
-            branch_list.append((pname, pdeps))
+      # if all dependencies have alredy been added to tree,
+      # add parameter to tree, else save parameter for
+      # later processing
+      elif all(n.strip('!') in processed for n in pdeps):
+        walk_tree_and_add_param(self.branch_tree, pname, pdeps, i)
+        processed.append(pname)
+        i += 2
+      else:
+        branch_list.append((pname, pdeps))
 
   def program_bin_name(self):
     return os.path.splitext(self.program_name())[0]
@@ -354,7 +355,6 @@ class FutharkTuner(MeasurementInterface):
       print("--save-json not given, so not writing parameter values to file.")
     print("Reproduce with command:")
     print(self.futhark_bench_cmd(configuration.data))
-    print(len(self.covered_branches))
 
 if __name__ == '__main__':
   argparser = opentuner.default_argparser()
