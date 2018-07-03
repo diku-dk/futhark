@@ -4,4 +4,4 @@
 -- output { [[1,0,3],[0,0,6]] }
 
 let main (as: [][]i32) (is: [][]i32) (vs: [][]i32) =
-  map (\(x, y, z) -> scatter (copy x) y z) (zip as is vs)
+  map3 (\x y z -> scatter (copy x) y z) as is vs

@@ -5,4 +5,4 @@
 -- output { [[42,2], [3,1337]] }
 
 let main (xss: *[][]i32) (is: []i32) (vs: []i32) =
-  map (\(xs: []i32, i, v) -> unsafe copy xs with [i] <- v) (zip xss is vs)
+  map3 (\(xs: []i32) i v -> unsafe copy xs with [i] <- v) xss is vs

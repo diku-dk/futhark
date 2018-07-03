@@ -13,4 +13,4 @@ let main [n] (xs: []i32, ys: [n]i32, zs: [n]i32, is: [n]i32, js: [n]i32): []i32 
          unsafe
          let tmp = unflatten y z xs
          in tmp[i,j]
-      ) (zip ys zs is js)
+      ) (zip4 ys zs is js)
