@@ -863,7 +863,7 @@ prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
 
           stms $ zipWith maybeCopyDim shape [0..rank-1]
 
-          return (known_sizes ++ wrote_sizes, [C.cty|$ty:ty*|])
+          return (known_sizes ++ wrote_sizes, [C.cty|const $ty:ty*|])
 
           where wrote_sizes = mapMaybe isVarSize shape
                 isVarSize ConstSize{} = Nothing
