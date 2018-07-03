@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `zip` and `unzip` are no longer language constructs, but library
     functions, and work only on two arrays and pairs, respectively.
+    Use functions `zipN/unzipN` (for `2<=n<=8`).
 
 ### Fixed
 
