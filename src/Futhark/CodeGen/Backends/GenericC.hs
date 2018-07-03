@@ -938,7 +938,7 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
   outputdecls <- collect $ mapM_ stubParam outputs
 
   let entry_point_name = nameToString fname
-      entry_point_function_name = "futhark_" ++ entry_point_name
+      entry_point_function_name = "futhark_entry_" ++ entry_point_name
 
   (entry_point_input_params, unpack_entry_inputs) <-
     collect' $ prepareEntryInputs args
@@ -1120,7 +1120,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
   let entry_point_name = nameToString fname
       cli_entry_point_function_name = "futrts_cli_entry_" ++ entry_point_name
-      entry_point_function_name = "futhark_" ++ entry_point_name
+      entry_point_function_name = "futhark_entry_" ++ entry_point_name
 
       run_it = [C.citems|
                   /* Run the program once. */
