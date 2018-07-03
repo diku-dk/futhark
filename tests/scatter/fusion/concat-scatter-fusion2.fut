@@ -6,5 +6,5 @@
 -- structure { Concat 0 Scatter 1 }
 
 let main (arr: *[]i32) (xs: []i32) =
-  let (is0, vs0, is1, vs1, is2, is3, vs2, vs3) = unzip (map (\x -> (x,1,x+1,2,x+2,x+3,3,4)) xs)
+  let (is0, vs0, is1, vs1, is2, is3, vs2, vs3) = unzip8 (map (\x -> (x,1,x+1,2,x+2,x+3,3,4)) xs)
   in scatter arr (is0 ++ is1 ++ is2 ++ is3) (vs0 ++ vs1 ++ vs2 ++ vs3)
