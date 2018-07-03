@@ -22,7 +22,7 @@ entry test_ifft (res: []f32) (ims: []f32) = unzip (fft.ifft (zip res ims))
 --         [[0f32, 0f32], [0f32, 0f32]] }
 -- output { [[10f32, -2f32], [-4f32, 0f32]]
 --          [[0f32, 0f32], [0f32, 0f32]] }
-entry test_fft2 (res: [][]f32) (ims: [][]f32) = unzip (fft.fft2 (zip@1 res ims))
+entry test_fft2 (res: [][]f32) (ims: [][]f32) = map2 zip res ims |> fft.fft2 |> map unzip |> unzip
 
 -- ==
 -- entry: test_ifft2
@@ -30,4 +30,4 @@ entry test_fft2 (res: [][]f32) (ims: [][]f32) = unzip (fft.fft2 (zip@1 res ims))
 --         [[0f32, 0f32], [0f32, 0f32]] }
 -- output { [[1f32, 2f32], [3f32, 4f32]]
 --          [[0f32, 0f32], [0f32, 0f32]] }
-entry test_ifft2 (res: [][]f32) (ims: [][]f32) = unzip (fft.ifft2 (zip@1 res ims))
+entry test_ifft2 (res: [][]f32) (ims: [][]f32) = map2 zip res ims |> fft.ifft2 |> map unzip |> unzip

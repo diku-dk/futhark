@@ -10,6 +10,6 @@ let main [n][m] (a: [n][m]i32): [][]i32 =
   let bar = replicate m (iota n)
   let b = replicate n (iota m)
   let c = map (\(xs: []i32, ys: []i32,zs: []i32): []i32  ->
-                map (\(x: i32, y: i32, z: i32): i32  -> x+y*z) (zip xs ys zs)) (
-              zip foo bar (transpose b)) in
+                map (\(x: i32, y: i32, z: i32): i32  -> x+y*z) (zip3 xs ys zs)) (
+              zip3 foo bar (transpose b)) in
   c

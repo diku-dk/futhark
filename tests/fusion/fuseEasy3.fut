@@ -12,6 +12,6 @@ let main(arr: []f64): []f64 =
     let x = map f arr
     let y = map g arr in
     if arr[0] < 0.0
-    then map h1 (zip x y x)
+    then map h1 (zip3 x y x)
     --else map(h2(1.0), zip(y,x))
     else map (h2(y[0])) (zip x x)

@@ -127,7 +127,6 @@ import Language.Futhark.Parser.Lexer
       ']'             { L $$ RBRACKET }
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
-      '@'             { L $$ AT }
       '\\'            { L $$ BACKSLASH }
       '\''            { L $$ APOSTROPHE }
       '\'^'           { L $$ APOSTROPHE_THEN_HAT }
@@ -140,8 +139,6 @@ import Language.Futhark.Parser.Lexer
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
-      zip             { L $$ ZIP }
-      unzip           { L $$ UNZIP }
       unsafe          { L $$ UNSAFE }
       assert          { L $$ ASSERT }
       true            { L $$ TRUE }
@@ -509,16 +506,6 @@ Exp2 :: { UncheckedExp }
 
      | LetExp %prec letprec { $1 }
 
-     | zip Atoms1
-                      { Zip 0 (fst $2) (snd $2) NoInfo
-                        (srcspan $1 (mconcat (map srclocOf (snd $>)))) }
-
-     | zip '@' NaturalInt Atoms1
-                      { Zip $3 (fst $4) (snd $4) NoInfo
-                        (srcspan $1 (mconcat (map srclocOf (snd $>)))) }
-
-     | unzip Atom  { Unzip $2 [] (srcspan $1 $>) }
-
      | unsafe Exp2     { Unsafe $2 (srcspan $1 $>) }
      | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
 
@@ -647,10 +634,6 @@ PrimLit :: { (PrimValue, SrcLoc) }
 
         | charlit { let L loc (CHARLIT char) = $1
                     in (SignedValue $ Int32Value $ fromIntegral $ ord char, loc) }
-
-Atoms1 :: { (UncheckedExp, [UncheckedExp]) }
-        : Atom Atoms1 { ($1, fst $2 : snd $2) }
-        | Atom        { ($1, []) }
 
 Exps1 :: { (UncheckedExp, [UncheckedExp]) }
        : Exps1_ { case reverse (snd $1 : fst $1) of
@@ -791,9 +774,6 @@ Value : IntValue { $1 }
 CatValues :: { [Value] }
 CatValues : Value CatValues { $1 : $2 }
           |                 { [] }
-
-NaturalInt :: { Int }
-           : intlit   { let L _ (INTLIT num) = $1 in fromIntegral num  }
 
 PrimType :: { PrimType }
          : id {% let L _ (ID s) = $1 in primTypeFromName s }

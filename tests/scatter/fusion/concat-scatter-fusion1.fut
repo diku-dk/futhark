@@ -7,5 +7,5 @@
 
 let main (xs: []i32) =
   let dest = replicate 10 (1,2)
-  let (is0, vs0, is1, vs1) = unzip (map (\x -> (x,(3,4),x+1,(5,6))) xs)
+  let (is0, vs0, is1, vs1) = unzip4 (map (\x -> (x,(3,4),x+1,(5,6))) xs)
   in unzip (scatter dest (concat is0 is1) (concat vs0 vs1))

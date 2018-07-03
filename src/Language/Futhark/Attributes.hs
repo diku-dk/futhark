@@ -742,6 +742,9 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                            Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique] $
                           Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique),
 
+              ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
+              ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
+
               ("map", IntrinsicPolyFun [tp_a, tp_b] [t_a `arr` t_b, arr_a] uarr_b),
 
               ("reduce", IntrinsicPolyFun [tp_a]
@@ -786,6 +789,12 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         arr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Nonunique
         uarr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Unique
         tp_b = TypeParamType tv_b noLoc
+
+        arr_a_b = Array (ArrayRecordElem (M.fromList $ zip tupleFieldNames
+                                          [RecordArrayElem $ ArrayPolyElem tv_a' [] (),
+                                           RecordArrayElem $ ArrayPolyElem tv_b' [] ()]))
+                        (rank 1) Nonunique
+        t_arr_a_arr_b = Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
 
         arr = Arrow mempty Nothing
 
