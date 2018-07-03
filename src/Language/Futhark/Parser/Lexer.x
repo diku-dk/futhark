@@ -79,7 +79,6 @@ tokens :-
   "<-"                     { tokenC LEFT_ARROW }
   ":"                      { tokenC COLON }
   "."                      { tokenC DOT }
-  "@"                      { tokenC AT }
   "\"                      { tokenC BACKSLASH }
   "'"                      { tokenC APOSTROPHE }
   "'^"                     { tokenC APOSTROPHE_THEN_HAT }
@@ -147,12 +146,6 @@ keyword s =
     "while"        -> WHILE
     "unsafe"       -> UNSAFE
     "assert"       -> ASSERT
-
--- In a perfect language, the remaining tokens would all be functions.
--- Perhaps we can eventually permit their use as variable names anyway.
-
-    "zip"          -> ZIP
-    "unzip"        -> UNZIP
 
     _              -> ID $ nameFromText s
 
@@ -318,7 +311,6 @@ data Token = ID Name
            | CHARLIT Char
 
            | COLON
-           | AT
            | BACKSLASH
            | APOSTROPHE
            | APOSTROPHE_THEN_HAT
@@ -355,8 +347,6 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | ZIP
-           | UNZIP
            | UNSAFE
            | ASSERT
            | TRUE

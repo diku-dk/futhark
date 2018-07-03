@@ -1,5 +1,5 @@
 -- ==
--- input {} error: length
+-- input {} error: wrong shape
 
 let predict (a:[10]f64) : i32 =
   let (m,i) = reduce (\(a,i) (b,j) -> if a > b then (a,i) else (b,j))

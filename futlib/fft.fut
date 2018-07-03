@@ -60,7 +60,7 @@ module mk_fft (R: real): fft with real = R.t = {
     let (res,_) =
       loop (input': *[n]complex, output': *[n]complex) = (input, output) for ns in NS do
         let (i0s, v0s, i1s, v1s) =
-          unsafe (unzip (map (fft_iteration forward ns input') ix))
+          unsafe (unzip4 (map (fft_iteration forward ns input') ix))
         in (scatter output' (concat i0s i1s) (concat v0s v1s), input')
     in res
 

@@ -24,6 +24,8 @@
 --
 -- for any `x`.
 
+import "zip"
+
 -- | Apply the given function to each element of an array.
 --
 -- **Work:** *O(n)*
@@ -46,7 +48,7 @@ let map1 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
 --
 -- **Span:** *O(1)*
 let map2 'a 'b [n] 'x (f: a -> b -> x) (as: [n]a) (bs: [n]b): *[n]x =
-  map (\(a, b) -> f a b) (zip as bs)
+  map (\(a, b) -> f a b) (zip2 as bs)
 
 -- | As `map2`@term, but with one more array.
 --
@@ -54,7 +56,7 @@ let map2 'a 'b [n] 'x (f: a -> b -> x) (as: [n]a) (bs: [n]b): *[n]x =
 --
 -- **Span:** *O(1)*
 let map3 'a 'b 'c [n] 'x (f: a -> b -> c -> x) (as: [n]a) (bs: [n]b) (cs: [n]c): *[n]x =
-  map (\(a, b, c) -> f a b c) (zip as bs cs)
+  map (\(a, b, c) -> f a b c) (zip3 as bs cs)
 
 -- | As `map3`@term, but with one more array.
 --
@@ -62,7 +64,7 @@ let map3 'a 'b 'c [n] 'x (f: a -> b -> c -> x) (as: [n]a) (bs: [n]b) (cs: [n]c):
 --
 -- **Span:** *O(1)*
 let map4 'a 'b 'c 'd [n] 'x (f: a -> b -> c -> d -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d): *[n]x =
-  map (\(a, b, c, d) -> f a b c d) (zip as bs cs ds)
+  map (\(a, b, c, d) -> f a b c d) (zip4 as bs cs ds)
 
 -- | As `map4`@term, but with one more array.
 --
@@ -70,7 +72,7 @@ let map4 'a 'b 'c 'd [n] 'x (f: a -> b -> c -> d -> x) (as: [n]a) (bs: [n]b) (cs
 --
 -- **Span:** *O(1)*
 let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e): *[n]x =
-  map (\(a, b, c, d, e) -> f a b c d e) (zip as bs cs ds es)
+  map (\(a, b, c, d, e) -> f a b c d e) (zip5 as bs cs ds es)
 
 -- | Reduce the array `as` with `op`, with `ne` as the neutral
 -- element for `op`.  The function `op` must be associative.  If
