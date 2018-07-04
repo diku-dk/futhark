@@ -8,7 +8,7 @@
 
 #include <windows.h>
 
-static int64_t get_wall_time() {
+static int64_t get_wall_time(void) {
   LARGE_INTEGER time,freq;
   assert(QueryPerformanceFrequency(&freq));
   assert(QueryPerformanceCounter(&time));
@@ -21,7 +21,7 @@ static int64_t get_wall_time() {
 #include <time.h>
 #include <sys/time.h>
 
-static int64_t get_wall_time() {
+static int64_t get_wall_time(void) {
   struct timeval time;
   assert(gettimeofday(&time,NULL) == 0);
   return time.tv_sec * 1000000 + time.tv_usec;
