@@ -557,7 +557,7 @@ bracket.  This disambiguates the array indexing ``a[i]``, from ``a
 ............
 
 Return a slice of the array ``a`` from index ``i`` to ``j``, the
-latter inclusive and the latter exclusive, taking every ``s``-th
+former inclusive and the latter exclusive, taking every ``s``-th
 element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
 it means to start at ``i`` and descend by steps of size ``s`` to ``j``
 (not inclusive).
