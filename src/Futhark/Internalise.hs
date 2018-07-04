@@ -44,12 +44,12 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
 internaliseProg :: MonadFreshNames m =>
-                   Imports -> m (Either String I.Prog)
-internaliseProg prog = do
+                   Bool -> Imports -> m (Either String I.Prog)
+internaliseProg always_safe prog = do
   prog_decs <- Defunctorise.transformProg prog
   prog_decs' <- Monomorphise.transformProg prog_decs
   prog_decs'' <- Defunctionalise.transformProg prog_decs'
-  prog' <- fmap (fmap I.Prog) $ runInternaliseM $ internaliseValBinds prog_decs''
+  prog' <- fmap (fmap I.Prog) $ runInternaliseM always_safe $ internaliseValBinds prog_decs''
   traverse I.renameProg prog'
 
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
@@ -1476,7 +1476,8 @@ funcall desc (QualName _ fname) args loc = do
 
 askSafety :: InternaliseM Safety
 askSafety = do check <- asks envDoBoundsChecks
-               return $ if check then I.Safe else I.Unsafe
+               safe <- asks envSafe
+               return $ if check || safe then I.Safe else I.Unsafe
 
 boundsCheck :: SrcLoc -> I.SubExp -> I.SubExp -> InternaliseM I.VName
 boundsCheck loc w e = do

@@ -41,12 +41,14 @@ data FutharkConfig = FutharkConfig
                      { futharkVerbose :: Maybe (Maybe FilePath)
                      , futharkWarn :: Bool -- ^ Warn if True.
                      , futharkWerror :: Bool -- ^ If true, error on any warnings.
+                     , futharkSafe :: Bool -- ^ If True, ignore @unsafe@.
                      }
 
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
                                  , futharkWarn = True
                                  , futharkWerror = False
+                                 , futharkSafe = False
                                  }
 
 dumpError :: FutharkConfig -> CompilerError -> IO ()
@@ -127,7 +129,7 @@ runPipelineOnProgram config b pipeline file = do
   putNameSource namesrc
   when (pipelineVerbose pipeline_config) $
     logMsg ("Internalising program" :: String)
-  res <- internaliseProg prog_imports
+  res <- internaliseProg (futharkSafe config) prog_imports
   case res of
     Left err ->
       internalErrorS ("During internalisation: " <> pretty err) $ E.Prog Nothing $

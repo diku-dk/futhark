@@ -48,6 +48,9 @@ OPTIONS
 --Werror
   Treat warnings as errors.
 
+--safe
+  Ignore ``unsafe`` in program and perform safety checks unconditionally.
+
 -h
   Print help text to standard output and exit.
 
