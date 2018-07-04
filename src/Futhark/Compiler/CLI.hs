@@ -74,6 +74,9 @@ commandLineOptions =
   , Option [] ["Werror"]
     (NoArg $ Right $ \config -> config { compilerWerror = True })
     "Treat warnings as errors."
+  , Option [] ["safe"]
+    (NoArg $ Right $ \config -> config { compilerSafe = True })
+    "Ignore 'unsafe' in code."
   ]
 
 wrapOption :: CompilerOption cfg -> CoreCompilerOption cfg
@@ -87,6 +90,7 @@ data CompilerConfig cfg =
                  , compilerVerbose :: Maybe (Maybe FilePath)
                  , compilerMode :: CompilerMode
                  , compilerWerror :: Bool
+                 , compilerSafe :: Bool
                  , compilerConfig :: cfg
                  }
 
@@ -99,6 +103,7 @@ newCompilerConfig x = CompilerConfig { compilerOutput = Nothing
                                      , compilerVerbose = Nothing
                                      , compilerMode = ToExecutable
                                      , compilerWerror = False
+                                     , compilerSafe = False
                                      , compilerConfig = x
                                      }
 
@@ -110,4 +115,5 @@ futharkConfig :: CompilerConfig cfg -> FutharkConfig
 futharkConfig config =
   newFutharkConfig { futharkVerbose = compilerVerbose config
                    , futharkWerror = compilerWerror config
+                   , futharkSafe = compilerSafe config
                    }

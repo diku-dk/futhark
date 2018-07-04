@@ -66,6 +66,7 @@ type VarSubstitutions = M.Map VName [SubExp]
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
+  , envSafe :: Bool
   }
 
 data InternaliseState = InternaliseState {
@@ -109,9 +110,9 @@ instance MonadBinder InternaliseM where
   certifying cs (InternaliseM m) = InternaliseM $ certifying cs m
 
 runInternaliseM :: MonadFreshNames m =>
-                   InternaliseM ()
+                   Bool -> InternaliseM ()
                 -> m (Either String [FunDef])
-runInternaliseM (InternaliseM m) =
+runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src -> do
   let onError e             = (Left e, src)
       onSuccess (funs,src') = (Right funs, src')
@@ -121,6 +122,7 @@ runInternaliseM (InternaliseM m) =
   where newEnv = InternaliseEnv {
                    envSubsts = mempty
                  , envDoBoundsChecks = True
+                 , envSafe = safe
                  }
         newState src =
           InternaliseState { stateNameSource = src

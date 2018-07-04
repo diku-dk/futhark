@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Generated code now frees memory much earlier, which can help
     reduce the footprint.
 
+  * Compilers now accept a `--safe` flag to make them ignore `unsafe`.
+
 ### Removed
 
   * The `rearrange` construct has been removed.  Use `transpose` instead.

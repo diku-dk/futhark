@@ -187,7 +187,7 @@ runProgram imports src prog = liftIO $
   case checkProg imports src (mkInitialImport "") prog of
     Left err -> print err >> return False
     Right (imp, _, src') ->
-      case evalState (internaliseProg $ imports ++ [("", imp)]) src' of
+      case evalState (internaliseProg True $ imports ++ [("", imp)]) src' of
         Left err -> print err >> return False
         Right prog'' ->
           case runFun (nameFromString "") [] prog'' of

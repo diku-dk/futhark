@@ -40,6 +40,9 @@ OPTIONS
 --Werror
   Treat warnings as errors.
 
+--safe
+  Ignore ``unsafe`` in program and perform safety checks unconditionally.
+
 -v verbose
   Enable debugging output.  If compilation fails due to a compiler
   error, the result of the last successful compiler step will be
