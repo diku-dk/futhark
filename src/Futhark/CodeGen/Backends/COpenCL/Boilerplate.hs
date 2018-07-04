@@ -41,12 +41,12 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   get_size_class <- GC.publicName "get_size_class"
   get_size_entry <- GC.publicName "get_size_entry"
 
-  GC.headerDecl GC.InitDecl [C.cedecl|int $id:get_num_sizes();|]
+  GC.headerDecl GC.InitDecl [C.cedecl|int $id:get_num_sizes(void);|]
   GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_name(int);|]
   GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_class(int);|]
   GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_entry(int);|]
 
-  GC.libDecl [C.cedecl|int $id:get_num_sizes() {
+  GC.libDecl [C.cedecl|int $id:get_num_sizes(void) {
                 return $int:(M.size sizes);
               }|]
   GC.libDecl [C.cedecl|const char* $id:get_size_name(int i) {
@@ -75,7 +75,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   cfg_set_size <- GC.publicName "context_config_set_size"
 
   GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg;|]
-  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg* $id:new_cfg();|]
+  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg* $id:new_cfg(void);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int flag);|]
@@ -97,7 +97,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                        };|]
 
   let size_value_inits = map (\i -> [C.cstm|cfg->sizes[$int:i] = 0;|]) [0..M.size sizes-1]
-  GC.libDecl [C.cedecl|struct $id:cfg* $id:new_cfg() {
+  GC.libDecl [C.cedecl|struct $id:cfg* $id:new_cfg(void) {
                          struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
                          if (cfg == NULL) {
                            return NULL;
