@@ -6,6 +6,7 @@
 -- names.
 module Language.Futhark.TypeChecker
   ( checkProg
+  , checkExp
   , TypeError
   , Warnings
   )
@@ -45,6 +46,21 @@ checkProg :: Imports
           -> Either TypeError (FileModule, Warnings, VNameSource)
 checkProg files src name prog =
   runTypeM initialEnv files' name src $ checkProgM prog
+  where files' = M.map fileEnv $ M.fromList files
+
+-- | Type check a single expression containing no type information,
+-- yielding either a type error or the same expression annotated with
+-- type information.  See also 'checkProg'.
+checkExp :: Imports
+         -> VNameSource
+         -> [UncheckedDec]
+         -> UncheckedExp
+         -> Either TypeError Exp
+checkExp files src decs e = do
+  (e', _, _) <- runTypeM initialEnv files' (mkInitialImport "") src $ do
+    (_, env, _) <- checkDecs decs
+    localEnv env $ checkOneExp e
+  return e'
   where files' = M.map fileEnv $ M.fromList files
 
 initialEnv :: Env
