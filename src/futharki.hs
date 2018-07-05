@@ -6,6 +6,7 @@ module Main (main) where
 
 import Control.Exception
 import Data.Char
+import Data.List
 import Data.Loc
 import Data.Version
 import Control.Monad
@@ -116,9 +117,11 @@ readEvalPrint = do
     Just (':', command) -> do
       let (cmdname, rest) = T.break isSpace command
           arg = T.dropWhileEnd isSpace $ T.dropWhile isSpace rest
-      case lookup cmdname commands of
-        Nothing -> liftIO $ T.putStrLn $ "Unknown command '" <> cmdname <> "'"
-        Just (cmdf, _) -> cmdf arg
+      case filter ((cmdname `T.isPrefixOf`) . fst) commands of
+        [] -> liftIO $ T.putStrLn $ "Unknown command '" <> cmdname <> "'"
+        [(_, (cmdf, _))] -> cmdf arg
+        matches -> liftIO $ T.putStrLn $ "Ambiguous command; could be one of " <>
+                   mconcat (intersperse ", " (map fst matches))
     _ -> do
       -- Read a declaration or expression.
       maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") ("[" ++ show i ++ "]") line
@@ -212,34 +215,50 @@ second time will replace the previously loaded file.  It will also replace
 any declarations entered at the REPL.
 
 |])),
+            ("type", (typeCommand, [text|
+Show the type of an expression.
+|])),
             ("help", (helpCommand, [text|
 Print a list of commands and a description of their behaviour.
 |])),
             ("quit", (quitCommand, [text|
 Quit futharki.
 |]))]
-  where loadCommand :: Command
-        loadCommand file = do
-          liftIO $ T.putStrLn $ "Reading " <> file
-          res <- liftIO $ runExceptT (readProgram preludeBasis (T.unpack file))
-                 `Haskeline.catch` \(err::IOException) ->
-                 return (Left (ExternalError (T.pack $ show err)))
-          case res of
-            Left err -> liftIO $ dumpError newFutharkConfig err
-            Right (_, imports, src) ->
-              modify $ \env -> env { interpImports = imports
-                                   , interpDecs = map mkOpen $ basisRoots preludeBasis ++
-                                                  [dropExtension $ T.unpack file]
-                                   , interpNameSource = src
-                                   }
 
-        helpCommand :: Command
-        helpCommand _ = liftIO $ forM_ commands $ \(cmd, (_, desc)) -> do
-            T.putStrLn $ ":" <> cmd
-            T.putStrLn $ T.replicate (1+T.length cmd) "-"
-            T.putStr desc
-            T.putStrLn ""
-            T.putStrLn ""
+loadCommand :: Command
+loadCommand file = do
+  liftIO $ T.putStrLn $ "Reading " <> file
+  res <- liftIO $ runExceptT (readProgram preludeBasis (T.unpack file))
+         `Haskeline.catch` \(err::IOException) ->
+         return (Left (ExternalError (T.pack $ show err)))
+  case res of
+    Left err -> liftIO $ dumpError newFutharkConfig err
+    Right (_, imports, src) ->
+      modify $ \env -> env { interpImports = imports
+                           , interpDecs = map mkOpen $ basisRoots preludeBasis ++
+                                          [dropExtension $ T.unpack file]
+                           , interpNameSource = src
+                           }
 
-        quitCommand :: Command
-        quitCommand _ = liftIO exitSuccess
+typeCommand :: Command
+typeCommand e =
+  case parseExp "input" e of
+    Left err -> liftIO $ print err
+    Right e' -> do
+      imports <- gets interpImports
+      src <- gets interpNameSource
+      decs <- gets interpDecs
+      case checkExp imports src decs e' of
+        Left err -> liftIO $ print err
+        Right e'' -> liftIO $ putStrLn $ pretty e' <> " : " <> pretty (typeOf e'')
+
+helpCommand :: Command
+helpCommand _ = liftIO $ forM_ commands $ \(cmd, (_, desc)) -> do
+    T.putStrLn $ ":" <> cmd
+    T.putStrLn $ T.replicate (1+T.length cmd) "-"
+    T.putStr desc
+    T.putStrLn ""
+    T.putStrLn ""
+
+quitCommand :: Command
+quitCommand _ = liftIO exitSuccess
