@@ -872,7 +872,7 @@ prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
                 assertSameSize expected got =
                   [C.cstm|if ($exp:expected != $exp:got) {
                             fprintf(stderr, "Parameter %s has bad dimension (expected %d, got %d).\n",
-                                    $string:(pretty src), $exp:expected, $exp:got);
+                                    $string:(pretty src), (int)$exp:expected, (int)$exp:got);
                             exit(1);
                           }|]
 
