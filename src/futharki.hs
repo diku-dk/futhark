@@ -142,8 +142,9 @@ onDec d = do
       prog' = mkProg decs' $ TupLit [] noLoc
   -- We have to read in any new imports done by the declaration.
   basis <- curBasis
-  res <- runExceptT $ readLibrary basis $
-         map ((<.> "fut") . fst) $ progImports $ Prog Nothing [d]
+  res <- runExceptT $ readImports basis $
+         map (uncurry $ mkImportFrom $ mkInitialImport ".") $
+         progImports $ Prog Nothing [d]
   case res of
     Left err -> liftIO $ print err
     Right (_, imports, src) -> do
