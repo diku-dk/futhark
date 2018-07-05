@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futharki` now supports entering declarations.
 
+  * `futharki` now supports a `:type` command (or `:t` for short).
+
   * `futhark-test` and `futhark-benchmark` now support gzipped data
     files.  They must have a `.gz` extension.
 
