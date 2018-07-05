@@ -5,6 +5,7 @@
 module Futhark.Compiler.Program
        ( readProgram
        , readLibrary
+       , readImports
        , Imports
        , FileModule(..)
 
@@ -159,6 +160,17 @@ readLibrary basis fps =
             Just (Left e) -> externalError $ T.pack e
             Nothing -> externalErrorS $ fp ++ ": file not found."
             where (fp_name, _) = splitExtension fp
+
+-- | Read and type-check Futhark imports (no @.fut@ extension; may
+-- refer to baked-in futlib).  This is an exotic operation that
+-- probably only makes sense in an interactive environment.
+readImports :: (MonadError CompilerError m, MonadIO m) =>
+               Basis -> [ImportName]
+            -> m (E.Warnings,
+                  Imports,
+                  VNameSource)
+readImports basis imps =
+  runCompilerM basis $ mapM (readImport []) imps
 
 runCompilerM :: Monad m =>
                 Basis -> CompilerM m a
