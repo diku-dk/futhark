@@ -51,8 +51,8 @@ floatTypeToCType Float64 = [C.cty|double|]
 primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t) = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
-primTypeToCType Bool = [C.cty|char|]
-primTypeToCType Cert = [C.cty|char|]
+primTypeToCType Bool = [C.cty|typename bool|]
+primTypeToCType Cert = [C.cty|typename bool|]
 
 -- | The C type corresponding to a primitive type.  Integers are
 -- assumed to have the specified sign.
