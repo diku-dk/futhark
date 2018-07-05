@@ -92,9 +92,9 @@ checkProgM (Prog doc decs) = do
 dupDefinitionError :: MonadTypeChecker m =>
                       Namespace -> Name -> SrcLoc -> SrcLoc -> m a
 dupDefinitionError space name pos1 pos2 =
-  throwError $ TypeError pos2 $
+  throwError $ TypeError pos1 $
   "Duplicate definition of " ++ ppSpace space ++ " " ++
-  nameToString name ++ ".  Previously defined at " ++ locStr pos1
+  nameToString name ++ ".  Previously defined at " ++ locStr pos2
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
