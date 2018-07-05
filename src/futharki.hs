@@ -103,6 +103,11 @@ newInterpreterState = do
       print err
       exitFailure
 
+getPrompt :: FutharkiM String
+getPrompt = do
+  i <- gets interpCount
+  return $ "[" ++ show i ++ "]"
+
 mkOpen :: FilePath -> UncheckedDec
 mkOpen f = OpenDec (ModImport f NoInfo noLoc) [] NoInfo noLoc
 
@@ -111,6 +116,7 @@ type FutharkiM = StateT InterpreterState (Haskeline.InputT IO)
 readEvalPrint :: FutharkiM ()
 readEvalPrint = do
   i <- gets interpCount
+  prompt <- getPrompt
   modify $ \s -> s { interpCount = i + 1 }
   line <- inputLine $ "[" ++ show i ++ "]> "
   case T.uncons line of
@@ -124,7 +130,7 @@ readEvalPrint = do
                    mconcat (intersperse ", " (map fst matches))
     _ -> do
       -- Read a declaration or expression.
-      maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") ("[" ++ show i ++ "]") line
+      maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
 
       case maybe_dec_or_e of
         Left err -> liftIO $ print err
@@ -139,22 +145,27 @@ readEvalPrint = do
 
 onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
+  prompt <- getPrompt
   decs <- gets interpDecs
-  -- See if it type checks with the new declaration.
+  -- See first if it type checks.
   let decs' = decs ++ [d]
-      prog' = mkProg decs' $ TupLit [] noLoc
+      prog = Prog Nothing decs'
+      include = mkInitialImport prompt
   -- We have to read in any new imports done by the declaration.
   basis <- curBasis
   res <- runExceptT $ readImports basis $
-         map (uncurry $ mkImportFrom $ mkInitialImport ".") $
+         map (uncurry $ mkImportFrom include) $
          progImports $ Prog Nothing [d]
   case res of
     Left err -> liftIO $ print err
-    Right (_, imports, src) -> do
-      ok <- runProgram imports src prog'
-      when ok $ modify $ \s -> s { interpDecs = decs'
-                                 , interpNameSource = src
-                                 , interpImports = imports }
+    Right (_, imports, src) ->
+      case checkProg imports src include prog of
+        Left err -> liftIO $ print err
+        Right (m, _, src') ->
+          modify $ \s ->
+            s { interpDecs = decs ++ [mkOpen prompt]
+              , interpNameSource = src'
+              , interpImports = imports ++ [(includeToString include, m)] }
   where curBasis = do
           imports <- gets interpImports
           src <- gets interpNameSource
@@ -241,8 +252,9 @@ loadCommand file = do
                            }
 
 typeCommand :: Command
-typeCommand e =
-  case parseExp "input" e of
+typeCommand e = do
+  prompt <- getPrompt
+  case parseExp prompt e of
     Left err -> liftIO $ print err
     Right e' -> do
       imports <- gets interpImports
