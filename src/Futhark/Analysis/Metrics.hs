@@ -3,7 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | Abstract Syntax Tree metrics.  This is used in the @futhark-test@ program.
 module Futhark.Analysis.Metrics
-       ( AstMetrics
+       ( AstMetrics(..)
        , progMetrics
 
          -- * Extensibility
@@ -26,7 +26,19 @@ import qualified Data.Semigroup as Sem
 
 import Futhark.Representation.AST
 
-type AstMetrics = M.Map Text Int
+newtype AstMetrics = AstMetrics (M.Map Text Int)
+
+instance Show AstMetrics where
+  show (AstMetrics m) = unlines $ map metric $ M.toList m
+    where metric (k, v) = pretty k ++ " " ++ pretty v
+
+instance Read AstMetrics where
+  readsPrec _ s =
+    maybe [] success $ mapM onLine $ lines s
+    where onLine l = case words l of
+                       [k, x] | [(n, "")] <- reads x -> Just (T.pack k, n)
+                       _ -> Nothing
+          success m = [(AstMetrics $ M.fromList m, "")]
 
 class OpMetrics op where
   opMetrics :: op -> MetricsM ()
@@ -45,7 +57,7 @@ instance Monoid CountMetrics where
 
 actualMetrics :: CountMetrics -> AstMetrics
 actualMetrics (CountMetrics metrics) =
-  M.fromListWith (+) $ concatMap expand metrics
+  AstMetrics $ M.fromListWith (+) $ concatMap expand metrics
   where expand (ctx, k) =
           [ (T.intercalate "/" (ctx' ++ [k]), 1)
           | ctx' <- tails $ "" : ctx ]
