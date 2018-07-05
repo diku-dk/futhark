@@ -619,7 +619,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
     src_size = ftell(f);
     fseek(f, 0, SEEK_SET);
     fut_opencl_src = malloc(src_size);
-    fread(fut_opencl_src, 1, src_size, f);
+    assert(fread(fut_opencl_src, 1, src_size, f) == src_size);
     fclose(f);
   } else {
     // Build the OpenCL program.  First we have to concatenate all the fragments.
