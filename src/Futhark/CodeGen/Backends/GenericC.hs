@@ -826,7 +826,7 @@ prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
           let pname = "in" ++ show pno
           (known_sizes', ty) <- prepareValue known_sizes ([C.cexp|$id:pname|], vd)
           return (known_sizes',
-                  [C.cparam|$ty:ty $id:pname|])
+                  [C.cparam|const $ty:ty $id:pname|])
 
         prepare known_sizes (pno, OpaqueValue desc vds) = do
           ty <- opaqueToCType desc vds
@@ -836,7 +836,7 @@ prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
           (known_sizes', _) <-
             mapAccumLM prepareValue known_sizes $ zip (zipWith field [0..] vds) vds
           return (known_sizes',
-                  [C.cparam|$ty:ty *$id:pname|])
+                  [C.cparam|const $ty:ty *$id:pname|])
 
         prepareValue known_sizes (src, ScalarValue pt signed name) = do
           let pt' = signedPrimTypeToCType signed pt
@@ -863,7 +863,7 @@ prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
 
           stms $ zipWith maybeCopyDim shape [0..rank-1]
 
-          return (known_sizes ++ wrote_sizes, [C.cty|const $ty:ty*|])
+          return (known_sizes ++ wrote_sizes, [C.cty|$ty:ty*|])
 
           where wrote_sizes = mapMaybe isVarSize shape
                 isVarSize ConstSize{} = Nothing
