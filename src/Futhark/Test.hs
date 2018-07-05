@@ -257,7 +257,7 @@ optimisePipeline = lexstr "distributed" $> KernelsPipeline <|>
                    pure SOACSPipeline
 
 parseMetrics :: Parser AstMetrics
-parseMetrics = braces $ fmap M.fromList $ many $
+parseMetrics = braces $ fmap (AstMetrics . M.fromList) $ many $
                (,) <$> (T.pack <$> lexeme (many1 (satisfy constituent))) <*> parseNatural
   where constituent c = isAlpha c || c == '/'
 

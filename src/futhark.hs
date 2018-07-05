@@ -233,6 +233,10 @@ soacsPipelineOption :: String -> Pipeline SOACS SOACS -> String -> [String]
                     -> FutharkOption
 soacsPipelineOption = pipelineOption getSOACSProg "SOACS" SOACS
 
+kernelsPipelineOption :: String -> Pipeline SOACS Kernels -> String -> [String]
+                    -> FutharkOption
+kernelsPipelineOption = pipelineOption getSOACSProg "Kernels" Kernels
+
 explicitMemoryPipelineOption :: String -> Pipeline SOACS ExplicitMemory -> String -> [String]
                              -> FutharkOption
 explicitMemoryPipelineOption = pipelineOption getSOACSProg "ExplicitMemory" ExplicitMemory
@@ -272,6 +276,9 @@ commandLineOptions =
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
+  , Option "m" ["metrics"]
+    (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction metricsAction metricsAction metricsAction })
+    "Print AST metrics of the resulting internal representation on standard output."
   , Option [] ["defunctorise"]
     (NoArg $ Right $ \opts -> opts { futharkPipeline = Defunctorise })
     "Partially evaluate all module constructs and print the residual program."
@@ -300,6 +307,8 @@ commandLineOptions =
 
   , soacsPipelineOption "Run the default optimised pipeline"
     standardPipeline "s" ["standard"]
+  , kernelsPipelineOption "Run the default optimised kernels pipeline"
+    kernelsPipeline [] ["kernels"]
   , explicitMemoryPipelineOption "Run the full GPU compilation pipeline"
     gpuPipeline [] ["gpu"]
   , explicitMemoryPipelineOption "Run the sequential CPU compilation pipeline"

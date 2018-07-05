@@ -25,11 +25,8 @@ import Text.Regex.TDFA
 
 import Futhark.Util.Pretty (prettyText)
 import Futhark.Analysis.Metrics
-import Futhark.Pipeline
 import Futhark.Compiler
 import Futhark.Test
-import Futhark.Passes
-import Language.Futhark.Futlib.Prelude
 
 import Futhark.Util.Options
 
@@ -69,32 +66,33 @@ data RunResult = ErrorResult Int SBS.ByteString
 progNotFound :: T.Text -> T.Text
 progNotFound s = s <> ": command not found"
 
-structTestConfig :: FutharkConfig
-structTestConfig = newFutharkConfig { futharkWarn = False }
-
-optimisedProgramMetrics :: StructurePipeline -> FilePath -> TestM AstMetrics
-optimisedProgramMetrics pipeline program =
+optimisedProgramMetrics :: ProgConfig -> StructurePipeline -> FilePath -> TestM AstMetrics
+optimisedProgramMetrics programs pipeline program =
   case pipeline of SOACSPipeline ->
-                     check standardPipeline
+                     check "-s"
                    KernelsPipeline ->
-                     check kernelsPipeline
+                     check "--kernels"
                    SequentialCpuPipeline ->
-                     check sequentialCpuPipeline
+                     check "--cpu"
                    GpuPipeline ->
-                     check gpuPipeline
-  where check pipeline' = do
-          res <- io $ runFutharkM (runPipelineOnProgram structTestConfig preludeBasis pipeline' program) NotVerbose
-          case res of
-            Left err ->
-              throwError $ T.pack $ show err
-            Right prog ->
-              return $ progMetrics prog
+                     check "--gpu"
+  where check opt = do
+          (code, output, err) <-
+            io $ readProcessWithExitCode (configTypeChecker programs) [opt, "--metrics", program] ""
+          let output' = T.decodeUtf8 output
+          case code of
+            ExitSuccess
+              | [(m, [])] <- reads $ T.unpack output' -> return m
+              | otherwise -> throwError $ "Could not read metrics output:\n" <> output'
+            ExitFailure 127 -> throwError $ progNotFound $ T.pack $ configTypeChecker programs
+            ExitFailure _ -> throwError $ T.decodeUtf8 err
 
-testMetrics :: FilePath -> StructureTest -> TestM ()
-testMetrics program (StructureTest pipeline expected) = context "Checking metrics" $ do
-  actual <- optimisedProgramMetrics pipeline program
-  mapM_ (ok actual) $ M.toList expected
-  where ok metrics (name, expected_occurences) =
+testMetrics :: ProgConfig -> FilePath -> StructureTest -> TestM ()
+testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
+  context "Checking metrics" $ do
+    actual <- optimisedProgramMetrics programs pipeline program
+    mapM_ (ok actual) $ M.toList expected
+  where ok (AstMetrics metrics) (name, expected_occurences) =
           case M.lookup name metrics of
             Nothing
               | expected_occurences > 0 ->
@@ -147,7 +145,7 @@ runTestCase (TestCase mode program testcase progs) =
       unless (mode == Interpreted) $
         context ("Compiling with " <> T.pack compiler) $ do
           compileTestProgram extra_options compiler program warnings
-          mapM_ (testMetrics program) structures
+          mapM_ (testMetrics progs program) structures
       unless (mode == Compile) $
         mapM_ runInputOutputs ios
 
