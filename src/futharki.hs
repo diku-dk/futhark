@@ -8,6 +8,7 @@ import Control.Exception
 import Data.Char
 import Data.List
 import Data.Loc
+import Data.Maybe
 import Data.Version
 import Control.Monad
 import Control.Monad.IO.Class
@@ -161,17 +162,26 @@ onDec d = do
     Right (_, imports, src) ->
       case checkProg imports src include prog of
         Left err -> liftIO $ print err
-        Right (m, _, src') ->
+        Right (fm, _, src') -> do
+          liftIO $ mapM_ putStrLn $ mapMaybe reportDec $ progDecs $ fileProg fm
           modify $ \s ->
             s { interpDecs = decs ++ [mkOpen prompt]
               , interpNameSource = src'
-              , interpImports = imports ++ [(includeToString include, m)] }
+              , interpImports = imports ++ [(includeToString include, fm)] }
+
   where curBasis = do
           imports <- gets interpImports
           src <- gets interpNameSource
           return $ Basis { basisImports = imports
                          , basisNameSource = src
                          , basisRoots = basisRoots preludeBasis }
+
+        reportDec (ValDec vb) =
+          Just $ baseString (valBindName vb) <> " : " <>
+          pretty (unInfo $ valBindRetType vb)
+        reportDec (TypeDec tb) =
+          Just $ pretty tb
+        reportDec _ = Nothing
 
 onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
