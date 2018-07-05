@@ -25,7 +25,6 @@ import Text.Regex.TDFA
 
 import Futhark.Util.Pretty (prettyText)
 import Futhark.Analysis.Metrics
-import Futhark.Compiler
 import Futhark.Test
 
 import Futhark.Util.Options
