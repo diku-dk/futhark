@@ -626,18 +626,18 @@ typeToCType t = do
 
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
-  (Int8,  TypeUnsigned) -> [C.cexp|u8|]
-  (Int16, TypeUnsigned) -> [C.cexp|u16|]
-  (Int32, TypeUnsigned) -> [C.cexp|u32|]
-  (Int64, TypeUnsigned) -> [C.cexp|u64|]
-  (Int8,  _) -> [C.cexp|i8|]
-  (Int16, _) -> [C.cexp|i16|]
-  (Int32, _) -> [C.cexp|i32|]
-  (Int64, _) -> [C.cexp|i64|]
-primTypeInfo (FloatType Float32) _ = [C.cexp|f32|]
-primTypeInfo (FloatType Float64) _ = [C.cexp|f64|]
-primTypeInfo Bool _ = [C.cexp|bool|]
-primTypeInfo Cert _ = [C.cexp|bool|]
+  (Int8,  TypeUnsigned) -> [C.cexp|u8_info|]
+  (Int16, TypeUnsigned) -> [C.cexp|u16_info|]
+  (Int32, TypeUnsigned) -> [C.cexp|u32_info|]
+  (Int64, TypeUnsigned) -> [C.cexp|u64_info|]
+  (Int8,  _) -> [C.cexp|i8_info|]
+  (Int16, _) -> [C.cexp|i16_info|]
+  (Int32, _) -> [C.cexp|i32_info|]
+  (Int64, _) -> [C.cexp|i64_info|]
+primTypeInfo (FloatType Float32) _ = [C.cexp|f32_info|]
+primTypeInfo (FloatType Float64) _ = [C.cexp|f64_info|]
+primTypeInfo Bool _ = [C.cexp|bool_info|]
+primTypeInfo Cert _ = [C.cexp|bool_info|]
 
 copyMemoryDefaultSpace :: C.Exp -> C.Exp -> C.Exp -> C.Exp -> C.Exp ->
                           CompilerM op s ()
@@ -1262,6 +1262,7 @@ compileProg ops extra userstate spaces options prog@(Functions funs) = do
   let headerdefs = [C.cunit|
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
+$esc:("#include <stdbool.h>")
 
 $esc:("\n/*\n * Initialisation\n*/\n")
 $edecls:(initDecls endstate)
@@ -1282,6 +1283,7 @@ $edecls:(miscDecls endstate)
   let utildefs = [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
+$esc:("#include <stdbool.h>")
 /* If NDEBUG is set, the assert() macro will do nothing. Since Futhark
    (unfortunately) makes use of assert() for error detection (and even some
    side effects), we want to avoid that. */

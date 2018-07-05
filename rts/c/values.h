@@ -556,56 +556,56 @@ struct primtype_info_t {
   const reader read_bin; // Read in binary format.
 };
 
-static const struct primtype_info_t i8 =
+static const struct primtype_info_t i8_info =
   {.binname = "  i8", .type_name = "i8",   .size = 1,
    .write_str = (writer)write_str_i8, .read_str = (reader)read_str_i8,
    .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
-static const struct primtype_info_t i16 =
+static const struct primtype_info_t i16_info =
   {.binname = " i16", .type_name = "i16",  .size = 2,
    .write_str = (writer)write_str_i16, .read_str = (reader)read_str_i16,
    .write_bin = (writer)write_le_2byte, .read_bin = (reader)read_le_2byte};
-static const struct primtype_info_t i32 =
+static const struct primtype_info_t i32_info =
   {.binname = " i32", .type_name = "i32",  .size = 4,
    .write_str = (writer)write_str_i32, .read_str = (reader)read_str_i32,
    .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
-static const struct primtype_info_t i64 =
+static const struct primtype_info_t i64_info =
   {.binname = " i64", .type_name = "i64",  .size = 8,
    .write_str = (writer)write_str_i64, .read_str = (reader)read_str_i64,
    .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
-static const struct primtype_info_t u8 =
+static const struct primtype_info_t u8_info =
   {.binname = "  u8", .type_name = "u8",   .size = 1,
    .write_str = (writer)write_str_u8, .read_str = (reader)read_str_u8,
    .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
-static const struct primtype_info_t u16 =
+static const struct primtype_info_t u16_info =
   {.binname = " u16", .type_name = "u16",  .size = 2,
    .write_str = (writer)write_str_u16, .read_str = (reader)read_str_u16,
    .write_bin = (writer)write_le_2byte, .read_bin = (reader)read_le_2byte};
-static const struct primtype_info_t u32 =
+static const struct primtype_info_t u32_info =
   {.binname = " u32", .type_name = "u32",  .size = 4,
    .write_str = (writer)write_str_u32, .read_str = (reader)read_str_u32,
    .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
-static const struct primtype_info_t u64 =
+static const struct primtype_info_t u64_info =
   {.binname = " u64", .type_name = "u64",  .size = 8,
    .write_str = (writer)write_str_u64, .read_str = (reader)read_str_u64,
    .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
-static const struct primtype_info_t f32 =
+static const struct primtype_info_t f32_info =
   {.binname = " f32", .type_name = "f32",  .size = 4,
    .write_str = (writer)write_str_f32, .read_str = (reader)read_str_f32,
    .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
-static const struct primtype_info_t f64 =
+static const struct primtype_info_t f64_info =
   {.binname = " f64", .type_name = "f64",  .size = 8,
    .write_str = (writer)write_str_f64, .read_str = (reader)read_str_f64,
    .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
-static const struct primtype_info_t bool =
+static const struct primtype_info_t bool_info =
   {.binname = "bool", .type_name = "bool", .size = 1,
    .write_str = (writer)write_str_bool, .read_str = (reader)read_str_bool,
    .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
 
 static const struct primtype_info_t* primtypes[] = {
-  &i8, &i16, &i32, &i64,
-  &u8, &u16, &u32, &u64,
-  &f32, &f64,
-  &bool,
+  &i8_info, &i16_info, &i32_info, &i64_info,
+  &u8_info, &u16_info, &u32_info, &u64_info,
+  &f32_info, &f64_info,
+  &bool_info,
   NULL // NULL-terminated
 };
 
