@@ -43,6 +43,7 @@ import Futhark.Representation.AST.Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
+import Futhark.Representation.AST.Pretty ()
 
 -- | How some name in scope was bound.
 data NameInfo lore = LetInfo (LetAttr lore)

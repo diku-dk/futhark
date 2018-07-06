@@ -4,6 +4,7 @@ module Futhark.Representation.Kernels.Sizes
 
 import Futhark.Util.Pretty
 import Language.Futhark.Core (VName)
+import Futhark.Representation.AST.Pretty ()
 
 -- | An indication of which comparisons have been performed to get to
 -- this point, as well as the result of each comparison.

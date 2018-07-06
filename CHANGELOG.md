@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed handling of `..` in `import` paths.
 
+  * Type errors (and other compiler feedback) will no longer contain
+    internal names.
+
 ## [0.5.2]
 
 ### Added
