@@ -340,7 +340,7 @@ instance MonadTypeChecker TermTypeM where
       Just (WasConsumed wloc) -> useAfterConsume (baseName name) loc wloc
 
       Just (BoundV tparams t)
-        | "_" `isPrefixOf` pretty name -> underscoreUse loc qn
+        | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise -> do
             (tnames, t') <- instantiateTypeScheme loc tparams t
             let qual = qualifyTypeVars outer_env tnames qs
@@ -1317,16 +1317,16 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
             | unique pat_v_t,
               v:_ <- S.toList $ aliases t `S.intersection` bound_outside =
                 lift $ typeError loc $ "Loop return value corresponding to merge parameter " ++
-                pretty pat_v ++ " aliases " ++ pretty v ++ "."
+                prettyName pat_v ++ " aliases " ++ prettyName v ++ "."
             | otherwise = do
                 (cons,obs) <- get
                 unless (S.null $ aliases t `S.intersection` cons) $
                   lift $ typeError loc $ "Loop return value for merge parameter " ++
-                  pretty pat_v ++ " aliases other consumed merge parameter."
+                  prettyName pat_v ++ " aliases other consumed merge parameter."
                 when (unique pat_v_t &&
                       not (S.null (aliases t `S.intersection` (cons<>obs)))) $
                   lift $ typeError loc $ "Loop return value for consuming merge parameter " ++
-                  pretty pat_v ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
+                  prettyName pat_v ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
                 if unique pat_v_t
                   then put (cons<>aliases t, obs)
                   else put (cons, obs<>aliases t)
@@ -1606,7 +1606,7 @@ closeOverTypes substs tparams ts = do
           | k `elem` map typeParamName tparams = return ()
           | otherwise =
               typeError (srclocOf v) $
-              unlines ["Type variable `" ++ baseString k ++
+              unlines ["Type variable `" ++ prettyName k ++
                         "' not closed over by type parameters " ++
                         intercalate ", " (map pretty tparams) ++ ".",
                         "This is usually because a parameter needs a type annotation."]
@@ -1674,7 +1674,7 @@ removeSeminullOccurences = censor $ filter $ not . seminullOccurence
 checkIfUsed :: Occurences -> Ident -> TermTypeM ()
 checkIfUsed occs v
   | not $ identName v `S.member` allOccuring occs,
-    not $ "_" `isPrefixOf` pretty (identName v) =
+    not $ "_" `isPrefixOf` prettyName (identName v) =
       warn (srclocOf v) $ "Unused variable '"++pretty (baseName $ identName v)++"'."
   | otherwise =
       return ()
@@ -1777,7 +1777,7 @@ linkVarToType loc vn tp = do
   constraints <- getConstraints
   if vn `S.member` typeVars tp
     then typeError loc $ "Occurs check: cannot instantiate " ++
-         pretty vn ++ " with " ++ pretty tp'
+         prettyName vn ++ " with " ++ pretty tp'
     else do modifyConstraints $ M.insert vn $ Constraint tp' loc
             modifyConstraints $ M.map $ applySubstInConstraint vn tp'
             case M.lookup vn constraints of
@@ -1791,7 +1791,7 @@ linkVarToType loc vn tp = do
                       TypeVar (TypeName [] v) []
                         | not $ isRigid v constraints -> linkVarToTypes loc v ts
                       _ ->
-                        typeError loc $ "Cannot unify `" ++ pretty vn ++ "' with type `" ++
+                        typeError loc $ "Cannot unify `" ++ prettyName vn ++ "' with type `" ++
                         pretty tp ++ "' (must be one of " ++ intercalate ", " (map pretty ts) ++
                         " due to use at " ++ locStr old_loc ++ ")."
               Just (HasFields required_fields old_loc) ->
@@ -1809,7 +1809,7 @@ linkVarToType loc vn tp = do
                           intercalate ", " $ map field $ M.toList required_fields
                         field (l, t) = pretty l ++ ": " ++ pretty t
                     in typeError loc $
-                       "Cannot unify `" ++ pretty vn ++ "' with type `" ++
+                       "Cannot unify `" ++ prettyName vn ++ "' with type `" ++
                        pretty tp ++ "' (must be a record with fields {" ++
                        required_fields' ++
                        "} due to use at " ++ locStr old_loc ++ ")."
@@ -1876,7 +1876,7 @@ equalityType loc t = do
             Just (Overloaded _ _) ->
               return () -- All primtypes support equality.
             _ ->
-              typeError loc $ "Type " ++ pretty (baseString vn) ++
+              typeError loc $ "Type " ++ pretty (prettyName vn) ++
               " does not support equality."
 
 zeroOrderType :: (Pretty (ShapeDecl dim), Monoid as) =>
@@ -1898,7 +1898,7 @@ zeroOrderType loc desc t = do
               modifyConstraints $ M.insert vn (NoConstraint (Just Unlifted) loc)
             Just (ParamType Lifted ploc) ->
               typeError loc $ "Type " ++ desc ++
-              " must be non-function, but type parameter " ++ pretty vn ++ " at " ++
+              " must be non-function, but type parameter " ++ prettyName vn ++ " at " ++
               locStr ploc ++ " may be a function."
             _ -> return ()
 

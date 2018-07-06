@@ -61,6 +61,9 @@ class (Annotations lore,
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
 
+instance Pretty VName where
+  ppr (VName vn i) = ppr vn <> text "_" <> text (show i)
+
 instance Pretty NoUniqueness where
   ppr _ = mempty
 

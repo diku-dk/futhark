@@ -140,6 +140,3 @@ instance Eq VName where
 
 instance Ord VName where
   VName _ x `compare` VName _ y = x `compare` y
-
-instance Pretty VName where
-  ppr (VName vn i) = ppr vn <> text "_" <> text (show i)

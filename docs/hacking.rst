@@ -37,6 +37,11 @@ a few hints:
     more information, see the `Profiling`_ chapter in the GHC User
     Guide.
 
+  * You may with to set the environment variable
+    ``FUTHARK_COMPILER_DEBUGGING=1``.  Currently this only has the
+    effect of making the frontend print internal names, but it may
+    control more things in the future.
+
 .. _`stack`: https://docs.haskellstack.org/en/stable/README/
 .. _`Profiling`: https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/profiling.html
 

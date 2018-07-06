@@ -16,6 +16,7 @@ import qualified Data.Sequence as Seq
 
 import           Futhark.MonadFreshNames
 import           Language.Futhark
+import           Futhark.Representation.AST.Pretty ()
 
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.

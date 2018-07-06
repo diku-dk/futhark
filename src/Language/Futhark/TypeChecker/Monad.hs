@@ -259,11 +259,11 @@ instance MonadTypeChecker TypeM where
     case M.lookup name $ envVtable env of
       Nothing -> unknownVariableError Term qn loc
       Just (BoundV _ t)
-        | "_" `isPrefixOf` pretty name -> underscoreUse loc qn
+        | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise ->
             case getType t of
               Left{} -> throwError $ TypeError loc $
-                        "Attempt to use function " ++ pretty name ++ " as value."
+                        "Attempt to use function " ++ baseString name ++ " as value."
               Right t' -> return (qn', removeShapeAnnotations $ fromStruct $
                                        qualifyTypeVars outer_env mempty qs t')
 
