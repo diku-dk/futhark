@@ -177,7 +177,8 @@ onDec d = do
                          , basisRoots = basisRoots preludeBasis }
 
         reportDec (ValDec vb) =
-          Just $ baseString (valBindName vb) <> " : " <>
+          Just $ "val " <> baseString (valBindName vb) <>
+          concatMap ((" "<>) . pretty) (valBindTypeParams vb) <> " : " <>
           pretty (unInfo $ valBindRetType vb)
         reportDec (TypeDec tb) =
           Just $ pretty tb
