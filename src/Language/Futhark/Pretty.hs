@@ -208,9 +208,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
-  pprPrec _ (Range start maybe_step end _ _) =
-    brackets $
-    ppr start <>
+  pprPrec p (Range start maybe_step end _ _) =
+    parensIf (p /= -1) $ ppr start <>
     maybe mempty ((text ".." <>) . ppr) maybe_step <>
     case end of
       DownToExclusive end' -> text "..>" <> ppr end'
@@ -225,14 +224,14 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     parensIf (p >= 10) $ ppr f <+> pprPrec 10 arg
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec p (LetPat tparams pat e body _) =
-    mparens $ align $
+    parensIf (p /= -1) $ align $
     text "let" <+> align (spread $ map ppr tparams ++ [ppr pat]) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
-     else equals <+> align (ppr e)) <+> text "in" </>
-    ppr body
-    where mparens = if p == -1 then id else parens
-          linebreak = case e of
+     else equals <+> align (ppr e)) </>
+    (case body of LetPat{} -> ppr body
+                  _        -> text "in" <+> ppr body)
+    where linebreak = case e of
                         Map{}      -> True
                         Reduce{}   -> True
                         Filter{}   -> True
@@ -252,7 +251,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
                        Nothing       -> mempty
   pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
-      text "let" <+> ppr dest <+> list (map ppr idxs) <+>
+      text "let" <+> ppr dest <> list (map ppr idxs) <+>
       equals <+> align (ppr ve) <+>
       text "in" </> ppr body
     | otherwise =
@@ -286,8 +285,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Partition k lam a _) = text "partition" <+> ppr k <+> spread (map (pprPrec 10) [lam, a])
   pprPrec _ (Zip 0 e es _ _) = text "zip" <+> spread (map (pprPrec 10) (e:es))
   pprPrec _ (Zip i e es _ _) = text "zip@" <> ppr i <+> spread (map (pprPrec 10) (e:es))
-  pprPrec _ (Unzip e _ _) = text "unzip" <+> pprPrec 10 e
-  pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 10 e
+  pprPrec _ (Unzip e _ _) = text "unzip" <+> pprPrec (-1) e
+  pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec (-1) e
   pprPrec _ (Assert e1 e2 _ _) = text "assert" <+> pprPrec 10 e1 <+> pprPrec 10 e2
   pprPrec p (Lambda tparams params body ascript _ _) =
     parensIf (p /= -1) $
@@ -306,9 +305,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (IndexSection idxs _ _) =
     parens $ text "." <> brackets (commasep (map ppr idxs))
   pprPrec _ (DoLoop tparams pat initexp form loopbody _) =
-    text "loop" <+> parens (spread (map ppr tparams ++ [ppr pat]) <+> equals
-                            <+> ppr initexp) <+> equals <+>
-    ppr form <+> text "do" </> indent 2 (ppr loopbody)
+    text "loop" <+> spread (map ppr tparams ++ [ppr pat]) <+>
+    equals <+> ppr initexp <+> ppr form <+> text "do" </>
+    indent 2 (ppr loopbody)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e
