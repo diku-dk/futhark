@@ -20,7 +20,7 @@ systems.  If you're lucky, it may even be in your local package
 repository.
 
 You can either retrieve a `source release tarball
-<https://github.com/diku-dk/futhark/releases>` or perform a checkout
+<https://github.com/diku-dk/futhark/releases>`_ or perform a checkout
 of our Git repository::
 
   $ git clone https://github.com/diku-dk/futhark.git
