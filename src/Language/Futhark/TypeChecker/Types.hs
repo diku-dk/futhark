@@ -228,12 +228,12 @@ checkTypeExp ote@TEApply{} = do
           return (TypeArgExpDim AnyDim loc,
                   M.singleton pv $ DimSub AnyDim)
 
-        checkArgApply (TypeParamType pv _) (TypeArgExpType te) = do
+        checkArgApply (TypeParamType Unlifted pv _) (TypeArgExpType te) = do
           (te', st) <- checkTypeExp te
           return (TypeArgExpType te',
                   M.singleton pv $ TypeSub $ TypeAbbr [] st)
 
-        checkArgApply (TypeParamLiftedType pv _) (TypeArgExpType te) = do
+        checkArgApply (TypeParamType Lifted pv _) (TypeArgExpType te) = do
           (te', st) <- checkTypeExp te
           return (TypeArgExpType te',
                   M.singleton pv $ TypeSub $ TypeAbbr [] st)
@@ -300,8 +300,7 @@ checkTypeParams ps m =
   bindSpaced (map typeParamSpace ps) $
   m =<< evalStateT (mapM checkTypeParam ps) mempty
   where typeParamSpace (TypeParamDim pv _) = (Term, pv)
-        typeParamSpace (TypeParamType pv _) = (Type, pv)
-        typeParamSpace (TypeParamLiftedType pv _) = (Type, pv)
+        typeParamSpace (TypeParamType _ pv _) = (Type, pv)
 
         checkParamName ns v loc = do
           seen <- gets $ M.lookup (ns,v)
@@ -315,10 +314,8 @@ checkTypeParams ps m =
 
         checkTypeParam (TypeParamDim pv loc) =
           TypeParamDim <$> checkParamName Term pv loc <*> pure loc
-        checkTypeParam (TypeParamType pv loc) =
-          TypeParamType <$> checkParamName Type pv loc <*> pure loc
-        checkTypeParam (TypeParamLiftedType pv loc) =
-          TypeParamLiftedType <$> checkParamName Type pv loc <*> pure loc
+        checkTypeParam (TypeParamType l pv loc) =
+          TypeParamType l <$> checkParamName Type pv loc <*> pure loc
 
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
@@ -382,7 +379,7 @@ applyType ps t args =
           (pv, DimSub $ ConstDim x)
         mkSubst (TypeParamDim pv _) (TypeArgDim AnyDim  _) =
           (pv, DimSub AnyDim)
-        mkSubst (TypeParamType pv _) (TypeArgType at _) =
+        mkSubst (TypeParamType _ pv _) (TypeArgType at _) =
           (pv, TypeSub $ TypeAbbr [] at)
         mkSubst p a =
           error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p

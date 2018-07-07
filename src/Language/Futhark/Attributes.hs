@@ -361,7 +361,6 @@ sortFields l = map snd $ sortBy (comparing fst) $ zip (map (fieldish . fst) l') 
 
 isTypeParam :: TypeParamBase vn -> Bool
 isTypeParam TypeParamType{}       = True
-isTypeParam TypeParamLiftedType{} = True
 isTypeParam TypeParamDim{}        = False
 
 
@@ -781,14 +780,14 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         t_a = TypeVar tv_a' []
         arr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique
         uarr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique
-        tp_a = TypeParamType tv_a noLoc
+        tp_a = TypeParamType Unlifted tv_a noLoc
 
         tv_b = VName (nameFromString "b") 1
         tv_b' = typeName tv_b
         t_b = TypeVar tv_b' []
         arr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Nonunique
         uarr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Unique
-        tp_b = TypeParamType tv_b noLoc
+        tp_b = TypeParamType Unlifted tv_b noLoc
 
         arr_a_b = Array (ArrayRecordElem (M.fromList $ zip tupleFieldNames
                                           [RecordArrayElem $ ArrayPolyElem tv_a' [] (),

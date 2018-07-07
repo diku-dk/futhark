@@ -302,8 +302,8 @@ Specs :: { [SpecBase NoInfo Name] }
 
 TypeParam :: { TypeParamBase Name }
            : '[' id ']' { let L _ (ID name) = $2 in TypeParamDim name (srcspan $1 $>) }
-           | '\'' id { let L _ (ID name) = $2 in TypeParamType name (srcspan $1 $>) }
-           | '\'^' id { let L _ (ID name) = $2 in TypeParamLiftedType name (srcspan $1 $>) }
+           | '\'' id { let L _ (ID name) = $2 in TypeParamType Unlifted name (srcspan $1 $>) }
+           | '\'^' id { let L _ (ID name) = $2 in TypeParamType Lifted name (srcspan $1 $>) }
 
 TypeParams :: { [TypeParamBase Name] }
             : TypeParam TypeParams { $1 : $2 }
