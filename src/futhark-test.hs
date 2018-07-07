@@ -260,6 +260,13 @@ compareResult _ (RunTimeFailure f) (SuccessResult _) =
 --- Test manager
 ---
 
+data TestStatus = TestStatus { _testStatusRemain :: [TestCase]
+                             , _testStatusRun :: [TestCase]
+                             , _testStatusFail :: Int
+                             , _testStatusPass :: Int
+                             , _testStatusCases :: Int
+                             }
+
 catching :: IO TestResult -> IO TestResult
 catching m = m `catch` save
   where save :: SomeException -> IO TestResult
@@ -289,27 +296,29 @@ excludedTest config =
 clearLine :: IO ()
 clearLine = putStr "\27[2K"
 
-reportInteractive :: [String] -> Int -> Int -> Int -> IO ()
-reportInteractive running failed passed remaining = do
+reportInteractive :: TestStatus -> IO ()
+reportInteractive ts = do
   clearLine
   putStr $ atMostChars 160 line ++ "\r"
   hFlush stdout
-    where num_running = length running
-          line = show failed ++ " failed; " ++
-                 show passed ++ " passed; " ++
-                 show remaining ++ " to go; currently running " ++
-                 show num_running ++ " tests: " ++
-                 unwords (reverse running)
+    where num_running = length $ _testStatusRun ts
+          num_remain  = length $ _testStatusRemain ts
+          line = show (_testStatusFail ts)  ++ " failed; " ++
+                 show (_testStatusPass ts)  ++ " passed; " ++
+                 show num_remain            ++ " to go; currently running " ++
+                 show num_running           ++ " tests: " ++
+                 (unwords . reverse . map testCaseProgram . _testStatusRun) ts
 
 atMostChars :: Int -> String -> String
 atMostChars n s | length s > n = take (n-3) s ++ "..."
                 | otherwise    = s
 
-reportText :: [String] -> Int -> Int -> Int -> IO ()
-reportText _ failed passed remaining =
-  putStr $ "(" ++ show failed ++ " failed, " ++
-                  show passed ++ " passed, " ++
-                  show remaining ++ " to go).\n"
+reportText :: TestStatus -> IO ()
+reportText ts =
+  putStr $ "(" ++ show (_testStatusFail ts)  ++ " failed, " ++
+                  show (_testStatusPass ts)  ++ " passed, " ++
+                  show num_remain            ++ " to go).\n"
+    where num_remain  = length $ _testStatusRemain ts
 
 runTests :: TestConfig -> [FilePath] -> IO ()
 runTests config paths = do
@@ -333,35 +342,50 @@ runTests config paths = do
   let report = if isTTY then reportInteractive else reportText
       clear  = if isTTY then clearLine else putStr "\n"
 
-      getResults [] _ _ failed passed =
-        clear >> return (failed, passed)
-      getResults remaining num_remaining running failed passed = do
-        report (map testCaseProgram running) failed passed num_remaining
-        msg <- takeMVar reportmvar
-        case msg of
-          TestStarted test -> do
-            unless isTTY $
-              putStr $ "Started testing " <> testCaseProgram test <> " "
-            getResults remaining num_remaining (test : running) failed passed
-          TestDone test res -> do
-            let next = getResults (test `delete` remaining) (num_remaining-1) (test `delete` running)
-            case res of
-              Success -> do
-                unless isTTY $
-                  putStr $ "Finished testing " <> testCaseProgram test <> " "
-                next failed (passed+1)
-              Failure s -> do
-                clear
-                T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
-                next (failed+1) passed
+      numTestCases tc =
+        case testAction $ testCaseTest tc of
+          CompileTimeFailure _ -> 1
+          RunCases inputOutputs _ _ -> length . concat $ iosTestRuns <$> inputOutputs
 
-  (failed, passed) <- getResults included (length included) mempty 0 0
+      getResults ts
+        | null (_testStatusRemain ts) = clear >> return ts
+        | otherwise = do
+          report ts
+          msg <- takeMVar reportmvar
+          case msg of
+            TestStarted test -> do
+              unless isTTY $
+                putStr $ "Started testing " <> testCaseProgram test <> " "
+              getResults $ ts {_testStatusRun = test : _testStatusRun ts}
+            TestDone test res -> do
+              let ts' = ts { _testStatusRemain = test `delete` _testStatusRemain ts
+                           , _testStatusRun    = test `delete` _testStatusRun ts
+                           , _testStatusCases  = numTestCases test + _testStatusCases ts
+                           }
+              case res of
+                Success -> do
+                  unless isTTY $
+                    putStr $ "Finished testing " <> testCaseProgram test <> " "
+                  getResults $ ts' { _testStatusPass = _testStatusPass ts + 1}
+                Failure s -> do
+                  clear
+                  T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
+                  getResults $ ts' { _testStatusFail = _testStatusFail ts + 1}
+
+  ts <- getResults $ TestStatus { _testStatusRemain = included
+                                , _testStatusRun    = []
+                                , _testStatusFail   = 0
+                                , _testStatusPass   = 0
+                                , _testStatusCases  = 0
+                                }
   let excluded_str = if null excluded
                      then ""
                      else " (" ++ show (length excluded) ++ " excluded)"
-  putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed" ++ excluded_str ++ "."
-  exitWith $ case failed of 0 -> ExitSuccess
-                            _ -> ExitFailure 1
+  putStrLn $ show (_testStatusFail ts)  ++ " failed, " ++
+             show (_testStatusPass ts)  ++ " passed, " ++
+             show (_testStatusCases ts) ++ " cases run" ++ excluded_str ++ "."
+  exitWith $ case _testStatusFail ts of 0 -> ExitSuccess
+                                        _ -> ExitFailure 1
 
 ---
 --- Configuration and command line parsing
