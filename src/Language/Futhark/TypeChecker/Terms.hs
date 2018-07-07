@@ -374,7 +374,7 @@ checkQualNameWithEnv space qn@(QualName [q] _) loc
   | nameToString q == "intrinsics" = do
       -- Check if we are referring to the magical intrinsics
       -- module.
-      (_, QualName _ q') <- liftTypeM $ TypeM.checkQualNameWithEnv Term (QualName [] q) loc
+      (_, QualName _ q') <- liftTypeM $ TypeM.checkQualNameWithEnv Term (qualName q) loc
       if baseTag q' <= maxIntrinsicTag
         then checkIntrinsic space qn loc
         else checkReallyQualName space qn loc

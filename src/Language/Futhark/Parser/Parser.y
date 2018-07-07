@@ -314,7 +314,7 @@ TypeParams1 :: { (TypeParamBase Name, [TypeParamBase Name]) }
 
 UnOp :: { (QualName Name, SrcLoc) }
       : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }
-      | unop  { let L loc (UNOP v) = $1 in (QualName [] v, loc) }
+      | unop  { let L loc (UNOP v) = $1 in (qualName v, loc) }
 
 -- Note that this production does not include Minus.
 BinOp :: { QualName Name }
@@ -343,7 +343,7 @@ BinOp :: { QualName Name }
       | '<<...'    { binOpName $1 }
       | '<|...'    { binOpName $1 }
       | '|>...'    { binOpName $1 }
-      | '<'        { QualName [] (nameFromString "<") }
+      | '<'        { qualName (nameFromString "<") }
 
 BindingUnOp :: { Name }
       : UnOp {% let (QualName qs name, _) = $1 in do
@@ -484,7 +484,7 @@ QualName :: { (QualName Name, SrcLoc) }
             { let L vloc (ID v) = $1 in
               foldl (\(QualName qs v', loc) (y, yloc) ->
                       (QualName (qs ++ [v']) y, srcspan loc yloc))
-                    (QualName [] v, vloc) $2 }
+                    (qualName v, vloc) $2 }
 
 -- Expressions are divided into several layers.  The first distinction
 -- (between Exp and Exp2) is to factor out ascription, which we do not
@@ -597,9 +597,9 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' UnOp ')'
         { Var (fst $2) NoInfo (srcspan (snd $2) $>) }
      | '(' '-' ')'
-        { OpSection (QualName [] (nameFromString "-")) NoInfo (srcspan $1 $>) }
+        { OpSection (qualName (nameFromString "-")) NoInfo (srcspan $1 $>) }
      | '(' Exp2 '-' ')'
-        { OpSectionLeft (QualName [] (nameFromString "-"))
+        { OpSectionLeft (qualName (nameFromString "-"))
            NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
      | '(' BinOp Exp2 ')'
        { OpSectionRight $2 NoInfo $3 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
@@ -696,7 +696,7 @@ VarSlice :: { (Name, [UncheckedDimIndex], SrcLoc) }
 
 QualVarSlice :: { (QualName Name, [UncheckedDimIndex], SrcLoc) }
               : VarSlice
-                { let (x, y, z) = $1 in (QualName [] x, y, z) }
+                { let (x, y, z) = $1 in (qualName x, y, z) }
               | 'qid[' DimIndices ']'
                 { let L _ (QUALINDEXING qs v) = $1 in (QualName qs v, $2, srcspan $1 $>) }
 
@@ -924,7 +924,7 @@ arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
-patternExp (Id v _ loc) = return $ Var (QualName [] v) NoInfo loc
+patternExp (Id v _ loc) = return $ Var (qualName v) NoInfo loc
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
 patternExp (PatternAscription pat _ _) = patternExp pat

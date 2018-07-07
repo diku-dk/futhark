@@ -701,7 +701,7 @@ findTypeDef :: QualName Name -> Mod -> Maybe (QualName VName, TypeBinding)
 findTypeDef _ ModFun{} = Nothing
 findTypeDef (QualName [] name) (ModEnv the_env) = do
   (name', tb) <- findBinding envTypeTable Type name the_env
-  return (QualName [] name', tb)
+  return (qualName name', tb)
 findTypeDef (QualName (q:qs) name) (ModEnv the_env) = do
   (q', q_mod) <- findBinding envModTable Term q the_env
   (QualName qs' name', tb) <- findTypeDef (QualName qs name) q_mod

@@ -46,7 +46,7 @@ data Scope = Scope { scopeSubsts :: Substitutions
 lookupSubstInScope :: QualName VName -> Scope -> (QualName VName, Scope)
 lookupSubstInScope qn@(QualName quals name) scope@(Scope substs mods) =
   case quals of
-    [] -> (QualName [] $ lookupSubst name substs, scope)
+    [] -> (qualName $ lookupSubst name substs, scope)
     q:qs ->
       let q' = lookupSubst q substs
       in case M.lookup q' mods of
