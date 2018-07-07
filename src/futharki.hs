@@ -146,17 +146,21 @@ readEvalPrint = do
 
 onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
+  -- For convenience, we turn local imports into open imports.
+  let d' = case d of LocalDec open@OpenDec{} _ -> open
+                     _                         -> d
+
   prompt <- getPrompt
   decs <- gets interpDecs
   -- See first if it type checks.
-  let decs' = decs ++ [d]
+  let decs' = decs ++ [d']
       prog = Prog Nothing decs'
       include = mkInitialImport prompt
   -- We have to read in any new imports done by the declaration.
   basis <- curBasis
   res <- runExceptT $ readImports basis $
          map (uncurry $ mkImportFrom include) $
-         progImports $ Prog Nothing [d]
+         progImports $ Prog Nothing [d']
   case res of
     Left err -> liftIO $ print err
     Right (_, imports, src) ->
