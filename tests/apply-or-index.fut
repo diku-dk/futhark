@@ -1,5 +1,7 @@
 -- Test that we can distinguish function application with literal
--- array argument from array indexing.  == input { 1 } output { 3 }
+-- array argument from array indexing.
+-- ==
+-- input { 1 } output { 3 }
 
 let f(xs: []i32): i32 = xs[0]
 
