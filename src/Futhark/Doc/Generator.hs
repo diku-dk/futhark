@@ -567,8 +567,8 @@ typeArgExpHtml (TypeArgExpType d) = typeExpHtml d
 
 typeParamHtml :: TypeParam -> Html
 typeParamHtml (TypeParamDim name _) = brackets $ vnameHtml name
-typeParamHtml (TypeParamType name _) = "'" <> vnameHtml name
-typeParamHtml (TypeParamLiftedType name _) = "'^" <> vnameHtml name
+typeParamHtml (TypeParamType Unlifted name _) = "'" <> vnameHtml name
+typeParamHtml (TypeParamType Lifted name _) = "'^" <> vnameHtml name
 
 typeAbbrevHtml :: Html -> [TypeParam] -> Html
 typeAbbrevHtml name params =

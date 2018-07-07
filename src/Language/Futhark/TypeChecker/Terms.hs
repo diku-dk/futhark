@@ -179,10 +179,6 @@ envToTermScope env = TermScope vtable (envTypeTable env) (envNameMap env) mempty
 -- a partial constraint on their type.
 type Constraints = M.Map VName Constraint
 
-data Liftedness = Lifted -- ^ May be a function.
-                | Unlifted -- ^ May not be a function.
-                deriving Show
-
 data Constraint = NoConstraint (Maybe Liftedness) SrcLoc
                 | ParamType Liftedness SrcLoc
                 | Constraint (TypeBase () ()) SrcLoc
@@ -430,8 +426,8 @@ instantiateTypeParam loc tparam = do
   v <- newID $ nameFromString $ baseString (typeParamName tparam) ++ show i
   modifyConstraints $ M.insert v $ NoConstraint (Just l) loc
   return (v, TypeVar (typeName v) [])
-  where l = case tparam of TypeParamType{} -> Unlifted
-                           _               -> Lifted
+  where l = case tparam of TypeParamType x _ _ -> x
+                           _                   -> Lifted
 
 newTypeVar :: SrcLoc -> String -> TermTypeM (TypeBase dim als)
 newTypeVar loc desc = do
@@ -688,10 +684,10 @@ bindingTypes types m = do
 bindingTypeParams :: [TypeParam] -> TermTypeM a -> TermTypeM a
 bindingTypeParams tparams = binding (mapMaybe typeParamIdent tparams) .
                             bindingTypes (mapMaybe typeParamType tparams)
-  where typeParamType (TypeParamType v loc) =
+  where typeParamType (TypeParamType Unlifted v loc) =
           Just (v, (TypeAbbr [] (TypeVar (typeName v) []),
                     ParamType Unlifted loc))
-        typeParamType (TypeParamLiftedType v loc) =
+        typeParamType (TypeParamType Lifted v loc) =
           Just (v, (TypeAbbr [] (TypeVar (typeName v) []),
                     ParamType Lifted loc))
         typeParamType TypeParamDim{} =
@@ -1611,8 +1607,8 @@ closeOverTypes substs tparams ts = do
                         intercalate ", " (map pretty tparams) ++ ".",
                         "This is usually because a parameter needs a type annotation."]
 
-        closeOver (k, NoConstraint (Just Unlifted) loc) = return $ Just $ TypeParamType k loc
-        closeOver (k, NoConstraint _ loc) = return $ Just $ TypeParamLiftedType k loc
+        closeOver (k, NoConstraint (Just Unlifted) loc) = return $ Just $ TypeParamType Unlifted k loc
+        closeOver (k, NoConstraint _ loc) = return $ Just $ TypeParamType Lifted k loc
         closeOver (_, ParamType{}) = return Nothing
         closeOver (_, Constraint{}) = return Nothing
         closeOver (_, Overloaded ots loc) =

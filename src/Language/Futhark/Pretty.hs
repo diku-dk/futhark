@@ -368,8 +368,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
 
 instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ pprName name
-  ppr (TypeParamType name _) = text "'" <> pprName name
-  ppr (TypeParamLiftedType name _) = text "'^" <> pprName name
+  ppr (TypeParamType Unlifted name _) = text "'" <> pprName name
+  ppr (TypeParamType Lifted name _) = text "'^" <> pprName name
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
   ppr (ValBind entry name retdecl rettype tparams args body _ _) =

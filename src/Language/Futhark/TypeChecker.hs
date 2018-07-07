@@ -128,10 +128,7 @@ bindingTypeParams tparams = localEnv env
         typeParamEnv (TypeParamDim v _) =
           mempty { envVtable =
                      M.singleton v $ BoundV [] (Prim (Signed Int32)) }
-        typeParamEnv (TypeParamType v _) =
-          mempty { envTypeTable =
-                     M.singleton v $ TypeAbbr [] $ TypeVar (typeName v) [] }
-        typeParamEnv (TypeParamLiftedType v _) =
+        typeParamEnv (TypeParamType _ v _) =
           mempty { envTypeTable =
                      M.singleton v $ TypeAbbr [] $ TypeVar (typeName v) [] }
 
@@ -188,9 +185,7 @@ checkSpecs (TypeSpec name ps doc loc : specs) =
             TypeSpec name' ps' doc loc : specs')
       where paramToArg (TypeParamDim v ploc) =
               TypeArgDim (NamedDim $ qualName v) ploc
-            paramToArg (TypeParamType v ploc) =
-              TypeArgType (TypeVar (typeName v) []) ploc
-            paramToArg (TypeParamLiftedType v ploc) =
+            paramToArg (TypeParamType _ v ploc) =
               TypeArgType (TypeVar (typeName v) []) ploc
 
 checkSpecs (ModSpec name sig doc loc : specs) =
@@ -613,9 +608,9 @@ matchMTys = matchMTys' mempty
 
               matchTypeParam (TypeParamDim x _) (TypeParamDim y _) =
                 pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
-              matchTypeParam (TypeParamType x _) (TypeParamType y _) =
+              matchTypeParam (TypeParamType Unlifted x _) (TypeParamType Unlifted y _) =
                 pure $ M.singleton x $ TypeSub $ TypeAbbr [] $ TypeVar (typeName y) []
-              matchTypeParam (TypeParamLiftedType x _) (TypeParamLiftedType y _) =
+              matchTypeParam (TypeParamType Lifted x _) (TypeParamType Lifted y _) =
                 pure $ M.singleton x $ TypeSub $ TypeAbbr [] $ TypeVar (typeName y) []
               matchTypeParam _ _ =
                 nomatch
@@ -797,10 +792,8 @@ newNamesForMTy orig_mty = do
 
         substituteInTypeParam (TypeParamDim p loc) =
           TypeParamDim (substitute p) loc
-        substituteInTypeParam (TypeParamType p loc) =
-          TypeParamType (substitute p) loc
-        substituteInTypeParam (TypeParamLiftedType p loc) =
-          TypeParamLiftedType (substitute p) loc
+        substituteInTypeParam (TypeParamType l p loc) =
+          TypeParamType l (substitute p) loc
 
         substituteInType :: StructType -> StructType
         substituteInType (TypeVar (TypeName qs v) targs) =
