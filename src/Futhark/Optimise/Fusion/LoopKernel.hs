@@ -632,7 +632,7 @@ fixupInputs inpIds inps =
 
         fixupInput d perm inp
           | SOAC.inputRank inp >= d =
-              Just $ SOAC.addTransform (SOAC.Rearrange mempty $ rearrangeInverse perm) inp
+              Just $ SOAC.addTransform (SOAC.Rearrange mempty perm) inp
           | otherwise = Nothing
 
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
