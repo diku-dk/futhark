@@ -281,7 +281,7 @@ transformDecs ds =
 transformImports :: Imports -> TransformM ()
 transformImports [] = return ()
 transformImports ((name,imp):imps) = do
-  let abs = S.fromList $ map qualLeaf $ S.toList $ fileAbs imp
+  let abs = S.fromList $ map qualLeaf $ M.keys $ fileAbs imp
   scope <- censor (fmap maybeHideEntryPoint) $
            bindingAbs abs $ transformDecs $ progDecs $ fileProg imp
   bindingAbs abs $ bindingImport name scope $ transformImports imps

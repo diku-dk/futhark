@@ -1116,7 +1116,7 @@ Module Type Expressions
    spec:   "val" `id` `type_param`* ":" `spec_type`
        : | "val" `binop` ":" `spec_type`
        : | "type" `id` `type_param`* "=" `type`
-       : | "type `id` `type_param`*
+       : | "type" ["^"] `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
    spec_type: `type` | `type` "->" `spec_type`

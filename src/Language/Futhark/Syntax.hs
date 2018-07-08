@@ -823,9 +823,10 @@ deriving instance Showable f vn => Show (TypeBindBase f vn)
 instance Located (TypeBindBase f vn) where
   locOf = locOf . typeBindLocation
 
--- | The liftedness of a type parameter.
-data Liftedness = Lifted -- ^ May be instantiated to a functional type.
-                | Unlifted -- ^ May only be instantiated with a zero-order type.
+-- | The liftedness of a type parameter.  By the @Ord@ instance,
+-- @Unlifted@ is less than @Lifted@.
+data Liftedness = Unlifted -- ^ May only be instantiated with a zero-order type.
+                | Lifted -- ^ May be instantiated to a functional type.
                 deriving (Eq, Ord, Show)
 
 data TypeParamBase vn = TypeParamDim vn SrcLoc
@@ -859,17 +860,17 @@ data SpecBase f vn = ValSpec  { specName       :: vn
                               , specLocation   :: SrcLoc
                               }
                    | TypeAbbrSpec (TypeBindBase f vn)
-                   | TypeSpec vn [TypeParamBase vn] (Maybe DocComment) SrcLoc -- ^ Abstract type.
+                   | TypeSpec Liftedness vn [TypeParamBase vn] (Maybe DocComment) SrcLoc -- ^ Abstract type.
                    | ModSpec vn (SigExpBase f vn) (Maybe DocComment) SrcLoc
                    | IncludeSpec (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
-  locOf (ValSpec _ _ _ _ loc) = locOf loc
-  locOf (TypeAbbrSpec tbind)  = locOf tbind
-  locOf (TypeSpec _ _ _ loc)  = locOf loc
-  locOf (ModSpec _ _ _ loc)   = locOf loc
-  locOf (IncludeSpec _ loc)   = locOf loc
+  locOf (ValSpec _ _ _ _ loc)  = locOf loc
+  locOf (TypeAbbrSpec tbind)   = locOf tbind
+  locOf (TypeSpec _ _ _ _ loc) = locOf loc
+  locOf (ModSpec _ _ _ loc)    = locOf loc
+  locOf (IncludeSpec _ loc)    = locOf loc
 
 data SigExpBase f vn = SigVar (QualName vn) SrcLoc
                      | SigParens (SigExpBase f vn) SrcLoc
