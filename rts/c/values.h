@@ -220,13 +220,14 @@ static int read_str_array(int64_t elem_size, int (*elem_reader)(void*),
 
 /* Makes a copy of numeric literal removing any underscores, and
    length of the literal. */
-static int remove_underscores(char* buf) {
+static int remove_underscores(char* buf, int bufsize) {
   int buf_index = 0;
   char c = getchar();
-  while (isxdigit(c) || c == '.' || c == '+' || c == '-' ||
-         c == 'x' || c == 'X' ||
-         c == 'p' || c == 'P' || /* exponent for hex. floats */
-         c == 'e' || c == 'E' || c == '_') {
+  while (buf_index < bufsize &&
+         (isxdigit(c) || c == '.' || c == '+' || c == '-' ||
+          c == 'x' || c == 'X' ||
+          c == 'p' || c == 'P' || /* exponent for hex. floats */
+          c == 'e' || c == 'E' || c == '_')) {
     if (c == '_') {
       c = getchar();
       continue;
@@ -250,7 +251,7 @@ static int read_str_i8(void* dest) {
      https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
   int x;
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   if (sscanf(buf, "%i", &x) == 1) {
     *(int8_t*)dest = x;
     scanf("i8");
@@ -269,7 +270,7 @@ static int read_str_u8(void* dest) {
      https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
   int x;
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   if (sscanf(buf, "%i", &x) == 1) {
     *(uint8_t*)dest = x;
     scanf("u8");
@@ -282,7 +283,7 @@ static int read_str_u8(void* dest) {
 static int read_str_i16(void* dest) {
   skipspaces();
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   if (sscanf(buf, "%"SCNi16, (int16_t*)dest) == 1) {
     scanf("i16");
     return next_is_not_constituent() ? 0 : 1;
@@ -295,7 +296,7 @@ static int read_str_i16(void* dest) {
 static int read_str_u16(void* dest) {
   skipspaces();
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   if (sscanf(buf, "%"SCNi16, (int16_t*)dest) == 1) {
     scanf("u16");
     return next_is_not_constituent() ? 0 : 1;
@@ -307,7 +308,7 @@ static int read_str_u16(void* dest) {
 static int read_str_i32(void* dest) {
   skipspaces();
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   if (sscanf(buf, "%"SCNi32, (int32_t*)dest) == 1) {
     scanf("i32");
     return next_is_not_constituent() ? 0 : 1;
@@ -319,7 +320,7 @@ static int read_str_i32(void* dest) {
 static int read_str_u32(void* dest) {
   skipspaces();
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   if (sscanf(buf, "%"SCNi32, (int32_t*)dest) == 1) {
     scanf("u32");
     return next_is_not_constituent() ? 0 : 1;
@@ -331,7 +332,7 @@ static int read_str_u32(void* dest) {
 static int read_str_i64(void* dest) {
   skipspaces();
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   if (sscanf(buf, "%"SCNi64, (int64_t*)dest) == 1) {
     scanf("i64");
     return next_is_not_constituent() ? 0 : 1;
@@ -343,7 +344,7 @@ static int read_str_i64(void* dest) {
 static int read_str_u64(void* dest) {
   skipspaces();
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   // FIXME: This is not correct, as SCNu64 only permits decimal
   // literals.  However, SCNi64 does not handle very large numbers
   // correctly (it's really for signed numbers, so that's fair).
@@ -358,7 +359,7 @@ static int read_str_u64(void* dest) {
 static int read_str_f32(void* dest) {
   skipspaces();
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   if (sscanf(buf, "%f", (float*)dest) == 1) {
     scanf("f32");
     return next_is_not_constituent() ? 0 : 1;
@@ -370,7 +371,7 @@ static int read_str_f32(void* dest) {
 static int read_str_f64(void* dest) {
   skipspaces();
   char buf[128];
-  remove_underscores(buf);
+  remove_underscores(buf, sizeof(buf)-1);
   if (sscanf(buf, "%lf", (double*)dest) == 1) {
     scanf("f64");
     return next_is_not_constituent() ? 0 : 1;
