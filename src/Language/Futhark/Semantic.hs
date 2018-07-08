@@ -25,7 +25,6 @@ where
 import Data.Semigroup ((<>))
 import Data.Loc
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import qualified Data.Semigroup as Sem
 import System.FilePath
 import qualified System.FilePath.Posix as Posix
@@ -94,8 +93,8 @@ data Namespace = Term -- ^ Functions and values.
                | Signature
                deriving (Eq, Ord, Show, Enum)
 
--- | A set of abstract types and where their definition is expected.
-type TySet = S.Set (QualName VName)
+-- | A mapping of abstract types to their liftedness.
+type TySet = M.Map (QualName VName) Liftedness
 
 -- | Representation of a module, which is either a plain environment,
 -- or a parametric module ("functor" in SML).
@@ -119,7 +118,7 @@ data MTy = MTy { mtyAbs :: TySet
          deriving (Show)
 
 -- | A binding from a name to its definition as a type.
-data TypeBinding = TypeAbbr [TypeParam] StructType
+data TypeBinding = TypeAbbr Liftedness [TypeParam] StructType
                  deriving (Eq, Show)
 
 -- | Type parameters, list of parameter types (optinally named), and

@@ -384,7 +384,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
-  ppr (TypeSpec name ps _ _) = text "type" <+> pprName name <+> spread (map ppr ps)
+  ppr (TypeSpec Unlifted name ps _ _) = text "type" <+> pprName name <+> spread (map ppr ps)
+  ppr (TypeSpec Lifted name ps _ _) = text "type^" <+> pprName name <+> spread (map ppr ps)
   ppr (ValSpec name tparams vtype _ _) =
     text "val" <+> pprName name <+> spread (map ppr tparams) <> colon <+> ppr vtype
   ppr (ModSpec name sig _ _) =

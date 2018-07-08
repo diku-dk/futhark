@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Compilers now accept a `--safe` flag to make them ignore `unsafe`.
 
+  * Module types may now define *lifted* abstract types, using the
+    notation `type ^t`.  These may be instantiated with functional
+    types.  A lifted abstract type has all the same restrictions as a
+    lifted type parameter.
+
 ### Removed
 
   * The `rearrange` construct has been removed.  Use `transpose` instead.

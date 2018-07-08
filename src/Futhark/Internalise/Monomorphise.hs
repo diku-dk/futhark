@@ -482,7 +482,7 @@ transformTypeBind (TypeBind name tparams tydecl _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   noticeDims $ unInfo $ expandedType tydecl
   let tp = substituteTypes subs . unInfo $ expandedType tydecl
-      tbinding = TypeAbbr tparams tp
+      tbinding = TypeAbbr Lifted tparams tp -- The Lifted is arbitrary.
   return mempty { envTypeBindings = M.singleton name tbinding }
 
 -- | Monomorphize a list of top-level declarations. A module-free input program

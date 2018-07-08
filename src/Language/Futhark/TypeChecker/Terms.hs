@@ -319,8 +319,8 @@ instance MonadTypeChecker TermTypeM where
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ scopeTypeTable scope of
       Nothing -> undefinedType loc qn
-      Just (TypeAbbr ps def) ->
-        return (qn', ps, qualifyTypeVars outer_env (map typeParamName ps) qs def)
+      Just (TypeAbbr l ps def) ->
+        return (qn', ps, qualifyTypeVars outer_env (map typeParamName ps) qs def, l)
 
   lookupMod loc name = liftTypeM $ TypeM.lookupMod loc name
   lookupMTy loc name = liftTypeM $ TypeM.lookupMTy loc name
@@ -398,7 +398,7 @@ checkReallyQualName space qn loc = do
 -- in the type.
 checkTypeDecl :: TypeDeclBase NoInfo Name -> TermTypeM (TypeDeclBase Info VName)
 checkTypeDecl tdecl = do
-  tdecl' <- Types.checkTypeDecl tdecl
+  (tdecl', _) <- Types.checkTypeDecl tdecl
   mapM_ observeDim $ nestedDims $ unInfo $ expandedType tdecl'
   return tdecl'
   where observeDim (NamedDim v) = observe $ Ident (qualLeaf v) (Info $ Prim $ Signed Int32) noLoc
@@ -588,7 +588,7 @@ checkPattern' (RecordPattern fs loc) NoneInferred =
   RecordPattern . M.toList <$> traverse (`checkPattern'` NoneInferred) (M.fromList fs) <*> pure loc
 
 checkPattern' (PatternAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
-  (t', st) <- checkTypeExp t
+  (t', st, _) <- checkTypeExp t
 
   let st' = fromStruct st
   case maybe_outer_t of
@@ -684,12 +684,9 @@ bindingTypes types m = do
 bindingTypeParams :: [TypeParam] -> TermTypeM a -> TermTypeM a
 bindingTypeParams tparams = binding (mapMaybe typeParamIdent tparams) .
                             bindingTypes (mapMaybe typeParamType tparams)
-  where typeParamType (TypeParamType Unlifted v loc) =
-          Just (v, (TypeAbbr [] (TypeVar (typeName v) []),
-                    ParamType Unlifted loc))
-        typeParamType (TypeParamType Lifted v loc) =
-          Just (v, (TypeAbbr [] (TypeVar (typeName v) []),
-                    ParamType Lifted loc))
+  where typeParamType (TypeParamType l v loc) =
+          Just (v, (TypeAbbr l [] (TypeVar (typeName v) []),
+                    ParamType l loc))
         typeParamType TypeParamDim{} =
           Nothing
 
@@ -1477,7 +1474,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
   bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
     maybe_retdecl' <- traverse checkTypeExp maybe_retdecl
 
-    body' <- checkFunBody body (snd <$> maybe_retdecl') (maybe loc srclocOf maybe_retdecl)
+    body' <- checkFunBody body ((\(_,t,_)->t) <$> maybe_retdecl') (maybe loc srclocOf maybe_retdecl)
 
     -- We are now done inferring types.  First we find any remaining
     -- overloaded type variables that were created in this function
@@ -1492,7 +1489,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
     body_t <- expType body''
 
     (maybe_retdecl'', rettype) <- case maybe_retdecl' of
-      Just (retdecl', retdecl_type) -> do
+      Just (retdecl', retdecl_type, _) -> do
         let rettype_structural = toStructural retdecl_type
         checkReturnAlias rettype_structural params'' body_t
         return (Just retdecl', retdecl_type)

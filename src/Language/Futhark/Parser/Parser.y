@@ -92,6 +92,7 @@ import Language.Futhark.Parser.Lexer
       '*'             { L $$ ASTERISK }
       '-'             { L $$ NEGATE }
       '<'             { L $$ LTH }
+      '^'             { L $$ HAT }
 
       '+...'          { L _ (SYMBOL Plus _ _) }
       '-...'          { L _ (SYMBOL Minus _ _) }
@@ -165,7 +166,7 @@ import Language.Futhark.Parser.Lexer
 %left '||...'
 %left '&&...'
 %left '<=...' '>=...' '>...' '<' '<...' '==...' '!=...'
-%left '&...' '^...' '|...'
+%left '&...' '^...' '^' '|...'
 %left '<<...' '>>...' '>>>...'
 %left '+...' '-...' '-'
 %left '*...' '*' '/...' '%...' '//...' '%%...'
@@ -231,7 +232,7 @@ SigBind :: { SigBindBase NoInfo Name }
 
 ModExp :: { UncheckedModExp }
         : ModExp ':' SigExp
-          { ModAscript $1 $3 NoInfo (srclocOf $1) }
+          { ModAscript $1 $3 NoInfo (srcspan $1 $>) }
         | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
           { ModLambda $2 (fmap (,NoInfo) $3) $5 (srcspan $1 $>) }
         | import stringlit
@@ -284,10 +285,16 @@ Spec :: { SpecBase NoInfo Name }
         { TypeAbbrSpec $1 }
       | type id TypeParams
         { let L _ (ID name) = $2
-          in TypeSpec name $3 Nothing (srcspan $1 $>) }
+          in TypeSpec Unlifted name $3 Nothing (srcspan $1 $>) }
       | type 'id[' id ']' TypeParams
         { let L _ (INDEXING name) = $2; L ploc (ID pname) = $3
-          in TypeSpec name (TypeParamDim pname ploc : $5) Nothing (srcspan $1 $>) }
+          in TypeSpec Unlifted name (TypeParamDim pname ploc : $5) Nothing (srcspan $1 $>) }
+      | type '^' id TypeParams
+        { let L _ (ID name) = $3
+          in TypeSpec Lifted name $4 Nothing (srcspan $1 $>) }
+      | type '^' 'id[' id ']' TypeParams
+        { let L _ (INDEXING name) = $3; L ploc (ID pname) = $4
+          in TypeSpec Lifted name (TypeParamDim pname ploc : $6) Nothing (srcspan $1 $>) }
       | module id ':' SigExp
         { let L _ (ID name) = $2
           in ModSpec name $4 Nothing (srcspan $1 $>) }
@@ -336,6 +343,7 @@ BinOp :: { QualName Name }
       | '||...'    { binOpName $1 }
       | '**...'    { binOpName $1 }
       | '^...'     { binOpName $1 }
+      | '^'        { qualName (nameFromString "^") }
       | '&...'     { binOpName $1 }
       | '|...'     { binOpName $1 }
       | '>>...'    { binOpName $1 }
@@ -527,6 +535,7 @@ Exp2 :: { UncheckedExp }
      | Exp2 '&&...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '||...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '^...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '^' Exp2       { binOp $1 (L $2 (SYMBOL Xor [] (nameFromString "^"))) $3 }
      | Exp2 '==...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '!=...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '<...' Exp2    { binOp $1 $2 $3 }
@@ -853,7 +862,7 @@ addDoc _ dec = dec
 addDocSpec :: DocComment -> SpecBase NoInfo Name -> SpecBase NoInfo Name
 addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig { typeDoc = Just doc })
 addDocSpec doc val@(ValSpec {}) = val { specDoc = Just doc }
-addDocSpec doc (TypeSpec name ps _ loc) = TypeSpec name ps (Just doc) loc
+addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
 addDocSpec _ spec = spec
 

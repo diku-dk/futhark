@@ -75,7 +75,7 @@ specRow a b c = H.tr $ (H.td ! A.class_ "spec_lhs") a <>
 vnameToFileMap :: Imports -> FileMap
 vnameToFileMap = mconcat . map forFile
   where forFile (file, FileModule abs file_env _prog) =
-          mconcat (map (vname Type) (S.toList abs)) <>
+          mconcat (map (vname Type) (M.keys abs)) <>
           forEnv file_env
           where vname ns v = M.singleton (qualLeaf v) (file, ns)
                 vname' ((ns, _), v) = vname ns v
@@ -357,7 +357,7 @@ renderValBind :: (VName, BoundV) -> DocM Html
 renderValBind = fmap H.div . synopsisValBindBind
 
 renderTypeBind :: (VName, TypeBinding) -> DocM Html
-renderTypeBind (name, TypeAbbr tps tp) = do
+renderTypeBind (name, TypeAbbr l tps tp) = do
   tp' <- typeHtml tp
   return $ H.div $ typeAbbrevHtml (vnameHtml name) tps <> " = " <> tp'
 
@@ -471,8 +471,10 @@ synopsisSpec :: SpecBase Info VName -> DocM Html
 synopsisSpec spec = case spec of
   TypeAbbrSpec tpsig ->
     fullRow <$> typeBindHtml (vnameSynopsisDef $ typeAlias tpsig) tpsig
-  TypeSpec name ps _ _ ->
+  TypeSpec Unlifted name ps _ _ ->
     return $ fullRow $ "type " <> vnameSynopsisDef name <> joinBy " " (map typeParamHtml ps)
+  TypeSpec Lifted name ps _ _ ->
+    return $ fullRow $ "type ^" <> vnameSynopsisDef name <> joinBy " " (map typeParamHtml ps)
   ValSpec name tparams rettype _ _ -> do
     let tparams' = map typeParamHtml tparams
     rettype' <- noLink (map typeParamName tparams) $
@@ -701,7 +703,7 @@ describeSpec (ValSpec name tparams t doc _) =
                then IndexValue else IndexFunction
 describeSpec (TypeAbbrSpec vb) =
   describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)
-describeSpec (TypeSpec name tparams doc _) =
+describeSpec (TypeSpec liftedness name tparams doc _) =
   describeGeneric name IndexType doc $ return . (`typeAbbrevHtml` tparams)
 describeSpec (ModSpec name se doc _) =
   describeGenericMod name IndexModule se doc $ \name' ->

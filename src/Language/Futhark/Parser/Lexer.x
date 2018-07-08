@@ -214,6 +214,7 @@ symbol [] q
   | nameToText q == "*" = ASTERISK
   | nameToText q == "-" = NEGATE
   | nameToText q == "<" = LTH
+  | nameToText q == "^" = HAT
   | otherwise = SYMBOL (leadingOperator q) [] q
 symbol qs q = SYMBOL (leadingOperator q) qs q
 
@@ -337,6 +338,7 @@ data Token = ID Name
            | ASTERISK
            | NEGATE
            | LTH
+           | HAT
 
            | IF
            | THEN

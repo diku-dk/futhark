@@ -135,41 +135,43 @@ data Bindage = BoundAsVar | UsedFree
              deriving (Show, Eq)
 
 checkTypeDecl :: MonadTypeChecker m =>
-                 TypeDeclBase NoInfo Name -> m (TypeDeclBase Info VName)
+                 TypeDeclBase NoInfo Name
+              -> m (TypeDeclBase Info VName, Liftedness)
 checkTypeDecl (TypeDecl t NoInfo) = do
   checkForDuplicateNamesInType t
-  (t', st) <- checkTypeExp t
-  return $ TypeDecl t' $ Info st
+  (t', st, l) <- checkTypeExp t
+  return (TypeDecl t' $ Info st, l)
 
 checkTypeExp :: MonadTypeChecker m =>
                 TypeExp Name
-             -> m (TypeExp VName, StructType)
+             -> m (TypeExp VName, StructType, Liftedness)
 checkTypeExp (TEVar name loc) = do
-  (name', ps, t) <- lookupType loc name
+  (name', ps, t, l) <- lookupType loc name
   case ps of
-    [] -> return (TEVar name' loc, t)
+    [] -> return (TEVar name' loc, t, l)
     _  -> throwError $ TypeError loc $
           "Type constructor " ++ pretty name ++ " used without any arguments."
 checkTypeExp (TETuple ts loc) = do
-  (ts', ts_s) <- unzip <$> mapM checkTypeExp ts
-  return (TETuple ts' loc, tupleRecord ts_s)
+  (ts', ts_s, ls) <- unzip3 <$> mapM checkTypeExp ts
+  return (TETuple ts' loc, tupleRecord ts_s, foldl' max Unlifted ls)
 checkTypeExp t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
   unless (sort field_names == sort (nub field_names)) $
     throwError $ TypeError loc $ "Duplicate record fields in " ++ pretty t
 
-  fs_and_ts <- traverse checkTypeExp $ M.fromList fs
-  let fs' = fmap fst fs_and_ts
-      ts_s = fmap snd fs_and_ts
-  return (TERecord (M.toList fs') loc, Record ts_s)
+  fs_ts_ls <- traverse checkTypeExp $ M.fromList fs
+  let fs' = fmap (\(x,_,_) -> x) fs_ts_ls
+      ts_s = fmap (\(_,y,_) -> y) fs_ts_ls
+      ls = fmap (\(_,_,z) -> z) fs_ts_ls
+  return (TERecord (M.toList fs') loc, Record ts_s, foldl' max Unlifted ls)
 checkTypeExp (TEArray t d loc) = do
-  (t', st) <- checkTypeExp t
+  (t', st, l) <- checkTypeExp t
   d' <- checkDimDecl d
-  case arrayOf st (ShapeDecl [d']) Nonunique of
-    Just st' -> return (TEArray t' d' loc, st')
-    Nothing -> throwError $ TypeError loc $
-               "Cannot create array with elements of type " ++ pretty st
+  case (l, arrayOf st (ShapeDecl [d']) Nonunique) of
+    (Unlifted, Just st') -> return (TEArray t' d' loc, st', Unlifted)
+    _ -> throwError $ TypeError loc $
+         "Cannot create array with elements of type `" ++ pretty st ++ "` (might be functional)."
   where checkDimDecl AnyDim =
           return AnyDim
         checkDimDecl (ConstDim k) =
@@ -177,37 +179,39 @@ checkTypeExp (TEArray t d loc) = do
         checkDimDecl (NamedDim v) =
           NamedDim <$> checkNamedDim loc v
 checkTypeExp (TEUnique t loc) = do
-  (t', st) <- checkTypeExp t
+  (t', st, l) <- checkTypeExp t
   case st of
-    Array{} -> return (t', st `setUniqueness` Unique)
+    Array{} -> return (t', st `setUniqueness` Unique, l)
     _       -> throwError $ TypeError loc $
                "Attempt to declare unique non-array " ++ pretty t ++ "."
 checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
-  (t1', st1) <- checkTypeExp t1
+  (t1', st1, _) <- checkTypeExp t1
   bindSpaced [(Term, v)] $ do
     v' <- checkName Term v loc
     let env = mempty { envVtable = M.singleton v' $ BoundV [] st1 }
     localEnv env $ do
-      (t2', st2) <- checkTypeExp t2
+      (t2', st2, _) <- checkTypeExp t2
       return (TEArrow (Just v') t1' t2' loc,
-              Arrow mempty (Just v') st1 st2)
+              Arrow mempty (Just v') st1 st2,
+              Lifted)
 checkTypeExp (TEArrow Nothing t1 t2 loc) = do
-  (t1', st1) <- checkTypeExp t1
-  (t2', st2) <- checkTypeExp t2
+  (t1', st1, _) <- checkTypeExp t1
+  (t2', st2, _) <- checkTypeExp t2
   return (TEArrow Nothing t1' t2' loc,
-          Arrow mempty Nothing st1 st2)
+          Arrow mempty Nothing st1 st2,
+          Lifted)
 checkTypeExp ote@TEApply{} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
-  (tname', ps, t) <- lookupType tloc tname
+  (tname', ps, t, l) <- lookupType tloc tname
   if length ps /= length targs
   then throwError $ TypeError tloc $
        "Type constructor " ++ pretty tname ++ " requires " ++ show (length ps) ++
        " arguments, but application at " ++ locStr tloc ++ " provides " ++ show (length targs)
   else do
     (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
-    return (foldl (\x y -> TEApply x y tloc)
-            (TEVar tname' tname_loc) targs',
-            substituteTypes (mconcat substs) t)
+    return (foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
+            substituteTypes (mconcat substs) t,
+            l)
   where tloc = srclocOf ote
 
         rootAndArgs :: MonadTypeChecker m => TypeExp Name -> m (QualName Name, SrcLoc, [TypeArgExp Name])
@@ -228,15 +232,10 @@ checkTypeExp ote@TEApply{} = do
           return (TypeArgExpDim AnyDim loc,
                   M.singleton pv $ DimSub AnyDim)
 
-        checkArgApply (TypeParamType Unlifted pv _) (TypeArgExpType te) = do
-          (te', st) <- checkTypeExp te
+        checkArgApply (TypeParamType l pv _) (TypeArgExpType te) = do
+          (te', st, _) <- checkTypeExp te
           return (TypeArgExpType te',
-                  M.singleton pv $ TypeSub $ TypeAbbr [] st)
-
-        checkArgApply (TypeParamType Lifted pv _) (TypeArgExpType te) = do
-          (te', st) <- checkTypeExp te
-          return (TypeArgExpType te',
-                  M.singleton pv $ TypeSub $ TypeAbbr [] st)
+                  M.singleton pv $ TypeSub $ TypeAbbr l [] st)
 
         checkArgApply p a =
           throwError $ TypeError tloc $ "Type argument " ++ pretty a ++
@@ -329,7 +328,7 @@ substituteTypes substs ot = case ot of
     fromMaybe nope $ arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
   Prim t -> Prim t
   TypeVar v targs
-    | Just (TypeSub (TypeAbbr ps t)) <-
+    | Just (TypeSub (TypeAbbr _ ps t)) <-
         M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
         applyType ps t $ map substituteInTypeArg targs
     | otherwise -> TypeVar v $ map substituteInTypeArg targs
@@ -342,7 +341,7 @@ substituteTypes substs ot = case ot of
         substituteTypesInArrayElem (ArrayPrimElem t ()) =
           Prim t
         substituteTypesInArrayElem (ArrayPolyElem v targs ())
-          | Just (TypeSub (TypeAbbr ps t)) <-
+          | Just (TypeSub (TypeAbbr _ ps t)) <-
               M.lookup (qualLeaf (qualNameFromTypeName v)) substs =
               applyType ps t (map substituteInTypeArg targs)
           | otherwise =
@@ -379,8 +378,8 @@ applyType ps t args =
           (pv, DimSub $ ConstDim x)
         mkSubst (TypeParamDim pv _) (TypeArgDim AnyDim  _) =
           (pv, DimSub AnyDim)
-        mkSubst (TypeParamType _ pv _) (TypeArgType at _) =
-          (pv, TypeSub $ TypeAbbr [] at)
+        mkSubst (TypeParamType l pv _) (TypeArgType at _) =
+          (pv, TypeSub $ TypeAbbr l [] at)
         mkSubst p a =
           error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
 
