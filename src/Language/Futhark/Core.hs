@@ -1,4 +1,6 @@
-{-# LANGUAGE DeriveLift         #-}
+{-# LANGUAGE DeriveLift #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
@@ -32,6 +34,7 @@ module Language.Futhark.Core
 where
 
 import Data.Int (Int8, Int16, Int32, Int64)
+import Data.String
 import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Loc
 import qualified Data.Semigroup as Sem
@@ -84,13 +87,10 @@ defaultEntryPoint = nameFromString "main"
 -- compiler.  'String's, being lists of characters, are very slow,
 -- while 'T.Text's are based on byte-arrays.
 newtype Name = Name T.Text
-  deriving (Show, Eq, Ord, Lift)
+  deriving (Show, Eq, Ord, Lift, IsString, Sem.Semigroup)
 
 instance Pretty Name where
   ppr = text . nameToString
-
-instance Sem.Semigroup Name where
-  Name t1 <> Name t2 = Name $ t1 <> t2
 
 -- | Convert a name to the corresponding list of characters.
 nameToString :: Name -> String

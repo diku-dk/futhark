@@ -1284,6 +1284,7 @@ $edecls:(miscDecls endstate)
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <stdbool.h>")
+$esc:("#include <math.h>")
 /* If NDEBUG is set, the assert() macro will do nothing. Since Futhark
    (unfortunately) makes use of assert() for error detection (and even some
    side effects), we want to avoid that. */
@@ -1381,7 +1382,6 @@ $esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
 $esc:("#include <string.h>")
 $esc:("#include <stdint.h>")
 $esc:("#include <inttypes.h>")
-$esc:("#include <math.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")

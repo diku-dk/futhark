@@ -332,26 +332,31 @@ readWord64 = readIntegral f
   where f (U64LIT x) = Just x
         f _          = Nothing
 
-readFloat :: RealFloat float => (Token -> Maybe float) -> ReadValue float
+readFloat :: RealFloat float => ([Token] -> Maybe float) -> ReadValue float
 readFloat f t = do
-  v <- case fst <$> scanTokens (Pos "" 1 1 0) a of
-         Right [L _ NEGATE, L _ (FLOATLIT x)] -> Just $ negate $ fromDouble x
-         Right [L _ (FLOATLIT x)] -> Just $ fromDouble x
-         Right [L _ tok] -> f tok
-         Right [L _ NEGATE, L _ tok] -> negate <$> f tok
+  v <- case map unLoc . fst <$> scanTokens (Pos "" 1 1 0) a of
+         Right [NEGATE, FLOATLIT x] -> Just $ negate $ fromDouble x
+         Right [FLOATLIT x] -> Just $ fromDouble x
+         Right (NEGATE : toks) -> negate <$> f toks
+         Right toks -> f toks
          _ -> Nothing
   return (v, dropSpaces b)
   where (a,b) = BS.span constituent t
         fromDouble = uncurry encodeFloat . decodeFloat
+        unLoc (L _ x) = x
 
 readFloat32 :: ReadValue Float
 readFloat32 = readFloat lexFloat32
-  where lexFloat32 (F32LIT x) = Just x
-        lexFloat32 _          = Nothing
+  where lexFloat32 [F32LIT x] = Just x
+        lexFloat32 [ID "f32", DOT, ID "inf"] = Just $ 1/0
+        lexFloat32 [ID "f32", DOT, ID "nan"] = Just $ 0/0
+        lexFloat32 _ = Nothing
 
 readFloat64 :: ReadValue Double
 readFloat64 = readFloat lexFloat64
-  where lexFloat64 (F64LIT x) = Just x
+  where lexFloat64 [F64LIT x] = Just x
+        lexFloat64 [ID "f64", DOT, ID "inf"] = Just $ 1/0
+        lexFloat64 [ID "f64", DOT, ID "nan"] = Just $ 0/0
         lexFloat64 _          = Nothing
 
 readBool :: ReadValue Bool
@@ -492,9 +497,9 @@ compareValue i got_v expected_v
       (Word64Value _ got_vs, Word64Value _ expected_vs) ->
         compareNum 1 got_vs expected_vs
       (Float32Value _ got_vs, Float32Value _ expected_vs) ->
-        compareNum (tolerance expected_vs) got_vs expected_vs
+        compareFloat (tolerance expected_vs) got_vs expected_vs
       (Float64Value _ got_vs, Float64Value _ expected_vs) ->
-        compareNum (tolerance expected_vs) got_vs expected_vs
+        compareFloat (tolerance expected_vs) got_vs expected_vs
       (BoolValue _ got_vs, BoolValue _ expected_vs) ->
         compareGen compareBool got_vs expected_vs
       _ ->
@@ -502,6 +507,7 @@ compareValue i got_v expected_v
   | otherwise =
       Just $ ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)
   where compareNum tol = compareGen $ compareElement tol
+        compareFloat tol = compareGen $ compareFloatElement tol
 
         compareGen cmp got expected =
           foldl mplus Nothing $
@@ -510,6 +516,12 @@ compareValue i got_v expected_v
         compareElement tol (j, got) expected
           | comparePrimValue tol got expected = Nothing
           | otherwise = Just $ PrimValueMismatch (i,j) (value got) (value expected)
+
+        compareFloatElement tol (j, got) expected
+          | isNaN got, isNaN expected = Nothing
+          | isInfinite got, isInfinite expected,
+            signum got == signum expected = Nothing
+          | otherwise = compareElement tol (j, got) expected
 
         compareBool (j, got) expected
           | got == expected = Nothing

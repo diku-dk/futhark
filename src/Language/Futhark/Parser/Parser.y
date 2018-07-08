@@ -821,6 +821,16 @@ UnsignedLit :: { (IntValue, SrcLoc) }
 FloatLit :: { (FloatValue, SrcLoc) }
          : f32lit { let L loc (F32LIT num) = $1 in (Float32Value num, loc) }
          | f64lit { let L loc (F64LIT num) = $1 in (Float64Value num, loc) }
+         | QualName {% let (qn, loc) = $1 in
+                       if      qn == QualName [nameFromString "f32"] (nameFromString "inf")
+                       then return (Float32Value (1/0), loc)
+                       else if qn == QualName [nameFromString "f32"] (nameFromString "nan")
+                       then return (Float32Value (0/0), loc)
+                       else if qn == QualName [nameFromString "f64"] (nameFromString "inf")
+                       then return (Float64Value (1/0), loc)
+                       else if qn == QualName [nameFromString "f64"] (nameFromString "nan")
+                       then return (Float64Value (0/0), loc)
+                       else parseErrorAt (snd $1) Nothing }
          | floatlit { let L loc (FLOATLIT num) = $1 in (Float64Value num, loc) }
 
 ArrayValue :: { Value }
