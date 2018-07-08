@@ -218,16 +218,16 @@ static int read_str_array(int64_t elem_size, int (*elem_reader)(void*),
   return ret;
 }
 
-/* Makes a copy of numeric literal removing any underscores, and
+static int constituent(char c) {
+  return isalnum(c) || c == '.' || c == '-' || c == '+' || c == '_';
+}
+
+/* Makes a copy of numeric literal/token removing any underscores, and
    length of the literal. */
 static int remove_underscores(char* buf, int bufsize) {
   int buf_index = 0;
   char c = getchar();
-  while (buf_index < bufsize &&
-         (isxdigit(c) || c == '.' || c == '+' || c == '-' ||
-          c == 'x' || c == 'X' ||
-          c == 'p' || c == 'P' || /* exponent for hex. floats */
-          c == 'e' || c == 'E' || c == '_')) {
+  while (buf_index < bufsize && constituent(c)) {
     if (c == '_') {
       c = getchar();
       continue;
@@ -360,7 +360,16 @@ static int read_str_f32(void* dest) {
   skipspaces();
   char buf[128];
   remove_underscores(buf, sizeof(buf)-1);
-  if (sscanf(buf, "%f", (float*)dest) == 1) {
+  if (strcmp(buf, "f32.nan") == 0) {
+    *(float*)dest = NAN;
+    return 0;
+  } else if (strcmp(buf, "f32.inf") == 0) {
+    *(float*)dest = INFINITY;
+    return 0;
+  } else if (strcmp(buf, "-f32.inf") == 0) {
+    *(float*)dest = -INFINITY;
+    return 0;
+  } else if (sscanf(buf, "%f", (float*)dest) == 1) {
     scanf("f32");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -372,7 +381,16 @@ static int read_str_f64(void* dest) {
   skipspaces();
   char buf[128];
   remove_underscores(buf, sizeof(buf)-1);
-  if (sscanf(buf, "%lf", (double*)dest) == 1) {
+  if (strcmp(buf, "f64.nan") == 0) {
+    *(double*)dest = NAN;
+    return 0;
+  } else if (strcmp(buf, "f64.inf") == 0) {
+    *(double*)dest = INFINITY;
+    return 0;
+  } else if (strcmp(buf, "-f64.inf") == 0) {
+    *(double*)dest = -INFINITY;
+    return 0;
+  } else if (sscanf(buf, "%lf", (double*)dest) == 1) {
     scanf("f64");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -432,11 +450,29 @@ static int write_str_u64(FILE *out, uint64_t *src) {
 }
 
 static int write_str_f32(FILE *out, float *src) {
-  return fprintf(out, "%.6ff32", *src);
+  float x = *src;
+  if (isnan(x)) {
+    return fprintf(out, "f32.nan");
+  } else if (isinf(x) && x >= 0) {
+    return fprintf(out, "f32.inf");
+  } else if (isinf(x)) {
+    return fprintf(out, "-f32.inf");
+  } else {
+    return fprintf(out, "%.6ff32", x);
+  }
 }
 
 static int write_str_f64(FILE *out, double *src) {
-  return fprintf(out, "%.6ff64", *src);
+  double x = *src;
+  if (isnan(x)) {
+    return fprintf(out, "f64.nan");
+  } else if (isinf(x) && x >= 0) {
+    return fprintf(out, "f64.inf");
+  } else if (isinf(x)) {
+    return fprintf(out, "-f64.inf");
+  } else {
+    return fprintf(out, "%.6ff64", *src);
+  }
 }
 
 static int write_str_bool(FILE *out, void *src) {

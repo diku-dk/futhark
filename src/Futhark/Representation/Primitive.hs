@@ -201,8 +201,16 @@ data FloatValue = Float32Value !Float
 
 
 instance Pretty FloatValue where
-  ppr (Float32Value v) = text $ show v ++ "f32"
-  ppr (Float64Value v) = text $ show v ++ "f64"
+  ppr (Float32Value v)
+    | isInfinite v, v >= 0 = text "f32.inf"
+    | isInfinite v, v <  0 = text "-f32.inf"
+    | isNaN v = text "f32.nan"
+    | otherwise = text $ show v ++ "f32"
+  ppr (Float64Value v)
+    | isInfinite v, v >= 0 = text "f64.inf"
+    | isInfinite v, v <  0 = text "-f64.inf"
+    | isNaN v = text "f64.nan"
+    | otherwise = text $ show v ++ "f64"
 
 -- | Create a 'FloatValue' from a type and a 'Rational'.
 floatValue :: Real num => FloatType -> num -> FloatValue

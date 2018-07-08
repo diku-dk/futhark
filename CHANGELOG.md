@@ -64,6 +64,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Type errors (and other compiler feedback) will no longer contain
     internal names.
 
+  * `futhark-test` and friends can now cope with infinities and NaNs.
+    Such values are printed and read as `f32.nan`, `f32.inf`,
+    `-f32.inf`, and similarly for `f32`.  In `futhark-test`, NaNs
+    compare equal.
+
 ## [0.5.2]
 
 ### Added
