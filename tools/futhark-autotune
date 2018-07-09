@@ -59,17 +59,33 @@ class FutharkTuner(MeasurementInterface):
     # tuning can be given at run-time.  This saves a lot of time for
     # programs that take a long time to compile.
     compile_cmd = '{} {}'.format(self.args.compiler, self.program_name())
+    print('Compiling {}... '.format(self.program_name()), end='')
     compile_res = self.call_program(compile_cmd)
     assert compile_res['returncode'] == 0
+    sys.stdout.flush()
+    print('Done.')
 
     if self.args.calc_timeout:
       print('Calculating --timeout based on untuned run... ', end='')
       sys.stdout.flush()
       self.args.timeout = self.get_base_timeout()
       print('{} seconds.'.format(self.args.timeout))
-    self.extract_thresholds()
-    self.yield_values()
-    self.build_branch_tree()
+
+    print('Extracting threshold parameters and values... ', end='')
+    sys.stdout.flush()
+    n = self.extract_thresholds()
+    print('{} threshold comparisons detected.'.format(n))
+
+
+    print('Calculating values for each threshold parameter... ', end='')
+    sys.stdout.flush()
+    n = self.yield_values()
+    print('{} threshold values generated.'.format(n))
+
+    print('Building the branching tree... ', end='')
+    sys.stdout.flush()
+    n = self.build_branch_tree()
+    print('{} branches generated.'.format(n))
 
   def get_base_timeout(self):
     """
@@ -101,7 +117,6 @@ class FutharkTuner(MeasurementInterface):
     along with the different values, that each
     parameter are compared against for each dataset.
     """
-    print('Extracting threshold-parameters and values...')
     sizes_cmd = './{} --print-size'.format(self.program_bin_name())
     sizes_res = self.call_program(sizes_cmd)
     assert sizes_res['returncode'] == 0
@@ -116,6 +131,7 @@ class FutharkTuner(MeasurementInterface):
       if m:
         all_params.append(m.group(1))
 
+    n = 0
     with tempfile.NamedTemporaryFile() as json_tmp:
       # extract comparison values
       val_cmd = 'futhark-bench {} --compiler=futhark-opencl --skip-compilation --pass-option=-L --runs=1 --json={}'.format(self.program_name(), json_tmp.name)
@@ -136,6 +152,7 @@ class FutharkTuner(MeasurementInterface):
             # onlyd add param, if it has not already been added for this dataset
             if param not in self.thresholds[dataset]:
               self.thresholds[dataset][param] = value
+              n += 1
 
         # if a param has not been used in a comparison,
         # and thus not added, add it now
@@ -145,6 +162,7 @@ class FutharkTuner(MeasurementInterface):
 
       # we need a list of datasets later
       self.datasets = datasets.keys()
+    return n
 
   # since we only need the min/max of the possible values,
   # this function could be simplified, but as an possible
@@ -157,7 +175,6 @@ class FutharkTuner(MeasurementInterface):
       on the threshold values such that
       all possible combinations are tried.
       """
-      print('Calculating values for each threshold parameter..')
       # extract threshold values for each parameter across all datasets
       # and save to a dict with all threshold values for each parameter
       # keeping the threshold values sorted
@@ -169,16 +186,20 @@ class FutharkTuner(MeasurementInterface):
 
       # iterate over all sorted threshold values of all parameters
       # and calculate a value lying between the current and previous value
+      n=0
       for name, values in t.items():
         for i in range(0,len(values)):
           current_value = values[i]
           prev_value = values[i - 1] if i != 0 else 0
           v = int((current_value + prev_value) / 2)
+          n += 1
           self.values[name].append(v)
 
         # for the last threshold value also calculate a larger value
+        n += 1
         v = int((values[len(values) - 1] * 2))
         self.values[name].append(v)
+      return n
 
   def build_branch_tree(self):
     """
@@ -210,7 +231,6 @@ class FutharkTuner(MeasurementInterface):
             start.append(branch_dict(name, i))
           break
 
-    print('Building the branching-tree..')
     # Run the program once to extract the configurable parameters.
     sizes_cmd = './{} --print-size'.format(self.program_bin_name())
     sizes_res = self.call_program(sizes_cmd)
@@ -253,6 +273,7 @@ class FutharkTuner(MeasurementInterface):
         i += 2
       else:
         branch_list.append((pname, pdeps))
+    return i
 
   def program_bin_name(self):
     return os.path.splitext(self.program_name())[0]
