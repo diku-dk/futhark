@@ -305,9 +305,11 @@ mapOpToOp (_, used) pat aux1 e
   | Just (map_pe, cs, w, BasicOp (Reshape newshape reshape_arr), [p], [arr]) <-
       isMapWithOp pat e,
     paramName p == reshape_arr,
-    not $ UT.isConsumed (patElemName map_pe) used =
+    not $ UT.isConsumed (patElemName map_pe) used = do
+      let redim | isJust $ shapeCoercion newshape = DimCoercion w
+                | otherwise                       = DimNew w
       certifying (stmAuxCerts aux1 <> cs) $ letBind_ pat $
-      BasicOp $ Reshape (DimCoercion w : newshape) arr
+        BasicOp $ Reshape (redim : newshape) arr
 
   | Just (_, cs, _,
           BasicOp (Concat d arr arrs dw), ps, outer_arr : outer_arrs) <-
