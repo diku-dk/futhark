@@ -81,7 +81,7 @@ import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.Util (zEncodeString, mapAccumLM)
+import Futhark.Util (zEncodeString)
 import Futhark.Representation.AST.Attributes (isBuiltInFunction, builtInFunctions)
 
 
@@ -787,29 +787,26 @@ externalValueToCType (TransparentValue vd) = valueDescToCType vd
 externalValueToCType (OpaqueValue desc vds) = opaqueToCType desc vds
 
 prepareEntryInputs :: [ExternalValue] -> CompilerM op s [C.Param]
-prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
-  where prepare known_sizes (pno, TransparentValue vd) = do
+prepareEntryInputs = zipWithM prepare [(0::Int)..]
+  where prepare pno (TransparentValue vd) = do
           let pname = "in" ++ show pno
-          (known_sizes', ty) <- prepareValue known_sizes ([C.cexp|$id:pname|], vd)
-          return (known_sizes',
-                  [C.cparam|const $ty:ty $id:pname|])
+          ty <- prepareValue [C.cexp|$id:pname|] vd
+          return [C.cparam|const $ty:ty $id:pname|]
 
-        prepare known_sizes (pno, OpaqueValue desc vds) = do
+        prepare pno (OpaqueValue desc vds) = do
           ty <- opaqueToCType desc vds
           let pname = "in" ++ show pno
               field i ScalarValue{} = [C.cexp|$id:pname->$id:(tupleField i)|]
               field i ArrayValue{} = [C.cexp|$id:pname->$id:(tupleField i)|]
-          (known_sizes', _) <-
-            mapAccumLM prepareValue known_sizes $ zip (zipWith field [0..] vds) vds
-          return (known_sizes',
-                  [C.cparam|const $ty:ty *$id:pname|])
+          zipWithM_ prepareValue (zipWith field [0..] vds) vds
+          return [C.cparam|const $ty:ty *$id:pname|]
 
-        prepareValue known_sizes (src, ScalarValue pt signed name) = do
+        prepareValue src (ScalarValue pt signed name) = do
           let pt' = signedPrimTypeToCType signed pt
           stm [C.cstm|$id:name = $exp:src;|]
-          return (known_sizes, pt')
+          return pt'
 
-        prepareValue known_sizes (src, vd@(ArrayValue mem mem_size _ _ _ shape)) = do
+        prepareValue src vd@(ArrayValue mem mem_size _ _ _ shape) = do
           ty <- valueDescToCType vd
 
           stm [C.cstm|$exp:mem = $exp:src->mem;|]
@@ -819,28 +816,13 @@ prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
 
 
           let rank = length shape
-              maybeCopyDim (ConstSize x) i =
-                assertSameSize x [C.cexp|$exp:src->shape[$int:i]|]
-              maybeCopyDim (VarSize d) i
-                | d `elem` known_sizes =
-                    assertSameSize d [C.cexp|$exp:src->shape[$int:i]|]
-                | otherwise =
-                    [C.cstm|$id:d = $exp:src->shape[$int:i];|]
+              maybeCopyDim (VarSize d) i =
+                Just [C.cstm|$id:d = $exp:src->shape[$int:i];|]
+              maybeCopyDim _ _ = Nothing
 
-          stms $ zipWith maybeCopyDim shape [0..rank-1]
+          stms $ catMaybes $ zipWith maybeCopyDim shape [0..rank-1]
 
-          return (known_sizes ++ wrote_sizes, [C.cty|$ty:ty*|])
-
-          where wrote_sizes = mapMaybe isVarSize shape
-                isVarSize ConstSize{} = Nothing
-                isVarSize (VarSize d) = Just d
-
-                assertSameSize expected got =
-                  [C.cstm|if ($exp:expected != $exp:got) {
-                            fprintf(stderr, "Parameter %s has bad dimension (expected %d, got %d).\n",
-                                    $string:(pretty src), (int)$exp:expected, (int)$exp:got);
-                            exit(1);
-                          }|]
+          return [C.cty|$ty:ty*|]
 
 prepareEntryOutputs :: [ExternalValue] -> CompilerM op s [C.Param]
 prepareEntryOutputs = zipWithM prepare [(0::Int)..]
