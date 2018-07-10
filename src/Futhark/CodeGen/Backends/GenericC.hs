@@ -343,13 +343,6 @@ collect' m = pass $ do
   return ((x, DL.toList $ accItems w),
           const w { accItems = mempty})
 
-lookupFunction :: Name -> CompilerM op s [Type]
-lookupFunction name = do
-  res <- asks $ M.lookup name . envFtable
-  case res of
-    Nothing -> fail $ "Function " ++ nameToString name ++ " not found."
-    Just ts -> return ts
-
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
 
