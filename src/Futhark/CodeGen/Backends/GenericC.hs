@@ -97,6 +97,7 @@ data CompilerState s = CompilerState {
   , compLibDecls :: DL.DList C.Definition
   , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
   , compDebugItems :: DL.DList C.BlockItem
+  , compDeclaredMem :: [(VName,Space)]
   }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
@@ -111,6 +112,7 @@ newCompilerState src s = CompilerState { compTypeStructs = []
                                        , compLibDecls = mempty
                                        , compCtxFields = mempty
                                        , compDebugItems = mempty
+                                       , compDeclaredMem = mempty
                                        }
 
 -- | In which part of the header file we put the declaration.  This is
@@ -216,17 +218,16 @@ data CompilerEnv op s = CompilerEnv {
   , envFtable     :: M.Map Name [Type]
   }
 
-data CompilerAcc op s = CompilerAcc {
+newtype CompilerAcc op s = CompilerAcc {
     accItems :: DL.DList C.BlockItem
-  , accDeclaredMem :: [(VName,Space)]
   }
 
 instance Sem.Semigroup (CompilerAcc op s) where
-  CompilerAcc items1 declared1 <> CompilerAcc items2 declared2 =
-    CompilerAcc (items1<>items2) (declared1<>declared2)
+  CompilerAcc items1 <> CompilerAcc items2 =
+    CompilerAcc (items1<>items2)
 
 instance Monoid (CompilerAcc op s) where
-  mempty = CompilerAcc mempty mempty
+  mempty = CompilerAcc mempty
   mappend = (Sem.<>)
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
@@ -331,10 +332,7 @@ atInit x = modify $ \s ->
   s { compInit = compInit s ++ [x] }
 
 collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
-collect m = pass $ do
-  ((), w) <- listen m
-  return (DL.toList $ accItems w,
-          const w { accItems = mempty })
+collect m = snd <$> collect' m
 
 collect' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
 collect' m = pass $ do
@@ -555,7 +553,7 @@ declMem name space = do
   ty <- memToCType space
   decl [C.cdecl|$ty:ty $id:name;|]
   resetMem name
-  tell $ mempty { accDeclaredMem = [(name, space)] }
+  modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
 resetMem :: C.ToExp a => a -> CompilerM op s ()
 resetMem mem = do
@@ -1630,9 +1628,11 @@ compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
 compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
+  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
   stm [C.cstm|if (!$exp:e') {
                    ctx->error = msgprintf("Assertion failed at %s: %s\n",
                                            $string:stacktrace, $string:msg);
+                   $items:free_all_mem
                    return 1;
                  }|]
   where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
@@ -1764,12 +1764,16 @@ blockScope :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 blockScope = fmap snd . blockScope'
 
 blockScope' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
-blockScope' m = pass $ do
-  (x, w) <- listen m
-  let items = DL.toList $ accItems w
-  releases <- collect $ mapM_ (uncurry unRefMem) $ accDeclaredMem w
-  return ((x, items ++ releases),
-          const mempty)
+blockScope' m = do
+  old_allocs <- gets compDeclaredMem
+  (x, items) <- pass $ do
+    (x, w) <- listen m
+    let items = DL.toList $ accItems w
+    return ((x, items), const mempty)
+  new_allocs <- gets $ filter (`notElem` old_allocs) . compDeclaredMem
+  modify $ \s -> s { compDeclaredMem = old_allocs }
+  releases <- collect $ mapM_ (uncurry unRefMem) new_allocs
+  return (x, items <> releases)
 
 compileFunBody :: [C.Exp] -> [Param] -> Code op -> CompilerM op s ()
 compileFunBody output_ptrs outputs code = do
