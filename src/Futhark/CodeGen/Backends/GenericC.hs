@@ -925,11 +925,12 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
     $items:unpack_entry_inputs
 
     int ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
-    assert(ret == 0);
 
-    $items:pack_entry_outputs
+    if (ret == 0) {
+      $items:pack_entry_outputs
+    }
 
-    return 0;
+    return ret;
 }
     |],
           cli_entry_point,
@@ -1075,19 +1076,24 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
   ctx_ty <- contextType
   sync_ctx <- publicName "context_sync"
+  error_ctx <- publicName "context_get_error"
 
   let entry_point_name = nameToString fname
       cli_entry_point_function_name = "futrts_cli_entry_" ++ entry_point_name
       entry_point_function_name = "futhark_entry_" ++ entry_point_name
 
       run_it = [C.citems|
+                  int r;
                   /* Run the program once. */
                   $stms:pack_input
                   assert($id:sync_ctx(ctx) == 0);
                   t_start = get_wall_time();
-                  assert($id:entry_point_function_name(ctx,
-                                                       $args:(map addrOf output_vals),
-                                                       $args:input_args) == 0);
+                  r = $id:entry_point_function_name(ctx,
+                                                    $args:(map addrOf output_vals),
+                                                    $args:input_args);
+                  if (r != 0) {
+                    panic(1, "%s", $id:error_ctx(ctx));
+                  }
                   assert($id:sync_ctx(ctx) == 0);
                   t_end = get_wall_time();
                   long int elapsed_usec = t_end - t_start;
@@ -1625,9 +1631,9 @@ compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
   stm [C.cstm|if (!$exp:e') {
-                   fprintf(stderr, "Assertion failed at %s: %s\n",
-                                   $string:stacktrace, $string:msg);
-                   exit(1);
+                   ctx->error = msgprintf("Assertion failed at %s: %s\n",
+                                           $string:stacktrace, $string:msg);
+                   return 1;
                  }|]
   where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
 
