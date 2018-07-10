@@ -21,6 +21,7 @@ import math
 import itertools
 import bisect
 import time
+import sys
 from collections import OrderedDict, defaultdict
 
 technique.register(bandittechniques.AUCBanditMetaTechnique([
@@ -60,8 +61,7 @@ class FutharkTuner(MeasurementInterface):
     # programs that take a long time to compile.
     compile_cmd = '{} {}'.format(self.args.compiler, self.program_name())
     print('Compiling {}... '.format(self.program_name()), end='')
-    compile_res = self.call_program(compile_cmd)
-    assert compile_res['returncode'] == 0
+    compile_res = self.call_critical_program(compile_cmd)
     sys.stdout.flush()
     print('Done.')
 
@@ -87,6 +87,14 @@ class FutharkTuner(MeasurementInterface):
     n = self.build_branch_tree()
     print('{} branches generated.'.format(n))
 
+  def call_critical_program(self, cmd):
+    r = self.call_program(cmd)
+    if r['returncode'] != 0:
+      print("Command '%s' failed:" % (cmd))
+      print(r['stderr'])
+      sys.exit(1)
+    return r
+
   def get_base_timeout(self):
     """
     Run a benchmark without specifying thresholds,
@@ -97,9 +105,8 @@ class FutharkTuner(MeasurementInterface):
       base_cmd = 'futhark-bench {} --compiler=futhark-opencl --skip-compilation --json={}'.format(self.program_name(),
                                                                                                   json_tmp.name)
       wall_start = time.time()
-      base_res = self.call_program(base_cmd)
+      base_res = self.call_critical_program(base_cmd)
       wall_duration = time.time() - wall_start
-      assert base_res['returncode'] == 0
 
       json_data = json.load(json_tmp)
       base_datasets = json_data[self.program_name()]['datasets']
@@ -118,8 +125,7 @@ class FutharkTuner(MeasurementInterface):
     parameter are compared against for each dataset.
     """
     sizes_cmd = './{} --print-size'.format(self.program_bin_name())
-    sizes_res = self.call_program(sizes_cmd)
-    assert sizes_res['returncode'] == 0
+    sizes_res = self.call_critical_program(sizes_cmd)
 
     # the tuner needs all params for all datasets,
     # so extract and save all params, so we can add them
@@ -135,8 +141,7 @@ class FutharkTuner(MeasurementInterface):
     with tempfile.NamedTemporaryFile() as json_tmp:
       # extract comparison values
       val_cmd = 'futhark-bench {} --compiler=futhark-opencl --skip-compilation --pass-option=-L --runs=1 --json={}'.format(self.program_name(), json_tmp.name)
-      val_res = self.call_program(val_cmd)
-      assert val_res['returncode'] == 0
+      val_res = self.call_critical_program(val_cmd)
 
       json_data = json.load(json_tmp, object_pairs_hook=OrderedDict)
       datasets = json_data[self.program_name()]['datasets']
@@ -233,8 +238,7 @@ class FutharkTuner(MeasurementInterface):
 
     # Run the program once to extract the configurable parameters.
     sizes_cmd = './{} --print-size'.format(self.program_bin_name())
-    sizes_res = self.call_program(sizes_cmd)
-    assert sizes_res['returncode'] == 0
+    sizes_res = self.call_critical_program(sizes_cmd)
 
     # extract all dependencies and their boolean value
     branch_info = OrderedDict()
