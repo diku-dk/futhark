@@ -194,6 +194,39 @@ ensureCoalescedAccess expmap thread_space num_threads isThreadLocal sizeSubst ou
         Just perm <- is' `isPermutationOf` is ->
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
+      -- Check whether the access is already coalesced because of a
+      -- previous rearrange being applied to the current array:
+      -- 1. get the permutation of the source-array rearrange
+      -- 2. apply it to the slice
+      -- 3. check that the innermost index is actually the gid
+      --    of the innermost kernel dimension.
+      -- If so, the access is already coalesced, nothing to do!
+      -- (Cosmin's Heuristic.)
+      | Just (Let _ _ (BasicOp (Rearrange perm _))) <- M.lookup arr expmap,
+        ---- Just (Just perm) <- nonlinearInMemory arr expmap,
+        not $ null perm,
+        length slice >= length perm,
+        slice' <- map (\i -> slice !! i) perm,
+        DimFix inner_ind <- last slice',
+        not $ null thread_gids,
+        inner_ind == (Var $ last thread_gids) ->
+          return Nothing
+
+      -- We are not fully indexing an array, but the remaining slice
+      -- is invariant to the innermost-kernel dimension. We assume
+      -- the remaining slice will be sequentially streamed, hence
+      -- tiling will be applied later and will solve coalescing.
+      -- Hence nothing to do at this point. (Cosmin's Heuristic.)
+      | (is, rem_slice) <- splitSlice slice,
+        not $ null rem_slice,
+        allDimAreSlice rem_slice,
+        Nothing <- M.lookup arr expmap,
+        not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
+        is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
+        not (null thread_gids || null is),
+        not ( S.member (last thread_gids) (S.union (freeIn is) (freeIn rem_slice)) ) ->
+          return Nothing
+
       -- We are not fully indexing the array, and the indices are not
       -- a proper prefix of the thread indices, and some indices are
       -- thread local, so we assume (HEURISTIC!)  that the remaining
@@ -256,6 +289,11 @@ splitSlice :: Slice SubExp -> ([SubExp], Slice SubExp)
 splitSlice [] = ([], [])
 splitSlice (DimFix i:is) = first (i:) $ splitSlice is
 splitSlice is = ([], is)
+
+allDimAreSlice :: Slice SubExp -> Bool
+allDimAreSlice [] = True
+allDimAreSlice (DimFix _:_) = False
+allDimAreSlice (_:is) = allDimAreSlice is
 
 -- Try to move thread indexes into their proper position.
 coalescedIndexes :: [SubExp] -> [SubExp] -> Maybe [SubExp]
