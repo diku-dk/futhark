@@ -974,7 +974,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let smallest = -inf
 
   let pi = f64 f64m.pi
-  let e = f64 f64m.pi
+  let e = f64 f64m.e
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
