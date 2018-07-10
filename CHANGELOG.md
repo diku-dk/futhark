@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `f64.e` is no longer pi.
 
+  * Generated C library code will no longer `abort()` on application
+    errors (#584).
+
 ## [0.6.1]
 
 ### Added
