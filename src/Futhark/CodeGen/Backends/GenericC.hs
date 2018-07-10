@@ -1759,7 +1759,7 @@ compileCode (Call dests fname args) = do
     _        -> do
       ret <- newVName "call_ret"
       item [C.citem|int $id:ret = $id:(funName fname)($args:args'');|]
-      stm [C.cstm|assert(ret == 0);|]
+      stm [C.cstm|assert($id:ret == 0);|]
   where compileArg (MemArg m) = return [C.cexp|$exp:m|]
         compileArg (ExpArg e) = compileExp e
 
