@@ -160,6 +160,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   new_ctx <- GC.publicName "context_new"
   free_ctx <- GC.publicName "context_free"
   sync_ctx <- GC.publicName "context_sync"
+  error_ctx <- GC.publicName "context_get_error"
   clear_caches_ctx <- GC.publicName "context_clear_caches"
 
   GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx;|]
@@ -167,6 +168,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx);|]
   GC.headerDecl GC.InitDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx);|]
   GC.headerDecl GC.InitDecl [C.cedecl|int $id:clear_caches_ctx(struct $id:ctx* ctx);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|char* $id:error_ctx(struct $id:ctx* ctx);|]
 
   (fields, init_fields) <- GC.contextContents
 
@@ -174,6 +176,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          int detail_memory;
                          int debugging;
                          int logging;
+                         char *error;
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
                          struct opencl_context opencl;
@@ -195,6 +198,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           ctx->debugging = cfg->opencl.debugging;
                           ctx->logging = cfg->opencl.logging;
                           ctx->opencl.cfg = cfg->opencl;
+                          ctx->error = NULL;
                           $stms:init_fields
                           $stms:ctx_opencl_inits
 
@@ -218,6 +222,11 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.libDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx) {
                          OPENCL_SUCCEED(clFinish(ctx->opencl.queue));
                          return 0;
+                       }|]
+  GC.libDecl [C.cedecl|char* $id:error_ctx(struct $id:ctx* ctx) {
+                         char* error = ctx->error;
+                         ctx->error = NULL;
+                         return error;
                        }|]
 
   GC.libDecl [C.cedecl|int $id:clear_caches_ctx(struct $id:ctx* ctx) {

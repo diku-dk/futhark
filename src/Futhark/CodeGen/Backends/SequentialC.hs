@@ -69,17 +69,20 @@ compileProg =
           new_ctx <- GC.publicName "context_new"
           free_ctx <- GC.publicName "context_free"
           sync_ctx <- GC.publicName "context_sync"
+          error_ctx <- GC.publicName "context_get_error"
 
           GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx;|]
           GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg);|]
           GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx);|]
           GC.headerDecl GC.InitDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx);|]
+          GC.headerDecl GC.InitDecl [C.cedecl|char* $id:error_ctx(struct $id:ctx* ctx);|]
 
           (fields, init_fields) <- GC.contextContents
 
           GC.libDecl [C.cedecl|struct $id:ctx {
                                  int detail_memory;
                                  int debugging;
+                                 char *error;
                                  $sdecls:fields
                                };|]
           GC.libDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg) {
@@ -89,6 +92,7 @@ compileProg =
                                   }
                                   ctx->detail_memory = cfg->debugging;
                                   ctx->debugging = cfg->debugging;
+                                  ctx->error = NULL;
                                   $stms:init_fields
                                   return ctx;
                                }|]
@@ -98,6 +102,11 @@ compileProg =
           GC.libDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx) {
                                  ctx=ctx;
                                  return 0;
+                               }|]
+          GC.libDecl [C.cedecl|char* $id:error_ctx(struct $id:ctx* ctx) {
+                                 char* error = ctx->error;
+                                 ctx->error = NULL;
+                                 return error;
                                }|]
 
 
