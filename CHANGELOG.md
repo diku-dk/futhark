@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * `f64.e` is no longer pi.
+
 ## [0.6.1]
 
 ### Added
