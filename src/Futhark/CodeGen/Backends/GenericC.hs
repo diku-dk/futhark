@@ -600,30 +600,6 @@ allocMem name size space = do
             join $ asks envAllocate <*> rawMem name <*>
             pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*> pure sid
 
-oneTypeToCType :: Type -> CompilerM op s C.Type
-oneTypeToCType (Scalar bt) = return $ primTypeToCType bt
-oneTypeToCType (Mem _ space) = memToCType space
-
-typeToCType :: [Type] -> CompilerM op s C.Type
-typeToCType t = do
-  ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
-  case ty of
-    Just (_, (cty, _)) -> return cty
-    Nothing -> do
-      members <- zipWithM field t [(0::Int)..]
-      let name = "futrts_" ++ intercalate "_" (map valueTypeName t)
-          struct = [C.cedecl|struct $id:name { $sdecls:members };|]
-          stype  = [C.cty|struct $id:name|]
-      modify $ \s -> s { compTypeStructs = (t, (stype,struct)) : compTypeStructs s }
-      return stype
-        where field et i = do
-                ct <- oneTypeToCType et
-                return [C.csdecl|$ty:ct $id:(tupleField i);|]
-
-  where valueTypeName (Scalar bt) = pretty $ primTypeToCType bt
-        valueTypeName (Mem _ (Space space)) = space ++ "_mem"
-        valueTypeName (Mem _ DefaultSpace) = "mem"
-
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
   (Int8,  TypeUnsigned) -> [C.cexp|u8_info|]
@@ -921,18 +897,11 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
                 [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
           stms $ zipWith maybeCopyDim shape [0..rank-1]
 
-unpackResults :: VName -> [Param] -> [C.Stm]
-unpackResults ret outparams =
-  zipWith assign outparams [0..]
-  where assign p i = [C.cstm|$id:(paramName p) = $exp:(tupleFieldExp ret i);|]
-
 onEntryPoint :: Name -> Function op
              -> CompilerM op s (C.Definition, C.Definition, C.Initializer)
 onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
-  ret <- newVName "ret"
-  crettype <- typeToCType $ paramsTypes outputs
-
-  let argexps = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
+  let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
+      in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
   inputdecls <- collect $ mapM_ stubParam inputs
   outputdecls <- collect $ mapM_ stubParam outputs
@@ -944,8 +913,6 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
     collect' $ prepareEntryInputs args
   (entry_point_output_params, pack_entry_outputs) <-
     collect' $ prepareEntryOutputs results
-
-  let unpack_ret = unpackResults ret outputs
 
   (cli_entry_point, cli_init) <- cliEntryPoint fname function
 
@@ -965,10 +932,9 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
 
     $items:unpack_entry_inputs
 
-    $ty:crettype $id:ret;
-    $id:ret = $id:(funName fname)(ctx, $args:argexps);
+    int ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
+    assert(ret == 0);
 
-    $stms:unpack_ret
     $items:pack_entry_outputs
 
     return 0;
@@ -1445,16 +1411,16 @@ $edecls:entry_point_decls
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
-  args' <- mapM compileInput inputs
-  (retval, body') <- blockScope' $ do
-    mapM_ compileOutput outputs
-    compileFunBody outputs body
-  crettype <- typeToCType $ paramsTypes outputs
+  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
+  inparams <- mapM compileInput inputs
+  body' <- blockScope $ compileFunBody out_ptrs outputs body
   ctx_ty <- contextType
-  return ([C.cedecl|static $ty:crettype $id:(funName fname)($ty:ctx_ty *ctx, $params:args');|],
-          [C.cfun|static $ty:crettype $id:(funName fname)($ty:ctx_ty *ctx, $params:args') {
+  return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
+                                                   $params:outparams, $params:inparams);|],
+          [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
+                                                 $params:outparams, $params:inparams) {
              $items:body'
-             return $id:retval;
+             return 0;
 }|])
   where compileInput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
@@ -1465,9 +1431,12 @@ compileFun (fname, Function _ outputs inputs body _ _) = do
 
         compileOutput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
-          decl [C.cdecl|$ty:ctp $id:name;|]
-        compileOutput (MemParam name space) =
-          declMem name space
+          p_name <- newVName $ "out_" ++ baseString name
+          return ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
+        compileOutput (MemParam name space) = do
+          ty <- memToCType space
+          p_name <- newVName $ baseString name ++ "_p"
+          return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
 compilePrimValue :: PrimValue -> C.Exp
 
@@ -1781,19 +1750,16 @@ compileCode (SetMem dest src space) =
 
 compileCode (Call dests fname args) = do
   args' <- mapM compileArg args
-  outtypes <- lookupFunction fname
-  crestype <- typeToCType outtypes
-  let args'' | isBuiltInFunction fname = args'
-             | otherwise = [C.cexp|ctx|] : args'
+  let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
+      args'' | isBuiltInFunction fname = args'
+             | otherwise = [C.cexp|ctx|] : out_args ++ args'
   case dests of
     [dest] | isBuiltInFunction fname ->
       stm [C.cstm|$id:dest = $id:(funName fname)($args:args'');|]
     _        -> do
       ret <- newVName "call_ret"
-      decl [C.cdecl|$ty:crestype $id:ret;|]
-      stm [C.cstm|$id:ret = $id:(funName fname)($args:args'');|]
-      forM_ (zip [0..] dests) $ \(i,dest) ->
-        stm [C.cstm|$id:dest = $exp:(tupleFieldExp ret i);|]
+      item [C.citem|int $id:ret = $id:(funName fname)($args:args'');|]
+      stm [C.cstm|assert(ret == 0);|]
   where compileArg (MemArg m) = return [C.cexp|$exp:m|]
         compileArg (ExpArg e) = compileExp e
 
@@ -1809,20 +1775,22 @@ blockScope' m = pass $ do
   return ((x, items ++ releases),
           const mempty)
 
-compileFunBody :: [Param] -> Code op -> CompilerM op s VName
-compileFunBody outputs code = do
-  retval <- newVName "retval"
-  bodytype <- typeToCType $ paramsTypes outputs
+compileFunBody :: [C.Exp] -> [Param] -> Code op -> CompilerM op s ()
+compileFunBody output_ptrs outputs code = do
+  mapM_ declareOutput outputs
   compileCode code
-  decl [C.cdecl|$ty:bodytype $id:retval;|]
-  let setRetVal' i (MemParam name space) = do
-        let field = tupleFieldExp retval i
-        resetMem field
-        setMem field name space
-      setRetVal' i (ScalarParam name _) =
-        stm [C.cstm|$exp:(tupleFieldExp retval i) = $id:name;|]
-  zipWithM_ setRetVal' [0..] outputs
-  return retval
+  zipWithM_ setRetVal' output_ptrs outputs
+  where declareOutput (MemParam name space) =
+          declMem name space
+        declareOutput (ScalarParam name pt) = do
+          let ctp = primTypeToCType pt
+          decl [C.cdecl|$ty:ctp $id:name;|]
+
+        setRetVal' p (MemParam name space) = do
+          resetMem [C.cexp|*$exp:p|]
+          setMem [C.cexp|*$exp:p|] name space
+        setRetVal' p (ScalarParam name _) =
+          stm [C.cstm|*$exp:p = $id:name;|]
 
 declareAndSet :: Code op -> Maybe (VName, PrimType, Exp, Code op)
 declareAndSet (DeclareScalar name t :>>: (SetScalar dest e :>>: c))
