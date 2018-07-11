@@ -335,7 +335,7 @@ synopsisType tb = Just $ do
 typeBindHtml :: Html -> TypeBind -> DocM Html
 typeBindHtml name' (TypeBind _ tparams t _ _) = do
   t' <- noLink (map typeParamName tparams) $ typeDeclHtml t
-  return $ typeAbbrevHtml name' tparams <> " = " <> t'
+  return $ typeAbbrevHtml Unlifted name' tparams <> " = " <> t'
 
 renderEnv :: Env -> DocM Html
 renderEnv (Env vtable ttable sigtable modtable _) = do
@@ -359,7 +359,7 @@ renderValBind = fmap H.div . synopsisValBindBind
 renderTypeBind :: (VName, TypeBinding) -> DocM Html
 renderTypeBind (name, TypeAbbr l tps tp) = do
   tp' <- typeHtml tp
-  return $ H.div $ typeAbbrevHtml (vnameHtml name) tps <> " = " <> tp'
+  return $ H.div $ typeAbbrevHtml l (vnameHtml name) tps <> " = " <> tp'
 
 synopsisValBindBind :: (VName, BoundV) -> DocM Html
 synopsisValBindBind (name, BoundV tps t) = do
@@ -572,9 +572,11 @@ typeParamHtml (TypeParamDim name _) = brackets $ vnameHtml name
 typeParamHtml (TypeParamType Unlifted name _) = "'" <> vnameHtml name
 typeParamHtml (TypeParamType Lifted name _) = "'^" <> vnameHtml name
 
-typeAbbrevHtml :: Html -> [TypeParam] -> Html
-typeAbbrevHtml name params =
-  "type " <> name <> joinBy " " (map typeParamHtml params)
+typeAbbrevHtml :: Liftedness -> Html -> [TypeParam] -> Html
+typeAbbrevHtml l name params =
+  what <> name <> joinBy " " (map typeParamHtml params)
+  where what = case l of Lifted -> "type ^"
+                         Unlifted -> "type "
 
 docHtml :: Maybe DocComment -> DocM Html
 docHtml (Just (DocComment doc loc)) =
@@ -703,8 +705,9 @@ describeSpec (ValSpec name tparams t doc _) =
                then IndexValue else IndexFunction
 describeSpec (TypeAbbrSpec vb) =
   describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)
-describeSpec (TypeSpec liftedness name tparams doc _) =
-  describeGeneric name IndexType doc $ return . (`typeAbbrevHtml` tparams)
+describeSpec (TypeSpec l name tparams doc _) =
+  describeGeneric name IndexType doc $
+  return . (\name' -> typeAbbrevHtml l name' tparams)
 describeSpec (ModSpec name se doc _) =
   describeGenericMod name IndexModule se doc $ \name' ->
   case se of
