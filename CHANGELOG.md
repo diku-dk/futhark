@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Generated C library code will no longer `abort()` on application
     errors (#584).
 
+  * Fix file imports on Windows.
+
 ## [0.6.1]
 
 ### Added
