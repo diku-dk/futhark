@@ -339,10 +339,17 @@ coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =
   [num_is..rank-1] ++ [0..num_is-1]
 
+areInversePerms :: [Int] -> [Int] -> Bool
+areInversePerms p1 p2 =
+  (length p1 == length p2) &&
+  ([0..length p2 - 1] == map (p2 !!) p1)
+
 rearrangeInput :: MonadBinder m =>
                   Maybe (Maybe [Int]) -> [Int] -> VName -> m VName
 rearrangeInput (Just (Just current_perm)) perm arr
-  | current_perm == perm = return arr -- Already has desired representation.
+  | areInversePerms current_perm perm = return arr -- Already has desired representation.
+                                                   -- was previously
+                                                   --`current_perm == perm` BUG?
 rearrangeInput Nothing perm arr
   | sort perm == perm = return arr -- We don't know the current
                                    -- representation, but the indexing
