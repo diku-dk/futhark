@@ -10,7 +10,7 @@ module Language.Futhark.Futlib (futlib) where
 import Data.FileEmbed
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified System.FilePath as Posix
+import qualified System.FilePath.Posix as Posix
 
 import Futhark.Util (toPOSIX)
 
