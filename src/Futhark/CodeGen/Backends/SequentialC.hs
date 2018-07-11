@@ -82,6 +82,7 @@ compileProg =
           GC.libDecl [C.cedecl|struct $id:ctx {
                                  int detail_memory;
                                  int debugging;
+                                 typename lock_t lock;
                                  char *error;
                                  $sdecls:fields
                                };|]
@@ -93,10 +94,12 @@ compileProg =
                                   ctx->detail_memory = cfg->debugging;
                                   ctx->debugging = cfg->debugging;
                                   ctx->error = NULL;
+                                  create_lock(&ctx->lock);
                                   $stms:init_fields
                                   return ctx;
                                }|]
           GC.libDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx) {
+                                 free_lock(&ctx->lock);
                                  free(ctx);
                                }|]
           GC.libDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx) {

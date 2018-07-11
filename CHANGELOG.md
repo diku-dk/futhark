@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix file imports on Windows.
 
+  * `futhark-c` and `futhark-opencl` now generates thread-safe code (#586).
+
 ## [0.6.1]
 
 ### Added
