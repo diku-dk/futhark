@@ -24,7 +24,7 @@ import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.List
-import System.FilePath
+import qualified System.FilePath.Posix as Posix
 import System.IO.Error
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -124,12 +124,12 @@ readImportFile include = do
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
   r <- liftIO $ readFileSafely $ includeToFilePath include
-  case (r, lookup abs_filepath futlib) of
+  case (r, lookup futlib_str futlib) of
     (Just (Right (filepath,s)), _) -> return (s, filepath)
     (Just (Left e), _)  -> externalErrorS e
-    (Nothing, Just t)   -> return (t, "[builtin]" </> abs_filepath)
+    (Nothing, Just t)   -> return (t, futlib_str)
     (Nothing, Nothing)  -> externalErrorS not_found
-   where abs_filepath = includeToFilePath include
+   where futlib_str = "/" Posix.</> includeToString include Posix.<.> "fut"
 
          not_found =
            "Error at " ++ E.locStr (srclocOf include) ++
@@ -159,7 +159,7 @@ readLibrary basis fps =
               handleFile [] (mkInitialImport fp_name) fs fp
             Just (Left e) -> externalError $ T.pack e
             Nothing -> externalErrorS $ fp ++ ": file not found."
-            where (fp_name, _) = splitExtension fp
+            where (fp_name, _) = Posix.splitExtension fp
 
 -- | Read and type-check Futhark imports (no @.fut@ extension; may
 -- refer to baked-in futlib).  This is an exotic operation that

@@ -26,11 +26,11 @@ import Data.Semigroup ((<>))
 import Data.Loc
 import qualified Data.Map.Strict as M
 import qualified Data.Semigroup as Sem
-import System.FilePath
 import qualified System.FilePath.Posix as Posix
+import qualified System.FilePath as Native
 
 import Language.Futhark
-import Futhark.Util (dropLast)
+import Futhark.Util (dropLast, toPOSIX, fromPOSIX)
 
 -- | Canonical reference to a Futhark code file.  Does not include the
 -- @.fut@ extension.  This is most often a path relative to the
@@ -43,10 +43,8 @@ instance Located ImportName where
 
 -- | Create an import name immediately from a file path specified by
 -- the user.
-mkInitialImport :: FilePath -> ImportName
+mkInitialImport :: Native.FilePath -> ImportName
 mkInitialImport s = ImportName (Posix.normalise $ toPOSIX s) noLoc
-  where toPOSIX :: FilePath -> Posix.FilePath
-        toPOSIX = Posix.joinPath . splitDirectories
 
 -- | We resolve '..' paths here and assume that no shenanigans are
 -- going on with symbolic links.  If there is, too bad.  Don't do
@@ -54,9 +52,9 @@ mkInitialImport s = ImportName (Posix.normalise $ toPOSIX s) noLoc
 mkImportFrom :: ImportName -> String -> SrcLoc -> ImportName
 mkImportFrom (ImportName includer _) includee
   | Posix.isAbsolute includee = ImportName includee
-  | otherwise = ImportName $ normalise $ joinPath $ includer' ++ includee'
-  where (dotdots, includee') = span ("../"==) $ splitPath includee
-        includer_parts = init $ splitPath includer
+  | otherwise = ImportName $ Posix.normalise $ Posix.joinPath $ includer' ++ includee'
+  where (dotdots, includee') = span ("../"==) $ Posix.splitPath includee
+        includer_parts = init $ Posix.splitPath includer
         includer'
           | length dotdots > length includer_parts =
               replicate (length dotdots - length includer_parts) "../"
@@ -64,13 +62,8 @@ mkImportFrom (ImportName includer _) includee
               dropLast (length dotdots) includer_parts
 
 -- | Create a @.fut@ file corresponding to an 'ImportName'.
-includeToFilePath :: ImportName -> FilePath
-includeToFilePath (ImportName s _) = fromPOSIX $ Posix.normalise s <.> "fut"
-  where -- | Some bad operating systems do not use forward slash as
-        -- directory separator - this is where we convert Futhark includes
-        -- (which always use forward slash) to native paths.
-        fromPOSIX :: Posix.FilePath -> FilePath
-        fromPOSIX = joinPath . Posix.splitDirectories
+includeToFilePath :: ImportName -> Native.FilePath
+includeToFilePath (ImportName s _) = fromPOSIX $ Posix.normalise s Posix.<.> "fut"
 
 -- | Produce a human-readable canonicalized string from an
 -- 'ImportName'.

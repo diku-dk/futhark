@@ -10,10 +10,12 @@ module Language.Futhark.Futlib (futlib) where
 import Data.FileEmbed
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import System.FilePath
+import qualified System.FilePath.Posix as Posix
+
+import Futhark.Util (toPOSIX)
 
 -- | Futlib embedded as 'T.Text' values, one for every file.
-futlib :: [(FilePath, T.Text)]
+futlib :: [(Posix.FilePath, T.Text)]
 futlib = map fixup futlib_bs
   where futlib_bs = $(embedDir "futlib")
-        fixup (path, s) = ("/futlib" </> path, T.decodeUtf8 s)
+        fixup (path, s) = ("/futlib" Posix.</> toPOSIX path, T.decodeUtf8 s)

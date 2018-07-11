@@ -228,6 +228,8 @@ will cause the function to ``abort()`` rather than return an error
 code.  However, all application errors (such as bounds and array size
 checks) will produce an error code.
 
+The API functions are thread safe.
+
 Generating Python
 ^^^^^^^^^^^^^^^^^
 
