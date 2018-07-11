@@ -7,7 +7,7 @@ environment:
     # use a short path prefix to avoid running into path-length limitations
     STACK_ROOT: C:\sr
   matrix:
-  - STACK_YAML: stack.yaml
+  - STACK_YAML: stack-lts-9.2.yaml
 cache:
 - "%STACK_ROOT%"
 
