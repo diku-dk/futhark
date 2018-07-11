@@ -632,6 +632,11 @@ opaqueName s vds = "opaque_" ++ zEncodeString (show (s ++ concatMap p vds)) -- F
         p (ArrayValue _ _ space pt signed dims) =
           show (space, pt, signed, length dims)
 
+criticalSection :: [C.BlockItem] -> [C.BlockItem]
+criticalSection items = [[C.citem|lock_lock(&ctx->lock);|]] <>
+                        items <>
+                        [[C.citem|lock_unlock(&ctx->lock);|]]
+
 arrayLibraryFunctions :: Space -> PrimType -> Signedness -> [DimSize]
                       -> CompilerM op s [C.Definition]
 arrayLibraryFunctions space pt signed shape = do
@@ -686,18 +691,18 @@ arrayLibraryFunctions space pt signed shape = do
             if (arr == NULL) {
               return NULL;
             }
-            $items:new_body
+            $items:(criticalSection new_body)
             return arr;
           }
 
           int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
-            $items:free_body
+            $items:(criticalSection free_body)
             free(arr);
             return 0;
           }
 
           int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data) {
-            $items:values_body
+            $items:(criticalSection values_body)
             return 0;
           }
 
@@ -902,6 +907,8 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
     $items:inputdecls
     $items:outputdecls
 
+    lock_lock(&ctx->lock);
+
     $items:unpack_entry_inputs
 
     int ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
@@ -909,6 +916,8 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
     if (ret == 0) {
       $items:pack_entry_outputs
     }
+
+    lock_unlock(&ctx->lock);
 
     return ret;
 }
@@ -1330,6 +1339,8 @@ $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
 
+$esc:lock_h
+
 $edecls:(DL.toList (compEarlyDecls endstate))
 
 $edecls:(DL.toList (compLibDecls endstate))
@@ -1386,6 +1397,7 @@ $edecls:entry_point_decls
         panic_h = $(embedStringFile "rts/c/panic.h")
         values_h = $(embedStringFile "rts/c/values.h")
         timing_h = $(embedStringFile "rts/c/timing.h")
+        lock_h = $(embedStringFile "rts/c/lock.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do

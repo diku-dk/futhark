@@ -176,6 +176,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          int detail_memory;
                          int debugging;
                          int logging;
+                         typename lock_t lock;
                          char *error;
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
@@ -199,6 +200,8 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           ctx->logging = cfg->opencl.logging;
                           ctx->opencl.cfg = cfg->opencl;
                           ctx->error = NULL;
+                          create_lock(&ctx->lock);
+
                           $stms:init_fields
                           $stms:ctx_opencl_inits
 
@@ -217,6 +220,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           return ctx;
                        }|]
   GC.libDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx) {
+                                 free_lock(&ctx->lock);
                                  free(ctx);
                                }|]
   GC.libDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx) {

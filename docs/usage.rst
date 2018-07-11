@@ -228,10 +228,7 @@ will cause the function to ``abort()`` rather than return an error
 code.  However, all application errors (such as bounds and array size
 checks) will produce an error code.
 
-The API functions are presently *not* thread safe.  If you have
-several threads that all wish to call Futhark functions, then you must
-add some form of synchronisation such that only one thread at a time
-is calling them.
+The API functions are thread safe.
 
 Generating Python
 ^^^^^^^^^^^^^^^^^
