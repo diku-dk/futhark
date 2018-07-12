@@ -690,8 +690,11 @@ int opencl_alloc_actual(struct opencl_context *ctx, size_t size, cl_mem *mem_out
     return error;
   }
 
-  int x = 2;
-  error = clEnqueueWriteBuffer(ctx->queue, *mem_out, 1, 0, sizeof(x), &x, 0, NULL, NULL);
+  int x = 1337;
+  error = clEnqueueFillBuffer(ctx->queue, *mem_out,
+                              &x, sizeof(x),
+                              0, (size/sizeof(x))*sizeof(x),
+                              0, NULL, NULL);
 
   // No need to wait for completion here. clWaitForEvents() cannot
   // return mem object allocation failures. This implies that the
