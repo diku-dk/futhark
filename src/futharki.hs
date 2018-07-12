@@ -118,7 +118,6 @@ readEvalPrint :: FutharkiM ()
 readEvalPrint = do
   i <- gets interpCount
   prompt <- getPrompt
-  modify $ \s -> s { interpCount = i + 1 }
   line <- inputLine $ "[" ++ show i ++ "]> "
   case T.uncons line of
     Just (':', command) -> do
@@ -137,6 +136,7 @@ readEvalPrint = do
         Left err -> liftIO $ print err
         Right (Left d) -> onDec d
         Right (Right e) -> onExp e
+  modify $ \s -> s { interpCount = i + 1 }
   where inputLine prompt = do
           inp <- lift $ Haskeline.getInputLine prompt
           case inp of
