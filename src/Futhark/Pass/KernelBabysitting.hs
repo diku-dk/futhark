@@ -54,7 +54,7 @@ type ExpMap = M.Map VName (Stm Kernels)
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case M.lookup name m of
-    Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just perm
+    Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just $ rearrangeInverse perm
     Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
     Just (Let pat _ (Op (Kernel _ _ ts _))) ->
@@ -64,7 +64,7 @@ nonlinearInMemory name m =
   where nonlinear (pe, t)
           | inner_r <- arrayRank t, inner_r > 0 = do
               let outer_r = arrayRank (patElemType pe) - inner_r
-              return $ Just $ [inner_r..inner_r+outer_r-1] ++ [0..inner_r-1]
+              return $ Just $ rearrangeInverse $ [inner_r..inner_r+outer_r-1] ++ [0..inner_r-1]
           | otherwise = Nothing
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
