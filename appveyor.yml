@@ -18,7 +18,7 @@ install:
  - 7z x stack.zip stack.exe > nul
  - stack setup > nul
  - stack build alex happy
- - stack --no-terminal test --only-dependencies -j 3
+ - stack --no-terminal test --only-dependencies -j 1
  - stack install
 
 test_script:

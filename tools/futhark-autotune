@@ -61,8 +61,8 @@ class FutharkTuner(MeasurementInterface):
     # programs that take a long time to compile.
     compile_cmd = '{} {}'.format(self.args.compiler, self.program_name())
     print('Compiling {}... '.format(self.program_name()), end='')
-    compile_res = self.call_critical_program(compile_cmd)
     sys.stdout.flush()
+    compile_res = self.call_critical_program(compile_cmd)
     print('Done.')
 
     if self.args.calc_timeout:
