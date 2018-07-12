@@ -176,9 +176,9 @@ onDec d = do
   where curBasis = do
           imports <- gets interpImports
           src <- gets interpNameSource
-          return $ Basis { basisImports = imports
-                         , basisNameSource = src
-                         , basisRoots = basisRoots preludeBasis }
+          return Basis { basisImports = imports
+                       , basisNameSource = src
+                       , basisRoots = basisRoots preludeBasis }
 
         reportDec (ValDec vb) =
           Just $ "val " <> baseString (valBindName vb) <>
