@@ -1628,7 +1628,7 @@ compileCode (Assert e (ErrorMsg parts) (loc, locs)) = do
       onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   stm [C.cstm|if (!$exp:e') {
-                   ctx->error = msgprintf($string:("Error at %s: " <> concat formatstrs <> "\n"),
+                   ctx->error = msgprintf($string:("Error at %s:\n" <> concat formatstrs <> "\n"),
                                            $string:stacktrace, $args:formatargs);
                    $items:free_all_mem
                    return 1;

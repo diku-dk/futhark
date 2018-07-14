@@ -10,7 +10,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Added
 
   * Bounds checking errors now show the erroneous index and the size
-    of the indexed array.
+    of the indexed array.  Some other size-related errors also show
+    more information, but it will be a while before they are all
+    converted (and say something useful - it's not entirely
+    straightforward).
 
 ### Removed
 
