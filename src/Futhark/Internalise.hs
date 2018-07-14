@@ -69,7 +69,7 @@ internaliseFunName ofname _  = do
     Nothing -> return $ nameFromString $ pretty ofname
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
-internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params body _ loc) = do
+internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ loc) = do
   info <- bindingParams tparams params $ \pcm shapeparams params' -> do
     (rettype_bad, rcm) <- internaliseReturnType rettype
     let rettype' = zeroExts rettype_bad
@@ -87,11 +87,14 @@ internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params bod
 
     fname' <- internaliseFunName fname params
 
-    body' <- localScope constscope $
-             ensureResultExtShape asserting
-             "shape of function result does not match shapes in return type"
-             loc (map I.fromDecl rettype')
-             =<< internaliseBody body
+    body' <- localScope constscope $ do
+      msg <- case retdecl of
+               Just dt -> ErrorMsg .
+                          ("Function return value does not match shape of type ":) <$>
+                          typeExpForError rcm dt
+               Nothing -> return $ ErrorMsg ["Function return value does not match shape of declared return type."]
+      internaliseBody body >>=
+        ensureResultExtShape asserting msg loc (map I.fromDecl rettype')
 
     let free_in_fun = freeInBody body' `S.difference` normal_param_names
 
@@ -380,13 +383,17 @@ internaliseExp desc (E.Empty (TypeDecl _(Info et)) _ _) = do
         extDimToZero I.Ext{} = constant (0::Int32)
         extDimToZero (I.Free d) = d
 
-internaliseExp desc (E.Ascript e (TypeDecl _ (Info et)) loc) = do
+internaliseExp desc (E.Ascript e (TypeDecl dt (Info et)) loc) = do
   es <- internaliseExp desc e
   (ts, cm) <- internaliseReturnType et
   mapM_ (uncurry (internaliseDimConstant loc)) cm
-  forM (zip es ts) $ \(e',t') ->
-    ensureExtShape asserting "value does not match shape in type"
-    loc (I.fromDecl t') desc e'
+  dt' <- typeExpForError cm dt
+  forM (zip es ts) $ \(e',t') -> do
+    dims <- arrayDims <$> subExpType e'
+    let parts = ["Value of (core language) shape ("] ++
+                intersperse ", " (map ErrorInt32 dims) ++
+                [") cannot match shape of type `"] ++ dt' ++ ["`."]
+    ensureExtShape asserting (ErrorMsg parts) loc (I.fromDecl t') desc e'
 
 internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
@@ -1613,3 +1620,41 @@ partitionWithSOACS k lam arrs = do
                   (I.Var (I.paramName p) : take i sizes)
       letSubExp "total_res" $ I.If is_this_one
         (resultBody [this_one]) (resultBody [next_one]) $ ifCommon [I.Prim int32]
+
+typeExpForError :: ConstParams -> E.TypeExp VName -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError _ (E.TEVar qn _) =
+  return [ErrorString $ pretty qn]
+typeExpForError cm (E.TEUnique te _) = ("*":) <$> typeExpForError cm te
+typeExpForError cm (E.TEArray te d _) = do
+  d' <- dimDeclForError cm d
+  te' <- typeExpForError cm te
+  return $ ["[", d', "]"] ++ te'
+typeExpForError cm (E.TETuple tes _) = do
+  tes' <- mapM (typeExpForError cm) tes
+  return $ ["("] ++ intercalate [", "] tes' ++ [")"]
+typeExpForError cm (E.TERecord fields _) = do
+  fields' <- mapM onField fields
+  return $ ["{"] ++ intercalate [", "] fields' ++ ["}"]
+  where onField (k, te) = (ErrorString (pretty k ++ ": "):) <$> typeExpForError cm te
+typeExpForError cm (E.TEArrow _ t1 t2 _) = do
+  t1' <- typeExpForError cm t1
+  t2' <- typeExpForError cm t2
+  return $ t1' ++ [" -> "] ++ t2'
+typeExpForError cm (E.TEApply t arg _) = do
+  t' <- typeExpForError cm t
+  arg' <- case arg of TypeArgExpType argt -> typeExpForError cm argt
+                      TypeArgExpDim d _   -> pure <$> dimDeclForError cm d
+  return $ t' ++ [" "] ++ arg'
+
+dimDeclForError :: ConstParams -> E.DimDecl VName -> InternaliseM (ErrorMsgPart SubExp)
+dimDeclForError cm (NamedDim d) = do
+  substs <- asks $ M.lookup (E.qualLeaf d) . envSubsts
+  let fname = nameFromString $ pretty (E.qualLeaf d) ++ "f"
+  d' <- case (substs, lookup fname cm) of
+          (Just [v], _) -> return v
+          (_, Just v)   -> return $ I.Var v
+          _             -> return $ I.Var $ E.qualLeaf d
+  return $ ErrorInt32 d'
+dimDeclForError _ (ConstDim d) =
+  return $ ErrorString $ "[" ++ pretty d ++ "]"
+dimDeclForError _ AnyDim = return ""
