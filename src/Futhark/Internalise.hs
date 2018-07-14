@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -217,15 +218,12 @@ internaliseExp _ (E.Var (E.QualName _ name) (Info t) loc) = do
 
 internaliseExp desc (E.Index e idxs _ loc) = do
   vs <- internaliseExpToVars "indexed" e
-  dims <- case vs of
-            [] -> return [] -- Will this happen?
-            v:_ -> I.arrayDims <$> lookupType v
-  (idxs', idx_cs) <- unzip <$> zipWithM (internaliseDimIndex loc) dims idxs
-  let index v = do
-        v_t <- lookupType v
-        return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
-  certifying (mconcat idx_cs) $
-    letSubExps desc =<< mapM index vs
+  dims <- case vs of []  -> return [] -- Will this happen?
+                     v:_ -> I.arrayDims <$> lookupType v
+  (idxs', cs) <- internaliseSlice loc dims idxs
+  let index v = do v_t <- lookupType v
+                   return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
+  certifying cs $ letSubExps desc =<< mapM index vs
 
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
@@ -573,14 +571,14 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   dims <- case srcs of
             [] -> return [] -- Will this happen?
             v:_ -> I.arrayDims <$> lookupType v
-  (idxs', idx_cs) <- unzip <$> zipWithM (internaliseDimIndex loc) dims idxs
+  (idxs', cs) <- internaliseSlice loc dims idxs
   let comb sname ve' = do
         sname_t <- lookupType sname
         let slice = fullSlice sname_t idxs'
             rowtype = sname_t `setArrayDims` sliceDims slice
         ve'' <- ensureShape asserting "shape of value does not match shape of source array"
                 loc rowtype "lw_val_correct_shape" ve'
-        certifying (mconcat idx_cs) $
+        certifying cs $
           letInPlace "letwith_dst" sname (fullSlice sname_t idxs') $ BasicOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
@@ -618,7 +616,7 @@ internaliseExp desc (E.Unsafe e _) =
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
   c <- assertingOne $ letExp "assert_c" $
-       I.BasicOp $ I.Assert e1' check (loc, mempty)
+       I.BasicOp $ I.Assert e1' (ErrorMsg [ErrorString check]) (loc, mempty)
   -- Make sure there are some bindings to certify.
   certifying c $ mapM rebind =<< internaliseExp desc e2
   where rebind v = do
@@ -807,13 +805,31 @@ internaliseExp _ e@E.ProjectSection{} =
 internaliseExp _ e@E.IndexSection{} =
   fail $ "internaliseExp: Unexpected index section at " ++ locStr (srclocOf e)
 
-internaliseDimIndex :: SrcLoc -> SubExp -> E.DimIndex
-                    -> InternaliseM (I.DimIndex SubExp, Certificates)
-internaliseDimIndex loc w (E.DimFix i) = do
+internaliseSlice :: SrcLoc
+                 -> [SubExp]
+                 -> [E.DimIndex]
+                 -> InternaliseM ([I.DimIndex SubExp], Certificates)
+internaliseSlice loc dims idxs = do
+ (idxs', oks, parts) <- unzip3 <$> zipWithM internaliseDimIndex dims idxs
+ c <- assertingOne $ do
+   ok <- letSubExp "index_ok" =<< foldBinOp I.LogAnd (constant True) oks
+   let msg = ErrorMsg $ ["Index ["] ++ intercalate [", "] parts ++
+             ["] out of bounds for array of shape ("] ++
+             intersperse ", " (map ErrorInt32 dims) ++ [")."]
+   letExp "index_certs" $ I.BasicOp $ I.Assert ok msg (loc, mempty)
+ return (idxs', c)
+
+internaliseDimIndex :: SubExp -> E.DimIndex
+                    -> InternaliseM (I.DimIndex SubExp, SubExp, [ErrorMsgPart SubExp])
+internaliseDimIndex w (E.DimFix i) = do
   (i', _) <- internaliseDimExp "i" i
-  cs <- assertingOne $ boundsCheck loc w i'
-  return (I.DimFix i', cs)
-internaliseDimIndex loc w (E.DimSlice i j s) = do
+  let lowerBound = I.BasicOp $
+                   I.CmpOp (I.CmpSle I.Int32) (I.constant (0 :: I.Int32)) i'
+      upperBound = I.BasicOp $
+                   I.CmpOp (I.CmpSlt I.Int32) i' w
+  ok <- letSubExp "bounds_check" =<< eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
+  return (I.DimFix i', ok, [ErrorInt32 i'])
+internaliseDimIndex w (E.DimSlice i j s) = do
   s' <- maybe (return one) (fmap fst . internaliseDimExp "s") s
   s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int32) s'
   backwards <- letSubExp "backwards" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) s_sign negone
@@ -831,44 +847,53 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
        (pure $ BasicOp $ I.UnOp (I.Abs Int32) j_m_i)
        (pure $ I.BasicOp $ I.UnOp (I.Abs Int32) s')
 
-  checked <- asserting $ fmap Certificates $ do
-    -- Bounds checks depend on whether we are slicing forwards or
-    -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
-    -- backwards, '-1 <= j && j <= i'.  In both cases, we check '0 <=
-    -- i+n*s && i+(n-1)*s < w'.  We only check if the slice is nonempty.
-    empty_slice <- letSubExp "empty_slice" $ I.BasicOp $ I.CmpOp (CmpEq int32) n zero
+  -- Bounds checks depend on whether we are slicing forwards or
+  -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
+  -- backwards, '-1 <= j && j <= i'.  In both cases, we check '0 <=
+  -- i+n*s && i+(n-1)*s < w'.  We only check if the slice is nonempty.
+  empty_slice <- letSubExp "empty_slice" $ I.BasicOp $ I.CmpOp (CmpEq int32) n zero
 
-    m <- letSubExp "m" $ I.BasicOp $ I.BinOp (Sub Int32) n one
-    m_t_s <- letSubExp "m_t_s" $ I.BasicOp $ I.BinOp (Mul Int32) m s'
-    i_p_m_t_s <- letSubExp "i_p_m_t_s" $ I.BasicOp $ I.BinOp (Add Int32) i' m_t_s
-    zero_leq_i_p_m_t_s <- letSubExp "zero_leq_i_p_m_t_s" $
-                          I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i_p_m_t_s
-    i_p_m_t_s_leq_w <- letSubExp "i_p_m_t_s_leq_w" $
-                       I.BasicOp $ I.CmpOp (I.CmpSle Int32) i_p_m_t_s w
-    i_p_m_t_s_lth_w <- letSubExp "i_p_m_t_s_leq_w" $
-                       I.BasicOp $ I.CmpOp (I.CmpSlt Int32) i_p_m_t_s w
+  m <- letSubExp "m" $ I.BasicOp $ I.BinOp (Sub Int32) n one
+  m_t_s <- letSubExp "m_t_s" $ I.BasicOp $ I.BinOp (Mul Int32) m s'
+  i_p_m_t_s <- letSubExp "i_p_m_t_s" $ I.BasicOp $ I.BinOp (Add Int32) i' m_t_s
+  zero_leq_i_p_m_t_s <- letSubExp "zero_leq_i_p_m_t_s" $
+                        I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i_p_m_t_s
+  i_p_m_t_s_leq_w <- letSubExp "i_p_m_t_s_leq_w" $
+                     I.BasicOp $ I.CmpOp (I.CmpSle Int32) i_p_m_t_s w
+  i_p_m_t_s_lth_w <- letSubExp "i_p_m_t_s_leq_w" $
+                     I.BasicOp $ I.CmpOp (I.CmpSlt Int32) i_p_m_t_s w
 
-    zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i'
-    i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) i' j'
-    forwards_ok <- letSubExp "forwards_ok" =<<
-                   foldBinOp I.LogAnd zero_lte_i
-                   [zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_lth_w]
+  zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i'
+  i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) i' j'
+  forwards_ok <- letSubExp "forwards_ok" =<<
+                 foldBinOp I.LogAnd zero_lte_i
+                 [zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_lth_w]
 
-    negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) negone j'
-    j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' i'
-    backwards_ok <- letSubExp "backwards_ok" =<<
-                    foldBinOp I.LogAnd negone_lte_j
-                    [negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
+  negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) negone j'
+  j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' i'
+  backwards_ok <- letSubExp "backwards_ok" =<<
+                  foldBinOp I.LogAnd negone_lte_j
+                  [negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
 
-    slice_ok <- letSubExp "slice_ok" $ I.If backwards
-                (resultBody [backwards_ok])
-                (resultBody [forwards_ok]) $
-                ifCommon [I.Prim I.Bool]
-    ok_or_empty <- letSubExp "ok_or_empty" $
-                   I.BasicOp $ I.BinOp I.LogOr empty_slice slice_ok
-    letTupExp "slice_cert" $ I.BasicOp $ I.Assert ok_or_empty "slice out of bounds" (loc, mempty)
+  slice_ok <- letSubExp "slice_ok" $ I.If backwards
+              (resultBody [backwards_ok])
+              (resultBody [forwards_ok]) $
+              ifCommon [I.Prim I.Bool]
+  ok_or_empty <- letSubExp "ok_or_empty" $
+                 I.BasicOp $ I.BinOp I.LogOr empty_slice slice_ok
 
-  return (I.DimSlice i' n s', checked)
+  let parts = case (i, j, s) of
+                (_, _, Just{}) ->
+                  [maybe "" (const $ ErrorInt32 i') i, ":",
+                   maybe "" (const $ ErrorInt32 j') j, ":",
+                   ErrorInt32 s']
+                (_, Just{}, _) ->
+                  [maybe "" (const $ ErrorInt32 i') i, ":",
+                   ErrorInt32 j'] ++
+                   maybe mempty (const [":", ErrorInt32 s']) s
+                (_, Nothing, Nothing) ->
+                  [ErrorInt32 i']
+  return (I.DimSlice i' n s', ok_or_empty, parts)
   where zero = constant (0::Int32)
         negone = constant (-1::Int32)
         one = constant (1::Int32)
@@ -1478,15 +1503,6 @@ askSafety :: InternaliseM Safety
 askSafety = do check <- asks envDoBoundsChecks
                safe <- asks envSafe
                return $ if check || safe then I.Safe else I.Unsafe
-
-boundsCheck :: SrcLoc -> I.SubExp -> I.SubExp -> InternaliseM I.VName
-boundsCheck loc w e = do
-  let check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
-      lowerBound = I.BasicOp $
-                   I.CmpOp (I.CmpSle I.Int32) (I.constant (0 :: I.Int32)) e
-      upperBound = I.BasicOp $
-                   I.CmpOp (I.CmpSlt I.Int32) e w
-  letExp "bounds_check" =<< eAssert check "index out of bounds" loc
 
 shadowIdentsInExp :: [(VName, I.SubExp)] -> Stms SOACS -> I.SubExp
                   -> InternaliseM I.SubExp

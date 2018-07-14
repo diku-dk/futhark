@@ -28,6 +28,8 @@ module Futhark.Representation.AST.Syntax.Core
          , DeclType
          , DeclExtType
          , Diet(..)
+         , ErrorMsg (..)
+         , ErrorMsgPart (..)
 
          -- * Values
          , PrimValue(..)
@@ -56,6 +58,7 @@ import Control.Monad.State
 import Data.Array
 import Data.Maybe
 import Data.Monoid ((<>))
+import Data.String
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.Semigroup as Sem
@@ -324,3 +327,40 @@ instance Functor PatElemT where
 
 -- | A set of names.
 type Names = S.Set VName
+
+-- | An error message is a list of error parts, which are concatenated
+-- to form the final message.
+newtype ErrorMsg a = ErrorMsg [ErrorMsgPart a]
+  deriving (Eq, Ord, Show)
+
+instance IsString (ErrorMsg a) where
+  fromString = ErrorMsg . pure . fromString
+
+-- | A part of an error message.
+data ErrorMsgPart a = ErrorString String -- ^ A literal string.
+                    | ErrorInt32 a -- ^ A run-time integer value.
+                    deriving (Eq, Ord, Show)
+
+instance IsString (ErrorMsgPart a) where
+  fromString = ErrorString
+
+instance Functor ErrorMsg where
+  fmap f (ErrorMsg parts) = ErrorMsg $ map (fmap f) parts
+
+instance Foldable ErrorMsg where
+  foldMap f (ErrorMsg parts) = foldMap (foldMap f) parts
+
+instance Traversable ErrorMsg where
+  traverse f (ErrorMsg parts) = ErrorMsg <$> traverse (traverse f) parts
+
+instance Functor ErrorMsgPart where
+  fmap _ (ErrorString s) = ErrorString s
+  fmap f (ErrorInt32 a) = ErrorInt32 $ f a
+
+instance Foldable ErrorMsgPart where
+  foldMap _ ErrorString{} = mempty
+  foldMap f (ErrorInt32 a) = f a
+
+instance Traversable ErrorMsgPart where
+  traverse _ (ErrorString s) = pure $ ErrorString s
+  traverse f (ErrorInt32 a) = ErrorInt32 <$> f a

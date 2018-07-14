@@ -209,7 +209,7 @@ data BasicOp lore
   | ConvOp ConvOp SubExp
     -- ^ Conversion "casting".
 
-  | Assert SubExp String (SrcLoc, [SrcLoc])
+  | Assert SubExp (ErrorMsg SubExp) (SrcLoc, [SrcLoc])
   -- ^ Turn a boolean into a certificate, halting the program with the
   -- given error message if the boolean is false.
 

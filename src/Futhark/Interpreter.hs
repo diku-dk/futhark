@@ -72,7 +72,7 @@ instance Show InterpreterError where
     "Invalid array reshaping " ++ pretty e ++
     ", from " ++ show shape ++ " to " ++ show newshape
   show (AssertFailed msg (loc,locs)) =
-    "Assertion failed at " ++ stacktrace ++ ":\n" ++ msg
+    "Error at " ++ stacktrace ++ ":\n" ++ msg
     where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
   show DivisionByZero =
     "Division by zero."
@@ -511,12 +511,15 @@ evalBasicOp (Copy v) = single <$> lookupVar v
 
 evalBasicOp (Manifest _ v) = single <$> lookupVar v
 
-evalBasicOp (Assert e msg loc) = do
+evalBasicOp (Assert e (ErrorMsg parts) loc) = do
   v <- evalSubExp e
   case v of PrimVal (BoolValue True) ->
               return [PrimVal Checked]
-            _ ->
+            _ -> do
+              msg <- concat <$> mapM msgPart parts
               bad $ AssertFailed msg loc
+  where msgPart (ErrorString s) = pure s
+        msgPart (ErrorInt32 v) = show <$> (asInt32 "ErrorInt32" =<< evalSubExp v)
 
 evalBasicOp (Partition n flags arrs) = do
   flags_elems <- arrToList =<< lookupVar flags

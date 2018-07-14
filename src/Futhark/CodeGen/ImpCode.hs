@@ -32,6 +32,8 @@ module Futhark.CodeGen.ImpCode
   , Arg (..)
   , var
   , index
+  , ErrorMsg(..)
+  , ErrorMsgPart(..)
 
     -- * Typed enumerations
   , Count (..)
@@ -64,7 +66,8 @@ import qualified Data.Semigroup as Sem
 
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
-import Futhark.Representation.AST.Syntax (Space(..), SpaceId)
+import Futhark.Representation.AST.Syntax
+  (Space(..), SpaceId, ErrorMsg(..), ErrorMsgPart(..))
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
@@ -165,7 +168,7 @@ data Code a = Skip
               -- ^ Must be in same space.
             | Call [VName] Name [Arg]
             | If Exp (Code a) (Code a)
-            | Assert Exp String (SrcLoc, [SrcLoc])
+            | Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
             | Comment String (Code a)
               -- ^ Has the same semantics as the contained code, but
               -- the comment should show up in generated code for ease
