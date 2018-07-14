@@ -378,7 +378,7 @@ typeHtml t = case t of
     where ppField (name, tp) = do
             tp' <- typeHtml tp
             return $ toHtml (nameToString name) <> ": " <> tp'
-  TypeVar et targs -> do
+  TypeVar _ et targs -> do
     targs' <- mapM typeArgHtml targs
     et' <- typeNameHtml et
     return $ et' <> joinBy " " targs'

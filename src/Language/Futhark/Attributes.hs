@@ -127,11 +127,11 @@ arrayShape _ = mempty
 -- removed.
 nestedDims :: TypeBase (DimDecl VName) as -> [DimDecl VName]
 nestedDims t =
-  case t of Array a ds _    -> nub $ arrayNestedDims a <> shapeDims ds
-            Record fs       -> nub $ fold $ fmap nestedDims fs
-            Prim{}          -> mempty
-            TypeVar _ targs -> concatMap typeArgDims targs
-            Arrow _ v t1 t2 -> filter (notV v) $ nestedDims t1 <> nestedDims t2
+  case t of Array a ds _      -> nub $ arrayNestedDims a <> shapeDims ds
+            Record fs         -> nub $ fold $ fmap nestedDims fs
+            Prim{}            -> mempty
+            TypeVar _ _ targs -> concatMap typeArgDims targs
+            Arrow _ v t1 t2   -> filter (notV v) $ nestedDims t1 <> nestedDims t2
   where arrayNestedDims ArrayPrimElem{} =
           mempty
         arrayNestedDims (ArrayPolyElem _ targs _) =
@@ -235,14 +235,14 @@ peelArray 0 t = Just t
 peelArray n (Array (ArrayPrimElem et _) shape _)
   | shapeRank shape == n =
     Just $ Prim et
-peelArray n (Array (ArrayPolyElem et targs _) shape _)
+peelArray n (Array (ArrayPolyElem et targs als) shape _)
   | shapeRank shape == n =
-    Just $ TypeVar et targs
+    Just $ TypeVar als et targs
 peelArray n (Array (ArrayRecordElem ts) shape _)
   | shapeRank shape == n =
     Just $ Record $ fmap asType ts
   where asType (RecordArrayElem (ArrayPrimElem bt _)) = Prim bt
-        asType (RecordArrayElem (ArrayPolyElem bt targs _)) = TypeVar bt targs
+        asType (RecordArrayElem (ArrayPolyElem bt targs als)) = TypeVar als bt targs
         asType (RecordArrayElem (ArrayRecordElem ts'))  = Record $ fmap asType ts'
         asType (RecordArrayArrayElem et e_shape u) = Array et e_shape u
 peelArray n (Array et shape u) = do
@@ -280,7 +280,7 @@ arrayOfWithAliases (Array et shape1 _) as shape2 u =
   Just $ Array et (shape2 <> shape1) u `setAliases` as
 arrayOfWithAliases (Prim et) as shape u =
   Just $ Array (ArrayPrimElem et as) shape u
-arrayOfWithAliases (TypeVar x targs) as shape u =
+arrayOfWithAliases (TypeVar _ x targs) as shape u =
   Just $ Array (ArrayPolyElem x targs as) shape u
 arrayOfWithAliases (Record ts) as shape u = do
   ts' <- traverse (typeToRecordArrayElem' as) ts
@@ -297,8 +297,8 @@ typeToRecordArrayElem' :: Monoid as =>
                        -> Maybe (RecordArrayElemTypeBase dim as)
 typeToRecordArrayElem' as (Prim bt) =
   Just $ RecordArrayElem $ ArrayPrimElem bt as
-typeToRecordArrayElem' as (TypeVar bt targs) =
-  Just $ RecordArrayElem $ ArrayPolyElem bt targs as
+typeToRecordArrayElem' as (TypeVar t_as bt targs) =
+  Just $ RecordArrayElem $ ArrayPolyElem bt targs (as <> t_as)
 typeToRecordArrayElem' as (Record ts') =
   RecordArrayElem . ArrayRecordElem <$>
   traverse (typeToRecordArrayElem' as) ts'
@@ -314,7 +314,7 @@ recordArrayElemToType (RecordArrayArrayElem et shape u) = (Array et shape u, mem
 
 arrayElemToType :: Monoid as => ArrayElemTypeBase dim as -> (TypeBase dim as, as)
 arrayElemToType (ArrayPrimElem bt als)       = (Prim bt, als)
-arrayElemToType (ArrayPolyElem bt targs als) = (TypeVar bt targs, als)
+arrayElemToType (ArrayPolyElem bt targs als) = (TypeVar als bt targs, als)
 arrayElemToType (ArrayRecordElem ts) =
   let ts' = fmap recordArrayElemToType ts
   in (Record $ fmap fst ts', foldMap snd ts')
@@ -500,7 +500,7 @@ typeVars :: Monoid as => TypeBase dim as -> Names
 typeVars t =
   case t of
     Prim{} -> mempty
-    TypeVar tn targs ->
+    TypeVar _ tn targs ->
       mconcat $ typeVarFree tn : map typeArgFree targs
     Arrow _ _ t1 t2 -> typeVars t1 <> typeVars t2
     Record fields -> foldMap typeVars fields
@@ -527,8 +527,9 @@ returnType (Array et shape Nonunique) ds args =
 returnType (Record fs) ds args =
   Record $ fmap (\et -> returnType et ds args) fs
 returnType (Prim t) _ _ = Prim t
-returnType (TypeVar t targs) ds args =
-  TypeVar t $ map (\arg -> typeArgReturnType arg ds args) targs
+returnType (TypeVar () t targs) ds args =
+  TypeVar als t $ map (\arg -> typeArgReturnType arg ds args) targs
+  where als = mconcat $ map aliases $ zipWith maskAliases args ds
 returnType (Arrow _ v t1 t2) ds args =
   Arrow als v (bimap id (const mempty) t1) (returnType t2 ds args)
   where als = foldMap aliases $ zipWith maskAliases args ds
@@ -777,14 +778,14 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
   where tv_a = VName (nameFromString "a") 0
         tv_a' = typeName tv_a
-        t_a = TypeVar tv_a' []
+        t_a = TypeVar () tv_a' []
         arr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique
         uarr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique
         tp_a = TypeParamType Unlifted tv_a noLoc
 
         tv_b = VName (nameFromString "b") 1
         tv_b' = typeName tv_b
-        t_b = TypeVar tv_b' []
+        t_b = TypeVar () tv_b' []
         arr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Nonunique
         uarr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Unique
         tp_b = TypeParamType Unlifted tv_b noLoc

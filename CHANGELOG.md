@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Significantly better behaviour in OOM situations.
 
+  * Fixed an unsound interaction between in-place updates and
+    parametric polymorphism (#589).
+
 ## [0.6.1]
 
 ### Added
