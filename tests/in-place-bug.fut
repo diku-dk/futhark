@@ -14,7 +14,7 @@ let explicitMethod [m] (myD:  [][m]f64,  myDD: [][]f64,
                let (mu_row, var_row, result_row) = tup in
                map (\(tup: ([]f64, []f64, f64, f64, i32)): f64  ->
                       let ( dx, dxx, mu, var, j ) = tup in
-                      ( mu*dx[1] + 0.5*var*dxx[1] ) * result_row[j]
+                      unsafe ( mu*dx[1] + 0.5*var*dxx[1] ) * result_row[j]
                   ) (zip5 myD myDD (mu_row) (var_row) (iota(m) )
                   )
            ) (zip3 myMu myVar result))
