@@ -902,7 +902,7 @@ compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc,locs)) = do
       onPart (Imp.ErrorInt32 x) = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   stm $ Assert e' (BinOp "%"
-                   (String $ "At " ++ stacktrace ++ ": " ++ concat formatstrs)
+                   (String $ "Error at " ++ stacktrace ++ ": " ++ concat formatstrs)
                    (Tuple formatargs))
   where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
 
