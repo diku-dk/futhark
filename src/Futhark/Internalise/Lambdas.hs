@@ -38,7 +38,8 @@ internaliseMapLambda internaliseLambda lam args = do
   shapefun <- makeShapeFun params body rettype' inner_shapes
   bindMapShapes index0 [] inner_shapes shapefun args outer_shape
   body' <- localScope (scopeOfLParams params) $
-           ensureResultShape asserting "not all iterations produce same shape"
+           ensureResultShape asserting
+           (ErrorMsg [ErrorString "not all iterations produce same shape"])
            (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
   where index0 arg = do
@@ -63,7 +64,8 @@ internaliseStreamMapLambda internaliseLambda lam args = do
     shapefun <- makeShapeFun (chunk_param:params) body rettype' inner_shapes
     bindMapShapes (slice0 chunk_size) [zero] inner_shapes shapefun args outer_shape
     body' <- localScope (scopeOfLParams params) $
-             ensureResultShape asserting "not all iterations produce same shape"
+             ensureResultShape asserting
+             (ErrorMsg [ErrorString "not all iterations produce same shape"])
              (srclocOf lam) (map outer rettype') body
     return $ I.Lambda (chunk_param:params) body' (map outer rettype')
   where slice0 chunk_size arg = do
@@ -133,7 +135,8 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   -- reshape().
   body' <- localScope (scopeOfLParams params) $
            ensureResultShape asserting
-           "shape of result does not match shape of initial value" (srclocOf lam) rettype' body
+           (ErrorMsg [ErrorString "shape of result does not match shape of initial value"])
+           (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
 
 internaliseStreamLambda :: InternaliseLambda

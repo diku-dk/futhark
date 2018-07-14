@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
@@ -1620,12 +1621,15 @@ compileCode c
 
 compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
-compileCode (Assert e msg (loc, locs)) = do
+compileCode (Assert e (ErrorMsg parts) (loc, locs)) = do
   e' <- compileExp e
   free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
+      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
+  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   stm [C.cstm|if (!$exp:e') {
-                   ctx->error = msgprintf("Assertion failed at %s: %s\n",
-                                           $string:stacktrace, $string:msg);
+                   ctx->error = msgprintf($string:("Error at %s: " <> concat formatstrs <> "\n"),
+                                           $string:stacktrace, $args:formatargs);
                    $items:free_all_mem
                    return 1;
                  }|]
