@@ -830,8 +830,8 @@ internaliseSlice loc dims idxs = do
  c <- assertingOne $ do
    ok <- letSubExp "index_ok" =<< foldBinOp I.LogAnd (constant True) oks
    let msg = ErrorMsg $ ["Index ["] ++ intercalate [", "] parts ++
-             ["] out of bounds for array of shape ("] ++
-             intersperse ", " (map ErrorInt32 dims) ++ [")."]
+             ["] out of bounds for array of shape ["] ++
+             intersperse "][" (map ErrorInt32 $ take (length idxs) dims) ++ ["]."]
    letExp "index_certs" $ I.BasicOp $ I.Assert ok msg (loc, mempty)
  return (idxs', c)
 
