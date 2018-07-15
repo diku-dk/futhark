@@ -68,7 +68,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 import Data.Bits (xor, shiftR)
-import Data.Char (ord)
+import Data.Char (ord, isDigit, isAlphaNum)
 import qualified Data.Map.Strict as M
 import qualified Data.DList as DL
 import Data.List
@@ -630,6 +630,12 @@ arrayName pt signed rank =
   prettySigned (signed==TypeUnsigned) pt ++ "_" ++ show rank ++ "d"
 
 opaqueName :: String -> [ValueDesc] -> String
+opaqueName s _
+  | valid = "opaque_" ++ s
+  where valid = head s /= '_' &&
+                not (isDigit $ head s) &&
+                all ok s
+        ok c = isAlphaNum c || c == '_'
 opaqueName s vds = "opaque_" ++ hash (map ord (s ++ concatMap p vds))
   where p (ScalarValue pt signed _) =
           show (pt, signed)

@@ -13,7 +13,6 @@ module Futhark.Internalise
   )
   where
 
-import Control.Arrow ((***))
 import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Map.Strict as M
@@ -127,13 +126,13 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
     zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: E.ValBind -> InternaliseM ()
-generateEntryPoint (E.ValBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
+generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ orig_params _ _ loc) =
   -- We remove all shape annotations, so there should be no constant
   -- parameters here.
   bindingParams [] (map E.patternNoShapeAnnotations params) $
   \_ shapeparams params' -> do
     (entry_rettype, _) <- internaliseEntryReturnType $ E.vacuousShapeAnnotations rettype
-    let entry' = entryPoint (zip params params') (rettype, entry_rettype)
+    let entry' = entryPoint (zip params params') (retdecl, rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     entry_body <- insertStmsM $ do
@@ -156,29 +155,39 @@ generateEntryPoint (E.ValBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
           _                   -> orig_params
 
 entryPoint :: [(E.Pattern,[I.FParam])]
-           -> (E.StructType,[[I.TypeBase ExtShape Uniqueness]])
+           -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
            -> EntryPoint
-entryPoint params (eret,crets) =
-  (concatMap (uncurry entryPointType . preParam) params,
+entryPoint params (retdecl, eret, crets) =
+  (concatMap (entryPointType . preParam) params,
    case isTupleRecord eret of
-     Just ts -> concat $ zipWith entryPointType ts crets
-     _       -> entryPointType eret $ concat crets)
-  where preParam = E.patternStructType *** staticShapes . map I.paramDeclType
+     Just ts -> concatMap entryPointType $ zip3 retdecls ts crets
+     _       -> entryPointType (retdecl, eret, concat crets))
+  where preParam (p_pat, ps) = (paramOuterType p_pat,
+                                E.patternStructType p_pat,
+                                staticShapes $ map I.paramDeclType ps)
+        paramOuterType (E.PatternAscription _ tdecl _) = Just $ declaredType tdecl
+        paramOuterType (E.PatternParens p _) = paramOuterType p
+        paramOuterType _ = Nothing
 
-        entryPointType :: E.StructType
-                       -> [I.TypeBase ExtShape Uniqueness]
+        retdecls = case retdecl of Just (TETuple tes _) -> map Just tes
+                                   _                    -> repeat Nothing
+
+        entryPointType :: (Maybe (E.TypeExp VName),
+                           E.StructType,
+                           [I.TypeBase ExtShape Uniqueness])
                        -> [EntryPointType]
-        entryPointType (E.Prim E.Unsigned{}) _ =
+        entryPointType (_, E.Prim E.Unsigned{}, _) =
           [I.TypeUnsigned]
-        entryPointType (E.Array (ArrayPrimElem Unsigned{} _) _ _) _ =
+        entryPointType (_, E.Array (ArrayPrimElem Unsigned{} _) _ _, _) =
           [I.TypeUnsigned]
-        entryPointType E.Prim{} _ =
+        entryPointType (_, E.Prim{}, _) =
           [I.TypeDirect]
-        entryPointType (E.Array ArrayPrimElem{} _ _) _ =
+        entryPointType (_, E.Array ArrayPrimElem{} _ _, _) =
           [I.TypeDirect]
-        entryPointType t ts =
-          [I.TypeOpaque (pretty t') $ length ts]
-          where t' = removeShapeAnnotations t `E.setUniqueness` Nonunique
+        entryPointType (te, t, ts) =
+          [I.TypeOpaque desc $ length ts]
+          where desc = maybe (pretty t') pretty te
+                t' = removeShapeAnnotations t `E.setUniqueness` Nonunique
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) loc) =
