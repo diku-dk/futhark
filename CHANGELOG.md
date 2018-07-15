@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     especially if you add manual size annotations to the entry point
     definitions.
 
+  * Backticked infix operators can now be used in operator sections.
+
 ### Removed
 
 ### Changed

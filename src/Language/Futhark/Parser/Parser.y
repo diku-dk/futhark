@@ -323,7 +323,8 @@ UnOp :: { (QualName Name, SrcLoc) }
       : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }
       | unop  { let L loc (UNOP v) = $1 in (qualName v, loc) }
 
--- Note that this production does not include Minus.
+-- Note that this production does not include Minus, but does include
+-- operator sections.
 BinOp :: { QualName Name }
       : '+...'     { binOpName $1 }
       | '-...'     { binOpName $1 }
@@ -352,6 +353,7 @@ BinOp :: { QualName Name }
       | '<|...'    { binOpName $1 }
       | '|>...'    { binOpName $1 }
       | '<'        { qualName (nameFromString "<") }
+      | '`' QualName '`' { fst $2 }
 
 BindingUnOp :: { Name }
       : UnOp {% let (QualName qs name, _) = $1 in do
