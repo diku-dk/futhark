@@ -636,13 +636,13 @@ opaqueName s _
                 not (isDigit $ head s) &&
                 all ok s
         ok c = isAlphaNum c || c == '_'
-opaqueName s vds = "opaque_" ++ hash (map ord (s ++ concatMap p vds))
+opaqueName s vds = "opaque_" ++ hash (zipWith xor [0..] $ map ord (s ++ concatMap p vds))
   where p (ScalarValue pt signed _) =
           show (pt, signed)
         p (ArrayValue _ _ space pt signed dims) =
           show (space, pt, signed, length dims)
 
-        -- FIXME: a stupid hash algorithm; may have collisions (but unlikely).
+        -- FIXME: a stupid hash algorithm; may have collisions.
         hash = printf "%x" . foldl xor 0 . map (iter . (*0x45d9f3b) .
                                                 iter . (*0x45d9f3b) .
                                                 iter . fromIntegral)
