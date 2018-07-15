@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     converted (and say something useful - it's not entirely
     straightforward).
 
+  * Opaque types now have significantly more readable names,
+    especially if you add manual size annotations to the entry point
+    definitions.
+
 ### Removed
 
 ### Changed
