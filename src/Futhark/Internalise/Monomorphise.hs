@@ -424,13 +424,13 @@ typeSubsts t1 t2 = error $ unlines ["typeSubsts: mismatched types:", pretty t1, 
 -- | Perform a given substitution on the types in a pattern.
 substPattern :: (PatternType -> PatternType) -> Pattern -> Pattern
 substPattern f pat = case pat of
-  TuplePattern pats loc    -> TuplePattern (map (substPattern f) pats) loc
-  RecordPattern fs loc     -> RecordPattern (map substField fs) loc
+  TuplePattern pats loc      -> TuplePattern (map (substPattern f) pats) loc
+  RecordPattern fs loc       -> RecordPattern (map substField fs) loc
     where substField (n, p) = (n, substPattern f p)
-  PatternParens p loc      -> PatternParens (substPattern f p) loc
-  Id vn (Info tp) loc      -> Id vn (Info $ f tp) loc
-  Wildcard (Info tp) loc   -> Wildcard (Info $ f tp) loc
-  PatternAscription p _ _  -> substPattern f p
+  PatternParens p loc        -> PatternParens (substPattern f p) loc
+  Id vn (Info tp) loc        -> Id vn (Info $ f tp) loc
+  Wildcard (Info tp) loc     -> Wildcard (Info $ f tp) loc
+  PatternAscription p td loc -> PatternAscription (substPattern f p) td loc
 
 toPolyBinding :: ValBind -> PolyBinding
 toPolyBinding (ValBind _ name retdecl (Info rettype) tparams params body _ loc) =
