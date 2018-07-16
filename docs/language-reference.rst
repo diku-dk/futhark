@@ -25,7 +25,7 @@ Identifiers and Keywords
    quals: (`id` ".")+
    qualid: `id` | `quals` `id`
    binop: `opstartchar` `opchar`*
-   qualbinop: `binop` | `quals` `binop`
+   qualbinop: `binop` | `quals` `binop` | "`" `qualid` "`"
    fieldid: `decimal` | `id`
    opstartchar = "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
    opchar: `opstartchar` | "."

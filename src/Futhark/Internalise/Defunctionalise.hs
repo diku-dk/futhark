@@ -880,14 +880,14 @@ dimName _             = mempty
 defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind True name _ (Info rettype) tparams params body _ loc)
+defuncValBind (ValBind True name retdecl (Info rettype) tparams params body _ loc)
   | (rettype_ps, rettype') <- unfoldFunType rettype,
     not $ null rettype_ps = do
       (body_pats, body', _) <- etaExpand body
-      defuncValBind $ ValBind True name Nothing (Info rettype')
+      defuncValBind $ ValBind True name retdecl (Info rettype')
         tparams (params <> body_pats) body' Nothing loc
 
-defuncValBind valbind@(ValBind _ name _ rettype tparams params body _ _) = do
+defuncValBind valbind@(ValBind _ name retdecl rettype tparams params body _ _) = do
   let env = envFromShapeParams tparams
   (params', body', sv) <- localEnv env $ defuncLet tparams params body rettype
   -- Remove any shape parameters that no longer occur in the value parameters.
@@ -895,7 +895,7 @@ defuncValBind valbind@(ValBind _ name _ rettype tparams params body _ _) = do
       tparams' = filter ((`S.member` dim_names) . typeParamName) tparams
 
   let rettype' = vacuousShapeAnnotations . toStruct $ typeOf body'
-  return ( valbind { valBindRetDecl    = Nothing
+  return ( valbind { valBindRetDecl    = retdecl
                    , valBindRetType    = Info $ combineTypeShapes
                                          (unInfo rettype) rettype'
                    , valBindTypeParams = tparams'

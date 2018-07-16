@@ -44,14 +44,14 @@ argShapes shapes valts valargts =
 
 ensureResultShape :: MonadBinder m =>
                      (m Certificates -> m Certificates)
-                  -> String -> SrcLoc -> [Type] -> Body (Lore m)
+                  -> ErrorMsg SubExp -> SrcLoc -> [Type] -> Body (Lore m)
                   -> m (Body (Lore m))
 ensureResultShape asserting msg loc =
   ensureResultExtShape asserting msg loc . staticShapes
 
 ensureResultExtShape :: MonadBinder m =>
                         (m Certificates -> m Certificates)
-                     -> String -> SrcLoc -> [ExtType] -> Body (Lore m)
+                     -> ErrorMsg SubExp -> SrcLoc -> [ExtType] -> Body (Lore m)
                      -> m (Body (Lore m))
 ensureResultExtShape asserting msg loc rettype body =
   insertStmsM $ do
@@ -63,7 +63,7 @@ ensureResultExtShape asserting msg loc rettype body =
 
 ensureResultExtShapeNoCtx :: MonadBinder m =>
                              (m Certificates -> m Certificates)
-                          -> String -> SrcLoc -> [ExtType] -> Body (Lore m)
+                          -> ErrorMsg SubExp -> SrcLoc -> [ExtType] -> Body (Lore m)
                           -> m (Body (Lore m))
 ensureResultExtShapeNoCtx asserting msg loc rettype body =
   insertStmsM $ do
@@ -78,7 +78,7 @@ ensureResultExtShapeNoCtx asserting msg loc rettype body =
 
 ensureExtShape :: MonadBinder m =>
                   (m Certificates -> m Certificates)
-               -> String -> SrcLoc -> ExtType -> String -> SubExp
+               -> ErrorMsg SubExp -> SrcLoc -> ExtType -> String -> SubExp
                -> m SubExp
 ensureExtShape asserting msg loc t name orig
   | Array{} <- t, Var v <- orig =
@@ -87,7 +87,7 @@ ensureExtShape asserting msg loc t name orig
 
 ensureShape :: MonadBinder m =>
                (m Certificates -> m Certificates)
-            -> String -> SrcLoc -> Type -> String -> SubExp
+            -> ErrorMsg SubExp -> SrcLoc -> Type -> String -> SubExp
             -> m SubExp
 ensureShape asserting msg loc = ensureExtShape asserting msg loc . staticShapes1
 
@@ -96,7 +96,7 @@ ensureShape asserting msg loc = ensureExtShape asserting msg loc . staticShapes1
 -- everything is otherwise type-correct.
 ensureArgShapes :: (MonadBinder m, Typed (TypeBase Shape u)) =>
                    (m Certificates -> m Certificates)
-                -> String -> SrcLoc -> [VName] -> [TypeBase Shape u] -> [SubExp]
+                -> ErrorMsg SubExp -> SrcLoc -> [VName] -> [TypeBase Shape u] -> [SubExp]
                 -> m [SubExp]
 ensureArgShapes asserting msg loc shapes paramts args =
   zipWithM ensureArgShape (expectedTypes shapes paramts args) args
@@ -109,7 +109,7 @@ ensureArgShapes asserting msg loc shapes paramts args =
 
 ensureShapeVar :: MonadBinder m =>
                   (m Certificates -> m Certificates)
-               -> String -> SrcLoc -> ExtType -> String -> VName
+               -> ErrorMsg SubExp -> SrcLoc -> ExtType -> String -> VName
                -> m VName
 ensureShapeVar asserting msg loc t name v
   | Array{} <- t = do

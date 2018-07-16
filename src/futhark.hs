@@ -247,6 +247,9 @@ commandLineOptions =
     (OptArg (\file -> Right $ changeFutharkConfig $
                       \opts -> opts { futharkVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
+  , Option [] ["Werror"]
+    (NoArg $ Right $ changeFutharkConfig $ \opts -> opts { futharkWerror = True })
+    "Treat warnings as errors."
 
   , Option "t" ["type-check"]
     (NoArg $ Right $ \opts ->

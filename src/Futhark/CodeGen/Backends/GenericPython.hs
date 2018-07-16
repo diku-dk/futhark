@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 -- | A generic Python code generator which is polymorphic in the type
 -- of the operations.  Concretely, we use this to handle both
 -- sequential and PyOpenCL Python code.
@@ -392,7 +393,8 @@ unpackDim arr_name (Imp.ConstSize c) i = do
   let shape_name = Field arr_name "shape"
   let constant_c = Integer $ toInteger c
   let constant_i = Integer $ toInteger i
-  stm $ Assert (BinOp "==" constant_c (Index shape_name $ IdxExp constant_i)) "constant dimension wrong"
+  stm $ Assert (BinOp "==" constant_c (Index shape_name $ IdxExp constant_i)) $
+    String "constant dimension wrong"
 
 unpackDim arr_name (Imp.VarSize var) i = do
   let shape_name = Field arr_name "shape"
@@ -894,9 +896,14 @@ compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
   stm $ Comment s code'
 
-compileCode (Imp.Assert e msg (loc,locs)) = do
+compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc,locs)) = do
   e' <- compileExp e
-  stm $ Assert e' ("At " ++ stacktrace ++ ": " ++ msg)
+  let onPart (Imp.ErrorString s) = return ("%s", String s)
+      onPart (Imp.ErrorInt32 x) = ("%d",) <$> compileExp x
+  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  stm $ Assert e' (BinOp "%"
+                   (String $ "Error at " ++ stacktrace ++ ": " ++ concat formatstrs)
+                   (Tuple formatargs))
   where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
 
 compileCode (Imp.Call dests fname args) = do

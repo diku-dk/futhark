@@ -144,10 +144,10 @@ void free_list_insert(struct opencl_free_list *l, size_t size, cl_mem mem, const
 
 /* Find and remove a memory block of at least the desired size and
    tag.  Returns 0 on success.  */
-int free_list_find(struct opencl_free_list *l, const char *tag, size_t min_size, size_t *size_out, cl_mem *mem_out) {
+int free_list_find(struct opencl_free_list *l, const char *tag, size_t *size_out, cl_mem *mem_out) {
   int i;
   for (i = 0; i < l->capacity; i++) {
-    if (l->entries[i].valid && (l->entries[i].tag == tag || l->entries[i].size == min_size)) {
+    if (l->entries[i].valid && l->entries[i].tag == tag) {
       l->entries[i].valid = 0;
       *size_out = l->entries[i].size;
       *mem_out = l->entries[i].mem;
@@ -709,7 +709,7 @@ int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, c
 
   size_t size;
 
-  if (free_list_find(&ctx->free_list, tag, min_size, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, tag, &size, mem_out) == 0) {
     // Successfully found a free block.  Is it big enough, but not too big?
     if (size >= min_size && size <= min_size*2) {
       return CL_SUCCESS;
@@ -753,7 +753,7 @@ int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) {
   cl_mem existing_mem;
 
   // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, tag, -1, &size, &existing_mem) == 0) {
+  if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0) {
     int error = clReleaseMemObject(existing_mem);
     if (error != CL_SUCCESS) {
       return error;

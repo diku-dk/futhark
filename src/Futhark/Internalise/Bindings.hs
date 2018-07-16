@@ -161,7 +161,7 @@ matchPattern tparam_names exts loc ses =
   forM (zip exts ses) $ \(et, se) -> do
   se_t <- I.subExpType se
   et' <- unExistentialise tparam_names et se_t
-  ensureExtShape asserting "value cannot match pattern"
+  ensureExtShape asserting (I.ErrorMsg [I.ErrorString "value cannot match pattern"])
     loc et' "correct_shape" se
 
 unExistentialise :: S.Set VName -> I.ExtType -> I.Type -> InternaliseM I.ExtType
