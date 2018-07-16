@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- | This module implements an optimisation that moves in-place
 -- updates into/before loops where possible, with the end goal of
 -- minimising memory copies.  As an example, consider this program:
