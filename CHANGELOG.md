@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.7.0]
+## [0.6.2]
 
 ### Added
 
@@ -20,10 +20,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     definitions.
 
   * Backticked infix operators can now be used in operator sections.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
