@@ -56,7 +56,7 @@ data PyStmt = If PyExp [PyStmt] [PyStmt]
             | Assign PyExp PyExp
             | AssignOp String PyExp PyExp
             | Comment String [PyStmt]
-            | Assert PyExp String
+            | Assert PyExp PyExp
             | Raise PyExp
             | Exp PyExp
             | Return PyExp
@@ -162,7 +162,7 @@ instance Pretty PyStmt where
 
   ppr (Comment s body) = text "#" <> text s </> stack (map ppr body)
 
-  ppr (Assert e s) = text "assert" <+> ppr e <> text "," <+> squotes(text s)
+  ppr (Assert e1 e2) = text "assert" <+> ppr e1 <> text "," <+> ppr e2
 
   ppr (Raise e) = text "raise" <+> ppr e
 

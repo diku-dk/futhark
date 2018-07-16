@@ -229,10 +229,15 @@ instance Pretty (BasicOp lore) where
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e msg (loc, _)) =
-    text "assert" <> apply [ppr e, text (show msg), text $ show $ locStr loc]
+    text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
   ppr (Partition n flags arrs) =
     text "partition" <>
     parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
+
+instance Pretty a => Pretty (ErrorMsg a) where
+  ppr (ErrorMsg parts) = commasep $ map p parts
+    where p (ErrorString s) = text $ show s
+          p (ErrorInt32 x) = ppr x
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f (IfAttr _ ifsort)) =

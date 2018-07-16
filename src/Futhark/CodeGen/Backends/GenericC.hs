@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
@@ -66,6 +67,8 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
+import Data.Bits (xor, shiftR)
+import Data.Char (ord, isDigit, isAlphaNum)
 import qualified Data.Map.Strict as M
 import qualified Data.DList as DL
 import Data.List
@@ -73,6 +76,7 @@ import Data.Loc
 import Data.Maybe
 import Data.FileEmbed
 import qualified Data.Semigroup as Sem
+import Text.Printf
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
@@ -626,11 +630,23 @@ arrayName pt signed rank =
   prettySigned (signed==TypeUnsigned) pt ++ "_" ++ show rank ++ "d"
 
 opaqueName :: String -> [ValueDesc] -> String
-opaqueName s vds = "opaque_" ++ zEncodeString (show (s ++ concatMap p vds)) -- FIXME
+opaqueName s _
+  | valid = "opaque_" ++ s
+  where valid = head s /= '_' &&
+                not (isDigit $ head s) &&
+                all ok s
+        ok c = isAlphaNum c || c == '_'
+opaqueName s vds = "opaque_" ++ hash (zipWith xor [0..] $ map ord (s ++ concatMap p vds))
   where p (ScalarValue pt signed _) =
           show (pt, signed)
         p (ArrayValue _ _ space pt signed dims) =
           show (space, pt, signed, length dims)
+
+        -- FIXME: a stupid hash algorithm; may have collisions.
+        hash = printf "%x" . foldl xor 0 . map (iter . (*0x45d9f3b) .
+                                                iter . (*0x45d9f3b) .
+                                                iter . fromIntegral)
+        iter x = ((x::Word32) `shiftR` 16) `xor` x
 
 criticalSection :: [C.BlockItem] -> [C.BlockItem]
 criticalSection items = [[C.citem|lock_lock(&ctx->lock);|]] <>
@@ -1238,6 +1254,7 @@ $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <stdbool.h>")
 $esc:("#include <math.h>")
+$esc:("#include <stdint.h>")
 /* If NDEBUG is set, the assert() macro will do nothing. Since Futhark
    (unfortunately) makes use of assert() for error detection (and even some
    side effects), we want to avoid that. */
@@ -1251,7 +1268,6 @@ $esc:timing_h
 
   let clidefs = [C.cunit|
 $esc:("#include <string.h>")
-$esc:("#include <stdint.h>")
 $esc:("#include <inttypes.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <ctype.h>")
@@ -1333,7 +1349,6 @@ int main(int argc, char** argv) {
   let libdefs = [C.cunit|
 $esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
 $esc:("#include <string.h>")
-$esc:("#include <stdint.h>")
 $esc:("#include <inttypes.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
@@ -1620,12 +1635,15 @@ compileCode c
 
 compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
-compileCode (Assert e msg (loc, locs)) = do
+compileCode (Assert e (ErrorMsg parts) (loc, locs)) = do
   e' <- compileExp e
   free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
+      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
+  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   stm [C.cstm|if (!$exp:e') {
-                   ctx->error = msgprintf("Assertion failed at %s: %s\n",
-                                           $string:stacktrace, $string:msg);
+                   ctx->error = msgprintf($string:("Error at %s:\n" <> concat formatstrs <> "\n"),
+                                           $string:stacktrace, $args:formatargs);
                    $items:free_all_mem
                    return 1;
                  }|]

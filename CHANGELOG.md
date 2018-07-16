@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.6.2]
+
+### Added
+
+  * Bounds checking errors now show the erroneous index and the size
+    of the indexed array.  Some other size-related errors also show
+    more information, but it will be a while before they are all
+    converted (and say something useful - it's not entirely
+    straightforward).
+
+  * Opaque types now have significantly more readable names,
+    especially if you add manual size annotations to the entry point
+    definitions.
+
+  * Backticked infix operators can now be used in operator sections.
+
+### Fixed
+
   * `f64.e` is no longer pi.
 
   * Generated C library code will no longer `abort()` on application
@@ -25,6 +43,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-c` and `futhark-opencl` now generates thread-safe code (#586).
 
   * Significantly better behaviour in OOM situations.
+
+  * Fixed an unsound interaction between in-place updates and
+    parametric polymorphism (#589).
 
 ## [0.6.1]
 

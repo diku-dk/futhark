@@ -1,8 +1,8 @@
 -- Dimension declarations on entry points can refer to constants.
 -- ==
 -- input { [1,2,3] } output { [0,1] }
--- input { [1,2] } error: failed
--- input { [1,3,2] } error: failed
+-- input { [1,2] } error: Error
+-- input { [1,3,2] } error: Error
 
 let three: i32 = 3
 let two: i32 = 2

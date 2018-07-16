@@ -618,7 +618,8 @@ defCompileBasicOp (Destination [target]) (CmpOp bop x y) = do
 
 defCompileBasicOp (Destination [_]) (Assert e msg loc) = do
   e' <- compileSubExp e
-  emit $ Imp.Assert e' msg loc
+  msg' <- traverse compileSubExp msg
+  emit $ Imp.Assert e' msg' loc
 
 defCompileBasicOp (Destination [target]) (Index src slice)
   | Just idxs <- sliceIndices slice =

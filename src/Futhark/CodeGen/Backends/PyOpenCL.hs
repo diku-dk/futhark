@@ -256,7 +256,7 @@ unpackArrayInput mem memsize "device" t s dims e = do
         BinOp "and"
         (BinOp "in" (Py.simpleCall "type" [e]) (List [Var "np.ndarray", Var "cl.array.Array"]))
         (BinOp "==" (Field e "dtype") (Var (Py.compilePrimToExtNp t s)))
-  Py.stm $ Assert type_is_ok "Parameter has unexpected type"
+  Py.stm $ Assert type_is_ok $ String "Parameter has unexpected type"
 
   zipWithM_ (Py.unpackDim e) dims [0..]
 
