@@ -1665,5 +1665,5 @@ dimDeclForError cm (NamedDim d) = do
           _             -> return $ I.Var $ E.qualLeaf d
   return $ ErrorInt32 d'
 dimDeclForError _ (ConstDim d) =
-  return $ ErrorString $ "[" ++ pretty d ++ "]"
+  return $ ErrorString $ pretty d
 dimDeclForError _ AnyDim = return ""
