@@ -602,7 +602,7 @@ def write_value(v, out=sys.stdout):
             if v >= 0:
                 out.write('f64.inf')
             else:
-                out.write('-f32.inf')
+                out.write('-f64.inf')
         else:
             out.write("%.6ff64" % v)
     elif type(v) == np.ndarray:
