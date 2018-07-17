@@ -300,6 +300,10 @@ cFloat32Funs = [C.cunit|
       return atan2(x,y);
     }
 
+    static inline float $id:(funName' "round32")(float x) {
+      return round(x);
+    }
+
     static inline char $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
@@ -375,6 +379,10 @@ cFloat64Funs = [C.cunit|
 
     static inline double $id:(funName' "atan2_64")(double x, double y) {
       return atan2(x,y);
+    }
+
+    static inline double $id:(funName' "round64")(double x) {
+      return round(x);
     }
 
     static inline char $id:(funName' "isnan64")(double x) {

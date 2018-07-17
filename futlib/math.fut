@@ -843,13 +843,7 @@ module f64: (float with t = f64 with int_t = u64) = {
 
   let even (x: f64) = i64m.f64 x % 2i64 i64m.== 0i64
 
-  let round (x: f64) : f64 =
-    let t0 = x + 0.5f64
-    let floor_t0 = floor t0
-    in if floor_t0 == t0 then
-	  let t = floor x
-	  in if even t then t else floor_t0
-	else floor_t0
+  let round = intrinsics.round64
 
   let to_bits (x: f64): u64 = u64m.i64 (intrinsics.to_bits64 x)
   let from_bits (x: u64): f64 = intrinsics.from_bits64 (intrinsics.sign_i64 x)
@@ -958,13 +952,7 @@ module f32: (float with t = f32 with int_t = u32) = {
 
   let even (x: f32) = i32m.f32 x % 2i32 i32m.== 0i32
 
-  let round (x: f32) : f32 =
-    let t0 = x + 0.5f32
-    let floor_t0 = floor t0
-    in if floor_t0 == t0 then
-	  let t = floor x
-	  in if even t then t else floor_t0
-	else floor_t0
+  let round = intrinsics.round32
 
   let to_bits (x: f32): u32 = u32m.i32 (intrinsics.to_bits32 x)
   let from_bits (x: u32): f32 = intrinsics.from_bits32 (intrinsics.sign_i32 x)

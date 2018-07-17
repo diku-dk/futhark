@@ -23,6 +23,8 @@ module Futhark.Util
         isEnvVarSet,
         runProgramWithExitCode,
         directoryContents,
+        roundFloat,
+        roundDouble,
         fromPOSIX,
         toPOSIX,
         zEncodeString
@@ -151,6 +153,17 @@ directoryContents dir = do
     _ -> return $ mapMaybe isFile $ Dir.flattenDir tree
   where isFile (Dir.File _ path) = Just path
         isFile _                 = Nothing
+
+foreign import ccall "round" c_round :: Double -> Double
+foreign import ccall "roundf" c_roundf :: Float -> Float
+
+-- | Round a single-precision floating point number correctly.
+roundFloat :: Float -> Float
+roundFloat = c_roundf
+
+-- | Round a double-precision floating point number correctly.
+roundDouble :: Double -> Double
+roundDouble = c_round
 
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
