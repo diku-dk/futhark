@@ -731,7 +731,7 @@ contain the result of evaluating ``e``.  Consumes ``a``.
 ``if c then a else b``
 ......................
 
-If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
+If ``c`` evaluates to ``true``, evaluate ``a``, else evaluate ``b``.
 
 Binding Expressions
 ~~~~~~~~~~~~~~~~~~~
