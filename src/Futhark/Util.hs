@@ -154,16 +154,16 @@ directoryContents dir = do
   where isFile (Dir.File _ path) = Just path
         isFile _                 = Nothing
 
-foreign import ccall "round" c_round :: Double -> Double
-foreign import ccall "roundf" c_roundf :: Float -> Float
+foreign import ccall "nearbyint" c_nearbyint :: Double -> Double
+foreign import ccall "nearbyintf" c_nearbyintf :: Float -> Float
 
 -- | Round a single-precision floating point number correctly.
 roundFloat :: Float -> Float
-roundFloat = c_roundf
+roundFloat = c_nearbyintf
 
 -- | Round a double-precision floating point number correctly.
 roundDouble :: Double -> Double
-roundDouble = c_round
+roundDouble = c_nearbyint
 
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
