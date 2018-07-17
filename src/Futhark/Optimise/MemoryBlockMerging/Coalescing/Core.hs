@@ -316,17 +316,6 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
 
-offsetIndexDWIM :: Int -> ExpMem.IxFun -> PrimExp VName -> ExpMem.IxFun
-offsetIndexDWIM n_ignore_initial ixfun offset =
-  fromMaybe (IxFun.offsetIndex ixfun offset) $ case ixfun of
-  IxFun.Index ixfun1 dimindices ->
-    let (dim_first, dim_rest) = L.splitAt n_ignore_initial dimindices
-    in case dim_rest of
-      (DimFix i : dim_rest') ->
-        Just $ IxFun.Index ixfun1 (dim_first ++ DimFix (i + offset) : dim_rest')
-      _ -> Nothing
-  _ -> Nothing
-
 tryCoalesce :: VName -> [Slice (PrimExp VName)] -> Bindage ->
                VName -> PrimExp VName -> FindM lore ()
 tryCoalesce dst ixfun_slices bindage src offset = do
@@ -380,7 +369,7 @@ tryCoalesce dst ixfun_slices bindage src offset = do
                                         then ixfun1 -- Should not be necessary,
                                                     -- but it makes the type
                                                     -- checker happy for now.
-                                        else offsetIndexDWIM (length initial_dimfixes) ixfun1 offset_local
+                                        else IxFun.offsetIndexDWIM (length initial_dimfixes) ixfun1 offset_local
                                ixfun3 = expandIxFun var_to_pe ixfun2
                            in ixfun3
                         ) offsets ixfun_slicess
