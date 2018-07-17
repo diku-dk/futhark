@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Added `log2` and `log10` functions to `f32` and `f64`.
+
 ### Removed
 
 ### Changed

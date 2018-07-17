@@ -256,6 +256,14 @@ cFloat32Funs = [C.cunit|
       return log(x);
     }
 
+    static inline float $id:(funName' "log2_32")(float x) {
+      return log2(x);
+    }
+
+    static inline float $id:(funName' "log10_32")(float x) {
+      return log10(x);
+    }
+
     static inline float $id:(funName' "sqrt32")(float x) {
       return sqrt(x);
     }
@@ -323,6 +331,14 @@ cFloat64Funs :: [C.Definition]
 cFloat64Funs = [C.cunit|
     static inline double $id:(funName' "log64")(double x) {
       return log(x);
+    }
+
+    static inline double $id:(funName' "log2_64")(double x) {
+      return log2(x);
+    }
+
+    static inline double $id:(funName' "log10_64")(double x) {
+      return log10(x);
     }
 
     static inline double $id:(funName' "sqrt64")(double x) {
