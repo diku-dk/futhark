@@ -92,7 +92,6 @@ data Lmad num = Lmad num [(num, num, num, Int, DimInfo)]
 --     contiguous memory interval?
 data IxFun num = IxFun [Lmad num] (Shape num) Bool
                  deriving (Show,Eq)
-               -- ^ list of Lmads * shape of original array * contiguous-in-mem
 
 --------------------------------
 --- Instances Implementation ---
