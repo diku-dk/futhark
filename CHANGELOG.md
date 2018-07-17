@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Floating-point numbers are now rounded correctly even in exotic
+    cases (#377).
+
 ## [0.6.2]
 
 ### Added

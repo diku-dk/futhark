@@ -86,6 +86,7 @@ import           Data.Word
 import           Prelude
 
 import           Futhark.Util.Pretty
+import           Futhark.Util (roundFloat, roundDouble)
 
 -- | An integer type, ordered by size.  Note that signedness is not a
 -- property of the type, but a property of the operations performed on
@@ -817,6 +818,8 @@ primFuns = M.fromList
   , f32 "asin32" asin, f64 "asin64" asin
   , f32 "acos32" acos, f64 "acos64" acos
   , f32 "atan32" atan, f64 "atan64" atan
+
+  , f32 "round32" roundFloat, f64 "round64" roundDouble
 
   , ("atan2_32",
      ([FloatType Float32, FloatType Float32], FloatType Float32,
