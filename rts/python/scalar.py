@@ -246,6 +246,12 @@ def fpconv_f64_f32(x):
 def futhark_log64(x):
   return np.float64(np.log(x))
 
+def futhark_log2_64(x):
+  return np.float64(np.log2(x))
+
+def futhark_log10_64(x):
+  return np.float64(np.log10(x))
+
 def futhark_sqrt64(x):
   return np.sqrt(x)
 
@@ -289,6 +295,12 @@ def futhark_from_bits64(x):
 
 def futhark_log32(x):
   return np.float32(np.log(x))
+
+def futhark_log2_32(x):
+  return np.float32(np.log2(x))
+
+def futhark_log10_32(x):
+  return np.float32(np.log10(x))
 
 def futhark_sqrt32(x):
   return np.float32(np.sqrt(x))

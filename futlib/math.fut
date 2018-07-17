@@ -123,7 +123,12 @@ module type real = {
   val atan: t -> t
   val atan2: t -> t -> t
 
+  -- | Natural logarithm.
   val log: t -> t
+  -- | Base-2 logarithm.
+  val log2: t -> t
+  -- | Base-10 logarithm.
+  val log10: t -> t
 
   val ceil : t -> t
   val floor : t -> t
@@ -809,6 +814,8 @@ module f64: (float with t = f64 with int_t = u64) = {
   let sqrt (x: f64) = intrinsics.sqrt64 x
 
   let log (x: f64) = intrinsics.log64 x
+  let log2 (x: f64) = intrinsics.log2_64 x
+  let log10 (x: f64) = intrinsics.log10_64 x
   let exp (x: f64) = intrinsics.exp64 x
   let cos (x: f64) = intrinsics.cos64 x
   let sin (x: f64) = intrinsics.sin64 x
@@ -922,6 +929,8 @@ module f32: (float with t = f32 with int_t = u32) = {
   let sqrt (x: f32) = intrinsics.sqrt32 x
 
   let log (x: f32) = intrinsics.log32 x
+  let log2 (x: f32) = intrinsics.log2_32 x
+  let log10 (x: f32) = intrinsics.log10_32 x
   let exp (x: f32) = intrinsics.exp32 x
   let cos (x: f32) = intrinsics.cos32 x
   let sin (x: f32) = intrinsics.sin32 x
