@@ -260,7 +260,7 @@ If everything went in order, pyOpenCL should be installed on your machine now.
     install pygame-1.9.2a0-cp27-none-win_amd64.whl`` from the command
     line.
 
-Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_ examples.
+Now you should be able to run the `Game of Life`_ example.
 
 11) To run the makefiles, first setup ``make`` by going to the ``bin``
     directory of MingWpy and making a copy of
@@ -278,6 +278,5 @@ Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_
     it.
 
 .. _`PyOpenCL repository`: https://github.com/pyopencl/pyopencl
-.. _`Mandelbrot Explorer`: https://github.com/diku-dk/futhark-benchmarks/tree/master/misc/mandelbrot-explorer
 .. _`Game of Life`: https://github.com/diku-dk/futhark-benchmarks/tree/master/misc/life
 .. _`issues page`: https://github.com/diku-dk/futhark/issues
