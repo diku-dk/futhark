@@ -301,7 +301,7 @@ cFloat32Funs = [C.cunit|
     }
 
     static inline float $id:(funName' "round32")(float x) {
-      return round(x);
+      return rint(x);
     }
 
     static inline char $id:(funName' "isnan32")(float x) {
@@ -382,7 +382,7 @@ cFloat64Funs = [C.cunit|
     }
 
     static inline double $id:(funName' "round64")(double x) {
-      return round(x);
+      return rint(x);
     }
 
     static inline char $id:(funName' "isnan64")(double x) {
