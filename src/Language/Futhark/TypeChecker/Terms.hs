@@ -1136,6 +1136,7 @@ checkExp (Assert e1 e2 NoInfo loc) = do
 
 checkExp Map{} = error "Map nodes should not appear in source program"
 checkExp Reduce{} = error "Reduce nodes should not appear in source program"
+checkExp GenReduce{} = error "GenReduce nodes should not appear in source program"
 checkExp Scan{} = error "Scan nodes should not appear in source program"
 checkExp Filter{} = error "Filter nodes should not appear in source program"
 checkExp Partition{} = error "Partition nodes should not appear in source program"

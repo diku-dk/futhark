@@ -197,6 +197,9 @@ transformExp (Apply e1 e2 d tp loc) =
           transformExp $ Stream (MapLike InOrder) f arr loc
       | intrinsic "stream_map_per" v ->
           transformExp $ Stream (MapLike Disorder) f arr loc
+    (Var v _ _, TupLit [dest, op, ne, bfun, img] _)
+      | intrinsic "gen_reduce" v ->
+          transformExp $ GenReduce dest op ne bfun img loc
 
     _ -> do
       e1' <- transformExp e1
@@ -290,6 +293,15 @@ transformExp (Stream form e1 e2 loc) = do
              MapLike _         -> return form
              RedLike so comm e -> RedLike so comm <$> transformExp e
   Stream form' <$> transformExp e1 <*> transformExp e2 <*> pure loc
+
+transformExp (GenReduce e1 e2 e3 e4 e5 loc) = do
+  GenReduce
+    <$> transformExp e1 -- hist
+    <*> transformExp e2 -- operator
+    <*> transformExp e3 -- neutral element
+    <*> transformExp e4 -- bucket function
+    <*> transformExp e5 -- input image
+    <*> pure loc
 
 transformExp (Zip i e1 es t loc) = do
   e1' <- transformExp e1

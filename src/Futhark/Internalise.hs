@@ -665,6 +665,23 @@ internaliseExp desc (E.Reduce comm lam ne arr loc) =
   where reduce w red_lam nes arrs =
           I.Screma w <$> I.reduceSOAC comm red_lam nes <*> pure arrs
 
+internaliseExp desc (E.GenReduce hist op ne bfun img _) = do
+  -- internalise input values and bucket function
+  ne' <- internaliseExp "gen_reduce_ne" ne
+  hist' <- internaliseExpToVars "gen_reduce_hist" hist
+  img' <- internaliseExpToVars "gen_reduce_img" img
+  bfun' <- internaliseMapLambda internaliseLambda bfun $ map I.Var img'
+
+  -- internalise combining operator
+  ne_ts <- mapM I.subExpType ne'
+  hist_ts <- mapM lookupType hist'
+  op' <- internaliseFoldLambda internaliseLambda op ne_ts hist_ts
+  w_hist <- arraysSize 0 <$> mapM lookupType hist'
+  let hist'' = map (w_hist,) hist'
+  w_img <- arraysSize 0 <$> mapM lookupType img'
+  letTupExp' desc $ I.Op $
+    I.GenReduce w_img hist'' [op'] ne' bfun' img'
+
 internaliseExp desc (E.Scan lam ne arr loc) =
   internaliseScanOrReduce desc "scan" scan (lam, ne, arr, loc)
   where scan w scan_lam nes arrs =

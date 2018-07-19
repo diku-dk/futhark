@@ -647,6 +647,10 @@ data ExpBase f vn =
             | Reduce Commutativity (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
              -- ^ @reduce (+) 0 ([1,2,...,n]) = (0+1+2+...+n)@.
 
+            | GenReduce (ExpBase f vn) (ExpBase f vn) (ExpBase f vn)
+                        (ExpBase f vn) (ExpBase f vn) SrcLoc
+             -- ^ @gen_reduce [1,1,1] (+) 0 (\x -> (x, x)) [1,1,1] = [4,1,1]@
+
             | Scan (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
              -- ^ @scan (+) 0 ([ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
 
@@ -736,6 +740,7 @@ instance Located (ExpBase f vn) where
   locOf (Update _ _ _ pos)             = locOf pos
   locOf (Map _ _ _ loc)                = locOf loc
   locOf (Reduce _ _ _ _ pos)           = locOf pos
+  locOf (GenReduce _ _ _ _ _ pos)      = locOf pos
   locOf (Zip _ _ _ _ loc)              = locOf loc
   locOf (Unzip _ _ pos)                = locOf pos
   locOf (Scan _ _ _ pos)               = locOf pos

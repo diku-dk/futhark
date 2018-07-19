@@ -87,6 +87,14 @@ data SOAC lore =
     --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
     --
     -- This must be consistent along all Scatter-related optimisations.
+  | GenReduce SubExp [(SubExp, VName)] [LambdaT lore] [SubExp] (LambdaT lore) [VName]
+    -- GenReduce <length> <dest. arrays> <ops> <nes> <bucket fun> <input arrays>
+    --
+    -- The first SubExp is the length of the input arrays. The first ('SubExp',
+    -- 'VName') list is the histogram arrays. The first 'LambdaT' list is the
+    -- associative and commutative operators. The second 'SubExp' list is the
+    -- neutral elements. The second 'LambdaT' is the bucket function.  Finally
+    -- comes the input images.
   | Screma SubExp (ScremaForm lore) [VName]
     -- ^ A combination of scan, reduction, and map.  The first
     -- 'SubExp' is the size of the input arrays.  The first
@@ -257,6 +265,16 @@ mapSOACM tv (Scatter len lam ivs as) =
   <*> mapM (mapOnSOACVName tv) ivs
   <*> mapM (\(aw,an,a) -> (,,) <$> mapOnSOACSubExp tv aw <*>
                           pure an <*> mapOnSOACVName tv a) as
+mapSOACM tv (GenReduce len hists ops nes bucket_fun imgs) =
+  GenReduce
+  <$> mapOnSOACSubExp tv len
+  <*> mapM (\(e, n) -> (,)
+                       <$> mapOnSOACSubExp tv e
+                       <*> mapOnSOACVName tv n) hists
+  <*> mapM (mapOnSOACLambda tv) ops
+  <*> mapM (mapOnSOACSubExp tv) nes
+  <*> mapOnSOACLambda tv bucket_fun
+  <*> mapM (mapOnSOACVName tv) imgs
 mapSOACM tv (Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs) =
   Screma <$> mapOnSOACSubExp tv w <*>
   (ScremaForm <$>
@@ -301,6 +319,10 @@ soacType (Scatter _w lam _ivs as) =
   where val_ts = concatMap (take 1) $ chunks ns $
                  drop (sum ns) $ lambdaReturnType lam
         (ws, ns, _) = unzip3 as
+soacType (GenReduce _len hists ops _nes _bucket_fun _imgs) =
+  zipWith arrayOfRow rtps ws
+  where (ws, _) = unzip hists
+        rtps = concatMap lambdaReturnType ops
 soacType (Screma w form _arrs) =
   scremaType w form
 soacType CmpThreshold{} = [Prim Bool]
@@ -330,6 +352,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                                (accs++map Var arrs)
   consumedInOp (Scatter _ _ _ as) =
     S.fromList $ map (\(_, _, a) -> a) as
+  consumedInOp (GenReduce _ xs _ _ _ _) =
+    S.fromList $ map (\(_, x) -> x) xs
   consumedInOp CmpThreshold{} = mempty
 
 instance (Attributes lore,
@@ -345,6 +369,9 @@ instance (Attributes lore,
           analyseStreamForm (Sequential acc) = Sequential acc
   addOpAliases (Scatter len lam ivs as) =
     Scatter len (Alias.analyseLambda lam) ivs as
+  addOpAliases (GenReduce len hists ops nes bucket_fun imgs) =
+    GenReduce len hists (map Alias.analyseLambda ops) nes
+    (Alias.analyseLambda bucket_fun) imgs
   addOpAliases (Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs) =
     Screma w (ScremaForm
                 (Alias.analyseLambda scan_lam, scan_nes)
@@ -394,6 +421,9 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
               return $ Parallel o comm lam0' acc
   addOpRanges (Scatter len lam ivs as) =
     Scatter len (Range.runRangeM $ Range.analyseLambda lam) ivs as
+  addOpRanges (GenReduce len hists ops nes bucket_fun imgs) =
+    GenReduce len hists (Range.runRangeM $ mapM Range.analyseLambda ops) nes
+    (Range.runRangeM $ Range.analyseLambda bucket_fun) imgs
   addOpRanges (Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs) =
     Screma w (ScremaForm
                 (Range.runRangeM $ Range.analyseLambda scan_lam, scan_nes)
@@ -537,6 +567,39 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   arrargs <- TC.checkSOACArrayArgs w ivs
   TC.checkLambda lam arrargs
 
+typeCheckSOAC (GenReduce len hists ops nes bucket_fun imgs) = do
+  -- 0. Histogram arrays' size arg. must have i32 type.
+  forM_ hists $ \(w, _) -> TC.require [Prim int32] w
+
+  -- 1. Type of ne must equal parameter types of operator.
+  nes' <- mapM TC.checkArg nes
+  forM_ (zip ops nes') $
+    \(op, ne') -> TC.checkLambda op $ map TC.noArgAliases $ [ne', ne']
+
+  -- 2. Type of ne must equal return type of operator.
+  let nes_t = map TC.argType nes'
+  zipWithM_ checkOpToNe ops nes_t
+
+  -- 3. Type of ne must equal type of destination array.
+  forM_ (zip hists nes_t) $ \((_w, name), ne) -> TC.requireI [ne] name
+
+  -- 4. Types of input arrays must equal parameter types for bucket function.
+  imgs' <- forM imgs $ \img -> TC.checkArg $ Var img
+  TC.checkLambda bucket_fun $ map TC.noArgAliases imgs'
+
+  -- 5. Return type of bucket function must be a tuple of i32 and alpha.
+  let bucket_ret_t = concatMap (\ne_t -> [Prim int32] ++ [ne_t]) nes_t
+  unless (bucket_ret_t == lambdaReturnType bucket_fun) $
+    TC.bad $ TC.TypeError $ "Bucket function has return type " ++
+    prettyTuple (lambdaReturnType bucket_fun) ++ " but should have type " ++
+    prettyTuple bucket_ret_t
+
+  where checkOpToNe op ne_t =
+          unless ([ne_t] == lambdaReturnType op) $
+          TC.bad $ TC.TypeError $ "Operator with type " ++
+          prettyTuple (lambdaReturnType op) ++ " but neutral element has type " ++
+          prettyTuple [ne_t]
+
 
 typeCheckSOAC (Screma w (ScremaForm (scan_lam, scan_nes) (_, red_lam, red_nes) map_lam) arrs) = do
   TC.require [Prim int32] w
@@ -579,6 +642,8 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Scatter _len lam _ivs _as) =
     inside "Scatter" $ lambdaMetrics lam
+  opMetrics (GenReduce _len _hists ops _nes bucket_fun _imgs) =
+    inside "GenReduce" $ mapM_ lambdaMetrics ops >> lambdaMetrics bucket_fun
   opMetrics (Screma _ (ScremaForm (scan_lam, _) (_, red_lam, _) map_lam) _) =
     inside "Screma" $
     lambdaMetrics scan_lam >> lambdaMetrics red_lam >> lambdaMetrics map_lam
@@ -600,7 +665,13 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                         commasep ( PP.braces (commasep $ map ppr acc) : map ppr arrs ))
   ppr (Scatter len lam ivs as) =
     ppSOAC "scatter" len [lam] (Just (map Var ivs)) (map (\(_,n,a) -> (n,a)) as)
-
+  ppr (GenReduce len hists ops nes bucket_fun imgs) =
+    text "gen_reduce" <> parens (ppr len <> comma </>
+                                 commasep (map ppr hists) <> comma </>
+                                 PP.braces (commasep $ map ppr ops) <> comma </>
+                                 PP.braces (commasep $ map ppr nes) <> comma </>
+                                 ppr bucket_fun <> comma </>
+                                 commasep (map ppr imgs))
   ppr (Screma w (ScremaForm (scan_lam, scan_nes) (_, red_lam, red_nes) map_lam) arrs)
     | isNilFn scan_lam, null scan_nes,
       isNilFn red_lam, null red_nes =

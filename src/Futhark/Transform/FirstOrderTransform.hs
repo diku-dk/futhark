@@ -577,6 +577,51 @@ transformSOAC pat (Scatter len lam ivs as) = do
     return $ resultBody (map Var ress)
   letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 
+transformSOAC pat (GenReduce len hists ops _nes bucket_fun imgs) = do
+  iter <- newVName "write_iter"
+
+  -- Bind arguments to parameters for the merge-variables.
+  hists_ts  <- mapM (lookupType . snd) hists
+  hists_out <- mapM (newIdent "write_out") hists_ts
+  let merge = loopMerge hists_out $ map Var imgs
+
+  -- Bind lambda-bodies for operators.
+  loopBody <- runBodyBinder $
+    localScope (M.insert iter (IndexInfo Int32) $
+                scopeOfFParams $ map fst merge) $ do
+    -- Bind images to parameters of bucket function.
+    imgs' <- forM imgs $ \img -> do
+      img_t <- lookupType img
+      letSubExp "write_iv" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
+    imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
+
+    -- Split out results from bucket function.
+    let lens  = map (length . lambdaReturnType) ops
+        lens' = map (+1) lens
+        ivs = chunks lens' imgs''
+        b_inds = map head ivs
+        b_vals = map tail ivs
+
+    -- Read from histogram arrays.
+    h_vals <- forM (zip (map snd hists) b_inds) $ \(hist, idx) -> do
+      hist_t <- lookupType hist
+      letSubExp "read_hist" $ BasicOp $ Index hist $ fullSlice hist_t [DimFix idx]
+
+    -- Apply operators.
+    h_vals' <- forM (zip3 ops b_vals (chunks lens h_vals)) $
+      \(op, b_val, h_val) -> bindLambda op $ map (BasicOp . SubExp) $ b_val ++ h_val
+
+    -- Write results back to histogram arrays.
+    ress <- forM (zip3 b_inds h_vals' (map identName hists_out)) $ \(idx, val, hist) -> do
+      let saveInArray indexCur array valueCur =
+            letExp "write_hist" =<< eWriteArray array [eSubExp indexCur] (eSubExp valueCur)
+
+      foldM (saveInArray idx) hist val
+
+    return $ resultBody $ map Var ress
+  -- Wrap up the above into a for-loop.
+  letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
+
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
                     Bindable lore, BinderOps lore,
