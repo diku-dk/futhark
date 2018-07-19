@@ -12,4 +12,5 @@ extra-deps:
 - process-extras-0.7.2
 - test-framework-quickcheck2-0.3.0.4
 - vector-0.12.0.1
+- megaparsec-6.0.2
 resolver: lts-9.2
