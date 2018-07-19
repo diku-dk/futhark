@@ -34,6 +34,7 @@ import Data.Char
 import Data.Functor
 import Data.Maybe
 import Data.Foldable (foldl')
+import Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
@@ -46,6 +47,8 @@ import qualified Control.Exception.Base as E
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
 import Text.Regex.TDFA
+
+import Prelude
 
 import Futhark.Analysis.Metrics
 import Futhark.Util.Pretty (pretty, prettyText)
