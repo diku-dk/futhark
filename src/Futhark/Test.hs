@@ -34,7 +34,7 @@ import Data.Char
 import Data.Functor
 import Data.Maybe
 import Data.Foldable (foldl')
-import Data.Monoid
+import Data.Semigroup
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
