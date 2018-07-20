@@ -567,15 +567,17 @@ matchBranchReturnType rettype (Body _ stms res) = do
 
 -- | Helper function for index function unification.
 --
--- The first return value maps a VName to its Int.  In case of
--- duplicates, it is mapped to the *first* Int that occurs.
+-- The first return value maps a VName (wrapped in 'Free') to its Int
+-- (wrapped in 'Ext').  In case of duplicates, it is mapped to the
+-- *first* Int that occurs.
 --
 -- The second return value maps each Int (wrapped in an 'Ext') to a
 -- 'LeafExp' 'Ext' with the Int at which its associated VName first
 -- occurs.
-getExtMaps :: [(VName,Int)] -> (M.Map VName Int, M.Map (Ext VName) (PrimExp (Ext VName)))
+getExtMaps :: [(VName,Int)] -> (M.Map (Ext VName) (PrimExp (Ext VName)),
+                                M.Map (Ext VName) (PrimExp (Ext VName)))
 getExtMaps ctx_lst_ids =
-  (M.fromListWith (flip const) ctx_lst_ids,
+  (M.map leafExp $ M.mapKeys Free $ M.fromListWith (flip const) ctx_lst_ids,
    M.fromList $
    mapMaybe (traverse (fmap (\i -> LeafExp (Ext i) int32) .
                        (`lookup` ctx_lst_ids)) .
@@ -595,13 +597,10 @@ matchReturnType rettype res ts = do
       getId (Constant _, _) = Nothing
 
       (ctx_map_ids, ctx_map_exts) =
-        getExtMaps $ mapMaybe getId $
-          zip ctx_res [0..length ctx_res - 1]
+        getExtMaps $ mapMaybe getId $ zip ctx_res [0..length ctx_res - 1]
 
       existentialiseIxFun0 :: IxFun -> ExtIxFun
-      existentialiseIxFun0 = fmap $ fmap ext
-        where ext v | Just i <- M.lookup v ctx_map_ids = Ext  i
-                    | otherwise                        = Free v
+      existentialiseIxFun0 = IxFun.substituteInIxFun ctx_map_ids . fmap (fmap Free)
 
       getCt :: (Int,SubExp) -> Maybe (Ext VName, PrimExp (Ext VName))
       getCt (_, Var _) = Nothing
@@ -698,9 +697,8 @@ matchPatternToExp pat e = do
   let (ctxs, vals) = bodyReturnsFromPattern $ removePatternAliases pat
       (ctx_ids, _ctx_ts) = unzip ctxs
       (_val_ids, val_ts) = unzip vals
-      (ctx_map_ids0, ctx_map_exts) =
+      (ctx_map_ids, ctx_map_exts) =
         getExtMaps $ zip ctx_ids [0..length ctx_ids - 1]
-      ctx_map_ids = M.map leafExp $ M.mapKeys Free ctx_map_ids0
 
   unless (length val_ts == length rt &&
           and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)) $
