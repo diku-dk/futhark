@@ -571,7 +571,7 @@ matchBranchReturnType rettype (Body _ stms res) = do
 -- | Helper function for index function unification.
 --
 -- The first return value maps a VName to its Int.  In case of
--- duplicates, it is mapped to the *last* Int that occurs.
+-- duplicates, it is mapped to the *first* Int that occurs.
 --
 -- The second return value maps @Ext i@s, where each @i@ is one of the
 -- @Int@s in the input list, to the corresponding @VName@ (so, it is
@@ -583,12 +583,11 @@ getExtMaps ctx_lst_ids =
                             Just (eqc, lst) -> M.insert nm (eqc, ei:lst) acc
                             Nothing -> M.insert nm (ei, []) acc
         ) M.empty ctx_lst_ids
-      ctx_map_ids = M.map fst ctx_map_tmp
       ctx_lst_exts :: [(Ext VName, Ext VName)]
       ctx_lst_exts= concatMap ((\(eqc,lst) -> map (\i->(Ext i, Ext eqc)) lst) . snd)
                               (M.toList ctx_map_tmp)
       ctx_map_exts= M.fromList ctx_lst_exts
-  in  (ctx_map_ids, ctx_map_exts)
+  in  (M.fromListWith (flip const) ctx_lst_ids, ctx_map_exts)
 
 matchReturnType :: PP.Pretty u =>
                    [MemInfo ExtSize u MemReturn]
