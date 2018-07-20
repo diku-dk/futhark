@@ -423,13 +423,12 @@ fixExtIxFun i e = fmap $ replaceInPrimExp update
                          | otherwise = LeafExp (Ext j) t
         update (Free x) t = LeafExp (Free x) t
 
-existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
-existentialiseIxFun ctx = existentialiseExtIxFun ctx' . fmap (fmap Free)
-  where ctx' = M.fromList $ zip (map Free ctx) [0..]
+leafExp :: Int -> PrimExp (Ext a)
+leafExp i = LeafExp (Ext i) int32
 
-existentialiseExtIxFun :: M.Map (Ext VName) Int -> ExtIxFun -> ExtIxFun
-existentialiseExtIxFun ctxids = IxFun.substituteInIxFun subst
-  where subst = M.map (\i -> LeafExp (Ext i) int32) ctxids
+existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
+existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
+  where ctx' = M.map leafExp $ M.fromList $ zip (map Free ctx) [0..]
 
 instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
@@ -571,13 +570,15 @@ matchBranchReturnType rettype (Body _ stms res) = do
 -- The first return value maps a VName to its Int.  In case of
 -- duplicates, it is mapped to the *first* Int that occurs.
 --
--- The second return value maps each Int (wrapped in an 'Ext') to the
--- Int at which its associated VName first occurs.
-getExtMaps :: [(VName,Int)] -> (M.Map VName Int, M.Map (Ext VName) Int)
+-- The second return value maps each Int (wrapped in an 'Ext') to a
+-- 'LeafExp' 'Ext' with the Int at which its associated VName first
+-- occurs.
+getExtMaps :: [(VName,Int)] -> (M.Map VName Int, M.Map (Ext VName) (PrimExp (Ext VName)))
 getExtMaps ctx_lst_ids =
   (M.fromListWith (flip const) ctx_lst_ids,
    M.fromList $
-   mapMaybe (traverse (`lookup` ctx_lst_ids) .
+   mapMaybe (traverse (fmap (\i -> LeafExp (Ext i) int32) .
+                       (`lookup` ctx_lst_ids)) .
              uncurry (flip (,)) . fmap Ext) ctx_lst_ids)
 
 matchReturnType :: PP.Pretty u =>
@@ -609,10 +610,8 @@ matchReturnType rettype res ts = do
       ctx_map_cts = M.fromList $ mapMaybe getCt $
                     zip [0..length ctx_res - 1] ctx_res
 
-      substCtInExtIxFun :: ExtIxFun -> ExtIxFun
-      substCtInExtIxFun = IxFun.substituteInIxFun ctx_map_cts
       substConstsInExtIndFun :: ExtIxFun -> ExtIxFun
-      substConstsInExtIndFun = existentialiseExtIxFun ctx_map_exts . substCtInExtIxFun
+      substConstsInExtIndFun = IxFun.substituteInIxFun (ctx_map_cts<>ctx_map_exts)
 
       fetchCtx i = case maybeNth i $ zip ctx_res ctx_ts of
                      Nothing -> throwError $ "Cannot find context variable " ++
@@ -701,7 +700,7 @@ matchPatternToExp pat e = do
       (_val_ids, val_ts) = unzip vals
       (ctx_map_ids0, ctx_map_exts) =
         getExtMaps $ zip ctx_ids [0..length ctx_ids - 1]
-      ctx_map_ids = M.mapKeys Free ctx_map_ids0
+      ctx_map_ids = M.map leafExp $ M.mapKeys Free ctx_map_ids0
 
   unless (length val_ts == length rt &&
           and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)) $
@@ -715,18 +714,18 @@ matchPatternToExp pat e = do
           x_pt == y_pt && x_shape == y_shape &&
           case (x_ret, y_ret) of
             (ReturnsInBlock x_mem x_ixfun, Just (ReturnsInBlock y_mem y_ixfun)) ->
-              let x_ixfun' = existentialiseExtIxFun ctxids  x_ixfun
-                  y_ixfun' = existentialiseExtIxFun ctxexts y_ixfun
+              let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
+                  y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
               in  x_mem == y_mem && x_ixfun' == y_ixfun'
             (ReturnsInBlock _ x_ixfun,
              Just (ReturnsNewBlock _ _ _ y_ixfun)) ->
-              let x_ixfun' = existentialiseExtIxFun ctxids  x_ixfun
-                  y_ixfun' = existentialiseExtIxFun ctxexts y_ixfun
+              let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
+                  y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
               in  x_ixfun' == y_ixfun'
             (ReturnsNewBlock x_space x_i x_size x_ixfun,
              Just (ReturnsNewBlock y_space y_i y_size y_ixfun)) ->
-              let x_ixfun' = existentialiseExtIxFun  ctxids x_ixfun
-                  y_ixfun' = existentialiseExtIxFun ctxexts y_ixfun
+              let x_ixfun' = IxFun.substituteInIxFun  ctxids x_ixfun
+                  y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
               in  x_space == y_space && x_i == y_i &&
                   x_size == y_size && x_ixfun' == y_ixfun'
             (_, Nothing) -> True
