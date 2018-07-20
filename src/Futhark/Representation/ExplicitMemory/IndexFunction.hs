@@ -66,29 +66,7 @@ data IxFun num = Direct (Shape num)
                | Index (IxFun num) (Slice num)
                | Reshape (IxFun num) (ShapeChange num)
                | Repeat (IxFun num) [Shape num] (Shape num)
-               deriving (Show)
-
---- XXX: this is almost just structural equality, which may be too
---- conservative - unless we normalise first, somehow.
-instance (IntegralExp num, Eq num) => Eq (IxFun num) where
-  Direct _ == Direct _ =
-    True
-  Permute ixfun1 perm1 == Permute ixfun2 perm2 =
-    ixfun1 == ixfun2 && perm1 == perm2
-  Rotate ixfun1 offsets1 == Rotate ixfun2 offsets2 =
-    ixfun1 == ixfun2 && offsets1 == offsets2
-  Index ixfun1 is1 == Index ixfun2 is2 =
-    ixfun1 == ixfun2 && length is1 == length is2 && and (zipWith eqIndex is1 is2)
-    -- Two DimSlices are considered equal even if their slice lengths
-    -- are not equal, as this allows us to get rid of reshapes.
-    where eqIndex (DimFix i) (DimFix j) = i == j
-          eqIndex (DimSlice i _ s0) (DimSlice j _ s1) = i==j && s0==s1
-          eqIndex _ _ = False
-  Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
-    ixfun1 == ixfun2 && length shape1 == length shape2
-  Repeat ixfun1 outer_shapes1 inner_shape1 == Repeat ixfun2 outer_shapes2 inner_shape2 =
-    ixfun1 == ixfun2 && outer_shapes1 == outer_shapes2 && inner_shape1 == inner_shape2
-  _ == _ = False
+               deriving (Eq,Show)
 
 instance Pretty num => Pretty (IxFun num) where
   ppr (Direct dims) =
@@ -388,8 +366,8 @@ isDirect Direct{} = True
 isDirect _ = False
 
 -- | Substituting a name with a PrimExp in an index function.
-substituteInIxFun :: M.Map VName (PrimExp VName) -> IxFun (PrimExp VName)
-                  -> IxFun (PrimExp VName)
+substituteInIxFun :: (Ord a) => M.Map a (PrimExp a) -> IxFun (PrimExp a)
+                  -> IxFun (PrimExp a)
 substituteInIxFun tab (Direct pes) =
   Direct $ map (substituteInPrimExp tab) pes
 substituteInIxFun tab (Permute ixfun p) =
