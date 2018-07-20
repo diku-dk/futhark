@@ -428,9 +428,8 @@ existentialiseIxFun ctx = existentialiseExtIxFun ctx' . fmap (fmap Free)
   where ctx' = M.fromList $ zip (map Free ctx) [0..]
 
 existentialiseExtIxFun :: M.Map (Ext VName) Int -> ExtIxFun -> ExtIxFun
-existentialiseExtIxFun ctxids = fmap $ fmap $ ext ctxids
-  where ext ctx v | Just ei <- M.lookup v ctx = Ext ei
-                  | otherwise                 = v
+existentialiseExtIxFun ctxids = IxFun.substituteInIxFun subst
+  where subst = M.map (\i -> LeafExp (Ext i) int32) ctxids
 
 instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
