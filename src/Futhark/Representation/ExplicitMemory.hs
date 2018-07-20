@@ -424,12 +424,11 @@ fixExtIxFun i e = fmap $ replaceInPrimExp update
         update (Free x) t = LeafExp (Free x) t
 
 existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
-existentialiseIxFun ctx = fmap $ fmap ext
-  where ext v | Just i <- elemIndex v ctx = Ext i
-              | otherwise                 = Free v
+existentialiseIxFun ctx = existentialiseExtIxFun ctx' . fmap (fmap Free)
+  where ctx' = M.fromList $ zip (map Free ctx) [0..]
 
-existentialiseIxFun2 :: M.Map (Ext VName) Int -> ExtIxFun -> ExtIxFun
-existentialiseIxFun2 ctxids = fmap (fmap (ext ctxids))
+existentialiseExtIxFun :: M.Map (Ext VName) Int -> ExtIxFun -> ExtIxFun
+existentialiseExtIxFun ctxids = fmap $ fmap $ ext ctxids
   where ext ctx v | Just ei <- M.lookup v ctx = Ext ei
                   | otherwise                 = v
 
@@ -614,7 +613,7 @@ matchReturnType rettype res ts = do
       substCtInExtIxFun :: ExtIxFun -> ExtIxFun
       substCtInExtIxFun = IxFun.substituteInIxFun ctx_map_cts
       substConstsInExtIndFun :: ExtIxFun -> ExtIxFun
-      substConstsInExtIndFun = existentialiseIxFun2 ctx_map_exts . substCtInExtIxFun
+      substConstsInExtIndFun = existentialiseExtIxFun ctx_map_exts . substCtInExtIxFun
 
       fetchCtx i = case maybeNth i $ zip ctx_res ctx_ts of
                      Nothing -> throwError $ "Cannot find context variable " ++
@@ -717,18 +716,18 @@ matchPatternToExp pat e = do
           x_pt == y_pt && x_shape == y_shape &&
           case (x_ret, y_ret) of
             (ReturnsInBlock x_mem x_ixfun, Just (ReturnsInBlock y_mem y_ixfun)) ->
-              let x_ixfun' = existentialiseIxFun2 ctxids  x_ixfun
-                  y_ixfun' = existentialiseIxFun2 ctxexts y_ixfun
+              let x_ixfun' = existentialiseExtIxFun ctxids  x_ixfun
+                  y_ixfun' = existentialiseExtIxFun ctxexts y_ixfun
               in  x_mem == y_mem && x_ixfun' == y_ixfun'
             (ReturnsInBlock _ x_ixfun,
              Just (ReturnsNewBlock _ _ _ y_ixfun)) ->
-              let x_ixfun' = existentialiseIxFun2 ctxids  x_ixfun
-                  y_ixfun' = existentialiseIxFun2 ctxexts y_ixfun
+              let x_ixfun' = existentialiseExtIxFun ctxids  x_ixfun
+                  y_ixfun' = existentialiseExtIxFun ctxexts y_ixfun
               in  x_ixfun' == y_ixfun'
             (ReturnsNewBlock x_space x_i x_size x_ixfun,
              Just (ReturnsNewBlock y_space y_i y_size y_ixfun)) ->
-              let x_ixfun' = existentialiseIxFun2  ctxids x_ixfun
-                  y_ixfun' = existentialiseIxFun2 ctxexts y_ixfun
+              let x_ixfun' = existentialiseExtIxFun  ctxids x_ixfun
+                  y_ixfun' = existentialiseExtIxFun ctxexts y_ixfun
               in  x_space == y_space && x_i == y_i &&
                   x_size == y_size && x_ixfun' == y_ixfun'
             (_, Nothing) -> True
