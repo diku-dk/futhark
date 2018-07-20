@@ -428,9 +428,9 @@ existentialiseIxFun ctx = fmap $ fmap ext
   where ext v | Just i <- elemIndex v ctx = Ext i
               | otherwise                 = Free v
 
-existentialiseIxFun2 :: M.Map (Ext VName) (Ext VName) -> ExtIxFun -> ExtIxFun
+existentialiseIxFun2 :: M.Map (Ext VName) Int -> ExtIxFun -> ExtIxFun
 existentialiseIxFun2 ctxids = fmap (fmap (ext ctxids))
-  where ext ctx v | Just ei <- M.lookup v ctx = ei
+  where ext ctx v | Just ei <- M.lookup v ctx = Ext ei
                   | otherwise                 = v
 
 instance PP.Pretty MemReturn where
@@ -575,11 +575,11 @@ matchBranchReturnType rettype (Body _ stms res) = do
 --
 -- The second return value maps each Int (wrapped in an 'Ext') to the
 -- Int at which its associated VName first occurs.
-getExtMaps :: [(VName,Int)] -> (M.Map VName Int, M.Map (Ext VName) (Ext VName))
+getExtMaps :: [(VName,Int)] -> (M.Map VName Int, M.Map (Ext VName) Int)
 getExtMaps ctx_lst_ids =
   (M.fromListWith (flip const) ctx_lst_ids,
    M.fromList $
-   mapMaybe (traverse (fmap Ext . (`lookup` ctx_lst_ids)) .
+   mapMaybe (traverse (`lookup` ctx_lst_ids) .
              uncurry (flip (,)) . fmap Ext) ctx_lst_ids)
 
 matchReturnType :: PP.Pretty u =>
@@ -703,7 +703,7 @@ matchPatternToExp pat e = do
       (_val_ids, val_ts) = unzip vals
       (ctx_map_ids0, ctx_map_exts) =
         getExtMaps $ zip ctx_ids [0..length ctx_ids - 1]
-      ctx_map_ids = (M.mapKeys Free . M.map Ext) ctx_map_ids0
+      ctx_map_ids = M.mapKeys Free ctx_map_ids0
 
   unless (length val_ts == length rt &&
           and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)) $
