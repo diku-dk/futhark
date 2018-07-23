@@ -1,5 +1,24 @@
 -- | This monomorphization module converts a well-typed, polymorphic,
 -- module-free Futhark program into an equivalent monomorphic program.
+--
+-- This pass also does a few other simplifications to make the job of
+-- subsequent passes easier.  Specifically, it does the following:
+--
+-- * Turn operator sections into explicit lambdas.
+--
+-- * Converts identifiers of record type into record patterns.
+--
+-- * Converts applications of intrinsic SOACs into SOAC AST nodes
+--   (Map, Reduce, etc).
+--
+-- * Elide functions that are not reachable from an entry point (this
+--   is a side effect of the monomorphisation algorithm, which uses
+--   the entry points as roots).
+--
+-- * Turns implicit record fields into explicit record fields.
+--
+-- Note that these changes are unfortunately not visible in the AST
+-- representation.
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Internalise.Monomorphise
   ( transformProg
@@ -26,17 +45,25 @@ import           Language.Futhark.TypeChecker.Types
 newtype PolyBinding = PolyBinding (VName, [TypeParam], [Pattern],
                                    Maybe (TypeExp VName), StructType, Exp, SrcLoc)
 
+-- | Mapping from record names to the variable names that contain the
+-- fields.  This is used because the monomorphiser also expands all
+-- record patterns.
+type RecordReplacements = M.Map VName RecordReplacement
+
+type RecordReplacement = M.Map Name (VName, PatternType)
+
 -- | Monomorphization environment mapping names of polymorphic functions to a
 -- representation of their corresponding function bindings.
 data Env = Env { envPolyBindings :: M.Map VName PolyBinding
                , envTypeBindings :: M.Map VName TypeBinding
+               , envRecordReplacements :: RecordReplacements
                }
 
 instance Sem.Semigroup Env where
-  Env tb1 pb1 <> Env tb2 pb2 = Env (tb1 <> tb2) (pb1 <> pb2)
+  Env tb1 pb1 rr1 <> Env tb2 pb2 rr2 = Env (tb1 <> tb2) (pb1 <> pb2) (rr1 <> rr2)
 
 instance Monoid Env where
-  mempty  = Env mempty mempty
+  mempty  = Env mempty mempty mempty
   mappend = (Sem.<>)
 
 localEnv :: Env -> MonoM a -> MonoM a
@@ -45,6 +72,9 @@ localEnv env = local (env <>)
 extendEnv :: VName -> PolyBinding -> MonoM a -> MonoM a
 extendEnv vn binding = localEnv
   mempty { envPolyBindings = M.singleton vn binding }
+
+withRecordReplacements :: RecordReplacements -> MonoM a -> MonoM a
+withRecordReplacements rr = localEnv mempty { envRecordReplacements = rr}
 
 -- | The monomorphization monad.
 newtype MonoM a = MonoM (RWST Env (Seq.Seq (VName, ValBind)) VNameSource
@@ -64,6 +94,9 @@ lookupFun vn = do
   case M.lookup vn env of
     Just valbind -> return $ Just valbind
     Nothing -> return Nothing
+
+lookupRecordReplacement :: VName -> MonoM (Maybe RecordReplacement)
+lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
 
 -- | Mapping from function name and instance list to a new function name in case
 -- the function has already been instantiated with those concrete types.
@@ -119,9 +152,9 @@ transformExp (RecordLit fs loc) =
   RecordLit <$> mapM transformField fs <*> pure loc
   where transformField (RecordFieldExplicit name e loc') =
           RecordFieldExplicit name <$> transformExp e <*> pure loc'
-        transformField (RecordFieldImplicit v (Info t) _) =
-          RecordFieldImplicit <$> transformFName v (toStruct t) <*>
-          pure (Info t) <*> pure loc
+        transformField (RecordFieldImplicit v t _) =
+          transformField $ RecordFieldExplicit (baseName v)
+          (Var (qualName v) (vacuousShapeAnnotations <$> t) loc) loc
 
 transformExp (ArrayLit es tp loc) =
   ArrayLit <$> mapM transformExp es <*> pure tp <*> pure loc
@@ -135,14 +168,24 @@ transformExp (Range e1 me incl tp loc) = do
 transformExp e@Empty{} = return e
 
 transformExp (Var (QualName qs fname) (Info t) loc) = do
-  fname' <- transformFName fname (toStructural t)
-  return $ Var (QualName qs fname') (Info t) loc
+  maybe_fs <- lookupRecordReplacement fname
+  case maybe_fs of
+    Just fs -> do
+      let toField (f, (f_v, f_t)) =
+            let f_v' = Var (qualName f_v) (Info $ vacuousShapeAnnotations f_t) loc
+            in RecordFieldExplicit f f_v' loc
+      return $ RecordLit (map toField $ M.toList fs) loc
+    Nothing -> do
+      fname' <- transformFName fname (toStructural t)
+      return $ Var (QualName qs fname') (Info t) loc
 
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
 
-transformExp (LetPat tparams pat e1 e2 loc) =
-  LetPat tparams pat <$> transformExp e1 <*> transformExp e2 <*> pure loc
+transformExp (LetPat tparams pat e1 e2 loc) = do
+  (pat', rr) <- expandRecordPattern pat
+  LetPat tparams pat' <$> transformExp e1 <*>
+    withRecordReplacements rr (transformExp e2) <*> pure loc
 
 transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
   | any isTypeParam tparams = do
@@ -254,8 +297,15 @@ transformExp (BinOp (QualName qs fname) (Info t) (e1, d1) (e2, d2) tp loc) = do
   return $ BinOp (QualName qs fname') (Info t) (e1', d1) (e2', d2) tp loc
 
 transformExp (Project n e tp loc) = do
-  e' <- transformExp e
-  return $ Project n e' tp loc
+  maybe_fs <- case e of
+    Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
+    _          -> return Nothing
+  case maybe_fs of
+    Just m | Just (v, _) <- M.lookup n m ->
+               return $ Var (qualName v) (vacuousShapeAnnotations <$> tp) loc
+    _ -> do
+      e' <- transformExp e
+      return $ Project n e' tp loc
 
 transformExp (LetWith id1 id2 idxs e1 body loc) = do
   idxs' <- mapM transformDimIndex idxs
@@ -362,6 +412,31 @@ unfoldLetFuns (ValBind _ fname _ rettype dim_params params body _ loc : rest) e 
   LetFun fname (dim_params, params, Nothing, rettype, body) e' loc
   where e' = unfoldLetFuns rest e
 
+expandRecordPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
+expandRecordPattern (Id v (Info (Record fs)) loc) = do
+  let fs' = M.toList fs
+  (fs_ks, fs_ts) <- fmap unzip $ forM fs' $ \(f, ft) ->
+    (,) <$> newVName (nameToString f) <*> pure ft
+  return (RecordPattern (zip (map fst fs')
+                             (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
+                        loc,
+          M.singleton v $ M.fromList $ zip (map fst fs') $ zip fs_ks fs_ts)
+expandRecordPattern (Id v t loc) = return (Id v t loc, mempty)
+expandRecordPattern (TuplePattern pats loc) = do
+  (pats', rrs) <- unzip <$> mapM expandRecordPattern pats
+  return (TuplePattern pats' loc, mconcat rrs)
+expandRecordPattern (RecordPattern fields loc) = do
+  let (field_names, field_pats) = unzip fields
+  (field_pats', rrs) <- unzip <$> mapM expandRecordPattern field_pats
+  return (RecordPattern (zip field_names field_pats') loc, mconcat rrs)
+expandRecordPattern (PatternParens pat loc) = do
+  (pat', rr) <- expandRecordPattern pat
+  return (PatternParens pat' loc, rr)
+expandRecordPattern (Wildcard t loc) = return (Wildcard t loc, mempty)
+expandRecordPattern (PatternAscription pat td loc) = do
+  (pat', rr) <- expandRecordPattern pat
+  return (PatternAscription pat' td loc, rr)
+
 -- | Monomorphize a polymorphic function at the types given in the instance
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
@@ -374,12 +449,14 @@ monomorphizeBinding (PolyBinding (name, tparams, params, retdecl, rettype, body,
       rettype' = applySubst (`M.lookup` substs) rettype
       params' = map (substPattern $ applySubst (`M.lookup` substs)) params
 
-  mapM_ noticeDims $ rettype : map patternStructType params'
+  (params'', rrs) <- unzip <$> mapM expandRecordPattern params'
+
+  mapM_ noticeDims $ rettype : map patternStructType params''
 
   body' <- updateExpTypes (`M.lookup` substs) body
-  body'' <- transformExp body'
+  body'' <- withRecordReplacements (mconcat rrs) $ transformExp body'
   name' <- if null tparams then return name else newName name
-  return (name', toValBinding name' params' rettype' body'')
+  return (name', toValBinding name' params'' rettype' body'')
 
   where shape_params = filter (not . isTypeParam) tparams
 
@@ -393,13 +470,13 @@ monomorphizeBinding (PolyBinding (name, tparams, params, retdecl, rettype, body,
                                   , mapOnPatternType = pure . applySubst substs
                                   }
 
-        toValBinding name' params' rettype' body'' =
+        toValBinding name' params'' rettype' body'' =
           ValBind { valBindEntryPoint = False
                   , valBindName       = name'
                   , valBindRetDecl    = retdecl
                   , valBindRetType    = Info rettype'
                   , valBindTypeParams = shape_params
-                  , valBindParams     = params'
+                  , valBindParams     = params''
                   , valBindBody       = body''
                   , valBindDoc        = Nothing
                   , valBindLocation   = loc
