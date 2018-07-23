@@ -490,8 +490,11 @@ distributeMap path pat (MapLoop cs w lam arrs) = do
     let exploitOuterParallelism path' = do
           soactypes <- asksScope scopeForSOACs
           (seq_lam, _) <- runBinderT (Kernelise.transformLambda lam) soactypes
-          fmap (postKernelsStms . snd) $ runKernelM (env path') $ distribute $
+          (acc', postkernels) <- runKernelM (env path') $ distribute $
             addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
+          -- As above, we deal with identity mappings.
+          return $ postKernelsStms postkernels <>
+            identityStms (outerTarget $ kernelTargets acc')
 
     distributeMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat w lam
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
