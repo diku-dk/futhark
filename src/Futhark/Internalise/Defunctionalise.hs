@@ -159,9 +159,6 @@ defuncExp (Range e1 me incl t@(Info t') loc) = do
   incl' <- mapM defuncExp' incl
   return (Range e1' me' incl' t loc, Dynamic t')
 
-defuncExp e@Empty{} =
-  return (e, Dynamic $ typeOf e)
-
 defuncExp e@(Var qn _ loc) = do
   sv <- lookupVar loc (qualLeaf qn)
   case sv of
@@ -761,7 +758,6 @@ freeVars expr = case expr of
   ArrayLit es _ _      -> foldMap freeVars es
   Range e me incl _ _  -> freeVars e <> foldMap freeVars me <>
                           foldMap freeVars incl
-  Empty t _ _          -> names $ foldMap dimName $ nestedDims $ unInfo $ expandedType t
   Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
   Ascript e t _        -> freeVars e <> names (foldMap dimName $ nestedDims $ unInfo $ expandedType t)
   LetPat _ pat e1 e2 _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)

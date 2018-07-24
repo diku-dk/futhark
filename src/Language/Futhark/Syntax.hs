@@ -582,8 +582,6 @@ data ExpBase f vn =
 
             | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) (f CompType) SrcLoc
 
-            | Empty (TypeDeclBase f vn) (f CompType) SrcLoc
-
             | Var (QualName vn) (f PatternType) SrcLoc
 
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
@@ -724,7 +722,6 @@ instance Located (ExpBase f vn) where
   locOf (Project _ _ _ pos)            = locOf pos
   locOf (ArrayLit _ _ pos)             = locOf pos
   locOf (Range _ _ _ _ pos)            = locOf pos
-  locOf (Empty _ _ pos)                = locOf pos
   locOf (BinOp _ _ _ _ _ pos)          = locOf pos
   locOf (If _ _ _ _ pos)               = locOf pos
   locOf (Var _ _ loc)                  = locOf loc

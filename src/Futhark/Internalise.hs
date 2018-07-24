@@ -384,14 +384,6 @@ internaliseExp desc (E.Range start maybe_second end _ _) = do
                (eBody [eDivRoundingUp Int32 (eSubExp distance) (eSubExp pos_step)])
   pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
 
-internaliseExp desc (E.Empty (TypeDecl _(Info et)) _ _) = do
-  (ts, _) <- internaliseReturnType et
-  let ts' = map (fromDecl . modifyArrayShape extToZero) ts
-  letSubExps desc $ map (I.BasicOp . I.ArrayLit []) ts'
-  where extToZero (I.Shape dims) = I.Shape $ map extDimToZero dims
-        extDimToZero I.Ext{} = constant (0::Int32)
-        extDimToZero (I.Free d) = d
-
 internaliseExp desc (E.Ascript e (TypeDecl dt (Info et)) loc) = do
   es <- internaliseExp desc e
   (ts, cm) <- internaliseReturnType et
