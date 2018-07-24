@@ -165,8 +165,6 @@ transformExp (Range e1 me incl tp loc) = do
   incl' <- mapM transformExp incl
   return $ Range e1' me' incl' tp loc
 
-transformExp e@Empty{} = return e
-
 transformExp (Var (QualName qs fname) (Info t) loc) = do
   maybe_fs <- lookupRecordReplacement fname
   case maybe_fs of

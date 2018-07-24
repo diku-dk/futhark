@@ -895,11 +895,6 @@ checkExp (Range start maybe_step end NoInfo loc) = do
 
   return $ Range start' maybe_step' end' (Info (t `setAliases` mempty)) loc
 
-checkExp (Empty decl NoInfo loc) = do
-  decl' <- checkTypeDecl decl
-  t <- arrayOfM loc (removeShapeAnnotations $ unInfo $ expandedType decl') (rank 1) Unique
-  return $ Empty decl' (Info $ t `setAliases` mempty) loc
-
 checkExp (Ascript e decl loc) = do
   decl' <- checkTypeDecl decl
   e' <- checkExp e

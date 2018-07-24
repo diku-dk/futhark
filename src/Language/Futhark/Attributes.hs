@@ -440,7 +440,6 @@ typeOf (RecordLit fs _) =
           M.singleton (baseName name) $ t `addAliases` S.insert name
 typeOf (ArrayLit _ (Info t) _) = t
 typeOf (Range _ _ _ (Info t) _) = t
-typeOf (Empty _ (Info t) _) = t
 typeOf (BinOp _ _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t

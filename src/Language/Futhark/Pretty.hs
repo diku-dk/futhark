@@ -204,8 +204,6 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     | otherwise                     = braces $ commasep $ map ppr fs
     where fieldArray (RecordFieldExplicit _ e _) = hasArrayLit e
           fieldArray RecordFieldImplicit{} = False
-  pprPrec _ (Empty (TypeDecl t _) _ _) =
-    text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
   pprPrec p (Range start maybe_step end _ _) =
