@@ -155,9 +155,12 @@ machine-checked, so human mistakes may occur.
 Note that ``futhark-pkg upgrade`` will *never* upgrade across a major
 version number.  Due to the principle of Semantic Import Versioning, a
 new major version is a completely different package from the point of
-view of the package manager.  Thus, you will need to use ``futhark-pkg
-add`` to add it and ``futhark-pkg remove`` to remove the old major
-version.
+view of the package manager.  Thus, to upgrade to a new major version,
+you will need to use ``futhark-pkg add`` to add the new version and
+``futhark-pkg remove`` to remove the old version.  Or you can keep it
+around - it is perfectly acceptable to depend on multiple major
+versions of the same package, because they are really different
+packages.
 
 Releasing a Package
 -------------------
