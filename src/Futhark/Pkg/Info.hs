@@ -102,6 +102,12 @@ newtype PkgInfo = PkgInfo { pkgVersions :: M.Map SemVer PkgRevInfo }
 lookupPkgRev :: SemVer -> PkgInfo -> Maybe PkgRevInfo
 lookupPkgRev v (PkgInfo m) = M.lookup v m
 
+majorRevOfPkg :: PkgPath -> (PkgPath, [Word])
+majorRevOfPkg p =
+  case T.splitOn "@" p of
+    [p', v] | [(v', "")] <- reads $ T.unpack v -> (p', [v'])
+    _                                          -> (p, [0, 1])
+
 -- | Retrieve information about a package based on its package path.
 -- This uses Semantic Import Versioning when interacting with GitHub
 -- repositories.  Specifically, a package @github.com/user/repo@ will
@@ -110,11 +116,8 @@ lookupPkgRev v (PkgInfo m) = M.lookup v m
 pkgInfo :: PkgPath -> IO (Either T.Text PkgInfo)
 pkgInfo path
   | ["github.com", owner, repo] <- T.splitOn "/" path =
-      case T.splitOn "@" repo of
-        [repo', v]
-          | [(v', "")] <- reads $ T.unpack v ->
-              ghPkgInfo path owner repo' [v']
-        _ -> ghPkgInfo path owner repo [0, 1]
+      let (repo', vs) = majorRevOfPkg repo
+      in ghPkgInfo path owner repo' vs
 pkgInfo path =
   return $ Left $ "Unable to handle package paths of the form '" <> path <> "'"
 
@@ -150,7 +153,8 @@ ghPkgInfo path owner repo versions = do
             Right v <- semver $ T.drop 1 t,
             _svMajor v `elem` versions = do
               gd <- memoiseGetDeps $ ghRevGetDeps owner repo t
-              let dir = T.unpack repo <> "-" <> T.unpack (prettySemVer v) </>
+              let dir = addTrailingPathSeparator $
+                        T.unpack repo <> "-" <> T.unpack (prettySemVer v) </>
                         "lib" </> T.unpack path
               return $ Just (v, PkgRevInfo
                                 (T.pack repo_url <> "/archive/" <> t <> ".zip")
@@ -226,8 +230,14 @@ lookupPackageRev p v = do
                        [] -> "Package " <> p <> " has no versions.  Invalid package path?"
                        ks -> "Known versions: " <>
                              T.concat (intersperse ", " $ map prettySemVer ks)
+          major | (_, vs) <- majorRevOfPkg p,
+                  _svMajor v `notElem` vs =
+                    "\nFor major version " <> T.pack (show (_svMajor v)) <>
+                    ", use package path " <> p <> "@" <> T.pack (show (_svMajor v))
+                | otherwise = mempty
       in fail $ T.unpack $
-         "package " <> p <> " does not have a version " <> prettySemVer v <> ".\n" <> versions
+         "package " <> p <> " does not have a version " <> prettySemVer v <> ".\n" <>
+         versions <> major
     Just v' -> return v'
 
 -- | Find the newest version of a package.
