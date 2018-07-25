@@ -17,6 +17,7 @@ import System.FilePath
 import qualified System.FilePath.Posix as Posix
 import System.Environment
 import System.Exit
+import System.IO
 
 import qualified Codec.Archive.Zip as Zip
 import qualified System.Directory.Tree as DirTree
@@ -31,6 +32,7 @@ import Futhark.Pkg.Types
 import Futhark.Pkg.Info
 import Futhark.Pkg.Solve
 import Futhark.Util (directoryContents)
+import Futhark.Util.Log
 
 --- Installing packages
 
@@ -61,7 +63,7 @@ mkLibNewDir = do
     then copyDirectory libDir libNewDir
     else createDirectoryIfMissing False "lib~new"
 
-installInDir :: MonadPkgRegistry m => BuildList -> FilePath -> m ()
+installInDir :: BuildList -> FilePath -> PkgM ()
 installInDir (BuildList bl) dir = do
   let putEntry pdir info entry
         | not (isInPkgDir info $ Zip.eRelativePath entry)
@@ -87,7 +89,7 @@ installInDir (BuildList bl) dir = do
 
   forM_ (M.toList bl) $ \(p, v) -> do
     info <- lookupPackageRev p v
-    a <- liftIO $ downloadZipball $ pkgRevZipballUrl info
+    a <- downloadZipball $ pkgRevZipballUrl info
 
     -- The directory that will contain the package.
     let pdir = dir </> T.unpack p
@@ -128,7 +130,7 @@ installInDir (BuildList bl) dir = do
 -- Since POSIX at least guarantees atomic renames, the only place this
 -- can fail is between steps 3 and 4.  In that case, at least the
 -- 'lib~old' will still exist and can be put back by the user.
-installBuildList :: MonadPkgRegistry m => BuildList -> m ()
+installBuildList :: BuildList -> PkgM ()
 installBuildList bl = do
   libdir_exists <- liftIO $ doesDirectoryExist libDir
 
@@ -141,12 +143,15 @@ installBuildList bl = do
 --- The CLI
 
 -- | The monad in which futhark-pkg runs.
-newtype PkgM a = PkgM (StateT PkgRegistry IO a)
+newtype PkgM a = PkgM (StateT (PkgRegistry PkgM) IO a)
   deriving (Functor, Applicative, Monad, MonadIO)
 
 instance MonadPkgRegistry PkgM where
   putPkgRegistry = PkgM . put
   getPkgRegistry = PkgM get
+
+instance MonadLogger PkgM where
+  addLog = liftIO . T.hPutStr stderr . toText
 
 runPkgM :: PkgM a -> IO a
 runPkgM (PkgM m) = evalStateT m mempty

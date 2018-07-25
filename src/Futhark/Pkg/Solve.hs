@@ -10,7 +10,6 @@ module Futhark.Pkg.Solve
   , PkgRevDepInfo
   ) where
 
-import Control.Monad.IO.Class
 import Control.Monad.State
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -85,7 +84,8 @@ doSolveDeps (PkgRevDeps deps) = do
 
 -- | Run the solver, producing both a package registry containing
 -- a cache of the lookups performed, as well as a build list.
-solveDeps :: MonadPkgRegistry m => PkgRevDeps -> m BuildList
+solveDeps :: MonadPkgRegistry m =>
+             PkgRevDeps -> m BuildList
 solveDeps deps = fmap buildList $ step $ execStateT (doSolveDeps deps) emptyRoughBuildList
   where step (Pure x) = return x
         step (Free (OpGetDeps p v h c)) = do
@@ -94,7 +94,7 @@ solveDeps deps = fmap buildList $ step $ execStateT (doSolveDeps deps) emptyRoug
           checkHash p v pinfo h
 
           let GetDeps g = pkgRevGetDeps pinfo
-          d <- liftIO g
+          d <- g
           step $ c d
 
         checkHash _ _ _ Nothing = return ()

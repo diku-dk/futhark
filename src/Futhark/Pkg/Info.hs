@@ -39,53 +39,56 @@ import Network.HTTP.Client hiding (path)
 import Network.HTTP.Simple
 
 import Futhark.Pkg.Types
+import Futhark.Util.Log
 
--- | Revision dependencies are stored as an IO action, because we want
--- to fetch them on-demand.  It would be a waste to fetch dependency
--- information for every version of every package if we only actually
--- need a small subset of them.
-newtype GetDeps = GetDeps (IO PkgRevDeps)
+-- | Revision dependencies are stored as a monadic action, because we
+-- want to fetch them on-demand.  It would be a waste to fetch
+-- dependency information for every version of every package if we
+-- only actually need a small subset of them.
+newtype GetDeps m = GetDeps (m PkgRevDeps)
 
-instance Show GetDeps where
+instance Show (GetDeps m) where
   show _ = "#<revdeps>"
 
-instance Eq GetDeps where
+instance Eq (GetDeps m) where
   _ == _ = True
 
 -- | Information about a version of a single package.  The version
 -- number is stored separately.
-data PkgRevInfo = PkgRevInfo { pkgRevZipballUrl :: T.Text
-                             , pkgRevPkgDir :: FilePath
-                               -- ^ The directory inside the tarball
-                               -- containing the package source code.
-                             , pkgRevCommit :: T.Text
-                               -- ^ The commit ID can be used for
-                               -- verification ("freezing"), by
-                               -- storing what it was at the time this
-                               -- version was last selected.
-                             , pkgRevGetDeps :: GetDeps
-                             }
+data PkgRevInfo m = PkgRevInfo { pkgRevZipballUrl :: T.Text
+                               , pkgRevPkgDir :: FilePath
+                                 -- ^ The directory inside the tarball
+                                 -- containing the package source code.
+                               , pkgRevCommit :: T.Text
+                                 -- ^ The commit ID can be used for
+                                 -- verification ("freezing"), by
+                                 -- storing what it was at the time this
+                                 -- version was last selected.
+                               , pkgRevGetDeps :: GetDeps m
+                               }
                   deriving (Eq, Show)
 
 -- | Create memoisation around a 'GetDeps' action to ensure that
 -- multiple inspections of the same revisions will not result in
 -- potentially expensive network round trips.
-memoiseGetDeps :: GetDeps -> IO GetDeps
+memoiseGetDeps :: MonadIO m => GetDeps m -> m (GetDeps m)
 memoiseGetDeps (GetDeps m) = do
-  ref <- newIORef Nothing
+  ref <- liftIO $ newIORef Nothing
   return $ GetDeps $ do
-    v <- readIORef ref
+    v <- liftIO $ readIORef ref
     case v of Just v' -> return v'
               Nothing -> do
                 v' <- m
-                writeIORef ref $ Just v'
+                liftIO $ writeIORef ref $ Just v'
                 return v'
 
-downloadZipball :: T.Text -> IO Zip.Archive
+downloadZipball :: (MonadLogger m, MonadIO m) =>
+                   T.Text -> m Zip.Archive
 downloadZipball url = do
-  r <- parseRequest $ T.unpack url
+  logMsg $ "Downloading " <> T.unpack url
+  r <- liftIO $ parseRequest $ T.unpack url
 
-  r' <- httpLBS r
+  r' <- liftIO $ httpLBS r
   let bad = fail . (("When downloading " <> T.unpack url <> ": ")<>)
   case getResponseStatusCode r' of
     200 ->
@@ -96,10 +99,10 @@ downloadZipball url = do
 
 -- | Information about a package.  The name of the package is stored
 -- separately.
-newtype PkgInfo = PkgInfo { pkgVersions :: M.Map SemVer PkgRevInfo }
+newtype PkgInfo m = PkgInfo { pkgVersions :: M.Map SemVer (PkgRevInfo m) }
   deriving (Show)
 
-lookupPkgRev :: SemVer -> PkgInfo -> Maybe PkgRevInfo
+lookupPkgRev :: SemVer -> PkgInfo m -> Maybe (PkgRevInfo m)
 lookupPkgRev v (PkgInfo m) = M.lookup v m
 
 majorRevOfPkg :: PkgPath -> (PkgPath, [Word])
@@ -113,7 +116,8 @@ majorRevOfPkg p =
 -- repositories.  Specifically, a package @github.com/user/repo@ will
 -- match version 0.* or 1.* tags only, a package
 -- @github.com/user/repo/v2@ will match 2.* tags, and so forth..
-pkgInfo :: PkgPath -> IO (Either T.Text PkgInfo)
+pkgInfo :: (MonadIO m, MonadLogger m) =>
+           PkgPath -> m (Either T.Text (PkgInfo m))
 pkgInfo path
   | ["github.com", owner, repo] <- T.splitOn "/" path =
       let (repo', vs) = majorRevOfPkg repo
@@ -129,13 +133,15 @@ pkgInfo path =
 -- by other systems (Go most notably), so we should not be stepping on
 -- any toes.
 
-ghPkgInfo :: PkgPath -> T.Text -> T.Text -> [Word] -> IO (Either T.Text PkgInfo)
+ghPkgInfo :: (MonadIO m, MonadLogger m) =>
+             PkgPath -> T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
 ghPkgInfo path owner repo versions = do
+  logMsg $ "Retrieving list of tags from " <> repo_url
   let prog = "git"
       prog_opts :: [String]
       prog_opts = ["ls-remote", "--tags", repo_url]
-  (code, out, err) <- readProcessWithExitCode prog prog_opts mempty
-  BS.hPutStr stderr err
+  (code, out, err) <- liftIO $ readProcessWithExitCode prog prog_opts mempty
+  liftIO $ BS.hPutStr stderr err
 
   case code of
     ExitFailure 127 -> fail $ "'" <> unwords (prog : prog_opts) <> "' failed (program not found?)."
@@ -163,14 +169,16 @@ ghPkgInfo path owner repo versions = do
                                 gd)
           | otherwise = return Nothing
 
-ghRevGetDeps :: T.Text -> T.Text -> T.Text -> GetDeps
+ghRevGetDeps :: (MonadIO m, MonadLogger m) =>
+                T.Text -> T.Text -> T.Text -> GetDeps m
 ghRevGetDeps owner repo tag = GetDeps $ do
-  r <- parseRequest $ T.unpack $
-       "https://raw.githubusercontent.com/" <>
-       owner <> "/" <> repo <> "/" <>
-       tag <> "/" <> T.pack futharkPkg
+  let url = "https://raw.githubusercontent.com/" <>
+            owner <> "/" <> repo <> "/" <>
+            tag <> "/" <> T.pack futharkPkg
+  logMsg $ "Downloading package manifest from " <> url
+  r <- liftIO $ parseRequest $ T.unpack url
 
-  r' <- httpBS r
+  r' <- liftIO $ httpBS r
   let path = T.unpack $ owner <> "/" <> repo <> "@" <>
              tag <> "/" <> T.pack futharkPkg
       msg = (("When reading " <> path <> ": ")<>)
@@ -189,39 +197,42 @@ ghRevGetDeps owner repo tag = GetDeps $ do
 -- global; rather small registries are constructed on-demand based on
 -- the package paths referenced by the user, and may also be combined
 -- monoidically.  In essence, the PkgRegistry is just a cache.
-newtype PkgRegistry = PkgRegistry (M.Map PkgPath PkgInfo)
+newtype PkgRegistry m = PkgRegistry (M.Map PkgPath (PkgInfo m))
 
-instance Sem.Semigroup PkgRegistry where
+instance Sem.Semigroup (PkgRegistry m) where
   PkgRegistry x <> PkgRegistry y = PkgRegistry $ x <> y
 
-instance Monoid PkgRegistry where
+instance Monoid (PkgRegistry m) where
   mempty = PkgRegistry mempty
   mappend = (Sem.<>)
 
-lookupKnownPackage :: PkgPath -> PkgRegistry -> Maybe PkgInfo
+lookupKnownPackage :: PkgPath -> PkgRegistry m -> Maybe (PkgInfo m)
 lookupKnownPackage p (PkgRegistry m) = M.lookup p m
 
 -- | Monads that support a stateful package registry.  These are also
 -- required to be instances of 'MonadIO' because most package registry
 -- operations involve network operations.
-class MonadIO m => MonadPkgRegistry m where
-  getPkgRegistry :: m PkgRegistry
-  putPkgRegistry :: PkgRegistry -> m ()
+class (MonadIO m, MonadLogger m) => MonadPkgRegistry m where
+  getPkgRegistry :: m (PkgRegistry m)
+  putPkgRegistry :: PkgRegistry m -> m ()
 
-lookupPackage :: MonadPkgRegistry m => PkgPath -> m PkgInfo
+lookupPackage :: MonadPkgRegistry m =>
+                 PkgPath -> m (PkgInfo m)
 lookupPackage p = do
   r@(PkgRegistry m) <- getPkgRegistry
   case lookupKnownPackage p r of
-    Just info -> return info
+    Just info ->
+      return info
     Nothing -> do
-      e <- liftIO $ pkgInfo p
+      e <- pkgInfo p
       case e of
         Left e' -> fail $ show e'
         Right pinfo -> do
           putPkgRegistry $ PkgRegistry $ M.insert p pinfo m
           return pinfo
 
-lookupPackageRev :: MonadPkgRegistry m => PkgPath -> SemVer -> m PkgRevInfo
+lookupPackageRev :: MonadPkgRegistry m =>
+                    PkgPath -> SemVer -> m (PkgRevInfo m)
 lookupPackageRev p v = do
   pinfo <- lookupPackage p
   case lookupPkgRev v pinfo of
@@ -241,7 +252,8 @@ lookupPackageRev p v = do
     Just v' -> return v'
 
 -- | Find the newest version of a package.
-lookupNewestRev :: MonadPkgRegistry m => PkgPath -> m SemVer
+lookupNewestRev :: MonadPkgRegistry m =>
+                   PkgPath -> m SemVer
 lookupNewestRev p = do
   pinfo <- lookupPackage p
   case M.keys $ pkgVersions pinfo of
