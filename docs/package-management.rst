@@ -3,11 +3,10 @@
 Package Management
 ==================
 
-This document describes ``futhark-pkg``, the Futhark package manager.
-Futhark takes a very simplistic approach to package management,
-inspired by `vgo <https://research.swtch.com/vgo>`_ - a package in
-Futhark is a collection of downloadable ``.fut`` files and little
-more.
+This document describes ``futhark-pkg``, a minimalistic package
+manager inspired by `vgo <https://research.swtch.com/vgo>`_.  A
+Futhark package is a collection of downloadable ``.fut`` files and
+little more.
 
 Package Management Principles
 -----------------------------
