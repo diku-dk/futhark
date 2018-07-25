@@ -178,13 +178,13 @@ with the old.
 Incrementing the Major Version Number
 -------------------------------------
 
-While backwards-incompatible modifications to a package are ultimately
+While backwards-incompatible modifications to a package are sometimes
 unavoidable, it is wise to avoid them as much as possible, as they
-significantly inconvenience users.  Futher, ``futhark-pkg`` also tries
-to ensure that the package developer feels this inconvenience as well,
-to discourage breaking compatibility.  In many cases, an incompatible
-change can be avoided simply by adding new files to the package rather
-than incompatibly changing the existing ones.
+significantly inconvenience users.  To discourage breaking
+compatibility, ``futhark-pkg`` tries to ensure that the package
+developer feels this inconvenience as well.  In many cases, an
+incompatible change can be avoided simply by adding new files to the
+package rather than incompatibly changing the existing ones.
 
 If you really must increment the major version, then you will need to
 change the package path in ``futhark.pkg`` to contain the new major
