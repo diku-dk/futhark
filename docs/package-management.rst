@@ -140,7 +140,7 @@ import a file ``foo.fut`` from ``saga.fut`` with::
 
 Ultimately, everything boils down to ordinary file system semantics.
 This has the downside of relatively long and clumsy file paths, but
-the advantage of predictability.
+the upside of predictability.
 
 Upgrading Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~
