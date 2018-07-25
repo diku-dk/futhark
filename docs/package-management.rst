@@ -111,7 +111,8 @@ are writing a Futhark file located at
 ``lib/github.com/sturluson/edda/saga.fut``.  Further, we have a
 dependency on the package ``github.com/athas/foo-fut``, which is
 stored in the directory ``lib/github.com/athas/foo-fut``.  We can
-import a file ``foo.fut`` from ``saga.fut`` with::
+import a file ``lib/github.com/athas/foo-fut/foo.fut`` from
+``lib/github.com/sturluson/edda/saga.fut`` with::
 
   import "../foo-fut/foo"
 
