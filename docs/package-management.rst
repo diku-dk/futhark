@@ -8,34 +8,22 @@ manager inspired by `vgo <https://research.swtch.com/vgo>`_.  A
 Futhark package is a collection of downloadable ``.fut`` files and
 little more.
 
-Package Management Principles
------------------------------
+Basic Concepts
+--------------
 
-A package is uniquely identified with a *package path*.  The package
-path also encodes information about where to obtain the package;
-typically this means it is (part of) a URL.  At the moment, package
+A package is uniquely identified with a *package path*, which is
+similar to a URL, except without a protocol.  At the moment, package
 paths are always links to Git repositories hosted on GitHub.  In the
 future, this will become more flexible.  As an example, a package path
-may be ``github.com/user/repo`` (note that there is no protocol part,
-so it is not a proper URL).  The available *versions* of a package are
-commits tagged with Git tags of the form ``vX.Y.Z``.  Whenever
-versions are indicated, all three digits must always be given (that
-is, ``1.0`` is not a valid shorthand for ``1.0.0``).
+may be ``github.com/athas/fut-foo``.
+
+Package are versioned with `semantic version numbers
+<https://semver.org/>`_ of the form ``X.Y.Z``.  Whenever versions are
+indicated, all three digits must always be given (that is, ``1.0`` is
+not a valid shorthand for ``1.0.0``).
 
 Most ``futhark-pkg`` operations involve reading and writing a *package
 manifest*, which is always stored in a file called ``futhark.pkg``.
-The package manifest declares which packages the program depends on.
-Dependencies are specified as the *oldest acceptable version* within
-the given major version.  Upper version bounds are not supported, as
-strict adherence to semantic versioning is assumed, so any later
-version with the same major version number should work.  When
-``futhark-pkg`` calculates which version of a given package to
-download, it will pick the oldest version that still satisfies the
-minimum version requirements of that package in all transitive
-dependencies.  This means that a version may be used that is newer
-than the one indicated in ``futhark.pkg``, but only if a dependency
-requires a more recent version.
-
 The ``futhark.pkg`` file is human-editable, but is in day-to-day use
 mainly modified by ``futhark-pkg`` automatically.
 
@@ -55,9 +43,9 @@ This will create a new file ``futhark.pkg`` with the following contents:
    }
 
 This lists one required package, with its package path, minimum
-version, and the expected commit hash.  The latter is used for
-verification, to ensure that the contents of a package version cannot
-be changed silently.
+version (see :ref:`version-selection`), and the expected commit hash.
+The latter is used for verification, to ensure that the contents of a
+package version cannot be changed silently.
 
 ``futhark-pkg`` will perform network requests to determine whether a
 package of the given name and with the given version exists and fail
@@ -183,7 +171,7 @@ can import a file ``lib/github.com/athas/foo-fut/foo.fut`` from
   import "../foo-fut/foo"
 
 Releasing a Package
--------------------
+~~~~~~~~~~~~~~~~~~~
 
 Currently, a package corresponds exactly to a GitHub repository
 mirroring the package path.  A release is done by tagging an
@@ -196,7 +184,7 @@ the major version is 0), the new version must be *fully compatible*
 with the old.
 
 Incrementing the Major Version Number
--------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 While backwards-incompatible modifications to a package are sometimes
 unavoidable, it is wise to avoid them as much as possible, as they
@@ -226,3 +214,20 @@ path has changed, you will also need to rename the package directory
 in ``lib/``.  This is painful and awkward, but it is less painful and
 awkward than what users feel when their dependencies break
 compatibility.
+
+.. _version-selection:
+
+Version Selection
+-----------------
+
+The package manifest declares which packages the program depends on.
+Dependencies are specified as the *oldest acceptable version* within
+the given major version.  Upper version bounds are not supported, as
+strict adherence to semantic versioning is assumed, so any later
+version with the same major version number should work.  When
+``futhark-pkg get`` calculates which version of a given package to
+download, it will pick the oldest version that still satisfies the
+minimum version requirements of that package in all transitive
+dependencies.  This means that a version may be used that is newer
+than the one indicated in ``futhark.pkg``, but only if a dependency
+requires a more recent version.
