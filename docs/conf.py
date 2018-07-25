@@ -277,6 +277,8 @@ man_pages = [
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-dataset', 'futhark-dataset', 'Generate random data sets',
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
+    ('man/futhark-pkg', 'futhark-pkg', 'Futhark package tool',
+     ['Troels Henriksen (athas@sigkill.dk)'], 1)
 ]
 
 # If true, show URL addresses after external links.

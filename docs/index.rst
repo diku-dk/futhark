@@ -30,6 +30,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    installation.rst
    usage.rst
    language-reference.rst
+   package-management.rst
    c-porting-guide.rst
    versus-other-languages.rst
    hacking.rst
@@ -49,3 +50,4 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-bench.rst
    man/futhark-doc.rst
    man/futhark-dataset.rst
+   man/futhark-pkg.rst

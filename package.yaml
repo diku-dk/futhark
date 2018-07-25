@@ -50,6 +50,13 @@ dependencies:
   - process
   - markdown
   - zlib
+  - versions
+  - http-client
+  - http-client-tls
+  - http-conduit
+  - process-extras
+  - free
+  - zip-archive
 
 when:
 - condition: "!impl(ghc >= 8.0)"
@@ -73,7 +80,6 @@ executables:
     dependencies:
       - futhark
       - random
-      - process-extras
       - temporary
       - json
     ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg"
@@ -107,6 +113,9 @@ executables:
   futhark-doc:
     <<: *futhark
     main: src/futhark-doc.hs
+  futhark-pkg:
+    <<: *futhark
+    main: src/futhark-pkg.hs
 
 tests:
   unit:
