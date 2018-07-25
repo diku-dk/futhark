@@ -1,0 +1,128 @@
+.. role:: ref(emphasis)
+
+.. _futhark-pkg(1):
+
+===========
+futhark-pkg
+===========
+
+SYNOPSIS
+========
+
+futhark-pkg add PKGPATH [X.Y.Z]
+
+futhark-pkg check
+
+futhark-pkg create PKGPATH
+
+futhark-pkg fmt
+
+futhark-pkg get
+
+futhark-pkg remove PKGPATH
+
+futhark-pkg upgrade
+
+DESCRIPTION
+===========
+
+This tool is used to modify the package manifest (``futhark.pkg``) and
+download the required packages it describes.  ``futhark-pkg`` is not a
+build system; you will still need to compile your Futhark code with
+the usual compilers.  The only purpose of ``futhark-pkg`` is to
+download code (and perform other package management utility tasks).
+This manpage is not a general introduction to package management in
+Futhark; see the User's Guide for that.
+
+The ``futhark-pkg`` subcommands will modify only two locations in the
+file system (relative to the current working directory): the
+``futhark.pkg`` file, and the contents of ``lib/``.  When modifying
+``lib/``, ``futhark-pkg`` constructs the new version in ``lib~new/``
+and backs up the old version in ``lib~old``.  If ``futhark-pkg``
+should fail for any reason, you can recover the old state by moving
+``lib~old`` back.  These temporary directories are normally erased
+after ``futhark-pkg`` finishes.
+
+COMMANDS
+========
+
+futhark-pkg add PKGPATH [X.Y.Z]
+-------------------------------
+
+Add the specified package of the given minimum version as a
+requirement to ``futhark.pkg``.  If no version is provided, the newest
+one is used.  If the package is already required in ``futhark.pkg``,
+the new version requirement will replace the old one.
+
+Note that adding a package does not automatically download it.  Run
+``futhark-pkg get`` to do that.
+
+futhark-pkg check
+-----------------
+
+Verify that the ``futhark.pkg`` is valid, that all required packages
+are available in the indicated versions.  This command does not check
+that these versions contain well-formed code.  If a package path is
+defined in ``futhark.pkg``, also checks that ``.fut`` files are
+located at the expected location in the file system.
+
+futhark-pkg create PKGPATH
+--------------------------
+
+Create a new ``futhark.pkg`` defining a package with the given package
+path, and initially no requirements.
+
+futhark-pkg fmt
+---------------
+
+Reformat the ``futhark.pkg`` file, while retaining any comments.
+
+futhark-pkg get
+---------------
+
+Download all packages listed in ``futhark.pkg`` and place them in
+``lib/``.
+
+futhark-pkg remove PKGPATH
+--------------------------
+
+Remove a package from ``futhark.pkg``.  Does *not* remove it from the
+``lib/`` directory.
+
+futhark-pkg upgrade
+-------------------
+
+Upgrade all package requirements in ``futhark.pkg`` to the newest
+available versions.
+
+EXAMPLES
+========
+
+Create a new package that will be hosted at
+``https://github.com/sturluson/edda``::
+
+  futhark-pkg create github.com/sturluson/edda
+
+Add a package dependency::
+
+  futhark-pkg add github.com/sturluson/hattatal
+
+Download the dependencies::
+
+  futhark-pkg get
+
+And then you're ready to start hacking!  (Except that these packages
+do not actually exist.)
+
+BUGS
+====
+
+Since the ``lib/`` directory is populated with transitive dependencies
+as well, it is possible for a package to depend unwittingly on one of
+the dependencies of its dependencies, without the ``futhark.pkg`` file
+reflecting this.
+
+SEE ALSO
+========
+
+futhark-test(1), futhark-bench(1)
