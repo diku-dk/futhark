@@ -55,16 +55,16 @@ well-formed).  The version number can be elided, in which case
 is already present in ``futhark.pkg``, it will simply have its version
 requirement changed to the one specified in the command.  Any
 dependencies of the package will *not* be added to ``futhark.pkg``,
-but will still be downloaded by ``futhark-pkg get`` (see below).
+but will still be downloaded by ``futhark-pkg sync`` (see below).
 
 Adding a package with ``futhark-pkg add`` only modifies
 ``futhark.pkg``, but does not download the package files.  This is
-done with ``futhark-pkg get`` (without further options).  The contents
-of each required dependency and any transitive dependencies will be
-stored in a subdirectory of ``lib/`` corresponding to their package
-path.  As an example::
+done with ``futhark-pkg sync`` (without further options).  The
+contents of each required dependency and any transitive dependencies
+will be stored in a subdirectory of ``lib/`` corresponding to their
+package path.  As an example::
 
-  $ futhark-pkg get
+  $ futhark-pkg sync
   $ tree lib
   lib
   └── github.com
@@ -78,15 +78,15 @@ Packages can be removed from ``futhark.pkg`` with::
 
   $ futhark-pkg remove pkgpath
 
-This will not delete any files in the ``lib/`` directory.  You will
-have to do that manually.
+You will need to run ``futhark-sync`` to actually remove the files in
+``lib/``.
 
 Importing Files from Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``futhark-pkg get`` will populate the ``lib/`` directory, but does not
-interact with the compiler in any way.  The downloaded files can be
-imported using the usual ``import`` mechanism (:ref:`other-files`);
+``futhark-pkg sync`` will populate the ``lib/`` directory, but does
+not interact with the compiler in any way.  The downloaded files can
+be imported using the usual ``import`` mechanism (:ref:`other-files`);
 for example, assuming the package contains a file ``foo.fut``::
 
   import "lib/github.com/athas/fut-foo/foo"
@@ -100,7 +100,7 @@ Upgrading Dependencies
 
 The ``futhark-pkg upgrade`` command will update every version
 requirement in ``futhark.pkg`` to be the most recent available
-version.  You still need to run ``futhark-pkg get`` to actually
+version.  You still need to run ``futhark-pkg sync`` to actually
 retrieve the new versions.  Be careful - while upgrades are safe if
 semantic versioning is followed correctly, this is not yet properly
 machine-checked, so human mistakes may occur.
@@ -119,7 +119,7 @@ As an example:
    require {
      github.com/athas/fut-foo 0.2.1 #3ddc9fc93c1d8ce560a3961e55547e5c78bd0f3e
    }
-   $ futhark-pkg get
+   $ futhark-pkg sync
    $ tree lib
    lib
    └── github.com
@@ -132,7 +132,7 @@ As an example:
    4 directories, 2 files
 
 Note that ``fut-foo 0.2.1`` depends on ``github.com/athas/fut-bar``,
-so it was fetched by ``futhark-pkg get``.
+so it was fetched by ``futhark-pkg sync``.
 
 ``futhark-pkg upgrade`` will *never* upgrade across a major version
 number.  Due to the principle of `Semantic Import Versioning
@@ -254,7 +254,7 @@ program depends on.  Dependencies are specified as the *oldest
 acceptable version* within the given major version.  Upper version
 bounds are not supported, as strict adherence to semantic versioning
 is assumed, so any later version with the same major version number
-should work.  When ``futhark-pkg get`` calculates which version of a
+should work.  When ``futhark-pkg sync`` calculates which version of a
 given package to download, it will pick the oldest version that still
 satisfies the minimum version requirements of that package in all
 transitive dependencies.  This means that a version may be used that
