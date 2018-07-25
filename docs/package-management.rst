@@ -91,18 +91,21 @@ Required packages can be added by using::
 
   futhark-pkg add pkgpath X.Y.Z
 
-This will add the indicated package to ``futhark.pkg``, if it exists.
+This will add the indicated package to ``futhark.pkg``.
 ``futhark-pkg`` will perform network requests to determine whether a
-package of the given name and with the given version exists (but it
-will not check whether the package is otherwise well-formed).  The
-version number can be elided, in which case ``futhark-pkg`` will use
-the newest available version.  If the package is already present in
-``futhark.pkg``, it will simply have its version requirement changed
-to the one specified in the command.
+package of the given name and with the given version exists and fail
+otherwise (but it will not check whether the package is otherwise
+well-formed).  The version number can be elided, in which case
+``futhark-pkg`` will use the newest available version.  If the package
+is already present in ``futhark.pkg``, it will simply have its version
+requirement changed to the one specified in the command.  Any
+dependencies of the package will *not* be added to ``futhark.pkg``,
+but will still be downloaded by ``futhark-pkg get`` (see below).
 
 Adding a package with ``futhark-pkg add`` only modifies
 ``futhark.pkg``, but does not download the package files.  This is
-done with ``futhark-pkg get``.  The contents of each package will be
+done with ``futhark-pkg get`` (without further options).  The contents
+of each required dependency and any transitive dependencies will be
 stored in a subdirectory of ``lib/`` corresponding to their package
 path.  For example, a dependency ``github.com/sturluson/edda`` will be
 stored in ``lib/github.com/sturluson/edda``.
