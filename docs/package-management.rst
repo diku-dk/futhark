@@ -156,7 +156,8 @@ Note again, no ``https://``.  The result is this ``futhark.pkg``::
 
 And this file hierarchy:
 
-.. .code-block: text
+.. code-block:: text
+
    $ tree lib
    lib
    └── github.com
