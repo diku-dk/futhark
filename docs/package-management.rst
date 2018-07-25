@@ -157,15 +157,15 @@ And this file hierarchy:
 Note that ``futhark-pkg create`` is not necessary simply to *use*
 packages, only when *creating* packages.
 
-When creating a reusable package (see below), the ``.fut`` files we
-are writing will be located inside the ``lib/`` directory.  If our
-package has its own dependencies whose files we would like to access,
-we can use *relative imports*.  For example, assume we are creating a
-package ``github.com/sturluson/edda`` and we are writing a Futhark
-file located at ``lib/github.com/sturluson/edda/saga.fut``.  Further,
-we have a dependency on the package ``github.com/athas/foo-fut``,
-which is stored in the directory ``lib/github.com/athas/foo-fut``.  We
-can import a file ``lib/github.com/athas/foo-fut/foo.fut`` from
+When creating a package, the ``.fut`` files we are writing will be
+located inside the ``lib/`` directory.  If the package has its own
+dependencies, whose files we would like to access, we can use
+*relative imports*.  For example, assume we are creating a package
+``github.com/sturluson/edda`` and we are writing a Futhark file
+located at ``lib/github.com/sturluson/edda/saga.fut``.  Further, we
+have a dependency on the package ``github.com/athas/foo-fut``, which
+is stored in the directory ``lib/github.com/athas/foo-fut``.  We can
+import a file ``lib/github.com/athas/foo-fut/foo.fut`` from
 ``lib/github.com/sturluson/edda/saga.fut`` with::
 
   import "../foo-fut/foo"
