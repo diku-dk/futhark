@@ -578,21 +578,22 @@ transformSOAC pat (Scatter len lam ivs as) = do
   letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 
 transformSOAC pat (GenReduce len hists ops _nes bucket_fun imgs) = do
-  iter <- newVName "write_iter"
+  iter <- newVName "iter"
 
   -- Bind arguments to parameters for the merge-variables.
   hists_ts  <- mapM (lookupType . snd) hists
-  hists_out <- mapM (newIdent "write_out") hists_ts
-  let merge = loopMerge hists_out $ map Var imgs
+  hists_out <- mapM (newIdent "dests") hists_ts
+  let merge = loopMerge hists_out $ map (Var . snd) hists
 
   -- Bind lambda-bodies for operators.
   loopBody <- runBodyBinder $
     localScope (M.insert iter (IndexInfo Int32) $
                 scopeOfFParams $ map fst merge) $ do
+
     -- Bind images to parameters of bucket function.
     imgs' <- forM imgs $ \img -> do
       img_t <- lookupType img
-      letSubExp "write_iv" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
+      letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
     imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
 
     -- Split out results from bucket function.
@@ -602,23 +603,26 @@ transformSOAC pat (GenReduce len hists ops _nes bucket_fun imgs) = do
         b_inds = map head ivs
         b_vals = map tail ivs
 
-    -- Read from histogram arrays.
-    h_vals <- forM (zip (map snd hists) b_inds) $ \(hist, idx) -> do
-      hist_t <- lookupType hist
-      letSubExp "read_hist" $ BasicOp $ Index hist $ fullSlice hist_t [DimFix idx]
+    let lens = length ops
+        inds = take lens imgs''
+        vals = chunks (map (length . lambdaParams) ops) $ drop lens imgs''
+        hists_out' = chunks (map (length . lambdaParams) ops) $ map identName hists_out
+
+    h_vals <- forM (zip inds hists_out') $ \(idx, hist) -> do
+      forM hist $ \arr -> do
+        arr_t <- lookupType arr
+        letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
 
     -- Apply operators.
-    h_vals' <- forM (zip3 ops b_vals (chunks lens h_vals)) $
-      \(op, b_val, h_val) -> bindLambda op $ map (BasicOp . SubExp) $ b_val ++ h_val
+    h_vals' <- forM (zip3 ops vals h_vals) $ \(op, ne_val, h_val) ->
+      bindLambda op $ map (BasicOp . SubExp) $ ne_val ++ h_val
 
     -- Write results back to histogram arrays.
-    ress <- forM (zip3 b_inds h_vals' (map identName hists_out)) $ \(idx, val, hist) -> do
-      let saveInArray indexCur array valueCur =
-            letExp "write_hist" =<< eWriteArray array [eSubExp indexCur] (eSubExp valueCur)
+    ress <- forM (zip3 inds h_vals' hists_out') $ \(idx, val, hist) -> do
+      forM (zip val hist) $  \(v, arr) -> do
+        letExp "write_hist" =<< eWriteArray arr [eSubExp idx] (eSubExp v)
 
-      foldM (saveInArray idx) hist val
-
-    return $ resultBody $ map Var ress
+    return $ resultBody $ map Var $ concat ress
   -- Wrap up the above into a for-loop.
   letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 

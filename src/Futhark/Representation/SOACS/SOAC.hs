@@ -320,9 +320,11 @@ soacType (Scatter _w lam _ivs as) =
                  drop (sum ns) $ lambdaReturnType lam
         (ws, ns, _) = unzip3 as
 soacType (GenReduce _len hists ops _nes _bucket_fun _imgs) =
-  zipWith arrayOfRow rtps ws
-  where (ws, _) = unzip hists
-        rtps = concatMap lambdaReturnType ops
+  zipWith arrayOfRow (concat rtps) ws'
+  where rtps = map lambdaReturnType ops
+        lens = map length rtps
+        (ws, _) = unzip hists
+        ws' = concatMap (uncurry replicate) $ zip lens ws
 soacType (Screma w form _arrs) =
   scremaType w form
 soacType CmpThreshold{} = [Prim Bool]
@@ -568,38 +570,40 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   TC.checkLambda lam arrargs
 
 typeCheckSOAC (GenReduce len hists ops nes bucket_fun imgs) = do
-  -- 0. Histogram arrays' size arg. must have i32 type.
+  -- 0. Histogram and input arrays' size arg. must have i32 type.
+  TC.require [Prim int32] len
   forM_ hists $ \(w, _) -> TC.require [Prim int32] w
 
   -- 1. Type of ne must equal parameter types of operator.
+  let ne_chunks = map (length . lambdaParams) ops
   nes' <- mapM TC.checkArg nes
-  forM_ (zip ops nes') $
-    \(op, ne') -> TC.checkLambda op $ map TC.noArgAliases $ [ne', ne']
+  forM_ (zip ops $ chunks ne_chunks nes') $
+    \(op, ne') -> TC.checkLambda op $ map TC.noArgAliases $ ne' ++ ne'
 
   -- 2. Type of ne must equal return type of operator.
   let nes_t = map TC.argType nes'
-  zipWithM_ checkOpToNe ops nes_t
+  zipWithM_ checkOpToNe ops $ chunks ne_chunks nes_t
 
   -- 3. Type of ne must equal type of destination array.
-  forM_ (zip hists nes_t) $ \((_w, name), ne) -> TC.requireI [ne] name
+  forM_ (zip hists nes_t) $ \((w, name), ne_t) -> do
+      TC.requireI [(ne_t `arrayOfRow` w)] name
+      TC.consume =<< TC.lookupAliases name
 
   -- 4. Types of input arrays must equal parameter types for bucket function.
-  imgs' <- forM imgs $ \img -> TC.checkArg $ Var img
-  TC.checkLambda bucket_fun $ map TC.noArgAliases imgs'
+  img' <- TC.checkSOACArrayArgs len imgs
+  TC.checkLambda bucket_fun img'
 
-  -- 5. Return type of bucket function must be a tuple of i32 and alpha.
-  let bucket_ret_t = concatMap (\ne_t -> [Prim int32] ++ [ne_t]) nes_t
+  -- 5. Return type of bucket function must be an index followed by alpha.
+  let bucket_ret_t = [Prim int32] ++ nes_t
   unless (bucket_ret_t == lambdaReturnType bucket_fun) $
     TC.bad $ TC.TypeError $ "Bucket function has return type " ++
     prettyTuple (lambdaReturnType bucket_fun) ++ " but should have type " ++
     prettyTuple bucket_ret_t
-
   where checkOpToNe op ne_t =
-          unless ([ne_t] == lambdaReturnType op) $
-          TC.bad $ TC.TypeError $ "Operator with type " ++
+          unless (ne_t == lambdaReturnType op) $
+          TC.bad $ TC.TypeError $ "Operator has return type " ++
           prettyTuple (lambdaReturnType op) ++ " but neutral element has type " ++
-          prettyTuple [ne_t]
-
+          prettyTuple ne_t
 
 typeCheckSOAC (Screma w (ScremaForm (scan_lam, scan_nes) (_, red_lam, red_nes) map_lam) arrs) = do
   TC.require [Prim int32] w

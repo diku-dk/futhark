@@ -673,9 +673,12 @@ internaliseExp desc (E.GenReduce hist op ne bfun img _) = do
   bfun' <- internaliseMapLambda internaliseLambda bfun $ map I.Var img'
 
   -- internalise combining operator
-  ne_ts <- mapM I.subExpType ne'
-  hist_ts <- mapM lookupType hist'
-  op' <- internaliseFoldLambda internaliseLambda op ne_ts hist_ts
+  ne_t <- mapM I.subExpType ne'
+  outsz <- arraysSize 0 <$> mapM lookupType hist'
+  let acc_tp = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- ne_t ]
+  op' <- internaliseFoldLambda internaliseLambda op ne_t acc_tp
+
+  -- get sizes of histogram and image arrays
   w_hist <- arraysSize 0 <$> mapM lookupType hist'
   let hist'' = map (w_hist,) hist'
   w_img <- arraysSize 0 <$> mapM lookupType img'
