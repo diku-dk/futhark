@@ -47,11 +47,13 @@ Required packages can be added by using ``futhark-pkg add``, for example::
 
   $ futhark-pkg add github.com/athas/fut-foo 0.1.0
 
-This will create a new file ``futhark.pkg`` with the following contents::
+This will create a new file ``futhark.pkg`` with the following contents:
 
-  require {
-    github.com/athas/fut-foo 0.1.0 #d285563c25c5152b1ae80fc64de64ff2775fa733
-  }
+.. code-block:: text
+
+   require {
+     github.com/athas/fut-foo 0.1.0 #d285563c25c5152b1ae80fc64de64ff2775fa733
+   }
 
 This contains the package path, the minimum version, and the expected
 commit hash.  The latter is used for verification, to ensure that the
