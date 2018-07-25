@@ -14,6 +14,7 @@ import Data.List
 import Data.Monoid
 import System.Directory
 import System.FilePath
+import qualified System.FilePath.Posix as Posix
 import System.Environment
 import System.Exit
 
@@ -62,10 +63,27 @@ mkLibNewDir = do
 
 installInDir :: MonadPkgRegistry m => BuildList -> FilePath -> m ()
 installInDir (BuildList bl) dir = do
-  let putFile pdir info entry = do
+  let putEntry pdir info entry
+        | not (isInPkgDir info $ Zip.eRelativePath entry)
+          || hasTrailingPathSeparator (Zip.eRelativePath entry) = return ()
+        | otherwise = do
+        -- Since we are writing to paths indicated in a zipfile we
+        -- downloaded from the wild Internet, we are going to be a
+        -- little bit paranoid.  Specifically, we want to avoid
+        -- writing outside of the 'lib/' directory.  We do this by
+        -- bailing out if the path contains any '..' components.  We
+        -- have to use System.FilePath.Posix, because the zip library
+        -- claims to encode filepaths with '/' directory seperators no
+        -- matter the host OS.
+        when (".." `elem` Posix.splitPath (Zip.eRelativePath entry)) $
+          fail $ "Zip archive for " <> pdir <> " contains suspicuous path: " <>
+          Zip.eRelativePath entry
         let f = pdir </> makeRelative (pkgRevPkgDir info) (Zip.eRelativePath entry)
         createDirectoryIfMissing True $ takeDirectory f
         LBS.writeFile f $ Zip.fromEntry entry
+
+      isInPkgDir info f =
+        splitPath (pkgRevPkgDir info) `isPrefixOf` Posix.splitPath f
 
   forM_ (M.toList bl) $ \(p, v) -> do
     info <- lookupPackageRev p v
@@ -81,10 +99,7 @@ installInDir (BuildList bl) dir = do
     liftIO $ removePathForcibly pdir
     liftIO $ createDirectoryIfMissing True pdir
 
-    liftIO $ mapM_ (putFile pdir info) $
-      mapMaybe (`Zip.findEntryByPath` a) $
-      filter (not . hasTrailingPathSeparator) $
-      filter (pkgRevPkgDir info `isPrefixOf`) $ Zip.filesInArchive a
+    liftIO $ mapM_ (putEntry pdir info) $ Zip.zEntries a
 
 -- | Install the packages listed in the build list in the 'lib'
 -- directory of the current working directory.  Since we are touching
@@ -115,11 +130,13 @@ installInDir (BuildList bl) dir = do
 -- 'lib~old' will still exist and can be put back by the user.
 installBuildList :: MonadPkgRegistry m => BuildList -> m ()
 installBuildList bl = do
+  libdir_exists <- liftIO $ doesDirectoryExist libDir
+
   liftIO mkLibNewDir
   installInDir bl libNewDir
-  liftIO $ renameDirectory libDir libOldDir
+  when libdir_exists $ liftIO $ renameDirectory libDir libOldDir
   liftIO $ renameDirectory libNewDir libDir
-  liftIO $ removePathForcibly libOldDir
+  when libdir_exists $ liftIO $ removePathForcibly libOldDir
 
 --- The CLI
 
