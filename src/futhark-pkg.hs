@@ -140,6 +140,21 @@ installBuildList bl = do
   liftIO $ renameDirectory libNewDir libDir
   when libdir_exists $ liftIO $ removePathForcibly libOldDir
 
+getPkgManifest :: PkgM PkgManifest
+getPkgManifest = do
+  file_exists <- liftIO $ doesFileExist futharkPkg
+  dir_exists <- liftIO $ doesDirectoryExist futharkPkg
+
+  case (file_exists, dir_exists) of
+    (True, _) -> liftIO $ parsePkgManifestFromFile futharkPkg
+    (_, True) -> fail $ futharkPkg <>
+                 " exists, but it is a directory!  What in Odin's beard..."
+    _         -> liftIO $ do T.putStrLn $ T.pack futharkPkg <> " not found - pretending it's empty."
+                             return $ newPkgManifest Nothing
+
+putPkgManifest :: PkgManifest -> PkgM ()
+putPkgManifest = liftIO . T.writeFile futharkPkg . prettyPkgManifest
+
 --- The CLI
 
 -- | The monad in which futhark-pkg runs.
@@ -165,33 +180,33 @@ doFmt = mainWithOptions () [] $ \args () ->
     _ -> Nothing
 
 doCheck :: IO ()
-doCheck = do
-  m <- parsePkgManifestFromFile futharkPkg
-  bl <- runPkgM $ solveDeps $ pkgRevDeps m
+doCheck = runPkgM $ do
+  m <- getPkgManifest
+  bl <- solveDeps $ pkgRevDeps m
 
-  T.putStrLn "Dependencies chosen:"
-  T.putStr $ prettyBuildList bl
+  liftIO $ T.putStrLn "Dependencies chosen:"
+  liftIO $ T.putStr $ prettyBuildList bl
 
   case commented $ manifestPkgPath m of
     Nothing -> return ()
     Just p -> do
       let pdir = "lib" </> T.unpack p
 
-      pdir_exists <- doesDirectoryExist pdir
+      pdir_exists <- liftIO $ doesDirectoryExist pdir
 
-      unless pdir_exists $ do
+      unless pdir_exists $ liftIO $ do
         T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not exist."
         exitFailure
 
-      anything <- any ((==".fut") . takeExtension) <$>
+      anything <- liftIO $ any ((==".fut") . takeExtension) <$>
                   directoryContents ("lib" </> T.unpack p)
-      unless anything $ do
+      unless anything $ liftIO $ do
         T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not contain any .fut files."
         exitFailure
 
 doGet :: IO ()
 doGet = runPkgM $ do
-  m <- liftIO $ parsePkgManifestFromFile futharkPkg
+  m <- getPkgManifest
   bl <- solveDeps $ pkgRevDeps m
   installBuildList bl
 
@@ -206,7 +221,7 @@ doAdd = mainWithOptions () [] $ \args () ->
 
   where
     doAdd' p v = do
-      m <- liftIO $ parsePkgManifestFromFile futharkPkg
+      m <- getPkgManifest
 
       -- See if this package (and its dependencies) even exists.  We
       -- do this by running the solver with the dependencies already
@@ -227,7 +242,7 @@ doAdd = mainWithOptions () [] $ \args () ->
           prettySemVer (requiredPkgRev prev_r') <> " => " <> prettySemVer v <> "."
         Nothing ->
           liftIO $ T.putStrLn $ "Added new required package " <> p <> " " <> prettySemVer v <> "."
-      liftIO $ T.writeFile futharkPkg $ prettyPkgManifest m'
+      putPkgManifest m'
       liftIO $ T.putStrLn "Remember to run 'futhark-pkg get'."
 
 doRemove :: IO ()
@@ -236,16 +251,15 @@ doRemove = mainWithOptions () [] $ \args () ->
     [p] -> Just $ doRemove' $ T.pack p
     _ -> Nothing
   where
-    doRemove' p = do
-      m <- parsePkgManifestFromFile futharkPkg
-
+    doRemove' p = runPkgM $ do
+      m <- getPkgManifest
       case removeRequiredFromManifest p m of
-        Nothing -> do
+        Nothing -> liftIO $ do
           T.putStrLn $ "No package " <> p <> " found in " <> T.pack futharkPkg <> "."
           exitFailure
         Just (m', r) -> do
-          T.writeFile futharkPkg $ prettyPkgManifest m'
-          T.putStrLn $ "Removed " <> p <> " " <> prettySemVer (requiredPkgRev r) <> "."
+          putPkgManifest m'
+          liftIO $ T.putStrLn $ "Removed " <> p <> " " <> prettySemVer (requiredPkgRev r) <> "."
 
 doCreate :: IO ()
 doCreate = mainWithOptions () [] $ \args () ->
@@ -253,24 +267,23 @@ doCreate = mainWithOptions () [] $ \args () ->
     [p] -> Just $ doCreate' $ T.pack p
     _ -> Nothing
   where
-    doCreate' p = do
-      exists <- (||) <$> doesFileExist futharkPkg <*> doesDirectoryExist futharkPkg
-      when exists $ do
+    doCreate' p = runPkgM $ do
+      exists <- liftIO $ (||) <$> doesFileExist futharkPkg <*> doesDirectoryExist futharkPkg
+      when exists $ liftIO $ do
         T.putStrLn $ T.pack futharkPkg <> " already exists."
         exitFailure
 
-      createDirectoryIfMissing True $ "lib" </> T.unpack p
-      T.putStrLn $ "Created directory " <> T.pack ("lib" </> T.unpack p) <> "."
+      liftIO $ createDirectoryIfMissing True $ "lib" </> T.unpack p
+      liftIO $ T.putStrLn $ "Created directory " <> T.pack ("lib" </> T.unpack p) <> "."
 
-      T.writeFile futharkPkg $ prettyPkgManifest $ newPkgManifest p
-      T.putStrLn $ "Wrote " <> T.pack futharkPkg <> "."
+      putPkgManifest $ newPkgManifest $ Just p
+      liftIO $ T.putStrLn $ "Wrote " <> T.pack futharkPkg <> "."
 
 doUpgrade :: IO ()
 doUpgrade = runPkgM $ do
-  m <- liftIO $ parsePkgManifestFromFile futharkPkg
-
+  m <- getPkgManifest
   rs <- traverse (mapM (traverse upgrade)) $ manifestRequire m
-  liftIO $ T.writeFile futharkPkg $ prettyPkgManifest m { manifestRequire = rs }
+  putPkgManifest m { manifestRequire = rs }
   where upgrade req = do
           v <- lookupNewestRev $ requiredPkg req
           h <- pkgRevCommit <$> lookupPackageRev (requiredPkg req) v

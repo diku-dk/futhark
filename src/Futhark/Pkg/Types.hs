@@ -114,10 +114,10 @@ data PkgManifest = PkgManifest { manifestPkgPath :: Commented (Maybe PkgPath)
                                }
                    deriving (Show, Eq)
 
--- | Given a package path, construct an otherwise-empty manifest file.
-newPkgManifest :: PkgPath -> PkgManifest
+-- | Possibly given a package path, construct an otherwise-empty manifest file.
+newPkgManifest :: Maybe PkgPath -> PkgManifest
 newPkgManifest p =
-  PkgManifest (Commented mempty $ Just p) (Commented mempty mempty) mempty
+  PkgManifest (Commented mempty p) (Commented mempty mempty) mempty
 
 -- | Prettyprint a package manifest such that it can be written to a
 -- @futhark.pkg@ file.
