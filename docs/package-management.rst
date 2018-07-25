@@ -99,27 +99,12 @@ Importing Files from Dependencies
 ``futhark-pkg get`` will populate the ``lib/`` directory, but does not
 interact with the compiler in any way.  The downloaded files can be
 imported using the usual ``import`` mechanism (:ref:`other-files`);
-for example, assuming the package contains a file ``saga.fut``::
+for example, assuming the package contains a file ``foo.fut``::
 
   import "lib/github.com/athas/fut-foo/foo"
 
-This works fine when writing Futhark code that is not intended to be
-imported as a package by other Futhark programs.  When writing a
-reusable package, the source files will already be located inside the
-``lib/`` directory (see the discussion of the *package directory*
-above).  In such cases we will use *relative imports*.  For example,
-assume we are defining a package ``github.com/sturluson/edda`` and we
-are writing a Futhark file located at
-``lib/github.com/sturluson/edda/saga.fut``.  Further, we have a
-dependency on the package ``github.com/athas/foo-fut``, which is
-stored in the directory ``lib/github.com/athas/foo-fut``.  We can
-import a file ``lib/github.com/athas/foo-fut/foo.fut`` from
-``lib/github.com/sturluson/edda/saga.fut`` with::
-
-  import "../foo-fut/foo"
-
 Ultimately, everything boils down to ordinary file system semantics.
-This has the downside of relatively long and clumsy file paths, but
+This has the downside of relatively long and clumsy import paths, but
 the upside of predictability.
 
 Upgrading Dependencies
@@ -162,7 +147,14 @@ automatically by running for example::
 
   $ futhark-pkg create github.com/sturluson/edda
 
-Note again, no ``https://``.  The result is this file hierarchy:
+Note again, no ``https://``.  The result is this ``futhark.pkg``::
+
+  package github.com/sturluson/edda
+
+  require {
+  }
+
+And this file hierarchy:
 
 .. .code-block: text
    $ tree lib
@@ -175,6 +167,19 @@ Note again, no ``https://``.  The result is this file hierarchy:
 
 Note that ``futhark-pkg create`` is not necessary simply to *use*
 packages, only when *creating* packages.
+
+When creating a reusable package (see below), the ``.fut`` files we
+are writing will be located inside the ``lib/`` directory.  If our
+package has its own dependencies whose files we would like to access,
+we can use *relative imports*.  For example, assume we are creating a
+package ``github.com/sturluson/edda`` and we are writing a Futhark
+file located at ``lib/github.com/sturluson/edda/saga.fut``.  Further,
+we have a dependency on the package ``github.com/athas/foo-fut``,
+which is stored in the directory ``lib/github.com/athas/foo-fut``.  We
+can import a file ``lib/github.com/athas/foo-fut/foo.fut`` from
+``lib/github.com/sturluson/edda/saga.fut`` with::
+
+  import "../foo-fut/foo"
 
 Releasing a Package
 -------------------
