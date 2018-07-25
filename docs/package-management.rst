@@ -107,7 +107,7 @@ machine-checked, so human mistakes may occur.
 
 As an example:
 
-.. code-block: text
+.. code-block:: text
 
    $ cat futhark.pkg
    require {
