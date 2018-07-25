@@ -24,24 +24,23 @@ is, ``1.0`` is not a valid shorthand for ``1.0.0``).
 
 Most ``futhark-pkg`` operations involve reading and writing a *package
 manifest*, which is always stored in a file called ``futhark.pkg``.
-The package manifest defines the name of the package as well as which
-other packages it depends on.  Dependencies are specified as the
-*oldest acceptable version* within the given major version.  Upper
-version bounds are not supported, as strict adherence to semantic
-versioning is assumed, so any later version with the same major
-version number should work.  When ``futhark-pkg`` calculates which
-version of a given package to download, it will pick the oldest
-version that still satisfies the minimum version requirements of that
-package in all transitive dependencies.  This means that a version may
-be used that is newer than the one indicated in ``futhark.pkg``, but
-only if a dependency requires a more recent version.
+The package manifest declares which packages the program depends on.
+Dependencies are specified as the *oldest acceptable version* within
+the given major version.  Upper version bounds are not supported, as
+strict adherence to semantic versioning is assumed, so any later
+version with the same major version number should work.  When
+``futhark-pkg`` calculates which version of a given package to
+download, it will pick the oldest version that still satisfies the
+minimum version requirements of that package in all transitive
+dependencies.  This means that a version may be used that is newer
+than the one indicated in ``futhark.pkg``, but only if a dependency
+requires a more recent version.
 
-The ``futhark.pkg`` file is human-editable, but the intent is that the
-subcommands provided by ``futhark-pkg`` (see below) are sufficient for
-day-to-day use.
+The ``futhark.pkg`` file is human-editable, but is in day-to-day use
+mainly modified by ``futhark-pkg`` automatically.
 
-Managing Dependencies
----------------------
+Using Packages
+--------------
 
 Required packages can be added by using ``futhark-pkg add``, for example::
 
@@ -55,9 +54,10 @@ This will create a new file ``futhark.pkg`` with the following contents:
      github.com/athas/fut-foo 0.1.0 #d285563c25c5152b1ae80fc64de64ff2775fa733
    }
 
-This contains the package path, the minimum version, and the expected
-commit hash.  The latter is used for verification, to ensure that the
-contents of a package verion cannot be changed silently.
+This lists one required package, with its package path, minimum
+version, and the expected commit hash.  The latter is used for
+verification, to ensure that the contents of a package version cannot
+be changed silently.
 
 ``futhark-pkg`` will perform network requests to determine whether a
 package of the given name and with the given version exists and fail
@@ -142,8 +142,8 @@ around - it is perfectly acceptable to depend on multiple major
 versions of the same package, because they are really different
 packages.
 
-Defining a Package
-------------------
+Creating Packages
+-----------------
 
 A package is a directory tree (which at the moment must correspond to
 a Git repository).  It *must* contain two things:
@@ -158,14 +158,23 @@ The contents of the package directory is what will be made available
 to users of the package.  The repository may contain other things
 (tests, data files, examples, docs, other programs, etc), but these
 are ignored by ``futhark-pkg``.  This structure can be created
-automatically by running::
+automatically by running for example::
 
-  $ futhark-pkg create pkgpath
+  $ futhark-pkg create github.com/sturluson/edda
 
-Where ``pkgpath`` is the package path of the new module (such as
-``github.com/sturluson/edda`` - note again, no ``https://``).  You do
-not need to run ``futhark-pkg create`` if you are just writing a
-Futhark program - it is only a necessity for packages.
+Note again, no ``https://``.  The result is this file hierarchy:
+
+.. .code-block: text
+   $ tree lib
+   lib
+   └── github.com
+       └── sturluson
+           └── edda
+
+   3 directories, 0 files
+
+Note that ``futhark-pkg create`` is not necessary simply to *use*
+packages, only when *creating* packages.
 
 Releasing a Package
 -------------------
