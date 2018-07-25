@@ -249,14 +249,14 @@ compatibility.
 Version Selection
 -----------------
 
-The package manifest declares which packages the program depends on.
-Dependencies are specified as the *oldest acceptable version* within
-the given major version.  Upper version bounds are not supported, as
-strict adherence to semantic versioning is assumed, so any later
-version with the same major version number should work.  When
-``futhark-pkg get`` calculates which version of a given package to
-download, it will pick the oldest version that still satisfies the
-minimum version requirements of that package in all transitive
-dependencies.  This means that a version may be used that is newer
-than the one indicated in ``futhark.pkg``, but only if a dependency
-requires a more recent version.
+The package manifest ``futhark.pkg`` declares which packages the
+program depends on.  Dependencies are specified as the *oldest
+acceptable version* within the given major version.  Upper version
+bounds are not supported, as strict adherence to semantic versioning
+is assumed, so any later version with the same major version number
+should work.  When ``futhark-pkg get`` calculates which version of a
+given package to download, it will pick the oldest version that still
+satisfies the minimum version requirements of that package in all
+transitive dependencies.  This means that a version may be used that
+is newer than the one indicated in ``futhark.pkg``, but only if a
+dependency requires a more recent version.
