@@ -17,9 +17,9 @@ futhark-pkg create PKGPATH
 
 futhark-pkg fmt
 
-futhark-pkg get
-
 futhark-pkg remove PKGPATH
+
+futhark-pkg sync
 
 futhark-pkg upgrade
 
@@ -40,8 +40,12 @@ file system (relative to the current working directory): the
 ``lib/``, ``futhark-pkg`` constructs the new version in ``lib~new/``
 and backs up the old version in ``lib~old``.  If ``futhark-pkg``
 should fail for any reason, you can recover the old state by moving
-``lib~old`` back.  These temporary directories are normally erased
-after ``futhark-pkg`` finishes.
+``lib~old`` back.  These temporary directories are erased if
+``futhark-pkg`` finishes without errors.
+
+The ``futhark-pkg sync`` subcommand is the only one that actually
+modifies ``lib/``; the others modify only ``futhark.pkg`` and require
+you to manually run ``futhark-pkg sync`` afterwards.
 
 COMMANDS
 ========
@@ -55,7 +59,7 @@ one is used.  If the package is already required in ``futhark.pkg``,
 the new version requirement will replace the old one.
 
 Note that adding a package does not automatically download it.  Run
-``futhark-pkg get`` to do that.
+``futhark-pkg sync`` to do that.
 
 futhark-pkg check
 -----------------
@@ -77,17 +81,18 @@ futhark-pkg fmt
 
 Reformat the ``futhark.pkg`` file, while retaining any comments.
 
-futhark-pkg get
----------------
-
-Download all packages listed in ``futhark.pkg`` and place them in
-``lib/``.
-
 futhark-pkg remove PKGPATH
 --------------------------
 
 Remove a package from ``futhark.pkg``.  Does *not* remove it from the
 ``lib/`` directory.
+
+futhark-pkg sync
+----------------
+
+Populate the ``lib/`` directory with the packages listed in
+``futhark.pkg``.  *Note*: this will delete everything in ``lib/`` that
+is no longer needed, as well as any manual modifications.
 
 futhark-pkg upgrade
 -------------------
@@ -109,7 +114,7 @@ Add a package dependency::
 
 Download the dependencies::
 
-  futhark-pkg get
+  futhark-pkg sync
 
 And then you're ready to start hacking!  (Except that these packages
 do not actually exist.)

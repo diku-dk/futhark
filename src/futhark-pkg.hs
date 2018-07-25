@@ -4,7 +4,6 @@ module Main (main) where
 
 import Control.Monad.IO.Class
 import Control.Monad.State
-import Control.Exception (throw)
 import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -20,8 +19,6 @@ import System.Exit
 import System.IO
 
 import qualified Codec.Archive.Zip as Zip
-import qualified System.Directory.Tree as DirTree
-
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS
 
@@ -36,32 +33,13 @@ import Futhark.Util.Log
 
 --- Installing packages
 
--- From https://stackoverflow.com/questions/6807025/what-is-the-haskell-way-to-copy-a-directory
---
--- Why is a simple function for this not on Hackage?
-copyDirectory ::  FilePath -> FilePath -> IO ()
-copyDirectory src dst =
-  void $ do
-    r <- DirTree.readDirectoryWithL (const $ return ()) src >>=
-         DirTree.writeDirectoryWith copy
-    case DirTree.failures $ DirTree.dirTree r of
-      DirTree.Failed _ e : _ -> throw e
-      _                      -> return ()
-  where copy f () = do
-          let f' = dst </> joinPath (drop 1 $ splitPath f)
-          createDirectoryIfMissing True $ takeDirectory f'
-          copyFile f f'
-
 libDir, libNewDir, libOldDir :: FilePath
 (libDir, libNewDir, libOldDir) = ("lib", "lib~new", "lib~old")
 
 mkLibNewDir :: IO ()
 mkLibNewDir = do
   removePathForcibly libNewDir
-  exists <- doesPathExist libDir
-  if exists
-    then copyDirectory libDir libNewDir
-    else createDirectoryIfMissing False "lib~new"
+  createDirectoryIfMissing False "lib~new"
 
 installInDir :: BuildList -> FilePath -> PkgM ()
 installInDir (BuildList bl) dir = do
@@ -94,7 +72,7 @@ installInDir (BuildList bl) dir = do
     -- The directory that will contain the package.
     let pdir = dir </> T.unpack p
     -- Remove any existing directory for this package.  This is a bit
-    -- inefficient, as the likelihood that the existing directory
+    -- inefficient, as the likelihood that the old ``lib`` directory
     -- already contains the correct version is rather high.  We should
     -- have a way to recognise this situation, and not download the
     -- zipball in that case.
@@ -107,16 +85,12 @@ installInDir (BuildList bl) dir = do
 -- directory of the current working directory.  Since we are touching
 -- the file system, we are going to be very paranoid.  In particular,
 -- we want to avoid corrupting the 'lib' directory if something fails
--- along the way.  Also, we want to maintain anything in the existing
--- 'lib' directory that we do not have an opinion about (such as
--- manually copied-in files and directories).  We will, however,
--- clobber any directories corresponding to the packages we are
--- installing.
+-- along the way.
 --
 -- The procedure is as follows:
 --
--- 1) Copy 'lib' (if it exists) to 'lib~new'.  Delete an existing
--- 'lib~new' if necessary.
+-- 1) Create a directory 'lib~new'.  Delete an existing 'lib~new' if
+-- necessary.
 --
 -- 2) Populate 'lib~new' based on the build list.
 --
@@ -204,8 +178,8 @@ doCheck = runPkgM $ do
         T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not contain any .fut files."
         exitFailure
 
-doGet :: IO ()
-doGet = runPkgM $ do
+doSync :: IO ()
+doSync = runPkgM $ do
   m <- getPkgManifest
   bl <- solveDeps $ pkgRevDeps m
   installBuildList bl
@@ -243,7 +217,7 @@ doAdd = mainWithOptions () [] $ \args () ->
         Nothing ->
           liftIO $ T.putStrLn $ "Added new required package " <> p <> " " <> prettySemVer v <> "."
       putPkgManifest m'
-      liftIO $ T.putStrLn "Remember to run 'futhark-pkg get'."
+      liftIO $ T.putStrLn "Remember to run 'futhark-pkg sync'."
 
 doRemove :: IO ()
 doRemove = mainWithOptions () [] $ \args () ->
@@ -309,8 +283,8 @@ main = do
                     (doCreate, "Create a new futhark.pkg and a lib/ skeleton."))
                  , ("fmt",
                     (doFmt, "Reformat futhark.pkg."))
-                 , ("get",
-                    (doGet, "Download packages listed in futhark.pkg to lib/."))
+                 , ("sync",
+                    (doSync, "Populate lib/ as specified by futhark.pkg."))
                  , ("remove",
                     (doRemove, "Remove a required package from futhark.pkg."))
                  , ("upgrade",
