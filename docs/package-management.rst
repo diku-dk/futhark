@@ -105,15 +105,44 @@ retrieve the new versions.  Be careful - while upgrades are safe if
 semantic versioning is followed correctly, this is not yet properly
 machine-checked, so human mistakes may occur.
 
-Note that ``futhark-pkg upgrade`` will *never* upgrade across a major
-version number.  Due to the principle of Semantic Import Versioning, a
-new major version is a completely different package from the point of
-view of the package manager.  Thus, to upgrade to a new major version,
-you will need to use ``futhark-pkg add`` to add the new version and
-``futhark-pkg remove`` to remove the old version.  Or you can keep it
-around - it is perfectly acceptable to depend on multiple major
-versions of the same package, because they are really different
-packages.
+As an example:
+
+.. code-block: text
+
+   $ cat futhark.pkg
+   require {
+     github.com/athas/fut-foo 0.1.0 #d285563c25c5152b1ae80fc64de64ff2775fa733
+   }
+   $ futhark-pkg upgrade
+   Upgraded github.com/athas/fut-foo 0.1.0 => 0.2.1.
+   $ cat futhark.pkg
+   require {
+     github.com/athas/fut-foo 0.2.1 #3ddc9fc93c1d8ce560a3961e55547e5c78bd0f3e
+   }
+   $ futhark-pkg get
+   $ tree lib
+   lib
+   └── github.com
+       └── athas
+           ├── fut-bar
+           │   └── bar.fut
+           └── fut-foo
+               └── foo.fut
+
+   4 directories, 2 files
+
+Note that ``fut-foo 0.2.1`` depends on ``fut-bar``, so it was fetched
+by ``futhark-pkg get``.
+
+``futhark-pkg upgrade`` will *never* upgrade across a major version
+number.  Due to the principle of `Semantic Import Versioning
+<https://research.swtch.com/vgo-import>`_, a new major version is a
+completely different package from the point of view of the package
+manager.  Thus, to upgrade to a new major version, you will need to
+use ``futhark-pkg add`` to add the new version and ``futhark-pkg
+remove`` to remove the old version.  Or you can keep it around - it is
+perfectly acceptable to depend on multiple major versions of the same
+package, because they are really different packages.
 
 Creating Packages
 -----------------
