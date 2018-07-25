@@ -4,24 +4,13 @@ Package Management
 ==================
 
 This document describes ``futhark-pkg``, the Futhark package manager.
-Futhark takes a very simplistic approach to package management - the
-only purpose of the package manager is to download ``.fut`` files from
-the Internet onto the local file system.  Actually accessing those
-files is done with the usual mechanisms (:ref:`other-files`).  In
-particular, ``futhark-pkg`` is not a build system, and the Futhark
-compiler must still be executed as usual.  The only objective of
-``futhark-pkg`` is to store files in a ``lib/`` directory; how you
-access them afterwards is up to you.
+Futhark takes a very simplistic approach to package management,
+inspired by `vgo <https://research.swtch.com/vgo>`_ - a package in
+Futhark is a collection of downloadable ``.fut`` files and little
+more.
 
-``futhark-pkg`` uses a scheme based on `semantic versioning
-<https://semver.org/>`_ to ensure that the same files (or "packages")
-are downloaded every time, and to facilitate safe upgrades to newer
-versions of a package.  The Futhark package manager derives
-significant inspiration from the `vgo
-<https://research.swtch.com/vgo>`_ system designed by Russ Cox.
-
-Package Management Basics
--------------------------
+Package Management Principles
+-----------------------------
 
 A package is uniquely identified with a *package path*.  The package
 path also encodes information about where to obtain the package;
@@ -32,16 +21,7 @@ may be ``github.com/user/repo`` (note that there is no protocol part,
 so it is not a proper URL).  The available *versions* of a package are
 commits tagged with Git tags of the form ``vX.Y.Z``.  Whenever
 versions are indicated, all three digits must always be given (that
-is, ``1.0`` is not a valid shorthand for ``1.0.0``).  In the general
-case, the package path also encodes the major version of the package,
-separated with a ``@``.  For example, version 5.2.1 of a package might
-have the package path ``github.com/user/repo@5``.  For major versions
-0 and 1, this can be elided.  This means that multiple (major)
-versions of a package are completely distinct from the point of view
-of the package manager - this principle is called `Semantic Import
-Versioning <https://research.swtch.com/vgo-import>`_, and is intended
-to facilitate backwards compatibility of packages when new versions
-are released.
+is, ``1.0`` is not a valid shorthand for ``1.0.0``).
 
 Most ``futhark-pkg`` operations involve reading and writing a *package
 manifest*, which is always stored in a file called ``futhark.pkg``.
@@ -61,37 +41,23 @@ The ``futhark.pkg`` file is human-editable, but the intent is that the
 subcommands provided by ``futhark-pkg`` (see below) are sufficient for
 day-to-day use.
 
-Defining a Package
-------------------
-
-A package is a directory tree (which at the moment must correspond to
-a Git repository).  It *must* contain two things:
-
-  * A file ``futhark.pkg`` at the root defining the package path and
-    any required packages.
-
-  * A *package directory* ``lib/pkg-path``, where ``pkg-path`` is the
-    full package path.
-
-The contents of the package directory is what will be made available
-to users of the package.  The repository may contain other things
-(tests, data files, examples, docs, other programs, etc), but these
-are ignored by ``futhark-pkg``.  This structure can be created
-automatically by running::
-
-  futhark-pkg create pkgpath
-
-Where ``pkgpath`` is the package path of the new module (such as
-``github.com/sturluson/edda`` - note again, no ``https://``).
-
 Managing Dependencies
 ---------------------
 
-Required packages can be added by using::
+Required packages can be added by using ``futhark-pkg add``, for example::
 
-  futhark-pkg add pkgpath X.Y.Z
+  $ futhark-pkg add github.com/athas/fut-foo 0.1.0
 
-This will add the indicated package to ``futhark.pkg``.
+This will create a new file ``futhark.pkg`` with the following contents::
+
+  require {
+    github.com/athas/fut-foo 0.1.0 #d285563c25c5152b1ae80fc64de64ff2775fa733
+  }
+
+This contains the package path, the minimum version, and the expected
+commit hash.  The latter is used for verification, to ensure that the
+contents of a package verion cannot be changed silently.
+
 ``futhark-pkg`` will perform network requests to determine whether a
 package of the given name and with the given version exists and fail
 otherwise (but it will not check whether the package is otherwise
@@ -107,12 +73,21 @@ Adding a package with ``futhark-pkg add`` only modifies
 done with ``futhark-pkg get`` (without further options).  The contents
 of each required dependency and any transitive dependencies will be
 stored in a subdirectory of ``lib/`` corresponding to their package
-path.  For example, a dependency ``github.com/sturluson/edda`` will be
-stored in ``lib/github.com/sturluson/edda``.
+path.  As an example::
+
+  $ futhark-pkg get
+  $ tree lib
+  lib
+  └── github.com
+      └── athas
+          └── fut-foo
+              └── foo.fut
+
+  3 directories, 1 file
 
 Packages can be removed from ``futhark.pkg`` with::
 
-  futhark-pkg remove pkgpath
+  $ futhark-pkg remove pkgpath
 
 This will not delete any files in the ``lib/`` directory.  You will
 have to do that manually.
@@ -125,7 +100,7 @@ interact with the compiler in any way.  The downloaded files can be
 imported using the usual ``import`` mechanism (:ref:`other-files`);
 for example, assuming the package contains a file ``saga.fut``::
 
-  import "lib/github.com/sturluson/edda/saga"
+  import "lib/github.com/athas/fut-foo/foo"
 
 This works fine when writing Futhark code that is not intended to be
 imported as a package by other Futhark programs.  When writing a
@@ -165,6 +140,31 @@ around - it is perfectly acceptable to depend on multiple major
 versions of the same package, because they are really different
 packages.
 
+Defining a Package
+------------------
+
+A package is a directory tree (which at the moment must correspond to
+a Git repository).  It *must* contain two things:
+
+  * A file ``futhark.pkg`` at the root defining the package path and
+    any required packages.
+
+  * A *package directory* ``lib/pkg-path``, where ``pkg-path`` is the
+    full package path.
+
+The contents of the package directory is what will be made available
+to users of the package.  The repository may contain other things
+(tests, data files, examples, docs, other programs, etc), but these
+are ignored by ``futhark-pkg``.  This structure can be created
+automatically by running::
+
+  $ futhark-pkg create pkgpath
+
+Where ``pkgpath`` is the package path of the new module (such as
+``github.com/sturluson/edda`` - note again, no ``https://``).  You do
+not need to run ``futhark-pkg create`` if you are just writing a
+Futhark program - it is only a necessity for packages.
+
 Releasing a Package
 -------------------
 
@@ -188,6 +188,16 @@ compatibility, ``futhark-pkg`` tries to ensure that the package
 developer feels this inconvenience as well.  In many cases, an
 incompatible change can be avoided simply by adding new files to the
 package rather than incompatibly changing the existing ones.
+
+In the general case, the package path also encodes the major version
+of the package, separated with a ``@``.  For example, version 5.2.1 of
+a package might have the package path ``github.com/user/repo@5``.  For
+major versions 0 and 1, this can be elided.  This means that multiple
+(major) versions of a package are completely distinct from the point
+of view of the package manager - this principle is called `Semantic
+Import Versioning <https://research.swtch.com/vgo-import>`_, and is
+intended to facilitate backwards compatibility of packages when new
+versions are released.
 
 If you really must increment the major version, then you will need to
 change the package path in ``futhark.pkg`` to contain the new major
