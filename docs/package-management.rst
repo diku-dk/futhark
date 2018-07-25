@@ -27,9 +27,9 @@ A package is uniquely identified with a *package path*.  The package
 path also encodes information about where to obtain the package;
 typically this means it is (part of) a URL.  At the moment, package
 paths are always links to Git repositories hosted on GitHub.  In the
-future, this will become more flexible.  As an, a package path may be
-``github.com/user/repo`` (note that there is no protocol part, so it
-is not a proper URL).  The available *versions* of a package are
+future, this will become more flexible.  As an example, a package path
+may be ``github.com/user/repo`` (note that there is no protocol part,
+so it is not a proper URL).  The available *versions* of a package are
 commits tagged with Git tags of the form ``vX.Y.Z``.  Whenever
 versions are indicated, all three digits must always be given (that
 is, ``1.0`` is not a valid shorthand for ``1.0.0``).  In the general
