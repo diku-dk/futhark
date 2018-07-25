@@ -131,8 +131,8 @@ As an example:
 
    4 directories, 2 files
 
-Note that ``fut-foo 0.2.1`` depends on ``fut-bar``, so it was fetched
-by ``futhark-pkg get``.
+Note that ``fut-foo 0.2.1`` depends on ``github.com/athas/fut-bar``,
+so it was fetched by ``futhark-pkg get``.
 
 ``futhark-pkg upgrade`` will *never* upgrade across a major version
 number.  Due to the principle of `Semantic Import Versioning
