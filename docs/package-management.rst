@@ -260,3 +260,25 @@ satisfies the minimum version requirements of that package in all
 transitive dependencies.  This means that a version may be used that
 is newer than the one indicated in ``futhark.pkg``, but only if a
 dependency requires a more recent version.
+
+Tests and Documentation for Dependencies
+----------------------------------------
+
+Package management has been designed to ensure that the normal
+development tools work as expected with the contents of the ``lib/``
+directory.  For example, to ensure that all dependencies do in fact
+work well (or at least compile) together, run:
+
+.. code-block:: text
+
+   futhark-test lib
+
+More interestingly, you can generate hyperlinked documentation for all
+dependencies with:
+
+.. code-block:: text
+
+   futhark-doc lib -o lib_docs
+
+The file ``lib_docs/index.html`` can be opened in a web browser to
+browse the documentation.
