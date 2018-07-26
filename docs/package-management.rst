@@ -57,12 +57,12 @@ requirement changed to the one specified in the command.  Any
 dependencies of the package will *not* be added to ``futhark.pkg``,
 but will still be downloaded by ``futhark-pkg sync`` (see below).
 
-Adding a package with ``futhark-pkg add`` only modifies
-``futhark.pkg``, but does not download the package files.  This is
-done with ``futhark-pkg sync`` (without further options).  The
-contents of each required dependency and any transitive dependencies
-will be stored in a subdirectory of ``lib/`` corresponding to their
-package path.  As an example::
+Adding a package with ``futhark-pkg add`` modifies ``futhark.pkg``,
+but does not download the package files.  This is done with
+``futhark-pkg sync`` (without further options).  The contents of each
+required dependency and any transitive dependencies will be stored in
+a subdirectory of ``lib/`` corresponding to their package path.  As an
+example::
 
   $ futhark-pkg sync
   $ tree lib
