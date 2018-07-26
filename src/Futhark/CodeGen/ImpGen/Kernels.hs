@@ -108,7 +108,7 @@ kernelCompiler dest (Kernel desc space _ kernel_body) = do
   let (space_is, space_dims) = unzip $ spaceDimensions space
   space_dims' <- mapM ImpGen.compileSubExp space_dims
   let constants = KernelConstants global_tid local_tid group_id
-                  (Imp.VarSize inner_group_size) num_threads'
+                  group_size' num_threads'
                   (Imp.VarSize wave_size) (zip space_is space_dims')
                   (Imp.var thread_active Bool) mempty
 
