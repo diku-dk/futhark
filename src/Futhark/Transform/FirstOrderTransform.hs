@@ -596,18 +596,13 @@ transformSOAC pat (GenReduce len hists ops _nes bucket_fun imgs) = do
       letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
     imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
 
-    -- Split out results from bucket function.
-    let lens  = map (length . lambdaReturnType) ops
-        lens' = map (+1) lens
-        ivs = chunks lens' imgs''
-        b_inds = map head ivs
-        b_vals = map tail ivs
-
+    -- Split out values from bucket function.
     let lens = length ops
         inds = take lens imgs''
         vals = chunks (map (length . lambdaParams) ops) $ drop lens imgs''
         hists_out' = chunks (map (length . lambdaParams) ops) $ map identName hists_out
 
+    -- Read values from histograms.
     h_vals <- forM (zip inds hists_out') $ \(idx, hist) -> do
       forM hist $ \arr -> do
         arr_t <- lookupType arr
@@ -617,7 +612,7 @@ transformSOAC pat (GenReduce len hists ops _nes bucket_fun imgs) = do
     h_vals' <- forM (zip3 ops vals h_vals) $ \(op, ne_val, h_val) ->
       bindLambda op $ map (BasicOp . SubExp) $ ne_val ++ h_val
 
-    -- Write results back to histogram arrays.
+    -- Write values back to histograms.
     ress <- forM (zip3 inds h_vals' hists_out') $ \(idx, val, hist) -> do
       forM (zip val hist) $  \(v, arr) -> do
         letExp "write_hist" =<< eWriteArray arr [eSubExp idx] (eSubExp v)
