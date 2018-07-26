@@ -1373,7 +1373,7 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
   occur [observation as loc]
 
   checkOccurences dflow
-  occurs <- consumeArg argloc argtype (diet tp1')
+  occurs <- consumeArg argloc argtype' (diet tp1')
 
   case anyConsumption dflow of
     Just c ->
