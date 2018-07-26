@@ -48,7 +48,7 @@ import Text.Megaparsec.Error (parseErrorPretty)
 
 import Prelude
 
-  -- | A package path is a unique identifier for a package, for example
+-- | A package path is a unique identifier for a package, for example
 -- @github.com/user/foo@.
 type PkgPath = T.Text
 
