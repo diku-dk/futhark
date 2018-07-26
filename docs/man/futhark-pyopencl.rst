@@ -44,7 +44,7 @@ OPTIONS
 
 --library
   Instead of compiling to an executable program, generate a Python
-  module that can be ported by other Python code.  The module will
+  module that can be imported by other Python code.  The module will
   contain a class of the same name as the Futhark source file with
   ``.fut`` removed.  Objects of the class define one method per entry
   point in the Futhark program, with matching parameters and return
