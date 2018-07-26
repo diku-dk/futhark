@@ -95,7 +95,7 @@ module type integral = {
 }
 
 -- | An extension of `size`@mtype that further includes facilities for
--- constructing arrays where the size is provides as a value of the
+-- constructing arrays where the size is provided as a value of the
 -- given integral type.
 module type size = {
   include integral
