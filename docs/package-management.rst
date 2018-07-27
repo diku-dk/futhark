@@ -5,8 +5,8 @@ Package Management
 
 This document describes ``futhark-pkg``, a minimalistic package
 manager inspired by `vgo <https://research.swtch.com/vgo>`_.  A
-Futhark package is a downloadable collection ``.fut`` files and little
-more.
+Futhark package is a downloadable collection of ``.fut`` files and
+little more.
 
 Basic Concepts
 --------------
