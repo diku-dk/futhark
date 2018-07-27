@@ -223,7 +223,8 @@ SigExp :: { UncheckedSigExp }
         | SigExp '->' SigExp  { SigArrow Nothing $1 $3 (srcspan $1 $>) }
 
 TypeRef :: { TypeRefBase NoInfo Name }
-         : QualName '=' TypeExpTerm { TypeRef (fst $1) (TypeDecl $3 NoInfo) (srcspan (snd $1) $>) }
+         : QualName TypeParams '=' TypeExpTerm
+           { TypeRef (fst $1) $2 (TypeDecl $4 NoInfo) (srcspan (snd $1) $>) }
 
 SigBind :: { SigBindBase NoInfo Name }
          : module type id '=' SigExp

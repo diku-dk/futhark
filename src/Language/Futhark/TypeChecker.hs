@@ -224,11 +224,12 @@ checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
   (abstypes, env, specs') <- checkSpecs specs
   return (MTy abstypes $ ModEnv env, SigSpecs specs' loc)
-checkSigExp (SigWith s (TypeRef tname td trloc) loc) = do
+checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
-  (td', _) <- checkTypeDecl td
-  (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname $ unInfo $ expandedType td'
-  return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' td' trloc) loc)
+  checkTypeParams ps $ \ps' -> do
+    (td', _) <- bindingTypeParams ps' $ checkTypeDecl td
+    (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' $ unInfo $ expandedType td'
+    return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
   (MTy s_abs e1_mod, e1') <- checkSigExp e1
   (env_for_e2, maybe_pname') <-
@@ -870,19 +871,30 @@ envTypeAbbrs env =
   (mconcat . map modTypeAbbrs . M.elems . envModTable) env
 
 -- | Refine the given type name in the given env.
-refineEnv :: SrcLoc -> TySet -> Env -> QualName Name -> StructType
+refineEnv :: SrcLoc -> TySet -> Env -> QualName Name -> [TypeParam] -> StructType
           -> TypeM (QualName VName, TySet, Env)
-refineEnv loc tset env tname t
-  | Just (tname', TypeAbbr l [] (TypeVar () (TypeName qs v) _)) <-
+refineEnv loc tset env tname ps t
+  | Just (tname', TypeAbbr l cur_ps (TypeVar () (TypeName qs v) _)) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
-      return (tname',
-              QualName qs v `M.delete` tset,
-              substituteTypesInEnv
-               (M.fromList [(qualLeaf tname',
-                             TypeSub $ TypeAbbr l [] t),
-                             (v, TypeSub $ TypeAbbr l [] t)])
-              env)
+      if paramsMatch cur_ps ps then
+        return (tname',
+                QualName qs v `M.delete` tset,
+                substituteTypesInEnv
+                (M.fromList [(qualLeaf tname',
+                              TypeSub $ TypeAbbr l cur_ps t),
+                              (v, TypeSub $ TypeAbbr l ps t)])
+                env)
+      else throwError $ TypeError loc $ "Cannot refine a type having " <>
+           tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
   | otherwise =
       throwError $ TypeError loc $
       pretty tname ++ " is not an abstract type in the module type."
+  where tpMsg [] = "no type parameters"
+        tpMsg xs = "type parameters " <> unwords (map pretty xs)
+
+paramsMatch :: [TypeParam] -> [TypeParam] -> Bool
+paramsMatch ps1 ps2 = length ps1 == length ps2 && all match (zip ps1 ps2)
+  where match (TypeParamType l1 _ _, TypeParamType l2 _ _) = l1 <= l2
+        match (TypeParamDim _ _, TypeParamDim _ _) = True
+        match _ = False

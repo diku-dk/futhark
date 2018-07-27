@@ -878,11 +878,11 @@ data SigExpBase f vn = SigVar (QualName vn) SrcLoc
 deriving instance Showable f vn => Show (SigExpBase f vn)
 
 -- | A type refinement.
-data TypeRefBase f vn = TypeRef (QualName vn) (TypeDeclBase f vn) SrcLoc
+data TypeRefBase f vn = TypeRef (QualName vn) [TypeParamBase vn] (TypeDeclBase f vn) SrcLoc
 deriving instance Showable f vn => Show (TypeRefBase f vn)
 
 instance Located (TypeRefBase f vn) where
-  locOf (TypeRef _ _ loc) = locOf loc
+  locOf (TypeRef _ _ _ loc) = locOf loc
 
 instance Located (SigExpBase f vn) where
   locOf (SigVar _ loc)       = locOf loc
