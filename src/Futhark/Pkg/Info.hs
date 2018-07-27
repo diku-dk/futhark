@@ -28,7 +28,7 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Semigroup as Sem
 import Data.List
 import Data.Monoid ((<>))
-import System.FilePath
+import qualified System.FilePath.Posix as Posix
 import System.Exit
 import System.IO
 
@@ -159,9 +159,9 @@ ghPkgInfo path owner repo versions = do
             Right v <- semver $ T.drop 1 t,
             _svMajor v `elem` versions = do
               gd <- memoiseGetDeps $ ghRevGetDeps owner repo t
-              let dir = addTrailingPathSeparator $
-                        T.unpack repo <> "-" <> T.unpack (prettySemVer v) </>
-                        "lib" </> T.unpack path
+              let dir = Posix.addTrailingPathSeparator $
+                        T.unpack repo <> "-" <> T.unpack (prettySemVer v) Posix.</>
+                        "lib" Posix.</> T.unpack path
               return $ Just (v, PkgRevInfo
                                 (T.pack repo_url <> "/archive/" <> t <> ".zip")
                                 dir

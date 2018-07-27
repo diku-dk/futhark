@@ -63,7 +63,7 @@ installInDir (BuildList bl) dir = do
         LBS.writeFile f $ Zip.fromEntry entry
 
       isInPkgDir info f =
-        splitPath (pkgRevPkgDir info) `isPrefixOf` Posix.splitPath f
+        Posix.splitPath (pkgRevPkgDir info) `isPrefixOf` Posix.splitPath f
 
   forM_ (M.toList bl) $ \(p, v) -> do
     info <- lookupPackageRev p v
