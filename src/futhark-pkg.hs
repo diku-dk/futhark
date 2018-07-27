@@ -99,19 +99,25 @@ installInDir (BuildList bl) dir = do
 --
 -- 4) Rename 'lib~new' to 'lib'
 --
--- 5) Delete 'lib~old'.
+-- 5) If the current package has package path 'p', move 'lib~old/p' to
+-- 'lib~new/p'.
+--
+-- 6) Delete 'lib~old'.
 --
 -- Since POSIX at least guarantees atomic renames, the only place this
--- can fail is between steps 3 and 4.  In that case, at least the
+-- can fail is between steps 3, 4, and 5.  In that case, at least the
 -- 'lib~old' will still exist and can be put back by the user.
-installBuildList :: BuildList -> PkgM ()
-installBuildList bl = do
+installBuildList :: Maybe PkgPath -> BuildList -> PkgM ()
+installBuildList p bl = do
   libdir_exists <- liftIO $ doesDirectoryExist libDir
 
   liftIO mkLibNewDir
   installInDir bl libNewDir
   when libdir_exists $ liftIO $ renameDirectory libDir libOldDir
   liftIO $ renameDirectory libNewDir libDir
+  case pkgPathFilePath <$> p of
+    Just pfp -> liftIO $ renameDirectory (libOldDir </> pfp) (libDir </> pfp)
+    Nothing  -> return ()
   when libdir_exists $ liftIO $ removePathForcibly libOldDir
 
 getPkgManifest :: PkgM PkgManifest
@@ -182,7 +188,7 @@ doSync :: IO ()
 doSync = runPkgM $ do
   m <- getPkgManifest
   bl <- solveDeps $ pkgRevDeps m
-  installBuildList bl
+  installBuildList (commented $ manifestPkgPath m) bl
 
 doAdd :: IO ()
 doAdd = mainWithOptions () [] $ \args () ->
