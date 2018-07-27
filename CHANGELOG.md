@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Module type refinement (`with`) now permits refining parametric
     types.
 
+  * Better error message when invalid values are passed to generated
+    Python entry points.
+
 ### Removed
 
 ### Changed
