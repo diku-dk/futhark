@@ -429,7 +429,6 @@ checkTypeBind (TypeBind name ps td doc loc) =
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
   (fname', tparams', params', maybe_tdecl', rettype, body') <-
-    bindSpaced [(Term, fname)] $
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   when (entry && any isTypeParam tparams') $
