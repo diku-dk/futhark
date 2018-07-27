@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Floating-point numbers are now correctly rounded to nearest even
     integer, even in exotic cases (#377).
 
+  * Fixed a nasty bug in the type checking of calls to consuming
+    functions (#596).
+
 ## [0.6.2]
 
 ### Added
