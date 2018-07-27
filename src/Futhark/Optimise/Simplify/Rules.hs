@@ -921,6 +921,23 @@ simplifyConcat (vtable, _) pat (StmAux cs _) (Concat i x xs new_d)
                        Just (Concat j y ys _, v_cs) | j == i -> (y : ys, v_cs)
                        _ -> ([v], mempty)
 
+-- If concatenating a bunch of array literals (or equivalent
+-- replicate), just construct the array literal instead.
+simplifyConcat (vtable, _) pat (StmAux cs _) (Concat 0 x xs _)
+  | Just (vs, vcs) <- unzip <$> mapM isArrayLit (x:xs) = do
+      rt <- rowType <$> lookupType x
+      certifying (cs <> mconcat vcs) $
+        letBind_ pat $ BasicOp $ ArrayLit vs rt
+      where isArrayLit v
+              | Just (Replicate shape se, vcs) <- ST.lookupBasicOp v vtable,
+                unitShape shape = Just (se, vcs)
+              | Just (ArrayLit [se] _, vcs) <- ST.lookupBasicOp v vtable =
+                  Just (se, vcs)
+              | otherwise =
+                  Nothing
+
+            unitShape = (==Shape [Constant $ IntValue $ Int32Value 1])
+
 simplifyConcat _ _ _  _ = cannotSimplify
 
 evaluateBranch :: BinderOps lore => TopDownRuleIf lore
