@@ -2,6 +2,7 @@
 -- | Types (and a few other simple definitions) for futhark-pkg.
 module Futhark.Pkg.Types
   ( PkgPath
+  , pkgPathFilePath
   , PkgRevDeps(..)
   , module Data.Versions
 
@@ -40,6 +41,8 @@ import qualified Data.Semigroup as Sem
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Map as M
+import System.FilePath
+import qualified System.FilePath.Posix as Posix
 
 import Data.Versions (SemVer(..), semver, semver', prettySemVer)
 import Text.Megaparsec hiding (many, some)
@@ -51,6 +54,12 @@ import Prelude
 -- | A package path is a unique identifier for a package, for example
 -- @github.com/user/foo@.
 type PkgPath = T.Text
+
+-- | Turn a package path (which always uses forward slashes) into a
+-- file path in the local file system (which might use different
+-- slashes).
+pkgPathFilePath :: PkgPath -> FilePath
+pkgPathFilePath = joinPath . Posix.splitPath . T.unpack
 
 -- | The dependencies of a (revision of a) package is a mapping from
 -- package paths to minimum versions (and an optional hash pinning).
