@@ -76,6 +76,9 @@ extendEnv vn binding = localEnv
 withRecordReplacements :: RecordReplacements -> MonoM a -> MonoM a
 withRecordReplacements rr = localEnv mempty { envRecordReplacements = rr}
 
+noRecordReplacements :: MonoM a -> MonoM a
+noRecordReplacements = local $ \env -> env { envRecordReplacements = mempty }
+
 -- | The monomorphization monad.
 newtype MonoM a = MonoM (RWST Env (Seq.Seq (VName, ValBind)) VNameSource
                          (State Lifts) a)
@@ -439,7 +442,8 @@ expandRecordPattern (PatternAscription pat td loc) = do
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
 monomorphizeBinding :: PolyBinding -> TypeBase () () -> MonoM (VName, ValBind)
-monomorphizeBinding (PolyBinding (name, tparams, params, retdecl, rettype, body, loc)) t = do
+monomorphizeBinding (PolyBinding (name, tparams, params, retdecl, rettype, body, loc)) t =
+  noRecordReplacements $ do
   t' <- removeTypeVariablesInType t
   let bind_t = foldFunType (map (toStructural . patternType) params) $
                toStructural rettype
