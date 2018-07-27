@@ -418,17 +418,18 @@ entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ (Imp.Space sid) bt 
 badInput :: Int -> PyExp -> String -> PyStmt
 badInput i e t =
   Raise $ simpleCall "TypeError"
-  [Call (Field (String err_msg) "format") [Arg (String t), Arg e]]
+  [Call (Field (String err_msg) "format")
+   [Arg (String t), Arg $ simpleCall "type" [e], Arg e]]
   where err_msg = unlines [ "Argument #" ++ show i ++ " has invalid value"
                           , "Futhark type: {}"
-                          , "Type of given Python value: {}" ]
+                          , "Argument has Python type {} and value: {}"]
 
 
 entryPointInput :: (Int, Imp.ExternalValue, PyExp) -> CompilerM op s ()
 entryPointInput (i, Imp.OpaqueValue desc vs, e) = do
   let type_is_ok = BinOp "and" (simpleCall "isinstance" [e, Var "opaque"])
                                (BinOp "==" (Field e "desc") (String desc))
-  stm $ If (UnOp "not" type_is_ok) [badInput i (simpleCall "type" [e]) desc] []
+  stm $ If (UnOp "not" type_is_ok) [badInput i e desc] []
   mapM_ entryPointInput $ zip3 (repeat i) (map Imp.TransparentValue vs) $
     map (Index (Field e "data") . IdxExp . Integer) [0..]
 
@@ -445,7 +446,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ScalarValue bt s name), e) = do
       npcall = simpleCall npobject [ctcall]
   stm $ Try [Assign vname' npcall]
     [Catch (Tuple [Var "TypeError", Var "AssertionError"])
-     [badInput i (simpleCall "type" [e]) $ prettySigned (s==Imp.TypeUnsigned) bt]]
+     [badInput i e $ prettySigned (s==Imp.TypeUnsigned) bt]]
 
 entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace t s dims), e) = do
   let type_is_wrong =
@@ -454,7 +455,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.Default
         (BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray"]))
         (BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s)))
   stm $ If type_is_wrong
-    [badInput i (simpleCall "type" [e]) $ concat (replicate (length dims) "[]") ++
+    [badInput i e $ concat (replicate (length dims) "[]") ++
      prettySigned (s==Imp.TypeUnsigned) t]
     []
 
@@ -476,7 +477,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize (Imp.Space 
   unpack <- collect $ unpack_input mem memsize sid bt ept dims e
   stm $ Try unpack
     [Catch (Tuple [Var "TypeError", Var "AssertionError"])
-     [badInput i (simpleCall "type" [e]) $ concat (replicate (length dims) "[]") ++
+     [badInput i e $ concat (replicate (length dims) "[]") ++
      prettySigned (ept==Imp.TypeUnsigned) bt]]
 
 extValueDescName :: Imp.ExternalValue -> String
