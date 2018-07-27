@@ -434,11 +434,12 @@ synopsisSigExp e = case e of
   SigVar v _ -> qualNameHtml v
   SigParens e' _ -> parens <$> synopsisSigExp e'
   SigSpecs ss _ -> braces . (H.table ! A.class_ "specs") . mconcat <$> mapM synopsisSpec ss
-  SigWith s (TypeRef v t _) _ -> do
+  SigWith s (TypeRef v ps t _) _ -> do
     s' <- synopsisSigExp s
     t' <- typeDeclHtml t
     v' <- qualNameHtml v
-    return $ s' <> " with " <> v' <> " = " <> t'
+    let ps' = mconcat $ map ((" "<>) . typeParamHtml) ps
+    return $ s' <> " with " <> v' <> ps' <> " = " <> t'
   SigArrow Nothing e1 e2 _ ->
     liftM2 f (synopsisSigExp e1) (synopsisSigExp e2)
     where f e1' e2' = e1' <> " -> " <> e2'

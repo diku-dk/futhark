@@ -1078,7 +1078,7 @@ Module Type Expressions
 .. productionlist::
    mod_type_exp:   `qualid`
              : | "{" `spec`* "}"
-             : | `mod_type_exp` "with" `qualid` "=" `type`
+             : | `mod_type_exp` "with" `qualid` `type_param`* "=" `type`
              : | "(" `mod_type_exp` ")"
              : | "(" `id` ":" `mod_type_exp` ")" "->" `mod_type_exp`
              : | `mod_type_exp` "->" `mod_type_exp`
