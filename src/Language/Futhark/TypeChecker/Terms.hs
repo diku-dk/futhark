@@ -1011,13 +1011,14 @@ checkExp (LetPat tparams pat e body loc) = do
       return $ LetPat tparams' pat' e' body' loc
 
 checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
-  bindSpaced [(Term, name)] $
   sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
     \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
 
     let ftype = foldr (uncurry (Arrow ()) . patternParam) rettype params'
         entry = BoundV tparams' $ ftype `setAliases` allOccuring closure
-        bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope }
+        bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope
+                            , scopeNameMap = M.insert (Term, name) (qualName name') $
+                                             scopeNameMap scope }
     body' <- local bindF $ checkExp body
 
     return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
@@ -1456,12 +1457,9 @@ checkFunDef' :: (Name, Maybe UncheckedTypeExp,
                  UncheckedExp, SrcLoc)
              -> TermTypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
 checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
-  fname' <- checkName Term fname loc
-
-  when (baseString fname' == "&&") $
+  when (nameToString fname == "&&") $
     typeError loc "The && operator may not be redefined."
-
-  when (baseString fname' == "||") $
+  when (nameToString fname == "||") $
     typeError loc "The || operator may not be redefined."
 
   then_substs <- getConstraints
@@ -1503,7 +1501,9 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         keep_type_variables = then_type_variables <> foldMap typeVars then_type_substs
     modifyConstraints $ M.filterWithKey $ \k _ -> k `S.member` keep_type_variables
 
-    return (fname', tparams'', params'', maybe_retdecl'', rettype, body'')
+    bindSpaced [(Term, fname)] $ do
+      fname' <- checkName Term fname loc
+      return (fname', tparams'', params'', maybe_retdecl'', rettype, body'')
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
