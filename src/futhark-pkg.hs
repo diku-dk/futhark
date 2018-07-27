@@ -33,14 +33,6 @@ import Futhark.Util.Log
 
 --- Installing packages
 
-libDir, libNewDir, libOldDir :: FilePath
-(libDir, libNewDir, libOldDir) = ("lib", "lib~new", "lib~old")
-
-mkLibNewDir :: IO ()
-mkLibNewDir = do
-  removePathForcibly libNewDir
-  createDirectoryIfMissing False "lib~new"
-
 installInDir :: BuildList -> FilePath -> PkgM ()
 installInDir (BuildList bl) dir = do
   let putEntry pdir info entry
@@ -81,6 +73,9 @@ installInDir (BuildList bl) dir = do
 
     liftIO $ mapM_ (putEntry pdir info) $ Zip.zEntries a
 
+libDir, libNewDir, libOldDir :: FilePath
+(libDir, libNewDir, libOldDir) = ("lib", "lib~new", "lib~old")
+
 -- | Install the packages listed in the build list in the 'lib'
 -- directory of the current working directory.  Since we are touching
 -- the file system, we are going to be very paranoid.  In particular,
@@ -111,13 +106,30 @@ installBuildList :: Maybe PkgPath -> BuildList -> PkgM ()
 installBuildList p bl = do
   libdir_exists <- liftIO $ doesDirectoryExist libDir
 
-  liftIO mkLibNewDir
+  -- 1
+  liftIO $ do removePathForcibly libNewDir
+              createDirectoryIfMissing False libNewDir
+
+  -- 2
   installInDir bl libNewDir
-  when libdir_exists $ liftIO $ renameDirectory libDir libOldDir
+
+  -- 3
+  when libdir_exists $ liftIO $ do
+    removePathForcibly libOldDir
+    renameDirectory libDir libOldDir
+
+  -- 4
   liftIO $ renameDirectory libNewDir libDir
+
+  -- 5
   case pkgPathFilePath <$> p of
-    Just pfp -> liftIO $ renameDirectory (libOldDir </> pfp) (libDir </> pfp)
-    Nothing  -> return ()
+    Just pfp | libdir_exists -> liftIO $ do
+      pkgdir_exists <- doesDirectoryExist $ libOldDir </> pfp
+      when pkgdir_exists $
+        renameDirectory (libOldDir </> pfp) (libDir </> pfp)
+    Nothing -> return ()
+
+  -- 6
   when libdir_exists $ liftIO $ removePathForcibly libOldDir
 
 getPkgManifest :: PkgM PkgManifest
