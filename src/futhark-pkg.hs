@@ -125,7 +125,10 @@ installBuildList p bl = do
   case pkgPathFilePath <$> p of
     Just pfp | libdir_exists -> liftIO $ do
       pkgdir_exists <- doesDirectoryExist $ libOldDir </> pfp
-      when pkgdir_exists $
+      when pkgdir_exists $ do
+        -- Ensure the parent directories exist so that we can move the
+        -- package directory directly.
+        createDirectoryIfMissing True $ takeDirectory $ libDir </> pfp
         renameDirectory (libOldDir </> pfp) (libDir </> pfp)
     _ -> return ()
 
