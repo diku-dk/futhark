@@ -290,6 +290,15 @@ doUpgrade = runPkgM $ do
           return req { requiredPkgRev = v
                      , requiredHash = Just h }
 
+doVersions :: IO ()
+doVersions = mainWithOptions () [] $ \args () ->
+  case args of
+    [p] -> Just $ runPkgM $ doVersions' $ T.pack p
+    _ -> Nothing
+  where doVersions' =
+          mapM_ (liftIO . T.putStrLn . prettySemVer) . M.keys . pkgVersions
+          <=< lookupPackage
+
 main :: IO ()
 main = do
   -- Ensure that we can make HTTPS requests.
@@ -310,6 +319,8 @@ main = do
                     (doRemove, "Remove a required package from futhark.pkg."))
                  , ("upgrade",
                     (doUpgrade, "Upgrade all packages to newest versions."))
+                 , ("versions",
+                    (doVersions, "List available versions for a package."))
                  ]
   case args of
     cmd : args' | Just (m, _) <- lookup cmd commands -> withArgs args' m

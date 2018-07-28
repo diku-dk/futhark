@@ -23,6 +23,8 @@ futhark-pkg sync
 
 futhark-pkg upgrade
 
+futhark-pkg versions
+
 DESCRIPTION
 ===========
 
@@ -100,6 +102,11 @@ futhark-pkg upgrade
 
 Upgrade all package requirements in ``futhark.pkg`` to the newest
 available versions.
+
+futhark-pkg versions PKGPATH
+----------------------------
+
+Print all available versions for the given package path.
 
 EXAMPLES
 ========
