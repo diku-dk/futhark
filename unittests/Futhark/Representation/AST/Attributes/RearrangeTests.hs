@@ -4,21 +4,21 @@ module Futhark.Representation.AST.Attributes.RearrangeTests
 
 import Control.Applicative
 
-import Test.HUnit hiding (Test)
-import Test.Framework
-import Test.Framework.Providers.HUnit
-import Test.Framework.Providers.QuickCheck2
+import Test.Tasty
+import Test.Tasty.HUnit
+import Test.Tasty.QuickCheck
 import Test.QuickCheck
 
 import Prelude
 
 import Futhark.Representation.AST.Attributes.Rearrange
 
-tests :: [Test]
-tests = isMapTransposeTests ++
+tests :: TestTree
+tests = testGroup "RearrangeTests" $
+        isMapTransposeTests ++
         [isMapTransposeProp]
 
-isMapTransposeTests :: [Test]
+isMapTransposeTests :: [TestTree]
 isMapTransposeTests =
   [ testCase (unwords ["isMapTranspose", show perm, "==", show dres]) $
     isMapTranspose perm @?= dres
@@ -39,7 +39,7 @@ instance Arbitrary Permutation where
     Positive n <- arbitrary
     Permutation <$> shuffle [0..n-1]
 
-isMapTransposeProp :: Test
+isMapTransposeProp :: TestTree
 isMapTransposeProp = testProperty "isMapTranspose corresponds to a map of transpose" prop
   where prop :: Permutation -> Bool
         prop (Permutation perm) =

@@ -1,9 +1,8 @@
 module Futhark.Optimise.AlgSimplifyTests ( tests )
 where
 
-import Test.HUnit hiding (Test)
-import Test.Framework
-import Test.Framework.Providers.HUnit
+import Test.Tasty
+import Test.Tasty.HUnit
 
 import Data.List
 import qualified Data.Map.Strict as M
@@ -13,10 +12,10 @@ import Futhark.Analysis.ScalExp
 import Futhark.Analysis.ScalExpTests (parseScalExp')
 import Futhark.Analysis.AlgSimplify
 
-tests :: [Test]
-tests = constantFoldTests ++ suffCondTests
+tests :: TestTree
+tests = testGroup "AlgSimplifyTests" $ constantFoldTests ++ suffCondTests
 
-constantFoldTests :: [Test]
+constantFoldTests :: [TestTree]
 constantFoldTests =
   [ cfoldTest "2+2" "4"
   , cfoldTest "2-2" "0"
@@ -40,7 +39,7 @@ constantFoldTests =
           testCase ("constant-fold " ++ input) $
           simplify'' input @?= scalExp expected
 
-suffCondTests :: [Test]
+suffCondTests :: [TestTree]
 suffCondTests =
   [
     suffCondTest "5<n" [["False"]]
