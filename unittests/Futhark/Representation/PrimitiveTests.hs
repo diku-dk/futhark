@@ -8,18 +8,17 @@ module Futhark.Representation.PrimitiveTests
 import Control.Applicative
 
 import Test.QuickCheck
-import Test.HUnit hiding (Test)
-import Test.Framework
-import Test.Framework.Providers.HUnit
+import Test.Tasty
+import Test.Tasty.HUnit
 
 import Prelude
 
 import Futhark.Representation.Primitive
 
-tests :: [Test]
-tests = propPrimValuesHaveRightType
+tests :: TestTree
+tests = testGroup "PrimitiveTests" propPrimValuesHaveRightType
 
-propPrimValuesHaveRightType :: [Test]
+propPrimValuesHaveRightType :: [TestTree]
 propPrimValuesHaveRightType = [ testCase (show t ++ " has blank of right type") $
                                 primValueType (blankPrimValue t) @?= t
                               | t <- [minBound..maxBound]
@@ -52,11 +51,11 @@ instance Arbitrary PrimValue where
                     ]
 
 arbitraryPrimValOfType :: PrimType -> Gen PrimValue
-arbitraryPrimValOfType (IntType Int8) = IntValue <$> Int8Value <$> arbitrary
-arbitraryPrimValOfType (IntType Int16) = IntValue <$> Int16Value <$> arbitrary
-arbitraryPrimValOfType (IntType Int32) = IntValue <$> Int32Value <$> arbitrary
-arbitraryPrimValOfType (IntType Int64) = IntValue <$> Int64Value <$> arbitrary
-arbitraryPrimValOfType (FloatType Float32) = FloatValue <$> Float32Value <$> arbitrary
-arbitraryPrimValOfType (FloatType Float64) = FloatValue <$> Float32Value <$> arbitrary
+arbitraryPrimValOfType (IntType Int8) = IntValue . Int8Value <$> arbitrary
+arbitraryPrimValOfType (IntType Int16) = IntValue . Int16Value <$> arbitrary
+arbitraryPrimValOfType (IntType Int32) = IntValue . Int32Value <$> arbitrary
+arbitraryPrimValOfType (IntType Int64) = IntValue . Int64Value <$> arbitrary
+arbitraryPrimValOfType (FloatType Float32) = FloatValue . Float32Value <$> arbitrary
+arbitraryPrimValOfType (FloatType Float64) = FloatValue . Float32Value <$> arbitrary
 arbitraryPrimValOfType Bool = BoolValue <$> arbitrary
 arbitraryPrimValOfType Cert = return Checked

@@ -5,9 +5,8 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Monoid
 
-import Test.HUnit hiding (Test)
-import Test.Framework
-import Test.Framework.Providers.HUnit
+import Test.Tasty
+import Test.Tasty.HUnit
 
 import Futhark.Pkg.Types
 import Futhark.Pkg.Solve
@@ -47,7 +46,7 @@ testEnv = M.fromList $ concatMap frob
               deps' = PkgRevDeps $ M.fromList $ map onDep deps
           return ((user <> "/" <> repo, rev'), deps')
 
-solverTest :: PkgPath -> T.Text -> Either T.Text [(PkgPath, T.Text)] -> Test
+solverTest :: PkgPath -> T.Text -> Either T.Text [(PkgPath, T.Text)] -> TestTree
 solverTest p v expected =
   testCase (T.unpack $ p <> "-" <> prettySemVer v') $
   fmap unBuildList (solveDepsPure testEnv target)
@@ -57,8 +56,8 @@ solverTest p v expected =
         expected' = M.fromList . map onRes <$> expected
         onRes (dp, dv) = (dp, semverE dv)
 
-tests :: [Test]
-tests =
+tests :: TestTree
+tests = testGroup "SolveTests"
   [
     solverTest "athas/foo" "0.1.0" $
     Right [ ("athas/foo", "0.1.0")]
