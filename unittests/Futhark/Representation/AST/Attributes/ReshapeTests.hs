@@ -6,11 +6,9 @@ module Futhark.Representation.AST.Attributes.ReshapeTests
 
 import Control.Applicative
 
-import Test.HUnit hiding (Test)
-import Test.Framework
-import Test.Framework.Providers.HUnit
-import Test.Framework.Providers.QuickCheck2
-import Test.QuickCheck
+import Test.Tasty
+import Test.Tasty.HUnit
+import Test.Tasty.QuickCheck
 
 import Prelude
 
@@ -18,8 +16,9 @@ import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Constants
 
-tests :: [Test]
-tests = fuseReshapeTests ++
+tests :: TestTree
+tests = testGroup "ReshapeTests" $
+        fuseReshapeTests ++
         informReshapeTests ++
         reshapeOuterTests ++
         reshapeInnerTests ++
@@ -27,7 +26,7 @@ tests = fuseReshapeTests ++
         , informReshapeProp
         ]
 
-fuseReshapeTests :: [Test]
+fuseReshapeTests :: [TestTree]
 fuseReshapeTests =
   [ testCase (unwords ["fuseReshape ", show d1, show d2]) $
     fuseReshape (d1 :: ShapeChange Int) d2 @?= dres -- type signature to avoid warning
@@ -38,7 +37,7 @@ fuseReshapeTests =
                       ]
   ]
 
-informReshapeTests :: [Test]
+informReshapeTests :: [TestTree]
 informReshapeTests =
   [ testCase (unwords ["informReshape ", show shape, show sc, show sc_res]) $
     informReshape (shape :: [Int]) sc @?= sc_res -- type signature to avoid warning
@@ -48,7 +47,7 @@ informReshapeTests =
     ]
   ]
 
-reshapeOuterTests :: [Test]
+reshapeOuterTests :: [TestTree]
 reshapeOuterTests =
   [ testCase (unwords ["reshapeOuter", show sc, show n, show shape, "==", show sc_res]) $
     reshapeOuter (intShapeChange sc) n (intShape shape) @?= intShapeChange sc_res
@@ -60,7 +59,7 @@ reshapeOuterTests =
     ]
   ]
 
-reshapeInnerTests :: [Test]
+reshapeInnerTests :: [TestTree]
 reshapeInnerTests =
   [ testCase (unwords ["reshapeInner", show sc, show n, show shape, "==", show sc_res]) $
     reshapeInner (intShapeChange sc) n (intShape shape) @?= intShapeChange sc_res
@@ -78,12 +77,12 @@ intShape = Shape . map (intConst Int32 . toInteger)
 intShapeChange :: ShapeChange Int -> ShapeChange SubExp
 intShapeChange = map (fmap $ intConst Int32 . toInteger)
 
-fuseReshapeProp :: Test
+fuseReshapeProp :: TestTree
 fuseReshapeProp = testProperty "fuseReshape result matches second argument" prop
   where prop :: ShapeChange Int -> ShapeChange Int -> Bool
         prop sc1 sc2 = map newDim (fuseReshape sc1 sc2) == map newDim sc2
 
-informReshapeProp :: Test
+informReshapeProp :: TestTree
 informReshapeProp = testProperty "informReshape result matches second argument" prop
   where prop :: [Int] -> ShapeChange Int -> Bool
         prop sc1 sc2 = map newDim (informReshape sc1 sc2) == map newDim sc2
