@@ -27,6 +27,7 @@ module Futhark.Util
         roundDouble,
         fromPOSIX,
         toPOSIX,
+        trim,
         zEncodeString
        )
        where
@@ -174,6 +175,11 @@ toPOSIX = Posix.joinPath . Native.splitDirectories
 -- (which always use forward slash) to native paths.
 fromPOSIX :: Posix.FilePath -> Native.FilePath
 fromPOSIX = Native.joinPath . Posix.splitDirectories
+
+-- | Remove leading and trailing whitespace from a string.  Not an
+-- efficient implementation!
+trim :: String -> String
+trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

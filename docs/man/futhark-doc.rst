@@ -29,6 +29,11 @@ another identifier is possible with the notation
 namespace).  A file may contain a leading documentation comment, which
 will be considered the file *abstract*.
 
+``futhark-doc`` will ignore any file whose documentation comment
+consists solely of the word "ignore".  This is useful for files that
+contain tests, or are otherwise not relevant to the reader of the
+documentation.
+
 OPTIONS
 =======
 

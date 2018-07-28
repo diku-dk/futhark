@@ -19,10 +19,11 @@ import qualified Data.Text.Lazy.IO as T
 import Text.Blaze.Html.Renderer.Text
 
 import Futhark.Doc.Generator
-import Futhark.Compiler (readLibrary, dumpError, newFutharkConfig, Imports)
+import Futhark.Compiler (readLibrary, dumpError, newFutharkConfig, Imports, fileProg)
 import Futhark.Pipeline (runFutharkM, FutharkM, Verbosity(..))
+import Language.Futhark.Syntax (progDoc, DocComment(..))
 import Futhark.Util.Options
-import Futhark.Util (directoryContents)
+import Futhark.Util (directoryContents, trim)
 import Language.Futhark.Futlib.Prelude
 
 main :: IO ()
@@ -60,7 +61,8 @@ futFiles dir = filter isFut <$> directoryContents dir
 printDecs :: DocConfig -> FilePath -> [FilePath] -> Imports -> IO ()
 printDecs cfg dir files imports = do
   let direct_imports = map (normalise . dropExtension) files
-      (file_htmls, _warnings) = renderFiles direct_imports imports
+      (file_htmls, _warnings) = renderFiles direct_imports $
+                                filter (not . ignored) imports
   mapM_ (write . fmap renderHtml) file_htmls
   write ("style.css", cssFile)
 
@@ -70,6 +72,14 @@ printDecs cfg dir files imports = do
                                      hPutStrLn stderr $ "Writing " <> file
                                    createDirectoryIfMissing True $ takeDirectory file
                                    T.writeFile file content
+
+        -- Some files are not worth documenting; typically because
+        -- they contain tests.  The current crude mechanism is to
+        -- recognise them by a file comment containing "ignore".
+        ignored (_, fm) =
+          case progDoc (fileProg fm) of
+            Just (DocComment s _) -> trim s == "ignore"
+            _                     -> False
 
 cssFile :: T.Text
 cssFile = $(embedStringFile "rts/futhark-doc/style.css")
