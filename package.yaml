@@ -123,8 +123,8 @@ tests:
     main: futhark_tests.hs
     dependencies:
       - QuickCheck >= 2.8
-      - test-framework >= 0.4.0
-      - test-framework-quickcheck2
+      - tasty
+      - tasty-quickcheck
       - HUnit
-      - test-framework-hunit
+      - tasty-hunit
       - futhark

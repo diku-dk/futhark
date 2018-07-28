@@ -7,7 +7,7 @@ module Futhark.Analysis.ScalExpTests
   )
 where
 
-import Test.Framework
+import Test.Tasty
 
 import Control.Applicative
 import Control.Monad.State
@@ -21,8 +21,8 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import Futhark.Analysis.ScalExp
 import Futhark.Representation.AST hiding (constant, SDiv)
 
-tests :: [Test]
-tests = []
+tests :: TestTree
+tests = testGroup "ScalExpTests" []
 
 parseScalExp :: String -> ScalExp
 parseScalExp = parseScalExp' M.empty

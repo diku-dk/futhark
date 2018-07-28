@@ -9,14 +9,14 @@ import Control.Applicative
 import Prelude
 
 import Test.QuickCheck
-import Test.Framework
+import Test.Tasty
 
 import Language.Futhark.Syntax
 
 import Futhark.Representation.PrimitiveTests()
 
-tests :: [Test]
-tests = []
+tests :: TestTree
+tests = testGroup "Source SyntaxTests" []
 
 instance Arbitrary BinOp where
   arbitrary = elements [minBound..maxBound]
