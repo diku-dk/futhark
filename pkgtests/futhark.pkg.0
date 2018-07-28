@@ -1,0 +1,4 @@
+package github.com/sturluson/testpkg
+
+require {
+}
