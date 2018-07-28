@@ -60,8 +60,7 @@ futFiles dir = filter isFut <$> directoryContents dir
 printDecs :: DocConfig -> FilePath -> [FilePath] -> Imports -> IO ()
 printDecs cfg dir files imports = do
   let direct_imports = map (normalise . dropExtension) files
-      (file_htmls, warnings) = renderFiles direct_imports imports
-  hPrint stderr warnings
+      (file_htmls, _warnings) = renderFiles direct_imports imports
   mapM_ (write . fmap renderHtml) file_htmls
   write ("style.css", cssFile)
 
