@@ -127,7 +127,7 @@ installBuildList p bl = do
       pkgdir_exists <- doesDirectoryExist $ libOldDir </> pfp
       when pkgdir_exists $
         renameDirectory (libOldDir </> pfp) (libDir </> pfp)
-    Nothing -> return ()
+    _ -> return ()
 
   -- 6
   when libdir_exists $ liftIO $ removePathForcibly libOldDir
