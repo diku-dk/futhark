@@ -43,9 +43,10 @@ should fail for any reason, you can recover the old state by moving
 ``lib~old`` back.  These temporary directories are erased if
 ``futhark-pkg`` finishes without errors.
 
-The ``futhark-pkg sync`` subcommand is the only one that actually
-modifies ``lib/``; the others modify only ``futhark.pkg`` and require
-you to manually run ``futhark-pkg sync`` afterwards.
+The ``futhark-pkg sync`` and ``futhark-pkg create`` subcommands are
+the only ones that actually modifies ``lib/``; the others modify only
+``futhark.pkg`` and require you to manually run ``futhark-pkg sync``
+afterwards.
 
 COMMANDS
 ========
