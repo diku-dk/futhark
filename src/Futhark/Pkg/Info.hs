@@ -29,6 +29,7 @@ import qualified Data.Semigroup as Sem
 import Data.List
 import Data.Monoid ((<>))
 import qualified System.FilePath.Posix as Posix
+import System.Environment
 import System.Exit
 import System.IO
 
@@ -140,6 +141,8 @@ ghPkgInfo path owner repo versions = do
   let prog = "git"
       prog_opts :: [String]
       prog_opts = ["ls-remote", "--tags", repo_url]
+  -- Avoid Git asking for credentials.  We prefer failure.
+  liftIO $ setEnv "GIT_TERMINAL_PROMPT" "0"
   (code, out, err) <- liftIO $ readProcessWithExitCode prog prog_opts mempty
   liftIO $ BS.hPutStr stderr err
 
