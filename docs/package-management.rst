@@ -286,5 +286,26 @@ with:
 
    futhark-doc lib -o docs
 
-The file ``lib_docs/index.html`` can be opened in a web browser to
-browse the documentation.
+The file ``docs/index.html`` can be opened in a web browser to browse
+the documentation.
+
+Safety
+------
+
+In contrast to some other package managers, ``futhark-pkg`` does not
+run any package-supplied code on installation, upgrade, or removal.
+This means that all ``futhark-pkg`` operations are in principle
+completely safe (barring exploitable bugs in ``futhark-pkg`` itself,
+which is unlikely but not impossible).  Further, Futhark code itself
+is also completely pure, so executing it cannot have any unfortunate
+effects like stealing your data.  The worst it can do is loop
+infinitely, consume arbitrarily large amounts of memory, or produce
+wrong results.
+
+The exception is packages that uses ``unsafe``.  With some cleverness,
+``unsafe`` can be combined with in-place updates to perform arbitrary
+memory reads and writes, which can trivially lead to exploitable
+behaviour.  You should not use untrusted code that employs ``unsafe``
+(but the ``--safe`` compiler option may help).  However, this is not
+any worse than using external code in a conventional impure language,
+which generally can perform any conceivable harmful action.
