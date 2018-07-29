@@ -225,6 +225,12 @@ versioning into account - unless you bump the major version number (or
 the major version is 0), the new version must be *fully compatible*
 with the old.
 
+When releasing a new package, consider getting it added to the
+`central package list <https://futhark-lang.org/pkgs>`_.  See `this
+page
+<https://github.com/diku-dk/futhark-docbot/blob/master/README.md>`_
+for details.
+
 Incrementing the Major Version Number
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
