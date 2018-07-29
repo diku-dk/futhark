@@ -17,7 +17,7 @@ paths are always links to Git repositories hosted on GitHub.  In the
 future, this will become more flexible.  As an example, a package path
 may be ``github.com/athas/fut-foo``.
 
-Package are versioned with `semantic version numbers
+Packages are versioned with `semantic version numbers
 <https://semver.org/>`_ of the form ``X.Y.Z``.  Whenever versions are
 indicated, all three digits must always be given (that is, ``1.0`` is
 not a valid shorthand for ``1.0.0``).
