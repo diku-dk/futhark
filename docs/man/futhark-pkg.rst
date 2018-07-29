@@ -94,8 +94,9 @@ futhark-pkg sync
 ----------------
 
 Populate the ``lib/`` directory with the packages listed in
-``futhark.pkg``.  *Note*: this will delete everything in ``lib/`` that
-is no longer needed, as well as any manual modifications.
+``futhark.pkg``.  **Warning**: this will delete everything in ``lib/``
+that does not relate to a file listed in ``futhark.pkg``, as well as
+any local modifications.
 
 futhark-pkg upgrade
 -------------------
