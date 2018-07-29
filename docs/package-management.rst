@@ -81,6 +81,11 @@ Packages can be removed from ``futhark.pkg`` with::
 You will need to run ``futhark-sync`` to actually remove the files in
 ``lib/``.
 
+The intended usage is that ``futhark.pkg`` is added to version
+control, but ``lib/`` is not, as the contents of ``lib/`` can always
+be reproduced from ``futhark.pkg``.  However, added ``lib/`` works
+just fine as well.
+
 Importing Files from Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
