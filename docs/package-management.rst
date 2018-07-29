@@ -305,7 +305,7 @@ This means that all ``futhark-pkg`` operations are in principle
 completely safe (barring exploitable bugs in ``futhark-pkg`` itself,
 which is unlikely but not impossible).  Further, Futhark code itself
 is also completely pure, so executing it cannot have any unfortunate
-effects like stealing your data.  The worst it can do is loop
+effectss, such as stealing your data.  The worst it can do is loop
 infinitely, consume arbitrarily large amounts of memory, or produce
 wrong results.
 
@@ -314,5 +314,5 @@ The exception is packages that uses ``unsafe``.  With some cleverness,
 memory reads and writes, which can trivially lead to exploitable
 behaviour.  You should not use untrusted code that employs ``unsafe``
 (but the ``--safe`` compiler option may help).  However, this is not
-any worse than using external code in a conventional impure language,
-which generally can perform any conceivable harmful action.
+any worse than calling external code in a conventional impure
+language, which generally can perform any conceivable harmful action.
