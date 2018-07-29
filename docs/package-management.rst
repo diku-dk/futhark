@@ -6,7 +6,8 @@ Package Management
 This document describes ``futhark-pkg``, a minimalistic package
 manager inspired by `vgo <https://research.swtch.com/vgo>`_.  A
 Futhark package is a downloadable collection of ``.fut`` files and
-little more.
+little more.  There is a (not necessarily comprehensive) `list of
+known packages <https://futhark-lang.org/pkgs>`_.
 
 Basic Concepts
 --------------
@@ -278,12 +279,12 @@ work well (or at least compile) together, run:
 
    futhark-test lib
 
-More interestingly, you can generate hyperlinked documentation for all
-dependencies with:
+Also, you can generate hyperlinked documentation for all dependencies
+with:
 
 .. code-block:: text
 
-   futhark-doc lib -o lib_docs
+   futhark-doc lib -o docs
 
 The file ``lib_docs/index.html`` can be opened in a web browser to
 browse the documentation.
