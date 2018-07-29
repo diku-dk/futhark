@@ -75,6 +75,11 @@ example::
 
   3 directories, 1 file
 
+**Warning:** ``futhark-sync`` will remove any unrecognized files or
+local modifications to files in ``lib/`` (except of course the package
+directory of the package path listed in ``futhark.pkg``; see
+:ref:`creating-packages`).
+
 Packages can be removed from ``futhark.pkg`` with::
 
   $ futhark-pkg remove pkgpath
@@ -149,6 +154,8 @@ use ``futhark-pkg add`` to add the new version and ``futhark-pkg
 remove`` to remove the old version.  Or you can keep it around - it is
 perfectly acceptable to depend on multiple major versions of the same
 package, because they are really different packages.
+
+.. _creating-packages:
 
 Creating Packages
 -----------------
