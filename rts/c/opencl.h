@@ -710,8 +710,20 @@ int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, c
   size_t size;
 
   if (free_list_find(&ctx->free_list, tag, &size, mem_out) == 0) {
-    // Successfully found a free block.  Is it big enough, but not too big?
-    if (size >= min_size && size <= min_size*2) {
+    // Successfully found a free block.  Is it big enough?
+    //
+    // FIXME: we might also want to check whether the block is *too
+    // big*, to avoid internal fragmentation.  However, this can
+    // sharply impact performance on programs where arrays change size
+    // frequently.  Fortunately, such allocations are usually fairly
+    // short-lived, as they are necessarily within a loop, so the risk
+    // of internal fragmentation resulting in an OOM situation is
+    // limited.  However, it would be preferable if we could go back
+    // and *shrink* oversize allocations when we encounter an OOM
+    // condition.  That is technically feasible, since we do not
+    // expose OpenCL pointer values directly to the application, but
+    // instead rely on a level of indirection.
+    if (size >= min_size) {
       return CL_SUCCESS;
     } else {
       // Not just right - free it.
