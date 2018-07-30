@@ -549,15 +549,9 @@ distributeMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
         fits <- letSubExp "fits" $ BasicOp $
                 CmpOp (CmpSle Int32) group_size max_group_size
 
-        group_available_par <-
-          letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w intra_avail_par
-        (suff, suff_key) <- sufficientParallelism "suff_intra_par" group_available_par $
-                            (outer_suff_key, False) : path
+        (intra_suff, suff_key) <- sufficientParallelism "suff_intra_par" intra_avail_par $
+                                  (outer_suff_key, False) : path
 
-        -- Avoid tiny workgroups.  TODO: this should be a tunable parameter.
-        group_large_enough <- letSubExp "group_large_enough" $
-          BasicOp $ CmpOp (CmpSle Int32) (intConst Int32 1) intra_avail_par
-        intra_suff <- letSubExp "intra_suff" $ BasicOp $ BinOp LogAnd group_large_enough suff
         intra_ok <- letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
         return (intra_ok, suff_key)
 
