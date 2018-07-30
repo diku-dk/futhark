@@ -52,7 +52,7 @@ class FutharkTuner(MeasurementInterface):
     self.branch_tree = []
     self.thresholds = OrderedDict()
     self.datasets = []
-    self.values = defaultdict(list)
+    self.values = defaultdict(set)
     self.covered_branches = {}
     self.timeout_branches = defaultdict(list)
 
@@ -149,15 +149,14 @@ class FutharkTuner(MeasurementInterface):
       # search for parameters and values for each dataset
       val_re = re.compile('Compared (\w+) <= (-?\d+)')
       for dataset in datasets:
-        self.thresholds[dataset] = OrderedDict()
+        self.thresholds[dataset] = defaultdict(set)
         for line in datasets[dataset]['stderr'].splitlines():
           match = val_re.search(line)
           if match:
             param, value = match.group(1), int(match.group(2))
-            # onlyd add param, if it has not already been added for this dataset
-            if param not in self.thresholds[dataset]:
-              self.thresholds[dataset][param] = value
-              n += 1
+            # Add comparison; note there might be several per parameter.
+            self.thresholds[dataset][param].add(value)
+            n += 1
 
         # if a param has not been used in a comparison,
         # and thus not added, add it now
@@ -185,9 +184,10 @@ class FutharkTuner(MeasurementInterface):
       # keeping the threshold values sorted
       t = defaultdict(list)
       for dataset, thresholds in self.thresholds.items():
-          for k, v in thresholds.items():
-              if v not in t[k]:
-                  bisect.insort(t[k], v)
+        for k, vs in thresholds.items():
+          for v in vs:
+            if v not in t[k]:
+              bisect.insort(t[k], v)
 
       # iterate over all sorted threshold values of all parameters
       # and calculate a value lying between the current and previous value
@@ -198,12 +198,12 @@ class FutharkTuner(MeasurementInterface):
           prev_value = values[i - 1] if i != 0 else 0
           v = int((current_value + prev_value) / 2)
           n += 1
-          self.values[name].append(v)
+          self.values[name].add(v)
 
         # for the last threshold value also calculate a larger value
         n += 1
         v = int((values[len(values) - 1] * 2))
-        self.values[name].append(v)
+        self.values[name].add(v)
       return n
 
   def build_branch_tree(self):
@@ -314,7 +314,7 @@ class FutharkTuner(MeasurementInterface):
       for branch in start:
         node = branch
         if node['name'] != 'end':
-          bl = cfg[node['name']] <= self.thresholds[d][node['name']]
+          bl = all(cfg[node['name']] <= t for t in self.thresholds[d][node['name']])
           self.get_branch(node[bl], cfg, [d], result)
         else:
           result.append(node['id'])
