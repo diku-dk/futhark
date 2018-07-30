@@ -64,7 +64,7 @@ opCompiler dest (Inner kernel) =
 
 compileInKernelOp :: KernelConstants -> ImpGen.Destination -> Op InKernel
                   -> InKernelGen ()
-compileInKernelOp _ (ImpGen.Destination [ImpGen.MemoryDestination mem]) Alloc{} =
+compileInKernelOp _ (ImpGen.Destination _ [ImpGen.MemoryDestination mem]) Alloc{} =
   compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
 compileInKernelOp _ dest Alloc{} =
   compilerBugS $ "Invalid target for in-kernel allocation: " ++ show dest
@@ -158,9 +158,9 @@ kernelCompiler dest (Kernel desc space _ kernel_body) = do
 expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
 expCompiler
-  (ImpGen.Destination [ImpGen.ArrayDestination (Just destloc)])
+  (ImpGen.Destination tag [ImpGen.ArrayDestination (Just destloc)])
   (BasicOp (Iota n x s et)) = do
-  thread_gid <- newVName "thread_gid"
+  thread_gid <- maybe (newVName "thread_gid") (return . VName (nameFromString "thread_gid")) tag
 
   makeAllMemoryGlobal $ do
     (destmem, destspace, destidx) <-
@@ -190,8 +190,8 @@ expCompiler
       }
 
 expCompiler
-  (ImpGen.Destination [dest]) (BasicOp (Replicate (Shape ds) se)) = do
-  constants <- simpleKernelConstants "replicate"
+  (ImpGen.Destination tag [dest]) (BasicOp (Replicate (Shape ds) se)) = do
+  constants <- simpleKernelConstants tag "replicate"
 
   t <- subExpType se
   let thread_gid = kernelGlobalThreadId constants
@@ -314,7 +314,7 @@ inKernelExpCompiler _ (BasicOp (Assert _ _ (loc, locs))) =
             " inside parallel kernel."
           , "As a workaround, surround the expression with 'unsafe'."]
 -- The static arrays stuff does not work inside kernels.
-inKernelExpCompiler (ImpGen.Destination [dest]) (BasicOp (ArrayLit es _)) =
+inKernelExpCompiler (ImpGen.Destination _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
   ImpGen.copyDWIMDest dest [fromIntegral (i::Int32)] e []
 inKernelExpCompiler dest e =
@@ -604,10 +604,11 @@ data KernelConstants = KernelConstants
 -- FIXME: wing a KernelConstants structure for use in Replicate
 -- compilation.  This cannot be the best way to do this...
 simpleKernelConstants :: MonadFreshNames m =>
-                         String
+                         Maybe Int -> String
                       -> m KernelConstants
-simpleKernelConstants desc = do
-  thread_gtid <- newVName $ desc ++ "_gtid"
+simpleKernelConstants tag desc = do
+  thread_gtid <- maybe (newVName $ desc ++ "_gtid")
+                       (return . VName (nameFromString $ desc ++ "_gtid")) tag
   thread_ltid <- newVName $ desc ++ "_ltid"
   thread_gid <- newVName $ desc ++ "_gid"
   return $ KernelConstants
@@ -619,7 +620,7 @@ compileKernelBody :: ImpGen.Destination
                   -> KernelConstants
                   -> KernelBody InKernel
                   -> InKernelGen ()
-compileKernelBody (ImpGen.Destination dest) constants kbody =
+compileKernelBody (ImpGen.Destination _ dest) constants kbody =
   compileKernelStms constants (stmsToList $ kernelBodyStms kbody) $
   zipWithM_ (compileKernelResult constants) dest $
   kernelBodyResult kbody
@@ -628,7 +629,7 @@ compileNestedKernelBody :: KernelConstants
                         -> ImpGen.Destination
                         -> Body InKernel
                         -> InKernelGen ()
-compileNestedKernelBody constants (ImpGen.Destination dest) kbody =
+compileNestedKernelBody constants (ImpGen.Destination _ dest) kbody =
   compileKernelStms constants (stmsToList $ bodyStms kbody) $
   zipWithM_ ImpGen.compileSubExpTo dest $ bodyResult kbody
 
@@ -674,12 +675,12 @@ groupStmsByGuard constants bnds =
 compileKernelExp :: KernelConstants -> ImpGen.Destination -> KernelExp InKernel
                  -> InKernelGen ()
 
-compileKernelExp _ (ImpGen.Destination dests) (Barrier ses) = do
+compileKernelExp _ (ImpGen.Destination _ dests) (Barrier ses) = do
   zipWithM_ ImpGen.compileSubExpTo dests ses
   ImpGen.emit $ Imp.Op Imp.Barrier
 
 compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
-  | ImpGen.Destination [ImpGen.ScalarDestination size] <- dest = do
+  | ImpGen.Destination _ [ImpGen.ScalarDestination size] <- dest = do
       num_elements <- Imp.elements <$> ImpGen.compileSubExp w
       i' <- ImpGen.compileSubExp i
       elems_per_thread' <- Imp.elements <$> ImpGen.compileSubExp elems_per_thread
@@ -765,7 +766,7 @@ compileKernelExp constants dest (Combine (CombineSpace scatter cspace) ts aspace
                fullSliceNum (space_dims++t_dims) i
           index _ _ _ = Nothing
 
-compileKernelExp constants (ImpGen.Destination dests) (GroupReduce w lam input) = do
+compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input) = do
   skip_waves <- newVName "skip_waves"
   w' <- ImpGen.compileSubExp w
 
@@ -777,7 +778,7 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce w lam input) 
         splitAt (length input) actual_reduce_params
       offset = paramName other_index_param
 
-  ImpGen.Destination reduce_acc_targets <-
+  ImpGen.Destination _ reduce_acc_targets <-
     ImpGen.destinationFromParams reduce_acc_params
 
   ImpGen.declaringPrimVar skip_waves int32 $
@@ -794,7 +795,7 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce w lam input) 
 
     let read_reduce_args = zipWithM_ (readReduceArgument offset)
                            reduce_arr_params arrs
-        reduce_acc_dest = ImpGen.Destination reduce_acc_targets
+        reduce_acc_dest = ImpGen.Destination Nothing reduce_acc_targets
         do_reduce = do ImpGen.comment "read array element" read_reduce_args
                        ImpGen.compileBody reduce_acc_dest $ lambdaBody lam
                        zipWithM_ (writeReduceOpResult local_tid)
@@ -946,7 +947,7 @@ compileKernelExp constants _ (GroupScan w lam input) = do
       ImpGen.emit $ Imp.If is_first_block write_final_result mempty
 
 
-compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w maxchunk lam accs _arrs) = do
+compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w maxchunk lam accs _arrs) = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
       block_offset' = Imp.var block_offset int32
   w' <- ImpGen.compileSubExp w

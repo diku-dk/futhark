@@ -15,6 +15,7 @@ module Futhark.Util
         dropLast,
         mapEither,
         maybeNth,
+        maybeHead,
         splitFromEnd,
         splitAt3,
         splitAt4,
@@ -94,6 +95,11 @@ maybeNth :: Integral int => int -> [a] -> Maybe a
 maybeNth i l
   | i >= 0, v:_ <- genericDrop i l = Just v
   | otherwise                      = Nothing
+
+-- | Return the first element of the list, if it exists.
+maybeHead :: [a] -> Maybe a
+maybeHead [] = Nothing
+maybeHead (x:_) = Just x
 
 -- | Like 'splitAt', but from the end.
 splitFromEnd :: Int -> [a] -> ([a], [a])
