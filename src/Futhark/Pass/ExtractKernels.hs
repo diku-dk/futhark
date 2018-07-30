@@ -305,7 +305,7 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
             blockedScan res_pat w
             (scan_lam_sequential, scan_nes)
             (comm, red_lam_sequential, red_nes)
-            map_lam_sequential (intConst Int32 1) [] [] arrs
+            map_lam_sequential (intConst Int32 16) [] [] arrs
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just (comm, red_fun, nes) <- isReduceSOAC form,
@@ -556,7 +556,7 @@ distributeMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
 
         -- Avoid tiny workgroups.  TODO: this should be a tunable parameter.
         group_large_enough <- letSubExp "group_large_enough" $
-          BasicOp $ CmpOp (CmpSle Int32) (intConst Int32 32) intra_avail_par
+          BasicOp $ CmpOp (CmpSle Int32) (intConst Int32 1) intra_avail_par
         intra_suff <- letSubExp "intra_suff" $ BasicOp $ BinOp LogAnd group_large_enough suff
         intra_ok <- letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
         return (intra_ok, suff_key)
