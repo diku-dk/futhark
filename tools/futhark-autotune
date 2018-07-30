@@ -162,7 +162,7 @@ class FutharkTuner(MeasurementInterface):
         # and thus not added, add it now
         for p in all_params:
           if not p in self.thresholds[dataset]:
-            self.thresholds[dataset][p] = 0
+            self.thresholds[dataset][p] = set()
 
       # we need a list of datasets later
       self.datasets = datasets.keys()
