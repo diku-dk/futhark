@@ -1058,18 +1058,22 @@ compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
       -- store it by collective copying among all the threads of the
       -- group.  TODO: also do this if the array is in global memory
       -- (but this is a bit more tricky, synchronisation-wise).
-      w <- ImpGen.compileSubExp . arraySize 0 =<< subExpType what
+      --
+      -- We do the reads/writes multidimensionally, but the loop is
+      -- single-dimensional.
+      ws <- mapM ImpGen.compileSubExp . arrayDims =<< subExpType what
       -- Compute how many elements this thread is responsible for.
       -- Formula: (w - ltid) / group_size (rounded up).
-      let ltid = ImpGen.varIndex (kernelLocalThreadId constants)
+      let w = product ws
+          ltid = ImpGen.varIndex (kernelLocalThreadId constants)
           group_size = Imp.sizeToExp (kernelGroupSize constants)
           to_write = (w - ltid) `quotRoundingUp` group_size
-          i' = ImpGen.varIndex i * group_size + ltid
+          is = unflattenIndex ws $ ImpGen.varIndex i * group_size + ltid
 
       write_result <-
         ImpGen.collect $
-        ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants, i']
-                            what [i']
+        ImpGen.copyDWIMDest dest (ImpGen.varIndex (kernelGroupId constants) : is)
+                            what is
 
       ImpGen.emit $ Imp.For i Int32 to_write write_result
 
