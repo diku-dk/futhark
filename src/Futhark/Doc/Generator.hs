@@ -38,6 +38,10 @@ data Context = Context { ctxCurrent :: String
                        , ctxImports :: Imports
                        , ctxNoLink :: NoLink
                        , ctxFileMap :: FileMap
+                       , ctxVisibleMTys :: S.Set VName
+                         -- ^ Local module types that show up in the
+                         -- interface.  These should be documented,
+                         -- but clearly marked local.
                        }
 type FileMap = M.Map VName (String, Namespace)
 type DocM = ReaderT Context (WriterT Documented (Writer Warnings))
@@ -90,7 +94,8 @@ vnameToFileMap = mconcat . map forFile
 renderFiles :: [FilePath] -> Imports -> ([(FilePath, Html)], Warnings)
 renderFiles important_imports imports = runWriter $ do
   (import_pages, documented) <- runWriterT $ forM imports $ \(current, fm) ->
-    let ctx = Context current fm imports mempty file_map in
+    let ctx = Context current fm imports mempty file_map
+              (progModuleTypes $ fileProg fm) in
     flip runReaderT ctx $ do
 
     (first_paragraph, maybe_abstract, maybe_sections) <- headerDoc $ fileProg fm
@@ -256,15 +261,16 @@ addBoilerplateWithNav important_imports current titleText content =
 
 synopsisDecs :: [Dec] -> DocM Html
 synopsisDecs decs = do
+  visible <- asks ctxVisibleMTys
   fm <- asks ctxFileMod
   -- We add an empty row to avoid generating invalid HTML in cases
   -- where all rows are otherwise colspan=2.
   (H.table ! A.class_ "specs") . (emptyRow<>) . mconcat <$>
-    sequence (mapMaybe (synopsisDec fm) decs)
+    sequence (mapMaybe (synopsisDec visible fm) decs)
 
-synopsisDec :: FileModule -> Dec -> Maybe (DocM Html)
-synopsisDec fm dec = case dec of
-  SigDec s -> synopsisModType s
+synopsisDec :: S.Set VName -> FileModule -> Dec -> Maybe (DocM Html)
+synopsisDec visible fm dec = case dec of
+  SigDec s -> synopsisModType mempty s
   ModDec m -> synopsisMod fm m
   ValDec v -> synopsisValBind v
   TypeDec t -> synopsisType t
@@ -275,6 +281,9 @@ synopsisDec fm dec = case dec of
     | otherwise ->
         Just $ return $ fullRow $
         fromString $ "open <" <> unwords (map pretty $ x:xs) ++ ">"
+  LocalDec (SigDec s) _
+    | sigName s `S.member` visible ->
+        synopsisModType ((H.span ! A.class_ "keyword" $ "local") <> " ") s
   LocalDec _ _ -> Nothing
 
 synopsisOpened :: ModExp -> Maybe (DocM Html)
@@ -307,12 +316,12 @@ valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _) = do
           tparams',
           mconcat (intersperse " -> " $ params' ++ [rettype']))
 
-synopsisModType :: SigBind -> Maybe (DocM Html)
-synopsisModType sb = Just $ do
+synopsisModType :: Html -> SigBind -> Maybe (DocM Html)
+synopsisModType prefix sb = Just $ do
   let name' = vnameSynopsisDef $ sigName sb
   fullRow <$> do
     se' <- synopsisSigExp $ sigExp sb
-    return $ "module type " <> name' <> " = " <> se'
+    return $ prefix <> "module type " <> name' <> " = " <> se'
 
 synopsisMod :: FileModule -> ModBind -> Maybe (DocM Html)
 synopsisMod fm (ModBind name ps sig _ _ _) =
@@ -660,12 +669,12 @@ describeGenericMod name what se doc f = do
 
 describeDecs :: [Dec] -> DocM Html
 describeDecs decs = do
-  fm <- asks ctxFileMod
+  visible <- asks ctxVisibleMTys
   H.dl . mconcat <$>
     mapM (fmap $ H.div ! A.class_ "decl_description")
-    (mapMaybe (describeDec fm) decs)
+    (mapMaybe (describeDec visible) decs)
 
-describeDec :: FileModule -> Dec -> Maybe (DocM Html)
+describeDec :: S.Set VName -> Dec -> Maybe (DocM Html)
 describeDec _ (ValDec vb) = Just $
   describeGeneric (valBindName vb) (valBindWhat vb) (valBindDoc vb) $ \name -> do
   (lhs, mhs, rhs) <- valBindHtml name vb
@@ -683,6 +692,12 @@ describeDec _ (ModDec mb) = Just $
   return $ "module " <> name'
 
 describeDec _ OpenDec{} = Nothing
+
+describeDec visible (LocalDec (SigDec (SigBind name se doc _)) _)
+  | name `S.member` visible = Just $
+  describeGenericMod name IndexModuleType se doc $ \name' ->
+  return $ (H.span ! A.class_ "keyword") "local" <> " module type " <> name'
+
 describeDec _ LocalDec{} = Nothing
 
 valBindWhat :: ValBind -> IndexWhat

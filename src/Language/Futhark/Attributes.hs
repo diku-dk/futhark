@@ -17,6 +17,7 @@ module Language.Futhark.Attributes
   , valueType
   , leadingOperator
   , progImports
+  , progModuleTypes
   , identifierReference
   , identifierReferences
 
@@ -897,6 +898,35 @@ progImports = concatMap decImports . progDecs
         modExpImports (ModApply _ me _ _ _) = modExpImports me
         modExpImports (ModAscript me _ _ _) = modExpImports me
         modExpImports ModLambda{}           = []
+
+-- | The set of module types used in any exported (non-local)
+-- declaration.
+progModuleTypes :: Ord vn => ProgBase f vn -> S.Set vn
+progModuleTypes = mconcat . map onDec . progDecs
+  where onDec (OpenDec x xs _ _) = mconcat $ map onModExp $ x:xs
+        onDec (ModDec md) =
+          maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
+        onDec SigDec{} = mempty
+        onDec TypeDec{} = mempty
+        onDec ValDec{} = mempty
+        onDec (LocalDec _ _) = mempty
+
+        onModExp ModVar{} = mempty
+        onModExp (ModParens p _) = onModExp p
+        onModExp ModImport {} = mempty
+        onModExp (ModDecs ds _) = mconcat $ map onDec ds
+        onModExp (ModApply me1 me2 _ _ _) = onModExp me1 <> onModExp me2
+        onModExp (ModAscript me _ _ _) = onModExp me
+        onModExp (ModLambda p r me _) =
+          onModParam p <> maybe mempty (onSigExp . fst) r <> onModExp me
+
+        onModParam = onSigExp . modParamType
+
+        onSigExp (SigVar v _) = S.singleton $ qualLeaf v
+        onSigExp (SigParens e _) = onSigExp e
+        onSigExp SigSpecs{} = mempty
+        onSigExp (SigWith e _ _) = onSigExp e
+        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
 
 -- | Extract a leading @((name, namespace, file), remainder)@ from a
 -- documentation comment string.  These are formatted as

@@ -135,6 +135,10 @@ main {
     }
 }
 
+.keyword {
+    font-weight: bold;
+}
+
 .specs {
     margin-left: 2ex;
     border-collapse: collapse;
