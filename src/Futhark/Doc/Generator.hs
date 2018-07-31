@@ -587,7 +587,7 @@ typeParamHtml (TypeParamType Lifted name _) = "'^" <> vnameHtml name
 
 typeAbbrevHtml :: Liftedness -> Html -> [TypeParam] -> Html
 typeAbbrevHtml l name params =
-  what <> name <> joinBy " " (map typeParamHtml params)
+  what <> name <> mconcat (map ((" "<>) . typeParamHtml) params)
   where what = case l of Lifted -> keyword "type " <> "^"
                          Unlifted -> keyword "type "
 
