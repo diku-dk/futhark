@@ -699,7 +699,7 @@ describeDec _ OpenDec{} = Nothing
 describeDec visible (LocalDec (SigDec (SigBind name se doc _)) _)
   | name `S.member` visible = Just $
   describeGenericMod name IndexModuleType se doc $ \name' ->
-  return $ keyword "local module type" <> name'
+  return $ keyword "local module type " <> name'
 
 describeDec _ LocalDec{} = Nothing
 
