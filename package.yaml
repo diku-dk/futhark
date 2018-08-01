@@ -57,6 +57,7 @@ dependencies:
   - process-extras
   - free
   - zip-archive
+  - time
 
 when:
 - condition: "!impl(ghc >= 8.0)"
