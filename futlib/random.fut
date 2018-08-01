@@ -393,16 +393,11 @@ module xorshift128plus: rng_engine with int.t = u64 = {
   module int = u64
   type rng = (u64,u64)
 
-  -- We currently have a problem where everything that is produced
-  -- must be convertible (losslessly) to a i64.  Therefore, we mask
-  -- off the highest bit to avoid negative numbers.
-  let mask (x: u64) = x & (~(1u64<<63u64))
-
   let rand ((x,y): rng): (rng, u64) =
     let x = x ^ (x << 23u64)
     let new_x = y
     let new_y = x ^ y ^ (x >> 17u64) ^ (y >> 26u64)
-    in ((new_x,new_y), mask (new_y + y))
+    in ((new_x,new_y), (new_y + y))
 
   let rng_from_seed [n] (seed: [n]i32) =
     loop (a,b) = (1u64,u64.i32 n) for i < n do
@@ -412,13 +407,13 @@ module xorshift128plus: rng_engine with int.t = u64 = {
 
   let split_rng (n: i32) ((x,y): rng): [n]rng =
     map (\i -> let (a,b) = (rand (rng_from_seed [hash (i^n)])).1
-               in (rand (x^a,y^b)).1) (iota n)
+               in (rand (rand (x^a,y^b)).1).1) (iota n)
 
   let join_rng [n] (xs: [n]rng): rng =
     reduce (\(x1,y1) (x2,y2) -> (x1^x2,y1^y2)) (0u64,0u64) xs
 
-  let min = 0u64
-  let max = mask 0xFF_FF_FF_FF_FF_FF_FF_FFu64
+  let min = u64.smallest
+  let max = u64.largest
 }
 
 
@@ -513,7 +508,8 @@ module normal_distribution (R: real) (E: rng_engine):
   rng_distribution with num.t = R.t
                    with engine.rng = E.rng
                    with distribution = {mean:R.t,stddev:R.t} = {
-  let to_R (x: E.int.t) = R.i64 (E.int.to_i64 x)
+  let to_R (x: E.int.t) =
+    R.u64 (u64.i64 (E.int.to_i64 x))
 
   module engine = E
   module num = R
@@ -527,9 +523,9 @@ module normal_distribution (R: real) (E: rng_engine):
     -- Box-Muller where we only use one of the generated points.
     let (rng, u1) = E.rand rng
     let (rng, u2) = E.rand rng
-    let u1 = to_R u1 / to_R E.max
-    let u2 = to_R u2 / to_R E.max
+    let u1 = (to_R u1 - to_R E.min) / (to_R E.max - to_R E.min)
+    let u2 = (to_R u2 - to_R E.min) / (to_R E.max - to_R E.min)
     let r = sqrt (i32 (-2) * log u1)
     let theta = i32 2 * pi * u2
-    in (rng, mean + stddev * (r * cos theta))
+    in (rng, mean + R.sqrt stddev * (r * cos theta))
 }
