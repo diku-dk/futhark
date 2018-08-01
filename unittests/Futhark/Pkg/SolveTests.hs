@@ -11,8 +11,10 @@ import Test.Tasty.HUnit
 import Futhark.Pkg.Types
 import Futhark.Pkg.Solve
 
+import Prelude
+
 semverE :: T.Text -> SemVer
-semverE s = case semver s of
+semverE s = case parseVersion s of
               Left err -> error $ T.unpack s <>
                           " is not a valid version number: " <>
                           parseErrorPretty err
