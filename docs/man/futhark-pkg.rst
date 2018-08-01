@@ -114,10 +114,12 @@ COMMIT VERSIONS
 
 It is possible to use ``futhark-pkg`` with packages that have not yet
 made proper releases.  This is done via pseudoversions of the form
-``0.0.0-yyyymmddhhmmss+commitid``.  The timestamp ensures that newer
-commits take precedence if multiple packages depend on a commit
-version for the same package.  If ``futhark-pkg add`` is given a
-package with no releases, the most recent commit will be used.
+``0.0.0-yyyymmddhhmmss+commitid``.  The timestamp is not verified
+against the actual commit.  The timestamp ensures that newer commits
+take precedence if multiple packages depend on a commit version for
+the same package.  If ``futhark-pkg add`` is given a package with no
+releases, the most recent commit will be used.  In this case, the
+timestamp is merely set to the current time.
 
 Commit versions are awkward and fragile, and should not be relied
 upon.  Issue proper releases (even experimental 0.x version) as soon
