@@ -29,11 +29,11 @@ import qualified Data.Semigroup as Sem
 import Data.List
 import Data.Monoid ((<>))
 import qualified System.FilePath.Posix as Posix
-import System.Environment
 import System.Exit
 import System.IO
 
 import qualified Codec.Archive.Zip as Zip
+import Data.Time (UTCTime, UTCTime, defaultTimeLocale, formatTime, getCurrentTime)
 import Data.Versions (SemVer(..), semver, prettySemVer, parseErrorPretty)
 import System.Process.ByteString (readProcessWithExitCode)
 import Network.HTTP.Client hiding (path)
@@ -41,6 +41,7 @@ import Network.HTTP.Simple
 
 import Futhark.Pkg.Types
 import Futhark.Util.Log
+import Futhark.Util (maybeHead)
 
 -- | Revision dependencies are stored as a monadic action, because we
 -- want to fetch them on-demand.  It would be a waste to fetch
@@ -66,6 +67,9 @@ data PkgRevInfo m = PkgRevInfo { pkgRevZipballUrl :: T.Text
                                  -- storing what it was at the time this
                                  -- version was last selected.
                                , pkgRevGetDeps :: GetDeps m
+                               , pkgRevTime :: UTCTime
+                                 -- ^ Timestamp for when the revision
+                                 -- was made (rarely used).
                                }
                   deriving (Eq, Show)
 
@@ -100,11 +104,14 @@ downloadZipball url = do
 
 -- | Information about a package.  The name of the package is stored
 -- separately.
-newtype PkgInfo m = PkgInfo { pkgVersions :: M.Map SemVer (PkgRevInfo m) }
-  deriving (Show)
+data PkgInfo m = PkgInfo { pkgVersions :: M.Map SemVer (PkgRevInfo m)
+                         , pkgLookupCommit :: Maybe T.Text -> m (PkgRevInfo m)
+                           -- ^ Look up information about a specific
+                           -- commit, or HEAD in case of Nothing.
+                         }
 
 lookupPkgRev :: SemVer -> PkgInfo m -> Maybe (PkgRevInfo m)
-lookupPkgRev v (PkgInfo m) = M.lookup v m
+lookupPkgRev v = M.lookup v . pkgVersions
 
 majorRevOfPkg :: PkgPath -> (PkgPath, [Word])
 majorRevOfPkg p =
@@ -134,26 +141,46 @@ pkgInfo path =
 -- by other systems (Go most notably), so we should not be stepping on
 -- any toes.
 
+gitCmd :: MonadIO m => [String] -> m BS.ByteString
+gitCmd opts = do
+  (code, out, err) <- liftIO $ readProcessWithExitCode "git" opts mempty
+  liftIO $ BS.hPutStr stderr err
+  case code of
+    ExitFailure 127 -> fail $ "'" <> unwords ("git" : opts) <> "' failed (program not found?)."
+    ExitFailure _ -> fail $ "'" <> unwords ("git" : opts) <> "' failed."
+    ExitSuccess -> return out
+
+ghLookupCommit :: (MonadIO m, MonadLogger m) =>
+                  PkgPath -> T.Text -> T.Text -> T.Text -> T.Text -> T.Text -> m (PkgRevInfo m)
+ghLookupCommit path owner repo d ref hash = do
+  gd <- memoiseGetDeps $ ghRevGetDeps owner repo ref
+  let dir = Posix.addTrailingPathSeparator $
+            T.unpack repo <> "-" <> T.unpack d Posix.</>
+            "lib" Posix.</> T.unpack path
+  time <- liftIO getCurrentTime -- FIXME
+  return $ PkgRevInfo
+    (T.pack repo_url <> "/archive/" <> ref <> ".zip") dir hash gd time
+  where repo_url = "https://github.com/" <> T.unpack owner <> "/" <> T.unpack repo
+
 ghPkgInfo :: (MonadIO m, MonadLogger m) =>
              PkgPath -> T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
 ghPkgInfo path owner repo versions = do
   logMsg $ "Retrieving list of tags from " <> repo_url
-  let prog = "git"
-      prog_opts :: [String]
-      prog_opts = ["ls-remote", "--tags", repo_url]
-  -- Avoid Git asking for credentials.  We prefer failure.
-  liftIO $ setEnv "GIT_TERMINAL_PROMPT" "0"
-  (code, out, err) <- liftIO $ readProcessWithExitCode prog prog_opts mempty
-  liftIO $ BS.hPutStr stderr err
+  remote_lines <- T.lines . T.decodeUtf8 <$> gitCmd ["ls-remote", repo_url]
 
-  case code of
-    ExitFailure 127 -> fail $ "'" <> unwords (prog : prog_opts) <> "' failed (program not found?)."
-    ExitFailure _ -> fail $ "'" <> unwords (prog : prog_opts) <> "' failed."
-    ExitSuccess -> return ()
+  head_ref <- maybe (fail $ "Cannot find HEAD ref for " <> repo_url) return $
+              maybeHead $ mapMaybe isHeadRef remote_lines
+  let def = fromMaybe head_ref
 
-  Right . PkgInfo . M.fromList . catMaybes <$>
-    mapM revInfo (T.lines $ T.decodeUtf8 out)
+  rev_info <- M.fromList . catMaybes <$> mapM revInfo remote_lines
+
+  return $ Right $ PkgInfo rev_info $ \r ->
+    ghLookupCommit path owner repo (def r) (def r) (def r)
   where repo_url = "https://github.com/" <> T.unpack owner <> "/" <> T.unpack repo
+
+        isHeadRef l
+          | [hash, "HEAD"] <- T.words l = Just hash
+          | otherwise                   = Nothing
 
         revInfo l
           | [hash, ref] <- T.words l,
@@ -161,15 +188,8 @@ ghPkgInfo path owner repo versions = do
             "v" `T.isPrefixOf` t,
             Right v <- semver $ T.drop 1 t,
             _svMajor v `elem` versions = do
-              gd <- memoiseGetDeps $ ghRevGetDeps owner repo t
-              let dir = Posix.addTrailingPathSeparator $
-                        T.unpack repo <> "-" <> T.unpack (prettySemVer v) Posix.</>
-                        "lib" Posix.</> T.unpack path
-              return $ Just (v, PkgRevInfo
-                                (T.pack repo_url <> "/archive/" <> t <> ".zip")
-                                dir
-                                hash
-                                gd)
+              pinfo <- ghLookupCommit path owner repo (prettySemVer v) t hash
+              return $ Just (v, pinfo)
           | otherwise = return Nothing
 
 ghRevGetDeps :: (MonadIO m, MonadLogger m) =>
@@ -218,6 +238,8 @@ lookupKnownPackage p (PkgRegistry m) = M.lookup p m
 class (MonadIO m, MonadLogger m) => MonadPkgRegistry m where
   getPkgRegistry :: m (PkgRegistry m)
   putPkgRegistry :: PkgRegistry m -> m ()
+  modifyPkgRegistry :: (PkgRegistry m -> PkgRegistry m) -> m ()
+  modifyPkgRegistry f = putPkgRegistry . f =<< getPkgRegistry
 
 lookupPackage :: MonadPkgRegistry m =>
                  PkgPath -> m (PkgInfo m)
@@ -234,9 +256,26 @@ lookupPackage p = do
           putPkgRegistry $ PkgRegistry $ M.insert p pinfo m
           return pinfo
 
+lookupPackageCommit :: MonadPkgRegistry m =>
+                       PkgPath -> Maybe T.Text -> m (SemVer, PkgRevInfo m)
+lookupPackageCommit p ref = do
+  pinfo <- lookupPackage p
+  rev_info <- pkgLookupCommit pinfo ref
+  let timestamp = T.pack $ formatTime defaultTimeLocale "%Y%m%d%H%M%S" $
+                  pkgRevTime rev_info
+      v = commitVersion timestamp $ pkgRevCommit rev_info
+      pinfo' = pinfo { pkgVersions = M.insert v rev_info $ pkgVersions pinfo }
+  modifyPkgRegistry $ \(PkgRegistry m) ->
+    PkgRegistry $ M.insert p pinfo' m
+  return (v, rev_info)
+
+-- | Look up information about a specific version of a package.
 lookupPackageRev :: MonadPkgRegistry m =>
                     PkgPath -> SemVer -> m (PkgRevInfo m)
-lookupPackageRev p v = do
+lookupPackageRev p v
+  | Just commit <- isCommitVersion v =
+      snd <$> lookupPackageCommit p (Just commit)
+  | otherwise = do
   pinfo <- lookupPackage p
   case lookupPkgRev v pinfo of
     Nothing ->
@@ -260,6 +299,7 @@ lookupNewestRev :: MonadPkgRegistry m =>
 lookupNewestRev p = do
   pinfo <- lookupPackage p
   case M.keys $ pkgVersions pinfo of
-    [] -> fail $ T.unpack $
-          "Package " <> p <> " has no versions.  Invalid package path?"
+    [] -> do
+      logMsg $ "Package " <> p <> " has no released versions.  Using HEAD."
+      fst <$> lookupPackageCommit p Nothing
     v:vs -> return $ foldl' max v vs

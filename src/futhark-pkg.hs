@@ -208,7 +208,7 @@ doSync = runPkgM $ do
 doAdd :: IO ()
 doAdd = mainWithOptions () [] $ \args () ->
   case args of
-    [p, v] | Right v' <- semver $ T.pack v -> Just $ runPkgM $ doAdd' (T.pack p) v'
+    [p, v] | Right v' <- parseVersion $ T.pack v -> Just $ runPkgM $ doAdd' (T.pack p) v'
     [p] -> Just $ runPkgM $
       -- Look up the newest revision of the package.
       doAdd' (T.pack p) =<< lookupNewestRev (T.pack p)
@@ -228,7 +228,13 @@ doAdd = mainWithOptions () [] $ \args () ->
       -- We either replace any existing occurence of package 'p', or
       -- we add a new one.
       p_info <- lookupPackageRev p v
-      let req = Required p v $ Just $ pkgRevCommit p_info
+      let hash = case (_svMajor v, _svMinor v, _svPatch v) of
+                   -- We do not perform hash-pinning for
+                   -- (0,0,0)-versions, because these already embed a
+                   -- specific revision ID into their version number.
+                   (0, 0, 0) -> Nothing
+                   _ -> Just $ pkgRevCommit p_info
+          req = Required p v hash
           (m', prev_r) = addRequiredToManifest req m
 
       case prev_r of
@@ -303,6 +309,9 @@ main :: IO ()
 main = do
   -- Ensure that we can make HTTPS requests.
   setGlobalManager =<< newManager tlsManagerSettings
+
+  -- Avoid Git asking for credentials.  We prefer failure.
+  liftIO $ setEnv "GIT_TERMINAL_PROMPT" "0"
 
   args <- getArgs
   let commands = [ ("add",

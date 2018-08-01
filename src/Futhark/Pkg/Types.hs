@@ -6,6 +6,11 @@ module Futhark.Pkg.Types
   , PkgRevDeps(..)
   , module Data.Versions
 
+  -- * Versions
+  , commitVersion
+  , isCommitVersion
+  , parseVersion
+
   -- * Package manifests
   , PkgManifest(..)
   , newPkgManifest
@@ -44,7 +49,7 @@ import qualified Data.Map as M
 import System.FilePath
 import qualified System.FilePath.Posix as Posix
 
-import Data.Versions (SemVer(..), semver, semver', prettySemVer)
+import Data.Versions (SemVer(..), VUnit(..), prettySemVer)
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
 import Text.Megaparsec.Error (parseErrorPretty)
@@ -60,6 +65,37 @@ type PkgPath = T.Text
 -- slashes).
 pkgPathFilePath :: PkgPath -> FilePath
 pkgPathFilePath = joinPath . Posix.splitPath . T.unpack
+
+-- | Versions of the form (0,0,0)-timestamp+hash are treated
+-- specially, as a reference to the commit identified uniquely with
+-- 'hash' (typically the Git commit ID).  This function detects such
+-- versions.
+isCommitVersion :: SemVer -> Maybe T.Text
+isCommitVersion (SemVer 0 0 0 [_] [[Str s]]) = Just s
+isCommitVersion _ = Nothing
+
+-- | @commitVersion timestamp commit@ constructs a commit version.
+commitVersion :: T.Text -> T.Text -> SemVer
+commitVersion time commit =
+  SemVer 0 0 0 [[Str time]] [[Str commit]]
+
+-- | Unfortunately, Data.Versions has a buggy semver parser that
+-- collapses consecutive zeroes in the metadata field.  So, we define
+-- our own parser here.  It's a little simpler too, since we don't
+-- need full semver.
+parseVersion :: T.Text -> Either (ParseError (Token T.Text) Void) SemVer
+parseVersion = parse (semver' <* eof) "Semantic Version"
+
+semver' :: Parsec Void T.Text SemVer
+semver' = SemVer <$> majorP <*> minorP <*> patchP <*> preRel <*> metaData
+  where majorP = digitsP <* char '.'
+        minorP = majorP
+        patchP = digitsP
+        digitsP = read <$> ((T.unpack <$> string "0") <|> some digitChar)
+        preRel = maybe [] pure <$> optional preRel'
+        preRel' = char '-' *> (pure . Str . T.pack <$> some digitChar)
+        metaData = maybe [] pure <$> optional metaData'
+        metaData' = char '+' *> (pure . Str . T.pack <$> some alphaNumChar)
 
 -- | The dependencies of a (revision of a) package is a mapping from
 -- package paths to minimum versions (and an optional hash pinning).
