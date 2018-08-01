@@ -527,5 +527,5 @@ module normal_distribution (R: real) (E: rng_engine):
     let u2 = (to_R u2 - to_R E.min) / (to_R E.max - to_R E.min)
     let r = sqrt (i32 (-2) * log u1)
     let theta = i32 2 * pi * u2
-    in (rng, mean + R.sqrt stddev * (r * cos theta))
+    in (rng, mean + stddev * (r * cos theta))
 }
