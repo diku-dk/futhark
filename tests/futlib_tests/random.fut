@@ -71,8 +71,8 @@ entry test_f32_rand (x: i32) (n: i32) =
 
 -- ==
 -- entry: test_f32_normal
--- compiled input { 0 10000 } output { 236.16484f32 51.118332f32 }
--- compiled input { 1 10000 } output { 144.83818f32 51.320827f32 }
+-- compiled input { 0 10000 } output { 87.695510f32 50.054848f32 }
+-- compiled input { 1 10000 } output { 69.860374f32 49.907085f32 }
 
 module test_f32_normal_m =
  mktest (normal_distribution f32 xorshift128plus)
@@ -82,8 +82,8 @@ entry test_f32_normal (x: i32) (n: i32) =
 
 -- ==
 -- entry: test_f32_shuffle
--- compiled input { 0 10000 } output { 165.477264f32 49.911663f32 }
--- compiled input { 1 10000 } output { 81.004059f32  52.509270f32 }
+-- compiled input { 0 10000 } output { 74.1559750f32 50.02034f32 }
+-- compiled input { 1 10000 } output { 60.1060940f32 50.52343f32 }
 
 module shuffle_m =
  shuffle_order_engine {let k = 10} xorshift128plus
