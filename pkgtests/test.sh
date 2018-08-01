@@ -63,3 +63,11 @@ succeed futhark-pkg sync
 succeed futhark-pkg add github.com/athas/fut-foo@2 2.0.0
 
 succeed futhark-pkg sync
+
+succeed futhark-pkg add github.com/athas/fut-quux 0.0.0-20180801102532+b70028521e4dbcc286834b32ce82c1d2721a6209
+
+succeed futhark-pkg sync
+
+succeed futhark-pkg add github.com/athas/fut-quux 0.0.0-20180801102533+dd5168df1b8a20cb0547a88afd4e4a6cc098e0f1
+
+succeed futhark-pkg sync
