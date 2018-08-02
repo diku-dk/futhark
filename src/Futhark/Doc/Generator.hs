@@ -106,7 +106,7 @@ renderFiles important_imports imports = runWriter $ do
 
     return (current,
             (H.docTypeHtml ! A.lang "en" $
-             addBoilerplateWithNav important_imports ("doc" </> current) current $
+             addBoilerplateWithNav important_imports imports ("doc" </> current) current $
              H.main $ maybe_abstract <>
              selfLink "synopsis" (H.h2 "Synopsis") <> (H.div ! A.id "overview") synopsis <>
              selfLink "description" (H.h2 "Description") <> description <>
@@ -115,7 +115,7 @@ renderFiles important_imports imports = runWriter $ do
 
   return $
     [("index.html", contentsPage important_imports $ map (fmap snd) import_pages),
-     ("doc-index.html", indexPage important_imports documented file_map)]
+     ("doc-index.html", indexPage important_imports imports documented file_map)]
     ++ map (importHtml *** fst) import_pages
   where file_map = vnameToFileMap imports
         importHtml import_name = "doc" </> import_name <.> "html"
@@ -166,9 +166,9 @@ importLink current name =
   let file = relativise (makeRelative "/" $ "doc" </> name -<.> "html") current
   in (H.a ! A.href (fromString file) $ fromString name)
 
-indexPage :: [FilePath] -> Documented -> FileMap -> Html
-indexPage important_imports documented fm =
-  H.docTypeHtml $ addBoilerplateWithNav important_imports "doc-index.html" "Index" $
+indexPage :: [FilePath] -> Imports -> Documented -> FileMap -> Html
+indexPage important_imports imports documented fm =
+  H.docTypeHtml $ addBoilerplateWithNav important_imports imports "doc-index.html" "Index" $
   H.main $
   (H.ul ! A.id "doc_index_list" $
    mconcat $ map initialListEntry $
@@ -252,12 +252,13 @@ addBoilerplate current titleText content =
   where futhark_doc_url =
           "https://futhark.readthedocs.io/en/latest/man/futhark-doc.html"
 
-addBoilerplateWithNav :: [FilePath] -> String -> String -> Html -> Html
-addBoilerplateWithNav important_imports current titleText content =
+addBoilerplateWithNav :: [FilePath] -> Imports -> String -> String -> Html -> Html
+addBoilerplateWithNav important_imports imports current titleText content =
   addBoilerplate current titleText $
   (H.nav ! A.id "filenav" $ files) <> content
-  where files = H.ul $ mconcat $ map pp $ sort important_imports
+  where files = H.ul $ mconcat $ map pp $ sort $ filter visible important_imports
         pp name = H.li $ importLink current name
+        visible = (`elem` map fst imports)
 
 synopsisDecs :: [Dec] -> DocM Html
 synopsisDecs decs = do
