@@ -263,6 +263,41 @@ in ``lib/``.  This is painful and awkward, but it is less painful and
 awkward than what users feel when their dependencies break
 compatibility.
 
+Renaming a Package
+~~~~~~~~~~~~~~~~~~
+
+It is likely that the hosting location for a very long-lived package
+will change from time to time.  Since the hosting location is embedded
+into the package path itself, this causes some issues for
+``futhark-pkg``.
+
+In simple cases, there is no problem.  Consider a package
+``github.com/asgard/loki`` which is moved to
+``github.com/utgard/loki``.  If no GitHub-level redirect is set up,
+all users must update the path by which they import the package.  This
+is unavoidable, unfortunately.
+
+However, the old tagged versions, which contain a ``futhark.pkg`` that
+uses the old package path, will continue to work.  This is because the
+package path indicated in ``package.pkg`` merely defines the
+subdirectory of ``lib/`` where the package files are to be found,
+while the package path used by dependents in the ``require`` section
+defines where the package files are located after ``futhark-pkg
+sync``.  Thus, when we import an old version of
+``github.com/utgard/loki`` whose ``futhark.pkg`` defines the package
+as ``github.com/asgard/loki``, the package files will be retrieved
+from the ``lib/github.com/asgard/loki`` directory in the repository,
+but stored at ``lib/github.com/utgard/loki`` in the local directory.
+
+The above means that package management remains operational in simple
+cases of renaming, but it is awkward when a transitive dependency is
+renamed (or deleted).  The Futhark package ecosystem is sufficiently
+embryonic that we have not yet developed more robust solutions.  When
+such solutions are developed, they will likely involve some form of
+``replace`` directive that allows transparent local renaming of
+packages, as well as perhaps a central registry of package paths that
+does not depend on specific source code hosts.
+
 .. _version-selection:
 
 Version Selection
