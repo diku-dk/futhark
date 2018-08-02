@@ -108,6 +108,13 @@ installed via::
 
   $ brew install futhark
 
+Or you can install the unreleased development version with::
+
+  $ brew install --HEAD futhark
+
+This has to compile from source, so it takes a little while (20-30
+minutes is common).
+
 macOS ships with one OpenCL platform and various devices.  One of
 these devices is always the CPU, which is not fully functional, and is
 never picked by Futhark by default.  You can still select it manually
@@ -117,6 +124,8 @@ system, there may also be one or more GPU devices, and Futhark will
 simply pick the first one as always.  On multi-GPU MacBooks, this is
 is the low-power integrated GPU.  It should work just fine, but you
 might have better performance if you use the dedicated GPU instead.
+On a Mac with an AMD GPU, this is done by passing ``-dAMD`` to the
+generated Futhark executable.
 
 .. _`Homebrew`: https://brew.sh/
 
