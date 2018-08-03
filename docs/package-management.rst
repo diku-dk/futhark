@@ -335,7 +335,8 @@ with:
    futhark-doc lib -o docs
 
 The file ``docs/index.html`` can be opened in a web browser to browse
-the documentation.
+the documentation.  Prebuilt documentation is also available via the
+`online package list <https://futhark-lang.org/pkgs>`_.
 
 Safety
 ------
