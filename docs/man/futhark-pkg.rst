@@ -153,6 +153,9 @@ as well, it is possible for a package to depend unwittingly on one of
 the dependencies of its dependencies, without the ``futhark.pkg`` file
 reflecting this.
 
+There is no caching of zipballs and version lists between invocations,
+so the network traffic can be rather heavy.
+
 SEE ALSO
 ========
 
