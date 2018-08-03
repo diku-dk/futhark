@@ -15,6 +15,7 @@ module Futhark.Pkg.Types
   , PkgManifest(..)
   , newPkgManifest
   , pkgRevDeps
+  , pkgDir
   , addRequiredToManifest
   , removeRequiredFromManifest
   , prettyPkgManifest
@@ -190,6 +191,12 @@ pkgRevDeps = PkgRevDeps . M.fromList . mapMaybe onR .
              commented .  manifestRequire
   where onR (Right r) = Just (requiredPkg r, (requiredPkgRev r, requiredHash r))
         onR (Left _) = Nothing
+
+-- | Where in the corresponding repository archive we can expect to
+-- find the package files.
+pkgDir :: PkgManifest -> Maybe Posix.FilePath
+pkgDir = fmap (Posix.addTrailingPathSeparator . ("lib" Posix.</>) .
+               T.unpack) . commented . manifestPkgPath
 
 -- | Add new required package to the package manifest.  If the package
 -- was already present, return the old version.

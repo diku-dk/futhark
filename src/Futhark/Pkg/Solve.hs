@@ -93,8 +93,7 @@ solveDeps deps = fmap buildList $ step $ execStateT (doSolveDeps deps) emptyRoug
 
           checkHash p v pinfo h
 
-          let GetDeps g = pkgRevGetDeps pinfo
-          d <- g
+          d <- fmap pkgRevDeps . getManifest $ pkgRevGetManifest pinfo
           step $ c d
 
         checkHash _ _ _ Nothing = return ()
