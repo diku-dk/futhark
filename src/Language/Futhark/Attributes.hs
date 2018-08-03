@@ -916,7 +916,7 @@ progModuleTypes = mconcat . map onDec . progDecs
         onModExp ModImport {} = mempty
         onModExp (ModDecs ds _) = mconcat $ map onDec ds
         onModExp (ModApply me1 me2 _ _ _) = onModExp me1 <> onModExp me2
-        onModExp (ModAscript me _ _ _) = onModExp me
+        onModExp (ModAscript me se _ _) = onModExp me <> onSigExp se
         onModExp (ModLambda p r me _) =
           onModParam p <> maybe mempty (onSigExp . fst) r <> onModExp me
 
