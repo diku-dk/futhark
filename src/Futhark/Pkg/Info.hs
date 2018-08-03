@@ -6,7 +6,7 @@ module Futhark.Pkg.Info
   , lookupPkgRev
   , pkgInfo
   , PkgRevInfo (..)
-  , GetDeps (..)
+  , GetManifest (getManifest)
   , downloadZipball
 
     -- * Package registry
@@ -43,43 +43,46 @@ import Futhark.Pkg.Types
 import Futhark.Util.Log
 import Futhark.Util (maybeHead)
 
--- | Revision dependencies are stored as a monadic action, because we
--- want to fetch them on-demand.  It would be a waste to fetch
--- dependency information for every version of every package if we
--- only actually need a small subset of them.
-newtype GetDeps m = GetDeps (m PkgRevDeps)
+-- | The manifest is stored as a monadic action, because we want to
+-- fetch them on-demand.  It would be a waste to fetch it information
+-- for every version of every package if we only actually need a small
+-- subset of them.
+newtype GetManifest m = GetManifest { getManifest :: m PkgManifest }
 
-instance Show (GetDeps m) where
+instance Show (GetManifest m) where
   show _ = "#<revdeps>"
 
-instance Eq (GetDeps m) where
+instance Eq (GetManifest m) where
   _ == _ = True
 
 -- | Information about a version of a single package.  The version
 -- number is stored separately.
 data PkgRevInfo m = PkgRevInfo { pkgRevZipballUrl :: T.Text
-                               , pkgRevPkgDir :: FilePath
-                                 -- ^ The directory inside the tarball
-                                 -- containing the package source code.
+                               , pkgRevZipballDir :: FilePath
+                                 -- ^ The directory inside the zipball
+                                 -- containing the 'lib' directory, in
+                                 -- which the package files themselves
+                                 -- are stored (Based on the package
+                                 -- path).
                                , pkgRevCommit :: T.Text
                                  -- ^ The commit ID can be used for
                                  -- verification ("freezing"), by
                                  -- storing what it was at the time this
                                  -- version was last selected.
-                               , pkgRevGetDeps :: GetDeps m
+                               , pkgRevGetManifest :: GetManifest m
                                , pkgRevTime :: UTCTime
                                  -- ^ Timestamp for when the revision
                                  -- was made (rarely used).
                                }
                   deriving (Eq, Show)
 
--- | Create memoisation around a 'GetDeps' action to ensure that
+-- | Create memoisation around a 'GetManifest' action to ensure that
 -- multiple inspections of the same revisions will not result in
 -- potentially expensive network round trips.
-memoiseGetDeps :: MonadIO m => GetDeps m -> m (GetDeps m)
-memoiseGetDeps (GetDeps m) = do
+memoiseGetManifest :: MonadIO m => GetManifest m -> m (GetManifest m)
+memoiseGetManifest (GetManifest m) = do
   ref <- liftIO $ newIORef Nothing
-  return $ GetDeps $ do
+  return $ GetManifest $ do
     v <- liftIO $ readIORef ref
     case v of Just v' -> return v'
               Nothing -> do
@@ -129,7 +132,7 @@ pkgInfo :: (MonadIO m, MonadLogger m) =>
 pkgInfo path
   | ["github.com", owner, repo] <- T.splitOn "/" path =
       let (repo', vs) = majorRevOfPkg repo
-      in ghPkgInfo path owner repo' vs
+      in ghPkgInfo owner repo' vs
 pkgInfo path =
   return $ Left $ "Unable to handle package paths of the form '" <> path <> "'"
 
@@ -151,20 +154,18 @@ gitCmd opts = do
     ExitSuccess -> return out
 
 ghLookupCommit :: (MonadIO m, MonadLogger m) =>
-                  PkgPath -> T.Text -> T.Text -> T.Text -> T.Text -> T.Text -> m (PkgRevInfo m)
-ghLookupCommit path owner repo d ref hash = do
-  gd <- memoiseGetDeps $ ghRevGetDeps owner repo ref
-  let dir = Posix.addTrailingPathSeparator $
-            T.unpack repo <> "-" <> T.unpack d Posix.</>
-            "lib" Posix.</> T.unpack path
+                  T.Text -> T.Text -> T.Text -> T.Text -> T.Text -> m (PkgRevInfo m)
+ghLookupCommit owner repo d ref hash = do
+  gd <- memoiseGetManifest $ ghRevGetManifest owner repo ref
+  let dir = Posix.addTrailingPathSeparator $ T.unpack repo <> "-" <> T.unpack d
   time <- liftIO getCurrentTime -- FIXME
   return $ PkgRevInfo
     (T.pack repo_url <> "/archive/" <> ref <> ".zip") dir hash gd time
   where repo_url = "https://github.com/" <> T.unpack owner <> "/" <> T.unpack repo
 
 ghPkgInfo :: (MonadIO m, MonadLogger m) =>
-             PkgPath -> T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
-ghPkgInfo path owner repo versions = do
+             T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
+ghPkgInfo owner repo versions = do
   logMsg $ "Retrieving list of tags from " <> repo_url
   remote_lines <- T.lines . T.decodeUtf8 <$> gitCmd ["ls-remote", repo_url]
 
@@ -175,7 +176,7 @@ ghPkgInfo path owner repo versions = do
   rev_info <- M.fromList . catMaybes <$> mapM revInfo remote_lines
 
   return $ Right $ PkgInfo rev_info $ \r ->
-    ghLookupCommit path owner repo (def r) (def r) (def r)
+    ghLookupCommit owner repo (def r) (def r) (def r)
   where repo_url = "https://github.com/" <> T.unpack owner <> "/" <> T.unpack repo
 
         isHeadRef l
@@ -188,13 +189,13 @@ ghPkgInfo path owner repo versions = do
             "v" `T.isPrefixOf` t,
             Right v <- semver $ T.drop 1 t,
             _svMajor v `elem` versions = do
-              pinfo <- ghLookupCommit path owner repo (prettySemVer v) t hash
+              pinfo <- ghLookupCommit owner repo (prettySemVer v) t hash
               return $ Just (v, pinfo)
           | otherwise = return Nothing
 
-ghRevGetDeps :: (MonadIO m, MonadLogger m) =>
-                T.Text -> T.Text -> T.Text -> GetDeps m
-ghRevGetDeps owner repo tag = GetDeps $ do
+ghRevGetManifest :: (MonadIO m, MonadLogger m) =>
+                T.Text -> T.Text -> T.Text -> GetManifest m
+ghRevGetManifest owner repo tag = GetManifest $ do
   let url = "https://raw.githubusercontent.com/" <>
             owner <> "/" <> repo <> "/" <>
             tag <> "/" <> T.pack futharkPkg
@@ -212,7 +213,7 @@ ghRevGetDeps owner repo tag = GetDeps $ do
         Right s ->
           case parsePkgManifest path s of
             Left e -> fail $ msg $ parseErrorPretty e
-            Right pm -> return $ pkgRevDeps pm
+            Right pm -> return pm
     x -> fail $ msg $ "got HTTP status " ++ show x
 
 -- | A package registry is a mapping from package paths to information

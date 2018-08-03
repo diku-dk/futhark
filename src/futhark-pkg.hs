@@ -35,8 +35,9 @@ import Futhark.Util.Log
 
 installInDir :: BuildList -> FilePath -> PkgM ()
 installInDir (BuildList bl) dir = do
-  let putEntry pdir info entry
-        | not (isInPkgDir info $ Zip.eRelativePath entry)
+  let putEntry from_dir pdir entry
+        -- The archive may contain all kinds of other stuff that we don't want.
+        | not (isInPkgDir from_dir $ Zip.eRelativePath entry)
           || hasTrailingPathSeparator (Zip.eRelativePath entry) = return ()
         | otherwise = do
         -- Since we are writing to paths indicated in a zipfile we
@@ -50,18 +51,26 @@ installInDir (BuildList bl) dir = do
         when (".." `elem` Posix.splitPath (Zip.eRelativePath entry)) $
           fail $ "Zip archive for " <> pdir <> " contains suspicuous path: " <>
           Zip.eRelativePath entry
-        let f = pdir </> makeRelative (pkgRevPkgDir info) (Zip.eRelativePath entry)
+        let f = pdir </> makeRelative from_dir (Zip.eRelativePath entry)
         createDirectoryIfMissing True $ takeDirectory f
         LBS.writeFile f $ Zip.fromEntry entry
 
-      isInPkgDir info f =
-        Posix.splitPath (pkgRevPkgDir info) `isPrefixOf` Posix.splitPath f
+      isInPkgDir from_dir f =
+        Posix.splitPath from_dir `isPrefixOf` Posix.splitPath f
 
   forM_ (M.toList bl) $ \(p, v) -> do
     info <- lookupPackageRev p v
     a <- downloadZipball $ pkgRevZipballUrl info
+    m <- getManifest $ pkgRevGetManifest info
 
-    -- The directory that will contain the package.
+    -- Compute the directory in the zipball that should contain the
+    -- package files.
+    let noPkgDir = fail $ "futhark.pkg for " ++ T.unpack p ++ "-" ++
+                   T.unpack (prettySemVer v) ++ " does not define a package path."
+    from_dir <- maybe noPkgDir (return . (pkgRevZipballDir info <>)) $ pkgDir m
+
+    -- The directory in the local file system that will contain the
+    -- package files.
     let pdir = dir </> T.unpack p
     -- Remove any existing directory for this package.  This is a bit
     -- inefficient, as the likelihood that the old ``lib`` directory
@@ -71,7 +80,7 @@ installInDir (BuildList bl) dir = do
     liftIO $ removePathForcibly pdir
     liftIO $ createDirectoryIfMissing True pdir
 
-    liftIO $ mapM_ (putEntry pdir info) $ Zip.zEntries a
+    liftIO $ mapM_ (putEntry from_dir pdir) $ Zip.zEntries a
 
 libDir, libNewDir, libOldDir :: FilePath
 (libDir, libNewDir, libOldDir) = ("lib", "lib~new", "lib~old")
