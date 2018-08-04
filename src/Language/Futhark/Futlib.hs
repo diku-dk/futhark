@@ -5,7 +5,7 @@
 -- compilation of the Futhark compiler.  The advantage is that the
 -- standard library can be accessed without reading it from disk, thus
 -- saving users from include path headaches.
-module Language.Futhark.Futlib (futlib) where
+module Language.Futhark.Futlib (futlib, prelude) where
 
 import Data.FileEmbed
 import qualified Data.Text as T
@@ -19,3 +19,9 @@ futlib :: [(Posix.FilePath, T.Text)]
 futlib = map fixup futlib_bs
   where futlib_bs = $(embedDir "futlib")
         fixup (path, s) = ("/futlib" Posix.</> toPOSIX path, T.decodeUtf8 s)
+
+-- The files intended to be implicitly imported into every Futhark
+-- program.  Make sure it does not depend on anything too big to be
+-- serialised efficiently.
+prelude :: [String]
+prelude = map ("/futlib/"++) ["prelude"]

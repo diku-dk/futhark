@@ -1,11 +1,6 @@
 -- | The default prelude that is implicitly available in all Futhark
 -- files.
 
--- Note: this file is known to the compiler, and along with its
--- dependencies, it is embedded into the (compiler) binary.  Make sure
--- it does not depend on anything too big to be serialised
--- efficiently.
-
 open import "soacs"
 open import "array"
 open import "math"
