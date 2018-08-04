@@ -181,7 +181,7 @@ checkTypeExp (TEArray t d loc) = do
 checkTypeExp (TEUnique t loc) = do
   (t', st, l) <- checkTypeExp t
   case st of
-    Array{} -> return (t', st `setUniqueness` Unique, l)
+    Array{} -> return (TEUnique t' loc, st `setUniqueness` Unique, l)
     _       -> throwError $ TypeError loc $
                "Attempt to declare unique non-array " ++ pretty t ++ "."
 checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
