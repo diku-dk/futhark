@@ -97,9 +97,9 @@ handleFile steps include file_contents file_name = do
   -- readImport.
   imports <- gets alreadyImported
   src <- gets nameSource
-  prelude <- ask
+  roots <- ask
 
-  case E.checkProg imports src include $ prependPrelude prelude prog of
+  case E.checkProg imports src include $ prependRoots roots prog of
     Left err ->
       externalError $ T.pack $ show err
     Right (m, ws, src') ->
@@ -135,7 +135,8 @@ readImportFile include = do
 
          not_found =
            "Error at " ++ E.locStr (srclocOf include) ++
-           ": could not find import '" ++ includeToString include ++ "'."
+           ": could not find import '" ++ includeToString include ++ "'." ++
+           futlib_str ++ "\n" ++ show (map fst futlib)
 
 -- | Read Futhark files from some basis, and printing log messages if
 -- the first parameter is True.
@@ -146,8 +147,8 @@ readLibraryWithBasis :: (MonadError CompilerError m, MonadIO m) =>
                            VNameSource)
 readLibraryWithBasis builtin fps = do
   (_, imps, src) <- runCompilerM builtin $
-    readImport [] $ mkInitialImport "/futlib/prelude"
-  let basis = Basis imps src ["/futlib/prelude"]
+    mapM (readImport [] . mkInitialImport) prelude
+  let basis = Basis imps src prelude
   readLibrary' basis fps
 
 -- | Read and type-check a Futhark library (multiple files, relative
@@ -188,8 +189,8 @@ runCompilerM (Basis imports src roots) m = do
           reverse $ alreadyImported s',
           nameSource s')
 
-prependPrelude :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
-prependPrelude prelude (E.Prog doc ds) =
-  E.Prog doc $ map mkImport prelude ++ ds
+prependRoots :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
+prependRoots roots (E.Prog doc ds) =
+  E.Prog doc $ map mkImport roots ++ ds
   where mkImport fp =
           E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo noLoc) [] E.NoInfo noLoc) noLoc
