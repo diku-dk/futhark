@@ -36,7 +36,7 @@ install:
  - stack --no-terminal test --fast --only-dependencies -j 3
 
 script:
- - stack --no-terminal test -j 1 --fast
+ - travis_wait stack --no-terminal test -j 1 --fast
  - stack install
 
  # Run integration test suite.
