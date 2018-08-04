@@ -28,7 +28,7 @@ readBasis fpath entry = do
   all_files <- runIO $ futFiles $ Posix.takeDirectory fpath
   mapM_ qAddDependentFile all_files
 
-  res <- runIO $ runExceptT $ readLibrary emptyBasis files
+  res <- runIO $ runExceptT $ readLibraryWithBasis emptyBasis files
   case res of
     Right (_, imps, src) ->
       return $ Basis imps src [entry]

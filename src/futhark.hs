@@ -17,7 +17,6 @@ import Prelude hiding (id)
 import Futhark.Pass
 import Futhark.Actions
 import Futhark.Compiler
-import Language.Futhark.Futlib.Prelude
 import Language.Futhark.Parser (parseFuthark)
 import Futhark.Util.Options
 import Futhark.Pipeline
@@ -339,7 +338,7 @@ main = mainWithOptions newConfig commandLineOptions compile
           case futharkPipeline config of
             TypeCheck -> do
               -- No pipeline; just read the program and type check
-              (warnings, _, _) <- readProgram preludeBasis file
+              (warnings, _, _) <- readProgram file
               liftIO $ hPutStr stderr $ show warnings
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file
@@ -347,22 +346,22 @@ main = mainWithOptions newConfig commandLineOptions compile
                 Left err  -> fail $ show err
                 Right prog-> putStrLn $ pretty prog
             Defunctorise -> do
-              (_, imports, src) <- readProgram preludeBasis file
+              (_, imports, src) <- readProgram file
               liftIO $ mapM_ (putStrLn . pretty) $
                 evalState (Defunctorise.transformProg imports) src
             Monomorphise -> do
-              (_, imports, src) <- readProgram preludeBasis file
+              (_, imports, src) <- readProgram file
               liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
             Defunctionalise -> do
-              (_, imports, src) <- readProgram preludeBasis file
+              (_, imports, src) <- readProgram file
               liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
                 >>= Defunctionalise.transformProg
             Pipeline{} -> do
-              prog <- runPipelineOnProgram (futharkConfig config) preludeBasis id file
+              prog <- runPipelineOnProgram (futharkConfig config) id file
               runPolyPasses config prog
 
 runPolyPasses :: Config -> SOACS.Prog -> FutharkM ()

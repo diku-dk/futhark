@@ -24,7 +24,6 @@ import Futhark.Pipeline (runFutharkM, FutharkM, Verbosity(..))
 import Language.Futhark.Syntax (progDoc, DocComment(..))
 import Futhark.Util.Options
 import Futhark.Util (directoryContents, trim)
-import Language.Futhark.Futlib.Prelude
 
 main :: IO ()
 main = mainWithOptions initialDocConfig commandLineOptions f
@@ -49,7 +48,7 @@ main = mainWithOptions initialDocConfig commandLineOptions f
               when (docVerbose config) $ liftIO $ do
                 mapM_ (hPutStrLn stderr . ("Found source file "<>)) files
                 hPutStrLn stderr "Reading files..."
-              (_w, imports, _vns) <- readLibrary preludeBasis files
+              (_w, imports, _vns) <- readLibrary files
               liftIO $ printDecs config outdir files $ nubBy sameImport imports
 
         sameImport (x, _) (y, _) = x == y
