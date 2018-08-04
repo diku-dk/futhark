@@ -35,7 +35,6 @@ import Futhark.Compiler
 import Futhark.Pipeline
 import Futhark.Internalise
 import Futhark.Util.Options
-import Language.Futhark.Futlib.Prelude
 
 banner :: String
 banner = unlines [
@@ -66,7 +65,7 @@ repl = do
 
 interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config =
-  runCompilerOnProgram newFutharkConfig preludeBasis standardPipeline $
+  runCompilerOnProgram newFutharkConfig standardPipeline $
   interpretAction' $ interpreterEntryPoint config
 
 newtype InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }
@@ -91,11 +90,11 @@ data InterpreterState =
 
 newInterpreterState :: IO InterpreterState
 newInterpreterState = do
-  res <- runExceptT $ readLibrary preludeBasis []
+  res <- runExceptT $ readLibrary []
   case res of
     Right (_, imports, src) ->
       return InterpreterState { interpImports = imports
-                              , interpDecs = map mkOpen $ basisRoots preludeBasis
+                              , interpDecs = [mkOpen "/futlib/prelude"]
                               , interpNameSource = src
                               , interpCount = 0
                               }
@@ -178,7 +177,7 @@ onDec d = do
           src <- gets interpNameSource
           return Basis { basisImports = imports
                        , basisNameSource = src
-                       , basisRoots = basisRoots preludeBasis }
+                       , basisRoots = ["/futlib/prelude"] }
 
         reportDec (ValDec vb) =
           Just $ "val " <> baseString (valBindName vb) <>
@@ -254,15 +253,16 @@ Quit futharki.
 loadCommand :: Command
 loadCommand file = do
   liftIO $ T.putStrLn $ "Reading " <> file
-  res <- liftIO $ runExceptT (readProgram preludeBasis (T.unpack file))
+  res <- liftIO $ runExceptT (readProgram (T.unpack file))
          `Haskeline.catch` \(err::IOException) ->
          return (Left (ExternalError (T.pack $ show err)))
   case res of
     Left err -> liftIO $ dumpError newFutharkConfig err
     Right (_, imports, src) ->
       modify $ \env -> env { interpImports = imports
-                           , interpDecs = map mkOpen $ basisRoots preludeBasis ++
-                                          [dropExtension $ T.unpack file]
+                           , interpDecs = map mkOpen
+                                          ["/futlib/prelude",
+                                           dropExtension $ T.unpack file]
                            , interpNameSource = src
                            }
 
