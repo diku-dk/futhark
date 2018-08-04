@@ -930,7 +930,7 @@ progModuleTypes = mconcat . map onDec . progDecs
 
 -- | Extract a leading @((name, namespace, file), remainder)@ from a
 -- documentation comment string.  These are formatted as
--- \`name\`\@namespace.  Let us hope that this pattern does not occur
+-- \`name\`\@namespace[\@file].  Let us hope that this pattern does not occur
 -- anywhere else.
 identifierReference :: String -> Maybe ((String, String, Maybe FilePath), String)
 identifierReference ('`' : s)
