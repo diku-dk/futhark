@@ -2,12 +2,14 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE TupleSections #-}
+-- | Low-level compilation parts.  Look at "Futhar.Compiler" for a
+-- more high-level API.
 module Futhark.Compiler.Program
-       ( readProgram
-       , readLibrary
+       ( readLibraryWithBasis
        , readImports
        , Imports
        , FileModule(..)
+       , E.Warnings
 
        , Basis(..)
        , emptyBasis
@@ -135,23 +137,27 @@ readImportFile include = do
            "Error at " ++ E.locStr (srclocOf include) ++
            ": could not find import '" ++ includeToString include ++ "'."
 
--- | Read and type-check a Futhark program, including all imports.
-readProgram :: (MonadError CompilerError m, MonadIO m) =>
-               Basis -> FilePath
-            -> m (E.Warnings,
-                  Imports,
-                  VNameSource)
-readProgram basis fp = readLibrary basis [fp]
+-- | Read Futhark files from some basis, and printing log messages if
+-- the first parameter is True.
+readLibraryWithBasis :: (MonadError CompilerError m, MonadIO m) =>
+                        Basis -> [FilePath]
+                     -> m (E.Warnings,
+                           Imports,
+                           VNameSource)
+readLibraryWithBasis builtin fps = do
+  (_, imps, src) <- runCompilerM builtin $
+    readImport [] $ mkInitialImport "/futlib/prelude"
+  let basis = Basis imps src ["/futlib/prelude"]
+  readLibrary' basis fps
 
 -- | Read and type-check a Futhark library (multiple files, relative
 -- to the same search path), including all imports.
-readLibrary :: (MonadError CompilerError m, MonadIO m) =>
-               Basis -> [FilePath]
-            -> m (E.Warnings,
-                  Imports,
-                  VNameSource)
-readLibrary basis fps =
-  runCompilerM basis (mapM onFile fps)
+readLibrary' :: (MonadError CompilerError m, MonadIO m) =>
+                Basis -> [FilePath]
+             -> m (E.Warnings,
+                   Imports,
+                   VNameSource)
+readLibrary' basis fps = runCompilerM basis $ mapM onFile fps
   where onFile fp =  do
           r <- liftIO $ readFileSafely fp
           case r of
