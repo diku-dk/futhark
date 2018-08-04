@@ -18,7 +18,6 @@ import Futhark.Compiler
 import Futhark.Representation.AST (Prog)
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Util.Options
-import Language.Futhark.Futlib.Prelude
 
 -- | Run a parameterised Futhark compiler, where @cfg@ is a user-given
 -- configuration type.  Call this from @main@.
@@ -38,7 +37,7 @@ compilerMain cfg cfg_opts name desc pipeline doIt =
         inspectNonOptions _      _      = Nothing
 
         compile config filepath =
-          runCompilerOnProgram (futharkConfig config) preludeBasis
+          runCompilerOnProgram (futharkConfig config)
           pipeline (action config filepath) filepath
 
         action config filepath =
