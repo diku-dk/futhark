@@ -7,7 +7,6 @@ import Control.Applicative
 import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck
-import Test.QuickCheck
 
 import Prelude
 
