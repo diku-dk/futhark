@@ -8,9 +8,11 @@ module Futhark.Analysis.UsageTable
   , lookup
   , keys
   , used
+  , expand
   , isConsumed
   , isInResult
   , isEqualTo
+  , isUsedDirectly
   , allConsumed
   , usages
   , usage
@@ -24,6 +26,7 @@ module Futhark.Analysis.UsageTable
 
 import Control.Arrow (first)
 import qualified Data.Foldable as Foldable
+import Data.List (foldl')
 import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -70,6 +73,12 @@ lookupPred f name = maybe False f . lookup name
 used :: VName -> UsageTable -> Bool
 used = lookupPred $ const True
 
+-- | Expand the usage table based on aliasing information.
+expand :: (VName -> Names) -> UsageTable -> UsageTable
+expand look (UsageTable m) = UsageTable $ foldl' grow m $ M.toList m
+  where grow m' (k, v) = foldl' (grow'' $ Present `S.delete` v) m' $ look k
+        grow'' v m'' k = M.insertWith (<>) k v m''
+
 keys :: UsageTable -> [VName]
 keys (UsageTable table) = M.keys table
 
@@ -85,12 +94,17 @@ isInResult = is InResult
 isEqualTo :: SubExp -> VName -> UsageTable -> Bool
 isEqualTo what = is $ EqualTo what
 
+-- | Has the given name been used directly (i.e. could we rename it or
+-- remove it without anyone noticing?)
+isUsedDirectly :: VName -> UsageTable -> Bool
+isUsedDirectly = is Present
+
 allConsumed :: UsageTable -> Names
 allConsumed (UsageTable m) =
   S.fromList . map fst . filter (S.member Consumed . snd) $ M.toList m
 
 usages :: Names -> UsageTable
-usages names = UsageTable $ M.fromList [ (name, S.empty) | name <- S.toList names ]
+usages names = UsageTable $ M.fromList [ (name, S.singleton Present) | name <- S.toList names ]
 
 usage :: VName -> Usages -> UsageTable
 usage name uses = UsageTable $ M.singleton name uses
@@ -110,6 +124,7 @@ type Usages = S.Set Usage
 data Usage = Consumed
            | InResult
            | EqualTo SubExp
+           | Present
              deriving (Eq, Ord, Show)
 
 leftScope :: UsageTable -> UsageTable

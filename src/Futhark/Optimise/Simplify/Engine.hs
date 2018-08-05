@@ -354,7 +354,7 @@ hoistStms rules block vtable uses orig_stms = do
             where vtables = scanl (flip ST.insertStm) vtable' $ stmsToList stms
 
         hoistable (uses',stms) (stm, vtable')
-          | not $ uses' `UT.contains` provides stm = -- Dead binding.
+          | not $ any (`UT.isUsedDirectly` uses') $ provides stm = -- Dead statement.
             return (uses', stms)
           | otherwise = do
             res <- localVtable (const vtable') $
@@ -362,10 +362,10 @@ hoistStms rules block vtable uses orig_stms = do
             case res of
               Nothing -- Nothing to optimise - see if hoistable.
                 | block uses' stm ->
-                  return (expandUsage uses' stm `UT.without` provides stm,
+                  return (expandUsage vtable' uses' stm `UT.without` provides stm,
                           Left stm : stms)
                 | otherwise ->
-                  return (expandUsage uses' stm, Right stm : stms)
+                  return (expandUsage vtable' uses' stm, Right stm : stms)
               Just optimstms -> do
                 changed
                 (uses'',stms') <- simplifyStmsBottomUp' vtable' uses' optimstms
@@ -390,8 +390,10 @@ requires :: Attributes lore => Stm lore -> Names
 requires = freeInStm
 
 expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
-               UT.UsageTable -> Stm lore -> UT.UsageTable
-expandUsage utable bnd = utable <> usageInStm bnd <> usageThroughAliases
+               ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> UT.UsageTable
+expandUsage vtable utable bnd =
+  UT.expand (`ST.lookupAliases` vtable) (usageInStm bnd <> usageThroughAliases) <>
+  utable
   where pat = stmPattern bnd
         usageThroughAliases =
           mconcat $ mapMaybe usageThroughBindeeAliases $
@@ -569,8 +571,9 @@ simplifyResult ds res = do
   (ctx_res', _ctx_res_cs) <- collectCerts $ mapM simplify ctx_res
   val_res' <- mapM simplify' val_res
 
-  let usages = consumeResult $ zip ds val_res'
-  return (ctx_res' <> val_res', usages)
+  let consumption = consumeResult $ zip ds val_res'
+      res' = ctx_res' <> val_res'
+  return (res', UT.usages (freeIn res') <> consumption)
 
   where simplify' (Var name) = do
           bnd <- ST.lookupSubExp name <$> askVtable
@@ -847,7 +850,7 @@ consumeResult :: [(Diet, SubExp)] -> UT.UsageTable
 consumeResult = mconcat . map inspect
   where inspect (Consume, se) =
           mconcat $ map UT.consumedUsage $ S.toList $ subExpAliases se
-        inspect (Observe, se) = UT.usages $ freeIn se
+        inspect _ = mempty
 
 instance Simplifiable Certificates where
   simplify (Certificates ocs) = Certificates . nub . concat <$> mapM check ocs

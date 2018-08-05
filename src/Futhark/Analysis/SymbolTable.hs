@@ -30,6 +30,7 @@ module Futhark.Analysis.SymbolTable
   , lookupScalExp
   , lookupValue
   , lookupVar
+  , lookupAliases
   , index
   , index'
   , IndexOp(..)
@@ -75,7 +76,7 @@ import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Representation.AST.Attributes.Ranges
   (Range, ScalExpRange, Ranged)
 import qualified Futhark.Representation.AST.Attributes.Ranges as Ranges
-
+import qualified Futhark.Representation.AST.Attributes.Aliases as Aliases
 
 data SymbolTable lore = SymbolTable {
     loopDepth :: Int
@@ -174,6 +175,7 @@ data LoopVarEntry lore =
 data LetBoundEntry lore =
   LetBoundEntry { letBoundRange    :: ScalExpRange
                 , letBoundAttr     :: LetAttr lore
+                , letBoundAliases  :: Names
                 , letBoundStm      :: Stm lore
                 , letBoundStmDepth :: Int
                 , letBoundScalExp  :: Maybe ScalExp
@@ -184,6 +186,7 @@ data LetBoundEntry lore =
 data FParamEntry lore =
   FParamEntry { fparamRange    :: ScalExpRange
               , fparamAttr     :: FParamAttr lore
+              , fparamAliases  :: Names
               , fparamStmDepth :: Int
               }
 
@@ -330,6 +333,12 @@ lookupVar name vtable = case lookupSubExp name vtable of
                           Just (Var v, cs) -> Just (v, cs)
                           _                -> Nothing
 
+lookupAliases :: VName -> SymbolTable lore -> Names
+lookupAliases name vtable = case M.lookup name $ bindings vtable of
+                              Just (LetBound e) -> letBoundAliases e
+                              Just (FParam e)   -> fparamAliases e
+                              _                 -> mempty
+
 index :: Attributes lore => VName -> [SubExp] -> SymbolTable lore
       -> Maybe (PrimExp VName, Certificates)
 index name is table = do
@@ -432,12 +441,14 @@ defBndEntry :: (Attributes lore, IndexOp (Op lore)) =>
                SymbolTable lore
             -> PatElem lore
             -> Range
+            -> Names
             -> Stm lore
             -> LetBoundEntry lore
-defBndEntry vtable patElem range bnd =
+defBndEntry vtable patElem range als bnd =
   LetBoundEntry {
       letBoundRange = simplifyRange $ scalExpRange range
     , letBoundAttr = patElemAttr patElem
+    , letBoundAliases = als
     , letBoundStm = bnd
     , letBoundScalExp =
       runReader (toScalExp (`lookupScalExp` vtable) (stmExp bnd)) types
@@ -481,13 +492,13 @@ defBndEntry vtable patElem range bnd =
         simplifyBound _ =
           Nothing
 
-bindingEntries :: (Ranged lore, IndexOp (Op lore)) =>
+bindingEntries :: (Ranged lore, Aliases.Aliased lore, IndexOp (Op lore)) =>
                   Stm lore -> SymbolTable lore
                -> [LetBoundEntry lore]
-bindingEntries bnd@(Let pat _ _) vtable =
-  [ defBndEntry vtable pat_elem (Ranges.rangeOf pat_elem) bnd
-  | pat_elem <- patternElements pat
-  ]
+bindingEntries bnd@(Let pat _ _) vtable = do
+  pat_elem <- patternElements pat
+  return $ defBndEntry vtable pat_elem
+    (Ranges.rangeOf pat_elem) (Aliases.aliasesOf pat_elem) bnd
 
 insertEntry :: Attributes lore =>
                VName -> Entry lore -> SymbolTable lore
@@ -506,13 +517,31 @@ insertEntries entries vtable =
           in M.insert name entry' bnds
         dim_vars = subExpVars $ concatMap (arrayDims . entryType . snd) entries
 
-insertStm :: (IndexOp (Op lore), Ranged lore) =>
+insertStm :: (IndexOp (Op lore), Ranged lore, Aliases.Aliased lore) =>
              Stm lore
           -> SymbolTable lore
           -> SymbolTable lore
-insertStm bnd vtable =
-  insertEntries (zip names $ map LetBound $ bindingEntries bnd vtable) vtable
-  where names = patternNames $ stmPattern bnd
+insertStm stm vtable =
+  foldl' addRevAliases
+  (insertEntries (zip names $ map LetBound $ bindingEntries stm vtable) vtable) $
+  patternElements $ stmPattern stm
+  where names = patternNames $ stmPattern stm
+        adjustSeveral f = flip $ foldl' $ flip $ M.adjust f
+        addRevAliases vtable' pe =
+          vtable' { bindings = adjustSeveral update inedges $ bindings vtable' }
+          where inedges = expandAliases (Aliases.aliasesOf pe) vtable'
+                update (LetBound entry) =
+                  LetBound entry
+                  { letBoundAliases = patElemName pe `S.insert` letBoundAliases entry }
+                update (FParam entry) =
+                  FParam entry
+                  { fparamAliases = patElemName pe `S.insert` fparamAliases entry }
+                update e = e
+
+expandAliases :: Names -> SymbolTable lore -> Names
+expandAliases names vtable = names `S.union` aliasesOfAliases
+  where aliasesOfAliases =
+          mconcat . map (`lookupAliases` vtable) . S.toList $ names
 
 insertFParam :: Attributes lore =>
                 AST.FParam lore
@@ -522,6 +551,7 @@ insertFParam fparam = insertEntry name entry
   where name = AST.paramName fparam
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
                                    , fparamAttr = AST.paramAttr fparam
+                                   , fparamAliases = mempty
                                    , fparamStmDepth = 0
                                    }
 
