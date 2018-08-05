@@ -409,7 +409,7 @@ lookupAliases name = do
   info <- lookupVar name
   return $ if primType $ typeOf info
            then mempty
-           else aliases info
+           else S.insert name $ aliases info
 
 aliases :: NameInfo (Aliases lore) -> Names
 aliases (LetInfo (als, _)) = unNames als
@@ -706,13 +706,13 @@ checkBasicOp (Update src idxes se) = do
   when (arrayRank src_t /= length idxes) $
     bad $ SlicingError (arrayRank src_t) (length idxes)
 
-  src_aliases <- lookupAliases src
-  when (src `S.member` src_aliases) $
-    bad $ TypeError "The source of an Update must not alias the destination."
+  se_aliases <- subExpAliasesM se
+  when (src `S.member` se_aliases) $
+    bad $ TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes
   require [Prim (elemType src_t) `arrayOfShape` Shape (sliceDims idxes)] se
-  consume src_aliases
+  consume =<< lookupAliases src
 
 checkBasicOp (Iota e x s et) = do
   require [Prim int32] e
