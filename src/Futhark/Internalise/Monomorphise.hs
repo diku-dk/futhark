@@ -489,7 +489,7 @@ typeSubsts :: TypeBase () () -> TypeBase () ()
 typeSubsts (Record fields1) (Record fields2) =
   mconcat $ zipWith typeSubsts
   (map snd $ sortFields fields1) (map snd $ sortFields fields2)
-typeSubsts (TypeVar _ v _) t =
+typeSubsts (TypeVar _ _ v _) t =
   M.singleton (typeLeaf v) t
 typeSubsts Prim{} Prim{} = mempty
 typeSubsts (Arrow _ _ t1a t1b) (Arrow _ _ t2a t2b) =

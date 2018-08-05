@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-doc` now ignores files whose doc comment is the word
     "ignore".
 
+  * `copy` now works on values of any type, not just arrays.
+
 ### Removed
 
 ### Changed

@@ -66,9 +66,9 @@ let iota (n: i32): *[n]i32 =
 let replicate 't (n: i32) (x: t): *[n]t =
   i32.replicate n x
 
--- | Copy an array.
-let copy [n] 't (a: [n]t): *[n]t =
-  map (\x -> x) a
+-- | Copy a value.  The result will not alias anything.
+let copy 't (a: t): *t =
+  ([a])[0]
 
 -- | Combines the outer two dimensions of an array.
 let flatten [n][m] 't (xs: [n][m]t): []t =

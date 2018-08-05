@@ -51,10 +51,11 @@ unifyTypesU :: (Monoid als, Eq als, ArrayDim dim) =>
 unifyTypesU _ (Prim t1) (Prim t2)
   | t1 == t2  = Just $ Prim t1
   | otherwise = Nothing
-unifyTypesU uf (TypeVar als1 t1 targs1) (TypeVar als2 t2 targs2)
+unifyTypesU uf (TypeVar als1 u1 t1 targs1) (TypeVar als2 u2 t2 targs2)
   | t1 == t2 = do
+      u3 <- uf u1 u2
       targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
-      Just $ TypeVar (als1 <> als2) t1 targs3
+      Just $ TypeVar (als1 <> als2) u3 t1 targs3
   | otherwise = Nothing
 unifyTypesU uf (Array et1 shape1 u1) (Array et2 shape2 u2) =
   Array <$> unifyArrayElemTypes uf et1 et2 <*>
@@ -180,10 +181,14 @@ checkTypeExp (TEArray t d loc) = do
           NamedDim <$> checkNamedDim loc v
 checkTypeExp (TEUnique t loc) = do
   (t', st, l) <- checkTypeExp t
-  case st of
-    Array{} -> return (TEUnique t' loc, st `setUniqueness` Unique, l)
-    _       -> throwError $ TypeError loc $
-               "Attempt to declare unique non-array " ++ pretty t ++ "."
+  unless (mayContainArray st) $
+    warn loc $ "Declaring `" <> pretty st <> "` as unique has no effect."
+  return (TEUnique t' loc, st `setUniqueness` Unique, l)
+  where mayContainArray Prim{} = False
+        mayContainArray Array{} = True
+        mayContainArray (Record fs) = any mayContainArray fs
+        mayContainArray TypeVar{} = True
+        mayContainArray Arrow{} = False
 checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', st1, _) <- checkTypeExp t1
   bindSpaced [(Term, v)] $ do
@@ -327,11 +332,11 @@ substituteTypes substs ot = case ot of
   Array at shape u ->
     fromMaybe nope $ arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
   Prim t -> Prim t
-  TypeVar () v targs
+  TypeVar () u v targs
     | Just (TypeSub (TypeAbbr _ ps t)) <-
         M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
         applyType ps t $ map substituteInTypeArg targs
-    | otherwise -> TypeVar () v $ map substituteInTypeArg targs
+    | otherwise -> TypeVar () u v $ map substituteInTypeArg targs
   Record ts ->
     Record $ fmap (substituteTypes substs) ts
   Arrow als v t1 t2 ->
@@ -345,7 +350,7 @@ substituteTypes substs ot = case ot of
               M.lookup (qualLeaf (qualNameFromTypeName v)) substs =
               applyType ps t (map substituteInTypeArg targs)
           | otherwise =
-              TypeVar () v (map substituteInTypeArg targs)
+              TypeVar () Nonunique v (map substituteInTypeArg targs)
         substituteTypesInArrayElem (ArrayRecordElem ts) =
           Record ts'
           where ts' = fmap (substituteTypes substs .
@@ -396,7 +401,7 @@ instantiatePolymorphic tnames loc orig_substs x y =
 
     instantiate :: TypeBase () () -> TypeBase () ()
                 -> InstantiateM ()
-    instantiate (TypeVar () (TypeName [] tn) []) orig_arg_t
+    instantiate (TypeVar () _ (TypeName [] tn) []) orig_arg_t
       | tn `elem` tnames = do
           substs <- get
           case M.lookup tn substs of
@@ -408,8 +413,8 @@ instantiatePolymorphic tnames loc orig_substs x y =
             _ -> modify $ M.insert tn (arg_t, loc)
             -- Ignore uniqueness when dealing with type variables.
             where arg_t = orig_arg_t `setUniqueness` Nonunique
-    instantiate (TypeVar () (TypeName _ tn) targs)
-                (TypeVar () (TypeName _ arg_tn) arg_targs)
+    instantiate (TypeVar () _ (TypeName _ tn) targs)
+                (TypeVar () _ (TypeName _ arg_tn) arg_targs)
       | tn == arg_tn, length targs == length arg_targs =
           zipWithM_ instantiateTypeArg targs arg_targs
     instantiate (Record fs) (Record arg_fs)
@@ -434,7 +439,7 @@ instantiatePolymorphic tnames loc orig_substs x y =
           mapM_ (uncurry instantiateRecordArrayElemType) $
           M.intersectionWith (,) fs arg_fs
     instantiateArrayElemType (ArrayPolyElem tn [] ()) arg_t =
-      instantiate (TypeVar () tn []) arg_t
+      instantiate (TypeVar () Nonunique tn []) arg_t
     instantiateArrayElemType _ _ =
       lift $ Left Nothing
 
@@ -478,9 +483,10 @@ substTypesAny lookupSubst ot = case ot of
                       uncurry arrayOfWithAliases (subsArrayElem et) shape u
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
-  TypeVar _ v []
-    | Just t <- lookupSubst $ qualLeaf (qualNameFromTypeName v) -> t
-  TypeVar als v targs -> TypeVar als v $ map subsTypeArg targs
+  TypeVar _ u v []
+    | Just t <- lookupSubst $ qualLeaf (qualNameFromTypeName v) ->
+        t `setUniqueness` u
+  TypeVar als u v targs -> TypeVar als u v $ map subsTypeArg targs
   Record ts ->  Record $ fmap (substTypesAny lookupSubst) ts
   Arrow als v t1 t2 ->
     Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
@@ -491,7 +497,7 @@ substTypesAny lookupSubst ot = case ot of
         subsArrayElem (ArrayPolyElem v [] as)
           | Just t <-  lookupSubst $ qualLeaf (qualNameFromTypeName v) = (t, as)
         subsArrayElem (ArrayPolyElem v targs as) =
-          (TypeVar as v (map subsTypeArg targs), as)
+          (TypeVar as Nonunique v (map subsTypeArg targs), as)
         subsArrayElem (ArrayRecordElem ts) =
           let ts' = fmap recordArrayElemToType ts
           in (Record $ fmap (substTypesAny lookupSubst . fst) ts', foldMap snd ts')

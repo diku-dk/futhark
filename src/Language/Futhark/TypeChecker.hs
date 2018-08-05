@@ -130,7 +130,7 @@ bindingTypeParams tparams = localEnv env
                      M.singleton v $ BoundV [] (Prim (Signed Int32)) }
         typeParamEnv (TypeParamType l v _) =
           mempty { envTypeTable =
-                     M.singleton v $ TypeAbbr l [] $ TypeVar () (typeName v) [] }
+                     M.singleton v $ TypeAbbr l [] $ TypeVar () Nonunique (typeName v) [] }
 
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName])
 
@@ -178,7 +178,7 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
                    M.singleton (Type, name) $ qualName name'
                , envTypeTable =
                    M.singleton name' $ TypeAbbr l ps' $
-                   TypeVar () (typeName name') $ map typeParamToArg ps'
+                   TypeVar () Nonunique (typeName name') $ map typeParamToArg ps'
                }
     (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     return (M.insert (qualName name') l abstypes,
@@ -606,9 +606,11 @@ matchMTys = matchMTys' mempty
               matchTypeParam (TypeParamDim x _) (TypeParamDim y _) =
                 pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
               matchTypeParam (TypeParamType Unlifted x _) (TypeParamType Unlifted y _) =
-                pure $ M.singleton x $ TypeSub $ TypeAbbr Unlifted [] $ TypeVar () (typeName y) []
+                pure $ M.singleton x $ TypeSub $ TypeAbbr Unlifted [] $
+                TypeVar () Nonunique (typeName y) []
               matchTypeParam (TypeParamType _ x _) (TypeParamType Lifted y _) =
-                pure $ M.singleton x $ TypeSub $ TypeAbbr Lifted [] $ TypeVar () (typeName y) []
+                pure $ M.singleton x $ TypeSub $ TypeAbbr Lifted [] $
+                TypeVar () Nonunique (typeName y) []
               matchTypeParam _ _ =
                 nomatch
 
@@ -696,7 +698,7 @@ matchMTys = matchMTys' mempty
     ppTypeAbbr abs name (ps, t) =
       "type " ++ unwords (pretty name : map pretty ps) ++ t'
       where t' = case t of
-                   TypeVar () tn args
+                   TypeVar () _ tn args
                      | typeLeaf tn `elem` abs,
                        map typeParamToArg ps == args -> ""
                    _ -> " = " ++ pretty t
@@ -723,7 +725,7 @@ typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
   TypeArgDim (NamedDim $ qualName v) ploc
 typeParamToArg (TypeParamType _ v ploc) =
-  TypeArgType (TypeVar () (typeName v) []) ploc
+  TypeArgType (TypeVar () Nonunique (typeName v) []) ploc
 
 substituteTypesInMod :: TypeSubs -> Mod -> Mod
 substituteTypesInMod substs (ModEnv e) =
@@ -819,8 +821,8 @@ newNamesForMTy orig_mty = do
           TypeParamType l (substitute p) loc
 
         substituteInType :: StructType -> StructType
-        substituteInType (TypeVar () (TypeName qs v) targs) =
-          TypeVar () (TypeName (map substitute qs) $ substitute v) $ map substituteInTypeArg targs
+        substituteInType (TypeVar () u (TypeName qs v) targs) =
+          TypeVar () u (TypeName (map substitute qs) $ substitute v) $ map substituteInTypeArg targs
         substituteInType (Prim t) =
           Prim t
         substituteInType (Record ts) =
@@ -873,7 +875,7 @@ envTypeAbbrs env =
 refineEnv :: SrcLoc -> TySet -> Env -> QualName Name -> [TypeParam] -> StructType
           -> TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr l cur_ps (TypeVar () (TypeName qs v) _)) <-
+  | Just (tname', TypeAbbr l cur_ps (TypeVar () _ (TypeName qs v) _)) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
       if paramsMatch cur_ps ps then

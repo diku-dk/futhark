@@ -1,7 +1,7 @@
--- No unique non-arrays
+-- Warn on unique non-arrays
 --
 -- ==
--- error: .*non-array.*
+-- warning: has no effect*
 
 type t = i32
 
