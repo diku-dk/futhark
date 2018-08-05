@@ -26,6 +26,7 @@ import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import qualified Text.JSON as JSON
 import Text.Printf
+import Text.Regex.TDFA
 
 import Futhark.Test
 import Futhark.Util.Options
@@ -38,11 +39,12 @@ data BenchOptions = BenchOptions
                    , optTimeout :: Int
                    , optSkipCompilation :: Bool
                    , optExcludeCase :: [String]
+                   , optIgnoreFiles :: [Regex]
                    }
 
 initialBenchOptions :: BenchOptions
 initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing (-1) False
-                      ["nobench", "disable"]
+                      ["nobench", "disable"] []
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -77,7 +79,7 @@ runBenchmarks opts paths = do
   -- Otherwise, CI tools and the like may believe we are hung and kill
   -- us.
   hSetBuffering stdout LineBuffering
-  benchmarks <- testSpecsFromPaths paths
+  benchmarks <- filter (not . ignored . fst) <$> testSpecsFromPaths paths
   (skipped_benchmarks, compiled_benchmarks) <-
     partitionEithers <$> mapM (compileBenchmark opts) benchmarks
 
@@ -88,6 +90,8 @@ runBenchmarks opts paths = do
     Nothing -> return ()
     Just file -> writeFile file $ JSON.encode $ resultsToJSON results
   when (anyFailed results) exitFailure
+
+  where ignored f = any (`match` f) $ optIgnoreFiles opts
 
 anyFailed :: [BenchResult] -> Bool
 anyFailed = any failedBenchResult
@@ -323,6 +327,11 @@ commandLineOptions = [
                 config { optExcludeCase = s : optExcludeCase config })
       "TAG")
     "Do not run test cases with this tag."
+  , Option [] ["ignore-files"]
+    (ReqArg (\s -> Right $ \config ->
+                config { optIgnoreFiles = makeRegex s : optIgnoreFiles config })
+      "REGEX")
+    "Ignore files matching this regular expression."
   ]
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000
