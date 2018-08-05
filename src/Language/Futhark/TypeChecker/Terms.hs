@@ -425,7 +425,7 @@ instantiateTypeParam loc tparam = do
   i <- incCounter
   v <- newID $ nameFromString $ baseString (typeParamName tparam) ++ show i
   modifyConstraints $ M.insert v $ NoConstraint (Just l) loc
-  return (v, TypeVar mempty (typeName v) [])
+  return (v, TypeVar mempty Nonunique (typeName v) [])
   where l = case tparam of TypeParamType x _ _ -> x
                            _                   -> Lifted
 
@@ -434,7 +434,7 @@ newTypeVar loc desc = do
   i <- incCounter
   v <- newID $ nameFromString $ desc ++ show i
   modifyConstraints $ M.insert v $ NoConstraint Nothing loc
-  return $ TypeVar mempty (typeName v) []
+  return $ TypeVar mempty Nonunique (typeName v) []
 
 newArrayType :: SrcLoc -> String -> Int -> TermTypeM (TypeBase () (), TypeBase () ())
 newArrayType loc desc r = do
@@ -442,7 +442,7 @@ newArrayType loc desc r = do
   modifyConstraints $ M.insert v $ NoConstraint Nothing loc
   return (Array (ArrayPolyElem (typeName v) [] ())
                 (ShapeDecl $ replicate r ()) Nonunique,
-          TypeVar () (typeName v) [])
+          TypeVar () Nonunique (typeName v) [])
 
 breadCrumb :: BreadCrumb -> TermTypeM a -> TermTypeM a
 breadCrumb bc = local $ \env ->
@@ -510,8 +510,8 @@ unifyTypeAliases t1 t2 =
       Array (unifyArrayElems et1 et2) shape1 $ min u1 u2
     (Record f1, Record f2) ->
       Record $ M.intersectionWith unifyTypeAliases f1 f2
-    (TypeVar als1 v targs1, TypeVar als2 _ targs2) ->
-      TypeVar (als1 <> als2) v $ zipWith unifyTypeArg targs1 targs2
+    (TypeVar als1 u v targs1, TypeVar als2 _ _ targs2) ->
+      TypeVar (als1 <> als2) u v $ zipWith unifyTypeArg targs1 targs2
     _ -> t1
   where unifyArrayElems (ArrayPrimElem pt1 als1) (ArrayPrimElem _ als2) =
           ArrayPrimElem pt1 $ als1 <> als2
@@ -685,7 +685,7 @@ bindingTypeParams :: [TypeParam] -> TermTypeM a -> TermTypeM a
 bindingTypeParams tparams = binding (mapMaybe typeParamIdent tparams) .
                             bindingTypes (mapMaybe typeParamType tparams)
   where typeParamType (TypeParamType l v loc) =
-          Just (v, (TypeAbbr l [] (TypeVar () (typeName v) []),
+          Just (v, (TypeAbbr l [] (TypeVar () Nonunique (typeName v) []),
                     ParamType l loc))
         typeParamType TypeParamDim{} =
           Nothing
@@ -1568,9 +1568,9 @@ fixOverloadedTypes not_these = getConstraints >>= mapM_ fixOverloaded . M.toList
   where fixOverloaded (v, Overloaded ots loc)
           | v `S.member` not_these = return ()
           | Signed Int32 `elem` ots =
-              unify loc (TypeVar () (typeName v) []) $ Prim $ Signed Int32
+              unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ Signed Int32
           | FloatType Float64 `elem` ots =
-              unify loc (TypeVar () (typeName v) []) $ Prim $ FloatType Float64
+              unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ FloatType Float64
         fixOverloaded _ = return ()
 
 -- | Find at all type variables in the given type that are covered by
@@ -1722,23 +1722,23 @@ unify loc orig_t1 orig_t2 = do
               forM_ (M.toList $ M.intersectionWith (,) fs arg_fs) $ \(k, (k_t1, k_t2)) ->
               breadCrumb (MatchingFields k) $ subunify k_t1 k_t2
 
-        (TypeVar _ (TypeName _ tn) targs,
-         TypeVar _ (TypeName _ arg_tn) arg_targs)
+        (TypeVar _ _ (TypeName _ tn) targs,
+         TypeVar _ _ (TypeName _ arg_tn) arg_targs)
           | tn == arg_tn, length targs == length arg_targs ->
               zipWithM_ unifyTypeArg targs arg_targs
 
-        (TypeVar _ (TypeName [] v1) [],
-         TypeVar _ (TypeName [] v2) []) ->
+        (TypeVar _ _ (TypeName [] v1) [],
+         TypeVar _ _ (TypeName [] v2) []) ->
           case (isRigid' v1, isRigid' v2) of
             (True, True) -> failure
             (True, False) -> linkVarToType loc v2 t1'
             (False, True) -> linkVarToType loc v1 t2'
             (False, False) -> linkVarToType loc v1 t2'
 
-        (TypeVar _ (TypeName [] v1) [], _)
+        (TypeVar _ _ (TypeName [] v1) [], _)
           | not $ isRigid' v1 ->
               linkVarToType loc v1 t2'
-        (_, TypeVar _ (TypeName [] v2) [])
+        (_, TypeVar _ _ (TypeName [] v2) [])
           | not $ isRigid' v2 ->
               linkVarToType loc v2 t1'
 
@@ -1776,7 +1776,7 @@ linkVarToType loc vn tp = do
               Just (Overloaded ts old_loc)
                 | tp `notElem` map Prim ts ->
                     case tp' of
-                      TypeVar _ (TypeName [] v) []
+                      TypeVar _ _ (TypeName [] v) []
                         | not $ isRigid v constraints -> linkVarToTypes loc v ts
                       _ ->
                         typeError loc $ "Cannot unify `" ++ prettyName vn ++ "' with type `" ++
@@ -1788,7 +1788,7 @@ linkVarToType loc vn tp = do
                     | all (`M.member` tp_fields) $ M.keys required_fields ->
                         mapM_ (uncurry $ unify loc) $ M.elems $
                         M.intersectionWith (,) required_fields tp_fields
-                  TypeVar _ (TypeName [] v) []
+                  TypeVar _ _ (TypeName [] v) []
                     | not $ isRigid v constraints ->
                         modifyConstraints $ M.insert v $
                         HasFields required_fields old_loc
@@ -1819,7 +1819,7 @@ mustBeOneOf ts loc t = do
       isRigid' v = isRigid v constraints
 
   case t' of
-    TypeVar _ (TypeName [] v) []
+    TypeVar _ _ (TypeName [] v) []
       | not $ isRigid' v -> linkVarToTypes loc v ts
 
     Prim pt | pt `elem` ts -> return ()
@@ -1852,7 +1852,7 @@ equalityType loc t = do
   where mustBeEquality vn = do
           constraints <- getConstraints
           case M.lookup vn constraints of
-            Just (Constraint (TypeVar _ (TypeName [] vn') []) _) ->
+            Just (Constraint (TypeVar _ _ (TypeName [] vn') []) _) ->
               mustBeEquality vn'
             Just (Constraint vn_t _)
               | not $ orderZero vn_t ->
@@ -1896,7 +1896,7 @@ mustHaveField loc l t = do
   l_type <- newTypeVar loc "t"
   let l_type' = toStructural l_type
   case t of
-    TypeVar _ (TypeName _ tn) []
+    TypeVar _ _ (TypeName _ tn) []
       | Just NoConstraint{} <- M.lookup tn constraints -> do
           modifyConstraints $ M.insert tn $ HasFields (M.singleton l l_type') loc
           return l_type

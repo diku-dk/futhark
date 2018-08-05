@@ -388,10 +388,10 @@ typeHtml t = case t of
     where ppField (name, tp) = do
             tp' <- typeHtml tp
             return $ toHtml (nameToString name) <> ": " <> tp'
-  TypeVar _ et targs -> do
+  TypeVar _ u et targs -> do
     targs' <- mapM typeArgHtml targs
     et' <- typeNameHtml et
-    return $ et' <> joinBy " " targs'
+    return $ prettyU u <> et' <> joinBy " " targs'
   Array et shape u -> do
     shape' <- prettyShapeDecl shape
     et' <- prettyElem et

@@ -108,7 +108,7 @@ type ``()``.
 
 .. productionlist::
    type: `qualid` | `array_type` | `tuple_type`
-       : | `record_type` | `function_type` | `type` `type_arg`
+       : | `record_type` | `function_type` | `type` `type_arg` | "*" `type`
    array_type: "[" [`dim`] "]" `type`
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"

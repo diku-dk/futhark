@@ -168,8 +168,11 @@ liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
 
       checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
         | Just inp <- M.lookup v inputMap =
-            let e | patElemName outId `UT.isConsumed` usages = Copy inp
-                  | otherwise                                = SubExp $ Var inp
+            let e | patElemName outId `UT.isConsumed` usages
+                    || inp `UT.isConsumed` usages =
+                      Copy inp
+                  | otherwise =
+                      SubExp $ Var inp
             in ((Pattern [] [outId], BasicOp e) : invariant,
                 mapresult,
                 rettype')

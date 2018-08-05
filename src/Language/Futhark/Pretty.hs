@@ -125,8 +125,8 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr (Prim et) = ppr et
-  ppr (TypeVar _ et targs) =
-    ppr (qualNameFromTypeName et) <+> spread (map ppr targs)
+  ppr (TypeVar _ u et targs) =
+    ppr u <> ppr (qualNameFromTypeName et) <+> spread (map ppr targs)
   ppr (Array at shape u) = ppr u <> ppr shape <> ppr at
   ppr (Record fs)
     | Just ts <- areTupleFields fs =
