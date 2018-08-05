@@ -363,7 +363,8 @@ expandAliases names env = names `S.union` aliasesOfAliases
           Just (LetInfo (als, _)) -> unNames als
           _                       -> mempty
 
-binding :: Scope (Aliases lore)
+binding :: Checkable lore =>
+           Scope (Aliases lore)
         -> TypeM lore a
         -> TypeM lore a
 binding bnds = check . local (`bindVars` bnds)
@@ -372,7 +373,8 @@ binding bnds = check . local (`bindVars` bnds)
         boundnameset = S.fromList boundnames
 
         bindVar env name (LetInfo (Names' als, attr)) =
-          let als' = expandAliases als env
+          let als' | primType (typeOf attr) = mempty
+                   | otherwise = expandAliases als env
               inedges = S.toList als'
               update (LetInfo (Names' thesenames, thisattr)) =
                 LetInfo (Names' $ S.insert name thesenames, thisattr)
@@ -402,14 +404,18 @@ lookupVar name = do
     Nothing -> bad $ UnknownVariableError name
     Just attr -> return attr
 
-lookupAliases :: VName -> TypeM lore Names
-lookupAliases name = S.insert name . aliases <$> lookupVar name
+lookupAliases :: Checkable lore => VName -> TypeM lore Names
+lookupAliases name = do
+  info <- lookupVar name
+  return $ if primType $ typeOf info
+           then mempty
+           else aliases info
 
 aliases :: NameInfo (Aliases lore) -> Names
 aliases (LetInfo (als, _)) = unNames als
 aliases _ = mempty
 
-subExpAliasesM :: SubExp -> TypeM lore Names
+subExpAliasesM :: Checkable lore => SubExp -> TypeM lore Names
 subExpAliasesM Constant{} = return mempty
 subExpAliasesM (Var v)    = lookupAliases v
 
@@ -700,9 +706,13 @@ checkBasicOp (Update src idxes se) = do
   when (arrayRank src_t /= length idxes) $
     bad $ SlicingError (arrayRank src_t) (length idxes)
 
+  src_aliases <- lookupAliases src
+  when (src `S.member` src_aliases) $
+    bad $ TypeError "The source of an Update must not alias the destination."
+
   mapM_ checkDimIndex idxes
   require [Prim (elemType src_t) `arrayOfShape` Shape (sliceDims idxes)] se
-  consume =<< lookupAliases src
+  consume src_aliases
 
 checkBasicOp (Iota e x s et) = do
   require [Prim int32] e
