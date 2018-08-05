@@ -149,7 +149,7 @@ removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
          mapM_ (uncurry letBindNames) $ dummyStms discard_val
          return body'
        letBind_ pat' $ DoLoop ctx' val' form body''
-  where pat_used = map (`UT.used` used) $ patternValueNames pat
+  where pat_used = map (`UT.isUsedDirectly` used) $ patternValueNames pat
         used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
         usedAfterLoop = flip elem used_vals . paramName
         usedAfterLoopOrInForm p =
@@ -1197,7 +1197,7 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfAttr rettype ifsort)
   | -- Only if there is no existential context...
     patternSize pat == length rettype,
     -- Figure out which of the names in 'pat' are used...
-    patused <- map (`UT.used` used) $ patternNames pat,
+    patused <- map (`UT.isUsedDirectly` used) $ patternNames pat,
     -- If they are not all used, then this rule applies.
     not (and patused) =
   -- Remove the parts of the branch-results that correspond to dead
