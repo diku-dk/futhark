@@ -11,14 +11,12 @@ module Futhark.Analysis.UsageTable
   , expand
   , isConsumed
   , isInResult
-  , isEqualTo
   , isUsedDirectly
   , allConsumed
   , usages
   , usage
   , consumedUsage
   , inResultUsage
-  , equalToUsage
   , Usages
   , leftScope
   )
@@ -91,9 +89,6 @@ isConsumed = is Consumed
 isInResult :: VName -> UsageTable -> Bool
 isInResult = is InResult
 
-isEqualTo :: SubExp -> VName -> UsageTable -> Bool
-isEqualTo what = is $ EqualTo what
-
 -- | Has the given name been used directly (i.e. could we rename it or
 -- remove it without anyone noticing?)
 isUsedDirectly :: VName -> UsageTable -> Bool
@@ -115,20 +110,14 @@ consumedUsage name = UsageTable $ M.singleton name $ S.singleton Consumed
 inResultUsage :: VName -> UsageTable
 inResultUsage name = UsageTable $ M.singleton name $ S.singleton InResult
 
-equalToUsage :: VName -> SubExp -> UsageTable
-equalToUsage name what =
-  UsageTable $ M.singleton name $ S.singleton $ EqualTo what
-
 type Usages = S.Set Usage
 
 data Usage = Consumed
            | InResult
-           | EqualTo SubExp
            | Present
              deriving (Eq, Ord, Show)
 
 leftScope :: UsageTable -> UsageTable
 leftScope (UsageTable table) = UsageTable $ M.map (S.filter $ not . scopeSpecific) table
-  where scopeSpecific (EqualTo _) = True
-        scopeSpecific InResult    = True
+  where scopeSpecific InResult    = True
         scopeSpecific _           = False
