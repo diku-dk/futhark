@@ -468,11 +468,6 @@ consumeAfterConsume name loc1 loc2 =
   throwError $ TypeError loc2 $
   "Variable " ++ pretty name ++ " previously consumed at " ++ locStr loc1 ++ "."
 
-indexingError :: MonadTypeChecker m => Int -> Int -> SrcLoc -> m a
-indexingError dims got loc =
-  throwError $ TypeError loc $
-  show got ++ " indices given, but type of indexee has " ++ show dims ++ " dimension(s)."
-
 badLetWithValue :: MonadTypeChecker m => SrcLoc -> m a
 badLetWithValue loc =
   throwError $ TypeError loc
@@ -1023,49 +1018,50 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
 
     return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
 
-checkExp (LetWith dest src idxes ve body pos) = sequentially (checkIdent src) $ \src' _ -> do
-  unless (unique $ unInfo $ identType src') $
-    typeError pos $ "Source '" ++ pretty (identName src) ++
-    "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
+checkExp (LetWith dest src idxes ve body pos) = do
+  (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
+  let elemt = stripArray (length $ filter isFix idxes) t
+  sequentially (checkIdent src) $ \src' _ -> do
+    let src'' = Var (qualName $ identName src')
+                    (vacuousShapeAnnotations <$> identType src')
+                    (srclocOf src)
+    void $ unifies t src''
 
-  idxes' <- mapM checkDimIndex idxes
-  case peelArray (length $ filter isFix idxes') (unInfo $ identType src') of
-    Nothing -> indexingError
-               (arrayRank $ unInfo $ identType src') (length idxes) (srclocOf src)
-    Just elemt -> do
-      let elemt' = toStructural elemt `setUniqueness` Nonunique
-      sequentially (unifies elemt' =<< checkExp ve) $ \ve' _ -> do
-        ve_t <- expType ve'
-        when (identName src' `S.member` aliases ve_t) $
-          badLetWithValue pos
+    unless (unique $ unInfo $ identType src') $
+      typeError pos $ "Source '" ++ pretty (identName src) ++
+      "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
 
-        bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
-          body' <- consuming src' $ checkExp body
-          return $ LetWith dest' src' idxes' ve' body' pos
+    idxes' <- mapM checkDimIndex idxes
+    sequentially (unifies elemt =<< checkExp ve) $ \ve' _ -> do
+      ve_t <- expType ve'
+      when (identName src' `S.member` aliases ve_t) $
+        badLetWithValue pos
+
+      bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
+        body' <- consuming src' $ checkExp body
+        return $ LetWith dest' src' idxes' ve' body' pos
   where isFix DimFix{} = True
         isFix _        = False
 
-checkExp (Update src idxes ve loc) =
-  sequentially (checkExp ve) $ \ve' _ ->
-  sequentially (checkExp src) $ \src' _ -> do
-    src_t <- expType src'
-    let src_als = aliases src_t
+checkExp (Update src idxes ve loc) = do
+  (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
+  let elemt = stripArray (length $ filter isFix idxes) t
+  sequentially (checkExp ve >>= unifies elemt) $ \ve' _ ->
+    sequentially (checkExp src >>= unifies t) $ \src' _ -> do
 
+    idxes' <- mapM checkDimIndex idxes
+
+    src_t <- expType src'
     unless (unique src_t) $
       typeError loc $ "Source '" ++ pretty src ++
       "' has type " ++ pretty src_t ++ ", which is not unique"
 
-    idxes' <- mapM checkDimIndex idxes
-    case peelArray (length $ filter isFix idxes') src_t of
-      Nothing -> indexingError (arrayRank src_t) (length idxes) (srclocOf src)
-      Just elemt -> do
-        ve_t <- expType ve'
-        unify (srclocOf ve') (toStruct elemt) $ toStruct ve_t
-        unless (S.null $ src_als `S.intersection` aliases ve_t) $
-          badLetWithValue loc
+    let src_als = aliases src_t
+    ve_t <- expType ve'
+    unless (S.null $ src_als `S.intersection` aliases ve_t) $ badLetWithValue loc
 
-        consume loc src_als
-        return $ Update src' idxes' ve' loc
+    consume loc src_als
+    return $ Update src' idxes' ve' loc
   where isFix DimFix{} = True
         isFix _        = False
 
