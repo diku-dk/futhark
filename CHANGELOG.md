@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `copy` now works on values of any type, not just arrays.
 
+  * Better type inference for array indexing.
+
 ### Removed
 
 ### Changed

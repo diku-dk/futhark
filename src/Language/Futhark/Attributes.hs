@@ -174,6 +174,7 @@ modifyShapeAnnotations f = bimap f id
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
 uniqueness (Array _ _ u) = u
+uniqueness (TypeVar _ u _ _) = u
 uniqueness _ = Nonunique
 
 recordArrayElemUniqueness :: RecordArrayElemTypeBase shape as -> Uniqueness
