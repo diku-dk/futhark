@@ -13,13 +13,6 @@ cache:
     - $TRAVIS_BUILD_DIR/.stack-work
   timeout: 300
 
-# We test against different Stackage snapshots.
-matrix:
-  include:
-    - env: BUILD=stack STACK_YAML=stack.yaml
-    - env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
-    - env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
-
 addons:
   apt:
     packages:
@@ -27,23 +20,55 @@ addons:
     - python-numpy
     - libgmp-dev
 
+# The order in which stages are run.
+stages:
+  - deps
+  - compiler
+  - tests
+
+# The defaults that are apparently included by all jobs.
 before_install:
- - export PATH=$HOME/.local/bin:$PATH
- - ./.travis-setup.sh
+  - ./.travis-setup.sh
+  - export PATH=$HOME/.local/bin:$PATH
 
-install:
- - stack build --fast alex happy
- - stack --no-terminal test --fast --only-dependencies -j 3
+# We test against different Stackage snapshots.
+jobs:
+  include:
+    - &deps
+      stage: deps
+      env: BUILD=stack STACK_YAML=stack.yaml
+      script:
+        - stack build --fast alex happy
+        - stack --no-terminal test --fast --only-dependencies -j 3
 
-script:
- - travis_wait stack --no-terminal test -j 1 --fast
- - stack install
+    - <<: *deps
+      env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
+    - <<: *deps
+      env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
 
- # Run integration test suite.
- - if [ "$STACK_YAML" = stack.yaml ]; then futhark-test --nobuffer tests examples; fi
- - (cd pkgtests; ./test.sh)
+    - &compiler
+      stage: compiler
+      env: BUILD=stack STACK_YAML=stack.yaml
+      script:
+        - travis_wait stack --no-terminal test -j 1 --fast
 
- # Check for style issues.
- - if [ "$STACK_YAML" = stack.yaml ]; then stack install hlint --fast && tools/style-check.sh src; fi
+    - <<: *compiler
+      env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
+    - <<: *compiler
+      env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
+
+    # Note - this stage is only run for one version of GHC.
+    - stage: tests
+      env: BUILD=stack STACK_YAML=stack.yaml
+      script:
+        - stack install
+
+        # Run integration test suite.
+        - futhark-test --nobuffer tests examples
+        - (cd pkgtests; ./test.sh)
+
+        # Check for style issues.
+        - stack install hlint --fast
+        - tools/style-check.sh src
 
 # EOF
