@@ -46,7 +46,7 @@ banner = unlines [
 
 main :: IO ()
 main = reportingIOErrors $
-       mainWithOptions interpreterConfig options run
+       mainWithOptions interpreterConfig options "options... program" run
   where run [prog] config = Just $ interpret config prog
         run []     _      = Just repl
         run _      _      = Nothing

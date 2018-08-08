@@ -337,7 +337,7 @@ commandLineOptions = [
         max_timeout = maxBound `div` 1000000
 
 main :: IO ()
-main = mainWithOptions initialBenchOptions commandLineOptions $ \progs config ->
+main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
   Just $ runBenchmarks config progs
 
 --- The following extracted from hstats package by Marshall Beddoe:

@@ -493,5 +493,5 @@ commandLineOptions = [
   ]
 
 main :: IO ()
-main = mainWithOptions defaultConfig commandLineOptions $ \progs config ->
+main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
   Just $ runTests config progs

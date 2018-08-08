@@ -28,7 +28,7 @@ import Futhark.Test.Values
 import Futhark.Util.Options
 
 main :: IO ()
-main = mainWithOptions initialDataOptions commandLineOptions f
+main = mainWithOptions initialDataOptions commandLineOptions "options..." f
   where f [] config
           | null $ optOrders config = Just $ do
               maybe_vs <- readValues <$> BS.getContents

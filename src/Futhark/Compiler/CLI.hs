@@ -32,7 +32,7 @@ compilerMain :: cfg -- ^ Initial configuration.
 compilerMain cfg cfg_opts name desc pipeline doIt =
   reportingIOErrors $
   mainWithOptions (newCompilerConfig cfg) (commandLineOptions ++ map wrapOption cfg_opts)
-  inspectNonOptions
+  "options... program" inspectNonOptions
   where inspectNonOptions [file] config = Just $ compile config file
         inspectNonOptions _      _      = Nothing
 

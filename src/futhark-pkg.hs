@@ -161,6 +161,11 @@ putPkgManifest = liftIO . T.writeFile futharkPkg . prettyPkgManifest
 
 --- The CLI
 
+usageMsg :: T.Text -> IO ()
+usageMsg s = do
+  T.putStrLn $ "Usage: futhark-pkg [--version] [--help] " <> s
+  exitFailure
+
 -- | The monad in which futhark-pkg runs.
 newtype PkgM a = PkgM (StateT (PkgRegistry PkgM) IO a)
   deriving (Functor, Applicative, Monad, MonadIO)
@@ -176,7 +181,7 @@ runPkgM :: PkgM a -> IO a
 runPkgM (PkgM m) = evalStateT m mempty
 
 doFmt :: IO ()
-doFmt = mainWithOptions () [] $ \args () ->
+doFmt = mainWithOptions () [] "fmt" $ \args () ->
   case args of
     [] -> Just $ do
       m <- parsePkgManifestFromFile futharkPkg
@@ -215,7 +220,7 @@ doSync = runPkgM $ do
   installBuildList (commented $ manifestPkgPath m) bl
 
 doAdd :: IO ()
-doAdd = mainWithOptions () [] $ \args () ->
+doAdd = mainWithOptions () [] "add PKGPATH" $ \args () ->
   case args of
     [p, v] | Right v' <- parseVersion $ T.pack v -> Just $ runPkgM $ doAdd' (T.pack p) v'
     [p] -> Just $ runPkgM $
@@ -256,7 +261,7 @@ doAdd = mainWithOptions () [] $ \args () ->
       liftIO $ T.putStrLn "Remember to run 'futhark-pkg sync'."
 
 doRemove :: IO ()
-doRemove = mainWithOptions () [] $ \args () ->
+doRemove = mainWithOptions () [] "remove PKGPATH" $ \args () ->
   case args of
     [p] -> Just $ doRemove' $ T.pack p
     _ -> Nothing
@@ -272,7 +277,7 @@ doRemove = mainWithOptions () [] $ \args () ->
           liftIO $ T.putStrLn $ "Removed " <> p <> " " <> prettySemVer (requiredPkgRev r) <> "."
 
 doCreate :: IO ()
-doCreate = mainWithOptions () [] $ \args () ->
+doCreate = mainWithOptions () [] "create PKGPATH" $ \args () ->
   case args of
     [p] -> Just $ doCreate' $ T.pack p
     _ -> Nothing
@@ -306,7 +311,7 @@ doUpgrade = runPkgM $ do
                      , requiredHash = Just h }
 
 doVersions :: IO ()
-doVersions = mainWithOptions () [] $ \args () ->
+doVersions = mainWithOptions () [] "versions PKGPATH" $ \args () ->
   case args of
     [p] -> Just $ runPkgM $ doVersions' $ T.pack p
     _ -> Nothing
@@ -340,14 +345,12 @@ main = do
                  , ("versions",
                     (doVersions, "List available versions for a package."))
                  ]
+      usage = "options... <" <> intercalate "|" (map fst commands) <> ">"
   case args of
     cmd : args' | Just (m, _) <- lookup cmd commands -> withArgs args' m
-    _ -> mainWithOptions () [] $ \_ () -> Just $ do
-      T.putStrLn "Usage: futhark-pkg [--version] [--help] <command> ...:"
-      T.putStrLn ""
-      T.putStrLn "Commands:"
+    _ -> mainWithOptions () [] usage $ \_ () -> Just $ do
       let k = maximum (map (length . fst) commands) + 3
-      forM_ commands $ \(cmd, (_, desc)) ->
-        T.putStrLn $ "   " <> T.pack cmd <>
-        T.pack (replicate (k - length cmd) ' ') <> desc
-      exitFailure
+      usageMsg $ T.unlines $
+        ["<command> ...:", "", "Commands:"] ++
+        [ "   " <> T.pack cmd <> T.pack (replicate (k - length cmd) ' ') <> desc
+        | (cmd, (_, desc)) <- commands ]

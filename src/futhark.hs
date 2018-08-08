@@ -320,7 +320,7 @@ commandLineOptions =
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
 main :: IO ()
-main = mainWithOptions newConfig commandLineOptions compile
+main = mainWithOptions newConfig commandLineOptions "options... program" compile
   where compile [file] config =
           Just $ do
             res <- runFutharkM (m file config) $
