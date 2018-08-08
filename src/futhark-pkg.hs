@@ -4,6 +4,7 @@ module Main (main) where
 
 import Control.Monad.IO.Class
 import Control.Monad.State
+import Control.Monad.Reader
 import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -17,6 +18,7 @@ import qualified System.FilePath.Posix as Posix
 import System.Environment
 import System.Exit
 import System.IO
+import System.Console.GetOpt
 
 import qualified Codec.Archive.Zip as Zip
 import Network.HTTP.Client
@@ -161,24 +163,29 @@ putPkgManifest = liftIO . T.writeFile futharkPkg . prettyPkgManifest
 
 --- The CLI
 
-usageMsg :: T.Text -> IO ()
-usageMsg s = do
-  T.putStrLn $ "Usage: futhark-pkg [--version] [--help] " <> s
-  exitFailure
+newtype PkgConfig = PkgConfig { pkgVerbose :: Bool }
 
 -- | The monad in which futhark-pkg runs.
-newtype PkgM a = PkgM (StateT (PkgRegistry PkgM) IO a)
-  deriving (Functor, Applicative, Monad, MonadIO)
+newtype PkgM a = PkgM (ReaderT PkgConfig (StateT (PkgRegistry PkgM) IO) a)
+  deriving (Functor, Applicative, Monad, MonadIO, MonadReader PkgConfig)
 
 instance MonadPkgRegistry PkgM where
   putPkgRegistry = PkgM . put
   getPkgRegistry = PkgM get
 
 instance MonadLogger PkgM where
-  addLog = liftIO . T.hPutStr stderr . toText
+  addLog l = do
+    verbose <- asks pkgVerbose
+    when verbose $ liftIO $ T.hPutStr stderr $ toText l
 
-runPkgM :: PkgM a -> IO a
-runPkgM (PkgM m) = evalStateT m mempty
+runPkgM :: PkgConfig -> PkgM a -> IO a
+runPkgM cfg (PkgM m) = evalStateT (runReaderT m cfg) mempty
+
+cmdMain :: String -> ([String] -> PkgConfig -> Maybe (IO ())) -> IO ()
+cmdMain = mainWithOptions (PkgConfig False) options
+  where options = [ Option "v" ["--verbose"]
+                    (NoArg $ Right $ \cfg -> cfg { pkgVerbose = True })
+                    "Write running diagnostics to stderr."]
 
 doFmt :: IO ()
 doFmt = mainWithOptions () [] "fmt" $ \args () ->
@@ -189,41 +196,47 @@ doFmt = mainWithOptions () [] "fmt" $ \args () ->
     _ -> Nothing
 
 doCheck :: IO ()
-doCheck = runPkgM $ do
-  m <- getPkgManifest
-  bl <- solveDeps $ pkgRevDeps m
+doCheck = cmdMain "check" $ \args cfg ->
+  case args of
+    [] -> Just $ runPkgM cfg $ do
+      m <- getPkgManifest
+      bl <- solveDeps $ pkgRevDeps m
 
-  liftIO $ T.putStrLn "Dependencies chosen:"
-  liftIO $ T.putStr $ prettyBuildList bl
+      liftIO $ T.putStrLn "Dependencies chosen:"
+      liftIO $ T.putStr $ prettyBuildList bl
 
-  case commented $ manifestPkgPath m of
-    Nothing -> return ()
-    Just p -> do
-      let pdir = "lib" </> T.unpack p
+      case commented $ manifestPkgPath m of
+        Nothing -> return ()
+        Just p -> do
+          let pdir = "lib" </> T.unpack p
 
-      pdir_exists <- liftIO $ doesDirectoryExist pdir
+          pdir_exists <- liftIO $ doesDirectoryExist pdir
 
-      unless pdir_exists $ liftIO $ do
-        T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not exist."
-        exitFailure
+          unless pdir_exists $ liftIO $ do
+            T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not exist."
+            exitFailure
 
-      anything <- liftIO $ any ((==".fut") . takeExtension) <$>
-                  directoryContents ("lib" </> T.unpack p)
-      unless anything $ liftIO $ do
-        T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not contain any .fut files."
-        exitFailure
+          anything <- liftIO $ any ((==".fut") . takeExtension) <$>
+                      directoryContents ("lib" </> T.unpack p)
+          unless anything $ liftIO $ do
+            T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not contain any .fut files."
+            exitFailure
+    _ -> Nothing
 
 doSync :: IO ()
-doSync = runPkgM $ do
-  m <- getPkgManifest
-  bl <- solveDeps $ pkgRevDeps m
-  installBuildList (commented $ manifestPkgPath m) bl
+doSync = cmdMain "sync" $ \args cfg ->
+  case args of
+    [] -> Just $ runPkgM cfg $ do
+      m <- getPkgManifest
+      bl <- solveDeps $ pkgRevDeps m
+      installBuildList (commented $ manifestPkgPath m) bl
+    _ -> Nothing
 
 doAdd :: IO ()
-doAdd = mainWithOptions () [] "add PKGPATH" $ \args () ->
+doAdd = cmdMain "add PKGPATH" $ \args cfg ->
   case args of
-    [p, v] | Right v' <- parseVersion $ T.pack v -> Just $ runPkgM $ doAdd' (T.pack p) v'
-    [p] -> Just $ runPkgM $
+    [p, v] | Right v' <- parseVersion $ T.pack v -> Just $ runPkgM cfg $ doAdd' (T.pack p) v'
+    [p] -> Just $ runPkgM cfg $
       -- Look up the newest revision of the package.
       doAdd' (T.pack p) =<< lookupNewestRev (T.pack p)
     _ -> Nothing
@@ -261,12 +274,12 @@ doAdd = mainWithOptions () [] "add PKGPATH" $ \args () ->
       liftIO $ T.putStrLn "Remember to run 'futhark-pkg sync'."
 
 doRemove :: IO ()
-doRemove = mainWithOptions () [] "remove PKGPATH" $ \args () ->
+doRemove = cmdMain "remove PKGPATH" $ \args cfg ->
   case args of
-    [p] -> Just $ doRemove' $ T.pack p
+    [p] -> Just $ runPkgM cfg $ doRemove' $ T.pack p
     _ -> Nothing
   where
-    doRemove' p = runPkgM $ do
+    doRemove' p = do
       m <- getPkgManifest
       case removeRequiredFromManifest p m of
         Nothing -> liftIO $ do
@@ -277,12 +290,12 @@ doRemove = mainWithOptions () [] "remove PKGPATH" $ \args () ->
           liftIO $ T.putStrLn $ "Removed " <> p <> " " <> prettySemVer (requiredPkgRev r) <> "."
 
 doCreate :: IO ()
-doCreate = mainWithOptions () [] "create PKGPATH" $ \args () ->
+doCreate = cmdMain "create PKGPATH" $ \args cfg ->
   case args of
-    [p] -> Just $ doCreate' $ T.pack p
+    [p] -> Just $ runPkgM cfg $ doCreate' $ T.pack p
     _ -> Nothing
   where
-    doCreate' p = runPkgM $ do
+    doCreate' p = do
       exists <- liftIO $ (||) <$> doesFileExist futharkPkg <*> doesDirectoryExist futharkPkg
       when exists $ liftIO $ do
         T.putStrLn $ T.pack futharkPkg <> " already exists."
@@ -295,10 +308,13 @@ doCreate = mainWithOptions () [] "create PKGPATH" $ \args () ->
       liftIO $ T.putStrLn $ "Wrote " <> T.pack futharkPkg <> "."
 
 doUpgrade :: IO ()
-doUpgrade = runPkgM $ do
-  m <- getPkgManifest
-  rs <- traverse (mapM (traverse upgrade)) $ manifestRequire m
-  putPkgManifest m { manifestRequire = rs }
+doUpgrade = cmdMain "upgrade" $ \args cfg ->
+  case args of
+    [] -> Just $ runPkgM cfg $ do
+      m <- getPkgManifest
+      rs <- traverse (mapM (traverse upgrade)) $ manifestRequire m
+      putPkgManifest m { manifestRequire = rs }
+    _ -> Nothing
   where upgrade req = do
           v <- lookupNewestRev $ requiredPkg req
           h <- pkgRevCommit <$> lookupPackageRev (requiredPkg req) v
@@ -311,9 +327,9 @@ doUpgrade = runPkgM $ do
                      , requiredHash = Just h }
 
 doVersions :: IO ()
-doVersions = mainWithOptions () [] "versions PKGPATH" $ \args () ->
+doVersions = cmdMain "versions PKGPATH" $ \args cfg ->
   case args of
-    [p] -> Just $ runPkgM $ doVersions' $ T.pack p
+    [p] -> Just $ runPkgM cfg $ doVersions' $ T.pack p
     _ -> Nothing
   where doVersions' =
           mapM_ (liftIO . T.putStrLn . prettySemVer) . M.keys . pkgVersions
@@ -354,3 +370,7 @@ main = do
         ["<command> ...:", "", "Commands:"] ++
         [ "   " <> T.pack cmd <> T.pack (replicate (k - length cmd) ' ') <> desc
         | (cmd, (_, desc)) <- commands ]
+
+  where usageMsg s = do
+          T.putStrLn $ "Usage: futhark-pkg [--version] [--help] " <> s
+          exitFailure

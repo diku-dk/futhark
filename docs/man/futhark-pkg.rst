@@ -50,6 +50,9 @@ the only ones that actually modifies ``lib/``; the others modify only
 ``futhark.pkg`` and require you to manually run ``futhark-pkg sync``
 afterwards.
 
+Most commands take a ``-v``/``--verbose`` option that makes
+``futhark-pkg`` write running diagnostics to stderr.
+
 COMMANDS
 ========
 
