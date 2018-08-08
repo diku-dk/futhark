@@ -58,7 +58,7 @@ jobs:
     env: BUILD=stack STACK_YAML=stack.yaml
     if: tag =~ ^v
     before_install:
-    - openssl aes-256-cbc -K $encrypted_0f71ac12d865_key -iv $encrypted_0f71ac12d865_iv in .travis_rsa.enc -out /tmp/travis_rsa -d
+    - openssl aes-256-cbc -K $encrypted_0f71ac12d865_key -iv $encrypted_0f71ac12d865_iv -in .travis_rsa.enc -out /tmp/travis_rsa -d
     - "./.travis-setup.sh"
     - export PATH=$HOME/.local/bin:$PATH
     script:
