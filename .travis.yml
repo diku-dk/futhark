@@ -7,7 +7,7 @@ cache:
   directories:
   - "$HOME/.stack"
   - "$TRAVIS_BUILD_DIR/.stack-work"
-  timeout: 300
+  timeout: 1000
 addons:
   apt:
     packages:
