@@ -135,8 +135,7 @@ readImportFile include = do
 
          not_found =
            "Error at " ++ E.locStr (srclocOf include) ++
-           ": could not find import '" ++ includeToString include ++ "'." ++
-           futlib_str ++ "\n" ++ show (map fst futlib)
+           ": could not find import '" ++ includeToString include ++ "'."
 
 -- | Read Futhark files from some basis, and printing log messages if
 -- the first parameter is True.

@@ -26,7 +26,7 @@ import Futhark.Util.Options
 import Futhark.Util (directoryContents, trim)
 
 main :: IO ()
-main = mainWithOptions initialDocConfig commandLineOptions f
+main = mainWithOptions initialDocConfig commandLineOptions "options... -o outdir programs..." f
   where f [dir] config = Just $ do
           res <- runFutharkM (m config dir) Verbose
           case res of
