@@ -694,6 +694,15 @@ simplifyExp (DoLoop ctx val form loopbody) = do
 simplifyExp (Op op) = do (op', stms) <- simplifyOp op
                          return (Op op', stms)
 
+-- Special case for simplification of commutative BinOps where we
+-- arrange the operands in sorted order.  This can make expressions
+-- more identical, which helps CSE.
+simplifyExp (BasicOp (BinOp op x y))
+  | commutativeBinOp op = do
+  x' <- simplify x
+  y' <- simplify y
+  return (BasicOp $ BinOp op (min x' y') (max x' y'), mempty)
+
 simplifyExp e = do e' <- simplifyExpBase e
                    return (e', mempty)
 
