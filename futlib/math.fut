@@ -134,8 +134,9 @@ module type real = {
   val floor : t -> t
   val trunc : t -> t
 
-  -- | Round to the nearest even integer.  Note that this differs from
-  -- `round()` in C, but matches more modern languages.
+  -- | Round to the nearest integer, with alfway cases rounded to the
+  -- nearest even integer.  Note that this differs from `round()` in
+  -- C, but matches more modern languages.
   val round : t -> t
 
   val isinf: t -> bool
