@@ -1,74 +1,74 @@
 language: minimal
-
 sudo: false
-
 dist: trusty
-
 git:
   submodules: false
-
 cache:
   directories:
-    - $HOME/.stack
-    - $TRAVIS_BUILD_DIR/.stack-work
+  - "$HOME/.stack"
+  - "$TRAVIS_BUILD_DIR/.stack-work"
   timeout: 300
-
 addons:
   apt:
     packages:
     - python
     - python-numpy
     - libgmp-dev
-
-# The order in which stages are run.
+    - python-sphinx
 stages:
-  - deps
-  - compiler
-  - tests
-
-# The defaults that are apparently included by all jobs.
+- deps
+- compiler
+- tests
+- deploy
 before_install:
-  - ./.travis-setup.sh
-  - export PATH=$HOME/.local/bin:$PATH
-
-# We test against different Stackage snapshots.
+- "./.travis-setup.sh"
+- export PATH=$HOME/.local/bin:$PATH
 jobs:
   include:
-    - &deps
-      stage: deps
-      env: BUILD=stack STACK_YAML=stack.yaml
-      script:
-        - stack build --fast alex happy
-        - stack --no-terminal test --fast --only-dependencies -j 3
-
-    - <<: *deps
-      env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
-    - <<: *deps
-      env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
-
-    - &compiler
-      stage: compiler
-      env: BUILD=stack STACK_YAML=stack.yaml
-      script:
-        - travis_wait stack --no-terminal test -j 1 --fast
-
-    - <<: *compiler
-      env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
-    - <<: *compiler
-      env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
-
-    # Note - this stage is only run for one version of GHC.
-    - stage: tests
-      env: BUILD=stack STACK_YAML=stack.yaml
-      script:
-        - stack install
-
-        # Run integration test suite.
-        - futhark-test --nobuffer tests examples
-        - (cd pkgtests; ./test.sh)
-
-        # Check for style issues.
-        - stack install hlint --fast
-        - tools/style-check.sh src
-
-# EOF
+  - stage: deps
+    env: BUILD=stack STACK_YAML=stack.yaml
+    script: &1
+    - stack build --fast alex happy
+    - stack --no-terminal test --fast --only-dependencies -j 3
+  - stage: deps
+    env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
+    script: *1
+  - stage: deps
+    env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
+    script: *1
+  - stage: compiler
+    env: BUILD=stack STACK_YAML=stack.yaml
+    script: &2
+    - travis_wait stack --no-terminal test -j 1 --fast
+  - stage: compiler
+    env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
+    script: *2
+  - stage: compiler
+    env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
+    script: *2
+  - stage: tests
+    env: BUILD=stack STACK_YAML=stack.yaml
+    script:
+    - stack install
+    - futhark-test --nobuffer tests examples
+    - "(cd pkgtests; ./test.sh)"
+    - stack install hlint --fast
+    - tools/style-check.sh src
+  - stage: deploy
+    env: BUILD=stack STACK_YAML=stack.yaml
+    if: tag =~ ^v
+    script:
+    - export VERSION=$(echo "$TRAVIS_TAG" | sed 's/^v//')
+    - export VERSION=$(echo v0.0.0 | sed 's/^v//')
+    - export TARBALL=futhark-$VERSION.tar.xz
+    - tools/release/binary-tarball.sh . "-$VERSION"
+    deploy:
+      provider: releases
+      api_key:
+        secure: OHk9iTQjnPGjw1/sLvePHVmUBV8S5Tq32xUiz4GvkoFVA9S5s8BP8HPiOQinZGVU7YVqn4FWQaxg1bHkbNSSHbQP6dmkhLme0HAVPxt/ravGd0Hb+T4ioudT63G05fQ2r8Yk1Dt+aS7v07uI5PGsQENIdmNR8ns98YHOwZf+haQ=
+      file_glob: true
+      file: "${TARBALL}"
+      on:
+        repo: diku-dk/futhark
+        tags: true
+      skip_cleanup: true
