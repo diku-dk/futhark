@@ -57,17 +57,32 @@ jobs:
   - stage: deploy
     env: BUILD=stack STACK_YAML=stack.yaml
     if: tag =~ ^v
+    before_install:
+    - openssl aes-256-cbc -K $encrypted_0f71ac12d865_key -iv $encrypted_0f71ac12d865_iv in .travis_rsa.enc -out /tmp/travis_rsa -d
+    - "./.travis-setup.sh"
+    - export PATH=$HOME/.local/bin:$PATH
     script:
     - export VERSION=$(echo "$TRAVIS_TAG" | sed 's/^v//')
-    - export VERSION=$(echo v0.0.0 | sed 's/^v//')
-    - export TARBALL=futhark-$VERSION.tar.xz
-    - tools/release/binary-tarball.sh . "-$VERSION"
+    - export SLUG=$VERSION-linux-x86_64
+    - export TARBALL=futhark-$SLUG.tar.xz
+    - tools/release/binary-tarball.sh . "-$SLUG"
+    before_deploy:
+    - eval "$(ssh-agent -s)"
+    - chmod 600 /tmp/travis_rsa
+    - ssh-add /tmp/travis_rsa
+
+    # Copy tarball to GitHub releases.
     deploy:
       provider: releases
       api_key:
         secure: OHk9iTQjnPGjw1/sLvePHVmUBV8S5Tq32xUiz4GvkoFVA9S5s8BP8HPiOQinZGVU7YVqn4FWQaxg1bHkbNSSHbQP6dmkhLme0HAVPxt/ravGd0Hb+T4ioudT63G05fQ2r8Yk1Dt+aS7v07uI5PGsQENIdmNR8ns98YHOwZf+haQ=
       file_glob: true
       file: "${TARBALL}"
+
+    # Copy tarball to our own webserver.
+    deploy:
+      provider: script
+      script: rsync -r --delete-after --quiet $TRAVIS_BUILD_DIR/$TARBALL futhark@sigkill.dk:/var/www/htdocs/futhark-lang.org/releases/
       on:
         repo: diku-dk/futhark
         tags: true
