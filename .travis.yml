@@ -82,7 +82,9 @@ jobs:
     # Copy tarball to our own webserver.
     deploy:
       provider: script
-      script: rsync -r --delete-after --quiet $TRAVIS_BUILD_DIR/$TARBALL futhark@sigkill.dk:/var/www/htdocs/futhark-lang.org/releases/
+      script:
+        - echo -e "Host sigkill.dk\n\tStrictHostKeyChecking no\n" >> ~/.ssh/config
+        - rsync -r --delete-after --quiet $TRAVIS_BUILD_DIR/$TARBALL futhark@sigkill.dk:/var/www/htdocs/futhark-lang.org/releases/
       on:
         repo: diku-dk/futhark
         tags: true
