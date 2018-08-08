@@ -265,9 +265,12 @@ doAdd = cmdMain "add PKGPATH" $ \args cfg ->
           (m', prev_r) = addRequiredToManifest req m
 
       case prev_r of
-        Just prev_r' ->
-          liftIO $ T.putStrLn $ "Replaced " <> p <> " " <>
-          prettySemVer (requiredPkgRev prev_r') <> " => " <> prettySemVer v <> "."
+        Just prev_r'
+          | requiredPkgRev prev_r' == v ->
+            liftIO $ T.putStrLn $ "Package already at version " <> prettySemVer v <> "; nothing to do."
+          | otherwise ->
+            liftIO $ T.putStrLn $ "Replaced " <> p <> " " <>
+            prettySemVer (requiredPkgRev prev_r') <> " => " <> prettySemVer v <> "."
         Nothing ->
           liftIO $ T.putStrLn $ "Added new required package " <> p <> " " <> prettySemVer v <> "."
       putPkgManifest m'
