@@ -83,6 +83,7 @@ jobs:
         on:
           repo: diku-dk/futhark
           tags: true
+        skip_cleanup: true
 
       # Copy tarball to our own webserver.
       - provider: script
