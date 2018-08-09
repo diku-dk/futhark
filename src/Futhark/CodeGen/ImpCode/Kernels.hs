@@ -11,6 +11,7 @@ module Futhark.CodeGen.ImpCode.Kernels
   , KernelConstExp
   , HostOp (..)
   , KernelOp (..)
+  , AtomicOp (..)
   , CallKernel (..)
   , MapKernel (..)
   , Kernel (..)
@@ -183,7 +184,15 @@ data KernelOp = GetGroupId VName Int
               | GetGlobalSize VName Int
               | GetGlobalId VName Int
               | GetLockstepWidth VName
+              | Atomic AtomicOp
               | Barrier
+              deriving (Show)
+
+-- Atomic operations return the value stored before the update.
+-- This value is stored in the first VName.
+data AtomicOp = AtomicAdd VName VName Int
+              | AtomicCmpXchg VName VName Int Int
+              | AtomicXchg VName VName Int
               deriving (Show)
 
 instance Pretty KernelOp where
