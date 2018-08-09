@@ -785,8 +785,21 @@ allocInLambda params body rettype = do
 allocInKernelBody :: KernelBody InInKernel
                   -> AllocM InInKernel OutInKernel (KernelBody OutInKernel)
 allocInKernelBody (KernelBody () stms res) =
-  allocInStms stms $ \stms' ->
-    return $ KernelBody () stms' res
+  allocInStms stms $ \stms' -> do
+    res' <- mapM allocInKernelResult res
+    return $ KernelBody () stms' res'
+  where allocInKernelResult :: KernelResult InInKernel
+                            -> AllocM InInKernel OutInKernel (KernelResult OutInKernel)
+        allocInKernelResult (ThreadsReturn _which _what) =
+          undefined
+        allocInKernelResult (WriteReturn _rws _arr _res) =
+          undefined
+        allocInKernelResult (ConcatReturns _o _w _per_thread_elems _moffset _v) =
+          undefined
+        allocInKernelResult (KernelInPlaceReturn _what) =
+          undefined
+        allocInKernelResult (CombiningReturn _szs _arr _ind _val _lam) =
+          undefined
 
 class SizeSubst op where
   opSizeSubst :: PatternT attr -> op -> ChunkMap

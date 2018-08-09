@@ -321,7 +321,7 @@ unAllocInKernelBody = unAllocKernelBody False
       Body attr <$> unAllocStms True stms <*> pure res
 
     unAllocKernelBody nested (KernelBody attr stms res) =
-      KernelBody attr <$> unAllocStms nested stms <*> pure res
+      KernelBody attr <$> unAllocStms nested stms <*> mapM unAllocKernelResult res
 
     unAllocStms nested =
       fmap (stmsFromList . catMaybes) . mapM (unAllocStm nested) . stmsToList
@@ -363,6 +363,19 @@ unAllocInKernelBody = unAllocKernelBody False
 
     unAllocOp Alloc{} = Left "unhandled Op"
     unAllocOp (Inner op) = unAllocKernelExp op
+
+    unAllocKernelResult :: KernelResult InKernel
+                        -> Either String (KernelResult Kernels.InKernel)
+    unAllocKernelResult (ThreadsReturn _which _what) =
+      undefined
+    unAllocKernelResult (WriteReturn _rws _arr _res) =
+      undefined
+    unAllocKernelResult (ConcatReturns _o _w _per_thread_elems _moffset _v) =
+      undefined
+    unAllocKernelResult (KernelInPlaceReturn _what) =
+      undefined
+    unAllocKernelResult (CombiningReturn _szs _arr _ind _val _lam) =
+      undefined
 
     unParam p = maybe bad return $ traverse unAttr p
       where bad = Left $ "Cannot handle memory-typed parameter '" ++ pretty p ++ "'"

@@ -1035,7 +1035,7 @@ streaming constants chunksize bound m = do
         constants { kernelStreamed = (chunksize, bound') : kernelStreamed constants }
   ImpGen.subImpM_ (inKernelOperations constants') m
 
-compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
+compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult lore
                     -> InKernelGen ()
 
 compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
