@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
+-- | Perform horizontal and vertical fusion of SOACs.
 module Futhark.Optimise.Fusion ( fuseSOACs )
   where
 
