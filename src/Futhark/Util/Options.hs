@@ -5,7 +5,6 @@ module Futhark.Util.Options
        , commonOptions
        ) where
 
-import Data.Version
 import System.Environment
 import Control.Monad.IO.Class
 import System.IO
@@ -38,8 +37,8 @@ mainWithOptions emptyConfig commandLineOptions usage f = do
   where applyOpts opts = do fs <- sequence opts
                             return $ foldl (.) id (reverse fs) emptyConfig
 
-        invalid nonopts unrecs errs = do usage <- helpStr usage commandLineOptions'
-                                         badOptions usage nonopts errs unrecs
+        invalid nonopts unrecs errs = do help <- helpStr usage commandLineOptions'
+                                         badOptions help nonopts errs unrecs
 
         commandLineOptions' =
           commonOptions usage commandLineOptions ++ commandLineOptions
