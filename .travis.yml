@@ -29,8 +29,8 @@ jobs:
   - stage: deps
     env: BUILD=stack STACK_YAML=stack.yaml
     script: &1
-    - stack build --fast alex happy
-    - stack --no-terminal test --fast --only-dependencies -j 3
+    - stack build alex happy
+    - stack --no-terminal test --only-dependencies -j 3
   - stage: deps
     env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
     script: *1
@@ -40,7 +40,7 @@ jobs:
   - stage: compiler
     env: BUILD=stack STACK_YAML=stack.yaml
     script: &2
-    - travis_wait stack --no-terminal test -j 1 --fast
+    - travis_wait stack --no-terminal test -j 1
   - stage: compiler
     env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
     script: *2
