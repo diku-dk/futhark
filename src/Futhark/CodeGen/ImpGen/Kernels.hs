@@ -1128,7 +1128,7 @@ compileKernelResult _ _ KernelInPlaceReturn{} =
   return ()
 
 
-compileKernelResult constants dest (CombiningReturn szs arr ind val lam) = do
+compileKernelResult _constants _dest (CombiningReturn _szs _arr _ind _val _lam) = do
   undefined
 
 isActive :: [(VName, SubExp)] -> Imp.Exp

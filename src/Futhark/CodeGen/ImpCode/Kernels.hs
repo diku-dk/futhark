@@ -190,9 +190,9 @@ data KernelOp = GetGroupId VName Int
 
 -- Atomic operations return the value stored before the update.
 -- This value is stored in the first VName.
-data AtomicOp = AtomicAdd VName VName Int
-              | AtomicCmpXchg VName VName Int Int
-              | AtomicXchg VName VName Int
+data AtomicOp = AtomicAdd VName VName Int Int
+              | AtomicCmpXchg VName VName Int Int Int
+              | AtomicXchg VName VName Int Int
               deriving (Show)
 
 instance Pretty KernelOp where
@@ -216,11 +216,11 @@ instance Pretty KernelOp where
     text "get_lockstep_width()"
   ppr Barrier =
     text "barrier()"
-  ppr (AtomicOp (AtomicAdd old val i)) =
+  ppr (Atomic (AtomicAdd _old _val _ind _x)) =
     undefined
-  ppr (AtomicOp (AtomicCmpXchg old val x y)) =
+  ppr (Atomic (AtomicCmpXchg _old _val _ind _x _y)) =
     undefined
-  ppr (AtomicOp (AtomicXchg old val i)) =
+  ppr (Atomic (AtomicXchg _old _val _ind _x)) =
     undefined
 
 instance FreeIn KernelOp where
