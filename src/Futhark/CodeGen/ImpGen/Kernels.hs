@@ -1127,6 +1127,10 @@ compileKernelResult _ _ KernelInPlaceReturn{} =
   -- Already in its place... said it was a hack.
   return ()
 
+
+compileKernelResult constants dest (CombiningReturn szs arr ind val lam) = do
+  undefined
+
 isActive :: [(VName, SubExp)] -> Imp.Exp
 isActive limit = case actives of
                     [] -> Imp.ValueExp $ BoolValue True

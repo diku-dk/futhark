@@ -216,6 +216,12 @@ instance Pretty KernelOp where
     text "get_lockstep_width()"
   ppr Barrier =
     text "barrier()"
+  ppr (AtomicOp (AtomicAdd old val i)) =
+    undefined
+  ppr (AtomicOp (AtomicCmpXchg old val x y)) =
+    undefined
+  ppr (AtomicOp (AtomicXchg old val i)) =
+    undefined
 
 instance FreeIn KernelOp where
   freeIn = const mempty
