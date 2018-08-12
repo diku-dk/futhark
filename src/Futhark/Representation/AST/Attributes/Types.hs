@@ -10,7 +10,6 @@ module Futhark.Representation.AST.Attributes.Types
        , existential
        , uniqueness
        , setUniqueness
-       , unifyUniqueness
        , unique
        , staticShapes
        , staticShapes1
@@ -141,19 +140,6 @@ setUniqueness :: TypeBase shape Uniqueness
               -> TypeBase shape Uniqueness
 setUniqueness (Array et dims _) u = Array et dims u
 setUniqueness t _ = t
-
--- | Unify the uniqueness attributes and aliasing information of two
--- types.  The two types must otherwise be identical.  The resulting
--- alias set will be the 'mappend' of the two input types aliasing sets,
--- and the uniqueness will be 'Unique' only if both of the input types
--- are unique.
-unifyUniqueness :: Monoid u =>
-                   TypeBase shape u
-                -> TypeBase shape u
-                -> TypeBase shape u
-unifyUniqueness (Array et dims u1) (Array _ _ u2) =
-  Array et dims (u1 <> u2)
-unifyUniqueness t1 _ = t1
 
 -- | Convert types with non-existential shapes to types with
 -- non-existential shapes.  Only the representation is changed, so all
