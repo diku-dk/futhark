@@ -1440,7 +1440,10 @@ consumeArg loc at Consume = return [consumption (aliases at) loc]
 consumeArg loc at _       = return [observation (aliases at) loc]
 
 checkOneExp :: UncheckedExp -> TypeM Exp
-checkOneExp e = fmap fst . runTermTypeM $ updateExpTypes =<< checkExp e
+checkOneExp e = fmap fst . runTermTypeM $ do
+  e' <- checkExp e
+  fixOverloadedTypes mempty
+  updateExpTypes e'
 
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
                 [UncheckedTypeParam], [UncheckedPattern],
