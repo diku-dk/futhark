@@ -223,7 +223,7 @@ parseInput = lexstr "input" *> parseValues
 parseValues :: Parser Values
 parseValues = do s <- parseBlock
                  case valuesFromByteString "input" $ BS.fromStrict $ T.encodeUtf8 s of
-                   Left err -> fail $ show err
+                   Left err -> fail err
                    Right vs -> return $ Values vs
               <|> lexstr "@" *> lexeme (InFile . T.unpack <$> nextWord)
 
@@ -305,7 +305,7 @@ testSpecFromFile path = do
 
   where moreCases test (lineno, cases) =
           case readInputOutputs path cases of
-            Left err     -> error $ show $ fixPosition lineno err
+            Left err     -> error $ parseErrorPretty $ fixPosition lineno err
             Right cases' ->
               case testAction test of
                 RunCases old_cases structures warnings ->
