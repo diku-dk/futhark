@@ -1,0 +1,5 @@
+-- ==
+-- input { empty([]i32) } output { empty([]i32) }
+-- input { [[1,2]]      } error: wrong shape
+
+let main (xs: [][3]i32) = xs
