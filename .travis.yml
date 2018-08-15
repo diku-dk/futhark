@@ -40,7 +40,7 @@ jobs:
   - stage: compiler
     env: BUILD=stack STACK_YAML=stack.yaml
     script: &2
-    - travis_wait stack --no-terminal test -j 1
+    - travis_wait 30 stack --no-terminal test -j 1
   - stage: compiler
     env: BUILD=stack STACK_YAML=stack-lts-10.0.yaml
     script: *2
