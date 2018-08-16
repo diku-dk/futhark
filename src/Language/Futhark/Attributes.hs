@@ -761,9 +761,6 @@ intrinsics = M.fromList $ zipWith namify [10..] $
               ("scan", IntrinsicPolyFun [tp_a]
                        [t_a `arr` (t_a `arr` t_a), t_a, arr_a] uarr_a),
 
-              ("filter", IntrinsicPolyFun [tp_a]
-                         [t_a `arr` Prim Bool, arr_a] uarr_a),
-
               ("partition",
                IntrinsicPolyFun [tp_a]
                [Prim (Signed Int32), t_a `arr` Prim (Signed Int32), arr_a] $
