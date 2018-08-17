@@ -7,6 +7,7 @@
 module Language.Futhark.TypeChecker
   ( checkProg
   , checkExp
+  , checkDec
   , TypeError
   , Warnings
   )
@@ -61,6 +62,22 @@ checkExp files src decs e = do
     (_, env, _) <- checkDecs decs
     localEnv env $ checkOneExp e
   return e'
+  where files' = M.map fileEnv $ M.fromList files
+
+-- | Type check a single declaration containing no type information,
+-- yielding either a type error or the same expression annotated with
+-- type information along the Env produced by that declaration.  See
+-- also 'checkProg'.
+checkDec :: Imports
+         -> VNameSource
+         -> UncheckedDec
+         -> Either TypeError (Env, Dec)
+checkDec files src d = do
+  (x, _, _) <- runTypeM initialEnv files' (mkInitialImport "") src $ do
+
+    (_, env, d') <- checkOneDec d
+    return (env, d')
+  return x
   where files' = M.map fileEnv $ M.fromList files
 
 initialEnv :: Env
@@ -448,20 +465,20 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                  },
            ValBind entry fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
 
-checkDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
-checkDec (ModDec struct) = do
+checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
+checkOneDec (ModDec struct) = do
   (abs, modenv, struct') <- checkModBind struct
   return (abs, modenv, ModDec struct')
 
-checkDec (SigDec sig) = do
+checkOneDec (SigDec sig) = do
   (sigenv, sig') <- checkSigBind sig
   return (mempty, sigenv, SigDec sig')
 
-checkDec (TypeDec tdec) = do
+checkOneDec (TypeDec tdec) = do
   (tenv, tdec') <- checkTypeBind tdec
   return (mempty, tenv, TypeDec tdec')
 
-checkDec (OpenDec x xs NoInfo loc) = do
+checkOneDec (OpenDec x xs NoInfo loc) = do
   (x_abs, x_env, x') <- checkModExpToEnv x
   (xs_abs, xs_envs, xs') <- unzip3 <$> mapM checkModExpToEnv xs
    -- We cannot use mconcat, as mconcat is a right-fold.
@@ -471,24 +488,24 @@ checkDec (OpenDec x xs NoInfo loc) = do
           env_ext,
           OpenDec x' xs' (Info names) loc)
 
-checkDec (LocalDec d loc) = do
-  (abstypes, env, d') <- checkDec d
+checkOneDec (LocalDec d loc) = do
+  (abstypes, env, d') <- checkOneDec d
   return (abstypes, env, LocalDec d' loc)
 
-checkDec (ValDec vb) = do
+checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb
   return (mempty, env, ValDec vb')
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
 checkDecs (LocalDec d loc:ds) = do
-  (d_abstypes, d_env, d') <- checkDec d
+  (d_abstypes, d_env, d') <- checkOneDec d
   (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
   return (d_abstypes <> ds_abstypes,
           ds_env,
           LocalDec d' loc : ds')
 
 checkDecs (d:ds) = do
-  (d_abstypes, d_env, d') <- checkDec d
+  (d_abstypes, d_env, d') <- checkOneDec d
   (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
   return (d_abstypes <> ds_abstypes,
           ds_env <> d_env,
