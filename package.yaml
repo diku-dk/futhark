@@ -13,6 +13,7 @@ ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates
 extra-source-files:
   - rts/python/*.py
   - rts/c/*.h
+  - rts/csharp/*.cs
 
   - futlib/*.fut
 
@@ -80,6 +81,7 @@ executables:
     main: src/futhark.hs
     dependencies:
       - futhark
+      - process
       - random
       - temporary
       - json
@@ -102,6 +104,12 @@ executables:
   futhark-pyopencl:
     <<: *futhark
     main: src/futhark-pyopencl.hs
+  futhark-cs:
+    <<: *futhark
+    main: src/futhark-cs.hs
+  futhark-csopencl:
+    <<: *futhark
+    main: src/futhark-csopencl.hs
   futhark-test:
     <<: *futhark
     main: src/futhark-test.hs
