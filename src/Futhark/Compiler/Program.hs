@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE TupleSections #-}
--- | Low-level compilation parts.  Look at "Futhar.Compiler" for a
+-- | Low-level compilation parts.  Look at "Futhark.Compiler" for a
 -- more high-level API.
 module Futhark.Compiler.Program
        ( readLibraryWithBasis
