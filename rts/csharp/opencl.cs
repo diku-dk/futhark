@@ -198,7 +198,7 @@ ComputeErrorCode OpenCLAlloc(ref futhark_context context, long min_size, string 
             }
         }
     }
-    
+
     ComputeErrorCode error = OpenCLAllocActual(ref context, min_size, ref mem_out);
     while (error == ComputeErrorCode.MemoryObjectAllocationFailure)
     {
@@ -893,4 +893,34 @@ CLMemoryHandle empty_mem_handle(CLContextHandle context)
                                    out tmp);
     return cl_mem;
 
+}
+
+void futhark_config_print_sizes()
+{
+    int n = futhark_get_num_sizes();
+    for (int i = 0; i < n; i++)
+    {
+        if (futhark_get_size_entry(i) ==  entry_point)
+        {
+            Console.WriteLine("{0} ({1})", futhark_get_size_name(i),
+                              futhark_get_size_class(i));
+        }
+    }
+    Environment.Exit(0);
+}
+
+void futhark_config_set_size(ref futhark_context_config config, string optarg)
+{
+    var name_and_value = optarg.Split('=');
+    if (name_and_value.Length != 2)
+    {
+        panic(1, "Invalid argument for size option: {0}", optarg);
+    }
+
+    var name = name_and_value[0];
+    var value = Convert.ToInt32(name_and_value[1]);
+    if (!futhark_context_config_set_size(ref config, name, value))
+    {
+        panic(1, "Unknown size: {0}", name);
+    }
 }

@@ -37,19 +37,24 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   CS.stm $ AssignTyped stringArrayT (Var "size_classes")
     (Just $ Collection "string[]" (map (String . pretty . fst) $ M.elems sizes))
 
+  CS.stm $ AssignTyped stringArrayT (Var "size_entry_points")
+    (Just $ Collection "string[]" (map (String . pretty . snd) $ M.elems sizes))
+
 
   let get_num_sizes = CS.publicName "get_num_sizes"
   let get_size_name = CS.publicName "get_size_name"
   let get_size_class = CS.publicName "get_size_class"
+  let get_size_entry = CS.publicName "get_size_entry"
 
 
-  CS.stm $ CS.funDef get_num_sizes intT [(intT, "i")]
+  CS.stm $ CS.funDef get_num_sizes intT []
     [ Return $ (Integer . toInteger) $ M.size sizes ]
   CS.stm $ CS.funDef get_size_name (Primitive StringT) [(intT, "i")]
     [ Return $ Index (Var "size_names") (IdxExp $ Var "i") ]
-
   CS.stm $ CS.funDef get_size_class (Primitive StringT) [(intT, "i")]
     [ Return $ Index (Var "size_classes") (IdxExp $ Var "i") ]
+  CS.stm $ CS.funDef get_size_entry (Primitive StringT) [(intT, "i")]
+    [ Return $ Index (Var "size_entry_points") (IdxExp $ Var "i") ]
 
   let cfg = CS.publicName "context_config"
   let new_cfg = CS.publicName "context_config_new"

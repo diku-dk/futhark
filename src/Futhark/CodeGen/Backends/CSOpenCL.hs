@@ -81,60 +81,37 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionArgument = NoArgument
                       , optionAction = [Escape "futhark_context_config_set_debugging(ref cfg, true);"]
                       }
-             ]
-
-{-
              , Option { optionLongName = "default-group-size"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument
-                      , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
+                      , optionAction = [Escape "futhark_context_config_set_default_group_size(ref cfg, Convert.ToInt32(optarg));"]
                       }
              , Option { optionLongName = "default-num-groups"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument
-                      , optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
+                      , optionAction = [Escape "futhark_context_config_set_default_num_groups(ref cfg, Convert.ToInt32(optarg));"]
                       }
              , Option { optionLongName = "default-tile-size"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument
-                      , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
+                      , optionAction = [Escape "futhark_context_config_set_default_tile_size(ref cfg, Convert.ToInt32(optarg));"]
                       }
              , Option { optionLongName = "default-threshold"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument
-                      , optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
+                      , optionAction = [Escape "futhark_context_config_set_default_threshold(ref cfg, Convert.ToInt32(optarg));"]
                       }
              , Option { optionLongName = "print-sizes"
                       , optionShortName = Nothing
                       , optionArgument = NoArgument
-                      , optionAction = [C.cstm|{
-                          int n = futhark_get_num_sizes();
-                          for (int i = 0; i < n; i++) {
-                            printf("%s (%s)\n", futhark_get_size_name(i),
-                                                futhark_get_size_class(i));
-                          }
-                          exit(0);
-                        }|]
+                      , optionAction = [Escape "futhark_config_print_sizes();"]
                       }
              , Option { optionLongName = "size"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument
-                      , optionAction = [C.cstm|{
-                          char *name = optarg;
-                          char *equals = strstr(optarg, "=");
-                          char *value_str = equals != NULL ? equals+1 : optarg;
-                          int value = atoi(value_str);
-                          if (equals != NULL) {
-                            *equals = 0;
-                            if (futhark_context_config_set_size(cfg, name, value) != 0) {
-                              panic(1, "Unknown size: %s\n", name);
-                            }
-                          } else {
-                            panic(1, "Invalid argument for size option: %s\n", optarg);
-                          }}|]
+                      , optionAction = [Escape "futhark_config_set_size(ref cfg, optarg);"]
                       }
              ]
--}
 
 
 comment :: String -> CSStmt

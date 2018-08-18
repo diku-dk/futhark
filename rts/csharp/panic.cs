@@ -1,8 +1,8 @@
 void panic(int exitcode, string str, params Object[] args)
 {
     var prog_name = Environment.GetCommandLineArgs()[0];
-    Console.Error.Write(String.Format("{0}:", prog_name));
-    Console.Error.Write(String.Format(str, args));
+    Console.Error.WriteLine(String.Format("{0}:", prog_name));
+    Console.Error.WriteLine(String.Format(str, args));
     Environment.Exit(exitcode);
 }
 
