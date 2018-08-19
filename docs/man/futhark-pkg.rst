@@ -13,7 +13,7 @@ futhark-pkg add PKGPATH [X.Y.Z]
 
 futhark-pkg check
 
-futhark-pkg create PKGPATH
+futhark-pkg init PKGPATH
 
 futhark-pkg fmt
 
@@ -45,7 +45,7 @@ should fail for any reason, you can recover the old state by moving
 ``lib~old`` back.  These temporary directories are erased if
 ``futhark-pkg`` finishes without errors.
 
-The ``futhark-pkg sync`` and ``futhark-pkg create`` subcommands are
+The ``futhark-pkg sync`` and ``futhark-pkg init`` subcommands are
 the only ones that actually modifies ``lib/``; the others modify only
 ``futhark.pkg`` and require you to manually run ``futhark-pkg sync``
 afterwards.
@@ -76,8 +76,8 @@ that these versions contain well-formed code.  If a package path is
 defined in ``futhark.pkg``, also checks that ``.fut`` files are
 located at the expected location in the file system.
 
-futhark-pkg create PKGPATH
---------------------------
+futhark-pkg init PKGPATH
+------------------------
 
 Create a new ``futhark.pkg`` defining a package with the given package
 path, and initially no requirements.
@@ -135,7 +135,7 @@ EXAMPLES
 Create a new package that will be hosted at
 ``https://github.com/sturluson/edda``::
 
-  futhark-pkg create github.com/sturluson/edda
+  futhark-pkg init github.com/sturluson/edda
 
 Add a package dependency::
 

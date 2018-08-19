@@ -175,7 +175,7 @@ to users of the package.  The repository may contain other things
 are ignored by ``futhark-pkg``.  This structure can be created
 automatically by running for example::
 
-  $ futhark-pkg create github.com/sturluson/edda
+  $ futhark-pkg init github.com/sturluson/edda
 
 Note again, no ``https://``.  The result is this ``futhark.pkg``::
 
@@ -196,7 +196,7 @@ And this file hierarchy:
 
    3 directories, 0 files
 
-Note that ``futhark-pkg create`` is not necessary simply to *use*
+Note that ``futhark-pkg init`` is not necessary simply to *use*
 packages, only when *creating* packages.
 
 When creating a package, the ``.fut`` files we are writing will be
