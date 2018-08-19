@@ -292,8 +292,8 @@ doRemove = cmdMain "remove PKGPATH" $ \args cfg ->
           putPkgManifest m'
           liftIO $ T.putStrLn $ "Removed " <> p <> " " <> prettySemVer (requiredPkgRev r) <> "."
 
-doCreate :: IO ()
-doCreate = cmdMain "create PKGPATH" $ \args cfg ->
+doInit :: IO ()
+doInit = cmdMain "create PKGPATH" $ \args cfg ->
   case args of
     [p] -> Just $ runPkgM cfg $ doCreate' $ T.pack p
     _ -> Nothing
@@ -351,8 +351,8 @@ main = do
                     (doAdd, "Add another required package to futhark.pkg."))
                  , ("check",
                     (doCheck, "Check that futhark.pkg is satisfiable."))
-                 , ("create",
-                    (doCreate, "Create a new futhark.pkg and a lib/ skeleton."))
+                 , ("init",
+                    (doInit, "Create a new futhark.pkg and a lib/ skeleton."))
                  , ("fmt",
                     (doFmt, "Reformat futhark.pkg."))
                  , ("sync",
