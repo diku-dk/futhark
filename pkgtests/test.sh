@@ -42,7 +42,7 @@ fail () {
 # Clean up after previous test runs.
 rm -rf futhark.pkg lib
 
-succeed futhark-pkg create github.com/sturluson/testpkg
+succeed futhark-pkg init github.com/sturluson/testpkg
 
 succeed futhark-pkg add github.com/athas/fut-foo 0.1.0
 
