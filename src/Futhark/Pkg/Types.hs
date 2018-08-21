@@ -41,6 +41,7 @@ import Data.Foldable
 import Data.List
 import Data.Maybe
 import Data.Traversable
+import Data.Ord (comparing)
 import Data.Void
 import Data.Semigroup ((<>))
 import qualified Data.Semigroup as Sem
@@ -293,5 +294,5 @@ newtype BuildList = BuildList { unBuildList :: M.Map PkgPath SemVer }
 -- | Prettyprint a build list; one package per line and
 -- newline-terminated.
 prettyBuildList :: BuildList -> T.Text
-prettyBuildList (BuildList m) = T.unlines $ map f $ M.toList m
+prettyBuildList (BuildList m) = T.unlines $ map f $ sortBy (comparing fst) $ M.toList m
   where f (p, v) = T.unwords [p, "=>", prettySemVer v]

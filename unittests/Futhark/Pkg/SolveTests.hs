@@ -34,6 +34,10 @@ testEnv = M.fromList $ concatMap frob
                                      , ("athas/baz", "0.1.0") ])])
               , ("quux_perm", [ ("0.1.0", [ ("athas/baz", "0.1.0")
                                           , ("athas/foo", "0.2.0")])])
+              , ("x_bar", [ ("1.0.0", [("athas/bar", "1.0.0")])])
+              , ("x_foo", [ ("1.0.0", [("athas/foo", "0.3.0")])])
+              , ("tricky", [ ("1.0.0", [ ("athas/foo", "0.2.0")
+                                       , ("athas/x_foo", "1.0.0")])])
               ])
 
   -- Some mutually recursive packages.
@@ -48,14 +52,20 @@ testEnv = M.fromList $ concatMap frob
               deps' = PkgRevDeps $ M.fromList $ map onDep deps
           return ((user <> "/" <> repo, rev'), deps')
 
+newtype SolverRes = SolverRes BuildList
+                    deriving (Eq)
+
+instance Show SolverRes where
+  show (SolverRes bl) = T.unpack $ prettyBuildList bl
+
 solverTest :: PkgPath -> T.Text -> Either T.Text [(PkgPath, T.Text)] -> TestTree
 solverTest p v expected =
   testCase (T.unpack $ p <> "-" <> prettySemVer v') $
-  fmap unBuildList (solveDepsPure testEnv target)
+  fmap SolverRes (solveDepsPure testEnv target)
   @?= expected'
   where target = PkgRevDeps $ M.singleton p (v', Nothing)
         v' = semverE v
-        expected' = M.fromList . map onRes <$> expected
+        expected' = SolverRes . BuildList . M.fromList . map onRes <$> expected
         onRes (dp, dv) = (dp, semverE dv)
 
 tests :: TestTree
@@ -91,4 +101,9 @@ tests = testGroup "SolveTests"
   , solverTest "nasty/foo" "1.0.0" $
     Right [ ("nasty/foo", "1.0.0")
           , ("nasty/bar", "1.0.0")]
+
+  , solverTest "athas/tricky" "1.0.0" $
+    Right [ ("athas/tricky", "1.0.0")
+          , ("athas/foo", "0.3.0")
+          , ("athas/x_foo", "1.0.0")]
   ]

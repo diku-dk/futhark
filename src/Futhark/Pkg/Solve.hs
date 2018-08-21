@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- | Dependency solver
 --
 -- This is a relatively simple problem due to the choice of the
@@ -11,6 +12,7 @@ module Futhark.Pkg.Solve
   ) where
 
 import Control.Monad.State
+import qualified Data.Set as S
 import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Monoid ((<>))
@@ -28,65 +30,56 @@ instance Functor PkgOp where
   fmap f (OpGetDeps p v h c) = OpGetDeps p v h (f . c)
 
 -- | A rough build list is like a build list, but may contain packages
--- that are not reachable from the root, and also contains a *reason*
--- for why each package is included.  It is sorted, such that any
--- package in the list can only be included due to a package later in
--- the list.  If the reason is 'Nothing', then it is a root package.
--- Unnecessary packages may be present if they were dependencies of
--- package revisions that were later bumped.
-newtype RoughBuildList = RoughBuildList [(PkgPath, (SemVer, Maybe (PkgPath, SemVer)))]
+-- that are not reachable from the root.  Also contains the
+-- dependencies of each package.
+newtype RoughBuildList = RoughBuildList (M.Map PkgPath (SemVer, [PkgPath]))
                        deriving (Show)
 
 emptyRoughBuildList :: RoughBuildList
 emptyRoughBuildList = RoughBuildList mempty
 
+depRoots :: PkgRevDeps -> S.Set PkgPath
+depRoots (PkgRevDeps m) = S.fromList $ M.keys m
+
 -- | Construct a 'BuildList' from a 'RoughBuildList'.  This involves
--- pruning all packages that cannot be reached from the specified
--- root.
-buildList :: RoughBuildList -> BuildList
-buildList (RoughBuildList []) =
-  BuildList mempty
-buildList (RoughBuildList ((p, (p_v, cause)) : l)) =
-  let BuildList m = buildList $ RoughBuildList l
-      keep = case cause of
-               Just (cause_p, cause_v) -> Just cause_v == M.lookup cause_p m
-               Nothing                 -> True
-  in if keep
-     then BuildList $ M.insertWith max p p_v m
-     else BuildList m
+-- pruning all packages that cannot be reached from the root.
+buildList :: S.Set PkgPath -> RoughBuildList -> BuildList
+buildList roots (RoughBuildList pkgs) =
+  BuildList $ execState (mapM_ addPkg roots) mempty
+  where addPkg p = case M.lookup p pkgs of
+                     Nothing -> return ()
+                     Just (v, deps) -> do
+                       listed <- gets $ M.member p
+                       modify $ M.insert p v
+                       unless listed $ mapM_ addPkg deps
 
 type SolveM = StateT RoughBuildList (Free PkgOp)
 
 getDeps :: PkgPath -> SemVer -> Maybe T.Text -> SolveM PkgRevDeps
 getDeps p v h = lift $ Free $ OpGetDeps p v h return
 
-notAlreadySeen :: (PkgPath, (SemVer, a)) -> SolveM Bool
-notAlreadySeen x = do
-  RoughBuildList l <- get
-  return $ pkgVerPairs x `notElem` map pkgVerPairs l
-  where pkgVerPairs (p, (v, _)) = (p, v)
-
-ensureFulfilled :: (PkgPath, (SemVer, Maybe T.Text)) -> SolveM ()
-ensureFulfilled (dep, (v, maybe_h)) = do
-  PkgRevDeps dep_deps <- getDeps dep v maybe_h
-  new_deps <- filterM notAlreadySeen $ M.toList dep_deps
-  modify $ \(RoughBuildList l) ->
-    RoughBuildList $ [(p, (p_v, Just (dep, v))) | (p, (p_v, _)) <- new_deps] ++ l
-  mapM_ ensureFulfilled new_deps
-
 -- | Given a list of immediate dependency minimum version constraints,
 -- find dependency versions that fit, including transitive
 -- dependencies.
 doSolveDeps :: PkgRevDeps -> SolveM ()
-doSolveDeps (PkgRevDeps deps) = do
-  put $ RoughBuildList [(p, (p_v, Nothing)) | (p, (p_v, _)) <- M.toList deps]
-  mapM_ ensureFulfilled $ M.toList deps
+doSolveDeps (PkgRevDeps deps) = mapM_ add $ M.toList deps
+  where add (p, (v, maybe_h)) = do
+          RoughBuildList l <- get
+          case M.lookup p l of
+            -- Already satisfied?
+            Just (cur_v, _) | v <= cur_v -> return ()
+            -- No; add 'p' and its dependencies.
+            _ -> do
+              PkgRevDeps p_deps <- getDeps p v maybe_h
+              put $ RoughBuildList $ M.insert p (v, M.keys p_deps) l
+              mapM_ add $ M.toList p_deps
 
 -- | Run the solver, producing both a package registry containing
 -- a cache of the lookups performed, as well as a build list.
 solveDeps :: MonadPkgRegistry m =>
              PkgRevDeps -> m BuildList
-solveDeps deps = fmap buildList $ step $ execStateT (doSolveDeps deps) emptyRoughBuildList
+solveDeps deps = fmap (buildList $ depRoots deps) $ step $
+                 execStateT (doSolveDeps deps) emptyRoughBuildList
   where step (Pure x) = return x
         step (Free (OpGetDeps p v h c)) = do
           pinfo <- lookupPackageRev p v
@@ -112,7 +105,8 @@ type PkgRevDepInfo = M.Map (PkgPath, SemVer) PkgRevDeps
 -- | Perform package resolution with only pre-known information.  This
 -- is useful for testing.
 solveDepsPure :: PkgRevDepInfo -> PkgRevDeps -> Either T.Text BuildList
-solveDepsPure r deps = fmap buildList $ step $ execStateT (doSolveDeps deps) emptyRoughBuildList
+solveDepsPure r deps = fmap (buildList $ depRoots deps) $ step $
+                       execStateT (doSolveDeps deps) emptyRoughBuildList
   where step (Pure x) = Right x
         step (Free (OpGetDeps p v _ c)) = do
           let errmsg = "Unknown package/version: " <> p <> "-" <> prettySemVer v
