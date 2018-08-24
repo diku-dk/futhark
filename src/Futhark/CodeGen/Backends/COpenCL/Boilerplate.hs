@@ -36,25 +36,25 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.libDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
   GC.libDecl [C.cedecl|static const char *size_entry_points[] = { $inits:size_entry_points_inits };|]
 
-  GC.publicDef "get_num_sizes" GC.InitDecl $ \s ->
+  GC.publicDef_ "get_num_sizes" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(void);|],
      [C.cedecl|int $id:s(void) {
                 return $int:(M.size sizes);
               }|])
 
-  GC.publicDef "get_size_name" GC.InitDecl $ \s ->
+  GC.publicDef_ "get_size_name" GC.InitDecl $ \s ->
     ([C.cedecl|const char* $id:s(int);|],
      [C.cedecl|const char* $id:s(int i) {
                 return size_names[i];
               }|])
 
-  GC.publicDef "get_size_class" GC.InitDecl $ \s ->
+  GC.publicDef_ "get_size_class" GC.InitDecl $ \s ->
     ([C.cedecl|const char* $id:s(int);|],
      [C.cedecl|const char* $id:s(int i) {
                 return size_classes[i];
               }|])
 
-  GC.publicDef "get_size_entry" GC.InitDecl $ \s ->
+  GC.publicDef_ "get_size_entry" GC.InitDecl $ \s ->
     ([C.cedecl|const char* $id:s(int);|],
      [C.cedecl|const char* $id:s(int i) {
                 return size_entry_points[i];
@@ -83,6 +83,12 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
 
                          cfg->opencl.transpose_block_dim = $int:(transposeBlockDim::Int);
                          return cfg;
+                       }|])
+
+  GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         free(cfg);
                        }|])
 
   GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
@@ -234,7 +240,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          return error;
                        }|])
 
-  GC.publicDef "context_clear_caches" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_clear_caches" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                          OPENCL_SUCCEED(opencl_free_all(&ctx->opencl));
