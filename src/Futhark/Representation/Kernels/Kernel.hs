@@ -66,7 +66,7 @@ import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import qualified Futhark.Analysis.Range as Range
-import Futhark.Util (maybeNth)
+import Futhark.Util (chunks, maybeNth)
 
 -- | Some information about what goes into a kernel, and where it came
 -- from.  Has no semantic meaning; only used for debugging generated
@@ -145,19 +145,29 @@ data KernelResult lore = ThreadsReturn WhichThreads SubExp
                          VName -- Chunk by this thread.
                        | KernelInPlaceReturn VName -- HACK!
                        | CombiningReturn
-                         [SubExp] -- Size of destination array.
-                         VName -- Destination array.
-                         SubExp -- Index.
-                         SubExp -- Value.
+                         [[SubExp]] -- Size of destination array(s).
+                         [VName] -- Destination array(s).
+                         [SubExp] -- Multi-dimensional index.
+                         [SubExp] -- Value(s).
                          (LambdaT lore) -- Combining operator.
                   deriving (Eq, Show, Ord)
 
-kernelResultSubExp :: KernelResult lore -> SubExp
-kernelResultSubExp (ThreadsReturn _ se) = se
-kernelResultSubExp (WriteReturn _ arr _) = Var arr
-kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
-kernelResultSubExp (KernelInPlaceReturn v) = Var v
-kernelResultSubExp (CombiningReturn _ arr _ _ _) = Var arr
+kernelResultSubExp :: KernelResult lore -> [SubExp]
+kernelResultSubExp (ThreadsReturn _ se) = [se]
+kernelResultSubExp (WriteReturn _ arr _) = [Var arr]
+kernelResultSubExp (ConcatReturns _ _ _ _ v) = [Var v]
+kernelResultSubExp (KernelInPlaceReturn v) = [Var v]
+kernelResultSubExp (CombiningReturn _ _ _ vals _) = vals
+
+-- What does a single KernelResult return. This is primarily
+-- used for obtaining the length of the returned list, which
+-- should be one except possibly for CombiningReturn.
+kernelResultReturn :: KernelResult lore -> [SubExp]
+kernelResultReturn (ThreadsReturn _ what) = [what]
+kernelResultReturn (WriteReturn _ arr _) = [Var arr]
+kernelResultReturn (ConcatReturns _ _ _ _ _) = []
+kernelResultReturn (KernelInPlaceReturn what) = [Var what]
+kernelResultReturn (CombiningReturn _ arrs _ _ _) = map Var arrs
 
 data WhichThreads = AllThreads
                   | OneResultPerGroup
@@ -397,26 +407,29 @@ instance Attributes lore => Rename (Kernel lore) where
 
 kernelType :: Kernel lore -> [Type]
 kernelType (Kernel _ space ts body) =
-  zipWith resultShape ts $ kernelBodyResult body
+  concat $ zipWith resultShape (chunks kres_lens ts) $ kernelBodyResult body
   where dims = map snd $ spaceDimensions space
         num_groups = spaceNumGroups space
         num_threads = spaceNumThreads space
-        resultShape t (WriteReturn rws _ _) =
-          t `arrayOfShape` Shape rws
-        resultShape t (ThreadsReturn AllThreads _) =
-          t `arrayOfRow` num_threads
-        resultShape t (ThreadsReturn OneResultPerGroup _) =
-          t `arrayOfRow` num_groups
-        resultShape t (ThreadsReturn (ThreadsPerGroup limit) _) =
-          t `arrayOfShape` Shape (map snd limit) `arrayOfRow` num_groups
-        resultShape t (ThreadsReturn ThreadsInSpace _) =
-          foldr (flip arrayOfRow) t dims
-        resultShape t (ConcatReturns _ w _ _ _) =
-          t `arrayOfRow` w
-        resultShape t KernelInPlaceReturn{} =
-          t
-        resultShape t (CombiningReturn ws _ _ _ _) =
-          t `arrayOfShape` Shape ws
+        kres_lens = map (length . kernelResultReturn) $ kernelBodyResult body
+        resultShape [t] (WriteReturn rws _ _) =
+          [t `arrayOfShape` Shape rws]
+        resultShape [t] (ThreadsReturn AllThreads _) =
+          [t `arrayOfRow` num_threads]
+        resultShape [t] (ThreadsReturn OneResultPerGroup _) =
+          [t `arrayOfRow` num_groups]
+        resultShape [t] (ThreadsReturn (ThreadsPerGroup limit) _) =
+          [t `arrayOfShape` Shape (map snd limit) `arrayOfRow` num_groups]
+        resultShape [t] (ThreadsReturn ThreadsInSpace _) =
+          [foldr (flip arrayOfRow) t dims]
+        resultShape [t] (ConcatReturns _ w _ _ _) =
+          [t `arrayOfRow` w]
+        resultShape [t] KernelInPlaceReturn{} =
+          [t]
+        resultShape ts' (CombiningReturn szs _ _ _ _) =
+          map (\(t, sz) -> rowType t `arrayOfShape` Shape sz) $ zip ts' szs
+        resultShape _ _ =
+          undefined -- this should not be possible
 
 kernelType GetSize{} = [Prim int32]
 kernelType GetSizeMax{} = [Prim int32]
@@ -513,7 +526,7 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) w
                 Range.analyseBody return return addKernelBodyRanges
           addKernelBodyRanges (KernelBody attr stms res) =
             Range.analyseStms stms $ \stms' -> do
-            let attr' = (mkBodyRanges stms $ map kernelResultSubExp res, attr)
+            let attr' = (mkBodyRanges stms $ concatMap kernelResultSubExp res, attr)
             res' <- mapM addKernelResultRanges res
             return $ KernelBody attr' stms' res'
 
@@ -631,15 +644,16 @@ typeCheckKernel (Kernel _ space kts kbody) = do
         checkKernelBody ts (KernelBody (_, attr) stms res) = do
           TC.checkBodyLore attr
           TC.checkStms stms $ do
-            unless (length ts == length res) $
+            unless (length ts == (length $ concatMap kernelResultReturn res)) $
               TC.bad $ TC.TypeError $ "Kernel return type is " ++ prettyTuple ts ++
               ", but body returns " ++ show (length res) ++ " values."
-            zipWithM_ checkKernelResult res ts
+            let res_lens = map (length . kernelResultReturn) res
+            zipWithM_ checkKernelResult res $ chunks res_lens ts
 
         checkKernelResult (ThreadsReturn which what) t = do
           checkWhich which
-          TC.require [t] what
-        checkKernelResult (WriteReturn rws arr res) t = do
+          TC.require t what
+        checkKernelResult (WriteReturn rws arr res) [t] = do
           mapM_ (TC.require [Prim int32]) rws
           arr_t <- lookupType arr
           forM_ res $ \(is, e) -> do
@@ -650,7 +664,7 @@ typeCheckKernel (Kernel _ space kts kbody) = do
               pretty e ++ " of type " ++ pretty t ++ ", shape=" ++ pretty rws ++
               ", but destination array has type " ++ pretty arr_t
           TC.consume =<< TC.lookupAliases arr
-        checkKernelResult (ConcatReturns o w per_thread_elems moffset v) t = do
+        checkKernelResult (ConcatReturns o w per_thread_elems moffset v) [t] = do
           case o of
             SplitContiguous     -> return ()
             SplitStrided stride -> TC.require [Prim int32] stride
@@ -661,30 +675,40 @@ typeCheckKernel (Kernel _ space kts kbody) = do
           unless (vt == t `arrayOfRow` arraySize 0 vt) $
             TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
         checkKernelResult (KernelInPlaceReturn what) t =
-          TC.requireI [t] what
+          TC.requireI t what
 
-        checkKernelResult (CombiningReturn szs arr ind val lam) t = do
-          mapM_ (TC.require [Prim int32]) szs
-          arr_t <- lookupType arr
+        checkKernelResult (CombiningReturn szs arrs ind vals lam) ts = do
+          mapM_ (TC.require [Prim int32]) $ concat szs
+          -- arr_ts <- mapM lookupType arrs
 
-          unless (arr_t == t `arrayOfShape` Shape szs) $
-            TC.bad $ TC.TypeError $ "CombiningReturn returning " ++
-            pretty val ++ " of type " ++ pretty t ++ ", shape=" ++ pretty szs ++
-            ", but destination array has type " ++ pretty arr_t
+          -- -- should be (zip arrs inds vals) when inds are multi-dim
+          -- -- forM_ (zip arrs vals) $ \(arr, val) ->
+          -- --   unless (peelArray ind arr == val)
+          -- --     TC.bad $ TC.TypeError $ "Something"
 
-          TC.require [Prim int32] ind
-          TC.require [t] val
+          -- forM_ (zip4 szs arr_ts vals ts) $ \(sz, arr_t, val, t) ->
+          --   -- when the bucket function is fixed s.t. it can
+          --   -- return multi-dim indices we should also fix
+          --   -- this, i.e., rowType should be stripArray of
+          --   -- the length of the ind
+          --   unless (arr_t == t) $ -- `arrayOfShape` Shape sz) $
+          --     TC.bad $ TC.TypeError $ "CombiningReturn returning " ++
+          --     pretty val ++ " of type " ++ pretty t ++ ", shape=" ++ pretty sz ++
+          --     ", but destination array has type " ++ pretty arr_t
 
-          -- check lambda params
-          val' <- TC.checkArg val
-          TC.checkLambda lam $ map TC.noArgAliases [val', val']
+          -- mapM_ (TC.require [Prim int32]) ind
+          -- --forM_ (zip vals ts) $ \(val, t) -> TC.require [t] val
 
-          -- check lambda result
-          let lam_ret_t = map TC.argType [val', val']
-          unless (lam_ret_t == lambdaReturnType lam) $
-            TC.bad $ TC.TypeError $ "Operator has return type " ++
-            prettyTuple (lambdaReturnType lam) ++ " but should have type " ++
-            prettyTuple lam_ret_t
+          -- -- check lambda params
+          -- vals' <- mapM TC.checkArg vals
+          -- TC.checkLambda lam $ map TC.noArgAliases $ vals' ++ vals'
+
+          -- -- check lambda result
+          -- let lam_ret_t = map TC.argType vals'
+          -- unless (lam_ret_t == lambdaReturnType lam) $
+          --   TC.bad $ TC.TypeError $ "Operator has return type " ++
+          --   prettyTuple (lambdaReturnType lam) ++ " but should have type " ++
+          --   prettyTuple lam_ret_t
 
         checkWhich AllThreads = return ()
         checkWhich OneResultPerGroup = return ()
@@ -692,7 +716,6 @@ typeCheckKernel (Kernel _ space kts kbody) = do
         checkWhich (ThreadsPerGroup limit) = do
           mapM_ (TC.requireI [Prim int32] . fst) limit
           mapM_ (TC.require [Prim int32] . snd) limit
-
 
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (Kernel _ _ _ kbody) =
@@ -768,4 +791,4 @@ instance PrettyLore lore => Pretty (KernelResult lore) where
   ppr (KernelInPlaceReturn what) =
     text "kernel returns" <+> ppr what
   ppr (CombiningReturn szs arr ind val lam) =
-    ppr arr <+> text "with" <+> ppr ind <+> text "<" <+> ppr szs <+> text "<-" <+> ppr val <+> text "using" <+> ppr lam
+    ppr arr <+> text "with" <+> ppr ind <+> text "<-" <+> ppr val <+> text "using" <+> ppr lam

@@ -443,6 +443,46 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
     addStms bnds
     letBind_ pat $ Op kernel
 
+transformStm _ (Let pat (StmAux cs _) (Op (GenReduce w hists ops _nes bucket_fun imgs))) = runBinder_ $ do
+  bfun' <- Kernelise.transformLambda bucket_fun
+  ops' <- mapM Kernelise.transformLambda ops
+  arr_dims <- mapM (fmap arrayDims . lookupType . snd) hists
+
+  -- create kernel input, body, and result
+  write_i <- newVName "write_i"
+
+  let kstms = bodyStms $ lambdaBody bfun'
+      (_, arrs) = unzip hists
+
+      lens = length ops
+      inds = take lens $ bodyResult $ lambdaBody bfun'
+      vals = chunks (map (length . lambdaParams) ops) $
+             drop lens $ bodyResult $ lambdaBody bfun'
+      arrs' = chunks (map (length . lambdaParams) ops) $ arrs
+
+      arr_dims' = chunks (map (length . lambdaParams) ops) arr_dims
+
+      krets = map (\(dim, as, ind, vs, op) ->
+                     CombiningReturn dim as [ind] vs op)
+              (zip5 arr_dims' arrs' inds vals ops')
+
+      body = KernelBody () kstms krets
+
+      -- inputs to kernel goes to bucket function
+      inputs = map (\(a, p) -> KernelInput (paramName p) (paramType p) a [Var write_i])
+               (zip imgs $ lambdaParams bfun')
+
+  -- bindings and kernel
+  (bnds, kernel) <-
+    -- I do not quite understand why the result of the
+    -- kernel is only the rowtypes of the pattern
+    -- mapKernel w (FlatThreadSpace [(write_i, w)]) inputs (map rowType $ patternTypes pat) body
+    mapKernel w (FlatThreadSpace [(write_i, w)]) inputs (patternTypes pat) body
+
+  certifying cs $ do
+    addStms bnds
+    letBind_ pat $ Op kernel
+
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
 

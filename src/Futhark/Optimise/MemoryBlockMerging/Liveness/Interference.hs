@@ -132,7 +132,7 @@ lookInKernelBody :: LoreConstraints lore =>
                     KernelBody lore -> FindM lore ()
 lookInKernelBody (KernelBody _ bnds res) = do
   mapM_ lookInStm bnds
-  lookInRes $ map kernelResultSubExp res
+  lookInRes $ concatMap kernelResultSubExp res
 
 awakenFirstUses :: [PatElem lore] -> FindM lore ()
 awakenFirstUses patvalelems =
