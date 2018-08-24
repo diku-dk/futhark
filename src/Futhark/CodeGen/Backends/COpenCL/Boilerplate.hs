@@ -36,68 +36,42 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.libDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
   GC.libDecl [C.cedecl|static const char *size_entry_points[] = { $inits:size_entry_points_inits };|]
 
-  get_num_sizes <- GC.publicName "get_num_sizes"
-  get_size_name <- GC.publicName "get_size_name"
-  get_size_class <- GC.publicName "get_size_class"
-  get_size_entry <- GC.publicName "get_size_entry"
-
-  GC.headerDecl GC.InitDecl [C.cedecl|int $id:get_num_sizes(void);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_name(int);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_class(int);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_entry(int);|]
-
-  GC.libDecl [C.cedecl|int $id:get_num_sizes(void) {
+  GC.publicDef "get_num_sizes" GC.InitDecl $ \s ->
+    ([C.cedecl|int $id:s(void);|],
+     [C.cedecl|int $id:s(void) {
                 return $int:(M.size sizes);
-              }|]
-  GC.libDecl [C.cedecl|const char* $id:get_size_name(int i) {
+              }|])
+
+  GC.publicDef "get_size_name" GC.InitDecl $ \s ->
+    ([C.cedecl|const char* $id:s(int);|],
+     [C.cedecl|const char* $id:s(int i) {
                 return size_names[i];
-              }|]
-  GC.libDecl [C.cedecl|const char* $id:get_size_class(int i) {
+              }|])
+
+  GC.publicDef "get_size_class" GC.InitDecl $ \s ->
+    ([C.cedecl|const char* $id:s(int);|],
+     [C.cedecl|const char* $id:s(int i) {
                 return size_classes[i];
-              }|]
-  GC.libDecl [C.cedecl|const char* $id:get_size_entry(int i) {
+              }|])
+
+  GC.publicDef "get_size_entry" GC.InitDecl $ \s ->
+    ([C.cedecl|const char* $id:s(int);|],
+     [C.cedecl|const char* $id:s(int i) {
                 return size_entry_points[i];
-              }|]
-
-  cfg <- GC.publicName "context_config"
-  new_cfg <- GC.publicName "context_config_new"
-  free_cfg <- GC.publicName "context_config_free"
-  cfg_set_debugging <- GC.publicName "context_config_set_debugging"
-  cfg_set_logging <- GC.publicName "context_config_set_logging"
-  cfg_set_device <- GC.publicName "context_config_set_device"
-  cfg_set_platform <- GC.publicName "context_config_set_platform"
-  cfg_dump_program_to <- GC.publicName "context_config_dump_program_to"
-  cfg_load_program_from <- GC.publicName "context_config_load_program_from"
-  cfg_set_default_group_size <- GC.publicName "context_config_set_default_group_size"
-  cfg_set_default_num_groups <- GC.publicName "context_config_set_default_num_groups"
-  cfg_set_default_tile_size <- GC.publicName "context_config_set_default_tile_size"
-  cfg_set_default_threshold <- GC.publicName "context_config_set_default_threshold"
-  cfg_set_size <- GC.publicName "context_config_set_size"
-
-  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg;|]
-  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg* $id:new_cfg(void);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int flag);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_device(struct $id:cfg* cfg, const char *s);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_platform(struct $id:cfg* cfg, const char *s);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_dump_program_to(struct $id:cfg* cfg, const char *path);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_load_program_from(struct $id:cfg* cfg, const char *path);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_default_group_size(struct $id:cfg* cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_default_num_groups(struct $id:cfg* cfg, int num);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_default_tile_size(struct $id:cfg* cfg, int num);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_default_threshold(struct $id:cfg* cfg, int num);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|int $id:cfg_set_size(struct $id:cfg* cfg, const char *size_name, size_t size_value);|]
+              }|])
 
   let size_decls = map (\k -> [C.csdecl|size_t $id:k;|]) $ M.keys sizes
   GC.libDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
-  GC.libDecl [C.cedecl|struct $id:cfg {
-                         struct opencl_config opencl;
-                         size_t sizes[$int:(M.size sizes)];
-                       };|]
+  cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
+    ([C.cedecl|struct $id:s;|],
+     [C.cedecl|struct $id:s { struct opencl_config opencl;
+                              size_t sizes[$int:(M.size sizes)];
+                            };|])
 
   let size_value_inits = map (\i -> [C.cstm|cfg->sizes[$int:i] = 0;|]) [0..M.size sizes-1]
-  GC.libDecl [C.cedecl|struct $id:cfg* $id:new_cfg(void) {
+  GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
+    ([C.cedecl|struct $id:cfg* $id:s(void);|],
+     [C.cedecl|struct $id:cfg* $id:s(void) {
                          struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
                          if (cfg == NULL) {
                            return NULL;
@@ -109,43 +83,73 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
 
                          cfg->opencl.transpose_block_dim = $int:(transposeBlockDim::Int);
                          return cfg;
-                       }|]
-  GC.libDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg) {
-                         free(cfg);
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag) {
+                       }|])
+
+  GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
                          cfg->opencl.logging = cfg->opencl.debugging = flag;
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int flag) {
+                       }|])
+
+  GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
                          cfg->opencl.logging = flag;
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_device(struct $id:cfg* cfg, const char *s) {
+                       }|])
+
+  GC.publicDef_ "context_config_set_device" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s) {
                          set_preferred_device(&cfg->opencl, s);
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_platform(struct $id:cfg* cfg, const char *s) {
+                       }|])
+
+  GC.publicDef_ "context_config_set_platform" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s) {
                          set_preferred_platform(&cfg->opencl, s);
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_dump_program_to(struct $id:cfg* cfg, const char *path) {
+                       }|])
+
+  GC.publicDef_ "context_config_dump_program_to" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
                          cfg->opencl.dump_program_to = path;
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_load_program_from(struct $id:cfg* cfg, const char *path) {
+                       }|])
+
+  GC.publicDef_ "context_config_load_program_from" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
                          cfg->opencl.load_program_from = path;
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_default_group_size(struct $id:cfg* cfg, int size) {
+                       }|])
+
+  GC.publicDef_ "context_config_set_default_group_size" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int size);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
                          cfg->opencl.default_group_size = size;
                          cfg->opencl.default_group_size_changed = 1;
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_default_num_groups(struct $id:cfg* cfg, int num) {
+                       }|])
+
+  GC.publicDef_ "context_config_set_default_num_groups" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int num) {
                          cfg->opencl.default_num_groups = num;
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_default_tile_size(struct $id:cfg* cfg, int size) {
+                       }|])
+
+  GC.publicDef_ "context_config_set_default_tile_size" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
                          cfg->opencl.default_tile_size = size;
                          cfg->opencl.default_tile_size_changed = 1;
-                       }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_default_threshold(struct $id:cfg* cfg, int size) {
+                       }|])
+
+  GC.publicDef_ "context_config_set_default_threshold" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
                          cfg->opencl.default_threshold = size;
-                       }|]
-  GC.libDecl [C.cedecl|int $id:cfg_set_size(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
+                       }|])
+
+  GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
+    ([C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
+     [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
 
                          for (int i = 0; i < $int:(M.size sizes); i++) {
                            if (strcmp(size_name, size_names[i]) == 0) {
@@ -154,25 +158,12 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                            }
                          }
                          return 1;
-                       }|]
-
-  ctx <- GC.publicName "context"
-  new_ctx <- GC.publicName "context_new"
-  free_ctx <- GC.publicName "context_free"
-  sync_ctx <- GC.publicName "context_sync"
-  error_ctx <- GC.publicName "context_get_error"
-  clear_caches_ctx <- GC.publicName "context_clear_caches"
-
-  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx;|]
-  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|int $id:clear_caches_ctx(struct $id:ctx* ctx);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|char* $id:error_ctx(struct $id:ctx* ctx);|]
+                       }|])
 
   (fields, init_fields) <- GC.contextContents
-
-  GC.libDecl [C.cedecl|struct $id:ctx {
+  ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
+    ([C.cedecl|struct $id:s;|],
+     [C.cedecl|struct $id:s {
                          int detail_memory;
                          int debugging;
                          int logging;
@@ -182,15 +173,16 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          $sdecls:ctx_opencl_fields
                          struct opencl_context opencl;
                          struct sizes sizes;
-                       };|]
+                       };|])
 
   mapM_ GC.libDecl later_top_decls
-
   let set_required_types = [ [C.cstm|required_types |= OPENCL_F64; |]
                            | FloatType Float64 `elem` types ]
       set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
                           [(0::Int)..] $ M.keys sizes
-  GC.libDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg) {
+  GC.publicDef_ "context_new" GC.InitDecl $ \s ->
+    ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
+     [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
                           struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
@@ -218,25 +210,36 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           $stms:set_sizes
 
                           return ctx;
-                       }|]
-  GC.libDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx) {
+                       }|])
+
+  GC.publicDef_ "context_free" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  free_lock(&ctx->lock);
                                  free(ctx);
-                               }|]
-  GC.libDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx) {
+                               }|])
+
+  GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
+    ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                          OPENCL_SUCCEED(clFinish(ctx->opencl.queue));
                          return 0;
-                       }|]
-  GC.libDecl [C.cedecl|char* $id:error_ctx(struct $id:ctx* ctx) {
+                       }|])
+
+  GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
+    ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
                          char* error = ctx->error;
                          ctx->error = NULL;
                          return error;
-                       }|]
+                       }|])
 
-  GC.libDecl [C.cedecl|int $id:clear_caches_ctx(struct $id:ctx* ctx) {
+  GC.publicDef "context_clear_caches" GC.InitDecl $ \s ->
+    ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                          OPENCL_SUCCEED(opencl_free_all(&ctx->opencl));
                          return 0;
-                       }|]
+                       }|])
 
   mapM_ GC.debugReport $ openClReport kernel_names
 
