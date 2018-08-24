@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * C# backend by Mikkel Storgaard Knudsen (`futhark-cs`/`futhark-csopencl`).
+
 ### Removed
 
 ### Changed
