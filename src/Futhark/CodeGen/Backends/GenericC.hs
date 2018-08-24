@@ -49,6 +49,8 @@ module Futhark.CodeGen.Backends.GenericC
   , decl
   , atInit
   , headerDecl
+  , publicDef
+  , publicDef_
   , debugReport
   , HeaderSection(..)
   , libDecl
@@ -369,6 +371,24 @@ instance C.ToExp PrimValue where
   toExp (BoolValue True) = C.toExp (1::Int8)
   toExp (BoolValue False) = C.toExp (0::Int8)
   toExp Checked = C.toExp (1::Int8)
+
+-- | Construct a publicly visible definition using the specified name
+-- as the template.  The first returned definition is put in the
+-- header file, and the second is the implementation.  Returns the public
+-- name.
+publicDef :: String -> HeaderSection -> (String -> (C.Definition, C.Definition))
+          -> CompilerM op s String
+publicDef s h f = do
+  s' <- publicName s
+  let (pub, priv) = f s'
+  headerDecl h pub
+  libDecl priv
+  return s'
+
+-- | As 'publicDef', but ignores the public name.
+publicDef_ :: String -> HeaderSection -> (String -> (C.Definition, C.Definition))
+           -> CompilerM op s ()
+publicDef_ s h f = void $ publicDef s h f
 
 headerDecl :: HeaderSection -> C.Definition -> CompilerM op s ()
 headerDecl sec def = modify $ \s ->

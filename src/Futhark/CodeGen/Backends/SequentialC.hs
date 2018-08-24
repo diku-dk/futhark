@@ -31,39 +31,35 @@ compileProg =
                      }
 
         generateContext = do
-          cfg <- GC.publicName "context_config"
-          new_cfg <- GC.publicName "context_config_new"
-          free_cfg <- GC.publicName "context_config_free"
-          cfg_set_debugging <- GC.publicName "context_config_set_debugging"
-          cfg_set_logging <- GC.publicName "context_config_set_logging"
-
-          GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg;|]
-          GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg* $id:new_cfg();|]
-          GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg);|]
-          GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag);|]
-          GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int flag);|]
-
-          GC.libDecl [C.cedecl|struct $id:cfg {
-                                 int debugging;
-                               };|]
-          GC.libDecl [C.cedecl|struct $id:cfg* $id:new_cfg() {
+          cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
+            ([C.cedecl|struct $id:s;|],
+             [C.cedecl|struct $id:s { int debugging; };|])
+          GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
+            ([C.cedecl|struct $id:cfg* $id:s();|],
+             [C.cedecl|struct $id:cfg* $id:s() {
                                  struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
                                  if (cfg == NULL) {
                                    return NULL;
                                  }
                                  cfg->debugging = 0;
                                  return cfg;
-                               }|]
-          GC.libDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg) {
+                               }|])
+          GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
+            ([C.cedecl|void $id:s(struct $id:cfg* cfg);|],
+             [C.cedecl|void $id:s(struct $id:cfg* cfg) {
                                  free(cfg);
-                               }|]
-          GC.libDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int detail) {
-                                 cfg->debugging = detail;
-                               }|]
-          GC.libDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int detail) {
+                               }|])
+          GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
+             ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+              [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
+                          cfg->debugging = detail;
+                        }|])
+          GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
+             ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+              [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
                                  /* Does nothing for this backend. */
                                  cfg = cfg; detail=detail;
-                               }|]
+                               }|])
 
           ctx <- GC.publicName "context"
           new_ctx <- GC.publicName "context_new"
