@@ -372,12 +372,12 @@ runTests config paths = do
                   T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
                   getResults $ ts' { testStatusFail = testStatusFail ts + 1}
 
-  ts <- getResults $ TestStatus { testStatusRemain = included
-                                , testStatusRun    = []
-                                , testStatusFail   = 0
-                                , testStatusPass   = 0
-                                , testStatusCases  = 0
-                                }
+  ts <- getResults TestStatus { testStatusRemain = included
+                              , testStatusRun    = []
+                              , testStatusFail   = 0
+                              , testStatusPass   = 0
+                              , testStatusCases  = 0
+                              }
   let excluded_str = if null excluded
                      then ""
                      else " (" ++ show (length excluded) ++ " excluded)"
