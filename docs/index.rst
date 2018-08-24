@@ -45,6 +45,8 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-opencl.rst
    man/futhark-py.rst
    man/futhark-pyopencl.rst
+   man/futhark-cs.rst
+   man/futhark-csopencl.rst
    man/futharki.rst
    man/futhark-test.rst
    man/futhark-bench.rst
