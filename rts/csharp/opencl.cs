@@ -489,12 +489,12 @@ private void SetPreferredDevice(ref OpenCLConfig cfg, string s)
     int i = 0;
     if (s[0] == '#') {
         i = 1;
-        while (char.IsDigit(s[i])) {
+        while (i < s.Length && char.IsDigit(s[i])) {
             x = x * 10 + (int) (s[i])-'0';
             i++;
         }
         // Skip trailing spaces.
-        while (char.IsWhiteSpace(s[i])) {
+        while (i < s.Length && char.IsWhiteSpace(s[i])) {
             i++;
         }
     }
