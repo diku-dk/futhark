@@ -25,8 +25,6 @@ module Futhark.CodeGen.Backends.GenericCSharp.AST
 import Language.Futhark.Core
 import Data.List(intersperse)
 import Futhark.Util.Pretty
-import Language.C.Quote.OpenCL()
-import qualified Language.C.Syntax as C
 
 data MemT = Pointer
           deriving (Eq, Show)
@@ -241,8 +239,6 @@ data CSStmt = If CSExp [CSStmt] [CSStmt]
             | ConstructorDef CSConstructorDef
             | StructDef String [(CSType, String)]
 
-            | CSDecl C.BlockItem
-
               -- Some arbitrary string of CS code.
             | Escape String
                 deriving (Eq, Show)
@@ -355,8 +351,6 @@ instance Pretty CSStmt where
   ppr (StructDef name assignments) = text "public struct" <+> text name <> braces(stack $ map (\(tp,field) -> text "public" <+> ppr tp <+> text field <> semi) assignments)
 
   ppr (Namespace name csstms) = text "namespace" <+> text name <> braces(stack $ map ppr csstms)
-
-  ppr (CSDecl decl) = text $ show decl
 
   ppr (Escape s) = stack $ map text $ lines s
 
