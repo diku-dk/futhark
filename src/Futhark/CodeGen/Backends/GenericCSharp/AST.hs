@@ -154,7 +154,6 @@ data CSExp = Integer Integer
            | Collection String [CSExp]
            | This CSExp
            | Null
-           -- | Dict [(CSExp, CSExp)]
            deriving (Eq, Show)
 
 instance Pretty CSExp where
