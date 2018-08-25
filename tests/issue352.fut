@@ -165,7 +165,6 @@ module sobol_dir : {
 }
 
 import "/futlib/math"
-import "/futlib/monoid"
 
 module array = import "/futlib/array"
 
@@ -182,7 +181,9 @@ module type sobol = {
   val recurrent : i32 -> [D]u32 -> [D]u32     -- [recurrent i v] returns the i'th sobol vector given v is the (i-1)'th sobol vector
   val chunk : i32 -> (n:i32) -> [n][D]f64     -- [chunk i n] returns the array [v_i,...,v_(i+n-1)] of sobol vectors where v_j is the
   module Reduce :                             --             j'th D-dimensional sobol vector
-      (X : { include monoid
+      (X : { type t
+             val ne	: 	t
+             val op	: 	t -> t -> t
              val f : [D]f64 -> t }) -> { val run : i32 -> X.t }
 }
 
@@ -258,7 +259,9 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
     let vct_ints = scan (\x y -> map2 (^) x y) (replicate D 0u32) contrbs
     in map (\xs -> map (\x -> f64.u32(x)/norm) xs) vct_ints
 
-  module Reduce (X : { include monoid
+  module Reduce (X : { type t
+                       val ne	: 	t
+                       val op	: 	t -> t -> t
                        val f : [D]f64 -> t }) : { val run : i32 -> X.t } =
   {
     let run (N:i32) : X.t =
