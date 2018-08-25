@@ -1234,17 +1234,16 @@ asExecutable (CParts a b c d) = a <> b <> c <> d
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
 compileProg :: MonadFreshNames m =>
-               Operations op s
-            -> CompilerM op s ()
-            -> s
+               Operations op ()
+            -> CompilerM op () ()
             -> [Space]
             -> [Option]
             -> Functions op
             -> m CParts
-compileProg ops extra userstate spaces options prog@(Functions funs) = do
+compileProg ops extra spaces options prog@(Functions funs) = do
   src <- getNameSource
   let ((prototypes, definitions, entry_points), endstate) =
-        runCompilerM prog ops src userstate compileProg'
+        runCompilerM prog ops src () compileProg'
       (entry_point_decls, cli_entry_point_decls, entry_point_inits) =
         unzip3 entry_points
 

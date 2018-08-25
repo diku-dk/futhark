@@ -28,7 +28,7 @@ compileProg prog = do
     Left err -> return $ Left err
     Right (Program opencl_code opencl_prelude kernel_names types sizes prog') ->
       Right <$> GC.compileProg operations
-                (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes) ()
+                (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes)
                 [Space "device", Space "local", DefaultSpace]
                 cliOptions prog'
   where operations :: GC.Operations OpenCL ()
