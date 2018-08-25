@@ -33,6 +33,7 @@ import Futhark.Util.Options
 
 data BenchOptions = BenchOptions
                    { optCompiler :: String
+                   , optRunner :: String
                    , optRuns :: Int
                    , optExtraOptions :: [String]
                    , optJSON :: Maybe FilePath
@@ -43,7 +44,7 @@ data BenchOptions = BenchOptions
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing (-1) False
+initialBenchOptions = BenchOptions "futhark-c" "" 10 [] Nothing (-1) False
                       ["nobench", "disable"] []
 
 -- | The name we use for compiled programs.
@@ -202,9 +203,13 @@ runBenchmarkCase opts program entry pad_to (TestRun _ input_spec (Succeeds expec
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no program component.
+  let (to_run, to_run_args)
+        | null $ optRunner opts = ("." </> binaryName program, options)
+        | otherwise = (optRunner opts, binaryName program : options)
+
   run_res <-
     timeout (optTimeout opts * 1000000) $
-    readProcessWithExitCode ("." </> binaryName program) options $
+    readProcessWithExitCode to_run to_run_args $
     LBS.toStrict input
 
   fmap (Just .  DataResult dataset_desc) $ runBenchM $ case run_res of
@@ -297,6 +302,9 @@ commandLineOptions = [
               Right $ \config -> config { optCompiler = prog })
      "PROGRAM")
     "The compiler used (defaults to 'futhark-c')."
+  , Option [] ["runner"]
+    (ReqArg (\prog -> Right $ \config -> config { optRunner = prog }) "PROGRAM")
+    "The program used to run the Futhark-generated programs (defaults to nothing)."
   , Option "p" ["pass-option"]
     (ReqArg (\opt ->
                Right $ \config ->

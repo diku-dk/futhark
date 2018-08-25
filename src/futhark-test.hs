@@ -159,7 +159,7 @@ runTestCase (TestCase mode program testcase progs) =
             interpretTestProgram interpreter program entry run
 
         context "Running compiled program" $
-          runCompiledTestProgram (configExtraOptions progs) program entry run
+          runCompiledTestProgram (configRunner progs) (configExtraOptions progs) program entry run
 
 checkError :: ExpectedError -> SBS.ByteString -> TestM ()
 checkError (ThisError regex_s regex) err
@@ -212,8 +212,8 @@ compileTestProgram extra_options futharkc program warnings = do
   where binOutputf = dropExtension program
         options = [program, "-o", binOutputf] ++ extra_options
 
-runCompiledTestProgram :: [String] -> String -> T.Text -> TestRun -> TestM ()
-runCompiledTestProgram extra_options program entry (TestRun _ inputValues expectedResult _) = do
+runCompiledTestProgram :: String -> [String] -> String -> T.Text -> TestRun -> TestM ()
+runCompiledTestProgram runner extra_options program entry (TestRun _ inputValues expectedResult _) = do
   input <- getValuesBS dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   -- Explicitly prefixing the current directory is necessary for
@@ -221,10 +221,14 @@ runCompiledTestProgram extra_options program entry (TestRun _ inputValues expect
   -- no path component.
   let binpath = "." </> binOutputf
       entry_options = ["-e", T.unpack entry]
+
+      (to_run, to_run_args)
+        | null runner = (binpath, entry_options ++ extra_options)
+        | otherwise = (runner, binpath : entry_options ++ extra_options)
+
   context ("Running " <> T.pack (unwords $ binpath : entry_options ++ extra_options)) $ do
     (progCode, output, progerr) <-
-      io $ readProcessWithExitCode binpath (entry_options ++ extra_options) $
-      LBS.toStrict input
+      io $ readProcessWithExitCode to_run to_run_args $ LBS.toStrict input
     withExceptT validating $
       compareResult program expectedResult' =<< runResult program progCode output progerr
   where binOutputf = dropExtension program
@@ -406,6 +410,7 @@ defaultConfig = TestConfig { configTestMode = Everything
                              { configCompiler = "futhark-c"
                              , configInterpreter = "futharki"
                              , configTypeChecker = "futhark"
+                             , configRunner = ""
                              , configExtraOptions = []
                              , configExtraCompilerOptions = []
                              }
@@ -416,6 +421,7 @@ data ProgConfig = ProgConfig
                   { configCompiler :: FilePath
                   , configInterpreter :: FilePath
                   , configTypeChecker :: FilePath
+                  , configRunner :: FilePath
                   , configExtraCompilerOptions :: [String]
                   , configExtraOptions :: [String]
                   -- ^ Extra options passed to the programs being run.
@@ -436,6 +442,10 @@ setInterpreter interpreter config =
 setTypeChecker :: FilePath -> ProgConfig -> ProgConfig
 setTypeChecker typeChecker config =
   config { configTypeChecker = typeChecker }
+
+setRunner :: FilePath -> ProgConfig -> ProgConfig
+setRunner runner config =
+  config { configRunner = runner }
 
 addCompilerOption :: String -> ProgConfig -> ProgConfig
 addCompilerOption option config =
@@ -478,6 +488,9 @@ commandLineOptions = [
   , Option [] ["interpreter"]
     (ReqArg (Right . changeProgConfig . setInterpreter) "PROGRAM")
     "What to run for interpretation (defaults to 'futharki')."
+  , Option [] ["runner"]
+    (ReqArg (Right . changeProgConfig . setRunner) "PROGRAM")
+    "The program used to run the Futhark-generated programs (defaults to nothing)."
   , Option [] ["exclude"]
     (ReqArg (\tag ->
                Right $ \config ->

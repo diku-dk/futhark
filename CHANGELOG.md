@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * C# backend by Mikkel Storgaard Knudsen (`futhark-cs`/`futhark-csopencl`).
 
+  * `futhark-test` and `futhark-bench` now take a `--runner` option.
+
 ### Removed
 
   * Most of futlib has been removed.  Use external packages instead:

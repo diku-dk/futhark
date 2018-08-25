@@ -128,6 +128,15 @@ OPTIONS
   Like ``--compiler``, but for when execution has been disabled with
   ``-t``.
 
+--runner=program
+
+  If this is set to the non-empty string, compiled programs are not
+  run directly, but instead the indicated program is run, with the
+  path to the compiled Futhark program passed as the first
+  command-line argument.  This is useful for compilation targets that
+  cannot be executed directly (like `futhark-cs(1)`), or when you wish
+  to run the program on a remote machine.
+
 --pass-option=opt
 
   Pass an option to benchmark programs that are being run.  For
