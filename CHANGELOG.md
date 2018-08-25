@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+  * Most of futlib has been removed.  Use external packages instead:
+
+    * `futlib/colour` => https://github.com/athas/matte
+
+    * `futlib/complex` => https://github.com/diku-dk/complex
+
+    * `futlib/date` => https://github.com/diku-dk/date
+
+    * `futlib/fft` => https://github.com/diku-dk/fft
+
+    * `futlib/linalg` => https://github.com/diku-dk/fft
+
+    * `futlib/merge_sort`, `futlib/radix_sort` => https://github.com/diku-dk/sorts
+
+    * `futlib/random` => https://github.com/diku-dk/cpprandom
+
+    * `futlib/sobol` => https://github.com/diku-dk/sobol
+
+    * `futlib/vector` => https://github.com/athas/vector
+
 ### Changed
 
 ### Fixed
