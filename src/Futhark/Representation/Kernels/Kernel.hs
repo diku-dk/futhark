@@ -427,7 +427,7 @@ kernelType (Kernel _ space ts body) =
         resultShape [t] KernelInPlaceReturn{} =
           [t]
         resultShape ts' (CombiningReturn szs _ _ _ _) =
-          map (\(t, sz) -> rowType t `arrayOfShape` Shape sz) $ zip ts' szs
+          map (\(t, sz) -> (Prim $ elemType t) `arrayOfShape` Shape sz) $ zip ts' szs
         resultShape _ _ =
           undefined -- this should not be possible
 
@@ -678,37 +678,43 @@ typeCheckKernel (Kernel _ space kts kbody) = do
           TC.requireI t what
 
         checkKernelResult (CombiningReturn szs arrs ind vals lam) ts = do
+          -- 0. Sizes must be all integers.
           mapM_ (TC.require [Prim int32]) $ concat szs
-          -- arr_ts <- mapM lookupType arrs
 
-          -- -- should be (zip arrs inds vals) when inds are multi-dim
-          -- -- forM_ (zip arrs vals) $ \(arr, val) ->
-          -- --   unless (peelArray ind arr == val)
-          -- --     TC.bad $ TC.TypeError $ "Something"
+          -- 1. Arrays should have dimensions given by szs.
+          arrs_ts <- mapM lookupType arrs
+          forM_ (zip szs arrs_ts) $ \(sz, arr_t) ->
+            unless (arrayDims arr_t == sz) $
+              TC.bad $ TC.TypeError $ "CombiningReturn array has size " ++ pretty (arrayDims arr_t) ++
+                                      " but should have size " ++ pretty sz
 
-          -- forM_ (zip4 szs arr_ts vals ts) $ \(sz, arr_t, val, t) ->
-          --   -- when the bucket function is fixed s.t. it can
-          --   -- return multi-dim indices we should also fix
-          --   -- this, i.e., rowType should be stripArray of
-          --   -- the length of the ind
-          --   unless (arr_t == t) $ -- `arrayOfShape` Shape sz) $
-          --     TC.bad $ TC.TypeError $ "CombiningReturn returning " ++
-          --     pretty val ++ " of type " ++ pretty t ++ ", shape=" ++ pretty sz ++
-          --     ", but destination array has type " ++ pretty arr_t
+          -- 2. Indices must also be integers.
+          mapM_ (TC.require [Prim int32]) ind
 
-          -- mapM_ (TC.require [Prim int32]) ind
-          -- --forM_ (zip vals ts) $ \(val, t) -> TC.require [t] val
+          -- 3. Type of values must equal row types of arrays.
+          -- When indices are multi-dim. use peelArray (or something) instead of rowType.
+          vals' <- mapM TC.checkArg vals
+          let vals_ts = map TC.argType vals'
+          forM_ (zip vals_ts arrs_ts) $ \(val_t, arr_t) ->
+            unless (rowType arr_t == val_t) $
+              TC.bad $ TC.TypeError $ "CombiningReturn value has type " ++ pretty val_t ++
+                                      " but should have type " ++ pretty (rowType arr_t)
 
-          -- -- check lambda params
-          -- vals' <- mapM TC.checkArg vals
-          -- TC.checkLambda lam $ map TC.noArgAliases $ vals' ++ vals'
+          -- 4. Lambda must take two times vals.
+          TC.checkLambda lam $ map TC.noArgAliases $ vals' ++ vals'
 
-          -- -- check lambda result
-          -- let lam_ret_t = map TC.argType vals'
-          -- unless (lam_ret_t == lambdaReturnType lam) $
-          --   TC.bad $ TC.TypeError $ "Operator has return type " ++
-          --   prettyTuple (lambdaReturnType lam) ++ " but should have type " ++
-          --   prettyTuple lam_ret_t
+          -- 5. Lambda must return one times vals.
+          let lam_ret_t = map TC.argType vals'
+          unless (lam_ret_t == lambdaReturnType lam) $
+            TC.bad $ TC.TypeError $ "Operator has return type " ++
+            prettyTuple (lambdaReturnType lam) ++ " but should have type " ++
+            prettyTuple lam_ret_t
+
+          -- 6. Kernel body type (ts) must be checked against arrs
+          forM_ (zip arrs_ts ts) $ \(arr_t, t) ->
+            unless (arr_t == t) $
+              TC.bad $ TC.TypeError $ "CombiningReturn returns " ++ pretty arr_t ++
+                                      " but should return " ++ pretty t
 
         checkWhich AllThreads = return ()
         checkWhich OneResultPerGroup = return ()
@@ -790,5 +796,5 @@ instance PrettyLore lore => Pretty (KernelResult lore) where
                                        Just se -> "," <+> "offset=" <> ppr se
   ppr (KernelInPlaceReturn what) =
     text "kernel returns" <+> ppr what
-  ppr (CombiningReturn szs arr ind val lam) =
+  ppr (CombiningReturn _szs arr ind val lam) =
     ppr arr <+> text "with" <+> ppr ind <+> text "<-" <+> ppr val <+> text "using" <+> ppr lam
