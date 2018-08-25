@@ -226,7 +226,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `default` keyword is no longer supported.
 
   * `/futlib/merge_sort` and `/futlib/radix_sort` now define
-	functions instead of modules.
+    functions instead of modules.
 
 ### Fixed
 
