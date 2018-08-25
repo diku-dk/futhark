@@ -681,12 +681,12 @@ arrayLibraryFunctions space pt signed shape = do
       name = arrayName pt signed rank
       array_type = [C.cty|struct $id:("futhark_" ++ arrayName pt signed rank)|]
 
-      new_array = "futhark_new_" ++ name
-      free_array = "futhark_free_" ++ name
-      values_array = "futhark_values_" ++ name
-      shape_array = "futhark_shape_" ++ name
+  new_array <- publicName $ "new_" ++ name
+  free_array <- publicName $ "free_" ++ name
+  values_array <- publicName $ "values_" ++ name
+  shape_array <- publicName $ "shape_" ++ name
 
-      shape_names = [ "dim"++show i | i <- [0..rank-1] ]
+  let shape_names = [ "dim"++show i | i <- [0..rank-1] ]
       shape_params = [ [C.cparam|int $id:k|] | k <- shape_names ]
       arr_size = cproduct [ [C.cexp|$id:k|] | k <- shape_names ]
       arr_size_array = cproduct [ [C.cexp|arr->shape[$int:i]|] | i <- [0..rank-1] ]
@@ -750,15 +750,16 @@ arrayLibraryFunctions space pt signed shape = do
 opaqueLibraryFunctions :: String -> [ValueDesc]
                        -> CompilerM op s [C.Definition]
 opaqueLibraryFunctions desc vds = do
-  let name = "futhark_" ++ opaqueName desc vds
-      free_opaque = "futhark_free_" ++ opaqueName desc vds
-      opaque_type = [C.cty|struct $id:name|]
+  name <- publicName $ opaqueName desc vds
+  free_opaque <- publicName $ "free_" ++ opaqueName desc vds
 
-  let freeComponent _ ScalarValue{} =
+  let opaque_type = [C.cty|struct $id:name|]
+
+      freeComponent _ ScalarValue{} =
         return ()
       freeComponent i (ArrayValue _ _ _ pt signed shape) = do
         let rank = length shape
-            free_array = "futhark_free_" ++ arrayName pt signed rank
+        free_array <- publicName $ "free_" ++ arrayName pt signed rank
         stm [C.cstm|if ((tmp = $id:free_array(ctx, obj->$id:(tupleField i))) != 0) {
                 ret = tmp;
              }|]
@@ -790,8 +791,8 @@ valueDescToCType (ArrayValue _ _ space pt signed shape) = do
     Just (cty, _) -> return cty
     Nothing -> do
       memty <- memToCType space
-      let name = "futhark_" ++ arrayName pt signed rank
-          struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
+      name <- publicName $ arrayName pt signed rank
+      let struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
           stype = [C.cty|struct $id:name|]
       headerDecl (ArrayDecl name) [C.cedecl|struct $id:name;|]
       library <- arrayLibraryFunctions space pt signed shape
@@ -802,7 +803,7 @@ valueDescToCType (ArrayValue _ _ space pt signed shape) = do
 
 opaqueToCType :: String -> [ValueDesc] -> CompilerM op s C.Type
 opaqueToCType desc vds = do
-  let name = "futhark_" ++ opaqueName desc vds
+  name <- publicName $ opaqueName desc vds
   exists <- gets $ lookup name . compOpaqueStructs
   case exists of
     Just (ty, _) -> return ty
@@ -920,7 +921,7 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
   outputdecls <- collect $ mapM_ stubParam outputs
 
   let entry_point_name = nameToString fname
-      entry_point_function_name = "futhark_entry_" ++ entry_point_name
+  entry_point_function_name <- publicName $ "entry_" ++ entry_point_name
 
   (entry_point_input_params, unpack_entry_inputs) <-
     collect' $ prepareEntryInputs args
@@ -988,7 +989,10 @@ printStm (OpaqueValue desc _) _ =
   return [C.cstm|printf("#<opaque %s>", $string:desc);|]
 printStm (TransparentValue (ScalarValue bt ept _)) e =
   return $ printPrimStm [C.cexp|stdout|] e bt ept
-printStm (TransparentValue (ArrayValue _ _ _ bt ept shape)) e =
+printStm (TransparentValue (ArrayValue _ _ _ bt ept shape)) e = do
+  values_array <- publicName $ "values_" ++ name
+  shape_array <- publicName $ "shape_" ++ name
+  let num_elems = cproduct [ [C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0..rank-1] ]
   return [C.cstm|{
       $ty:bt' *arr = calloc(sizeof($ty:bt'), $exp:num_elems);
       assert(arr != NULL);
@@ -999,10 +1003,7 @@ printStm (TransparentValue (ArrayValue _ _ _ bt ept shape)) e =
   }|]
   where rank = length shape
         bt' = primTypeToCType bt
-        num_elems = cproduct [ [C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0..rank-1] ]
         name = arrayName bt ept rank
-        values_array = "futhark_values_" ++ name
-        shape_array = "futhark_shape_" ++ name
 
 readPrimStm :: C.ToExp a => a -> Int -> PrimType -> Signedness -> C.Stm
 readPrimStm place i t ept =
@@ -1035,9 +1036,10 @@ readInput i (TransparentValue vd@(ArrayValue _ _ _ t ept dims)) = do
   let t' = primTypeToCType t
       rank = length dims
       name = arrayName t ept rank
-      new_array = "futhark_new_" ++ name
-      free_array = "futhark_free_" ++ name
       dims_exps = [ [C.cexp|$id:shape[$int:j]|] | j <- [0..rank-1] ]
+
+  new_array <- publicName $ "new_" ++ name
+  free_array <- publicName $ "free_" ++ name
 
   stm [C.cstm|{
      typename int64_t $id:shape[$int:rank];
@@ -1073,12 +1075,12 @@ prepareOutputs = mapM prepareResult
               return ([C.cexp|$id:result|], [C.cstm|;|])
             TransparentValue (ArrayValue _ _ _ t ept dims) -> do
               let name = arrayName t ept $ length dims
-                  free_array = "futhark_free_" ++ name
+              free_array <- publicName $ "free_" ++ name
               item [C.citem|$ty:ty *$id:result;|]
               return ([C.cexp|$id:result|],
                       [C.cstm|assert($id:free_array(ctx, $exp:result) == 0);|])
             OpaqueValue desc vds -> do
-              let free_opaque = "futhark_free_" ++ opaqueName desc vds
+              free_opaque <- publicName $ "free_" ++ opaqueName desc vds
               item [C.citem|$ty:ty *$id:result;|]
               return ([C.cexp|$id:result|],
                       [C.cstm|assert($id:free_opaque(ctx, $exp:result) == 0);|])
@@ -1105,9 +1107,9 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
   let entry_point_name = nameToString fname
       cli_entry_point_function_name = "futrts_cli_entry_" ++ entry_point_name
-      entry_point_function_name = "futhark_entry_" ++ entry_point_name
+  entry_point_function_name <- publicName $ "entry_" ++ entry_point_name
 
-      run_it = [C.citems|
+  let run_it = [C.citems|
                   int r;
                   /* Run the program once. */
                   $stms:pack_input
