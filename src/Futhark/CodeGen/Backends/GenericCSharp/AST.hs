@@ -349,7 +349,10 @@ instance Pretty CSStmt where
 
   ppr (StructDef name assignments) = text "public struct" <+> text name <> braces(stack $ map (\(tp,field) -> text "public" <+> ppr tp <+> text field <> semi) assignments)
 
-  ppr (Namespace name csstms) = text "namespace" <+> text name <> braces(stack $ map ppr csstms)
+  ppr (Namespace name csstms) = text "namespace" <+> text name </>
+                                lbrace </>
+                                indent 4 (stack $ map ppr csstms) </>
+                                rbrace
 
   ppr (Escape s) = stack $ map text $ lines s
 
