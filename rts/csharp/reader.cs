@@ -836,21 +836,22 @@ private double ReadF64()
     return ReadStrF64();
 }
 
-private void WriteValue(string s, sbyte x){Console.Write(s, x);}
-private void WriteValue(string s, short x){Console.Write(s, x);}
-private void WriteValue(string s, int x){Console.Write(s, x);}
-private void WriteValue(string s, long x){Console.Write(s, x);}
-private void WriteValue(string s, byte x){Console.Write(s, x);}
-private void WriteValue(string s, ushort x){Console.Write(s, x);}
-private void WriteValue(string s, uint x){Console.Write(s, x);}
-private void WriteValue(string s, ulong x){Console.Write(s, x);}
-private void WriteValue(string s, float x){if (Single.IsNaN(x))
+private void WriteValue(bool x){Console.Write(x ? "true" : "false", x);}
+private void WriteValue(sbyte x){Console.Write("{0}i8", x);}
+private void WriteValue(short x){Console.Write("{0}i16", x);}
+private void WriteValue(int x){Console.Write("{0}i32", x);}
+private void WriteValue(long x){Console.Write("{0}i64", x);}
+private void WriteValue(byte x){Console.Write("{0}u8", x);}
+private void WriteValue(ushort x){Console.Write("{0}u16", x);}
+private void WriteValue(uint x){Console.Write("{0}u32", x);}
+private void WriteValue(ulong x){Console.Write("{0}u64", x);}
+private void WriteValue(float x){if (Single.IsNaN(x))
     {Console.Write("f32.nan");} else if (Single.IsNegativeInfinity(x))
     {Console.Write("-f32.inf");} else if (Single.IsPositiveInfinity(x))
     {Console.Write("f32.inf");} else
-    {Console.Write(s, x);}}
-private void WriteValue(string s, double x){if (Double.IsNaN(x))
+    {Console.Write("{0:0.000000}f32", x);}}
+private void WriteValue(double x){if (Double.IsNaN(x))
     {Console.Write("f64.nan");} else if (Double.IsNegativeInfinity(x))
     {Console.Write("-f64.inf");} else if (Double.IsPositiveInfinity(x))
     {Console.Write("f64.inf");} else
-    {Console.Write(s, x);}}
+    {Console.Write("{0:0.000000}f64", x);}}

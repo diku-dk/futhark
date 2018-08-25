@@ -794,36 +794,19 @@ initializeGenericFunction :: String -> String -> String
 initializeGenericFunction fun tp = fun ++ "<" ++ tp ++ ">"
 
 
-printPrimStm :: CSExp -> PrimType -> Imp.Signedness -> CSStmt
-printPrimStm val t ept =
-  case (t, ept) of
-    (IntType Int8, Imp.TypeUnsigned) -> p  "{0}u8"
-    (IntType Int16, Imp.TypeUnsigned) -> p "{0}u16"
-    (IntType Int32, Imp.TypeUnsigned) -> p "{0}u32"
-    (IntType Int64, Imp.TypeUnsigned) -> p "{0}u64"
-    (IntType Int8, _) -> p "{0}i8"
-    (IntType Int16, _) -> p "{0}i16"
-    (IntType Int32, _) -> p "{0}i32"
-    (IntType Int64, _) -> p "{0}i64"
-    (Imp.Bool, _) -> If val
-                     [Exp $ simpleCall "Console.Write" [String "true"]]
-                     [Exp $ simpleCall "Console.Write" [String "false"]]
-    (Cert, _) -> Exp $ simpleCall "Console.Write" [String "Checked"]
-    (FloatType Float32, _) -> p "{0:0.000000}f32"
-    (FloatType Float64, _) -> p "{0:0.000000}f64"
-  where p s =
-          Exp $ simpleCall "WriteValue" [String s, val]
+printPrimStm :: CSExp -> CSStmt
+printPrimStm val = Exp $ simpleCall "WriteValue" [val]
 
 formatString :: String -> [CSExp] -> CSExp
 formatString fmt contents =
   simpleCall "String.Format" $ String fmt : contents
 
 printStm :: Imp.ValueDesc -> CSExp -> CSExp -> CompilerM op s CSStmt
-printStm (Imp.ScalarValue bt ept _) _ e =
-  return $ printPrimStm e bt ept
-printStm (Imp.ArrayValue _ _ _ bt ept []) ind e = do
+printStm Imp.ScalarValue{} _ e =
+  return $ printPrimStm e
+printStm (Imp.ArrayValue _ _ _ _ _ []) ind e = do
   let e' = Index e (IdxExp (PostUnOp "++" ind))
-  return $ printPrimStm e' bt ept
+  return $ printPrimStm e'
 
 printStm (Imp.ArrayValue mem memsize space bt ept (outer:shape)) ind e = do
   ptr <- newVName "shapePtr"
