@@ -520,6 +520,18 @@ static cl_program setup_opencl(struct opencl_context *ctx,
   ctx->device = device = device_option.device;
   ctx->platform = platform = device_option.platform;
 
+  // Note that NVIDIA's OpenCL requires the platform property
+  cl_context_properties properties[] = {
+    CL_CONTEXT_PLATFORM,
+    (cl_context_properties)platform,
+    0
+  };
+  ctx->ctx = clCreateContext(properties, 1, &device, NULL, NULL, &error);
+  assert(error == 0);
+
+  ctx->queue = clCreateCommandQueue(ctx->ctx, device, 0, &error);
+  assert(error == 0);
+
   if (required_types & OPENCL_F64) {
     cl_uint supported;
     OPENCL_SUCCEED(clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE,
@@ -586,18 +598,6 @@ static cl_program setup_opencl(struct opencl_context *ctx,
       *size_value = max_value;
     }
   }
-
-  cl_context_properties properties[] = {
-    CL_CONTEXT_PLATFORM,
-    (cl_context_properties)platform,
-    0
-  };
-  // Note that nVidia's OpenCL requires the platform property
-  ctx->ctx = clCreateContext(properties, 1, &device, NULL, NULL, &error);
-  assert(error == 0);
-
-  ctx->queue = clCreateCommandQueue(ctx->ctx, device, 0, &error);
-  assert(error == 0);
 
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
