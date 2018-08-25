@@ -186,6 +186,30 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                            | FloatType Float64 `elem` types ]
       set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
                           [(0::Int)..] $ M.keys sizes
+
+  GC.libDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
+                     typename cl_int error;
+                     ctx->opencl.cfg = cfg->opencl;
+                     ctx->detail_memory = cfg->opencl.debugging;
+                     ctx->debugging = cfg->opencl.debugging;
+                     ctx->logging = cfg->opencl.logging;
+                     ctx->error = NULL;
+                     create_lock(&ctx->lock);
+
+                     $stms:init_fields
+                     $stms:ctx_opencl_inits
+  }|]
+
+  GC.libDecl [C.cedecl|static void init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx, typename cl_program prog) {
+                     typename cl_int error;
+                     // Load all the kernels.
+                     $stms:(map (loadKernelByName) kernel_names)
+
+                     $stms:final_inits
+
+                     $stms:set_sizes
+  }|]
+
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
@@ -193,28 +217,30 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           if (ctx == NULL) {
                             return NULL;
                           }
-                          ctx->detail_memory = cfg->opencl.debugging;
-                          ctx->debugging = cfg->opencl.debugging;
-                          ctx->logging = cfg->opencl.logging;
-                          ctx->opencl.cfg = cfg->opencl;
-                          ctx->error = NULL;
-                          create_lock(&ctx->lock);
-
-                          $stms:init_fields
-                          $stms:ctx_opencl_inits
 
                           int required_types = 0;
                           $stms:set_required_types
 
-                          typename cl_int error;
+                          init_context_early(cfg, ctx);
                           typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types);
-                          // Load all the kernels.
-                          $stms:(map (loadKernelByName) kernel_names)
+                          init_context_late(cfg, ctx, prog);
+                          return ctx;
+                       }|])
 
-                          $stms:final_inits
+  GC.publicDef_ "context_new_with_command_queue" GC.InitDecl $ \s ->
+    ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue);|],
+     [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue) {
+                          struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
+                          if (ctx == NULL) {
+                            return NULL;
+                          }
 
-                          $stms:set_sizes
+                          int required_types = 0;
+                          $stms:set_required_types
 
+                          init_context_early(cfg, ctx);
+                          typename cl_program prog = setup_opencl_with_command_queue(&ctx->opencl, queue, opencl_program, required_types);
+                          init_context_late(cfg, ctx, prog);
                           return ctx;
                        }|])
 
@@ -246,6 +272,12 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          OPENCL_SUCCEED(opencl_free_all(&ctx->opencl));
                          return 0;
                        }|])
+
+  GC.publicDef_ "context_get_command_queue" GC.InitDecl $ \s ->
+    ([C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx) {
+                 return ctx->opencl.queue;
+               }|])
 
   mapM_ GC.debugReport $ openClReport kernel_names
 

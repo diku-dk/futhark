@@ -22,7 +22,7 @@ import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
 compileProg =
-  traverse (GC.compileProg operations generateContext [DefaultSpace] []) <=<
+  traverse (GC.compileProg operations generateContext "" [DefaultSpace] []) <=<
   ImpGen.compileProg
   where operations :: GC.Operations Imp.Sequential ()
         operations = GC.defaultOperations

@@ -236,6 +236,27 @@ checks) will produce an error code.
 
 The API functions are thread safe.
 
+C with OpenCL
+~~~~~~~~~~~~~
+
+When generating C code with ``futhark-opencl`` (which is likely the
+common case), extra API functions are provided for directly accessing
+or providing the OpenCL objects used by Futhark.  Take care when using
+these functions.  In particular, a Futhark context can now be provided
+with the command queue to use::
+
+  struct futhark_context *futhark_context_new_with_command_queue(struct futhark_context_config *cfg, cl_command_queue queue);
+
+As a ``cl_command_queue`` specifies an OpenCL device, this is also how
+manual platform and device selection is possible.  A function is also
+provided for retrieving the command queue used by some Futhark
+context::
+
+  cl_command_queue futhark_context_get_command_queue(struct futhark_context *ctx);
+
+This can be used to connect two separate Futhark contexts that have
+been loaded dynamically.
+
 Generating Python
 ^^^^^^^^^^^^^^^^^
 
