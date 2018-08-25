@@ -1236,11 +1236,12 @@ asExecutable (CParts a b c d) = a <> b <> c <> d
 compileProg :: MonadFreshNames m =>
                Operations op ()
             -> CompilerM op () ()
+            -> String
             -> [Space]
             -> [Option]
             -> Functions op
             -> m CParts
-compileProg ops extra spaces options prog@(Functions funs) = do
+compileProg ops extra header_extra spaces options prog@(Functions funs) = do
   src <- getNameSource
   let ((prototypes, definitions, entry_points), endstate) =
         runCompilerM prog ops src () compileProg'
@@ -1248,9 +1249,11 @@ compileProg ops extra spaces options prog@(Functions funs) = do
         unzip3 entry_points
 
   let headerdefs = [C.cunit|
+$esc:("/*\n * Headers\n*/\n")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
+$esc:(header_extra)
 
 $esc:("\n/*\n * Initialisation\n*/\n")
 $edecls:(initDecls endstate)
