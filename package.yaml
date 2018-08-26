@@ -20,45 +20,45 @@ extra-source-files:
 dependencies:
   - base >= 4 && < 5
   - array >= 0.4
-  - binary
-  - data-binary-ieee754
-  - vector
+  - binary >= 0.8.3
+  - data-binary-ieee754 >= 0.1
+  - vector >= 0.12
   - vector-binary-instances
   - containers >= 0.5
   - mtl >= 2.2.1
   - transformers >= 0.3
   - srcloc >= 0.4
   - language-c-quote >= 0.12
-  - mainland-pretty >= 0.6
-  - megaparsec >= 6
+  - mainland-pretty >= 0.6.1
+  - megaparsec >= 6.0.2
   - regex-tdfa >= 1.2
-  - filepath
+  - filepath >= 1.4.1.1
   - dlist >= 0.6.0.1
-  - bytestring
-  - text
-  - raw-strings-qq
+  - bytestring >= 0.10.8
+  - text >= 1.2.2.2
+  - raw-strings-qq >= 1.1
   - neat-interpolation >= 0.3
   - file-embed >= 0.0.9
-  - directory
-  - directory-tree
+  - directory >= 1.3.0.0
+  - directory-tree >= 0.12.1
   - gitrev >= 1.2.0
   - parallel >= 3.2.1.0
-  - bifunctors
-  - blaze-html
-  - template-haskell
-  - th-lift-instances
-  - extra
-  - process
-  - markdown
-  - zlib
-  - versions
-  - http-client
-  - http-client-tls
-  - http-conduit
-  - process-extras
-  - free
-  - zip-archive
-  - time
+  - bifunctors >= 5.4.2
+  - blaze-html >= 0.9.0.1
+  - template-haskell >= 2.11.1
+  - th-lift-instances >= 0.1.11
+  - extra >= 1.5.3
+  - process >= 1.4.3.0
+  - markdown >= 0.1.16
+  - zlib >= 0.6.1.2
+  - versions >= 3.3.2
+  - http-client >= 0.5.7.0
+  - http-client-tls >= 0.3.5.1
+  - http-conduit >= 2.2.4
+  - process-extras >= 0.7.2
+  - free >= 4.12.4
+  - zip-archive >= 0.3.1.1
+  - time >= 1.6.0.1
 
 when:
 - condition: "!impl(ghc >= 8.0)"
