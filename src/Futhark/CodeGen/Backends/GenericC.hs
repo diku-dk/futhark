@@ -679,11 +679,13 @@ arrayLibraryFunctions space pt signed shape = do
   let rank = length shape
       pt' = signedPrimTypeToCType signed pt
       name = arrayName pt signed rank
-      array_type = [C.cty|struct $id:("futhark_" ++ arrayName pt signed rank)|]
+      array_type = [C.cty|struct $id:("futhark_" ++ name)|]
 
   new_array <- publicName $ "new_" ++ name
+  new_raw_array <- publicName $ "new_raw_" ++ name
   free_array <- publicName $ "free_" ++ name
   values_array <- publicName $ "values_" ++ name
+  values_raw_array <- publicName $ "values_raw_" ++ name
   shape_array <- publicName $ "shape_" ++ name
 
   let shape_names = [ "dim"++show i | i <- [0..rank-1] ]
@@ -693,15 +695,25 @@ arrayLibraryFunctions space pt signed shape = do
   copy <- asks envCopy
 
   arr_raw_mem <- rawMem [C.cexp|arr->mem|]
+  memty <- rawMemCType space
+
+  let prepare_new = do
+        resetMem [C.cexp|arr->mem|]
+        allocMem [C.cexp|arr->mem|] [C.cexp|$exp:arr_size * sizeof($ty:pt')|] space
+        forM_ [0..rank-1] $ \i ->
+          stm [C.cstm|arr->shape[$int:i] = $id:("dim"++show i);|]
 
   new_body <- collect $ do
-    resetMem [C.cexp|arr->mem|]
-    allocMem [C.cexp|arr->mem|] [C.cexp|$exp:arr_size * sizeof($ty:pt')|] space
+    prepare_new
     copy arr_raw_mem [C.cexp|0|] space
          [C.cexp|data|] [C.cexp|0|] DefaultSpace
          [C.cexp|$exp:arr_size * sizeof($ty:pt')|]
-    forM_ [0..rank-1] $ \i ->
-      stm [C.cstm|arr->shape[$int:i] = $id:("dim"++show i);|]
+
+  new_raw_body <- collect $ do
+    prepare_new
+    copy arr_raw_mem [C.cexp|0|] space
+         [C.cexp|data|] [C.cexp|offset|] space
+         [C.cexp|$exp:arr_size * sizeof($ty:pt')|]
 
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
@@ -713,11 +725,17 @@ arrayLibraryFunctions space pt signed shape = do
   ctx_ty <- contextType
 
   headerDecl (ArrayDecl name)
+    [C.cedecl|struct $id:name;|]
+  headerDecl (ArrayDecl name)
     [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params);|]
+  headerDecl (ArrayDecl name)
+    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset, $params:shape_params);|]
   headerDecl (ArrayDecl name)
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   headerDecl (ArrayDecl name)
     [C.cedecl|int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data);|]
+  headerDecl (ArrayDecl name)
+    [C.cedecl|$ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   headerDecl (ArrayDecl name)
     [C.cedecl|typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
 
@@ -731,6 +749,16 @@ arrayLibraryFunctions space pt signed shape = do
             return arr;
           }
 
+          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset,
+                                            $params:shape_params) {
+            $ty:array_type *arr = malloc(sizeof($ty:array_type));
+            if (arr == NULL) {
+              return NULL;
+            }
+            $items:(criticalSection new_raw_body)
+            return arr;
+          }
+
           int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
             $items:(criticalSection free_body)
             free(arr);
@@ -740,6 +768,10 @@ arrayLibraryFunctions space pt signed shape = do
           int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data) {
             $items:(criticalSection values_body)
             return 0;
+          }
+
+          $ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
+            return $exp:arr_raw_mem;
           }
 
           typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
@@ -794,7 +826,6 @@ valueDescToCType (ArrayValue _ _ space pt signed shape) = do
       name <- publicName $ arrayName pt signed rank
       let struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
           stype = [C.cty|struct $id:name|]
-      headerDecl (ArrayDecl name) [C.cedecl|struct $id:name;|]
       library <- arrayLibraryFunctions space pt signed shape
       modify $ \s -> s { compArrayStructs =
                            ((pt', rank), (stype, struct : library)) : compArrayStructs s
