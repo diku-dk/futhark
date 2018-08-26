@@ -1406,6 +1406,7 @@ $edecls:entry_point_decls
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
 
           mapM_ libDecl memstructs
+          entry_points <- mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
           extra
           mapM_ libDecl $ concat memfuns
           debugreport <- gets $ DL.toList . compDebugItems
@@ -1420,9 +1421,6 @@ $edecls:entry_point_decls
     $items:debugreport
   }
 }|]
-
-          entry_points <- mapM (uncurry onEntryPoint) $
-                          filter (functionEntry . snd) funs
 
           return (prototypes, definitions, entry_points)
         funcToDef func = C.FuncDef func loc
