@@ -257,6 +257,27 @@ context::
 This can be used to connect two separate Futhark contexts that have
 been loaded dynamically.
 
+The raw ``cl_mem`` object underlying a Futhark array can be accessed
+with the function named ``futhark_values_raw_type``, where ``type``
+depends on the array in question.  For example::
+
+  cl_mem futhark_values_raw_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr);
+
+The array will be stored in row-major form in the returned memory
+object.  The function performs no copying, so the ``cl_mem`` still
+belongs to Futhark, and may be reused for other purposes when the
+corresponding array is freed.  A dual function can be used to
+construct a Futhark array from a ``cl_mem``::
+
+  struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx,
+                                                cl_mem data,
+                                                int offset,
+                                                int dim0);
+
+This function *does* copy the provided memory into fresh internally
+allocated memory.  The array is assumed to be stored in row-major form
+``offset`` bytes into the memory region.
+
 Generating Python
 ^^^^^^^^^^^^^^^^^
 
