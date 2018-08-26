@@ -51,7 +51,7 @@ dependencies:
   - process >= 1.4.3.0
   - markdown >= 0.1.16
   - zlib >= 0.6.1.2
-  - versions >= 3.3.2
+  - versions >= 3.3.1
   - http-client >= 0.5.7.0
   - http-client-tls >= 0.3.5.1
   - http-conduit >= 2.2.4
