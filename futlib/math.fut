@@ -95,7 +95,7 @@ module type integral = {
 }
 
 -- | An extension of `size`@mtype that further includes facilities for
--- constructing arrays where the size is provides as a value of the
+-- constructing arrays where the size is provided as a value of the
 -- given integral type.
 module type size = {
   include integral
@@ -123,11 +123,20 @@ module type real = {
   val atan: t -> t
   val atan2: t -> t -> t
 
+  -- | Natural logarithm.
   val log: t -> t
+  -- | Base-2 logarithm.
+  val log2: t -> t
+  -- | Base-10 logarithm.
+  val log10: t -> t
 
   val ceil : t -> t
   val floor : t -> t
   val trunc : t -> t
+
+  -- | Round to the nearest integer, with alfway cases rounded to the
+  -- nearest even integer.  Note that this differs from `round()` in
+  -- C, but matches more modern languages.
   val round : t -> t
 
   val isinf: t -> bool
@@ -809,6 +818,8 @@ module f64: (float with t = f64 with int_t = u64) = {
   let sqrt (x: f64) = intrinsics.sqrt64 x
 
   let log (x: f64) = intrinsics.log64 x
+  let log2 (x: f64) = intrinsics.log2_64 x
+  let log10 (x: f64) = intrinsics.log10_64 x
   let exp (x: f64) = intrinsics.exp64 x
   let cos (x: f64) = intrinsics.cos64 x
   let sin (x: f64) = intrinsics.sin64 x
@@ -836,13 +847,7 @@ module f64: (float with t = f64 with int_t = u64) = {
 
   let even (x: f64) = i64m.f64 x % 2i64 i64m.== 0i64
 
-  let round (x: f64) : f64 =
-    let t0 = x + 0.5f64
-    let floor_t0 = floor t0
-    in if floor_t0 == t0 then
-	  let t = floor x
-	  in if even t then t else floor_t0
-	else floor_t0
+  let round = intrinsics.round64
 
   let to_bits (x: f64): u64 = u64m.i64 (intrinsics.to_bits64 x)
   let from_bits (x: u64): f64 = intrinsics.from_bits64 (intrinsics.sign_i64 x)
@@ -922,6 +927,8 @@ module f32: (float with t = f32 with int_t = u32) = {
   let sqrt (x: f32) = intrinsics.sqrt32 x
 
   let log (x: f32) = intrinsics.log32 x
+  let log2 (x: f32) = intrinsics.log2_32 x
+  let log10 (x: f32) = intrinsics.log10_32 x
   let exp (x: f32) = intrinsics.exp32 x
   let cos (x: f32) = intrinsics.cos32 x
   let sin (x: f32) = intrinsics.sin32 x
@@ -949,13 +956,7 @@ module f32: (float with t = f32 with int_t = u32) = {
 
   let even (x: f32) = i32m.f32 x % 2i32 i32m.== 0i32
 
-  let round (x: f32) : f32 =
-    let t0 = x + 0.5f32
-    let floor_t0 = floor t0
-    in if floor_t0 == t0 then
-	  let t = floor x
-	  in if even t then t else floor_t0
-	else floor_t0
+  let round = intrinsics.round32
 
   let to_bits (x: f32): u32 = u32m.i32 (intrinsics.to_bits32 x)
   let from_bits (x: u32): f32 = intrinsics.from_bits32 (intrinsics.sign_i32 x)
@@ -974,7 +975,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let smallest = -inf
 
   let pi = f64 f64m.pi
-  let e = f64 f64m.pi
+  let e = f64 f64m.e
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)

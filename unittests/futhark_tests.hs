@@ -4,15 +4,18 @@ import qualified Language.Futhark.SyntaxTests
 import qualified Futhark.Representation.AST.Syntax.CoreTests
 import qualified Futhark.Representation.AST.AttributesTests
 import qualified Futhark.Optimise.AlgSimplifyTests
+import qualified Futhark.Pkg.SolveTests
 
-import Test.Framework (defaultMain, testGroup, Test)
+import Test.Tasty
 
-allTests :: [Test]
+allTests :: TestTree
 allTests =
-  [ testGroup "external SyntaxTests" Language.Futhark.SyntaxTests.tests
-  , testGroup "AttributesTests" Futhark.Representation.AST.AttributesTests.tests
-  , testGroup "AlgSimplifyTests" Futhark.Optimise.AlgSimplifyTests.tests
-  , testGroup "internal CoreTests" Futhark.Representation.AST.Syntax.CoreTests.tests
+  testGroup ""
+  [ Language.Futhark.SyntaxTests.tests
+  , Futhark.Representation.AST.AttributesTests.tests
+  , Futhark.Optimise.AlgSimplifyTests.tests
+  , Futhark.Representation.AST.Syntax.CoreTests.tests
+  , Futhark.Pkg.SolveTests.tests
   ]
 
 main :: IO ()

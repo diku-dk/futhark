@@ -17,6 +17,7 @@ module Language.Futhark.Attributes
   , valueType
   , leadingOperator
   , progImports
+  , progModuleTypes
   , identifierReference
   , identifierReferences
 
@@ -127,11 +128,11 @@ arrayShape _ = mempty
 -- removed.
 nestedDims :: TypeBase (DimDecl VName) as -> [DimDecl VName]
 nestedDims t =
-  case t of Array a ds _    -> nub $ arrayNestedDims a <> shapeDims ds
-            Record fs       -> nub $ fold $ fmap nestedDims fs
-            Prim{}          -> mempty
-            TypeVar _ targs -> concatMap typeArgDims targs
-            Arrow _ v t1 t2 -> filter (notV v) $ nestedDims t1 <> nestedDims t2
+  case t of Array a ds _        -> nub $ arrayNestedDims a <> shapeDims ds
+            Record fs           -> nub $ fold $ fmap nestedDims fs
+            Prim{}              -> mempty
+            TypeVar _ _ _ targs -> concatMap typeArgDims targs
+            Arrow _ v t1 t2     -> filter (notV v) $ nestedDims t1 <> nestedDims t2
   where arrayNestedDims ArrayPrimElem{} =
           mempty
         arrayNestedDims (ArrayPolyElem _ targs _) =
@@ -173,6 +174,7 @@ modifyShapeAnnotations f = bimap f id
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
 uniqueness (Array _ _ u) = u
+uniqueness (TypeVar _ u _ _) = u
 uniqueness _ = Nonunique
 
 recordArrayElemUniqueness :: RecordArrayElemTypeBase shape as -> Uniqueness
@@ -235,16 +237,16 @@ peelArray 0 t = Just t
 peelArray n (Array (ArrayPrimElem et _) shape _)
   | shapeRank shape == n =
     Just $ Prim et
-peelArray n (Array (ArrayPolyElem et targs _) shape _)
+peelArray n (Array (ArrayPolyElem et targs als) shape u)
   | shapeRank shape == n =
-    Just $ TypeVar et targs
-peelArray n (Array (ArrayRecordElem ts) shape _)
+    Just $ TypeVar als u et targs
+peelArray n (Array (ArrayRecordElem ts) shape u)
   | shapeRank shape == n =
     Just $ Record $ fmap asType ts
   where asType (RecordArrayElem (ArrayPrimElem bt _)) = Prim bt
-        asType (RecordArrayElem (ArrayPolyElem bt targs _)) = TypeVar bt targs
-        asType (RecordArrayElem (ArrayRecordElem ts'))  = Record $ fmap asType ts'
-        asType (RecordArrayArrayElem et e_shape u) = Array et e_shape u
+        asType (RecordArrayElem (ArrayPolyElem bt targs als)) = TypeVar als u bt targs
+        asType (RecordArrayElem (ArrayRecordElem ts')) = Record $ fmap asType ts'
+        asType (RecordArrayArrayElem et e_shape _) = Array et e_shape u
 peelArray n (Array et shape u) = do
   shape' <- stripDims n shape
   return $ Array et shape' u
@@ -280,7 +282,7 @@ arrayOfWithAliases (Array et shape1 _) as shape2 u =
   Just $ Array et (shape2 <> shape1) u `setAliases` as
 arrayOfWithAliases (Prim et) as shape u =
   Just $ Array (ArrayPrimElem et as) shape u
-arrayOfWithAliases (TypeVar x targs) as shape u =
+arrayOfWithAliases (TypeVar _ _ x targs) as shape u =
   Just $ Array (ArrayPolyElem x targs as) shape u
 arrayOfWithAliases (Record ts) as shape u = do
   ts' <- traverse (typeToRecordArrayElem' as) ts
@@ -297,8 +299,8 @@ typeToRecordArrayElem' :: Monoid as =>
                        -> Maybe (RecordArrayElemTypeBase dim as)
 typeToRecordArrayElem' as (Prim bt) =
   Just $ RecordArrayElem $ ArrayPrimElem bt as
-typeToRecordArrayElem' as (TypeVar bt targs) =
-  Just $ RecordArrayElem $ ArrayPolyElem bt targs as
+typeToRecordArrayElem' as (TypeVar t_as _ bt targs) =
+  Just $ RecordArrayElem $ ArrayPolyElem bt targs (as <> t_as)
 typeToRecordArrayElem' as (Record ts') =
   RecordArrayElem . ArrayRecordElem <$>
   traverse (typeToRecordArrayElem' as) ts'
@@ -314,7 +316,7 @@ recordArrayElemToType (RecordArrayArrayElem et shape u) = (Array et shape u, mem
 
 arrayElemToType :: Monoid as => ArrayElemTypeBase dim as -> (TypeBase dim as, as)
 arrayElemToType (ArrayPrimElem bt als)       = (Prim bt, als)
-arrayElemToType (ArrayPolyElem bt targs als) = (TypeVar bt targs, als)
+arrayElemToType (ArrayPolyElem bt targs als) = (TypeVar als Nonunique bt targs, als)
 arrayElemToType (ArrayRecordElem ts) =
   let ts' = fmap recordArrayElemToType ts
   in (Record $ fmap fst ts', foldMap snd ts')
@@ -326,7 +328,7 @@ stripArray :: Monoid as => Int -> TypeBase dim as -> TypeBase dim as
 stripArray n (Array et shape u)
   | Just shape' <- stripDims n shape =
     Array et shape' u
-  | otherwise = fst $ arrayElemToType et
+  | otherwise = fst (arrayElemToType et) `setUniqueness` u
 stripArray _ t = t
 
 -- | Create a record type corresponding to a tuple with the given
@@ -361,7 +363,6 @@ sortFields l = map snd $ sortBy (comparing fst) $ zip (map (fieldish . fst) l') 
 
 isTypeParam :: TypeParamBase vn -> Bool
 isTypeParam TypeParamType{}       = True
-isTypeParam TypeParamLiftedType{} = True
 isTypeParam TypeParamDim{}        = False
 
 
@@ -370,6 +371,8 @@ isTypeParam TypeParamDim{}        = False
 setUniqueness :: TypeBase dim as -> Uniqueness -> TypeBase dim as
 setUniqueness (Array et shape _) u =
   Array (setArrayElemUniqueness et u) shape u
+setUniqueness (TypeVar als _ t targs) u =
+  TypeVar als u t targs
 setUniqueness (Record ets) u =
   Record $ fmap (`setUniqueness` u) ets
 setUniqueness t _ = t
@@ -441,7 +444,6 @@ typeOf (RecordLit fs _) =
           M.singleton (baseName name) $ t `addAliases` S.insert name
 typeOf (ArrayLit _ (Info t) _) = t
 typeOf (Range _ _ _ (Info t) _) = t
-typeOf (Empty _ (Info t) _) = t
 typeOf (BinOp _ _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
@@ -503,7 +505,7 @@ typeVars :: Monoid as => TypeBase dim as -> Names
 typeVars t =
   case t of
     Prim{} -> mempty
-    TypeVar tn targs ->
+    TypeVar _ _ tn targs ->
       mconcat $ typeVarFree tn : map typeArgFree targs
     Arrow _ _ t1 t2 -> typeVars t1 <> typeVars t2
     Record fields -> foldMap typeVars fields
@@ -530,8 +532,11 @@ returnType (Array et shape Nonunique) ds args =
 returnType (Record fs) ds args =
   Record $ fmap (\et -> returnType et ds args) fs
 returnType (Prim t) _ _ = Prim t
-returnType (TypeVar t targs) ds args =
-  TypeVar t $ map (\arg -> typeArgReturnType arg ds args) targs
+returnType (TypeVar () Unique t targs) _ _ =
+  TypeVar mempty Unique t $ map (bimap id (const mempty)) targs
+returnType (TypeVar () Nonunique t targs) ds args =
+  TypeVar als Nonunique t $ map (\arg -> typeArgReturnType arg ds args) targs
+  where als = mconcat $ map aliases $ zipWith maskAliases args ds
 returnType (Arrow _ v t1 t2) ds args =
   Arrow als v (bimap id (const mempty) t1) (returnType t2 ds args)
   where als = foldMap aliases $ zipWith maskAliases args ds
@@ -725,14 +730,6 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                          [Prim $ Signed Int32, arr_a] arr_a),
               ("transpose", IntrinsicPolyFun [tp_a] [arr_a] arr_a),
 
-              ("cosmin_flatten", IntrinsicPolyFun [tp_a]
-                                 [Array (ArrayPolyElem tv_a' [] ()) (rank 2) Unique] $
-                                 Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique),
-              ("cosmin_unflatten", IntrinsicPolyFun [tp_a]
-                                   [Prim $ Signed Int32,
-                                    Prim $ Signed Int32,
-                                    Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique] $
-                                   Array (ArrayPolyElem tv_a' [] ()) (rank 2) Unique),
               ("cmp_threshold", IntrinsicPolyFun []
                                 [Prim $ Signed Int32,
                                  Array (ArrayPrimElem (Signed Int32) ()) (rank 1) Nonunique] $
@@ -751,6 +748,8 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                               t_b `arr` (tupleRecord [Prim $ Signed Int32, t_a]),
                               arr_b]
                              uarr_a),
+              ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
+              ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
 
               ("map", IntrinsicPolyFun [tp_a, tp_b] [t_a `arr` t_b, arr_a] uarr_b),
 
@@ -762,9 +761,6 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
               ("scan", IntrinsicPolyFun [tp_a]
                        [t_a `arr` (t_a `arr` t_a), t_a, arr_a] uarr_a),
-
-              ("filter", IntrinsicPolyFun [tp_a]
-                         [t_a `arr` Prim Bool, arr_a] uarr_a),
 
               ("partition",
                IntrinsicPolyFun [tp_a]
@@ -785,17 +781,23 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
   where tv_a = VName (nameFromString "a") 0
         tv_a' = typeName tv_a
-        t_a = TypeVar tv_a' []
+        t_a = TypeVar () Nonunique tv_a' []
         arr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique
         uarr_a = Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique
-        tp_a = TypeParamType tv_a noLoc
+        tp_a = TypeParamType Unlifted tv_a noLoc
 
         tv_b = VName (nameFromString "b") 1
         tv_b' = typeName tv_b
-        t_b = TypeVar tv_b' []
+        t_b = TypeVar () Nonunique tv_b' []
         arr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Nonunique
         uarr_b = Array (ArrayPolyElem tv_b' [] ()) (rank 1) Unique
-        tp_b = TypeParamType tv_b noLoc
+        tp_b = TypeParamType Unlifted tv_b noLoc
+
+        arr_a_b = Array (ArrayRecordElem (M.fromList $ zip tupleFieldNames
+                                          [RecordArrayElem $ ArrayPolyElem tv_a' [] (),
+                                           RecordArrayElem $ ArrayPolyElem tv_b' [] ()]))
+                        (rank 1) Nonunique
+        t_arr_a_arr_b = Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
 
         arr = Arrow mempty Nothing
 
@@ -900,9 +902,38 @@ progImports = concatMap decImports . progDecs
         modExpImports (ModAscript me _ _ _) = modExpImports me
         modExpImports ModLambda{}           = []
 
+-- | The set of module types used in any exported (non-local)
+-- declaration.
+progModuleTypes :: Ord vn => ProgBase f vn -> S.Set vn
+progModuleTypes = mconcat . map onDec . progDecs
+  where onDec (OpenDec x xs _ _) = mconcat $ map onModExp $ x:xs
+        onDec (ModDec md) =
+          maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
+        onDec SigDec{} = mempty
+        onDec TypeDec{} = mempty
+        onDec ValDec{} = mempty
+        onDec (LocalDec _ _) = mempty
+
+        onModExp ModVar{} = mempty
+        onModExp (ModParens p _) = onModExp p
+        onModExp ModImport {} = mempty
+        onModExp (ModDecs ds _) = mconcat $ map onDec ds
+        onModExp (ModApply me1 me2 _ _ _) = onModExp me1 <> onModExp me2
+        onModExp (ModAscript me se _ _) = onModExp me <> onSigExp se
+        onModExp (ModLambda p r me _) =
+          onModParam p <> maybe mempty (onSigExp . fst) r <> onModExp me
+
+        onModParam = onSigExp . modParamType
+
+        onSigExp (SigVar v _) = S.singleton $ qualLeaf v
+        onSigExp (SigParens e _) = onSigExp e
+        onSigExp SigSpecs{} = mempty
+        onSigExp (SigWith e _ _) = onSigExp e
+        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
+
 -- | Extract a leading @((name, namespace, file), remainder)@ from a
 -- documentation comment string.  These are formatted as
--- \`name\`\@namespace.  Let us hope that this pattern does not occur
+-- \`name\`\@namespace[\@file].  Let us hope that this pattern does not occur
 -- anywhere else.
 identifierReference :: String -> Maybe ((String, String, Maybe FilePath), String)
 identifierReference ('`' : s)

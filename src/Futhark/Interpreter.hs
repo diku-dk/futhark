@@ -72,7 +72,7 @@ instance Show InterpreterError where
     "Invalid array reshaping " ++ pretty e ++
     ", from " ++ show shape ++ " to " ++ show newshape
   show (AssertFailed msg (loc,locs)) =
-    "Assertion failed at " ++ stacktrace ++ ":\n" ++ msg
+    "Error at " ++ stacktrace ++ ":\n" ++ msg
     where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
   show DivisionByZero =
     "Division by zero."
@@ -325,10 +325,9 @@ evalExp (If e1 e2 e3 info) = do
                   _                       -> bad $ TypeError "evalExp If"
   return $ valueShapeContext (bodyTypeValues $ ifReturns info) vs ++ vs
 
-evalExp (Apply fname args rettype _) = do
+evalExp (Apply fname args _ _) = do
   args' <- mapM (evalSubExp . fst) args
-  vs <- evalFuncall fname args'
-  return $ valueShapeContext (retTypeValues rettype) vs ++ vs
+  evalFuncall fname args'
 evalExp (BasicOp op) = evalBasicOp op
 
 evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar it boundexp loopvars) loopbody) = do
@@ -512,12 +511,15 @@ evalBasicOp (Copy v) = single <$> lookupVar v
 
 evalBasicOp (Manifest _ v) = single <$> lookupVar v
 
-evalBasicOp (Assert e msg loc) = do
+evalBasicOp (Assert e (ErrorMsg parts) loc) = do
   v <- evalSubExp e
   case v of PrimVal (BoolValue True) ->
               return [PrimVal Checked]
-            _ ->
+            _ -> do
+              msg <- concat <$> mapM msgPart parts
               bad $ AssertFailed msg loc
+  where msgPart (ErrorString s) = pure s
+        msgPart (ErrorInt32 v) = show <$> (asInt32 "ErrorInt32" =<< evalSubExp v)
 
 evalBasicOp (Partition n flags arrs) = do
   flags_elems <- arrToList =<< lookupVar flags
@@ -530,7 +532,7 @@ evalBasicOp (Partition n flags arrs) = do
       [] ->
         replicate n $ PrimVal $ IntValue $ Int32Value 0
       first_part:_ ->
-        map (PrimVal . IntValue . Int32Value . genericLength) first_part ++
+        map (PrimVal . IntValue . Int32Value . fromIntegral . length) first_part ++
         [arrayVal (concat part) et (valueShape arrv) |
          (part,et,arrv) <- zip3 partitions ets arrvs]
   where partitionArray flagsv arrv =
@@ -610,7 +612,7 @@ evalSOAC (Scatter w lam ivs dests) = do
   let handleIteration :: [Array Int PrimValue] -> Int -> FutharkM [Array Int PrimValue]
       handleIteration arrs iter = do
         let updatess =
-              [ if idx < 0 || idx >= genericLength (elems a) then []
+              [ if idx < 0 || idx >= fromIntegral (length (elems a)) then []
                 else case val of
                   PrimVal pval -> [(fromIntegral idx, pval)]
                   ArrayVal arr _ _ ->

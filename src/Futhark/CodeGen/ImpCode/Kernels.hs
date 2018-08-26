@@ -135,6 +135,15 @@ instance Pretty HostOp where
   ppr (CallKernel c) =
     ppr c
 
+instance FreeIn HostOp where
+  freeIn (CallKernel c) = freeIn c
+  freeIn (CmpSizeLe dest name _ x) =
+    freeIn dest <> freeIn name <> freeIn x
+  freeIn (GetSizeMax dest _) =
+    freeIn dest
+  freeIn (GetSize dest _ _) =
+    freeIn dest
+
 instance Pretty CallKernel where
   ppr (Map k) = ppr k
   ppr (AnyKernel k) = ppr k
@@ -150,6 +159,17 @@ instance Pretty CallKernel where
             ppr out_size)
     where ppMemLoc base offset =
             ppr base <+> text "+" <+> ppr offset
+
+instance FreeIn CallKernel where
+  freeIn (Map k) = freeIn k
+  freeIn (AnyKernel k) = freeIn k
+  freeIn (MapTranspose _ dest destoffset src srcoffset num_arrays size_x size_y in_size out_size) =
+    freeIn [dest, src] <> freeIn [destoffset, srcoffset] <> freeIn num_arrays <>
+    freeIn [size_x, size_y] <> freeIn [in_size, out_size]
+
+instance FreeIn Kernel where
+  freeIn kernel = freeIn (kernelBody kernel) <>
+                  freeIn [kernelNumGroups kernel, kernelGroupSize kernel]
 
 instance Pretty MapKernel where
   ppr kernel =

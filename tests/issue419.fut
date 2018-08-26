@@ -44,7 +44,7 @@ let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
                         ) (iota len)
         let ones  = replicate len 1
         let tmp   = sgmPrefSum flags ones
-        let (inds1,inds2,vals) = unzip (
+        let (inds1,inds2,vals) = unzip3 (
             map (\ i -> if (i == len-1) || (unsafe flags[i+1] == 1)
                              -- end of segment
                              then (i+1-tmp[i], ini_sgms[i], tmp[i])
@@ -77,7 +77,7 @@ let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
         then (num_moves, all_perm, all_data, concat shapes cur_shape, false, count)
         else -- reorder perm, data, and shape arrays
             let scan_moves = scan (+) 0 moves
-            let (inds_s, lens, inds_v) = unzip (
+            let (inds_s, lens, inds_v) = unzip3 (
                 map (\ i -> let offset = scan_moves[i]
                             let (ind_s, ll) =
                                 if i > 0 && flags[i] == 0 && unsafe moves[i-1] > 0

@@ -283,23 +283,29 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
       distributeMap path pat $ MapLoop cs w lam arrs
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
-  | Just (scan_fun, nes) <- isScanSOAC form,
-    Just do_iswim <- iswim res_pat w scan_fun $ zip nes arrs = do
+  | Just (scan_lam, nes) <- isScanSOAC form,
+    Just do_iswim <- iswim res_pat w scan_lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       transformStms path =<< (stmsToList . snd <$> runBinderT (certifying cs do_iswim) types)
 
-transformStm _ (Let pat (StmAux cs _) (Op (Screma w form arrs)))
+  | Just (scan_lam, scan_nes) <- isScanSOAC form,
+    ScremaForm _ _ map_lam <- form =
+      doScan (scan_lam, scan_nes) (mempty, nilFn, mempty) map_lam
+
   | ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam <- form,
-    not $ null scan_nes,
-    not $ lambdaContainsParallelism map_lam = do
-      scan_lam_sequential <- Kernelise.transformLambda scan_lam
-      red_lam_sequential <- Kernelise.transformLambda red_lam
-      map_lam_sequential <- Kernelise.transformLambda map_lam
-      runBinder_ $ certifying cs $
-        blockedScan pat w
-        (scan_lam_sequential, scan_nes)
-        (comm, red_lam_sequential, red_nes)
-        map_lam_sequential (intConst Int32 1) [] [] arrs
+    not $ null scan_nes, all primType $ lambdaReturnType scan_lam,
+    not $ lambdaContainsParallelism map_lam =
+      doScan (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam
+
+  where doScan (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam = do
+          scan_lam_sequential <- Kernelise.transformLambda scan_lam
+          red_lam_sequential <- Kernelise.transformLambda red_lam
+          map_lam_sequential <- Kernelise.transformLambda map_lam
+          runBinder_ $ certifying cs $
+            blockedScan res_pat w
+            (scan_lam_sequential, scan_nes)
+            (comm, red_lam_sequential, red_nes)
+            map_lam_sequential (intConst Int32 16) [] [] arrs
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just (comm, red_fun, nes) <- isReduceSOAC form,
@@ -524,8 +530,11 @@ distributeMap path pat (MapLoop cs w lam arrs) = do
     let exploitOuterParallelism path' = do
           soactypes <- asksScope scopeForSOACs
           (seq_lam, _) <- runBinderT (Kernelise.transformLambda lam) soactypes
-          fmap (postKernelsStms . snd) $ runKernelM (env path') $ distribute $
+          (acc', postkernels) <- runKernelM (env path') $ distribute $
             addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
+          -- As above, we deal with identity mappings.
+          return $ postKernelsStms postkernels <>
+            identityStms (outerTarget $ kernelTargets acc')
 
     distributeMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat w lam
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
@@ -580,15 +589,9 @@ distributeMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
         fits <- letSubExp "fits" $ BasicOp $
                 CmpOp (CmpSle Int32) group_size max_group_size
 
-        group_available_par <-
-          letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w intra_avail_par
-        (suff, suff_key) <- sufficientParallelism "suff_intra_par" group_available_par $
-                            (outer_suff_key, False) : path
+        (intra_suff, suff_key) <- sufficientParallelism "suff_intra_par" intra_avail_par $
+                                  (outer_suff_key, False) : path
 
-        -- Avoid tiny workgroups.  TODO: this should be a tunable parameter.
-        group_large_enough <- letSubExp "group_large_enough" $
-          BasicOp $ CmpOp (CmpSle Int32) (intConst Int32 32) intra_avail_par
-        intra_suff <- letSubExp "intra_suff" $ BasicOp $ BinOp LogAnd group_large_enough suff
         intra_ok <- letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
         return (intra_ok, suff_key)
 

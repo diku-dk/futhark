@@ -1,6 +1,6 @@
 -- With of a type in an inner module.
 -- ==
--- error: bool.*i32
+-- error: module type requires
 
 module type has_t = { type t }
 

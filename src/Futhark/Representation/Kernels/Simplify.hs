@@ -39,17 +39,18 @@ import Futhark.Analysis.Rephrase (castStm)
 simpleKernels :: Simplify.SimpleOps Kernels
 simpleKernels = Simplify.bindableSimpleOps (simplifyKernelOp simpleInKernel inKernelEnv)
 
-simpleInKernel :: Simplify.SimpleOps InKernel
-simpleInKernel = Simplify.bindableSimpleOps simplifyKernelExp
+simpleInKernel :: KernelSpace -> Simplify.SimpleOps InKernel
+simpleInKernel = Simplify.bindableSimpleOps . simplifyKernelExp
 
 simplifyKernels :: Prog Kernels -> PassM (Prog Kernels)
 simplifyKernels =
   Simplify.simplifyProg simpleKernels kernelRules Simplify.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope InKernel m, MonadFreshNames m) =>
-                  Lambda InKernel -> [Maybe VName] -> m (Lambda InKernel)
-simplifyLambda =
-  Simplify.simplifyLambda simpleInKernel inKernelRules Engine.noExtraHoistBlockers
+                  KernelSpace -> Lambda InKernel -> [Maybe VName] -> m (Lambda InKernel)
+simplifyLambda kspace =
+  Simplify.simplifyLambda (simpleInKernel kspace)
+  inKernelRules Engine.noExtraHoistBlockers
 
 simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      Engine.SimplifiableLore outerlore,
@@ -58,14 +59,14 @@ simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      SameScope lore outerlore,
                      RetType lore ~ RetType outerlore,
                      BranchType lore ~ BranchType outerlore) =>
-                    Engine.SimpleOps lore -> Engine.Env lore
+                    (KernelSpace -> Engine.SimpleOps lore) -> Engine.Env lore
                  -> Kernel lore -> Engine.SimpleM outerlore (Kernel (Wise lore), Stms (Wise outerlore))
-simplifyKernelOp ops env (Kernel desc space ts kbody) = do
+simplifyKernelOp mk_ops env (Kernel desc space ts kbody) = do
   space' <- Engine.simplify space
   ts' <- mapM Engine.simplify ts
   outer_vtable <- Engine.askVtable
   (((kbody_stms, kbody_res), kbody_hoisted), again) <-
-    Engine.subSimpleM ops env outer_vtable $ do
+    Engine.subSimpleM (mk_ops space) env outer_vtable $ do
       par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
       Engine.localVtable (<>scope_vtable) $
         Engine.blockIf (Engine.hasFree bound_here
@@ -128,19 +129,21 @@ instance Engine.Simplifiable CombineSpace where
                  <*> mapM (traverse Engine.simplify) cspace
 
 simplifyKernelExp :: Engine.SimplifiableLore lore =>
-                     KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore), Stms (Wise lore))
+                     KernelSpace -> KernelExp lore
+                  -> Engine.SimpleM lore (KernelExp (Wise lore), Stms (Wise lore))
 
-simplifyKernelExp (Barrier se) =
+simplifyKernelExp _ (Barrier se) =
   (,) <$> (Barrier <$> Engine.simplify se) <*> pure mempty
 
-simplifyKernelExp (SplitSpace o w i elems_per_thread) =
+simplifyKernelExp _ (SplitSpace o w i elems_per_thread) =
   (,) <$> (SplitSpace <$> Engine.simplify o <*> Engine.simplify w
            <*> Engine.simplify i <*> Engine.simplify elems_per_thread)
       <*> pure mempty
 
-simplifyKernelExp (Combine cspace ts active body) = do
+simplifyKernelExp kspace (Combine cspace ts active body) = do
   ((body_stms', body_res'), hoisted) <-
-    Engine.blockIf (Engine.hasFree bound_here `Engine.orIf` Engine.isNotSafe) $
+    wrapbody $ Engine.blockIf (Engine.hasFree bound_here `Engine.orIf`
+                               maybeBlockUnsafe) $
     localScope (scopeOfCombineSpace cspace) $
     Engine.simplifyBody (map (const Observe) ts) body
   body' <- Engine.constructBody body_stms' body_res'
@@ -150,7 +153,30 @@ simplifyKernelExp (Combine cspace ts active body) = do
            <*> pure body') <*> pure hoisted
   where bound_here = S.fromList $ M.keys $ scopeOfCombineSpace cspace
 
-simplifyKernelExp (GroupReduce w lam input) = do
+        protectCombineHoisted checkIfActive m = do
+          (x, stms) <- m
+          runBinder $ do
+            if any (not . safeExp . stmExp) stms
+              then do is_active <- checkIfActive
+                      mapM_ (Engine.protectIf (not . safeExp) is_active) stms
+              else addStms stms
+            return x
+
+        (maybeBlockUnsafe, wrapbody)
+          | [d] <- map snd $ cspaceDims cspace,
+            d == spaceGroupSize kspace =
+            (Engine.isFalse True,
+             protectCombineHoisted $
+              letSubExp "active" =<<
+              foldBinOp LogAnd (constant True) =<<
+              mapM (uncurry check) active)
+          | otherwise =
+              (Engine.isNotSafe, id)
+
+        check v se =
+          letSubExp "is_active" $ BasicOp $ CmpOp (CmpSlt Int32) (Var v) se
+
+simplifyKernelExp _ (GroupReduce w lam input) = do
   arrs' <- mapM Engine.simplify arrs
   nes' <- mapM Engine.simplify nes
   w' <- Engine.simplify w
@@ -158,7 +184,7 @@ simplifyKernelExp (GroupReduce w lam input) = do
   return (GroupReduce w' lam' $ zip nes' arrs', hoisted)
   where (nes,arrs) = unzip input
 
-simplifyKernelExp (GroupScan w lam input) = do
+simplifyKernelExp _ (GroupScan w lam input) = do
   w' <- Engine.simplify w
   nes' <- mapM Engine.simplify nes
   arrs' <- mapM Engine.simplify arrs
@@ -166,7 +192,7 @@ simplifyKernelExp (GroupScan w lam input) = do
   return (GroupScan w' lam' $ zip nes' arrs', hoisted)
   where (nes,arrs) = unzip input
 
-simplifyKernelExp (GroupStream w maxchunk lam accs arrs) = do
+simplifyKernelExp _ (GroupStream w maxchunk lam accs arrs) = do
   w' <- Engine.simplify w
   maxchunk' <- Engine.simplify maxchunk
   accs' <- mapM Engine.simplify accs

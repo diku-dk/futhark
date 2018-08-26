@@ -23,9 +23,9 @@ let myop (p: (f64,f64,f64,f64,f64)) (q: (f64,f64,f64,f64,f64)): (f64,f64,f64,f64
 
 --let f64
 let main(x1: []f64, x2: [][]f64): (f64,f64,f64,f64,f64) =
-    let (y1, y2, y3) = unzip( map f1 (zip x1 (x2[1]  ) ) )
-    let (z1, z2)     = unzip( map f2 (zip y1 y2 ) )
-    let (q1, q2)     = unzip( map g (zip y3 z1 y2 y3 ) )  in
+    let (y1, y2, y3) = unzip3( map f1 (zip x1 (x2[1]  ) ) )
+    let (z1, z2)     = unzip2( map f2 (zip y1 y2 ) )
+    let (q1, q2)     = unzip2( map g (zip4 y3 z1 y2 y3 ) )  in
 --    let res          = map  ( myop, zip(q1,q2,z2,y1,y3) )    in
 --        res[3]
-    reduce myop (0.0,0.0,0.0,0.0,0.0) (zip q1 q2 z2 y1 y3 )
+    reduce myop (0.0,0.0,0.0,0.0,0.0) (zip5 q1 q2 z2 y1 y3 )

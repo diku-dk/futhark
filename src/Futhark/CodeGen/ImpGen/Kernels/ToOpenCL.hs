@@ -182,7 +182,10 @@ onKernel (MapTranspose bt
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
-  let ctp = GenericC.primTypeToCType bt
+  let ctp = case bt of
+        -- OpenCL does not permit bool as a kernel parameter type.
+        Bool -> [C.cty|unsigned char|]
+        _    -> GenericC.primTypeToCType bt
   in Just [C.cparam|$ty:ctp $id:name|]
 useAsParam (MemoryUse name _) =
   Just [C.cparam|__global unsigned char *$id:name|]
@@ -561,6 +564,7 @@ typesInCode DeclareMem{} = mempty
 typesInCode (DeclareScalar _ t) = S.singleton t
 typesInCode (DeclareArray _ _ t _) = S.singleton t
 typesInCode (Allocate _ (Count e) _) = typesInExp e
+typesInCode Free{} = mempty
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (Write _ (Count e1) t _ _ e2) =

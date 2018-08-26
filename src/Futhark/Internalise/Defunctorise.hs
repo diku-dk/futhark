@@ -46,7 +46,7 @@ data Scope = Scope { scopeSubsts :: Substitutions
 lookupSubstInScope :: QualName VName -> Scope -> (QualName VName, Scope)
 lookupSubstInScope qn@(QualName quals name) scope@(Scope substs mods) =
   case quals of
-    [] -> (QualName [] $ lookupSubst name substs, scope)
+    [] -> (qualName $ lookupSubst name substs, scope)
     q:qs ->
       let q' = lookupSubst q substs
       in case M.lookup q' mods of
@@ -281,7 +281,7 @@ transformDecs ds =
 transformImports :: Imports -> TransformM ()
 transformImports [] = return ()
 transformImports ((name,imp):imps) = do
-  let abs = S.fromList $ map qualLeaf $ S.toList $ fileAbs imp
+  let abs = S.fromList $ map qualLeaf $ M.keys $ fileAbs imp
   scope <- censor (fmap maybeHideEntryPoint) $
            bindingAbs abs $ transformDecs $ progDecs $ fileProg imp
   bindingAbs abs $ bindingImport name scope $ transformImports imps

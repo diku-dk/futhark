@@ -437,7 +437,8 @@ sliceKernelSizes sizes kspace kbody = do
       mapM_ addStm $ kernelBodyStms kbody'
       return sizes
     localScope (scopeOfKernelSpace kspace) $
-      Kernels.simplifyLambda (Lambda mempty (Body () stms zs) i64s) []
+      Kernels.simplifyLambda kspace -- XXX, is this the right KernelSpace?
+      (Lambda mempty (Body () stms zs) i64s) []
 
   ((maxes_per_thread, size_sums), slice_stms) <- flip runBinderT kernels_scope $ do
     space_size <- letSubExp "space_size" =<<

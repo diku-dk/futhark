@@ -1,6 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, TypeFamilies, FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- |
 --
 -- Perform general rule-based simplification based on data dependency
@@ -61,6 +62,7 @@ module Futhark.Optimise.Simplify.Engine
 
        , blockIf
        , constructBody
+       , protectIf
 
        , module Futhark.Optimise.Simplify.Lore
        ) where
@@ -352,7 +354,7 @@ hoistStms rules block vtable uses orig_stms = do
             where vtables = scanl (flip ST.insertStm) vtable' $ stmsToList stms
 
         hoistable (uses',stms) (stm, vtable')
-          | not $ uses' `UT.contains` provides stm = -- Dead binding.
+          | not $ any (`UT.isUsedDirectly` uses') $ provides stm = -- Dead statement.
             return (uses', stms)
           | otherwise = do
             res <- localVtable (const vtable') $
@@ -360,10 +362,10 @@ hoistStms rules block vtable uses orig_stms = do
             case res of
               Nothing -- Nothing to optimise - see if hoistable.
                 | block uses' stm ->
-                  return (expandUsage uses' stm `UT.without` provides stm,
+                  return (expandUsage vtable' uses' stm `UT.without` provides stm,
                           Left stm : stms)
                 | otherwise ->
-                  return (expandUsage uses' stm, Right stm : stms)
+                  return (expandUsage vtable' uses' stm, Right stm : stms)
               Just optimstms -> do
                 changed
                 (uses'',stms') <- simplifyStmsBottomUp' vtable' uses' optimstms
@@ -388,8 +390,10 @@ requires :: Attributes lore => Stm lore -> Names
 requires = freeInStm
 
 expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
-               UT.UsageTable -> Stm lore -> UT.UsageTable
-expandUsage utable bnd = utable <> usageInStm bnd <> usageThroughAliases
+               ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> UT.UsageTable
+expandUsage vtable utable bnd =
+  UT.expand (`ST.lookupAliases` vtable) (usageInStm bnd <> usageThroughAliases) <>
+  utable
   where pat = stmPattern bnd
         usageThroughAliases =
           mconcat $ mapMaybe usageThroughBindeeAliases $
@@ -567,8 +571,9 @@ simplifyResult ds res = do
   (ctx_res', _ctx_res_cs) <- collectCerts $ mapM simplify ctx_res
   val_res' <- mapM simplify' val_res
 
-  let usages = consumeResult $ zip ds val_res'
-  return (ctx_res' <> val_res', usages)
+  let consumption = consumeResult $ zip ds val_res'
+      res' = ctx_res' <> val_res'
+  return (res', UT.usages (freeIn res') <> consumption)
 
   where simplify' (Var name) = do
           bnd <- ST.lookupSubExp name <$> askVtable
@@ -688,6 +693,15 @@ simplifyExp (DoLoop ctx val form loopbody) = do
 
 simplifyExp (Op op) = do (op', stms) <- simplifyOp op
                          return (Op op', stms)
+
+-- Special case for simplification of commutative BinOps where we
+-- arrange the operands in sorted order.  This can make expressions
+-- more identical, which helps CSE.
+simplifyExp (BasicOp (BinOp op x y))
+  | commutativeBinOp op = do
+  x' <- simplify x
+  y' <- simplify y
+  return (BasicOp $ BinOp op (min x' y') (max x' y'), mempty)
 
 simplifyExp e = do e' <- simplifyExpBase e
                    return (e', mempty)
@@ -845,7 +859,7 @@ consumeResult :: [(Diet, SubExp)] -> UT.UsageTable
 consumeResult = mconcat . map inspect
   where inspect (Consume, se) =
           mconcat $ map UT.consumedUsage $ S.toList $ subExpAliases se
-        inspect (Observe, se) = UT.usages $ freeIn se
+        inspect _ = mempty
 
 instance Simplifiable Certificates where
   simplify (Certificates ocs) = Certificates . nub . concat <$> mapM check ocs

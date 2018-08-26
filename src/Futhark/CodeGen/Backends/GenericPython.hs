@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 -- | A generic Python code generator which is polymorphic in the type
 -- of the operations.  Concretely, we use this to handle both
 -- sequential and PyOpenCL Python code.
@@ -392,7 +393,8 @@ unpackDim arr_name (Imp.ConstSize c) i = do
   let shape_name = Field arr_name "shape"
   let constant_c = Integer $ toInteger c
   let constant_i = Integer $ toInteger i
-  stm $ Assert (BinOp "==" constant_c (Index shape_name $ IdxExp constant_i)) "constant dimension wrong"
+  stm $ Assert (BinOp "==" constant_c (Index shape_name $ IdxExp constant_i)) $
+    String "constant dimension wrong"
 
 unpackDim arr_name (Imp.VarSize var) i = do
   let shape_name = Field arr_name "shape"
@@ -416,17 +418,18 @@ entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ (Imp.Space sid) bt 
 badInput :: Int -> PyExp -> String -> PyStmt
 badInput i e t =
   Raise $ simpleCall "TypeError"
-  [Call (Field (String err_msg) "format") [Arg (String t), Arg e]]
+  [Call (Field (String err_msg) "format")
+   [Arg (String t), Arg $ simpleCall "type" [e], Arg e]]
   where err_msg = unlines [ "Argument #" ++ show i ++ " has invalid value"
                           , "Futhark type: {}"
-                          , "Type of given Python value: {}" ]
+                          , "Argument has Python type {} and value: {}"]
 
 
 entryPointInput :: (Int, Imp.ExternalValue, PyExp) -> CompilerM op s ()
 entryPointInput (i, Imp.OpaqueValue desc vs, e) = do
   let type_is_ok = BinOp "and" (simpleCall "isinstance" [e, Var "opaque"])
                                (BinOp "==" (Field e "desc") (String desc))
-  stm $ If (UnOp "not" type_is_ok) [badInput i (simpleCall "type" [e]) desc] []
+  stm $ If (UnOp "not" type_is_ok) [badInput i e desc] []
   mapM_ entryPointInput $ zip3 (repeat i) (map Imp.TransparentValue vs) $
     map (Index (Field e "data") . IdxExp . Integer) [0..]
 
@@ -443,7 +446,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ScalarValue bt s name), e) = do
       npcall = simpleCall npobject [ctcall]
   stm $ Try [Assign vname' npcall]
     [Catch (Tuple [Var "TypeError", Var "AssertionError"])
-     [badInput i (simpleCall "type" [e]) $ prettySigned (s==Imp.TypeUnsigned) bt]]
+     [badInput i e $ prettySigned (s==Imp.TypeUnsigned) bt]]
 
 entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace t s dims), e) = do
   let type_is_wrong =
@@ -452,7 +455,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.Default
         (BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray"]))
         (BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s)))
   stm $ If type_is_wrong
-    [badInput i (simpleCall "type" [e]) $ concat (replicate (length dims) "[]") ++
+    [badInput i e $ concat (replicate (length dims) "[]") ++
      prettySigned (s==Imp.TypeUnsigned) t]
     []
 
@@ -474,7 +477,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize (Imp.Space 
   unpack <- collect $ unpack_input mem memsize sid bt ept dims e
   stm $ Try unpack
     [Catch (Tuple [Var "TypeError", Var "AssertionError"])
-     [badInput i (simpleCall "type" [e]) $ concat (replicate (length dims) "[]") ++
+     [badInput i e $ concat (replicate (length dims) "[]") ++
      prettySigned (ept==Imp.TypeUnsigned) bt]]
 
 extValueDescName :: Imp.ExternalValue -> String
@@ -894,9 +897,14 @@ compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
   stm $ Comment s code'
 
-compileCode (Imp.Assert e msg (loc,locs)) = do
+compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc,locs)) = do
   e' <- compileExp e
-  stm $ Assert e' ("At " ++ stacktrace ++ ": " ++ msg)
+  let onPart (Imp.ErrorString s) = return ("%s", String s)
+      onPart (Imp.ErrorInt32 x) = ("%d",) <$> compileExp x
+  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  stm $ Assert e' (BinOp "%"
+                   (String $ "Error at " ++ stacktrace ++ ": " ++ concat formatstrs)
+                   (Tuple formatargs))
   where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
 
 compileCode (Imp.Call dests fname args) = do
@@ -924,6 +932,9 @@ compileCode (Imp.Allocate name (Imp.Count e) DefaultSpace) = do
   let allocate' = simpleCall "allocateMem" [e']
   let name' = Var (compileName name)
   stm $ Assign name' allocate'
+
+compileCode (Imp.Free name _) =
+  stm $ Assign (Var (compileName name)) None
 
 compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
   join $ asks envAllocate

@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
@@ -48,6 +49,8 @@ module Futhark.CodeGen.Backends.GenericC
   , decl
   , atInit
   , headerDecl
+  , publicDef
+  , publicDef_
   , debugReport
   , HeaderSection(..)
   , libDecl
@@ -66,6 +69,8 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
+import Data.Bits (xor, shiftR)
+import Data.Char (ord, isDigit, isAlphaNum)
 import qualified Data.Map.Strict as M
 import qualified Data.DList as DL
 import Data.List
@@ -73,6 +78,7 @@ import Data.Loc
 import Data.Maybe
 import Data.FileEmbed
 import qualified Data.Semigroup as Sem
+import Text.Printf
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
@@ -81,7 +87,7 @@ import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.Util (zEncodeString, mapAccumLM)
+import Futhark.Util (zEncodeString)
 import Futhark.Representation.AST.Attributes (isBuiltInFunction, builtInFunctions)
 
 
@@ -97,6 +103,7 @@ data CompilerState s = CompilerState {
   , compLibDecls :: DL.DList C.Definition
   , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
   , compDebugItems :: DL.DList C.BlockItem
+  , compDeclaredMem :: [(VName,Space)]
   }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
@@ -111,6 +118,7 @@ newCompilerState src s = CompilerState { compTypeStructs = []
                                        , compLibDecls = mempty
                                        , compCtxFields = mempty
                                        , compDebugItems = mempty
+                                       , compDeclaredMem = mempty
                                        }
 
 -- | In which part of the header file we put the declaration.  This is
@@ -216,17 +224,16 @@ data CompilerEnv op s = CompilerEnv {
   , envFtable     :: M.Map Name [Type]
   }
 
-data CompilerAcc op s = CompilerAcc {
+newtype CompilerAcc op s = CompilerAcc {
     accItems :: DL.DList C.BlockItem
-  , accDeclaredMem :: [(VName,Space)]
   }
 
 instance Sem.Semigroup (CompilerAcc op s) where
-  CompilerAcc items1 declared1 <> CompilerAcc items2 declared2 =
-    CompilerAcc (items1<>items2) (declared1<>declared2)
+  CompilerAcc items1 <> CompilerAcc items2 =
+    CompilerAcc (items1<>items2)
 
 instance Monoid (CompilerAcc op s) where
-  mempty = CompilerAcc mempty mempty
+  mempty = CompilerAcc mempty
   mappend = (Sem.<>)
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
@@ -331,23 +338,13 @@ atInit x = modify $ \s ->
   s { compInit = compInit s ++ [x] }
 
 collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
-collect m = pass $ do
-  ((), w) <- listen m
-  return (DL.toList $ accItems w,
-          const w { accItems = mempty })
+collect m = snd <$> collect' m
 
 collect' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
 collect' m = pass $ do
   (x, w) <- listen m
   return ((x, DL.toList $ accItems w),
           const w { accItems = mempty})
-
-lookupFunction :: Name -> CompilerM op s [Type]
-lookupFunction name = do
-  res <- asks $ M.lookup name . envFtable
-  case res of
-    Nothing -> fail $ "Function " ++ nameToString name ++ " not found."
-    Just ts -> return ts
 
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
@@ -374,6 +371,24 @@ instance C.ToExp PrimValue where
   toExp (BoolValue True) = C.toExp (1::Int8)
   toExp (BoolValue False) = C.toExp (0::Int8)
   toExp Checked = C.toExp (1::Int8)
+
+-- | Construct a publicly visible definition using the specified name
+-- as the template.  The first returned definition is put in the
+-- header file, and the second is the implementation.  Returns the public
+-- name.
+publicDef :: String -> HeaderSection -> (String -> (C.Definition, C.Definition))
+          -> CompilerM op s String
+publicDef s h f = do
+  s' <- publicName s
+  let (pub, priv) = f s'
+  headerDecl h pub
+  libDecl priv
+  return s'
+
+-- | As 'publicDef', but ignores the public name.
+publicDef_ :: String -> HeaderSection -> (String -> (C.Definition, C.Definition))
+           -> CompilerM op s ()
+publicDef_ s h f = void $ publicDef s h f
 
 headerDecl :: HeaderSection -> C.Definition -> CompilerM op s ()
 headerDecl sec def = modify $ \s ->
@@ -488,12 +503,12 @@ defineMemorySpace space = do
       ctx->$id:usagename -= block->size;
       $items:free
       free(block->references);
-      block->references = NULL;
       if (ctx->detail_memory) {
         fprintf(stderr, "%lld bytes freed (now allocated: %lld bytes)\n",
                 (long long) block->size, (long long) ctx->$id:usagename);
       }
     }
+    block->references = NULL;
   }
 }|]
 
@@ -562,7 +577,7 @@ declMem name space = do
   ty <- memToCType space
   decl [C.cdecl|$ty:ty $id:name;|]
   resetMem name
-  tell $ mempty { accDeclaredMem = [(name, space)] }
+  modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
 resetMem :: C.ToExp a => a -> CompilerM op s ()
 resetMem mem = do
@@ -599,44 +614,20 @@ allocMem name size space = do
             join $ asks envAllocate <*> rawMem name <*>
             pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*> pure sid
 
-oneTypeToCType :: Type -> CompilerM op s C.Type
-oneTypeToCType (Scalar bt) = return $ primTypeToCType bt
-oneTypeToCType (Mem _ space) = memToCType space
-
-typeToCType :: [Type] -> CompilerM op s C.Type
-typeToCType t = do
-  ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
-  case ty of
-    Just (_, (cty, _)) -> return cty
-    Nothing -> do
-      members <- zipWithM field t [(0::Int)..]
-      let name = "futrts_" ++ intercalate "_" (map valueTypeName t)
-          struct = [C.cedecl|struct $id:name { $sdecls:members };|]
-          stype  = [C.cty|struct $id:name|]
-      modify $ \s -> s { compTypeStructs = (t, (stype,struct)) : compTypeStructs s }
-      return stype
-        where field et i = do
-                ct <- oneTypeToCType et
-                return [C.csdecl|$ty:ct $id:(tupleField i);|]
-
-  where valueTypeName (Scalar bt) = pretty $ primTypeToCType bt
-        valueTypeName (Mem _ (Space space)) = space ++ "_mem"
-        valueTypeName (Mem _ DefaultSpace) = "mem"
-
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
-  (Int8,  TypeUnsigned) -> [C.cexp|u8|]
-  (Int16, TypeUnsigned) -> [C.cexp|u16|]
-  (Int32, TypeUnsigned) -> [C.cexp|u32|]
-  (Int64, TypeUnsigned) -> [C.cexp|u64|]
-  (Int8,  _) -> [C.cexp|i8|]
-  (Int16, _) -> [C.cexp|i16|]
-  (Int32, _) -> [C.cexp|i32|]
-  (Int64, _) -> [C.cexp|i64|]
-primTypeInfo (FloatType Float32) _ = [C.cexp|f32|]
-primTypeInfo (FloatType Float64) _ = [C.cexp|f64|]
-primTypeInfo Bool _ = [C.cexp|bool|]
-primTypeInfo Cert _ = [C.cexp|bool|]
+  (Int8,  TypeUnsigned) -> [C.cexp|u8_info|]
+  (Int16, TypeUnsigned) -> [C.cexp|u16_info|]
+  (Int32, TypeUnsigned) -> [C.cexp|u32_info|]
+  (Int64, TypeUnsigned) -> [C.cexp|u64_info|]
+  (Int8,  _) -> [C.cexp|i8_info|]
+  (Int16, _) -> [C.cexp|i16_info|]
+  (Int32, _) -> [C.cexp|i32_info|]
+  (Int64, _) -> [C.cexp|i64_info|]
+primTypeInfo (FloatType Float32) _ = [C.cexp|f32_info|]
+primTypeInfo (FloatType Float64) _ = [C.cexp|f64_info|]
+primTypeInfo Bool _ = [C.cexp|bool_info|]
+primTypeInfo Cert _ = [C.cexp|bool_info|]
 
 copyMemoryDefaultSpace :: C.Exp -> C.Exp -> C.Exp -> C.Exp -> C.Exp ->
                           CompilerM op s ()
@@ -659,11 +650,28 @@ arrayName pt signed rank =
   prettySigned (signed==TypeUnsigned) pt ++ "_" ++ show rank ++ "d"
 
 opaqueName :: String -> [ValueDesc] -> String
-opaqueName s vds = "opaque_" ++ zEncodeString (show (s ++ concatMap p vds)) -- FIXME
+opaqueName s _
+  | valid = "opaque_" ++ s
+  where valid = head s /= '_' &&
+                not (isDigit $ head s) &&
+                all ok s
+        ok c = isAlphaNum c || c == '_'
+opaqueName s vds = "opaque_" ++ hash (zipWith xor [0..] $ map ord (s ++ concatMap p vds))
   where p (ScalarValue pt signed _) =
           show (pt, signed)
         p (ArrayValue _ _ space pt signed dims) =
           show (space, pt, signed, length dims)
+
+        -- FIXME: a stupid hash algorithm; may have collisions.
+        hash = printf "%x" . foldl xor 0 . map (iter . (*0x45d9f3b) .
+                                                iter . (*0x45d9f3b) .
+                                                iter . fromIntegral)
+        iter x = ((x::Word32) `shiftR` 16) `xor` x
+
+criticalSection :: [C.BlockItem] -> [C.BlockItem]
+criticalSection items = [[C.citem|lock_lock(&ctx->lock);|]] <>
+                        items <>
+                        [[C.citem|lock_unlock(&ctx->lock);|]]
 
 arrayLibraryFunctions :: Space -> PrimType -> Signedness -> [DimSize]
                       -> CompilerM op s [C.Definition]
@@ -671,29 +679,41 @@ arrayLibraryFunctions space pt signed shape = do
   let rank = length shape
       pt' = signedPrimTypeToCType signed pt
       name = arrayName pt signed rank
-      array_type = [C.cty|struct $id:("futhark_" ++ arrayName pt signed rank)|]
+      array_type = [C.cty|struct $id:("futhark_" ++ name)|]
 
-      new_array = "futhark_new_" ++ name
-      free_array = "futhark_free_" ++ name
-      values_array = "futhark_values_" ++ name
-      shape_array = "futhark_shape_" ++ name
+  new_array <- publicName $ "new_" ++ name
+  new_raw_array <- publicName $ "new_raw_" ++ name
+  free_array <- publicName $ "free_" ++ name
+  values_array <- publicName $ "values_" ++ name
+  values_raw_array <- publicName $ "values_raw_" ++ name
+  shape_array <- publicName $ "shape_" ++ name
 
-      shape_names = [ "dim"++show i | i <- [0..rank-1] ]
+  let shape_names = [ "dim"++show i | i <- [0..rank-1] ]
       shape_params = [ [C.cparam|int $id:k|] | k <- shape_names ]
       arr_size = cproduct [ [C.cexp|$id:k|] | k <- shape_names ]
       arr_size_array = cproduct [ [C.cexp|arr->shape[$int:i]|] | i <- [0..rank-1] ]
   copy <- asks envCopy
 
   arr_raw_mem <- rawMem [C.cexp|arr->mem|]
+  memty <- rawMemCType space
+
+  let prepare_new = do
+        resetMem [C.cexp|arr->mem|]
+        allocMem [C.cexp|arr->mem|] [C.cexp|$exp:arr_size * sizeof($ty:pt')|] space
+        forM_ [0..rank-1] $ \i ->
+          stm [C.cstm|arr->shape[$int:i] = $id:("dim"++show i);|]
 
   new_body <- collect $ do
-    resetMem [C.cexp|arr->mem|]
-    allocMem [C.cexp|arr->mem|] [C.cexp|$exp:arr_size * sizeof($ty:pt')|] space
+    prepare_new
     copy arr_raw_mem [C.cexp|0|] space
          [C.cexp|data|] [C.cexp|0|] DefaultSpace
          [C.cexp|$exp:arr_size * sizeof($ty:pt')|]
-    forM_ [0..rank-1] $ \i ->
-      stm [C.cstm|arr->shape[$int:i] = $id:("dim"++show i);|]
+
+  new_raw_body <- collect $ do
+    prepare_new
+    copy arr_raw_mem [C.cexp|0|] space
+         [C.cexp|data|] [C.cexp|offset|] space
+         [C.cexp|$exp:arr_size * sizeof($ty:pt')|]
 
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
@@ -705,11 +725,17 @@ arrayLibraryFunctions space pt signed shape = do
   ctx_ty <- contextType
 
   headerDecl (ArrayDecl name)
+    [C.cedecl|struct $id:name;|]
+  headerDecl (ArrayDecl name)
     [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params);|]
+  headerDecl (ArrayDecl name)
+    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset, $params:shape_params);|]
   headerDecl (ArrayDecl name)
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   headerDecl (ArrayDecl name)
     [C.cedecl|int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data);|]
+  headerDecl (ArrayDecl name)
+    [C.cedecl|$ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   headerDecl (ArrayDecl name)
     [C.cedecl|typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
 
@@ -719,19 +745,33 @@ arrayLibraryFunctions space pt signed shape = do
             if (arr == NULL) {
               return NULL;
             }
-            $items:new_body
+            $items:(criticalSection new_body)
+            return arr;
+          }
+
+          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset,
+                                            $params:shape_params) {
+            $ty:array_type *arr = malloc(sizeof($ty:array_type));
+            if (arr == NULL) {
+              return NULL;
+            }
+            $items:(criticalSection new_raw_body)
             return arr;
           }
 
           int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
-            $items:free_body
+            $items:(criticalSection free_body)
             free(arr);
             return 0;
           }
 
           int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data) {
-            $items:values_body
+            $items:(criticalSection values_body)
             return 0;
+          }
+
+          $ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
+            return $exp:arr_raw_mem;
           }
 
           typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
@@ -742,15 +782,16 @@ arrayLibraryFunctions space pt signed shape = do
 opaqueLibraryFunctions :: String -> [ValueDesc]
                        -> CompilerM op s [C.Definition]
 opaqueLibraryFunctions desc vds = do
-  let name = "futhark_" ++ opaqueName desc vds
-      free_opaque = "futhark_free_" ++ opaqueName desc vds
-      opaque_type = [C.cty|struct $id:name|]
+  name <- publicName $ opaqueName desc vds
+  free_opaque <- publicName $ "free_" ++ opaqueName desc vds
 
-  let freeComponent _ ScalarValue{} =
+  let opaque_type = [C.cty|struct $id:name|]
+
+      freeComponent _ ScalarValue{} =
         return ()
       freeComponent i (ArrayValue _ _ _ pt signed shape) = do
         let rank = length shape
-            free_array = "futhark_free_" ++ arrayName pt signed rank
+        free_array <- publicName $ "free_" ++ arrayName pt signed rank
         stm [C.cstm|if ((tmp = $id:free_array(ctx, obj->$id:(tupleField i))) != 0) {
                 ret = tmp;
              }|]
@@ -782,10 +823,9 @@ valueDescToCType (ArrayValue _ _ space pt signed shape) = do
     Just (cty, _) -> return cty
     Nothing -> do
       memty <- memToCType space
-      let name = "futhark_" ++ arrayName pt signed rank
-          struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
+      name <- publicName $ arrayName pt signed rank
+      let struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
           stype = [C.cty|struct $id:name|]
-      headerDecl (ArrayDecl name) [C.cedecl|struct $id:name;|]
       library <- arrayLibraryFunctions space pt signed shape
       modify $ \s -> s { compArrayStructs =
                            ((pt', rank), (stype, struct : library)) : compArrayStructs s
@@ -794,7 +834,7 @@ valueDescToCType (ArrayValue _ _ space pt signed shape) = do
 
 opaqueToCType :: String -> [ValueDesc] -> CompilerM op s C.Type
 opaqueToCType desc vds = do
-  let name = "futhark_" ++ opaqueName desc vds
+  name <- publicName $ opaqueName desc vds
   exists <- gets $ lookup name . compOpaqueStructs
   case exists of
     Just (ty, _) -> return ty
@@ -820,29 +860,26 @@ externalValueToCType (TransparentValue vd) = valueDescToCType vd
 externalValueToCType (OpaqueValue desc vds) = opaqueToCType desc vds
 
 prepareEntryInputs :: [ExternalValue] -> CompilerM op s [C.Param]
-prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
-  where prepare known_sizes (pno, TransparentValue vd) = do
+prepareEntryInputs = zipWithM prepare [(0::Int)..]
+  where prepare pno (TransparentValue vd) = do
           let pname = "in" ++ show pno
-          (known_sizes', ty) <- prepareValue known_sizes ([C.cexp|$id:pname|], vd)
-          return (known_sizes',
-                  [C.cparam|$ty:ty $id:pname|])
+          ty <- prepareValue [C.cexp|$id:pname|] vd
+          return [C.cparam|const $ty:ty $id:pname|]
 
-        prepare known_sizes (pno, OpaqueValue desc vds) = do
+        prepare pno (OpaqueValue desc vds) = do
           ty <- opaqueToCType desc vds
           let pname = "in" ++ show pno
               field i ScalarValue{} = [C.cexp|$id:pname->$id:(tupleField i)|]
               field i ArrayValue{} = [C.cexp|$id:pname->$id:(tupleField i)|]
-          (known_sizes', _) <-
-            mapAccumLM prepareValue known_sizes $ zip (zipWith field [0..] vds) vds
-          return (known_sizes',
-                  [C.cparam|$ty:ty *$id:pname|])
+          zipWithM_ prepareValue (zipWith field [0..] vds) vds
+          return [C.cparam|const $ty:ty *$id:pname|]
 
-        prepareValue known_sizes (src, ScalarValue pt signed name) = do
+        prepareValue src (ScalarValue pt signed name) = do
           let pt' = signedPrimTypeToCType signed pt
           stm [C.cstm|$id:name = $exp:src;|]
-          return (known_sizes, pt')
+          return pt'
 
-        prepareValue known_sizes (src, vd@(ArrayValue mem mem_size _ _ _ shape)) = do
+        prepareValue src vd@(ArrayValue mem mem_size _ _ _ shape) = do
           ty <- valueDescToCType vd
 
           stm [C.cstm|$exp:mem = $exp:src->mem;|]
@@ -852,28 +889,13 @@ prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
 
 
           let rank = length shape
-              maybeCopyDim (ConstSize x) i =
-                assertSameSize x [C.cexp|$exp:src->shape[$int:i]|]
-              maybeCopyDim (VarSize d) i
-                | d `elem` known_sizes =
-                    assertSameSize d [C.cexp|$exp:src->shape[$int:i]|]
-                | otherwise =
-                    [C.cstm|$id:d = $exp:src->shape[$int:i];|]
+              maybeCopyDim (VarSize d) i =
+                Just [C.cstm|$id:d = $exp:src->shape[$int:i];|]
+              maybeCopyDim _ _ = Nothing
 
-          stms $ zipWith maybeCopyDim shape [0..rank-1]
+          stms $ catMaybes $ zipWith maybeCopyDim shape [0..rank-1]
 
-          return (known_sizes ++ wrote_sizes, [C.cty|$ty:ty*|])
-
-          where wrote_sizes = mapMaybe isVarSize shape
-                isVarSize ConstSize{} = Nothing
-                isVarSize (VarSize d) = Just d
-
-                assertSameSize expected got =
-                  [C.cstm|if ($exp:expected != $exp:got) {
-                            fprintf(stderr, "Parameter %s has bad dimension (expected %d, got %d).\n",
-                                    $string:(pretty src), $exp:expected, $exp:got);
-                            exit(1);
-                          }|]
+          return [C.cty|$ty:ty*|]
 
 prepareEntryOutputs :: [ExternalValue] -> CompilerM op s [C.Param]
 prepareEntryOutputs = zipWithM prepare [(0::Int)..]
@@ -920,31 +942,22 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
                 [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
           stms $ zipWith maybeCopyDim shape [0..rank-1]
 
-unpackResults :: VName -> [Param] -> [C.Stm]
-unpackResults ret outparams =
-  zipWith assign outparams [0..]
-  where assign p i = [C.cstm|$id:(paramName p) = $exp:(tupleFieldExp ret i);|]
-
 onEntryPoint :: Name -> Function op
              -> CompilerM op s (C.Definition, C.Definition, C.Initializer)
 onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
-  ret <- newVName "ret"
-  crettype <- typeToCType $ paramsTypes outputs
-
-  let argexps = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
+  let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
+      in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
   inputdecls <- collect $ mapM_ stubParam inputs
   outputdecls <- collect $ mapM_ stubParam outputs
 
   let entry_point_name = nameToString fname
-      entry_point_function_name = "futhark_" ++ entry_point_name
+  entry_point_function_name <- publicName $ "entry_" ++ entry_point_name
 
   (entry_point_input_params, unpack_entry_inputs) <-
     collect' $ prepareEntryInputs args
   (entry_point_output_params, pack_entry_outputs) <-
     collect' $ prepareEntryOutputs results
-
-  let unpack_ret = unpackResults ret outputs
 
   (cli_entry_point, cli_init) <- cliEntryPoint fname function
 
@@ -962,15 +975,19 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
     $items:inputdecls
     $items:outputdecls
 
+    lock_lock(&ctx->lock);
+
     $items:unpack_entry_inputs
 
-    $ty:crettype $id:ret;
-    $id:ret = $id:(funName fname)(ctx, $args:argexps);
+    int ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
 
-    $stms:unpack_ret
-    $items:pack_entry_outputs
+    if (ret == 0) {
+      $items:pack_entry_outputs
+    }
 
-    return 0;
+    lock_unlock(&ctx->lock);
+
+    return ret;
 }
     |],
           cli_entry_point,
@@ -1003,7 +1020,10 @@ printStm (OpaqueValue desc _) _ =
   return [C.cstm|printf("#<opaque %s>", $string:desc);|]
 printStm (TransparentValue (ScalarValue bt ept _)) e =
   return $ printPrimStm [C.cexp|stdout|] e bt ept
-printStm (TransparentValue (ArrayValue _ _ _ bt ept shape)) e =
+printStm (TransparentValue (ArrayValue _ _ _ bt ept shape)) e = do
+  values_array <- publicName $ "values_" ++ name
+  shape_array <- publicName $ "shape_" ++ name
+  let num_elems = cproduct [ [C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0..rank-1] ]
   return [C.cstm|{
       $ty:bt' *arr = calloc(sizeof($ty:bt'), $exp:num_elems);
       assert(arr != NULL);
@@ -1014,10 +1034,7 @@ printStm (TransparentValue (ArrayValue _ _ _ bt ept shape)) e =
   }|]
   where rank = length shape
         bt' = primTypeToCType bt
-        num_elems = cproduct [ [C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0..rank-1] ]
         name = arrayName bt ept rank
-        values_array = "futhark_values_" ++ name
-        shape_array = "futhark_shape_" ++ name
 
 readPrimStm :: C.ToExp a => a -> Int -> PrimType -> Signedness -> C.Stm
 readPrimStm place i t ept =
@@ -1050,9 +1067,10 @@ readInput i (TransparentValue vd@(ArrayValue _ _ _ t ept dims)) = do
   let t' = primTypeToCType t
       rank = length dims
       name = arrayName t ept rank
-      new_array = "futhark_new_" ++ name
-      free_array = "futhark_free_" ++ name
       dims_exps = [ [C.cexp|$id:shape[$int:j]|] | j <- [0..rank-1] ]
+
+  new_array <- publicName $ "new_" ++ name
+  free_array <- publicName $ "free_" ++ name
 
   stm [C.cstm|{
      typename int64_t $id:shape[$int:rank];
@@ -1088,12 +1106,12 @@ prepareOutputs = mapM prepareResult
               return ([C.cexp|$id:result|], [C.cstm|;|])
             TransparentValue (ArrayValue _ _ _ t ept dims) -> do
               let name = arrayName t ept $ length dims
-                  free_array = "futhark_free_" ++ name
+              free_array <- publicName $ "free_" ++ name
               item [C.citem|$ty:ty *$id:result;|]
               return ([C.cexp|$id:result|],
                       [C.cstm|assert($id:free_array(ctx, $exp:result) == 0);|])
             OpaqueValue desc vds -> do
-              let free_opaque = "futhark_free_" ++ opaqueName desc vds
+              free_opaque <- publicName $ "free_" ++ opaqueName desc vds
               item [C.citem|$ty:ty *$id:result;|]
               return ([C.cexp|$id:result|],
                       [C.cstm|assert($id:free_opaque(ctx, $exp:result) == 0);|])
@@ -1116,19 +1134,24 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
   ctx_ty <- contextType
   sync_ctx <- publicName "context_sync"
+  error_ctx <- publicName "context_get_error"
 
   let entry_point_name = nameToString fname
       cli_entry_point_function_name = "futrts_cli_entry_" ++ entry_point_name
-      entry_point_function_name = "futhark_" ++ entry_point_name
+  entry_point_function_name <- publicName $ "entry_" ++ entry_point_name
 
-      run_it = [C.citems|
+  let run_it = [C.citems|
+                  int r;
                   /* Run the program once. */
                   $stms:pack_input
                   assert($id:sync_ctx(ctx) == 0);
                   t_start = get_wall_time();
-                  assert($id:entry_point_function_name(ctx,
-                                                       $args:(map addrOf output_vals),
-                                                       $args:input_args) == 0);
+                  r = $id:entry_point_function_name(ctx,
+                                                    $args:(map addrOf output_vals),
+                                                    $args:input_args);
+                  if (r != 0) {
+                    panic(1, "%s", $id:error_ctx(ctx));
+                  }
                   assert($id:sync_ctx(ctx) == 0);
                   t_end = get_wall_time();
                   long int elapsed_usec = t_end - t_start;
@@ -1244,23 +1267,26 @@ asExecutable (CParts a b c d) = a <> b <> c <> d
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
 compileProg :: MonadFreshNames m =>
-               Operations op s
-            -> CompilerM op s ()
-            -> s
+               Operations op ()
+            -> CompilerM op () ()
+            -> String
             -> [Space]
             -> [Option]
             -> Functions op
             -> m CParts
-compileProg ops extra userstate spaces options prog@(Functions funs) = do
+compileProg ops extra header_extra spaces options prog@(Functions funs) = do
   src <- getNameSource
   let ((prototypes, definitions, entry_points), endstate) =
-        runCompilerM prog ops src userstate compileProg'
+        runCompilerM prog ops src () compileProg'
       (entry_point_decls, cli_entry_point_decls, entry_point_inits) =
         unzip3 entry_points
 
   let headerdefs = [C.cunit|
+$esc:("/*\n * Headers\n*/\n")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
+$esc:("#include <stdbool.h>")
+$esc:(header_extra)
 
 $esc:("\n/*\n * Initialisation\n*/\n")
 $edecls:(initDecls endstate)
@@ -1281,6 +1307,13 @@ $edecls:(miscDecls endstate)
   let utildefs = [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
+$esc:("#include <stdbool.h>")
+$esc:("#include <math.h>")
+$esc:("#include <stdint.h>")
+/* If NDEBUG is set, the assert() macro will do nothing. Since Futhark
+   (unfortunately) makes use of assert() for error detection (and even some
+   side effects), we want to avoid that. */
+$esc:("#undef NDEBUG")
 $esc:("#include <assert.h>")
 
 $esc:panic_h
@@ -1290,7 +1323,6 @@ $esc:timing_h
 
   let clidefs = [C.cunit|
 $esc:("#include <string.h>")
-$esc:("#include <stdint.h>")
 $esc:("#include <inttypes.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <ctype.h>")
@@ -1372,12 +1404,12 @@ int main(int argc, char** argv) {
   let libdefs = [C.cunit|
 $esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
 $esc:("#include <string.h>")
-$esc:("#include <stdint.h>")
 $esc:("#include <inttypes.h>")
-$esc:("#include <math.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
+
+$esc:lock_h
 
 $edecls:(DL.toList (compEarlyDecls endstate))
 
@@ -1405,6 +1437,7 @@ $edecls:entry_point_decls
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
 
           mapM_ libDecl memstructs
+          entry_points <- mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
           extra
           mapM_ libDecl $ concat memfuns
           debugreport <- gets $ DL.toList . compDebugItems
@@ -1420,9 +1453,6 @@ $edecls:entry_point_decls
   }
 }|]
 
-          entry_points <- mapM (uncurry onEntryPoint) $
-                          filter (functionEntry . snd) funs
-
           return (prototypes, definitions, entry_points)
         funcToDef func = C.FuncDef func loc
           where loc = case func of
@@ -1435,19 +1465,20 @@ $edecls:entry_point_decls
         panic_h = $(embedStringFile "rts/c/panic.h")
         values_h = $(embedStringFile "rts/c/values.h")
         timing_h = $(embedStringFile "rts/c/timing.h")
+        lock_h = $(embedStringFile "rts/c/lock.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
-  args' <- mapM compileInput inputs
-  (retval, body') <- blockScope' $ do
-    mapM_ compileOutput outputs
-    compileFunBody outputs body
-  crettype <- typeToCType $ paramsTypes outputs
+  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
+  inparams <- mapM compileInput inputs
+  body' <- blockScope $ compileFunBody out_ptrs outputs body
   ctx_ty <- contextType
-  return ([C.cedecl|static $ty:crettype $id:(funName fname)($ty:ctx_ty *ctx, $params:args');|],
-          [C.cfun|static $ty:crettype $id:(funName fname)($ty:ctx_ty *ctx, $params:args') {
+  return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
+                                                   $params:outparams, $params:inparams);|],
+          [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
+                                                 $params:outparams, $params:inparams) {
              $items:body'
-             return $id:retval;
+             return 0;
 }|])
   where compileInput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
@@ -1458,9 +1489,12 @@ compileFun (fname, Function _ outputs inputs body _ _) = do
 
         compileOutput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
-          decl [C.cdecl|$ty:ctp $id:name;|]
-        compileOutput (MemParam name space) =
-          declMem name space
+          p_name <- newVName $ "out_" ++ baseString name
+          return ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
+        compileOutput (MemParam name space) = do
+          ty <- memToCType space
+          p_name <- newVName $ baseString name ++ "_p"
+          return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
 compilePrimValue :: PrimValue -> C.Exp
 
@@ -1654,18 +1688,26 @@ compileCode c
 
 compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
-compileCode (Assert e msg (loc, locs)) = do
+compileCode (Assert e (ErrorMsg parts) (loc, locs)) = do
   e' <- compileExp e
+  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
+      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
+  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   stm [C.cstm|if (!$exp:e') {
-                   fprintf(stderr, "Assertion failed at %s: %s\n",
-                                   $string:stacktrace, $string:msg);
-                   exit(1);
+                   ctx->error = msgprintf($string:("Error at %s:\n" <> concat formatstrs <> "\n"),
+                                           $string:stacktrace, $args:formatargs);
+                   $items:free_all_mem
+                   return 1;
                  }|]
   where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
 
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
   allocMem name size space
+
+compileCode (Free name space) =
+  unRefMem name space
 
 compileCode (For i it bound body) = do
   let i' = C.toIdent i
@@ -1770,19 +1812,16 @@ compileCode (SetMem dest src space) =
 
 compileCode (Call dests fname args) = do
   args' <- mapM compileArg args
-  outtypes <- lookupFunction fname
-  crestype <- typeToCType outtypes
-  let args'' | isBuiltInFunction fname = args'
-             | otherwise = [C.cexp|ctx|] : args'
+  let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
+      args'' | isBuiltInFunction fname = args'
+             | otherwise = [C.cexp|ctx|] : out_args ++ args'
   case dests of
     [dest] | isBuiltInFunction fname ->
       stm [C.cstm|$id:dest = $id:(funName fname)($args:args'');|]
     _        -> do
       ret <- newVName "call_ret"
-      decl [C.cdecl|$ty:crestype $id:ret;|]
-      stm [C.cstm|$id:ret = $id:(funName fname)($args:args'');|]
-      forM_ (zip [0..] dests) $ \(i,dest) ->
-        stm [C.cstm|$id:dest = $exp:(tupleFieldExp ret i);|]
+      item [C.citem|int $id:ret = $id:(funName fname)($args:args'');|]
+      stm [C.cstm|assert($id:ret == 0);|]
   where compileArg (MemArg m) = return [C.cexp|$exp:m|]
         compileArg (ExpArg e) = compileExp e
 
@@ -1790,27 +1829,33 @@ blockScope :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 blockScope = fmap snd . blockScope'
 
 blockScope' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
-blockScope' m = pass $ do
-  (x, w) <- listen m
-  let items = DL.toList $ accItems w
-  releases <- collect $ mapM_ (uncurry unRefMem) $ accDeclaredMem w
-  return ((x, items ++ releases),
-          const mempty)
+blockScope' m = do
+  old_allocs <- gets compDeclaredMem
+  (x, items) <- pass $ do
+    (x, w) <- listen m
+    let items = DL.toList $ accItems w
+    return ((x, items), const mempty)
+  new_allocs <- gets $ filter (`notElem` old_allocs) . compDeclaredMem
+  modify $ \s -> s { compDeclaredMem = old_allocs }
+  releases <- collect $ mapM_ (uncurry unRefMem) new_allocs
+  return (x, items <> releases)
 
-compileFunBody :: [Param] -> Code op -> CompilerM op s VName
-compileFunBody outputs code = do
-  retval <- newVName "retval"
-  bodytype <- typeToCType $ paramsTypes outputs
+compileFunBody :: [C.Exp] -> [Param] -> Code op -> CompilerM op s ()
+compileFunBody output_ptrs outputs code = do
+  mapM_ declareOutput outputs
   compileCode code
-  decl [C.cdecl|$ty:bodytype $id:retval;|]
-  let setRetVal' i (MemParam name space) = do
-        let field = tupleFieldExp retval i
-        resetMem field
-        setMem field name space
-      setRetVal' i (ScalarParam name _) =
-        stm [C.cstm|$exp:(tupleFieldExp retval i) = $id:name;|]
-  zipWithM_ setRetVal' [0..] outputs
-  return retval
+  zipWithM_ setRetVal' output_ptrs outputs
+  where declareOutput (MemParam name space) =
+          declMem name space
+        declareOutput (ScalarParam name pt) = do
+          let ctp = primTypeToCType pt
+          decl [C.cdecl|$ty:ctp $id:name;|]
+
+        setRetVal' p (MemParam name space) = do
+          resetMem [C.cexp|*$exp:p|]
+          setMem [C.cexp|*$exp:p|] name space
+        setRetVal' p (ScalarParam name _) =
+          stm [C.cstm|*$exp:p = $id:name;|]
 
 declareAndSet :: Code op -> Maybe (VName, PrimType, Exp, Code op)
 declareAndSet (DeclareScalar name t :>>: (SetScalar dest e :>>: c))

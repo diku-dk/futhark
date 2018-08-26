@@ -19,14 +19,14 @@ import qualified Data.Text.Lazy.IO as T
 import Text.Blaze.Html.Renderer.Text
 
 import Futhark.Doc.Generator
-import Futhark.Compiler (readLibrary, dumpError, newFutharkConfig, Imports)
+import Futhark.Compiler (readLibrary, dumpError, newFutharkConfig, Imports, fileProg)
 import Futhark.Pipeline (runFutharkM, FutharkM, Verbosity(..))
+import Language.Futhark.Syntax (progDoc, DocComment(..))
 import Futhark.Util.Options
-import Futhark.Util (directoryContents)
-import Language.Futhark.Futlib.Prelude
+import Futhark.Util (directoryContents, trim)
 
 main :: IO ()
-main = mainWithOptions initialDocConfig commandLineOptions f
+main = mainWithOptions initialDocConfig commandLineOptions "options... -o outdir programs..." f
   where f [dir] config = Just $ do
           res <- runFutharkM (m config dir) Verbose
           case res of
@@ -48,7 +48,7 @@ main = mainWithOptions initialDocConfig commandLineOptions f
               when (docVerbose config) $ liftIO $ do
                 mapM_ (hPutStrLn stderr . ("Found source file "<>)) files
                 hPutStrLn stderr "Reading files..."
-              (_w, imports, _vns) <- readLibrary preludeBasis files
+              (_w, imports, _vns) <- readLibrary files
               liftIO $ printDecs config outdir files $ nubBy sameImport imports
 
         sameImport (x, _) (y, _) = x == y
@@ -60,8 +60,8 @@ futFiles dir = filter isFut <$> directoryContents dir
 printDecs :: DocConfig -> FilePath -> [FilePath] -> Imports -> IO ()
 printDecs cfg dir files imports = do
   let direct_imports = map (normalise . dropExtension) files
-      (file_htmls, warnings) = renderFiles direct_imports imports
-  hPrint stderr warnings
+      (file_htmls, _warnings) = renderFiles direct_imports $
+                                filter (not . ignored) imports
   mapM_ (write . fmap renderHtml) file_htmls
   write ("style.css", cssFile)
 
@@ -71,6 +71,14 @@ printDecs cfg dir files imports = do
                                      hPutStrLn stderr $ "Writing " <> file
                                    createDirectoryIfMissing True $ takeDirectory file
                                    T.writeFile file content
+
+        -- Some files are not worth documenting; typically because
+        -- they contain tests.  The current crude mechanism is to
+        -- recognise them by a file comment containing "ignore".
+        ignored (_, fm) =
+          case progDoc (fileProg fm) of
+            Just (DocComment s _) -> trim s == "ignore"
+            _                     -> False
 
 cssFile :: T.Text
 cssFile = $(embedStringFile "rts/futhark-doc/style.css")

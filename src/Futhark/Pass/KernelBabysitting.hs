@@ -54,7 +54,7 @@ type ExpMap = M.Map VName (Stm Kernels)
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case M.lookup name m of
-    Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just perm
+    Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just $ rearrangeInverse perm
     Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
     Just (Let pat _ (Op (Kernel _ _ ts _))) ->
@@ -64,7 +64,7 @@ nonlinearInMemory name m =
   where nonlinear (pe, t)
           | inner_r <- arrayRank t, inner_r > 0 = do
               let outer_r = arrayRank (patElemType pe) - inner_r
-              return $ Just $ [inner_r..inner_r+outer_r-1] ++ [0..inner_r-1]
+              return $ Just $ rearrangeInverse $ [inner_r..inner_r+outer_r-1] ++ [0..inner_r-1]
           | otherwise = Nothing
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
@@ -194,6 +194,39 @@ ensureCoalescedAccess expmap thread_space num_threads isThreadLocal sizeSubst ou
         Just perm <- is' `isPermutationOf` is ->
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
+      -- Check whether the access is already coalesced because of a
+      -- previous rearrange being applied to the current array:
+      -- 1. get the permutation of the source-array rearrange
+      -- 2. apply it to the slice
+      -- 3. check that the innermost index is actually the gid
+      --    of the innermost kernel dimension.
+      -- If so, the access is already coalesced, nothing to do!
+      -- (Cosmin's Heuristic.)
+      | Just (Let _ _ (BasicOp (Rearrange perm _))) <- M.lookup arr expmap,
+        ---- Just (Just perm) <- nonlinearInMemory arr expmap,
+        not $ null perm,
+        length slice >= length perm,
+        slice' <- map (\i -> slice !! i) perm,
+        DimFix inner_ind <- last slice',
+        not $ null thread_gids,
+        inner_ind == (Var $ last thread_gids) ->
+          return Nothing
+
+      -- We are not fully indexing an array, but the remaining slice
+      -- is invariant to the innermost-kernel dimension. We assume
+      -- the remaining slice will be sequentially streamed, hence
+      -- tiling will be applied later and will solve coalescing.
+      -- Hence nothing to do at this point. (Cosmin's Heuristic.)
+      | (is, rem_slice) <- splitSlice slice,
+        not $ null rem_slice,
+        allDimAreSlice rem_slice,
+        Nothing <- M.lookup arr expmap,
+        not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
+        is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
+        not (null thread_gids || null is),
+        not ( S.member (last thread_gids) (S.union (freeIn is) (freeIn rem_slice)) ) ->
+          return Nothing
+
       -- We are not fully indexing the array, and the indices are not
       -- a proper prefix of the thread indices, and some indices are
       -- thread local, so we assume (HEURISTIC!)  that the remaining
@@ -257,6 +290,11 @@ splitSlice [] = ([], [])
 splitSlice (DimFix i:is) = first (i:) $ splitSlice is
 splitSlice is = ([], is)
 
+allDimAreSlice :: Slice SubExp -> Bool
+allDimAreSlice [] = True
+allDimAreSlice (DimFix _:_) = False
+allDimAreSlice (_:is) = allDimAreSlice is
+
 -- Try to move thread indexes into their proper position.
 coalescedIndexes :: [SubExp] -> [SubExp] -> Maybe [SubExp]
 coalescedIndexes tgids is
@@ -305,6 +343,7 @@ rearrangeInput :: MonadBinder m =>
                   Maybe (Maybe [Int]) -> [Int] -> VName -> m VName
 rearrangeInput (Just (Just current_perm)) perm arr
   | current_perm == perm = return arr -- Already has desired representation.
+
 rearrangeInput Nothing perm arr
   | sort perm == perm = return arr -- We don't know the current
                                    -- representation, but the indexing

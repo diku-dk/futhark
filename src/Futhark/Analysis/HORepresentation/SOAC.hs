@@ -463,9 +463,15 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: (Op lore ~ Futhark.SOAC lore, HasScope t f, Monad f) =>
-           Exp lore -> f (Either NotSOAC (SOAC lore))
+fromExp :: (Op lore ~ Futhark.SOAC lore, Bindable lore,
+            HasScope lore m, MonadFreshNames m) =>
+           Exp lore -> m (Either NotSOAC (SOAC lore))
 
+fromExp (BasicOp (Copy arr)) = do
+  arr_t <- lookupType arr
+  p <- Param <$> newVName "copy_p" <*> pure (rowType arr_t)
+  let lam = Lambda [p] (mkBody mempty [Futhark.Var $ paramName p]) [rowType arr_t]
+  Right . Screma (arraySize 0 arr_t) (Futhark.mapSOAC lam) . pure <$> varInput arr
 fromExp (Op (Futhark.Stream w form lam as)) =
   Right . Stream w form lam <$> traverse varInput as
 fromExp (Op (Futhark.Scatter len lam ivs as)) = do

@@ -22,7 +22,7 @@ import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
 compileProg =
-  traverse (GC.compileProg operations generateContext () [DefaultSpace] []) <=<
+  traverse (GC.compileProg operations generateContext "" [DefaultSpace] []) <=<
   ImpGen.compileProg
   where operations :: GC.Operations Imp.Sequential ()
         operations = GC.defaultOperations
@@ -31,75 +31,87 @@ compileProg =
                      }
 
         generateContext = do
-          cfg <- GC.publicName "context_config"
-          new_cfg <- GC.publicName "context_config_new"
-          free_cfg <- GC.publicName "context_config_free"
-          cfg_set_debugging <- GC.publicName "context_config_set_debugging"
-          cfg_set_logging <- GC.publicName "context_config_set_logging"
+          cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
+            ([C.cedecl|struct $id:s;|],
+             [C.cedecl|struct $id:s { int debugging; };|])
 
-          GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg;|]
-          GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg* $id:new_cfg();|]
-          GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg);|]
-          GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag);|]
-          GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int flag);|]
-
-          GC.libDecl [C.cedecl|struct $id:cfg {
-                                 int debugging;
-                               };|]
-          GC.libDecl [C.cedecl|struct $id:cfg* $id:new_cfg() {
+          GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
+            ([C.cedecl|struct $id:cfg* $id:s();|],
+             [C.cedecl|struct $id:cfg* $id:s() {
                                  struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
                                  if (cfg == NULL) {
                                    return NULL;
                                  }
                                  cfg->debugging = 0;
                                  return cfg;
-                               }|]
-          GC.libDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg) {
+                               }|])
+
+          GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
+            ([C.cedecl|void $id:s(struct $id:cfg* cfg);|],
+             [C.cedecl|void $id:s(struct $id:cfg* cfg) {
                                  free(cfg);
-                               }|]
-          GC.libDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int detail) {
-                                 cfg->debugging = detail;
-                               }|]
-          GC.libDecl [C.cedecl|void $id:cfg_set_logging(struct $id:cfg* cfg, int detail) {
+                               }|])
+
+          GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
+             ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+              [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
+                          cfg->debugging = detail;
+                        }|])
+
+          GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
+             ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+              [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
                                  /* Does nothing for this backend. */
                                  cfg = cfg; detail=detail;
-                               }|]
-
-          ctx <- GC.publicName "context"
-          new_ctx <- GC.publicName "context_new"
-          free_ctx <- GC.publicName "context_free"
-          sync_ctx <- GC.publicName "context_sync"
-
-          GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx;|]
-          GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg);|]
-          GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx);|]
-          GC.headerDecl GC.InitDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx);|]
+                               }|])
 
           (fields, init_fields) <- GC.contextContents
 
-          GC.libDecl [C.cedecl|struct $id:ctx {
-                                 int detail_memory;
-                                 int debugging;
-                                 $sdecls:fields
-                               };|]
-          GC.libDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg) {
+          ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
+            ([C.cedecl|struct $id:s;|],
+             [C.cedecl|struct $id:s {
+                          int detail_memory;
+                          int debugging;
+                          typename lock_t lock;
+                          char *error;
+                          $sdecls:fields
+                        };|])
+
+          GC.publicDef_ "context_new" GC.InitDecl $ \s ->
+            ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
+             [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
                                   struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
                                   if (ctx == NULL) {
                                     return NULL;
                                   }
                                   ctx->detail_memory = cfg->debugging;
                                   ctx->debugging = cfg->debugging;
+                                  ctx->error = NULL;
+                                  create_lock(&ctx->lock);
                                   $stms:init_fields
                                   return ctx;
-                               }|]
-          GC.libDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx) {
+                               }|])
+
+          GC.publicDef_ "context_free" GC.InitDecl $ \s ->
+            ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
+             [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 free_lock(&ctx->lock);
                                  free(ctx);
-                               }|]
-          GC.libDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx) {
+                               }|])
+
+          GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
+            ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+             [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                                  ctx=ctx;
                                  return 0;
-                               }|]
-
+                               }|])
+          GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
+            ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
+             [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
+                                 char* error = ctx->error;
+                                 ctx->error = NULL;
+                                 return error;
+                               }|])
 
 copySequentialMemory :: GC.Copy Imp.Sequential ()
 copySequentialMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =

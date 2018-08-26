@@ -8,7 +8,7 @@
 -- input { [[1,2,3],[4,5,6]] 1 1 }
 -- output { empty([]i32) }
 -- input { [[1,2,3],[4,5,6]] 1 0 }
--- error: Assertion.*failed
+-- error: Index \[0:2, 1:0\] out of bounds for array of shape \[2\]\[3\].
 
 let main [n][m] (as: [n][m]i32, i: i32, j: i32): [n][]i32 =
   as[0:n,i:j]

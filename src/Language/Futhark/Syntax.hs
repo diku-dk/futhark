@@ -67,6 +67,7 @@ module Language.Futhark.Syntax
   -- * Definitions
   , DocComment(..)
   , ValBindBase(..)
+  , Liftedness(..)
   , TypeBindBase(..)
   , TypeParamBase(..)
   , typeParamName
@@ -333,7 +334,7 @@ instance Bifoldable ArrayElemTypeBase where
 data TypeBase dim as = Prim PrimType
                      | Array (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
                      | Record (M.Map Name (TypeBase dim as))
-                     | TypeVar TypeName [TypeArg dim as]
+                     | TypeVar as Uniqueness TypeName [TypeArg dim as]
                      | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
                      -- ^ The aliasing corresponds to the lexical
                      -- closure of the function.
@@ -343,7 +344,7 @@ instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
   Prim x1 == Prim y1 = x1 == y1
   Array x1 y1 z1 == Array x2 y2 z2 = x1 == x2 && y1 == y2 && z1 == z2
   Record x1 == Record x2 = x1 == x2
-  TypeVar x1 y1 == TypeVar x2 y2 = x1 == x2 && y1 == y2
+  TypeVar _ u1 x1 y1 == TypeVar _ u2 x2 y2 = u1 == u2 && x1 == x2 && y1 == y2
   Arrow _ _ x1 y1 == Arrow _ _ x2 y2 = x1 == x2 && y1 == y2
   _ == _ = False
 
@@ -352,7 +353,8 @@ instance Bitraversable TypeBase where
   bitraverse f g (Array a shape u) =
     Array <$> bitraverse f g a <*> traverse f shape <*> pure u
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
-  bitraverse f g (TypeVar t args) = TypeVar t <$> traverse (bitraverse f g) args
+  bitraverse f g (TypeVar als u t args) =
+    TypeVar <$> g als <*> pure u <*> pure t <*> traverse (bitraverse f g) args
   bitraverse f g (Arrow als v t1 t2) =
     Arrow <$> g als <*> pure v <*> bitraverse f g t1 <*> bitraverse f g t2
 
@@ -439,8 +441,8 @@ data Diet = RecordDiet (M.Map Name Diet) -- ^ Consumes these fields in the recor
                     -- not consume.
             deriving (Eq, Show)
 
--- | Every possible value in Futhark.  Values are fully evaluated and their
--- type is always unambiguous.
+-- | Simple Futhark values.  Values are fully evaluated and their type
+-- is always unambiguous.
 data Value = PrimValue !PrimValue
            | ArrayValue !(Array Int Value) (TypeBase () ())
              -- ^ It is assumed that the array is 0-indexed.  The type
@@ -579,8 +581,6 @@ data ExpBase f vn =
             -- Second arg is the row type of the rows of the array.
 
             | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) (f CompType) SrcLoc
-
-            | Empty (TypeDeclBase f vn) (f CompType) SrcLoc
 
             | Var (QualName vn) (f PatternType) SrcLoc
 
@@ -726,7 +726,6 @@ instance Located (ExpBase f vn) where
   locOf (Project _ _ _ pos)            = locOf pos
   locOf (ArrayLit _ _ pos)             = locOf pos
   locOf (Range _ _ _ _ pos)            = locOf pos
-  locOf (Empty _ _ pos)                = locOf pos
   locOf (BinOp _ _ _ _ _ pos)          = locOf pos
   locOf (If _ _ _ _ pos)               = locOf pos
   locOf (Var _ _ loc)                  = locOf loc
@@ -827,12 +826,16 @@ deriving instance Showable f vn => Show (TypeBindBase f vn)
 instance Located (TypeBindBase f vn) where
   locOf = locOf . typeBindLocation
 
+-- | The liftedness of a type parameter.  By the @Ord@ instance,
+-- @Unlifted@ is less than @Lifted@.
+data Liftedness = Unlifted -- ^ May only be instantiated with a zero-order type.
+                | Lifted -- ^ May be instantiated to a functional type.
+                deriving (Eq, Ord, Show)
+
 data TypeParamBase vn = TypeParamDim vn SrcLoc
                         -- ^ A type parameter that must be a size.
-                      | TypeParamType vn SrcLoc
+                      | TypeParamType Liftedness vn SrcLoc
                         -- ^ A type parameter that must be a type.
-                      | TypeParamLiftedType vn SrcLoc
-                        -- ^ A type parameter which may be a function type.
   deriving (Eq, Show)
 
 instance Functor TypeParamBase where
@@ -843,18 +846,15 @@ instance Foldable TypeParamBase where
 
 instance Traversable TypeParamBase where
   traverse f (TypeParamDim v loc) = TypeParamDim <$> f v <*> pure loc
-  traverse f (TypeParamType v loc) = TypeParamType <$> f v <*> pure loc
-  traverse f (TypeParamLiftedType v loc) = TypeParamLiftedType <$> f v <*> pure loc
+  traverse f (TypeParamType l v loc) = TypeParamType l <$> f v <*> pure loc
 
 instance Located (TypeParamBase vn) where
-  locOf (TypeParamDim _ loc)        = locOf loc
-  locOf (TypeParamType _ loc)       = locOf loc
-  locOf (TypeParamLiftedType _ loc) = locOf loc
+  locOf (TypeParamDim _ loc)    = locOf loc
+  locOf (TypeParamType _ _ loc) = locOf loc
 
 typeParamName :: TypeParamBase vn -> vn
-typeParamName (TypeParamDim v _)        = v
-typeParamName (TypeParamType v _)       = v
-typeParamName (TypeParamLiftedType v _) = v
+typeParamName (TypeParamDim v _)    = v
+typeParamName (TypeParamType _ v _) = v
 
 data SpecBase f vn = ValSpec  { specName       :: vn
                               , specTypeParams :: [TypeParamBase vn]
@@ -863,17 +863,17 @@ data SpecBase f vn = ValSpec  { specName       :: vn
                               , specLocation   :: SrcLoc
                               }
                    | TypeAbbrSpec (TypeBindBase f vn)
-                   | TypeSpec vn [TypeParamBase vn] (Maybe DocComment) SrcLoc -- ^ Abstract type.
+                   | TypeSpec Liftedness vn [TypeParamBase vn] (Maybe DocComment) SrcLoc -- ^ Abstract type.
                    | ModSpec vn (SigExpBase f vn) (Maybe DocComment) SrcLoc
                    | IncludeSpec (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
-  locOf (ValSpec _ _ _ _ loc) = locOf loc
-  locOf (TypeAbbrSpec tbind)  = locOf tbind
-  locOf (TypeSpec _ _ _ loc)  = locOf loc
-  locOf (ModSpec _ _ _ loc)   = locOf loc
-  locOf (IncludeSpec _ loc)   = locOf loc
+  locOf (ValSpec _ _ _ _ loc)  = locOf loc
+  locOf (TypeAbbrSpec tbind)   = locOf tbind
+  locOf (TypeSpec _ _ _ _ loc) = locOf loc
+  locOf (ModSpec _ _ _ loc)    = locOf loc
+  locOf (IncludeSpec _ loc)    = locOf loc
 
 data SigExpBase f vn = SigVar (QualName vn) SrcLoc
                      | SigParens (SigExpBase f vn) SrcLoc
@@ -883,11 +883,11 @@ data SigExpBase f vn = SigVar (QualName vn) SrcLoc
 deriving instance Showable f vn => Show (SigExpBase f vn)
 
 -- | A type refinement.
-data TypeRefBase f vn = TypeRef (QualName vn) (TypeDeclBase f vn) SrcLoc
+data TypeRefBase f vn = TypeRef (QualName vn) [TypeParamBase vn] (TypeDeclBase f vn) SrcLoc
 deriving instance Showable f vn => Show (TypeRefBase f vn)
 
 instance Located (TypeRefBase f vn) where
-  locOf (TypeRef _ _ loc) = locOf loc
+  locOf (TypeRef _ _ _ loc) = locOf loc
 
 instance Located (SigExpBase f vn) where
   locOf (SigVar _ loc)       = locOf loc

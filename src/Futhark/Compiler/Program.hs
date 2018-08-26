@@ -2,11 +2,14 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE TupleSections #-}
+-- | Low-level compilation parts.  Look at "Futhark.Compiler" for a
+-- more high-level API.
 module Futhark.Compiler.Program
-       ( readProgram
-       , readLibrary
+       ( readLibraryWithBasis
+       , readImports
        , Imports
        , FileModule(..)
+       , E.Warnings
 
        , Basis(..)
        , emptyBasis
@@ -23,7 +26,7 @@ import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.List
-import System.FilePath
+import qualified System.FilePath.Posix as Posix
 import System.IO.Error
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -94,9 +97,9 @@ handleFile steps include file_contents file_name = do
   -- readImport.
   imports <- gets alreadyImported
   src <- gets nameSource
-  prelude <- ask
+  roots <- ask
 
-  case E.checkProg imports src include $ prependPrelude prelude prog of
+  case E.checkProg imports src include $ prependRoots roots prog of
     Left err ->
       externalError $ T.pack $ show err
     Right (m, ws, src') ->
@@ -123,34 +126,38 @@ readImportFile include = do
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
   r <- liftIO $ readFileSafely $ includeToFilePath include
-  case (r, lookup abs_filepath futlib) of
+  case (r, lookup futlib_str futlib) of
     (Just (Right (filepath,s)), _) -> return (s, filepath)
     (Just (Left e), _)  -> externalErrorS e
-    (Nothing, Just t)   -> return (t, "[builtin]" </> abs_filepath)
+    (Nothing, Just t)   -> return (t, futlib_str)
     (Nothing, Nothing)  -> externalErrorS not_found
-   where abs_filepath = includeToFilePath include
+   where futlib_str = "/" Posix.</> includeToString include Posix.<.> "fut"
 
          not_found =
            "Error at " ++ E.locStr (srclocOf include) ++
            ": could not find import '" ++ includeToString include ++ "'."
 
--- | Read and type-check a Futhark program, including all imports.
-readProgram :: (MonadError CompilerError m, MonadIO m) =>
-               Basis -> FilePath
-            -> m (E.Warnings,
-                  Imports,
-                  VNameSource)
-readProgram basis fp = readLibrary basis [fp]
+-- | Read Futhark files from some basis, and printing log messages if
+-- the first parameter is True.
+readLibraryWithBasis :: (MonadError CompilerError m, MonadIO m) =>
+                        Basis -> [FilePath]
+                     -> m (E.Warnings,
+                           Imports,
+                           VNameSource)
+readLibraryWithBasis builtin fps = do
+  (_, imps, src) <- runCompilerM builtin $
+    mapM (readImport [] . mkInitialImport) prelude
+  let basis = Basis imps src prelude
+  readLibrary' basis fps
 
 -- | Read and type-check a Futhark library (multiple files, relative
 -- to the same search path), including all imports.
-readLibrary :: (MonadError CompilerError m, MonadIO m) =>
-               Basis -> [FilePath]
-            -> m (E.Warnings,
-                  Imports,
-                  VNameSource)
-readLibrary basis fps =
-  runCompilerM basis (mapM onFile fps)
+readLibrary' :: (MonadError CompilerError m, MonadIO m) =>
+                Basis -> [FilePath]
+             -> m (E.Warnings,
+                   Imports,
+                   VNameSource)
+readLibrary' basis fps = runCompilerM basis $ mapM onFile fps
   where onFile fp =  do
           r <- liftIO $ readFileSafely fp
           case r of
@@ -158,7 +165,18 @@ readLibrary basis fps =
               handleFile [] (mkInitialImport fp_name) fs fp
             Just (Left e) -> externalError $ T.pack e
             Nothing -> externalErrorS $ fp ++ ": file not found."
-            where (fp_name, _) = splitExtension fp
+            where (fp_name, _) = Posix.splitExtension fp
+
+-- | Read and type-check Futhark imports (no @.fut@ extension; may
+-- refer to baked-in futlib).  This is an exotic operation that
+-- probably only makes sense in an interactive environment.
+readImports :: (MonadError CompilerError m, MonadIO m) =>
+               Basis -> [ImportName]
+            -> m (E.Warnings,
+                  Imports,
+                  VNameSource)
+readImports basis imps =
+  runCompilerM basis $ mapM (readImport []) imps
 
 runCompilerM :: Monad m =>
                 Basis -> CompilerM m a
@@ -170,8 +188,8 @@ runCompilerM (Basis imports src roots) m = do
           reverse $ alreadyImported s',
           nameSource s')
 
-prependPrelude :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
-prependPrelude prelude (E.Prog doc ds) =
-  E.Prog doc $ map mkImport prelude ++ ds
+prependRoots :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
+prependRoots roots (E.Prog doc ds) =
+  E.Prog doc $ map mkImport roots ++ ds
   where mkImport fp =
           E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo noLoc) [] E.NoInfo noLoc) noLoc

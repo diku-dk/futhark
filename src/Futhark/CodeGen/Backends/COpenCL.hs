@@ -28,8 +28,8 @@ compileProg prog = do
     Left err -> return $ Left err
     Right (Program opencl_code opencl_prelude kernel_names types sizes prog') ->
       Right <$> GC.compileProg operations
-                (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes) ()
-                [Space "device", Space "local", DefaultSpace]
+                (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes)
+                include_opencl_h [Space "device", Space "local", DefaultSpace]
                 cliOptions prog'
   where operations :: GC.Operations OpenCL ()
         operations = GC.Operations
@@ -43,6 +43,12 @@ compileProg prog = do
                      , GC.opsMemoryType = openclMemoryType
                      , GC.opsFatMemory = True
                      }
+        include_opencl_h = unlines ["#define CL_USE_DEPRECATED_OPENCL_1_2_APIS",
+                                    "#ifdef __APPLE__",
+                                    "#include <OpenCL/cl.h>",
+                                    "#else",
+                                    "#include <CL/cl.h>",
+                                    "#endif"]
 
 cliOptions :: [Option]
 cliOptions = [ Option { optionLongName = "platform"
@@ -297,7 +303,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
     if ($exp:total_elements != 0) {
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
       const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
-      typename int64_t $id:time_start, $id:time_end;
+      typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
         fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
         $stms:(printKernelSize global_work_size)

@@ -190,7 +190,7 @@ class MonadError TypeError m => MonadTypeChecker m where
 
   checkQualName :: Namespace -> QualName Name -> SrcLoc -> m (QualName VName)
 
-  lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructType)
+  lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructType, Liftedness)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
   lookupImport :: SrcLoc -> FilePath -> m (FilePath, Env)
@@ -230,7 +230,7 @@ instance MonadTypeChecker TypeM where
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
       Nothing -> undefinedType loc qn
-      Just (TypeAbbr ps def) -> return (qn', ps, qualifyTypeVars outer_env mempty qs def)
+      Just (TypeAbbr l ps def) -> return (qn', ps, qualifyTypeVars outer_env mempty qs def, l)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
@@ -259,11 +259,11 @@ instance MonadTypeChecker TypeM where
     case M.lookup name $ envVtable env of
       Nothing -> unknownVariableError Term qn loc
       Just (BoundV _ t)
-        | "_" `isPrefixOf` pretty name -> underscoreUse loc qn
+        | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise ->
             case getType t of
               Left{} -> throwError $ TypeError loc $
-                        "Attempt to use function " ++ pretty name ++ " as value."
+                        "Attempt to use function " ++ baseString name ++ " as value."
               Right t' -> return (qn', removeShapeAnnotations $ fromStruct $
                                        qualifyTypeVars outer_env mempty qs t')
 
@@ -318,7 +318,7 @@ qualifyTypeVars outer_env except qs = runIdentity . astMap mapper
 
         reachable [] name env =
           isJust $ find matches $ M.elems (envTypeTable env)
-          where matches (TypeAbbr [] (TypeVar (TypeName x_qs name') [])) =
+          where matches (TypeAbbr _ [] (TypeVar _ _ (TypeName x_qs name') [])) =
                   null x_qs && name == name'
                 matches _ = False
 

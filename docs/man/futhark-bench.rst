@@ -38,6 +38,15 @@ OPTIONS
   for each test case.  The specified program must support the same
   interface as ``futhark-c``.
 
+--runner=program
+
+  If this is set to the non-empty string, compiled programs are not
+  run directly, but instead the indicated program is run, with the
+  path to the compiled Futhark program passed as the first
+  command-line argument.  This is useful for compilation targets that
+  cannot be executed directly (like `futhark-cs(1)`), or when you wish
+  to run the program on a remote machine.
+
 --json=file
 
   Write raw results in JSON format to the specified file.
@@ -68,6 +77,10 @@ OPTIONS
 
   Do not run test cases that contain the given tag.  Cases marked with
   "nobench" or "disable" are ignored by default.
+
+--ignore=files=REGEX
+
+  Ignore files whose path match the given regular expression.
 
 EXAMPLES
 ========

@@ -175,7 +175,6 @@ int free_list_first(struct opencl_free_list *l, cl_mem *mem_out) {
 }
 
 struct opencl_context {
-  cl_platform_id platform;
   cl_device_id device;
   cl_context ctx;
   cl_command_queue queue;
@@ -498,40 +497,49 @@ enum opencl_required_type { OPENCL_F64 = 1 };
 // C does not guarantee that the compiler supports particularly large
 // literals.  Notably, Visual C has a limit of 2048 characters.  The
 // array must be NULL-terminated.
-static cl_program setup_opencl(struct opencl_context *ctx,
-                               const char *srcs[],
-                               int required_types) {
+static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
+                                                  cl_command_queue queue,
+                                                  const char *srcs[],
+                                                  int required_types) {
+  int error;
 
-  cl_int error;
-  cl_platform_id platform;
-  cl_device_id device;
-  size_t max_group_size;
+  ctx->queue = queue;
 
-  ctx->lockstep_width = 0;
+  OPENCL_SUCCEED(clGetCommandQueueInfo(ctx->queue, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx->ctx, NULL));
 
-  free_list_init(&ctx->free_list);
+  // Fill out the device info.  This is redundant work if we are
+  // called from setup_opencl() (which is the common case), but I
+  // doubt it matters much.
+  struct opencl_device_option device_option;
+  OPENCL_SUCCEED(clGetCommandQueueInfo(ctx->queue, CL_QUEUE_DEVICE,
+                                       sizeof(cl_device_id),
+                                       &device_option.device,
+                                       NULL));
+  OPENCL_SUCCEED(clGetDeviceInfo(device_option.device, CL_DEVICE_PLATFORM,
+                                 sizeof(cl_platform_id),
+                                 &device_option.platform,
+                                 NULL));
+  OPENCL_SUCCEED(clGetDeviceInfo(device_option.device, CL_DEVICE_TYPE,
+                                 sizeof(cl_device_type),
+                                 &device_option.device_type,
+                                 NULL));
+  device_option.platform_name = opencl_platform_info(device_option.platform, CL_PLATFORM_NAME);
+  device_option.device_name = opencl_device_info(device_option.device, CL_DEVICE_NAME);
 
-  struct opencl_device_option device_option = get_preferred_device(&ctx->cfg);
-
-  if (ctx->cfg.logging) {
-    describe_device_option(device_option);
-  }
-
-  ctx->device = device = device_option.device;
-  ctx->platform = platform = device_option.platform;
+  ctx->device = device_option.device;
 
   if (required_types & OPENCL_F64) {
     cl_uint supported;
-    OPENCL_SUCCEED(clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE,
+    OPENCL_SUCCEED(clGetDeviceInfo(device_option.device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE,
                                    sizeof(cl_uint), &supported, NULL));
     if (!supported) {
-      panic(1,
-            "Program uses double-precision floats, but this is not supported on chosen device: %s\n",
+      panic(1, "Program uses double-precision floats, but this is not supported on the chosen device: %s",
             device_option.device_name);
     }
   }
 
-  OPENCL_SUCCEED(clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
+  size_t max_group_size;
+  OPENCL_SUCCEED(clGetDeviceInfo(device_option.device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
                                  sizeof(size_t), &max_group_size, NULL));
 
   size_t max_tile_size = sqrt(max_group_size);
@@ -587,18 +595,6 @@ static cl_program setup_opencl(struct opencl_context *ctx,
     }
   }
 
-  cl_context_properties properties[] = {
-    CL_CONTEXT_PLATFORM,
-    (cl_context_properties)platform,
-    0
-  };
-  // Note that nVidia's OpenCL requires the platform property
-  ctx->ctx = clCreateContext(properties, 1, &device, NULL, NULL, &error);
-  assert(error == 0);
-
-  ctx->queue = clCreateCommandQueue(ctx->ctx, device, 0, &error);
-  assert(error == 0);
-
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
@@ -619,7 +615,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
     src_size = ftell(f);
     fseek(f, 0, SEEK_SET);
     fut_opencl_src = malloc(src_size);
-    fread(fut_opencl_src, 1, src_size, f);
+    assert(fread(fut_opencl_src, 1, src_size, f) == src_size);
     fclose(f);
   } else {
     // Build the OpenCL program.  First we have to concatenate all the fragments.
@@ -669,11 +665,68 @@ static cl_program setup_opencl(struct opencl_context *ctx,
                   (int)ctx->cfg.size_values[i]);
   }
 
-  OPENCL_SUCCEED(build_opencl_program(prog, device, compile_opts));
+  OPENCL_SUCCEED(build_opencl_program(prog, device_option.device, compile_opts));
   free(compile_opts);
   free(fut_opencl_src);
 
   return prog;
+}
+
+static cl_program setup_opencl(struct opencl_context *ctx,
+                               const char *srcs[],
+                               int required_types) {
+
+  ctx->lockstep_width = 0;
+
+  free_list_init(&ctx->free_list);
+
+  struct opencl_device_option device_option = get_preferred_device(&ctx->cfg);
+
+  if (ctx->cfg.logging) {
+    describe_device_option(device_option);
+  }
+
+  // Note that NVIDIA's OpenCL requires the platform property
+  cl_context_properties properties[] = {
+    CL_CONTEXT_PLATFORM,
+    (cl_context_properties)device_option.platform,
+    0
+  };
+
+  cl_int error;
+
+  ctx->ctx = clCreateContext(properties, 1, &device_option.device, NULL, NULL, &error);
+  assert(error == 0);
+
+  cl_command_queue queue = clCreateCommandQueue(ctx->ctx, device_option.device, 0, &error);
+  assert(error == 0);
+
+  return setup_opencl_with_command_queue(ctx, queue, srcs, required_types);
+}
+
+// Allocate memory from driver. The problem is that OpenCL may perform
+// lazy allocation, so we cannot know whether an allocation succeeded
+// until the first time we try to use it.  Hence we immediately
+// perform a write to see if the allocation succeeded.  This is slow,
+// but the assumption is that this operation will be rare (most things
+// will go through the free list).
+int opencl_alloc_actual(struct opencl_context *ctx, size_t size, cl_mem *mem_out) {
+  int error;
+  *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, size, NULL, &error);
+
+  if (error != CL_SUCCESS) {
+    return error;
+  }
+
+  int x = 2;
+  error = clEnqueueWriteBuffer(ctx->queue, *mem_out, 1, 0, sizeof(x), &x, 0, NULL, NULL);
+
+  // No need to wait for completion here. clWaitForEvents() cannot
+  // return mem object allocation failures. This implies that the
+  // buffer is faulted onto the device on enqueue. (Observation by
+  // Andreas Kloeckner.)
+
+  return error;
 }
 
 int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, cl_mem *mem_out) {
@@ -685,8 +738,20 @@ int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, c
   size_t size;
 
   if (free_list_find(&ctx->free_list, tag, &size, mem_out) == 0) {
-    // Successfully found a free block.  Is it big enough, but not too big?
-    if (size >= min_size && size <= min_size*2) {
+    // Successfully found a free block.  Is it big enough?
+    //
+    // FIXME: we might also want to check whether the block is *too
+    // big*, to avoid internal fragmentation.  However, this can
+    // sharply impact performance on programs where arrays change size
+    // frequently.  Fortunately, such allocations are usually fairly
+    // short-lived, as they are necessarily within a loop, so the risk
+    // of internal fragmentation resulting in an OOM situation is
+    // limited.  However, it would be preferable if we could go back
+    // and *shrink* oversize allocations when we encounter an OOM
+    // condition.  That is technically feasible, since we do not
+    // expose OpenCL pointer values directly to the application, but
+    // instead rely on a level of indirection.
+    if (size >= min_size) {
       return CL_SUCCESS;
     } else {
       // Not just right - free it.
@@ -697,9 +762,29 @@ int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, c
     }
   }
 
-  // We have to allocate a new block from the driver.
-  int error;
-  *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, min_size, NULL, &error);
+  // We have to allocate a new block from the driver.  If the
+  // allocation does not succeed, then we might be in an out-of-memory
+  // situation.  We now start freeing things from the free list until
+  // we think we have freed enough that the allocation will succeed.
+  // Since we don't know how far the allocation is from fitting, we
+  // have to check after every deallocation.  This might be pretty
+  // expensive.  Let's hope that this case is hit rarely.
+
+  int error = opencl_alloc_actual(ctx, min_size, mem_out);
+
+  while (error == CL_MEM_OBJECT_ALLOCATION_FAILURE) {
+    cl_mem mem;
+    if (free_list_first(&ctx->free_list, &mem) == 0) {
+      error = clReleaseMemObject(mem);
+      if (error != CL_SUCCESS) {
+        return error;
+      }
+    } else {
+      break;
+    }
+    error = opencl_alloc_actual(ctx, min_size, mem_out);
+  }
+
   return error;
 }
 

@@ -17,7 +17,6 @@ import Prelude hiding (id)
 import Futhark.Pass
 import Futhark.Actions
 import Futhark.Compiler
-import Language.Futhark.Futlib.Prelude
 import Language.Futhark.Parser (parseFuthark)
 import Futhark.Util.Options
 import Futhark.Pipeline
@@ -233,6 +232,10 @@ soacsPipelineOption :: String -> Pipeline SOACS SOACS -> String -> [String]
                     -> FutharkOption
 soacsPipelineOption = pipelineOption getSOACSProg "SOACS" SOACS
 
+kernelsPipelineOption :: String -> Pipeline SOACS Kernels -> String -> [String]
+                    -> FutharkOption
+kernelsPipelineOption = pipelineOption getSOACSProg "Kernels" Kernels
+
 explicitMemoryPipelineOption :: String -> Pipeline SOACS ExplicitMemory -> String -> [String]
                              -> FutharkOption
 explicitMemoryPipelineOption = pipelineOption getSOACSProg "ExplicitMemory" ExplicitMemory
@@ -243,6 +246,9 @@ commandLineOptions =
     (OptArg (\file -> Right $ changeFutharkConfig $
                       \opts -> opts { futharkVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
+  , Option [] ["Werror"]
+    (NoArg $ Right $ changeFutharkConfig $ \opts -> opts { futharkWerror = True })
+    "Treat warnings as errors."
 
   , Option "t" ["type-check"]
     (NoArg $ Right $ \opts ->
@@ -272,6 +278,9 @@ commandLineOptions =
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
+  , Option "m" ["metrics"]
+    (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction metricsAction metricsAction metricsAction })
+    "Print AST metrics of the resulting internal representation on standard output."
   , Option [] ["defunctorise"]
     (NoArg $ Right $ \opts -> opts { futharkPipeline = Defunctorise })
     "Partially evaluate all module constructs and print the residual program."
@@ -300,6 +309,8 @@ commandLineOptions =
 
   , soacsPipelineOption "Run the default optimised pipeline"
     standardPipeline "s" ["standard"]
+  , kernelsPipelineOption "Run the default optimised kernels pipeline"
+    kernelsPipeline [] ["kernels"]
   , explicitMemoryPipelineOption "Run the full GPU compilation pipeline"
     gpuPipeline [] ["gpu"]
   , explicitMemoryPipelineOption "Run the sequential CPU compilation pipeline"
@@ -309,7 +320,7 @@ commandLineOptions =
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
 main :: IO ()
-main = mainWithOptions newConfig commandLineOptions compile
+main = mainWithOptions newConfig commandLineOptions "options... program" compile
   where compile [file] config =
           Just $ do
             res <- runFutharkM (m file config) $
@@ -327,7 +338,7 @@ main = mainWithOptions newConfig commandLineOptions compile
           case futharkPipeline config of
             TypeCheck -> do
               -- No pipeline; just read the program and type check
-              (warnings, _, _) <- readProgram preludeBasis file
+              (warnings, _, _) <- readProgram file
               liftIO $ hPutStr stderr $ show warnings
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file
@@ -335,22 +346,22 @@ main = mainWithOptions newConfig commandLineOptions compile
                 Left err  -> fail $ show err
                 Right prog-> putStrLn $ pretty prog
             Defunctorise -> do
-              (_, imports, src) <- readProgram preludeBasis file
+              (_, imports, src) <- readProgram file
               liftIO $ mapM_ (putStrLn . pretty) $
                 evalState (Defunctorise.transformProg imports) src
             Monomorphise -> do
-              (_, imports, src) <- readProgram preludeBasis file
+              (_, imports, src) <- readProgram file
               liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
             Defunctionalise -> do
-              (_, imports, src) <- readProgram preludeBasis file
+              (_, imports, src) <- readProgram file
               liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
                 >>= Defunctionalise.transformProg
             Pipeline{} -> do
-              prog <- runPipelineOnProgram (futharkConfig config) preludeBasis id file
+              prog <- runPipelineOnProgram (futharkConfig config) id file
               runPolyPasses config prog
 
 runPolyPasses :: Config -> SOACS.Prog -> FutharkM ()

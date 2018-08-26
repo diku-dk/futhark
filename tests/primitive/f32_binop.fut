@@ -12,6 +12,10 @@
 -- output { -1.0f32 }
 -- input { 0 3.402823e38f32 10f32 }
 -- output { 340282306073709652508363335590014353408.000000f32 }
+-- input { 0 0f32 f32.nan }
+-- output { f32.nan }
+-- input { 0 0f32 f32.inf }
+-- output { f32.inf }
 --
 -- input { 1 0.0f32 0.0f32 }
 -- output { 0.0f32 }

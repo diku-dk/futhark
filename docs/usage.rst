@@ -166,6 +166,12 @@ Not all Futhark types can be mapped cleanly to the target language.
 Arrays of tuples are the most common case.  In such cases, *opaque
 types* are used in the generated code.  Values of these types cannot
 be directly inspected, but can be passed back to Futhark entry points.
+In the general case, these types will be named with a random hash.
+However, you if you insert explicit type annotations (and the type
+name contains only characters valid for identifiers for the used
+backend), the indicated name will be used.  Note that arrays contain
+brackets, which are usually not valid in identifiers.  Defining a
+simple type alias is the best way around this.
 
 Generating C
 ^^^^^^^^^^^^
@@ -212,6 +218,65 @@ following function::
 Memory management is entirely manual.  Deallocation functions are
 provided for all types defined in the header file.  Everything
 returned by an entry point must be manually deallocated.
+
+Functions that can fail return an integer: 0 on success and a non-zero
+value on error.  A human-readable string describing the error can be
+retrieved with the following function::
+
+  char *futhark_context_get_error(struct futhark_context *ctx);
+
+It is the callers responsibility to ``free()`` the returned string.
+Any subsequent call to the function returns ``NULL``, until a new
+error occurs.
+
+For now, many internal errors, such as failure to allocate memory,
+will cause the function to ``abort()`` rather than return an error
+code.  However, all application errors (such as bounds and array size
+checks) will produce an error code.
+
+The API functions are thread safe.
+
+C with OpenCL
+~~~~~~~~~~~~~
+
+When generating C code with ``futhark-opencl`` (which is likely the
+common case), extra API functions are provided for directly accessing
+or providing the OpenCL objects used by Futhark.  Take care when using
+these functions.  In particular, a Futhark context can now be provided
+with the command queue to use::
+
+  struct futhark_context *futhark_context_new_with_command_queue(struct futhark_context_config *cfg, cl_command_queue queue);
+
+As a ``cl_command_queue`` specifies an OpenCL device, this is also how
+manual platform and device selection is possible.  A function is also
+provided for retrieving the command queue used by some Futhark
+context::
+
+  cl_command_queue futhark_context_get_command_queue(struct futhark_context *ctx);
+
+This can be used to connect two separate Futhark contexts that have
+been loaded dynamically.
+
+The raw ``cl_mem`` object underlying a Futhark array can be accessed
+with the function named ``futhark_values_raw_type``, where ``type``
+depends on the array in question.  For example::
+
+  cl_mem futhark_values_raw_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr);
+
+The array will be stored in row-major form in the returned memory
+object.  The function performs no copying, so the ``cl_mem`` still
+belongs to Futhark, and may be reused for other purposes when the
+corresponding array is freed.  A dual function can be used to
+construct a Futhark array from a ``cl_mem``::
+
+  struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx,
+                                                cl_mem data,
+                                                int offset,
+                                                int dim0);
+
+This function *does* copy the provided memory into fresh internally
+allocated memory.  The array is assumed to be stored in row-major form
+``offset`` bytes into the memory region.
 
 Generating Python
 ^^^^^^^^^^^^^^^^^

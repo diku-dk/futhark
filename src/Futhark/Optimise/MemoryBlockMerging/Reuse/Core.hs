@@ -439,9 +439,9 @@ handleNewArray x xmem = do
               then Nothing -- These are not special, and need not special handling.
               else do
               (kmem_ixfun_start, kmem_indices_start, kmem_final_dim) <-
-                getInfo kmem_ixfun
+                IxFun.getInfoMaxUnification kmem_ixfun
               (xmem_ixfun_start, xmem_indices_start, xmem_final_dim) <-
-                getInfo xmem_ixfun
+                IxFun.getInfoMaxUnification xmem_ixfun
 
               let xmem_final_dim_before_kmem_final_dim =
                     maybe False (xmem_final_dim `S.member`) $
@@ -464,20 +464,7 @@ handleNewArray x xmem = do
                 in res
           _ -> Nothing
 
-        where getInfo :: ExpMem.IxFun ->
-                         Maybe (ExpMem.IxFun, Slice (PrimExp VName), VName)
-              getInfo (IxFun.Index ixfun_start slice) =
-                case L.span isDimFix slice of
-                  (indices_start, [DimSlice _start_offset
-                                   (LeafExp final_dim@VName{} (IntType Int32))
-                                   _stride]) ->
-                    Just (ixfun_start, indices_start, final_dim)
-                  _ -> Nothing
-                where isDimFix DimFix{} = True
-                      isDimFix _ = False
-              getInfo _ = Nothing
-
-              getIxFun' :: ExpMem.IxFun -> M.Map VName VName ->
+        where getIxFun' :: ExpMem.IxFun -> M.Map VName VName ->
                            IxFun.IxFun (PrimExp VarWithLooseEquality)
               getIxFun' ixfun others =
                 let loose_eq_map name_inner =
@@ -605,13 +592,7 @@ interferesInKernel mem0 mem1 = do
 -- the iteration/thread by some memory with a *different* index in its memory
 -- annotation index function, which can affect reads in other threads.
 ixFunHasIndex :: IxFun.IxFun num -> Bool
-ixFunHasIndex ixfun = case ixfun of
-  IxFun.Direct _ -> False
-  IxFun.Permute ixfun' _ -> ixFunHasIndex ixfun'
-  IxFun.Rotate ixfun' _ -> ixFunHasIndex ixfun'
-  IxFun.Index{} -> True
-  IxFun.Reshape ixfun' _ -> ixFunHasIndex ixfun'
-  IxFun.Repeat ixfun' _ _ -> ixFunHasIndex ixfun'
+ixFunHasIndex = IxFun.ixFunHasIndex
 
 -- Do the two index functions describe the same range?  In other words, does one
 -- array take up precisely the same location (offset) and size as another array
@@ -623,27 +604,7 @@ ixFunsCompatible :: Eq v =>
                     (MName, IxFun.IxFun (PrimExp v)) -> (MName, IxFun.IxFun (PrimExp v)) ->
                     Bool
 ixFunsCompatible (_mem0, ixfun0) (_mem1, ixfun1) =
-  ixFunsCompatibleRaw ixfun0 ixfun1
-
--- Are two index functions *identical*?  (Silly approach, but the Eq instance is
--- used for something else.)
-ixFunsCompatibleRaw :: Eq num => IxFun.IxFun num -> IxFun.IxFun num -> Bool
-ixFunsCompatibleRaw ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
-  where primEq a b = case (a, b) of
-          (IxFun.Direct sa, IxFun.Direct sb) ->
-            sa == sb
-          (IxFun.Permute a1 pa, IxFun.Permute b1 pb) ->
-            a1 `primEq` b1 && pa == pb
-          (IxFun.Rotate a1 ia, IxFun.Rotate b1 ib) ->
-            a1 `primEq` b1 && ia == ib
-          (IxFun.Index a1 sa, IxFun.Index b1 sb) ->
-            a1 `primEq` b1 && sa == sb
-          (IxFun.Reshape a1 sa, IxFun.Reshape b1 sb) ->
-            a1 `primEq` b1 && sa == sb
-          (IxFun.Repeat a1 ssa sa, IxFun.Repeat b1 ssb sb) ->
-            a1 `primEq` b1 && ssa == ssb && sa == sb
-          _ -> False
-
+  IxFun.ixFunsCompatibleRaw ixfun0 ixfun1
 
 -- Replace certain allocation sizes in a program with new variables describing
 -- the maximum of two or more allocation sizes.
@@ -771,16 +732,10 @@ transformFromKernelMaxSizedMappings
               vars_xmem =
                 S.insert xmem_array $ lookupActualVars' actual_vars xmem_array
 
-              newIxFun (IxFun.Index ixfun_start slice) final_dim =
-                let tab = M.singleton final_dim (LeafExp final_dim_max_v (IntType Int32))
-                    ixfun_start' = IxFun.substituteInIxFun tab ixfun_start
-                in IxFun.Index ixfun_start' slice
-              newIxFun _ _ = error "Should not happen"
-
               arrayToMapping final_dim v =
                 let ixfun = memSrcIxFun $ fromJust "should exist"
                             $ M.lookup v var_to_mem
-                    ixfun_new = newIxFun ixfun final_dim
+                    ixfun_new = IxFun.subsInIndexIxFun ixfun final_dim final_dim_max_v --newIxFun ixfun final_dim
                 in (v, mem, ixfun_new)
               arr_to_mem_ixfun_kmem = map (arrayToMapping kmem_final_dim)
                                       $ S.toList vars_kmem

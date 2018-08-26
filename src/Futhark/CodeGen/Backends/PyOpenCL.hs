@@ -4,7 +4,6 @@ module Futhark.CodeGen.Backends.PyOpenCL
   ) where
 
 import Control.Monad
-import Data.List
 
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
@@ -221,7 +220,7 @@ staticOpenCLArray name "device" t vs = do
 
     -- Create memory block on the device.
     static_mem <- newVName "static_mem"
-    let size = Integer $ genericLength vs * Imp.primByteSize t
+    let size = Integer $ fromIntegral (length vs) * Imp.primByteSize t
     allocateOpenCLBuffer static_mem size "device"
 
     -- Copy Numpy array to the device memory block.
@@ -257,7 +256,7 @@ unpackArrayInput mem memsize "device" t s dims e = do
         BinOp "and"
         (BinOp "in" (Py.simpleCall "type" [e]) (List [Var "np.ndarray", Var "cl.array.Array"]))
         (BinOp "==" (Field e "dtype") (Var (Py.compilePrimToExtNp t s)))
-  Py.stm $ Assert type_is_ok "Parameter has unexpected type"
+  Py.stm $ Assert type_is_ok $ String "Parameter has unexpected type"
 
   zipWithM_ (Py.unpackDim e) dims [0..]
 

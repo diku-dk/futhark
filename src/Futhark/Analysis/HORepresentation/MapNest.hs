@@ -79,7 +79,9 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm (_, []) (_, _, []) lam) inps) = 
   maybenest <- case (stmsToList $ bodyStms $ lambdaBody lam,
                      bodyResult $ lambdaBody lam) of
     ([Let pat _ e], res) | res == map Var (patternNames pat) ->
-      either (return . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound') =<< SOAC.fromExp e
+      localScope (scopeOfLParams $ lambdaParams lam) $
+      SOAC.fromExp e >>=
+      either (return . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound')
     _ ->
       return $ Right Nothing
 

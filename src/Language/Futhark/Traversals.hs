@@ -73,8 +73,6 @@ instance ASTMappable (ExpBase Info VName) where
     traverse (mapOnExp tv) end <*> traverse (mapOnCompType tv) t <*> pure loc
   astMap tv (Ascript e tdecl loc) =
     Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
-  astMap tv (Empty tdecl t loc) =
-    Empty <$> astMap tv tdecl <*> traverse (astMap tv) t <*> pure loc
   astMap tv (BinOp fname t (x,xt) (y,yt) (Info rt) loc) =
     BinOp <$> mapOnQualName tv fname <*> traverse (mapOnPatternType tv) t <*>
     ((,) <$> mapOnExp tv x <*> traverse (mapOnStructType tv) xt) <*>
@@ -229,7 +227,8 @@ traverseType _ _ _ (Prim t) = pure $ Prim t
 traverseType f g h (Array et shape u) =
   Array <$> traverseArrayElemType f g h et <*> traverse g shape <*> pure u
 traverseType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
-traverseType f g h (TypeVar t args) = TypeVar <$> f t <*> traverse (traverseTypeArg f g h) args
+traverseType f g h (TypeVar als u t args) =
+  TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g h) args
 traverseType f g h (Arrow als v t1 t2) =
   Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
 

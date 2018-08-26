@@ -5,8 +5,9 @@ Installation
 
 There are two ways to install the Futhark compiler: using a
 precompiled tarball or compiling from source.  Both methods are
-discussed below.  If you are using Windows, make sure to read
-:ref:`windows-installation`.  If you are using macOS, read
+discussed below.  If you are using Linux, see
+:ref:`linux-installation`.  If you are using Windows, make sure to
+read :ref:`windows-installation`.  If you are using macOS, read
 :ref:`macos-installation`.
 
 Compiling from source
@@ -20,7 +21,7 @@ systems.  If you're lucky, it may even be in your local package
 repository.
 
 You can either retrieve a `source release tarball
-<https://github.com/diku-dk/futhark/releases>` or perform a checkout
+<https://github.com/diku-dk/futhark/releases>`_ or perform a checkout
 of our Git repository::
 
   $ git clone https://github.com/diku-dk/futhark.git
@@ -77,6 +78,26 @@ we are limited by system availability.
 .. _`Haskell tool stack`: http://docs.haskellstack.org/
 .. _`installing Stack`: http://docs.haskellstack.org/#how-to-install
 
+.. _linux-installation:
+
+Installing Futhark on Linux
+---------------------------
+
+* `Linuxbrew`_ is a distribution-agnostic package manager that
+  contains a formula for Futhark.  If Linuxbrew is installed (which
+  does not require ``root`` access), installation is as easy as::
+
+    $ brew install futhark
+
+* Arch Linux users can use a `futhark-nightly package
+  <https://aur.archlinux.org/packages/futhark-nightly/>`_.
+
+Otherwise (or if the version in the package system is too old), your
+best bet is to install from source or use a tarball, as described
+above.
+
+.. _`Linuxbrew`: http://linuxbrew.sh/
+
 .. _macos-installation:
 
 Installing Futhark on macOS
@@ -87,6 +108,13 @@ installed via::
 
   $ brew install futhark
 
+Or you can install the unreleased development version with::
+
+  $ brew install --HEAD futhark
+
+This has to compile from source, so it takes a little while (20-30
+minutes is common).
+
 macOS ships with one OpenCL platform and various devices.  One of
 these devices is always the CPU, which is not fully functional, and is
 never picked by Futhark by default.  You can still select it manually
@@ -96,6 +124,8 @@ system, there may also be one or more GPU devices, and Futhark will
 simply pick the first one as always.  On multi-GPU MacBooks, this is
 is the low-power integrated GPU.  It should work just fine, but you
 might have better performance if you use the dedicated GPU instead.
+On a Mac with an AMD GPU, this is done by passing ``-dAMD`` to the
+generated Futhark executable.
 
 .. _`Homebrew`: https://brew.sh/
 
@@ -239,7 +269,7 @@ If everything went in order, pyOpenCL should be installed on your machine now.
     install pygame-1.9.2a0-cp27-none-win_amd64.whl`` from the command
     line.
 
-Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_ examples.
+Now you should be able to run the `Game of Life`_ example.
 
 11) To run the makefiles, first setup ``make`` by going to the ``bin``
     directory of MingWpy and making a copy of
@@ -257,6 +287,5 @@ Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_
     it.
 
 .. _`PyOpenCL repository`: https://github.com/pyopencl/pyopencl
-.. _`Mandelbrot Explorer`: https://github.com/diku-dk/futhark-benchmarks/tree/master/misc/mandelbrot-explorer
 .. _`Game of Life`: https://github.com/diku-dk/futhark-benchmarks/tree/master/misc/life
 .. _`issues page`: https://github.com/diku-dk/futhark/issues

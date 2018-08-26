@@ -37,6 +37,17 @@ a few hints:
     more information, see the `Profiling`_ chapter in the GHC User
     Guide.
 
+  * You may with to set the environment variable
+    ``FUTHARK_COMPILER_DEBUGGING=1``.  Currently this only has the
+    effect of making the frontend print internal names, but it may
+    control more things in the future.
+
+  * When hacking on the compiler frontend, you might want to change
+    the definition of ``Language.Futhark.Futlib.Builtin.builtinBasis``
+    to ``emptyBasis``.  This drastically cuts down on the compilation
+    time of the Futhark compiler itself, although Futhark programs
+    will take a little longer to type-check (roughly 200ms).
+
 .. _`stack`: https://docs.haskellstack.org/en/stable/README/
 .. _`Profiling`: https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/profiling.html
 

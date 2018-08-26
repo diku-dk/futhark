@@ -1,42 +1,88 @@
 //// Text I/O
 
+typedef int (*writer)(FILE*, void*);
+typedef int (*bin_reader)(void*);
+typedef int (*str_reader)(const char *, void*);
+
 struct array_reader {
   char* elems;
   int64_t n_elems_space;
   int64_t elem_size;
   int64_t n_elems_used;
   int64_t *shape;
-  int (*elem_reader)(void*);
+  str_reader elem_reader;
 };
 
-static int peekc() {
-  int c = getchar();
-  if (c != EOF) {
-    ungetc(c,stdin);
-  }
-  return c;
-}
-
-static int next_is_not_constituent() {
-  int c = peekc();
-  return c == EOF || !isalnum(c);
-}
-
 static void skipspaces() {
-  int c = getchar();
-  if (isspace(c)) {
-    skipspaces();
-  } else if (c == '-' && peekc() == '-') {
-    // Skip to end of line.
-    for (; c != '\n' && c != EOF; c = getchar());
-    // Next line may have more spaces.
-    skipspaces();
-  } else if (c != EOF) {
+  int c;
+  do {
+    c = getchar();
+  } while (isspace(c));
+
+  if (c != EOF) {
     ungetc(c, stdin);
   }
 }
 
-static int read_str_elem(struct array_reader *reader) {
+static int constituent(char c) {
+  return isalnum(c) || c == '.' || c == '-' || c == '+' || c == '_';
+}
+
+// Produces an empty token only on EOF.
+static void next_token(char *buf, int bufsize) {
+ start:
+  skipspaces();
+
+  int i = 0;
+  while (i < bufsize) {
+    int c = getchar();
+    buf[i] = c;
+
+    if (c == EOF) {
+      buf[i] = 0;
+      return;
+    } else if (c == '-' && i == 1 && buf[0] == '-') {
+      // Line comment, so skip to end of line and start over.
+      for (; c != '\n' && c != EOF; c = getchar());
+      goto start;
+    } else if (!constituent(c)) {
+      if (i == 0) {
+        // We permit single-character tokens that are not
+        // constituents; this lets things like ']' and ',' be
+        // tokens.
+        buf[i+1] = 0;
+        return;
+      } else {
+        ungetc(c, stdin);
+        buf[i] = 0;
+        return;
+      }
+    }
+
+    i++;
+  }
+
+  buf[bufsize-1] = 0;
+}
+
+static int next_token_is(char *buf, int bufsize, const char* expected) {
+  next_token(buf, bufsize);
+  return strcmp(buf, expected) == 0;
+}
+
+static void remove_underscores(char *buf) {
+  char *w = buf;
+
+  for (char *r = buf; *r; r++) {
+    if (*r != '_') {
+      *w++ = *r;
+    }
+  }
+
+  *w++ = 0;
+}
+
+static int read_str_elem(char *buf, struct array_reader *reader) {
   int ret;
   if (reader->n_elems_used == reader->n_elems_space) {
     reader->n_elems_space *= 2;
@@ -44,7 +90,7 @@ static int read_str_elem(struct array_reader *reader) {
                                     reader->n_elems_space * reader->elem_size);
   }
 
-  ret = reader->elem_reader(reader->elems + reader->n_elems_used * reader->elem_size);
+  ret = reader->elem_reader(buf, reader->elems + reader->n_elems_used * reader->elem_size);
 
   if (ret == 0) {
     reader->n_elems_used++;
@@ -53,18 +99,18 @@ static int read_str_elem(struct array_reader *reader) {
   return ret;
 }
 
-static int read_str_array_elems(struct array_reader *reader, int dims) {
-  int c;
+static int read_str_array_elems(char *buf, int bufsize,
+                                struct array_reader *reader, int dims) {
   int ret;
   int first = 1;
   char *knows_dimsize = (char*) calloc(dims,sizeof(char));
   int cur_dim = dims-1;
   int64_t *elems_read_in_dim = (int64_t*) calloc(dims,sizeof(int64_t));
-  while (1) {
-    skipspaces();
 
-    c = getchar();
-    if (c == ']') {
+  while (1) {
+    next_token(buf, bufsize);
+
+    if (strcmp(buf, "]") == 0) {
       if (knows_dimsize[cur_dim]) {
         if (reader->shape[cur_dim] != elems_read_in_dim[cur_dim]) {
           ret = 1;
@@ -81,10 +127,9 @@ static int read_str_array_elems(struct array_reader *reader, int dims) {
         cur_dim--;
         elems_read_in_dim[cur_dim]++;
       }
-    } else if (c == ',') {
-      skipspaces();
-      c = getchar();
-      if (c == '[') {
+    } else if (strcmp(buf, ",") == 0) {
+      next_token(buf, bufsize);
+      if (strcmp(buf, "[") == 0) {
         if (cur_dim == dims - 1) {
           ret = 1;
           break;
@@ -93,8 +138,7 @@ static int read_str_array_elems(struct array_reader *reader, int dims) {
         cur_dim++;
         elems_read_in_dim[cur_dim] = 0;
       } else if (cur_dim == dims - 1) {
-        ungetc(c, stdin);
-        ret = read_str_elem(reader);
+        ret = read_str_elem(buf, reader);
         if (ret != 0) {
           break;
         }
@@ -103,11 +147,12 @@ static int read_str_array_elems(struct array_reader *reader, int dims) {
         ret = 1;
         break;
       }
-    } else if (c == EOF) {
+    } else if (strlen(buf) == 0) {
+      // EOF
       ret = 1;
       break;
     } else if (first) {
-      if (c == '[') {
+      if (strcmp(buf, "[") == 0) {
         if (cur_dim == dims - 1) {
           ret = 1;
           break;
@@ -115,8 +160,7 @@ static int read_str_array_elems(struct array_reader *reader, int dims) {
         cur_dim++;
         elems_read_in_dim[cur_dim] = 0;
       } else {
-        ungetc(c, stdin);
-        ret = read_str_elem(reader);
+        ret = read_str_elem(buf, reader);
         if (ret != 0) {
           break;
         }
@@ -134,37 +178,37 @@ static int read_str_array_elems(struct array_reader *reader, int dims) {
   return ret;
 }
 
-static int read_str_empty_array(const char *type_name, int64_t *shape, int64_t dims) {
-  char c;
-  if (scanf("empty") == EOF) {
+static int read_str_empty_array(char *buf, int bufsize,
+                                const char *type_name, int64_t *shape, int64_t dims) {
+  if (strlen(buf) == 0) {
+    // EOF
     return 1;
   }
 
-  c = getchar();
-  if (c != '(') {
+  if (strcmp(buf, "empty") != 0) {
+    return 1;
+  }
+
+  if (!next_token_is(buf, bufsize, "(")) {
     return 1;
   }
 
   for (int i = 0; i < dims-1; i++) {
-    c = getchar();
-    if (c != '[') {
+    if (!next_token_is(buf, bufsize, "[")) {
       return 1;
     }
-    c = getchar();
-    if (c != ']') {
+
+    if (!next_token_is(buf, bufsize, "]")) {
       return 1;
     }
   }
 
-  int n = strlen(type_name);
-  for (int i = 0; i < n; i++) {
-    c = getchar();
-    if (c != type_name[i]) {
-      return 1;
-    }
+  if (!next_token_is(buf, bufsize, type_name)) {
+    return 1;
   }
 
-  if (getchar() != ')') {
+
+  if (!next_token_is(buf, bufsize, ")")) {
     return 1;
   }
 
@@ -175,32 +219,25 @@ static int read_str_empty_array(const char *type_name, int64_t *shape, int64_t d
   return 0;
 }
 
-static int read_str_array(int64_t elem_size, int (*elem_reader)(void*),
+static int read_str_array(int64_t elem_size, str_reader elem_reader,
                           const char *type_name,
                           void **data, int64_t *shape, int64_t dims) {
   int ret;
   struct array_reader reader;
-  int64_t read_dims = 0;
+  char buf[100];
 
-  while (1) {
-    int c;
-    skipspaces();
-    c = getchar();
-    if (c=='[') {
-      read_dims++;
-    } else {
-      if (c != EOF) {
-        ungetc(c, stdin);
-      }
+  int dims_seen;
+  for (dims_seen = 0; dims_seen < dims; dims_seen++) {
+    if (!next_token_is(buf, sizeof(buf), "[")) {
       break;
     }
   }
 
-  if (read_dims == 0) {
-    return read_str_empty_array(type_name, shape, dims);
+  if (dims_seen == 0) {
+    return read_str_empty_array(buf, sizeof(buf), type_name, shape, dims);
   }
 
-  if (read_dims != dims) {
+  if (dims_seen != dims) {
     return 1;
   }
 
@@ -211,188 +248,120 @@ static int read_str_array(int64_t elem_size, int (*elem_reader)(void*),
   reader.elems = (char*) realloc(*data, elem_size*reader.n_elems_space);
   reader.elem_reader = elem_reader;
 
-  ret = read_str_array_elems(&reader, dims);
+  ret = read_str_array_elems(buf, sizeof(buf), &reader, dims);
 
   *data = reader.elems;
 
   return ret;
 }
 
-/* Makes a copy of numeric literal removing any underscores, and
-   length of the literal. */
-static int remove_underscores(char* buf) {
-  int buf_index = 0;
-  char c = getchar();
-  while (isxdigit(c) || c == '.' || c == '+' || c == '-' ||
-         c == 'x' || c == 'X' ||
-         c == 'p' || c == 'P' || /* exponent for hex. floats */
-         c == 'e' || c == 'E' || c == '_') {
-    if (c == '_') {
-      c = getchar();
-      continue;
-    }
-    else {
-      buf[buf_index++] = c;
-      c = getchar();
-    }
+#define READ_STR(MACRO, PTR, SUFFIX)                                   \
+  remove_underscores(buf);                                              \
+  int j;                                                                \
+  if (sscanf(buf, "%"MACRO"%n", (PTR*)dest, &j) == 1) {                 \
+    return !(strcmp(buf+j, "") == 0 || strcmp(buf+j, SUFFIX) == 0);     \
+  } else {                                                              \
+    return 1;                                                           \
   }
-  buf[buf_index] = 0;
-  ungetc(c, stdin);             /* unget 'i' */
-  return buf_index;
-}
 
-static int read_str_i8(void* dest) {
-  skipspaces();
+static int read_str_i8(char *buf, void* dest) {
   /* Some platforms (WINDOWS) does not support scanf %hhd or its
      cousin, %SCNi8.  Read into int first to avoid corrupting
      memory.
 
      https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
-  int x;
-  char buf[128];
   remove_underscores(buf);
-  if (sscanf(buf, "%i", &x) == 1) {
+  int j, x;
+  if (sscanf(buf, "%d%n", &x, &j) == 1) {
     *(int8_t*)dest = x;
-    scanf("i8");
-    return next_is_not_constituent() ? 0 : 1;
+    return !(strcmp(buf+j, "") == 0 || strcmp(buf+j, "i8") == 0);
   } else {
     return 1;
   }
 }
 
-static int read_str_u8(void* dest) {
-  skipspaces();
+static int read_str_u8(char *buf, void* dest) {
   /* Some platforms (WINDOWS) does not support scanf %hhd or its
      cousin, %SCNu8.  Read into int first to avoid corrupting
      memory.
 
      https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
-  int x;
-  char buf[128];
   remove_underscores(buf);
-  if (sscanf(buf, "%i", &x) == 1) {
+  int j, x;
+  if (sscanf(buf, "%d%n", &x, &j) == 1) {
     *(uint8_t*)dest = x;
-    scanf("u8");
-    return next_is_not_constituent() ? 0 : 1;
+    return !(strcmp(buf+j, "") == 0 || strcmp(buf+j, "u8") == 0);
   } else {
     return 1;
   }
 }
 
-static int read_str_i16(void* dest) {
-  skipspaces();
-  char buf[128];
-  remove_underscores(buf);
-  if (sscanf(buf, "%"SCNi16, (int16_t*)dest) == 1) {
-    scanf("i16");
-    return next_is_not_constituent() ? 0 : 1;
-  } else {
-    printf("fail\n");
-    return 1;
-  }
+static int read_str_i16(char *buf, void* dest) {
+  READ_STR(SCNi16, int16_t, "i16");
 }
 
-static int read_str_u16(void* dest) {
-  skipspaces();
-  char buf[128];
-  remove_underscores(buf);
-  if (sscanf(buf, "%"SCNi16, (int16_t*)dest) == 1) {
-    scanf("u16");
-    return next_is_not_constituent() ? 0 : 1;
-  } else {
-    return 1;
-  }
+static int read_str_u16(char *buf, void* dest) {
+  READ_STR(SCNi16, int16_t, "u16");
 }
 
-static int read_str_i32(void* dest) {
-  skipspaces();
-  char buf[128];
-  remove_underscores(buf);
-  if (sscanf(buf, "%"SCNi32, (int32_t*)dest) == 1) {
-    scanf("i32");
-    return next_is_not_constituent() ? 0 : 1;
-  } else {
-    return 1;
-  }
+static int read_str_i32(char *buf, void* dest) {
+  READ_STR(SCNi32, int32_t, "i32");
 }
 
-static int read_str_u32(void* dest) {
-  skipspaces();
-  char buf[128];
-  remove_underscores(buf);
-  if (sscanf(buf, "%"SCNi32, (int32_t*)dest) == 1) {
-    scanf("u32");
-    return next_is_not_constituent() ? 0 : 1;
-  } else {
-    return 1;
-  }
+static int read_str_u32(char *buf, void* dest) {
+  READ_STR(SCNi32, int32_t, "u32");
 }
 
-static int read_str_i64(void* dest) {
-  skipspaces();
-  char buf[128];
-  remove_underscores(buf);
-  if (sscanf(buf, "%"SCNi64, (int64_t*)dest) == 1) {
-    scanf("i64");
-    return next_is_not_constituent() ? 0 : 1;
-  } else {
-    return 1;
-  }
+static int read_str_i64(char *buf, void* dest) {
+  READ_STR(SCNi64, int64_t, "i64");
 }
 
-static int read_str_u64(void* dest) {
-  skipspaces();
-  char buf[128];
-  remove_underscores(buf);
+static int read_str_u64(char *buf, void* dest) {
   // FIXME: This is not correct, as SCNu64 only permits decimal
   // literals.  However, SCNi64 does not handle very large numbers
   // correctly (it's really for signed numbers, so that's fair).
-  if (sscanf(buf, "%"SCNu64, (uint64_t*)dest) == 1) {
-    scanf("u64");
-    return next_is_not_constituent() ? 0 : 1;
-  } else {
-    return 1;
-  }
+  READ_STR(SCNu64, uint64_t, "u64");
 }
 
-static int read_str_f32(void* dest) {
-  skipspaces();
-  char buf[128];
+static int read_str_f32(char *buf, void* dest) {
   remove_underscores(buf);
-  if (sscanf(buf, "%f", (float*)dest) == 1) {
-    scanf("f32");
-    return next_is_not_constituent() ? 0 : 1;
+  if (strcmp(buf, "f32.nan") == 0) {
+    *(float*)dest = NAN;
+    return 0;
+  } else if (strcmp(buf, "f32.inf") == 0) {
+    *(float*)dest = INFINITY;
+    return 0;
+  } else if (strcmp(buf, "-f32.inf") == 0) {
+    *(float*)dest = -INFINITY;
+    return 0;
   } else {
-    return 1;
+    READ_STR("f", float, "f32");
   }
 }
 
-static int read_str_f64(void* dest) {
-  skipspaces();
-  char buf[128];
+static int read_str_f64(char *buf, void* dest) {
   remove_underscores(buf);
-  if (sscanf(buf, "%lf", (double*)dest) == 1) {
-    scanf("f64");
-    return next_is_not_constituent() ? 0 : 1;
+  if (strcmp(buf, "f64.nan") == 0) {
+    *(double*)dest = NAN;
+    return 0;
+  } else if (strcmp(buf, "f64.inf") == 0) {
+    *(double*)dest = INFINITY;
+    return 0;
+  } else if (strcmp(buf, "-f64.inf") == 0) {
+    *(double*)dest = -INFINITY;
+    return 0;
   } else {
-    return 1;
+    READ_STR("lf", double, "f64");
   }
 }
 
-static int read_str_bool(void* dest) {
-  /* This is a monstrous hack.  Maybe we should get a proper lexer in here. */
-  char b[4];
-  skipspaces();
-  if (scanf("%4c", b) == 1) {
-    if (strncmp(b, "true", 4) == 0) {
-      *(char*)dest = 1;
-      return 0;
-    } else if (strncmp(b, "fals", 4) == 0 && getchar() == 'e') {
-      *(char*)dest = 0;
-      return 0;
-    } else {
-      return 1;
-    }
+static int read_str_bool(char *buf, void* dest) {
+  if (strcmp(buf, "true") == 0) {
+    *(char*)dest = 1;
+    return 0;
+  } else if (strcmp(buf, "false") == 0) {
+    *(char*)dest = 0;
+    return 0;
   } else {
     return 1;
   }
@@ -431,11 +400,29 @@ static int write_str_u64(FILE *out, uint64_t *src) {
 }
 
 static int write_str_f32(FILE *out, float *src) {
-  return fprintf(out, "%.6ff32", *src);
+  float x = *src;
+  if (isnan(x)) {
+    return fprintf(out, "f32.nan");
+  } else if (isinf(x) && x >= 0) {
+    return fprintf(out, "f32.inf");
+  } else if (isinf(x)) {
+    return fprintf(out, "-f32.inf");
+  } else {
+    return fprintf(out, "%.6ff32", x);
+  }
 }
 
 static int write_str_f64(FILE *out, double *src) {
-  return fprintf(out, "%.6ff64", *src);
+  double x = *src;
+  if (isnan(x)) {
+    return fprintf(out, "f64.nan");
+  } else if (isinf(x) && x >= 0) {
+    return fprintf(out, "f64.inf");
+  } else if (isinf(x)) {
+    return fprintf(out, "-f64.inf");
+  } else {
+    return fprintf(out, "%.6ff64", *src);
+  }
 }
 
 static int write_str_bool(FILE *out, void *src) {
@@ -543,69 +530,66 @@ static int write_le_8byte(void* dest) {
 
 //// Types
 
-typedef int (*writer)(FILE*, void*);
-typedef int (*reader)(void*);
-
 struct primtype_info_t {
   const char binname[4]; // Used for parsing binary data.
   const char* type_name; // Same name as in Futhark.
   const int size; // in bytes
   const writer write_str; // Write in text format.
-  const reader read_str; // Read in text format.
+  const str_reader read_str; // Read in text format.
   const writer write_bin; // Write in binary format.
-  const reader read_bin; // Read in binary format.
+  const bin_reader read_bin; // Read in binary format.
 };
 
-static const struct primtype_info_t i8 =
+static const struct primtype_info_t i8_info =
   {.binname = "  i8", .type_name = "i8",   .size = 1,
-   .write_str = (writer)write_str_i8, .read_str = (reader)read_str_i8,
-   .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
-static const struct primtype_info_t i16 =
+   .write_str = (writer)write_str_i8, .read_str = (str_reader)read_str_i8,
+   .write_bin = (writer)write_byte, .read_bin = (bin_reader)read_byte};
+static const struct primtype_info_t i16_info =
   {.binname = " i16", .type_name = "i16",  .size = 2,
-   .write_str = (writer)write_str_i16, .read_str = (reader)read_str_i16,
-   .write_bin = (writer)write_le_2byte, .read_bin = (reader)read_le_2byte};
-static const struct primtype_info_t i32 =
+   .write_str = (writer)write_str_i16, .read_str = (str_reader)read_str_i16,
+   .write_bin = (writer)write_le_2byte, .read_bin = (bin_reader)read_le_2byte};
+static const struct primtype_info_t i32_info =
   {.binname = " i32", .type_name = "i32",  .size = 4,
-   .write_str = (writer)write_str_i32, .read_str = (reader)read_str_i32,
-   .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
-static const struct primtype_info_t i64 =
+   .write_str = (writer)write_str_i32, .read_str = (str_reader)read_str_i32,
+   .write_bin = (writer)write_le_4byte, .read_bin = (bin_reader)read_le_4byte};
+static const struct primtype_info_t i64_info =
   {.binname = " i64", .type_name = "i64",  .size = 8,
-   .write_str = (writer)write_str_i64, .read_str = (reader)read_str_i64,
-   .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
-static const struct primtype_info_t u8 =
+   .write_str = (writer)write_str_i64, .read_str = (str_reader)read_str_i64,
+   .write_bin = (writer)write_le_8byte, .read_bin = (bin_reader)read_le_8byte};
+static const struct primtype_info_t u8_info =
   {.binname = "  u8", .type_name = "u8",   .size = 1,
-   .write_str = (writer)write_str_u8, .read_str = (reader)read_str_u8,
-   .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
-static const struct primtype_info_t u16 =
+   .write_str = (writer)write_str_u8, .read_str = (str_reader)read_str_u8,
+   .write_bin = (writer)write_byte, .read_bin = (bin_reader)read_byte};
+static const struct primtype_info_t u16_info =
   {.binname = " u16", .type_name = "u16",  .size = 2,
-   .write_str = (writer)write_str_u16, .read_str = (reader)read_str_u16,
-   .write_bin = (writer)write_le_2byte, .read_bin = (reader)read_le_2byte};
-static const struct primtype_info_t u32 =
+   .write_str = (writer)write_str_u16, .read_str = (str_reader)read_str_u16,
+   .write_bin = (writer)write_le_2byte, .read_bin = (bin_reader)read_le_2byte};
+static const struct primtype_info_t u32_info =
   {.binname = " u32", .type_name = "u32",  .size = 4,
-   .write_str = (writer)write_str_u32, .read_str = (reader)read_str_u32,
-   .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
-static const struct primtype_info_t u64 =
+   .write_str = (writer)write_str_u32, .read_str = (str_reader)read_str_u32,
+   .write_bin = (writer)write_le_4byte, .read_bin = (bin_reader)read_le_4byte};
+static const struct primtype_info_t u64_info =
   {.binname = " u64", .type_name = "u64",  .size = 8,
-   .write_str = (writer)write_str_u64, .read_str = (reader)read_str_u64,
-   .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
-static const struct primtype_info_t f32 =
+   .write_str = (writer)write_str_u64, .read_str = (str_reader)read_str_u64,
+   .write_bin = (writer)write_le_8byte, .read_bin = (bin_reader)read_le_8byte};
+static const struct primtype_info_t f32_info =
   {.binname = " f32", .type_name = "f32",  .size = 4,
-   .write_str = (writer)write_str_f32, .read_str = (reader)read_str_f32,
-   .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
-static const struct primtype_info_t f64 =
+   .write_str = (writer)write_str_f32, .read_str = (str_reader)read_str_f32,
+   .write_bin = (writer)write_le_4byte, .read_bin = (bin_reader)read_le_4byte};
+static const struct primtype_info_t f64_info =
   {.binname = " f64", .type_name = "f64",  .size = 8,
-   .write_str = (writer)write_str_f64, .read_str = (reader)read_str_f64,
-   .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
-static const struct primtype_info_t bool =
+   .write_str = (writer)write_str_f64, .read_str = (str_reader)read_str_f64,
+   .write_bin = (writer)write_le_8byte, .read_bin = (bin_reader)read_le_8byte};
+static const struct primtype_info_t bool_info =
   {.binname = "bool", .type_name = "bool", .size = 1,
-   .write_str = (writer)write_str_bool, .read_str = (reader)read_str_bool,
-   .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
+   .write_str = (writer)write_str_bool, .read_str = (str_reader)read_str_bool,
+   .write_bin = (writer)write_byte, .read_bin = (bin_reader)read_byte};
 
 static const struct primtype_info_t* primtypes[] = {
-  &i8, &i16, &i32, &i64,
-  &u8, &u16, &u32, &u64,
-  &f32, &f64,
-  &bool,
+  &i8_info, &i16_info, &i32_info, &i64_info,
+  &u8_info, &u16_info, &u32_info, &u64_info,
+  &f32_info, &f64_info,
+  &bool_info,
   NULL // NULL-terminated
 };
 
@@ -732,7 +716,7 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
 
 static int read_array(const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
   if (!read_is_binary()) {
-    return read_str_array(expected_type->size, (reader)expected_type->read_str, expected_type->type_name, data, shape, dims);
+    return read_str_array(expected_type->size, (str_reader)expected_type->read_str, expected_type->type_name, data, shape, dims);
   } else {
     return read_bin_array(expected_type, data, shape, dims);
   }
@@ -817,7 +801,9 @@ static int write_array(FILE *out, int write_binary,
 
 static int read_scalar(const struct primtype_info_t *expected_type, void *dest) {
   if (!read_is_binary()) {
-    return expected_type->read_str(dest);
+    char buf[100];
+    next_token(buf, sizeof(buf));
+    return expected_type->read_str(buf, dest);
   } else {
     read_bin_ensure_scalar(expected_type);
     return expected_type->read_bin(dest);

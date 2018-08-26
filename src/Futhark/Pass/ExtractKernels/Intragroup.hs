@@ -66,12 +66,12 @@ intraGroupParallelise knest lam = runMaybeT $ do
     intra_avail_par <- letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int32) ws_avail
 
     -- The group size is either the maximum of the minimum parallelism
-    -- exploited, or some configurable size (bounded by the amount of
-    -- exploitable parallelism) in case there is no minimum.
+    -- exploited, or the desired parallelism (bounded by the max group
+    -- size) in case there is no minimum.
     group_size <- letSubExp "computed_group_size" =<<
                   if null ws_min
                   then eBinOp (SMin Int32)
-                       (eSubExp =<< getSize "intra_group_size" Out.SizeGroup)
+                       (eSubExp =<< letSubExp "max_group_size" (Op $ Out.GetSizeMax Out.SizeGroup))
                        (eSubExp intra_avail_par)
                   else foldBinOp' (SMax Int32) ws_min
 
@@ -234,14 +234,14 @@ intraGroupStm stm@(Let pat _ e) = do
       censor replaceSets $ mapM_ intraGroupStm stream_bnds
 
     Op (Scatter w lam ivs dests) -> do
-      parallelAvail [w]
+      parallelMin [w]
       ctid <- newVName "ctid"
       let cspace = Out.CombineSpace dests [(ctid, w)]
       body_stms <- collectStms_ $ do
         forM_ (zip (lambdaParams lam) ivs) $ \(p, arr) -> do
           arr_t <- lookupType arr
           letBindNames [paramName p] $ BasicOp $ Index arr $
-            fullSlice arr_t [DimFix $ Var ctid]
+            fullSlice arr_t [DimFix $ Var ltid] -- ltid on purpose to enable hoisting.
         Kernelise.transformStms $ bodyStms $ lambdaBody lam
       let body = mkBody body_stms $ bodyResult $ lambdaBody lam
       letBind_ pat $ Op $ Out.Combine cspace (lambdaReturnType lam) mempty body
@@ -271,7 +271,6 @@ intraGroupStm stm@(Let pat _ e) = do
     BasicOp (Copy arr) -> do
       arr_t <- lookupType arr
       let w = arraySize 0 arr_t
-      parallelAvail [w]
       ctid <- newVName "copy_ctid"
       letBind_ pat . Op . Out.Combine (Out.combineSpace [(ctid, w)]) [rowType arr_t] [] <=<
         localScope (M.singleton ctid $ IndexInfo Int32) $
@@ -281,7 +280,6 @@ intraGroupStm stm@(Let pat _ e) = do
     BasicOp (Replicate (Shape outer_ws) se)
       | [inner_ws] <- map (drop (length outer_ws) . arrayDims) $ patternTypes pat -> do
       let ws = outer_ws ++ inner_ws
-      parallelAvail ws
       new_inds' <- replicateM (length ws) $ newVName "new_local_index"
       let inner_inds' = drop (length outer_ws) new_inds'
           space = Out.combineSpace $ zip new_inds' ws

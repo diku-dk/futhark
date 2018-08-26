@@ -44,14 +44,14 @@ argShapes shapes valts valargts =
 
 ensureResultShape :: MonadBinder m =>
                      (m Certificates -> m Certificates)
-                  -> String -> SrcLoc -> [Type] -> Body (Lore m)
+                  -> ErrorMsg SubExp -> SrcLoc -> [Type] -> Body (Lore m)
                   -> m (Body (Lore m))
 ensureResultShape asserting msg loc =
   ensureResultExtShape asserting msg loc . staticShapes
 
 ensureResultExtShape :: MonadBinder m =>
                         (m Certificates -> m Certificates)
-                     -> String -> SrcLoc -> [ExtType] -> Body (Lore m)
+                     -> ErrorMsg SubExp -> SrcLoc -> [ExtType] -> Body (Lore m)
                      -> m (Body (Lore m))
 ensureResultExtShape asserting msg loc rettype body =
   insertStmsM $ do
@@ -63,7 +63,7 @@ ensureResultExtShape asserting msg loc rettype body =
 
 ensureResultExtShapeNoCtx :: MonadBinder m =>
                              (m Certificates -> m Certificates)
-                          -> String -> SrcLoc -> [ExtType] -> Body (Lore m)
+                          -> ErrorMsg SubExp -> SrcLoc -> [ExtType] -> Body (Lore m)
                           -> m (Body (Lore m))
 ensureResultExtShapeNoCtx asserting msg loc rettype body =
   insertStmsM $ do
@@ -78,7 +78,7 @@ ensureResultExtShapeNoCtx asserting msg loc rettype body =
 
 ensureExtShape :: MonadBinder m =>
                   (m Certificates -> m Certificates)
-               -> String -> SrcLoc -> ExtType -> String -> SubExp
+               -> ErrorMsg SubExp -> SrcLoc -> ExtType -> String -> SubExp
                -> m SubExp
 ensureExtShape asserting msg loc t name orig
   | Array{} <- t, Var v <- orig =
@@ -87,7 +87,7 @@ ensureExtShape asserting msg loc t name orig
 
 ensureShape :: MonadBinder m =>
                (m Certificates -> m Certificates)
-            -> String -> SrcLoc -> Type -> String -> SubExp
+            -> ErrorMsg SubExp -> SrcLoc -> Type -> String -> SubExp
             -> m SubExp
 ensureShape asserting msg loc = ensureExtShape asserting msg loc . staticShapes1
 
@@ -96,7 +96,7 @@ ensureShape asserting msg loc = ensureExtShape asserting msg loc . staticShapes1
 -- everything is otherwise type-correct.
 ensureArgShapes :: (MonadBinder m, Typed (TypeBase Shape u)) =>
                    (m Certificates -> m Certificates)
-                -> String -> SrcLoc -> [VName] -> [TypeBase Shape u] -> [SubExp]
+                -> ErrorMsg SubExp -> SrcLoc -> [VName] -> [TypeBase Shape u] -> [SubExp]
                 -> m [SubExp]
 ensureArgShapes asserting msg loc shapes paramts args =
   zipWithM ensureArgShape (expectedTypes shapes paramts args) args
@@ -109,17 +109,30 @@ ensureArgShapes asserting msg loc shapes paramts args =
 
 ensureShapeVar :: MonadBinder m =>
                   (m Certificates -> m Certificates)
-               -> String -> SrcLoc -> ExtType -> String -> VName
+               -> ErrorMsg SubExp -> SrcLoc -> ExtType -> String -> VName
                -> m VName
 ensureShapeVar asserting msg loc t name v
   | Array{} <- t = do
-    newshape <- arrayDims . removeExistentials t <$> lookupType v
-    oldshape <- arrayDims <$> lookupType v
-    let checkDim desired has =
-          letExp "shape_cert" =<<
-          eAssert (pure $ BasicOp $ CmpOp (CmpEq int32) desired has) msg loc
-    if newshape == oldshape
+    newdims <- arrayDims . removeExistentials t <$> lookupType v
+    olddims <- arrayDims <$> lookupType v
+    if newdims == olddims
       then return v
-      else do certs <- asserting $ Certificates <$> zipWithM checkDim newshape oldshape
-              certifying certs $ letExp name $ shapeCoerce newshape v
+      else do
+        certs <- asserting $ do
+          old_zero <- letSubExp "old_empty" =<< anyZero olddims
+          new_zero <- letSubExp "new_empty" =<< anyZero newdims
+          both_empty <- letSubExp "both_empty" $ BasicOp $ BinOp LogAnd old_zero new_zero
+
+          matches <- zipWithM checkDim newdims olddims
+          all_match <- letSubExp "match" =<< foldBinOp LogAnd (constant True) matches
+
+          empty_or_match <- letSubExp "empty_or_match" $ BasicOp $ BinOp LogOr both_empty all_match
+          Certificates . pure <$> letExp "empty_or_match_cert"
+            (BasicOp $ Assert empty_or_match msg (loc, []))
+        certifying certs $ letExp name $ shapeCoerce newdims v
   | otherwise = return v
+  where checkDim desired has =
+          letSubExp "dim_match" $ BasicOp $ CmpOp (CmpEq int32) desired has
+        anyZero =
+          foldBinOp LogOr (constant False) <=<
+          mapM (letSubExp "dim_zero" . BasicOp . CmpOp (CmpEq int32) (intConst Int32 0))

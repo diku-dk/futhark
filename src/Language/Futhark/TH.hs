@@ -42,12 +42,13 @@ deriving instance Lift IntValue
 deriving instance Lift FloatValue
 deriving instance Lift PrimValue
 deriving instance Lift Diet
+deriving instance Lift Liftedness
+deriving instance Lift DocComment
 
 -- Checked AST instances
 deriving instance Lift (TypeDeclBase Info VName)
 deriving instance Lift (IdentBase Info VName)
 deriving instance Lift (PatternBase Info VName)
-deriving instance Lift DocComment
 deriving instance Lift (ValBindBase Info VName)
 deriving instance Lift (FieldBase Info VName)
 deriving instance Lift (LoopFormBase Info VName)

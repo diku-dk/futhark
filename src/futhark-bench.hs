@@ -26,23 +26,26 @@ import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import qualified Text.JSON as JSON
 import Text.Printf
+import Text.Regex.TDFA
 
 import Futhark.Test
 import Futhark.Util.Options
 
 data BenchOptions = BenchOptions
                    { optCompiler :: String
+                   , optRunner :: String
                    , optRuns :: Int
                    , optExtraOptions :: [String]
                    , optJSON :: Maybe FilePath
                    , optTimeout :: Int
                    , optSkipCompilation :: Bool
                    , optExcludeCase :: [String]
+                   , optIgnoreFiles :: [Regex]
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing (-1) False
-                      ["nobench", "disable"]
+initialBenchOptions = BenchOptions "futhark-c" "" 10 [] Nothing (-1) False
+                      ["nobench", "disable"] []
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -77,7 +80,7 @@ runBenchmarks opts paths = do
   -- Otherwise, CI tools and the like may believe we are hung and kill
   -- us.
   hSetBuffering stdout LineBuffering
-  benchmarks <- testSpecsFromPaths paths
+  benchmarks <- filter (not . ignored . fst) <$> testSpecsFromPaths paths
   (skipped_benchmarks, compiled_benchmarks) <-
     partitionEithers <$> mapM (compileBenchmark opts) benchmarks
 
@@ -88,6 +91,8 @@ runBenchmarks opts paths = do
     Nothing -> return ()
     Just file -> writeFile file $ JSON.encode $ resultsToJSON results
   when (anyFailed results) exitFailure
+
+  where ignored f = any (`match` f) $ optIgnoreFiles opts
 
 anyFailed :: [BenchResult] -> Bool
 anyFailed = any failedBenchResult
@@ -151,7 +156,7 @@ reportResult [] =
   print (0::Int)
 reportResult results = do
   let runtimes = map (fromIntegral . runMicroseconds) results
-      avg = sum runtimes / genericLength runtimes
+      avg = sum runtimes / fromIntegral (length runtimes)
       rel_dev = stddevp runtimes / mean runtimes :: Double
   putStrLn $ printf "%10.2f" avg ++ "us (avg. of " ++ show (length runtimes) ++
     " runs; RSD: " ++ printf "%.2f" rel_dev ++ ")"
@@ -198,9 +203,13 @@ runBenchmarkCase opts program entry pad_to (TestRun _ input_spec (Succeeds expec
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no program component.
+  let (to_run, to_run_args)
+        | null $ optRunner opts = ("." </> binaryName program, options)
+        | otherwise = (optRunner opts, binaryName program : options)
+
   run_res <-
     timeout (optTimeout opts * 1000000) $
-    readProcessWithExitCode ("." </> binaryName program) options $
+    readProcessWithExitCode to_run to_run_args $
     LBS.toStrict input
 
   fmap (Just .  DataResult dataset_desc) $ runBenchM $ case run_res of
@@ -293,6 +302,9 @@ commandLineOptions = [
               Right $ \config -> config { optCompiler = prog })
      "PROGRAM")
     "The compiler used (defaults to 'futhark-c')."
+  , Option [] ["runner"]
+    (ReqArg (\prog -> Right $ \config -> config { optRunner = prog }) "PROGRAM")
+    "The program used to run the Futhark-generated programs (defaults to nothing)."
   , Option "p" ["pass-option"]
     (ReqArg (\opt ->
                Right $ \config ->
@@ -323,12 +335,17 @@ commandLineOptions = [
                 config { optExcludeCase = s : optExcludeCase config })
       "TAG")
     "Do not run test cases with this tag."
+  , Option [] ["ignore-files"]
+    (ReqArg (\s -> Right $ \config ->
+                config { optIgnoreFiles = makeRegex s : optIgnoreFiles config })
+      "REGEX")
+    "Ignore files matching this regular expression."
   ]
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000
 
 main :: IO ()
-main = mainWithOptions initialBenchOptions commandLineOptions $ \progs config ->
+main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
   Just $ runBenchmarks config progs
 
 --- The following extracted from hstats package by Marshall Beddoe:

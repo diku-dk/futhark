@@ -51,8 +51,8 @@ floatTypeToCType Float64 = [C.cty|double|]
 primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t) = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
-primTypeToCType Bool = [C.cty|char|]
-primTypeToCType Cert = [C.cty|char|]
+primTypeToCType Bool = [C.cty|typename bool|]
+primTypeToCType Cert = [C.cty|typename bool|]
 
 -- | The C type corresponding to a primitive type.  Integers are
 -- assumed to have the specified sign.
@@ -256,6 +256,14 @@ cFloat32Funs = [C.cunit|
       return log(x);
     }
 
+    static inline float $id:(funName' "log2_32")(float x) {
+      return log2(x);
+    }
+
+    static inline float $id:(funName' "log10_32")(float x) {
+      return log10(x);
+    }
+
     static inline float $id:(funName' "sqrt32")(float x) {
       return sqrt(x);
     }
@@ -292,6 +300,10 @@ cFloat32Funs = [C.cunit|
       return atan2(x,y);
     }
 
+    static inline float $id:(funName' "round32")(float x) {
+      return rint(x);
+    }
+
     static inline char $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
@@ -323,6 +335,14 @@ cFloat64Funs :: [C.Definition]
 cFloat64Funs = [C.cunit|
     static inline double $id:(funName' "log64")(double x) {
       return log(x);
+    }
+
+    static inline double $id:(funName' "log2_64")(double x) {
+      return log2(x);
+    }
+
+    static inline double $id:(funName' "log10_64")(double x) {
+      return log10(x);
     }
 
     static inline double $id:(funName' "sqrt64")(double x) {
@@ -359,6 +379,10 @@ cFloat64Funs = [C.cunit|
 
     static inline double $id:(funName' "atan2_64")(double x, double y) {
       return atan2(x,y);
+    }
+
+    static inline double $id:(funName' "round64")(double x) {
+      return rint(x);
     }
 
     static inline char $id:(funName' "isnan64")(double x) {

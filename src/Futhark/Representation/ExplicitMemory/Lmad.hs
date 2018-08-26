@@ -15,8 +15,8 @@ module Futhark.Representation.ExplicitMemory.Lmad
          IxFun(..)
        , index
        , iota
---       , offsetIndex
---       , strideIndex
+       , offsetIndex
+       , strideIndex
        , permute
        , rotate
        , reshape
@@ -28,38 +28,29 @@ module Futhark.Representation.ExplicitMemory.Lmad
        , shape
        , rank
        , getMonotonicity
---       , linearWithOffset
---       , rearrangeWithOffset
---       , isDirect
---       , substituteInIxFun
+       , linearWithOffset
+       , rearrangeWithOffset
+       , isDirect
+       , isLinear
+       , substituteInIxFun
        )
        where
 
---import Control.Applicative
---import Data.Maybe
 import Data.List as L hiding (repeat)
---import Data.Semigroup ((<>))
---import Data.List hiding (repeat)
 import Control.Monad.Identity
---import Control.Monad.Writer
-
+import Control.Monad.Writer
 import Prelude hiding (mod, repeat)
+import qualified Data.Map.Strict as M
 
---import qualified Data.Map.Strict as M
-
---import Futhark.Transform.Substitute
---import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
+import Futhark.Transform.Rename
 
 import Futhark.Representation.AST.Syntax
-  (ShapeChange, DimChange(..), DimIndex(..), Slice, unitSlice) --VName, sliceDims
---import Futhark.Representation.AST.Attributes.Names
-import Futhark.Representation.AST.Attributes.Reshape
---import Futhark.Representation.AST.Attributes.Rearrange
---import Futhark.Representation.AST.Pretty ()
+  (ShapeChange, DimChange(..), DimIndex(..), Slice, unitSlice, VName)
+import Futhark.Representation.AST.Attributes
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
---import Futhark.Analysis.PrimExp.Convert
---import Futhark.Util
+import Futhark.Analysis.PrimExp.Convert
 
 --import Debug.Trace
 
@@ -82,7 +73,7 @@ data DimInfo = Inc | Dec | Unknown
 --   in that the permutation can be performed directly
 --   on Lmad dimensions, but then it is difficult to
 --   extract the permutation back from an Lmad.
-data Lmad num = Lmad num [(num,num,num,Int,DimInfo)]
+data Lmad num = Lmad num [(num, num, num, Int, DimInfo)]
                 deriving (Show,Eq)
 
 -- | LMAD algebra is closed under composition w.r.t.
@@ -100,7 +91,110 @@ data Lmad num = Lmad num [(num,num,num,Int,DimInfo)]
 --     all the points of the current index function, do we get a
 --     contiguous memory interval?
 data IxFun num = IxFun [Lmad num] (Shape num) Bool
-               -- ^ list of Lmads * shape of original array * contiguous-in-mem
+                 deriving (Show,Eq)
+
+--------------------------------
+--- Instances Implementation ---
+--------------------------------
+
+instance Pretty DimInfo where
+  ppr Inc      = text "I"
+  ppr Dec      = text "D"
+  ppr Unknown  = text "U"
+
+instance Pretty num => Pretty (Lmad num) where
+  ppr (Lmad tau srnps) =
+    let (ss, rs, ns, ps, fs) = unzip5 srnps
+    in text " | " <> ppr tau <>
+        text " + " <> brackets (commasep $ map ppr ss) <>
+        text "v" <> brackets (commasep $ map ppr rs) <>
+        text "v" <> brackets (commasep $ map ppr ns) <>
+        text "v" <> brackets (commasep $ map ppr ps) <>
+        text "v" <> brackets (commasep $ map ppr fs) <>
+        text " | "
+
+instance Pretty num => Pretty (IxFun num) where
+  ppr (IxFun lmads orgshp cg) =
+    text "Shape: " <> braces (commasep $ map ppr orgshp) <>
+    text " LMADS: " <> braces (stack $ map ppr lmads)    <>
+    text " CONTIG: "<> text (show cg)
+
+instance Substitute num => Substitute (Lmad num) where
+  substituteNames substs = fmap $ substituteNames substs
+
+instance Substitute num => Substitute (IxFun num) where
+  substituteNames substs = fmap $ substituteNames substs
+
+instance Substitute num => Rename (Lmad num) where
+  rename = substituteRename
+
+instance Substitute num => Rename (IxFun num) where
+  rename = substituteRename
+
+
+instance FreeIn num => FreeIn (Lmad num) where
+  freeIn = foldMap freeIn
+
+instance FreeIn num => FreeIn (IxFun num) where
+  freeIn = foldMap freeIn
+
+instance Functor Lmad where
+  fmap f = runIdentity . traverse (return . f)
+
+instance Functor IxFun where
+  fmap f = runIdentity . traverse (return . f)
+
+instance Foldable Lmad where
+  foldMap f = execWriter . traverse (tell . f)
+
+instance Foldable IxFun where
+  foldMap f = execWriter . traverse (tell . f)
+
+instance Traversable Lmad where
+  traverse f (Lmad x l) =
+    Lmad <$> f x <*> traverse f' l
+    where f' (a, b, c, k, info) =
+             (,,,,) <$> f a <*> f b <*> f c <*> pure k <*> pure info
+
+instance Traversable IxFun where
+  traverse f (IxFun lmads shp cg) =
+    IxFun  <$> traverse (traverse f) lmads <*> traverse f shp <*> pure cg
+
+-- | Substituting a name with a PrimExp in an Lmad.
+substituteInLmad :: M.Map VName (PrimExp VName) -> Lmad (PrimExp VName)
+                    -> Lmad (PrimExp VName)
+substituteInLmad tab (Lmad off srnpds) =
+  let off'    = substituteInPrimExp tab off
+      srnpds' = map (\(s,r,n,p,d) ->
+                      ( substituteInPrimExp tab s
+                      , substituteInPrimExp tab r
+                      , substituteInPrimExp tab n
+                      , p, d
+                      )
+                    ) srnpds
+  in  Lmad off' srnpds'
+
+-- | Substituting a name with a PrimExp in an index function.
+substituteInIxFun :: M.Map VName (PrimExp VName) -> IxFun (PrimExp VName)
+                  -> IxFun (PrimExp VName)
+substituteInIxFun tab (IxFun lmads shp b) =
+  IxFun (map (substituteInLmad tab) lmads)
+        (map (substituteInPrimExp tab) shp)
+        b
+
+------------------------------------------
+--- Index Function/LMAD Implementation ---
+------------------------------------------
+
+-- | whether this is a row-major array
+isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
+isDirect (IxFun [Lmad off info] shp True)
+  | length shp == length info,
+    all (\((s,r,n,p,_),i,d) -> s==1 && r==0 && n==d && p==i)
+        (zip3 info [0..length info - 1] shp),
+    off == 0 = True
+  | otherwise = False
+isDirect _ = False
 
 -- | whether an index function has contiguous memory support
 isContiguous :: (Eq num, IntegralExp num) => IxFun num -> Bool
@@ -118,7 +212,7 @@ shape (IxFun (lmad:_) _ _) = shape0 lmad
 
 -- | Computing the flat memory index for a complete set `inds`
 --     of array indices and a certain element size `elem_size`.
-index :: (Pretty num, IntegralExp num, Eq num) =>
+index :: (IntegralExp num, Eq num) =>
           IxFun num -> Indices num -> num -> num
 index (IxFun [] _ _) _ _ = error "index: empty index function"
 index (IxFun [lmad] _ _) iis elm_size = index0 lmad iis elm_size
@@ -128,7 +222,7 @@ index (IxFun (lmad1:lmad2:lmads) oshp c) iis elm_size =
   in  index (IxFun (lmad2:lmads) oshp c) new_inds elm_size
 
 -- | Helper for index: computing the flat index of an Lmad.
-index0 :: (Pretty num, Eq num, IntegralExp num) =>
+index0 :: (Eq num, IntegralExp num) =>
           Lmad num -> Indices num -> num -> num
 index0 lmad@(Lmad tau srnps) inds elm_size =
   let prod = sum $ zipWith flatOneDim
@@ -138,7 +232,7 @@ index0 lmad@(Lmad tau srnps) inds elm_size =
   in  if elm_size == 1 then ind else ind * elm_size
 
 -- | iota
-iota :: (Pretty num, IntegralExp num) => Shape num -> IxFun num
+iota :: (IntegralExp num) => Shape num -> IxFun num
 iota ns = IxFun [makeRotIota Inc 0 $ zip rs ns] ns True
   where rs = replicate (length ns) 0
 
@@ -185,7 +279,7 @@ rotate  (IxFun (lmad@(Lmad off srnps) : lmads) oshp cg) offs =
 
 
 -- | Slicing an index function.
-slice :: (Pretty num, Eq num, IntegralExp num) =>
+slice :: (Eq num, IntegralExp num) =>
          IxFun num -> Slice num -> IxFun num
 slice (IxFun [] _ _) _ = error "slice: empty index function"
 slice _ [] = error "slice: empty slice ???"
@@ -312,7 +406,7 @@ slice (IxFun (lmad@(Lmad _ srnpfs):lmads) oshp cg) is =
 --   Actually there are some special cases that need to be treated,
 --   for example if everything is a coercion, then it should succeed
 --   no matter what.
-reshape :: (Pretty num, Eq num, IntegralExp num) =>
+reshape :: (Eq num, IntegralExp num) =>
            IxFun num -> ShapeChange num -> IxFun num
 reshape (IxFun [] _ _) _ =
   error "reshape: empty index function"
@@ -418,7 +512,7 @@ base (IxFun _ osh _) = osh
 
 -- | Correctness assumption: the shape of the new base is
 --   equal to the base of the index function (to be rebased).
-rebase :: (Pretty num, Eq num, IntegralExp num) =>
+rebase :: (Eq num, IntegralExp num) =>
           IxFun num
        -> IxFun num
        -> IxFun num
@@ -497,44 +591,65 @@ rebase newbase@(IxFun (lmad_base:lmads_base) shp_base cg_base)
 getMonotonicity :: (Eq num, IntegralExp num) => IxFun num -> DimInfo
 getMonotonicity = getMonotonicityRots False
 
-------------------------------------------
---- COSMIN is here with the re-writing ---
-------------------------------------------
-
-{--
+-- | results in the index function corresponding to indexing
+--    with `i` on the outermost dimension.
 offsetIndex :: (Eq num, IntegralExp num) =>
-               Lmads num -> num -> Lmads num
+               IxFun num -> num -> IxFun num
 offsetIndex ixfun i | i == 0 = ixfun
 offsetIndex ixfun i =
   case shape ixfun of
     d:ds -> slice ixfun (DimSlice i (d-i) 1 : map (unitSlice 0) ds)
     []   -> error "offsetIndex: underlying index function has rank zero"
 
+-- | results in the index function corresponding to making
+--   the outermost dimension strided by `s`.
 strideIndex :: (Eq num, IntegralExp num) =>
-               Lmads num -> num -> Lmads num
+               IxFun num -> num -> IxFun num
 strideIndex ixfun s =
   case shape ixfun of
     d:ds -> slice ixfun (DimSlice 0 d s : map (unitSlice 0) ds)
     []   -> error "offsetIndex: underlying index function has rank zero"
---}
 
-{--
+
+-- | If the memory support of the index function is contiguous
+--     and row-major (i.e., no transpositions, repetitions,
+--     rotates, etc.), then this should return the offset from
+--     which the memory-support of this index function starts.
+linearWithOffset :: (Eq num, IntegralExp num) =>
+                    IxFun num -> num -> Maybe num
+linearWithOffset (IxFun [] _ _) _ =
+  error "linearWithOffset: empty index function"
+linearWithOffset ixfn@(IxFun [lmad] _ cg) elem_size
+  | mon  <- getMonotonicity ixfn,
+    perm <- getPermutation lmad,
+    cg && mon == Inc,
+    all (\(s,_,_,_,_) -> s /= 0) (getLmadDims lmad),
+    perm == [0..length perm - 1],
+    off <- getOffset lmad = return $ off * elem_size
+  | otherwise = Nothing
+linearWithOffset _ _ = Nothing
+
+-- | Similar restrictions to `linearWithOffset` except
+--     for transpositions, which are returned together
+--     with the offset.
 rearrangeWithOffset :: (Eq num, IntegralExp num) =>
-                       Lmads num -> Lmads num -> num -> Maybe (num, num, Permutation)
-rearrangeWithOffset [Lmad tau1 ss1] [Lmad tau2 ss2] elm_size =
-  let dims1 = map getDimLogicalSize ss1
-      dims2 = map getDimLogicalSize ss2
-      ok1   = foldl (&&) True $ zipWith (==) dims1 dims2
+                       IxFun num -> num -> Maybe (num, [(Int,num)])
+rearrangeWithOffset (IxFun [] _ _) _ =
+  error "rearrangeWithOffset: empty index function"
+rearrangeWithOffset ixfn@(IxFun [lmad] _ cg) elem_size
+  | perm <- getPermutation lmad,
+    mon  <- getMonotonicity ixfn,
+    cg && mon == Inc,
+    all (\(s,_,_,_,_) -> s /= 0) (getLmadDims lmad),
+    perm /= [0..length perm - 1],
+    offset <- getOffset lmad * elem_size =
+    return (offset, zip perm $ rearrangeShape perm $ shape ixfn)
+  | otherwise = Nothing
+rearrangeWithOffset _ _ = Nothing
 
-rearrangeWithOffset _ _ _ = Nothing
-rearrangeWithOffset (Reshape ixfun _) element_size =
-  rearrangeWithOffset ixfun element_size
-rearrangeWithOffset (Permute ixfun perm) element_size = do
-  offset <- linearWithOffset ixfun element_size
-  return (offset, zip perm $ rearrangeShape perm $ shape ixfun)
-rearrangeWithOffset _ _ =
-  Nothing
---}
+isLinear :: (Eq num, IntegralExp num) => IxFun num -> Bool
+isLinear =
+  (==Just 0) . flip linearWithOffset 1
 
 ------------------------
 --- Helper functions ---
@@ -612,7 +727,7 @@ flatOneDim (s,r,n) i
   | r == 0 = i*s
   | otherwise = ((i+r) `mod` n) * s
 
-makeRotIota :: (Pretty num, IntegralExp num) =>
+makeRotIota :: (IntegralExp num) =>
                DimInfo -> num -> [(num,num)] -> Lmad num
 makeRotIota info tau support
   | info == Inc || info == Dec =
@@ -644,40 +759,3 @@ isMonDim :: (Eq num, IntegralExp num) => Bool -> DimInfo ->
             (num, num, num, Int, DimInfo) -> Bool
 isMonDim ignore_rots mon (s,r,_,_,info) =
   s == 0 || ((ignore_rots || r == 0) && mon == info)
-
---------------------------------
---- Instances Implementation ---
---------------------------------
-
-instance Pretty DimInfo where
-  ppr Inc      = text "I"
-  ppr Dec      = text "D"
-  ppr Unknown  = text "U"
-
-instance Pretty num => Pretty (Lmad num) where
-  ppr (Lmad tau srnps) =
-    let (ss, rs, ns, ps, fs) = unzip5 srnps
-    in text " | " <> ppr tau <>
-        text " + " <> brackets (commasep $ map ppr ss) <>
-        text "v" <> brackets (commasep $ map ppr rs) <>
-        text "v" <> brackets (commasep $ map ppr ns) <>
-        text "v" <> brackets (commasep $ map ppr ps) <>
-        text "v" <> brackets (commasep $ map ppr fs) <>
-        text " | "
-
-instance Pretty num => Pretty (IxFun num) where
-  ppr (IxFun lmads orgshp cg) =
-    text "Shape: " <> braces (commasep $ map ppr orgshp) <>
-    text " LMADS: " <> braces (stack $ map ppr lmads)    <>
-    text " CONTIG: "<> text (show cg)
-{--
-    text "Direct" <> parens (commasep $ map ppr dims)
-  ppr (Permute fun perm) = ppr fun <> ppr perm
-  ppr (Rotate fun offsets) = ppr fun <> brackets (commasep $ map ((text "+" <>) . ppr) offsets)
-  ppr (Index fun is) = ppr fun <> brackets (commasep $ map ppr is)
-  ppr (Reshape fun oldshape) =
-    ppr fun <> text "->reshape" <>
-    parens (commasep (map ppr oldshape))
-  ppr (Repeat fun outer_shapes inner_shape) =
-    ppr fun <> text "->repeat" <> parens (commasep (map ppr $ outer_shapes++ [inner_shape]))
---}

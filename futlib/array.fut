@@ -3,6 +3,7 @@
 import "math"
 import "soacs"
 import "functional"
+open import "zip" -- Rexport.
 
 -- | The size of the outer dimension of an array.
 let length [n] 't (_: [n]t) = n
@@ -65,9 +66,9 @@ let iota (n: i32): *[n]i32 =
 let replicate 't (n: i32) (x: t): *[n]t =
   i32.replicate n x
 
--- | Copy an array.
-let copy [n] 't (a: [n]t): *[n]t =
-  map (\x -> x) a
+-- | Copy a value.  The result will not alias anything.
+let copy 't (a: t): *t =
+  ([a])[0]
 
 -- | Combines the outer two dimensions of an array.
 let flatten [n][m] 't (xs: [n][m]t): []t =
@@ -138,34 +139,6 @@ let tabulate 'a (n: i32) (f: i32 -> a): *[n]a =
 let tabulate_2d 'a (n: i32) (m: i32) (f: i32 -> i32 -> a): *[n][m]a =
   map1 (f >-> tabulate m) (iota n)
 
--- | Construct an array of pairs from two arrays.
-let zip2 [n] 'a 'b (as: [n]a) (bs: [n]b): [n](a,b) =
-  zip as bs
-
--- | As `zip2`@term, but with one more array.
-let zip3 [n] 'a 'b 'c (as: [n]a) (bs: [n]b) (cs: [n]c): [n](a,b,c) =
-  zip as bs cs
-
--- | As `zip3`@term, but with one more array.
-let zip4 [n] 'a 'b 'c 'd (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d): [n](a,b,c,d) =
-  zip as bs cs ds
-
--- | As `zip4`@term, but with one more array.
-let zip5 [n] 'a 'b 'c 'd 'e (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e): [n](a,b,c,d,e) =
-  zip as bs cs ds es
-
--- | Turn an array of pairs into two arrays.
-let unzip2 [n] 'a 'b (xs: [n](a,b)): ([n]a, [n]b) =
-  unzip xs
-
--- | As `unzip2`@term, but with one more array.
-let unzip3 [n] 'a 'b 'c (xs: [n](a,b,c)): ([n]a, [n]b, [n]c) =
-  unzip xs
-
--- | As `unzip3`@term, but with one more array.
-let unzip4 [n] 'a 'b 'c 'd (xs: [n](a,b,c,d)): ([n]a, [n]b, [n]c, [n]d) =
-  unzip xs
-
--- | As `unzip4`@term, but with one more array.
-let unzip5 [n] 'a 'b 'c 'd 'e (xs: [n](a,b,c,d,e)): ([n]a, [n]b, [n]c, [n]d, [n]e) =
-  unzip xs
+-- | Create a value for each point in a three-dimensional index space.
+let tabulate_3d 'a (n: i32) (m: i32) (o: i32) (f: i32 -> i32 -> i32 -> a): *[n][m][o]a =
+  map1 (f >-> tabulate_2d m n) (iota n)

@@ -2,7 +2,8 @@
 -- to a flat byte offset.
 module Futhark.Representation.ExplicitMemory.IndexFunction
        (
-         IxFun(..)
+--         IxFun(..)
+         IxFun
        , index
        , iota
        , offsetIndex
@@ -21,6 +22,11 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , isLinear
        , isDirect
        , substituteInIxFun
+       , getInfoMaxUnification
+       , subsInIndexIxFun
+       , ixFunsCompatibleRaw
+       , ixFunHasIndex
+       , offsetIndexDWIM
        )
        where
 
@@ -33,13 +39,14 @@ import Control.Monad.Writer
 
 import Prelude hiding (mod, repeat)
 
+import qualified Data.List as L
 import qualified Data.Map.Strict as M
 
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 
 import Futhark.Representation.AST.Syntax
-  (ShapeChange, DimChange(..), DimIndex(..), Slice, sliceDims, unitSlice, VName)
+  (ShapeChange, DimChange(..), DimIndex(..), Slice, sliceDims, unitSlice, VName(..))
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
@@ -59,29 +66,7 @@ data IxFun num = Direct (Shape num)
                | Index (IxFun num) (Slice num)
                | Reshape (IxFun num) (ShapeChange num)
                | Repeat (IxFun num) [Shape num] (Shape num)
-               deriving (Show)
-
---- XXX: this is almost just structural equality, which may be too
---- conservative - unless we normalise first, somehow.
-instance (IntegralExp num, Eq num) => Eq (IxFun num) where
-  Direct _ == Direct _ =
-    True
-  Permute ixfun1 perm1 == Permute ixfun2 perm2 =
-    ixfun1 == ixfun2 && perm1 == perm2
-  Rotate ixfun1 offsets1 == Rotate ixfun2 offsets2 =
-    ixfun1 == ixfun2 && offsets1 == offsets2
-  Index ixfun1 is1 == Index ixfun2 is2 =
-    ixfun1 == ixfun2 && length is1 == length is2 && and (zipWith eqIndex is1 is2)
-    -- Two DimSlices are considered equal even if their slice lengths
-    -- are not equal, as this allows us to get rid of reshapes.
-    where eqIndex (DimFix i) (DimFix j) = i == j
-          eqIndex (DimSlice i _ s0) (DimSlice j _ s1) = i==j && s0==s1
-          eqIndex _ _ = False
-  Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
-    ixfun1 == ixfun2 && length shape1 == length shape2
-  Repeat ixfun1 outer_shapes1 inner_shape1 == Repeat ixfun2 outer_shapes2 inner_shape2 =
-    ixfun1 == ixfun2 && outer_shapes1 == outer_shapes2 && inner_shape1 == inner_shape2
-  _ == _ = False
+               deriving (Eq,Show)
 
 instance Pretty num => Pretty (IxFun num) where
   ppr (Direct dims) =
@@ -381,8 +366,8 @@ isDirect Direct{} = True
 isDirect _ = False
 
 -- | Substituting a name with a PrimExp in an index function.
-substituteInIxFun :: M.Map VName (PrimExp VName) -> IxFun (PrimExp VName)
-                  -> IxFun (PrimExp VName)
+substituteInIxFun :: (Ord a) => M.Map a (PrimExp a) -> IxFun (PrimExp a)
+                  -> IxFun (PrimExp a)
 substituteInIxFun tab (Direct pes) =
   Direct $ map (substituteInPrimExp tab) pes
 substituteInIxFun tab (Permute ixfun p) =
@@ -395,3 +380,68 @@ substituteInIxFun tab (Reshape ixfun newshape) =
   Reshape (substituteInIxFun tab ixfun) $ map (fmap $ substituteInPrimExp tab) newshape
 substituteInIxFun tab (Repeat ixfun outer_shapes inner_shape) =
   Repeat (substituteInIxFun tab ixfun) outer_shapes inner_shape
+
+-----------------------------------------------------------
+--- Niels' functions for memory management:             ---
+--- these are prime candidates to be removed/re-written ---
+-----------------------------------------------------------
+
+type IxFn = IxFun (PrimExp VName)
+
+getInfoMaxUnification :: IxFn -> Maybe (IxFn, Slice (PrimExp VName), VName)
+getInfoMaxUnification (Index ixfun_start slc) =
+  case L.span isDimFix slc of
+    (indices_start, [DimSlice _start_offset
+                     (LeafExp final_dim@VName{} (IntType Int32))
+                     _stride]) ->
+        Just (ixfun_start, indices_start, final_dim)
+    _ -> Nothing
+  where isDimFix DimFix{} = True
+        isDimFix _ = False
+getInfoMaxUnification _ = Nothing
+
+-- Are two index functions *identical*?  (Silly approach, but the Eq
+-- instance is used for something else.)
+ixFunsCompatibleRaw :: Eq num => IxFun num -> IxFun num -> Bool
+ixFunsCompatibleRaw ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
+  where primEq a b = case (a, b) of
+          (Direct sa, Direct sb) ->
+            sa == sb
+          (Permute a1 pa, Permute b1 pb) ->
+            a1 `primEq` b1 && pa == pb
+          (Rotate a1 ia, Rotate b1 ib) ->
+            a1 `primEq` b1 && ia == ib
+          (Index a1 sa, Index b1 sb) ->
+            a1 `primEq` b1 && sa == sb
+          (Reshape a1 sa, Reshape b1 sb) ->
+            a1 `primEq` b1 && sa == sb
+          (Repeat a1 ssa sa, Repeat b1 ssb sb) ->
+            a1 `primEq` b1 && ssa == ssb && sa == sb
+          _ -> False
+
+ixFunHasIndex :: IxFun num -> Bool
+ixFunHasIndex ixfun = case ixfun of
+  Direct _ -> False
+  Permute ixfun' _ -> ixFunHasIndex ixfun'
+  Rotate ixfun' _ -> ixFunHasIndex ixfun'
+  Index{} -> True
+  Reshape ixfun' _ -> ixFunHasIndex ixfun'
+  Repeat ixfun' _ _ -> ixFunHasIndex ixfun'
+
+subsInIndexIxFun :: IxFn -> VName -> VName -> IxFn
+subsInIndexIxFun (Index ixfun_start slc) final_dim final_dim_max_v =
+  let tab = M.singleton final_dim (LeafExp final_dim_max_v (IntType Int32))
+      ixfun_start' = substituteInIxFun tab ixfun_start
+  in  Index ixfun_start' slc
+subsInIndexIxFun _ _ _ = error "In IxFun.subsInIndexIxFun: should-not-happen case reached!"
+
+offsetIndexDWIM :: Int -> IxFn -> PrimExp VName -> IxFn
+offsetIndexDWIM n_ignore_initial ixfun offset =
+  fromMaybe (offsetIndex ixfun offset) $ case ixfun of
+  Index ixfun1 dimindices ->
+    let (dim_first, dim_rest) = L.splitAt n_ignore_initial dimindices
+    in case dim_rest of
+      (DimFix i : dim_rest') ->
+        Just $ Index ixfun1 (dim_first ++ DimFix (i + offset) : dim_rest')
+      _ -> Nothing
+  _ -> Nothing

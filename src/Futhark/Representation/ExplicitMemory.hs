@@ -91,6 +91,7 @@ module Futhark.Representation.ExplicitMemory
        )
 where
 
+import Data.Maybe
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Except
@@ -422,10 +423,12 @@ fixExtIxFun i e = fmap $ replaceInPrimExp update
                          | otherwise = LeafExp (Ext j) t
         update (Free x) t = LeafExp (Free x) t
 
+leafExp :: Int -> PrimExp (Ext a)
+leafExp i = LeafExp (Ext i) int32
+
 existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
-existentialiseIxFun ctx = fmap $ fmap ext
-  where ext v | Just i <- elemIndex v ctx = Ext i
-              | otherwise                 = Free v
+existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
+  where ctx' = M.map leafExp $ M.fromList $ zip (map Free ctx) [0..]
 
 instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
@@ -562,6 +565,24 @@ matchBranchReturnType rettype (Body _ stms res) = do
   ts <- runReaderT (mapM subExpMemInfo res) $ removeScopeAliases (scope <> scopeOf stms)
   matchReturnType rettype res ts
 
+-- | Helper function for index function unification.
+--
+-- The first return value maps a VName (wrapped in 'Free') to its Int
+-- (wrapped in 'Ext').  In case of duplicates, it is mapped to the
+-- *first* Int that occurs.
+--
+-- The second return value maps each Int (wrapped in an 'Ext') to a
+-- 'LeafExp' 'Ext' with the Int at which its associated VName first
+-- occurs.
+getExtMaps :: [(VName,Int)] -> (M.Map (Ext VName) (PrimExp (Ext VName)),
+                                M.Map (Ext VName) (PrimExp (Ext VName)))
+getExtMaps ctx_lst_ids =
+  (M.map leafExp $ M.mapKeys Free $ M.fromListWith (flip const) ctx_lst_ids,
+   M.fromList $
+   mapMaybe (traverse (fmap (\i -> LeafExp (Ext i) int32) .
+                       (`lookup` ctx_lst_ids)) .
+             uncurry (flip (,)) . fmap Ext) ctx_lst_ids)
+
 matchReturnType :: PP.Pretty u =>
                    [MemInfo ExtSize u MemReturn]
                 -> [SubExp]
@@ -570,6 +591,26 @@ matchReturnType :: PP.Pretty u =>
 matchReturnType rettype res ts = do
   let (ctx_ts, val_ts) = splitFromEnd (length rettype) ts
       (ctx_res, _val_res) = splitFromEnd (length rettype) res
+
+      getId :: (SubExp,Int) -> Maybe (VName,Int)
+      getId (Var ii, i) = Just (ii,i)
+      getId (Constant _, _) = Nothing
+
+      (ctx_map_ids, ctx_map_exts) =
+        getExtMaps $ mapMaybe getId $ zip ctx_res [0..length ctx_res - 1]
+
+      existentialiseIxFun0 :: IxFun -> ExtIxFun
+      existentialiseIxFun0 = IxFun.substituteInIxFun ctx_map_ids . fmap (fmap Free)
+
+      getCt :: (Int,SubExp) -> Maybe (Ext VName, PrimExp (Ext VName))
+      getCt (_, Var _) = Nothing
+      getCt (i, Constant c) = Just (Ext i, ValueExp c)
+
+      ctx_map_cts = M.fromList $ mapMaybe getCt $
+                    zip [0..length ctx_res - 1] ctx_res
+
+      substConstsInExtIndFun :: ExtIxFun -> ExtIxFun
+      substConstsInExtIndFun = IxFun.substituteInIxFun (ctx_map_cts<>ctx_map_exts)
 
       fetchCtx i = case maybeNth i $ zip ctx_res ctx_ts of
                      Nothing -> throwError $ "Cannot find context variable " ++
@@ -599,10 +640,25 @@ matchReturnType rettype res ts = do
                                 "but got", pretty y]
 
       checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
-        | x_mem == y_mem, x_ixfun == existentialiseIxFun [] y_ixfun = return ()
-      checkMemReturn (ReturnsNewBlock x_space x_ext x_mem_size _x_ixfun)
-                     (ArrayIn y_mem _y_ixfun) = do
+          | x_mem == y_mem = do
+              let x_ixfun' = substConstsInExtIndFun x_ixfun
+                  y_ixfun' = existentialiseIxFun0   y_ixfun
+              unless (x_ixfun' == y_ixfun') $
+                throwError $ unwords  ["Index function unification fails1!",
+                    "\nixfun of body result: ", pretty y_ixfun',
+                    "\nixfun of return type: ", pretty x_ixfun',
+                    "\nand context elements: ", pretty ctx_res]
+              return ()
+      checkMemReturn (ReturnsNewBlock x_space x_ext x_mem_size x_ixfun)
+                     (ArrayIn y_mem y_ixfun) = do
         (x_mem, x_mem_type)  <- fetchCtx x_ext
+        let x_ixfun' = substConstsInExtIndFun x_ixfun
+            y_ixfun' = existentialiseIxFun0   y_ixfun
+        unless (x_ixfun' == y_ixfun') $
+          throwError $ unwords  ["Index function unification fails2!",
+            "\nixfun of body result: ", pretty y_ixfun',
+            "\nixfun of return type: ", pretty x_ixfun',
+            "\nand context elements: ", pretty ctx_res]
         case x_mem_type of
           MemMem y_mem_size y_space -> do
             unless (x_mem == Var y_mem) $
@@ -637,25 +693,42 @@ matchPatternToExp :: (ExplicitMemorish lore) =>
 matchPatternToExp pat e = do
   scope <- asksScope removeScopeAliases
   rt <- runReaderT (expReturns $ removeExpAliases e) scope
-  let (_ctx_ts, val_ts) = bodyReturnsFromPattern $ removePatternAliases pat
+
+  let (ctxs, vals) = bodyReturnsFromPattern $ removePatternAliases pat
+      (ctx_ids, _ctx_ts) = unzip ctxs
+      (_val_ids, val_ts) = unzip vals
+      (ctx_map_ids, ctx_map_exts) =
+        getExtMaps $ zip ctx_ids [0..length ctx_ids - 1]
+
   unless (length val_ts == length rt &&
-          and (zipWith matches val_ts rt)) $
-    TC.bad $ TC.TypeError $ "Expression type:\n  " ++ prettyTuple rt ++ "\ncannot match pattern type:\n  " ++ prettyTuple val_ts
-  where matches (MemPrim x) (MemPrim y) = x == y
-        matches (MemMem x_size x_space) (MemMem y_size y_space) =
+          and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)) $
+    TC.bad $ TC.TypeError $ "Expression type:\n  " ++ prettyTuple rt ++
+                            "\ncannot match pattern type:\n  " ++ prettyTuple val_ts ++
+                            "\nwith context elements: " ++ pretty ctx_ids
+  where matches _ _ (MemPrim x) (MemPrim y) = x == y
+        matches _ _ (MemMem x_size x_space) (MemMem y_size y_space) =
           x_size == y_size && x_space == y_space
-        matches (MemArray x_pt x_shape _ x_ret) (MemArray y_pt y_shape _ y_ret) =
+        matches ctxids ctxexts (MemArray x_pt x_shape _ x_ret) (MemArray y_pt y_shape _ y_ret) =
           x_pt == y_pt && x_shape == y_shape &&
           case (x_ret, y_ret) of
             (ReturnsInBlock x_mem x_ixfun, Just (ReturnsInBlock y_mem y_ixfun)) ->
-              x_mem == y_mem && x_ixfun == y_ixfun
-            (ReturnsInBlock{}, Just ReturnsNewBlock{}) -> True
-            (ReturnsNewBlock x_space x_i x_size _x_ixfun,
-             Just (ReturnsNewBlock y_space y_i y_size _y_ixfun)) ->
-              x_space == y_space && x_i == y_i && x_size == y_size
+              let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
+                  y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
+              in  x_mem == y_mem && x_ixfun' == y_ixfun'
+            (ReturnsInBlock _ x_ixfun,
+             Just (ReturnsNewBlock _ _ _ y_ixfun)) ->
+              let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
+                  y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
+              in  x_ixfun' == y_ixfun'
+            (ReturnsNewBlock x_space x_i x_size x_ixfun,
+             Just (ReturnsNewBlock y_space y_i y_size y_ixfun)) ->
+              let x_ixfun' = IxFun.substituteInIxFun  ctxids x_ixfun
+                  y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
+              in  x_space == y_space && x_i == y_i &&
+                  x_size == y_size && x_ixfun' == y_ixfun'
             (_, Nothing) -> True
             _ -> False
-        matches _ _ = False
+        matches _ _ _ _ = False
 
 varMemInfo :: ExplicitMemorish lore =>
               VName -> TC.TypeM lore (MemInfo SubExp NoUniqueness MemBind)
@@ -730,13 +803,13 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
       " (" ++ show ident_rank ++ ")"
 
 instance Attributes ExplicitMemory where
-  expTypesFromPattern = return . snd . bodyReturnsFromPattern
+  expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
 
 instance Attributes InKernel where
-  expTypesFromPattern = return . snd . bodyReturnsFromPattern
+  expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
 
 bodyReturnsFromPattern :: PatternT (MemBound NoUniqueness)
-                       -> ([BodyReturns], [BodyReturns])
+                       -> ([(VName,BodyReturns)], [(VName,BodyReturns)])
 bodyReturnsFromPattern pat =
   (map asReturns $ patternContextElements pat,
    map asReturns $ patternValueElements pat)
@@ -748,6 +821,7 @@ bodyReturnsFromPattern pat =
         ext se = Free se
 
         asReturns pe =
+         (patElemName pe,
           case patElemAttr pe of
             MemPrim pt -> MemPrim pt
             MemMem size space -> MemMem (ext size) space
@@ -758,6 +832,7 @@ bodyReturnsFromPattern pat =
                   ReturnsNewBlock space i (ext size) $
                   existentialiseIxFun (map patElemName ctx) ixfun
                 _ -> ReturnsInBlock mem $ existentialiseIxFun [] ixfun
+         )
 
 instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (PatElemT (MemInfo SubExp u r)) where
   ppAnnot = bindeeAnnot patElemName patElemAttr

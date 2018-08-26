@@ -66,9 +66,15 @@ def parse_specific_string(f, s):
     # `bytes`, so therefore we make each character an array element
     b = s.encode('utf8')
     bs = [b[i:i+1] for i in range(len(b))]
-    for c in bs:
-        parse_specific_char(f, c)
-    return True
+    read = []
+    try:
+        for c in bs:
+            parse_specific_char(f, c)
+            read.append(c)
+        return True
+    except ValueError:
+        map(f.unget_char, read[::-1])
+        raise
 
 def optional(p, *args):
     try:
@@ -241,14 +247,38 @@ def read_str_decimal(f):
     return float(sign + bef + b'.' + aft + b'E' + expt)
 
 def read_str_f32(f):
-    x = read_str_decimal(f)
-    optional_specific_string(f, 'f32')
-    return x
+    try:
+        parse_specific_string(f, 'f32.nan')
+        return np.float32(np.nan)
+    except ValueError:
+        try:
+            parse_specific_string(f, 'f32.inf')
+            return np.float32(np.inf)
+        except ValueError:
+            try:
+               parse_specific_string(f, '-f32.inf')
+               return np.float32(-np.inf)
+            except ValueError:
+               x = read_str_decimal(f)
+               optional_specific_string(f, 'f32')
+               return x
 
 def read_str_f64(f):
-    x = read_str_decimal(f)
-    optional_specific_string(f, 'f64')
-    return x
+    try:
+        parse_specific_string(f, 'f64.nan')
+        return np.float64(np.nan)
+    except ValueError:
+        try:
+            parse_specific_string(f, 'f64.inf')
+            return np.float64(np.inf)
+        except ValueError:
+            try:
+               parse_specific_string(f, '-f64.inf')
+               return np.float64(-np.inf)
+            except ValueError:
+               x = read_str_decimal(f)
+               optional_specific_string(f, 'f64')
+               return x
 
 def read_str_bool(f):
     skip_spaces(f)
@@ -556,9 +586,25 @@ def write_value(v, out=sys.stdout):
         else:
             out.write("false")
     elif type(v) == np.float32:
-        out.write("%.6ff32" % v)
+        if np.isnan(v):
+            out.write('f32.nan')
+        elif np.isinf(v):
+            if v >= 0:
+                out.write('f32.inf')
+            else:
+                out.write('-f32.inf')
+        else:
+            out.write("%.6ff32" % v)
     elif type(v) == np.float64:
-        out.write("%.6ff64" % v)
+        if np.isnan(v):
+            out.write('f64.nan')
+        elif np.isinf(v):
+            if v >= 0:
+                out.write('f64.inf')
+            else:
+                out.write('-f64.inf')
+        else:
+            out.write("%.6ff64" % v)
     elif type(v) == np.ndarray:
         if np.product(v.shape) == 0:
             tname = numpy_type_to_type_name(v.dtype)

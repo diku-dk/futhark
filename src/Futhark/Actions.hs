@@ -5,6 +5,7 @@ module Futhark.Actions
   , impCodeGenAction
   , kernelImpCodeGenAction
   , rangeAction
+  , metricsAction
   )
 where
 
@@ -28,6 +29,7 @@ import Futhark.Interpreter
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
+import Futhark.Analysis.Metrics
 import Futhark.Util.Pretty (text, ppr, prettyDoc, prettyText, brackets)
 
 printAction :: (Attributes lore, CanBeAliased (Op lore)) => Action lore
@@ -53,6 +55,13 @@ rangeAction =
            , actionDescription = "Print the program with range annotations added."
            , actionProcedure = liftIO . putStrLn . pretty . rangeAnalysis
            }
+
+metricsAction :: OpMetrics (Op lore) => Action lore
+metricsAction =
+  Action { actionName = "Compute metrics"
+         , actionDescription = "Print metrics on the final AST."
+         , actionProcedure = liftIO . putStr . show . progMetrics
+         }
 
 impCodeGenAction :: Action ExplicitMemory
 impCodeGenAction =

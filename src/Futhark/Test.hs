@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | Facilities for reading Futhark test programs.  A Futhark test
 -- program is an ordinary Futhark program where an initial comment
 -- block specifies input- and output-sets.
@@ -33,15 +34,21 @@ import Data.Char
 import Data.Functor
 import Data.Maybe
 import Data.Foldable (foldl')
+import Data.Semigroup
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
+import Data.Void
 import System.FilePath
+import Codec.Compression.GZip
+import Codec.Compression.Zlib.Internal (DecompressError)
+import qualified Control.Exception.Base as E
 
-import Text.Parsec hiding ((<|>), many)
-import Text.Parsec.Text
-import Text.Parsec.Error
+import Text.Megaparsec hiding (many, some)
+import Text.Megaparsec.Char
 import Text.Regex.TDFA
+
+import Prelude
 
 import Futhark.Analysis.Metrics
 import Futhark.Util.Pretty (pretty, prettyText)
@@ -119,10 +126,12 @@ data ExpectedResult values
   | RunTimeFailure ExpectedError -- ^ Execution fails with this error.
   deriving (Show)
 
-lexeme :: Parser a -> Parser a
-lexeme p = p <* spaces
+type Parser = Parsec Void T.Text
 
-lexstr :: String -> Parser ()
+lexeme :: Parser a -> Parser a
+lexeme p = p <* space
+
+lexstr :: T.Text -> Parser ()
 lexstr = void . try . lexeme . string
 
 braces :: Parser a -> Parser a
@@ -130,7 +139,7 @@ braces p = lexstr "{" *> p <* lexstr "}"
 
 parseNatural :: Parser Int
 parseNatural = lexeme $ foldl' (\acc x -> acc * 10 + x) 0 .
-               map num <$> some digit
+               map num <$> some digitChar
   where num c = ord c - ord '0'
 
 parseDescription :: Parser T.Text
@@ -140,12 +149,12 @@ parseDescriptionSeparator :: Parser ()
 parseDescriptionSeparator = try (string descriptionSeparator >>
                                  void (satisfy isSpace `manyTill` newline)) <|> eof
 
-descriptionSeparator :: String
+descriptionSeparator :: T.Text
 descriptionSeparator = "=="
 
 parseTags :: Parser [T.Text]
 parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
-  where parseTag = T.pack <$> lexeme (many1 $ satisfy constituent)
+  where parseTag = T.pack <$> lexeme (some $ satisfy constituent)
         constituent c = not (isSpace c) && c /= '}'
 
 parseAction :: Parser TestAction
@@ -157,13 +166,13 @@ parseInputOutputs :: Parser InputOutputs
 parseInputOutputs = InputOutputs <$> parseEntryPoint <*> parseRunCases
 
 parseEntryPoint :: Parser T.Text
-parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> many1 (satisfy constituent))) <|>
+parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> some (satisfy constituent))) <|>
                   pure (T.pack "main")
   where constituent c = not (isSpace c) && c /= '}'
 
 parseRunTags :: Parser [String]
 parseRunTags = many parseTag
-  where parseTag = try $ lexeme $ do s <- many1 $ satisfy isAlphaNum
+  where parseTag = try $ lexeme $ do s <- some $ satisfy isAlphaNum
                                      guard $ s `notElem` ["input", "structure", "warning"]
                                      return s
 
@@ -176,9 +185,17 @@ parseRunCases = parseRunCases' (0::Int)
           input <- parseInput
           expr <- parseExpectedResult
           return $ TestRun tags input expr $ desc i input
-        desc _ (InFile path) = path
+
+        -- If the file is gzipped, we strip the 'gz' extension from
+        -- the dataset name.  This makes it more convenient to rename
+        -- from 'foo.in' to 'foo.in.gz', as the reported dataset name
+        -- does not change (which would make comparisons to historical
+        -- data harder).
+        desc _ (InFile path)
+          | takeExtension path == ".gz" = dropExtension path
+          | otherwise                   = path
         desc i (Values vs) =
-          -- Turn linebreaks into spaces.
+          -- Turn linebreaks into space.
           "#" ++ show i ++ " (\"" ++ unwords (lines vs') ++ "\")"
           where vs' = case unwords (map pretty vs) of
                         s | length s > 50 -> take 50 s ++ "..."
@@ -206,7 +223,7 @@ parseInput = lexstr "input" *> parseValues
 parseValues :: Parser Values
 parseValues = do s <- parseBlock
                  case valuesFromByteString "input" $ BS.fromStrict $ T.encodeUtf8 s of
-                   Left err -> fail $ show err
+                   Left err -> fail err
                    Right vs -> return $ Values vs
               <|> lexstr "@" *> lexeme (InFile . T.unpack <$> nextWord)
 
@@ -246,29 +263,33 @@ optimisePipeline = lexstr "distributed" $> KernelsPipeline <|>
                    pure SOACSPipeline
 
 parseMetrics :: Parser AstMetrics
-parseMetrics = braces $ fmap M.fromList $ many $
-               (,) <$> (T.pack <$> lexeme (many1 (satisfy constituent))) <*> parseNatural
+parseMetrics = braces $ fmap (AstMetrics . M.fromList) $ many $
+               (,) <$> (T.pack <$> lexeme (some (satisfy constituent))) <*> parseNatural
   where constituent c = isAlpha c || c == '/'
 
 testSpec :: Parser ProgramTest
 testSpec =
   ProgramTest <$> parseDescription <*> parseTags <*> parseAction
 
-readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
+readTestSpec :: String -> T.Text -> Either (ParseError Char Void) ProgramTest
 readTestSpec = parse $ testSpec <* eof
 
-readInputOutputs :: SourceName -> T.Text -> Either ParseError InputOutputs
-readInputOutputs = parse $ parseDescription *> spaces *> parseInputOutputs <* eof
+readInputOutputs :: String -> T.Text -> Either (ParseError Char Void) InputOutputs
+readInputOutputs = parse $ parseDescription *> space *> parseInputOutputs <* eof
 
 commentPrefix :: T.Text
 commentPrefix = T.pack "--"
 
-fixPosition :: Int -> ParseError -> ParseError
+fixPosition :: Int -> ParseError Char Void -> ParseError Char Void
 fixPosition lineno err =
-  let newpos = incSourceLine
-               (incSourceColumn (errorPos err) $ T.length commentPrefix)
-               lineno
-  in setErrorPos newpos err
+  case err of TrivialError poss x y ->
+                TrivialError (fmap fixup poss) x y
+              FancyError poss x ->
+                FancyError (fmap fixup poss) x
+  where fixup pos =
+          pos { sourceLine = sourceLine pos <> mkPos lineno
+              , sourceColumn = sourceColumn pos <> mkPos (T.length commentPrefix)
+              }
 
 -- | Read the test specification from the given Futhark program.
 -- Note: will call 'error' on parse errors.
@@ -279,12 +300,12 @@ testSpecFromFile path = do
         case blocks of []       -> (0, mempty, [])
                        (n,s):ss -> (n, s, ss)
   case readTestSpec path first_spec of
-    Left err -> error $ show $ fixPosition first_spec_line err
+    Left err -> error $ parseErrorPretty $ fixPosition (1+first_spec_line) err
     Right v  -> foldM moreCases v rest_specs
 
   where moreCases test (lineno, cases) =
           case readInputOutputs path cases of
-            Left err     -> error $ show $ fixPosition lineno err
+            Left err     -> error $ parseErrorPretty $ fixPosition lineno err
             Right cases' ->
               case testAction test of
                 RunCases old_cases structures warnings ->
@@ -294,7 +315,7 @@ testSpecFromFile path = do
 testBlocks :: T.Text -> [(Int, T.Text)]
 testBlocks = mapMaybe isTestBlock . commentBlocks
   where isTestBlock (n,block)
-          | any (T.pack (" " ++ descriptionSeparator) `T.isPrefixOf`) block =
+          | any ((" " <> descriptionSeparator) `T.isPrefixOf`) block =
               Just (n, T.unlines block)
           | otherwise =
               Nothing
@@ -331,9 +352,9 @@ testPrograms :: FilePath -> IO [FilePath]
 testPrograms dir = filter isFut <$> directoryContents dir
   where isFut = (==".fut") . takeExtension
 
--- | Try to parse a several values from a byte string.  The 'SourceName'
+-- | Try to parse a several values from a byte string.  The 'String'
 -- parameter is used for error messages.
-valuesFromByteString :: SourceName -> BS.ByteString -> Either String [Value]
+valuesFromByteString :: String -> BS.ByteString -> Either String [Value]
 valuesFromByteString srcname =
   maybe (Left $ "Cannot parse values from " ++ srcname) Right . readValues
 
@@ -344,7 +365,7 @@ getValues :: MonadIO m => FilePath -> Values -> m [Value]
 getValues _ (Values vs) =
   return vs
 getValues dir (InFile file) = do
-  s <- liftIO $ BS.readFile file'
+  s <- getValuesBS dir (InFile file)
   case valuesFromByteString file' s of
     Left e   -> fail $ show e
     Right vs -> return vs
@@ -357,5 +378,14 @@ getValuesBS :: MonadIO m => FilePath -> Values -> m BS.ByteString
 getValuesBS _ (Values vs) =
   return $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map prettyText vs
 getValuesBS dir (InFile file) =
-  liftIO $ BS.readFile file'
+  case takeExtension file of
+   ".gz" -> liftIO $ do
+     s <- E.try readAndDecompress
+     case s of
+       Left e   -> fail $ show file ++ ": " ++ show (e :: DecompressError)
+       Right s' -> return s'
+
+   _  -> liftIO $ BS.readFile file'
   where file' = dir </> file
+        readAndDecompress = do s <- BS.readFile file'
+                               E.evaluate $ decompress s

@@ -600,7 +600,7 @@ pushRearrange inpIds soac ots = do
     soac' <- MapNest.toSOAC $
       inputs' `MapNest.setInputs`
       rearrangeReturnTypes nest perm
-    return (soac', ots SOAC.|> invertRearrange)
+    return (soac', invertRearrange SOAC.<| ots)
   else fail "Cannot push transpose"
 
 -- | Actually also rearranges indices.
@@ -613,7 +613,12 @@ rearrangeReturnTypes nest@(MapNest.MapNest w body nestings inps) perm =
    drop 1 $ iterate (map rowType) ts)
   inps
   where origts = MapNest.typeOf nest
-        ts =  map (rearrangeType perm) origts
+        -- The permutation may be deeper than the rank of the type,
+        -- but it is required that it is an identity permutation
+        -- beyond that.  This is supposed to be checked as an
+        -- invariant by whoever calls rearrangeReturnTypes.
+        rearrangeType' t = rearrangeType (take (arrayRank t) perm) t
+        ts = map rearrangeType' origts
 
         setReturnType nesting t' =
           nesting { MapNest.nestingReturnType = t' }
@@ -631,8 +636,9 @@ fixupInputs inpIds inps =
         inputRearrange _                                     = Nothing
 
         fixupInput d perm inp
-          | SOAC.inputRank inp >= d =
-              Just $ SOAC.addTransform (SOAC.Rearrange mempty $ rearrangeInverse perm) inp
+          | r <- SOAC.inputRank inp,
+            r >= d =
+              Just $ SOAC.addTransform (SOAC.Rearrange mempty $ take r perm) inp
           | otherwise = Nothing
 
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)

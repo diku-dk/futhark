@@ -7,7 +7,7 @@ environment:
     # use a short path prefix to avoid running into path-length limitations
     STACK_ROOT: C:\sr
   matrix:
-  - STACK_YAML: stack.yaml
+  - STACK_YAML: stack-lts-9.2.yaml
 cache:
 - "%STACK_ROOT%"
 
@@ -18,9 +18,9 @@ install:
  - 7z x stack.zip stack.exe > nul
  - stack setup > nul
  - stack build alex happy
- - stack --no-terminal test --only-dependencies -j 3
+ - stack --no-terminal test --only-dependencies -j 1
  - stack install
 
 test_script:
 - stack --no-terminal test
-- futhark-test -- --nobuffer tests examples
+- futhark-test --nobuffer tests examples

@@ -25,7 +25,7 @@ Identifiers and Keywords
    quals: (`id` ".")+
    qualid: `id` | `quals` `id`
    binop: `opstartchar` `opchar`*
-   qualbinop: `binop` | `quals` `binop`
+   qualbinop: `binop` | `quals` `binop` | "`" `qualid` "`"
    fieldid: `decimal` | `id`
    opstartchar = "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
    opchar: `opstartchar` | "."
@@ -108,7 +108,7 @@ type ``()``.
 
 .. productionlist::
    type: `qualid` | `array_type` | `tuple_type`
-       : | `record_type` | `function_type` | `type` `type_arg`
+       : | `record_type` | `function_type` | `type` `type_arg` | "*" `type`
    array_type: "[" [`dim`] "]" `type`
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
@@ -407,8 +407,6 @@ literals and variables, but also more complicated forms.
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `type_param`* `pat` [("=" `exp`)] `loopform` "do" `exp`
-      : | "zip" ["@" `nat_int`] `exp`+
-      : | "unzip" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
@@ -557,7 +555,7 @@ bracket.  This disambiguates the array indexing ``a[i]``, from ``a
 ............
 
 Return a slice of the array ``a`` from index ``i`` to ``j``, the
-latter inclusive and the latter exclusive, taking every ``s``-th
+former inclusive and the latter exclusive, taking every ``s``-th
 element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
 it means to start at ``i`` and descend by steps of size ``s`` to ``j``
 (not inclusive).
@@ -705,31 +703,6 @@ Numerical negation of ``x``, which must be of numeric type.
 
 Bitwise negation of ``x``, which must be of integral type.
 
-``zip x y z``
-.............
-
-Zips together the elements of the outer dimensions of arrays ``x``,
-``y``, and ``z``.  Static or runtime check is performed to check that
-the sizes of the outermost dimension of the arrays are the same.  If
-this property is not true, program execution stops with an error.  Any
-number of arrays may be passed to ``unzip``.  If *n* arrays are given,
-the result will be a single-dimensional array of *n*-tuples (where the
-the tuple components may themselves be arrays).
-
-``zip@i x y z``
-...............
-
-Like ``zip``, but operates within ``i+1`` dimensions.  Thus, ``zip@0``
-is equivalent to unadorned ``zip``.  This form is useful when zipping
-multidimensional arrays along the innermost dimensions.
-
-``unzip a``
-...........
-
-If the type of ``a`` is ``[(t_1, ..., t_n)]``, the result is a tuple
-of *n* arrays, i.e., ``([t_1], ..., [t_n])``, and otherwise a type
-error.
-
 ``unsafe e``
 ............
 
@@ -758,7 +731,7 @@ contain the result of evaluating ``e``.  Consumes ``a``.
 ``if c then a else b``
 ......................
 
-If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
+If ``c`` evaluates to ``true``, evaluate ``a``, else evaluate ``b``.
 
 Binding Expressions
 ~~~~~~~~~~~~~~~~~~~
@@ -885,11 +858,10 @@ Type Inference
 --------------
 
 Futhark supports Hindley-Milner-style type inference, so in many cases
-explicit type annotations can be left off.  Some built-in language
-constructs cannot currently be fully inferred, and may need type
-annotations where their inputs are bound.  The problematic constructs
-are ``rotate``, ``zip``, ``unzip``, and field projection.  Further,
-unique types (see `In-place updates`_) must be explicitly annotated.
+explicit type annotations can be left off.  Record field projection
+cannot in isolation be fully inferred, and may need type annotations
+where their inputs are bound.  Further, unique types (see `In-place
+updates`_) must be explicitly annotated.
 
 .. _in-place-updates:
 
@@ -906,7 +878,7 @@ performs an in-place update.  The compiler verifies that the original
 array (``a``) is not used on any execution path following the in-place
 update.  This involves also checking that no *alias* of ``a`` is used.
 Generally, most language constructs produce new arrays, but some
-(``zip``, ``unzip``) create arrays that alias their input arrays.
+(slicing) create arrays that alias their input arrays.
 
 When defining a function parameter or return type, we can mark it as
 *unique* by prefixing it with an asterisk.  For example::
@@ -1106,7 +1078,7 @@ Module Type Expressions
 .. productionlist::
    mod_type_exp:   `qualid`
              : | "{" `spec`* "}"
-             : | `mod_type_exp` "with" `qualid` "=" `type`
+             : | `mod_type_exp` "with" `qualid` `type_param`* "=" `type`
              : | "(" `mod_type_exp` ")"
              : | "(" `id` ":" `mod_type_exp` ")" "->" `mod_type_exp`
              : | `mod_type_exp` "->" `mod_type_exp`
@@ -1116,7 +1088,7 @@ Module Type Expressions
    spec:   "val" `id` `type_param`* ":" `spec_type`
        : | "val" `binop` ":" `spec_type`
        : | "type" `id` `type_param`* "=" `type`
-       : | "type `id` `type_param`*
+       : | "type" ["^"] `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
    spec_type: `type` | `type` "->" `spec_type`

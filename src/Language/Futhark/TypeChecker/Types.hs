@@ -51,10 +51,11 @@ unifyTypesU :: (Monoid als, Eq als, ArrayDim dim) =>
 unifyTypesU _ (Prim t1) (Prim t2)
   | t1 == t2  = Just $ Prim t1
   | otherwise = Nothing
-unifyTypesU uf (TypeVar t1 targs1) (TypeVar t2 targs2)
+unifyTypesU uf (TypeVar als1 u1 t1 targs1) (TypeVar als2 u2 t2 targs2)
   | t1 == t2 = do
+      u3 <- uf u1 u2
       targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
-      Just $ TypeVar t1 targs3
+      Just $ TypeVar (als1 <> als2) u3 t1 targs3
   | otherwise = Nothing
 unifyTypesU uf (Array et1 shape1 u1) (Array et2 shape2 u2) =
   Array <$> unifyArrayElemTypes uf et1 et2 <*>
@@ -135,41 +136,43 @@ data Bindage = BoundAsVar | UsedFree
              deriving (Show, Eq)
 
 checkTypeDecl :: MonadTypeChecker m =>
-                 TypeDeclBase NoInfo Name -> m (TypeDeclBase Info VName)
+                 TypeDeclBase NoInfo Name
+              -> m (TypeDeclBase Info VName, Liftedness)
 checkTypeDecl (TypeDecl t NoInfo) = do
   checkForDuplicateNamesInType t
-  (t', st) <- checkTypeExp t
-  return $ TypeDecl t' $ Info st
+  (t', st, l) <- checkTypeExp t
+  return (TypeDecl t' $ Info st, l)
 
 checkTypeExp :: MonadTypeChecker m =>
                 TypeExp Name
-             -> m (TypeExp VName, StructType)
+             -> m (TypeExp VName, StructType, Liftedness)
 checkTypeExp (TEVar name loc) = do
-  (name', ps, t) <- lookupType loc name
+  (name', ps, t, l) <- lookupType loc name
   case ps of
-    [] -> return (TEVar name' loc, t)
+    [] -> return (TEVar name' loc, t, l)
     _  -> throwError $ TypeError loc $
           "Type constructor " ++ pretty name ++ " used without any arguments."
 checkTypeExp (TETuple ts loc) = do
-  (ts', ts_s) <- unzip <$> mapM checkTypeExp ts
-  return (TETuple ts' loc, tupleRecord ts_s)
+  (ts', ts_s, ls) <- unzip3 <$> mapM checkTypeExp ts
+  return (TETuple ts' loc, tupleRecord ts_s, foldl' max Unlifted ls)
 checkTypeExp t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
   unless (sort field_names == sort (nub field_names)) $
     throwError $ TypeError loc $ "Duplicate record fields in " ++ pretty t
 
-  fs_and_ts <- traverse checkTypeExp $ M.fromList fs
-  let fs' = fmap fst fs_and_ts
-      ts_s = fmap snd fs_and_ts
-  return (TERecord (M.toList fs') loc, Record ts_s)
+  fs_ts_ls <- traverse checkTypeExp $ M.fromList fs
+  let fs' = fmap (\(x,_,_) -> x) fs_ts_ls
+      ts_s = fmap (\(_,y,_) -> y) fs_ts_ls
+      ls = fmap (\(_,_,z) -> z) fs_ts_ls
+  return (TERecord (M.toList fs') loc, Record ts_s, foldl' max Unlifted ls)
 checkTypeExp (TEArray t d loc) = do
-  (t', st) <- checkTypeExp t
+  (t', st, l) <- checkTypeExp t
   d' <- checkDimDecl d
-  case arrayOf st (ShapeDecl [d']) Nonunique of
-    Just st' -> return (TEArray t' d' loc, st')
-    Nothing -> throwError $ TypeError loc $
-               "Cannot create array with elements of type " ++ pretty st
+  case (l, arrayOf st (ShapeDecl [d']) Nonunique) of
+    (Unlifted, Just st') -> return (TEArray t' d' loc, st', Unlifted)
+    _ -> throwError $ TypeError loc $
+         "Cannot create array with elements of type `" ++ pretty st ++ "` (might be functional)."
   where checkDimDecl AnyDim =
           return AnyDim
         checkDimDecl (ConstDim k) =
@@ -177,37 +180,43 @@ checkTypeExp (TEArray t d loc) = do
         checkDimDecl (NamedDim v) =
           NamedDim <$> checkNamedDim loc v
 checkTypeExp (TEUnique t loc) = do
-  (t', st) <- checkTypeExp t
-  case st of
-    Array{} -> return (t', st `setUniqueness` Unique)
-    _       -> throwError $ TypeError loc $
-               "Attempt to declare unique non-array " ++ pretty t ++ "."
+  (t', st, l) <- checkTypeExp t
+  unless (mayContainArray st) $
+    warn loc $ "Declaring `" <> pretty st <> "` as unique has no effect."
+  return (TEUnique t' loc, st `setUniqueness` Unique, l)
+  where mayContainArray Prim{} = False
+        mayContainArray Array{} = True
+        mayContainArray (Record fs) = any mayContainArray fs
+        mayContainArray TypeVar{} = True
+        mayContainArray Arrow{} = False
 checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
-  (t1', st1) <- checkTypeExp t1
+  (t1', st1, _) <- checkTypeExp t1
   bindSpaced [(Term, v)] $ do
     v' <- checkName Term v loc
     let env = mempty { envVtable = M.singleton v' $ BoundV [] st1 }
     localEnv env $ do
-      (t2', st2) <- checkTypeExp t2
+      (t2', st2, _) <- checkTypeExp t2
       return (TEArrow (Just v') t1' t2' loc,
-              Arrow mempty (Just v') st1 st2)
+              Arrow mempty (Just v') st1 st2,
+              Lifted)
 checkTypeExp (TEArrow Nothing t1 t2 loc) = do
-  (t1', st1) <- checkTypeExp t1
-  (t2', st2) <- checkTypeExp t2
+  (t1', st1, _) <- checkTypeExp t1
+  (t2', st2, _) <- checkTypeExp t2
   return (TEArrow Nothing t1' t2' loc,
-          Arrow mempty Nothing st1 st2)
+          Arrow mempty Nothing st1 st2,
+          Lifted)
 checkTypeExp ote@TEApply{} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
-  (tname', ps, t) <- lookupType tloc tname
+  (tname', ps, t, l) <- lookupType tloc tname
   if length ps /= length targs
   then throwError $ TypeError tloc $
        "Type constructor " ++ pretty tname ++ " requires " ++ show (length ps) ++
        " arguments, but application at " ++ locStr tloc ++ " provides " ++ show (length targs)
   else do
     (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
-    return (foldl (\x y -> TEApply x y tloc)
-            (TEVar tname' tname_loc) targs',
-            substituteTypes (mconcat substs) t)
+    return (foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
+            substituteTypes (mconcat substs) t,
+            l)
   where tloc = srclocOf ote
 
         rootAndArgs :: MonadTypeChecker m => TypeExp Name -> m (QualName Name, SrcLoc, [TypeArgExp Name])
@@ -228,15 +237,10 @@ checkTypeExp ote@TEApply{} = do
           return (TypeArgExpDim AnyDim loc,
                   M.singleton pv $ DimSub AnyDim)
 
-        checkArgApply (TypeParamType pv _) (TypeArgExpType te) = do
-          (te', st) <- checkTypeExp te
+        checkArgApply (TypeParamType l pv _) (TypeArgExpType te) = do
+          (te', st, _) <- checkTypeExp te
           return (TypeArgExpType te',
-                  M.singleton pv $ TypeSub $ TypeAbbr [] st)
-
-        checkArgApply (TypeParamLiftedType pv _) (TypeArgExpType te) = do
-          (te', st) <- checkTypeExp te
-          return (TypeArgExpType te',
-                  M.singleton pv $ TypeSub $ TypeAbbr [] st)
+                  M.singleton pv $ TypeSub $ TypeAbbr l [] st)
 
         checkArgApply p a =
           throwError $ TypeError tloc $ "Type argument " ++ pretty a ++
@@ -300,8 +304,7 @@ checkTypeParams ps m =
   bindSpaced (map typeParamSpace ps) $
   m =<< evalStateT (mapM checkTypeParam ps) mempty
   where typeParamSpace (TypeParamDim pv _) = (Term, pv)
-        typeParamSpace (TypeParamType pv _) = (Type, pv)
-        typeParamSpace (TypeParamLiftedType pv _) = (Type, pv)
+        typeParamSpace (TypeParamType _ pv _) = (Type, pv)
 
         checkParamName ns v loc = do
           seen <- gets $ M.lookup (ns,v)
@@ -315,10 +318,8 @@ checkTypeParams ps m =
 
         checkTypeParam (TypeParamDim pv loc) =
           TypeParamDim <$> checkParamName Term pv loc <*> pure loc
-        checkTypeParam (TypeParamType pv loc) =
-          TypeParamType <$> checkParamName Type pv loc <*> pure loc
-        checkTypeParam (TypeParamLiftedType pv loc) =
-          TypeParamLiftedType <$> checkParamName Type pv loc <*> pure loc
+        checkTypeParam (TypeParamType l pv loc) =
+          TypeParamType l <$> checkParamName Type pv loc <*> pure loc
 
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
@@ -331,11 +332,11 @@ substituteTypes substs ot = case ot of
   Array at shape u ->
     fromMaybe nope $ arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
   Prim t -> Prim t
-  TypeVar v targs
-    | Just (TypeSub (TypeAbbr ps t)) <-
+  TypeVar () u v targs
+    | Just (TypeSub (TypeAbbr _ ps t)) <-
         M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
         applyType ps t $ map substituteInTypeArg targs
-    | otherwise -> TypeVar v $ map substituteInTypeArg targs
+    | otherwise -> TypeVar () u v $ map substituteInTypeArg targs
   Record ts ->
     Record $ fmap (substituteTypes substs) ts
   Arrow als v t1 t2 ->
@@ -345,11 +346,11 @@ substituteTypes substs ot = case ot of
         substituteTypesInArrayElem (ArrayPrimElem t ()) =
           Prim t
         substituteTypesInArrayElem (ArrayPolyElem v targs ())
-          | Just (TypeSub (TypeAbbr ps t)) <-
+          | Just (TypeSub (TypeAbbr _ ps t)) <-
               M.lookup (qualLeaf (qualNameFromTypeName v)) substs =
               applyType ps t (map substituteInTypeArg targs)
           | otherwise =
-              TypeVar v (map substituteInTypeArg targs)
+              TypeVar () Nonunique v (map substituteInTypeArg targs)
         substituteTypesInArrayElem (ArrayRecordElem ts) =
           Record ts'
           where ts' = fmap (substituteTypes substs .
@@ -382,8 +383,8 @@ applyType ps t args =
           (pv, DimSub $ ConstDim x)
         mkSubst (TypeParamDim pv _) (TypeArgDim AnyDim  _) =
           (pv, DimSub AnyDim)
-        mkSubst (TypeParamType pv _) (TypeArgType at _) =
-          (pv, TypeSub $ TypeAbbr [] at)
+        mkSubst (TypeParamType l pv _) (TypeArgType at _) =
+          (pv, TypeSub $ TypeAbbr l [] at)
         mkSubst p a =
           error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
 
@@ -400,7 +401,7 @@ instantiatePolymorphic tnames loc orig_substs x y =
 
     instantiate :: TypeBase () () -> TypeBase () ()
                 -> InstantiateM ()
-    instantiate (TypeVar (TypeName [] tn) []) orig_arg_t
+    instantiate (TypeVar () _ (TypeName [] tn) []) orig_arg_t
       | tn `elem` tnames = do
           substs <- get
           case M.lookup tn substs of
@@ -412,8 +413,8 @@ instantiatePolymorphic tnames loc orig_substs x y =
             _ -> modify $ M.insert tn (arg_t, loc)
             -- Ignore uniqueness when dealing with type variables.
             where arg_t = orig_arg_t `setUniqueness` Nonunique
-    instantiate (TypeVar (TypeName _ tn) targs)
-                (TypeVar (TypeName _ arg_tn) arg_targs)
+    instantiate (TypeVar () _ (TypeName _ tn) targs)
+                (TypeVar () _ (TypeName _ arg_tn) arg_targs)
       | tn == arg_tn, length targs == length arg_targs =
           zipWithM_ instantiateTypeArg targs arg_targs
     instantiate (Record fs) (Record arg_fs)
@@ -438,7 +439,7 @@ instantiatePolymorphic tnames loc orig_substs x y =
           mapM_ (uncurry instantiateRecordArrayElemType) $
           M.intersectionWith (,) fs arg_fs
     instantiateArrayElemType (ArrayPolyElem tn [] ()) arg_t =
-      instantiate (TypeVar tn []) arg_t
+      instantiate (TypeVar () Nonunique tn []) arg_t
     instantiateArrayElemType _ _ =
       lift $ Left Nothing
 
@@ -482,9 +483,10 @@ substTypesAny lookupSubst ot = case ot of
                       uncurry arrayOfWithAliases (subsArrayElem et) shape u
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
-  TypeVar v []
-    | Just t <- lookupSubst $ qualLeaf (qualNameFromTypeName v) -> t
-  TypeVar v targs -> TypeVar v $ map subsTypeArg targs
+  TypeVar _ u v []
+    | Just t <- lookupSubst $ qualLeaf (qualNameFromTypeName v) ->
+        t `setUniqueness` u
+  TypeVar als u v targs -> TypeVar als u v $ map subsTypeArg targs
   Record ts ->  Record $ fmap (substTypesAny lookupSubst) ts
   Arrow als v t1 t2 ->
     Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
@@ -495,7 +497,7 @@ substTypesAny lookupSubst ot = case ot of
         subsArrayElem (ArrayPolyElem v [] as)
           | Just t <-  lookupSubst $ qualLeaf (qualNameFromTypeName v) = (t, as)
         subsArrayElem (ArrayPolyElem v targs as) =
-          (TypeVar v (map subsTypeArg targs), as)
+          (TypeVar as Nonunique v (map subsTypeArg targs), as)
         subsArrayElem (ArrayRecordElem ts) =
           let ts' = fmap recordArrayElemToType ts
           in (Record $ fmap (substTypesAny lookupSubst . fst) ts', foldMap snd ts')

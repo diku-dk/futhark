@@ -149,7 +149,7 @@ removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
          mapM_ (uncurry letBindNames) $ dummyStms discard_val
          return body'
        letBind_ pat' $ DoLoop ctx' val' form body''
-  where pat_used = map (`UT.used` used) $ patternValueNames pat
+  where pat_used = map (`UT.isUsedDirectly` used) $ patternValueNames pat
         used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
         usedAfterLoop = flip elem used_vals . paramName
         usedAfterLoopOrInForm p =
@@ -429,7 +429,7 @@ simplifyReplicate _ _ _ _ = cannotSimplify
 arrayLitToReplicate :: BinderOps lore => TopDownRuleBasicOp lore
 arrayLitToReplicate _ pat _ (ArrayLit (se:ses) _)
   | all (==se) ses =
-    let n = constant (genericLength ses + 1 :: Int32)
+    let n = constant (fromIntegral (length ses) + 1 :: Int32)
     in letBind_ pat $ BasicOp $ Replicate (Shape [n]) se
 arrayLitToReplicate _ _ _ _ = cannotSimplify
 
@@ -921,6 +921,23 @@ simplifyConcat (vtable, _) pat (StmAux cs _) (Concat i x xs new_d)
                        Just (Concat j y ys _, v_cs) | j == i -> (y : ys, v_cs)
                        _ -> ([v], mempty)
 
+-- If concatenating a bunch of array literals (or equivalent
+-- replicate), just construct the array literal instead.
+simplifyConcat (vtable, _) pat (StmAux cs _) (Concat 0 x xs _)
+  | Just (vs, vcs) <- unzip <$> mapM isArrayLit (x:xs) = do
+      rt <- rowType <$> lookupType x
+      certifying (cs <> mconcat vcs) $
+        letBind_ pat $ BasicOp $ ArrayLit vs rt
+      where isArrayLit v
+              | Just (Replicate shape se, vcs) <- ST.lookupBasicOp v vtable,
+                unitShape shape = Just (se, vcs)
+              | Just (ArrayLit [se] _, vcs) <- ST.lookupBasicOp v vtable =
+                  Just (se, vcs)
+              | otherwise =
+                  Nothing
+
+            unitShape = (==Shape [Constant $ IntValue $ Int32Value 1])
+
 simplifyConcat _ _ _  _ = cannotSimplify
 
 evaluateBranch :: BinderOps lore => TopDownRuleIf lore
@@ -1143,7 +1160,11 @@ removeFullInPlace :: BinderOps lore => TopDownRuleBasicOp lore
 removeFullInPlace vtable pat _ (Update dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
     isFullSlice (arrayShape dest_t) is =
-      letBind_ pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
+      letBind_ pat $ BasicOp $
+      case se of
+        Var v | not $ null $ sliceDims is ->
+                  Reshape (map DimNew $ arrayDims dest_t) v
+        _ -> ArrayLit [se] $ rowType dest_t
 removeFullInPlace _ _ _ _ =
   cannotSimplify
 
@@ -1176,7 +1197,7 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfAttr rettype ifsort)
   | -- Only if there is no existential context...
     patternSize pat == length rettype,
     -- Figure out which of the names in 'pat' are used...
-    patused <- map (`UT.used` used) $ patternNames pat,
+    patused <- map (`UT.isUsedDirectly` used) $ patternNames pat,
     -- If they are not all used, then this rule applies.
     not (and patused) =
   -- Remove the parts of the branch-results that correspond to dead
