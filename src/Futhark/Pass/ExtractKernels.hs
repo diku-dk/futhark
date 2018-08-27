@@ -744,8 +744,8 @@ nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
 worthSequentialising :: Lambda -> Bool
 worthSequentialising lam = interesting $ lambdaBody lam
   where interesting body = any (interesting' . stmExp) $ bodyStms body
-        interesting' (Op (Screma _ form _))
-          | isJust $ isMapSOAC form = False
+        interesting' (Op (Screma _ form@(ScremaForm _ _ lam') _))
+          | isJust $ isMapSOAC form = worthSequentialising lam'
         interesting' (Op Scatter{}) = False -- Basically a map.
         interesting' (DoLoop _ _ _ body) = interesting body
         interesting' (Op _) = True
@@ -759,8 +759,8 @@ worthIntraGroup lam = interesting $ lambdaBody lam
   where interesting body = not (null $ nestedParallelism body) &&
                            not (onlyMaps $ bodyStms body)
         onlyMaps = all $ isMapOrSeq . stmExp
-        isMapOrSeq (Op (Screma _ form _))
-          | isJust $ isMapSOAC form = True
+        isMapOrSeq (Op (Screma _ form@(ScremaForm _ _ lam') _))
+          | isJust $ isMapSOAC form = not $ worthIntraGroup lam'
         isMapOrSeq (Op Scatter{}) = True -- Basically a map.
         isMapOrSeq (DoLoop _ _ _ body) =
           null $ nestedParallelism body
