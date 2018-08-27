@@ -363,6 +363,7 @@ transposeInput k n inp =
 data SOAC lore = Stream SubExp (StreamForm lore) (Lambda lore) [Input]
                | Scatter SubExp (Lambda lore) [Input] [(SubExp, Int, VName)]
                | Screma SubExp (ScremaForm lore) [Input]
+               | GenReduce SubExp [(SubExp, VName)] [Lambda lore] [SubExp] (Lambda lore) [Input]
             deriving (Eq, Show)
 
 instance PP.Pretty Input where
@@ -387,6 +388,7 @@ inputs :: SOAC lore -> [Input]
 inputs (Stream   _ _ _     arrs) = arrs
 inputs (Scatter  _len _lam ivs _as) = ivs
 inputs (Screma _ _       arrs) = arrs
+inputs (GenReduce _ _ _ _ _ inps) = inps
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC lore -> SOAC lore
@@ -396,6 +398,8 @@ setInputs arrs (Scatter w lam _ivs as) =
   Scatter (newWidth arrs w) lam arrs as
 setInputs arrs (Screma w form _) =
   Screma w form arrs
+setInputs inps (GenReduce w hists ops nes lam _) =
+  GenReduce w hists ops nes lam inps
 
 newWidth :: [Input] -> SubExp -> SubExp
 newWidth [] w = w
@@ -406,6 +410,7 @@ lambda :: SOAC lore -> Lambda lore
 lambda (Stream  _ _ lam      _) = lam
 lambda (Scatter _len lam _ivs _as) = lam
 lambda (Screma _ (ScremaForm _ _ lam) _) = lam
+lambda (GenReduce _ _ _ _ lam _) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda lore -> SOAC lore -> SOAC lore
@@ -415,6 +420,8 @@ setLambda lam (Scatter len _lam ivs as) =
   Scatter len lam ivs as
 setLambda lam (Screma w (ScremaForm scan red _) arrs) =
   Screma w (ScremaForm scan red lam) arrs
+setLambda lam (GenReduce w hists ops nes _ inps) =
+  GenReduce w hists ops nes lam inps
 
 -- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
@@ -431,6 +438,12 @@ typeOf (Scatter _w lam _ivs dests) =
         (aws, _, _) = unzip3 dests
 typeOf (Screma w form _) =
   scremaType w form
+typeOf (GenReduce _ hists ops _ _ _) =
+  zipWith arrayOfRow (concat rtps) ws'
+  where rtps = map lambdaReturnType ops
+        lens = map length rtps
+        (ws, _) = unzip hists
+        ws' = concatMap (uncurry replicate) $ zip lens ws
 
 -- | The "width" of a SOAC is the expected outer size of its array
 -- inputs _after_ input-transforms have been carried out.
@@ -438,6 +451,7 @@ width :: SOAC lore -> SubExp
 width (Stream w _ _ _) = w
 width (Scatter len _lam _ivs _as) = len
 width (Screma w _ _) = w
+width (GenReduce w _ _ _ _ _) = w
 
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
@@ -454,6 +468,8 @@ toSOAC (Scatter len lam ivs dests) = do
   return $ Futhark.Scatter len lam ivs' dests
 toSOAC (Screma w form arrs) =
   Futhark.Screma w form <$> inputsToSubExps arrs
+toSOAC (GenReduce w hists ops nes lam inps) =
+  Futhark.GenReduce w hists ops nes lam <$> inputsToSubExps inps
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -479,6 +495,8 @@ fromExp (Op (Futhark.Scatter len lam ivs as)) = do
   return $ Right $ Scatter len lam ivs' as
 fromExp (Op (Futhark.Screma w form arrs)) =
   Right . Screma w form <$> traverse varInput arrs
+fromExp (Op (Futhark.GenReduce w hists ops nes lam arrs)) =
+  Right . GenReduce w hists ops nes lam <$> traverse varInput arrs
 fromExp _ = pure $ Left NotSOAC
 
 -- | To-Stream translation of SOACs.

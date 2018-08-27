@@ -309,6 +309,23 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
           success (outNames ker ++ extra_nms) $
             SOAC.Scatter w res_lam' new_inp dests
 
+    -- Map-genreduce fusion.
+    --
+    -- The 'inplace' mechanism for kernels already takes care of
+    -- checking that the GenReduce is not writing to any array used in
+    -- the Map.
+    (SOAC.GenReduce _ dests ops nes _ _,
+     SOAC.Screma _ form _)
+      | isJust $ isMapSOAC form,
+        -- 1. all arrays produced by the map are ONLY used (consumed)
+        --    by the genreduce, i.e., not used elsewhere.
+        not (any (`S.member` unfus_set) outVars),
+        -- 2. all arrays produced by the map are input to the scatter.
+        mapWriteFusionOK outVars ker -> do
+          let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
+          success (outNames ker ++ extra_nms) $
+            SOAC.GenReduce w dests ops nes res_lam' new_inp
+
     -- Scatter-write fusion.
     (SOAC.Scatter _len2 _lam_c ivs2 as2,
      SOAC.Scatter _len_p _lam_p ivs_p as_p)
