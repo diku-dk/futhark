@@ -830,7 +830,6 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
               unless (a_t_r `subtypeOf` typeOf (paramAttr p)) $
                  bad $ TypeError $ "Loop parameter " ++ pretty p ++
                  " not valid for element of " ++ pretty a ++ ", which has row type " ++ pretty a_t_r
-              return ()
             _ -> bad $ TypeError $ "Cannot loop over " ++ pretty a ++
                  " of type " ++ pretty a_t
 

@@ -355,7 +355,7 @@ tupleFieldNames = map (nameFromString . show) [(1::Int)..]
 -- their numeric value.  This ensures that tuples and tuple-like
 -- records match.
 sortFields :: M.Map Name a -> [(Name,a)]
-sortFields l = map snd $ sortBy (comparing fst) $ zip (map (fieldish . fst) l') l'
+sortFields l = map snd $ sortOn fst $ zip (map (fieldish . fst) l') l'
   where l' = M.toList l
         fieldish s = case reads $ nameToString s of
           [(x, "")] -> Left (x::Int)

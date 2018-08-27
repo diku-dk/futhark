@@ -648,7 +648,6 @@ matchReturnType rettype res ts = do
                     "\nixfun of body result: ", pretty y_ixfun',
                     "\nixfun of return type: ", pretty x_ixfun',
                     "\nand context elements: ", pretty ctx_res]
-              return ()
       checkMemReturn (ReturnsNewBlock x_space x_ext x_mem_size x_ixfun)
                      (ArrayIn y_mem y_ixfun) = do
         (x_mem, x_mem_type)  <- fetchCtx x_ext

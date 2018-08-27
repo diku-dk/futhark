@@ -5,7 +5,7 @@ import Control.Arrow ((***))
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Writer
-import Data.List (sort, sortBy, intersperse, inits, tails, isPrefixOf, find, groupBy, partition)
+import Data.List (sort, sortOn, intersperse, inits, tails, isPrefixOf, find, groupBy, partition)
 import Data.Char (isSpace, isAlpha, toUpper)
 import Data.Loc
 import Data.Maybe
@@ -154,7 +154,7 @@ contentsPage important_imports pages =
 
         fileList pages' =
           H.dl ! A.class_ "file_list" $
-          mconcat $ map linkTo $ sortBy (comparing fst) pages'
+          mconcat $ map linkTo $ sortOn fst pages'
 
         linkTo (name, maybe_abstract) =
           H.div ! A.class_ "file_desc" $
@@ -178,7 +178,7 @@ indexPage important_imports imports documented fm =
    mconcat (letter_groups ++ [symbol_group]))
   where (letter_names, sym_names) =
           partition (isLetterName . baseString . fst) $
-          sortBy (comparing (map toUpper . baseString . fst)) $
+          sortOn (map toUpper . baseString . fst) $
           mapMaybe isDocumented $ M.toList fm
 
         isDocumented (k, (file, _)) = do
