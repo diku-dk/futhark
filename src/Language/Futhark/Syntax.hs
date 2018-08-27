@@ -649,7 +649,7 @@ data ExpBase f vn =
 
             | GenReduce (ExpBase f vn) (ExpBase f vn) (ExpBase f vn)
                         (ExpBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @gen_reduce [1,1,1] (+) 0 (\x -> (x, x)) [1,1,1] = [4,1,1]@
+             -- ^ @gen_reduce [1,1,1] (+) 0 [1,1,1] [1,1,1] = [4,1,1]@
 
             | Scan (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
              -- ^ @scan (+) 0 ([ 1, 2, 3 ]) = [ 1, 3, 6 ]@.

@@ -232,6 +232,6 @@ let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
 
 -- | The `gen_reduce dest f ne g as` expression computes the same as `scatter`,
 -- but in the case where we have duplicate values in the index array it produces
--- a deterministc result by applying the combining operator `f`.
-let gen_reduce 'a 'b [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (g : b -> (i32, a)) (as : [n]b) : *[m]a =
-  intrinsics.gen_reduce (dest, f, ne, g, as)
+-- a deterministic result by applying the combining operator `f`.
+let gen_reduce 'a 'b [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i32) (as : [n]b) : *[m]a =
+  intrinsics.gen_reduce (dest, f, ne, is, as)
