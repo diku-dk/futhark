@@ -9,7 +9,6 @@ module Futhark.Representation.AST.Attributes.Rearrange
        ) where
 
 import Data.List
-import Data.Ord
 
 import Futhark.Util
 
@@ -25,7 +24,7 @@ rearrangeShape perm l = map pick perm
 
 -- | Produce the inverse permutation.
 rearrangeInverse :: [Int] -> [Int]
-rearrangeInverse perm = map snd $ sortBy (comparing fst) $ zip perm [0..]
+rearrangeInverse perm = map snd $ sortOn fst $ zip perm [0..]
 
 -- | Return the first dimension not affected by the permutation.  For
 -- example, the permutation @[1,0,2]@ would return @2@.

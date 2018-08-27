@@ -50,7 +50,6 @@ import qualified Data.Set as S
 import Data.Foldable
 import Data.Maybe
 import Data.List
-import Data.Ord
 
 import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames
@@ -205,7 +204,7 @@ fixNestingPatternOrder nest (_,res) inner_pat =
   nest { loopNestingPattern = basicPattern [] pat' }
   where pat = loopNestingPattern nest
         pat' = map fst fixed_target
-        fixed_target = sortBy (comparing posInInnerPat) $ zip (patternValueIdents pat) res
+        fixed_target = sortOn posInInnerPat $ zip (patternValueIdents pat) res
         posInInnerPat (_, Var v) = fromMaybe 0 $ elemIndex v $ patternNames inner_pat
         posInInnerPat _          = 0
 

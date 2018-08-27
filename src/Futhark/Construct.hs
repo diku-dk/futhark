@@ -68,7 +68,6 @@ import qualified Data.Array as A
 import qualified Data.Map.Strict as M
 import Data.Loc (SrcLoc)
 import Data.List
-import Data.Ord
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
@@ -151,7 +150,7 @@ eIf' ce te fe if_sort = do
   return $ If ce' te'' fe'' $ IfAttr ts if_sort
   where addContextForBranch ts (Body _ stms val_res) = do
           body_ts <- extendedScope (traverse subExpType val_res) stmsscope
-          let ctx_res = map snd $ sortBy (comparing fst) $
+          let ctx_res = map snd $ sortOn fst $
                         M.toList $ shapeExtMapping ts body_ts
           mkBodyM stms $ ctx_res++val_res
             where stmsscope = scopeOf stms

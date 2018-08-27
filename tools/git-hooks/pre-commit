@@ -29,7 +29,7 @@ fi
 
 futhark_hlint() {
     # Some hlint-suggestions are terrible, so ignore them here.
-    hlint -i "Use import/export shortcut" -i "Use const" "$@"
+    hlint -i "Use import/export shortcut" -i "Use const" -i "Use tuple-section" "$@"
 }
 
 # Run hlint on changed files.

@@ -87,7 +87,6 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
 import Data.List
-import Data.Ord
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
@@ -371,7 +370,7 @@ compileOutParams :: ExplicitMemorish lore =>
 compileOutParams orig_rts orig_epts = do
   ((extvs, dests), (outparams,ctx_dests)) <-
     runWriterT $ evalStateT (mkExts orig_epts orig_rts) (M.empty, M.empty)
-  let ctx_dests' = map snd $ sortBy (comparing fst) $ M.toList ctx_dests
+  let ctx_dests' = map snd $ sortOn fst $ M.toList ctx_dests
   return (extvs, outparams, Destination Nothing $ ctx_dests' <> dests)
   where imp = lift . lift
 

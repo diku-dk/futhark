@@ -61,7 +61,6 @@ import Data.List
 import Data.Loc
 import Data.Maybe
 import Data.Either
-import Data.Ord
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Semigroup as Sem
@@ -134,7 +133,7 @@ instance Show Warnings where
   show (Warnings []) = ""
   show (Warnings ws) =
     intercalate "\n\n" ws' ++ "\n"
-    where ws' = map showWarning $ sortBy (comparing (off . locOf . fst)) ws
+    where ws' = map showWarning $ sortOn (off . locOf . fst) ws
           off NoLoc = 0
           off (Loc p _) = posCoff p
           showWarning (loc, w) =
