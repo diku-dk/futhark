@@ -1065,8 +1065,7 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
 
 maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots _))) acc =
   distributeSingleUnaryStm acc stm $ \nest outerpat arr -> do
-    let rots' = map (const $ intConst Int32 0) (kernelNestWidths nest) ++
-                rots
+    let rots' = map (const $ intConst Int32 0) (kernelNestWidths nest) ++ rots
     return $ oneStm $ Let outerpat aux $ BasicOp $ Rotate rots' arr
 
 -- XXX?  This rule is present to avoid the case where an in-place
@@ -1120,7 +1119,9 @@ distributeSingleUnaryStm acc bnd f =
     Just (kernels, res, nest, acc')
       | res == map Var (patternNames $ stmPattern bnd),
         (outer, inners) <- nest,
-        [(_, arr)] <- loopNestingParamsAndArrs outer -> do
+        [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
+        boundInKernelNest nest `S.intersection` freeInStm bnd
+        == S.singleton (paramName arr_p) -> do
           addKernels kernels
           let outerpat = loopNestingPattern $ fst nest
           localScope (typeEnvFromKernelAcc acc') $ do
