@@ -755,6 +755,7 @@ checkBasicOp (Rearrange perm arr) = do
 checkBasicOp (Rotate rots arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
+  mapM_ (require [Prim int32]) rots
   when (length rots /= rank) $
     bad $ TypeError $ "Cannot rotate " ++ show (length rots) ++
     " dimensions of " ++ show rank ++ "-dimensional array."
