@@ -252,7 +252,7 @@ lookupPackage p = do
     Nothing -> do
       e <- pkgInfo p
       case e of
-        Left e' -> fail $ show e'
+        Left e' -> fail $ T.unpack e'
         Right pinfo -> do
           putPkgRegistry $ PkgRegistry $ M.insert p pinfo m
           return pinfo
