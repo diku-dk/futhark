@@ -1036,7 +1036,7 @@ streaming constants chunksize bound m = do
         constants { kernelStreamed = (chunksize, bound') : kernelStreamed constants }
   ImpGen.subImpM_ (inKernelOperations constants') m
 
-compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
+compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult lore
                     -> InKernelGen ()
 
 compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
@@ -1131,6 +1131,10 @@ compileKernelResult constants dest (WriteReturn rws _arr dests) = do
 compileKernelResult _ _ KernelInPlaceReturn{} =
   -- Already in its place... said it was a hack.
   return ()
+
+
+compileKernelResult _constants _dest (CombiningReturn _szs _arr _ind _val _lam) = do
+  undefined
 
 isActive :: [(VName, SubExp)] -> Imp.Exp
 isActive limit = case actives of

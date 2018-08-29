@@ -318,6 +318,14 @@ inKernelOperations = GenericC.Operations
           GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
         kernelOps Barrier =
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
+        kernelOps (Atomic aop) = atomicOps aop
+
+        atomicOps (AtomicAdd old val ind x) =
+          GenericC.stm [C.cstm|$id:old = atomic_add(&$id:val[$int:ind], $int:x);|]
+        atomicOps (AtomicCmpXchg old val ind x y) =
+          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&$id:val[$int:ind], $int:x, $int:y);|]
+        atomicOps (AtomicXchg old val ind x) =
+          GenericC.stm [C.cstm|$id:old = atomic_xchg(&$id:val[$int:ind], $int:x);|]
 
         cannotAllocate :: GenericC.Allocate KernelOp UsedFunctions
         cannotAllocate _ =

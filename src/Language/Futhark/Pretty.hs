@@ -232,6 +232,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     where linebreak = case e of
                         Map{}      -> True
                         Reduce{}   -> True
+                        --GenReduce  -> True -- Maybe?
                         Filter{}   -> True
                         Scan{}     -> True
                         DoLoop{}   -> True
@@ -266,6 +267,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduce_comm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
+  pprPrec _ (GenReduce hist op ne bfun img _) =
+    ppSOAC "gen_reduce" [op, bfun] [hist, ne, img] -- do this manually
   pprPrec _ (Stream form lam arr _) =
     case form of
       MapLike o ->

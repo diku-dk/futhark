@@ -103,15 +103,16 @@ processHoistedStm bnd
   | otherwise                = fail $ "Cannot hoist binding: " ++ pretty bnd
 
 mkWiseKernelBody :: (Attributes lore, CanBeWise (Op lore)) =>
-                    BodyAttr lore -> Stms (Wise lore) -> [KernelResult] -> KernelBody (Wise lore)
+                    BodyAttr lore -> Stms (Wise lore) -> [KernelResult (Wise lore)] -> KernelBody (Wise lore)
 mkWiseKernelBody attr bnds res =
   let Body attr' _ _ = mkWiseBody attr bnds res_vs
   in KernelBody attr' bnds res
-  where res_vs = map resValue res
-        resValue (ThreadsReturn _ se) = se
-        resValue (WriteReturn _ arr _) = Var arr
-        resValue (ConcatReturns _ _ _ _ v) = Var v
-        resValue (KernelInPlaceReturn v) = Var v
+  where res_vs = concatMap resValue res
+        resValue (ThreadsReturn _ se) = [se]
+        resValue (WriteReturn _ arr _) = [Var arr]
+        resValue (ConcatReturns _ _ _ _ v) = [Var v]
+        resValue (KernelInPlaceReturn v) = [Var v]
+        resValue (CombiningReturn _ arr _ _ _) = map Var arr
 
 inKernelEnv :: Engine.Env InKernel
 inKernelEnv = Engine.emptyEnv inKernelRules Simplify.noExtraHoistBlockers
@@ -199,12 +200,24 @@ simplifyKernelExp _ (GroupStream w maxchunk lam accs arrs) = do
   (lam', hoisted) <- simplifyGroupStreamLambda lam w' maxchunk' arrs'
   return (GroupStream w' maxchunk' lam' accs' arrs', hoisted)
 
+{-
 simplifyKernelBodyM :: Engine.SimplifiableLore lore =>
                        KernelBody lore
-                    -> Engine.SimpleM lore (Engine.SimplifiedBody lore [KernelResult])
+                    -> Engine.SimpleM lore (Engine.SimplifiedBody lore [KernelResult lore])
 simplifyKernelBodyM (KernelBody _ stms res) =
   Engine.simplifyStms stms $ do res' <- mapM Engine.simplify res
                                 return ((res', UT.usages $ freeIn res'), mempty)
+-}
+simplifyKernelBodyM :: Engine.SimplifiableLore lore =>
+                       KernelBody lore
+                    -> Engine.SimpleM lore (Engine.SimplifiedBody lore [KernelResult (Wise lore)])
+simplifyKernelBodyM (KernelBody _ stms res) = do
+  (res', hoists') <- foldM combine_hoists (mempty, mempty) res
+  Engine.simplifyStms (stms <> fmap removeStmWisdom hoists') $ do
+    return ((res', UT.usages $ freeIn res'), mempty)
+  where combine_hoists (kress, hoists) kres = do
+          (kres', hoist') <- simplifyKernelResult kres
+          return (kres' : kress, hoist' <> hoists)
 
 simplifyGroupStreamLambda :: Engine.SimplifiableLore lore =>
                              GroupStreamLambda lore
@@ -227,6 +240,40 @@ simplifyGroupStreamLambda lam w max_chunk arrs = do
   body' <- Engine.constructBody body_stms' body_res'
   return (GroupStreamLambda block_size block_offset acc_params' arr_params' body', hoisted)
 
+simplifyKernelResult :: Engine.SimplifiableLore lore =>
+                        KernelResult lore
+                     -> Engine.SimpleM lore (KernelResult (Wise lore), Stms (Wise lore))
+simplifyKernelResult (ThreadsReturn threads what) = do
+  (,) <$> (ThreadsReturn
+           <$> Engine.simplify threads
+           <*> Engine.simplify what)
+      <*> pure mempty
+simplifyKernelResult (WriteReturn ws a res) = do
+  (,) <$> (WriteReturn
+           <$> Engine.simplify ws
+           <*> Engine.simplify a
+           <*> Engine.simplify res)
+      <*> pure mempty
+simplifyKernelResult (ConcatReturns o w pt moffset what) = do
+  (,) <$> (ConcatReturns
+           <$> Engine.simplify o
+           <*> Engine.simplify w
+           <*> Engine.simplify pt
+           <*> Engine.simplify moffset
+           <*> Engine.simplify what)
+      <*> pure mempty
+simplifyKernelResult (KernelInPlaceReturn what) = do
+  (,) <$> (KernelInPlaceReturn
+           <$> Engine.simplify what)
+      <*> pure mempty
+simplifyKernelResult (CombiningReturn szs arr ind val lam) = do
+  szs' <- Engine.simplify szs
+  arr' <- Engine.simplify arr
+  ind' <- Engine.simplify ind
+  val' <- Engine.simplify val
+  (lam', hoisted) <- Engine.simplifyLambda lam $ replicate (length $ lambdaParams lam) Nothing
+  return $ ((CombiningReturn szs' arr' ind' val' lam'), hoisted)
+
 instance Engine.Simplifiable KernelSpace where
   simplify (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
     KernelSpace gtid ltid gid
@@ -246,21 +293,6 @@ instance Engine.Simplifiable SpaceStructure where
          <*> pure ltids
          <*> mapM Engine.simplify ldims)
     where (gtids, gdims, ltids, ldims) = unzip4 dims
-
-instance Engine.Simplifiable KernelResult where
-  simplify (ThreadsReturn threads what) =
-    ThreadsReturn <$> Engine.simplify threads <*> Engine.simplify what
-  simplify (WriteReturn ws a res) =
-    WriteReturn <$> Engine.simplify ws <*> Engine.simplify a <*> Engine.simplify res
-  simplify (ConcatReturns o w pte moffset what) =
-    ConcatReturns
-    <$> Engine.simplify o
-    <*> Engine.simplify w
-    <*> Engine.simplify pte
-    <*> Engine.simplify moffset
-    <*> Engine.simplify what
-  simplify (KernelInPlaceReturn what) =
-    KernelInPlaceReturn <$> Engine.simplify what
 
 instance Engine.Simplifiable WhichThreads where
   simplify AllThreads = pure AllThreads

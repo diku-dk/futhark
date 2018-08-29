@@ -464,6 +464,8 @@ typeOf (Assert _ e _ _) = typeOf e
 typeOf (Map _ _ (Info t) _) = t `setUniqueness` Unique
 typeOf (Reduce _ _ _ arr _) =
   stripArray 1 (typeOf arr) `setAliases` mempty
+typeOf (GenReduce hist _ _ _ _ _) =
+  typeOf hist `setAliases` mempty `setUniqueness` Unique
 typeOf (Scan _ _ arr _) = typeOf arr `setAliases` mempty `setUniqueness` Unique
 typeOf (Filter _ arr _) = typeOf arr `setAliases` mempty `setUniqueness` Unique
 typeOf (Partition _ _ arr _) =
@@ -739,6 +741,13 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                            Array (ArrayPolyElem tv_a' [] ()) (rank 1) Nonunique] $
                           Array (ArrayPolyElem tv_a' [] ()) (rank 1) Unique),
 
+              ("gen_reduce", IntrinsicPolyFun [tp_a, tp_b]
+                             [uarr_a,
+                              t_a `arr` (t_a `arr` t_a),
+                              t_a,
+                              t_b `arr` (tupleRecord [Prim $ Signed Int32, t_a]),
+                              arr_b]
+                             uarr_a),
               ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
               ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
 

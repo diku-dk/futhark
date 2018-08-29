@@ -627,6 +627,8 @@ evalSOAC (Scatter w lam ivs dests) = do
   ress <- foldM handleIteration aArrs [0..fromIntegral w' - 1]
   return $ zipWith3 ArrayVal ress aPrimTypes aShapes
 
+evalSOAC (GenReduce len hists ops nes bucket_fun imgs) = undefined
+
 toArrayVal :: String -> Value -> FutharkM (Array Int PrimValue, PrimType, [Int])
 toArrayVal err v = case v of
   ArrayVal a b c -> return (a, b, c)

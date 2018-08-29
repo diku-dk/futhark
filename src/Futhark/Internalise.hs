@@ -671,6 +671,38 @@ internaliseExp desc (E.Reduce comm lam ne arr loc) =
   where reduce w red_lam nes arrs =
           I.Screma w <$> I.reduceSOAC comm red_lam nes <*> pure arrs
 
+internaliseExp desc (E.GenReduce hist op ne bfun img loc) = do
+  ne' <- internaliseExp "gen_reduce_ne" ne
+  hist' <- internaliseExpToVars "gen_reduce_hist" hist
+  img' <- internaliseExpToVars "gen_reduce_img" img
+
+  -- reshape neutral element to have same size as the destination array
+  ne_shp <- forM (zip ne' hist') $ \(n, h) -> do
+    rowtype <- I.stripArray 1 <$> lookupType h
+    ensureShape asserting
+      "Row shape of destination array does not match shape of neutral element"
+      loc rowtype "gen_reduce_ne_right_shape" n
+  ne_ts <- mapM I.subExpType ne_shp
+  his_ts <- mapM lookupType hist'
+  op' <- (:[]) <$> internaliseFoldLambda internaliseLambda op ne_ts his_ts
+
+  -- reshape return type of bucket function to have same size as neutral element
+  -- (modulo the index)
+  (I.Lambda params body rettype) <- internaliseMapLambda internaliseLambda bfun $ map I.Var img'
+  let rettype' = [I.Prim int32] ++ [t `I.setArrayShape` I.arrayShape shape
+                                    | (t, shape) <- zip (drop 1 rettype) ne_ts]
+  body' <- localScope (scopeOfLParams params) $
+           ensureResultShape asserting
+           "Result shape of bucket function does not match shape of neutral element"
+           (srclocOf bfun) rettype' body
+
+  -- get sizes of histogram and image arrays
+  w_hist <- arraysSize 0 <$> mapM lookupType hist'
+  let hist_ = map (w_hist,) hist'
+  w_img <- arraysSize 0 <$> mapM lookupType img'
+  letTupExp' desc $ I.Op $
+    I.GenReduce w_img hist_ op' ne_shp (I.Lambda params body' rettype') img'
+
 internaliseExp desc (E.Scan lam ne arr loc) =
   internaliseScanOrReduce desc "scan" scan (lam, ne, arr, loc)
   where scan w scan_lam nes arrs =
