@@ -133,8 +133,12 @@ pkgInfo path
   | ["github.com", owner, repo] <- T.splitOn "/" path =
       let (repo', vs) = majorRevOfPkg repo
       in ghPkgInfo owner repo' vs
-pkgInfo path =
-  return $ Left $ "Unable to handle package paths of the form '" <> path <> "'"
+  | "github.com": owner : repo : _ <- T.splitOn "/" path =
+      return $ Left $ T.intercalate "\n"
+      [nope, "Do you perhaps mean 'github.com/" <> owner <> "/" <> repo <> "'?"]
+  | otherwise =
+      return $ Left nope
+  where nope = "Unable to handle package paths of the form '" <> path <> "'"
 
 -- For Github, we unfortunately cannot use the (otherwise very nice)
 -- GitHub web API, because it is rate-limited to 60 requests per hour
