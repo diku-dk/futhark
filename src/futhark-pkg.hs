@@ -166,8 +166,16 @@ putPkgManifest = liftIO . T.writeFile futharkPkg . prettyPkgManifest
 newtype PkgConfig = PkgConfig { pkgVerbose :: Bool }
 
 -- | The monad in which futhark-pkg runs.
-newtype PkgM a = PkgM (ReaderT PkgConfig (StateT (PkgRegistry PkgM) IO) a)
-  deriving (Functor, Applicative, Monad, MonadIO, MonadReader PkgConfig)
+newtype PkgM a = PkgM { unPkgM :: ReaderT PkgConfig (StateT (PkgRegistry PkgM) IO) a }
+  deriving (Functor, Applicative, MonadIO, MonadReader PkgConfig)
+
+instance Monad PkgM where
+  PkgM m >>= f = PkgM $ m >>= unPkgM . f
+  return = PkgM . return
+  fail s = liftIO $ do
+    prog <- getProgName
+    putStrLn $ prog ++ ": " ++ s
+    exitFailure
 
 instance MonadPkgRegistry PkgM where
   putPkgRegistry = PkgM . put
