@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
     * `futlib/vector` => https://github.com/athas/vector
 
+    No replacement: `futlib/mss`, `futlib/lss`.
+
 ### Changed
 
 ### Fixed
