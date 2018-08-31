@@ -515,13 +515,11 @@ instance Attributes lore => ST.IndexOp (Kernel lore) where
             | otherwise =
                 table
 
-          asPrimExp table (BasicOp (SubExp (Var v)))
+          asPrimExp table v
             | Just (e,cs) <- M.lookup v table = tell cs >> return e
             | Just (Prim pt) <- ST.lookupType v vtable =
                 return $ LeafExp v pt
-          asPrimExp _ (BasicOp (SubExp (Constant v))) =
-            return $ ValueExp v
-          asPrimExp _ _ = lift Nothing
+            | otherwise = lift Nothing
 
   indexOp _ _ _ _ = Nothing
 
