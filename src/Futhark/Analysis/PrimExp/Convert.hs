@@ -5,6 +5,7 @@ module Futhark.Analysis.PrimExp.Convert
     primExpToExp
   , primExpFromExp
   , primExpFromSubExp
+  , primExpFromSubExpM
   , replaceInPrimExp
   , substituteInPrimExp
 
@@ -12,6 +13,7 @@ module Futhark.Analysis.PrimExp.Convert
     , module Futhark.Analysis.PrimExp
   ) where
 
+import qualified Control.Monad.Fail as Fail
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe
@@ -55,8 +57,8 @@ primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
 -- used to convert expressions that are not trivially 'PrimExp's.
 -- This includes constants and variable names, which are passed as
 -- 'SubExp's.
-primExpFromExp :: (Monad m, Annotations lore) =>
-                  (Exp lore -> m (PrimExp v)) -> Exp lore -> m (PrimExp v)
+primExpFromExp :: (Fail.MonadFail m, Annotations lore) =>
+                  (VName -> m (PrimExp v)) -> Exp lore -> m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
   BinOpExp op <$> primExpFromSubExpM f x <*> primExpFromSubExpM f y
 primExpFromExp f (BasicOp (CmpOp op x y)) =
@@ -70,11 +72,12 @@ primExpFromExp _ (BasicOp (SubExp (Constant v))) =
 primExpFromExp f (Apply fname args ts _)
   | isBuiltInFunction fname, [Prim t] <- retTypeValues ts =
       FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
-primExpFromExp f e = f e
+primExpFromExp _ _ = fail "Not a PrimExp"
 
-primExpFromSubExpM :: (Monad m, Annotations lore) =>
-                     (Exp lore -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
-primExpFromSubExpM f = primExpFromExp f . BasicOp . SubExp
+primExpFromSubExpM :: Fail.MonadFail m =>
+                      (VName -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
+primExpFromSubExpM f (Var v) = f v
+primExpFromSubExpM _ (Constant v) = return $ ValueExp v
 
 -- | Convert 'SubExp's of a given type.
 primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName

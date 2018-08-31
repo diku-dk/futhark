@@ -81,9 +81,7 @@ lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   prim_types <- get
-  let varUse (BasicOp (SubExp (Var v))) =
-        ExpMem.LeafExp v <$> M.lookup v prim_types
-      varUse _ = Nothing
+  let varUse v = ExpMem.LeafExp v <$> M.lookup v prim_types
 
   case patvalelems of
     [PatElem dst _] ->

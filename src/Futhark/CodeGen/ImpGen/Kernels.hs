@@ -383,10 +383,8 @@ isConstExp :: VName -> CallKernelGen (Maybe Imp.KernelConstExp)
 isConstExp v = do
   vtable <- asks ImpGen.envVtable
   let lookupConstExp name = constExp =<< hasExp =<< M.lookup name vtable
-      kernelConst (Op (Inner (GetSize key _))) = Just $ LeafExp (Imp.SizeConst key) int32
-      kernelConst (BasicOp (SubExp (Var name))) = lookupConstExp name
-      kernelConst _              = Nothing
-      constExp = primExpFromExp kernelConst
+      constExp (Op (Inner (GetSize key _))) = Just $ LeafExp (Imp.SizeConst key) int32
+      constExp e = primExpFromExp lookupConstExp e
   return $ lookupConstExp v
   where hasExp (ImpGen.ArrayVar e _) = e
         hasExp (ImpGen.ScalarVar e _) = e
