@@ -6,7 +6,8 @@
 --
 -- * Turn operator sections into explicit lambdas.
 --
--- * Converts identifiers of record type into record patterns.
+-- * Converts identifiers of record type into record patterns (and
+--   similarly for tuples).
 --
 -- * Converts applications of intrinsic SOACs into SOAC AST nodes
 --   (Map, Reduce, etc).
