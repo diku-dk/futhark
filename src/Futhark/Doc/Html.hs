@@ -1,4 +1,15 @@
-module Futhark.Doc.Html where
+module Futhark.Doc.Html
+  ( primTypeHtml
+  , prettyTypeName
+  , prettyU
+  , renderName
+  , joinBy
+  , commas
+  , brackets
+  , braces
+  , parens
+  )
+where
 
 import Data.Semigroup ((<>))
 
@@ -37,6 +48,3 @@ braces :: Html -> Html
 braces x = toHtml "{" <> x <> toHtml "}"
 brackets :: Html -> Html
 brackets x = toHtml "[" <> x <> toHtml "]"
-
-prettyQualName :: QualName VName -> Html
-prettyQualName = docToHtml . ppr . fmap baseName
