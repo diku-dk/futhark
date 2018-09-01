@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
     No replacement: `futlib/mss`, `futlib/lss`.
 
+  * `zip6`/`zip7`/`zip8` and their `unzip` variants have been removed.
+    If you build gigantic tuples, you're on your own.
+
 ### Changed
 
 ### Fixed

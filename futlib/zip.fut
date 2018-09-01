@@ -31,18 +31,6 @@ let zip4 [n] 'a 'b 'c 'd (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d): [n](a,b,c,
 let zip5 [n] 'a 'b 'c 'd 'e (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e): [n](a,b,c,d,e) =
   internal_map (\(a,(b,c,d,e)) -> (a,b,c,d,e)) (zip as (zip4 bs cs ds es))
 
--- | As `zip6`@term, but with one more array.
-let zip6 [n] 'a 'b 'c 'd 'e 'f (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e) (fs: [n]f): [n](a,b,c,d,e,f) =
-  internal_map (\(a,(b,c,d,e,f)) -> (a,b,c,d,e,f)) (zip as (zip5 bs cs ds es fs))
-
--- | As `zip6`@term, but with one more array.
-let zip7 [n] 'a 'b 'c 'd 'e 'f 'g (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e) (fs: [n]f) (gs: [n]g): [n](a,b,c,d,e,f,g) =
-  internal_map (\(a,(b,c,d,e,f,g)) -> (a,b,c,d,e,f,g)) (zip as (zip6 bs cs ds es fs gs))
-
--- | As `zip6`@term, but with one more array.
-let zip8 [n] 'a 'b 'c 'd 'e 'f 'g 'h (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e) (fs: [n]f) (gs: [n]g) (hs: [n]h): [n](a,b,c,d,e,f,g,h) =
-  internal_map (\(a,(b,c,d,e,f,g,h)) -> (a,b,c,d,e,f,g,h)) (zip as (zip7 bs cs ds es fs gs hs))
-
 -- | Turn an array of pairs into two arrays.
 let unzip [n] 'a 'b (xs: [n](a,b)): ([n]a, [n]b) =
   intrinsics.unzip xs
@@ -68,21 +56,3 @@ let unzip5 [n] 'a 'b 'c 'd 'e (xs: [n](a,b,c,d,e)): ([n]a, [n]b, [n]c, [n]d, [n]
   let (as, bs, cs, des) = unzip4 (internal_map (\(a,b,c,d,e) -> (a,b,c,(d,e))) xs)
   let (ds, es) = unzip des
   in (as, bs, cs, ds, es)
-
--- | As `unzip5`@term, but with one more array.
-let unzip6 [n] 'a 'b 'c 'd 'e 'f (xs: [n](a,b,c,d,e,f)): ([n]a, [n]b, [n]c, [n]d, [n]e, [n]f) =
-  let (as, bs, cs, ds, efs) = unzip5 (internal_map (\(a,b,c,d,e,f) -> (a,b,c,d,(e,f))) xs)
-  let (es, fs) = unzip efs
-  in (as, bs, cs, ds, es, fs)
-
--- | As `unzip6`@term, but with one more array.
-let unzip7 [n] 'a 'b 'c 'd 'e 'f 'g (xs: [n](a,b,c,d,e,f,g)): ([n]a, [n]b, [n]c, [n]d, [n]e, [n]f, [n]g) =
-  let (as, bs, cs, ds, es, fgs) = unzip6 (internal_map (\(a,b,c,d,e,f,g) -> (a,b,c,d,e,(f,g))) xs)
-  let (fs, gs) = unzip fgs
-  in (as, bs, cs, ds, es, fs, gs)
-
--- | As `unzip7`@term, but with one more array.
-let unzip8 [n] 'a 'b 'c 'd 'e 'f 'g 'h (xs: [n](a,b,c,d,e,f,g,h)): ([n]a, [n]b, [n]c, [n]d, [n]e, [n]f, [n]g, [n]h) =
-  let (as, bs, cs, ds, es, fs, ghs) = unzip7 (internal_map (\(a,b,c,d,e,f,g,h) -> (a,b,c,d,e,f,(g,h))) xs)
-  let (gs, hs) = unzip ghs
-  in (as, bs, cs, ds, es, fs, gs, hs)
