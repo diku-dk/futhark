@@ -335,7 +335,8 @@ substituteTypes substs ot = case ot of
   TypeVar () u v targs
     | Just (TypeSub (TypeAbbr _ ps t)) <-
         M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
-        applyType ps t $ map substituteInTypeArg targs
+        applyType ps t (map substituteInTypeArg targs)
+        `setUniqueness` u
     | otherwise -> TypeVar () u v $ map substituteInTypeArg targs
   Record ts ->
     Record $ fmap (substituteTypes substs) ts
