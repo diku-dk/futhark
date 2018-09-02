@@ -1101,18 +1101,6 @@ compilePrimTypeExt t ept =
     (Cert, _) -> "byte"
 
 -- | Select function to retrieve bytes from byte array as specific data type
-compileBitConverter :: PrimType -> String
-compileBitConverter t =
-  case t of
-    IntType Int8 -> "BitConverter.ToSByte"
-    IntType Int16 -> "BitConverter.ToInt16"
-    IntType Int32 -> "BitConverter.ToInt32"
-    IntType Int64 -> "BitConverter.ToInt64"
-    FloatType Float32 -> "BitConverter.ToSingle"
-    FloatType Float64 -> "BitConverter.ToDouble"
-    Imp.Bool -> "BitConverter.ToBoolean"
-    Cert -> "BitConverter.ToBoolean"
-
 -- | The ctypes type corresponding to a 'PrimType'.
 compileTypecastExt :: PrimType -> Imp.Signedness -> (CSExp -> CSExp)
 compileTypecastExt t ept =
@@ -1200,8 +1188,7 @@ compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) (IntType Int8) DefaultSp
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt DefaultSpace _) _) = do
   iexp' <- compileExp iexp
   let bt' = compilePrimType bt
-  let converter = compileBitConverter bt
-  return $ parametrizedCall "indexArray" bt' [Var $ compileName src, iexp', Var converter]
+  return $ simpleCall ("indexArray_" ++ bt') [Var $ compileName src, iexp']
 
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) _) =
   join $ asks envReadScalar

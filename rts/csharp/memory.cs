@@ -224,9 +224,125 @@ private byte[] unwrapArray(Array src, int obj_size)
     return bytes;
 }
 
-private T indexArray<T>(byte[] src, int offset, Func<byte[],int, T> converter)
+private byte indexArray_byte(byte[] src, int offset)
 {
-    return converter(src, offset);
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(byte*) dest_ptr;
+        }
+    }
+}
+
+private ushort indexArray_ushort(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(ushort*) dest_ptr;
+        }
+    }
+}
+
+private uint indexArray_uint(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(uint*) dest_ptr;
+        }
+    }
+}
+
+private ulong indexArray_ulong(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(ulong*) dest_ptr;
+        }
+    }
+}
+
+private sbyte indexArray_sbyte(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(sbyte*) dest_ptr;
+        }
+    }
+}
+
+private short indexArray_short(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(short*) dest_ptr;
+        }
+    }
+}
+
+private int indexArray_int(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(int*) dest_ptr;
+        }
+    }
+}
+
+private long indexArray_long(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(long*) dest_ptr;
+        }
+    }
+}
+
+private float indexArray_float(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(float*) dest_ptr;
+        }
+    }
+}
+
+private double indexArray_double(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(double*) dest_ptr;
+        }
+    }
+}
+
+private bool indexArray_bool(byte[] src, int offset)
+{
+    unsafe
+    {
+        fixed (void* dest_ptr = &src[offset])
+        {
+            return *(bool*) dest_ptr;
+        }
+    }
 }
 
 private void writeScalarArray(byte[] dest, int offset, sbyte value)
