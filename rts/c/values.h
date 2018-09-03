@@ -272,7 +272,7 @@ static int read_str_i8(char *buf, void* dest) {
      https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
   remove_underscores(buf);
   int j, x;
-  if (sscanf(buf, "%d%n", &x, &j) == 1) {
+  if (sscanf(buf, "%i%n", &x, &j) == 1) {
     *(int8_t*)dest = x;
     return !(strcmp(buf+j, "") == 0 || strcmp(buf+j, "i8") == 0);
   } else {
@@ -288,7 +288,7 @@ static int read_str_u8(char *buf, void* dest) {
      https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
   remove_underscores(buf);
   int j, x;
-  if (sscanf(buf, "%d%n", &x, &j) == 1) {
+  if (sscanf(buf, "%i%n", &x, &j) == 1) {
     *(uint8_t*)dest = x;
     return !(strcmp(buf+j, "") == 0 || strcmp(buf+j, "u8") == 0);
   } else {
