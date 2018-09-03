@@ -38,7 +38,9 @@ main = compilerMain () []
                  , "-lib:"++mono_libs
                  , "-r:Mono.Options.dll"
                  , cspath
-                 , "/unsafe"] ""
+                 , "/unsafe"
+                 , "/optimize"
+                 ] ""
                case ret of
                  Left err ->
                    externalErrorS $ "Failed to run csc: " ++ show err

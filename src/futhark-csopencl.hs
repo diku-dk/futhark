@@ -40,7 +40,9 @@ main = compilerMain () []
                 , "-r:Cloo.clSharp.dll"
                 , "-r:Mono.Options.dll"
                 , cspath
-                , "/unsafe"] ""
+                , "/unsafe"
+                , "/optimize"
+                ] ""
               case ret of
                 Left err ->
                   externalErrorS $ "Failed to run csc: " ++ show err
