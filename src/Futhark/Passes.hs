@@ -17,6 +17,7 @@ import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.TileLoops
+import Futhark.Optimise.Stencils
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Unstream
 import Futhark.Optimise.MemoryBlockMerging
@@ -111,6 +112,7 @@ kernelsPipeline =
          , babysitKernels
          , simplifyKernels
          , tileLoops
+         , optimiseStencils
          , unstream
          , simplifyKernels
          , performCSE True

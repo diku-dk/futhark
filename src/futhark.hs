@@ -41,6 +41,7 @@ import Futhark.Pass.Simplify
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.TileLoops
+import Futhark.Optimise.Stencils
 import Futhark.Optimise.Unstream
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExtractKernels
@@ -291,6 +292,7 @@ commandLineOptions =
   , kernelsPassOption inPlaceLowering []
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []
+  , kernelsPassOption optimiseStencils []
   , kernelsPassOption unstream []
   , typedPassOption soacsProg Kernels extractKernels []
 
