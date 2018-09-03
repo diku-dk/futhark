@@ -65,10 +65,9 @@ let brownianBridge [num_dates]
         map (brownianBridgeDates bb_inds bb_data) gauss2dT
       )
 
-let main [num_dates] (num_und: i32,
-                      bb_inds: [3][num_dates]i32,
-                      arr_usz: []f64
-                     ): [][]f64 =
+let main [num_dates] (num_und: i32)
+                     (bb_inds: [3][num_dates]i32)
+                     (arr_usz: []f64): [][]f64 =
   let n = num_dates*num_und
   let arr    = arr_usz : [n]f64
   let bb_data= map (\(row: []i32): []f64  ->

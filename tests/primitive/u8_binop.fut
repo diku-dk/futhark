@@ -25,7 +25,7 @@
 -- input { 3 3u8 6u8 } output { 217u8 }
 -- input { 3 3u8 7u8 } output { 139u8 }
 
-let main(f: i32, x: u8, y: u8): u8 =
+let main (f: i32) (x: u8) (y: u8): u8 =
   if      f == 0 then x + y
   else if f == 1 then x - y
   else if f == 2 then x * y

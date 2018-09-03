@@ -10,4 +10,4 @@
 
 import "/futlib/math"
 
-let main(x: f64, y: f64): f64 = f64.atan2 x y
+let main (x: f64) (y: f64): f64 = f64.atan2 x y

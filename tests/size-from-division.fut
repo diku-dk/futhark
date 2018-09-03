@@ -6,5 +6,5 @@
 -- input { 5 2 }
 -- output { [0, 1] }
 
-let main (x: i32, y: i32): []i32 =
+let main (x: i32) (y: i32): []i32 =
   iota (x / y)

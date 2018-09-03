@@ -22,7 +22,7 @@ let myop (p: (f64,f64,f64,f64,f64)) (q: (f64,f64,f64,f64,f64)): (f64,f64,f64,f64
         (a1+b1,a2+b2,a3+b3,a4+b4,a5+b5)
 
 --let f64
-let main(x1: []f64, x2: [][]f64): (f64,f64,f64,f64,f64) =
+let main(x1: []f64) (x2: [][]f64): (f64,f64,f64,f64,f64) =
     let (y1, y2, y3) = unzip3( map f1 (zip x1 (x2[1]  ) ) )
     let (z1, z2)     = unzip2( map f2 (zip y1 y2 ) )
     let (q1, q2)     = unzip2( map g (zip4 y3 z1 y2 y3 ) )  in

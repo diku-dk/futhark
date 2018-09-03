@@ -8,6 +8,6 @@ type ints [n] = [n]i32
 
 type pairints [n] [m] = (ints [n], ints [m])
 
-let main [n][m] (a: ints [n], b: ints [m]) : pairints [n] [n] =
+let main [n][m] (a: ints [n]) (b: ints [m]) : pairints [n] [n] =
   let b' = (split n b).1
   in (a,b')

@@ -64,6 +64,6 @@ let floydSbsFun(n: i32, d: [][]i32 ): [][]i32 =
     let partial = map redmin2 abr        in
         map min1 (zip partial d )
 
-let main(): [][]i32 =
+let main: [][]i32 =
     let arr = [[2,4,5], [1,1000,3], [3,7,1]] in
     floydSbsFun(3, arr)

@@ -71,7 +71,7 @@ let iteration [n][m] (board: [n][m]bool): [n][m]bool =
                     lives_r board_r)
            lives board
 
-let main(int_board: [][]i32, iterations: i32): [][]i32 =
+let main (int_board: [][]i32) (iterations: i32): [][]i32 =
   -- We accept the board as integers for convenience, and then we
   -- convert to booleans here.
   let board = to_bool_board int_board

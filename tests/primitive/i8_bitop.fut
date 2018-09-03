@@ -56,7 +56,7 @@
 -- input { 5 -1i8  0i8 } output { -1i8 }
 -- input { 5 -1i8  1i8 } output { 127i8 }
 
-let main(f: i32, x: i8, y: i8): i8 =
+let main (f: i32) (x: i8) (y: i8): i8 =
   if      f == 0 then x & y
   else if f == 1 then x | y
   else if f == 2 then x ^ y

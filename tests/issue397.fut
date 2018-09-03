@@ -7,5 +7,5 @@ let predict (a:[10]f64) : i32 =
                        (zip (a[:8]) (iota 9))
   in i
 
-let main() : i32 =
+let main : i32 =
   predict [0.2,0.3,0.1,0.5,0.6,0.2,0.3,0.1,0.7,0.1]

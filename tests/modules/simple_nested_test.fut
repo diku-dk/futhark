@@ -19,5 +19,5 @@ module NumLib = {
 
 let localplus(a: i32, b: i32): i32 = NumLib.plus (a,b)
 
-let main(a: i32, b: i32): i32 =
+let main (a: i32) (b: i32): i32 =
   localplus(NumLib.BestNumbers.four() ,   2)

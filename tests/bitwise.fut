@@ -30,6 +30,6 @@ let frob(a: i32, b: i32, c: i32, d: i32): (i32, i32, i32, i32) =
   let a' = b + rotateL((a + f' + w + 0xd76aa478), 7) in
   (d, a', b, c)
 
-let main(a: i32, b: i32, c: i32, d: i32, n: i32): (i32, i32, i32, i32) =
+let main (a: i32) (b: i32) (c: i32) (d: i32) (n: i32): (i32, i32, i32, i32) =
   loop (a',b',c',d') = (a,b,c,d) for i < n do
     frob(a',b',c',d')

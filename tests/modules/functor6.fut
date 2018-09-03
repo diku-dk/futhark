@@ -18,4 +18,4 @@ module m1 = {
 
 module m2 = f2(m1)
 
-let main(): m2.cell = 2
+let main: m2.cell = 2

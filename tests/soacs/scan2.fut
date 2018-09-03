@@ -14,7 +14,7 @@
 --   2.000000
 -- }
 
-let main(bb_mat: [][][]f64, e_rows: [][]f64): f64 =
+let main (bb_mat: [][][]f64) (e_rows: [][]f64): f64 =
   let md_st = [42.0]
   let a = map (\(bb_arr_431: [][]f64): [][]f64  ->
                 scan (\(x_657: []f64) (y_658: []f64): []f64  -> [2.0]) (

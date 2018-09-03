@@ -69,10 +69,10 @@ let mkPrices [num_dates][num_und]
 
   -- Formerly blackScholes.
 let main [num_dates][num_und]
-        (md_c: [num_und][num_und]f64,
-         md_vols: [num_dates][num_und]f64,
-         md_drifts: [num_dates][num_und]f64,
-         bb_arr: [num_und][num_dates]f64): [num_dates][num_und]f64 =
+        (md_c: [num_und][num_und]f64)
+        (md_vols: [num_dates][num_und]f64)
+        (md_drifts: [num_dates][num_und]f64)
+        (bb_arr: [num_und][num_dates]f64): [num_dates][num_und]f64 =
   -- I don't want to import the entire Brownian bridge, so we just
   -- transpose bb_arr.
   let bb_row = transpose bb_arr

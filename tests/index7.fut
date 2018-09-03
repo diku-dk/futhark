@@ -8,5 +8,5 @@
 --   [3i8,2i8]
 -- }
 
-let main(a: [][]i8, i: i32): []i8 =
+let main (a: [][]i8) (i: i32): []i8 =
   a[i]

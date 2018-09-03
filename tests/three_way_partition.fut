@@ -5,7 +5,7 @@
 --         [0, 1, 2, 3, 0, 1, 2, 3, 0] }
 -- output { 3 2 2 [1f32, 5f32, 9f32, 2f32, 6f32, 3f32, 7f32] }
 
-let main [n] (vs: [n]f32, classes: [n]i32): (i32, i32, i32, []f32) =
+let main [n] (vs: [n]f32) (classes: [n]i32): (i32, i32, i32, []f32) =
   let flags = map (\c  ->
                      if      c == 0 then (1, 0, 0)
                      else if c == 1 then (0, 1, 0)

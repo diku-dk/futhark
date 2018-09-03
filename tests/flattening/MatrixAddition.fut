@@ -12,5 +12,5 @@ let addRows (xs: []i32, ys: []i32): []i32 =
 let addMatricies (a: [][]i32, b: [][]i32): [][]i32 =
   map  addRows (zip  a b)
 
-let main(a: [][]i32, b: [][]i32): [][]i32 =
+let main (a: [][]i32) (b: [][]i32): [][]i32 =
   addMatricies(a,b)

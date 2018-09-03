@@ -9,5 +9,5 @@ module f(P: {type t}) = {
 module m1 = f({type t = i32})
 module m2 = f({type t = bool})
 
-let main(x: i32, y: bool) =
+let main (x: i32) (y: bool) =
   (m1.id x, m2.id y)

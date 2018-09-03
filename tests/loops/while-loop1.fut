@@ -10,5 +10,5 @@
 --   [7, 8, 9, 10, 11, 12]
 -- }
 
-let main(a: []i32, i: i32, bound: i32): []i32 =
+let main (a: []i32) (i: i32) (bound: i32): []i32 =
   loop (a) while a[i] < bound do map (+1) a

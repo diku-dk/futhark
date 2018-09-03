@@ -12,7 +12,7 @@
 let combineVs(n_row: []i32): []i32 =
   map2 (*) n_row n_row
 
-let main(md_starts: []i32, md_vols: [][]i32, md_drifts: [][]i32): [][]i32 =
+let main (md_starts: []i32) (md_vols: [][]i32) (md_drifts: [][]i32): [][]i32 =
   let e_rows = map (\(x: []i32): []i32  -> map (+2) x) (
                    map combineVs (md_vols))
   in  scan (\(x: []i32) (y: []i32): []i32 -> map2 (*) x y) (md_starts) (e_rows )

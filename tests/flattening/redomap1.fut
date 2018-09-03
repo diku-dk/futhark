@@ -6,7 +6,7 @@
 -- output {
 --   [12, 27]
 -- }
-let main [m][n] (xss: [m][n]i32, yss: [m][n]i32): [m]i32 =
+let main [m][n] (xss: [m][n]i32) (yss: [m][n]i32): [m]i32 =
     let final_res =
       map (\(xs: [n]i32, ys: [n]i32): i32  ->
             let tmp =

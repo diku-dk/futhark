@@ -20,7 +20,7 @@ module M1: MT = {
   let unpack (xs: t i32) = xs
 }
 
-let main (x: i32, y: i32): []i32 =
+let main (x: i32) (y: i32): []i32 =
   let a: M0.t i32 = M0.pack [x,y]
   let b: M1.t i32 = M1.pack (M0.unpack a)
   in M1.unpack b

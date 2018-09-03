@@ -21,5 +21,5 @@ let matmult [n][m][p] (x: [n][m]i32) (y: [m][p]i32): [n][p]i32 =
   x
 
 
-let main [k][n][m][p] (xs: [k][n][m]i32, ys: [k][m][p]i32): [k][n][p]i32 =
+let main [k][n][m][p] (xs: [k][n][m]i32) (ys: [k][m][p]i32): [k][n][p]i32 =
   map2 matmult xs ys

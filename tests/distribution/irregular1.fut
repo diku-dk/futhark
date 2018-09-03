@@ -29,7 +29,7 @@
 let addRows (xs: []i32, ys: []i32): []i32 =
   map2 (+) xs ys
 
-let main (xssss: [][][][]i32, cs: []i32): [][][][]i32 =
+let main (xssss: [][][][]i32) (cs: []i32): [][][][]i32 =
   map2 (\(xsss: [][][]i32) (c: i32): [][][]i32  -> unsafe
             let yss = unflatten 2 c (flatten_3d xsss) in
             map  (\(xss: [][]i32): [][]i32  ->

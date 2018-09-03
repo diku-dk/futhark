@@ -12,4 +12,4 @@ module C = {
   module B = F( { let b = 23 } )
 }
 
-let main() : i32 = C.B.c
+let main : i32 = C.B.c

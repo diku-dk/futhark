@@ -12,4 +12,4 @@ module PM(P: {type r}) = {
 
 module PMI = PM {type r = []f64}
 
-let main() = PMI.f [1.0,2.0] [1]
+let main = PMI.f [1.0,2.0] [1]

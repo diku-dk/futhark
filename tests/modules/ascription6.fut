@@ -9,4 +9,4 @@ module outer: { val x: i32 module inner: { val y: i32 } } = {
   let x = inner.y + 2
 }
 
-let main () = (outer.x, outer.inner.y)
+let main = (outer.x, outer.inner.y)

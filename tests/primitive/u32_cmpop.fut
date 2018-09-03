@@ -6,5 +6,5 @@
 -- input { 4294967295u32 1u32 } output { false false false }
 -- input {  1u32 4294967295u32 } output { true false true }
 
-let main(x: u32, y: u32): (bool, bool, bool) =
+let main (x: u32) (y: u32): (bool, bool, bool) =
   (x < y, x == y, x <= y)

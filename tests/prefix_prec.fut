@@ -3,4 +3,4 @@
 -- ==
 -- input {} output { 1 }
 
-let main() = -1+2
+let main = -1+2

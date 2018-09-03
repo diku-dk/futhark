@@ -10,7 +10,7 @@ let div2(x: i32): bool = x % 2 == 0
 
 let div3(x: i32): bool = x % 3 == 0
 
-let main(a: []i32, b: []i32): []i32 =
+let main(a: []i32) (b: []i32): []i32 =
   let (c1,c2) = unzip(filter (\(x: i32, y: i32): bool  ->
                                div2(x) || div3(y)) (
                              zip a b)) in
