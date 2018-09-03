@@ -451,6 +451,9 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
   when (entry && any isTypeParam tparams') $
     throwError $ TypeError loc "Entry point functions may not be polymorphic."
 
+  when (entry && singleTuplePattern params') $
+    warn loc "This entry point accepts a *single* tuple-typed parameter, *not* multiple parameters.\nThis will be an error in the future."
+
   let (rettype_params, rettype') = unfoldFunType rettype
   when (entry && (any (not . patternOrderZero) params' ||
                   any (not . orderZero) rettype_params ||
@@ -464,6 +467,10 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                      M.singleton (Term, fname) $ qualName fname'
                  },
            ValBind entry fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
+
+singleTuplePattern :: [Pattern] -> Bool
+singleTuplePattern [TuplePattern _ _] = True
+singleTuplePattern _                  = False
 
 checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
 checkOneDec (ModDec struct) = do
