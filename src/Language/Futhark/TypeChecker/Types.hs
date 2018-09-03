@@ -66,7 +66,7 @@ unifyTypesU uf (Record ts1) (Record ts2)
       Record <$> traverse (uncurry (unifyTypesU uf))
       (M.intersectionWith (,) ts1 ts2)
 unifyTypesU uf (Arrow as1 mn1 t1 t1') (Arrow as2 _ t2 t2') =
-  Arrow (as1 <> as2) mn1 <$> unifyTypesU uf t1 t2 <*> unifyTypesU uf t1' t2'
+  Arrow (as1 <> as2) mn1 <$> unifyTypesU (flip uf) t1 t2 <*> unifyTypesU uf t1' t2'
 unifyTypesU _ _ _ = Nothing
 
 unifyTypeArgs :: (Monoid als, Eq als, ArrayDim dim) =>
@@ -402,8 +402,9 @@ instantiatePolymorphic tnames loc orig_substs x y =
 
     instantiate :: TypeBase () () -> TypeBase () ()
                 -> InstantiateM ()
-    instantiate (TypeVar () _ (TypeName [] tn) []) orig_arg_t
-      | tn `elem` tnames = do
+    instantiate (TypeVar () p_u (TypeName [] tn) []) orig_arg_t
+      | tn `elem` tnames,
+        p_u `subuniqueOf` uniqueness orig_arg_t = do
           substs <- get
           case M.lookup tn substs of
             Just (old_arg_t, old_arg_loc) | old_arg_t /= orig_arg_t ->
@@ -414,9 +415,10 @@ instantiatePolymorphic tnames loc orig_substs x y =
             _ -> modify $ M.insert tn (arg_t, loc)
             -- Ignore uniqueness when dealing with type variables.
             where arg_t = orig_arg_t `setUniqueness` Nonunique
-    instantiate (TypeVar () _ (TypeName _ tn) targs)
-                (TypeVar () _ (TypeName _ arg_tn) arg_targs)
-      | tn == arg_tn, length targs == length arg_targs =
+    instantiate (TypeVar () p_u (TypeName _ tn) targs)
+                (TypeVar () u (TypeName _ arg_tn) arg_targs)
+      | tn == arg_tn, length targs == length arg_targs,
+        p_u `subuniqueOf` u =
           zipWithM_ instantiateTypeArg targs arg_targs
     instantiate (Record fs) (Record arg_fs)
       | M.keys fs == M.keys arg_fs =

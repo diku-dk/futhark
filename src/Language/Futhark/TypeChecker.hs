@@ -652,18 +652,21 @@ matchMTys = matchMTys' mempty
 
             match substs_and_locs (Arrow _ _ spec_pt spec_rt) (Arrow _ _ pt rt) =
               case instantiatePolymorphic tnames loc substs_and_locs pt' spec_pt' of
-                Right substs_and_locs' -> match substs_and_locs' spec_rt rt
-                Left _                 -> False
+                Right substs_and_locs'
+                  | spec_pt' `subtypeOf`
+                    toStructural (substituteTypes (mkSubsts substs_and_locs') pt) ->
+                      match substs_and_locs' spec_rt rt
+                _ -> False
                 where pt' = toStructural pt
                       spec_pt' = toStructural spec_pt
 
             -- The base case relies on the property that there can be
             -- no new type variables in the return type.
             match substs_and_locs spec_t t =
-              let substs = M.map (TypeSub . TypeAbbr Lifted [] . vacuousShapeAnnotations . fst)
-                           substs_and_locs
-              in toStructural (substituteTypes substs t)
-                 `subtypeOf` toStructural spec_t
+              toStructural (substituteTypes (mkSubsts substs_and_locs) t)
+              `subtypeOf` toStructural spec_t
+
+            mkSubsts = M.map $ TypeSub . TypeAbbr Lifted [] . vacuousShapeAnnotations . fst
 
     missingType loc name =
       Left $ TypeError loc $
