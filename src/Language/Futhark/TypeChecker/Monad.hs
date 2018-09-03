@@ -137,7 +137,8 @@ instance Show Warnings where
           off NoLoc = 0
           off (Loc p _) = posCoff p
           showWarning (loc, w) =
-            "Warning at " ++ locStr loc ++ ":\n  " ++ w
+            "Warning at " ++ locStr loc ++ ":\n" ++
+            intercalate "\n" (map ("  "<>) $ lines w)
 
 singleWarning :: SrcLoc -> String -> Warnings
 singleWarning loc problem = Warnings [(loc, problem)]
