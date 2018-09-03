@@ -1428,6 +1428,8 @@ consumeArg loc (Arrow _ _ t1 _) (FuncDiet d _)
       typeError loc "Non-consuming higher-order parameter passed consuming argument."
   where contravariantArg (Array _ _ Unique) Observe =
           False
+        contravariantArg (TypeVar _ Unique _ _) Observe =
+          False
         contravariantArg (Record ets) (RecordDiet ds) =
           and (M.intersectionWith contravariantArg ets ds)
         contravariantArg (Arrow _ _ tp tr) (FuncDiet dp dr) =
