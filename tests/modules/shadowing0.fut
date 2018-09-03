@@ -16,4 +16,4 @@ module M0 = {
   }
 }
 
-let main(): i32 = M0.M1.foo()
+let main: i32 = M0.M1.foo()

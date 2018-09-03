@@ -77,8 +77,8 @@ let sobolChunk [len][num_bits] (dir_vs: [len][num_bits]i32, n: i32, chunk: i32, 
          ) (vct_ints)
 
 let main [num_bits]
-         (num_dates:  i32, num_und: i32, num_mc_it: i32,
-          dir_vs_nosz: [][num_bits]i32 ): f32 =
+         (num_dates:  i32) (num_und: i32) (num_mc_it: i32)
+         (dir_vs_nosz: [][num_bits]i32): f32 =
   let sobvctsz  = num_dates*num_und
   let dir_vs    = dir_vs_nosz : [sobvctsz][num_bits]i32
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in

@@ -20,4 +20,4 @@ module M1 = {
   let baz(): i32 = M0.foo()
 }
 
-let main(): (i32, i32, i32) = (M0.foo(), M1.bar(), M1.baz())
+let main: (i32, i32, i32) = (M0.foo(), M1.bar(), M1.baz())

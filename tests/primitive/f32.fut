@@ -7,7 +7,7 @@
 
 import "/futlib/math"
 
-let main(x: f32, y: f32): (bool, bool, u32, f32) =
+let main (x: f32) (y: f32): (bool, bool, u32, f32) =
   (f32.isinf(x / y),
    f32.isnan(f32.sqrt(x)),
    f32.to_bits x,

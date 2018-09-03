@@ -6,5 +6,5 @@
 -- input { true  false } output { false false false false false }
 -- input { false false } output { false false true  true  true  }
 
-let main(x: bool, y: bool) =
+let main (x: bool) (y: bool) =
   (x < y, y > x, x == y, x <= y, y >= x)

@@ -13,5 +13,5 @@ module IntLib = {
 
 let localplus(a: i32, b: i32): i32 = IntLib.plus (a,b)
 
-let main(a: i32, b: i32): i32 =
+let main (a: i32) (b: i32): i32 =
   localplus(a,b)

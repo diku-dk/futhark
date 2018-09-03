@@ -29,5 +29,5 @@ let rand_array(n: i32, lower: i32, upper: i32): [n]i32 =
         hash(i+n) % (upper-lower+1) + lower) (
       iota(n))
 
-let main(x: i32, lower: i32, upper: i32): []i32 =
+let main (x: i32) (lower: i32) (upper: i32): []i32 =
   rand_array(x, lower, upper)

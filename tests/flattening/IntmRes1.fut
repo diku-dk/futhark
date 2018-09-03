@@ -15,7 +15,7 @@
 let addToRow (xs: []i32, y: i32): []i32 =
   map (\(x: i32): i32  -> x+y) xs
 
-let main (xss: [][]i32, cs: []i32, y: i32): [][]i32 =
+let main (xss: [][]i32) (cs: []i32) (y: i32): [][]i32 =
   map  (\(xs: []i32, c: i32): []i32  ->
          let y' = y * c + c
          let zs = addToRow(xs,y') in

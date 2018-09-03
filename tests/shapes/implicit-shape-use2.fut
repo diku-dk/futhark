@@ -18,4 +18,4 @@ let mkPrices [num_dates][num_und]
             ): [num_dates][num_und]f64 =
   map2 combineVs noises md_vols
 
-let main(vol: [][]f64, noises: [][]f64): [][]f64 = mkPrices(vol,noises)
+let main (vol: [][]f64) (noises: [][]f64): [][]f64 = mkPrices(vol,noises)

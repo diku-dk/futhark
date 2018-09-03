@@ -7,7 +7,7 @@
 --   0
 -- }
 
-let main(): i32 =
+let main: i32 =
   let n = 10
   let inarr  = replicate n 0 in
   let _ = loop outarr  = inarr for i < n  do

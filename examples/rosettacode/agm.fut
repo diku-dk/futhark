@@ -13,5 +13,5 @@ let agm(a: f64, g: f64): f64 =
      f64.sqrt (a*g))
   in a
 
-let main(x: f64, y: f64): f64 =
+let main (x: f64) (y: f64): f64 =
   agm(x,y)

@@ -13,4 +13,4 @@ module Foo = {
   }
 }
 
-let main(): (foo, Foo.Foo.foo) = ( Foo.foo() , Foo.Foo.foo())
+let main: (foo, Foo.Foo.foo) = ( Foo.foo() , Foo.Foo.foo())

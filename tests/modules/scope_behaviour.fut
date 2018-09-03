@@ -26,5 +26,5 @@ module M1 = {
 
 type baz = M1.baz -- is defined at line 27
 
-let main(a: i32, b: f64): baz = (1,2,3)
+let main (a: i32) (b: f64): baz = (1,2,3)
 

@@ -12,5 +12,5 @@
 -- input { empty(i32) 0 1 }
 -- error: Index \[0:1\] out of bounds for array of shape \[0\]
 
-let main(as: []i32, i: i32, j: i32): []i32 =
+let main (as: []i32) (i: i32) (j: i32): []i32 =
   as[i:j]

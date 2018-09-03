@@ -58,6 +58,6 @@ let floydSbsImp(n: i32, d: *[][]i32): [][]i32 =
            let d[i,j] = minrow
            in d
 
-let main(): [][]i32 =
+let main: [][]i32 =
     let arr = [[2,4,5], [1,1000,3], [3,7,1]] in
     floydSbsImp(3, copy(arr))

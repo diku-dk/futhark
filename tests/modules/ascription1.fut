@@ -21,5 +21,5 @@ module Struct: SIG = {
   let f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
 }
 
-let main(xs: []i32, ys: []i32): (i32,i32) =
+let main (xs: []i32) (ys: []i32): (i32,i32) =
   Struct.extract (Struct.f (map2 Struct.inject xs ys))

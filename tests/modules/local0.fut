@@ -6,4 +6,4 @@ let x = 1
 
 open { local let x = 2 }
 
-let main() = x
+let main = x

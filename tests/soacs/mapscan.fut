@@ -6,7 +6,7 @@
 -- compiled input { 400 1000} output { 985824 }
 -- compiled input { 100000 100} output { 15799424 }
 --
-let main(n: i32, m: i32): i32 =
+let main(n: i32) (m: i32): i32 =
   let a = map (\(i: i32): [m]i32  ->
                 map (+i) (iota(m))) (
               iota(n))

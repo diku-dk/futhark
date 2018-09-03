@@ -12,4 +12,4 @@ module cm = pm { let x = 2 }
 module m1 = cm { let y = 1 }
 module m2 = cm { let y = 2 }
 
-let main() = m1.z + m2.z
+let main = m1.z + m2.z

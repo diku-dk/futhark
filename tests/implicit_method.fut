@@ -74,9 +74,9 @@ let implicitMethod [n][m] (myD:  [m][3]f32,  myDD: [m][3]f32,
                               (zip4 (mu_row) (var_row) myD myDD))
          in tridagSeq( a, copy b, c, copy u_row )) (zip3 myMu myVar u)
 
-let main [m][n] (myD:  [m][3]f32,  myDD: [m][3]f32,
-                 myMu: [n][m]f32, myVar: [n][m]f32,
-                 u: *[n][m]f32,    dtInv: f32,
-                 num_samples: i32): *[num_samples][n][m]f32 =
+let main [m][n] (myD:  [m][3]f32) (myDD: [m][3]f32)
+                (myMu: [n][m]f32) (myVar: [n][m]f32)
+                (u: *[n][m]f32)   (dtInv: f32)
+                (num_samples: i32): *[num_samples][n][m]f32 =
   map (implicitMethod(myD,myDD,myMu,myVar,u)) (
       map (*dtInv) (map  (/r32(num_samples)) (map r32 (map (+1) (iota(num_samples))))))

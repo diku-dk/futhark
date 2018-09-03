@@ -17,4 +17,4 @@ module f2(R1: { type cell }) = {
 
 module m2 = f2({type cell = i32})
 
-let main(): m2.cell = m2.id 2
+let main: m2.cell = m2.id 2

@@ -7,7 +7,7 @@
 
 let even(x: i32): bool = x % 2 == 0
 
-let main [n] (xs: [n]i32, m: i32): i32 =
+let main [n] (xs: [n]i32) (m: i32): i32 =
   let k = n / 2
   let [num_even] (evens: [num_even][m]i32) =
     loop [num_even] (evens: [num_even][m]i32) = replicate 0 (replicate k 0) for i < n do

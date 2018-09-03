@@ -22,4 +22,4 @@ module foospace(C: foo) = {
 
 module rgba = foospace(rgba_foo)
 
-let main() = 2
+let main = 2

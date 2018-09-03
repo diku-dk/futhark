@@ -18,5 +18,5 @@ let matmult [m][o][n] (a: [m][o]i32, b: [o][n]i32): [m][n]i32 =
           let res[i,j] = partsum
           in res
 
-let main(x: [][]i32, y: [][]i32): [][]i32 =
+let main (x: [][]i32) (y: [][]i32): [][]i32 =
   matmult(x, y)

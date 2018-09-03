@@ -6,7 +6,7 @@
 -- }
 let f(a: *[][]i32): i32 = a[0,0]
 
-let main(): i32 =
+let main: i32 =
     let n = 10
     let a = replicate n (iota n)
     let b = replicate n (iota n) in

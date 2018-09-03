@@ -10,7 +10,7 @@
 
 let f(x: (i32,i32)): (i32,i32) = x
 
-let main(): (i32,i32) =
+let main: (i32,i32) =
     let x = 1 + 2
     let y = (x + 5, 4+7)
     let (z, (t,q)) = (x, y) in

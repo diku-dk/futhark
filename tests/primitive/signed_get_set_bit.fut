@@ -9,7 +9,7 @@
 
 import "/futlib/math"
 
-entry test_i8(a:i8, bit:i32) : (i32, i8, i8) =
+entry test_i8 (a:i8) (bit:i32) : (i32, i8, i8) =
   (i8.get_bit bit a,
    i8.set_bit bit a 0,
    i8.set_bit bit a 1)
@@ -21,7 +21,7 @@ entry test_i8(a:i8, bit:i32) : (i32, i8, i8) =
 -- input { 24i16 3 } output { 1 16i16 24i16 }
 -- input { 0b0011001001010101i16 11 } output { 0 0b0011001001010101i16 0b0011101001010101i16 }
 -- input { 0b1011011010010010i16 13 } output { 1 0b1001011010010010i16 0b1011011010010010i16 }
-entry test_i16(a:i16, bit:i32) : (i32, i16, i16) =
+entry test_i16 (a:i16) (bit:i32) : (i32, i16, i16) =
   (i16.get_bit bit a,
    i16.set_bit bit a 0,
    i16.set_bit bit a 1)
@@ -33,7 +33,7 @@ entry test_i16(a:i16, bit:i32) : (i32, i16, i16) =
 -- input { 24 3 } output { 1 16 24 }
 -- input { 214783648 5 } output { 1 214783616 214783648 }
 -- input { 214783648 11 } output { 0 214783648 214785696 }
-entry test_i32(a:i32, bit:i32) : (i32, i32, i32) =
+entry test_i32 (a:i32) (bit:i32) : (i32, i32, i32) =
   (i32.get_bit bit a,
    i32.set_bit bit a 0,
    i32.set_bit bit a 1)
@@ -45,7 +45,7 @@ entry test_i32(a:i32, bit:i32) : (i32, i32, i32) =
 -- input { 24i64 3 } output { 1 16i64 24i64 }
 -- input { 4294967295i64 31 } output { 1 2147483647i64 4294967295i64 }
 -- input { 4294967295i64 30 } output { 1 3221225471i64 4294967295i64 }
-entry test_i64(a:i64, bit:i32) : (i32, i64, i64) =
+entry test_i64 (a:i64) (bit:i32) : (i32, i64, i64) =
   (i64.get_bit bit a,
    i64.set_bit bit a 0,
    i64.set_bit bit a 1)

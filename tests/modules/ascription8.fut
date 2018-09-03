@@ -23,4 +23,4 @@ module R = Sobol.Reduce { type t = f64
                           let ne = 0f64
                         }
 
-let main () : f64 = R.run 100000
+let main : f64 = R.run 100000

@@ -9,7 +9,7 @@ let getInt(): i32 = 10
 let myfun(x:  (i32,i32,(i32,i32)) ): i32 =
     let (a,b,(c,d)) = x in a + b + c + d
 
-let main(): i32 =
+let main: i32 =
     let n  = getInt()
     let a  = (n, n, (n*0+5,n))
 

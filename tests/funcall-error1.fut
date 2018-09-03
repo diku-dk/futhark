@@ -4,4 +4,4 @@
 
 let f(x: i32) (y: f64): f64 = r64(x) + y
 
-let main(): f64 = f 2 2.0 3
+let main: f64 = f 2 2.0 3

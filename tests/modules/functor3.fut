@@ -18,4 +18,4 @@ module colourspace(C: colour) = {
 
 module rgba = colourspace(rgba_colour)
 
-let main() = 2
+let main = 2

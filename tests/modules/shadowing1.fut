@@ -18,4 +18,4 @@ module M0 = {
   }
 }
 
-let main(): (f64, i32, i32) = (best_number() , M0.best_number() , M0.M1.best_number())
+let main: (f64, i32, i32) = (best_number() , M0.best_number() , M0.M1.best_number())

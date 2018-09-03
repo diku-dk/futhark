@@ -29,7 +29,7 @@ let mapInPlaceUpdate [num_dates][num_und]
 ----------------------------------------
 
 let main [num_dates][num_und]
-        (bb_inds: [3][num_dates]i32,
-         bb_data: [3][num_dates]f64,
-         gauss_mat: [][num_und][num_dates]f64): [][][]f64 =
+        (bb_inds: [3][num_dates]i32)
+        (bb_data: [3][num_dates]f64)
+        (gauss_mat: [][num_und][num_dates]f64): [][][]f64 =
   map  (mapInPlaceUpdate bb_inds bb_data) (gauss_mat )

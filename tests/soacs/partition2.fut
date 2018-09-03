@@ -13,7 +13,7 @@
 --   [1, 0, 7, 4, 1]
 -- }
 
-let main(xs: []i32, ys: []i32): ([]i32, []i32, []i32, []i32, []i32, []i32) =
+let main (xs: []i32) (ys: []i32): ([]i32, []i32, []i32, []i32, []i32, []i32) =
   let (x,y,z) = partition2 (\(x,y)->x<y) (\(x,y)->x==y) (zip xs ys)
   let (x1,x2) = unzip(x)
   let (y1,y2) = unzip(y)

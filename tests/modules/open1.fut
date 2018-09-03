@@ -10,4 +10,4 @@ module M = {
 
 open M
 
-let main() = the_value
+let main = the_value

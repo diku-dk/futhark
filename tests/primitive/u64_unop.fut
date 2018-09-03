@@ -21,7 +21,7 @@
 
 import "/futlib/math"
 
-let main(f: i32, x: u64): u64 =
+let main (f: i32) (x: u64): u64 =
   if      f == 0 then -x
   else if f == 1 then u64.abs(x)
   else                u64.sgn(x)

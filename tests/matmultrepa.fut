@@ -22,5 +22,5 @@ let matmultFun [n][m] (a: [n][m]i32, b: [m][n]i32 ): [n][n]i32 =
     let abr = map   mul2 (zip ar br)
     in map redplus2 abr
 
-let main [n][m] (x: [n][m]i32, y: [m][n]i32): [n][n]i32 =
+let main [n][m] (x: [n][m]i32) (y: [m][n]i32): [n][n]i32 =
   matmultFun(x, y)
