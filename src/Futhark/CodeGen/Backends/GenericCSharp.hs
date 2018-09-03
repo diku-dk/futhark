@@ -635,9 +635,9 @@ unpackDim arr_name (Imp.VarSize var) i = do
   isAssigned <- getVarAssigned var
   if isAssigned
     then
-      stm $ Reassign dest $ simpleCall "Convert.ToInt32" [src]
+      stm $ Reassign dest $ Cast (Primitive $ CSInt Int32T) src
     else do
-      stm $ Assign dest $ simpleCall "Convert.ToInt32" [src]
+      stm $ Assign dest $ Cast (Primitive $ CSInt Int32T) src
       setVarAssigned var
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s CSExp
@@ -1134,39 +1134,27 @@ compileTypecast t =
   in Cast t'
 
 -- | The ctypes type corresponding to a 'PrimType'.
-compileTypeConverter :: PrimType -> String
-compileTypeConverter t =
-  case t of
-    IntType Int8 -> "Convert.ToSByte"
-    IntType Int16 -> "Convert.ToInt16"
-    IntType Int32 -> "Convert.ToInt32"
-    IntType Int64 -> "Convert.ToInt64"
-    FloatType Float32 -> "Convert.ToSingle"
-    FloatType Float64 -> "Convert.ToDouble"
-    Imp.Bool -> "Convert.ToBoolean"
-    Cert -> "Convert.ToByte"
-
 compilePrimValue :: Imp.PrimValue -> CSExp
 compilePrimValue (IntValue (Int8Value v)) =
-  simpleCall "Convert.ToSByte" [Integer $ toInteger v]
+  Cast (Primitive $ CSInt Int8T) $ Integer $ toInteger v
 compilePrimValue (IntValue (Int16Value v)) =
-  simpleCall "Convert.ToInt16" [Integer $ toInteger v]
+  Cast (Primitive $ CSInt Int16T) $ Integer $ toInteger v
 compilePrimValue (IntValue (Int32Value v)) =
-  simpleCall "Convert.ToInt32" [Integer $ toInteger v]
+  Cast (Primitive $ CSInt Int32T) $ Integer $ toInteger v
 compilePrimValue (IntValue (Int64Value v)) =
-  simpleCall "Convert.ToInt64" [Integer $ toInteger v]
+  Cast (Primitive $ CSInt Int64T) $ Integer $ toInteger v
 compilePrimValue (FloatValue (Float32Value v))
   | isInfinite v =
       if v > 0 then Var "Single.PositiveInfinity" else Var "Single.NegativeInfinity"
   | isNaN v =
       Var "Single.NaN"
-  | otherwise = simpleCall "Convert.ToSingle" [Float $ fromRational $ toRational v]
+  | otherwise = Cast (Primitive $ CSFloat FloatT) (Float $ fromRational $ toRational v)
 compilePrimValue (FloatValue (Float64Value v))
   | isInfinite v =
       if v > 0 then Var "Double.PositiveInfinity" else Var "Double.NegativeInfinity"
   | isNaN v =
       Var "Double.NaN"
-  | otherwise = simpleCall "Convert.ToDouble" [Float $ fromRational $ toRational v]
+  | otherwise = Cast (Primitive $ CSFloat DoubleT) (Float $ fromRational $ toRational v)
 compilePrimValue (BoolValue v) = Bool v
 compilePrimValue Checked = Bool True
 
@@ -1178,7 +1166,7 @@ compileExp (Imp.LeafExp (Imp.ScalarVar vname) _) =
   return $ Var $ compileName vname
 
 compileExp (Imp.LeafExp (Imp.SizeOf t) _) =
-  return $ simpleCall (compileTypeConverter $ IntType Int32) [Integer $ primByteSize t]
+  return $ (compileTypecast $ IntType Int32) (Integer $ primByteSize t)
 
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) (IntType Int8) DefaultSpace _) _) = do
   let src' = compileName src
@@ -1253,8 +1241,8 @@ compileCode (Imp.For i it bound body) = do
   body' <- blockScope $ compileCode body
   counter <- pretty <$> newVName "counter"
   one <- pretty <$> newVName "one"
-  stm $ Assign (Var i') $ simpleCall (compileTypeConverter (IntType it)) [Integer 0]
-  stm $ Assign (Var one) $ simpleCall (compileTypeConverter (IntType it)) [Integer 1]
+  stm $ Assign (Var i') $ compileTypecast (IntType it) (Integer 0)
+  stm $ Assign (Var one) $ compileTypecast (IntType it) (Integer 1)
   stm $ For counter bound' $ body' ++
     [AssignOp "+" (Var i') (Var one)]
 
@@ -1359,8 +1347,8 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = d
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
   let dest' = Var $ compileName dest
-  let elemtype' = compileTypeConverter elemtype
-  let ctype = simpleCall elemtype' [elemexp']
+  let elemtype' = compileTypecast elemtype
+  let ctype = elemtype' elemexp'
   stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
 
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
