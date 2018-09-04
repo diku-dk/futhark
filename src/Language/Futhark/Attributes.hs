@@ -842,7 +842,6 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         intrinsicBinOp Quot     = binOp anyIntType
         intrinsicBinOp Rem      = binOp anyIntType
         intrinsicBinOp ShiftR   = binOp anyIntType
-        intrinsicBinOp ZShiftR  = binOp anyIntType
         intrinsicBinOp ShiftL   = binOp anyIntType
         intrinsicBinOp Band     = binOp anyIntType
         intrinsicBinOp Xor      = binOp anyIntType
