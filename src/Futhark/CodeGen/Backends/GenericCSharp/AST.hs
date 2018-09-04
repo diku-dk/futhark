@@ -193,8 +193,6 @@ instance Pretty CSExp where
   ppr (This e) = text "this" <> dot <> ppr e
   ppr Null = text "null"
   ppr (AllocArray t len) = text "new" <+> ppr t <> lbracket <> ppr len <> rbracket
-  --ppr (Dict exps) = undefined
-
 
 data CSIdx = IdxRange CSExp CSExp
            | IdxExp CSExp
