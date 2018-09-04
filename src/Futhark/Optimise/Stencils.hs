@@ -61,8 +61,10 @@ optimiseKernelBody kspace (KernelBody () kstms kres) = do
                  gtids vtable kstms
 
   ((), kstms') <- trace (show stencils) $ flip runBinderT (scopeOfKernelSpace kspace <> castScope scope) $ do
+    let halo_size = foldl' max 0 $ map unOffset $
+                    concatMap indexingOffset $ concatMap stencilIndexings stencils
     stencil_size <- letSubExp "stencil_size" $
-                    BasicOp $ BinOp (Add Int32) (spaceGroupSize kspace) (intConst Int32 2)
+                    BasicOp $ BinOp (Add Int32) (spaceGroupSize kspace) (constant $ halo_size * 2)
     ctid <- newVName "ctid"
     let cspace = combineSpace [(ctid, stencil_size)]
         arrs = nub $ map stencilArray stencils
@@ -72,8 +74,8 @@ optimiseKernelBody kspace (KernelBody () kstms kres) = do
                  forM (zip arrs arr_ts) $ \(arr, arr_t) -> do
       offset <- letSubExp "offset" $ BasicOp $
                 BinOp (Mul Int32) (Var (spaceGroupId kspace)) (spaceGroupSize kspace)
-      i_offbyone <- letSubExp "i_offbyone" $ BasicOp $ BinOp (Add Int32) offset (Var ctid)
-      i_oob <- letSubExp "i_oob" $ BasicOp $ BinOp (Sub Int32) i_offbyone (intConst Int32 1)
+      i_offbyhalo <- letSubExp "i_offbyhalo" $ BasicOp $ BinOp (Add Int32) offset (Var ctid)
+      i_oob <- letSubExp "i_oob" $ BasicOp $ BinOp (Sub Int32) i_offbyhalo (constant halo_size)
       i <- letSubExp "i" $ BasicOp $ BinOp (SMod Int32) i_oob (arraySize 0 arr_t)
       letSubExp (baseString arr <> "_elem") $ BasicOp $ Index arr $
         fullSlice arr_t [DimFix i]
@@ -88,7 +90,7 @@ optimiseKernelBody kspace (KernelBody () kstms kres) = do
           return $ do
             new_index <- letSubExp "stencil_new_index" $ BasicOp $
                          BinOp (Add Int32) (Var $ spaceLocalId kspace) $
-                         constant $ k + 1
+                         constant $ k + halo_size
             return (arr, [DimFix new_index])
 
     mapM_ addStm =<< replaceIndexing replace kstms
@@ -107,7 +109,7 @@ primExpTable = foldl' bindsOne
                     M.insert v pe vtable
             _   -> vtable
 
-newtype Offset = Offset Int32
+newtype Offset = Offset { unOffset :: Int32 }
                deriving (Show, Eq, Ord)
 
 data Stencil = Stencil1D { stencilArray :: VName
