@@ -481,7 +481,6 @@ data BinOp =  Backtick
            | Quot
            | Rem
            | ShiftR
-           | ZShiftR -- ^ Zero-extend right shift.
            | ShiftL
            | Band
            | Xor
@@ -997,7 +996,6 @@ instance Pretty BinOp where
   ppr Quot      = text "//"
   ppr Rem       = text "%%"
   ppr ShiftR    = text ">>"
-  ppr ZShiftR   = text ">>>"
   ppr ShiftL    = text "<<"
   ppr Band      = text "&"
   ppr Xor       = text "^"

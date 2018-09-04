@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `zip6`/`zip7`/`zip8` and their `unzip` variants have been removed.
     If you build gigantic tuples, you're on your own.
 
+  * The `>>>` operator has been removed.  Use an unsigned integer type
+    if you want zero-extended right shifts.
+
 ### Changed
 
 ### Fixed

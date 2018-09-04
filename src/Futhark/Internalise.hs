@@ -1006,10 +1006,6 @@ internaliseBinOp desc E.ShiftR x y (E.Signed t) _ =
   simpleBinOp desc (I.AShr t) x y
 internaliseBinOp desc E.ShiftR x y (E.Unsigned t) _ =
   simpleBinOp desc (I.LShr t) x y
-internaliseBinOp desc E.ZShiftR x y (E.Signed t) _ =
-  simpleBinOp desc (I.LShr t) x y
-internaliseBinOp desc E.ZShiftR x y (E.Unsigned t) _ =
-  simpleBinOp desc (I.LShr t) x y
 internaliseBinOp desc E.ShiftL x y (E.Signed t) _ =
   simpleBinOp desc (I.Shl t) x y
 internaliseBinOp desc E.ShiftL x y (E.Unsigned t) _ =

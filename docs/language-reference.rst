@@ -479,7 +479,7 @@ in natural text.
   left               ``&&``
   left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=``
   left               ``&`` ``^`` ``|``
-  left               ``<<`` ``>>`` ``>>>``
+  left               ``<<`` ``>>``
   left               ``+`` ``-``
   left               ``*`` ``/`` ``%`` ``//`` ``%%``
   left               ``|>``
@@ -641,7 +641,7 @@ are:
     Note that ``/`` and ``%`` rounds towards negative infinity when
     used on integers - this is different from in C.
 
-  ``^``, ``&``, ``|``, ``>>``, ``<<``, ``>>>``
+  ``^``, ``&``, ``|``, ``>>``, ``<<``
 
     Bitwise operators, respectively bitwise xor, and, or, arithmetic
     shift right and left, and logical shift right.  Shift amounts

@@ -442,7 +442,6 @@ prettyBinOp p bop x y = parensIf (p > symPrecedence) $
         precedence Geq      = 2
         precedence ShiftL   = 3
         precedence ShiftR   = 3
-        precedence ZShiftR  = 3
         precedence Plus     = 4
         precedence Minus    = 4
         precedence Times    = 5
