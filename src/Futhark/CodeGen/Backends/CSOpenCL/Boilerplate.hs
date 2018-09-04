@@ -284,7 +284,7 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
                        -- This only works for device info that fits in the variable.
                        Unsafe
                        [
-                         Fixed (CS.assignScalarPointer which' (Var "ptr"))
+                         Fixed (Var "ptr") (Addr which')
                          [
                            Exp $ CS.simpleCall "CL10.GetDeviceInfo"
                              [ Var "Ctx.OpenCL.Device", Var "ComputeDeviceInfo.MaxComputeUnits"
