@@ -153,7 +153,7 @@ isOffset d tid e
 
         tidOffset (BinOpExp (Add Int32)
                    (ValueExp (IntValue (Int32Value k))) x)
-          | isTid x, k `elem` [-1,1] = Just $ Offset k
+          | isTid x, k `elem` [-2, -1..2] = Just $ Offset k
         tidOffset _ = Nothing
 
         tidMod (BinOpExp (SMod Int32) x y)
