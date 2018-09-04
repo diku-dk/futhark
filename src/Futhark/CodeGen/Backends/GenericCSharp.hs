@@ -9,7 +9,6 @@ module Futhark.CodeGen.Backends.GenericCSharp
   , emptyConstructor
 
   , assignScalarPointer
-  , assignArrayPointer
   , toIntPtr
   , compileName
   , compileDim
@@ -556,10 +555,6 @@ tupleOrSingleT es = Composite $ TupleT es
 tupleOrSingle :: [CSExp] -> CSExp
 tupleOrSingle [e] = e
 tupleOrSingle es = Tuple es
-
-assignArrayPointer :: CSExp -> CSExp -> CSStmt
-assignArrayPointer e ptr =
-  AssignTyped (PointerT VoidT) ptr (Just $ Addr $ Index e (IdxExp $ Integer 0))
 
 assignScalarPointer :: CSExp -> CSExp -> CSStmt
 assignScalarPointer e ptr =

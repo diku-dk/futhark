@@ -203,7 +203,7 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
           err <- newVName' "setargErr"
           dest <- newVName "kArgDest"
           let err_var = Var err
-          return [ Fixed (CS.assignScalarPointer (memblockFromMem v) (Var $ CS.compileName dest))
+          return [ Fixed (Var $ CS.compileName dest) (Addr $ memblockFromMem v)
                    [ Assign err_var $ getKernelCall kernel argnum (CS.sizeOf $ Primitive IntPtrT) (Var $ CS.compileName dest)]
                  ]
 
@@ -287,7 +287,7 @@ copyOpenCLMemory :: CS.Copy Imp.OpenCL ()
 copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes _ = do
   let destmem' = Var $ CS.compileName destmem
   ptr <- newVName' "ptr"
-  CS.stm $ Fixed (CS.assignArrayPointer destmem' (Var ptr))
+  CS.stm $ Fixed (Var ptr) (Addr $ Index destmem' $ IdxExp $ Integer 0)
     [ ifNotZeroSize nbytes $
       Exp $ CS.simpleCall "CL10.EnqueueReadBuffer"
       [ Var "Ctx.Opencl.Queue", memblockFromMem srcmem, Bool True
@@ -298,7 +298,7 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes _ = do
   let srcmem'  = CS.compileName srcmem
   ptr <- newVName' "ptr"
-  CS.stm $ Fixed (CS.assignArrayPointer (Var srcmem') (Var ptr))
+  CS.stm $ Fixed (Var ptr) (Addr $ Index (Var srcmem') $ IdxExp $ Integer 0)
     [ ifNotZeroSize nbytes $
       Exp $ CS.simpleCall "CL10.EnqueueWriteBuffer"
         [ Var "Ctx.OpenCL.Queue", memblockFromMem destmem, Bool True
@@ -341,7 +341,7 @@ staticOpenCLArray name "device" t vs = do
 
   -- Copy Numpy array to the device memory block.
   CS.staticMemAlloc $ Unsafe [
-    Fixed (CS.assignArrayPointer (Var tmp_arr) (Var ptr))
+    Fixed (Var ptr) (Addr $ Index (Var tmp_arr) $ IdxExp $ Integer 0)
       [ ifNotZeroSize size $
         Exp $ CS.simpleCall "CL10.EnqueueWriteBuffer"
           [ Var "Ctx.OpenCL.Queue", memblockFromMem name, Bool True
@@ -386,7 +386,7 @@ unpackArrayInput mem memsize "device" t _ dims e = do
 
   CS.stm $ CS.getDefaultDecl (Imp.MemParam mem (Imp.Space "device"))
   allocateOpenCLBuffer mem memsize' "device"
-  CS.stm $ Unsafe [Fixed (CS.assignArrayPointer (Field e "Item1") (Var ptr))
+  CS.stm $ Unsafe [Fixed (Var ptr) (Addr $ Index (Field e "Item1") $ IdxExp $ Integer 0)
       [ ifNotZeroSize memsize' $
         Exp $ CS.simpleCall "CL10.EnqueueWriteBuffer"
         [ Var "Ctx.OpenCL.Queue", memblockFromMem mem, Bool True
