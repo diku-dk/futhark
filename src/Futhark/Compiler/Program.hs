@@ -192,4 +192,4 @@ prependRoots :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
 prependRoots roots (E.Prog doc ds) =
   E.Prog doc $ map mkImport roots ++ ds
   where mkImport fp =
-          E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo noLoc) [] E.NoInfo noLoc) noLoc
+          E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo noLoc) E.NoInfo noLoc) noLoc

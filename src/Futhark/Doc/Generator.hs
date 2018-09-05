@@ -275,13 +275,13 @@ synopsisDec visible fm dec = case dec of
   ModDec m -> synopsisMod fm m
   ValDec v -> synopsisValBind v
   TypeDec t -> synopsisType t
-  OpenDec x xs (Info _names) _
-    | Just opened <- mapM synopsisOpened (x:xs) -> Just $ do
-        opened' <- sequence opened
-        return $ fullRow $ keyword "open " <> mconcat (intersperse " " opened')
+  OpenDec x (Info _names) _
+    | Just opened <- synopsisOpened x -> Just $ do
+        opened' <- opened
+        return $ fullRow $ keyword "open " <> opened'
     | otherwise ->
         Just $ return $ fullRow $
-        keyword "open" <> fromString (" <" <> unwords (map pretty $ x:xs) ++ ">")
+        keyword "open" <> fromString (" <" <> pretty x <> ">")
   LocalDec (SigDec s) _
     | sigName s `S.member` visible ->
         synopsisModType (keyword "local" <> " ") s

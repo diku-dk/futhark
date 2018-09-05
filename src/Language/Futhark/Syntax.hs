@@ -951,17 +951,17 @@ data DecBase f vn = ValDec (ValBindBase f vn)
                   | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
                   | ModDec (ModBindBase f vn)
-                  | OpenDec (ModExpBase f vn) [ModExpBase f vn] (f [VName]) SrcLoc
+                  | OpenDec (ModExpBase f vn) (f [VName]) SrcLoc
                   | LocalDec (DecBase f vn) SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
-  locOf (ValDec d)          = locOf d
-  locOf (TypeDec d)         = locOf d
-  locOf (SigDec d)          = locOf d
-  locOf (ModDec d)          = locOf d
-  locOf (OpenDec _ _ _ loc) = locOf loc
-  locOf (LocalDec _ loc)    = locOf loc
+  locOf (ValDec d)        = locOf d
+  locOf (TypeDec d)       = locOf d
+  locOf (SigDec d)        = locOf d
+  locOf (ModDec d)        = locOf d
+  locOf (OpenDec _ _ loc) = locOf loc
+  locOf (LocalDec _ loc)  = locOf loc
 
 -- | The program described by a single Futhark file.  May depend on
 -- other files.
