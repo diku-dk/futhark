@@ -5,7 +5,9 @@
 -- | Find all variable-to-memory mappings, so that other modules can lookup the
 -- relation.  Maps array names to memory blocks.
 
-module Futhark.Optimise.MemoryBlockMerging.VariableMemory where
+module Futhark.Optimise.MemoryBlockMerging.VariableMemory
+  ( findVarMemMappings
+  ) where
 
 import qualified Data.Map.Strict as M
 import Control.Monad.Writer

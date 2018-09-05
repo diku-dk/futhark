@@ -8,7 +8,9 @@
 -- FIXME: This module is silly.  It should be able to go away, with the other
 -- modules getting variable aliases by using the Aliases representation
 -- directly.
-module Futhark.Optimise.MemoryBlockMerging.VariableAliases where
+module Futhark.Optimise.MemoryBlockMerging.VariableAliases
+  ( findVarAliases
+  ) where
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
