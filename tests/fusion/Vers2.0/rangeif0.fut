@@ -1,5 +1,5 @@
 -- ==
--- input {
+-- compiled input {
 --   100 1
 -- }
 -- output {

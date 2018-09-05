@@ -1,6 +1,6 @@
 -- Computes escapes for each pixel, but not the colour.
 -- ==
--- input { 10 10 100 0.0f32 0.0f32 1.0f32 1.0f32 }
+-- compiled input { 10 10 100 0.0f32 0.0f32 1.0f32 1.0f32 }
 -- output {
 --   [[100i32, 100i32, 100i32, 100i32, 100i32, 100i32, 100i32, 12i32, 17i32, 7i32],
 --    [100i32, 100i32, 100i32, 100i32, 100i32, 100i32, 100i32, 8i32, 5i32, 4i32],

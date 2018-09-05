@@ -5,7 +5,6 @@ module Futhark.Compiler
          runPipelineOnProgram
        , runCompilerOnProgram
 
-       , interpretAction'
        , FutharkConfig (..)
        , newFutharkConfig
        , dumpError
@@ -28,10 +27,8 @@ import System.IO
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
-import Language.Futhark.Parser
 import Futhark.Internalise
 import Futhark.Pipeline
-import Futhark.Actions
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import qualified Futhark.Representation.SOACS as I
@@ -151,16 +148,6 @@ typeCheckInternalProgram prog =
   case I.checkProg prog of
     Left err -> internalErrorS ("After internalisation:\n" ++ show err) (Just prog)
     Right () -> return ()
-
-interpretAction' :: Name -> Action I.SOACS
-interpretAction' =
-  interpretAction parseValues'
-  where parseValues' :: FilePath -> T.Text -> Either ParseError [I.Value]
-        parseValues' path s =
-          fmap concat $ mapM internalise =<< parseValues path s
-        internalise v =
-          maybe (Left $ ParseError $ "Invalid input value: " ++ I.pretty v) Right $
-          internaliseValue v
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
