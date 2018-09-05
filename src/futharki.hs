@@ -5,11 +5,12 @@
 module Main (main) where
 
 import Control.Exception
+import Data.Array
 import Data.Char
 import Data.List
 import Data.Loc
-import Data.Maybe
 import Data.Version
+import qualified Data.Map as M
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State
@@ -21,20 +22,21 @@ import NeatInterpolation (text)
 import System.FilePath
 import System.Exit
 import System.Console.GetOpt
+import System.IO
 import qualified System.Console.Haskeline as Haskeline
 
 import Language.Futhark
 import Language.Futhark.Parser
-import Language.Futhark.TypeChecker
-import Language.Futhark.Semantic
+import qualified Language.Futhark.TypeChecker as T
+import qualified Language.Futhark.Semantic as T
 import Futhark.MonadFreshNames
-import Futhark.Interpreter
 import Futhark.Version
-import Futhark.Passes
 import Futhark.Compiler
 import Futhark.Pipeline
-import Futhark.Internalise
 import Futhark.Util.Options
+import Futhark.Util (toPOSIX)
+
+import qualified Language.Futhark.Interpreter as I
 
 banner :: String
 banner = unlines [
@@ -64,9 +66,51 @@ repl = do
     (evalStateT (forever readEvalPrint) s)
 
 interpret :: InterpreterConfig -> FilePath -> IO ()
-interpret config =
-  runCompilerOnProgram newFutharkConfig standardPipeline $
-  interpretAction' $ interpreterEntryPoint config
+interpret config fp = do
+  pr <- loadProgram fp
+  env <- case pr of Nothing -> exitFailure
+                    Just env -> return env
+
+  let entry = interpreterEntryPoint config
+      (tenv, ienv) = interpEnv env
+  vr <- parseValues "stdin" <$> T.getContents
+
+  inps <-
+    case vr of
+      Left err -> do
+        hPutStrLn stderr $ "Error when reading input: " ++ show err
+        exitFailure
+      Right vs
+        | Just vs' <- mapM convertValue vs ->
+            return vs'
+        | otherwise -> do
+            hPutStrLn stderr "Error when reading input: irregular array."
+            exitFailure
+
+  (fname, ret) <-
+    case M.lookup (T.Term, entry) $ T.envNameMap tenv of
+      Just fname
+        | Just (T.BoundV _ t) <- M.lookup (qualLeaf fname) $ T.envVtable tenv ->
+            return (fname, snd $ unfoldFunType t)
+      _ -> do hPutStrLn stderr $ "Invalid entry point: " ++ pretty entry
+              exitFailure
+
+  let putValue v t
+        | I.isEmptyArray v =
+            putStrLn $ "empty(" ++ pretty (stripArray 1 t) ++ ")"
+        | otherwise = putStrLn $ pretty v
+
+  case I.interpretFunction ienv (qualLeaf fname) inps of
+    Left err -> do hPrint stderr err
+                   exitFailure
+    Right res ->
+      case (I.fromTuple res, isTupleRecord ret) of
+        (Just vs, Just ts) -> zipWithM_ putValue vs ts
+        _ -> putValue res ret
+
+convertValue :: Value -> Maybe I.Value
+convertValue (PrimValue p) = Just $ I.ValuePrim p
+convertValue (ArrayValue arr _) = I.mkArray =<< mapM convertValue (elems arr)
 
 newtype InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }
 
@@ -83,25 +127,59 @@ options = [ Option "e" ["entry-point"]
 
 data InterpreterState =
   InterpreterState { interpImports :: Imports
-                   , interpDecs :: [UncheckedDec]
                    , interpNameSource :: VNameSource
                    , interpCount :: Int
+                   , interpEnv :: (T.Env, I.Ctx)
                    }
 
 newInterpreterState :: IO InterpreterState
 newInterpreterState = do
-  res <- runExceptT $ readLibrary []
-  case res of
-    Right (_, imports, src) ->
-      return InterpreterState { interpImports = imports
-                              , interpDecs = [mkOpen "/futlib/prelude"]
-                              , interpNameSource = src
-                              , interpCount = 0
-                              }
-    Left err -> do
-      putStrLn "Error when initialising interpreter state:"
-      print err
-      exitFailure
+  -- Load the builtins through the type checker.
+  (_, imports, src) <- badOnLeft =<< runExceptT (readLibrary [])
+  -- Then into the interpreter.
+  ienv <- badOnLeft $ foldM I.interpretImport I.initialCtx $ map (fmap fileProg) imports
+
+  -- Then make the prelude available in the type checker.
+  (tenv, d) <- badOnLeft $ T.checkDec imports src T.initialEnv $ mkOpen "/futlib/prelude"
+  -- Then in the interpreter.
+  ienv' <- badOnLeft $ I.interpretDec ienv d
+
+  return InterpreterState { interpImports = imports
+                          , interpNameSource = src
+                          , interpCount = 0
+                          , interpEnv = (tenv, ienv')
+                          }
+  where badOnLeft (Right x) = return x
+        badOnLeft (Left err) = do
+          putStrLn "Error when initialising interpreter state:"
+          print err
+          exitFailure
+
+loadProgram :: FilePath -> IO (Maybe InterpreterState)
+loadProgram file = fmap (either (const Nothing) Just) $ runExceptT $ do
+  (_, imports, src) <-
+    badOnLeft =<< liftIO (runExceptT (readProgram file)
+                          `Haskeline.catch` \(err::IOException) ->
+                             return (Left (ExternalError (T.pack $ show err))))
+
+  ienv1 <- badOnLeft' $ foldM I.interpretImport I.initialCtx $ map (fmap fileProg) imports
+  (tenv1, d1) <- badOnLeft' $ T.checkDec imports src T.initialEnv $
+                 mkOpen "/futlib/prelude"
+  (tenv2, d2) <- badOnLeft' $ T.checkDec imports src tenv1 $
+                 mkOpen $ toPOSIX $ dropExtension file
+  ienv2 <- badOnLeft' $ I.interpretDec ienv1 d1
+  ienv3 <- badOnLeft' $ I.interpretDec ienv2 d2
+
+  return InterpreterState { interpImports = imports
+                          , interpNameSource = src
+                          , interpCount = 0
+                          , interpEnv = (tenv2, ienv3)
+                          }
+  where badOnLeft (Right x) = return x
+        badOnLeft (Left err) = do liftIO $ dumpError newFutharkConfig err
+                                  throwError ()
+        badOnLeft' :: (Show err, MonadIO m) => Either err x -> ExceptT () m x
+        badOnLeft' = badOnLeft . either (Left . ExternalError . T.pack . show) Right
 
 getPrompt :: FutharkiM String
 getPrompt = do
@@ -143,85 +221,32 @@ readEvalPrint = do
             Nothing -> liftIO $ do putStrLn "Leaving futharki."
                                    exitSuccess
 
+getIt :: FutharkiM (Imports, VNameSource, T.Env, I.Ctx)
+getIt = do
+  imports <- gets interpImports
+  src <- gets interpNameSource
+  (tenv, ienv) <- gets interpEnv
+  return (imports, src, tenv, ienv)
+
 onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
-  -- For convenience, we turn local imports into open imports.
-  let d' = case d of LocalDec open@OpenDec{} _ -> open
-                     _                         -> d
-
-  prompt <- getPrompt
-  decs <- gets interpDecs
-  -- See first if it type checks.
-  let decs' = decs ++ [d']
-      prog = Prog Nothing decs'
-      include = mkInitialImport prompt
-  -- We have to read in any new imports done by the declaration.
-  basis <- curBasis
-  res <- runExceptT $ readImports basis $
-         map (uncurry $ mkImportFrom include) $
-         progImports $ Prog Nothing [d']
-  case res of
-    Left err -> liftIO $ print err
-    Right (_, imports, src) ->
-      case checkProg imports src include prog of
-        Left err -> liftIO $ print err
-        Right (fm, _, src') -> do
-          liftIO $ mapM_ putStrLn $ mapMaybe reportDec $ progDecs $ fileProg fm
-          modify $ \s ->
-            s { interpDecs = decs ++ [mkOpen prompt]
-              , interpNameSource = src'
-              , interpImports = imports ++ [(includeToString include, fm)] }
-
-  where curBasis = do
-          imports <- gets interpImports
-          src <- gets interpNameSource
-          return Basis { basisImports = imports
-                       , basisNameSource = src
-                       , basisRoots = ["/futlib/prelude"] }
-
-        reportDec (ValDec vb) =
-          Just $ "val " <> baseString (valBindName vb) <>
-          concatMap ((" "<>) . pretty) (valBindTypeParams vb) <> " : " <>
-          pretty (unInfo $ valBindRetType vb)
-        reportDec (TypeDec tb) =
-          Just $ pretty tb
-        reportDec _ = Nothing
+  (imports, src, tenv, ienv) <- getIt
+  case T.checkDec imports src tenv d of
+    Left e -> liftIO $ print e
+    Right (tenv', d') ->
+      case I.interpretDec ienv d' of
+        Left e -> liftIO $ print e
+        Right ienv' -> modify $ \s -> s { interpEnv = (tenv', ienv') }
 
 onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
-  imports <- gets interpImports
-  decs <- gets interpDecs
-  src <- gets interpNameSource
-  -- Generate a 0-ary function with empty name with the expression as
-  -- its body, append it to the stored program, then run it.
-  let prog' = mkProg decs e
-  void $ runProgram imports src prog'
-
-mkProg :: [UncheckedDec] -> UncheckedExp -> UncheckedProg
-mkProg decs e =
-  let mainfun = ValBind { valBindEntryPoint = True
-                        , valBindName = nameFromString ""
-                        , valBindRetType = NoInfo
-                        , valBindRetDecl = Nothing
-                        , valBindTypeParams = []
-                        , valBindParams = []
-                        , valBindBody = e
-                        , valBindLocation = noLoc
-                        , valBindDoc = Nothing
-                        }
-  in Prog Nothing $ decs ++ [ValDec mainfun]
-
-runProgram :: Imports -> VNameSource -> UncheckedProg -> FutharkiM Bool
-runProgram imports src prog = liftIO $
-  case checkProg imports src (mkInitialImport "") prog of
-    Left err -> print err >> return False
-    Right (imp, _, src') ->
-      case evalState (internaliseProg True $ imports ++ [("", imp)]) src' of
-        Left err -> print err >> return False
-        Right prog'' ->
-          case runFun (nameFromString "") [] prog'' of
-            Left err -> print err >> return False
-            Right vs -> mapM_ (putStrLn . pretty) vs >> return True
+  (imports, src, tenv, ienv) <- getIt
+  case showErr . I.interpretExp ienv =<<
+       showErr (T.checkExp imports src tenv e) of
+    Left err -> liftIO $ putStrLn err
+    Right v -> liftIO $ putStrLn $ pretty v
+    where showErr :: Show a => Either a b -> Either String b
+          showErr = either (Left . show) Right
 
 type Command = T.Text -> FutharkiM ()
 
@@ -251,20 +276,16 @@ Quit futharki.
 |]))]
 
 loadCommand :: Command
-loadCommand file = do
+loadCommand file = void $ runExceptT $ do
   liftIO $ T.putStrLn $ "Reading " <> file
-  res <- liftIO $ runExceptT (readProgram (T.unpack file))
-         `Haskeline.catch` \(err::IOException) ->
-         return (Left (ExternalError (T.pack $ show err)))
-  case res of
-    Left err -> liftIO $ dumpError newFutharkConfig err
-    Right (_, imports, src) ->
-      modify $ \env -> env { interpImports = imports
-                           , interpDecs = map mkOpen
-                                          ["/futlib/prelude",
-                                           dropExtension $ T.unpack file]
-                           , interpNameSource = src
+  r <- liftIO $ loadProgram $ T.unpack file
+  case r of
+    Just prog_env ->
+      modify $ \env -> env { interpImports = interpImports prog_env
+                           , interpNameSource = interpNameSource prog_env
+                           , interpEnv = interpEnv prog_env
                            }
+    Nothing -> return ()
 
 typeCommand :: Command
 typeCommand e = do
@@ -274,8 +295,8 @@ typeCommand e = do
     Right e' -> do
       imports <- gets interpImports
       src <- gets interpNameSource
-      decs <- gets interpDecs
-      case checkExp imports src decs e' of
+      (tenv, _) <- gets interpEnv
+      case T.checkExp imports src tenv e' of
         Left err -> liftIO $ print err
         Right e'' -> liftIO $ putStrLn $ pretty e' <> " : " <> pretty (typeOf e'')
 

@@ -10,6 +10,7 @@ module Language.Futhark.TypeChecker
   , checkDec
   , TypeError
   , Warnings
+  , initialEnv
   )
   where
 
@@ -53,13 +54,12 @@ checkProg files src name prog =
 -- type information.  See also 'checkProg'.
 checkExp :: Imports
          -> VNameSource
-         -> [UncheckedDec]
+         -> Env
          -> UncheckedExp
          -> Either TypeError Exp
-checkExp files src decs e = do
-  (e', _, _) <- runTypeM initialEnv files' (mkInitialImport "") src $ do
-    (_, env, _) <- checkDecs decs
-    localEnv env $ checkOneExp e
+checkExp files src env e = do
+  (e', _, _) <- runTypeM env files' (mkInitialImport "") src $
+    checkOneExp e
   return e'
   where files' = M.map fileEnv $ M.fromList files
 
@@ -69,16 +69,18 @@ checkExp files src decs e = do
 -- also 'checkProg'.
 checkDec :: Imports
          -> VNameSource
+         -> Env
          -> UncheckedDec
          -> Either TypeError (Env, Dec)
-checkDec files src d = do
-  (x, _, _) <- runTypeM initialEnv files' (mkInitialImport "") src $ do
-
-    (_, env, d') <- checkOneDec d
-    return (env, d')
-  return x
+checkDec files src env d = do
+  (env', _, _) <- runTypeM env files' (mkInitialImport "") src $ do
+    (_, env', d') <- checkOneDec d
+    return (env' <> env, d')
+  return env'
   where files' = M.map fileEnv $ M.fromList files
 
+-- | An initial environment for the type checker, containing
+-- intrinsics and such.
 initialEnv :: Env
 initialEnv = intrinsicsModule
                { envModTable = initialModTable
