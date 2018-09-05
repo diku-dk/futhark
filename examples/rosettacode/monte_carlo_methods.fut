@@ -5,8 +5,8 @@
 -- tags { no_python }
 -- input { 1 } output { 4f32 }
 -- input { 10 } output { 3.2f32 }
--- input { 100 } output { 3.16f32 }
--- input { 1000 } output { 3.144f32 }
+-- compiled input { 100 } output { 3.16f32 }
+-- compiled input { 1000 } output { 3.144f32 }
 -- compiled input { 10000 } output { 3.142f32 }
 -- compiled input { 100000 } output { 3.14184f32 }
 -- compiled input { 1000000 } output { 3.141696f32 }

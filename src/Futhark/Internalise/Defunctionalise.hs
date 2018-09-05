@@ -759,7 +759,7 @@ freeVars expr = case expr of
   Range e me incl _ _  -> freeVars e <> foldMap freeVars me <>
                           foldMap freeVars incl
   Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
-  Ascript e t _        -> freeVars e <> names (foldMap dimName $ nestedDims $ unInfo $ expandedType t)
+  Ascript e t _        -> freeVars e <> names (typeDimNames $ unInfo $ expandedType t)
   LetPat _ pat e1 e2 _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
                                           `without` patternVars pat)
 
@@ -854,20 +854,6 @@ combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1 u1)
   | Just new_shape <- unifyShapes shape1 shape2 =
       RecordArrayArrayElem (combineElemTypeInfo et1 et2) new_shape (u1 <> u2)
 combineRecordArrayTypeInfo _ new_tp = new_tp
-
--- | Extract all the shape names that occur in a given pattern.
-patternDimNames :: Pattern -> Names
-patternDimNames (TuplePattern ps _)    = foldMap patternDimNames ps
-patternDimNames (RecordPattern fs _)   = foldMap (patternDimNames . snd) fs
-patternDimNames (PatternParens p _)    = patternDimNames p
-patternDimNames (Id _ (Info tp) _)     = foldMap dimName $ nestedDims tp
-patternDimNames (Wildcard (Info tp) _) = foldMap dimName $ nestedDims tp
-patternDimNames (PatternAscription p (TypeDecl _ (Info t)) _) =
-  patternDimNames p <> foldMap dimName (nestedDims t)
-
-dimName :: DimDecl VName -> Names
-dimName (NamedDim qn) = S.singleton $ qualLeaf qn
-dimName _             = mempty
 
 -- | Defunctionalize a top-level value binding. Returns the
 -- transformed result as well as an environment that binds the name of

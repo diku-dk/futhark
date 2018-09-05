@@ -31,6 +31,7 @@ module Language.Futhark.Attributes
   , patternParam
   , patternNoShapeAnnotations
   , patternOrderZero
+  , patternDimNames
 
   -- * Queries on types
   , uniqueness
@@ -46,6 +47,7 @@ module Language.Futhark.Attributes
   , unfoldFunType
   , foldFunType
   , typeVars
+  , typeDimNames
 
   -- * Operations on types
   , rank
@@ -592,6 +594,23 @@ orderZero (Record fs)     = all orderZero $ M.elems fs
 orderZero TypeVar{}       = True
 orderZero Arrow{}         = False
 
+-- | Extract all the shape names that occur in a given pattern.
+patternDimNames :: PatternBase Info VName -> Names
+patternDimNames (TuplePattern ps _)    = foldMap patternDimNames ps
+patternDimNames (RecordPattern fs _)   = foldMap (patternDimNames . snd) fs
+patternDimNames (PatternParens p _)    = patternDimNames p
+patternDimNames (Id _ (Info tp) _)     = typeDimNames tp
+patternDimNames (Wildcard (Info tp) _) = typeDimNames tp
+patternDimNames (PatternAscription p (TypeDecl _ (Info t)) _) =
+  patternDimNames p <> typeDimNames t
+
+-- | Extract all the shape names that occur in a given type.
+typeDimNames :: TypeBase (DimDecl VName) als -> Names
+typeDimNames = foldMap dimName . nestedDims
+  where dimName :: DimDecl VName -> Names
+        dimName (NamedDim qn) = S.singleton $ qualLeaf qn
+        dimName _             = mempty
+
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.
 patternOrderZero :: PatternBase Info vn -> Bool
@@ -894,7 +913,7 @@ progImports = concatMap decImports . progDecs
 -- declaration.
 progModuleTypes :: Ord vn => ProgBase f vn -> S.Set vn
 progModuleTypes = mconcat . map onDec . progDecs
-  where onDec (OpenDec x xs _) = onModExp x
+  where onDec (OpenDec x _ _) = onModExp x
         onDec (ModDec md) =
           maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
         onDec SigDec{} = mempty
