@@ -875,10 +875,8 @@ typeName = typeNameFromQualName . qualName
 
 progImports :: ProgBase f vn -> [(String,SrcLoc)]
 progImports = concatMap decImports . progDecs
-  where decImports (OpenDec x xs _ _) =
-          concatMap modExpImports $ x:xs
-        decImports (ModDec md) =
-          modExpImports $ modExp md
+  where decImports (OpenDec x _ _) = modExpImports x
+        decImports (ModDec md) = modExpImports $ modExp md
         decImports SigDec{} = []
         decImports TypeDec{} = []
         decImports ValDec{} = []
@@ -896,7 +894,7 @@ progImports = concatMap decImports . progDecs
 -- declaration.
 progModuleTypes :: Ord vn => ProgBase f vn -> S.Set vn
 progModuleTypes = mconcat . map onDec . progDecs
-  where onDec (OpenDec x xs _ _) = mconcat $ map onModExp $ x:xs
+  where onDec (OpenDec x xs _) = onModExp x
         onDec (ModDec md) =
           maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
         onDec SigDec{} = mempty

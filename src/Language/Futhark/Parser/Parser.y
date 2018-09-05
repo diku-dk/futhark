@@ -205,9 +205,9 @@ Dec_ :: { UncheckedDec }
     | SigBind           { SigDec $1 }
     | ModBind           { ModDec $1 }
     | open ModExp
-      { OpenDec $2 [] NoInfo $1 }
+      { OpenDec $2 NoInfo $1 }
     | import stringlit
-      { let L loc (STRINGLIT s) = $2 in LocalDec (OpenDec (ModImport s NoInfo loc) [] NoInfo $1) (srcspan $1 $>) }
+      { let L loc (STRINGLIT s) = $2 in LocalDec (OpenDec (ModImport s NoInfo loc) NoInfo $1) (srcspan $1 $>) }
     | local Dec         { LocalDec $2 (srcspan $1 $>) }
 ;
 

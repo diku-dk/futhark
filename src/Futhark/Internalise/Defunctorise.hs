@@ -273,9 +273,8 @@ transformDecs ds =
       bindingNames [modName mb] $ do
         mod_scope <- transformModBind mb
         extendScope mod_scope $ mappend <$> transformDecs ds' <*> pure mod_scope
-    OpenDec e es _ _ : ds' -> do
-      mods <- mapM evalModExp $ e:es
-      let scope = mconcat $ reverse $ map modScope mods
+    OpenDec e _ _ : ds' -> do
+      scope <- modScope <$> evalModExp e
       extendScope scope $ mappend <$> transformDecs ds' <*> pure scope
 
 transformImports :: Imports -> TransformM ()

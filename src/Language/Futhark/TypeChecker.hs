@@ -20,7 +20,6 @@ import Data.Loc
 import Data.Maybe
 import Data.Either
 import Data.Ord
-import Data.Traversable (mapM)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
@@ -485,15 +484,12 @@ checkOneDec (TypeDec tdec) = do
   (tenv, tdec') <- checkTypeBind tdec
   return (mempty, tenv, TypeDec tdec')
 
-checkOneDec (OpenDec x xs NoInfo loc) = do
+checkOneDec (OpenDec x NoInfo loc) = do
   (x_abs, x_env, x') <- checkModExpToEnv x
-  (xs_abs, xs_envs, xs') <- unzip3 <$> mapM checkModExpToEnv xs
-   -- We cannot use mconcat, as mconcat is a right-fold.
-  let env_ext = foldl (flip mappend) x_env xs_envs
-      names = S.toList $ S.unions $ map allNamesInEnv $ x_env:xs_envs
-  return (x_abs <> mconcat xs_abs,
-          env_ext,
-          OpenDec x' xs' (Info names) loc)
+  let names = S.toList $ allNamesInEnv x_env
+  return (x_abs,
+          x_env,
+          OpenDec x' (Info names) loc)
 
 checkOneDec (LocalDec d loc) = do
   (abstypes, env, d') <- checkOneDec d
