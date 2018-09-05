@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark-test` and `futhark-bench` now take a `--runner` option.
 
+  * `futharki` now uses a new interpreter that directly interprets the
+    source language, rather than operating on the desugared core
+    language.  In practice, this means that the interactive mode is
+    better, but that interpretation is also much slower.
+
 ### Removed
 
   * Most of futlib has been removed.  Use external packages instead:
