@@ -15,19 +15,22 @@ DESCRIPTION
 ===========
 
 When run with no options, start an interactive futharki session.  This
-will let you interactively enter expressions which are then
-immediately interpreted.  You cannot enter function definitions and
-the like directly, but you can load Futhark source files using the
-``:load`` command.  Use the ``:help`` command to see a list of
-commands.  All commands are prefixed with a colon.
+will let you interactively enter expressions and declarations which
+are then immediately interpreted.  If the entered line can be either a
+declaration or an expression, it is assumed to be a declaration.
+
+Futhark source files can be loaded using the ``:load`` command.  This
+will erase any interactively entered definitions.  Use the ``:help``
+command to see a list of commands.  All commands are prefixed with a
+colon.
 
 When ``futharki`` is run with a Futhark program as the command line
 option, the program is executed by evaluating the ``main`` function,
 and the result printed on standard output.  The parameters to ``main``
 are read from standard input.
 
-Futharki will run the standard Futhark optimisation pipeline before
-execution, but the interpreter is still very slow.
+``futharki`` is very slow, and in practice only useful for testing,
+teaching, and experimenting with the language.
 
 OPTIONS
 =======
@@ -40,12 +43,6 @@ OPTIONS
 
 -V
   Print version information on standard output and exit.
-
-BUGS
-====
-
-Input editing is not yet implemented; we recommend running
-``futharki`` via ``rlwrap(1)``.
 
 SEE ALSO
 ========
