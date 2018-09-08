@@ -18,10 +18,6 @@ module Futhark.Representation.AST.Syntax
   , TypeBase(..)
   , Diet(..)
 
-  -- * Values
-  , PrimValue(..)
-  , Value(..)
-
   -- * Abstract syntax tree
   , Ident (..)
   , SubExp(..)

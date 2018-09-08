@@ -8,7 +8,6 @@ module Futhark.Representation.AST.Attributes
   ( module Futhark.Representation.AST.Attributes.Reshape
   , module Futhark.Representation.AST.Attributes.Rearrange
   , module Futhark.Representation.AST.Attributes.Types
-  , module Futhark.Representation.AST.Attributes.Values
   , module Futhark.Representation.AST.Attributes.Constants
   , module Futhark.Representation.AST.Attributes.TypeOf
   , module Futhark.Representation.AST.Attributes.Patterns
@@ -46,7 +45,6 @@ import qualified Data.Map.Strict as M
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
 import Futhark.Representation.AST.Attributes.Types
-import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Names

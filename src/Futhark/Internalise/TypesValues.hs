@@ -14,13 +14,11 @@ module Futhark.Internalise.TypesValues
 
   -- * Internalising values
   , internalisePrimValue
-  , internaliseValue
   )
   where
 
 import Control.Monad.State
 import Control.Monad.Reader
-import qualified Data.Array as A
 import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -136,92 +134,10 @@ internaliseTypeM orig_t =
 
         internaliseShape = mapM internaliseDim . E.shapeDims
 
-internaliseSimpleType :: E.TypeBase () ()
-                      -> Maybe [I.TypeBase ExtShape NoUniqueness]
-internaliseSimpleType = fmap (map I.fromDecl) . internaliseTypeWithUniqueness
-
-internaliseTypeWithUniqueness :: E.TypeBase () ()
-                              -> Maybe [I.TypeBase ExtShape Uniqueness]
-internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
-  where internaliseType' E.TypeVar{} =
-          lift Nothing
-        internaliseType' (E.Prim bt) =
-          return [I.Prim $ internalisePrimType bt]
-        internaliseType' (E.Record ets) =
-          concat <$> mapM (internaliseType' . snd) (E.sortFields ets)
-        internaliseType' (E.Array et shape u) = do
-          dims <- map Ext <$> replicateM (E.shapeRank shape) newId'
-          ets <- internaliseElemType et
-          return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets ]
-        internaliseType' E.Arrow{} =
-          fail "internaliseTypeWithUniqueness: cannot handle function type."
-
-        internaliseElemType E.ArrayPolyElem{} =
-          lift Nothing
-        internaliseElemType (E.ArrayPrimElem bt _) =
-          return [I.Prim $ internalisePrimType bt]
-        internaliseElemType (E.ArrayRecordElem elemts) =
-          concat <$> mapM (internaliseRecordElem . snd) (E.sortFields elemts)
-
-        internaliseRecordElem (E.RecordArrayElem et) =
-          internaliseElemType et
-        internaliseRecordElem (E.RecordArrayArrayElem et shape u) =
-          internaliseType' $ E.Array et shape u
-
-        newId' = do i <- get
-                    put $ i + 1
-                    return i
-
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
 internalisedTypeSize :: E.TypeBase dim () -> InternaliseM Int
 internalisedTypeSize = fmap length . internaliseType . E.removeShapeAnnotations
-
--- | Transform an external value to a number of internal values.
--- Roughly:
---
--- * The resulting list is empty if the original value is an empty
---   tuple.
---
--- * It contains a single element if the original value was a
--- singleton tuple or non-tuple.
---
--- * The list contains more than one element if the original value was
--- a non-empty non-singleton tuple.
---
--- Although note that the transformation from arrays-of-tuples to
--- tuples-of-arrays may also contribute to several discrete arrays
--- being returned for a single input array.
---
--- If the input value is or contains a non-regular array, 'Nothing'
--- will be returned.
-internaliseValue :: E.Value -> Maybe [I.Value]
-internaliseValue (E.ArrayValue arr rt) = do
-  arrayvalues <- mapM internaliseValue $ A.elems arr
-  ts <- internaliseSimpleType rt
-  let arrayvalues' =
-        case arrayvalues of
-          [] -> replicate (length ts) []
-          _  -> transpose arrayvalues
-  zipWithM asarray ts arrayvalues'
-  where asarray rt' values =
-          let shape = determineShape (I.arrayRank rt') values
-              values' = concatMap flat values
-              size = product shape
-          in if size == length values' then
-               Just $ I.ArrayVal (A.listArray (0,size - 1) values')
-               (I.elemType rt') shape
-             else Nothing
-        flat (I.PrimVal bv)      = [bv]
-        flat (I.ArrayVal bvs _ _) = A.elems bvs
-internaliseValue (E.PrimValue bv) =
-  return [I.PrimVal $ internalisePrimValue bv]
-
-determineShape :: Int -> [I.Value] -> [Int]
-determineShape _ vs@(I.ArrayVal _ _ shape : _) =
-  length vs : shape
-determineShape r vs =
-  length vs : replicate r 0
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType

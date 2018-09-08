@@ -23,7 +23,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , bodyExtType
        , primOpType
        , mapType
-       , valueShapeContext
        , subExpShapeContext
        , loopResultContext
        , loopExtType
@@ -47,7 +46,6 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
-import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.RetType
@@ -165,12 +163,6 @@ bodyExtType (Body _ stms res) =
   where bndscope = scopeOf stms
         boundInLet (Let pat _ _) = S.fromList $ patternNames pat
         bound = S.toList $ fold $ fmap boundInLet stms
-
--- | Given an the return type of a function and the values returned by
--- that function, return the size context.
-valueShapeContext :: [TypeBase ExtShape u] -> [Value] -> [Value]
-valueShapeContext rettype values =
-  map (PrimVal . value) $ extractShapeContext rettype $ map valueShape values
 
 -- | Given the return type of a function and the subexpressions
 -- returned by that function, return the size context.

@@ -13,12 +13,9 @@ module Futhark.Representation.AST.Pretty
   , PrettyLore (..)
   , ppTuple'
   , bindingAnnotation
-  , ppArray
   )
   where
 
-import           Data.Array                                     (elems,
-                                                                 listArray)
 import           Data.Maybe
 import           Data.Monoid                                    ((<>))
 
@@ -26,7 +23,6 @@ import           Futhark.Util.Pretty
 
 import           Futhark.Representation.AST.Attributes.Patterns
 import           Futhark.Representation.AST.Syntax
-import           Futhark.Util
 
 -- | Class for values that may have some prettyprinted annotation.
 class PrettyAnnot a where
@@ -70,24 +66,6 @@ instance Pretty NoUniqueness where
 instance Pretty Commutativity where
   ppr Commutative    = text "commutative"
   ppr Noncommutative = text "noncommutative"
-
--- | Print an array value, using the given function for printing
--- elements and element types.
-ppArray :: (TypeBase Rank NoUniqueness -> Doc) -> (PrimValue -> Doc) -> Value -> Doc
-ppArray _ pprim (PrimVal v) = pprim v
-ppArray pt _ (ArrayVal _ t shape)
-  | product shape == 0 = text "empty" <> parens (pt row_t)
-  where row_t = Array t (Rank $ length shape - 1) NoUniqueness
-ppArray pt pprim (ArrayVal a t (_:rowshape@(_:_))) =
-  brackets $ commastack
-  [ ppArray pt pprim $ ArrayVal (listArray (0, rowsize-1) a') t rowshape
-  | a' <- chunk rowsize $ elems a ]
-  where rowsize = product rowshape
-ppArray _ pprim (ArrayVal a _ _) =
-  brackets $ commasep $ map pprim $ elems a
-
-instance Pretty Value where
-  ppr = ppArray ppr ppr
 
 instance Pretty Shape where
   ppr = brackets . commasep . map ppr . shapeDims

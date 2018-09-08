@@ -33,7 +33,6 @@ module Futhark.Representation.AST.Syntax.Core
 
          -- * Values
          , PrimValue(..)
-         , Value(..)
 
          -- * Abstract syntax tree
          , Ident (..)
@@ -198,13 +197,6 @@ data Diet = Consume -- ^ Consumes this value.
           | Observe -- ^ Only observes value in this position, does
                     -- not consume.
             deriving (Eq, Ord, Show)
-
--- | Every possible value in Futhark.  Values are fully evaluated and their
--- type is always unambiguous.
-data Value = PrimVal !PrimValue
-           | ArrayVal !(Array Int PrimValue) PrimType [Int]
-             -- ^ It is assumed that the array is 0-indexed.
-             deriving (Eq, Ord, Show)
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.

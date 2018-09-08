@@ -22,7 +22,6 @@ module Futhark.Construct
   , eSignum
   , eCopy
   , eAssert
-  , eValue
   , eBody
   , eLambda
   , eDivRoundingUp
@@ -64,7 +63,6 @@ module Futhark.Construct
   )
 where
 
-import qualified Data.Array as A
 import qualified Data.Map.Strict as M
 import Data.Loc (SrcLoc)
 import Data.List
@@ -225,22 +223,6 @@ eAssert :: MonadBinder m =>
          m (Exp (Lore m)) -> ErrorMsg SubExp -> SrcLoc -> m (Exp (Lore m))
 eAssert e msg loc = do e' <- letSubExp "assert_arg" =<< e
                        return $ BasicOp $ Assert e' msg (loc, mempty)
-
-eValue :: MonadBinder m => Value -> m (Exp (Lore m))
-eValue (PrimVal bv) =
-  return $ BasicOp $ SubExp $ Constant bv
-eValue (ArrayVal a bt [_]) = do
-  let ses = map Constant $ A.elems a
-  return $ BasicOp $ ArrayLit ses $ Prim bt
-eValue (ArrayVal a bt shape) = do
-  let rowshape = drop 1 shape
-      rowsize  = product rowshape
-      rows     = [ ArrayVal (A.listArray (0,rowsize-1) r) bt rowshape
-                 | r <- chunk rowsize $ A.elems a ]
-      rowtype = Array bt (Shape $ map (intConst Int32 . toInteger) rowshape)
-                NoUniqueness
-  ses <- mapM (letSubExp "array_elem" <=< eValue) rows
-  return $ BasicOp $ ArrayLit ses rowtype
 
 eBody :: (MonadBinder m) =>
          [m (Exp (Lore m))]

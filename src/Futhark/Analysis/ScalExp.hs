@@ -83,7 +83,7 @@ instance Num ScalExp where
   negate = SNeg
 
 instance Pretty ScalExp where
-  pprPrec _ (Val val) = ppr $ PrimVal val
+  pprPrec _ (Val val) = ppr val
   pprPrec _ (Id v _) = ppr v
   pprPrec _ (SNeg e) = text "-" <> pprPrec 9 e
   pprPrec _ (SNot e) = text "not" <+> pprPrec 9 e
