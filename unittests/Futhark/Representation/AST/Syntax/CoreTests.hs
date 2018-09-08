@@ -56,9 +56,6 @@ instance (Arbitrary shape, Arbitrary u) => Arbitrary (TypeBase shape u) where
           , Array <$> arbitrary <*> arbitrary <*> arbitrary
           ]
 
-instance Arbitrary Value where
-  arbitrary = PrimVal <$> arbitrary
-
 instance Arbitrary Ident where
   arbitrary = Ident <$> arbitrary <*> arbitrary
 
