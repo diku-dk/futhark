@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     language.  In practice, this means that the interactive mode is
     better, but that interpretation is also much slower.
 
+  * A `trace` function that is semantically `id`, but makes `futharki`
+    print out the value.
+
 ### Removed
 
   * Most of futlib has been removed.  Use external packages instead:

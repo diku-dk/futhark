@@ -8,12 +8,14 @@ module Language.Futhark.Interpreter
   , interpretDec
   , interpretImport
   , interpretFunction
+  , ExtOp(..)
   , Value (ValuePrim, ValueArray, ValueRecord)
   , mkArray
   , fromTuple
   , isEmptyArray
   ) where
 
+import Control.Monad.Free.Church
 import Control.Monad.Except
 import Control.Monad.Reader
 import qualified Control.Monad.Fail as Fail
@@ -32,22 +34,29 @@ import qualified Futhark.Representation.Primitive as P
 import Language.Futhark.Semantic (TypeBinding(..))
 
 import Futhark.Util.Pretty hiding (apply, bool)
-import Futhark.Util (chunk, splitFromEnd)
+import Futhark.Util (chunk, splitFromEnd, maybeHead)
 
 import Prelude hiding (mod)
 
+data ExtOp a = ExtOpTrace String String a
+             | ExtOpError InterpreterError
+
+instance Functor ExtOp where
+  fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
+  fmap _ (ExtOpError err) = ExtOpError err
+
 -- | The monad in which evaluation takes place.
 newtype EvalM a = EvalM (ReaderT ([String], M.Map FilePath Env)
-                         (Except InterpreterError) a)
+                         (F ExtOp) a)
   deriving (Monad, Applicative, Functor,
-            MonadError InterpreterError,
+            MonadFree ExtOp,
             MonadReader ([String], M.Map FilePath Env))
 
 instance Fail.MonadFail EvalM where
   fail = error
 
-runEvalM :: M.Map FilePath Env -> EvalM a -> Either InterpreterError a
-runEvalM imports (EvalM m) = runExcept (runReaderT m (mempty, imports))
+runEvalM :: M.Map FilePath Env -> EvalM a -> F ExtOp a
+runEvalM imports (EvalM m) = runReaderT m (mempty, imports)
 
 stacking :: SrcLoc -> EvalM a -> EvalM a
 stacking loc = local $ \(ss, imports) ->
@@ -57,6 +66,9 @@ stacking loc = local $ \(ss, imports) ->
 
 stacktrace :: EvalM [String]
 stacktrace = asks $ reverse . fst
+
+stacktraceTop :: EvalM String
+stacktraceTop = fromMaybe "<nowhere>" . maybeHead <$> stacktrace
 
 lookupImport :: FilePath -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
@@ -191,7 +203,12 @@ instance Show InterpreterError where
 bad :: SrcLoc -> String -> EvalM a
 bad loc s = stacking loc $ do
   ss <- stacktrace
-  throwError $ InterpreterError $ "Error at " ++ intercalate " -> " ss ++ ": " ++ s
+  liftF $ ExtOpError $ InterpreterError $ "Error at " ++ intercalate " -> " ss ++ ": " ++ s
+
+traceValue :: Value -> EvalM ()
+traceValue v = do
+  top <- stacktraceTop
+  liftF $ ExtOpTrace top (pretty v) ()
 
 fromArray :: Value -> [Value]
 fromArray (ValueArray as) = elems as
@@ -994,6 +1011,8 @@ initialCtx =
 
     def "opaque" = Just $ fun1 return
 
+    def "trace" = Just $ fun1 $ \v -> traceValue v >> return v
+
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
 
     def s = error $ "Missing intrinsic: " ++ s
@@ -1002,22 +1021,22 @@ initialCtx =
       t <- nameFromString s `M.lookup` namesToPrimTypes
       return $ TypeAbbr Unlifted [] $ Prim t
 
-interpretExp :: Ctx -> Exp -> Either InterpreterError Value
+interpretExp :: Ctx -> Exp -> F ExtOp Value
 interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
 
-interpretDec :: Ctx -> Dec -> Either InterpreterError Ctx
+interpretDec :: Ctx -> Dec -> F ExtOp Ctx
 interpretDec ctx d = do
   env <- runEvalM (ctxImports ctx) $ evalDec (ctxEnv ctx) d
   return ctx { ctxEnv = env }
 
-interpretImport :: Ctx -> (FilePath, Prog) -> Either InterpreterError Ctx
+interpretImport :: Ctx -> (FilePath, Prog) -> F ExtOp Ctx
 interpretImport ctx (fp, prog) = do
   env <- runEvalM (ctxImports ctx) $ foldM evalDec (ctxEnv ctx) $ progDecs prog
   return ctx { ctxImports = M.insert fp env $ ctxImports ctx }
 
 -- | Execute the named function on the given arguments; will fail
 -- horribly if these are ill-typed.
-interpretFunction :: Ctx -> VName -> [Value] -> Either InterpreterError Value
+interpretFunction :: Ctx -> VName -> [Value] -> F ExtOp Value
 interpretFunction ctx fname vs = runEvalM (ctxImports ctx) $ do
   f <- evalTermVar (ctxEnv ctx) $ qualName fname
   foldM (apply noLoc) f vs

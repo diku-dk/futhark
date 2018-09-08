@@ -1332,6 +1332,9 @@ isOverloadedFunction qname args loc = do
     handle [x] "unzip" = Just $ \desc ->
       internaliseExp desc x
 
+    handle [x] "trace" = Just $ \desc ->
+      internaliseExp desc x
+
     handle _ _ = Nothing
 
     toSigned int_to e desc = do
