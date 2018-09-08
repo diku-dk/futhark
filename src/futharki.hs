@@ -2,8 +2,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Main (main) where
 
+import Control.Monad.Free.Church
 import Control.Exception
 import Data.Array
 import Data.Char
@@ -62,8 +64,8 @@ repl = do
   putStrLn "Run :help for a list of commands."
   putStrLn ""
   s <- newInterpreterState
-  Haskeline.runInputT Haskeline.defaultSettings
-    (evalStateT (forever readEvalPrint) s)
+  Haskeline.runInputT Haskeline.defaultSettings $
+    evalStateT (runFutharkiM $ forever readEvalPrint) s
 
 interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config fp = do
@@ -100,7 +102,8 @@ interpret config fp = do
             putStrLn $ "empty(" ++ pretty (stripArray 1 t) ++ ")"
         | otherwise = putStrLn $ pretty v
 
-  case I.interpretFunction ienv (qualLeaf fname) inps of
+  r <- runInterpreter $ I.interpretFunction ienv (qualLeaf fname) inps
+  case r of
     Left err -> do hPrint stderr err
                    exitFailure
     Right res ->
@@ -137,12 +140,13 @@ newInterpreterState = do
   -- Load the builtins through the type checker.
   (_, imports, src) <- badOnLeft =<< runExceptT (readLibrary [])
   -- Then into the interpreter.
-  ienv <- badOnLeft $ foldM I.interpretImport I.initialCtx $ map (fmap fileProg) imports
+  ienv <- foldM (\ctx -> badOnLeft <=< runInterpreter . I.interpretImport ctx)
+          I.initialCtx $ map (fmap fileProg) imports
 
   -- Then make the prelude available in the type checker.
   (tenv, d) <- badOnLeft $ T.checkDec imports src T.initialEnv $ mkOpen "/futlib/prelude"
   -- Then in the interpreter.
-  ienv' <- badOnLeft $ I.interpretDec ienv d
+  ienv' <- badOnLeft =<< runInterpreter (I.interpretDec ienv d)
 
   return InterpreterState { interpImports = imports
                           , interpNameSource = src
@@ -162,13 +166,14 @@ loadProgram file = fmap (either (const Nothing) Just) $ runExceptT $ do
                           `Haskeline.catch` \(err::IOException) ->
                              return (Left (ExternalError (T.pack $ show err))))
 
-  ienv1 <- badOnLeft' $ foldM I.interpretImport I.initialCtx $ map (fmap fileProg) imports
+  ienv1 <- foldM (\ctx -> badOnLeft' <=< runInterpreter . I.interpretImport ctx) I.initialCtx $
+           map (fmap fileProg) imports
   (tenv1, d1) <- badOnLeft' $ T.checkDec imports src T.initialEnv $
                  mkOpen "/futlib/prelude"
   (tenv2, d2) <- badOnLeft' $ T.checkDec imports src tenv1 $
                  mkOpen $ toPOSIX $ dropExtension file
-  ienv2 <- badOnLeft' $ I.interpretDec ienv1 d1
-  ienv3 <- badOnLeft' $ I.interpretDec ienv2 d2
+  ienv2 <- badOnLeft' =<< runInterpreter (I.interpretDec ienv1 d1)
+  ienv3 <- badOnLeft' =<< runInterpreter (I.interpretDec ienv2 d2)
 
   return InterpreterState { interpImports = imports
                           , interpNameSource = src
@@ -189,7 +194,9 @@ getPrompt = do
 mkOpen :: FilePath -> UncheckedDec
 mkOpen f = OpenDec (ModImport f NoInfo noLoc) NoInfo noLoc
 
-type FutharkiM = StateT InterpreterState (Haskeline.InputT IO)
+newtype FutharkiM a =
+  FutharkiM { runFutharkiM :: StateT InterpreterState (Haskeline.InputT IO) a }
+  deriving (Functor, Applicative, Monad, MonadState InterpreterState, MonadIO)
 
 readEvalPrint :: FutharkiM ()
 readEvalPrint = do
@@ -215,7 +222,7 @@ readEvalPrint = do
         Right (Right e) -> onExp e
   modify $ \s -> s { interpCount = i + 1 }
   where inputLine prompt = do
-          inp <- lift $ Haskeline.getInputLine prompt
+          inp <- FutharkiM $ lift $ Haskeline.getInputLine prompt
           case inp of
             Just s -> return $ T.pack s
             Nothing -> liftIO $ do putStrLn "Leaving futharki."
@@ -233,20 +240,36 @@ onDec d = do
   (imports, src, tenv, ienv) <- getIt
   case T.checkDec imports src tenv d of
     Left e -> liftIO $ print e
-    Right (tenv', d') ->
-      case I.interpretDec ienv d' of
-        Left e -> liftIO $ print e
+    Right (tenv', d') -> do
+      r <- runInterpreter $ I.interpretDec ienv d'
+      case r of
+        Left err -> liftIO $ print err
         Right ienv' -> modify $ \s -> s { interpEnv = (tenv', ienv') }
 
 onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
-  case showErr . I.interpretExp ienv =<<
-       showErr (T.checkExp imports src tenv e) of
+  case showErr (T.checkExp imports src tenv e) of
     Left err -> liftIO $ putStrLn err
-    Right v -> liftIO $ putStrLn $ pretty v
+    Right e' -> do
+      r <- runInterpreter $ I.interpretExp ienv e'
+      case r of
+        Left err -> liftIO $ print err
+        Right v -> liftIO $ putStrLn $ pretty v
     where showErr :: Show a => Either a b -> Either String b
           showErr = either (Left . show) Right
+
+runInterpreter :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreter m = runF m (return . Right) intOp
+
+intOp :: MonadIO m =>
+         I.ExtOp (m (Either I.InterpreterError a))
+      -> m (Either I.InterpreterError a)
+intOp (I.ExtOpError err) =
+  return $ Left err
+intOp (I.ExtOpTrace w v c) = do
+  liftIO $ putStrLn $ "Trace at " ++ w ++ ": " ++ v
+  c
 
 type Command = T.Text -> FutharkiM ()
 

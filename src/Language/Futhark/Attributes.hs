@@ -787,7 +787,10 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b),
 
               ("stream_red_per",
-               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b)]
+               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b),
+
+
+              ("trace", IntrinsicPolyFun [tp_a] [t_a] t_a)]
 
   where tv_a = VName (nameFromString "a") 0
         tv_a' = typeName tv_a
