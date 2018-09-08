@@ -9,12 +9,12 @@ futharki
 SYNOPSIS
 ========
 
-futharki [infile]
+futharki [program]
 
 DESCRIPTION
 ===========
 
-When run with no options, start an interactive futharki session.  This
+When run with no options, start an interactive Futhark session.  This
 will let you interactively enter expressions and declarations which
 are then immediately interpreted.  If the entered line can be either a
 declaration or an expression, it is assumed to be a declaration.
@@ -30,7 +30,11 @@ and the result printed on standard output.  The parameters to ``main``
 are read from standard input.
 
 ``futharki`` is very slow, and in practice only useful for testing,
-teaching, and experimenting with the language.
+teaching, and experimenting with the language.  Certain special
+debugging functions are available in ``futharki``: ``trace`` and
+``break``.  Consult the basis library documentation for details.  The
+``break`` function is only available when starting a program from the
+prompt; not when passing a program on the command line.
 
 OPTIONS
 =======
