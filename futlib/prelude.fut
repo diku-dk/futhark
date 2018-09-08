@@ -20,3 +20,8 @@ let t64 (x: f64): i32 = i32.f64 x
 -- will be printed.
 let trace 't (x: t): t =
   intrinsics.trace x
+
+-- | Semantically just identity, but acts as a break point in
+-- `futharki`.
+let break 't (x: t): t =
+  intrinsics.break x
