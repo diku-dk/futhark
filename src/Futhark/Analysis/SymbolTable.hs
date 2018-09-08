@@ -323,9 +323,9 @@ lookupScalExp name vtable =
     (Just entry, _) -> asScalExp entry
     _ -> Nothing
 
-lookupValue :: VName -> SymbolTable lore -> Maybe (Value, Certificates)
+lookupValue :: VName -> SymbolTable lore -> Maybe (PrimValue, Certificates)
 lookupValue name vtable = case lookupSubExp name vtable of
-                            Just (Constant val, cs) -> Just (PrimVal val, cs)
+                            Just (Constant val, cs) -> Just (val, cs)
                             _                       -> Nothing
 
 lookupVar :: VName -> SymbolTable lore -> Maybe (VName, Certificates)

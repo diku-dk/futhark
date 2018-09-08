@@ -1272,7 +1272,7 @@ mulVals (IntValue v1) (IntValue v2) =
   return $ IntValue $ P.doMul v1 v2
 mulVals v1 v2 =
   badAlgSimplifyM $ "mulVals: operands not of (the same) numeral type! "++
-  pretty (PrimVal v1)++" "++pretty (PrimVal v2)
+  pretty v1++" "++pretty v2
 
 divVals :: PrimValue -> PrimValue -> AlgSimplifyM PrimValue
 divVals (IntValue v1) (IntValue v2) =

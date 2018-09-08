@@ -7,11 +7,7 @@
 -- This module implements a transformation from source to core
 -- Futhark.
 --
-module Futhark.Internalise
-  ( internaliseProg
-  , internaliseValue
-  )
-  where
+module Futhark.Internalise (internaliseProg) where
 
 import Control.Monad.State
 import Control.Monad.Reader
