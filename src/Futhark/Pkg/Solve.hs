@@ -17,7 +17,7 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Monoid ((<>))
 
-import Control.Monad.Free
+import Control.Monad.Free.Church
 
 import Futhark.Pkg.Info
 import Futhark.Pkg.Types
@@ -53,10 +53,10 @@ buildList roots (RoughBuildList pkgs) =
                        modify $ M.insert p v
                        unless listed $ mapM_ addPkg deps
 
-type SolveM = StateT RoughBuildList (Free PkgOp)
+type SolveM = StateT RoughBuildList (F PkgOp)
 
 getDeps :: PkgPath -> SemVer -> Maybe T.Text -> SolveM PkgRevDeps
-getDeps p v h = lift $ Free $ OpGetDeps p v h return
+getDeps p v h = lift $ liftF $ OpGetDeps p v h id
 
 -- | Given a list of immediate dependency minimum version constraints,
 -- find dependency versions that fit, including transitive
@@ -78,16 +78,16 @@ doSolveDeps (PkgRevDeps deps) = mapM_ add $ M.toList deps
 -- a cache of the lookups performed, as well as a build list.
 solveDeps :: MonadPkgRegistry m =>
              PkgRevDeps -> m BuildList
-solveDeps deps = fmap (buildList $ depRoots deps) $ step $
-                 execStateT (doSolveDeps deps) emptyRoughBuildList
-  where step (Pure x) = return x
-        step (Free (OpGetDeps p v h c)) = do
+solveDeps deps = buildList (depRoots deps) <$> runF
+                 (execStateT (doSolveDeps deps) emptyRoughBuildList)
+                 return step
+  where step (OpGetDeps p v h c) = do
           pinfo <- lookupPackageRev p v
 
           checkHash p v pinfo h
 
           d <- fmap pkgRevDeps . getManifest $ pkgRevGetManifest pinfo
-          step $ c d
+          c d
 
         checkHash _ _ _ Nothing = return ()
         checkHash p v pinfo (Just h)
@@ -105,10 +105,10 @@ type PkgRevDepInfo = M.Map (PkgPath, SemVer) PkgRevDeps
 -- | Perform package resolution with only pre-known information.  This
 -- is useful for testing.
 solveDepsPure :: PkgRevDepInfo -> PkgRevDeps -> Either T.Text BuildList
-solveDepsPure r deps = fmap (buildList $ depRoots deps) $ step $
-                       execStateT (doSolveDeps deps) emptyRoughBuildList
-  where step (Pure x) = Right x
-        step (Free (OpGetDeps p v _ c)) = do
+solveDepsPure r deps = buildList (depRoots deps) <$> runF
+                       (execStateT (doSolveDeps deps) emptyRoughBuildList)
+                       Right step
+  where step (OpGetDeps p v _ c) = do
           let errmsg = "Unknown package/version: " <> p <> "-" <> prettySemVer v
           d <- maybe (Left errmsg) Right $ M.lookup (p,v) r
-          step $ c d
+          c d
