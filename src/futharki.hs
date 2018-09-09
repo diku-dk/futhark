@@ -109,7 +109,7 @@ interpret config fp = do
     case M.lookup (T.Term, entry) $ T.envNameMap tenv of
       Just fname
         | Just (T.BoundV _ t) <- M.lookup (qualLeaf fname) $ T.envVtable tenv ->
-            return (fname, snd $ unfoldFunType t)
+            return (fname, toStructural $ snd $ unfoldFunType t)
       _ -> do hPutStrLn stderr $ "Invalid entry point: " ++ pretty entry
               exitFailure
 
@@ -122,7 +122,7 @@ interpret config fp = do
         (Just vs, Just ts) -> zipWithM_ putValue vs ts
         _ -> putValue res ret
 
-putValue :: I.Value -> StructType -> IO ()
+putValue :: I.Value -> TypeBase () () -> IO ()
 putValue v t
   | I.isEmptyArray v =
       putStrLn $ "empty(" ++ pretty (stripArray 1 t) ++ ")"
