@@ -1,6 +1,6 @@
 .. role:: ref(emphasis)
 
-.. _futhark-opencl(1):
+.. _futhark-csopencl(1):
 
 ================
 futhark-csopencl
