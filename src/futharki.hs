@@ -21,6 +21,7 @@ import Data.Semigroup ((<>))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
+import System.Directory
 import System.FilePath
 import System.Exit
 import System.Console.GetOpt
@@ -341,6 +342,12 @@ any declarations entered at the REPL.
             ("type", (typeCommand, [text|
 Show the type of an expression.
 |])),
+            ("pwd", (pwdCommand, [text|
+Print the current working directory.
+|])),
+            ("cd", (cdCommand, [text|
+Change the current working directory.
+|])),
             ("help", (helpCommand, [text|
 Print a list of commands and a description of their behaviour.
 |])),
@@ -372,6 +379,16 @@ typeCommand e = do
       case T.checkExp imports src tenv e' of
         Left err -> liftIO $ print err
         Right e'' -> liftIO $ putStrLn $ pretty e' <> " : " <> pretty (typeOf e'')
+
+pwdCommand :: Command
+pwdCommand _ = liftIO $ putStrLn =<< getCurrentDirectory
+
+cdCommand :: Command
+cdCommand dir
+ | T.null dir = liftIO $ putStrLn "Usage: ':cd <dir>'."
+ | otherwise =
+    liftIO $ setCurrentDirectory (T.unpack dir)
+    `Haskeline.catch` \(err::IOException) -> print err
 
 helpCommand :: Command
 helpCommand _ = liftIO $ forM_ commands $ \(cmd, (_, desc)) -> do
