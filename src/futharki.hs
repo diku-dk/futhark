@@ -145,7 +145,7 @@ options = [ Option "e" ["entry-point"]
 data FutharkiState =
   FutharkiState { futharkiImports :: Imports
                 , futharkiNameSource :: VNameSource
-                , futharkiCount :: (Int, [Int])
+                , futharkiCount :: Int
                 , futharkiEnv :: (T.Env, I.Ctx)
                 }
 
@@ -164,7 +164,7 @@ newFutharkiState = do
 
   return FutharkiState { futharkiImports = imports
                        , futharkiNameSource = src
-                       , futharkiCount = (0, [])
+                       , futharkiCount = 0
                        , futharkiEnv = (tenv, ienv')
                        }
   where badOnLeft (Right x) = return x
@@ -191,7 +191,7 @@ loadProgram file = fmap (either (const Nothing) Just) $ runExceptT $ do
 
   return FutharkiState { futharkiImports = imports
                        , futharkiNameSource = src
-                       , futharkiCount = (0, [])
+                       , futharkiCount = 0
                        , futharkiEnv = (tenv2, ienv3)
                        }
   where badOnLeft (Right x) = return x
@@ -202,8 +202,8 @@ loadProgram file = fmap (either (const Nothing) Just) $ runExceptT $ do
 
 getPrompt :: FutharkiM String
 getPrompt = do
-  (i, is) <- gets futharkiCount
-  return $ show (i:is) ++ "> "
+  i <- gets futharkiCount
+  return $ "[" ++ show i ++ "]> "
 
 mkOpen :: FilePath -> UncheckedDec
 mkOpen f = OpenDec (ModImport f NoInfo noLoc) NoInfo noLoc
@@ -236,8 +236,7 @@ readEvalPrint = do
         Left err -> liftIO $ print err
         Right (Left d) -> onDec d
         Right (Right e) -> onExp e
-  (i, is) <- gets futharkiCount
-  modify $ \s -> s { futharkiCount = (i + 1, is) }
+  modify $ \s -> s { futharkiCount = futharkiCount s + 1 }
   where inputLine prompt = do
           inp <- FutharkiM $ lift $ lift $ Haskeline.getInputLine prompt
           case inp of
@@ -292,7 +291,7 @@ runInterpreter m = runF m (return . Right) intOp
       s' <- FutharkiM $ lift $ lift $
             execStateT (runExceptT $ runFutharkiM $ forever readEvalPrint)
             s { futharkiEnv = (tenv <> fst (futharkiEnv s), ctx)
-              , futharkiCount = (0, uncurry (:) (futharkiCount s)) }
+              , futharkiCount = futharkiCount s + 1 }
       liftIO $ putStrLn "Continuing..."
       put s { futharkiCount = futharkiCount s' }
       c
