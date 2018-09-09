@@ -154,6 +154,8 @@ data FutharkiState =
                   -- ^ Are we currently stopped at a breakpoint?
                 , futharkiSkipBreaks :: [Loc]
                 -- ^ Skip breakpoints at these locations.
+                , futharkiLoaded :: Maybe T.Text
+                -- ^ The currently loaded file.
                 }
 
 newFutharkiState :: IO FutharkiState
@@ -175,6 +177,7 @@ newFutharkiState = do
                        , futharkiEnv = (tenv, ienv')
                        , futharkiBreaking = Nothing
                        , futharkiSkipBreaks = mempty
+                       , futharkiLoaded = Nothing
                        }
   where badOnLeft (Right x) = return x
         badOnLeft (Left err) = do
@@ -204,6 +207,7 @@ loadProgram file = fmap (either (const Nothing) Just) $ runExceptT $ do
                        , futharkiEnv = (tenv2, ienv3)
                        , futharkiBreaking = Nothing
                        , futharkiSkipBreaks = mempty
+                       , futharkiLoaded = Nothing
                        }
   where badOnLeft (Right x) = return x
         badOnLeft (Left err) = do liftIO $ dumpError newFutharkConfig err
@@ -335,51 +339,24 @@ runInterpreter' m = runF m (return . Right) intOp
 
 type Command = T.Text -> FutharkiM ()
 
-commands :: [(T.Text, (Command, T.Text))]
-commands = [("load", (loadCommand, [text|
-Load a Futhark source file.  Usage:
-
-  > :load foo.fut
-
-If the loading succeeds, any subsequentialy entered expressions entered
-subsequently will have access to the definition (such as function definitions)
-in the source file.
-
-Only one source file can be loaded at a time.  Using the :load command a
-second time will replace the previously loaded file.  It will also replace
-any declarations entered at the REPL.
-
-|])),
-            ("type", (typeCommand, [text|
-Show the type of an expression.
-|])),
-            ("unbreak", (unbreakCommand, [text|
-"Skip all future occurences of the current breakpoint.
-|])),
-            ("pwd", (pwdCommand, [text|
-Print the current working directory.
-|])),
-            ("cd", (cdCommand, [text|
-Change the current working directory.
-|])),
-            ("help", (helpCommand, [text|
-Print a list of commands and a description of their behaviour.
-|])),
-            ("quit", (quitCommand, [text|
-Quit futharki.
-|]))]
-
 loadCommand :: Command
-loadCommand file = void $ runExceptT $ do
-  liftIO $ T.putStrLn $ "Loading " <> file
-  r <- liftIO $ loadProgram $ T.unpack file
-  case r of
-    Just prog_env ->
-      modify $ \env -> env { futharkiImports = futharkiImports prog_env
-                           , futharkiNameSource = futharkiNameSource prog_env
-                           , futharkiEnv = futharkiEnv prog_env
-                           }
-    Nothing -> return ()
+loadCommand file = do
+  loaded <- gets futharkiLoaded
+  case (T.null file, loaded) of
+    (True, Just loaded') -> load loaded'
+    (True, Nothing) -> liftIO $ T.putStrLn "No file specified and no file previously loaded."
+    (False, _) -> load file
+  where load file' = do
+          liftIO $ T.putStrLn $ "Loading " <> file'
+          r <- liftIO $ loadProgram $ T.unpack file'
+          case r of
+            Just prog_env ->
+              modify $ \env -> env { futharkiImports = futharkiImports prog_env
+                                   , futharkiNameSource = futharkiNameSource prog_env
+                                   , futharkiEnv = futharkiEnv prog_env
+                                   , futharkiLoaded = Just file'
+                                   }
+            Nothing -> return ()
 
 typeCommand :: Command
 typeCommand e = do
@@ -422,3 +399,37 @@ helpCommand _ = liftIO $ forM_ commands $ \(cmd, (_, desc)) -> do
 
 quitCommand :: Command
 quitCommand _ = liftIO exitSuccess
+
+commands :: [(T.Text, (Command, T.Text))]
+commands = [("load", (loadCommand, [text|
+Load a Futhark source file.  Usage:
+
+  > :load foo.fut
+
+If the loading succeeds, any subsequentialy entered expressions entered
+subsequently will have access to the definition (such as function definitions)
+in the source file.
+
+Only one source file can be loaded at a time.  Using the :load command a
+second time will replace the previously loaded file.  It will also replace
+any declarations entered at the REPL.
+
+|])),
+            ("type", (typeCommand, [text|
+Show the type of an expression.
+|])),
+            ("unbreak", (unbreakCommand, [text|
+"Skip all future occurences of the current breakpoint.
+|])),
+            ("pwd", (pwdCommand, [text|
+Print the current working directory.
+|])),
+            ("cd", (cdCommand, [text|
+Change the current working directory.
+|])),
+            ("help", (helpCommand, [text|
+Print a list of commands and a description of their behaviour.
+|])),
+            ("quit", (quitCommand, [text|
+Quit futharki.
+|]))]
