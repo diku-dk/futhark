@@ -14,7 +14,7 @@ let computefibs [n] (arr: *[n]i32): *[]i32 =
     loop (arr) for i < n-2 do
                  let x = arr[i]
                  let y = arr[i+1]
-                 let arr[i+2] = x + break y
+                 let arr[i+2] = x + y
                  in arr
 
 let fibs(arr: []i32, n: i32): *[][]i32 =
