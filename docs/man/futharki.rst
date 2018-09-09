@@ -39,9 +39,9 @@ debugging functions are available in ``futharki``:
 ``break 'a : a -> a``
   Semantically identity, but interrupts execution at the calling
   point, such that the environment can be inspected.  Continue
-  execution by entering an empty input line.  This function is only
-  available when starting a program from the prompt; not when passing
-  a program on the command line.
+  execution by entering an empty input line.  Breakpoints are only
+  respected when starting a program from the prompt, not when
+  passing a program on the command line.
 
 OPTIONS
 =======
