@@ -145,7 +145,7 @@ options = [ Option "e" ["entry-point"]
 data FutharkiState =
   FutharkiState { futharkiImports :: Imports
                 , futharkiNameSource :: VNameSource
-                , futharkiCount :: Int
+                , futharkiCount :: (Int, [Int])
                 , futharkiEnv :: (T.Env, I.Ctx)
                 }
 
@@ -164,7 +164,7 @@ newFutharkiState = do
 
   return FutharkiState { futharkiImports = imports
                        , futharkiNameSource = src
-                       , futharkiCount = 0
+                       , futharkiCount = (0, [])
                        , futharkiEnv = (tenv, ienv')
                        }
   where badOnLeft (Right x) = return x
@@ -191,7 +191,7 @@ loadProgram file = fmap (either (const Nothing) Just) $ runExceptT $ do
 
   return FutharkiState { futharkiImports = imports
                        , futharkiNameSource = src
-                       , futharkiCount = 0
+                       , futharkiCount = (0, [])
                        , futharkiEnv = (tenv2, ienv3)
                        }
   where badOnLeft (Right x) = return x
@@ -202,9 +202,8 @@ loadProgram file = fmap (either (const Nothing) Just) $ runExceptT $ do
 
 getPrompt :: FutharkiM String
 getPrompt = do
-  i <- gets futharkiCount
-  modify $ \s -> s { futharkiCount = i + 1 }
-  return $ "[" ++ show i ++ "]"
+  (i, is) <- gets futharkiCount
+  return $ show (i:is) ++ "> "
 
 mkOpen :: FilePath -> UncheckedDec
 mkOpen f = OpenDec (ModImport f NoInfo noLoc) NoInfo noLoc
@@ -218,9 +217,8 @@ newtype FutharkiM a =
 
 readEvalPrint :: FutharkiM ()
 readEvalPrint = do
-  i <- gets futharkiCount
   prompt <- getPrompt
-  line <- inputLine $ "[" ++ show i ++ "]> "
+  line <- inputLine prompt
   case T.uncons line of
     Just (':', command) -> do
       let (cmdname, rest) = T.break isSpace command
@@ -238,6 +236,8 @@ readEvalPrint = do
         Left err -> liftIO $ print err
         Right (Left d) -> onDec d
         Right (Right e) -> onExp e
+  (i, is) <- gets futharkiCount
+  modify $ \s -> s { futharkiCount = (i + 1, is) }
   where inputLine prompt = do
           inp <- FutharkiM $ lift $ lift $ Haskeline.getInputLine prompt
           case inp of
@@ -291,7 +291,8 @@ runInterpreter m = runF m (return . Right) intOp
       -- line history and such).
       s' <- FutharkiM $ lift $ lift $
             execStateT (runExceptT $ runFutharkiM $ forever readEvalPrint)
-            s { futharkiEnv = (tenv <> fst (futharkiEnv s), ctx) }
+            s { futharkiEnv = (tenv <> fst (futharkiEnv s), ctx)
+              , futharkiCount = (0, uncurry (:) (futharkiCount s)) }
       liftIO $ putStrLn "Continuing..."
       put s { futharkiCount = futharkiCount s' }
       c
