@@ -31,10 +31,17 @@ are read from standard input.
 
 ``futharki`` is very slow, and in practice only useful for testing,
 teaching, and experimenting with the language.  Certain special
-debugging functions are available in ``futharki``: ``trace`` and
-``break``.  Consult the basis library documentation for details.  The
-``break`` function is only available when starting a program from the
-prompt; not when passing a program on the command line.
+debugging functions are available in ``futharki``:
+
+``trace 'a : a -> a``
+  Semantically identity, but prints the value on standard output.
+
+``break 'a : a -> a``
+  Semantically identity, but interrupts execution at the calling
+  point, such that the environment can be inspected.  Continue
+  execution by passing EOF (``<Ctrl>-d``).  This function is only
+  available when starting a program from the prompt; not when passing
+  a program on the command line.
 
 OPTIONS
 =======
