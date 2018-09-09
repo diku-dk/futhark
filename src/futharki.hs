@@ -357,7 +357,7 @@ Quit futharki.
 
 loadCommand :: Command
 loadCommand file = void $ runExceptT $ do
-  liftIO $ T.putStrLn $ "Reading " <> file
+  liftIO $ T.putStrLn $ "Loading " <> file
   r <- liftIO $ loadProgram $ T.unpack file
   case r of
     Just prog_env ->
