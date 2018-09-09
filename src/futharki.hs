@@ -290,7 +290,7 @@ runInterpreter m = runF m (return . Right) intOp
       -- line history and such).
       s' <- FutharkiM $ lift $ lift $
             execStateT (runExceptT $ runFutharkiM $ forever readEvalPrint)
-            s { futharkiEnv = (tenv <> fst (futharkiEnv s), ctx)
+            s { futharkiEnv = (tenv, ctx)
               , futharkiCount = futharkiCount s + 1 }
       liftIO $ putStrLn "Continuing..."
       put s { futharkiCount = futharkiCount s' }

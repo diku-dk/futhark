@@ -810,14 +810,6 @@ data Ctx = Ctx { ctxEnv :: Env
                , ctxImports :: M.Map FilePath Env
                }
 
--- | The environment, but with all types set to Nothing.  This means
--- they will not be seen as local definitions for the purposes of
--- 'break' and such.
-nonlocalEnv :: Env -> Env
-nonlocalEnv env = env { envTerm = M.map hide $ envTerm env }
-  where hide (TermValue _ v) = TermValue Nothing v
-        hide x = x
-
 -- | The initial environment contains definitions of the various intrinsic functions.
 initialCtx :: Ctx
 initialCtx =
@@ -1093,12 +1085,12 @@ interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
 interpretDec :: Ctx -> Dec -> F ExtOp Ctx
 interpretDec ctx d = do
   env <- runEvalM (ctxImports ctx) $ evalDec (ctxEnv ctx) d
-  return ctx { ctxEnv = nonlocalEnv env }
+  return ctx { ctxEnv = env }
 
 interpretImport :: Ctx -> (FilePath, Prog) -> F ExtOp Ctx
 interpretImport ctx (fp, prog) = do
   env <- runEvalM (ctxImports ctx) $ foldM evalDec (ctxEnv ctx) $ progDecs prog
-  return ctx { ctxImports = M.insert fp (nonlocalEnv env) $ ctxImports ctx }
+  return ctx { ctxImports = M.insert fp env $ ctxImports ctx }
 
 -- | Execute the named function on the given arguments; will fail
 -- horribly if these are ill-typed.
