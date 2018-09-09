@@ -65,19 +65,20 @@ repl = do
   putStrLn ""
   putStrLn "Run :help for a list of commands."
   putStrLn ""
-  s <- newFutharkiState
-  let toploop = do
-        void $ evalStateT (runExceptT $ runFutharkiM $ forever readEvalPrint) s
+  init_s <- newFutharkiState
+  let toploop s = do
+        s' <- execStateT (runExceptT $ runFutharkiM $ forever readEvalPrint) s
         quit <- confirmQuit
         if quit
           then liftIO $ putStrLn "Leaving futharki."
-          else toploop
-  Haskeline.runInputT Haskeline.defaultSettings toploop
+          else toploop s'
+  Haskeline.runInputT Haskeline.defaultSettings $ toploop init_s
 
 confirmQuit :: Haskeline.InputT IO Bool
 confirmQuit = do
   c <- Haskeline.getInputChar "Quit futharki? (y/n) "
   case c of
+    Nothing -> return True -- EOF
     Just 'y' -> return True
     Just 'n' -> return False
     _        -> confirmQuit
