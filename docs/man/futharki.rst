@@ -39,7 +39,7 @@ debugging functions are available in ``futharki``:
 ``break 'a : a -> a``
   Semantically identity, but interrupts execution at the calling
   point, such that the environment can be inspected.  Continue
-  execution by passing EOF (``<Ctrl>-d``).  This function is only
+  execution by entering an empty input line.  This function is only
   available when starting a program from the prompt; not when passing
   a program on the command line.
 

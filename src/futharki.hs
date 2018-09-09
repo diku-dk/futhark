@@ -28,7 +28,7 @@ import System.IO
 import qualified System.Console.Haskeline as Haskeline
 
 import Language.Futhark
-import Language.Futhark.Parser
+import Language.Futhark.Parser hiding (EOF)
 import qualified Language.Futhark.TypeChecker as T
 import qualified Language.Futhark.Semantic as T
 import Futhark.MonadFreshNames
@@ -147,6 +147,8 @@ data FutharkiState =
                 , futharkiNameSource :: VNameSource
                 , futharkiCount :: Int
                 , futharkiEnv :: (T.Env, I.Ctx)
+                , futharkiBreaking :: Bool
+                  -- ^ Are we currently stopped at a breakpoint?
                 }
 
 newFutharkiState :: IO FutharkiState
@@ -166,6 +168,7 @@ newFutharkiState = do
                        , futharkiNameSource = src
                        , futharkiCount = 0
                        , futharkiEnv = (tenv, ienv')
+                       , futharkiBreaking = False
                        }
   where badOnLeft (Right x) = return x
         badOnLeft (Left err) = do
@@ -193,6 +196,7 @@ loadProgram file = fmap (either (const Nothing) Just) $ runExceptT $ do
                        , futharkiNameSource = src
                        , futharkiCount = 0
                        , futharkiEnv = (tenv2, ienv3)
+                       , futharkiBreaking = False
                        }
   where badOnLeft (Right x) = return x
         badOnLeft (Left err) = do liftIO $ dumpError newFutharkConfig err
@@ -208,18 +212,25 @@ getPrompt = do
 mkOpen :: FilePath -> UncheckedDec
 mkOpen f = OpenDec (ModImport f NoInfo noLoc) NoInfo noLoc
 
+data StopReason = EOF | Stop
+
 -- The ExceptT part is just so we have an easy way of ending the L
 -- part of the REPL.
 newtype FutharkiM a =
-  FutharkiM { runFutharkiM :: ExceptT () (StateT FutharkiState (Haskeline.InputT IO)) a }
+  FutharkiM { runFutharkiM :: ExceptT StopReason (StateT FutharkiState (Haskeline.InputT IO)) a }
   deriving (Functor, Applicative, Monad,
-            MonadState FutharkiState, MonadIO, MonadError ())
+            MonadState FutharkiState, MonadIO, MonadError StopReason)
 
 readEvalPrint :: FutharkiM ()
 readEvalPrint = do
   prompt <- getPrompt
   line <- inputLine prompt
+  breaking <- gets futharkiBreaking
   case T.uncons line of
+    Nothing
+      | breaking -> throwError Stop
+      | otherwise -> return ()
+
     Just (':', command) -> do
       let (cmdname, rest) = T.break isSpace command
           arg = T.dropWhileEnd isSpace $ T.dropWhile isSpace rest
@@ -228,6 +239,7 @@ readEvalPrint = do
         [(_, (cmdf, _))] -> cmdf arg
         matches -> liftIO $ T.putStrLn $ "Ambiguous command; could be one of " <>
                    mconcat (intersperse ", " (map fst matches))
+
     _ -> do
       -- Read a declaration or expression.
       maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
@@ -241,7 +253,7 @@ readEvalPrint = do
           inp <- FutharkiM $ lift $ lift $ Haskeline.getInputLine prompt
           case inp of
             Just s -> return $ T.pack s
-            Nothing -> throwError ()
+            Nothing -> throwError EOF
 
 getIt :: FutharkiM (Imports, VNameSource, T.Env, I.Ctx)
 getIt = do
@@ -283,17 +295,22 @@ runInterpreter m = runF m (return . Right) intOp
       liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
       c
     intOp (I.ExtOpBreak w ctx tenv c) = do
-      liftIO $ putStrLn $ "Breaking at " ++ intercalate " -> " (map locStr w) ++ "."
-      liftIO $ putStrLn "<Ctrl-d> to continue."
       s <- get
-      -- Note the cleverness to preserve the Haskeline session (for
-      -- line history and such).
-      s' <- FutharkiM $ lift $ lift $
-            execStateT (runExceptT $ runFutharkiM $ forever readEvalPrint)
-            s { futharkiEnv = (tenv, ctx)
-              , futharkiCount = futharkiCount s + 1 }
-      liftIO $ putStrLn "Continuing..."
-      put s { futharkiCount = futharkiCount s' }
+      -- We do not want recursive breakpoints.  It could work fine
+      -- technically, but is probably too confusing to be useful.
+      unless (futharkiBreaking s) $ do
+        liftIO $ putStrLn $ "Breaking at " ++ intercalate " -> " (map locStr w) ++ "."
+        liftIO $ putStrLn "<Enter> to continue."
+
+        -- Note the cleverness to preserve the Haskeline session (for
+        -- line history and such).
+        s' <- FutharkiM $ lift $ lift $
+              execStateT (runExceptT $ runFutharkiM $ forever readEvalPrint)
+              s { futharkiEnv = (tenv, ctx)
+                , futharkiCount = futharkiCount s + 1
+                , futharkiBreaking = True }
+        liftIO $ putStrLn "Continuing..."
+        put s { futharkiCount = futharkiCount s' }
       c
 
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
