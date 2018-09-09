@@ -172,10 +172,8 @@ lookupVar = lookupInEnv envTerm
 lookupType :: QualName VName -> Env -> Maybe T.TypeBinding
 lookupType = lookupInEnv envType
 
--- | A TermValue with a 'Nothing' type annotation is an intrinsic.  Or
--- to put it another way, it is only 'Just' for names that have been
--- bound during interpretation
-data TermBinding = TermValue (Maybe (TypeBase () ())) Value
+-- | A TermValue with a 'Nothing' type annotation is an intrinsic.
+data TermBinding = TermValue (Maybe T.BoundV) Value
                  | TermModule Module
 
 data Module = Module Env
@@ -194,7 +192,7 @@ instance Sem.Semigroup Env where
 
 newtype InterpreterError = InterpreterError String
 
-valEnv :: M.Map VName (Maybe (TypeBase () ()), Value) -> Env
+valEnv :: M.Map VName (Maybe T.BoundV, Value) -> Env
 valEnv m = Env { envTerm = M.map (uncurry TermValue) m
                , envType = mempty
                }
@@ -220,7 +218,7 @@ trace v = do
 typeEnv :: Env -> T.Env
 typeEnv env =
   -- FIXME: some shadowing issues are probably not right here.
-  let valMap (TermValue (Just t) _) = Just $ T.BoundV [] $ vacuousShapeAnnotations t
+  let valMap (TermValue (Just t) _) = Just t
       valMap _ = Nothing
       vtable = M.mapMaybe valMap $ envTerm env
       nameMap k | k `M.member` vtable = Just ((T.Term, baseName k), qualName k)
@@ -264,14 +262,14 @@ apply2 loc env f x y = stacking loc env $ do f' <- apply noLoc mempty f x
                                              apply noLoc mempty f' y
 
 matchPattern :: Env -> Pattern -> Value
-             -> EvalM (M.Map VName (Maybe (TypeBase () ()), Value))
+             -> EvalM (M.Map VName (Maybe T.BoundV, Value))
 matchPattern env = matchPattern' env mempty
 
-matchPattern' :: Env -> M.Map VName (Maybe (TypeBase () ()), Value)
+matchPattern' :: Env -> M.Map VName (Maybe T.BoundV, Value)
               -> Pattern -> Value
-              -> EvalM (M.Map VName (Maybe (TypeBase () ()), Value))
+              -> EvalM (M.Map VName (Maybe T.BoundV, Value))
 matchPattern' _ m (Id v (Info t) _) val =
-  pure $ M.insert v (Just $ toStructural t, val) m
+  pure $ M.insert v (Just $ T.BoundV [] $ toStruct t, val) m
 matchPattern' env m (PatternParens p _) val =
   matchPattern' env m p val
 matchPattern' env m (TuplePattern ps _) (ValueRecord vs) =
@@ -292,10 +290,10 @@ matchPattern' _ _ pat v =
 -- | For matching size annotations (the actual type will have been
 -- verified by the type checker).  It is assumed that previously
 -- unbound names are in binding position here.
-matchValueToType :: Env -> M.Map VName (Maybe (TypeBase () ()), Value)
+matchValueToType :: Env -> M.Map VName (Maybe T.BoundV, Value)
                  -> StructType
                  -> Value
-                 -> Either String (M.Map VName (Maybe (TypeBase () ()), Value))
+                 -> Either String (M.Map VName (Maybe T.BoundV, Value))
 
 -- Empty arrays always match.
 matchValueToType env m t@(Array _ (ShapeDecl ds@(d:_)) _) val@(ValueArray arr)
@@ -311,7 +309,7 @@ matchValueToType env m t@(Array _ (ShapeDecl ds@(d:_)) _) val@(ValueArray arr)
               else wrong $ "`" <> pretty v <> "` (" <> pretty x <> ")"
           | otherwise ->
               continue $ M.insert (qualLeaf v)
-              (Just $ Prim $ Signed Int32,
+              (Just $ T.BoundV [] $ Prim $ Signed Int32,
                ValuePrim $ SignedValue $ Int32Value arr_n)
               m
         AnyDim -> continue m
@@ -339,7 +337,7 @@ matchValueToType env m t@(Array _ (ShapeDecl ds@(d:_)) _) val@(ValueArray arr)
         zeroDim (ConstDim x) = x == 0
 
         namedAreZero (NamedDim v) =
-          M.singleton (qualLeaf v) (Just $ Prim $ Signed Int32,
+          M.singleton (qualLeaf v) (Just $ T.BoundV [] $ Prim $ Signed Int32,
                                     ValuePrim $ SignedValue $ Int32Value 0)
         namedAreZero _ = mempty
 
@@ -546,7 +544,7 @@ eval env (LetPat _ p e body _) = do
 
 eval env (LetFun f (tparams, pats, _, Info ret, fbody) body loc) = do
   v <- eval env $ Lambda tparams pats fbody Nothing (Info (mempty, ret)) loc
-  let ftype = toStructural $ foldr (uncurry (Arrow ()) . patternParam) ret pats
+  let ftype = T.BoundV [] $ foldr (uncurry (Arrow ()) . patternParam) ret pats
   eval (valEnv (M.singleton f (Just ftype, v)) <> env) body
 
 eval _ (IntLit v (Info t) _) =
@@ -620,8 +618,8 @@ eval env (LetWith dest src is v body loc) = do
   dest' <- maybe oob return =<<
     updateArray <$> mapM (evalDimIndex env) is <*>
     evalTermVar env (qualName $ identName src) <*> eval env v
-  eval (valEnv (M.singleton (identName dest)
-                (Just $ toStructural $ unInfo $ identType dest, dest')) <> env) body
+  let t = T.BoundV [] $ vacuousShapeAnnotations $ toStruct $ unInfo $ identType dest
+  eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where oob = bad loc env "Bad update"
 
 -- We treat zero-parameter lambdas as simply an expression to
@@ -687,7 +685,7 @@ eval env (DoLoop _ pat init_e form body _) = do
           | otherwise = do
               env' <- withLoopParams v
               forLoop iv bound (inc i) =<<
-                eval (valEnv (M.singleton iv (Just $ Prim $ Signed Int32,
+                eval (valEnv (M.singleton iv (Just $ T.BoundV [] $ Prim $ Signed Int32,
                                               ValuePrim (SignedValue i))) <> env') body
 
         whileLoop cond v = do
@@ -783,7 +781,7 @@ evalDec :: Env -> Dec -> EvalM Env
 
 evalDec env (ValDec (ValBind _ v _ (Info t) tps ps def _ loc)) = do
   t' <- evalType env t
-  let ftype = toStructural $ foldr (uncurry (Arrow ()) . patternParam) t' ps
+  let ftype = T.BoundV tps $ foldr (uncurry (Arrow ()) . patternParam) t' ps
   val <- eval env $ Lambda tps ps def Nothing (Info (mempty, t')) loc
   return $ valEnv (M.singleton v (Just ftype, val)) <> env
 
