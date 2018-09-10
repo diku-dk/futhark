@@ -303,6 +303,12 @@ offsetMemoryInExp offsets (Op (Inner (GroupReduce w lam input))) = do
   body <- offsetMemoryInBody offsets $ lambdaBody lam
   let lam' = lam { lambdaBody = body }
   return $ Op $ Inner $ GroupReduce w lam' input
+offsetMemoryInExp offsets (Op (Inner (GroupGenReduce w dests lam nes vals locks))) = do
+  body <- offsetMemoryInBody offsets $ lambdaBody lam
+  let lam' = lam { lambdaBody = body
+                 , lambdaParams = map (offsetMemoryInParam offsets) $ lambdaParams lam
+                 }
+  return $ Op $ Inner $ GroupGenReduce w dests lam' nes vals locks
 offsetMemoryInExp offsets (Op (Inner (Combine cspace ts active body))) =
   Op . Inner . Combine cspace ts active <$> offsetMemoryInBody offsets body
 offsetMemoryInExp offsets e = mapExpM recurse e
