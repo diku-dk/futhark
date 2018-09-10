@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
     * `futlib/random` => https://github.com/diku-dk/cpprandom
 
+    * `futlib/segmented` => https://github.com/diku-dk/segmented
+
     * `futlib/sobol` => https://github.com/diku-dk/sobol
 
     * `futlib/vector` => https://github.com/athas/vector
