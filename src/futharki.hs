@@ -167,12 +167,12 @@ newFutharkiState = do
           I.initialCtx $ map (fmap fileProg) imports
 
   -- Then make the prelude available in the type checker.
-  (tenv, d) <- badOnLeft $ T.checkDec imports src T.initialEnv $ mkOpen "/futlib/prelude"
+  (tenv, d, src') <- badOnLeft $ T.checkDec imports src T.initialEnv $ mkOpen "/futlib/prelude"
   -- Then in the interpreter.
   ienv' <- badOnLeft =<< runInterpreter' (I.interpretDec ienv d)
 
   return FutharkiState { futharkiImports = imports
-                       , futharkiNameSource = src
+                       , futharkiNameSource = src'
                        , futharkiCount = 0
                        , futharkiEnv = (tenv, ienv')
                        , futharkiBreaking = Nothing
@@ -194,15 +194,15 @@ loadProgram file = fmap (either (const Nothing) Just) $ runExceptT $ do
 
   ienv1 <- foldM (\ctx -> badOnLeft' <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
            map (fmap fileProg) imports
-  (tenv1, d1) <- badOnLeft' $ T.checkDec imports src T.initialEnv $
-                 mkOpen "/futlib/prelude"
-  (tenv2, d2) <- badOnLeft' $ T.checkDec imports src tenv1 $
-                 mkOpen $ toPOSIX $ dropExtension file
+  (tenv1, d1, src') <- badOnLeft' $ T.checkDec imports src T.initialEnv $
+                       mkOpen "/futlib/prelude"
+  (tenv2, d2, src'') <- badOnLeft' $ T.checkDec imports src' tenv1 $
+                        mkOpen $ toPOSIX $ dropExtension file
   ienv2 <- badOnLeft' =<< runInterpreter' (I.interpretDec ienv1 d1)
   ienv3 <- badOnLeft' =<< runInterpreter' (I.interpretDec ienv2 d2)
 
   return FutharkiState { futharkiImports = imports
-                       , futharkiNameSource = src
+                       , futharkiNameSource = src''
                        , futharkiCount = 0
                        , futharkiEnv = (tenv2, ienv3)
                        , futharkiBreaking = Nothing
@@ -290,7 +290,7 @@ onDec d = do
     Right (_, imports',  src') ->
       case T.checkDec imports' src' tenv d of
         Left e -> liftIO $ print e
-        Right (tenv', d') -> do
+        Right (tenv', d', src'') -> do
           let new_imports = filter ((`notElem` map fst imports) . fst) imports'
           int_r <- runInterpreter $ do
             let onImport ienv' (s, imp) =
@@ -301,6 +301,7 @@ onDec d = do
             Left err -> liftIO $ print err
             Right ienv' -> modify $ \s -> s { futharkiEnv = (tenv', ienv')
                                             , futharkiImports = imports'
+                                            , futharkiNameSource = src''
                                             }
 
 onExp :: UncheckedExp -> FutharkiM ()

@@ -14,8 +14,8 @@ module Language.Futhark.TypeChecker
   )
   where
 
-import Control.Monad.Except hiding (mapM)
-import Control.Monad.Writer hiding (mapM)
+import Control.Monad.Except
+import Control.Monad.Writer
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -71,12 +71,12 @@ checkDec :: Imports
          -> VNameSource
          -> Env
          -> UncheckedDec
-         -> Either TypeError (Env, Dec)
+         -> Either TypeError (Env, Dec, VNameSource)
 checkDec files src env d = do
-  (env', _, _) <- runTypeM env files' (mkInitialImport "") src $ do
+  ((env', d'), _, src') <- runTypeM env files' (mkInitialImport "") src $ do
     (_, env', d') <- checkOneDec d
     return (env' <> env, d')
-  return env'
+  return (env', d', src')
   where files' = M.map fileEnv $ M.fromList files
 
 -- | An initial environment for the type checker, containing
