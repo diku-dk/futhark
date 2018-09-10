@@ -276,13 +276,32 @@ getIt = do
 onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
   (imports, src, tenv, ienv) <- getIt
-  case T.checkDec imports src tenv d of
+
+  -- Most of the complexity here concerns the dealing with the fact
+  -- that 'import "foo"' is a declaration.  We have to involve a lot
+  -- of machinery to load this external code before executing the
+  -- declaration itself.
+  let basis = Basis imports src ["/futlib/prelude"]
+      mkImport = uncurry $ T.mkImportFrom $ T.mkInitialImport "."
+  imp_r <- runExceptT $ readImports basis (map mkImport $ decImports d)
+
+  case imp_r of
     Left e -> liftIO $ print e
-    Right (tenv', d') -> do
-      r <- runInterpreter $ I.interpretDec ienv d'
-      case r of
-        Left err -> liftIO $ print err
-        Right ienv' -> modify $ \s -> s { futharkiEnv = (tenv', ienv') }
+    Right (_, imports',  src') ->
+      case T.checkDec imports' src' tenv d of
+        Left e -> liftIO $ print e
+        Right (tenv', d') -> do
+          let new_imports = filter ((`notElem` map fst imports) . fst) imports'
+          int_r <- runInterpreter $ do
+            let onImport ienv' (s, imp) =
+                  I.interpretImport ienv' (s, T.fileProg imp)
+            ienv' <- foldM onImport ienv new_imports
+            I.interpretDec ienv' d'
+          case int_r of
+            Left err -> liftIO $ print err
+            Right ienv' -> modify $ \s -> s { futharkiEnv = (tenv', ienv')
+                                            , futharkiImports = imports'
+                                            }
 
 onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do

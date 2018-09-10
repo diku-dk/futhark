@@ -17,6 +17,7 @@ module Language.Futhark.Attributes
   , valueType
   , leadingOperator
   , progImports
+  , decImports
   , progModuleTypes
   , identifierReference
   , identifierReferences
@@ -896,22 +897,27 @@ qualify k (QualName ks v) = QualName (k:ks) v
 typeName :: VName -> TypeName
 typeName = typeNameFromQualName . qualName
 
+-- | The modules imported by a Futhark program.
 progImports :: ProgBase f vn -> [(String,SrcLoc)]
 progImports = concatMap decImports . progDecs
-  where decImports (OpenDec x _ _) = modExpImports x
-        decImports (ModDec md) = modExpImports $ modExp md
-        decImports SigDec{} = []
-        decImports TypeDec{} = []
-        decImports ValDec{} = []
-        decImports (LocalDec d _) = decImports d
 
-        modExpImports ModVar{}              = []
-        modExpImports (ModParens p _)       = modExpImports p
-        modExpImports (ModImport f _ loc)   = [(f,loc)]
-        modExpImports (ModDecs ds _)        = concatMap decImports ds
-        modExpImports (ModApply _ me _ _ _) = modExpImports me
-        modExpImports (ModAscript me _ _ _) = modExpImports me
-        modExpImports ModLambda{}           = []
+-- | The modules imported by a single declaration.
+decImports :: DecBase f vn -> [(String,SrcLoc)]
+decImports (OpenDec x _ _) = modExpImports x
+decImports (ModDec md) = modExpImports $ modExp md
+decImports SigDec{} = []
+decImports TypeDec{} = []
+decImports ValDec{} = []
+decImports (LocalDec d _) = decImports d
+
+modExpImports :: ModExpBase f vn -> [(String,SrcLoc)]
+modExpImports ModVar{}              = []
+modExpImports (ModParens p _)       = modExpImports p
+modExpImports (ModImport f _ loc)   = [(f,loc)]
+modExpImports (ModDecs ds _)        = concatMap decImports ds
+modExpImports (ModApply _ me _ _ _) = modExpImports me
+modExpImports (ModAscript me _ _ _) = modExpImports me
+modExpImports ModLambda{}           = []
 
 -- | The set of module types used in any exported (non-local)
 -- declaration.
