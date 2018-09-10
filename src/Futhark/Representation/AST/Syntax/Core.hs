@@ -54,7 +54,6 @@ module Futhark.Representation.AST.Syntax.Core
          ) where
 
 import Control.Monad.State
-import Data.Array
 import Data.Maybe
 import Data.Monoid ((<>))
 import Data.String
