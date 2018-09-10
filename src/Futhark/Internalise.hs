@@ -667,6 +667,53 @@ internaliseExp desc (E.Reduce comm lam ne arr loc) =
   where reduce w red_lam nes arrs =
           I.Screma w <$> I.reduceSOAC comm red_lam nes <*> pure arrs
 
+internaliseExp desc (E.GenReduce hist op ne buckets img loc) = do
+  ne' <- internaliseExp "gen_reduce_ne" ne
+  hist' <- internaliseExpToVars "gen_reduce_hist" hist
+  buckets' <- letExp "gen_reduce_buckets" . BasicOp . SubExp =<<
+              internaliseExp1 "gen_reduce_buckets" buckets
+  img' <- internaliseExpToVars "gen_reduce_img" img
+
+  -- reshape neutral element to have same size as the destination array
+  ne_shp <- forM (zip ne' hist') $ \(n, h) -> do
+    rowtype <- I.stripArray 1 <$> lookupType h
+    ensureShape asserting
+      "Row shape of destination array does not match shape of neutral element"
+      loc rowtype "gen_reduce_ne_right_shape" n
+  ne_ts <- mapM I.subExpType ne_shp
+  his_ts <- mapM lookupType hist'
+  op' <- internaliseFoldLambda internaliseLambda op ne_ts his_ts
+
+  -- reshape return type of bucket function to have same size as neutral element
+  -- (modulo the index)
+  bucket_param <- newParam "bucket_p" $ I.Prim int32
+  img_params <- mapM (newParam "img_p" . rowType) =<< mapM lookupType img'
+  let params = bucket_param : img_params
+      rettype = I.Prim int32 : ne_ts
+      body = mkBody mempty $ map (I.Var . paramName) params
+  body' <- localScope (scopeOfLParams params) $
+           ensureResultShape asserting
+           "Row shape of value array does not match row shape of gen_reduce target"
+           (srclocOf img) rettype body
+
+  -- get sizes of histogram and image arrays
+  w_hist <- arraysSize 0 <$> mapM lookupType hist'
+  w_img <- arraysSize 0 <$> mapM lookupType img'
+
+  -- Generate an assertion and reshapes to ensure that buckets' and
+  -- img' are the same size.
+  b_shape <- arrayShape <$> lookupType buckets'
+  let b_w = shapeSize 0 b_shape
+  cmp <- letSubExp "bucket_cmp" $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) b_w w_img
+  c <- assertingOne $
+    letExp "bucket_cert" $ I.BasicOp $
+    I.Assert cmp "length of index and value array does not match" (loc, mempty)
+  buckets'' <- certifying c $ letExp (baseString buckets') $
+    I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
+
+  letTupExp' desc $ I.Op $
+    I.GenReduce w_img [GenReduceOp w_hist hist' ne_shp op'] (I.Lambda params body' rettype) $ buckets'' : img'
+
 internaliseExp desc (E.Scan lam ne arr loc) =
   internaliseScanOrReduce desc "scan" scan (lam, ne, arr, loc)
   where scan w scan_lam nes arrs =

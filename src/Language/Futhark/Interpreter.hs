@@ -885,6 +885,11 @@ initialCtx =
       case fromTuple v of Just [x,y,z] -> f x y z
                           _ -> error $ "Expected triple; got: " ++ pretty v
 
+    fun5t f =
+      TermValue Nothing $ ValueFun $ \v ->
+      case fromTuple v of Just [x,y,z,a,b] -> f x y z a b
+                          _ -> error $ "Expected quintuple; got: " ++ pretty v
+
     bopDef fs = fun2 $ \x y ->
       case (x, y) of
         (ValuePrim x', ValuePrim y')
@@ -1012,6 +1017,20 @@ initialCtx =
       where update arr' (i, v) =
               if i >= 0 && i < arrayLength arr'
               then arr' // [(i, v)] else arr'
+
+    def "gen_reduce" = Just $ fun5t $ \arr fun _ is vs ->
+      case arr of
+        ValueArray arr' ->
+          ValueArray <$> foldM (update fun) arr'
+          (zip (map asInt $ fromArray is) (fromArray vs))
+        _ ->
+          error $ "gen_reduce expects array, but got: " ++ pretty arr
+      where update fun arr' (i, v) =
+              if i >= 0 && i < arrayLength arr'
+              then do
+                v' <- apply2 noLoc mempty fun (arr' ! i) v
+                return $ arr' // [(i, v')]
+              else return arr'
 
     def "partition" = Just $ fun3t $ \k f xs ->
       let next outs x = do

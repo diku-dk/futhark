@@ -1018,6 +1018,98 @@ compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w m
       where isSimpleThreadInSpace (Let _ _ Op{}) = Nothing
             isSimpleThreadInSpace bnd = Just bnd
 
+compileKernelExp _constants _ (GroupGenReduce w arrs op bucket values locks) = do
+  -- Code generation target:
+  --
+  -- while(!done) {
+  --   if( atomicExch((int *)&d_locks[idx], 1) == 0 ) {
+  --     d_his[idx] = OP::apply(d_his[idx], val);
+  --     __threadfence();
+  --     atomicExch((int *)&d_locks[idx], 0);
+  --     done = 1;
+  --   }
+  -- }
+
+  -- Helpers
+  let mone = -1
+      zero = 0
+      one  = 1
+
+  old <- newVName "old"
+  tmp <- newVName "tmp"
+  loop_done <- newVName "loop_done"
+  ImpGen.emit $
+    Imp.DeclareScalar old int32 <>
+    Imp.DeclareScalar tmp int32 <>
+    Imp.DeclareScalar loop_done int32
+
+  -- Check if bucket is in-bounds
+  bucket' <- ImpGen.compileSubExp bucket
+  -- arr_sz <- ImpGen.compileSubExp =<< (arraySize 0) <$> lookupType a
+  arr_sz <- ImpGen.compileSubExp w
+
+  ImpGen.emit $
+    Imp.If (Imp.BinOpExp LogAnd
+             (Imp.CmpOpExp (CmpSlt Int32) mone bucket')    -- -1 < bucket
+             (Imp.CmpOpExp (CmpSlt Int32)  bucket' arr_sz)) -- bucket < arr_sz
+    -- True branch: bucket in-bounds -> enter loop
+    (Imp.SetScalar loop_done zero)
+    -- False branch: bucket out-of-bounds -> skip loop
+    (Imp.SetScalar loop_done one)
+
+  -- Preparing parameters
+  let (acc_params, arr_params) =
+        splitAt (length values) $ lambdaParams op
+
+  -- Store result from operator in accumulators
+  dests <- ImpGen.destinationFromParams acc_params
+
+  -- Locate locks array
+  locks_entry <- ImpGen.lookupArray locks
+  let locks'  = ImpGen.memLocationName $ ImpGen.entryArrayLocation locks_entry
+
+  -- Critical section
+  ImpGen.declaringLParams (lambdaParams op) $ do
+    let try_acquire_lock =
+          Imp.Op $ Imp.Atomic $ Imp.AtomicXchg old locks' (Imp.elements bucket') one
+        lock_acquired =
+          Imp.CmpOpExp (CmpEq int32) (Imp.var old int32) zero
+        loop_cond =
+          Imp.CmpOpExp (CmpEq int32) (Imp.var loop_done int32) zero
+        break_loop =
+          Imp.SetScalar loop_done one
+
+    bind_acc_params <- ImpGen.collect $
+      forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
+      ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName acc_p) [] (Var arr) [bucket']
+
+    bind_arr_params <- ImpGen.collect $
+      forM_ (zip arr_params values) $ \(arr_p, val) ->
+      ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName arr_p) [] val []
+
+    op_body <- ImpGen.collect $
+      ImpGen.compileBody dests $ lambdaBody op
+
+    do_gen_reduce <- ImpGen.collect $
+      zipWithM_ (writeOpResult bucket') acc_params arrs
+
+    release_lock <- ImpGen.collect $
+      ImpGen.copyDWIM locks [bucket'] (intConst Int32 0) []
+
+    -- While-loop: Try to insert your value
+    ImpGen.emit $ Imp.While loop_cond
+      (try_acquire_lock <>
+        Imp.If lock_acquired
+         -- True branch
+         (bind_acc_params <> bind_arr_params <> op_body <> do_gen_reduce <> release_lock <> break_loop)
+         -- False branch
+         Imp.Skip
+         <>
+        Imp.Op Imp.MemFence
+      )
+  where writeOpResult i param arr =
+          ImpGen.copyDWIM arr [i] (Var $ paramName param) []
+
 compileKernelExp _ dest e =
   compilerBugS $ unlines ["Invalid target", "  " ++ show dest,
                           "for kernel expression", "  " ++ pretty e]

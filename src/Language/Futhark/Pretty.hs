@@ -230,16 +230,17 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     (case body of LetPat{} -> ppr body
                   _        -> text "in" <+> ppr body)
     where linebreak = case e of
-                        Map{}      -> True
-                        Reduce{}   -> True
-                        Filter{}   -> True
-                        Scan{}     -> True
-                        DoLoop{}   -> True
-                        LetPat{}   -> True
-                        LetWith{}  -> True
-                        If{}       -> True
-                        ArrayLit{} -> False
-                        _          -> hasArrayLit e
+                        Map{}       -> True
+                        Reduce{}    -> True
+                        GenReduce{} -> True
+                        Filter{}    -> True
+                        Scan{}      -> True
+                        DoLoop{}    -> True
+                        LetPat{}    -> True
+                        LetWith{}   -> True
+                        If{}        -> True
+                        ArrayLit{}  -> False
+                        _           -> hasArrayLit e
   pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
     text "let" <+> pprName fname <+> spread (map ppr tparams ++ map ppr params) <>
     retdecl' <+> equals </> indent 2 (ppr e) <+> text "in" </>
@@ -266,6 +267,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduce_comm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
+  pprPrec _ (GenReduce hist op ne bfun img _) =
+    ppSOAC "gen_reduce" [op, bfun] [hist, ne, img] -- do this manually
   pprPrec _ (Stream form lam arr _) =
     case form of
       MapLike o ->
