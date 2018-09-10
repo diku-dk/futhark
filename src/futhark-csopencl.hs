@@ -31,8 +31,7 @@ main = compilerMain () []
           liftIO $ writeFile cspath csprog
 
           case mode of
-            ToLibrary -> do
-              liftIO $ return ()
+            ToLibrary -> return ()
             ToExecutable -> do
               ret <- liftIO $ runProgramWithExitCode "csc"
                 ["-out:" ++ outpath, "-lib:"++mono_libs, "-r:Cloo.clSharp.dll,Mono.Options.dll", cspath, "/unsafe"] ""

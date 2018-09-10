@@ -30,8 +30,7 @@ main = compilerMain () []
            liftIO $ writeFile cspath csprog
 
            case mode of
-             ToLibrary ->
-               liftIO $ return ()
+             ToLibrary -> return ()
              ToExecutable -> do
                ret <- liftIO $ runProgramWithExitCode "csc"
                  ["-out:" ++ outpath
