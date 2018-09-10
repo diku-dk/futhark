@@ -132,6 +132,8 @@ data KernelExp lore = SplitSpace SplitOrdering SubExp SubExp SubExp
                       -- First  SubExp is the outersize of the array
                       -- Second SubExp is the maximal chunk size
                       -- [SubExp] is the accumulator, [VName] are the input arrays
+                    | GroupGenReduce SubExp [VName] (LambdaT lore) SubExp [SubExp] VName
+                      -- ^ GroupGenReduce <length> <destarrays> <op> <bucket> <values> <locks array>
                     | Barrier [SubExp]
                       -- ^ HACK: Semantically identity, but inserts a
                       -- barrier afterwards.  This reflects a weakness
@@ -171,6 +173,8 @@ instance Attributes lore => TypedOp (KernelExp lore) where
     pure $ staticShapes $ map (`arrayOfRow` w) (lambdaReturnType lam)
   opType (GroupStream _ _ lam _ _) =
     pure $ staticShapes $ map paramType $ groupStreamAccParams lam
+  opType (GroupGenReduce _ dests _ _ _ _) =
+    staticShapes <$> traverse lookupType dests
   opType (Barrier ses) = staticShapes <$> traverse subExpType ses
 
 instance FreeIn SplitOrdering where
@@ -188,6 +192,8 @@ instance Attributes lore => FreeIn (KernelExp lore) where
     freeIn w <> freeInLambda lam <> freeIn input
   freeIn (GroupStream w maxchunk lam accs arrs) =
     freeIn w <> freeIn maxchunk <> freeIn lam <> freeIn accs <> freeIn arrs
+  freeIn (GroupGenReduce w dests op bucket values locks) =
+    freeIn w <> freeIn dests <> freeInLambda op <> freeIn bucket <> freeIn values <> freeIn locks
   freeIn (Barrier ses) = freeIn ses
 
 instance Attributes lore => FreeIn (GroupStreamLambda lore) where
@@ -214,6 +220,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
     replicate (length (lambdaReturnType lam)) mempty
   opAliases (GroupStream _ _ lam _ _) =
     map (const mempty) $ groupStreamAccParams lam
+  opAliases (GroupGenReduce _ dests _ _ _ _) =
+    map S.singleton dests
   opAliases (Barrier ses) = map subExpAliases ses
 
   consumedInOp (GroupReduce _ _ input) =
@@ -230,6 +238,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
           consumedArray v = fromMaybe v $ subExpVar =<< lookup v params_to_arrs
           params_to_arrs = zip (map paramName $ acc_params ++ arr_params) $
                            accs ++ map Var arrs
+  consumedInOp (GroupGenReduce _ dests _ _ _ _) =
+    S.fromList dests
 
   consumedInOp SplitSpace{} = mempty
   consumedInOp Barrier{} = mempty
@@ -268,6 +278,10 @@ instance Attributes lore => Substitute (KernelExp lore) where
     (substituteNames subst w) (substituteNames subst maxchunk)
     (substituteNames subst lam)
     (substituteNames subst accs) (substituteNames subst arrs)
+  substituteNames subst (GroupGenReduce w dests op bucket vs locks) =
+    GroupGenReduce (substituteNames subst w) (substituteNames subst dests)
+    (substituteNames subst op) (substituteNames subst bucket) (substituteNames subst vs)
+    (substituteNames subst locks)
   substituteNames substs (Barrier ses) = Barrier $ substituteNames substs ses
 
 instance Attributes lore => Substitute (GroupStreamLambda lore) where
@@ -305,6 +319,9 @@ instance Renameable lore => Rename (KernelExp lore) where
   rename (GroupStream w maxchunk lam accs arrs) =
     GroupStream <$> rename w <*> rename maxchunk <*>
     rename lam <*> rename accs <*> rename arrs
+  rename (GroupGenReduce w dests op bucket vs locks) =
+    GroupGenReduce <$> rename w <*> rename dests <*> rename op <*>
+    rename bucket <*> rename vs <*> rename locks
   rename (Barrier ses) = Barrier <$> mapM rename ses
 
 instance Renameable lore => Rename (GroupStreamLambda lore) where
@@ -334,6 +351,8 @@ instance (Attributes lore,
           analyseGroupStreamLambda (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
             Alias.analyseBody body
+  addOpAliases (GroupGenReduce w dests op bucket vs locks) =
+    GroupGenReduce w dests (Alias.analyseLambda op) bucket vs locks
   addOpAliases (Combine cspace ts active body) =
     Combine cspace ts active $ Alias.analyseBody body
   addOpAliases (Barrier ses) = Barrier ses
@@ -347,7 +366,8 @@ instance (Attributes lore,
     where removeGroupStreamLambdaAliases (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
             removeBodyAliases body
-
+  removeOpAliases (GroupGenReduce w dests op bucket vs locks) =
+    GroupGenReduce w dests (removeLambdaAliases op) bucket vs locks
   removeOpAliases (Combine cspace ts active body) =
     Combine cspace ts active $ removeBodyAliases body
   removeOpAliases (SplitSpace o w i elems_per_thread) =
@@ -365,6 +385,8 @@ instance (Attributes lore,
     GroupReduce w (Range.runRangeM $ Range.analyseLambda lam) input
   addOpRanges (GroupScan w lam input) =
     GroupScan w (Range.runRangeM $ Range.analyseLambda lam) input
+  addOpRanges (GroupGenReduce w dests op bucket vs locks) =
+    GroupGenReduce w dests (Range.runRangeM $ Range.analyseLambda op) bucket vs locks
   addOpRanges (Combine cspace ts active body) =
     Combine cspace ts active $ Range.runRangeM $ Range.analyseBody body
   addOpRanges (GroupStream w maxchunk lam accs arrs) =
@@ -384,6 +406,8 @@ instance (Attributes lore,
     where removeGroupStreamLambdaRanges (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
             removeBodyRanges body
+  removeOpRanges (GroupGenReduce w dests op bucket vs locks) =
+    GroupGenReduce w dests (removeLambdaRanges op) bucket vs locks
   removeOpRanges (Combine cspace ts active body) =
     Combine cspace ts active $ removeBodyRanges body
   removeOpRanges (SplitSpace o w i elems_per_thread) =
@@ -403,6 +427,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
             (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
             removeBodyWisdom body
+  removeOpWisdom (GroupGenReduce w dests op bucket vs locks) =
+    GroupGenReduce w dests (removeLambdaWisdom op) bucket vs locks
   removeOpWisdom (Combine cspace ts active body) =
     Combine cspace ts active $ removeBodyWisdom body
   removeOpWisdom (SplitSpace o w i elems_per_thread) =
@@ -421,6 +447,7 @@ instance OpMetrics (Op lore) => OpMetrics (KernelExp lore) where
   opMetrics Combine{} = seen "Combine"
   opMetrics (GroupReduce _ lam _) = inside "GroupReduce" $ lambdaMetrics lam
   opMetrics (GroupScan _ lam _) = inside "GroupScan" $ lambdaMetrics lam
+  opMetrics (GroupGenReduce _ _ op _ _ _) = inside "GroupGenReduce" $ lambdaMetrics op
   opMetrics (GroupStream _ _ lam _ _) =
     inside "GroupStream" $ groupStreamLambdaMetrics lam
     where groupStreamLambdaMetrics =
@@ -468,6 +495,21 @@ typeCheckKernelExp (GroupReduce w lam input) =
 
 typeCheckKernelExp (GroupScan w lam input) =
   checkScanOrReduce w lam input
+
+typeCheckKernelExp (GroupGenReduce w dests op bucket vs locks) = do
+  TC.require [Prim int32] w
+
+  dest_row_ts <- mapM (fmap rowType . lookupType) dests
+
+  TC.require [Prim int32] bucket
+
+  vs_ts <- mapM subExpType vs
+  unless (vs_ts == dest_row_ts) $
+    TC.bad $ TC.TypeError $ "Destination arrays have type " ++
+    pretty dest_row_ts ++ ", but values to write have type " ++ pretty vs_ts
+
+  let asArg t = (t, mempty)
+  TC.checkLambda op $ map asArg $ dest_row_ts ++ vs_ts
 
 typeCheckKernelExp (GroupStream w maxchunk lam accs arrs) = do
   TC.require [Prim int32] w
@@ -549,6 +591,13 @@ instance PrettyLore lore => Pretty (KernelExp lore) where
             ppr lam <> comma </>
             braces (commasep $ map ppr accs) <> comma </>
             commasep (map ppr arrs))
+
+  ppr (GroupGenReduce w dests op bucket vs locks) =
+    text "gen_reduce" <>
+    parens (ppr w <> comma </>
+            braces (commasep $ map ppr dests) <> comma </>
+            ppr op <> comma </>
+            commasep (map ppr $ bucket : vs) </> ppr locks)
 
   ppr (Barrier ses) = text "barrier" <> parens (commasep $ map ppr ses)
 

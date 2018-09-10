@@ -547,20 +547,38 @@ handleKernel (Kernel desc space kernel_ts kbody) = subAllocM handleKernelExp Tru
   localScope (scopeOfKernelSpace space) (allocInKernelBody kbody)
   where handleKernelExp (Barrier se) =
           return $ Inner $ Barrier se
+
         handleKernelExp (SplitSpace o w i elems_per_thread) =
           return $ Inner $ SplitSpace o w i elems_per_thread
+
         handleKernelExp (Combine cspace ts active body) =
           Inner . Combine cspace ts active <$> allocInBodyNoDirect body
+
         handleKernelExp (GroupReduce w lam input) = do
           summaries <- mapM lookupArraySummary arrs
           lam' <- allocInReduceLambda lam summaries
           return $ Inner $ GroupReduce w lam' input
           where arrs = map snd input
+
         handleKernelExp (GroupScan w lam input) = do
           summaries <- mapM lookupArraySummary arrs
           lam' <- allocInReduceLambda lam summaries
           return $ Inner $ GroupScan w lam' input
           where arrs = map snd input
+
+        handleKernelExp (GroupGenReduce w dests op bucket vs locks) = do
+          let (x_params, y_params) = splitAt (length vs) $ lambdaParams op
+              sliceDest dest = do
+                dest_t <- lookupType dest
+                sliceInfo dest $ fullSlice dest_t [DimFix bucket]
+          x_params' <- zipWith Param (map paramName x_params) <$>
+                       mapM sliceDest dests
+          y_params' <- zipWith Param (map paramName y_params) <$>
+                       mapM subExpMemInfo vs
+
+          op' <- allocInLambda (x_params'<>y_params') (lambdaBody op) (lambdaReturnType op)
+          return $ Inner $ GroupGenReduce w dests op' bucket vs locks
+
         handleKernelExp (GroupStream w maxchunk lam accs arrs) = do
           acc_summaries <- mapM accSummary accs
           arr_summaries <- mapM lookupArraySummary arrs

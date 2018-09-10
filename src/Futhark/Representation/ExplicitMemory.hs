@@ -73,7 +73,9 @@ module Futhark.Representation.ExplicitMemory
        , ExplicitMemorish
        , expReturns
        , extReturns
+       , sliceInfo
        , lookupMemInfo
+       , subExpMemInfo
        , lookupMemSize
        , lookupArraySummary
        , fullyLinear
@@ -942,15 +944,13 @@ expReturns (BasicOp (Rotate offsets v)) = do
           Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun']
 
 expReturns (BasicOp (Index v slice)) = do
-  (et, _, mem, ixfun) <- arrayVarReturns v
-  case sliceDims slice of
-    []     ->
-      return [MemPrim et]
-    dims ->
-      return [MemArray et (Shape $ map Free dims) NoUniqueness $
-             Just $ ReturnsInBlock mem $
-             existentialiseIxFun [] $ IxFun.slice ixfun
-             (map (fmap (primExpFromSubExp int32)) slice)]
+  info <- sliceInfo v slice
+  case info of
+    MemArray et shape u (ArrayIn mem ixfun) ->
+      return [MemArray et (fmap Free shape) u $
+              Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun]
+    MemPrim pt -> return [MemPrim pt]
+    MemMem d space -> return [MemMem (Free d) space]
 
 expReturns (BasicOp (Update v _ _)) =
   pure <$> varReturns v
@@ -992,6 +992,18 @@ expReturns (If _ _ _ (IfAttr ret _)) =
 expReturns (Op op) =
   opReturns op
 
+sliceInfo :: (Monad m, HasScope lore m, ExplicitMemorish lore) =>
+             VName
+          -> Slice SubExp -> m (MemInfo SubExp NoUniqueness MemBind)
+sliceInfo v slice = do
+  (et, _, mem, ixfun) <- arrayVarReturns v
+  case sliceDims slice of
+    [] -> return $ MemPrim et
+    dims ->
+      return $ MemArray et (Shape dims) NoUniqueness $
+      ArrayIn mem $ IxFun.slice ixfun
+      (map (fmap (primExpFromSubExp int32)) slice)
+
 class TypedOp (Op lore) => OpReturns lore where
   opReturns :: (Monad m, HasScope lore m) =>
                Op lore -> m [ExpReturns]
@@ -1028,6 +1040,9 @@ instance OpReturns InKernel where
   opReturns (Inner (GroupScan _ _ input)) =
     mapM varReturns arrs
     where arrs = map snd input
+
+  opReturns (Inner (GroupGenReduce _ dests _ _ _ _)) =
+    mapM varReturns dests
 
   opReturns (Inner (Barrier res)) = mapM f res
     where f (Var v) = varReturns v

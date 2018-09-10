@@ -449,6 +449,13 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
     addStms bnds
     letBind_ pat $ Op kernel
 
+transformStm _ (Let pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = runBinder_ $ do
+  bfun' <- Kernelise.transformLambda bucket_fun
+  ops' <- forM ops $ \(GenReduceOp dest_w dests nes op) ->
+    GenReduceOp dest_w dests nes <$> Kernelise.transformLambda op
+  stms <- blockedGenReduce pat w ops' bfun' imgs
+  certifying cs $ addStms stms
+
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
 
