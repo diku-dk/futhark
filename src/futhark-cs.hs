@@ -30,24 +30,8 @@ main = compilerMain () []
            liftIO $ writeFile cspath csprog
 
            case mode of
-             ToLibrary -> do
-               let dllpath = outpath `addExtension` "dll"
-               ret <- liftIO $ runProgramWithExitCode "csc"
-                 ["-out:" ++ dllpath
-                 , "-target:library"
-                 , "-lib:"++mono_libs
-                 , "-r:Mono.Options.dll"
-                 , cspath
-                 , "/unsafe"
-                 , "/optimize"
-                 ] ""
-               case ret of
-                 Left err ->
-                   externalErrorS $ "Failed to run csc: " ++ show err
-                 Right (ExitFailure code, cscwarn, cscerr) ->
-                   externalErrorS $ "csc failed with code " ++ show code ++ ":\n" ++ cscerr ++ cscwarn
-                 Right (ExitSuccess, _, _) -> liftIO $ return ()
-
+             ToLibrary ->
+               liftIO $ return ()
              ToExecutable -> do
                ret <- liftIO $ runProgramWithExitCode "csc"
                  ["-out:" ++ outpath
