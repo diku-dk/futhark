@@ -1079,12 +1079,18 @@ compileKernelExp _constants _ (GroupGenReduce w arrs op bucket values locks) = d
         break_loop =
           Imp.SetScalar loop_done one
 
+    -- We copy the current value and the new value to the parameters
+    -- *unless* they are array-typed.  If they are arrays, then the
+    -- index functions should already be set up correctly, so there is
+    -- nothing more to do.
     bind_acc_params <- ImpGen.collect $
       forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
+      when (primType (paramType acc_p)) $
       ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName acc_p) [] (Var arr) [bucket']
 
     bind_arr_params <- ImpGen.collect $
       forM_ (zip arr_params values) $ \(arr_p, val) ->
+      when (primType (paramType arr_p)) $
       ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName arr_p) [] val []
 
     op_body <- ImpGen.collect $
