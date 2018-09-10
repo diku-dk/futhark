@@ -11,6 +11,7 @@ module Futhark.CodeGen.ImpCode.Kernels
   , KernelConstExp
   , HostOp (..)
   , KernelOp (..)
+  , AtomicOp (..)
   , CallKernel (..)
   , MapKernel (..)
   , Kernel (..)
@@ -203,8 +204,22 @@ data KernelOp = GetGroupId VName Int
               | GetGlobalSize VName Int
               | GetGlobalId VName Int
               | GetLockstepWidth VName
+              | Atomic AtomicOp
               | Barrier
+              | MemFence
               deriving (Show)
+
+-- Atomic operations return the value stored before the update.
+-- This value is stored in the first VName.
+data AtomicOp = AtomicAdd VName VName (Count Elements) Exp
+              | AtomicCmpXchg VName VName (Count Elements) Exp Exp
+              | AtomicXchg VName VName (Count Elements) Exp
+              deriving (Show)
+
+instance FreeIn AtomicOp where
+  freeIn (AtomicAdd _ arr i x) = freeIn arr <> freeIn i <> freeIn x
+  freeIn (AtomicCmpXchg _ arr i x y) = freeIn arr <> freeIn i <> freeIn x <> freeIn y
+  freeIn (AtomicXchg _ arr i x) = freeIn arr <> freeIn i <> freeIn x
 
 instance Pretty KernelOp where
   ppr (GetGroupId dest i) =
@@ -227,9 +242,18 @@ instance Pretty KernelOp where
     text "get_lockstep_width()"
   ppr Barrier =
     text "barrier()"
+  ppr MemFence =
+    text "mem_fence()"
+  ppr (Atomic (AtomicAdd _old _val _ind _x)) =
+    undefined
+  ppr (Atomic (AtomicCmpXchg _old _val _ind _x _y)) =
+    undefined
+  ppr (Atomic (AtomicXchg _old _val _ind _x)) =
+    undefined
 
 instance FreeIn KernelOp where
-  freeIn = const mempty
+  freeIn (Atomic op) = freeIn op
+  freeIn _ = mempty
 
 brace :: Doc -> Doc
 brace body = text " {" </> indent 2 body </> text "}"

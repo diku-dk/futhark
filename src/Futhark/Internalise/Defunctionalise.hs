@@ -313,6 +313,14 @@ defuncExp e@(Reduce comm fun ne arr loc) = do
   arr' <- defuncExp' arr
   return (Reduce comm fun' ne' arr' loc, Dynamic $ typeOf e)
 
+defuncExp e@(GenReduce hist op ne bfun img loc) = do
+  hist' <- defuncExp' hist
+  op' <- defuncSoacExp op
+  ne' <- defuncExp' ne
+  bfun' <- defuncSoacExp bfun
+  img' <- defuncExp' img
+  return (GenReduce hist' op' ne' bfun' img' loc, Dynamic $ typeOf e)
+
 defuncExp e@(Scan fun ne arr loc) =
   (,) <$> (Scan <$> defuncSoacExp fun <*> defuncExp' ne <*> defuncExp' arr
                 <*> pure loc)
@@ -800,6 +808,8 @@ freeVars expr = case expr of
 
   Map e1 e2 _ _       -> freeVars e1 <> freeVars e2
   Reduce _ e1 e2 e3 _ -> freeVars e1 <> freeVars e2 <> freeVars e3
+  GenReduce e1 e2 e3 e4 e5 _ -> freeVars e1 <> freeVars e2 <> freeVars e3 <>
+                                freeVars e4 <> freeVars e5
   Scan e1 e2 e3 _     -> freeVars e1 <> freeVars e2 <> freeVars e3
   Filter e1 e2 _      -> freeVars e1 <> freeVars e2
   Partition _ e1 e2 _ -> freeVars e1 <> freeVars e2

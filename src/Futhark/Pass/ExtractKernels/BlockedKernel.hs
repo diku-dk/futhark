@@ -3,6 +3,7 @@
 module Futhark.Pass.ExtractKernels.BlockedKernel
        ( blockedReduction
        , blockedReductionStream
+       , blockedGenReduce
        , blockedMap
        , blockedScan
 
@@ -23,6 +24,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
 
 import Control.Monad
 import Data.Maybe
+import Data.List
 import Data.Semigroup ((<>))
 import qualified Data.Set as S
 
@@ -39,7 +41,7 @@ import Futhark.Transform.Rename
 import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.Alias as Alias
-import Futhark.Representation.SOACS.SOAC (composeLambda, Scan, Reduce, nilFn)
+import Futhark.Representation.SOACS.SOAC (composeLambda, Scan, Reduce, nilFn, GenReduceOp(..))
 import Futhark.Util
 import Futhark.Util.IntegralExp
 
@@ -307,6 +309,85 @@ blockedReduction pat w comm reduce_lam map_lam ispace nes arrs = runBinder_ $ do
   addStms =<<
     blockedReductionStream pat w comm reduce_lam fold_lam'
     ispace nes (arrs ++ map_out_arrs)
+
+blockedGenReduce :: (MonadFreshNames m, HasScope Kernels m) =>
+                    Pattern Kernels
+                 -> SubExp -> [GenReduceOp InKernel]
+                 -> Lambda InKernel -> [VName]
+                 -> m (Stms Kernels)
+blockedGenReduce pat arr_w ops lam arrs = runBinder_ $ do
+  (_, KernelSize num_groups group_size elems_per_thread _ num_threads) <-
+    blockedKernelSize arr_w
+
+  kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
+  let ltid = spaceLocalId kspace
+
+  let dests = concatMap genReduceDest ops
+      nes = concatMap genReduceNeutral ops
+  dest_ts <- mapM lookupType dests
+
+  lock_arrs <- forM (map genReduceWidth ops) $ \dest_w ->
+    letExp "locks_arr" $ BasicOp $ Replicate (Shape [dest_w]) (intConst Int32 0)
+
+  (kres, kstms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
+    i <- newVName "i"
+    -- The merge parameters are the histogram we are constructing.
+    merge_params <- zipWithM newParam (map baseString dests)
+                                      (map (`toDecl` Unique) dest_ts)
+    let merge = zip merge_params $ map Var dests
+        form = ForLoop i Int32 elems_per_thread []
+
+    loop_body <- runBodyBinder $ localScope (scopeOfFParams (map fst merge) <>
+                                             scopeOf form) $ do
+      -- Compute the offset into the input and output.  To this a
+      -- thread can add its local ID to figure out which element it is
+      -- responsible for.
+      offset <- letSubExp "offset" =<<
+                eBinOp (Add Int32)
+                (eBinOp (Mul Int32)
+                 (eSubExp $ Var $ spaceGroupId kspace)
+                 (pure $ BasicOp $ BinOp (Mul Int32) elems_per_thread group_size))
+                (pure $ BasicOp $ BinOp (Mul Int32) (Var i) group_size)
+
+      -- We execute the bucket function once and update each histogram serially.
+      -- We apply the bucket function if j=offset+ltid is less than
+      -- num_elements.  This also involves writing to the mapout
+      -- arrays.
+      j <- letSubExp "j" $ BasicOp $ BinOp (Add Int32) offset (Var ltid)
+      let in_bounds = pure $ BasicOp $ CmpOp (CmpSlt Int32) j arr_w
+
+          in_bounds_branch = do
+            -- Read array input.
+            arr_elems <- forM arrs $ \a -> do
+              a_t <- lookupType a
+              let slice = fullSlice a_t [DimFix j]
+              letSubExp (baseString a ++ "_elem") $ BasicOp $ Index a slice
+
+            -- Apply bucket function.
+            resultBody <$> eLambda lam (map eSubExp arr_elems)
+
+          not_in_bounds_branch =
+            return $ resultBody $ replicate (length ops) (intConst Int32 (-1)) ++ nes
+
+      lam_res <- letTupExp "bucket_fun_res" =<<
+                  eIf in_bounds in_bounds_branch not_in_bounds_branch
+
+      let (buckets, vs) = splitAt (length ops) $ map Var lam_res
+          perOp :: [a] -> [[a]]
+          perOp = chunks $ map (length . genReduceDest) ops
+
+      ops_res <- forM (zip5 ops (perOp merge_params) buckets (perOp vs) lock_arrs) $
+        \(GenReduceOp dest_w _ _ comb_op, dests', bucket, vs', lock_arr) ->
+        fmap (map Var) $ letTupExp "genreduce_res" $ Op $
+        GroupGenReduce dest_w (map paramName dests') comb_op bucket vs' lock_arr
+
+      return $ resultBody $ concat ops_res
+
+    result <- letTupExp "result" $ DoLoop [] merge form loop_body
+    return $ map KernelInPlaceReturn result
+
+  let kbody = KernelBody () kstms kres
+  letBind_ pat $ Op $ Kernel (KernelDebugHints "gen_reduce" []) kspace dest_ts kbody
 
 blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
               Pattern Kernels -> SubExp

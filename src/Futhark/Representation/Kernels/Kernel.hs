@@ -429,7 +429,15 @@ aliasAnalyseKernelBody :: (Attributes lore,
                        -> KernelBody (Aliases lore)
 aliasAnalyseKernelBody (KernelBody attr stms res) =
   let Body attr' stms' _ = Alias.analyseBody $ Body attr stms []
-  in KernelBody attr' stms' res
+  in KernelBody attr' stms' $ map aliasAnalyseKernelResult res
+  where aliasAnalyseKernelResult (ThreadsReturn which what) =
+          ThreadsReturn which what
+        aliasAnalyseKernelResult (WriteReturn rws arr res') =
+          WriteReturn rws arr res'
+        aliasAnalyseKernelResult (ConcatReturns o w per_thread_elems moffset v) =
+          ConcatReturns o w per_thread_elems moffset v
+        aliasAnalyseKernelResult (KernelInPlaceReturn what) =
+          KernelInPlaceReturn what
 
 instance (Attributes lore,
           Attributes (Aliases lore),
@@ -470,9 +478,19 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) w
     where add = KernelMapper return Range.analyseLambda
                 Range.analyseBody return return addKernelBodyRanges
           addKernelBodyRanges (KernelBody attr stms res) =
-            Range.analyseStms stms $ \stms' ->
+            Range.analyseStms stms $ \stms' -> do
             let attr' = (mkBodyRanges stms $ map kernelResultSubExp res, attr)
-            in return $ KernelBody attr' stms' res
+            res' <- mapM addKernelResultRanges res
+            return $ KernelBody attr' stms' res'
+
+          addKernelResultRanges (ThreadsReturn which what) =
+            return $ ThreadsReturn which what
+          addKernelResultRanges (WriteReturn rws arr res) =
+            return $ WriteReturn rws arr res
+          addKernelResultRanges (ConcatReturns o w per_thread_elems moffset v) =
+            return $ ConcatReturns o w per_thread_elems moffset v
+          addKernelResultRanges (KernelInPlaceReturn what) =
+            return $ KernelInPlaceReturn what
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
   type OpWithWisdom (Kernel lore) = Kernel (Wise lore)
@@ -598,7 +616,6 @@ typeCheckKernel (Kernel _ space kts kbody) = do
         checkWhich (ThreadsPerGroup limit) = do
           mapM_ (TC.requireI [Prim int32] . fst) limit
           mapM_ (TC.require [Prim int32] . snd) limit
-
 
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (Kernel _ _ _ kbody) =

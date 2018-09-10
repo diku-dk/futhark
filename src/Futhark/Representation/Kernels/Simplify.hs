@@ -191,6 +191,15 @@ simplifyKernelExp _ (GroupScan w lam input) = do
   return (GroupScan w' lam' $ zip nes' arrs', hoisted)
   where (nes,arrs) = unzip input
 
+simplifyKernelExp _ (GroupGenReduce w dests op bucket vs locks) = do
+  w' <- Engine.simplify w
+  dests' <- mapM Engine.simplify dests
+  (op', hoisted) <- Engine.simplifyLambdaSeq op (map (const Nothing) vs)
+  bucket' <- Engine.simplify bucket
+  vs' <- mapM Engine.simplify vs
+  locks' <- Engine.simplify locks
+  return (GroupGenReduce w' dests' op' bucket' vs' locks', hoisted)
+
 simplifyKernelExp _ (GroupStream w maxchunk lam accs arrs) = do
   w' <- Engine.simplify w
   maxchunk' <- Engine.simplify maxchunk
