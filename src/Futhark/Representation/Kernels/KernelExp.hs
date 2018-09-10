@@ -508,6 +508,8 @@ typeCheckKernelExp (GroupGenReduce w dests op bucket vs locks) = do
     TC.bad $ TC.TypeError $ "Destination arrays have type " ++
     pretty dest_row_ts ++ ", but values to write have type " ++ pretty vs_ts
 
+  TC.requireI [Prim int32 `arrayOfRow` w] locks
+
   let asArg t = (t, mempty)
   TC.checkLambda op $ map asArg $ dest_row_ts ++ vs_ts
 
