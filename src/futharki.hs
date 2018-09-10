@@ -419,7 +419,7 @@ any declarations entered at the REPL.
 Show the type of an expression.
 |])),
             ("unbreak", (unbreakCommand, [text|
-"Skip all future occurences of the current breakpoint.
+Skip all future occurences of the current breakpoint.
 |])),
             ("pwd", (pwdCommand, [text|
 Print the current working directory.
