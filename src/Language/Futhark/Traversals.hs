@@ -119,6 +119,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Reduce comm fun startexp arrexp loc) =
     Reduce comm <$> mapOnExp tv fun <*>
     mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
+  astMap tv (GenReduce hist op ne bfun img loc) =
+    GenReduce <$> mapOnExp tv hist <*> mapOnExp tv op <*> mapOnExp tv ne
+    <*> mapOnExp tv bfun <*> mapOnExp tv img <*> pure loc
   astMap tv (Zip i e es t loc) =
     Zip i <$> mapOnExp tv e <*> mapM (mapOnExp tv) es <*>
     traverse (mapOnCompType tv) t <*> pure loc

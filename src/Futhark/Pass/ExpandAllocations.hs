@@ -344,6 +344,9 @@ unAllocInKernelBody = unAllocKernelBody False
       GroupScan w <$> unAllocLambda lam <*> pure input
     unAllocKernelExp (GroupStream w maxchunk lam accs arrs) =
       GroupStream w maxchunk <$> unAllocStreamLambda lam <*> pure accs <*> pure arrs
+    unAllocKernelExp (GroupGenReduce w arrs op bucket vals locks) =
+      GroupGenReduce w arrs <$> unAllocLambda op <*>
+      pure bucket <*> pure vals <*> pure locks
 
     unAllocStreamLambda (GroupStreamLambda chunk_size chunk_offset
                          acc_params arr_params body) =

@@ -577,6 +577,51 @@ transformSOAC pat (Scatter len lam ivs as) = do
     return $ resultBody (map Var ress)
   letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 
+transformSOAC pat (GenReduce len ops bucket_fun imgs) = do
+  iter <- newVName "iter"
+
+  -- Bind arguments to parameters for the merge-variables.
+  hists_ts  <- mapM lookupType $ concatMap genReduceDest ops
+  hists_out <- mapM (newIdent "dests") hists_ts
+  let merge = loopMerge hists_out $ concatMap (map Var . genReduceDest) ops
+
+  -- Bind lambda-bodies for operators.
+  loopBody <- runBodyBinder $
+    localScope (M.insert iter (IndexInfo Int32) $
+                scopeOfFParams $ map fst merge) $ do
+
+    -- Bind images to parameters of bucket function.
+    imgs' <- forM imgs $ \img -> do
+      img_t <- lookupType img
+      letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
+    imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
+
+    -- Split out values from bucket function.
+    let lens = length ops
+        inds = take lens imgs''
+        vals = chunks (map (length . lambdaReturnType . genReduceOp) ops) $ drop lens imgs''
+        hists_out' = chunks (map (length . lambdaReturnType . genReduceOp) ops) $
+                     map identName hists_out
+
+    -- Read values from histograms.
+    h_vals <- forM (zip inds hists_out') $ \(idx, hist) ->
+      forM hist $ \arr -> do
+        arr_t <- lookupType arr
+        letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
+
+    -- Apply operators.
+    h_vals' <- forM (zip3 (map genReduceOp ops) vals h_vals) $ \(op, ne_val, h_val) ->
+      bindLambda op $ map (BasicOp . SubExp) $ ne_val ++ h_val
+
+    -- Write values back to histograms.
+    ress <- forM (zip3 inds h_vals' hists_out') $ \(idx, val, hist) ->
+      forM (zip val hist) $  \(v, arr) ->
+        letExp "write_hist" =<< eWriteArray arr [eSubExp idx] (eSubExp v)
+
+    return $ resultBody $ map Var $ concat ress
+  -- Wrap up the above into a for-loop.
+  letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
+
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
                     Bindable lore, BinderOps lore,
