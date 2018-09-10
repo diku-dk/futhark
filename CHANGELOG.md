@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * A `break` function that is semantically `id`, but makes `futharki`
     stop and provide the opportunity to inspect variables in scope.
 
+  * A new SOAC, `gen_reduce`, for expressing generalised reductions
+    (sometimes called reduction-by-key or histograms).
+
 ### Removed
 
   * Most of futlib has been removed.  Use external packages instead:
