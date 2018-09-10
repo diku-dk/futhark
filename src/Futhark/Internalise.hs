@@ -1325,11 +1325,9 @@ isOverloadedFunction qname args loc = do
       (++) <$> internaliseExp (desc ++ "_zip_x") x
            <*> internaliseExp (desc ++ "_zip_y") y
 
-    handle [x] "unzip" = Just $ \desc ->
-      internaliseExp desc x
-
-    handle [x] "trace" = Just $ \desc ->
-      internaliseExp desc x
+    handle [x] "unzip" = Just $ flip internaliseExp x
+    handle [x] "trace" = Just $ flip internaliseExp x
+    handle [x] "break" = Just $ flip internaliseExp x
 
     handle _ _ = Nothing
 
