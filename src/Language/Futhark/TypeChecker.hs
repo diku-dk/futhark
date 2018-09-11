@@ -70,10 +70,11 @@ checkExp files src env e = do
 checkDec :: Imports
          -> VNameSource
          -> Env
+         -> ImportName
          -> UncheckedDec
          -> Either TypeError (Env, Dec, VNameSource)
-checkDec files src env d = do
-  ((env', d'), _, src') <- runTypeM env files' (mkInitialImport "") src $ do
+checkDec files src env name d = do
+  ((env', d'), _, src') <- runTypeM env files' name src $ do
     (_, env', d') <- checkOneDec d
     return (env' <> env, d')
   return (env', d', src')

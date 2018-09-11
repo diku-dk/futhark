@@ -57,7 +57,7 @@ main = reportingIOErrors $
         run []     _      = Just repl
         run _      _      = Nothing
 
-data StopReason = EOF | Stop | Exit | Load T.Text
+data StopReason = EOF | Stop | Exit | Load FilePath
 
 repl :: IO ()
 repl = do
@@ -75,9 +75,9 @@ repl = do
           Left EOF -> finish s'
           Left Exit -> finish s'
           Left (Load file) -> do
-            liftIO $ T.putStrLn $ "Loading " <> file
+            liftIO $ T.putStrLn $ "Loading " <> T.pack file
             maybe_new_state <-
-              liftIO $ newFutharkiState (futharkiCount s) $ Just $ T.unpack file
+              liftIO $ newFutharkiState (futharkiCount s) $ Just file
             case maybe_new_state of
               Right new_state -> toploop new_state
               Left err -> do liftIO $ putStrLn err
@@ -176,7 +176,7 @@ data FutharkiState =
                   -- ^ Are we currently stopped at a breakpoint?
                 , futharkiSkipBreaks :: [Loc]
                 -- ^ Skip breakpoints at these locations.
-                , futharkiLoaded :: Maybe T.Text
+                , futharkiLoaded :: Maybe FilePath
                 -- ^ The currently loaded file.
                 }
 
@@ -192,7 +192,8 @@ newFutharkiState count maybe_file = runExceptT $ do
               I.initialCtx $ map (fmap fileProg) imports
 
       -- Then make the prelude available in the type checker.
-      (tenv, d, src') <- badOnLeft $ T.checkDec imports src T.initialEnv $ mkOpen "/futlib/prelude"
+      (tenv, d, src') <- badOnLeft $ T.checkDec imports src T.initialEnv
+                         (T.mkInitialImport ".") $ mkOpen "/futlib/prelude"
       -- Then in the interpreter.
       ienv' <- badOnLeft =<< runInterpreter' (I.interpretDec ienv d)
       return (imports, src', tenv, ienv')
@@ -202,12 +203,12 @@ newFutharkiState count maybe_file = runExceptT $ do
         badOnLeft =<< liftIO (runExceptT (readProgram file)
                               `Haskeline.catch` \(err::IOException) ->
                                  return (Left (ExternalError (T.pack $ show err))))
-
+      let imp = T.mkInitialImport file
       ienv1 <- foldM (\ctx -> badOnLeft <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
                map (fmap fileProg) imports
-      (tenv1, d1, src') <- badOnLeft $ T.checkDec imports src T.initialEnv $
+      (tenv1, d1, src') <- badOnLeft $ T.checkDec imports src T.initialEnv imp $
                            mkOpen "/futlib/prelude"
-      (tenv2, d2, src'') <- badOnLeft $ T.checkDec imports src' tenv1 $
+      (tenv2, d2, src'') <- badOnLeft $ T.checkDec imports src' tenv1 imp $
                             mkOpen $ toPOSIX $ dropExtension file
       ienv2 <- badOnLeft =<< runInterpreter' (I.interpretDec ienv1 d1)
       ienv3 <- badOnLeft =<< runInterpreter' (I.interpretDec ienv2 d2)
@@ -219,7 +220,7 @@ newFutharkiState count maybe_file = runExceptT $ do
                        , futharkiEnv = (tenv, ienv)
                        , futharkiBreaking = Nothing
                        , futharkiSkipBreaks = mempty
-                       , futharkiLoaded = Nothing
+                       , futharkiLoaded = maybe_file
                        }
   where badOnLeft :: Show err => Either err a -> ExceptT String IO a
         badOnLeft (Right x) = return x
@@ -283,19 +284,20 @@ getIt = do
 onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
   (imports, src, tenv, ienv) <- getIt
+  cur_import <- T.mkInitialImport . fromMaybe "." <$> gets futharkiLoaded
 
   -- Most of the complexity here concerns the dealing with the fact
   -- that 'import "foo"' is a declaration.  We have to involve a lot
   -- of machinery to load this external code before executing the
   -- declaration itself.
   let basis = Basis imports src ["/futlib/prelude"]
-      mkImport = uncurry $ T.mkImportFrom $ T.mkInitialImport "."
+      mkImport = uncurry $ T.mkImportFrom cur_import
   imp_r <- runExceptT $ readImports basis (map mkImport $ decImports d)
 
   case imp_r of
     Left e -> liftIO $ print e
     Right (_, imports',  src') ->
-      case T.checkDec imports' src' tenv d of
+      case T.checkDec imports' src' tenv cur_import d of
         Left e -> liftIO $ print e
         Right (tenv', d', src'') -> do
           let new_imports = filter ((`notElem` map fst imports) . fst) imports'
@@ -377,7 +379,7 @@ loadCommand file = do
   case (T.null file, loaded) of
     (True, Just loaded') -> throwError $ Load loaded'
     (True, Nothing) -> liftIO $ T.putStrLn "No file specified and no file previously loaded."
-    (False, _) -> throwError $ Load file
+    (False, _) -> throwError $ Load $ T.unpack file
 
 typeCommand :: Command
 typeCommand e = do
