@@ -1018,23 +1018,104 @@ compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w m
       where isSimpleThreadInSpace (Let _ _ Op{}) = Nothing
             isSimpleThreadInSpace bnd = Just bnd
 
-compileKernelExp _constants _ (GroupGenReduce w arrs op bucket values locks) = do
-  -- Code generation target:
-  --
-  -- while(!done) {
-  --   if( atomicExch((int *)&d_locks[idx], 1) == 0 ) {
-  --     d_his[idx] = OP::apply(d_his[idx], val);
-  --     __threadfence();
-  --     atomicExch((int *)&d_locks[idx], 0);
-  --     done = 1;
-  --   }
-  -- }
+compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _) = do
+  -- If we have only one array and one value (this is a
+  -- one-to-one correspondance) then we need only one
+  -- update. If operator has an atomic implementation we use
+  -- that, otherwise it is still a binary operator which can
+  -- be implemented by atomic compare-and-swap.
 
-  -- Helpers
-  let mone = -1
-      zero = 0
-      one  = 1
+  -- Common variables.
+  old <- newVName "old"
+  ImpGen.emit $ Imp.DeclareScalar old int32
+  bucket' <- ImpGen.compileSubExp bucket
+  arr_sz <- ImpGen.compileSubExp w
+  arr_entry <- ImpGen.lookupArray a
+  let arr'  = ImpGen.memLocationName $ ImpGen.entryArrayLocation arr_entry
 
+  if opHasAtomicSupport op then
+    (do
+      val' <- ImpGen.compileSubExp v
+      ImpGen.emit $
+        Imp.If (Imp.BinOpExp LogAnd
+                (Imp.CmpOpExp (CmpSlt Int32) (-1) bucket')
+                (Imp.CmpOpExp (CmpSlt Int32) bucket' arr_sz))
+        -- True branch
+        (Imp.Op $ Imp.Atomic $ Imp.AtomicAdd old arr' (Imp.elements bucket') val')
+        -- False branch
+        Imp.Skip)
+
+    else
+    (do
+      -- Code generation target:
+      --
+      -- old = d_his[idx];
+      -- do {
+      --   assumed = old;
+      --   tmp = OP::apply(val, assumed);
+      --   old = atomicCAS(&d_his[idx], assumed, tmp);
+      -- } while(assumed != old);
+      assumed <- newVName "assumed"
+      run_loop <- newVName "run_loop"
+      ImpGen.emit $
+        Imp.DeclareScalar assumed int32 <>
+        Imp.DeclareScalar run_loop int32
+
+      read_old <- ImpGen.collect $
+        ImpGen.copyDWIMDest (ImpGen.ScalarDestination old) [] (Var a) [bucket']
+
+      ImpGen.emit $
+        Imp.If (Imp.BinOpExp LogAnd
+                (Imp.CmpOpExp (CmpSlt Int32) (-1) bucket')
+                (Imp.CmpOpExp (CmpSlt Int32) bucket' arr_sz))
+        -- True branch: bucket in-bounds -> enter loop
+        (Imp.SetScalar run_loop 1 <> read_old)
+        -- False branch: bucket out-of-bounds -> skip loop
+        (Imp.SetScalar run_loop 0)
+
+        -- Preparing parameters
+      let (acc_p:arr_p:_) = lambdaParams op
+
+      -- Store result from operator in accumulators
+      dests <- ImpGen.destinationFromParams [acc_p]
+
+      -- Critical section
+      ImpGen.declaringLParams (lambdaParams op) $ do
+        bind_acc_param <- ImpGen.collect $
+          ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName acc_p) [] v []
+
+        let bind_arr_param =
+              Imp.SetScalar (paramName arr_p) $ Imp.var assumed int32
+
+        op_body <- ImpGen.collect $
+          ImpGen.compileBody dests $ lambdaBody op
+
+        -- While-loop: Try to insert your value
+        ImpGen.emit $ Imp.While (Imp.var run_loop int32)
+          (Imp.SetScalar assumed (Imp.var old int32) <>
+           bind_acc_param <> bind_arr_param <> op_body
+           <>
+           (
+             Imp.Op $
+               Imp.Atomic $
+                 Imp.AtomicCmpXchg old arr' (Imp.elements bucket')
+                   (Imp.var assumed int32) (Imp.var (paramName acc_p) int32)
+           ) <>
+            Imp.If
+              (Imp.CmpOpExp
+                (CmpEq int32) (Imp.var assumed int32) (Imp.var old int32))
+              -- True branch:
+              (Imp.SetScalar run_loop 0)
+              -- False branch:
+              Imp.Skip
+          )
+    )
+    where opHasAtomicSupport lam =
+            case map stmExp $ stmsToList $ bodyStms $ lambdaBody lam of
+              [BasicOp (BinOp (Add Int32) _ _)] -> True
+              _ -> False
+
+compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   old <- newVName "old"
   tmp <- newVName "tmp"
   loop_done <- newVName "loop_done"
@@ -1045,17 +1126,16 @@ compileKernelExp _constants _ (GroupGenReduce w arrs op bucket values locks) = d
 
   -- Check if bucket is in-bounds
   bucket' <- ImpGen.compileSubExp bucket
-  -- arr_sz <- ImpGen.compileSubExp =<< (arraySize 0) <$> lookupType a
   arr_sz <- ImpGen.compileSubExp w
 
   ImpGen.emit $
     Imp.If (Imp.BinOpExp LogAnd
-             (Imp.CmpOpExp (CmpSlt Int32) mone bucket')    -- -1 < bucket
-             (Imp.CmpOpExp (CmpSlt Int32)  bucket' arr_sz)) -- bucket < arr_sz
+             (Imp.CmpOpExp (CmpSlt Int32) (-1) bucket')
+             (Imp.CmpOpExp (CmpSlt Int32)  bucket' arr_sz))
     -- True branch: bucket in-bounds -> enter loop
-    (Imp.SetScalar loop_done zero)
+    (Imp.SetScalar loop_done 0)
     -- False branch: bucket out-of-bounds -> skip loop
-    (Imp.SetScalar loop_done one)
+    (Imp.SetScalar loop_done 1)
 
   -- Preparing parameters
   let (acc_params, arr_params) =
@@ -1071,13 +1151,13 @@ compileKernelExp _constants _ (GroupGenReduce w arrs op bucket values locks) = d
   -- Critical section
   ImpGen.declaringLParams (lambdaParams op) $ do
     let try_acquire_lock =
-          Imp.Op $ Imp.Atomic $ Imp.AtomicXchg old locks' (Imp.elements bucket') one
+          Imp.Op $ Imp.Atomic $ Imp.AtomicXchg old locks' (Imp.elements bucket') 1
         lock_acquired =
-          Imp.CmpOpExp (CmpEq int32) (Imp.var old int32) zero
+          Imp.CmpOpExp (CmpEq int32) (Imp.var old int32) 0
         loop_cond =
-          Imp.CmpOpExp (CmpEq int32) (Imp.var loop_done int32) zero
+          Imp.CmpOpExp (CmpEq int32) (Imp.var loop_done int32) 0
         break_loop =
-          Imp.SetScalar loop_done one
+          Imp.SetScalar loop_done 1
 
     bind_acc_params <- ImpGen.collect $
       forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
