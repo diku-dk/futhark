@@ -1080,7 +1080,7 @@ compileKernelExp _constants _ (GroupGenReduce w arrs op bucket values locks) = d
           Imp.SetScalar loop_done one
 
     -- We copy the current value and the new value to the parameters
-    -- *unless* they are array-typed.  If they are arrays, then the
+    -- unless they are array-typed.  If they are arrays, then the
     -- index functions should already be set up correctly, so there is
     -- nothing more to do.
     bind_acc_params <- ImpGen.collect $
