@@ -26,4 +26,4 @@
 -- }
 
 let main [m][n] (hist : *[n]i32) (image : [m]i32) : [n]i32 =
-  gen_reduce hist (+) 0 image image
+  reduce_by_index hist (+) 0 image image
