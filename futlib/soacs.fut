@@ -98,6 +98,23 @@ let reduce 'a (op: a -> a -> a) (ne: a) (as: []a): a =
 let reduce_comm 'a (op: a -> a -> a) (ne: a) (as: []a): a =
   intrinsics.reduce_comm (op, ne, as)
 
+-- | `reduce_by_index dest f ne is as` returns `dest`, but with each
+-- element given by the indices of `is` updated by using applying `f`
+-- to the current value and the corresponding value in `as`.  The `ne`
+-- value must be a neutral element for `op`.  If `is` has duplicates,
+-- `f` may be applied multiple times, and hence must be associative
+-- and commutative.  Out-of-bounds indices in `is` are ignored.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(n)* in the worst case (all updates to same position),
+-- but *O(1)* in the best case.
+--
+-- In practice, the *O(n)* behaviour only occurs if *m* is also very
+-- large.
+let reduce_by_index 'a 'b [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i32) (as : [n]b) : *[m]a =
+  intrinsics.gen_reduce (dest, f, ne, is, as)
+
 -- | Inclusive prefix scan.  Has the same caveats with respect to
 -- associativity as `reduce`.
 --
@@ -217,9 +234,10 @@ let any 'a (f: a -> bool) (as: []a): bool =
 -- acts in-place and consumes the `as` array, returning a new array
 -- that has the same type and elements as `as`, except for the indices
 -- in `is`.  If `is` contains duplicates (i.e. several writes are
--- performed to the same location), the result is unspecified.  It is not
--- guaranteed that one of the duplicate writes will complete atomically -
--- they may be interleaved.
+-- performed to the same location), the result is unspecified.  It is
+-- not guaranteed that one of the duplicate writes will complete
+-- atomically - they may be interleaved.  See `reduce_by_index`@term
+-- for a function that can handle this case deterministically.
 --
 -- This is technically not a second-order operation, but it is defined
 -- here because it is closely related to the SOACs.
@@ -229,9 +247,3 @@ let any 'a (f: a -> bool) (as: []a): bool =
 -- **Span:** *O(1)*
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs)
-
--- | The `gen_reduce dest f ne g as` expression computes the same as `scatter`,
--- but in the case where we have duplicate values in the index array it produces
--- a deterministic result by applying the combining operator `f`.
-let gen_reduce 'a 'b [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i32) (as : [n]b) : *[m]a =
-  intrinsics.gen_reduce (dest, f, ne, is, as)
