@@ -441,8 +441,8 @@ instantiatePolymorphic tnames loc orig_substs x y =
       | M.keys fs == M.keys arg_fs =
           mapM_ (uncurry instantiateRecordArrayElemType) $
           M.intersectionWith (,) fs arg_fs
-    instantiateArrayElemType (ArrayPolyElem tn [] ()) arg_t =
-      instantiate (TypeVar () Nonunique tn []) arg_t
+    instantiateArrayElemType (ArrayPolyElem tn targs ()) arg_t =
+      instantiate (TypeVar () Nonunique tn targs) arg_t
     instantiateArrayElemType _ _ =
       lift $ Left Nothing
 
