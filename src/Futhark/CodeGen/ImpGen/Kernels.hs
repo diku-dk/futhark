@@ -1034,8 +1034,8 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
   arr_entry <- ImpGen.lookupArray a
   let arr'  = ImpGen.memLocationName $ ImpGen.entryArrayLocation arr_entry
 
-  if opHasAtomicSupport op then
-    (do
+  if opHasAtomicSupport op
+    then do
       val' <- ImpGen.compileSubExp v
       ImpGen.emit $
         Imp.If (Imp.BinOpExp LogAnd
@@ -1044,10 +1044,9 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
         -- True branch
         (Imp.Op $ Imp.Atomic $ Imp.AtomicAdd old arr' (Imp.elements bucket') val')
         -- False branch
-        Imp.Skip)
+        Imp.Skip
 
-    else
-    (do
+    else do
       -- Code generation target:
       --
       -- old = d_his[idx];
@@ -1110,7 +1109,7 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
               -- False branch:
               Imp.Skip
           )
-    )
+
     where opHasAtomicSupport lam =
             case map stmExp $ stmsToList $ bodyStms $ lambdaBody lam of
               [BasicOp (BinOp (Add Int32) _ _)] -> True
