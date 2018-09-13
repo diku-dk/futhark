@@ -1018,8 +1018,9 @@ compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w m
       where isSimpleThreadInSpace (Let _ _ Op{}) = Nothing
             isSimpleThreadInSpace bnd = Just bnd
 
-compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _) = do
-  -- If we have only one array and one value (this is a
+compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
+  | [Prim _] <- lambdaReturnType op = do
+  -- If we have only one array and one non-array value (this is a
   -- one-to-one correspondance) then we need only one
   -- update. If operator has an atomic implementation we use
   -- that, otherwise it is still a binary operator which can
