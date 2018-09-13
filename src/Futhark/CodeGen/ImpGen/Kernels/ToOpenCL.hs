@@ -326,11 +326,33 @@ inKernelOperations = GenericC.Operations
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
           GenericC.stm [C.cstm|$id:old = atomic_add((volatile __global int *)&$id:arr[$exp:ind' * 4], $exp:val');|]
+
+        atomicOps (AtomicSMax old arr ind val) = do
+          ind' <- GenericC.compileExp $ innerExp ind
+          val' <- GenericC.compileExp val
+          GenericC.stm [C.cstm|$id:old = atomic_max((volatile __global int *)&$id:arr[$exp:ind' * 4], $exp:val');|]
+
+        atomicOps (AtomicSMin old arr ind val) = do
+          ind' <- GenericC.compileExp $ innerExp ind
+          val' <- GenericC.compileExp val
+          GenericC.stm [C.cstm|$id:old = atomic_min((volatile __global int *)&$id:arr[$exp:ind' * 4], $exp:val');|]
+
+        atomicOps (AtomicUMax old arr ind val) = do
+          ind' <- GenericC.compileExp $ innerExp ind
+          val' <- GenericC.compileExp val
+          GenericC.stm [C.cstm|$id:old = atomic_max((volatile __global unsigned int *)&$id:arr[$exp:ind' * 4], (unsigned int)$exp:val');|]
+
+        atomicOps (AtomicUMin old arr ind val) = do
+          ind' <- GenericC.compileExp $ innerExp ind
+          val' <- GenericC.compileExp val
+          GenericC.stm [C.cstm|$id:old = atomic_min((volatile __global unsigned int *)&$id:arr[$exp:ind' * 4], (unsigned int)$exp:val');|]
+
         atomicOps (AtomicCmpXchg old arr ind cmp val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           cmp' <- GenericC.compileExp cmp
           val' <- GenericC.compileExp val
           GenericC.stm [C.cstm|$id:old = atomic_cmpxchg((volatile __global int *)&$id:arr[$exp:ind' * 4], $exp:cmp', $exp:val');|]
+
         atomicOps (AtomicXchg old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val

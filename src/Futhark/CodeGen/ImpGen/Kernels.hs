@@ -1034,19 +1034,19 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
   arr_entry <- ImpGen.lookupArray a
   let arr'  = ImpGen.memLocationName $ ImpGen.entryArrayLocation arr_entry
 
-  if opHasAtomicSupport op
-    then do
+  case opHasAtomicSupport old arr' bucket' op of
+    Just f -> do
       val' <- ImpGen.compileSubExp v
       ImpGen.emit $
         Imp.If (Imp.BinOpExp LogAnd
                 (Imp.CmpOpExp (CmpSlt Int32) (-1) bucket')
                 (Imp.CmpOpExp (CmpSlt Int32) bucket' arr_sz))
         -- True branch
-        (Imp.Op $ Imp.Atomic $ Imp.AtomicAdd old arr' (Imp.elements bucket') val')
+        (Imp.Op $ f val')
         -- False branch
         Imp.Skip
 
-    else do
+    Nothing -> do
       -- Code generation target:
       --
       -- old = d_his[idx];
@@ -1110,10 +1110,17 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
               Imp.Skip
           )
 
-    where opHasAtomicSupport lam =
-            case map stmExp $ stmsToList $ bodyStms $ lambdaBody lam of
-              [BasicOp (BinOp (Add Int32) _ _)] -> True
-              _ -> False
+    where opHasAtomicSupport old arr' bucket' lam = do
+            let atomic f = Imp.Atomic . f old arr' (Imp.elements bucket')
+                atomics = [ (Add Int32, Imp.AtomicAdd)
+                          , (SMax Int32, Imp.AtomicSMax)
+                          , (SMin Int32, Imp.AtomicSMin)
+                          , (UMax Int32, Imp.AtomicUMax)
+                          , (UMin Int32, Imp.AtomicUMin)
+                          ]
+            [BasicOp (BinOp bop _ _)] <-
+              Just $ map stmExp $ stmsToList $ bodyStms $ lambdaBody lam
+            atomic <$> lookup bop atomics
 
 compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   old <- newVName "old"
