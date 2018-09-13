@@ -449,12 +449,39 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
     addStms bnds
     letBind_ pat $ Op kernel
 
-transformStm _ (Let pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = runBinder_ $ do
+transformStm _ (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = runBinder_ $ do
   bfun' <- Kernelise.transformLambda bucket_fun
   ops' <- forM ops $ \(GenReduceOp dest_w dests nes op) ->
     GenReduceOp dest_w dests nes <$> Kernelise.transformLambda op
-  stms <- blockedGenReduce pat w ops' bfun' imgs
-  certifying cs $ addStms stms
+  (histos, stms) <- blockedGenReduce w ops' bfun' imgs
+  certifying cs $ mapM_ addStm stms
+
+  let histos' = chunks (map (length . genReduceDest) ops') histos
+      pes = chunks (map (length . genReduceDest) ops') $ patternElements orig_pat
+  mapM_ combineIntermediateResults $ zip3 pes ops' histos'
+
+  where combineIntermediateResults (pes, GenReduceOp num_bins _ nes op, histos) = do
+          num_histos <- arraysSize 0 <$> mapM lookupType histos
+          num_elems <- letSubExp "num_elems" $ BasicOp $ BinOp (Mul Int32) num_histos w
+
+          let pat = Pattern [] pes
+          flat_pat <- fmap (Pattern []) $ forM pes $ \pe ->
+            PatElem <$> newVName (baseString (patElemName pe) <> "_flat") <*>
+            pure (rowType (patElemType pe) `arrayOfRow` num_elems)
+
+          identity <- mkIdentityLambda $ lambdaReturnType op
+          fold_lam <- composeLambda nilFn op identity
+
+          histos_flat <- forM histos $ \h -> do
+            h_t <- lookupType h
+            let perm = [1,0] ++ [2..arrayRank h_t-1]
+            h_tr <- letExp (baseString h <> "_tr") $ BasicOp $ Rearrange perm h
+            let reshape = reshapeOuter [DimNew num_elems] 2 (arrayShape h_t)
+            letExp (baseString h <> "_flat") $ BasicOp $ Reshape reshape h_tr
+
+          bin_id <- newVName "bin_id"
+          regularSegmentedRedomap num_histos num_bins [num_bins] flat_pat pat
+            num_elems Commutative op fold_lam [(bin_id, num_bins)] [] nes histos_flat
 
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
