@@ -244,12 +244,15 @@ instance Pretty KernelOp where
     text "barrier()"
   ppr MemFence =
     text "mem_fence()"
-  ppr (Atomic (AtomicAdd _old _val _ind _x)) =
-    undefined
-  ppr (Atomic (AtomicCmpXchg _old _val _ind _x _y)) =
-    undefined
-  ppr (Atomic (AtomicXchg _old _val _ind _x)) =
-    undefined
+  ppr (Atomic (AtomicAdd old arr ind x)) =
+    ppr old <+> text "<-" <+> text "atomic_add" <>
+    parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+  ppr (Atomic (AtomicCmpXchg old arr ind x y)) =
+    ppr old <+> text "<-" <+> text "atomic_cmp_xchg" <>
+    parens (commasep [ppr arr <> brackets (ppr ind), ppr x, ppr y])
+  ppr (Atomic (AtomicXchg old arr ind x)) =
+    ppr old <+> text "<-" <+> text "atomic_xchg" <>
+    parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
 
 instance FreeIn KernelOp where
   freeIn (Atomic op) = freeIn op
