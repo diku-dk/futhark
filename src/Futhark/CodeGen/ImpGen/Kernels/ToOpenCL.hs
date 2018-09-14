@@ -347,6 +347,21 @@ inKernelOperations = GenericC.Operations
           val' <- GenericC.compileExp val
           GenericC.stm [C.cstm|$id:old = atomic_min((volatile __global unsigned int *)&$id:arr[$exp:ind' * 4], (unsigned int)$exp:val');|]
 
+        atomicOps (AtomicAnd old arr ind val) = do
+          ind' <- GenericC.compileExp $ innerExp ind
+          val' <- GenericC.compileExp val
+          GenericC.stm [C.cstm|$id:old = atomic_and((volatile __global unsigned int *)&$id:arr[$exp:ind' * 4], (unsigned int)$exp:val');|]
+
+        atomicOps (AtomicOr old arr ind val) = do
+          ind' <- GenericC.compileExp $ innerExp ind
+          val' <- GenericC.compileExp val
+          GenericC.stm [C.cstm|$id:old = atomic_or((volatile __global unsigned int *)&$id:arr[$exp:ind' * 4], (unsigned int)$exp:val');|]
+
+        atomicOps (AtomicXor old arr ind val) = do
+          ind' <- GenericC.compileExp $ innerExp ind
+          val' <- GenericC.compileExp val
+          GenericC.stm [C.cstm|$id:old = atomic_xor((volatile __global unsigned int *)&$id:arr[$exp:ind' * 4], (unsigned int)$exp:val');|]
+
         atomicOps (AtomicCmpXchg old arr ind cmp val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           cmp' <- GenericC.compileExp cmp
