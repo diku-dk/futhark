@@ -32,5 +32,5 @@
 -- }
 
 let main [m] (n: i32) (is: [m]i32) (image: [m]i32) : ([n]i32, [n]i32) =
-  (reduce_by_index (replicate n 0) i32.max i32.smallest is image,
-   map i32.u32 (reduce_by_index (replicate n 0) u32.max u32.smallest is (map u32.i32 image)))
+  (reduce_by_index (replicate n 0) i32.max i32.lowest is image,
+   map i32.u32 (reduce_by_index (replicate n 0) u32.max u32.lowest is (map u32.i32 image)))
