@@ -247,6 +247,7 @@ def read_str_decimal(f):
     return float(sign + bef + b'.' + aft + b'E' + expt)
 
 def read_str_f32(f):
+    skip_spaces(f)
     try:
         parse_specific_string(f, 'f32.nan')
         return np.float32(np.nan)
@@ -264,6 +265,7 @@ def read_str_f32(f):
                return x
 
 def read_str_f64(f):
+    skip_spaces(f)
     try:
         parse_specific_string(f, 'f64.nan')
         return np.float64(np.nan)
