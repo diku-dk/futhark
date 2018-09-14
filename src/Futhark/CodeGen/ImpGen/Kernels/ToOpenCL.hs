@@ -347,15 +347,11 @@ inKernelOperations = GenericC.Operations
           val' <- GenericC.compileExp val
           GenericC.stm [C.cstm|$id:old = atomic_min((volatile __global unsigned int *)&$id:arr[$exp:ind' * 4], (unsigned int)$exp:val');|]
 
-        atomicOps (AtomicCmpXchg t old arr ind cmp val) = do
+        atomicOps (AtomicCmpXchg old arr ind cmp val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           cmp' <- GenericC.compileExp cmp
           val' <- GenericC.compileExp val
-          let (to_int, from_int) =
-                 case t of FloatType Float32 -> (funName $ nameFromString "to_bits32",
-                                                 funName $ nameFromString "from_bits32")
-                           _                 -> ("", "")
-          GenericC.stm [C.cstm|$id:old = $id:from_int(atomic_cmpxchg((volatile __global int *)&$id:arr[$exp:ind' * 4], $id:to_int($exp:cmp'), $id:to_int($exp:val')));|]
+          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg((volatile __global int *)&$id:arr[$exp:ind' * 4], $exp:cmp', $exp:val');|]
 
         atomicOps (AtomicXchg old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
