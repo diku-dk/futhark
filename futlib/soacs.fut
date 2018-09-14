@@ -99,11 +99,12 @@ let reduce_comm 'a (op: a -> a -> a) (ne: a) (as: []a): a =
   intrinsics.reduce_comm (op, ne, as)
 
 -- | `reduce_by_index dest f ne is as` returns `dest`, but with each
--- element given by the indices of `is` updated by using applying `f`
--- to the current value and the corresponding value in `as`.  The `ne`
--- value must be a neutral element for `op`.  If `is` has duplicates,
--- `f` may be applied multiple times, and hence must be associative
--- and commutative.  Out-of-bounds indices in `is` are ignored.
+-- element given by the indices of `is` updated by applying `f` to the
+-- current value in `dest` and the corresponding value in `as`.  The
+-- `ne` value must be a neutral element for `op`.  If `is` has
+-- duplicates, `f` may be applied multiple times, and hence must be
+-- associative and commutative.  Out-of-bounds indices in `is` are
+-- ignored.
 --
 -- **Work:** *O(n)*
 --
