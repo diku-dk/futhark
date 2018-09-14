@@ -216,7 +216,7 @@ data AtomicOp = AtomicAdd VName VName (Count Elements) Exp
               | AtomicSMin VName VName (Count Elements) Exp
               | AtomicUMax VName VName (Count Elements) Exp
               | AtomicUMin VName VName (Count Elements) Exp
-              | AtomicCmpXchg VName VName (Count Elements) Exp Exp
+              | AtomicCmpXchg PrimType VName VName (Count Elements) Exp Exp
               | AtomicXchg VName VName (Count Elements) Exp
               deriving (Show)
 
@@ -226,7 +226,7 @@ instance FreeIn AtomicOp where
   freeIn (AtomicSMin _ arr i x) = freeIn arr <> freeIn i <> freeIn x
   freeIn (AtomicUMax _ arr i x) = freeIn arr <> freeIn i <> freeIn x
   freeIn (AtomicUMin _ arr i x) = freeIn arr <> freeIn i <> freeIn x
-  freeIn (AtomicCmpXchg _ arr i x y) = freeIn arr <> freeIn i <> freeIn x <> freeIn y
+  freeIn (AtomicCmpXchg _ _ arr i x y) = freeIn arr <> freeIn i <> freeIn x <> freeIn y
   freeIn (AtomicXchg _ arr i x) = freeIn arr <> freeIn i <> freeIn x
 
 instance Pretty KernelOp where
@@ -267,8 +267,8 @@ instance Pretty KernelOp where
   ppr (Atomic (AtomicUMin old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_umin" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
-  ppr (Atomic (AtomicCmpXchg old arr ind x y)) =
-    ppr old <+> text "<-" <+> text "atomic_cmp_xchg" <>
+  ppr (Atomic (AtomicCmpXchg t old arr ind x y)) =
+    ppr old <+> text "<-" <+> text ("atomic_cmp_xchg_" <> pretty t) <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x, ppr y])
   ppr (Atomic (AtomicXchg old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_xchg" <>
