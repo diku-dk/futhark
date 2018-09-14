@@ -473,7 +473,8 @@ evalType env t@(TypeVar () _ tn args) =
       (substs, types) <- mconcat <$> zipWithM matchPtoA ps args
       let onDim (NamedDim v) = fromMaybe (NamedDim v) $ M.lookup (qualLeaf v) substs
           onDim d = d
-      evalType (Env mempty types <> env) $ bimap onDim id t'
+      if null ps then return $ bimap onDim id t'
+      else evalType (Env mempty types <> env) $ bimap onDim id t'
     Nothing -> return t
   where matchPtoA (TypeParamDim p _) (TypeArgDim (NamedDim qv) _) =
           return (M.singleton p $ NamedDim qv, mempty)
