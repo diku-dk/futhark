@@ -1029,7 +1029,9 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
 
   -- Common variables.
   old <- newVName "old"
-  ImpGen.emit $ Imp.DeclareScalar old int32
+  old_bits <- newVName "old_bits"
+  ImpGen.emit $ Imp.DeclareScalar old t
+  ImpGen.emit $ Imp.DeclareScalar old_bits int32
   bucket' <- ImpGen.compileSubExp bucket
   arr_sz <- ImpGen.compileSubExp w
   arr_entry <- ImpGen.lookupArray a
@@ -1058,9 +1060,8 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
       -- } while(assumed != old);
       assumed <- newVName "assumed"
       run_loop <- newVName "run_loop"
-      ImpGen.emit $
-        Imp.DeclareScalar assumed int32 <>
-        Imp.DeclareScalar run_loop int32
+      ImpGen.emit $ Imp.DeclareScalar assumed t
+      ImpGen.emit $ Imp.DeclareScalar run_loop int32
 
       read_old <- ImpGen.collect $
         ImpGen.copyDWIMDest (ImpGen.ScalarDestination old) [] (Var a) [bucket']
@@ -1086,25 +1087,30 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
           ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName acc_p) [] v []
 
         let bind_arr_param =
-              Imp.SetScalar (paramName arr_p) $ Imp.var assumed int32
+              Imp.SetScalar (paramName arr_p) $ Imp.var assumed t
 
         op_body <- ImpGen.collect $
           ImpGen.compileBody dests $ lambdaBody op
 
         -- While-loop: Try to insert your value
+        let (toBits, fromBits) =
+              case t of FloatType Float32 -> (\x -> Imp.FunExp "to_bits32" [x] int32,
+                                              \x -> Imp.FunExp "from_bits32" [x] t)
+                        _                 -> (id, id)
         ImpGen.emit $ Imp.While (Imp.var run_loop int32)
-          (Imp.SetScalar assumed (Imp.var old int32) <>
+          (Imp.SetScalar assumed (Imp.var old t) <>
            bind_acc_param <> bind_arr_param <> op_body
            <>
-           (
-             Imp.Op $
+           (Imp.Op $
                Imp.Atomic $
-                 Imp.AtomicCmpXchg t old arr' (Imp.elements bucket')
-                   (Imp.var assumed int32) (Imp.var (paramName acc_p) int32)
-           ) <>
+                 Imp.AtomicCmpXchg old_bits arr' (Imp.elements bucket')
+                   (toBits (Imp.var assumed int32)) (toBits (Imp.var (paramName acc_p) int32)))
+           <>
+           Imp.SetScalar old (fromBits (Imp.var old_bits int32))
+           <>
             Imp.If
               (Imp.CmpOpExp
-                (CmpEq int32) (Imp.var assumed int32) (Imp.var old int32))
+                (CmpEq int32) (toBits $ Imp.var assumed t) (Imp.var old_bits int32))
               -- True branch:
               (Imp.SetScalar run_loop 0)
               -- False branch:
