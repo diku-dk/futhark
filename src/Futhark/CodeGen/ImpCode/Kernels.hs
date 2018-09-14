@@ -216,6 +216,9 @@ data AtomicOp = AtomicAdd VName VName (Count Elements) Exp
               | AtomicSMin VName VName (Count Elements) Exp
               | AtomicUMax VName VName (Count Elements) Exp
               | AtomicUMin VName VName (Count Elements) Exp
+              | AtomicAnd VName VName (Count Elements) Exp
+              | AtomicOr VName VName (Count Elements) Exp
+              | AtomicXor VName VName (Count Elements) Exp
               | AtomicCmpXchg VName VName (Count Elements) Exp Exp
               | AtomicXchg VName VName (Count Elements) Exp
               deriving (Show)
@@ -226,6 +229,9 @@ instance FreeIn AtomicOp where
   freeIn (AtomicSMin _ arr i x) = freeIn arr <> freeIn i <> freeIn x
   freeIn (AtomicUMax _ arr i x) = freeIn arr <> freeIn i <> freeIn x
   freeIn (AtomicUMin _ arr i x) = freeIn arr <> freeIn i <> freeIn x
+  freeIn (AtomicAnd _ arr i x) = freeIn arr <> freeIn i <> freeIn x
+  freeIn (AtomicOr _ arr i x) = freeIn arr <> freeIn i <> freeIn x
+  freeIn (AtomicXor _ arr i x) = freeIn arr <> freeIn i <> freeIn x
   freeIn (AtomicCmpXchg _ arr i x y) = freeIn arr <> freeIn i <> freeIn x <> freeIn y
   freeIn (AtomicXchg _ arr i x) = freeIn arr <> freeIn i <> freeIn x
 
@@ -266,6 +272,15 @@ instance Pretty KernelOp where
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic (AtomicUMin old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_umin" <>
+    parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+  ppr (Atomic (AtomicAnd old arr ind x)) =
+    ppr old <+> text "<-" <+> text "atomic_and" <>
+    parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+  ppr (Atomic (AtomicOr old arr ind x)) =
+    ppr old <+> text "<-" <+> text "atomic_or" <>
+    parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+  ppr (Atomic (AtomicXor old arr ind x)) =
+    ppr old <+> text "<-" <+> text "atomic_xor" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic (AtomicCmpXchg old arr ind x y)) =
     ppr old <+> text "<-" <+> text "atomic_cmp_xchg" <>

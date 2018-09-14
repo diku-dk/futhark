@@ -1124,6 +1124,9 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
                           , (SMin Int32, Imp.AtomicSMin)
                           , (UMax Int32, Imp.AtomicUMax)
                           , (UMin Int32, Imp.AtomicUMin)
+                          , (And Int32, Imp.AtomicAnd)
+                          , (Or Int32, Imp.AtomicOr)
+                          , (Xor Int32, Imp.AtomicXor)
                           ]
             [BasicOp (BinOp bop _ _)] <-
               Just $ map stmExp $ stmsToList $ bodyStms $ lambdaBody lam
