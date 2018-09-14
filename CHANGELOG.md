@@ -61,6 +61,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * The `largest`/`smallest` values for numeric modules have been
+    renamed `highest`/`lowest`.
+
 ### Fixed
 
 ## [0.6.3]
