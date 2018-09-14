@@ -1019,12 +1019,13 @@ compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w m
             isSimpleThreadInSpace bnd = Just bnd
 
 compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
-  | [Prim _] <- lambdaReturnType op = do
+  | [Prim t] <- lambdaReturnType op,
+    primBitSize t == 32 = do
   -- If we have only one array and one non-array value (this is a
   -- one-to-one correspondance) then we need only one
   -- update. If operator has an atomic implementation we use
   -- that, otherwise it is still a binary operator which can
-  -- be implemented by atomic compare-and-swap.
+  -- be implemented by atomic compare-and-swap if 32 bits.
 
   -- Common variables.
   old <- newVName "old"
@@ -1098,7 +1099,7 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
            (
              Imp.Op $
                Imp.Atomic $
-                 Imp.AtomicCmpXchg old arr' (Imp.elements bucket')
+                 Imp.AtomicCmpXchg t old arr' (Imp.elements bucket')
                    (Imp.var assumed int32) (Imp.var (paramName acc_p) int32)
            ) <>
             Imp.If
