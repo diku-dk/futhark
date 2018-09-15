@@ -1030,22 +1030,14 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
   -- Common variables.
   old <- newVName "old"
   old_bits <- newVName "old_bits"
-  full_index <- newVName "full_index"
   ImpGen.emit $ Imp.DeclareScalar old t
   ImpGen.emit $ Imp.DeclareScalar old_bits int32
-  ImpGen.emit $ Imp.DeclareScalar full_index int32
   bucket' <- mapM ImpGen.compileSubExp bucket
   w' <- mapM ImpGen.compileSubExp w
-  arr_entry <- ImpGen.lookupArray a
-  let arr'  = ImpGen.memLocationName $ ImpGen.entryArrayLocation arr_entry
-      -- Ensured by typechecker.
-      b0:b1:_ = bucket'
 
-  -- Correctly index into subhistogram.
-  ImpGen.emit $ Imp.SetScalar full_index $
-    Imp.BinOpExp (Add Int32) b0 b1
+  (arr', _a_space, bucket_offset) <- ImpGen.fullyIndexArray a bucket'
 
-  case opHasAtomicSupport old arr' (Imp.var full_index int32) op of
+  case opHasAtomicSupport old arr' bucket_offset op of
     Just f -> do
       val' <- ImpGen.compileSubExp v
 
@@ -1106,7 +1098,7 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
            <>
            (Imp.Op $
                Imp.Atomic $
-                 Imp.AtomicCmpXchg old_bits arr' (Imp.elements $ Imp.var full_index int32)
+                 Imp.AtomicCmpXchg old_bits arr' bucket_offset
                    (toBits (Imp.var assumed int32)) (toBits (Imp.var (paramName acc_p) int32)))
            <>
            Imp.SetScalar old (fromBits (Imp.var old_bits int32))
@@ -1121,7 +1113,7 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
           )
 
     where opHasAtomicSupport old arr' bucket' lam = do
-            let atomic f = Imp.Atomic . f old arr' (Imp.elements bucket')
+            let atomic f = Imp.Atomic . f old arr' bucket'
                 atomics = [ (Add Int32, Imp.AtomicAdd)
                           , (SMax Int32, Imp.AtomicSMax)
                           , (SMin Int32, Imp.AtomicSMin)
@@ -1147,13 +1139,10 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   -- Check if bucket is in-bounds
   bucket' <- mapM ImpGen.compileSubExp bucket
   w' <- mapM ImpGen.compileSubExp w
-  let b0:b1:_ = bucket'
 
-  -- Correctly index into subhistogram.
-  full_index <- newVName "full_index"
-  ImpGen.emit $ Imp.DeclareScalar full_index int32
-  ImpGen.emit $ Imp.SetScalar full_index $
-    Imp.BinOpExp (Add Int32) b0 b1
+  -- Correctly index into locks.
+  (locks', _locks_space, locks_offset) <-
+    ImpGen.fullyIndexArray locks bucket'
 
   ImpGen.emit $
     Imp.If (indexInBounds bucket' w')
@@ -1169,15 +1158,11 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   -- Store result from operator in accumulators
   dests <- ImpGen.destinationFromParams acc_params
 
-  -- Locate locks array
-  locks_entries <- ImpGen.lookupArray locks
-  let locks' = ImpGen.memLocationName $ ImpGen.entryArrayLocation locks_entries
-
   -- Critical section
   ImpGen.declaringLParams (lambdaParams op) $ do
     let try_acquire_lock =
           Imp.Op $ Imp.Atomic $
-          Imp.AtomicXchg old locks' (Imp.elements $ Imp.var full_index int32) 1
+          Imp.AtomicXchg old locks' locks_offset 1
         lock_acquired =
           Imp.CmpOpExp (CmpEq int32) (Imp.var old int32) 0
         loop_cond =
