@@ -770,11 +770,14 @@ compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input
 
   let local_tid = kernelLocalThreadId constants
       (_nes, arrs) = unzip input
-      (reduce_i, other_index_param, actual_reduce_params) =
+      (reduce_i, reduce_j_param, actual_reduce_params) =
         partitionChunkedKernelLambdaParameters $ lambdaParams lam
       (reduce_acc_params, reduce_arr_params) =
         splitAt (length input) actual_reduce_params
-      offset = paramName other_index_param
+      reduce_j = paramName reduce_j_param
+
+  offset <- newVName "offset"
+  ImpGen.emit $ Imp.DeclareScalar offset int32
 
   ImpGen.Destination _ reduce_acc_targets <-
     ImpGen.destinationFromParams reduce_acc_params
@@ -784,7 +787,11 @@ compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input
 
     ImpGen.emit $ Imp.SetScalar reduce_i $ Imp.var local_tid int32
 
-    ImpGen.emit $ Imp.SetScalar offset 0
+    let setOffset x =
+          Imp.SetScalar offset x <>
+          Imp.SetScalar reduce_j (Imp.var local_tid int32 + Imp.var offset int32)
+    ImpGen.emit $ setOffset 0
+
     set_init_params <- ImpGen.collect $
       zipWithM_ (readReduceArgument offset) reduce_acc_params arrs
     ImpGen.emit $
@@ -808,10 +815,7 @@ compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input
         in_wave_id = Imp.var local_tid int32 - wave_id * wave_size
         num_waves = (group_size + wave_size - 1) `quot` wave_size
         arg_in_bounds = Imp.CmpOpExp (CmpSlt Int32)
-                        (Imp.BinOpExp (Add Int32)
-                          (Imp.var local_tid int32)
-                          (Imp.var (paramName other_index_param) int32))
-                        w'
+                        (Imp.var reduce_j int32) w'
 
         doing_in_wave_reductions =
           Imp.CmpOpExp (CmpSlt Int32) (Imp.var offset int32) wave_size
@@ -819,11 +823,11 @@ compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input
           Imp.CmpOpExp (CmpEq int32)
           (Imp.BinOpExp (And Int32) in_wave_id (2 * Imp.var offset int32 - 1)) 0
         in_wave_reductions =
-          Imp.SetScalar offset 1 <>
+          setOffset 1 <>
           Imp.While doing_in_wave_reductions
             (Imp.If (Imp.BinOpExp LogAnd arg_in_bounds apply_in_in_wave_iteration)
              in_wave_reduce mempty <>
-             Imp.SetScalar offset (Imp.var offset int32 * 2))
+             setOffset (Imp.var offset int32 * 2))
 
         doing_cross_wave_reductions =
           Imp.CmpOpExp (CmpSlt Int32) (Imp.var skip_waves int32) num_waves
@@ -840,7 +844,7 @@ compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input
           Imp.SetScalar skip_waves 1 <>
           Imp.While doing_cross_wave_reductions
             (Imp.Op Imp.Barrier <>
-             Imp.SetScalar offset (Imp.var skip_waves int32 * wave_size) <>
+             setOffset (Imp.var skip_waves int32 * wave_size) <>
              Imp.If apply_in_cross_wave_iteration
              cross_wave_reduce mempty <>
              Imp.SetScalar skip_waves (Imp.var skip_waves int32 * 2))

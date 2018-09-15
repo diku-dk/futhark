@@ -82,11 +82,11 @@ blockedReductionStream pat w comm reduce_lam fold_lam ispace nes arrs = runBinde
   fold_lam' <- kerneliseLambda nes fold_lam
 
   my_index <- newVName "my_index"
-  other_offset <- newVName "other_offset"
+  other_index <- newVName "other_index"
   let my_index_param = Param my_index (Prim int32)
-      other_offset_param = Param other_offset (Prim int32)
+      other_index_param = Param other_index (Prim int32)
       reduce_lam' = reduce_lam { lambdaParams = my_index_param :
-                                                other_offset_param :
+                                                other_index_param :
                                                 lambdaParams reduce_lam
                                }
       params_to_arrs = zip (map paramName $ drop 1 $ lambdaParams fold_lam') arrs
