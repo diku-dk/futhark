@@ -570,7 +570,7 @@ handleKernel (Kernel desc space kernel_ts kbody) = subAllocM handleKernelExp Tru
           let (x_params, y_params) = splitAt (length vs) $ lambdaParams op
               sliceDest dest = do
                 dest_t <- lookupType dest
-                sliceInfo dest $ fullSlice dest_t [DimFix bucket]
+                sliceInfo dest $ fullSlice dest_t $ map DimFix bucket
           x_params' <- zipWith Param (map paramName x_params) <$>
                        mapM sliceDest dests
           y_params' <- zipWith Param (map paramName y_params) <$>

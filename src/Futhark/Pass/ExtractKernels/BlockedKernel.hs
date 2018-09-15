@@ -311,30 +311,45 @@ blockedReduction pat w comm reduce_lam map_lam ispace nes arrs = runBinder_ $ do
     ispace nes (arrs ++ map_out_arrs)
 
 blockedGenReduce :: (MonadFreshNames m, HasScope Kernels m) =>
-                    Pattern Kernels
-                 -> SubExp -> [GenReduceOp InKernel]
+                    SubExp -> [GenReduceOp InKernel]
                  -> Lambda InKernel -> [VName]
-                 -> m (Stms Kernels)
-blockedGenReduce pat arr_w ops lam arrs = runBinder_ $ do
+                 -> m ([VName], Stms Kernels)
+blockedGenReduce arr_w ops lam arrs = runBinder $ do
   (_, KernelSize num_groups group_size elems_per_thread _ num_threads) <-
     blockedKernelSize arr_w
 
   kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
   let ltid = spaceLocalId kspace
+      gtid = spaceGlobalId kspace
+      nthreads = spaceNumThreads kspace
 
-  let dests = concatMap genReduceDest ops
-      nes = concatMap genReduceNeutral ops
-  dest_ts <- mapM lookupType dests
+  -- Determining the degree of cooperation (heuristic):
+  -- coop_lvl   := size of histogram (Cooperation level)
+  -- num_histos := (threads / coop_lvl) (Number of histograms)
+  num_histos <- forM ops $ \(GenReduceOp w _ _ _) ->
+    letSubExp "num_histos" =<< eDivRoundingUp Int32 (eSubExp nthreads) (eSubExp w)
 
-  lock_arrs <- forM (map genReduceWidth ops) $ \dest_w ->
-    letExp "locks_arr" $ BasicOp $ Replicate (Shape [dest_w]) (intConst Int32 0)
+  -- Initialize sub-histograms.
+  sub_histos <- forM (zip ops num_histos) $ \(GenReduceOp w dests nes _, num_histos') ->
+    -- To incorporate the original values of the genreduce target, we
+    -- copy those values to the first subhistogram here.
+    forM (zip nes dests) $ \(ne, dest) -> do
+      blank <- letExp "sub_histo_blank" $ BasicOp $ Replicate (Shape [num_histos', w]) ne
+      slice <- fullSlice <$> lookupType blank <*> pure [DimFix $ intConst Int32 0]
+      letExp "sub_histo" $ BasicOp $ Update blank slice $ Var dest
+
+  let sub_histos' = concat sub_histos
+  dest_ts <- mapM lookupType sub_histos'
+
+  lock_arrs <- forM (zip ops num_histos) $ \(GenReduceOp w _ _ _, num_histos') ->
+    letExp "locks_arr" $ BasicOp $ Replicate (Shape [num_histos', w]) (intConst Int32 0)
 
   (kres, kstms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
     i <- newVName "i"
     -- The merge parameters are the histogram we are constructing.
-    merge_params <- zipWithM newParam (map baseString dests)
+    merge_params <- zipWithM newParam (map baseString sub_histos')
                                       (map (`toDecl` Unique) dest_ts)
-    let merge = zip merge_params $ map Var dests
+    let merge = zip merge_params $ map Var sub_histos'
         form = ForLoop i Int32 elems_per_thread []
 
     loop_body <- runBodyBinder $ localScope (scopeOfFParams (map fst merge) <>
@@ -367,19 +382,32 @@ blockedGenReduce pat arr_w ops lam arrs = runBinder_ $ do
             resultBody <$> eLambda lam (map eSubExp arr_elems)
 
           not_in_bounds_branch =
-            return $ resultBody $ replicate (length ops) (intConst Int32 (-1)) ++ nes
+            return $ resultBody $ replicate (length ops) (intConst Int32 (-1)) ++
+            concatMap genReduceNeutral ops
 
       lam_res <- letTupExp "bucket_fun_res" =<<
                   eIf in_bounds in_bounds_branch not_in_bounds_branch
 
+      -- Compute global histogram index for each thread.
+      global_inds <- forM (map genReduceWidth ops) $ \w ->
+        letSubExp "global_ind" =<<
+        eBinOp (Mul Int32)
+        (eBinOp (UDiv Int32)
+         (toExp gtid)
+         (eSubExp w))
+        (eSubExp w)
+
       let (buckets, vs) = splitAt (length ops) $ map Var lam_res
+          -- Combine global histogram index and local bucket
+          -- index into multi-dimensional index.
+          buckets' = zip global_inds buckets
           perOp :: [a] -> [[a]]
           perOp = chunks $ map (length . genReduceDest) ops
 
-      ops_res <- forM (zip5 ops (perOp merge_params) buckets (perOp vs) lock_arrs) $
-        \(GenReduceOp dest_w _ _ comb_op, dests', bucket, vs', lock_arr) ->
-        fmap (map Var) $ letTupExp "genreduce_res" $ Op $
-        GroupGenReduce dest_w (map paramName dests') comb_op bucket vs' lock_arr
+      ops_res <- forM (zip6 ops (perOp $ map paramName merge_params) buckets' (perOp vs) lock_arrs num_histos) $
+        \(GenReduceOp dest_w _ _ comb_op, subhistos, (global_ind, bucket), vs', lock_arrs', num_histos') ->
+          fmap (map Var) $ letTupExp "genreduce_res" $ Op $
+            GroupGenReduce [num_histos', dest_w] subhistos comb_op [global_ind, bucket] vs' lock_arrs'
 
       return $ resultBody $ concat ops_res
 
@@ -387,7 +415,7 @@ blockedGenReduce pat arr_w ops lam arrs = runBinder_ $ do
     return $ map KernelInPlaceReturn result
 
   let kbody = KernelBody () kstms kres
-  letBind_ pat $ Op $ Kernel (KernelDebugHints "gen_reduce" []) kspace dest_ts kbody
+  letTupExp "histograms" $ Op $ Kernel (KernelDebugHints "gen_reduce" []) kspace dest_ts kbody
 
 blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
               Pattern Kernels -> SubExp
