@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     stop and provide the opportunity to inspect variables in scope.
 
   * A new SOAC, `reduce_by_index`, for expressing generalised
-    reductions (sometimes called histograms).
+    reductions (sometimes called histograms).  Designed and
+    implemented by Sune Hellfritzsch.
 
 ### Removed
 
