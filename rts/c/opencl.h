@@ -676,7 +676,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
                                const char *srcs[],
                                int required_types) {
 
-  ctx->lockstep_width = 0;
+  ctx->lockstep_width = 1;
 
   free_list_init(&ctx->free_list);
 
