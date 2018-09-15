@@ -1030,23 +1030,28 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
   -- Common variables.
   old <- newVName "old"
   old_bits <- newVName "old_bits"
+  full_index <- newVName "full_index"
   ImpGen.emit $ Imp.DeclareScalar old t
   ImpGen.emit $ Imp.DeclareScalar old_bits int32
-  bucket' <- ImpGen.compileSubExp bucket
-  arr_sz <- ImpGen.compileSubExp w
+  ImpGen.emit $ Imp.DeclareScalar full_index int32
+  bucket' <- mapM ImpGen.compileSubExp bucket
+  w' <- mapM ImpGen.compileSubExp w
   arr_entry <- ImpGen.lookupArray a
   let arr'  = ImpGen.memLocationName $ ImpGen.entryArrayLocation arr_entry
+      -- Ensured by typechecker.
+      b0:b1:_ = bucket'
 
-  case opHasAtomicSupport old arr' bucket' op of
+  -- Correctly index into subhistogram.
+  ImpGen.emit $ Imp.SetScalar full_index $
+    Imp.BinOpExp (Add Int32) b0 b1
+
+  case opHasAtomicSupport old arr' (Imp.var full_index int32) op of
     Just f -> do
       val' <- ImpGen.compileSubExp v
+
       ImpGen.emit $
-        Imp.If (Imp.BinOpExp LogAnd
-                (Imp.CmpOpExp (CmpSlt Int32) (-1) bucket')
-                (Imp.CmpOpExp (CmpSlt Int32) bucket' arr_sz))
-        -- True branch
+        Imp.If (indexInBounds bucket' w')
         (Imp.Op $ f val')
-        -- False branch
         Imp.Skip
 
     Nothing -> do
@@ -1064,12 +1069,10 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
       ImpGen.emit $ Imp.DeclareScalar run_loop int32
 
       read_old <- ImpGen.collect $
-        ImpGen.copyDWIMDest (ImpGen.ScalarDestination old) [] (Var a) [bucket']
+        ImpGen.copyDWIMDest (ImpGen.ScalarDestination old) [] (Var a) bucket'
 
       ImpGen.emit $
-        Imp.If (Imp.BinOpExp LogAnd
-                (Imp.CmpOpExp (CmpSlt Int32) (-1) bucket')
-                (Imp.CmpOpExp (CmpSlt Int32) bucket' arr_sz))
+        Imp.If (indexInBounds bucket' w')
         -- True branch: bucket in-bounds -> enter loop
         (Imp.SetScalar run_loop 1 <> read_old)
         -- False branch: bucket out-of-bounds -> skip loop
@@ -1103,7 +1106,7 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
            <>
            (Imp.Op $
                Imp.Atomic $
-                 Imp.AtomicCmpXchg old_bits arr' (Imp.elements bucket')
+                 Imp.AtomicCmpXchg old_bits arr' (Imp.elements $ Imp.var full_index int32)
                    (toBits (Imp.var assumed int32)) (toBits (Imp.var (paramName acc_p) int32)))
            <>
            Imp.SetScalar old (fromBits (Imp.var old_bits int32))
@@ -1142,13 +1145,18 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
     Imp.DeclareScalar loop_done int32
 
   -- Check if bucket is in-bounds
-  bucket' <- ImpGen.compileSubExp bucket
-  arr_sz <- ImpGen.compileSubExp w
+  bucket' <- mapM ImpGen.compileSubExp bucket
+  w' <- mapM ImpGen.compileSubExp w
+  let b0:b1:_ = bucket'
+
+  -- Correctly index into subhistogram.
+  full_index <- newVName "full_index"
+  ImpGen.emit $ Imp.DeclareScalar full_index int32
+  ImpGen.emit $ Imp.SetScalar full_index $
+    Imp.BinOpExp (Add Int32) b0 b1
 
   ImpGen.emit $
-    Imp.If (Imp.BinOpExp LogAnd
-             (Imp.CmpOpExp (CmpSlt Int32) (-1) bucket')
-             (Imp.CmpOpExp (CmpSlt Int32)  bucket' arr_sz))
+    Imp.If (indexInBounds bucket' w')
     -- True branch: bucket in-bounds -> enter loop
     (Imp.SetScalar loop_done 0)
     -- False branch: bucket out-of-bounds -> skip loop
@@ -1162,13 +1170,14 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   dests <- ImpGen.destinationFromParams acc_params
 
   -- Locate locks array
-  locks_entry <- ImpGen.lookupArray locks
-  let locks'  = ImpGen.memLocationName $ ImpGen.entryArrayLocation locks_entry
+  locks_entries <- ImpGen.lookupArray locks
+  let locks' = ImpGen.memLocationName $ ImpGen.entryArrayLocation locks_entries
 
   -- Critical section
   ImpGen.declaringLParams (lambdaParams op) $ do
     let try_acquire_lock =
-          Imp.Op $ Imp.Atomic $ Imp.AtomicXchg old locks' (Imp.elements bucket') 1
+          Imp.Op $ Imp.Atomic $
+          Imp.AtomicXchg old locks' (Imp.elements $ Imp.var full_index int32) 1
         lock_acquired =
           Imp.CmpOpExp (CmpEq int32) (Imp.var old int32) 0
         loop_cond =
@@ -1183,7 +1192,7 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
     bind_acc_params <- ImpGen.collect $
       forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
       when (primType (paramType acc_p)) $
-      ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName acc_p) [] (Var arr) [bucket']
+      ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName acc_p) [] (Var arr) bucket'
 
     bind_arr_params <- ImpGen.collect $
       forM_ (zip arr_params values) $ \(arr_p, val) ->
@@ -1194,10 +1203,10 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
       ImpGen.compileBody dests $ lambdaBody op
 
     do_gen_reduce <- ImpGen.collect $
-      zipWithM_ (writeOpResult bucket') acc_params arrs
+      zipWithM_ (writeArray bucket') arrs $ map (Var . paramName) acc_params
 
     release_lock <- ImpGen.collect $
-      ImpGen.copyDWIM locks [bucket'] (intConst Int32 0) []
+      ImpGen.copyDWIM locks bucket' (intConst Int32 0) []
 
     -- While-loop: Try to insert your value
     ImpGen.emit $ Imp.While loop_cond
@@ -1210,12 +1219,22 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
          <>
         Imp.Op Imp.MemFence
       )
-  where writeOpResult i param arr =
-          ImpGen.copyDWIM arr [i] (Var $ paramName param) []
+  where writeArray i arr val =
+          ImpGen.copyDWIM arr i val []
 
 compileKernelExp _ dest e =
   compilerBugS $ unlines ["Invalid target", "  " ++ show dest,
                           "for kernel expression", "  " ++ pretty e]
+
+-- Requires that the lists are of equal length, otherwise
+-- zip with truncate the longer list.
+indexInBounds :: [Imp.Exp] -> [Imp.Exp] -> Imp.Exp
+indexInBounds inds bounds =
+  foldl1 (Imp.BinOpExp LogAnd) $ zipWith checkBound inds bounds
+  where checkBound ind bound =
+          Imp.BinOpExp LogAnd
+           (Imp.CmpOpExp (CmpSle Int32) 0 ind)
+           (Imp.CmpOpExp (CmpSlt Int32) ind bound)
 
 allThreads :: KernelConstants -> InKernelGen () -> InKernelGen Imp.KernelCode
 allThreads constants = ImpGen.subImpM_ $ inKernelOperations constants'

@@ -132,8 +132,8 @@ data KernelExp lore = SplitSpace SplitOrdering SubExp SubExp SubExp
                       -- First  SubExp is the outersize of the array
                       -- Second SubExp is the maximal chunk size
                       -- [SubExp] is the accumulator, [VName] are the input arrays
-                    | GroupGenReduce SubExp [VName] (LambdaT lore) SubExp [SubExp] VName
-                      -- ^ GroupGenReduce <length> <destarrays> <op> <bucket> <values> <locks array>
+                    | GroupGenReduce [SubExp] [VName] (LambdaT lore) [SubExp] [SubExp] VName
+                      -- ^ GroupGenReduce <length> <destarrays> <op> <bucket> <values> <locks arrays>
                     | Barrier [SubExp]
                       -- ^ HACK: Semantically identity, but inserts a
                       -- barrier afterwards.  This reflects a weakness
@@ -496,19 +496,25 @@ typeCheckKernelExp (GroupReduce w lam input) =
 typeCheckKernelExp (GroupScan w lam input) =
   checkScanOrReduce w lam input
 
-typeCheckKernelExp (GroupGenReduce w dests op bucket vs locks) = do
-  TC.require [Prim int32] w
+typeCheckKernelExp (GroupGenReduce ws dests op bucket vs locks) = do
+  mapM_ (TC.require [Prim int32]) ws
 
-  dest_row_ts <- mapM (fmap rowType . lookupType) dests
+  mapM_ (TC.require [Prim int32]) bucket
 
-  TC.require [Prim int32] bucket
+  -- Support only two-dimensional indices for now, i.e., you
+  -- can only index into a sub-histogram at top-level.
+  unless (length bucket <= 2) $
+    TC.bad $ TC.TypeError $ "Bucket has dimension " ++ pretty (length bucket) ++
+    " but should have maximum dimension of two."
+
+  dest_row_ts <- mapM (fmap (stripArray (length bucket)) . lookupType) dests
 
   vs_ts <- mapM subExpType vs
   unless (vs_ts == dest_row_ts) $
     TC.bad $ TC.TypeError $ "Destination arrays have type " ++
     pretty dest_row_ts ++ ", but values to write have type " ++ pretty vs_ts
 
-  TC.requireI [Prim int32 `arrayOfRow` w] locks
+  TC.requireI [Prim int32 `arrayOfShape` Shape ws] locks
 
   let asArg t = (t, mempty)
   TC.checkLambda op $ map asArg $ dest_row_ts ++ vs_ts
@@ -599,7 +605,8 @@ instance PrettyLore lore => Pretty (KernelExp lore) where
     parens (ppr w <> comma </>
             braces (commasep $ map ppr dests) <> comma </>
             ppr op <> comma </>
-            commasep (map ppr $ bucket : vs) </> ppr locks)
+            braces (commasep [ppr bucket, ppr vs]) </>
+            ppr locks)
 
   ppr (Barrier ses) = text "barrier" <> parens (commasep $ map ppr ses)
 

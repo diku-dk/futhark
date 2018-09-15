@@ -167,7 +167,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
 
   redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
     vn' <- newName $ patElemName pe
-    return $ PatElem vn' $ patElemType pe `setArrayDims` [num_segments]
+    return $ PatElem vn' $ replaceSegmentDims num_segments $ patElemType pe
   let mapres_pes = drop num_redres $ patternValueElements flat_pat
   let unreshaped_pat = Pattern [] $ redres_pes ++ mapres_pes
 
@@ -180,6 +180,9 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
     (patElemName kpe)
 
   where
+    replaceSegmentDims d t =
+      t `setArrayDims` (d : drop (length nest_sizes) (arrayDims t))
+
     one = constant (1 :: Int32)
     two = constant (2 :: Int32)
 
@@ -208,7 +211,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
 
       kernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
-        return $ PatElem vn' $ patElemType pe `setArrayDims` [num_segments]
+        return $ PatElem vn' $ replaceSegmentDims num_segments $ patElemType pe
 
       let kernel_pat = Pattern [] $ kernel_redres_pes ++ mapres_pes
 
@@ -229,7 +232,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
 
       firstkernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
-        return $ PatElem vn' $ patElemType pe `setArrayDims` [num_groups_used]
+        return $ PatElem vn' $ replaceSegmentDims num_groups_used $ patElemType pe
 
       let first_pat = Pattern [] $ firstkernel_redres_pes ++ mapres_pes
       addStm =<< renameStm (Let first_pat (defAux ()) $ Op firstkernel)
@@ -265,10 +268,15 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
       -- Small kernel, using one group many segments (ogms)
       (small_ses, small_stms) <- runBinder $ do
         red_scratch_arrs <- forM (take num_redres $ patternIdents pat) $ \(Ident name t) -> do
+          -- We construct a scratch array for writing the result, but
+          -- we have to flatten the dimensions corresponding to the
+          -- map nest, because multi-dimensional WriteReturns are/were
+          -- not supported.
           tmp <- letExp (baseString name <> "_redres_scratch") $
                  BasicOp $ Scratch (elemType t) (arrayDims t)
+          let reshape = reshapeOuter [DimNew num_segments] (length nest_sizes) $ arrayShape t
           letExp (baseString name ++ "_redres_scratch") $
-                  BasicOp $ Reshape [DimNew num_segments] tmp
+                  BasicOp $ Reshape reshape tmp
         kernel <- smallKernel group_size new_segment_size num_segments
                               tmp_redres red_scratch_arrs
                               comm flag_reduce_lam' reduce_lam
