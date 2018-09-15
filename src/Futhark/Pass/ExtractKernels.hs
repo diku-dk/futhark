@@ -449,39 +449,41 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
     addStms bnds
     letBind_ pat $ Op kernel
 
-transformStm _ (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = runBinder_ $ do
+transformStm path (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = do
   bfun' <- Kernelise.transformLambda bucket_fun
   ops' <- forM ops $ \(GenReduceOp dest_w dests nes op) ->
     GenReduceOp dest_w dests nes <$> Kernelise.transformLambda op
   (histos, stms) <- blockedGenReduce w ops' bfun' imgs
-  certifying cs $ mapM_ addStm stms
 
   let histos' = chunks (map (length . genReduceDest) ops') histos
       pes = chunks (map (length . genReduceDest) ops') $ patternElements orig_pat
-  mapM_ combineIntermediateResults $ zip3 pes ops' histos'
+
+  (fmap (certify cs) stms<>) . mconcat <$>
+    localScope (castScope $ scopeOf stms)
+    (mapM combineIntermediateResults (zip3 pes ops histos'))
 
   where combineIntermediateResults (pes, GenReduceOp num_bins _ nes op, histos) = do
           num_histos <- arraysSize 0 <$> mapM lookupType histos
-          num_elems <- letSubExp "num_elems" $ BasicOp $ BinOp (Mul Int32) num_histos w
 
-          let pat = Pattern [] pes
-          flat_pat <- fmap (Pattern []) $ forM pes $ \pe ->
-            PatElem <$> newVName (baseString (patElemName pe) <> "_flat") <*>
-            pure (rowType (patElemType pe) `arrayOfRow` num_elems)
-
-          identity <- mkIdentityLambda $ lambdaReturnType op
-          fold_lam <- composeLambda nilFn op identity
-
-          histos_flat <- forM histos $ \h -> do
+          (histos_tr, tr_stms) <- runBinder $ forM histos $ \h -> do
             h_t <- lookupType h
             let perm = [1,0] ++ [2..arrayRank h_t-1]
-            h_tr <- letExp (baseString h <> "_tr") $ BasicOp $ Rearrange perm h
-            let reshape = reshapeOuter [DimNew num_elems] 2 (arrayShape h_t)
-            letExp (baseString h <> "_flat") $ BasicOp $ Reshape reshape h_tr
+            letExp (baseString h <> "_tr") $ BasicOp $ Rearrange perm h
 
-          bin_id <- newVName "bin_id"
-          regularSegmentedRedomap num_histos num_bins [num_bins] flat_pat pat
-            num_elems Commutative op fold_lam [(bin_id, num_bins)] [] nes histos_flat
+          op_renamed <- renameLambda op
+          map_params <- forM (lambdaReturnType op) $ \t ->
+            newParam "bin" $ t `arrayOfRow` num_histos
+          (map_res, map_stms) <- runBinder $ do
+            form <- reduceSOAC Commutative op_renamed nes
+            letTupExp "bin_combined" $ Op $
+              Screma num_histos form $ map paramName map_params
+          let map_lam = Lambda { lambdaParams = map_params
+                               , lambdaReturnType = lambdaReturnType op
+                               , lambdaBody = mkBody map_stms $ map Var map_res
+                               }
+              collapse_stm = Let (Pattern [] pes) (StmAux mempty ()) $
+                             Op $ Screma num_bins (mapSOAC map_lam) histos_tr
+          (tr_stms<>) <$> inScopeOf tr_stms (transformStm path collapse_stm)
 
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
