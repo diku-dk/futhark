@@ -388,24 +388,17 @@ blockedGenReduce arr_w ops lam arrs = runBinder $ do
       lam_res <- letTupExp "bucket_fun_res" =<<
                   eIf in_bounds in_bounds_branch not_in_bounds_branch
 
-      -- Compute global histogram index for each thread.
-      global_inds <- forM (map genReduceWidth ops) $ \w ->
-        letSubExp "global_ind" =<<
-        eBinOp (Mul Int32)
-        (eBinOp (UDiv Int32)
-         (toExp gtid)
-         (eSubExp w))
-        (eSubExp w)
-
       let (buckets, vs) = splitAt (length ops) $ map Var lam_res
-          -- Combine global histogram index and local bucket
-          -- index into multi-dimensional index.
-          buckets' = zip global_inds buckets
           perOp :: [a] -> [[a]]
           perOp = chunks $ map (length . genReduceDest) ops
 
-      ops_res <- forM (zip6 ops (perOp $ map paramName merge_params) buckets' (perOp vs) lock_arrs num_histos) $
-        \(GenReduceOp dest_w _ _ comb_op, subhistos, (global_ind, bucket), vs', lock_arrs', num_histos') ->
+      ops_res <- forM (zip6 ops (perOp $ map paramName merge_params) buckets (perOp vs) lock_arrs num_histos) $
+        \(GenReduceOp dest_w _ _ comb_op, subhistos, bucket, vs', lock_arrs', num_histos') -> do
+          -- Compute subhistogram index for each thread.
+          global_ind <- letSubExp "global_ind" =<<
+                        eBinOp (SDiv Int32)
+                        (toExp gtid)
+                        (eDivRoundingUp Int32 (toExp nthreads) (eSubExp num_histos'))
           fmap (map Var) $ letTupExp "genreduce_res" $ Op $
             GroupGenReduce [num_histos', dest_w] subhistos comb_op [global_ind, bucket] vs' lock_arrs'
 
