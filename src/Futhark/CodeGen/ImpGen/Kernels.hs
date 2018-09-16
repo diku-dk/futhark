@@ -871,6 +871,9 @@ compileKernelExp constants _ (GroupScan w lam input) = do
   renamed_lam <- renameLambda lam
   w' <- ImpGen.compileSubExp w
 
+  when (any (not . primType . paramType) $ lambdaParams lam) $
+    compilerLimitationS "Cannot compile parallel scans with array element type."
+
   let local_tid = kernelLocalThreadId constants
       (_nes, arrs) = unzip input
       (lam_i, other_index_param, actual_params) =
