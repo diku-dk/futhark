@@ -110,6 +110,7 @@ data TestRun = TestRun
                { runTags :: [String]
                , runInput :: Values
                , runExpectedResult :: ExpectedResult Values
+               , runIndex :: Int
                , runDescription :: String
                }
              deriving (Show)
@@ -184,7 +185,7 @@ parseRunCases = parseRunCases' (0::Int)
           tags <- parseRunTags
           input <- parseInput
           expr <- parseExpectedResult
-          return $ TestRun tags input expr $ desc i input
+          return $ TestRun tags input expr i $ desc i input
 
         -- If the file is gzipped, we strip the 'gz' extension from
         -- the dataset name.  This makes it more convenient to rename
