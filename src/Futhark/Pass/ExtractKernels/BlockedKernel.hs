@@ -330,13 +330,29 @@ blockedGenReduce arr_w ops lam arrs = runBinder $ do
     letSubExp "num_histos" =<< eDivRoundingUp Int32 (eSubExp nthreads) (eSubExp w)
 
   -- Initialize sub-histograms.
-  sub_histos <- forM (zip ops num_histos) $ \(GenReduceOp w dests nes _, num_histos') ->
-    -- To incorporate the original values of the genreduce target, we
-    -- copy those values to the first subhistogram here.
-    forM (zip nes dests) $ \(ne, dest) -> do
-      blank <- letExp "sub_histo_blank" $ BasicOp $ Replicate (Shape [num_histos', w]) ne
-      slice <- fullSlice <$> lookupType blank <*> pure [DimFix $ intConst Int32 0]
-      letExp "sub_histo" $ BasicOp $ Update blank slice $ Var dest
+  sub_histos <- forM (zip ops num_histos) $ \(GenReduceOp w dests nes _, num_histos') -> do
+    -- If num_histos' is 1, then we just reuse the original
+    -- destination.  The idea is to avoid a copy if we are writing a
+    -- small number of values into a very large prior histogram.  This
+    -- only works if neither the Reshape nor the If results in a copy.
+    let num_histos_is_one = BasicOp $ CmpOp (CmpEq int32) num_histos' $ intConst Int32 1
+
+        reuse_dest =
+          fmap resultBody $ forM dests $ \dest -> do
+            dest_dims <- arrayDims <$> lookupType dest
+            letSubExp "sub_histo" $ BasicOp $
+              Reshape (DimNew num_histos' : map DimNew dest_dims) dest
+
+        make_subhistograms =
+          -- To incorporate the original values of the genreduce target, we
+          -- copy those values to the first subhistogram here.
+          fmap resultBody $ forM (zip nes dests) $ \(ne, dest) -> do
+            blank <- letExp "sub_histo_blank" $ BasicOp $ Replicate (Shape [num_histos', w]) ne
+            slice <- fullSlice <$> lookupType blank <*> pure [DimFix $ intConst Int32 0]
+            letSubExp "sub_histo" $ BasicOp $ Update blank slice $ Var dest
+
+    letTupExp "histo_dests" =<<
+      eIf (pure num_histos_is_one) reuse_dest make_subhistograms
 
   let sub_histos' = concat sub_histos
   dest_ts <- mapM lookupType sub_histos'
