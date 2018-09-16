@@ -117,11 +117,6 @@ mkArray vs =
              v:_ | all ((==valueShape v) . valueShape) vs -> Just $ toArray' vs
                  | otherwise -> Nothing
 
-isEmptyArray :: Value -> Bool
-isEmptyArray (ValueArray arr) =
-  arrayLength arr == (0::Int32) || any isEmptyArray (elems arr)
-isEmptyArray _ = False
-
 -- | A shape is a tree to accomodate the case of records.
 data Shape = ShapeDim Int32 Shape
            | ShapeLeaf
@@ -145,6 +140,9 @@ valueShape (ValueArray arr) = ShapeDim (arrayLength arr) $
                                 v:_ -> valueShape v
 valueShape (ValueRecord fs) = ShapeRecord $ M.map valueShape fs
 valueShape _ = ShapeLeaf
+
+isEmptyArray :: Value -> Bool
+isEmptyArray = emptyShape . valueShape
 
 arrayLength :: Integral int => Array Int Value -> int
 arrayLength = fromIntegral . (+1) . snd . bounds
