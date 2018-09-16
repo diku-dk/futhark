@@ -1149,6 +1149,11 @@ removeIdentityInPlace vtable pat _ (Update dest destis (Var v))
               arrayFrom e'
         arrayFrom (BasicOp (Index src srcis)) =
           src == dest && destis == srcis
+        arrayFrom (BasicOp (Replicate v_shape v_se))
+          | Just (Replicate dest_shape dest_se, _) <- ST.lookupBasicOp dest vtable,
+            v_se == dest_se,
+            shapeDims v_shape `isSuffixOf` shapeDims dest_shape =
+              True
         arrayFrom _ =
           False
 removeIdentityInPlace _ _ _ _ =
