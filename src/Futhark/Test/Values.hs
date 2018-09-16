@@ -467,14 +467,15 @@ explainMismatch i what got expected =
 
 -- | Compare two sets of Futhark values for equality.  Shapes and
 -- types must also match.
-compareValues :: [Value] -> [Value] -> Maybe Mismatch
+compareValues :: [Value] -> [Value] -> Maybe [Mismatch]
 compareValues got expected
-  | n /= m = Just $ ValueCountMismatch n m
+  | n /= m = Just [ValueCountMismatch n m]
   | otherwise = case catMaybes $ zipWith3 compareValue [0..] got expected of
-    e : _ -> Just e
-    []    -> Nothing
+    [] -> Nothing
+    es -> Just es
   where n = length got
         m = length expected
+
 
 compareValue :: Int -> Value -> Value -> Maybe Mismatch
 compareValue i got_v expected_v

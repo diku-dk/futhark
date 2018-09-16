@@ -174,12 +174,12 @@ io = liftIO
 
 runBenchmarkCase :: BenchOptions -> FilePath -> T.Text -> Int -> TestRun
                  -> IO (Maybe DataResult)
-runBenchmarkCase _ _ _ _ (TestRun _ _ RunTimeFailure{} _) =
+runBenchmarkCase _ _ _ _ (TestRun _ _ RunTimeFailure{} _ _) =
   return Nothing -- Not our concern, we are not a testing tool.
-runBenchmarkCase opts _ _ _ (TestRun tags _ _ _)
+runBenchmarkCase opts _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
       return Nothing
-runBenchmarkCase opts program entry pad_to (TestRun _ input_spec (Succeeds expected_spec) dataset_desc) =
+runBenchmarkCase opts program entry pad_to (TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
