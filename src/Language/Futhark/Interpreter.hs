@@ -95,15 +95,18 @@ instance Eq Value where
   ValueRecord x == ValueRecord y = x == y
   _ == _ = False
 
+prettyRecord :: Pretty a => M.Map Name a -> Doc
+prettyRecord m
+  | Just vs <- areTupleFields m =
+      parens $ commasep $ map ppr vs
+  | otherwise =
+      braces $ commasep $ map field $ M.toList m
+      where field (k, v) = ppr k <+> equals <+> ppr v
+
 instance Pretty Value where
   ppr (ValuePrim v) = ppr v
   ppr (ValueArray a) = brackets $ commasep $ map ppr $ elems a
-  ppr (ValueRecord m)
-    | Just vs <- areTupleFields m =
-        parens $ commasep $ map ppr vs
-    | otherwise =
-        braces $ commasep $ map field $ M.toList m
-        where field (k, v) = ppr k <+> equals <+> ppr v
+  ppr (ValueRecord m) = prettyRecord m
   ppr ValueFun{} = text "#<fun>"
 
 -- | Create an array value; failing if that would result in an
@@ -111,21 +114,37 @@ instance Pretty Value where
 mkArray :: [Value] -> Maybe Value
 mkArray vs =
   case vs of [] -> Just $ toArray' vs
-             v:_ | all ((==len v) . len) vs -> Just $ toArray' vs
+             v:_ | all ((==valueShape v) . valueShape) vs -> Just $ toArray' vs
                  | otherwise -> Nothing
-    where len (ValueArray arr) = arrayLength arr
-          len _                = 0 :: Int
 
 isEmptyArray :: Value -> Bool
 isEmptyArray (ValueArray arr) =
   arrayLength arr == (0::Int32) || any isEmptyArray (elems arr)
 isEmptyArray _ = False
 
-valueShape :: Value -> [Int32]
-valueShape (ValueArray arr) = arrayLength arr : case elems arr of
-                                                  []  -> []
-                                                  v:_ -> valueShape v
-valueShape _ = []
+-- | A shape is a tree to accomodate the case of records.
+data Shape = ShapeDim Int32 Shape
+           | ShapeLeaf
+           | ShapeRecord (M.Map Name Shape)
+           deriving (Eq, Show)
+
+instance Pretty Shape where
+  ppr ShapeLeaf = mempty
+  ppr (ShapeDim d s) = brackets (ppr d) <> ppr s
+  ppr (ShapeRecord m) = prettyRecord m
+
+emptyShape :: Shape -> Bool
+emptyShape ShapeLeaf = False
+emptyShape (ShapeDim d s) = d == 0 || emptyShape s
+emptyShape (ShapeRecord fs) = any emptyShape fs
+
+valueShape :: Value -> Shape
+valueShape (ValueArray arr) = ShapeDim (arrayLength arr) $
+                              case elems arr of
+                                []  -> ShapeLeaf
+                                v:_ -> valueShape v
+valueShape (ValueRecord fs) = ShapeRecord $ M.map valueShape fs
+valueShape _ = ShapeLeaf
 
 arrayLength :: Integral int => Array Int Value -> int
 arrayLength = fromIntegral . (+1) . snd . bounds
@@ -297,7 +316,7 @@ matchValueToType :: Env -> M.Map VName (Maybe T.BoundV, Value)
 
 -- Empty arrays always match.
 matchValueToType env m t@(Array _ (ShapeDecl ds@(d:_)) _) val@(ValueArray arr)
-  | any zeroDim ds, 0 `elem` valueShape val =
+  | any zeroDim ds, emptyShape (valueShape val) =
       Right $ m <> mconcat (map namedAreZero ds)
 
   | otherwise =
@@ -438,8 +457,8 @@ evalDimIndex env (DimSlice start end stride) =
 evalIndex :: SrcLoc -> Env -> [Indexing] -> Value -> EvalM Value
 evalIndex loc env is arr = do
   let oob = bad loc env $ "Index [" <> intercalate ", " (map pretty is) <>
-            "] out of bounds for array of shape [" <>
-            intercalate "][" (map pretty (valueShape arr)) <> "]."
+            "] out of bounds for array of shape " <>
+            pretty (valueShape arr) <> "."
   maybe oob return $ indexArray is arr
 
 evalTermVar :: Env -> QualName VName -> EvalM Value
