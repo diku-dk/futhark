@@ -465,6 +465,18 @@ transformStm path (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun im
   where combineIntermediateResults (pes, GenReduceOp num_bins _ nes op, histos) = do
           num_histos <- arraysSize 0 <$> mapM lookupType histos
 
+          -- Avoid the segmented reduction if num_histos is 1.
+          num_histos_is_one <- newVName "num_histos_is_one"
+          let num_histos_is_one_stm =
+                mkLet [] [Ident num_histos_is_one $ Prim Bool] $
+                BasicOp $ CmpOp (CmpEq int32) num_histos $ intConst Int32 1
+
+          no_segmented_reduce_body <- runBodyBinder $
+            fmap resultBody $ forM histos $ \histo -> do
+              histo_dims <- arrayDims <$> lookupType histo
+              letSubExp "histo_flattened" $
+                BasicOp $ Reshape (map DimNew $ drop 1 histo_dims) histo
+
           (histos_tr, tr_stms) <- runBinder $ forM histos $ \h -> do
             h_t <- lookupType h
             let perm = [1,0] ++ [2..arrayRank h_t-1]
@@ -477,13 +489,24 @@ transformStm path (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun im
             form <- reduceSOAC Commutative op_renamed nes
             letTupExp "bin_combined" $ Op $
               Screma num_histos form $ map paramName map_params
+          pes' <- forM pes $ \pe ->
+            PatElem <$> newVName "histo_segred" <*> pure (patElemType pe)
           let map_lam = Lambda { lambdaParams = map_params
                                , lambdaReturnType = lambdaReturnType op
                                , lambdaBody = mkBody map_stms $ map Var map_res
                                }
-              collapse_stm = Let (Pattern [] pes) (StmAux mempty ()) $
+              collapse_stm = Let (Pattern [] pes') (StmAux mempty ()) $
                              Op $ Screma num_bins (mapSOAC map_lam) histos_tr
-          (tr_stms<>) <$> inScopeOf tr_stms (transformStm path collapse_stm)
+
+          segmented_reduce_stms <-
+            (tr_stms<>) <$> inScopeOf tr_stms (transformStm path collapse_stm)
+          let segmented_reduce_body =
+                mkBody segmented_reduce_stms $ map (Var . patElemName) pes'
+          return $ stmsFromList
+            [num_histos_is_one_stm,
+             mkLet [] (map patElemIdent pes) $
+             If (Var num_histos_is_one) no_segmented_reduce_body segmented_reduce_body $
+             IfAttr (staticShapes $ map patElemType pes) IfNormal]
 
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
