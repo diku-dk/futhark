@@ -1,37 +1,47 @@
-{-# LANGUAGE OverloadedStrings, FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings, FlexibleContexts, LambdaCase #-}
 -- | This program is a convenience utility for running the Futhark
 -- test suite, and its test programs.
 module Main (main) where
 
+import Control.Applicative.Lift (runErrors, failure, Errors, Lift(..))
+import Control.Concurrent
+import Control.Exception
+import Control.Monad
+import Control.Monad.Except hiding (throwError)
+import qualified Control.Monad.Except as E
 import qualified Data.ByteString as SBS
 import qualified Data.ByteString.Lazy as LBS
-import Control.Concurrent
-import Control.Monad
-import Control.Exception
-import Control.Monad.Except
 
 import Data.List
 import Data.Semigroup ((<>))
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Text.Encoding as T
 import qualified Data.Map.Strict as M
-import System.Console.GetOpt
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Data.Text.IO as T
+import System.Console.ANSI
 import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
-import System.IO
 import System.FilePath
+import System.Console.GetOpt
+import System.IO
 import Text.Regex.TDFA
 
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Analysis.Metrics
 import Futhark.Test
-
 import Futhark.Util.Options
+import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Table
 
 --- Test execution
 
-type TestM = ExceptT T.Text IO
+type TestM = ExceptT [T.Text] IO
+
+-- Taken from transformers-0.5.5.0.
+eitherToErrors :: Either e a -> Errors e a
+eitherToErrors = either failure Pure
+
+throwError :: MonadError [e] m => e -> m a
+throwError e = E.throwError [e]
 
 runTestM :: TestM () -> IO TestResult
 runTestM = fmap (either Failure $ const Success) . runExceptT
@@ -40,10 +50,22 @@ io :: IO a -> TestM a
 io = liftIO
 
 context :: T.Text -> TestM a -> TestM a
-context s = withExceptT ((s<>":\n")<>)
+context s = withExceptT $
+  \case
+    []      -> []
+    (e:es') -> (s <> ":\n" <> e):es'
+
+accErrors :: [TestM a] -> TestM [a]
+accErrors tests = do
+  eithers <- lift $ mapM runExceptT tests
+  let errors = traverse eitherToErrors eithers
+  ExceptT $ return $ runErrors errors
+
+accErrors_ :: [TestM a] -> TestM ()
+accErrors_ = void . accErrors
 
 data TestResult = Success
-                | Failure T.Text
+                | Failure [T.Text]
                 deriving (Eq, Show)
 
 data TestCase = TestCase { _testCaseMode :: TestMode
@@ -90,7 +112,7 @@ testMetrics :: ProgConfig -> FilePath -> StructureTest -> TestM ()
 testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
   context "Checking metrics" $ do
     actual <- optimisedProgramMetrics programs pipeline program
-    mapM_ (ok actual) $ M.toList expected
+    accErrors_ $ map (ok actual) $ M.toList expected
   where ok (AstMetrics metrics) (name, expected_occurences) =
           case M.lookup name metrics of
             Nothing
@@ -104,7 +126,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
             _ -> return ()
 
 testWarnings :: [WarningTest] -> SBS.ByteString -> TestM ()
-testWarnings warnings futerr = mapM_ testWarning warnings
+testWarnings warnings futerr = accErrors_ $ map testWarning warnings
   where testWarning (ExpectedWarning regex_s regex)
           | not (match regex $ T.unpack $ T.decodeUtf8 futerr) =
             throwError $ "Expected warning:\n  " <> regex_s <>
@@ -140,26 +162,68 @@ runTestCase (TestCase mode program testcase progs) =
     RunCases ios structures warnings -> do
       -- Compile up-front and reuse same executable for several entry points.
       let compiler = configCompiler progs
+          interpreter = configInterpreter progs
           extra_options = configExtraCompilerOptions progs
       unless (mode == Interpreted) $
         context ("Compiling with " <> T.pack compiler) $ do
           compileTestProgram extra_options compiler program warnings
           mapM_ (testMetrics progs program) structures
-      unless (mode == Compile) $
-        mapM_ runInputOutputs ios
+          context "Running compiled program" $
+            accErrors_ $ map (runCompiledEntry program progs) ios
+      unless (mode == Compile || mode == Compiled) $
+        context ("Interpreting with " <> T.pack interpreter) $
+          accErrors_ $ map (runInterpretedEntry interpreter program) ios
 
-  where
+runInterpretedEntry :: String -> FilePath -> InputOutputs -> TestM()
+runInterpretedEntry futharki program (InputOutputs entry run_cases) =
+  let dir = takeDirectory program
+      runInterpretedCase run@(TestRun _ inputValues expectedResult index _) =
+        unless ("compiled" `elem` runTags run) $
+          context ("Entry point: " <> entry
+                   <> "; dataset: " <> T.pack (runDescription run)) $ do
 
-    runInputOutputs (InputOutputs entry run_cases) =
-      forM_ run_cases $ \run -> context ("Entry point: " <> entry <> "; dataset: " <>
-                                         T.pack (runDescription run)) $ do
-        let interpreter = configInterpreter progs
-        unless (mode == Compiled || "compiled" `elem` runTags run) $
-          context ("Interpreting with " <> T.pack interpreter) $
-            interpretTestProgram interpreter program entry run
+            input <- T.unlines . map prettyText <$> getValues dir inputValues
+            expectedResult' <- getExpectedResult dir expectedResult
+            (code, output, err) <-
+              io $ readProcessWithExitCode futharki ["-e", T.unpack entry, program] $
+              T.encodeUtf8 input
+            case code of
+              ExitFailure 127 -> throwError $ progNotFound $ T.pack futharki
 
-        context "Running compiled program" $
-          runCompiledTestProgram (configRunner progs) (configExtraOptions progs) program entry run
+              _               -> compareResult entry index program expectedResult'
+                                 =<< runResult program code output err
+
+  in accErrors_ $ map runInterpretedCase run_cases
+
+runCompiledEntry :: FilePath -> ProgConfig -> InputOutputs -> TestM ()
+runCompiledEntry program progs (InputOutputs entry run_cases) =
+      -- Explicitly prefixing the current directory is necessary for
+      -- readProcessWithExitCode to find the binary when binOutputf has
+      -- no path component.
+  let binOutputf = dropExtension program
+      dir = takeDirectory program
+      binpath = "." </> binOutputf
+      entry_options = ["-e", T.unpack entry]
+
+      runner = configRunner progs
+      extra_options = configExtraOptions progs
+      (to_run, to_run_args)
+        | null runner = (binpath, entry_options ++ extra_options)
+        | otherwise = (runner, binpath : entry_options ++ extra_options)
+
+      runCompiledCase run@(TestRun _ inputValues expectedResult index _) =
+        context ("Entry point: " <> entry
+                 <> "; dataset: " <> T.pack (runDescription run)) $ do
+
+          input <- getValuesBS dir inputValues
+          expectedResult' <- getExpectedResult dir expectedResult
+          (progCode, output, progerr) <-
+            io $ readProcessWithExitCode to_run to_run_args $ LBS.toStrict input
+          compareResult entry index program expectedResult'
+            =<< runResult program progCode output progerr
+
+  in context ("Running " <> T.pack (unwords $ binpath : entry_options ++ extra_options)) $
+         accErrors_ $ map runCompiledCase run_cases
 
 checkError :: ExpectedError -> SBS.ByteString -> TestM ()
 checkError (ThisError regex_s regex) err
@@ -187,20 +251,6 @@ getExpectedResult dir (Succeeds (Just vals)) = Succeeds . Just <$> getValues dir
 getExpectedResult _   (Succeeds Nothing) = return $ Succeeds Nothing
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
-interpretTestProgram :: String -> FilePath -> T.Text -> TestRun -> TestM ()
-interpretTestProgram futharki program entry (TestRun _ inputValues expectedResult _) = do
-  input <- T.unlines . map prettyText <$> getValues dir inputValues
-  expectedResult' <- getExpectedResult dir expectedResult
-  (code, output, err) <-
-    io $ readProcessWithExitCode futharki ["-e", T.unpack entry, program] $
-    T.encodeUtf8 input
-  case code of
-    ExitFailure 127 ->
-      throwError $ progNotFound $ T.pack futharki
-    _               ->
-      compareResult program expectedResult' =<< runResult program code output err
-  where dir = takeDirectory program
-
 compileTestProgram :: [String] -> String -> FilePath -> [WarningTest] -> TestM ()
 compileTestProgram extra_options futharkc program warnings = do
   (futcode, _, futerr) <- io $ readProcessWithExitCode futharkc options ""
@@ -212,52 +262,31 @@ compileTestProgram extra_options futharkc program warnings = do
   where binOutputf = dropExtension program
         options = [program, "-o", binOutputf] ++ extra_options
 
-runCompiledTestProgram :: String -> [String] -> String -> T.Text -> TestRun -> TestM ()
-runCompiledTestProgram runner extra_options program entry (TestRun _ inputValues expectedResult _) = do
-  input <- getValuesBS dir inputValues
-  expectedResult' <- getExpectedResult dir expectedResult
-  -- Explicitly prefixing the current directory is necessary for
-  -- readProcessWithExitCode to find the binary when binOutputf has
-  -- no path component.
-  let binpath = "." </> binOutputf
-      entry_options = ["-e", T.unpack entry]
-
-      (to_run, to_run_args)
-        | null runner = (binpath, entry_options ++ extra_options)
-        | otherwise = (runner, binpath : entry_options ++ extra_options)
-
-  context ("Running " <> T.pack (unwords $ binpath : entry_options ++ extra_options)) $ do
-    (progCode, output, progerr) <-
-      io $ readProcessWithExitCode to_run to_run_args $ LBS.toStrict input
-    withExceptT validating $
-      compareResult program expectedResult' =<< runResult program progCode output progerr
-  where binOutputf = dropExtension program
-        dir = takeDirectory program
-        validating = ("validating test result:\n"<>)
-
-compareResult :: FilePath -> ExpectedResult [Value] -> RunResult
+compareResult :: T.Text -> Int -> FilePath -> ExpectedResult [Value] -> RunResult
               -> TestM ()
-compareResult _ (Succeeds Nothing) SuccessResult{} =
+compareResult _ _ _ (Succeeds Nothing) SuccessResult{} =
   return ()
-compareResult program (Succeeds (Just expectedResult)) (SuccessResult actualResult) =
+compareResult entry index program (Succeeds (Just expectedResult)) (SuccessResult actualResult) =
   case compareValues actualResult expectedResult of
-    Just mismatch -> do
-      let actualf = program `addExtension` "actual"
-          expectedf = program `addExtension` "expected"
-      io $ SBS.writeFile actualf $
-        T.encodeUtf8 $ T.unlines $ map prettyText actualResult
-      io $ SBS.writeFile expectedf $
-        T.encodeUtf8 $ T.unlines $ map prettyText expectedResult
-      throwError $ T.pack actualf <> " and " <> T.pack expectedf <>
-        " do not match:\n" <> T.pack (show mismatch)
+    Just mismatches ->
+      let reportMismatch mismatch = do
+            let actualf = program <.> T.unpack entry <.> show index <.> "actual"
+                expectedf = program <.> T.unpack entry <.> show index <.> "expected"
+            io $ SBS.writeFile actualf $
+              T.encodeUtf8 $ T.unlines $ map prettyText actualResult
+            io $ SBS.writeFile expectedf $
+              T.encodeUtf8 $ T.unlines $ map prettyText expectedResult
+            throwError $ T.pack actualf <> " and " <> T.pack expectedf <>
+              " do not match:\n" <> T.pack (show mismatch) <> "\n"
+      in mapM_ reportMismatch mismatches
     Nothing ->
       return ()
-compareResult _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
+compareResult _ _ _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
   checkError expectedError actualError
-compareResult _ (Succeeds _) (ErrorResult code err) =
+compareResult _ _ _ (Succeeds _) (ErrorResult code err) =
   throwError $ "Program failed with error code " <>
   T.pack (show code) <> " and stderr:\n  " <> T.decodeUtf8 err
-compareResult _ (RunTimeFailure f) (SuccessResult _) =
+compareResult _ _ _ (RunTimeFailure f) (SuccessResult _) =
   throwError $ "Program succeeded, but expected failure:\n  " <> T.pack (show f)
 
 ---
@@ -266,15 +295,19 @@ compareResult _ (RunTimeFailure f) (SuccessResult _) =
 
 data TestStatus = TestStatus { testStatusRemain :: [TestCase]
                              , testStatusRun :: [TestCase]
+                             , testStatusTotal :: Int
                              , testStatusFail :: Int
                              , testStatusPass :: Int
-                             , testStatusCases :: Int
+                             , testStatusRuns :: Int
+                             , testStatusRunsRemain :: Int
+                             , testStatusRunPass :: Int
+                             , testStatusRunFail :: Int
                              }
 
 catching :: IO TestResult -> IO TestResult
 catching m = m `catch` save
   where save :: SomeException -> IO TestResult
-        save e = return $ Failure $ T.pack $ show e
+        save e = return $ Failure [T.pack $ show e]
 
 doTest :: TestCase -> IO TestResult
 doTest = catching . runTestM . runTestCase
@@ -297,21 +330,44 @@ excludedTest :: TestConfig -> TestCase -> Bool
 excludedTest config =
   any (`elem` configExclude config) . testTags . testCaseTest
 
-clearLine :: IO ()
-clearLine = putStr "\27[2K"
+statusTable :: TestStatus -> String
+statusTable ts = buildTable rows 1
+  where rows =
+          [ [ mkEntry "", passed, failed, mkEntry "remaining"]
+          , map mkEntry ["programs", passedProgs, failedProgs, remainProgs']
+          , map mkEntry ["runs", passedRuns, failedRuns, remainRuns']
+          ]
+        passed       = ("passed", [SetColor Foreground Vivid Green])
+        failed       = ("failed", [SetColor Foreground Vivid Red])
+        passedProgs  = show $ testStatusPass ts
+        failedProgs  = show $ testStatusFail ts
+        totalProgs   = show $ testStatusTotal ts
+        totalRuns    = show $ testStatusRuns ts
+        passedRuns   = show $ testStatusRunPass ts
+        failedRuns   = show $ testStatusRunFail ts
+        remainProgs  = show . length $ testStatusRemain ts
+        remainProgs' = remainProgs ++ "/" ++ totalProgs
+        remainRuns   = show $ testStatusRunsRemain ts
+        remainRuns'  = remainRuns ++ "/" ++ totalRuns
 
-reportInteractive :: TestStatus -> IO ()
-reportInteractive ts = do
+tableLines :: Int
+tableLines = 1 + (length . lines $ blankTable)
+  where blankTable = statusTable $ TestStatus [] [] 0 0 0 0 0 0 0
+
+spaceTable :: IO ()
+spaceTable = putStr $ replicate tableLines '\n'
+
+reportTable :: TestStatus -> IO ()
+reportTable ts = do
+  moveCursorToTableTop
+  putStrLn $ statusTable ts
   clearLine
-  putStr $ atMostChars 160 line ++ "\r"
-  hFlush stdout
-    where num_running = length $ testStatusRun ts
-          num_remain  = length $ testStatusRemain ts
-          line = show (testStatusFail ts)  ++ " failed; " ++
-                 show (testStatusPass ts)  ++ " passed; " ++
-                 show num_remain           ++ " to go; currently running " ++
-                 show num_running          ++ " tests: " ++
-                 (unwords . reverse . map testCaseProgram . testStatusRun) ts
+  putStrLn $ atMostChars 60 running
+  where running    = "Now testing: " ++
+                     (unwords . reverse . map testCaseProgram . testStatusRun) ts
+
+moveCursorToTableTop :: IO ()
+moveCursorToTableTop = cursorUpLine tableLines
 
 atMostChars :: Int -> String -> String
 atMostChars n s | length s > n = take (n-3) s ++ "..."
@@ -333,7 +389,6 @@ runTests config paths = do
 
   let mode = configTestMode config
   all_tests <- map (makeTestCase config mode) <$> testSpecsFromPaths paths
-
   testmvar <- newEmptyMVar
   reportmvar <- newEmptyMVar
   concurrency <- getNumCapabilities
@@ -343,16 +398,17 @@ runTests config paths = do
   _ <- forkIO $ mapM_ (putMVar testmvar) included
   isTTY <- (&& not (configUnbufferOutput config)) <$> hIsTerminalDevice stdout
 
-  let report = if isTTY then reportInteractive else reportText
-      clear  = if isTTY then clearLine else putStr "\n"
+  let report = if isTTY then reportTable else reportText
+      clear  = if isTTY then clearFromCursorToScreenEnd else putStr "\n"
 
       numTestCases tc =
         case testAction $ testCaseTest tc of
           CompileTimeFailure _ -> 1
-          RunCases inputOutputs _ _ -> length . concat $ iosTestRuns <$> inputOutputs
+          RunCases ios sts wts -> (length . concat) (iosTestRuns <$> ios)
+                                  + length sts + length wts
 
       getResults ts
-        | null (testStatusRemain ts) = clear >> return ts
+        | null (testStatusRemain ts) = report ts >> return ts
         | otherwise = do
           report ts
           msg <- takeMVar reportmvar
@@ -364,35 +420,56 @@ runTests config paths = do
             TestDone test res -> do
               let ts' = ts { testStatusRemain = test `delete` testStatusRemain ts
                            , testStatusRun    = test `delete` testStatusRun ts
-                           , testStatusCases  = numTestCases test + testStatusCases ts
+                           , testStatusRunsRemain = testStatusRunsRemain ts
+                                                    - numTestCases test
                            }
               case res of
                 Success -> do
+                  let ts'' = ts' { testStatusRunPass =
+                                     testStatusRunPass ts' + numTestCases test
+                                 }
                   unless isTTY $
                     putStr $ "Finished testing " <> testCaseProgram test <> " "
-                  getResults $ ts' { testStatusPass = testStatusPass ts + 1}
+                  getResults $ ts'' { testStatusPass = testStatusPass ts + 1}
                 Failure s -> do
+                  when isTTY moveCursorToTableTop
                   clear
-                  T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
-                  getResults $ ts' { testStatusFail = testStatusFail ts + 1}
+                  T.putStrLn $ (T.pack (testCaseProgram test) <> ":\n") <> T.concat s
+                  when isTTY spaceTable
+                  getResults $ ts' { testStatusFail = testStatusFail ts' + 1
+                                   , testStatusRunPass = testStatusRunPass ts'
+                                                         + numTestCases test - length s
+
+                                   , testStatusRunFail = testStatusRunFail ts'
+                                                         + length s
+                                   }
+
+  when isTTY spaceTable
 
   ts <- getResults TestStatus { testStatusRemain = included
                               , testStatusRun    = []
+                              , testStatusTotal  = length included
                               , testStatusFail   = 0
                               , testStatusPass   = 0
-                              , testStatusCases  = 0
+                              , testStatusRuns  = sum $ map numTestCases included
+                              , testStatusRunsRemain = sum $ map numTestCases included
+                              , testStatusRunPass = 0
+                              , testStatusRunFail = 0
                               }
+
+  -- Removes "Now testing" output.
+  when isTTY $ cursorUpLine 1 >> clearLine
+
   let excluded_str = if null excluded
                      then ""
-                     else " (" ++ show (length excluded) ++ " excluded)"
-  putStrLn $ show (testStatusFail ts)  ++ " failed, " ++
-             show (testStatusPass ts)  ++ " passed, " ++
-             show (testStatusCases ts) ++ " cases run" ++ excluded_str ++ "."
+                     else " (" ++ show (length excluded) ++ " program(s) excluded).\n"
+  putStr excluded_str
   exitWith $ case testStatusFail ts of 0 -> ExitSuccess
                                        _ -> ExitFailure 1
 
 ---
 --- Configuration and command line parsing
+
 ---
 
 data TestConfig = TestConfig

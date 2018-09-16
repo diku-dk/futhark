@@ -59,6 +59,7 @@ dependencies:
   - free >= 4.12.4
   - zip-archive >= 0.3.1.1
   - time >= 1.6.0.1
+  - ansi-terminal >= 0.6.3.1
 
 when:
 - condition: "!impl(ghc >= 8.0)"
