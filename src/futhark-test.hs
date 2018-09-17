@@ -434,7 +434,7 @@ runTests config paths = do
                 Failure s -> do
                   when isTTY moveCursorToTableTop
                   clear
-                  T.putStrLn $ (T.pack (testCaseProgram test) <> ":\n") <> T.concat s
+                  T.putStrLn $ (T.pack (inRed $ testCaseProgram test) <> ":\n") <> T.concat s
                   when isTTY spaceTable
                   getResults $ ts' { testStatusFail = testStatusFail ts' + 1
                                    , testStatusRunPass = testStatusRunPass ts'
@@ -467,9 +467,11 @@ runTests config paths = do
   exitWith $ case testStatusFail ts of 0 -> ExitSuccess
                                        _ -> ExitFailure 1
 
+inRed :: String -> String
+inRed s = setSGRCode [SetColor Foreground Vivid Red] ++ s ++ setSGRCode [Reset]
+
 ---
 --- Configuration and command line parsing
-
 ---
 
 data TestConfig = TestConfig
