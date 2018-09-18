@@ -175,7 +175,7 @@ names bound by preceding declarations.
 
 The ``open`` declaration brings names defined in another module into
 scope (see also `Module System`_).  For the meaning of ``import``, see
-`Referring to Other Files`_.  If a declaration prefixed with
+`Referring to Other Files`_.  If a declaration is prefixed with
 ``local``, whatever names it defines will *not* be visible outside the
 current module.  In particular ``local open`` is used to bring names
 from another module into scope, without making those names available
@@ -198,12 +198,12 @@ of the function::
 
   let name params...: rettype = body
 
-Full type inference is not supported, but the return type can be
-elided.  A parameter is written as ``(name: type)``.  Functions may
-not be recursive.  Optionally, the programmer may put *shape
-declarations* in the return type and parameter types; see `Shape
-Declarations`_.  A function can be *polymorphic* by using type
-parameters, in the same way as for `Type Abbreviations`_::
+Hindley-Milner-style type inference is supported.  A parameter may be
+given a type with the notation ``(name: type)``.  Functions may not be
+recursive.  Optionally, the programmer may put *shape declarations* in
+the return type and parameter types; see `Shape Declarations`_.  A
+function can be *polymorphic* by using type parameters, in the same
+way as for `Type Abbreviations`_::
 
   let reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
@@ -221,6 +221,13 @@ For example::
 
   let (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
 
+We can also define operators by enclosing the operator name in
+parentheses and suffixing the parameters, as an ordinary function:
+
+  let (+^) (a:i32,b:i32) (c:i32,d:i32) = (a+c, b+d)
+
+This is necessary when defining a polymorphic operator.
+
 A valid operator name is a non-empty sequence of characters chosen
 from the string ``"+-*/%=!><&^"``.  The fixity of an operator is
 determined by its first characters, which must correspond to a
@@ -231,8 +238,8 @@ like ``*``.  The longest such prefix is used to determine fixity, so
 It is not permitted to define operators with the names ``&&`` or
 ``||`` (although these as prefixes are accepted).  This is because a
 user-defined version of these operators would not be short-circuiting.
-User-defined operators behave exactly like functions, except for
-syntactically.
+User-defined operators behave exactly like ordinary functions, except
+for bbeing infix.
 
 A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
 This will result in the built-in polymorphic operator becoming
@@ -253,14 +260,14 @@ Entry Points
 
 Apart from declaring a function with the keyword ``let``, it can also
 be declared with ``entry``.  When the Futhark program is compiled any
-function declared with ``entry`` will be exposed as an entry point.
-If the Futhark program has been compiled as a library, these are the
-functions that will be exposed.  If compiled as an executable, you can
-use the ``--entry-point`` command line option of the generated
+top-level function declared with ``entry`` will be exposed as an entry
+point.  If the Futhark program has been compiled as a library, these
+are the functions that will be exposed.  If compiled as an executable,
+you can use the ``--entry-point`` command line option of the generated
 executable to select the entry point you wish to run.
 
-Any function named ``main`` will always be considered an entry point,
-whether it is declared with ``entry`` or not.
+Any top-level function named ``main`` will always be considered an
+entry point, whether it is declared with ``entry`` or not.
 
 Value Declarations
 ~~~~~~~~~~~~~~~~~~
@@ -271,11 +278,7 @@ A named value/constant can be declared as follows::
 
 The definition can be an arbitrary expression, including function
 calls and other values, although they must be in scope before the
-value is defined.  The type annotation can be elided if the value is
-defined before it is used.
-
-Values can be used in shape declarations, except in the return value
-of entry points.
+value is defined.
 
 Shape Declarations
 ~~~~~~~~~~~~~~~~~~
@@ -318,11 +321,11 @@ Type Abbreviations
    type_bind: "type" `id` `type_param`* "=" `type`
    type_param: "[" `id` "]" | "'" `id` | "'^" `id`
 
-Type abbreviations function as shorthands for purpose of documentation
-or brevity.  After a type binding ``type t1 = t2``, the name ``t1``
-can be used as a shorthand for the type ``t2``.  Type abbreviations do
-not create new unique types.  After the previous binding, the types
-``t1`` and ``t2`` are entirely interchangeable.
+Type abbreviations function as shorthands for the purpose of
+documentation or brevity.  After a type binding ``type t1 = t2``, the
+name ``t1`` can be used as a shorthand for the type ``t2``.  Type
+abbreviations do not create distinct types: the types ``t1`` and
+``t2`` are entirely interchangeable.
 
 A type abbreviation can have zero or more parameters.  A type
 parameter enclosed with square brackets is a *shape parameter*, and
@@ -354,16 +357,6 @@ These may be instantiated with types that may be functions.  On the
 other hand, values of such types are subject to the same restrictions
 as function types (cannot be put in an arrays, returned from ``if``,
 or used as a ``loop`` parameter; see `Higher-order functions`_).
-
-When using uniqueness attributes with type abbreviations, inner
-uniqueness attributes are overridden by outer ones::
-
-  type unique_ints = *[]i32
-  type nonunique_int_lists = []unique_ints
-  type unique_int_lists = *nonunique_int_lists
-
-  -- Error: using non-unique value for a unique return value.
-  let f (p: nonunique_int_lists): unique_int_lists = p
 
 Expressions
 -----------
@@ -504,8 +497,8 @@ A variable name; evaluates to its value in the current environment.
 `stringlit`
 ...........
 
-Evaluates to an array of type ``[]i32`` that contains the string
-characters as integers.
+Evaluates to an array of type ``[]i32`` that contains the code points
+of the characters as integers.
 
 ``()``
 ......
@@ -686,7 +679,9 @@ declarations, the correctness of the shape declarations is checked at
 run-time.
 
 Due to ambiguities, this syntactic form cannot appear as an array
-index expression unless it is first enclosed in parentheses.
+index expression unless it is first enclosed in parentheses.  However,
+as an array index must always be of type ``i32``, there is never a
+reason to put an explicit type ascription there.
 
 ``! x``
 .......
@@ -717,10 +712,9 @@ corruption.
 .................
 
 Terminate execution with an error if ``cond`` evaluates to false,
-otherwise produce the result of evaluating ``e``.  Make sure that
-``e`` produces a meaningful value that is used subsequently (it can
-just be a variable), or dead code elimination can easily remove the
-assertion.
+otherwise produce the result of evaluating ``e``.  Unless ``e``
+produces a value that is used subsequently (it can just be a
+variable), dead code elimination may remove the assertion.
 
 ``a with [i] <- e``
 ...................
@@ -803,18 +797,18 @@ Function Expressions
 Produces an anonymous function taking parameters ``x``, ``y``, and
 ``z``, returns type ``t``, and whose body is ``e``.
 
-``(*binop*)``
-...............
+``(binop)``
+...........
 
 An *operator section* that is equivalent to ``\x y -> x *binop* y``.
 
-``(x *binop*)``
-...............
+``(x binop)``
+.............
 
 An *operator section* that is equivalent to ``\y -> x *binop* y``.
 
-``(*binop* y)``
-...............
+``(binop y)``
+.............
 
 An *operator section* that is equivalent to ``\x -> x *binop* y``.
 
