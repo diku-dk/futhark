@@ -605,7 +605,8 @@ instance PrettyLore lore => Pretty (KernelExp lore) where
     parens (ppr w <> comma </>
             braces (commasep $ map ppr dests) <> comma </>
             ppr op <> comma </>
-            braces (commasep [ppr bucket, ppr vs]) </>
+            braces (commasep $ map ppr bucket) <> comma </>
+            braces (commasep $ map ppr vs) <> comma </>
             ppr locks)
 
   ppr (Barrier ses) = text "barrier" <> parens (commasep $ map ppr ses)
