@@ -22,6 +22,7 @@ module Futhark.Transform.Rename
   , renameBody
   , renameLambda
   , renameFun
+  , renamePattern
   -- * Renaming annotations
   , RenameM
   , substituteRename
@@ -99,6 +100,13 @@ renameLambda = modifyNameSource . runRenamer . rename
 renameFun :: (Renameable lore, MonadFreshNames m) =>
              FunDef lore -> m (FunDef lore)
 renameFun = modifyNameSource . runRenamer . rename
+
+-- | Produce an equivalent pattern but with each pattern element given
+-- a new name.
+renamePattern :: (Rename attr, MonadFreshNames m) =>
+                 PatternT attr -> m (PatternT attr)
+renamePattern = modifyNameSource . runRenamer . rename'
+  where rename' pat = bind (patternNames pat) $ rename pat
 
 data RenameEnv = RenameEnv {
     envNameMap :: M.Map VName VName

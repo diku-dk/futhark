@@ -501,12 +501,6 @@ typeCheckKernelExp (GroupGenReduce ws dests op bucket vs locks) = do
 
   mapM_ (TC.require [Prim int32]) bucket
 
-  -- Support only two-dimensional indices for now, i.e., you
-  -- can only index into a sub-histogram at top-level.
-  unless (length bucket <= 2) $
-    TC.bad $ TC.TypeError $ "Bucket has dimension " ++ pretty (length bucket) ++
-    " but should have maximum dimension of two."
-
   dest_row_ts <- mapM (fmap (stripArray (length bucket)) . lookupType) dests
 
   vs_ts <- mapM subExpType vs
