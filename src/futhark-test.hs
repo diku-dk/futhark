@@ -168,7 +168,8 @@ runTestCase (TestCase mode program testcase progs) =
         context ("Compiling with " <> T.pack compiler) $ do
           compileTestProgram extra_options compiler program warnings
           mapM_ (testMetrics progs program) structures
-          context "Running compiled program" $
+          unless (mode == Compile) $
+            context "Running compiled program" $
             accErrors_ $ map (runCompiledEntry program progs) ios
       unless (mode == Compile || mode == Compiled) $
         context ("Interpreting with " <> T.pack interpreter) $
