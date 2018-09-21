@@ -96,8 +96,8 @@ Futhark source directory.  A simple example can be found in
 OPTIONS
 =======
 
---nobuffer
-  Print each result on a line by itself, without buffering.
+--notty
+  Print each result on a line by itself, without line buffering.
 
 --exclude=tag
   Ignore benchmarks with the specified tag.

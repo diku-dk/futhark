@@ -396,7 +396,7 @@ runTests config paths = do
 
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar) included
-  isTTY <- (&& not (configUnbufferOutput config)) <$> hIsTerminalDevice stdout
+  isTTY <- (&& not (configLineOutput config)) <$> hIsTerminalDevice stdout
 
   let report = if isTTY then reportTable else reportText
       clear  = if isTTY then clearFromCursorToScreenEnd else putStr "\n"
@@ -478,7 +478,7 @@ data TestConfig = TestConfig
                   { configTestMode :: TestMode
                   , configPrograms :: ProgConfig
                   , configExclude :: [T.Text]
-                  , configUnbufferOutput :: Bool
+                  , configLineOutput :: Bool
                   }
 
 defaultConfig :: TestConfig
@@ -493,7 +493,7 @@ defaultConfig = TestConfig { configTestMode = Everything
                              , configExtraOptions = []
                              , configExtraCompilerOptions = []
                              }
-                           , configUnbufferOutput = False
+                           , configLineOutput = False
                            }
 
 data ProgConfig = ProgConfig
@@ -555,9 +555,9 @@ commandLineOptions = [
   , Option "C" ["compile"]
     (NoArg $ Right $ \config -> config { configTestMode = Compile })
     "Only compile, do not run."
-  , Option [] ["nobuffer"]
-    (NoArg $ Right $ \config -> config { configUnbufferOutput = True })
-    "Do not buffer output, and write each result on a line by itself."
+  , Option [] ["notty"]
+    (NoArg $ Right $ \config -> config { configLineOutput = True })
+    "Provide simpler line-based output."
   , Option [] ["typechecker"]
     (ReqArg (Right . changeProgConfig . setTypeChecker) "PROGRAM")
     "What to run for type-checking (defaults to 'futhark')."
