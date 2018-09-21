@@ -30,7 +30,7 @@ dependencies:
   - srcloc >= 0.4
   - language-c-quote >= 0.12
   - mainland-pretty >= 0.6.1
-  - megaparsec >= 6.0.2
+  - megaparsec == 6.*
   - regex-tdfa >= 1.2
   - filepath >= 1.4.1.1
   - dlist >= 0.6.0.1
