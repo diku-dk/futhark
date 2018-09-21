@@ -311,12 +311,18 @@ blockedReduction pat w comm reduce_lam map_lam ispace nes arrs = runBinder_ $ do
     ispace nes (arrs ++ map_out_arrs)
 
 blockedGenReduce :: (MonadFreshNames m, HasScope Kernels m) =>
-                    SubExp -> [GenReduceOp InKernel]
+                    SubExp
+                 -> [(VName,SubExp)] -- ^ Segment indexes and sizes.
+                 -> [KernelInput]
+                 -> [GenReduceOp InKernel]
                  -> Lambda InKernel -> [VName]
                  -> m ([VName], Stms Kernels)
-blockedGenReduce arr_w ops lam arrs = runBinder $ do
+blockedGenReduce arr_w segments inputs ops lam arrs = runBinder $ do
+  let (segment_is, segment_sizes) = unzip segments
+      depth = length segments
+  total_w <- letSubExp "genreduce_elems" =<< foldBinOp (Mul Int32) arr_w segment_sizes
   (_, KernelSize num_groups group_size elems_per_thread _ num_threads) <-
-    blockedKernelSize arr_w
+    blockedKernelSize total_w
 
   kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
   let ltid = spaceLocalId kspace
@@ -339,16 +345,19 @@ blockedGenReduce arr_w ops lam arrs = runBinder $ do
 
         reuse_dest =
           fmap resultBody $ forM dests $ \dest -> do
-            dest_dims <- arrayDims <$> lookupType dest
+            (segment_dims, hist_dims) <- splitAt depth . arrayDims <$> lookupType dest
             letSubExp "sub_histo" $ BasicOp $
-              Reshape (DimNew num_histos' : map DimNew dest_dims) dest
+              Reshape (map DimNew $ segment_dims ++ num_histos' : hist_dims) dest
 
         make_subhistograms =
           -- To incorporate the original values of the genreduce target, we
           -- copy those values to the first subhistogram here.
           fmap resultBody $ forM (zip nes dests) $ \(ne, dest) -> do
-            blank <- letExp "sub_histo_blank" $ BasicOp $ Replicate (Shape [num_histos', w]) ne
-            slice <- fullSlice <$> lookupType blank <*> pure [DimFix $ intConst Int32 0]
+            blank <- letExp "sub_histo_blank" $
+              BasicOp $ Replicate (Shape $ segment_sizes ++ [num_histos', w]) ne
+            let (zero, one) = (intConst Int32 0, intConst Int32 1)
+            slice <- fullSlice <$> lookupType blank <*>
+                     pure (map (flip (DimSlice zero) one) segment_sizes ++ [DimFix zero])
             letSubExp "sub_histo" $ BasicOp $ Update blank slice $ Var dest
 
     letTupExp "histo_dests" =<<
@@ -358,7 +367,8 @@ blockedGenReduce arr_w ops lam arrs = runBinder $ do
   dest_ts <- mapM lookupType sub_histos'
 
   lock_arrs <- forM (zip ops num_histos) $ \(GenReduceOp w _ _ _, num_histos') ->
-    letExp "locks_arr" $ BasicOp $ Replicate (Shape [num_histos', w]) (intConst Int32 0)
+    letExp "locks_arr" $ BasicOp $
+    Replicate (Shape $ segment_sizes ++ [num_histos', w]) (intConst Int32 0)
 
   (kres, kstms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
     i <- newVName "i"
@@ -380,18 +390,28 @@ blockedGenReduce arr_w ops lam arrs = runBinder $ do
                  (pure $ BasicOp $ BinOp (Mul Int32) elems_per_thread group_size))
                 (pure $ BasicOp $ BinOp (Mul Int32) (Var i) group_size)
 
+      -- Construct segment indices.
+      j <- letSubExp "j" $ BasicOp $ BinOp (Add Int32) offset (Var ltid)
+      l <- newVName "l"
+      let bindIndex v = letBindNames_ [v] <=< toExp
+      zipWithM_ bindIndex (segment_is++[l]) $
+        unflattenIndex (map (primExpFromSubExp int32) $ segment_sizes ++ [arr_w]) $
+        primExpFromSubExp int32 j
+
       -- We execute the bucket function once and update each histogram serially.
       -- We apply the bucket function if j=offset+ltid is less than
       -- num_elements.  This also involves writing to the mapout
       -- arrays.
-      j <- letSubExp "j" $ BasicOp $ BinOp (Add Int32) offset (Var ltid)
-      let in_bounds = pure $ BasicOp $ CmpOp (CmpSlt Int32) j arr_w
+      let in_bounds = pure $ BasicOp $ CmpOp (CmpSlt Int32) j total_w
 
           in_bounds_branch = do
+            -- Read segment inputs.
+            mapM_ (addStm <=< readKernelInput) inputs
+
             -- Read array input.
             arr_elems <- forM arrs $ \a -> do
               a_t <- lookupType a
-              let slice = fullSlice a_t [DimFix j]
+              let slice = fullSlice a_t [DimFix $ Var l]
               letSubExp (baseString a ++ "_elem") $ BasicOp $ Index a slice
 
             -- Apply bucket function.
@@ -411,12 +431,13 @@ blockedGenReduce arr_w ops lam arrs = runBinder $ do
       ops_res <- forM (zip6 ops (perOp $ map paramName merge_params) buckets (perOp vs) lock_arrs num_histos) $
         \(GenReduceOp dest_w _ _ comb_op, subhistos, bucket, vs', lock_arrs', num_histos') -> do
           -- Compute subhistogram index for each thread.
-          global_ind <- letSubExp "global_ind" =<<
-                        eBinOp (SDiv Int32)
-                        (toExp gtid)
-                        (eDivRoundingUp Int32 (toExp nthreads) (eSubExp num_histos'))
+          subhisto_ind <- letSubExp "subhisto_ind" =<<
+                          eBinOp (SDiv Int32)
+                          (toExp gtid)
+                          (eDivRoundingUp Int32 (toExp nthreads) (eSubExp num_histos'))
           fmap (map Var) $ letTupExp "genreduce_res" $ Op $
-            GroupGenReduce [num_histos', dest_w] subhistos comb_op [global_ind, bucket] vs' lock_arrs'
+            GroupGenReduce (segment_sizes ++ [num_histos', dest_w])
+            subhistos comb_op (map Var segment_is ++ [subhisto_ind, bucket]) vs' lock_arrs'
 
       return $ resultBody $ concat ops_res
 
@@ -1002,7 +1023,7 @@ data KernelInput = KernelInput { kernelInputName :: VName
 kernelInputParam :: KernelInput -> Param Type
 kernelInputParam p = Param (kernelInputName p) (kernelInputType p)
 
-readKernelInput :: (HasScope Kernels m, Monad m) =>
+readKernelInput :: (HasScope scope m, Monad m) =>
                    KernelInput -> m (Stm InKernel)
 readKernelInput inp = do
   let pe = PatElem (kernelInputName inp) $ kernelInputType inp
