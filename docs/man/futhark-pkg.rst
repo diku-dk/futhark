@@ -159,6 +159,8 @@ reflecting this.
 There is no caching of zipballs and version lists between invocations,
 so the network traffic can be rather heavy.
 
+Only GitHub and GitLab are supported as code hosting sites.
+
 SEE ALSO
 ========
 
