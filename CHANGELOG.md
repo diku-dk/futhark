@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
-  * Fix the `-C` option.
+  * Fix the `-C` option for `futhark-test`.
 
 ## [0.7.1]
 
