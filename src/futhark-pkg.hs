@@ -191,7 +191,7 @@ runPkgM cfg (PkgM m) = evalStateT (runReaderT m cfg) mempty
 
 cmdMain :: String -> ([String] -> PkgConfig -> Maybe (IO ())) -> IO ()
 cmdMain = mainWithOptions (PkgConfig False) options
-  where options = [ Option "v" ["--verbose"]
+  where options = [ Option "v" ["verbose"]
                     (NoArg $ Right $ \cfg -> cfg { pkgVerbose = True })
                     "Write running diagnostics to stderr."]
 
