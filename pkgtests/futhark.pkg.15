@@ -1,0 +1,8 @@
+package github.com/sturluson/testpkg
+
+require {
+  github.com/athas/fut-baz 0.2.0 #44da85224224d37803976c1d30cedb1d2cd20b74
+  github.com/athas/fut-foo@2 2.0.0 #9459117fa75aea8fffc677294d25f273e894d19f
+  github.com/athas/fut-quux 0.0.0-20180801102533+dd5168df1b8a20cb0547a88afd4e4a6cc098e0f1
+  gitlab.com/athas/fut-gitlab 1.0.1 #631578b71d68381dd7461fc1d0c669cf84d0d5fe
+}
