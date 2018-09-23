@@ -556,7 +556,7 @@ commandLineOptions = [
   , Option "C" ["compile"]
     (NoArg $ Right $ \config -> config { configTestMode = Compile })
     "Only compile, do not run."
-  , Option [] ["notty"]
+  , Option [] ["no-terminal", "notty"]
     (NoArg $ Right $ \config -> config { configLineOutput = True })
     "Provide simpler line-based output."
   , Option [] ["typechecker"]
