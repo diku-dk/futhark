@@ -178,6 +178,13 @@ static uint32_t get_suitable_queue_family(const struct vulkan_config *cfg,
 
 static int setup_vulkan(vulkan_context *ctx, uint32_t shader[], uint32_t shader_size) {
 
+  if (ctx->cfg.dump_program_to != NULL) {
+    FILE *f = fopen(ctx->cfg.dump_program_to, "wb");
+    assert(f != NULL);
+    fwrite(shader, sizeof(uint32_t), shader_size / sizeof(uint32_t), f);
+    fclose(f);
+  }
+
   VkApplicationInfo application_info = {};
   application_info.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   application_info.pNext              = 0;
