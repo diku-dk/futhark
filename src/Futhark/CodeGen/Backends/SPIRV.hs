@@ -1,8 +1,11 @@
 module Futhark.CodeGen.Backends.SPIRV
   ( runCompilerM
+  , CompilerM
   , CompilerState
   , newCompilerState
+  , getResult
   , compileCode
+  , makePrelude
   ) where
 
 import Control.Monad.State
@@ -14,6 +17,7 @@ import Data.Word
 
 import Futhark.CodeGen.Backends.SPIRV.Operations
 import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.ImpCode.Kernels hiding (Code)
 
 type ExprInfo = (Word32, PrimType)
 
@@ -69,6 +73,11 @@ getVarInfo v = do
   s <- get
   return $ (M.!) (compVarRefs s) v
 
+getResult :: CompilerM [Word32]
+getResult = do
+  s <- get
+  return $ compResult s
+
 appendCode :: [Word32] -> CompilerM ()
 appendCode code = modify $ \s -> s { compResult = compResult s ++ code }
 
@@ -99,6 +108,9 @@ compileLeaf (SizeOf t) = return (0, Bool) -- TODO: Fix
 
 compileExp :: Exp -> CompilerM ExprInfo
 compileExp = compilePrimExp compileLeaf
+
+compileKernelExp :: PrimExp KernelOp -> CompilerM ExprInfo
+compileKernelExp = compilePrimExp compileKernelOp
 
 compilePrimExp :: (v -> CompilerM ExprInfo) -> PrimExp v -> CompilerM ExprInfo
 compilePrimExp f (LeafExp v _) = f v
@@ -176,7 +188,30 @@ compilePrimExp f (BinOpExp bop x y) = do
     LogOr{}  -> liftReturnOp t $ opLogicalOr x_id y_id
 compilePrimExp f (FunExp h args _) = return (0, Bool) -- TODO: Fix
 
-compileCode :: Code op -> CompilerM ()
+compileAtomicOp :: AtomicOp -> CompilerM ExprInfo
+compileAtomicOp (AtomicAdd store rname (Count c) e) = return (0, Bool) -- TODO: Fix
+compileAtomicOp (AtomicSMax store rname (Count c) e) = return (0, Bool) -- TODO: Fix
+compileAtomicOp (AtomicSMin store rname (Count c) e) = return (0, Bool) -- TODO: Fix
+compileAtomicOp (AtomicUMax store rname (Count c) e) = return (0, Bool) -- TODO: Fix
+compileAtomicOp (AtomicUMin store rname (Count c) e) = return (0, Bool) -- TODO: Fix
+compileAtomicOp (AtomicAnd store rname (Count c) e) = return (0, Bool) -- TODO: Fix
+compileAtomicOp (AtomicOr store rname (Count c) e) = return (0, Bool) -- TODO: Fix
+compileAtomicOp (AtomicXor store rname (Count c) e) = return (0, Bool) -- TODO: Fix
+compileAtomicOp (AtomicCmpXchg store rname (Count c) le re) = return (0, Bool) -- TODO: Fix
+compileAtomicOp (AtomicXchg store rname (Count c) e) = return (0, Bool) -- TODO: Fix
+
+compileKernelOp :: KernelOp -> CompilerM ExprInfo
+compileKernelOp (GetGroupId name i) = return (0, Bool) -- TODO: Fix
+compileKernelOp (GetLocalId name i) = return (0, Bool) -- TODO: Fix
+compileKernelOp (GetLocalSize name i) = return (0, Bool) -- TODO: Fix
+compileKernelOp (GetGlobalSize name i) = return (0, Bool) -- TODO: Fix
+compileKernelOp (GetGlobalId name i) = return (0, Bool) -- TODO: Fix
+compileKernelOp (GetLockstepWidth name) = return (0, Bool) -- TODO: Fix
+compileKernelOp (Atomic op) = return (0, Bool) -- TODO: Fix
+compileKernelOp Barrier = return (0, Bool) -- TODO: Fix
+compileKernelOp MemFence = return (0, Bool) -- TODO: Fix
+
+compileCode :: Code KernelOp -> CompilerM ()
 compileCode Skip = return ()
 compileCode (lc :>>: rc) =  compileCode lc >> compileCode rc
 compileCode (If cond tbranch fbranch) = do
@@ -224,3 +259,12 @@ compileCode (Comment _ c) = compileCode c
 -- ^ SPIR-V does not support comments
 compileCode (DebugPrint s t e) = return () -- TODO: Fix
 compileCode op = return () -- TODO: Fix
+
+makePrelude :: CompilerM ()
+makePrelude = do
+  -- NOTE: Prepend these to the code
+  -- TODO: Insert header
+  -- TODO: Insert all types
+  -- TODO: Insert all decorations
+  -- TODO: Insert all constants
+  return ()
