@@ -71,3 +71,7 @@ succeed futhark-pkg sync
 succeed futhark-pkg add github.com/athas/fut-quux 0.0.0-20180801102533+dd5168df1b8a20cb0547a88afd4e4a6cc098e0f1
 
 succeed futhark-pkg sync
+
+succeed futhark-pkg add gitlab.com/athas/fut-gitlab
+
+succeed futhark-pkg sync

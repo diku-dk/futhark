@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.7.0]
+## [0.8.0]
+
+### Added
+
+  * `futhark-pkg` now supports GitLab.
+
+  * `futhark-test`s `--notty` option now has a `--no-terminal` alias.
+    `--notty` is deprecated, but still works.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Fix the `-C` option for `futhark-test`.
+
+## [0.7.1]
 
 ### Added
 
@@ -66,6 +83,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     renamed `highest`/`lowest`.
 
 ### Fixed
+
+  * Many small things.
 
 ## [0.6.3]
 

@@ -1,5 +1,5 @@
 name: futhark
-version: "0.7.0"
+version: "0.8.0"
 synopsis: An optimising compiler for a functional, array-oriented language.
 description: See the website at https://futhark-lang.org
 homepage: https://futhark-lang.org
@@ -30,7 +30,7 @@ dependencies:
   - srcloc >= 0.4
   - language-c-quote >= 0.12
   - mainland-pretty >= 0.6.1
-  - megaparsec >= 6.0.2
+  - megaparsec == 6.*
   - regex-tdfa >= 1.2
   - filepath >= 1.4.1.1
   - dlist >= 0.6.0.1

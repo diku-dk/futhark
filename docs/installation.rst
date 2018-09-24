@@ -89,6 +89,10 @@ Installing Futhark on Linux
 
     $ brew install futhark
 
+  Note that as of this writing, Linuxbrew is hampered by limited
+  compute resources for building packages, so the Futhark version may
+  be a bit behind.
+
 * Arch Linux users can use a `futhark-nightly package
   <https://aur.archlinux.org/packages/futhark-nightly/>`_.
 

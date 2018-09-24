@@ -501,12 +501,6 @@ typeCheckKernelExp (GroupGenReduce ws dests op bucket vs locks) = do
 
   mapM_ (TC.require [Prim int32]) bucket
 
-  -- Support only two-dimensional indices for now, i.e., you
-  -- can only index into a sub-histogram at top-level.
-  unless (length bucket <= 2) $
-    TC.bad $ TC.TypeError $ "Bucket has dimension " ++ pretty (length bucket) ++
-    " but should have maximum dimension of two."
-
   dest_row_ts <- mapM (fmap (stripArray (length bucket)) . lookupType) dests
 
   vs_ts <- mapM subExpType vs
@@ -605,7 +599,8 @@ instance PrettyLore lore => Pretty (KernelExp lore) where
     parens (ppr w <> comma </>
             braces (commasep $ map ppr dests) <> comma </>
             ppr op <> comma </>
-            braces (commasep [ppr bucket, ppr vs]) </>
+            braces (commasep $ map ppr bucket) <> comma </>
+            braces (commasep $ map ppr vs) <> comma </>
             ppr locks)
 
   ppr (Barrier ses) = text "barrier" <> parens (commasep $ map ppr ses)

@@ -45,7 +45,7 @@ jobs:
     env: BUILD=stack STACK_YAML=stack.yaml
     script:
     - stack install
-    - futhark-test --nobuffer tests examples
+    - futhark-test --no-terminal tests examples
     - "(cd pkgtests; ./test.sh)"
     - stack install hlint --fast
     - tools/style-check.sh src

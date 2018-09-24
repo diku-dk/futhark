@@ -123,8 +123,8 @@ majorRevOfPkg p =
     _                                          -> (p, [0, 1])
 
 -- | Retrieve information about a package based on its package path.
--- This uses Semantic Import Versioning when interacting with GitHub
--- repositories.  Specifically, a package @github.com/user/repo@ will
+-- This uses Semantic Import Versioning when interacting with
+-- repositories.  For example, a package @github.com/user/repo@ will
 -- match version 0.* or 1.* tags only, a package
 -- @github.com/user/repo/v2@ will match 2.* tags, and so forth..
 pkgInfo :: (MonadIO m, MonadLogger m) =>
@@ -136,11 +136,17 @@ pkgInfo path
   | "github.com": owner : repo : _ <- T.splitOn "/" path =
       return $ Left $ T.intercalate "\n"
       [nope, "Do you perhaps mean 'github.com/" <> owner <> "/" <> repo <> "'?"]
+  | ["gitlab.com", owner, repo] <- T.splitOn "/" path =
+      let (repo', vs) = majorRevOfPkg repo
+      in glPkgInfo owner repo' vs
+  | "gitlab.com": owner : repo : _ <- T.splitOn "/" path =
+      return $ Left $ T.intercalate "\n"
+      [nope, "Do you perhaps mean 'gitlab.com/" <> owner <> "/" <> repo <> "'?"]
   | otherwise =
       return $ Left nope
   where nope = "Unable to handle package paths of the form '" <> path <> "'"
 
--- For Github, we unfortunately cannot use the (otherwise very nice)
+-- For GitHub, we unfortunately cannot use the (otherwise very nice)
 -- GitHub web API, because it is rate-limited to 60 requests per hour
 -- for non-authenticated users.  Instead we fall back to a combination
 -- of calling 'git' directly and retrieving things from the GitHub
@@ -157,52 +163,13 @@ gitCmd opts = do
     ExitFailure _ -> fail $ "'" <> unwords ("git" : opts) <> "' failed."
     ExitSuccess -> return out
 
-ghLookupCommit :: (MonadIO m, MonadLogger m) =>
-                  T.Text -> T.Text -> T.Text -> T.Text -> T.Text -> m (PkgRevInfo m)
-ghLookupCommit owner repo d ref hash = do
-  gd <- memoiseGetManifest $ ghRevGetManifest owner repo ref
-  let dir = Posix.addTrailingPathSeparator $ T.unpack repo <> "-" <> T.unpack d
-  time <- liftIO getCurrentTime -- FIXME
-  return $ PkgRevInfo
-    (T.pack repo_url <> "/archive/" <> ref <> ".zip") dir hash gd time
-  where repo_url = "https://github.com/" <> T.unpack owner <> "/" <> T.unpack repo
+-- The GitLab and GitHub interactions are very similar, so we define a
+-- couple of generic functions that are used to implement support for
+-- both.
 
-ghPkgInfo :: (MonadIO m, MonadLogger m) =>
-             T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
-ghPkgInfo owner repo versions = do
-  logMsg $ "Retrieving list of tags from " <> repo_url
-  remote_lines <- T.lines . T.decodeUtf8 <$> gitCmd ["ls-remote", repo_url]
-
-  head_ref <- maybe (fail $ "Cannot find HEAD ref for " <> repo_url) return $
-              maybeHead $ mapMaybe isHeadRef remote_lines
-  let def = fromMaybe head_ref
-
-  rev_info <- M.fromList . catMaybes <$> mapM revInfo remote_lines
-
-  return $ Right $ PkgInfo rev_info $ \r ->
-    ghLookupCommit owner repo (def r) (def r) (def r)
-  where repo_url = "https://github.com/" <> T.unpack owner <> "/" <> T.unpack repo
-
-        isHeadRef l
-          | [hash, "HEAD"] <- T.words l = Just hash
-          | otherwise                   = Nothing
-
-        revInfo l
-          | [hash, ref] <- T.words l,
-            ["refs", "tags", t] <- T.splitOn "/" ref,
-            "v" `T.isPrefixOf` t,
-            Right v <- semver $ T.drop 1 t,
-            _svMajor v `elem` versions = do
-              pinfo <- ghLookupCommit owner repo (prettySemVer v) t hash
-              return $ Just (v, pinfo)
-          | otherwise = return Nothing
-
-ghRevGetManifest :: (MonadIO m, MonadLogger m) =>
-                T.Text -> T.Text -> T.Text -> GetManifest m
-ghRevGetManifest owner repo tag = GetManifest $ do
-  let url = "https://raw.githubusercontent.com/" <>
-            owner <> "/" <> repo <> "/" <>
-            tag <> "/" <> T.pack futharkPkg
+ghglRevGetManifest :: (MonadIO m, MonadLogger m) =>
+                      T.Text -> T.Text -> T.Text -> T.Text -> GetManifest m
+ghglRevGetManifest url owner repo tag = GetManifest $ do
   logMsg $ "Downloading package manifest from " <> url
   r <- liftIO $ parseRequest $ T.unpack url
 
@@ -219,6 +186,67 @@ ghRevGetManifest owner repo tag = GetManifest $ do
             Left e -> fail $ msg $ parseErrorPretty e
             Right pm -> return pm
     x -> fail $ msg $ "got HTTP status " ++ show x
+
+ghglLookupCommit :: (MonadIO m, MonadLogger m) =>
+                    T.Text -> T.Text
+                 -> T.Text -> T.Text -> T.Text -> T.Text -> T.Text -> m (PkgRevInfo m)
+ghglLookupCommit archive_url manifest_url owner repo d ref hash = do
+  gd <- memoiseGetManifest $ ghglRevGetManifest manifest_url owner repo ref
+  let dir = Posix.addTrailingPathSeparator $ T.unpack repo <> "-" <> T.unpack d
+  time <- liftIO getCurrentTime -- FIXME
+  return $ PkgRevInfo archive_url dir hash gd time
+
+ghglPkgInfo :: (MonadIO m, MonadLogger m) =>
+               T.Text -> (T.Text -> T.Text) -> (T.Text -> T.Text)
+            -> T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
+ghglPkgInfo repo_url mk_archive_url mk_manifest_url owner repo versions = do
+  logMsg $ "Retrieving list of tags from " <> repo_url
+  remote_lines <- T.lines . T.decodeUtf8 <$> gitCmd ["ls-remote", T.unpack repo_url]
+
+  head_ref <- maybe (fail $ "Cannot find HEAD ref for " <> T.unpack repo_url) return $
+              maybeHead $ mapMaybe isHeadRef remote_lines
+  let def = fromMaybe head_ref
+
+  rev_info <- M.fromList . catMaybes <$> mapM revInfo remote_lines
+
+  return $ Right $ PkgInfo rev_info $ \r ->
+    ghglLookupCommit (mk_archive_url (def r)) (mk_manifest_url (def r))
+    owner repo (def r) (def r) (def r)
+  where isHeadRef l
+          | [hash, "HEAD"] <- T.words l = Just hash
+          | otherwise                   = Nothing
+
+        revInfo l
+          | [hash, ref] <- T.words l,
+            ["refs", "tags", t] <- T.splitOn "/" ref,
+            "v" `T.isPrefixOf` t,
+            Right v <- semver $ T.drop 1 t,
+            _svMajor v `elem` versions = do
+              pinfo <- ghglLookupCommit (mk_archive_url t) (mk_manifest_url t)
+                       owner repo (prettySemVer v) t hash
+              return $ Just (v, pinfo)
+          | otherwise = return Nothing
+
+ghPkgInfo :: (MonadIO m, MonadLogger m) =>
+             T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
+ghPkgInfo owner repo versions =
+  ghglPkgInfo repo_url mk_archive_url mk_manifest_url owner repo versions
+  where repo_url = "https://github.com/" <> owner <> "/" <> repo
+        mk_archive_url r = repo_url <> "/archive/" <> r <> ".zip"
+        mk_manifest_url r = "https://raw.githubusercontent.com/" <>
+                            owner <> "/" <> repo <> "/" <>
+                            r <> "/" <> T.pack futharkPkg
+
+glPkgInfo :: (MonadIO m, MonadLogger m) =>
+             T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
+glPkgInfo owner repo versions =
+  ghglPkgInfo repo_url mk_archive_url mk_manifest_url owner repo versions
+  where base_url = "https://gitlab.com/" <> owner <> "/" <> repo
+        repo_url = base_url <> ".git"
+        mk_archive_url r = base_url <> "/-/archive/" <> r <>
+                           "/" <> repo <> "-" <> r <> ".zip"
+        mk_manifest_url r = base_url <> "/raw/" <>
+                            r <> "/" <> T.pack futharkPkg
 
 -- | A package registry is a mapping from package paths to information
 -- about the package.  It is unlikely that any given registry is
