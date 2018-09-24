@@ -110,6 +110,9 @@ executables:
   futhark-csopencl:
     <<: *futhark
     main: src/futhark-csopencl.hs
+  futhark-vulkan:
+    <<: *futhark
+    main: src/futhark-vulkan.hs
   futhark-test:
     <<: *futhark
     main: src/futhark-test.hs
