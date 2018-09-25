@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix the `-C` option for `futhark-test`.
 
+  * Fixed incorrect type of `reduce_by_index`.
+
 ## [0.7.1]
 
 ### Added
