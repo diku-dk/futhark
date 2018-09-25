@@ -200,7 +200,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                      $stms:ctx_opencl_inits
   }|]
 
-  GC.libDecl [C.cedecl|static void init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx, typename cl_program prog) {
+  GC.libDecl [C.cedecl|static int init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx, typename cl_program prog) {
                      typename cl_int error;
                      // Load all the kernels.
                      $stms:(map (loadKernelByName) kernel_names)
@@ -208,6 +208,8 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                      $stms:final_inits
 
                      $stms:set_sizes
+
+                     return 0;
   }|]
 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
