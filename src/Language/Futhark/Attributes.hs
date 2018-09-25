@@ -645,7 +645,7 @@ patternType (PatternAscription p _ _) = patternType p
 
 -- | The type matched by the pattern, including shape declarations if present.
 patternStructType :: PatternBase Info VName -> StructType
-patternStructType (PatternAscription _ td _) = unInfo $ expandedType td
+patternStructType (PatternAscription p _ _) = patternStructType p
 patternStructType (PatternParens p _) = patternStructType p
 patternStructType (Id _ (Info t) _) = t `setAliases` ()
 patternStructType (TuplePattern ps _) = tupleRecord $ map patternStructType ps
