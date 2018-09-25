@@ -764,12 +764,12 @@ intrinsics = M.fromList $ zipWith namify [10..] $
               ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
               ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
 
-              ("gen_reduce", IntrinsicPolyFun [tp_a, tp_b]
+              ("gen_reduce", IntrinsicPolyFun [tp_a]
                              [uarr_a,
                               t_a `arr` (t_a `arr` t_a),
                               t_a,
                               Array (ArrayPrimElem (Signed Int32) ()) (rank 1) Nonunique,
-                              arr_b]
+                              arr_a]
                              uarr_a),
 
               ("map", IntrinsicPolyFun [tp_a, tp_b] [t_a `arr` t_b, arr_a] uarr_b),
