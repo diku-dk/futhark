@@ -254,8 +254,8 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         OPENCL_SUCCEED(clFinish(ctx->opencl.queue));
-                         return 0;
+                         ctx->error = OPENCL_SUCCEED_NONFATAL(clFinish(ctx->opencl.queue));
+                         return ctx->error != NULL;
                        }|])
 
   GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
@@ -269,8 +269,8 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "context_clear_caches" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         OPENCL_SUCCEED(opencl_free_all(&ctx->opencl));
-                         return 0;
+                         ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
+                         return ctx->error != NULL;
                        }|])
 
   GC.publicDef_ "context_get_command_queue" GC.InitDecl $ \s ->

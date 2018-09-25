@@ -8,7 +8,20 @@
   #include <CL/cl.h>
 #endif
 
-#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)
+#define OPENCL_SUCCEED_FATAL(e) opencl_succeed_fatal(e, #e, __FILE__, __LINE__)
+#define OPENCL_SUCCEED_NONFATAL(e) opencl_succeed_nonfatal(e, #e, __FILE__, __LINE__)
+// Take care not to override an existing error.
+#define OPENCL_SUCCEED_OR_RETURN(e) {             \
+    char *error = OPENCL_SUCCEED_NONFATAL(e);     \
+    if (error) {                                  \
+      if (!ctx->error) {                          \
+        ctx->error = error;                       \
+        return 1;                                 \
+      } else {                                    \
+        free(error);                              \
+      }                                           \
+    }                                             \
+  }
 
 struct opencl_config {
   int debugging;
@@ -269,13 +282,25 @@ static const char* opencl_error_string(unsigned int err)
     }
 }
 
-static void opencl_succeed(unsigned int ret,
-                           const char *call,
-                           const char *file,
-                           int line) {
+static void opencl_succeed_fatal(unsigned int ret,
+                                 const char *call,
+                                 const char *file,
+                                 int line) {
   if (ret != CL_SUCCESS) {
     panic(-1, "%s:%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
           file, line, call, ret, opencl_error_string(ret));
+  }
+}
+
+static char* opencl_succeed_nonfatal(unsigned int ret,
+                                     const char *call,
+                                     const char *file,
+                                     int line) {
+  if (ret != CL_SUCCESS) {
+    return msgprintf("%s:%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
+                     file, line, call, ret, opencl_error_string(ret));
+  } else {
+    return NULL;
   }
 }
 
@@ -304,11 +329,11 @@ static char* opencl_platform_info(cl_platform_id platform,
   size_t req_bytes;
   char *info;
 
-  OPENCL_SUCCEED(clGetPlatformInfo(platform, param, 0, NULL, &req_bytes));
+  OPENCL_SUCCEED_FATAL(clGetPlatformInfo(platform, param, 0, NULL, &req_bytes));
 
   info = malloc(req_bytes);
 
-  OPENCL_SUCCEED(clGetPlatformInfo(platform, param, req_bytes, info, NULL));
+  OPENCL_SUCCEED_FATAL(clGetPlatformInfo(platform, param, req_bytes, info, NULL));
 
   return info;
 }
@@ -318,11 +343,11 @@ static char* opencl_device_info(cl_device_id device,
   size_t req_bytes;
   char *info;
 
-  OPENCL_SUCCEED(clGetDeviceInfo(device, param, 0, NULL, &req_bytes));
+  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device, param, 0, NULL, &req_bytes));
 
   info = malloc(req_bytes);
 
-  OPENCL_SUCCEED(clGetDeviceInfo(device, param, req_bytes, info, NULL));
+  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device, param, req_bytes, info, NULL));
 
   return info;
 }
@@ -337,14 +362,14 @@ static void opencl_all_device_options(struct opencl_device_option **devices_out,
   cl_uint num_platforms;
 
   // Find the number of platforms.
-  OPENCL_SUCCEED(clGetPlatformIDs(0, NULL, &num_platforms));
+  OPENCL_SUCCEED_FATAL(clGetPlatformIDs(0, NULL, &num_platforms));
 
   // Make room for them.
   all_platforms = calloc(num_platforms, sizeof(cl_platform_id));
   platform_num_devices = calloc(num_platforms, sizeof(cl_uint));
 
   // Fetch all the platforms.
-  OPENCL_SUCCEED(clGetPlatformIDs(num_platforms, all_platforms, NULL));
+  OPENCL_SUCCEED_FATAL(clGetPlatformIDs(num_platforms, all_platforms, NULL));
 
   // Count the number of devices for each platform, as well as the
   // total number of devices.
@@ -375,7 +400,7 @@ static void opencl_all_device_options(struct opencl_device_option **devices_out,
       calloc(num_platform_devices, sizeof(cl_device_id));
 
     // Fetch all the devices.
-    OPENCL_SUCCEED(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL,
+    OPENCL_SUCCEED_FATAL(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL,
                                   num_platform_devices, platform_devices, NULL));
 
     // Loop through the devices, adding them to the devices array.
@@ -383,7 +408,7 @@ static void opencl_all_device_options(struct opencl_device_option **devices_out,
       char *device_name = opencl_device_info(platform_devices[i], CL_DEVICE_NAME);
       devices[num_devices_added].platform = platform;
       devices[num_devices_added].device = platform_devices[i];
-      OPENCL_SUCCEED(clGetDeviceInfo(platform_devices[i], CL_DEVICE_TYPE,
+      OPENCL_SUCCEED_FATAL(clGetDeviceInfo(platform_devices[i], CL_DEVICE_TYPE,
                                      sizeof(cl_device_type),
                                      &devices[num_devices_added].device_type,
                                      NULL));
@@ -505,21 +530,21 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
   ctx->queue = queue;
 
-  OPENCL_SUCCEED(clGetCommandQueueInfo(ctx->queue, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx->ctx, NULL));
+  OPENCL_SUCCEED_FATAL(clGetCommandQueueInfo(ctx->queue, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx->ctx, NULL));
 
   // Fill out the device info.  This is redundant work if we are
   // called from setup_opencl() (which is the common case), but I
   // doubt it matters much.
   struct opencl_device_option device_option;
-  OPENCL_SUCCEED(clGetCommandQueueInfo(ctx->queue, CL_QUEUE_DEVICE,
+  OPENCL_SUCCEED_FATAL(clGetCommandQueueInfo(ctx->queue, CL_QUEUE_DEVICE,
                                        sizeof(cl_device_id),
                                        &device_option.device,
                                        NULL));
-  OPENCL_SUCCEED(clGetDeviceInfo(device_option.device, CL_DEVICE_PLATFORM,
+  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_PLATFORM,
                                  sizeof(cl_platform_id),
                                  &device_option.platform,
                                  NULL));
-  OPENCL_SUCCEED(clGetDeviceInfo(device_option.device, CL_DEVICE_TYPE,
+  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_TYPE,
                                  sizeof(cl_device_type),
                                  &device_option.device_type,
                                  NULL));
@@ -530,7 +555,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
   if (required_types & OPENCL_F64) {
     cl_uint supported;
-    OPENCL_SUCCEED(clGetDeviceInfo(device_option.device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE,
+    OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE,
                                    sizeof(cl_uint), &supported, NULL));
     if (!supported) {
       panic(1, "Program uses double-precision floats, but this is not supported on the chosen device: %s",
@@ -539,7 +564,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   }
 
   size_t max_group_size;
-  OPENCL_SUCCEED(clGetDeviceInfo(device_option.device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
+  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
                                  sizeof(size_t), &max_group_size, NULL));
 
   size_t max_tile_size = sqrt(max_group_size);
@@ -665,7 +690,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
                   (int)ctx->cfg.size_values[i]);
   }
 
-  OPENCL_SUCCEED(build_opencl_program(prog, device_option.device, compile_opts));
+  OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
   free(compile_opts);
   free(fut_opencl_src);
 
