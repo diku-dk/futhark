@@ -349,13 +349,16 @@ matchValueToType env m t@(Array _ (ShapeDecl ds@(d:_)) _) val@(ValueArray arr)
         wrong x = Left $ "Size annotation " <> x <>
                   " does not match observed size " <> pretty arr_n <> "."
 
-        zeroDim (NamedDim v) = Just 0 == look v
-        zeroDim AnyDim = False
+        zeroDim (NamedDim v) = isNothing (look v) || Just 0 == look v
+        zeroDim AnyDim = True
         zeroDim (ConstDim x) = x == 0
 
-        namedAreZero (NamedDim v) =
-          M.singleton (qualLeaf v) (Just $ T.BoundV [] $ Prim $ Signed Int32,
-                                    ValuePrim $ SignedValue $ Int32Value 0)
+        namedAreZero (NamedDim v)
+          | isNothing $ look v =
+              M.singleton (qualLeaf v) (Just $ T.BoundV [] $ Prim $ Signed Int32,
+                                        ValuePrim $ SignedValue $ Int32Value 0)
+          | otherwise =
+              mempty
         namedAreZero _ = mempty
 
 matchValueToType env m (Record fs) (ValueRecord arr) =
