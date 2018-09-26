@@ -73,7 +73,7 @@ data TestAction
   | RunCases [InputOutputs] [StructureTest] [WarningTest]
   deriving (Show)
 
--- | Input and output pairs for some entry point.
+-- | Input and output pairs for some entry point(s).
 data InputOutputs = InputOutputs { iosEntryPoint :: T.Text
                                  , iosTestRuns :: [TestRun] }
   deriving (Show)
@@ -132,6 +132,10 @@ type Parser = Parsec Void T.Text
 lexeme :: Parser a -> Parser a
 lexeme p = p <* space
 
+-- | Like 'lexeme', but does not consume trailing linebreaks.
+lexeme' :: Parser a -> Parser a
+lexeme' p = p <* many (oneOf (" \t" :: String))
+
 lexstr :: T.Text -> Parser ()
 lexstr = void . try . lexeme . string
 
@@ -160,16 +164,19 @@ parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
 
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
-              (RunCases . pure <$> parseInputOutputs <*>
+              (RunCases <$> parseInputOutputs <*>
                many parseExpectedStructure <*> many parseWarning)
 
-parseInputOutputs :: Parser InputOutputs
-parseInputOutputs = InputOutputs <$> parseEntryPoint <*> parseRunCases
+parseInputOutputs :: Parser [InputOutputs]
+parseInputOutputs = do
+  entrys <- parseEntryPoints
+  cases <- parseRunCases
+  return $ map (`InputOutputs` cases) entrys
 
-parseEntryPoint :: Parser T.Text
-parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> some (satisfy constituent))) <|>
-                  pure (T.pack "main")
+parseEntryPoints :: Parser [T.Text]
+parseEntryPoints = (lexstr "entry:" *> many entry <* space) <|> pure ["main"]
   where constituent c = not (isSpace c) && c /= '}'
+        entry = lexeme' $ T.pack <$> some (satisfy constituent)
 
 parseRunTags :: Parser [String]
 parseRunTags = many parseTag
@@ -275,7 +282,7 @@ testSpec =
 readTestSpec :: String -> T.Text -> Either (ParseError Char Void) ProgramTest
 readTestSpec = parse $ testSpec <* eof
 
-readInputOutputs :: String -> T.Text -> Either (ParseError Char Void) InputOutputs
+readInputOutputs :: String -> T.Text -> Either (ParseError Char Void) [InputOutputs]
 readInputOutputs = parse $ parseDescription *> space *> parseInputOutputs <* eof
 
 commentPrefix :: T.Text
@@ -310,7 +317,7 @@ testSpecFromFile path = do
             Right cases' ->
               case testAction test of
                 RunCases old_cases structures warnings ->
-                  return test { testAction = RunCases (old_cases ++ [cases']) structures warnings }
+                  return test { testAction = RunCases (old_cases ++ cases') structures warnings }
                 _ -> fail "Secondary test block provided, but primary test block specifies compilation error."
 
 testBlocks :: T.Text -> [(Int, T.Text)]

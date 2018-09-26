@@ -36,7 +36,7 @@ at the beginning of the line, and containing a line consisting of just
 as follows::
 
   [tags { tags... }]
-  [entry: name]
+  [entry: names...]
   [compiled|nobench] input {
     values...
   }
@@ -83,11 +83,13 @@ by whitespace.  Any program with the ``disable`` tag is ignored by
 
 Another optional directive is ``entry``, which specifies the entry
 point to be used for testing.  This is useful for writing programs
-that test libraries with multiple entry points.  The ``entry``
-directive affects subsequent input-output pairs in the same comment
-block, and may only be present immediately preceding these
-input-output pairs.  If no ``entry`` is given, the default of ``main``
-is assumed.  See below for an example.
+that test libraries with multiple entry points.  Multiple entry points
+can be specified on the same line by separating them with space, and
+they will all be tested with the same input/output pairs.  The
+``entry`` directive affects subsequent input-output pairs in the same
+comment block, and may only be present immediately preceding these
+input-output pairs.  If no ``entry`` is given, ``main`` is assumed.
+See below for an example.
 
 For many usage examples, see the ``tests`` directory in the
 Futhark source directory.  A simple example can be found in

@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-test`s `--notty` option now has a `--no-terminal` alias.
     `--notty` is deprecated, but still works.
 
+  * `futhark-test` now supports multiple entry points per test block.
+
 ### Removed
 
 ### Changed
