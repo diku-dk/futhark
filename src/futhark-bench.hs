@@ -76,11 +76,10 @@ resultsToJSON = JSON.JSObject . JSON.toJSObject . map benchResultToJSObject
                   ("stderr", JSON.showJSON progerr)])
 
 fork :: (a -> IO b) -> a -> IO (MVar b)
-fork f x =
-  do
-    cell <- newEmptyMVar
-    forkIO (do { result <- f x; putMVar cell result })
-    return cell
+fork f x = do cell <- newEmptyMVar
+              void $ forkIO $ do result <- f x
+                                 putMVar cell result
+              return cell
 
 pmapIO :: (a -> IO b) -> [a] -> IO [b]
 pmapIO f elems = go elems []
