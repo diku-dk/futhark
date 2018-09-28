@@ -104,8 +104,15 @@ prettyRecord m
       where field (k, v) = ppr k <+> equals <+> ppr v
 
 instance Pretty Value where
-  ppr (ValuePrim v) = ppr v
-  ppr (ValueArray a) = brackets $ commasep $ map ppr $ elems a
+  ppr (ValuePrim v)  = ppr v
+  ppr (ValueArray a) =
+    let elements  = elems a -- [Value]
+        (x:_)     = elements
+        separator = case x of
+                      (ValueArray _) -> comma <> line
+                      _              -> comma <> space
+     in brackets $ cat $ punctuate separator (map ppr elements)
+
   ppr (ValueRecord m) = prettyRecord m
   ppr ValueFun{} = text "#<fun>"
 
