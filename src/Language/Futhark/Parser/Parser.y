@@ -159,6 +159,8 @@ import Language.Futhark.Parser.Lexer
 %left ':'
 %right '...' '..<' '..>' '..'
 %left '`'
+%right '->'
+%left with
 %left '<-'
 %left '|>...'
 %right '<|...'
@@ -170,9 +172,7 @@ import Language.Futhark.Parser.Lexer
 %left '+...' '-...' '-'
 %left '*...' '*' '/...' '%...' '//...' '%%...'
 %left '**...'
-%right '->'
 %left juxtprec
-%nonassoc with
 %left indexprec
 %%
 
