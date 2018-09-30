@@ -262,6 +262,10 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     ppr src <+> text "with" <+>
     brackets (commasep (map ppr idxs)) <+>
     text "<-" <+> align (ppr ve)
+  pprPrec _ (RecordUpdate src fs ve _ _) =
+    ppr src <+> text "with" <+>
+    mconcat (intersperse (text ".") (map ppr fs)) <+>
+    text "<-" <+> align (ppr ve)
   pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]

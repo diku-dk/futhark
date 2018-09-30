@@ -302,6 +302,23 @@ defuncExp (Update e1 idxs e2 loc) = do
   e2' <- defuncExp' e2
   return (Update e1' idxs' e2' loc, sv)
 
+-- Note that we might change the type of the record field here.  This
+-- is not permitted in the type checker due to problems with type
+-- inference, but it actually works fine.
+defuncExp (RecordUpdate e1 fs e2 _ loc) = do
+  (e1', sv1) <- defuncExp e1
+  (e2', sv2) <- defuncExp e2
+  let sv = staticField sv1 sv2 fs
+  return (RecordUpdate e1' fs e2'
+           (Info $ vacuousShapeAnnotations $ typeFromSV sv) loc,
+          sv)
+  where staticField (RecordSV svs) sv2 (f:fs') =
+          case lookup f svs of
+            Just sv -> RecordSV $
+                       (f, staticField sv sv2 fs') : filter ((/=f) . fst) svs
+            Nothing -> error "Invalid record projection."
+        staticField _ sv2 _ = sv2
+
 defuncExp e@(Map fun arr t loc) = do
   fun' <- defuncSoacExp fun
   arr' <- defuncExp' arr
@@ -805,6 +822,7 @@ freeVars expr = case expr of
 
   Index e idxs _ _    -> freeVars e  <> foldMap freeDimIndex idxs
   Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2
+  RecordUpdate e1 _ e2 _ _ -> freeVars e1 <> freeVars e2
 
   Map e1 e2 _ _       -> freeVars e1 <> freeVars e2
   Reduce _ e1 e2 e3 _ -> freeVars e1 <> freeVars e2 <> freeVars e3

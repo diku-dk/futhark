@@ -69,9 +69,9 @@ bindingLambdaParams tparams params ts m = do
     local (\env -> env { envSubsts = ascript_substs `M.union` envSubsts env }) $
     I.localScope (I.scopeOfLParams $ concat params') $ m cm $ concat params'
 
-processFlatPattern :: [(E.Ident,VName)] -> [t]
+processFlatPattern :: Show t => [(E.Ident,VName)] -> [t]
                    -> InternaliseM ([[I.Param t]], VarSubstitutions)
-processFlatPattern = processFlatPattern' []
+processFlatPattern x y = processFlatPattern' [] x y
   where
     processFlatPattern' pat []       _  = do
       let (vs, substs) = unzip pat
@@ -94,7 +94,7 @@ processFlatPattern = processFlatPattern' []
       let v' = I.Param vname t
       in ([v'], v', ts)
     handleMapping' [] _ =
-      error "processFlatPattern: insufficient identifiers in pattern."
+      error $ "processFlatPattern: insufficient identifiers in pattern." ++ show (x, y)
 
     internaliseBindee :: (E.Ident, VName) -> InternaliseM [(VName, I.DeclExtType)]
     internaliseBindee (bindee, name) = do
@@ -112,7 +112,7 @@ processFlatPattern = processFlatPattern' []
     -- Fixed up later.
     nothing_bound = boundInTypes []
 
-bindingFlatPattern :: [(E.Ident, VName)] -> [t]
+bindingFlatPattern :: Show t => [(E.Ident, VName)] -> [t]
                    -> ([[I.Param t]] -> InternaliseM a)
                    -> InternaliseM a
 bindingFlatPattern idents ts m = do

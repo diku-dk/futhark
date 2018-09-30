@@ -105,6 +105,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Update src slice v loc) =
     Update <$> mapOnExp tv src <*> mapM (astMap tv) slice <*>
     mapOnExp tv v <*> pure loc
+  astMap tv (RecordUpdate src fs v (Info t) loc) =
+    RecordUpdate <$> mapOnExp tv src <*> pure fs <*>
+    mapOnExp tv v <*> (Info <$> mapOnPatternType tv t) <*> pure loc
   astMap tv (Project field e t loc) =
     Project field <$> mapOnExp tv e <*> traverse (mapOnCompType tv) t <*> pure loc
   astMap tv (Index arr idxexps t loc) =

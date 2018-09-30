@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark-test` now supports multiple entry points per test block.
 
+  * Functional record updates: `r with f <- x`.
+
 ### Removed
 
 ### Changed

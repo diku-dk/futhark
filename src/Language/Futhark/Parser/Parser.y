@@ -562,6 +562,9 @@ Exp2 :: { UncheckedExp }
      | Exp2 with '[' DimIndices ']' '<-' Exp2
        { Update $1 $4 $7 (srcspan $1 $>) }
 
+     | Exp2 with FieldAccesses_ '<-' Exp2
+       { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
+
      | '\\' TypeParams FunParams1 maybeAscription(TypeExpTerm) '->' Exp
        { Lambda $2 (fst $3 : snd $3) $6 (fmap (flip TypeDecl NoInfo) $4) NoInfo (srcspan $1 $>) }
 
@@ -659,6 +662,9 @@ FieldAccess :: { (Name, SrcLoc) }
 FieldAccesses :: { [(Name, SrcLoc)] }
                : FieldAccess FieldAccesses { $1 : $2 }
                |                           { [] }
+
+FieldAccesses_ :: { [(Name, SrcLoc)] }
+               : FieldId FieldAccesses { (fst $1, snd $1) : $2 }
 
 Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordFieldExplicit (fst $1) $3 (srcspan (snd $1) $>) }

@@ -325,6 +325,10 @@ transformExp (Update e1 idxs e2 loc) =
   Update <$> transformExp e1 <*> mapM transformDimIndex idxs
          <*> transformExp e2 <*> pure loc
 
+transformExp (RecordUpdate e1 fs e2 t loc) =
+  RecordUpdate <$> transformExp e1 <*> pure fs
+               <*> transformExp e2 <*> pure t <*> pure loc
+
 transformExp (Map e1 es t loc) =
   Map <$> transformExp e1 <*> transformExp es <*> pure t <*> pure loc
 

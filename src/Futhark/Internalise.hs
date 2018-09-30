@@ -27,6 +27,7 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Util (splitAt3)
 
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.AccurateSizes
@@ -609,6 +610,20 @@ internaliseExp desc (E.Update src slice ve loc) = do
       (E.Var (E.qualName dest_name) (E.Info (E.vacuousShapeAnnotations src_t)) loc)
       loc)
     loc
+
+internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
+  src' <- internaliseExp desc src
+  ve' <- internaliseExp desc ve
+  replace (E.typeOf src `setAliases` ()) fields ve' src'
+  where replace (E.Record m) (f:fs) ve' src'
+          | Just t <- M.lookup f m = do
+          i <- fmap sum $ mapM (internalisedTypeSize . snd) $
+               takeWhile ((/=f) . fst) $ sortFields m
+          k <- internalisedTypeSize t
+          let (bef, to_update, aft) = splitAt3 i k src'
+          src'' <- replace t fs ve' to_update
+          return $ bef ++ src'' ++ aft
+        replace _ _ ve' _ = return ve'
 
 internaliseExp desc (E.Unzip e _ _) =
   internaliseExp desc e
