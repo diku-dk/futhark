@@ -638,6 +638,8 @@ data ExpBase f vn =
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
+            | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
+
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
@@ -736,6 +738,7 @@ instance Located (ExpBase f vn) where
   locOf (LetWith _ _ _ _ _ pos)        = locOf pos
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
+  locOf (RecordUpdate _ _ _ _ pos)     = locOf pos
   locOf (Map _ _ _ loc)                = locOf loc
   locOf (Reduce _ _ _ _ pos)           = locOf pos
   locOf (GenReduce _ _ _ _ _ pos)      = locOf pos

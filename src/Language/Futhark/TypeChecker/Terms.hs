@@ -1065,6 +1065,15 @@ checkExp (Update src idxes ve loc) = do
   where isFix DimFix{} = True
         isFix _        = False
 
+checkExp (RecordUpdate src fields ve NoInfo loc) = do
+  src' <- checkExp src
+  ve' <- checkExp ve
+  a <- expType src'
+  r <- foldM (flip $ mustHaveField loc) a fields
+  unify loc (toStruct r) . toStruct =<< expType ve'
+  return $ RecordUpdate src' fields ve'
+    (Info $ vacuousShapeAnnotations $ fromStruct a) loc
+
 checkExp (Index e idxes NoInfo loc) = do
   (t, _) <- newArrayType (srclocOf e) "e" $ length idxes
   e' <- unifies t =<< checkExp e

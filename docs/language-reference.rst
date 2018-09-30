@@ -403,6 +403,7 @@ literals and variables, but also more complicated forms.
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
+      : | `exp` "with" `fieldid` ("." `fieldid`)* "<-" `exp`
    field:   `fieldid` "=" `exp`
         : | `id`
    pat:   `id`
@@ -721,6 +722,12 @@ variable), dead code elimination may remove the assertion.
 
 Return ``a``, but with the element at position ``i`` changed to
 contain the result of evaluating ``e``.  Consumes ``a``.
+
+``r with f <- e``
+.................
+
+Return the record ``r``, but with field `f` changed to have value `e`.
+The type of the field must remain unchanged.
 
 ``if c then a else b``
 ......................

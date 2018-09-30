@@ -635,6 +635,14 @@ eval env (Update src is v loc) =
   updateArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
   where oob = bad loc env "Bad update"
 
+eval env (RecordUpdate src all_fs v _ _) =
+  update <$> eval env src <*> pure all_fs <*> eval env v
+  where update _ [] v' = v'
+        update (ValueRecord src') (f:fs) v'
+          | Just f_v <- M.lookup f src' =
+              ValueRecord $ M.insert f (update f_v fs v') src'
+        update _ _ _ = error "eval RecordUpdate: invalid value."
+
 eval env (LetWith dest src is v body loc) = do
   dest' <- maybe oob return =<<
     updateArray <$> mapM (evalDimIndex env) is <*>
