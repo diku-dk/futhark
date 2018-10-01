@@ -1,6 +1,6 @@
 /* The simple Vulkan runtime framework used by Futhark. */
 
-#include "vulkan/vulkan.h"
+#include <vulkan/vulkan.h>
 #include <stdlib.h>
 
 #define VULKAN_SUCCEED(e) vulkan_succeed(e, #e, __FILE__, __LINE__)
@@ -17,7 +17,7 @@ struct vulkan_config {
 };
 
 void vulkan_config_init(struct vulkan_config *cfg) {
-  cfg->api_version = VK_MAKE_VERSION(1, 0, 9);
+  cfg->api_version = VK_MAKE_VERSION(1, 0, 85);
   cfg->debugging = 0;
   cfg->logging = 0;
   cfg->preferred_device_index = -1;
@@ -30,7 +30,9 @@ struct vulkan_context {
   VkInstance instance;
   VkPhysicalDevice physical_device;
   VkDevice device;
+  VkQueue queue;
   uint32_t queue_family_index;
+  VkShaderModule shader_module;
 
   struct vulkan_config cfg;
 
@@ -82,6 +84,22 @@ static void vulkan_succeed(unsigned int ret,
   }
 }
 
+static int get_suitable_physical_device(const struct vulkan_config *cfg, VkPhysicalDevice *const devices,
+                               uint32_t device_count, VkPhysicalDevice* device) {
+  for (uint32_t i = 0; i < device_count; ++i)
+  {
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(devices[i], &properties);
+
+    if (properties.apiVersion < cfg->api_version)
+      continue;
+
+    *device = devices[i];
+    return 1;
+  }
+  return 0;
+}
+
 static VkPhysicalDevice get_preferred_physical_device(const struct vulkan_config *cfg, VkInstance instance) {
   uint32_t device_count = 0;
   VULKAN_SUCCEED(vkEnumeratePhysicalDevices(instance, &device_count, 0));
@@ -111,19 +129,22 @@ static VkPhysicalDevice get_preferred_physical_device(const struct vulkan_config
   return device;
 }
 
-static int get_suitable_physical_device(const struct vulkan_config *cfg, VkPhysicalDevice *const devices,
-                               uint32_t device_count, VkPhysicalDevice* device) {
-  for (uint32_t i = 0; i < device_count; ++i)
+static uint32_t get_suitable_queue_family(const struct vulkan_config *cfg,
+                                          VkQueueFamilyProperties *const queue_props,
+                                          uint32_t queue_prop_count,
+                                          uint32_t *queue_family_index) {
+  for (uint32_t i = 0; i < queue_prop_count; ++i)
   {
-    VkPhysicalDeviceProperties properties;
-    vkGetPhysicalDeviceProperties(devices[i], &properties);
+      const VkQueueFlags masked_flags = (~(VK_QUEUE_TRANSFER_BIT | VK_QUEUE_SPARSE_BINDING_BIT) &
+                                        queue_props[i].queueFlags);
 
-    if (properties.apiVersion < cfg->api_version)
-      continue;
-
-    *device = devices[i];
-    return 1;
+      if (VK_QUEUE_COMPUTE_BIT & masked_flags)
+      {
+          *queue_family_index = i;
+          return 1;
+      }
   }
+  
   return 0;
 }
 
@@ -157,26 +178,7 @@ static uint32_t get_preferred_queue_family(const struct vulkan_config *cfg, VkPh
   return queue_family_index;
 }
 
-static uint32_t get_suitable_queue_family(const struct vulkan_config *cfg,
-                                          VkQueueFamilyProperties *const queue_props,
-                                          uint32_t queue_prop_count,
-                                          uint32_t *queue_family_index) {
-  for (uint32_t i = 0; i < queue_prop_count; i++)
-  {
-      const VkQueueFlags masked_flags = (~(VK_QUEUE_TRANSFER_BIT | VK_QUEUE_SPARSE_BINDING_BIT) &
-                                        queue_props[i].queueFlags);
-
-      if (VK_QUEUE_COMPUTE_BIT & masked_flags)
-      {
-          *queue_family_index = i;
-          return 1;
-      }
-  }
-  
-  return 0;
-}
-
-static int setup_vulkan(vulkan_context *ctx, uint32_t shader[], uint32_t shader_size) {
+static void setup_vulkan(struct vulkan_context *ctx, const uint32_t shader[], uint32_t shader_size) {
 
   if (ctx->cfg.dump_program_to != NULL) {
     FILE *f = fopen(ctx->cfg.dump_program_to, "wb");
@@ -233,6 +235,8 @@ static int setup_vulkan(vulkan_context *ctx, uint32_t shader[], uint32_t shader_
 
   VULKAN_SUCCEED(vkCreateDevice(ctx->physical_device, &device_create_info, 0, &ctx->device));
 
+  vkGetDeviceQueue(ctx->device, ctx->queue_family_index, 0, &ctx->queue);
+
   VkShaderModuleCreateInfo shader_module_create_info = {};
   shader_module_create_info.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
   shader_module_create_info.pNext    = 0;
@@ -240,10 +244,11 @@ static int setup_vulkan(vulkan_context *ctx, uint32_t shader[], uint32_t shader_
   shader_module_create_info.codeSize = shader_size;
   shader_module_create_info.pCode    = shader;
 
-  VkShaderModule shader_module;
-  VULKAN_SUCCEED(vkCreateShaderModule(ctx->device, &shader_module_create_info, 0, &shader_module));
+  VULKAN_SUCCEED(vkCreateShaderModule(ctx->device, &shader_module_create_info, 0, &ctx->shader_module));
 }
 
-static int cleanup_vulkan(vulkan_context *ctx) {
+static void vulkan_cleanup(struct vulkan_context *ctx) {
+  vkDestroyShaderModule(ctx->device, ctx->shader_module, 0);
   vkDestroyDevice(ctx->device, 0);
+  vkDestroyInstance(ctx->instance, 0);
 }

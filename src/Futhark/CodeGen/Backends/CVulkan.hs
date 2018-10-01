@@ -6,9 +6,7 @@ module Futhark.CodeGen.Backends.CVulkan
   , GC.asExecutable
   ) where
 
-import Debug.Trace -- REMOVE
-
-import Control.Monad hiding (mapM)
+import Control.Monad
 import Data.List
 
 import qualified Language.C.Syntax as C
@@ -26,12 +24,12 @@ import Futhark.MonadFreshNames
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
 compileProg prog = do
   res <- ImpGen.compileProg prog
-  traceM "Hello?"
   case res of
     Left err -> return $ Left err
     Right (Program spirv_code entry_points prog') ->
       Right <$> GC.compileProg operations (generateBoilerplate spirv_code entry_points)
-                "" [Space "device", Space "local", DefaultSpace] cliOptions prog'
+                "#include <vulkan/vulkan.h>" [Space "device", Space "local", DefaultSpace]
+                cliOptions prog'
   where operations :: GC.Operations Vulkan ()
         operations = GC.Operations
                      { GC.opsCompiler = callKernel
@@ -59,61 +57,46 @@ cliOptions = [ Option { optionLongName = "dump-spirv"
              ]
 
 writeVulkanScalar :: GC.WriteScalar Vulkan ()
-writeVulkanScalar mem i t "device" _ val =
-  fail $ "Not implemented."
+writeVulkanScalar mem i t "device" _ val = return ()
 writeVulkanScalar _ _ _ space _ _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
 
 readVulkanScalar :: GC.ReadScalar Vulkan ()
-readVulkanScalar mem i t "device" _ =
-  fail $ "Not implemented."
+readVulkanScalar mem i t "device" _ = pure [C.cexp|nullptr|] -- dummy type
 readVulkanScalar _ _ _ space _ =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateVulkanBuffer :: GC.Allocate Vulkan ()
-allocateVulkanBuffer mem size tag "device" =
-  fail $ "Not implemented."
-allocateVulkanBuffer _ _ _ "local" =
-  fail $ "Not implemented."
+allocateVulkanBuffer mem size tag "device" = return ()
+allocateVulkanBuffer _ _ _ "local" = return ()
 allocateVulkanBuffer _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
 
 deallocateVulkanBuffer :: GC.Deallocate Vulkan ()
-deallocateVulkanBuffer mem tag "device" =
-  fail $ "Not implemented."
-deallocateVulkanBuffer _ _ "local" =
-  fail $ "Not implemented."
+deallocateVulkanBuffer mem tag "device" = return ()
+deallocateVulkanBuffer _ _ "local" = return ()
 deallocateVulkanBuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' space"
 
 copyVulkanMemory :: GC.Copy Vulkan ()
-copyVulkanMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
-  fail $ "Not implemented."
-copyVulkanMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
-  fail $ "Not implemented."
-copyVulkanMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
-  fail $ "Not implemented."
-copyVulkanMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
-  fail $ "Not implemented."
+copyVulkanMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes = return ()
+copyVulkanMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes = return ()
+copyVulkanMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes = return ()
+copyVulkanMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes = return ()
 copyVulkanMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 vulkanMemoryType :: GC.MemoryType Vulkan ()
-vulkanMemoryType "device" =
-  fail $ "Not implemented."
-vulkanMemoryType "local" =
-  fail $ "Not implemented."
+vulkanMemoryType "device" = pure [C.cty|unsigned char|] -- dummy type
+vulkanMemoryType "local" = pure [C.cty|unsigned char|] -- dummy type
 vulkanMemoryType space =
   fail $ "Vulkan backend does not support '" ++ space ++ "' memory space."
 
 staticVulkanArray :: GC.StaticArray Vulkan ()
-staticVulkanArray name "device" t vs =
-  fail $ "Not implemented."
-
+staticVulkanArray name "device" t vs = return ()
 staticVulkanArray _ space _ _ =
   fail $ "Vulkan backend cannot create static array in memory space '" ++ space ++ "'"
 
 callKernel :: GC.OpCompiler Vulkan ()
 callKernel (HostCode c) = GC.compileCode c
-callKernel (LaunchEntryPoint name args kernel_size workgroup_size) =
-  fail $ "Not implemented."
+callKernel (LaunchEntryPoint name args kernel_size workgroup_size) = return ()
