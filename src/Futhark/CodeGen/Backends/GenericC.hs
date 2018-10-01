@@ -607,13 +607,13 @@ unRefMem mem space = do
              }|]
 
 allocMem :: (C.ToExp a, C.ToExp b) =>
-            a -> b -> Space -> CompilerM op s ()
-allocMem name size space = do
+            a -> b -> Space -> C.Stm -> CompilerM op s ()
+allocMem name size space on_failure = do
   refcount <- asks envFatMemory
   if refcount
     then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
                                                  $string:(pretty $ C.toExp name noLoc))) {
-                       return 1;
+                       $stm:on_failure
                      }|]
     else alloc name
   where alloc dest = case space of
@@ -709,6 +709,7 @@ arrayLibraryFunctions space pt signed shape = do
   let prepare_new = do
         resetMem [C.cexp|arr->mem|]
         allocMem [C.cexp|arr->mem|] [C.cexp|$exp:arr_size * sizeof($ty:pt')|] space
+                 [C.cstm|return NULL;|]
         forM_ [0..rank-1] $ \i ->
           stm [C.cstm|arr->shape[$int:i] = $id:("dim"++show i);|]
 
@@ -750,9 +751,10 @@ arrayLibraryFunctions space pt signed shape = do
 
   return [C.cunit|
           $ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params) {
+            $ty:array_type* bad = NULL;
             $ty:array_type *arr = malloc(sizeof($ty:array_type));
             if (arr == NULL) {
-              return NULL;
+              return bad;
             }
             $items:(criticalSection new_body)
             return arr;
@@ -760,9 +762,10 @@ arrayLibraryFunctions space pt signed shape = do
 
           $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset,
                                             $params:shape_params) {
+            $ty:array_type* bad = NULL;
             $ty:array_type *arr = malloc(sizeof($ty:array_type));
             if (arr == NULL) {
-              return NULL;
+              return bad;
             }
             $items:(criticalSection new_raw_body)
             return arr;
@@ -1713,7 +1716,7 @@ compileCode (Assert e (ErrorMsg parts) (loc, locs)) = do
 
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
-  allocMem name size space
+  allocMem name size space [C.cstm|return 1;|]
 
 compileCode (Free name space) =
   unRefMem name space

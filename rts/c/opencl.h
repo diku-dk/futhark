@@ -16,12 +16,18 @@
     if (error) {                                  \
       if (!ctx->error) {                          \
         ctx->error = error;                       \
-        return 1;                                 \
+        return bad;                               \
       } else {                                    \
         free(error);                              \
       }                                           \
     }                                             \
   }
+
+// OPENCL_SUCCEED_OR_RETURN returns the value of the variable 'bad' in
+// scope.  By default, it will be this one.  Create a local variable
+// of some other type if needed.  This is a bit of a hack, but it
+// saves effort in the code generator.
+static const int bad = 1;
 
 struct opencl_config {
   int debugging;
