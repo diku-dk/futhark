@@ -17,15 +17,14 @@ import Data.Word
 
 -- | Translate a kernels-program to a Vulkan/SPIR-V program.
 kernelsToVulkan :: ImpKernels.Program -> Either InternalError ImpVulkan.Program
-kernelsToVulkan (ImpKernels.Functions funs) =
-  let (spirv_code, _) = SPIRV.runCompilerM SPIRV.newCompilerState $ kernelsToSPIRV funs
-  in fail "Not implemented"
+kernelsToVulkan prog =
+  let ((spirv_code, entry_points), _) = SPIRV.runCompilerM SPIRV.newCompilerState $ kernelsToSPIRV prog
+  in return $ ImpVulkan.Program spirv_code entry_points $ ImpVulkan.Functions []
 
-kernelsToSPIRV :: [(ImpVulkan.Name, ImpCode.Function ImpKernels.HostOp)] -> SPIRV.CompilerM [Word32]
-kernelsToSPIRV funs = do 
-  mapM_ (\(name, fun) -> traverse kernelToSPIRV fun) funs
-  SPIRV.makePrelude
-  SPIRV.getResult
-
-kernelToSPIRV :: ImpKernels.HostOp -> SPIRV.CompilerM ()
-kernelToSPIRV fun = return ()
+kernelsToSPIRV :: ImpKernels.Program -> SPIRV.CompilerM ([Word32], [ImpVulkan.EntryPointName])
+kernelsToSPIRV prog = do 
+  mapM_ SPIRV.compileKernel $ ImpKernels.getKernels prog
+  code <- SPIRV.finalizedProgram
+  entry_points <- SPIRV.getEntryPoints
+  let (entry_names, _) = unzip entry_points
+  return (code, entry_names)

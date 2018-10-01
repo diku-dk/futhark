@@ -4,6 +4,7 @@ module Main (main) where
 import Control.Monad.IO.Class
 import System.FilePath
 import System.Exit
+import System.Environment
 import qualified System.Info
 
 import Futhark.Pipeline
@@ -19,13 +20,14 @@ main = compilerMain () []
        gpuPipeline $ \() mode outpath prog -> do
          cprog <- either (`internalError` prettyText prog) return =<<
                   CVulkan.compileProg prog
+         vk_sdk <- liftIO $ getEnv "VULKAN_SDK"
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
              extra_options
                | System.Info.os == "darwin" =
                    ["-framework", "OpenCL"]
                | System.Info.os == "mingw32" =
-                   ["-lOpenCL64"]
+                   ["-I" ++ vk_sdk ++ "\\Include", "-L" ++ vk_sdk ++ "\\Lib", "-lvulkan-1"]
                | otherwise =
                    ["-lOpenCL"]
 
