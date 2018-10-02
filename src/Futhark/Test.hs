@@ -148,7 +148,7 @@ parseNatural = lexeme $ foldl' (\acc x -> acc * 10 + x) 0 .
   where num c = ord c - ord '0'
 
 parseDescription :: Parser T.Text
-parseDescription = lexeme $ T.pack <$> (anyChar `manyTill` parseDescriptionSeparator)
+parseDescription = lexeme $ T.pack <$> (anySingle `manyTill` parseDescriptionSeparator)
 
 parseDescriptionSeparator :: Parser ()
 parseDescriptionSeparator = try (string descriptionSeparator >>
@@ -240,18 +240,18 @@ parseBlock = lexeme $ braces (T.pack <$> parseBlockBody 0)
 
 parseBlockBody :: Int -> Parser String
 parseBlockBody n = do
-  c <- lookAhead anyChar
+  c <- lookAhead anySingle
   case (c,n) of
     ('}', 0) -> return mempty
-    ('}', _) -> (:) <$> anyChar <*> parseBlockBody (n-1)
-    ('{', _) -> (:) <$> anyChar <*> parseBlockBody (n+1)
-    _        -> (:) <$> anyChar <*> parseBlockBody n
+    ('}', _) -> (:) <$> anySingle <*> parseBlockBody (n-1)
+    ('{', _) -> (:) <$> anySingle <*> parseBlockBody (n+1)
+    _        -> (:) <$> anySingle <*> parseBlockBody n
 
 restOfLine :: Parser T.Text
-restOfLine = T.pack <$> (anyChar `manyTill` (void newline <|> eof))
+restOfLine = T.pack <$> (anySingle `manyTill` (void newline <|> eof))
 
 nextWord :: Parser T.Text
-nextWord = T.pack <$> (anyChar `manyTill` satisfy isSpace)
+nextWord = T.pack <$> (anySingle `manyTill` satisfy isSpace)
 
 parseWarning :: Parser WarningTest
 parseWarning = lexstr "warning:" >> parseExpectedWarning
@@ -279,25 +279,33 @@ testSpec :: Parser ProgramTest
 testSpec =
   ProgramTest <$> parseDescription <*> parseTags <*> parseAction
 
-readTestSpec :: String -> T.Text -> Either (ParseError Char Void) ProgramTest
-readTestSpec = parse $ testSpec <* eof
+parserState :: Int -> FilePath -> s -> State s
+parserState line name t =
+  State { stateInput = t
+        , stateOffset = 0
+        , statePosState = PosState
+          { pstateInput = t
+          , pstateOffset = 0
+          , pstateSourcePos = SourcePos
+                              { sourceName = name
+                              , sourceLine = mkPos line
+                              , sourceColumn = mkPos 3 }
+          , pstateTabWidth = defaultTabWidth
+          , pstateLinePrefix = "-- "}
+        }
 
-readInputOutputs :: String -> T.Text -> Either (ParseError Char Void) [InputOutputs]
-readInputOutputs = parse $ parseDescription *> space *> parseInputOutputs <* eof
+
+readTestSpec :: Int -> String -> T.Text -> Either (ParseErrorBundle T.Text Void) ProgramTest
+readTestSpec line name t =
+  snd $ runParser' (testSpec <* eof) $ parserState line name t
+
+readInputOutputs :: Int -> String -> T.Text -> Either (ParseErrorBundle T.Text Void) [InputOutputs]
+readInputOutputs line name t =
+  snd $ runParser' (parseDescription *> space *> parseInputOutputs <* eof) $
+  parserState line name t
 
 commentPrefix :: T.Text
 commentPrefix = T.pack "--"
-
-fixPosition :: Int -> ParseError Char Void -> ParseError Char Void
-fixPosition lineno err =
-  case err of TrivialError poss x y ->
-                TrivialError (fmap fixup poss) x y
-              FancyError poss x ->
-                FancyError (fmap fixup poss) x
-  where fixup pos =
-          pos { sourceLine = sourceLine pos <> mkPos lineno
-              , sourceColumn = sourceColumn pos <> mkPos (T.length commentPrefix)
-              }
 
 -- | Read the test specification from the given Futhark program.
 -- Note: will call 'error' on parse errors.
@@ -307,13 +315,13 @@ testSpecFromFile path = do
   let (first_spec_line, first_spec, rest_specs) =
         case blocks of []       -> (0, mempty, [])
                        (n,s):ss -> (n, s, ss)
-  case readTestSpec path first_spec of
-    Left err -> error $ parseErrorPretty $ fixPosition (1+first_spec_line) err
+  case readTestSpec (1+first_spec_line) path first_spec of
+    Left err -> error $ errorBundlePretty err
     Right v  -> foldM moreCases v rest_specs
 
   where moreCases test (lineno, cases) =
-          case readInputOutputs path cases of
-            Left err     -> error $ parseErrorPretty $ fixPosition lineno err
+          case readInputOutputs lineno path cases of
+            Left err     -> error $ errorBundlePretty err
             Right cases' ->
               case testAction test of
                 RunCases old_cases structures warnings ->
