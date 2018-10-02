@@ -6,7 +6,7 @@ extra-deps:
   - megaparsec-7.0.1
   - neat-interpolation-0.3.2.4
   - versions-3.5.0
-
+  - parser-combinators-1.0.0
 flags: {}
 
 extra-package-dbs: []

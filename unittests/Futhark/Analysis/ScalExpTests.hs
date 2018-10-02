@@ -14,7 +14,7 @@ import Control.Monad.State
 import qualified Data.Map as M
 import Data.Void
 import Text.Megaparsec hiding (token, (<|>), many, State)
-import Text.Megaparsec.Expr
+import Control.Monad.Combinators.Expr
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
