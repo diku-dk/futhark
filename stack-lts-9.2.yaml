@@ -4,7 +4,6 @@ packages:
 - '.'
 extra-deps:
 - base-orphans-0.6
-- base-prelude-1.2.0.1
 - cpphs-1.20.8
 - language-c-quote-0.12
 - mainland-pretty-0.6.1
