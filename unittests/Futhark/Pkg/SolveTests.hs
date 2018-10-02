@@ -17,7 +17,7 @@ semverE :: T.Text -> SemVer
 semverE s = case parseVersion s of
               Left err -> error $ T.unpack s <>
                           " is not a valid version number: " <>
-                          parseErrorPretty err
+                          errorBundlePretty err
               Right x -> x
 
 -- | A world of packages and interdependencies for testing the solver
