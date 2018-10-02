@@ -31,6 +31,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
       size_class_inits = map (\(c,_) -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       size_entry_points_inits = map (\(_,e) -> [C.cinit|$string:(pretty e)|]) $ M.elems sizes
+      num_sizes = M.size sizes
 
   GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
   GC.libDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
@@ -39,7 +40,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "get_num_sizes" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(void);|],
      [C.cedecl|int $id:s(void) {
-                return $int:(M.size sizes);
+                return $int:num_sizes;
               }|])
 
   GC.publicDef_ "get_size_name" GC.InitDecl $ \s ->
@@ -65,10 +66,11 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s { struct opencl_config opencl;
-                              size_t sizes[$int:(M.size sizes)];
+                              size_t sizes[$int:num_sizes];
                             };|])
 
   let size_value_inits = map (\i -> [C.cstm|cfg->sizes[$int:i] = 0;|]) [0..M.size sizes-1]
+      transposeBlockDim' = transposeBlockDim :: Int
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {
@@ -78,10 +80,10 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          }
 
                          $stms:size_value_inits
-                         opencl_config_init(&cfg->opencl, $int:(M.size sizes),
+                         opencl_config_init(&cfg->opencl, $int:num_sizes,
                                             size_names, cfg->sizes, size_classes, size_entry_points);
 
-                         cfg->opencl.transpose_block_dim = $int:(transposeBlockDim::Int);
+                         cfg->opencl.transpose_block_dim = $int:transposeBlockDim';
                          return cfg;
                        }|])
 
@@ -157,7 +159,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
     ([C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
 
-                         for (int i = 0; i < $int:(M.size sizes); i++) {
+                         for (int i = 0; i < $int:num_sizes; i++) {
                            if (strcmp(size_name, size_names[i]) == 0) {
                              cfg->sizes[i] = size_value;
                              return 0;
@@ -292,7 +294,6 @@ openClDecls kernel_names opencl_program opencl_prelude =
           -- chunk the entire program into small bits here, and
           -- concatenate it again at runtime.
           [ [C.cinit|$string:s|] | s <- chunk 2000 (opencl_prelude++opencl_program) ]
-        nullptr = [C.cinit|NULL|]
 
         ctx_fields =
           [ [C.csdecl|int total_runs;|],
@@ -321,10 +322,10 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 
         openCL_h = $(embedStringFile "rts/c/opencl.h")
 
+        program_fragments = opencl_program_fragments ++ [[C.cinit|NULL|]]
         openCL_boilerplate = [C.cunit|
           $esc:openCL_h
-          const char *opencl_program[] =
-            {$inits:(opencl_program_fragments++[nullptr])};|]
+          const char *opencl_program[] = {$inits:program_fragments};|]
 
 loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{

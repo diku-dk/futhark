@@ -222,7 +222,7 @@ openclMemoryType space =
 staticOpenCLArray :: GC.StaticArray OpenCL ()
 staticOpenCLArray name "device" t vs = do
   let ct = GC.primTypeToCType t
-      vs' = [[C.cinit|$exp:(GC.compilePrimValue v)|] | v <- vs]
+      vs' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vs]
       num_elems = length vs
   name_realtype <- newVName $ baseString name ++ "_realtype"
   GC.libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:num_elems] = {$inits:vs'};|]
@@ -261,7 +261,8 @@ callKernel (CmpSizeLe v key x) = do
     fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
     }|]
 callKernel (GetSizeMax v size_class) =
-  GC.stm [C.cstm|$id:v = ctx->opencl.$id:("max_" ++ pretty size_class);|]
+  let field = "max_" ++ pretty size_class
+  in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
 callKernel (HostCode c) =
   GC.compileCode c
 
