@@ -27,7 +27,7 @@ module Futhark.Pkg.Types
   -- * Parsing package manifests
   , parsePkgManifest
   , parsePkgManifestFromFile
-  , parseErrorPretty
+  , errorBundlePretty
 
   -- * Build list
   , BuildList(..)
@@ -53,7 +53,6 @@ import qualified System.FilePath.Posix as Posix
 import Data.Versions (SemVer(..), VUnit(..), prettySemVer)
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
-import Text.Megaparsec.Error (parseErrorPretty)
 
 import Prelude
 
@@ -84,7 +83,7 @@ commitVersion time commit =
 -- collapses consecutive zeroes in the metadata field.  So, we define
 -- our own parser here.  It's a little simpler too, since we don't
 -- need full semver.
-parseVersion :: T.Text -> Either (ParseError (Token T.Text) Void) SemVer
+parseVersion :: T.Text -> Either (ParseErrorBundle T.Text Void) SemVer
 parseVersion = parse (semver' <* eof) "Semantic Version"
 
 semver' :: Parsec Void T.Text SemVer
@@ -267,7 +266,7 @@ pPkgManifest = do
 
         pHash = char '#' *> (T.pack <$> some alphaNumChar)
 
-        pComment = lexeme $ T.pack <$> (string "--" >> anyChar `manyTill` (void eol <|> eof))
+        pComment = lexeme $ T.pack <$> (string "--" >> anySingle `manyTill` (void eol <|> eof))
 
         pComments :: Parser [Comment]
         pComments = catMaybes <$> many (comment <|> blankLine)
@@ -275,14 +274,14 @@ pPkgManifest = do
                 blankLine = some spaceChar >> pure Nothing
 
 
-parsePkgManifest :: FilePath -> T.Text -> Either (ParseError Char Void) PkgManifest
+parsePkgManifest :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text Void) PkgManifest
 parsePkgManifest = parse pPkgManifest
 
 parsePkgManifestFromFile :: FilePath -> IO PkgManifest
 parsePkgManifestFromFile f = do
   s <- T.readFile f
   case parsePkgManifest f s of
-    Left err -> fail $ parseErrorPretty err
+    Left err -> fail $ errorBundlePretty err
     Right m -> return m
 
 -- | A mapping from package paths to their chosen revisions.  This is

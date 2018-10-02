@@ -34,7 +34,7 @@ import System.IO
 
 import qualified Codec.Archive.Zip as Zip
 import Data.Time (UTCTime, UTCTime, defaultTimeLocale, formatTime, getCurrentTime)
-import Data.Versions (SemVer(..), semver, prettySemVer, parseErrorPretty)
+import Data.Versions (SemVer(..), semver, prettySemVer)
 import System.Process.ByteString (readProcessWithExitCode)
 import Network.HTTP.Client hiding (path)
 import Network.HTTP.Simple
@@ -183,7 +183,7 @@ ghglRevGetManifest url owner repo tag = GetManifest $ do
         Left e -> fail $ msg $ show e
         Right s ->
           case parsePkgManifest path s of
-            Left e -> fail $ msg $ parseErrorPretty e
+            Left e -> fail $ msg $ errorBundlePretty e
             Right pm -> return pm
     x -> fail $ msg $ "got HTTP status " ++ show x
 

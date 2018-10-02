@@ -23,14 +23,14 @@ dependencies:
   - binary >= 0.8.3
   - data-binary-ieee754 >= 0.1
   - vector >= 0.12
-  - vector-binary-instances
+  - vector-binary-instances >= 0.2.2.0
   - containers >= 0.5
   - mtl >= 2.2.1
   - transformers >= 0.3
   - srcloc >= 0.4
   - language-c-quote >= 0.12
   - mainland-pretty >= 0.6.1
-  - megaparsec == 6.*
+  - megaparsec >= 7.0.1
   - regex-tdfa >= 1.2
   - filepath >= 1.4.1.1
   - dlist >= 0.6.0.1

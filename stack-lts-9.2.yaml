@@ -12,7 +12,9 @@ extra-deps:
 - process-extras-0.7.2
 - test-framework-quickcheck2-0.3.0.4
 - vector-0.12.0.1
-- megaparsec-6.0.2
-- versions-3.3.2
+- megaparsec-7.0.1
+- neat-interpolation-0.3.2.4
+- versions-3.5.0
 - http-conduit-2.2.4
+- parser-combinators-1.0.0
 resolver: lts-9.2
