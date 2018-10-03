@@ -7,14 +7,16 @@ environment:
     # use a short path prefix to avoid running into path-length limitations
     STACK_ROOT: C:\sr
   matrix:
-  - STACK_YAML: stack-lts-9.2.yaml
+  - STACK_YAML: stack.yaml
+platform:
+  - x64
 cache:
 - "%STACK_ROOT%"
 
 install:
  - set PATH=%CD%\_stack;C:\msys64\usr\bin;%PATH%
  - set PATH=C:\Users\appveyor\AppData\Roaming\local\bin\;%PATH%
- - curl -sS -ostack.zip -L --insecure http://www.stackage.org/stack/windows-i386
+ - curl -sS -ostack.zip -L --insecure http://www.stackage.org/stack/windows-x86_64
  - 7z x stack.zip stack.exe > nul
  - stack setup > nul
  - stack build alex happy
