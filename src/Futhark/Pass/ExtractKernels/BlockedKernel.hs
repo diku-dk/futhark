@@ -332,8 +332,10 @@ blockedGenReduce arr_w segments inputs ops lam arrs = runBinder $ do
   -- Determining the degree of cooperation (heuristic):
   -- coop_lvl   := size of histogram (Cooperation level)
   -- num_histos := (threads / coop_lvl) (Number of histograms)
+  -- threads    := min(physical_threads, segment_size)
   num_histos <- forM ops $ \(GenReduceOp w _ _ _) ->
-    letSubExp "num_histos" =<< eDivRoundingUp Int32 (eSubExp nthreads) (eSubExp w)
+    letSubExp "num_histos" =<< eDivRoundingUp Int32 (eSubExp nthreads)
+    (foldBinOp (Mul Int32) w segment_sizes)
 
   -- Initialize sub-histograms.
   sub_histos <- forM (zip ops num_histos) $ \(GenReduceOp w dests nes _, num_histos') -> do
