@@ -1283,16 +1283,23 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
   let orig_pat = Pattern [] $ rearrangeShape perm $
                  patternValueElements $ loopNestingPattern $ fst nest
   path <- asks kernelPath
-  -- The input/output arrays ('as') _must_ correspond to some kernel
-  -- input, or else the original nested scatter would have been
-  -- ill-typed.  Find them.
+  -- The input/output arrays _must_ correspond to some kernel input,
+  -- or else the original nested GenReduce would have been ill-typed.
+  -- Find them.
   ops' <- forM ops $ \(GenReduceOp num_bins dests nes op) ->
     GenReduceOp num_bins
     <$> mapM (fmap kernelInputArray . findInput inputs) dests
     <*> pure nes
     <*> pure op
+  -- We should also remove those from the kernel nest, as otherwise
+  -- the generated code may be ill-typed (referencing a consumed
+  -- array).  They will not be used anywhere else (due to uniqueness
+  -- constraints), so this is safe.
+  let all_dests = concatMap genReduceDest ops'
   (nest_stms<>) <$>
-    inScopeOf nest_stms (genReduceKernel path (kernelNestLoops nest) orig_pat ispace inputs cs genred_w ops' lam arrs)
+    inScopeOf nest_stms
+    (genReduceKernel path (kernelNestLoops $ removeArraysFromNest all_dests nest)
+     orig_pat ispace inputs cs genred_w ops' lam arrs)
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = fail "Ill-typed nested GenReduce encountered."
