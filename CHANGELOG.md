@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed incorrect type of `reduce_by_index`.
 
+  * Segmented `reduce_by_index` now uses much less memory.
+
 ## [0.7.1]
 
 ### Added
