@@ -152,14 +152,12 @@ instance Pretty (ParamT Type) where
 
 instance PrettyLore lore => Pretty (Stm lore) where
   ppr bnd@(Let pat (StmAux cs attr) e) =
-    bindingAnnotation bnd $ align $
+    bindingAnnotation bnd $ align $ hang 2 $
     text "let" <+> align (ppr pat) <+>
     case (linebreak, ppExpLore attr e) of
-      (True, Nothing) -> equals </>
-                         indent 2 e'
-      (_, Just ann) -> equals </>
-                       indent 2 (ann </> e')
-      (False, Nothing) -> equals <+> align e'
+      (True, Nothing) -> equals </> e'
+      (_, Just ann) -> equals </> (ann </> e')
+      (False, Nothing) -> equals <+/> e'
     where e' = ppr cs <> ppr e
           linebreak = case e of
                         DoLoop{}           -> True
