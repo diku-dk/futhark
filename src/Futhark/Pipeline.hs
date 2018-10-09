@@ -27,7 +27,9 @@ import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import Data.Time.Clock
 import System.IO
+import Text.Printf
 
 import Prelude hiding (id, (.))
 
@@ -42,28 +44,38 @@ import Futhark.MonadFreshNames
 -- | If verbose, print log messages to standard error.
 data Verbosity = Verbose | NotVerbose deriving (Eq)
 
-newtype FutharkEnv = FutharkEnv {
-  futharkVerbose :: Verbosity
-  }
+newtype FutharkEnv = FutharkEnv { futharkVerbose :: Verbosity }
 
-newtype FutharkM a = FutharkM (ExceptT CompilerError (StateT VNameSource (ReaderT FutharkEnv IO)) a)
+data FutharkState = FutharkState { futharkPrevLog :: UTCTime
+                                 , futharkNameSource :: VNameSource }
+
+newtype FutharkM a = FutharkM (ExceptT CompilerError (StateT FutharkState (ReaderT FutharkEnv IO)) a)
                      deriving (Applicative, Functor, Monad,
                                MonadError CompilerError,
-                               MonadState VNameSource,
+                               MonadState FutharkState,
                                MonadReader FutharkEnv,
                                MonadIO)
 
 instance MonadFreshNames FutharkM where
-  getNameSource = get
-  putNameSource = put
+  getNameSource = gets futharkNameSource
+  putNameSource src = modify $ \s -> s { futharkNameSource = src }
 
 instance MonadLogger FutharkM where
-  addLog msg = do verb <- asks $ (==Verbose) . futharkVerbose
-                  when verb $ liftIO $ T.hPutStr stderr $ toText msg
+  addLog = mapM_ perLine . T.lines . toText
+    where perLine msg = do
+            verb <- asks $ (==Verbose) . futharkVerbose
+            prev <- gets futharkPrevLog
+            now <- liftIO getCurrentTime
+            let delta :: Double
+                delta = fromRational $ toRational (now `diffUTCTime` prev)
+                prefix = printf "[  +%.6f] " delta
+            modify $ \s -> s { futharkPrevLog = now }
+            when verb $ liftIO $ T.hPutStrLn stderr $ T.pack prefix <> msg
 
 runFutharkM :: FutharkM a -> Verbosity -> IO (Either CompilerError a)
-runFutharkM (FutharkM m) verbose =
-  runReaderT (evalStateT (runExceptT m) blankNameSource) newEnv
+runFutharkM (FutharkM m) verbose = do
+  s <- FutharkState <$> getCurrentTime <*> pure blankNameSource
+  runReaderT (evalStateT (runExceptT m) s) newEnv
   where newEnv = FutharkEnv verbose
 
 internalErrorS :: Pretty t => String -> t -> FutharkM a
