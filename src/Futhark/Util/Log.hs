@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | Opaque type for an operations log that provides fast O(1)
 -- appends.
 module Futhark.Util.Log
@@ -31,7 +32,7 @@ instance Monoid Log where
 -- | Transform a log into text.  Every log entry becomes its own line
 -- (or possibly more, in case of multi-line entries).
 toText :: Log -> T.Text
-toText = T.unlines . DL.toList . unLog
+toText = T.intercalate "\n" . DL.toList . unLog
 
 -- | Typeclass for things that can be turned into a single-entry log.
 class ToLog a where
