@@ -9,6 +9,7 @@ module Futhark.Compiler.CLI
        )
 where
 
+import Control.Monad
 import Data.Maybe
 import System.FilePath
 import System.Console.GetOpt
@@ -62,7 +63,7 @@ commandLineOptions =
      "FILE")
     "Name of the compiled binary."
   , Option "v" ["verbose"]
-    (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
+    (OptArg (Right . incVerbosity) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
   , Option [] ["library"]
     (NoArg $ Right $ \config -> config { compilerMode = ToLibrary })
@@ -84,9 +85,17 @@ wrapOption = fmap wrap
           g <- f
           return $ \cfg -> cfg { compilerConfig = g (compilerConfig cfg) }
 
+incVerbosity :: Maybe FilePath -> CompilerConfig cfg -> CompilerConfig cfg
+incVerbosity file cfg =
+  cfg { compilerVerbose = (v, file `mplus` snd (compilerVerbose cfg)) }
+  where v = case fst $ compilerVerbose cfg of
+              NotVerbose -> Verbose
+              Verbose -> VeryVerbose
+              VeryVerbose -> VeryVerbose
+
 data CompilerConfig cfg =
   CompilerConfig { compilerOutput :: Maybe FilePath
-                 , compilerVerbose :: Maybe (Maybe FilePath)
+                 , compilerVerbose :: (Verbosity, Maybe FilePath)
                  , compilerMode :: CompilerMode
                  , compilerWerror :: Bool
                  , compilerSafe :: Bool
@@ -99,7 +108,7 @@ data CompilerMode = ToLibrary | ToExecutable deriving (Eq, Ord, Show)
 -- | The configuration of the compiler.
 newCompilerConfig :: cfg -> CompilerConfig cfg
 newCompilerConfig x = CompilerConfig { compilerOutput = Nothing
-                                     , compilerVerbose = Nothing
+                                     , compilerVerbose = (NotVerbose, Nothing)
                                      , compilerMode = ToExecutable
                                      , compilerWerror = False
                                      , compilerSafe = False

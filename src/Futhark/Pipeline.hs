@@ -41,8 +41,9 @@ import Futhark.Util.Log
 import Futhark.Util.Pretty (Pretty, prettyText)
 import Futhark.MonadFreshNames
 
--- | If verbose, print log messages to standard error.
-data Verbosity = Verbose | NotVerbose deriving (Eq)
+-- | If Verbose, print log messages to standard error.  If
+-- VeryVerbose, also print logs from individual passes.
+data Verbosity = NotVerbose | Verbose | VeryVerbose deriving (Eq, Ord)
 
 newtype FutharkEnv = FutharkEnv { futharkVerbose :: Verbosity }
 
@@ -63,7 +64,7 @@ instance MonadFreshNames FutharkM where
 instance MonadLogger FutharkM where
   addLog = mapM_ perLine . T.lines . toText
     where perLine msg = do
-            verb <- asks $ (==Verbose) . futharkVerbose
+            verb <- asks $ (>=Verbose) . futharkVerbose
             prev <- gets futharkPrevLog
             now <- liftIO getCurrentTime
             let delta :: Double
@@ -147,6 +148,7 @@ runPass :: PrettyLore fromlore =>
         -> FutharkM (Prog tolore)
 runPass pass prog = do
   (res, logged) <- runPassM (passFunction pass prog)
-  addLog logged
+  verb <- asks $ (>=VeryVerbose) . futharkVerbose
+  when verb $ addLog logged
   case res of Left err -> internalError err $ prettyText prog
               Right x  -> return x
