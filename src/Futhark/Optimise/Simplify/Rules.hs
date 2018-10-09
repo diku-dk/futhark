@@ -5,6 +5,14 @@
 -- | This module defines a collection of simplification rules, as per
 -- "Futhark.Optimise.Simplify.Rule".  They are used in the
 -- simplifier.
+--
+-- For performance reasons, many sufficiently simple logically
+-- separate rules are merged into single "super-rules", like ruleIf
+-- and ruleBasicOp.  This is because it is relatively expensive to
+-- activate a rule just to determine that it does not apply.  Thus, it
+-- is more efficient to have a few very fat rules than a lot of small
+-- rules.  This does not affect the compiler result in any way; it is
+-- purely an optimisation to speed up compilation.
 module Futhark.Optimise.Simplify.Rules
   ( standardRules
   , removeUnnecessaryCopy
@@ -40,34 +48,11 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , RuleDoLoop simplifyClosedFormLoop
                , RuleDoLoop simplifKnownIterationLoop
                , RuleDoLoop simplifyLoopVariables
-               , RuleBasicOp simplifyRearrange
-               , RuleBasicOp simplifyRotate
-               , letRule simplifyBinOp
-               , letRule simplifyCmpOp
-               , letRule simplifyUnOp
-               , letRule simplifyConvOp
-               , letRule simplifyAssert
-               , letRule copyScratchToScratch
                , RuleGeneric constantFoldPrimFun
-               , RuleBasicOp twoPowerToBitShift
-               , RuleBasicOp simplifyIndexIntoReshape
-               , RuleIf evaluateBranch
-               , RuleIf simplifyFallbackBranch
-               , RuleIf simplifyBoolBranch
+               , RuleIf ruleIf
                , RuleIf hoistBranchInvariant
                , RuleBasicOp simplifyScalExp
-               , letRule simplifyIdentityReshape
-               , letRule simplifyReshapeReshape
-               , letRule simplifyReshapeScratch
-               , letRule simplifyReshapeReplicate
-               , letRule improveReshape
-               , RuleBasicOp removeScratchValue
-               , RuleBasicOp removeIdentityInPlace
-               , RuleBasicOp removeFullInPlace
-               , RuleBasicOp removeInPlaceCopy
-               , RuleBasicOp simplifyBranchResultComparison
-               , RuleBasicOp simplifyReplicate
-               , RuleBasicOp arrayLitToReplicate
+               , RuleBasicOp ruleBasicOp
                ]
 
 bottomUpRules :: BinderOps lore => [BottomUpRule lore]
@@ -251,16 +236,22 @@ type VarLookup lore = VName -> Maybe (Exp lore, Certificates)
 -- | A function that, given a subexpression, returns its type.
 type TypeLookup = SubExp -> Maybe Type
 
-type LetTopDownRule lore = VarLookup lore -> TypeLookup
-                           -> BasicOp lore -> Maybe (BasicOp lore, Certificates)
+-- | A simple rule is a top-down rule that can be expressed as a pure
+-- function.
+type SimpleRule lore = VarLookup lore -> TypeLookup -> BasicOp lore -> Maybe (BasicOp lore, Certificates)
 
-letRule :: BinderOps lore => LetTopDownRule lore -> TopDownRule lore
-letRule rule = RuleBasicOp $ \vtable pat aux op -> do
-  let defOf = (`ST.lookupExp` vtable)
-      seType (Var v) = ST.lookupType v vtable
-      seType (Constant v) = Just $ Prim $ primValueType v
-  (op', cs) <- liftMaybe $ rule defOf seType op
-  certifying (cs <> stmAuxCerts aux) $ letBind_ pat $ BasicOp op'
+simpleRules :: [SimpleRule lore]
+simpleRules = [ simplifyBinOp
+              , simplifyCmpOp
+              , simplifyUnOp
+              , simplifyConvOp
+              , simplifyAssert
+              , copyScratchToScratch
+              , simplifyIdentityReshape
+              , simplifyReshapeReshape
+              , simplifyReshapeScratch
+              , simplifyReshapeReplicate
+              , improveReshape ]
 
 simplifyClosedFormLoop :: BinderOps lore => TopDownRuleDoLoop lore
 simplifyClosedFormLoop _ pat _ ([], val, ForLoop i _ bound [], body) =
@@ -360,79 +351,6 @@ simplifKnownIterationLoop _ pat _ (ctx, val, ForLoop i it (Constant iters) loop_
 simplifKnownIterationLoop _ _ _ _ =
   cannotSimplify
 
-simplifyRearrange :: BinderOps lore => TopDownRuleBasicOp lore
-
--- Handle identity permutation.
-simplifyRearrange _ pat _ (Rearrange perm v)
-  | sort perm == perm =
-      letBind_ pat $ BasicOp $ SubExp $ Var v
-
-simplifyRearrange vtable pat (StmAux cs _) (Rearrange perm v)
-  | Just (BasicOp (Rearrange perm2 e), v_cs) <- ST.lookupExp v vtable =
-      -- Rearranging a rearranging: compose the permutations.
-      certifying (cs<>v_cs) $
-      letBind_ pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
-
-simplifyRearrange vtable pat (StmAux cs _) (Rearrange perm v)
-  | Just (BasicOp (Rotate offsets v2), v_cs) <- ST.lookupExp v vtable,
-    Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable = do
-      let offsets' = rearrangeShape (rearrangeInverse perm3) offsets
-      rearrange_rotate <- letExp "rearrange_rotate" $ BasicOp $ Rotate offsets' v3
-      certifying (cs<>v_cs<>v2_cs) $
-        letBind_ pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm3) rearrange_rotate
-
--- Rearranging a replicate where the outer dimension is left untouched.
-simplifyRearrange vtable pat (StmAux cs _) (Rearrange perm v1)
-  | Just (BasicOp (Replicate dims (Var v2)), v1_cs) <- ST.lookupExp v1 vtable,
-    num_dims <- shapeRank dims,
-    (rep_perm, rest_perm) <- splitAt num_dims perm,
-    not $ null rest_perm,
-    rep_perm == [0..length rep_perm-1] = certifying (cs<>v1_cs) $ do
-      v <- letSubExp "rearrange_replicate" $
-           BasicOp $ Rearrange (map (subtract num_dims) rest_perm) v2
-      letBind_ pat $ BasicOp $ Replicate dims v
-
-simplifyRearrange _ _ _ _ = cannotSimplify
-
-simplifyRotate :: BinderOps lore => TopDownRuleBasicOp lore
--- A zero-rotation is identity.
-simplifyRotate _ pat _ (Rotate offsets v)
-  | all isCt0 offsets = letBind_ pat $ BasicOp $ SubExp $ Var v
-
-simplifyRotate vtable pat (StmAux cs _) (Rotate offsets v)
-  | Just (BasicOp (Rearrange perm v2), v_cs) <- ST.lookupExp v vtable,
-    Just (BasicOp (Rotate offsets2 v3), v2_cs) <- ST.lookupExp v2 vtable = do
-      let offsets2' = rearrangeShape (rearrangeInverse perm) offsets2
-          addOffsets x y = letSubExp "summed_offset" $ BasicOp $ BinOp (Add Int32) x y
-      offsets' <- zipWithM addOffsets offsets offsets2'
-      rotate_rearrange <-
-        certifying cs $ letExp "rotate_rearrange" $ BasicOp $ Rearrange perm v3
-      certifying (v_cs <> v2_cs) $
-        letBind_ pat $ BasicOp $ Rotate offsets' rotate_rearrange
-
-simplifyRotate _ _ _ _ = cannotSimplify
-
-simplifyReplicate :: BinderOps lore => TopDownRuleBasicOp lore
-simplifyReplicate _ pat _ (Replicate (Shape []) se@Constant{}) =
-  letBind_ pat $ BasicOp $ SubExp se
-simplifyReplicate _ pat _ (Replicate (Shape []) (Var v)) = do
-  v_t <- lookupType v
-  letBind_ pat $ BasicOp $ if primType v_t
-                          then SubExp $ Var v
-                          else Copy v
-simplifyReplicate vtable pat _  (Replicate shape (Var v))
-  | Just (BasicOp (Replicate shape2 se), cs) <- ST.lookupExp v vtable =
-      certifying cs $ letBind_ pat $ BasicOp $ Replicate (shape<>shape2) se
-simplifyReplicate _ _ _ _ = cannotSimplify
-
--- | Turn array literals with identical elements into replicates.
-arrayLitToReplicate :: BinderOps lore => TopDownRuleBasicOp lore
-arrayLitToReplicate _ pat _ (ArrayLit (se:ses) _)
-  | all (==se) ses =
-    let n = constant (fromIntegral (length ses) + 1 :: Int32)
-    in letBind_ pat $ BasicOp $ Replicate (Shape [n]) se
-arrayLitToReplicate _ _ _ _ = cannotSimplify
-
 -- | Turn @copy(x)@ into @x@ iff @x@ is not used after this copy
 -- statement and it can be consumed.
 --
@@ -451,7 +369,7 @@ removeUnnecessaryCopy (vtable,used) (Pattern [] [d]) _ (Copy v)
                        _ -> False
 removeUnnecessaryCopy _ _ _ _ = cannotSimplify
 
-simplifyCmpOp :: LetTopDownRule lore
+simplifyCmpOp :: SimpleRule lore
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)
   | e1 == e2 = constRes $ BoolValue $
                case cmp of CmpEq{}  -> True
@@ -467,7 +385,7 @@ simplifyCmpOp _ _ (CmpOp cmp (Constant v1) (Constant v2)) =
   constRes =<< BoolValue <$> doCmpOp cmp v1 v2
 simplifyCmpOp _ _ _ = Nothing
 
-simplifyBinOp :: LetTopDownRule lore
+simplifyBinOp :: SimpleRule lore
 
 simplifyBinOp _ _ (BinOp op (Constant v1) (Constant v2))
   | Just res <- doBinOp op v1 v2 =
@@ -616,7 +534,7 @@ constRes = Just . (,mempty) . SubExp . Constant
 subExpRes :: SubExp -> Maybe (BasicOp lore, Certificates)
 subExpRes = Just . (,mempty) . SubExp
 
-simplifyUnOp :: LetTopDownRule lore
+simplifyUnOp :: SimpleRule lore
 simplifyUnOp _ _ (UnOp op (Constant v)) =
   constRes =<< doUnOp op v
 simplifyUnOp defOf _ (UnOp Not (Var v))
@@ -625,7 +543,7 @@ simplifyUnOp defOf _ (UnOp Not (Var v))
 simplifyUnOp _ _ _ =
   Nothing
 
-simplifyConvOp :: LetTopDownRule lore
+simplifyConvOp :: SimpleRule lore
 simplifyConvOp _ _ (ConvOp op (Constant v)) =
   constRes =<< doConvOp op v
 simplifyConvOp _ _ (ConvOp op se)
@@ -655,7 +573,7 @@ simplifyConvOp _ _ _ =
   Nothing
 
 -- If expression is true then just replace assertion.
-simplifyAssert :: LetTopDownRule lore
+simplifyAssert :: SimpleRule lore
 simplifyAssert _ _ (Assert (Constant (BoolValue True)) _ _) =
   constRes Checked
 simplifyAssert _ _ _ =
@@ -670,12 +588,6 @@ constantFoldPrimFun _ (Let pat (StmAux cs _) (Apply fname args _ _))
   where isConst (Constant v) = Just v
         isConst _ = Nothing
 constantFoldPrimFun _ _ = cannotSimplify
-
-twoPowerToBitShift :: BinderOps lore => TopDownRuleBasicOp lore
-twoPowerToBitShift _ pat _ (BinOp (Pow t) e1 e2)
-  | e1 == intConst t 2 =
-      letBind_ pat $ BasicOp $ BinOp (Shl t) (intConst t 1) e2
-twoPowerToBitShift _ _ _ _ = cannotSimplify
 
 simplifyIndex :: BinderOps lore => BottomUpRuleBasicOp lore
 simplifyIndex (vtable, used) pat@(Pattern [] [pe]) (StmAux cs _) (Index idd inds)
@@ -869,28 +781,6 @@ sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') = do
   (DimSlice j_p_s0_t_i n s1:) <$> sliceSlice js' is'
 sliceSlice _ _ = return []
 
-simplifyIndexIntoReshape :: BinderOps lore => TopDownRuleBasicOp lore
-simplifyIndexIntoReshape vtable pat (StmAux cs _) (Index idd slice)
-  | Just inds <- sliceIndices slice,
-    Just (BasicOp (Reshape newshape idd2), idd_cs) <- ST.lookupExp idd vtable,
-    length newshape == length inds =
-      case shapeCoercion newshape of
-        Just _ ->
-          certifying (cs<>idd_cs) $
-            letBind_ pat $ BasicOp $ Index idd2 slice
-        Nothing -> do
-          -- Linearise indices and map to old index space.
-          oldshape <- arrayDims <$> lookupType idd2
-          let new_inds =
-                reshapeIndex (map (primExpFromSubExp int32) oldshape)
-                             (map (primExpFromSubExp int32) $ newDims newshape)
-                             (map (primExpFromSubExp int32) inds)
-          new_inds' <-
-            mapM (letSubExp "new_index" <=< toExp . asInt32PrimExp) new_inds
-          certifying (cs<>idd_cs) $
-            letBind_ pat $ BasicOp $ Index idd2 $ map DimFix new_inds'
-simplifyIndexIntoReshape _ _ _ _ =
-  cannotSimplify
 
 simplifyConcat :: BinderOps lore => BottomUpRuleBasicOp lore
 
@@ -940,8 +830,9 @@ simplifyConcat (vtable, _) pat (StmAux cs _) (Concat 0 x xs _)
 
 simplifyConcat _ _ _  _ = cannotSimplify
 
-evaluateBranch :: BinderOps lore => TopDownRuleIf lore
-evaluateBranch _ pat _ (e1, tb, fb, IfAttr t ifsort)
+ruleIf :: BinderOps lore => TopDownRuleIf lore
+
+ruleIf _ pat _ (e1, tb, fb, IfAttr t ifsort)
   | Just branch <- checkBranch,
     ifsort /= IfFallback || isCt1 e1 = do
   let ses = bodyResult branch
@@ -950,25 +841,25 @@ evaluateBranch _ pat _ (e1, tb, fb, IfAttr t ifsort)
   let ses' = ctx ++ ses
   sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
             | (p,se) <- zip (patternElements pat) ses']
-  | otherwise = cannotSimplify
+
   where checkBranch
           | isCt1 e1  = Just tb
           | isCt0 e1  = Just fb
           | otherwise = Nothing
 
--- IMPROVE: This rule can be generalised to work in more cases,
--- especially when the branches have bindings, or return more than one
--- value.
-simplifyBoolBranch :: BinderOps lore => TopDownRuleIf lore
+-- IMPROVE: the following two rules can be generalised to work in more
+-- cases, especially when the branches have bindings, or return more
+-- than one value.
+--
 -- if c then True else v == c || v
-simplifyBoolBranch _ pat _
+ruleIf _ pat _
   (cond, Body _ tstms [Constant (BoolValue True)],
          Body _ fstms [se], IfAttr ts _)
   | null tstms, null fstms, [Prim Bool] <- bodyTypeValues ts =
       letBind_ pat $ BasicOp $ BinOp LogOr cond se
 
--- When seType(x)==bool, if c then x else y == (c && x) || (!c && y)
-simplifyBoolBranch _ pat _ (cond, tb, fb, IfAttr ts _)
+-- When type(x)==bool, if c then x else y == (c && x) || (!c && y)
+ruleIf _ pat _ (cond, tb, fb, IfAttr ts _)
   | Body _ tstms [tres] <- tb,
     Body _ fstms [fres] <- fb,
     all (safeExp . stmExp) $ tstms <> fstms,
@@ -979,17 +870,16 @@ simplifyBoolBranch _ pat _ (cond, tb, fb, IfAttr ts _)
                     (eBinOp LogAnd (pure $ BasicOp $ UnOp Not cond)
                      (pure $ BasicOp $ SubExp fres))
   letBind_ pat e
-simplifyBoolBranch _ _ _ _ = cannotSimplify
 
-simplifyFallbackBranch :: BinderOps lore => TopDownRuleIf lore
-simplifyFallbackBranch _ pat _ (_, tbranch, _, IfAttr _ IfFallback)
+ruleIf _ pat _ (_, tbranch, _, IfAttr _ IfFallback)
   | null $ patternContextNames pat,
     all (safeExp . stmExp) $ bodyStms tbranch = do
       let ses = bodyResult tbranch
       addStms $ bodyStms tbranch
       sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
                 | (p,se) <- zip (patternElements pat) ses]
-simplifyFallbackBranch _ _ _ _ = cannotSimplify
+
+ruleIf _ _ _ _ = cannotSimplify
 
 -- | Move out results of a conditional expression whose computation is
 -- either invariant to the branches (only done for results in the
@@ -1084,26 +974,26 @@ simplifyScalExp vtable pat _ e = do
         valOrVar (SE.Id v _) = Just $ Var v
         valOrVar _           = Nothing
 
-simplifyIdentityReshape :: LetTopDownRule lore
+simplifyIdentityReshape :: SimpleRule lore
 simplifyIdentityReshape _ seType (Reshape newshape v)
   | Just t <- seType $ Var v,
     newDims newshape == arrayDims t = -- No-op reshape.
       subExpRes $ Var v
 simplifyIdentityReshape _ _ _ = Nothing
 
-simplifyReshapeReshape :: LetTopDownRule lore
+simplifyReshapeReshape :: SimpleRule lore
 simplifyReshapeReshape defOf _ (Reshape newshape v)
   | Just (BasicOp (Reshape oldshape v2), v_cs) <- defOf v =
     Just (Reshape (fuseReshape oldshape newshape) v2, v_cs)
 simplifyReshapeReshape _ _ _ = Nothing
 
-simplifyReshapeScratch :: LetTopDownRule lore
+simplifyReshapeScratch :: SimpleRule lore
 simplifyReshapeScratch defOf _ (Reshape newshape v)
   | Just (BasicOp (Scratch bt _), v_cs) <- defOf v =
     Just (Scratch bt $ newDims newshape, v_cs)
 simplifyReshapeScratch _ _ _ = Nothing
 
-simplifyReshapeReplicate :: LetTopDownRule lore
+simplifyReshapeReplicate :: SimpleRule lore
 simplifyReshapeReplicate defOf seType (Reshape newshape v)
   | Just (BasicOp (Replicate _ se), v_cs) <- defOf v,
     Just oldshape <- arrayShape <$> seType se,
@@ -1114,7 +1004,7 @@ simplifyReshapeReplicate defOf seType (Reshape newshape v)
 simplifyReshapeReplicate _ _ _ = Nothing
 
 
-improveReshape :: LetTopDownRule lore
+improveReshape :: SimpleRule lore
 improveReshape _ seType (Reshape newshape v)
   | Just t <- seType $ Var v,
     newshape' <- informReshape (arrayDims t) newshape,
@@ -1124,7 +1014,7 @@ improveReshape _ _ _ = Nothing
 
 -- | If we are copying a scratch array (possibly indirectly), just turn it into a scratch by
 -- itself.
-copyScratchToScratch :: LetTopDownRule lore
+copyScratchToScratch :: SimpleRule lore
 copyScratchToScratch defOf seType (Copy src) = do
   t <- seType $ Var src
   if isActuallyScratch src then
@@ -1139,8 +1029,21 @@ copyScratchToScratch defOf seType (Copy src) = do
 copyScratchToScratch _ _ _ =
   Nothing
 
-removeIdentityInPlace :: BinderOps lore => TopDownRuleBasicOp lore
-removeIdentityInPlace vtable pat _ (Update dest destis (Var v))
+ruleBasicOp :: BinderOps lore => TopDownRuleBasicOp lore
+
+-- Check all the simpleRules.
+ruleBasicOp vtable pat aux op
+  | Just (op', cs) <- msum [ rule defOf seType op | rule <- simpleRules ] =
+      certifying (cs <> stmAuxCerts aux) $ letBind_ pat $ BasicOp op'
+  where defOf = (`ST.lookupExp` vtable)
+        seType (Var v) = ST.lookupType v vtable
+        seType (Constant v) = Just $ Prim $ primValueType v
+
+ruleBasicOp vtable pat _ (Update src _ (Var v))
+  | Just (BasicOp Scratch{}, _) <- ST.lookupExp v vtable =
+      letBind_ pat $ BasicOp $ SubExp $ Var src
+
+ruleBasicOp vtable pat _ (Update dest destis (Var v))
   | Just (e, _) <- ST.lookupExp v vtable,
     arrayFrom e =
       letBind_ pat $ BasicOp $ SubExp $ Var dest
@@ -1156,13 +1059,10 @@ removeIdentityInPlace vtable pat _ (Update dest destis (Var v))
               True
         arrayFrom _ =
           False
-removeIdentityInPlace _ _ _ _ =
-  cannotSimplify
 
 -- | Turn in-place updates that replace an entire array into just
 -- array literals.
-removeFullInPlace :: BinderOps lore => TopDownRuleBasicOp lore
-removeFullInPlace vtable pat _ (Update dest is se)
+ruleBasicOp vtable pat _ (Update dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
     isFullSlice (arrayShape dest_t) is =
       letBind_ pat $ BasicOp $
@@ -1170,54 +1070,16 @@ removeFullInPlace vtable pat _ (Update dest is se)
         Var v | not $ null $ sliceDims is ->
                   Reshape (map DimNew $ arrayDims dest_t) v
         _ -> ArrayLit [se] $ rowType dest_t
-removeFullInPlace _ _ _ _ =
-  cannotSimplify
 
 -- | Simplify a chain of in-place updates and copies.  This chain is
 -- often produced by in-place lowering.
-removeInPlaceCopy :: BinderOps lore => TopDownRuleBasicOp lore
-removeInPlaceCopy vtable pat (StmAux cs1 _) (Update dest1 is1 (Var v1))
+ruleBasicOp vtable pat (StmAux cs1 _) (Update dest1 is1 (Var v1))
   | Just (Update dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
     Just (Copy v3, cs3) <- ST.lookupBasicOp dest2 vtable,
     Just (Index v4 is4, cs4) <- ST.lookupBasicOp v3 vtable,
     is4 == is1, v4 == dest1 = certifying (cs1 <> cs2 <> cs3 <> cs4) $ do
       is5 <- sliceSlice is1 is2
       letBind_ pat $ BasicOp $ Update dest1 is5 se2
-removeInPlaceCopy _ _ _ _ =
-  cannotSimplify
-
-removeScratchValue :: BinderOps lore => TopDownRuleBasicOp lore
-removeScratchValue vtable pat _ (Update src _ (Var v))
-  | Just (BasicOp Scratch{}, _) <- ST.lookupExp v vtable =
-      letBind_ pat $ BasicOp $ SubExp $ Var src
-removeScratchValue _ _ _ _ =
-  cannotSimplify
-
--- | Remove the return values of a branch, that are not actually used
--- after a branch.  Standard dead code removal can remove the branch
--- if *none* of the return values are used, but this rule is more
--- precise.
-removeDeadBranchResult :: BinderOps lore => BottomUpRuleIf lore
-removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfAttr rettype ifsort)
-  | -- Only if there is no existential context...
-    patternSize pat == length rettype,
-    -- Figure out which of the names in 'pat' are used...
-    patused <- map (`UT.isUsedDirectly` used) $ patternNames pat,
-    -- If they are not all used, then this rule applies.
-    not (and patused) =
-  -- Remove the parts of the branch-results that correspond to dead
-  -- return value bindings.  Note that this leaves dead code in the
-  -- branch bodies, but that will be removed later.
-  let tses = bodyResult tb
-      fses = bodyResult fb
-      pick :: [a] -> [a]
-      pick = map snd . filter fst . zip patused
-      tb' = tb { bodyResult = pick tses }
-      fb' = fb { bodyResult = pick fses }
-      pat' = pick $ patternElements pat
-      rettype' = pick rettype
-  in letBind_ (Pattern [] pat') $ If e1 tb' fb' $ IfAttr rettype' ifsort
-  | otherwise = cannotSimplify
 
 -- | If we are comparing X against the result of a branch of the form
 -- @if P then Y else Z@ then replace comparison with '(P && X == Y) ||
@@ -1226,8 +1088,7 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfAttr rettype ifsort)
 -- should have some more checks to ensure that we only do this if that
 -- is actually the case, such as if we will obtain at least one
 -- constant-to-constant comparison?
-simplifyBranchResultComparison :: BinderOps lore => TopDownRuleBasicOp lore
-simplifyBranchResultComparison vtable pat _ (CmpOp (CmpEq t) se1 se2)
+ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
   | Just m <- simplifyWith se1 se2 = m
   | Just m <- simplifyWith se2 se1 = m
   where simplifyWith (Var v) x
@@ -1257,8 +1118,122 @@ simplifyBranchResultComparison vtable pat _ (CmpOp (CmpEq t) se1 se2)
           find ((==v) . patElemName . fst) $
           zip (patternValueElements ifpat) $
           zip (bodyResult tbranch) (bodyResult fbranch)
-simplifyBranchResultComparison _ _ _ _ =
+
+ruleBasicOp _ pat _ (Replicate (Shape []) se@Constant{}) =
+  letBind_ pat $ BasicOp $ SubExp se
+ruleBasicOp _ pat _ (Replicate (Shape []) (Var v)) = do
+  v_t <- lookupType v
+  letBind_ pat $ BasicOp $ if primType v_t
+                          then SubExp $ Var v
+                          else Copy v
+ruleBasicOp vtable pat _  (Replicate shape (Var v))
+  | Just (BasicOp (Replicate shape2 se), cs) <- ST.lookupExp v vtable =
+      certifying cs $ letBind_ pat $ BasicOp $ Replicate (shape<>shape2) se
+
+-- | Turn array literals with identical elements into replicates.
+ruleBasicOp _ pat _ (ArrayLit (se:ses) _)
+  | all (==se) ses =
+    let n = constant (fromIntegral (length ses) + 1 :: Int32)
+    in letBind_ pat $ BasicOp $ Replicate (Shape [n]) se
+
+ruleBasicOp vtable pat (StmAux cs _) (Index idd slice)
+  | Just inds <- sliceIndices slice,
+    Just (BasicOp (Reshape newshape idd2), idd_cs) <- ST.lookupExp idd vtable,
+    length newshape == length inds =
+      case shapeCoercion newshape of
+        Just _ ->
+          certifying (cs<>idd_cs) $
+            letBind_ pat $ BasicOp $ Index idd2 slice
+        Nothing -> do
+          -- Linearise indices and map to old index space.
+          oldshape <- arrayDims <$> lookupType idd2
+          let new_inds =
+                reshapeIndex (map (primExpFromSubExp int32) oldshape)
+                             (map (primExpFromSubExp int32) $ newDims newshape)
+                             (map (primExpFromSubExp int32) inds)
+          new_inds' <-
+            mapM (letSubExp "new_index" <=< toExp . asInt32PrimExp) new_inds
+          certifying (cs<>idd_cs) $
+            letBind_ pat $ BasicOp $ Index idd2 $ map DimFix new_inds'
+
+ruleBasicOp _ pat _ (BinOp (Pow t) e1 e2)
+  | e1 == intConst t 2 =
+      letBind_ pat $ BasicOp $ BinOp (Shl t) (intConst t 1) e2
+
+-- Handle identity permutation.
+ruleBasicOp _ pat _ (Rearrange perm v)
+  | sort perm == perm =
+      letBind_ pat $ BasicOp $ SubExp $ Var v
+
+ruleBasicOp vtable pat (StmAux cs _) (Rearrange perm v)
+  | Just (BasicOp (Rearrange perm2 e), v_cs) <- ST.lookupExp v vtable =
+      -- Rearranging a rearranging: compose the permutations.
+      certifying (cs<>v_cs) $
+      letBind_ pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
+
+ruleBasicOp vtable pat (StmAux cs _) (Rearrange perm v)
+  | Just (BasicOp (Rotate offsets v2), v_cs) <- ST.lookupExp v vtable,
+    Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable = do
+      let offsets' = rearrangeShape (rearrangeInverse perm3) offsets
+      rearrange_rotate <- letExp "rearrange_rotate" $ BasicOp $ Rotate offsets' v3
+      certifying (cs<>v_cs<>v2_cs) $
+        letBind_ pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm3) rearrange_rotate
+
+-- Rearranging a replicate where the outer dimension is left untouched.
+ruleBasicOp vtable pat (StmAux cs _) (Rearrange perm v1)
+  | Just (BasicOp (Replicate dims (Var v2)), v1_cs) <- ST.lookupExp v1 vtable,
+    num_dims <- shapeRank dims,
+    (rep_perm, rest_perm) <- splitAt num_dims perm,
+    not $ null rest_perm,
+    rep_perm == [0..length rep_perm-1] = certifying (cs<>v1_cs) $ do
+      v <- letSubExp "rearrange_replicate" $
+           BasicOp $ Rearrange (map (subtract num_dims) rest_perm) v2
+      letBind_ pat $ BasicOp $ Replicate dims v
+
+-- A zero-rotation is identity.
+ruleBasicOp _ pat _ (Rotate offsets v)
+  | all isCt0 offsets = letBind_ pat $ BasicOp $ SubExp $ Var v
+
+ruleBasicOp vtable pat (StmAux cs _) (Rotate offsets v)
+  | Just (BasicOp (Rearrange perm v2), v_cs) <- ST.lookupExp v vtable,
+    Just (BasicOp (Rotate offsets2 v3), v2_cs) <- ST.lookupExp v2 vtable = do
+      let offsets2' = rearrangeShape (rearrangeInverse perm) offsets2
+          addOffsets x y = letSubExp "summed_offset" $ BasicOp $ BinOp (Add Int32) x y
+      offsets' <- zipWithM addOffsets offsets offsets2'
+      rotate_rearrange <-
+        certifying cs $ letExp "rotate_rearrange" $ BasicOp $ Rearrange perm v3
+      certifying (v_cs <> v2_cs) $
+        letBind_ pat $ BasicOp $ Rotate offsets' rotate_rearrange
+
+ruleBasicOp _ _ _ _ =
   cannotSimplify
+
+-- | Remove the return values of a branch, that are not actually used
+-- after a branch.  Standard dead code removal can remove the branch
+-- if *none* of the return values are used, but this rule is more
+-- precise.
+removeDeadBranchResult :: BinderOps lore => BottomUpRuleIf lore
+removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfAttr rettype ifsort)
+  | -- Only if there is no existential context...
+    patternSize pat == length rettype,
+    -- Figure out which of the names in 'pat' are used...
+    patused <- map (`UT.isUsedDirectly` used) $ patternNames pat,
+    -- If they are not all used, then this rule applies.
+    not (and patused) =
+  -- Remove the parts of the branch-results that correspond to dead
+  -- return value bindings.  Note that this leaves dead code in the
+  -- branch bodies, but that will be removed later.
+  let tses = bodyResult tb
+      fses = bodyResult fb
+      pick :: [a] -> [a]
+      pick = map snd . filter fst . zip patused
+      tb' = tb { bodyResult = pick tses }
+      fb' = fb { bodyResult = pick fses }
+      pat' = pick $ patternElements pat
+      rettype' = pick rettype
+  in letBind_ (Pattern [] pat') $ If e1 tb' fb' $ IfAttr rettype' ifsort
+  | otherwise = cannotSimplify
+
 
 -- Some helper functions
 
