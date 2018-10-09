@@ -104,8 +104,10 @@ runCompilerOnProgram config pipeline action file = do
   where compile = do
           prog <- runPipelineOnProgram config pipeline file
           when ((>NotVerbose) . fst $ futharkVerbose config) $
-            liftIO $ hPutStrLn stderr $ "Running action " ++ actionName action
+            logMsg $ "Running action " ++ actionName action
           actionProcedure action prog
+          when ((>NotVerbose) . fst $ futharkVerbose config) $
+            logMsg ("Done." :: String)
 
 runPipelineOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS tolore
