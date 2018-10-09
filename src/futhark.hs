@@ -243,8 +243,7 @@ explicitMemoryPipelineOption = pipelineOption getSOACSProg "ExplicitMemory" Expl
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
   [ Option "v" ["verbose"]
-    (OptArg (\file -> Right $ changeFutharkConfig $
-                      \opts -> opts { futharkVerbose = Just file }) "FILE")
+    (OptArg (Right . changeFutharkConfig . incVerbosity) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
   , Option [] ["Werror"]
     (NoArg $ Right $ changeFutharkConfig $ \opts -> opts { futharkWerror = True })
@@ -313,6 +312,14 @@ commandLineOptions =
     sequentialCpuPipeline [] ["cpu"]
   ]
 
+incVerbosity :: Maybe FilePath -> FutharkConfig -> FutharkConfig
+incVerbosity file cfg =
+  cfg { futharkVerbose = (v, file `mplus` snd (futharkVerbose cfg)) }
+  where v = case fst $ futharkVerbose cfg of
+              NotVerbose -> Verbose
+              Verbose -> VeryVerbose
+              VeryVerbose -> VeryVerbose
+
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
 main :: IO ()
@@ -320,9 +327,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
   where compile [file] config =
           Just $ do
             res <- runFutharkM (m file config) $
-                   case futharkVerbose $ futharkConfig config of
-                     Just _ -> Verbose
-                     Nothing -> NotVerbose
+                   fst $ futharkVerbose $ futharkConfig config
             case res of
               Left err -> do
                 dumpError (futharkConfig config) err
@@ -384,7 +389,7 @@ runPolyPasses config prog = do
         " expects " ++ representation action ++ " representation, but got " ++
         representation prog' ++ "."
   where pipeline_config =
-          PipelineConfig { pipelineVerbose = isJust $ futharkVerbose $ futharkConfig config
+          PipelineConfig { pipelineVerbose = fst (futharkVerbose $ futharkConfig config) > NotVerbose
                          , pipelineValidate = True
                          }
 
