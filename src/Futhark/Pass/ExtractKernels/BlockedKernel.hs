@@ -66,7 +66,7 @@ blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                        -> [(VName, SubExp)] -> [SubExp] -> [VName]
                        -> m (Stms Kernels)
 blockedReductionStream pat w comm reduce_lam fold_lam ispace nes arrs = runBinder_ $ do
-  (max_step_one_num_groups, step_one_size) <- blockedKernelSize Int32 w
+  (max_step_one_num_groups, step_one_size) <- blockedKernelSize =<< asIntS Int64 w
 
   let one = constant (1 :: Int32)
       num_chunks = kernelWorkgroups step_one_size
@@ -161,8 +161,9 @@ chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' ispace nes arrs =
 
   red_rets <- forM final_red_pes $ \pe ->
     return $ ThreadsReturn OneResultPerGroup $ Var $ patElemName pe
+  elems_per_thread <- asIntS Int32 $ kernelElementsPerThread step_one_size
   map_rets <- forM chunk_map_pes $ \pe ->
-    return $ ConcatReturns ordering' w (kernelElementsPerThread step_one_size) Nothing $ patElemName pe
+    return $ ConcatReturns ordering' w elems_per_thread Nothing $ patElemName pe
   let rets = red_rets ++ map_rets
 
   return $ Kernel (KernelDebugHints "chunked_reduce" [("input size", w)]) space ts $
@@ -324,7 +325,7 @@ blockedGenReduce arr_w segments inputs ops lam arrs = runBinder $ do
   segment_sizes_64 <- mapM (letSubExp "segment_size_64" <=< eConvOp (SExt Int32 Int64) . toExp) segment_sizes
   total_w <- letSubExp "genreduce_elems" =<< foldBinOp (Mul Int64) arr_w_64 segment_sizes_64
   (_, KernelSize num_groups group_size elems_per_thread_64 _ num_threads) <-
-    blockedKernelSize Int64 total_w
+    blockedKernelSize total_w
 
   kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
   let ltid = spaceLocalId kspace
@@ -463,7 +464,7 @@ blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
            -> StreamOrd -> Lambda InKernel -> [SubExp] -> [VName]
            -> m (Stm Kernels, Stms Kernels)
 blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
-  (_, kernel_size) <- blockedKernelSize Int32 w
+  (_, kernel_size) <- blockedKernelSize =<< asIntS Int64 w
   let num_nonconcat = length (lambdaReturnType lam) - patternSize concat_pat
       num_groups = kernelWorkgroups kernel_size
       group_size = kernelWorkgroupSize kernel_size
@@ -508,8 +509,9 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
       red_ts = take num_nonconcat $ lambdaReturnType lam
       map_ts = map rowType $ drop num_nonconcat $ lambdaReturnType lam
 
+  per_thread <- asIntS Int32 $ kernelElementsPerThread kernel_size
   splitArrays (paramName chunk_size) (map paramName arr_params) ordering' w
-    (Var thread_gtid) (kernelElementsPerThread kernel_size) arrs
+    (Var thread_gtid) per_thread arrs
 
   chunk_red_pes <- forM red_ts $ \red_t -> do
     pe_name <- newVName "chunk_fold_red"
@@ -554,44 +556,49 @@ splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
           letBindNames_ [slice_name] $ BasicOp $ Index arr slice
 
 data KernelSize = KernelSize { kernelWorkgroups :: SubExp
+                               -- ^ Int32
                              , kernelWorkgroupSize :: SubExp
+                               -- ^ Int32
                              , kernelElementsPerThread :: SubExp
+                               -- ^ Int64
                              , kernelTotalElements :: SubExp
+                               -- ^ Int64
                              , kernelNumThreads :: SubExp
+                               -- ^ Int32
                              }
                 deriving (Eq, Ord, Show)
 
-numberOfGroups :: MonadBinder m => IntType -> SubExp -> SubExp -> SubExp -> m (SubExp, SubExp)
-numberOfGroups int w group_size max_num_groups = do
+numberOfGroups :: MonadBinder m => SubExp -> SubExp -> SubExp -> m (SubExp, SubExp)
+numberOfGroups w group_size max_num_groups = do
   -- If 'w' is small, we launch fewer groups than we normally would.
   -- We don't want any idle groups.
   w_div_group_size <- letSubExp "w_div_group_size" =<<
-    eDivRoundingUp int (eSubExp w) (eSubExp group_size)
+    eDivRoundingUp Int64 (eSubExp w) (eSubExp group_size)
   -- We also don't want zero groups.
-  num_groups_maybe_zero <- letSubExp "num_groups_maybe_zero" $ BasicOp $ BinOp (SMin int)
+  num_groups_maybe_zero <- letSubExp "num_groups_maybe_zero" $ BasicOp $ BinOp (SMin Int64)
                            w_div_group_size max_num_groups
   num_groups <- letSubExp "num_groups" $
-                BasicOp $ BinOp (SMax int) (intConst int 1)
+                BasicOp $ BinOp (SMax Int64) (intConst Int64 1)
                 num_groups_maybe_zero
   num_threads <-
-    letSubExp "num_threads" $ BasicOp $ BinOp (Mul int) num_groups group_size
+    letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int64) num_groups group_size
   return (num_groups, num_threads)
 
 blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
-                     IntType -> SubExp -> m (SubExp, KernelSize)
-blockedKernelSize int w = do
+                     SubExp -> m (SubExp, KernelSize)
+blockedKernelSize w = do
   group_size <- getSize "group_size" SizeGroup
   max_num_groups <- getSize "max_num_groups" SizeNumGroups
 
-  group_size' <- asIntS int group_size
-  max_num_groups' <- asIntS int max_num_groups
-  (num_groups, num_threads) <- numberOfGroups int w group_size' max_num_groups'
+  group_size' <- asIntS Int64 group_size
+  max_num_groups' <- asIntS Int64 max_num_groups
+  (num_groups, num_threads) <- numberOfGroups w group_size' max_num_groups'
   num_groups' <- asIntS Int32 num_groups
   num_threads' <- asIntS Int32 num_threads
 
   per_thread_elements <-
     letSubExp "per_thread_elements" =<<
-    eDivRoundingUp int (toExp =<< asIntS int w) (toExp =<< asIntS int num_threads)
+    eDivRoundingUp Int64 (toExp =<< asIntS Int64 w) (toExp =<< asIntS Int64 num_threads)
 
   return (max_num_groups,
           KernelSize num_groups' group_size per_thread_elements w num_threads')
@@ -604,6 +611,8 @@ scanKernel1 :: (MonadBinder m, Lore m ~ Kernels) =>
             -> Lambda InKernel -> [VName]
             -> m (Kernel InKernel)
 scanKernel1 w scan_sizes (scan_lam, scan_nes) (_comm, red_lam, red_nes) foldlam arrs = do
+  num_elements <- asIntS Int32 $ kernelTotalElements scan_sizes
+
   let (scan_ts, red_ts, map_ts) =
         splitAt3 (length scan_nes) (length red_nes) $ lambdaReturnType foldlam
       (_, foldlam_acc_params, _) =
@@ -723,7 +732,6 @@ scanKernel1 w scan_sizes (scan_lam, scan_nes) (_comm, red_lam, red_nes) foldlam 
   where num_groups = kernelWorkgroups scan_sizes
         group_size = kernelWorkgroupSize scan_sizes
         num_threads = kernelNumThreads scan_sizes
-        num_elements = kernelTotalElements scan_sizes
         consumed_in_foldlam = consumedInBody $ lambdaBody $ Alias.analyseLambda foldlam
 
         mkOutArray desc t = do
@@ -855,7 +863,7 @@ blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
 blockedScan pat w (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam segment_size ispace inps arrs = do
   foldlam <- composeLambda scan_lam red_lam map_lam
 
-  (_, first_scan_size) <- blockedKernelSize Int32 w
+  (_, first_scan_size) <- blockedKernelSize =<< asIntS Int64 w
   my_index <- newVName "my_index"
   other_index <- newVName "other_index"
   let num_groups = kernelWorkgroups first_scan_size
