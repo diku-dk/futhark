@@ -489,8 +489,9 @@ blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
 
   nonconcat_rets <- forM chunk_red_pes $ \pe ->
     return $ ThreadsReturn AllThreads $ Var $ patElemName pe
+  elems_per_thread <- asIntS Int32 $ kernelElementsPerThread kernel_size
   concat_rets <- forM chunk_map_pes $ \pe ->
-    return $ ConcatReturns ordering' w (kernelElementsPerThread kernel_size) Nothing $ patElemName pe
+    return $ ConcatReturns ordering' w elems_per_thread Nothing $ patElemName pe
 
   return $ Let pat (defAux ()) $ Op $ Kernel (KernelDebugHints "chunked_map" []) space ts $
     KernelBody () chunk_and_fold $ nonconcat_rets ++ concat_rets
