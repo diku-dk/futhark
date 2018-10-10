@@ -16,6 +16,7 @@ module Futhark.Construct
   , eIf'
   , eBinOp
   , eCmpOp
+  , eConvOp
   , eNegate
   , eNot
   , eAbs
@@ -168,6 +169,13 @@ eCmpOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
   return $ BasicOp $ CmpOp op x' y'
+
+eConvOp :: MonadBinder m =>
+           ConvOp -> m (Exp (Lore m))
+        -> m (Exp (Lore m))
+eConvOp op x = do
+  x' <- letSubExp "x" =<< x
+  return $ BasicOp $ ConvOp op x'
 
 eNegate :: MonadBinder m =>
            m (Exp (Lore m)) -> m (Exp (Lore m))
