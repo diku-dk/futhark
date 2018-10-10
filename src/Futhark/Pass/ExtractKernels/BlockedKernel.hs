@@ -66,7 +66,7 @@ blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                        -> [(VName, SubExp)] -> [SubExp] -> [VName]
                        -> m (Stms Kernels)
 blockedReductionStream pat w comm reduce_lam fold_lam ispace nes arrs = runBinder_ $ do
-  (max_step_one_num_groups, step_one_size) <- blockedKernelSize w
+  (max_step_one_num_groups, step_one_size) <- blockedKernelSize Int32 w
 
   let one = constant (1 :: Int32)
       num_chunks = kernelWorkgroups step_one_size
@@ -320,9 +320,11 @@ blockedGenReduce :: (MonadFreshNames m, HasScope Kernels m) =>
 blockedGenReduce arr_w segments inputs ops lam arrs = runBinder $ do
   let (segment_is, segment_sizes) = unzip segments
       depth = length segments
-  total_w <- letSubExp "genreduce_elems" =<< foldBinOp (Mul Int32) arr_w segment_sizes
-  (_, KernelSize num_groups group_size elems_per_thread _ num_threads) <-
-    blockedKernelSize total_w
+  arr_w_64 <- letSubExp "arr_w_64" =<< eConvOp (SExt Int32 Int64) (toExp arr_w)
+  segment_sizes_64 <- mapM (letSubExp "segment_size_64" <=< eConvOp (SExt Int32 Int64) . toExp) segment_sizes
+  total_w <- letSubExp "genreduce_elems" =<< foldBinOp (Mul Int64) arr_w_64 segment_sizes_64
+  (_, KernelSize num_groups group_size elems_per_thread_64 _ num_threads) <-
+    blockedKernelSize Int64 total_w
 
   kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
   let ltid = spaceLocalId kspace
@@ -373,38 +375,45 @@ blockedGenReduce arr_w segments inputs ops lam arrs = runBinder $ do
     Replicate (Shape $ segment_sizes ++ [num_histos', w]) (intConst Int32 0)
 
   (kres, kstms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
+    let toInt64 = eConvOp (SExt Int32 Int64)
     i <- newVName "i"
     -- The merge parameters are the histogram we are constructing.
     merge_params <- zipWithM newParam (map baseString sub_histos')
                                       (map (`toDecl` Unique) dest_ts)
+    group_size_64 <- letSubExp "group_size_64" =<<
+                     toInt64 (toExp group_size)
     let merge = zip merge_params $ map Var sub_histos'
-        form = ForLoop i Int32 elems_per_thread []
+        form = ForLoop i Int64 elems_per_thread_64 []
 
     loop_body <- runBodyBinder $ localScope (scopeOfFParams (map fst merge) <>
                                              scopeOf form) $ do
       -- Compute the offset into the input and output.  To this a
       -- thread can add its local ID to figure out which element it is
-      -- responsible for.
+      -- responsible for.  The calculation is done with 64-bit
+      -- integers to avoid overflow, but the final segment indexes are
+      -- 32 bit.
       offset <- letSubExp "offset" =<<
-                eBinOp (Add Int32)
-                (eBinOp (Mul Int32)
-                 (eSubExp $ Var $ spaceGroupId kspace)
-                 (pure $ BasicOp $ BinOp (Mul Int32) elems_per_thread group_size))
-                (pure $ BasicOp $ BinOp (Mul Int32) (Var i) group_size)
+                eBinOp (Add Int64)
+                (eBinOp (Mul Int64)
+                 (toInt64 $ toExp $ spaceGroupId kspace)
+                 (eBinOp (Mul Int64) (toExp elems_per_thread_64) (toExp group_size_64)))
+                (eBinOp (Mul Int64) (toExp i) (toExp group_size_64))
 
       -- Construct segment indices.
-      j <- letSubExp "j" $ BasicOp $ BinOp (Add Int32) offset (Var ltid)
+      j <- letSubExp "j" =<< eBinOp (Add Int64) (toExp offset) (toInt64 $ toExp ltid)
       l <- newVName "l"
       let bindIndex v = letBindNames_ [v] <=< toExp
       zipWithM_ bindIndex (segment_is++[l]) $
-        unflattenIndex (map (primExpFromSubExp int32) $ segment_sizes ++ [arr_w]) $
-        primExpFromSubExp int32 j
+        map (ConvOpExp (SExt Int64 Int32)) .
+        unflattenIndex (map (ConvOpExp (SExt Int32 Int64) .
+                             primExpFromSubExp int32) $ segment_sizes ++ [arr_w]) $
+        primExpFromSubExp int64 j
 
       -- We execute the bucket function once and update each histogram serially.
       -- We apply the bucket function if j=offset+ltid is less than
       -- num_elements.  This also involves writing to the mapout
       -- arrays.
-      let in_bounds = pure $ BasicOp $ CmpOp (CmpSlt Int32) j total_w
+      let in_bounds = pure $ BasicOp $ CmpOp (CmpSlt Int64) j total_w
 
           in_bounds_branch = do
             -- Read segment inputs.
@@ -454,7 +463,7 @@ blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
            -> StreamOrd -> Lambda InKernel -> [SubExp] -> [VName]
            -> m (Stm Kernels, Stms Kernels)
 blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
-  (_, kernel_size) <- blockedKernelSize w
+  (_, kernel_size) <- blockedKernelSize Int32 w
   let num_nonconcat = length (lambdaReturnType lam) - patternSize concat_pat
       num_groups = kernelWorkgroups kernel_size
       group_size = kernelWorkgroupSize kernel_size
@@ -569,16 +578,17 @@ numberOfGroups w group_size max_num_groups = do
   return (num_groups, num_threads)
 
 blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
-                     SubExp -> m (SubExp, KernelSize)
-blockedKernelSize w = do
+                     IntType -> SubExp -> m (SubExp, KernelSize)
+blockedKernelSize int w = do
   group_size <- getSize "group_size" SizeGroup
   max_num_groups <- getSize "max_num_groups" SizeNumGroups
 
-  (num_groups, num_threads) <- numberOfGroups w group_size max_num_groups
+  w' <- asIntS Int32 w
+  (num_groups, num_threads) <- numberOfGroups w' group_size max_num_groups
 
   per_thread_elements <-
     letSubExp "per_thread_elements" =<<
-    eDivRoundingUp Int32 (eSubExp w) (eSubExp num_threads)
+    eDivRoundingUp int (toExp =<< asIntS int w) (toExp =<< asIntS int num_threads)
 
   return (max_num_groups,
           KernelSize num_groups group_size per_thread_elements w num_threads)
@@ -842,7 +852,7 @@ blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
 blockedScan pat w (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam segment_size ispace inps arrs = do
   foldlam <- composeLambda scan_lam red_lam map_lam
 
-  (_, first_scan_size) <- blockedKernelSize w
+  (_, first_scan_size) <- blockedKernelSize Int32 w
   my_index <- newVName "my_index"
   other_index <- newVName "other_index"
   let num_groups = kernelWorkgroups first_scan_size
