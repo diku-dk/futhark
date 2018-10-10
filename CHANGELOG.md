@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * The compiler itself is about 10% faster.
+
 ### Removed
 
 ### Changed
