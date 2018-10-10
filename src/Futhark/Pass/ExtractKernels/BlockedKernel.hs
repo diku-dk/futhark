@@ -561,20 +561,20 @@ data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              }
                 deriving (Eq, Ord, Show)
 
-numberOfGroups :: MonadBinder m => SubExp -> SubExp -> SubExp -> m (SubExp, SubExp)
-numberOfGroups w group_size max_num_groups = do
+numberOfGroups :: MonadBinder m => IntType -> SubExp -> SubExp -> SubExp -> m (SubExp, SubExp)
+numberOfGroups int w group_size max_num_groups = do
   -- If 'w' is small, we launch fewer groups than we normally would.
   -- We don't want any idle groups.
   w_div_group_size <- letSubExp "w_div_group_size" =<<
-    eDivRoundingUp Int32 (eSubExp w) (eSubExp group_size)
+    eDivRoundingUp int (eSubExp w) (eSubExp group_size)
   -- We also don't want zero groups.
-  num_groups_maybe_zero <- letSubExp "num_groups_maybe_zero" $ BasicOp $ BinOp (SMin Int32)
+  num_groups_maybe_zero <- letSubExp "num_groups_maybe_zero" $ BasicOp $ BinOp (SMin int)
                            w_div_group_size max_num_groups
   num_groups <- letSubExp "num_groups" $
-                BasicOp $ BinOp (SMax Int32) (constant (1::Int32))
+                BasicOp $ BinOp (SMax int) (intConst int 1)
                 num_groups_maybe_zero
   num_threads <-
-    letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32) num_groups group_size
+    letSubExp "num_threads" $ BasicOp $ BinOp (Mul int) num_groups group_size
   return (num_groups, num_threads)
 
 blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
@@ -583,15 +583,18 @@ blockedKernelSize int w = do
   group_size <- getSize "group_size" SizeGroup
   max_num_groups <- getSize "max_num_groups" SizeNumGroups
 
-  w' <- asIntS Int32 w
-  (num_groups, num_threads) <- numberOfGroups w' group_size max_num_groups
+  group_size' <- asIntS int group_size
+  max_num_groups' <- asIntS int max_num_groups
+  (num_groups, num_threads) <- numberOfGroups int w group_size' max_num_groups'
+  num_groups' <- asIntS Int32 num_groups
+  num_threads' <- asIntS Int32 num_threads
 
   per_thread_elements <-
     letSubExp "per_thread_elements" =<<
     eDivRoundingUp int (toExp =<< asIntS int w) (toExp =<< asIntS int num_threads)
 
   return (max_num_groups,
-          KernelSize num_groups group_size per_thread_elements w num_threads)
+          KernelSize num_groups' group_size per_thread_elements w num_threads')
 
 -- First stage scan kernel.
 scanKernel1 :: (MonadBinder m, Lore m ~ Kernels) =>
