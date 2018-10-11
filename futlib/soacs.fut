@@ -141,20 +141,20 @@ let filter 'a (p: a -> bool) (as: []a): *[]a =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let partition 'a (p: a -> bool) (as: []a): ([]a, []a) =
+let partition [n] 'a (p: a -> bool) (as: [n]a): ([]a, []a) =
   let p' x = if p x then 0 else 1
   let (as', is) = intrinsics.partition (2, p', as)
-  in (as'[:is[0]], as'[is[0]:])
+  in (as'[0:is[0]], as'[is[0]:n])
 
 -- | Split an array by two predicates, producing three arrays.
 --
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let partition2 'a (p1: a -> bool) (p2: a -> bool) (as: []a): ([]a, []a, []a) =
+let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a) =
   let p' x = if p1 x then 0 else if p2 x then 1 else 2
   let (as', is) = intrinsics.partition (3, p', as)
-  in (as'[:is[0]], as'[is[0]:is[0]+is[1]], as'[is[0]+is[1]:])
+  in (as'[0:is[0]], as'[is[0]:is[0]+is[1]], as'[is[0]+is[1]:n])
 
 -- | `stream_red op f as` splits `as` into chunks, applies `f` to each
 -- of these in parallel, and uses `op` (which must be associative) to
