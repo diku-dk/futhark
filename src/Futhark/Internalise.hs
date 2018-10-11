@@ -909,9 +909,11 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   i' <- maybe i_def (fmap fst . internaliseDimExp "i") i
   j' <- maybe j_def (fmap fst . internaliseDimExp "j") j
   j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int32) j' i'
-  n <- letSubExp "n" =<< eDivRoundingUp Int32
-       (pure $ BasicOp $ I.UnOp (I.Abs Int32) j_m_i)
-       (pure $ I.BasicOp $ I.UnOp (I.Abs Int32) s')
+  -- Something like a division-rounding-up, but accomodating negative
+  -- operands.
+  let divRounding x y =
+        eBinOp (SQuot Int32) (eBinOp (Add Int32) x (eBinOp (Sub Int32) y (eSignum $ toExp s'))) y
+  n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
 
   -- Bounds checks depend on whether we are slicing forwards or
   -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
