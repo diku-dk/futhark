@@ -485,7 +485,7 @@ distributeMap path pat (MapLoop cs w lam arrs) = do
                             }
       exploitInnerParallelism path' = do
         (acc', postkernels) <- runKernelM (env path') $
-          distribute =<< distributeMapBodyStms acc (stmsToList $ bodyStms $ lambdaBody lam)
+          distribute =<< distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
 
         -- There may be a few final targets remaining - these correspond to
         -- arrays that are identity mapped, and must have statements
@@ -809,7 +809,7 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
       distribute =<<
       leavingNesting maploop =<<
       mapNesting pat cs w lam arrs
-      (distribute =<< distributeMapBodyStms def_acc (stmsToList lam_bnds))
+      (distribute =<< distributeMapBodyStms def_acc lam_bnds)
 
     multiVersion perm nest acc' = do
       -- The kernel can be distributed by itself, so now we can
@@ -824,7 +824,7 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
             fmap postKernelsStms $ collectKernels_ $ localPath path' $
             localScope extra_scope $ inNesting nest' $ void $
             distribute =<< leavingNesting maploop =<< distribute =<<
-            distributeMapBodyStms def_acc (stmsToList lam_bnds)
+            distributeMapBodyStms def_acc lam_bnds
 
       -- XXX: we do not construct a new KernelPath when
       -- sequentialising.  This is only OK as long as further
@@ -867,27 +867,25 @@ leavingNesting (MapLoop cs w lam arrs) acc =
                stms <- runBinder_ $ Kernelise.mapIsh pat cs w used_params kbody used_arrs
                return $ addStmsToKernel stms acc' { kernelStms = mempty }
 
-distributeMapBodyStms :: KernelAcc -> [Stm] -> KernelM KernelAcc
+distributeMapBodyStms :: KernelAcc -> Stms SOACS -> KernelM KernelAcc
+distributeMapBodyStms orig_acc all_stms =
+  onStms orig_acc $ stmsToList all_stms
+  where
+    onStms acc [] = return acc
 
-distributeMapBodyStms acc [] =
-  return acc
+    onStms acc (Let pat (StmAux cs _) (Op (Stream w (Sequential accs) lam arrs)):stms) = do
+      types <- asksScope scopeForSOACs
+      stream_stms <-
+        snd <$> runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
+      stream_stms' <-
+        runReaderT (copyPropagateInStms simpleSOACS stream_stms) types
+      onStms acc $ stmsToList (fmap (certify cs) stream_stms') ++ stms
 
-distributeMapBodyStms acc
-  (Let pat (StmAux cs _) (Op (Stream w (Sequential accs) lam arrs)):bnds) = do
-    types <- asksScope scopeForSOACs
-    stream_bnds <-
-      snd <$> runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
-    stream_bnds' <-
-      runReaderT (copyPropagateInStms simpleSOACS stream_bnds) types
-    distributeMapBodyStms acc $ stmsToList (fmap (certify cs) stream_bnds') ++ bnds
-
-distributeMapBodyStms acc (bnd:bnds) =
-  -- It is important that bnd is in scope if 'maybeDistributeStm'
-  -- wants to distribute, even if this causes the slightly silly
-  -- situation that bnd is in scope of itself.
-  withStm bnd $
-  maybeDistributeStm bnd =<<
-  distributeMapBodyStms acc bnds
+    onStms acc (stm:stms) =
+      -- It is important that stm is in scope if 'maybeDistributeStm'
+      -- wants to distribute, even if this causes the slightly silly
+      -- situation that stm is in scope of itself.
+      withStm stm $ maybeDistributeStm stm =<< onStms acc stms
 
 maybeDistributeStm :: Stm -> KernelAcc -> KernelM KernelAcc
 
@@ -955,7 +953,7 @@ maybeDistributeStm (Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
     Just m <- irwim pat w comm lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       (_, bnds) <- runBinderT (certifying cs m) types
-      distributeMapBodyStms acc $ stmsToList bnds
+      distributeMapBodyStms acc bnds
 
 -- Parallelise segmented scatters.
 maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) acc =
@@ -1038,7 +1036,7 @@ maybeDistributeStm (Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
   -- This with-loop is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
-  distributeMapBodyStms acc . map (certify cs) . stmsToList . snd =<<
+  distributeMapBodyStms acc . fmap (certify cs) . snd =<<
     runBinderT (dissectScrema pat w form arrs) scope
 
 maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d:ds)) v))) acc
