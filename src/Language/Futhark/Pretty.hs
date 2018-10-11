@@ -124,20 +124,22 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
     where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
-  ppr (Prim et) = ppr et
-  ppr (TypeVar _ u et targs) =
+  ppr = pprPrec 0
+  pprPrec _ (Prim et) = ppr et
+  pprPrec _ (TypeVar _ u et targs) =
     ppr u <> ppr (qualNameFromTypeName et) <+> spread (map ppr targs)
-  ppr (Array at shape u) = ppr u <> ppr shape <> ppr at
-  ppr (Record fs)
+  pprPrec _ (Array at shape u) = ppr u <> ppr shape <> ppr at
+  pprPrec _ (Record fs)
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
         braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
-  ppr (Arrow _ (Just v) t1 t2) =
+  pprPrec p (Arrow _ (Just v) t1 t2) =
+    parensIf (p > 0) $
     parens (pprName v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
-  ppr (Arrow _ Nothing t1 t2) =
-    ppr t1 <+> text "->" <+> ppr t2
+  pprPrec p (Arrow _ Nothing t1 t2) =
+    parensIf (p > 0) $ pprPrec 1 t1 <+> text "->" <+> ppr t2
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim as) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
