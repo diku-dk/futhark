@@ -285,7 +285,7 @@ transformStm path (Let pat aux (DoLoop ctx val form body)) =
 
 transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just lam <- isMapSOAC form =
-      distributeMap path pat $ MapLoop cs w lam arrs
+      distributeMap path $ MapLoop pat cs w lam arrs
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just (scan_lam, nes) <- isScanSOAC form,
@@ -461,10 +461,10 @@ transformStm path (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun im
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
 
-data MapLoop = MapLoop Certificates SubExp Lambda [VName]
+data MapLoop = MapLoop Pattern Certificates SubExp Lambda [VName]
 
-mapLoopExp :: MapLoop -> Exp
-mapLoopExp (MapLoop _ w lam arrs) = Op $ Screma w (mapSOAC lam) arrs
+mapLoopStm :: MapLoop -> Stm
+mapLoopStm (MapLoop pat cs w lam arrs) = Let pat (StmAux cs ()) $ Op $ Screma w (mapSOAC lam) arrs
 
 sufficientParallelism :: (Op (Lore m) ~ Kernel innerlore, MonadBinder m) =>
                          String -> SubExp -> KernelPath -> m (SubExp, VName)
@@ -472,8 +472,8 @@ sufficientParallelism desc what path = cmpSizeLe desc (Out.SizeThreshold path) w
 
 distributeMap :: (HasScope Out.Kernels m,
                   MonadFreshNames m, MonadLogger m) =>
-                 KernelPath -> Pattern -> MapLoop -> m KernelsStms
-distributeMap path pat (MapLoop cs w lam arrs) = do
+                 KernelPath -> MapLoop -> m KernelsStms
+distributeMap path (MapLoop pat cs w lam arrs) = do
   types <- askScope
   let loopnest = MapNesting pat cs w $ zip (lambdaParams lam) arrs
       env path' = KernelEnv { kernelNest =
@@ -781,15 +781,15 @@ worthIntraGroup lam = interesting $ lambdaBody lam
 incrementalFlattening :: Bool
 incrementalFlattening = isJust $ lookup "FUTHARK_INCREMENTAL_FLATTENING" unixEnvironment
 
-distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
+distributeInnerMap :: MapLoop -> KernelAcc
                    -> KernelM KernelAcc
-distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
+distributeInnerMap maploop@(MapLoop pat cs w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
-      addStmToKernel (Let pat (StmAux cs ()) $ mapLoopExp maploop) acc
+      addStmToKernel (mapLoopStm maploop) acc
   | not incrementalFlattening =
       distributeNormally
   | otherwise =
-      distributeSingleStm acc (Let pat (StmAux cs ()) $ mapLoopExp maploop) >>= \case
+      distributeSingleStm acc (mapLoopStm maploop) >>= \case
       Just (post_kernels, res, nest, acc')
         | Just (perm, _pat_unused) <- permutationAndMissing pat res -> do
             addKernels post_kernels
@@ -850,7 +850,7 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
       return acc'
 
 leavingNesting :: MapLoop -> KernelAcc -> KernelM KernelAcc
-leavingNesting (MapLoop cs w lam arrs) acc =
+leavingNesting (MapLoop _ cs w lam arrs) acc =
   case popInnerTarget $ kernelTargets acc of
    Nothing ->
      fail "The kernel targets list is unexpectedly small"
@@ -868,8 +868,7 @@ leavingNesting (MapLoop cs w lam arrs) acc =
                return $ addStmsToKernel stms acc' { kernelStms = mempty }
 
 distributeMapBodyStms :: KernelAcc -> Stms SOACS -> KernelM KernelAcc
-distributeMapBodyStms orig_acc all_stms =
-  onStms orig_acc $ stmsToList all_stms
+distributeMapBodyStms orig_acc = onStms orig_acc . stmsToList
   where
     onStms acc [] = return acc
 
@@ -895,7 +894,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Screma w form arrs))) acc
   -- following the map.
   distributeIfPossible acc >>= \case
     Nothing -> addStmToKernel bnd acc
-    Just acc' -> distribute =<< distributeInnerMap pat (MapLoop (stmCerts bnd) w lam arrs) acc'
+    Just acc' -> distribute =<< distributeInnerMap (MapLoop pat (stmCerts bnd) w lam arrs) acc'
 
 maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
   | null (patternContextElements pat), bodyContainsParallelism body =
