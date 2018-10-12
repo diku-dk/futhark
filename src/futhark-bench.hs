@@ -176,7 +176,7 @@ reportResult results = do
   let runtimes = map (fromIntegral . runMicroseconds) results
       avg = sum runtimes / fromIntegral (length runtimes)
       rel_dev = stddevp runtimes / mean runtimes :: Double
-  putStrLn $ printf "%10.2f" avg ++ "us (avg. of " ++ show (length runtimes) ++
+  putStrLn $ printf "%10.2f" avg ++ "μs (avg. of " ++ show (length runtimes) ++
     " runs; RSD: " ++ printf "%.2f" rel_dev ++ ")"
 
 progNotFound :: String -> String
