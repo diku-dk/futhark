@@ -641,12 +641,8 @@ matchMTys = matchMTys' mempty
              -> VName -> BoundV
              -> VName -> BoundV
              -> Either TypeError (VName, VName)
-    matchVal loc spec_name spec_f@(BoundV _ Arrow{}) name f@(BoundV _ Arrow{})
-      | matchFunBinding loc spec_f f =
-          return (spec_name, name)
-    matchVal _ spec_name (BoundV [] spec_t) name (BoundV [] t)
-      | toStructural t `subtypeOf` toStructural spec_t =
-          return (spec_name, name)
+    matchVal loc spec_name spec_t name t
+      | matchFunBinding loc spec_t t = return (spec_name, name)
     matchVal loc spec_name spec_v _ v =
       Left $ TypeError loc $ "Value `" ++ baseString spec_name ++ "` specified as type " ++
       ppValBind spec_v ++ " in signature, but has " ++ ppValBind v ++ " in structure."
