@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     top-level function ends.  This is similar to what other ML
     languages do.
 
+  * `futhark-bench` now writes "μs" instead of "us".
+
 ## [0.7.2]
 
 ### Added
