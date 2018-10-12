@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * The type checker no longer requires types used inside local
+    functions to be unambiguous at the point where the local function
+    is defined.  They must still be unambiguous by the time the
+    top-level function ends.  This is similar to what other ML
+    languages do.
+
 ## [0.7.2]
 
 ### Added
