@@ -207,10 +207,15 @@ lookupSubst :: VName -> Constraints -> Maybe (TypeBase () ())
 lookupSubst v constraints = do Constraint t _ <- M.lookup v constraints
                                Just t
 
-constraintSubsts :: Constraints -> M.Map VName (TypeBase () ())
-constraintSubsts = M.mapMaybe constraintSubst
-  where constraintSubst (Constraint t _) = Just t
-        constraintSubst _ = Nothing
+constraintTypeVars :: Constraints -> Names
+constraintTypeVars = mconcat . map f . M.elems
+  where f (Constraint t _) = typeVars t
+        f _ = mempty
+
+overloadedTypeVars :: Constraints -> Names
+overloadedTypeVars = mconcat . map f . M.elems
+  where f (HasFields fs _) = mconcat $ map typeVars $ M.elems fs
+        f _ = mempty
 
 applySubstInConstraint :: VName -> TypeBase () () -> Constraint -> Constraint
 applySubstInConstraint vn tp (Constraint t loc) =
@@ -1454,14 +1459,58 @@ consumeArg loc at _       = return [observation (aliases at) loc]
 checkOneExp :: UncheckedExp -> TypeM Exp
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e
-  fixOverloadedTypes mempty
+  fixOverloadedTypes
   updateExpTypes e'
 
+-- | Type-check a top-level (or module-level) function definition.
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
                 [UncheckedTypeParam], [UncheckedPattern],
                 UncheckedExp, SrcLoc)
             -> TypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
-checkFunDef = fmap fst . runTermTypeM . checkFunDef'
+checkFunDef f = fmap fst $ runTermTypeM $ do
+  (fname, tparams, params, maybe_retdecl, rettype, body) <- checkFunDef' f
+
+  -- Since this is a top-level function, we also resolve overloaded
+  -- types, using either defaults or complaining about ambiguities.
+  fixOverloadedTypes
+
+  -- Then replace all inferred types in the body and parameters.
+  body' <- updateExpTypes body
+  params' <- updateExpTypes params
+  maybe_retdecl' <- traverse updateExpTypes maybe_retdecl
+  rettype' <- normaliseType rettype
+
+  return (fname, tparams, params', maybe_retdecl', rettype', body')
+
+-- | This is "fixing" as in "setting them", not "correcting them".  We
+-- only make very conservative fixing.
+fixOverloadedTypes :: TermTypeM ()
+fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
+  where fixOverloaded (v, Overloaded ots loc)
+          | Signed Int32 `elem` ots =
+              unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ Signed Int32
+          | FloatType Float64 `elem` ots =
+              unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ FloatType Float64
+          | otherwise =
+              typeError loc $
+              unlines ["Type is ambiguous (could be one of " ++ intercalate ", " (map pretty ots) ++ ").",
+                       "Add a type annotation to disambiguate the type."]
+
+        fixOverloaded (_, NoConstraint _ loc) =
+          typeError loc $ unlines ["Type of expression is ambiguous.",
+                                    "Add a type annotation to disambiguate the type."]
+
+        fixOverloaded (_, Equality loc) =
+          typeError loc $ unlines ["Type is ambiguous (must be equality type).",
+                                   "Add a type annotation to disambiguate the type."]
+
+        fixOverloaded (_, HasFields fs loc) =
+          typeError loc $ unlines ["Type is ambiguous (must be record with fields {" ++ fs' ++ "}).",
+                                   "Add a type annotation to disambiguate the type."]
+          where fs' = intercalate ", " $ map field $ M.toList fs
+                field (l, t) = pretty l ++ ": " ++ pretty t
+
+        fixOverloaded _ = return ()
 
 checkFunDef' :: (Name, Maybe UncheckedTypeExp,
                  [UncheckedTypeParam], [UncheckedPattern],
@@ -1480,17 +1529,8 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
 
     body' <- checkFunBody body ((\(_,t,_)->t) <$> maybe_retdecl') (maybe loc srclocOf maybe_retdecl)
 
-    -- We are now done inferring types.  First we find any remaining
-    -- overloaded type variables that were created in this function
-    -- and determine them using defaults.
-    fixOverloadedTypes $ S.fromList $ M.keys then_substs
-
-    -- Then replace all inferred types in the body and parameters.
-    body'' <- updateExpTypes body'
     params'' <- updateExpTypes params'
-    now_substs <- getConstraints
-
-    body_t <- expType body''
+    body_t <- expType body'
 
     (maybe_retdecl'', rettype) <- case maybe_retdecl' of
       Just (retdecl', retdecl_type, _) -> do
@@ -1499,22 +1539,36 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         return (Just retdecl', retdecl_type)
       Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
 
-    let new_substs = now_substs `M.difference` then_substs
+    -- Candidates for let-generalisation are those type variables that
+    ---
+    -- (1) were not known before we checked this function, and
+    --
+    -- (2) are not used in the (new) definition of any type variables
+    -- known before we checked this function.
+    --
+    -- (3) are not referenced from an overloaded type (for example,
+    -- are the element types of an incompletely resolved record type).
+    -- This is a bit more restrictive than I'd like, and SML for
+    -- example does not have this restriction.
+    now_substs <- getConstraints
+    let then_type_variables = S.fromList $ M.keys then_substs
+        then_type_constraints = constraintTypeVars $
+                                M.filterWithKey (\k _ -> k `S.member` then_type_variables) now_substs
+        keep_type_variables = then_type_variables <>
+                              then_type_constraints <>
+                              overloadedTypeVars now_substs
+
+    let new_substs = M.filterWithKey (\k _ -> not (k `S.member` keep_type_variables)) now_substs
     tparams'' <- closeOverTypes new_substs tparams' $
                  rettype : map patternStructType params''
 
-    -- We keep only those type variables that existed before the
-    -- function, or which are used in the substitutions for those that
-    -- are.
-    let then_type_variables = S.fromList (M.keys then_substs)
-        then_type_substs = M.elems $ constraintSubsts $
-                           M.filterWithKey (\k _ -> k `S.member` then_type_variables) now_substs
-        keep_type_variables = then_type_variables <> foldMap typeVars then_type_substs
-    modifyConstraints $ M.filterWithKey $ \k _ -> k `S.member` keep_type_variables
+    -- We keep those type variables that were not closed over by
+    -- let-generalisation.
+    modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` map typeParamName tparams''
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
-      return (fname', tparams'', params'', maybe_retdecl'', rettype, body'')
+      return (fname', tparams'', params'', maybe_retdecl'', rettype, body')
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -1572,28 +1626,12 @@ checkFunBody body maybe_rettype _loc = do
 
   return body'
 
--- | This is "fixing" as in "setting them", not "correcting them".  We
--- only make very conservative fixing.
-fixOverloadedTypes :: S.Set VName -> TermTypeM ()
-fixOverloadedTypes not_these = getConstraints >>= mapM_ fixOverloaded . M.toList
-  where fixOverloaded (v, Overloaded ots loc)
-          | v `S.member` not_these = return ()
-          | Signed Int32 `elem` ots =
-              unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ Signed Int32
-          | FloatType Float64 `elem` ots =
-              unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ FloatType Float64
-        fixOverloaded _ = return ()
-
 -- | Find at all type variables in the given type that are covered by
 -- the constraints, and produce type parameters that close over them.
 -- Produce an error if the given list of type parameters is non-empty,
 -- yet does not cover all type variables in the type.
 closeOverTypes :: Constraints -> [TypeParam] -> [StructType] -> TermTypeM [TypeParam]
-closeOverTypes substs tparams ts = do
-  -- Check that there are not unconstrained type variables left,
-  -- except for those closed over by the type variables.
-  mapM_ constrained $ M.elems $ M.filterWithKey (\k _ -> k `S.notMember` visible) substs
-
+closeOverTypes substs tparams ts =
   case tparams of
     [] -> fmap catMaybes $ mapM closeOver $ M.toList substs'
     _ -> do mapM_ checkClosedOver $ M.toList substs'
@@ -1602,7 +1640,8 @@ closeOverTypes substs tparams ts = do
         visible = mconcat (map typeVars ts)
 
         checkClosedOver (k, v)
-          | k `elem` map typeParamName tparams = return ()
+          | not (canBeClosedOver v) ||
+            k `elem` map typeParamName tparams = return ()
           | otherwise =
               typeError (srclocOf v) $
               unlines ["Type variable `" ++ prettyName k ++
@@ -1610,29 +1649,12 @@ closeOverTypes substs tparams ts = do
                         intercalate ", " (map pretty tparams) ++ ".",
                         "This is usually because a parameter needs a type annotation."]
 
+        canBeClosedOver NoConstraint{} = True
+        canBeClosedOver _ = False
+
         closeOver (k, NoConstraint (Just Unlifted) loc) = return $ Just $ TypeParamType Unlifted k loc
         closeOver (k, NoConstraint _ loc) = return $ Just $ TypeParamType Lifted k loc
-        closeOver (_, ParamType{}) = return Nothing
-        closeOver (_, Constraint{}) = return Nothing
-        closeOver (_, Overloaded ots loc) =
-          typeError loc $
-          unlines ["Type is ambiguous (could be one of " ++ intercalate ", " (map pretty ots) ++ ").",
-                   "Add a type annotation to disambiguate the type."]
-        closeOver (_, Equality loc) =
-          typeError loc $ unlines ["Type is ambiguous (must be equality type).",
-                                   "Add a type annotation to disambiguate the type."]
-        closeOver (_, HasFields fs loc) =
-          typeError loc $ unlines ["Type is ambiguous (must be record with fields {" ++ fs' ++ "}).",
-                                   "Add a type annotation to disambiguate the type."]
-          where fs' = intercalate ", " $ map field $ M.toList fs
-                field (l, t) = pretty l ++ ": " ++ pretty t
-
-        constrained (NoConstraint _ loc) = ambiguous loc
-        constrained (Overloaded _ loc) = ambiguous loc
-        constrained (Equality loc) = ambiguous loc
-        constrained _ = return ()
-        ambiguous loc = typeError loc $ unlines ["Type of expression is ambiguous.",
-                                                 "Add a type annotation to disambiguate the type."]
+        closeOver (_, _) = return Nothing
 
 --- Consumption
 
