@@ -22,7 +22,6 @@ import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
 import Futhark.Representation.SOACS as I hiding (stmPattern)
 import Futhark.Transform.Rename as I
-import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Representation.AST.Attributes.Aliases
@@ -537,36 +536,46 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
                         (map I.paramName shapepat)
                         (map I.paramType mergepat')
                         mergeinit_ts
-            initsubst = [ (I.paramName mergeparam, initval)
-                        | (mergeparam, initval) <-
-                            zip (shapepat++mergepat') (shapeinit++mergeinit)
-                        ]
+
+        (loop_initial_cond, init_loop_cond_bnds) <- collectStms $ do
+          forM_ (zip shapepat shapeinit) $ \(p, se) ->
+            letBindNames_ [paramName p] $ BasicOp $ SubExp se
+          forM_ (zip (concat nested_mergepat) mergeinit) $ \(p, se) ->
+            unless (se == I.Var (paramName p)) $
+            letBindNames_ [paramName p] $ BasicOp $
+            case se of I.Var v | not $ primType $ paramType p ->
+                                   Reshape (map DimCoercion $ arrayDims $ paramType p) v
+                       _ -> SubExp se
+          internaliseExp1 "loop_cond" cond
 
         internaliseBodyStms loopbody $ \ses -> do
           sets <- mapM subExpType ses
           loop_while <- newParam "loop_while" $ I.Prim I.Bool
-          (loop_cond, loop_cond_bnds) <-
-            collectStms $ internaliseExp1 "loop_cond" cond
-          let endsubst = [ (I.paramName mergeparam, endval)
-                         | (mergeparam, endval) <-
-                              zip (shapepat++mergepat') (shapeargs++ses)
-                         ]
-              shapeargs = argShapes
+          let shapeargs = argShapes
                           (map I.paramName shapepat)
                           (map I.paramType mergepat')
                           sets
-          (loop_initial_cond, init_loop_cond_bnds) <-
-            collectStms $
-            shadowIdentsInExp initsubst loop_cond_bnds loop_cond
-          (loop_end_cond, loop_end_cond_bnds) <-
-            collectStms $ shadowIdentsInExp endsubst loop_cond_bnds loop_cond
-          return (mkBody loop_end_cond_bnds $ shapeargs++[loop_end_cond]++ses,
+
+          -- Careful not to clobber anything.
+          loop_end_cond_body <- renameBody <=< insertStmsM $ do
+            forM_ (zip shapepat shapeargs) $ \(p, se) ->
+              unless (se == I.Var (paramName p)) $
+              letBindNames_ [paramName p] $ BasicOp $ SubExp se
+            forM_ (zip (concat nested_mergepat) ses) $ \(p, se) ->
+              unless (se == I.Var (paramName p)) $
+              letBindNames_ [paramName p] $ BasicOp $
+              case se of I.Var v | not $ primType $ paramType p ->
+                                     Reshape (map DimCoercion $ arrayDims $ paramType p) v
+                         _ -> SubExp se
+            resultBody <$> internaliseExp "loop_cond" cond
+          loop_end_cond <- bodyBind loop_end_cond_body
+
+          return (resultBody $ shapeargs++loop_end_cond++ses,
                   (I.WhileLoop $ I.paramName loop_while,
                    shapepat,
                    loop_while : mergepat',
                    loop_initial_cond : mergeinit,
                    init_loop_cond_bnds))
-
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   srcs <- internaliseExpToVars "src" $
@@ -1568,29 +1577,6 @@ askSafety :: InternaliseM Safety
 askSafety = do check <- asks envDoBoundsChecks
                safe <- asks envSafe
                return $ if check || safe then I.Safe else I.Unsafe
-
-shadowIdentsInExp :: [(VName, I.SubExp)] -> Stms SOACS -> I.SubExp
-                  -> InternaliseM I.SubExp
-shadowIdentsInExp substs bnds res = do
-  body <- renameBody <=< insertStmsM $ do
-    -- XXX: we have to substitute names to fix type annotations in the
-    -- bindings.  This goes away once we get rid of these type
-    -- annotations.
-    let handleSubst nameSubsts (name, I.Var v)
-          | v == name =
-            return nameSubsts
-          | otherwise =
-            return $ M.insert name v nameSubsts
-        handleSubst nameSubsts (name, se) = do
-          letBindNames_ [name] $ BasicOp $ SubExp se
-          return nameSubsts
-    nameSubsts <- foldM handleSubst M.empty substs
-    addStms $ substituteNames nameSubsts bnds
-    return $ resultBody [substituteNames nameSubsts res]
-  res' <- bodyBind body
-  case res' of
-    [se] -> return se
-    _    -> fail "Internalise.shadowIdentsInExp: something went very wrong"
 
 -- Implement partitioning using maps, scans and writes.
 partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], [I.SubExp])
