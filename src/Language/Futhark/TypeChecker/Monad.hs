@@ -20,6 +20,10 @@ module Language.Futhark.TypeChecker.Monad
   , underscoreUse
   , functionIsNotValue
 
+  , BreadCrumb(..)
+  , MonadBreadCrumbs(..)
+  , typeError
+
   , MonadTypeChecker(..)
   , checkName
   , badOnLeft
@@ -178,6 +182,36 @@ askRootEnv = asks contextRootEnv
 localTmpEnv :: Env -> TypeM a -> TypeM a
 localTmpEnv env = local $ \ctx ->
   ctx { contextEnv = env <> contextEnv ctx }
+
+-- | A piece of information that describes what process the type
+-- checker currently performing.  This is used to give better error
+-- messages.
+data BreadCrumb = MatchingTypes (TypeBase () ()) (TypeBase () ())
+                | MatchingFields Name
+
+instance Show BreadCrumb where
+  show (MatchingTypes t1 t2) =
+    "When matching type\n" ++ indent (pretty t1) ++
+    "\nwith\n" ++ indent (pretty t2)
+    where indent = intercalate "\n" . map ("  "++) . lines
+  show (MatchingFields field) =
+    "When matching types of record field `" ++ pretty field ++ "`."
+
+-- | Tracking breadcrumbs to give a kind of "stack trace" in errors.
+class Monad m => MonadBreadCrumbs m where
+  breadCrumb :: BreadCrumb -> m a -> m a
+  breadCrumb _ m = m
+
+  getBreadCrumbs :: m [BreadCrumb]
+  getBreadCrumbs = return []
+
+typeError :: (MonadError TypeError m, MonadBreadCrumbs m) =>
+             SrcLoc -> String -> m a
+typeError loc s = do
+  bc <- getBreadCrumbs
+  let bc' | null bc = ""
+          | otherwise = "\n" ++ unlines (map show bc)
+  throwError $ TypeError loc $ s ++ bc'
 
 class MonadError TypeError m => MonadTypeChecker m where
   warn :: SrcLoc -> String -> m ()

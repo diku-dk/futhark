@@ -3,11 +3,9 @@ module Language.Futhark.TypeChecker.Types
   ( checkTypeExp
   , checkTypeDecl
 
-  , unifyTypes
   , unifyTypesU
   , subtypeOf
   , subuniqueOf
-  , similarTo
 
   , checkForDuplicateNames
   , checkTypeParams
@@ -16,8 +14,6 @@ module Language.Futhark.TypeChecker.Types
   , TypeSubs
   , substituteTypes
   , substituteTypesInBoundV
-
-  , instantiatePolymorphic
 
   , Substitutable(..)
   , substTypesAny
@@ -36,15 +32,10 @@ import qualified Data.Map.Strict as M
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad
 
--- | @t1 `unifyTypes` t2@ attempts to unify @t1@ and @t2@.  If
+-- | @unifyTypes uf t2 t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
--- that combines the aliasing of @t1@ and @t2@ is returned.  The
--- uniqueness of the resulting type will be the least of the
--- uniqueness of @t1@ and @t2@.
-unifyTypes :: (Monoid als, Eq als, ArrayDim dim) =>
-              TypeBase dim als -> TypeBase dim als -> Maybe (TypeBase dim als)
-unifyTypes = unifyTypesU $ \x y -> Just $ x <> y
-
+-- that combines the aliasing of @t1@ and @t2@ is returned.
+-- Uniqueness is unified with @uf@.
 unifyTypesU :: (Monoid als, Eq als, ArrayDim dim) =>
               (Uniqueness -> Uniqueness -> Maybe Uniqueness)
            -> TypeBase dim als -> TypeBase dim als -> Maybe (TypeBase dim als)
@@ -116,16 +107,6 @@ subtypeOf :: ArrayDim dim =>
              TypeBase dim as1 -> TypeBase dim as2 -> Bool
 subtypeOf t1 t2 = isJust $ unifyTypesU unifyUniqueness (toStruct t1) (toStruct t2)
   where unifyUniqueness u2 u1 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
-
--- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
--- ignoring uniqueness and aliasing.
-similarTo :: ArrayDim dim =>
-             TypeBase dim as1
-          -> TypeBase dim as2
-          -> Bool
-similarTo t1 t2 = t1' `subtypeOf` t2' || t2' `subtypeOf` t1'
-  where t1' = toStruct t1
-        t2' = toStruct t2
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -388,75 +369,6 @@ applyType ps t args =
           (pv, TypeSub $ TypeAbbr l [] at)
         mkSubst p a =
           error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
-
-type InstantiateM = StateT
-                    (M.Map VName (TypeBase () (),SrcLoc))
-                    (Either (Maybe String))
-
-instantiatePolymorphic :: [VName] -> SrcLoc -> M.Map VName (TypeBase () (),SrcLoc)
-                       -> TypeBase () () -> TypeBase () ()
-                       -> Either (Maybe String) (M.Map VName (TypeBase () (),SrcLoc))
-instantiatePolymorphic tnames loc orig_substs x y =
-  execStateT (instantiate x y) orig_substs
-  where
-
-    instantiate :: TypeBase () () -> TypeBase () ()
-                -> InstantiateM ()
-    instantiate (TypeVar () p_u (TypeName [] tn) []) orig_arg_t
-      | tn `elem` tnames,
-        p_u `subuniqueOf` uniqueness orig_arg_t = do
-          substs <- get
-          case M.lookup tn substs of
-            Just (old_arg_t, old_arg_loc) | old_arg_t /= orig_arg_t ->
-              lift $ Left $ Just $ "Argument determines type parameter '" ++
-              pretty (baseName tn) ++ "' as " ++ pretty arg_t ++
-              ", but previously determined as " ++ pretty old_arg_t ++
-              " at " ++ locStr old_arg_loc
-            _ -> modify $ M.insert tn (arg_t, loc)
-            -- Ignore uniqueness when dealing with type variables.
-            where arg_t = orig_arg_t `setUniqueness` Nonunique
-    instantiate (TypeVar () p_u (TypeName _ tn) targs)
-                (TypeVar () u (TypeName _ arg_tn) arg_targs)
-      | tn == arg_tn, length targs == length arg_targs,
-        p_u `subuniqueOf` u =
-          zipWithM_ instantiateTypeArg targs arg_targs
-    instantiate (Record fs) (Record arg_fs)
-      | M.keys fs == M.keys arg_fs =
-        mapM_ (uncurry instantiate) $ M.intersectionWith (,) fs arg_fs
-    instantiate (Array et shape u) arg_t@(Array _ _ p_u)
-      | Just arg_t' <- peelArray (shapeRank shape) arg_t,
-        p_u `subuniqueOf` u =
-          instantiateArrayElemType et arg_t'
-    instantiate (Prim pt) (Prim p_pt)
-      | pt == p_pt = return ()
-    instantiate (Arrow () _ t1 t2) (Arrow () _ t1' t2') =
-      instantiate t1 t1' >> instantiate t2 t2'
-    instantiate _ _ =
-      lift $ Left Nothing
-
-    instantiateArrayElemType (ArrayPrimElem pt ()) (Prim arg_pt)
-      | pt == arg_pt =
-          return ()
-    instantiateArrayElemType (ArrayRecordElem fs) (Record arg_fs)
-      | M.keys fs == M.keys arg_fs =
-          mapM_ (uncurry instantiateRecordArrayElemType) $
-          M.intersectionWith (,) fs arg_fs
-    instantiateArrayElemType (ArrayPolyElem tn targs ()) arg_t =
-      instantiate (TypeVar () Nonunique tn targs) arg_t
-    instantiateArrayElemType _ _ =
-      lift $ Left Nothing
-
-    instantiateRecordArrayElemType (RecordArrayElem et) arg_t =
-      instantiateArrayElemType et arg_t
-    instantiateRecordArrayElemType (RecordArrayArrayElem et shape u) arg_t =
-      instantiate (Array et shape u) arg_t
-
-    instantiateTypeArg TypeArgDim{} TypeArgDim{} =
-      return ()
-    instantiateTypeArg (TypeArgType t _) (TypeArgType arg_t _) =
-      instantiate t arg_t
-    instantiateTypeArg _ _ =
-      lift $ Left Nothing
 
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
