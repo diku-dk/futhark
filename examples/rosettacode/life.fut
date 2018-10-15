@@ -44,20 +44,20 @@ let to_bool_board(board: [][]i32): [][]bool =
 let to_int_board(board: [][]bool): [][]i32 =
   map (\(r: []bool): []i32  -> map bint r) board
 
-let cell_neighbors [n] [m] (i: i32, j: i32, board: [n][m]bool): i32 =
-  unsafe
-  let above = (i - 1) % n
-  let below = (i + 1) % n
-  let right = (j + 1) % m
-  let left = (j - 1) % m in
-  bint board[above,left] + bint board[above,j]  + bint board[above,right] +
-  bint board[i,left] + bint board[i,right] +
-  bint board[below,left] + bint board[below,j] + bint board[below,right]
-
-let all_neighbours [n] [m] (board: [n][m]bool): [n][m]i32 =
-  map (\(i: i32): []i32  ->
-        map (\(j: i32): i32  -> cell_neighbors(i,j,board)) (iota m))
-      (iota n)
+let all_neighbours [n][m] (world: [n][m]bool): [n][m]i32 =
+    let world = map (map bint) world
+    let ns  = map (rotate (-1)) world
+    let ss  = map (rotate   1)  world
+    let ws  = rotate      (-1)  world
+    let es  = rotate        1   world
+    let nws = map (rotate (-1)) ws
+    let nes = map (rotate (-1)) es
+    let sws = map (rotate   1)  ws
+    let ses = map (rotate   1)  es
+    in map3 (\(nws_r, ns_r, nes_r) (ws_r, world_r, es_r) (sws_r, ss_r, ses_r) ->
+             map3 (\(nw,n,ne) (w,_,e) (sw,s,se) -> nw + n + ne + w + e + sw + s + se)
+             (zip3 nws_r ns_r nes_r) (zip3 ws_r world_r es_r) (zip3 sws_r ss_r ses_r))
+            (zip3 nws ns nes) (zip3 ws world es) (zip3 sws ss ses)
 
 let iteration [n][m] (board: [n][m]bool): [n][m]bool =
   let lives = all_neighbours(board) in
