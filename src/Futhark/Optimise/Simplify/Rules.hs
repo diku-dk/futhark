@@ -1205,6 +1205,14 @@ ruleBasicOp vtable pat (StmAux cs _) (Rotate offsets v)
       certifying (v_cs <> v2_cs) $
         letBind_ pat $ BasicOp $ Rotate offsets' rotate_rearrange
 
+-- Combining Rotates.
+ruleBasicOp vtable pat (StmAux cs _) (Rotate offsets1 v)
+  | Just (BasicOp (Rotate offsets2 v2), v_cs) <- ST.lookupExp v vtable = do
+      offsets <- zipWithM add offsets1 offsets2
+      certifying (cs<>v_cs) $
+        letBind_ pat $ BasicOp $ Rotate offsets v2
+        where add x y = letSubExp "offset" $ BasicOp $ BinOp (Add Int32) x y
+
 ruleBasicOp _ _ _ _ =
   cannotSimplify
 
