@@ -640,8 +640,8 @@ doConvOp (FPToUI _ to) (FloatValue v) = Just $ IntValue $ doFPToUI v to
 doConvOp (FPToSI _ to) (FloatValue v) = Just $ IntValue $ doFPToSI v to
 doConvOp (UIToFP _ to) (IntValue v)   = Just $ FloatValue $ doUIToFP v to
 doConvOp (SIToFP _ to) (IntValue v)   = Just $ FloatValue $ doSIToFP v to
-doConvOp (IToB from) (IntValue v)     = Just $ BoolValue $ intToInt64 v /= 0
-doConvOp (BToI to) (BoolValue v)      = Just $ IntValue $ intValue to $ if v then 1 else 0
+doConvOp (IToB _) (IntValue v)        = Just $ BoolValue $ intToInt64 v /= 0
+doConvOp (BToI to) (BoolValue v)      = Just $ IntValue $ intValue to $ if v then 1 else 0::Int
 doConvOp _ _                          = Nothing
 
 -- | Zero-extend the given integer value to the size of the given
