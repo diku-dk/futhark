@@ -172,15 +172,15 @@ module type float = {
 module bool: from_prim with t = bool = {
   type t = bool
 
-  let i8  (x: i8)  = x != 0i8
-  let i16 (x: i16) = x != 0i16
-  let i32 (x: i32) = x != 0i32
-  let i64 (x: i64) = x != 0i64
+  let i8  = intrinsics.itob_i8_bool
+  let i16 = intrinsics.itob_i16_bool
+  let i32 = intrinsics.itob_i32_bool
+  let i64 = intrinsics.itob_i64_bool
 
-  let u8  (x: u8)  = x != 0u8
-  let u16 (x: u16) = x != 0u16
-  let u32 (x: u32) = x != 0u32
-  let u64 (x: u64) = x != 0u64
+  let u8  (x: u8)  = intrinsics.itob_i8_bool (intrinsics.sign_i8 x)
+  let u16 (x: u16) = intrinsics.itob_i16_bool (intrinsics.sign_i16 x)
+  let u32 (x: u32) = intrinsics.itob_i32_bool (intrinsics.sign_i32 x)
+  let u64 (x: u64) = intrinsics.itob_i64_bool (intrinsics.sign_i64 x)
 
   let f32 (x: f32) = x != 0f32
   let f64 (x: f64) = x != 0f64
@@ -222,7 +222,7 @@ module i8: (size with t = i8) = {
   let f32 (x: f32) = intrinsics.fptosi_f32_i8 x
   let f64 (x: f64) = intrinsics.fptosi_f64_i8 x
 
-  let bool (x: bool) = if x then 1i8 else 0i8
+  let bool = intrinsics.btoi_bool_i8
 
   let to_i32(x: i8) = intrinsics.sext_i8_i32 x
   let to_i64(x: i8) = intrinsics.sext_i8_i64 x
@@ -292,7 +292,7 @@ module i16: (size with t = i16) = {
   let f32 (x: f32) = intrinsics.fptosi_f32_i16 x
   let f64 (x: f64) = intrinsics.fptosi_f64_i16 x
 
-  let bool (x: bool) = if x then 1i16 else 0i16
+  let bool = intrinsics.btoi_bool_i16
 
   let to_i32(x: i16) = intrinsics.sext_i16_i32 x
   let to_i64(x: i16) = intrinsics.sext_i16_i64 x
@@ -365,7 +365,7 @@ module i32: (size with t = i32) = {
   let f32 (x: f32) = intrinsics.fptosi_f32_i32 x
   let f64 (x: f64) = intrinsics.fptosi_f64_i32 x
 
-  let bool (x: bool) = if x then 1i32 else 0i32
+  let bool = intrinsics.btoi_bool_i32
 
   let to_i32(x: i32) = intrinsics.sext_i32_i32 x
   let to_i64(x: i32) = intrinsics.sext_i32_i64 x
@@ -438,7 +438,7 @@ module i64: (size with t = i64) = {
   let f32 (x: f32) = intrinsics.fptosi_f32_i64 x
   let f64 (x: f64) = intrinsics.fptosi_f64_i64 x
 
-  let bool (x: bool) = if x then 1i64 else 0i64
+  let bool = intrinsics.btoi_bool_i64
 
   let to_i32(x: i64) = intrinsics.sext_i64_i32 x
   let to_i64(x: i64) = intrinsics.sext_i64_i64 x
@@ -511,7 +511,7 @@ module u8: (size with t = u8) = {
   let f32 (x: f32) = unsign (intrinsics.fptoui_f32_i8 x)
   let f64 (x: f64) = unsign (intrinsics.fptoui_f64_i8 x)
 
-  let bool (x: bool) = if x then 1u8 else 0u8
+  let bool x = unsign (intrinsics.btoi_bool_i8 x)
 
   let to_i32(x: u8) = intrinsics.zext_i8_i32 (sign x)
   let to_i64(x: u8) = intrinsics.zext_i8_i64 (sign x)
@@ -584,7 +584,7 @@ module u16: (size with t = u16) = {
   let f32 (x: f32) = unsign (intrinsics.fptoui_f32_i16 x)
   let f64 (x: f64) = unsign (intrinsics.fptoui_f64_i16 x)
 
-  let bool (x: bool) = if x then 1u16 else 0u16
+  let bool x = unsign (intrinsics.btoi_bool_i16 x)
 
   let to_i32(x: u16) = intrinsics.zext_i16_i32 (sign x)
   let to_i64(x: u16) = intrinsics.zext_i16_i64 (sign x)
@@ -657,7 +657,7 @@ module u32: (size with t = u32) = {
   let f32 (x: f32) = unsign (intrinsics.fptoui_f32_i32 x)
   let f64 (x: f64) = unsign (intrinsics.fptoui_f64_i32 x)
 
-  let bool (x: bool) = if x then 1u32 else 0u32
+  let bool x = unsign (intrinsics.btoi_bool_i32 x)
 
   let to_i32(x: u32) = intrinsics.zext_i32_i32 (sign x)
   let to_i64(x: u32) = intrinsics.zext_i32_i64 (sign x)
@@ -730,7 +730,7 @@ module u64: (size with t = u64) = {
   let f32 (x: f32) = unsign (intrinsics.fptoui_f32_i64 x)
   let f64 (x: f64) = unsign (intrinsics.fptoui_f64_i64 x)
 
-  let bool (x: bool) = if x then 1u64 else 0u64
+  let bool x = unsign (intrinsics.btoi_bool_i64 x)
 
   let to_i32(x: u64) = intrinsics.zext_i64_i32 (sign x)
   let to_i64(x: u64) = intrinsics.zext_i64_i64 (sign x)
