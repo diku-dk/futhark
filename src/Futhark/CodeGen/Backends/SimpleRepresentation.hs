@@ -108,7 +108,8 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
                mkShl, mkLShr, mkAShr,
                mkAnd, mkOr, mkXor,
                mkUlt, mkUle,  mkSlt, mkSle,
-               mkPow
+               mkPow,
+               mkIToB, mkBToI
               ] ++
               map mkSExt [minBound..maxBound] ++
               map mkZExt [minBound..maxBound]
@@ -184,6 +185,20 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
           where name = "zext_"++pretty from_t++"_"++pretty to_t
                 from_ct = uintTypeToCType from_t
                 to_ct = uintTypeToCType to_t
+
+        mkBToI to_t =
+          [C.cedecl|static inline $ty:to_ct
+                    $id:name($ty:from_ct x) { return x; } |]
+          where name = "btoi_bool_"++pretty to_t
+                from_ct = primTypeToCType Bool
+                to_ct = intTypeToCType to_t
+
+        mkIToB from_t =
+          [C.cedecl|static inline $ty:to_ct
+                    $id:name($ty:from_ct x) { return x; } |]
+          where name = "itob_"++pretty from_t++"_bool"
+                to_ct = primTypeToCType Bool
+                from_ct = intTypeToCType from_t
 
         simpleUintOp s e t =
           [C.cedecl|static inline $ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]

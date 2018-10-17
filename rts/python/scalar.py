@@ -107,6 +107,21 @@ def sext_T_i32(x):
 def sext_T_i64(x):
   return np.int64(x)
 
+def itob_T_bool(x):
+  return np.bool(x)
+
+def btoi_bool_i8(x):
+  return np.int8(x)
+
+def btoi_bool_i16(x):
+  return np.int8(x)
+
+def btoi_bool_i32(x):
+  return np.int8(x)
+
+def btoi_bool_i64(x):
+  return np.int8(x)
+
 def zext_i8_i8(x):
   return np.int8(np.uint8(x))
 
@@ -179,6 +194,7 @@ sext_i8_i8 = sext_i16_i8 = sext_i32_i8 = sext_i64_i8 = sext_T_i8
 sext_i8_i16 = sext_i16_i16 = sext_i32_i16 = sext_i64_i16 = sext_T_i16
 sext_i8_i32 = sext_i16_i32 = sext_i32_i32 = sext_i64_i32 = sext_T_i32
 sext_i8_i64 = sext_i16_i64 = sext_i32_i64 = sext_i64_i64 = sext_T_i64
+itob_i8_bool = itob_i16_bool = itob_i32_bool = itob_i64_bool = itob_T_bool
 
 def ssignum(x):
   return np.sign(x)
