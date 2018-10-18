@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The compiler itself is about 10% faster.
 
+  * A warning when ambiguously typed expressions are assigned a
+    default (`i32` or `f64`).
+
 ### Removed
 
 ### Changed
