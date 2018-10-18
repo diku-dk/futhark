@@ -1418,10 +1418,12 @@ checkFunDef f = fmap fst $ runTermTypeM $ do
 fixOverloadedTypes :: TermTypeM ()
 fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
   where fixOverloaded (v, Overloaded ots loc)
-          | Signed Int32 `elem` ots =
+          | Signed Int32 `elem` ots = do
               unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ Signed Int32
-          | FloatType Float64 `elem` ots =
+              warn loc "Defaulting ambiguous type to `i32`."
+          | FloatType Float64 `elem` ots = do
               unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ FloatType Float64
+              warn loc "Defaulting ambiguous type to `f64`."
           | otherwise =
               typeError loc $
               unlines ["Type is ambiguous (could be one of " ++ intercalate ", " (map pretty ots) ++ ").",
