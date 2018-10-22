@@ -317,9 +317,12 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
   $stms:(map sizeHeuristicsCode sizeHeuristicsTable)
 }|]]
 
+        freelist_h = $(embedStringFile "rts/c/free_list.h")
         openCL_h = $(embedStringFile "rts/c/opencl.h")
 
         openCL_boilerplate = [C.cunit|
+          $esc:("typedef cl_mem fl_entry_mem;")
+          $esc:freelist_h
           $esc:openCL_h
           const char *opencl_program[] =
             {$inits:(opencl_program_fragments++[nullptr])};|]
