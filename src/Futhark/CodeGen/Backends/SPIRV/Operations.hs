@@ -14,8 +14,24 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , glslSMax
   , cMemoryAccessNone
   , cMemoryAccessVolatile
+  , cSimpleMemoryModel
+  , cGLSLMemoryModel
+  , cShaderCapability
+  , cAddressesCapability
+  , cFloat64Capability
+  , cInt64Capability
+  , cInt64AtomicsCapability
+  , cInt16Capability
+  , cInt8Capability
+  , cVariablePointersStorageBufferCapability
+  , cStorageBuffer8BitAccessCapability
   , cScopeWorkgroup
+  , cStorageClassStorageBuffer
   , cStorageClassUniform
+  , cStorageClassWorkgroup
+  , cStorageClassCrossWorkgroup
+  , cStorageClassPrivate
+  , cStorageClassUniformConstant
   , cStorageClassFunction
   , cStorageClassInput
   , cMemorySemanticsAcquireRelease
@@ -23,11 +39,27 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , cFunctionControlNone
   , cNoSignedness
   , cExecutionModelGLCompute
+  , cExecutionModeLocalSize
+  , cDecorationSpecId
+  , cDecorationBlock
+  , cDecorationBufferBlock
+  , cDecorationArrayStride
+  , cDecorationBuiltin
+  , cDecorationBinding
+  , cDecorationDescriptorSet
+  , cDecorationOffset
+  , cBuiltinNumWorkgroups
+  , cBuiltinWorkgroupSize
+  , cBuiltinWorkgroupId
+  , cBuiltinLocalInvocationId
+  , cBuiltinGlobalInvocationId
   , genHeader
+  , opExtension
   , opExtInstImport
   , opExtInst
   , opMemoryModel
   , opEntryPoint
+  , opExecutionMode
   , opCapability
   , opTypeVoid
   , opTypeBool
@@ -36,17 +68,24 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , opTypeVector
   , opTypeArray
   , opTypeRuntimeArray
+  , opTypeStruct
   , opTypePointer
   , opTypeFunction
   , opConstantTrue
   , opConstantFalse
   , opConstant
+  , opSpecConstantFalse
+  , opSpecConstant
+  , opSpecConstantComposite
   , opFunction
   , opFunctionEnd
   , opVariable
   , opLoad
   , opStore
   , opAccessChain
+  , opDecorate
+  , opMemberDecorate
+  , opCompositeExtract
   , opConvertFToU
   , opConvertFToS
   , opConvertSToF
@@ -54,6 +93,9 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , opUConvert
   , opSConvert
   , opFConvert
+  , opConvertPtrToU
+  , opConvertUToPtr
+  , opBitcast
   , opIAdd
   , opFAdd
   , opISub
@@ -103,20 +145,24 @@ type SPIRVInstr = Word32
 
 -- | Aux
 encodeString :: String -> [Word32]
-encodeString [] = []
-encodeString (c1:c2:c3:c4:cs) =
+encodeString s = encodeString' $ s ++ [chr 0]
+-- | ^ String must be null-terminated
+
+encodeString' :: String -> [Word32]
+encodeString' [] = []
+encodeString' (c1:c2:c3:c4:cs) =
   let ws = map (fromIntegral . ord) [c1,c2,c3,c4]
       bs = zipWith (\w i -> w `shift` (8 * i)) ws [0..3]
       wd = foldl (.|.) 0 bs
-  in wd : encodeString cs
-encodeString cs = encodeString $ (++) cs $ replicate (4 - length cs) $ chr 0
+  in wd : encodeString' cs
+encodeString' cs = encodeString' $ (++) cs $ replicate (4 - length cs) $ chr 0
 
 -- | SPIR-V constants
 cMagicNumber :: Word32
 cMagicNumber = 0x07230203
 
 cVersion :: Word32
-cVersion = 0x00010000
+cVersion = 0x00010300
 
 cGenerator :: Word32
 cGenerator = 0
@@ -126,6 +172,30 @@ cSchema = 0
 
 cShaderCapability :: Word32
 cShaderCapability = 1
+
+cAddressesCapability :: Word32
+cAddressesCapability = 4
+
+cFloat64Capability :: Word32
+cFloat64Capability = 10
+
+cInt64Capability :: Word32
+cInt64Capability = 11
+
+cInt64AtomicsCapability :: Word32
+cInt64AtomicsCapability = 12
+
+cInt16Capability :: Word32
+cInt16Capability = 22
+
+cInt8Capability :: Word32
+cInt8Capability = 39
+
+cVariablePointersStorageBufferCapability :: Word32
+cVariablePointersStorageBufferCapability = 4441
+
+cStorageBuffer8BitAccessCapability :: Word32
+cStorageBuffer8BitAccessCapability = 4448
 
 cLogicalAddressing :: Word32
 cLogicalAddressing = 0
@@ -145,14 +215,29 @@ cMemoryAccessVolatile = 0
 cScopeWorkgroup :: Word32
 cScopeWorkgroup = 2
 
+cStorageClassUniformConstant :: Word32
+cStorageClassUniformConstant = 0
+
+cStorageClassInput :: Word32
+cStorageClassInput = 1
+
 cStorageClassUniform :: Word32
 cStorageClassUniform = 2
+
+cStorageClassWorkgroup :: Word32
+cStorageClassWorkgroup = 4
+
+cStorageClassCrossWorkgroup :: Word32
+cStorageClassCrossWorkgroup = 5
+
+cStorageClassPrivate :: Word32
+cStorageClassPrivate = 6
 
 cStorageClassFunction :: Word32
 cStorageClassFunction = 7
 
-cStorageClassInput :: Word32
-cStorageClassInput = 1
+cStorageClassStorageBuffer :: Word32
+cStorageClassStorageBuffer = 12
 
 cMemorySemanticsAcquireRelease :: Word32
 cMemorySemanticsAcquireRelease = 4
@@ -168,6 +253,48 @@ cNoSignedness = 0
 
 cExecutionModelGLCompute :: Word32
 cExecutionModelGLCompute = 5
+
+cExecutionModeLocalSize :: Word32
+cExecutionModeLocalSize = 17
+
+cDecorationSpecId :: Word32
+cDecorationSpecId = 1
+
+cDecorationBlock :: Word32
+cDecorationBlock = 2
+
+cDecorationBufferBlock :: Word32
+cDecorationBufferBlock = 3
+
+cDecorationArrayStride :: Word32
+cDecorationArrayStride = 6
+
+cDecorationBuiltin :: Word32
+cDecorationBuiltin = 11
+
+cDecorationBinding :: Word32
+cDecorationBinding = 33
+
+cDecorationDescriptorSet :: Word32
+cDecorationDescriptorSet = 34
+
+cDecorationOffset :: Word32
+cDecorationOffset = 35
+
+cBuiltinNumWorkgroups :: Word32
+cBuiltinNumWorkgroups = 24
+
+cBuiltinWorkgroupSize :: Word32
+cBuiltinWorkgroupSize = 25
+
+cBuiltinWorkgroupId :: Word32
+cBuiltinWorkgroupId = 26
+
+cBuiltinLocalInvocationId :: Word32
+cBuiltinLocalInvocationId = 27
+
+cBuiltinGlobalInvocationId :: Word32
+cBuiltinGlobalInvocationId = 28
 
 -- | GLSL instructions
 
@@ -206,20 +333,20 @@ glslSMax = 42
 
 -- | SPIR-V header
 
-genHeader :: Word32 -> Maybe Word32 -> [Word32]
-genHeader max_id glsl_id =
+genHeader :: Word32 -> [Word32]
+genHeader max_id =
   [ cMagicNumber
   , cVersion
   , cGenerator
   , max_id + 1 -- Bound
   , cSchema
-  ] ++
-  opCapability ++
-  case glsl_id of
-    Nothing  -> opMemoryModel cSimpleMemoryModel
-    Just gid -> opMemoryModel cGLSLMemoryModel ++ opExtInstImport (encodeString "GLSL.std.450") gid
+  ]
+  
 
 -- | SPIR-V opcodes
+
+opcExtension :: SPIRVInstr
+opcExtension = 10
 
 opcExtInstImport :: SPIRVInstr
 opcExtInstImport = 11
@@ -232,6 +359,9 @@ opcMemoryModel = 14
 
 opcEntryPoint :: SPIRVInstr
 opcEntryPoint = 15
+
+opcExecutionMode :: SPIRVInstr
+opcExecutionMode = 16
 
 opcCapability :: SPIRVInstr
 opcCapability = 17
@@ -257,6 +387,9 @@ opcTypeArray = 28
 opcTypeRuntimeArray :: SPIRVInstr
 opcTypeRuntimeArray = 29
 
+opcTypeStruct :: SPIRVInstr
+opcTypeStruct = 30
+
 opcTypePointer :: SPIRVInstr
 opcTypePointer = 32
 
@@ -271,6 +404,15 @@ opcConstantFalse = 42
 
 opcConstant :: SPIRVInstr
 opcConstant = 43
+
+opcSpecConstantFalse :: SPIRVInstr
+opcSpecConstantFalse = 49
+
+opcSpecConstant :: SPIRVInstr
+opcSpecConstant = 50
+
+opcSpecConstantComposite :: SPIRVInstr
+opcSpecConstantComposite = 51
 
 opcFunction :: SPIRVInstr
 opcFunction = 54
@@ -289,6 +431,15 @@ opcStore = 62
 
 opcAccessChain :: SPIRVInstr
 opcAccessChain = 65
+
+opcDecorate :: SPIRVInstr
+opcDecorate = 71
+
+opcMemberDecorate :: SPIRVInstr
+opcMemberDecorate = 72
+
+opcCompositeExtract :: SPIRVInstr
+opcCompositeExtract = 81
 
 opcConvertFToU :: SPIRVInstr
 opcConvertFToU = 109
@@ -310,6 +461,15 @@ opcSConvert = 114
 
 opcFConvert :: SPIRVInstr
 opcFConvert = 115
+
+opcConvertPtrToU :: SPIRVInstr
+opcConvertPtrToU = 117
+
+opcConvertUToPtr :: SPIRVInstr
+opcConvertUToPtr = 120
+
+opcBitcast :: SPIRVInstr
+opcBitcast = 124
 
 opcIAdd :: SPIRVInstr
 opcIAdd = 128
@@ -433,14 +593,20 @@ makeOperation opcode args =
       opcodeAndFlag = shift opLen 16 .|. opcode
   in opcodeAndFlag : args
 
+opExtension :: [Word32] -> [Word32]
+opExtension = makeOperation opcExtension
+
 opExtInstImport :: [Word32] -> Word32 -> [Word32]
 opExtInstImport ext_name r_id = makeOperation opcExtInstImport $ r_id : ext_name
 
 opExtInst :: GLSLInstr -> [Word32] -> Word32 -> Word32 -> Word32 -> [Word32]
 opExtInst instr ops ext t_id r_id = makeOperation opcExtInst $ [t_id, r_id, ext, instr] ++ ops
+
+opExecutionMode :: Word32 -> Word32 -> [Word32] -> [Word32]
+opExecutionMode entry mode lits = makeOperation opcExecutionMode $ [entry, mode] ++ lits
   
-opCapability :: [Word32]
-opCapability = makeOperation opcCapability [cShaderCapability]
+opCapability :: Word32 -> [Word32]
+opCapability cap = makeOperation opcCapability [cap]
 
 opTypeVoid :: Word32 -> [Word32]
 opTypeVoid r_id = makeOperation opcTypeVoid [r_id]
@@ -463,6 +629,9 @@ opTypeArray elem_id len r_id = makeOperation opcTypeArray [r_id, elem_id, len]
 opTypeRuntimeArray :: Word32 -> Word32 -> [Word32]
 opTypeRuntimeArray elem_id r_id = makeOperation opcTypeRuntimeArray [r_id, elem_id]
 
+opTypeStruct :: [Word32] -> Word32 -> [Word32]
+opTypeStruct t_ids r_id = makeOperation opcTypeStruct $ r_id : t_ids
+
 opTypePointer :: Word32 -> Word32 -> Word32 -> [Word32]
 opTypePointer storage t_id r_id = makeOperation opcTypePointer [r_id, storage, t_id]
 
@@ -478,6 +647,15 @@ opConstantFalse t_id r_id = makeOperation opcConstantFalse [t_id, r_id]
 opConstant :: [Word32] -> Word32 -> Word32 -> [Word32]
 opConstant literals t_id r_id = makeOperation opcConstant $ [t_id, r_id] ++ literals
 
+opSpecConstantFalse :: Word32 -> Word32 -> [Word32]
+opSpecConstantFalse t_id r_id = makeOperation opcSpecConstantFalse [t_id, r_id]
+
+opSpecConstant :: [Word32] -> Word32 -> Word32 -> [Word32]
+opSpecConstant literals t_id r_id = makeOperation opcSpecConstant $ [t_id, r_id] ++ literals
+
+opSpecConstantComposite :: [Word32] -> Word32 -> Word32 -> [Word32]
+opSpecConstantComposite constits t_id r_id = makeOperation opcSpecConstantComposite $ [t_id, r_id] ++ constits
+
 opFunction :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opFunction func_ctrl func_t_id t_id r_id = makeOperation opcFunction [t_id, r_id, func_ctrl, func_t_id]
 
@@ -487,20 +665,29 @@ opFunctionEnd = makeOperation opcFunctionEnd []
 opMemoryModel :: Word32 -> [Word32]
 opMemoryModel mem_model = makeOperation opcMemoryModel [cLogicalAddressing, mem_model]
 
-opEntryPoint :: Word32 -> Word32 -> [Word32] -> [Word32]
-opEntryPoint exec_model entry_id name = makeOperation opcEntryPoint $ [exec_model, entry_id] ++ name
+opEntryPoint :: Word32 -> Word32 -> [Word32] -> [Word32] -> [Word32]
+opEntryPoint exec_model entry_id name inputs = makeOperation opcEntryPoint $ [exec_model, entry_id] ++ name ++ inputs
 
 opVariable :: Word32 -> Word32 -> Word32 -> [Word32]
 opVariable storage_class t_id r_id = makeOperation opcVariable [t_id, r_id, storage_class]
 
-opLoad :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
-opLoad ptr_id mem t_id r_id = makeOperation opcLoad [t_id, r_id, ptr_id, mem]
+opLoad :: Word32 -> [Word32] -> Word32 -> Word32 -> [Word32]
+opLoad ptr_id mem t_id r_id = makeOperation opcLoad $ [t_id, r_id, ptr_id] ++ mem
 
-opStore :: Word32 -> Word32 -> [Word32]
-opStore to_id from_id = makeOperation opcStore [to_id, from_id]
+opStore :: Word32 -> Word32 -> [Word32] -> [Word32]
+opStore to_id from_id mem_access = makeOperation opcStore $ [to_id, from_id] ++ mem_access
 
 opAccessChain :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opAccessChain src_id ind_id t_id r_id = makeOperation opcAccessChain [t_id, r_id, src_id, ind_id]
+
+opDecorate :: Word32 -> Word32 -> [Word32] -> [Word32]
+opDecorate target_id dec lits = makeOperation opcDecorate $ [target_id, dec] ++ lits
+
+opMemberDecorate :: Word32 -> Word32 -> Word32 -> [Word32] -> [Word32]
+opMemberDecorate struct_id member dec lits = makeOperation opcMemberDecorate $ [struct_id, member, dec] ++ lits
+
+opCompositeExtract :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opCompositeExtract comp_id i_id t_id r_id = makeOperation opcCompositeExtract [t_id, r_id, comp_id, i_id]
 
 opConvertFToU :: Word32 -> Word32 -> Word32 -> [Word32]
 opConvertFToU op_id t_id r_id = makeOperation opcConvertFToU [t_id, r_id, op_id]
@@ -522,6 +709,15 @@ opSConvert op_id t_id r_id = makeOperation opcSConvert [t_id, r_id, op_id]
 
 opFConvert :: Word32 -> Word32 -> Word32 -> [Word32]
 opFConvert op_id t_id r_id = makeOperation opcFConvert [t_id, r_id, op_id]
+
+opConvertPtrToU :: Word32 -> Word32 -> Word32 -> [Word32]
+opConvertPtrToU ptr_id t_id r_id = makeOperation opcConvertPtrToU [t_id, r_id, ptr_id]
+
+opConvertUToPtr :: Word32 -> Word32 -> Word32 -> [Word32]
+opConvertUToPtr val_id t_id r_id = makeOperation opcConvertUToPtr [t_id, r_id, val_id]
+
+opBitcast :: Word32 -> Word32 -> Word32 -> [Word32]
+opBitcast op_id t_id r_id = makeOperation opcBitcast [t_id, r_id, op_id]
 
 opIAdd :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opIAdd op1_id op2_id t_id r_id = makeOperation opcIAdd [t_id, r_id, op1_id, op2_id]

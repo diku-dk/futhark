@@ -11,21 +11,27 @@ module Futhark.CodeGen.ImpCode.Vulkan
        , Function
        , FunctionT (Function)
        , Code
-       , EntryPointName
+       , EntryPoint
        , EntryPointArg (..)
        , Vulkan (..)
        , module Futhark.CodeGen.ImpCode
        )
        where
+        
+import qualified Data.Map.Strict as M
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
+import Futhark.Representation.Kernels.Sizes
+import qualified Futhark.CodeGen.Backends.SPIRV as SPIRV
 
 import Futhark.Util.Pretty
 
 -- | An program calling SPIR-V entry-points using the Vulkan API.
 data Program = Program { spirvProgram :: [Word32]
-                       , spirvEntryPoints :: [EntryPointName]
+                       , spirvEntryPoints :: [EntryPoint]
+                       , spirvDescriptorSets :: SPIRV.DescriptorSetMap
+                       , hostSizes :: M.Map VName (SizeClass, Name)
                        , hostFunctions :: Functions Vulkan
                        }
 
@@ -36,20 +42,24 @@ type Function = Imp.Function Vulkan
 type Code = Imp.Code Vulkan
 
 -- | The name of an entry point.
-type EntryPointName = String
+type EntryPoint = VName
+
+-- | Index of the descritor set of an entry point
+type DescriptorSetBinding = Int
 
 -- | An argument to be passed to a a SPIR-V entry point.
 data EntryPointArg = ValueKArg Exp PrimType
-                      -- ^ Pass the value of this scalar expression as argument.
+                    -- ^ Pass the value of this scalar expression as argument.
                    | MemKArg VName
                     -- ^ Pass this pointer as argument.
-                   | SharedMemoryKArg (Count Bytes)
-                    -- ^ Create this much local memory per workgroup.
                 deriving (Show)
 
 -- | Host-level OpenCL operation.
-data Vulkan = LaunchEntryPoint EntryPointName [EntryPointArg] [Exp] [Exp]
+data Vulkan = LaunchEntryPoint EntryPoint DescriptorSetBinding [EntryPointArg] [Exp] [Exp]
             | HostCode Code
+            | GetSize VName VName
+            | CmpSizeLe VName VName Exp
+            | GetSizeMax VName SizeClass
             deriving (Show)
 
 instance Pretty Vulkan where
