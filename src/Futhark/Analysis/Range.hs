@@ -52,7 +52,7 @@ analyseStms = analyseStms' mempty . stmsToList
         analyseStms' acc (bnd:bnds) m = do
           bnd' <- analyseStm bnd
           bindPattern (stmPattern bnd') $
-            analyseStms' (oneStm bnd' <> acc) bnds m
+            analyseStms' (acc <> oneStm bnd') bnds m
 
 analyseStm :: (Attributes lore, CanBeRanged (Op lore)) =>
               Stm lore -> RangeM (Stm (Ranges lore))
