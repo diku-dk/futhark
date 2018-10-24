@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-  * The compiler itself is about 10% faster.
+  * Significant performance changes: there is now a constant extra
+    compilation overhead (less than 200ms on most machines).  However,
+    the rest of the compiler is 30-40% faster (or more in some cases).
 
   * A warning when ambiguously typed expressions are assigned a
     default (`i32` or `f64`).

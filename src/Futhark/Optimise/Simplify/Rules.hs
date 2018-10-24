@@ -34,8 +34,6 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.DataDependencies
 import Futhark.Optimise.Simplify.ClosedForm
 import Futhark.Optimise.Simplify.Rule
-import qualified Futhark.Analysis.AlgSimplify as AS
-import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
@@ -51,7 +49,6 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , RuleGeneric constantFoldPrimFun
                , RuleIf ruleIf
                , RuleIf hoistBranchInvariant
-               , RuleBasicOp simplifyScalExp
                , RuleBasicOp ruleBasicOp
                ]
 
@@ -955,25 +952,6 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = do
             else return $ Var v
         reshapeResult se _ =
           return se
-
-simplifyScalExp :: BinderOps lore => TopDownRuleBasicOp lore
-simplifyScalExp vtable pat _ e = do
-  res <- SE.toScalExp (`ST.lookupScalExp` vtable) $ BasicOp e
-  case res of
-    -- If the sufficient condition is 'True', then it statically succeeds.
-    Just se
-      | SE.scalExpType se == Bool,
-        isNothing $ valOrVar se,
-        SE.scalExpSize se < size_bound,
-        Just se' <- valOrVar $ AS.simplify se ranges ->
-        letBind_ pat $ BasicOp $ SubExp se'
-    _ -> cannotSimplify
-  where ranges = ST.rangesRep vtable
-        size_bound = 10 -- don't touch scalexps bigger than this.
-
-        valOrVar (SE.Val v)  = Just $ Constant v
-        valOrVar (SE.Id v _) = Just $ Var v
-        valOrVar _           = Nothing
 
 simplifyIdentityReshape :: SimpleRule lore
 simplifyIdentityReshape _ seType (Reshape newshape v)
