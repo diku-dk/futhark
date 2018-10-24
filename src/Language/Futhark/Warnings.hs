@@ -3,9 +3,12 @@ module Language.Futhark.Warnings
   , singleWarning
   ) where
 
+import Data.Monoid
 import Data.List
 import Data.Loc
 import qualified Data.Semigroup as Sem
+
+import Prelude
 
 import Language.Futhark.Core (locStr)
 
