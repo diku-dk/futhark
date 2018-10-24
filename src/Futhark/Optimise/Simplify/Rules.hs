@@ -251,6 +251,7 @@ simpleRules = [ simplifyBinOp
               , simplifyReshapeReshape
               , simplifyReshapeScratch
               , simplifyReshapeReplicate
+              , simplifyReshapeIota
               , improveReshape ]
 
 simplifyClosedFormLoop :: BinderOps lore => TopDownRuleDoLoop lore
@@ -1003,6 +1004,12 @@ simplifyReshapeReplicate defOf seType (Reshape newshape v)
       in Just (Replicate (Shape new) se, v_cs)
 simplifyReshapeReplicate _ _ _ = Nothing
 
+simplifyReshapeIota :: SimpleRule lore
+simplifyReshapeIota defOf _ (Reshape newshape v)
+  | Just (BasicOp (Iota _ offset stride it), v_cs) <- defOf v,
+    [n] <- newDims newshape =
+      Just (Iota n offset stride it, v_cs)
+simplifyReshapeIota _ _ _ = Nothing
 
 improveReshape :: SimpleRule lore
 improveReshape _ seType (Reshape newshape v)
