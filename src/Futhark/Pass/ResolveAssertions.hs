@@ -10,6 +10,7 @@ module Futhark.Pass.ResolveAssertions
   where
 
 import Data.Maybe
+import Data.Monoid
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplify.Rule
@@ -23,6 +24,8 @@ import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.SOACS.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify as Simplify
 import Futhark.Optimise.Simplify.Rules
+
+import Prelude
 
 -- | The assertion-resolver pass.
 resolveAssertions :: Pass SOACS SOACS
