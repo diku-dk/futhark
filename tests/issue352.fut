@@ -215,7 +215,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
 	  let (_,vi) =
 	    loop (k,vi) = (1,vi0) while k <= s-1 do
               (k+1, vi ^ (((a >> u32.i32(s-1-k)) & 1u32) * V[i-k]))
-	  in (i+1, V with [i] <- vi)).2
+	  in (i+1, V with [i] = vi)).2
 
   let index_of_least_significant_0(x: i32): i32 =
     loop i = 0 while i < 32 && ((x>>i)&1) != 0 do i + 1

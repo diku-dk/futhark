@@ -4,7 +4,7 @@
 -- error: consumption
 
 let zero (xs: *[]i32) (i: i32) =
-  xs with [i] <- 0
+  xs with [i] = 0
 
 let apply f x = f x
 
