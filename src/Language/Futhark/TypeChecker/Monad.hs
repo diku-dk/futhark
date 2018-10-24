@@ -28,8 +28,7 @@ module Language.Futhark.TypeChecker.Monad
   , checkName
   , badOnLeft
 
-  , Warnings
-  , singleWarning
+  , module Language.Futhark.Warnings
 
   , Env(..)
   , TySet
@@ -67,13 +66,13 @@ import Data.Maybe
 import Data.Either
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import qualified Data.Semigroup as Sem
 
 import Prelude hiding (mapM, mod)
 
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Traversals
+import Language.Futhark.Warnings
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
 
@@ -121,31 +120,6 @@ underscoreUse loc name =
 instance Show TypeError where
   show (TypeError pos msg) =
     "Error at " ++ locStr pos ++ ":\n" ++ msg
-
--- | The warnings produced by the type checker.  The 'Show' instance
--- produces a human-readable description.
-newtype Warnings = Warnings [(SrcLoc, String)] deriving (Eq)
-
-instance Sem.Semigroup Warnings where
-  Warnings ws1 <> Warnings ws2 = Warnings $ ws1 <> ws2
-
-instance Monoid Warnings where
-  mempty = Warnings mempty
-  mappend = (Sem.<>)
-
-instance Show Warnings where
-  show (Warnings []) = ""
-  show (Warnings ws) =
-    intercalate "\n\n" ws' ++ "\n"
-    where ws' = map showWarning $ sortOn (off . locOf . fst) ws
-          off NoLoc = 0
-          off (Loc p _) = posCoff p
-          showWarning (loc, w) =
-            "Warning at " ++ locStr loc ++ ":\n" ++
-            intercalate "\n" (map ("  "<>) $ lines w)
-
-singleWarning :: SrcLoc -> String -> Warnings
-singleWarning loc problem = Warnings [(loc, problem)]
 
 type ImportTable = M.Map String Env
 
