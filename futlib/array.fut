@@ -54,7 +54,7 @@ let concat 't (xs: []t) (ys: []t): *[]t = xs ++ ys
 let rotate 't (r: i32) (xs: []t) = intrinsics.rotate (r, xs)
 
 -- | Replace an element of the array with a new value.
-let update [n] 't (xs: *[n]t) (i: i32) (x: t): *[n]t = xs with [i] <- x
+let update [n] 't (xs: *[n]t) (i: i32) (x: t): *[n]t = xs with [i] = x
 
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
