@@ -2,7 +2,7 @@
 -- error: consumption
 
 let zero (xs: *[]i32) (i: i32) =
-  xs with [i] <- 0
+  xs with [i] = 0
 
 let uniq (x: i32): *[]i32 = [x,x,x]
 

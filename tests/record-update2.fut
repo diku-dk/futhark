@@ -4,5 +4,5 @@
 
 let main (x: i32) (y: i32): (i32, i32, i32, i32) =
   let r0 = {a={x,y}, b={x,y}}
-  let r1 = r0 with a.x <- 1
+  let r1 = r0 with a.x = 1
   in (r1.a.x, r1.a.y, r1.b.x, r1.b.y)
