@@ -25,6 +25,7 @@ import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
+import Futhark.Pass.ResolveAssertions
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
@@ -45,6 +46,7 @@ standardPipeline =
          , fuseSOACs
          , performCSE True
          , simplifySOACS
+         , resolveAssertions
          , removeDeadFunctions
          ]
 
