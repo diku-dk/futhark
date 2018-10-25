@@ -187,12 +187,16 @@ transformSOAC pat (Stream w form lam arrs) = do
 
   -- The number of results in the body matches exactly the size (and
   -- order) of 'pat', so we bind them up here, again with a reshape to
-  -- make the types work out.
+  -- make the types work out.  We also do a copy to ensure that the
+  -- result does not have any aliases (as the semantics of Stream
+  -- require).
   forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lam) $ \(pe, se) ->
     case (arrayDims $ patElemType pe, se) of
-      (dims, Var v) | not $ null dims ->
-                        letBindNames_ [patElemName pe] $
-                        BasicOp $ Reshape (map DimCoercion dims) v
+      (dims, Var v)
+        | not $ null dims -> do
+            v_reshaped <- letExp (baseString v <> "_reshaped") $
+                          BasicOp $ Reshape (map DimCoercion dims) v
+            letBindNames_ [patElemName pe] $ BasicOp $ Copy v_reshaped
       _ -> letBindNames_ [patElemName pe] $ BasicOp $ SubExp se
 
 transformSOAC pat (Scatter len lam ivs as) = do
