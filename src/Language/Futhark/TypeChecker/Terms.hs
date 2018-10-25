@@ -844,16 +844,16 @@ checkExp (Ascript e decl loc) = do
   return $ Ascript e' decl' loc
 
 checkExp (BinOp op NoInfo (e1,_) (e2,_) NoInfo loc) = do
+  (op', ftype) <- lookupVar loc op
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
 
-  (op', ftype) <- lookupVar loc op
+  (p1_t, rt) <- checkApply loc ftype e1_arg
+  (p2_t, rt') <- checkApply loc (removeShapeAnnotations rt) e2_arg
 
-  (e1_pt : e2_pt : pts, rettype') <-
-    checkFuncall loc ftype [e1_arg, e2_arg]
   return $ BinOp op' (Info (vacuousShapeAnnotations ftype))
-    (e1', Info $ toStruct e1_pt) (e2', Info $ toStruct e2_pt)
-    (Info (foldr (Arrow mempty Nothing) rettype' pts)) loc
+    (e1', Info $ toStruct p1_t) (e2', Info $ toStruct p2_t)
+    (Info rt') loc
 
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
@@ -1340,29 +1340,6 @@ checkApply loc ftype arg =
   typeError loc $
   "Attempt to apply an expression of type " ++ pretty ftype ++
   " to an argument of type " ++ pretty (argType arg) ++ "."
-
-checkFuncall :: SrcLoc -> CompType -> [Arg]
-             -> TermTypeM ([PatternType], PatternType)
-checkFuncall _ ftype [] = return ([], vacuousShapeAnnotations ftype)
-checkFuncall loc ftype ((argtype, dflow, argloc) : args) =
-  case ftype of
-    Arrow as _ t1 t2 -> do
-      unify argloc (toStructural t1) (toStruct argtype)
-      constraints <- getConstraints
-      let t1' = toStruct $ applySubst (`lookupSubst` constraints) t1
-          t2' = applySubst (`lookupSubst` constraints) t2
-
-      occur [observation as loc]
-      checkOccurences dflow
-      occurs <- consumeArg argloc argtype (diet t1')
-      occur $ dflow `seqOccurences` occurs
-
-      (ps, ret) <- checkFuncall loc t2' args
-      return (fromStruct (vacuousShapeAnnotations t1') : ps, ret)
-
-    _ -> typeError loc $
-         "Attempt to apply an expression of type " ++ pretty ftype ++
-         " to an argument of type " ++ pretty argtype ++ "."
 
 consumeArg :: SrcLoc -> CompType -> Diet -> TermTypeM [Occurence]
 consumeArg loc (Record ets) (RecordDiet ds) =

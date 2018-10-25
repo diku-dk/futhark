@@ -625,7 +625,6 @@ data ExpBase f vn =
             | BinOp (QualName vn) (f PatternType)
               (ExpBase f vn, f StructType) (ExpBase f vn, f StructType)
               (f PatternType) SrcLoc
-            -- ^ The first annotation is the instantiation list.
 
             | Project Name (ExpBase f vn) (f CompType) SrcLoc
 

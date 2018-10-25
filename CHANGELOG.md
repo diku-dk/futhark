@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark-bench` now writes "μs" instead of "us".
 
+  * Type inference for infix operators now works properly.
+
 ## [0.7.2]
 
 ### Added
