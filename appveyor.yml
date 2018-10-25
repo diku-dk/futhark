@@ -20,9 +20,9 @@ install:
  - 7z x stack.zip stack.exe > nul
  - stack setup > nul
  - stack build alex happy
- - stack --no-terminal test --only-dependencies -j 1
- - stack install
+ - stack --no-terminal test --only-dependencies -j 1 --fast
+ - stack install --fast
 
 test_script:
-- stack --no-terminal test
-- futhark-test --no-terminal tests examples
+- stack --no-terminal test --fast
+- futhark-test --no-terminal -t tests examples
