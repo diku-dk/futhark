@@ -402,8 +402,8 @@ literals and variables, but also more complicated forms.
       : | "loop" `type_param`* `pat` [("=" `exp`)] `loopform` "do" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
-      : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
-      : | `exp` "with" `fieldid` ("." `fieldid`)* "<-" `exp`
+      : | `exp` "with" "[" `index` ("," `index`)* "]" "=" `exp`
+      : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
    field:   `fieldid` "=" `exp`
         : | `id`
    pat:   `id`
@@ -717,13 +717,13 @@ otherwise produce the result of evaluating ``e``.  Unless ``e``
 produces a value that is used subsequently (it can just be a
 variable), dead code elimination may remove the assertion.
 
-``a with [i] <- e``
+``a with [i] = e``
 ...................
 
 Return ``a``, but with the element at position ``i`` changed to
 contain the result of evaluating ``e``.  Consumes ``a``.
 
-``r with f <- e``
+``r with f = e``
 .................
 
 Return the record ``r``, but with field `f` changed to have value `e`.
@@ -749,8 +749,8 @@ evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
 
 Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value
-of ``v`` must be an array of the proper size.  Syntactic sugar for
-``let a = a with [i] <- v in a``.
+of ``v`` must be an array of the proper size.  This notation is
+Syntactic sugar for ``let a = a with [i] = v in a``.
 
 ``let f params... = e in body``
 ...............................
@@ -874,7 +874,7 @@ provide a way to efficiently update an array in-place, with the
 guarantee that the cost is proportional to the size of the value(s)
 being written, not the size of the full array.
 
-The ``a with [i] <- v`` language construct, and derived forms,
+The ``a with [i] = v`` language construct, and derived forms,
 performs an in-place update.  The compiler verifies that the original
 array (``a``) is not used on any execution path following the in-place
 update.  This involves also checking that no *alias* of ``a`` is used.
@@ -885,7 +885,7 @@ When defining a function parameter or return type, we can mark it as
 *unique* by prefixing it with an asterisk.  For example::
 
   let modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
-    a with [i] <- a[i] + x
+    a with [i] = a[i] + x
 
 For bulk in-place updates with multiple values, use the ``scatter``
 function in the basis library.  In the parameter declaration ``a:
