@@ -822,7 +822,7 @@ An *operator section* that is equivalent to ``\x -> x *binop* y``.
 ``(.a.b.c)``
 ............
 
-An *operator section* that is equivalent to ``\x -> a.b.c``.
+An *operator section* that is equivalent to ``\x -> x.a.b.c``.
 
 ``(.[i,j])``
 ............
