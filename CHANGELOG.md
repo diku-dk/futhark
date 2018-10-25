@@ -16,9 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * A warning when ambiguously typed expressions are assigned a
     default (`i32` or `f64`).
 
-  * In-place updates and records are now written with `=` instead of
-    `<-`.  The latter is deprecated and will be removed in the next
-    major version (#650).
+  * In-place updates and record updates are now written with `=`
+    instead of `<-`.  The latter is deprecated and will be removed in
+    the next major version (#650).
 
 ### Removed
 
