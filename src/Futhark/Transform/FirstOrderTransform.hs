@@ -162,42 +162,9 @@ transformSOAC pat (Screma w form@(ScremaForm (scan_lam, scan_nes)
   pat' <- discardPattern (map paramType scanacc_params) pat
   letBind_ pat' $ DoLoop [] merge loopform loop_body
 
-transformSOAC pat (Stream w form lam arrs) = do
-  -- We just set the chunksize to w and inline the lambda body.  There
-  -- is no difference between parallel and sequential streams here.
-  let nes = getStreamAccums form
-      (chunk_size_param, fold_params, arr_params) =
-        partitionChunkedFoldParameters (length nes) $ lambdaParams lam
-
-  -- The chunk size is the full size of the array.
-  letBindNames_ [paramName chunk_size_param] $ BasicOp $ SubExp w
-
-  -- The accumulator parameters are initialised to the neutral element.
-  forM_ (zip fold_params nes) $ \(p, ne) ->
-    letBindNames [paramName p] $ BasicOp $ SubExp ne
-
-  -- Finally, the array parameters are set to the arrays (but reshaped
-  -- to make the types work out; this will be simplified rapidly).
-  forM_ (zip arr_params arrs) $ \(p, arr) ->
-    letBindNames [paramName p] $ BasicOp $
-      Reshape (map DimCoercion $ arrayDims $ paramType p) arr
-
-  -- Then we just inline the lambda body.
-  mapM_ addStm $ bodyStms $ lambdaBody lam
-
-  -- The number of results in the body matches exactly the size (and
-  -- order) of 'pat', so we bind them up here, again with a reshape to
-  -- make the types work out.  We also do a copy to ensure that the
-  -- result does not have any aliases (as the semantics of Stream
-  -- require).
-  forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lam) $ \(pe, se) ->
-    case (arrayDims $ patElemType pe, se) of
-      (dims, Var v)
-        | not $ null dims -> do
-            v_reshaped <- letExp (baseString v <> "_reshaped") $
-                          BasicOp $ Reshape (map DimCoercion dims) v
-            letBindNames_ [patElemName pe] $ BasicOp $ Copy v_reshaped
-      _ -> letBindNames_ [patElemName pe] $ BasicOp $ SubExp se
+transformSOAC pat (Stream w form lam arrs) =
+  sequentialStreamWholeArray pat w nes lam arrs
+  where nes = getStreamAccums form
 
 transformSOAC pat (Scatter len lam ivs as) = do
   iter <- newVName "write_iter"
