@@ -85,7 +85,7 @@ executables:
       - futhark
       - random
       - temporary
-      - json
+      - aeson
     ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg"
   futharki:
     <<: *futhark

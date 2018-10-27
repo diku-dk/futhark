@@ -7,7 +7,6 @@ extra-deps:
 - exception-mtl-0.4.0.1
 - exception-transformers-0.4.0.7
 - haskell-src-meta-0.8.0.3@rev:1
-- json-0.9.2
 - language-c-quote-0.12.2
 - neat-interpolation-0.3.2.4
 - mainland-pretty-0.7
