@@ -14,6 +14,7 @@ import Data.Either
 import Data.Maybe
 import Data.Semigroup ((<>))
 import Data.List
+import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
@@ -25,7 +26,7 @@ import System.IO.Temp
 import System.Timeout
 import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
-import qualified Text.JSON as JSON
+import qualified Data.Aeson as JSON
 import Text.Printf
 import Text.Regex.TDFA
 
@@ -56,24 +57,23 @@ newtype RunResult = RunResult { runMicroseconds :: Int }
 data DataResult = DataResult String (Either T.Text ([RunResult], T.Text))
 data BenchResult = BenchResult FilePath [DataResult]
 
-resultsToJSON :: [BenchResult] -> JSON.JSValue
-resultsToJSON = JSON.JSObject . JSON.toJSObject . map benchResultToJSObject
+resultsToJSON :: [BenchResult] -> JSON.Value
+resultsToJSON = JSON.toJSON . M.fromList . map benchResultToJSObject
   where benchResultToJSObject
           :: BenchResult
-          -> (String, JSON.JSValue)
+          -> (String, JSON.Value)
         benchResultToJSObject (BenchResult prog rs) =
-          (prog, JSON.JSObject $ JSON.toJSObject
-                 [("datasets", JSON.JSObject $ JSON.toJSObject $
-                               map dataResultToJSObject rs)])
+          (prog, JSON.toJSON $ M.fromList
+                 [("datasets" :: String, M.fromList $ map dataResultToJSObject rs)])
         dataResultToJSObject
           :: DataResult
-          -> (String, JSON.JSValue)
+          -> (String, JSON.Value)
         dataResultToJSObject (DataResult desc (Left err)) =
-          (desc, JSON.showJSON err)
+          (desc, JSON.toJSON $ show err)
         dataResultToJSObject (DataResult desc (Right (runtimes, progerr))) =
-          (desc, JSON.JSObject $ JSON.toJSObject
-                 [("runtimes", JSON.showJSON $ map runMicroseconds runtimes),
-                  ("stderr", JSON.showJSON progerr)])
+          (desc, JSON.toJSON $ M.fromList
+                 [("runtimes" :: String, JSON.toJSON $ map runMicroseconds runtimes),
+                  ("stderr", JSON.toJSON $ show progerr)])
 
 fork :: (a -> IO b) -> a -> IO (MVar b)
 fork f x = do cell <- newEmptyMVar
@@ -107,7 +107,7 @@ runBenchmarks opts paths = do
   results <- concat <$> mapM (runBenchmark opts) compiled_benchmarks
   case optJSON opts of
     Nothing -> return ()
-    Just file -> writeFile file $ JSON.encode $ resultsToJSON results
+    Just file -> LBS.writeFile file $ JSON.encode $ resultsToJSON results
   when (anyFailed results) exitFailure
 
   where ignored f = any (`match` f) $ optIgnoreFiles opts
