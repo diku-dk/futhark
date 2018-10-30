@@ -1087,7 +1087,7 @@ Module Type Expressions
 
 .. productionlist::
    spec:   "val" `id` `type_param`* ":" `spec_type`
-       : | "val" `binop` ":" `spec_type`
+       : | "val" `binop` `type_param`* ":" `spec_type`
        : | "type" `id` `type_param`* "=" `type`
        : | "type" ["^"] `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
