@@ -277,10 +277,10 @@ Spec :: { SpecBase NoInfo Name }
       : val id TypeParams ':' TypeExpDecl
         { let L loc (ID name) = $2
           in ValSpec name $3 $5 Nothing (srcspan $1 $>) }
-      | val BindingBinOp ':' TypeExpDecl
-        { ValSpec $2 [] $4 Nothing (srcspan $1 $>) }
-      | val BindingUnOp ':' TypeExpDecl
-        { ValSpec $2 [] $4 Nothing (srcspan $1 $>) }
+      | val BindingBinOp TypeParams ':' TypeExpDecl
+        { ValSpec $2 $3 $5 Nothing (srcspan $1 $>) }
+      | val BindingUnOp TypeParams ':' TypeExpDecl
+        { ValSpec $2 $3 $5 Nothing (srcspan $1 $>) }
       | TypeAbbr
         { TypeAbbrSpec $1 }
       | type id TypeParams
