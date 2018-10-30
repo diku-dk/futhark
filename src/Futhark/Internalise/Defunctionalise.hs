@@ -451,9 +451,12 @@ defuncLet dims ps@(pat:pats) body (Info rettype)
       return ([], e, sv)
 defuncLet _ [] body (Info rettype) = do
   (body', sv) <- defuncExp body
-  case sv of
-    Dynamic _ -> return ([], body', Dynamic $ fromStruct $ removeShapeAnnotations rettype)
-    _         -> return ([], body', sv)
+  return ([], body', imposeType sv rettype )
+  where imposeType Dynamic{} t =
+          Dynamic $ fromStruct $ removeShapeAnnotations t
+        imposeType (RecordSV fs1) (Record fs2) =
+          RecordSV $ M.toList $ M.intersectionWith imposeType (M.fromList fs1) fs2
+        imposeType sv _ = sv
 
 -- | Defunctionalize an application expression at a given depth of application.
 -- Calls to dynamic (first-order) functions are preserved at much as possible,
