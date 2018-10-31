@@ -176,6 +176,11 @@ instance ASTMappable (ExpBase Info VName) where
     DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
     mapOnExp tv mergeexp <*> astMap tv form <*>
     mapOnExp tv loopbody <*> pure loc
+  astMap tv (VConstr0 name t loc) =
+    VConstr0 name <$> traverse (mapOnCompType tv) t <*> pure loc
+  astMap tv (Match e cases t loc) =
+    Match <$> mapOnExp tv e <*> astMap tv cases
+          <*> traverse (mapOnCompType tv) t <*> pure loc
 
 instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (For i bound) = For <$> astMap tv i <*> astMap tv bound
@@ -194,6 +199,7 @@ instance ASTMappable (TypeExp VName) where
     TEApply <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
   astMap tv (TEArrow v t1 t2 loc) =
     TEArrow v <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
+  astMap _ te@TEEnum{} = pure te
 
 instance ASTMappable (TypeArgExp VName) where
   astMap tv (TypeArgExpDim dim loc) =
@@ -234,6 +240,7 @@ traverseType f g h (TypeVar als u t args) =
   TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g h) args
 traverseType f g h (Arrow als v t1 t2) =
   Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
+traverseType _ _ _ (Enum cs) = pure $ Enum cs
 
 traverseArrayElemType :: Applicative f =>
                          TypeTraverser f ArrayElemTypeBase dim1 als1 dim2 als2
@@ -243,6 +250,8 @@ traverseArrayElemType f g h (ArrayPolyElem t args as) =
   ArrayPolyElem <$> f t <*> traverse (traverseTypeArg f g h) args <*> h as
 traverseArrayElemType f g h (ArrayRecordElem fs) =
   ArrayRecordElem <$> traverse (traverseRecordArrayElemType f g h) fs
+traverseArrayElemType _ _ h (ArrayEnumElem cs as) =
+  ArrayEnumElem cs <$> h as
 
 traverseRecordArrayElemType :: Applicative f =>
                                TypeTraverser f RecordArrayElemTypeBase dim1 als1 dim2 als2
@@ -294,6 +303,8 @@ instance ASTMappable (PatternBase Info VName) where
     PatternAscription <$> astMap tv pat <*> astMap tv t <*> pure loc
   astMap tv (Wildcard (Info t) loc) =
     Wildcard <$> (Info <$> mapOnPatternType tv t) <*> pure loc
+  astMap tv (PatternLit e (Info t) loc) =
+    PatternLit <$> astMap tv e <*> (Info <$> mapOnPatternType tv t) <*>  pure loc
 
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =
@@ -301,6 +312,10 @@ instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldImplicit name t loc) =
     RecordFieldImplicit <$> mapOnName tv name
     <*> traverse (mapOnCompType tv) t <*> pure loc
+
+instance ASTMappable (CaseBase Info VName) where
+  astMap tv (CasePat pat e loc) =
+    CasePat <$> astMap tv pat <*> astMap tv e <*> pure loc
 
 instance ASTMappable a => ASTMappable (Info a) where
   astMap tv = traverse $ astMap tv
