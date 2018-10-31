@@ -37,8 +37,8 @@ import Futhark.Util.IntegralExp (quotRoundingUp)
 
 kernelsToCuda, kernelsToOpenCL :: ImpKernels.Program
                                -> Either InternalError ImpOpenCL.Program
-kernelsToCuda = kernelsToOpenCL' TargetCuda
-kernelsToOpenCL = kernelsToOpenCL' TargetOpenCL
+kernelsToCuda = translateKernels TargetCuda
+kernelsToOpenCL = translateKernels TargetOpenCL
 
 -- | Translate a kernels-program to an OpenCL-program.
 translateKernels :: KernelTarget
