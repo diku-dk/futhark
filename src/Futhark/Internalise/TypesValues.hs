@@ -119,6 +119,7 @@ internaliseTypeM orig_t =
       ets <- internaliseElemType et
       return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets ]
     E.Arrow{} -> fail $ "internaliseTypeM: cannot handle function type: " ++ pretty orig_t
+    E.Enum{} -> return [I.Prim $ I.IntType I.Int8]
 
   where internaliseElemType E.ArrayPolyElem{} =
           fail "internaliseElemType: cannot handle type variable."
@@ -126,6 +127,8 @@ internaliseTypeM orig_t =
           return [I.Prim $ internalisePrimType bt]
         internaliseElemType (E.ArrayRecordElem elemts) =
           concat <$> mapM (internaliseRecordElem . snd) (E.sortFields elemts)
+        internaliseElemType (E.ArrayEnumElem _ _) =
+          return [I.Prim $ I.IntType I.Int8]
 
         internaliseRecordElem (E.RecordArrayElem et) =
           internaliseElemType et

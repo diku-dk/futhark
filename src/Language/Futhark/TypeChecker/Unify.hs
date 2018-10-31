@@ -9,6 +9,7 @@ module Language.Futhark.TypeChecker.Unify
   , typeError
 
   , zeroOrderType
+  , mustHaveConstr
   , mustHaveField
   , mustBeOneOf
   , equalityType
@@ -46,6 +47,7 @@ data Constraint = NoConstraint (Maybe Liftedness) SrcLoc
                 | Overloaded [PrimType] SrcLoc
                 | HasFields (M.Map Name (TypeBase () ())) SrcLoc
                 | Equality SrcLoc
+                | HasConstrs [Name] SrcLoc
                 deriving Show
 
 instance Located Constraint where
@@ -55,6 +57,7 @@ instance Located Constraint where
   locOf (Overloaded _ loc) = locOf loc
   locOf (HasFields _ loc) = locOf loc
   locOf (Equality loc) = locOf loc
+  locOf (HasConstrs _ loc) = locOf loc
 
 lookupSubst :: VName -> Constraints -> Maybe (TypeBase () ())
 lookupSubst v constraints = do Constraint t _ <- M.lookup v constraints
@@ -156,6 +159,7 @@ applySubstInConstraint _ _ (NoConstraint l loc) = NoConstraint l loc
 applySubstInConstraint _ _ (Overloaded ts loc) = Overloaded ts loc
 applySubstInConstraint _ _ (Equality loc) = Equality loc
 applySubstInConstraint _ _ (ParamType l loc) = ParamType l loc
+applySubstInConstraint _ _ (HasConstrs ns loc) = HasConstrs ns loc
 
 linkVarToType :: MonadUnify m => SrcLoc -> VName -> TypeBase () () -> m ()
 linkVarToType loc vn tp = do
@@ -198,6 +202,21 @@ linkVarToType loc vn tp = do
                        pretty tp ++ "' (must be a record with fields {" ++
                        required_fields' ++
                        "} due to use at " ++ locStr old_loc ++ ")."
+              Just (HasConstrs cs old_loc) ->
+                case tp of
+                  Enum t_cs
+                    | intersect cs t_cs == cs -> return ()
+                    | otherwise -> typeError loc $
+                       "Cannot unify `" ++ prettyName vn ++ "' with type `"
+                       ++ pretty tp ++ "'"
+                  TypeVar _ _ (TypeName [] v) []
+                    | not $ isRigid v constraints ->
+                        let addConstrs (HasConstrs cs' loc') (HasConstrs cs'' _) =
+                              HasConstrs (cs' `union` cs'') loc'
+                            addConstrs c _ = c
+                        in modifyConstraints $ M.insertWith addConstrs v $
+                           HasConstrs cs old_loc
+                  _ -> typeError loc "Cannot unify."
               _ -> return ()
   where tp' = removeUniqueness tp
 
@@ -286,6 +305,26 @@ zeroOrderType loc desc t = do
               " must be non-function, but type parameter " ++ prettyName vn ++ " at " ++
               locStr ploc ++ " may be a function."
             _ -> return ()
+
+mustHaveConstr :: MonadUnify m =>
+                  SrcLoc -> Name -> TypeBase dim as -> m ()
+mustHaveConstr loc c t = do
+  constraints <- getConstraints
+  case t of
+    TypeVar _ _ (TypeName _ tn) []
+      | Just NoConstraint{} <- M.lookup tn constraints ->
+          modifyConstraints $ M.insert tn $ HasConstrs [c] loc
+      | Just (HasConstrs cs _) <- M.lookup tn constraints ->
+          if c `elem` cs
+          then return ()
+          else modifyConstraints $ M.insert tn $ HasConstrs (c:cs) loc
+    Enum cs
+      | c `elem` cs -> return ()
+      | otherwise   -> throwError $ TypeError loc $
+                       "Type " ++ pretty (toStructural t) ++
+                       " does not have a " ++ pretty c ++ " constructor."
+    _ -> do unify loc (toStructural t) $ Enum [c]
+            return ()
 
 mustHaveField :: (MonadUnify m, Monoid as) =>
                  SrcLoc -> Name -> TypeBase dim as -> m (TypeBase dim as)

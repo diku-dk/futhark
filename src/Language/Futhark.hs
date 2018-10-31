@@ -9,7 +9,7 @@ module Language.Futhark
   , ValBind, Dec, Spec, Prog
   , TypeBind, TypeDecl
   , StructTypeArg, ArrayElemType
-  , TypeParam
+  , TypeParam, Case
   )
   where
 
@@ -71,3 +71,6 @@ type TypeParam = TypeParamBase VName
 -- | A known array element type with no shape annotations, but aliasing
 -- information.
 type ArrayElemType = ArrayElemTypeBase () Names
+
+-- | A type-checked case (of a match expression).
+type Case = CaseBase Info VName
