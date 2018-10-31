@@ -4,6 +4,7 @@
 -- kernels to imperative code with OpenCL calls.
 module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
   ( kernelsToOpenCL
+  , kernelsToCuda
   )
   where
 
@@ -18,6 +19,7 @@ import qualified Data.Semigroup as Sem
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
+import qualified Language.C.Quote.CUDA as CudaC
 
 import Futhark.Error
 import Futhark.Representation.AST.Attributes.Types (int32)
@@ -33,19 +35,27 @@ import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty, prettyOneLine)
 import Futhark.Util.IntegralExp (quotRoundingUp)
 
+kernelsToCuda, kernelsToOpenCL :: ImpKernels.Program
+                               -> Either InternalError ImpOpenCL.Program
+kernelsToCuda = kernelsToOpenCL' TargetCuda
+kernelsToOpenCL = kernelsToOpenCL' TargetOpenCL
+
 -- | Translate a kernels-program to an OpenCL-program.
-kernelsToOpenCL :: ImpKernels.Program
-                -> Either InternalError ImpOpenCL.Program
-kernelsToOpenCL (ImpKernels.Functions funs) = do
+translateKernels :: KernelTarget
+                 -> ImpKernels.Program
+                 -> Either InternalError ImpOpenCL.Program
+translateKernels target (ImpKernels.Functions funs) = do
   (prog', ToOpenCL extra_funs kernels requirements sizes) <-
     runWriterT $ fmap Functions $ forM funs $ \(fname, fun) ->
-    (fname,) <$> runReaderT (traverse onHostOp fun) fname
+    (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
   let kernel_names = M.keys kernels
       opencl_code = openClCode $ M.elems kernels
-      opencl_prelude = pretty $ genOpenClPrelude requirements
+      opencl_prelude = pretty $ genPrelude target requirements
   return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names
     (S.toList $ kernelUsedTypes requirements) sizes $
     ImpOpenCL.Functions (M.toList extra_funs) <> prog'
+  where genPrelude TargetOpenCL = genOpenClPrelude
+        genPrelude TargetCuda = genCudaPrelude
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
@@ -88,22 +98,22 @@ instance Monoid ToOpenCL where
 
 type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
-onHostOp :: HostOp -> OnKernelM OpenCL
-onHostOp (CallKernel k) = onKernel k
-onHostOp (ImpKernels.GetSize v key size_class) = do
+onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
+onHostOp target (CallKernel k) = onKernel target k
+onHostOp _ (ImpKernels.GetSize v key size_class) = do
   fname <- ask
   tell mempty { clSizes = M.singleton key (size_class, fname) }
   return $ ImpOpenCL.GetSize v key
-onHostOp (ImpKernels.CmpSizeLe v key size_class x) = do
+onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
   fname <- ask
   tell mempty { clSizes = M.singleton key (size_class, fname) }
   return $ ImpOpenCL.CmpSizeLe v key x
-onHostOp (ImpKernels.GetSizeMax v size_class) =
+onHostOp _ (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
 
-onKernel :: CallKernel -> OnKernelM OpenCL
+onKernel :: KernelTarget -> CallKernel -> OnKernelM OpenCL
 
-onKernel called@(Map kernel) = do
+onKernel _ called@(Map kernel) = do
   let (funbody, _) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
           size <- GenericC.compileExp $ mapKernelSize kernel
@@ -130,7 +140,7 @@ onKernel called@(Map kernel) = do
 
   where (kernel_size, workgroup_size) = kernelAndWorkgroupSize called
 
-onKernel called@(AnyKernel kernel) = do
+onKernel target called@(AnyKernel kernel) = do
   let (kernel_body, _) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
         GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel
@@ -140,7 +150,7 @@ onKernel called@(AnyKernel kernel) = do
       (local_memory_params, local_memory_init) =
         unzip $
         flip evalState (blankNameSource :: VNameSource) $
-        mapM prepareLocalMemory $ kernelLocalMemory kernel
+        mapM (prepareLocalMemory target) $ kernelLocalMemory kernel
 
       params = catMaybes local_memory_params ++ use_params
 
@@ -158,22 +168,33 @@ onKernel called@(AnyKernel kernel) = do
   return $ LaunchKernel
     (calledKernelName called) (kernelArgs called) kernel_size workgroup_size
 
-  where prepareLocalMemory (mem, Left _) = do
+  where
+        prepareLocalMemory TargetOpenCL (mem, Left _) = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
           return (Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
                   [C.citem|__local volatile char* restrict $id:mem = $id:mem_aligned;|])
-        prepareLocalMemory (mem, Right size) = do
+        prepareLocalMemory TargetOpenCL (mem, Right size) = do
           let size' = compilePrimExp size
           return (Nothing,
                   [C.citem|ALIGNED_LOCAL_MEMORY($id:mem, $exp:size');|])
+        prepareLocalMemory TargetCuda (mem, Left _) = do
+          param <- newVName $ baseString mem ++ "_offset"
+          return (Just [C.cparam|uint $id:param|],
+                  [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|])
+        prepareLocalMemory TargetCuda (mem, Right size) = do
+          let size' = compilePrimExp size
+          return (Nothing,
+                  [CudaC.citem|__shared__ volatile char *$id:mem[$exp:size'];|])
         name = calledKernelName called
         (kernel_size, workgroup_size) = kernelAndWorkgroupSize called
 
-onKernel (MapTranspose bt
-          destmem destoffset
-          srcmem srcoffset
-          num_arrays x_elems y_elems in_elems out_elems) = do
-  generateTransposeFunction bt
+onKernel target (MapTranspose bt
+                 destmem destoffset
+                 srcmem srcoffset
+                 num_arrays
+                 x_elems y_elems
+                 in_elems out_elems) = do
+  generateTransposeFunction target bt
   return $ HostCode $ Call [] (transposeName bt)
     [MemArg destmem, ExpArg destoffset,
      MemArg srcmem, ExpArg srcoffset,
@@ -233,9 +254,135 @@ $esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attr
   (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else []) ++
   [ [C.cedecl|$esc:def|] | def <- map constToDefine consts ]
   where uses_float64 = FloatType Float64 `S.member` ts
-        constToDefine (name, e) =
-          let e' = compilePrimExp e
-          in unwords ["#define", zEncodeString (pretty name), "("++prettyOneLine e'++")"]
+
+
+cudaAtomicOps :: [C.Definition]
+cudaAtomicOps = (return mkOp <*> opNames <*> types) ++ extraOps
+  where
+    mkOp (clName, cuName) t =
+      [C.cedecl|static inline $ty:t $id:clName(volatile $ty:t *p, $ty:t val) {
+                 return $id:cuName(($ty:t *)p, val);
+               }|]
+    types = [ [C.cty|int|]
+            , [C.cty|unsigned int|]
+            , [C.cty|unsigned long long|]
+            ]
+    opNames = [ ("atomic_add",  "atomicAdd")
+              , ("atomic_max",  "atomicMax")
+              , ("atomic_min",  "atomicMin")
+              , ("atomic_and",  "atomicAnd")
+              , ("atomic_or",   "atomicOr")
+              , ("atomic_xor",  "atomicXor")
+              , ("atomic_xchg", "atomicExch")
+              ]
+    extraOps =
+      [ [C.cedecl|static inline $ty:t atomic_cmpxchg(volatile $ty:t *p, $ty:t cmp, $ty:t val) {
+                  return atomicCAS(($ty:t *)p, cmp, val);
+                }|] | t <- types]
+
+genCudaPrelude :: OpenClRequirements -> [C.Definition]
+genCudaPrelude (OpenClRequirements _ consts) =
+  cudafy ++ cudaAtomicOps ++ defs ++ ops
+  where ops = cIntOps ++ cFloat32Ops ++ cFloat32Funs ++ cFloat64Ops
+                ++ cFloat64Funs ++ cFloatConvOps
+        defs = [ [C.cedecl|$esc:def|] | def <- map constToDefine consts ]
+        cudafy = [CudaC.cunit|
+typedef char int8_t;
+typedef short int16_t;
+typedef int int32_t;
+typedef long int64_t;
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
+typedef uint8_t uchar;
+typedef uint16_t ushort;
+typedef uint32_t uint;
+typedef uint64_t ulong;
+$esc:("#define __kernel extern \"C\" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)")
+$esc:("#define __global")
+$esc:("#define __local")
+$esc:("#define __private")
+$esc:("#define __constant")
+$esc:("#define __write_only")
+$esc:("#define __read_only")
+static inline int get_group_id(int d)
+{
+  switch (d) {
+    case 0: return blockIdx.x;
+    case 1: return blockIdx.y;
+    case 2: return blockIdx.z;
+    default: return 0;
+  }
+}
+static inline int get_num_groups(int d)
+{
+  switch(d) {
+    case 0: return gridDim.x;
+    case 1: return gridDim.y;
+    case 2: return gridDim.z;
+  }
+}
+static inline int get_local_id(int d)
+{
+  switch (d) {
+    case 0: return threadIdx.x;
+    case 1: return threadIdx.y;
+    case 2: return threadIdx.z;
+    default: return 0;
+  }
+}
+static inline int get_local_size(int d)
+{
+  switch (d) {
+    case 0: return blockDim.x;
+    case 1: return blockDim.y;
+    case 2: return blockDim.z;
+    default: return 0;
+  }
+}
+static inline int get_global_id(int d)
+{
+  switch (d) {
+    case 0: return blockIdx.x * blockDim.x + threadIdx.x;
+    case 1: return blockIdx.y * blockDim.y + threadIdx.y;
+    case 2: return blockIdx.z * blockDim.z + threadIdx.z;
+    default: return 0;
+  }
+}
+static inline int get_global_size(int d)
+{
+  switch (d) {
+    case 0: return gridDim.x * blockDim.x;
+    case 1: return gridDim.y * blockDim.y;
+    case 2: return gridDim.z * blockDim.z;
+    default: return 0;
+  }
+}
+$esc:("#define CLK_LOCAL_MEM_FENCE 1")
+$esc:("#define CLK_GLOBAL_MEM_FENCE 2")
+static inline void barrier(int x)
+{
+  __syncthreads();
+}
+static inline void mem_fence(int x)
+{
+  if (x == CLK_LOCAL_MEM_FENCE) {
+    __threadfence_block();
+  } else {
+    __threadfence();
+  }
+}
+$esc:("#define NAN __longlong_as_double(0x7ff0000000000001ULL)")
+$esc:("#define INFINITY __longlong_as_double(0x7ff0000000000000ULL)")
+extern volatile __shared__ char shared_mem[];
+|]
+
+constToDefine :: (VName, KernelConstExp) -> String
+constToDefine (name, e) =
+  let e' = compilePrimExp e
+  in unwords ["#define", zEncodeString (pretty name), "("++prettyOneLine e'++")"]
+
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
@@ -408,18 +555,17 @@ transposeKernelName bt Kernels.TransposeSmall =
 transposeName :: PrimType -> Name
 transposeName bt = nameFromString $ "map_transpose_opencl_" ++ pretty bt
 
-generateTransposeFunction :: PrimType -> OnKernelM ()
-generateTransposeFunction bt =
+generateTransposeFunction :: KernelTarget -> PrimType -> OnKernelM ()
+generateTransposeFunction target bt =
   -- We have special functions to handle transposing an input array with low
   -- width or low height, as this would cause very few threads to be active. See
   -- comment in Futhark.CodeGen.OpenCL.OpenCL.Kernels.hs for more details.
-
   tell mempty
     { clExtraFuns = M.singleton (transposeName bt) $
                     ImpOpenCL.Function False [] params transpose_code [] []
     , clKernels = M.fromList $
         map (\tt -> let name = transposeKernelName bt tt
-                    in (name, Kernels.mapTranspose name bt' tt))
+                    in (name, Kernels.mapTranspose target name bt' tt))
         [Kernels.TransposeNormal, Kernels.TransposeLowWidth,
          Kernels.TransposeLowHeight, Kernels.TransposeSmall]
 
