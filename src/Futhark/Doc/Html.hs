@@ -8,6 +8,7 @@ module Futhark.Doc.Html
   , brackets
   , braces
   , parens
+  , pipes
   )
 where
 
@@ -44,7 +45,11 @@ commas = joinBy (toHtml ", ")
 
 parens :: Html -> Html
 parens x = toHtml "(" <> x <> toHtml ")"
+
 braces :: Html -> Html
 braces x = toHtml "{" <> x <> toHtml "}"
 brackets :: Html -> Html
 brackets x = toHtml "[" <> x <> toHtml "]"
+
+pipes :: [Html] -> Html
+pipes = joinBy (toHtml " | ")

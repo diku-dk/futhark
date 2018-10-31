@@ -379,9 +379,27 @@ defuncExp (Assert e1 e2 desc loc) = do
   (e2', sv) <- defuncExp e2
   return (Assert e1' e2' desc loc, sv)
 
+defuncExp e@VConstr0{} = return (e, Dynamic $ typeOf e)
+
+defuncExp (Match e cs t loc) = do
+  (e', sv) <- defuncExp e
+  csPairs  <- mapM (defuncCase sv) cs
+  let cs' = map fst csPairs
+      sv' = case csPairs of
+              []   -> error "Matches must always have at least one case."
+              c':_ -> snd c'
+  return (Match e' cs' t loc, sv')
+
 -- | Same as 'defuncExp', except it ignores the static value.
 defuncExp' :: Exp -> DefM Exp
 defuncExp' = fmap fst . defuncExp
+
+defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
+defuncCase sv (CasePat p e loc) = do
+  let p'  = updatePattern p sv
+      env = matchPatternSV p sv
+  (e', sv') <- localEnv env $ defuncExp e
+  return (CasePat p' e' loc, sv')
 
 -- | Defunctionalize the function argument to a SOAC by eta-expanding if
 -- necessary and then defunctionalizing the body of the introduced lambda.
@@ -604,6 +622,7 @@ envFromPattern pat = case pat of
   Id vn (Info t) _        -> M.singleton vn $ Dynamic $ removeShapeAnnotations t
   Wildcard _ _            -> mempty
   PatternAscription p _ _ -> envFromPattern p
+  PatternLit{}            -> mempty
 
 -- | Create an environment that binds the shape parameters.
 envFromShapeParams :: [TypeParamBase VName] -> Env
@@ -702,6 +721,7 @@ matchPatternSV (Id vn (Info t) _) sv =
   else M.singleton vn sv
 matchPatternSV (Wildcard _ _) _ = mempty
 matchPatternSV (PatternAscription pat _ _) sv = matchPatternSV pat sv
+matchPatternSV PatternLit{} _ = mempty
 matchPatternSV pat (Dynamic t) = matchPatternSV pat $ svFromType t
 matchPatternSV pat sv = error $ "Tried to match pattern " ++ pretty pat
                              ++ " with static value " ++ show sv ++ "."
@@ -733,6 +753,7 @@ updatePattern (PatternAscription pat tydecl loc) sv
   | orderZero . unInfo $ expandedType tydecl =
       PatternAscription (updatePattern pat sv) tydecl loc
   | otherwise = updatePattern pat sv
+updatePattern p@PatternLit{} _ = p
 updatePattern pat (Dynamic t) = updatePattern pat (svFromType t)
 updatePattern pat sv =
   error $ "Tried to update pattern " ++ pretty pat
@@ -842,6 +863,10 @@ freeVars expr = case expr of
   Unzip e _ _         -> freeVars e
   Unsafe e _          -> freeVars e
   Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
+  VConstr0{}          -> mempty
+  Match e cs _ _      -> freeVars e <> foldMap caseFV cs
+    where caseFV (CasePat p eCase _) = (names (patternDimNames p) <> freeVars eCase)
+                                       `without` patternVars p
 
 freeDimIndex :: DimIndexBase Info VName -> NameSet
 freeDimIndex (DimFix e) = freeVars e
