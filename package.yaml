@@ -99,6 +99,9 @@ executables:
   futhark-opencl:
     <<: *futhark
     main: src/futhark-opencl.hs
+  futhark-cuda:
+    <<: *futhark
+    main: src/futhark-cuda.hs
   futhark-py:
     <<: *futhark
     main: src/futhark-py.hs

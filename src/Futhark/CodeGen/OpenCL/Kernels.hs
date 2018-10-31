@@ -14,6 +14,8 @@ module Futhark.CodeGen.OpenCL.Kernels
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
+import Futhark.CodeGen.ImpCode.OpenCL (KernelTarget(..))
+
 -- Some OpenCL platforms have a SIMD/warp/wavefront-based execution
 -- model that execute groups of threads in lockstep, permitting us to
 -- perform cross-thread synchronisation within each such group without
@@ -84,8 +86,9 @@ data TransposeType = TransposeNormal
 -- the kernel to handle input arrays with low height.
 --
 -- See issue #308 on GitHub for more details.
-mapTranspose :: C.ToIdent a => a -> C.Type -> TransposeType -> C.Func
-mapTranspose kernel_name elem_type transpose_type =
+mapTranspose :: C.ToIdent a => KernelTarget -> a -> C.Type -> TransposeType
+             -> C.Func
+mapTranspose target kernel_name elem_type transpose_type =
   case transpose_type of
     TransposeNormal ->
       bigKernel []
@@ -129,6 +132,7 @@ mapTranspose kernel_name elem_type transpose_type =
        // Note that input_size/output_size may not equal width*height if we are dealing with
        // a truncated array - this happens sometimes for coalescing optimisations.
        __kernel void $id:kernel_name($params:params) {
+         $items:param_init
          uint x_index;
          uint y_index;
          uint our_array_offset;
@@ -173,8 +177,14 @@ mapTranspose kernel_name elem_type transpose_type =
                                 uint width,
                                 uint height,
                                 uint input_size,
-                                uint output_size|] ++ extraparams ++
-                          [C.cparams|__local $ty:elem_type* block|]
+                                uint output_size|] ++ extraparams
+                                ++ shared_param
+                 shared_param = case target of
+                   TargetOpenCL -> [C.cparams|__local $ty:elem_type* block|]
+                   TargetCuda -> []
+                 param_init = case target of
+                   TargetOpenCL -> []
+                   TargetCuda -> [C.citems|volatile $ty:elem_type *block = ($ty:elem_type *)shared_mem;|]
 
     smallKernel =
       [C.cfun|

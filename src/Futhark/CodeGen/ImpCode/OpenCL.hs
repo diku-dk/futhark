@@ -15,6 +15,7 @@ module Futhark.CodeGen.ImpCode.OpenCL
        , KernelArg (..)
        , OpenCL (..)
        , transposeBlockDim
+       , KernelTarget (..)
        , module Futhark.CodeGen.ImpCode
        , module Futhark.Representation.Kernels.Sizes
        )
@@ -69,6 +70,11 @@ data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
 -- | The block size when transposing.
 transposeBlockDim :: Num a => a
 transposeBlockDim = 16
+
+-- | The target platform when compiling imperative code to a 'Program'
+data KernelTarget = TargetOpenCL
+                  | TargetCuda
+                  deriving (Eq)
 
 instance Pretty OpenCL where
   ppr = text . show
