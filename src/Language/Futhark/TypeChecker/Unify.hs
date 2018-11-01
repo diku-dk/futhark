@@ -279,6 +279,8 @@ equalityType loc t = do
               modifyConstraints $ M.insert vn (Equality loc)
             Just (Overloaded _ _) ->
               return () -- All primtypes support equality.
+            Just HasConstrs{} ->
+              return ()
             _ ->
               typeError loc $ "Type " ++ pretty (prettyName vn) ++
               " does not support equality."
