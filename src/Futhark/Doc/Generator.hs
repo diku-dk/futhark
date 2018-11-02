@@ -490,10 +490,10 @@ synopsisSpec :: SpecBase Info VName -> DocM Html
 synopsisSpec spec = case spec of
   TypeAbbrSpec tpsig ->
     fullRow <$> typeBindHtml (vnameSynopsisDef $ typeAlias tpsig) tpsig
-  TypeSpec Unlifted name ps _ _ ->
-    return $ fullRow $ keyword "type " <> vnameSynopsisDef name <> joinBy " " (map typeParamHtml ps)
-  TypeSpec Lifted name ps _ _ ->
-    return $ fullRow $ keyword "type" <> "^" <> vnameSynopsisDef name <> joinBy " " (map typeParamHtml ps)
+  TypeSpec l name ps _ _ ->
+    return $ fullRow $ keyword l' <> vnameSynopsisDef name <> mconcat (map ((" "<>) . typeParamHtml) ps)
+    where l' = case l of Unlifted -> "type "
+                         Lifted   -> "type^ "
   ValSpec name tparams rettype _ _ -> do
     let tparams' = map typeParamHtml tparams
     rettype' <- noLink (map typeParamName tparams) $
