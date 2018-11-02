@@ -1,6 +1,6 @@
 -- Missing pattern warning 3.
 -- ==
--- warning: unmatched
+-- error:
 
 type foobar = #foo | #bar
 

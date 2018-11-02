@@ -1,6 +1,6 @@
 -- Missing pattern warning 1.
 -- ==
--- warning: unmatched
+-- error:
 
 type planet = #mercury | #venus | #earth | #mars
 

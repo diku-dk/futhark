@@ -1,7 +1,7 @@
 -- Missing pattern warning 4; intended behaviour is to print the warning without
 -- superfluous parentheses.
 -- ==
--- warning: unmatched
+-- error:
 
 type foobar = #foo | #bar
 
