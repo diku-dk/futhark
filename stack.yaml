@@ -3,16 +3,15 @@ packages:
 - .
 
 extra-deps:
-- containers-0.5.11.0
 - exception-mtl-0.4.0.1
 - exception-transformers-0.4.0.7
 - haskell-src-meta-0.8.0.3@rev:1
-- language-c-quote-0.12.2
+- language-c-quote-0.12.2@rev:1
 - neat-interpolation-0.3.2.4
-- mainland-pretty-0.7
+- mainland-pretty-0.7@rev:1
 - megaparsec-7.0.1
 - srcloc-0.5.1.2
-- symbol-0.2.4
+- symbol-0.2.4@rev:2
 - versions-3.5.0
 flags: {}
 
