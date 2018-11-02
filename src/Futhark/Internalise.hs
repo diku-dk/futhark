@@ -124,7 +124,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
     zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: E.ValBind -> InternaliseM ()
-generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ orig_params _ _ loc) =
+generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) =
   -- We remove all shape annotations, so there should be no constant
   -- parameters here.
   bindingParams [] (map E.patternNoShapeAnnotations params) $
@@ -143,14 +143,6 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ orig_params _ _ 
       I.FunDef (Just entry') (baseName ofname)
       (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
-
-  -- XXX: We massage the parameters a little bit to handle the case
-  -- where there is just a single parameter that is a tuple.  This is
-  -- wide-spread in existing Futhark code, although I'd like to get
-  -- rid of it.
-  where params = case orig_params of
-          [TuplePattern ps _] -> ps
-          _                   -> orig_params
 
 entryPoint :: [(E.Pattern,[I.FParam])]
            -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
