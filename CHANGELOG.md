@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * Entry points that accept a single tuple-typed parameter are no
+    longer silently rewritten to accept multiple parameters.
+
 ### Fixed
 
 ## [0.7.4]
