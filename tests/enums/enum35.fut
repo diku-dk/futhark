@@ -1,6 +1,6 @@
 -- Missing pattern warning 5 (integers).
 -- ==
--- warning: unmatched
+-- error:
 
 let f : i32 =
   match (1 : i32)

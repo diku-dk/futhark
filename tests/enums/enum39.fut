@@ -1,6 +1,6 @@
 -- Missing pattern warning 9.
 -- ==
--- warning: unmatched
+-- error:
 
 type foobar = #foo | #bar
 type rec    = {f1 : foobar, f2 : f32}

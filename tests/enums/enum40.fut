@@ -1,7 +1,7 @@
 -- Missing pattern warning 10. 
 -- (Checks that warnings are still triggered with ambiguous types)
 -- ==
--- warning: unmatched
+-- error:
 
 type foobar = #foo | #bar
 

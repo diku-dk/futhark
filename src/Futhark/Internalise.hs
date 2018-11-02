@@ -423,15 +423,8 @@ internaliseExp desc e@E.Apply{} = do
            args' <- concat <$> mapM (internaliseExp "arg") args
            fst <$> funcall desc qfname args' loc
 
-internaliseExp desc (E.LetPat tparams pat e body loc) = do
-  ses <- internaliseExp desc e
-  t <- I.staticShapes <$> mapM I.subExpType ses
-  stmPattern tparams pat t $ \cm pat_names match -> do
-    mapM_ (uncurry (internaliseDimConstant loc)) cm
-    ses' <- match loc ses
-    forM_ (zip pat_names ses') $ \(v,se) ->
-      letBindNames_ [v] $ I.BasicOp $ I.SubExp se
-    internaliseExp desc body
+internaliseExp desc (E.LetPat tparams pat e body loc) =
+  internalisePat desc tparams pat e body loc (internaliseExp desc)
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
   internaliseValBind $ E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc
@@ -830,14 +823,14 @@ internaliseExp _ (E.VConstr0 c (Info t) loc) =
 
 internaliseExp desc (E.Match  e cs _ loc) =
   case cs of
-    (c@(CasePat _ eCase _):cs') -> do
+    [CasePat _ eCase _] -> internaliseExp desc eCase
+    (c:cs') -> do
       bFalse <- bFalseM
-      letTupExp' desc =<< generateCaseIf desc e bFalse c
+      letTupExp' desc =<< generateCaseIf desc e c bFalse
       where bFalseM = do
-              patFail' <- internaliseBody patFail
-              foldM (\bf c' -> eBody $ return $ generateCaseIf desc e bf c') patFail' cs'
-            patFail = E.Assert (E.Literal (E.BoolValue False) noLoc)
-                        eCase (Info "Pattern match failure.") loc
+              eLast' <- internalisePat desc [] pLast e eLast locLast internaliseBody
+              foldM (\bf c' -> eBody $ return $ generateCaseIf desc e c' bf) eLast' (reverse $ init cs')
+            CasePat pLast eLast locLast = last cs'
     [] -> fail $ "internaliseExp: match with no cases at: " ++ locStr loc
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
@@ -940,18 +933,24 @@ generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
         generateCond' (E.PatternLit ePat (Info t) _) =
           [(Just (eqExp ePat), removeShapeAnnotations t)]
 
-generateCaseIf :: String -> E.Exp -> I.Body -> Case -> InternaliseM I.Exp
-generateCaseIf desc e bFail (CasePat p eCase loc) = do
+
+generateCaseIf :: String -> E.Exp -> Case -> I.Body -> InternaliseM I.Exp
+generateCaseIf desc e (CasePat p eCase loc) bFail = do
+  eCase' <- internalisePat desc [] p e eCase loc internaliseBody
+  eIf cond (return eCase') (return bFail)
+  where cond = BasicOp . SubExp <$> internaliseExp1 "cond" (generateCond p e)
+
+internalisePat :: String -> [TypeParamBase VName] -> E.Pattern -> E.Exp
+               -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a) -> InternaliseM a
+internalisePat desc tparams p e body loc m = do
   ses <- internaliseExp desc e
   t <- I.staticShapes <$> mapM I.subExpType ses
-  eCase' <- stmPattern [] p t $ \cm pat_names match -> do
-      mapM_ (uncurry (internaliseDimConstant loc)) cm
-      ses' <- match loc ses
-      forM_ (zip pat_names ses') $ \(v,se) ->
-        letBindNames_ [v] $ I.BasicOp (I.SubExp se)
-      internaliseBody eCase
-  let cond = BasicOp . SubExp <$> internaliseExp1 "cond" (generateCond p e)
-  eIf cond (return eCase') (return bFail)
+  stmPattern tparams p t $ \cm pat_names match -> do
+    mapM_ (uncurry (internaliseDimConstant loc)) cm
+    ses' <- match loc ses
+    forM_ (zip pat_names ses') $ \(v,se) ->
+      letBindNames_ [v] $ I.BasicOp $ I.SubExp se
+    m body
 
 internaliseSlice :: SrcLoc
                  -> [SubExp]

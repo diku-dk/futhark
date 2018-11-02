@@ -1,6 +1,6 @@
 -- Missing pattern warning 8 (bool).
 -- ==
--- warning: unmatched
+-- error:
 
 let f : bool =
   match (true, false)
