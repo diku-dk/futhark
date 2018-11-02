@@ -1364,20 +1364,17 @@ wildPattern (PatternAscription p _ _) pos um = wildPattern p pos um
 wildPattern (PatternParens p _) pos um = wildPattern p pos um
 wildPattern _ _ um = um
 
-checkUnmatched :: (MonadTypeChecker m) => Exp -> m ()
-checkUnmatched (Match _ cs _ loc) =
-  case unmatched id ps of
-    []  -> return ()
-    ps' -> warn loc $ "Possible unmatched cases: \n"
-                      ++ unlines (map pretty ps')
-  where ps = map getPattern cs
-        getPattern (CasePat p _ _ ) = p
-checkUnmatched _ = return ()
-
-warnUnmatched :: (MonadTypeChecker m) => Exp -> m ()
-warnUnmatched e = void $ checkUnmatched e >> astMap tv e
-  where tv = ASTMapper { mapOnExp =
-                           \e' -> checkUnmatched e' >> return e'
+checkUnmatched :: (MonadBreadCrumbs m, MonadTypeChecker m) => Exp -> m ()
+checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
+  where checkUnmatched' (Match _ cs _ loc) =
+          let ps = map (\(CasePat p _ _) -> p) cs
+          in case unmatched id ps of
+              []  -> return ()
+              ps' -> typeError loc $ "Unmatched cases in match expression: \n"
+                                     ++ unlines (map (("  " ++) . pretty) ps')
+        checkUnmatched' _ = return ()
+        tv = ASTMapper { mapOnExp =
+                           \e' -> checkUnmatched' e' >> return e'
                        , mapOnName        = pure
                        , mapOnQualName    = pure
                        , mapOnType        = pure
@@ -1418,7 +1415,8 @@ unmatched hole (p:ps)
             _ -> []
 
         sameStructure [] = True
-        sameStructure (x:xs) = all (\y -> length y == length x ) xs
+        sameStructure (x:xs) = all (\y -> length y == length x' ) xs'
+          where (x':xs') = map snd (x:xs)
 
         pExp (PatternLit e' _ _) = Just e'
         pExp _ = Nothing
@@ -1570,8 +1568,8 @@ checkFunDef f = fmap fst $ runTermTypeM $ do
   rettype' <- normaliseType rettype
 
   -- Check if pattern matches are exhaustive and yield
-  -- warnings if not.
-  warnUnmatched body'
+  -- errors if not.
+  checkUnmatched body'
 
   return (fname, tparams, params', maybe_retdecl', rettype', body')
 

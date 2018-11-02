@@ -1,6 +1,5 @@
 -- Non-exhaustive pattern match.
 -- ==
--- input { }
 -- error: 
 
 type planet = #mercury | #venus | #earth | #mars
