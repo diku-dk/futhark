@@ -1,6 +1,6 @@
 -- Missing pattern warning 6 (floats).
 -- ==
--- warning: unmatched
+-- error:
 
 let f : f32 =
   match (1.5 : f32)
