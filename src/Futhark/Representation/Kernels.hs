@@ -16,8 +16,6 @@ module Futhark.Representation.Kernels
        )
 where
 
-import Control.Monad
-
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Kernels.KernelExp
@@ -47,37 +45,15 @@ instance Attributes InKernel where
   expTypesFromPattern = return . expExtTypesFromPattern
 instance PrettyLore InKernel where
 
-instance TypeCheck.Checkable Kernels where
-  checkExpLore = return
-  checkBodyLore = return
-  checkFParamLore _ = TypeCheck.checkType
-  checkLParamLore _ = TypeCheck.checkType
-  checkLetBoundLore _ = TypeCheck.checkType
-  checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
+instance TypeCheck.CheckableOp Kernels where
   checkOp = TypeCheck.subCheck . typeCheckKernel
-  matchPattern pat = TypeCheck.matchExtPattern pat <=< expExtType
-  primFParam name t =
-    return $ Param name (Prim t)
-  primLParam name t =
-    return $ Param name (Prim t)
-  matchReturnType = TypeCheck.matchExtReturnType . map fromDecl
-  matchBranchType = TypeCheck.matchExtBranchType
+
+instance TypeCheck.CheckableOp InKernel where
+  checkOp = TypeCheck.subCheck . typeCheckKernelExp
+
+instance TypeCheck.Checkable Kernels where
 
 instance TypeCheck.Checkable InKernel where
-  checkExpLore = return
-  checkBodyLore = return
-  checkFParamLore _ = TypeCheck.checkType
-  checkLParamLore _ = TypeCheck.checkType
-  checkLetBoundLore _ = TypeCheck.checkType
-  checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  checkOp = typeCheckKernelExp
-  matchPattern pat = TypeCheck.matchExtPattern pat <=< expExtType
-  primFParam name t =
-    return $ Param name (Prim t)
-  primLParam name t =
-    return $ Param name (Prim t)
-  matchReturnType = TypeCheck.matchExtReturnType . map fromDecl
-  matchBranchType = TypeCheck.matchExtBranchType
 
 instance Bindable Kernels where
   mkBody = Body ()

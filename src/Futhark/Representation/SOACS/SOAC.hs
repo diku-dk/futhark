@@ -12,13 +12,13 @@ module Futhark.Representation.SOACS.SOAC
        , Scan
        , Reduce
 
-       , typeCheckSOAC
-
          -- * Utility
        , getStreamOrder
        , getStreamAccums
        , scremaType
        , soacType
+
+       , typeCheckSOAC
 
        , mkIdentityLambda
        , isIdentityLambda
