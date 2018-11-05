@@ -24,9 +24,10 @@ The resulting program will otherwise behave exactly as one compiled
 with ``futhark-py``.  While the sequential host-level code is pure
 Python and just as slow as in ``futhark-py``, parallel sections will
 have been compiled to OpenCL, and runs just as fast as when using
-``futhark-c(1)``.  The kernel launch overhead is significantly higher,
-however, so a good rule of thumb when using ``futhark-pyopencl`` is to
-aim for having fewer but longer-lasting parallel sections.
+``futhark-opencl``.  The kernel launch overhead is significantly
+higher, however, so a good rule of thumb when using
+``futhark-pyopencl`` is to aim for having fewer but longer-lasting
+parallel sections.
 
 The generated code requires at least PyOpenCL version 2015.2.
 
