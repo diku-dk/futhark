@@ -75,8 +75,11 @@ module Futhark.CodeGen.ImpGen
   , dScopes
   , dPrim, dPrim_
 
-  , sFor
-  , sWhile
+  , sFor, sWhile
+  , sComment
+  , sIf, sWhen
+  , sOp
+  , (<--)
   )
   where
 
@@ -1326,3 +1329,25 @@ sWhile :: Imp.Exp -> ImpM lore op () -> ImpM lore op ()
 sWhile cond body = do
   body' <- collect body
   emit $ Imp.While cond body'
+
+sComment :: String -> ImpM lore op () -> ImpM lore op ()
+sComment s code = do
+  code' <- collect code
+  emit $ Imp.Comment s code'
+
+sIf :: Imp.Exp -> ImpM lore op () -> ImpM lore op () -> ImpM lore op ()
+sIf cond tbranch fbranch = do
+  tbranch' <- collect tbranch
+  fbranch' <- collect fbranch
+  emit $ Imp.If cond tbranch' fbranch'
+
+sWhen :: Imp.Exp -> ImpM lore op () -> ImpM lore op ()
+sWhen cond tbranch = sIf cond tbranch (return ())
+
+sOp :: op -> ImpM lore op ()
+sOp = emit . Imp.Op
+
+-- | ASsignment.
+(<--) :: VName -> Imp.Exp -> ImpM lore op ()
+x <-- e = emit $ Imp.SetScalar x e
+infixl 3 <--
