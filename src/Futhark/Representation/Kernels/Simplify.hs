@@ -65,7 +65,7 @@ simplifyKernelOp mk_ops env (Kernel desc space ts kbody) = do
   space' <- Engine.simplify space
   ts' <- mapM Engine.simplify ts
   outer_vtable <- Engine.askVtable
-  (((kbody_stms, kbody_res), kbody_hoisted), again) <-
+  ((kbody_stms, kbody_res), kbody_hoisted) <-
     Engine.subSimpleM (mk_ops space) env outer_vtable $ do
       par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
       Engine.localVtable (<>scope_vtable) $
@@ -74,7 +74,6 @@ simplifyKernelOp mk_ops env (Kernel desc space ts kbody) = do
                         `Engine.orIf` par_blocker
                         `Engine.orIf` Engine.isConsumed) $
         simplifyKernelBodyM kbody
-  when again Engine.changed
   kbody_hoisted' <- mapM processHoistedStm kbody_hoisted
   return (Kernel desc space' ts' $ mkWiseKernelBody () kbody_stms kbody_res,
           kbody_hoisted')

@@ -40,7 +40,6 @@ module Futhark.Optimise.Simplify.Engine
        , isOp
        , isNotSafe
        , asksEngineEnv
-       , changed
        , askVtable
        , localVtable
 
@@ -167,8 +166,7 @@ runSimpleM (SimpleM m) simpl env src =
   let (x, (src', b), _) = runRWS m (simpl, env) (src, False)
   in ((x, b), src')
 
-subSimpleM :: (MonadFreshNames m,
-               SameScope outerlore lore,
+subSimpleM :: (SameScope outerlore lore,
                ExpAttr outerlore ~ ExpAttr lore,
                BodyAttr outerlore ~ BodyAttr lore,
                RetType outerlore ~ RetType lore,
@@ -177,14 +175,15 @@ subSimpleM :: (MonadFreshNames m,
            -> Env lore
            -> ST.SymbolTable (Wise outerlore)
            -> SimpleM lore a
-           -> m (a, Bool)
+           -> SimpleM outerlore a
 subSimpleM simpl env outer_vtable m = do
   let inner_vtable = ST.castSymbolTable outer_vtable
   src <- getNameSource
   let SimpleM m' = localVtable (<>inner_vtable) m
       (x, (src', b), _) = runRWS m' (simpl, env) (src, False)
   putNameSource src'
-  return (x, b)
+  when b changed
+  return x
 
 askEngineEnv :: SimpleM lore (Env lore)
 askEngineEnv = snd <$> ask
