@@ -77,7 +77,7 @@ module Futhark.CodeGen.ImpGen
 
   , sFor, sWhile
   , sComment
-  , sIf, sWhen
+  , sIf, sWhen, sUnless
   , sOp
   , (<--)
   )
@@ -1343,6 +1343,9 @@ sIf cond tbranch fbranch = do
 
 sWhen :: Imp.Exp -> ImpM lore op () -> ImpM lore op ()
 sWhen cond tbranch = sIf cond tbranch (return ())
+
+sUnless :: Imp.Exp -> ImpM lore op () -> ImpM lore op ()
+sUnless cond = sIf cond (return ())
 
 sOp :: op -> ImpM lore op ()
 sOp = emit . Imp.Op

@@ -27,7 +27,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen ((<--),
-                               sFor, sWhile, sComment, sIf, sWhen,
+                               sFor, sWhile, sComment, sIf, sWhen, sUnless,
                                sOp,
                                dPrim, dPrim_)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
@@ -624,9 +624,8 @@ compileKernelStms constants ungrouped_bnds m =
           body_m
         protect (Just (Imp.ValueExp (BoolValue True))) body_m =
           body_m
-        protect (Just g) body_m = do
-          body <- allThreads constants body_m
-          ImpGen.emit $ Imp.If g body mempty
+        protect (Just g) body_m =
+          sWhen g $ allThreads constants body_m
 
         compileKernelStm (Let pat _ e) = do
           dest <- ImpGen.destinationFromPattern pat
@@ -675,7 +674,7 @@ compileKernelExp constants dest (Combine (CombineSpace scatter cspace) ts aspace
 
   iter <- newVName "comb_iter"
 
-  one_iteration <- ImpGen.collect $ do
+  sFor iter Int32 num_iters $ do
     mapM_ ((`dPrim_` int32) . fst) cspace
     cid <- dPrim "flat_comb_id" int32
 
@@ -702,7 +701,9 @@ compileKernelExp constants dest (Combine (CombineSpace scatter cspace) ts aspace
             zipWithM (index local_index) (drop (sum scatter_ns*2) ts) normal_dests) of
         (Just x, Just y) -> return (x, y)
         _ -> fail "compileKernelExp combine: invalid destination."
-    body' <- allThreads constants $
+
+    -- Execute the body if we are within bounds.
+    sWhen (isActive cspace .&&. isActive aspace) $ allThreads constants $
       ImpGen.compileStms (freeIn $ bodyResult body) (stmsToList $ bodyStms body) $ do
 
       forM_ (zip4 scatter_ws_repl res_is res_vs scatter_dests') $
@@ -711,32 +712,26 @@ compileKernelExp constants dest (Combine (CombineSpace scatter cspace) ts aspace
               w'     = ImpGen.compileSubExpOfType int32 w
               -- We have to check that 'res_i' is in-bounds wrt. an array of size 'w'.
               in_bounds = 0 .<=. res_i' .&&. res_i' .<. w'
-          when_in_bounds <- ImpGen.collect $ ImpGen.compileSubExpTo scatter_dest res_v
-          ImpGen.emit $ Imp.If in_bounds when_in_bounds mempty
+          sWhen in_bounds $ ImpGen.compileSubExpTo scatter_dest res_v
 
       zipWithM_ ImpGen.compileSubExpTo normal_dests' res_normal
 
-    -- Execute the body if we are within bounds.
-    ImpGen.emit $
-      Imp.If (isActive cspace .&&. isActive aspace) body' mempty
+  sOp Imp.Barrier
 
-  ImpGen.emit $ Imp.For iter Int32 num_iters one_iteration
-  ImpGen.emit $ Imp.Op Imp.Barrier
+  where streamBounded (Var v)
+          | Just x <- lookup v $ kernelStreamed constants =
+              Imp.sizeToExp x
+        streamBounded se = ImpGen.compileSubExpOfType int32 se
 
-    where streamBounded (Var v)
-            | Just x <- lookup v $ kernelStreamed constants =
-                Imp.sizeToExp x
-          streamBounded se = ImpGen.compileSubExpOfType int32 se
+        local_index = map (DimFix . ImpGen.varIndex . fst) cspace
 
-          local_index = map (DimFix . ImpGen.varIndex . fst) cspace
-
-          index i t (ImpGen.ArrayDestination (Just loc)) =
-            let space_dims = map (ImpGen.varIndex . fst) cspace
-                t_dims = map (ImpGen.compileSubExpOfType int32) $ arrayDims t
-            in Just $ ImpGen.ArrayDestination $
-               Just $ ImpGen.sliceArray loc $
-               fullSliceNum (space_dims++t_dims) i
-          index _ _ _ = Nothing
+        index i t (ImpGen.ArrayDestination (Just loc)) =
+          let space_dims = map (ImpGen.varIndex . fst) cspace
+              t_dims = map (ImpGen.compileSubExpOfType int32) $ arrayDims t
+          in Just $ ImpGen.ArrayDestination $
+             Just $ ImpGen.sliceArray loc $
+             fullSliceNum (space_dims++t_dims) i
+        index _ _ _ = Nothing
 
 compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input) = do
   w' <- ImpGen.compileSubExp w
@@ -765,11 +760,8 @@ compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input
 
   setOffset 0
 
-  set_init_params <- ImpGen.collect $
+  sWhen (Imp.var local_tid int32 .<. w') $
     zipWithM_ (readReduceArgument offset) reduce_acc_params arrs
-  ImpGen.emit $
-    Imp.If (Imp.var local_tid int32 .<. w')
-    set_init_params mempty
 
   let read_reduce_args = zipWithM_ (readReduceArgument offset)
                          reduce_arr_params arrs
@@ -874,45 +866,41 @@ compileKernelExp constants _ (GroupScan w lam input) = do
   doInBlockScan lid_in_bounds lam
   ImpGen.emit $ Imp.Op Imp.Barrier
 
-  pack_block_results <-
-    ImpGen.collect $
+  let last_in_block = in_block_id .==. block_size - 1
+  sComment "last thread of block 'i' writes its result to offset 'i'" $
+    sWhen (last_in_block .&&. lid_in_bounds) $
     zipWithM_ (writeParamToLocalMemory block_id) acc_local_mem y_params
 
-  let last_in_block = in_block_id .==. block_size - 1
-  ImpGen.comment
-    "last thread of block 'i' writes its result to offset 'i'" $
-    ImpGen.emit $ Imp.If (last_in_block .&&. lid_in_bounds) pack_block_results mempty
-
-  ImpGen.emit $ Imp.Op Imp.Barrier
+  sOp Imp.Barrier
 
   let is_first_block = block_id .==. 0
   ImpGen.comment
     "scan the first block, after which offset 'i' contains carry-in for warp 'i+1'" $
     doInBlockScan (is_first_block .&&. lid_in_bounds) renamed_lam
 
-  ImpGen.emit $ Imp.Op Imp.Barrier
+  sOp Imp.Barrier
 
-  read_carry_in <-
-    ImpGen.collect $
-    zipWithM_ (readParamFromLocalMemory
-               (paramName other_index_param) (block_id - 1))
-    x_params acc_local_mem
+  let read_carry_in =
+        zipWithM_ (readParamFromLocalMemory
+                   (paramName other_index_param) (block_id - 1))
+        x_params acc_local_mem
 
   y_dest <- ImpGen.destinationFromParams y_params
-  op_to_y <- ImpGen.collect $ ImpGen.compileBody y_dest $ lambdaBody lam
-  write_final_result <- ImpGen.collect $
-    zipWithM_ (writeParamToLocalMemory $ Imp.var local_tid int32) acc_local_mem y_params
+  let op_to_y =
+        ImpGen.compileBody y_dest $ lambdaBody lam
+      write_final_result =
+        zipWithM_ (writeParamToLocalMemory $ Imp.var local_tid int32) acc_local_mem y_params
 
-  ImpGen.comment "carry-in for every block except the first" $
-    ImpGen.emit $ Imp.If (is_first_block .||. Imp.UnOpExp Not lid_in_bounds) mempty $
-    Imp.Comment "read operands" read_carry_in <>
-    Imp.Comment "perform operation" op_to_y <>
-    Imp.Comment "write final result" write_final_result
+  sComment "carry-in for every block except the first" $
+    sUnless (is_first_block .||. Imp.UnOpExp Not lid_in_bounds) $ do
+    sComment "read operands" read_carry_in
+    sComment "perform operation" op_to_y
+    sComment "write final result" write_final_result
 
-  ImpGen.emit $ Imp.Op Imp.Barrier
+  sOp Imp.Barrier
 
-  ImpGen.comment "restore correct values for first block" $
-    ImpGen.emit $ Imp.If is_first_block write_final_result mempty
+  sComment "restore correct values for first block" $
+    sWhen is_first_block write_final_result
 
 compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w maxchunk lam accs _arrs) = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
@@ -929,9 +917,8 @@ compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w m
   case mapM isSimpleThreadInSpace $ stmsToList $ bodyStms body of
     Just stms' | ValueExp x <- max_block_size, oneIsh x -> do
       let body' = body { bodyStms = stmsFromList stms' }
-      body'' <- do dPrim_ block_offset int32
-                   allThreads constants $ ImpGen.emit =<<
-                     ImpGen.compileLoopBody (map paramName acc_params) body'
+          body'' = allThreads constants $ ImpGen.emit =<<
+                   ImpGen.compileLoopBody (map paramName acc_params) body'
       block_size <-- 1
 
       -- Check if loop is candidate for unrolling.
@@ -940,15 +927,14 @@ compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w m
               Var w_var | Just w_bound <- lookup w_var $ kernelStreamed constants,
                           w_bound /= Imp.ConstSize 1 ->
                           -- Candidate for unrolling, so generate two loops.
-                          Imp.If (w' .==. Imp.sizeToExp w_bound)
-                          (Imp.For block_offset Int32 (Imp.sizeToExp w_bound) body'')
-                          (Imp.For block_offset Int32 w' body'')
-              _ -> Imp.For block_offset Int32 w' body''
+                          sIf (w' .==. Imp.sizeToExp w_bound)
+                          (sFor block_offset Int32 (Imp.sizeToExp w_bound) body'')
+                          (sFor block_offset Int32 w' body'')
+              _ -> sFor block_offset Int32 w' body''
 
-      ImpGen.emit $
-        if kernelThreadActive constants == Imp.ValueExp (BoolValue True)
+      if kernelThreadActive constants == Imp.ValueExp (BoolValue True)
         then loop
-        else Imp.If (kernelThreadActive constants) loop mempty
+        else sWhen (kernelThreadActive constants) loop
 
     _ -> do
       dPrim_ block_offset int32
@@ -1004,11 +990,7 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
   case opHasAtomicSupport old arr' bucket_offset op of
     Just f -> do
       val' <- ImpGen.compileSubExp v
-
-      ImpGen.emit $
-        Imp.If (indexInBounds bucket' w')
-        (Imp.Op $ f val')
-        Imp.Skip
+      sWhen (indexInBounds bucket' w') (sOp $ f val')
 
     Nothing -> do
       -- Code generation target:
@@ -1149,8 +1131,8 @@ indexInBounds inds bounds =
   foldl1 (.&&.) $ zipWith checkBound inds bounds
   where checkBound ind bound = 0 .<=. ind .&&. ind .<. bound
 
-allThreads :: KernelConstants -> InKernelGen () -> InKernelGen Imp.KernelCode
-allThreads constants = ImpGen.subImpM_ $ inKernelOperations constants'
+allThreads :: KernelConstants -> InKernelGen () -> InKernelGen ()
+allThreads constants = ImpGen.emit <=< ImpGen.subImpM_ (inKernelOperations constants')
   where constants' =
           constants { kernelThreadActive = Imp.ValueExp (BoolValue True) }
 
@@ -1171,13 +1153,9 @@ compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
   let me = Imp.var (kernelLocalThreadId constants) int32
 
   if not in_local_memory then do
-    write_result <-
-      ImpGen.collect $
-      ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
-
     who' <- ImpGen.compileSubExp $ intConst Int32 0
-    ImpGen.emit $
-      Imp.If (me .==. who') write_result mempty
+    sWhen (me .==. who') $
+      ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
     else do
       -- If the result of the group is an array in local memory, we
       -- store it by collective copying among all the threads of the
@@ -1195,28 +1173,19 @@ compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
           to_write = (w - ltid) `quotRoundingUp` group_size
           is = unflattenIndex ws $ ImpGen.varIndex i * group_size + ltid
 
-      write_result <-
-        ImpGen.collect $
-        ImpGen.copyDWIMDest dest (ImpGen.varIndex (kernelGroupId constants) : is)
-                            what is
-
-      ImpGen.emit $ Imp.For i Int32 to_write write_result
+      sFor i Int32 to_write $
+        ImpGen.copyDWIMDest dest (ImpGen.varIndex (kernelGroupId constants) : is) what is
 
 compileKernelResult constants dest (ThreadsReturn AllThreads what) =
   ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
 
-compileKernelResult constants dest (ThreadsReturn (ThreadsPerGroup limit) what) = do
-  write_result <-
-    ImpGen.collect $
-    ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
-
-  ImpGen.emit $ Imp.If (isActive limit) write_result mempty
+compileKernelResult constants dest (ThreadsReturn (ThreadsPerGroup limit) what) =
+  sWhen (isActive limit) $
+  ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
 
 compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
   let is = map (ImpGen.varIndex . fst) $ kernelDimensions constants
-  write_result <- ImpGen.collect $ ImpGen.copyDWIMDest dest is what []
-  ImpGen.emit $ Imp.If (kernelThreadActive constants)
-    write_result mempty
+  sWhen (kernelThreadActive constants) $ ImpGen.copyDWIMDest dest is what []
 
 compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_elems moffset what) = do
   ImpGen.ArrayDestination (Just dest_loc) <- return dest
@@ -1246,9 +1215,7 @@ compileKernelResult constants dest (WriteReturn rws _arr dests) = do
     let condInBounds i rw = 0 .<=. i .&&. i .<. rw
         write = foldl (.&&.) (kernelThreadActive constants) $
                 zipWith condInBounds is' rws'
-    actual_body' <- ImpGen.collect $
-      ImpGen.copyDWIMDest dest (map (ImpGen.compileSubExpOfType int32) is) e []
-    ImpGen.emit $ Imp.If write actual_body' Imp.Skip
+    sWhen write $ ImpGen.copyDWIMDest dest (map (ImpGen.compileSubExpOfType int32) is) e []
 
 compileKernelResult _ _ KernelInPlaceReturn{} =
   -- Already in its place... said it was a hack.
@@ -1260,7 +1227,7 @@ isActive limit = case actives of
                     x:xs -> foldl (.&&.) x xs
   where (is, ws) = unzip limit
         actives = zipWith active is $ map (ImpGen.compileSubExpOfType Bool) ws
-        active i = (Imp.var i Bool .<.)
+        active i = (Imp.var i int32 .<.)
 
 setSpaceIndices :: KernelSpace -> InKernelGen ()
 setSpaceIndices space =
