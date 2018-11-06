@@ -487,7 +487,7 @@ defCompileBody (Destination _ dest) (Body _ bnds ses) =
   compileStms (freeIn ses) (stmsToList bnds) $ zipWithM_ compileSubExpTo dest ses
 
 compileLoopBody :: (ExplicitMemorish lore, FreeIn op) =>
-                   [VName] -> Body lore -> ImpM lore op (Imp.Code op)
+                   [VName] -> Body lore -> ImpM lore op ()
 compileLoopBody mergenames (Body _ bnds ses) = do
   -- We cannot write the results to the merge parameters immediately,
   -- as some of the results may actually *be* merge parameters, and
@@ -496,7 +496,7 @@ compileLoopBody mergenames (Body _ bnds ses) = do
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
   tmpnames <- mapM (newVName . (++"_tmp") . baseString) mergenames
-  collect $ compileStms (freeIn ses) (stmsToList bnds) $ do
+  compileStms (freeIn ses) (stmsToList bnds) $ do
     copy_to_merge_params <- forM (zip3 mergenames tmpnames ses) $ \(d,tmp,se) ->
       subExpType se >>= \case
         Prim bt  -> do
@@ -578,7 +578,7 @@ defCompileExp (Destination _ dest) (DoLoop ctx val form body) = do
     when na $
       copyDWIM (paramName p) [] se []
 
-  let doBody = emit =<< compileLoopBody mergenames body
+  let doBody = compileLoopBody mergenames body
 
   case form of
     ForLoop i it bound loopvars -> do

@@ -81,15 +81,15 @@ kernelCompiler :: ImpGen.Destination -> Kernel InKernel
 
 kernelCompiler dest (GetSize key size_class) = do
   [v] <- ImpGen.funcallTargets dest
-  ImpGen.emit $ Imp.Op $ Imp.GetSize v key size_class
+  sOp $ Imp.GetSize v key size_class
 
 kernelCompiler dest (CmpSizeLe key size_class x) = do
   [v] <- ImpGen.funcallTargets dest
-  ImpGen.emit =<< Imp.Op . Imp.CmpSizeLe v key size_class <$> ImpGen.compileSubExp x
+  sOp . Imp.CmpSizeLe v key size_class =<< ImpGen.compileSubExp x
 
 kernelCompiler dest (GetSizeMax size_class) = do
   [v] <- ImpGen.funcallTargets dest
-  ImpGen.emit $ Imp.Op $ Imp.GetSizeMax v size_class
+  sOp $ Imp.GetSizeMax v size_class
 
 kernelCompiler dest (Kernel desc space _ kernel_body) = do
 
@@ -123,12 +123,11 @@ kernelCompiler dest (Kernel desc space _ kernel_body) = do
     dPrim_ thread_active Bool
     ImpGen.dScope Nothing (scopeOfKernelSpace space)
 
-    ImpGen.emit $
-      Imp.Op (Imp.GetGlobalId global_tid 0) <>
-      Imp.Op (Imp.GetLocalId local_tid 0) <>
-      Imp.Op (Imp.GetLocalSize inner_group_size 0) <>
-      Imp.Op (Imp.GetLockstepWidth wave_size) <>
-      Imp.Op (Imp.GetGroupId group_id 0)
+    sOp (Imp.GetGlobalId global_tid 0)
+    sOp (Imp.GetLocalId local_tid 0)
+    sOp (Imp.GetLocalSize inner_group_size 0)
+    sOp (Imp.GetLockstepWidth wave_size)
+    sOp (Imp.GetGroupId group_id 0)
 
     setSpaceIndices space
 
@@ -148,7 +147,7 @@ kernelCompiler dest (Kernel desc space _ kernel_body) = do
 
     ImpGen.compileSubExp v >>= ImpGen.emit . Imp.DebugPrint s (elemType ty)
 
-  ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
+  sOp $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = kernel_body'
             , Imp.kernelLocalMemory = local_memory
             , Imp.kernelUses = uses
@@ -182,7 +181,7 @@ expCompiler
                       (freeIn body <> freeIn [n',x',s'])
                       [thread_gid]
 
-    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel
+    sOp $ Imp.CallKernel $ Imp.Map Imp.MapKernel
       { Imp.mapKernelThreadNum = thread_gid
       , Imp.mapKernelDesc = "iota"
       , Imp.mapKernelNumGroups = Imp.VarSize num_groups
@@ -215,7 +214,7 @@ expCompiler
                       (freeIn body <> freeIn ds')
                       [thread_gid]
 
-    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel
+    sOp $ Imp.CallKernel $ Imp.Map Imp.MapKernel
       { Imp.mapKernelThreadNum = thread_gid
       , Imp.mapKernelDesc = "replicate"
       , Imp.mapKernelNumGroups = Imp.VarSize num_groups
@@ -240,7 +239,7 @@ callKernelCopy bt
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
           src_elems, dest_elems) <- isMapTransposeKernel bt destloc srcloc =
-  ImpGen.emit $ Imp.Op $ Imp.CallKernel $
+  sOp $ Imp.CallKernel $
   Imp.MapTranspose bt
   destmem destoffset
   srcmem srcoffset
@@ -294,7 +293,7 @@ callKernelCopy bt
     let bound_in_kernel = [global_thread_index]
     (body_uses, _) <- computeKernelUses (kernel_size, body) bound_in_kernel
 
-    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel
+    sOp $ Imp.CallKernel $ Imp.Map Imp.MapKernel
       { Imp.mapKernelThreadNum = global_thread_index
       , Imp.mapKernelDesc = "copy"
       , Imp.mapKernelNumGroups = Imp.VarSize num_groups
@@ -541,8 +540,8 @@ inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = I
       write_operation_result =
         zipWithM_ (writeParamToLocalMemory $ Imp.var local_id int32)
         acc_local_mem y_params
-      maybeBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32)$
-                     ImpGen.emit $ Imp.Op Imp.Barrier
+      maybeBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32) $
+                     sOp Imp.Barrier
 
   sComment "in-block scan (hopefully no barriers needed)" $ do
     skip_threads <-- 1
@@ -651,7 +650,7 @@ compileKernelExp :: KernelConstants -> ImpGen.Destination -> KernelExp InKernel
 
 compileKernelExp _ (ImpGen.Destination _ dests) (Barrier ses) = do
   zipWithM_ ImpGen.compileSubExpTo dests ses
-  ImpGen.emit $ Imp.Op Imp.Barrier
+  sOp Imp.Barrier
 
 compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
   | ImpGen.Destination _ [ImpGen.ScalarDestination size] <- dest = do
@@ -864,7 +863,7 @@ compileKernelExp constants _ (GroupScan w lam input) = do
       lid_in_bounds = Imp.var local_tid int32 .<. w'
 
   doInBlockScan lid_in_bounds lam
-  ImpGen.emit $ Imp.Op Imp.Barrier
+  sOp Imp.Barrier
 
   let last_in_block = in_block_id .==. block_size - 1
   sComment "last thread of block 'i' writes its result to offset 'i'" $
@@ -917,7 +916,7 @@ compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w m
   case mapM isSimpleThreadInSpace $ stmsToList $ bodyStms body of
     Just stms' | ValueExp x <- max_block_size, oneIsh x -> do
       let body' = body { bodyStms = stmsFromList stms' }
-          body'' = allThreads constants $ ImpGen.emit =<<
+          body'' = allThreads constants $
                    ImpGen.compileLoopBody (map paramName acc_params) body'
       block_size <-- 1
 
