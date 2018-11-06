@@ -8,6 +8,7 @@ module Futhark.Analysis.PrimExp
   , coerceIntPrimExp
 
   , module Futhark.Representation.Primitive
+  , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
   ) where
 
 import           Data.Foldable
@@ -150,6 +151,39 @@ instance Pretty v => IntegralExp (PrimExp v) where
   fromInt32 = ValueExp . IntValue . Int32Value
   fromInt64 = ValueExp . IntValue . Int64Value
 
+-- | Lifted logical conjunction.
+(.&&.) :: PrimExp v -> PrimExp v -> PrimExp v
+x .&&. y = BinOpExp LogAnd x y
+
+-- | Lifted logical conjunction.
+(.||.) :: PrimExp v -> PrimExp v -> PrimExp v
+x .||. y = BinOpExp LogOr x y
+
+-- | Lifted relational operators; assuming signed numbers in case of
+-- integers.
+(.<.), (.>.), (.<=.), (.>=.), (.==.) :: PrimExp v -> PrimExp v -> PrimExp v
+x .<. y = CmpOpExp cmp x y where cmp = case primExpType x of
+                                         IntType t -> CmpSlt $ t `min` primExpIntType y
+                                         FloatType t -> FCmpLt t
+                                         _ -> CmpLlt
+x .<=. y = CmpOpExp cmp x y where cmp = case primExpType x of
+                                          IntType t -> CmpSle $ t `min` primExpIntType y
+                                          FloatType t -> FCmpLe t
+                                          _ -> CmpLle
+x .==. y = CmpOpExp (CmpEq $ primExpType x `min` primExpType y) x y
+x .>. y = y .<. x
+x .>=. y = y .<=. x
+
+-- | Lifted bitwise operators.
+(.&.), (.|.), (.^.) :: PrimExp v -> PrimExp v -> PrimExp v
+x .&. y = BinOpExp (And $ primExpIntType x `min` primExpIntType y) x y
+x .|. y = BinOpExp (Or $ primExpIntType x `min` primExpIntType y) x y
+x .^. y = BinOpExp (Xor $ primExpIntType x `min` primExpIntType y) x y
+
+infix 4 .==., .<., .>., .<=., .>=.
+infixr 3 .&&.
+infixr 2 .||.
+
 asIntOp :: (IntType -> BinOp) -> PrimExp v -> PrimExp v -> Maybe (PrimExp v)
 asIntOp f x y
   | IntType t <- primExpType x,
@@ -255,6 +289,10 @@ valueExp _            = Nothing
 coerceIntPrimExp :: IntType -> PrimExp v -> PrimExp v
 coerceIntPrimExp t (ValueExp (IntValue v)) = ValueExp $ IntValue $ doSExt v t
 coerceIntPrimExp _ e                       = e
+
+primExpIntType :: PrimExp v -> IntType
+primExpIntType e = case primExpType e of IntType t -> t
+                                         _         -> Int64
 
 -- Prettyprinting instances
 

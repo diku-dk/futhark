@@ -771,7 +771,7 @@ defCompileBasicOp (Destination _ dests) (Partition n flags value_arrs)
   -- the appropriate size variable.
   eqclass <- dPrim "eqclass" int32
   let mkSizeLoopBody code c sizevar =
-        Imp.If (Imp.CmpOpExp (CmpEq int32) (Imp.var eqclass int32) (fromIntegral c))
+        Imp.If (Imp.var eqclass int32 .==. fromIntegral c)
         (Imp.SetScalar sizevar $ Imp.var sizevar int32 + 1)
         code
       sizeLoopBody = M.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
@@ -805,7 +805,7 @@ defCompileBasicOp (Destination _ dests) (Partition n flags value_arrs)
     destloc [varIndex partition_cur_offset]
     srcloc [varIndex i]
   let mkWriteLoopBody code c offsetvar =
-        Imp.If (Imp.CmpOpExp (CmpEq int32) (Imp.var eqclass int32) (fromIntegral c))
+        Imp.If (Imp.var eqclass int32 .==. fromIntegral c)
         (Imp.SetScalar partition_cur_offset
            (Imp.var offsetvar int32)
          <>

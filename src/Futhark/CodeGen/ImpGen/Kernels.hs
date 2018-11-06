@@ -497,13 +497,10 @@ computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elem
 
   remaining_elements <-- Imp.innerExp num_elements - Imp.var starting_point int32
 
-  let no_remaining_elements = Imp.CmpOpExp (CmpSle Int32)
-                              (Imp.var remaining_elements int32) 0
-      beyond_bounds = Imp.CmpOpExp (CmpSle Int32)
-                      (Imp.innerExp num_elements)
-                      (Imp.var starting_point int32)
+  let no_remaining_elements = Imp.var remaining_elements int32 .<=. 0
+      beyond_bounds = Imp.innerExp num_elements .<=. Imp.var starting_point int32
 
-  sIf (Imp.BinOpExp LogOr no_remaining_elements beyond_bounds)
+  sIf (no_remaining_elements .||. beyond_bounds)
     (chunk_var <-- 0)
     (sIf is_last_thread
        (chunk_var <-- Imp.innerExp last_thread_elements)
@@ -511,9 +508,8 @@ computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elem
   where last_thread_elements =
           num_elements - Imp.elements thread_index * elements_per_thread
         is_last_thread =
-          Imp.CmpOpExp (CmpSlt Int32)
-          (Imp.innerExp num_elements)
-          ((thread_index + 1) * Imp.innerExp elements_per_thread)
+          Imp.innerExp num_elements .<.
+          (thread_index + 1) * Imp.innerExp elements_per_thread
 
 inBlockScan :: Imp.Exp
            -> Imp.Exp
@@ -525,7 +521,7 @@ inBlockScan :: Imp.Exp
 inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = ImpGen.everythingVolatile $ do
   skip_threads <- dPrim "skip_threads" int32
   let in_block_thread_active =
-        Imp.CmpOpExp (CmpSle Int32) (Imp.var skip_threads int32) in_block_id
+        Imp.var skip_threads int32 .<=. in_block_id
       (scan_lam_i, other_index_param, actual_params) =
         partitionChunkedKernelLambdaParameters $ lambdaParams scan_lam
       (x_params, y_params) =
@@ -545,27 +541,26 @@ inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = I
       write_operation_result =
         zipWithM_ (writeParamToLocalMemory $ Imp.var local_id int32)
         acc_local_mem y_params
-      andBlockActive = Imp.BinOpExp LogAnd active
-      maybeBarrier = sWhen (Imp.CmpOpExp (CmpSle Int32) lockstep_width (Imp.var skip_threads int32))$
+      maybeBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32)$
                      ImpGen.emit $ Imp.Op Imp.Barrier
 
   sComment "in-block scan (hopefully no barriers needed)" $ do
     skip_threads <-- 1
-    sWhile (Imp.CmpOpExp (CmpSlt Int32) (Imp.var skip_threads int32) block_size) $ do
-      sWhen (andBlockActive in_block_thread_active) $ do
+    sWhile (Imp.var skip_threads int32 .<. block_size) $ do
+      sWhen (in_block_thread_active .&&. active) $ do
         sComment "read operands" read_operands
         sComment "perform operation" op_to_y
 
       maybeBarrier
 
-      sWhen (andBlockActive in_block_thread_active) $
+      sWhen (in_block_thread_active .&&. active) $
         sComment "write result" write_operation_result
 
       maybeBarrier
 
       skip_threads <-- Imp.var skip_threads int32 * 2
 
-  where block_id = Imp.BinOpExp (SQuot Int32) (Imp.var local_id int32) block_size
+  where block_id = Imp.var local_id int32 `quot` block_size
         in_block_id = Imp.var local_id int32 - block_id * block_size
 
 data KernelConstants = KernelConstants
@@ -715,8 +710,7 @@ compileKernelExp constants dest (Combine (CombineSpace scatter cspace) ts aspace
           let res_i' = ImpGen.compileSubExpOfType int32 res_i
               w'     = ImpGen.compileSubExpOfType int32 w
               -- We have to check that 'res_i' is in-bounds wrt. an array of size 'w'.
-              in_bounds = BinOpExp LogAnd (CmpOpExp (CmpSle Int32) 0 res_i')
-                                          (CmpOpExp (CmpSlt Int32) res_i' w')
+              in_bounds = 0 .<=. res_i' .&&. res_i' .<. w'
           when_in_bounds <- ImpGen.collect $ ImpGen.compileSubExpTo scatter_dest res_v
           ImpGen.emit $ Imp.If in_bounds when_in_bounds mempty
 
@@ -724,7 +718,7 @@ compileKernelExp constants dest (Combine (CombineSpace scatter cspace) ts aspace
 
     -- Execute the body if we are within bounds.
     ImpGen.emit $
-      Imp.If (Imp.BinOpExp LogAnd (isActive cspace) (isActive aspace)) body' mempty
+      Imp.If (isActive cspace .&&. isActive aspace) body' mempty
 
   ImpGen.emit $ Imp.For iter Int32 num_iters one_iteration
   ImpGen.emit $ Imp.Op Imp.Barrier
@@ -774,7 +768,7 @@ compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input
   set_init_params <- ImpGen.collect $
     zipWithM_ (readReduceArgument offset) reduce_acc_params arrs
   ImpGen.emit $
-    Imp.If (Imp.CmpOpExp (CmpSlt Int32) (Imp.var local_tid int32) w')
+    Imp.If (Imp.var local_tid int32 .<. w')
     set_init_params mempty
 
   let read_reduce_args = zipWithM_ (readReduceArgument offset)
@@ -791,32 +785,27 @@ compileKernelExp constants (ImpGen.Destination _ dests) (GroupReduce w lam input
       wave_id = Imp.var local_tid int32 `quot` wave_size
       in_wave_id = Imp.var local_tid int32 - wave_id * wave_size
       num_waves = (group_size + wave_size - 1) `quot` wave_size
-      arg_in_bounds = Imp.CmpOpExp (CmpSlt Int32)
-                      (Imp.var reduce_j int32) w'
+      arg_in_bounds = Imp.var reduce_j int32 .<. w'
 
       doing_in_wave_reductions =
-        Imp.CmpOpExp (CmpSlt Int32) (Imp.var offset int32) wave_size
+        Imp.var offset int32 .<. wave_size
       apply_in_in_wave_iteration =
-        Imp.CmpOpExp (CmpEq int32)
-        (Imp.BinOpExp (And Int32) in_wave_id (2 * Imp.var offset int32 - 1)) 0
+        (in_wave_id .&. (2 * Imp.var offset int32 - 1)) .==. 0
       in_wave_reductions = do
         setOffset 1
         sWhile doing_in_wave_reductions $ do
-          sWhen (Imp.BinOpExp LogAnd arg_in_bounds apply_in_in_wave_iteration)
+          sWhen (arg_in_bounds .&&. apply_in_in_wave_iteration)
             in_wave_reduce
           setOffset $ Imp.var offset int32 * 2
 
       doing_cross_wave_reductions =
-        Imp.CmpOpExp (CmpSlt Int32) (Imp.var skip_waves int32) num_waves
+        Imp.var skip_waves int32 .<. num_waves
       is_first_thread_in_wave =
-        Imp.CmpOpExp (CmpEq int32) in_wave_id 0
+        in_wave_id .==. 0
       wave_not_skipped =
-        Imp.CmpOpExp (CmpEq int32)
-        (Imp.BinOpExp (And Int32) wave_id (2 * Imp.var skip_waves int32 - 1))
-        0
+        (wave_id .&. (2 * Imp.var skip_waves int32 - 1)) .==. 0
       apply_in_cross_wave_iteration =
-        Imp.BinOpExp LogAnd arg_in_bounds $
-        Imp.BinOpExp LogAnd is_first_thread_in_wave wave_not_skipped
+        arg_in_bounds .&&. is_first_thread_in_wave .&&. wave_not_skipped
       cross_wave_reductions = do
         skip_waves <-- 1
         sWhile doing_cross_wave_reductions $ do
@@ -880,7 +869,7 @@ compileKernelExp constants _ (GroupScan w lam input) = do
       block_id = Imp.var local_tid int32 `quot` block_size
       in_block_id = Imp.var local_tid int32 - block_id * block_size
       doInBlockScan active = inBlockScan simd_width block_size active local_tid acc_local_mem
-      lid_in_bounds = Imp.CmpOpExp (CmpSlt Int32) (Imp.var local_tid int32) w'
+      lid_in_bounds = Imp.var local_tid int32 .<. w'
 
   doInBlockScan lid_in_bounds lam
   ImpGen.emit $ Imp.Op Imp.Barrier
@@ -889,18 +878,17 @@ compileKernelExp constants _ (GroupScan w lam input) = do
     ImpGen.collect $
     zipWithM_ (writeParamToLocalMemory block_id) acc_local_mem y_params
 
-  let last_in_block =
-        Imp.CmpOpExp (CmpEq int32) in_block_id $ block_size - 1
+  let last_in_block = in_block_id .==. block_size - 1
   ImpGen.comment
     "last thread of block 'i' writes its result to offset 'i'" $
-    ImpGen.emit $ Imp.If (Imp.BinOpExp LogAnd last_in_block lid_in_bounds) pack_block_results mempty
+    ImpGen.emit $ Imp.If (last_in_block .&&. lid_in_bounds) pack_block_results mempty
 
   ImpGen.emit $ Imp.Op Imp.Barrier
 
-  let is_first_block = Imp.CmpOpExp (CmpEq int32) block_id 0
+  let is_first_block = block_id .==. 0
   ImpGen.comment
     "scan the first block, after which offset 'i' contains carry-in for warp 'i+1'" $
-    doInBlockScan (Imp.BinOpExp LogAnd is_first_block lid_in_bounds) renamed_lam
+    doInBlockScan (is_first_block .&&. lid_in_bounds) renamed_lam
 
   ImpGen.emit $ Imp.Op Imp.Barrier
 
@@ -916,9 +904,7 @@ compileKernelExp constants _ (GroupScan w lam input) = do
     zipWithM_ (writeParamToLocalMemory $ Imp.var local_tid int32) acc_local_mem y_params
 
   ImpGen.comment "carry-in for every block except the first" $
-    ImpGen.emit $ Imp.If (Imp.BinOpExp LogOr
-                           is_first_block
-                           (Imp.UnOpExp Not lid_in_bounds)) mempty $
+    ImpGen.emit $ Imp.If (is_first_block .||. Imp.UnOpExp Not lid_in_bounds) mempty $
     Imp.Comment "read operands" read_carry_in <>
     Imp.Comment "perform operation" op_to_y <>
     Imp.Comment "write final result" write_final_result
@@ -954,7 +940,7 @@ compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w m
               Var w_var | Just w_bound <- lookup w_var $ kernelStreamed constants,
                           w_bound /= Imp.ConstSize 1 ->
                           -- Candidate for unrolling, so generate two loops.
-                          Imp.If (CmpOpExp (CmpEq int32) w' (Imp.sizeToExp w_bound))
+                          Imp.If (w' .==. Imp.sizeToExp w_bound)
                           (Imp.For block_offset Int32 (Imp.sizeToExp w_bound) body'')
                           (Imp.For block_offset Int32 w' body'')
               _ -> Imp.For block_offset Int32 w' body''
@@ -971,12 +957,9 @@ compileKernelExp constants (ImpGen.Destination _ final_targets) (GroupStream w m
 
       block_offset <-- 0
 
-      let not_at_end =
-            Imp.CmpOpExp (CmpSlt Int32) block_offset' w'
+      let not_at_end = block_offset' .<. w'
           set_block_size =
-            sIf (Imp.CmpOpExp (CmpSlt Int32)
-                  (w' - block_offset')
-                  max_block_size)
+            sIf (w' - block_offset' .<. max_block_size)
             (block_size <-- (w' - block_offset'))
             (block_size <-- max_block_size)
           increase_offset =
@@ -1073,8 +1056,7 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
           Imp.AtomicCmpXchg old_bits arr' bucket_offset
           (toBits (Imp.var assumed int32)) (toBits (Imp.var (paramName acc_p) int32))
         old <-- fromBits (Imp.var old_bits int32)
-        sWhen (Imp.CmpOpExp
-              (CmpEq int32) (toBits $ Imp.var assumed t) (Imp.var old_bits int32))
+        sWhen (toBits (Imp.var assumed t) .==. Imp.var old_bits int32)
             (run_loop <-- 0)
 
     where opHasAtomicSupport old arr' bucket' lam = do
@@ -1122,10 +1104,8 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   let try_acquire_lock =
         sOp $ Imp.Atomic $
         Imp.AtomicXchg old locks' locks_offset 1
-      lock_acquired =
-        Imp.CmpOpExp (CmpEq int32) (Imp.var old int32) 0
-      loop_cond =
-        Imp.CmpOpExp (CmpEq int32) (Imp.var loop_done int32) 0
+      lock_acquired = Imp.var old int32 .==. 0
+      loop_cond = Imp.var loop_done int32 .==. 0
       break_loop =
         loop_done <-- 1
 
@@ -1166,11 +1146,8 @@ compileKernelExp _ dest e =
 -- zip with truncate the longer list.
 indexInBounds :: [Imp.Exp] -> [Imp.Exp] -> Imp.Exp
 indexInBounds inds bounds =
-  foldl1 (Imp.BinOpExp LogAnd) $ zipWith checkBound inds bounds
-  where checkBound ind bound =
-          Imp.BinOpExp LogAnd
-           (Imp.CmpOpExp (CmpSle Int32) 0 ind)
-           (Imp.CmpOpExp (CmpSlt Int32) ind bound)
+  foldl1 (.&&.) $ zipWith checkBound inds bounds
+  where checkBound ind bound = 0 .<=. ind .&&. ind .<. bound
 
 allThreads :: KernelConstants -> InKernelGen () -> InKernelGen Imp.KernelCode
 allThreads constants = ImpGen.subImpM_ $ inKernelOperations constants'
@@ -1200,7 +1177,7 @@ compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
 
     who' <- ImpGen.compileSubExp $ intConst Int32 0
     ImpGen.emit $
-      Imp.If (Imp.CmpOpExp (CmpEq int32) me who') write_result mempty
+      Imp.If (me .==. who') write_result mempty
     else do
       -- If the result of the group is an array in local memory, we
       -- store it by collective copying among all the threads of the
@@ -1266,11 +1243,8 @@ compileKernelResult constants dest (WriteReturn rws _arr dests) = do
   rws' <- mapM ImpGen.compileSubExp rws
   forM_ dests $ \(is, e) -> do
     is' <- mapM ImpGen.compileSubExp is
-    let condInBounds0 = Imp.CmpOpExp (Imp.CmpSle Int32) $
-                        Imp.ValueExp (IntValue (Int32Value 0))
-        condInBounds1 = Imp.CmpOpExp (Imp.CmpSlt Int32)
-        condInBounds i rw = Imp.BinOpExp LogAnd (condInBounds0 i) (condInBounds1 i rw)
-        write = foldl (Imp.BinOpExp LogAnd) (kernelThreadActive constants) $
+    let condInBounds i rw = 0 .<=. i .&&. i .<. rw
+        write = foldl (.&&.) (kernelThreadActive constants) $
                 zipWith condInBounds is' rws'
     actual_body' <- ImpGen.collect $
       ImpGen.copyDWIMDest dest (map (ImpGen.compileSubExpOfType int32) is) e []
@@ -1283,10 +1257,10 @@ compileKernelResult _ _ KernelInPlaceReturn{} =
 isActive :: [(VName, SubExp)] -> Imp.Exp
 isActive limit = case actives of
                     [] -> Imp.ValueExp $ BoolValue True
-                    x:xs -> foldl (Imp.BinOpExp LogAnd) x xs
+                    x:xs -> foldl (.&&.) x xs
   where (is, ws) = unzip limit
         actives = zipWith active is $ map (ImpGen.compileSubExpOfType Bool) ws
-        active i = Imp.CmpOpExp (CmpSlt Int32) (Imp.var i Bool)
+        active i = (Imp.var i Bool .<.)
 
 setSpaceIndices :: KernelSpace -> InKernelGen ()
 setSpaceIndices space =
