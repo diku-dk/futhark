@@ -172,7 +172,7 @@ entryPoint params (retdecl, eret, crets) =
           [I.TypeUnsigned]
         entryPointType (_, E.Array (ArrayPrimElem Unsigned{} _) _ _, _) =
           [I.TypeUnsigned]
-        entryPointType (_, E.Array (ArrayEnumElem _ _) _ _, _) =
+        entryPointType (_, E.Array ArrayEnumElem{} _ _, _) =
           [I.TypeUnsigned]
         entryPointType (_, E.Prim{}, _) =
           [I.TypeDirect]
