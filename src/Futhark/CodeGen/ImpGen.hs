@@ -44,11 +44,6 @@ module Futhark.CodeGen.ImpGen
   , compilePrimExp
   , compileAlloc
   , subExpToDimSize
-  , dLParams
-  , dFParams
-  , dScope
-  , dScopes
-  , dPrim, dPrim_
   , everythingVolatile
   , compileBody
   , compileLoopBody
@@ -72,6 +67,16 @@ module Futhark.CodeGen.ImpGen
   , copyDWIM
   , copyDWIMDest
   , copyElementWise
+
+  -- * Constructing code.
+  , dLParams
+  , dFParams
+  , dScope
+  , dScopes
+  , dPrim, dPrim_
+
+  , sFor
+  , sWhile
   )
   where
 
@@ -570,28 +575,25 @@ defCompileExp (Destination _ dest) (DoLoop ctx val form body) = do
     when na $
       copyDWIM (paramName p) [] se []
 
-  emitForm <-
-    case form of
-      ForLoop i it bound loopvars -> do
-        bound' <- compileSubExp bound
-        let setLoopParam (p,a)
-              | Prim _ <- paramType p =
-                  copyDWIM (paramName p) [] (Var a) [varIndex i]
-              | otherwise =
-                  return ()
+  let doBody = emit =<< compileLoopBody mergenames body
 
-        let emitForm body' = do
-              set_loop_params <- collect $ mapM_ setLoopParam loopvars
-              emit $ Imp.For i it bound' $ set_loop_params<>body'
-        dLParams $ map fst loopvars
-        dPrim_ i $ IntType it
-        return emitForm
-      WhileLoop cond ->
-        return $ emit . Imp.While (Imp.var cond Bool)
+  case form of
+    ForLoop i it bound loopvars -> do
+      bound' <- compileSubExp bound
 
-  body' <- compileLoopBody mergenames body
-  emitForm body'
+      let setLoopParam (p,a)
+            | Prim _ <- paramType p =
+                copyDWIM (paramName p) [] (Var a) [varIndex i]
+            | otherwise =
+                return ()
+
+      dLParams $ map fst loopvars
+      sFor i it bound' $ mapM_ setLoopParam loopvars >> doBody
+    WhileLoop cond ->
+      sWhile (Imp.var cond Bool) doBody
+
   zipWithM_ compileSubExpTo dest $ map (Var . paramName . fst) merge
+
   where merge = ctx ++ val
         mergepat = map fst merge
         mergenames = map paramName mergepat
@@ -842,13 +844,17 @@ addArrays = mapM_ addArray
           , entryArrayElemType = bt
           }
 
--- | Like 'daringFParams', but does not create new darations.
+-- | Like 'daringFParams', but does not create new declarations.
 -- Note: a hack to be used only for functions.
 addFParams :: ExplicitMemorish lore => [FParam lore] -> ImpM lore op ()
 addFParams = mapM_ addFParam
   where addFParam fparam = do
           entry <- memBoundToVarEntry Nothing $ noUniquenessReturns $ paramAttr fparam
           addVar (paramName fparam) entry
+
+-- | Another hack.
+addLoopVar :: VName -> IntType -> ImpM lore op ()
+addLoopVar i it = addVar i $ ScalarVar Nothing $ ScalarEntry $ IntType it
 
 dVars :: ExplicitMemorish lore =>
             Maybe (Exp lore) -> [PatElem lore] -> ImpM lore op ()
@@ -1307,3 +1313,16 @@ dimSizeToSubExp (Imp.VarSize v) = Var v
 
 dimSizeToExp :: Imp.Size -> Imp.Exp
 dimSizeToExp = compilePrimExp . primExpFromSubExp int32 . dimSizeToSubExp
+
+--- Building blocks for constructing code.
+
+sFor :: VName -> IntType -> Imp.Exp -> ImpM lore op () -> ImpM lore op ()
+sFor i it bound body = do
+  addLoopVar i it
+  body' <- collect body
+  emit $ Imp.For i it bound body'
+
+sWhile :: Imp.Exp -> ImpM lore op () -> ImpM lore op ()
+sWhile cond body = do
+  body' <- collect body
+  emit $ Imp.While cond body'
