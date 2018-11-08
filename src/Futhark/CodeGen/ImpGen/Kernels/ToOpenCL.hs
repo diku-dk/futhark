@@ -321,6 +321,7 @@ static inline int get_num_groups(int d)
     case 0: return gridDim.x;
     case 1: return gridDim.y;
     case 2: return gridDim.z;
+    default: return 0;
   }
 }
 static inline int get_local_id(int d)
