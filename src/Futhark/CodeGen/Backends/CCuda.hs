@@ -58,6 +58,16 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
                       , optionArgument = RequiredArgument
                       , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
                       }
+             , Option { optionLongName = "dump-ptx"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_dump_ptx_to(cfg, optarg);|]
+                      }
+             , Option { optionLongName = "load-ptx"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
+                      }
              , Option { optionLongName = "print-sizes"
                       , optionShortName = Nothing
                       , optionArgument = NoArgument

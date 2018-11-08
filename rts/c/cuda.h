@@ -36,6 +36,9 @@ struct cuda_config {
   const char *dump_program_to;
   const char *load_program_from;
 
+  const char *dump_ptx_to;
+  const char *load_ptx_from;
+
   size_t default_block_size;
   size_t default_grid_size;
   size_t default_tile_size;
@@ -66,6 +69,9 @@ void cuda_config_init(struct cuda_config *cfg,
 
   cfg->dump_program_to = NULL;
   cfg->load_program_from = NULL;
+
+  cfg->dump_ptx_to = NULL;
+  cfg->load_ptx_from = NULL;
 
   cfg->default_block_size = 256;
   cfg->default_grid_size = 128;
@@ -236,7 +242,7 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev)
   return x[chosen].arch_str;
 }
 
-static void cuda_nvrtc_build(struct cuda_context *ctx, const char *src)
+static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src)
 {
   nvrtcProgram prog;
   NVRTC_SUCCEED(nvrtcCreateProgram(&prog, src, "futhark-cuda", 0, NULL, NULL));
@@ -292,10 +298,9 @@ static void cuda_nvrtc_build(struct cuda_context *ctx, const char *src)
   ptx = malloc(ptx_size);
   NVRTC_SUCCEED(nvrtcGetPTX(prog, ptx));
 
-  CUDA_SUCCEED(cuModuleLoadData(&ctx->module, ptx));
-
-  free(ptx);
   NVRTC_SUCCEED(nvrtcDestroyProgram(&prog));
+
+  return ptx;
 }
 
 static void cuda_size_setup(struct cuda_context *ctx)
@@ -359,6 +364,75 @@ static void cuda_size_setup(struct cuda_context *ctx)
   }
 }
 
+static void dump_string_to_file(const char *file, const char *buf)
+{
+  FILE *f = fopen(file, "w");
+  assert(f != NULL);
+  assert(fputs(buf, f) != EOF);
+  assert(fclose(f) == 0);
+}
+
+static void load_string_from_file(const char *file, char **obuf, size_t *olen)
+{
+  char *buf;
+  size_t len;
+  FILE *f = fopen(file, "r");
+
+  assert(f != NULL);
+  assert(fseek(f, 0, SEEK_END) == 0);
+  len = ftell(f);
+  assert(fseek(f, 0, SEEK_SET) == 0);
+
+  buf = malloc(len + 1);
+  assert(fread(buf, 1, len, f) == len);
+  buf[len] = 0;
+  *obuf = buf;
+  if (olen != NULL) {
+    *olen = len;
+  }
+
+  assert(fclose(f) == 0);
+}
+
+static void cuda_module_setup(struct cuda_context *ctx,
+    const char *src_fragments[])
+{
+  char *ptx = NULL, *src = NULL;
+
+  if (ctx->cfg.load_ptx_from == NULL && ctx->cfg.load_program_from == NULL) {
+    src = concat_fragments(src_fragments);
+    ptx = cuda_nvrtc_build(ctx, src);
+  } else if (ctx->cfg.load_ptx_from == NULL) {
+    load_string_from_file(ctx->cfg.load_program_from, &src, NULL);
+    ptx = cuda_nvrtc_build(ctx, src);
+  } else {
+    if (ctx->cfg.load_program_from != NULL) {
+      fprintf(stderr,
+              "WARNING: Loading PTX from %s instead of C code from %s\n",
+              ctx->cfg.load_ptx_from, ctx->cfg.load_program_from);
+    }
+
+    load_string_from_file(ctx->cfg.load_ptx_from, &ptx, NULL);
+  }
+
+  if (ctx->cfg.dump_program_to != NULL) {
+    if (src == NULL) {
+      src = concat_fragments(src_fragments);
+    }
+    dump_string_to_file(ctx->cfg.dump_program_to, src);
+  }
+  if (ctx->cfg.dump_ptx_to != NULL) {
+    dump_string_to_file(ctx->cfg.dump_ptx_to, ptx);
+  }
+
+  CUDA_SUCCEED(cuModuleLoadData(&ctx->module, ptx));
+
+  free(ptx);
+  if (src != NULL) {
+    free(src);
+  }
+}
+
 void cuda_setup(struct cuda_context *ctx, const char *src_fragments[])
 {
   CUDA_SUCCEED(cuInit(0));
@@ -379,31 +453,7 @@ void cuda_setup(struct cuda_context *ctx, const char *src_fragments[])
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
 
   cuda_size_setup(ctx);
-
-  char *src;
-  if (ctx->cfg.load_program_from != NULL) {
-    FILE *f = fopen(ctx->cfg.load_program_from, "r");
-    assert(f != NULL);
-    fseek(f, 0, SEEK_END);
-    size_t src_size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    src = malloc(src_size + 1);
-    assert(fread(src, 1, src_size, f) == src_size);
-    src[src_size] = 0;
-    fclose(f);
-  } else {
-    src = concat_fragments(src_fragments);
-  }
-  if (ctx->cfg.dump_program_to != NULL) {
-    FILE *f = fopen(ctx->cfg.dump_program_to, "w");
-    assert(f != NULL);
-    fputs(src, f);
-    fclose(f);
-  }
-
-  cuda_nvrtc_build(ctx, src);
-  free(src);
-
+  cuda_module_setup(ctx, src_fragments);
 }
 
 CUresult cuda_free_all(struct cuda_context *ctx);
