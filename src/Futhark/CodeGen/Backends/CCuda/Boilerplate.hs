@@ -122,11 +122,11 @@ generateConfigFuns sizes = do
                          cfg->cu_cfg.logging = flag;
                        }|])
 
-  --GC.publicDef_ "context_config_set_device" GC.InitDecl $ \s ->
-  --  ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s);|],
-  --   [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s) {
-  --                       //set_preferred_device(&cfg->opencl, s);
-  --                     }|])
+  GC.publicDef_ "context_config_set_device" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s) {
+                         set_preferred_device(&cfg->cu_cfg, s);
+                       }|])
 
   GC.publicDef_ "context_config_dump_program_to" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],

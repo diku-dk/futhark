@@ -125,6 +125,11 @@ static int _function_query(CUfunction dev, CUfunction_attribute attrib)
   return val;
 }
 
+void set_preferred_device(struct cuda_config *cfg, const char *s)
+{
+  cfg->preferred_device = s;
+}
+
 static int cuda_device_setup(struct cuda_context *ctx)
 {
   char name[256];
