@@ -140,6 +140,18 @@ generateConfigFuns sizes = do
                          cfg->cu_cfg.load_program_from = path;
                        }|])
 
+  GC.publicDef_ "context_config_dump_ptx_to" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
+                          cfg->cu_cfg.dump_ptx_to = path;
+                      }|])
+
+  GC.publicDef_ "context_config_load_ptx_from" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
+                          cfg->cu_cfg.load_ptx_from = path;
+                      }|])
+
   GC.publicDef_ "context_config_set_default_block_size" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg, int size);|],
      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
