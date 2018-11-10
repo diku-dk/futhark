@@ -60,8 +60,6 @@ module Futhark.CodeGen.ImpGen
   , varIndex
   , Imp.dimSizeToExp
   , dimSizeToSubExp
-  , destinationFromParam
-  , destinationFromParams
   , destinationFromPattern
   , funcallTargets
   , copy
@@ -471,7 +469,7 @@ compileFunDef ops ds src (FunDef entry fname rettype params body) = do
 
           let Body _ stms ses = body
           compileStms (freeIn ses) (stmsToList stms) $
-            zipWithM_ compileSubExpTo dests ses
+            forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
 
           return (outparams, inparams, results, args)
 
@@ -481,15 +479,13 @@ compileBody pat body = do
   cb pat body
 
 compileBody' :: attr ~ LetAttr lore => [Param attr] -> Body lore -> ImpM lore op ()
-compileBody' ps body = do
-  let pat = Pattern [] $ map toPatElem ps
-      toPatElem p = PatElem (paramName p) $ paramAttr p
-  compileBody pat body
+compileBody' = compileBody . patternFromParams
 
 defCompileBody :: (ExplicitMemorish lore, FreeIn op) => Pattern lore -> Body lore -> ImpM lore op ()
 defCompileBody pat (Body _ bnds ses) = do
   Destination _ dests <- destinationFromPattern pat
-  compileStms (freeIn ses) (stmsToList bnds) $ zipWithM_ compileSubExpTo dests ses
+  compileStms (freeIn ses) (stmsToList bnds) $
+    forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
 
 compileLoopBody :: (ExplicitMemorish lore, FreeIn op) =>
                    [VName] -> Body lore -> ImpM lore op ()
@@ -601,7 +597,8 @@ defCompileExp pat (DoLoop ctx val form body) = do
       sWhile (Imp.var cond Bool) doBody
 
   Destination _ pat_dests <- destinationFromPattern pat
-  zipWithM_ compileSubExpTo pat_dests $ map (Var . paramName . fst) merge
+  forM_ (zip pat_dests $ map (Var . paramName . fst) merge) $ \(d, r) ->
+    copyDWIMDest d [] r []
 
   where merge = ctx ++ val
         mergepat = map fst merge
@@ -923,8 +920,8 @@ subExpToDimSize (Constant (IntValue (Int32Value i))) =
 subExpToDimSize Constant{} =
   compilerBugS "Size subexp is not an int32 or int64 constant."
 
-compileSubExpTo :: ValueDestination -> SubExp -> ImpM lore op ()
-compileSubExpTo d se = copyDWIMDest d [] se []
+compileSubExpTo :: VName -> SubExp -> ImpM lore op ()
+compileSubExpTo d se = copyDWIM d [] se []
 
 compileSubExp :: SubExp -> ImpM lore op Imp.Exp
 compileSubExp (Constant v) =
@@ -992,19 +989,6 @@ lookupMemory name = do
   case res of
     MemVar _ entry -> return entry
     _              -> compilerBugS $ "Unknown memory block: " ++ pretty name
-
-destinationFromParam :: Param (MemBound u) -> ImpM lore op ValueDestination
-destinationFromParam param
-  | MemArray _ shape _ (ArrayIn mem ixfun) <- paramAttr param = do
-      let dims = shapeDims shape
-      memloc <- MemLocation mem <$> mapM subExpToDimSize dims <*>
-                pure (fmap compilePrimExp ixfun)
-      return $ ArrayDestination $ Just memloc
-  | otherwise =
-      return $ ScalarDestination $ paramName param
-
-destinationFromParams :: [Param (MemBound u)] -> ImpM lore op Destination
-destinationFromParams ps = fmap (Destination $ baseTag . paramName <$> maybeHead ps) . mapM destinationFromParam $ ps
 
 destinationFromPattern :: ExplicitMemorish lore => Pattern lore -> ImpM lore op Destination
 destinationFromPattern pat = fmap (Destination (baseTag <$> maybeHead (patternNames pat))) . mapM inspect $

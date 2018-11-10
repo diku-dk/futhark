@@ -130,8 +130,7 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
 
     thread_active <-- isActive (spaceDimensions space)
 
-    dest <- ImpGen.destinationFromPattern pat
-    compileKernelBody dest constants kernel_body
+    compileKernelBody pat constants kernel_body
 
   (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
 
@@ -592,13 +591,13 @@ simpleKernelConstants tag desc = do
     (Imp.ConstSize 0) (Imp.ConstSize 0) (Imp.ConstSize 0)
     [] (Imp.ValueExp $ BoolValue True) mempty
 
-compileKernelBody :: ImpGen.Destination
+compileKernelBody :: Pattern InKernel
                   -> KernelConstants
                   -> KernelBody InKernel
                   -> InKernelGen ()
-compileKernelBody (ImpGen.Destination _ dest) constants kbody =
+compileKernelBody pat constants kbody =
   compileKernelStms constants (stmsToList $ kernelBodyStms kbody) $
-  zipWithM_ (compileKernelResult constants) dest $
+  zipWithM_ (compileKernelResult constants) (patternElements pat) $
   kernelBodyResult kbody
 
 compileNestedKernelBody :: KernelConstants
@@ -608,7 +607,7 @@ compileNestedKernelBody :: KernelConstants
 compileNestedKernelBody constants pat kbody = do
   ImpGen.Destination _ dests <- ImpGen.destinationFromPattern pat
   compileKernelStms constants (stmsToList $ bodyStms kbody) $
-    zipWithM_ ImpGen.compileSubExpTo dests $ bodyResult kbody
+    forM_ (zip dests $ bodyResult kbody) $ \(d, se) -> ImpGen.copyDWIMDest d [] se []
 
 compileKernelStms :: KernelConstants -> [Stm InKernel]
                   -> InKernelGen a
@@ -649,8 +648,8 @@ compileKernelExp :: KernelConstants -> Pattern InKernel -> KernelExp InKernel
                  -> InKernelGen ()
 
 compileKernelExp _ pat (Barrier ses) = do
-  ImpGen.Destination _ dests <- ImpGen.destinationFromPattern pat
-  zipWithM_ ImpGen.compileSubExpTo dests ses
+  forM_ (zip (patternNames pat) ses) $ \(d, se) ->
+    ImpGen.copyDWIM d [] se []
   sOp Imp.Barrier
 
 compileKernelExp _ (Pattern [] [size]) (SplitSpace o w i elems_per_thread) = do
@@ -887,10 +886,9 @@ compileKernelExp constants (Pattern _ final) (GroupStream w maxchunk lam accs _a
       block_offset' = Imp.var block_offset int32
   w' <- ImpGen.compileSubExp w
   max_block_size <- ImpGen.compileSubExp maxchunk
-  acc_dest <- ImpGen.destinationFromParams acc_params
 
   ImpGen.dLParams (acc_params++arr_params)
-  zipWithM_ ImpGen.compileSubExpTo (ImpGen.valueDestinations acc_dest) accs
+  zipWithM_ ImpGen.compileSubExpTo (map paramName acc_params) accs
   dPrim_ block_size int32
 
   -- If the GroupStream is morally just a do-loop, generate simpler code.
@@ -1117,10 +1115,10 @@ streaming constants chunksize bound m = do
         constants { kernelStreamed = (chunksize, bound') : kernelStreamed constants }
   ImpGen.emit =<< ImpGen.subImpM_ (inKernelOperations constants') m
 
-compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
+compileKernelResult :: KernelConstants -> PatElem InKernel -> KernelResult
                     -> InKernelGen ()
 
-compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
+compileKernelResult constants pe (ThreadsReturn OneResultPerGroup what) = do
   i <- newVName "i"
 
   in_local_memory <- arrayInLocalMemory what
@@ -1129,7 +1127,7 @@ compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
   if not in_local_memory then do
     who' <- ImpGen.compileSubExp $ intConst Int32 0
     sWhen (me .==. who') $
-      ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
+      ImpGen.copyDWIM (patElemName pe) [ImpGen.varIndex $ kernelGroupId constants] what []
     else do
       -- If the result of the group is an array in local memory, we
       -- store it by collective copying among all the threads of the
@@ -1148,21 +1146,21 @@ compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
           is = unflattenIndex ws $ ImpGen.varIndex i * group_size + ltid
 
       sFor i Int32 to_write $
-        ImpGen.copyDWIMDest dest (ImpGen.varIndex (kernelGroupId constants) : is) what is
+        ImpGen.copyDWIM (patElemName pe) (ImpGen.varIndex (kernelGroupId constants) : is) what is
 
-compileKernelResult constants dest (ThreadsReturn AllThreads what) =
-  ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
+compileKernelResult constants pe (ThreadsReturn AllThreads what) =
+  ImpGen.copyDWIM (patElemName pe) [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
 
-compileKernelResult constants dest (ThreadsReturn (ThreadsPerGroup limit) what) =
+compileKernelResult constants pe (ThreadsReturn (ThreadsPerGroup limit) what) =
   sWhen (isActive limit) $
-  ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
+  ImpGen.copyDWIM (patElemName pe) [ImpGen.varIndex $ kernelGroupId constants] what []
 
-compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
+compileKernelResult constants pe (ThreadsReturn ThreadsInSpace what) = do
   let is = map (ImpGen.varIndex . fst) $ kernelDimensions constants
-  sWhen (kernelThreadActive constants) $ ImpGen.copyDWIMDest dest is what []
+  sWhen (kernelThreadActive constants) $ ImpGen.copyDWIM (patElemName pe) is what []
 
-compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_elems moffset what) = do
-  ImpGen.ArrayDestination (Just dest_loc) <- return dest
+compileKernelResult constants pe (ConcatReturns SplitContiguous _ per_thread_elems moffset what) = do
+  dest_loc <- ImpGen.entryArrayLocation <$> ImpGen.lookupArray (patElemName pe)
   let dest_loc_offset = ImpGen.offsetArray dest_loc offset
       dest' = ImpGen.ArrayDestination $ Just dest_loc_offset
   ImpGen.copyDWIMDest dest' [] (Var what) []
@@ -1171,8 +1169,8 @@ compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_e
                               ImpGen.varIndex (kernelGlobalThreadId constants)
                    Just se -> ImpGen.compileSubExpOfType int32 se
 
-compileKernelResult constants dest (ConcatReturns (SplitStrided stride) _ _ moffset what) = do
-  ImpGen.ArrayDestination (Just dest_loc) <- return dest
+compileKernelResult constants pe (ConcatReturns (SplitStrided stride) _ _ moffset what) = do
+  dest_loc <- ImpGen.entryArrayLocation <$> ImpGen.lookupArray (patElemName pe)
   let dest_loc' = ImpGen.strideArray
                   (ImpGen.offsetArray dest_loc offset) $
                   ImpGen.compileSubExpOfType int32 stride
@@ -1182,14 +1180,14 @@ compileKernelResult constants dest (ConcatReturns (SplitStrided stride) _ _ moff
                    Nothing -> ImpGen.varIndex (kernelGlobalThreadId constants)
                    Just se -> ImpGen.compileSubExpOfType int32 se
 
-compileKernelResult constants dest (WriteReturn rws _arr dests) = do
+compileKernelResult constants pe (WriteReturn rws _arr dests) = do
   rws' <- mapM ImpGen.compileSubExp rws
   forM_ dests $ \(is, e) -> do
     is' <- mapM ImpGen.compileSubExp is
     let condInBounds i rw = 0 .<=. i .&&. i .<. rw
         write = foldl (.&&.) (kernelThreadActive constants) $
                 zipWith condInBounds is' rws'
-    sWhen write $ ImpGen.copyDWIMDest dest (map (ImpGen.compileSubExpOfType int32) is) e []
+    sWhen write $ ImpGen.copyDWIM (patElemName pe) (map (ImpGen.compileSubExpOfType int32) is) e []
 
 compileKernelResult _ _ KernelInPlaceReturn{} =
   -- Already in its place... said it was a hack.
