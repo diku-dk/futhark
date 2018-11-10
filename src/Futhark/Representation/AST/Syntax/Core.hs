@@ -302,10 +302,10 @@ fixSlice (DimSlice orig_k _ orig_s:mis') (i:is') =
   (orig_k+i*orig_s) : fixSlice mis' is'
 fixSlice _ _ = []
 
--- | An element of a pattern - consisting of an name (essentially a
--- pair of the name andtype), a 'Bindage', and an addditional
--- parametric attribute.  This attribute is what is expected to
--- contain the type of the resulting variable.
+-- | An element of a pattern - consisting of a name (essentially a
+-- pair of the name and type) and an addditional parametric attribute.
+-- This attribute is what is expected to contain the type of the
+-- resulting variable.
 data PatElemT attr = PatElem { patElemName :: VName
                                -- ^ The name being bound.
                              , patElemAttr :: attr
