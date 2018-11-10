@@ -44,14 +44,14 @@ callKernelOperations =
   ImpGen.Operations { ImpGen.opsExpCompiler = expCompiler
                     , ImpGen.opsCopyCompiler = callKernelCopy
                     , ImpGen.opsOpCompiler = opCompiler
-                    , ImpGen.opsBodyCompiler = ImpGen.defCompileBody
+                    , ImpGen.opsStmsCompiler = ImpGen.defCompileStms
                     }
 
 inKernelOperations :: KernelConstants -> ImpGen.Operations InKernel Imp.KernelOp
 inKernelOperations constants = (ImpGen.defaultOperations $ compileInKernelOp constants)
                                { ImpGen.opsCopyCompiler = inKernelCopy
                                , ImpGen.opsExpCompiler = inKernelExpCompiler
-                               , ImpGen.opsBodyCompiler = compileNestedKernelBody constants
+                               , ImpGen.opsStmsCompiler = \_ -> compileKernelStms constants
                                }
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Imp.Program)
@@ -599,15 +599,6 @@ compileKernelBody pat constants kbody =
   compileKernelStms constants (stmsToList $ kernelBodyStms kbody) $
   zipWithM_ (compileKernelResult constants) (patternElements pat) $
   kernelBodyResult kbody
-
-compileNestedKernelBody :: KernelConstants
-                        -> Pattern InKernel
-                        -> Body InKernel
-                        -> InKernelGen ()
-compileNestedKernelBody constants pat kbody = do
-  ImpGen.Destination _ dests <- ImpGen.destinationFromPattern pat
-  compileKernelStms constants (stmsToList $ bodyStms kbody) $
-    forM_ (zip dests $ bodyResult kbody) $ \(d, se) -> ImpGen.copyDWIMDest d [] se []
 
 compileKernelStms :: KernelConstants -> [Stm InKernel]
                   -> InKernelGen a
