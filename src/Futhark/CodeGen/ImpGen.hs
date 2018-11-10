@@ -178,7 +178,6 @@ data Destination = Destination { destinationTag :: Maybe Int
                     deriving (Show)
 
 data ValueDestination = ScalarDestination VName
-                      | ArrayElemDestination VName PrimType Imp.Space (Count Bytes)
                       | MemoryDestination VName
                       | ArrayDestination (Maybe MemLocation)
                         -- ^ The 'MemLocation' is 'Just' if a copy if
@@ -818,9 +817,6 @@ defCompileBasicOp target e =
 writeExp :: ValueDestination -> Imp.Exp -> ImpM lore op ()
 writeExp (ScalarDestination target) e =
   emit $ Imp.SetScalar target e
-writeExp (ArrayElemDestination destmem bt space elemoffset) e = do
-  vol <- asks envVolatility
-  emit $ Imp.Write destmem elemoffset bt space vol e
 writeExp target e =
   compilerBugS $ "Cannot write " ++ pretty e ++ " to " ++ show target
 
@@ -915,8 +911,6 @@ funcallTargets (Destination _ dests) =
   concat <$> mapM funcallTarget dests
   where funcallTarget (ScalarDestination name) =
           return [name]
-        funcallTarget ArrayElemDestination{} =
-          compilerBugS "Cannot put scalar function return in-place yet." -- FIXME
         funcallTarget (ArrayDestination _) =
           return []
         funcallTarget (MemoryDestination name) =
@@ -1179,9 +1173,6 @@ copyDWIMDest dest dest_is (Constant v) [] =
   case dest of
   ScalarDestination name ->
     emit $ Imp.SetScalar name $ Imp.ValueExp v
-  ArrayElemDestination dest_mem _ dest_space dest_i -> do
-    vol <- asks envVolatility
-    emit $ Imp.Write dest_mem dest_i bt dest_space vol $ Imp.ValueExp v
   MemoryDestination{} ->
     compilerBugS $
     unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
@@ -1226,30 +1217,6 @@ copyDWIMDest dest dest_is (Var src) src_is = do
         fullyIndexArray' (entryArrayLocation arr) src_is bt
       vol <- asks envVolatility
       emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
-
-    (ArrayElemDestination{}, _) | not $ null dest_is->
-      compilerBugS $
-      unwords ["copyDWIMDest: array elemenent destination given indices:", pretty dest_is]
-
-    (ArrayElemDestination dest_mem _ dest_space dest_i,
-     ScalarVar _ (ScalarEntry bt)) -> do
-      vol <- asks envVolatility
-      emit $ Imp.Write dest_mem dest_i bt dest_space vol $ Imp.var src bt
-
-    (ArrayElemDestination dest_mem _ dest_space dest_i, ArrayVar _ src_arr)
-      | length (entryArrayShape src_arr) == length src_is -> do
-          let bt = entryArrayElemType src_arr
-          (src_mem, src_space, src_i) <-
-            fullyIndexArray' (entryArrayLocation src_arr) src_is bt
-          vol <- asks envVolatility
-          emit $ Imp.Write dest_mem dest_i bt dest_space vol $
-            Imp.index src_mem src_i bt src_space vol
-
-    (ArrayElemDestination{}, ArrayVar{}) ->
-      compilerBugS $
-      unwords ["copyDWIMDest: array element destination, but array source",
-               pretty src,
-               "with incomplete indexing."]
 
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
       let src_loc = entryArrayLocation src_arr
