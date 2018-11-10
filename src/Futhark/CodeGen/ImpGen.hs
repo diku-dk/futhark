@@ -645,22 +645,9 @@ defCompileBasicOp _ Index{} =
 
 defCompileBasicOp (Destination _ [ArrayDestination (Just memloc)]) (Update _ slice se)
   | MemLocation mem shape ixfun <- memloc = do
-    bt <- elemType <$> subExpType se
-    target' <-
-      case sliceIndices slice of
-        Just is -> do
-          (_, space, elemOffset) <-
-            fullyIndexArray'
-            (MemLocation mem shape ixfun)
-            (map (compileSubExpOfType int32) is)
-            bt
-          return $ ArrayElemDestination mem bt space elemOffset
-        Nothing ->
-          let memdest = sliceArray (MemLocation mem shape ixfun) $
-                        map (fmap (compileSubExpOfType int32)) slice
-          in return $ ArrayDestination $ Just memdest
-
-    copyDWIMDest target' [] se []
+    let memdest = sliceArray (MemLocation mem shape ixfun) $
+                  map (fmap (compileSubExpOfType int32)) slice
+    copyDWIMDest (ArrayDestination $ Just memdest) [] se []
 
 defCompileBasicOp (Destination _ [dest]) (Replicate (Shape ds) se) = do
   ds' <- mapM compileSubExp ds
