@@ -9,7 +9,7 @@ module Futhark.CodeGen.ImpGen
   , OpCompiler
   , ExpCompiler
   , CopyCompiler
-  , BodyCompiler
+  , StmsCompiler
   , Operations (..)
   , defaultOperations
   , Destination (..)
@@ -48,7 +48,7 @@ module Futhark.CodeGen.ImpGen
   , compileBody
   , compileBody'
   , compileLoopBody
-  , defCompileBody
+  , defCompileStms
   , compileStms
   , compileExp
   , defCompileExp
@@ -110,8 +110,8 @@ import Futhark.Util
 -- | How to compile an 'Op'.
 type OpCompiler lore op = Pattern lore -> Op lore -> ImpM lore op ()
 
--- | How to compile a 'Body'.
-type BodyCompiler lore op = Pattern lore -> Body lore -> ImpM lore op ()
+-- | How to compile some 'Stms'.
+type StmsCompiler lore op = Names -> [Stm lore] -> ImpM lore op () -> ImpM lore op ()
 
 -- | How to compile an 'Exp'.
 type ExpCompiler lore op = Pattern lore -> Exp lore -> ImpM lore op ()
@@ -124,7 +124,7 @@ type CopyCompiler lore op = PrimType
 
 data Operations lore op = Operations { opsExpCompiler :: ExpCompiler lore op
                                      , opsOpCompiler :: OpCompiler lore op
-                                     , opsBodyCompiler :: BodyCompiler lore op
+                                     , opsStmsCompiler :: StmsCompiler lore op
                                      , opsCopyCompiler :: CopyCompiler lore op
                                      }
 
@@ -134,7 +134,7 @@ defaultOperations :: (ExplicitMemorish lore, FreeIn op) =>
                      OpCompiler lore op -> Operations lore op
 defaultOperations opc = Operations { opsExpCompiler = defCompileExp
                                    , opsOpCompiler = opc
-                                   , opsBodyCompiler = defCompileBody
+                                   , opsStmsCompiler = defCompileStms
                                    , opsCopyCompiler = defaultCopy
                                    }
 
@@ -187,7 +187,7 @@ data ValueDestination = ScalarDestination VName
 
 data Env lore op = Env {
     envExpCompiler :: ExpCompiler lore op
-  , envBodyCompiler :: BodyCompiler lore op
+  , envStmsCompiler :: StmsCompiler lore op
   , envOpCompiler :: OpCompiler lore op
   , envCopyCompiler :: CopyCompiler lore op
   , envDefaultSpace :: Imp.Space
@@ -196,7 +196,7 @@ data Env lore op = Env {
 
 newEnv :: Operations lore op -> Imp.Space -> Env lore op
 newEnv ops ds = Env { envExpCompiler = opsExpCompiler ops
-                    , envBodyCompiler = opsBodyCompiler ops
+                    , envStmsCompiler = opsStmsCompiler ops
                     , envOpCompiler = opsOpCompiler ops
                     , envCopyCompiler = opsCopyCompiler ops
                     , envDefaultSpace = ds
@@ -256,7 +256,7 @@ subImpM ops (ImpM m) = do
   env <- ask
   s <- get
   case runRWST m env { envExpCompiler = opsExpCompiler ops
-                     , envBodyCompiler = opsBodyCompiler ops
+                     , envStmsCompiler = opsStmsCompiler ops
                      , envCopyCompiler = opsCopyCompiler ops
                      , envOpCompiler = opsOpCompiler ops
                      }
@@ -448,7 +448,7 @@ compileOutParams orig_rts orig_epts = do
             Just sizeout -> return $ Imp.VarSize sizeout
         ensureMemSizeOut (Free v) = imp $ subExpToDimSize v
 
-compileFunDef :: (ExplicitMemorish lore, FreeIn op) =>
+compileFunDef :: ExplicitMemorish lore =>
                  Operations lore op -> Imp.Space
               -> VNameSource
               -> FunDef lore
@@ -473,21 +473,17 @@ compileFunDef ops ds src (FunDef entry fname rettype params body) = do
 
           return (outparams, inparams, results, args)
 
-compileBody :: Pattern lore -> Body lore -> ImpM lore op ()
-compileBody pat body = do
-  cb <- asks envBodyCompiler
-  cb pat body
-
-compileBody' :: attr ~ LetAttr lore => [Param attr] -> Body lore -> ImpM lore op ()
-compileBody' = compileBody . patternFromParams
-
-defCompileBody :: (ExplicitMemorish lore, FreeIn op) => Pattern lore -> Body lore -> ImpM lore op ()
-defCompileBody pat (Body _ bnds ses) = do
+compileBody :: (ExplicitMemorish lore, FreeIn op) => Pattern lore -> Body lore -> ImpM lore op ()
+compileBody pat (Body _ bnds ses) = do
   Destination _ dests <- destinationFromPattern pat
   compileStms (freeIn ses) (stmsToList bnds) $
     forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
 
-compileLoopBody :: (ExplicitMemorish lore, FreeIn op) =>
+compileBody' :: (ExplicitMemorish lore, attr ~ LetAttr lore, FreeIn op)
+             => [Param attr] -> Body lore -> ImpM lore op ()
+compileBody' = compileBody . patternFromParams
+
+compileLoopBody :: ExplicitMemorish lore =>
                    [VName] -> Body lore -> ImpM lore op ()
 compileLoopBody mergenames (Body _ bnds ses) = do
   -- We cannot write the results to the merge parameters immediately,
@@ -512,9 +508,14 @@ compileLoopBody mergenames (Body _ bnds ses) = do
         _ -> return $ return ()
     sequence_ copy_to_merge_params
 
-compileStms :: (ExplicitMemorish lore, FreeIn op) =>
-               Names -> [Stm lore] -> ImpM lore op () -> ImpM lore op ()
-compileStms alive_after_stms all_stms m =
+compileStms :: Names -> [Stm lore] -> ImpM lore op () -> ImpM lore op ()
+compileStms alive_after_stms all_stms m = do
+  cb <- asks envStmsCompiler
+  cb alive_after_stms all_stms m
+
+defCompileStms :: (ExplicitMemorish lore, FreeIn op) =>
+                  Names -> [Stm lore] -> ImpM lore op () -> ImpM lore op ()
+defCompileStms alive_after_stms all_stms m =
   -- We keep track of any memory blocks produced by the statements,
   -- and after the last time that memory block is used, we insert a
   -- Free.  This is very conservative, but can cut down on lifetimes
