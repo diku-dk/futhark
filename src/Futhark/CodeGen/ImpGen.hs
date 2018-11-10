@@ -12,8 +12,8 @@ module Futhark.CodeGen.ImpGen
   , StmsCompiler
   , Operations (..)
   , defaultOperations
-  , Destination (..)
-  , ValueDestination (..)
+  , ValueDestination
+  , arrayDestination
   , MemLocation (..)
   , MemEntry (..)
   , ScalarEntry (..)
@@ -52,7 +52,6 @@ module Futhark.CodeGen.ImpGen
   , compileStms
   , compileExp
   , defCompileExp
-  , sliceArray
   , offsetArray
   , strideArray
   , fullyIndexArray
@@ -60,8 +59,6 @@ module Futhark.CodeGen.ImpGen
   , varIndex
   , Imp.dimSizeToExp
   , dimSizeToSubExp
-  , destinationFromPattern
-  , funcallTargets
   , copy
   , copyDWIM
   , copyDWIMDest
@@ -185,6 +182,9 @@ data ValueDestination = ScalarDestination VName
                         -- takes care of this array.
                       deriving (Show)
 
+arrayDestination :: MemLocation -> ValueDestination
+arrayDestination = ArrayDestination . Just
+
 data Env lore op = Env {
     envExpCompiler :: ExpCompiler lore op
   , envStmsCompiler :: StmsCompiler lore op
@@ -291,7 +291,7 @@ comment desc m = do code <- collect m
 emit :: Imp.Code op -> ImpM lore op ()
 emit = tell
 
-compileProg :: (ExplicitMemorish lore, FreeIn op, MonadFreshNames m) =>
+compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
                Operations lore op -> Imp.Space
             -> Prog lore -> m (Either InternalError (Imp.Functions op))
 compileProg ops ds prog =
@@ -473,18 +473,17 @@ compileFunDef ops ds src (FunDef entry fname rettype params body) = do
 
           return (outparams, inparams, results, args)
 
-compileBody :: (ExplicitMemorish lore, FreeIn op) => Pattern lore -> Body lore -> ImpM lore op ()
+compileBody :: (ExplicitMemorish lore) => Pattern lore -> Body lore -> ImpM lore op ()
 compileBody pat (Body _ bnds ses) = do
   Destination _ dests <- destinationFromPattern pat
   compileStms (freeIn ses) (stmsToList bnds) $
     forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
 
-compileBody' :: (ExplicitMemorish lore, attr ~ LetAttr lore, FreeIn op)
+compileBody' :: (ExplicitMemorish lore, attr ~ LetAttr lore)
              => [Param attr] -> Body lore -> ImpM lore op ()
 compileBody' = compileBody . patternFromParams
 
-compileLoopBody :: ExplicitMemorish lore =>
-                   [VName] -> Body lore -> ImpM lore op ()
+compileLoopBody :: [VName] -> Body lore -> ImpM lore op ()
 compileLoopBody mergenames (Body _ bnds ses) = do
   -- We cannot write the results to the merge parameters immediately,
   -- as some of the results may actually *be* merge parameters, and
@@ -550,7 +549,7 @@ compileExp pat e = do
   ec <- asks envExpCompiler
   ec pat e
 
-defCompileExp :: (ExplicitMemorish lore, FreeIn op) =>
+defCompileExp :: (ExplicitMemorish lore) =>
                  Pattern lore -> Exp lore -> ImpM lore op ()
 
 defCompileExp pat (If cond tbranch fbranch _) = do

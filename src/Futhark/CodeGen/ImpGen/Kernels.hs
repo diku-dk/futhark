@@ -956,9 +956,9 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
 
   (arr', _a_space, bucket_offset) <- ImpGen.fullyIndexArray a bucket'
 
+  val' <- ImpGen.compileSubExp v
   case opHasAtomicSupport old arr' bucket_offset op of
-    Just f -> do
-      val' <- ImpGen.compileSubExp v
+    Just f ->
       sWhen (indexInBounds bucket' w') (sOp $ f val')
 
     Nothing -> do
@@ -973,11 +973,9 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
       assumed <- dPrim "assumed" t
       run_loop <- dPrim "run_loop" int32
 
-      let read_old = ImpGen.copyDWIMDest (ImpGen.ScalarDestination old) [] (Var a) bucket'
-
       sIf (indexInBounds bucket' w')
         -- True branch: bucket in-bounds -> enter loop
-        (run_loop <-- 1 >> read_old)
+        (run_loop <-- 1 >> ImpGen.copyDWIM old [] (Var a) bucket')
         -- False branch: bucket out-of-bounds -> skip loop
         (run_loop <-- 0)
 
@@ -986,9 +984,7 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
 
       -- Critical section
       ImpGen.dLParams $ lambdaParams op
-      let bind_acc_param = ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName acc_p) [] v []
-          bind_arr_param = paramName arr_p <-- Imp.var assumed t
-          op_body = ImpGen.compileBody' [acc_p] $ lambdaBody op
+      let op_body = ImpGen.compileBody' [acc_p] $ lambdaBody op
 
       -- While-loop: Try to insert your value
       let (toBits, fromBits) =
@@ -997,8 +993,8 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
                       _                 -> (id, id)
       sWhile (Imp.var run_loop int32) $ do
         assumed <-- Imp.var old t
-        bind_acc_param
-        bind_arr_param
+        paramName acc_p <-- val'
+        paramName arr_p <-- Imp.var assumed t
         op_body
         sOp $ Imp.Atomic $
           Imp.AtomicCmpXchg old_bits arr' bucket_offset
@@ -1061,12 +1057,12 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   let bind_acc_params =
         forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
         when (primType (paramType acc_p)) $
-        ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName acc_p) [] (Var arr) bucket'
+        ImpGen.copyDWIM (paramName acc_p) [] (Var arr) bucket'
 
   let bind_arr_params =
         forM_ (zip arr_params values) $ \(arr_p, val) ->
         when (primType (paramType arr_p)) $
-        ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName arr_p) [] val []
+        ImpGen.copyDWIM (paramName arr_p) [] val []
 
   let op_body = ImpGen.compileBody' acc_params $ lambdaBody op
 
@@ -1153,7 +1149,7 @@ compileKernelResult constants pe (ThreadsReturn ThreadsInSpace what) = do
 compileKernelResult constants pe (ConcatReturns SplitContiguous _ per_thread_elems moffset what) = do
   dest_loc <- ImpGen.entryArrayLocation <$> ImpGen.lookupArray (patElemName pe)
   let dest_loc_offset = ImpGen.offsetArray dest_loc offset
-      dest' = ImpGen.ArrayDestination $ Just dest_loc_offset
+      dest' = ImpGen.arrayDestination dest_loc_offset
   ImpGen.copyDWIMDest dest' [] (Var what) []
   where offset = case moffset of
                    Nothing -> ImpGen.compileSubExpOfType int32 per_thread_elems *
@@ -1165,7 +1161,7 @@ compileKernelResult constants pe (ConcatReturns (SplitStrided stride) _ _ moffse
   let dest_loc' = ImpGen.strideArray
                   (ImpGen.offsetArray dest_loc offset) $
                   ImpGen.compileSubExpOfType int32 stride
-      dest' = ImpGen.ArrayDestination $ Just dest_loc'
+      dest' = ImpGen.arrayDestination dest_loc'
   ImpGen.copyDWIMDest dest' [] (Var what) []
   where offset = case moffset of
                    Nothing -> ImpGen.varIndex (kernelGlobalThreadId constants)
