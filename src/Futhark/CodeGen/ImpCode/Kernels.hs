@@ -21,6 +21,7 @@ module Futhark.CodeGen.ImpCode.Kernels
   , module Futhark.Representation.Kernels.Sizes
   -- * Utility functions
   , getKernels
+  , atomicBinOp
   )
   where
 
@@ -110,6 +111,18 @@ getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
         sameKernel (MapTranspose bt1 _ _ _ _ _ _ _ _ _) (MapTranspose bt2 _ _ _ _ _ _ _ _ _) =
           bt1 == bt2
         sameKernel _ _ = False
+
+-- | Get an atomic operator corresponding to a binary operator.
+atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Bytes -> Exp -> AtomicOp)
+atomicBinOp = flip lookup [ (Add Int32, AtomicAdd)
+                          , (SMax Int32, AtomicSMax)
+                          , (SMin Int32, AtomicSMin)
+                          , (UMax Int32, AtomicUMax)
+                          , (UMin Int32, AtomicUMin)
+                          , (And Int32, AtomicAnd)
+                          , (Or Int32, AtomicOr)
+                          , (Xor Int32, AtomicXor)
+                          ]
 
 instance Pretty KernelConst where
   ppr (SizeConst key) = text "get_size" <> parens (ppr key)
