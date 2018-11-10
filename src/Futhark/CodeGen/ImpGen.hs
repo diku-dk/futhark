@@ -46,6 +46,7 @@ module Futhark.CodeGen.ImpGen
   , subExpToDimSize
   , everythingVolatile
   , compileBody
+  , compileBody'
   , compileLoopBody
   , defCompileBody
   , compileStms
@@ -112,7 +113,7 @@ import Futhark.Util
 type OpCompiler lore op = Pattern lore -> Op lore -> ImpM lore op ()
 
 -- | How to compile a 'Body'.
-type BodyCompiler lore op = Destination -> Body lore -> ImpM lore op ()
+type BodyCompiler lore op = Pattern lore -> Body lore -> ImpM lore op ()
 
 -- | How to compile an 'Exp'.
 type ExpCompiler lore op = Pattern lore -> Exp lore -> ImpM lore op ()
@@ -292,7 +293,7 @@ comment desc m = do code <- collect m
 emit :: Imp.Code op -> ImpM lore op ()
 emit = tell
 
-compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
+compileProg :: (ExplicitMemorish lore, FreeIn op, MonadFreshNames m) =>
                Operations lore op -> Imp.Space
             -> Prog lore -> m (Either InternalError (Imp.Functions op))
 compileProg ops ds prog =
@@ -449,7 +450,7 @@ compileOutParams orig_rts orig_epts = do
             Just sizeout -> return $ Imp.VarSize sizeout
         ensureMemSizeOut (Free v) = imp $ subExpToDimSize v
 
-compileFunDef :: ExplicitMemorish lore =>
+compileFunDef :: (ExplicitMemorish lore, FreeIn op) =>
                  Operations lore op -> Imp.Space
               -> VNameSource
               -> FunDef lore
@@ -464,20 +465,31 @@ compileFunDef ops ds src (FunDef entry fname rettype params body) = do
         ret_entry = maybe (replicate (length rettype) TypeDirect) snd entry
         compile = do
           (inparams, arrayds, args) <- compileInParams params params_entry
-          (results, outparams, dests) <- compileOutParams rettype ret_entry
+          (results, outparams, Destination _ dests) <- compileOutParams rettype ret_entry
           addFParams params
           addArrays arrayds
-          compileBody dests body
+
+          let Body _ stms ses = body
+          compileStms (freeIn ses) (stmsToList stms) $
+            zipWithM_ compileSubExpTo dests ses
+
           return (outparams, inparams, results, args)
 
-compileBody :: Destination -> Body lore -> ImpM lore op ()
-compileBody dest body = do
+compileBody :: Pattern lore -> Body lore -> ImpM lore op ()
+compileBody pat body = do
   cb <- asks envBodyCompiler
-  cb dest body
+  cb pat body
 
-defCompileBody :: (ExplicitMemorish lore, FreeIn op) => Destination -> Body lore -> ImpM lore op ()
-defCompileBody (Destination _ dest) (Body _ bnds ses) =
-  compileStms (freeIn ses) (stmsToList bnds) $ zipWithM_ compileSubExpTo dest ses
+compileBody' :: attr ~ LetAttr lore => [Param attr] -> Body lore -> ImpM lore op ()
+compileBody' ps body = do
+  let pat = Pattern [] $ map toPatElem ps
+      toPatElem p = PatElem (paramName p) $ paramAttr p
+  compileBody pat body
+
+defCompileBody :: (ExplicitMemorish lore, FreeIn op) => Pattern lore -> Body lore -> ImpM lore op ()
+defCompileBody pat (Body _ bnds ses) = do
+  Destination _ dests <- destinationFromPattern pat
+  compileStms (freeIn ses) (stmsToList bnds) $ zipWithM_ compileSubExpTo dests ses
 
 compileLoopBody :: (ExplicitMemorish lore, FreeIn op) =>
                    [VName] -> Body lore -> ImpM lore op ()
@@ -546,9 +558,8 @@ defCompileExp :: (ExplicitMemorish lore, FreeIn op) =>
 
 defCompileExp pat (If cond tbranch fbranch _) = do
   cond' <- compileSubExp cond
-  dest <- destinationFromPattern pat
-  tcode <- collect $ compileBody dest tbranch
-  fcode <- collect $ compileBody dest fbranch
+  tcode <- collect $ compileBody pat tbranch
+  fcode <- collect $ compileBody pat fbranch
   emit $ Imp.If cond' tcode fcode
 
 defCompileExp pat (Apply fname args _ _) = do

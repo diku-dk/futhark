@@ -531,14 +531,13 @@ inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = I
         zipWithM_ (readParamFromLocalMemory (paramName other_index_param) $
                    Imp.var local_id int32 - Imp.var skip_threads int32)
         x_params acc_local_mem
-  scan_y_dest <- ImpGen.destinationFromParams y_params
 
   -- Set initial y values
   sWhen active $
     zipWithM_ (readParamFromLocalMemory scan_lam_i $ Imp.var local_id int32)
     y_params acc_local_mem
 
-  let op_to_y = ImpGen.compileBody scan_y_dest $ lambdaBody scan_lam
+  let op_to_y = ImpGen.compileBody' y_params $ lambdaBody scan_lam
       write_operation_result =
         zipWithM_ (writeParamToLocalMemory $ Imp.var local_id int32)
         acc_local_mem y_params
@@ -603,12 +602,13 @@ compileKernelBody (ImpGen.Destination _ dest) constants kbody =
   kernelBodyResult kbody
 
 compileNestedKernelBody :: KernelConstants
-                        -> ImpGen.Destination
+                        -> Pattern InKernel
                         -> Body InKernel
                         -> InKernelGen ()
-compileNestedKernelBody constants (ImpGen.Destination _ dest) kbody =
+compileNestedKernelBody constants pat kbody = do
+  ImpGen.Destination _ dests <- ImpGen.destinationFromPattern pat
   compileKernelStms constants (stmsToList $ bodyStms kbody) $
-  zipWithM_ ImpGen.compileSubExpTo dest $ bodyResult kbody
+    zipWithM_ ImpGen.compileSubExpTo dests $ bodyResult kbody
 
 compileKernelStms :: KernelConstants -> [Stm InKernel]
                   -> InKernelGen a
@@ -731,9 +731,6 @@ compileKernelExp constants (Pattern _ dests) (GroupReduce w lam input) = do
 
   offset <- dPrim "offset" int32
 
-  ImpGen.Destination _ reduce_acc_targets <-
-    ImpGen.destinationFromParams reduce_acc_params
-
   skip_waves <- dPrim "skip_waves" int32
   ImpGen.dLParams $ lambdaParams lam
 
@@ -750,9 +747,8 @@ compileKernelExp constants (Pattern _ dests) (GroupReduce w lam input) = do
 
   let read_reduce_args = zipWithM_ (readReduceArgument offset)
                          reduce_arr_params arrs
-      reduce_acc_dest = ImpGen.Destination Nothing reduce_acc_targets
       do_reduce = do ImpGen.comment "read array element" read_reduce_args
-                     ImpGen.compileBody reduce_acc_dest $ lambdaBody lam
+                     ImpGen.compileBody' reduce_acc_params $ lambdaBody lam
                      zipWithM_ (writeReduceOpResult local_tid)
                        reduce_acc_params arrs
       in_wave_reduce = ImpGen.everythingVolatile do_reduce
@@ -870,9 +866,8 @@ compileKernelExp constants _ (GroupScan w lam input) = do
                    (paramName other_index_param) (block_id - 1))
         x_params acc_local_mem
 
-  y_dest <- ImpGen.destinationFromParams y_params
   let op_to_y =
-        ImpGen.compileBody y_dest $ lambdaBody lam
+        ImpGen.compileBody' y_params $ lambdaBody lam
       write_final_result =
         zipWithM_ (writeParamToLocalMemory $ Imp.var local_tid int32) acc_local_mem y_params
 
@@ -924,7 +919,7 @@ compileKernelExp constants (Pattern _ final) (GroupStream w maxchunk lam accs _a
     _ -> do
       dPrim_ block_offset int32
       let body' = streaming constants block_size maxchunk $
-                  ImpGen.compileBody acc_dest body
+                  ImpGen.compileBody' acc_params body
 
       block_offset <-- 0
 
@@ -1000,14 +995,11 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
         -- Preparing parameters
       let (acc_p:arr_p:_) = lambdaParams op
 
-      -- Store result from operator in accumulators
-      dests <- ImpGen.destinationFromParams [acc_p]
-
       -- Critical section
       ImpGen.dLParams $ lambdaParams op
       let bind_acc_param = ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName acc_p) [] v []
           bind_arr_param = paramName arr_p <-- Imp.var assumed t
-          op_body = ImpGen.compileBody dests $ lambdaBody op
+          op_body = ImpGen.compileBody' [acc_p] $ lambdaBody op
 
       -- While-loop: Try to insert your value
       let (toBits, fromBits) =
@@ -1063,9 +1055,6 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   let (acc_params, arr_params) =
         splitAt (length values) $ lambdaParams op
 
-  -- Store result from operator in accumulators
-  dests <- ImpGen.destinationFromParams acc_params
-
   -- Critical section
   ImpGen.dLParams $ lambdaParams op
   let try_acquire_lock =
@@ -1090,7 +1079,7 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
         when (primType (paramType arr_p)) $
         ImpGen.copyDWIMDest (ImpGen.ScalarDestination $ paramName arr_p) [] val []
 
-  let op_body = ImpGen.compileBody dests $ lambdaBody op
+  let op_body = ImpGen.compileBody' acc_params $ lambdaBody op
 
       do_gen_reduce = zipWithM_ (writeArray bucket') arrs $ map (Var . paramName) acc_params
 
