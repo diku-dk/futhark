@@ -15,7 +15,7 @@ import Futhark.Transform.Rename
 import Futhark.Representation.Kernels
 import Futhark.Representation.SOACS.SOAC (nilFn)
 import Futhark.MonadFreshNames
-import Futhark.Tools
+import Futhark.Tools hiding (true, false)
 import Futhark.Pass.ExtractKernels.BlockedKernel
 
 data SegmentedVersion = OneGroupOneSegment
