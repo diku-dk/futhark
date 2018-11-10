@@ -6,6 +6,8 @@ module Futhark.Analysis.PrimExp
   , evalPrimExp
   , primExpType
   , coerceIntPrimExp
+  , true
+  , false
 
   , module Futhark.Representation.Primitive
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
@@ -293,6 +295,11 @@ coerceIntPrimExp _ e                       = e
 primExpIntType :: PrimExp v -> IntType
 primExpIntType e = case primExpType e of IntType t -> t
                                          _         -> Int64
+
+-- | Boolean-valued PrimExps.
+true, false :: PrimExp v
+true = ValueExp $ BoolValue True
+false = ValueExp $ BoolValue False
 
 -- Prettyprinting instances
 
