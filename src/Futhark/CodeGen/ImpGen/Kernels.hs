@@ -939,7 +939,24 @@ compileKernelExp constants (Pattern _ final) (GroupStream w maxchunk lam accs _a
   where isSimpleThreadInSpace (Let _ _ Op{}) = Nothing
         isSimpleThreadInSpace bnd = Just bnd
 
-compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
+compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
+  -- Check if bucket is in-bounds
+  bucket' <- mapM ImpGen.compileSubExp bucket
+  w' <- mapM ImpGen.compileSubExp w
+  sWhen (indexInBounds bucket' w') $
+    atomicUpdate arrs bucket op values locks
+  where indexInBounds inds bounds =
+          foldl1 (.&&.) $ zipWith checkBound inds bounds
+          where checkBound ind bound = 0 .<=. ind .&&. ind .<. bound
+
+compileKernelExp _ dest e =
+  compilerBugS $ unlines ["Invalid target", "  " ++ show dest,
+                          "for kernel expression", "  " ++ pretty e]
+
+atomicUpdate :: ExplicitMemorish lore =>
+                [VName] -> [SubExp] -> Lambda lore -> [SubExp] -> VName
+             -> ImpGen.ImpM lore Imp.KernelOp ()
+atomicUpdate [a] bucket op [v] _
   | [Prim t] <- lambdaReturnType op,
     primBitSize t == 32 = do
   -- If we have only one array and one non-array value (this is a
@@ -952,14 +969,12 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
   old <- dPrim "old" t
   old_bits <- dPrim "old_bits" int32
   bucket' <- mapM ImpGen.compileSubExp bucket
-  w' <- mapM ImpGen.compileSubExp w
 
   (arr', _a_space, bucket_offset) <- ImpGen.fullyIndexArray a bucket'
 
   val' <- ImpGen.compileSubExp v
   case opHasAtomicSupport old arr' bucket_offset op of
-    Just f ->
-      sWhen (indexInBounds bucket' w') (sOp $ f val')
+    Just f -> sOp $ f val'
 
     Nothing -> do
       -- Code generation target:
@@ -972,12 +987,8 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
       -- } while(assumed != old);
       assumed <- dPrim "assumed" t
       run_loop <- dPrim "run_loop" int32
-
-      sIf (indexInBounds bucket' w')
-        -- True branch: bucket in-bounds -> enter loop
-        (run_loop <-- 1 >> ImpGen.copyDWIM old [] (Var a) bucket')
-        -- False branch: bucket out-of-bounds -> skip loop
-        (run_loop <-- 0)
+      run_loop <-- 1
+      ImpGen.copyDWIM old [] (Var a) bucket'
 
         -- Preparing parameters
       let (acc_p:arr_p:_) = lambdaParams op
@@ -1001,40 +1012,24 @@ compileKernelExp _ _ (GroupGenReduce w [a] op bucket [v] _)
           (toBits (Imp.var assumed int32)) (toBits (Imp.var (paramName acc_p) int32))
         old <-- fromBits (Imp.var old_bits int32)
         sWhen (toBits (Imp.var assumed t) .==. Imp.var old_bits int32)
-            (run_loop <-- 0)
+          (run_loop <-- 0)
+  where opHasAtomicSupport old arr' bucket' lam = do
+          let atomic f = Imp.Atomic . f old arr' bucket'
+          [BasicOp (BinOp bop _ _)] <-
+            Just $ map stmExp $ stmsToList $ bodyStms $ lambdaBody lam
+          atomic <$> Imp.atomicBinOp bop
 
-    where opHasAtomicSupport old arr' bucket' lam = do
-            let atomic f = Imp.Atomic . f old arr' bucket'
-                atomics = [ (Add Int32, Imp.AtomicAdd)
-                          , (SMax Int32, Imp.AtomicSMax)
-                          , (SMin Int32, Imp.AtomicSMin)
-                          , (UMax Int32, Imp.AtomicUMax)
-                          , (UMin Int32, Imp.AtomicUMin)
-                          , (And Int32, Imp.AtomicAnd)
-                          , (Or Int32, Imp.AtomicOr)
-                          , (Xor Int32, Imp.AtomicXor)
-                          ]
-            [BasicOp (BinOp bop _ _)] <-
-              Just $ map stmExp $ stmsToList $ bodyStms $ lambdaBody lam
-            atomic <$> lookup bop atomics
-
-compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
+atomicUpdate arrs bucket op values locks = do
   old <- dPrim "old" int32
   loop_done <- dPrim "loop_done" int32
+  loop_done <-- 0
 
   -- Check if bucket is in-bounds
   bucket' <- mapM ImpGen.compileSubExp bucket
-  w' <- mapM ImpGen.compileSubExp w
 
   -- Correctly index into locks.
   (locks', _locks_space, locks_offset) <-
     ImpGen.fullyIndexArray locks bucket'
-
-  sIf (indexInBounds bucket' w')
-    -- True branch: bucket in-bounds -> enter loop
-    (loop_done <-- 0)
-    -- False branch: bucket out-of-bounds -> skip loop
-    (loop_done <-- 1)
 
   -- Preparing parameters
   let (acc_params, arr_params) =
@@ -1047,8 +1042,7 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
         Imp.AtomicXchg old locks' locks_offset 1
       lock_acquired = Imp.var old int32 .==. 0
       loop_cond = Imp.var loop_done int32 .==. 0
-      break_loop =
-        loop_done <-- 1
+      break_loop = loop_done <-- 1
 
   -- We copy the current value and the new value to the parameters
   -- unless they are array-typed.  If they are arrays, then the
@@ -1076,19 +1070,8 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
     sWhen lock_acquired
       (bind_acc_params >> bind_arr_params >> op_body >> do_gen_reduce >> release_lock >> break_loop)
     sOp Imp.MemFence
-  where writeArray i arr val =
-          ImpGen.copyDWIM arr i val []
-
-compileKernelExp _ dest e =
-  compilerBugS $ unlines ["Invalid target", "  " ++ show dest,
-                          "for kernel expression", "  " ++ pretty e]
-
--- Requires that the lists are of equal length, otherwise
--- zip with truncate the longer list.
-indexInBounds :: [Imp.Exp] -> [Imp.Exp] -> Imp.Exp
-indexInBounds inds bounds =
-  foldl1 (.&&.) $ zipWith checkBound inds bounds
-  where checkBound ind bound = 0 .<=. ind .&&. ind .<. bound
+  where writeArray bucket' arr val =
+          ImpGen.copyDWIM arr bucket' val []
 
 allThreads :: KernelConstants -> InKernelGen () -> InKernelGen ()
 allThreads constants = ImpGen.emit <=< ImpGen.subImpM_ (inKernelOperations constants')
