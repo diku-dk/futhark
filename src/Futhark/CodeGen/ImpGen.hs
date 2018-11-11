@@ -69,12 +69,16 @@ module Futhark.CodeGen.ImpGen
   , dFParams
   , dScope
   , dScopes
+  , dArray
   , dPrim, dPrim_
 
   , sFor, sWhile
   , sComment
   , sIf, sWhen, sUnless
   , sOp
+  , sAlloc
+  , sArray
+  , sWrite
   , (<--)
   )
   where
@@ -896,6 +900,11 @@ dScope e = mapM_ (uncurry $ dInfo e) . M.toList
 dScopes :: [(Maybe (Exp lore), Scope ExplicitMemory)] -> ImpM lore op ()
 dScopes = mapM_ $ uncurry dScope
 
+dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op ()
+dArray name bt shape membind = do
+  entry <- memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
+  addVar name entry
+
 everythingVolatile :: ImpM lore op a -> ImpM lore op a
 everythingVolatile = local $ \env -> env { envVolatility = Imp.Volatile }
 
@@ -1285,6 +1294,32 @@ sUnless cond = sIf cond (return ())
 
 sOp :: op -> ImpM lore op ()
 sOp = emit . Imp.Op
+
+sAlloc :: String -> Count Bytes -> Space -> ImpM lore op VName
+sAlloc name size space = do
+  name' <- newVName name
+  size' <- case Imp.innerExp size of
+             Imp.LeafExp (Imp.ScalarVar size') _ -> return $ Imp.VarSize size'
+             Imp.ValueExp (IntValue (Int64Value v)) -> return $ Imp.ConstSize v
+             _ -> do size_var <- dPrim "local_buf_size" int32
+                     size_var <-- Imp.innerExp size
+                     return $ Imp.VarSize size_var
+  emit $ Imp.DeclareMem name' space
+  emit $ Imp.Allocate name' size space
+  addVar name' $ MemVar Nothing $ MemEntry size' space
+  return name'
+
+sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName
+sArray name bt shape membind = do
+  name' <- newVName name
+  dArray name' bt shape membind
+  return name'
+
+sWrite :: VName -> [Imp.Exp] -> PrimExp Imp.ExpLeaf -> ImpM lore op ()
+sWrite arr is v = do
+  (mem, space, offset) <- fullyIndexArray arr is
+  vol <- asks envVolatility
+  emit $ Imp.Write mem offset (primExpType v) space vol v
 
 -- | ASsignment.
 (<--) :: VName -> Imp.Exp -> ImpM lore op ()
