@@ -957,6 +957,7 @@ decImports SigDec{} = []
 decImports TypeDec{} = []
 decImports ValDec{} = []
 decImports (LocalDec d _) = decImports d
+decImports (ImportDec x _ loc) = [(x, loc)]
 
 modExpImports :: ModExpBase f vn -> [(String,SrcLoc)]
 modExpImports ModVar{}              = []
@@ -977,7 +978,8 @@ progModuleTypes = mconcat . map onDec . progDecs
         onDec SigDec{} = mempty
         onDec TypeDec{} = mempty
         onDec ValDec{} = mempty
-        onDec (LocalDec _ _) = mempty
+        onDec LocalDec{} = mempty
+        onDec ImportDec{} = mempty
 
         onModExp ModVar{} = mempty
         onModExp (ModParens p _) = onModExp p

@@ -138,8 +138,8 @@ checkForDuplicateDecs =
           check Term name loc
 
         f OpenDec{} = return
-
         f LocalDec{} = return
+        f ImportDec{} = return
 
 bindingTypeParams :: [TypeParam] -> TypeM a -> TypeM a
 bindingTypeParams tparams = localEnv env
@@ -491,6 +491,12 @@ checkOneDec (OpenDec x NoInfo loc) = do
 checkOneDec (LocalDec d loc) = do
   (abstypes, env, d') <- checkOneDec d
   return (abstypes, env, LocalDec d' loc)
+
+checkOneDec (ImportDec name NoInfo loc) = do
+  (name', env) <- lookupImport loc name
+  when ("/futlib" `isPrefixOf` name) $
+    warn loc $ name ++ " is already implicitly imported."
+  return (mempty, env, ImportDec name (Info name') loc)
 
 checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb
