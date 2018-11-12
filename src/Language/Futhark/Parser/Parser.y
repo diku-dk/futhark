@@ -210,7 +210,7 @@ Dec_ :: { UncheckedDec }
     | open ModExp
       { OpenDec $2 NoInfo $1 }
     | import stringlit
-      { let L loc (STRINGLIT s) = $2 in LocalDec (OpenDec (ModImport s NoInfo loc) NoInfo $1) (srcspan $1 $>) }
+      { let L _ (STRINGLIT s) = $2 in ImportDec s NoInfo (srcspan $1 $>) }
     | local Dec         { LocalDec $2 (srcspan $1 $>) }
 ;
 

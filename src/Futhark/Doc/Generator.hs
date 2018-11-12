@@ -285,7 +285,8 @@ synopsisDec visible fm dec = case dec of
   LocalDec (SigDec s) _
     | sigName s `S.member` visible ->
         synopsisModType (keyword "local" <> " ") s
-  LocalDec _ _ -> Nothing
+  LocalDec{} -> Nothing
+  ImportDec{} -> Nothing
 
 synopsisOpened :: ModExp -> Maybe (DocM Html)
 synopsisOpened (ModVar qn _) = Just $ qualNameHtml qn
@@ -709,6 +710,7 @@ describeDec visible (LocalDec (SigDec (SigBind name se doc _)) _)
   return $ keyword "local module type " <> name'
 
 describeDec _ LocalDec{} = Nothing
+describeDec _ ImportDec{} = Nothing
 
 valBindWhat :: ValBind -> IndexWhat
 valBindWhat vb =

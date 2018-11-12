@@ -276,6 +276,9 @@ transformDecs ds =
     OpenDec e _ _ : ds' -> do
       scope <- modScope <$> evalModExp e
       extendScope scope $ mappend <$> transformDecs ds' <*> pure scope
+    ImportDec name name' loc : ds' ->
+      let d = LocalDec (OpenDec (ModImport name name' loc) (Info mempty) loc) loc
+      in transformDecs $ d : ds'
 
 transformImports :: Imports -> TransformM ()
 transformImports [] = return ()

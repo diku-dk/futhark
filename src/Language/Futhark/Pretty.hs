@@ -361,12 +361,13 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ProgBase f vn) where
   ppr = stack . punctuate line . map ppr . progDecs
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (DecBase f vn) where
-  ppr (ValDec dec)     = ppr dec
-  ppr (TypeDec dec)    = ppr dec
-  ppr (SigDec sig)     = ppr sig
-  ppr (ModDec sd)      = ppr sd
-  ppr (OpenDec x _ _)  = text "open" <+> ppr x
-  ppr (LocalDec dec _) = text "local" <+> ppr dec
+  ppr (ValDec dec)      = ppr dec
+  ppr (TypeDec dec)     = ppr dec
+  ppr (SigDec sig)      = ppr sig
+  ppr (ModDec sd)       = ppr sd
+  ppr (OpenDec x _ _)   = text "open" <+> ppr x
+  ppr (LocalDec dec _)  = text "local" <+> ppr dec
+  ppr (ImportDec x _ _) = text "import" <+> ppr x
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ModExpBase f vn) where
   ppr (ModVar v _) = ppr v

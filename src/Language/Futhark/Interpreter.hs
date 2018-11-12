@@ -858,6 +858,9 @@ evalDec env (OpenDec me (Info _) _) = do
   Module me' <- evalModExp env me
   return $ me' <> env
 
+evalDec env (ImportDec name name' loc) =
+  evalDec env $ LocalDec (OpenDec (ModImport name name' loc) (Info mempty) loc) loc
+
 evalDec env (LocalDec d _) = evalDec env d
 evalDec env SigDec{} = return env
 evalDec env (TypeDec (TypeBind v ps t _ _)) = do
