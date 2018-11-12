@@ -203,7 +203,7 @@ newFutharkiState count maybe_file = runExceptT $ do
         badOnLeft =<< liftIO (runExceptT (readProgram file)
                               `Haskeline.catch` \(err::IOException) ->
                                  return (Left (ExternalError (T.pack $ show err))))
-      liftIO $ print ws
+      liftIO $ hPrint stderr ws
 
       let imp = T.mkInitialImport "."
       ienv1 <- foldM (\ctx -> badOnLeft <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
