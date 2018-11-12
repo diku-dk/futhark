@@ -447,14 +447,20 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
   when (entry && any isTypeParam tparams') $
     throwError $ TypeError loc "Entry point functions may not be polymorphic."
 
-  when (entry && singleTuplePattern params') $
-    warn loc "This entry point accepts a *single* tuple-typed parameter, *not* multiple parameters.\nThis will be an error in the future."
-
   let (rettype_params, rettype') = unfoldFunType rettype
   when (entry && (any (not . patternOrderZero) params' ||
                   any (not . orderZero) rettype_params ||
                   not (orderZero rettype'))) $
     throwError $ TypeError loc "Entry point functions may not be higher-order."
+
+  case (entry, filter nastyParameter params') of
+    (True, p : _) -> warn loc $ "Entry point parameter\n\n  " <>
+                     pretty p <> "\n\nwill have an opaque type, so the entry point will likely not be callable."
+    _ -> return ()
+
+  when (entry && nastyReturnType maybe_tdecl' rettype) $
+    warn loc $ "Entry point return type\n\n  " <>
+    pretty rettype <> "\n\nwill have an opaque type, so the result will likely not be usable."
 
   return (mempty { envVtable =
                      M.singleton fname' $
@@ -464,9 +470,22 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                  },
            ValBind entry fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
 
-singleTuplePattern :: [Pattern] -> Bool
-singleTuplePattern [TuplePattern _ _] = True
-singleTuplePattern _                  = False
+nastyType :: Monoid als => TypeBase dim als -> Bool
+nastyType Prim{} = False
+nastyType t@Array{} = nastyType $ stripArray 1 t
+nastyType _ = True
+
+nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
+nastyReturnType (Just (TEVar (QualName [] _) _)) _ = False
+nastyReturnType _ t
+  | Just ts <- isTupleRecord t = any nastyType ts
+  | otherwise = nastyType t
+
+nastyParameter :: Pattern -> Bool
+nastyParameter p = nastyType (patternType p) && not (ascripted p)
+  where ascripted (PatternAscription _ (TypeDecl (TEVar (QualName [] _) _) _) _) = True
+        ascripted (PatternParens p' _) = ascripted p'
+        ascripted _ = False
 
 checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
 checkOneDec (ModDec struct) = do
