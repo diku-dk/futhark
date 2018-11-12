@@ -986,7 +986,7 @@ data DecBase f vn = ValDec (ValBindBase f vn)
                   | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
                   | ModDec (ModBindBase f vn)
-                  | OpenDec (ModExpBase f vn) (f [VName]) SrcLoc
+                  | OpenDec (ModExpBase f vn) SrcLoc
                   | LocalDec (DecBase f vn) SrcLoc
                   | ImportDec FilePath (f FilePath) SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
@@ -996,7 +996,7 @@ instance Located (DecBase f vn) where
   locOf (TypeDec d)         = locOf d
   locOf (SigDec d)          = locOf d
   locOf (ModDec d)          = locOf d
-  locOf (OpenDec _ _ loc)   = locOf loc
+  locOf (OpenDec _ loc)     = locOf loc
   locOf (LocalDec _ loc)    = locOf loc
   locOf (ImportDec _ _ loc) = locOf loc
 

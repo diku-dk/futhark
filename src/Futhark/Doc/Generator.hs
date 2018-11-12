@@ -275,7 +275,7 @@ synopsisDec visible fm dec = case dec of
   ModDec m -> synopsisMod fm m
   ValDec v -> synopsisValBind v
   TypeDec t -> synopsisType t
-  OpenDec x (Info _names) _
+  OpenDec x _
     | Just opened <- synopsisOpened x -> Just $ do
         opened' <- opened
         return $ fullRow $ keyword "open " <> opened'

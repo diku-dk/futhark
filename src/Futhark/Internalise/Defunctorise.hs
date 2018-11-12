@@ -273,11 +273,11 @@ transformDecs ds =
       bindingNames [modName mb] $ do
         mod_scope <- transformModBind mb
         extendScope mod_scope $ mappend <$> transformDecs ds' <*> pure mod_scope
-    OpenDec e _ _ : ds' -> do
+    OpenDec e _ : ds' -> do
       scope <- modScope <$> evalModExp e
       extendScope scope $ mappend <$> transformDecs ds' <*> pure scope
     ImportDec name name' loc : ds' ->
-      let d = LocalDec (OpenDec (ModImport name name' loc) (Info mempty) loc) loc
+      let d = LocalDec (OpenDec (ModImport name name' loc) loc) loc
       in transformDecs $ d : ds'
 
 transformImports :: Imports -> TransformM ()

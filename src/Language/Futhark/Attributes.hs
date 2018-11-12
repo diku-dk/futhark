@@ -951,7 +951,7 @@ progImports = concatMap decImports . progDecs
 
 -- | The modules imported by a single declaration.
 decImports :: DecBase f vn -> [(String,SrcLoc)]
-decImports (OpenDec x _ _) = modExpImports x
+decImports (OpenDec x _) = modExpImports x
 decImports (ModDec md) = modExpImports $ modExp md
 decImports SigDec{} = []
 decImports TypeDec{} = []
@@ -972,7 +972,7 @@ modExpImports ModLambda{}           = []
 -- declaration.
 progModuleTypes :: Ord vn => ProgBase f vn -> S.Set vn
 progModuleTypes = mconcat . map onDec . progDecs
-  where onDec (OpenDec x _ _) = onModExp x
+  where onDec (OpenDec x _) = onModExp x
         onDec (ModDec md) =
           maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
         onDec SigDec{} = mempty

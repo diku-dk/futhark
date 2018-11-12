@@ -854,12 +854,12 @@ evalDec env (ValDec (ValBind _ v _ (Info t) tps ps def _ loc)) = do
   val <- eval env $ Lambda tps ps def Nothing (Info (mempty, t')) loc
   return $ valEnv (M.singleton v (Just ftype, val)) <> env
 
-evalDec env (OpenDec me (Info _) _) = do
+evalDec env (OpenDec me _) = do
   Module me' <- evalModExp env me
   return $ me' <> env
 
 evalDec env (ImportDec name name' loc) =
-  evalDec env $ LocalDec (OpenDec (ModImport name name' loc) (Info mempty) loc) loc
+  evalDec env $ LocalDec (OpenDec (ModImport name name' loc) loc) loc
 
 evalDec env (LocalDec d _) = evalDec env d
 evalDec env SigDec{} = return env

@@ -232,7 +232,7 @@ getPrompt = do
   return $ "[" ++ show i ++ "]> "
 
 mkOpen :: FilePath -> UncheckedDec
-mkOpen f = OpenDec (ModImport f NoInfo noLoc) NoInfo noLoc
+mkOpen f = OpenDec (ModImport f NoInfo noLoc) noLoc
 
 -- The ExceptT part is more of a continuation, really.
 newtype FutharkiM a =
