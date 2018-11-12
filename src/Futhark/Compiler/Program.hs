@@ -187,5 +187,4 @@ runCompilerM (Basis imports src roots) m = do
 prependRoots :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
 prependRoots roots (E.Prog doc ds) =
   E.Prog doc $ map mkImport roots ++ ds
-  where mkImport fp =
-          E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo noLoc) E.NoInfo noLoc) noLoc
+  where mkImport fp = E.ImportDec fp E.NoInfo noLoc

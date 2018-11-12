@@ -207,8 +207,7 @@ Dec_ :: { UncheckedDec }
     | TypeAbbr          { TypeDec $1 }
     | SigBind           { SigDec $1 }
     | ModBind           { ModDec $1 }
-    | open ModExp
-      { OpenDec $2 NoInfo $1 }
+    | open ModExp       { OpenDec $2 $1 }
     | import stringlit
       { let L _ (STRINGLIT s) = $2 in ImportDec s NoInfo (srcspan $1 $>) }
     | local Dec         { LocalDec $2 (srcspan $1 $>) }

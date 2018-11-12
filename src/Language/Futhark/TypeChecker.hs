@@ -481,12 +481,9 @@ checkOneDec (TypeDec tdec) = do
   (tenv, tdec') <- checkTypeBind tdec
   return (mempty, tenv, TypeDec tdec')
 
-checkOneDec (OpenDec x NoInfo loc) = do
+checkOneDec (OpenDec x loc) = do
   (x_abs, x_env, x') <- checkModExpToEnv x
-  let names = S.toList $ allNamesInEnv x_env
-  return (x_abs,
-          x_env,
-          OpenDec x' (Info names) loc)
+  return (x_abs, x_env, OpenDec x' loc)
 
 checkOneDec (LocalDec d loc) = do
   (abstypes, env, d') <- checkOneDec d
