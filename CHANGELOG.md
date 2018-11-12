@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futharki` now prints warnings for files that are ":load"ed.
 
+  * The compiler now warns when entry points are declared with types
+    that will become unnamed and opaque, and thus impossible provide
+    from the outside.
+
 ### Removed
 
 ### Changed
