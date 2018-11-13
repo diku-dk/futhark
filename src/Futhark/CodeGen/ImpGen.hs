@@ -659,7 +659,7 @@ defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) = do
 
 defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM compileSubExp ds
-  is <- replicateM (length ds) (dPrim "i" int32)
+  is <- replicateM (length ds) (newVName "i")
   copy_elem <- collect $ copyDWIM (patElemName pe) (map varIndex is) se []
   emit $ foldl (.) id (zipWith (`Imp.For` Int32) is ds') copy_elem
 
@@ -673,11 +673,10 @@ defCompileBasicOp (Pattern [] [pe]) (Iota n e s et) = do
   e' <- compileSubExp e
   s' <- compileSubExp s
   let i' = ConvOpExp (SExt Int32 et) $ Imp.var i $ IntType Int32
-  dPrim_ i int32
   dPrim_ x $ IntType et
-  emit =<< (Imp.For i Int32 n' <$>
-            collect (do emit $ Imp.SetScalar x $ e' + i' * s'
-                        copyDWIM (patElemName pe) [varIndex i] (Var x) []))
+  sFor i Int32 n' $ do
+    x <-- e' + i' * s'
+    copyDWIM (patElemName pe) [varIndex i] (Var x) []
 
 defCompileBasicOp (Pattern _ [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
@@ -743,7 +742,6 @@ defCompileBasicOp (Pattern ctx vals) (Partition n flags value_arrs) = do
   let sizenames = map patElemName ctx
   destlocs <- mapM (fmap entryArrayLocation . lookupArray . patElemName) vals
   i <- newVName "i"
-  dPrim_ i int32
   outer_dim <- compileSubExp =<< (arraySize 0 <$> lookupType flags)
   -- We will use 'i' to index the flag array and the value array.
   -- Note that they have the same outer size ('outer_dim').
@@ -769,9 +767,9 @@ defCompileBasicOp (Pattern ctx vals) (Partition n flags value_arrs) = do
         (Imp.SetScalar sizevar $ Imp.var sizevar int32 + 1)
         code
       sizeLoopBody = M.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
-  emit $ Imp.For i Int32 outer_dim $
-    Imp.SetScalar eqclass read_flags_i <>
-    sizeLoopBody
+  sFor i Int32 outer_dim $ do
+    eqclass <-- read_flags_i
+    emit sizeLoopBody
 
   -- We can now compute the starting offsets of each of the
   -- partitions, creating a map from equivalence class to its
@@ -809,10 +807,9 @@ defCompileBasicOp (Pattern ctx vals) (Partition n flags value_arrs) = do
            (Imp.var offsetvar int32 + 1))
         code
       writeLoopBody = M.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
-  emit $ Imp.For i Int32 outer_dim $
-    Imp.SetScalar eqclass read_flags_i <>
-    writeLoopBody
-  return ()
+  sFor i Int32 outer_dim $ do
+    eqclass <-- read_flags_i
+    emit writeLoopBody
 
 defCompileBasicOp pat e =
   compilerBugS $ "ImpGen.defCompileBasicOp: Invalid pattern\n  " ++
