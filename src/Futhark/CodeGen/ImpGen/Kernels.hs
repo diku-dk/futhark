@@ -709,92 +709,11 @@ compileKernelExp constants pat (Combine (CombineSpace scatter cspace) _ aspace b
         local_index = map (ImpGen.compileSubExpOfType int32 . Var . fst) cspace
 
 compileKernelExp constants (Pattern _ dests) (GroupReduce w lam input) = do
-  w' <- ImpGen.compileSubExp w
-
-  let local_tid = kernelLocalThreadId constants
-      (_nes, arrs) = unzip input
-      (reduce_i, reduce_j_param, actual_reduce_params) =
-        partitionChunkedKernelLambdaParameters $ lambdaParams lam
-      (reduce_acc_params, reduce_arr_params) =
-        splitAt (length input) actual_reduce_params
-      reduce_j = paramName reduce_j_param
-
-  offset <- dPrim "offset" int32
-
-  skip_waves <- dPrim "skip_waves" int32
-  ImpGen.dLParams $ lambdaParams lam
-
-  reduce_i <-- Imp.var local_tid int32
-
-  let setOffset x = do
-        offset <-- x
-        reduce_j <-- Imp.var local_tid int32 + Imp.var offset int32
-
-  setOffset 0
-
-  sWhen (Imp.var local_tid int32 .<. w') $
-    zipWithM_ (readReduceArgument offset) reduce_acc_params arrs
-
-  let read_reduce_args = zipWithM_ (readReduceArgument offset)
-                         reduce_arr_params arrs
-      do_reduce = do ImpGen.comment "read array element" read_reduce_args
-                     ImpGen.compileBody' reduce_acc_params $ lambdaBody lam
-                     zipWithM_ (writeReduceOpResult local_tid)
-                       reduce_acc_params arrs
-      in_wave_reduce = ImpGen.everythingVolatile do_reduce
-
-      wave_size = Imp.sizeToExp $ kernelWaveSize constants
-      group_size = Imp.sizeToExp $ kernelGroupSize constants
-      wave_id = Imp.var local_tid int32 `quot` wave_size
-      in_wave_id = Imp.var local_tid int32 - wave_id * wave_size
-      num_waves = (group_size + wave_size - 1) `quot` wave_size
-      arg_in_bounds = Imp.var reduce_j int32 .<. w'
-
-      doing_in_wave_reductions =
-        Imp.var offset int32 .<. wave_size
-      apply_in_in_wave_iteration =
-        (in_wave_id .&. (2 * Imp.var offset int32 - 1)) .==. 0
-      in_wave_reductions = do
-        setOffset 1
-        sWhile doing_in_wave_reductions $ do
-          sWhen (arg_in_bounds .&&. apply_in_in_wave_iteration)
-            in_wave_reduce
-          setOffset $ Imp.var offset int32 * 2
-
-      doing_cross_wave_reductions =
-        Imp.var skip_waves int32 .<. num_waves
-      is_first_thread_in_wave =
-        in_wave_id .==. 0
-      wave_not_skipped =
-        (wave_id .&. (2 * Imp.var skip_waves int32 - 1)) .==. 0
-      apply_in_cross_wave_iteration =
-        arg_in_bounds .&&. is_first_thread_in_wave .&&. wave_not_skipped
-      cross_wave_reductions = do
-        skip_waves <-- 1
-        sWhile doing_cross_wave_reductions $ do
-          sOp Imp.Barrier
-          setOffset (Imp.var skip_waves int32 * wave_size)
-          sWhen apply_in_cross_wave_iteration
-            do_reduce
-          skip_waves <-- Imp.var skip_waves int32 * 2
-
-  in_wave_reductions
-  cross_wave_reductions
-
+  groupReduce constants w lam $ map snd input
+  let (reduce_acc_params, _) =
+        splitAt (length input) $ drop 2 $ lambdaParams lam
   forM_ (zip dests reduce_acc_params) $ \(dest, reduce_acc_param) ->
     ImpGen.copyDWIM (patElemName dest) [] (Var $ paramName reduce_acc_param) []
-  where readReduceArgument offset param arr
-          | Prim _ <- paramType param =
-              ImpGen.copyDWIM (paramName param) [] (Var arr) [i]
-          | otherwise =
-              return ()
-          where i = ImpGen.varIndex (kernelLocalThreadId constants) + ImpGen.varIndex offset
-
-        writeReduceOpResult i param arr
-          | Prim _ <- paramType param =
-              ImpGen.copyDWIM arr [ImpGen.varIndex i] (Var $ paramName param) []
-          | otherwise =
-              return ()
 
 compileKernelExp constants _ (GroupScan w lam input) = do
   renamed_lam <- renameLambda lam
@@ -944,17 +863,115 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   bucket' <- mapM ImpGen.compileSubExp bucket
   w' <- mapM ImpGen.compileSubExp w
   sWhen (indexInBounds bucket' w') $
-    atomicUpdate arrs bucket op values locks
+    atomicUpdate arrs bucket op values locking
   where indexInBounds inds bounds =
           foldl1 (.&&.) $ zipWith checkBound inds bounds
           where checkBound ind bound = 0 .<=. ind .&&. ind .<. bound
+        locking = Locking locks 0 1 0
 
 compileKernelExp _ dest e =
   compilerBugS $ unlines ["Invalid target", "  " ++ show dest,
                           "for kernel expression", "  " ++ pretty e]
 
+-- | Locking strategy used for an atomic update.
+data Locking = Locking { lockingArray :: VName -- ^ Array containing the lock.
+                       , lockingIsUnlocked :: Imp.Exp -- ^ Value for us to consider the lock free.
+                       , lockingToLock :: Imp.Exp -- ^ What to write when we lock it.
+                       , lockingToUnlock :: Imp.Exp -- ^ What to write when we unlock it.
+                       }
+
+groupReduce :: ExplicitMemorish lore =>
+               KernelConstants
+            -> SubExp
+            -> Lambda lore
+            -> [VName]
+            -> ImpGen.ImpM lore Imp.KernelOp ()
+groupReduce constants w lam arrs = do
+  w' <- ImpGen.compileSubExp w
+
+  let local_tid = kernelLocalThreadId constants
+      (reduce_i, reduce_j_param, actual_reduce_params) =
+        partitionChunkedKernelLambdaParameters $ lambdaParams lam
+      (reduce_acc_params, reduce_arr_params) =
+        splitAt (length arrs) actual_reduce_params
+      reduce_j = paramName reduce_j_param
+
+  offset <- dPrim "offset" int32
+
+  skip_waves <- dPrim "skip_waves" int32
+  ImpGen.dLParams $ lambdaParams lam
+
+  reduce_i <-- Imp.var local_tid int32
+
+  let setOffset x = do
+        offset <-- x
+        reduce_j <-- Imp.var local_tid int32 + Imp.var offset int32
+
+  setOffset 0
+
+  sWhen (Imp.var local_tid int32 .<. w') $
+    zipWithM_ (readReduceArgument offset) reduce_acc_params arrs
+
+  let read_reduce_args = zipWithM_ (readReduceArgument offset)
+                         reduce_arr_params arrs
+      do_reduce = do ImpGen.comment "read array element" read_reduce_args
+                     ImpGen.compileBody' reduce_acc_params $ lambdaBody lam
+                     zipWithM_ (writeReduceOpResult local_tid)
+                       reduce_acc_params arrs
+      in_wave_reduce = ImpGen.everythingVolatile do_reduce
+
+      wave_size = Imp.sizeToExp $ kernelWaveSize constants
+      group_size = Imp.sizeToExp $ kernelGroupSize constants
+      wave_id = Imp.var local_tid int32 `quot` wave_size
+      in_wave_id = Imp.var local_tid int32 - wave_id * wave_size
+      num_waves = (group_size + wave_size - 1) `quot` wave_size
+      arg_in_bounds = Imp.var reduce_j int32 .<. w'
+
+      doing_in_wave_reductions =
+        Imp.var offset int32 .<. wave_size
+      apply_in_in_wave_iteration =
+        (in_wave_id .&. (2 * Imp.var offset int32 - 1)) .==. 0
+      in_wave_reductions = do
+        setOffset 1
+        sWhile doing_in_wave_reductions $ do
+          sWhen (arg_in_bounds .&&. apply_in_in_wave_iteration)
+            in_wave_reduce
+          setOffset $ Imp.var offset int32 * 2
+
+      doing_cross_wave_reductions =
+        Imp.var skip_waves int32 .<. num_waves
+      is_first_thread_in_wave =
+        in_wave_id .==. 0
+      wave_not_skipped =
+        (wave_id .&. (2 * Imp.var skip_waves int32 - 1)) .==. 0
+      apply_in_cross_wave_iteration =
+        arg_in_bounds .&&. is_first_thread_in_wave .&&. wave_not_skipped
+      cross_wave_reductions = do
+        skip_waves <-- 1
+        sWhile doing_cross_wave_reductions $ do
+          sOp Imp.Barrier
+          setOffset (Imp.var skip_waves int32 * wave_size)
+          sWhen apply_in_cross_wave_iteration
+            do_reduce
+          skip_waves <-- Imp.var skip_waves int32 * 2
+
+  in_wave_reductions
+  cross_wave_reductions
+  where readReduceArgument offset param arr
+          | Prim _ <- paramType param =
+              ImpGen.copyDWIM (paramName param) [] (Var arr) [i]
+          | otherwise =
+              return ()
+          where i = ImpGen.varIndex (kernelLocalThreadId constants) + ImpGen.varIndex offset
+
+        writeReduceOpResult i param arr
+          | Prim _ <- paramType param =
+              ImpGen.copyDWIM arr [ImpGen.varIndex i] (Var $ paramName param) []
+          | otherwise =
+              return ()
+
 atomicUpdate :: ExplicitMemorish lore =>
-                [VName] -> [SubExp] -> Lambda lore -> [SubExp] -> VName
+                [VName] -> [SubExp] -> Lambda lore -> [SubExp] -> Locking
              -> ImpGen.ImpM lore Imp.KernelOp ()
 atomicUpdate [a] bucket op [v] _
   | [Prim t] <- lambdaReturnType op,
@@ -967,7 +984,6 @@ atomicUpdate [a] bucket op [v] _
 
   -- Common variables.
   old <- dPrim "old" t
-  old_bits <- dPrim "old_bits" int32
   bucket' <- mapM ImpGen.compileSubExp bucket
 
   (arr', _a_space, bucket_offset) <- ImpGen.fullyIndexArray a bucket'
@@ -995,7 +1011,6 @@ atomicUpdate [a] bucket op [v] _
 
       -- Critical section
       ImpGen.dLParams $ lambdaParams op
-      let op_body = ImpGen.compileBody' [acc_p] $ lambdaBody op
 
       -- While-loop: Try to insert your value
       let (toBits, fromBits) =
@@ -1006,7 +1021,8 @@ atomicUpdate [a] bucket op [v] _
         assumed <-- Imp.var old t
         paramName acc_p <-- val'
         paramName arr_p <-- Imp.var assumed t
-        op_body
+        ImpGen.compileBody' [acc_p] $ lambdaBody op
+        old_bits <- dPrim "old_bits" int32
         sOp $ Imp.Atomic $
           Imp.AtomicCmpXchg old_bits arr' bucket_offset
           (toBits (Imp.var assumed int32)) (toBits (Imp.var (paramName acc_p) int32))
@@ -1019,7 +1035,7 @@ atomicUpdate [a] bucket op [v] _
             Just $ map stmExp $ stmsToList $ bodyStms $ lambdaBody lam
           atomic <$> Imp.atomicBinOp bop
 
-atomicUpdate arrs bucket op values locks = do
+atomicUpdate arrs bucket op values locking = do
   old <- dPrim "old" int32
   loop_done <- dPrim "loop_done" int32
   loop_done <-- 0
@@ -1029,19 +1045,20 @@ atomicUpdate arrs bucket op values locks = do
 
   -- Correctly index into locks.
   (locks', _locks_space, locks_offset) <-
-    ImpGen.fullyIndexArray locks bucket'
+    ImpGen.fullyIndexArray (lockingArray locking) bucket'
 
   -- Preparing parameters
   let (acc_params, arr_params) =
         splitAt (length values) $ lambdaParams op
 
   -- Critical section
-  ImpGen.dLParams $ lambdaParams op
   let try_acquire_lock =
         sOp $ Imp.Atomic $
-        Imp.AtomicXchg old locks' locks_offset 1
-      lock_acquired = Imp.var old int32 .==. 0
+        Imp.AtomicCmpXchg old locks' locks_offset (lockingIsUnlocked locking) (lockingToLock locking)
+      lock_acquired = Imp.var old int32 .==. lockingIsUnlocked locking
       loop_cond = Imp.var loop_done int32 .==. 0
+      release_lock = ImpGen.everythingVolatile $
+                     ImpGen.sWrite (lockingArray locking) bucket' $ lockingToUnlock locking
       break_loop = loop_done <-- 1
 
   -- We copy the current value and the new value to the parameters
@@ -1062,13 +1079,17 @@ atomicUpdate arrs bucket op values locks = do
 
       do_gen_reduce = zipWithM_ (writeArray bucket') arrs $ map (Var . paramName) acc_params
 
-      release_lock = ImpGen.copyDWIM locks bucket' (intConst Int32 0) []
-
   -- While-loop: Try to insert your value
   sWhile loop_cond $ do
     try_acquire_lock
-    sWhen lock_acquired
-      (bind_acc_params >> bind_arr_params >> op_body >> do_gen_reduce >> release_lock >> break_loop)
+    sWhen lock_acquired $ do
+      ImpGen.dLParams $ lambdaParams op
+      bind_acc_params
+      bind_arr_params
+      op_body
+      do_gen_reduce
+      release_lock
+      break_loop
     sOp Imp.MemFence
   where writeArray bucket' arr val =
           ImpGen.copyDWIM arr bucket' val []
