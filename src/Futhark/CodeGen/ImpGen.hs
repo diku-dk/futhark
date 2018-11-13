@@ -1106,7 +1106,7 @@ defaultCopy bt dest src n
 
 copyElementWise :: CopyCompiler lore op
 copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
-    is <- replicateM (IxFun.rank destIxFun) (dPrim "i" int32)
+    is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     let ivars = map varIndex is
         destidx = IxFun.index destIxFun ivars bt_size
         srcidx = IxFun.index srcIxFun ivars bt_size
