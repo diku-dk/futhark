@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Compare to JSON files produced by futhark-bench's --json option.
+# Compare two JSON files produced by futhark-bench's --json option.
 
 import json
 import sys
