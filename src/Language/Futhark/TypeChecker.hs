@@ -476,11 +476,15 @@ nastyType t@Array{} = nastyType $ stripArray 1 t
 nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
-nastyReturnType (Just (TEVar (QualName [] _) _)) _ = False
 nastyReturnType _ (Arrow _ _ t1 t2) = nastyType t1 || nastyReturnType Nothing t2
-nastyReturnType _ t
-  | Just ts <- isTupleRecord t = any nastyType ts
-  | otherwise = nastyType t
+nastyReturnType te t
+  | Just ts <- isTupleRecord t =
+      case te of
+        Just (TETuple tes _) -> or $ zipWith nastyType' (map Just tes) ts
+        _ -> any nastyType ts
+  | otherwise = nastyType' te t
+  where nastyType' (Just (TEVar (QualName [] _) _)) _ = False
+        nastyType' _ t' = nastyType t'
 
 nastyParameter :: Pattern -> Bool
 nastyParameter p = nastyType (patternType p) && not (ascripted p)
