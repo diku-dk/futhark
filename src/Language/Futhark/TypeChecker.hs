@@ -477,6 +477,7 @@ nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
 nastyReturnType (Just (TEVar (QualName [] _) _)) _ = False
+nastyReturnType _ (Arrow _ _ t1 t2) = nastyType t1 || nastyReturnType Nothing t2
 nastyReturnType _ t
   | Just ts <- isTupleRecord t = any nastyType ts
   | otherwise = nastyType t
