@@ -1,11 +1,23 @@
 module Futhark.CodeGen.Backends.SPIRV.Operations 
   ( GLSLInstr
   , encodeString
+  , glslRound
   , glslFAbs
   , glslSAbs
   , glslFSign
   , glslSSign
+  , glslSin
+  , glslCos
+  , glslTan
+  , glslASin
+  , glslACos
+  , glslATan
+  , glslATan2
   , glslPow
+  , glslLog
+  , glslExp
+  , glslLog2
+  , glslSqrt
   , glslFMin
   , glslUMin
   , glslSMin
@@ -25,6 +37,7 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , cInt8Capability
   , cVariablePointersStorageBufferCapability
   , cStorageBuffer8BitAccessCapability
+  , cScopeDevice
   , cScopeWorkgroup
   , cStorageClassStorageBuffer
   , cStorageClassUniform
@@ -36,6 +49,8 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , cStorageClassInput
   , cMemorySemanticsAcquireRelease
   , cMemorySemanticsSequentiallyConsistent
+  , cMemorySemanticsUniformMemory
+  , cMemorySemanticsWorkgroupMemory
   , cFunctionControlNone
   , cNoSignedness
   , cExecutionModelGLCompute
@@ -108,11 +123,15 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , opUMod
   , opSRem
   , opSMod
+  , opIsNan
+  , opIsInf
   , opLogicalEqual
   , opLogicalOr
+  , opSelect
   , opIEqual
   , opFOrdEqual
   , opLogicalAnd
+  , opLogicalNot
   , opULessThan
   , opSLessThan
   , opFOrdLessThan
@@ -128,6 +147,16 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , opNot
   , opControlBarrier
   , opMemoryBarrier
+  , opAtomicExchange
+  , opAtomicCompareExchange
+  , opAtomicIAdd
+  , opAtomicSMin
+  , opAtomicUMin
+  , opAtomicSMax
+  , opAtomicUMax
+  , opAtomicAnd
+  , opAtomicOr
+  , opAtomicXor
   , opLoopMerge
   , opSelectionMerge
   , opLabel
@@ -212,6 +241,9 @@ cMemoryAccessNone = 0
 cMemoryAccessVolatile :: Word32
 cMemoryAccessVolatile = 0
 
+cScopeDevice :: Word32
+cScopeDevice = 1
+
 cScopeWorkgroup :: Word32
 cScopeWorkgroup = 2
 
@@ -240,10 +272,16 @@ cStorageClassStorageBuffer :: Word32
 cStorageClassStorageBuffer = 12
 
 cMemorySemanticsAcquireRelease :: Word32
-cMemorySemanticsAcquireRelease = 4
+cMemorySemanticsAcquireRelease = 8
 
 cMemorySemanticsSequentiallyConsistent :: Word32
 cMemorySemanticsSequentiallyConsistent = 16
+
+cMemorySemanticsUniformMemory :: Word32
+cMemorySemanticsUniformMemory = 64
+
+cMemorySemanticsWorkgroupMemory :: Word32
+cMemorySemanticsWorkgroupMemory = 256
 
 cFunctionControlNone :: Word32
 cFunctionControlNone = 0
@@ -298,6 +336,9 @@ cBuiltinGlobalInvocationId = 28
 
 -- | GLSL instructions
 
+glslRound :: GLSLInstr
+glslRound = 1
+
 glslFAbs :: GLSLInstr
 glslFAbs = 4
 
@@ -310,8 +351,41 @@ glslFSign = 6
 glslSSign :: GLSLInstr
 glslSSign = 7
 
+glslSin :: GLSLInstr
+glslSin = 13
+
+glslCos :: GLSLInstr
+glslCos = 14
+
+glslTan :: GLSLInstr
+glslTan = 15
+
+glslASin :: GLSLInstr
+glslASin = 16
+
+glslACos :: GLSLInstr
+glslACos = 17
+
+glslATan :: GLSLInstr
+glslATan = 18
+
+glslATan2 :: GLSLInstr
+glslATan2 = 25
+
 glslPow :: GLSLInstr
 glslPow = 26
+
+glslLog :: GLSLInstr
+glslLog = 28
+
+glslExp :: GLSLInstr
+glslExp = 29
+
+glslLog2 :: GLSLInstr
+glslLog2 = 30
+
+glslSqrt :: GLSLInstr
+glslSqrt = 31
 
 glslFMin :: GLSLInstr
 glslFMin = 37
@@ -507,6 +581,12 @@ opcSRem = 138
 opcSMod :: SPIRVInstr
 opcSMod = 139
 
+opcIsNan :: SPIRVInstr
+opcIsNan = 156
+
+opcIsInf :: SPIRVInstr
+opcIsInf = 157
+
 opcLogicalEqual :: SPIRVInstr
 opcLogicalEqual = 164
 
@@ -515,6 +595,12 @@ opcLogicalOr = 166
 
 opcLogicalAnd :: SPIRVInstr
 opcLogicalAnd = 167
+
+opcLogicalNot :: SPIRVInstr
+opcLogicalNot = 168
+
+opcSelect :: SPIRVInstr
+opcSelect = 169
 
 opcIEqual :: SPIRVInstr
 opcIEqual = 170
@@ -566,6 +652,36 @@ opcControlBarrier = 224
 
 opcMemoryBarrier :: SPIRVInstr
 opcMemoryBarrier = 225
+
+opcAtomicExchange :: SPIRVInstr
+opcAtomicExchange = 229
+
+opcAtomicCompareExchange :: SPIRVInstr
+opcAtomicCompareExchange = 230
+
+opcAtomicIAdd :: SPIRVInstr
+opcAtomicIAdd = 234
+
+opcAtomicSMin :: SPIRVInstr
+opcAtomicSMin = 236
+
+opcAtomicUMin :: SPIRVInstr
+opcAtomicUMin = 237
+
+opcAtomicSMax :: SPIRVInstr
+opcAtomicSMax = 238
+
+opcAtomicUMax :: SPIRVInstr
+opcAtomicUMax = 239
+
+opcAtomicAnd :: SPIRVInstr
+opcAtomicAnd = 240
+
+opcAtomicOr :: SPIRVInstr
+opcAtomicOr = 241
+
+opcAtomicXor :: SPIRVInstr
+opcAtomicXor = 242
 
 opcLoopMerge :: SPIRVInstr
 opcLoopMerge = 246
@@ -755,17 +871,29 @@ opSRem op1_id op2_id t_id r_id = makeOperation opcSRem [t_id, r_id, op1_id, op2_
 opSMod :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opSMod op1_id op2_id t_id r_id = makeOperation opcSMod [t_id, r_id, op1_id, op2_id]
 
+opIsNan :: Word32 -> Word32 -> Word32 -> [Word32]
+opIsNan op_id t_id r_id = makeOperation opcIsNan [t_id, r_id, op_id]
+
+opIsInf :: Word32 -> Word32 -> Word32 -> [Word32]
+opIsInf op_id t_id r_id = makeOperation opcIsInf [t_id, r_id, op_id]
+
 opLogicalEqual :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opLogicalEqual op1_id op2_id t_id r_id = makeOperation opcLogicalEqual [t_id, r_id, op1_id, op2_id]
 
 opLogicalOr :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opLogicalOr op1_id op2_id t_id r_id = makeOperation opcLogicalOr [t_id, r_id, op1_id, op2_id]
 
+opSelect :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opSelect cond_id op1_id op2_id t_id r_id = makeOperation opcSelect [t_id, r_id, cond_id, op1_id, op2_id]
+
 opIEqual :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opIEqual op1_id op2_id t_id r_id = makeOperation opcIEqual [t_id, r_id, op1_id, op2_id]
 
 opLogicalAnd :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opLogicalAnd op1_id op2_id t_id r_id = makeOperation opcLogicalAnd [t_id, r_id, op1_id, op2_id]
+
+opLogicalNot :: Word32 -> Word32 -> Word32 -> [Word32]
+opLogicalNot op_id t_id r_id = makeOperation opcLogicalNot [t_id, r_id, op_id]
 
 opULessThan :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opULessThan op1_id op2_id t_id r_id = makeOperation opcULessThan [t_id, r_id, op1_id, op2_id]
@@ -814,6 +942,46 @@ opControlBarrier exec_scope mem_scope sem = makeOperation opcControlBarrier [exe
 
 opMemoryBarrier :: Word32 -> Word32 -> [Word32]
 opMemoryBarrier mem_scope sem = makeOperation opcMemoryBarrier [mem_scope, sem]
+
+opAtomicExchange :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicExchange ptr_id scope_id sem_id val_id t_id r_id =
+  makeOperation opcAtomicExchange [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
+
+opAtomicCompareExchange :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicCompareExchange ptr_id scope_id eq_sem_id neq_sem_id val_id cmp_id t_id r_id =
+  makeOperation opcAtomicCompareExchange [t_id, r_id, ptr_id, scope_id, eq_sem_id, neq_sem_id, val_id, cmp_id]
+
+opAtomicIAdd :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicIAdd ptr_id scope_id sem_id val_id t_id r_id =
+  makeOperation opcAtomicIAdd [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
+
+opAtomicSMin :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicSMin ptr_id scope_id sem_id val_id t_id r_id =
+  makeOperation opcAtomicSMin [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
+
+opAtomicUMin :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicUMin  ptr_id scope_id sem_id val_id t_id r_id =
+  makeOperation opcAtomicUMin [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
+
+opAtomicSMax :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicSMax ptr_id scope_id sem_id val_id t_id r_id =
+  makeOperation opcAtomicSMax [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
+
+opAtomicUMax :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicUMax ptr_id scope_id sem_id val_id t_id r_id =
+  makeOperation opcAtomicUMax [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
+
+opAtomicAnd :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicAnd ptr_id scope_id sem_id val_id t_id r_id =
+  makeOperation opcAtomicAnd [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
+
+opAtomicOr :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicOr ptr_id scope_id sem_id val_id t_id r_id =
+  makeOperation opcAtomicOr [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
+
+opAtomicXor :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opAtomicXor ptr_id scope_id sem_id val_id t_id r_id =
+  makeOperation opcAtomicXor [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
 
 opLoopMerge :: Word32 -> Word32 -> [Word32]
 opLoopMerge merge_id continue_id = makeOperation opcLoopMerge [merge_id, continue_id, 0]
