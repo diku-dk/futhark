@@ -2,11 +2,10 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Futhark.CodeGen.Backends.CVulkan.Boilerplate
   ( generateBoilerplate
+  , shaderCtx
   ) where
 
-import Data.Word
 import Data.FileEmbed
-import Data.List
 import qualified Data.Map as M
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
@@ -16,7 +15,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.SPIRV as SPIRV
 
 generateBoilerplate :: Program -> GC.CompilerM Vulkan () ()
-generateBoilerplate (Program spirv_code entry_points desc_sets sizes _) = do
+generateBoilerplate (Program shaders sizes _) = do
   final_inits <- GC.contextFinalInits
   
   -- Define buffer structure in header
@@ -24,17 +23,19 @@ generateBoilerplate (Program spirv_code entry_points desc_sets sizes _) = do
                                           typename VkBuffer buffer;
                                           typename VkDeviceMemory memory;
                                           size_t size;
+                                          typename uint32_t owner_index;
+                                          typename uint8_t owned;
                                         };|]
 
-  let entry_point_names  = map SPIRV.entryPointName entry_points
-      vulkan_boilerplate = vulkanBoilerplate spirv_code
-      vulkan_ctx_fields  = vulkanCtxFields entry_point_names
-      vulkan_ctx_inits   = vulkanCtxInits entry_point_names
-      desc_layout_create = vulkanCreateDescriptorSetLayouts desc_sets
-      pipe_layout_create = vulkanCreatePipelineLayouts entry_points desc_sets
-      desc_pool_init     = vulkanCreateDescriptorPool desc_sets
-      size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
-      size_class_inits = map (\(c,_) -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+  let entry_point_names       = map SPIRV.shaderEntryPoint shaders
+      vulkan_boilerplate      = vulkanBoilerplate shaders
+      vulkan_ctx_fields       = vulkanCtxFields entry_point_names
+      vulkan_ctx_inits        = vulkanCtxInits entry_point_names
+      vulkan_shader_ctx_inits = map vulkanShaderCtxInit shaders
+      vulkan_shader_ctx_clrs  = map vulkanShaderCtxCleanup shaders
+      desc_pool_init          = vulkanCreateDescriptorPool shaders
+      size_name_inits         = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
+      size_class_inits        = map (\(c,_) -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       size_entry_points_inits = map (\(_,e) -> [C.cinit|$string:(pretty e)|]) $ M.elems sizes
   GC.earlyDecls vulkan_boilerplate
 
@@ -166,13 +167,12 @@ generateBoilerplate (Program spirv_code entry_points desc_sets sizes _) = do
                           [(0::Int)..] $ M.keys sizes
 
   GC.libDecl [C.cedecl|static void init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx) {
-                     $stms:desc_layout_create
-                     $stms:pipe_layout_create
                      $stm:desc_pool_init
+                     $stms:set_sizes
+
+                     $stms:vulkan_shader_ctx_inits
 
                      $stms:final_inits
-
-                     $stms:set_sizes
                   }|]
 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
@@ -184,10 +184,7 @@ generateBoilerplate (Program spirv_code entry_points desc_sets sizes _) = do
                           }
 
                           init_context_early(cfg, ctx);
-                          setup_vulkan(&ctx->vulkan,
-                                       $int:(M.size desc_sets),
-                                       spirv_shader,
-                                       sizeof(spirv_shader));
+                          setup_vulkan(&ctx->vulkan);
                           init_context_late(cfg, ctx);
                           return ctx;
                        }|])
@@ -196,6 +193,7 @@ generateBoilerplate (Program spirv_code entry_points desc_sets sizes _) = do
     ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  free_lock(&ctx->lock);
+                                 $stms:vulkan_shader_ctx_clrs
                                  vulkan_cleanup(&ctx->vulkan);
                                  free(ctx);
                                }|])
@@ -228,31 +226,52 @@ generateBoilerplate (Program spirv_code entry_points desc_sets sizes _) = do
                  return ctx->vulkan.queue;
                }|])
 
-  return () -- Report
+  mapM_ GC.debugReport $ vulkanReport entry_point_names
 
-vulkanBoilerplate :: [Word32] -> [C.Definition]
-vulkanBoilerplate spirv_code = [C.cunit|
+vulkanBoilerplate :: [SPIRV.SingleEntryShader] -> [C.Definition]
+vulkanBoilerplate shaders = [C.cunit|
     $esc:("typedef struct vk_buffer_mem_pair fl_entry_mem;")
     $esc:freelist_h
     $esc:vulkan_h
-    $esc:("const uint32_t spirv_shader[] = " ++ shader ++ ";")
+    $edecls:shader_inits
   |]
   where freelist_h = $(embedStringFile "rts/c/free_list.h")
         vulkan_h = $(embedStringFile "rts/c/vulkan.h")
-        shader = "{" ++ intercalate "," (map show spirv_code) ++ "}"
+        shader_inits = map vulkanShaderInit shaders
 
+vulkanShaderInit :: SPIRV.SingleEntryShader -> C.Definition
+vulkanShaderInit (SPIRV.SEShader name _ code) = [C.cedecl|
+    const typename uint32_t $id:(shaderCodeName name)[] = { $inits:code_words };
+  |]
+  where code_words = [ [C.cinit|$int:w|] | w <- code ]
 
-vulkanCtxFields :: [String] -> [C.FieldGroup]
+vulkanShaderCtxInit :: SPIRV.SingleEntryShader -> C.Stm
+vulkanShaderCtxInit (SPIRV.SEShader name desc_set_size _) = [C.cstm|
+    vulkan_setup_shader(&ctx->vulkan,
+                        &ctx->$id:(shaderCtx name),
+                        $string:(SPIRV.entryPointName name),
+                        $int:desc_set_size,
+                        $id:(shaderCodeName name),
+                        sizeof($id:(shaderCodeName name)));
+  |]
+
+vulkanShaderCtxCleanup :: SPIRV.SingleEntryShader -> C.Stm
+vulkanShaderCtxCleanup (SPIRV.SEShader name _ _) = [C.cstm|
+    vulkan_shader_cleanup(&ctx->vulkan, &ctx->$id:(shaderCtx name));
+  |]
+
+vulkanCtxFields :: [VName] -> [C.FieldGroup]
 vulkanCtxFields entry_point_names =
   [ [C.csdecl|int total_runs;|],
     [C.csdecl|long int total_runtime;|] ] ++
   concat
   [ [ [C.csdecl|int $id:(entryPointRuntime name);|]
     , [C.csdecl|int $id:(entryPointRuns name);|]
+    , [C.csdecl|struct vulkan_shader_context $id:(shaderCtx name);|]
     ]
   | name <- entry_point_names ]
 
-vulkanCtxInits :: [String] -> [C.Stm]
+vulkanCtxInits :: [VName] -> [C.Stm]
 vulkanCtxInits entry_point_names =
   [ [C.cstm|ctx->total_runs = 0;|],
     [C.cstm|ctx->total_runtime = 0;|] ] ++
@@ -262,66 +281,53 @@ vulkanCtxInits entry_point_names =
     ]
   | name <- entry_point_names ]
 
-vulkanCreateDescriptorSetLayout :: Int -> SPIRV.DescriptorSet -> C.Stm
-vulkanCreateDescriptorSetLayout map_i descs = [C.cstm|{
-    typename VkDescriptorSetLayoutBinding desc_set_layout_bindings[$int:(length descs)];
-    $stms:binding_inits
+vulkanCreateDescriptorPool :: [SPIRV.SingleEntryShader] -> C.Stm
+vulkanCreateDescriptorPool shaders = [C.cstm|
+    vulkan_init_descriptor_pool(&ctx->vulkan,
+                                $int:shader_count,
+                                $int:total_desc_count);
+  |]
+  where shader_count = length shaders
+        total_desc_count = sum $ map SPIRV.shaderDescriptorSetSize shaders
 
-    typename VkDescriptorSetLayoutCreateInfo desc_set_layout_create_info;
-    desc_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    desc_set_layout_create_info.pNext = 0;
-    desc_set_layout_create_info.flags = 0;
-    desc_set_layout_create_info.bindingCount = $int:(length descs);
-    desc_set_layout_create_info.pBindings = desc_set_layout_bindings;
+vulkanReport :: [VName] -> [C.BlockItem]
+vulkanReport names = report_kernels ++ [report_total]
+  where longest_name = foldl max 0 $ map (length . SPIRV.entryPointName) names
+        report_kernels = concatMap reportKernel names
+        format_string vname =
+          let name = SPIRV.entryPointName vname
+              padding = replicate (longest_name - length name) ' '
+          in unwords ["Kernel",
+                      name ++ padding,
+                      "executed %6d times, with average runtime: %6ldus\tand total runtime: %6ldus\n"]
+        reportKernel name =
+          let runs = entryPointRuns name
+              total_runtime = entryPointRuntime name
+          in [[C.citem|
+               fprintf(stderr,
+                       $string:(format_string name),
+                       ctx->$id:runs,
+                       (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
+                       (long int) ctx->$id:total_runtime);
+              |],
+              [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
+              [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
-    VULKAN_SUCCEED(vkCreateDescriptorSetLayout(ctx->vulkan.device,
-                                               &desc_set_layout_create_info,
-                                               0,
-                                               &ctx->vulkan.descriptor_set_layouts[$int:map_i]));
-  }|]
-  where binding_inits = concat
-          [ [ [C.cstm|desc_set_layout_bindings[$int:i].binding = $int:i;|]
-            , [C.cstm|desc_set_layout_bindings[$int:i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;|]
-            , [C.cstm|desc_set_layout_bindings[$int:i].descriptorCount = 1;|]
-            , [C.cstm|desc_set_layout_bindings[$int:i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;|]
-            , [C.cstm|desc_set_layout_bindings[$int:i].pImmutableSamplers = 0;|]
-            ]
-          | i <- [0..length descs - 1]]
+        report_total = [C.citem|
+                          if (ctx->debugging) {
+                            fprintf(stderr, "Ran %d kernels with cumulative runtime: %6ldus\n",
+                                    ctx->total_runs, ctx->total_runtime);
+                          }
+                        |]
 
-vulkanCreateDescriptorSetLayouts :: SPIRV.DescriptorSetMap -> [C.Stm]
-vulkanCreateDescriptorSetLayouts desc_map =
-  let descs = M.elems desc_map
-  in zipWith vulkanCreateDescriptorSetLayout [0..M.size desc_map - 1] descs
+entryPointRuntime :: VName -> String
+entryPointRuntime name = SPIRV.entryPointName name ++ "_total_runtime"
 
-vulkanCreateDescriptorPool :: SPIRV.DescriptorSetMap -> C.Stm
-vulkanCreateDescriptorPool desc_map =
-  [C.cstm|VULKAN_SUCCEED(vulkan_init_descriptor_pool(&ctx->vulkan, $int:total_desc_count));|]
-  where total_desc_count = sum $ map length $ M.elems desc_map
+entryPointRuns :: VName -> String
+entryPointRuns name = SPIRV.entryPointName name ++ "_runs"
 
-vulkanCreatePipelineLayout :: Int -> Int -> C.Stm
-vulkanCreatePipelineLayout entry_i desc_set_i = [C.cstm|{
-    typename VkPipelineLayoutCreateInfo pipeline_layout_create_info;
-    pipeline_layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_layout_create_info.pNext = 0;
-    pipeline_layout_create_info.flags = 0;
-    pipeline_layout_create_info.setLayoutCount = 1;
-    pipeline_layout_create_info.pSetLayouts = &ctx->vulkan.descriptor_set_layouts[$int:desc_set_i];
-    pipeline_layout_create_info.pushConstantRangeCount = 0;
-    pipeline_layout_create_info.pPushConstantRanges = 0;
+shaderCodeName :: VName -> String
+shaderCodeName name = SPIRV.entryPointName name ++ "_shader"
 
-    VULKAN_SUCCEED(vkCreatePipelineLayout(ctx->vulkan.device,
-                                          &pipeline_layout_create_info,
-                                          0,
-                                          &ctx->vulkan.pipeline_layouts[$int:entry_i]));
-  }|]
-
-vulkanCreatePipelineLayouts :: [VName] -> SPIRV.DescriptorSetMap -> [C.Stm]
-vulkanCreatePipelineLayouts entry_points desc_map =
-  let indexed_create entry_i entry = vulkanCreatePipelineLayout entry_i $ M.findIndex entry desc_map
-  in zipWith indexed_create [0..length entry_points - 1] entry_points
-
-entryPointRuntime :: String -> String
-entryPointRuntime = (++"_total_runtime")
-
-entryPointRuns :: String -> String
-entryPointRuns = (++"_runs")
+shaderCtx :: VName -> String
+shaderCtx name = SPIRV.entryPointName name ++ "_shader_ctx"

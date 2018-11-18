@@ -5,6 +5,9 @@
 
 #define VULKAN_SUCCEED(e) vulkan_succeed(e, #e, __FILE__, __LINE__)
 
+#define SCALAR_TAG "scalar"
+#define ALLOC_STEP 32
+
 struct vulkan_config {
   uint32_t api_version;
   int debugging;
@@ -58,6 +61,22 @@ void vulkan_config_init(struct vulkan_config *cfg,
   cfg->size_classes = size_classes;
 }
 
+struct vulkan_shader_context {
+  const char *entry_point;
+  VkShaderModule shader_module;
+  VkDescriptorSetLayout descriptor_set_layout;
+  VkDescriptorSet descriptor_set;
+  VkPipelineLayout pipeline_layout;
+};
+
+struct vulkan_command_buffer_context {
+  VkCommandBuffer command_buffer;
+  VkFence fence;
+  uint32_t owns;
+  struct vk_buffer_mem_pair *scalars;
+  uint32_t scalar_count;
+};
+
 struct vulkan_context {
   VkInstance instance;
   VkPhysicalDevice physical_device;
@@ -65,13 +84,10 @@ struct vulkan_context {
   VkQueue queue;
   uint32_t queue_family_index;
   VkCommandPool command_pool;
-  VkCommandBuffer command_buffer;
-  VkShaderModule shader_module;
   VkDescriptorPool descriptor_pool;
-  VkDescriptorSet *descriptor_sets;
-  VkDescriptorSetLayout *descriptor_set_layouts;
-  VkPipelineLayout *pipeline_layouts;
-  uint32_t entry_point_count;
+
+  struct vulkan_command_buffer_context *command_buffers;
+  uint32_t command_buffer_count;
 
   struct vulkan_config cfg;
 
@@ -150,7 +166,7 @@ static VkPhysicalDevice get_preferred_physical_device(const struct vulkan_config
   uint32_t device_count = 0;
   VULKAN_SUCCEED(vkEnumeratePhysicalDevices(instance, &device_count, 0));
 
-  VkPhysicalDevice *const devices = (VkPhysicalDevice *)malloc(sizeof(VkPhysicalDevice) * device_count);
+  VkPhysicalDevice *const devices = malloc(sizeof(VkPhysicalDevice) * device_count);
 
   VULKAN_SUCCEED(vkEnumeratePhysicalDevices(instance, &device_count, devices));
 
@@ -198,8 +214,7 @@ static uint32_t get_preferred_queue_family(const struct vulkan_config *cfg, VkPh
   uint32_t queue_family_props_count = 0;
   vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_props_count, 0);
 
-  VkQueueFamilyProperties *const queue_family_props = (VkQueueFamilyProperties *)malloc(
-    sizeof(VkQueueFamilyProperties) * queue_family_props_count);
+  VkQueueFamilyProperties *const queue_family_props = malloc(sizeof(VkQueueFamilyProperties) * queue_family_props_count);
 
   vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_props_count, queue_family_props);
 
@@ -284,20 +299,52 @@ static void init_sizes(struct vulkan_context *ctx) {
   }
 }
 
-static void setup_vulkan(struct vulkan_context *ctx,
-                         const uint32_t entry_point_count,
-                         const uint32_t shader[],
-                         const uint32_t shader_size) {
+static VkResult vulkan_allocate_command_buffers(struct vulkan_context *ctx,
+                                                uint32_t offset,
+                                                uint32_t count) {
+
+  VkCommandBuffer *tmp_buffers = malloc(count * sizeof(VkCommandBuffer));
+
+  VkCommandBufferAllocateInfo command_buffer_allocate_info;
+  command_buffer_allocate_info.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  command_buffer_allocate_info.pNext              = 0;
+  command_buffer_allocate_info.commandPool        = ctx->command_pool;
+  command_buffer_allocate_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  command_buffer_allocate_info.commandBufferCount = count;
+
+  VkResult error = vkAllocateCommandBuffers(ctx->device, &command_buffer_allocate_info, tmp_buffers);
+
+  if (error != VK_SUCCESS)
+    return error;
+
+  const VkFenceCreateInfo fence_create_info = {
+    VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    0,
+    VK_FENCE_CREATE_SIGNALED_BIT
+  };
+
+  for (int i = offset; i < offset + count; ++i) {
+    ctx->command_buffers[i].owns = 0;
+    ctx->command_buffers[i].scalar_count = 0;
+    ctx->command_buffers[i].command_buffer = tmp_buffers[i-offset]; 
+
+    error = vkCreateFence(ctx->device,
+                          &fence_create_info,
+                          0,
+                          &ctx->command_buffers[i].fence);
+
+    if (error != VK_SUCCESS)
+      return error;
+  }
+
+  free(tmp_buffers);
+  return VK_SUCCESS;
+}
+
+static void setup_vulkan(struct vulkan_context *ctx) {
   ctx->lockstep_width = 1;
 
   free_list_init(&ctx->free_list);
-
-  if (ctx->cfg.dump_program_to != NULL) {
-    FILE *f = fopen(ctx->cfg.dump_program_to, "wb");
-    assert(f != NULL);
-    fwrite(shader, sizeof(uint32_t), shader_size / sizeof(uint32_t), f);
-    fclose(f);
-  }
 
   VkApplicationInfo application_info;
   application_info.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -342,7 +389,7 @@ static void setup_vulkan(struct vulkan_context *ctx,
   storage_8bit_features.pNext                             = 0;
   storage_8bit_features.storageBuffer8BitAccess           = true;
 
-  VkPhysicalDeviceFeatures device_features;
+  VkPhysicalDeviceFeatures device_features = {};
   device_features.shaderInt16   = true;
   device_features.shaderInt64   = true;
   device_features.shaderFloat64 = true;
@@ -371,14 +418,29 @@ static void setup_vulkan(struct vulkan_context *ctx,
 
   VULKAN_SUCCEED(vkCreateCommandPool(ctx->device, &command_pool_create_info, 0, &ctx->command_pool));
 
-  VkCommandBufferAllocateInfo command_buffer_allocate_info;
-  command_buffer_allocate_info.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  command_buffer_allocate_info.pNext              = 0;
-  command_buffer_allocate_info.commandPool        = ctx->command_pool;
-  command_buffer_allocate_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  command_buffer_allocate_info.commandBufferCount = 1;
+  ctx->command_buffer_count = ALLOC_STEP;
+  ctx->command_buffers = malloc(ctx->command_buffer_count * sizeof(struct vulkan_command_buffer_context));
+  VULKAN_SUCCEED(vulkan_allocate_command_buffers(ctx, 0, ctx->command_buffer_count));
+}
 
-  VULKAN_SUCCEED(vkAllocateCommandBuffers(ctx->device, &command_buffer_allocate_info, &ctx->command_buffer));
+void vulkan_setup_shader(struct vulkan_context *ctx,
+                         struct vulkan_shader_context *sh_ctx,
+                         const char* entry_point,
+                         uint32_t descriptor_count,
+                         const uint32_t shader[],
+                         uint32_t shader_size) {
+  
+  if (ctx->cfg.dump_program_to != NULL) {
+    char *fname = malloc((strlen(ctx->cfg.dump_program_to) + strlen(entry_point) + 5) * sizeof(char));
+    sprintf(fname, "%s.%s.spv", ctx->cfg.dump_program_to, entry_point);
+    FILE *f = fopen(fname, "wb");
+    assert(f != NULL);
+    fwrite(shader, sizeof(uint32_t), shader_size / sizeof(uint32_t), f);
+    fclose(f);
+    free(fname);
+  }
+
+  sh_ctx->entry_point = entry_point;
 
   VkShaderModuleCreateInfo shader_module_create_info;
   shader_module_create_info.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -387,15 +449,61 @@ static void setup_vulkan(struct vulkan_context *ctx,
   shader_module_create_info.codeSize = shader_size;
   shader_module_create_info.pCode    = shader;
 
-  VULKAN_SUCCEED(vkCreateShaderModule(ctx->device, &shader_module_create_info, 0, &ctx->shader_module));
+  VULKAN_SUCCEED(vkCreateShaderModule(ctx->device, &shader_module_create_info, 0, &sh_ctx->shader_module));
 
-  ctx->entry_point_count = entry_point_count;
-  ctx->descriptor_set_layouts = (VkDescriptorSetLayout*)malloc(entry_point_count * sizeof(VkDescriptorSetLayout));
-  ctx->descriptor_sets = (VkDescriptorSet*)malloc(entry_point_count * sizeof(VkDescriptorSet));
-  ctx->pipeline_layouts = (VkPipelineLayout*)malloc(entry_point_count * sizeof(VkPipelineLayoutCreateInfo));
+  VkDescriptorSetLayoutBinding *desc_set_layout_bindings =
+    malloc(sizeof(VkDescriptorSetLayoutBinding) * descriptor_count);
+  
+  for (int i = 0; i < descriptor_count; ++i) {
+    desc_set_layout_bindings[i].binding = i;
+    desc_set_layout_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    desc_set_layout_bindings[i].descriptorCount = 1;
+    desc_set_layout_bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    desc_set_layout_bindings[i].pImmutableSamplers = 0;
+  }
+
+  VkDescriptorSetLayoutCreateInfo desc_set_layout_create_info;
+  desc_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  desc_set_layout_create_info.pNext = 0;
+  desc_set_layout_create_info.flags = 0;
+  desc_set_layout_create_info.bindingCount = descriptor_count;
+  desc_set_layout_create_info.pBindings = desc_set_layout_bindings;
+
+  VULKAN_SUCCEED(vkCreateDescriptorSetLayout(ctx->device,
+                                             &desc_set_layout_create_info,
+                                             0,
+                                             &sh_ctx->descriptor_set_layout));
+  free(desc_set_layout_bindings);
+
+  VkDescriptorSetAllocateInfo descriptor_set_allocate_info;
+  descriptor_set_allocate_info.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  descriptor_set_allocate_info.pNext              = 0;
+  descriptor_set_allocate_info.descriptorPool     = ctx->descriptor_pool;
+  descriptor_set_allocate_info.descriptorSetCount = 1;
+  descriptor_set_allocate_info.pSetLayouts        = &sh_ctx->descriptor_set_layout;
+
+  VULKAN_SUCCEED(vkAllocateDescriptorSets(ctx->device,
+                                          &descriptor_set_allocate_info,
+                                          &sh_ctx->descriptor_set));
+
+  VkPipelineLayoutCreateInfo pipeline_layout_create_info;
+  pipeline_layout_create_info.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipeline_layout_create_info.pNext                  = 0;
+  pipeline_layout_create_info.flags                  = 0;
+  pipeline_layout_create_info.setLayoutCount         = 1;
+  pipeline_layout_create_info.pSetLayouts            = &sh_ctx->descriptor_set_layout;
+  pipeline_layout_create_info.pushConstantRangeCount = 0;
+  pipeline_layout_create_info.pPushConstantRanges    = 0;
+
+  VULKAN_SUCCEED(vkCreatePipelineLayout(ctx->device,
+                                        &pipeline_layout_create_info,
+                                        0,
+                                        &sh_ctx->pipeline_layout));
 }
 
-VkResult vulkan_init_descriptor_pool(struct vulkan_context *ctx, uint32_t total_desc_count) {
+void vulkan_init_descriptor_pool(struct vulkan_context *ctx,
+                                 uint32_t set_count,
+                                 uint32_t total_desc_count) {
   VkDescriptorPoolSize descriptor_pool_size;
   descriptor_pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   descriptor_pool_size.descriptorCount = total_desc_count;
@@ -404,34 +512,91 @@ VkResult vulkan_init_descriptor_pool(struct vulkan_context *ctx, uint32_t total_
   descriptor_pool_create_info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   descriptor_pool_create_info.pNext         = 0;
   descriptor_pool_create_info.flags         = 0;
-  descriptor_pool_create_info.maxSets       = ctx->entry_point_count;
+  descriptor_pool_create_info.maxSets       = set_count;
   descriptor_pool_create_info.poolSizeCount = 1;
   descriptor_pool_create_info.pPoolSizes    = &descriptor_pool_size;
 
-  VkResult error = vkCreateDescriptorPool(ctx->device, &descriptor_pool_create_info, 0, &ctx->descriptor_pool);
+  VULKAN_SUCCEED(vkCreateDescriptorPool(ctx->device, &descriptor_pool_create_info, 0, &ctx->descriptor_pool));
+}
+
+void vulkan_create_pipeline(struct vulkan_context *ctx,
+                            struct vulkan_shader_context *sh_ctx,
+                            const VkSpecializationInfo spec_info,
+                            VkPipeline *pipeline) {
+  VkComputePipelineCreateInfo compute_pipeline_create_info;
+  compute_pipeline_create_info.sType                     = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+  compute_pipeline_create_info.pNext                     = 0;
+  compute_pipeline_create_info.flags                     = 0;
+  compute_pipeline_create_info.layout                    = sh_ctx->pipeline_layout;
+  compute_pipeline_create_info.basePipelineHandle        = 0;
+  compute_pipeline_create_info.basePipelineIndex         = 0;
+  compute_pipeline_create_info.stage.sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  compute_pipeline_create_info.stage.pNext               = 0;
+  compute_pipeline_create_info.stage.flags               = 0;
+  compute_pipeline_create_info.stage.stage               = VK_SHADER_STAGE_COMPUTE_BIT;
+  compute_pipeline_create_info.stage.module              = sh_ctx->shader_module;
+  compute_pipeline_create_info.stage.pName               = sh_ctx->entry_point;
+  compute_pipeline_create_info.stage.pSpecializationInfo = &spec_info;
+
+  VULKAN_SUCCEED(vkCreateComputePipelines(ctx->device,
+                                          0,
+                                          1,
+                                          &compute_pipeline_create_info,
+                                          0,
+                                          pipeline));
+}
+
+void vulkan_destroy_pipeline(struct vulkan_context *ctx, VkPipeline pipeline) {
+  vkDestroyPipeline(ctx->device, pipeline, 0);
+}
+
+VkResult vulkan_sync_mem(struct vulkan_context *ctx, struct vk_buffer_mem_pair *mem) {
+  if (!mem->owned)
+    return VK_SUCCESS;
+
+  // Why is vkWaitForFences not working?
+  VkResult error = VK_TIMEOUT;
+  while(error == VK_TIMEOUT)
+    error = vkWaitForFences(ctx->device, 1, &ctx->command_buffers[mem->owner_index].fence, VK_TRUE, 1e15);
+
+  if (error != VK_SUCCESS)
+    return error;
+  
+  // The corresponding command buffer no longer references the memory
+  ctx->command_buffers[mem->owner_index].owns--;
+
+  mem->owned = 0;
+  return VK_SUCCESS;
+}
+
+VkResult vulkan_free_mem_sync(struct vulkan_context *ctx, struct vk_buffer_mem_pair *mem) {
+  VkResult error = vulkan_sync_mem(ctx, mem);
 
   if (error != VK_SUCCESS)
     return error;
 
-  VkDescriptorSetAllocateInfo descriptor_set_allocate_info;
-  descriptor_set_allocate_info.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  descriptor_set_allocate_info.pNext              = 0;
-  descriptor_set_allocate_info.descriptorPool     = ctx->descriptor_pool;
-  descriptor_set_allocate_info.descriptorSetCount = ctx->entry_point_count;
-  descriptor_set_allocate_info.pSetLayouts        = ctx->descriptor_set_layouts;
-
-  return vkAllocateDescriptorSets(ctx->device, &descriptor_set_allocate_info, ctx->descriptor_sets);
+  vkFreeMemory(ctx->device, mem->memory, 0);
+  vkDestroyBuffer(ctx->device, mem->buffer, 0);
+  return VK_SUCCESS;
 }
 
-VkResult vulkan_alloc(struct vulkan_context *ctx, size_t min_size, const char *tag, struct vk_buffer_mem_pair *mem_out) {
+VkResult vulkan_alloc(struct vulkan_context *ctx,
+                      size_t min_size,
+                      const char *tag,
+                      struct vk_buffer_mem_pair *mem_out) {
   assert(min_size >= 0);
+  if (min_size < sizeof(int)) {
+    min_size = sizeof(int);
+  }
 
   VkBufferCreateInfo buffer_create_info;
   buffer_create_info.sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   buffer_create_info.pNext                 = 0;
   buffer_create_info.flags                 = 0;
   buffer_create_info.size                  = min_size;
-  buffer_create_info.usage                 = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+  buffer_create_info.usage                 = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                                           | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+                                           | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   buffer_create_info.sharingMode           = VK_SHARING_MODE_EXCLUSIVE;
   buffer_create_info.queueFamilyIndexCount = 1;
   buffer_create_info.pQueueFamilyIndices   = &ctx->queue_family_index;
@@ -460,8 +625,7 @@ VkResult vulkan_alloc(struct vulkan_context *ctx, size_t min_size, const char *t
     }
 
     // Not just right - free it.
-    vkFreeMemory(ctx->device, mem.memory, 0);
-    vkDestroyBuffer(ctx->device, mem.buffer, 0);
+    vulkan_free_mem_sync(ctx, &mem);
   }
 
   // Find suitable heap
@@ -489,6 +653,9 @@ VkResult vulkan_alloc(struct vulkan_context *ctx, size_t min_size, const char *t
   // have to check after every deallocation.  This might be pretty
   // expensive.  Let's hope that this case is hit rarely.
 
+  mem_out->owned = 0;
+  mem_out->owner_index = 0;
+  
   VkMemoryAllocateInfo mem_alloc_info;
   mem_alloc_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   mem_alloc_info.pNext           = 0;
@@ -498,11 +665,9 @@ VkResult vulkan_alloc(struct vulkan_context *ctx, size_t min_size, const char *t
   error = vkAllocateMemory(ctx->device, &mem_alloc_info, 0, &mem_out->memory);
 
   while (error != VK_SUCCESS) {
-    if (free_list_first(&ctx->free_list, &mem) != 0) {
+    if (free_list_first(&ctx->free_list, &mem) != 0)
       break;
-    }
-    vkFreeMemory(ctx->device, mem.memory, 0);
-    vkDestroyBuffer(ctx->device, mem.buffer, 0);
+    vulkan_free_mem_sync(ctx, &mem);
     error = vkAllocateMemory(ctx->device, &mem_alloc_info, 0, &mem_out->memory);
   }
 
@@ -514,10 +679,8 @@ void vulkan_free(struct vulkan_context *ctx, struct vk_buffer_mem_pair mem, cons
 
   // If there is already a block with this tag, then remove it.
   size_t size;
-  if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0) {
-    vkFreeMemory(ctx->device, existing_mem.memory, 0);
-    vkDestroyBuffer(ctx->device, existing_mem.buffer, 0);
-  }
+  if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0)
+    vulkan_free_mem_sync(ctx, &existing_mem);
 
   free_list_insert(&ctx->free_list, mem.size, mem, tag);
 }
@@ -525,28 +688,192 @@ void vulkan_free(struct vulkan_context *ctx, struct vk_buffer_mem_pair mem, cons
 void vulkan_free_all(struct vulkan_context *ctx) {
   struct vk_buffer_mem_pair mem;
   free_list_pack(&ctx->free_list);
-  while (free_list_first(&ctx->free_list, &mem) == 0) {
-    vkFreeMemory(ctx->device, mem.memory, 0);
-    vkDestroyBuffer(ctx->device, mem.buffer, 0);
+  while (free_list_first(&ctx->free_list, &mem) == 0)
+    vulkan_free_mem_sync(ctx, &mem);
+}
+
+struct vk_buffer_mem_pair* vulkan_alloc_scalars(struct vulkan_context *ctx,
+                                                uint32_t command_buffer_index,
+                                                uint32_t count,
+                                                size_t *sizes) {
+  if (count < 1)
+    return NULL;
+
+  struct vulkan_command_buffer_context *command_buffer_ctx = ctx->command_buffers + command_buffer_index;
+
+  command_buffer_ctx->scalars = malloc(count * sizeof(struct vk_buffer_mem_pair));
+
+  for (int i = 0; i < count; ++i)
+    vulkan_alloc(ctx, sizes[i], SCALAR_TAG, command_buffer_ctx->scalars + i);
+
+  return command_buffer_ctx->scalars;
+}
+
+void vulkan_free_scalars(struct vulkan_context *ctx, uint32_t command_buffer_index) {
+  struct vulkan_command_buffer_context *command_buffer_ctx = ctx->command_buffers + command_buffer_index;
+
+  for (int i = 0; i < command_buffer_ctx->scalar_count; ++i)
+    vulkan_free(ctx, command_buffer_ctx->scalars[i], SCALAR_TAG);
+
+  if (command_buffer_ctx->scalar_count > 0)
+    free(command_buffer_ctx->scalars);
+  
+  command_buffer_ctx->scalar_count = 0;
+}
+
+void vulkan_free_all_scalars(struct vulkan_context *ctx) {
+  for (int i = 0; i < ctx->command_buffer_count; ++i)
+    vulkan_free_scalars(ctx, i);
+}
+
+void vulkan_acquire_ownership(struct vulkan_context *ctx,
+                              struct vk_buffer_mem_pair *mem,
+                              uint32_t command_buffer_index) {
+  vulkan_sync_mem(ctx, mem);
+  mem->owned = 1;
+  mem->owner_index = command_buffer_index;
+  ctx->command_buffers[mem->owner_index].owns++;
+}
+
+VkResult vulkan_available_command_buffer(struct vulkan_context *ctx,
+                                         uint32_t *command_buffer_index) {
+  VkResult error;
+
+  for (int i = 0; i < ctx->command_buffer_count; ++i) {
+    struct vulkan_command_buffer_context *command_buffer_ctx = ctx->command_buffers + i;
+
+    // Skip if still referenced
+    if (command_buffer_ctx->owns > 0)
+      continue;
+
+    // Skip if still executing
+    VkResult fence_status = vkGetFenceStatus(ctx->device, command_buffer_ctx->fence);
+    if (fence_status != VK_SUCCESS)
+      continue;
+
+    // Free up old scalars
+    vulkan_free_scalars(ctx, i);
+
+    *command_buffer_index = i;
+    return vkResetFences(ctx->device, 1, &command_buffer_ctx->fence);
   }
+
+  uint32_t old_command_buffer_count = ctx->command_buffer_count;
+
+  ctx->command_buffer_count += ALLOC_STEP;
+  ctx->command_buffers =
+    realloc(&ctx->command_buffers, ctx->command_buffer_count * sizeof(struct vulkan_command_buffer_context));
+
+  error = vulkan_allocate_command_buffers(ctx,
+                                          old_command_buffer_count,
+                                          ctx->command_buffer_count - old_command_buffer_count);
+
+  if (error != VK_SUCCESS)
+    return error;
+
+  *command_buffer_index = old_command_buffer_count;
+  return vkResetFences(ctx->device, 1, &ctx->command_buffers[old_command_buffer_count].fence);
+}
+
+void vulkan_free_all_command_buffers(struct vulkan_context *ctx) {
+  VkCommandBuffer *tmp_buffers = malloc(ctx->command_buffer_count * sizeof(VkCommandBuffer));
+
+  for (int i = 0; i < ctx->command_buffer_count; ++i){
+    vulkan_free_scalars(ctx, i);
+    vkDestroyFence(ctx->device, ctx->command_buffers[i].fence, 0);
+    tmp_buffers[i] = ctx->command_buffers[i].command_buffer;
+  }
+
+  vkFreeCommandBuffers(ctx->device, ctx->command_pool, ctx->command_buffer_count, tmp_buffers);
+  free(tmp_buffers);
+}
+
+VkResult vulkan_begin_recording(struct vulkan_context *ctx, uint32_t command_buffer_index) {
+
+  VkCommandBuffer command_buffer = ctx->command_buffers[command_buffer_index].command_buffer;
+
+  VkCommandBufferBeginInfo command_buffer_begin_info;
+  command_buffer_begin_info.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  command_buffer_begin_info.pNext            = 0;
+  command_buffer_begin_info.flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  command_buffer_begin_info.pInheritanceInfo = 0;
+
+  return vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
+}
+
+VkResult vulkan_end_recording_and_submit(struct vulkan_context *ctx,
+                                         uint32_t command_buffer_index) {
+
+  struct vulkan_command_buffer_context command_buffer_ctx =
+    ctx->command_buffers[command_buffer_index];
+
+  VkResult error = vkEndCommandBuffer(command_buffer_ctx.command_buffer);
+
+  if (error != VK_SUCCESS)
+    return error;
+
+  VkSubmitInfo submit_info;
+  submit_info.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit_info.pNext                = 0;
+  submit_info.waitSemaphoreCount   = 0;
+  submit_info.pWaitSemaphores      = 0;
+  submit_info.pWaitDstStageMask    = 0;
+  submit_info.commandBufferCount   = 1;
+  submit_info.pCommandBuffers      = &command_buffer_ctx.command_buffer;
+  submit_info.signalSemaphoreCount = 0;
+  submit_info.pSignalSemaphores    = 0;
+  
+  return vkQueueSubmit(ctx->queue, 1, &submit_info, command_buffer_ctx.fence);
+}
+
+void vulkan_copy_buffers(struct vulkan_context *ctx,
+                         VkBufferCopy buffer_copy,
+                         struct vk_buffer_mem_pair *src,
+                         struct vk_buffer_mem_pair *dest) {
+
+  uint32_t command_buffer_index;
+  VULKAN_SUCCEED(vulkan_available_command_buffer(ctx, &command_buffer_index));
+  VkCommandBuffer command_buffer = ctx->command_buffers[command_buffer_index].command_buffer;
+
+  vulkan_acquire_ownership(ctx, src, command_buffer_index);
+  vulkan_acquire_ownership(ctx, dest, command_buffer_index);
+
+  VULKAN_SUCCEED(vulkan_begin_recording(ctx, command_buffer_index));
+  vkCmdCopyBuffer(command_buffer, src->buffer, dest->buffer, 1, &buffer_copy);
+  VULKAN_SUCCEED(vulkan_end_recording_and_submit(ctx, command_buffer_index));
+}
+
+void vulkan_dispatch(struct vulkan_context *ctx,
+                     struct vulkan_shader_context *sh_ctx,
+                     uint32_t command_buffer_index,
+                     VkPipeline pipeline,
+                     uint32_t kernel_size) {
+
+  VkCommandBuffer command_buffer = ctx->command_buffers[command_buffer_index].command_buffer;
+
+  VULKAN_SUCCEED(vulkan_begin_recording(ctx, command_buffer_index));
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, sh_ctx->pipeline_layout,
+                          0, 1, &sh_ctx->descriptor_set, 0, 0);
+  vkCmdDispatch(command_buffer, kernel_size, 1, 1);
+  VULKAN_SUCCEED(vulkan_end_recording_and_submit(ctx, command_buffer_index));
+}
+
+static void vulkan_shader_cleanup(struct vulkan_context *ctx,
+                                  struct vulkan_shader_context *sh_ctx) {
+  vkDestroyPipelineLayout(ctx->device, sh_ctx->pipeline_layout, 0);
+  vkDestroyDescriptorSetLayout(ctx->device, sh_ctx->descriptor_set_layout, 0);
+  vkDestroyShaderModule(ctx->device, sh_ctx->shader_module, 0);
 }
 
 static void vulkan_cleanup(struct vulkan_context *ctx) {
+  vkQueueWaitIdle(ctx->queue);
+  vulkan_free_all_scalars(ctx);
   vulkan_free_all(ctx);
-  for (int i = 0; i < ctx->entry_point_count; ++i) {
-    vkDestroyPipelineLayout(ctx->device, ctx->pipeline_layouts[i], 0);
-  }
-  free(ctx->pipeline_layouts);
-  for (int i = 0; i < ctx->entry_point_count; ++i) {
-    vkDestroyDescriptorSetLayout(ctx->device, ctx->descriptor_set_layouts[i], 0);
-  }
-  free(ctx->descriptor_set_layouts);
-  free(ctx->descriptor_sets);
+  vulkan_free_all_command_buffers(ctx);
+  free(ctx->command_buffers);
   vkDestroyDescriptorPool(ctx->device, ctx->descriptor_pool, 0);
-  vkResetCommandBuffer(ctx->command_buffer, 0);
-  vkFreeCommandBuffers(ctx->device, ctx->command_pool, 1, &ctx->command_buffer);
   vkDestroyCommandPool(ctx->device, ctx->command_pool, 0);
-  vkDestroyShaderModule(ctx->device, ctx->shader_module, 0);
   vkDestroyDevice(ctx->device, 0);
   vkDestroyInstance(ctx->instance, 0);
 }

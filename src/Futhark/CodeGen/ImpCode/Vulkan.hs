@@ -13,7 +13,9 @@ module Futhark.CodeGen.ImpCode.Vulkan
        , Code
        , EntryPoint
        , EntryPointArg (..)
+       , SpecConstExp (..)
        , Vulkan (..)
+       , Kernel.KernelConstExp
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -23,14 +25,13 @@ import qualified Data.Map.Strict as M
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.Kernels.Sizes
+import qualified Futhark.CodeGen.ImpCode.Kernels as Kernel
 import qualified Futhark.CodeGen.Backends.SPIRV as SPIRV
 
 import Futhark.Util.Pretty
 
 -- | An program calling SPIR-V entry-points using the Vulkan API.
-data Program = Program { spirvProgram :: [Word32]
-                       , spirvEntryPoints :: [EntryPoint]
-                       , spirvDescriptorSets :: SPIRV.DescriptorSetMap
+data Program = Program { spirvShaders :: [SPIRV.SingleEntryShader]
                        , hostSizes :: M.Map VName (SizeClass, Name)
                        , hostFunctions :: Functions Vulkan
                        }
@@ -44,9 +45,6 @@ type Code = Imp.Code Vulkan
 -- | The name of an entry point.
 type EntryPoint = VName
 
--- | Index of the descritor set of an entry point
-type DescriptorSetBinding = Int
-
 -- | An argument to be passed to a a SPIR-V entry point.
 data EntryPointArg = ValueKArg Exp PrimType
                     -- ^ Pass the value of this scalar expression as argument.
@@ -54,8 +52,14 @@ data EntryPointArg = ValueKArg Exp PrimType
                     -- ^ Pass this pointer as argument.
                 deriving (Show)
 
+data SpecConstExp = SpecConstKernelExp VName Kernel.KernelConstExp
+                  | SpecConstSizeExp DimSize
+                  | SpecConstLocalMemExp (Either MemSize Kernel.KernelConstExp)
+                  | SpecConstLockstepWidth
+                deriving (Show)
+
 -- | Host-level OpenCL operation.
-data Vulkan = LaunchEntryPoint EntryPoint DescriptorSetBinding [EntryPointArg] [Exp] [Exp]
+data Vulkan = LaunchEntryPoint EntryPoint [EntryPointArg] [SpecConstExp] Exp
             | HostCode Code
             | GetSize VName VName
             | CmpSizeLe VName VName Exp

@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 -- | This module defines a translation from imperative code with
 -- kernels to imperative code with Vulkan calls.
 module Futhark.CodeGen.ImpGen.Kernels.ToVulkan
@@ -6,18 +7,17 @@ module Futhark.CodeGen.ImpGen.Kernels.ToVulkan
   where
     
 import Futhark.Error
+import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
+import Futhark.Representation.AST.Attributes.Types
 import qualified Futhark.CodeGen.Backends.SPIRV as SPIRV
 import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
-import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.Vulkan as ImpVulkan
-import Futhark.MonadFreshNames
 
-import Data.Word
 import qualified Data.Map.Strict as M
 import qualified Data.Semigroup as Sem
+import Data.Maybe
 import Control.Monad.Identity
 import Control.Monad.Writer
-import Control.Monad.Reader
 
 newtype ToVulkan = ToVulkan { vkSizes :: M.Map VName (SizeClass, Name) }
 
@@ -33,52 +33,82 @@ type OnKernelM = Writer ToVulkan
 
 -- | Translate a kernels-program to a Vulkan/SPIR-V program.
 kernelsToVulkan :: ImpKernels.Program -> Either InternalError ImpVulkan.Program
-kernelsToVulkan prog =
-  return $ SPIRV.runCompilerM SPIRV.newCompilerState $ kernelsToSPIRV prog
-
-kernelsToSPIRV :: ImpKernels.Program -> SPIRV.CompilerM ImpVulkan.Program
-kernelsToSPIRV prog@(ImpKernels.Functions funs) = do
-  mapM_ SPIRV.compileKernel $ ImpKernels.getKernels prog
-  code         <- SPIRV.finalizedProgram
-  entry_points <- SPIRV.getEntryPoints
-  desc_sets    <- SPIRV.getDescriptorSets
-  prog'        <- traverse hostOpToFunction prog
-  let (_, ToVulkan sizes) = runWriter $ forM funs $
-                              \(fname, fun) -> traverse (vulkanOnHostOp fname) fun
-  return $ ImpVulkan.Program code entry_points desc_sets sizes prog'
-
-hostOpToFunction :: HostOp -> SPIRV.CompilerM ImpVulkan.Vulkan
-hostOpToFunction (GetSize v key size_class)     = return $ ImpVulkan.GetSize v key
-hostOpToFunction (CmpSizeLe v key size_class x) = return $ ImpVulkan.CmpSizeLe v key x
-hostOpToFunction (GetSizeMax v size_class)      = return $ ImpVulkan.GetSizeMax v size_class
-hostOpToFunction (CallKernel k)                 = do
-  desc_set_map <- SPIRV.getDescriptorSets
-  let name = getKernelName k
-      desc_set_binding = M.findIndex name desc_set_map
-      (kernel_size, workgroup_size) = kernelAndWorkgroupSize k
-  return $ ImpVulkan.LaunchEntryPoint name desc_set_binding [] kernel_size workgroup_size -- Set params
+kernelsToVulkan prog@(ImpKernels.Functions funs) = return $ ImpVulkan.Program shaders sizes prog'
+  where shaders = map SPIRV.kernelToShader $ ImpKernels.getKernels prog
+        (prog', ToVulkan sizes) = runWriter $ fmap Functions $ forM funs $
+            \(fname, fun) -> (fname,) <$> traverse (vulkanOnHostOp fname) fun
 
 getKernelName :: CallKernel -> VName
 getKernelName (Map kernel)                       = mapKernelThreadNum kernel
 getKernelName (AnyKernel kernel)                 = kernelName kernel
 getKernelName (MapTranspose _ n _ _ _ _ _ _ _ _) = n -- TODO: fix
 
-kernelAndWorkgroupSize :: CallKernel -> ([Exp], [Exp])
-kernelAndWorkgroupSize (Map kernel) =
-  ([sizeToExp (mapKernelNumGroups kernel) *
-    sizeToExp (mapKernelGroupSize kernel)],
-   [sizeToExp $ mapKernelGroupSize kernel])
-kernelAndWorkgroupSize (AnyKernel kernel) =
-  ([sizeToExp (kernelNumGroups kernel) *
-    sizeToExp (kernelGroupSize kernel)],
-   [sizeToExp $ kernelGroupSize kernel])
-kernelAndWorkgroupSize MapTranspose{} = 
-  ([sizeToExp (ConstSize 1)], 
-   [sizeToExp (ConstSize 1)]) -- TODO: fix
+numGroups :: CallKernel -> Exp
+numGroups (Map kernel)       = sizeToExp (mapKernelNumGroups kernel)
+numGroups (AnyKernel kernel) = sizeToExp (kernelNumGroups kernel)
+numGroups MapTranspose{}     = sizeToExp (ConstSize 1) -- TODO: fix
 
-vulkanOnHostOp :: Name -> HostOp -> OnKernelM ()
-vulkanOnHostOp fname (GetSize v key size_class)     =
+getArgs :: CallKernel -> [ImpVulkan.EntryPointArg]
+getArgs (Map kernel)       = mapMaybe getArg $ mapKernelUses kernel
+getArgs (AnyKernel kernel) = mapMaybe getArg $ kernelUses kernel
+getArgs (MapTranspose _ destmem destoffset srcmem srcoffset _ x_elems y_elems in_elems out_elems) = 
+  [ ImpVulkan.MemKArg destmem
+  , ImpVulkan.ValueKArg destoffset int32
+  , ImpVulkan.MemKArg srcmem
+  , ImpVulkan.ValueKArg srcoffset int32
+  , ImpVulkan.ValueKArg x_elems int32
+  , ImpVulkan.ValueKArg y_elems int32
+  , ImpVulkan.ValueKArg in_elems int32
+  , ImpVulkan.ValueKArg out_elems int32
+  ]
+
+getArg :: KernelUse -> Maybe ImpVulkan.EntryPointArg
+getArg (MemoryUse v _)  = Just $ ImpVulkan.MemKArg v
+getArg (ScalarUse v bt) = Just $ ImpVulkan.ValueKArg (LeafExp (ScalarVar v) bt) bt
+getArg _                = Nothing
+
+getKernelWorkgroupSizeExp :: CallKernel -> ImpVulkan.SpecConstExp
+getKernelWorkgroupSizeExp (Map k)       = ImpVulkan.SpecConstSizeExp $ mapKernelGroupSize k
+getKernelWorkgroupSizeExp (AnyKernel k) = ImpVulkan.SpecConstSizeExp $ kernelGroupSize k
+-- ^ TODO: Add transpose kernel case
+
+getReservedSpecExpr :: CallKernel -> SPIRV.ReservedSpec -> ImpVulkan.SpecConstExp
+getReservedSpecExpr kernel SPIRV.WorkgroupSizeXSpec = getKernelWorkgroupSizeExp kernel
+getReservedSpecExpr _ SPIRV.LockstepWidthSpec       = ImpVulkan.SpecConstLockstepWidth
+
+getConstExp :: KernelUse -> Maybe (VName, ImpVulkan.KernelConstExp)
+getConstExp (ConstUse vn e) = Just (vn, e)
+getConstExp _              = Nothing
+
+getKernelConsts :: CallKernel -> [(VName, ImpVulkan.KernelConstExp)]
+getKernelConsts (Map k)        = mapMaybe getConstExp $ mapKernelUses k
+getKernelConsts (AnyKernel k)  = mapMaybe getConstExp $ kernelUses k
+getKernelConsts MapTranspose{} = []
+
+getLocalMemConsts :: CallKernel -> [ImpVulkan.SpecConstExp]
+getLocalMemConsts (AnyKernel k) =
+  map (ImpVulkan.SpecConstLocalMemExp . snd) $ kernelLocalMemory k
+getLocalMemConsts _             = []
+
+getSpecConstExps :: CallKernel -> [ImpVulkan.SpecConstExp]
+getSpecConstExps kernel = 
+  let res_exprs   = map (getReservedSpecExpr kernel) SPIRV.reservedSpecList
+      const_exprs = map (uncurry ImpVulkan.SpecConstKernelExp) $ getKernelConsts kernel
+      mem_exprs   = getLocalMemConsts kernel
+  in res_exprs ++ const_exprs ++ mem_exprs
+
+vulkanOnHostOp :: Name -> HostOp -> OnKernelM ImpVulkan.Vulkan
+vulkanOnHostOp fname (GetSize v key size_class)     = do
   void $ tell mempty { vkSizes = M.singleton key (size_class, fname) }
-vulkanOnHostOp fname (CmpSizeLe v key size_class x) =
-  void $ tell mempty { vkSizes = M.singleton key (size_class, fname) }
-vulkanOnHostOp _ _                                  = return ()
+  return $ ImpVulkan.GetSize v key
+vulkanOnHostOp fname (CmpSizeLe v key size_class _) = do
+  tell mempty { vkSizes = M.singleton key (size_class, fname) }
+  return $ ImpVulkan.GetSizeMax v size_class
+vulkanOnHostOp _ (GetSizeMax v size_class)          =
+  return $ ImpVulkan.GetSizeMax v size_class
+vulkanOnHostOp _ (CallKernel k)                     =
+  let name = getKernelName k
+      args = getArgs k
+      spec_exps = getSpecConstExps k
+      num_groups = numGroups k
+  in return $ ImpVulkan.LaunchEntryPoint name args spec_exps num_groups
