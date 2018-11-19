@@ -480,6 +480,7 @@ nastyReturnType _ (Arrow _ _ t1 t2) = nastyType t1 || nastyReturnType Nothing t2
 nastyReturnType te t
   | Just ts <- isTupleRecord t =
       case te of
+        Just (TEVar (QualName [] _) _) -> False
         Just (TETuple tes _) -> or $ zipWith nastyType' (map Just tes) ts
         _ -> any nastyType ts
   | otherwise = nastyType' te t
