@@ -73,7 +73,7 @@ resultsToJSON = JSON.toJSON . M.fromList . map benchResultToJSObject
         dataResultToJSObject (DataResult desc (Right (runtimes, progerr))) =
           (desc, JSON.toJSON $ M.fromList
                  [("runtimes" :: String, JSON.toJSON $ map runMicroseconds runtimes),
-                  ("stderr", JSON.toJSON $ show progerr)])
+                  ("stderr", JSON.toJSON progerr)])
 
 fork :: (a -> IO b) -> a -> IO (MVar b)
 fork f x = do cell <- newEmptyMVar
