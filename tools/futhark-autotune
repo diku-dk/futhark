@@ -25,6 +25,13 @@ import sys
 import logging
 from collections import OrderedDict, defaultdict
 
+# We define our own LogIntegerParameter to crudely work around a bug
+# in OpenTuner: https://github.com/jansel/opentuner/issues/114
+class FixedLogIntegerParameter(LogIntegerParameter):
+  def _scale(self, v):
+    v = max(self.min_value, v) # WORKAROUND
+    return math.log(v + 1.0 - self.min_value, 2.0)
+
 technique.register(bandittechniques.AUCBanditMetaTechnique([
     simplextechniques.RegularNelderMead(),
     simplextechniques.RightNelderMead(),
@@ -295,7 +302,7 @@ class FutharkTuner(MeasurementInterface):
     """
     manipulator = ConfigurationManipulator()
     for k, v in self.values.items():
-      manipulator.add_parameter(LogIntegerParameter(k, min(v), max(v)))
+      manipulator.add_parameter(FixedLogIntegerParameter(k, min(v), max(v)))
 
     return manipulator
 
