@@ -163,6 +163,7 @@ bottomUpRules = [RuleOp removeDeadMapping,
                  RuleOp removeDeadWrite,
                  RuleBasicOp removeUnnecessaryCopy,
                  RuleOp liftIdentityMapping,
+                 RuleOp liftIdentityStreaming,
                  RuleOp removeDuplicateMapOutput,
                  RuleOp mapOpToOp
                 ]
@@ -207,6 +208,35 @@ liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
       mapM_ (uncurry letBind) invariant
       letBindNames_ (map patElemName pat') $ Op $ Screma w (mapSOAC fun') arrs
 liftIdentityMapping _ _ _ _ = cannotSimplify
+
+liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
+liftIdentityStreaming _ (Pattern [] pes) _ (Stream w form lam arrs)
+  | (variant_map, invariant_map) <-
+      partitionEithers $ map isInvariantRes $ zip3 map_ts map_pes map_res,
+    not $ null invariant_map = do
+
+      forM_ invariant_map $ \(pe, arr) ->
+        letBind_ (Pattern [] [pe]) $ BasicOp $ Copy arr
+
+      let (variant_map_ts, variant_map_pes, variant_map_res) = unzip3 variant_map
+          lam' = lam { lambdaBody = (lambdaBody lam) { bodyResult = fold_res ++ variant_map_res }
+                     , lambdaReturnType = fold_ts ++ variant_map_ts }
+
+      letBind_ (Pattern [] $ fold_pes ++ variant_map_pes) $
+        Op $ Stream w form lam' arrs
+  where num_folds = length $ getStreamAccums form
+        (fold_pes, map_pes) = splitAt num_folds pes
+        (fold_ts, map_ts) = splitAt num_folds $ lambdaReturnType lam
+        lam_res = bodyResult $ lambdaBody lam
+        (fold_res, map_res) = splitAt num_folds lam_res
+        params_to_arrs = zip (map paramName $ drop (1 + num_folds) $ lambdaParams lam) arrs
+
+        isInvariantRes (_, pe, Var v)
+          | Just arr <- lookup v params_to_arrs =
+              Right (pe, arr)
+        isInvariantRes x =
+          Left x
+liftIdentityStreaming _ _ _ _ = cannotSimplify
 
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
