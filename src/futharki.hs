@@ -320,7 +320,7 @@ onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case showErr (T.checkExp imports src tenv e) of
     Left err -> liftIO $ putStrLn err
-    Right e' -> do
+    Right (_, e') -> do
       r <- runInterpreter $ I.interpretExp ienv e'
       case r of
         Left err -> liftIO $ print err
@@ -394,7 +394,9 @@ typeCommand e = do
       (tenv, _) <- gets futharkiEnv
       case T.checkExp imports src tenv e' of
         Left err -> liftIO $ print err
-        Right e'' -> liftIO $ putStrLn $ pretty e' <> " : " <> pretty (typeOf e'')
+        Right (ps, e'') -> liftIO $ putStrLn $
+          pretty e' <> concatMap ((" "<>) . pretty) ps <>
+          " : " <> pretty (typeOf e'')
 
 unbreakCommand :: Command
 unbreakCommand _ = do

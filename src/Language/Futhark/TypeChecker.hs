@@ -52,15 +52,16 @@ checkProg files src name prog =
 
 -- | Type check a single expression containing no type information,
 -- yielding either a type error or the same expression annotated with
--- type information.  See also 'checkProg'.
+-- type information.  Also returns a list of type parameters, which
+-- will be nonempty if the expression is polymorphic.  See also
+-- 'checkProg'.
 checkExp :: Imports
          -> VNameSource
          -> Env
          -> UncheckedExp
-         -> Either TypeError Exp
+         -> Either TypeError ([TypeParam], Exp)
 checkExp files src env e = do
-  (e', _, _) <- runTypeM env files' (mkInitialImport "") src $
-    checkOneExp e
+  (e', _, _) <- runTypeM env files' (mkInitialImport "") src $ checkOneExp e
   return e'
   where files' = M.map fileEnv $ M.fromList files
 

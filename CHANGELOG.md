@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * The `:type` command in `futharki` can now handle polymorphic
+    expressions (#669).
+
 ## [0.7.4]
 
 ### Added
