@@ -1543,11 +1543,14 @@ consumeArg loc (Arrow _ _ _ t2) (FuncDiet _ pd) =
 consumeArg loc at Consume = return [consumption (aliases at) loc]
 consumeArg loc at _       = return [observation (aliases at) loc]
 
-checkOneExp :: UncheckedExp -> TypeM Exp
+checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e
+  let t = vacuousShapeAnnotations $ toStruct $ typeOf e'
+  tparams <- letGeneralise [] [t] mempty
   fixOverloadedTypes
-  updateExpTypes e'
+  e'' <- updateExpTypes e'
+  return (tparams, e'')
 
 -- | Type-check a top-level (or module-level) function definition.
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
@@ -1637,32 +1640,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         return (Just retdecl', retdecl_type)
       Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
 
-    -- Candidates for let-generalisation are those type variables that
-    ---
-    -- (1) were not known before we checked this function, and
-    --
-    -- (2) are not used in the (new) definition of any type variables
-    -- known before we checked this function.
-    --
-    -- (3) are not referenced from an overloaded type (for example,
-    -- are the element types of an incompletely resolved record type).
-    -- This is a bit more restrictive than I'd like, and SML for
-    -- example does not have this restriction.
-    now_substs <- getConstraints
-    let then_type_variables = S.fromList $ M.keys then_substs
-        then_type_constraints = constraintTypeVars $
-                                M.filterWithKey (\k _ -> k `S.member` then_type_variables) now_substs
-        keep_type_variables = then_type_variables <>
-                              then_type_constraints <>
-                              overloadedTypeVars now_substs
-
-    let new_substs = M.filterWithKey (\k _ -> not (k `S.member` keep_type_variables)) now_substs
-    tparams'' <- closeOverTypes new_substs tparams' $
-                 rettype : map patternStructType params''
-
-    -- We keep those type variables that were not closed over by
-    -- let-generalisation.
-    modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` map typeParamName tparams''
+    tparams'' <- letGeneralise tparams' (rettype : map patternStructType params'') then_substs
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
@@ -1698,6 +1676,39 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         returnAliasing (Record ets1) (Record ets2) =
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
+
+letGeneralise :: [TypeParam]
+              -> [StructType]
+              -> Constraints
+              -> TermTypeM [TypeParam]
+letGeneralise tparams ts then_substs = do
+  now_substs <- getConstraints
+  -- Candidates for let-generalisation are those type variables that
+  --
+  -- (1) were not known before we checked this function, and
+  --
+  -- (2) are not used in the (new) definition of any type variables
+  -- known before we checked this function.
+  --
+  -- (3) are not referenced from an overloaded type (for example,
+  -- are the element types of an incompletely resolved record type).
+  -- This is a bit more restrictive than I'd like, and SML for
+  -- example does not have this restriction.
+  let then_type_variables = S.fromList $ M.keys then_substs
+      then_type_constraints = constraintTypeVars $
+                              M.filterWithKey (\k _ -> k `S.member` then_type_variables) now_substs
+      keep_type_variables = then_type_variables <>
+                            then_type_constraints <>
+                            overloadedTypeVars now_substs
+
+  let new_substs = M.filterWithKey (\k _ -> not (k `S.member` keep_type_variables)) now_substs
+  tparams' <- closeOverTypes new_substs tparams ts
+
+  -- We keep those type variables that were not closed over by
+  -- let-generalisation.
+  modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` map typeParamName tparams'
+
+  return tparams'
 
 checkFunBody :: ExpBase NoInfo Name
              -> Maybe StructType
