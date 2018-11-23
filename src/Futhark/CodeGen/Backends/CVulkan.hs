@@ -241,7 +241,8 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
   buffers <- getArgBuffers args scalar_buffers 0
   buffer_infos <- mapM initBufferInfo buffers
   workgroup_count' <- GC.compileExp workgroup_count
-  let buffer_count = length buffer_infos
+  let shader_ctx = shaderCtx name
+      buffer_count = length buffer_infos
       wd_inits = zipWith (writeDescriptorInits name) buffer_infos [0..buffer_count - 1]
       spec_const_exps = map specConstToExp spec_consts
       spec_const_types = map specConstToType spec_consts
@@ -250,25 +251,31 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
       spec_const_exp_inits = [ [C.cinit|$exp:e|] | e <- spec_const_exps ]
       spec_map_entry_inits = specMapEntry spec_data_struct spec_data spec_const_s_names
       total_size = [C.cexp|sizeof($id:spec_data)|]
-  mapM_ (memArgAcquireOwnership cmd_buffer_id) args
+  mapM_ (memArgTransferOwnership cmd_buffer_id) args
   GC.decl [C.cdecl|struct $id:spec_data_struct { $sdecls:spec_const_s_mems }
-                          $id:spec_data = { $inits:spec_const_exp_inits };
+                          const $id:spec_data = { $inits:spec_const_exp_inits };
           |]
-  GC.decl [C.cdecl|const typename VkSpecializationMapEntry $id:spec_entries[]
-                      = { $inits:spec_map_entry_inits };
-          |]
-  GC.decl [C.cdecl|const typename VkSpecializationInfo $id:spec_info = {
+  GC.decl [C.cdecl|typename VkPipeline $id:pipeline = ctx->$id:shader_ctx.pipeline_cache;|]
+  GC.stm [C.cstm|
+          if (!ctx->$id:shader_ctx.pipeline_cache_valid ||
+              memcmp(ctx->$id:shader_ctx.pipeline_cache_key, &$id:spec_data, sizeof(struct $id:spec_data_struct))) {
+            // Cached pipeline is invalid
+            const typename VkSpecializationMapEntry $id:spec_entries[] = { $inits:spec_map_entry_inits };
+            const typename VkSpecializationInfo $id:spec_info = {
                       $int:(length spec_consts),
                       $id:spec_entries,
                       $exp:total_size,
                       &$id:spec_data
                     };
-          |]
-  GC.decl [C.cdecl|typename VkPipeline $id:pipeline;|]
-  GC.stm [C.cstm|vulkan_create_pipeline(&ctx->vulkan,
-                                        &ctx->$id:(shaderCtx name),
-                                        $id:spec_info,
-                                        &$id:pipeline);|]
+            vulkan_create_pipeline(&ctx->vulkan, &ctx->$id:(shaderCtx name), $id:spec_info, &$id:pipeline);
+
+            if(!ctx->$id:shader_ctx.pipeline_cache_valid)
+              ctx->$id:shader_ctx.pipeline_cache_key = malloc(sizeof(struct $id:spec_data_struct));
+            memcpy(ctx->$id:shader_ctx.pipeline_cache_key, &$id:pipeline, sizeof(struct $id:spec_data_struct));
+            ctx->$id:shader_ctx.pipeline_cache = $id:pipeline;
+            ctx->$id:shader_ctx.pipeline_cache_valid = 1;
+          }
+         |]
   GC.decl [C.cdecl|const typename VkWriteDescriptorSet $id:write_desc_set[]
                       = {$inits:wd_inits};
           |]
@@ -283,7 +290,6 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
                                  $id:cmd_buffer_id,
                                  $id:pipeline,
                                  $exp:workgroup_count');|]
-  --GC.stm [C.cstm|vulkan_destroy_pipeline(&ctx->vulkan, $id:pipeline);|] TODO: Destroy on sync (Remember to sync and destroy on clean)
 
 specConstToExp :: SpecConstExp -> C.Exp
 specConstToExp (SpecConstSizeExp ds)             = GC.dimSizeToExp ds
@@ -295,9 +301,9 @@ specConstToExp (SpecConstLocalMemExp (Right kc)) =
   where compileKernelConst (Kernel.SizeConst key) = return [C.cexp|$id:(pretty key)|]
 
 specConstToType :: SpecConstExp -> C.Type
-specConstToType SpecConstSizeExp{}       = [C.cty|typename int32_t|]
-specConstToType SpecConstLocalMemExp{}   = [C.cty|typename int32_t|]
-specConstToType SpecConstLockstepWidth   = [C.cty|typename int32_t|]
+specConstToType SpecConstSizeExp{}         = [C.cty|typename int32_t|]
+specConstToType SpecConstLocalMemExp{}     = [C.cty|typename int32_t|]
+specConstToType SpecConstLockstepWidth     = [C.cty|typename int32_t|]
 specConstToType (SpecConstKernelExp _ kce) =
   [C.cty|$ty:(GC.primTypeToCType $ primExpType kce)|]
 
@@ -343,7 +349,7 @@ initBufferInfo bexp = do
   GC.stm [C.cstm|$id:buffer_info.range = VK_WHOLE_SIZE;|]
   return buffer_info
 
-writeDescriptorInits :: VName -> VName -> Int -> C.Initializer
+writeDescriptorInits :: EntryPointName -> VName -> Int -> C.Initializer
 writeDescriptorInits fname biname i = [C.cinit|
     {
       VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -359,7 +365,7 @@ writeDescriptorInits fname biname i = [C.cinit|
     }
   |]
 
-memArgAcquireOwnership :: VName -> EntryPointArg -> GC.CompilerM op s ()
-memArgAcquireOwnership cmd_buffer_id (MemKArg bname) = GC.stm
-  [C.cstm|vulkan_acquire_ownership(&ctx->vulkan, &$id:bname.mem, $id:cmd_buffer_id);|]
-memArgAcquireOwnership _ _                           = return ()
+memArgTransferOwnership :: VName -> EntryPointArg -> GC.CompilerM op s ()
+memArgTransferOwnership cmd_buffer_id (MemKArg bname) = GC.stm
+  [C.cstm|vulkan_transfer_ownership(&ctx->vulkan, &$id:bname.mem, $id:cmd_buffer_id);|]
+memArgTransferOwnership _ _                           = return ()

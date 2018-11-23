@@ -249,7 +249,7 @@ vulkanShaderCtxInit :: SPIRV.SingleEntryShader -> C.Stm
 vulkanShaderCtxInit (SPIRV.SEShader name desc_set_size _) = [C.cstm|
     vulkan_setup_shader(&ctx->vulkan,
                         &ctx->$id:(shaderCtx name),
-                        $string:(SPIRV.entryPointName name),
+                        $string:name,
                         $int:desc_set_size,
                         $id:(shaderCodeName name),
                         sizeof($id:(shaderCodeName name)));
@@ -260,7 +260,7 @@ vulkanShaderCtxCleanup (SPIRV.SEShader name _ _) = [C.cstm|
     vulkan_shader_cleanup(&ctx->vulkan, &ctx->$id:(shaderCtx name));
   |]
 
-vulkanCtxFields :: [VName] -> [C.FieldGroup]
+vulkanCtxFields :: [String] -> [C.FieldGroup]
 vulkanCtxFields entry_point_names =
   [ [C.csdecl|int total_runs;|],
     [C.csdecl|long int total_runtime;|] ] ++
@@ -271,7 +271,7 @@ vulkanCtxFields entry_point_names =
     ]
   | name <- entry_point_names ]
 
-vulkanCtxInits :: [VName] -> [C.Stm]
+vulkanCtxInits :: [String] -> [C.Stm]
 vulkanCtxInits entry_point_names =
   [ [C.cstm|ctx->total_runs = 0;|],
     [C.cstm|ctx->total_runtime = 0;|] ] ++
@@ -290,13 +290,12 @@ vulkanCreateDescriptorPool shaders = [C.cstm|
   where shader_count = length shaders
         total_desc_count = sum $ map SPIRV.shaderDescriptorSetSize shaders
 
-vulkanReport :: [VName] -> [C.BlockItem]
+vulkanReport :: [String] -> [C.BlockItem]
 vulkanReport names = report_kernels ++ [report_total]
-  where longest_name = foldl max 0 $ map (length . SPIRV.entryPointName) names
+  where longest_name = foldl max 0 $ map length names
         report_kernels = concatMap reportKernel names
-        format_string vname =
-          let name = SPIRV.entryPointName vname
-              padding = replicate (longest_name - length name) ' '
+        format_string name =
+          let padding = replicate (longest_name - length name) ' '
           in unwords ["Kernel",
                       name ++ padding,
                       "executed %6d times, with average runtime: %6ldus\tand total runtime: %6ldus\n"]
@@ -320,14 +319,14 @@ vulkanReport names = report_kernels ++ [report_total]
                           }
                         |]
 
-entryPointRuntime :: VName -> String
-entryPointRuntime name = SPIRV.entryPointName name ++ "_total_runtime"
+entryPointRuntime :: String -> String
+entryPointRuntime name = name ++ "_total_runtime"
 
-entryPointRuns :: VName -> String
-entryPointRuns name = SPIRV.entryPointName name ++ "_runs"
+entryPointRuns :: String -> String
+entryPointRuns name = name ++ "_runs"
 
-shaderCodeName :: VName -> String
-shaderCodeName name = SPIRV.entryPointName name ++ "_shader"
+shaderCodeName :: String -> String
+shaderCodeName name = name ++ "_shader"
 
-shaderCtx :: VName -> String
-shaderCtx name = SPIRV.entryPointName name ++ "_shader_ctx"
+shaderCtx :: String -> String
+shaderCtx name = name ++ "_shader_ctx"

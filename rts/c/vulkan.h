@@ -67,6 +67,10 @@ struct vulkan_shader_context {
   VkDescriptorSetLayout descriptor_set_layout;
   VkDescriptorSet descriptor_set;
   VkPipelineLayout pipeline_layout;
+
+  VkPipeline pipeline_cache;
+  void *pipeline_cache_key;
+  uint8_t pipeline_cache_valid;
 };
 
 struct vulkan_command_buffer_context {
@@ -441,6 +445,7 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
   }
 
   sh_ctx->entry_point = entry_point;
+  sh_ctx->pipeline_cache_valid = 0;
 
   VkShaderModuleCreateInfo shader_module_create_info;
   shader_module_create_info.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -701,6 +706,7 @@ struct vk_buffer_mem_pair* vulkan_alloc_scalars(struct vulkan_context *ctx,
 
   struct vulkan_command_buffer_context *command_buffer_ctx = ctx->command_buffers + command_buffer_index;
 
+  command_buffer_ctx->scalar_count = count;
   command_buffer_ctx->scalars = malloc(count * sizeof(struct vk_buffer_mem_pair));
 
   for (int i = 0; i < count; ++i)
@@ -726,10 +732,11 @@ void vulkan_free_all_scalars(struct vulkan_context *ctx) {
     vulkan_free_scalars(ctx, i);
 }
 
-void vulkan_acquire_ownership(struct vulkan_context *ctx,
+void vulkan_transfer_ownership(struct vulkan_context *ctx,
                               struct vk_buffer_mem_pair *mem,
                               uint32_t command_buffer_index) {
-  vulkan_sync_mem(ctx, mem);
+  if (mem->owned)
+    ctx->command_buffers[mem->owner_index].owns--;
   mem->owned = 1;
   mem->owner_index = command_buffer_index;
   ctx->command_buffers[mem->owner_index].owns++;
@@ -835,8 +842,8 @@ void vulkan_copy_buffers(struct vulkan_context *ctx,
   VULKAN_SUCCEED(vulkan_available_command_buffer(ctx, &command_buffer_index));
   VkCommandBuffer command_buffer = ctx->command_buffers[command_buffer_index].command_buffer;
 
-  vulkan_acquire_ownership(ctx, src, command_buffer_index);
-  vulkan_acquire_ownership(ctx, dest, command_buffer_index);
+  vulkan_transfer_ownership(ctx, src, command_buffer_index);
+  vulkan_transfer_ownership(ctx, dest, command_buffer_index);
 
   VULKAN_SUCCEED(vulkan_begin_recording(ctx, command_buffer_index));
   vkCmdCopyBuffer(command_buffer, src->buffer, dest->buffer, 1, &buffer_copy);
@@ -864,6 +871,10 @@ static void vulkan_shader_cleanup(struct vulkan_context *ctx,
   vkDestroyPipelineLayout(ctx->device, sh_ctx->pipeline_layout, 0);
   vkDestroyDescriptorSetLayout(ctx->device, sh_ctx->descriptor_set_layout, 0);
   vkDestroyShaderModule(ctx->device, sh_ctx->shader_module, 0);
+  if(sh_ctx->pipeline_cache_valid) {
+    vkDestroyPipeline(ctx->device, sh_ctx->pipeline_cache, 0);
+    free(sh_ctx->pipeline_cache_key);
+  }
 }
 
 static void vulkan_cleanup(struct vulkan_context *ctx) {
