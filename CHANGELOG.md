@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     that will become unnamed and opaque, and thus impossible provide
     from the outside.
 
+  * Type variables invented by the type checker will now have a
+    unicode subscript to distinguish them from type parameters
+    originating in the source code.
+
 ### Removed
 
 ### Changed

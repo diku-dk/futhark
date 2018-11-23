@@ -204,7 +204,7 @@ instance MonadUnify TermTypeM where
 
   newTypeVar loc desc = do
     i <- incCounter
-    v <- newID $ nameFromString $ desc ++ show i
+    v <- newID $ mkTypeVarName desc i
     modifyConstraints $ M.insert v $ NoConstraint Nothing loc
     return $ TypeVar mempty Nonunique (typeName v) []
 
