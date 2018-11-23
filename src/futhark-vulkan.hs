@@ -2,6 +2,7 @@
 module Main (main) where
 
 import Control.Monad.IO.Class
+import Data.Maybe
 import System.FilePath
 import System.Exit
 import System.Environment
@@ -20,7 +21,7 @@ main = compilerMain () []
        gpuPipeline $ \() mode outpath prog -> do
          cprog <- either (`internalError` prettyText prog) return =<<
                   CVulkan.compileProg prog
-         vk_sdk <- liftIO $ getEnv "VULKAN_SDK"
+         vk_sdk <- liftIO $ fromMaybe "." <$> lookupEnv "VULKAN_SDK"
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
              extra_options
@@ -29,7 +30,7 @@ main = compilerMain () []
                | System.Info.os == "mingw32" =
                    ["-I" ++ vk_sdk ++ "\\Include", "-L" ++ vk_sdk ++ "\\Lib", "-lvulkan-1"]
                | otherwise =
-                   ["-lOpenCL"]
+                   ["-lvulkan"]
 
          case mode of
            ToLibrary -> do
