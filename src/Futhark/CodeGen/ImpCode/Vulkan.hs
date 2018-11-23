@@ -11,11 +11,13 @@ module Futhark.CodeGen.ImpCode.Vulkan
        , Function
        , FunctionT (Function)
        , Code
-       , EntryPoint
        , EntryPointArg (..)
        , SpecConstExp (..)
        , Vulkan (..)
        , Kernel.KernelConstExp
+       , transposeGroupSize
+       , SPIRV.EntryPointName
+       , SPIRV.transposeEntryPointName
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -42,9 +44,6 @@ type Function = Imp.Function Vulkan
 -- | A piece of code using the Vulkan API.
 type Code = Imp.Code Vulkan
 
--- | The name of an entry point.
-type EntryPoint = VName
-
 -- | An argument to be passed to a a SPIR-V entry point.
 data EntryPointArg = ValueKArg Exp PrimType
                     -- ^ Pass the value of this scalar expression as argument.
@@ -59,12 +58,15 @@ data SpecConstExp = SpecConstKernelExp VName Kernel.KernelConstExp
                 deriving (Show)
 
 -- | Host-level OpenCL operation.
-data Vulkan = LaunchEntryPoint EntryPoint [EntryPointArg] [SpecConstExp] Exp
+data Vulkan = LaunchEntryPoint SPIRV.EntryPointName [EntryPointArg] [SpecConstExp] Exp
             | HostCode Code
             | GetSize VName VName
             | CmpSizeLe VName VName Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
+
+transposeGroupSize :: Num a => a
+transposeGroupSize = 256
 
 instance Pretty Vulkan where
   ppr = text . show
