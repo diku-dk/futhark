@@ -7,6 +7,7 @@ module Language.Futhark.TypeChecker.Unify
   , MonadUnify(..)
   , BreadCrumb(..)
   , typeError
+  , mkTypeVarName
 
   , zeroOrderType
   , mustHaveConstr
@@ -181,7 +182,8 @@ linkVarToType loc vn tp = do
                         | not $ isRigid v constraints -> linkVarToTypes loc v ts
                       _ ->
                         typeError loc $ "Cannot unify `" ++ prettyName vn ++ "' with type `" ++
-                        pretty tp ++ "' (must be one of " ++ intercalate ", " (map pretty ts) ++
+                        pretty tp ++ "' (`" ++ prettyName vn ++
+                        "` must be one of " ++ intercalate ", " (map pretty ts) ++
                         " due to use at " ++ locStr old_loc ++ ")."
               Just (HasFields required_fields old_loc) ->
                 case tp of
@@ -373,9 +375,18 @@ instance MonadUnify UnifyM where
     i <- do (x, i) <- get
             put (x, i+1)
             return i
-    let v = VName (nameFromString $ desc ++ show i) 0
+    let v = VName (mkTypeVarName desc i) 0
     modifyConstraints $ M.insert v $ NoConstraint Nothing loc
     return $ TypeVar mempty Nonunique (typeName v) []
+
+-- | Construct a the name of a new type variable given a base
+-- description and a tag number (note that this is distinct from
+-- actually constructing a VName; the tag here is intended for human
+-- consumption but the machine does not care).
+mkTypeVarName :: String -> Int -> Name
+mkTypeVarName desc i =
+  nameFromString $ desc ++ mapMaybe subscript (show i)
+  where subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
 instance MonadBreadCrumbs UnifyM where
 
