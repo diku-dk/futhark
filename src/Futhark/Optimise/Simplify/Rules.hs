@@ -1206,6 +1206,7 @@ ruleBasicOp vtable pat (StmAux cs _) (Rotate offsets1 v)
 ruleBasicOp vtable pat (StmAux cs_x _) (Update arr_x slice_x (Var v))
   | Just _ <- sliceIndices slice_x,
     Just (Index arr_y slice_y, cs_y) <- ST.lookupBasicOp v vtable,
+    ST.available arr_y vtable,
     -- XXX: we should check for proper aliasing here instead.
     arr_y /= arr_x,
     Just (slice_x_bef, DimFix i, []) <- focusNth (length slice_x - 1) slice_x,
