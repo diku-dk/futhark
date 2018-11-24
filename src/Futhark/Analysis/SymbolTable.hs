@@ -31,6 +31,7 @@ module Futhark.Analysis.SymbolTable
   , lookupValue
   , lookupVar
   , lookupAliases
+  , available
   , index
   , index'
   , IndexOp(..)
@@ -131,6 +132,7 @@ castSymbolTable table = genCastSymbolTable loopVar letBound fParam lParam freeVa
               , freeVarStmDepth = letBoundStmDepth e
               , freeVarRange = letBoundRange e
               , freeVarIndex = \name is -> index' name is table
+              , freeVarConsumed = False
               }
 
         fParam e = FParam e { fparamAttr = fparamAttr e }
@@ -181,6 +183,8 @@ data LetBoundEntry lore =
                 , letBoundScalExp  :: Maybe ScalExp
                 , letBoundIndex    :: Int -> IndexArray
                 -- ^ Index a delayed array, if possible.
+                , letBoundConsumed :: Bool
+                -- ^ True if consumed.
                 }
 
 data FParamEntry lore =
@@ -188,6 +192,7 @@ data FParamEntry lore =
               , fparamAttr     :: FParamAttr lore
               , fparamAliases  :: Names
               , fparamStmDepth :: Int
+              , fparamConsumed :: Bool
               }
 
 data LParamEntry lore =
@@ -195,6 +200,7 @@ data LParamEntry lore =
               , lparamAttr     :: LParamAttr lore
               , lparamStmDepth :: Int
               , lparamIndex    :: IndexArray
+              , lparamConsumed :: Bool
               }
 
 data FreeVarEntry lore =
@@ -203,6 +209,7 @@ data FreeVarEntry lore =
                , freeVarRange    :: ScalExpRange
                , freeVarIndex    :: VName -> IndexArray
                 -- ^ Index a delayed array, if possible.
+               , freeVarConsumed :: Bool
                }
 
 entryInfo :: Entry lore -> NameInfo lore
@@ -259,6 +266,13 @@ setValueRange range (LoopVar entry) =
   LoopVar $ entry { loopVarRange = range }
 setValueRange range (FreeVar entry) =
   FreeVar $ entry { freeVarRange = range }
+
+consumed :: Entry lore -> Bool
+consumed (LetBound entry) = letBoundConsumed entry
+consumed (FParam entry)   = fparamConsumed entry
+consumed (LParam entry)   = lparamConsumed entry
+consumed LoopVar{}        = False
+consumed (FreeVar entry)  = freeVarConsumed entry
 
 entryStm :: Entry lore -> Maybe (Stm lore)
 entryStm (LetBound entry) = Just $ letBoundStm entry
@@ -338,6 +352,10 @@ lookupAliases name vtable = case M.lookup name $ bindings vtable of
                               Just (LetBound e) -> letBoundAliases e
                               Just (FParam e)   -> fparamAliases e
                               _                 -> mempty
+
+-- | In symbol table and not consumed.
+available :: VName -> SymbolTable lore -> Bool
+available name = maybe False (not . consumed) . M.lookup name . bindings
 
 index :: Attributes lore => VName -> [SubExp] -> SymbolTable lore
       -> Maybe (PrimExp VName, Certificates)
@@ -455,6 +473,7 @@ defBndEntry vtable patElem range als bnd =
     , letBoundStmDepth = 0
     , letBoundIndex = \k -> fmap (second (<>(stmAuxCerts $ stmAux bnd))) .
                             indexExp vtable (stmExp bnd) k
+    , letBoundConsumed = False
     }
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable
@@ -522,11 +541,12 @@ insertStm :: (IndexOp (Op lore), Ranged lore, Aliases.Aliased lore) =>
           -> SymbolTable lore
           -> SymbolTable lore
 insertStm stm vtable =
-  foldl' addRevAliases
-  (insertEntries (zip names $ map LetBound $ bindingEntries stm vtable) vtable) $
-  patternElements $ stmPattern stm
+  flip (foldl' $ flip consume) stm_consumed $
+  flip (foldl' addRevAliases) (patternElements $ stmPattern stm) $
+  insertEntries (zip names $ map LetBound $ bindingEntries stm vtable) vtable
   where names = patternNames $ stmPattern stm
         adjustSeveral f = flip $ foldl' $ flip $ M.adjust f
+        stm_consumed = expandAliases (Aliases.consumedInStm stm) vtable
         addRevAliases vtable' pe =
           vtable' { bindings = adjustSeveral update inedges $ bindings vtable' }
           where inedges = expandAliases (Aliases.aliasesOf pe) vtable'
@@ -553,6 +573,7 @@ insertFParam fparam = insertEntry name entry
                                    , fparamAttr = AST.paramAttr fparam
                                    , fparamAliases = mempty
                                    , fparamStmDepth = 0
+                                   , fparamConsumed = False
                                    }
 
 insertFParams :: Attributes lore =>
@@ -573,6 +594,7 @@ insertLParamWithRange param range indexf vtable =
                                   , lparamAttr = AST.paramAttr param
                                   , lparamStmDepth = 0
                                   , lparamIndex = indexf
+                                  , lparamConsumed = False
                                   }
         name = AST.paramName param
         sizevars = subExpVars $ arrayDims $ AST.paramType param
@@ -626,6 +648,7 @@ insertFreeVar name attr = insertEntry name entry
           , freeVarRange = (Nothing, Nothing)
           , freeVarStmDepth = 0
           , freeVarIndex  = \_ _ -> Nothing
+          , freeVarConsumed = False
           }
 
 updateBounds :: Attributes lore => Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
@@ -725,6 +748,15 @@ updateBounds' cond sym_tab =
                                            (S.insert sym cur_syms)
                                            (S.toList $ S.fromList sym_bds)
                Nothing        -> S.insert sym cur_syms
+
+consume :: Attributes lore => VName -> SymbolTable lore -> SymbolTable lore
+consume v vtable | Just e <- lookup v vtable = insertEntry v (consume' e) vtable
+                 | otherwise                 = vtable
+    where consume' (LetBound entry) = LetBound $ entry { letBoundConsumed = True }
+          consume' (FParam entry)   = FParam $ entry { fparamConsumed = True }
+          consume' (LParam entry)   = LParam $ entry { lparamConsumed = True }
+          consume' (LoopVar entry)  = LoopVar entry
+          consume' (FreeVar entry)  = FreeVar $ entry { freeVarConsumed = True }
 
 setUpperBound :: VName -> ScalExp -> SymbolTable lore
               -> SymbolTable lore
