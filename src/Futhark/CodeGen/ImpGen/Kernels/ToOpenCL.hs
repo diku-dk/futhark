@@ -536,8 +536,8 @@ generateTransposeFunction bt =
               elems_per_thread = 4
               group_rows = BinOpExp (SQuot Int32) actual_dim elems_per_thread
               workgroup_size = [actual_dim, group_rows, 1]
-              num_groups = [ (asExp x_p) `quotRoundingUp` actual_dim
-                           , (asExp y_p) `quotRoundingUp` actual_dim
+              num_groups = [ asExp x_p `quotRoundingUp` actual_dim
+                           , asExp y_p `quotRoundingUp` actual_dim
                            , asExp num_arrays_p
                            ]
               kernel_size = zipWith (*) num_groups workgroup_size
