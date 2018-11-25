@@ -133,7 +133,7 @@ castSymbolTable table = genCastSymbolTable loopVar letBound fParam lParam freeVa
               , freeVarStmDepth = letBoundStmDepth e
               , freeVarRange = letBoundRange e
               , freeVarIndex = \name is -> index' name is table
-              , freeVarConsumed = False
+              , freeVarConsumed = letBoundConsumed e
               }
 
         fParam e = FParam e { fparamAttr = fparamAttr e }
@@ -184,6 +184,8 @@ data LetBoundEntry lore =
                 , letBoundScalExp  :: Maybe ScalExp
                 , letBoundIndex    :: Int -> IndexArray
                 -- ^ Index a delayed array, if possible.
+                , letBoundConsumed :: Bool
+                  -- ^ True if consumed.
                 }
 
 data FParamEntry lore =
@@ -191,6 +193,7 @@ data FParamEntry lore =
               , fparamAttr     :: FParamAttr lore
               , fparamAliases  :: Names
               , fparamStmDepth :: Int
+              , fparamConsumed :: Bool
               }
 
 data LParamEntry lore =
@@ -198,6 +201,7 @@ data LParamEntry lore =
               , lparamAttr     :: LParamAttr lore
               , lparamStmDepth :: Int
               , lparamIndex    :: IndexArray
+              , lparamConsumed :: Bool
               }
 
 data FreeVarEntry lore =
@@ -266,8 +270,11 @@ setValueRange range (FreeVar entry) =
   FreeVar $ entry { freeVarRange = range }
 
 consumed :: Entry lore -> Bool
-consumed (FreeVar entry) = freeVarConsumed entry
-consumed _               = False
+consumed (LetBound entry) = letBoundConsumed entry
+consumed (FParam entry)   = fparamConsumed entry
+consumed (LParam entry)   = lparamConsumed entry
+consumed LoopVar{}        = False
+consumed (FreeVar entry)  = freeVarConsumed entry
 
 entryStm :: Entry lore -> Maybe (Stm lore)
 entryStm (LetBound entry) = Just $ letBoundStm entry
@@ -468,6 +475,7 @@ defBndEntry vtable patElem range als bnd =
     , letBoundStmDepth = 0
     , letBoundIndex = \k -> fmap (second (<>(stmAuxCerts $ stmAux bnd))) .
                             indexExp vtable (stmExp bnd) k
+    , letBoundConsumed = False
     }
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable
@@ -567,6 +575,7 @@ insertFParam fparam = insertEntry name entry
                                    , fparamAttr = AST.paramAttr fparam
                                    , fparamAliases = mempty
                                    , fparamStmDepth = 0
+                                   , fparamConsumed = False
                                    }
 
 insertFParams :: Attributes lore =>
@@ -587,6 +596,7 @@ insertLParamWithRange param range indexf vtable =
                                   , lparamAttr = AST.paramAttr param
                                   , lparamStmDepth = 0
                                   , lparamIndex = indexf
+                                  , lparamConsumed = False
                                   }
         name = AST.paramName param
         sizevars = subExpVars $ arrayDims $ AST.paramType param
@@ -745,12 +755,11 @@ consume :: Attributes lore => VName -> SymbolTable lore -> SymbolTable lore
 consume consumee vtable = foldl' consume' vtable $ expandAliases (S.singleton consumee) vtable
   where consume' vtable' v | Just e <- lookup v vtable = insertEntry v (consume'' e) vtable'
                            | otherwise                 = vtable'
-        consume'' e = FreeVar $ FreeVarEntry { freeVarAttr = entryInfo e
-                                             , freeVarStmDepth = bindingDepth e
-                                             , freeVarRange = valueRange e
-                                             , freeVarIndex = \_ _ -> Nothing
-                                             , freeVarConsumed = True
-                                             }
+        consume'' (FreeVar e)  = FreeVar e { freeVarConsumed = True }
+        consume'' (LetBound e) = LetBound e { letBoundConsumed = True }
+        consume'' (FParam e)   = FParam e { fparamConsumed = True }
+        consume'' (LParam e)   = LParam e { lparamConsumed = True }
+        consume'' (LoopVar e)  = LoopVar e
 
 setUpperBound :: VName -> ScalExp -> SymbolTable lore
               -> SymbolTable lore
