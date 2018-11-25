@@ -679,7 +679,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
               protectLoopHoisted ctx' val' (WhileLoop cond'))
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   ((loopstms, loopres), hoisted) <-
-    enterLoop $
+    enterLoop $ consumeMerge $
     bindFParams (ctxparams'++valparams') $ wrapbody $
     blockIf
     (hasFree boundnames `orIf` isConsumed
@@ -688,7 +688,12 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       return ((res, uses <> isDoLoopResult res), stms)
   loopbody' <- constructBody loopstms loopres
   return (DoLoop ctx' val' form' loopbody', hoisted)
-  where fparamnames = S.fromList (map (paramName . fst) $ ctx++val)
+  where fparamnames =
+          S.fromList (map (paramName . fst) $ ctx++val)
+        consumeMerge =
+          localVtable $ flip (foldl' (flip ST.consume)) consumed_by_merge
+        consumed_by_merge =
+          freeIn $ map snd $ filter (unique . paramDeclType . fst) val
 
 simplifyExp (Op op) = do (op', stms) <- simplifyOp op
                          return (Op op', stms)

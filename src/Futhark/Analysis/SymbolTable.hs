@@ -32,6 +32,7 @@ module Futhark.Analysis.SymbolTable
   , lookupVar
   , lookupAliases
   , available
+  , consume
   , index
   , index'
   , IndexOp(..)
@@ -183,8 +184,6 @@ data LetBoundEntry lore =
                 , letBoundScalExp  :: Maybe ScalExp
                 , letBoundIndex    :: Int -> IndexArray
                 -- ^ Index a delayed array, if possible.
-                , letBoundConsumed :: Bool
-                -- ^ True if consumed.
                 }
 
 data FParamEntry lore =
@@ -192,7 +191,6 @@ data FParamEntry lore =
               , fparamAttr     :: FParamAttr lore
               , fparamAliases  :: Names
               , fparamStmDepth :: Int
-              , fparamConsumed :: Bool
               }
 
 data LParamEntry lore =
@@ -200,7 +198,6 @@ data LParamEntry lore =
               , lparamAttr     :: LParamAttr lore
               , lparamStmDepth :: Int
               , lparamIndex    :: IndexArray
-              , lparamConsumed :: Bool
               }
 
 data FreeVarEntry lore =
@@ -210,6 +207,7 @@ data FreeVarEntry lore =
                , freeVarIndex    :: VName -> IndexArray
                 -- ^ Index a delayed array, if possible.
                , freeVarConsumed :: Bool
+                -- ^ True if consumed.
                }
 
 entryInfo :: Entry lore -> NameInfo lore
@@ -268,11 +266,8 @@ setValueRange range (FreeVar entry) =
   FreeVar $ entry { freeVarRange = range }
 
 consumed :: Entry lore -> Bool
-consumed (LetBound entry) = letBoundConsumed entry
-consumed (FParam entry)   = fparamConsumed entry
-consumed (LParam entry)   = lparamConsumed entry
-consumed LoopVar{}        = False
-consumed (FreeVar entry)  = freeVarConsumed entry
+consumed (FreeVar entry) = freeVarConsumed entry
+consumed _               = False
 
 entryStm :: Entry lore -> Maybe (Stm lore)
 entryStm (LetBound entry) = Just $ letBoundStm entry
@@ -473,7 +468,6 @@ defBndEntry vtable patElem range als bnd =
     , letBoundStmDepth = 0
     , letBoundIndex = \k -> fmap (second (<>(stmAuxCerts $ stmAux bnd))) .
                             indexExp vtable (stmExp bnd) k
-    , letBoundConsumed = False
     }
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable
@@ -573,7 +567,6 @@ insertFParam fparam = insertEntry name entry
                                    , fparamAttr = AST.paramAttr fparam
                                    , fparamAliases = mempty
                                    , fparamStmDepth = 0
-                                   , fparamConsumed = False
                                    }
 
 insertFParams :: Attributes lore =>
@@ -594,7 +587,6 @@ insertLParamWithRange param range indexf vtable =
                                   , lparamAttr = AST.paramAttr param
                                   , lparamStmDepth = 0
                                   , lparamIndex = indexf
-                                  , lparamConsumed = False
                                   }
         name = AST.paramName param
         sizevars = subExpVars $ arrayDims $ AST.paramType param
@@ -750,13 +742,15 @@ updateBounds' cond sym_tab =
                Nothing        -> S.insert sym cur_syms
 
 consume :: Attributes lore => VName -> SymbolTable lore -> SymbolTable lore
-consume v vtable | Just e <- lookup v vtable = insertEntry v (consume' e) vtable
-                 | otherwise                 = vtable
-    where consume' (LetBound entry) = LetBound $ entry { letBoundConsumed = True }
-          consume' (FParam entry)   = FParam $ entry { fparamConsumed = True }
-          consume' (LParam entry)   = LParam $ entry { lparamConsumed = True }
-          consume' (LoopVar entry)  = LoopVar entry
-          consume' (FreeVar entry)  = FreeVar $ entry { freeVarConsumed = True }
+consume consumee vtable = foldl' consume' vtable $ expandAliases (S.singleton consumee) vtable
+  where consume' vtable' v | Just e <- lookup v vtable = insertEntry v (consume'' e) vtable'
+                           | otherwise                 = vtable'
+        consume'' e = FreeVar $ FreeVarEntry { freeVarAttr = entryInfo e
+                                             , freeVarStmDepth = bindingDepth e
+                                             , freeVarRange = valueRange e
+                                             , freeVarIndex = \_ _ -> Nothing
+                                             , freeVarConsumed = True
+                                             }
 
 setUpperBound :: VName -> ScalExp -> SymbolTable lore
               -> SymbolTable lore
