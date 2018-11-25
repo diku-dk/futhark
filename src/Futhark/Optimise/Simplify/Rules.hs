@@ -686,7 +686,7 @@ simplifyIndexing vtable seType idd inds consuming =
     Just (Copy src, cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
-        not consuming ->
+        not consuming, ST.available src vtable ->
           Just $ pure $ IndexResult cs src inds
 
     Just (Reshape newshape src, cs)

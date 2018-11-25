@@ -49,8 +49,8 @@ import "/futlib/math"
 import "/futlib/array"
 
 let floydSbsImp(n: i32, d: *[][]i32): [][]i32 =
-    let dT = transpose d in
-    loop d = copy d for i < n do
+    let dT = copy (transpose d) in
+    loop d = d for i < n do
        loop d for j < n do
            let sumrow = map2 (+) d[i] dT[j]
            let minrow = reduce i32.min 1200 sumrow
