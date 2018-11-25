@@ -629,6 +629,10 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
+  if (ctx->lockstep_width == 0) {
+    ctx->lockstep_width = 1;
+  }
+
   if (ctx->cfg.logging) {
     fprintf(stderr, "Lockstep width: %d\n", (int)ctx->lockstep_width);
     fprintf(stderr, "Default group size: %d\n", (int)ctx->cfg.default_group_size);
@@ -707,7 +711,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
                                const char *srcs[],
                                int required_types) {
 
-  ctx->lockstep_width = 1;
+  ctx->lockstep_width = 0; // Real value set later.
 
   free_list_init(&ctx->free_list);
 
