@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     unicode subscript to distinguish them from type parameters
     originating in the source code.
 
+  * `futhark-test` and `futhark-bench` now support generating random
+    test data.
+
 ### Removed
 
 ### Changed

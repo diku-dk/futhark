@@ -37,9 +37,7 @@ as follows::
 
   [tags { tags... }]
   [entry: names...]
-  [compiled|nobench] input {
-    values...
-  }
+  [compiled|nobench|random] input ({ values... } | @ filename)
   output { values... } | error: regex
 
 If ``compiled`` is present before the ``input`` keyword, this test
@@ -47,6 +45,17 @@ case will never be passed to the interpreter.  This is useful for test
 cases that are annoyingly slow to interpret.  The ``nobench`` keyword
 is for data sets that are too small to be worth benchmarking, and only
 has meaning to futhark-bench(1).
+
+If ``input`` is preceded by ``random``, the text between the curly
+braces must consist of a sequence of Futhark types, including sizes in
+the case of arrays.  When ``futhark-test`` is run, a file located in a
+``data/`` subdirectory, containing values of the indicated types and
+shapes is, automatically constructed with ``futhark-dataset``
+
+If ``input`` is followed by an ``@`` and a file name (which must not
+contain any whitespace) instead of curly braces, values will be read
+from the indicated file.  This is recommended for large data sets.
+This notation cannot be used with ``random`` input.
 
 After the ``input`` block, the expected result of the test case is
 written as either another block of values, or an expected run-time
@@ -180,6 +189,16 @@ tested::
   -- input { 1 } output { 0 }
 
   entry sub1 (x: i32): i32 = add x (-1)
+
+The following program containts an entry point that is tested with
+randomly generated data::
+
+  -- ==
+  -- random input { [100]i32 [100]i32 }
+  -- random input { [1000]i32 [1000]i32 }
+
+  let main xs ys = i32.product (map2 (*) xs ys)
+
 
 SEE ALSO
 ========
