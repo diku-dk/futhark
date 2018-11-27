@@ -70,7 +70,7 @@ for prog in sorted(speedups.keys()):
     prog_speedups = speedups[prog]
     if len(prog_speedups) > 0:
         print('\n%s%s%s' % (bcolors.HEADER+bcolors.BOLD, prog, bcolors.ENDC))
-        for dataset,(dataset_speedup,significant) in prog_speedups.items():
+        for dataset,(dataset_speedup,significant) in sorted(prog_speedups.items()):
             if significant and dataset_speedup > 1.01:
                 color = bcolors.OKGREEN
             elif significant and dataset_speedup < 0.99:
