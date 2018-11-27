@@ -29,6 +29,7 @@ module Futhark.Test
 import Control.Applicative
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.ByteString as SBS
+import Control.Exception (catch)
 import Control.Monad
 import Control.Monad.IO.Class
 import qualified Data.Map.Strict as M
@@ -53,14 +54,17 @@ import Text.Regex.TDFA
 import System.Directory
 import System.Exit
 import System.Process.ByteString (readProcessWithExitCode)
+import System.IO (withFile, IOMode(..), hFileSize)
+import System.IO.Error
 
 import Prelude
 
 import Futhark.Analysis.Metrics
-import Futhark.Util.Pretty (pretty, prettyText)
+import Futhark.Representation.Primitive (IntType(..), FloatType(..), intByteSize, floatByteSize)
 import Futhark.Test.Values
 import Futhark.Util (directoryContents)
-import Language.Futhark.Syntax (PrimType(..), IntType(..), FloatType(..))
+import Futhark.Util.Pretty (pretty, prettyText)
+import Language.Futhark.Syntax (PrimType(..))
 
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
@@ -446,8 +450,11 @@ getValuesBS dir (InFile file) =
         readAndDecompress = do s <- BS.readFile file'
                                E.evaluate $ decompress s
 getValuesBS dir (GenValues gens) = do
-  exists <- liftIO $ doesFileExist $ dir </> file
-  unless exists $ liftIO $ do
+  exists_and_proper_size <- liftIO $
+    withFile (dir </> file) ReadMode (fmap (== genFileSize gens) . hFileSize)
+    `catch` \ex -> if isDoesNotExistError ex then return False
+                   else E.throw ex
+  unless exists_and_proper_size $ liftIO $ do
     s <- genValues gens
     createDirectoryIfMissing True $ takeDirectory $ dir </> file
     SBS.writeFile (dir </> file) s
@@ -468,3 +475,16 @@ genValues gens = do
 
 genFileName :: [GenValue] -> FilePath
 genFileName gens = intercalate "_" (map genValueType gens) ++ ".in"
+
+-- | Compute the expected size of the file.  We use this to check
+-- whether an existing file is broken/truncated.
+genFileSize :: [GenValue] -> Integer
+genFileSize gens = header_size + sum (map genSize gens)
+  where header_size = 2 -- 'b' <version>
+        value_header_size = 5 -- <num_dims> <type>
+        genSize (GenValue ds t) = value_header_size + toInteger (length ds) * 8 +
+                                  product (map toInteger ds) * primSize t
+        primSize (Signed it) = intByteSize it
+        primSize (Unsigned it) = intByteSize it
+        primSize (FloatType ft) = floatByteSize ft
+        primSize Bool = 1
