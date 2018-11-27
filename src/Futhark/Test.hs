@@ -479,10 +479,9 @@ genFileName gens = intercalate "_" (map genValueType gens) ++ ".in"
 -- | Compute the expected size of the file.  We use this to check
 -- whether an existing file is broken/truncated.
 genFileSize :: [GenValue] -> Integer
-genFileSize gens = header_size + sum (map genSize gens)
-  where header_size = 2 -- 'b' <version>
-        value_header_size = 5 -- <num_dims> <type>
-        genSize (GenValue ds t) = value_header_size + toInteger (length ds) * 8 +
+genFileSize = sum . map genSize
+  where header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
+        genSize (GenValue ds t) = header_size + toInteger (length ds) * 8 +
                                   product (map toInteger ds) * primSize t
         primSize (Signed it) = intByteSize it
         primSize (Unsigned it) = intByteSize it
