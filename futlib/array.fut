@@ -54,7 +54,7 @@ let concat 't (xs: []t) (ys: []t): *[]t = xs ++ ys
 let rotate 't (r: i32) (xs: []t) = intrinsics.rotate (r, xs)
 
 -- | Replace an element of the array with a new value.
-let update [n] 't (xs: *[n]t) (i: i32) (x: t): *[n]t = xs with [i] <- x
+let update [n] 't (xs: *[n]t) (i: i32) (x: t): *[n]t = xs with [i] = x
 
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
@@ -141,4 +141,4 @@ let tabulate_2d 'a (n: i32) (m: i32) (f: i32 -> i32 -> a): *[n][m]a =
 
 -- | Create a value for each point in a three-dimensional index space.
 let tabulate_3d 'a (n: i32) (m: i32) (o: i32) (f: i32 -> i32 -> i32 -> a): *[n][m][o]a =
-  map1 (f >-> tabulate_2d m n) (iota n)
+  map1 (f >-> tabulate_2d m o) (iota n)

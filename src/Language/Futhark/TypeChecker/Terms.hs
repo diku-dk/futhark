@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances, DeriveFunctor #-}
 -- | Facilities for type-checking Futhark terms.  Checking a term
 -- requires a little more context to track uniqueness and such.
 --
@@ -33,7 +34,7 @@ import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import Language.Futhark.TypeChecker.Unify
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
-import Futhark.Util.Pretty (Pretty)
+import Futhark.Util.Pretty hiding (space, bool)
 
 --- Uniqueness
 
@@ -203,7 +204,7 @@ instance MonadUnify TermTypeM where
 
   newTypeVar loc desc = do
     i <- incCounter
-    v <- newID $ nameFromString $ desc ++ show i
+    v <- newID $ mkTypeVarName desc i
     modifyConstraints $ M.insert v $ NoConstraint Nothing loc
     return $ TypeVar mempty Nonunique (typeName v) []
 
@@ -544,6 +545,17 @@ checkPattern' (PatternAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
       pure (TypeDecl t' (Info st)) <*> pure loc
  where unifyUniqueness u1 u2 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
 
+checkPattern' (PatternLit e NoInfo loc) (Ascribed t) = do
+  e' <- checkExp e
+  t' <- expType e'
+  unify loc (toStructural t') (toStructural t)
+  return $ PatternLit e' (Info (vacuousShapeAnnotations t')) loc
+
+checkPattern' (PatternLit e NoInfo loc) NoneInferred = do
+  e' <- checkExp e
+  t' <- expType e'
+  return $ PatternLit e' (Info (vacuousShapeAnnotations t')) loc
+
 bindPatternNames :: PatternBase NoInfo Name -> TermTypeM a -> TermTypeM a
 bindPatternNames = bindSpaced . map asTerm . S.toList . patIdentSet
   where asTerm v = (Term, identName v)
@@ -695,6 +707,7 @@ checkShapeParamUses tps ps = do
 patternUses :: Pattern -> ([VName], [VName])
 patternUses Id{} = mempty
 patternUses Wildcard{} = mempty
+patternUses PatternLit{} = mempty
 patternUses (PatternParens p _) = patternUses p
 patternUses (TuplePattern ps _) = foldMap patternUses ps
 patternUses (RecordPattern fs _) = foldMap (patternUses . snd) fs
@@ -709,6 +722,7 @@ patternUses (PatternAscription p (TypeDecl declte _) _) =
         typeExpUses (TEArrow _ t1 t2 _) =
           let (pos, neg) = typeExpUses t1 <> typeExpUses t2
           in (mempty, pos <> neg)
+        typeExpUses TEEnum{} = mempty
         typeArgUses (TypeArgExpDim d _) = dimDeclUses d
         typeArgUses (TypeArgExpType te) = typeExpUses te
 
@@ -844,16 +858,16 @@ checkExp (Ascript e decl loc) = do
   return $ Ascript e' decl' loc
 
 checkExp (BinOp op NoInfo (e1,_) (e2,_) NoInfo loc) = do
+  (op', ftype) <- lookupVar loc op
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
 
-  (op', ftype) <- lookupVar loc op
+  (p1_t, rt) <- checkApply loc ftype e1_arg
+  (p2_t, rt') <- checkApply loc (removeShapeAnnotations rt) e2_arg
 
-  (e1_pt : e2_pt : pts, rettype') <-
-    checkFuncall loc ftype [e1_arg, e2_arg]
   return $ BinOp op' (Info (vacuousShapeAnnotations ftype))
-    (e1', Info $ toStruct e1_pt) (e2', Info $ toStruct e2_pt)
-    (Info (foldr (Arrow mempty Nothing) rettype' pts)) loc
+    (e1', Info $ toStruct p1_t) (e2', Info $ toStruct p2_t)
+    (Info rt') loc
 
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
@@ -1226,6 +1240,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
             RecordPattern (map (fmap uniquePat) fs) ploc
           uniquePat (PatternAscription p t ploc) =
             PatternAscription p t ploc
+          uniquePat p@PatternLit{} = p
 
           -- Make the pattern unique where needed.
           pat' = uniquePat pat
@@ -1270,6 +1285,170 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       if body_cons' == body_cons && patternType pat' == patternType pat
         then return pat'
         else convergePattern pat' body_cons' body_t' body_loc
+
+checkExp (VConstr0 name NoInfo loc) = do
+  t <- newTypeVar loc "t"
+  mustHaveConstr loc name t
+  return $ VConstr0 name (Info t) loc
+
+checkExp (Match e cs NoInfo loc) = do
+  e' <- checkExp e
+  mt <- expType e'
+  (t', cs') <- mustHaveSameType loc mt cs
+  return $ Match e' cs' (Info t') loc
+
+mustHaveSameType :: SrcLoc -> CompType -> [CaseBase NoInfo Name]
+                  -> TermTypeM (CompType, [CaseBase Info VName])
+mustHaveSameType loc _ [] = typeError loc "Match expressions must have at least one case."
+mustHaveSameType loc mt (c:cs) = do
+  s   <- newTypeVar loc "s"
+  c'  <- checkCase mt s c
+  ct  <- expType $ caseExp c'
+  cs' <- mapM (checkCase mt ct) cs
+  return (ct, c':cs')
+  where caseExp (CasePat _ e _) = e
+
+checkCase :: CompType -> CompType -> CaseBase NoInfo Name
+          -> TermTypeM (CaseBase Info VName)
+checkCase mt ct (CasePat p caseExp loc) =
+  bindingPattern [] p (Ascribed $ vacuousShapeAnnotations mt) $ \_ p' -> do
+    caseExp' <- checkExp caseExp
+    caseType <- expType caseExp'
+    unify loc (toStructural ct) (toStructural caseType)
+    return $ CasePat p' caseExp' loc
+
+-- | An unmatched pattern. Used in in the generation of
+-- unmatched pattern warnings by the type checker.
+data Unmatched p = UnmatchedNum p [ExpBase Info VName]
+                 | UnmatchedBool p
+                 | UnmatchedEnum p
+                 | Unmatched p
+                 deriving (Functor, Show)
+
+instance Pretty (Unmatched (PatternBase Info VName)) where
+  ppr um = case um of
+      (UnmatchedNum p nums) -> ppr' p <+> text "where p is not one of" <+> ppr nums
+      (UnmatchedBool p)     -> ppr' p
+      (UnmatchedEnum p)     -> ppr' p
+      (Unmatched p)         -> ppr' p
+    where
+      ppr' (PatternAscription p t _) = ppr p <> text ":" <+> ppr t
+      ppr' (PatternParens p _)       = parens $ ppr' p
+      ppr' (Id v _ _)                = pprName v
+      ppr' (TuplePattern pats _)     = parens $ commasep $ map ppr' pats
+      ppr' (RecordPattern fs _)      = braces $ commasep $ map ppField fs
+        where ppField (name, t)      = text (nameToString name) <> equals <> ppr' t
+      ppr' Wildcard{}                = text "_"
+      ppr' (PatternLit e _ _)        = ppr e
+
+unpackPat :: Pattern -> [Maybe Pattern]
+unpackPat Wildcard{} = [Nothing]
+unpackPat (PatternParens p _) = unpackPat p
+unpackPat Id{} = [Nothing]
+unpackPat (TuplePattern ps _) = Just <$> ps
+unpackPat (RecordPattern fs _) = Just . snd <$> sortFields (M.fromList fs)
+unpackPat (PatternAscription p _ _) = unpackPat p
+unpackPat p@PatternLit{} = [Just p]
+
+wildPattern :: Pattern -> Int -> Unmatched Pattern -> Unmatched Pattern
+wildPattern (TuplePattern ps loc) pos um = f <$> um
+  where f p = TuplePattern (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
+        ps' = map wildOut ps
+        wildOut p = Wildcard (Info (patternPatternType p)) (srclocOf p)
+wildPattern (RecordPattern fs loc) pos um = wildRecord <$> um
+    where wildRecord p =
+            RecordPattern (take (pos - 1) fs' ++ [(fst (fs!!(pos - 1)), p)] ++ drop pos fs') loc
+          fs' = map wildOut fs
+          wildOut (f,p) = (f, Wildcard (Info (patternPatternType p)) (srclocOf p))
+wildPattern (PatternAscription p _ _) pos um = wildPattern p pos um
+wildPattern (PatternParens p _) pos um = wildPattern p pos um
+wildPattern _ _ um = um
+
+checkUnmatched :: (MonadBreadCrumbs m, MonadTypeChecker m) => Exp -> m ()
+checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
+  where checkUnmatched' (Match _ cs _ loc) =
+          let ps = map (\(CasePat p _ _) -> p) cs
+          in case unmatched id ps of
+              []  -> return ()
+              ps' -> typeError loc $ "Unmatched cases in match expression: \n"
+                                     ++ unlines (map (("  " ++) . pretty) ps')
+        checkUnmatched' _ = return ()
+        tv = ASTMapper { mapOnExp =
+                           \e' -> checkUnmatched' e' >> return e'
+                       , mapOnName        = pure
+                       , mapOnQualName    = pure
+                       , mapOnType        = pure
+                       , mapOnCompType    = pure
+                       , mapOnStructType  = pure
+                       , mapOnPatternType = pure
+                       }
+
+unmatched :: (Unmatched Pattern -> Unmatched Pattern) -> [Pattern] -> [Unmatched Pattern]
+unmatched hole (p:ps)
+  | sameStructure labeledCols = do
+    (i, cols) <- labeledCols
+    let hole' p' = hole $ wildPattern p i p'
+    case sequence cols of
+      Nothing      -> []
+      Just cs
+        | all isPatternLit cs  -> map hole' $ localUnmatched cs
+        | otherwise            -> unmatched hole' cs
+
+  where labeledCols = zip [1..] $ transpose $ map unpackPat (p:ps)
+
+        localUnmatched :: [Pattern] -> [Unmatched Pattern]
+        localUnmatched [] = []
+        localUnmatched ps'@(p':_) =
+          case vacuousShapeAnnotations $ patternType p'  of
+            Enum cs'' ->
+              let matched = nub $ mapMaybe (pExp >=> constr) ps'
+              in map (UnmatchedEnum . buildEnum (Enum cs'')) $ cs'' \\ matched
+            Prim t
+              | not (any idOrWild ps') ->
+                case t of
+                  Bool ->
+                    let matched = nub $ mapMaybe (pExp >=> bool) $ filter isPatternLit ps'
+                    in map (UnmatchedBool . buildBool (Prim t)) $ [True, False] \\ matched
+                  _ ->
+                    let matched = mapMaybe pExp $ filter isPatternLit ps'
+                    in [UnmatchedNum (buildId (Info (Prim t)) "p") matched]
+            _ -> []
+
+        sameStructure [] = True
+        sameStructure (x:xs) = all (\y -> length y == length x' ) xs'
+          where (x':xs') = map snd (x:xs)
+
+        pExp (PatternLit e' _ _) = Just e'
+        pExp _ = Nothing
+
+        constr (VConstr0 c _ _) = Just c
+        constr (Ascript e' _ _)  = constr e'
+        constr _ = Nothing
+
+        isPatternLit PatternLit{} = True
+        isPatternLit (PatternAscription p' _ _) = isPatternLit p'
+        isPatternLit (PatternParens p' _)  = isPatternLit p'
+        isPatternLit _ = False
+
+        idOrWild Id{} = True
+        idOrWild Wildcard{} = True
+        idOrWild (PatternAscription p' _ _) = idOrWild p'
+        idOrWild (PatternParens p' _) = idOrWild p'
+        idOrWild _ = False
+
+        bool (Literal (BoolValue b) _ ) = Just b
+        bool _ = Nothing
+
+        buildEnum t c =
+          PatternLit (VConstr0 c (Info t) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
+        buildBool t b =
+          PatternLit (Literal (BoolValue b) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
+        buildId t n =
+          -- The VName tag here will never be used since the value
+          -- exists exclusively for printing warnings.
+          Id (VName (nameFromString n) (-1)) t noLoc
+
+unmatched _ _ = []
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
@@ -1341,29 +1520,6 @@ checkApply loc ftype arg =
   "Attempt to apply an expression of type " ++ pretty ftype ++
   " to an argument of type " ++ pretty (argType arg) ++ "."
 
-checkFuncall :: SrcLoc -> CompType -> [Arg]
-             -> TermTypeM ([PatternType], PatternType)
-checkFuncall _ ftype [] = return ([], vacuousShapeAnnotations ftype)
-checkFuncall loc ftype ((argtype, dflow, argloc) : args) =
-  case ftype of
-    Arrow as _ t1 t2 -> do
-      unify argloc (toStructural t1) (toStruct argtype)
-      constraints <- getConstraints
-      let t1' = toStruct $ applySubst (`lookupSubst` constraints) t1
-          t2' = applySubst (`lookupSubst` constraints) t2
-
-      occur [observation as loc]
-      checkOccurences dflow
-      occurs <- consumeArg argloc argtype (diet t1')
-      occur $ dflow `seqOccurences` occurs
-
-      (ps, ret) <- checkFuncall loc t2' args
-      return (fromStruct (vacuousShapeAnnotations t1') : ps, ret)
-
-    _ -> typeError loc $
-         "Attempt to apply an expression of type " ++ pretty ftype ++
-         " to an argument of type " ++ pretty argtype ++ "."
-
 consumeArg :: SrcLoc -> CompType -> Diet -> TermTypeM [Occurence]
 consumeArg loc (Record ets) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
@@ -1387,11 +1543,14 @@ consumeArg loc (Arrow _ _ _ t2) (FuncDiet _ pd) =
 consumeArg loc at Consume = return [consumption (aliases at) loc]
 consumeArg loc at _       = return [observation (aliases at) loc]
 
-checkOneExp :: UncheckedExp -> TypeM Exp
+checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e
+  let t = vacuousShapeAnnotations $ toStruct $ typeOf e'
+  tparams <- letGeneralise [] [t] mempty
   fixOverloadedTypes
-  updateExpTypes e'
+  e'' <- updateExpTypes e'
+  return (tparams, e'')
 
 -- | Type-check a top-level (or module-level) function definition.
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
@@ -1411,6 +1570,10 @@ checkFunDef f = fmap fst $ runTermTypeM $ do
   maybe_retdecl' <- traverse updateExpTypes maybe_retdecl
   rettype' <- normaliseType rettype
 
+  -- Check if pattern matches are exhaustive and yield
+  -- errors if not.
+  checkUnmatched body'
+
   return (fname, tparams, params', maybe_retdecl', rettype', body')
 
 -- | This is "fixing" as in "setting them", not "correcting them".  We
@@ -1418,10 +1581,12 @@ checkFunDef f = fmap fst $ runTermTypeM $ do
 fixOverloadedTypes :: TermTypeM ()
 fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
   where fixOverloaded (v, Overloaded ots loc)
-          | Signed Int32 `elem` ots =
+          | Signed Int32 `elem` ots = do
               unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ Signed Int32
-          | FloatType Float64 `elem` ots =
+              warn loc "Defaulting ambiguous type to `i32`."
+          | FloatType Float64 `elem` ots = do
               unify loc (TypeVar () Nonunique (typeName v) []) $ Prim $ FloatType Float64
+              warn loc "Defaulting ambiguous type to `f64`."
           | otherwise =
               typeError loc $
               unlines ["Type is ambiguous (could be one of " ++ intercalate ", " (map pretty ots) ++ ").",
@@ -1440,6 +1605,11 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
                                    "Add a type annotation to disambiguate the type."]
           where fs' = intercalate ", " $ map field $ M.toList fs
                 field (l, t) = pretty l ++ ": " ++ pretty t
+
+        fixOverloaded (_, HasConstrs cs loc) =
+          typeError loc $ unlines [ "Type is ambiguous (must be an enum with constructors: " ++ cs' ++ ")."
+                                    ,"Add a type annotation to disambiguate the type."]
+          where cs' = intercalate " | " $ map (\c -> '#' : pretty c) cs
 
         fixOverloaded _ = return ()
 
@@ -1470,32 +1640,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         return (Just retdecl', retdecl_type)
       Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
 
-    -- Candidates for let-generalisation are those type variables that
-    ---
-    -- (1) were not known before we checked this function, and
-    --
-    -- (2) are not used in the (new) definition of any type variables
-    -- known before we checked this function.
-    --
-    -- (3) are not referenced from an overloaded type (for example,
-    -- are the element types of an incompletely resolved record type).
-    -- This is a bit more restrictive than I'd like, and SML for
-    -- example does not have this restriction.
-    now_substs <- getConstraints
-    let then_type_variables = S.fromList $ M.keys then_substs
-        then_type_constraints = constraintTypeVars $
-                                M.filterWithKey (\k _ -> k `S.member` then_type_variables) now_substs
-        keep_type_variables = then_type_variables <>
-                              then_type_constraints <>
-                              overloadedTypeVars now_substs
-
-    let new_substs = M.filterWithKey (\k _ -> not (k `S.member` keep_type_variables)) now_substs
-    tparams'' <- closeOverTypes new_substs tparams' $
-                 rettype : map patternStructType params''
-
-    -- We keep those type variables that were not closed over by
-    -- let-generalisation.
-    modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` map typeParamName tparams''
+    tparams'' <- letGeneralise tparams' (rettype : map patternStructType params'') then_substs
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
@@ -1531,6 +1676,39 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         returnAliasing (Record ets1) (Record ets2) =
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
+
+letGeneralise :: [TypeParam]
+              -> [StructType]
+              -> Constraints
+              -> TermTypeM [TypeParam]
+letGeneralise tparams ts then_substs = do
+  now_substs <- getConstraints
+  -- Candidates for let-generalisation are those type variables that
+  --
+  -- (1) were not known before we checked this function, and
+  --
+  -- (2) are not used in the (new) definition of any type variables
+  -- known before we checked this function.
+  --
+  -- (3) are not referenced from an overloaded type (for example,
+  -- are the element types of an incompletely resolved record type).
+  -- This is a bit more restrictive than I'd like, and SML for
+  -- example does not have this restriction.
+  let then_type_variables = S.fromList $ M.keys then_substs
+      then_type_constraints = constraintTypeVars $
+                              M.filterWithKey (\k _ -> k `S.member` then_type_variables) now_substs
+      keep_type_variables = then_type_variables <>
+                            then_type_constraints <>
+                            overloadedTypeVars now_substs
+
+  let new_substs = M.filterWithKey (\k _ -> not (k `S.member` keep_type_variables)) now_substs
+  tparams' <- closeOverTypes new_substs tparams ts
+
+  -- We keep those type variables that were not closed over by
+  -- let-generalisation.
+  modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` map typeParamName tparams'
+
+  return tparams'
 
 checkFunBody :: ExpBase NoInfo Name
              -> Maybe StructType

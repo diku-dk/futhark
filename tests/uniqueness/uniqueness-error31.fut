@@ -3,4 +3,4 @@
 -- error: in-place
 
 let main [n] (a: *[][n]i32, i: i32): [][]i32 =
-  a with [i] <- a[0]
+  a with [i] = a[0]

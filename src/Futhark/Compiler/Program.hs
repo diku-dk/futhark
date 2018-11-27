@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE TupleSections #-}
 -- | Low-level compilation parts.  Look at "Futhark.Compiler" for a
 -- more high-level API.
@@ -30,7 +29,6 @@ import qualified System.FilePath.Posix as Posix
 import System.IO.Error
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Language.Haskell.TH.Syntax (Lift)
 
 import Futhark.Error
 import Futhark.FreshNames
@@ -39,7 +37,6 @@ import qualified Language.Futhark as E
 import qualified Language.Futhark.TypeChecker as E
 import Language.Futhark.Semantic
 import Language.Futhark.Futlib
-import Language.Futhark.TH ()
 
 -- | A little monad for reading and type-checking a Futhark program.
 type CompilerM m = ReaderT [FilePath] (StateT ReaderState m)
@@ -55,7 +52,6 @@ data Basis = Basis { basisImports :: Imports
                    , basisRoots :: [String]
                      -- ^ Files that should be implicitly opened.
                    }
-           deriving (Lift)
 
 -- | A basis that contains no imports, and has a properly initialised
 -- name source.
@@ -192,4 +188,6 @@ prependRoots :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
 prependRoots roots (E.Prog doc ds) =
   E.Prog doc $ map mkImport roots ++ ds
   where mkImport fp =
-          E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo noLoc) E.NoInfo noLoc) noLoc
+          -- We do not use ImportDec here, because we do not want the
+          -- type checker to issue a warning about a redundant import.
+          E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo noLoc) noLoc) noLoc

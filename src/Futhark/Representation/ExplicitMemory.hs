@@ -503,32 +503,30 @@ funReturnsToExpReturns = noUniquenessReturns . maybeReturns
 bodyReturnsToExpReturns :: BodyReturns -> ExpReturns
 bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
+instance TC.CheckableOp ExplicitMemory where
+  checkOp (Alloc size _) = TC.require [Prim int64] size
+  checkOp (Inner k) = TC.subCheck $ typeCheckKernel k
+
+instance TC.CheckableOp InKernel where
+  checkOp (Alloc size _) = TC.require [Prim int64] size
+  checkOp (Inner k) = TC.subCheck $ typeCheckKernelExp k
+
 instance TC.Checkable ExplicitMemory where
-  checkExpLore = return
-  checkBodyLore = return
   checkFParamLore = checkMemInfo
   checkLParamLore = checkMemInfo
   checkLetBoundLore = checkMemInfo
   checkRetType = mapM_ TC.checkExtType . retTypeValues
-  checkOp (Alloc size _) = TC.require [Prim int64] size
-  checkOp (Inner k) = TC.subCheck $ typeCheckKernel k
   primFParam name t = return $ Param name (MemPrim t)
-  primLParam name t = return $ Param name (MemPrim t)
   matchPattern = matchPatternToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
 
 instance TC.Checkable InKernel where
-  checkExpLore = return
-  checkBodyLore = return
   checkFParamLore = checkMemInfo
   checkLParamLore = checkMemInfo
   checkLetBoundLore = checkMemInfo
   checkRetType = mapM_ TC.checkExtType . retTypeValues
-  checkOp (Alloc size _) = TC.require [Prim int64] size
-  checkOp (Inner k) = typeCheckKernelExp k
   primFParam name t = return $ Param name (MemPrim t)
-  primLParam name t = return $ Param name (MemPrim t)
   matchPattern = matchPatternToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType

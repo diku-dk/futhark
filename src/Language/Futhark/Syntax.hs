@@ -51,6 +51,7 @@ module Language.Futhark.Syntax
   , DimIndexBase(..)
   , ExpBase(..)
   , FieldBase(..)
+  , CaseBase(..)
   , LoopFormBase (..)
   , PatternBase(..)
   , StreamForm(..)
@@ -96,6 +97,7 @@ import           Data.Ord
 import qualified Data.Set                         as S
 import           Data.Traversable
 import qualified Data.Semigroup as Sem
+import           Data.List
 import           Prelude
 
 import           Futhark.Representation.Primitive (FloatType (..),
@@ -311,6 +313,7 @@ data ArrayElemTypeBase dim as =
     ArrayPrimElem PrimType as
   | ArrayPolyElem TypeName [TypeArg dim as] as
   | ArrayRecordElem (M.Map Name (RecordArrayElemTypeBase dim as))
+  | ArrayEnumElem [Name] as
   deriving (Eq, Show)
 
 instance Bitraversable ArrayElemTypeBase where
@@ -320,6 +323,8 @@ instance Bitraversable ArrayElemTypeBase where
     ArrayPolyElem t <$> traverse (bitraverse f g) args <*> g as
   bitraverse f g (ArrayRecordElem fs) =
     ArrayRecordElem <$> traverse (bitraverse f g) fs
+  bitraverse _ g (ArrayEnumElem cs as) =
+    ArrayEnumElem cs <$> g as
 
 instance Bifunctor ArrayElemTypeBase where
   bimap = bimapDefault
@@ -332,6 +337,7 @@ instance Bifoldable ArrayElemTypeBase where
 -- '==', aliases are ignored, but dimensions much match.  Function
 -- parameter names are ignored.
 data TypeBase dim as = Prim PrimType
+                     | Enum [Name]
                      | Array (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
                      | Record (M.Map Name (TypeBase dim as))
                      | TypeVar as Uniqueness TypeName [TypeArg dim as]
@@ -346,6 +352,7 @@ instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
   Record x1 == Record x2 = x1 == x2
   TypeVar _ u1 x1 y1 == TypeVar _ u2 x2 y2 = u1 == u2 && x1 == x2 && y1 == y2
   Arrow _ _ x1 y1 == Arrow _ _ x2 y2 = x1 == x2 && y1 == y2
+  Enum ns1 == Enum ns2 = sort ns1 == sort ns2
   _ == _ = False
 
 instance Bitraversable TypeBase where
@@ -357,6 +364,7 @@ instance Bitraversable TypeBase where
     TypeVar <$> g als <*> pure u <*> pure t <*> traverse (bitraverse f g) args
   bitraverse f g (Arrow als v t1 t2) =
     Arrow <$> g als <*> pure v <*> bitraverse f g t1 <*> bitraverse f g t2
+  bitraverse _ _ (Enum n) = pure $ Enum n
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
@@ -395,6 +403,7 @@ data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TEUnique (TypeExp vn) SrcLoc
                 | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
                 | TEArrow (Maybe vn) (TypeExp vn) (TypeExp vn) SrcLoc
+                | TEEnum [Name] SrcLoc
                  deriving (Eq, Show)
 
 instance Located (TypeExp vn) where
@@ -405,6 +414,7 @@ instance Located (TypeExp vn) where
   locOf (TEUnique _ loc)    = locOf loc
   locOf (TEApply _ _ loc)   = locOf loc
   locOf (TEArrow _ _ _ loc) = locOf loc
+  locOf (TEEnum _ loc)    = locOf loc
 
 data TypeArgExp vn = TypeArgExpDim (DimDecl vn) SrcLoc
                    | TypeArgExpType (TypeExp vn)
@@ -625,7 +635,6 @@ data ExpBase f vn =
             | BinOp (QualName vn) (f PatternType)
               (ExpBase f vn, f StructType) (ExpBase f vn, f StructType)
               (f PatternType) SrcLoc
-            -- ^ The first annotation is the instantiation list.
 
             | Project Name (ExpBase f vn) (f CompType) SrcLoc
 
@@ -710,6 +719,12 @@ data ExpBase f vn =
             -- and return the value of the second expression if it
             -- does.
 
+            | VConstr0 Name (f CompType) SrcLoc
+            -- ^ An enum element, e.g., @#foo@.
+
+            | Match (ExpBase f vn) [CaseBase f vn] (f CompType) SrcLoc
+            -- ^ A match expression.
+
 deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
@@ -757,6 +772,8 @@ instance Located (ExpBase f vn) where
   locOf (Stream _ _ _  pos)            = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
+  locOf (VConstr0 _ _ loc)             = locOf loc
+  locOf (Match _ _ _ loc)                = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
@@ -767,6 +784,14 @@ deriving instance Showable f vn => Show (FieldBase f vn)
 instance Located (FieldBase f vn) where
   locOf (RecordFieldExplicit _ _ loc) = locOf loc
   locOf (RecordFieldImplicit _ _ loc) = locOf loc
+
+-- | A case in a match expression.
+data CaseBase f vn = CasePat (PatternBase f vn) (ExpBase f vn) SrcLoc
+
+deriving instance Showable f vn => Show (CaseBase f vn)
+
+instance Located (CaseBase f vn) where
+  locOf (CasePat _ _ loc) = locOf loc
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For (IdentBase f vn) (ExpBase f vn)
@@ -782,6 +807,7 @@ data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
                       | Id vn (f PatternType) SrcLoc
                       | Wildcard (f PatternType) SrcLoc -- Nothing, i.e. underscore.
                       | PatternAscription (PatternBase f vn) (TypeDeclBase f vn) SrcLoc
+                      | PatternLit (ExpBase f vn) (f PatternType) SrcLoc
 deriving instance Showable f vn => Show (PatternBase f vn)
 
 instance Located (PatternBase f vn) where
@@ -791,6 +817,7 @@ instance Located (PatternBase f vn) where
   locOf (Id _ _ loc)                = locOf loc
   locOf (Wildcard _ loc)            = locOf loc
   locOf (PatternAscription _ _ loc) = locOf loc
+  locOf (PatternLit _ _ loc)        = locOf loc
 
 -- | Documentation strings, including source location.
 data DocComment = DocComment String SrcLoc
@@ -959,17 +986,19 @@ data DecBase f vn = ValDec (ValBindBase f vn)
                   | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
                   | ModDec (ModBindBase f vn)
-                  | OpenDec (ModExpBase f vn) (f [VName]) SrcLoc
+                  | OpenDec (ModExpBase f vn) SrcLoc
                   | LocalDec (DecBase f vn) SrcLoc
+                  | ImportDec FilePath (f FilePath) SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
-  locOf (ValDec d)        = locOf d
-  locOf (TypeDec d)       = locOf d
-  locOf (SigDec d)        = locOf d
-  locOf (ModDec d)        = locOf d
-  locOf (OpenDec _ _ loc) = locOf loc
-  locOf (LocalDec _ loc)  = locOf loc
+  locOf (ValDec d)          = locOf d
+  locOf (TypeDec d)         = locOf d
+  locOf (SigDec d)          = locOf d
+  locOf (ModDec d)          = locOf d
+  locOf (OpenDec _ loc)     = locOf loc
+  locOf (LocalDec _ loc)    = locOf loc
+  locOf (ImportDec _ _ loc) = locOf loc
 
 -- | The program described by a single Futhark file.  May depend on
 -- other files.

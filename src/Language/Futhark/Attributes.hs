@@ -29,6 +29,7 @@ module Language.Futhark.Attributes
   , patIdentSet
   , patternType
   , patternStructType
+  , patternPatternType
   , patternParam
   , patternNoShapeAnnotations
   , patternOrderZero
@@ -94,6 +95,7 @@ module Language.Futhark.Attributes
   , UncheckedValBind
   , UncheckedDec
   , UncheckedProg
+  , UncheckedCase
   )
   where
 
@@ -136,12 +138,14 @@ nestedDims t =
             Prim{}              -> mempty
             TypeVar _ _ _ targs -> concatMap typeArgDims targs
             Arrow _ v t1 t2     -> filter (notV v) $ nestedDims t1 <> nestedDims t2
+            Enum{}              -> []
   where arrayNestedDims ArrayPrimElem{} =
           mempty
         arrayNestedDims (ArrayPolyElem _ targs _) =
           concatMap typeArgDims targs
         arrayNestedDims (ArrayRecordElem ts) =
           fold (fmap recordArrayElemNestedDims ts)
+        arrayNestedDims ArrayEnumElem{} = mempty
 
         recordArrayElemNestedDims (RecordArrayArrayElem a ds _) =
           arrayNestedDims a <> shapeDims ds
@@ -202,6 +206,7 @@ diet TypeVar{}             = Observe
 diet (Arrow _ _ t1 t2)     = FuncDiet (diet t1) (diet t2)
 diet (Array _ _ Unique)    = Consume
 diet (Array _ _ Nonunique) = Observe
+diet (Enum _)              = Observe
 
 -- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
@@ -249,7 +254,11 @@ peelArray n (Array (ArrayRecordElem ts) shape u)
   where asType (RecordArrayElem (ArrayPrimElem bt _)) = Prim bt
         asType (RecordArrayElem (ArrayPolyElem bt targs als)) = TypeVar als u bt targs
         asType (RecordArrayElem (ArrayRecordElem ts')) = Record $ fmap asType ts'
+        asType (RecordArrayElem (ArrayEnumElem cs _)) = Enum cs
         asType (RecordArrayArrayElem et e_shape _) = Array et e_shape u
+peelArray n (Array (ArrayEnumElem cs _) shape _)
+  | shapeRank shape == n =
+    Just $ Enum cs
 peelArray n (Array et shape u) = do
   shape' <- stripDims n shape
   return $ Array et shape' u
@@ -291,6 +300,8 @@ arrayOfWithAliases (Record ts) as shape u = do
   ts' <- traverse (typeToRecordArrayElem' as) ts
   return $ Array (ArrayRecordElem ts') shape u
 arrayOfWithAliases Arrow{} _ _ _ = Nothing
+arrayOfWithAliases (Enum cs) as shape u  =
+  Just $ Array (ArrayEnumElem cs as) shape u
 
 typeToRecordArrayElem :: Monoid as =>
                          TypeBase dim as
@@ -310,6 +321,8 @@ typeToRecordArrayElem' as (Record ts') =
 typeToRecordArrayElem' _ (Array et shape u) =
   Just $ RecordArrayArrayElem et shape u
 typeToRecordArrayElem' _ Arrow{} = Nothing
+typeToRecordArrayElem' as (Enum cs) =
+  Just $ RecordArrayElem $ ArrayEnumElem cs as
 
 recordArrayElemToType :: Monoid as =>
                          RecordArrayElemTypeBase dim as
@@ -323,6 +336,7 @@ arrayElemToType (ArrayPolyElem bt targs als) = (TypeVar als Nonunique bt targs, 
 arrayElemToType (ArrayRecordElem ts) =
   let ts' = fmap recordArrayElemToType ts
   in (Record $ fmap fst ts', foldMap snd ts')
+arrayElemToType (ArrayEnumElem cs als) = (Enum cs, als)
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
@@ -392,6 +406,7 @@ setArrayElemUniqueness (ArrayRecordElem r) u =
           RecordArrayElem $ setArrayElemUniqueness et u
         set (RecordArrayArrayElem et shape e_u) =
           RecordArrayArrayElem (setArrayElemUniqueness et u) shape e_u
+setArrayElemUniqueness (ArrayEnumElem cs as) _ = ArrayEnumElem cs as
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
 -- any already present aliasing.
@@ -493,6 +508,8 @@ typeOf (ProjectSection _ (Info t) _) =
   removeShapeAnnotations t
 typeOf (IndexSection _ (Info t) _) =
   removeShapeAnnotations t
+typeOf (VConstr0 _ (Info t) _)  = t
+typeOf (Match _ _ (Info t) _) = t
 
 foldFunType :: Monoid as => [TypeBase dim as] -> TypeBase dim as -> TypeBase dim as
 foldFunType ps ret = foldr (Arrow mempty Nothing) ret ps
@@ -518,6 +535,8 @@ typeVars t =
       mconcat $ typeVarFree tn : map typeArgFree targs
     Array (ArrayRecordElem fields) _ _ ->
       foldMap (typeVars . fst . recordArrayElemToType) fields
+    Array ArrayEnumElem{} _ _ -> mempty
+    Enum{} -> mempty
   where typeVarFree = S.singleton . typeLeaf
         typeArgFree (TypeArgType ta _) = typeVars ta
         typeArgFree TypeArgDim{} = mempty
@@ -544,6 +563,7 @@ returnType (TypeVar () Nonunique t targs) ds args =
 returnType (Arrow _ v t1 t2) ds args =
   Arrow als v (bimap id (const mempty) t1) (returnType t2 ds args)
   where als = foldMap aliases $ zipWith maskAliases args ds
+returnType (Enum cs) _ _ = Enum cs
 
 typeArgReturnType :: TypeArg shape () -> [Diet] -> [CompType]
                   -> TypeArg shape Names
@@ -564,6 +584,9 @@ arrayElemReturnType (ArrayPolyElem bt targs ()) ds args =
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
 arrayElemReturnType (ArrayRecordElem et) ds args =
   ArrayRecordElem $ fmap (\t -> recordArrayElemReturnType t ds args) et
+arrayElemReturnType (ArrayEnumElem cs ()) ds args =
+  ArrayEnumElem cs als
+  where als = mconcat $ map aliases $ zipWith maskAliases args ds
 
 recordArrayElemReturnType :: RecordArrayElemTypeBase dim ()
                          -> [Diet]
@@ -580,10 +603,12 @@ concreteType Prim{} = True
 concreteType TypeVar{} = False
 concreteType Arrow{} = False
 concreteType (Record ts) = all concreteType ts
+concreteType Enum{} = True
 concreteType (Array at _ _) = concreteArrayType at
   where concreteArrayType ArrayPrimElem{}      = True
         concreteArrayType ArrayPolyElem{}      = False
         concreteArrayType (ArrayRecordElem ts) = all concreteRecordArrayElem ts
+        concreteArrayType ArrayEnumElem{}      = True
 
         concreteRecordArrayElem (RecordArrayElem et) = concreteArrayType et
         concreteRecordArrayElem (RecordArrayArrayElem et _ _) = concreteArrayType et
@@ -597,6 +622,7 @@ orderZero Array{}         = True
 orderZero (Record fs)     = all orderZero $ M.elems fs
 orderZero TypeVar{}       = True
 orderZero Arrow{}         = False
+orderZero Enum{}          = True
 
 -- | Extract all the shape names that occur in a given pattern.
 patternDimNames :: PatternBase Info VName -> Names
@@ -607,6 +633,7 @@ patternDimNames (Id _ (Info tp) _)     = typeDimNames tp
 patternDimNames (Wildcard (Info tp) _) = typeDimNames tp
 patternDimNames (PatternAscription p (TypeDecl _ (Info t)) _) =
   patternDimNames p <> typeDimNames t
+patternDimNames (PatternLit _ (Info tp) _) = typeDimNames tp
 
 -- | Extract all the shape names that occur in a given type.
 typeDimNames :: TypeBase (DimDecl VName) als -> Names
@@ -625,15 +652,17 @@ patternOrderZero pat = case pat of
   Id _ (Info t) _         -> orderZero t
   Wildcard (Info t) _     -> orderZero t
   PatternAscription p _ _ -> patternOrderZero p
+  PatternLit _ (Info t) _ -> orderZero t
 
 -- | The set of identifiers bound in a pattern.
 patIdentSet :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
-patIdentSet (Id v t loc)            = S.singleton $ Ident v (removeShapeAnnotations <$> t) loc
+patIdentSet (Id v t loc)              = S.singleton $ Ident v (removeShapeAnnotations <$> t) loc
 patIdentSet (PatternParens p _)       = patIdentSet p
 patIdentSet (TuplePattern pats _)     = mconcat $ map patIdentSet pats
 patIdentSet (RecordPattern fs _)      = mconcat $ map (patIdentSet . snd) fs
 patIdentSet Wildcard{}                = mempty
 patIdentSet (PatternAscription p _ _) = patIdentSet p
+patIdentSet PatternLit{}              = mempty
 
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> CompType
@@ -643,15 +672,21 @@ patternType (Id _ (Info t) _)         = removeShapeAnnotations t
 patternType (TuplePattern pats _)     = tupleRecord $ map patternType pats
 patternType (RecordPattern fs _)      = Record $ patternType <$> M.fromList fs
 patternType (PatternAscription p _ _) = patternType p
+patternType (PatternLit _ (Info t) _) = removeShapeAnnotations t
+
+-- | The type of a pattern, including shape annotations.
+patternPatternType :: PatternBase Info VName -> PatternType
+patternPatternType (Wildcard (Info t) _)      = t
+patternPatternType (PatternParens p _)        = patternPatternType p
+patternPatternType (Id _ (Info t) _)          = t
+patternPatternType (TuplePattern pats _)      = tupleRecord $ map patternPatternType pats
+patternPatternType (RecordPattern fs _)       = Record $ patternPatternType <$> M.fromList fs
+patternPatternType (PatternAscription p _ _)  = patternPatternType p
+patternPatternType (PatternLit _ (Info t) _)  = t
 
 -- | The type matched by the pattern, including shape declarations if present.
 patternStructType :: PatternBase Info VName -> StructType
-patternStructType (PatternAscription p _ _) = patternStructType p
-patternStructType (PatternParens p _) = patternStructType p
-patternStructType (Id _ (Info t) _) = t `setAliases` ()
-patternStructType (TuplePattern ps _) = tupleRecord $ map patternStructType ps
-patternStructType (RecordPattern fs _) = Record $ patternStructType <$> M.fromList fs
-patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
+patternStructType = toStruct . patternPatternType
 
 -- | When viewed as a function parameter, does this pattern correspond
 -- to a named parameter of some type?
@@ -679,6 +714,8 @@ patternNoShapeAnnotations (RecordPattern ps loc) =
   RecordPattern (map (fmap patternNoShapeAnnotations) ps) loc
 patternNoShapeAnnotations (Wildcard (Info t) loc) =
   Wildcard (Info (vacuousShapeAnnotations t)) loc
+patternNoShapeAnnotations (PatternLit e (Info t) loc) =
+  PatternLit e (Info (vacuousShapeAnnotations t)) loc
 
 -- | Names of primitive types to types.  This is only valid if no
 -- shadowing is going on, but useful for tools.
@@ -914,12 +951,13 @@ progImports = concatMap decImports . progDecs
 
 -- | The modules imported by a single declaration.
 decImports :: DecBase f vn -> [(String,SrcLoc)]
-decImports (OpenDec x _ _) = modExpImports x
+decImports (OpenDec x _) = modExpImports x
 decImports (ModDec md) = modExpImports $ modExp md
 decImports SigDec{} = []
 decImports TypeDec{} = []
 decImports ValDec{} = []
 decImports (LocalDec d _) = decImports d
+decImports (ImportDec x _ loc) = [(x, loc)]
 
 modExpImports :: ModExpBase f vn -> [(String,SrcLoc)]
 modExpImports ModVar{}              = []
@@ -934,13 +972,14 @@ modExpImports ModLambda{}           = []
 -- declaration.
 progModuleTypes :: Ord vn => ProgBase f vn -> S.Set vn
 progModuleTypes = mconcat . map onDec . progDecs
-  where onDec (OpenDec x _ _) = onModExp x
+  where onDec (OpenDec x _) = onModExp x
         onDec (ModDec md) =
           maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
         onDec SigDec{} = mempty
         onDec TypeDec{} = mempty
         onDec ValDec{} = mempty
-        onDec (LocalDec _ _) = mempty
+        onDec LocalDec{} = mempty
+        onDec ImportDec{} = mempty
 
         onModExp ModVar{} = mempty
         onModExp (ModParens p _) = onModExp p
@@ -1035,3 +1074,6 @@ type UncheckedDec = DecBase NoInfo Name
 
 -- | A Futhark program with no type annotations.
 type UncheckedProg = ProgBase NoInfo Name
+
+-- | A case (of a match expression) with no type annotations.
+type UncheckedCase = CaseBase NoInfo Name

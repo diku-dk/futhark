@@ -322,5 +322,5 @@ takes various keyword parameters:
     the ``-d`` option for executables.
 
 Futhark arrays are mapped to either the Numpy ``ndarray`` type or the
-```pyopencl.array`` <https://documen.tician.de/pyopencl/array.html>_`
+`pyopencl.array <https://documen.tician.de/pyopencl/array.html>`_
 type.  Scalars are mapped to Numpy scalar types.

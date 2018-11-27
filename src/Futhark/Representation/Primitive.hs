@@ -371,6 +371,12 @@ data ConvOp = ZExt IntType IntType
               -- ^ Convert an unsigned integer to a floating-point value.
             | SIToFP IntType FloatType
               -- ^ Convert a signed integer to a floating-point value.
+            | IToB IntType
+              -- ^ Convert an integer to a boolean value.  Zero
+              -- becomes false; anything else is true.
+            | BToI IntType
+              -- ^ Convert a boolean to an integer.  True is converted
+              -- to 1 and False to 0.
              deriving (Eq, Ord, Show)
 
 -- | A list of all unary operators for all types.
@@ -434,6 +440,8 @@ allConvOps = concat [ ZExt <$> allIntTypes <*> allIntTypes
                     , FPToSI <$> allFloatTypes <*> allIntTypes
                     , UIToFP <$> allIntTypes <*> allFloatTypes
                     , SIToFP <$> allIntTypes <*> allFloatTypes
+                    , IToB <$> allIntTypes
+                    , BToI <$> allIntTypes
                     ]
 
 doUnOp :: UnOp -> PrimValue -> Maybe PrimValue
@@ -632,6 +640,8 @@ doConvOp (FPToUI _ to) (FloatValue v) = Just $ IntValue $ doFPToUI v to
 doConvOp (FPToSI _ to) (FloatValue v) = Just $ IntValue $ doFPToSI v to
 doConvOp (UIToFP _ to) (IntValue v)   = Just $ FloatValue $ doUIToFP v to
 doConvOp (SIToFP _ to) (IntValue v)   = Just $ FloatValue $ doSIToFP v to
+doConvOp (IToB _) (IntValue v)        = Just $ BoolValue $ intToInt64 v /= 0
+doConvOp (BToI to) (BoolValue v)      = Just $ IntValue $ intValue to $ if v then 1 else 0::Int
 doConvOp _ _                          = Nothing
 
 -- | Zero-extend the given integer value to the size of the given
@@ -801,6 +811,8 @@ convOpType (FPToUI from to) = (FloatType from, IntType to)
 convOpType (FPToSI from to) = (FloatType from, IntType to)
 convOpType (UIToFP from to) = (IntType from, FloatType to)
 convOpType (SIToFP from to) = (IntType from, FloatType to)
+convOpType (IToB from) = (IntType from, Bool)
+convOpType (BToI to) = (Bool, IntType to)
 
 -- | A mapping from names of primitive functions to their parameter
 -- types, their result type, and a function for evaluating them.
@@ -1040,6 +1052,8 @@ convOpFun FPToUI{} = "fptoui"
 convOpFun FPToSI{} = "fptosi"
 convOpFun UIToFP{} = "uitofp"
 convOpFun SIToFP{} = "sitofp"
+convOpFun IToB{} = "itob"
+convOpFun BToI{} = "btoi"
 
 taggedI :: String -> IntType -> Doc
 taggedI s Int8  = text $ s ++ "8"

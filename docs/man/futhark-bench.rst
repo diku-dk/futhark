@@ -17,8 +17,9 @@ DESCRIPTION
 This tool is the recommended way to benchmark Futhark programs.
 Programs are compiled using the specified compiler (``futhark-c`` by
 default), then run a number of times for each test case, and the
-average runtime printed on standard output.  A program will be ignored
-if it contains no data sets - it will not even be compiled.
+average runtime printed on standard output.  Test data is indicated as
+with ``futhark-test``.  A program will be ignored if it contains no
+data sets - it will not even be compiled.
 
 If compilation or running fails, an error message will be printed and
 benchmarking will continue (and ``--json`` will write the file), but a

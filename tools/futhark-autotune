@@ -25,6 +25,13 @@ import sys
 import logging
 from collections import OrderedDict, defaultdict
 
+# We define our own LogIntegerParameter to crudely work around a bug
+# in OpenTuner: https://github.com/jansel/opentuner/issues/114
+class FixedLogIntegerParameter(LogIntegerParameter):
+  def _scale(self, v):
+    v = max(self.min_value, v) # WORKAROUND
+    return math.log(v + 1.0 - self.min_value, 2.0)
+
 technique.register(bandittechniques.AUCBanditMetaTechnique([
     simplextechniques.RegularNelderMead(),
     simplextechniques.RightNelderMead(),
@@ -104,8 +111,8 @@ class FutharkTuner(MeasurementInterface):
     as timeout-value, plus the (estimated) overhead of initialisation.
     """
     with tempfile.NamedTemporaryFile() as json_tmp:
-      base_cmd = 'futhark-bench {} --compiler=futhark-opencl --skip-compilation --json={}'.format(self.program_name(),
-                                                                                                  json_tmp.name)
+      base_cmd = '{} {} --exclude-case=notune --compiler=futhark-opencl --skip-compilation --json={}'.format(
+        self.args.futhark_bench, self.program_name(), json_tmp.name)
       wall_start = time.time()
       base_res = self.call_critical_program(base_cmd)
       wall_duration = time.time() - wall_start
@@ -142,7 +149,8 @@ class FutharkTuner(MeasurementInterface):
     n = 0
     with tempfile.NamedTemporaryFile() as json_tmp:
       # extract comparison values
-      val_cmd = 'futhark-bench {} --compiler=futhark-opencl --skip-compilation --pass-option=-L --runs=1 --json={}'.format(self.program_name(), json_tmp.name)
+      val_cmd = '{} {} --exclude-case=notune --compiler=futhark-opencl --skip-compilation --pass-option=-L --runs=1 --json={}'.format(
+        self.args.futhark_bench, self.program_name(), json_tmp.name)
       val_res = self.call_critical_program(val_cmd)
 
       json_data = json.load(json_tmp, object_pairs_hook=OrderedDict)
@@ -294,7 +302,7 @@ class FutharkTuner(MeasurementInterface):
     """
     manipulator = ConfigurationManipulator()
     for k, v in self.values.items():
-      manipulator.add_parameter(LogIntegerParameter(k, min(v), max(v)))
+      manipulator.add_parameter(FixedLogIntegerParameter(k, min(v), max(v)))
 
     return manipulator
 
@@ -305,8 +313,8 @@ class FutharkTuner(MeasurementInterface):
     def otherOption(opt):
       return '--pass-option {}'.format(opt)
     other_options = ' '.join(map(otherOption, self.args.pass_option))
-    return 'futhark-bench --skip-compilation {} {} {}'.format(
-      self.program_name(), size_options, other_options)
+    return '{} --skip-compilation {} --exclude-case=notune {} {}'.format(
+      self.args.futhark_bench, self.program_name(), size_options, other_options)
 
   def get_branch(self, start, cfg, datasets, result):
     """
@@ -389,6 +397,7 @@ if __name__ == '__main__':
   argparser = opentuner.default_argparser()
   argparser.add_argument('program', type=str, metavar='PROGRAM')
   argparser.add_argument('--compiler', type=str, metavar='COMPILER', default='futhark-opencl')
+  argparser.add_argument('--futhark-bench', type=str, metavar='PROGRAM', default='futhark-bench')
   argparser.add_argument('--timeout', type=int, metavar='TIMEOUT', default='60')
   argparser.add_argument('--pass-option', type=str, metavar='OPTION', action='append', default=[])
   argparser.add_argument('--save-json', type=str, metavar='FILENAME', default=None)

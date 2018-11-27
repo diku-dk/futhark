@@ -34,8 +34,6 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.DataDependencies
 import Futhark.Optimise.Simplify.ClosedForm
 import Futhark.Optimise.Simplify.Rule
-import qualified Futhark.Analysis.AlgSimplify as AS
-import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
@@ -51,7 +49,6 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , RuleGeneric constantFoldPrimFun
                , RuleIf ruleIf
                , RuleIf hoistBranchInvariant
-               , RuleBasicOp simplifyScalExp
                , RuleBasicOp ruleBasicOp
                ]
 
@@ -251,6 +248,7 @@ simpleRules = [ simplifyBinOp
               , simplifyReshapeReshape
               , simplifyReshapeScratch
               , simplifyReshapeReplicate
+              , simplifyReshapeIota
               , improveReshape ]
 
 simplifyClosedFormLoop :: BinderOps lore => TopDownRuleDoLoop lore
@@ -688,7 +686,7 @@ simplifyIndexing vtable seType idd inds consuming =
     Just (Copy src, cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
-        not consuming ->
+        not consuming, ST.available src vtable ->
           Just $ pure $ IndexResult cs src inds
 
     Just (Reshape newshape src, cs)
@@ -955,25 +953,6 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = do
         reshapeResult se _ =
           return se
 
-simplifyScalExp :: BinderOps lore => TopDownRuleBasicOp lore
-simplifyScalExp vtable pat _ e = do
-  res <- SE.toScalExp (`ST.lookupScalExp` vtable) $ BasicOp e
-  case res of
-    -- If the sufficient condition is 'True', then it statically succeeds.
-    Just se
-      | SE.scalExpType se == Bool,
-        isNothing $ valOrVar se,
-        SE.scalExpSize se < size_bound,
-        Just se' <- valOrVar $ AS.simplify se ranges ->
-        letBind_ pat $ BasicOp $ SubExp se'
-    _ -> cannotSimplify
-  where ranges = ST.rangesRep vtable
-        size_bound = 10 -- don't touch scalexps bigger than this.
-
-        valOrVar (SE.Val v)  = Just $ Constant v
-        valOrVar (SE.Id v _) = Just $ Var v
-        valOrVar _           = Nothing
-
 simplifyIdentityReshape :: SimpleRule lore
 simplifyIdentityReshape _ seType (Reshape newshape v)
   | Just t <- seType $ Var v,
@@ -1003,6 +982,12 @@ simplifyReshapeReplicate defOf seType (Reshape newshape v)
       in Just (Replicate (Shape new) se, v_cs)
 simplifyReshapeReplicate _ _ _ = Nothing
 
+simplifyReshapeIota :: SimpleRule lore
+simplifyReshapeIota defOf _ (Reshape newshape v)
+  | Just (BasicOp (Iota _ offset stride it), v_cs) <- defOf v,
+    [n] <- newDims newshape =
+      Just (Iota n offset stride it, v_cs)
+simplifyReshapeIota _ _ _ = Nothing
 
 improveReshape :: SimpleRule lore
 improveReshape _ seType (Reshape newshape v)
@@ -1212,6 +1197,25 @@ ruleBasicOp vtable pat (StmAux cs _) (Rotate offsets1 v)
       certifying (cs<>v_cs) $
         letBind_ pat $ BasicOp $ Rotate offsets v2
         where add x y = letSubExp "offset" $ BasicOp $ BinOp (Add Int32) x y
+
+-- If we see an Update with a scalar where the value to be written is
+-- the result of indexing some other array, then we convert it into an
+-- Update with a slice of that array.  This matters when the arrays
+-- are far away (on the GPU, say), because it avoids a copy of the
+-- scalar to and from the host.
+ruleBasicOp vtable pat (StmAux cs_x _) (Update arr_x slice_x (Var v))
+  | Just _ <- sliceIndices slice_x,
+    Just (Index arr_y slice_y, cs_y) <- ST.lookupBasicOp v vtable,
+    ST.available arr_y vtable,
+    -- XXX: we should check for proper aliasing here instead.
+    arr_y /= arr_x,
+    Just (slice_x_bef, DimFix i, []) <- focusNth (length slice_x - 1) slice_x,
+    Just (slice_y_bef, DimFix j, []) <- focusNth (length slice_y - 1) slice_y = do
+      let slice_x' = slice_x_bef ++ [DimSlice i (intConst Int32 1) (intConst Int32 1)]
+          slice_y' = slice_y_bef ++ [DimSlice j (intConst Int32 1) (intConst Int32 1)]
+      v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
+      certifying (cs_x <> cs_y) $
+        letBind_ pat $ BasicOp $ Update arr_x slice_x' $ Var v'
 
 ruleBasicOp _ _ _ _ =
   cannotSimplify

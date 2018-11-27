@@ -122,6 +122,8 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
     | otherwise =
         braces (commasep $ map ppField $ M.toList fs)
     where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
+  ppr (ArrayEnumElem cs _) =
+    cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr = pprPrec 0
@@ -140,6 +142,8 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
     parens (pprName v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
   pprPrec p (Arrow _ Nothing t1 t2) =
     parensIf (p > 0) $ pprPrec 1 t1 <+> text "->" <+> ppr t2
+  pprPrec _ (Enum cs) =
+    cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim as) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
@@ -156,6 +160,8 @@ instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
   ppr (TEArrow (Just v) t1 t2 _) = parens v' <+> text "->" <+> ppr t2
     where v' = pprName v <> colon <+> ppr t1
   ppr (TEArrow Nothing t1 t2 _) = ppr t1 <+> text "->" <+> ppr t2
+  ppr (TEEnum cs _) =
+    cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
 
 instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = ppr $ ShapeDecl [d]
@@ -315,10 +321,15 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "loop" <+> spread (map ppr tparams ++ [ppr pat]) <+>
     equals <+> ppr initexp <+> ppr form <+> text "do" </>
     indent 2 (ppr loopbody)
+  pprPrec _ (VConstr0 n _ _) = text "#" <> ppr n
+  pprPrec _ (Match e cs _ _) = text "match" <+> ppr e </> ppr cs
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e
   ppr (RecordFieldImplicit name _ _) = pprName name
+
+instance (Eq vn, IsName vn, Annot f) => Pretty (CaseBase f vn) where
+  ppr (CasePat p e _) = ppr p <+> text "->" <+> ppr e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
   ppr (For i ubound) =
@@ -340,6 +351,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
   ppr (Wildcard t _)            = case unAnnot t of
                                     Just t' -> parens $ text "_" <> colon <+> ppr t'
                                     Nothing -> text "_"
+  ppr (PatternLit e _ _)        = ppr e
 
 ppAscription :: (Eq vn, IsName vn, Annot f) => Maybe (TypeDeclBase f vn) -> Doc
 ppAscription Nothing  = mempty
@@ -349,12 +361,13 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ProgBase f vn) where
   ppr = stack . punctuate line . map ppr . progDecs
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (DecBase f vn) where
-  ppr (ValDec dec)     = ppr dec
-  ppr (TypeDec dec)    = ppr dec
-  ppr (SigDec sig)     = ppr sig
-  ppr (ModDec sd)      = ppr sd
-  ppr (OpenDec x _ _)  = text "open" <+> ppr x
-  ppr (LocalDec dec _) = text "local" <+> ppr dec
+  ppr (ValDec dec)      = ppr dec
+  ppr (TypeDec dec)     = ppr dec
+  ppr (SigDec sig)      = ppr sig
+  ppr (ModDec sd)       = ppr sd
+  ppr (OpenDec x _)     = text "open" <+> ppr x
+  ppr (LocalDec dec _)  = text "local" <+> ppr dec
+  ppr (ImportDec x _ _) = text "import" <+> ppr x
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ModExpBase f vn) where
   ppr (ModVar v _) = ppr v

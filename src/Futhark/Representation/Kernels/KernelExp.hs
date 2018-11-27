@@ -438,8 +438,9 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
 instance ST.IndexOp (KernelExp lore) where
 
 instance Aliased lore => UsageInOp (KernelExp lore) where
-  usageInOp (Combine _ _ _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
+  usageInOp (Combine cspace _ _ body) =
+    mconcat $ map UT.consumedUsage $ S.toList (consumedInBody body) <>
+    [ arr | (_, _, arr) <- cspaceScatter cspace ]
   usageInOp _ = mempty
 
 instance OpMetrics (Op lore) => OpMetrics (KernelExp lore) where
@@ -478,10 +479,12 @@ typeCheckKernelExp (Combine cspace@(CombineSpace scatter dims) ts aspace body) =
     forM_ ts_is $ \ts_i -> unless (Prim int32 == ts_i) $
       TC.bad $ TC.TypeError "Combine: index return type must be i32."
 
-    forM_ (zip (chunks as_ns ts_vs) scatter) $ \(ts_vs', (aw, _, a)) -> do
+    to_consume <- forM (zip (chunks as_ns ts_vs) scatter) $ \(ts_vs', (aw, _, a)) -> do
       TC.require [Prim int32] aw
       forM_ ts_vs' $ \ts_v -> TC.requireI [ts_v `arrayOfRow` aw] a
-      TC.consume =<< TC.lookupAliases a
+      return a
+    -- Consume all at once because it is valid to do two scatters to the same array.
+    TC.consume . mconcat =<< mapM TC.lookupAliases to_consume
 
     mapM_ TC.checkType ts
     mapM_ (TC.requireI [Prim int32]) a_is

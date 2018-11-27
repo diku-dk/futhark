@@ -32,6 +32,9 @@ jobs:
     - stack build alex happy
     - stack --no-terminal test --only-dependencies -j 3
   - stage: deps
+    env: BUILD=stack STACK_YAML=stack-lts-12.11.yaml
+    script: *1
+  - stage: deps
     env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
     script: *1
   - stage: compiler
@@ -39,16 +42,22 @@ jobs:
     script: &2
     - travis_wait 30 stack --no-terminal test -j 1
   - stage: compiler
+    env: BUILD=stack STACK_YAML=stack-lts-12.11.yaml
+    script: *2
+  - stage: compiler
     env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
     script: *2
+  - stage: style
+    env: BUILD=stack STACK_YAML=stack-lts-12.11.yaml
+    script:
+    - stack install hlint --fast
+    - tools/style-check.sh src
   - stage: tests
     env: BUILD=stack STACK_YAML=stack.yaml
     script:
     - stack install
     - futhark-test --no-terminal tests examples
     - "(cd pkgtests; ./test.sh)"
-    - stack install hlint --fast
-    - tools/style-check.sh src
   - stage: deploy
     env: BUILD=stack STACK_YAML=stack.yaml
     if: tag =~ ^v

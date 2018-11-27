@@ -374,6 +374,15 @@ transformExp (Unsafe e1 loc) =
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 
+transformExp e@VConstr0{} = return e
+transformExp (Match e cs t loc) =
+  Match <$> transformExp e <*> mapM transformCase cs <*> pure t <*> pure loc
+
+transformCase :: Case -> MonoM Case
+transformCase (CasePat p e loc) = do
+  (p', rr) <- expandRecordPattern p
+  CasePat <$> pure p' <*> withRecordReplacements rr (transformExp e) <*> pure loc
+
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
 transformDimIndex (DimFix e) = DimFix <$> transformExp e
 transformDimIndex (DimSlice me1 me2 me3) =
@@ -454,6 +463,7 @@ expandRecordPattern (Wildcard t loc) = return (Wildcard t loc, mempty)
 expandRecordPattern (PatternAscription pat td loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternAscription pat' td loc, rr)
+expandRecordPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
 
 -- | Monomorphize a polymorphic function at the types given in the instance
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
@@ -515,18 +525,20 @@ typeSubsts t1@Array{} t2@Array{}
   | Just t1' <- peelArray (arrayRank t1) t1,
     Just t2' <- peelArray (arrayRank t1) t2 =
       typeSubsts t1' t2'
+typeSubsts Enum{} Enum{} = mempty
 typeSubsts t1 t2 = error $ unlines ["typeSubsts: mismatched types:", pretty t1, pretty t2]
 
 -- | Perform a given substitution on the types in a pattern.
 substPattern :: (PatternType -> PatternType) -> Pattern -> Pattern
 substPattern f pat = case pat of
-  TuplePattern pats loc      -> TuplePattern (map (substPattern f) pats) loc
-  RecordPattern fs loc       -> RecordPattern (map substField fs) loc
+  TuplePattern pats loc       -> TuplePattern (map (substPattern f) pats) loc
+  RecordPattern fs loc        -> RecordPattern (map substField fs) loc
     where substField (n, p) = (n, substPattern f p)
-  PatternParens p loc        -> PatternParens (substPattern f p) loc
-  Id vn (Info tp) loc        -> Id vn (Info $ f tp) loc
-  Wildcard (Info tp) loc     -> Wildcard (Info $ f tp) loc
-  PatternAscription p td loc -> PatternAscription (substPattern f p) td loc
+  PatternParens p loc         -> PatternParens (substPattern f p) loc
+  Id vn (Info tp) loc         -> Id vn (Info $ f tp) loc
+  Wildcard (Info tp) loc      -> Wildcard (Info $ f tp) loc
+  PatternAscription p td loc  -> PatternAscription (substPattern f p) td loc
+  PatternLit e (Info tp) loc  -> PatternLit e (Info $ f tp) loc
 
 toPolyBinding :: ValBind -> PolyBinding
 toPolyBinding (ValBind _ name retdecl (Info rettype) tparams params body _ loc) =

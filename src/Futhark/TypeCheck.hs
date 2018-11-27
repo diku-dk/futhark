@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, ScopedTypeVariables #-}
+{-# LANGUAGE DefaultSignatures #-}
 -- | The type checker checks whether the program is type-consistent.
 module Futhark.TypeCheck
   ( -- * Interface
@@ -12,6 +13,7 @@ module Futhark.TypeCheck
   , context
   , message
   , Checkable (..)
+  , CheckableOp (..)
   , lookupVar
   , lookupAliases
   , Occurences
@@ -1082,17 +1084,48 @@ requirePrimExp t e = context ("in PrimExp " ++ pretty e) $ do
   unless (primExpType e == t) $ bad $ TypeError $
     pretty e ++ " must have type " ++ pretty t
 
+class Attributes lore => CheckableOp lore where
+  checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
+
 -- | The class of lores that can be type-checked.
-class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where
+class (Attributes lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable lore where
   checkExpLore :: ExpAttr lore -> TypeM lore ()
   checkBodyLore :: BodyAttr lore -> TypeM lore ()
   checkFParamLore :: VName -> FParamAttr lore -> TypeM lore ()
   checkLParamLore :: VName -> LParamAttr lore -> TypeM lore ()
   checkLetBoundLore :: VName -> LetAttr lore -> TypeM lore ()
   checkRetType :: [RetType lore] -> TypeM lore ()
-  checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
   matchPattern :: Pattern (Aliases lore) -> Exp (Aliases lore) -> TypeM lore ()
   primFParam :: VName -> PrimType -> TypeM lore (FParam (Aliases lore))
-  primLParam :: VName -> PrimType -> TypeM lore (LParam (Aliases lore))
   matchReturnType :: [RetType lore] -> Result -> TypeM lore ()
   matchBranchType :: [BranchType lore] -> Body (Aliases lore) -> TypeM lore ()
+
+  default checkExpLore :: ExpAttr lore ~ () => ExpAttr lore -> TypeM lore ()
+  checkExpLore = return
+
+  default checkBodyLore :: BodyAttr lore ~ () => BodyAttr lore -> TypeM lore ()
+  checkBodyLore = return
+
+  default checkFParamLore :: FParamAttr lore ~ DeclType => VName -> FParamAttr lore -> TypeM lore ()
+  checkFParamLore _ = checkType
+
+  default checkLParamLore :: LParamAttr lore ~ Type => VName -> LParamAttr lore -> TypeM lore ()
+  checkLParamLore _ = checkType
+
+  default checkLetBoundLore :: LetAttr lore ~ Type => VName -> LetAttr lore -> TypeM lore ()
+  checkLetBoundLore _ = checkType
+
+  default checkRetType :: RetType lore ~ DeclExtType => [RetType lore] -> TypeM lore ()
+  checkRetType = mapM_ checkExtType . retTypeValues
+
+  default matchPattern :: Pattern (Aliases lore) -> Exp (Aliases lore) -> TypeM lore ()
+  matchPattern pat = matchExtPattern pat <=< expExtType
+
+  default primFParam :: FParamAttr lore ~ DeclType => VName -> PrimType -> TypeM lore (FParam (Aliases lore))
+  primFParam name t = return $ Param name (Prim t)
+
+  default matchReturnType :: RetType lore ~ DeclExtType => [RetType lore] -> Result -> TypeM lore ()
+  matchReturnType = matchExtReturnType . map fromDecl
+
+  default matchBranchType :: BranchType lore ~ ExtType => [BranchType lore] -> Body (Aliases lore) -> TypeM lore ()
+  matchBranchType = matchExtBranchType

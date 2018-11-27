@@ -9,11 +9,59 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-  * The compiler itself is about 10% faster.
+  * Now warns when `/futlib/...` files are redundantly imported.
+
+  * `futharki` now prints warnings for files that are ":load"ed.
+
+  * The compiler now warns when entry points are declared with types
+    that will become unnamed and opaque, and thus impossible provide
+    from the outside.
+
+  * Type variables invented by the type checker will now have a
+    unicode subscript to distinguish them from type parameters
+    originating in the source code.
+
+  * `futhark-test` and `futhark-bench` now support generating random
+    test data.
 
 ### Removed
 
 ### Changed
+
+  * Entry points that accept a single tuple-typed parameter are no
+    longer silently rewritten to accept multiple parameters.
+
+### Fixed
+
+  * The `:type` command in `futharki` can now handle polymorphic
+    expressions (#669).
+
+## [0.7.4]
+
+### Added
+
+  * Support type parameters for operator specs defined with `val`.
+
+### Fixed
+
+  * Fixed nasty defunctionalisation bug (#661).
+
+  * 'cabal`/`stack` `sdist` works now.
+
+## [0.7.3]
+
+### Added
+
+  * Significant performance changes: there is now a constant extra
+    compilation overhead (less than 200ms on most machines).  However,
+    the rest of the compiler is 30-40% faster (or more in some cases).
+
+  * A warning when ambiguously typed expressions are assigned a
+    default (`i32` or `f64`).
+
+  * In-place updates and record updates are now written with `=`
+    instead of `<-`.  The latter is deprecated and will be removed in
+    the next major version (#650).
 
 ### Fixed
 
@@ -27,6 +75,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     languages do.
 
   * `futhark-bench` now writes "μs" instead of "us".
+
+  * Type inference for infix operators now works properly.
 
 ## [0.7.2]
 

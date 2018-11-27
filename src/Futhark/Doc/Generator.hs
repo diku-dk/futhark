@@ -275,7 +275,7 @@ synopsisDec visible fm dec = case dec of
   ModDec m -> synopsisMod fm m
   ValDec v -> synopsisValBind v
   TypeDec t -> synopsisType t
-  OpenDec x (Info _names) _
+  OpenDec x _
     | Just opened <- synopsisOpened x -> Just $ do
         opened' <- opened
         return $ fullRow $ keyword "open " <> opened'
@@ -285,7 +285,8 @@ synopsisDec visible fm dec = case dec of
   LocalDec (SigDec s) _
     | sigName s `S.member` visible ->
         synopsisModType (keyword "local" <> " ") s
-  LocalDec _ _ -> Nothing
+  LocalDec{} -> Nothing
+  ImportDec{} -> Nothing
 
 synopsisOpened :: ModExp -> Maybe (DocM Html)
 synopsisOpened (ModVar qn _) = Just $ qualNameHtml qn
@@ -377,6 +378,9 @@ synopsisValBindBind (name, BoundV tps t) = do
   t' <- typeHtml t
   return $ keyword "val " <> vnameHtml name <> joinBy " " tps' <> ": " <> t'
 
+prettyEnum :: [Name] -> Html
+prettyEnum cs = pipes $ map (("#"<>) . renderName) cs
+
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
   Prim et -> return $ primTypeHtml et
@@ -404,6 +408,7 @@ typeHtml t = case t of
         parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
       Nothing ->
         t1' <> " -> " <> t2'
+  Enum cs -> return $ prettyEnum cs
 
 prettyElem :: ArrayElemTypeBase (DimDecl VName) () -> DocM Html
 prettyElem (ArrayPrimElem et _) = return $ primTypeHtml et
@@ -418,6 +423,7 @@ prettyElem (ArrayRecordElem fs)
   where ppField (name, tp) = do
           tp' <- prettyRecordElem tp
           return $ toHtml (nameToString name) <> ": " <> tp'
+prettyElem (ArrayEnumElem cs _ ) = return $ braces $ prettyEnum cs
 
 prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) () -> DocM Html
 prettyRecordElem (RecordArrayElem et) = prettyElem et
@@ -485,10 +491,10 @@ synopsisSpec :: SpecBase Info VName -> DocM Html
 synopsisSpec spec = case spec of
   TypeAbbrSpec tpsig ->
     fullRow <$> typeBindHtml (vnameSynopsisDef $ typeAlias tpsig) tpsig
-  TypeSpec Unlifted name ps _ _ ->
-    return $ fullRow $ keyword "type " <> vnameSynopsisDef name <> joinBy " " (map typeParamHtml ps)
-  TypeSpec Lifted name ps _ _ ->
-    return $ fullRow $ keyword "type" <> "^" <> vnameSynopsisDef name <> joinBy " " (map typeParamHtml ps)
+  TypeSpec l name ps _ _ ->
+    return $ fullRow $ keyword l' <> vnameSynopsisDef name <> mconcat (map ((" "<>) . typeParamHtml) ps)
+    where l' = case l of Unlifted -> "type "
+                         Lifted   -> "type^ "
   ValSpec name tparams rettype _ _ -> do
     let tparams' = map typeParamHtml tparams
     rettype' <- noLink (map typeParamName tparams) $
@@ -529,6 +535,7 @@ typeExpHtml e = case e of
         parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
       Nothing ->
         t1' <> " -> " <> t2'
+  TEEnum cs _ -> return $ prettyEnum cs
 
 qualNameHtml :: QualName VName -> DocM Html
 qualNameHtml (QualName names vname@(VName name tag)) =
@@ -703,6 +710,7 @@ describeDec visible (LocalDec (SigDec (SigBind name se doc _)) _)
   return $ keyword "local module type " <> name'
 
 describeDec _ LocalDec{} = Nothing
+describeDec _ ImportDec{} = Nothing
 
 valBindWhat :: ValBind -> IndexWhat
 valBindWhat vb =

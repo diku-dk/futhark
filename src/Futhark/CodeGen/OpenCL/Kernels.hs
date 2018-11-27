@@ -91,13 +91,52 @@ mapTranspose :: C.ToIdent a => KernelTarget -> a -> C.Type -> TransposeType
 mapTranspose target kernel_name elem_type transpose_type =
   case transpose_type of
     TransposeNormal ->
-      bigKernel []
-      [C.cexp|get_global_id(0)|]
-      [C.cexp|get_global_id(1)|]
-      [C.cexp|get_group_id(1) * FUT_BLOCK_DIM + get_local_id(0)|]
-      [C.cexp|get_group_id(0) * FUT_BLOCK_DIM + get_local_id(1)|]
+      mkTranspose [] [C.citems|
+        // This kernel is optimized to ensure all global reads and writes are
+        // coalesced, and to avoid bank conflicts in shared memory.  Each
+        // thread group transposes a 2D tile of FUT_BLOCK_DIM*2 by
+        // FUT_BLOCK_DIM*2 elements. The size of a thread group is
+        // FUT_BLOCK_DIM/2 by FUT_BLOCK_DIM*2, meaning that each thread will
+        // process 4 elements in a 2D tile.  The shared memory array containing
+        // the 2D tile consists of FUT_BLOCK_DIM*2 by FUT_BLOCK_DIM*2+1
+        // elements. Padding each row with an additional element prevents bank
+        // conflicts from occuring when the tile is accessed column-wise.
+        //
+        // Note that input_size and output_size may not equal width*height if
+        // we are dealing with a truncated array - this happens sometimes for
+        // coalescing optimisations.
+        const uint tile_dim = 2 * FUT_BLOCK_DIM;
+        const uint elems_per_thread = 4;
+        uint x_index = get_global_id(0);
+        uint y_index = get_group_id(1) * tile_dim + get_local_id(1);
+        if (x_index < width) {
+          for (int i = 0; i < tile_dim; i += tile_dim/elems_per_thread)
+          {
+            uint index_in = (y_index + i) * width + x_index;
+            if (y_index + i < height && index_in < input_size)
+            {
+              block[(get_local_id(1) + i)*(tile_dim+1)+get_local_id(0)] = idata[index_in];
+            }
+          }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+
+        x_index = get_group_id(1) * tile_dim + get_local_id(0);
+        y_index = get_group_id(0) * tile_dim + get_local_id(1);
+        if (x_index < height)
+        {
+          for (int i = 0; i < tile_dim; i += tile_dim/elems_per_thread)
+          {
+            uint index_out = (y_index + i) * height + x_index;
+            if (y_index + i < width && index_out < output_size)
+            {
+              odata[index_out] = block[get_local_id(0)*(tile_dim+1)+get_local_id(1)+i];
+            }
+          }
+        }
+      |]
     TransposeLowWidth ->
-      bigKernel [C.cparams|uint muly|]
+      mkTranspose [C.cparams|uint muly|] $ lowDimBody
       [C.cexp|get_group_id(0) * FUT_BLOCK_DIM + (get_local_id(0) / muly)|]
       [C.cexp|get_group_id(1) * FUT_BLOCK_DIM * muly
            + get_local_id(1)
@@ -108,7 +147,7 @@ mapTranspose target kernel_name elem_type transpose_type =
            + (get_local_id(1) % muly) * FUT_BLOCK_DIM|]
       [C.cexp|get_group_id(0) * FUT_BLOCK_DIM + (get_local_id(1) / muly)|]
     TransposeLowHeight ->
-      bigKernel [C.cparams|uint mulx|]
+      mkTranspose [C.cparams|uint mulx|] $ lowDimBody
       [C.cexp|get_group_id(0) * FUT_BLOCK_DIM * mulx
            + get_local_id(0)
            + (get_local_id(1) % mulx) * FUT_BLOCK_DIM
@@ -122,70 +161,53 @@ mapTranspose target kernel_name elem_type transpose_type =
     TransposeSmall ->
       smallKernel
   where
-    bigKernel extraparams x_in_index y_in_index x_out_index y_out_index =
+    mkTranspose extra_params body =
       [C.cfun|
-       // This kernel is optimized to ensure all global reads and writes are coalesced,
-       // and to avoid bank conflicts in shared memory.  The shared memory array is sized
-       // to (BLOCK_DIM+1)*BLOCK_DIM.  This pads each row of the 2D block in shared memory
-       // so that bank conflicts do not occur when threads address the array column-wise.
-       //
-       // Note that input_size/output_size may not equal width*height if we are dealing with
-       // a truncated array - this happens sometimes for coalescing optimisations.
        __kernel void $id:kernel_name($params:params) {
          $items:param_init
-         uint x_index;
-         uint y_index;
-         uint our_array_offset;
-
-         // Adjust the input and output arrays with the basic offset.
          odata += odata_offset/sizeof($ty:elem_type);
          idata += idata_offset/sizeof($ty:elem_type);
-
-         // Adjust the input and output arrays for the third dimension.
-         our_array_offset = get_global_id(2) * width * height;
+         uint our_array_offset = get_group_id(2) * width * height;
          odata += our_array_offset;
          idata += our_array_offset;
-
-         // read the matrix tile into shared memory
-         x_index = $exp:x_in_index;
-         y_index = $exp:y_in_index;
-
+         $items:body
+       }|]
+        where params = [C.cparams|__global $ty:elem_type *odata,
+                             uint odata_offset,
+                             __global $ty:elem_type *idata,
+                             uint idata_offset,
+                             uint width,
+                             uint height,
+                             uint input_size,
+                             uint output_size
+                             |] ++ extra_params ++ shared_param
+              shared_param = case target of
+                TargetOpenCL -> [C.cparams|__local $ty:elem_type* block|]
+                TargetCuda -> []
+              param_init = case target of
+                TargetOpenCL -> []
+                TargetCuda ->
+                  [C.citems|volatile $ty:elem_type *block
+                    = ($ty:elem_type *)shared_mem;|]
+    lowDimBody x_in_index y_in_index x_out_index y_out_index =
+      [C.citems|
+         uint x_index = $exp:x_in_index;
+         uint y_index = $exp:y_in_index;
          uint index_in = y_index * width + x_index;
-
          if(x_index < width && y_index < height && index_in < input_size)
          {
-             block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] = idata[index_in];
+           block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] = idata[index_in];
          }
-
          barrier(CLK_LOCAL_MEM_FENCE);
 
-         // Scatter the transposed matrix tile to global memory.
          x_index = $exp:x_out_index;
          y_index = $exp:y_out_index;
-
          uint index_out = y_index * height + x_index;
-
          if(x_index < height && y_index < width && index_out < output_size)
          {
-             odata[index_out] = block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
+           odata[index_out] = block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
          }
-       }|]
-           where params = [C.cparams|__global $ty:elem_type *odata,
-                                uint odata_offset,
-                                __global $ty:elem_type *idata,
-                                uint idata_offset,
-                                uint width,
-                                uint height,
-                                uint input_size,
-                                uint output_size|] ++ extraparams
-                                ++ shared_param
-                 shared_param = case target of
-                   TargetOpenCL -> [C.cparams|__local $ty:elem_type* block|]
-                   TargetCuda -> []
-                 param_init = case target of
-                   TargetOpenCL -> []
-                   TargetCuda -> [C.citems|volatile $ty:elem_type *block = ($ty:elem_type *)shared_mem;|]
-
+      |]
     smallKernel =
       [C.cfun|
          __kernel void $id:kernel_name(__global $ty:elem_type *odata,

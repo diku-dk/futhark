@@ -10,4 +10,4 @@
 -- }
 
 let main [n] (a: *[][n]i32) (i: i32) (v: i32): [][]i32 =
-  a with [i] <- replicate n v
+  a with [i] = replicate n v

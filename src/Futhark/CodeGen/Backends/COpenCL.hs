@@ -124,12 +124,22 @@ cliOptions = [ Option { optionLongName = "platform"
                       }
              ]
 
+-- We detect the special case of writing a constant and turn it into a
+-- non-blocking write.  This may be slightly faster, as it prevents
+-- unnecessary synchronisation of the OpenCL command queue, and
+-- writing a constant is fairly common.  This is only possible because
+-- we can give the constant infinite lifetime (with 'static'), which
+-- is not the case for ordinary variables.
 writeOpenCLScalar :: GC.WriteScalar OpenCL ()
 writeOpenCLScalar mem i t "device" _ val = do
   val' <- newVName "write_tmp"
-  GC.stm [C.cstm|{$ty:t $id:val' = $exp:val;
+  let (decl, blocking) =
+        case val of
+          C.Const{} -> ([C.citem|static $ty:t $id:val' = $exp:val;|], [C.cexp|CL_FALSE|])
+          _         -> ([C.citem|$ty:t $id:val' = $exp:val;|], [C.cexp|CL_TRUE|])
+  GC.stm [C.cstm|{$item:decl
                   OPENCL_SUCCEED_OR_RETURN(
-                    clEnqueueWriteBuffer(ctx->opencl.queue, $exp:mem, CL_TRUE,
+                    clEnqueueWriteBuffer(ctx->opencl.queue, $exp:mem, $exp:blocking,
                                          $exp:i, sizeof($ty:t),
                                          &$id:val',
                                          0, NULL, NULL));
