@@ -58,6 +58,8 @@ unifyTypesU uf (Record ts1) (Record ts2)
       (M.intersectionWith (,) ts1 ts2)
 unifyTypesU uf (Arrow as1 mn1 t1 t1') (Arrow as2 _ t2 t2') =
   Arrow (as1 <> as2) mn1 <$> unifyTypesU (flip uf) t1 t2 <*> unifyTypesU uf t1' t2'
+unifyTypesU _ e1@Enum{} e2@Enum{}
+  | e1 == e2 = Just e1
 unifyTypesU _ _ _ = Nothing
 
 unifyTypeArgs :: (Monoid als, Eq als, ArrayDim dim) =>
@@ -85,6 +87,9 @@ unifyArrayElemTypes uf (ArrayRecordElem et1) (ArrayRecordElem et2)
   | sort (M.keys et1) == sort (M.keys et2) =
     ArrayRecordElem <$>
     traverse (uncurry $ unifyRecordArrayElemTypes uf) (M.intersectionWith (,) et1 et2)
+unifyArrayElemTypes _ (ArrayEnumElem cs1 als1) (ArrayEnumElem cs2 als2)
+  | cs1 == cs2 =
+     Just $ ArrayEnumElem cs1 (als1 <> als2)
 unifyArrayElemTypes _ _ _ =
   Nothing
 
@@ -170,6 +175,7 @@ checkTypeExp (TEUnique t loc) = do
         mayContainArray (Record fs) = any mayContainArray fs
         mayContainArray TypeVar{} = True
         mayContainArray Arrow{} = False
+        mayContainArray Enum{} = False
 checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', st1, _) <- checkTypeExp t1
   bindSpaced [(Term, v)] $ do
@@ -227,6 +233,12 @@ checkTypeExp ote@TEApply{} = do
           throwError $ TypeError tloc $ "Type argument " ++ pretty a ++
           " not valid for a type parameter " ++ pretty p
 
+checkTypeExp t@(TEEnum names loc) = do
+  unless (sort names == sort (nub names)) $
+    throwError $ TypeError loc $ "Duplicate constructors in " ++ pretty t
+  unless (length names <= 256) $
+    throwError $ TypeError loc "Enums must have 256 or fewer constructors."
+  return (TEEnum names loc, Enum names,  Unlifted)
 
 checkNamedDim :: MonadTypeChecker m =>
                  SrcLoc -> QualName Name -> m (QualName VName)
@@ -249,6 +261,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
         check (TuplePattern ps _) = mapM_ check ps
         check (RecordPattern fs _) = mapM_ (check . snd) fs
         check (PatternAscription p _ _) = check p
+        check PatternLit{} = return ()
 
         seen v loc = do
           already <- gets $ M.lookup v
@@ -276,6 +289,7 @@ checkForDuplicateNamesInType = checkForDuplicateNames . pats
         pats (TEApply t1 (TypeArgExpType t2) _) = pats t1 ++ pats t2
         pats (TEApply t1 TypeArgExpDim{} _) = pats t1
         pats TEVar{} = []
+        pats TEEnum{} = []
 
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]
@@ -323,6 +337,7 @@ substituteTypes substs ot = case ot of
     Record $ fmap (substituteTypes substs) ts
   Arrow als v t1 t2 ->
     Arrow als v (substituteTypes substs t1) (substituteTypes substs t2)
+  Enum cs -> Enum cs
   where nope = error "substituteTypes: Cannot create array after substitution."
 
         substituteTypesInArrayElem (ArrayPrimElem t ()) =
@@ -337,6 +352,8 @@ substituteTypes substs ot = case ot of
           Record ts'
           where ts' = fmap (substituteTypes substs .
                             fst . recordArrayElemToType) ts
+        substituteTypesInArrayElem (ArrayEnumElem cs ()) =
+          Enum cs
 
         substituteInTypeArg (TypeArgDim d loc) =
           TypeArgDim (substituteInDim d) loc
@@ -405,6 +422,7 @@ substTypesAny lookupSubst ot = case ot of
   Record ts ->  Record $ fmap (substTypesAny lookupSubst) ts
   Arrow als v t1 t2 ->
     Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
+  Enum names -> Enum names
 
   where nope = error "substTypesAny: Cannot create array after substitution."
 
@@ -416,6 +434,7 @@ substTypesAny lookupSubst ot = case ot of
         subsArrayElem (ArrayRecordElem ts) =
           let ts' = fmap recordArrayElemToType ts
           in (Record $ fmap (substTypesAny lookupSubst . fst) ts', foldMap snd ts')
+        subsArrayElem (ArrayEnumElem cs as) = (Enum cs, as)
 
         subsTypeArg (TypeArgType t loc) =
           TypeArgType (substTypesAny lookupSubst t) loc

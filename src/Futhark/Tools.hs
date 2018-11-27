@@ -21,7 +21,6 @@ where
 
 import Control.Monad.Identity
 import Data.Semigroup ((<>))
-import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST
 import Futhark.Representation.SOACS.SOAC
@@ -131,48 +130,42 @@ dissectScrema pat w (ScremaForm (scan_lam, scan_nes)
   scan <- scanSOAC scan_lam scan_nes
   letBindNames_ scan_res $ Op $ Screma w scan to_scan
 
-sequentialStreamWholeArrayStms :: Bindable lore =>
-                                  SubExp -> [SubExp]
-                               -> LambdaT lore -> [VName]
-                               -> (Stms lore, [SubExp])
-sequentialStreamWholeArrayStms width accs lam arrs =
-  let (chunk_param, acc_params, arr_params) =
-        partitionChunkedFoldParameters (length accs) $ lambdaParams lam
-      chunk_bnd = mkLet [] [paramIdent chunk_param] $ BasicOp $ SubExp width
-      acc_bnds = [ mkLet [] [paramIdent acc_param] $ BasicOp $ SubExp acc
-                 | (acc_param, acc) <- zip acc_params accs ]
-      arr_bnds = [ mkLet [] [paramIdent arr_param] $
-                   BasicOp $ Reshape (map DimCoercion $ arrayDims $ paramType arr_param) arr
-                 | (arr_param, arr) <- zip arr_params arrs ]
-
-  in (oneStm chunk_bnd <>
-      stmsFromList acc_bnds <>
-      stmsFromList arr_bnds <>
-      bodyStms (lambdaBody lam),
-
-      bodyResult $ lambdaBody lam)
-
 sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
                               Pattern (Lore m)
                            -> SubExp -> [SubExp]
                            -> LambdaT (Lore m) -> [VName]
                            -> m ()
-sequentialStreamWholeArray pat width nes fun arrs = do
-  let (body_bnds,res) = sequentialStreamWholeArrayStms width nes fun arrs
-      reshapeRes t (Var v)
-        | null (arrayDims t) = BasicOp $ SubExp $ Var v
-        | otherwise          = shapeCoerce (arrayDims t) v
-      reshapeRes _ se        = BasicOp $ SubExp se
-      res_bnds =
-        [ mkLet [] [ident] $ reshapeRes (identType ident) se
-        | (ident,se) <- zip (patternValueIdents pat) res]
+sequentialStreamWholeArray pat w nes lam arrs = do
+  -- We just set the chunksize to w and inline the lambda body.  There
+  -- is no difference between parallel and sequential streams here.
+  let (chunk_size_param, fold_params, arr_params) =
+        partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
-  addStms body_bnds
-  shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
-  forM_ (M.toList shapemap) $ \(name,se) ->
-    when (name `elem` patternContextNames pat) $
-      addStm =<< mkLetNames [name] (BasicOp $ SubExp se)
-  addStms $ stmsFromList res_bnds
+  -- The chunk size is the full size of the array.
+  letBindNames_ [paramName chunk_size_param] $ BasicOp $ SubExp w
+
+  -- The accumulator parameters are initialised to the neutral element.
+  forM_ (zip fold_params nes) $ \(p, ne) ->
+    letBindNames [paramName p] $ BasicOp $ SubExp ne
+
+  -- Finally, the array parameters are set to the arrays (but reshaped
+  -- to make the types work out; this will be simplified rapidly).
+  forM_ (zip arr_params arrs) $ \(p, arr) ->
+    letBindNames [paramName p] $ BasicOp $
+      Reshape (map DimCoercion $ arrayDims $ paramType p) arr
+
+  -- Then we just inline the lambda body.
+  mapM_ addStm $ bodyStms $ lambdaBody lam
+
+  -- The number of results in the body matches exactly the size (and
+  -- order) of 'pat', so we bind them up here, again with a reshape to
+  -- make the types work out.
+  forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lam) $ \(pe, se) ->
+    case (arrayDims $ patElemType pe, se) of
+      (dims, Var v)
+        | not $ null dims ->
+            letBindNames_ [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
+      _ -> letBindNames_ [patElemName pe] $ BasicOp $ SubExp se
 
 partitionChunkedFoldParameters :: Int -> [Param attr]
                                -> (Param attr, [Param attr], [Param attr])

@@ -146,6 +146,8 @@ keyword s =
     "while"        -> WHILE
     "unsafe"       -> UNSAFE
     "assert"       -> ASSERT
+    "match"        -> MATCH
+    "case"         -> CASE
 
     _              -> ID $ nameFromText s
 
@@ -215,6 +217,7 @@ symbol [] q
   | nameToText q == "-" = NEGATE
   | nameToText q == "<" = LTH
   | nameToText q == "^" = HAT
+  | nameToText q == "|" = PIPE
   | otherwise = SYMBOL (leadingOperator q) [] q
 symbol qs q = SYMBOL (leadingOperator q) qs q
 
@@ -339,6 +342,7 @@ data Token = ID Name
            | NEGATE
            | LTH
            | HAT
+           | PIPE
 
            | IF
            | THEN
@@ -362,6 +366,8 @@ data Token = ID Name
            | VAL
            | OPEN
            | LOCAL
+           | MATCH
+           | CASE
 
            | DOC String
 

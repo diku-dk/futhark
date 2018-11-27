@@ -140,6 +140,8 @@ flattenPattern = flattenPattern'
           flattenPattern' $ E.TuplePattern (map snd $ sortFields $ M.fromList fs) loc
         flattenPattern' (E.PatternAscription p _ _) =
           flattenPattern' p
+        flattenPattern' (E.PatternLit _ t loc) =
+          flattenPattern' $ E.Wildcard t loc
 
 type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
 

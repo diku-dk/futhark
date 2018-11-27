@@ -40,7 +40,6 @@ module Futhark.Optimise.Simplify.Engine
        , isOp
        , isNotSafe
        , asksEngineEnv
-       , changed
        , askVtable
        , localVtable
 
@@ -167,8 +166,7 @@ runSimpleM (SimpleM m) simpl env src =
   let (x, (src', b), _) = runRWS m (simpl, env) (src, False)
   in ((x, b), src')
 
-subSimpleM :: (MonadFreshNames m,
-               SameScope outerlore lore,
+subSimpleM :: (SameScope outerlore lore,
                ExpAttr outerlore ~ ExpAttr lore,
                BodyAttr outerlore ~ BodyAttr lore,
                RetType outerlore ~ RetType lore,
@@ -177,14 +175,15 @@ subSimpleM :: (MonadFreshNames m,
            -> Env lore
            -> ST.SymbolTable (Wise outerlore)
            -> SimpleM lore a
-           -> m (a, Bool)
+           -> SimpleM outerlore a
 subSimpleM simpl env outer_vtable m = do
   let inner_vtable = ST.castSymbolTable outer_vtable
   src <- getNameSource
   let SimpleM m' = localVtable (<>inner_vtable) m
       (x, (src', b), _) = runRWS m' (simpl, env) (src, False)
   putNameSource src'
-  return (x, b)
+  when b changed
+  return x
 
 askEngineEnv :: SimpleM lore (Env lore)
 askEngineEnv = snd <$> ask
@@ -680,7 +679,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
               protectLoopHoisted ctx' val' (WhileLoop cond'))
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   ((loopstms, loopres), hoisted) <-
-    enterLoop $
+    enterLoop $ consumeMerge $
     bindFParams (ctxparams'++valparams') $ wrapbody $
     blockIf
     (hasFree boundnames `orIf` isConsumed
@@ -689,7 +688,12 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       return ((res, uses <> isDoLoopResult res), stms)
   loopbody' <- constructBody loopstms loopres
   return (DoLoop ctx' val' form' loopbody', hoisted)
-  where fparamnames = S.fromList (map (paramName . fst) $ ctx++val)
+  where fparamnames =
+          S.fromList (map (paramName . fst) $ ctx++val)
+        consumeMerge =
+          localVtable $ flip (foldl' (flip ST.consume)) consumed_by_merge
+        consumed_by_merge =
+          freeIn $ map snd $ filter (unique . paramDeclType . fst) val
 
 simplifyExp (Op op) = do (op', stms) <- simplifyOp op
                          return (Op op', stms)

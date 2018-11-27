@@ -199,10 +199,12 @@ newFutharkiState count maybe_file = runExceptT $ do
       return (imports, src', tenv, ienv')
 
     Just file -> do
-      (_, imports, src) <-
+      (ws, imports, src) <-
         badOnLeft =<< liftIO (runExceptT (readProgram file)
                               `Haskeline.catch` \(err::IOException) ->
                                  return (Left (ExternalError (T.pack $ show err))))
+      liftIO $ hPrint stderr ws
+
       let imp = T.mkInitialImport "."
       ienv1 <- foldM (\ctx -> badOnLeft <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
                map (fmap fileProg) imports
@@ -232,7 +234,7 @@ getPrompt = do
   return $ "[" ++ show i ++ "]> "
 
 mkOpen :: FilePath -> UncheckedDec
-mkOpen f = OpenDec (ModImport f NoInfo noLoc) NoInfo noLoc
+mkOpen f = OpenDec (ModImport f NoInfo noLoc) noLoc
 
 -- The ExceptT part is more of a continuation, really.
 newtype FutharkiM a =
@@ -318,7 +320,7 @@ onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case showErr (T.checkExp imports src tenv e) of
     Left err -> liftIO $ putStrLn err
-    Right e' -> do
+    Right (_, e') -> do
       r <- runInterpreter $ I.interpretExp ienv e'
       case r of
         Left err -> liftIO $ print err
@@ -392,7 +394,9 @@ typeCommand e = do
       (tenv, _) <- gets futharkiEnv
       case T.checkExp imports src tenv e' of
         Left err -> liftIO $ print err
-        Right e'' -> liftIO $ putStrLn $ pretty e' <> " : " <> pretty (typeOf e'')
+        Right (ps, e'') -> liftIO $ putStrLn $
+          pretty e' <> concatMap ((" "<>) . pretty) ps <>
+          " : " <> pretty (typeOf e'')
 
 unbreakCommand :: Command
 unbreakCommand _ = do

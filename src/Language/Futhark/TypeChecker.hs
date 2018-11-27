@@ -52,15 +52,16 @@ checkProg files src name prog =
 
 -- | Type check a single expression containing no type information,
 -- yielding either a type error or the same expression annotated with
--- type information.  See also 'checkProg'.
+-- type information.  Also returns a list of type parameters, which
+-- will be nonempty if the expression is polymorphic.  See also
+-- 'checkProg'.
 checkExp :: Imports
          -> VNameSource
          -> Env
          -> UncheckedExp
-         -> Either TypeError Exp
+         -> Either TypeError ([TypeParam], Exp)
 checkExp files src env e = do
-  (e', _, _) <- runTypeM env files' (mkInitialImport "") src $
-    checkOneExp e
+  (e', _, _) <- runTypeM env files' (mkInitialImport "") src $ checkOneExp e
   return e'
   where files' = M.map fileEnv $ M.fromList files
 
@@ -138,8 +139,8 @@ checkForDuplicateDecs =
           check Term name loc
 
         f OpenDec{} = return
-
         f LocalDec{} = return
+        f ImportDec{} = return
 
 bindingTypeParams :: [TypeParam] -> TypeM a -> TypeM a
 bindingTypeParams tparams = localEnv env
@@ -447,14 +448,20 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
   when (entry && any isTypeParam tparams') $
     throwError $ TypeError loc "Entry point functions may not be polymorphic."
 
-  when (entry && singleTuplePattern params') $
-    warn loc "This entry point accepts a *single* tuple-typed parameter, *not* multiple parameters.\nThis will be an error in the future."
-
   let (rettype_params, rettype') = unfoldFunType rettype
   when (entry && (any (not . patternOrderZero) params' ||
                   any (not . orderZero) rettype_params ||
                   not (orderZero rettype'))) $
     throwError $ TypeError loc "Entry point functions may not be higher-order."
+
+  case (entry, filter nastyParameter params') of
+    (True, p : _) -> warn loc $ "Entry point parameter\n\n  " <>
+                     pretty p <> "\n\nwill have an opaque type, so the entry point will likely not be callable."
+    _ -> return ()
+
+  when (entry && nastyReturnType maybe_tdecl' rettype) $
+    warn loc $ "Entry point return type\n\n  " <>
+    pretty rettype <> "\n\nwill have an opaque type, so the result will likely not be usable."
 
   return (mempty { envVtable =
                      M.singleton fname' $
@@ -464,9 +471,28 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                  },
            ValBind entry fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
 
-singleTuplePattern :: [Pattern] -> Bool
-singleTuplePattern [TuplePattern _ _] = True
-singleTuplePattern _                  = False
+nastyType :: Monoid als => TypeBase dim als -> Bool
+nastyType Prim{} = False
+nastyType t@Array{} = nastyType $ stripArray 1 t
+nastyType _ = True
+
+nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
+nastyReturnType _ (Arrow _ _ t1 t2) = nastyType t1 || nastyReturnType Nothing t2
+nastyReturnType te t
+  | Just ts <- isTupleRecord t =
+      case te of
+        Just (TEVar (QualName [] _) _) -> False
+        Just (TETuple tes _) -> or $ zipWith nastyType' (map Just tes) ts
+        _ -> any nastyType ts
+  | otherwise = nastyType' te t
+  where nastyType' (Just (TEVar (QualName [] _) _)) _ = False
+        nastyType' _ t' = nastyType t'
+
+nastyParameter :: Pattern -> Bool
+nastyParameter p = nastyType (patternType p) && not (ascripted p)
+  where ascripted (PatternAscription _ (TypeDecl (TEVar (QualName [] _) _) _) _) = True
+        ascripted (PatternParens p' _) = ascripted p'
+        ascripted _ = False
 
 checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
 checkOneDec (ModDec struct) = do
@@ -481,16 +507,19 @@ checkOneDec (TypeDec tdec) = do
   (tenv, tdec') <- checkTypeBind tdec
   return (mempty, tenv, TypeDec tdec')
 
-checkOneDec (OpenDec x NoInfo loc) = do
+checkOneDec (OpenDec x loc) = do
   (x_abs, x_env, x') <- checkModExpToEnv x
-  let names = S.toList $ allNamesInEnv x_env
-  return (x_abs,
-          x_env,
-          OpenDec x' (Info names) loc)
+  return (x_abs, x_env, OpenDec x' loc)
 
 checkOneDec (LocalDec d loc) = do
   (abstypes, env, d') <- checkOneDec d
   return (abstypes, env, LocalDec d' loc)
+
+checkOneDec (ImportDec name NoInfo loc) = do
+  (name', env) <- lookupImport loc name
+  when ("/futlib" `isPrefixOf` name) $
+    warn loc $ name ++ " is already implicitly imported."
+  return (mempty, env, ImportDec name (Info name') loc)
 
 checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb
@@ -828,6 +857,8 @@ newNamesForMTy orig_mty = do
           Prim t
         substituteInType (Record ts) =
           Record $ fmap substituteInType ts
+        substituteInType (Enum cs) =
+          Enum cs
         substituteInType (Array (ArrayPrimElem t ()) shape u) =
           Array (ArrayPrimElem t ()) (substituteInShape shape) u
         substituteInType (Array (ArrayPolyElem (TypeName qs v) targs ()) shape u) =
@@ -840,6 +871,8 @@ newNamesForMTy orig_mty = do
           in case arrayOf (Record ts') (substituteInShape shape) u of
             Just t' -> t'
             _ -> error "substituteInType: Cannot create array after substitution."
+        substituteInType (Array (ArrayEnumElem cs ()) shape u) =
+          Array (ArrayEnumElem cs ()) (substituteInShape shape) u
         substituteInType (Arrow als v t1 t2) =
           Arrow als v (substituteInType t1) (substituteInType t2)
 

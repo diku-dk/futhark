@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fmax-pmcheck-iterations=2500000#-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -17,6 +18,7 @@ import Data.Semigroup ((<>))
 import Data.List
 import Data.Loc
 import Data.Char (chr)
+import Data.Maybe
 
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
@@ -122,7 +124,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
     zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: E.ValBind -> InternaliseM ()
-generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ orig_params _ _ loc) =
+generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) =
   -- We remove all shape annotations, so there should be no constant
   -- parameters here.
   bindingParams [] (map E.patternNoShapeAnnotations params) $
@@ -141,14 +143,6 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ orig_params _ _ 
       I.FunDef (Just entry') (baseName ofname)
       (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
-
-  -- XXX: We massage the parameters a little bit to handle the case
-  -- where there is just a single parameter that is a tuple.  This is
-  -- wide-spread in existing Futhark code, although I'd like to get
-  -- rid of it.
-  where params = case orig_params of
-          [TuplePattern ps _] -> ps
-          _                   -> orig_params
 
 entryPoint :: [(E.Pattern,[I.FParam])]
            -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
@@ -421,15 +415,8 @@ internaliseExp desc e@E.Apply{} = do
            args' <- concat <$> mapM (internaliseExp "arg") args
            fst <$> funcall desc qfname args' loc
 
-internaliseExp desc (E.LetPat tparams pat e body loc) = do
-  ses <- internaliseExp desc e
-  t <- I.staticShapes <$> mapM I.subExpType ses
-  stmPattern tparams pat t $ \cm pat_names match -> do
-    mapM_ (uncurry (internaliseDimConstant loc)) cm
-    ses' <- match loc ses
-    forM_ (zip pat_names ses') $ \(v,se) ->
-      letBindNames_ [v] $ I.BasicOp $ I.SubExp se
-    internaliseExp desc body
+internaliseExp desc (E.LetPat tparams pat e body loc) =
+  internalisePat desc tparams pat e body loc (internaliseExp desc)
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
   internaliseValBind $ E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc
@@ -816,6 +803,28 @@ internaliseExp desc (E.Stream (E.RedLike o comm lam0) lam arr _) = do
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
 
+internaliseExp _ (E.VConstr0 c (Info t) loc) =
+  case t of
+    Enum cs ->
+      case elemIndex c $ sort cs of
+        Just i -> return [I.Constant $ I.IntValue $ intValue I.Int8 i]
+        _      -> fail $ "internaliseExp: invalid constructor: #" ++ nameToString c ++
+                         "\nfor enum at " ++ locStr loc ++ ": " ++ pretty t
+    _ -> fail $ "internaliseExp: nonsensical type for enum at "
+                ++ locStr loc ++ ": " ++ pretty t
+
+internaliseExp desc (E.Match  e cs _ loc) =
+  case cs of
+    [CasePat _ eCase _] -> internaliseExp desc eCase
+    (c:cs') -> do
+      bFalse <- bFalseM
+      letTupExp' desc =<< generateCaseIf desc e c bFalse
+      where bFalseM = do
+              eLast' <- internalisePat desc [] pLast e eLast locLast internaliseBody
+              foldM (\bf c' -> eBody $ return $ generateCaseIf desc e c' bf) eLast' (reverse $ init cs')
+            CasePat pLast eLast locLast = last cs'
+    [] -> fail $ "internaliseExp: match with no cases at: " ++ locStr loc
+
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
 internaliseExp _ (E.Literal v _) =
@@ -879,6 +888,61 @@ internaliseExp _ e@E.ProjectSection{} =
 
 internaliseExp _ e@E.IndexSection{} =
   fail $ "internaliseExp: Unexpected index section at " ++ locStr (srclocOf e)
+
+andExp :: E.Exp -> E.Exp -> E.Exp
+andExp l r = E.If l r (E.Literal (E.BoolValue False) noLoc) (Info (E.Prim E.Bool)) noLoc
+
+eqExp :: E.Exp -> E.Exp -> E.Exp
+eqExp l r = E.BinOp eq (Info $ vacuousShapeAnnotations ft)
+            (l, sType l) (r, sType r) (Info (E.Prim E.Bool)) noLoc
+  where sType e = Info $ toStruct $ vacuousShapeAnnotations $ E.typeOf e
+        arrow   = Arrow S.empty Nothing
+        ft      = E.typeOf l `arrow` E.typeOf r `arrow` E.Prim E.Bool
+        eq      = qualName $ VName "==" (-1)
+
+generateCond :: E.Pattern -> E.Exp -> E.Exp
+generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
+  where conds = mapMaybe ((<*> pure e) . fst) $ generateCond' p
+
+        generateCond' :: E.Pattern -> [(Maybe (E.Exp -> E.Exp), CompType)]
+        generateCond' (E.TuplePattern ps loc) = generateCond' (E.RecordPattern fs loc)
+          where fs = zipWith (\i p' -> (nameFromString (show i), p')) ([1..] :: [Integer]) ps
+        generateCond' (E.RecordPattern fs _) = concatMap instCond holes
+          where holes = map (\(n, p') -> (generateCond' p', n)) fs
+                field ([],_) = Nothing
+                field ((_, t):_, f) = Just (f, t)
+                t' = Record $ M.fromList $ mapMaybe field holes
+                projectHole _ (Nothing, _) = (Nothing, t')
+                projectHole f (Just condHole, t) =
+                  (Just (\e' -> condHole $ Project f e' (Info t) noLoc), t')
+                instCond (condHoles, f) = map (projectHole f) condHoles
+        generateCond' (E.PatternParens p' _) = generateCond' p'
+        generateCond' (E.Id _ (Info t) _) =
+          [(Nothing, removeShapeAnnotations t)]
+        generateCond' (E.Wildcard (Info t) _)=
+          [(Nothing, removeShapeAnnotations t)]
+        generateCond' (E.PatternAscription p' _ _) = generateCond' p'
+        generateCond' (E.PatternLit ePat (Info t) _) =
+          [(Just (eqExp ePat), removeShapeAnnotations t)]
+
+
+generateCaseIf :: String -> E.Exp -> Case -> I.Body -> InternaliseM I.Exp
+generateCaseIf desc e (CasePat p eCase loc) bFail = do
+  eCase' <- internalisePat desc [] p e eCase loc internaliseBody
+  eIf cond (return eCase') (return bFail)
+  where cond = BasicOp . SubExp <$> internaliseExp1 "cond" (generateCond p e)
+
+internalisePat :: String -> [TypeParamBase VName] -> E.Pattern -> E.Exp
+               -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a) -> InternaliseM a
+internalisePat desc tparams p e body loc m = do
+  ses <- internaliseExp desc e
+  t <- I.staticShapes <$> mapM I.subExpType ses
+  stmPattern tparams p t $ \cm pat_names match -> do
+    mapM_ (uncurry (internaliseDimConstant loc)) cm
+    ses' <- match loc ses
+    forM_ (zip pat_names ses') $ \(v,se) ->
+      letBindNames_ [v] $ I.BasicOp $ I.SubExp se
+    m body
 
 internaliseSlice :: SrcLoc
                  -> [SubExp]
@@ -1689,6 +1753,8 @@ typeExpForError cm (E.TEApply t arg _) = do
   arg' <- case arg of TypeArgExpType argt -> typeExpForError cm argt
                       TypeArgExpDim d _   -> pure <$> dimDeclForError cm d
   return $ t' ++ [" "] ++ arg'
+typeExpForError _ e@E.TEEnum{} =
+  return [ErrorString $ pretty e]
 
 dimDeclForError :: ConstParams -> E.DimDecl VName -> InternaliseM (ErrorMsgPart SubExp)
 dimDeclForError cm (NamedDim d) = do

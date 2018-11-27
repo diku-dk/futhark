@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections, FlexibleInstances, MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DefaultSignatures #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Futhark.Pass.ExplicitAllocations
        ( explicitAllocations
@@ -57,9 +58,30 @@ bindAllocStm (ArrayCopy name src) =
 class (MonadFreshNames m, HasScope lore m, ExplicitMemorish lore) =>
       Allocator lore m where
   addAllocStm :: AllocStm -> m ()
+
+  default addAllocStm :: (Allocable fromlore lore,
+                          Op lore ~ MemOp inner,
+                          m ~ AllocM fromlore lore)
+                      => AllocStm -> m ()
+  addAllocStm (SizeComputation name se) =
+    letBindNames_ [name] =<< toExp (coerceIntPrimExp Int64 se)
+  addAllocStm (Allocation name size space) =
+    letBindNames_ [name] $ Op $ Alloc size space
+  addAllocStm (ArrayCopy name src) =
+    letBindNames_ [name] $ BasicOp $ Copy src
+
   -- | The subexpression giving the number of elements we should
   -- allocate space for.  See 'ChunkMap' comment.
   dimAllocationSize :: SubExp -> m SubExp
+
+  default dimAllocationSize :: m ~ AllocM fromlore lore
+                               => SubExp -> m SubExp
+  dimAllocationSize (Var v) =
+    -- It is important to recurse here, as the substitution may itself
+    -- be a chunk size.
+    maybe (return $ Var v) dimAllocationSize =<< asks (M.lookup v . chunkMap)
+  dimAllocationSize size =
+    return size
 
   expHints :: Exp lore -> m [ExpHint]
   expHints e = return $ replicate (expExtTypeSize e) NoHint
@@ -141,38 +163,10 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 
 instance Allocable fromlore OutInKernel =>
          Allocator ExplicitMemory (AllocM fromlore ExplicitMemory) where
-  addAllocStm (SizeComputation name se) =
-    letBindNames_ [name] =<< toExp (coerceIntPrimExp Int64 se)
-  addAllocStm (Allocation name size space) =
-    letBindNames_ [name] $ Op $ Alloc size space
-  addAllocStm (ArrayCopy name src) =
-    letBindNames_ [name] $ BasicOp $ Copy src
-
-  dimAllocationSize (Var v) =
-    -- It is important to recurse here, as the substitution may itself
-    -- be a chunk size.
-    maybe (return $ Var v) dimAllocationSize =<< asks (M.lookup v . chunkMap)
-  dimAllocationSize size =
-    return size
-
   expHints = kernelExpHints
 
 instance Allocable fromlore OutInKernel =>
          Allocator OutInKernel (AllocM fromlore OutInKernel) where
-  addAllocStm (SizeComputation name se) =
-    letBindNames_ [name] =<< toExp (coerceIntPrimExp Int64 se)
-  addAllocStm (Allocation name size space) =
-    letBindNames_ [name] $ Op $ Alloc size space
-  addAllocStm (ArrayCopy name src) =
-    letBindNames_ [name] $ BasicOp $ Copy src
-
-  dimAllocationSize (Var v) =
-    -- It is important to recurse here, as the substitution may itself
-    -- be a chunk size.
-    maybe (return $ Var v) dimAllocationSize =<< asks (M.lookup v . chunkMap)
-  dimAllocationSize size =
-    return size
-
   expHints = inKernelExpHints
 
 runAllocM :: MonadFreshNames m =>

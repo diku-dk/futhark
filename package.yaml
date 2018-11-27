@@ -14,6 +14,7 @@ extra-source-files:
   - rts/python/*.py
   - rts/c/*.h
   - rts/csharp/*.cs
+  - rts/futhark-doc/*.css
 
   - futlib/*.fut
 
@@ -85,7 +86,7 @@ executables:
       - futhark
       - random
       - temporary
-      - json
+      - aeson
     ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg"
   futharki:
     <<: *futhark

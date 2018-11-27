@@ -51,12 +51,10 @@ data FusionGEnv = FusionGEnv {
   , fusedRes   :: FusedRes
   }
 
-arrsInScope :: FusionGEnv -> M.Map VName SOAC.Input
-arrsInScope = M.fromList . mapMaybe asArray . M.toList . varsInScope
-  where asArray (name, IsArray _ _ _ input) =
-          Just (name, input)
-        asArray (_, IsNotArray{}) =
-          Nothing
+lookupArr :: VName -> FusionGEnv -> Maybe SOAC.Input
+lookupArr v env = asArray =<< M.lookup v (varsInScope env)
+  where asArray (IsArray _ _ _ input) = Just input
+        asArray IsNotArray{}          = Nothing
 
 newtype Error = Error String
 
@@ -136,7 +134,7 @@ checkForUpdates res _ = return res
 
 -- | Updates the environment: (i) the @soacs@ (map) by binding each pattern
 --   element identifier to all pattern elements (identifiers) and (ii) the
---   @arrsInScope@ (map) by inserting each (pattern-array) name.
+--   variables in scope (map) by inserting each (pattern-array) name.
 --   Finally, if the binding is an in-place update, then the @inplace@ field
 --   of each (result) kernel is updated with the new in-place updates.
 bindingFamily :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
@@ -307,7 +305,7 @@ addNewKerWithInfusible res (idd, cs, soac, consumed) ufs = do
            (M.insert nm_ker new_ker (kernels res))
 
 lookupInput :: VName -> FusionGM (Maybe SOAC.Input)
-lookupInput name = asks $ M.lookup name . arrsInScope
+lookupInput name = asks $ lookupArr name
 
 inlineSOACInput :: SOAC.Input -> FusionGM SOAC.Input
 inlineSOACInput (SOAC.Input ts v t) = do
@@ -732,7 +730,7 @@ addNamesToInfusible fres = foldM addVarToInfusible fres . S.toList
 
 addVarToInfusible :: FusedRes -> VName -> FusionGM FusedRes
 addVarToInfusible fres name = do
-  trns <- asks $ M.lookup name . arrsInScope
+  trns <- asks $ lookupArr name
   let name' = case trns of
         Nothing         -> name
         Just (SOAC.Input _ orig _) -> orig

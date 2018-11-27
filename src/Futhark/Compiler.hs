@@ -34,7 +34,6 @@ import qualified Futhark.Representation.SOACS as I
 import qualified Futhark.TypeCheck as I
 import Futhark.Compiler.Program
 import qualified Language.Futhark as E
-import Language.Futhark.Futlib.Builtin (builtinBasis)
 import Futhark.Util.Log
 
 data FutharkConfig = FutharkConfig
@@ -156,4 +155,4 @@ readProgram = readLibrary . pure
 -- imports.
 readLibrary :: (MonadError CompilerError m, MonadIO m) =>
                [FilePath] -> m (Warnings, Imports, VNameSource)
-readLibrary = readLibraryWithBasis builtinBasis
+readLibrary = readLibraryWithBasis emptyBasis

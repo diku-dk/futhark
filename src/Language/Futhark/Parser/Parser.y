@@ -56,6 +56,8 @@ import Language.Futhark.Parser.Lexer
       let             { L $$ LET }
       loop            { L $$ LOOP }
       in              { L $$ IN }
+      match           { L $$ MATCH }
+      case            { L $$ CASE }
 
       id              { L _ (ID _) }
       'id['           { L _ (INDEXING _) }
@@ -93,6 +95,7 @@ import Language.Futhark.Parser.Lexer
       '-'             { L $$ NEGATE }
       '<'             { L $$ LTH }
       '^'             { L $$ HAT }
+      '|'             { L $$ PIPE  }
 
       '+...'          { L _ (SYMBOL Plus _ _) }
       '-...'          { L _ (SYMBOL Minus _ _) }
@@ -154,20 +157,20 @@ import Language.Futhark.Parser.Lexer
       doc             { L _  (DOC _) }
 
 %left bottom
-%left ifprec letprec unsafe
-%left ','
+%left ifprec letprec unsafe caseprec typeprec enumprec
+%left ',' case
 %left ':'
 %right '...' '..<' '..>' '..'
 %left '`'
 %right '->'
 %left with
-%left '<-'
+%left '=' '<-'
 %left '|>...'
 %right '<|...'
 %left '||...'
 %left '&&...'
 %left '<=...' '>=...' '>...' '<' '<...' '==...' '!=...'
-%left '&...' '^...' '^' '|...'
+%left '&...' '^...' '^' '|...' '|'
 %left '<<...' '>>...'
 %left '+...' '-...' '-'
 %left '*...' '*' '/...' '%...' '//...' '%%...'
@@ -204,10 +207,9 @@ Dec_ :: { UncheckedDec }
     | TypeAbbr          { TypeDec $1 }
     | SigBind           { SigDec $1 }
     | ModBind           { ModDec $1 }
-    | open ModExp
-      { OpenDec $2 NoInfo $1 }
+    | open ModExp       { OpenDec $2 $1 }
     | import stringlit
-      { let L loc (STRINGLIT s) = $2 in LocalDec (OpenDec (ModImport s NoInfo loc) NoInfo $1) (srcspan $1 $>) }
+      { let L _ (STRINGLIT s) = $2 in ImportDec s NoInfo (srcspan $1 $>) }
     | local Dec         { LocalDec $2 (srcspan $1 $>) }
 ;
 
@@ -277,10 +279,10 @@ Spec :: { SpecBase NoInfo Name }
       : val id TypeParams ':' TypeExpDecl
         { let L loc (ID name) = $2
           in ValSpec name $3 $5 Nothing (srcspan $1 $>) }
-      | val BindingBinOp ':' TypeExpDecl
-        { ValSpec $2 [] $4 Nothing (srcspan $1 $>) }
-      | val BindingUnOp ':' TypeExpDecl
-        { ValSpec $2 [] $4 Nothing (srcspan $1 $>) }
+      | val BindingBinOp TypeParams ':' TypeExpDecl
+        { ValSpec $2 $3 $5 Nothing (srcspan $1 $>) }
+      | val BindingUnOp TypeParams ':' TypeExpDecl
+        { ValSpec $2 $3 $5 Nothing (srcspan $1 $>) }
       | TypeAbbr
         { TypeAbbrSpec $1 }
       | type id TypeParams
@@ -347,6 +349,7 @@ BinOp :: { QualName Name }
       | '^'        { qualName (nameFromString "^") }
       | '&...'     { binOpName $1 }
       | '|...'     { binOpName $1 }
+      | '|'        { qualName (nameFromString "|") }
       | '>>...'    { binOpName $1 }
       | '<<...'    { binOpName $1 }
       | '<|...'    { binOpName $1 }
@@ -408,8 +411,7 @@ TypeExp :: { UncheckedTypeExp }
            { let L _ (ID v) = $2 in TEArrow (Just v) $4 $7 (srcspan $1 $>) }
          | TypeExpTerm '->' TypeExp
            { TEArrow Nothing $1 $3 (srcspan $1 $>) }
-         | TypeExpTerm { $1 }
-
+         | TypeExpTerm %prec typeprec { $1 }
 
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
@@ -446,6 +448,16 @@ TypeExpAtom :: { UncheckedTypeExp }
              | '{' '}'                        { TERecord [] (srcspan $1 $>) }
              | '{' FieldTypes1 '}'            { TERecord $2 (srcspan $1 $>) }
              | QualName                       { TEVar (fst $1) (snd $1) }
+             | Enum                           { TEEnum (fst $1)  (snd $1)}
+
+Enum :: { ([Name], SrcLoc) }
+      : VConstr0 %prec enumprec { ([fst $1], snd $1) }
+      | VConstr0 '|' Enum
+        { let names = fst $1 : fst $3; loc = srcspan (snd $1) (snd $3)
+          in (names, loc) }
+
+VConstr0 :: { (Name, SrcLoc) }
+          : '#' id  { let L _ (ID c) = $2 in  (c, srclocOf $1) }
 
 TypeArg :: { TypeArgExp Name }
          : '[' DimDecl ']' { TypeArgExpDim (fst $2) (srcspan $1 $>) }
@@ -515,6 +527,8 @@ Exp2 :: { UncheckedExp }
 
      | LetExp %prec letprec { $1 }
 
+     | MatchExp { $1 }
+
      | unsafe Exp2     { Unsafe $2 (srcspan $1 $>) }
      | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
 
@@ -532,6 +546,7 @@ Exp2 :: { UncheckedExp }
      | Exp2 '<<...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '&...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '|...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '|' Exp2       { binOp $1 (L $2 (SYMBOL Bor [] (nameFromString "|"))) $3 }
      | Exp2 '&&...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '||...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '^...' Exp2    { binOp $1 $2 $3 }
@@ -559,11 +574,16 @@ Exp2 :: { UncheckedExp }
      | '-' Exp2
        { Negate $2 $1 }
 
-     | Exp2 with '[' DimIndices ']' '<-' Exp2
+     | Exp2 with '[' DimIndices ']' '=' Exp2
        { Update $1 $4 $7 (srcspan $1 $>) }
+
+     | Exp2 with FieldAccesses_ '=' Exp2
+       { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
 
      | Exp2 with FieldAccesses_ '<-' Exp2
        { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
+     | Exp2 with '[' DimIndices ']' '<-' Exp2
+       { Update $1 $4 $7 (srcspan $1 $>) }
 
      | '\\' TypeParams FunParams1 maybeAscription(TypeExpTerm) '->' Exp
        { Lambda $2 (fst $3 : snd $3) $6 (fmap (flip TypeDecl NoInfo) $4) NoInfo (srcspan $1 $>) }
@@ -580,6 +600,7 @@ Apply :: { UncheckedExp }
 
 Atom :: { UncheckedExp }
 Atom : PrimLit        { Literal (fst $1) (snd $1) }
+     | VConstr0       { VConstr0 (fst $1) NoInfo (snd $1) }
      | intlit         { let L loc (INTLIT x) = $1 in IntLit x NoInfo loc }
      | floatlit       { let L loc (FLOATLIT x) = $1 in FloatLit x NoInfo loc }
      | stringlit      { let L loc (STRINGLIT s) = $1 in
@@ -695,6 +716,61 @@ LetExp :: { UncheckedExp }
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
     | LetExp %prec letprec { $1 }
+
+MatchExp :: { UncheckedExp }
+          : match Exp Cases  { let loc = srcspan $1 $>
+                               in Match $2 $> NoInfo loc  }
+
+Cases :: { [CaseBase NoInfo Name] }
+       : Case  %prec caseprec { [$1] }
+       | Case Cases           { $1 : $2 }
+
+Case :: { CaseBase NoInfo Name }
+      : case CPattern '->' Exp       { let loc = srcspan $1 $>
+                                       in CasePat $2 $> loc }
+
+CPattern :: { PatternBase NoInfo Name }
+          : CInnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
+          | CInnerPattern                 { $1 }
+
+CPatterns1 :: { [PatternBase NoInfo Name] }
+           : CPattern               { [$1] }
+           | CPattern ',' CPatterns1 { $1 : $3 }
+
+CInnerPattern :: { PatternBase NoInfo Name }
+               : id                                 { let L loc (ID name) = $1 in Id name NoInfo loc }
+               | '(' BindingBinOp ')'               { Id $2 NoInfo (srcspan $1 $>) }
+               | '(' BindingUnOp ')'                { Id $2 NoInfo (srcspan $1 $>) }
+               | '_'                                { Wildcard NoInfo $1 }
+               | '(' ')'                            { TuplePattern [] (srcspan $1 $>) }
+               | '(' CPattern ')'                   { PatternParens $2 (srcspan $1 $>) }
+               | '(' CPattern ',' CPatterns1 ')'    { TuplePattern ($2:$4) (srcspan $1 $>) }
+               | '{' CFieldPatterns '}'             { RecordPattern $2 (srcspan $1 $>) }
+               | CaseLiteral                        { PatternLit (fst $1) NoInfo (snd $1) }
+
+CFieldPattern :: { (Name, PatternBase NoInfo Name) }
+               : FieldId '=' CPattern
+               { (fst $1, $3) }
+               | FieldId ':' TypeExpDecl
+               { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
+               | FieldId
+               { (fst $1, Id (fst $1) NoInfo (snd $1)) }
+
+CFieldPatterns :: { [(Name, PatternBase NoInfo Name)] }
+                : CFieldPatterns1 { $1 }
+                |                { [] }
+
+CFieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
+                 : CFieldPattern ',' CFieldPatterns1 { $1 : $3 }
+                 | CFieldPattern                    { [$1] }
+
+CaseLiteral :: { (UncheckedExp, SrcLoc) }
+             : PrimLit        { (Literal (fst $1) (snd $1), snd $1) }
+             | intlit         { let L loc (INTLIT x) = $1 in (IntLit x NoInfo loc, loc) }
+             | floatlit       { let L loc (FLOATLIT x) = $1 in (FloatLit x NoInfo loc, loc) }
+             | stringlit      { let L loc (STRINGLIT s) = $1 in
+                              (ArrayLit (map (flip Literal loc . SignedValue . Int32Value . fromIntegral . ord) s) NoInfo loc, loc) }
+             | VConstr0       { (VConstr0 (fst $1) NoInfo (snd $1), snd $1) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp

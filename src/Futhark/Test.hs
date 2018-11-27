@@ -21,12 +21,14 @@ module Futhark.Test
        , TestRun (..)
        , ExpectedResult (..)
        , Values (..)
+       , GenValue (..)
        , Value
        )
        where
 
 import Control.Applicative
 import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString as SBS
 import Control.Monad
 import Control.Monad.IO.Class
 import qualified Data.Map.Strict as M
@@ -34,6 +36,7 @@ import Data.Char
 import Data.Functor
 import Data.Maybe
 import Data.Foldable (foldl')
+import Data.List
 import Data.Semigroup
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -47,6 +50,9 @@ import qualified Control.Exception.Base as E
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
 import Text.Regex.TDFA
+import System.Directory
+import System.Exit
+import System.Process.ByteString (readProcessWithExitCode)
 
 import Prelude
 
@@ -54,6 +60,7 @@ import Futhark.Analysis.Metrics
 import Futhark.Util.Pretty (pretty, prettyText)
 import Futhark.Test.Values
 import Futhark.Util (directoryContents)
+import Language.Futhark.Syntax (PrimType(..), IntType(..), FloatType(..))
 
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
@@ -115,10 +122,23 @@ data TestRun = TestRun
                }
              deriving (Show)
 
--- | Several Values - either literally, or by reference to a file.
+-- | Several Values - either literally, or by reference to a file, or
+-- to be generated on demand.
 data Values = Values [Value]
             | InFile FilePath
+            | GenValues [GenValue]
             deriving (Show)
+
+data GenValue = GenValue [Int] PrimType
+                -- ^ Generate a value of the given rank and primitive
+                -- type.  Scalars are considered 0-ary arrays.
+              deriving (Show)
+
+-- | A prettyprinted representation of type of value produced by a
+-- 'GenValue'.
+genValueType :: GenValue -> String
+genValueType (GenValue ds t) =
+  concatMap (\d -> "[" ++ show d ++ "]") ds ++ pretty t
 
 -- | How a test case is expected to terminate.
 data ExpectedResult values
@@ -190,7 +210,8 @@ parseRunCases = parseRunCases' (0::Int)
                            <|> pure []
         parseRunCase i = do
           tags <- parseRunTags
-          input <- parseInput
+          lexstr "input"
+          input <- if "random" `elem` tags then parseRandomValues else parseValues
           expr <- parseExpectedResult
           return $ TestRun tags input expr i $ desc i input
 
@@ -208,7 +229,7 @@ parseRunCases = parseRunCases' (0::Int)
           where vs' = case unwords (map pretty vs) of
                         s | length s > 50 -> take 50 s ++ "..."
                           | otherwise     -> s
-
+        desc _ (GenValues gens) = intercalate "_" $ map genValueType gens
 
 parseExpectedResult :: Parser (ExpectedResult Values)
 parseExpectedResult =
@@ -225,12 +246,32 @@ parseExpectedError = lexeme $ do
          -- newlines like ordinary characters, which is what we want.
     else ThisError s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
 
-parseInput :: Parser Values
-parseInput = lexstr "input" *> parseValues
+parseRandomValues :: Parser Values
+parseRandomValues = GenValues <$> between (lexstr "{") (lexstr "}") (many parseGenValue)
+
+parseGenValue :: Parser GenValue
+parseGenValue = GenValue <$> many dim <*> parsePrimType
+  where dim = between (lexstr "[") (lexstr "]") $
+              lexeme $ read <$> some (satisfy isDigit)
+
+parsePrimType :: Parser PrimType
+parsePrimType =
+  choice [ lexstr "i8" $> Signed Int8
+         , lexstr "i16" $> Signed Int16
+         , lexstr "i32" $> Signed Int32
+         , lexstr "i64" $> Signed Int64
+         , lexstr "u8" $> Unsigned Int8
+         , lexstr "u16" $> Unsigned Int16
+         , lexstr "u32" $> Unsigned Int32
+         , lexstr "u64" $> Unsigned Int64
+         , lexstr "f32" $> FloatType Float32
+         , lexstr "f64" $> FloatType Float64
+         , lexstr "bool" $> Bool
+         ]
 
 parseValues :: Parser Values
 parseValues = do s <- parseBlock
-                 case valuesFromByteString "input" $ BS.fromStrict $ T.encodeUtf8 s of
+                 case valuesFromByteString "input block contents" $ BS.fromStrict $ T.encodeUtf8 s of
                    Left err -> fail err
                    Right vs -> return $ Values vs
               <|> lexstr "@" *> lexeme (InFile . T.unpack <$> nextWord)
@@ -380,12 +421,11 @@ valuesFromByteString srcname =
 getValues :: MonadIO m => FilePath -> Values -> m [Value]
 getValues _ (Values vs) =
   return vs
-getValues dir (InFile file) = do
-  s <- getValuesBS dir (InFile file)
-  case valuesFromByteString file' s of
+getValues dir v = do
+  s <- getValuesBS dir v
+  case valuesFromByteString "file" s of
     Left e   -> fail $ show e
     Right vs -> return vs
-  where file' = dir </> file
 
 -- | Extract a pretty representation of some 'Values'.  In the IO
 -- monad because this might involve reading from a file.  There is no
@@ -405,3 +445,26 @@ getValuesBS dir (InFile file) =
   where file' = dir </> file
         readAndDecompress = do s <- BS.readFile file'
                                E.evaluate $ decompress s
+getValuesBS dir (GenValues gens) = do
+  exists <- liftIO $ doesFileExist $ dir </> file
+  unless exists $ liftIO $ do
+    s <- genValues gens
+    createDirectoryIfMissing True $ takeDirectory $ dir </> file
+    SBS.writeFile (dir </> file) s
+  getValuesBS dir $ InFile file
+  where file = "data" </> genFileName gens
+
+genValues :: [GenValue] -> IO SBS.ByteString
+genValues gens = do
+  (code, stdout, stderr) <- readProcessWithExitCode "futhark-dataset" args mempty
+  case code of
+    ExitSuccess ->
+      return stdout
+    ExitFailure e ->
+      fail $ "futhark-dataset failed with exit code " ++ show e ++ " and stderr:\n" ++
+      map (chr . fromIntegral) (SBS.unpack stderr)
+  where args = "-b" : concatMap argForGen gens
+        argForGen g = ["-g", genValueType g]
+
+genFileName :: [GenValue] -> FilePath
+genFileName gens = intercalate "_" (map genValueType gens) ++ ".in"

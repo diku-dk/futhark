@@ -2,7 +2,7 @@
 -- error: consumption
 
 let update (xs: *[]i32) (x: i32) : *[]i32 =
-  xs with [0] <- x
+  xs with [0] = x
 
 let apply (f: i32->[]i32) (x: i32) : []i32 =
   f x

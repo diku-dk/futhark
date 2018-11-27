@@ -186,6 +186,16 @@ private static short sext_i64_i16(long x){return (short) (x);}
 private static int sext_i64_i32(long x){return (int) (x);}
 private static long sext_i64_i64(long x){return (long) (x);}
 
+private static sbyte btoi_bool_i8 (bool x){return (sbyte) (Convert.ToInt32(x));}
+private static short btoi_bool_i16(bool x){return (short) (Convert.ToInt32(x));}
+private static int   btoi_bool_i32(bool x){return (int)   (Convert.ToInt32(x));}
+private static long  btoi_bool_i64(bool x){return (long)  (Convert.ToInt32(x));}
+
+private static bool itob_i8_bool (sbyte x){return x != 0;}
+private static bool itob_i16_bool(short x){return x != 0;}
+private static bool itob_i32_bool(int x)  {return x != 0;}
+private static bool itob_i64_bool(long x) {return x != 0;}
+
 private static sbyte zext_i8_i8(sbyte x)   {return (sbyte) ((byte)(x));}
 private static short zext_i8_i16(sbyte x)  {return (short)((byte)(x));}
 private static int   zext_i8_i32(sbyte x)  {return (int)((byte)(x));}
