@@ -18,6 +18,7 @@ import Control.Monad.Except
 import Control.Monad.State
 import Control.Monad.RWS
 import qualified Control.Monad.Fail as Fail
+import Data.Char (isAlpha)
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -378,7 +379,7 @@ instantiateTypeScheme loc tparams t = do
 instantiateTypeParam :: Monoid as => SrcLoc -> TypeParam -> TermTypeM (VName, TypeBase dim as)
 instantiateTypeParam loc tparam = do
   i <- incCounter
-  v <- newID $ nameFromString $ baseString (typeParamName tparam) ++ show i
+  v <- newID $ mkTypeVarName (takeWhile isAlpha (baseString (typeParamName tparam))) i
   modifyConstraints $ M.insert v $ NoConstraint (Just l) loc
   return (v, TypeVar mempty Nonunique (typeName v) [])
   where l = case tparam of TypeParamType x _ _ -> x
