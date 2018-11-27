@@ -233,7 +233,8 @@ parseRunCases = parseRunCases' (0::Int)
           where vs' = case unwords (map pretty vs) of
                         s | length s > 50 -> take 50 s ++ "..."
                           | otherwise     -> s
-        desc _ (GenValues gens) = intercalate "_" $ map genValueType gens
+        desc i (GenValues gens) =
+          "#" ++ show i ++ " (\"" ++ unwords (map genValueType gens) ++ "\")"
 
 parseExpectedResult :: Parser (ExpectedResult Values)
 parseExpectedResult =
