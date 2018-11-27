@@ -234,7 +234,7 @@ parseRunCases = parseRunCases' (0::Int)
                         s | length s > 50 -> take 50 s ++ "..."
                           | otherwise     -> s
         desc i (GenValues gens) =
-          "#" ++ show i ++ " (\"" ++ unwords (map genValueType gens) ++ "\")"
+          desc i $ InFile $ "data" </> genFileName gens
 
 parseExpectedResult :: Parser (ExpectedResult Values)
 parseExpectedResult =
