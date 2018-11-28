@@ -10,11 +10,11 @@ import Control.Monad
 import Control.Monad.Except
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
+import qualified Data.Map as M
 import Data.Either
 import Data.Maybe
 import Data.Semigroup ((<>))
 import Data.List
-import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
@@ -27,6 +27,7 @@ import System.Timeout
 import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import qualified Data.Aeson as JSON
+import qualified Data.Aeson.Encoding.Internal as JSON
 import Text.Printf
 import Text.Regex.TDFA
 
@@ -57,23 +58,28 @@ newtype RunResult = RunResult { runMicroseconds :: Int }
 data DataResult = DataResult String (Either T.Text ([RunResult], T.Text))
 data BenchResult = BenchResult FilePath [DataResult]
 
-resultsToJSON :: [BenchResult] -> JSON.Value
-resultsToJSON = JSON.toJSON . M.fromList . map benchResultToJSObject
-  where benchResultToJSObject
-          :: BenchResult
-          -> (String, JSON.Value)
-        benchResultToJSObject (BenchResult prog rs) =
-          (prog, JSON.toJSON $ M.fromList
-                 [("datasets" :: String, M.fromList $ map dataResultToJSObject rs)])
-        dataResultToJSObject
-          :: DataResult
-          -> (String, JSON.Value)
-        dataResultToJSObject (DataResult desc (Left err)) =
-          (desc, JSON.toJSON $ show err)
-        dataResultToJSObject (DataResult desc (Right (runtimes, progerr))) =
-          (desc, JSON.toJSON $ M.fromList
-                 [("runtimes" :: String, JSON.toJSON $ map runMicroseconds runtimes),
-                  ("stderr", JSON.toJSON progerr)])
+-- Intermediate types to help write the JSON instances.
+newtype DataResults = DataResults [DataResult]
+
+instance JSON.ToJSON DataResults where
+  toJSON (DataResults rs) =
+    JSON.object $ map dataResultJSON rs
+  toEncoding (DataResults rs) =
+    JSON.pairs $ mconcat $ map (uncurry (JSON..=) . dataResultJSON) rs
+
+dataResultJSON :: DataResult -> (T.Text, JSON.Value)
+dataResultJSON (DataResult desc (Left err)) =
+  (T.pack desc, JSON.toJSON $ show err)
+dataResultJSON (DataResult desc (Right (runtimes, progerr))) =
+  (T.pack desc, JSON.object
+                [("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
+                 ("stderr", JSON.toJSON progerr)])
+
+encodeBenchResults :: [BenchResult] -> LBS.ByteString
+encodeBenchResults rs =
+  JSON.encodingToLazyByteString $ JSON.pairs $ mconcat $ do
+  BenchResult prog r <- rs
+  return $ T.pack prog JSON..= M.singleton ("datasets" :: T.Text) (DataResults r)
 
 fork :: (a -> IO b) -> a -> IO (MVar b)
 fork f x = do cell <- newEmptyMVar
@@ -107,7 +113,7 @@ runBenchmarks opts paths = do
   results <- concat <$> mapM (runBenchmark opts) compiled_benchmarks
   case optJSON opts of
     Nothing -> return ()
-    Just file -> LBS.writeFile file $ JSON.encode $ resultsToJSON results
+    Just file -> LBS.writeFile file $ encodeBenchResults results
   when (anyFailed results) exitFailure
 
   where ignored f = any (`match` f) $ optIgnoreFiles opts
