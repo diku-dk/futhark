@@ -33,6 +33,9 @@ OPTIONS
 -g type, --generate type
   Generate a value of the indicated type, e.g. ``-g i32`` or ``-g [10]f32``.
 
+  The type may also be a value, in which case that literal value is
+  generated.
+
 -s int
   Set the seed used for the RNG.  Zero by default.
 
