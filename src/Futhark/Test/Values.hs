@@ -6,11 +6,14 @@
 -- here does not support tuples, so don't use those as input/output
 -- for your test programs.
 module Futhark.Test.Values
-       ( Value
-       , valueType
+       ( Value(..)
 
        -- * Reading Values
        , readValues
+
+       -- * Types of values
+       , ValueType(..)
+       , valueType
 
        -- * Comparing Values
        , compareValues
@@ -133,7 +136,7 @@ putBinaryValue tstr shape vs putv = do
 instance PP.Pretty Value where
   ppr v | product (valueShape v) == 0 =
             text "empty" <>
-            parens (dims <> text (valueElemType v))
+            parens (dims <> ppr (valueElemType v))
     where dims = mconcat $ replicate (length (valueShape v)-1) $ text "[]"
   ppr (Int8Value shape vs) = pprArray (UVec.toList shape) vs
   ppr (Int16Value shape vs) = pprArray (UVec.toList shape) vs
@@ -155,24 +158,22 @@ pprArray (d:ds) vs =
   where slice_size = product ds
         slice i = UVec.slice (i*slice_size) slice_size vs
 
+-- | A representation of the simple values we represent in this module.
+data ValueType = ValueType [Int] F.PrimType
+               deriving (Show)
+
+instance PP.Pretty ValueType where
+  ppr (ValueType ds t) = mconcat (map pprDim ds) <> ppr t
+    where pprDim d = brackets $ ppr d
+
 -- | A textual description of the type of a value.  Follows Futhark
 -- type notation, and contains the exact dimension sizes if an array.
-valueType :: Value -> String
-valueType v = concatMap (\d -> "[" ++ show d ++ "]") (valueShape v) ++
-              valueElemType v
+valueType :: Value -> ValueType
+valueType v = ValueType (valueShape v) $ valueElemType v
 
-valueElemType :: Value -> String
-valueElemType (Int8Value _ _) = "i8"
-valueElemType (Int16Value _ _) = "i16"
-valueElemType (Int32Value _ _) = "i32"
-valueElemType (Int64Value _ _) = "i64"
-valueElemType (Word8Value _ _) = "u8"
-valueElemType (Word16Value _ _) = "u16"
-valueElemType (Word32Value _ _) = "u32"
-valueElemType (Word64Value _ _) = "u64"
-valueElemType (Float32Value _ _) = "f32"
-valueElemType (Float64Value _ _) = "f64"
-valueElemType (BoolValue _ _) = "bool"
+valueElemType :: Value -> F.PrimType
+valueElemType v = let ValueType _ t = valueType v
+                  in t
 
 valueShape :: Value -> [Int]
 valueShape (Int8Value shape _) = UVec.toList shape
@@ -504,7 +505,7 @@ compareValue i got_v expected_v
       (BoolValue _ got_vs, BoolValue _ expected_vs) ->
         compareGen compareBool got_vs expected_vs
       _ ->
-        Just $ TypeMismatch i (valueElemType got_v) (valueElemType expected_v)
+        Just $ TypeMismatch i (pretty $ valueElemType got_v) (pretty $ valueElemType expected_v)
   | otherwise =
       Just $ ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)
   where compareNum tol = compareGen $ compareElement tol
