@@ -172,8 +172,17 @@ valueType :: Value -> ValueType
 valueType v = ValueType (valueShape v) $ valueElemType v
 
 valueElemType :: Value -> F.PrimType
-valueElemType v = let ValueType _ t = valueType v
-                  in t
+valueElemType Int8Value{} = F.Signed F.Int8
+valueElemType Int16Value{} = F.Signed F.Int16
+valueElemType Int32Value{} = F.Signed F.Int32
+valueElemType Int64Value{} = F.Signed F.Int64
+valueElemType Word8Value{} = F.Unsigned F.Int8
+valueElemType Word16Value{} = F.Unsigned F.Int16
+valueElemType Word32Value{} = F.Unsigned F.Int32
+valueElemType Word64Value{} = F.Unsigned F.Int64
+valueElemType Float32Value{} = F.FloatType F.Float32
+valueElemType Float64Value{} = F.FloatType F.Float64
+valueElemType BoolValue{} = F.Bool
 
 valueShape :: Value -> [Int]
 valueShape (Int8Value shape _) = UVec.toList shape
