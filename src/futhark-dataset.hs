@@ -226,11 +226,13 @@ randomVector range final ds stdgen = runST $ do
   -- vector of the desired size, populate it via the random number
   -- generator, and then finally reutrn a frozen binary vector.
   arr <- UMVec.new n
-  let gen stdgen' i = do
-        let (v, stdgen'') = randomR range stdgen'
-        UMVec.write arr i v
-        return stdgen''
-  stdgen' <- foldM gen stdgen [0..n-1]
-  arr' <- final (UVec.fromList ds) <$> freeze arr
-  return (arr', stdgen')
+  let fill stdgen' i
+        | i < n = do
+            let (v, stdgen'') = randomR range stdgen'
+            UMVec.write arr i v
+            fill stdgen'' $! i+1
+        | otherwise = do
+            arr' <- final (UVec.fromList ds) <$> freeze arr
+            return (arr', stdgen')
+  fill stdgen 0
   where n = product ds
