@@ -678,6 +678,21 @@ generateTransposeFunction target bt =
                      x_p, y_p, in_p, out_p, mulx] ++
           shared_memory transposeBlockDim
 
+        mkLaunchOp transpose_type args workgroup_size num_groups =
+          let name = transposeKernelName bt transpose_type
+          in ImpOpenCL.Op $ case target of
+               TargetOpenCL ->
+                 let kernel_size = zipWith (*) workgroup_size num_groups
+                 in LaunchKernel name args kernel_size workgroup_size
+               TargetCuda ->
+                 let minExp = BinOpExp $ UMin Int32
+                     -- XXX: Use ImpOpenCL.GetSizeMax here
+                     max_dims = [2147483647, 65535, 65535]
+                     num_phys_groups = zipWith minExp max_dims num_groups
+                     kernel_size = zipWith (*) workgroup_size num_phys_groups
+                     args' = args ++ map (flip ValueKArg int32) num_groups
+                  in LaunchKernel name args' kernel_size workgroup_size
+
         normal_transpose_code =
           let actual_dim = transposeBlockDim * 2
               elems_per_thread = 4
@@ -687,9 +702,8 @@ generateTransposeFunction target bt =
                            , asExp y_p `quotRoundingUp` actual_dim
                            , asExp num_arrays_p
                            ]
-              kernel_size = zipWith (*) num_groups workgroup_size
-          in ImpOpenCL.Op $ LaunchKernel
-             (transposeKernelName bt Kernels.TransposeNormal) normal_kernel_args kernel_size workgroup_size
+          in mkLaunchOp Kernels.TransposeNormal normal_kernel_args
+             workgroup_size num_groups
 
         small_transpose_code =
           let group_size = (transposeBlockDim * transposeBlockDim)
@@ -701,9 +715,9 @@ generateTransposeFunction target bt =
                          num_arrays_p, x_p, y_p, in_p, out_p])
              [kernel_size] [group_size]
 
-        lowDimKernelAndGroupSize num_arrays x_elems y_elems =
-          ([x_elems `roundUpTo` transposeBlockDim ,
-            y_elems `roundUpTo` transposeBlockDim,
+        lowDimGroupNumAndSize num_arrays x_elems y_elems =
+          ([x_elems `quotRoundingUp` transposeBlockDim ,
+            y_elems `quotRoundingUp` transposeBlockDim,
             num_arrays],
            [transposeBlockDim, transposeBlockDim, 1])
 
@@ -712,10 +726,10 @@ generateTransposeFunction target bt =
                         :>>: SetScalar (paramName muly) (BinOpExp (SQuot Int32) transposeBlockDim (asExp x_p))
               set_new_height = DeclareScalar (paramName new_height) (IntType Int32)
                 :>>: SetScalar (paramName new_height) (asExp y_p `quotRoundingUp` asExp muly)
-              (kernel_size, workgroup_size) =
-                lowDimKernelAndGroupSize (asExp num_arrays_p) (asExp x_p) (asExp new_height)
-              launch = ImpOpenCL.Op $ LaunchKernel
-                (transposeKernelName bt Kernels.TransposeLowWidth) lowwidth_kernel_args kernel_size workgroup_size
+              (num_groups, workgroup_size) =
+                lowDimGroupNumAndSize (asExp num_arrays_p) (asExp x_p) (asExp new_height)
+              launch = mkLaunchOp Kernels.TransposeLowWidth
+                       lowwidth_kernel_args workgroup_size num_groups
           in set_muly :>>: set_new_height :>>: launch
 
         lowheight_transpose_code =
@@ -723,10 +737,10 @@ generateTransposeFunction target bt =
                         :>>: SetScalar (paramName mulx) (BinOpExp (SQuot Int32) transposeBlockDim (asExp y_p))
               set_new_width = DeclareScalar (paramName new_width) (IntType Int32)
                 :>>: SetScalar (paramName new_width) (asExp x_p `quotRoundingUp` asExp mulx)
-              (kernel_size, workgroup_size) =
-                lowDimKernelAndGroupSize (asExp num_arrays_p) (asExp new_width) (asExp y_p)
-              launch = ImpOpenCL.Op $ LaunchKernel
-                (transposeKernelName bt Kernels.TransposeLowHeight) lowheight_kernel_args kernel_size workgroup_size
+              (num_groups, workgroup_size) =
+                lowDimGroupNumAndSize (asExp num_arrays_p)(asExp new_width) (asExp y_p)
+              launch = mkLaunchOp Kernels.TransposeLowHeight
+                       lowheight_kernel_args workgroup_size num_groups
           in set_mulx :>>: set_new_width :>>: launch
 
 roundUpTo :: ImpOpenCL.Exp -> ImpOpenCL.Exp -> ImpOpenCL.Exp
