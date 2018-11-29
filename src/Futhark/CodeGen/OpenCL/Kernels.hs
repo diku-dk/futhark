@@ -107,22 +107,22 @@ mapTranspose target kernel_name elem_type transpose_type =
         // coalescing optimisations.
         const uint tile_dim = 2 * FUT_BLOCK_DIM;
         const uint elems_per_thread = 4;
-        uint x_index = get_global_id(0);
-        uint y_index = get_group_id(1) * tile_dim + get_local_id(1);
+        uint x_index = vgroup_id_x * tile_dim + get_local_id(0);
+        uint y_index = vgroup_id_y * tile_dim + get_local_id(1);
         if (x_index < width) {
           for (int i = 0; i < tile_dim; i += tile_dim/elems_per_thread)
           {
             uint index_in = (y_index + i) * width + x_index;
             if (y_index + i < height && index_in < input_size)
             {
-              block[(get_local_id(1) + i)*(tile_dim+1)+get_local_id(0)] = idata[index_in];
+              block[(get_local_id(1) + i)*(tile_dim+1)+get_local_id(0)] = in[index_in];
             }
           }
         }
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        x_index = get_group_id(1) * tile_dim + get_local_id(0);
-        y_index = get_group_id(0) * tile_dim + get_local_id(1);
+        x_index = vgroup_id_y * tile_dim + get_local_id(0);
+        y_index = vgroup_id_x * tile_dim + get_local_id(1);
         if (x_index < height)
         {
           for (int i = 0; i < tile_dim; i += tile_dim/elems_per_thread)
@@ -130,31 +130,31 @@ mapTranspose target kernel_name elem_type transpose_type =
             uint index_out = (y_index + i) * height + x_index;
             if (y_index + i < width && index_out < output_size)
             {
-              odata[index_out] = block[get_local_id(0)*(tile_dim+1)+get_local_id(1)+i];
+              out[index_out] = block[get_local_id(0)*(tile_dim+1)+get_local_id(1)+i];
             }
           }
         }
       |]
     TransposeLowWidth ->
       mkTranspose [C.cparams|uint muly|] $ lowDimBody
-      [C.cexp|get_group_id(0) * FUT_BLOCK_DIM + (get_local_id(0) / muly)|]
-      [C.cexp|get_group_id(1) * FUT_BLOCK_DIM * muly
+      [C.cexp|vgroup_id_x * FUT_BLOCK_DIM + (get_local_id(0) / muly)|]
+      [C.cexp|vgroup_id_y * FUT_BLOCK_DIM * muly
            + get_local_id(1)
            + (get_local_id(0) % muly) * FUT_BLOCK_DIM
           |]
-      [C.cexp|get_group_id(1) * FUT_BLOCK_DIM * muly
+      [C.cexp|vgroup_id_y * FUT_BLOCK_DIM * muly
            + get_local_id(0)
            + (get_local_id(1) % muly) * FUT_BLOCK_DIM|]
-      [C.cexp|get_group_id(0) * FUT_BLOCK_DIM + (get_local_id(1) / muly)|]
+      [C.cexp|vgroup_id_x * FUT_BLOCK_DIM + (get_local_id(1) / muly)|]
     TransposeLowHeight ->
       mkTranspose [C.cparams|uint mulx|] $ lowDimBody
-      [C.cexp|get_group_id(0) * FUT_BLOCK_DIM * mulx
+      [C.cexp|vgroup_id_x * FUT_BLOCK_DIM * mulx
            + get_local_id(0)
            + (get_local_id(1) % mulx) * FUT_BLOCK_DIM
           |]
-      [C.cexp|get_group_id(1) * FUT_BLOCK_DIM + (get_local_id(1) / mulx)|]
-      [C.cexp|get_group_id(1) * FUT_BLOCK_DIM + (get_local_id(0) / mulx)|]
-      [C.cexp|get_group_id(0) * FUT_BLOCK_DIM * mulx
+      [C.cexp|vgroup_id_y * FUT_BLOCK_DIM + (get_local_id(1) / mulx)|]
+      [C.cexp|vgroup_id_y * FUT_BLOCK_DIM + (get_local_id(0) / mulx)|]
+      [C.cexp|vgroup_id_x * FUT_BLOCK_DIM * mulx
            + get_local_id(1)
            + (get_local_id(0) % mulx) * FUT_BLOCK_DIM
            |]
@@ -162,33 +162,63 @@ mapTranspose target kernel_name elem_type transpose_type =
       smallKernel
   where
     mkTranspose extra_params body =
-      [C.cfun|
-       __kernel void $id:kernel_name($params:params) {
-         $items:param_init
-         odata += odata_offset/sizeof($ty:elem_type);
-         idata += idata_offset/sizeof($ty:elem_type);
-         uint our_array_offset = get_group_id(2) * width * height;
-         odata += our_array_offset;
-         idata += our_array_offset;
-         $items:body
-       }|]
-        where params = [C.cparams|__global $ty:elem_type *odata,
-                             uint odata_offset,
-                             __global $ty:elem_type *idata,
-                             uint idata_offset,
-                             uint width,
-                             uint height,
-                             uint input_size,
-                             uint output_size
-                             |] ++ extra_params ++ shared_param
-              shared_param = case target of
-                TargetOpenCL -> [C.cparams|__local $ty:elem_type* block|]
-                TargetCuda -> []
-              param_init = case target of
-                TargetOpenCL -> []
-                TargetCuda ->
-                  [C.citems|volatile $ty:elem_type *block
-                    = ($ty:elem_type *)shared_mem;|]
+      case target of
+        TargetOpenCL ->
+          [C.cfun|
+           __kernel void $id:kernel_name($params:params) {
+             odata += odata_offset/sizeof($ty:elem_type);
+             idata += idata_offset/sizeof($ty:elem_type);
+             uint vgroup_id_x = get_group_id(0);
+             uint vgroup_id_y = get_group_id(1);
+             uint vgroup_id_z = get_group_id(2);
+             uint our_array_offset = vgroup_id_z * width * height;
+             __global $ty:elem_type *in = idata + our_array_offset;
+             __global $ty:elem_type *out = odata + our_array_offset;
+             $items:body
+           }|]
+        TargetCuda ->
+          [C.cfun|
+           __kernel void $id:kernel_name($params:params) {
+             volatile $ty:elem_type *block = ($ty:elem_type *)shared_mem;
+             odata += odata_offset/sizeof($ty:elem_type);
+             idata += idata_offset/sizeof($ty:elem_type);
+
+             for (uint vgroup_id_z = get_group_id(2);
+                  vgroup_id_z < num_vgroups_z;
+                  vgroup_id_z += get_num_groups(2)) {
+             for (uint vgroup_id_y = get_group_id(1);
+                  vgroup_id_y < num_vgroups_y;
+                  vgroup_id_y += get_num_groups(1)) {
+             for (uint vgroup_id_x = get_group_id(0);
+                  vgroup_id_x < num_vgroups_x;
+                  vgroup_id_x += get_num_groups(0)) {
+               uint our_array_offset = vgroup_id_z * width * height;
+               __global $ty:elem_type *in = idata + our_array_offset;
+               __global $ty:elem_type *out = odata + our_array_offset;
+               $items:body
+               barrier(CLK_LOCAL_MEM_FENCE);
+             }
+             }
+             }
+           }|]
+      where params = [C.cparams|__global $ty:elem_type *odata,
+                           uint odata_offset,
+                           __global $ty:elem_type *idata,
+                           uint idata_offset,
+                           uint width,
+                           uint height,
+                           uint input_size,
+                           uint output_size
+                           |] ++ extra_params ++ target_params
+            target_params = case target of
+              TargetOpenCL -> [C.cparams|__local $ty:elem_type* block|]
+              TargetCuda ->
+                [C.cparams|
+                  uint shared_offset, // always 0
+                  uint num_vgroups_x,
+                  uint num_vgroups_y,
+                  uint num_vgroups_z|]
+
     lowDimBody x_in_index y_in_index x_out_index y_out_index =
       [C.citems|
          uint x_index = $exp:x_in_index;
@@ -196,7 +226,7 @@ mapTranspose target kernel_name elem_type transpose_type =
          uint index_in = y_index * width + x_index;
          if(x_index < width && y_index < height && index_in < input_size)
          {
-           block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] = idata[index_in];
+           block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] = in[index_in];
          }
          barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -205,7 +235,7 @@ mapTranspose target kernel_name elem_type transpose_type =
          uint index_out = y_index * height + x_index;
          if(x_index < height && y_index < width && index_out < output_size)
          {
-           odata[index_out] = block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
+           out[index_out] = block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
          }
       |]
     smallKernel =
