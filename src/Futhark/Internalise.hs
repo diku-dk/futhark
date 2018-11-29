@@ -176,8 +176,26 @@ entryPoint params (retdecl, eret, crets) =
           [I.TypeDirect]
         entryPointType (te, t, ts) =
           [I.TypeOpaque desc $ length ts]
-          where desc = maybe (pretty t') pretty te
+          where desc = maybe (pretty t') typeExpOpaqueName te
                 t' = removeShapeAnnotations t `E.setUniqueness` Nonunique
+
+        -- | We remove dimension arguments such that we hopefully end
+        -- up with a simpler type name for the entry point.  The
+        -- intend is that if an entry point uses a type 'nasty [w] [h]',
+        -- then we should turn that into an opaque type just called
+        -- 'nasty'.  Also, we try to give arrays of opaques a nicer name.
+        typeExpOpaqueName (TEApply te TypeArgExpDim{} _) =
+          typeExpOpaqueName te
+        typeExpOpaqueName (TEArray te _ _) =
+          let (d, te') = withoutDims te
+          in "arr_" ++ typeExpOpaqueName te' ++
+             "_" ++ show (1 + d) ++ "d"
+        typeExpOpaqueName te = pretty te
+
+        withoutDims (TEArray te _ _) =
+          let (d, te') = withoutDims te
+          in (d+1, te')
+        withoutDims te = (0::Int, te)
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) loc) =
