@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+  * The `<-` symbol can no longer be used for in-place updates and
+    record updates (deprecated in 0.7.3).
+
 ### Changed
 
   * Entry points that accept a single tuple-typed parameter are no

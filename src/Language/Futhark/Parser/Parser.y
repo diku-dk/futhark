@@ -136,7 +136,6 @@ import Language.Futhark.Parser.Lexer
       '`'             { L $$ BACKTICK }
       entry           { L $$ ENTRY }
       '->'            { L $$ RIGHT_ARROW }
-      '<-'            { L $$ LEFT_ARROW }
       ':'             { L $$ COLON }
       '.'             { L $$ DOT }
       for             { L $$ FOR }
@@ -164,7 +163,7 @@ import Language.Futhark.Parser.Lexer
 %left '`'
 %right '->'
 %left with
-%left '=' '<-'
+%left '='
 %left '|>...'
 %right '<|...'
 %left '||...'
@@ -579,11 +578,6 @@ Exp2 :: { UncheckedExp }
 
      | Exp2 with FieldAccesses_ '=' Exp2
        { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
-
-     | Exp2 with FieldAccesses_ '<-' Exp2
-       { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
-     | Exp2 with '[' DimIndices ']' '<-' Exp2
-       { Update $1 $4 $7 (srcspan $1 $>) }
 
      | '\\' TypeParams FunParams1 maybeAscription(TypeExpTerm) '->' Exp
        { Lambda $2 (fst $3 : snd $3) $6 (fmap (flip TypeDecl NoInfo) $4) NoInfo (srcspan $1 $>) }
