@@ -450,9 +450,7 @@ void cuda_setup(struct cuda_context *ctx, const char *src_fragments[])
   free_list_init(&ctx->free_list);
 
   ctx->max_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
-  ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X) *
-                          device_query(ctx->dev, MAX_GRID_DIM_Y) *
-                          device_query(ctx->dev, MAX_GRID_DIM_Z);
+  ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
   ctx->max_tile_size = sqrt(ctx->max_block_size);
   ctx->max_threshold = 0;
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
