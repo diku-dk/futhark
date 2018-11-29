@@ -2,6 +2,8 @@
 
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 
+#define CL_SILENCE_DEPRECATION // For macOS.
+
 #ifdef __APPLE__
   #include <OpenCL/cl.h>
 #else
