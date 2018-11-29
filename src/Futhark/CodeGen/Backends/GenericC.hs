@@ -741,7 +741,7 @@ arrayLibraryFunctions space pt signed shape = do
   ctx_ty <- contextType
 
   headerDecl (ArrayDecl name)
-    [C.cedecl|struct $id:name;|]
+    [C.cedecl|struct $id:arr_name;|]
   headerDecl (ArrayDecl name)
     [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params);|]
   headerDecl (ArrayDecl name)
