@@ -5,6 +5,7 @@
 import json
 import sys
 import numpy as np
+from collections import OrderedDict
 
 class bcolors:
     HEADER = '\033[95m'
@@ -18,8 +19,8 @@ class bcolors:
 
 _, a_file, b_file = sys.argv
 
-a_json = json.load(open(a_file))
-b_json = json.load(open(b_file))
+a_json = json.load(open(a_file), object_pairs_hook=OrderedDict)
+b_json = json.load(open(b_file), object_pairs_hook=OrderedDict)
 
 speedups = {}
 
@@ -35,7 +36,7 @@ for prog,a_prog in a_json.items():
     else:
         a_prog_datasets = a_prog['datasets']
         b_prog_datasets = b_json[prog]['datasets']
-        speedups[prog] = {}
+        speedups[prog] = OrderedDict()
         for dataset,a_dataset_results in a_prog_datasets.items():
             if not dataset in b_prog_datasets:
                 print('In %s but not %s: program %s dataset %s' % (a_file, b_file, prog, dataset))

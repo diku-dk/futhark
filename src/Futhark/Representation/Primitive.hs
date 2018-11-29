@@ -68,6 +68,8 @@ module Futhark.Representation.Primitive
        , negativeIsh
        , primBitSize
        , primByteSize
+       , intByteSize
+       , floatByteSize
        , commutativeBinOp
 
        -- * Prettyprinting

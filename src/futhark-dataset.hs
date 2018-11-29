@@ -3,23 +3,21 @@
 -- specified type and shape.
 module Main (main) where
 
-import Control.Arrow (first)
 import Control.Monad
-import Control.Monad.State
+import Control.Monad.ST
 import qualified Data.Binary as Bin
-import qualified Data.ByteString.Lazy as BS
-import Data.Binary.IEEE754
-import Data.Binary.Put
-import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Lazy.Char8 as BS
 import qualified Data.Map.Strict as M
-import Data.List
 import qualified Data.Text as T
 import Data.Word
+import qualified Data.Vector.Unboxed.Mutable as UMVec
+import qualified Data.Vector.Unboxed as UVec
+import Data.Vector.Generic (freeze)
 
 import System.Console.GetOpt
 import System.Random
 
-import Language.Futhark.Syntax
+import Language.Futhark.Syntax hiding (Value, PrimValue(..), IntValue(..), FloatValue(..))
 import Language.Futhark.Attributes (UncheckedTypeExp, namesToPrimTypes)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
@@ -38,7 +36,7 @@ main = mainWithOptions initialDataOptions commandLineOptions "options..." f
                   case format config of
                     Text -> mapM_ (putStrLn . pretty) vs
                     Binary -> mapM_ (BS.putStr . Bin.encode) vs
-                    Type -> mapM_ (putStrLn . valueType) vs
+                    Type -> mapM_ (putStrLn . pretty . valueType) vs
           | otherwise =
               Just $ zipWithM_ ($) (optOrders config) $ map mkStdGen [optSeed config..]
         f _ _ =
@@ -124,121 +122,36 @@ setRangeOption tname set =
   where name = tname ++ "-bounds"
 
 tryMakeGenerator :: String -> Either String (RandomConfiguration -> OutputFormat -> StdGen  -> IO ())
-tryMakeGenerator t = do
-  t' <- toSimpleType =<< either (Left . show) Right (parseType name (T.pack t))
+tryMakeGenerator t
+  | Just vs <- readValues $ BS.pack t =
+      return $ \_ fmt _ -> mapM_ (putValue fmt) vs
+  | otherwise = do
+  t' <- toValueType =<< either (Left . show) Right (parseType name (T.pack t))
   return $ \conf fmt stdgen -> do
     let (v, _) = randomValue conf t' stdgen
-    case fmt of
-      Text -> printSimpleValueT v
-      Binary -> printSimpleValueB t' v
-      Type -> putStrLn t
+    putValue fmt v
   where name = "option " ++ t
+        putValue Text = putStrLn . pretty
+        putValue Binary = BS.putStr . Bin.encode
+        putValue Type = putStrLn . pretty . valueType
 
-data SimpleType = SimpleArray SimpleType Int
-                | SimplePrim PrimType
-                  deriving (Show)
-
-toSimpleType :: UncheckedTypeExp -> Either String SimpleType
-toSimpleType TETuple{} = Left "Cannot handle tuples yet."
-toSimpleType TERecord{} = Left "Cannot handle records yet."
-toSimpleType TEApply{} = Left "Cannot handle type applications yet."
-toSimpleType TEArrow{} = Left "Cannot generate functions."
-toSimpleType TEEnum{} = Left "Cannot handle enums yet."
-toSimpleType (TEUnique t _) = toSimpleType t
-toSimpleType (TEArray t d _) =
-  SimpleArray <$> toSimpleType t <*> constantDim d
+toValueType :: UncheckedTypeExp -> Either String ValueType
+toValueType TETuple{} = Left "Cannot handle tuples yet."
+toValueType TERecord{} = Left "Cannot handle records yet."
+toValueType TEApply{} = Left "Cannot handle type applications yet."
+toValueType TEArrow{} = Left "Cannot generate functions."
+toValueType TEEnum{} = Left "Cannot handle enums yet."
+toValueType (TEUnique t _) = toValueType t
+toValueType (TEArray t d _) = do
+  d' <- constantDim d
+  ValueType ds t' <- toValueType t
+  return $ ValueType (d':ds) t'
   where constantDim (ConstDim k) = Right k
         constantDim _ = Left "Array has non-constant dimension declaration."
-toSimpleType (TEVar (QualName [] v) _)
-  | Just t <- M.lookup v namesToPrimTypes = Right $ SimplePrim t
-toSimpleType (TEVar v _) =
+toValueType (TEVar (QualName [] v) _)
+  | Just t <- M.lookup v namesToPrimTypes = Right $ ValueType [] t
+toValueType (TEVar v _) =
   Left $ "Unknown type " ++ pretty v
-
-data SimpleValue = SimpleArrayValue [SimpleValue]
-                 | SimplePrimValue PrimValue
-                   deriving (Show)
-
--- Ordinary prettyprinting consumes too much memory, likely because it
--- manifests the string to print instead of doing it lazily, which is
--- a bad idea for giant values.  This is likely because it tries to do
--- a good job with respect to line wrapping and the like.  We opt to
--- do a bad job instead, but one that we can do much faster.
-printSimpleValueT :: SimpleValue -> IO ()
-printSimpleValueT = (>>putStrLn "") . flip evalStateT 0 . p
-  where elements_per_line = 20 :: Int
-
-        p (SimplePrimValue v) = do
-          maybeNewline
-          lift $ putStr $ pretty v
-        p (SimpleArrayValue []) =
-          lift $ putStr "[]"
-        p (SimpleArrayValue (v:vs)) = do
-          lift $ putStr "["
-          p v
-          forM_ vs $ \v' -> do
-            lift $ putStr ", "
-            p v'
-          lift $ putStr "]"
-
-        maybeNewline = do
-          i <- get
-          if i >= elements_per_line
-            then do lift $ putStrLn ""
-                    put 0
-            else put $ i + 1
-
-binaryFormatVersion :: Int
-binaryFormatVersion = 2
-
-printSimpleValueB :: SimpleType -> SimpleValue -> IO ()
-printSimpleValueB st sv =
-  BL.putStr $ runPut $ printHeader >> pSimpleValue sv
-
-  where
-    printHeader = do
-      Bin.put 'b'
-      putWord8 $ fromIntegral binaryFormatVersion
-      let dims = getDims st
-      putWord8 $ fromIntegral $ length dims
-      putElemType st
-      case sv of
-        SimplePrimValue _ -> return ()
-        SimpleArrayValue _ -> mapM_ (putWord64le . fromIntegral) dims
-
-    -- Simply calling @Bin.put (" i8" :: String)@ would cause a lot of bytes to
-    -- be written. Doing it this way will only write 4 bytes.
-    putElemType (SimplePrim (Signed Int8))  = mapM_ Bin.put ("  i8" :: String)
-    putElemType (SimplePrim (Signed Int16)) = mapM_ Bin.put (" i16" :: String)
-    putElemType (SimplePrim (Signed Int32)) = mapM_ Bin.put (" i32" :: String)
-    putElemType (SimplePrim (Signed Int64)) = mapM_ Bin.put (" i64" :: String)
-    putElemType (SimplePrim (Unsigned Int8))  = mapM_ Bin.put ("  u8" :: String)
-    putElemType (SimplePrim (Unsigned Int16)) = mapM_ Bin.put (" u16" :: String)
-    putElemType (SimplePrim (Unsigned Int32)) = mapM_ Bin.put (" u32" :: String)
-    putElemType (SimplePrim (Unsigned Int64)) = mapM_ Bin.put (" u64" :: String)
-    putElemType (SimplePrim (FloatType Float32)) = mapM_ Bin.put (" f32" :: String)
-    putElemType (SimplePrim (FloatType Float64)) = mapM_ Bin.put (" f64" :: String)
-    putElemType (SimplePrim Bool) = mapM_ Bin.put ("bool" :: String)
-    putElemType (SimpleArray ty _) = putElemType ty
-
-    getDims (SimplePrim _) = []
-    getDims (SimpleArray ty dim) = dim : getDims ty
-
-    pSimpleValue :: SimpleValue -> Put
-    pSimpleValue (SimplePrimValue pv) = p pv
-    pSimpleValue (SimpleArrayValue svs) = mapM_ pSimpleValue svs
-
-    p :: PrimValue -> Put
-    p (SignedValue (Int8Value v))    = putWord8    $ fromIntegral $ fromEnum v
-    p (SignedValue (Int16Value v))   = putWord16le $ fromIntegral $ fromEnum v
-    p (SignedValue (Int32Value v))   = putWord32le $ fromIntegral $ fromEnum v
-    p (SignedValue (Int64Value v))   = putWord64le $ fromIntegral $ fromEnum v
-    p (UnsignedValue (Int8Value v))  = putWord8    $ fromIntegral $ fromEnum v
-    p (UnsignedValue (Int16Value v)) = putWord16le $ fromIntegral $ fromEnum v
-    p (UnsignedValue (Int32Value v)) = putWord32le $ fromIntegral $ fromEnum v
-    p (UnsignedValue (Int64Value v)) = putWord64le $ fromIntegral $ fromEnum v
-    p (FloatValue (Float32Value v))  = putFloat32le v
-    p (FloatValue (Float64Value v))  = putFloat64le v
-    p (BoolValue v)                  = putWord8 $ if v then 1 else 0
 
 -- | Closed interval, as in @System.Random@.
 type Range a = (a, a)
@@ -287,63 +200,39 @@ initialRandomConfiguration = RandomConfiguration
   (minBound, maxBound) (minBound, maxBound) (minBound, maxBound) (minBound, maxBound)
   (0.0, 1.0) (0.0, 1.0)
 
-randomValue :: RandomConfiguration -> SimpleType -> StdGen -> (SimpleValue, StdGen)
-randomValue conf (SimplePrim (Signed Int8)) stdgen =
-  randomC conf i8Range stdgen
-randomValue conf (SimplePrim (Signed Int16)) stdgen =
-  randomC conf i16Range stdgen
-randomValue conf (SimplePrim (Signed Int32)) stdgen =
-  randomC conf i32Range stdgen
-randomValue conf (SimplePrim (Signed Int64)) stdgen =
-  randomC conf i64Range stdgen
+randomValue :: RandomConfiguration -> ValueType -> StdGen -> (Value, StdGen)
+randomValue conf (ValueType ds t) stdgen =
+  case t of
+    Signed Int8  -> gen  i8Range Int8Value
+    Signed Int16 -> gen i16Range Int16Value
+    Signed Int32 -> gen i32Range Int32Value
+    Signed Int64 -> gen i64Range Int64Value
+    Unsigned Int8  -> gen  u8Range Word8Value
+    Unsigned Int16 -> gen u16Range Word16Value
+    Unsigned Int32 -> gen u32Range Word32Value
+    Unsigned Int64 -> gen u64Range Word64Value
+    FloatType Float32 -> gen f32Range Float32Value
+    FloatType Float64 -> gen f64Range Float64Value
+    Bool -> gen (const (False,True)) BoolValue
+  where gen range final = randomVector (range conf) final ds stdgen
 
-randomValue conf (SimplePrim (Unsigned Int8)) stdgen =
-  randomC conf u8Range stdgen
-randomValue conf (SimplePrim (Unsigned Int16)) stdgen =
-  randomC conf u16Range stdgen
-randomValue conf (SimplePrim (Unsigned Int32)) stdgen =
-  randomC conf u32Range stdgen
-randomValue conf (SimplePrim (Unsigned Int64)) stdgen =
-  randomC conf u64Range stdgen
-
-randomValue _ (SimplePrim Bool) stdgen =
-  first (SimplePrimValue . BoolValue) $ random stdgen
-
-randomValue conf (SimplePrim (FloatType Float32)) stdgen =
-  randomC conf f32Range stdgen
-randomValue conf (SimplePrim (FloatType Float64)) stdgen =
-  randomC conf f64Range stdgen
-
-randomValue conf (SimpleArray t d) stdgen =
-  first SimpleArrayValue $ uncurry (flip (,)) $
-  mapAccumL f stdgen [0..d-1]
-  where f stdgen' _ = uncurry (flip (,)) $ randomValue conf t stdgen'
-
-class ToFuthark a where
-  toFuthark :: a -> SimpleValue
-
-instance ToFuthark Int8 where
-  toFuthark = SimplePrimValue . SignedValue . Int8Value
-instance ToFuthark Int16 where
-  toFuthark = SimplePrimValue . SignedValue . Int16Value
-instance ToFuthark Int32 where
-  toFuthark = SimplePrimValue . SignedValue . Int32Value
-instance ToFuthark Int64 where
-  toFuthark = SimplePrimValue . SignedValue . Int64Value
-instance ToFuthark Word8 where
-  toFuthark = SimplePrimValue . UnsignedValue . Int8Value . fromIntegral
-instance ToFuthark Word16 where
-  toFuthark = SimplePrimValue . UnsignedValue . Int16Value . fromIntegral
-instance ToFuthark Word32 where
-  toFuthark = SimplePrimValue . UnsignedValue . Int32Value . fromIntegral
-instance ToFuthark Word64 where
-  toFuthark = SimplePrimValue . UnsignedValue . Int64Value . fromIntegral
-instance ToFuthark Float where
-  toFuthark = SimplePrimValue . FloatValue . Float32Value
-instance ToFuthark Double where
-  toFuthark = SimplePrimValue . FloatValue . Float64Value
-
-randomC :: (ToFuthark a, Random a) =>
-           RandomConfiguration -> (RandomConfiguration -> Range a) -> StdGen
-        -> (SimpleValue, StdGen)
-randomC conf pick = first toFuthark . randomR (pick conf)
+randomVector :: (UMVec.Unbox v, Random v) =>
+                Range v
+             -> (UVec.Vector Int -> UVec.Vector v -> Value)
+             -> [Int] -> StdGen
+             -> (Value, StdGen)
+randomVector range final ds stdgen = runST $ do
+  -- USe some nice impure computation where we can preallocate a
+  -- vector of the desired size, populate it via the random number
+  -- generator, and then finally reutrn a frozen binary vector.
+  arr <- UMVec.new n
+  let fill stdgen' i
+        | i < n = do
+            let (v, stdgen'') = randomR range stdgen'
+            UMVec.write arr i v
+            fill stdgen'' $! i+1
+        | otherwise = do
+            arr' <- final (UVec.fromList ds) <$> freeze arr
+            return (arr', stdgen')
+  fill stdgen 0
+  where n = product ds
