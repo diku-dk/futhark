@@ -50,7 +50,9 @@ If ``input`` is preceded by ``random``, the text between the curly
 braces must consist of a sequence of Futhark types, including sizes in
 the case of arrays.  When ``futhark-test`` is run, a file located in a
 ``data/`` subdirectory, containing values of the indicated types and
-shapes is, automatically constructed with ``futhark-dataset``
+shapes is, automatically constructed with ``futhark-dataset``.  Apart
+from sizes, integer constants (without any type suffix) are also
+permitted.  These become ``ì32`` values.
 
 If ``input`` is followed by an ``@`` and a file name (which must not
 contain any whitespace) instead of curly braces, values will be read

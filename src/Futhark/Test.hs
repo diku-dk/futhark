@@ -29,6 +29,7 @@ module Futhark.Test
 import Control.Applicative
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.ByteString as SBS
+import Control.Exception (catch)
 import Control.Monad
 import Control.Monad.IO.Class
 import qualified Data.Map.Strict as M
@@ -53,14 +54,17 @@ import Text.Regex.TDFA
 import System.Directory
 import System.Exit
 import System.Process.ByteString (readProcessWithExitCode)
+import System.IO (withFile, IOMode(..), hFileSize)
+import System.IO.Error
 
 import Prelude
 
 import Futhark.Analysis.Metrics
-import Futhark.Util.Pretty (pretty, prettyText)
+import Futhark.Representation.Primitive (IntType(..), FloatType(..), intByteSize, floatByteSize)
 import Futhark.Test.Values
 import Futhark.Util (directoryContents)
-import Language.Futhark.Syntax (PrimType(..), IntType(..), FloatType(..))
+import Futhark.Util.Pretty (pretty, prettyText)
+import Language.Futhark.Syntax (PrimType(..), Int32)
 
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
@@ -132,6 +136,8 @@ data Values = Values [Value]
 data GenValue = GenValue [Int] PrimType
                 -- ^ Generate a value of the given rank and primitive
                 -- type.  Scalars are considered 0-ary arrays.
+              | GenInt Int32
+                -- ^ A fixed non-randomised integer.
               deriving (Show)
 
 -- | A prettyprinted representation of type of value produced by a
@@ -139,6 +145,8 @@ data GenValue = GenValue [Int] PrimType
 genValueType :: GenValue -> String
 genValueType (GenValue ds t) =
   concatMap (\d -> "[" ++ show d ++ "]") ds ++ pretty t
+genValueType (GenInt x) =
+  show x ++ "i32"
 
 -- | How a test case is expected to terminate.
 data ExpectedResult values
@@ -229,7 +237,8 @@ parseRunCases = parseRunCases' (0::Int)
           where vs' = case unwords (map pretty vs) of
                         s | length s > 50 -> take 50 s ++ "..."
                           | otherwise     -> s
-        desc _ (GenValues gens) = intercalate "_" $ map genValueType gens
+        desc i (GenValues gens) =
+          "#" ++ show i ++ " (\"" ++ unwords (map genValueType gens) ++ "\")"
 
 parseExpectedResult :: Parser (ExpectedResult Values)
 parseExpectedResult =
@@ -250,7 +259,9 @@ parseRandomValues :: Parser Values
 parseRandomValues = GenValues <$> between (lexstr "{") (lexstr "}") (many parseGenValue)
 
 parseGenValue :: Parser GenValue
-parseGenValue = GenValue <$> many dim <*> parsePrimType
+parseGenValue = choice [ GenValue <$> many dim <*> parsePrimType
+                       , lexeme $ GenInt . read <$> some (satisfy isDigit)
+                       ]
   where dim = between (lexstr "[") (lexstr "]") $
               lexeme $ read <$> some (satisfy isDigit)
 
@@ -445,14 +456,21 @@ getValuesBS dir (InFile file) =
   where file' = dir </> file
         readAndDecompress = do s <- BS.readFile file'
                                E.evaluate $ decompress s
-getValuesBS dir (GenValues gens) = do
-  exists <- liftIO $ doesFileExist $ dir </> file
-  unless exists $ liftIO $ do
-    s <- genValues gens
+getValuesBS dir (GenValues gens) =
+  mconcat <$> mapM (getGenBS dir) gens
+
+getGenBS :: MonadIO m => FilePath -> GenValue -> m BS.ByteString
+getGenBS dir gen = do
+  exists_and_proper_size <- liftIO $
+    withFile (dir </> file) ReadMode (fmap (== genFileSize gen) . hFileSize)
+    `catch` \ex -> if isDoesNotExistError ex then return False
+                   else E.throw ex
+  unless exists_and_proper_size $ liftIO $ do
+    s <- genValues [gen]
     createDirectoryIfMissing True $ takeDirectory $ dir </> file
     SBS.writeFile (dir </> file) s
   getValuesBS dir $ InFile file
-  where file = "data" </> genFileName gens
+  where file = "data" </> genFileName gen
 
 genValues :: [GenValue] -> IO SBS.ByteString
 genValues gens = do
@@ -466,5 +484,18 @@ genValues gens = do
   where args = "-b" : concatMap argForGen gens
         argForGen g = ["-g", genValueType g]
 
-genFileName :: [GenValue] -> FilePath
-genFileName gens = intercalate "_" (map genValueType gens) ++ ".in"
+genFileName :: GenValue -> FilePath
+genFileName gen = genValueType gen ++ ".in"
+
+-- | Compute the expected size of the file.  We use this to check
+-- whether an existing file is broken/truncated.
+genFileSize :: GenValue -> Integer
+genFileSize = genSize
+  where header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
+        genSize (GenValue ds t) = header_size + toInteger (length ds) * 8 +
+                                  product (map toInteger ds) * primSize t
+        genSize (GenInt _) = header_size + primSize (Signed Int32)
+        primSize (Signed it) = intByteSize it
+        primSize (Unsigned it) = intByteSize it
+        primSize (FloatType ft) = floatByteSize ft
+        primSize Bool = 1
