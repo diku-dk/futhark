@@ -282,7 +282,7 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src)
   }
 
   nvrtcResult res = nvrtcCompileProgram(prog, n_opts, opts);
-  if (res != NVRTC_SUCCESS || ctx->cfg.debugging) {
+  if (res != NVRTC_SUCCESS) {
     size_t log_size;
     if (nvrtcGetProgramLogSize(prog, &log_size) == NVRTC_SUCCESS) {
       char *log = malloc(log_size);
