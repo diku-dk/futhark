@@ -76,7 +76,6 @@ tokens :-
   ","                      { tokenC COMMA }
   "_"                      { tokenC UNDERSCORE }
   "->"                     { tokenC RIGHT_ARROW }
-  "<-"                     { tokenC LEFT_ARROW }
   ":"                      { tokenC COLON }
   "."                      { tokenC DOT }
   "\"                      { tokenC BACKSLASH }
@@ -335,7 +334,6 @@ data Token = ID Name
            | COMMA
            | UNDERSCORE
            | RIGHT_ARROW
-           | LEFT_ARROW
 
            | EQU
            | ASTERISK

@@ -6,9 +6,9 @@
 let swap_inplace (n : i32) : *[]#foo | #bar =
   let x = replicate n #foo ++ replicate n #bar
   in loop x for i < 2*n do
-      x with [i] <- match x[i]
-                      case #foo -> #bar
-                      case #bar -> #foo
+      x with [i] = match x[i]
+                   case #foo -> #bar
+                   case #bar -> #foo
                     
 let f (x : #foo | #bar) : i32 =
   match x
