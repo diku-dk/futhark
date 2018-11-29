@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-test` and `futhark-bench` now support generating random
     test data.
 
+  * The library backends now generate proper names for arrays of
+    opaque values.
+
 ### Removed
 
   * The `<-` symbol can no longer be used for in-place updates and

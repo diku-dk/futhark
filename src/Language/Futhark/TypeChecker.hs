@@ -477,22 +477,30 @@ nastyType t@Array{} = nastyType $ stripArray 1 t
 nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
-nastyReturnType _ (Arrow _ _ t1 t2) = nastyType t1 || nastyReturnType Nothing t2
+nastyReturnType _ (Arrow _ _ t1 t2) =
+  nastyType t1 || nastyReturnType Nothing t2
+nastyReturnType (Just te) _
+  | niceTypeExp te = False
 nastyReturnType te t
   | Just ts <- isTupleRecord t =
       case te of
-        Just (TEVar (QualName [] _) _) -> False
         Just (TETuple tes _) -> or $ zipWith nastyType' (map Just tes) ts
         _ -> any nastyType ts
   | otherwise = nastyType' te t
-  where nastyType' (Just (TEVar (QualName [] _) _)) _ = False
+  where nastyType' (Just te') _ | niceTypeExp te' = False
         nastyType' _ t' = nastyType t'
 
 nastyParameter :: Pattern -> Bool
 nastyParameter p = nastyType (patternType p) && not (ascripted p)
-  where ascripted (PatternAscription _ (TypeDecl (TEVar (QualName [] _) _) _) _) = True
+  where ascripted (PatternAscription _ (TypeDecl te _) _) = niceTypeExp te
         ascripted (PatternParens p' _) = ascripted p'
         ascripted _ = False
+
+niceTypeExp :: TypeExp VName -> Bool
+niceTypeExp (TEVar (QualName [] _) _) = True
+niceTypeExp (TEApply te TypeArgExpDim{} _) = niceTypeExp te
+niceTypeExp (TEArray te _ _) = niceTypeExp te
+niceTypeExp _ = False
 
 checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
 checkOneDec (ModDec struct) = do
