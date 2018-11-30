@@ -190,7 +190,7 @@ parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
   where parseTag = T.pack <$> lexeme (some $ satisfy tagConstituent)
 
 tagConstituent :: Char -> Bool
-tagConstituent c = isAlphaNum c || c == '_'
+tagConstituent c = isAlphaNum c || c == '_' || c == '-'
 
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
