@@ -32,6 +32,7 @@ compilerMain :: cfg -- ^ Initial configuration.
              -- ^ The action to take on the result of the pipeline.
              -> IO ()
 compilerMain cfg cfg_opts name desc pipeline doIt = do
+  hSetEncoding stdout utf8
   hSetEncoding stderr utf8
   reportingIOErrors $
     mainWithOptions (newCompilerConfig cfg) (commandLineOptions ++ map wrapOption cfg_opts)
