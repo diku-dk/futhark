@@ -13,6 +13,7 @@ import Control.Monad
 import Data.Maybe
 import System.FilePath
 import System.Console.GetOpt
+import System.IO
 
 import Futhark.Pipeline
 import Futhark.Compiler
@@ -30,10 +31,11 @@ compilerMain :: cfg -- ^ Initial configuration.
              -> (cfg -> CompilerMode -> FilePath -> Prog lore -> FutharkM ())
              -- ^ The action to take on the result of the pipeline.
              -> IO ()
-compilerMain cfg cfg_opts name desc pipeline doIt =
+compilerMain cfg cfg_opts name desc pipeline doIt = do
+  hSetEncoding stderr utf8
   reportingIOErrors $
-  mainWithOptions (newCompilerConfig cfg) (commandLineOptions ++ map wrapOption cfg_opts)
-  "options... program" inspectNonOptions
+    mainWithOptions (newCompilerConfig cfg) (commandLineOptions ++ map wrapOption cfg_opts)
+    "options... program" inspectNonOptions
   where inspectNonOptions [file] config = Just $ compile config file
         inspectNonOptions _      _      = Nothing
 
