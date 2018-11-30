@@ -187,8 +187,10 @@ descriptionSeparator = "=="
 
 parseTags :: Parser [T.Text]
 parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
-  where parseTag = T.pack <$> lexeme (some $ satisfy constituent)
-        constituent c = not (isSpace c) && c /= '}'
+  where parseTag = T.pack <$> lexeme (some $ satisfy tagConstituent)
+
+tagConstituent :: Char -> Bool
+tagConstituent c = isAlphaNum c || c == '_'
 
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
@@ -208,7 +210,7 @@ parseEntryPoints = (lexstr "entry:" *> many entry <* space) <|> pure ["main"]
 
 parseRunTags :: Parser [String]
 parseRunTags = many parseTag
-  where parseTag = try $ lexeme $ do s <- some $ satisfy isAlphaNum
+  where parseTag = try $ lexeme $ do s <- some $ satisfy tagConstituent
                                      guard $ s `notElem` ["input", "structure", "warning"]
                                      return s
 

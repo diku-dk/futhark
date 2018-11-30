@@ -88,9 +88,9 @@ This section can contain arbitrary tags that classify the benchmark::
 
   tags { names... }
 
-Tag are sequences of alphanumeric characters, with each tag seperated
-by whitespace.  Any program with the ``disable`` tag is ignored by
-``futhark-test``.
+Tag are sequences of alphanumeric characters and semicolons, with each
+tag seperated by whitespace.  Any program with the ``disable`` tag is
+ignored by ``futhark-test``.
 
 Another optional directive is ``entry``, which specifies the entry
 point to be used for testing.  This is useful for writing programs
