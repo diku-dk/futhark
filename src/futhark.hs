@@ -323,7 +323,10 @@ incVerbosity file cfg =
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
 main :: IO ()
-main = mainWithOptions newConfig commandLineOptions "options... program" compile
+main = do
+  hSetEncoding stdout utf8
+  hSetEncoding stderr utf8
+  mainWithOptions newConfig commandLineOptions "options... program" compile
   where compile [file] config =
           Just $ do
             res <- runFutharkM (m file config) $
