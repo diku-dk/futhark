@@ -161,17 +161,17 @@ mapTranspose kernel_name elem_type transpose_type =
     mkTranspose extra_params body =
       [C.cfun|
        __kernel void $id:kernel_name($params:params) {
-         odata += odata_offset/sizeof($ty:elem_type);
-         idata += idata_offset/sizeof($ty:elem_type);
          uint our_array_offset = get_group_id(2) * width * height;
-         odata += our_array_offset;
-         idata += our_array_offset;
+         uint odata_offset =
+           basic_odata_offset/sizeof($ty:elem_type) + our_array_offset;
+         uint idata_offset =
+           basic_idata_offset/sizeof($ty:elem_type) + our_array_offset;
          $items:body
        }|]
         where params = [C.cparams|__global $ty:elem_type *odata,
-                             uint odata_offset,
+                             uint basic_odata_offset,
                              __global $ty:elem_type *idata,
-                             uint idata_offset,
+                             uint basic_idata_offset,
                              uint width,
                              uint height,
                              uint input_size,
@@ -185,7 +185,8 @@ mapTranspose kernel_name elem_type transpose_type =
          uint index_in = y_index * width + x_index;
          if(x_index < width && y_index < height && index_in < input_size)
          {
-           block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] = idata[index_in];
+           block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] =
+             idata[idata_offset + index_in];
          }
          barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -194,15 +195,16 @@ mapTranspose kernel_name elem_type transpose_type =
          uint index_out = y_index * height + x_index;
          if(x_index < height && y_index < width && index_out < output_size)
          {
-           odata[index_out] = block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
+           odata[odata_offset + index_out] =
+             block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
          }
       |]
     smallKernel =
       [C.cfun|
          __kernel void $id:kernel_name(__global $ty:elem_type *odata,
-                                      uint odata_offset,
+                                      uint basic_odata_offset,
                                       __global $ty:elem_type *idata,
-                                      uint idata_offset,
+                                      uint basic_idata_offset,
                                       uint num_arrays,
                                       uint width,
                                       uint height,
@@ -212,18 +214,15 @@ mapTranspose kernel_name elem_type transpose_type =
            uint x_index = get_global_id(0) % (height*width) / height;
            uint y_index = get_global_id(0) % height;
 
-           // Adjust the input and output arrays with the basic offset.
-           odata += odata_offset/sizeof($ty:elem_type);
-           idata += idata_offset/sizeof($ty:elem_type);
-
-           // Adjust the input and output arrays.
-           odata += our_array_offset;
-           idata += our_array_offset;
+           uint odata_offset =
+             basic_odata_offset/sizeof($ty:elem_type) + our_array_offset;
+           uint idata_offset =
+             basic_idata_offset/sizeof($ty:elem_type) + our_array_offset;
 
            // Read and write the element.
            uint index_in = y_index * width + x_index;
            uint index_out = x_index * height + y_index;
            if (get_global_id(0) < input_size) {
-               odata[index_out] = idata[index_in];
+               odata[odata_offset + index_out] = idata[idata_offset + index_in];
            }
          }|]
