@@ -317,12 +317,12 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
                           S.unions (map freeInStm var_ind_stmts),
     -- 7. We assume (check) for simplicity that all accumulator initializers
     --     of the outer stream are invariant to the z parallel dimension.
-    loop_ini_vs <- mapMaybe getVarNameFromSE accs_o_p,
+    loop_ini_vs <- subExpVars accs_o_p,
     all (not . variantToOuterDim variance gidz) loop_ini_vs,
     -- 8. We assume that all results of the inner-stream body are variables
     --    (for simplicity); they should have been simplified anyways if not!
     loop_res0 <- bodyResult body_i,
-    loop_res  <- mapMaybe getVarNameFromSE loop_res0,
+    loop_res  <- subExpVars loop_res0,
     length loop_res == length loop_res0 = do
   -- I. After all these conditions, we finally start by partitioning
   --    the stream's accumulators and results into the ones that are
@@ -596,18 +596,9 @@ transfVarIndStm _ _ _ _ = return Nothing
 --- HELPES ---
 --------------
 
-getVarNameFromSE :: SubExp -> Maybe VName
-getVarNameFromSE (Var nm)     = Just nm
-getVarNameFromSE (Constant _) = Nothing
 -- | translates an LParam to an FParam
 translParamToFParam :: LParam InKernel -> FParam InKernel
-translParamToFParam p =
-  Param { paramName = paramName p, paramAttr = fp_attr}
-  where fp_attr =
-          case paramAttr p of
-            Prim  ptp       -> Prim ptp
-            Array ptp shp _ -> Array ptp shp Nonunique
-            Mem   se  spc   -> Mem se spc
+translParamToFParam = fmap (`toDecl` Nonunique)
 
 -- | Tries to identified the following pattern:
 --   code folowed by a group stream followed by
