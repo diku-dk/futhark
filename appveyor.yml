@@ -12,6 +12,7 @@ platform:
   - x64
 cache:
 - "%STACK_ROOT%"
+- .stack-work
 
 install:
  - set PATH=%CD%\_stack;C:\msys64\usr\bin;%PATH%
