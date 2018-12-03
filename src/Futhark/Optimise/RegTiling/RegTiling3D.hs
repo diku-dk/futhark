@@ -181,22 +181,22 @@ doRegTiling3D (Let pat aux (Op old_kernel))
       -- add the in-place updates
       epilogue <- mapM (mkEpilogue (reg_tile,mm) space strm_res_var loop_var_res) $
                        zip3 ker_patels kres kertp
-      let (scratch_if_stmts, krestp') = unzip epilogue
-          (scratch_stmts, if_stmts2) = unzip $ catMaybes scratch_if_stmts
-          if_stmts = concat if_stmts2
-          kstms' = stmsFromList $ mask_stm : mm_stmt : stm_loop : if_stmts
+      let (scratch_if_stms, krestp') = unzip epilogue
+          (scratch_stms, if_stms2) = unzip $ catMaybes scratch_if_stms
+          if_stms = concat if_stms2
+          kstms' = stmsFromList $ mask_stm : mm_stmt : stm_loop : if_stms
           (kres', kertp') = unzip krestp'
           ker_body = KernelBody () kstms' kres'
           new_ker = Op $ Kernel kerhint kspace' kertp' ker_body
-          extra_stmts = space_stms <> stmsFromList (scratch_stmts ++ manif_stms)
+          extra_stms = space_stms <> stmsFromList (scratch_stms ++ manif_stms)
 --      let new_ker' = trace ("3D-Tilable Kernel: " ++ pretty old_kernel ++
 --                               "\n code 1 is:\n" ++ concatMap pretty code1 ++
 --                               "\n 3dtilable stream is: \n" ++ pretty stream_stmt ++
 --                               "\n code2 is: \n" ++ concatMap pretty code2 ++
 --                               "\n resulted kernel: \n" ++ pretty new_ker ++
---                               "\n extra stmts: \n" ++ concatMap pretty (stmsToList extra_stmts)
+--                               "\n extra stms: \n" ++ concatMap pretty (stmsToList extra_stms)
 --                           ) new_ker
-      return $ Just (extra_stmts, Let pat aux new_ker)
+      return $ Just (extra_stms, Let pat aux new_ker)
   where -- | Checks that the statement is a slice that produces one of the
         --   streamed arrays. Also that the streamed array is one dimensional.
         --   Accumulates the information in a table for later use.
@@ -285,10 +285,10 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
     --    mapping it as a result-loop variant variable.
     accs_i_f' <- map translParamToFParam accs_i_f,
     -- 5. We break the "loop" statements into two parts:
-    --      a) the ones invariant to the z parallel dimension `invar_out_stmts`,
-    --      b) the ones variant   to the z parallel dimension `var_out_stmts`, and
-    --      c) the ones corresponding to indexing operations on variant arrays `var_ind_stmts`.
-    (invar_out_stmts, var_ind_stmts, var_out_stmts) <-
+    --      a) the ones invariant to the z parallel dimension `invar_out_stms`,
+    --      b) the ones variant   to the z parallel dimension `var_out_stms`, and
+    --      c) the ones corresponding to indexing operations on variant arrays `var_ind_stms`.
+    (invar_out_stms, var_ind_stms, var_out_stms) <-
       foldl (\ (acc_inv, acc_inds, acc_var) stmt ->
                 let nm = patElemName $ head $ patternValueElements $ stmPattern stmt
                 in  if not $ variantToOuterDim variance gidz nm
@@ -301,11 +301,11 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
                            _ -> (acc_inv,acc_inds,stmt:acc_var)
             ) ([],[],[]) $ reverse $ stmsToList $ bodyStms body_i,
     -- 6. We check that the variables used in the index statements referring to
-    --    streamed arrays that are variant to the z parallel dimension (`var_ind_stmts`)
-    --    depend only on variables defined in the invariant stmts to the z parallel dimension.
-    var_nms <- concatMap (patternNames . stmPattern) var_out_stmts,
+    --    streamed arrays that are variant to the z parallel dimension (`var_ind_stms`)
+    --    depend only on variables defined in the invariant stms to the z parallel dimension.
+    var_nms <- concatMap (patternNames . stmPattern) var_out_stms,
     null $ S.intersection (S.fromList var_nms) $
-                          S.unions (map freeInStm var_ind_stmts),
+                          S.unions (map freeInStm var_ind_stms),
     -- 7. We assume (check) for simplicity that all accumulator initializers
     --     of the outer stream are invariant to the z parallel dimension.
     loop_ini_vs <- subExpVars accs_o_p,
@@ -324,29 +324,29 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
   -- II. Transform the statements invariant to the z-parallel dimension
   --     so that they perform indexing in the global arrays rather than
   --     in the streamed arrays, i.e., eliminate the indirection.
-  inv_stmts0 <- mapM (transfInvIndStm arr_tab' loop_ind_nm) invar_out_stmts
-  let inv_stmts = concat inv_stmts0
+  inv_stms0 <- mapM (transfInvIndStm arr_tab' loop_ind_nm) invar_out_stms
+  let inv_stms = concat inv_stms0
   -- III. the index-statements variant to the z-parallel dimension are
   --      transformed to combined regions.
   m <- newVName "m"
-  ind_stmts0 <- foldM (transfVarIndStm arr_tab' (reg_tile,loop_ind_nm,local_tid,group_size,m,m_M))
-                      (Just ([],M.empty)) $ reverse var_ind_stmts
-  case ind_stmts0 of
+  ind_stms0 <- foldM (transfVarIndStm arr_tab' (reg_tile,loop_ind_nm,local_tid,group_size,m,m_M))
+                      (Just ([],M.empty)) $ reverse var_ind_stms
+  case ind_stms0 of
     Nothing -> return Nothing
-    Just (ind_stmts, subst_tab) -> do
+    Just (ind_stms, subst_tab) -> do
       -- IV. Add statement `let m = mm + local_tid`
       --     Then perform the substitution `gidz -> m` on the combine regions.
       let m_stmt = mkLet [] [Ident m $ Prim int32] $
                 BasicOp $ BinOp (Add Int32) (Var mm) (Var local_tid)
           tab_z_m_comb = M.insert gidz m M.empty
-          ind_stmts' = m_stmt : map (substituteNames tab_z_m_comb) ind_stmts
+          ind_stms' = m_stmt : map (substituteNames tab_z_m_comb) ind_stms
 
       -- V. We clone the variant statements regTile times and enclose
       --    each one in a if-then-else testing whether `mm + local_id < m_M`
       --    TODO: check that the statements do not involve In-Place updates!
       let loop_var_p_i_r' = map (\(x,y,z,_)->(x,y,z)) loop_var_p_i_r
       if_ress <- mapM (cloneVarStms subst_tab (mask,loop_ind_nm,mm,m_M,gidz)
-                                     loop_var_p_i_r' var_out_stmts) [0..reg_tile-1]
+                                     loop_var_p_i_r' var_out_stms) [0..reg_tile-1]
       -- VI. build the loop-variant vars/res/inis
       let (if_stmt_clones0, var_ress_pars) = unzip if_ress
           if_stmt_clones = concat if_stmt_clones0
@@ -362,10 +362,10 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
       --        it dependent on the loop index so it cannot be hoisted!
       ind_bar <- newVName "loop_ind"
       let bar_stmt = mkLet [] [Ident loop_ind_nm $ Prim int32] $ Op (Barrier [Var ind_bar])
-          stmts_body_i' = bar_stmt : inv_stmts ++ ind_stmts' ++ if_stmt_clones
+          stms_body_i' = bar_stmt : inv_stms ++ ind_stms' ++ if_stmt_clones
           form = ForLoop ind_bar Int32 w_o []
           body_i' = Body (bodyAttr body_i)
-                         (stmsFromList stmts_body_i') $
+                         (stmsFromList stms_body_i') $
                          map Var loop_ress
           myloop = DoLoop [] (zip loop_form_acc loop_inis_acc) form body_i'
           -- myloop = DoLoop [] (zip accs_i_f' accs_o_p) form body_i'
@@ -389,7 +389,7 @@ translateStreamsToLoop _ _ _ _ _ _ _ _ = return Nothing
 cloneVarStms :: M.Map VName (VName,Type) -> (VName, VName, VName, SubExp, VName)
               -> [(FParam InKernel, SubExp, VName)] -> [Stm InKernel]
               -> Int32 -> TileM ([Stm InKernel], [(VName,FParam InKernel)])
-cloneVarStms subst_tab (mask,loop_ind,mm,m_M,gidz) loop_info var_out_stmts i = do
+cloneVarStms subst_tab (mask,loop_ind,mm,m_M,gidz) loop_info var_out_stms i = do
   let (loop_par_origs, loop_inis, body_res_origs) = unzip3 loop_info
   body_res_clones <- mapM (\x -> newVName $ baseString x ++ "_clone") body_res_origs
   loop_par_nm_clones <- mapM (\x -> newVName $ baseString (paramName x) ++ "_clone") loop_par_origs
@@ -408,7 +408,7 @@ cloneVarStms subst_tab (mask,loop_ind,mm,m_M,gidz) loop_info var_out_stmts i = d
       m_stmt_other =
         mkLet [] [Ident m $ Prim int32] $
               BasicOp $ BinOp (Add Int32) (Var mm) (Var ii)
-      read_sh_stmts =
+      read_sh_stms =
         map (\ (scal,(sh_arr, el_tp)) ->
                   mkLet [] [Ident scal el_tp] $
                         BasicOp $ Index sh_arr [DimFix i_se]
@@ -416,19 +416,19 @@ cloneVarStms subst_tab (mask,loop_ind,mm,m_M,gidz) loop_info var_out_stmts i = d
       tab_z_m_other = foldl (\tab (old,new) -> M.insert (paramName old) new tab)
                             (M.insert gidz m M.empty) $
                             zip loop_par_origs loop_par_nm_clones
-      var_out_stmts' = map (substituteNames tab_z_m_other) $
-                           read_sh_stmts ++ var_out_stmts
+      var_out_stms' = map (substituteNames tab_z_m_other) $
+                           read_sh_stms ++ var_out_stms
   cond_nm <- newVName "out3_inbounds"
   -- if the statements are simple, i.e., "safe", then do not
   -- encapsulate them in an if-then-else; this will result in
   -- significant performance gains.
-  let simple = all simpleStm var_out_stmts
+  let simple = all simpleStm var_out_stms
   let cond_stm  = if simple
                   then mkLet [] [Ident cond_nm $ Prim Bool] $
                           BasicOp $ SubExp (Constant $ BoolValue True)
                   else mkCondStmt m_M m cond_nm
       -- TODO: we need to uniquely rename the then/else bodies!
-  then_body <- renameBody $ Body () (stmsFromList var_out_stmts') (map Var body_res_origs)
+  then_body <- renameBody $ Body () (stmsFromList var_out_stms') (map Var body_res_origs)
   let else_body = Body () mempty loop_inis
       if_stmt = mkLet [] (zipWith Ident body_res_clones res_types) $
                   If (Var cond_nm) then_body else_body $
@@ -463,9 +463,9 @@ simpleStm _ = False
 --     4. @ker_parels@: the pattern elements of the kernel statement
 --     5. @ker_res@: one of the kernel result
 --   Result: None if the @ker_res@ does not correspond to a z-variant loop result
---           Just (scratch_stm, if_stmts, res_ip_arr_nm) otherwise, where
+--           Just (scratch_stm, if_stms, res_ip_arr_nm) otherwise, where
 --     1. @scratch_stm@ is the scratch statement that needs to be placed before kernel call
---     2. @if_stmts@ is the series of z-variant (unrolled) in-place updates, which are
+--     2. @if_stms@ is the series of z-variant (unrolled) in-place updates, which are
 --          protected by if-then-else statements
 --     3. @res_ip_arr_nm@ is the name of the result array
 mkEpilogue :: (Int32,VName) -> KernelSpace -> [PatElem InKernel] -> [[PatElem InKernel]]
@@ -482,8 +482,8 @@ mkEpilogue (reg_tile,mm) space strm_res_vars loop_var_ress
   scrtch_arr_nm <- newVName $ baseString res_arr_nm0 ++ "_0"
   let scratch_stm = mkLet [] [Ident scrtch_arr_nm unique_arr_tp] $
                           BasicOp $ Scratch ptp $ arrayDims unique_arr_tp
-  (lst_arr_nm, if_stmts) <-
-    foldM (\ (curr_arr_nm, stmts) (x,i) -> do
+  (lst_arr_nm, if_stms) <-
+    foldM (\ (curr_arr_nm, stms) (x,i) -> do
             new_arr_nm_in <- newVName $ baseString res_arr_nm0 ++ "_" ++ pretty i ++ "_in"
             new_arr_nm_ot <- newVName $ baseString res_arr_nm0 ++ "_" ++ pretty i ++ "_out"
             m <- newVName "m"
@@ -500,9 +500,9 @@ mkEpilogue (reg_tile,mm) space strm_res_vars loop_var_ress
                 if_stm = mkLet [] [Ident new_arr_nm_ot unique_arr_tp] $
                             If (Var cond_nm) then_body else_body $
                                IfAttr (staticShapes [unique_arr_tp]) IfFallback
-            return (new_arr_nm_ot, stmts++[m_stm,c_stm,if_stm])
+            return (new_arr_nm_ot, stms++[m_stm,c_stm,if_stm])
           ) (scrtch_arr_nm, []) $ zip loop_var_res [0..reg_tile-1]
-  return (Just (scratch_stm, if_stmts), (KernelInPlaceReturn lst_arr_nm,unique_arr_tp))
+  return (Just (scratch_stm, if_stms), (KernelInPlaceReturn lst_arr_nm,unique_arr_tp))
 mkEpilogue _ _ _ _ (_, ker_res, ker_tp) = return (Nothing, (ker_res,ker_tp))
 --  let outer_slice = map (\(gid,_) -> DimFix gid) outer_dims
 --  let inner_slice = [DimFix gidy, DimFix gidx]
@@ -510,7 +510,7 @@ mkEpilogue _ _ _ _ (_, ker_res, ker_tp) = return (Nothing, (ker_res,ker_tp))
   -- inpl_arr_nms <- mapM (\_ -> newVName "res_3dregtile") [0..regTile-1]
   -- let res_nm0 = first inpl_arr_nms
   -- let scratch_stm = Scratch PrimType ip_arr_sizes
---  inplace_stmts_nms <-
+--  inplace_stms_nms <-
 --    mapM (\ (PatElem nm atr, res_nm) ->
 --            let inpl_exp = Update nm (Slice SubExp) SubExp
 --         ) $ zip loop_var_res strm_res_var
@@ -559,7 +559,7 @@ transfVarIndStm :: M.Map VName (VName, Slice SubExp, Type)
                 -> TileM (Maybe ([Stm InKernel],M.Map VName (VName,Type)))
 transfVarIndStm tab (reg_tile,loop_ind,local_tid,group_size,m,m_M) acc
                     stm@(Let ptt _ (BasicOp (Index arr_nm [DimFix _])))
-  | Just (tstmts,stab) <- acc,
+  | Just (tstms,stab) <- acc,
     Just (par_arr, par_slc@(_:_), _) <- M.lookup arr_nm tab,
     DimSlice beg _ strd <- last par_slc,
     [pat_el] <- patternValueElements ptt,
@@ -567,20 +567,20 @@ transfVarIndStm tab (reg_tile,loop_ind,local_tid,group_size,m,m_M) acc
     pat_el_nm <- patElemName pat_el,
     Prim _ <- el_tp = do
   -- compute the index into the global array
-  stmts3 <- helper3Stms loop_ind strd beg par_slc par_arr stm
-  let glb_ind_stmts = stmsFromList stmts3
+  stms3 <- helper3Stms loop_ind strd beg par_slc par_arr stm
+  let glb_ind_stms = stmsFromList stms3
   -- set up the combine part
   sh_arr_1d <- newVName $ baseString par_arr ++ "_sh_1d"
   cid <- newVName "cid"
   let block_cspace = combineSpace [(cid,group_size)]--reg_tile_se
       comb_exp = Op $ Combine block_cspace [el_tp]
                     [(local_tid, mkRegTileSe reg_tile), (m,m_M)] $
-                    Body () glb_ind_stmts [Var pat_el_nm]
+                    Body () glb_ind_stms [Var pat_el_nm]
       sh_arr_pe = PatElem sh_arr_1d $
                     arrayOfShape el_tp $ Shape [group_size]--[reg_tile_se]
       write_sh_arr_stmt =
          Let (Pattern [] [sh_arr_pe]) (defAux ()) comb_exp
-  return $ Just (write_sh_arr_stmt:tstmts, M.insert pat_el_nm (sh_arr_1d,el_tp) stab)
+  return $ Just (write_sh_arr_stmt:tstms, M.insert pat_el_nm (sh_arr_1d,el_tp) stab)
 transfVarIndStm _ _ _ _ = return Nothing
 
 --------------
@@ -678,10 +678,10 @@ mkKerSpaceExtraStms reg_tile gspace = do
   ((num_threads, num_groups), num_bnds) <-
         runBinder $ sufficientGroups gspace' tiled_group_size
 
-  let extra_stmts = oneStm tmp_stm <> oneStm rgz_stm <> tile_size_bnds <> num_bnds
---      extra_stmts = stmsFromList (tmp_stm : rgz_stm : scratch_stmts ++ manif_stms) <>
+  let extra_stms = oneStm tmp_stm <> oneStm rgz_stm <> tile_size_bnds <> num_bnds
+--      extra_stms = stmsFromList (tmp_stm : rgz_stm : scratch_stms ++ manif_stms) <>
 --                    tile_size_bnds <> num_bnds
-  return ( extra_stmts, NestedThreadSpace gspace'
+  return ( extra_stms, NestedThreadSpace gspace'
          , tiled_group_size, num_threads, num_groups )
 
 
