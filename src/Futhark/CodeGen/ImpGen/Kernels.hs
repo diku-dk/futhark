@@ -658,8 +658,10 @@ compileKernelExp constants pat (Combine (CombineSpace scatter cspace) _ aspace b
   -- conditional jump), so for simplicity we just always generate
   -- the loop.
   let cspace_dims = map (streamBounded . snd) cspace
-      num_iters = product cspace_dims `quotRoundingUp`
-                  Imp.sizeToExp (kernelGroupSize constants)
+      num_iters
+        | cspace_dims == [Imp.sizeToExp $ kernelGroupSize constants] = 1
+        | otherwise = product cspace_dims `quotRoundingUp`
+                      Imp.sizeToExp (kernelGroupSize constants)
 
   iter <- newVName "comb_iter"
 
