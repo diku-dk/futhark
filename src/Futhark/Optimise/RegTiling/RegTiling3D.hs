@@ -173,11 +173,9 @@ doRegTiling3D (Let pat aux (Op old_kernel))
     Nothing -> return Nothing
     Just (myloop, strm_res_inv, strm_res_var) -> do
       -- make loop statement
-      loop_var_res <- mapM (\ (PatElem nm atr) -> do
-                                clone_patel_nms <- mapM (\_ -> newVName (baseString nm))
-                                                        [0..reg_tile-1]
-                                return $ map (`PatElem` atr) clone_patel_nms
-                           ) strm_res_var
+      loop_var_res <- forM strm_res_var $ \(PatElem nm attr) -> do
+        clone_patel_nms <- replicateM (fromIntegral reg_tile) $ newVName $ baseString nm
+        return $ map (`PatElem` attr) clone_patel_nms
       let pat_loop = Pattern [] $ strm_res_inv ++ concat loop_var_res
       let stm_loop = Let pat_loop aux_strm myloop
       -- add the in-place updates
@@ -268,11 +266,7 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
     ct1i32 == (Constant $ IntValue $ Int32Value 1),
     accs_i_f <- groupStreamAccParams lam_i,
     arrs_i_f <- groupStreamArrParams lam_i,
-    and $ zipWith (\ a_i_se a_f ->
-                    case a_i_se of
-                      Var a_i -> a_i == paramName a_f
-                      _ -> False
-                  ) accs_i_p accs_o_f,
+    and $ zipWith (==) (map subExpVar accs_i_p) (map (Just . paramName) accs_o_f),
     and $ zipWith (==) arrs_i_p $ map paramName arrs_o_f,
     -- 2. The intent is to flatten the two streams into a loop, so
     --    we reuse the index of the inner stream for the result-loop index,
@@ -309,10 +303,7 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
     -- 6. We check that the variables used in the index statements referring to
     --    streamed arrays that are variant to the z parallel dimension (`var_ind_stmts`)
     --    depend only on variables defined in the invariant stmts to the z parallel dimension.
-    var_nms <- concatMap ((\p -> map patElemName $
-                                    patternValueElements p ++
-                                    patternContextElements p
-                          ) . stmPattern) var_out_stmts,
+    var_nms <- concatMap (patternNames . stmPattern) var_out_stmts,
     null $ S.intersection (S.fromList var_nms) $
                           S.unions (map freeInStm var_ind_stmts),
     -- 7. We assume (check) for simplicity that all accumulator initializers
