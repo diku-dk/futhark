@@ -20,9 +20,9 @@ module Futhark.Optimise.RegTiling.RegTiling3D
 import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Set as S
-import qualified Data.Sequence as Seq
 import qualified Data.Map.Strict as M
 import Data.List
+import Data.Semigroup ((<>))
 import Data.Maybe
 --import Debug.Trace
 
@@ -186,11 +186,11 @@ doRegTiling3D (Let pat aux (Op old_kernel))
       let (scratch_if_stmts, krestp') = unzip epilogue
           (scratch_stmts, if_stmts2) = unzip $ catMaybes scratch_if_stmts
           if_stmts = concat if_stmts2
-          kstms' = Seq.fromList $ mask_stm : mm_stmt : stm_loop : if_stmts
+          kstms' = stmsFromList $ mask_stm : mm_stmt : stm_loop : if_stmts
           (kres', kertp') = unzip krestp'
           ker_body = KernelBody () kstms' kres'
           new_ker = Op $ Kernel kerhint kspace' kertp' ker_body
-          extra_stmts = space_stms <> Seq.fromList (scratch_stmts ++ manif_stms)
+          extra_stmts = space_stms <> stmsFromList (scratch_stmts ++ manif_stms)
 --      let new_ker' = trace ("3D-Tilable Kernel: " ++ pretty old_kernel ++
 --                               "\n code 1 is:\n" ++ concatMap pretty code1 ++
 --                               "\n 3dtilable stream is: \n" ++ pretty stream_stmt ++
@@ -354,7 +354,7 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
       --    each one in a if-then-else testing whether `mm + local_id < m_M`
       --    TODO: check that the statements do not involve In-Place updates!
       let loop_var_p_i_r' = map (\(x,y,z,_)->(x,y,z)) loop_var_p_i_r
-      if_ress <- mapM (cloneVarStmts subst_tab (mask,loop_ind_nm,mm,m_M,gidz)
+      if_ress <- mapM (cloneVarStms subst_tab (mask,loop_ind_nm,mm,m_M,gidz)
                                      loop_var_p_i_r' var_out_stmts) [0..reg_tile-1]
       -- VI. build the loop-variant vars/res/inis
       let (if_stmt_clones0, var_ress_pars) = unzip if_ress
@@ -374,7 +374,7 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
           stmts_body_i' = bar_stmt : inv_stmts ++ ind_stmts' ++ if_stmt_clones
           form = ForLoop ind_bar Int32 w_o []
           body_i' = Body (bodyAttr body_i)
-                         (Seq.fromList stmts_body_i') $
+                         (stmsFromList stmts_body_i') $
                          map Var loop_ress
           myloop = DoLoop [] (zip loop_form_acc loop_inis_acc) form body_i'
           -- myloop = DoLoop [] (zip accs_i_f' accs_o_p) form body_i'
@@ -395,10 +395,10 @@ translateStreamsToLoop _ _ _ _ _ _ _ _ = return Nothing
 --   In order to disallow hoisting from the loop we will generate:
 --   let zero = mask & loop_ind
 --   let mmpi = zero + mm + i
-cloneVarStmts :: M.Map VName (VName,Type) -> (VName, VName, VName, SubExp, VName)
+cloneVarStms :: M.Map VName (VName,Type) -> (VName, VName, VName, SubExp, VName)
               -> [(FParam InKernel, SubExp, VName)] -> [Stm InKernel]
               -> Int32 -> TileM ([Stm InKernel], [(VName,FParam InKernel)])
-cloneVarStmts subst_tab (mask,loop_ind,mm,m_M,gidz) loop_info var_out_stmts i = do
+cloneVarStms subst_tab (mask,loop_ind,mm,m_M,gidz) loop_info var_out_stmts i = do
   let (loop_par_origs, loop_inis, body_res_origs) = unzip3 loop_info
   body_res_clones <- mapM (\x -> newVName $ baseString x ++ "_clone") body_res_origs
   loop_par_nm_clones <- mapM (\x -> newVName $ baseString (paramName x) ++ "_clone") loop_par_origs
@@ -431,14 +431,14 @@ cloneVarStmts subst_tab (mask,loop_ind,mm,m_M,gidz) loop_info var_out_stmts i = 
   -- if the statements are simple, i.e., "safe", then do not
   -- encapsulate them in an if-then-else; this will result in
   -- significant performance gains.
-  let simple = simpleStmts $ Seq.fromList var_out_stmts
+  let simple = all simpleStm var_out_stmts
   let cond_stm  = if simple
                   then mkLet [] [Ident cond_nm $ Prim Bool] $
                           BasicOp $ SubExp (Constant $ BoolValue True)
                   else mkCondStmt m_M m cond_nm
       -- TODO: we need to uniquely rename the then/else bodies!
-  then_body <- renameBody $ Body () (Seq.fromList var_out_stmts') (map Var body_res_origs)
-  let else_body = Body () Seq.empty loop_inis
+  then_body <- renameBody $ Body () (stmsFromList var_out_stmts') (map Var body_res_origs)
+  let else_body = Body () mempty loop_inis
       if_stmt = mkLet [] (zipWith Ident body_res_clones res_types) $
                   If (Var cond_nm) then_body else_body $
                      IfAttr (staticShapes res_types) IfFallback
@@ -452,21 +452,18 @@ mkCondStmt m_M m cond_nm =
   mkLet [] [Ident cond_nm $ Prim Bool] $
         BasicOp $ CmpOp (CmpSlt Int32) (Var m) m_M
 
-simpleStmts :: Stms InKernel -> Bool
-simpleStmts = all simpleStmt
-
-simpleStmt :: Stm InKernel -> Bool
-simpleStmt (Let _ _ (BasicOp (SubExp _))) = True
-simpleStmt (Let _ _ (BasicOp (BinOp (SDiv _) _ _))) = False
-simpleStmt (Let _ _ (BasicOp (BinOp (FDiv _) _ _))) = False
-simpleStmt (Let _ _ (BasicOp BinOp{})) = True
-simpleStmt (Let _ _ (BasicOp CmpOp{})) = True
-simpleStmt (Let _ _ (BasicOp ConvOp{})) = True
-simpleStmt (Let _ _ (BasicOp UnOp{})) = True
-simpleStmt (Let _ _ (If _  body_t body_f _)) =
-  simpleStmts (bodyStms body_t) &&
-  simpleStmts (bodyStms body_f)
-simpleStmt _ = False
+simpleStm :: Stm InKernel -> Bool
+simpleStm (Let _ _ (BasicOp (SubExp _))) = True
+simpleStm (Let _ _ (BasicOp (BinOp (SDiv _) _ _))) = False
+simpleStm (Let _ _ (BasicOp (BinOp (FDiv _) _ _))) = False
+simpleStm (Let _ _ (BasicOp BinOp{})) = True
+simpleStm (Let _ _ (BasicOp CmpOp{})) = True
+simpleStm (Let _ _ (BasicOp ConvOp{})) = True
+simpleStm (Let _ _ (BasicOp UnOp{})) = True
+simpleStm (Let _ _ (If _  body_t body_f _)) =
+  all simpleStm (bodyStms body_t) &&
+  all simpleStm (bodyStms body_f)
+simpleStm _ = False
 
 -- | Arguments are:
 --     1. @space@: the kernel space
@@ -504,11 +501,11 @@ mkEpilogue (reg_tile,mm) space strm_res_vars loop_var_ress
                 m_stm = mkLet [] [Ident m $ Prim int32] $
                               BasicOp $ BinOp (Add Int32) (Var mm) i_se
                 c_stm = mkCondStmt m_M m cond_nm
-                else_body = Body () Seq.empty [Var curr_arr_nm]
+                else_body = Body () mempty [Var curr_arr_nm]
                 upd_slc = map (DimFix . Var) $ outer_gids ++ [m, gidy, gidx]
                 ipupd_exp = BasicOp $ Update curr_arr_nm upd_slc (Var x)
                 ipupd_stm = mkLet [] [Ident new_arr_nm_in unique_arr_tp] ipupd_exp
-                then_body = Body () (Seq.singleton ipupd_stm) [Var new_arr_nm_in]
+                then_body = Body () (oneStm ipupd_stm) [Var new_arr_nm_in]
                 if_stm = mkLet [] [Ident new_arr_nm_ot unique_arr_tp] $
                             If (Var cond_nm) then_body else_body $
                                IfAttr (staticShapes [unique_arr_tp]) IfFallback
@@ -533,9 +530,9 @@ mkEpilogue _ _ _ _ (_, ker_res, ker_tp) = return (Nothing, (ker_res,ker_tp))
 --      -- Scratch PrimType [SubExp]
 
 
-helper3Stmts :: VName -> SubExp -> SubExp -> Slice SubExp
+helper3Stms :: VName -> SubExp -> SubExp -> Slice SubExp
              -> VName -> Stm InKernel -> TileM [Stm InKernel]
-helper3Stmts loop_ind strd beg par_slc par_arr (Let ptt att _) = do
+helper3Stms loop_ind strd beg par_slc par_arr (Let ptt att _) = do
   tmp1 <- newVName "tmp"
   tmp2 <- newVName "ind"
   let stmt1 = mkLet [] [Ident tmp1 $ Prim int32] $
@@ -558,7 +555,7 @@ transfInvIndStm :: M.Map VName (VName, Slice SubExp, Type)
 transfInvIndStm tab loop_ind stm@(Let _ _ (BasicOp (Index arr_nm [DimFix _])))
   | Just (par_arr, par_slc@(_:_), _) <- M.lookup arr_nm tab,
     DimSlice beg _ strd <- last par_slc =
-  helper3Stmts loop_ind strd beg par_slc par_arr stm
+  helper3Stms loop_ind strd beg par_slc par_arr stm
 transfInvIndStm _ _ stm = return [stm]
 
 -- | Insert the necessary translations for a statement that is indexing
@@ -579,8 +576,8 @@ transfVarIndStm tab (reg_tile,loop_ind,local_tid,group_size,m,m_M) acc
     pat_el_nm <- patElemName pat_el,
     Prim _ <- el_tp = do
   -- compute the index into the global array
-  stmts3 <- helper3Stmts loop_ind strd beg par_slc par_arr stm
-  let glb_ind_stmts = Seq.fromList stmts3
+  stmts3 <- helper3Stms loop_ind strd beg par_slc par_arr stm
+  let glb_ind_stmts = stmsFromList stmts3
   -- set up the combine part
   sh_arr_1d <- newVName $ baseString par_arr ++ "_sh_1d"
   cid <- newVName "cid"
@@ -699,8 +696,8 @@ mkKerSpaceExtraStms reg_tile gspace = do
   ((num_threads, num_groups), num_bnds) <-
         runBinder $ sufficientGroups gspace' tiled_group_size
 
-  let extra_stmts = Seq.fromList [tmp_stm, rgz_stm] <> tile_size_bnds <> num_bnds
---      extra_stmts = Seq.fromList (tmp_stm : rgz_stm : scratch_stmts ++ manif_stms) <>
+  let extra_stmts = oneStm tmp_stm <> oneStm rgz_stm <> tile_size_bnds <> num_bnds
+--      extra_stmts = stmsFromList (tmp_stm : rgz_stm : scratch_stmts ++ manif_stms) <>
 --                    tile_size_bnds <> num_bnds
   return ( extra_stmts, NestedThreadSpace gspace'
          , tiled_group_size, num_threads, num_groups )
