@@ -112,7 +112,7 @@ mapTranspose kernel_name elem_type transpose_type =
             uint index_in = (y_index + i) * width + x_index;
             if (y_index + i < height && index_in < input_size)
             {
-              block[(get_local_id(1) + i)*(tile_dim+1)+get_local_id(0)] = idata[index_in];
+              block[(get_local_id(1) + i)*(tile_dim+1)+get_local_id(0)] = idata[idata_offset + index_in];
             }
           }
         }
@@ -127,7 +127,7 @@ mapTranspose kernel_name elem_type transpose_type =
             uint index_out = (y_index + i) * height + x_index;
             if (y_index + i < width && index_out < output_size)
             {
-              odata[index_out] = block[get_local_id(0)*(tile_dim+1)+get_local_id(1)+i];
+              odata[odata_offset + index_out] = block[get_local_id(0)*(tile_dim+1)+get_local_id(1)+i];
             }
           }
         }
