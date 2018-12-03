@@ -29,7 +29,7 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen ((<--),
                                sFor, sWhile, sComment, sIf, sWhen, sUnless,
                                sOp,
-                               dPrim, dPrim_)
+                               dPrim, dPrim_, dPrimV)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedKernelLambdaParameters)
@@ -411,10 +411,9 @@ makeAllMemoryGlobal =
 computeMapKernelGroups :: Imp.Exp -> CallKernelGen (VName, VName)
 computeMapKernelGroups kernel_size = do
   group_size <- dPrim "group_size" int32
-  num_groups <- dPrim "num_groups" int32
   let group_size_var = Imp.var group_size int32
   sOp $ Imp.GetSize group_size group_size Imp.SizeGroup
-  num_groups <-- kernel_size `quotRoundingUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
+  num_groups <- dPrimV "num_groups" $ kernel_size `quotRoundingUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
   return (group_size, num_groups)
 
 isMapTransposeKernel :: PrimType -> ImpGen.MemLocation -> ImpGen.MemLocation
@@ -490,12 +489,10 @@ computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread nu
     ((Imp.innerExp num_elements - thread_index) `quotRoundingUp` stride')
 
 computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elements chunk_var = do
-  starting_point <- dPrim "starting_point" int32
-  remaining_elements <- dPrim "remaining_elements" int32
-
-  starting_point <-- thread_index * Imp.innerExp elements_per_thread
-
-  remaining_elements <-- Imp.innerExp num_elements - Imp.var starting_point int32
+  starting_point <- dPrimV "starting_point" $
+    thread_index * Imp.innerExp elements_per_thread
+  remaining_elements <- dPrimV "remaining_elements" $
+    Imp.innerExp num_elements - Imp.var starting_point int32
 
   let no_remaining_elements = Imp.var remaining_elements int32 .<=. 0
       beyond_bounds = Imp.innerExp num_elements .<=. Imp.var starting_point int32
@@ -667,10 +664,8 @@ compileKernelExp constants pat (Combine (CombineSpace scatter cspace) _ aspace b
 
   sFor iter Int32 num_iters $ do
     mapM_ ((`dPrim_` int32) . fst) cspace
-    cid <- dPrim "flat_comb_id" int32
-
     -- Compute the *flat* array index.
-    cid <--
+    cid <- dPrimV "flat_comb_id" $
       Imp.var iter int32 * Imp.sizeToExp (kernelGroupSize constants) +
       Imp.var (kernelLocalThreadId constants) int32
 
@@ -1004,8 +999,7 @@ atomicUpdate [a] bucket op [v] _
       --   old = atomicCAS(&d_his[idx], assumed, tmp);
       -- } while(assumed != old);
       assumed <- dPrim "assumed" t
-      run_loop <- dPrim "run_loop" int32
-      run_loop <-- 1
+      run_loop <- dPrimV "run_loop" 1
       ImpGen.copyDWIM old [] (Var a) bucket'
 
         -- Preparing parameters
@@ -1039,8 +1033,7 @@ atomicUpdate [a] bucket op [v] _
 
 atomicUpdate arrs bucket op values locking = do
   old <- dPrim "old" int32
-  loop_done <- dPrim "loop_done" int32
-  loop_done <-- 0
+  loop_done <- dPrimV "loop_done" 0
 
   -- Check if bucket is in-bounds
   bucket' <- mapM ImpGen.compileSubExp bucket
