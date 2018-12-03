@@ -39,7 +39,7 @@ maxRegTile :: Int32
 maxRegTile = 30
 
 mkRegTileSe :: Int32 -> SubExp
-mkRegTileSe r = Constant $ IntValue $ Int32Value r
+mkRegTileSe = constant
 
 -- | Expects a kernel statement as argument.
 --   CONDITIONS for 3D tiling optimization to fire are:
