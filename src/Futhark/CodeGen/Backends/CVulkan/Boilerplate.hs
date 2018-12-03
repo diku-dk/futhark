@@ -2,6 +2,10 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Futhark.CodeGen.Backends.CVulkan.Boilerplate
   ( generateBoilerplate
+  , entryPointRuntime
+  , entryPointRuns
+  , entryPointPipeCacheMiss
+  , shaderCodeName
   , shaderCtx
   ) where
 
@@ -33,7 +37,7 @@ generateBoilerplate (Program shaders sizes _) = do
       vulkan_ctx_inits        = vulkanCtxInits entry_point_names
       vulkan_shader_ctx_inits = map vulkanShaderCtxInit shaders
       vulkan_shader_ctx_clrs  = map vulkanShaderCtxCleanup shaders
-      desc_pool_init          = vulkanCreateDescriptorPool shaders
+      max_desc_count          = maximum $ 0 : map SPIRV.shaderDescriptorSetSize shaders
       size_name_inits         = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
       size_class_inits        = map (\(c,_) -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       size_entry_points_inits = map (\(_,e) -> [C.cinit|$string:(pretty e)|]) $ M.elems sizes
@@ -116,10 +120,30 @@ generateBoilerplate (Program shaders sizes _) = do
                          cfg->vulkan.dump_program_to = path;
                        }|])
 
-  GC.publicDef_ "context_config_load_program_from" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
-     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
-                         cfg->vulkan.load_program_from = path;
+  GC.publicDef_ "context_config_set_default_group_size" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int size);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
+                         cfg->vulkan.default_group_size = size;
+                         cfg->vulkan.default_group_size_changed = 1;
+                       }|])
+
+  GC.publicDef_ "context_config_set_default_num_groups" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int num) {
+                         cfg->vulkan.default_num_groups = num;
+                       }|])
+
+  GC.publicDef_ "context_config_set_default_tile_size" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
+                         cfg->vulkan.default_tile_size = size;
+                         cfg->vulkan.default_tile_size_changed = 1;
+                       }|])
+
+  GC.publicDef_ "context_config_set_default_threshold" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
+                         cfg->vulkan.default_threshold = size;
                        }|])
 
   GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
@@ -167,7 +191,6 @@ generateBoilerplate (Program shaders sizes _) = do
                           [(0::Int)..] $ M.keys sizes
 
   GC.libDecl [C.cedecl|static void init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx) {
-                     $stm:desc_pool_init
                      $stms:set_sizes
 
                      $stms:vulkan_shader_ctx_inits
@@ -184,7 +207,7 @@ generateBoilerplate (Program shaders sizes _) = do
                           }
 
                           init_context_early(cfg, ctx);
-                          setup_vulkan(&ctx->vulkan);
+                          setup_vulkan(&ctx->vulkan, $int:max_desc_count);
                           init_context_late(cfg, ctx);
                           return ctx;
                        }|])
@@ -266,6 +289,7 @@ vulkanCtxFields entry_point_names =
     [C.csdecl|long int total_runtime;|] ] ++
   concat
   [ [ [C.csdecl|int $id:(entryPointRuntime name);|]
+    , [C.csdecl|int $id:(entryPointPipeCacheMiss name);|]
     , [C.csdecl|int $id:(entryPointRuns name);|]
     , [C.csdecl|struct vulkan_shader_context $id:(shaderCtx name);|]
     ]
@@ -277,18 +301,10 @@ vulkanCtxInits entry_point_names =
     [C.cstm|ctx->total_runtime = 0;|] ] ++
   concat
   [ [ [C.cstm|ctx->$id:(entryPointRuntime name) = 0;|]
+    , [C.cstm|ctx->$id:(entryPointPipeCacheMiss name) = 0;|]
     , [C.cstm|ctx->$id:(entryPointRuns name) = 0;|]
     ]
   | name <- entry_point_names ]
-
-vulkanCreateDescriptorPool :: [SPIRV.SingleEntryShader] -> C.Stm
-vulkanCreateDescriptorPool shaders = [C.cstm|
-    vulkan_init_descriptor_pool(&ctx->vulkan,
-                                $int:shader_count,
-                                $int:total_desc_count);
-  |]
-  where shader_count = length shaders
-        total_desc_count = sum $ map SPIRV.shaderDescriptorSetSize shaders
 
 vulkanReport :: [String] -> [C.BlockItem]
 vulkanReport names = report_kernels ++ [report_total]
@@ -298,16 +314,18 @@ vulkanReport names = report_kernels ++ [report_total]
           let padding = replicate (longest_name - length name) ' '
           in unwords ["Kernel",
                       name ++ padding,
-                      "executed %6d times, with average runtime: %6ldus\tand total runtime: %6ldus\n"]
+                      "executed %6d times, with average runtime: %6ldus\t total runtime: %6ldus\t pipeline cache misses: %6ld\n"]
         reportKernel name =
           let runs = entryPointRuns name
               total_runtime = entryPointRuntime name
+              pipeline_cache_misses = entryPointPipeCacheMiss name
           in [[C.citem|
                fprintf(stderr,
                        $string:(format_string name),
                        ctx->$id:runs,
                        (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
-                       (long int) ctx->$id:total_runtime);
+                       (long int) ctx->$id:total_runtime,
+                       (long int) ctx->$id:pipeline_cache_misses);
               |],
               [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
               [C.citem|ctx->total_runs += ctx->$id:runs;|]]
@@ -324,6 +342,9 @@ entryPointRuntime name = name ++ "_total_runtime"
 
 entryPointRuns :: String -> String
 entryPointRuns name = name ++ "_runs"
+
+entryPointPipeCacheMiss :: String -> String
+entryPointPipeCacheMiss name = name ++ "_pipeline_cache_misses"
 
 shaderCodeName :: String -> String
 shaderCodeName name = name ++ "_shader"

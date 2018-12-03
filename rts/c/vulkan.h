@@ -16,7 +16,6 @@ struct vulkan_config {
   int preferred_device_queue_index;
 
   const char* dump_program_to;
-  const char* load_program_from;
 
   size_t default_group_size;
   size_t default_num_groups;
@@ -44,7 +43,6 @@ void vulkan_config_init(struct vulkan_config *cfg,
   cfg->preferred_device_index = -1;
   cfg->preferred_device_queue_index = -1;
   cfg->dump_program_to = NULL;
-  cfg->load_program_from = NULL;
 
   cfg->default_group_size = 256;
   cfg->default_num_groups = 128;
@@ -61,21 +59,26 @@ void vulkan_config_init(struct vulkan_config *cfg,
   cfg->size_classes = size_classes;
 }
 
+struct vulkan_pipeline_cache_entry {
+  VkPipeline pipeline;
+  void *key;
+};
+
 struct vulkan_shader_context {
   const char *entry_point;
   VkShaderModule shader_module;
   VkDescriptorSetLayout descriptor_set_layout;
-  VkDescriptorSet descriptor_set;
   VkPipelineLayout pipeline_layout;
 
-  VkPipeline pipeline_cache;
-  void *pipeline_cache_key;
-  uint8_t pipeline_cache_valid;
+  struct vulkan_pipeline_cache_entry *pipeline_cache;
+  uint32_t pipeline_cache_count;
 };
 
 struct vulkan_command_buffer_context {
   VkCommandBuffer command_buffer;
   VkFence fence;
+  VkDescriptorSet descriptor_set;
+  uint8_t active_descriptor_set;
   uint32_t owns;
   struct vk_buffer_mem_pair *scalars;
   uint32_t scalar_count;
@@ -88,7 +91,8 @@ struct vulkan_context {
   VkQueue queue;
   uint32_t queue_family_index;
   VkCommandPool command_pool;
-  VkDescriptorPool descriptor_pool;
+  uint32_t max_descriptor_set_size;
+  VkDescriptorPool *descriptor_pools;
 
   struct vulkan_command_buffer_context *command_buffers;
   uint32_t command_buffer_count;
@@ -328,6 +332,7 @@ static VkResult vulkan_allocate_command_buffers(struct vulkan_context *ctx,
   };
 
   for (int i = offset; i < offset + count; ++i) {
+    ctx->command_buffers[i].active_descriptor_set = 0;
     ctx->command_buffers[i].owns = 0;
     ctx->command_buffers[i].scalar_count = 0;
     ctx->command_buffers[i].command_buffer = tmp_buffers[i-offset]; 
@@ -345,7 +350,23 @@ static VkResult vulkan_allocate_command_buffers(struct vulkan_context *ctx,
   return VK_SUCCESS;
 }
 
-static void setup_vulkan(struct vulkan_context *ctx) {
+VkResult vulkan_create_descriptor_pool(struct vulkan_context *ctx, VkDescriptorPool *descriptor_pool) {
+  VkDescriptorPoolSize descriptor_pool_size;
+  descriptor_pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  descriptor_pool_size.descriptorCount = ctx->max_descriptor_set_size * ALLOC_STEP;
+
+  VkDescriptorPoolCreateInfo descriptor_pool_create_info;
+  descriptor_pool_create_info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  descriptor_pool_create_info.pNext         = 0;
+  descriptor_pool_create_info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  descriptor_pool_create_info.maxSets       = ALLOC_STEP;
+  descriptor_pool_create_info.poolSizeCount = 1;
+  descriptor_pool_create_info.pPoolSizes    = &descriptor_pool_size;
+
+  return vkCreateDescriptorPool(ctx->device, &descriptor_pool_create_info, 0, descriptor_pool);
+}
+
+static void setup_vulkan(struct vulkan_context *ctx, uint32_t max_desc_count) {
   ctx->lockstep_width = 1;
 
   free_list_init(&ctx->free_list);
@@ -425,6 +446,10 @@ static void setup_vulkan(struct vulkan_context *ctx) {
   ctx->command_buffer_count = ALLOC_STEP;
   ctx->command_buffers = malloc(ctx->command_buffer_count * sizeof(struct vulkan_command_buffer_context));
   VULKAN_SUCCEED(vulkan_allocate_command_buffers(ctx, 0, ctx->command_buffer_count));
+
+  ctx->max_descriptor_set_size = max_desc_count;
+  ctx->descriptor_pools = malloc(sizeof(VkDescriptorPool));
+  VULKAN_SUCCEED(vulkan_create_descriptor_pool(ctx, ctx->descriptor_pools));
 }
 
 void vulkan_setup_shader(struct vulkan_context *ctx,
@@ -445,7 +470,8 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
   }
 
   sh_ctx->entry_point = entry_point;
-  sh_ctx->pipeline_cache_valid = 0;
+  sh_ctx->pipeline_cache_count = 0;
+  sh_ctx->pipeline_cache = NULL;
 
   VkShaderModuleCreateInfo shader_module_create_info;
   shader_module_create_info.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -480,17 +506,6 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
                                              &sh_ctx->descriptor_set_layout));
   free(desc_set_layout_bindings);
 
-  VkDescriptorSetAllocateInfo descriptor_set_allocate_info;
-  descriptor_set_allocate_info.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  descriptor_set_allocate_info.pNext              = 0;
-  descriptor_set_allocate_info.descriptorPool     = ctx->descriptor_pool;
-  descriptor_set_allocate_info.descriptorSetCount = 1;
-  descriptor_set_allocate_info.pSetLayouts        = &sh_ctx->descriptor_set_layout;
-
-  VULKAN_SUCCEED(vkAllocateDescriptorSets(ctx->device,
-                                          &descriptor_set_allocate_info,
-                                          &sh_ctx->descriptor_set));
-
   VkPipelineLayoutCreateInfo pipeline_layout_create_info;
   pipeline_layout_create_info.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   pipeline_layout_create_info.pNext                  = 0;
@@ -504,24 +519,6 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
                                         &pipeline_layout_create_info,
                                         0,
                                         &sh_ctx->pipeline_layout));
-}
-
-void vulkan_init_descriptor_pool(struct vulkan_context *ctx,
-                                 uint32_t set_count,
-                                 uint32_t total_desc_count) {
-  VkDescriptorPoolSize descriptor_pool_size;
-  descriptor_pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  descriptor_pool_size.descriptorCount = total_desc_count;
-
-  VkDescriptorPoolCreateInfo descriptor_pool_create_info;
-  descriptor_pool_create_info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  descriptor_pool_create_info.pNext         = 0;
-  descriptor_pool_create_info.flags         = 0;
-  descriptor_pool_create_info.maxSets       = set_count;
-  descriptor_pool_create_info.poolSizeCount = 1;
-  descriptor_pool_create_info.pPoolSizes    = &descriptor_pool_size;
-
-  VULKAN_SUCCEED(vkCreateDescriptorPool(ctx->device, &descriptor_pool_create_info, 0, &ctx->descriptor_pool));
 }
 
 void vulkan_create_pipeline(struct vulkan_context *ctx,
@@ -553,6 +550,35 @@ void vulkan_create_pipeline(struct vulkan_context *ctx,
 
 void vulkan_destroy_pipeline(struct vulkan_context *ctx, VkPipeline pipeline) {
   vkDestroyPipeline(ctx->device, pipeline, 0);
+}
+
+void vulkan_add_pipeline_cache_entry(struct vulkan_shader_context *sh_ctx,
+                                     void *cache_key,
+                                     size_t cache_key_size,
+                                     VkPipeline pipeline) {
+  uint32_t old_cache_count = sh_ctx->pipeline_cache_count++;
+
+  sh_ctx->pipeline_cache = realloc(sh_ctx->pipeline_cache,
+                                    sh_ctx->pipeline_cache_count *
+                                    sizeof(struct vulkan_pipeline_cache_entry));
+
+  sh_ctx->pipeline_cache[old_cache_count].pipeline = pipeline;
+  sh_ctx->pipeline_cache[old_cache_count].key = malloc(cache_key_size);
+  memcpy(sh_ctx->pipeline_cache[old_cache_count].key, cache_key, cache_key_size);
+}
+
+uint8_t vulkan_find_cached_pipeline(struct vulkan_shader_context *sh_ctx,
+                                    void *cache_key,
+                                    size_t cache_key_size,
+                                    VkPipeline *cached_pipeline) {
+  for (int i = 0; i < sh_ctx->pipeline_cache_count; ++i) {
+    if (memcmp(sh_ctx->pipeline_cache[i].key, cache_key, cache_key_size) == 0) {
+      *cached_pipeline = sh_ctx->pipeline_cache[i].pipeline;
+      return 1;
+    }
+  }
+
+  return 0;
 }
 
 VkResult vulkan_sync_mem(struct vulkan_context *ctx, struct vk_buffer_mem_pair *mem) {
@@ -744,8 +770,7 @@ void vulkan_transfer_ownership(struct vulkan_context *ctx,
 
 VkResult vulkan_available_command_buffer(struct vulkan_context *ctx,
                                          uint32_t *command_buffer_index) {
-  VkResult error;
-
+                                           
   for (int i = 0; i < ctx->command_buffer_count; ++i) {
     struct vulkan_command_buffer_context *command_buffer_ctx = ctx->command_buffers + i;
 
@@ -769,12 +794,17 @@ VkResult vulkan_available_command_buffer(struct vulkan_context *ctx,
 
   ctx->command_buffer_count += ALLOC_STEP;
   ctx->command_buffers =
-    realloc(&ctx->command_buffers, ctx->command_buffer_count * sizeof(struct vulkan_command_buffer_context));
+    realloc(ctx->command_buffers, ctx->command_buffer_count * sizeof(struct vulkan_command_buffer_context));
 
-  error = vulkan_allocate_command_buffers(ctx,
-                                          old_command_buffer_count,
-                                          ctx->command_buffer_count - old_command_buffer_count);
+  VkResult error = vulkan_allocate_command_buffers(ctx, old_command_buffer_count, ALLOC_STEP);
 
+  if (error != VK_SUCCESS)
+    return error;
+
+  ctx->descriptor_pools = realloc(ctx->descriptor_pools,
+                                  ctx->command_buffer_count / ALLOC_STEP * sizeof(VkDescriptorPool));
+  error = vulkan_create_descriptor_pool(ctx, ctx->descriptor_pools + old_command_buffer_count / ALLOC_STEP);
+  
   if (error != VK_SUCCESS)
     return error;
 
@@ -789,10 +819,45 @@ void vulkan_free_all_command_buffers(struct vulkan_context *ctx) {
     vulkan_free_scalars(ctx, i);
     vkDestroyFence(ctx->device, ctx->command_buffers[i].fence, 0);
     tmp_buffers[i] = ctx->command_buffers[i].command_buffer;
+
+    if (i%ALLOC_STEP == 0)
+      vkDestroyDescriptorPool(ctx->device, ctx->descriptor_pools[i/ALLOC_STEP], 0);
   }
 
   vkFreeCommandBuffers(ctx->device, ctx->command_pool, ctx->command_buffer_count, tmp_buffers);
   free(tmp_buffers);
+}
+
+VkResult vulkan_allocate_descriptor_set(struct vulkan_context *ctx,
+                                        struct vulkan_shader_context *sh_ctx,
+                                        uint32_t command_buffer_index) {
+
+  struct vulkan_command_buffer_context *command_buffer_ctx =
+    ctx->command_buffers + command_buffer_index;
+
+  // Free old descriptor set
+  VkResult error = VK_SUCCESS;
+  if (command_buffer_ctx->active_descriptor_set)
+    error = vkFreeDescriptorSets(ctx->device,
+                                 ctx->descriptor_pools[command_buffer_index/ALLOC_STEP],
+                                 1,
+                                 &command_buffer_ctx->descriptor_set);
+
+  if (error != VK_SUCCESS)
+    return error;
+
+  command_buffer_ctx->active_descriptor_set = 1;
+
+  VkDescriptorSetAllocateInfo descriptor_set_allocate_info;
+  descriptor_set_allocate_info.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  descriptor_set_allocate_info.pNext              = 0;
+  descriptor_set_allocate_info.descriptorPool     = ctx->descriptor_pools[command_buffer_index/ALLOC_STEP];
+  descriptor_set_allocate_info.descriptorSetCount = 1;
+  descriptor_set_allocate_info.pSetLayouts        = &sh_ctx->descriptor_set_layout;
+
+  return vkAllocateDescriptorSets(ctx->device,
+                                  &descriptor_set_allocate_info,
+                                  &command_buffer_ctx->descriptor_set);
 }
 
 VkResult vulkan_begin_recording(struct vulkan_context *ctx, uint32_t command_buffer_index) {
@@ -857,11 +922,12 @@ void vulkan_dispatch(struct vulkan_context *ctx,
                      uint32_t kernel_size) {
 
   VkCommandBuffer command_buffer = ctx->command_buffers[command_buffer_index].command_buffer;
+  VkDescriptorSet descriptor_set = ctx->command_buffers[command_buffer_index].descriptor_set;
 
   VULKAN_SUCCEED(vulkan_begin_recording(ctx, command_buffer_index));
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
   vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, sh_ctx->pipeline_layout,
-                          0, 1, &sh_ctx->descriptor_set, 0, 0);
+                          0, 1, &descriptor_set, 0, 0);
   vkCmdDispatch(command_buffer, kernel_size, 1, 1);
   VULKAN_SUCCEED(vulkan_end_recording_and_submit(ctx, command_buffer_index));
 }
@@ -871,10 +937,12 @@ static void vulkan_shader_cleanup(struct vulkan_context *ctx,
   vkDestroyPipelineLayout(ctx->device, sh_ctx->pipeline_layout, 0);
   vkDestroyDescriptorSetLayout(ctx->device, sh_ctx->descriptor_set_layout, 0);
   vkDestroyShaderModule(ctx->device, sh_ctx->shader_module, 0);
-  if(sh_ctx->pipeline_cache_valid) {
-    vkDestroyPipeline(ctx->device, sh_ctx->pipeline_cache, 0);
-    free(sh_ctx->pipeline_cache_key);
+  for(int i = 0; i < sh_ctx->pipeline_cache_count; ++i) {
+    free(sh_ctx->pipeline_cache[i].key);
+    vulkan_destroy_pipeline(ctx, sh_ctx->pipeline_cache[i].pipeline);
   }
+  if(sh_ctx->pipeline_cache_count > 0)
+    free(sh_ctx->pipeline_cache);
 }
 
 static void vulkan_cleanup(struct vulkan_context *ctx) {
@@ -882,8 +950,8 @@ static void vulkan_cleanup(struct vulkan_context *ctx) {
   vulkan_free_all_scalars(ctx);
   vulkan_free_all(ctx);
   vulkan_free_all_command_buffers(ctx);
+  free(ctx->descriptor_pools);
   free(ctx->command_buffers);
-  vkDestroyDescriptorPool(ctx->device, ctx->descriptor_pool, 0);
   vkDestroyCommandPool(ctx->device, ctx->command_pool, 0);
   vkDestroyDevice(ctx->device, 0);
   vkDestroyInstance(ctx->instance, 0);

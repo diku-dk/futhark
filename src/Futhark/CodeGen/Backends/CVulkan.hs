@@ -9,7 +9,14 @@ module Futhark.CodeGen.Backends.CVulkan
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
+import Control.Monad.IO.Class
 import Control.Monad.Identity
+import Data.Word
+import Data.Char hiding (Space)
+import Data.Bits
+import System.Exit
+import qualified System.Process.ByteString as BP
+import qualified Data.ByteString as B
 
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
@@ -20,10 +27,11 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.Vulkan
 import qualified Futhark.CodeGen.ImpGen.Vulkan as ImpGen
 import Futhark.MonadFreshNames
+import Futhark.CodeGen.Backends.SPIRV
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
+compileProg :: (MonadFreshNames m, MonadIO m) => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
 compileProg prog = do
-  res <- ImpGen.compileProg prog
+  res <- ImpGen.compileProg prog -- >>= optimizeProgram
   case res of
     Left err -> return $ Left err
     Right vk_prog@(Program _ _ prog') ->
@@ -49,10 +57,56 @@ cliOptions = [ Option { optionLongName = "dump-spirv"
                       , optionArgument = RequiredArgument
                       , optionAction = [C.cstm|futhark_context_config_dump_program_to(cfg, optarg);|]
                       }
-             , Option { optionLongName = "load-spirv"
+             , Option { optionLongName = "default-group-size"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument
-                      , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
+                      , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "default-num-groups"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "default-tile-size"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "default-threshold"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "print-sizes"
+                      , optionShortName = Nothing
+                      , optionArgument = NoArgument
+                      , optionAction = [C.cstm|{
+                          int n = futhark_get_num_sizes();
+                          for (int i = 0; i < n; i++) {
+                            if (strcmp(futhark_get_size_entry(i), entry_point) == 0) {
+                              printf("%s (%s)\n", futhark_get_size_name(i),
+                                                  futhark_get_size_class(i));
+                            }
+                          }
+                          exit(0);
+                        }|]
+                      }
+             , Option { optionLongName = "size"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|{
+                          char *name = optarg;
+                          char *equals = strstr(optarg, "=");
+                          char *value_str = equals != NULL ? equals+1 : optarg;
+                          int value = atoi(value_str);
+                          if (equals != NULL) {
+                            *equals = 0;
+                            if (futhark_context_config_set_size(cfg, name, value) != 0) {
+                              panic(1, "Unknown size: %s\n", name);
+                            }
+                          } else {
+                            panic(1, "Invalid argument for size option: %s\n", optarg);
+                          }}|]
                       }
              ]
 
@@ -60,7 +114,6 @@ writeVulkanScalar :: GC.WriteScalar Vulkan ()
 writeVulkanScalar mem i t "device" _ val = do
   mapped_val <- newVName "mapped_val"
   GC.decl [C.cdecl|$ty:t *$id:mapped_val;|]
-  GC.stm [C.cstm|vulkan_sync_mem(&ctx->vulkan, &$exp:mem);|]
   GC.stm [C.cstm|VULKAN_SUCCEED(vkMapMemory(ctx->vulkan.device,
                                             $exp:mem.memory,
                                             $exp:i,
@@ -68,6 +121,7 @@ writeVulkanScalar mem i t "device" _ val = do
                                             0,
                                             (void *)&$id:mapped_val));
                 |]
+  GC.stm [C.cstm|vulkan_sync_mem(&ctx->vulkan, &$exp:mem);|]
   GC.stm [C.cstm|*$id:mapped_val = $exp:val;|]
   GC.stm [C.cstm|vkUnmapMemory(ctx->vulkan.device, $exp:mem.memory);|]
 writeVulkanScalar _ _ _ space _ _ =
@@ -77,7 +131,6 @@ readVulkanScalar :: GC.ReadScalar Vulkan ()
 readVulkanScalar mem i t "device" _ = do
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t *$id:val;|]
-  GC.stm [C.cstm|vulkan_sync_mem(&ctx->vulkan, &$exp:mem);|]
   GC.stm [C.cstm|VULKAN_SUCCEED(vkMapMemory(ctx->vulkan.device,
                                             $exp:mem.memory,
                                             $exp:i,
@@ -85,6 +138,7 @@ readVulkanScalar mem i t "device" _ = do
                                             0,
                                             (void *)&$id:val));
                 |]
+  GC.stm [C.cstm|vulkan_sync_mem(&ctx->vulkan, &$exp:mem);|]
   GC.stm [C.cstm|vkUnmapMemory(ctx->vulkan.device, $exp:mem.memory);|]
   return [C.cexp|*$id:val|]
 readVulkanScalar _ _ _ space _ =
@@ -111,13 +165,13 @@ copyVulkanMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nby
   GC.decl [C.cdecl|$ty:mem_t *$id:mapped_mem;|]
   GC.stm [C.cstm|
     if ($exp:nbytes > 0) {
-      vulkan_sync_mem(&ctx->vulkan, &$exp:srcmem);
       VULKAN_SUCCEED(vkMapMemory(ctx->vulkan.device,
                                  $exp:srcmem.memory,
                                  0,
                                  VK_WHOLE_SIZE,
                                  0,
                                  (void *)&$id:mapped_mem));
+      vulkan_sync_mem(&ctx->vulkan, &$exp:srcmem);
     }|]
   GC.copyMemoryDefaultSpace destmem destidx [C.cexp|$id:mapped_mem|] srcidx nbytes
   GC.stm [C.cstm|
@@ -130,13 +184,13 @@ copyVulkanMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nby
   GC.decl [C.cdecl|$ty:mem_t *$id:mapped_mem;|]
   GC.stm [C.cstm|
     if ($exp:nbytes > 0) {
-      vulkan_sync_mem(&ctx->vulkan, &$exp:destmem);
       VULKAN_SUCCEED(vkMapMemory(ctx->vulkan.device,
                                  $exp:destmem.memory,
                                  0,
                                  VK_WHOLE_SIZE,
                                  0,
                                  (void *)&$id:mapped_mem));
+      vulkan_sync_mem(&ctx->vulkan, &$exp:destmem);
     }|]
   GC.copyMemoryDefaultSpace [C.cexp|$id:mapped_mem|] destidx srcmem srcidx nbytes
   GC.stm [C.cstm|
@@ -230,7 +284,8 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
   GC.stm [C.cstm|VULKAN_SUCCEED(vulkan_available_command_buffer(&ctx->vulkan,
                                                                 &$id:cmd_buffer_id));
          |]
-  let scalar_sizes_inits = [ [C.cinit|sizeof($ty:t)|] | t <- filterScalarTypes args ]
+  let shader_ctx = shaderCtx name
+      scalar_sizes_inits = [ [C.cinit|sizeof($ty:t)|] | t <- filterScalarTypes args ]
   GC.decl [C.cdecl|size_t $id:scalar_sizes[] = { $inits:scalar_sizes_inits };|]
   GC.decl [C.cdecl|struct vk_buffer_mem_pair *$id:scalar_buffers =
                       vulkan_alloc_scalars(&ctx->vulkan,
@@ -238,12 +293,14 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
                                            $int:(length scalar_sizes_inits),
                                            $id:scalar_sizes);
          |]
+  GC.stm [C.cstm|VULKAN_SUCCEED(vulkan_allocate_descriptor_set(&ctx->vulkan,
+                                                               &ctx->$id:shader_ctx,
+                                                               $id:cmd_buffer_id));|]
   buffers <- getArgBuffers args scalar_buffers 0
   buffer_infos <- mapM initBufferInfo buffers
   workgroup_count' <- GC.compileExp workgroup_count
-  let shader_ctx = shaderCtx name
-      buffer_count = length buffer_infos
-      wd_inits = zipWith (writeDescriptorInits name) buffer_infos [0..buffer_count - 1]
+  let buffer_count = length buffer_infos
+      wd_inits = zipWith (writeDescriptorInits cmd_buffer_id) buffer_infos [0..buffer_count - 1]
       spec_const_exps = map specConstToExp spec_consts
       spec_const_types = map specConstToType spec_consts
       spec_const_s_names = [ "data" ++ show i | i <- [0..length spec_consts - 1] ]
@@ -255,11 +312,16 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
   GC.decl [C.cdecl|struct $id:spec_data_struct { $sdecls:spec_const_s_mems }
                           const $id:spec_data = { $inits:spec_const_exp_inits };
           |]
-  GC.decl [C.cdecl|typename VkPipeline $id:pipeline = ctx->$id:shader_ctx.pipeline_cache;|]
+  GC.decl [C.cdecl|typename VkPipeline $id:pipeline = NULL;|]
   GC.stm [C.cstm|
-          if (!ctx->$id:shader_ctx.pipeline_cache_valid ||
-              memcmp(ctx->$id:shader_ctx.pipeline_cache_key, &$id:spec_data, sizeof(struct $id:spec_data_struct))) {
-            // Cached pipeline is invalid
+          if (!vulkan_find_cached_pipeline(&ctx->$id:shader_ctx,
+                                           (void*)&$id:spec_data,
+                                           sizeof(struct $id:spec_data_struct),
+                                           &$id:pipeline)) {
+            if (ctx->debugging) {
+              ++ctx->$id:(entryPointPipeCacheMiss name);
+              fprintf(stderr, "Pipeline cache miss for %s.\n", $string:name);
+            }
             const typename VkSpecializationMapEntry $id:spec_entries[] = { $inits:spec_map_entry_inits };
             const typename VkSpecializationInfo $id:spec_info = {
                       $int:(length spec_consts),
@@ -267,13 +329,11 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
                       $exp:total_size,
                       &$id:spec_data
                     };
-            vulkan_create_pipeline(&ctx->vulkan, &ctx->$id:(shaderCtx name), $id:spec_info, &$id:pipeline);
-
-            if(!ctx->$id:shader_ctx.pipeline_cache_valid)
-              ctx->$id:shader_ctx.pipeline_cache_key = malloc(sizeof(struct $id:spec_data_struct));
-            memcpy(ctx->$id:shader_ctx.pipeline_cache_key, &$id:pipeline, sizeof(struct $id:spec_data_struct));
-            ctx->$id:shader_ctx.pipeline_cache = $id:pipeline;
-            ctx->$id:shader_ctx.pipeline_cache_valid = 1;
+            vulkan_create_pipeline(&ctx->vulkan, &ctx->$id:shader_ctx, $id:spec_info, &$id:pipeline);
+            vulkan_add_pipeline_cache_entry(&ctx->$id:shader_ctx,
+                                            (void*)&$id:spec_data,
+                                            sizeof(struct $id:spec_data_struct),
+                                            $id:pipeline);
           }
          |]
   GC.decl [C.cdecl|const typename VkWriteDescriptorSet $id:write_desc_set[]
@@ -285,11 +345,13 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
                                         0,
                                         0);
          |]
+  start_time <- kernelDebugBefore name
   GC.stm [C.cstm|vulkan_dispatch(&ctx->vulkan,
-                                 &ctx->$id:(shaderCtx name),
+                                 &ctx->$id:shader_ctx,
                                  $id:cmd_buffer_id,
                                  $id:pipeline,
                                  $exp:workgroup_count');|]
+  kernelDebugAfter name start_time
 
 specConstToExp :: SpecConstExp -> C.Exp
 specConstToExp (SpecConstSizeExp ds)             = GC.dimSizeToExp ds
@@ -349,12 +411,12 @@ initBufferInfo bexp = do
   GC.stm [C.cstm|$id:buffer_info.range = VK_WHOLE_SIZE;|]
   return buffer_info
 
-writeDescriptorInits :: EntryPointName -> VName -> Int -> C.Initializer
-writeDescriptorInits fname biname i = [C.cinit|
+writeDescriptorInits :: VName -> VName -> Int -> C.Initializer
+writeDescriptorInits cmd_buffer_id biname i = [C.cinit|
     {
       VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
       0,
-      ctx->$id:(shaderCtx fname).descriptor_set,
+      ctx->vulkan.command_buffers[$id:cmd_buffer_id].descriptor_set,
       $int:i,
       0,
       1,
@@ -369,3 +431,53 @@ memArgTransferOwnership :: VName -> EntryPointArg -> GC.CompilerM op s ()
 memArgTransferOwnership cmd_buffer_id (MemKArg bname) = GC.stm
   [C.cstm|vulkan_transfer_ownership(&ctx->vulkan, &$id:bname.mem, $id:cmd_buffer_id);|]
 memArgTransferOwnership _ _                           = return ()
+
+kernelDebugBefore :: String -> GC.CompilerM op s VName
+kernelDebugBefore entry_point_name = do
+  time_start <- newVName "time_start"
+  GC.decl [C.cdecl|long int $id:time_start = 0;|]
+  GC.stm [C.cstm|
+    if (ctx->debugging) {
+      fprintf(stderr, "Launching %s.\n", $string:entry_point_name);
+      $id:time_start = get_wall_time();
+    }
+  |]
+  return time_start
+
+kernelDebugAfter :: String -> VName -> GC.CompilerM op s ()
+kernelDebugAfter entry_point_name time_start = do
+  time_diff <- newVName "time_diff"
+  GC.stm [C.cstm|
+    if (ctx->debugging) {
+      VULKAN_SUCCEED(vkQueueWaitIdle(ctx->vulkan.queue));
+      long int $id:time_diff = get_wall_time() - $id:time_start;
+      ctx->$id:(entryPointRuntime entry_point_name) += $id:time_diff;
+      ctx->$id:(entryPointRuns entry_point_name)++;
+      fprintf(stderr, "kernel %s runtime: %ldus\n",
+              $string:entry_point_name, $id:time_diff);
+    }
+  |]
+
+getWord32Bytes :: Word32 -> B.ByteString
+getWord32Bytes w = B.pack [getByte i w | i <- [0..3]]
+  where getByte i s = fromIntegral $ shiftR s (8 * i) .&. 0xFF
+
+bytesToWord32 :: B.ByteString -> [Word32]
+bytesToWord32 bs = stringToCode $ map (chr . fromIntegral) $ B.unpack bs
+
+optimizeShader :: MonadIO m => SingleEntryShader -> m SingleEntryShader
+optimizeShader (SEShader name desc code) = do
+  let args = ["-O", "-o", "-"]
+      inp = B.concat $ map getWord32Bytes code
+  res <- liftIO $ BP.readProcessWithExitCode "spirv-opt" args inp
+  case res of
+    (ExitSuccess, out, _) -> return $ SEShader name desc $ bytesToWord32 out
+    (ExitFailure c, _, err) -> fail $ concat ["spirv-opt for kernel ", name,
+                                              " failed with error code ",
+                                              show c, ": ", show err]
+
+optimizeProgram :: MonadIO m => Either a Program -> m (Either a Program)
+optimizeProgram (Right (Program shaders hc hf)) = do
+  opt_shaders <- mapM optimizeShader shaders
+  return $ Right $ Program opt_shaders hc hf
+optimizeProgram e = return e

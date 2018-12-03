@@ -9,6 +9,7 @@ module Futhark.CodeGen.Backends.SPIRV
   , CompilerM
   , CompilerState
   , newCompilerState
+  , stringToCode
   , getResult
   , getEntryPoints
   , getDescriptorSets
@@ -23,6 +24,7 @@ import Data.Bits
 import Data.Binary.IEEE754
 import Data.Word
 import Data.List
+import Data.Char hiding (Space)
 
 import Futhark.CodeGen.Backends.SPIRV.Operations
 import Futhark.CodeGen.ImpCode hiding (Scalar, Function)
@@ -228,6 +230,19 @@ getCapabilities = concatMap opCapability [ cShaderCapability
                                          --, cInt8Capability
                                          ]
 
+encodeString :: String -> [Word32]
+encodeString s = stringToCode $ s ++ [chr 0 | length s `mod` 4 == 0]
+-- | ^ SPIR-V strings must be null-terminated
+
+stringToCode :: String -> [Word32]
+stringToCode [] = []
+stringToCode (c1:c2:c3:c4:cs) =
+  let ws = map (fromIntegral . ord) [c1,c2,c3,c4]
+      bs = zipWith (\w i -> w `shift` (8 * i)) ws [0..3]
+      wd = foldl (.|.) 0 bs
+  in wd : stringToCode cs
+stringToCode cs = stringToCode $ (++) cs $ replicate (4 - length cs) $ chr 0
+
 getExtensions :: [Word32]
 getExtensions = concatMap (opExtension . encodeString) [ "SPV_KHR_8bit_storage" ]
 
@@ -279,16 +294,27 @@ getUseType (MemoryUse name _) = do
   return $ Array t Nothing
 getUseType (ConstUse _ e)     = return $ Scalar $ primExpType e
 
-insertDescriptorAccess :: Word32 -> KernelUse -> CompilerM ()
-insertDescriptorAccess desc_id use = do
+registerDescriptorAccessEarly :: KernelUse -> CompilerM ()
+registerDescriptorAccessEarly use = do
   t <- getUseType use
   let p_t = Pointer t StorageBuffer
       s_t = Struct [t]
-  zero_id <- getConstId $ IntValue $ Int32Value 0
   ensureTypeId p_t
   ensureTypeId s_t
-  (var_id, _) <- insertReturnOp p_t $ opAccessChain desc_id zero_id
+  var_id <- newId
   modify $ \s -> s { compVarRefs = M.insert (getUseName use) (var_id, t, InterOp) $ compVarRefs s }
+
+insertDescriptorAccess :: Word32 -> KernelUse -> CompilerM ()
+insertDescriptorAccess desc_id use = do
+  zero_id <- getConstId $ IntValue $ Int32Value 0
+  (var_id, p_t, _) <- getVarInfo $ getUseName use
+  t_id <- getTypeId $ Pointer p_t StorageBuffer
+  appendCode $ opAccessChain desc_id zero_id t_id var_id
+
+insertDescriptorAccesses :: EntryPointName -> CompilerM ()
+insertDescriptorAccesses name = do
+  desc_map <- gets compDescriptors
+  mapM_ (uncurry insertDescriptorAccess) $ (M.!) desc_map name
 
 getResult :: CompilerM [Word32]
 getResult = gets compResult
@@ -331,16 +357,16 @@ registerConstUse _                   = return ()
 insertLocalMemory :: LocalMemoryUse -> CompilerM ()
 insertLocalMemory (name, _) = do
   size_id <- newId
+  size_expr_id <- newId
   access_size_map <- gets compArrayLeastAccessSize
   let elem_size = (M.!) access_size_map name
       elem_t    = Scalar $ byteSizeToIntPrimType elem_size
-      t         = Array elem_t $ Just size_id
+      t         = Array elem_t $ Just size_expr_id
       p_t       = Pointer t Local
-      size_t    = Scalar int32
   (var_id, _) <- insertReturnOp p_t $ opVariable cStorageClassWorkgroup
   ensureTypeId p_t
   modify $ \s -> s { compVarRefs       = M.insert name (var_id, t, LocalMem) $ compVarRefs s,
-                     compSpecConstRefs = compSpecConstRefs s ++ [(size_id, size_t)] }
+                     compSpecConstRefs = compSpecConstRefs s ++ [(size_id, t)] }
 
 getDescriptorUses :: [KernelUse] -> [KernelUse]
 getDescriptorUses []                  = []
@@ -375,7 +401,7 @@ insertEntryHead name = do
   addEntryPoint name entry_id
   desc_map <- gets compDescriptors
   newId >>= appendCode . opLabel
-  mapM_ (uncurry insertDescriptorAccess) $ (M.!) desc_map name
+  mapM_ (registerDescriptorAccessEarly . snd) $ (M.!) desc_map name
 
 insertEntryTail :: CompilerM ()
 insertEntryTail = do
@@ -513,15 +539,18 @@ insertArrayWrite arr i_id val_id val_pt scope vol = do
   (arr_id, _, _) <- getVarInfo arr
   access_size_map <- gets compArrayLeastAccessSize
   let elem_size = (M.!) access_size_map arr
-      r_size = primByteSize val_pt
-      chunks = r_size `div` elem_size
-      int_pt = byteSizeToIntPrimType r_size
-      int_t  = Scalar int_pt
-      c_t    = Scalar $ byteSizeToIntPrimType elem_size
+      r_size  = primByteSize val_pt
+      chunks  = r_size `div` elem_size
+      int_pt  = byteSizeToIntPrimType r_size
+      int_t   = Scalar int_pt
+      int32_t = Scalar int32
+      c_t     = Scalar $ byteSizeToIntPrimType elem_size
+  size_id <- getConstId $ IntValue $ Int32Value $ fromIntegral elem_size
+  (i_id', _) <- insertReturnOp int32_t $ opUDiv i_id size_id
   c_id <- fst <$> insertBitcast int_pt val_pt val_id
   shf_ids <- mapM (insertShiftRightConst int_t c_id . (elem_size*8*)) [0..chunks-1]
   vs_ids <- mapM (insertIntConversion c_t int_t) shf_ids
-  is_ids <- mapM (insertIndexIncrConst i_id . fromIntegral) [0..chunks-1]
+  is_ids <- mapM (insertIndexIncrConst i_id' . fromIntegral) [0..chunks-1]
   zipWithM_ (insertArrayWriteChunk c_t scope vol arr_id) is_ids vs_ids
 
 insertArrayReadChunk :: SPIRVType -> VarScope -> Volatility -> Word32 -> Word32 -> CompilerM Word32
@@ -536,13 +565,16 @@ insertArrayRead arr i_id r_pt scope vol = do
   (arr_id, _, _) <- getVarInfo arr
   access_size_map <- gets compArrayLeastAccessSize
   let elem_size = (M.!) access_size_map arr
-      r_size = primByteSize r_pt
-      chunks = r_size `div` elem_size
-      c_t    = Scalar $ byteSizeToIntPrimType elem_size
-      int_pt = byteSizeToIntPrimType r_size
-      int_t  = Scalar int_pt
-      shf_is = map (elem_size*8*) [0..chunks-1]
-  is_ids <- mapM (insertIndexIncrConst i_id . fromIntegral) [0..chunks-1]
+      r_size  = primByteSize r_pt
+      chunks  = r_size `div` elem_size
+      c_t     = Scalar $ byteSizeToIntPrimType elem_size
+      int_pt  = byteSizeToIntPrimType r_size
+      int_t   = Scalar int_pt
+      int32_t = Scalar int32
+      shf_is  = map (elem_size*8*) [0..chunks-1]
+  size_id <- getConstId $ IntValue $ Int32Value $ fromIntegral elem_size
+  (i_id', _) <- insertReturnOp int32_t $ opUDiv i_id size_id
+  is_ids <- mapM (insertIndexIncrConst i_id' . fromIntegral) [0..chunks-1]
   vs_ids <- mapM (insertArrayReadChunk c_t scope vol arr_id) is_ids
   vis_ids <- mapM (insertIntConversion int_t c_t) vs_ids
   shf_ids <- zipWithM (insertShiftLeftConst int_t) vis_ids shf_is
@@ -685,10 +717,15 @@ getSpecConstDeclaration (spec_id, t@(Scalar Bool)) = do
   t_id <- getTypeId t
   return $ opSpecConstantFalse t_id spec_id
 getSpecConstDeclaration (spec_id, t@(Scalar pt)) = do
-  let num_lits = primBitSize pt `div` 32
-      default_lit = replicate num_lits 1
+  let num_lits = primByteSize pt `div` 4
+      default_lit = replicate (max (num_lits - 1) 0) 0 ++ [1]
   t_id <- getTypeId t
   return $ opSpecConstant default_lit t_id spec_id
+getSpecConstDeclaration (spec_id, Array t@(Scalar pt) (Just expr_id)) = do
+  spec_const <- getSpecConstDeclaration (spec_id, Scalar int32)
+  elem_size_id <- getConstId $ IntValue $ Int32Value $ primByteSize pt
+  t_id <- getTypeId t
+  return $ spec_const ++ opSpecConstantOp opcUDiv [spec_id, elem_size_id] t_id expr_id
 getSpecConstDeclaration _ = return []
 
 getSpecConstDeclarations :: CompilerM [Word32]
@@ -723,12 +760,12 @@ getExecutionModeDeclarations =
   concatMap (getExecutionModeDeclaration . snd) <$> gets compEntryPoints
 
 getTypeDecoration :: SPIRVType -> Word32 -> [Word32]
-getTypeDecoration (Array _ _) t_id  = opDecorate t_id cDecorationArrayStride [1]
--- | ^ Always byte-index
-getTypeDecoration (Struct _) t_id =
+getTypeDecoration (Array (Scalar t) _) t_id =
+  opDecorate t_id cDecorationArrayStride [primByteSize t]
+getTypeDecoration (Struct _) t_id           =
   opDecorate t_id cDecorationBlock [] ++
   opMemberDecorate t_id 0 cDecorationOffset [0]
-getTypeDecoration _ _           = []
+getTypeDecoration _ _                       = []
 
 getTypeDecorations :: CompilerM [Word32]
 getTypeDecorations =
@@ -830,6 +867,97 @@ compileFunCall "atan2_64" arg_ids        = fun64To32 "atan2_" arg_ids
 compileFunCall "log10_64" arg_ids        = fun64To32 "log10_" arg_ids
 compileFunCall h _                       = fail $ "Call to " ++ pretty h ++ " not implemented."
 
+signedDivision :: PrimType -> Word32 -> Word32 -> CompilerM ExprInfo
+signedDivision pt@(IntType it) x_id y_id = do
+  let t = Scalar pt
+      bt = Scalar Bool
+  zero_id <- getConstId $ IntValue $ intValue it (0 :: Integer)
+  one_id  <- getConstId $ IntValue $ intValue it (1 :: Integer)
+  (q_id, _)      <- insertReturnOp t $ opSDiv x_id y_id
+  (r_id, _)      <- signedRemainder pt x_id y_id
+  (r_lz_id, _)   <- insertReturnOp bt $ opSLessThan r_id zero_id
+  (y_lz_id, _)   <- insertReturnOp bt $ opSLessThan y_id zero_id
+  (r_neqz_id, _) <- insertReturnOp bt $ opINotEqual r_id zero_id
+  (cm1_id, _)    <- insertReturnOp bt $ opLogicalNotEqual r_lz_id y_lz_id
+  (cm2_id, _)    <- insertReturnOp bt $ opLogicalAnd r_neqz_id cm1_id
+  (s_id, _)      <- insertReturnOp t $ opSelect cm2_id one_id zero_id
+  insertReturnOp t $ opISub q_id s_id
+  
+signedRemainder :: PrimType -> Word32 -> Word32 -> CompilerM ExprInfo
+signedRemainder pt@(IntType it) x_id y_id = do
+  let t = Scalar pt
+  (xa_id, _)  <- glslReturnOp glslSAbs [x_id] t
+  (ya_id, _)  <- glslReturnOp glslSAbs [y_id] t
+  (mod_id, _) <- insertReturnOp t $ opUMod xa_id ya_id
+  (xs_id, _)  <- glslReturnOp glslSSign [x_id] t
+  insertReturnOp t $ opIMul xs_id mod_id
+  
+signedModulo :: PrimType -> Word32 -> Word32 -> CompilerM ExprInfo
+signedModulo pt@(IntType it) x_id y_id = do
+  let t = Scalar pt
+      bt = Scalar Bool
+  zero_id <- getConstId $ IntValue $ intValue it (0 :: Integer)
+  (xa_id, _)       <- glslReturnOp glslSAbs [x_id] t
+  (ya_id, _)       <- glslReturnOp glslSAbs [y_id] t
+  (moda_id, _)     <- insertReturnOp t $ opUMod xa_id ya_id
+  (xs_id, _)       <- glslReturnOp glslSSign [x_id] t
+  (ys_id, _)       <- glslReturnOp glslSSign [y_id] t
+  (s_eq_id, _)     <- insertReturnOp bt $ opIEqual xs_id ys_id
+  (moda_eqz_id, _) <- insertReturnOp bt $ opIEqual moda_id zero_id
+  (or_id, _)       <- insertReturnOp bt $ opLogicalOr s_eq_id moda_eqz_id
+  (c_id, _)        <- insertReturnOp t $ opSelect or_id zero_id ya_id
+  (modc_id, _)     <- insertReturnOp t $ opISub moda_id c_id
+  (modca_id, _)    <- glslReturnOp glslSAbs [modc_id] t
+  insertReturnOp t $ opIMul ys_id modca_id
+
+integerPower :: PrimType -> Word32 -> Word32 -> CompilerM ExprInfo
+integerPower pt@(IntType it) x_id y_id = do
+  let t = Scalar pt
+      bt = Scalar Bool
+  t_id <- getTypeId t
+  zero_id <- getConstId $ IntValue $ intValue it (0 :: Integer)
+  one_id <- getConstId $ IntValue $ intValue it (1 :: Integer)
+  pre_id <- newId
+  start_id <- newId
+  check_id <- newId
+  body_id <- newId
+  if_true_id <- newId
+  if_end_id <- newId
+  continue_id <- newId
+  end_id <- newId
+  res_inc_id <- newId
+  rem_sh_id <- newId
+  xp_sqr_id <- newId
+  appendCode $ opBranch pre_id
+  appendCode $ opLabel pre_id
+  appendCode $ opBranch start_id
+  appendCode $ opLabel start_id
+  (res_id, _) <- insertReturnOp t $ opPhi [one_id, pre_id, res_inc_id, continue_id]
+  (rem_id, _) <- insertReturnOp t $ opPhi [y_id, pre_id, rem_sh_id, continue_id]
+  (xp_id, _) <- insertReturnOp t $ opPhi [x_id, pre_id, xp_sqr_id, continue_id]
+  appendCode $ opLoopMerge end_id continue_id
+  appendCode $ opBranch check_id
+  appendCode $ opLabel check_id
+  (cond1_id, _) <- insertReturnOp bt $ opINotEqual rem_id zero_id
+  appendCode $ opBranchConditional cond1_id body_id end_id
+  appendCode $ opLabel body_id
+  -- Insert if here
+  (rem_fb_id, _) <- insertReturnOp t $ opBitwiseAnd rem_id one_id
+  (cond2_id, _) <- insertReturnOp bt $ opINotEqual rem_fb_id zero_id
+  appendCode $ opSelectionMerge if_end_id
+  appendCode $ opBranchConditional cond2_id if_true_id if_end_id
+  appendCode $ opLabel if_true_id
+  appendCode $ opIMul res_id xp_id t_id res_inc_id
+  appendCode $ opBranch if_end_id
+  appendCode $ opLabel if_end_id
+  appendCode $ opShiftRightLogical rem_id one_id t_id rem_sh_id
+  appendCode $ opIMul xp_id xp_id t_id xp_sqr_id
+  appendCode $ opBranch continue_id
+  appendCode $ opLabel continue_id
+  appendCode $ opBranch start_id
+  appendCode $ opLabel end_id
+  return (res_id, t)
+
 compileLeaf :: ExpLeaf -> CompilerM ExprInfo
 compileLeaf (SizeOf t) = do
   s_id <- getConstId $ IntValue $ Int32Value $ primByteSize t
@@ -916,18 +1044,19 @@ compilePrimExp f (BinOpExp bop x y) = do
     FMul{}   -> insertReturnOp t $ opFMul x_id y_id
     FDiv{}   -> insertReturnOp t $ opFDiv x_id y_id
     UDiv{}   -> insertReturnOp t $ opUDiv x_id y_id
-    SDiv{}   -> insertReturnOp t $ opSDiv x_id y_id
+    SDiv{}   -> signedDivision pt x_id y_id
     UMod{}   -> insertReturnOp t $ opUMod x_id y_id
-    SMod{}   -> insertReturnOp t $ opSMod x_id y_id
+    SMod{}   -> signedModulo pt x_id y_id
+    -- | ^ Replace with opSMod when NVIDIA fixes bug
     SQuot{}  -> insertReturnOp t $ opUDiv x_id y_id
-    SRem{}   -> insertReturnOp t $ opSRem x_id y_id
+    SRem{}   -> signedRemainder pt x_id y_id
     FMin{}   -> glslReturnOp glslFMin [x_id, y_id] t
     SMin{}   -> glslReturnOp glslSMin [x_id, y_id] t
     UMin{}   -> glslReturnOp glslUMin [x_id, y_id] t
     FMax{}   -> glslReturnOp glslFMax [x_id, y_id] t
     UMax{}   -> glslReturnOp glslUMax [x_id, y_id] t
     SMax{}   -> glslReturnOp glslSMax [x_id, y_id] t
-    Pow{}    -> fail "Integer Pow not implemented" -- TODO: Fix!
+    Pow{}    -> integerPower pt x_id y_id
     FPow{}   -> compileFunCall ("pow" ++ show (primBitSize pt)) [x_id, y_id]
     Xor{}    -> insertReturnOp t $ opBitwiseXor x_id y_id
     And{}    -> insertReturnOp t $ opBitwiseAnd x_id y_id
@@ -953,7 +1082,9 @@ compileAtomicOp op = do
               cMemorySemanticsUniformMemory .|. cMemorySemanticsSequentiallyConsistent
   (i_id, _) <- compileExp i
   (e_id, _) <- compileExp e
-  (ptr_id, _) <- insertReturnOp ptr_t $ opAccessChain arr_id i_id
+  size_id <- getConstId $ IntValue $ Int32Value 4
+  (i_id', _) <- insertReturnOp int_t $ opUDiv i_id size_id
+  (ptr_id, _) <- insertReturnOp ptr_t $ opAccessChain arr_id i_id'
   (r_id, _) <- insertReturnOp int_t $ s_op ptr_id dev_scope_id sem_id e_id
   insertStore old_id r_id
   where unpack (AtomicAdd old arr (Count i) e) = return (opAtomicIAdd, old, arr, i, e)
@@ -1126,6 +1257,7 @@ compileKernel (Map kernel) = do
   insertEntryHead name
   _ <- insertVarInline g_var FunctionLocal int_t
   compileEarlyDecls body
+  insertDescriptorAccesses name
   (g_var_id, _, _) <- getVarInfo g_var
   (g_id, _) <- readBuiltin GlobalInvocationId 0
   insertStore g_var_id g_id
@@ -1148,6 +1280,7 @@ compileKernel (AnyKernel kernel) = do
   mapM_ insertLocalMemory $ kernelLocalMemory kernel
   insertEntryHead name
   compileEarlyDecls body
+  insertDescriptorAccesses name
   compileCode body
   insertEntryTail
 compileKernel (MapTranspose bt _ _ _ _ _ _ _ _ _) = do
@@ -1172,6 +1305,7 @@ compileKernel (MapTranspose bt _ _ _ _ _ _ _ _ _) = do
   suggestArrayLeastAccessSize src $ primByteSize bt
   addDescriptors name uses
   insertEntryHead name
+  insertDescriptorAccesses name
   (dest_offset_id, _) <- getVarInfo dest_offset >>= insertVarLoad
   (src_offset_id, _)  <- getVarInfo src_offset >>= insertVarLoad
   (x_elems_id, _)     <- getVarInfo x_elems >>= insertVarLoad
@@ -1184,17 +1318,23 @@ compileKernel (MapTranspose bt _ _ _ _ _ _ _ _ _) = do
   appendCode $ opSelectionMerge oob_id
   appendCode $ opBranchConditional cond_id oob_id inside_id
   appendCode $ opLabel inside_id
+  (sub_size_id, _) <- insertReturnOp int32_t $ opIMul x_elems_id y_elems_id
   bt_size_id <- getConstId $ IntValue $ Int32Value $ primByteSize bt
   (aligned_g_id, _) <- insertReturnOp int32_t $ opIMul g_id bt_size_id
   (i_id, _) <- insertReturnOp int32_t $ opIAdd aligned_g_id src_offset_id
   (val_id, _) <- insertArrayRead src i_id bt StorageBuffer Nonvolatile
-  (x_id, _) <- insertReturnOp int32_t $ opSDiv g_id x_elems_id
-  (y_id, _) <- insertReturnOp int32_t $ opSRem g_id x_elems_id
+  (sub_g_id, _) <- insertReturnOp int32_t $ opSMod g_id sub_size_id
+  (x_id, _) <- insertReturnOp int32_t $ opSDiv sub_g_id x_elems_id
+  (y_id, _) <- insertReturnOp int32_t $ opSRem sub_g_id x_elems_id
   (y_id', _) <- insertReturnOp int32_t $ opIMul y_id y_elems_id
   (tr_id, _) <- insertReturnOp int32_t $ opIAdd x_id y_id'
   (aligned_tr_id, _) <- insertReturnOp int32_t $ opIMul tr_id bt_size_id
-  (i_t_id, _) <- insertReturnOp int32_t $ opIAdd aligned_tr_id dest_offset_id
-  insertArrayWrite dest i_t_id val_id bt StorageBuffer Nonvolatile
+  (sub_num_id, _) <- insertReturnOp int32_t $ opSDiv g_id sub_size_id
+  (sub_offset_id, _) <- insertReturnOp int32_t $ opIMul sub_num_id sub_size_id
+  (aligned_sub_offset_id, _) <- insertReturnOp int32_t $ opIMul sub_offset_id bt_size_id
+  (i_t_id, _) <- insertReturnOp int32_t $ opIAdd aligned_tr_id aligned_sub_offset_id
+  (i_t_id', _) <- insertReturnOp int32_t $ opIAdd i_t_id dest_offset_id
+  insertArrayWrite dest i_t_id' val_id bt StorageBuffer Nonvolatile
   appendCode $ opBranch oob_id
   appendCode $ opLabel oob_id
   insertEntryTail

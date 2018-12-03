@@ -1,6 +1,5 @@
 module Futhark.CodeGen.Backends.SPIRV.Operations 
   ( GLSLInstr
-  , encodeString
   , glslRound
   , glslFAbs
   , glslSAbs
@@ -69,6 +68,7 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , cBuiltinLocalInvocationId
   , cBuiltinGlobalInvocationId
   , genHeader
+  , opcUDiv
   , opExtension
   , opExtInstImport
   , opExtInst
@@ -92,6 +92,7 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , opSpecConstantFalse
   , opSpecConstant
   , opSpecConstantComposite
+  , opSpecConstantOp
   , opFunction
   , opFunctionEnd
   , opVariable
@@ -126,9 +127,11 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , opIsNan
   , opIsInf
   , opLogicalEqual
+  , opLogicalNotEqual
   , opLogicalOr
   , opSelect
   , opIEqual
+  , opINotEqual
   , opFOrdEqual
   , opLogicalAnd
   , opLogicalNot
@@ -157,6 +160,7 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
   , opAtomicAnd
   , opAtomicOr
   , opAtomicXor
+  , opPhi
   , opLoopMerge
   , opSelectionMerge
   , opLabel
@@ -167,31 +171,16 @@ module Futhark.CodeGen.Backends.SPIRV.Operations
 
 import Data.Word
 import Data.Bits
-import Data.Char
 
 type GLSLInstr = Word32
 type SPIRVInstr = Word32
-
--- | Aux
-encodeString :: String -> [Word32]
-encodeString s = encodeString' $ s ++ [chr 0]
--- | ^ String must be null-terminated
-
-encodeString' :: String -> [Word32]
-encodeString' [] = []
-encodeString' (c1:c2:c3:c4:cs) =
-  let ws = map (fromIntegral . ord) [c1,c2,c3,c4]
-      bs = zipWith (\w i -> w `shift` (8 * i)) ws [0..3]
-      wd = foldl (.|.) 0 bs
-  in wd : encodeString' cs
-encodeString' cs = encodeString' $ (++) cs $ replicate (4 - length cs) $ chr 0
 
 -- | SPIR-V constants
 cMagicNumber :: Word32
 cMagicNumber = 0x07230203
 
 cVersion :: Word32
-cVersion = 0x00010300
+cVersion = 0x00010100
 
 cGenerator :: Word32
 cGenerator = 0
@@ -488,6 +477,9 @@ opcSpecConstant = 50
 opcSpecConstantComposite :: SPIRVInstr
 opcSpecConstantComposite = 51
 
+opcSpecConstantOp :: SPIRVInstr
+opcSpecConstantOp = 52
+
 opcFunction :: SPIRVInstr
 opcFunction = 54
 
@@ -590,6 +582,9 @@ opcIsInf = 157
 opcLogicalEqual :: SPIRVInstr
 opcLogicalEqual = 164
 
+opcLogicalNotEqual :: SPIRVInstr
+opcLogicalNotEqual = 165
+
 opcLogicalOr :: SPIRVInstr
 opcLogicalOr = 166
 
@@ -604,6 +599,9 @@ opcSelect = 169
 
 opcIEqual :: SPIRVInstr
 opcIEqual = 170
+
+opcINotEqual :: SPIRVInstr
+opcINotEqual = 171
 
 opcULessThan :: SPIRVInstr
 opcULessThan = 176
@@ -682,6 +680,9 @@ opcAtomicOr = 241
 
 opcAtomicXor :: SPIRVInstr
 opcAtomicXor = 242
+
+opcPhi :: SPIRVInstr
+opcPhi = 245
 
 opcLoopMerge :: SPIRVInstr
 opcLoopMerge = 246
@@ -771,6 +772,9 @@ opSpecConstant literals t_id r_id = makeOperation opcSpecConstant $ [t_id, r_id]
 
 opSpecConstantComposite :: [Word32] -> Word32 -> Word32 -> [Word32]
 opSpecConstantComposite constits t_id r_id = makeOperation opcSpecConstantComposite $ [t_id, r_id] ++ constits
+
+opSpecConstantOp :: Word32 -> [Word32] -> Word32 -> Word32 -> [Word32]
+opSpecConstantOp op opers t_id r_id = makeOperation opcSpecConstantOp $ [t_id, r_id, op] ++ opers
 
 opFunction :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opFunction func_ctrl func_t_id t_id r_id = makeOperation opcFunction [t_id, r_id, func_ctrl, func_t_id]
@@ -880,6 +884,9 @@ opIsInf op_id t_id r_id = makeOperation opcIsInf [t_id, r_id, op_id]
 opLogicalEqual :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opLogicalEqual op1_id op2_id t_id r_id = makeOperation opcLogicalEqual [t_id, r_id, op1_id, op2_id]
 
+opLogicalNotEqual :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opLogicalNotEqual op1_id op2_id t_id r_id = makeOperation opcLogicalNotEqual [t_id, r_id, op1_id, op2_id]
+
 opLogicalOr :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opLogicalOr op1_id op2_id t_id r_id = makeOperation opcLogicalOr [t_id, r_id, op1_id, op2_id]
 
@@ -888,6 +895,9 @@ opSelect cond_id op1_id op2_id t_id r_id = makeOperation opcSelect [t_id, r_id, 
 
 opIEqual :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opIEqual op1_id op2_id t_id r_id = makeOperation opcIEqual [t_id, r_id, op1_id, op2_id]
+
+opINotEqual :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
+opINotEqual op1_id op2_id t_id r_id = makeOperation opcINotEqual [t_id, r_id, op1_id, op2_id]
 
 opLogicalAnd :: Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opLogicalAnd op1_id op2_id t_id r_id = makeOperation opcLogicalAnd [t_id, r_id, op1_id, op2_id]
@@ -982,6 +992,9 @@ opAtomicOr ptr_id scope_id sem_id val_id t_id r_id =
 opAtomicXor :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opAtomicXor ptr_id scope_id sem_id val_id t_id r_id =
   makeOperation opcAtomicXor [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
+  
+opPhi :: [Word32] -> Word32 -> Word32 -> [Word32]
+opPhi vars t_id r_id = makeOperation opcPhi $ [t_id, r_id] ++ vars
 
 opLoopMerge :: Word32 -> Word32 -> [Word32]
 opLoopMerge merge_id continue_id = makeOperation opcLoopMerge [merge_id, continue_id, 0]
