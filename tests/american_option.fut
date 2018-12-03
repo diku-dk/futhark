@@ -6,7 +6,7 @@
 -- fairly slow on the GPU.
 --
 -- ==
--- tags { no_python }
+-- tags { no_python no_vulkan }
 -- compiled input { 1  } output { 6.745433 }
 -- compiled input { 8  } output { 13.945689 }
 -- compiled input { 16 } output { 16.222591 }
