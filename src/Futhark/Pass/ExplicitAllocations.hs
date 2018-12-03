@@ -674,7 +674,20 @@ allocInExp (If cond tbranch fbranch (IfAttr rets ifsort)) = do
   space_oks <- mkSpaceOks (length rets) tbranch'
   fbranch' <- allocInFunBody space_oks fbranch
   let rets' = createBodyReturns rets space_oks
-  return $ If cond tbranch' fbranch' $ IfAttr rets' ifsort
+      res_then = bodyResult tbranch'
+      res_else = bodyResult fbranch'
+      size_ext = length res_then - length rets'
+      (ind_ses0, r_then_else) =
+        foldl (\(acc_ise,acc_ext) (r_then, r_else, i) ->
+                if r_then == r_else then ((i,r_then):acc_ise, acc_ext)
+                else (acc_ise, (r_then, r_else):acc_ext)
+              ) ([],[]) $ reverse $ zip3 res_then res_else [0..size_ext-1]
+      (r_then_ext, r_else_ext) = unzip r_then_else
+      ind_ses = zipWith (\(i,se) k -> (i-k,se)) ind_ses0 [0..length ind_ses0 - 1]
+      rets'' = foldl (\acc (i,se) -> fixExt i se acc) rets' ind_ses
+      tbranch'' = tbranch' { bodyResult = r_then_ext ++ drop size_ext res_then }
+      fbranch'' = fbranch' { bodyResult = r_else_ext ++ drop size_ext res_else }
+  return $ If cond tbranch'' fbranch'' $ IfAttr rets'' ifsort
 allocInExp e = mapExpM alloc e
   where alloc =
           identityMapper { mapOnBody = fail "Unhandled Body in ExplicitAllocations"

@@ -21,6 +21,7 @@ import Futhark.Representation.Kernels
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Util (mapAccumLM)
+import Futhark.Optimise.RegTiling.RegTiling3D
 
 tileLoops :: Pass Kernels Kernels
 tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
@@ -36,19 +37,23 @@ optimiseFunDef fundec = do
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 
 optimiseBody :: Body Kernels -> TileM (Body Kernels)
-optimiseBody (Body () bnds res) =
+optimiseBody (Body () bnds res) = localScope (scopeOf bnds) $
   Body () <$> (mconcat <$> mapM optimiseStm (stmsToList bnds)) <*> pure res
 
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
-optimiseStm (Let pat aux (Op old_kernel@(Kernel desc space ts body))) = do
-  (extra_bnds, space', body') <- tileInKernelBody mempty initial_variance space body
-  let new_kernel = Kernel desc space' ts body'
-  -- XXX: we should not change the type of the kernel (such as by
-  -- changing the number of groups being used for a kernel that
-  -- returns a result-per-group).
-  if kernelType old_kernel == kernelType new_kernel
-    then return $ extra_bnds <> oneStm (Let pat aux $ Op new_kernel)
-    else return $ oneStm $ Let pat aux $ Op old_kernel
+optimiseStm stmt@(Let pat aux (Op old_kernel@(Kernel desc space ts body))) = do
+  res3dtiling <- doRegTiling3D stmt
+  case res3dtiling of
+    Just (extra_bnds, stmt') -> return $ extra_bnds <> oneStm stmt'
+    Nothing -> do
+          (extra_bnds, space', body') <- tileInKernelBody mempty initial_variance space body
+          let new_kernel = Kernel desc space' ts body'
+          -- XXX: we should not change the type of the kernel (such as by
+          -- changing the number of groups being used for a kernel that
+          -- returns a result-per-group).
+          if kernelType old_kernel == kernelType new_kernel
+            then return $ extra_bnds <> oneStm (Let pat aux $ Op new_kernel)
+            else return $ oneStm $ Let pat aux $ Op old_kernel
   where initial_variance = M.map mempty $ scopeOfKernelSpace space
 optimiseStm (Let pat aux e) =
   pure <$> (Let pat aux <$> mapExpM optimise e)
