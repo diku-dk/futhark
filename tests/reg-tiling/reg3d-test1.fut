@@ -15,7 +15,7 @@
 
 
 -- compile input @ data/medium.in
--- output @ data/medium.out
+-- output @ data/medium-1.out
 
 let pred (x : f32) : bool = x < 9.0
 

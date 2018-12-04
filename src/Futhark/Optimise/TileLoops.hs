@@ -21,7 +21,7 @@ import Futhark.Representation.Kernels
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Util (mapAccumLM)
-import Futhark.Optimise.RegTiling.RegTiling3D
+import Futhark.Optimise.TileLoops.RegTiling3D
 
 tileLoops :: Pass Kernels Kernels
 tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
