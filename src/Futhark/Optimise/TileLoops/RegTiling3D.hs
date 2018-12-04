@@ -13,7 +13,7 @@
 --     * the stream's result is a tuple of scalar values, which are
 --       also the "thread-in-space" return of the kernel.
 --   Target code can be found in "tests/reg-tiling/reg-tiling-3d.fut".
-module Futhark.Optimise.RegTiling.RegTiling3D
+module Futhark.Optimise.TileLoops.RegTiling3D
        ( doRegTiling3D )
        where
 
