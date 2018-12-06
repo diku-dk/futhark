@@ -343,7 +343,7 @@ mustHaveField loc l t = do
           return l_type
       | Just (HasFields fields _) <- M.lookup tn constraints -> do
           case M.lookup l fields of
-            Just t' -> unify loc (toStructural t) t'
+            Just t' -> unify loc l_type' t'
             Nothing -> modifyConstraints $ M.insert tn $
                        HasFields (M.insert l l_type' fields) loc
           return l_type

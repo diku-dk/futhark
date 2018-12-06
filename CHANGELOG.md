@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed serious bug related to chaining record updates.
 
+  * Fixed type inference of record fields (#677).
+
 ## [0.7.4]
 
 ### Added
