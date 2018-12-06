@@ -310,7 +310,7 @@ defuncExp (RecordUpdate e1 fs e2 _ loc) = do
   (e2', sv2) <- defuncExp e2
   let sv = staticField sv1 sv2 fs
   return (RecordUpdate e1' fs e2'
-           (Info $ vacuousShapeAnnotations $ typeFromSV sv) loc,
+           (Info $ vacuousShapeAnnotations $ typeFromSV sv1) loc,
           sv)
   where staticField (RecordSV svs) sv2 (f:fs') =
           case lookup f svs of
