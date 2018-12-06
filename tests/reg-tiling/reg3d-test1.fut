@@ -13,7 +13,6 @@
 --   ]
 -- }
 
-
 -- compile input @ data/medium.in
 -- output @ data/medium-1.out
 
