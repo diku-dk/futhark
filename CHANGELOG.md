@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futharki` now prints warnings for files that are ":load"ed.
 
   * The compiler now warns when entry points are declared with types
-    that will become unnamed and opaque, and thus impossible provide
-    from the outside.
+    that will become unnamed and opaque, and thus impossible to
+    provide from the outside.
 
   * Type variables invented by the type checker will now have a
     unicode subscript to distinguish them from type parameters
@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `:type` command in `futharki` can now handle polymorphic
     expressions (#669).
 
+  * Fixed serious bug related to chaining record updates.
+
 ## [0.7.4]
 
 ### Added
@@ -52,7 +54,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed nasty defunctionalisation bug (#661).
 
-  * 'cabal`/`stack` `sdist` works now.
+  * `cabal sdist` and `stack sdist` works now.
 
 ## [0.7.3]
 
