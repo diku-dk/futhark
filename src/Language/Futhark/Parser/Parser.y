@@ -183,7 +183,7 @@ import Language.Futhark.Parser.Lexer
 Doc :: { DocComment }
      : doc { let L loc (DOC s) = $1 in DocComment s loc }
 
--- Three cases to avoid ambiguities.
+-- Four cases to avoid ambiguities.
 Prog :: { UncheckedProg }
       -- File begins with a file comment, followed by a Dec with a comment.
       : Doc Doc Dec_ Decs { Prog (Just $1) (addDoc $2 $3 : $4) }
@@ -191,6 +191,8 @@ Prog :: { UncheckedProg }
       | Doc Dec_ Decs     { Prog (Just $1) ($2 : $3) }
       -- File begins with a dec with no comment.
       | Dec_ Decs         { Prog Nothing ($1 : $2) }
+      -- File is empty.
+      |                   { Prog Nothing [] }
 ;
 
 Dec :: { UncheckedDec }
