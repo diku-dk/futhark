@@ -123,7 +123,6 @@ primOpMetrics Scratch{} = seen "Scratch"
 primOpMetrics Reshape{} = seen "Reshape"
 primOpMetrics Rearrange{} = seen "Rearrange"
 primOpMetrics Rotate{} = seen "Rotate"
-primOpMetrics Partition{} = seen "Partition"
 
 lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

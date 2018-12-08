@@ -487,9 +487,6 @@ typeOf (GenReduce hist _ _ _ _ _) =
   typeOf hist `setAliases` mempty `setUniqueness` Unique
 typeOf (Scan _ _ arr _) = typeOf arr `setAliases` mempty `setUniqueness` Unique
 typeOf (Filter _ arr _) = typeOf arr `setAliases` mempty `setUniqueness` Unique
-typeOf (Partition _ _ arr _) =
-  tupleRecord [typeOf arr `setAliases` mempty `setUniqueness` Unique,
-               Array (ArrayPrimElem (Signed Int32) mempty) (rank 1) Unique]
 typeOf (Stream _ lam _ _) =
   rettype (typeOf lam) `setUniqueness` Unique
   where rettype (Arrow _ _ _ t) = rettype t

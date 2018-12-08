@@ -782,17 +782,6 @@ checkBasicOp (Manifest perm arr) =
 checkBasicOp (Assert e _ _) =
   require [Prim Bool] e
 
-checkBasicOp (Partition _ flags arrs) = do
-  flagst <- lookupType flags
-  unless (rowType flagst == Prim int32) $
-    bad $ TypeError $ "Flag array has type " ++ pretty flagst ++ "."
-  forM_ arrs $ \arr -> do
-    arrt <- lookupType arr
-    unless (arrayRank arrt > 0) $
-      bad $ TypeError $
-      "Array argument " ++ pretty arr ++
-      " to partition has type " ++ pretty arrt ++ "."
-
 checkExp :: Checkable lore =>
             Exp (Aliases lore) -> TypeM lore ()
 
