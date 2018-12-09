@@ -735,7 +735,7 @@ eval env (DoLoop _ pat init_e form body _) = do
         zero = (`P.doMul` Int64Value 0)
 
         forLoop iv bound i v
-          | i == bound = return v
+          | i >= bound = return v
           | otherwise = do
               env' <- withLoopParams v
               forLoop iv bound (inc i) =<<

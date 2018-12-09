@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed type inference of record fields (#677).
 
+  * `futharki` no longer goes in an infinite loop if a ``for`` loop
+    contains a negative upper bound.
+
 ## [0.7.4]
 
 ### Added
