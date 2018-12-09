@@ -1,5 +1,5 @@
 -- ==
--- tags { no_opencl }
+-- tags { no_opencl no_vulkan }
 
 type point = (f32, f32)
 

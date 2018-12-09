@@ -2,7 +2,7 @@
 -- for ICFP 2016.
 --
 -- ==
--- tags { no_opencl }
+-- tags { no_opencl no_vulkan }
 -- input {
 --   [[1,2,3],[3,2,1],[4,5,6]]
 -- }

@@ -9,14 +9,7 @@ module Futhark.CodeGen.Backends.CVulkan
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Control.Monad.IO.Class
 import Control.Monad.Identity
-import Data.Word
-import Data.Char hiding (Space)
-import Data.Bits
-import System.Exit
-import qualified System.Process.ByteString as BP
-import qualified Data.ByteString as B
 
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
@@ -27,11 +20,10 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.Vulkan
 import qualified Futhark.CodeGen.ImpGen.Vulkan as ImpGen
 import Futhark.MonadFreshNames
-import Futhark.CodeGen.Backends.SPIRV
 
-compileProg :: (MonadFreshNames m, MonadIO m) => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
 compileProg prog = do
-  res <- ImpGen.compileProg prog -- >>= optimizeProgram
+  res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
     Right vk_prog@(Program _ _ prog') ->
@@ -253,6 +245,7 @@ staticVulkanArray name "device" t vs = do
       vkUnmapMemory(ctx->vulkan.device, ctx->$id:name.mem.memory);
     }
   }|]
+  GC.atCleanup [C.cstm|vulkan_free(&ctx->vulkan, ctx->$id:name.mem, $string:(pretty name));|]
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
 staticVulkanArray _ space _ _ =
   fail $ "Vulkan backend cannot create static array in memory space '" ++ space ++ "'"
@@ -457,27 +450,3 @@ kernelDebugAfter entry_point_name time_start = do
               $string:entry_point_name, $id:time_diff);
     }
   |]
-
-getWord32Bytes :: Word32 -> B.ByteString
-getWord32Bytes w = B.pack [getByte i w | i <- [0..3]]
-  where getByte i s = fromIntegral $ shiftR s (8 * i) .&. 0xFF
-
-bytesToWord32 :: B.ByteString -> [Word32]
-bytesToWord32 bs = stringToCode $ map (chr . fromIntegral) $ B.unpack bs
-
-optimizeShader :: MonadIO m => SingleEntryShader -> m SingleEntryShader
-optimizeShader (SEShader name desc code) = do
-  let args = ["-O", "-o", "-"]
-      inp = B.concat $ map getWord32Bytes code
-  res <- liftIO $ BP.readProcessWithExitCode "spirv-opt" args inp
-  case res of
-    (ExitSuccess, out, _) -> return $ SEShader name desc $ bytesToWord32 out
-    (ExitFailure c, _, err) -> fail $ concat ["spirv-opt for kernel ", name,
-                                              " failed with error code ",
-                                              show c, ": ", show err]
-
-optimizeProgram :: MonadIO m => Either a Program -> m (Either a Program)
-optimizeProgram (Right (Program shaders hc hf)) = do
-  opt_shaders <- mapM optimizeShader shaders
-  return $ Right $ Program opt_shaders hc hf
-optimizeProgram e = return e

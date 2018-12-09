@@ -33,6 +33,7 @@ module Futhark.CodeGen.Backends.GenericC
   , modifyUserState
   , contextContents
   , contextFinalInits
+  , contextCleanup
   , runCompilerM
   , blockScope
   , compileFun
@@ -48,6 +49,7 @@ module Futhark.CodeGen.Backends.GenericC
   , stms
   , decl
   , atInit
+  , atCleanup
   , headerDecl
   , publicDef
   , publicDef_
@@ -97,6 +99,7 @@ data CompilerState s = CompilerState {
   , compOpaqueStructs :: [(String, (C.Type, [C.Definition]))]
   , compEarlyDecls :: DL.DList C.Definition
   , compInit :: [C.Stm]
+  , compCleanup :: [C.Stm]
   , compNameSrc :: VNameSource
   , compUserState :: s
   , compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition)
@@ -112,6 +115,7 @@ newCompilerState src s = CompilerState { compTypeStructs = []
                                        , compOpaqueStructs = []
                                        , compEarlyDecls = mempty
                                        , compInit = []
+                                       , compCleanup = []
                                        , compNameSrc = src
                                        , compUserState = s
                                        , compHeaderDecls = mempty
@@ -303,6 +307,9 @@ contextContents = do
 contextFinalInits :: CompilerM op s [C.Stm]
 contextFinalInits = gets compInit
 
+contextCleanup :: CompilerM op s [C.Stm]
+contextCleanup = gets compCleanup
+
 newtype CompilerM op s a = CompilerM (RWS
                                       (CompilerEnv op s)
                                       (CompilerAcc op s)
@@ -336,6 +343,10 @@ modifyUserState f = modify $ \compstate ->
 atInit :: C.Stm -> CompilerM op s ()
 atInit x = modify $ \s ->
   s { compInit = compInit s ++ [x] }
+
+atCleanup :: C.Stm -> CompilerM op s ()
+atCleanup x = modify $ \s ->
+  s { compCleanup = compCleanup s ++ [x] }
 
 collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 collect m = snd <$> collect' m

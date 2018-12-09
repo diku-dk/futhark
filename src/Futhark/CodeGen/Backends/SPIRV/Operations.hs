@@ -364,11 +364,11 @@ glslATan2 = 25
 glslPow :: GLSLInstr
 glslPow = 26
 
+glslExp :: GLSLInstr
+glslExp = 27
+
 glslLog :: GLSLInstr
 glslLog = 28
-
-glslExp :: GLSLInstr
-glslExp = 29
 
 glslLog2 :: GLSLInstr
 glslLog2 = 30

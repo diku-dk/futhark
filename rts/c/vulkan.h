@@ -448,8 +448,11 @@ static void setup_vulkan(struct vulkan_context *ctx, uint32_t max_desc_count) {
   VULKAN_SUCCEED(vulkan_allocate_command_buffers(ctx, 0, ctx->command_buffer_count));
 
   ctx->max_descriptor_set_size = max_desc_count;
-  ctx->descriptor_pools = malloc(sizeof(VkDescriptorPool));
-  VULKAN_SUCCEED(vulkan_create_descriptor_pool(ctx, ctx->descriptor_pools));
+
+  if(max_desc_count) {
+    ctx->descriptor_pools = malloc(sizeof(VkDescriptorPool));
+    VULKAN_SUCCEED(vulkan_create_descriptor_pool(ctx, ctx->descriptor_pools));
+  }
 }
 
 void vulkan_setup_shader(struct vulkan_context *ctx,
@@ -465,6 +468,7 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
     FILE *f = fopen(fname, "wb");
     assert(f != NULL);
     fwrite(shader, sizeof(uint32_t), shader_size / sizeof(uint32_t), f);
+    fflush(f);
     fclose(f);
     free(fname);
   }
@@ -820,7 +824,7 @@ void vulkan_free_all_command_buffers(struct vulkan_context *ctx) {
     vkDestroyFence(ctx->device, ctx->command_buffers[i].fence, 0);
     tmp_buffers[i] = ctx->command_buffers[i].command_buffer;
 
-    if (i%ALLOC_STEP == 0)
+    if (i%ALLOC_STEP == 0 && ctx->max_descriptor_set_size)
       vkDestroyDescriptorPool(ctx->device, ctx->descriptor_pools[i/ALLOC_STEP], 0);
   }
 

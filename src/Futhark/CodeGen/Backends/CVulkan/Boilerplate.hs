@@ -21,6 +21,7 @@ import qualified Futhark.CodeGen.Backends.SPIRV as SPIRV
 generateBoilerplate :: Program -> GC.CompilerM Vulkan () ()
 generateBoilerplate (Program shaders sizes _) = do
   final_inits <- GC.contextFinalInits
+  ctx_cleanup <- GC.contextCleanup
   
   -- Define buffer structure in header
   GC.headerDecl GC.InitDecl [C.cedecl|struct vk_buffer_mem_pair {
@@ -217,6 +218,7 @@ generateBoilerplate (Program shaders sizes _) = do
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  free_lock(&ctx->lock);
                                  $stms:vulkan_shader_ctx_clrs
+                                 $stms:ctx_cleanup
                                  vulkan_cleanup(&ctx->vulkan);
                                  free(ctx);
                                }|])
