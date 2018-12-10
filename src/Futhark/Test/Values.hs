@@ -77,13 +77,13 @@ instance Binary Value where
   put (Int16Value shape vs) = putBinaryValue " i16" shape vs putInt16le
   put (Int32Value shape vs) = putBinaryValue " i32" shape vs putInt32le
   put (Int64Value shape vs) = putBinaryValue " i64" shape vs putInt64le
-  put (Word8Value shape vs) = putBinaryValue "  i8" shape vs putWord8
-  put (Word16Value shape vs) = putBinaryValue " i16" shape vs putWord16le
-  put (Word32Value shape vs) = putBinaryValue " i32" shape vs putWord32le
-  put (Word64Value shape vs) = putBinaryValue " i64" shape vs putWord64le
+  put (Word8Value shape vs) = putBinaryValue "  u8" shape vs putWord8
+  put (Word16Value shape vs) = putBinaryValue " u16" shape vs putWord16le
+  put (Word32Value shape vs) = putBinaryValue " u32" shape vs putWord32le
+  put (Word64Value shape vs) = putBinaryValue " u64" shape vs putWord64le
   put (Float32Value shape vs) = putBinaryValue " f32" shape vs putFloat32le
   put (Float64Value shape vs) = putBinaryValue " f64" shape vs putFloat64le
-  put (BoolValue shape vs) = putBinaryValue " f64" shape vs $ putInt8 . boolToInt
+  put (BoolValue shape vs) = putBinaryValue "bool" shape vs $ putInt8 . boolToInt
     where boolToInt True = 1
           boolToInt False = 0
 
