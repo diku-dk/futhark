@@ -260,7 +260,7 @@ callKernel (CmpSizeLe v key x) = do
       fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
     }|]
 callKernel (GetSizeMax v size_class) =
-  GC.stm [C.cstm|$id:v = ctx->opencl.$id:("max_" ++ pretty size_class);|]
+  GC.stm [C.cstm|$id:v = ctx->vulkan.$id:("max_" ++ pretty size_class);|]
 callKernel (HostCode c) = GC.compileCode c
 callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
   cmd_buffer_id <- newVName "cmd_buffer_id"

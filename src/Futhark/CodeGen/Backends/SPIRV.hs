@@ -1059,6 +1059,10 @@ compilePrimExp f (ConvOpExp conv x) = do
     FPToSI{} -> insertReturnOp r_t $ opConvertFToS x_id
     UIToFP{} -> insertReturnOp r_t $ opConvertUToF x_id
     SIToFP{} -> insertReturnOp r_t $ opConvertSToF x_id
+    BToI{}   -> insertBitcast r_it Bool x_id
+    IToB{}   -> case x_t of
+                  Scalar x_pt -> insertBitcast Bool x_pt x_id
+                  _           -> fail "IToB applied to non-scalar value."
 compilePrimExp f (BinOpExp bop x y) = do
   (x_id, _) <- compilePrimExp f x
   (y_id, _) <- compilePrimExp f y

@@ -103,9 +103,9 @@ vulkanOnHostOp :: Name -> HostOp -> OnKernelM ImpVulkan.Vulkan
 vulkanOnHostOp fname (GetSize v key size_class)     = do
   void $ tell mempty { vkSizes = M.singleton key (size_class, fname) }
   return $ ImpVulkan.GetSize v key
-vulkanOnHostOp fname (CmpSizeLe v key size_class _) = do
+vulkanOnHostOp fname (CmpSizeLe v key size_class x) = do
   tell mempty { vkSizes = M.singleton key (size_class, fname) }
-  return $ ImpVulkan.GetSizeMax v size_class
+  return $ ImpVulkan.CmpSizeLe v key x
 vulkanOnHostOp _ (GetSizeMax v size_class)          =
   return $ ImpVulkan.GetSizeMax v size_class
 vulkanOnHostOp _ (CallKernel k)                     =
