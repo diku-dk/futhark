@@ -119,10 +119,6 @@ primOpType (Manifest _ v) =
   pure <$> lookupType v
 primOpType Assert{} =
   pure [Prim Cert]
-primOpType (Partition n _ arrays) =
-  result <$> traverse lookupType arrays
-  where result ts = replicate n (Prim $ IntType Int32) ++ ts
-
 
 -- | The type of an expression.
 expExtType :: (HasScope lore m, TypedOp (Op lore)) =>

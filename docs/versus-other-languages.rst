@@ -147,7 +147,10 @@ want a *lifted* type parameter::
 
   let id '^t (x: t) = x
 
-Such *lifted* type parameters are restricted from being instantiated with function types.
+Such *lifted* type parameters are not restricted from being
+instantiated with function types.  On the other hand, in the function
+definition they are subject to the same restrictions as functional
+types.
 
 Futhark supports Hindley-Milner type inference (with some
 restrictions), so we could also just write it as::

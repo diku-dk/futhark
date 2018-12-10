@@ -263,11 +263,6 @@ data BasicOp lore
   -- ^ Rotate the dimensions of the input array.  The list of
   -- subexpressions specify how much each dimension is rotated.  The
   -- length of this list must be equal to the rank of the array.
-
-  | Partition Int VName [VName]
-    -- ^ First variable is the flag array, second is the element
-    -- arrays.  If no arrays are given, the returned offsets are zero,
-    -- and no arrays are returned.
   deriving (Eq, Ord, Show)
 
 -- | The root Futhark expression type.  The 'Op' constructor contains

@@ -206,9 +206,6 @@ instance Pretty (BasicOp lore) where
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e msg (loc, _)) =
     text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
-  ppr (Partition n flags arrs) =
-    text "partition" <>
-    parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
 
 instance Pretty a => Pretty (ErrorMsg a) where
   ppr (ErrorMsg parts) = commasep $ map p parts
