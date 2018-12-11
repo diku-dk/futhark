@@ -109,10 +109,10 @@ mapTranspose kernel_name elem_type transpose_type =
         if (x_index < width) {
           for (int i = 0; i < tile_dim; i += tile_dim/elems_per_thread)
           {
-            uint index_in = idata_offset + (y_index + i) * width + x_index;
+            uint index_in = (y_index + i) * width + x_index;
             if (y_index + i < height && index_in < input_size)
             {
-              block[(get_local_id(1) + i)*(tile_dim+1)+get_local_id(0)] = idata[index_in];
+              block[(get_local_id(1) + i)*(tile_dim+1)+get_local_id(0)] = idata[idata_offset + index_in];
             }
           }
         }
@@ -124,10 +124,10 @@ mapTranspose kernel_name elem_type transpose_type =
         {
           for (int i = 0; i < tile_dim; i += tile_dim/elems_per_thread)
           {
-            uint index_out = odata_offset + (y_index + i) * height + x_index;
+            uint index_out = (y_index + i) * height + x_index;
             if (y_index + i < width && index_out < output_size)
             {
-              odata[index_out] = block[get_local_id(0)*(tile_dim+1)+get_local_id(1)+i];
+              odata[odata_offset + index_out] = block[get_local_id(0)*(tile_dim+1)+get_local_id(1)+i];
             }
           }
         }
@@ -185,20 +185,20 @@ mapTranspose kernel_name elem_type transpose_type =
       [C.citems|
          uint x_index = $exp:x_in_index;
          uint y_index = $exp:y_in_index;
-         uint index_in = idata_offset + y_index * width + x_index;
+         uint index_in = y_index * width + x_index;
          if(x_index < width && y_index < height && index_in < input_size)
          {
            block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] =
-             idata[index_in];
+             idata[idata_offset + index_in];
          }
          barrier(CLK_LOCAL_MEM_FENCE);
 
          x_index = $exp:x_out_index;
          y_index = $exp:y_out_index;
-         uint index_out = odata_offset + y_index * height + x_index;
+         uint index_out = y_index * height + x_index;
          if(x_index < height && y_index < width && index_out < output_size)
          {
-           odata[index_out] =
+           odata[odata_offset + index_out] =
              block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
          }
       |]
@@ -216,9 +216,9 @@ mapTranspose kernel_name elem_type transpose_type =
              basic_idata_offset/sizeof($ty:elem_type) + our_array_offset;
 
            // Read and write the element.
-           uint index_in = idata_offset + y_index * width + x_index;
-           uint index_out = odata_offset + x_index * height + y_index;
-           if (index_in < input_size && index_out < output_size) {
-               odata[index_out] = idata[index_in];
+           uint index_in = y_index * width + x_index;
+           uint index_out = x_index * height + y_index;
+           if (get_global_id(0) < input_size) {
+               odata[odata_offset + index_out] = idata[idata_offset + index_in];
            }
          }|]
