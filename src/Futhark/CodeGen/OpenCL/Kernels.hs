@@ -88,7 +88,7 @@ mapTranspose :: C.ToIdent a => a -> C.Type -> TransposeType -> C.Func
 mapTranspose kernel_name elem_type transpose_type =
   case transpose_type of
     TransposeNormal ->
-      mkTranspose [] [C.citems|
+      mkTranspose [C.citems|
         // This kernel is optimized to ensure all global reads and writes are
         // coalesced, and to avoid bank conflicts in shared memory.  Each
         // thread group transposes a 2D tile of FUT_BLOCK_DIM*2 by
@@ -133,7 +133,7 @@ mapTranspose kernel_name elem_type transpose_type =
         }
       |]
     TransposeLowWidth ->
-      mkTranspose [C.cparams|uint muly|] $ lowDimBody
+      mkTranspose $ lowDimBody
       [C.cexp|get_group_id(0) * FUT_BLOCK_DIM + (get_local_id(0) / muly)|]
       [C.cexp|get_group_id(1) * FUT_BLOCK_DIM * muly
            + get_local_id(1)
@@ -144,7 +144,7 @@ mapTranspose kernel_name elem_type transpose_type =
            + (get_local_id(1) % muly) * FUT_BLOCK_DIM|]
       [C.cexp|get_group_id(0) * FUT_BLOCK_DIM + (get_local_id(1) / muly)|]
     TransposeLowHeight ->
-      mkTranspose [C.cparams|uint mulx|] $ lowDimBody
+      mkTranspose $ lowDimBody
       [C.cexp|get_group_id(0) * FUT_BLOCK_DIM * mulx
            + get_local_id(0)
            + (get_local_id(1) % mulx) * FUT_BLOCK_DIM
@@ -158,7 +158,19 @@ mapTranspose kernel_name elem_type transpose_type =
     TransposeSmall ->
       smallKernel
   where
-    mkTranspose extra_params body =
+    params = [C.cparams|__global $ty:elem_type *odata,
+                        uint basic_odata_offset,
+                        __global $ty:elem_type *idata,
+                        uint basic_idata_offset,
+                        uint width,
+                        uint height,
+                        uint input_size,
+                        uint output_size,
+                        uint mulx, uint muly, uint num_arrays,
+                        __local $ty:elem_type* block
+                        |]
+
+    mkTranspose body =
       [C.cfun|
        __kernel void $id:kernel_name($params:params) {
          uint our_array_offset = get_group_id(2) * width * height;
@@ -168,16 +180,7 @@ mapTranspose kernel_name elem_type transpose_type =
            basic_idata_offset/sizeof($ty:elem_type) + our_array_offset;
          $items:body
        }|]
-        where params = [C.cparams|__global $ty:elem_type *odata,
-                             uint basic_odata_offset,
-                             __global $ty:elem_type *idata,
-                             uint basic_idata_offset,
-                             uint width,
-                             uint height,
-                             uint input_size,
-                             uint output_size
-                             |] ++ extra_params ++ shared_param
-              shared_param = [C.cparams|__local $ty:elem_type* block|]
+
     lowDimBody x_in_index y_in_index x_out_index y_out_index =
       [C.citems|
          uint x_index = $exp:x_in_index;
@@ -199,17 +202,10 @@ mapTranspose kernel_name elem_type transpose_type =
              block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
          }
       |]
+
     smallKernel =
       [C.cfun|
-         __kernel void $id:kernel_name(__global $ty:elem_type *odata,
-                                      uint basic_odata_offset,
-                                      __global $ty:elem_type *idata,
-                                      uint basic_idata_offset,
-                                      uint num_arrays,
-                                      uint width,
-                                      uint height,
-                                      uint input_size,
-                                      uint output_size) {
+         __kernel void $id:kernel_name($params:params) {
            uint our_array_offset = get_global_id(0) / (height*width) * (height*width);
            uint x_index = get_global_id(0) % (height*width) / height;
            uint y_index = get_global_id(0) % height;

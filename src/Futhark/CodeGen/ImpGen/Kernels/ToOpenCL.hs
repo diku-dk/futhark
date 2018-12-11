@@ -424,11 +424,11 @@ generateTransposeFunction bt =
         intparam s i = ScalarParam (VName (nameFromString s) i) $ IntType Int32
 
         params = [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                num_arrays_p, x_p, y_p, in_p, out_p]
+                  num_arrays_p, x_p, y_p, in_p, out_p]
 
         [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                num_arrays_p, x_p, y_p, in_p, out_p,
-                muly, new_height, mulx, new_width] =
+         num_arrays_p, x_p, y_p, in_p, out_p,
+         muly, new_height, mulx, new_width] =
           zipWith ($) [memparam "destmem",
                        intparam "destoffset",
                        memparam "srcmem",
@@ -489,20 +489,18 @@ generateTransposeFunction bt =
                  (BinOpExp LogOr onearr noprob_widthheight)
                  (BinOpExp LogOr width_is_one height_is_one))
 
-        input_is_empty = CmpOpExp (CmpEq $ IntType Int32)
-                         (asExp num_arrays_p * asExp x_p * asExp y_p) 0
+        input_is_empty = asExp num_arrays_p .==. 0 .||. asExp x_p .==. 0 .||. asExp y_p .==. 0
 
         transpose_code =
-          ImpOpenCL.If input_is_empty mempty
-          (ImpOpenCL.If can_use_copy
-            copy_code
-            (ImpOpenCL.If should_use_lowwidth
-              lowwidth_transpose_code
-              (ImpOpenCL.If should_use_lowheight
-                lowheight_transpose_code
-                (ImpOpenCL.If should_use_small
-                  small_transpose_code
-                  normal_transpose_code))))
+          ImpOpenCL.If input_is_empty mempty $ mconcat
+          [ DeclareScalar (paramName muly) (IntType Int32)
+          , SetScalar (paramName muly) (BinOpExp (SQuot Int32) transposeBlockDim (asExp x_p))
+          , DeclareScalar (paramName mulx) (IntType Int32)
+          , SetScalar (paramName mulx) (BinOpExp (SQuot Int32) transposeBlockDim (asExp y_p))
+          , ImpOpenCL.If can_use_copy copy_code $
+            ImpOpenCL.If should_use_lowwidth lowwidth_transpose_code $
+            ImpOpenCL.If should_use_lowheight lowheight_transpose_code $
+            ImpOpenCL.If should_use_small small_transpose_code normal_transpose_code]
 
         copy_code =
           let num_bytes =
@@ -512,24 +510,19 @@ generateTransposeFunction bt =
                (paramName srcmem_p) (Count $ asExp srcoffset_p) space
                (Count num_bytes)
 
-        shared_memory tile_dim =
-          [SharedMemoryKArg $ bytes $ tile_dim * (tile_dim + 1) *
-           LeafExp (SizeOf bt) (IntType Int32)]
+        sharedMemory tile_dim =
+          SharedMemoryKArg $ bytes $ tile_dim * (tile_dim + 1) *
+          LeafExp (SizeOf bt) (IntType Int32)
 
-        normal_kernel_args =
-          map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                     x_p, y_p, in_p, out_p] ++
-          shared_memory (transposeBlockDim * 2)
+        kargs blockmult =
+          map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p, x_p, y_p, in_p,
+                     out_p, mulx, muly, num_arrays_p] ++
+          [sharedMemory (transposeBlockDim * blockmult)]
 
-        lowwidth_kernel_args =
-          map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                     x_p, y_p, in_p, out_p, muly] ++
-          shared_memory transposeBlockDim
-
-        lowheight_kernel_args =
-          map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                     x_p, y_p, in_p, out_p, mulx] ++
-          shared_memory transposeBlockDim
+        normal_kernel_args = kargs 2
+        lowwidth_kernel_args = kargs 1
+        lowheight_kernel_args = kargs 1
+        small_kernel_args = kargs 0
 
         normal_transpose_code =
           let actual_dim = transposeBlockDim * 2
@@ -550,9 +543,7 @@ generateTransposeFunction bt =
                             group_size
           in ImpOpenCL.Op $ LaunchKernel
              (transposeKernelName bt Kernels.TransposeSmall)
-             (map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                         num_arrays_p, x_p, y_p, in_p, out_p])
-             [kernel_size] [group_size]
+             small_kernel_args [kernel_size] [group_size]
 
         lowDimKernelAndGroupSize num_arrays x_elems y_elems =
           ([x_elems `roundUpTo` transposeBlockDim ,
@@ -561,26 +552,22 @@ generateTransposeFunction bt =
            [transposeBlockDim, transposeBlockDim, 1])
 
         lowwidth_transpose_code =
-          let set_muly = DeclareScalar (paramName muly) (IntType Int32)
-                        :>>: SetScalar (paramName muly) (BinOpExp (SQuot Int32) transposeBlockDim (asExp x_p))
-              set_new_height = DeclareScalar (paramName new_height) (IntType Int32)
-                :>>: SetScalar (paramName new_height) (asExp y_p `quotRoundingUp` asExp muly)
-              (kernel_size, workgroup_size) =
+          let (kernel_size, workgroup_size) =
                 lowDimKernelAndGroupSize (asExp num_arrays_p) (asExp x_p) (asExp new_height)
               launch = ImpOpenCL.Op $ LaunchKernel
                 (transposeKernelName bt Kernels.TransposeLowWidth) lowwidth_kernel_args kernel_size workgroup_size
-          in set_muly :>>: set_new_height :>>: launch
+          in mconcat [ DeclareScalar (paramName new_height) (IntType Int32)
+                     , SetScalar (paramName new_height) (asExp y_p `quotRoundingUp` asExp muly)
+                     , launch ]
 
         lowheight_transpose_code =
-          let set_mulx = DeclareScalar (paramName mulx) (IntType Int32)
-                        :>>: SetScalar (paramName mulx) (BinOpExp (SQuot Int32) transposeBlockDim (asExp y_p))
-              set_new_width = DeclareScalar (paramName new_width) (IntType Int32)
-                :>>: SetScalar (paramName new_width) (asExp x_p `quotRoundingUp` asExp mulx)
-              (kernel_size, workgroup_size) =
+          let (kernel_size, workgroup_size) =
                 lowDimKernelAndGroupSize (asExp num_arrays_p) (asExp new_width) (asExp y_p)
               launch = ImpOpenCL.Op $ LaunchKernel
                 (transposeKernelName bt Kernels.TransposeLowHeight) lowheight_kernel_args kernel_size workgroup_size
-          in set_mulx :>>: set_new_width :>>: launch
+          in mconcat [ DeclareScalar (paramName new_width) (IntType Int32)
+                     , SetScalar (paramName new_width) (asExp x_p `quotRoundingUp` asExp mulx)
+                     , launch ]
 
 roundUpTo :: ImpOpenCL.Exp -> ImpOpenCL.Exp -> ImpOpenCL.Exp
 roundUpTo x y = x + ((y - (x `impRem` y)) `impRem` y)
