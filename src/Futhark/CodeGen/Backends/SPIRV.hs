@@ -10,7 +10,6 @@ module Futhark.CodeGen.Backends.SPIRV
   , CompilerState
   , newCompilerState
   , stringToCode
-  , getResult
   , getEntryPoints
   , getDescriptorSets
   , compileKernel
@@ -24,6 +23,8 @@ import Data.Bits
 import Data.Binary.IEEE754
 import Data.Word
 import Data.List
+import qualified Data.Sequence as S
+import Data.Foldable
 import Data.Char hiding (Space)
 
 import Futhark.CodeGen.Backends.SPIRV.Operations
@@ -126,7 +127,7 @@ data CompilerState = CompilerState {
   , compConstRefs :: M.Map PrimValue Word32
   -- | ^ Constants used inside the SPIR-V program
   , compEntryPoints :: [(EntryPointName, Word32)]
-  , compResult :: [Word32]
+  , compResult :: S.Seq Word32
   , compGLSLExtId :: Maybe Word32
   , compBuiltinRefs :: M.Map Builtin Word32
   , compDescriptors :: DescriptorSetMap
@@ -141,7 +142,7 @@ newCompilerState = CompilerState { compCurrentMaxId = totalReservedIdCount
                                  , compTypeRefs = M.empty
                                  , compConstRefs = M.empty
                                  , compEntryPoints = []
-                                 , compResult = []
+                                 , compResult = S.Empty
                                  , compGLSLExtId = Nothing
                                  , compBuiltinRefs = M.empty
                                  , compDescriptors = M.empty
@@ -239,7 +240,7 @@ stringToCode [] = []
 stringToCode (c1:c2:c3:c4:cs) =
   let ws = map (fromIntegral . ord) [c1,c2,c3,c4]
       bs = zipWith (\w i -> w `shift` (8 * i)) ws [0..3]
-      wd = foldl (.|.) 0 bs
+      wd = foldl' (.|.) 0 bs
   in wd : stringToCode cs
 stringToCode cs = stringToCode $ (++) cs $ replicate (4 - length cs) $ chr 0
 
@@ -326,9 +327,6 @@ insertDescriptorAccesses name = do
   desc_map <- gets compDescriptors
   mapM_ (uncurry insertDescriptorAccess) $ (M.!) desc_map name
 
-getResult :: CompilerM [Word32]
-getResult = gets compResult
-
 getEntryPoints :: CompilerM [String]
 getEntryPoints = map fst <$> gets compEntryPoints
 
@@ -346,7 +344,7 @@ getGLSLExtId = do
       return ext_id
 
 appendCode :: [Word32] -> CompilerM ()
-appendCode code = modify $ \s -> s { compResult = compResult s ++ code }
+appendCode code = modify $ \s -> s { compResult = (S.><) (compResult s) (S.fromList code) }
 
 addEntryPoint :: EntryPointName -> Word32 -> CompilerM ()
 addEntryPoint name entry_id = modify $ \s -> s { compEntryPoints = (name, entry_id) : compEntryPoints s }
@@ -850,8 +848,8 @@ fun64To32 fun arg_ids = do
   insertReturnOp (Scalar float64) $ opFConvert r32_id
 
 compileFunCall :: String -> [Word32] -> CompilerM ExprInfo
-compileFunCall "isnan32" [a_id]          = insertReturnOp (Scalar float32) $ opIsNan a_id
-compileFunCall "isinf32" [a_id]          = insertReturnOp (Scalar float32) $ opIsInf a_id
+compileFunCall "isnan32" [a_id]          = insertReturnOp (Scalar Bool) $ opIsNan a_id
+compileFunCall "isinf32" [a_id]          = insertReturnOp (Scalar Bool) $ opIsInf a_id
 compileFunCall "round32" [a_id]          = glslReturnOp glslRound [a_id] (Scalar float32)
 compileFunCall "log32" [a_id]            = glslReturnOp glslLog [a_id] (Scalar float32)
 compileFunCall "log2_32" [a_id]          = glslReturnOp glslLog2 [a_id] (Scalar float32)
@@ -872,8 +870,8 @@ compileFunCall "log10_32" [a_id]         = do
   (numer_id, _) <- glslReturnOp glslLog [a_id] (Scalar float32)
   (denom_id, _) <- glslReturnOp glslLog [base_id] (Scalar float32)
   insertReturnOp (Scalar float32) $ opFDiv numer_id denom_id
-compileFunCall "isnan64" [a_id]          = insertReturnOp (Scalar float64) $ opIsNan a_id
-compileFunCall "isinf64" [a_id]          = insertReturnOp (Scalar float64) $ opIsInf a_id
+compileFunCall "isnan64" [a_id]          = insertReturnOp (Scalar Bool) $ opIsNan a_id
+compileFunCall "isinf64" [a_id]          = insertReturnOp (Scalar Bool) $ opIsInf a_id
 compileFunCall "round64" [a_id]          = glslReturnOp glslRound [a_id] (Scalar float64)
 compileFunCall "sqrt64" [a_id]           = glslReturnOp glslSqrt [a_id] (Scalar float64)
 compileFunCall "to_bits64" [a_id]        = insertBitcast int64 float64 a_id
@@ -1386,7 +1384,7 @@ finalizedShader = do
   nons_types   <- getNonScalarTypeDeclarations
   -- | ^ Seperate from scalar types as they may require consts before
   max_id       <- gets compCurrentMaxId
-  code_body    <- gets compResult
+  code_body    <- toList <$> gets compResult
   return $ concat [ genHeader max_id
                   , getCapabilities
                   , getExtensions
