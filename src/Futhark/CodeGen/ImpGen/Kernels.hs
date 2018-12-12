@@ -999,7 +999,7 @@ atomicUpdate [a] bucket op [v] _
       --   old = atomicCAS(&d_his[idx], assumed, tmp);
       -- } while(assumed != old);
       assumed <- dPrim "assumed" t
-      run_loop <- dPrimV "run_loop" 1
+      run_loop <- dPrimV "run_loop" true
       ImpGen.copyDWIM old [] (Var a) bucket'
 
         -- Preparing parameters
@@ -1013,7 +1013,7 @@ atomicUpdate [a] bucket op [v] _
             case t of FloatType Float32 -> (\x -> Imp.FunExp "to_bits32" [x] int32,
                                             \x -> Imp.FunExp "from_bits32" [x] t)
                       _                 -> (id, id)
-      sWhile (Imp.var run_loop int32) $ do
+      sWhile (Imp.var run_loop Bool) $ do
         assumed <-- Imp.var old t
         paramName acc_p <-- val'
         paramName arr_p <-- Imp.var assumed t
@@ -1024,7 +1024,7 @@ atomicUpdate [a] bucket op [v] _
           (toBits (Imp.var assumed int32)) (toBits (Imp.var (paramName acc_p) int32))
         old <-- fromBits (Imp.var old_bits int32)
         sWhen (toBits (Imp.var assumed t) .==. Imp.var old_bits int32)
-          (run_loop <-- 0)
+          (run_loop <-- false)
   where opHasAtomicSupport old arr' bucket' lam = do
           let atomic f = Imp.Atomic . f old arr' bucket'
           [BasicOp (BinOp bop _ _)] <-
