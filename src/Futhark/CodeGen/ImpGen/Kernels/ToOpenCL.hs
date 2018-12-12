@@ -522,7 +522,9 @@ generateTransposeFunction bt =
         normal_kernel_args = kargs 2
         lowwidth_kernel_args = kargs 1
         lowheight_kernel_args = kargs 1
-        small_kernel_args = kargs 0
+        small_kernel_args = kargs 1 -- Not used, but AMD's OpenCL does
+                                    -- not like zero-size local
+                                    -- memory.
 
         normal_transpose_code =
           let actual_dim = transposeBlockDim * 2
