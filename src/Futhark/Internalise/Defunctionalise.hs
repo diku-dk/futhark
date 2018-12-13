@@ -317,6 +317,8 @@ defuncExp (RecordUpdate e1 fs e2 _ loc) = do
             Just sv -> RecordSV $
                        (f, staticField sv sv2 fs') : filter ((/=f) . fst) svs
             Nothing -> error "Invalid record projection."
+        staticField (Dynamic t@Record{}) sv2 fs'@(_:_) =
+          staticField (svFromType t) sv2 fs'
         staticField _ sv2 _ = sv2
 
 defuncExp e@(Map fun arr t loc) = do
