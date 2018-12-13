@@ -782,7 +782,7 @@ evalCase :: Value -> Env -> CaseBase Info VName
             -> MaybeT EvalM Value
 evalCase v env (CasePat p cExp _) = do
   pEnv <- valEnv <$> patternMatch env mempty p v
-  lift $ eval pEnv cExp
+  lift $ eval (pEnv <> env) cExp
 
 substituteInModule :: M.Map VName VName -> Module -> Module
 substituteInModule substs = onModule
