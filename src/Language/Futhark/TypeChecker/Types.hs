@@ -15,6 +15,7 @@ module Language.Futhark.TypeChecker.Types
   , substituteTypes
   , substituteTypesInBoundV
 
+  , Subst(..)
   , Substitutable(..)
   , substTypesAny
   )
@@ -387,27 +388,37 @@ applyType ps t args =
         mkSubst p a =
           error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
 
+-- | A type substituion may be a substitution or a yet-unknown
+-- substitution (but which is certainly an overloaded primitive
+-- type!).  The latter is used to remove aliases from types that are
+-- yet-unknown but that we know cannot carry aliases (see issue #682).
+data Subst t = Subst t | PrimSubst
+
+instance Functor Subst where
+  fmap f (Subst t) = Subst $ f t
+  fmap _ PrimSubst = PrimSubst
+
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
 class Substitutable a where
-  applySubst :: (VName -> Maybe (TypeBase () ())) -> a -> a
+  applySubst :: (VName -> Maybe (Subst (TypeBase () ()))) -> a -> a
 
 instance Substitutable (TypeBase () ()) where
   applySubst = substTypesAny
 
 instance Substitutable (TypeBase () Names) where
-  applySubst = substTypesAny . (fmap fromStruct.)
+  applySubst = substTypesAny . (fmap (fmap fromStruct).)
 
 instance Substitutable (TypeBase (DimDecl VName) ()) where
-  applySubst = substTypesAny . (fmap vacuousShapeAnnotations.)
+  applySubst = substTypesAny . (fmap (fmap vacuousShapeAnnotations).)
 
 instance Substitutable (TypeBase (DimDecl VName) Names) where
-  applySubst = substTypesAny . (fmap (vacuousShapeAnnotations . fromStruct).)
+  applySubst = substTypesAny . (fmap (fmap (vacuousShapeAnnotations . fromStruct)).)
 
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny :: (ArrayDim dim, Monoid as) =>
-                 (VName -> Maybe (TypeBase dim as))
+                 (VName -> Maybe (Subst (TypeBase dim as)))
               -> TypeBase dim as -> TypeBase dim as
 substTypesAny lookupSubst ot = case ot of
   Prim t -> Prim t
@@ -415,10 +426,11 @@ substTypesAny lookupSubst ot = case ot of
                       uncurry arrayOfWithAliases (subsArrayElem et) shape u
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
-  TypeVar _ u v []
-    | Just t <- lookupSubst $ qualLeaf (qualNameFromTypeName v) ->
-        t `setUniqueness` u
-  TypeVar als u v targs -> TypeVar als u v $ map subsTypeArg targs
+  TypeVar als u v targs ->
+    case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
+      Just (Subst t) -> t `setUniqueness` u
+      Just PrimSubst -> TypeVar mempty u v $ map subsTypeArg targs
+      Nothing -> TypeVar als u v $ map subsTypeArg targs
   Record ts ->  Record $ fmap (substTypesAny lookupSubst) ts
   Arrow als v t1 t2 ->
     Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
@@ -427,10 +439,13 @@ substTypesAny lookupSubst ot = case ot of
   where nope = error "substTypesAny: Cannot create array after substitution."
 
         subsArrayElem (ArrayPrimElem t as) = (Prim t, as)
-        subsArrayElem (ArrayPolyElem v [] as)
-          | Just t <-  lookupSubst $ qualLeaf (qualNameFromTypeName v) = (t, as)
         subsArrayElem (ArrayPolyElem v targs as) =
-          (TypeVar as Nonunique v (map subsTypeArg targs), as)
+          case lookupSubst $ qualLeaf $ qualNameFromTypeName v of
+            Just (Subst t) -> (t, as)
+            -- It is intentional that we do not handle PrimSubst
+            -- specially here, as we are inside an array, and that
+            -- gives the aliasing.
+            _ -> (TypeVar as Nonunique v (map subsTypeArg targs), as)
         subsArrayElem (ArrayRecordElem ts) =
           let ts' = fmap recordArrayElemToType ts
           in (Record $ fmap (substTypesAny lookupSubst . fst) ts', foldMap snd ts')

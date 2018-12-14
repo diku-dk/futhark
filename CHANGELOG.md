@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futharki` no longer goes in an infinite loop if a ``for`` loop
     contains a negative upper bound.
 
+  * Overloaded number types can no longer carry aliases (#682).
+
 ## [0.7.4]
 
 ### Added

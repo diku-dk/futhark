@@ -370,7 +370,7 @@ instantiateTypeScheme loc tparams t = do
       tnames = map typeParamName tparams'
   (fresh_tnames, inst_list) <- unzip <$> mapM (instantiateTypeParam loc) tparams'
   let substs = M.fromList $ zip tnames $
-               map vacuousShapeAnnotations inst_list
+               map (Subst . vacuousShapeAnnotations) inst_list
       t' = substTypesAny (`M.lookup` substs) t
   return (fresh_tnames, t')
 
