@@ -84,8 +84,8 @@ data Kernel = Kernel
               , kernelUses :: [KernelUse]
                 -- ^ The host variables referenced by the kernel.
 
-              , kernelNumGroups :: DimSize
-              , kernelGroupSize :: DimSize
+              , kernelNumGroups :: Imp.Exp
+              , kernelGroupSize :: Imp.Exp
               , kernelName :: VName
                 -- ^ Unique name for the kernel.
               , kernelDesc :: String

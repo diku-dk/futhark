@@ -90,7 +90,6 @@ kernelCompiler (Pattern _ [pe]) (GetSizeMax size_class) =
 
 kernelCompiler pat (Kernel desc space _ kernel_body) = do
 
-  num_groups' <- ImpGen.subExpToDimSize $ spaceNumGroups space
   group_size' <- ImpGen.subExpToDimSize $ spaceGroupSize space
   num_threads' <- ImpGen.subExpToDimSize $ spaceNumThreads space
 
@@ -148,8 +147,8 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
             { Imp.kernelBody = kernel_body'
             , Imp.kernelLocalMemory = local_memory
             , Imp.kernelUses = uses
-            , Imp.kernelNumGroups = num_groups'
-            , Imp.kernelGroupSize = group_size'
+            , Imp.kernelNumGroups = ImpGen.compileSubExpOfType int32 $ spaceNumGroups space
+            , Imp.kernelGroupSize = ImpGen.compileSubExpOfType int32 $ spaceGroupSize space
             , Imp.kernelName = global_tid
             , Imp.kernelDesc = kernelName desc
             }
@@ -281,7 +280,6 @@ callKernelCopy bt
     let body = Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
                Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
 
-    destmem_size <- ImpGen.entryMemSize <$> ImpGen.lookupMemory destmem
     let writes_to = [Imp.MemoryUse destmem]
 
     reads_from <- readsFromSet $
@@ -344,7 +342,7 @@ readsFromSet free =
     case t of
       Array {} -> return Nothing
       Mem _ (Space "local") -> return Nothing
-      Mem memsize _ -> return $ Just $ Imp.MemoryUse var
+      Mem _ _ -> return $ Just $ Imp.MemoryUse var
       Prim bt ->
         isConstExp var >>= \case
           Just ce -> return $ Just $ Imp.ConstUse var ce
