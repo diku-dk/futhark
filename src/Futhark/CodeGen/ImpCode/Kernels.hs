@@ -98,7 +98,7 @@ data Kernel = Kernel
 type LocalMemoryUse = (VName, Either MemSize KernelConstExp)
 
 data KernelUse = ScalarUse VName PrimType
-               | MemoryUse VName Imp.DimSize
+               | MemoryUse VName
                | ConstUse VName KernelConstExp
                  deriving (Eq, Show)
 
@@ -130,8 +130,8 @@ instance Pretty KernelConst where
 instance Pretty KernelUse where
   ppr (ScalarUse name t) =
     text "scalar_copy" <> parens (commasep [ppr name, ppr t])
-  ppr (MemoryUse name size) =
-    text "mem_copy" <> parens (commasep [ppr name, ppr size])
+  ppr (MemoryUse name) =
+    text "mem_copy" <> parens (commasep [ppr name])
   ppr (ConstUse name e) =
     text "const" <> parens (commasep [ppr name, ppr e])
 

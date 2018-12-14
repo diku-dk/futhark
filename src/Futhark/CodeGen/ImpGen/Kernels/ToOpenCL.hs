@@ -191,7 +191,7 @@ useAsParam (ScalarUse name bt) =
         Bool -> [C.cty|unsigned char|]
         _    -> GenericC.primTypeToCType bt
   in Just [C.cparam|$ty:ctp $id:name|]
-useAsParam (MemoryUse name _) =
+useAsParam (MemoryUse name) =
   Just [C.cparam|__global unsigned char *$id:name|]
 useAsParam ConstUse{} =
   Nothing
@@ -578,9 +578,9 @@ roundUpTo x y = x + ((y - (x `impRem` y)) `impRem` y)
 --- Checking requirements
 
 useToArg :: KernelUse -> Maybe KernelArg
-useToArg (MemoryUse mem _) = Just $ MemKArg mem
-useToArg (ScalarUse v bt)  = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
-useToArg ConstUse{}        = Nothing
+useToArg (MemoryUse mem)  = Just $ MemKArg mem
+useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
+useToArg ConstUse{}       = Nothing
 
 typesInKernel :: CallKernel -> S.Set PrimType
 typesInKernel (Map kernel) = typesInCode $ mapKernelBody kernel
