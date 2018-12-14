@@ -282,7 +282,7 @@ callKernelCopy bt
                Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
 
     destmem_size <- ImpGen.entryMemSize <$> ImpGen.lookupMemory destmem
-    let writes_to = [Imp.MemoryUse destmem destmem_size]
+    let writes_to = [Imp.MemoryUse destmem]
 
     reads_from <- readsFromSet $
                   S.singleton srcmem <>
@@ -344,8 +344,7 @@ readsFromSet free =
     case t of
       Array {} -> return Nothing
       Mem _ (Space "local") -> return Nothing
-      Mem memsize _ -> Just <$> (Imp.MemoryUse var <$>
-                                 ImpGen.subExpToDimSize memsize)
+      Mem memsize _ -> return $ Just $ Imp.MemoryUse var
       Prim bt ->
         isConstExp var >>= \case
           Just ce -> return $ Just $ Imp.ConstUse var ce
