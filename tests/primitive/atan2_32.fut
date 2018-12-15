@@ -8,6 +8,5 @@
 -- input { 1f32 -1f32 } output { 2.356194f32 }
 -- input { -1f32 -1f32 } output { -2.356194f32 }
 
-import "/futlib/math"
 
 let main (x: f32) (y: f32): f32 = f32.atan2 x y

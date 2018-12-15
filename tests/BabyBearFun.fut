@@ -45,7 +45,6 @@
 --      enddo
 --    enddo
 
-import "/futlib/array"
 
 let min1(a: []i32, b: []i32): []i32 = map (uncurry i32.min) (zip a b)
 

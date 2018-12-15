@@ -2,7 +2,6 @@
 -- ==
 -- input { 9 } output { 3.0 }
 
-import "/futlib/math"
 
 module type operation = {type a type b val f: a -> b}
 

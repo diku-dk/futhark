@@ -7,7 +7,6 @@
 -- input { 0b010101i8 3 } output { 0 0b010101i8 0b011101i8 }
 -- input { 0b11111111i8 7 } output { 1 0b01111111i8 0b11111111i8 }
 
-import "/futlib/math"
 
 entry test_i8 (a:i8) (bit:i32) : (i32, i8, i8) =
   (i8.get_bit bit a,

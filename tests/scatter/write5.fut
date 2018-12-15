@@ -1,4 +1,3 @@
-import "/futlib/array"
 
 let main [n] ((a: [n]f32, ja: []i32)): ([]f32, []i32) =
   let res  = zip a ja
