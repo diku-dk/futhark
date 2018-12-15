@@ -614,14 +614,19 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
 internaliseExp desc (E.Update src slice ve loc) = do
   src_name <- newVName "update_src"
   dest_name <- newVName "update_dest"
+  ve_name <- newVName "update_ve"
   let src_t = E.typeOf src
       src_ident = E.Ident src_name (E.Info src_t) loc
       dest_ident = E.Ident dest_name (E.Info src_t) loc
+      ve_t = E.typeOf ve
 
   internaliseExp desc $
-    E.LetPat [] (E.Id src_name (E.Info $ E.vacuousShapeAnnotations src_t) loc) src
-    (E.LetWith dest_ident src_ident slice ve
-      (E.Var (E.qualName dest_name) (E.Info (E.vacuousShapeAnnotations src_t)) loc)
+    E.LetPat [] (E.Id ve_name (E.Info $ E.vacuousShapeAnnotations ve_t) loc) ve
+    (E.LetPat [] (E.Id src_name (E.Info $ E.vacuousShapeAnnotations src_t) loc) src
+      (E.LetWith dest_ident src_ident slice
+       (E.Var (E.qualName ve_name) (E.Info (E.vacuousShapeAnnotations ve_t)) loc)
+       (E.Var (E.qualName dest_name) (E.Info (E.vacuousShapeAnnotations src_t)) loc)
+       loc)
       loc)
     loc
 
