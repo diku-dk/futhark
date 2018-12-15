@@ -1291,11 +1291,11 @@ checkExp (VConstr0 name NoInfo loc) = do
   mustHaveConstr loc name t
   return $ VConstr0 name (Info t) loc
 
-checkExp (Match e cs NoInfo loc) = do
-  e' <- checkExp e
-  mt <- expType e'
-  (t', cs') <- mustHaveSameType loc mt cs
-  return $ Match e' cs' (Info t') loc
+checkExp (Match e cs NoInfo loc) =
+  sequentially (checkExp e) $ \e' _ -> do
+    mt <- expType e'
+    (t', cs') <- mustHaveSameType loc mt cs
+    return $ Match e' cs' (Info t') loc
 
 mustHaveSameType :: SrcLoc -> CompType -> [CaseBase NoInfo Name]
                   -> TermTypeM (CompType, [CaseBase Info VName])
