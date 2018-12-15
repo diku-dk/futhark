@@ -19,7 +19,6 @@
 -- input { 2  8u64 } output { 1u64 }
 -- input { 2 18446744073709551608u64 } output { 1u64 }
 
-import "/futlib/math"
 
 let main (f: i32) (x: u64): u64 =
   if      f == 0 then -x

@@ -5,7 +5,6 @@
 -- input { -1f32 0f32 } output { true true 0xbf800000u32 -1f32 }
 -- input { -1f32 1f32 } output { false true 0xbf800000u32 -1f32 }
 
-import "/futlib/math"
 
 let main (x: f32) (y: f32): (bool, bool, u32, f32) =
   (f32.isinf(x / y),

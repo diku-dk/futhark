@@ -10,8 +10,6 @@
 --           34i32, 35i32, 36i32, 37i32, 38i32] }
 
 
-import "/futlib/math"
-import "/futlib/array"
 
 let sgmPrefSum [n] (flags: [n]i32) (data: [n]i32) : [n]i32 =
     (unzip (scan (\(x_flag,x) (y_flag,y) ->

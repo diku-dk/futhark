@@ -45,8 +45,6 @@
 --      enddo
 --    enddo
 
-import "/futlib/math"
-import "/futlib/array"
 
 let floydSbsImp(n: i32, d: *[][]i32): [][]i32 =
     let dT = copy (transpose d) in

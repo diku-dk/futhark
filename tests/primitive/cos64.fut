@@ -5,6 +5,5 @@
 -- input { 3.1415927 } output { -1.0 }
 -- input { -3.1415927 } output { -1.0 }
 
-import "/futlib/math"
 
 let main(x: f64): f64 = f64.cos(x)
