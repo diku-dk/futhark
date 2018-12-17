@@ -277,8 +277,10 @@ inKernelOperations = GenericC.Operations
           GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
         kernelOps (GetLockstepWidth v) =
           GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
-        kernelOps Barrier =
+        kernelOps LocalBarrier =
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
+        kernelOps GlobalBarrier =
+          GenericC.stm [C.cstm|barrier(CLK_GLOBAL_MEM_FENCE);|]
         kernelOps MemFence =
           GenericC.stm [C.cstm|mem_fence(CLK_GLOBAL_MEM_FENCE);|]
         kernelOps (Atomic aop) = atomicOps aop

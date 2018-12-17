@@ -146,7 +146,11 @@ data Code a = Skip
             | DeclareMem VName Space
             | DeclareScalar VName PrimType
             | DeclareArray VName Space PrimType [PrimValue]
-              -- ^ Create a read-only array containing the given values.
+              -- ^ Create an array containing the given values.  The
+              -- lifetime of the array will be the entire application.
+              -- This is mostly used for constant arrays, but also for
+              -- some bookkeeping data, like the synchronisation
+              -- counts used to implement reduction.
             | Allocate VName (Count Bytes) Space
               -- ^ Memory space must match the corresponding
               -- 'DeclareMem'.

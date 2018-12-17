@@ -77,6 +77,37 @@ simplifyKernelOp mk_ops env (Kernel desc space ts kbody) = do
   kbody_hoisted' <- mapM processHoistedStm kbody_hoisted
   return (Kernel desc space' ts' $ mkWiseKernelBody () kbody_stms kbody_res,
           kbody_hoisted')
+  where scope = scopeOfKernelSpace space
+        scope_vtable = ST.fromScope scope
+        bound_here = S.fromList $ M.keys scope
+
+simplifyKernelOp mk_ops env (SegRed space comm red_op nes ts body) = do
+  space' <- Engine.simplify space
+  nes' <- mapM Engine.simplify nes
+  ts' <- mapM Engine.simplify ts
+  outer_vtable <- Engine.askVtable
+
+  (red_op', red_op_hoisted) <-
+    Engine.subSimpleM (mk_ops space) env outer_vtable $
+    Engine.localVtable (<>scope_vtable) $
+    Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
+  red_op_hoisted' <- mapM processHoistedStm red_op_hoisted
+
+  ((body_stms, body_res), body_hoisted) <-
+    Engine.subSimpleM (mk_ops space) env outer_vtable $ do
+      par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
+      Engine.localVtable (<>scope_vtable) $
+        Engine.blockIf (Engine.hasFree bound_here
+                        `Engine.orIf` Engine.isOp
+                        `Engine.orIf` par_blocker
+                        `Engine.orIf` Engine.isConsumed) $
+        Engine.simplifyBody (replicate (length ts) Observe) body
+  body_hoisted' <- mapM processHoistedStm body_hoisted
+
+  return (SegRed space' comm red_op' nes' ts' $
+          mkWiseBody () body_stms body_res,
+          red_op_hoisted' <> body_hoisted')
+
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
         bound_here = S.fromList $ M.keys scope
