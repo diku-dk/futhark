@@ -88,7 +88,7 @@ mapTranspose block_dim args t kind =
 
     TransposeLowWidth ->
       mkTranspose $ lowDimBody
-      (v32 get_group_id_0 * block_dim * (v32 get_local_id_0 `quot` muly))
+      (v32 get_group_id_0 * block_dim + (v32 get_local_id_0 `quot` muly))
       (v32 get_group_id_1 * block_dim * muly + v32 get_local_id_1 +
        (v32 get_local_id_0 `rem` muly) * block_dim)
       (v32 get_group_id_1* block_dim * muly + v32 get_local_id_0 +
