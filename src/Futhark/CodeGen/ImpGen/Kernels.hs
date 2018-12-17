@@ -147,8 +147,8 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
             { Imp.kernelBody = kernel_body'
             , Imp.kernelLocalMemory = local_memory
             , Imp.kernelUses = uses
-            , Imp.kernelNumGroups = ImpGen.compileSubExpOfType int32 $ spaceNumGroups space
-            , Imp.kernelGroupSize = ImpGen.compileSubExpOfType int32 $ spaceGroupSize space
+            , Imp.kernelNumGroups = [ImpGen.compileSubExpOfType int32 $ spaceNumGroups space]
+            , Imp.kernelGroupSize = [ImpGen.compileSubExpOfType int32 $ spaceGroupSize space]
             , Imp.kernelName = global_tid
             , Imp.kernelDesc = kernelName desc
             }

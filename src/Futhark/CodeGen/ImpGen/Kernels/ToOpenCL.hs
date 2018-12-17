@@ -169,8 +169,8 @@ onKernel called@(AnyKernel kernel) = do
           return (Nothing,
                   [C.citem|ALIGNED_LOCAL_MEMORY($id:mem, $exp:size');|])
         name = calledKernelName called
-        kernel_size = [kernelNumGroups kernel * kernelGroupSize kernel]
-        workgroup_size = [kernelGroupSize kernel]
+        kernel_size = zipWith (*) (kernelNumGroups kernel) (kernelGroupSize kernel)
+        workgroup_size = kernelGroupSize kernel
 
 onKernel (MapTranspose bt
           destmem destoffset
