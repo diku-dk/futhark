@@ -86,10 +86,8 @@ data Kernel = Kernel
 
               , kernelNumGroups :: [Imp.Exp]
               , kernelGroupSize :: [Imp.Exp]
-              , kernelName :: VName
-                -- ^ Unique name for the kernel.
-              , kernelDesc :: String
-               -- ^ A short descriptive name - should be
+              , kernelName :: Name
+               -- ^ A short descriptive and _unique_ name - should be
                -- alphanumeric and without spaces.
               }
             deriving (Show)

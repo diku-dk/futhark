@@ -252,7 +252,7 @@ calledKernelName :: CallKernel -> String
 calledKernelName (Map k) =
   mapKernelName k
 calledKernelName (AnyKernel k) =
-  kernelDesc k ++ "_kernel_" ++ show (baseTag $ kernelName k)
+  nameToString $ kernelName k
 calledKernelName (MapTranspose bt _ _ _ _ _ _ _ _ _) =
   transposeKernelName bt Kernels.TransposeNormal
 

@@ -149,8 +149,8 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
             , Imp.kernelUses = uses
             , Imp.kernelNumGroups = [ImpGen.compileSubExpOfType int32 $ spaceNumGroups space]
             , Imp.kernelGroupSize = [ImpGen.compileSubExpOfType int32 $ spaceGroupSize space]
-            , Imp.kernelName = global_tid
-            , Imp.kernelDesc = kernelName desc
+            , Imp.kernelName = nameFromString $ kernelName desc ++ "_" ++
+                               show (baseTag global_tid)
             }
 
 kernelCompiler pat e =
