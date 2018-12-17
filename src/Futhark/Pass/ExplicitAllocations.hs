@@ -529,16 +529,25 @@ allocInFun (FunDef entry fname rettype params fbody) =
     return $ FunDef entry fname (memoryInRetType rettype) params' fbody'
 
 handleKernel :: Kernel InInKernel
-             -> AllocM fromlore2 ExplicitMemory (MemOp (Kernel OutInKernel))
+             -> AllocM Kernels ExplicitMemory (MemOp (Kernel OutInKernel))
 handleKernel (GetSize key size_class) =
   return $ Inner $ GetSize key size_class
 handleKernel (GetSizeMax size_class) =
   return $ Inner $ GetSizeMax size_class
 handleKernel (CmpSizeLe key size_class x) =
   return $ Inner $ CmpSizeLe key size_class x
-handleKernel (Kernel desc space kernel_ts kbody) = subAllocM handleKernelExp True $
+handleKernel (Kernel desc space kernel_ts kbody) = subInKernel $
   Inner . Kernel desc space kernel_ts <$>
   localScope (scopeOfKernelSpace space) (allocInKernelBody kbody)
+
+handleKernel (SegRed space comm red_op nes ts body) = do
+  body' <- subInKernel $ localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
+  red_op' <- allocInSegRedLambda (spaceGlobalId space) (spaceNumThreads space) red_op
+  return $ Inner $ SegRed space comm red_op' nes ts body'
+
+subInKernel :: AllocM InInKernel OutInKernel a
+            -> AllocM fromlore2 ExplicitMemory a
+subInKernel = subAllocM handleKernelExp True
   where handleKernelExp (Barrier se) =
           return $ Inner $ Barrier se
 
@@ -784,6 +793,48 @@ allocInReduceParameters my_id = mapM allocInReduceParameter
             Mem size space ->
               return p { paramAttr = MemMem size space }
 
+allocInSegRedLambda :: VName -> SubExp -> Lambda InInKernel
+                    -> AllocM Kernels ExplicitMemory (Lambda OutInKernel)
+allocInSegRedLambda gtid num_threads lam = do
+  let (acc_params, arr_params) =
+        splitAt (length (lambdaParams lam) `div` 2) $ lambdaParams lam
+      this_index = LeafExp gtid int32
+      other_index = this_index + primExpFromSubExp int32 num_threads
+  (acc_params', arr_params') <-
+    allocInSegRedParameters num_threads this_index other_index acc_params arr_params
+
+  subInKernel $ allocInLambda (acc_params' ++ arr_params')
+    (lambdaBody lam) (lambdaReturnType lam)
+
+allocInSegRedParameters :: SubExp
+                        -> PrimExp VName -> PrimExp VName
+                        -> [LParam InInKernel]
+                        -> [LParam InInKernel]
+                        -> AllocM Kernels ExplicitMemory ([LParam ExplicitMemory], [LParam ExplicitMemory])
+allocInSegRedParameters num_threads my_id other_id xs ys = unzip <$> zipWithM alloc xs ys
+  where alloc x y =
+          case paramType x of
+            Array bt shape u -> do
+              twice_num_threads <- letSubExp "twice_num_threads" $
+                                   BasicOp $ BinOp (Mul Int32) num_threads $ intConst Int32 2
+              let t = paramType x `arrayOfRow` twice_num_threads
+              (_, mem) <- allocForArray t DefaultSpace
+              -- XXX: this iota ixfun is a bit inefficient; leading to uncoalesced access.
+              let ixfun_base = IxFun.iota $
+                               map (primExpFromSubExp int32) (arrayDims t)
+                  ixfun_x = IxFun.slice ixfun_base $
+                            fullSliceNum (IxFun.shape ixfun_base) [DimFix my_id]
+                  ixfun_y = IxFun.slice ixfun_base $
+                            fullSliceNum (IxFun.shape ixfun_base) [DimFix other_id]
+              return (x { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_x },
+                      y { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_y })
+            Prim bt ->
+              return (x { paramAttr = MemPrim bt },
+                      y { paramAttr = MemPrim bt })
+            Mem size space ->
+              return (x { paramAttr = MemMem size space },
+                      y { paramAttr = MemMem size space })
+
 allocInChunkedParameters :: PrimExp VName
                         -> [(LParam InInKernel, (VName, IxFun))]
                         -> AllocM InInKernel OutInKernel [LParam OutInKernel]
@@ -961,6 +1012,7 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
       ixfun = IxFun.permute (IxFun.iota $ map (primExpFromSubExp int32) dims')
               perm_inv
   return [Hint ixfun DefaultSpace]
+
 kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
   zipWithM hint rets $ kernelBodyResult kbody
   where num_threads = spaceNumThreads space
@@ -974,17 +1026,6 @@ kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
         coalesceReturnOfShape _ [] = False
         coalesceReturnOfShape bs [Constant (IntValue (Int32Value d))] = bs * d > 4
         coalesceReturnOfShape _ _ = True
-
-        innermost space_dims t_dims =
-          let r = length t_dims
-              dims = space_dims ++ t_dims
-              perm = [length space_dims..length space_dims+r-1] ++
-                     [0..length space_dims-1]
-              perm_inv = rearrangeInverse perm
-              dims_perm = rearrangeShape perm dims
-              ixfun_base = IxFun.iota $ map (primExpFromSubExp int32) dims_perm
-              ixfun_rearranged = IxFun.permute ixfun_base perm_inv
-          in ixfun_rearranged
 
         hint t (ThreadsReturn threads _)
           | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t,
@@ -1004,8 +1045,29 @@ kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
           return $ Hint ixfun DefaultSpace
 
         hint _ _ = return NoHint
+
+kernelExpHints (Op (Inner (SegRed space _ _ nes ts body))) =
+  (map (const NoHint) red_res <>) <$> zipWithM mapHint (drop (length nes) ts) map_res
+  where (red_res, map_res) = splitAt (length nes) $ bodyResult body
+
+        mapHint t _ = do
+          t_dims <- mapM dimAllocationSize $ arrayDims t
+          return $ Hint (innermost (map snd $ spaceDimensions space) t_dims) DefaultSpace
+
 kernelExpHints e =
   return $ replicate (expExtTypeSize e) NoHint
+
+innermost :: [SubExp] -> [SubExp] -> IxFun
+innermost space_dims t_dims =
+  let r = length t_dims
+      dims = space_dims ++ t_dims
+      perm = [length space_dims..length space_dims+r-1] ++
+             [0..length space_dims-1]
+      perm_inv = rearrangeInverse perm
+      dims_perm = rearrangeShape perm dims
+      ixfun_base = IxFun.iota $ map (primExpFromSubExp int32) dims_perm
+      ixfun_rearranged = IxFun.permute ixfun_base perm_inv
+  in ixfun_rearranged
 
 inKernelExpHints :: (Allocator lore m, Op lore ~ MemOp (KernelExp somelore)) =>
                     Exp lore -> m [ExpHint]

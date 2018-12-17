@@ -198,7 +198,8 @@ data KernelOp = GetGroupId VName Int
               | GetGlobalId VName Int
               | GetLockstepWidth VName
               | Atomic AtomicOp
-              | Barrier
+              | LocalBarrier
+              | GlobalBarrier
               | MemFence
               deriving (Show)
 
@@ -247,8 +248,10 @@ instance Pretty KernelOp where
   ppr (GetLockstepWidth dest) =
     ppr dest <+> text "<-" <+>
     text "get_lockstep_width()"
-  ppr Barrier =
-    text "barrier()"
+  ppr LocalBarrier =
+    text "local_barrier()"
+  ppr GlobalBarrier =
+    text "global_barrier()"
   ppr MemFence =
     text "mem_fence()"
   ppr (Atomic (AtomicAdd old arr ind x)) =
