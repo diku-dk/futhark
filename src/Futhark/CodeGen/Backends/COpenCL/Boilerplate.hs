@@ -70,7 +70,6 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                             };|])
 
   let size_value_inits = map (\i -> [C.cstm|cfg->sizes[$int:i] = 0;|]) [0..M.size sizes-1]
-      transposeBlockDim' = transposeBlockDim :: Int
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {
@@ -82,8 +81,6 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          $stms:size_value_inits
                          opencl_config_init(&cfg->opencl, $int:num_sizes,
                                             size_names, cfg->sizes, size_classes, size_entry_points);
-
-                         cfg->opencl.transpose_block_dim = $int:transposeBlockDim';
                          return cfg;
                        }|])
 

@@ -58,7 +58,6 @@ data HostOp = CallKernel CallKernel
 
 data CallKernel = Map MapKernel
                 | AnyKernel Kernel
-                | MapTranspose PrimType VName Exp VName Exp Exp Exp Exp Exp Exp
             deriving (Show)
 
 -- | A generic kernel containing arbitrary kernel code.
@@ -106,8 +105,6 @@ getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
           tell [kernel]
         getFunKernels _ =
           return ()
-        sameKernel (MapTranspose bt1 _ _ _ _ _ _ _ _ _) (MapTranspose bt2 _ _ _ _ _ _ _ _ _) =
-          bt1 == bt2
         sameKernel _ _ = False
 
 -- | Get an atomic operator corresponding to a binary operator.
@@ -158,25 +155,10 @@ instance FreeIn HostOp where
 instance Pretty CallKernel where
   ppr (Map k) = ppr k
   ppr (AnyKernel k) = ppr k
-  ppr (MapTranspose bt dest destoffset src srcoffset num_arrays size_x size_y in_size out_size) =
-    text "mapTranspose" <>
-    parens (ppr bt <> comma </>
-            ppMemLoc dest destoffset <> comma </>
-            ppMemLoc src srcoffset <> comma </>
-            ppr num_arrays <> comma <+>
-            ppr size_x <> comma <+>
-            ppr size_y <> comma <+>
-            ppr in_size <> comma <+>
-            ppr out_size)
-    where ppMemLoc base offset =
-            ppr base <+> text "+" <+> ppr offset
 
 instance FreeIn CallKernel where
   freeIn (Map k) = freeIn k
   freeIn (AnyKernel k) = freeIn k
-  freeIn (MapTranspose _ dest destoffset src srcoffset num_arrays size_x size_y in_size out_size) =
-    freeIn [dest, src] <> freeIn [destoffset, srcoffset] <> freeIn num_arrays <>
-    freeIn [size_x, size_y] <> freeIn [in_size, out_size]
 
 instance FreeIn Kernel where
   freeIn kernel = freeIn (kernelBody kernel) <>

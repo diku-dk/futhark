@@ -28,6 +28,7 @@ module Futhark.CodeGen.ImpGen
   , subImpM_
   , emit
   , emitFunction
+  , hasFunction
   , collect
   , comment
   , VarEntry (..)
@@ -303,6 +304,11 @@ emitFunction :: Name -> Imp.Function op -> ImpM lore op ()
 emitFunction fname fun = do
   Imp.Functions fs <- gets stateFunctions
   modify $ \s -> s { stateFunctions = Imp.Functions $ (fname,fun) : fs }
+
+-- | Check if a function of a given name exists.
+hasFunction :: Name -> ImpM lore op Bool
+hasFunction fname = gets $ \s -> let Imp.Functions fs = stateFunctions s
+                                 in isJust $ lookup fname fs
 
 compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
                Operations lore op -> Imp.Space
