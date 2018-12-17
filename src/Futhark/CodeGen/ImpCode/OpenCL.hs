@@ -14,7 +14,6 @@ module Futhark.CodeGen.ImpCode.OpenCL
        , KernelName
        , KernelArg (..)
        , OpenCL (..)
-       , transposeBlockDim
        , module Futhark.CodeGen.ImpCode
        , module Futhark.Representation.Kernels.Sizes
        )
@@ -65,10 +64,6 @@ data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
             | CmpSizeLe VName VName Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
-
--- | The block size when transposing.
-transposeBlockDim :: Num a => a
-transposeBlockDim = 16
 
 instance Pretty OpenCL where
   ppr = text . show

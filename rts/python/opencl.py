@@ -81,7 +81,6 @@ def initialise_opencl_object(self,
                              default_num_groups=None,
                              default_tile_size=None,
                              default_threshold=None,
-                             transpose_block_dim=16,
                              size_heuristics=[],
                              required_types=[],
                              all_sizes={},
@@ -167,8 +166,7 @@ def initialise_opencl_object(self,
 
     if (len(program_src) >= 0):
         return cl.Program(self.ctx, program_src).build(
-            ["-DFUT_BLOCK_DIM={}".format(transpose_block_dim),
-             "-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
+            ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
             + ["-D{}={}".format(s,v) for (s,v) in self.sizes.items()])
 
 def opencl_alloc(self, min_size, tag):
