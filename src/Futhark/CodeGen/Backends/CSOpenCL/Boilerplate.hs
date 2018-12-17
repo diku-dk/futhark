@@ -79,7 +79,6 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
     , Reassign (Field tmp_cfg "Sizes") (Collection "int[]" (replicate (M.size sizes) (Integer 0)))
     , Exp $ CS.simpleCall "OpenCLConfigInit" [ Out $ Field tmp_cfg "OpenCL", (Integer . toInteger) $ M.size sizes
                                                , Var "SizeNames", Field tmp_cfg "Sizes", Var "SizeClasses" ]
-    , Reassign (Field tmp_cfg "OpenCL.TransposeBlockDim") (Integer transposeBlockDim)
     , Return tmp_cfg
     ]
 
