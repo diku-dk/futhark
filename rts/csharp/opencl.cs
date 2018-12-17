@@ -868,7 +868,7 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
 
     int compile_opts_size = 1024;
 
-    string compile_opts = String.Format("-DLOCKSTEP_WIDTH={1} ",
+    string compile_opts = String.Format("-DLOCKSTEP_WIDTH={0} ",
                                         ctx.OpenCL.LockstepWidth);
 
     for (int i = 0; i < ctx.OpenCL.Cfg.NumSizes; i++) {
