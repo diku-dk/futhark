@@ -69,6 +69,8 @@ import Language.Futhark.Parser.Lexer
       unop            { L _ (UNOP _) }
       qunop           { L _ (QUALUNOP _ _) }
 
+      constructor     { L _ (CONSTRUCTOR _) }
+
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
       i16lit          { L _ (I16LIT _) }
@@ -458,7 +460,7 @@ Enum :: { ([Name], SrcLoc) }
           in (names, loc) }
 
 VConstr0 :: { (Name, SrcLoc) }
-          : '#' id  { let L _ (ID c) = $2 in  (c, srclocOf $1) }
+          : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, srclocOf $1) }
 
 TypeArg :: { TypeArgExp Name }
          : '[' DimDecl ']' { TypeArgExpDim (fst $2) (srcspan $1 $>) }
