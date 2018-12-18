@@ -327,7 +327,7 @@ instance Pretty op => Pretty (Code op) where
   ppr (SetMem dest from space) =
     ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
   ppr (Assert e msg _) =
-    text "assert" <> parens (commasep [text (show msg), ppr e])
+    text "assert" <> parens (commasep [ppr msg, ppr e])
   ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
     text "memcpy" <>
     parens (ppMemLoc dest destoffset <> ppr destspace <> comma </>
