@@ -262,7 +262,7 @@ callKernel (CmpSizeLe v key x) = do
 callKernel (GetSizeMax v size_class) =
   GC.stm [C.cstm|$id:v = ctx->vulkan.$id:("max_" ++ pretty size_class);|]
 callKernel (HostCode c) = GC.compileCode c
-callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
+callKernel (LaunchEntryPoint name args spec_consts (wg_x, wg_y, wg_z)) = do
   cmd_buffer_id <- newVName "cmd_buffer_id"
   scalar_buffers <- newVName "scalar_buffers"
   scalar_sizes <- newVName "scalar_sizes"
@@ -291,10 +291,12 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
                                                                $id:cmd_buffer_id));|]
   buffers <- getArgBuffers args scalar_buffers 0
   buffer_infos <- mapM initBufferInfo buffers
-  workgroup_count' <- GC.compileExp workgroup_count
+  wg_x' <- GC.compileExp wg_x
+  wg_y' <- GC.compileExp wg_y
+  wg_z' <- GC.compileExp wg_z
+  spec_const_exps <- mapM specConstToExp spec_consts
   let buffer_count = length buffer_infos
       wd_inits = zipWith (writeDescriptorInits cmd_buffer_id) buffer_infos [0..buffer_count - 1]
-      spec_const_exps = map specConstToExp spec_consts
       spec_const_types = map specConstToType spec_consts
       spec_const_s_names = [ "data" ++ show i | i <- [0..length spec_consts - 1] ]
       spec_const_s_mems = zipWith (\t n -> [C.csdecl|$ty:t $id:n;|]) spec_const_types spec_const_s_names
@@ -343,22 +345,27 @@ callKernel (LaunchEntryPoint name args spec_consts workgroup_count) = do
                                  &ctx->$id:shader_ctx,
                                  $id:cmd_buffer_id,
                                  $id:pipeline,
-                                 $exp:workgroup_count');|]
+                                 $exp:wg_x',
+                                 $exp:wg_y',
+                                 $exp:wg_z');|]
   kernelDebugAfter name start_time
 
-specConstToExp :: SpecConstExp -> C.Exp
-specConstToExp (SpecConstSizeExp ds)             = GC.dimSizeToExp ds
-specConstToExp SpecConstLockstepWidth            = [C.cexp|ctx->vulkan.lockstep_width|]
-specConstToExp (SpecConstKernelExp vn _)         = [C.cexp|$id:vn|]
-specConstToExp (SpecConstLocalMemExp (Left ms))  = GC.dimSizeToExp ms
-specConstToExp (SpecConstLocalMemExp (Right kc)) = 
-  runIdentity $ GC.compilePrimExp compileKernelConst kc
+specConstToExp :: SpecConstExp -> GC.CompilerM op s C.Exp
+specConstToExp (SpecConstSizeExp ds)             = return $ GC.dimSizeToExp ds
+specConstToExp SpecConstLockstepWidth            = return [C.cexp|ctx->vulkan.lockstep_width|]
+specConstToExp (SpecConstKernelExp vn _)         = return [C.cexp|$id:vn|]
+specConstToExp (SpecConstLocalMemExp (Left ms))  = return $ GC.dimSizeToExp ms
+specConstToExp (SpecConstExp e)                  = GC.compileExp e
+specConstToExp (SpecConstLocalMemExp (Right kc)) =
+  return $ runIdentity $ GC.compilePrimExp compileKernelConst kc
   where compileKernelConst (Kernel.SizeConst key) = return [C.cexp|$id:(pretty key)|]
 
 specConstToType :: SpecConstExp -> C.Type
 specConstToType SpecConstSizeExp{}         = [C.cty|typename int32_t|]
 specConstToType SpecConstLocalMemExp{}     = [C.cty|typename int32_t|]
 specConstToType SpecConstLockstepWidth     = [C.cty|typename int32_t|]
+specConstToType (SpecConstExp e)           =
+  [C.cty|$ty:(GC.primTypeToCType $ primExpType e)|]
 specConstToType (SpecConstKernelExp _ kce) =
   [C.cty|$ty:(GC.primTypeToCType $ primExpType kce)|]
 

@@ -923,7 +923,9 @@ void vulkan_dispatch(struct vulkan_context *ctx,
                      struct vulkan_shader_context *sh_ctx,
                      uint32_t command_buffer_index,
                      VkPipeline pipeline,
-                     uint32_t kernel_size) {
+                     uint32_t kernel_x_size,
+                     uint32_t kernel_y_size,
+                     uint32_t kernel_z_size) {
 
   VkCommandBuffer command_buffer = ctx->command_buffers[command_buffer_index].command_buffer;
   VkDescriptorSet descriptor_set = ctx->command_buffers[command_buffer_index].descriptor_set;
@@ -932,7 +934,7 @@ void vulkan_dispatch(struct vulkan_context *ctx,
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
   vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, sh_ctx->pipeline_layout,
                           0, 1, &descriptor_set, 0, 0);
-  vkCmdDispatch(command_buffer, kernel_size, 1, 1);
+  vkCmdDispatch(command_buffer, kernel_x_size, kernel_y_size, kernel_z_size);
   VULKAN_SUCCEED(vulkan_end_recording_and_submit(ctx, command_buffer_index));
 }
 

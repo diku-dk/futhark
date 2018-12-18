@@ -8,7 +8,6 @@ module Futhark.CodeGen.ImpGen.Kernels.ToVulkan
     
 import Futhark.Error
 import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
-import Futhark.Representation.AST.Attributes.Types
 import qualified Futhark.CodeGen.Backends.SPIRV as SPIRV
 import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import qualified Futhark.CodeGen.ImpCode.Vulkan as ImpVulkan
@@ -39,43 +38,41 @@ kernelsToVulkan prog@(ImpKernels.Functions funs) = return $ ImpVulkan.Program sh
             \(fname, fun) -> (fname,) <$> traverse (vulkanOnHostOp fname) fun
 
 getKernelName :: CallKernel -> ImpVulkan.EntryPointName
-getKernelName (Map kernel)                        = pretty $ mapKernelThreadNum kernel
-getKernelName (AnyKernel kernel)                  = pretty $ kernelName kernel
-getKernelName (MapTranspose bt _ _ _ _ _ _ _ _ _) = ImpVulkan.transposeEntryPointName bt
+getKernelName (Map kernel)       = pretty $ mapKernelThreadNum kernel
+getKernelName (AnyKernel kernel) = pretty $ kernelName kernel
 
-numGroups :: CallKernel -> Exp
-numGroups (Map kernel)       = sizeToExp (mapKernelNumGroups kernel)
-numGroups (AnyKernel kernel) = sizeToExp (kernelNumGroups kernel)
-numGroups (MapTranspose _ _ _ _ _ _ _ _ in_elems _) =
-  let impDiv  = BinOpExp $ SDiv Int32
-  in ((in_elems - 1) `impDiv` ImpVulkan.transposeGroupSize) + 1
+numGroups :: CallKernel -> ImpVulkan.WorkGroups
+numGroups (Map kernel)       = (sizeToExp $ mapKernelNumGroups kernel,
+                                sizeToExp $ ConstSize 1,
+                                sizeToExp $ ConstSize 1)
+numGroups (AnyKernel kernel) =
+  case kernelNumGroups kernel of
+    [x, y, z] -> (x, y, z)
+    [x, y]    -> (x, y, sizeToExp $ ConstSize 1)
+    [x]       -> (x, sizeToExp $ ConstSize 1, sizeToExp $ ConstSize 1)
+    _         -> (sizeToExp $ ConstSize 1, sizeToExp $ ConstSize 1, sizeToExp $ ConstSize 1)
 
 getArgs :: CallKernel -> [ImpVulkan.EntryPointArg]
 getArgs (Map kernel)       = mapMaybe getArg $ mapKernelUses kernel
 getArgs (AnyKernel kernel) = mapMaybe getArg $ kernelUses kernel
-getArgs (MapTranspose _ destmem destoffset srcmem srcoffset _ x_elems y_elems in_elems _) = 
-  [ ImpVulkan.MemKArg destmem
-  , ImpVulkan.ValueKArg destoffset int32
-  , ImpVulkan.MemKArg srcmem
-  , ImpVulkan.ValueKArg srcoffset int32
-  , ImpVulkan.ValueKArg x_elems int32
-  , ImpVulkan.ValueKArg y_elems int32
-  , ImpVulkan.ValueKArg in_elems int32
-  ]
 
 getArg :: KernelUse -> Maybe ImpVulkan.EntryPointArg
-getArg (MemoryUse v _)  = Just $ ImpVulkan.MemKArg v
+getArg (MemoryUse v)    = Just $ ImpVulkan.MemKArg v
 getArg (ScalarUse v bt) = Just $ ImpVulkan.ValueKArg (LeafExp (ScalarVar v) bt) bt
 getArg _                = Nothing
 
-getKernelWorkgroupSizeExp :: CallKernel -> ImpVulkan.SpecConstExp
-getKernelWorkgroupSizeExp (Map k)        = ImpVulkan.SpecConstSizeExp $ mapKernelGroupSize k
-getKernelWorkgroupSizeExp (AnyKernel k)  = ImpVulkan.SpecConstSizeExp $ kernelGroupSize k
-getKernelWorkgroupSizeExp MapTranspose{} =
-  ImpVulkan.SpecConstSizeExp $ ConstSize ImpVulkan.transposeGroupSize
+getKernelWorkgroupSizeExp :: CallKernel -> Int -> ImpVulkan.SpecConstExp
+getKernelWorkgroupSizeExp (Map k) 0        = ImpVulkan.SpecConstSizeExp $ mapKernelGroupSize k
+getKernelWorkgroupSizeExp (Map _) _        = ImpVulkan.SpecConstSizeExp $ ConstSize 1
+getKernelWorkgroupSizeExp (AnyKernel k) i  = 
+  let gs = kernelGroupSize k
+  in if i < length gs then ImpVulkan.SpecConstExp $ gs!!i
+                      else ImpVulkan.SpecConstSizeExp $ ConstSize 1
 
 getReservedSpecExpr :: CallKernel -> SPIRV.ReservedSpec -> ImpVulkan.SpecConstExp
-getReservedSpecExpr kernel SPIRV.WorkgroupSizeXSpec = getKernelWorkgroupSizeExp kernel
+getReservedSpecExpr kernel SPIRV.WorkgroupSizeXSpec = getKernelWorkgroupSizeExp kernel 0
+getReservedSpecExpr kernel SPIRV.WorkgroupSizeYSpec = getKernelWorkgroupSizeExp kernel 1
+getReservedSpecExpr kernel SPIRV.WorkgroupSizeZSpec = getKernelWorkgroupSizeExp kernel 2
 getReservedSpecExpr _ SPIRV.LockstepWidthSpec       = ImpVulkan.SpecConstLockstepWidth
 
 getConstExp :: KernelUse -> Maybe (VName, ImpVulkan.KernelConstExp)
@@ -85,7 +82,6 @@ getConstExp _               = Nothing
 getKernelConsts :: CallKernel -> [(VName, ImpVulkan.KernelConstExp)]
 getKernelConsts (Map k)        = mapMaybe getConstExp $ mapKernelUses k
 getKernelConsts (AnyKernel k)  = mapMaybe getConstExp $ kernelUses k
-getKernelConsts MapTranspose{} = []
 
 getLocalMemConsts :: CallKernel -> [ImpVulkan.SpecConstExp]
 getLocalMemConsts (AnyKernel k) =

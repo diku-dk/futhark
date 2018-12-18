@@ -1,7 +1,6 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module Futhark.CodeGen.Backends.SPIRV
   ( EntryPointName
-  , transposeEntryPointName
   , SingleEntryShader(..)
   , ReservedSpec (..)
   , reservedSpecList
@@ -34,9 +33,6 @@ import Futhark.Representation.AST.Attributes.Types
 import Futhark.MonadFreshNames
 
 type EntryPointName = String
-
-transposeEntryPointName :: PrimType -> EntryPointName
-transposeEntryPointName pt = "vulkan_transpose_" ++ pretty pt
 
 data SingleEntryShader = SEShader {
     shaderEntryPoint :: EntryPointName
@@ -86,11 +82,15 @@ type DescriptorSet = [Descriptor]
 type DescriptorSetMap = M.Map EntryPointName DescriptorSet
 
 data ReservedSpec = WorkgroupSizeXSpec
+                  | WorkgroupSizeYSpec
+                  | WorkgroupSizeZSpec
                   | LockstepWidthSpec
   deriving (Eq, Ord)
 
 reservedSpecList :: [ReservedSpec]
 reservedSpecList = [ WorkgroupSizeXSpec
+                   , WorkgroupSizeYSpec
+                   , WorkgroupSizeZSpec
                    , LockstepWidthSpec
                    ]
 
@@ -99,6 +99,8 @@ reservedSpecId res = fromIntegral $ maybe 0 (1+) $ elemIndex res reservedSpecLis
 
 reservedSpecType :: ReservedSpec -> SPIRVType
 reservedSpecType WorkgroupSizeXSpec = Scalar int32
+reservedSpecType WorkgroupSizeYSpec = Scalar int32
+reservedSpecType WorkgroupSizeZSpec = Scalar int32
 reservedSpecType LockstepWidthSpec  = Scalar int32
 
 reservedSpecRef :: ReservedSpec -> (Word32, SPIRVType)
@@ -283,12 +285,12 @@ insertVarInline name scope t = do
 
 getUseName :: KernelUse -> VName
 getUseName (ScalarUse name _) = name
-getUseName (MemoryUse name _) = name
+getUseName (MemoryUse name)   = name
 getUseName (ConstUse name _)  = name
 
 getUseType :: KernelUse -> CompilerM SPIRVType
 getUseType (ScalarUse _ t)    = return $ Scalar t
-getUseType (MemoryUse name _) = do
+getUseType (MemoryUse name)   = do
   access_size_map <- gets compArrayLeastAccessSize
   let elem_size = (M.!) access_size_map name
       t         = Scalar $ byteSizeToIntPrimType elem_size
@@ -367,7 +369,7 @@ insertLocalMemory (name, _) = do
   size_id <- newId
   size_expr_id <- newId
   access_size_map <- gets compArrayLeastAccessSize
-  let elem_size = (M.!) access_size_map name
+  let elem_size = maybe 4 id $ (M.!?) access_size_map name -- Default if unused
       elem_t    = Scalar $ byteSizeToIntPrimType elem_size
       t         = Array elem_t $ Just size_expr_id
       p_t       = Pointer t Local
@@ -760,10 +762,11 @@ getSpecConstDeclarations = do
 getReservedDeclarations :: CompilerM [Word32]
 getReservedDeclarations = do
   let ws_x_id = reservedSpecId WorkgroupSizeXSpec
+      ws_y_id = reservedSpecId WorkgroupSizeYSpec
+      ws_z_id = reservedSpecId WorkgroupSizeZSpec
       ws_id   = reservedId WorkgroupSize
-  one_id  <- getConstId $ IntValue $ Int32Value 1
   vec3_id <- getTypeId $ Vector (Scalar int32) 3
-  return $ opSpecConstantComposite [ws_x_id, one_id, one_id] vec3_id ws_id
+  return $ opSpecConstantComposite [ws_x_id, ws_y_id, ws_z_id] vec3_id ws_id
 
 getEntryPointDeclaration :: EntryPointName -> Word32 -> [Word32] -> [Word32]
 getEntryPointDeclaration name entry_id inputs =
@@ -1313,61 +1316,6 @@ compileKernel (AnyKernel kernel) = do
   insertDescriptorAccesses name
   compileCode body
   insertEntryTail
-compileKernel (MapTranspose bt _ _ _ _ _ _ _ _ _) = do
-  let int32_t = Scalar int32
-      name = transposeEntryPointName bt
-  dest        <- newVName "dest"
-  dest_offset <- newVName "dest_offset"
-  src         <- newVName "src"
-  src_offset  <- newVName "src_offset"
-  x_elems     <- newVName "x_elems"
-  y_elems     <- newVName "y_elems"
-  in_elems    <- newVName "in_elems"
-  let uses = [ MemoryUse dest $ ConstSize 0
-             , ScalarUse dest_offset int32
-             , MemoryUse src $ ConstSize 0
-             , ScalarUse src_offset int32
-             , ScalarUse x_elems int32
-             , ScalarUse y_elems int32
-             , ScalarUse in_elems int32
-             ]
-  suggestArrayLeastAccessSize dest $ primByteSize bt
-  suggestArrayLeastAccessSize src $ primByteSize bt
-  addDescriptors name uses
-  insertEntryHead name
-  insertDescriptorAccesses name
-  (dest_offset_id, _) <- getVarInfo dest_offset >>= insertVarLoad
-  (src_offset_id, _)  <- getVarInfo src_offset >>= insertVarLoad
-  (x_elems_id, _)     <- getVarInfo x_elems >>= insertVarLoad
-  (y_elems_id, _)     <- getVarInfo y_elems >>= insertVarLoad
-  (in_elems_id, _)    <- getVarInfo in_elems >>= insertVarLoad
-  inside_id           <- newId
-  oob_id              <- newId
-  (g_id, _) <- readBuiltin GlobalInvocationId 0
-  (cond_id, _) <- insertReturnOp (Scalar Bool) $ opULessThanEqual in_elems_id g_id
-  appendCode $ opSelectionMerge oob_id
-  appendCode $ opBranchConditional cond_id oob_id inside_id
-  appendCode $ opLabel inside_id
-  (sub_size_id, _) <- insertReturnOp int32_t $ opIMul x_elems_id y_elems_id
-  bt_size_id <- getConstId $ IntValue $ Int32Value $ primByteSize bt
-  (aligned_g_id, _) <- insertReturnOp int32_t $ opIMul g_id bt_size_id
-  (i_id, _) <- insertReturnOp int32_t $ opIAdd aligned_g_id src_offset_id
-  (val_id, _) <- insertArrayRead src i_id bt StorageBuffer Nonvolatile
-  (sub_g_id, _) <- insertReturnOp int32_t $ opSMod g_id sub_size_id
-  (x_id, _) <- insertReturnOp int32_t $ opSDiv sub_g_id x_elems_id
-  (y_id, _) <- insertReturnOp int32_t $ opSRem sub_g_id x_elems_id
-  (y_id', _) <- insertReturnOp int32_t $ opIMul y_id y_elems_id
-  (tr_id, _) <- insertReturnOp int32_t $ opIAdd x_id y_id'
-  (aligned_tr_id, _) <- insertReturnOp int32_t $ opIMul tr_id bt_size_id
-  (sub_num_id, _) <- insertReturnOp int32_t $ opSDiv g_id sub_size_id
-  (sub_offset_id, _) <- insertReturnOp int32_t $ opIMul sub_num_id sub_size_id
-  (aligned_sub_offset_id, _) <- insertReturnOp int32_t $ opIMul sub_offset_id bt_size_id
-  (i_t_id, _) <- insertReturnOp int32_t $ opIAdd aligned_tr_id aligned_sub_offset_id
-  (i_t_id', _) <- insertReturnOp int32_t $ opIAdd i_t_id dest_offset_id
-  insertArrayWrite dest i_t_id' val_id bt StorageBuffer Nonvolatile
-  appendCode $ opBranch oob_id
-  appendCode $ opLabel oob_id
-  insertEntryTail
 
 finalizedShader :: CompilerM [Word32]
 finalizedShader = do
@@ -1377,8 +1325,8 @@ finalizedShader = do
   decos        <- getDecorations
   res_consts   <- getReservedDeclarations
   builtin_vars <- getBuiltinVarDeclarations
-  consts       <- getConstDeclarations
   spec_consts  <- getSpecConstDeclarations
+  consts       <- getConstDeclarations
   desc_vars    <- getDescVarDeclarations
   scalar_types <- getScalarTypeDeclarations
   nons_types   <- getNonScalarTypeDeclarations

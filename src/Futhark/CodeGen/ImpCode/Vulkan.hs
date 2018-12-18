@@ -13,11 +13,10 @@ module Futhark.CodeGen.ImpCode.Vulkan
        , Code
        , EntryPointArg (..)
        , SpecConstExp (..)
+       , WorkGroups
        , Vulkan (..)
        , Kernel.KernelConstExp
-       , transposeGroupSize
        , SPIRV.EntryPointName
-       , SPIRV.transposeEntryPointName
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -51,22 +50,24 @@ data EntryPointArg = ValueKArg Exp PrimType
                     -- ^ Pass this pointer as argument.
                 deriving (Show)
 
+-- | The expressions of specialization constants of a shader
 data SpecConstExp = SpecConstKernelExp VName Kernel.KernelConstExp
                   | SpecConstSizeExp DimSize
+                  | SpecConstExp Exp
                   | SpecConstLocalMemExp (Either MemSize Kernel.KernelConstExp)
                   | SpecConstLockstepWidth
                 deriving (Show)
 
+-- | Work group dimensions of an entry point
+type WorkGroups = (Exp, Exp, Exp)
+
 -- | Host-level OpenCL operation.
-data Vulkan = LaunchEntryPoint SPIRV.EntryPointName [EntryPointArg] [SpecConstExp] Exp
+data Vulkan = LaunchEntryPoint SPIRV.EntryPointName [EntryPointArg] [SpecConstExp] WorkGroups
             | HostCode Code
             | GetSize VName VName
             | CmpSizeLe VName VName Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
-
-transposeGroupSize :: Num a => a
-transposeGroupSize = 256
 
 instance Pretty Vulkan where
   ppr = text . show
