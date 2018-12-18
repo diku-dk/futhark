@@ -27,6 +27,8 @@ module Futhark.CodeGen.ImpGen
   , subImpM
   , subImpM_
   , emit
+  , emitFunction
+  , hasFunction
   , collect
   , comment
   , VarEntry (..)
@@ -210,16 +212,17 @@ newEnv ops ds = Env { envExpCompiler = opsExpCompiler ops
 -- | The symbol table used during compilation.
 type VTable lore = M.Map VName (VarEntry lore)
 
-data State lore = State { stateVTable :: VTable lore
-                        , stateNameSource :: VNameSource
-                        }
+data State lore op = State { stateVTable :: VTable lore
+                           , stateFunctions :: Imp.Functions op
+                           , stateNameSource :: VNameSource
+                           }
 
-newState :: VNameSource -> State lore
-newState = State mempty
+newState :: VNameSource -> State lore op
+newState = State mempty mempty
 
-newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) (State lore) (Either InternalError) a)
+newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) (State lore op) (Either InternalError) a)
   deriving (Functor, Applicative, Monad,
-            MonadState (State lore),
+            MonadState (State lore op),
             MonadReader (Env lore op),
             MonadWriter (Imp.Code op),
             MonadError InternalError)
@@ -245,10 +248,10 @@ instance HasScope SOACS (ImpM lore op) where
 
 runImpM :: ImpM lore op a
         -> Operations lore op -> Imp.Space -> VNameSource
-        -> Either InternalError (a, VNameSource, Imp.Code op)
+        -> Either InternalError (a, VNameSource, Imp.Code op, Imp.Functions op)
 runImpM (ImpM m) comp space src = do
   (a, s, code) <- runRWST m (newEnv comp space) (newState src)
-  return (a, stateNameSource s, code)
+  return (a, stateNameSource s, code, stateFunctions s)
 
 subImpM_ :: Operations lore' op' -> ImpM lore' op' a
          -> ImpM lore op (Imp.Code op')
@@ -264,7 +267,8 @@ subImpM ops (ImpM m) = do
                      , envCopyCompiler = opsCopyCompiler ops
                      , envOpCompiler = opsOpCompiler ops
                      }
-                 s { stateVTable = M.map scrubExps $ stateVTable s } of
+                 s { stateVTable = M.map scrubExps $ stateVTable s
+                   , stateFunctions = mempty } of
     Left err -> throwError err
     Right (x, s', code) -> do
       putNameSource $ stateNameSource s'
@@ -295,14 +299,25 @@ comment desc m = do code <- collect m
 emit :: Imp.Code op -> ImpM lore op ()
 emit = tell
 
+-- | Emit a function in the generated code.
+emitFunction :: Name -> Imp.Function op -> ImpM lore op ()
+emitFunction fname fun = do
+  Imp.Functions fs <- gets stateFunctions
+  modify $ \s -> s { stateFunctions = Imp.Functions $ (fname,fun) : fs }
+
+-- | Check if a function of a given name exists.
+hasFunction :: Name -> ImpM lore op Bool
+hasFunction fname = gets $ \s -> let Imp.Functions fs = stateFunctions s
+                                 in isJust $ lookup fname fs
+
 compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
                Operations lore op -> Imp.Space
             -> Prog lore -> m (Either InternalError (Imp.Functions op))
-compileProg ops ds prog =
+compileProg ops space prog =
   modifyNameSource $ \src ->
-  case mapAccumLM (compileFunDef ops ds) src (progFunctions prog) of
+  case runImpM (mapM_ compileFunDef $ progFunctions prog) ops space src of
     Left err -> (Left err, src)
-    Right (src', funs) -> (Right $ Imp.Functions funs, src')
+    Right ((), src', _, fs) -> (Right fs, src')
 
 compileInParam :: ExplicitMemorish lore =>
                   FParam lore -> ImpM lore op (Either Imp.Param ArrayDecl)
@@ -453,16 +468,11 @@ compileOutParams orig_rts orig_epts = do
         ensureMemSizeOut (Free v) = imp $ subExpToDimSize v
 
 compileFunDef :: ExplicitMemorish lore =>
-                 Operations lore op -> Imp.Space
-              -> VNameSource
-              -> FunDef lore
-              -> Either InternalError (VNameSource, (Name, Imp.Function op))
-compileFunDef ops ds src (FunDef entry fname rettype params body) = do
-  ((outparams, inparams, results, args), src', body') <-
-    runImpM compile ops ds src
-  return (src',
-          (fname,
-           Imp.Function (isJust entry) outparams inparams body' results args))
+                 FunDef lore
+              -> ImpM lore op ()
+compileFunDef (FunDef entry fname rettype params body) = do
+  ((outparams, inparams, results, args), body') <- collect' compile
+  emitFunction fname $ Imp.Function (isJust entry) outparams inparams body' results args
   where params_entry = maybe (replicate (length params) TypeDirect) fst entry
         ret_entry = maybe (replicate (length rettype) TypeDirect) snd entry
         compile = do
@@ -918,9 +928,6 @@ lookupArray name = do
     ArrayVar _ entry -> return entry
     _                -> compilerBugS $ "ImpGen.lookupArray: not an array: " ++ pretty name
 
-arrayLocation :: VName -> ImpM lore op MemLocation
-arrayLocation name = entryArrayLocation <$> lookupArray name
-
 lookupMemory :: VName -> ImpM lore op MemEntry
 lookupMemory name = do
   res <- lookupVar name
@@ -959,15 +966,6 @@ fullyIndexArray' (MemLocation mem _ ixfun) indices bt = do
   space <- entryMemSpace <$> lookupMemory mem
   return (mem, space,
           bytes $ IxFun.index ixfun indices $ primByteSize bt)
-
-readFromArray :: VName -> [Imp.Exp]
-              -> ImpM lore op Imp.Exp
-readFromArray name indices = do
-  arr <- lookupArray name
-  (mem, space, i) <-
-    fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
-  vol <- asks envVolatility
-  return $ Imp.index mem i (entryArrayElemType arr) space vol
 
 sliceArray :: MemLocation
            -> Slice Imp.Exp

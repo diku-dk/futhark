@@ -1,4 +1,3 @@
-import "/futlib/math"
 
 -- ==
 -- entry: test_f64_ceil

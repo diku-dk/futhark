@@ -82,7 +82,6 @@ tokens :-
   "'"                      { tokenC APOSTROPHE }
   "'^"                     { tokenC APOSTROPHE_THEN_HAT }
   "`"                      { tokenC BACKTICK }
-  "#"                      { tokenC HASH }
   "..<"                    { tokenC TWO_DOTS_LT }
   "..>"                    { tokenC TWO_DOTS_GT }
   "..."                    { tokenC THREE_DOTS }
@@ -112,6 +111,7 @@ tokens :-
   @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
   @identifier "." "("      { tokenM $ fmap (QUALPAREN []) . indexing . T.init . T.takeWhile (/='(') }
   @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
+  "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
 
   @unop                    { tokenS $ UNOP . nameFromText }
   @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
@@ -297,6 +297,7 @@ data Token = ID Name
            | UNOP Name
            | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name
+           | CONSTRUCTOR Name
 
            | INTLIT Integer
            | STRINGLIT String
@@ -318,7 +319,6 @@ data Token = ID Name
            | APOSTROPHE
            | APOSTROPHE_THEN_HAT
            | BACKTICK
-           | HASH
            | DOT
            | TWO_DOTS
            | TWO_DOTS_LT

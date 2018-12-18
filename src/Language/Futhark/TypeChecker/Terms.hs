@@ -370,7 +370,7 @@ instantiateTypeScheme loc tparams t = do
       tnames = map typeParamName tparams'
   (fresh_tnames, inst_list) <- unzip <$> mapM (instantiateTypeParam loc) tparams'
   let substs = M.fromList $ zip tnames $
-               map vacuousShapeAnnotations inst_list
+               map (Subst . vacuousShapeAnnotations) inst_list
       t' = substTypesAny (`M.lookup` substs) t
   return (fresh_tnames, t')
 
@@ -398,8 +398,7 @@ newArrayType loc desc r = do
 useAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
 useAfterConsume name rloc wloc =
   throwError $ TypeError rloc $
-  "Variable " ++ pretty name ++ " used," ++
-  "but previously consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
+  "Variable " ++ pretty name ++ " previously consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
 
 consumeAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
 consumeAfterConsume name loc1 loc2 =
@@ -1292,31 +1291,37 @@ checkExp (VConstr0 name NoInfo loc) = do
   mustHaveConstr loc name t
   return $ VConstr0 name (Info t) loc
 
-checkExp (Match e cs NoInfo loc) = do
-  e' <- checkExp e
-  mt <- expType e'
-  (t', cs') <- mustHaveSameType loc mt cs
-  return $ Match e' cs' (Info t') loc
+checkExp (Match _ [] NoInfo loc) =
+  typeError loc "Match expressions must have at least one case."
 
-mustHaveSameType :: SrcLoc -> CompType -> [CaseBase NoInfo Name]
-                  -> TermTypeM (CompType, [CaseBase Info VName])
-mustHaveSameType loc _ [] = typeError loc "Match expressions must have at least one case."
-mustHaveSameType loc mt (c:cs) = do
-  s   <- newTypeVar loc "s"
-  c'  <- checkCase mt s c
-  ct  <- expType $ caseExp c'
-  cs' <- mapM (checkCase mt ct) cs
-  return (ct, c':cs')
-  where caseExp (CasePat _ e _) = e
+checkExp (Match e (c:cs) NoInfo loc) =
+  sequentially (checkExp e) $ \e' _ -> do
+    mt <- expType e'
+    (cs', t) <- checkCases mt c cs
+    zeroOrderType loc "returned from pattern match" t
+    return $ Match e' cs' (Info t) loc
 
-checkCase :: CompType -> CompType -> CaseBase NoInfo Name
-          -> TermTypeM (CaseBase Info VName)
-checkCase mt ct (CasePat p caseExp loc) =
+checkCases :: CompType
+           -> CaseBase NoInfo Name
+           -> [CaseBase NoInfo Name]
+           -> TermTypeM ([CaseBase Info VName], CompType)
+checkCases mt c [] = do
+  (c', t) <- checkCase mt c
+  return ([c'], t)
+checkCases mt c (c2:cs) = do
+  (((c', c_t), (cs', cs_t)), dflow) <-
+    tapOccurences $ checkCase mt c `alternative` checkCases mt c2 cs
+  unify (srclocOf c) (toStruct c_t) (toStruct cs_t)
+  let t = unifyTypeAliases c_t cs_t `addAliases` (`S.difference` allConsumed dflow)
+  return (c':cs', t)
+
+checkCase :: CompType -> CaseBase NoInfo Name
+          -> TermTypeM (CaseBase Info VName, CompType)
+checkCase mt (CasePat p caseExp loc) =
   bindingPattern [] p (Ascribed $ vacuousShapeAnnotations mt) $ \_ p' -> do
     caseExp' <- checkExp caseExp
     caseType <- expType caseExp'
-    unify loc (toStructural ct) (toStructural caseType)
-    return $ CasePat p' caseExp' loc
+    return (CasePat p' caseExp' loc, caseType)
 
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.

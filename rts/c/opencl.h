@@ -45,7 +45,6 @@ struct opencl_config {
   size_t default_num_groups;
   size_t default_tile_size;
   size_t default_threshold;
-  size_t transpose_block_dim;
 
   int default_group_size_changed;
   int default_tile_size_changed;
@@ -75,7 +74,6 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->default_num_groups = 128;
   cfg->default_tile_size = 32;
   cfg->default_threshold = 32*1024;
-  cfg->transpose_block_dim = 16;
 
   cfg->default_group_size_changed = 0;
   cfg->default_tile_size_changed = 0;
@@ -584,8 +582,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   char *compile_opts = malloc(compile_opts_size);
 
   int w = snprintf(compile_opts, compile_opts_size,
-                   "-DFUT_BLOCK_DIM=%d -DLOCKSTEP_WIDTH=%d ",
-                   (int)ctx->cfg.transpose_block_dim,
+                   "-DLOCKSTEP_WIDTH=%d ",
                    (int)ctx->lockstep_width);
 
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {

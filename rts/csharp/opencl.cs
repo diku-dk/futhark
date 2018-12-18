@@ -35,7 +35,6 @@ public struct OpenCLConfig
     public int DefaultNumGroups;
     public int DefaultTileSize;
     public int DefaultThreshold;
-    public int TransposeBlockDim;
 
     public int NumSizes;
     public string[] SizeNames;
@@ -377,7 +376,6 @@ private void OpenCLConfigInit(out OpenCLConfig cfg,
     cfg.DefaultNumGroups = 128;
     cfg.DefaultTileSize = 32;
     cfg.DefaultThreshold = 32*1024;
-    cfg.TransposeBlockDim = 16;
 
     cfg.NumSizes = num_sizes;
     cfg.SizeNames = size_names;
@@ -870,8 +868,7 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
 
     int compile_opts_size = 1024;
 
-    string compile_opts = String.Format("-DFUT_BLOCK_DIM={0} -DLOCKSTEP_WIDTH={1} ",
-                                        ctx.OpenCL.Cfg.TransposeBlockDim,
+    string compile_opts = String.Format("-DLOCKSTEP_WIDTH={0} ",
                                         ctx.OpenCL.LockstepWidth);
 
     for (int i = 0; i < ctx.OpenCL.Cfg.NumSizes; i++) {

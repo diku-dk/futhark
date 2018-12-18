@@ -58,7 +58,6 @@ data HostOp = CallKernel CallKernel
 
 data CallKernel = Map MapKernel
                 | AnyKernel Kernel
-                | MapTranspose PrimType VName Exp VName Exp Exp Exp Exp Exp Exp
             deriving (Show)
 
 -- | A generic kernel containing arbitrary kernel code.
@@ -84,12 +83,10 @@ data Kernel = Kernel
               , kernelUses :: [KernelUse]
                 -- ^ The host variables referenced by the kernel.
 
-              , kernelNumGroups :: DimSize
-              , kernelGroupSize :: DimSize
-              , kernelName :: VName
-                -- ^ Unique name for the kernel.
-              , kernelDesc :: String
-               -- ^ A short descriptive name - should be
+              , kernelNumGroups :: [Imp.Exp]
+              , kernelGroupSize :: [Imp.Exp]
+              , kernelName :: Name
+               -- ^ A short descriptive and _unique_ name - should be
                -- alphanumeric and without spaces.
               }
             deriving (Show)
@@ -98,7 +95,7 @@ data Kernel = Kernel
 type LocalMemoryUse = (VName, Either MemSize KernelConstExp)
 
 data KernelUse = ScalarUse VName PrimType
-               | MemoryUse VName Imp.DimSize
+               | MemoryUse VName
                | ConstUse VName KernelConstExp
                  deriving (Eq, Show)
 
@@ -108,8 +105,6 @@ getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
           tell [kernel]
         getFunKernels _ =
           return ()
-        sameKernel (MapTranspose bt1 _ _ _ _ _ _ _ _ _) (MapTranspose bt2 _ _ _ _ _ _ _ _ _) =
-          bt1 == bt2
         sameKernel _ _ = False
 
 -- | Get an atomic operator corresponding to a binary operator.
@@ -130,8 +125,8 @@ instance Pretty KernelConst where
 instance Pretty KernelUse where
   ppr (ScalarUse name t) =
     text "scalar_copy" <> parens (commasep [ppr name, ppr t])
-  ppr (MemoryUse name size) =
-    text "mem_copy" <> parens (commasep [ppr name, ppr size])
+  ppr (MemoryUse name) =
+    text "mem_copy" <> parens (commasep [ppr name])
   ppr (ConstUse name e) =
     text "const" <> parens (commasep [ppr name, ppr e])
 
@@ -160,25 +155,10 @@ instance FreeIn HostOp where
 instance Pretty CallKernel where
   ppr (Map k) = ppr k
   ppr (AnyKernel k) = ppr k
-  ppr (MapTranspose bt dest destoffset src srcoffset num_arrays size_x size_y in_size out_size) =
-    text "mapTranspose" <>
-    parens (ppr bt <> comma </>
-            ppMemLoc dest destoffset <> comma </>
-            ppMemLoc src srcoffset <> comma </>
-            ppr num_arrays <> comma <+>
-            ppr size_x <> comma <+>
-            ppr size_y <> comma <+>
-            ppr in_size <> comma <+>
-            ppr out_size)
-    where ppMemLoc base offset =
-            ppr base <+> text "+" <+> ppr offset
 
 instance FreeIn CallKernel where
   freeIn (Map k) = freeIn k
   freeIn (AnyKernel k) = freeIn k
-  freeIn (MapTranspose _ dest destoffset src srcoffset num_arrays size_x size_y in_size out_size) =
-    freeIn [dest, src] <> freeIn [destoffset, srcoffset] <> freeIn num_arrays <>
-    freeIn [size_x, size_y] <> freeIn [in_size, out_size]
 
 instance FreeIn Kernel where
   freeIn kernel = freeIn (kernelBody kernel) <>
