@@ -86,7 +86,6 @@ import Language.Futhark.Parser.Lexer
       stringlit       { L _ (STRINGLIT _) }
       charlit         { L _ (CHARLIT _) }
 
-      '#'             { L $$ HASH }
       '..'            { L $$ TWO_DOTS }
       '...'           { L $$ THREE_DOTS }
       '..<'           { L $$ TWO_DOTS_LT }
@@ -484,13 +483,6 @@ DimDecl :: { (DimDecl Name, SrcLoc) }
         | intlit
           { let L loc (INTLIT n) = $1
             in (ConstDim (fromIntegral n), loc) }
-
-        -- Errors
-        | '#' {% parseErrorAt (srclocOf $1) $ Just $
-                unlines ["found implicit size quantification.",
-                         "This is no longer supported.  Use explicit size parameters."]
-              }
-
 
 FunParam :: { PatternBase NoInfo Name }
 FunParam : InnerPattern { $1 }
