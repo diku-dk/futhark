@@ -771,16 +771,20 @@ eval _ (VConstr0 c _ _) = return $ ValueEnum c
 
 eval env (Match e cs _ _) = do
   v <- eval env e
-  cs' <- mapM (runMaybeT . evalCase v env) cs
-  case catMaybes cs' of
-    []     -> fail "Pattern match failure."
-    (v':_) -> return v'
+  match v cs
+  where match v [] =
+          fail "Pattern match failure."
+        match v (c:cs) = do
+          c' <- evalCase v env c
+          case c' of
+            Just v' -> return v'
+            Nothing -> match v cs
 
 eval _ e = error $ "eval not yet: " ++ show e
 
 evalCase :: Value -> Env -> CaseBase Info VName
-            -> MaybeT EvalM Value
-evalCase v env (CasePat p cExp _) = do
+         -> EvalM (Maybe Value)
+evalCase v env (CasePat p cExp _) = runMaybeT $ do
   pEnv <- valEnv <$> patternMatch env mempty p v
   lift $ eval (pEnv <> env) cExp
 
