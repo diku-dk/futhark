@@ -71,6 +71,9 @@ import Language.Futhark.Parser.Lexer
 
       constructor     { L _ (CONSTRUCTOR _) }
 
+      '.field'        { L _ (PROJ_FIELD _) }
+      '.['            { L _ PROJ_INDEX }
+
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
       i16lit          { L _ (I16LIT _) }
@@ -138,7 +141,6 @@ import Language.Futhark.Parser.Lexer
       entry           { L $$ ENTRY }
       '->'            { L $$ RIGHT_ARROW }
       ':'             { L $$ COLON }
-      '.'             { L $$ DOT }
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
@@ -634,8 +636,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' FieldAccess FieldAccesses ')'
        { ProjectSection (map fst ($2:$3)) NoInfo (srcspan $1 $>) }
 
-     | '(' '.' '[' DimIndices ']' ')'
-       { IndexSection $4 NoInfo (srcspan $1 $>) }
+     | '(' '.[' DimIndices ']' ')'
+       { IndexSection $3 NoInfo (srcspan $1 $>) }
 
 
 PrimLit :: { (PrimValue, SrcLoc) }
@@ -668,7 +670,7 @@ Exps1_ :: { ([UncheckedExp], UncheckedExp) }
         | Exp            { ([], $1) }
 
 FieldAccess :: { (Name, SrcLoc) }
-             : '.' FieldId { (fst $2, srcspan $1 (snd $>)) }
+             : '.field' { let L loc (PROJ_FIELD f) = $1 in (f, loc) }
 
 FieldAccesses :: { [(Name, SrcLoc)] }
                : FieldAccess FieldAccesses { $1 : $2 }

@@ -77,7 +77,6 @@ tokens :-
   "_"                      { tokenC UNDERSCORE }
   "->"                     { tokenC RIGHT_ARROW }
   ":"                      { tokenC COLON }
-  "."                      { tokenC DOT }
   "\"                      { tokenC BACKSLASH }
   "'"                      { tokenC APOSTROPHE }
   "'^"                     { tokenC APOSTROPHE_THEN_HAT }
@@ -118,6 +117,9 @@ tokens :-
 
   @binop                   { tokenM $ return . symbol [] . nameFromText }
   @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
+
+  "." (@identifier|[0-9]+) { tokenM $ return . PROJ_FIELD . nameFromText . T.drop 1 }
+  "." "["                  { tokenC PROJ_INDEX }
 {
 
 keyword :: T.Text -> Token
@@ -298,6 +300,8 @@ data Token = ID Name
            | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name
            | CONSTRUCTOR Name
+           | PROJ_FIELD Name
+           | PROJ_INDEX
 
            | INTLIT Integer
            | STRINGLIT String
@@ -319,7 +323,6 @@ data Token = ID Name
            | APOSTROPHE
            | APOSTROPHE_THEN_HAT
            | BACKTICK
-           | DOT
            | TWO_DOTS
            | TWO_DOTS_LT
            | TWO_DOTS_GT
