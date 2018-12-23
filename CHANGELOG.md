@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The parser now permits empty programs.
 
+  * Most transpositions are now a good bit faster, especially on
+    NVIDIA GPUs.
+
 ### Removed
 
   * The `<-` symbol can no longer be used for in-place updates and
