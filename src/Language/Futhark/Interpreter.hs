@@ -772,13 +772,13 @@ eval _ (VConstr0 c _ _) = return $ ValueEnum c
 eval env (Match e cs _ _) = do
   v <- eval env e
   match v cs
-  where match v [] =
+  where match _ [] =
           fail "Pattern match failure."
-        match v (c:cs) = do
+        match v (c:cs') = do
           c' <- evalCase v env c
           case c' of
             Just v' -> return v'
-            Nothing -> match v cs
+            Nothing -> match v cs'
 
 eval _ e = error $ "eval not yet: " ++ show e
 
