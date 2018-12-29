@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.8.1]
+
+### Added
+
   * Now warns when `/futlib/...` files are redundantly imported.
 
   * `futharki` now prints warnings for files that are ":load"ed.
