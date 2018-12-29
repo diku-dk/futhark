@@ -70,9 +70,13 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->dump_program_to = NULL;
   cfg->load_program_from = NULL;
 
-  cfg->default_group_size = 256;
-  cfg->default_num_groups = 128;
-  cfg->default_tile_size = 32;
+  // The following are dummy sizes that mean the concrete defaults
+  // will be set during initialisation via hardware-inspection-based
+  // heuristics.
+  cfg->default_group_size = 0;
+  cfg->default_num_groups = 0;
+  cfg->default_tile_size = 0;
+
   cfg->default_threshold = 32*1024;
 
   cfg->default_group_size_changed = 0;
@@ -575,6 +579,9 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
   size_t max_tile_size = sqrt(max_group_size);
 
+  // Make sure this function is defined.
+  post_opencl_setup(ctx, &device_option);
+
   if (max_group_size < ctx->cfg.default_group_size) {
     if (ctx->cfg.default_group_size_changed) {
       fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
@@ -625,9 +632,6 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
       *size_value = max_value;
     }
   }
-
-  // Make sure this function is defined.
-  post_opencl_setup(ctx, &device_option);
 
   if (ctx->lockstep_width == 0) {
     ctx->lockstep_width = 1;
