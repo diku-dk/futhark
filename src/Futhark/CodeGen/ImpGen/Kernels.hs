@@ -42,7 +42,7 @@ callKernelOperations =
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Imp.Program)
 compileProg prog =
   fmap (setDefaultSpace (Imp.Space "device")) <$>
-  ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
+  ImpGen.compileProg callKernelOperations (Imp.Space "device") [Imp.Space "local"] prog
 
 opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
            -> CallKernelGen ()
