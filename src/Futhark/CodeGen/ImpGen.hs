@@ -79,7 +79,7 @@ module Futhark.CodeGen.ImpGen
   , sIf, sWhen, sUnless
   , sOp
   , sAlloc
-  , sArray
+  , sArray, sAllocArray, sStaticArray
   , sWrite
   , (<--)
   )
@@ -1241,6 +1241,26 @@ sArray name bt shape membind = do
   name' <- newVName name
   dArray name' bt shape membind
   return name'
+
+-- | Uses linear/iota index function.
+sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
+sAllocArray name pt shape space = do
+  let arr_bytes = Imp.bytes $ Imp.LeafExp (Imp.SizeOf pt) int32 *
+                  product (map (compileSubExpOfType int32) (shapeDims shape))
+  mem <- sAlloc (name ++ "_mem") arr_bytes space
+  sArray name pt shape $
+    ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
+
+-- | Uses linear/iota index function.
+sStaticArray :: String -> Space -> PrimType -> [PrimValue] -> ImpM lore op VName
+sStaticArray name space pt vs = do
+  let shape = Shape [constant $ length vs]
+      size = Imp.ConstSize $ fromIntegral (length vs) * primByteSize pt
+  mem <- newVName $ name ++ "_mem"
+  emit $ Imp.DeclareArray mem space pt vs
+  addVar mem $ MemVar Nothing $ MemEntry size space
+  sArray name pt shape $
+    ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
 
 sWrite :: VName -> [Imp.Exp] -> PrimExp Imp.ExpLeaf -> ImpM lore op ()
 sWrite arr is v = do

@@ -324,11 +324,12 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
 transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just (comm, red_lam, nes, map_lam) <- isRedomapSOAC form = do
 
-  let paralleliseOuter = do
+  let paralleliseOuter = runBinder_ $ do
         red_lam_sequential <- Kernelise.transformLambda red_lam
         map_lam_sequential <- Kernelise.transformLambda map_lam
-        fmap (certify cs) <$>
-          blockedReduction pat w comm' red_lam_sequential map_lam_sequential [] nes arrs
+        addStms =<<
+          (fmap (certify cs) <$>
+           nonSegRed pat w comm' red_lam_sequential map_lam_sequential nes arrs)
 
       outerParallelBody =
         renameBody =<<
@@ -341,7 +342,6 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
       innerParallelBody path' =
         renameBody =<<
         (mkBody <$> paralleliseInner path' <*> pure (map Var (patternNames pat)))
-
 
       comm' | commutativeLambda red_lam = Commutative
             | otherwise = comm
@@ -1425,11 +1425,8 @@ regularSegmentedRedomapKernel :: KernelNest
 regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
   isSegmentedOp nest perm segment_size
     (lambdaReturnType map_lam) (freeInLambda lam) (freeInLambda map_lam) nes arrs $
-    \pat flat_pat num_segments total_num_elements ispace inps nes' _ arrs' -> do
-      fold_lam <- composeLambda nilFn lam map_lam
-      regularSegmentedRedomap
-        segment_size num_segments (kernelNestWidths nest)
-        flat_pat pat total_num_elements comm lam fold_lam ispace inps nes' arrs'
+    \pat _flat_pat _num_segments total_num_elements ispace inps nes' _ _ ->
+      addStms =<< segRed pat total_num_elements segment_size comm lam map_lam nes' arrs ispace inps
 
 isSegmentedOp :: KernelNest
               -> [Int]

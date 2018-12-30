@@ -22,7 +22,8 @@
 -- }
 -- structure distributed {
 --   DoLoop/Kernel 1
---   Kernel 7
+--   Kernel 2
+--   SegRed 1
 -- }
 
 let main [n][m] (pss: [n][m]i32): ([n][m][m]i32, [n][m]i32) =
