@@ -198,16 +198,20 @@ data Env lore op = Env {
   , envCopyCompiler :: CopyCompiler lore op
   , envDefaultSpace :: Imp.Space
   , envVolatility :: Imp.Volatility
+  , envFakeMemory :: [Space]
+    -- ^ Do not actually generate allocations for these memory spaces.
   }
 
-newEnv :: Operations lore op -> Imp.Space -> Env lore op
-newEnv ops ds = Env { envExpCompiler = opsExpCompiler ops
-                    , envStmsCompiler = opsStmsCompiler ops
-                    , envOpCompiler = opsOpCompiler ops
-                    , envCopyCompiler = opsCopyCompiler ops
-                    , envDefaultSpace = ds
-                    , envVolatility = Imp.Nonvolatile
-                    }
+newEnv :: Operations lore op -> Imp.Space -> [Imp.Space] -> Env lore op
+newEnv ops ds fake =
+  Env { envExpCompiler = opsExpCompiler ops
+      , envStmsCompiler = opsStmsCompiler ops
+      , envOpCompiler = opsOpCompiler ops
+      , envCopyCompiler = opsCopyCompiler ops
+      , envDefaultSpace = ds
+      , envVolatility = Imp.Nonvolatile
+      , envFakeMemory = fake
+      }
 
 -- | The symbol table used during compilation.
 type VTable lore = M.Map VName (VarEntry lore)
@@ -247,10 +251,10 @@ instance HasScope SOACS (ImpM lore op) where
             Prim $ entryScalarType scalarEntry
 
 runImpM :: ImpM lore op a
-        -> Operations lore op -> Imp.Space -> VNameSource
+        -> Operations lore op -> Imp.Space -> [Imp.Space] -> VNameSource
         -> Either InternalError (a, VNameSource, Imp.Code op, Imp.Functions op)
-runImpM (ImpM m) comp space src = do
-  (a, s, code) <- runRWST m (newEnv comp space) (newState src)
+runImpM (ImpM m) comp space fake src = do
+  (a, s, code) <- runRWST m (newEnv comp space fake) (newState src)
   return (a, stateNameSource s, code, stateFunctions s)
 
 subImpM_ :: Operations lore' op' -> ImpM lore' op' a
@@ -311,11 +315,11 @@ hasFunction fname = gets $ \s -> let Imp.Functions fs = stateFunctions s
                                  in isJust $ lookup fname fs
 
 compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
-               Operations lore op -> Imp.Space
+               Operations lore op -> Imp.Space -> [Imp.Space]
             -> Prog lore -> m (Either InternalError (Imp.Functions op))
-compileProg ops space prog =
+compileProg ops space fake prog =
   modifyNameSource $ \src ->
-  case runImpM (mapM_ compileFunDef $ progFunctions prog) ops space src of
+  case runImpM (mapM_ compileFunDef $ progFunctions prog) ops space fake src of
     Left err -> (Left err, src)
     Right ((), src', _, fs) -> (Right fs, src')
 
@@ -1178,7 +1182,8 @@ compileAlloc :: ExplicitMemorish lore =>
              -> ImpM lore op ()
 compileAlloc (Pattern [] [mem]) e space = do
   e' <- compileSubExp e
-  emit $ Imp.Allocate (patElemName mem) (Imp.bytes e') space
+  fake <- asks $ elem space . envFakeMemory
+  unless fake $ emit $ Imp.Allocate (patElemName mem) (Imp.bytes e') space
 compileAlloc pat _ _ =
   compilerBugS $ "compileAlloc: Invalid pattern: " ++ pretty pat
 
@@ -1232,7 +1237,8 @@ sAlloc name size space = do
                      size_var <-- Imp.innerExp size
                      return $ Imp.VarSize size_var
   emit $ Imp.DeclareMem name' space
-  emit $ Imp.Allocate name' size space
+  fake <- asks $ elem space . envFakeMemory
+  unless fake $ emit $ Imp.Allocate name' size space
   addVar name' $ MemVar Nothing $ MemEntry size' space
   return name'
 
