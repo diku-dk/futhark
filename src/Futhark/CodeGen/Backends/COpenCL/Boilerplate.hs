@@ -373,7 +373,7 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
   [C.cstm|
    if ($exp:which' == 0 &&
        strstr(option->platform_name, $string:platform_name) != NULL &&
-       option->device_type == $exp:(clDeviceType device_type)) {
+       (option->device_type & $exp:(clDeviceType device_type)) == $exp:(clDeviceType device_type)) {
      $stm:get_size
    }|]
   where clDeviceType DeviceGPU = [C.cexp|CL_DEVICE_TYPE_GPU|]
