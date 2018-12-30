@@ -5,7 +5,6 @@
 -- flag for machine-readable output.
 module Main (main) where
 
-import Control.Concurrent
 import Control.Monad
 import Control.Monad.Except
 import qualified Data.ByteString.Char8 as SBS
@@ -32,6 +31,7 @@ import Text.Printf
 import Text.Regex.TDFA
 
 import Futhark.Test
+import Futhark.Util (pmapIO)
 import Futhark.Util.Options
 
 data BenchOptions = BenchOptions
@@ -81,23 +81,6 @@ encodeBenchResults rs =
   BenchResult prog r <- rs
   return $ T.pack prog JSON..= M.singleton ("datasets" :: T.Text) (DataResults r)
 
-fork :: (a -> IO b) -> a -> IO (MVar b)
-fork f x = do cell <- newEmptyMVar
-              void $ forkIO $ do result <- f x
-                                 putMVar cell result
-              return cell
-
-pmapIO :: (a -> IO b) -> [a] -> IO [b]
-pmapIO f elems = go elems []
-  where
-    go [] res = return res
-    go xs res = do
-      numThreads <- getNumCapabilities
-      let (e,es) = splitAt numThreads xs
-      mvars  <- mapM (fork f) e
-      result <- mapM takeMVar mvars
-      go es (result ++ res)
-
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
   -- We force line buffering to ensure that we produce running output.
@@ -126,9 +109,9 @@ anyFailed = any failedBenchResult
         failedResult _                     = False
 
 anyFailedToCompile :: [SkipReason] -> Bool
-anyFailedToCompile = elem FailedToCompile
+anyFailedToCompile = not . all (==Skipped)
 
-data SkipReason = Skipped | FailedToCompile
+data SkipReason = Skipped | FailedToCompile | ReferenceFailed
   deriving (Eq)
 
 compileBenchmark :: BenchOptions -> (FilePath, ProgramTest)
@@ -147,16 +130,25 @@ compileBenchmark opts (program, spec) =
                   return $ Left FailedToCompile
         else do
         putStr $ "Compiling " ++ program ++ "...\n"
-        (futcode, _, futerr) <- liftIO $ readProcessWithExitCode compiler
-                                [program, "-o", binaryName program] ""
 
-        case futcode of
-          ExitSuccess     -> return $ Right (program, cases)
-          ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
-                                return $ Left FailedToCompile
-          ExitFailure _   -> do putStrLn "Failed:\n"
-                                SBS.putStrLn futerr
-                                return $ Left FailedToCompile
+        ref_res <- runExceptT $ ensureReferenceOutput "futhark-c" program cases
+        case ref_res of
+          Left err -> do
+            putStrLn "Reference output generation failed:\n"
+            print err
+            return $ Left ReferenceFailed
+
+          Right () -> do
+            (futcode, _, futerr) <- liftIO $ readProcessWithExitCode compiler
+                                    [program, "-o", binaryName program] ""
+
+            case futcode of
+              ExitSuccess     -> return $ Right (program, cases)
+              ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
+                                    return $ Left FailedToCompile
+              ExitFailure _   -> do putStrLn "Failed:\n"
+                                    SBS.putStrLn futerr
+                                    return $ Left FailedToCompile
     _ ->
       return $ Left Skipped
   where compiler = optCompiler opts
@@ -203,15 +195,18 @@ runBenchmarkCase _ _ _ _ (TestRun _ _ RunTimeFailure{} _ _) =
 runBenchmarkCase opts _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
       return Nothing
-runBenchmarkCase opts program entry pad_to (TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) =
+runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesBS dir input_spec
-  let getValuesAndBS vs = do
+  let getValuesAndBS (SuccessValues vs) = do
         vs' <- getValues dir vs
         bs <- getValuesBS dir vs
         return (LBS.toStrict bs, vs')
+      getValuesAndBS SuccessGenerateValues =
+        getValuesAndBS $ SuccessValues $ InFile $
+        testRunReferenceOutput program entry tr
   maybe_expected <- maybe (return Nothing) (fmap Just . getValuesAndBS) expected_spec
   let options = optExtraOptions opts ++ ["-e", T.unpack entry,
                                          "-t", tmpfile,
@@ -236,22 +231,21 @@ runBenchmarkCase opts program entry pad_to (TestRun _ input_spec (Succeeds expec
     readProcessWithExitCode to_run to_run_args $
     LBS.toStrict input
 
-  fmap (Just .  DataResult dataset_desc) $ runBenchM $ case run_res of
-    Just (progCode, output, progerr) ->
-      do
-        case maybe_expected of
-          Nothing ->
-            didNotFail program progCode $ T.decodeUtf8 progerr
-          Just expected ->
-            compareResult program expected =<<
-            runResult program progCode output progerr
-        runtime_result <- io $ T.readFile tmpfile
-        runtimes <- case mapM readRuntime $ T.lines runtime_result of
-          Just runtimes -> return $ map RunResult runtimes
-          Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
+  fmap (Just . DataResult dataset_desc) $ runBenchM $ case run_res of
+    Just (progCode, output, progerr) -> do
+      case maybe_expected of
+        Nothing ->
+          didNotFail program progCode $ T.decodeUtf8 progerr
+        Just expected ->
+          compareResult program expected =<<
+          runResult program progCode output progerr
+      runtime_result <- io $ T.readFile tmpfile
+      runtimes <- case mapM readRuntime $ T.lines runtime_result of
+        Just runtimes -> return $ map RunResult runtimes
+        Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
 
-        io $ reportResult runtimes
-        return (runtimes, T.decodeUtf8 progerr)
+      io $ reportResult runtimes
+      return (runtimes, T.decodeUtf8 progerr)
     Nothing ->
       itWentWrong $ T.pack $ "Execution exceeded " ++ show (optTimeout opts) ++ " seconds."
 

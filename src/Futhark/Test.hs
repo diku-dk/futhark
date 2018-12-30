@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 -- | Facilities for reading Futhark test programs.  A Futhark test
 -- program is an ordinary Futhark program where an initial comment
 -- block specifies input- and output-sets.
@@ -9,6 +11,11 @@ module Futhark.Test
        , getValues
        , getValuesBS
        , compareValues
+       , testRunReferenceOutput
+       , getExpectedResult
+       , compileProgram
+       , runProgram
+       , ensureReferenceOutput
        , Mismatch
 
        , ProgramTest (..)
@@ -20,6 +27,7 @@ module Futhark.Test
        , InputOutputs (..)
        , TestRun (..)
        , ExpectedResult (..)
+       , Success(..)
        , Values (..)
        , GenValue (..)
        , Value
@@ -31,7 +39,7 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.ByteString as SBS
 import Control.Exception (catch)
 import Control.Monad
-import Control.Monad.IO.Class
+import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Char
 import Data.Functor
@@ -62,7 +70,7 @@ import Prelude
 import Futhark.Analysis.Metrics
 import Futhark.Representation.Primitive (IntType(..), FloatType(..), intByteSize, floatByteSize)
 import Futhark.Test.Values
-import Futhark.Util (directoryContents)
+import Futhark.Util (directoryContents, pmapIO)
 import Futhark.Util.Pretty (pretty, prettyText)
 import Language.Futhark.Syntax (PrimType(..), Int32)
 
@@ -120,7 +128,7 @@ instance Show WarningTest where
 data TestRun = TestRun
                { runTags :: [String]
                , runInput :: Values
-               , runExpectedResult :: ExpectedResult Values
+               , runExpectedResult :: ExpectedResult Success
                , runIndex :: Int
                , runDescription :: String
                }
@@ -154,6 +162,14 @@ data ExpectedResult values
                             -- expected result values.
   | RunTimeFailure ExpectedError -- ^ Execution fails with this error.
   deriving (Show)
+
+-- | The result expected from a succesful execution.
+data Success = SuccessValues Values
+             -- ^ These values are expected.
+             | SuccessGenerateValues
+             -- ^ Compute expected values from executing a known-good
+             -- reference implementation.
+             deriving (Show)
 
 type Parser = Parsec Void T.Text
 
@@ -221,7 +237,9 @@ parseRunCases = parseRunCases' (0::Int)
         parseRunCase i = do
           tags <- parseRunTags
           lexstr "input"
-          input <- if "random" `elem` tags then parseRandomValues else parseValues
+          input <- if "random" `elem` tags
+                   then parseRandomValues
+                   else parseValues
           expr <- parseExpectedResult
           return $ TestRun tags input expr i $ desc i input
 
@@ -242,9 +260,10 @@ parseRunCases = parseRunCases' (0::Int)
         desc _ (GenValues gens) =
           unwords $ map genValueType gens
 
-parseExpectedResult :: Parser (ExpectedResult Values)
+parseExpectedResult :: Parser (ExpectedResult Success)
 parseExpectedResult =
-  (Succeeds . Just <$> (lexstr "output" *> parseValues)) <|>
+  (lexstr "auto" *> lexstr "output" $> Succeeds (Just SuccessGenerateValues)) <|>
+  (Succeeds . Just . SuccessValues <$> (lexstr "output" *> parseValues)) <|>
   (RunTimeFailure <$> (lexstr "error:" *> parseExpectedError)) <|>
   pure (Succeeds Nothing)
 
@@ -501,3 +520,95 @@ genFileSize = genSize
         primSize (Unsigned it) = intByteSize it
         primSize (FloatType ft) = floatByteSize ft
         primSize Bool = 1
+
+-- | When/if generating a reference output file for this run, what
+-- should it be called?  Includes the "data/" folder.
+testRunReferenceOutput :: FilePath -> T.Text -> TestRun -> FilePath
+testRunReferenceOutput prog entry tr =
+  "data"
+  </> takeBaseName prog
+  <> ":" <> T.unpack entry
+  <> "-" <> map clean (runDescription tr)
+  <.> "out"
+  where clean '/' = '_' -- Would this ever happen?
+        clean ' ' = '_'
+        clean c = c
+
+-- | Get the values corresponding to an expected result, if any.
+getExpectedResult :: MonadIO m =>
+                     FilePath -> T.Text -> TestRun
+                  -> m (ExpectedResult [Value])
+getExpectedResult prog entry tr =
+  case runExpectedResult tr of
+    (Succeeds (Just (SuccessValues vals))) ->
+      Succeeds . Just <$> getValues (takeDirectory prog) vals
+    Succeeds (Just SuccessGenerateValues) ->
+      getExpectedResult prog entry
+      tr { runExpectedResult = Succeeds $ Just $ SuccessValues $ InFile $
+                               testRunReferenceOutput prog entry tr }
+    Succeeds Nothing ->
+      return $ Succeeds Nothing
+    RunTimeFailure err ->
+      return $ RunTimeFailure err
+
+compileProgram :: (MonadIO m, MonadError [T.Text] m) =>
+                  [String] -> FilePath -> FilePath
+               -> m (SBS.ByteString, SBS.ByteString)
+compileProgram extra_options compiler program = do
+  (futcode, stdout, stderr) <- liftIO $ readProcessWithExitCode compiler options ""
+  case futcode of
+    ExitFailure 127 -> throwError [progNotFound $ T.pack compiler]
+    ExitFailure _   -> throwError [T.decodeUtf8 stderr]
+    ExitSuccess     -> return ()
+  return (stdout, stderr)
+  where binOutputf = dropExtension program
+        options = [program, "-o", binOutputf] ++ extra_options
+        progNotFound s = s <> ": command not found"
+
+runProgram :: MonadIO m =>
+              String -> [String]
+           -> String -> T.Text -> Values
+           -> m (ExitCode, SBS.ByteString, SBS.ByteString)
+runProgram runner extra_options prog entry input = do
+  let progbin = dropExtension prog
+      dir = takeDirectory prog
+      binpath = "." </> progbin
+      entry_options = ["-e", T.unpack entry]
+
+      (to_run, to_run_args)
+        | null runner = (binpath, entry_options ++ extra_options)
+        | otherwise = (runner, binpath : entry_options ++ extra_options)
+
+  input' <- getValuesBS dir input
+  liftIO $ readProcessWithExitCode to_run to_run_args $ BS.toStrict input'
+
+-- | Ensure that any reference output files exist, or create them (by
+-- compiling the program with the reference compiler and running it on
+-- the input) if necessary.
+ensureReferenceOutput :: (MonadIO m, MonadError [T.Text] m) =>
+                         FilePath -> FilePath -> [InputOutputs]
+                      -> m ()
+ensureReferenceOutput compiler prog ios = do
+  missing <- filterM isReferenceMissing $ concatMap entryAndRuns ios
+  unless (null missing) $ do
+    void $ compileProgram [] compiler prog
+    liftIO $ void $ flip pmapIO missing $ \(entry, tr) -> do
+      (code, stdout, stderr) <- runProgram "" ["-b"] prog entry $ runInput tr
+      case code of
+        ExitFailure e ->
+          fail $ "Reference dataset generation failed with exit code " ++
+          show e ++ " and stderr:\n" ++
+          map (chr . fromIntegral) (SBS.unpack stderr)
+        ExitSuccess ->
+          SBS.writeFile (file (entry, tr)) stdout
+  where file (entry, tr) =
+          takeDirectory prog
+          </> testRunReferenceOutput prog entry tr
+
+        entryAndRuns (InputOutputs entry rts) = map (entry,) rts
+
+        isReferenceMissing (entry, tr)
+          | Succeeds (Just SuccessGenerateValues) <- runExpectedResult tr =
+              liftIO . fmap not . doesFileExist . file $ (entry, tr)
+          | otherwise =
+              return False
