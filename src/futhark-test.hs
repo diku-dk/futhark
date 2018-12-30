@@ -164,6 +164,8 @@ runTestCase (TestCase mode program testcase progs) =
       let compiler = configCompiler progs
           interpreter = configInterpreter progs
           extra_options = configExtraCompilerOptions progs
+      context "Generating reference outputs" $
+        ensureReferenceOutput "futhark-c" program ios
       unless (mode == Interpreted) $
         context ("Compiling with " <> T.pack compiler) $ do
           compileTestProgram extra_options compiler program warnings
@@ -178,13 +180,13 @@ runTestCase (TestCase mode program testcase progs) =
 runInterpretedEntry :: String -> FilePath -> InputOutputs -> TestM()
 runInterpretedEntry futharki program (InputOutputs entry run_cases) =
   let dir = takeDirectory program
-      runInterpretedCase run@(TestRun _ inputValues expectedResult index _) =
+      runInterpretedCase run@(TestRun _ inputValues _ index _) =
         unless ("compiled" `elem` runTags run) $
           context ("Entry point: " <> entry
                    <> "; dataset: " <> T.pack (runDescription run)) $ do
 
             input <- T.unlines . map prettyText <$> getValues dir inputValues
-            expectedResult' <- getExpectedResult dir expectedResult
+            expectedResult' <- getExpectedResult program entry run
             (code, output, err) <-
               io $ readProcessWithExitCode futharki ["-e", T.unpack entry, program] $
               T.encodeUtf8 input
@@ -198,33 +200,27 @@ runInterpretedEntry futharki program (InputOutputs entry run_cases) =
 
 runCompiledEntry :: FilePath -> ProgConfig -> InputOutputs -> TestM ()
 runCompiledEntry program progs (InputOutputs entry run_cases) =
-      -- Explicitly prefixing the current directory is necessary for
-      -- readProcessWithExitCode to find the binary when binOutputf has
-      -- no path component.
+  -- Explicitly prefixing the current directory is necessary for
+  -- readProcessWithExitCode to find the binary when binOutputf has
+  -- no path component.
   let binOutputf = dropExtension program
-      dir = takeDirectory program
       binpath = "." </> binOutputf
       entry_options = ["-e", T.unpack entry]
 
       runner = configRunner progs
       extra_options = configExtraOptions progs
-      (to_run, to_run_args)
-        | null runner = (binpath, entry_options ++ extra_options)
-        | otherwise = (runner, binpath : entry_options ++ extra_options)
 
-      runCompiledCase run@(TestRun _ inputValues expectedResult index _) =
+      runCompiledCase run@(TestRun _ inputValues _ index _) =
         context ("Entry point: " <> entry
                  <> "; dataset: " <> T.pack (runDescription run)) $ do
-
-          input <- getValuesBS dir inputValues
-          expectedResult' <- getExpectedResult dir expectedResult
+          expected <- getExpectedResult program entry run
           (progCode, output, progerr) <-
-            io $ readProcessWithExitCode to_run to_run_args $ LBS.toStrict input
-          compareResult entry index program expectedResult'
+            runProgram runner extra_options program entry inputValues
+          compareResult entry index program expected
             =<< runResult program progCode output progerr
 
   in context ("Running " <> T.pack (unwords $ binpath : entry_options ++ extra_options)) $
-         accErrors_ $ map runCompiledCase run_cases
+     accErrors_ $ map runCompiledCase run_cases
 
 checkError :: ExpectedError -> SBS.ByteString -> TestM ()
 checkError (ThisError regex_s regex) err
@@ -245,23 +241,10 @@ runResult program ExitSuccess stdout_s _ =
 runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
-getExpectedResult :: MonadIO m =>
-                     FilePath -> ExpectedResult Values
-                  -> m (ExpectedResult [Value])
-getExpectedResult dir (Succeeds (Just vals)) = Succeeds . Just <$> getValues dir vals
-getExpectedResult _   (Succeeds Nothing) = return $ Succeeds Nothing
-getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
-
 compileTestProgram :: [String] -> String -> FilePath -> [WarningTest] -> TestM ()
 compileTestProgram extra_options futharkc program warnings = do
-  (futcode, _, futerr) <- io $ readProcessWithExitCode futharkc options ""
+  (_, futerr) <- compileProgram extra_options futharkc program
   testWarnings warnings futerr
-  case futcode of
-    ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
-    ExitFailure _   -> throwError $ T.decodeUtf8 futerr
-    ExitSuccess     -> return ()
-  where binOutputf = dropExtension program
-        options = [program, "-o", binOutputf] ++ extra_options
 
 compareResult :: T.Text -> Int -> FilePath -> ExpectedResult [Value] -> RunResult
               -> TestM ()
