@@ -164,7 +164,8 @@ runTestCase (TestCase mode program testcase progs) =
       let compiler = configCompiler progs
           interpreter = configInterpreter progs
           extra_options = configExtraCompilerOptions progs
-      context "Generating reference outputs" $
+      unless (mode == Compile) $
+        context "Generating reference outputs" $
         ensureReferenceOutput "futhark-c" program ios
       unless (mode == Interpreted) $
         context ("Compiling with " <> T.pack compiler) $ do
