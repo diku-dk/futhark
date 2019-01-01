@@ -25,7 +25,7 @@ import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen (sFor, sWhen,
                                sOp,
-                               dPrim, dPrimV)
+                               dPrim, dPrim_, dPrimV)
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
@@ -88,7 +88,7 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
 
     ImpGen.compileSubExp v >>= ImpGen.emit . Imp.DebugPrint s (elemType ty)
 
-  sOp $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
+  sOp $ Imp.CallKernel $ Imp.Kernel
             { Imp.kernelBody = kernel_body'
             , Imp.kernelLocalMemory = local_memory
             , Imp.kernelUses = uses
@@ -111,71 +111,39 @@ kernelCompiler pat e =
   pretty pat ++ "\nfor expression\n  " ++ pretty e
 
 expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
+
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
+  n' <- ImpGen.compileSubExp n
+  x' <- ImpGen.compileSubExp x
+  s' <- ImpGen.compileSubExp s
   destloc <- ImpGen.entryArrayLocation <$> ImpGen.lookupArray (patElemName pe)
-  let tag = Just $ baseTag $ patElemName pe
-  thread_gid <- maybe (newVName "thread_gid") (return . VName (nameFromString "thread_gid")) tag
+  (constants, set_constants) <- simpleKernelConstants n' "iota"
 
-  makeAllMemoryGlobal $ do
-    (destmem, destspace, destidx) <-
-      ImpGen.fullyIndexArray' destloc [ImpGen.varIndex thread_gid] (IntType et)
+  sKernel constants "iota" $ do
+    set_constants
+    let gtid = kernelGlobalThreadId constants
+    sWhen (kernelThreadActive constants) $ do
+      (destmem, destspace, destidx) <-
+        ImpGen.fullyIndexArray' destloc [gtid] (IntType et)
 
-    n' <- ImpGen.compileSubExp n
-    x' <- ImpGen.compileSubExp x
-    s' <- ImpGen.compileSubExp s
+      ImpGen.emit $
+        Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
+        Imp.ConvOpExp (SExt Int32 et) gtid * s' + x'
 
-    let body = Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
-               Imp.ConvOpExp (SExt Int32 et) (Imp.var thread_gid int32) * s' + x'
-
-    (group_size, num_groups) <- computeMapKernelGroups n'
-
-    (body_uses, _) <- computeKernelUses
-                      (freeIn body <> freeIn [n',x',s'])
-                      [thread_gid]
-
-    sOp $ Imp.CallKernel $ Imp.Map Imp.MapKernel
-      { Imp.mapKernelThreadNum = thread_gid
-      , Imp.mapKernelDesc = "iota"
-      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
-      , Imp.mapKernelGroupSize = Imp.VarSize group_size
-      , Imp.mapKernelSize = n'
-      , Imp.mapKernelUses = body_uses
-      , Imp.mapKernelBody = body
-      }
-
-expCompiler
-  (Pattern _ [pe]) (BasicOp (Replicate (Shape ds) se)) = do
-  constants <- simpleKernelConstants (Just $ baseTag $ patElemName pe) "replicate"
-
+expCompiler (Pattern _ [pe]) (BasicOp (Replicate (Shape ds) se)) = do
   t <- subExpType se
-  let thread_gid = kernelGlobalThreadIdVar constants
-      row_dims = arrayDims t
-      dims = ds ++ row_dims
-      is' = unflattenIndex (map (ImpGen.compileSubExpOfType int32) dims) $
-            ImpGen.varIndex thread_gid
-  ds' <- mapM ImpGen.compileSubExp ds
 
-  makeAllMemoryGlobal $ do
-    body <- ImpGen.subImpM_ (inKernelOperations constants) $
+  dims <- mapM ImpGen.compileSubExp $ ds ++ arrayDims t
+  (constants, set_constants) <-
+    simpleKernelConstants (product dims) "replicate"
+
+  let is' = unflattenIndex dims $ kernelGlobalThreadId constants
+
+  sKernel constants "replicate" $ do
+    set_constants
+    sWhen (kernelThreadActive constants) $
       ImpGen.copyDWIM (patElemName pe) is' se $ drop (length ds) is'
-
-    dims' <- mapM ImpGen.compileSubExp dims
-    (group_size, num_groups) <- computeMapKernelGroups $ product dims'
-
-    (body_uses, _) <- computeKernelUses
-                      (freeIn body <> freeIn ds')
-                      [thread_gid]
-
-    sOp $ Imp.CallKernel $ Imp.Map Imp.MapKernel
-      { Imp.mapKernelThreadNum = thread_gid
-      , Imp.mapKernelDesc = "replicate"
-      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
-      , Imp.mapKernelGroupSize = Imp.VarSize group_size
-      , Imp.mapKernelSize = product dims'
-      , Imp.mapKernelUses = body_uses
-      , Imp.mapKernelBody = body
-      }
 
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
@@ -218,37 +186,28 @@ callKernelCopy bt
           (n * row_size) `Imp.withElemType` bt
 
   | otherwise = do
-  global_thread_index <- newVName "copy_global_thread_index"
 
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
   let shape = map Imp.sizeToExp srcshape
       shape_se = map (Imp.innerExp . ImpGen.dimSizeToExp) srcshape
-      dest_is = unflattenIndex shape_se $ ImpGen.varIndex global_thread_index
-      src_is = dest_is
+      kernel_size = Imp.innerExp n * product (drop 1 shape)
 
-  makeAllMemoryGlobal $ do
+  (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
+
+  sKernel constants "copy" $ do
+    set_constants
+
+    let gtid = kernelGlobalThreadId constants
+        dest_is = unflattenIndex shape_se gtid
+        src_is = dest_is
+
     (_, destspace, destidx) <- ImpGen.fullyIndexArray' destloc dest_is bt
     (_, srcspace, srcidx) <- ImpGen.fullyIndexArray' srcloc src_is bt
 
-    let body = Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
-               Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
-
-    let kernel_size = Imp.innerExp n * product (drop 1 shape)
-    (group_size, num_groups) <- computeMapKernelGroups kernel_size
-
-    let bound_in_kernel = [global_thread_index]
-    (body_uses, _) <- computeKernelUses (kernel_size, body) bound_in_kernel
-
-    sOp $ Imp.CallKernel $ Imp.Map Imp.MapKernel
-      { Imp.mapKernelThreadNum = global_thread_index
-      , Imp.mapKernelDesc = "copy"
-      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
-      , Imp.mapKernelGroupSize = Imp.VarSize group_size
-      , Imp.mapKernelSize = kernel_size
-      , Imp.mapKernelUses = body_uses
-      , Imp.mapKernelBody = body
-      }
+    sWhen (gtid .<. kernel_size) $ ImpGen.emit $
+      Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
+      Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
 
 mapTransposeForType :: PrimType -> ImpGen.ImpM ExplicitMemory Imp.HostOp Name
 mapTransposeForType bt = do
@@ -362,20 +321,12 @@ mapTransposeFunction bt =
                (Imp.Count num_bytes)
 
         callTransposeKernel =
-          Imp.Op . Imp.CallKernel . Imp.AnyKernel .
+          Imp.Op . Imp.CallKernel .
           mapTransposeKernel (mapTransposeName bt) block_dim_int
           (destmem, v32 destoffset, srcmem, v32 srcoffset,
             v32 x, v32 y, v32 in_elems, v32 out_elems,
             v32 mulx, v32 muly, v32 num_arrays,
             block) bt
-
-computeMapKernelGroups :: Imp.Exp -> CallKernelGen (VName, VName)
-computeMapKernelGroups kernel_size = do
-  group_size <- dPrim "group_size" int32
-  let group_size_var = Imp.var group_size int32
-  sOp $ Imp.GetSize group_size group_size Imp.SizeGroup
-  num_groups <- dPrimV "num_groups" $ kernel_size `quotRoundingUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
-  return (group_size, num_groups)
 
 isMapTransposeKernel :: PrimType -> ImpGen.MemLocation -> ImpGen.MemLocation
                      -> Maybe (Imp.Exp, Imp.Exp,
@@ -412,21 +363,36 @@ isMapTransposeKernel bt
               (pretrans, posttrans) = f $ splitAt r2 notmapped
           in (product mapped, product pretrans, product posttrans)
 
--- FIXME: wing a KernelConstants structure for use in Replicate
--- compilation.  This cannot be the best way to do this...
-simpleKernelConstants :: MonadFreshNames m =>
-                         Maybe Int -> String
-                      -> m KernelConstants
-simpleKernelConstants tag desc = do
-  thread_gtid <- maybe (newVName $ desc ++ "_gtid")
-                       (return . VName (nameFromString $ desc ++ "_gtid")) tag
+simpleKernelConstants :: Imp.Exp -> String
+                      -> CallKernelGen (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
+simpleKernelConstants kernel_size desc = do
+  thread_gtid <- newVName $ desc ++ "_gtid"
   thread_ltid <- newVName $ desc ++ "_ltid"
-  thread_gid <- newVName $ desc ++ "_gid"
-  return $ KernelConstants
-    (Imp.var thread_gtid int32) (Imp.var thread_ltid int32) (Imp.var thread_gid int32)
-    thread_gtid thread_ltid thread_gid
-    0 0 0 0
-    [] (Imp.ValueExp $ BoolValue True) mempty
+  group_id <- newVName $ desc ++ "_gid"
+  (group_size, num_groups) <- computeMapKernelGroups kernel_size
+  let set_constants = do
+        dPrim_ thread_gtid int32
+        dPrim_ thread_ltid int32
+        dPrim_ group_id int32
+        sOp (Imp.GetGlobalId thread_gtid 0)
+        sOp (Imp.GetLocalId thread_ltid 0)
+        sOp (Imp.GetGroupId group_id 0)
+
+  return (KernelConstants
+          (Imp.var thread_gtid int32) (Imp.var thread_ltid int32) (Imp.var group_id int32)
+          thread_gtid thread_ltid group_id
+          group_size num_groups (group_size*num_groups) 0
+          [] (Imp.var thread_gtid int32 .<. kernel_size) mempty,
+
+          set_constants)
+
+computeMapKernelGroups :: Imp.Exp -> CallKernelGen (Imp.Exp, Imp.Exp)
+computeMapKernelGroups kernel_size = do
+  group_size <- dPrim "group_size" int32
+  let group_size_var = Imp.var group_size int32
+  sOp $ Imp.GetSize group_size group_size Imp.SizeGroup
+  num_groups <- dPrimV "num_groups" $ kernel_size `quotRoundingUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
+  return (Imp.var group_size int32, Imp.var num_groups int32)
 
 compileKernelBody :: Pattern InKernel
                   -> KernelConstants

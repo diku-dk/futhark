@@ -17,6 +17,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , groupReduce
   , groupScan
   , isActive
+  , sKernel
   )
   where
 
@@ -920,3 +921,18 @@ groupStmsByGuard constants bnds =
           (Nothing, [])
         collapse l@((g,_):_) =
           (g, map snd l)
+
+sKernel :: KernelConstants -> String -> ImpGen.ImpM InKernel Imp.KernelOp a -> CallKernelGen ()
+sKernel constants name m = do
+  body <- makeAllMemoryGlobal $
+          ImpGen.subImpM_ (inKernelOperations constants) m
+  (uses, local_memory) <- computeKernelUses body mempty
+  ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Kernel
+    { Imp.kernelBody = body
+    , Imp.kernelLocalMemory = local_memory
+    , Imp.kernelUses = uses
+    , Imp.kernelNumGroups = [kernelNumGroups constants]
+    , Imp.kernelGroupSize = [kernelGroupSize constants]
+    , Imp.kernelName =
+        nameFromString $ name ++ "_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+    }

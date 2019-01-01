@@ -12,8 +12,6 @@ module Futhark.CodeGen.ImpCode.Kernels
   , HostOp (..)
   , KernelOp (..)
   , AtomicOp (..)
-  , CallKernel (..)
-  , MapKernel (..)
   , Kernel (..)
   , LocalMemoryUse
   , KernelUse (..)
@@ -27,7 +25,6 @@ module Futhark.CodeGen.ImpCode.Kernels
 
 import Control.Monad.Writer
 import Data.List
-import qualified Data.Set as S
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
@@ -39,7 +36,7 @@ import Futhark.Util.Pretty
 type Program = Functions HostOp
 type Function = Imp.Function HostOp
 -- | Host-level code that can call kernels.
-type Code = Imp.Code CallKernel
+type Code = Imp.Code HostOp
 -- | Code inside a kernel.
 type KernelCode = Imp.Code KernelOp
 
@@ -50,31 +47,13 @@ newtype KernelConst = SizeConst VName
 -- | An expression whose variables are kernel constants.
 type KernelConstExp = PrimExp KernelConst
 
-data HostOp = CallKernel CallKernel
+data HostOp = CallKernel Kernel
             | GetSize VName VName SizeClass
             | CmpSizeLe VName VName SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
 
-data CallKernel = Map MapKernel
-                | AnyKernel Kernel
-            deriving (Show)
-
 -- | A generic kernel containing arbitrary kernel code.
-data MapKernel = MapKernel { mapKernelThreadNum :: VName
-                             -- ^ Stm position - also serves as a unique
-                             -- name for the kernel.
-                           , mapKernelDesc :: String
-                           -- ^ Used to name the kernel for readability.
-                           , mapKernelBody :: Imp.Code KernelOp
-                           , mapKernelUses :: [KernelUse]
-                           , mapKernelNumGroups :: DimSize
-                           , mapKernelGroupSize :: DimSize
-                           , mapKernelSize :: Imp.Exp
-                           -- ^ Do not actually execute threads past this.
-                           }
-                     deriving (Show)
-
 data Kernel = Kernel
               { kernelBody :: Imp.Code KernelOp
               , kernelLocalMemory :: [LocalMemoryUse]
@@ -99,7 +78,7 @@ data KernelUse = ScalarUse VName PrimType
                | ConstUse VName KernelConstExp
                  deriving (Eq, Show)
 
-getKernels :: Program -> [CallKernel]
+getKernels :: Program -> [Kernel]
 getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
   where getFunKernels (CallKernel kernel) =
           tell [kernel]
@@ -152,25 +131,9 @@ instance FreeIn HostOp where
   freeIn (GetSize dest _ _) =
     freeIn dest
 
-instance Pretty CallKernel where
-  ppr (Map k) = ppr k
-  ppr (AnyKernel k) = ppr k
-
-instance FreeIn CallKernel where
-  freeIn (Map k) = freeIn k
-  freeIn (AnyKernel k) = freeIn k
-
 instance FreeIn Kernel where
   freeIn kernel = freeIn (kernelBody kernel) <>
                   freeIn [kernelNumGroups kernel, kernelGroupSize kernel]
-
-instance Pretty MapKernel where
-  ppr kernel =
-    text "mapKernel" <+> brace
-    (text "uses" <+> brace (commasep $ map ppr $ mapKernelUses kernel) </>
-     text "body" <+> brace (ppr (mapKernelThreadNum kernel) <+>
-                            text "<- get_thread_number()" </>
-                            ppr (mapKernelBody kernel)))
 
 instance Pretty Kernel where
   ppr kernel =
@@ -186,10 +149,6 @@ instance Pretty Kernel where
             ppr name <+> parens (ppr size <+> text "bytes")
           ppLocalMemory (name, Right size) =
             ppr name <+> parens (ppr size <+> text "bytes (const)")
-
-instance FreeIn MapKernel where
-  freeIn kernel =
-    mapKernelThreadNum kernel `S.delete` freeIn (mapKernelBody kernel)
 
 data KernelOp = GetGroupId VName Int
               | GetLocalId VName Int

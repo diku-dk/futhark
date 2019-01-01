@@ -49,7 +49,6 @@ module Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Control.Monad.Except
 import Data.Maybe
 import Data.Semigroup ((<>))
-import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List
 
@@ -124,8 +123,10 @@ unitSegmentsReduction (Pattern _ segred_pes) space nes body = do
   let num_segments = product $ init dims'
       required_groups = num_segments `quotRoundingUp` kernelGroupSize constants
 
-  body' <- makeAllMemoryGlobal $
-           ImpGen.subImpM_ (inKernelOperations constants) $ do
+  ImpGen.emit $ Imp.DebugPrint "num_segments" int32 num_segments
+  ImpGen.emit $ Imp.DebugPrint "required_groups" int32 required_groups
+
+  sKernel constants "segred_mapseg" $ do
     init_constants
     virtualiseGroups constants required_groups $ \group_id -> do
       setSpaceIndices (group_id * kernelGroupSize constants + kernelLocalThreadId constants) space
@@ -139,23 +140,6 @@ unitSegmentsReduction (Pattern _ segred_pes) space nes body = do
         forM_ (zip mapout_pes mapout_ses) $ \(pe, se) ->
           ImpGen.copyDWIM (patElemName pe)
           (map (`Imp.var` int32) gtids) se []
-
-  let bound_in_kernel =
-        M.keys $ scopeOfKernelSpace space <> scopeOf (bodyStms body)
-  (uses, local_memory) <- computeKernelUses body' bound_in_kernel
-
-  ImpGen.emit $ Imp.DebugPrint "num_segments" int32 num_segments
-  ImpGen.emit $ Imp.DebugPrint "required_groups" int32 required_groups
-
-  ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
-    { Imp.kernelBody = body'
-    , Imp.kernelLocalMemory = local_memory
-    , Imp.kernelUses = uses
-    , Imp.kernelNumGroups = [kernelNumGroups constants]
-    , Imp.kernelGroupSize = [kernelGroupSize constants]
-    , Imp.kernelName =
-      nameFromString $ "segred_mapseg_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-    }
 
 nonsegmentedReduction :: Pattern ExplicitMemory
                       -> KernelSpace
@@ -194,9 +178,7 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
 
   num_threads <- dPrimV "num_threads" $ kernelNumThreads constants
 
-  kernel_body' <- makeAllMemoryGlobal $
-                  ImpGen.subImpM_ (inKernelOperations constants) $
-                  allThreads constants $ do
+  sKernel constants "segred_nonseg" $ allThreads constants $ do
     init_constants
 
     -- Since this is the nonsegmented case, all outer segment IDs must
@@ -216,20 +198,6 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
     reductionStageTwo constants segred_pat 0 [0] 0
       (kernelNumGroups constants) group_result_params red_acc_params red_op_renamed nes
       1 counter sync_arr group_res_arrs red_arrs
-
-  let bound_in_kernel =
-        M.keys $ scopeOfKernelSpace space <> scopeOf (bodyStms body)
-  (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
-
-  ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
-    { Imp.kernelBody = kernel_body'
-    , Imp.kernelLocalMemory = local_memory
-    , Imp.kernelUses = uses
-    , Imp.kernelNumGroups = [kernelNumGroups constants]
-    , Imp.kernelGroupSize = [kernelGroupSize constants]
-    , Imp.kernelName =
-      nameFromString $ "segred_nonseg_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-    }
 
 hasMemoryAccesses :: Body InKernel -> ImpGen.ImpM InKernel Imp.KernelOp Bool
 hasMemoryAccesses body = or <$> mapM isArray (S.toList $ freeInBody body)
@@ -270,9 +238,7 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
   ImpGen.emit $ Imp.DebugPrint "segments_per_group" int32 segments_per_group
   ImpGen.emit $ Imp.DebugPrint "required_groups" int32 required_groups
 
-  kernel_body' <- makeAllMemoryGlobal $
-                  ImpGen.subImpM_ (inKernelOperations constants) $
-                  allThreads constants $ do
+  sKernel constants "segred_small" $ allThreads constants $ do
     init_constants
 
     -- We probably do not have enough actual workgroups to cover the
@@ -334,20 +300,6 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
             gtids' = unflattenIndex (init dims') flat_segment_index
         ImpGen.copyDWIM (patElemName pe) gtids'
                         (Var arr) [(ltid+1) * segment_size - 1]
-
-  let bound_in_kernel =
-        M.keys $ scopeOfKernelSpace space <> scopeOf (bodyStms body)
-  (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
-
-  ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
-    { Imp.kernelBody = kernel_body'
-    , Imp.kernelLocalMemory = local_memory
-    , Imp.kernelUses = uses
-    , Imp.kernelNumGroups = [kernelNumGroups constants]
-    , Imp.kernelGroupSize = [kernelGroupSize constants]
-    , Imp.kernelName =
-        nameFromString $ "segred_small_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-    }
 
 largeSegmentsReduction :: Pattern ExplicitMemory
                        -> KernelSpace
@@ -421,9 +373,7 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
 
   sync_arr <- ImpGen.sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
-  kernel_body' <- makeAllMemoryGlobal $
-                  ImpGen.subImpM_ (inKernelOperations constants) $
-                  allThreads constants $ do
+  sKernel constants "segred_large" $ allThreads constants $ do
     init_constants
     let segment_gtids = init gtids
         group_id = kernelGroupId constants
@@ -458,20 +408,6 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
             ImpGen.copyDWIM v (map (`Imp.var` int32) segment_gtids) (Var $ paramName p) []
 
     sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
-
-  let bound_in_kernel =
-        M.keys $ scopeOfKernelSpace space <> scopeOf (bodyStms body)
-  (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
-
-  ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
-    { Imp.kernelBody = kernel_body'
-    , Imp.kernelLocalMemory = local_memory
-    , Imp.kernelUses = uses
-    , Imp.kernelNumGroups = [kernelNumGroups constants]
-    , Imp.kernelGroupSize = [kernelGroupSize constants]
-    , Imp.kernelName =
-        nameFromString $ "segred_large_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-    }
 
 groupsPerSegmentAndElementsPerThread :: Imp.Exp -> Imp.Exp -> Imp.Exp -> Imp.Exp
                                      -> (Imp.Exp, Imp.Count Imp.Elements)
