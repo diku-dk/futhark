@@ -152,6 +152,7 @@ data ArrayEntry = ArrayEntry {
     entryArrayLocation :: MemLocation
   , entryArrayElemType :: PrimType
   }
+  deriving (Show)
 
 entryArrayShape :: ArrayEntry -> [Imp.DimSize]
 entryArrayShape = memLocationShape . entryArrayLocation
@@ -160,15 +161,18 @@ data MemEntry = MemEntry {
       entryMemSize  :: Imp.MemSize
     , entryMemSpace :: Imp.Space
   }
+  deriving (Show)
 
 newtype ScalarEntry = ScalarEntry {
     entryScalarType    :: PrimType
   }
+  deriving (Show)
 
 -- | Every non-scalar variable must be associated with an entry.
 data VarEntry lore = ArrayVar (Maybe (Exp lore)) ArrayEntry
                    | ScalarVar (Maybe (Exp lore)) ScalarEntry
                    | MemVar (Maybe (Exp lore)) MemEntry
+                   deriving (Show)
 
 -- | When compiling an expression, this is a description of where the
 -- result should end up.  The integer is a reference to the construct

@@ -98,38 +98,9 @@ onHostOp (ImpKernels.CmpSizeLe v key size_class x) = do
 onHostOp (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
 
-onKernel :: CallKernel -> OnKernelM OpenCL
+onKernel :: Kernel -> OnKernelM OpenCL
 
-onKernel called@(Map kernel) = do
-  let (funbody, _) =
-        GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
-          size <- GenericC.compileExp $ mapKernelSize kernel
-          let check = [C.citem|if ($id:(mapKernelThreadNum kernel) >= $exp:size) return;|]
-          body <- GenericC.blockScope $ GenericC.compileCode $ mapKernelBody kernel
-          return $ check : body
-
-      params = mapMaybe useAsParam $ mapKernelUses kernel
-
-  tell mempty
-    { clExtraFuns = mempty
-    , clKernels = M.singleton (mapKernelName kernel)
-                  [C.cfun|__kernel void $id:(mapKernelName kernel) ($params:params) {
-                     const uint $id:(mapKernelThreadNum kernel) = get_global_id(0);
-                     $items:funbody
-                  }|]
-    , clRequirements = OpenClRequirements
-                       (typesInKernel called)
-                       (mapMaybe useAsConst $ mapKernelUses kernel)
-    }
-
-  return $ LaunchKernel
-    (calledKernelName called) (kernelArgs called) kernel_size workgroup_size
-
-  where kernel_size = [sizeToExp (mapKernelNumGroups kernel) *
-                       sizeToExp (mapKernelGroupSize kernel)]
-        workgroup_size = [sizeToExp $ mapKernelGroupSize kernel]
-
-onKernel called@(AnyKernel kernel) = do
+onKernel kernel = do
   let (kernel_body, _) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
         GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel
@@ -150,12 +121,12 @@ onKernel called@(AnyKernel kernel) = do
                                   $items:kernel_body
                                   }|]
                , clRequirements = OpenClRequirements
-                                  (typesInKernel called)
+                                  (typesInKernel kernel)
                                   (mapMaybe useAsConst $ kernelUses kernel)
                }
 
   return $ LaunchKernel
-    (calledKernelName called) (kernelArgs called) kernel_size workgroup_size
+    name (kernelArgs kernel) kernel_size workgroup_size
 
   where prepareLocalMemory (mem, Left _) = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
@@ -165,7 +136,7 @@ onKernel called@(AnyKernel kernel) = do
           let size' = compilePrimExp size
           return (Nothing,
                   [C.citem|ALIGNED_LOCAL_MEMORY($id:mem, $exp:size');|])
-        name = calledKernelName called
+        name = nameToString $ kernelName kernel
         kernel_size = zipWith (*) (kernelNumGroups kernel) (kernelGroupSize kernel)
         workgroup_size = kernelGroupSize kernel
 
@@ -230,20 +201,8 @@ compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
   where compileKernelConst (SizeConst key) = return [C.cexp|$id:(pretty key)|]
 
-mapKernelName :: MapKernel -> String
-mapKernelName k = "kernel_"++ mapKernelDesc k ++ "_" ++
-                  show (baseTag $ mapKernelThreadNum k)
-
-calledKernelName :: CallKernel -> String
-calledKernelName (Map k) =
-  mapKernelName k
-calledKernelName (AnyKernel k) =
-  nameToString $ kernelName k
-
-kernelArgs :: CallKernel -> [KernelArg]
-kernelArgs (Map kernel) =
-  mapMaybe useToArg $ mapKernelUses kernel
-kernelArgs (AnyKernel kernel) =
+kernelArgs :: Kernel -> [KernelArg]
+kernelArgs kernel =
   mapMaybe (fmap (SharedMemoryKArg . memSizeToExp) . localMemorySize)
   (kernelLocalMemory kernel) ++
   mapMaybe useToArg (kernelUses kernel)
@@ -363,9 +322,8 @@ useToArg (MemoryUse mem)  = Just $ MemKArg mem
 useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
 useToArg ConstUse{}       = Nothing
 
-typesInKernel :: CallKernel -> S.Set PrimType
-typesInKernel (Map kernel) = typesInCode $ mapKernelBody kernel
-typesInKernel (AnyKernel kernel) = typesInCode $ kernelBody kernel
+typesInKernel :: Kernel -> S.Set PrimType
+typesInKernel kernel = typesInCode $ kernelBody kernel
 
 typesInCode :: ImpKernels.KernelCode -> S.Set PrimType
 typesInCode Skip = mempty
