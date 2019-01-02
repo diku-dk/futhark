@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * `futharki` now reports source locations of `trace` expressions
+    properly.
+
 ## [0.8.1]
 
 ### Added

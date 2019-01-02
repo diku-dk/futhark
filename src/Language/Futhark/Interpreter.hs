@@ -78,9 +78,6 @@ stacking loc env = local $ \(ss, imports) ->
 stacktrace :: EvalM [SrcLoc]
 stacktrace = asks $ map stackFrameSrcLoc . reverse . fst
 
-stacktraceTop :: EvalM SrcLoc
-stacktraceTop = fromMaybe noLoc . maybeHead <$> stacktrace
-
 lookupImport :: FilePath -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
@@ -240,7 +237,10 @@ bad loc env s = stacking loc env $ do
 
 trace :: Value -> EvalM ()
 trace v = do
-  top <- stacktraceTop
+  -- We take the second-to-last element of the stack, because any
+  -- actual call to 'implicits.trace' is going to be in the trace
+  -- function in the prelude, which is not interesting.
+  top <- fromMaybe noLoc . maybeHead . drop 1 . reverse <$> stacktrace
   liftF $ ExtOpTrace top (pretty v) ()
 
 typeEnv :: Env -> T.Env
