@@ -12,6 +12,7 @@ struct vulkan_config {
   uint32_t api_version;
   int debugging;
   int logging;
+  int lunarg_debugging;
   int preferred_device_index;
   int preferred_device_queue_index;
 
@@ -40,6 +41,7 @@ void vulkan_config_init(struct vulkan_config *cfg,
   cfg->api_version = VK_MAKE_VERSION(1, 1, 0);
   cfg->debugging = 0;
   cfg->logging = 0;
+  cfg->lunarg_debugging = 0;
   cfg->preferred_device_index = -1;
   cfg->preferred_device_queue_index = -1;
   cfg->dump_program_to = NULL;
@@ -205,10 +207,7 @@ static uint32_t get_suitable_queue_family(const struct vulkan_config *cfg,
                                           uint32_t *queue_family_index) {
   for (uint32_t i = 0; i < queue_prop_count; ++i)
   {
-      const VkQueueFlags masked_flags = (~(VK_QUEUE_TRANSFER_BIT | VK_QUEUE_SPARSE_BINDING_BIT) &
-                                        queue_props[i].queueFlags);
-
-      if (VK_QUEUE_COMPUTE_BIT & masked_flags)
+      if (VK_QUEUE_COMPUTE_BIT & queue_props[i].queueFlags)
       {
           *queue_family_index = i;
           return 1;
@@ -230,11 +229,8 @@ static uint32_t get_preferred_queue_family(const struct vulkan_config *cfg, VkPh
   if (cfg->preferred_device_queue_index >= 0) {
     if(cfg->preferred_device_queue_index >= queue_family_props_count)
       panic(1, "Specified queue family index not found.\n");
-      
-      const VkQueueFlags masked_flags = (~(VK_QUEUE_TRANSFER_BIT | VK_QUEUE_SPARSE_BINDING_BIT) &
-                                        queue_family_props[cfg->preferred_device_queue_index].queueFlags);
 
-    if (VK_QUEUE_COMPUTE_BIT & masked_flags)
+    if (!(VK_QUEUE_COMPUTE_BIT & queue_family_props[cfg->preferred_device_queue_index].queueFlags))
       panic(1, "Queue family does not support compute shaders.");
     
     queue_family_index = cfg->preferred_device_queue_index;
@@ -380,13 +376,15 @@ static void setup_vulkan(struct vulkan_context *ctx, uint32_t max_desc_count) {
   application_info.engineVersion      = 0;
   application_info.apiVersion         = ctx->cfg.api_version;
 
+  const char *layer_names[] = { "VK_LAYER_LUNARG_standard_validation" };
+
   VkInstanceCreateInfo instance_create_info;
   instance_create_info.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   instance_create_info.pNext                   = 0;
   instance_create_info.flags                   = 0;
   instance_create_info.pApplicationInfo        = &application_info;
-  instance_create_info.enabledLayerCount       = 0;
-  instance_create_info.ppEnabledLayerNames     = 0;
+  instance_create_info.enabledLayerCount       = ctx->cfg.lunarg_debugging ? 1 : 0;
+  instance_create_info.ppEnabledLayerNames     = layer_names;
   instance_create_info.enabledExtensionCount   = 0;
   instance_create_info.ppEnabledExtensionNames = 0;
 

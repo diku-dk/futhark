@@ -109,6 +109,12 @@ generateBoilerplate (Program shaders sizes _) = do
                          cfg->vulkan.logging = cfg->vulkan.debugging = flag;
                        }|])
 
+  GC.publicDef_ "context_config_set_lunarg_debugging" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         cfg->vulkan.lunarg_debugging = 1;
+                       }|])
+
   GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
      [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {

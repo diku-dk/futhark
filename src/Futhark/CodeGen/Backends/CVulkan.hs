@@ -49,6 +49,11 @@ cliOptions = [ Option { optionLongName = "dump-spirv"
                       , optionArgument = RequiredArgument
                       , optionAction = [C.cstm|futhark_context_config_dump_program_to(cfg, optarg);|]
                       }
+             , Option { optionLongName = "lunarg-debug"
+                      , optionShortName = Nothing
+                      , optionArgument = NoArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_lunarg_debugging(cfg);|]
+                      }
              , Option { optionLongName = "default-group-size"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument
