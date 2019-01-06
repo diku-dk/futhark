@@ -68,9 +68,8 @@ type StructTypeArg = TypeArg (DimDecl VName) ()
 -- | A type-checked type parameter.
 type TypeParam = TypeParamBase VName
 
--- | A known array element type with no shape annotations, but aliasing
--- information.
-type ArrayElemType = ArrayElemTypeBase () Names
+-- | A known array element type with no shape annotations.
+type ArrayElemType = ArrayElemTypeBase ()
 
 -- | A type-checked case (of a match expression).
 type Case = CaseBase Info VName

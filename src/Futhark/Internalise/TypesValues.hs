@@ -114,7 +114,7 @@ internaliseTypeM orig_t =
       fail "internaliseTypeM: cannot handle type variable."
     E.Record ets ->
       concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
-    E.Array et shape u -> do
+    E.Array _ et shape u -> do
       dims <- internaliseShape shape
       ets <- internaliseElemType et
       return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets ]
@@ -123,17 +123,17 @@ internaliseTypeM orig_t =
 
   where internaliseElemType E.ArrayPolyElem{} =
           fail "internaliseElemType: cannot handle type variable."
-        internaliseElemType (E.ArrayPrimElem bt _) =
+        internaliseElemType (E.ArrayPrimElem bt) =
           return [I.Prim $ internalisePrimType bt]
         internaliseElemType (E.ArrayRecordElem elemts) =
           concat <$> mapM (internaliseRecordElem . snd) (E.sortFields elemts)
-        internaliseElemType (E.ArrayEnumElem _ _) =
+        internaliseElemType E.ArrayEnumElem{} =
           return [I.Prim $ I.IntType I.Int8]
 
         internaliseRecordElem (E.RecordArrayElem et) =
           internaliseElemType et
         internaliseRecordElem (E.RecordArrayArrayElem et shape u) =
-          internaliseTypeM $ E.Array et shape u
+          internaliseTypeM $ E.Array mempty et shape u
 
         internaliseShape = mapM internaliseDim . E.shapeDims
 

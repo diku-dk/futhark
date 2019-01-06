@@ -24,6 +24,7 @@ where
 import Control.Monad.Reader
 import Control.Monad.Except
 import Control.Monad.State
+import Data.Bifunctor
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -49,8 +50,8 @@ unifyTypesU uf (TypeVar als1 u1 t1 targs1) (TypeVar als2 u2 t2 targs2)
       targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
       Just $ TypeVar (als1 <> als2) u3 t1 targs3
   | otherwise = Nothing
-unifyTypesU uf (Array et1 shape1 u1) (Array et2 shape2 u2) =
-  Array <$> unifyArrayElemTypes uf et1 et2 <*>
+unifyTypesU uf (Array als1 et1 shape1 u1) (Array als2 et2 shape2 u2) =
+  Array (als1 <> als2) <$> unifyArrayElemTypes uf et1 et2 <*>
   unifyShapes shape1 shape2 <*> uf u1 u2
 unifyTypesU uf (Record ts1) (Record ts2)
   | length ts1 == length ts2,
@@ -73,32 +74,32 @@ unifyTypeArgs uf (TypeArgType t1 loc) (TypeArgType t2 _) =
 unifyTypeArgs _ _ _ =
   Nothing
 
-unifyArrayElemTypes :: (Monoid als, Eq als, ArrayDim dim) =>
+unifyArrayElemTypes :: (ArrayDim dim) =>
                        (Uniqueness -> Uniqueness -> Maybe Uniqueness)
-                    -> ArrayElemTypeBase dim als
-                    -> ArrayElemTypeBase dim als
-                    -> Maybe (ArrayElemTypeBase dim als)
-unifyArrayElemTypes _ (ArrayPrimElem bt1 als1) (ArrayPrimElem bt2 als2)
+                    -> ArrayElemTypeBase dim
+                    -> ArrayElemTypeBase dim
+                    -> Maybe (ArrayElemTypeBase dim)
+unifyArrayElemTypes _ (ArrayPrimElem bt1) (ArrayPrimElem bt2)
   | bt1 == bt2 =
-      Just $ ArrayPrimElem bt1 (als1 <> als2)
-unifyArrayElemTypes _ (ArrayPolyElem bt1 targs1 als1) (ArrayPolyElem bt2 targs2 als2)
+      Just $ ArrayPrimElem bt1
+unifyArrayElemTypes _ (ArrayPolyElem bt1 targs1) (ArrayPolyElem bt2 targs2)
   | bt1 == bt2, targs1 == targs2 =
-      Just $ ArrayPolyElem bt1 targs1 (als1 <> als2)
+      Just $ ArrayPolyElem bt1 targs1
 unifyArrayElemTypes uf (ArrayRecordElem et1) (ArrayRecordElem et2)
   | sort (M.keys et1) == sort (M.keys et2) =
     ArrayRecordElem <$>
     traverse (uncurry $ unifyRecordArrayElemTypes uf) (M.intersectionWith (,) et1 et2)
-unifyArrayElemTypes _ (ArrayEnumElem cs1 als1) (ArrayEnumElem cs2 als2)
+unifyArrayElemTypes _ (ArrayEnumElem cs1) (ArrayEnumElem cs2)
   | cs1 == cs2 =
-     Just $ ArrayEnumElem cs1 (als1 <> als2)
+     Just $ ArrayEnumElem cs1
 unifyArrayElemTypes _ _ _ =
   Nothing
 
-unifyRecordArrayElemTypes :: (Monoid als, Eq als, ArrayDim dim) =>
+unifyRecordArrayElemTypes :: (ArrayDim dim) =>
                              (Uniqueness -> Uniqueness -> Maybe Uniqueness)
-                          -> RecordArrayElemTypeBase dim als
-                          -> RecordArrayElemTypeBase dim als
-                          -> Maybe (RecordArrayElemTypeBase dim als)
+                          -> RecordArrayElemTypeBase dim
+                          -> RecordArrayElemTypeBase dim
+                          -> Maybe (RecordArrayElemTypeBase dim)
 unifyRecordArrayElemTypes uf (RecordArrayElem et1) (RecordArrayElem et2) =
   RecordArrayElem <$> unifyArrayElemTypes uf et1 et2
 unifyRecordArrayElemTypes uf (RecordArrayArrayElem et1 shape1 u1) (RecordArrayArrayElem et2 shape2 u2) =
@@ -325,8 +326,8 @@ type TypeSubs = M.Map VName TypeSub
 
 substituteTypes :: TypeSubs -> StructType -> StructType
 substituteTypes substs ot = case ot of
-  Array at shape u ->
-    fromMaybe nope $ arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
+  Array als at shape u ->
+    fromMaybe nope $ arrayOfWithAliases (substituteTypesInArrayElem at) als (substituteInShape shape) u
   Prim t -> Prim t
   TypeVar () u v targs
     | Just (TypeSub (TypeAbbr _ ps t)) <-
@@ -341,9 +342,9 @@ substituteTypes substs ot = case ot of
   Enum cs -> Enum cs
   where nope = error "substituteTypes: Cannot create array after substitution."
 
-        substituteTypesInArrayElem (ArrayPrimElem t ()) =
+        substituteTypesInArrayElem (ArrayPrimElem t) =
           Prim t
-        substituteTypesInArrayElem (ArrayPolyElem v targs ())
+        substituteTypesInArrayElem (ArrayPolyElem v targs)
           | Just (TypeSub (TypeAbbr _ ps t)) <-
               M.lookup (qualLeaf (qualNameFromTypeName v)) substs =
               applyType ps t (map substituteInTypeArg targs)
@@ -351,9 +352,8 @@ substituteTypes substs ot = case ot of
               TypeVar () Nonunique v (map substituteInTypeArg targs)
         substituteTypesInArrayElem (ArrayRecordElem ts) =
           Record ts'
-          where ts' = fmap (substituteTypes substs .
-                            fst . recordArrayElemToType) ts
-        substituteTypesInArrayElem (ArrayEnumElem cs ()) =
+          where ts' = fmap (substituteTypes substs . recordArrayElemToType) ts
+        substituteTypesInArrayElem (ArrayEnumElem cs) =
           Enum cs
 
         substituteInTypeArg (TypeArgDim d loc) =
@@ -422,8 +422,9 @@ substTypesAny :: (ArrayDim dim, Monoid as) =>
               -> TypeBase dim as -> TypeBase dim as
 substTypesAny lookupSubst ot = case ot of
   Prim t -> Prim t
-  Array et shape u -> fromMaybe nope $
-                      uncurry arrayOfWithAliases (subsArrayElem et) shape u
+  Array als et shape u ->
+    fromMaybe nope $
+    arrayOfWithAliases (subsArrayElem et) als shape u
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
   TypeVar als u v targs ->
@@ -438,18 +439,18 @@ substTypesAny lookupSubst ot = case ot of
 
   where nope = error "substTypesAny: Cannot create array after substitution."
 
-        subsArrayElem (ArrayPrimElem t as) = (Prim t, as)
-        subsArrayElem (ArrayPolyElem v targs as) =
+        subsArrayElem (ArrayPrimElem t) = Prim t
+        subsArrayElem (ArrayPolyElem v targs) =
           case lookupSubst $ qualLeaf $ qualNameFromTypeName v of
-            Just (Subst t) -> (t, as)
+            Just (Subst t) -> t
             -- It is intentional that we do not handle PrimSubst
             -- specially here, as we are inside an array, and that
             -- gives the aliasing.
-            _ -> (TypeVar as Nonunique v (map subsTypeArg targs), as)
+            _ -> TypeVar mempty Nonunique v $
+                 map (subsTypeArg . bimap id (const mempty)) targs
         subsArrayElem (ArrayRecordElem ts) =
-          let ts' = fmap recordArrayElemToType ts
-          in (Record $ fmap (substTypesAny lookupSubst . fst) ts', foldMap snd ts')
-        subsArrayElem (ArrayEnumElem cs as) = (Enum cs, as)
+          Record $ substTypesAny lookupSubst . recordArrayElemToType <$> ts
+        subsArrayElem (ArrayEnumElem cs) = Enum cs
 
         subsTypeArg (TypeArgType t loc) =
           TypeArgType (substTypesAny lookupSubst t) loc

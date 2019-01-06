@@ -396,7 +396,7 @@ typeHtml t = case t of
     targs' <- mapM typeArgHtml targs
     et' <- typeNameHtml et
     return $ prettyU u <> et' <> joinBy " " targs'
-  Array et shape u -> do
+  Array _ et shape u -> do
     shape' <- prettyShapeDecl shape
     et' <- prettyElem et
     return $ prettyU u <> shape' <> et'
@@ -410,9 +410,9 @@ typeHtml t = case t of
         t1' <> " -> " <> t2'
   Enum cs -> return $ prettyEnum cs
 
-prettyElem :: ArrayElemTypeBase (DimDecl VName) () -> DocM Html
-prettyElem (ArrayPrimElem et _) = return $ primTypeHtml et
-prettyElem (ArrayPolyElem et targs _) = do
+prettyElem :: ArrayElemTypeBase (DimDecl VName) -> DocM Html
+prettyElem (ArrayPrimElem et) = return $ primTypeHtml et
+prettyElem (ArrayPolyElem et targs) = do
   targs' <- mapM typeArgHtml targs
   return $ prettyTypeName et <> joinBy " " targs'
 prettyElem (ArrayRecordElem fs)
@@ -423,12 +423,12 @@ prettyElem (ArrayRecordElem fs)
   where ppField (name, tp) = do
           tp' <- prettyRecordElem tp
           return $ toHtml (nameToString name) <> ": " <> tp'
-prettyElem (ArrayEnumElem cs _ ) = return $ braces $ prettyEnum cs
+prettyElem (ArrayEnumElem cs) = return $ braces $ prettyEnum cs
 
-prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) () -> DocM Html
+prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) -> DocM Html
 prettyRecordElem (RecordArrayElem et) = prettyElem et
 prettyRecordElem (RecordArrayArrayElem et shape u) =
-  typeHtml $ Array et shape u
+  typeHtml $ Array () et shape u
 
 prettyShapeDecl :: ShapeDecl (DimDecl VName) -> DocM Html
 prettyShapeDecl (ShapeDecl ds) =

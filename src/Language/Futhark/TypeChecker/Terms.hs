@@ -389,8 +389,8 @@ newArrayType :: SrcLoc -> String -> Int -> TermTypeM (TypeBase () (), TypeBase (
 newArrayType loc desc r = do
   v <- newID $ nameFromString desc
   modifyConstraints $ M.insert v $ NoConstraint Nothing loc
-  return (Array (ArrayPolyElem (typeName v) [] ())
-                (ShapeDecl $ replicate r ()) Nonunique,
+  return (Array ()
+          (ArrayPolyElem (typeName v) []) (ShapeDecl $ replicate r ()) Nonunique,
           TypeVar () Nonunique (typeName v) [])
 
 --- Errors
@@ -438,17 +438,17 @@ unifyExpTypes e1 e2 = do
 unifyTypeAliases :: CompType -> CompType -> CompType
 unifyTypeAliases t1 t2 =
   case (t1, t2) of
-    (Array et1 shape1 u1, Array et2 _ u2) ->
-      Array (unifyArrayElems et1 et2) shape1 $ min u1 u2
+    (Array als1 et1 shape1 u1, Array als2 et2 _ u2) ->
+      Array (als1<>als2) (unifyArrayElems et1 et2) shape1 $ min u1 u2
     (Record f1, Record f2) ->
       Record $ M.intersectionWith unifyTypeAliases f1 f2
     (TypeVar als1 u v targs1, TypeVar als2 _ _ targs2) ->
       TypeVar (als1 <> als2) u v $ zipWith unifyTypeArg targs1 targs2
     _ -> t1
-  where unifyArrayElems (ArrayPrimElem pt1 als1) (ArrayPrimElem _ als2) =
-          ArrayPrimElem pt1 $ als1 <> als2
-        unifyArrayElems (ArrayPolyElem v targs1 als1) (ArrayPolyElem _ targs2 als2) =
-          ArrayPolyElem v (zipWith unifyTypeArg targs1 targs2) $ als1 <> als2
+  where unifyArrayElems (ArrayPrimElem pt1) (ArrayPrimElem _) =
+          ArrayPrimElem pt1
+        unifyArrayElems (ArrayPolyElem v targs1) (ArrayPolyElem _ _targs2) =
+          ArrayPolyElem v targs1
         unifyArrayElems (ArrayRecordElem fields1) (ArrayRecordElem fields2) =
           ArrayRecordElem $ M.intersectionWith unifyRecordArray fields1 fields2
         unifyArrayElems x _ = x
@@ -1039,24 +1039,25 @@ checkExp (Zip i e es NoInfo loc) = do
   e' <- checkInput e
   es' <- mapM checkInput es
 
-  ts <- forM (e':es') $ \arr_e -> do
-    arr_e_t <- expType arr_e
-    case typeToRecordArrayElem' (aliases arr_e_t) =<< peelArray (i+1) arr_e_t of
+  e_ts <- mapM expType $ e':es'
+  ts <- forM (zip (e':es') e_ts) $ \(arr_e, arr_e_t) ->
+    case typeToRecordArrayElem =<< peelArray (i+1) arr_e_t of
       Just t -> return t
       Nothing -> typeError (srclocOf arr_e) $
                  "Expected array with at least " ++ show (1+i) ++
                  " dimensions, but got " ++ pretty arr_e_t ++ "."
 
   let u = mconcat $ map (uniqueness . typeOf) $ e':es'
-      t = Array (ArrayRecordElem $ M.fromList $ zip tupleFieldNames ts)
-                (rank (1+i)) u
+      t = Array (mconcat $ map aliases e_ts)
+          (ArrayRecordElem $ M.fromList $ zip tupleFieldNames ts)
+          (rank (1+i)) u
   return $ Zip i e' es' (Info t) loc
 
 checkExp (Unzip e _ loc) = do
   e' <- checkExp e
   e_t <- expType e'
   case e_t of
-    Array (ArrayRecordElem fs) shape u
+    Array _ (ArrayRecordElem fs) shape u
       | Just ets <- map (componentType shape u) <$> areTupleFields fs ->
           return $ Unzip e' (map Info ets) loc
     t ->
@@ -1066,9 +1067,9 @@ checkExp (Unzip e _ loc) = do
   where componentType shape u et =
           case et of
             RecordArrayElem et' ->
-              Array et' shape u
+              Array mempty et' shape u
             RecordArrayArrayElem et' et_shape et_u ->
-              Array et' (shape <> et_shape) (u `max` et_u)
+              Array mempty et' (shape <> et_shape) (u `max` et_u)
 
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc
@@ -1529,12 +1530,12 @@ checkApply loc ftype arg =
 consumeArg :: SrcLoc -> CompType -> Diet -> TermTypeM [Occurence]
 consumeArg loc (Record ets) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
-consumeArg loc (Array _ _ Nonunique) Consume =
+consumeArg loc (Array _ _ _ Nonunique) Consume =
   typeError loc "Consuming parameter passed non-unique argument."
 consumeArg loc (Arrow _ _ t1 _) (FuncDiet d _)
   | not $ contravariantArg t1 d =
       typeError loc "Non-consuming higher-order parameter passed consuming argument."
-  where contravariantArg (Array _ _ Unique) Observe =
+  where contravariantArg (Array _ _ _ Unique) Observe =
           False
         contravariantArg (TypeVar _ Unique _ _) Observe =
           False
