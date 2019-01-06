@@ -311,7 +311,7 @@ instance Foldable RecordArrayElemTypeBase where
 
 data ArrayElemTypeBase dim =
     ArrayPrimElem PrimType
-  | ArrayPolyElem TypeName [TypeArg dim ()]
+  | ArrayPolyElem TypeName [TypeArg dim]
   | ArrayRecordElem (M.Map Name (RecordArrayElemTypeBase dim))
   | ArrayEnumElem [Name]
   deriving (Eq, Show)
@@ -320,7 +320,7 @@ instance Traversable ArrayElemTypeBase where
   traverse _ (ArrayPrimElem t) =
     pure $ ArrayPrimElem t
   traverse f (ArrayPolyElem t args) =
-    ArrayPolyElem t <$> traverse (bitraverse f pure) args
+    ArrayPolyElem t <$> traverse (traverse f) args
   traverse f (ArrayRecordElem fs) =
     ArrayRecordElem <$> traverse (traverse f) fs
   traverse _ (ArrayEnumElem cs) =
@@ -340,7 +340,7 @@ data TypeBase dim as = Prim PrimType
                      | Enum [Name]
                      | Array as (ArrayElemTypeBase dim) (ShapeDecl dim) Uniqueness
                      | Record (M.Map Name (TypeBase dim as))
-                     | TypeVar as Uniqueness TypeName [TypeArg dim as]
+                     | TypeVar as Uniqueness TypeName [TypeArg dim]
                      | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
                      -- ^ The aliasing corresponds to the lexical
                      -- closure of the function.
@@ -361,7 +361,7 @@ instance Bitraversable TypeBase where
     Array <$> g a <*> traverse f t <*> traverse f shape <*> pure u
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar als u t args) =
-    TypeVar <$> g als <*> pure u <*> pure t <*> traverse (bitraverse f g) args
+    TypeVar <$> g als <*> pure u <*> pure t <*> traverse (traverse f) args
   bitraverse f g (Arrow als v t1 t2) =
     Arrow <$> g als <*> pure v <*> bitraverse f g t1 <*> bitraverse f g t2
   bitraverse _ _ (Enum n) = pure $ Enum n
@@ -372,19 +372,19 @@ instance Bifunctor TypeBase where
 instance Bifoldable TypeBase where
   bifoldMap = bifoldMapDefault
 
-data TypeArg dim as = TypeArgDim dim SrcLoc
-                    | TypeArgType (TypeBase dim as) SrcLoc
+data TypeArg dim = TypeArgDim dim SrcLoc
+                 | TypeArgType (TypeBase dim ()) SrcLoc
              deriving (Eq, Show)
 
-instance Bitraversable TypeArg where
-  bitraverse f _ (TypeArgDim v loc) = TypeArgDim <$> f v <*> pure loc
-  bitraverse f g (TypeArgType t loc) = TypeArgType <$> bitraverse f g t <*> pure loc
+instance Traversable TypeArg where
+  traverse f (TypeArgDim v loc) = TypeArgDim <$> f v <*> pure loc
+  traverse f (TypeArgType t loc) = TypeArgType <$> bitraverse f pure t <*> pure loc
 
-instance Bifunctor TypeArg where
-  bimap = bimapDefault
+instance Functor TypeArg where
+  fmap = fmapDefault
 
-instance Bifoldable TypeArg where
-  bifoldMap = bifoldMapDefault
+instance Foldable TypeArg where
+  foldMap = foldMapDefault
 
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.

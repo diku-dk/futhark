@@ -62,8 +62,8 @@ type Spec = SpecBase Info VName
 -- | An Futhark program with type information.
 type Prog = ProgBase Info VName
 
--- | A known type arg with shape annotations but no aliasing information.
-type StructTypeArg = TypeArg (DimDecl VName) ()
+-- | A known type arg with shape annotations.
+type StructTypeArg = TypeArg (DimDecl VName)
 
 -- | A type-checked type parameter.
 type TypeParam = TypeParamBase VName

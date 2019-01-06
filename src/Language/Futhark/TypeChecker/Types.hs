@@ -64,9 +64,9 @@ unifyTypesU _ e1@Enum{} e2@Enum{}
   | e1 == e2 = Just e1
 unifyTypesU _ _ _ = Nothing
 
-unifyTypeArgs :: (Monoid als, Eq als, ArrayDim dim) =>
+unifyTypeArgs :: (ArrayDim dim) =>
                  (Uniqueness -> Uniqueness -> Maybe Uniqueness)
-              -> TypeArg dim als -> TypeArg dim als -> Maybe (TypeArg dim als)
+              -> TypeArg dim -> TypeArg dim -> Maybe (TypeArg dim)
 unifyTypeArgs _ (TypeArgDim d1 loc) (TypeArgDim d2 _) =
   TypeArgDim <$> unifyDims d1 d2 <*> pure loc
 unifyTypeArgs uf (TypeArgType t1 loc) (TypeArgType t2 _) =
@@ -446,12 +446,12 @@ substTypesAny lookupSubst ot = case ot of
             -- It is intentional that we do not handle PrimSubst
             -- specially here, as we are inside an array, and that
             -- gives the aliasing.
-            _ -> TypeVar mempty Nonunique v $
-                 map (subsTypeArg . bimap id (const mempty)) targs
+            _ -> TypeVar mempty Nonunique v $ map subsTypeArg targs
         subsArrayElem (ArrayRecordElem ts) =
           Record $ substTypesAny lookupSubst . recordArrayElemToType <$> ts
         subsArrayElem (ArrayEnumElem cs) = Enum cs
 
         subsTypeArg (TypeArgType t loc) =
-          TypeArgType (substTypesAny lookupSubst t) loc
+          TypeArgType (substTypesAny lookupSubst' t) loc
+          where lookupSubst' = fmap (fmap $ bimap id (const ())) . lookupSubst
         subsTypeArg t = t

@@ -146,7 +146,7 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   pprPrec _ (Enum cs) =
     cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
 
-instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim as) where
+instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
   ppr (TypeArgType t _) = ppr t
 

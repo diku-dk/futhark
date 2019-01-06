@@ -434,7 +434,7 @@ prettyShapeDecl :: ShapeDecl (DimDecl VName) -> DocM Html
 prettyShapeDecl (ShapeDecl ds) =
   mconcat <$> mapM (fmap brackets . dimDeclHtml) ds
 
-typeArgHtml :: TypeArg (DimDecl VName) () -> DocM Html
+typeArgHtml :: TypeArg (DimDecl VName) -> DocM Html
 typeArgHtml (TypeArgDim d _) = brackets <$> dimDeclHtml d
 typeArgHtml (TypeArgType t _) = typeHtml t
 
