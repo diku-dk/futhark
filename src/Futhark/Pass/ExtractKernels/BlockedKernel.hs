@@ -317,10 +317,8 @@ segRed pat total_num_elements w comm reduce_lam map_lam nes arrs ispace inps = r
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
     return $ lambdaBody map_lam
 
-  let reduce_lam' = reduce_lam { lambdaParams = lambdaParams reduce_lam }
-
   letBind_ pat $ Op $
-    SegRed kspace comm reduce_lam' nes (lambdaReturnType map_lam) body
+    SegRed kspace comm reduce_lam nes (lambdaReturnType map_lam) body
 
 nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels
