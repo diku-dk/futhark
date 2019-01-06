@@ -237,7 +237,7 @@ traverseType f g h (Array als et shape u) =
   Array <$> h als <*> traverseArrayElemType f g et <*> traverse g shape <*> pure u
 traverseType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseType f g h (TypeVar als u t args) =
-  TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g h) args
+  TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
 traverseType f g h (Arrow als v t1 t2) =
   Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
 traverseType _ _ _ (Enum cs) = pure $ Enum cs
@@ -248,7 +248,7 @@ traverseArrayElemType :: Applicative f =>
 traverseArrayElemType _ _ (ArrayPrimElem t) =
   pure $ ArrayPrimElem t
 traverseArrayElemType f g (ArrayPolyElem t args) =
-  ArrayPolyElem <$> f t <*> traverse (traverseTypeArg f g pure) args
+  ArrayPolyElem <$> f t <*> traverse (traverseTypeArg f g) args
 traverseArrayElemType f g (ArrayRecordElem fs) =
   ArrayRecordElem <$> traverse (traverseRecordArrayElemType f g) fs
 traverseArrayElemType _ _ (ArrayEnumElem cs) =
@@ -264,9 +264,10 @@ traverseRecordArrayElemType f g (RecordArrayArrayElem et shape u) =
   traverse g shape <*> pure u
 
 traverseTypeArg :: Applicative f =>
-                   TypeTraverser f TypeArg dim1 als1 dim2 als2
-traverseTypeArg _ g _ (TypeArgDim d loc) = TypeArgDim <$> g d <*> pure loc
-traverseTypeArg f g h (TypeArgType t loc) = TypeArgType <$> traverseType f g h t <*> pure loc
+                   (TypeName -> f TypeName) -> (dim1 -> f dim2)
+                -> TypeArg dim1 -> f (TypeArg dim2)
+traverseTypeArg _ g (TypeArgDim d loc) = TypeArgDim <$> g d <*> pure loc
+traverseTypeArg f g (TypeArgType t loc) = TypeArgType <$> traverseType f g pure t <*> pure loc
 
 instance ASTMappable (TypeBase () ()) where
   astMap tv = traverseType f pure pure

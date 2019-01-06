@@ -459,8 +459,8 @@ unifyTypeAliases t1 t2 =
           RecordArrayArrayElem (unifyArrayElems at1 at2) shape1 $ min u1 u2
         unifyRecordArray x _ = x
 
-        unifyTypeArg (TypeArgType t1' loc) (TypeArgType t2' _) =
-          TypeArgType (unifyTypeAliases t1' t2') loc
+        unifyTypeArg (TypeArgType t1' loc) (TypeArgType _ _) =
+          TypeArgType t1' loc
         unifyTypeArg a _ = a
 
 --- General binding.

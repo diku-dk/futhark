@@ -246,13 +246,12 @@ peelArray n (Array _ (ArrayPrimElem et) shape _)
     Just $ Prim et
 peelArray n (Array als (ArrayPolyElem et targs) shape u)
   | shapeRank shape == n =
-    Just $ TypeVar als u et $ map (bimap id (const als)) targs
+    Just $ TypeVar als u et targs
 peelArray n (Array als (ArrayRecordElem ts) shape u)
   | shapeRank shape == n =
     Just $ Record $ fmap asType ts
   where asType (RecordArrayElem (ArrayPrimElem bt)) = Prim bt
-        asType (RecordArrayElem (ArrayPolyElem bt targs)) =
-          TypeVar als u bt $ map (bimap id (const als)) targs
+        asType (RecordArrayElem (ArrayPolyElem bt targs)) = TypeVar als u bt targs
         asType (RecordArrayElem (ArrayRecordElem ts')) = Record $ fmap asType ts'
         asType (RecordArrayElem (ArrayEnumElem cs)) = Enum cs
         asType (RecordArrayArrayElem et e_shape _) = Array als et e_shape u
@@ -295,8 +294,7 @@ arrayOfWithAliases (Array as1 et shape1 _) as2 shape2 u =
 arrayOfWithAliases (Prim et) as shape u =
   Just $ Array as (ArrayPrimElem et) shape u
 arrayOfWithAliases (TypeVar _ _ x targs) as shape u =
-  Just $ Array as (ArrayPolyElem x targs') shape u
-  where targs' = map (bimap id (const ())) targs
+  Just $ Array as (ArrayPolyElem x targs) shape u
 arrayOfWithAliases (Record ts) as shape u = do
   ts' <- traverse typeToRecordArrayElem ts
   return $ Array as (ArrayRecordElem ts') shape u
@@ -309,7 +307,7 @@ typeToRecordArrayElem :: Monoid as =>
 typeToRecordArrayElem (Prim bt) =
   Just $ RecordArrayElem $ ArrayPrimElem bt
 typeToRecordArrayElem (TypeVar _ _ bt targs) =
-  Just $ RecordArrayElem $ ArrayPolyElem bt $ map (bimap id (const ())) targs
+  Just $ RecordArrayElem $ ArrayPolyElem bt targs
 typeToRecordArrayElem (Record ts') =
   RecordArrayElem . ArrayRecordElem <$>
   traverse typeToRecordArrayElem ts'
@@ -327,7 +325,7 @@ recordArrayElemToType (RecordArrayArrayElem et shape u) = Array mempty et shape 
 
 arrayElemToType :: Monoid as => ArrayElemTypeBase dim -> TypeBase dim as
 arrayElemToType (ArrayPolyElem bt targs) =
-  TypeVar mempty Nonunique bt $ map (bimap id (const mempty)) targs
+  TypeVar mempty Nonunique bt targs
 arrayElemToType (ArrayRecordElem ts) =
   Record $ fmap recordArrayElemToType ts
 arrayElemToType (ArrayPrimElem bt) = Prim bt
@@ -555,7 +553,7 @@ returnType (Record fs) ds args =
   Record $ fmap (\et -> returnType et ds args) fs
 returnType (Prim t) _ _ = Prim t
 returnType (TypeVar () Unique t targs) _ _ =
-  TypeVar mempty Unique t $ map (bimap id (const mempty)) targs
+  TypeVar mempty Unique t targs
 returnType (TypeVar () Nonunique t targs) ds args =
   TypeVar als Nonunique t $ map (\arg -> typeArgReturnType arg ds args) targs
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
@@ -564,12 +562,12 @@ returnType (Arrow _ v t1 t2) ds args =
   where als = foldMap aliases $ zipWith maskAliases args ds
 returnType (Enum cs) _ _ = Enum cs
 
-typeArgReturnType :: TypeArg shape () -> [Diet] -> [CompType]
-                  -> TypeArg shape Names
+typeArgReturnType :: TypeArg shape -> [Diet] -> [CompType]
+                  -> TypeArg shape
 typeArgReturnType (TypeArgDim v loc) _ _ =
   TypeArgDim v loc
 typeArgReturnType (TypeArgType t loc) ds args =
-  TypeArgType (returnType t ds args) loc
+  TypeArgType (returnType t ds args `setAliases` ()) loc
 
 arrayElemReturnType :: ArrayElemTypeBase dim
                     -> [Diet]
@@ -578,7 +576,7 @@ arrayElemReturnType :: ArrayElemTypeBase dim
 arrayElemReturnType (ArrayPrimElem bt) _ _ =
   ArrayPrimElem bt
 arrayElemReturnType (ArrayPolyElem bt targs) ds args =
-  ArrayPolyElem bt $ map (\arg -> bimap id (const ()) $ typeArgReturnType arg ds args) targs
+  ArrayPolyElem bt $ map (\arg -> typeArgReturnType arg ds args) targs
 arrayElemReturnType (ArrayRecordElem et) ds args =
   ArrayRecordElem $ fmap (\t -> recordArrayElemReturnType t ds args) et
 arrayElemReturnType (ArrayEnumElem cs) _ _ =
