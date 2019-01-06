@@ -883,28 +883,28 @@ patternVars = mconcat . map ident . S.toList . patIdentSet
 -- argument is the orignal type and the second is the type of the transformed
 -- expression. This is necessary since the original type may contain additional
 -- information (e.g., shape restrictions) from the user given annotation.
-combineTypeShapes :: ArrayDim dim =>
+combineTypeShapes :: (Monoid as, ArrayDim dim) =>
                      TypeBase dim as -> TypeBase dim as -> TypeBase dim as
 combineTypeShapes (Record ts1) (Record ts2)
   | M.keys ts1 == M.keys ts2 =
   Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
-combineTypeShapes (Array et1 shape1 u1) (Array et2 shape2 _u2)
+combineTypeShapes (Array als1 et1 shape1 u1) (Array als2 et2 shape2 _u2)
   | Just new_shape <- unifyShapes shape1 shape2 =
-      Array (combineElemTypeInfo et1 et2) new_shape u1
+      Array (als1<>als2) (combineElemTypeInfo et1 et2) new_shape u1
 combineTypeShapes _ new_tp = new_tp
 
 combineElemTypeInfo :: ArrayDim dim =>
-                       ArrayElemTypeBase dim as
-                    -> ArrayElemTypeBase dim as -> ArrayElemTypeBase dim as
+                       ArrayElemTypeBase dim
+                    -> ArrayElemTypeBase dim -> ArrayElemTypeBase dim
 combineElemTypeInfo (ArrayRecordElem et1) (ArrayRecordElem et2) =
   ArrayRecordElem $ M.map (uncurry combineRecordArrayTypeInfo)
                           (M.intersectionWith (,) et1 et2)
 combineElemTypeInfo _ new_tp = new_tp
 
 combineRecordArrayTypeInfo :: ArrayDim dim =>
-                              RecordArrayElemTypeBase dim as
-                           -> RecordArrayElemTypeBase dim as
-                           -> RecordArrayElemTypeBase dim as
+                              RecordArrayElemTypeBase dim
+                           -> RecordArrayElemTypeBase dim
+                           -> RecordArrayElemTypeBase dim
 combineRecordArrayTypeInfo (RecordArrayElem et1) (RecordArrayElem et2) =
   RecordArrayElem $ combineElemTypeInfo et1 et2
 combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1 u1)

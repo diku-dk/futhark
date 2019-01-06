@@ -121,7 +121,7 @@ class (Show vn,
        Show (f (Names, StructType)),
        Show (f ([TypeBase () ()], PatternType)),
        Show (f (M.Map VName VName)),
-       Show (f [RecordArrayElemTypeBase () Names]),
+       Show (f [RecordArrayElemTypeBase ()]),
        Show (f Uniqueness),
        Show (f ([CompType], CompType))) => Showable f vn where
 
@@ -293,44 +293,44 @@ qualNameFromTypeName :: TypeName -> QualName VName
 qualNameFromTypeName (TypeName qs x) = QualName qs x
 
 -- | Types that can be elements of tuple-arrays.
-data RecordArrayElemTypeBase dim as =
-    RecordArrayElem (ArrayElemTypeBase dim as)
-  | RecordArrayArrayElem (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
+data RecordArrayElemTypeBase dim =
+    RecordArrayElem (ArrayElemTypeBase dim)
+  | RecordArrayArrayElem (ArrayElemTypeBase dim) (ShapeDecl dim) Uniqueness
   deriving (Eq, Show)
 
-instance Bitraversable RecordArrayElemTypeBase where
-  bitraverse f g (RecordArrayElem t) = RecordArrayElem <$> bitraverse f g t
-  bitraverse f g (RecordArrayArrayElem a shape u) =
-    RecordArrayArrayElem <$> bitraverse f g a <*> traverse f shape <*> pure u
+instance Traversable RecordArrayElemTypeBase where
+  traverse f (RecordArrayElem t) = RecordArrayElem <$> traverse f t
+  traverse f (RecordArrayArrayElem a shape u) =
+    RecordArrayArrayElem <$> traverse f a <*> traverse f shape <*> pure u
 
-instance Bifunctor RecordArrayElemTypeBase where
-  bimap = bimapDefault
+instance Functor RecordArrayElemTypeBase where
+  fmap = fmapDefault
 
-instance Bifoldable RecordArrayElemTypeBase where
-  bifoldMap = bifoldMapDefault
+instance Foldable RecordArrayElemTypeBase where
+  foldMap = foldMapDefault
 
-data ArrayElemTypeBase dim as =
-    ArrayPrimElem PrimType as
-  | ArrayPolyElem TypeName [TypeArg dim as] as
-  | ArrayRecordElem (M.Map Name (RecordArrayElemTypeBase dim as))
-  | ArrayEnumElem [Name] as
+data ArrayElemTypeBase dim =
+    ArrayPrimElem PrimType
+  | ArrayPolyElem TypeName [TypeArg dim ()]
+  | ArrayRecordElem (M.Map Name (RecordArrayElemTypeBase dim))
+  | ArrayEnumElem [Name]
   deriving (Eq, Show)
 
-instance Bitraversable ArrayElemTypeBase where
-  bitraverse _ g (ArrayPrimElem t as) =
-    ArrayPrimElem t <$> g as
-  bitraverse f g (ArrayPolyElem t args as) =
-    ArrayPolyElem t <$> traverse (bitraverse f g) args <*> g as
-  bitraverse f g (ArrayRecordElem fs) =
-    ArrayRecordElem <$> traverse (bitraverse f g) fs
-  bitraverse _ g (ArrayEnumElem cs as) =
-    ArrayEnumElem cs <$> g as
+instance Traversable ArrayElemTypeBase where
+  traverse _ (ArrayPrimElem t) =
+    pure $ ArrayPrimElem t
+  traverse f (ArrayPolyElem t args) =
+    ArrayPolyElem t <$> traverse (bitraverse f pure) args
+  traverse f (ArrayRecordElem fs) =
+    ArrayRecordElem <$> traverse (traverse f) fs
+  traverse _ (ArrayEnumElem cs) =
+    pure $ ArrayEnumElem cs
 
-instance Bifunctor ArrayElemTypeBase where
-  bimap = bimapDefault
+instance Functor ArrayElemTypeBase where
+  fmap = fmapDefault
 
-instance Bifoldable ArrayElemTypeBase where
-  bifoldMap = bifoldMapDefault
+instance Foldable ArrayElemTypeBase where
+  foldMap = foldMapDefault
 
 -- | An expanded Futhark type is either an array, a prim type, a
 -- tuple, or a type variable.  When comparing types for equality with
@@ -338,7 +338,7 @@ instance Bifoldable ArrayElemTypeBase where
 -- parameter names are ignored.
 data TypeBase dim as = Prim PrimType
                      | Enum [Name]
-                     | Array (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
+                     | Array as (ArrayElemTypeBase dim) (ShapeDecl dim) Uniqueness
                      | Record (M.Map Name (TypeBase dim as))
                      | TypeVar as Uniqueness TypeName [TypeArg dim as]
                      | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
@@ -348,7 +348,7 @@ data TypeBase dim as = Prim PrimType
 
 instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
   Prim x1 == Prim y1 = x1 == y1
-  Array x1 y1 z1 == Array x2 y2 z2 = x1 == x2 && y1 == y2 && z1 == z2
+  Array x1 y1 z1 v1 == Array x2 y2 z2 v2 = x1 == x2 && y1 == y2 && z1 == z2 && v1 == v2
   Record x1 == Record x2 = x1 == x2
   TypeVar _ u1 x1 y1 == TypeVar _ u2 x2 y2 = u1 == u2 && x1 == x2 && y1 == y2
   Arrow _ _ x1 y1 == Arrow _ _ x2 y2 = x1 == x2 && y1 == y2
@@ -357,8 +357,8 @@ instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
 
 instance Bitraversable TypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
-  bitraverse f g (Array a shape u) =
-    Array <$> bitraverse f g a <*> traverse f shape <*> pure u
+  bitraverse f g (Array a t shape u) =
+    Array <$> g a <*> traverse f t <*> traverse f shape <*> pure u
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar als u t args) =
     TypeVar <$> g als <*> pure u <*> pure t <*> traverse (bitraverse f g) args

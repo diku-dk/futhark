@@ -337,7 +337,7 @@ matchValueToType :: Env -> M.Map VName (Maybe T.BoundV, Value)
                  -> Either String (M.Map VName (Maybe T.BoundV, Value))
 
 -- Empty arrays always match.
-matchValueToType env m t@(Array _ (ShapeDecl ds@(d:_)) _) val@(ValueArray arr)
+matchValueToType env m t@(Array _ _ (ShapeDecl ds@(d:_)) _) val@(ValueArray arr)
   | any zeroDim ds, emptyShape (valueShape val) =
       Right $ m <> mconcat (map namedAreZero ds)
 
@@ -499,7 +499,7 @@ evalType _ (Prim pt) = return $ Prim pt
 evalType env (Record fs) = Record <$> traverse (evalType env) fs
 evalType env (Arrow () p t1 t2) =
   Arrow () p <$> evalType env t1 <*> evalType env t2
-evalType env t@(Array _ shape u) = do
+evalType env t@(Array _ _ shape u) = do
   let et = stripArray (shapeRank shape) t
   et' <- evalType env et
   shape' <- traverse evalDim shape
