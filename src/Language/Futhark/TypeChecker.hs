@@ -867,20 +867,20 @@ newNamesForMTy orig_mty = do
           Record $ fmap substituteInType ts
         substituteInType (Enum cs) =
           Enum cs
-        substituteInType (Array () (ArrayPrimElem t) shape u) =
-          Array () (ArrayPrimElem t) (substituteInShape shape) u
-        substituteInType (Array () (ArrayPolyElem (TypeName qs v) targs) shape u) =
-          Array () (ArrayPolyElem
-                    (TypeName (map substitute qs) $ substitute v)
-                    (map substituteInTypeArg targs))
-                   (substituteInShape shape) u
-        substituteInType (Array () (ArrayRecordElem ts) shape u) =
+        substituteInType (Array () u (ArrayPrimElem t) shape) =
+          Array () u (ArrayPrimElem t) (substituteInShape shape)
+        substituteInType (Array () u (ArrayPolyElem (TypeName qs v) targs) shape) =
+          Array () u (ArrayPolyElem
+                      (TypeName (map substitute qs) $ substitute v)
+                      (map substituteInTypeArg targs))
+                     (substituteInShape shape)
+        substituteInType (Array () u (ArrayRecordElem ts) shape) =
           let ts' = fmap (substituteInType . recordArrayElemToType) ts
           in case arrayOf (Record ts') (substituteInShape shape) u of
             Just t' -> t'
             _ -> error "substituteInType: Cannot create array after substitution."
-        substituteInType (Array () (ArrayEnumElem cs) shape u) =
-          Array () (ArrayEnumElem cs) (substituteInShape shape) u
+        substituteInType (Array () u (ArrayEnumElem cs) shape) =
+          Array () u (ArrayEnumElem cs) (substituteInShape shape)
         substituteInType (Arrow als v t1 t2) =
           Arrow als v (substituteInType t1) (substituteInType t2)
 
