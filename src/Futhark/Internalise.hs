@@ -168,11 +168,11 @@ entryPoint params (retdecl, eret, crets) =
                        -> [EntryPointType]
         entryPointType (_, E.Prim E.Unsigned{}, _) =
           [I.TypeUnsigned]
-        entryPointType (_, E.Array _ (ArrayPrimElem Unsigned{}) _ _, _) =
+        entryPointType (_, E.Array _ _ (ArrayPrimElem Unsigned{}) _, _) =
           [I.TypeUnsigned]
         entryPointType (_, E.Prim{}, _) =
           [I.TypeDirect]
-        entryPointType (_, E.Array _ ArrayPrimElem{} _ _, _) =
+        entryPointType (_, E.Array _ _ ArrayPrimElem{} _, _) =
           [I.TypeDirect]
         entryPointType (te, t, ts) =
           [I.TypeOpaque desc $ length ts]

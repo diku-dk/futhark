@@ -233,8 +233,8 @@ type TypeTraverser f t dim1 als1 dim2 als2 =
 traverseType :: Applicative f =>
                 TypeTraverser f TypeBase dim1 als1 dims als2
 traverseType _ _ _ (Prim t) = pure $ Prim t
-traverseType f g h (Array als et shape u) =
-  Array <$> h als <*> traverseArrayElemType f g et <*> traverse g shape <*> pure u
+traverseType f g h (Array als u et shape) =
+  Array <$> h als <*> pure u <*> traverseArrayElemType f g et <*> traverse g shape
 traverseType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseType f g h (TypeVar als u t args) =
   TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args

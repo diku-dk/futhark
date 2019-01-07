@@ -887,10 +887,10 @@ combineTypeShapes :: (Monoid as, ArrayDim dim) =>
                      TypeBase dim as -> TypeBase dim as -> TypeBase dim as
 combineTypeShapes (Record ts1) (Record ts2)
   | M.keys ts1 == M.keys ts2 =
-  Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
-combineTypeShapes (Array als1 et1 shape1 u1) (Array als2 et2 shape2 _u2)
+      Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
+combineTypeShapes (Array als1 u1 et1 shape1) (Array als2 _u2 et2 shape2)
   | Just new_shape <- unifyShapes shape1 shape2 =
-      Array (als1<>als2) (combineElemTypeInfo et1 et2) new_shape u1
+      Array (als1<>als2) u1 (combineElemTypeInfo et1 et2) new_shape
 combineTypeShapes _ new_tp = new_tp
 
 combineElemTypeInfo :: ArrayDim dim =>

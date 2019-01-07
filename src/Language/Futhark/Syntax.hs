@@ -338,7 +338,7 @@ instance Foldable ArrayElemTypeBase where
 -- parameter names are ignored.
 data TypeBase dim as = Prim PrimType
                      | Enum [Name]
-                     | Array as (ArrayElemTypeBase dim) (ShapeDecl dim) Uniqueness
+                     | Array as Uniqueness (ArrayElemTypeBase dim) (ShapeDecl dim)
                      | Record (M.Map Name (TypeBase dim as))
                      | TypeVar as Uniqueness TypeName [TypeArg dim]
                      | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
@@ -357,8 +357,8 @@ instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
 
 instance Bitraversable TypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
-  bitraverse f g (Array a t shape u) =
-    Array <$> g a <*> traverse f t <*> traverse f shape <*> pure u
+  bitraverse f g (Array a u t shape) =
+    Array <$> g a <*> pure u <*> traverse f t <*> traverse f shape
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar als u t args) =
     TypeVar <$> g als <*> pure u <*> pure t <*> traverse (traverse f) args

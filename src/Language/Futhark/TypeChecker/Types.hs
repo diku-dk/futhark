@@ -50,9 +50,9 @@ unifyTypesU uf (TypeVar als1 u1 t1 targs1) (TypeVar als2 u2 t2 targs2)
       targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
       Just $ TypeVar (als1 <> als2) u3 t1 targs3
   | otherwise = Nothing
-unifyTypesU uf (Array als1 et1 shape1 u1) (Array als2 et2 shape2 u2) =
-  Array (als1 <> als2) <$> unifyArrayElemTypes uf et1 et2 <*>
-  unifyShapes shape1 shape2 <*> uf u1 u2
+unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 shape2) =
+  Array (als1 <> als2) <$> uf u1 u2
+  <*> unifyArrayElemTypes uf et1 et2 <*> unifyShapes shape1 shape2
 unifyTypesU uf (Record ts1) (Record ts2)
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
@@ -326,7 +326,7 @@ type TypeSubs = M.Map VName TypeSub
 
 substituteTypes :: TypeSubs -> StructType -> StructType
 substituteTypes substs ot = case ot of
-  Array als at shape u ->
+  Array als u at shape ->
     fromMaybe nope $ arrayOfWithAliases (substituteTypesInArrayElem at) als (substituteInShape shape) u
   Prim t -> Prim t
   TypeVar () u v targs
@@ -422,7 +422,7 @@ substTypesAny :: (ArrayDim dim, Monoid as) =>
               -> TypeBase dim as -> TypeBase dim as
 substTypesAny lookupSubst ot = case ot of
   Prim t -> Prim t
-  Array als et shape u ->
+  Array als u et shape ->
     fromMaybe nope $
     arrayOfWithAliases (subsArrayElem et) als shape u
   -- We only substitute for a type variable with no arguments, since
