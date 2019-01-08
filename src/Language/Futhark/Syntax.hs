@@ -295,13 +295,13 @@ qualNameFromTypeName (TypeName qs x) = QualName qs x
 -- | Types that can be elements of tuple-arrays.
 data RecordArrayElemTypeBase dim =
     RecordArrayElem (ArrayElemTypeBase dim)
-  | RecordArrayArrayElem (ArrayElemTypeBase dim) (ShapeDecl dim) Uniqueness
+  | RecordArrayArrayElem (ArrayElemTypeBase dim) (ShapeDecl dim)
   deriving (Eq, Show)
 
 instance Traversable RecordArrayElemTypeBase where
   traverse f (RecordArrayElem t) = RecordArrayElem <$> traverse f t
-  traverse f (RecordArrayArrayElem a shape u) =
-    RecordArrayArrayElem <$> traverse f a <*> traverse f shape <*> pure u
+  traverse f (RecordArrayArrayElem a shape) =
+    RecordArrayArrayElem <$> traverse f a <*> traverse f shape
 
 instance Functor RecordArrayElemTypeBase where
   fmap = fmapDefault

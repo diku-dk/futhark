@@ -259,9 +259,8 @@ traverseRecordArrayElemType :: Applicative f =>
                             -> RecordArrayElemTypeBase dim1 -> f (RecordArrayElemTypeBase dim2)
 traverseRecordArrayElemType f g (RecordArrayElem et) =
   RecordArrayElem <$> traverseArrayElemType f g et
-traverseRecordArrayElemType f g (RecordArrayArrayElem et shape u) =
-  RecordArrayArrayElem <$> traverseArrayElemType f g et <*>
-  traverse g shape <*> pure u
+traverseRecordArrayElemType f g (RecordArrayArrayElem et shape) =
+  RecordArrayArrayElem <$> traverseArrayElemType f g et <*> traverse g shape
 
 traverseTypeArg :: Applicative f =>
                    (TypeName -> f TypeName) -> (dim1 -> f dim2)

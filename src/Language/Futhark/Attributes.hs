@@ -145,7 +145,7 @@ nestedDims t =
           fold (fmap recordArrayElemNestedDims ts)
         arrayNestedDims ArrayEnumElem{} = mempty
 
-        recordArrayElemNestedDims (RecordArrayArrayElem a ds _) =
+        recordArrayElemNestedDims (RecordArrayArrayElem a ds) =
           arrayNestedDims a <> shapeDims ds
         recordArrayElemNestedDims (RecordArrayElem et) =
           arrayNestedDims et
@@ -249,7 +249,7 @@ peelArray n (Array als u (ArrayRecordElem ts) shape)
         asType (RecordArrayElem (ArrayPolyElem bt targs)) = TypeVar als u bt targs
         asType (RecordArrayElem (ArrayRecordElem ts')) = Record $ fmap asType ts'
         asType (RecordArrayElem (ArrayEnumElem cs)) = Enum cs
-        asType (RecordArrayArrayElem et e_shape _) = Array als u et e_shape
+        asType (RecordArrayArrayElem et e_shape) = Array als u et e_shape
 peelArray n (Array _ _ (ArrayEnumElem cs) shape)
   | shapeRank shape == n =
     Just $ Enum cs
@@ -306,8 +306,8 @@ typeToRecordArrayElem (TypeVar _ _ bt targs) =
 typeToRecordArrayElem (Record ts') =
   RecordArrayElem . ArrayRecordElem <$>
   traverse typeToRecordArrayElem ts'
-typeToRecordArrayElem (Array _ u et shape) =
-  Just $ RecordArrayArrayElem et shape u
+typeToRecordArrayElem (Array _ _ et shape) =
+  Just $ RecordArrayArrayElem et shape
 typeToRecordArrayElem Arrow{} = Nothing
 typeToRecordArrayElem (Enum cs) =
   Just $ RecordArrayElem $ ArrayEnumElem cs
@@ -316,7 +316,7 @@ recordArrayElemToType :: Monoid as =>
                          RecordArrayElemTypeBase dim
                       -> TypeBase dim as
 recordArrayElemToType (RecordArrayElem et)              = arrayElemToType et
-recordArrayElemToType (RecordArrayArrayElem et shape u) = Array mempty u et shape
+recordArrayElemToType (RecordArrayArrayElem et shape) = Array mempty Nonunique et shape
 
 arrayElemToType :: Monoid as => ArrayElemTypeBase dim -> TypeBase dim as
 arrayElemToType (ArrayPolyElem bt targs) =
@@ -569,8 +569,8 @@ recordArrayElemReturnType :: RecordArrayElemTypeBase dim
                          -> RecordArrayElemTypeBase dim
 recordArrayElemReturnType (RecordArrayElem et) ds args =
   RecordArrayElem $ arrayElemReturnType et ds args
-recordArrayElemReturnType (RecordArrayArrayElem et shape u) ds args =
-  RecordArrayArrayElem (arrayElemReturnType et ds args) shape u
+recordArrayElemReturnType (RecordArrayArrayElem et shape) ds args =
+  RecordArrayArrayElem (arrayElemReturnType et ds args) shape
 
 -- | Is the type concrete, i.e, without any type variables or function arrows?
 concreteType :: TypeBase f vn -> Bool
@@ -586,7 +586,7 @@ concreteType (Array _ _ at _) = concreteArrayType at
         concreteArrayType ArrayEnumElem{}      = True
 
         concreteRecordArrayElem (RecordArrayElem et) = concreteArrayType et
-        concreteRecordArrayElem (RecordArrayArrayElem et _ _) = concreteArrayType et
+        concreteRecordArrayElem (RecordArrayArrayElem et _) = concreteArrayType et
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
 -- a function type, does not contain a function type as a subcomponent, and may

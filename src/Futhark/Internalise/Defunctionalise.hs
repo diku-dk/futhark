@@ -907,10 +907,10 @@ combineRecordArrayTypeInfo :: ArrayDim dim =>
                            -> RecordArrayElemTypeBase dim
 combineRecordArrayTypeInfo (RecordArrayElem et1) (RecordArrayElem et2) =
   RecordArrayElem $ combineElemTypeInfo et1 et2
-combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1 u1)
-                           (RecordArrayArrayElem et2 shape2 u2)
+combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1)
+                           (RecordArrayArrayElem et2 shape2)
   | Just new_shape <- unifyShapes shape1 shape2 =
-      RecordArrayArrayElem (combineElemTypeInfo et1 et2) new_shape (u1 <> u2)
+      RecordArrayArrayElem (combineElemTypeInfo et1 et2) new_shape
 combineRecordArrayTypeInfo _ new_tp = new_tp
 
 -- | Defunctionalize a top-level value binding. Returns the

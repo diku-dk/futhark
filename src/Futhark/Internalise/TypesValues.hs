@@ -132,8 +132,8 @@ internaliseTypeM orig_t =
 
         internaliseRecordElem (E.RecordArrayElem et) =
           internaliseElemType et
-        internaliseRecordElem (E.RecordArrayArrayElem et shape u) =
-          internaliseTypeM $ E.Array mempty u et shape
+        internaliseRecordElem (E.RecordArrayArrayElem et shape) =
+          internaliseTypeM $ E.Array mempty Nonunique et shape
 
         internaliseShape = mapM internaliseDim . E.shapeDims
 
