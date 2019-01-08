@@ -38,7 +38,6 @@ module Language.Futhark.Attributes
   -- * Queries on types
   , uniqueness
   , unique
-  , recordArrayElemUniqueness
   , aliases
   , diet
   , arrayRank
@@ -182,10 +181,6 @@ uniqueness :: TypeBase shape as -> Uniqueness
 uniqueness (Array _ u _ _) = u
 uniqueness (TypeVar _ u _ _) = u
 uniqueness _ = Nonunique
-
-recordArrayElemUniqueness :: RecordArrayElemTypeBase shape -> Uniqueness
-recordArrayElemUniqueness RecordArrayElem{} = Nonunique
-recordArrayElemUniqueness (RecordArrayArrayElem _ _ u) = u
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
 unique :: TypeBase shape as -> Bool
@@ -380,26 +375,12 @@ isTypeParam TypeParamDim{}        = False
 -- the uniqueness of its components will be modified.
 setUniqueness :: TypeBase dim as -> Uniqueness -> TypeBase dim as
 setUniqueness (Array als _ et shape) u =
-  Array als u (setArrayElemUniqueness et u) shape
+  Array als u et shape
 setUniqueness (TypeVar als _ t targs) u =
   TypeVar als u t targs
 setUniqueness (Record ets) u =
   Record $ fmap (`setUniqueness` u) ets
 setUniqueness t _ = t
-
-setArrayElemUniqueness :: ArrayElemTypeBase dim
-                       -> Uniqueness -> ArrayElemTypeBase dim
-setArrayElemUniqueness (ArrayPrimElem bt) _ =
-  ArrayPrimElem bt
-setArrayElemUniqueness (ArrayPolyElem v args) _ =
-  ArrayPolyElem v args
-setArrayElemUniqueness (ArrayRecordElem r) u =
-  ArrayRecordElem $ fmap set r
-  where set (RecordArrayElem et) =
-          RecordArrayElem $ setArrayElemUniqueness et u
-        set (RecordArrayArrayElem et shape e_u) =
-          RecordArrayArrayElem (setArrayElemUniqueness et u) shape e_u
-setArrayElemUniqueness (ArrayEnumElem cs) _ = ArrayEnumElem cs
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
 -- any already present aliasing.
