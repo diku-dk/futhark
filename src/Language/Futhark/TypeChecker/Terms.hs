@@ -455,8 +455,8 @@ unifyTypeAliases t1 t2 =
 
         unifyRecordArray (RecordArrayElem at1) (RecordArrayElem at2) =
           RecordArrayElem $ unifyArrayElems at1 at2
-        unifyRecordArray (RecordArrayArrayElem at1 shape1 u1) (RecordArrayArrayElem at2 _ u2) =
-          RecordArrayArrayElem (unifyArrayElems at1 at2) shape1 $ min u1 u2
+        unifyRecordArray (RecordArrayArrayElem at1 shape1) (RecordArrayArrayElem at2 _) =
+          RecordArrayArrayElem (unifyArrayElems at1 at2) shape1
         unifyRecordArray x _ = x
 
         unifyTypeArg (TypeArgType t1' loc) (TypeArgType _ _) =
@@ -1068,8 +1068,8 @@ checkExp (Unzip e _ loc) = do
           case et of
             RecordArrayElem et' ->
               Array mempty u et' shape
-            RecordArrayArrayElem et' et_shape et_u ->
-              Array mempty (u `max` et_u) et' (shape <> et_shape)
+            RecordArrayArrayElem et' et_shape ->
+              Array mempty u et' (shape <> et_shape)
 
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc

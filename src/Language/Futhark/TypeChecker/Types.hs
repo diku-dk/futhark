@@ -102,9 +102,8 @@ unifyRecordArrayElemTypes :: (ArrayDim dim) =>
                           -> Maybe (RecordArrayElemTypeBase dim)
 unifyRecordArrayElemTypes uf (RecordArrayElem et1) (RecordArrayElem et2) =
   RecordArrayElem <$> unifyArrayElemTypes uf et1 et2
-unifyRecordArrayElemTypes uf (RecordArrayArrayElem et1 shape1 u1) (RecordArrayArrayElem et2 shape2 u2) =
-  RecordArrayArrayElem <$> unifyArrayElemTypes uf et1 et2 <*>
-  unifyShapes shape1 shape2 <*> uf u1 u2
+unifyRecordArrayElemTypes uf (RecordArrayArrayElem et1 shape1) (RecordArrayArrayElem et2 shape2) =
+  RecordArrayArrayElem <$> unifyArrayElemTypes uf et1 et2 <*> unifyShapes shape1 shape2
 unifyRecordArrayElemTypes _ _ _ =
   Nothing
 

@@ -110,8 +110,8 @@ instance Pretty (ShapeDecl ()) where
 
 instance Pretty (ShapeDecl dim) => Pretty (RecordArrayElemTypeBase dim) where
   ppr (RecordArrayElem et) = ppr et
-  ppr (RecordArrayArrayElem et shape u) =
-    ppr u <> ppr shape <> ppr et
+  ppr (RecordArrayArrayElem et shape) =
+    ppr shape <> ppr et
 
 instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim) where
   ppr (ArrayPrimElem pt) = ppr pt

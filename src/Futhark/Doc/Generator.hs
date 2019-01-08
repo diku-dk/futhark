@@ -427,8 +427,8 @@ prettyElem (ArrayEnumElem cs) = return $ braces $ prettyEnum cs
 
 prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) -> DocM Html
 prettyRecordElem (RecordArrayElem et) = prettyElem et
-prettyRecordElem (RecordArrayArrayElem et shape u) =
-  typeHtml $ Array () u et shape
+prettyRecordElem (RecordArrayArrayElem et shape) =
+  typeHtml $ Array () Nonunique et shape
 
 prettyShapeDecl :: ShapeDecl (DimDecl VName) -> DocM Html
 prettyShapeDecl (ShapeDecl ds) =
