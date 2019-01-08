@@ -327,7 +327,8 @@ type TypeSubs = M.Map VName TypeSub
 substituteTypes :: TypeSubs -> StructType -> StructType
 substituteTypes substs ot = case ot of
   Array als u at shape ->
-    fromMaybe nope $ arrayOfWithAliases (substituteTypesInArrayElem at) als (substituteInShape shape) u
+    maybe nope (`addAliases` (<>als)) $
+    arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
   Prim t -> Prim t
   TypeVar () u v targs
     | Just (TypeSub (TypeAbbr _ ps t)) <-
@@ -423,8 +424,8 @@ substTypesAny :: (ArrayDim dim, Monoid as) =>
 substTypesAny lookupSubst ot = case ot of
   Prim t -> Prim t
   Array als u et shape ->
-    fromMaybe nope $
-    arrayOfWithAliases (subsArrayElem et) als shape u
+    maybe nope (`addAliases` (<>als)) $
+    arrayOf (subsArrayElem et) shape u
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
   TypeVar als u v targs ->
