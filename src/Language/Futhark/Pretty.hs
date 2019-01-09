@@ -175,7 +175,7 @@ instance IsName vn => Pretty (QualName vn) where
   ppr (QualName names name) =
     mconcat $ punctuate (text ".") $ map pprName names ++ [pprName name]
 
-instance IsName vn => Pretty (IdentBase f vn) where
+instance IsName vn => Pretty (IdentBase vn t) where
   ppr = pprName . identName
 
 hasArrayLit :: ExpBase ty vn -> Bool
@@ -318,7 +318,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     where p name = text "." <> ppr name
   pprPrec _ (IndexSection idxs _ _) =
     parens $ text "." <> brackets (commasep (map ppr idxs))
-  pprPrec _ (DoLoop tparams pat initexp form loopbody _) =
+  pprPrec _ (DoLoop tparams pat initexp form loopbody _ _) =
     text "loop" <+> spread (map ppr tparams ++ [ppr pat]) <+>
     equals <+> ppr initexp <+> ppr form <+> text "do" </>
     indent 2 (ppr loopbody)
@@ -334,13 +334,13 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (CaseBase f vn) where
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
   ppr (For i ubound) =
-    text "for" <+> ppr i <+> text "<" <+> align (ppr ubound)
+    text "for" <+> pprName i <+> text "<" <+> align (ppr ubound)
   ppr (ForIn x e) =
     text "for" <+> ppr x <+> text "in" <+> ppr e
   ppr (While cond) =
     text "while" <+> ppr cond
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
+instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn u) where
   ppr (PatternAscription p t _) = ppr p <> text ":" <+> ppr t
   ppr (PatternParens p _)       = parens $ ppr p
   ppr (Id v t _)                = case unAnnot t of

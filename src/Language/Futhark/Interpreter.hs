@@ -289,7 +289,7 @@ apply2 :: SrcLoc -> Env -> Value -> Value -> Value -> EvalM Value
 apply2 loc env f x y = stacking loc env $ do f' <- apply noLoc mempty f x
                                              apply noLoc mempty f' y
 
-matchPattern :: Env -> Pattern -> Value
+matchPattern :: Env -> Pattern u -> Value
              -> EvalM (M.Map VName (Maybe T.BoundV, Value))
 matchPattern env p v = do
   m <- runMaybeT $ patternMatch env mempty p v
@@ -298,7 +298,7 @@ matchPattern env p v = do
     Just binds -> return binds
 
 patternMatch :: Env -> M.Map VName (Maybe T.BoundV, Value)
-             -> Pattern -> Value
+             -> Pattern u -> Value
              -> MaybeT EvalM (M.Map VName (Maybe T.BoundV, Value))
 patternMatch _ m (Id v (Info t) _) val =
   lift $ pure $ M.insert v (Just $ T.BoundV [] $ toStruct t, val) m
@@ -719,11 +719,11 @@ eval _ (ProjectSection ks _ _) = return $ ValueFun $ flip (foldM walk) ks
           | Just v' <- M.lookup f fs = return v'
         walk _ _ = fail "Value does not have expected field."
 
-eval env (DoLoop _ pat init_e form body _) = do
+eval env (DoLoop _ pat init_e form body _ _) = do
   init_v <- eval env init_e
   case form of For iv bound -> do
                  bound' <- asSigned <$> eval env bound
-                 forLoop (identName iv) bound' (zero bound') init_v
+                 forLoop iv bound' (zero bound') init_v
                ForIn in_pat in_e -> do
                  in_vs <- fromArray <$> eval env in_e
                  foldM (forInLoop in_pat) init_v in_vs

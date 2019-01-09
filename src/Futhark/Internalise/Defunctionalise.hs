@@ -1,5 +1,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
--- | Defunctionalization of typed, monomorphic Futhark programs without modules.
+-- | Defunctionalization of typed, monomorphic Futhark programs
+-- without modules.
+--
+-- When doing type juggling here, we are quite happy to throw away the
+-- aliasing information.  It is not needed downstream anyway (and may
+-- already have been mangled by previous passes).
 module Futhark.Internalise.Defunctionalise
   ( transformProg ) where
 
@@ -21,7 +26,7 @@ import           Futhark.Representation.AST.Pretty ()
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
 data StaticVal = Dynamic CompType
-               | LambdaSV [VName] Pattern Exp Env
+               | LambdaSV [VName] (Pattern ()) Exp Env
                  -- ^ The 'VName's are shape parameters that are bound
                  -- by the 'Pattern'.
                | RecordSV [(Name, StaticVal)]
@@ -146,7 +151,7 @@ defuncExp (RecordLit fs loc) = do
                                                 (vn', sv'))
             -- The field may refer to a functional expression, so we get the
             -- type from the static value and not the one from the AST.
-            _ -> let tp = Info $ typeFromSV sv
+            _ -> let tp = Info $ fromStruct $ removeShapeAnnotations $ typeFromSV sv
                  in return (RecordFieldImplicit vn tp loc', (baseName vn, sv))
 
 defuncExp (ArrayLit es t@(Info t') loc) = do
@@ -172,7 +177,7 @@ defuncExp e@(Var qn _ loc) = do
       (pats, body, tp) <- etaExpand e
       defuncExp $ Lambda [] pats body Nothing (Info (mempty, tp)) noLoc
     _ -> let tp = typeFromSV sv
-         in return (Var qn (Info (vacuousShapeAnnotations tp)) loc, sv)
+         in return (Var qn (Info (fromStruct $ vacuousShapeAnnotations tp)) loc, sv)
 
 defuncExp (Ascript e0 tydecl loc)
   | orderZero (typeOf e0) = do (e0', sv) <- defuncExp e0
@@ -242,7 +247,7 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
 
         closureFromDynamicFun (vn, sv) =
           let name = nameFromString $ pretty vn
-              tp' = vacuousShapeAnnotations $ typeFromSV sv
+              tp' = fromStruct $ vacuousShapeAnnotations $ typeFromSV sv
           in (RecordFieldExplicit name
                (Var (qualName vn) (Info tp') noLoc) noLoc, (vn, sv))
 
@@ -254,20 +259,19 @@ defuncExp OpSectionRight{} = error "defuncExp: unexpected operator section."
 defuncExp ProjectSection{} = error "defuncExp: unexpected projection section."
 defuncExp IndexSection{}   = error "defuncExp: unexpected projection section."
 
-defuncExp (DoLoop tparams pat e1 form e3 loc) = do
+defuncExp (DoLoop tparams pat e1 form e3 t loc) = do
   let env_dim = envFromShapeParams tparams
   (e1', sv1) <- defuncExp e1
   let env1 = matchPatternSV pat sv1
   (form', env2) <- case form of
     For v e2      -> do e2' <- defuncExp' e2
-                        return (For v e2', envFromIdent v)
+                        return (For v e2', M.singleton v $ Dynamic $ typeOf e2')
     ForIn pat2 e2 -> do e2' <- defuncExp' e2
                         return (ForIn pat2 e2', envFromPattern pat2)
     While e2      -> do e2' <- localEnv (env1 <> env_dim) $ defuncExp' e2
                         return (While e2', mempty)
   (e3', sv) <- localEnv (env1 <> env2 <> env_dim) $ defuncExp e3
-  return (DoLoop tparams pat e1' form' e3' loc, sv)
-  where envFromIdent (Ident vn (Info tp) _) = M.singleton vn $ Dynamic tp
+  return (DoLoop tparams pat e1' form' e3' t loc, sv)
 
 -- We handle BinOps by turning them into ordinary function applications.
 defuncExp (BinOp qn (Info t) (e1, Info pt1) (e2, Info pt2) (Info ret) loc) =
@@ -279,7 +283,10 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
   (e0', sv0) <- defuncExp e0
   case sv0 of
     RecordSV svs -> case lookup vn svs of
-      Just sv -> return (Project vn e0' (Info $ typeFromSV sv) loc, sv)
+      Just sv -> return (Project vn e0'
+                         (Info $ fromStruct $ removeShapeAnnotations $ typeFromSV sv)
+                         loc,
+                         sv)
       Nothing -> error "Invalid record projection."
     Dynamic _ -> return (Project vn e0' tp loc, Dynamic tp')
     _ -> error $ "Projection of an expression with static value " ++ show sv0
@@ -310,7 +317,7 @@ defuncExp (RecordUpdate e1 fs e2 _ loc) = do
   (e2', sv2) <- defuncExp e2
   let sv = staticField sv1 sv2 fs
   return (RecordUpdate e1' fs e2'
-           (Info $ vacuousShapeAnnotations $ typeFromSV sv1) loc,
+           (Info $ fromStruct $ vacuousShapeAnnotations $ typeFromSV sv1) loc,
           sv)
   where staticField (RecordSV svs) sv2 (f:fs') =
           case lookup f svs of
@@ -428,13 +435,13 @@ defuncSoacExp e
       return $ Lambda [] pats body' Nothing (Info (mempty, tp)) noLoc
   | otherwise = defuncExp' e
 
-etaExpand :: Exp -> DefM ([Pattern], Exp, StructType)
+etaExpand :: Exp -> DefM ([Pattern ()], Exp, StructType)
 etaExpand e = do
   let (ps, ret) = getType $ typeOf e
   (pats, vars) <- fmap unzip . forM ps $ \t -> do
     x <- newNameFromString "x"
     let t' = vacuousShapeAnnotations t
-    return (Id x (Info t') noLoc,
+    return (Id x (Info $ toStruct t') noLoc,
             Var (qualName x) (Info t') noLoc)
   let ps_st = map vacuousShapeAnnotations ps
       e' = foldl' (\e1 (e2, t2, argtypes) ->
@@ -456,8 +463,8 @@ defuncDimIndex (DimSlice me1 me2 me3) =
 
 -- | Defunctionalize a let-bound function, while preserving parameters
 -- that have order 0 types (i.e., non-functional).
-defuncLet :: [TypeParam] -> [Pattern] -> Exp -> Info StructType
-          -> DefM ([Pattern], Exp, StaticVal)
+defuncLet :: [TypeParam] -> [Pattern ()] -> Exp -> Info StructType
+          -> DefM ([Pattern ()], Exp, StaticVal)
 defuncLet dims ps@(pat:pats) body (Info rettype)
   | patternOrderZero pat = do
       let env = envFromPattern pat
@@ -494,9 +501,6 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
           env_dim = envFromDimNames dims
       (e0', sv) <- localNewEnv (env' <> closure_env <> env_dim) $ defuncExp e0
 
-      let closure_pat = buildEnvPattern closure_env
-          pat' = updatePattern pat sv2
-
       -- Inline certain trivial lifted functions immediately.  This is
       -- purely an optimisation to avoid having the rest of the
       -- compiler spend a lot of time processing them (they will end
@@ -527,10 +531,14 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
           inline Negate{} = True
           inline _ = False
       if inline e0' && null dims
-        then return (letPat closure_pat e1' $ letPat pat' e2' e0', sv)
+        then let closure_pat = buildEnvPattern closure_env
+                 pat' = updatePattern pat sv2
+             in return (letPat closure_pat e1' $ letPat pat' e2' e0', sv)
         else do
           -- Lift lambda to top-level function definition.
-          let params = [closure_pat, pat']
+          let closure_pat = buildEnvPattern closure_env
+              pat' = updatePattern pat sv2
+              params = [closure_pat, pat']
               rettype = buildRetType closure_env params $ typeOf e0'
 
               -- Embed some information about the original function
@@ -542,7 +550,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
                 liftedName (i+1) f
               liftedName _ _ = "lifted"
           fname <- newNameFromString $ liftedName (0::Int) e1
-          liftValDec fname rettype dims params e0'
+          liftValDec fname (toStruct rettype) dims params e0'
 
           let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
               t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
@@ -556,8 +564,8 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
     -- but we update the types since it may be partially applied or return
     -- a higher-order term.
     DynamicFun _ sv ->
-      let (argtypes', rettype) = dynamicFunType sv argtypes
-          apply_e = Apply e1' e2' d (Info $ foldFunType argtypes' rettype) loc
+      let (argtypes', rettype) = dynamicFunType sv $ map toStruct argtypes
+          apply_e = Apply e1' e2' d (Info $ fromStruct $ foldFunType argtypes' rettype) loc
       in return (apply_e, sv)
 
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
@@ -577,20 +585,20 @@ defuncApply depth e@(Var qn (Info t) loc) = do
         | fullyApplied sv depth ->
             -- We still need to update the types in case the dynamic
             -- function returns a higher-order term.
-            let (argtypes', rettype) = dynamicFunType sv argtypes
-            in return (Var qn (Info (foldFunType argtypes' rettype)) loc, sv)
+            let (argtypes', rettype) = dynamicFunType sv $ map toStruct argtypes
+            in return (Var qn (Info $ fromStruct $ foldFunType argtypes' rettype) loc, sv)
 
         | otherwise -> do
             fname <- newName $ qualLeaf qn
             let (dims, pats, e0, sv') = liftDynFun sv depth
-                (argtypes', rettype) = dynamicFunType sv' argtypes
+                (argtypes', rettype) = dynamicFunType sv'  $ map toStruct argtypes
             liftValDec fname rettype dims pats e0
             return (Var (qualName fname)
-                    (Info (foldFunType argtypes' rettype)) loc, sv')
+                    (Info (fromStruct $ foldFunType argtypes' rettype)) loc, sv')
 
       IntrinsicSV -> return (e, IntrinsicSV)
 
-      _ -> return (Var qn (Info (vacuousShapeAnnotations $ typeFromSV sv)) loc, sv)
+      _ -> return (Var qn (Info (fromStruct $ typeFromSV sv)) loc, sv)
 
 defuncApply _ expr = defuncExp expr
 
@@ -606,7 +614,7 @@ fullyApplied _ _ = True
 -- dimensions, a list of parameters, a function body, and the
 -- appropriate static value for applying the function at the given
 -- depth of partial application.
-liftDynFun :: StaticVal -> Int -> ([VName], [Pattern], Exp, StaticVal)
+liftDynFun :: StaticVal -> Int -> ([VName], [Pattern ()], Exp, StaticVal)
 liftDynFun (DynamicFun (e, sv) _) 0 = ([], [], e, sv)
 liftDynFun (DynamicFun clsr@(_, LambdaSV dims pat _ _) sv) d
   | d > 0 =  let (dims', pats, e', sv') = liftDynFun sv (d-1)
@@ -616,12 +624,12 @@ liftDynFun sv _ = error $ "Tried to lift a StaticVal " ++ show sv
 
 -- | Converts a pattern to an environment that binds the individual names of the
 -- pattern to their corresponding types wrapped in a 'Dynamic' static value.
-envFromPattern :: Pattern -> Env
+envFromPattern :: Pattern u -> Env
 envFromPattern pat = case pat of
   TuplePattern ps _       -> foldMap envFromPattern ps
   RecordPattern fs _      -> foldMap (envFromPattern . snd) fs
   PatternParens p _       -> envFromPattern p
-  Id vn (Info t) _        -> M.singleton vn $ Dynamic $ removeShapeAnnotations t
+  Id vn (Info t) _        -> M.singleton vn $ Dynamic $ fromStruct $ removeShapeAnnotations t
   Wildcard _ _            -> mempty
   PatternAscription p _ _ -> envFromPattern p
   PatternLit{}            -> mempty
@@ -640,15 +648,14 @@ envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Prim $ Signed Int32)
 
 -- | Create a new top-level value declaration with the given function name,
 -- return type, list of parameters, and body expression.
-liftValDec :: VName -> PatternType -> [VName] -> [Pattern] -> Exp -> DefM ()
+liftValDec :: VName -> StructType -> [VName] -> [Pattern ()] -> Exp -> DefM ()
 liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
   where dims' = map (flip TypeParamDim noLoc) dims
-        rettype_st = vacuousShapeAnnotations $ toStruct rettype
         dec = ValBind
           { valBindEntryPoint = False
           , valBindName       = fname
           , valBindRetDecl    = Nothing
-          , valBindRetType    = Info rettype_st
+          , valBindRetType    = Info $ vacuousShapeAnnotations rettype
           , valBindTypeParams = dims'
           , valBindParams     = pats
           , valBindBody       = body
@@ -658,11 +665,12 @@ liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
 
 -- | Given a closure environment, construct a record pattern that
 -- binds the closed over variables.
-buildEnvPattern :: Env -> Pattern
+buildEnvPattern :: Monoid u => Env -> Pattern u
 buildEnvPattern env = RecordPattern (map buildField $ M.toList env) noLoc
-  where buildField (vn, sv) = let tp = vacuousShapeAnnotations (typeFromSV sv)
-                              in (nameFromString (pretty vn),
-                                  Id vn (Info tp) noLoc)
+  where buildField (vn, sv) =
+          let tp = fromStruct $ vacuousShapeAnnotations $ typeFromSV sv
+          in (nameFromString (pretty vn),
+              Id vn (Info tp) noLoc)
 
 -- | Given a closure environment pattern and the type of a term,
 -- construct the type of that term, where uniqueness is set to
@@ -671,7 +679,7 @@ buildEnvPattern env = RecordPattern (map buildField $ M.toList env) noLoc
 -- lifted function can create unique arrays as long as they do not
 -- alias any of its parameters.  XXX: it is not clear that this is a
 -- sufficient property, unfortunately.
-buildRetType :: Env -> [Pattern] -> CompType -> PatternType
+buildRetType :: Env -> [Pattern ()] -> CompType -> PatternType
 buildRetType env pats = vacuousShapeAnnotations . descend
   where bound = foldMap oneName (M.keys env) <> foldMap patternVars pats
         boundAsUnique v =
@@ -684,21 +692,21 @@ buildRetType env pats = vacuousShapeAnnotations . descend
         descend t = t
 
 -- | Compute the corresponding type for a given static value.
-typeFromSV :: StaticVal -> CompType
-typeFromSV (Dynamic tp)           = tp
+typeFromSV :: StaticVal -> StructType
+typeFromSV (Dynamic tp)           = vacuousShapeAnnotations $ toStruct tp
 typeFromSV (LambdaSV _ _ _ env)   = typeFromEnv env
 typeFromSV (RecordSV ls)          = Record $ M.fromList $ map (fmap typeFromSV) ls
 typeFromSV (DynamicFun (_, sv) _) = typeFromSV sv
 typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
                                          ++ "static value of an intrinsic."
 
-typeFromEnv :: Env -> CompType
+typeFromEnv :: Env -> StructType
 typeFromEnv = Record . M.fromList .
               map (bimap (nameFromString . pretty) typeFromSV) . M.toList
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
-dynamicFunType :: StaticVal -> [PatternType] -> ([PatternType], PatternType)
+dynamicFunType :: StaticVal -> [StructType] -> ([StructType], StructType)
 dynamicFunType (DynamicFun _ sv) (p:ps) =
   let (ps', ret) = dynamicFunType sv ps in (p : ps', ret)
 dynamicFunType sv _ = ([], vacuousShapeAnnotations $ typeFromSV sv)
@@ -706,7 +714,7 @@ dynamicFunType sv _ = ([], vacuousShapeAnnotations $ typeFromSV sv)
 -- | Match a pattern with its static value. Returns an environment with
 -- the identifier components of the pattern mapped to the corresponding
 -- subcomponents of the static value.
-matchPatternSV :: PatternBase Info VName -> StaticVal -> Env
+matchPatternSV :: Pattern u -> StaticVal -> Env
 matchPatternSV (TuplePattern ps _) (RecordSV ls) =
   mconcat $ zipWith (\p (_, sv) -> matchPatternSV p sv) ps ls
 matchPatternSV (RecordPattern ps _) (RecordSV ls)
@@ -719,7 +727,7 @@ matchPatternSV (Id vn (Info t) _) sv =
   -- the pattern wins out.  This is important when matching a
   -- nonunique pattern with a unique value.
   if orderZeroSV sv
-  then M.singleton vn $ Dynamic $ removeShapeAnnotations t
+  then M.singleton vn $ Dynamic $ fromStruct $ removeShapeAnnotations t
   else M.singleton vn sv
 matchPatternSV (Wildcard _ _) _ = mempty
 matchPatternSV (PatternAscription pat _ _) sv = matchPatternSV pat sv
@@ -735,7 +743,7 @@ orderZeroSV _ = False
 
 -- | Given a pattern and the static value for the defunctionalized argument,
 -- update the pattern to reflect the changes in the types.
-updatePattern :: Pattern -> StaticVal -> Pattern
+updatePattern :: Monoid b => Pattern a -> StaticVal -> Pattern b
 updatePattern (TuplePattern ps loc) (RecordSV svs) =
   TuplePattern (zipWith updatePattern ps $ map snd svs) loc
 updatePattern (RecordPattern ps loc) (RecordSV svs)
@@ -744,19 +752,22 @@ updatePattern (RecordPattern ps loc) (RecordSV svs)
                                 (n, updatePattern p sv)) ps' svs') loc
 updatePattern (PatternParens pat loc) sv =
   PatternParens (updatePattern pat sv) loc
-updatePattern pat@(Id vn (Info tp) loc) sv
-  | orderZero tp = pat
-  | otherwise = Id vn (Info . vacuousShapeAnnotations $
+updatePattern (Id vn (Info tp) loc) sv
+  | orderZero tp = Id vn (Info $ fromStruct tp) loc
+  | otherwise = Id vn (Info . fromStruct . vacuousShapeAnnotations $
                        typeFromSV sv `setUniqueness` Nonunique) loc
-updatePattern pat@(Wildcard (Info tp) loc) sv
-  | orderZero tp = pat
-  | otherwise = Wildcard (Info . vacuousShapeAnnotations $ typeFromSV sv) loc
+updatePattern (Wildcard (Info tp) loc) sv
+  | orderZero tp = Wildcard (Info $ fromStruct tp) loc
+  | otherwise = Wildcard (Info . fromStruct . vacuousShapeAnnotations $ typeFromSV sv) loc
 updatePattern (PatternAscription pat tydecl loc) sv
   | orderZero . unInfo $ expandedType tydecl =
       PatternAscription (updatePattern pat sv) tydecl loc
   | otherwise = updatePattern pat sv
-updatePattern p@PatternLit{} _ = p
-updatePattern pat (Dynamic t) = updatePattern pat (svFromType t)
+updatePattern (PatternLit e (Info t) loc) _ =
+  -- Can never be functional.
+  PatternLit e (Info $ fromStruct $ vacuousShapeAnnotations t) loc
+updatePattern pat (Dynamic t) =
+  updatePattern pat (svFromType t)
 updatePattern pat sv =
   error $ "Tried to update pattern " ++ pretty pat
        ++ "to reflect the static value " ++ show sv
@@ -783,7 +794,7 @@ without (NameSet x) (NameSet y) = NameSet $ x `M.difference` y
 member :: VName -> NameSet -> Bool
 member v (NameSet m) = v `M.member` m
 
-ident :: Ident -> NameSet
+ident :: IdentBase VName (Info (TypeBase d u)) -> NameSet
 ident v = NameSet $ M.singleton (identName v) (uniqueness $ unInfo $ identType v)
 
 oneName :: VName -> NameSet
@@ -831,10 +842,10 @@ freeVars expr = case expr of
   ProjectSection{}            -> mempty
   IndexSection idxs _ _       -> foldMap freeDimIndex idxs
 
-  DoLoop _ pat e1 form e3 _ -> let (e2fv, e2ident) = formVars form
-                               in freeVars e1 <> e2fv <>
-                               (freeVars e3 `without` (patternVars pat <> e2ident))
-    where formVars (For v e2) = (freeVars e2, ident v)
+  DoLoop _ pat e1 form e3 _ _ -> let (e2fv, e2ident) = formVars form
+                                 in freeVars e1 <> e2fv <>
+                                    (freeVars e3 `without` (patternVars pat <> e2ident))
+    where formVars (For v e2) = (freeVars e2, oneName v)
           formVars (ForIn p e2)   = (freeVars e2, patternVars p)
           formVars (While e2)     = (freeVars e2, mempty)
 
@@ -876,7 +887,7 @@ freeDimIndex (DimSlice me1 me2 me3) =
   foldMap (foldMap freeVars) [me1, me2, me3]
 
 -- | Extract all the variable names bound in a pattern.
-patternVars :: Pattern -> NameSet
+patternVars :: Pattern u -> NameSet
 patternVars = mconcat . map ident . S.toList . patIdentSet
 
 -- | Combine the shape information of types as much as possible. The first
