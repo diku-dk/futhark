@@ -477,9 +477,7 @@ checkPattern' (PatternParens p loc) t =
 
 checkPattern' (Id name NoInfo loc) (Ascribed t) = do
   name' <- checkName Term name loc
-  let t' = case t of Record{} -> t
-                     _        -> t `addAliases` S.insert name'
-  return $ Id name' (Info t') loc
+  return $ Id name' (Info t) loc
 checkPattern' (Id name NoInfo loc) NoneInferred = do
   name' <- checkName Term name loc
   t <- newTypeVar loc "t"
@@ -1103,7 +1101,8 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
 
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
-  return $ OpSection op' (Info (vacuousShapeAnnotations ftype)) loc
+  let ftype' = vacuousShapeAnnotations ftype `addAliases` (<>S.singleton (qualLeaf op'))
+  return $ OpSection op' (Info ftype') loc
 
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
