@@ -567,7 +567,7 @@ vnameLink' (VName _ tag) current file =
 typeNameHtml :: TypeName -> DocM Html
 typeNameHtml = qualNameHtml . qualNameFromTypeName
 
-patternHtml :: Pattern -> DocM Html
+patternHtml :: Pattern u -> DocM Html
 patternHtml pat = do
   let (pat_param, t) = patternParam pat
   t' <- typeHtml t

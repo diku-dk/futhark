@@ -465,12 +465,13 @@ unifyTypeAliases t1 t2 =
 
 --- General binding.
 
-data InferredType = NoneInferred
-                  | Ascribed PatternType
+data InferredType u = NoneInferred
+                    | Ascribed (TypeBase (DimDecl VName) u)
 
 
-checkPattern' :: UncheckedPattern -> InferredType
-              -> TermTypeM Pattern
+checkPattern' :: Monoid u =>
+                 UncheckedPattern u -> InferredType u
+              -> TermTypeM (Pattern u)
 
 checkPattern' (PatternParens p loc) t =
   PatternParens <$> checkPattern' p t <*> pure loc
@@ -547,18 +548,19 @@ checkPattern' (PatternLit e NoInfo loc) (Ascribed t) = do
   e' <- checkExp e
   t' <- expType e'
   unify loc (toStructural t') (toStructural t)
-  return $ PatternLit e' (Info (vacuousShapeAnnotations t')) loc
+  return $ PatternLit e' (Info (fromStruct $ vacuousShapeAnnotations t')) loc
 
 checkPattern' (PatternLit e NoInfo loc) NoneInferred = do
   e' <- checkExp e
   t' <- expType e'
-  return $ PatternLit e' (Info (vacuousShapeAnnotations t')) loc
+  return $ PatternLit e' (Info (fromStruct $ vacuousShapeAnnotations t')) loc
 
-bindPatternNames :: PatternBase NoInfo Name -> TermTypeM a -> TermTypeM a
+bindPatternNames :: PatternBase NoInfo Name u -> TermTypeM a -> TermTypeM a
 bindPatternNames = bindSpaced . map asTerm . S.toList . patIdentSet
   where asTerm v = (Term, identName v)
 
-checkPattern :: UncheckedPattern -> InferredType -> (Pattern -> TermTypeM a)
+checkPattern :: Monoid u =>
+                UncheckedPattern u -> InferredType u -> (Pattern u -> TermTypeM a)
              -> TermTypeM a
 checkPattern p t m = do
   checkForDuplicateNames [p]
@@ -636,7 +638,7 @@ typeParamIdent (TypeParamDim v loc) =
   Just $ Ident v (Info (Prim (Signed Int32))) loc
 typeParamIdent _ = Nothing
 
-bindingIdent :: IdentBase NoInfo Name -> CompType -> (Ident -> TermTypeM a)
+bindingIdent :: IdentBase Name (NoInfo CompType) -> CompType -> (Ident -> TermTypeM a)
              -> TermTypeM a
 bindingIdent (Ident v NoInfo vloc) t m =
   bindSpaced [(Term, v)] $ do
@@ -644,15 +646,32 @@ bindingIdent (Ident v NoInfo vloc) t m =
     let ident = Ident v' (Info t) vloc
     binding [ident] $ m ident
 
-bindingPatternGroup :: [UncheckedTypeParam]
-                    -> [(UncheckedPattern, InferredType)]
-                    -> ([TypeParam] -> [Pattern] -> TermTypeM a) -> TermTypeM a
+-- | Convenience class to handle the two kinds of patterns.
+class Monoid u => HasAliases u where
+  uAliases :: u -> Names
+
+instance HasAliases () where
+  uAliases = mempty
+
+instance HasAliases Names where
+  uAliases = id
+
+identWithAliases :: HasAliases u =>
+                    IdentBase vn (Info (TypeBase shape u))
+                 -> IdentBase vn (Info (TypeBase shape Names))
+identWithAliases (Ident v (Info t) loc) =
+  Ident v (Info $ t `setAliases` uAliases (aliases t)) loc
+
+bindingPatternGroup :: HasAliases u =>
+                       [UncheckedTypeParam]
+                    -> [(UncheckedPattern u, InferredType u)]
+                    -> ([TypeParam] -> [Pattern u] -> TermTypeM a) -> TermTypeM a
 bindingPatternGroup tps orig_ps m = do
   checkForDuplicateNames $ map fst orig_ps
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
     let descend ps' ((p,t):ps) =
           checkPattern p t $ \p' ->
-            binding (S.toList $ patIdentSet p') $ descend (p':ps') ps
+            binding (map identWithAliases $ S.toList $ patIdentSet p') $ descend (p':ps') ps
         descend ps' [] = do
           -- Perform an observation of every type parameter.  This
           -- prevents unused-name warnings for otherwise unused
@@ -665,13 +684,15 @@ bindingPatternGroup tps orig_ps m = do
 
     descend [] orig_ps
 
-bindingPattern :: [UncheckedTypeParam]
-               -> PatternBase NoInfo Name -> InferredType
-               -> ([TypeParam] -> Pattern -> TermTypeM a) -> TermTypeM a
+bindingPattern :: HasAliases u =>
+                  [UncheckedTypeParam]
+               -> PatternBase NoInfo Name u -> InferredType u
+               -> ([TypeParam] -> Pattern u -> TermTypeM a) -> TermTypeM a
 bindingPattern tps p t m = do
   checkForDuplicateNames [p]
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
-    checkPattern p t $ \p' -> binding (S.toList $ patIdentSet p') $ do
+    checkPattern p t $ \p' ->
+    binding (map identWithAliases $ S.toList $ patIdentSet p') $ do
       -- Perform an observation of every declared dimension.  This
       -- prevents unused-name warnings for otherwise unused dimensions.
       mapM_ observe $ patternDims p'
@@ -681,7 +702,7 @@ bindingPattern tps p t m = do
 
 -- | Ensure that every shape parameter is used in positive position at
 -- least once before being used in negative position.
-checkShapeParamUses :: [TypeParam] -> [Pattern] -> TermTypeM ()
+checkShapeParamUses :: [TypeParam] -> [Pattern u] -> TermTypeM ()
 checkShapeParamUses tps ps = do
   pos_uses <- foldM checkShapePositions [] ps
   mapM_ (checkUsed pos_uses) tps
@@ -702,7 +723,7 @@ checkShapeParamUses tps ps = do
 
 -- | Return the shapes used in a given pattern in postive and negative
 -- position, respectively.
-patternUses :: Pattern -> ([VName], [VName])
+patternUses :: Pattern u -> ([VName], [VName])
 patternUses Id{} = mempty
 patternUses Wildcard{} = mempty
 patternUses PatternLit{} = mempty
@@ -735,7 +756,7 @@ noTypeParamsPermitted ps =
   where typeParamLoc (TypeParamDim _ _) = Nothing
         typeParamLoc tparam             = Just $ srclocOf tparam
 
-patternDims :: Pattern -> [Ident]
+patternDims :: Pattern u -> [Ident]
 patternDims (PatternParens p _) = patternDims p
 patternDims (TuplePattern pats _) = concatMap patternDims pats
 patternDims (PatternAscription p (TypeDecl _ (Info t)) _) =
@@ -1141,16 +1162,15 @@ checkExp (IndexSection idxes NoInfo loc) = do
   where isFix DimFix{} = True
         isFix _        = False
 
-checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
+checkExp (DoLoop tparams mergepat mergeexp form loopbody NoInfo loc) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
 
   noTypeParamsPermitted tparams
 
   zeroOrderType (srclocOf mergeexp) "used as loop variable" (typeOf mergeexp')
 
-  merge_t <- do
-    merge_t <- expType mergeexp'
-    return $ Ascribed $ vacuousShapeAnnotations $ merge_t `setAliases` mempty
+  merge_t <- expType mergeexp'
+  let merge_t' = Ascribed $ vacuousShapeAnnotations $ merge_t `setAliases` mempty
 
   -- First we do a basic check of the loop body to figure out which of
   -- the merge parameters are being consumed.  For this, we first need
@@ -1164,13 +1184,13 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       For i uboundexp -> do
         uboundexp' <- require anySignedType =<< checkExp uboundexp
         bound_t <- expType uboundexp'
-        bindingIdent i bound_t $ \i' ->
-          noUnique $ bindingPattern tparams mergepat merge_t $
+        bindingIdent (Ident i NoInfo loc) bound_t $ \i' ->
+          noUnique $ bindingPattern tparams mergepat merge_t' $
           \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
             loopbody' <- checkExp loopbody
             return (tparams',
                     mergepat',
-                    For i' uboundexp',
+                    For (identName i') uboundexp',
                     loopbody')
 
       ForIn xpat e -> do
@@ -1180,7 +1200,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         case t of
           _ | Just t' <- peelArray 1 t ->
                 bindingPattern [] xpat (Ascribed $ vacuousShapeAnnotations t') $ \_ xpat' ->
-                noUnique $ bindingPattern tparams mergepat merge_t $
+                noUnique $ bindingPattern tparams mergepat merge_t' $
                 \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
                   loopbody' <- checkExp loopbody
                   return (tparams',
@@ -1192,7 +1212,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
                 "Iteratee of a for-in loop must be an array, but expression has type " ++ pretty t
 
       While cond ->
-        noUnique $ bindingPattern tparams mergepat merge_t $ \tparams' mergepat' ->
+        noUnique $ bindingPattern tparams mergepat merge_t' $ \tparams' mergepat' ->
         onlySelfAliasing $ tapOccurences $
         sequentially (unifies (Prim Bool) =<< checkExp cond) $ \cond' _ -> do
           loopbody' <- checkExp loopbody
@@ -1216,9 +1236,12 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       consumeMerge _ _ =
         return ()
   consumeMerge mergepat'' =<< expType mergeexp'
-  return $ DoLoop tparams' mergepat'' mergeexp' form' loopbody' loc
+  let pattern_t = patternPatternType mergepat''
+      result_t = returnType (toStruct pattern_t) [diet pattern_t] [merge_t]
+  return $ DoLoop tparams' mergepat'' mergeexp' form' loopbody' (Info result_t) loc
 
   where
+    convergePattern :: Pattern () -> Names -> CompType -> SrcLoc -> TermTypeM (Pattern ())
     convergePattern pat body_cons body_t body_loc = do
       let consumed_merge = S.map identName (patIdentSet pat) `S.intersection`
                            body_cons
@@ -1246,9 +1269,9 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
           pat' = uniquePat pat
 
       -- Now check that the loop returned the right type.
-      unify body_loc (toStruct body_t) $ toStruct $ patternType pat'
+      unify body_loc (toStruct body_t) $ toStructural $ patternPatternType pat'
       body_t' <- normaliseType body_t
-      pat_t <- normaliseType $ patternType pat'
+      pat_t <- normaliseType $ toStructural $ patternPatternType pat'
       unless (body_t' `subtypeOf` pat_t) $
         unexpectedType body_loc
         (toStructural body_t')
@@ -1282,7 +1305,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
             return ()
       (pat_cons, _) <- execStateT (checkMergeReturn pat' body_t') (mempty, mempty)
       let body_cons' = body_cons <> pat_cons
-      if body_cons' == body_cons && patternType pat' == patternType pat
+      if body_cons' == body_cons && patternPatternType pat' == patternPatternType pat
         then return pat'
         else convergePattern pat' body_cons' body_t' body_loc
 
@@ -1331,7 +1354,7 @@ data Unmatched p = UnmatchedNum p [ExpBase Info VName]
                  | Unmatched p
                  deriving (Functor, Show)
 
-instance Pretty (Unmatched (PatternBase Info VName)) where
+instance Pretty (Unmatched (PatternBase Info VName u)) where
   ppr um = case um of
       (UnmatchedNum p nums) -> ppr' p <+> text "where p is not one of" <+> ppr nums
       (UnmatchedBool p)     -> ppr' p
@@ -1347,7 +1370,7 @@ instance Pretty (Unmatched (PatternBase Info VName)) where
       ppr' Wildcard{}                = text "_"
       ppr' (PatternLit e _ _)        = ppr e
 
-unpackPat :: Pattern -> [Maybe Pattern]
+unpackPat :: Pattern Names -> [Maybe (Pattern Names)]
 unpackPat Wildcard{} = [Nothing]
 unpackPat (PatternParens p _) = unpackPat p
 unpackPat Id{} = [Nothing]
@@ -1356,7 +1379,7 @@ unpackPat (RecordPattern fs _) = Just . snd <$> sortFields (M.fromList fs)
 unpackPat (PatternAscription p _ _) = unpackPat p
 unpackPat p@PatternLit{} = [Just p]
 
-wildPattern :: Pattern -> Int -> Unmatched Pattern -> Unmatched Pattern
+wildPattern :: Pattern Names -> Int -> Unmatched (Pattern Names) -> Unmatched (Pattern Names)
 wildPattern (TuplePattern ps loc) pos um = f <$> um
   where f p = TuplePattern (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
         ps' = map wildOut ps
@@ -1389,7 +1412,7 @@ checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
                        , mapOnPatternType = pure
                        }
 
-unmatched :: (Unmatched Pattern -> Unmatched Pattern) -> [Pattern] -> [Unmatched Pattern]
+unmatched :: (Unmatched (Pattern Names) -> Unmatched (Pattern Names)) -> [Pattern Names] -> [Unmatched (Pattern Names)]
 unmatched hole (p:ps)
   | sameStructure labeledCols = do
     (i, cols) <- labeledCols
@@ -1402,10 +1425,10 @@ unmatched hole (p:ps)
 
   where labeledCols = zip [1..] $ transpose $ map unpackPat (p:ps)
 
-        localUnmatched :: [Pattern] -> [Unmatched Pattern]
+        localUnmatched :: [Pattern Names] -> [Unmatched (Pattern Names)]
         localUnmatched [] = []
         localUnmatched ps'@(p':_) =
-          case vacuousShapeAnnotations $ patternType p'  of
+          case vacuousShapeAnnotations $ patternType p' of
             Enum cs'' ->
               let matched = nub $ mapMaybe (pExp >=> constr) ps'
               in map (UnmatchedEnum . buildEnum (Enum cs'')) $ cs'' \\ matched
@@ -1456,7 +1479,7 @@ unmatched hole (p:ps)
 
 unmatched _ _ = []
 
-checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
+checkIdent :: IdentBase Name (NoInfo CompType) -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
   (QualName _ name', vt) <- lookupVar loc (qualName name)
   return $ Ident name' (Info vt) loc
@@ -1560,9 +1583,9 @@ checkOneExp e = fmap fst . runTermTypeM $ do
 
 -- | Type-check a top-level (or module-level) function definition.
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
-                [UncheckedTypeParam], [UncheckedPattern],
+                [UncheckedTypeParam], [UncheckedPattern ()],
                 UncheckedExp, SrcLoc)
-            -> TypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
+            -> TypeM (VName, [TypeParam], [Pattern ()], Maybe (TypeExp VName), StructType, Exp)
 checkFunDef f = fmap fst $ runTermTypeM $ do
   (fname, tparams, params, maybe_retdecl, rettype, body) <- checkFunDef' f
 
@@ -1620,9 +1643,9 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
         fixOverloaded _ = return ()
 
 checkFunDef' :: (Name, Maybe UncheckedTypeExp,
-                 [UncheckedTypeParam], [UncheckedPattern],
+                 [UncheckedTypeParam], [UncheckedPattern ()],
                  UncheckedExp, SrcLoc)
-             -> TermTypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
+             -> TermTypeM (VName, [TypeParam], [Pattern ()], Maybe (TypeExp VName), StructType, Exp)
 checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
   when (nameToString fname == "&&") $
     typeError loc "The && operator may not be redefined."

@@ -82,7 +82,6 @@ module Language.Futhark.Attributes
   , UncheckedType
   , UncheckedTypeExp
   , UncheckedArrayElemType
-  , UncheckedIdent
   , UncheckedTypeDecl
   , UncheckedDimIndex
   , UncheckedExp
@@ -227,9 +226,10 @@ toStruct :: TypeBase dim as
 toStruct t = t `setAliases` ()
 
 -- | Replace no aliasing with an empty alias set.
-fromStruct :: TypeBase dim as
-           -> TypeBase dim Names
-fromStruct t = t `setAliases` S.empty
+fromStruct :: Monoid b =>
+              TypeBase dim a
+           -> TypeBase dim b
+fromStruct t = t `setAliases` mempty
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
@@ -468,7 +468,7 @@ typeOf (Stream _ lam _ _) =
   rettype (typeOf lam) `setUniqueness` Unique
   where rettype (Arrow _ _ _ t) = rettype t
         rettype t = t
-typeOf (DoLoop _ pat _ _ _ _) = patternType pat
+typeOf (DoLoop _ _ _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Lambda _ params _ _ (Info (als, t)) _) =
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
   `setAliases` als
@@ -600,7 +600,7 @@ orderZero Arrow{}         = False
 orderZero Enum{}          = True
 
 -- | Extract all the shape names that occur in a given pattern.
-patternDimNames :: PatternBase Info VName -> Names
+patternDimNames :: PatternBase Info VName u -> Names
 patternDimNames (TuplePattern ps _)    = foldMap patternDimNames ps
 patternDimNames (RecordPattern fs _)   = foldMap (patternDimNames . snd) fs
 patternDimNames (PatternParens p _)    = patternDimNames p
@@ -619,7 +619,7 @@ typeDimNames = foldMap dimName . nestedDims
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.
-patternOrderZero :: PatternBase Info vn -> Bool
+patternOrderZero :: PatternBase Info vn u -> Bool
 patternOrderZero pat = case pat of
   TuplePattern ps _       -> all patternOrderZero ps
   RecordPattern fs _      -> all (patternOrderZero . snd) fs
@@ -630,7 +630,9 @@ patternOrderZero pat = case pat of
   PatternLit _ (Info t) _ -> orderZero t
 
 -- | The set of identifiers bound in a pattern.
-patIdentSet :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
+patIdentSet :: (Functor f, Ord vn) =>
+               PatternBase f vn u
+            -> S.Set (IdentBase vn (f (TypeBase () u)))
 patIdentSet (Id v t loc)              = S.singleton $ Ident v (removeShapeAnnotations <$> t) loc
 patIdentSet (PatternParens p _)       = patIdentSet p
 patIdentSet (TuplePattern pats _)     = mconcat $ map patIdentSet pats
@@ -640,7 +642,7 @@ patIdentSet (PatternAscription p _ _) = patIdentSet p
 patIdentSet PatternLit{}              = mempty
 
 -- | The type of values bound by the pattern.
-patternType :: PatternBase Info VName -> CompType
+patternType :: PatternBase Info VName Names -> CompType
 patternType (Wildcard (Info t) _)     = removeShapeAnnotations t
 patternType (PatternParens p _)       = patternType p
 patternType (Id _ (Info t) _)         = removeShapeAnnotations t
@@ -650,7 +652,7 @@ patternType (PatternAscription p _ _) = patternType p
 patternType (PatternLit _ (Info t) _) = removeShapeAnnotations t
 
 -- | The type of a pattern, including shape annotations.
-patternPatternType :: PatternBase Info VName -> PatternType
+patternPatternType :: PatternBase Info VName u -> TypeBase (DimDecl VName) u
 patternPatternType (Wildcard (Info t) _)      = t
 patternPatternType (PatternParens p _)        = patternPatternType p
 patternPatternType (Id _ (Info t) _)          = t
@@ -660,12 +662,12 @@ patternPatternType (PatternAscription p _ _)  = patternPatternType p
 patternPatternType (PatternLit _ (Info t) _)  = t
 
 -- | The type matched by the pattern, including shape declarations if present.
-patternStructType :: PatternBase Info VName -> StructType
+patternStructType :: PatternBase Info VName u -> StructType
 patternStructType = toStruct . patternPatternType
 
 -- | When viewed as a function parameter, does this pattern correspond
 -- to a named parameter of some type?
-patternParam :: PatternBase Info VName -> (Maybe VName, StructType)
+patternParam :: PatternBase Info VName u -> (Maybe VName, StructType)
 patternParam (PatternParens p _) =
   patternParam p
 patternParam (PatternAscription (Id v _ _) td _) =
@@ -675,7 +677,7 @@ patternParam p =
 
 -- | Remove all shape annotations from a pattern, leaving them unnamed
 -- instead.
-patternNoShapeAnnotations :: PatternBase Info VName -> PatternBase Info VName
+patternNoShapeAnnotations :: PatternBase Info VName u -> PatternBase Info VName u
 patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t)) loc) =
   PatternAscription (patternNoShapeAnnotations p)
   (TypeDecl te $ Info $ vacuousShapeAnnotations t) loc
@@ -1021,9 +1023,6 @@ type UncheckedArrayElemType = ArrayElemTypeBase (ShapeDecl Name)
 -- | A type declaration with no expanded type.
 type UncheckedTypeDecl = TypeDeclBase NoInfo Name
 
--- | An identifier with no type annotations.
-type UncheckedIdent = IdentBase NoInfo Name
-
 -- | An index with no type annotations.
 type UncheckedDimIndex = DimIndexBase NoInfo Name
 
@@ -1039,8 +1038,8 @@ type UncheckedSigExp = SigExpBase NoInfo Name
 -- | A type parameter with no type annotations.
 type UncheckedTypeParam = TypeParamBase Name
 
--- | A pattern with no type annotations.
-type UncheckedPattern = PatternBase NoInfo Name
+-- | A value pattern with no type annotations.
+type UncheckedPattern u = PatternBase NoInfo Name u
 
 -- | A function declaration with no type annotations.
 type UncheckedValBind = ValBindBase NoInfo Name

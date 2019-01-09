@@ -38,7 +38,7 @@ import Language.Futhark.TypeChecker.Monad
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
 -- that combines the aliasing of @t1@ and @t2@ is returned.
 -- Uniqueness is unified with @uf@.
-unifyTypesU :: (Monoid als, Eq als, ArrayDim dim) =>
+unifyTypesU :: (Monoid als, ArrayDim dim) =>
               (Uniqueness -> Uniqueness -> Maybe Uniqueness)
            -> TypeBase dim als -> TypeBase dim als -> Maybe (TypeBase dim als)
 unifyTypesU _ (Prim t1) (Prim t2)
@@ -60,8 +60,8 @@ unifyTypesU uf (Record ts1) (Record ts2)
       (M.intersectionWith (,) ts1 ts2)
 unifyTypesU uf (Arrow as1 mn1 t1 t1') (Arrow as2 _ t2 t2') =
   Arrow (as1 <> as2) mn1 <$> unifyTypesU (flip uf) t1 t2 <*> unifyTypesU uf t1' t2'
-unifyTypesU _ e1@Enum{} e2@Enum{}
-  | e1 == e2 = Just e1
+unifyTypesU _ e1@(Enum cs1) (Enum cs2)
+  | cs1 == cs2 = Just e1
 unifyTypesU _ _ _ = Nothing
 
 unifyTypeArgs :: (ArrayDim dim) =>
@@ -254,7 +254,7 @@ checkNamedDim loc v = do
 -- | Check for duplication of names inside a pattern group.  Produces
 -- a description of all names used in the pattern group.
 checkForDuplicateNames :: MonadTypeChecker m =>
-                          [UncheckedPattern] -> m ()
+                          [UncheckedPattern u] -> m ()
 checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
   where check (Id v _ loc) = seen v loc
         check (PatternParens p _) = check p
@@ -403,17 +403,11 @@ instance Functor Subst where
 class Substitutable a where
   applySubst :: (VName -> Maybe (Subst (TypeBase () ()))) -> a -> a
 
-instance Substitutable (TypeBase () ()) where
-  applySubst = substTypesAny
-
-instance Substitutable (TypeBase () Names) where
+instance Monoid u => Substitutable (TypeBase () u) where
   applySubst = substTypesAny . (fmap (fmap fromStruct).)
 
-instance Substitutable (TypeBase (DimDecl VName) ()) where
-  applySubst = substTypesAny . (fmap (fmap vacuousShapeAnnotations).)
-
-instance Substitutable (TypeBase (DimDecl VName) Names) where
-  applySubst = substTypesAny . (fmap (fmap (vacuousShapeAnnotations . fromStruct)).)
+instance Monoid u => Substitutable (TypeBase (DimDecl VName) u) where
+  applySubst = substTypesAny . (fmap (fmap $ vacuousShapeAnnotations . fromStruct).)
 
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.

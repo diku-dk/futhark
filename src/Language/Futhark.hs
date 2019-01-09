@@ -18,7 +18,7 @@ import Language.Futhark.Attributes
 import Language.Futhark.Pretty
 
 -- | An identifier with type- and aliasing information.
-type Ident = IdentBase Info VName
+type Ident = IdentBase VName (Info CompType)
 
 -- | An index with type information.
 type DimIndex = DimIndexBase Info VName
