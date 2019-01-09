@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE UndecidableInstances       #-}
 -- | This is an ever-changing syntax representation for Futhark.  Some
 -- types, such as @Exp@, are parametrised by type and name
 -- representation.  See the @https://futhark.readthedocs.org@ for a
@@ -54,6 +55,8 @@ module Language.Futhark.Syntax
   , CaseBase(..)
   , LoopFormBase (..)
   , PatternBase(..)
+  , ValPatternBase
+  , ParamPatternBase
   , StreamForm(..)
 
   -- * Module language
@@ -461,19 +464,19 @@ data Value = PrimValue !PrimValue
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
-data IdentBase f vn = Ident { identName   :: vn
-                            , identType   :: f CompType
+data IdentBase vn t = Ident { identName   :: vn
+                            , identType   :: t
                             , identSrcLoc :: SrcLoc
                             }
-deriving instance Showable f vn => Show (IdentBase f vn)
+                      deriving (Show)
 
-instance Eq vn => Eq (IdentBase ty vn) where
+instance Eq vn => Eq (IdentBase vn t) where
   x == y = identName x == identName y
 
-instance Ord vn => Ord (IdentBase ty vn) where
+instance Ord vn => Ord (IdentBase vn t) where
   compare = comparing identName
 
-instance Located (IdentBase ty vn) where
+instance Located (IdentBase vn t) where
   locOf = locOf . identSrcLoc
 
 -- | Default binary operators.
@@ -596,9 +599,9 @@ data ExpBase f vn =
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
             -- ^ Type ascription: @e : t@.
 
-            | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            | LetPat [TypeParamBase vn] (ValPatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
 
-            | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
+            | LetFun vn ([TypeParamBase vn], [ParamPatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
               (ExpBase f vn) SrcLoc
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
@@ -608,7 +611,7 @@ data ExpBase f vn =
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
 
-            | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
+            | Lambda [TypeParamBase vn] [ParamPatternBase f vn] (ExpBase f vn)
               (Maybe (TypeDeclBase f vn)) (f (Names, StructType)) SrcLoc
 
             | OpSection (QualName vn) (f PatternType) SrcLoc
@@ -626,10 +629,11 @@ data ExpBase f vn =
 
             | DoLoop
               [TypeParamBase vn]
-              (PatternBase f vn) -- Merge variable pattern
+              (ParamPatternBase f vn) -- Merge variable pattern
               (ExpBase f vn) -- Initial values of merge variables.
               (LoopFormBase f vn) -- Do or while loop.
               (ExpBase f vn) -- Loop body.
+              (f PatternType) -- Result type.
               SrcLoc
 
             | BinOp (QualName vn) (f PatternType)
@@ -639,7 +643,8 @@ data ExpBase f vn =
             | Project Name (ExpBase f vn) (f CompType) SrcLoc
 
             -- Primitive array operations
-            | LetWith (IdentBase f vn) (IdentBase f vn)
+            | LetWith (IdentBase vn (f CompType))
+                      (IdentBase vn (f CompType))
                       [DimIndexBase f vn] (ExpBase f vn)
                       (ExpBase f vn) SrcLoc
 
@@ -768,7 +773,7 @@ instance Located (ExpBase f vn) where
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
   locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (IndexSection _ _ loc)         = locOf loc
-  locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
+  locOf (DoLoop _ _ _ _ _ _ loc)       = locOf loc
   locOf (Stream _ _ _  pos)            = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
@@ -786,7 +791,7 @@ instance Located (FieldBase f vn) where
   locOf (RecordFieldImplicit _ _ loc) = locOf loc
 
 -- | A case in a match expression.
-data CaseBase f vn = CasePat (PatternBase f vn) (ExpBase f vn) SrcLoc
+data CaseBase f vn = CasePat (ValPatternBase f vn) (ExpBase f vn) SrcLoc
 
 deriving instance Showable f vn => Show (CaseBase f vn)
 
@@ -794,23 +799,30 @@ instance Located (CaseBase f vn) where
   locOf (CasePat _ _ loc) = locOf loc
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
-data LoopFormBase f vn = For (IdentBase f vn) (ExpBase f vn)
-                       | ForIn (PatternBase f vn) (ExpBase f vn)
+data LoopFormBase f vn = For vn (ExpBase f vn)
+                       | ForIn (ValPatternBase f vn) (ExpBase f vn)
                        | While (ExpBase f vn)
 deriving instance Showable f vn => Show (LoopFormBase f vn)
 
--- | A pattern as used most places where variables are bound (function
--- parameters, @let@ expressions, etc).
-data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
-                      | RecordPattern [(Name, PatternBase f vn)] SrcLoc
-                      | PatternParens (PatternBase f vn) SrcLoc
-                      | Id vn (f PatternType) SrcLoc
-                      | Wildcard (f PatternType) SrcLoc -- Nothing, i.e. underscore.
-                      | PatternAscription (PatternBase f vn) (TypeDeclBase f vn) SrcLoc
-                      | PatternLit (ExpBase f vn) (f PatternType) SrcLoc
-deriving instance Showable f vn => Show (PatternBase f vn)
+-- | A generic pattern as used most places where variables are bound
+-- (function parameters, @let@ expressions, etc).
+data PatternBase f vn u = TuplePattern [PatternBase f vn u] SrcLoc
+                        | RecordPattern [(Name, PatternBase f vn u)] SrcLoc
+                        | PatternParens (PatternBase f vn u) SrcLoc
+                        | Id vn (f (TypeBase (DimDecl VName) u)) SrcLoc
+                        | Wildcard (f (TypeBase (DimDecl VName) u)) SrcLoc -- ^ Nothing, i.e. underscore.
+                        | PatternAscription (PatternBase f vn u) (TypeDeclBase f vn) SrcLoc
+                        | PatternLit (ExpBase f vn) (f (TypeBase (DimDecl VName) u)) SrcLoc
+deriving instance (Showable f vn, Show (f (TypeBase (DimDecl VName) u))) => Show (PatternBase f vn u)
 
-instance Located (PatternBase f vn) where
+-- | A pattern used for @let@ and @case@ and such, with aliasing
+-- information.
+type ValPatternBase f vn = PatternBase f vn Names
+
+-- | A pattern used for function parameters.
+type ParamPatternBase f vn = PatternBase f vn ()
+
+instance Located (PatternBase f vn u) where
   locOf (TuplePattern _ loc)        = locOf loc
   locOf (RecordPattern _ loc)       = locOf loc
   locOf (PatternParens _ loc)       = locOf loc
@@ -833,7 +845,7 @@ data ValBindBase f vn = ValBind { valBindEntryPoint :: Bool
                                 , valBindRetDecl    :: Maybe (TypeExp vn)
                                 , valBindRetType    :: f StructType
                                 , valBindTypeParams :: [TypeParamBase vn]
-                                , valBindParams     :: [PatternBase f vn]
+                                , valBindParams     :: [ParamPatternBase f vn]
                                 , valBindBody       :: ExpBase f vn
                                 , valBindDoc        :: Maybe DocComment
                                 , valBindLocation   :: SrcLoc
