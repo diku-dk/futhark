@@ -53,7 +53,7 @@ internaliseProg always_safe prog = do
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
 
-internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
+internaliseFunName :: VName -> [E.Pattern ()] -> InternaliseM Name
 internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
 internaliseFunName ofname _  = do
   info <- lookupFunction' ofname
@@ -144,7 +144,7 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) 
       (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
 
-entryPoint :: [(E.Pattern,[I.FParam])]
+entryPoint :: [(E.Pattern (),[I.FParam])]
            -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
            -> EntryPoint
 entryPoint params (retdecl, eret, crets) =
@@ -440,7 +440,7 @@ internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, bo
   internaliseValBind $ E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc
   internaliseExp desc letbody
 
-internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
+internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody _ loc) = do
   -- We pretend that we saw a let-binding first to ensure that the
   -- initial values for the merge parameters match their annotated
   -- sizes
@@ -516,7 +516,6 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
 
     handleForm mergeinit (E.For i num_iterations) = do
       num_iterations' <- internaliseExp1 "upper_bound" num_iterations
-      i' <- internaliseIdent i
       num_iterations_t <- I.subExpType num_iterations'
       it <- case num_iterations_t of
               I.Prim (IntType it) -> return it
@@ -524,7 +523,7 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
 
       bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
         mapM_ (uncurry (internaliseDimConstant loc)) mergecm
-        forLoop nested_mergepat shapepat mergeinit $ I.ForLoop i' it num_iterations' []
+        forLoop nested_mergepat shapepat mergeinit $ I.ForLoop i it num_iterations' []
 
     handleForm mergeinit (E.While cond) =
       bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
@@ -898,11 +897,11 @@ eqExp l r = E.BinOp eq (Info $ vacuousShapeAnnotations ft)
         ft      = E.typeOf l `arrow` E.typeOf r `arrow` E.Prim E.Bool
         eq      = qualName $ VName "==" (-1)
 
-generateCond :: E.Pattern -> E.Exp -> E.Exp
+generateCond :: E.Pattern E.Names -> E.Exp -> E.Exp
 generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
   where conds = mapMaybe ((<*> pure e) . fst) $ generateCond' p
 
-        generateCond' :: E.Pattern -> [(Maybe (E.Exp -> E.Exp), CompType)]
+        generateCond' :: E.Pattern E.Names -> [(Maybe (E.Exp -> E.Exp), CompType)]
         generateCond' (E.TuplePattern ps loc) = generateCond' (E.RecordPattern fs loc)
           where fs = zipWith (\i p' -> (nameFromString (show i), p')) ([1..] :: [Integer]) ps
         generateCond' (E.RecordPattern fs _) = concatMap instCond holes
@@ -930,7 +929,7 @@ generateCaseIf desc e (CasePat p eCase loc) bFail = do
   eIf cond (return eCase') (return bFail)
   where cond = BasicOp . SubExp <$> internaliseExp1 "cond" (generateCond p e)
 
-internalisePat :: String -> [TypeParamBase VName] -> E.Pattern -> E.Exp
+internalisePat :: String -> [TypeParamBase VName] -> E.Pattern E.Names -> E.Exp
                -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a) -> InternaliseM a
 internalisePat desc tparams p e body loc m = do
   ses <- internaliseExp desc e

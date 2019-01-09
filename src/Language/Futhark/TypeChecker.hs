@@ -490,8 +490,8 @@ nastyReturnType te t
   where nastyType' (Just te') _ | niceTypeExp te' = False
         nastyType' _ t' = nastyType t'
 
-nastyParameter :: Pattern -> Bool
-nastyParameter p = nastyType (patternType p) && not (ascripted p)
+nastyParameter :: Pattern () -> Bool
+nastyParameter p = nastyType (patternPatternType p) && not (ascripted p)
   where ascripted (PatternAscription _ (TypeDecl te _) _) = niceTypeExp te
         ascripted (PatternParens p' _) = ascripted p'
         ascripted _ = False
