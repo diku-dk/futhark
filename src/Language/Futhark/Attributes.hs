@@ -443,7 +443,13 @@ typeOf (Var qn (Info t) _) = removeShapeAnnotations t `addAliases` S.insert (qua
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Apply _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ _ _ body _) = typeOf body
+typeOf (LetPat _ _ _ body _) =
+  -- It is intentional that we do not remove the names bound by the
+  -- pattern from the aliasing of the result, as we need to track that
+  -- two values may alias each other through a variable, even if that
+  -- variable has gone out of scope.  See uniqueness-error18.fut for
+  -- an example.
+  typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index _ _ (Info t) _) = t
