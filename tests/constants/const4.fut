@@ -7,4 +7,4 @@ let n: i32 = 3
 
 let x: [n]i32 = replicate n 0
 
-let main: []i32 = x
+let main: []i32 = copy x
