@@ -78,7 +78,8 @@ module Language.Futhark.Syntax
   -- * Miscellaneous
   , NoInfo(..)
   , Info(..)
-  , Names
+  , Alias(..)
+  , Aliasing
   , QualName(..)
   )
   where
@@ -118,7 +119,7 @@ class (Show vn,
        Show (f Int),
        Show (f [TypeBase () ()]),
        Show (f StructType),
-       Show (f (Names, StructType)),
+       Show (f (Aliasing, StructType)),
        Show (f ([TypeBase () ()], PatternType)),
        Show (f (M.Map VName VName)),
        Show (f [RecordArrayElemTypeBase ()]),
@@ -386,13 +387,25 @@ instance Functor TypeArg where
 instance Foldable TypeArg where
   foldMap = foldMapDefault
 
+-- | A variable that is aliased.  Can be still in-scope, or have gone
+-- out of scope and be free.  In the latter case, it behaves more like
+-- an equivalence class.  See uniqueness-error18.fut for an example of
+-- why this is necessary.
+data Alias = AliasBound { aliasVar :: VName }
+           | AliasFree { aliasVar :: VName }
+           deriving (Eq, Ord, Show)
+
+-- | Aliasing for a type, which is a set of the variables that are
+-- aliased.
+type Aliasing = S.Set Alias
+
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
-type CompType = TypeBase () Names
+type CompType = TypeBase () Aliasing
 
 -- | A type with aliasing information and shape annotations, used for
 -- describing the type of a pattern.
-type PatternType = TypeBase (DimDecl VName) Names
+type PatternType = TypeBase (DimDecl VName) Aliasing
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
@@ -609,7 +622,7 @@ data ExpBase f vn =
               -- ^ Numeric negation (ugly special case; Haskell did it first).
 
             | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
-              (Maybe (TypeDeclBase f vn)) (f (Names, StructType)) SrcLoc
+              (Maybe (TypeDeclBase f vn)) (f (Aliasing, StructType)) SrcLoc
 
             | OpSection (QualName vn) (f PatternType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.
@@ -1006,9 +1019,6 @@ data ProgBase f vn = Prog { progDoc :: Maybe DocComment
                           , progDecs :: [DecBase f vn]
                           }
 deriving instance Showable f vn => Show (ProgBase f vn)
-
--- | A set of names.
-type Names = S.Set VName
 
 --- Some prettyprinting definitions are here because we need them in
 --- the Attributes module.

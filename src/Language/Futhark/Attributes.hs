@@ -228,7 +228,7 @@ toStruct t = t `setAliases` ()
 
 -- | Replace no aliasing with an empty alias set.
 fromStruct :: TypeBase dim as
-           -> TypeBase dim Names
+           -> TypeBase dim Aliasing
 fromStruct t = t `setAliases` S.empty
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
@@ -419,6 +419,11 @@ valueType (ArrayValue _ t) = t
 rank :: Int -> ShapeDecl ()
 rank n = ShapeDecl $ replicate n ()
 
+unscopeAliases :: S.Set VName -> CompType -> CompType
+unscopeAliases bound_here t = t `addAliases` S.map unbind
+  where unbind (AliasBound v) | v `S.member` bound_here = AliasFree v
+        unbind a = a
+
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: ExpBase Info VName -> CompType
@@ -433,25 +438,21 @@ typeOf (RecordLit fs _) =
   Record $ M.unions $ reverse $ map record fs
   where record (RecordFieldExplicit name e _) = M.singleton name $ typeOf e
         record (RecordFieldImplicit name (Info t) _) =
-          M.singleton (baseName name) $ t `addAliases` S.insert name
+          M.singleton (baseName name) $ t `addAliases` S.insert (AliasBound name)
 typeOf (ArrayLit _ (Info t) _) = t
 typeOf (Range _ _ _ (Info t) _) = t
 typeOf (BinOp _ _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
-typeOf (Var qn (Info t) _) = removeShapeAnnotations t `addAliases` S.insert (qualLeaf qn)
+typeOf (Var _ (Info t) _) = removeShapeAnnotations t
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Apply _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ _ _ body _) =
-  -- It is intentional that we do not remove the names bound by the
-  -- pattern from the aliasing of the result, as we need to track that
-  -- two values may alias each other through a variable, even if that
-  -- variable has gone out of scope.  See uniqueness-error18.fut for
-  -- an example.
-  typeOf body
+typeOf (LetPat _ pat _ body _) =
+  unscopeAliases (S.map identName $ patIdentSet pat) $ typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
-typeOf (LetWith _ _ _ _ body _) = typeOf body
+typeOf (LetWith dest _ _ _ body _) =
+  unscopeAliases (S.singleton $ identName dest) $ typeOf body
 typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = removeShapeAnnotations t
@@ -476,6 +477,7 @@ typeOf (Stream _ lam _ _) =
         rettype t = t
 typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 typeOf (Lambda _ params _ _ (Info (als, t)) _) =
+  unscopeAliases (S.map identName $ mconcat $ map patIdentSet params) $
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
   `setAliases` als
 typeOf (OpSection _ (Info t) _) =
@@ -502,7 +504,7 @@ unfoldFunType (Arrow _ _ t1 t2) = let (ps, r) = unfoldFunType t2
 unfoldFunType t = ([], t)
 
 -- | The type names mentioned in a type.
-typeVars :: Monoid as => TypeBase dim as -> Names
+typeVars :: Monoid as => TypeBase dim as -> S.Set VName
 typeVars t =
   case t of
     Prim{} -> mempty
@@ -530,7 +532,7 @@ typeVars t =
 returnType :: TypeBase dim ()
            -> [Diet]
            -> [CompType]
-           -> TypeBase dim Names
+           -> TypeBase dim Aliasing
 returnType (Array () Unique et shape) _ _ =
   Array mempty Unique et shape
 returnType (Array () Nonunique et shape) ds args =
@@ -606,7 +608,7 @@ orderZero Arrow{}         = False
 orderZero Enum{}          = True
 
 -- | Extract all the shape names that occur in a given pattern.
-patternDimNames :: PatternBase Info VName -> Names
+patternDimNames :: PatternBase Info VName -> S.Set VName
 patternDimNames (TuplePattern ps _)    = foldMap patternDimNames ps
 patternDimNames (RecordPattern fs _)   = foldMap (patternDimNames . snd) fs
 patternDimNames (PatternParens p _)    = patternDimNames p
@@ -617,9 +619,9 @@ patternDimNames (PatternAscription p (TypeDecl _ (Info t)) _) =
 patternDimNames (PatternLit _ (Info tp) _) = typeDimNames tp
 
 -- | Extract all the shape names that occur in a given type.
-typeDimNames :: TypeBase (DimDecl VName) als -> Names
+typeDimNames :: TypeBase (DimDecl VName) als -> S.Set VName
 typeDimNames = foldMap dimName . nestedDims
-  where dimName :: DimDecl VName -> Names
+  where dimName :: DimDecl VName -> S.Set VName
         dimName (NamedDim qn) = S.singleton $ qualLeaf qn
         dimName _             = mempty
 

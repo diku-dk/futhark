@@ -223,8 +223,12 @@ instance ASTMappable (DimIndexBase Info VName) where
     maybe (return Nothing) (fmap Just . astMap tv) j <*>
     maybe (return Nothing) (fmap Just . astMap tv) stride
 
-instance ASTMappable Names where
-  astMap tv = fmap S.fromList . traverse (mapOnName tv) . S.toList
+instance ASTMappable Alias where
+  astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v
+  astMap tv (AliasFree v) = AliasFree <$> mapOnName tv v
+
+instance ASTMappable Aliasing where
+  astMap tv = fmap S.fromList . traverse (astMap tv) . S.toList
 
 type TypeTraverser f t dim1 als1 dim2 als2 =
   (TypeName -> f TypeName) -> (dim1 -> f dim2) -> (als1 -> f als2) ->

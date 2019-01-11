@@ -43,6 +43,8 @@ data Usage = Consumed SrcLoc
            | Observed SrcLoc
            deriving (Eq, Ord, Show)
 
+type Names = S.Set VName
+
 -- | The consumption set is a Maybe so we can distinguish whether a
 -- consumption took place, but the variable went out of scope since,
 -- or no consumption at all took place.
@@ -55,11 +57,11 @@ data Occurence = Occurence { observed :: Names
 instance Located Occurence where
   locOf = locOf . location
 
-observation :: Names -> SrcLoc -> Occurence
-observation = flip Occurence Nothing
+observation :: Aliasing -> SrcLoc -> Occurence
+observation = flip Occurence Nothing . S.map aliasVar
 
-consumption :: Names -> SrcLoc -> Occurence
-consumption = Occurence S.empty . Just
+consumption :: Aliasing -> SrcLoc -> Occurence
+consumption = Occurence S.empty . Just . S.map aliasVar
 
 -- | A null occurence is one that we can remove without affecting
 -- anything.
@@ -131,7 +133,11 @@ altOccurences occurs1 occurs2 =
 
 --- Scope management
 
-data ValBinding = BoundV [TypeParam] PatternType
+-- | Whether something is a global or a local variable.
+data Locality = Local | Global
+              deriving (Show)
+
+data ValBinding = BoundV Locality [TypeParam] PatternType
                 -- ^ Aliases in parameters indicate the lexical
                 -- closure.
                 | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
@@ -160,8 +166,10 @@ instance Monoid TermScope where
 
 envToTermScope :: Env -> TermScope
 envToTermScope env = TermScope vtable (envTypeTable env) (envNameMap env) mempty
-  where vtable = M.map valBinding $ envVtable env
-        valBinding (TypeM.BoundV tps v) = BoundV tps $ v `setAliases` mempty
+  where vtable = M.mapWithKey valBinding $ envVtable env
+        valBinding k (TypeM.BoundV tps v) =
+          BoundV Global tps $ v `setAliases`
+          (if arrayRank v > 0 then S.singleton (AliasBound k) else mempty)
 
 constraintTypeVars :: Constraints -> Names
 constraintTypeVars = mconcat . map f . M.elems
@@ -234,11 +242,11 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap mempty
         funF ts t = foldr (Arrow mempty Nothing . Prim) (Prim t) ts
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
-          Just (name, BoundV [] $ funF ts t)
+          Just (name, BoundV Global [] $ funF ts t)
         addIntrinsicF (name, IntrinsicOverloadedFun ts pts rts) =
           Just (name, OverloadedF ts pts rts)
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
-          Just (name, BoundV tvs $
+          Just (name, BoundV Global tvs $
                       fromStruct $ vacuousShapeAnnotations $
                       Arrow mempty Nothing pts' rt)
           where pts' = case pts of [pt] -> pt
@@ -291,7 +299,7 @@ instance MonadTypeChecker TermTypeM where
 
       Just (WasConsumed wloc) -> useAfterConsume (baseName name) loc wloc
 
-      Just (BoundV tparams t)
+      Just (BoundV _ tparams t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise -> do
             (tnames, t') <- instantiateTypeScheme loc tparams t
@@ -572,15 +580,17 @@ binding bnds = check . local (`bindVars` bnds)
 
         bindVar :: TermScope -> Ident -> TermScope
         bindVar scope (Ident name (Info tp) _) =
-          let inedges = S.toList $ aliases tp
-              update (BoundV tparams tp')
+          let inedges = boundAliases $ aliases tp
+              update (BoundV l tparams in_t)
               -- If 'name' is record-typed, don't alias the components
               -- to 'name', because records have no identity beyond
               -- their components.
-                | Record _ <- tp = BoundV tparams tp'
-                | otherwise = BoundV tparams (tp' `addAliases` S.insert name)
+                | Record _ <- tp = BoundV l tparams in_t
+                | otherwise = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
               update b = b
-          in scope { scopeVtable = M.insert name (BoundV [] $ vacuousShapeAnnotations tp) $
+
+              tp' = vacuousShapeAnnotations tp `addAliases` S.insert (AliasBound name)
+          in scope { scopeVtable = M.insert name (BoundV Local [] tp') $
                                    adjustSeveral update inedges $
                                    scopeVtable scope
                    }
@@ -877,7 +887,7 @@ checkExp (If e1 e2 e3 _ loc) =
   sequentially checkCond $ \e1' _ -> do
   ((e2', e3'), dflow) <- tapOccurences $ checkExp e2 `alternative` checkExp e3
   brancht <- unifyExpTypes e2' e3'
-  let t' = addAliases brancht (`S.difference` allConsumed dflow)
+  let t' = addAliases brancht (`S.difference` S.map AliasBound (allConsumed dflow))
   zeroOrderType loc "returned from branch" t'
   return $ If e1' e2' e3' (Info t') loc
   where checkCond = do
@@ -909,7 +919,9 @@ checkExp (Var qn NoInfo loc) = do
   -- end until we find a module.
 
   (qn', t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
-  foldM checkField (Var qn' (Info (vacuousShapeAnnotations t)) loc) fields
+
+  foldM checkField (Var qn' (Info $ vacuousShapeAnnotations t) loc) fields
+
   where findRootVar qs name =
           (whenFound <$> lookupVar loc (QualName qs name)) `catchError` notFound qs name
 
@@ -958,7 +970,8 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
     \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
 
     let ftype = foldr (uncurry (Arrow ()) . patternParam) rettype params'
-        entry = BoundV tparams' $ ftype `setAliases` allOccuring closure
+        entry = BoundV Local tparams' $
+                ftype `setAliases` S.map AliasBound (allOccuring closure)
         bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope
                             , scopeNameMap = M.insert (Term, name) (qualName name') $
                                              scopeNameMap scope }
@@ -982,7 +995,7 @@ checkExp (LetWith dest src idxes ve body pos) = do
     idxes' <- mapM checkDimIndex idxes
     sequentially (unifies elemt =<< checkExp ve) $ \ve' _ -> do
       ve_t <- expType ve'
-      when (identName src' `S.member` aliases ve_t) $
+      when (AliasBound (identName src') `S.member` aliases ve_t) $
         badLetWithValue pos
 
       bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
@@ -1096,13 +1109,22 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
       Nothing -> do
         body_t <- expType body'
         return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
-    return $ Lambda tparams' params' body' maybe_retdecl''
-      (Info (allOccuring closure, rettype)) loc
+
+    -- The closure of the lambda are those variables that it
+    -- references, and which local to the current function.
+    vtable <- asks scopeVtable
+    let isLocal v = case v `M.lookup` vtable of
+                      Just (BoundV Local _ _) -> True
+                      _ -> False
+        closure' = S.map AliasBound $ S.filter isLocal $
+                   allOccuring closure S.\\
+                   S.map identName (mconcat (map patIdentSet params'))
+
+    return $ Lambda tparams' params' body' maybe_retdecl'' (Info (closure', rettype)) loc
 
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
-  let ftype' = vacuousShapeAnnotations ftype `addAliases` (<>S.singleton (qualLeaf op'))
-  return $ OpSection op' (Info ftype') loc
+  return $ OpSection op' (Info $ vacuousShapeAnnotations ftype) loc
 
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
@@ -1261,7 +1283,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       bound_outside <- asks $ S.fromList . M.keys . scopeVtable
       let checkMergeReturn (Id pat_v (Info pat_v_t) _) t
             | unique pat_v_t,
-              v:_ <- S.toList $ aliases t `S.intersection` bound_outside =
+              v:_ <- S.toList $ S.map aliasVar (aliases t) `S.intersection` bound_outside =
                 lift $ typeError loc $ "Loop return value corresponding to merge parameter " ++
                 prettyName pat_v ++ " aliases " ++ prettyName v ++ "."
             | otherwise = do
@@ -1281,8 +1303,8 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
           checkMergeReturn _ _ =
             return ()
       (pat_cons, _) <- execStateT (checkMergeReturn pat' body_t') (mempty, mempty)
-      let body_cons' = body_cons <> pat_cons
-      if body_cons' == body_cons && patternType pat' == patternType pat
+      let body_cons' = body_cons <> S.map aliasVar pat_cons
+      if body_cons' == body_cons && patternPatternType pat' == patternPatternType pat
         then return pat'
         else convergePattern pat' body_cons' body_t' body_loc
 
@@ -1312,7 +1334,8 @@ checkCases mt c (c2:cs) = do
   (((c', c_t), (cs', cs_t)), dflow) <-
     tapOccurences $ checkCase mt c `alternative` checkCases mt c2 cs
   unify (srclocOf c) (toStruct c_t) (toStruct cs_t)
-  let t = unifyTypeAliases c_t cs_t `addAliases` (`S.difference` allConsumed dflow)
+  let t = unifyTypeAliases c_t cs_t `addAliases`
+        (`S.difference` S.map AliasBound (allConsumed dflow))
   return (c':cs', t)
 
 checkCase :: CompType -> CaseBase NoInfo Name
@@ -1510,10 +1533,9 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
     _ -> return ()
 
   occur $ dflow `seqOccurences` occurs
-
-  return (vacuousShapeAnnotations tp1',
-          vacuousShapeAnnotations $
-           returnType (toStruct tp2') [diet tp1'] [argtype'])
+  let tp2'' = vacuousShapeAnnotations $
+              returnType (toStruct tp2') [diet tp1'] [argtype']
+  return (vacuousShapeAnnotations tp1', tp2'')
 
 checkApply loc tfun@TypeVar{} arg = do
   tv <- newTypeVar loc "b"
@@ -1650,7 +1672,20 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
-      return (fname', tparams'', params'', maybe_retdecl'', rettype, body')
+      vtable <- asks scopeVtable
+      let isLocal v = case v `M.lookup` vtable of
+                        Just (BoundV Local _ _) -> True
+                        _ -> False
+      let als = filter (not . isLocal) $ S.toList $
+                boundArrayAliases body_t `S.difference`
+                S.map identName (mconcat (map patIdentSet params'))
+      case als of
+        v:_ | not $ null params ->
+          typeError loc $
+          unlines [ "Function result aliases the free variable `" <> prettyName v <> "`."
+                  , "Use `copy` to break the aliasing."]
+        _ ->
+          return (fname', tparams'', params'', maybe_retdecl'', rettype, body')
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -1658,10 +1693,10 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           foldM_ (checkReturnAlias' params') S.empty . returnAliasing rettp
         checkReturnAlias' params' seen (Unique, names)
           | any (`S.member` S.map snd seen) $ S.toList names =
-            uniqueReturnAliased fname loc
+              uniqueReturnAliased fname loc
           | otherwise = do
-            notAliasingParam params' names
-            return $ seen `S.union` tag Unique names
+              notAliasingParam params' names
+              return $ seen `S.union` tag Unique names
         checkReturnAlias' _ seen (Nonunique, names)
           | any (`S.member` seen) $ S.toList $ tag Unique names =
             uniqueReturnAliased fname loc
@@ -1681,7 +1716,22 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
 
         returnAliasing (Record ets1) (Record ets2) =
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
-        returnAliasing expected got = [(uniqueness expected, aliases got)]
+        returnAliasing expected got =
+          [(uniqueness expected, S.map aliasVar $ aliases got)]
+
+boundArrayAliases :: CompType -> S.Set VName
+boundArrayAliases (Array als _ _ _) = boundAliases als
+boundArrayAliases Prim{} = mempty
+boundArrayAliases Enum{} = mempty
+boundArrayAliases (Record fs) = foldMap boundArrayAliases fs
+boundArrayAliases (TypeVar als _ _ _) = boundAliases als
+boundArrayAliases Arrow{} = mempty
+
+-- | The set of in-scope variables that are being aliased.
+boundAliases :: Aliasing -> S.Set VName
+boundAliases = S.map aliasVar . S.filter bound
+  where bound AliasBound{} = True
+        bound AliasFree{} = False
 
 letGeneralise :: [TypeParam]
               -> [StructType]
@@ -1779,11 +1829,11 @@ occur = tell
 -- | Proclaim that we have made read-only use of the given variable.
 observe :: Ident -> TermTypeM ()
 observe (Ident nm (Info t) loc) =
-  let als = nm `S.insert` aliases t
+  let als = AliasBound nm `S.insert` aliases t
   in occur [observation als loc]
 
 -- | Proclaim that we have written to the given variable.
-consume :: SrcLoc -> Names -> TermTypeM ()
+consume :: SrcLoc -> Aliasing -> TermTypeM ()
 consume loc als = occur [consumption als loc]
 
 -- | Proclaim that we have written to the given variable, and mark
@@ -1791,7 +1841,7 @@ consume loc als = occur [consumption als loc]
 -- computation.
 consuming :: Ident -> TermTypeM a -> TermTypeM a
 consuming (Ident name (Info t) loc) m = do
-  consume loc $ name `S.insert` aliases t
+  consume loc $ AliasBound name `S.insert` aliases t
   local consume' m
   where consume' scope =
           scope { scopeVtable = M.insert name (WasConsumed loc) $ scopeVtable scope }
@@ -1827,7 +1877,7 @@ alternative m1 m2 = pass $ do
 -- | Make all bindings nonunique.
 noUnique :: TermTypeM a -> TermTypeM a
 noUnique = local (\scope -> scope { scopeVtable = M.map set $ scopeVtable scope})
-  where set (BoundV tparams t)      = BoundV tparams $ t `setUniqueness` Nonunique
+  where set (BoundV l tparams t)    = BoundV l tparams $ t `setUniqueness` Nonunique
         set (OverloadedF ts pts rt) = OverloadedF ts pts rt
         set EqualityF               = EqualityF
         set OpaqueF                 = OpaqueF
@@ -1835,7 +1885,8 @@ noUnique = local (\scope -> scope { scopeVtable = M.map set $ scopeVtable scope}
 
 onlySelfAliasing :: TermTypeM a -> TermTypeM a
 onlySelfAliasing = local (\scope -> scope { scopeVtable = M.mapWithKey set $ scopeVtable scope})
-  where set k (BoundV tparams t)      = BoundV tparams $ t `addAliases` S.intersection (S.singleton k)
+  where set k (BoundV l tparams t)    = BoundV l tparams $
+                                        t `addAliases` S.intersection (S.singleton (AliasBound k))
         set _ (OverloadedF ts pts rt) = OverloadedF ts pts rt
         set _ EqualityF               = EqualityF
         set _ OpaqueF                 = OpaqueF
