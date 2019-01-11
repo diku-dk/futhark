@@ -530,55 +530,26 @@ typeVars t =
 -- function with the given return type, consuming its parameters with
 -- the given diets.
 returnType :: TypeBase dim ()
-           -> [Diet]
-           -> [CompType]
+           -> Diet
+           -> CompType
            -> TypeBase dim Aliasing
 returnType (Array () Unique et shape) _ _ =
   Array mempty Unique et shape
-returnType (Array () Nonunique et shape) ds args =
-  Array als Nonunique (arrayElemReturnType et ds args) shape
-  where als = mconcat $ map aliases $ zipWith maskAliases args ds
-returnType (Record fs) ds args =
-  Record $ fmap (\et -> returnType et ds args) fs
+returnType (Array () Nonunique et shape) d arg =
+  Array als Nonunique et shape
+  where als = aliases $ maskAliases arg d
+returnType (Record fs) d arg =
+  Record $ fmap (\et -> returnType et d arg) fs
 returnType (Prim t) _ _ = Prim t
 returnType (TypeVar () Unique t targs) _ _ =
   TypeVar mempty Unique t targs
-returnType (TypeVar () Nonunique t targs) ds args =
-  TypeVar als Nonunique t $ map (\arg -> typeArgReturnType arg ds args) targs
-  where als = mconcat $ map aliases $ zipWith maskAliases args ds
-returnType (Arrow _ v t1 t2) ds args =
-  Arrow als v (bimap id (const mempty) t1) (returnType t2 ds args)
-  where als = foldMap aliases $ zipWith maskAliases args ds
+returnType (TypeVar () Nonunique t targs) d arg =
+  TypeVar als Nonunique t targs
+  where als = aliases $ maskAliases arg d
+returnType (Arrow _ v t1 t2) d arg =
+  Arrow als v (bimap id (const mempty) t1) (returnType t2 d arg)
+  where als = aliases $ maskAliases arg d
 returnType (Enum cs) _ _ = Enum cs
-
-typeArgReturnType :: TypeArg shape -> [Diet] -> [CompType]
-                  -> TypeArg shape
-typeArgReturnType (TypeArgDim v loc) _ _ =
-  TypeArgDim v loc
-typeArgReturnType (TypeArgType t loc) ds args =
-  TypeArgType (returnType t ds args `setAliases` ()) loc
-
-arrayElemReturnType :: ArrayElemTypeBase dim
-                    -> [Diet]
-                    -> [CompType]
-                    -> ArrayElemTypeBase dim
-arrayElemReturnType (ArrayPrimElem bt) _ _ =
-  ArrayPrimElem bt
-arrayElemReturnType (ArrayPolyElem bt targs) ds args =
-  ArrayPolyElem bt $ map (\arg -> typeArgReturnType arg ds args) targs
-arrayElemReturnType (ArrayRecordElem et) ds args =
-  ArrayRecordElem $ fmap (\t -> recordArrayElemReturnType t ds args) et
-arrayElemReturnType (ArrayEnumElem cs) _ _ =
-  ArrayEnumElem cs
-
-recordArrayElemReturnType :: RecordArrayElemTypeBase dim
-                         -> [Diet]
-                         -> [CompType]
-                         -> RecordArrayElemTypeBase dim
-recordArrayElemReturnType (RecordArrayElem et) ds args =
-  RecordArrayElem $ arrayElemReturnType et ds args
-recordArrayElemReturnType (RecordArrayArrayElem et shape) ds args =
-  RecordArrayArrayElem (arrayElemReturnType et ds args) shape
 
 -- | Is the type concrete, i.e, without any type variables or function arrows?
 concreteType :: TypeBase f vn -> Bool
