@@ -768,6 +768,18 @@ unifies t e = do
   unify (srclocOf e) t =<< toStruct <$> expType e
   return e
 
+-- The closure of a lambda or local function are those variables that
+-- it references, and which local to the current top-level function.
+lexicalClosure :: [Pattern] -> Occurences -> TermTypeM Aliasing
+lexicalClosure params closure = do
+  vtable <- asks scopeVtable
+  let isLocal v = case v `M.lookup` vtable of
+                    Just (BoundV Local _ _) -> True
+                    _ -> False
+  return $ S.map AliasBound $ S.filter isLocal $
+    allOccuring closure S.\\
+    S.map identName (mconcat (map patIdentSet params))
+
 checkExp :: UncheckedExp -> TermTypeM Exp
 
 checkExp (Literal val loc) =
@@ -969,9 +981,10 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
     \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
 
+    closure' <- lexicalClosure params' closure
+
     let ftype = foldr (uncurry (Arrow ()) . patternParam) rettype params'
-        entry = BoundV Local tparams' $
-                ftype `setAliases` S.map AliasBound (allOccuring closure)
+        entry = BoundV Local tparams' $ ftype `setAliases` closure'
         bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope
                             , scopeNameMap = M.insert (Term, name) (qualName name') $
                                              scopeNameMap scope }
@@ -1108,17 +1121,9 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
       Just retdecl'@(TypeDecl _ (Info st)) -> return (Just retdecl', st)
       Nothing -> do
         body_t <- expType body'
-        return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
+        return (Nothing, inferReturnUniqueness params' body_t)
 
-    -- The closure of the lambda are those variables that it
-    -- references, and which local to the current function.
-    vtable <- asks scopeVtable
-    let isLocal v = case v `M.lookup` vtable of
-                      Just (BoundV Local _ _) -> True
-                      _ -> False
-        closure' = S.map AliasBound $ S.filter isLocal $
-                   allOccuring closure S.\\
-                   S.map identName (mconcat (map patIdentSet params'))
+    closure' <- lexicalClosure params' closure
 
     return $ Lambda tparams' params' body' maybe_retdecl'' (Info (closure', rettype)) loc
 
@@ -1533,8 +1538,7 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
     _ -> return ()
 
   occur $ dflow `seqOccurences` occurs
-  let tp2'' = vacuousShapeAnnotations $
-              returnType (toStruct tp2') (diet tp1') argtype'
+  let tp2'' = vacuousShapeAnnotations $ returnType tp2' (diet tp1') argtype'
   return (vacuousShapeAnnotations tp1', tp2'')
 
 checkApply loc tfun@TypeVar{} arg = do
@@ -1666,7 +1670,8 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         let rettype_structural = toStructural retdecl_type
         checkReturnAlias rettype_structural params'' body_t
         return (Just retdecl', retdecl_type)
-      Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
+      Nothing ->
+        return (Nothing, inferReturnUniqueness params'' body_t)
 
     tparams'' <- letGeneralise tparams' (rettype : map patternStructType params'') then_substs
 
@@ -1718,6 +1723,34 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
         returnAliasing expected got =
           [(uniqueness expected, S.map aliasVar $ aliases got)]
+
+inferReturnUniqueness :: [Pattern] -> CompType -> StructType
+inferReturnUniqueness params t =
+  let forbidden = aliasesMultipleTimes t
+      uniques = uniqueParamNames params
+      delve (Record fs) =
+        Record $ M.map delve fs
+      delve t'
+        | all (`S.member` uniques) (boundArrayAliases t'),
+          not $ any ((`S.member` forbidden) . aliasVar) (aliases t') =
+            toStruct t'
+        | otherwise =
+            toStruct $ t' `setUniqueness` Nonunique
+  in vacuousShapeAnnotations $ delve t
+
+-- An alias inhibits uniqueness if it is used in disjoint values.
+aliasesMultipleTimes :: CompType -> Names
+aliasesMultipleTimes = S.fromList . map fst . filter ((>1) . snd) . M.toList . delve
+  where delve (Record fs) =
+          foldl' (M.unionWith (+)) mempty $ map delve $ M.elems fs
+        delve t =
+          M.fromList $ zip (map aliasVar $ S.toList (aliases t)) $ repeat (1::Int)
+
+uniqueParamNames :: [Pattern] -> Names
+uniqueParamNames =
+  S.fromList . map identName
+  . filter (unique . unInfo . identType)
+  . S.toList . mconcat . map patIdentSet
 
 boundArrayAliases :: CompType -> S.Set VName
 boundArrayAliases (Array als _ _ _) = boundAliases als
@@ -1834,7 +1867,17 @@ observe (Ident nm (Info t) loc) =
 
 -- | Proclaim that we have written to the given variable.
 consume :: SrcLoc -> Aliasing -> TermTypeM ()
-consume loc als = occur [consumption als loc]
+consume loc als = do
+  vtable <- asks scopeVtable
+  let consumable v = case M.lookup v vtable of
+                       Just (BoundV Local _ t)
+                         | arrayRank t > 0 -> unique t
+                         | otherwise -> True
+                       _ -> False
+  case filter (not . consumable) $ map aliasVar $ S.toList als of
+    v:_ -> typeError loc $ "Attempt to consume variable `" ++ prettyName v
+           ++ "`, which is not allowed."
+    [] -> occur [consumption als loc]
 
 -- | Proclaim that we have written to the given variable, and mark
 -- accesses to it and all of its aliases as invalid inside the given

@@ -429,7 +429,7 @@ substTypesAny lookupSubst ot = case ot of
   -- type parameters cannot have higher kind.
   TypeVar als u v targs ->
     case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
-      Just (Subst t) -> t `setUniqueness` u
+      Just (Subst t) -> t `setUniqueness` u `addAliases` (<>als)
       Just PrimSubst -> TypeVar mempty u v $ map subsTypeArg targs
       Nothing -> TypeVar als u v $ map subsTypeArg targs
   Record ts ->  Record $ fmap (substTypesAny lookupSubst) ts

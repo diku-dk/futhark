@@ -21,7 +21,7 @@ import           Futhark.Representation.AST.Pretty ()
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
 data StaticVal = Dynamic CompType
-               | LambdaSV [VName] Pattern Exp Env
+               | LambdaSV [VName] Pattern StructType Exp Env
                  -- ^ The 'VName's are shape parameters that are bound
                  -- by the 'Pattern'.
                | RecordSV [(Name, StaticVal)]
@@ -62,8 +62,8 @@ restrictEnvTo (NameSet m) = restrict <$> ask
           Dynamic $ t `setUniqueness`  Nonunique
         restrict' _ (Dynamic t) =
           Dynamic t
-        restrict' u (LambdaSV dims pat e env) =
-          LambdaSV dims pat e $ M.map (restrict' u) env
+        restrict' u (LambdaSV dims pat t e env) =
+          LambdaSV dims pat t e $ M.map (restrict' u) env
         restrict' u (RecordSV fields) =
           RecordSV $ map (fmap $ restrict' u) fields
         restrict' u (DynamicFun (e, sv1) sv2) =
@@ -211,15 +211,15 @@ defuncExp (Negate e0 loc) = do
   (e0', sv) <- defuncExp e0
   return (Negate e0' loc, sv)
 
-defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
+defuncExp e@(Lambda tparams pats e0 decl (Info (closure, ret)) loc) = do
   when (any isTypeParam tparams) $
     error $ "Received a lambda with type parameters at " ++ locStr loc
          ++ ", but the defunctionalizer expects a monomorphic input program."
   -- Extract the first parameter of the lambda and "push" the
   -- remaining ones (if there are any) into the body of the lambda.
-  let (dims, pat, e0') = case pats of
+  let (dims, pat, ret', e0') = case pats of
         [] -> error "Received a lambda with no parameters."
-        [pat'] -> (map typeParamName tparams, pat', e0)
+        [pat'] -> (map typeParamName tparams, pat', ret, e0)
         (pat' : pats') ->
           -- Split shape parameters into those that are determined by
           -- the first pattern, and those that are determined by later
@@ -227,14 +227,15 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
           let bound_by_pat = (`S.member` patternDimNames pat') . typeParamName
               (pat_dims, rest_dims) = partition bound_by_pat tparams
           in (map typeParamName pat_dims, pat',
-              Lambda rest_dims pats' e0 decl tp loc)
+              foldFunType (map (toStruct . patternPatternType) pats') ret,
+              Lambda rest_dims pats' e0 decl (Info (closure, ret)) loc)
 
   -- Construct a record literal that closes over the environment of
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
   env <- restrictEnvTo (freeVars e)
   let (fields, env') = unzip $ map closureFromDynamicFun $ M.toList env
-  return (RecordLit fields loc, LambdaSV dims pat e0' $ M.fromList env')
+  return (RecordLit fields loc, LambdaSV dims pat ret' e0' $ M.fromList env')
 
   where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
           let name = nameFromString $ pretty vn
@@ -489,7 +490,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
   (e2', sv2) <- defuncExp e2
   let e' = Apply e1' e2' d t loc
   case sv1 of
-    LambdaSV dims pat e0 closure_env -> do
+    LambdaSV dims pat e0_t e0 closure_env -> do
       let env' = matchPatternSV pat sv2
           env_dim = envFromDimNames dims
       (e0', sv) <- localNewEnv (env' <> closure_env <> env_dim) $ defuncExp e0
@@ -531,7 +532,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
         else do
           -- Lift lambda to top-level function definition.
           let params = [closure_pat, pat']
-              rettype = buildRetType closure_env params $ typeOf e0'
+              rettype = buildRetType closure_env params e0_t $ typeOf e0'
 
               -- Embed some information about the original function
               -- into the name of the lifted function, to make the
@@ -584,9 +585,9 @@ defuncApply depth e@(Var qn (Info t) loc) = do
             fname <- newName $ qualLeaf qn
             let (dims, pats, e0, sv') = liftDynFun sv depth
                 (argtypes', rettype) = dynamicFunType sv' argtypes
-            liftValDec fname rettype dims pats e0
+            liftValDec fname (fromStruct rettype) dims pats e0
             return (Var (qualName fname)
-                    (Info (foldFunType argtypes' rettype)) loc, sv')
+                    (Info (foldFunType argtypes' $ fromStruct rettype)) loc, sv')
 
       IntrinsicSV -> return (e, IntrinsicSV)
 
@@ -608,7 +609,7 @@ fullyApplied _ _ = True
 -- depth of partial application.
 liftDynFun :: StaticVal -> Int -> ([VName], [Pattern], Exp, StaticVal)
 liftDynFun (DynamicFun (e, sv) _) 0 = ([], [], e, sv)
-liftDynFun (DynamicFun clsr@(_, LambdaSV dims pat _ _) sv) d
+liftDynFun (DynamicFun clsr@(_, LambdaSV dims pat _ _ _) sv) d
   | d > 0 =  let (dims', pats, e', sv') = liftDynFun sv (d-1)
              in (dims ++ dims', pat : pats, e', DynamicFun clsr sv')
 liftDynFun sv _ = error $ "Tried to lift a StaticVal " ++ show sv
@@ -671,13 +672,18 @@ buildEnvPattern env = RecordPattern (map buildField $ M.toList env) noLoc
 -- lifted function can create unique arrays as long as they do not
 -- alias any of its parameters.  XXX: it is not clear that this is a
 -- sufficient property, unfortunately.
-buildRetType :: Env -> [Pattern] -> CompType -> PatternType
-buildRetType env pats = vacuousShapeAnnotations . descend
+buildRetType :: Env -> [Pattern] -> StructType -> CompType -> PatternType
+buildRetType env pats = comb
   where bound = foldMap oneName (M.keys env) <> foldMap patternVars pats
         boundAsUnique v =
           maybe False (unique . unInfo . identType) $
           find ((==v) . identName) $ S.toList $ foldMap patIdentSet pats
         problematic v = (v `member` bound) && not (boundAsUnique v)
+        comb (Record fs_annot) (Record fs_got) =
+          Record $ M.intersectionWith comb fs_annot fs_got
+        comb Arrow{} t = vacuousShapeAnnotations $ descend t
+        comb got _ = fromStruct got
+
         descend t@Array{}
           | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
         descend (Record t) = Record $ fmap descend t
@@ -686,7 +692,7 @@ buildRetType env pats = vacuousShapeAnnotations . descend
 -- | Compute the corresponding type for a given static value.
 typeFromSV :: StaticVal -> CompType
 typeFromSV (Dynamic tp)           = tp
-typeFromSV (LambdaSV _ _ _ env)   = typeFromEnv env
+typeFromSV (LambdaSV _ _ _ _ env) = typeFromEnv env
 typeFromSV (RecordSV ls)          = Record $ M.fromList $ map (fmap typeFromSV) ls
 typeFromSV (DynamicFun (_, sv) _) = typeFromSV sv
 typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
