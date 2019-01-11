@@ -1534,7 +1534,7 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
 
   occur $ dflow `seqOccurences` occurs
   let tp2'' = vacuousShapeAnnotations $
-              returnType (toStruct tp2') [diet tp1'] [argtype']
+              returnType (toStruct tp2') (diet tp1') argtype'
   return (vacuousShapeAnnotations tp1', tp2'')
 
 checkApply loc tfun@TypeVar{} arg = do
