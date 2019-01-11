@@ -406,13 +406,13 @@ class Substitutable a where
 instance Substitutable (TypeBase () ()) where
   applySubst = substTypesAny
 
-instance Substitutable (TypeBase () Names) where
+instance Substitutable (TypeBase () Aliasing) where
   applySubst = substTypesAny . (fmap (fmap fromStruct).)
 
 instance Substitutable (TypeBase (DimDecl VName) ()) where
   applySubst = substTypesAny . (fmap (fmap vacuousShapeAnnotations).)
 
-instance Substitutable (TypeBase (DimDecl VName) Names) where
+instance Substitutable (TypeBase (DimDecl VName) Aliasing) where
   applySubst = substTypesAny . (fmap (fmap (vacuousShapeAnnotations . fromStruct)).)
 
 -- | Perform substitutions, from type names to types, on a type. Works

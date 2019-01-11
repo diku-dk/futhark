@@ -74,9 +74,9 @@ restrictEnvTo (NameSet m) = restrict <$> ask
 -- the current Env as well as the set of globally defined dynamic
 -- functions.  This is used to avoid unnecessarily large closure
 -- environments.
-newtype DefM a = DefM (RWS (Names, Env) (Seq.Seq ValBind) VNameSource a)
+newtype DefM a = DefM (RWS (S.Set VName, Env) (Seq.Seq ValBind) VNameSource a)
   deriving (Functor, Applicative, Monad,
-            MonadReader (Names, Env),
+            MonadReader (S.Set VName, Env),
             MonadWriter (Seq.Seq ValBind),
             MonadFreshNames)
 
@@ -679,7 +679,7 @@ buildRetType env pats = vacuousShapeAnnotations . descend
           find ((==v) . identName) $ S.toList $ foldMap patIdentSet pats
         problematic v = (v `member` bound) && not (boundAsUnique v)
         descend t@Array{}
-          | any problematic (aliases t) = t `setUniqueness` Nonunique
+          | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
         descend (Record t) = Record $ fmap descend t
         descend t = t
 
@@ -789,7 +789,7 @@ ident v = NameSet $ M.singleton (identName v) (uniqueness $ unInfo $ identType v
 oneName :: VName -> NameSet
 oneName v = NameSet $ M.singleton v Nonunique
 
-names :: Names -> NameSet
+names :: S.Set VName -> NameSet
 names = foldMap oneName
 
 -- | Compute the set of free variables of an expression.
