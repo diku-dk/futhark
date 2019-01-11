@@ -476,10 +476,12 @@ typeOf (Stream _ lam _ _) =
   where rettype (Arrow _ _ _ t) = rettype t
         rettype t = t
 typeOf (DoLoop _ pat _ _ _ _) = patternType pat
-typeOf (Lambda _ params _ _ (Info (als, t)) _) =
-  unscopeAliases (S.map identName $ mconcat $ map patIdentSet params) $
+typeOf (Lambda tparams params _ _ (Info (als, t)) _) =
+  unscopeAliases bound_here $
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
   `setAliases` als
+  where bound_here = S.fromList (map typeParamName tparams) <>
+                     S.map identName (mconcat $ map patIdentSet params)
 typeOf (OpSection _ (Info t) _) =
   removeShapeAnnotations t
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
@@ -529,25 +531,25 @@ typeVars t =
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
 -- the given diets.
-returnType :: TypeBase dim ()
+returnType :: TypeBase dim Aliasing
            -> Diet
            -> CompType
            -> TypeBase dim Aliasing
-returnType (Array () Unique et shape) _ _ =
+returnType (Array _ Unique et shape) _ _ =
   Array mempty Unique et shape
-returnType (Array () Nonunique et shape) d arg =
-  Array als Nonunique et shape
-  where als = aliases $ maskAliases arg d
+returnType (Array als Nonunique et shape) d arg =
+  Array (als<>arg_als) Unique et shape -- Intentional!
+  where arg_als = aliases $ maskAliases arg d
 returnType (Record fs) d arg =
   Record $ fmap (\et -> returnType et d arg) fs
 returnType (Prim t) _ _ = Prim t
-returnType (TypeVar () Unique t targs) _ _ =
+returnType (TypeVar _ Unique t targs) _ _ =
   TypeVar mempty Unique t targs
-returnType (TypeVar () Nonunique t targs) d arg =
-  TypeVar als Nonunique t targs
-  where als = aliases $ maskAliases arg d
+returnType (TypeVar als Nonunique t targs) d arg =
+  TypeVar (als<>arg_als) Unique t targs -- Intentional!
+  where arg_als = aliases $ maskAliases arg d
 returnType (Arrow _ v t1 t2) d arg =
-  Arrow als v (bimap id (const mempty) t1) (returnType t2 d arg)
+  Arrow als v (bimap id (const mempty) t1) (t2 `setAliases` als)
   where als = aliases $ maskAliases arg d
 returnType (Enum cs) _ _ = Enum cs
 
