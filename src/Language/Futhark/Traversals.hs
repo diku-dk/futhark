@@ -172,10 +172,10 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (IndexSection idxs t loc) =
     IndexSection <$> mapM (astMap tv) idxs <*>
     traverse (mapOnPatternType tv) t <*> pure loc
-  astMap tv (DoLoop tparams mergepat mergeexp form loopbody (Info t) loc) =
+  astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =
     DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
     mapOnExp tv mergeexp <*> astMap tv form <*>
-    mapOnExp tv loopbody <*> (Info <$> mapOnPatternType tv t) <*> pure loc
+    mapOnExp tv loopbody <*> pure loc
   astMap tv (VConstr0 name t loc) =
     VConstr0 name <$> traverse (mapOnCompType tv) t <*> pure loc
   astMap tv (Match e cases t loc) =
@@ -183,7 +183,7 @@ instance ASTMappable (ExpBase Info VName) where
           <*> traverse (mapOnCompType tv) t <*> pure loc
 
 instance ASTMappable (LoopFormBase Info VName) where
-  astMap tv (For i bound) = For <$> mapOnName tv i <*> astMap tv bound
+  astMap tv (For i bound) = For <$> astMap tv i <*> astMap tv bound
   astMap tv (ForIn pat e) = ForIn <$> astMap tv pat <*> astMap tv e
   astMap tv (While e)     = While <$> astMap tv e
 
@@ -288,35 +288,25 @@ instance ASTMappable (TypeDeclBase Info VName) where
   astMap tv (TypeDecl dt (Info et)) =
     TypeDecl <$> astMap tv dt <*> (Info <$> mapOnStructType tv et)
 
-instance ASTMappable (IdentBase VName (Info CompType)) where
+instance ASTMappable (IdentBase Info VName) where
   astMap tv (Ident name (Info t) loc) =
     Ident <$> mapOnName tv name <*> (Info <$> mapOnCompType tv t) <*> pure loc
 
-instance ASTMappable (PatternBase Info VName Names) where
-  astMap = astMapPattern mapOnPatternType
-
-instance ASTMappable (PatternBase Info VName ()) where
-  astMap = astMapPattern mapOnStructType
-
-astMapPattern :: Monad m =>
-                 (ASTMapper m -> TypeBase (DimDecl VName) u -> m (TypeBase (DimDecl VName) u))
-              -> ASTMapper m
-              -> PatternBase Info VName u
-              -> m (PatternBase Info VName u)
-astMapPattern f tv (Id name (Info t) loc) =
-  Id <$> mapOnName tv name <*> (Info <$> f tv t) <*> pure loc
-astMapPattern f tv (TuplePattern pats loc) =
-  TuplePattern <$> mapM (astMapPattern f tv) pats <*> pure loc
-astMapPattern f tv (RecordPattern fields loc) =
-  RecordPattern <$> mapM (traverse $ astMapPattern f tv) fields <*> pure loc
-astMapPattern f tv (PatternParens pat loc) =
-  PatternParens <$> astMapPattern f tv pat <*> pure loc
-astMapPattern f tv (PatternAscription pat t loc) =
-  PatternAscription <$> astMapPattern f tv pat <*> astMap tv t <*> pure loc
-astMapPattern f tv (Wildcard (Info t) loc) =
-  Wildcard <$> (Info <$> f tv t) <*> pure loc
-astMapPattern f tv (PatternLit e (Info t) loc) =
-  PatternLit <$> astMap tv e <*> (Info <$> f tv t) <*>  pure loc
+instance ASTMappable (PatternBase Info VName) where
+  astMap tv (Id name (Info t) loc) =
+    Id <$> mapOnName tv name <*> (Info <$> mapOnPatternType tv t) <*> pure loc
+  astMap tv (TuplePattern pats loc) =
+    TuplePattern <$> mapM (astMap tv) pats <*> pure loc
+  astMap tv (RecordPattern fields loc) =
+    RecordPattern <$> mapM (traverse $ astMap tv) fields <*> pure loc
+  astMap tv (PatternParens pat loc) =
+    PatternParens <$> astMap tv pat <*> pure loc
+  astMap tv (PatternAscription pat t loc) =
+    PatternAscription <$> astMap tv pat <*> astMap tv t <*> pure loc
+  astMap tv (Wildcard (Info t) loc) =
+    Wildcard <$> (Info <$> mapOnPatternType tv t) <*> pure loc
+  astMap tv (PatternLit e (Info t) loc) =
+    PatternLit <$> astMap tv e <*> (Info <$> mapOnPatternType tv t) <*>  pure loc
 
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =

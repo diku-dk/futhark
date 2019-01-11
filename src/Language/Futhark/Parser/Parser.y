@@ -486,14 +486,14 @@ DimDecl :: { (DimDecl Name, SrcLoc) }
           { let L loc (INTLIT n) = $1
             in (ConstDim (fromIntegral n), loc) }
 
-FunParam :: { UncheckedPattern u }
+FunParam :: { PatternBase NoInfo Name }
 FunParam : InnerPattern { $1 }
 
-FunParams1 :: { (UncheckedPattern u, [UncheckedPattern u]) }
+FunParams1 :: { (PatternBase NoInfo Name, [PatternBase NoInfo Name]) }
 FunParams1 : FunParam            { ($1, []) }
            | FunParam FunParams1 { ($1, fst $2 : snd $2) }
 
-FunParams :: { [UncheckedPattern u] }
+FunParams :: { [PatternBase NoInfo Name] }
 FunParams :                     { [] }
            | FunParam FunParams { $1 : $2 }
 
@@ -517,10 +517,10 @@ Exp2 :: { UncheckedExp }
                       { If $2 $4 $6 NoInfo (srcspan $1 $>) }
 
      | loop TypeParams Pattern LoopForm do Exp %prec ifprec
-         {% fmap (\t -> DoLoop $2 $3 t $4 $6 NoInfo (srcspan $1 $>)) (patternExp $3) }
+         {% fmap (\t -> DoLoop $2 $3 t $4 $6 (srcspan $1 $>)) (patternExp $3) }
 
      | loop TypeParams Pattern '=' Exp LoopForm do Exp %prec ifprec
-         { DoLoop $2 $3 $5 $6 $8 NoInfo (srcspan $1 $>) }
+         { DoLoop $2 $3 $5 $6 $8 (srcspan $1 $>) }
 
      | LetExp %prec letprec { $1 }
 
@@ -721,15 +721,15 @@ Case :: { CaseBase NoInfo Name }
       : case CPattern '->' Exp       { let loc = srcspan $1 $>
                                        in CasePat $2 $> loc }
 
-CPattern :: { UncheckedPattern u }
+CPattern :: { PatternBase NoInfo Name }
           : CInnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
           | CInnerPattern                 { $1 }
 
-CPatterns1 :: { [UncheckedPattern u] }
+CPatterns1 :: { [PatternBase NoInfo Name] }
            : CPattern               { [$1] }
            | CPattern ',' CPatterns1 { $1 : $3 }
 
-CInnerPattern :: { UncheckedPattern u }
+CInnerPattern :: { PatternBase NoInfo Name }
                : id                                 { let L loc (ID name) = $1 in Id name NoInfo loc }
                | '(' BindingBinOp ')'               { Id $2 NoInfo (srcspan $1 $>) }
                | '(' BindingUnOp ')'                { Id $2 NoInfo (srcspan $1 $>) }
@@ -740,7 +740,7 @@ CInnerPattern :: { UncheckedPattern u }
                | '{' CFieldPatterns '}'             { RecordPattern $2 (srcspan $1 $>) }
                | CaseLiteral                        { PatternLit (fst $1) NoInfo (snd $1) }
 
-CFieldPattern :: { (Name, UncheckedPattern u) }
+CFieldPattern :: { (Name, PatternBase NoInfo Name) }
                : FieldId '=' CPattern
                { (fst $1, $3) }
                | FieldId ':' TypeExpDecl
@@ -748,11 +748,11 @@ CFieldPattern :: { (Name, UncheckedPattern u) }
                | FieldId
                { (fst $1, Id (fst $1) NoInfo (snd $1)) }
 
-CFieldPatterns :: { [(Name, UncheckedPattern u)] }
+CFieldPatterns :: { [(Name, PatternBase NoInfo Name)] }
                 : CFieldPatterns1 { $1 }
                 |                { [] }
 
-CFieldPatterns1 :: { [(Name, UncheckedPattern u)] }
+CFieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
                  : CFieldPattern ',' CFieldPatterns1 { $1 : $3 }
                  | CFieldPattern                    { [$1] }
 
@@ -765,8 +765,8 @@ CaseLiteral :: { (UncheckedExp, SrcLoc) }
              | VConstr0       { (VConstr0 (fst $1) NoInfo (snd $1), snd $1) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
-LoopForm : for id '<' Exp
-           { let L _ (ID name) = $2 in For name $4 }
+LoopForm : for VarId '<' Exp
+           { For $2 $4 }
          | for Pattern in Exp
            { ForIn $2 $4 }
          | while Exp
@@ -802,19 +802,22 @@ DimIndices1 :: { (UncheckedDimIndex, [UncheckedDimIndex]) }
              : DimIndex                 { ($1, []) }
              | DimIndex ',' DimIndices1 { ($1, fst $3 : snd $3) }
 
+VarId :: { IdentBase NoInfo Name }
+VarId : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
+
 FieldId :: { (Name, SrcLoc) }
          : id     { let L loc (ID name) = $1 in (name, loc) }
          | intlit { let L loc (INTLIT n) = $1 in (nameFromString (show n), loc) }
 
-Pattern :: { UncheckedPattern u }
+Pattern :: { PatternBase NoInfo Name }
 Pattern : InnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
         | InnerPattern                 { $1 }
 
-Patterns1 :: { [UncheckedPattern u] }
+Patterns1 :: { [PatternBase NoInfo Name] }
            : Pattern               { [$1] }
            | Pattern ',' Patterns1 { $1 : $3 }
 
-InnerPattern :: { UncheckedPattern u }
+InnerPattern :: { PatternBase NoInfo Name }
 InnerPattern : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
              | '(' BindingBinOp ')'             { Id $2 NoInfo (srcspan $1 $>) }
              | '(' BindingUnOp ')'              { Id $2 NoInfo (srcspan $1 $>) }
@@ -824,7 +827,7 @@ InnerPattern : id                               { let L loc (ID name) = $1 in Id
              | '(' Pattern ',' Patterns1 ')'    { TuplePattern ($2:$4) (srcspan $1 $>) }
              | '{' FieldPatterns '}'            { RecordPattern $2 (srcspan $1 $>) }
 
-FieldPattern :: { (Name, UncheckedPattern u) }
+FieldPattern :: { (Name, PatternBase NoInfo Name) }
               : FieldId '=' Pattern
                 { (fst $1, $3) }
               | FieldId ':' TypeExpDecl
@@ -832,11 +835,11 @@ FieldPattern :: { (Name, UncheckedPattern u) }
               | FieldId
                 { (fst $1, Id (fst $1) NoInfo (snd $1)) }
 
-FieldPatterns :: { [(Name, UncheckedPattern u)] }
+FieldPatterns :: { [(Name, PatternBase NoInfo Name)] }
                : FieldPatterns1 { $1 }
                |                { [] }
 
-FieldPatterns1 :: { [(Name, UncheckedPattern u)] }
+FieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
                : FieldPattern ',' FieldPatterns1 { $1 : $3 }
                | FieldPattern                    { [$1] }
 
@@ -1013,7 +1016,7 @@ combArrayElements t ts = foldM comb t ts
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
-patternExp :: UncheckedPattern u -> ParserMonad UncheckedExp
+patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id v _ loc) = return $ Var (qualName v) NoInfo loc
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."

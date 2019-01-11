@@ -43,7 +43,7 @@ import           Language.Futhark.TypeChecker.Types
 
 -- | The monomorphization monad reads 'PolyBinding's and writes 'ValBinding's.
 -- The 'TypeParam's in a 'ValBinding' can only be shape parameters.
-newtype PolyBinding = PolyBinding (VName, [TypeParam], [Pattern ()],
+newtype PolyBinding = PolyBinding (VName, [TypeParam], [Pattern],
                                    Maybe (TypeExp VName), StructType, Exp, SrcLoc)
 
 -- | Mapping from record names to the variable names that contain the
@@ -201,9 +201,9 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
         return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
 
   | otherwise =
-      transformExp $ LetPat [] (Id fname (Info $ fromStruct ft) loc) lam e loc
+      transformExp $ LetPat [] (Id fname (Info ft) loc) lam e loc
         where lam = Lambda tparams params body Nothing (Info (mempty, ret)) loc
-              ft = foldFunType (map (vacuousShapeAnnotations . patternPatternType) params) $ fromStruct ret
+              ft = foldFunType (map (vacuousShapeAnnotations . patternType) params) $ fromStruct ret
 
 transformExp (If e1 e2 e3 tp loc) = do
   e1' <- transformExp e1
@@ -286,14 +286,14 @@ transformExp (ProjectSection fields (Info t) loc) =
 transformExp (IndexSection idxs (Info t) loc) =
   desugarIndexSection idxs t loc
 
-transformExp (DoLoop tparams pat e1 form e3 t loc) = do
+transformExp (DoLoop tparams pat e1 form e3 loc) = do
   e1' <- transformExp e1
   form' <- case form of
     For ident e2  -> For ident <$> transformExp e2
     ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
     While e2      -> While <$> transformExp e2
   e3' <- transformExp e3
-  return $ DoLoop tparams pat e1' form' e3' t loc
+  return $ DoLoop tparams pat e1' form' e3' loc
 
 transformExp (BinOp (QualName qs fname) (Info t) (e1, d1) (e2, d2) tp loc) = do
   fname' <- transformFName fname (toStructural t)
@@ -409,8 +409,7 @@ desugarProjectSection :: [Name] -> PatternType -> SrcLoc -> MonoM Exp
 desugarProjectSection fields (Arrow _ _ t1 t2) loc = do
   p <- newVName "project_p"
   let body = foldl project (Var (qualName p) (Info t1) noLoc) fields
-  return $ Lambda [] [Id p (Info $ toStruct t1) noLoc]
-    body Nothing (Info (mempty, toStruct t2)) loc
+  return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
   where project e field =
           case typeOf e of
             Record fs | Just t <- M.lookup field fs ->
@@ -423,8 +422,7 @@ desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Arrow _ _ t1 t2) loc = do
   p <- newVName "index_i"
   let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2') loc
-  return $ Lambda [] [Id p (Info $ toStruct t1) noLoc]
-    body Nothing (Info (mempty, toStruct t2)) loc
+  return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
   where t2' = removeShapeAnnotations t2
 desugarIndexSection  _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
@@ -441,7 +439,7 @@ unfoldLetFuns (ValBind _ fname _ rettype dim_params params body _ loc : rest) e 
   LetFun fname (dim_params, params, Nothing, rettype, body) e' loc
   where e' = unfoldLetFuns rest e
 
-expandRecordPattern :: Pattern u -> MonoM (Pattern u, RecordReplacements)
+expandRecordPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
 expandRecordPattern (Id v (Info (Record fs)) loc) = do
   let fs' = M.toList fs
   (fs_ks, fs_ts) <- fmap unzip $ forM fs' $ \(f, ft) ->
@@ -449,8 +447,7 @@ expandRecordPattern (Id v (Info (Record fs)) loc) = do
   return (RecordPattern (zip (map fst fs')
                              (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
                         loc,
-          M.singleton v $ M.fromList $ zip (map fst fs') $ zip fs_ks $
-          map fromStruct fs_ts)
+          M.singleton v $ M.fromList $ zip (map fst fs') $ zip fs_ks fs_ts)
 expandRecordPattern (Id v t loc) = return (Id v t loc, mempty)
 expandRecordPattern (TuplePattern pats loc) = do
   (pats', rrs) <- unzip <$> mapM expandRecordPattern pats
@@ -475,7 +472,7 @@ monomorphizeBinding :: PolyBinding -> TypeBase () () -> MonoM (VName, ValBind)
 monomorphizeBinding (PolyBinding (name, tparams, params, retdecl, rettype, body, loc)) t =
   noRecordReplacements $ do
   t' <- removeTypeVariablesInType t
-  let bind_t = foldFunType (map (toStructural . patternPatternType) params) $
+  let bind_t = foldFunType (map (toStructural . patternType) params) $
                toStructural rettype
       substs = M.map Subst $ typeSubsts bind_t t'
       rettype' = applySubst (`M.lookup` substs) rettype
@@ -532,8 +529,7 @@ typeSubsts Enum{} Enum{} = mempty
 typeSubsts t1 t2 = error $ unlines ["typeSubsts: mismatched types:", pretty t1, pretty t2]
 
 -- | Perform a given substitution on the types in a pattern.
-substPattern :: (TypeBase (DimDecl VName) u -> TypeBase (DimDecl VName) u)
-             -> Pattern u -> Pattern u
+substPattern :: (PatternType -> PatternType) -> Pattern -> Pattern
 substPattern f pat = case pat of
   TuplePattern pats loc       -> TuplePattern (map (substPattern f) pats) loc
   RecordPattern fs loc        -> RecordPattern (map substField fs) loc
@@ -563,7 +559,7 @@ removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
                              substituteTypes subs .
                              vacuousShapeAnnotations . toStruct
         , mapOnStructType  = pure . substituteTypes subs
-        , mapOnPatternType = pure . fromStruct . substituteTypes subs . toStruct
+        , mapOnPatternType = pure . substPatternType
         }
 
   body' <- astMap mapper body

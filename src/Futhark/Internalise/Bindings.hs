@@ -27,7 +27,7 @@ import Futhark.Internalise.TypesValues
 import Futhark.Internalise.AccurateSizes
 import Futhark.Util
 
-bindingParams :: [E.TypeParam] -> [E.Pattern u]
+bindingParams :: [E.TypeParam] -> [E.Pattern]
               -> (ConstParams -> [I.FParam] -> [[I.FParam]] -> InternaliseM a)
               -> InternaliseM a
 bindingParams tparams params m = do
@@ -53,7 +53,7 @@ bindingParams tparams params m = do
     I.localScope (I.scopeOfFParams $ shape_params++concat valueparams) $
     substitutingVars shape_subst $ m cm shape_params $ chunks num_param_ts (concat valueparams)
 
-bindingLambdaParams :: [E.TypeParam] -> [E.Pattern u] -> [I.Type]
+bindingLambdaParams :: [E.TypeParam] -> [E.Pattern] -> [I.Type]
                     -> (ConstParams -> [I.LParam] -> InternaliseM a)
                     -> InternaliseM a
 bindingLambdaParams tparams params ts m = do
@@ -122,7 +122,7 @@ bindingFlatPattern idents ts m = do
 
 -- | Flatten a pattern.  Returns a list of identifiers.  The
 -- structural type of each identifier is returned separately.
-flattenPattern :: MonadFreshNames m => E.Pattern u -> m [((E.Ident, VName), E.StructType)]
+flattenPattern :: MonadFreshNames m => E.Pattern -> m [((E.Ident, VName), E.StructType)]
 flattenPattern = flattenPattern'
   where flattenPattern' (E.PatternParens p _) =
           flattenPattern' p
@@ -131,7 +131,7 @@ flattenPattern = flattenPattern'
           flattenPattern' $ E.Id name t loc
         flattenPattern' (E.Id v (Info t) loc) = do
           new_name <- newVName $ baseString v
-          return [((E.Ident v (Info (fromStruct $ E.removeShapeAnnotations t)) loc,
+          return [((E.Ident v (Info (E.removeShapeAnnotations t)) loc,
                     new_name),
                    t `E.setAliases` ())]
         flattenPattern' (E.TuplePattern pats _) =
@@ -145,7 +145,7 @@ flattenPattern = flattenPattern'
 
 type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
 
-stmPattern :: [E.TypeParam] -> E.Pattern u -> [I.ExtType]
+stmPattern :: [E.TypeParam] -> E.Pattern -> [I.ExtType]
            -> (ConstParams -> [VName] -> MatchPattern -> InternaliseM a)
            -> InternaliseM a
 stmPattern tparams pat ts m = do
