@@ -82,6 +82,7 @@ module Language.Futhark.Attributes
   , UncheckedType
   , UncheckedTypeExp
   , UncheckedArrayElemType
+  , UncheckedIdent
   , UncheckedTypeDecl
   , UncheckedDimIndex
   , UncheckedExp
@@ -226,10 +227,9 @@ toStruct :: TypeBase dim as
 toStruct t = t `setAliases` ()
 
 -- | Replace no aliasing with an empty alias set.
-fromStruct :: Monoid b =>
-              TypeBase dim a
-           -> TypeBase dim b
-fromStruct t = t `setAliases` mempty
+fromStruct :: TypeBase dim as
+           -> TypeBase dim Aliasing
+fromStruct t = t `setAliases` S.empty
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
@@ -419,6 +419,11 @@ valueType (ArrayValue _ t) = t
 rank :: Int -> ShapeDecl ()
 rank n = ShapeDecl $ replicate n ()
 
+unscopeAliases :: S.Set VName -> CompType -> CompType
+unscopeAliases bound_here t = t `addAliases` S.map unbind
+  where unbind (AliasBound v) | v `S.member` bound_here = AliasFree v
+        unbind a = a
+
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: ExpBase Info VName -> CompType
@@ -433,25 +438,21 @@ typeOf (RecordLit fs _) =
   Record $ M.unions $ reverse $ map record fs
   where record (RecordFieldExplicit name e _) = M.singleton name $ typeOf e
         record (RecordFieldImplicit name (Info t) _) =
-          M.singleton (baseName name) $ t `addAliases` S.insert name
+          M.singleton (baseName name) $ t `addAliases` S.insert (AliasBound name)
 typeOf (ArrayLit _ (Info t) _) = t
 typeOf (Range _ _ _ (Info t) _) = t
 typeOf (BinOp _ _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
-typeOf (Var qn (Info t) _) = removeShapeAnnotations t `addAliases` S.insert (qualLeaf qn)
+typeOf (Var _ (Info t) _) = removeShapeAnnotations t
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Apply _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ _ _ body _) =
-  -- It is intentional that we do not remove the names bound by the
-  -- pattern from the aliasing of the result, as we need to track that
-  -- two values may alias each other through a variable, even if that
-  -- variable has gone out of scope.  See uniqueness-error18.fut for
-  -- an example.
-  typeOf body
+typeOf (LetPat _ pat _ body _) =
+  unscopeAliases (S.map identName $ patIdentSet pat) $ typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
-typeOf (LetWith _ _ _ _ body _) = typeOf body
+typeOf (LetWith dest _ _ _ body _) =
+  unscopeAliases (S.singleton $ identName dest) $ typeOf body
 typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = removeShapeAnnotations t
@@ -474,10 +475,13 @@ typeOf (Stream _ lam _ _) =
   rettype (typeOf lam) `setUniqueness` Unique
   where rettype (Arrow _ _ _ t) = rettype t
         rettype t = t
-typeOf (DoLoop _ _ _ _ _ (Info t) _) = removeShapeAnnotations t
-typeOf (Lambda _ params _ _ (Info (als, t)) _) =
+typeOf (DoLoop _ pat _ _ _ _) = patternType pat
+typeOf (Lambda tparams params _ _ (Info (als, t)) _) =
+  unscopeAliases bound_here $
   removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
   `setAliases` als
+  where bound_here = S.fromList (map typeParamName tparams) <>
+                     S.map identName (mconcat $ map patIdentSet params)
 typeOf (OpSection _ (Info t) _) =
   removeShapeAnnotations t
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
@@ -502,7 +506,7 @@ unfoldFunType (Arrow _ _ t1 t2) = let (ps, r) = unfoldFunType t2
 unfoldFunType t = ([], t)
 
 -- | The type names mentioned in a type.
-typeVars :: Monoid as => TypeBase dim as -> Names
+typeVars :: Monoid as => TypeBase dim as -> S.Set VName
 typeVars t =
   case t of
     Prim{} -> mempty
@@ -527,56 +531,27 @@ typeVars t =
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
 -- the given diets.
-returnType :: TypeBase dim ()
-           -> [Diet]
-           -> [CompType]
-           -> TypeBase dim Names
-returnType (Array () Unique et shape) _ _ =
+returnType :: TypeBase dim Aliasing
+           -> Diet
+           -> CompType
+           -> TypeBase dim Aliasing
+returnType (Array _ Unique et shape) _ _ =
   Array mempty Unique et shape
-returnType (Array () Nonunique et shape) ds args =
-  Array als Nonunique (arrayElemReturnType et ds args) shape
-  where als = mconcat $ map aliases $ zipWith maskAliases args ds
-returnType (Record fs) ds args =
-  Record $ fmap (\et -> returnType et ds args) fs
+returnType (Array als Nonunique et shape) d arg =
+  Array (als<>arg_als) Unique et shape -- Intentional!
+  where arg_als = aliases $ maskAliases arg d
+returnType (Record fs) d arg =
+  Record $ fmap (\et -> returnType et d arg) fs
 returnType (Prim t) _ _ = Prim t
-returnType (TypeVar () Unique t targs) _ _ =
+returnType (TypeVar _ Unique t targs) _ _ =
   TypeVar mempty Unique t targs
-returnType (TypeVar () Nonunique t targs) ds args =
-  TypeVar als Nonunique t $ map (\arg -> typeArgReturnType arg ds args) targs
-  where als = mconcat $ map aliases $ zipWith maskAliases args ds
-returnType (Arrow _ v t1 t2) ds args =
-  Arrow als v (bimap id (const mempty) t1) (returnType t2 ds args)
-  where als = foldMap aliases $ zipWith maskAliases args ds
+returnType (TypeVar als Nonunique t targs) d arg =
+  TypeVar (als<>arg_als) Unique t targs -- Intentional!
+  where arg_als = aliases $ maskAliases arg d
+returnType (Arrow _ v t1 t2) d arg =
+  Arrow als v (bimap id (const mempty) t1) (t2 `setAliases` als)
+  where als = aliases $ maskAliases arg d
 returnType (Enum cs) _ _ = Enum cs
-
-typeArgReturnType :: TypeArg shape -> [Diet] -> [CompType]
-                  -> TypeArg shape
-typeArgReturnType (TypeArgDim v loc) _ _ =
-  TypeArgDim v loc
-typeArgReturnType (TypeArgType t loc) ds args =
-  TypeArgType (returnType t ds args `setAliases` ()) loc
-
-arrayElemReturnType :: ArrayElemTypeBase dim
-                    -> [Diet]
-                    -> [CompType]
-                    -> ArrayElemTypeBase dim
-arrayElemReturnType (ArrayPrimElem bt) _ _ =
-  ArrayPrimElem bt
-arrayElemReturnType (ArrayPolyElem bt targs) ds args =
-  ArrayPolyElem bt $ map (\arg -> typeArgReturnType arg ds args) targs
-arrayElemReturnType (ArrayRecordElem et) ds args =
-  ArrayRecordElem $ fmap (\t -> recordArrayElemReturnType t ds args) et
-arrayElemReturnType (ArrayEnumElem cs) _ _ =
-  ArrayEnumElem cs
-
-recordArrayElemReturnType :: RecordArrayElemTypeBase dim
-                         -> [Diet]
-                         -> [CompType]
-                         -> RecordArrayElemTypeBase dim
-recordArrayElemReturnType (RecordArrayElem et) ds args =
-  RecordArrayElem $ arrayElemReturnType et ds args
-recordArrayElemReturnType (RecordArrayArrayElem et shape) ds args =
-  RecordArrayArrayElem (arrayElemReturnType et ds args) shape
 
 -- | Is the type concrete, i.e, without any type variables or function arrows?
 concreteType :: TypeBase f vn -> Bool
@@ -606,7 +581,7 @@ orderZero Arrow{}         = False
 orderZero Enum{}          = True
 
 -- | Extract all the shape names that occur in a given pattern.
-patternDimNames :: PatternBase Info VName u -> Names
+patternDimNames :: PatternBase Info VName -> S.Set VName
 patternDimNames (TuplePattern ps _)    = foldMap patternDimNames ps
 patternDimNames (RecordPattern fs _)   = foldMap (patternDimNames . snd) fs
 patternDimNames (PatternParens p _)    = patternDimNames p
@@ -617,15 +592,15 @@ patternDimNames (PatternAscription p (TypeDecl _ (Info t)) _) =
 patternDimNames (PatternLit _ (Info tp) _) = typeDimNames tp
 
 -- | Extract all the shape names that occur in a given type.
-typeDimNames :: TypeBase (DimDecl VName) als -> Names
+typeDimNames :: TypeBase (DimDecl VName) als -> S.Set VName
 typeDimNames = foldMap dimName . nestedDims
-  where dimName :: DimDecl VName -> Names
+  where dimName :: DimDecl VName -> S.Set VName
         dimName (NamedDim qn) = S.singleton $ qualLeaf qn
         dimName _             = mempty
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.
-patternOrderZero :: PatternBase Info vn u -> Bool
+patternOrderZero :: PatternBase Info vn -> Bool
 patternOrderZero pat = case pat of
   TuplePattern ps _       -> all patternOrderZero ps
   RecordPattern fs _      -> all (patternOrderZero . snd) fs
@@ -636,9 +611,7 @@ patternOrderZero pat = case pat of
   PatternLit _ (Info t) _ -> orderZero t
 
 -- | The set of identifiers bound in a pattern.
-patIdentSet :: (Functor f, Ord vn) =>
-               PatternBase f vn u
-            -> S.Set (IdentBase vn (f (TypeBase () u)))
+patIdentSet :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
 patIdentSet (Id v t loc)              = S.singleton $ Ident v (removeShapeAnnotations <$> t) loc
 patIdentSet (PatternParens p _)       = patIdentSet p
 patIdentSet (TuplePattern pats _)     = mconcat $ map patIdentSet pats
@@ -648,7 +621,7 @@ patIdentSet (PatternAscription p _ _) = patIdentSet p
 patIdentSet PatternLit{}              = mempty
 
 -- | The type of values bound by the pattern.
-patternType :: PatternBase Info VName Names -> CompType
+patternType :: PatternBase Info VName -> CompType
 patternType (Wildcard (Info t) _)     = removeShapeAnnotations t
 patternType (PatternParens p _)       = patternType p
 patternType (Id _ (Info t) _)         = removeShapeAnnotations t
@@ -658,7 +631,7 @@ patternType (PatternAscription p _ _) = patternType p
 patternType (PatternLit _ (Info t) _) = removeShapeAnnotations t
 
 -- | The type of a pattern, including shape annotations.
-patternPatternType :: PatternBase Info VName u -> TypeBase (DimDecl VName) u
+patternPatternType :: PatternBase Info VName -> PatternType
 patternPatternType (Wildcard (Info t) _)      = t
 patternPatternType (PatternParens p _)        = patternPatternType p
 patternPatternType (Id _ (Info t) _)          = t
@@ -668,12 +641,12 @@ patternPatternType (PatternAscription p _ _)  = patternPatternType p
 patternPatternType (PatternLit _ (Info t) _)  = t
 
 -- | The type matched by the pattern, including shape declarations if present.
-patternStructType :: PatternBase Info VName u -> StructType
+patternStructType :: PatternBase Info VName -> StructType
 patternStructType = toStruct . patternPatternType
 
 -- | When viewed as a function parameter, does this pattern correspond
 -- to a named parameter of some type?
-patternParam :: PatternBase Info VName u -> (Maybe VName, StructType)
+patternParam :: PatternBase Info VName -> (Maybe VName, StructType)
 patternParam (PatternParens p _) =
   patternParam p
 patternParam (PatternAscription (Id v _ _) td _) =
@@ -683,7 +656,7 @@ patternParam p =
 
 -- | Remove all shape annotations from a pattern, leaving them unnamed
 -- instead.
-patternNoShapeAnnotations :: PatternBase Info VName u -> PatternBase Info VName u
+patternNoShapeAnnotations :: PatternBase Info VName -> PatternBase Info VName
 patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t)) loc) =
   PatternAscription (patternNoShapeAnnotations p)
   (TypeDecl te $ Info $ vacuousShapeAnnotations t) loc
@@ -1029,6 +1002,9 @@ type UncheckedArrayElemType = ArrayElemTypeBase (ShapeDecl Name)
 -- | A type declaration with no expanded type.
 type UncheckedTypeDecl = TypeDeclBase NoInfo Name
 
+-- | An identifier with no type annotations.
+type UncheckedIdent = IdentBase NoInfo Name
+
 -- | An index with no type annotations.
 type UncheckedDimIndex = DimIndexBase NoInfo Name
 
@@ -1044,8 +1020,8 @@ type UncheckedSigExp = SigExpBase NoInfo Name
 -- | A type parameter with no type annotations.
 type UncheckedTypeParam = TypeParamBase Name
 
--- | A value pattern with no type annotations.
-type UncheckedPattern u = PatternBase NoInfo Name u
+-- | A pattern with no type annotations.
+type UncheckedPattern = PatternBase NoInfo Name
 
 -- | A function declaration with no type annotations.
 type UncheckedValBind = ValBindBase NoInfo Name

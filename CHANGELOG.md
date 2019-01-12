@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * The result of a function is now forbidden from aliasing a global
+    variable.  Surprisingly little code is affected by this.
+
+  * A global definition may not be ascribed a unique type.  This never
+    had any effect in the first place, but now the compiler will
+    explicitly complain.
+
 ### Fixed
 
   * `futharki` now reports source locations of `trace` expressions
