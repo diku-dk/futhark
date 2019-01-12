@@ -15,4 +15,4 @@ let f (x : #foo | #bar) : i32 =
     case #foo -> 1
     case #bar -> 2
 
-let main : *[]i32 = map f (swap_inplace 2)
+let main : []i32 = map f (swap_inplace 2)

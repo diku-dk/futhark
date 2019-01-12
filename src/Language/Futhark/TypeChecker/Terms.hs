@@ -1585,6 +1585,8 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   return (tparams, e'')
 
 -- | Type-check a top-level (or module-level) function definition.
+-- Despite the name, this is also used for checking constant
+-- definitions, by treating them as 0-ary functions.
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
                 [UncheckedTypeParam], [UncheckedPattern],
                 UncheckedExp, SrcLoc)
@@ -1669,9 +1671,15 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
       Just (retdecl', retdecl_type, _) -> do
         let rettype_structural = toStructural retdecl_type
         checkReturnAlias rettype_structural params'' body_t
+
+        when (null params) $ nothingMustBeUnique loc rettype_structural
+
         return (Just retdecl', retdecl_type)
-      Nothing ->
-        return (Nothing, inferReturnUniqueness params'' body_t)
+      Nothing
+        | null params ->
+            return (Nothing, vacuousShapeAnnotations $ toStruct $ body_t `setUniqueness` Nonunique)
+        | otherwise ->
+            return (Nothing, inferReturnUniqueness params'' body_t)
 
     tparams'' <- letGeneralise tparams' (rettype : map patternStructType params'') then_substs
 
@@ -1765,6 +1773,14 @@ boundAliases :: Aliasing -> S.Set VName
 boundAliases = S.map aliasVar . S.filter bound
   where bound AliasBound{} = True
         bound AliasFree{} = False
+
+nothingMustBeUnique :: SrcLoc -> TypeBase () () -> TermTypeM ()
+nothingMustBeUnique loc = check
+  where check (Array _ Unique _ _) = bad
+        check (TypeVar _ Unique _ _) = bad
+        check (Record fs) = mapM_ check fs
+        check _ = return ()
+        bad = typeError loc "A top-level constant cannot have a unique type."
 
 letGeneralise :: [TypeParam]
               -> [StructType]
