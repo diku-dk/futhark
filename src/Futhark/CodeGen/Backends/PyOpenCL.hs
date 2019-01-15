@@ -101,23 +101,26 @@ callKernel (Imp.GetSizeMax v size_class) =
 callKernel (Imp.HostCode c) =
   Py.compileCode c
 
-callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
-  kernel_size' <- mapM Py.compileExp kernel_size
-  let total_elements = foldl mult_exp (Integer 1) kernel_size'
-  let cond = BinOp "!=" total_elements (Integer 0)
-  workgroup_size' <- Tuple <$> mapM (fmap asLong . Py.compileExp) workgroup_size
-  body <- Py.collect $ launchKernel name kernel_size' workgroup_size' args
+callKernel (Imp.LaunchKernel name args num_workgroups workgroup_size) = do
+  num_workgroups' <- mapM (fmap asLong . Py.compileExp) num_workgroups
+  workgroup_size' <- mapM (fmap asLong . Py.compileExp) workgroup_size
+  let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
+      total_elements = foldl mult_exp (Integer 1) kernel_size
+      cond = BinOp "!=" total_elements (Integer 0)
+  body <- Py.collect $ launchKernel name kernel_size workgroup_size' args
   Py.stm $ If cond body []
   where mult_exp = BinOp "*"
 
-launchKernel :: String -> [PyExp] -> PyExp -> [Imp.KernelArg] -> Py.CompilerM op s ()
+launchKernel :: String -> [PyExp] -> [PyExp] -> [Imp.KernelArg]
+             -> Py.CompilerM op s ()
 launchKernel kernel_name kernel_dims workgroup_dims args = do
-  let kernel_dims' = Tuple $ map asLong kernel_dims
-  let kernel_name' = "self." ++ kernel_name ++ "_var"
+  let kernel_dims' = Tuple kernel_dims
+      workgroup_dims' = Tuple workgroup_dims
+      kernel_name' = "self." ++ kernel_name ++ "_var"
   args' <- mapM processKernelArg args
   Py.stm $ Exp $ Py.simpleCall (kernel_name' ++ ".set_args") args'
   Py.stm $ Exp $ Py.simpleCall "cl.enqueue_nd_range_kernel"
-    [Var "self.queue", Var kernel_name', kernel_dims', workgroup_dims]
+    [Var "self.queue", Var kernel_name', kernel_dims', workgroup_dims']
   finishIfSynchronous
   where processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
         processKernelArg (Imp.ValueKArg e bt) = do
