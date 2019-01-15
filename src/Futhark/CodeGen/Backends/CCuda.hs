@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.CCuda
   ) where
 
 import qualified Language.C.Quote.OpenCL as C
+import Data.List
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.Cuda as ImpGen
@@ -184,7 +185,7 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
-callKernel (LaunchKernel name args kernel_size workgroup_size) = do
+callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   (args', shared_vars) <- unzip <$> mapM mkArgs args
   let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
@@ -195,18 +196,24 @@ callKernel (LaunchKernel name args kernel_size workgroup_size) = do
            GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
         ) shared_args
 
-  (global_x, global_y, global_z) <- mkDims <$> mapM GC.compileExp kernel_size
-  (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp workgroup_size
+  (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
+  (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp block_size
   let args'' = [ [C.cinit|&$id:a|] | a <- args' ]
-      sizes_nonzero = expsNotZero [global_x, global_y, global_z]
+      sizes_nonzero = expsNotZero [grid_x, grid_y, grid_z,
+                      block_x, block_y, block_z]
   GC.stm [C.cstm|
     if ($exp:sizes_nonzero) {
       void *$id:args_arr[] = {$inits:args''};
+      if (ctx->debugging) {
+        fprintf(stderr, "Launching %s with grid size (", $string:name);
+        $stms:(printSizes [grid_x, grid_y, grid_z])
+        fprintf(stderr, ") and block size (");
+        $stms:(printSizes [block_x, block_y, block_z])
+        fprintf(stderr, ").\n");
+      }
       CUDA_SUCCEED(
         cuLaunchKernel(ctx->$id:name,
-                       $exp:global_x / $exp:block_x,
-                       $exp:global_y / $exp:block_y,
-                       $exp:global_z / $exp:block_z,
+                       $exp:grid_x, $exp:grid_y, $exp:grid_z,
                        $exp:block_x, $exp:block_y, $exp:block_z,
                        $exp:shared_tot, NULL,
                        $id:args_arr, NULL));
@@ -235,4 +242,9 @@ callKernel (LaunchKernel name args kernel_size workgroup_size) = do
       offset <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
       return (offset, Just (size, offset))
+
+    printSizes =
+      intercalate [[C.cstm|fprintf(stderr, ", ");|]] . map printSize
+    printSize e =
+      [[C.cstm|fprintf(stderr, "%zu", $exp:e);|]]
 

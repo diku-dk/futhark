@@ -127,12 +127,13 @@ callKernel (Imp.GetSizeMax v size_class) =
 
 callKernel (Imp.HostCode c) = CS.compileCode c
 
-callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
-  kernel_size' <- mapM CS.compileExp kernel_size
-  let total_elements = foldl mult_exp (Integer 1) kernel_size'
-  let cond = BinOp "!=" total_elements (Integer 0)
+callKernel (Imp.LaunchKernel name args num_workgroups workgroup_size) = do
+  num_workgroups' <- mapM CS.compileExp num_workgroups
   workgroup_size' <- mapM CS.compileExp workgroup_size
-  body <- CS.collect $ launchKernel name kernel_size' workgroup_size' args
+  let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
+      total_elements = foldl mult_exp (Integer 1) kernel_size
+      cond = BinOp "!=" total_elements (Integer 0)
+  body <- CS.collect $ launchKernel name kernel_size workgroup_size' args
   CS.stm $ If cond body []
   where mult_exp = BinOp "*"
 
