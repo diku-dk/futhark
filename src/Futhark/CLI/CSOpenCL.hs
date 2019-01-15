@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
-module Main (main) where
+module Futhark.CLI.CSOpenCL (main) where
 
 import Control.Monad.IO.Class
 import Data.Maybe (fromMaybe)
@@ -15,7 +15,7 @@ import Futhark.Util.Pretty (prettyText)
 import Futhark.Compiler.CLI
 import Futhark.Util
 
-main :: IO ()
+main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile OpenCL C#" "Generate OpenCL C# code from optimised Futhark program."
        gpuPipeline $ \() mode outpath prog -> do

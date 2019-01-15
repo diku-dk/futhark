@@ -8,7 +8,6 @@ module Futhark.Compiler
        , FutharkConfig (..)
        , newFutharkConfig
        , dumpError
-       , reportingIOErrors
 
        , module Futhark.Compiler.Program
        , readProgram
@@ -17,13 +16,11 @@ module Futhark.Compiler
 where
 
 import Data.Semigroup ((<>))
-import Control.Exception
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Except
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
-import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import Futhark.Internalise
@@ -69,23 +66,6 @@ dumpError config err =
           when (fst (futharkVerbose config) > NotVerbose) $
             maybe (T.hPutStr stderr) T.writeFile
             (snd (futharkVerbose config)) $ info <> "\n"
-
--- | Catch all IO exceptions and print a better error message if they
--- happen.  Use this at the top-level of all Futhark compiler
--- frontends.
-reportingIOErrors :: IO () -> IO ()
-reportingIOErrors = flip catches [Handler onExit, Handler onError]
-  where onExit :: ExitCode -> IO ()
-        onExit = throwIO
-        onError :: SomeException -> IO ()
-        onError e
-          | Just UserInterrupt <- asyncExceptionFromException e =
-              return () -- This corresponds to CTRL-C, which is not an error.
-          | otherwise = do
-              T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
-              T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
-              T.hPutStrLn stderr $ T.pack $ show e
-              exitWith $ ExitFailure 1
 
 runCompilerOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS lore

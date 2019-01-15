@@ -1,24 +1,25 @@
 .. role:: ref(emphasis)
 
-.. _futhark-cs(1):
+.. _futhark-csharp(1):
 
-==========
-futhark-cs
-==========
+==============
+futhark-csharp
+==============
 
 SYNOPSIS
 ========
 
-futhark-cs [-V] [-o outfile] infile
+futhark csharp [-V] [-o outfile] infile
 
 DESCRIPTION
 ===========
 
-``futhark-cs`` translates a Futhark program to sequential C# code, and
-either compiles that C# code with the Roslyn C# Compiler ``csc``
-to an executable binary program, or produces a ``.dll`` file that can be linked with
-other code..  The standard Futhark optimisation pipeline is used, and
-``csc`` is invoked with ``-lib:$MONO_PATH``, ``-r:Mono.Options.dll``, and ``/unsafe``.
+``futhark csharp`` translates a Futhark program to sequential C# code,
+and either compiles that C# code with the Roslyn C# Compiler ``csc``
+to an executable binary program, or produces a ``.dll`` file that can
+be linked with other code..  The standard Futhark optimisation
+pipeline is used, and ``csc`` is invoked with ``-lib:$MONO_PATH``,
+``-r:Mono.Options.dll``, and ``/unsafe``.
 
 The resulting program will read the arguments to the entry point
 (``main`` by default) from standard input and print its return value
@@ -50,7 +51,7 @@ OPTIONS
 
 REQUIREMENTS
 ============
-``futhark-cs`` uses the Mono implementation of the .NET framework.
+``futhark csharp`` uses the Mono implementation of the .NET framework.
 To compile and execute the compiled binaries/libraries, you must have the ``MONO_PATH`` environment variable defined. ``MONO_PATH`` must be set to a directory containing the ``Mono.Options`` dll.
 
 Mono.Options is available on https://www.nuget.org/packages/Mono.Options/5.3.0.1
@@ -58,4 +59,4 @@ Mono.Options is available on https://www.nuget.org/packages/Mono.Options/5.3.0.1
 SEE ALSO
 ========
 
-futharki(1), futhark-test(1)
+futhark-csopencl(1)
