@@ -2,28 +2,29 @@
 
 .. _futhark-py(1):
 
-==========
-futhark-py
-==========
+==============
+futhark-python
+==============
 
 SYNOPSIS
 ========
 
-futhark-py [-V] [-o outfile] infile
+futhark python [-V] [-o outfile] infile
 
 DESCRIPTION
 ===========
 
-``futhark-py`` translates a Futhark program to sequential Python code.
+``futhark python`` translates a Futhark program to sequential Python
+code.
 
 The resulting program will read the arguments to the ``main`` function
 from standard input and print its return value on standard output.
 The arguments are read and printed in Futhark syntax, just like
 futharki(1).
 
-The generated code is very slow, likely too much to be useful.  It is
+The generated code is very slow, likely too slow to be useful.  It is
 more interesting to use this command's big brother,
-``futhark-pyopencl``.
+``futhark pyopencl``.
 
 OPTIONS
 =======

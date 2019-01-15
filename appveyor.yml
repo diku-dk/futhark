@@ -27,4 +27,4 @@ install:
 test_script:
 - chcp 65001
 - stack --no-terminal test --fast
-- futhark-test --no-terminal -t tests examples
+- futhark test --no-terminal -t tests examples

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Main (main) where
+module Futhark.CLI.Pkg (main) where
 
 import Control.Monad.IO.Class
 import Control.Monad.State
@@ -189,21 +189,22 @@ instance MonadLogger PkgM where
 runPkgM :: PkgConfig -> PkgM a -> IO a
 runPkgM cfg (PkgM m) = evalStateT (runReaderT m cfg) mempty
 
-cmdMain :: String -> ([String] -> PkgConfig -> Maybe (IO ())) -> IO ()
+cmdMain :: String -> ([String] -> PkgConfig -> Maybe (IO ()))
+        -> String -> [String] -> IO ()
 cmdMain = mainWithOptions (PkgConfig False) options
   where options = [ Option "v" ["verbose"]
                     (NoArg $ Right $ \cfg -> cfg { pkgVerbose = True })
                     "Write running diagnostics to stderr."]
 
-doFmt :: IO ()
-doFmt = mainWithOptions () [] "fmt" $ \args () ->
+doFmt :: String -> [String] -> IO ()
+doFmt = mainWithOptions () [] "" $ \args () ->
   case args of
     [] -> Just $ do
       m <- parsePkgManifestFromFile futharkPkg
       T.writeFile futharkPkg $ prettyPkgManifest m
     _ -> Nothing
 
-doCheck :: IO ()
+doCheck :: String -> [String] -> IO ()
 doCheck = cmdMain "check" $ \args cfg ->
   case args of
     [] -> Just $ runPkgM cfg $ do
@@ -231,8 +232,8 @@ doCheck = cmdMain "check" $ \args cfg ->
             exitFailure
     _ -> Nothing
 
-doSync :: IO ()
-doSync = cmdMain "sync" $ \args cfg ->
+doSync :: String -> [String] -> IO ()
+doSync = cmdMain "" $ \args cfg ->
   case args of
     [] -> Just $ runPkgM cfg $ do
       m <- getPkgManifest
@@ -240,8 +241,8 @@ doSync = cmdMain "sync" $ \args cfg ->
       installBuildList (commented $ manifestPkgPath m) bl
     _ -> Nothing
 
-doAdd :: IO ()
-doAdd = cmdMain "add PKGPATH" $ \args cfg ->
+doAdd :: String -> [String] -> IO ()
+doAdd = cmdMain "PKGPATH" $ \args cfg ->
   case args of
     [p, v] | Right v' <- parseVersion $ T.pack v -> Just $ runPkgM cfg $ doAdd' (T.pack p) v'
     [p] -> Just $ runPkgM cfg $
@@ -284,8 +285,8 @@ doAdd = cmdMain "add PKGPATH" $ \args cfg ->
       putPkgManifest m'
       liftIO $ T.putStrLn "Remember to run 'futhark-pkg sync'."
 
-doRemove :: IO ()
-doRemove = cmdMain "remove PKGPATH" $ \args cfg ->
+doRemove :: String -> [String] -> IO ()
+doRemove = cmdMain "PKGPATH" $ \args cfg ->
   case args of
     [p] -> Just $ runPkgM cfg $ doRemove' $ T.pack p
     _ -> Nothing
@@ -300,8 +301,8 @@ doRemove = cmdMain "remove PKGPATH" $ \args cfg ->
           putPkgManifest m'
           liftIO $ T.putStrLn $ "Removed " <> p <> " " <> prettySemVer (requiredPkgRev r) <> "."
 
-doInit :: IO ()
-doInit = cmdMain "create PKGPATH" $ \args cfg ->
+doInit :: String -> [String] -> IO ()
+doInit = cmdMain "PKGPATH" $ \args cfg ->
   case args of
     [p] -> Just $ runPkgM cfg $ doCreate' $ T.pack p
     _ -> Nothing
@@ -318,8 +319,8 @@ doInit = cmdMain "create PKGPATH" $ \args cfg ->
       putPkgManifest $ newPkgManifest $ Just p
       liftIO $ T.putStrLn $ "Wrote " <> T.pack futharkPkg <> "."
 
-doUpgrade :: IO ()
-doUpgrade = cmdMain "upgrade" $ \args cfg ->
+doUpgrade :: String -> [String] -> IO ()
+doUpgrade = cmdMain "" $ \args cfg ->
   case args of
     [] -> Just $ runPkgM cfg $ do
       m <- getPkgManifest
@@ -337,8 +338,8 @@ doUpgrade = cmdMain "upgrade" $ \args cfg ->
           return req { requiredPkgRev = v
                      , requiredHash = Just h }
 
-doVersions :: IO ()
-doVersions = cmdMain "versions PKGPATH" $ \args cfg ->
+doVersions :: String -> [String] -> IO ()
+doVersions = cmdMain "PKGPATH" $ \args cfg ->
   case args of
     [p] -> Just $ runPkgM cfg $ doVersions' $ T.pack p
     _ -> Nothing
@@ -346,15 +347,14 @@ doVersions = cmdMain "versions PKGPATH" $ \args cfg ->
           mapM_ (liftIO . T.putStrLn . prettySemVer) . M.keys . pkgVersions
           <=< lookupPackage
 
-main :: IO ()
-main = do
+main :: String -> [String] -> IO ()
+main prog args = do
   -- Ensure that we can make HTTPS requests.
   setGlobalManager =<< newManager tlsManagerSettings
 
   -- Avoid Git asking for credentials.  We prefer failure.
   liftIO $ setEnv "GIT_TERMINAL_PROMPT" "0"
 
-  args <- getArgs
   let commands = [ ("add",
                     (doAdd, "Add another required package to futhark.pkg."))
                  , ("check",
@@ -374,14 +374,18 @@ main = do
                  ]
       usage = "options... <" <> intercalate "|" (map fst commands) <> ">"
   case args of
-    cmd : args' | Just (m, _) <- lookup cmd commands -> withArgs args' m
-    _ -> mainWithOptions () [] usage $ \_ () -> Just $ do
-      let k = maximum (map (length . fst) commands) + 3
-      usageMsg $ T.unlines $
-        ["<command> ...:", "", "Commands:"] ++
-        [ "   " <> T.pack cmd <> T.pack (replicate (k - length cmd) ' ') <> desc
-        | (cmd, (_, desc)) <- commands ]
+    cmd : args' | Just (m, _) <- lookup cmd commands ->
+                    m (unwords [prog, cmd]) args'
+    _ -> do
+      let bad _ () = Just $ do
+            let k = maximum (map (length . fst) commands) + 3
+            usageMsg $ T.unlines $
+              ["<command> ...:", "", "Commands:"] ++
+              [ "   " <> T.pack cmd <> T.pack (replicate (k - length cmd) ' ') <> desc
+              | (cmd, (_, desc)) <- commands ]
+
+      mainWithOptions () [] usage bad prog args
 
   where usageMsg s = do
-          T.putStrLn $ "Usage: futhark-pkg [--version] [--help] " <> s
+          T.putStrLn $ "Usage: " <> T.pack prog <> " [--version] [--help] " <> s
           exitFailure

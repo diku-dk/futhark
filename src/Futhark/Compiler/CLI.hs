@@ -30,13 +30,14 @@ compilerMain :: cfg -- ^ Initial configuration.
              -> Pipeline SOACS lore -- ^ The pipeline to use.
              -> (cfg -> CompilerMode -> FilePath -> Prog lore -> FutharkM ())
              -- ^ The action to take on the result of the pipeline.
+             -> String -- ^ Program name
+             -> [String] -- ^ Command line arguments.
              -> IO ()
-compilerMain cfg cfg_opts name desc pipeline doIt = do
+compilerMain cfg cfg_opts name desc pipeline doIt prog args = do
   hSetEncoding stdout utf8
   hSetEncoding stderr utf8
-  reportingIOErrors $
-    mainWithOptions (newCompilerConfig cfg) (commandLineOptions ++ map wrapOption cfg_opts)
-    "options... program" inspectNonOptions
+  mainWithOptions (newCompilerConfig cfg) (commandLineOptions ++ map wrapOption cfg_opts)
+    "options... program" inspectNonOptions prog args
   where inspectNonOptions [file] config = Just $ compile config file
         inspectNonOptions _      _      = Nothing
 

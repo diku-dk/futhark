@@ -125,7 +125,7 @@ elide ``d``, in which case the size will be inferred.  As an example,
 an array of three integers could be written as ``[1,2,3]``, and has
 type ``[3]i32``.  An empty array is written as ``[]``, and its type is
 inferred from its use.  When writing Futhark values for such uses as
-``futhark-test`` (but not when writing programs), the syntax
+``futhark test`` (but not when writing programs), the syntax
 ``empty(t)`` can be used to denote an empty array with row type ``t``.
 
 Multi-dimensional arrays are supported in Futhark, but they must be

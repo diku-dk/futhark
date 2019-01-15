@@ -552,12 +552,12 @@ getExpectedResult prog entry tr =
       return $ RunTimeFailure err
 
 compileProgram :: (MonadIO m, MonadError [T.Text] m) =>
-                  [String] -> FilePath -> FilePath
+                  [String] -> FilePath -> String -> FilePath
                -> m (SBS.ByteString, SBS.ByteString)
-compileProgram extra_options compiler program = do
-  (futcode, stdout, stderr) <- liftIO $ readProcessWithExitCode compiler options ""
+compileProgram extra_options futhark backend program = do
+  (futcode, stdout, stderr) <- liftIO $ readProcessWithExitCode futhark (backend:options) ""
   case futcode of
-    ExitFailure 127 -> throwError [progNotFound $ T.pack compiler]
+    ExitFailure 127 -> throwError [progNotFound $ T.pack futhark]
     ExitFailure _   -> throwError [T.decodeUtf8 stderr]
     ExitSuccess     -> return ()
   return (stdout, stderr)
@@ -586,12 +586,12 @@ runProgram runner extra_options prog entry input = do
 -- compiling the program with the reference compiler and running it on
 -- the input) if necessary.
 ensureReferenceOutput :: (MonadIO m, MonadError [T.Text] m) =>
-                         FilePath -> FilePath -> [InputOutputs]
+                         FilePath -> String -> FilePath -> [InputOutputs]
                       -> m ()
-ensureReferenceOutput compiler prog ios = do
+ensureReferenceOutput futhark compiler prog ios = do
   missing <- filterM isReferenceMissing $ concatMap entryAndRuns ios
   unless (null missing) $ do
-    void $ compileProgram [] compiler prog
+    void $ compileProgram [] futhark compiler prog
     liftIO $ void $ flip pmapIO missing $ \(entry, tr) -> do
       (code, stdout, stderr) <- runProgram "" ["-b"] prog entry $ runInput tr
       case code of
