@@ -187,6 +187,8 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeTile = "tile_size"
 callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
+  time_start <- newVName "time_start"
+  time_end <- newVName "time_end"
   (args', shared_vars) <- unzip <$> mapM mkArgs args
   let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
       shared_offsets_sc = mkOffsets shared_sizes
@@ -204,12 +206,14 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
   GC.stm [C.cstm|
     if ($exp:sizes_nonzero) {
       void *$id:args_arr[] = {$inits:args''};
+      typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
         fprintf(stderr, "Launching %s with grid size (", $string:name);
         $stms:(printSizes [grid_x, grid_y, grid_z])
         fprintf(stderr, ") and block size (");
         $stms:(printSizes [block_x, block_y, block_z])
         fprintf(stderr, ").\n");
+        $id:time_start = get_wall_time();
       }
       CUDA_SUCCEED(
         cuLaunchKernel(ctx->$id:name,
@@ -217,6 +221,12 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
                        $exp:block_x, $exp:block_y, $exp:block_z,
                        $exp:shared_tot, NULL,
                        $id:args_arr, NULL));
+      if (ctx->debugging) {
+        CUDA_SUCCEED(cuCtxSynchronize());
+        $id:time_end = get_wall_time();
+        fprintf(stderr, "Kernel %s runtime: %ldus\n",
+                $string:name, $id:time_end - $id:time_start);
+      }
     }|]
   where
     mkDims [] = ([C.cexp|0|] , [C.cexp|0|], [C.cexp|0|])
