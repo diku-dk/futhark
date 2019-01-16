@@ -7,13 +7,11 @@ module Futhark.CLI.REPL (main) where
 
 import Control.Monad.Free.Church
 import Control.Exception
-import Data.Array
 import Data.Char
 import Data.List
 import Data.Loc
 import Data.Maybe
 import Data.Version
-import qualified Data.Map as M
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State
@@ -24,7 +22,6 @@ import qualified Data.Text.IO as T
 import NeatInterpolation (text)
 import System.Directory
 import System.FilePath
-import System.Exit
 import System.Console.GetOpt
 import System.IO
 import qualified System.Console.Haskeline as Haskeline
