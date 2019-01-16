@@ -109,6 +109,8 @@ executables:
     main: src/wrapper.hs
   futhark-bench:
     main: src/wrapper.hs
+  futhark-pkg:
+    main: src/wrapper.hs
   futharki:
     main: src/futharki.hs
 
