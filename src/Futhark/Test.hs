@@ -62,8 +62,9 @@ import Text.Regex.TDFA
 import System.Directory
 import System.Exit
 import System.Process.ByteString (readProcessWithExitCode)
-import System.IO (withFile, IOMode(..), hFileSize)
+import System.IO (withFile, IOMode(..), hFileSize, hClose)
 import System.IO.Error
+import System.IO.Temp
 
 import Prelude
 
@@ -480,16 +481,29 @@ getValuesBS dir (InFile file) =
 getValuesBS dir (GenValues gens) =
   mconcat <$> mapM (getGenBS dir) gens
 
+-- | There is a risk of race conditions when multiple programs have
+-- identical 'GenValues'.  In such cases, multiple threads in 'futhark
+-- test' might attempt to create the same file (or read from it, while
+-- something else is constructing it).  This leads to a mess.  To
+-- avoid this, we create a temporary file, and only when it is
+-- complete do we move it into place.  It would be better if we could
+-- use file locking, but that does not work on some file systems.  The
+-- approach here seems robust enough for now, but certainly it could
+-- be made even better.  The race condition that remains should mostly
+-- result in duplicate work, not crashes or data corruption.
 getGenBS :: MonadIO m => FilePath -> GenValue -> m BS.ByteString
 getGenBS dir gen = do
+  liftIO $ createDirectoryIfMissing True $ dir </> "data"
   exists_and_proper_size <- liftIO $
     withFile (dir </> file) ReadMode (fmap (== genFileSize gen) . hFileSize)
     `catch` \ex -> if isDoesNotExistError ex then return False
                    else E.throw ex
   unless exists_and_proper_size $ liftIO $ do
     s <- genValues [gen]
-    createDirectoryIfMissing True $ takeDirectory $ dir </> file
-    SBS.writeFile (dir </> file) s
+    withTempFile (dir </> "data") (genFileName gen) $ \tmpfile h -> do
+      hClose h -- We will be writing and reading this ourselves.
+      SBS.writeFile tmpfile s
+      renameFile tmpfile $ dir </> file
   getValuesBS dir $ InFile file
   where file = "data" </> genFileName gen
 
@@ -602,8 +616,7 @@ ensureReferenceOutput futhark compiler prog ios = do
         ExitSuccess ->
           SBS.writeFile (file (entry, tr)) stdout
   where file (entry, tr) =
-          takeDirectory prog
-          </> testRunReferenceOutput prog entry tr
+          takeDirectory prog </> testRunReferenceOutput prog entry tr
 
         entryAndRuns (InputOutputs entry rts) = map (entry,) rts
 
