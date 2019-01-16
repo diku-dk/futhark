@@ -1,3 +1,6 @@
+-- Wrapper program that translates @futhark-foo@ to @futhark foo@;
+-- using whichever @futhark@ binary is in the user's search path.
+
 module Main (main) where
 
 import System.Environment
@@ -9,11 +12,9 @@ main :: IO ()
 main = do
   prog <- getProgName
   args <- getArgs
-  let suffix = case args of
-                 [] -> "repl"
-                 _ -> "run"
+  let suffix = drop 1 $ dropWhile (/='-') prog
   hPutStrLn stderr $
-    "'" ++ prog ++ "' is deprecated.  Use '" ++
+    prog ++ ": this command is deprecated.  Use '" ++
     unwords ["futhark", suffix] ++ "' instead."
   (_, _, _, h) <- createProcess $ proc "futhark" $ suffix:args
   exitWith =<< waitForProcess h

@@ -205,11 +205,11 @@ Setting up Futhark and OpenCL
 
    The CUDA distribution also comes with the static ``OpenCL.lib``, but
    trying to use that one instead of the ``OpenCL64.dll`` will cause
-   programs compiled with ``futhark-opencl`` to crash, so ignore it
+   programs compiled with ``futhark opencl`` to crash, so ignore it
    completely.
 
-Now you should be able to compile ``futhark-opencl`` and run Futhark
-programs on the GPU.
+Now you should be able to compile with ``futhark opencl`` and run
+Futhark programs on the GPU.
 
 Congratulations!
 

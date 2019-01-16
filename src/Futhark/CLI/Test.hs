@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, FlexibleContexts, LambdaCase #-}
 -- | This program is a convenience utility for running the Futhark
 -- test suite, and its test programs.
-module Main (main) where
+module Futhark.CLI.Test (main) where
 
 import Control.Applicative.Lift (runErrors, failure, Errors, Lift(..))
 import Control.Concurrent
@@ -99,13 +99,13 @@ optimisedProgramMetrics programs pipeline program =
                      check "--gpu"
   where check opt = do
           (code, output, err) <-
-            io $ readProcessWithExitCode (configTypeChecker programs) [opt, "--metrics", program] ""
+            io $ readProcessWithExitCode (configFuthark programs) ["dev", opt, "--metrics", program] ""
           let output' = T.decodeUtf8 output
           case code of
             ExitSuccess
               | [(m, [])] <- reads $ T.unpack output' -> return m
               | otherwise -> throwError $ "Could not read metrics output:\n" <> output'
-            ExitFailure 127 -> throwError $ progNotFound $ T.pack $ configTypeChecker programs
+            ExitFailure 127 -> throwError $ progNotFound $ T.pack $ configFuthark programs
             ExitFailure _ -> throwError $ T.decodeUtf8 err
 
 testMetrics :: ProgConfig -> FilePath -> StructureTest -> TestM ()
@@ -137,49 +137,49 @@ runTestCase :: TestCase -> TestM ()
 runTestCase (TestCase mode program testcase progs) =
   case testAction testcase of
 
-    CompileTimeFailure expected_error -> do
-      let typeChecker = configTypeChecker progs
-      context ("Type-checking with " <> T.pack typeChecker) $ do
+    CompileTimeFailure expected_error ->
+      context (mconcat ["Type-checking with '", T.pack futhark,
+                        " check ", T.pack program, "'"]) $ do
         (code, _, err) <-
-          io $ readProcessWithExitCode typeChecker ["-t", program] ""
+          io $ readProcessWithExitCode futhark ["check", program] ""
         case code of
          ExitSuccess -> throwError "Expected failure\n"
-         ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
+         ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
          ExitFailure 1 -> throwError $ T.decodeUtf8 err
          ExitFailure _ -> checkError expected_error err
 
     RunCases _ _ warnings | mode == TypeCheck -> do
-      let typeChecker = configTypeChecker progs
-          options = ["-t", program] ++ configExtraCompilerOptions progs
-      context ("Type-checking with " <> T.pack typeChecker) $ do
-        (code, _, err) <- io $ readProcessWithExitCode typeChecker options ""
+      let options = ["check", program] ++ configExtraCompilerOptions progs
+      context (mconcat ["Type-checking with '", T.pack futhark,
+                        " check ", T.pack program, "'"]) $ do
+        (code, _, err) <- io $ readProcessWithExitCode futhark options ""
         testWarnings warnings err
         case code of
          ExitSuccess -> return ()
-         ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
+         ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
          ExitFailure _ -> throwError $ T.decodeUtf8 err
 
     RunCases ios structures warnings -> do
       -- Compile up-front and reuse same executable for several entry points.
-      let compiler = configCompiler progs
-          interpreter = configInterpreter progs
+      let backend = configBackend progs
           extra_options = configExtraCompilerOptions progs
       unless (mode == Compile) $
         context "Generating reference outputs" $
-        ensureReferenceOutput "futhark-c" program ios
+        ensureReferenceOutput futhark "c" program ios
       unless (mode == Interpreted) $
-        context ("Compiling with " <> T.pack compiler) $ do
-          compileTestProgram extra_options compiler program warnings
+        context ("Compiling with --backend=" <> T.pack backend) $ do
+          compileTestProgram extra_options futhark backend program warnings
           mapM_ (testMetrics progs program) structures
           unless (mode == Compile) $
             context "Running compiled program" $
             accErrors_ $ map (runCompiledEntry program progs) ios
       unless (mode == Compile || mode == Compiled) $
-        context ("Interpreting with " <> T.pack interpreter) $
-          accErrors_ $ map (runInterpretedEntry interpreter program) ios
+        context "Interpreting" $
+          accErrors_ $ map (runInterpretedEntry futhark program) ios
+  where futhark = configFuthark progs
 
 runInterpretedEntry :: String -> FilePath -> InputOutputs -> TestM()
-runInterpretedEntry futharki program (InputOutputs entry run_cases) =
+runInterpretedEntry futhark program (InputOutputs entry run_cases) =
   let dir = takeDirectory program
       runInterpretedCase run@(TestRun _ inputValues _ index _) =
         unless ("compiled" `elem` runTags run) $
@@ -189,10 +189,10 @@ runInterpretedEntry futharki program (InputOutputs entry run_cases) =
             input <- T.unlines . map prettyText <$> getValues dir inputValues
             expectedResult' <- getExpectedResult program entry run
             (code, output, err) <-
-              io $ readProcessWithExitCode futharki ["-e", T.unpack entry, program] $
+              io $ readProcessWithExitCode futhark ["run", "-e", T.unpack entry, program] $
               T.encodeUtf8 input
             case code of
-              ExitFailure 127 -> throwError $ progNotFound $ T.pack futharki
+              ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
 
               _               -> compareResult entry index program expectedResult'
                                  =<< runResult program code output err
@@ -242,9 +242,9 @@ runResult program ExitSuccess stdout_s _ =
 runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
-compileTestProgram :: [String] -> String -> FilePath -> [WarningTest] -> TestM ()
-compileTestProgram extra_options futharkc program warnings = do
-  (_, futerr) <- compileProgram extra_options futharkc program
+compileTestProgram :: [String] -> FilePath -> String -> FilePath -> [WarningTest] -> TestM ()
+compileTestProgram extra_options futhark backend program warnings = do
+  (_, futerr) <- compileProgram extra_options futhark backend program
   testWarnings warnings futerr
 
 compareResult :: T.Text -> Int -> FilePath -> ExpectedResult [Value] -> RunResult
@@ -471,9 +471,8 @@ defaultConfig = TestConfig { configTestMode = Everything
                            , configExclude = [ "disable" ]
                            , configPrograms =
                              ProgConfig
-                             { configCompiler = "futhark-c"
-                             , configInterpreter = "futharki"
-                             , configTypeChecker = "futhark"
+                             { configBackend = "c"
+                             , configFuthark = "futhark"
                              , configRunner = ""
                              , configExtraOptions = []
                              , configExtraCompilerOptions = []
@@ -482,9 +481,8 @@ defaultConfig = TestConfig { configTestMode = Everything
                            }
 
 data ProgConfig = ProgConfig
-                  { configCompiler :: FilePath
-                  , configInterpreter :: FilePath
-                  , configTypeChecker :: FilePath
+                  { configBackend :: String
+                  , configFuthark :: FilePath
                   , configRunner :: FilePath
                   , configExtraCompilerOptions :: [String]
                   , configExtraOptions :: [String]
@@ -495,17 +493,13 @@ data ProgConfig = ProgConfig
 changeProgConfig :: (ProgConfig -> ProgConfig) -> TestConfig -> TestConfig
 changeProgConfig f config = config { configPrograms = f $ configPrograms config }
 
-setCompiler :: FilePath -> ProgConfig -> ProgConfig
-setCompiler compiler config =
-  config { configCompiler = compiler }
+setBackend :: FilePath -> ProgConfig -> ProgConfig
+setBackend backend config =
+  config { configBackend = backend }
 
-setInterpreter :: FilePath -> ProgConfig -> ProgConfig
-setInterpreter interpreter config =
-  config { configInterpreter = interpreter }
-
-setTypeChecker :: FilePath -> ProgConfig -> ProgConfig
-setTypeChecker typeChecker config =
-  config { configTypeChecker = typeChecker }
+setFuthark :: FilePath -> ProgConfig -> ProgConfig
+setFuthark futhark config =
+  config { configFuthark = futhark }
 
 setRunner :: FilePath -> ProgConfig -> ProgConfig
 setRunner runner config =
@@ -543,15 +537,12 @@ commandLineOptions = [
   , Option [] ["no-terminal", "notty"]
     (NoArg $ Right $ \config -> config { configLineOutput = True })
     "Provide simpler line-based output."
-  , Option [] ["typechecker"]
-    (ReqArg (Right . changeProgConfig . setTypeChecker) "PROGRAM")
-    "What to run for type-checking (defaults to 'futhark')."
-  , Option [] ["compiler"]
-    (ReqArg (Right . changeProgConfig . setCompiler) "PROGRAM")
-    "What to run for code generation (defaults to 'futhark-c')."
-  , Option [] ["interpreter"]
-    (ReqArg (Right . changeProgConfig . setInterpreter) "PROGRAM")
-    "What to run for interpretation (defaults to 'futharki')."
+  , Option [] ["backend"]
+    (ReqArg (Right . changeProgConfig . setBackend) "BACKEND")
+    "Backend used for compilation (defaults to 'c')."
+  , Option [] ["futhark"]
+    (ReqArg (Right . changeProgConfig . setFuthark) "PROGRAM")
+    "Program to run for subcommands (defaults to 'futhark')."
   , Option [] ["runner"]
     (ReqArg (Right . changeProgConfig . setRunner) "PROGRAM")
     "The program used to run the Futhark-generated programs (defaults to nothing)."
@@ -569,6 +560,6 @@ commandLineOptions = [
     "Pass this option to the compiler (or typechecker if in -t mode)."
   ]
 
-main :: IO ()
+main :: String -> [String] -> IO ()
 main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
   Just $ runTests config progs

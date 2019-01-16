@@ -9,15 +9,14 @@ futhark-test
 SYNOPSIS
 ========
 
-futhark-test [-c | -C | -t | -i] infiles...
+futhark test [-c | -C | -t | -i] infiles...
 
 DESCRIPTION
 ===========
 
-This program is used to integration-test the Futhark compiler itself.
-You must have futhark-c(1) and futharki(1) in your ``PATH`` when
-running ``futhark-test``.  If a directory is given, all contained
-files with a ``.fut`` extension are considered.
+This tool is used to test Futhark programs based on input/output
+datasets.  If a directory is given, all contained files with a
+``.fut`` extension are considered.
 
 A Futhark test program is an ordinary Futhark program, with at least
 one test block describing input/output test cases and possibly other
@@ -48,7 +47,7 @@ has meaning to futhark-bench(1).
 
 If ``input`` is preceded by ``random``, the text between the curly
 braces must consist of a sequence of Futhark types, including sizes in
-the case of arrays.  When ``futhark-test`` is run, a file located in a
+the case of arrays.  When ``futhark test`` is run, a file located in a
 ``data/`` subdirectory, containing values of the indicated types and
 shapes is, automatically constructed with ``futhark-dataset``.  Apart
 from sizes, integer constants (without any type suffix) are also
@@ -83,12 +82,12 @@ This is used to test the type checker.
 
 By default, both the interpreter and compiler is run on all test cases
 (except those that have specified ``compiled``), although this can be
-changed with command-line options to ``futhark-test``.
+changed with command-line options to ``futhark test``.
 
 Tuple syntax is not supported when specifying input and output values.
 Instead, you can write an N-tuple as its constituent N values.  Beware
 of syntax errors in the values - the errors reported by
-``futhark-test`` are very poor.
+``futhark test`` are very poor.
 
 An optional tags specification is permitted in the first test block.
 This section can contain arbitrary tags that classify the benchmark::
@@ -97,7 +96,7 @@ This section can contain arbitrary tags that classify the benchmark::
 
 Tag are sequences of alphanumeric characters, dashes, and underscores,
 with each tag seperated by whitespace.  Any program with the
-``disable`` tag is ignored by ``futhark-test``.
+``disable`` tag is ignored by ``futhark test``.
 
 Another optional directive is ``entry``, which specifies the entry
 point to be used for testing.  This is useful for writing programs
@@ -134,19 +133,14 @@ OPTIONS
 -t
   Type-check the programs, but do not run them.
 
---compiler=program
-  The program used to compile Futhark programs.  This option can be
-  passed multiple times, with the last taking effect.  The specified
-  program must support the same interface as ``futhark-c``.
+--backend=program
 
---interpreter=program
+  The backend used when compiling Futhark programs (without leading
+  ``futhark``, e.g. just ``opencl``).
 
-  Like ``--compiler``, but for interpretation.
+--futhark=program
 
---typechecker=program
-
-  Like ``--compiler``, but for when execution has been disabled with
-  ``-t``.
+  The program used to perform operations.  Defaults to ``futhark``.
 
 --runner=program
 
@@ -154,7 +148,7 @@ OPTIONS
   run directly, but instead the indicated program is run, with the
   path to the compiled Futhark program passed as the first
   command-line argument.  This is useful for compilation targets that
-  cannot be executed directly (like `futhark-cs(1)`), or when you wish
+  cannot be executed directly (like ``futhark cs``), or when you wish
   to run the program on a remote machine.
 
 --pass-option=opt
@@ -162,7 +156,7 @@ OPTIONS
   Pass an option to benchmark programs that are being run.  For
   example, we might want to run OpenCL programs on a specific device::
 
-    futhark-bench prog.fut --compiler=futhark-opencl --pass-option=-dHawaii
+    futhark-bench prog.fut --backend=opencl --pass-option=-dHawaii
 
 EXAMPLES
 ========

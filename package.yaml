@@ -62,6 +62,10 @@ dependencies:
   - zip-archive >= 0.3.1.1
   - time >= 1.6.0.1
   - ansi-terminal >= 0.6.3.1
+  - random
+  - temporary
+  - aeson
+  - haskeline
 
 when:
 - condition: "!impl(ghc >= 8.0)"
@@ -84,49 +88,29 @@ executables:
     main: src/futhark.hs
     dependencies:
       - futhark
-      - random
-      - temporary
-      - aeson
     ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg"
-  futharki:
-    <<: *futhark
-    dependencies:
-      - futhark
-      - haskeline
-    main: src/futharki.hs
   futhark-c:
-    <<: *futhark
-    main: src/futhark-c.hs
+    main: src/wrapper.hs
   futhark-opencl:
-    <<: *futhark
-    main: src/futhark-opencl.hs
+    main: src/wrapper.hs
   futhark-py:
-    <<: *futhark
-    main: src/futhark-py.hs
+    main: src/wrapper.hs
   futhark-pyopencl:
-    <<: *futhark
-    main: src/futhark-pyopencl.hs
+    main: src/wrapper.hs
   futhark-cs:
-    <<: *futhark
-    main: src/futhark-cs.hs
+    main: src/wrapper.hs
   futhark-csopencl:
-    <<: *futhark
-    main: src/futhark-csopencl.hs
-  futhark-test:
-    <<: *futhark
-    main: src/futhark-test.hs
-  futhark-bench:
-    <<: *futhark
-    main: src/futhark-bench.hs
+    main: src/wrapper.hs
   futhark-dataset:
-    <<: *futhark
-    main: src/futhark-dataset.hs
+    main: src/wrapper.hs
   futhark-doc:
-    <<: *futhark
-    main: src/futhark-doc.hs
-  futhark-pkg:
-    <<: *futhark
-    main: src/futhark-pkg.hs
+    main: src/wrapper.hs
+  futhark-test:
+    main: src/wrapper.hs
+  futhark-bench:
+    main: src/wrapper.hs
+  futharki:
+    main: src/futharki.hs
 
 tests:
   unit:

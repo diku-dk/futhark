@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * Major command reorganisation: all Futhark programs have been
+    combined into a single all-powerful `futhark` program.  Instead of
+    e.g. `futhark-foo`, use `futhark foo`.  Wrappers will be kept
+    around under the old names for a little while.  `futharki` has
+    been split into two commands: `futhark repl` and `futhark run`.
+    Also, `py` has become `python` and `cs` has become `csharp`, but
+    `pyopencl` and `csopencl` have remained as they were.
+
   * The result of a function is now forbidden from aliasing a global
     variable.  Surprisingly little code is affected by this.
 
