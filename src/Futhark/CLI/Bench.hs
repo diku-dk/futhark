@@ -3,7 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 -- | Simple tool for benchmarking Futhark programs.  Use the @--json@
 -- flag for machine-readable output.
-module Main (main) where
+module Futhark.CLI.Bench (main) where
 
 import Control.Monad
 import Control.Monad.Except
@@ -35,7 +35,8 @@ import Futhark.Util (pmapIO)
 import Futhark.Util.Options
 
 data BenchOptions = BenchOptions
-                   { optCompiler :: String
+                   { optBackend :: String
+                   , optFuthark :: String
                    , optRunner :: String
                    , optRuns :: Int
                    , optExtraOptions :: [String]
@@ -47,7 +48,7 @@ data BenchOptions = BenchOptions
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" "" 10 [] Nothing (-1) False
+initialBenchOptions = BenchOptions "c" "futhark" "" 10 [] Nothing (-1) False
                       ["nobench", "disable"] []
 
 -- | The name we use for compiled programs.
@@ -131,7 +132,7 @@ compileBenchmark opts (program, spec) =
         else do
         putStr $ "Compiling " ++ program ++ "...\n"
 
-        ref_res <- runExceptT $ ensureReferenceOutput "futhark-c" program cases
+        ref_res <- runExceptT $ ensureReferenceOutput futhark "c" program cases
         case ref_res of
           Left err -> do
             putStrLn "Reference output generation failed:\n"
@@ -139,21 +140,20 @@ compileBenchmark opts (program, spec) =
             return $ Left ReferenceFailed
 
           Right () -> do
-            (futcode, _, futerr) <- liftIO $ readProcessWithExitCode compiler
-                                    [program, "-o", binaryName program] ""
+            (futcode, _, futerr) <- liftIO $ readProcessWithExitCode futhark
+                                    [optBackend opts, program, "-o", binaryName program] ""
 
             case futcode of
               ExitSuccess     -> return $ Right (program, cases)
-              ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
+              ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound futhark
                                     return $ Left FailedToCompile
               ExitFailure _   -> do putStrLn "Failed:\n"
                                     SBS.putStrLn futerr
                                     return $ Left FailedToCompile
     _ ->
       return $ Left Skipped
-  where compiler = optCompiler opts
-
-        hasRuns (InputOutputs _ runs) = not $ null runs
+  where hasRuns (InputOutputs _ runs) = not $ null runs
+        futhark = optFuthark opts
 
 runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO [BenchResult]
 runBenchmark opts (program, cases) = mapM forInputOutputs cases
@@ -315,11 +315,14 @@ commandLineOptions = [
                   Left $ error $ "'" ++ n ++ "' is not a non-negative integer.")
      "RUNS")
     "Run each test case this many times."
-  , Option [] ["compiler"]
-    (ReqArg (\prog ->
-              Right $ \config -> config { optCompiler = prog })
+  , Option [] ["backend"]
+    (ReqArg (\backend -> Right $ \config -> config { optBackend = backend })
      "PROGRAM")
     "The compiler used (defaults to 'futhark-c')."
+  , Option [] ["futhark"]
+    (ReqArg (\prog -> Right $ \config -> config { optFuthark = prog })
+     "PROGRAM")
+    "The binary used for operations (defaults to 'futhark')."
   , Option [] ["runner"]
     (ReqArg (\prog -> Right $ \config -> config { optRunner = prog }) "PROGRAM")
     "The program used to run the Futhark-generated programs (defaults to nothing)."
@@ -362,7 +365,7 @@ commandLineOptions = [
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000
 
-main :: IO ()
+main :: String -> [String] -> IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
   Just $ runBenchmarks config progs
 
