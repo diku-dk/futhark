@@ -9,22 +9,34 @@ futhark
 SYNOPSIS
 ========
 
-futhark [options...] infile
+futhark <subcommand> options...
 
 DESCRIPTION
 ===========
 
-This is a Futhark compiler development tool, intentionally
-undocumented and intended for use in developing the Futhark compiler,
-not for programmers writing in Futhark.  To compile Futhark code, use
-one of the compilers, e.g. ``futhark-c`` or ``futhark-opencl``.
+Futhark is a data-parallel functional array language.  Through various
+subcommands, the ``futhark`` tool provides facilities for compiling,
+developing, or analysing Futhark programs.  Most subcommands are
+documented in their own manpage.  For example, ``futhark opencl`` is
+documented as :ref:`futhark-opencl(1)`.  The remaining subcommands are
+documented in this page.
 
-For documentation on the Futhark language itself, see::
+COMMANDS
+========
 
-  http://futhark.readthedocs.io
+futhark check PROGRAM
+---------------------
 
+Check whether a Futhark program type checks.
+
+futhark dev options... PROGRAM
+------------------------------
+
+A Futhark compiler development command, intentionally undocumented and
+intended for use in developing the Futhark compiler, not for
+programmers writing in Futhark.
 
 SEE ALSO
 ========
 
-futhark-c(1), futhark-opencl(1)
+futhark-opencl(1), futhark-c(1), futhark-py(1), futhark-pyopencl(1), futhark-dataset(1), futhark-doc(1), futhark-test(1), futhark-bench(1)
