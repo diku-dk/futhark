@@ -106,14 +106,21 @@ nameFromText :: T.Text -> Name
 nameFromText = Name
 
 -- | A human-readable location string, of the form
--- @filename:lineno:columnno@.
+-- @filename:lineno:columnno@.  This follows the GNU coding standards
+-- for error messages:
+-- https://www.gnu.org/prep/standards/html_node/Errors.html
+--
+-- This function assumes that both start and end position is in the
+-- same file (it is not clear what the alternative would even mean).
 locStr :: SrcLoc -> String
 locStr (SrcLoc NoLoc) = "unknown location"
-locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
-  -- Assume that both positions are in the same file (what would the
-  -- alternative mean?)
-  file ++ ":" ++ show line1 ++ ":" ++ show col1
-       ++ "-" ++ show line2 ++ ":" ++ show col2
+locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _)))
+  -- Do not show line2 if it is identical to line1.
+  | line1 == line2 =
+      first_part ++ "-" ++ show col2
+  | otherwise =
+      first_part ++ "-" ++ show line2 ++ ":" ++ show col2
+  where first_part = file ++ ":" ++ show line1 ++ ":" ++ show col1
 
 -- | A name tagged with some integer.  Only the integer is used in
 -- comparisons, no matter the type of @vn@.
