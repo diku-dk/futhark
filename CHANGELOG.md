@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     had any effect in the first place, but now the compiler will
     explicitly complain.
 
+  * Source spans are now printed in a slightly different format, with
+    ending the line number omitted when it is the same as the start
+    line number.
+
 ### Fixed
 
   * `futharki` now reports source locations of `trace` expressions
