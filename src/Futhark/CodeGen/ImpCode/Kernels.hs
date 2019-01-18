@@ -41,15 +41,15 @@ type Code = Imp.Code HostOp
 type KernelCode = Imp.Code KernelOp
 
 -- | A run-time constant related to kernels.
-newtype KernelConst = SizeConst VName
+newtype KernelConst = SizeConst Name
                     deriving (Eq, Ord, Show)
 
 -- | An expression whose variables are kernel constants.
 type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel Kernel
-            | GetSize VName VName SizeClass
-            | CmpSizeLe VName VName SizeClass Imp.Exp
+            | GetSize VName Name SizeClass
+            | CmpSizeLe VName Name SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
 
@@ -124,8 +124,8 @@ instance Pretty HostOp where
 
 instance FreeIn HostOp where
   freeIn (CallKernel c) = freeIn c
-  freeIn (CmpSizeLe dest name _ x) =
-    freeIn dest <> freeIn name <> freeIn x
+  freeIn (CmpSizeLe dest _ _ x) =
+    freeIn dest <> freeIn x
   freeIn (GetSizeMax dest _) =
     freeIn dest
   freeIn (GetSize dest _ _) =

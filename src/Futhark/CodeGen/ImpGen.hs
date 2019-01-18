@@ -20,7 +20,7 @@ module Futhark.CodeGen.ImpGen
 
     -- * Monadic Compiler Interface
   , ImpM
-  , Env (envDefaultSpace)
+  , Env (envDefaultSpace, envFunction)
   , VTable
   , getVTable
   , localVTable
@@ -204,10 +204,12 @@ data Env lore op = Env {
   , envVolatility :: Imp.Volatility
   , envFakeMemory :: [Space]
     -- ^ Do not actually generate allocations for these memory spaces.
+  , envFunction :: Name
+    -- ^ Name of the function we are compiling.
   }
 
-newEnv :: Operations lore op -> Imp.Space -> [Imp.Space] -> Env lore op
-newEnv ops ds fake =
+newEnv :: Operations lore op -> Imp.Space -> [Imp.Space] -> Name -> Env lore op
+newEnv ops ds fake fname =
   Env { envExpCompiler = opsExpCompiler ops
       , envStmsCompiler = opsStmsCompiler ops
       , envOpCompiler = opsOpCompiler ops
@@ -215,6 +217,7 @@ newEnv ops ds fake =
       , envDefaultSpace = ds
       , envVolatility = Imp.Nonvolatile
       , envFakeMemory = fake
+      , envFunction = fname
       }
 
 -- | The symbol table used during compilation.
@@ -255,11 +258,10 @@ instance HasScope SOACS (ImpM lore op) where
             Prim $ entryScalarType scalarEntry
 
 runImpM :: ImpM lore op a
-        -> Operations lore op -> Imp.Space -> [Imp.Space] -> VNameSource
-        -> Either InternalError (a, VNameSource, Imp.Code op, Imp.Functions op)
-runImpM (ImpM m) comp space fake src = do
-  (a, s, code) <- runRWST m (newEnv comp space fake) (newState src)
-  return (a, stateNameSource s, code, stateFunctions s)
+        -> Operations lore op -> Imp.Space -> [Imp.Space] -> Name -> State lore op
+        -> Either InternalError (a, State lore op, Imp.Code op)
+runImpM (ImpM m) comp space fake fname =
+  runRWST m (newEnv comp space fake fname)
 
 subImpM_ :: Operations lore' op' -> ImpM lore' op' a
          -> ImpM lore op (Imp.Code op')
@@ -323,9 +325,13 @@ compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
             -> Prog lore -> m (Either InternalError (Imp.Functions op))
 compileProg ops space fake prog =
   modifyNameSource $ \src ->
-  case runImpM (mapM_ compileFunDef $ progFunctions prog) ops space fake src of
+  case foldM compileFunDef' (newState src) (progFunctions prog) of
     Left err -> (Left err, src)
-    Right ((), src', _, fs) -> (Right fs, src')
+    Right s -> (Right $ stateFunctions s, stateNameSource s)
+  where compileFunDef' s fdef = do
+          ((), s', _) <-
+            runImpM (compileFunDef fdef) ops space fake (funDefName fdef) s
+          return s'
 
 compileInParam :: ExplicitMemorish lore =>
                   FParam lore -> ImpM lore op (Either Imp.Param ArrayDecl)

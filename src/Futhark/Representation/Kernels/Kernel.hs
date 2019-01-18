@@ -80,9 +80,9 @@ data KernelDebugHints =
   deriving (Eq, Show, Ord)
 
 data Kernel lore =
-    GetSize VName SizeClass -- ^ Produce some runtime-configurable size.
+    GetSize Name SizeClass -- ^ Produce some runtime-configurable size.
   | GetSizeMax SizeClass -- ^ The maximum size of some class.
-  | CmpSizeLe VName SizeClass SubExp
+  | CmpSizeLe Name SizeClass SubExp
     -- ^ Compare size (likely a threshold) with some Int32 value.
   | Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
   | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (Body lore)

@@ -51,17 +51,17 @@ struct opencl_config {
 
   int num_sizes;
   const char **size_names;
+  const char **size_vars;
   size_t *size_values;
   const char **size_classes;
-  const char **size_entry_points;
 };
 
 void opencl_config_init(struct opencl_config *cfg,
                         int num_sizes,
                         const char *size_names[],
+                        const char *size_vars[],
                         size_t *size_values,
-                        const char *size_classes[],
-                        const char *size_entry_points[]) {
+                        const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
   cfg->preferred_device_num = 0;
@@ -84,9 +84,9 @@ void opencl_config_init(struct opencl_config *cfg,
 
   cfg->num_sizes = num_sizes;
   cfg->size_names = size_names;
+  cfg->size_vars = size_vars;
   cfg->size_values = size_values;
   cfg->size_classes = size_classes;
-  cfg->size_entry_points = size_entry_points;
 }
 
 /* An entry in the free list.  May be invalid, to avoid having to
@@ -699,7 +699,8 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
-                  "-D%s=%d ", ctx->cfg.size_names[i],
+                  "-D%s=%d ",
+                  ctx->cfg.size_vars[i],
                   (int)ctx->cfg.size_values[i]);
   }
 

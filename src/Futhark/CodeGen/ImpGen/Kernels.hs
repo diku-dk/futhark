@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpGen.Kernels
   where
 
 import Control.Monad.Except
+import Control.Monad.Reader
 import Data.Maybe
 import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
@@ -51,15 +52,25 @@ opCompiler dest (Alloc e space) =
 opCompiler dest (Inner kernel) =
   kernelCompiler dest kernel
 
--- | Recognise kernels (maps), give everything else back.
+sizeClassWithEntryPoint :: Name -> Imp.SizeClass -> Imp.SizeClass
+sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
+  Imp.SizeThreshold $ map f path
+  where f (name, x) = (keyWithEntryPoint fname name, x)
+sizeClassWithEntryPoint _ size_class = size_class
+
 kernelCompiler :: Pattern ExplicitMemory -> Kernel InKernel
                -> CallKernelGen ()
 
-kernelCompiler (Pattern _ [pe]) (GetSize key size_class) =
-  sOp $ Imp.GetSize (patElemName pe) key size_class
+kernelCompiler (Pattern _ [pe]) (GetSize key size_class) = do
+  fname <- asks ImpGen.envFunction
+  sOp $ Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
+    sizeClassWithEntryPoint fname size_class
 
-kernelCompiler (Pattern _ [pe]) (CmpSizeLe key size_class x) =
-  sOp . Imp.CmpSizeLe (patElemName pe) key size_class =<< ImpGen.compileSubExp x
+kernelCompiler (Pattern _ [pe]) (CmpSizeLe key size_class x) = do
+  fname <- asks ImpGen.envFunction
+  let size_class' = sizeClassWithEntryPoint fname size_class
+  sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
+    =<< ImpGen.compileSubExp x
 
 kernelCompiler (Pattern _ [pe]) (GetSizeMax size_class) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
@@ -88,7 +99,7 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
 
     ImpGen.compileSubExp v >>= ImpGen.emit . Imp.DebugPrint s (elemType ty)
 
-  sOp $ Imp.CallKernel $ Imp.Kernel
+  sOp $ Imp.CallKernel Imp.Kernel
             { Imp.kernelBody = kernel_body'
             , Imp.kernelLocalMemory = local_memory
             , Imp.kernelUses = uses
@@ -389,8 +400,10 @@ simpleKernelConstants kernel_size desc = do
 computeMapKernelGroups :: Imp.Exp -> CallKernelGen (Imp.Exp, Imp.Exp)
 computeMapKernelGroups kernel_size = do
   group_size <- dPrim "group_size" int32
+  fname <- asks ImpGen.envFunction
   let group_size_var = Imp.var group_size int32
-  sOp $ Imp.GetSize group_size group_size Imp.SizeGroup
+      group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty group_size
+  sOp $ Imp.GetSize group_size group_size_key Imp.SizeGroup
   num_groups <- dPrimV "num_groups" $ kernel_size `quotRoundingUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
   return (Imp.var group_size int32, Imp.var num_groups int32)
 

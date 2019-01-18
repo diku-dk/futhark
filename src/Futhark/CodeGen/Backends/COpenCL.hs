@@ -97,10 +97,8 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionAction = [C.cstm|{
                           int n = futhark_get_num_sizes();
                           for (int i = 0; i < n; i++) {
-                            if (strcmp(futhark_get_size_entry(i), entry_point) == 0) {
-                              printf("%s (%s)\n", futhark_get_size_name(i),
-                                                  futhark_get_size_class(i));
-                            }
+                            printf("%s (%s)\n", futhark_get_size_name(i),
+                                                futhark_get_size_class(i));
                           }
                           exit(0);
                         }|]

@@ -15,10 +15,10 @@ import qualified Language.C.Quote.OpenCL as C
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.OpenCL.Kernels
-import Futhark.Util (chunk)
+import Futhark.Util (chunk, zEncodeString)
 
 generateBoilerplate :: String -> String -> [String] -> [PrimType]
-                    -> M.Map VName (SizeClass, Name)
+                    -> M.Map Name SizeClass
                     -> GC.CompilerM OpenCL () ()
 generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   final_inits <- GC.contextFinalInits
@@ -29,13 +29,13 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.earlyDecls top_decls
 
   let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
-      size_class_inits = map (\(c,_) -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
-      size_entry_points_inits = map (\(_,e) -> [C.cinit|$string:(pretty e)|]) $ M.elems sizes
+      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
+      size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       num_sizes = M.size sizes
 
   GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
+  GC.libDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
   GC.libDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
-  GC.libDecl [C.cedecl|static const char *size_entry_points[] = { $inits:size_entry_points_inits };|]
 
   GC.publicDef_ "get_num_sizes" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(void);|],
@@ -53,12 +53,6 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
     ([C.cedecl|const char* $id:s(int);|],
      [C.cedecl|const char* $id:s(int i) {
                 return size_classes[i];
-              }|])
-
-  GC.publicDef_ "get_size_entry" GC.InitDecl $ \s ->
-    ([C.cedecl|const char* $id:s(int);|],
-     [C.cedecl|const char* $id:s(int i) {
-                return size_entry_points[i];
               }|])
 
   let size_decls = map (\k -> [C.csdecl|size_t $id:k;|]) $ M.keys sizes
@@ -80,7 +74,8 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
 
                          $stms:size_value_inits
                          opencl_config_init(&cfg->opencl, $int:num_sizes,
-                                            size_names, cfg->sizes, size_classes, size_entry_points);
+                                            size_names, size_vars,
+                                            cfg->sizes, size_classes);
                          return cfg;
                        }|])
 
