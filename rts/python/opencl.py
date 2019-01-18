@@ -164,10 +164,13 @@ def initialise_opencl_object(self,
         else:
             self.sizes[k] = v['value']
 
+    # XXX: we perform only a subset of z-encoding here.  Really, the
+    # compiler should provide us with the variables to which
+    # parameters are mapped.
     if (len(program_src) >= 0):
         return cl.Program(self.ctx, program_src).build(
             ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
-            + ["-D{}={}".format(s,v) for (s,v) in self.sizes.items()])
+            + ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi'),v) for (s,v) in self.sizes.items()])
 
 def opencl_alloc(self, min_size, tag):
     min_size = 1 if min_size == 0 else min_size

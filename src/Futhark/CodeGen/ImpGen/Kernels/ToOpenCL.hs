@@ -72,7 +72,7 @@ instance Monoid OpenClRequirements where
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
                          , clRequirements :: OpenClRequirements
-                         , clSizes :: M.Map VName (SizeClass, Name)
+                         , clSizes :: M.Map Name SizeClass
                          }
 
 instance Sem.Semigroup ToOpenCL where
@@ -88,12 +88,10 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 onHostOp :: HostOp -> OnKernelM OpenCL
 onHostOp (CallKernel k) = onKernel k
 onHostOp (ImpKernels.GetSize v key size_class) = do
-  fname <- ask
-  tell mempty { clSizes = M.singleton key (size_class, fname) }
+  tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
 onHostOp (ImpKernels.CmpSizeLe v key size_class x) = do
-  fname <- ask
-  tell mempty { clSizes = M.singleton key (size_class, fname) }
+  tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.CmpSizeLe v key x
 onHostOp (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
@@ -199,7 +197,8 @@ $esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attr
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
-  where compileKernelConst (SizeConst key) = return [C.cexp|$id:(pretty key)|]
+  where compileKernelConst (SizeConst key) =
+          return [C.cexp|$id:(zEncodeString (pretty key))|]
 
 kernelArgs :: Kernel -> [KernelArg]
 kernelArgs kernel =

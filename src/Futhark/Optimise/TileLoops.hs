@@ -25,7 +25,7 @@ import Futhark.Optimise.TileLoops.RegTiling3D
 
 tileLoops :: Pass Kernels Kernels
 tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
-            intraproceduralTransformation optimiseFunDef
+            fmap Prog . mapM optimiseFunDef . progFunctions
 
 optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 optimiseFunDef fundec = do
@@ -126,7 +126,7 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
               arrs arr_chunk_params = do
 
           ((tile_size, tiled_group_size), tile_size_bnds) <- runBinder $ do
-            tile_size_key <- newVName "tile_size"
+            tile_size_key <- nameFromString . pretty <$> newVName "tile_size"
             tile_size <- letSubExp "tile_size" $ Op $ GetSize tile_size_key SizeTile
             tiled_group_size <- letSubExp "tiled_group_size" $
                                 BasicOp $ BinOp (Mul Int32) tile_size tile_size

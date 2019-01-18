@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RankNTypes #-}
 -- | Kernel extraction.
 --
 -- In the following, I will use the term "width" to denote the amount
@@ -163,8 +164,8 @@ module Futhark.Pass.ExtractKernels
 
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
+import Control.Monad.Writer.Strict
 import Control.Monad.Trans.Maybe
-import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
 import Data.List
@@ -200,31 +201,38 @@ extractKernels :: Pass SOACS Out.Kernels
 extractKernels =
   Pass { passName = "extract kernels"
        , passDescription = "Perform kernel extraction"
-       , passFunction = runDistribM . fmap Prog . mapM transformFunDef . progFunctions
+       , passFunction = fmap Prog . mapM transformFunDef . progFunctions
        }
 
-newtype DistribM a = DistribM (RWS (Scope Out.Kernels) Log VNameSource a)
+-- In order to generate more stable threshold names, we keep track of
+-- the numbers used for thresholds separately from the ordinary name
+-- source,
+data State = State { stateNameSource :: VNameSource
+                   , stateThresholdCounter :: Int
+                   }
+
+newtype DistribM a = DistribM (RWS (Scope Out.Kernels) Log State a)
                    deriving (Functor, Applicative, Monad,
-                             HasScope Out.Kernels,
-                             LocalScope Out.Kernels,
-                             MonadFreshNames,
+                             HasScope Out.Kernels, LocalScope Out.Kernels,
+                             MonadState State,
                              MonadLogger)
+
+instance MonadFreshNames DistribM where
+  getNameSource = gets stateNameSource
+  putNameSource src = modify $ \s -> s { stateNameSource = src }
 
 runDistribM :: (MonadLogger m, MonadFreshNames m) =>
                DistribM a -> m a
 runDistribM (DistribM m) = do
-  (x, msgs) <- modifyNameSource $ positionNameSource . runRWS m M.empty
+  (x, msgs) <- modifyNameSource $ \src ->
+    let (x, s, msgs) = runRWS m mempty (State src 0)
+    in ((x, msgs), stateNameSource s)
   addLog msgs
   return x
-  where positionNameSource (x, src, msgs) = ((x, msgs), src)
 
-runDistribM' :: MonadFreshNames m => DistribM a -> m a
-runDistribM' (DistribM m) =
-  fmap fst $ modifyNameSource $ positionNameSource . runRWS m M.empty
-  where positionNameSource (x, src, msgs) = ((x, msgs), src)
-
-transformFunDef :: FunDef -> DistribM (Out.FunDef Out.Kernels)
-transformFunDef (FunDef entry name rettype params body) = do
+transformFunDef :: (MonadFreshNames m, MonadLogger m) =>
+                   FunDef -> m (Out.FunDef Out.Kernels)
+transformFunDef (FunDef entry name rettype params body) = runDistribM $ do
   body' <- localScope (scopeOfFParams params) $
            transformBody mempty body
   return $ FunDef entry name rettype params body'
@@ -262,9 +270,10 @@ scopeForKernels = castScope
 
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 
-transformStm path (Let pat aux (Op (CmpThreshold what s))) =
+transformStm path (Let pat aux (Op (CmpThreshold what s))) = do
+  ((r, _), stms) <- cmpSizeLe s (Out.SizeThreshold path) what
   runBinder_ $ do
-    (r, _) <- cmpSizeLe s (Out.SizeThreshold path) what
+    addStms stms
     addStm $ Let pat aux $ BasicOp $ SubExp r
 
 transformStm path (Let pat aux (If c tb fb rt)) = do
@@ -350,7 +359,7 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
     then paralleliseOuter
     else if incrementalFlattening then do
     ((outer_suff, outer_suff_key), suff_stms) <-
-      runBinder $ sufficientParallelism "suff_outer_redomap" w path
+      sufficientParallelism "suff_outer_redomap" w path
 
     outer_stms <- outerParallelBody
     inner_stms <- innerParallelBody ((outer_suff_key, False):path)
@@ -370,7 +379,7 @@ transformStm path (Let pat (StmAux cs _) (Op (Stream w (Parallel _ _ _ []) map_f
 transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs)))
   | incrementalFlattening = do
       ((outer_suff, outer_suff_key), suff_stms) <-
-        runBinder $ sufficientParallelism "suff_outer_stream" w path
+        sufficientParallelism "suff_outer_stream" w path
 
       outer_stms <- outerParallelBody ((outer_suff_key, True) : path)
       inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
@@ -466,13 +475,11 @@ data MapLoop = MapLoop Pattern Certificates SubExp Lambda [VName]
 mapLoopStm :: MapLoop -> Stm
 mapLoopStm (MapLoop pat cs w lam arrs) = Let pat (StmAux cs ()) $ Op $ Screma w (mapSOAC lam) arrs
 
-sufficientParallelism :: (Op (Lore m) ~ Kernel innerlore, MonadBinder m) =>
-                         String -> SubExp -> KernelPath -> m (SubExp, VName)
+sufficientParallelism :: String -> SubExp -> KernelPath
+                      -> DistribM ((SubExp, Name), Out.Stms Out.Kernels)
 sufficientParallelism desc what path = cmpSizeLe desc (Out.SizeThreshold path) what
 
-distributeMap :: (HasScope Out.Kernels m,
-                  MonadFreshNames m, MonadLogger m) =>
-                 KernelPath -> MapLoop -> m KernelsStms
+distributeMap :: KernelPath -> MapLoop -> DistribM KernelsStms
 distributeMap path (MapLoop pat cs w lam arrs) = do
   types <- askScope
   let loopnest = MapNesting pat cs w $ zip (lambdaParams lam) arrs
@@ -505,7 +512,7 @@ distributeMap path (MapLoop pat cs w lam arrs) = do
           return $ postKernelsStms postkernels <>
             identityStms (outerTarget $ kernelTargets acc')
 
-    distributeMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat w lam
+    distributeMap' id (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat w lam
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                           , kernelStms = mempty
                           }
@@ -520,19 +527,20 @@ distributeMap path (MapLoop pat cs w lam arrs) = do
             Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Replicate (Shape [w]) se
 
 distributeMap' :: (HasScope Out.Kernels m, MonadFreshNames m) =>
-                  KernelNest -> KernelPath
+                  (forall a. DistribM a -> m a)
+               -> KernelNest -> KernelPath
                -> (KernelPath -> m (Out.Stms Out.Kernels))
                -> (KernelPath -> m (Out.Stms Out.Kernels))
                -> PatternT Type
                -> SubExp
                -> LambdaT SOACS
                -> m (Out.Stms Out.Kernels)
-distributeMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
+distributeMap' distribM loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
   let res = map Var $ patternNames pat
 
   types <- askScope
-  ((outer_suff, outer_suff_key), outer_suff_stms) <- runBinder $
-    sufficientParallelism "suff_outer_par" nest_w path
+  ((outer_suff, outer_suff_key), outer_suff_stms) <-
+    distribM $ sufficientParallelism "suff_outer_par" nest_w path
 
   intra <- if worthIntraGroup lam then
              flip runReaderT types $ intraGroupParallelise loopnest lam
@@ -550,19 +558,25 @@ distributeMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
 
     Just ((_intra_min_par, intra_avail_par), group_size, intra_prelude, intra_stms) -> do
       -- We must check that all intra-group parallelism fits in a group.
-      ((intra_ok, intra_suff_key), intra_suff_stms) <- runBinder $ do
-        addStms intra_prelude
+      ((intra_ok, intra_suff_key), intra_suff_stms) <- do
 
-        max_group_size <-
-          letSubExp "max_group_size" $ Op $ Out.GetSizeMax Out.SizeGroup
-        fits <- letSubExp "fits" $ BasicOp $
-                CmpOp (CmpSle Int32) group_size max_group_size
+        ((intra_suff, suff_key), check_suff_stms) <-
+          distribM $ sufficientParallelism "suff_intra_par" intra_avail_par $
+          (outer_suff_key, False) : path
 
-        (intra_suff, suff_key) <- sufficientParallelism "suff_intra_par" intra_avail_par $
-                                  (outer_suff_key, False) : path
+        runBinder $ do
 
-        intra_ok <- letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
-        return (intra_ok, suff_key)
+          addStms intra_prelude
+
+          max_group_size <-
+            letSubExp "max_group_size" $ Op $ Out.GetSizeMax Out.SizeGroup
+          fits <- letSubExp "fits" $ BasicOp $
+                  CmpOp (CmpSle Int32) group_size max_group_size
+
+          addStms check_suff_stms
+
+          intra_ok <- letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
+          return (intra_ok, suff_key)
 
       group_par_body <- renameBody $ mkBody intra_stms res
 
@@ -622,11 +636,19 @@ addStmToKernel bnd acc = do
   stms <- runBinder_ $ Kernelise.transformStm bnd
   return acc { kernelStms = stms <> kernelStms acc }
 
-newtype KernelM a = KernelM (RWS KernelEnv KernelRes VNameSource a)
+newtype KernelM a = KernelM (ReaderT KernelEnv (WriterT KernelRes DistribM) a)
   deriving (Functor, Applicative, Monad,
             MonadReader KernelEnv,
-            MonadWriter KernelRes,
-            MonadFreshNames)
+            MonadWriter KernelRes)
+
+liftDistribM :: DistribM a -> KernelM a
+liftDistribM m = do
+  scope <- askScope
+  KernelM $ lift $ lift $ localScope scope m
+
+instance MonadFreshNames KernelM where
+  getNameSource = KernelM $ lift getNameSource
+  putNameSource = KernelM . lift . putNameSource
 
 instance HasScope Out.Kernels KernelM where
   askScope = asks kernelScope
@@ -638,13 +660,11 @@ instance LocalScope Out.Kernels KernelM where
 instance MonadLogger KernelM where
   addLog msgs = tell mempty { accLog = msgs }
 
-runKernelM :: (MonadFreshNames m, MonadLogger m) =>
-              KernelEnv -> KernelM a -> m (a, PostKernels)
+runKernelM :: KernelEnv -> KernelM a -> DistribM (a, PostKernels)
 runKernelM env (KernelM m) = do
-  (x, res) <- modifyNameSource $ getKernels . runRWS m env
+  (x, res) <- runWriterT $ runReaderT m env
   addLog $ accLog res
   return (x, accPostKernels res)
-  where getKernels (x,s,a) = ((x, a), s)
 
 collectKernels :: KernelM a -> KernelM (a, PostKernels)
 collectKernels m = pass $ do
@@ -841,7 +861,7 @@ distributeInnerMap maploop@(MapLoop pat cs w lam arrs) acc
       let outer_pat = loopNestingPattern $ fst nest
       path <- asks kernelPath
       addKernel =<< (nestw_bnds<>) <$>
-        localScope extra_scope (distributeMap' nest' path
+        localScope extra_scope (distributeMap' liftDistribM nest' path
                                 (const $ return $ oneStm sequentialised_kernel)
                                 exploitInnerParallelism
                                 outer_pat nestw
@@ -908,13 +928,11 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
           addKernels kernels
           nest' <- expandKernelNest pat_unused nest
           types <- asksScope scopeForSOACs
-          scope <- askScope
+
           bnds <- runReaderT
                   (interchangeLoops nest' (SeqLoop perm pat val form body)) types
-          -- runDistribM starts out with an empty scope, so we have to
-          -- immmediately insert the real one.
           path <- asks kernelPath
-          bnds' <- runDistribM $ localScope scope $ transformStms path $ stmsToList bnds
+          bnds' <- liftDistribM $ transformStms path $ stmsToList bnds
           addKernel bnds'
           return acc'
     _ ->
@@ -937,11 +955,9 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             types <- asksScope scopeForSOACs
             let branch = Branch perm pat cond tbranch fbranch ret
             stms <- runReaderT (interchangeBranch nest' branch) types
-            -- runDistribM starts out with an empty scope, so we have to
-            -- immmediately insert the real one.
-            scope <- askScope
+
             path <- asks kernelPath
-            stms' <- runDistribM $ localScope scope $ transformStms path $ stmsToList stms
+            stms' <- liftDistribM $ transformStms path $ stmsToList stms
             addKernel stms'
             return acc'
       _ ->
@@ -1293,7 +1309,7 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
   -- array).  They will not be used anywhere else (due to uniqueness
   -- constraints), so this is safe.
   let all_dests = concatMap genReduceDest ops'
-  (nest_stms<>) <$>
+  liftDistribM $ (nest_stms<>) <$>
     inScopeOf nest_stms
     (genReduceKernel path (kernelNestLoops $ removeArraysFromNest all_dests nest)
      orig_pat ispace inputs cs genred_w ops' lam arrs)
@@ -1301,12 +1317,11 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = fail "Ill-typed nested GenReduce encountered."
 
-genReduceKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
-                   KernelPath -> [LoopNesting]
+genReduceKernel :: KernelPath -> [LoopNesting]
                 -> Pattern -> [(VName, SubExp)] -> [KernelInput]
                 -> Certificates -> SubExp -> [GenReduceOp SOACS]
                 -> InKernelLambda -> [VName]
-                -> m KernelsStms
+                -> DistribM KernelsStms
 genReduceKernel path nests orig_pat ispace inputs cs genred_w ops lam arrs = do
   ops' <- forM ops $ \(GenReduceOp num_bins dests nes op) ->
     GenReduceOp num_bins dests nes <$> Kernelise.transformLambda op
@@ -1314,26 +1329,17 @@ genReduceKernel path nests orig_pat ispace inputs cs genred_w ops lam arrs = do
   let isDest = flip elem $ concatMap genReduceDest ops'
       inputs' = filter (not . isDest . kernelInputArray) inputs
 
-  runBinder_ $ do
-    (histos, k_stms) <- blockedGenReduce genred_w ispace inputs' ops' lam arrs
+  (histos, k_stms) <- blockedGenReduce genred_w ispace inputs' ops' lam arrs
 
-    addStms $ fmap (certify cs) k_stms
+  let histos' = chunks (map (length . genReduceDest) ops') histos
+      pes = chunks (map (length . genReduceDest) ops') $ patternElements orig_pat
 
-    let histos' = chunks (map (length . genReduceDest) ops') histos
-        pes = chunks (map (length . genReduceDest) ops') $ patternElements orig_pat
-
-    mapM_ combineIntermediateResults (zip3 pes ops histos')
+  ((fmap (certify cs) k_stms<>) . mconcat) <$>
+    inScopeOf k_stms (mapM combineIntermediateResults (zip3 pes ops histos'))
 
   where depth = length nests
 
-        combineIntermediateResults (pes, GenReduceOp num_bins _ nes op, histos) = do
-          num_histos <- arraysSize depth <$> mapM lookupType histos
-
-          -- Avoid the segmented reduction if num_histos is 1.
-          num_histos_is_one <-
-            letSubExp "num_histos_is_one" $
-            BasicOp $ CmpOp (CmpEq int32) num_histos $ intConst Int32 1
-
+        mkBodies num_histos pes num_bins nes op histos = runBinder $ do
           body_with_reshape <- runBodyBinder $
             fmap resultBody $ forM histos $ \histo -> do
               histo_dims <- arrayDims <$> lookupType histo
@@ -1361,19 +1367,34 @@ genReduceKernel path nests orig_pat ispace inputs cs genred_w ops lam arrs = do
           nests' <-
             moreArrays (map paramName map_params) histos_tr_t histos_tr $
             nests ++ [MapNesting inner_segred_pat cs num_bins $ zip (lambdaParams lam) arrs]
+
           let collapse_body = reconstructMapNest nests' (map (rowType . patElemType) pes) $
                               mkBody map_stms $ map Var map_res
 
-          scope <- askScope
+          return (body_with_reshape, collapse_body)
+
+        combineIntermediateResults (pes, GenReduceOp num_bins _ nes op, histos) = do
+          num_histos <- arraysSize depth <$> mapM lookupType histos
+
+          ((body_with_reshape, collapse_body), aux_stms) <- mkBodies num_histos pes num_bins nes op histos
+
           segmented_reduce_stms <-
-            runDistribM' $ localScope scope $ transformStms path $
-            stmsToList $ bodyStms collapse_body
+            inScopeOf aux_stms $ transformStms path $ stmsToList $ bodyStms collapse_body
 
           let body_with_segred = mkBody segmented_reduce_stms $
                                  bodyResult collapse_body
-          letBindNames (map patElemName pes) $
-            If num_histos_is_one body_with_reshape body_with_segred $
-            IfAttr (staticShapes $ map patElemType pes) IfNormal
+
+          runBinder_ $ do
+            addStms aux_stms
+
+            -- Avoid the segmented reduction if num_histos is 1.
+            num_histos_is_one <-
+              letSubExp "num_histos_is_one" $
+              BasicOp $ CmpOp (CmpEq int32) num_histos $ intConst Int32 1
+
+            letBindNames (map patElemName pes) $
+              If num_histos_is_one body_with_reshape body_with_segred $
+              IfAttr (staticShapes $ map patElemType pes) IfNormal
 
 reconstructMapNest :: [LoopNesting] -> [Type] -> BodyT SOACS -> BodyT SOACS
 reconstructMapNest [] _ body = body
@@ -1561,6 +1582,16 @@ expandKernelNest pes (outer_nest, inner_nests) = do
           return pe { patElemName = name
                     , patElemAttr = patElemType pe `arrayOfShape` Shape dims
                     }
+
+cmpSizeLe :: String -> Out.SizeClass -> SubExp
+          -> DistribM ((SubExp, Name), Out.Stms Out.Kernels)
+cmpSizeLe desc size_class to_what = do
+  x <- gets stateThresholdCounter
+  modify $ \s -> s { stateThresholdCounter = x + 1}
+  let size_key = nameFromString $ desc ++ "_" ++ show x
+  runBinder $ do
+    cmp_res <- letSubExp desc $ Op $ CmpSizeLe size_key size_class to_what
+    return (cmp_res, size_key)
 
 kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                       Out.Pattern Out.Kernels

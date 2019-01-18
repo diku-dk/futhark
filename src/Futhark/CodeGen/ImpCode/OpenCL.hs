@@ -34,7 +34,7 @@ data Program = Program { openClProgram :: String
                        , openClKernelNames :: [KernelName]
                        , openClUsedTypes :: [PrimType]
                          -- ^ So we can detect whether the device is capable.
-                       , openClSizes :: M.Map VName (SizeClass, Name)
+                       , openClSizes :: M.Map Name SizeClass
                          -- ^ Runtime-configurable constants.
                        , hostFunctions :: Functions OpenCL
                        }
@@ -60,8 +60,8 @@ data KernelArg = ValueKArg Exp PrimType
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
             | HostCode Code
-            | GetSize VName VName
-            | CmpSizeLe VName VName Exp
+            | GetSize VName Name
+            | CmpSizeLe VName Name Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
 

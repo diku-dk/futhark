@@ -23,7 +23,7 @@ openClPrelude = $(embedStringFile "rts/python/opencl.py")
 -- | Python code (as a string) that calls the
 -- @initiatialize_opencl_object@ procedure.  Should be put in the
 -- class constructor.
-openClInit :: [PrimType] -> String -> M.Map VName (SizeClass, Name) -> String
+openClInit :: [PrimType] -> String -> M.Map Name SizeClass -> String
 openClInit types assign sizes = T.unpack [text|
 size_heuristics=$size_heuristics
 program = initialise_opencl_object(self,
@@ -44,9 +44,9 @@ $assign'
   where assign' = T.pack assign
         size_heuristics = prettyText $ sizeHeuristicsToPython sizeHeuristicsTable
         types' = prettyText $ map (show . pretty) types -- Looks enough like Python.
-        sizes' = prettyText $ sizeClassesToPython $ M.map fst sizes
+        sizes' = prettyText $ sizeClassesToPython sizes
 
-sizeClassesToPython :: M.Map VName SizeClass -> PyExp
+sizeClassesToPython :: M.Map Name SizeClass -> PyExp
 sizeClassesToPython = Dict . map f . M.toList
   where f (size_name, size_class) =
           (String $ pretty size_name,

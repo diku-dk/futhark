@@ -38,6 +38,7 @@ public struct OpenCLConfig
 
     public int NumSizes;
     public string[] SizeNames;
+    public string[] SizeVars;
     public int[] SizeValues;
     public string[] SizeClasses;
 }
@@ -362,6 +363,7 @@ private OpenCLFreeList OpenCLFreeListInit()
 private void OpenCLConfigInit(out OpenCLConfig cfg,
                       int num_sizes,
                       string[] size_names,
+                      string[] size_vars,
                       int[] size_values,
                       string[] size_classes)
 {
@@ -379,6 +381,7 @@ private void OpenCLConfigInit(out OpenCLConfig cfg,
 
     cfg.NumSizes = num_sizes;
     cfg.SizeNames = size_names;
+    cfg.SizeVars = size_vars;
     cfg.SizeValues = size_values;
     cfg.SizeClasses = size_classes;
 }
@@ -873,7 +876,7 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
 
     for (int i = 0; i < ctx.OpenCL.Cfg.NumSizes; i++) {
         compile_opts += String.Format("-D{0}={1} ",
-                                      ctx.OpenCL.Cfg.SizeNames[i],
+                                      ctx.OpenCL.Cfg.SizeVars[i],
                                       ctx.OpenCL.Cfg.SizeValues[i]);
     }
 
@@ -897,11 +900,8 @@ private void FutharkConfigPrintSizes()
     int n = FutharkGetNumSizes();
     for (int i = 0; i < n; i++)
     {
-        if (FutharkGetSizeEntry(i) ==  EntryPoint)
-        {
-            Console.WriteLine("{0} ({1})", FutharkGetSizeName(i),
-                              FutharkGetSizeClass(i));
-        }
+      Console.WriteLine("{0} ({1})", FutharkGetSizeName(i),
+                        FutharkGetSizeClass(i));
     }
     Environment.Exit(0);
 }

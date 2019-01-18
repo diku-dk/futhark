@@ -5,6 +5,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   ( KernelConstants (..)
   , inKernelOperations
   , computeKernelUses
+  , keyWithEntryPoint
   , CallKernelGen
   , InKernelGen
   , computeThreadChunkSize
@@ -73,6 +74,10 @@ inKernelOperations constants = (ImpGen.defaultOperations $ compileInKernelOp con
                                , ImpGen.opsExpCompiler = inKernelExpCompiler
                                , ImpGen.opsStmsCompiler = \_ -> compileKernelStms constants
                                }
+
+keyWithEntryPoint :: Name -> Name -> Name
+keyWithEntryPoint fname key =
+  nameFromString $ nameToString fname ++ "." ++ nameToString key
 
 -- | We have no bulk copy operation (e.g. memmove) inside kernels, so
 -- turn any copy into a loop.
@@ -472,8 +477,10 @@ localMemSize (Imp.VarSize v) = isConstExp v >>= \case
 isConstExp :: VName -> CallKernelGen (Maybe Imp.KernelConstExp)
 isConstExp v = do
   vtable <- ImpGen.getVTable
+  fname <- asks ImpGen.envFunction
   let lookupConstExp name = constExp =<< hasExp =<< M.lookup name vtable
-      constExp (Op (Inner (GetSize key _))) = Just $ LeafExp (Imp.SizeConst key) int32
+      constExp (Op (Inner (GetSize key _))) =
+        Just $ LeafExp (Imp.SizeConst $ keyWithEntryPoint fname key) int32
       constExp e = primExpFromExp lookupConstExp e
   return $ lookupConstExp v
   where hasExp (ImpGen.ArrayVar e _) = e
@@ -927,7 +934,7 @@ sKernel constants name m = do
   body <- makeAllMemoryGlobal $
           ImpGen.subImpM_ (inKernelOperations constants) m
   (uses, local_memory) <- computeKernelUses body mempty
-  ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Kernel
+  ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
     { Imp.kernelBody = body
     , Imp.kernelLocalMemory = local_memory
     , Imp.kernelUses = uses

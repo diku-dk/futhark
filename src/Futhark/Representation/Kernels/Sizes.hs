@@ -3,12 +3,12 @@ module Futhark.Representation.Kernels.Sizes
   where
 
 import Futhark.Util.Pretty
-import Language.Futhark.Core (VName)
+import Language.Futhark.Core (Name)
 import Futhark.Representation.AST.Pretty ()
 
 -- | An indication of which comparisons have been performed to get to
 -- this point, as well as the result of each comparison.
-type KernelPath = [(VName, Bool)]
+type KernelPath = [(Name, Bool)]
 
 -- | The class of some kind of configurable size.  Each class may
 -- impose constraints on the valid values.

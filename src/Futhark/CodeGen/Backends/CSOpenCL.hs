@@ -17,6 +17,7 @@ import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
 import Futhark.Util.Pretty(pretty)
+import Futhark.Util (zEncodeString)
 import Futhark.MonadFreshNames hiding (newVName')
 
 
@@ -119,7 +120,7 @@ cliOptions = [ Option { optionLongName = "platform"
 callKernel :: CS.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) =
   CS.stm $ Reassign (Var (CS.compileName v)) $
-    Field (Var "Ctx.Sizes") $ pretty key
+    Field (Var "Ctx.Sizes") $ zEncodeString $ pretty key
 
 callKernel (Imp.GetSizeMax v size_class) =
   CS.stm $ Reassign (Var (CS.compileName v)) $

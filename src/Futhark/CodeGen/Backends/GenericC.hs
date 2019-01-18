@@ -349,6 +349,9 @@ collect' m = pass $ do
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
 
+instance C.ToIdent Name where
+  toIdent = C.toIdent . zEncodeString . nameToString
+
 instance C.ToIdent VName where
   toIdent = C.toIdent . zEncodeString . pretty
 

@@ -659,7 +659,7 @@ mkKerSpaceExtraStms reg_tile gspace = do
       (gidx,sz_x) : (gidy,sz_y) : (gidz,m_M) : untiled_gspace = reverse gspace
 
   ((tile_size_x, tile_size_y, tiled_group_size), tile_size_bnds) <- runBinder $ do
-      tile_size_key <- newVName "tile_size"
+      tile_size_key <- nameFromString . pretty <$> newVName "tile_size"
       tile_ct_size  <- letSubExp "tile_size" $ Op $ GetSize tile_size_key SizeTile
       tile_size_x   <- letSubExp "tile_size_x" $ BasicOp $
                                  BinOp (SMin Int32) tile_ct_size sz_x
