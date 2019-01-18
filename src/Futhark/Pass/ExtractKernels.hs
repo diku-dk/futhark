@@ -1334,7 +1334,7 @@ genReduceKernel path nests orig_pat ispace inputs cs genred_w ops lam arrs = do
   let histos' = chunks (map (length . genReduceDest) ops') histos
       pes = chunks (map (length . genReduceDest) ops') $ patternElements orig_pat
 
-  ((fmap (certify cs) k_stms<>) . mconcat) <$>
+  (fmap (certify cs) k_stms<>) . mconcat <$>
     inScopeOf k_stms (mapM combineIntermediateResults (zip3 pes ops histos'))
 
   where depth = length nests
