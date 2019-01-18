@@ -35,7 +35,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
     (Just $ Collection "string[]" (map (String . pretty) $ M.keys sizes))
 
   CS.stm $ AssignTyped stringArrayT (Var "SizeVars")
-    (Just $ Collection "string[]" (map (String . pretty) $ M.keys sizes))
+    (Just $ Collection "string[]" (map (String . zEncodeString . pretty) $ M.keys sizes))
 
   CS.stm $ AssignTyped stringArrayT (Var "SizeClasses")
     (Just $ Collection "string[]" (map (String . pretty) $ M.elems sizes))
