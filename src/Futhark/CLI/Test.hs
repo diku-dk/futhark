@@ -419,7 +419,7 @@ runTests config paths = do
                 Failure s -> do
                   when isTTY moveCursorToTableTop
                   clear
-                  T.putStrLn $ (T.pack (inRed $ testCaseProgram test) <> ":\n") <> T.concat s
+                  T.putStr $ (T.pack (inRed $ testCaseProgram test) <> ":\n") <> T.unlines s
                   when isTTY spaceTable
                   getResults $ ts' { testStatusFail = testStatusFail ts' + 1
                                    , testStatusRunPass = testStatusRunPass ts'
