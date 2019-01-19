@@ -68,7 +68,7 @@ class FutharkTuner(MeasurementInterface):
     # We only compile the program once, since the parameters we are
     # tuning can be given at run-time.  This saves a lot of time for
     # programs that take a long time to compile.
-    compile_cmd = '{} {}'.format(self.args.compiler, self.program_name())
+    compile_cmd = '{} {} {}'.format(self.args.futhark, self.args.backend, self.program_name())
     print('Compiling {}... '.format(self.program_name()), end='')
     sys.stdout.flush()
     compile_res = self.call_critical_program(compile_cmd)
@@ -111,8 +111,8 @@ class FutharkTuner(MeasurementInterface):
     as timeout-value, plus the (estimated) overhead of initialisation.
     """
     with tempfile.NamedTemporaryFile() as json_tmp:
-      base_cmd = '{} {} --exclude-case=notune --compiler=futhark-opencl --skip-compilation --json={}'.format(
-        self.args.futhark_bench, self.program_name(), json_tmp.name)
+      base_cmd = '{} bench {} --exclude-case=notune --backend=opencl --skip-compilation --json={}'.format(
+        self.args.futhark, self.program_name(), json_tmp.name)
       wall_start = time.time()
       base_res = self.call_critical_program(base_cmd)
       wall_duration = time.time() - wall_start
@@ -133,7 +133,7 @@ class FutharkTuner(MeasurementInterface):
     along with the different values, that each
     parameter are compared against for each dataset.
     """
-    sizes_cmd = './{} --print-size'.format(self.program_bin_name())
+    sizes_cmd = './{} --print-sizes'.format(self.program_bin_name())
     sizes_res = self.call_critical_program(sizes_cmd)
 
     # the tuner needs all params for all datasets,
@@ -149,15 +149,15 @@ class FutharkTuner(MeasurementInterface):
     n = 0
     with tempfile.NamedTemporaryFile() as json_tmp:
       # extract comparison values
-      val_cmd = '{} {} --exclude-case=notune --compiler=futhark-opencl --skip-compilation --pass-option=-L --runs=1 --json={}'.format(
-        self.args.futhark_bench, self.program_name(), json_tmp.name)
+      val_cmd = '{} bench {} --exclude-case=notune --backend=opencl --skip-compilation --pass-option=-L --runs=1 --json={}'.format(
+        self.args.futhark, self.program_name(), json_tmp.name)
       val_res = self.call_critical_program(val_cmd)
 
       json_data = json.load(json_tmp, object_pairs_hook=OrderedDict)
       datasets = json_data[self.program_name()]['datasets']
 
       # search for parameters and values for each dataset
-      val_re = re.compile('Compared (\w+) <= (-?\d+)')
+      val_re = re.compile('Compared ([^ ]+) <= (-?\d+)')
       for dataset in datasets:
         self.thresholds[dataset] = defaultdict(set)
         for line in datasets[dataset]['stderr'].splitlines():
@@ -313,8 +313,8 @@ class FutharkTuner(MeasurementInterface):
     def otherOption(opt):
       return '--pass-option {}'.format(opt)
     other_options = ' '.join(map(otherOption, self.args.pass_option))
-    return '{} --skip-compilation {} --exclude-case=notune {} {}'.format(
-      self.args.futhark_bench, self.program_name(), size_options, other_options)
+    return '{} bench --skip-compilation {} --exclude-case=notune {} {}'.format(
+      self.args.futhark, self.program_name(), size_options, other_options)
 
   def get_branch(self, start, cfg, datasets, result):
     """
@@ -396,8 +396,8 @@ class FutharkTuner(MeasurementInterface):
 if __name__ == '__main__':
   argparser = opentuner.default_argparser()
   argparser.add_argument('program', type=str, metavar='PROGRAM')
-  argparser.add_argument('--compiler', type=str, metavar='COMPILER', default='futhark-opencl')
-  argparser.add_argument('--futhark-bench', type=str, metavar='PROGRAM', default='futhark-bench')
+  argparser.add_argument('--backend', type=str, metavar='BACKEND', default='opencl')
+  argparser.add_argument('--futhark', type=str, metavar='FUTHARK', default='futhark')
   argparser.add_argument('--timeout', type=int, metavar='TIMEOUT', default='60')
   argparser.add_argument('--pass-option', type=str, metavar='OPTION', action='append', default=[])
   argparser.add_argument('--save-json', type=str, metavar='FILENAME', default=None)
