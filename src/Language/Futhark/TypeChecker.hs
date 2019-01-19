@@ -162,7 +162,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     name' <- checkName Term name loc
     (tparams', rettype') <-
       checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
-        (vtype', _) <- checkTypeDecl vtype
+        (vtype', _) <- checkTypeDecl tparams' vtype
         return (tparams', vtype')
 
     let binding = BoundV tparams' $ unInfo $ expandedType rettype'
@@ -241,7 +241,7 @@ checkSigExp (SigSpecs specs loc) = do
 checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
   checkTypeParams ps $ \ps' -> do
-    (td', _) <- bindingTypeParams ps' $ checkTypeDecl td
+    (td', _) <- bindingTypeParams ps' $ checkTypeDecl ps' td
     (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' $ unInfo $ expandedType td'
     return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
@@ -430,7 +430,7 @@ checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
 checkTypeBind (TypeBind name ps td doc loc) =
   checkTypeParams ps $ \ps' -> do
-    (td', l) <- bindingTypeParams ps' $ checkTypeDecl td
+    (td', l) <- bindingTypeParams ps' $ checkTypeDecl ps' td
     bindSpaced [(Type, name)] $ do
       name' <- checkName Type name loc
       return (mempty { envTypeTable =

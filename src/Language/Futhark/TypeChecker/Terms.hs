@@ -358,11 +358,11 @@ checkReallyQualName space qn loc = do
   (env, name') <- liftTypeM $ TypeM.checkQualNameWithEnv space qn loc
   return (envToTermScope env, name')
 
--- | Wrap 'checkTypeDecl' to also perform an observation of every size
--- in the type.
+-- | Wrap 'Types.checkTypeDecl' to also perform an observation of
+-- every size in the type.
 checkTypeDecl :: TypeDeclBase NoInfo Name -> TermTypeM (TypeDeclBase Info VName)
 checkTypeDecl tdecl = do
-  (tdecl', _) <- Types.checkTypeDecl tdecl
+  (tdecl', _) <- Types.checkTypeDecl [] tdecl
   mapM_ observeDim $ nestedDims $ unInfo $ expandedType tdecl'
   return tdecl'
   where observeDim (NamedDim v) = observe $ Ident (qualLeaf v) (Info $ Prim $ Signed Int32) noLoc
@@ -669,7 +669,7 @@ bindingPatternGroup tps orig_ps m = do
           -- dimensions.
           mapM_ observe $ mapMaybe typeParamIdent tps'
           let ps'' = reverse ps'
-          checkShapeParamUses tps' ps''
+          checkShapeParamUses patternUses tps' ps''
 
           m tps' ps''
 
@@ -685,30 +685,9 @@ bindingPattern tps p t m = do
       -- Perform an observation of every declared dimension.  This
       -- prevents unused-name warnings for otherwise unused dimensions.
       mapM_ observe $ patternDims p'
-      checkShapeParamUses tps' [p']
+      checkShapeParamUses patternUses tps' [p']
 
       m tps' p'
-
--- | Ensure that every shape parameter is used in positive position at
--- least once before being used in negative position.
-checkShapeParamUses :: [TypeParam] -> [Pattern] -> TermTypeM ()
-checkShapeParamUses tps ps = do
-  pos_uses <- foldM checkShapePositions [] ps
-  mapM_ (checkUsed pos_uses) tps
-  where checkShapePositions pos_uses p = do
-          let (pos, neg) = patternUses p
-              pos_uses' = pos <> pos_uses
-          forM_ neg (\pv -> unless (pv `elem` pos_uses') $
-                      typeError (srclocOf p) $ "Shape parameter " ++
-                      pretty (baseName pv) ++ " must first be given in " ++
-                      "a positive position (non-functional parameter).")
-          return pos_uses'
-        checkUsed uses (TypeParamDim pv loc)
-          | pv `elem` uses = return ()
-          | otherwise =
-              typeError loc $ "Size parameter " ++
-              pretty (baseName pv) ++ " not used in any value parameters."
-        checkUsed _ _ = return ()
 
 -- | Return the shapes used in a given pattern in postive and negative
 -- position, respectively.
@@ -721,21 +700,6 @@ patternUses (TuplePattern ps _) = foldMap patternUses ps
 patternUses (RecordPattern fs _) = foldMap (patternUses . snd) fs
 patternUses (PatternAscription p (TypeDecl declte _) _) =
   patternUses p <> typeExpUses declte
-  where typeExpUses (TEVar _ _) = mempty
-        typeExpUses (TETuple tes _) = foldMap typeExpUses tes
-        typeExpUses (TERecord fs _) = foldMap (typeExpUses . snd) fs
-        typeExpUses (TEArray te d _) = typeExpUses te <> dimDeclUses d
-        typeExpUses (TEUnique te _) = typeExpUses te
-        typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
-        typeExpUses (TEArrow _ t1 t2 _) =
-          let (pos, neg) = typeExpUses t1 <> typeExpUses t2
-          in (mempty, pos <> neg)
-        typeExpUses TEEnum{} = mempty
-        typeArgUses (TypeArgExpDim d _) = dimDeclUses d
-        typeArgUses (TypeArgExpType te) = typeExpUses te
-
-        dimDeclUses (NamedDim v) = ([qualLeaf v], [])
-        dimDeclUses _ = mempty
 
 noTypeParamsPermitted :: [UncheckedTypeParam] -> TermTypeM ()
 noTypeParamsPermitted ps =
