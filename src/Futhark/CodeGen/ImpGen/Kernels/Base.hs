@@ -181,11 +181,17 @@ compileKernelExp constants pat (Combine (CombineSpace scatter cspace) _ aspace b
         local_index = map (ImpGen.compileSubExpOfType int32 . Var . fst) cspace
 
 compileKernelExp constants (Pattern _ dests) (GroupReduce w lam input) = do
-  -- XXX
-  let lam' = lam { lambdaParams = drop 2 $ lambdaParams lam }
+  let [my_index_param, offset_param] = take 2 $ lambdaParams lam
+      lam' = lam { lambdaParams = drop 2 $ lambdaParams lam }
+
+  dPrim_ (paramName my_index_param) int32
+  dPrim_ (paramName offset_param) int32
+  paramName my_index_param <-- kernelGlobalThreadId constants
   w' <- ImpGen.compileSubExp w
-  groupReduce constants w' lam' $ map snd input
+  groupReduceWithOffset constants (paramName offset_param) w' lam' $ map snd input
+
   let (reduce_acc_params, _) = splitAt (length input) $ lambdaParams lam'
+
   forM_ (zip dests reduce_acc_params) $ \(dest, reduce_acc_param) ->
     ImpGen.copyDWIM (patElemName dest) [] (Var $ paramName reduce_acc_param) []
 
@@ -671,9 +677,18 @@ groupReduce :: ExplicitMemorish lore =>
             -> [VName]
             -> ImpGen.ImpM lore Imp.KernelOp ()
 groupReduce constants w lam arrs = do
-  let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
-
   offset <- dPrim "offset" int32
+  groupReduceWithOffset constants offset w lam arrs
+
+groupReduceWithOffset :: ExplicitMemorish lore =>
+                         KernelConstants
+                      -> VName
+                      -> Imp.Exp
+                      -> Lambda lore
+                      -> [VName]
+                      -> ImpGen.ImpM lore Imp.KernelOp ()
+groupReduceWithOffset constants offset w lam arrs = do
+  let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
 
   skip_waves <- dPrim "skip_waves" int32
   ImpGen.dLParams $ lambdaParams lam
@@ -682,11 +697,10 @@ groupReduce constants w lam arrs = do
 
   ImpGen.comment "participating threads read initial accumulator" $
     sWhen (local_tid .<. w) $
-    zipWithM_ (readReduceArgument offset) reduce_acc_params arrs
+    zipWithM_ readReduceArgument reduce_acc_params arrs
 
   let do_reduce = do ImpGen.comment "read array element" $
-                       zipWithM_ (readReduceArgument offset)
-                       reduce_arr_params arrs
+                       zipWithM_ readReduceArgument reduce_arr_params arrs
                      ImpGen.comment "apply reduction operation" $
                        ImpGen.compileBody' reduce_acc_params $ lambdaBody lam
                      ImpGen.comment "write result of operation" $
@@ -737,7 +751,7 @@ groupReduce constants w lam arrs = do
           | all primType $ lambdaReturnType lam = sOp Imp.LocalBarrier
           | otherwise                           = sOp Imp.GlobalBarrier
 
-        readReduceArgument offset param arr
+        readReduceArgument param arr
           | Prim _ <- paramType param = do
               let i = local_tid + ImpGen.varIndex offset
               ImpGen.copyDWIM (paramName param) [] (Var arr) [i]
