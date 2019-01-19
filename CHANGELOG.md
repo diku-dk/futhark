@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futharki` now reports source locations of `trace` expressions
     properly.
 
+  * The type checker now properly complains if you try to define a
+    type abbreviation that has unused size parameters.
+
 ## [0.8.1]
 
 ### Added

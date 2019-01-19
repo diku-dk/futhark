@@ -10,6 +10,9 @@ module Language.Futhark.TypeChecker.Types
   , checkForDuplicateNames
   , checkTypeParams
 
+  , typeExpUses
+  , checkShapeParamUses
+
   , TypeSub(..)
   , TypeSubs
   , substituteTypes
@@ -119,16 +122,19 @@ subuniqueOf :: Uniqueness -> Uniqueness -> Bool
 subuniqueOf Nonunique Unique = False
 subuniqueOf _ _              = True
 
-data Bindage = BoundAsVar | UsedFree
-             deriving (Show, Eq)
-
 checkTypeDecl :: MonadTypeChecker m =>
-                 TypeDeclBase NoInfo Name
+                 [TypeParam]
+              -> TypeDeclBase NoInfo Name
               -> m (TypeDeclBase Info VName, Liftedness)
-checkTypeDecl (TypeDecl t NoInfo) = do
+checkTypeDecl tps (TypeDecl t NoInfo) = do
   checkForDuplicateNamesInType t
   (t', st, l) <- checkTypeExp t
+  checkShapeParamUses typeExpUses tps $ unfoldTypeExp t'
   return (TypeDecl t' $ Info st, l)
+
+unfoldTypeExp :: TypeExp VName -> [TypeExp VName]
+unfoldTypeExp (TEArrow _ t1 t2 _) = t1 : unfoldTypeExp t2
+unfoldTypeExp t = [t]
 
 checkTypeExp :: MonadTypeChecker m =>
                 TypeExp Name
@@ -292,6 +298,32 @@ checkForDuplicateNamesInType = checkForDuplicateNames . pats
         pats TEVar{} = []
         pats TEEnum{} = []
 
+-- | Ensure that every shape parameter is used in positive position at
+-- least once before being used in negative position.
+checkShapeParamUses :: (MonadTypeChecker m, Located a) =>
+                       (a -> ([VName], [VName])) -> [TypeParam] -> [a]
+                    -> m ()
+checkShapeParamUses getUses tps ps = do
+  pos_uses <- foldM checkShapePositions [] ps
+  mapM_ (checkUsed pos_uses) tps
+  where tp_names = map typeParamName tps
+
+        checkShapePositions pos_uses p = do
+          let (pos, neg) = getUses p
+              pos_uses' = pos <> pos_uses
+          forM_ neg $ \pv ->
+            unless ((pv `notElem` tp_names) || (pv `elem` pos_uses')) $
+            throwError $ TypeError (srclocOf p) $ "Shape parameter `" ++
+            pretty (baseName pv) ++ "` must first be given in " ++
+            "a positive position (non-functional parameter)."
+          return pos_uses'
+        checkUsed uses (TypeParamDim pv loc)
+          | pv `elem` uses = return ()
+          | otherwise =
+              throwError $ TypeError loc $ "Size parameter `" ++
+              pretty (baseName pv) ++ "` unused."
+        checkUsed _ _ = return ()
+
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]
                 -> ([TypeParamBase VName] -> m a)
@@ -316,6 +348,26 @@ checkTypeParams ps m =
           TypeParamDim <$> checkParamName Term pv loc <*> pure loc
         checkTypeParam (TypeParamType l pv loc) =
           TypeParamType l <$> checkParamName Type pv loc <*> pure loc
+
+-- | Return the shapes used in a given type expression in positive and negative
+-- position, respectively.
+typeExpUses :: TypeExp VName -> ([VName], [VName])
+typeExpUses (TEVar _ _) = mempty
+typeExpUses (TETuple tes _) = foldMap typeExpUses tes
+typeExpUses (TERecord fs _) = foldMap (typeExpUses . snd) fs
+typeExpUses (TEArray te d _) = typeExpUses te <> dimDeclUses d
+typeExpUses (TEUnique te _) = typeExpUses te
+typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
+  where typeArgUses (TypeArgExpDim d _) = dimDeclUses d
+        typeArgUses (TypeArgExpType tae) = typeExpUses tae
+typeExpUses (TEArrow _ t1 t2 _) =
+  let (pos, neg) = typeExpUses t1 <> typeExpUses t2
+  in (mempty, pos <> neg)
+typeExpUses TEEnum{} = mempty
+
+dimDeclUses :: DimDecl VName -> ([VName], [VName])
+dimDeclUses (NamedDim v) = ([qualLeaf v], [])
+dimDeclUses _ = mempty
 
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
