@@ -765,7 +765,7 @@ allocInReduceLambda lam input_summaries = do
       (acc_params, arr_params) =
         splitAt (length input_summaries) actual_params
       this_index = LeafExp i int32
-      other_index = LeafExp (paramName j_param) int32
+      other_index = this_index + LeafExp (paramName j_param) int32
   acc_params' <-
     allocInReduceParameters this_index $
     zip acc_params input_summaries
