@@ -13,7 +13,7 @@ import System.IO
 import System.Exit
 import System.Environment
 
-import Prelude hiding (id)
+import Prelude
 
 import Futhark.Util.Options
 
@@ -56,14 +56,14 @@ commands = sortOn fst
 
            , ("dataset", (Dataset.main, "Generate random test data."))
            , ("doc", (Doc.main, "Generate documentation for Futhark code."))
-           , ("pkg", (Pkg.main, "Management local packages."))
+           , ("pkg", (Pkg.main, "Manage local packages."))
 
            , ("check", (Misc.mainCheck, "Type check a program."))
            ]
 
 msg :: String
 msg = unlines $
-      ["<command> options...", "Commands:"] ++
+      ["<command> options...", "Commands:", ""] ++
       [ "   " <> cmd <> replicate (k - length cmd) ' ' <> desc
       | (cmd, (_, desc)) <- commands ]
   where k = maximum (map (length . fst) commands) + 3
