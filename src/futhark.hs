@@ -27,6 +27,7 @@ import qualified Futhark.CLI.CSOpenCL as CSOpenCL
 import qualified Futhark.CLI.Test as Test
 import qualified Futhark.CLI.Bench as Bench
 import qualified Futhark.CLI.Dataset as Dataset
+import qualified Futhark.CLI.Datacmp as Datacmp
 import qualified Futhark.CLI.Pkg as Pkg
 import qualified Futhark.CLI.Doc as Doc
 import qualified Futhark.CLI.REPL as REPL
@@ -55,6 +56,8 @@ commands = sortOn fst
            , ("bench", (Bench.main, "Test Futhark programs."))
 
            , ("dataset", (Dataset.main, "Generate random test data."))
+           , ("datacmp", (Datacmp.main, "Compare Futhark data files for equality."))
+
            , ("doc", (Doc.main, "Generate documentation for Futhark code."))
            , ("pkg", (Pkg.main, "Manage local packages."))
 

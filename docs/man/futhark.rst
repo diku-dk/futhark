@@ -29,6 +29,16 @@ futhark check PROGRAM
 
 Check whether a Futhark program type checks.
 
+futhark datacmp FILE_A FILE_B
+-----------------------------
+
+Check whether the two files contain the same Futhark values.  The
+files must be formatted using the general Futhark data format that is
+used by all other executable and tools (such as
+:ref:`futhark-dataset(1)`).  All discrepancies will be reported.  This
+is in contrast to :ref:`futhark-test(1)`, which only reports the first
+one.
+
 futhark dev options... PROGRAM
 ------------------------------
 
