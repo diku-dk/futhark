@@ -17,8 +17,8 @@ module Futhark.Test.Values
 
        -- * Comparing Values
        , compareValues
+       , compareValues1
        , Mismatch
-       , explainMismatch
        )
        where
 
@@ -29,7 +29,6 @@ import Data.Binary.Put
 import Data.Binary.Get
 import Data.Binary.IEEE754
 import qualified Data.ByteString.Lazy.Char8 as BS
-import Data.Maybe
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Char (isSpace, ord, chr)
 import Data.Vector.Binary
@@ -46,6 +45,7 @@ import qualified Futhark.Util.Pretty as PP
 import Futhark.Representation.AST.Attributes.Constants (IsValue(..))
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
+import Futhark.Util (maybeHead)
 
 type STVector s = UMVec.STVector s
 type Vector = UVec.Vector
@@ -452,7 +452,8 @@ readValues = readValues' . dropSpaces
 
 -- Comparisons
 
--- | Two values differ in some way.
+-- | Two values differ in some way.  The 'Show' instance produces a
+-- human-readable explanation.
 data Mismatch = PrimValueMismatch (Int,Int) PrimValue PrimValue
               -- ^ The position the value number and a flat index
               -- into the array.
@@ -477,17 +478,18 @@ explainMismatch i what got expected =
 
 -- | Compare two sets of Futhark values for equality.  Shapes and
 -- types must also match.
-compareValues :: [Value] -> [Value] -> Maybe [Mismatch]
+compareValues :: [Value] -> [Value] -> [Mismatch]
 compareValues got expected
-  | n /= m = Just [ValueCountMismatch n m]
-  | otherwise = case catMaybes $ zipWith3 compareValue [0..] got expected of
-    [] -> Nothing
-    es -> Just es
+  | n /= m = [ValueCountMismatch n m]
+  | otherwise = concat $ zipWith3 compareValue [0..] got expected
   where n = length got
         m = length expected
 
+-- | As 'compareValues', but only reports one mismatch.
+compareValues1 :: [Value] -> [Value] -> Maybe Mismatch
+compareValues1 got expected = maybeHead $ compareValues got expected
 
-compareValue :: Int -> Value -> Value -> Maybe Mismatch
+compareValue :: Int -> Value -> Value -> [Mismatch]
 compareValue i got_v expected_v
   | valueShape got_v == valueShape expected_v =
     case (got_v, expected_v) of
@@ -514,29 +516,29 @@ compareValue i got_v expected_v
       (BoolValue _ got_vs, BoolValue _ expected_vs) ->
         compareGen compareBool got_vs expected_vs
       _ ->
-        Just $ TypeMismatch i (pretty $ valueElemType got_v) (pretty $ valueElemType expected_v)
+        [TypeMismatch i (pretty $ valueElemType got_v) (pretty $ valueElemType expected_v)]
   | otherwise =
-      Just $ ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)
+      [ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)]
   where compareNum tol = compareGen $ compareElement tol
         compareFloat tol = compareGen $ compareFloatElement tol
 
         compareGen cmp got expected =
-          foldl mplus Nothing $
+          concat $
           zipWith cmp (UVec.toList $ UVec.indexed got) (UVec.toList expected)
 
         compareElement tol (j, got) expected
-          | comparePrimValue tol got expected = Nothing
-          | otherwise = Just $ PrimValueMismatch (i,j) (value got) (value expected)
+          | comparePrimValue tol got expected = []
+          | otherwise = [PrimValueMismatch (i,j) (value got) (value expected)]
 
         compareFloatElement tol (j, got) expected
-          | isNaN got, isNaN expected = Nothing
+          | isNaN got, isNaN expected = []
           | isInfinite got, isInfinite expected,
-            signum got == signum expected = Nothing
+            signum got == signum expected = []
           | otherwise = compareElement tol (j, got) expected
 
         compareBool (j, got) expected
-          | got == expected = Nothing
-          | otherwise = Just $ PrimValueMismatch (i,j) (value got) (value expected)
+          | got == expected = []
+          | otherwise = [PrimValueMismatch (i,j) (value got) (value expected)]
 
 comparePrimValue :: (Ord num, Num num) =>
                     num -> num -> num -> Bool

@@ -11,6 +11,7 @@ module Futhark.Test
        , getValues
        , getValuesBS
        , compareValues
+       , compareValues1
        , testRunReferenceOutput
        , getExpectedResult
        , compileProgram

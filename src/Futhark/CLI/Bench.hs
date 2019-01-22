@@ -291,7 +291,7 @@ compareResult :: (MonadError T.Text m, MonadIO m) =>
                  FilePath -> (SBS.ByteString, [Value]) -> (SBS.ByteString, [Value])
               -> m ()
 compareResult program (expected_bs, expected_vs) (actual_bs, actual_vs) =
-  case compareValues actual_vs expected_vs of
+  case compareValues1 actual_vs expected_vs of
     Just mismatch -> do
       let actualf = program `replaceExtension` "actual"
           expectedf = program `replaceExtension` "expected"

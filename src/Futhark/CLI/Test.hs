@@ -252,18 +252,16 @@ compareResult :: T.Text -> Int -> FilePath -> ExpectedResult [Value] -> RunResul
 compareResult _ _ _ (Succeeds Nothing) SuccessResult{} =
   return ()
 compareResult entry index program (Succeeds (Just expectedResult)) (SuccessResult actualResult) =
-  case compareValues actualResult expectedResult of
-    Just mismatches ->
-      let reportMismatch mismatch = do
-            let actualf = program <.> T.unpack entry <.> show index <.> "actual"
-                expectedf = program <.> T.unpack entry <.> show index <.> "expected"
-            io $ SBS.writeFile actualf $
-              T.encodeUtf8 $ T.unlines $ map prettyText actualResult
-            io $ SBS.writeFile expectedf $
-              T.encodeUtf8 $ T.unlines $ map prettyText expectedResult
-            throwError $ T.pack actualf <> " and " <> T.pack expectedf <>
-              " do not match:\n" <> T.pack (show mismatch) <> "\n"
-      in mapM_ reportMismatch mismatches
+  case compareValues1 actualResult expectedResult of
+    Just mismatch -> do
+      let actualf = program <.> T.unpack entry <.> show index <.> "actual"
+          expectedf = program <.> T.unpack entry <.> show index <.> "expected"
+      io $ SBS.writeFile actualf $
+        T.encodeUtf8 $ T.unlines $ map prettyText actualResult
+      io $ SBS.writeFile expectedf $
+        T.encodeUtf8 $ T.unlines $ map prettyText expectedResult
+      throwError $ T.pack actualf <> " and " <> T.pack expectedf <>
+        " do not match:\n" <> T.pack (show mismatch) <> "\n"
     Nothing ->
       return ()
 compareResult _ _ _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
