@@ -190,10 +190,11 @@ compileKernelExp constants (Pattern _ dests) (GroupReduce w lam input) = do
   w' <- ImpGen.compileSubExp w
   groupReduceWithOffset constants (paramName offset_param) w' lam' $ map snd input
 
-  let (reduce_acc_params, _) = splitAt (length input) $ lambdaParams lam'
+  sOp Imp.LocalBarrier
 
-  forM_ (zip dests reduce_acc_params) $ \(dest, reduce_acc_param) ->
-    ImpGen.copyDWIM (patElemName dest) [] (Var $ paramName reduce_acc_param) []
+  -- The final result will be stored in element 0 of the local memory array.
+  forM_ (zip dests input) $ \(dest, (_, arr)) ->
+    ImpGen.copyDWIM (patElemName dest) [] (Var arr) [0]
 
 compileKernelExp constants _ (GroupScan w lam input) = do
   w' <- ImpGen.compileSubExp w
