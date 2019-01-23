@@ -224,7 +224,7 @@ checkSpecs (IncludeSpec e loc : specs) = do
           (lookupType loc qn >> warnAbout qn)
           `catchError` \_ -> return ()
         warnAbout qn =
-          warn loc $ "Inclusion shadows type `" ++ pretty qn ++ "`."
+          warn loc $ "Inclusion shadows type " ++ quote (pretty qn) ++ "."
 
 checkSigExp :: SigExpBase NoInfo Name -> TypeM (MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
@@ -675,7 +675,7 @@ matchMTys = matchMTys' mempty
     matchVal loc spec_name spec_t name t
       | matchFunBinding loc spec_t t = return (spec_name, name)
     matchVal loc spec_name spec_v _ v =
-      Left $ TypeError loc $ "Value `" ++ baseString spec_name ++ "` specified as type " ++
+      Left $ TypeError loc $ "Value " ++ quote (baseString spec_name) ++ " specified as type " ++
       ppValBind spec_v ++ " in signature, but has " ++ ppValBind v ++ " in structure."
 
     matchFunBinding :: SrcLoc -> BoundV -> BoundV -> Bool

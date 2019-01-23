@@ -27,6 +27,7 @@ module Language.Futhark.TypeChecker.Monad
   , MonadTypeChecker(..)
   , checkName
   , badOnLeft
+  , quote
 
   , module Language.Futhark.Warnings
 
@@ -337,6 +338,12 @@ qualifyTypeVars outer_env except qs = runIdentity . astMap mapper
 
 badOnLeft :: MonadTypeChecker m => Either TypeError a -> m a
 badOnLeft = either throwError return
+
+-- | Enclose a string in the prefered quotes used in error messages.
+-- These are picked to not collide with characters permitted in
+-- identifiers.
+quote :: String -> String
+quote s = "`" ++ s ++ "`"
 
 anySignedType :: [PrimType]
 anySignedType = map Signed [minBound .. maxBound]
