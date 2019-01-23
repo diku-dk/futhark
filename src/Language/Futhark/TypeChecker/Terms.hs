@@ -543,8 +543,8 @@ checkPattern' (PatternAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
           PatternAscription <$> checkPattern' p (Ascribed outer_t'') <*>
           pure (TypeDecl t' (Info st)) <*> pure loc
         Nothing ->
-          typeError loc $ "Cannot match type `" ++ pretty outer_t' ++ "' with expected type `" ++
-          pretty st'' ++ "'."
+          typeError loc $ "Cannot match type " ++ quote (pretty outer_t') ++ " with expected type " ++
+          quote (pretty st'') ++ "."
 
     NoneInferred ->
       PatternAscription <$> checkPattern' p (Ascribed st') <*>
@@ -966,8 +966,8 @@ checkExp (LetWith dest src idxes ve body pos) = do
     void $ unifies t src''
 
     unless (unique $ unInfo $ identType src') $
-      typeError pos $ "Source '" ++ pretty (identName src) ++
-      "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
+      typeError pos $ "Source " ++ quote (pretty (identName src)) ++
+      " has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
 
     idxes' <- mapM checkDimIndex idxes
     sequentially (unifies elemt =<< checkExp ve) $ \ve' _ -> do
@@ -991,8 +991,8 @@ checkExp (Update src idxes ve loc) = do
 
     src_t <- expType src'
     unless (unique src_t) $
-      typeError loc $ "Source '" ++ pretty src ++
-      "' has type " ++ pretty src_t ++ ", which is not unique"
+      typeError loc $ "Source " ++ quote (pretty src) ++
+      " has type " ++ pretty src_t ++ ", which is not unique"
 
     let src_als = aliases src_t
     ve_t <- expType ve'
@@ -1659,8 +1659,9 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
       case als of
         v:_ | not $ null params ->
           typeError loc $
-          unlines [ "Function result aliases the free variable `" <> prettyName v <> "`."
-                  , "Use `copy` to break the aliasing."]
+          unlines [ "Function result aliases the free variable " <>
+                    quote (prettyName v) <> "."
+                  , "Use " ++ quote "copy" ++ " to break the aliasing."]
         _ ->
           return (fname', tparams'', params'', maybe_retdecl'', rettype, body')
 
@@ -1796,9 +1797,9 @@ checkFunBody body maybe_rettype _loc = do
       rettype_structural' <- normaliseType rettype_structural
       body_t <- expType body'
       unless (body_t `subtypeOf` rettype_structural') $
-        typeError (srclocOf body) $ "Body type `" ++ pretty body_t ++
-        "' is not a subtype of annotated type `" ++
-        pretty rettype_structural' ++ "'."
+        typeError (srclocOf body) $ "Body type " ++ quote (pretty body_t) ++
+        " is not a subtype of annotated type " ++
+        quote (pretty rettype_structural') ++ "."
 
     Nothing -> return ()
 
@@ -1822,8 +1823,8 @@ closeOverTypes substs tparams ts =
             k `elem` map typeParamName tparams = return ()
           | otherwise =
               typeError (srclocOf v) $
-              unlines ["Type variable `" ++ prettyName k ++
-                        "' not closed over by type parameters " ++
+              unlines ["Type variable " ++ quote (prettyName k) ++
+                        " not closed over by type parameters " ++
                         intercalate ", " (map pretty tparams) ++ ".",
                         "This is usually because a parameter needs a type annotation."]
 
@@ -1855,8 +1856,8 @@ consume loc als = do
                          | otherwise -> True
                        _ -> False
   case filter (not . consumable) $ map aliasVar $ S.toList als of
-    v:_ -> typeError loc $ "Attempt to consume variable `" ++ prettyName v
-           ++ "`, which is not allowed."
+    v:_ -> typeError loc $ "Attempt to consume variable " ++ quote (prettyName v)
+           ++ ", which is not allowed."
     [] -> occur [consumption als loc]
 
 -- | Proclaim that we have written to the given variable, and mark
@@ -1884,7 +1885,7 @@ checkIfUsed :: Occurences -> Ident -> TermTypeM ()
 checkIfUsed occs v
   | not $ identName v `S.member` allOccuring occs,
     not $ "_" `isPrefixOf` prettyName (identName v) =
-      warn (srclocOf v) $ "Unused variable '"++pretty (baseName $ identName v)++"'."
+      warn (srclocOf v) $ "Unused variable " ++ quote (pretty $ baseName $ identName v) ++ "."
   | otherwise =
       return ()
 
