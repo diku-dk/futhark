@@ -45,11 +45,12 @@ data BenchOptions = BenchOptions
                    , optSkipCompilation :: Bool
                    , optExcludeCase :: [String]
                    , optIgnoreFiles :: [Regex]
+                   , optEntryPoint :: Maybe String
                    }
 
 initialBenchOptions :: BenchOptions
 initialBenchOptions = BenchOptions "c" "futhark" "" 10 [] Nothing (-1) False
-                      ["nobench", "disable"] []
+                      ["nobench", "disable"] [] Nothing
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -156,7 +157,7 @@ compileBenchmark opts (program, spec) =
         futhark = optFuthark opts
 
 runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO [BenchResult]
-runBenchmark opts (program, cases) = mapM forInputOutputs cases
+runBenchmark opts (program, cases) = mapM forInputOutputs $ filter relevant cases
   where forInputOutputs (InputOutputs entry_name runs) = do
           putStr $ "Results for " ++ program' ++ ":\n"
           BenchResult program' . catMaybes <$>
@@ -164,6 +165,8 @@ runBenchmark opts (program, cases) = mapM forInputOutputs cases
           where program' = if entry_name == "main"
                            then program
                            else program ++ ":" ++ T.unpack entry_name
+
+        relevant = maybe (const True) (==) (optEntryPoint opts) . T.unpack . iosEntryPoint
 
         pad_to = foldl max 0 $ concatMap (map (length . runDescription) . iosTestRuns) cases
 
@@ -361,6 +364,11 @@ commandLineOptions = [
                 config { optIgnoreFiles = makeRegex s : optIgnoreFiles config })
       "REGEX")
     "Ignore files matching this regular expression."
+  , Option "e" ["entry-point"]
+    (ReqArg (\s -> Right $ \config ->
+                config { optEntryPoint = Just s })
+      "NAME")
+    "Only run this entry point."
   ]
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000
