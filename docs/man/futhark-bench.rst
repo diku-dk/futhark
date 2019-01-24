@@ -9,7 +9,7 @@ futhark-bench
 SYNOPSIS
 ========
 
-futhark bench [--runs=count | --compiler=program | --json | --no-validate] programs...
+futhark bench [options...] programs...
 
 DESCRIPTION
 ===========
@@ -36,6 +36,10 @@ OPTIONS
 
   The backend used when compiling Futhark programs (without leading
   ``futhark``, e.g. just ``opencl``).
+
+--entry-point=name
+
+  Only run entry points with this name.
 
 --futhark=program
 
