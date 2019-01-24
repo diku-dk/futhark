@@ -83,8 +83,12 @@ class FutharkTuner(MeasurementInterface):
     print('Extracting threshold parameters and values... ', end='')
     sys.stdout.flush()
     n = self.extract_thresholds()
+
     print('{} threshold comparisons detected.'.format(n))
 
+    if n == 0:
+      print('\nProgram does not have any threshold parameters.  Nothing to tune.')
+      sys.exit(0)
 
     print('Calculating values for each threshold parameter... ', end='')
     sys.stdout.flush()
