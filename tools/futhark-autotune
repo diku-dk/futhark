@@ -99,7 +99,9 @@ class FutharkTuner(MeasurementInterface):
   def call_critical_program(self, cmd):
     r = self.call_program(cmd)
     if r['returncode'] != 0:
-      print("Command '%s' failed:" % (cmd))
+      print("Command '%s' failed with stdout:" % (cmd))
+      print(r['stdout'])
+      print('And stderr:')
       print(r['stderr'])
       sys.exit(1)
     return r
@@ -111,14 +113,14 @@ class FutharkTuner(MeasurementInterface):
     as timeout-value, plus the (estimated) overhead of initialisation.
     """
     with tempfile.NamedTemporaryFile() as json_tmp:
-      base_cmd = '{} bench {} --exclude-case=notune --backend=opencl --skip-compilation --json={}'.format(
-        self.args.futhark, self.program_name(), json_tmp.name)
+      base_cmd = '{} bench {} -e {} --exclude-case=notune --backend=opencl --skip-compilation --json={}'.format(
+        self.args.futhark, self.program_name(), self.args.entry_point, json_tmp.name)
       wall_start = time.time()
       base_res = self.call_critical_program(base_cmd)
       wall_duration = time.time() - wall_start
 
       json_data = json.load(json_tmp)
-      base_datasets = json_data[self.program_name()]['datasets']
+      base_datasets = json_data[self.program_key_name()]['datasets']
       high = 0
       dataset_runtimes = [ sum(base_datasets[dataset]['runtimes']) / 1000000.0
                            for dataset in base_datasets ]
@@ -149,12 +151,13 @@ class FutharkTuner(MeasurementInterface):
     n = 0
     with tempfile.NamedTemporaryFile() as json_tmp:
       # extract comparison values
-      val_cmd = '{} bench {} --exclude-case=notune --backend=opencl --skip-compilation --pass-option=-L --runs=1 --json={}'.format(
-        self.args.futhark, self.program_name(), json_tmp.name)
+      val_cmd = '{} bench {} -e {} --exclude-case=notune --backend=opencl --skip-compilation --pass-option=-L --runs=1 --json={}'.format(
+        self.args.futhark, self.program_name(), self.args.entry_point, json_tmp.name)
       val_res = self.call_critical_program(val_cmd)
 
       json_data = json.load(json_tmp, object_pairs_hook=OrderedDict)
-      datasets = json_data[self.program_name()]['datasets']
+
+      datasets = json_data[self.program_key_name()]['datasets']
 
       # search for parameters and values for each dataset
       val_re = re.compile('Compared ([^ ]+) <= (-?\d+)')
@@ -292,6 +295,12 @@ class FutharkTuner(MeasurementInterface):
   def program_bin_name(self):
     return os.path.splitext(self.program_name())[0]
 
+  def program_key_name(self):
+    if self.args.entry_point == 'main':
+      return self.program_name()
+    else:
+      return self.program_name() + ':' + self.args.entry_point
+
   def interesting_class(self, p_class):
     return len(self.args.only) == 0 or p_class in self.args.only
 
@@ -368,7 +377,7 @@ class FutharkTuner(MeasurementInterface):
       # this configuration.  This may be too crude, as it heavily
       # favours the longer-running data sets.
       json_data = json.load(bench_json)
-      datasets = json_data[self.program_name()]['datasets']
+      datasets = json_data[self.program_key_name()]['datasets']
       runtime = 0
       for dataset in datasets:
         try:
@@ -399,6 +408,7 @@ if __name__ == '__main__':
   argparser.add_argument('--backend', type=str, metavar='BACKEND', default='opencl')
   argparser.add_argument('--futhark', type=str, metavar='FUTHARK', default='futhark')
   argparser.add_argument('--timeout', type=int, metavar='TIMEOUT', default='60')
+  argparser.add_argument('--entry-point', '-e', type=str, metavar='NAME', default='main')
   argparser.add_argument('--pass-option', type=str, metavar='OPTION', action='append', default=[])
   argparser.add_argument('--save-json', type=str, metavar='FILENAME', default=None)
   argparser.add_argument('--calc-timeout', action='store_true')
