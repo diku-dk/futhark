@@ -81,7 +81,7 @@ OPTIONS
   Do not run test cases that contain the given tag.  Cases marked with
   "nobench" or "disable" are ignored by default.
 
---ignore=files=REGEX
+--ignore-files=REGEX
 
   Ignore files whose path match the given regular expression.
 
