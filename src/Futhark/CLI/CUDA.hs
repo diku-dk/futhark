@@ -41,4 +41,3 @@ main = compilerMain () []
                  show code ++ ":\n" ++ gccerr
                Right (ExitSuccess, _, _) ->
                  return ()
-
