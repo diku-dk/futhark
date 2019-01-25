@@ -1,17 +1,11 @@
 /* Free list management */
 
-#ifdef FUTHARK_CUDA
-typedef CUdeviceptr device_mem_t;
-#else
-typedef cl_mem device_mem_t;
-#endif
-
 /* An entry in the free list.  May be invalid, to avoid having to
    deallocate entries as soon as they are removed.  There is also a
    tag, to help with memory reuse. */
 struct free_list_entry {
   size_t size;
-  device_mem_t mem;
+  fl_mem_t mem;
   const char *tag;
   unsigned char valid;
 };
@@ -60,7 +54,7 @@ int free_list_find_invalid(struct free_list *l) {
   return i;
 }
 
-void free_list_insert(struct free_list *l, size_t size, device_mem_t mem, const char *tag) {
+void free_list_insert(struct free_list *l, size_t size, fl_mem_t mem, const char *tag) {
   int i = free_list_find_invalid(l);
 
   if (i == l->capacity) {
@@ -84,7 +78,7 @@ void free_list_insert(struct free_list *l, size_t size, device_mem_t mem, const 
 
 /* Find and remove a memory block of at least the desired size and
    tag.  Returns 0 on success.  */
-int free_list_find(struct free_list *l, const char *tag, size_t *size_out, device_mem_t *mem_out) {
+int free_list_find(struct free_list *l, const char *tag, size_t *size_out, fl_mem_t *mem_out) {
   int i;
   for (i = 0; i < l->capacity; i++) {
     if (l->entries[i].valid && l->entries[i].tag == tag) {
@@ -101,7 +95,7 @@ int free_list_find(struct free_list *l, const char *tag, size_t *size_out, devic
 
 /* Remove the first block in the free list.  Returns 0 if a block was
    removed, and nonzero if the free list was already empty. */
-int free_list_first(struct free_list *l, device_mem_t *mem_out) {
+int free_list_first(struct free_list *l, fl_mem_t *mem_out) {
   for (int i = 0; i < l->capacity; i++) {
     if (l->entries[i].valid) {
       l->entries[i].valid = 0;

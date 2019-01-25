@@ -1,8 +1,5 @@
 /* Simple CUDA runtime framework */
 
-#include <cuda.h>
-#include <nvrtc.h>
-
 #define CUDA_SUCCEED(x) cuda_api_succeed(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED(x) nvrtc_api_succeed(x, #x, __FILE__, __LINE__)
 
