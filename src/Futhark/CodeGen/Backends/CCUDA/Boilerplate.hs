@@ -22,7 +22,9 @@ generateBoilerplate :: String -> String -> [String]
                     -> GC.CompilerM OpenCL () ()
 generateBoilerplate cuda_program cuda_prelude kernel_names sizes = do
   GC.earlyDecls [C.cunit|
-      $esc:("#define FUTHARK_CUDA")
+      $esc:("#include <cuda.h>")
+      $esc:("#include <nvrtc.h>")
+      $esc:("typedef CUdeviceptr fl_mem_t;")
       $esc:free_list_h
       $esc:cuda_h
       const char *cuda_program[] = {$inits:fragments, NULL};

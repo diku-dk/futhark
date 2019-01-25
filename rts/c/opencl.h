@@ -1,15 +1,5 @@
 /* The simple OpenCL runtime framework used by Futhark. */
 
-#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
-
-#define CL_SILENCE_DEPRECATION // For macOS.
-
-#ifdef __APPLE__
-  #include <OpenCL/cl.h>
-#else
-  #include <CL/cl.h>
-#endif
-
 #define OPENCL_SUCCEED_FATAL(e) opencl_succeed_fatal(e, #e, __FILE__, __LINE__)
 #define OPENCL_SUCCEED_NONFATAL(e) opencl_succeed_nonfatal(e, #e, __FILE__, __LINE__)
 // Take care not to override an existing error.
