@@ -11,7 +11,7 @@ import qualified Language.C.Quote.OpenCL as C
 import Data.List
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
-import qualified Futhark.CodeGen.ImpGen.Cuda as ImpGen
+import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.MonadFreshNames
@@ -34,12 +34,12 @@ compileProg prog = do
   where
     operations :: GC.Operations OpenCL ()
     operations = GC.Operations
-                 { GC.opsWriteScalar = writeCudaScalar
-                 , GC.opsReadScalar  = readCudaScalar
-                 , GC.opsAllocate    = allocateCudaBuffer
-                 , GC.opsDeallocate  = deallocateCudaBuffer
-                 , GC.opsCopy        = copyCudaMemory
-                 , GC.opsStaticArray = staticCudaArray
+                 { GC.opsWriteScalar = writeCUDAScalar
+                 , GC.opsReadScalar  = readCUDAScalar
+                 , GC.opsAllocate    = allocateCUDABuffer
+                 , GC.opsDeallocate  = deallocateCUDABuffer
+                 , GC.opsCopy        = copyCUDAMemory
+                 , GC.opsStaticArray = staticCUDAArray
                  , GC.opsMemoryType  = cudaMemoryType
                  , GC.opsCompiler    = callKernel
                  , GC.opsFatMemory   = True
@@ -83,8 +83,8 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
                       }
              ]
 
-writeCudaScalar :: GC.WriteScalar OpenCL ()
-writeCudaScalar mem idx t "device" _ val = do
+writeCUDAScalar :: GC.WriteScalar OpenCL ()
+writeCUDAScalar mem idx t "device" _ val = do
   val' <- newVName "write_tmp"
   GC.stm [C.cstm|{$ty:t $id:val' = $exp:val;
                   CUDA_SUCCEED(
@@ -92,11 +92,11 @@ writeCudaScalar mem idx t "device" _ val = do
                                  &$id:val',
                                  sizeof($ty:t)));
                  }|]
-writeCudaScalar _ _ _ space _ _ =
+writeCUDAScalar _ _ _ space _ _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
 
-readCudaScalar :: GC.ReadScalar OpenCL ()
-readCudaScalar mem idx t "device" _ = do
+readCUDAScalar :: GC.ReadScalar OpenCL ()
+readCUDAScalar mem idx t "device" _ = do
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm [C.cstm|CUDA_SUCCEED(
@@ -105,25 +105,25 @@ readCudaScalar mem idx t "device" _ = do
                                 sizeof($ty:t)));
                 |]
   return [C.cexp|$id:val|]
-readCudaScalar _ _ _ space _ =
+readCUDAScalar _ _ _ space _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
 
-allocateCudaBuffer :: GC.Allocate OpenCL ()
-allocateCudaBuffer mem size tag "device" =
+allocateCUDABuffer :: GC.Allocate OpenCL ()
+allocateCUDABuffer mem size tag "device" =
   GC.stm [C.cstm|CUDA_SUCCEED(cuda_alloc(&ctx->cuda, $exp:size, $exp:tag, &$exp:mem));|]
-allocateCudaBuffer _ _ _ "local" = return ()
-allocateCudaBuffer _ _ _ space =
+allocateCUDABuffer _ _ _ "local" = return ()
+allocateCUDABuffer _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' memory space."
 
-deallocateCudaBuffer :: GC.Deallocate OpenCL ()
-deallocateCudaBuffer mem tag "device" =
+deallocateCUDABuffer :: GC.Deallocate OpenCL ()
+deallocateCUDABuffer mem tag "device" =
   GC.stm [C.cstm|CUDA_SUCCEED(cuda_free(&ctx->cuda, $exp:mem, $exp:tag));|]
-deallocateCudaBuffer _ _ "local" = return ()
-deallocateCudaBuffer _ _ space =
+deallocateCUDABuffer _ _ "local" = return ()
+deallocateCUDABuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
-copyCudaMemory :: GC.Copy OpenCL ()
-copyCudaMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
+copyCUDAMemory :: GC.Copy OpenCL ()
+copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
   fn <- memcpyFun dstSpace srcSpace
   GC.stm [C.cstm|CUDA_SUCCEED(
                   $id:fn($exp:dstmem + $exp:dstidx,
@@ -137,8 +137,8 @@ copyCudaMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
     memcpyFun _ _ = fail $ "Cannot copy to '" ++ show dstSpace
                            ++ "' from '" ++ show srcSpace ++ "'."
 
-staticCudaArray :: GC.StaticArray OpenCL ()
-staticCudaArray name "device" t vals = do
+staticCUDAArray :: GC.StaticArray OpenCL ()
+staticCUDAArray name "device" t vals = do
   let ct = GC.primTypeToCType t
       vals' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vals]
       num_elems = length vals
@@ -158,7 +158,7 @@ staticCudaArray name "device" t vals = do
     }
   }|]
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
-staticCudaArray _ space _ _ =
+staticCUDAArray _ space _ _ =
   fail $ "CUDA backend cannot create static array in '" ++ space
           ++ "' memory space"
 

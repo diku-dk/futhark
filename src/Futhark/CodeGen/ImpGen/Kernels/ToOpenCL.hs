@@ -4,7 +4,7 @@
 -- kernels to imperative code with OpenCL calls.
 module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
   ( kernelsToOpenCL
-  , kernelsToCuda
+  , kernelsToCUDA
   )
   where
 
@@ -19,7 +19,7 @@ import qualified Data.Semigroup as Sem
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Quote.CUDA as CudaC
+import qualified Language.C.Quote.CUDA as CUDAC
 
 import Futhark.Error
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
@@ -32,9 +32,9 @@ import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty, prettyOneLine)
 
-kernelsToCuda, kernelsToOpenCL :: ImpKernels.Program
+kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program
                                -> Either InternalError ImpOpenCL.Program
-kernelsToCuda = translateKernels TargetCuda
+kernelsToCUDA = translateKernels TargetCUDA
 kernelsToOpenCL = translateKernels TargetOpenCL
 
 -- | Translate a kernels-program to an OpenCL-program.
@@ -52,7 +52,7 @@ translateKernels target (ImpKernels.Functions funs) = do
     (S.toList $ kernelUsedTypes requirements) sizes $
     ImpOpenCL.Functions (M.toList extra_funs) <> prog'
   where genPrelude TargetOpenCL = genOpenClPrelude
-        genPrelude TargetCuda = genCudaPrelude
+        genPrelude TargetCUDA = genCUDAPrelude
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
@@ -143,14 +143,14 @@ onKernel target kernel = do
           let size' = compilePrimExp size
           return (Nothing,
                   [C.citem|ALIGNED_LOCAL_MEMORY($id:mem, $exp:size');|])
-        prepareLocalMemory TargetCuda (mem, Left _) = do
+        prepareLocalMemory TargetCUDA (mem, Left _) = do
           param <- newVName $ baseString mem ++ "_offset"
           return (Just [C.cparam|uint $id:param|],
                   [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|])
-        prepareLocalMemory TargetCuda (mem, Right size) = do
+        prepareLocalMemory TargetCUDA (mem, Right size) = do
           let size' = compilePrimExp size
           return (Nothing,
-                  [CudaC.citem|__shared__ volatile char *$id:mem[$exp:size'];|])
+                  [CUDAC.citem|__shared__ volatile char *$id:mem[$exp:size'];|])
         name = nameToString $ kernelName kernel
         num_groups = kernelNumGroups kernel
         group_size = kernelGroupSize kernel
@@ -234,13 +234,13 @@ cudaAtomicOps = (return mkOp <*> opNames <*> types) ++ extraOps
                   return atomicCAS(($ty:t *)p, cmp, val);
                 }|] | t <- types]
 
-genCudaPrelude :: OpenClRequirements -> [C.Definition]
-genCudaPrelude (OpenClRequirements _ consts) =
+genCUDAPrelude :: OpenClRequirements -> [C.Definition]
+genCUDAPrelude (OpenClRequirements _ consts) =
   cudafy ++ cudaAtomicOps ++ defs ++ ops
   where ops = cIntOps ++ cFloat32Ops ++ cFloat32Funs ++ cFloat64Ops
                 ++ cFloat64Funs ++ cFloatConvOps
         defs = [ [C.cedecl|$esc:def|] | def <- map constToDefine consts ]
-        cudafy = [CudaC.cunit|
+        cudafy = [CUDAC.cunit|
 typedef char int8_t;
 typedef short int16_t;
 typedef int int32_t;

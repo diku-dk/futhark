@@ -1,5 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
-module Futhark.CodeGen.ImpGen.Cuda
+module Futhark.CodeGen.ImpGen.CUDA
   ( compileProg
   ) where
 
@@ -12,5 +12,5 @@ import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError OpenCL.Program)
-compileProg prog = either Left kernelsToCuda <$> ImpGenKernels.compileProg prog
+compileProg prog = either Left kernelsToCUDA <$> ImpGenKernels.compileProg prog
 
