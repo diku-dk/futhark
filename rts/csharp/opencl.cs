@@ -35,10 +35,10 @@ public struct OpenCLConfig
     public int DefaultNumGroups;
     public int DefaultTileSize;
     public int DefaultThreshold;
-    public int TransposeBlockDim;
 
     public int NumSizes;
     public string[] SizeNames;
+    public string[] SizeVars;
     public int[] SizeValues;
     public string[] SizeClasses;
 }
@@ -363,6 +363,7 @@ private OpenCLFreeList OpenCLFreeListInit()
 private void OpenCLConfigInit(out OpenCLConfig cfg,
                       int num_sizes,
                       string[] size_names,
+                      string[] size_vars,
                       int[] size_values,
                       string[] size_classes)
 {
@@ -377,10 +378,10 @@ private void OpenCLConfigInit(out OpenCLConfig cfg,
     cfg.DefaultNumGroups = 128;
     cfg.DefaultTileSize = 32;
     cfg.DefaultThreshold = 32*1024;
-    cfg.TransposeBlockDim = 16;
 
     cfg.NumSizes = num_sizes;
     cfg.SizeNames = size_names;
+    cfg.SizeVars = size_vars;
     cfg.SizeValues = size_values;
     cfg.SizeClasses = size_classes;
 }
@@ -870,13 +871,12 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
 
     int compile_opts_size = 1024;
 
-    string compile_opts = String.Format("-DFUT_BLOCK_DIM={0} -DLOCKSTEP_WIDTH={1} ",
-                                        ctx.OpenCL.Cfg.TransposeBlockDim,
+    string compile_opts = String.Format("-DLOCKSTEP_WIDTH={0} ",
                                         ctx.OpenCL.LockstepWidth);
 
     for (int i = 0; i < ctx.OpenCL.Cfg.NumSizes; i++) {
         compile_opts += String.Format("-D{0}={1} ",
-                                      ctx.OpenCL.Cfg.SizeNames[i],
+                                      ctx.OpenCL.Cfg.SizeVars[i],
                                       ctx.OpenCL.Cfg.SizeValues[i]);
     }
 
@@ -900,11 +900,8 @@ private void FutharkConfigPrintSizes()
     int n = FutharkGetNumSizes();
     for (int i = 0; i < n; i++)
     {
-        if (FutharkGetSizeEntry(i) ==  EntryPoint)
-        {
-            Console.WriteLine("{0} ({1})", FutharkGetSizeName(i),
-                              FutharkGetSizeClass(i));
-        }
+      Console.WriteLine("{0} ({1})", FutharkGetSizeName(i),
+                        FutharkGetSizeClass(i));
     }
     Environment.Exit(0);
 }

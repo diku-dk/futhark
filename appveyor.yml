@@ -12,6 +12,7 @@ platform:
   - x64
 cache:
 - "%STACK_ROOT%"
+- .stack-work
 
 install:
  - set PATH=%CD%\_stack;C:\msys64\usr\bin;%PATH%
@@ -24,5 +25,6 @@ install:
  - stack install --fast
 
 test_script:
+- chcp 65001
 - stack --no-terminal test --fast
-- futhark-test --no-terminal -t tests examples
+- futhark test --no-terminal -t tests examples

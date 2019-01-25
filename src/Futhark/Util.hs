@@ -29,12 +29,15 @@ module Futhark.Util
         fromPOSIX,
         toPOSIX,
         trim,
+        pmapIO,
         zEncodeString
        )
        where
 
 import Numeric
+import Control.Concurrent
 import Control.Exception
+import Control.Monad
 import Data.Char
 import Data.List
 import Data.Either
@@ -186,6 +189,23 @@ fromPOSIX = Native.joinPath . Posix.splitDirectories
 -- efficient implementation!
 trim :: String -> String
 trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
+
+fork :: (a -> IO b) -> a -> IO (MVar b)
+fork f x = do cell <- newEmptyMVar
+              void $ forkIO $ do result <- f x
+                                 putMVar cell result
+              return cell
+
+pmapIO :: (a -> IO b) -> [a] -> IO [b]
+pmapIO f elems = go elems []
+  where
+    go [] res = return res
+    go xs res = do
+      numThreads <- getNumCapabilities
+      let (e,es) = splitAt numThreads xs
+      mvars  <- mapM (fork f) e
+      result <- mapM takeMVar mvars
+      go es (result ++ res)
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

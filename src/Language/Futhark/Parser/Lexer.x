@@ -76,14 +76,11 @@ tokens :-
   ","                      { tokenC COMMA }
   "_"                      { tokenC UNDERSCORE }
   "->"                     { tokenC RIGHT_ARROW }
-  "<-"                     { tokenC LEFT_ARROW }
   ":"                      { tokenC COLON }
-  "."                      { tokenC DOT }
   "\"                      { tokenC BACKSLASH }
   "'"                      { tokenC APOSTROPHE }
   "'^"                     { tokenC APOSTROPHE_THEN_HAT }
   "`"                      { tokenC BACKTICK }
-  "#"                      { tokenC HASH }
   "..<"                    { tokenC TWO_DOTS_LT }
   "..>"                    { tokenC TWO_DOTS_GT }
   "..."                    { tokenC THREE_DOTS }
@@ -113,12 +110,16 @@ tokens :-
   @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
   @identifier "." "("      { tokenM $ fmap (QUALPAREN []) . indexing . T.init . T.takeWhile (/='(') }
   @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
+  "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
 
   @unop                    { tokenS $ UNOP . nameFromText }
   @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
 
   @binop                   { tokenM $ return . symbol [] . nameFromText }
   @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
+
+  "." (@identifier|[0-9]+) { tokenM $ return . PROJ_FIELD . nameFromText . T.drop 1 }
+  "." "["                  { tokenC PROJ_INDEX }
 {
 
 keyword :: T.Text -> Token
@@ -298,6 +299,9 @@ data Token = ID Name
            | UNOP Name
            | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name
+           | CONSTRUCTOR Name
+           | PROJ_FIELD Name
+           | PROJ_INDEX
 
            | INTLIT Integer
            | STRINGLIT String
@@ -319,8 +323,6 @@ data Token = ID Name
            | APOSTROPHE
            | APOSTROPHE_THEN_HAT
            | BACKTICK
-           | HASH
-           | DOT
            | TWO_DOTS
            | TWO_DOTS_LT
            | TWO_DOTS_GT
@@ -335,7 +337,6 @@ data Token = ID Name
            | COMMA
            | UNDERSCORE
            | RIGHT_ARROW
-           | LEFT_ARROW
 
            | EQU
            | ASTERISK

@@ -223,8 +223,12 @@ instance ASTMappable (DimIndexBase Info VName) where
     maybe (return Nothing) (fmap Just . astMap tv) j <*>
     maybe (return Nothing) (fmap Just . astMap tv) stride
 
-instance ASTMappable Names where
-  astMap tv = fmap S.fromList . traverse (mapOnName tv) . S.toList
+instance ASTMappable Alias where
+  astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v
+  astMap tv (AliasFree v) = AliasFree <$> mapOnName tv v
+
+instance ASTMappable Aliasing where
+  astMap tv = fmap S.fromList . traverse (astMap tv) . S.toList
 
 type TypeTraverser f t dim1 als1 dim2 als2 =
   (TypeName -> f TypeName) -> (dim1 -> f dim2) -> (als1 -> f als2) ->
@@ -233,38 +237,40 @@ type TypeTraverser f t dim1 als1 dim2 als2 =
 traverseType :: Applicative f =>
                 TypeTraverser f TypeBase dim1 als1 dims als2
 traverseType _ _ _ (Prim t) = pure $ Prim t
-traverseType f g h (Array et shape u) =
-  Array <$> traverseArrayElemType f g h et <*> traverse g shape <*> pure u
+traverseType f g h (Array als u et shape) =
+  Array <$> h als <*> pure u <*> traverseArrayElemType f g et <*> traverse g shape
 traverseType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseType f g h (TypeVar als u t args) =
-  TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g h) args
+  TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
 traverseType f g h (Arrow als v t1 t2) =
   Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
 traverseType _ _ _ (Enum cs) = pure $ Enum cs
 
 traverseArrayElemType :: Applicative f =>
-                         TypeTraverser f ArrayElemTypeBase dim1 als1 dim2 als2
-traverseArrayElemType _ _ h (ArrayPrimElem t as) =
-  ArrayPrimElem t <$> h as
-traverseArrayElemType f g h (ArrayPolyElem t args as) =
-  ArrayPolyElem <$> f t <*> traverse (traverseTypeArg f g h) args <*> h as
-traverseArrayElemType f g h (ArrayRecordElem fs) =
-  ArrayRecordElem <$> traverse (traverseRecordArrayElemType f g h) fs
-traverseArrayElemType _ _ h (ArrayEnumElem cs as) =
-  ArrayEnumElem cs <$> h as
+                         (TypeName -> f TypeName) -> (dim1 -> f dim2)
+                      -> ArrayElemTypeBase dim1 -> f (ArrayElemTypeBase dim2)
+traverseArrayElemType _ _ (ArrayPrimElem t) =
+  pure $ ArrayPrimElem t
+traverseArrayElemType f g (ArrayPolyElem t args) =
+  ArrayPolyElem <$> f t <*> traverse (traverseTypeArg f g) args
+traverseArrayElemType f g (ArrayRecordElem fs) =
+  ArrayRecordElem <$> traverse (traverseRecordArrayElemType f g) fs
+traverseArrayElemType _ _ (ArrayEnumElem cs) =
+  pure $ ArrayEnumElem cs
 
 traverseRecordArrayElemType :: Applicative f =>
-                               TypeTraverser f RecordArrayElemTypeBase dim1 als1 dim2 als2
-traverseRecordArrayElemType f g h (RecordArrayElem et) =
-  RecordArrayElem <$> traverseArrayElemType f g h et
-traverseRecordArrayElemType f g h (RecordArrayArrayElem et shape u) =
-  RecordArrayArrayElem <$> traverseArrayElemType f g h et <*>
-  traverse g shape <*> pure u
+                               (TypeName -> f TypeName) -> (dim1 -> f dim2)
+                            -> RecordArrayElemTypeBase dim1 -> f (RecordArrayElemTypeBase dim2)
+traverseRecordArrayElemType f g (RecordArrayElem et) =
+  RecordArrayElem <$> traverseArrayElemType f g et
+traverseRecordArrayElemType f g (RecordArrayArrayElem et shape) =
+  RecordArrayArrayElem <$> traverseArrayElemType f g et <*> traverse g shape
 
 traverseTypeArg :: Applicative f =>
-                   TypeTraverser f TypeArg dim1 als1 dim2 als2
-traverseTypeArg _ g _ (TypeArgDim d loc) = TypeArgDim <$> g d <*> pure loc
-traverseTypeArg f g h (TypeArgType t loc) = TypeArgType <$> traverseType f g h t <*> pure loc
+                   (TypeName -> f TypeName) -> (dim1 -> f dim2)
+                -> TypeArg dim1 -> f (TypeArg dim2)
+traverseTypeArg _ g (TypeArgDim d loc) = TypeArgDim <$> g d <*> pure loc
+traverseTypeArg f g (TypeArgType t loc) = TypeArgType <$> traverseType f g pure t <*> pure loc
 
 instance ASTMappable (TypeBase () ()) where
   astMap tv = traverseType f pure pure

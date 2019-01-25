@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances
 -- for the AST defined in "Language.Futhark.Syntax".
 module Language.Futhark.Pretty
@@ -107,14 +108,14 @@ instance IsName vn => Pretty (ShapeDecl (DimDecl vn)) where
 instance Pretty (ShapeDecl ()) where
   ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
 
-instance Pretty (ShapeDecl dim) => Pretty (RecordArrayElemTypeBase dim as) where
+instance Pretty (ShapeDecl dim) => Pretty (RecordArrayElemTypeBase dim) where
   ppr (RecordArrayElem et) = ppr et
-  ppr (RecordArrayArrayElem et shape u) =
-    ppr u <> ppr shape <> ppr et
+  ppr (RecordArrayArrayElem et shape) =
+    ppr shape <> ppr et
 
-instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
-  ppr (ArrayPrimElem pt _) = ppr pt
-  ppr (ArrayPolyElem v args _) =
+instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim) where
+  ppr (ArrayPrimElem pt) = ppr pt
+  ppr (ArrayPolyElem v args) =
     ppr (qualNameFromTypeName v) <+> spread (map ppr args)
   ppr (ArrayRecordElem fs)
     | Just ts <- areTupleFields fs =
@@ -122,7 +123,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
     | otherwise =
         braces (commasep $ map ppField $ M.toList fs)
     where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
-  ppr (ArrayEnumElem cs _) =
+  ppr (ArrayEnumElem cs) =
     cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
@@ -130,7 +131,7 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   pprPrec _ (Prim et) = ppr et
   pprPrec _ (TypeVar _ u et targs) =
     ppr u <> ppr (qualNameFromTypeName et) <+> spread (map ppr targs)
-  pprPrec _ (Array at shape u) = ppr u <> ppr shape <> ppr at
+  pprPrec _ (Array _ u at shape) = ppr u <> ppr shape <> ppr at
   pprPrec _ (Record fs)
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
@@ -145,7 +146,7 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   pprPrec _ (Enum cs) =
     cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
 
-instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim as) where
+instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
   ppr (TypeArgType t _) = ppr t
 

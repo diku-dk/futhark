@@ -312,9 +312,12 @@ observe name = do
   unless (primType $ typeOf attr) $
     occur [observation $ S.insert name $ aliases attr]
 
--- | Proclaim that we have written to the given variable.
-consume :: Names -> TypeM lore ()
-consume als = occur [consumption als]
+-- | Proclaim that we have written to the given variables.
+consume :: Checkable lore => Names -> TypeM lore ()
+consume als = do
+  scope <- askScope
+  let isArray = maybe False ((>0) . arrayRank . typeOf) . (`M.lookup` scope)
+  occur [consumption $ S.filter isArray als]
 
 collectOccurences :: TypeM lore a -> TypeM lore (a, Occurences)
 collectOccurences m = pass $ do
@@ -547,7 +550,9 @@ checkFun' (fname, rettype, params, body) consumable check = do
   binding (M.fromList params) $
     consumeOnlyParams consumable $ do
       check
-      checkReturnAlias $ bodyAliases body
+      scope <- askScope
+      let isArray = maybe False ((>0) . arrayRank . typeOf) . (`M.lookup` scope)
+      checkReturnAlias $ map (S.filter isArray) $ bodyAliases body
   where param_names = map fst params
 
         checkNoDuplicateParams = foldM_ expand [] param_names
@@ -781,17 +786,6 @@ checkBasicOp (Manifest perm arr) =
 
 checkBasicOp (Assert e _ _) =
   require [Prim Bool] e
-
-checkBasicOp (Partition _ flags arrs) = do
-  flagst <- lookupType flags
-  unless (rowType flagst == Prim int32) $
-    bad $ TypeError $ "Flag array has type " ++ pretty flagst ++ "."
-  forM_ arrs $ \arr -> do
-    arrt <- lookupType arr
-    unless (arrayRank arrt > 0) $
-      bad $ TypeError $
-      "Array argument " ++ pretty arr ++
-      " to partition has type " ++ pretty arrt ++ "."
 
 checkExp :: Checkable lore =>
             Exp (Aliases lore) -> TypeM lore ()

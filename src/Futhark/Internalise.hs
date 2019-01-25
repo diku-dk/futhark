@@ -168,16 +168,34 @@ entryPoint params (retdecl, eret, crets) =
                        -> [EntryPointType]
         entryPointType (_, E.Prim E.Unsigned{}, _) =
           [I.TypeUnsigned]
-        entryPointType (_, E.Array (ArrayPrimElem Unsigned{} _) _ _, _) =
+        entryPointType (_, E.Array _ _ (ArrayPrimElem Unsigned{}) _, _) =
           [I.TypeUnsigned]
         entryPointType (_, E.Prim{}, _) =
           [I.TypeDirect]
-        entryPointType (_, E.Array ArrayPrimElem{} _ _, _) =
+        entryPointType (_, E.Array _ _ ArrayPrimElem{} _, _) =
           [I.TypeDirect]
         entryPointType (te, t, ts) =
           [I.TypeOpaque desc $ length ts]
-          where desc = maybe (pretty t') pretty te
+          where desc = maybe (pretty t') typeExpOpaqueName te
                 t' = removeShapeAnnotations t `E.setUniqueness` Nonunique
+
+        -- | We remove dimension arguments such that we hopefully end
+        -- up with a simpler type name for the entry point.  The
+        -- intend is that if an entry point uses a type 'nasty [w] [h]',
+        -- then we should turn that into an opaque type just called
+        -- 'nasty'.  Also, we try to give arrays of opaques a nicer name.
+        typeExpOpaqueName (TEApply te TypeArgExpDim{} _) =
+          typeExpOpaqueName te
+        typeExpOpaqueName (TEArray te _ _) =
+          let (d, te') = withoutDims te
+          in "arr_" ++ typeExpOpaqueName te' ++
+             "_" ++ show (1 + d) ++ "d"
+        typeExpOpaqueName te = pretty te
+
+        withoutDims (TEArray te _ _) =
+          let (d, te') = withoutDims te
+          in (d+1, te')
+        withoutDims te = (0::Int, te)
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) loc) =
@@ -565,47 +583,27 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
                    init_loop_cond_bnds))
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
-  srcs <- internaliseExpToVars "src" $
-          E.Var (qualName (E.identName src)) (vacuousShapeAnnotations <$> E.identType src)
-          (srclocOf src)
+  let pat = E.Id (E.identName name) (E.vacuousShapeAnnotations <$> E.identType name) loc
+      src_t = E.fromStruct . E.vacuousShapeAnnotations <$> E.identType src
+      e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
+  internaliseExp desc $ E.LetPat [] pat e body loc
+
+internaliseExp desc (E.Update src slice ve loc) = do
   ves <- internaliseExp "lw_val" ve
+  srcs <- internaliseExpToVars "src" src
   dims <- case srcs of
             [] -> return [] -- Will this happen?
             v:_ -> I.arrayDims <$> lookupType v
-  (idxs', cs) <- internaliseSlice loc dims idxs
+  (idxs', cs) <- internaliseSlice loc dims slice
+
   let comb sname ve' = do
         sname_t <- lookupType sname
-        let slice = fullSlice sname_t idxs'
-            rowtype = sname_t `setArrayDims` sliceDims slice
+        let full_slice = fullSlice sname_t idxs'
+            rowtype = sname_t `setArrayDims` sliceDims full_slice
         ve'' <- ensureShape asserting "shape of value does not match shape of source array"
                 loc rowtype "lw_val_correct_shape" ve'
-        certifying cs $
-          letInPlace "letwith_dst" sname (fullSlice sname_t idxs') $ BasicOp $ SubExp ve''
-  dsts <- zipWithM comb srcs ves
-  dstt <- I.staticShapes <$> mapM lookupType dsts
-  let pat = E.Id (E.identName name)
-            (E.vacuousShapeAnnotations <$> E.identType name)
-            (srclocOf name)
-  stmPattern [] pat dstt $ \cm pat_names match -> do
-    mapM_ (uncurry (internaliseDimConstant loc)) cm
-    dsts' <- match loc $ map I.Var dsts
-    forM_ (zip pat_names dsts') $ \(v,dst) ->
-      letBindNames_ [v] $ I.BasicOp $ I.SubExp dst
-    internaliseExp desc body
-
-internaliseExp desc (E.Update src slice ve loc) = do
-  src_name <- newVName "update_src"
-  dest_name <- newVName "update_dest"
-  let src_t = E.typeOf src
-      src_ident = E.Ident src_name (E.Info src_t) loc
-      dest_ident = E.Ident dest_name (E.Info src_t) loc
-
-  internaliseExp desc $
-    E.LetPat [] (E.Id src_name (E.Info $ E.vacuousShapeAnnotations src_t) loc) src
-    (E.LetWith dest_ident src_ident slice ve
-      (E.Var (E.qualName dest_name) (E.Info (E.vacuousShapeAnnotations src_t)) loc)
-      loc)
-    loc
+        letInPlace desc sname full_slice $ BasicOp $ SubExp ve''
+  certifying cs $ map I.Var <$> zipWithM comb srcs ves
 
 internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
   src' <- internaliseExp desc src

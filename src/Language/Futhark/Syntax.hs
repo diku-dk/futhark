@@ -78,7 +78,8 @@ module Language.Futhark.Syntax
   -- * Miscellaneous
   , NoInfo(..)
   , Info(..)
-  , Names
+  , Alias(..)
+  , Aliasing
   , QualName(..)
   )
   where
@@ -118,10 +119,10 @@ class (Show vn,
        Show (f Int),
        Show (f [TypeBase () ()]),
        Show (f StructType),
-       Show (f (Names, StructType)),
+       Show (f (Aliasing, StructType)),
        Show (f ([TypeBase () ()], PatternType)),
        Show (f (M.Map VName VName)),
-       Show (f [RecordArrayElemTypeBase () Names]),
+       Show (f [RecordArrayElemTypeBase ()]),
        Show (f Uniqueness),
        Show (f ([CompType], CompType))) => Showable f vn where
 
@@ -293,44 +294,44 @@ qualNameFromTypeName :: TypeName -> QualName VName
 qualNameFromTypeName (TypeName qs x) = QualName qs x
 
 -- | Types that can be elements of tuple-arrays.
-data RecordArrayElemTypeBase dim as =
-    RecordArrayElem (ArrayElemTypeBase dim as)
-  | RecordArrayArrayElem (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
+data RecordArrayElemTypeBase dim =
+    RecordArrayElem (ArrayElemTypeBase dim)
+  | RecordArrayArrayElem (ArrayElemTypeBase dim) (ShapeDecl dim)
   deriving (Eq, Show)
 
-instance Bitraversable RecordArrayElemTypeBase where
-  bitraverse f g (RecordArrayElem t) = RecordArrayElem <$> bitraverse f g t
-  bitraverse f g (RecordArrayArrayElem a shape u) =
-    RecordArrayArrayElem <$> bitraverse f g a <*> traverse f shape <*> pure u
+instance Traversable RecordArrayElemTypeBase where
+  traverse f (RecordArrayElem t) = RecordArrayElem <$> traverse f t
+  traverse f (RecordArrayArrayElem a shape) =
+    RecordArrayArrayElem <$> traverse f a <*> traverse f shape
 
-instance Bifunctor RecordArrayElemTypeBase where
-  bimap = bimapDefault
+instance Functor RecordArrayElemTypeBase where
+  fmap = fmapDefault
 
-instance Bifoldable RecordArrayElemTypeBase where
-  bifoldMap = bifoldMapDefault
+instance Foldable RecordArrayElemTypeBase where
+  foldMap = foldMapDefault
 
-data ArrayElemTypeBase dim as =
-    ArrayPrimElem PrimType as
-  | ArrayPolyElem TypeName [TypeArg dim as] as
-  | ArrayRecordElem (M.Map Name (RecordArrayElemTypeBase dim as))
-  | ArrayEnumElem [Name] as
+data ArrayElemTypeBase dim =
+    ArrayPrimElem PrimType
+  | ArrayPolyElem TypeName [TypeArg dim]
+  | ArrayRecordElem (M.Map Name (RecordArrayElemTypeBase dim))
+  | ArrayEnumElem [Name]
   deriving (Eq, Show)
 
-instance Bitraversable ArrayElemTypeBase where
-  bitraverse _ g (ArrayPrimElem t as) =
-    ArrayPrimElem t <$> g as
-  bitraverse f g (ArrayPolyElem t args as) =
-    ArrayPolyElem t <$> traverse (bitraverse f g) args <*> g as
-  bitraverse f g (ArrayRecordElem fs) =
-    ArrayRecordElem <$> traverse (bitraverse f g) fs
-  bitraverse _ g (ArrayEnumElem cs as) =
-    ArrayEnumElem cs <$> g as
+instance Traversable ArrayElemTypeBase where
+  traverse _ (ArrayPrimElem t) =
+    pure $ ArrayPrimElem t
+  traverse f (ArrayPolyElem t args) =
+    ArrayPolyElem t <$> traverse (traverse f) args
+  traverse f (ArrayRecordElem fs) =
+    ArrayRecordElem <$> traverse (traverse f) fs
+  traverse _ (ArrayEnumElem cs) =
+    pure $ ArrayEnumElem cs
 
-instance Bifunctor ArrayElemTypeBase where
-  bimap = bimapDefault
+instance Functor ArrayElemTypeBase where
+  fmap = fmapDefault
 
-instance Bifoldable ArrayElemTypeBase where
-  bifoldMap = bifoldMapDefault
+instance Foldable ArrayElemTypeBase where
+  foldMap = foldMapDefault
 
 -- | An expanded Futhark type is either an array, a prim type, a
 -- tuple, or a type variable.  When comparing types for equality with
@@ -338,9 +339,9 @@ instance Bifoldable ArrayElemTypeBase where
 -- parameter names are ignored.
 data TypeBase dim as = Prim PrimType
                      | Enum [Name]
-                     | Array (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
+                     | Array as Uniqueness (ArrayElemTypeBase dim) (ShapeDecl dim)
                      | Record (M.Map Name (TypeBase dim as))
-                     | TypeVar as Uniqueness TypeName [TypeArg dim as]
+                     | TypeVar as Uniqueness TypeName [TypeArg dim]
                      | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
                      -- ^ The aliasing corresponds to the lexical
                      -- closure of the function.
@@ -348,7 +349,7 @@ data TypeBase dim as = Prim PrimType
 
 instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
   Prim x1 == Prim y1 = x1 == y1
-  Array x1 y1 z1 == Array x2 y2 z2 = x1 == x2 && y1 == y2 && z1 == z2
+  Array x1 y1 z1 v1 == Array x2 y2 z2 v2 = x1 == x2 && y1 == y2 && z1 == z2 && v1 == v2
   Record x1 == Record x2 = x1 == x2
   TypeVar _ u1 x1 y1 == TypeVar _ u2 x2 y2 = u1 == u2 && x1 == x2 && y1 == y2
   Arrow _ _ x1 y1 == Arrow _ _ x2 y2 = x1 == x2 && y1 == y2
@@ -357,11 +358,11 @@ instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
 
 instance Bitraversable TypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
-  bitraverse f g (Array a shape u) =
-    Array <$> bitraverse f g a <*> traverse f shape <*> pure u
+  bitraverse f g (Array a u t shape) =
+    Array <$> g a <*> pure u <*> traverse f t <*> traverse f shape
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar als u t args) =
-    TypeVar <$> g als <*> pure u <*> pure t <*> traverse (bitraverse f g) args
+    TypeVar <$> g als <*> pure u <*> pure t <*> traverse (traverse f) args
   bitraverse f g (Arrow als v t1 t2) =
     Arrow <$> g als <*> pure v <*> bitraverse f g t1 <*> bitraverse f g t2
   bitraverse _ _ (Enum n) = pure $ Enum n
@@ -372,27 +373,39 @@ instance Bifunctor TypeBase where
 instance Bifoldable TypeBase where
   bifoldMap = bifoldMapDefault
 
-data TypeArg dim as = TypeArgDim dim SrcLoc
-                    | TypeArgType (TypeBase dim as) SrcLoc
+data TypeArg dim = TypeArgDim dim SrcLoc
+                 | TypeArgType (TypeBase dim ()) SrcLoc
              deriving (Eq, Show)
 
-instance Bitraversable TypeArg where
-  bitraverse f _ (TypeArgDim v loc) = TypeArgDim <$> f v <*> pure loc
-  bitraverse f g (TypeArgType t loc) = TypeArgType <$> bitraverse f g t <*> pure loc
+instance Traversable TypeArg where
+  traverse f (TypeArgDim v loc) = TypeArgDim <$> f v <*> pure loc
+  traverse f (TypeArgType t loc) = TypeArgType <$> bitraverse f pure t <*> pure loc
 
-instance Bifunctor TypeArg where
-  bimap = bimapDefault
+instance Functor TypeArg where
+  fmap = fmapDefault
 
-instance Bifoldable TypeArg where
-  bifoldMap = bifoldMapDefault
+instance Foldable TypeArg where
+  foldMap = foldMapDefault
+
+-- | A variable that is aliased.  Can be still in-scope, or have gone
+-- out of scope and be free.  In the latter case, it behaves more like
+-- an equivalence class.  See uniqueness-error18.fut for an example of
+-- why this is necessary.
+data Alias = AliasBound { aliasVar :: VName }
+           | AliasFree { aliasVar :: VName }
+           deriving (Eq, Ord, Show)
+
+-- | Aliasing for a type, which is a set of the variables that are
+-- aliased.
+type Aliasing = S.Set Alias
 
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
-type CompType = TypeBase () Names
+type CompType = TypeBase () Aliasing
 
 -- | A type with aliasing information and shape annotations, used for
 -- describing the type of a pattern.
-type PatternType = TypeBase (DimDecl VName) Names
+type PatternType = TypeBase (DimDecl VName) Aliasing
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
@@ -609,7 +622,7 @@ data ExpBase f vn =
               -- ^ Numeric negation (ugly special case; Haskell did it first).
 
             | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
-              (Maybe (TypeDeclBase f vn)) (f (Names, StructType)) SrcLoc
+              (Maybe (TypeDeclBase f vn)) (f (Aliasing, StructType)) SrcLoc
 
             | OpSection (QualName vn) (f PatternType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.
@@ -1006,9 +1019,6 @@ data ProgBase f vn = Prog { progDoc :: Maybe DocComment
                           , progDecs :: [DecBase f vn]
                           }
 deriving instance Showable f vn => Show (ProgBase f vn)
-
--- | A set of names.
-type Names = S.Set VName
 
 --- Some prettyprinting definitions are here because we need them in
 --- the Attributes module.

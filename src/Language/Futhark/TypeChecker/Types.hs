@@ -10,11 +10,15 @@ module Language.Futhark.TypeChecker.Types
   , checkForDuplicateNames
   , checkTypeParams
 
+  , typeExpUses
+  , checkShapeParamUses
+
   , TypeSub(..)
   , TypeSubs
   , substituteTypes
   , substituteTypesInBoundV
 
+  , Subst(..)
   , Substitutable(..)
   , substTypesAny
   )
@@ -23,6 +27,7 @@ where
 import Control.Monad.Reader
 import Control.Monad.Except
 import Control.Monad.State
+import Data.Bifunctor
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -48,9 +53,9 @@ unifyTypesU uf (TypeVar als1 u1 t1 targs1) (TypeVar als2 u2 t2 targs2)
       targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
       Just $ TypeVar (als1 <> als2) u3 t1 targs3
   | otherwise = Nothing
-unifyTypesU uf (Array et1 shape1 u1) (Array et2 shape2 u2) =
-  Array <$> unifyArrayElemTypes uf et1 et2 <*>
-  unifyShapes shape1 shape2 <*> uf u1 u2
+unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 shape2) =
+  Array (als1 <> als2) <$> uf u1 u2
+  <*> unifyArrayElemTypes uf et1 et2 <*> unifyShapes shape1 shape2
 unifyTypesU uf (Record ts1) (Record ts2)
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
@@ -62,9 +67,9 @@ unifyTypesU _ e1@Enum{} e2@Enum{}
   | e1 == e2 = Just e1
 unifyTypesU _ _ _ = Nothing
 
-unifyTypeArgs :: (Monoid als, Eq als, ArrayDim dim) =>
+unifyTypeArgs :: (ArrayDim dim) =>
                  (Uniqueness -> Uniqueness -> Maybe Uniqueness)
-              -> TypeArg dim als -> TypeArg dim als -> Maybe (TypeArg dim als)
+              -> TypeArg dim -> TypeArg dim -> Maybe (TypeArg dim)
 unifyTypeArgs _ (TypeArgDim d1 loc) (TypeArgDim d2 _) =
   TypeArgDim <$> unifyDims d1 d2 <*> pure loc
 unifyTypeArgs uf (TypeArgType t1 loc) (TypeArgType t2 _) =
@@ -72,37 +77,36 @@ unifyTypeArgs uf (TypeArgType t1 loc) (TypeArgType t2 _) =
 unifyTypeArgs _ _ _ =
   Nothing
 
-unifyArrayElemTypes :: (Monoid als, Eq als, ArrayDim dim) =>
+unifyArrayElemTypes :: (ArrayDim dim) =>
                        (Uniqueness -> Uniqueness -> Maybe Uniqueness)
-                    -> ArrayElemTypeBase dim als
-                    -> ArrayElemTypeBase dim als
-                    -> Maybe (ArrayElemTypeBase dim als)
-unifyArrayElemTypes _ (ArrayPrimElem bt1 als1) (ArrayPrimElem bt2 als2)
+                    -> ArrayElemTypeBase dim
+                    -> ArrayElemTypeBase dim
+                    -> Maybe (ArrayElemTypeBase dim)
+unifyArrayElemTypes _ (ArrayPrimElem bt1) (ArrayPrimElem bt2)
   | bt1 == bt2 =
-      Just $ ArrayPrimElem bt1 (als1 <> als2)
-unifyArrayElemTypes _ (ArrayPolyElem bt1 targs1 als1) (ArrayPolyElem bt2 targs2 als2)
+      Just $ ArrayPrimElem bt1
+unifyArrayElemTypes _ (ArrayPolyElem bt1 targs1) (ArrayPolyElem bt2 targs2)
   | bt1 == bt2, targs1 == targs2 =
-      Just $ ArrayPolyElem bt1 targs1 (als1 <> als2)
+      Just $ ArrayPolyElem bt1 targs1
 unifyArrayElemTypes uf (ArrayRecordElem et1) (ArrayRecordElem et2)
   | sort (M.keys et1) == sort (M.keys et2) =
     ArrayRecordElem <$>
     traverse (uncurry $ unifyRecordArrayElemTypes uf) (M.intersectionWith (,) et1 et2)
-unifyArrayElemTypes _ (ArrayEnumElem cs1 als1) (ArrayEnumElem cs2 als2)
+unifyArrayElemTypes _ (ArrayEnumElem cs1) (ArrayEnumElem cs2)
   | cs1 == cs2 =
-     Just $ ArrayEnumElem cs1 (als1 <> als2)
+     Just $ ArrayEnumElem cs1
 unifyArrayElemTypes _ _ _ =
   Nothing
 
-unifyRecordArrayElemTypes :: (Monoid als, Eq als, ArrayDim dim) =>
+unifyRecordArrayElemTypes :: (ArrayDim dim) =>
                              (Uniqueness -> Uniqueness -> Maybe Uniqueness)
-                          -> RecordArrayElemTypeBase dim als
-                          -> RecordArrayElemTypeBase dim als
-                          -> Maybe (RecordArrayElemTypeBase dim als)
+                          -> RecordArrayElemTypeBase dim
+                          -> RecordArrayElemTypeBase dim
+                          -> Maybe (RecordArrayElemTypeBase dim)
 unifyRecordArrayElemTypes uf (RecordArrayElem et1) (RecordArrayElem et2) =
   RecordArrayElem <$> unifyArrayElemTypes uf et1 et2
-unifyRecordArrayElemTypes uf (RecordArrayArrayElem et1 shape1 u1) (RecordArrayArrayElem et2 shape2 u2) =
-  RecordArrayArrayElem <$> unifyArrayElemTypes uf et1 et2 <*>
-  unifyShapes shape1 shape2 <*> uf u1 u2
+unifyRecordArrayElemTypes uf (RecordArrayArrayElem et1 shape1) (RecordArrayArrayElem et2 shape2) =
+  RecordArrayArrayElem <$> unifyArrayElemTypes uf et1 et2 <*> unifyShapes shape1 shape2
 unifyRecordArrayElemTypes _ _ _ =
   Nothing
 
@@ -118,16 +122,19 @@ subuniqueOf :: Uniqueness -> Uniqueness -> Bool
 subuniqueOf Nonunique Unique = False
 subuniqueOf _ _              = True
 
-data Bindage = BoundAsVar | UsedFree
-             deriving (Show, Eq)
-
 checkTypeDecl :: MonadTypeChecker m =>
-                 TypeDeclBase NoInfo Name
+                 [TypeParam]
+              -> TypeDeclBase NoInfo Name
               -> m (TypeDeclBase Info VName, Liftedness)
-checkTypeDecl (TypeDecl t NoInfo) = do
+checkTypeDecl tps (TypeDecl t NoInfo) = do
   checkForDuplicateNamesInType t
   (t', st, l) <- checkTypeExp t
+  checkShapeParamUses typeExpUses tps $ unfoldTypeExp t'
   return (TypeDecl t' $ Info st, l)
+
+unfoldTypeExp :: TypeExp VName -> [TypeExp VName]
+unfoldTypeExp (TEArrow _ t1 t2 _) = t1 : unfoldTypeExp t2
+unfoldTypeExp t = [t]
 
 checkTypeExp :: MonadTypeChecker m =>
                 TypeExp Name
@@ -291,6 +298,32 @@ checkForDuplicateNamesInType = checkForDuplicateNames . pats
         pats TEVar{} = []
         pats TEEnum{} = []
 
+-- | Ensure that every shape parameter is used in positive position at
+-- least once before being used in negative position.
+checkShapeParamUses :: (MonadTypeChecker m, Located a) =>
+                       (a -> ([VName], [VName])) -> [TypeParam] -> [a]
+                    -> m ()
+checkShapeParamUses getUses tps ps = do
+  pos_uses <- foldM checkShapePositions [] ps
+  mapM_ (checkUsed pos_uses) tps
+  where tp_names = map typeParamName tps
+
+        checkShapePositions pos_uses p = do
+          let (pos, neg) = getUses p
+              pos_uses' = pos <> pos_uses
+          forM_ neg $ \pv ->
+            unless ((pv `notElem` tp_names) || (pv `elem` pos_uses')) $
+            throwError $ TypeError (srclocOf p) $ "Shape parameter `" ++
+            pretty (baseName pv) ++ "` must first be given in " ++
+            "a positive position (non-functional parameter)."
+          return pos_uses'
+        checkUsed uses (TypeParamDim pv loc)
+          | pv `elem` uses = return ()
+          | otherwise =
+              throwError $ TypeError loc $ "Size parameter `" ++
+              pretty (baseName pv) ++ "` unused."
+        checkUsed _ _ = return ()
+
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]
                 -> ([TypeParamBase VName] -> m a)
@@ -316,6 +349,26 @@ checkTypeParams ps m =
         checkTypeParam (TypeParamType l pv loc) =
           TypeParamType l <$> checkParamName Type pv loc <*> pure loc
 
+-- | Return the shapes used in a given type expression in positive and negative
+-- position, respectively.
+typeExpUses :: TypeExp VName -> ([VName], [VName])
+typeExpUses (TEVar _ _) = mempty
+typeExpUses (TETuple tes _) = foldMap typeExpUses tes
+typeExpUses (TERecord fs _) = foldMap (typeExpUses . snd) fs
+typeExpUses (TEArray te d _) = typeExpUses te <> dimDeclUses d
+typeExpUses (TEUnique te _) = typeExpUses te
+typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
+  where typeArgUses (TypeArgExpDim d _) = dimDeclUses d
+        typeArgUses (TypeArgExpType tae) = typeExpUses tae
+typeExpUses (TEArrow _ t1 t2 _) =
+  let (pos, neg) = typeExpUses t1 <> typeExpUses t2
+  in (mempty, pos <> neg)
+typeExpUses TEEnum{} = mempty
+
+dimDeclUses :: DimDecl VName -> ([VName], [VName])
+dimDeclUses (NamedDim v) = ([qualLeaf v], [])
+dimDeclUses _ = mempty
+
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
              deriving (Show)
@@ -324,8 +377,9 @@ type TypeSubs = M.Map VName TypeSub
 
 substituteTypes :: TypeSubs -> StructType -> StructType
 substituteTypes substs ot = case ot of
-  Array at shape u ->
-    fromMaybe nope $ arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
+  Array als u at shape ->
+    maybe nope (`addAliases` (<>als)) $
+    arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
   Prim t -> Prim t
   TypeVar () u v targs
     | Just (TypeSub (TypeAbbr _ ps t)) <-
@@ -340,9 +394,9 @@ substituteTypes substs ot = case ot of
   Enum cs -> Enum cs
   where nope = error "substituteTypes: Cannot create array after substitution."
 
-        substituteTypesInArrayElem (ArrayPrimElem t ()) =
+        substituteTypesInArrayElem (ArrayPrimElem t) =
           Prim t
-        substituteTypesInArrayElem (ArrayPolyElem v targs ())
+        substituteTypesInArrayElem (ArrayPolyElem v targs)
           | Just (TypeSub (TypeAbbr _ ps t)) <-
               M.lookup (qualLeaf (qualNameFromTypeName v)) substs =
               applyType ps t (map substituteInTypeArg targs)
@@ -350,9 +404,8 @@ substituteTypes substs ot = case ot of
               TypeVar () Nonunique v (map substituteInTypeArg targs)
         substituteTypesInArrayElem (ArrayRecordElem ts) =
           Record ts'
-          where ts' = fmap (substituteTypes substs .
-                            fst . recordArrayElemToType) ts
-        substituteTypesInArrayElem (ArrayEnumElem cs ()) =
+          where ts' = fmap (substituteTypes substs . recordArrayElemToType) ts
+        substituteTypesInArrayElem (ArrayEnumElem cs) =
           Enum cs
 
         substituteInTypeArg (TypeArgDim d loc) =
@@ -387,38 +440,50 @@ applyType ps t args =
         mkSubst p a =
           error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
 
+-- | A type substituion may be a substitution or a yet-unknown
+-- substitution (but which is certainly an overloaded primitive
+-- type!).  The latter is used to remove aliases from types that are
+-- yet-unknown but that we know cannot carry aliases (see issue #682).
+data Subst t = Subst t | PrimSubst
+
+instance Functor Subst where
+  fmap f (Subst t) = Subst $ f t
+  fmap _ PrimSubst = PrimSubst
+
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
 class Substitutable a where
-  applySubst :: (VName -> Maybe (TypeBase () ())) -> a -> a
+  applySubst :: (VName -> Maybe (Subst (TypeBase () ()))) -> a -> a
 
 instance Substitutable (TypeBase () ()) where
   applySubst = substTypesAny
 
-instance Substitutable (TypeBase () Names) where
-  applySubst = substTypesAny . (fmap fromStruct.)
+instance Substitutable (TypeBase () Aliasing) where
+  applySubst = substTypesAny . (fmap (fmap fromStruct).)
 
 instance Substitutable (TypeBase (DimDecl VName) ()) where
-  applySubst = substTypesAny . (fmap vacuousShapeAnnotations.)
+  applySubst = substTypesAny . (fmap (fmap vacuousShapeAnnotations).)
 
-instance Substitutable (TypeBase (DimDecl VName) Names) where
-  applySubst = substTypesAny . (fmap (vacuousShapeAnnotations . fromStruct).)
+instance Substitutable (TypeBase (DimDecl VName) Aliasing) where
+  applySubst = substTypesAny . (fmap (fmap (vacuousShapeAnnotations . fromStruct)).)
 
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny :: (ArrayDim dim, Monoid as) =>
-                 (VName -> Maybe (TypeBase dim as))
+                 (VName -> Maybe (Subst (TypeBase dim as)))
               -> TypeBase dim as -> TypeBase dim as
 substTypesAny lookupSubst ot = case ot of
   Prim t -> Prim t
-  Array et shape u -> fromMaybe nope $
-                      uncurry arrayOfWithAliases (subsArrayElem et) shape u
+  Array als u et shape ->
+    maybe nope (`addAliases` (<>als)) $
+    arrayOf (subsArrayElem et) shape u
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
-  TypeVar _ u v []
-    | Just t <- lookupSubst $ qualLeaf (qualNameFromTypeName v) ->
-        t `setUniqueness` u
-  TypeVar als u v targs -> TypeVar als u v $ map subsTypeArg targs
+  TypeVar als u v targs ->
+    case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
+      Just (Subst t) -> t `setUniqueness` u `addAliases` (<>als)
+      Just PrimSubst -> TypeVar mempty u v $ map subsTypeArg targs
+      Nothing -> TypeVar als u v $ map subsTypeArg targs
   Record ts ->  Record $ fmap (substTypesAny lookupSubst) ts
   Arrow als v t1 t2 ->
     Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
@@ -426,16 +491,19 @@ substTypesAny lookupSubst ot = case ot of
 
   where nope = error "substTypesAny: Cannot create array after substitution."
 
-        subsArrayElem (ArrayPrimElem t as) = (Prim t, as)
-        subsArrayElem (ArrayPolyElem v [] as)
-          | Just t <-  lookupSubst $ qualLeaf (qualNameFromTypeName v) = (t, as)
-        subsArrayElem (ArrayPolyElem v targs as) =
-          (TypeVar as Nonunique v (map subsTypeArg targs), as)
+        subsArrayElem (ArrayPrimElem t) = Prim t
+        subsArrayElem (ArrayPolyElem v targs) =
+          case lookupSubst $ qualLeaf $ qualNameFromTypeName v of
+            Just (Subst t) -> t
+            -- It is intentional that we do not handle PrimSubst
+            -- specially here, as we are inside an array, and that
+            -- gives the aliasing.
+            _ -> TypeVar mempty Nonunique v $ map subsTypeArg targs
         subsArrayElem (ArrayRecordElem ts) =
-          let ts' = fmap recordArrayElemToType ts
-          in (Record $ fmap (substTypesAny lookupSubst . fst) ts', foldMap snd ts')
-        subsArrayElem (ArrayEnumElem cs as) = (Enum cs, as)
+          Record $ substTypesAny lookupSubst . recordArrayElemToType <$> ts
+        subsArrayElem (ArrayEnumElem cs) = Enum cs
 
         subsTypeArg (TypeArgType t loc) =
-          TypeArgType (substTypesAny lookupSubst t) loc
+          TypeArgType (substTypesAny lookupSubst' t) loc
+          where lookupSubst' = fmap (fmap $ bimap id (const ())) . lookupSubst
         subsTypeArg t = t

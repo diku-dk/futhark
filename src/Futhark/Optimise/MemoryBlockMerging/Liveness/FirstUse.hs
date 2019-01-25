@@ -175,7 +175,6 @@ class ArrayUtils lore where
 
 createsNewArrayBase :: Exp lore -> Bool
 createsNewArrayBase e = case e of
-  BasicOp Partition{} -> True
   BasicOp Replicate{} -> True
   BasicOp Iota{} -> True
   BasicOp Manifest{} -> True

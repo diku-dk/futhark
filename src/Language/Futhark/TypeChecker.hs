@@ -162,7 +162,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     name' <- checkName Term name loc
     (tparams', rettype') <-
       checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
-        (vtype', _) <- checkTypeDecl vtype
+        (vtype', _) <- checkTypeDecl tparams' vtype
         return (tparams', vtype')
 
     let binding = BoundV tparams' $ unInfo $ expandedType rettype'
@@ -224,7 +224,7 @@ checkSpecs (IncludeSpec e loc : specs) = do
           (lookupType loc qn >> warnAbout qn)
           `catchError` \_ -> return ()
         warnAbout qn =
-          warn loc $ "Inclusion shadows type `" ++ pretty qn ++ "`."
+          warn loc $ "Inclusion shadows type " ++ quote (pretty qn) ++ "."
 
 checkSigExp :: SigExpBase NoInfo Name -> TypeM (MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
@@ -241,7 +241,7 @@ checkSigExp (SigSpecs specs loc) = do
 checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
   checkTypeParams ps $ \ps' -> do
-    (td', _) <- bindingTypeParams ps' $ checkTypeDecl td
+    (td', _) <- bindingTypeParams ps' $ checkTypeDecl ps' td
     (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' $ unInfo $ expandedType td'
     return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
@@ -430,7 +430,7 @@ checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
 checkTypeBind (TypeBind name ps td doc loc) =
   checkTypeParams ps $ \ps' -> do
-    (td', l) <- bindingTypeParams ps' $ checkTypeDecl td
+    (td', l) <- bindingTypeParams ps' $ checkTypeDecl ps' td
     bindSpaced [(Type, name)] $ do
       name' <- checkName Type name loc
       return (mempty { envTypeTable =
@@ -477,22 +477,30 @@ nastyType t@Array{} = nastyType $ stripArray 1 t
 nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
-nastyReturnType _ (Arrow _ _ t1 t2) = nastyType t1 || nastyReturnType Nothing t2
+nastyReturnType _ (Arrow _ _ t1 t2) =
+  nastyType t1 || nastyReturnType Nothing t2
+nastyReturnType (Just te) _
+  | niceTypeExp te = False
 nastyReturnType te t
   | Just ts <- isTupleRecord t =
       case te of
-        Just (TEVar (QualName [] _) _) -> False
         Just (TETuple tes _) -> or $ zipWith nastyType' (map Just tes) ts
         _ -> any nastyType ts
   | otherwise = nastyType' te t
-  where nastyType' (Just (TEVar (QualName [] _) _)) _ = False
+  where nastyType' (Just te') _ | niceTypeExp te' = False
         nastyType' _ t' = nastyType t'
 
 nastyParameter :: Pattern -> Bool
 nastyParameter p = nastyType (patternType p) && not (ascripted p)
-  where ascripted (PatternAscription _ (TypeDecl (TEVar (QualName [] _) _) _) _) = True
+  where ascripted (PatternAscription _ (TypeDecl te _) _) = niceTypeExp te
         ascripted (PatternParens p' _) = ascripted p'
         ascripted _ = False
+
+niceTypeExp :: TypeExp VName -> Bool
+niceTypeExp (TEVar (QualName [] _) _) = True
+niceTypeExp (TEApply te TypeArgExpDim{} _) = niceTypeExp te
+niceTypeExp (TEArray te _ _) = niceTypeExp te
+niceTypeExp _ = False
 
 checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
 checkOneDec (ModDec struct) = do
@@ -667,7 +675,7 @@ matchMTys = matchMTys' mempty
     matchVal loc spec_name spec_t name t
       | matchFunBinding loc spec_t t = return (spec_name, name)
     matchVal loc spec_name spec_v _ v =
-      Left $ TypeError loc $ "Value `" ++ baseString spec_name ++ "` specified as type " ++
+      Left $ TypeError loc $ "Value " ++ quote (baseString spec_name) ++ " specified as type " ++
       ppValBind spec_v ++ " in signature, but has " ++ ppValBind v ++ " in structure."
 
     matchFunBinding :: SrcLoc -> BoundV -> BoundV -> Bool
@@ -859,20 +867,20 @@ newNamesForMTy orig_mty = do
           Record $ fmap substituteInType ts
         substituteInType (Enum cs) =
           Enum cs
-        substituteInType (Array (ArrayPrimElem t ()) shape u) =
-          Array (ArrayPrimElem t ()) (substituteInShape shape) u
-        substituteInType (Array (ArrayPolyElem (TypeName qs v) targs ()) shape u) =
-          Array (ArrayPolyElem
-                 (TypeName (map substitute qs) $ substitute v)
-                 (map substituteInTypeArg targs) ())
-                (substituteInShape shape) u
-        substituteInType (Array (ArrayRecordElem ts) shape u) =
-          let ts' = fmap (substituteInType . fst . recordArrayElemToType) ts
+        substituteInType (Array () u (ArrayPrimElem t) shape) =
+          Array () u (ArrayPrimElem t) (substituteInShape shape)
+        substituteInType (Array () u (ArrayPolyElem (TypeName qs v) targs) shape) =
+          Array () u (ArrayPolyElem
+                      (TypeName (map substitute qs) $ substitute v)
+                      (map substituteInTypeArg targs))
+                     (substituteInShape shape)
+        substituteInType (Array () u (ArrayRecordElem ts) shape) =
+          let ts' = fmap (substituteInType . recordArrayElemToType) ts
           in case arrayOf (Record ts') (substituteInShape shape) u of
             Just t' -> t'
             _ -> error "substituteInType: Cannot create array after substitution."
-        substituteInType (Array (ArrayEnumElem cs ()) shape u) =
-          Array (ArrayEnumElem cs ()) (substituteInShape shape) u
+        substituteInType (Array () u (ArrayEnumElem cs) shape) =
+          Array () u (ArrayEnumElem cs) (substituteInShape shape)
         substituteInType (Arrow als v t1 t2) =
           Arrow als v (substituteInType t1) (substituteInType t2)
 

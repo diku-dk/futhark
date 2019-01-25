@@ -2,6 +2,8 @@
 
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 
+#define CL_SILENCE_DEPRECATION // For macOS.
+
 #ifdef __APPLE__
   #include <OpenCL/cl.h>
 #else
@@ -43,24 +45,23 @@ struct opencl_config {
   size_t default_num_groups;
   size_t default_tile_size;
   size_t default_threshold;
-  size_t transpose_block_dim;
 
   int default_group_size_changed;
   int default_tile_size_changed;
 
   int num_sizes;
   const char **size_names;
+  const char **size_vars;
   size_t *size_values;
   const char **size_classes;
-  const char **size_entry_points;
 };
 
 void opencl_config_init(struct opencl_config *cfg,
                         int num_sizes,
                         const char *size_names[],
+                        const char *size_vars[],
                         size_t *size_values,
-                        const char *size_classes[],
-                        const char *size_entry_points[]) {
+                        const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
   cfg->preferred_device_num = 0;
@@ -69,20 +70,23 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->dump_program_to = NULL;
   cfg->load_program_from = NULL;
 
-  cfg->default_group_size = 256;
-  cfg->default_num_groups = 128;
-  cfg->default_tile_size = 32;
+  // The following are dummy sizes that mean the concrete defaults
+  // will be set during initialisation via hardware-inspection-based
+  // heuristics.
+  cfg->default_group_size = 0;
+  cfg->default_num_groups = 0;
+  cfg->default_tile_size = 0;
+
   cfg->default_threshold = 32*1024;
-  cfg->transpose_block_dim = 16;
 
   cfg->default_group_size_changed = 0;
   cfg->default_tile_size_changed = 0;
 
   cfg->num_sizes = num_sizes;
   cfg->size_names = size_names;
+  cfg->size_vars = size_vars;
   cfg->size_values = size_values;
   cfg->size_classes = size_classes;
-  cfg->size_entry_points = size_entry_points;
 }
 
 struct opencl_context {
@@ -467,6 +471,9 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
   size_t max_tile_size = sqrt(max_group_size);
 
+  // Make sure this function is defined.
+  post_opencl_setup(ctx, &device_option);
+
   if (max_group_size < ctx->cfg.default_group_size) {
     if (ctx->cfg.default_group_size_changed) {
       fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
@@ -517,9 +524,6 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
       *size_value = max_value;
     }
   }
-
-  // Make sure this function is defined.
-  post_opencl_setup(ctx, &device_option);
 
   if (ctx->lockstep_width == 0) {
     ctx->lockstep_width = 1;
@@ -582,13 +586,13 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   char *compile_opts = malloc(compile_opts_size);
 
   int w = snprintf(compile_opts, compile_opts_size,
-                   "-DFUT_BLOCK_DIM=%d -DLOCKSTEP_WIDTH=%d ",
-                   (int)ctx->cfg.transpose_block_dim,
+                   "-DLOCKSTEP_WIDTH=%d ",
                    (int)ctx->lockstep_width);
 
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
-                  "-D%s=%d ", ctx->cfg.size_names[i],
+                  "-D%s=%d ",
+                  ctx->cfg.size_vars[i],
                   (int)ctx->cfg.size_values[i]);
   }
 

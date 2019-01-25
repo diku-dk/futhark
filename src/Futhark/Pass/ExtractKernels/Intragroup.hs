@@ -191,11 +191,11 @@ intraGroupStm stm@(Let pat _ e) = do
 
       -- A GroupScan lambda needs two more parameters.
       my_index <- newVName "my_index"
-      other_index <- newVName "other_index"
+      offset <- newVName "offset"
       let my_index_param = Param my_index (Prim int32)
-          other_index_param = Param other_index (Prim int32)
+          offset_param = Param offset (Prim int32)
           scanfun'' = scanfun' { lambdaParams = my_index_param :
-                                                other_index_param :
+                                                offset_param :
                                                 lambdaParams scanfun'
                                }
       letBind_ (Pattern [] scan_pes) $
@@ -212,11 +212,11 @@ intraGroupStm stm@(Let pat _ e) = do
 
       -- A GroupReduce lambda needs two more parameters.
       my_index <- newVName "my_index"
-      other_index <- newVName "other_index"
+      offset <- newVName "offset"
       let my_index_param = Param my_index (Prim int32)
-          other_index_param = Param other_index (Prim int32)
+          offset_param = Param offset (Prim int32)
           redfun'' = redfun' { lambdaParams = my_index_param :
-                                              other_index_param :
+                                              offset_param :
                                               lambdaParams redfun'
                                }
       letBind_ (Pattern [] red_pes) $

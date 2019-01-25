@@ -1,6 +1,5 @@
 -- Tests of various array functions from the basis library.
 
-import "/futlib/array"
 
 -- ==
 -- entry: test_length

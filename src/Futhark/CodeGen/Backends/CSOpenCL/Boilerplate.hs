@@ -11,7 +11,7 @@ import Futhark.CodeGen.ImpCode.OpenCL hiding (Index, If)
 import Futhark.CodeGen.Backends.GenericCSharp as CS
 import Futhark.CodeGen.Backends.GenericCSharp.AST as AST
 import Futhark.CodeGen.OpenCL.Kernels
-
+import Futhark.Util (zEncodeString)
 
 intT, longT, stringT, intArrayT, stringArrayT :: CSType
 intT = Primitive $ CSInt Int32T
@@ -21,7 +21,7 @@ intArrayT = Composite $ ArrayT intT
 stringArrayT = Composite $ ArrayT stringT
 
 generateBoilerplate :: String -> String -> [String] -> [PrimType]
-                    -> M.Map VName (SizeClass, Name)
+                    -> M.Map Name SizeClass
                     -> CS.CompilerM OpenCL () ()
 generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   final_inits <- CS.contextFinalInits
@@ -34,17 +34,16 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   CS.stm $ AssignTyped stringArrayT (Var "SizeNames")
     (Just $ Collection "string[]" (map (String . pretty) $ M.keys sizes))
 
-  CS.stm $ AssignTyped stringArrayT (Var "SizeClasses")
-    (Just $ Collection "string[]" (map (String . pretty . fst) $ M.elems sizes))
+  CS.stm $ AssignTyped stringArrayT (Var "SizeVars")
+    (Just $ Collection "string[]" (map (String . zEncodeString . pretty) $ M.keys sizes))
 
-  CS.stm $ AssignTyped stringArrayT (Var "SizeEntryPoints")
-    (Just $ Collection "string[]" (map (String . pretty . snd) $ M.elems sizes))
+  CS.stm $ AssignTyped stringArrayT (Var "SizeClasses")
+    (Just $ Collection "string[]" (map (String . pretty) $ M.elems sizes))
 
 
   let get_num_sizes = CS.publicName  "GetNumSizes"
   let get_size_name = CS.publicName  "GetSizeName"
   let get_size_class = CS.publicName "GetSizeClass"
-  let get_size_entry = CS.publicName "GetSizeEntry"
 
 
   CS.stm $ CS.privateFunDef get_num_sizes intT []
@@ -53,8 +52,6 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
     [ Return $ Index (Var "SizeNames") (IdxExp $ Var "i") ]
   CS.stm $ CS.privateFunDef get_size_class (Primitive StringT) [(intT, "i")]
     [ Return $ Index (Var "SizeClasses") (IdxExp $ Var "i") ]
-  CS.stm $ CS.privateFunDef get_size_entry (Primitive StringT) [(intT, "i")]
-    [ Return $ Index (Var "SizeEntryPoints") (IdxExp $ Var "i") ]
 
   let cfg = CS.publicName "ContextConfig"
   let new_cfg = CS.publicName "ContextConfigNew"
@@ -69,7 +66,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   let cfg_set_default_threshold = CS.publicName "ContextConfigSetDefaultThreshold"
   let cfg_set_size = CS.publicName "ContextConfigSetSize"
 
-  CS.stm $ StructDef "Sizes" (map (\k -> (intT, pretty k)) $ M.keys sizes)
+  CS.stm $ StructDef "Sizes" (map (\k -> (intT, zEncodeString $ pretty k)) $ M.keys sizes)
   CS.stm $ StructDef cfg [ (CustomT "OpenCLConfig", "OpenCL")
                          , (intArrayT, "Sizes")]
 
@@ -78,8 +75,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
     [ Assign tmp_cfg $ CS.simpleInitClass cfg []
     , Reassign (Field tmp_cfg "Sizes") (Collection "int[]" (replicate (M.size sizes) (Integer 0)))
     , Exp $ CS.simpleCall "OpenCLConfigInit" [ Out $ Field tmp_cfg "OpenCL", (Integer . toInteger) $ M.size sizes
-                                               , Var "SizeNames", Field tmp_cfg "Sizes", Var "SizeClasses" ]
-    , Reassign (Field tmp_cfg "OpenCL.TransposeBlockDim") (Integer transposeBlockDim)
+                                             , Var "SizeNames", Var "SizeVars", Field tmp_cfg "Sizes", Var "SizeClasses" ]
     , Return tmp_cfg
     ]
 
@@ -153,7 +149,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   let set_required_types = [Reassign (Var "RequiredTypes") (AST.Bool True)
                            | FloatType Float64 `elem` types]
 
-      set_sizes = zipWith (\i k -> Reassign (Field (Var "Ctx.Sizes") (pretty k))
+      set_sizes = zipWith (\i k -> Reassign (Field (Var "Ctx.Sizes") (zEncodeString $ pretty k))
                                             (Index (Var "Cfg.Sizes") (IdxExp $ (Integer . toInteger) i)))
                           [(0::Int)..] $ M.keys sizes
 

@@ -9,13 +9,13 @@ futhark-csopencl
 SYNOPSIS
 ========
 
-futhark-csopencl [-V] [-o outfile] infile
+futhark csopencl [-V] [-o outfile] infile
 
 DESCRIPTION
 ===========
 
 
-``futhark-csopencl`` translates a Futhark program to C# code invoking
+``futhark csopencl`` translates a Futhark program to C# code invoking
 OpenCL kernels, and either compiles that C# code with the Roslyn C# Compiler ``csc``
 to an executable binary program, or produces a ``.dll`` file that can be linked with
 other code..  The standard Futhark optimisation pipeline is used, and
@@ -50,7 +50,7 @@ OPTIONS
 
 REQUIREMENTS
 ============
-``futhark-csopencl`` uses the Mono implementation of the .NET framework.
+``futhark csopencl`` uses the Mono implementation of the .NET framework.
 To compile and execute the compiled binaries/libraries, you must have the ``MONO_PATH`` environment variable defined. ``MONO_PATH`` must be set to a directory containing the ``Mono.Options`` and ``Cloo.clSharp`` dll's.
 
 Mono.Options is available on https://www.nuget.org/packages/Mono.Options/5.3.0.1

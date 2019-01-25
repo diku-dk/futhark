@@ -22,8 +22,6 @@ import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Quote.CUDA as CudaC
 
 import Futhark.Error
-import Futhark.Representation.AST.Attributes.Types (int32)
-import qualified Futhark.CodeGen.OpenCL.Kernels as Kernels
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
@@ -33,7 +31,6 @@ import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty, prettyOneLine)
-import Futhark.Util.IntegralExp (quotRoundingUp)
 
 kernelsToCuda, kernelsToOpenCL :: ImpKernels.Program
                                -> Either InternalError ImpOpenCL.Program
@@ -85,7 +82,7 @@ instance Monoid OpenClRequirements where
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
                          , clRequirements :: OpenClRequirements
-                         , clSizes :: M.Map VName (SizeClass, Name)
+                         , clSizes :: M.Map Name SizeClass
                          }
 
 instance Sem.Semigroup ToOpenCL where
@@ -101,47 +98,17 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
-  fname <- ask
-  tell mempty { clSizes = M.singleton key (size_class, fname) }
+  tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
 onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
-  fname <- ask
-  tell mempty { clSizes = M.singleton key (size_class, fname) }
+  tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.CmpSizeLe v key x
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
 
-onKernel :: KernelTarget -> CallKernel -> OnKernelM OpenCL
+onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
 
-onKernel _ called@(Map kernel) = do
-  let (funbody, _) =
-        GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
-          size <- GenericC.compileExp $ mapKernelSize kernel
-          let check = [C.citem|if ($id:(mapKernelThreadNum kernel) >= $exp:size) return;|]
-          body <- GenericC.blockScope $ GenericC.compileCode $ mapKernelBody kernel
-          return $ check : body
-
-      params = mapMaybe useAsParam $ mapKernelUses kernel
-
-  tell mempty
-    { clExtraFuns = mempty
-    , clKernels = M.singleton name
-                  [C.cfun|__kernel void $id:name ($params:params) {
-                     const uint $id:(mapKernelThreadNum kernel) = get_global_id(0);
-                     $items:funbody
-                  }|]
-    , clRequirements = OpenClRequirements
-                       (typesInKernel called)
-                       (mapMaybe useAsConst $ mapKernelUses kernel)
-    }
-
-  return $ LaunchKernel name (kernelArgs called) num_groups group_size
-
-  where name = calledKernelName called
-        num_groups = [sizeToExp $ mapKernelNumGroups kernel]
-        group_size = [sizeToExp $ mapKernelGroupSize kernel]
-
-onKernel target called@(AnyKernel kernel) = do
+onKernel target kernel = do
   let (kernel_body, _) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
         GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel
@@ -162,12 +129,11 @@ onKernel target called@(AnyKernel kernel) = do
                                   $items:kernel_body
                                   }|]
                , clRequirements = OpenClRequirements
-                                  (typesInKernel called)
+                                  (typesInKernel kernel)
                                   (mapMaybe useAsConst $ kernelUses kernel)
                }
 
-  return $ LaunchKernel name (kernelArgs called) num_groups group_size
-
+  return $ LaunchKernel name (kernelArgs kernel) num_groups group_size
   where
         prepareLocalMemory TargetOpenCL (mem, Left _) = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
@@ -185,22 +151,9 @@ onKernel target called@(AnyKernel kernel) = do
           let size' = compilePrimExp size
           return (Nothing,
                   [CudaC.citem|__shared__ volatile char *$id:mem[$exp:size'];|])
-        name = calledKernelName called
-        num_groups = [sizeToExp $ kernelNumGroups kernel]
-        group_size = [sizeToExp $ kernelGroupSize kernel]
-
-onKernel target (MapTranspose bt
-                 destmem destoffset
-                 srcmem srcoffset
-                 num_arrays
-                 x_elems y_elems
-                 in_elems out_elems) = do
-  generateTransposeFunction target bt
-  return $ HostCode $ Call [] (transposeName bt)
-    [MemArg destmem, ExpArg destoffset,
-     MemArg srcmem, ExpArg srcoffset,
-     ExpArg num_arrays, ExpArg x_elems, ExpArg y_elems,
-     ExpArg in_elems, ExpArg out_elems]
+        name = nameToString $ kernelName kernel
+        num_groups = kernelNumGroups kernel
+        group_size = kernelGroupSize kernel
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
@@ -209,7 +162,7 @@ useAsParam (ScalarUse name bt) =
         Bool -> [C.cty|unsigned char|]
         _    -> GenericC.primTypeToCType bt
   in Just [C.cparam|$ty:ctp $id:name|]
-useAsParam (MemoryUse name _) =
+useAsParam (MemoryUse name) =
   Just [C.cparam|__global unsigned char *$id:name|]
 useAsParam ConstUse{} =
   Nothing
@@ -388,39 +341,16 @@ constToDefine (name, e) =
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
-  where compileKernelConst (SizeConst key) = return [C.cexp|$id:(pretty key)|]
+  where compileKernelConst (SizeConst key) =
+          return [C.cexp|$id:(zEncodeString (pretty key))|]
 
-calledKernelName :: CallKernel -> String
-calledKernelName (Map k) =
-  "kernel_" ++ mapKernelDesc k ++ "_" ++ show (baseTag $ mapKernelThreadNum k)
-calledKernelName (AnyKernel k) =
-  kernelDesc k ++ "_kernel_" ++ show (baseTag $ kernelName k)
-calledKernelName (MapTranspose bt _ _ _ _ _ _ _ _ _) =
-  transposeKernelName bt Kernels.TransposeNormal
-
-kernelArgs :: CallKernel -> [KernelArg]
-kernelArgs (Map kernel) =
-  mapMaybe useToArg $ mapKernelUses kernel
-kernelArgs (AnyKernel kernel) =
+kernelArgs :: Kernel -> [KernelArg]
+kernelArgs kernel =
   mapMaybe (fmap (SharedMemoryKArg . memSizeToExp) . localMemorySize)
   (kernelLocalMemory kernel) ++
   mapMaybe useToArg (kernelUses kernel)
   where localMemorySize (_, Left size) = Just size
         localMemorySize (_, Right{}) = Nothing
-kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elems in_elems out_elems) =
-  [ MemKArg destmem
-  , ValueKArg destoffset int32
-  , MemKArg srcmem
-  , ValueKArg srcoffset int32
-  , ValueKArg x_elems int32
-  , ValueKArg y_elems int32
-  , ValueKArg in_elems int32
-  , ValueKArg out_elems int32
-  , SharedMemoryKArg shared_memory
-  ]
-  where shared_memory =
-          bytes $ (transposeBlockDim * 2 + 1) * transposeBlockDim * 2 *
-          LeafExp (SizeOf bt) (IntType Int32)
 
 --- Generating C
 
@@ -449,8 +379,10 @@ inKernelOperations = GenericC.Operations
           GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
         kernelOps (GetLockstepWidth v) =
           GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
-        kernelOps Barrier =
+        kernelOps LocalBarrier =
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
+        kernelOps GlobalBarrier =
+          GenericC.stm [C.cstm|barrier(CLK_GLOBAL_MEM_FENCE);|]
         kernelOps MemFence =
           GenericC.stm [C.cstm|mem_fence(CLK_GLOBAL_MEM_FENCE);|]
         kernelOps (Atomic aop) = atomicOps aop
@@ -526,228 +458,15 @@ inKernelOperations = GenericC.Operations
           quals <- pointerQuals space
           return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
---- Handling transpositions
-
-transposeKernelName :: PrimType -> Kernels.TransposeType -> String
-transposeKernelName bt Kernels.TransposeNormal =
-  "fut_kernel_map_transpose_" ++ pretty bt
-transposeKernelName bt Kernels.TransposeLowWidth =
-  "fut_kernel_map_transpose_lowwidth_" ++ pretty bt
-transposeKernelName bt Kernels.TransposeLowHeight =
-  "fut_kernel_map_transpose_lowheight_" ++ pretty bt
-transposeKernelName bt Kernels.TransposeSmall =
-  "fut_kernel_map_transpose_small_" ++ pretty bt
-
-transposeName :: PrimType -> Name
-transposeName bt = nameFromString $ "map_transpose_opencl_" ++ pretty bt
-
-generateTransposeFunction :: KernelTarget -> PrimType -> OnKernelM ()
-generateTransposeFunction target bt =
-  -- We have special functions to handle transposing an input array with low
-  -- width or low height, as this would cause very few threads to be active. See
-  -- comment in Futhark.CodeGen.OpenCL.OpenCL.Kernels.hs for more details.
-  tell mempty
-    { clExtraFuns = M.singleton (transposeName bt) $
-                    ImpOpenCL.Function False [] params transpose_code [] []
-    , clKernels = M.fromList $
-        map (\tt -> let name = transposeKernelName bt tt
-                    in (name, Kernels.mapTranspose target name bt' tt))
-        [Kernels.TransposeNormal, Kernels.TransposeLowWidth,
-         Kernels.TransposeLowHeight, Kernels.TransposeSmall]
-
-    , clRequirements = mempty
-    }
-
-  where bt' = GenericC.primTypeToCType bt
-        space = ImpOpenCL.Space "device"
-        memparam s i = MemParam (VName (nameFromString s) i) space
-        intparam s i = ScalarParam (VName (nameFromString s) i) $ IntType Int32
-
-        params = [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                num_arrays_p, x_p, y_p, in_p, out_p]
-
-        [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                num_arrays_p, x_p, y_p, in_p, out_p,
-                muly, new_height, mulx, new_width] =
-          zipWith ($) [memparam "destmem",
-                       intparam "destoffset",
-                       memparam "srcmem",
-                       intparam "srcoffset",
-                       intparam "num_arrays",
-                       intparam "x_elems",
-                       intparam "y_elems",
-                       intparam "in_elems",
-                       intparam "out_elems",
-                       -- The following is only used for low width/height
-                       -- transpose kernels
-                       intparam "muly",
-                       intparam "new_height",
-                       intparam "mulx",
-                       intparam "new_width"
-                      ]
-                      [0..]
-
-        asExp param =
-          ImpOpenCL.LeafExp (ImpOpenCL.ScalarVar (paramName param)) (IntType Int32)
-
-        asArg (MemParam name _) =
-          MemKArg name
-        asArg (ScalarParam name t) =
-          ValueKArg (ImpOpenCL.LeafExp (ImpOpenCL.ScalarVar name) t) t
-
-        transposeBlockDimDivTwo = BinOpExp (SQuot Int32) transposeBlockDim 2
-
-        should_use_lowwidth = BinOpExp LogAnd
-          (CmpOpExp (CmpSle Int32) (asExp x_p) transposeBlockDimDivTwo)
-          (CmpOpExp (CmpSlt Int32) transposeBlockDim (asExp y_p))
-
-        should_use_lowheight = BinOpExp LogAnd
-          (CmpOpExp (CmpSle Int32) (asExp y_p) transposeBlockDimDivTwo)
-          (CmpOpExp (CmpSlt Int32) transposeBlockDim (asExp x_p))
-
-        should_use_small = BinOpExp LogAnd
-          (CmpOpExp (CmpSle Int32) (asExp x_p) transposeBlockDimDivTwo)
-          (CmpOpExp (CmpSle Int32) (asExp y_p) transposeBlockDimDivTwo)
-
-        -- When an input array has either width==1 or height==1, performing a
-        -- transpose will be the same as performing a copy.  If 'input_size' or
-        -- 'output_size' is not equal to width*height, then this trick will not
-        -- work when there are more than one array to process, as it is a per
-        -- array limit. We could copy each array individually, but currently we
-        -- do not.
-        can_use_copy =
-          let in_out_eq = CmpOpExp (CmpEq $ IntType Int32) (asExp in_p) (asExp out_p)
-              onearr = CmpOpExp (CmpEq $ IntType Int32) (asExp num_arrays_p) 1
-              noprob_widthheight = CmpOpExp (CmpEq $ IntType Int32)
-                                     (asExp x_p * asExp y_p)
-                                     (asExp in_p)
-              height_is_one = CmpOpExp (CmpEq $ IntType Int32) (asExp y_p) 1
-              width_is_one = CmpOpExp (CmpEq $ IntType Int32) (asExp x_p) 1
-          in BinOpExp LogAnd
-               in_out_eq
-               (BinOpExp LogAnd
-                 (BinOpExp LogOr onearr noprob_widthheight)
-                 (BinOpExp LogOr width_is_one height_is_one))
-
-        input_is_empty = CmpOpExp (CmpEq $ IntType Int32)
-                         (asExp num_arrays_p * asExp x_p * asExp y_p) 0
-
-        transpose_code =
-          ImpOpenCL.If input_is_empty mempty
-          (ImpOpenCL.If can_use_copy
-            copy_code
-            (ImpOpenCL.If should_use_lowwidth
-              lowwidth_transpose_code
-              (ImpOpenCL.If should_use_lowheight
-                lowheight_transpose_code
-                (ImpOpenCL.If should_use_small
-                  small_transpose_code
-                  normal_transpose_code))))
-
-        copy_code =
-          let num_bytes =
-                asExp in_p * ImpOpenCL.LeafExp (ImpOpenCL.SizeOf bt) (IntType Int32)
-          in ImpOpenCL.Copy
-               (paramName destmem_p) (Count $ asExp destoffset_p) space
-               (paramName srcmem_p) (Count $ asExp srcoffset_p) space
-               (Count num_bytes)
-
-        shared_memory tile_dim =
-          [SharedMemoryKArg $ bytes $ tile_dim * (tile_dim + 1) *
-           LeafExp (SizeOf bt) (IntType Int32)]
-
-        normal_kernel_args =
-          map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                     x_p, y_p, in_p, out_p] ++
-          shared_memory (transposeBlockDim * 2)
-
-        lowwidth_kernel_args =
-          map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                     x_p, y_p, in_p, out_p, muly] ++
-          shared_memory transposeBlockDim
-
-        lowheight_kernel_args =
-          map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                     x_p, y_p, in_p, out_p, mulx] ++
-          shared_memory transposeBlockDim
-
-        mkLaunchOp transpose_type args group_size num_groups =
-          let name = transposeKernelName bt transpose_type
-          in ImpOpenCL.Op $ case target of
-               TargetOpenCL ->
-                 LaunchKernel name args num_groups group_size
-               TargetCuda ->
-                 let minExp = BinOpExp $ UMin Int32
-                     -- XXX: Use ImpOpenCL.GetSizeMax here
-                     max_dims = [2147483647, 65535, 65535]
-                     num_phys_groups = zipWith minExp max_dims num_groups
-                     args' = args ++ map (flip ValueKArg int32) num_groups
-                  in LaunchKernel name args' num_phys_groups group_size
-
-        normal_transpose_code =
-          let actual_dim = transposeBlockDim * 2
-              elems_per_thread = 4
-              group_rows = BinOpExp (SQuot Int32) actual_dim elems_per_thread
-              group_size = [actual_dim, group_rows, 1]
-              num_groups = [ asExp x_p `quotRoundingUp` actual_dim
-                           , asExp y_p `quotRoundingUp` actual_dim
-                           , asExp num_arrays_p
-                           ]
-          in mkLaunchOp Kernels.TransposeNormal normal_kernel_args
-             group_size num_groups
-
-        small_transpose_code =
-          let group_size = transposeBlockDim * transposeBlockDim
-              num_groups = asExp num_arrays_p * asExp x_p * asExp y_p
-          in ImpOpenCL.Op $ LaunchKernel
-             (transposeKernelName bt Kernels.TransposeSmall)
-             (map asArg [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
-                         num_arrays_p, x_p, y_p, in_p, out_p])
-             [num_groups] [group_size]
-
-        lowDimGroupNumAndSize num_arrays x_elems y_elems =
-          ([x_elems `quotRoundingUp` transposeBlockDim ,
-            y_elems `quotRoundingUp` transposeBlockDim,
-            num_arrays],
-           [transposeBlockDim, transposeBlockDim, 1])
-
-        lowwidth_transpose_code =
-          let set_muly = DeclareScalar (paramName muly) (IntType Int32)
-                        :>>: SetScalar (paramName muly) (BinOpExp (SQuot Int32) transposeBlockDim (asExp x_p))
-              set_new_height = DeclareScalar (paramName new_height) (IntType Int32)
-                :>>: SetScalar (paramName new_height) (asExp y_p `quotRoundingUp` asExp muly)
-              (num_groups, group_size) =
-                lowDimGroupNumAndSize (asExp num_arrays_p) (asExp x_p) (asExp new_height)
-              launch = mkLaunchOp Kernels.TransposeLowWidth
-                       lowwidth_kernel_args group_size num_groups
-          in set_muly :>>: set_new_height :>>: launch
-
-        lowheight_transpose_code =
-          let set_mulx = DeclareScalar (paramName mulx) (IntType Int32)
-                        :>>: SetScalar (paramName mulx) (BinOpExp (SQuot Int32) transposeBlockDim (asExp y_p))
-              set_new_width = DeclareScalar (paramName new_width) (IntType Int32)
-                :>>: SetScalar (paramName new_width) (asExp x_p `quotRoundingUp` asExp mulx)
-              (num_groups, group_size) =
-                lowDimGroupNumAndSize (asExp num_arrays_p)(asExp new_width) (asExp y_p)
-              launch = mkLaunchOp Kernels.TransposeLowHeight
-                       lowheight_kernel_args group_size num_groups
-          in set_mulx :>>: set_new_width :>>: launch
-
-roundUpTo :: ImpOpenCL.Exp -> ImpOpenCL.Exp -> ImpOpenCL.Exp
-roundUpTo x y = x + ((y - (x `impRem` y)) `impRem` y)
-  where impRem = BinOpExp $ SRem Int32
-
 --- Checking requirements
 
 useToArg :: KernelUse -> Maybe KernelArg
-useToArg (MemoryUse mem _) = Just $ MemKArg mem
-useToArg (ScalarUse v bt)  = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
-useToArg ConstUse{}        = Nothing
+useToArg (MemoryUse mem)  = Just $ MemKArg mem
+useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
+useToArg ConstUse{}       = Nothing
 
-typesInKernel :: CallKernel -> S.Set PrimType
-typesInKernel (Map kernel) = typesInCode $ mapKernelBody kernel
-typesInKernel (AnyKernel kernel) = typesInCode $ kernelBody kernel
-typesInKernel MapTranspose{} = mempty
+typesInKernel :: Kernel -> S.Set PrimType
+typesInKernel kernel = typesInCode $ kernelBody kernel
 
 typesInCode :: ImpKernels.KernelCode -> S.Set PrimType
 typesInCode Skip = mempty

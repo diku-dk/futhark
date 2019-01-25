@@ -78,9 +78,6 @@ stacking loc env = local $ \(ss, imports) ->
 stacktrace :: EvalM [SrcLoc]
 stacktrace = asks $ map stackFrameSrcLoc . reverse . fst
 
-stacktraceTop :: EvalM SrcLoc
-stacktraceTop = fromMaybe noLoc . maybeHead <$> stacktrace
-
 lookupImport :: FilePath -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
@@ -240,7 +237,10 @@ bad loc env s = stacking loc env $ do
 
 trace :: Value -> EvalM ()
 trace v = do
-  top <- stacktraceTop
+  -- We take the second-to-last element of the stack, because any
+  -- actual call to 'implicits.trace' is going to be in the trace
+  -- function in the prelude, which is not interesting.
+  top <- fromMaybe noLoc . maybeHead . drop 1 . reverse <$> stacktrace
   liftF $ ExtOpTrace top (pretty v) ()
 
 typeEnv :: Env -> T.Env
@@ -337,7 +337,7 @@ matchValueToType :: Env -> M.Map VName (Maybe T.BoundV, Value)
                  -> Either String (M.Map VName (Maybe T.BoundV, Value))
 
 -- Empty arrays always match.
-matchValueToType env m t@(Array _ (ShapeDecl ds@(d:_)) _) val@(ValueArray arr)
+matchValueToType env m t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr)
   | any zeroDim ds, emptyShape (valueShape val) =
       Right $ m <> mconcat (map namedAreZero ds)
 
@@ -499,7 +499,7 @@ evalType _ (Prim pt) = return $ Prim pt
 evalType env (Record fs) = Record <$> traverse (evalType env) fs
 evalType env (Arrow () p t1 t2) =
   Arrow () p <$> evalType env t1 <*> evalType env t2
-evalType env t@(Array _ shape u) = do
+evalType env t@(Array _ u _ shape) = do
   let et = stripArray (shapeRank shape) t
   et' <- evalType env et
   shape' <- traverse evalDim shape
@@ -735,7 +735,7 @@ eval env (DoLoop _ pat init_e form body _) = do
         zero = (`P.doMul` Int64Value 0)
 
         forLoop iv bound i v
-          | i == bound = return v
+          | i >= bound = return v
           | otherwise = do
               env' <- withLoopParams v
               forLoop iv bound (inc i) =<<
@@ -771,18 +771,22 @@ eval _ (VConstr0 c _ _) = return $ ValueEnum c
 
 eval env (Match e cs _ _) = do
   v <- eval env e
-  cs' <- mapM (runMaybeT . evalCase v env) cs
-  case catMaybes cs' of
-    []     -> fail "Pattern match failure."
-    (v':_) -> return v'
+  match v cs
+  where match _ [] =
+          fail "Pattern match failure."
+        match v (c:cs') = do
+          c' <- evalCase v env c
+          case c' of
+            Just v' -> return v'
+            Nothing -> match v cs'
 
 eval _ e = error $ "eval not yet: " ++ show e
 
 evalCase :: Value -> Env -> CaseBase Info VName
-            -> MaybeT EvalM Value
-evalCase v env (CasePat p cExp _) = do
+         -> EvalM (Maybe Value)
+evalCase v env (CasePat p cExp _) = runMaybeT $ do
   pEnv <- valEnv <$> patternMatch env mempty p v
-  lift $ eval pEnv cExp
+  lift $ eval (pEnv <> env) cExp
 
 substituteInModule :: M.Map VName VName -> Module -> Module
 substituteInModule substs = onModule

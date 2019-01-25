@@ -69,14 +69,15 @@ nonlinearInMemory name m =
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
-transformStm expmap (Let pat aux (Op (Kernel desc space ts kbody))) = do
+transformStm expmap (Let pat aux ke@(Op (Kernel desc space ts kbody))) = do
   -- Go spelunking for accesses to arrays that are defined outside the
   -- kernel body and where the indices are kernel thread indices.
   scope <- askScope
   let thread_gids = map fst $ spaceDimensions space
       thread_local = S.fromList $ spaceGlobalId space : spaceLocalId space : thread_gids
-
+      free_ker_vars = freeInExp ke `S.difference` getKerVariantIds space
   kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
+                         free_ker_vars
                          thread_local
                          (castScope scope <> scopeOfKernelSpace space)
                          (ensureCoalescedAccess expmap (spaceDimensions space) num_threads)
@@ -87,6 +88,12 @@ transformStm expmap (Let pat aux (Op (Kernel desc space ts kbody))) = do
   addStm bnd'
   return $ M.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
   where num_threads = spaceNumThreads space
+        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ (FlatThreadSpace strct)) =
+            let (gids, _) = unzip strct
+            in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids
+        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ (NestedThreadSpace strct)) =
+            let (gids, _, lids, _) = unzip4 strct
+            in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids ++ lids
 
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
@@ -99,18 +106,21 @@ transform expmap =
   identityMapper { mapOnBody = \scope -> localScope scope . transformBody expmap }
 
 type ArrayIndexTransform m =
+  Names ->
   (VName -> Bool) ->           -- thread local?
+  (VName -> SubExp -> Bool)->  -- variant to a certain gid (given as first param)?
   (SubExp -> Maybe SubExp) ->  -- split substitution?
   Scope InKernel ->            -- type environment
   VName -> Slice SubExp -> m (Maybe (VName, Slice SubExp))
 
 traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                   Names
+                               -> Names
                                -> Scope InKernel
                                -> ArrayIndexTransform f
                                -> KernelBody InKernel
                                -> f (KernelBody InKernel)
-traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms kres) =
+traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (KernelBody () kstms kres) =
   KernelBody () . stmsFromList <$>
   mapM (onStm (varianceInStms mempty kstms,
                mkSizeSubsts kstms,
@@ -134,11 +144,15 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
                 scope' = scope <> scopeOf stms
 
         onStm (variance, szsubst, _) (Let pat attr (BasicOp (Index arr is))) =
-          Let pat attr . oldOrNew <$> f isThreadLocal sizeSubst outer_scope arr is
+          Let pat attr . oldOrNew <$> f free_ker_vars isThreadLocal isGidVariant sizeSubst outer_scope arr is
           where oldOrNew Nothing =
                   BasicOp $ Index arr is
                 oldOrNew (Just (arr', is')) =
                   BasicOp $ Index arr' is'
+
+                isGidVariant gid (Var v) =
+                  gid == v || S.member gid (M.findWithDefault (S.singleton v) v variance)
+                isGidVariant _ _ = False
 
                 isThreadLocal v =
                   not $ S.null $
@@ -177,7 +191,8 @@ ensureCoalescedAccess :: MonadBinder m =>
                       -> [(VName,SubExp)]
                       -> SubExp
                       -> ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess expmap thread_space num_threads isThreadLocal sizeSubst outer_scope arr slice = do
+ensureCoalescedAccess expmap thread_space num_threads free_ker_vars isThreadLocal
+                      isGidVariant sizeSubst outer_scope arr slice = do
   seen <- gets $ M.lookup (arr, slice)
 
   case (seen, isThreadLocal arr, typeOf <$> M.lookup arr outer_scope) of
@@ -190,7 +205,7 @@ ensureCoalescedAccess expmap thread_space num_threads isThreadLocal sizeSubst ou
       -- indices are in a permuted order.
       | Just is <- sliceIndices slice,
         length is == arrayRank t,
-        Just is' <- coalescedIndexes (map Var thread_gids) is,
+        Just is' <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is,
         Just perm <- is' `isPermutationOf` is ->
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
@@ -205,11 +220,14 @@ ensureCoalescedAccess expmap thread_space num_threads isThreadLocal sizeSubst ou
       | Just (Let _ _ (BasicOp (Rearrange perm _))) <- M.lookup arr expmap,
         ---- Just (Just perm) <- nonlinearInMemory arr expmap,
         not $ null perm,
+        not $ null thread_gids,
+        inner_gid <- last thread_gids,
         length slice >= length perm,
         slice' <- map (\i -> slice !! i) perm,
         DimFix inner_ind <- last slice',
         not $ null thread_gids,
-        inner_ind == (Var $ last thread_gids) ->
+        isGidVariant inner_gid inner_ind ->
+--        inner_ind == (Var $ inner_gid) ->
           return Nothing
 
       -- We are not fully indexing an array, but the remaining slice
@@ -262,7 +280,7 @@ ensureCoalescedAccess expmap thread_space num_threads isThreadLocal sizeSubst ou
       -- order!  Make sure that is the case.
       | Just{} <- nonlinearInMemory arr expmap ->
           case sliceIndices slice of
-            Just is | Just _ <- coalescedIndexes (map Var thread_gids) is ->
+            Just is | Just _ <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is ->
                         replace =<< lift (rowMajorArray arr)
                     | otherwise ->
                         return Nothing
@@ -296,18 +314,23 @@ allDimAreSlice (DimFix _:_) = False
 allDimAreSlice (_:is) = allDimAreSlice is
 
 -- Try to move thread indexes into their proper position.
-coalescedIndexes :: [SubExp] -> [SubExp] -> Maybe [SubExp]
-coalescedIndexes tgids is
+coalescedIndexes :: Names -> (VName -> SubExp -> Bool) -> [SubExp] -> [SubExp] -> Maybe [SubExp]
+coalescedIndexes free_ker_vars isGidVariant tgids is
   -- Do Nothing if:
-  -- 1. the innermost index is the innermost thread id
-  --    (because access is already coalesced)
-  -- 2. any of the indices is a constant, i.e., kernel free variable
+  -- 1. any of the indices is a constant or a kernel free variable
   --    (because it would transpose a bigger array then needed -- big overhead).
+  -- 2. the innermost index is variant to the innermost-thread gid
+  --    (because access is likely to be already coalesced)
   | any isCt is =
-      Nothing
-  | num_is > 0 && not (null tgids) && last is == last tgids =
-      Just is
-  -- Otherwise try fix coalescing
+        Nothing
+  | any (`S.member` free_ker_vars) (mapMaybe mbVarId is) =
+        Nothing
+  | not (null tgids),
+    not (null is),
+    Var innergid <- last tgids,
+    num_is > 0 && isGidVariant innergid (last is) =
+        Just is
+  -- 3. Otherwise try fix coalescing
   | otherwise =
       Just $ reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
   where num_is = length is
@@ -334,6 +357,9 @@ coalescedIndexes tgids is
         isCt :: SubExp -> Bool
         isCt (Constant _) = True
         isCt (Var      _) = False
+
+        mbVarId (Constant _) = Nothing
+        mbVarId (Var v) = Just v
 
 coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =

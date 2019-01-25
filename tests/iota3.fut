@@ -5,7 +5,6 @@
 -- input { 255u8 250u8 } output { [250u8, 251u8, 252u8, 253u8, 254u8] }
 -- structure { Index 0 }
 
-import "/futlib/math"
 
 let main (x: u8) (i: u8) =
   let a = u8.iota x

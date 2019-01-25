@@ -7,7 +7,6 @@
 -- }
 -- structure { Replicate 0 }
 
-import "/futlib/array"
 
 let getInt (): i32 = 10
 let plus1(x: []i32): []i32 = map (\(y: i32): i32->y+1) x

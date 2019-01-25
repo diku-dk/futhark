@@ -9,16 +9,16 @@ futhark-bench
 SYNOPSIS
 ========
 
-futhark-bench [--runs=count | --compiler=program | --json | --no-validate] programs...
+futhark bench [options...] programs...
 
 DESCRIPTION
 ===========
 
 This tool is the recommended way to benchmark Futhark programs.
-Programs are compiled using the specified compiler (``futhark-c`` by
+Programs are compiled using the specified backend (``futhark c`` by
 default), then run a number of times for each test case, and the
 average runtime printed on standard output.  Test data is indicated as
-with ``futhark-test``.  A program will be ignored if it contains no
+with ``futhark test``.  A program will be ignored if it contains no
 data sets - it will not even be compiled.
 
 If compilation or running fails, an error message will be printed and
@@ -32,12 +32,18 @@ OPTIONS
 
   The number of runs per data set.
 
---compiler=program
+--backend=name
 
-  The program used to compile Futhark programs.  This option can be
-  passed multiple times, resulting in multiple compilers being used
-  for each test case.  The specified program must support the same
-  interface as ``futhark-c``.
+  The backend used when compiling Futhark programs (without leading
+  ``futhark``, e.g. just ``opencl``).
+
+--entry-point=name
+
+  Only run entry points with this name.
+
+--futhark=program
+
+  The binary used to perform operations.  Defaults to ``futhark``.
 
 --runner=program
 
@@ -45,8 +51,8 @@ OPTIONS
   run directly, but instead the indicated program is run, with the
   path to the compiled Futhark program passed as the first
   command-line argument.  This is useful for compilation targets that
-  cannot be executed directly (like `futhark-cs(1)`), or when you wish
-  to run the program on a remote machine.
+  cannot be executed directly (as with `futhark-cs(1)`), or when you
+  wish to run the program on a remote machine.
 
 --json=file
 
@@ -57,7 +63,7 @@ OPTIONS
   Pass an option to benchmark programs that are being run.  For
   example, we might want to run OpenCL programs on a specific device::
 
-    futhark-bench prog.fut --compiler=futhark-opencl --pass-option=-dHawaii
+    futhark bench prog.fut --codegen=opencl --pass-option=-dHawaii
 
 --timeout=seconds
 
@@ -79,7 +85,7 @@ OPTIONS
   Do not run test cases that contain the given tag.  Cases marked with
   "nobench" or "disable" are ignored by default.
 
---ignore=files=REGEX
+--ignore-files=REGEX
 
   Ignore files whose path match the given regular expression.
 

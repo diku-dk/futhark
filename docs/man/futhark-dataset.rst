@@ -9,7 +9,7 @@ futhark-dataset
 SYNOPSIS
 ========
 
-futhark-dataset options...
+futhark dataset options...
 
 DESCRIPTION
 ===========
@@ -62,23 +62,23 @@ EXAMPLES
 
 Generate a 4 by 2 integer matrix::
 
-  futhark-dataset -g [4][2]i32
+  futhark dataset -g [4][2]i32
 
 Generate an array of floating-point numbers and an array of indices into that array::
 
-  futhark-dataset -g [10]f32 --i32-bounds=0:9 -g [100]i32
+  futhark dataset -g [10]f32 --i32-bounds=0:9 -g [100]i32
 
 To generate binary data, the ``--binary`` must come before the ``--generate``::
 
-  futhark-dataset --binary --generate=[42]i32
+  futhark dataset --binary --generate=[42]i32
 
 Create a binary data file from a data file::
 
-  futhark-dataset --binary < any_data > binary_data
+  futhark dataset --binary < any_data > binary_data
 
 Determine the types of values contained in a data file::
 
-  futhark-dataset -t < any_data
+  futhark dataset -t < any_data
 
 
 SEE ALSO

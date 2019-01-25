@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 -- | Facilities for reading Futhark test programs.  A Futhark test
 -- program is an ordinary Futhark program where an initial comment
 -- block specifies input- and output-sets.
@@ -9,6 +11,12 @@ module Futhark.Test
        , getValues
        , getValuesBS
        , compareValues
+       , compareValues1
+       , testRunReferenceOutput
+       , getExpectedResult
+       , compileProgram
+       , runProgram
+       , ensureReferenceOutput
        , Mismatch
 
        , ProgramTest (..)
@@ -20,6 +28,7 @@ module Futhark.Test
        , InputOutputs (..)
        , TestRun (..)
        , ExpectedResult (..)
+       , Success(..)
        , Values (..)
        , GenValue (..)
        , Value
@@ -31,7 +40,7 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.ByteString as SBS
 import Control.Exception (catch)
 import Control.Monad
-import Control.Monad.IO.Class
+import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Char
 import Data.Functor
@@ -54,15 +63,16 @@ import Text.Regex.TDFA
 import System.Directory
 import System.Exit
 import System.Process.ByteString (readProcessWithExitCode)
-import System.IO (withFile, IOMode(..), hFileSize)
+import System.IO (withFile, IOMode(..), hFileSize, hClose)
 import System.IO.Error
+import System.IO.Temp
 
 import Prelude
 
 import Futhark.Analysis.Metrics
 import Futhark.Representation.Primitive (IntType(..), FloatType(..), intByteSize, floatByteSize)
 import Futhark.Test.Values
-import Futhark.Util (directoryContents)
+import Futhark.Util (directoryContents, pmapIO)
 import Futhark.Util.Pretty (pretty, prettyText)
 import Language.Futhark.Syntax (PrimType(..), Int32)
 
@@ -120,7 +130,7 @@ instance Show WarningTest where
 data TestRun = TestRun
                { runTags :: [String]
                , runInput :: Values
-               , runExpectedResult :: ExpectedResult Values
+               , runExpectedResult :: ExpectedResult Success
                , runIndex :: Int
                , runDescription :: String
                }
@@ -155,6 +165,14 @@ data ExpectedResult values
   | RunTimeFailure ExpectedError -- ^ Execution fails with this error.
   deriving (Show)
 
+-- | The result expected from a succesful execution.
+data Success = SuccessValues Values
+             -- ^ These values are expected.
+             | SuccessGenerateValues
+             -- ^ Compute expected values from executing a known-good
+             -- reference implementation.
+             deriving (Show)
+
 type Parser = Parsec Void T.Text
 
 lexeme :: Parser a -> Parser a
@@ -187,8 +205,10 @@ descriptionSeparator = "=="
 
 parseTags :: Parser [T.Text]
 parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
-  where parseTag = T.pack <$> lexeme (some $ satisfy constituent)
-        constituent c = not (isSpace c) && c /= '}'
+  where parseTag = T.pack <$> lexeme (some $ satisfy tagConstituent)
+
+tagConstituent :: Char -> Bool
+tagConstituent c = isAlphaNum c || c == '_' || c == '-'
 
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
@@ -208,7 +228,7 @@ parseEntryPoints = (lexstr "entry:" *> many entry <* space) <|> pure ["main"]
 
 parseRunTags :: Parser [String]
 parseRunTags = many parseTag
-  where parseTag = try $ lexeme $ do s <- some $ satisfy isAlphaNum
+  where parseTag = try $ lexeme $ do s <- some $ satisfy tagConstituent
                                      guard $ s `notElem` ["input", "structure", "warning"]
                                      return s
 
@@ -219,7 +239,9 @@ parseRunCases = parseRunCases' (0::Int)
         parseRunCase i = do
           tags <- parseRunTags
           lexstr "input"
-          input <- if "random" `elem` tags then parseRandomValues else parseValues
+          input <- if "random" `elem` tags
+                   then parseRandomValues
+                   else parseValues
           expr <- parseExpectedResult
           return $ TestRun tags input expr i $ desc i input
 
@@ -237,12 +259,13 @@ parseRunCases = parseRunCases' (0::Int)
           where vs' = case unwords (map pretty vs) of
                         s | length s > 50 -> take 50 s ++ "..."
                           | otherwise     -> s
-        desc i (GenValues gens) =
-          "#" ++ show i ++ " (\"" ++ unwords (map genValueType gens) ++ "\")"
+        desc _ (GenValues gens) =
+          unwords $ map genValueType gens
 
-parseExpectedResult :: Parser (ExpectedResult Values)
+parseExpectedResult :: Parser (ExpectedResult Success)
 parseExpectedResult =
-  (Succeeds . Just <$> (lexstr "output" *> parseValues)) <|>
+  (lexstr "auto" *> lexstr "output" $> Succeeds (Just SuccessGenerateValues)) <|>
+  (Succeeds . Just . SuccessValues <$> (lexstr "output" *> parseValues)) <|>
   (RunTimeFailure <$> (lexstr "error:" *> parseExpectedError)) <|>
   pure (Succeeds Nothing)
 
@@ -459,16 +482,29 @@ getValuesBS dir (InFile file) =
 getValuesBS dir (GenValues gens) =
   mconcat <$> mapM (getGenBS dir) gens
 
+-- | There is a risk of race conditions when multiple programs have
+-- identical 'GenValues'.  In such cases, multiple threads in 'futhark
+-- test' might attempt to create the same file (or read from it, while
+-- something else is constructing it).  This leads to a mess.  To
+-- avoid this, we create a temporary file, and only when it is
+-- complete do we move it into place.  It would be better if we could
+-- use file locking, but that does not work on some file systems.  The
+-- approach here seems robust enough for now, but certainly it could
+-- be made even better.  The race condition that remains should mostly
+-- result in duplicate work, not crashes or data corruption.
 getGenBS :: MonadIO m => FilePath -> GenValue -> m BS.ByteString
 getGenBS dir gen = do
+  liftIO $ createDirectoryIfMissing True $ dir </> "data"
   exists_and_proper_size <- liftIO $
     withFile (dir </> file) ReadMode (fmap (== genFileSize gen) . hFileSize)
     `catch` \ex -> if isDoesNotExistError ex then return False
                    else E.throw ex
   unless exists_and_proper_size $ liftIO $ do
     s <- genValues [gen]
-    createDirectoryIfMissing True $ takeDirectory $ dir </> file
-    SBS.writeFile (dir </> file) s
+    withTempFile (dir </> "data") (genFileName gen) $ \tmpfile h -> do
+      hClose h -- We will be writing and reading this ourselves.
+      SBS.writeFile tmpfile s
+      renameFile tmpfile $ dir </> file
   getValuesBS dir $ InFile file
   where file = "data" </> genFileName gen
 
@@ -499,3 +535,94 @@ genFileSize = genSize
         primSize (Unsigned it) = intByteSize it
         primSize (FloatType ft) = floatByteSize ft
         primSize Bool = 1
+
+-- | When/if generating a reference output file for this run, what
+-- should it be called?  Includes the "data/" folder.
+testRunReferenceOutput :: FilePath -> T.Text -> TestRun -> FilePath
+testRunReferenceOutput prog entry tr =
+  "data"
+  </> takeBaseName prog
+  <> ":" <> T.unpack entry
+  <> "-" <> map clean (runDescription tr)
+  <.> "out"
+  where clean '/' = '_' -- Would this ever happen?
+        clean ' ' = '_'
+        clean c = c
+
+-- | Get the values corresponding to an expected result, if any.
+getExpectedResult :: MonadIO m =>
+                     FilePath -> T.Text -> TestRun
+                  -> m (ExpectedResult [Value])
+getExpectedResult prog entry tr =
+  case runExpectedResult tr of
+    (Succeeds (Just (SuccessValues vals))) ->
+      Succeeds . Just <$> getValues (takeDirectory prog) vals
+    Succeeds (Just SuccessGenerateValues) ->
+      getExpectedResult prog entry
+      tr { runExpectedResult = Succeeds $ Just $ SuccessValues $ InFile $
+                               testRunReferenceOutput prog entry tr }
+    Succeeds Nothing ->
+      return $ Succeeds Nothing
+    RunTimeFailure err ->
+      return $ RunTimeFailure err
+
+compileProgram :: (MonadIO m, MonadError [T.Text] m) =>
+                  [String] -> FilePath -> String -> FilePath
+               -> m (SBS.ByteString, SBS.ByteString)
+compileProgram extra_options futhark backend program = do
+  (futcode, stdout, stderr) <- liftIO $ readProcessWithExitCode futhark (backend:options) ""
+  case futcode of
+    ExitFailure 127 -> throwError [progNotFound $ T.pack futhark]
+    ExitFailure _   -> throwError [T.decodeUtf8 stderr]
+    ExitSuccess     -> return ()
+  return (stdout, stderr)
+  where binOutputf = dropExtension program
+        options = [program, "-o", binOutputf] ++ extra_options
+        progNotFound s = s <> ": command not found"
+
+runProgram :: MonadIO m =>
+              String -> [String]
+           -> String -> T.Text -> Values
+           -> m (ExitCode, SBS.ByteString, SBS.ByteString)
+runProgram runner extra_options prog entry input = do
+  let progbin = dropExtension prog
+      dir = takeDirectory prog
+      binpath = "." </> progbin
+      entry_options = ["-e", T.unpack entry]
+
+      (to_run, to_run_args)
+        | null runner = (binpath, entry_options ++ extra_options)
+        | otherwise = (runner, binpath : entry_options ++ extra_options)
+
+  input' <- getValuesBS dir input
+  liftIO $ readProcessWithExitCode to_run to_run_args $ BS.toStrict input'
+
+-- | Ensure that any reference output files exist, or create them (by
+-- compiling the program with the reference compiler and running it on
+-- the input) if necessary.
+ensureReferenceOutput :: (MonadIO m, MonadError [T.Text] m) =>
+                         FilePath -> String -> FilePath -> [InputOutputs]
+                      -> m ()
+ensureReferenceOutput futhark compiler prog ios = do
+  missing <- filterM isReferenceMissing $ concatMap entryAndRuns ios
+  unless (null missing) $ do
+    void $ compileProgram [] futhark compiler prog
+    liftIO $ void $ flip pmapIO missing $ \(entry, tr) -> do
+      (code, stdout, stderr) <- runProgram "" ["-b"] prog entry $ runInput tr
+      case code of
+        ExitFailure e ->
+          fail $ "Reference dataset generation failed with exit code " ++
+          show e ++ " and stderr:\n" ++
+          map (chr . fromIntegral) (SBS.unpack stderr)
+        ExitSuccess ->
+          SBS.writeFile (file (entry, tr)) stdout
+  where file (entry, tr) =
+          takeDirectory prog </> testRunReferenceOutput prog entry tr
+
+        entryAndRuns (InputOutputs entry rts) = map (entry,) rts
+
+        isReferenceMissing (entry, tr)
+          | Succeeds (Just SuccessGenerateValues) <- runExpectedResult tr =
+              liftIO . fmap not . doesFileExist . file $ (entry, tr)
+          | otherwise =
+              return False
