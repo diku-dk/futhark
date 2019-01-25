@@ -68,7 +68,7 @@ data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
 
 -- | The target platform when compiling imperative code to a 'Program'
 data KernelTarget = TargetOpenCL
-                  | TargetCuda
+                  | TargetCUDA
                   deriving (Eq)
 
 instance Pretty OpenCL where
