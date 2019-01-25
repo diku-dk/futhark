@@ -349,6 +349,9 @@ collect' m = pass $ do
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
 
+instance C.ToIdent Name where
+  toIdent = C.toIdent . zEncodeString . nameToString
+
 instance C.ToIdent VName where
   toIdent = C.toIdent . zEncodeString . pretty
 
@@ -741,7 +744,7 @@ arrayLibraryFunctions space pt signed shape = do
   ctx_ty <- contextType
 
   headerDecl (ArrayDecl name)
-    [C.cedecl|struct $id:name;|]
+    [C.cedecl|struct $id:arr_name;|]
   headerDecl (ArrayDecl name)
     [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params);|]
   headerDecl (ArrayDecl name)

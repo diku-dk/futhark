@@ -9,54 +9,54 @@ futhark-pkg
 SYNOPSIS
 ========
 
-futhark-pkg add PKGPATH [X.Y.Z]
+futhark pkg add PKGPATH [X.Y.Z]
 
-futhark-pkg check
+futhark pkg check
 
-futhark-pkg init PKGPATH
+futhark pkg init PKGPATH
 
-futhark-pkg fmt
+futhark pkg fmt
 
-futhark-pkg remove PKGPATH
+futhark pkg remove PKGPATH
 
-futhark-pkg sync
+futhark pkg sync
 
-futhark-pkg upgrade
+futhark pkg upgrade
 
-futhark-pkg versions
+futhark pkg versions
 
 DESCRIPTION
 ===========
 
 This tool is used to modify the package manifest (``futhark.pkg``) and
-download the required packages it describes.  ``futhark-pkg`` is not a
+download the required packages it describes.  ``futhark pkg`` is not a
 build system; you will still need to compile your Futhark code with
-the usual compilers.  The only purpose of ``futhark-pkg`` is to
+the usual compilers.  The only purpose of ``futhark pkg`` is to
 download code (and perform other package management utility tasks).
 This manpage is not a general introduction to package management in
 Futhark; see the User's Guide for that.
 
-The ``futhark-pkg`` subcommands will modify only two locations in the
+The ``futhark pkg`` subcommands will modify only two locations in the
 file system (relative to the current working directory): the
 ``futhark.pkg`` file, and the contents of ``lib/``.  When modifying
-``lib/``, ``futhark-pkg`` constructs the new version in ``lib~new/``
-and backs up the old version in ``lib~old``.  If ``futhark-pkg``
+``lib/``, ``futhark pkg`` constructs the new version in ``lib~new/``
+and backs up the old version in ``lib~old``.  If ``futhark pkg``
 should fail for any reason, you can recover the old state by moving
 ``lib~old`` back.  These temporary directories are erased if
-``futhark-pkg`` finishes without errors.
+``futhark pkg`` finishes without errors.
 
-The ``futhark-pkg sync`` and ``futhark-pkg init`` subcommands are
+The ``futhark pkg sync`` and ``futhark pkg init`` subcommands are
 the only ones that actually modifies ``lib/``; the others modify only
-``futhark.pkg`` and require you to manually run ``futhark-pkg sync``
+``futhark.pkg`` and require you to manually run ``futhark pkg sync``
 afterwards.
 
 Most commands take a ``-v``/``--verbose`` option that makes
-``futhark-pkg`` write running diagnostics to stderr.
+``futhark pkg`` write running diagnostics to stderr.
 
 COMMANDS
 ========
 
-futhark-pkg add PKGPATH [X.Y.Z]
+futhark pkg add PKGPATH [X.Y.Z]
 -------------------------------
 
 Add the specified package of the given minimum version as a
@@ -65,9 +65,9 @@ one is used.  If the package is already required in ``futhark.pkg``,
 the new version requirement will replace the old one.
 
 Note that adding a package does not automatically download it.  Run
-``futhark-pkg sync`` to do that.
+``futhark pkg sync`` to do that.
 
-futhark-pkg check
+futhark pkg check
 -----------------
 
 Verify that the ``futhark.pkg`` is valid, that all required packages
@@ -76,24 +76,24 @@ that these versions contain well-formed code.  If a package path is
 defined in ``futhark.pkg``, also checks that ``.fut`` files are
 located at the expected location in the file system.
 
-futhark-pkg init PKGPATH
+futhark pkg init PKGPATH
 ------------------------
 
 Create a new ``futhark.pkg`` defining a package with the given package
 path, and initially no requirements.
 
-futhark-pkg fmt
+futhark pkg fmt
 ---------------
 
 Reformat the ``futhark.pkg`` file, while retaining any comments.
 
-futhark-pkg remove PKGPATH
+futhark pkg remove PKGPATH
 --------------------------
 
 Remove a package from ``futhark.pkg``.  Does *not* remove it from the
 ``lib/`` directory.
 
-futhark-pkg sync
+futhark pkg sync
 ----------------
 
 Populate the ``lib/`` directory with the packages listed in
@@ -101,13 +101,13 @@ Populate the ``lib/`` directory with the packages listed in
 that does not relate to a file listed in ``futhark.pkg``, as well as
 any local modifications.
 
-futhark-pkg upgrade
+futhark pkg upgrade
 -------------------
 
 Upgrade all package requirements in ``futhark.pkg`` to the newest
 available versions.
 
-futhark-pkg versions PKGPATH
+futhark pkg versions PKGPATH
 ----------------------------
 
 Print all available versions for the given package path.
@@ -115,12 +115,12 @@ Print all available versions for the given package path.
 COMMIT VERSIONS
 ===============
 
-It is possible to use ``futhark-pkg`` with packages that have not yet
+It is possible to use ``futhark pkg`` with packages that have not yet
 made proper releases.  This is done via pseudoversions of the form
 ``0.0.0-yyyymmddhhmmss+commitid``.  The timestamp is not verified
 against the actual commit.  The timestamp ensures that newer commits
 take precedence if multiple packages depend on a commit version for
-the same package.  If ``futhark-pkg add`` is given a package with no
+the same package.  If ``futhark pkg add`` is given a package with no
 releases, the most recent commit will be used.  In this case, the
 timestamp is merely set to the current time.
 
@@ -135,15 +135,15 @@ EXAMPLES
 Create a new package that will be hosted at
 ``https://github.com/sturluson/edda``::
 
-  futhark-pkg init github.com/sturluson/edda
+  futhark pkg init github.com/sturluson/edda
 
 Add a package dependency::
 
-  futhark-pkg add github.com/sturluson/hattatal
+  futhark pkg add github.com/sturluson/hattatal
 
 Download the dependencies::
 
-  futhark-pkg sync
+  futhark pkg sync
 
 And then you're ready to start hacking!  (Except that these packages
 do not actually exist.)

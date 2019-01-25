@@ -15,7 +15,7 @@ module Sobol: sobol = {
   module Reduce (X : { type t
                        val ne : t }) : { val run : i32 -> X.t } =
   {
-    let run (N:i32) : X.t = X.ne
+    let run (N:i32) : X.t = copy X.ne
   }
 }
 

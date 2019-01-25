@@ -97,7 +97,7 @@ generated executable.
 Using the ``futhark`` Tool
 --------------------------
 
-For debugging specific compiler passes, there is a tool simply called
-:ref:`futhark(1)`, which allows you to tailor your own compilation
-pipeline using command line options.  It is also useful for seeing
-what the AST looks like after specific passes.
+For debugging specific compiler passes, the ``futhark dev`` subcommand
+allows you to tailor your own compilation pipeline using command line
+options.  It is also useful for seeing what the AST looks like after
+specific passes.

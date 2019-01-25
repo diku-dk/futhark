@@ -17,8 +17,8 @@ module Futhark.Test.Values
 
        -- * Comparing Values
        , compareValues
+       , compareValues1
        , Mismatch
-       , explainMismatch
        )
        where
 
@@ -29,7 +29,6 @@ import Data.Binary.Put
 import Data.Binary.Get
 import Data.Binary.IEEE754
 import qualified Data.ByteString.Lazy.Char8 as BS
-import Data.Maybe
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Char (isSpace, ord, chr)
 import Data.Vector.Binary
@@ -46,6 +45,7 @@ import qualified Futhark.Util.Pretty as PP
 import Futhark.Representation.AST.Attributes.Constants (IsValue(..))
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
+import Futhark.Util (maybeHead)
 
 type STVector s = UMVec.STVector s
 type Vector = UVec.Vector
@@ -77,13 +77,13 @@ instance Binary Value where
   put (Int16Value shape vs) = putBinaryValue " i16" shape vs putInt16le
   put (Int32Value shape vs) = putBinaryValue " i32" shape vs putInt32le
   put (Int64Value shape vs) = putBinaryValue " i64" shape vs putInt64le
-  put (Word8Value shape vs) = putBinaryValue "  i8" shape vs putWord8
-  put (Word16Value shape vs) = putBinaryValue " i16" shape vs putWord16le
-  put (Word32Value shape vs) = putBinaryValue " i32" shape vs putWord32le
-  put (Word64Value shape vs) = putBinaryValue " i64" shape vs putWord64le
+  put (Word8Value shape vs) = putBinaryValue "  u8" shape vs putWord8
+  put (Word16Value shape vs) = putBinaryValue " u16" shape vs putWord16le
+  put (Word32Value shape vs) = putBinaryValue " u32" shape vs putWord32le
+  put (Word64Value shape vs) = putBinaryValue " u64" shape vs putWord64le
   put (Float32Value shape vs) = putBinaryValue " f32" shape vs putFloat32le
   put (Float64Value shape vs) = putBinaryValue " f64" shape vs putFloat64le
-  put (BoolValue shape vs) = putBinaryValue " f64" shape vs $ putInt8 . boolToInt
+  put (BoolValue shape vs) = putBinaryValue "bool" shape vs $ putInt8 . boolToInt
     where boolToInt True = 1
           boolToInt False = 0
 
@@ -358,15 +358,15 @@ readFloat f t = do
 readFloat32 :: ReadValue Float
 readFloat32 = readFloat lexFloat32
   where lexFloat32 [F32LIT x] = Just x
-        lexFloat32 [ID "f32", DOT, ID "inf"] = Just $ 1/0
-        lexFloat32 [ID "f32", DOT, ID "nan"] = Just $ 0/0
+        lexFloat32 [ID "f32", PROJ_FIELD "inf"] = Just $ 1/0
+        lexFloat32 [ID "f32", PROJ_FIELD "nan"] = Just $ 0/0
         lexFloat32 _ = Nothing
 
 readFloat64 :: ReadValue Double
 readFloat64 = readFloat lexFloat64
   where lexFloat64 [F64LIT x] = Just x
-        lexFloat64 [ID "f64", DOT, ID "inf"] = Just $ 1/0
-        lexFloat64 [ID "f64", DOT, ID "nan"] = Just $ 0/0
+        lexFloat64 [ID "f64", PROJ_FIELD "inf"] = Just $ 1/0
+        lexFloat64 [ID "f64", PROJ_FIELD "nan"] = Just $ 0/0
         lexFloat64 _          = Nothing
 
 readBool :: ReadValue Bool
@@ -452,7 +452,8 @@ readValues = readValues' . dropSpaces
 
 -- Comparisons
 
--- | Two values differ in some way.
+-- | Two values differ in some way.  The 'Show' instance produces a
+-- human-readable explanation.
 data Mismatch = PrimValueMismatch (Int,Int) PrimValue PrimValue
               -- ^ The position the value number and a flat index
               -- into the array.
@@ -477,17 +478,18 @@ explainMismatch i what got expected =
 
 -- | Compare two sets of Futhark values for equality.  Shapes and
 -- types must also match.
-compareValues :: [Value] -> [Value] -> Maybe [Mismatch]
+compareValues :: [Value] -> [Value] -> [Mismatch]
 compareValues got expected
-  | n /= m = Just [ValueCountMismatch n m]
-  | otherwise = case catMaybes $ zipWith3 compareValue [0..] got expected of
-    [] -> Nothing
-    es -> Just es
+  | n /= m = [ValueCountMismatch n m]
+  | otherwise = concat $ zipWith3 compareValue [0..] got expected
   where n = length got
         m = length expected
 
+-- | As 'compareValues', but only reports one mismatch.
+compareValues1 :: [Value] -> [Value] -> Maybe Mismatch
+compareValues1 got expected = maybeHead $ compareValues got expected
 
-compareValue :: Int -> Value -> Value -> Maybe Mismatch
+compareValue :: Int -> Value -> Value -> [Mismatch]
 compareValue i got_v expected_v
   | valueShape got_v == valueShape expected_v =
     case (got_v, expected_v) of
@@ -514,29 +516,29 @@ compareValue i got_v expected_v
       (BoolValue _ got_vs, BoolValue _ expected_vs) ->
         compareGen compareBool got_vs expected_vs
       _ ->
-        Just $ TypeMismatch i (pretty $ valueElemType got_v) (pretty $ valueElemType expected_v)
+        [TypeMismatch i (pretty $ valueElemType got_v) (pretty $ valueElemType expected_v)]
   | otherwise =
-      Just $ ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)
+      [ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)]
   where compareNum tol = compareGen $ compareElement tol
         compareFloat tol = compareGen $ compareFloatElement tol
 
         compareGen cmp got expected =
-          foldl mplus Nothing $
+          concat $
           zipWith cmp (UVec.toList $ UVec.indexed got) (UVec.toList expected)
 
         compareElement tol (j, got) expected
-          | comparePrimValue tol got expected = Nothing
-          | otherwise = Just $ PrimValueMismatch (i,j) (value got) (value expected)
+          | comparePrimValue tol got expected = []
+          | otherwise = [PrimValueMismatch (i,j) (value got) (value expected)]
 
         compareFloatElement tol (j, got) expected
-          | isNaN got, isNaN expected = Nothing
+          | isNaN got, isNaN expected = []
           | isInfinite got, isInfinite expected,
-            signum got == signum expected = Nothing
+            signum got == signum expected = []
           | otherwise = compareElement tol (j, got) expected
 
         compareBool (j, got) expected
-          | got == expected = Nothing
-          | otherwise = Just $ PrimValueMismatch (i,j) (value got) (value expected)
+          | got == expected = []
+          | otherwise = [PrimValueMismatch (i,j) (value got) (value expected)]
 
 comparePrimValue :: (Ord num, Num num) =>
                     num -> num -> num -> Bool

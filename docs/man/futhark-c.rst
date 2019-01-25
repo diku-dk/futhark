@@ -9,12 +9,12 @@ futhark-c
 SYNOPSIS
 ========
 
-futhark-c [-V] [-o outfile] infile
+futhark c [-V] [-o outfile] infile
 
 DESCRIPTION
 ===========
 
-``futhark-c`` translates a Futhark program to sequential C code, and
+``futhark c`` translates a Futhark program to sequential C code, and
 either compiles that C code with gcc(1) to an executable binary
 program, or produces a ``.h`` and ``.c`` file that can be linked with
 other code..  The standard Futhark optimisation pipeline is used, and

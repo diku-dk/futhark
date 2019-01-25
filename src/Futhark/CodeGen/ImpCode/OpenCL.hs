@@ -14,7 +14,6 @@ module Futhark.CodeGen.ImpCode.OpenCL
        , KernelName
        , KernelArg (..)
        , OpenCL (..)
-       , transposeBlockDim
        , KernelTarget (..)
        , module Futhark.CodeGen.ImpCode
        , module Futhark.Representation.Kernels.Sizes
@@ -36,7 +35,7 @@ data Program = Program { openClProgram :: String
                        , openClKernelNames :: [KernelName]
                        , openClUsedTypes :: [PrimType]
                          -- ^ So we can detect whether the device is capable.
-                       , openClSizes :: M.Map VName (SizeClass, Name)
+                       , openClSizes :: M.Map Name SizeClass
                          -- ^ Runtime-configurable constants.
                        , hostFunctions :: Functions OpenCL
                        }
@@ -62,14 +61,10 @@ data KernelArg = ValueKArg Exp PrimType
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
             | HostCode Code
-            | GetSize VName VName
-            | CmpSizeLe VName VName Exp
+            | GetSize VName Name
+            | CmpSizeLe VName Name Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
-
--- | The block size when transposing.
-transposeBlockDim :: Num a => a
-transposeBlockDim = 16
 
 -- | The target platform when compiling imperative code to a 'Program'
 data KernelTarget = TargetOpenCL

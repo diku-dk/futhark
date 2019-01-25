@@ -69,6 +69,11 @@ import Language.Futhark.Parser.Lexer
       unop            { L _ (UNOP _) }
       qunop           { L _ (QUALUNOP _ _) }
 
+      constructor     { L _ (CONSTRUCTOR _) }
+
+      '.field'        { L _ (PROJ_FIELD _) }
+      '.['            { L _ PROJ_INDEX }
+
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
       i16lit          { L _ (I16LIT _) }
@@ -84,7 +89,6 @@ import Language.Futhark.Parser.Lexer
       stringlit       { L _ (STRINGLIT _) }
       charlit         { L _ (CHARLIT _) }
 
-      '#'             { L $$ HASH }
       '..'            { L $$ TWO_DOTS }
       '...'           { L $$ THREE_DOTS }
       '..<'           { L $$ TWO_DOTS_LT }
@@ -136,9 +140,7 @@ import Language.Futhark.Parser.Lexer
       '`'             { L $$ BACKTICK }
       entry           { L $$ ENTRY }
       '->'            { L $$ RIGHT_ARROW }
-      '<-'            { L $$ LEFT_ARROW }
       ':'             { L $$ COLON }
-      '.'             { L $$ DOT }
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
@@ -164,7 +166,7 @@ import Language.Futhark.Parser.Lexer
 %left '`'
 %right '->'
 %left with
-%left '=' '<-'
+%left '='
 %left '|>...'
 %right '<|...'
 %left '||...'
@@ -184,7 +186,7 @@ import Language.Futhark.Parser.Lexer
 Doc :: { DocComment }
      : doc { let L loc (DOC s) = $1 in DocComment s loc }
 
--- Three cases to avoid ambiguities.
+-- Four cases to avoid ambiguities.
 Prog :: { UncheckedProg }
       -- File begins with a file comment, followed by a Dec with a comment.
       : Doc Doc Dec_ Decs { Prog (Just $1) (addDoc $2 $3 : $4) }
@@ -192,6 +194,8 @@ Prog :: { UncheckedProg }
       | Doc Dec_ Decs     { Prog (Just $1) ($2 : $3) }
       -- File begins with a dec with no comment.
       | Dec_ Decs         { Prog Nothing ($1 : $2) }
+      -- File is empty.
+      |                   { Prog Nothing [] }
 ;
 
 Dec :: { UncheckedDec }
@@ -457,7 +461,7 @@ Enum :: { ([Name], SrcLoc) }
           in (names, loc) }
 
 VConstr0 :: { (Name, SrcLoc) }
-          : '#' id  { let L _ (ID c) = $2 in  (c, srclocOf $1) }
+          : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, srclocOf $1) }
 
 TypeArg :: { TypeArgExp Name }
          : '[' DimDecl ']' { TypeArgExpDim (fst $2) (srcspan $1 $>) }
@@ -481,13 +485,6 @@ DimDecl :: { (DimDecl Name, SrcLoc) }
         | intlit
           { let L loc (INTLIT n) = $1
             in (ConstDim (fromIntegral n), loc) }
-
-        -- Errors
-        | '#' {% parseErrorAt (srclocOf $1) $ Just $
-                unlines ["found implicit size quantification.",
-                         "This is no longer supported.  Use explicit size parameters."]
-              }
-
 
 FunParam :: { PatternBase NoInfo Name }
 FunParam : InnerPattern { $1 }
@@ -580,11 +577,6 @@ Exp2 :: { UncheckedExp }
      | Exp2 with FieldAccesses_ '=' Exp2
        { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
 
-     | Exp2 with FieldAccesses_ '<-' Exp2
-       { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
-     | Exp2 with '[' DimIndices ']' '<-' Exp2
-       { Update $1 $4 $7 (srcspan $1 $>) }
-
      | '\\' TypeParams FunParams1 maybeAscription(TypeExpTerm) '->' Exp
        { Lambda $2 (fst $3 : snd $3) $6 (fmap (flip TypeDecl NoInfo) $4) NoInfo (srcspan $1 $>) }
 
@@ -644,8 +636,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' FieldAccess FieldAccesses ')'
        { ProjectSection (map fst ($2:$3)) NoInfo (srcspan $1 $>) }
 
-     | '(' '.' '[' DimIndices ']' ')'
-       { IndexSection $4 NoInfo (srcspan $1 $>) }
+     | '(' '.[' DimIndices ']' ')'
+       { IndexSection $3 NoInfo (srcspan $1 $>) }
 
 
 PrimLit :: { (PrimValue, SrcLoc) }
@@ -678,7 +670,7 @@ Exps1_ :: { ([UncheckedExp], UncheckedExp) }
         | Exp            { ([], $1) }
 
 FieldAccess :: { (Name, SrcLoc) }
-             : '.' FieldId { (fst $2, srcspan $1 (snd $>)) }
+             : '.field' { let L loc (PROJ_FIELD f) = $1 in (f, loc) }
 
 FieldAccesses :: { [(Name, SrcLoc)] }
                : FieldAccess FieldAccesses { $1 : $2 }

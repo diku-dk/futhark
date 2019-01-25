@@ -4,7 +4,6 @@
 -- input { 3 4 }
 -- output { [1i32, 2i32, 5i32, 6i32, 9i32, 10i32] }
 
-import "/futlib/math"
 
 let dim_2 't [d0] [d1] (i: i32) (x: [d0][d1]t): i32 =
   if (i == 1)

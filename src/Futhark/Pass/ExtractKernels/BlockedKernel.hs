@@ -7,6 +7,9 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , blockedMap
        , blockedScan
 
+       , segRed
+       , nonSegRed
+
        , mapKernel
        , mapKernelFromBody
        , KernelInput(..)
@@ -18,7 +21,6 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , chunkLambda
        , splitArrays
        , getSize
-       , cmpSizeLe
        )
        where
 
@@ -48,15 +50,8 @@ import Futhark.Util.IntegralExp
 getSize :: (MonadBinder m, Op (Lore m) ~ Kernel innerlore) =>
            String -> SizeClass -> m SubExp
 getSize desc size_class = do
-  size_key <- newVName desc
+  size_key <- nameFromString . pretty <$> newVName desc
   letSubExp desc $ Op $ GetSize size_key size_class
-
-cmpSizeLe :: (MonadBinder m, Op (Lore m) ~ Kernel innerlore) =>
-           String -> SizeClass -> SubExp -> m (SubExp, VName)
-cmpSizeLe desc size_class to_what = do
-  size_key <- newVName desc
-  cmp_res <- letSubExp desc $ Op $ CmpSizeLe size_key size_class to_what
-  return (cmp_res, size_key)
 
 blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                           Pattern Kernels
@@ -290,6 +285,58 @@ kerneliseLambda nes lam = do
                               fold_chunk_param :
                               fold_inp_params
              }
+
+segRed :: (MonadFreshNames m, HasScope Kernels m) =>
+          Pattern Kernels
+       -> SubExp
+       -> SubExp -- segment size
+       -> Commutativity
+       -> Lambda InKernel -> Lambda InKernel
+       -> [SubExp] -> [VName]
+       -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this reduction
+       -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
+       -> m (Stms Kernels)
+segRed pat total_num_elements w comm reduce_lam map_lam nes arrs ispace inps = runBinder_ $ do
+  (_, KernelSize num_groups group_size _ _ num_threads) <- blockedKernelSize =<< asIntS Int64 total_num_elements
+  gtid <- newVName "gtid"
+  kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace $
+            ispace ++ [(gtid, w)]
+  body <- runBodyBinder $ localScope (scopeOfKernelSpace kspace) $ do
+    mapM_ (addStm <=< readKernelInput) inps
+    forM_ (zip (lambdaParams map_lam) arrs) $ \(p, arr) -> do
+      arr_t <- lookupType arr
+      letBindNames_ [paramName p] $
+        BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
+    return $ lambdaBody map_lam
+
+  letBind_ pat $ Op $
+    SegRed kspace comm reduce_lam nes (lambdaReturnType map_lam) body
+
+nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
+             Pattern Kernels
+          -> SubExp
+          -> Commutativity
+          -> Lambda InKernel
+          -> Lambda InKernel
+          -> [SubExp]
+          -> [VName]
+          -> m (Stms Kernels)
+nonSegRed pat w comm red_lam map_lam nes arrs = runBinder_ $ do
+  -- We add a unit-size segment on top to ensure that the result
+  -- of the SegRed is an array, which we then immediately index.
+  -- This is useful in the case that the value is used on the
+  -- device afterwards, as this may save an expensive
+  -- host-device copy (scalars are kept on the host, but arrays
+  -- may be on the device).
+  let addDummyDim t = t `arrayOfRow` intConst Int32 1
+  pat' <- fmap addDummyDim <$> renamePattern pat
+  dummy <- newVName "dummy"
+  addStms =<<
+    segRed pat' w w comm red_lam map_lam nes arrs [(dummy, intConst Int32 1)] []
+
+  forM_ (zip (patternNames pat') (patternNames pat)) $ \(from, to) -> do
+    from_t <- lookupType from
+    letBindNames_ [to] $ BasicOp $ Index from $ fullSlice from_t [DimFix $ intConst Int32 0]
 
 blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                     Pattern Kernels

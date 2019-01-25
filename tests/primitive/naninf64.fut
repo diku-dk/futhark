@@ -3,7 +3,6 @@
 -- input { 2f64 }
 -- output { false true true true true }
 
-import "/futlib/math"
 
 let main(x: f64) =
   (x < f64.nan,

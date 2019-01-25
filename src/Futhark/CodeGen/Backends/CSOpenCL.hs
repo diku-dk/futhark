@@ -17,6 +17,7 @@ import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
 import Futhark.Util.Pretty(pretty)
+import Futhark.Util (zEncodeString)
 import Futhark.MonadFreshNames hiding (newVName')
 
 
@@ -119,11 +120,15 @@ cliOptions = [ Option { optionLongName = "platform"
 callKernel :: CS.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) =
   CS.stm $ Reassign (Var (CS.compileName v)) $
-    Field (Var "Ctx.Sizes") $ pretty key
+    Field (Var "Ctx.Sizes") $ zEncodeString $ pretty key
 
 callKernel (Imp.GetSizeMax v size_class) =
   CS.stm $ Reassign (Var (CS.compileName v)) $
-    Var $ "max_" ++ pretty size_class
+  Field (Var "Ctx.OpenCL") $
+  case size_class of Imp.SizeGroup -> "MaxGroupSize"
+                     Imp.SizeNumGroups -> "MaxNumGroups"
+                     Imp.SizeTile -> "MaxTileSize"
+                     Imp.SizeThreshold{} -> "MaxThreshold"
 
 callKernel (Imp.HostCode c) = CS.compileCode c
 
@@ -137,7 +142,10 @@ callKernel (Imp.LaunchKernel name args num_workgroups workgroup_size) = do
   CS.stm $ If cond body []
   where mult_exp = BinOp "*"
 
-callKernel _ = undefined
+callKernel (Imp.CmpSizeLe v key x) = do
+  x' <- CS.compileExp x
+  CS.stm $ Reassign (Var (CS.compileName v)) $
+    BinOp "<=" (Field (Var "Ctx.Sizes") (zEncodeString $ pretty key)) x'
 
 launchKernel :: String -> [CSExp] -> [CSExp] -> [Imp.KernelArg] -> CS.CompilerM op s ()
 launchKernel kernel_name kernel_dims workgroup_dims args = do

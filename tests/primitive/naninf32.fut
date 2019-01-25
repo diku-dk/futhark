@@ -9,7 +9,6 @@
 -- input { -f32.inf }
 -- output { false true false true false }
 
-import "/futlib/math"
 
 let main(x: f32) =
   (x < f32.nan,

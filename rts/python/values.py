@@ -24,9 +24,12 @@ class ReaderInput:
         self.lookahead_buffer = [c] + self.lookahead_buffer
 
     def get_chars(self, n):
-        s = b''
-        for _ in range(n):
-            s += self.get_char()
+        n1 = min(n, len(self.lookahead_buffer))
+        s = b''.join(self.lookahead_buffer[:n1])
+        self.lookahead_buffer = self.lookahead_buffer[n1:]
+        n2 = n - n1
+        if n2 > 0:
+            s += self.f.read(n2)
         return s
 
     def peek_char(self):

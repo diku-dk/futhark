@@ -474,7 +474,7 @@ monomorphizeBinding (PolyBinding (name, tparams, params, retdecl, rettype, body,
   t' <- removeTypeVariablesInType t
   let bind_t = foldFunType (map (toStructural . patternType) params) $
                toStructural rettype
-      substs = typeSubsts bind_t t'
+      substs = M.map Subst $ typeSubsts bind_t t'
       rettype' = applySubst (`M.lookup` substs) rettype
       params' = map (substPattern $ applySubst (`M.lookup` substs)) params
 

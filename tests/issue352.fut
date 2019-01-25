@@ -164,9 +164,7 @@ module sobol_dir : {
 
 }
 
-import "/futlib/math"
 
-module array = import "/futlib/array"
 
 module type sobol_dir = {
   val a: []u32

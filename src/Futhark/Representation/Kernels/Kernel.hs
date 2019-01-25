@@ -80,11 +80,14 @@ data KernelDebugHints =
   deriving (Eq, Show, Ord)
 
 data Kernel lore =
-    GetSize VName SizeClass -- ^ Produce some runtime-configurable size.
+    GetSize Name SizeClass -- ^ Produce some runtime-configurable size.
   | GetSizeMax SizeClass -- ^ The maximum size of some class.
-  | CmpSizeLe VName SizeClass SubExp
+  | CmpSizeLe Name SizeClass SubExp
     -- ^ Compare size (likely a threshold) with some Int32 value.
   | Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
+  | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (Body lore)
+    -- ^ The KernelSpace must always have at least two dimensions,
+    -- implying that the result of a SegRed is always an array.
     deriving (Eq, Show, Ord)
 
 data KernelSpace = KernelSpace { spaceGlobalId :: VName
@@ -189,28 +192,39 @@ mapKernelM _ (GetSizeMax size_class) =
   pure $ GetSizeMax size_class
 mapKernelM tv (CmpSizeLe name size_class x) =
   CmpSizeLe name size_class <$> mapOnKernelSubExp tv x
+mapKernelM tv (SegRed space comm red_op nes ts lam) =
+  SegRed
+  <$> mapOnKernelSpace tv space
+  <*> pure comm
+  <*> mapOnKernelLambda tv red_op
+  <*> mapM (mapOnKernelSubExp tv) nes
+  <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
+  <*> mapOnKernelBody tv lam
 mapKernelM tv (Kernel desc space ts kernel_body) =
   Kernel <$> mapOnKernelDebugHints desc <*>
-  mapOnKernelSpace space <*>
+  mapOnKernelSpace tv space <*>
   mapM (mapOnKernelType tv) ts <*>
   mapOnKernelKernelBody tv kernel_body
   where mapOnKernelDebugHints (KernelDebugHints name kvs) =
           KernelDebugHints name <$>
           (zip (map fst kvs) <$> mapM (mapOnKernelSubExp tv . snd) kvs)
-        mapOnKernelSpace (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
-          KernelSpace gtid ltid gid -- all in binding position
-          <$> mapOnKernelSubExp tv num_threads
-          <*> mapOnKernelSubExp tv num_groups
-          <*> mapOnKernelSubExp tv group_size
-          <*> mapOnKernelStructure structure
-        mapOnKernelStructure (FlatThreadSpace dims) =
+
+mapOnKernelSpace :: Monad f =>
+                    KernelMapper flore tlore f -> KernelSpace -> f KernelSpace
+mapOnKernelSpace tv (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+  KernelSpace gtid ltid gid -- all in binding position
+  <$> mapOnKernelSubExp tv num_threads
+  <*> mapOnKernelSubExp tv num_groups
+  <*> mapOnKernelSubExp tv group_size
+  <*> mapOnKernelStructure structure
+  where mapOnKernelStructure (FlatThreadSpace dims) =
           FlatThreadSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
           where (gtids, gdim_sizes) = unzip dims
         mapOnKernelStructure (NestedThreadSpace dims) =
-            NestedThreadSpace <$> (zip4 gtids
-                             <$> mapM (mapOnKernelSubExp tv) gdim_sizes
-                             <*> pure ltids
-                             <*> mapM (mapOnKernelSubExp tv) ldim_sizes)
+          NestedThreadSpace <$> (zip4 gtids
+                                 <$> mapM (mapOnKernelSubExp tv) gdim_sizes
+                                 <*> pure ltids
+                                 <*> mapM (mapOnKernelSubExp tv) ldim_sizes)
           where (gtids, gdim_sizes, ltids, ldim_sizes) = unzip4 dims
 
 mapOnKernelType :: Monad m =>
@@ -400,6 +414,13 @@ kernelType (Kernel _ space ts body) =
         resultShape t KernelInPlaceReturn{} =
           t
 
+kernelType (SegRed space _ _ nes ts _) =
+  map (`arrayOfShape` Shape outer_dims) red_ts ++
+  map (`arrayOfShape` Shape dims) map_ts
+  where (red_ts, map_ts) = splitAt (length nes) ts
+        dims = map snd $ spaceDimensions space
+        outer_dims = init dims
+
 kernelType GetSize{} = [Prim int32]
 kernelType GetSizeMax{} = [Prim int32]
 kernelType CmpSizeLe{} = [Prim Bool]
@@ -544,6 +565,8 @@ instance Attributes lore => ST.IndexOp (Kernel lore) where
 instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
+  usageInOp (SegRed _ _ _ _ _ body) =
+    mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
   usageInOp GetSize{} = mempty
   usageInOp GetSizeMax{} = mempty
   usageInOp CmpSizeLe{} = mempty
@@ -559,6 +582,22 @@ typeCheckKernel GetSize{} = return ()
 typeCheckKernel GetSizeMax{} = return ()
 typeCheckKernel (CmpSizeLe _ _ x) = TC.require [Prim int32] x
 
+typeCheckKernel (SegRed space _ red_op nes ts body) = do
+  checkSpace space
+  mapM_ TC.checkType ts
+
+  ne_ts <- mapM subExpType nes
+
+  let asArg t = (t, mempty)
+  TC.binding (scopeOfKernelSpace space) $ do
+    TC.checkLambda red_op $ map asArg $ ne_ts ++ ne_ts
+    unless (lambdaReturnType red_op == ne_ts &&
+            take (length nes) ts == ne_ts) $
+      TC.bad $ TC.TypeError
+      "SegRed: wrong type for reduction or neutral elements."
+
+    TC.checkLambdaBody ts body
+
 typeCheckKernel (Kernel _ space kts kbody) = do
   checkSpace space
   mapM_ TC.checkType kts
@@ -566,16 +605,7 @@ typeCheckKernel (Kernel _ space kts kbody) = do
 
   TC.binding (scopeOfKernelSpace space) $
     checkKernelBody kts kbody
-  where checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
-          mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size]
-          case structure of
-            FlatThreadSpace dims ->
-              mapM_ (TC.require [Prim int32] . snd) dims
-            NestedThreadSpace dims ->
-              let (_, gdim_sizes, _, ldim_sizes) = unzip4 dims
-              in mapM_ (TC.require [Prim int32]) $ gdim_sizes ++ ldim_sizes
-
-        checkKernelBody ts (KernelBody (_, attr) stms res) = do
+  where checkKernelBody ts (KernelBody (_, attr) stms res) = do
           TC.checkBodyLore attr
           TC.checkStms stms $ do
             unless (length ts == length res) $
@@ -617,11 +647,23 @@ typeCheckKernel (Kernel _ space kts kbody) = do
           mapM_ (TC.requireI [Prim int32] . fst) limit
           mapM_ (TC.require [Prim int32] . snd) limit
 
+checkSpace :: TC.Checkable lore => KernelSpace -> TC.TypeM lore ()
+checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
+  mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size]
+  case structure of
+    FlatThreadSpace dims ->
+      mapM_ (TC.require [Prim int32] . snd) dims
+    NestedThreadSpace dims ->
+      let (_, gdim_sizes, _, ldim_sizes) = unzip4 dims
+      in mapM_ (TC.require [Prim int32]) $ gdim_sizes ++ ldim_sizes
+
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
     where kernelBodyMetrics :: KernelBody lore -> MetricsM ()
           kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
+  opMetrics (SegRed _ _ red_op _ _ body) =
+    inside "SegRed" $ lambdaMetrics red_op >> bodyMetrics body
   opMetrics GetSize{} = seen "GetSize"
   opMetrics GetSizeMax{} = seen "GetSizeMax"
   opMetrics CmpSizeLe{} = seen "CmpSizeLe"
@@ -641,6 +683,14 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
     text "kernel" <+> text (kernelName desc) <>
     PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
+
+  ppr (SegRed space comm red_op nes ts body) =
+    text name <> PP.parens (ppr red_op <> PP.comma </>
+                             PP.braces (PP.commasep $ map ppr nes)) </>
+    PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
+    PP.nestedBlock "{" "}" (ppr body)
+    where name = case comm of Commutative    -> "segred_comm"
+                              Noncommutative -> "segred"
 
 instance Pretty KernelSpace where
   ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size structure) =

@@ -146,7 +146,11 @@ data Code a = Skip
             | DeclareMem VName Space
             | DeclareScalar VName PrimType
             | DeclareArray VName Space PrimType [PrimValue]
-              -- ^ Create a read-only array containing the given values.
+              -- ^ Create an array containing the given values.  The
+              -- lifetime of the array will be the entire application.
+              -- This is mostly used for constant arrays, but also for
+              -- some bookkeeping data, like the synchronisation
+              -- counts used to implement reduction.
             | Allocate VName (Count Bytes) Space
               -- ^ Memory space must match the corresponding
               -- 'DeclareMem'.
@@ -327,7 +331,7 @@ instance Pretty op => Pretty (Code op) where
   ppr (SetMem dest from space) =
     ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
   ppr (Assert e msg _) =
-    text "assert" <> parens (commasep [text (show msg), ppr e])
+    text "assert" <> parens (commasep [ppr msg, ppr e])
   ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
     text "memcpy" <>
     parens (ppMemLoc dest destoffset <> ppr destspace <> comma </>

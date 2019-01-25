@@ -81,7 +81,6 @@ def initialise_opencl_object(self,
                              default_num_groups=None,
                              default_tile_size=None,
                              default_threshold=None,
-                             transpose_block_dim=16,
                              size_heuristics=[],
                              required_types=[],
                              all_sizes={},
@@ -165,11 +164,13 @@ def initialise_opencl_object(self,
         else:
             self.sizes[k] = v['value']
 
+    # XXX: we perform only a subset of z-encoding here.  Really, the
+    # compiler should provide us with the variables to which
+    # parameters are mapped.
     if (len(program_src) >= 0):
         return cl.Program(self.ctx, program_src).build(
-            ["-DFUT_BLOCK_DIM={}".format(transpose_block_dim),
-             "-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
-            + ["-D{}={}".format(s,v) for (s,v) in self.sizes.items()])
+            ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
+            + ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi'),v) for (s,v) in self.sizes.items()])
 
 def opencl_alloc(self, min_size, tag):
     min_size = 1 if min_size == 0 else min_size

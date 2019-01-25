@@ -5,7 +5,6 @@ module Futhark.Util.Options
        , commonOptions
        ) where
 
-import System.Environment
 import Control.Monad.IO.Class
 import System.IO
 import System.Exit
@@ -23,9 +22,10 @@ mainWithOptions :: cfg
                 -> [FunOptDescr cfg]
                 -> String
                 -> ([String] -> cfg -> Maybe (IO ()))
+                -> String
+                -> [String]
                 -> IO ()
-mainWithOptions emptyConfig commandLineOptions usage f = do
-  args <- getArgs
+mainWithOptions emptyConfig commandLineOptions usage f prog args =
   case getOpt' Permute commandLineOptions' args of
     (opts, nonopts, [], []) ->
       case applyOpts opts of
@@ -37,16 +37,14 @@ mainWithOptions emptyConfig commandLineOptions usage f = do
   where applyOpts opts = do fs <- sequence opts
                             return $ foldl (.) id (reverse fs) emptyConfig
 
-        invalid nonopts unrecs errs = do help <- helpStr usage commandLineOptions'
+        invalid nonopts unrecs errs = do help <- helpStr prog usage commandLineOptions'
                                          badOptions help nonopts errs unrecs
 
         commandLineOptions' =
-          commonOptions usage commandLineOptions ++ commandLineOptions
+          commonOptions prog usage commandLineOptions ++ commandLineOptions
 
-helpStr :: String -> [OptDescr a] -> IO String
-helpStr usage opts = do
-  prog <- getProgName
-
+helpStr :: String -> String -> [OptDescr a] -> IO String
+helpStr prog usage opts = do
   let header = unlines ["Usage: " ++ prog ++ " " ++ usage, "Options:"]
   return $ usageInfo header opts
 
@@ -63,8 +61,8 @@ errput = liftIO . hPutStrLn stderr
 
 -- | Common definitions for @-v@ and @-h@, given the list of all other
 -- options.
-commonOptions :: String -> [FunOptDescr cfg] -> [FunOptDescr cfg]
-commonOptions usage options =
+commonOptions :: String -> String -> [FunOptDescr cfg] -> [FunOptDescr cfg]
+commonOptions prog usage options =
   [ Option "V" ["version"]
     (NoArg $ Left $ do header
                        exitSuccess)
@@ -73,7 +71,7 @@ commonOptions usage options =
   , Option "h" ["help"]
     (NoArg $ Left $ do header
                        putStrLn ""
-                       putStrLn =<< helpStr usage (commonOptions usage [] ++ options)
+                       putStrLn =<< helpStr prog usage (commonOptions prog usage [] ++ options)
                        exitSuccess)
     "Print help and exit."
   ]

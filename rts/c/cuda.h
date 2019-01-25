@@ -43,7 +43,6 @@ struct cuda_config {
   size_t default_grid_size;
   size_t default_tile_size;
   size_t default_threshold;
-  size_t transpose_block_dim;
 
   int default_block_size_changed;
   int default_grid_size_changed;
@@ -51,17 +50,17 @@ struct cuda_config {
 
   int num_sizes;
   const char **size_names;
+  const char **size_vars;
   size_t *size_values;
   const char **size_classes;
-  const char **size_entry_points;
 };
 
 void cuda_config_init(struct cuda_config *cfg,
                       int num_sizes,
                       const char *size_names[],
+                      const char *size_vars[],
                       size_t *size_values,
-                      const char *size_classes[],
-                      const char *size_entry_points[])
+                      const char *size_classes[])
 {
   cfg->debugging = 0;
   cfg->logging = 0;
@@ -77,7 +76,6 @@ void cuda_config_init(struct cuda_config *cfg,
   cfg->default_grid_size = 128;
   cfg->default_tile_size = 32;
   cfg->default_threshold = 32*1024;
-  cfg->transpose_block_dim = 16;
 
   cfg->default_block_size_changed = 0;
   cfg->default_grid_size_changed = 0;
@@ -85,9 +83,9 @@ void cuda_config_init(struct cuda_config *cfg,
 
   cfg->num_sizes = num_sizes;
   cfg->size_names = size_names;
+  cfg->size_vars = size_vars;
   cfg->size_values = size_values;
   cfg->size_classes = size_classes;
-  cfg->size_entry_points = size_entry_points;
 }
 
 struct cuda_context {
@@ -265,11 +263,10 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src)
   }
   i_dyn = i;
   for (size_t j = 0; j < ctx->cfg.num_sizes; j++) {
-    opts[i++] = msgprintf("-D%s=%zu", ctx->cfg.size_names[j],
+    opts[i++] = msgprintf("-D%s=%zu", ctx->cfg.size_vars[j],
         ctx->cfg.size_values[j]);
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
-  opts[i++] = msgprintf("-DFUT_BLOCK_DIM=%zu", ctx->cfg.transpose_block_dim);
   opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_block_size);
   n_opts = i;
 

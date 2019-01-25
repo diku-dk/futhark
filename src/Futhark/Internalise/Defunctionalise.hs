@@ -21,7 +21,7 @@ import           Futhark.Representation.AST.Pretty ()
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
 data StaticVal = Dynamic CompType
-               | LambdaSV [VName] Pattern Exp Env
+               | LambdaSV [VName] Pattern StructType Exp Env
                  -- ^ The 'VName's are shape parameters that are bound
                  -- by the 'Pattern'.
                | RecordSV [(Name, StaticVal)]
@@ -62,8 +62,8 @@ restrictEnvTo (NameSet m) = restrict <$> ask
           Dynamic $ t `setUniqueness`  Nonunique
         restrict' _ (Dynamic t) =
           Dynamic t
-        restrict' u (LambdaSV dims pat e env) =
-          LambdaSV dims pat e $ M.map (restrict' u) env
+        restrict' u (LambdaSV dims pat t e env) =
+          LambdaSV dims pat t e $ M.map (restrict' u) env
         restrict' u (RecordSV fields) =
           RecordSV $ map (fmap $ restrict' u) fields
         restrict' u (DynamicFun (e, sv1) sv2) =
@@ -74,9 +74,9 @@ restrictEnvTo (NameSet m) = restrict <$> ask
 -- the current Env as well as the set of globally defined dynamic
 -- functions.  This is used to avoid unnecessarily large closure
 -- environments.
-newtype DefM a = DefM (RWS (Names, Env) (Seq.Seq ValBind) VNameSource a)
+newtype DefM a = DefM (RWS (S.Set VName, Env) (Seq.Seq ValBind) VNameSource a)
   deriving (Functor, Applicative, Monad,
-            MonadReader (Names, Env),
+            MonadReader (S.Set VName, Env),
             MonadWriter (Seq.Seq ValBind),
             MonadFreshNames)
 
@@ -211,15 +211,15 @@ defuncExp (Negate e0 loc) = do
   (e0', sv) <- defuncExp e0
   return (Negate e0' loc, sv)
 
-defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
+defuncExp e@(Lambda tparams pats e0 decl (Info (closure, ret)) loc) = do
   when (any isTypeParam tparams) $
     error $ "Received a lambda with type parameters at " ++ locStr loc
          ++ ", but the defunctionalizer expects a monomorphic input program."
   -- Extract the first parameter of the lambda and "push" the
   -- remaining ones (if there are any) into the body of the lambda.
-  let (dims, pat, e0') = case pats of
+  let (dims, pat, ret', e0') = case pats of
         [] -> error "Received a lambda with no parameters."
-        [pat'] -> (map typeParamName tparams, pat', e0)
+        [pat'] -> (map typeParamName tparams, pat', ret, e0)
         (pat' : pats') ->
           -- Split shape parameters into those that are determined by
           -- the first pattern, and those that are determined by later
@@ -227,14 +227,15 @@ defuncExp e@(Lambda tparams pats e0 decl tp loc) = do
           let bound_by_pat = (`S.member` patternDimNames pat') . typeParamName
               (pat_dims, rest_dims) = partition bound_by_pat tparams
           in (map typeParamName pat_dims, pat',
-              Lambda rest_dims pats' e0 decl tp loc)
+              foldFunType (map (toStruct . patternPatternType) pats') ret,
+              Lambda rest_dims pats' e0 decl (Info (closure, ret)) loc)
 
   -- Construct a record literal that closes over the environment of
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
   env <- restrictEnvTo (freeVars e)
   let (fields, env') = unzip $ map closureFromDynamicFun $ M.toList env
-  return (RecordLit fields loc, LambdaSV dims pat e0' $ M.fromList env')
+  return (RecordLit fields loc, LambdaSV dims pat ret' e0' $ M.fromList env')
 
   where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
           let name = nameFromString $ pretty vn
@@ -310,13 +311,15 @@ defuncExp (RecordUpdate e1 fs e2 _ loc) = do
   (e2', sv2) <- defuncExp e2
   let sv = staticField sv1 sv2 fs
   return (RecordUpdate e1' fs e2'
-           (Info $ vacuousShapeAnnotations $ typeFromSV sv) loc,
+           (Info $ vacuousShapeAnnotations $ typeFromSV sv1) loc,
           sv)
   where staticField (RecordSV svs) sv2 (f:fs') =
           case lookup f svs of
             Just sv -> RecordSV $
                        (f, staticField sv sv2 fs') : filter ((/=f) . fst) svs
             Nothing -> error "Invalid record projection."
+        staticField (Dynamic t@Record{}) sv2 fs'@(_:_) =
+          staticField (svFromType t) sv2 fs'
         staticField _ sv2 _ = sv2
 
 defuncExp e@(Map fun arr t loc) = do
@@ -487,7 +490,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
   (e2', sv2) <- defuncExp e2
   let e' = Apply e1' e2' d t loc
   case sv1 of
-    LambdaSV dims pat e0 closure_env -> do
+    LambdaSV dims pat e0_t e0 closure_env -> do
       let env' = matchPatternSV pat sv2
           env_dim = envFromDimNames dims
       (e0', sv) <- localNewEnv (env' <> closure_env <> env_dim) $ defuncExp e0
@@ -529,7 +532,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
         else do
           -- Lift lambda to top-level function definition.
           let params = [closure_pat, pat']
-              rettype = buildRetType closure_env params $ typeOf e0'
+              rettype = buildRetType closure_env params e0_t $ typeOf e0'
 
               -- Embed some information about the original function
               -- into the name of the lifted function, to make the
@@ -582,9 +585,9 @@ defuncApply depth e@(Var qn (Info t) loc) = do
             fname <- newName $ qualLeaf qn
             let (dims, pats, e0, sv') = liftDynFun sv depth
                 (argtypes', rettype) = dynamicFunType sv' argtypes
-            liftValDec fname rettype dims pats e0
+            liftValDec fname (fromStruct rettype) dims pats e0
             return (Var (qualName fname)
-                    (Info (foldFunType argtypes' rettype)) loc, sv')
+                    (Info (foldFunType argtypes' $ fromStruct rettype)) loc, sv')
 
       IntrinsicSV -> return (e, IntrinsicSV)
 
@@ -606,7 +609,7 @@ fullyApplied _ _ = True
 -- depth of partial application.
 liftDynFun :: StaticVal -> Int -> ([VName], [Pattern], Exp, StaticVal)
 liftDynFun (DynamicFun (e, sv) _) 0 = ([], [], e, sv)
-liftDynFun (DynamicFun clsr@(_, LambdaSV dims pat _ _) sv) d
+liftDynFun (DynamicFun clsr@(_, LambdaSV dims pat _ _ _) sv) d
   | d > 0 =  let (dims', pats, e', sv') = liftDynFun sv (d-1)
              in (dims ++ dims', pat : pats, e', DynamicFun clsr sv')
 liftDynFun sv _ = error $ "Tried to lift a StaticVal " ++ show sv
@@ -669,22 +672,27 @@ buildEnvPattern env = RecordPattern (map buildField $ M.toList env) noLoc
 -- lifted function can create unique arrays as long as they do not
 -- alias any of its parameters.  XXX: it is not clear that this is a
 -- sufficient property, unfortunately.
-buildRetType :: Env -> [Pattern] -> CompType -> PatternType
-buildRetType env pats = vacuousShapeAnnotations . descend
+buildRetType :: Env -> [Pattern] -> StructType -> CompType -> PatternType
+buildRetType env pats = comb
   where bound = foldMap oneName (M.keys env) <> foldMap patternVars pats
         boundAsUnique v =
           maybe False (unique . unInfo . identType) $
           find ((==v) . identName) $ S.toList $ foldMap patIdentSet pats
         problematic v = (v `member` bound) && not (boundAsUnique v)
+        comb (Record fs_annot) (Record fs_got) =
+          Record $ M.intersectionWith comb fs_annot fs_got
+        comb Arrow{} t = vacuousShapeAnnotations $ descend t
+        comb got _ = fromStruct got
+
         descend t@Array{}
-          | any problematic (aliases t) = t `setUniqueness` Nonunique
+          | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
         descend (Record t) = Record $ fmap descend t
         descend t = t
 
 -- | Compute the corresponding type for a given static value.
 typeFromSV :: StaticVal -> CompType
 typeFromSV (Dynamic tp)           = tp
-typeFromSV (LambdaSV _ _ _ env)   = typeFromEnv env
+typeFromSV (LambdaSV _ _ _ _ env) = typeFromEnv env
 typeFromSV (RecordSV ls)          = Record $ M.fromList $ map (fmap typeFromSV) ls
 typeFromSV (DynamicFun (_, sv) _) = typeFromSV sv
 typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
@@ -787,7 +795,7 @@ ident v = NameSet $ M.singleton (identName v) (uniqueness $ unInfo $ identType v
 oneName :: VName -> NameSet
 oneName v = NameSet $ M.singleton v Nonunique
 
-names :: Names -> NameSet
+names :: S.Set VName -> NameSet
 names = foldMap oneName
 
 -- | Compute the set of free variables of an expression.
@@ -881,34 +889,34 @@ patternVars = mconcat . map ident . S.toList . patIdentSet
 -- argument is the orignal type and the second is the type of the transformed
 -- expression. This is necessary since the original type may contain additional
 -- information (e.g., shape restrictions) from the user given annotation.
-combineTypeShapes :: ArrayDim dim =>
+combineTypeShapes :: (Monoid as, ArrayDim dim) =>
                      TypeBase dim as -> TypeBase dim as -> TypeBase dim as
 combineTypeShapes (Record ts1) (Record ts2)
   | M.keys ts1 == M.keys ts2 =
-  Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
-combineTypeShapes (Array et1 shape1 u1) (Array et2 shape2 _u2)
+      Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
+combineTypeShapes (Array als1 u1 et1 shape1) (Array als2 _u2 et2 shape2)
   | Just new_shape <- unifyShapes shape1 shape2 =
-      Array (combineElemTypeInfo et1 et2) new_shape u1
+      Array (als1<>als2) u1 (combineElemTypeInfo et1 et2) new_shape
 combineTypeShapes _ new_tp = new_tp
 
 combineElemTypeInfo :: ArrayDim dim =>
-                       ArrayElemTypeBase dim as
-                    -> ArrayElemTypeBase dim as -> ArrayElemTypeBase dim as
+                       ArrayElemTypeBase dim
+                    -> ArrayElemTypeBase dim -> ArrayElemTypeBase dim
 combineElemTypeInfo (ArrayRecordElem et1) (ArrayRecordElem et2) =
   ArrayRecordElem $ M.map (uncurry combineRecordArrayTypeInfo)
                           (M.intersectionWith (,) et1 et2)
 combineElemTypeInfo _ new_tp = new_tp
 
 combineRecordArrayTypeInfo :: ArrayDim dim =>
-                              RecordArrayElemTypeBase dim as
-                           -> RecordArrayElemTypeBase dim as
-                           -> RecordArrayElemTypeBase dim as
+                              RecordArrayElemTypeBase dim
+                           -> RecordArrayElemTypeBase dim
+                           -> RecordArrayElemTypeBase dim
 combineRecordArrayTypeInfo (RecordArrayElem et1) (RecordArrayElem et2) =
   RecordArrayElem $ combineElemTypeInfo et1 et2
-combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1 u1)
-                           (RecordArrayArrayElem et2 shape2 u2)
+combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1)
+                           (RecordArrayArrayElem et2 shape2)
   | Just new_shape <- unifyShapes shape1 shape2 =
-      RecordArrayArrayElem (combineElemTypeInfo et1 et2) new_shape (u1 <> u2)
+      RecordArrayArrayElem (combineElemTypeInfo et1 et2) new_shape
 combineRecordArrayTypeInfo _ new_tp = new_tp
 
 -- | Defunctionalize a top-level value binding. Returns the

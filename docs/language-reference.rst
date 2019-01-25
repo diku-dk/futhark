@@ -125,7 +125,7 @@ elide ``d``, in which case the size will be inferred.  As an example,
 an array of three integers could be written as ``[1,2,3]``, and has
 type ``[3]i32``.  An empty array is written as ``[]``, and its type is
 inferred from its use.  When writing Futhark values for such uses as
-``futhark-test`` (but not when writing programs), the syntax
+``futhark test`` (but not when writing programs), the syntax
 ``empty(t)`` can be used to denote an empty array with row type ``t``.
 
 Multi-dimensional arrays are supported in Futhark, but they must be
@@ -209,6 +209,10 @@ way as for `Type Abbreviations`_::
 
 Shape and type parameters are not passed explicitly when calling
 function, but are automatically derived.
+
+To simplify the handling of in-inplace updates (see
+:ref:`in-place-updates`), the value returned by a function may not
+alias any global variables.
 
 User-Defined Operators
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -866,7 +870,7 @@ updates`_) must be explicitly annotated.
 
 .. _in-place-updates:
 
-In-place updates
+In-place Updates
 ----------------
 
 In-place updates do not provide observable side effects, but they do
@@ -896,6 +900,36 @@ This allows the ``with`` expression to perform an in-place update.
 
 After a call ``modify a i x``, neither ``a`` or any variable that
 *aliases* ``a`` may be used on any following execution path.
+
+Alias Analysis
+~~~~~~~~~~~~~~
+
+The rules used by the Futhark compiler to determine aliasing are
+intuitive in the intra-procedural case.  Aliases are associated with
+entire arrays.  Aliases of a record are tuple are tracked for each
+element, not for the record or tuple itself.  Most constructs produce
+fresh arrays, with no aliases.  The main exceptions are ``if``,
+``loop``, function calls, and variable literals.
+
+* After a binding ``let a = b``, that simply assigns a new name to an
+  existing variable, the variable ``a`` aliases ``b``.  Similarly for
+  record projections and patterns.
+
+* The result of an ``if`` aliases the union of the aliases of the
+  components.
+
+* The result of a ``loop`` aliases the initial values, as well as any
+  aliases that the merge parameters may assume at the end of an
+  iteration, computed to a fixed point.
+
+* The aliases of a value returned from a function is the most
+  interesting case, and depends on whether the return value is
+  declared *unique* (with an asterisk ``*``) or not.  If it is
+  declared unique, then it has no aliases.  Otherwise, it aliases all
+  arguments passed for *non-unique* parameters.
+
+In-place Updates and Higher-Order Functions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Uniqueness typing generally interacts poorly with higher-order
 functions.  The issue is that we cannot control how many times a

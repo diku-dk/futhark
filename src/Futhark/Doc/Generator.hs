@@ -376,7 +376,9 @@ synopsisValBindBind :: (VName, BoundV) -> DocM Html
 synopsisValBindBind (name, BoundV tps t) = do
   let tps' = map typeParamHtml tps
   t' <- typeHtml t
-  return $ keyword "val " <> vnameHtml name <> joinBy " " tps' <> ": " <> t'
+  return $
+    keyword "val " <> vnameHtml name <>
+    mconcat (map (" "<>) tps') <> ": " <> t'
 
 prettyEnum :: [Name] -> Html
 prettyEnum cs = pipes $ map (("#"<>) . renderName) cs
@@ -396,7 +398,7 @@ typeHtml t = case t of
     targs' <- mapM typeArgHtml targs
     et' <- typeNameHtml et
     return $ prettyU u <> et' <> joinBy " " targs'
-  Array et shape u -> do
+  Array _ u et shape -> do
     shape' <- prettyShapeDecl shape
     et' <- prettyElem et
     return $ prettyU u <> shape' <> et'
@@ -410,9 +412,9 @@ typeHtml t = case t of
         t1' <> " -> " <> t2'
   Enum cs -> return $ prettyEnum cs
 
-prettyElem :: ArrayElemTypeBase (DimDecl VName) () -> DocM Html
-prettyElem (ArrayPrimElem et _) = return $ primTypeHtml et
-prettyElem (ArrayPolyElem et targs _) = do
+prettyElem :: ArrayElemTypeBase (DimDecl VName) -> DocM Html
+prettyElem (ArrayPrimElem et) = return $ primTypeHtml et
+prettyElem (ArrayPolyElem et targs) = do
   targs' <- mapM typeArgHtml targs
   return $ prettyTypeName et <> joinBy " " targs'
 prettyElem (ArrayRecordElem fs)
@@ -423,18 +425,18 @@ prettyElem (ArrayRecordElem fs)
   where ppField (name, tp) = do
           tp' <- prettyRecordElem tp
           return $ toHtml (nameToString name) <> ": " <> tp'
-prettyElem (ArrayEnumElem cs _ ) = return $ braces $ prettyEnum cs
+prettyElem (ArrayEnumElem cs) = return $ braces $ prettyEnum cs
 
-prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) () -> DocM Html
+prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) -> DocM Html
 prettyRecordElem (RecordArrayElem et) = prettyElem et
-prettyRecordElem (RecordArrayArrayElem et shape u) =
-  typeHtml $ Array et shape u
+prettyRecordElem (RecordArrayArrayElem et shape) =
+  typeHtml $ Array () Nonunique et shape
 
 prettyShapeDecl :: ShapeDecl (DimDecl VName) -> DocM Html
 prettyShapeDecl (ShapeDecl ds) =
   mconcat <$> mapM (fmap brackets . dimDeclHtml) ds
 
-typeArgHtml :: TypeArg (DimDecl VName) () -> DocM Html
+typeArgHtml :: TypeArg (DimDecl VName) -> DocM Html
 typeArgHtml (TypeArgDim d _) = brackets <$> dimDeclHtml d
 typeArgHtml (TypeArgType t _) = typeHtml t
 

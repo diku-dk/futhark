@@ -111,9 +111,8 @@
 -- -0.000443f32, 0.000283f32, -0.000084f32, 0.000129f32, 0.000419f32,
 -- -0.000178f32, -0.001124f32, -0.001211f32, 0.000297f32, 0.000291f32,
 -- 0.001163f32, 0.001455f32]]}
--- structure distributed { Kernel 7 }
+-- structure distributed { Kernel 2 SegRed 1 }
 
-import "/futlib/math"
 
 let main (nfeatures: i32) (npoints: i32) (nclusters: i32): [nclusters][nfeatures]f32 =
   let membership = map (%nclusters) (iota(npoints))

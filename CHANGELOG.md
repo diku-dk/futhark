@@ -5,7 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.8.0]
+## [0.9.0]
+
+### Added
+
+  * New command for comparing data files: `futhark datacmp`.
+
+### Removed
+
+### Changed
+
+  * Major command reorganisation: all Futhark programs have been
+    combined into a single all-powerful `futhark` program.  Instead of
+    e.g. `futhark-foo`, use `futhark foo`.  Wrappers will be kept
+    around under the old names for a little while.  `futharki` has
+    been split into two commands: `futhark repl` and `futhark run`.
+    Also, `py` has become `python` and `cs` has become `csharp`, but
+    `pyopencl` and `csopencl` have remained as they were.
+
+  * The result of a function is now forbidden from aliasing a global
+    variable.  Surprisingly little code is affected by this.
+
+  * A global definition may not be ascribed a unique type.  This never
+    had any effect in the first place, but now the compiler will
+    explicitly complain.
+
+  * Source spans are now printed in a slightly different format, with
+    ending the line number omitted when it is the same as the start
+    line number.
+
+### Fixed
+
+  * `futharki` now reports source locations of `trace` expressions
+    properly.
+
+  * The type checker now properly complains if you try to define a
+    type abbreviation that has unused size parameters.
+
+## [0.8.1]
 
 ### Added
 
@@ -14,8 +51,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futharki` now prints warnings for files that are ":load"ed.
 
   * The compiler now warns when entry points are declared with types
-    that will become unnamed and opaque, and thus impossible provide
-    from the outside.
+    that will become unnamed and opaque, and thus impossible to
+    provide from the outside.
 
   * Type variables invented by the type checker will now have a
     unicode subscript to distinguish them from type parameters
@@ -24,7 +61,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-test` and `futhark-bench` now support generating random
     test data.
 
+  * The library backends now generate proper names for arrays of
+    opaque values.
+
+  * The parser now permits empty programs.
+
+  * Most transpositions are now a good bit faster, especially on
+    NVIDIA GPUs.
+
 ### Removed
+
+  * The `<-` symbol can no longer be used for in-place updates and
+    record updates (deprecated in 0.7.3).
 
 ### Changed
 
@@ -36,6 +84,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `:type` command in `futharki` can now handle polymorphic
     expressions (#669).
 
+  * Fixed serious bug related to chaining record updates.
+
+  * Fixed type inference of record fields (#677).
+
+  * `futharki` no longer goes in an infinite loop if a ``for`` loop
+    contains a negative upper bound.
+
+  * Overloaded number types can no longer carry aliases (#682).
+
 ## [0.7.4]
 
 ### Added
@@ -46,7 +103,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed nasty defunctionalisation bug (#661).
 
-  * 'cabal`/`stack` `sdist` works now.
+  * `cabal sdist` and `stack sdist` works now.
 
 ## [0.7.3]
 

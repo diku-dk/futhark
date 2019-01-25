@@ -43,6 +43,8 @@ data Usage = Consumed SrcLoc
            | Observed SrcLoc
            deriving (Eq, Ord, Show)
 
+type Names = S.Set VName
+
 -- | The consumption set is a Maybe so we can distinguish whether a
 -- consumption took place, but the variable went out of scope since,
 -- or no consumption at all took place.
@@ -55,11 +57,11 @@ data Occurence = Occurence { observed :: Names
 instance Located Occurence where
   locOf = locOf . location
 
-observation :: Names -> SrcLoc -> Occurence
-observation = flip Occurence Nothing
+observation :: Aliasing -> SrcLoc -> Occurence
+observation = flip Occurence Nothing . S.map aliasVar
 
-consumption :: Names -> SrcLoc -> Occurence
-consumption = Occurence S.empty . Just
+consumption :: Aliasing -> SrcLoc -> Occurence
+consumption = Occurence S.empty . Just . S.map aliasVar
 
 -- | A null occurence is one that we can remove without affecting
 -- anything.
@@ -131,7 +133,11 @@ altOccurences occurs1 occurs2 =
 
 --- Scope management
 
-data ValBinding = BoundV [TypeParam] PatternType
+-- | Whether something is a global or a local variable.
+data Locality = Local | Global
+              deriving (Show)
+
+data ValBinding = BoundV Locality [TypeParam] PatternType
                 -- ^ Aliases in parameters indicate the lexical
                 -- closure.
                 | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
@@ -160,8 +166,10 @@ instance Monoid TermScope where
 
 envToTermScope :: Env -> TermScope
 envToTermScope env = TermScope vtable (envTypeTable env) (envNameMap env) mempty
-  where vtable = M.map valBinding $ envVtable env
-        valBinding (TypeM.BoundV tps v) = BoundV tps $ v `setAliases` mempty
+  where vtable = M.mapWithKey valBinding $ envVtable env
+        valBinding k (TypeM.BoundV tps v) =
+          BoundV Global tps $ v `setAliases`
+          (if arrayRank v > 0 then S.singleton (AliasBound k) else mempty)
 
 constraintTypeVars :: Constraints -> Names
 constraintTypeVars = mconcat . map f . M.elems
@@ -234,11 +242,11 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap mempty
         funF ts t = foldr (Arrow mempty Nothing . Prim) (Prim t) ts
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
-          Just (name, BoundV [] $ funF ts t)
+          Just (name, BoundV Global [] $ funF ts t)
         addIntrinsicF (name, IntrinsicOverloadedFun ts pts rts) =
           Just (name, OverloadedF ts pts rts)
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
-          Just (name, BoundV tvs $
+          Just (name, BoundV Global tvs $
                       fromStruct $ vacuousShapeAnnotations $
                       Arrow mempty Nothing pts' rt)
           where pts' = case pts of [pt] -> pt
@@ -291,7 +299,7 @@ instance MonadTypeChecker TermTypeM where
 
       Just (WasConsumed wloc) -> useAfterConsume (baseName name) loc wloc
 
-      Just (BoundV tparams t)
+      Just (BoundV _ tparams t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise -> do
             (tnames, t') <- instantiateTypeScheme loc tparams t
@@ -350,11 +358,11 @@ checkReallyQualName space qn loc = do
   (env, name') <- liftTypeM $ TypeM.checkQualNameWithEnv space qn loc
   return (envToTermScope env, name')
 
--- | Wrap 'checkTypeDecl' to also perform an observation of every size
--- in the type.
+-- | Wrap 'Types.checkTypeDecl' to also perform an observation of
+-- every size in the type.
 checkTypeDecl :: TypeDeclBase NoInfo Name -> TermTypeM (TypeDeclBase Info VName)
 checkTypeDecl tdecl = do
-  (tdecl', _) <- Types.checkTypeDecl tdecl
+  (tdecl', _) <- Types.checkTypeDecl [] tdecl
   mapM_ observeDim $ nestedDims $ unInfo $ expandedType tdecl'
   return tdecl'
   where observeDim (NamedDim v) = observe $ Ident (qualLeaf v) (Info $ Prim $ Signed Int32) noLoc
@@ -370,7 +378,7 @@ instantiateTypeScheme loc tparams t = do
       tnames = map typeParamName tparams'
   (fresh_tnames, inst_list) <- unzip <$> mapM (instantiateTypeParam loc) tparams'
   let substs = M.fromList $ zip tnames $
-               map vacuousShapeAnnotations inst_list
+               map (Subst . vacuousShapeAnnotations) inst_list
       t' = substTypesAny (`M.lookup` substs) t
   return (fresh_tnames, t')
 
@@ -389,8 +397,8 @@ newArrayType :: SrcLoc -> String -> Int -> TermTypeM (TypeBase () (), TypeBase (
 newArrayType loc desc r = do
   v <- newID $ nameFromString desc
   modifyConstraints $ M.insert v $ NoConstraint Nothing loc
-  return (Array (ArrayPolyElem (typeName v) [] ())
-                (ShapeDecl $ replicate r ()) Nonunique,
+  return (Array () Nonunique
+          (ArrayPolyElem (typeName v) []) (ShapeDecl $ replicate r ()),
           TypeVar () Nonunique (typeName v) [])
 
 --- Errors
@@ -398,8 +406,7 @@ newArrayType loc desc r = do
 useAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
 useAfterConsume name rloc wloc =
   throwError $ TypeError rloc $
-  "Variable " ++ pretty name ++ " used," ++
-  "but previously consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
+  "Variable " ++ pretty name ++ " previously consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
 
 consumeAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
 consumeAfterConsume name loc1 loc2 =
@@ -439,29 +446,29 @@ unifyExpTypes e1 e2 = do
 unifyTypeAliases :: CompType -> CompType -> CompType
 unifyTypeAliases t1 t2 =
   case (t1, t2) of
-    (Array et1 shape1 u1, Array et2 _ u2) ->
-      Array (unifyArrayElems et1 et2) shape1 $ min u1 u2
+    (Array als1 u1 et1 shape1, Array als2 u2 et2 _) ->
+      Array (als1<>als2) (min u1 u2) (unifyArrayElems et1 et2) shape1
     (Record f1, Record f2) ->
       Record $ M.intersectionWith unifyTypeAliases f1 f2
     (TypeVar als1 u v targs1, TypeVar als2 _ _ targs2) ->
       TypeVar (als1 <> als2) u v $ zipWith unifyTypeArg targs1 targs2
     _ -> t1
-  where unifyArrayElems (ArrayPrimElem pt1 als1) (ArrayPrimElem _ als2) =
-          ArrayPrimElem pt1 $ als1 <> als2
-        unifyArrayElems (ArrayPolyElem v targs1 als1) (ArrayPolyElem _ targs2 als2) =
-          ArrayPolyElem v (zipWith unifyTypeArg targs1 targs2) $ als1 <> als2
+  where unifyArrayElems (ArrayPrimElem pt1) (ArrayPrimElem _) =
+          ArrayPrimElem pt1
+        unifyArrayElems (ArrayPolyElem v targs1) (ArrayPolyElem _ _targs2) =
+          ArrayPolyElem v targs1
         unifyArrayElems (ArrayRecordElem fields1) (ArrayRecordElem fields2) =
           ArrayRecordElem $ M.intersectionWith unifyRecordArray fields1 fields2
         unifyArrayElems x _ = x
 
         unifyRecordArray (RecordArrayElem at1) (RecordArrayElem at2) =
           RecordArrayElem $ unifyArrayElems at1 at2
-        unifyRecordArray (RecordArrayArrayElem at1 shape1 u1) (RecordArrayArrayElem at2 _ u2) =
-          RecordArrayArrayElem (unifyArrayElems at1 at2) shape1 $ min u1 u2
+        unifyRecordArray (RecordArrayArrayElem at1 shape1) (RecordArrayArrayElem at2 _) =
+          RecordArrayArrayElem (unifyArrayElems at1 at2) shape1
         unifyRecordArray x _ = x
 
-        unifyTypeArg (TypeArgType t1' loc) (TypeArgType t2' _) =
-          TypeArgType (unifyTypeAliases t1' t2') loc
+        unifyTypeArg (TypeArgType t1' loc) (TypeArgType _ _) =
+          TypeArgType t1' loc
         unifyTypeArg a _ = a
 
 --- General binding.
@@ -478,9 +485,7 @@ checkPattern' (PatternParens p loc) t =
 
 checkPattern' (Id name NoInfo loc) (Ascribed t) = do
   name' <- checkName Term name loc
-  let t' = case t of Record{} -> t
-                     _        -> t `addAliases` S.insert name'
-  return $ Id name' (Info t') loc
+  return $ Id name' (Info t) loc
 checkPattern' (Id name NoInfo loc) NoneInferred = do
   name' <- checkName Term name loc
   t <- newTypeVar loc "t"
@@ -538,8 +543,8 @@ checkPattern' (PatternAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
           PatternAscription <$> checkPattern' p (Ascribed outer_t'') <*>
           pure (TypeDecl t' (Info st)) <*> pure loc
         Nothing ->
-          typeError loc $ "Cannot match type `" ++ pretty outer_t' ++ "' with expected type `" ++
-          pretty st'' ++ "'."
+          typeError loc $ "Cannot match type " ++ quote (pretty outer_t') ++ " with expected type " ++
+          quote (pretty st'') ++ "."
 
     NoneInferred ->
       PatternAscription <$> checkPattern' p (Ascribed st') <*>
@@ -575,15 +580,17 @@ binding bnds = check . local (`bindVars` bnds)
 
         bindVar :: TermScope -> Ident -> TermScope
         bindVar scope (Ident name (Info tp) _) =
-          let inedges = S.toList $ aliases tp
-              update (BoundV tparams tp')
+          let inedges = boundAliases $ aliases tp
+              update (BoundV l tparams in_t)
               -- If 'name' is record-typed, don't alias the components
               -- to 'name', because records have no identity beyond
               -- their components.
-                | Record _ <- tp = BoundV tparams tp'
-                | otherwise = BoundV tparams (tp' `addAliases` S.insert name)
+                | Record _ <- tp = BoundV l tparams in_t
+                | otherwise = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
               update b = b
-          in scope { scopeVtable = M.insert name (BoundV [] $ vacuousShapeAnnotations tp) $
+
+              tp' = vacuousShapeAnnotations tp `addAliases` S.insert (AliasBound name)
+          in scope { scopeVtable = M.insert name (BoundV Local [] tp') $
                                    adjustSeveral update inedges $
                                    scopeVtable scope
                    }
@@ -662,7 +669,7 @@ bindingPatternGroup tps orig_ps m = do
           -- dimensions.
           mapM_ observe $ mapMaybe typeParamIdent tps'
           let ps'' = reverse ps'
-          checkShapeParamUses tps' ps''
+          checkShapeParamUses patternUses tps' ps''
 
           m tps' ps''
 
@@ -678,30 +685,9 @@ bindingPattern tps p t m = do
       -- Perform an observation of every declared dimension.  This
       -- prevents unused-name warnings for otherwise unused dimensions.
       mapM_ observe $ patternDims p'
-      checkShapeParamUses tps' [p']
+      checkShapeParamUses patternUses tps' [p']
 
       m tps' p'
-
--- | Ensure that every shape parameter is used in positive position at
--- least once before being used in negative position.
-checkShapeParamUses :: [TypeParam] -> [Pattern] -> TermTypeM ()
-checkShapeParamUses tps ps = do
-  pos_uses <- foldM checkShapePositions [] ps
-  mapM_ (checkUsed pos_uses) tps
-  where checkShapePositions pos_uses p = do
-          let (pos, neg) = patternUses p
-              pos_uses' = pos <> pos_uses
-          forM_ neg (\pv -> unless (pv `elem` pos_uses') $
-                      typeError (srclocOf p) $ "Shape parameter " ++
-                      pretty (baseName pv) ++ " must first be given in " ++
-                      "a positive position (non-functional parameter).")
-          return pos_uses'
-        checkUsed uses (TypeParamDim pv loc)
-          | pv `elem` uses = return ()
-          | otherwise =
-              typeError loc $ "Size parameter " ++
-              pretty (baseName pv) ++ " not used in any value parameters."
-        checkUsed _ _ = return ()
 
 -- | Return the shapes used in a given pattern in postive and negative
 -- position, respectively.
@@ -714,21 +700,6 @@ patternUses (TuplePattern ps _) = foldMap patternUses ps
 patternUses (RecordPattern fs _) = foldMap (patternUses . snd) fs
 patternUses (PatternAscription p (TypeDecl declte _) _) =
   patternUses p <> typeExpUses declte
-  where typeExpUses (TEVar _ _) = mempty
-        typeExpUses (TETuple tes _) = foldMap typeExpUses tes
-        typeExpUses (TERecord fs _) = foldMap (typeExpUses . snd) fs
-        typeExpUses (TEArray te d _) = typeExpUses te <> dimDeclUses d
-        typeExpUses (TEUnique te _) = typeExpUses te
-        typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
-        typeExpUses (TEArrow _ t1 t2 _) =
-          let (pos, neg) = typeExpUses t1 <> typeExpUses t2
-          in (mempty, pos <> neg)
-        typeExpUses TEEnum{} = mempty
-        typeArgUses (TypeArgExpDim d _) = dimDeclUses d
-        typeArgUses (TypeArgExpType te) = typeExpUses te
-
-        dimDeclUses (NamedDim v) = ([qualLeaf v], [])
-        dimDeclUses _ = mempty
 
 noTypeParamsPermitted :: [UncheckedTypeParam] -> TermTypeM ()
 noTypeParamsPermitted ps =
@@ -760,6 +731,18 @@ unifies :: TypeBase () () -> Exp -> TermTypeM Exp
 unifies t e = do
   unify (srclocOf e) t =<< toStruct <$> expType e
   return e
+
+-- The closure of a lambda or local function are those variables that
+-- it references, and which local to the current top-level function.
+lexicalClosure :: [Pattern] -> Occurences -> TermTypeM Aliasing
+lexicalClosure params closure = do
+  vtable <- asks scopeVtable
+  let isLocal v = case v `M.lookup` vtable of
+                    Just (BoundV Local _ _) -> True
+                    _ -> False
+  return $ S.map AliasBound $ S.filter isLocal $
+    allOccuring closure S.\\
+    S.map identName (mconcat (map patIdentSet params))
 
 checkExp :: UncheckedExp -> TermTypeM Exp
 
@@ -880,7 +863,7 @@ checkExp (If e1 e2 e3 _ loc) =
   sequentially checkCond $ \e1' _ -> do
   ((e2', e3'), dflow) <- tapOccurences $ checkExp e2 `alternative` checkExp e3
   brancht <- unifyExpTypes e2' e3'
-  let t' = addAliases brancht (`S.difference` allConsumed dflow)
+  let t' = addAliases brancht (`S.difference` S.map AliasBound (allConsumed dflow))
   zeroOrderType loc "returned from branch" t'
   return $ If e1' e2' e3' (Info t') loc
   where checkCond = do
@@ -912,7 +895,9 @@ checkExp (Var qn NoInfo loc) = do
   -- end until we find a module.
 
   (qn', t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
-  foldM checkField (Var qn' (Info (vacuousShapeAnnotations t)) loc) fields
+
+  foldM checkField (Var qn' (Info $ vacuousShapeAnnotations t) loc) fields
+
   where findRootVar qs name =
           (whenFound <$> lookupVar loc (QualName qs name)) `catchError` notFound qs name
 
@@ -960,8 +945,10 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
     \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
 
+    closure' <- lexicalClosure params' closure
+
     let ftype = foldr (uncurry (Arrow ()) . patternParam) rettype params'
-        entry = BoundV tparams' $ ftype `setAliases` allOccuring closure
+        entry = BoundV Local tparams' $ ftype `setAliases` closure'
         bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope
                             , scopeNameMap = M.insert (Term, name) (qualName name') $
                                              scopeNameMap scope }
@@ -979,13 +966,13 @@ checkExp (LetWith dest src idxes ve body pos) = do
     void $ unifies t src''
 
     unless (unique $ unInfo $ identType src') $
-      typeError pos $ "Source '" ++ pretty (identName src) ++
-      "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
+      typeError pos $ "Source " ++ quote (pretty (identName src)) ++
+      " has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
 
     idxes' <- mapM checkDimIndex idxes
     sequentially (unifies elemt =<< checkExp ve) $ \ve' _ -> do
       ve_t <- expType ve'
-      when (identName src' `S.member` aliases ve_t) $
+      when (AliasBound (identName src') `S.member` aliases ve_t) $
         badLetWithValue pos
 
       bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
@@ -1004,8 +991,8 @@ checkExp (Update src idxes ve loc) = do
 
     src_t <- expType src'
     unless (unique src_t) $
-      typeError loc $ "Source '" ++ pretty src ++
-      "' has type " ++ pretty src_t ++ ", which is not unique"
+      typeError loc $ "Source " ++ quote (pretty src) ++
+      " has type " ++ pretty src_t ++ ", which is not unique"
 
     let src_als = aliases src_t
     ve_t <- expType ve'
@@ -1040,24 +1027,25 @@ checkExp (Zip i e es NoInfo loc) = do
   e' <- checkInput e
   es' <- mapM checkInput es
 
-  ts <- forM (e':es') $ \arr_e -> do
-    arr_e_t <- expType arr_e
-    case typeToRecordArrayElem' (aliases arr_e_t) =<< peelArray (i+1) arr_e_t of
+  e_ts <- mapM expType $ e':es'
+  ts <- forM (zip (e':es') e_ts) $ \(arr_e, arr_e_t) ->
+    case typeToRecordArrayElem =<< peelArray (i+1) arr_e_t of
       Just t -> return t
       Nothing -> typeError (srclocOf arr_e) $
                  "Expected array with at least " ++ show (1+i) ++
                  " dimensions, but got " ++ pretty arr_e_t ++ "."
 
   let u = mconcat $ map (uniqueness . typeOf) $ e':es'
-      t = Array (ArrayRecordElem $ M.fromList $ zip tupleFieldNames ts)
-                (rank (1+i)) u
+      t = Array (mconcat $ map aliases e_ts) u
+          (ArrayRecordElem $ M.fromList $ zip tupleFieldNames ts)
+          (rank (1+i))
   return $ Zip i e' es' (Info t) loc
 
 checkExp (Unzip e _ loc) = do
   e' <- checkExp e
   e_t <- expType e'
   case e_t of
-    Array (ArrayRecordElem fs) shape u
+    Array _ u (ArrayRecordElem fs) shape
       | Just ets <- map (componentType shape u) <$> areTupleFields fs ->
           return $ Unzip e' (map Info ets) loc
     t ->
@@ -1067,9 +1055,9 @@ checkExp (Unzip e _ loc) = do
   where componentType shape u et =
           case et of
             RecordArrayElem et' ->
-              Array et' shape u
-            RecordArrayArrayElem et' et_shape et_u ->
-              Array et' (shape <> et_shape) (u `max` et_u)
+              Array mempty u et' shape
+            RecordArrayArrayElem et' et_shape ->
+              Array mempty u et' (shape <> et_shape)
 
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc
@@ -1097,13 +1085,15 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
       Just retdecl'@(TypeDecl _ (Info st)) -> return (Just retdecl', st)
       Nothing -> do
         body_t <- expType body'
-        return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
-    return $ Lambda tparams' params' body' maybe_retdecl''
-      (Info (allOccuring closure, rettype)) loc
+        return (Nothing, inferReturnUniqueness params' body_t)
+
+    closure' <- lexicalClosure params' closure
+
+    return $ Lambda tparams' params' body' maybe_retdecl'' (Info (closure', rettype)) loc
 
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
-  return $ OpSection op' (Info (vacuousShapeAnnotations ftype)) loc
+  return $ OpSection op' (Info $ vacuousShapeAnnotations ftype) loc
 
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
@@ -1262,7 +1252,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       bound_outside <- asks $ S.fromList . M.keys . scopeVtable
       let checkMergeReturn (Id pat_v (Info pat_v_t) _) t
             | unique pat_v_t,
-              v:_ <- S.toList $ aliases t `S.intersection` bound_outside =
+              v:_ <- S.toList $ S.map aliasVar (aliases t) `S.intersection` bound_outside =
                 lift $ typeError loc $ "Loop return value corresponding to merge parameter " ++
                 prettyName pat_v ++ " aliases " ++ prettyName v ++ "."
             | otherwise = do
@@ -1282,8 +1272,8 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
           checkMergeReturn _ _ =
             return ()
       (pat_cons, _) <- execStateT (checkMergeReturn pat' body_t') (mempty, mempty)
-      let body_cons' = body_cons <> pat_cons
-      if body_cons' == body_cons && patternType pat' == patternType pat
+      let body_cons' = body_cons <> S.map aliasVar pat_cons
+      if body_cons' == body_cons && patternPatternType pat' == patternPatternType pat
         then return pat'
         else convergePattern pat' body_cons' body_t' body_loc
 
@@ -1292,31 +1282,38 @@ checkExp (VConstr0 name NoInfo loc) = do
   mustHaveConstr loc name t
   return $ VConstr0 name (Info t) loc
 
-checkExp (Match e cs NoInfo loc) = do
-  e' <- checkExp e
-  mt <- expType e'
-  (t', cs') <- mustHaveSameType loc mt cs
-  return $ Match e' cs' (Info t') loc
+checkExp (Match _ [] NoInfo loc) =
+  typeError loc "Match expressions must have at least one case."
 
-mustHaveSameType :: SrcLoc -> CompType -> [CaseBase NoInfo Name]
-                  -> TermTypeM (CompType, [CaseBase Info VName])
-mustHaveSameType loc _ [] = typeError loc "Match expressions must have at least one case."
-mustHaveSameType loc mt (c:cs) = do
-  s   <- newTypeVar loc "s"
-  c'  <- checkCase mt s c
-  ct  <- expType $ caseExp c'
-  cs' <- mapM (checkCase mt ct) cs
-  return (ct, c':cs')
-  where caseExp (CasePat _ e _) = e
+checkExp (Match e (c:cs) NoInfo loc) =
+  sequentially (checkExp e) $ \e' _ -> do
+    mt <- expType e'
+    (cs', t) <- checkCases mt c cs
+    zeroOrderType loc "returned from pattern match" t
+    return $ Match e' cs' (Info t) loc
 
-checkCase :: CompType -> CompType -> CaseBase NoInfo Name
-          -> TermTypeM (CaseBase Info VName)
-checkCase mt ct (CasePat p caseExp loc) =
+checkCases :: CompType
+           -> CaseBase NoInfo Name
+           -> [CaseBase NoInfo Name]
+           -> TermTypeM ([CaseBase Info VName], CompType)
+checkCases mt c [] = do
+  (c', t) <- checkCase mt c
+  return ([c'], t)
+checkCases mt c (c2:cs) = do
+  (((c', c_t), (cs', cs_t)), dflow) <-
+    tapOccurences $ checkCase mt c `alternative` checkCases mt c2 cs
+  unify (srclocOf c) (toStruct c_t) (toStruct cs_t)
+  let t = unifyTypeAliases c_t cs_t `addAliases`
+        (`S.difference` S.map AliasBound (allConsumed dflow))
+  return (c':cs', t)
+
+checkCase :: CompType -> CaseBase NoInfo Name
+          -> TermTypeM (CaseBase Info VName, CompType)
+checkCase mt (CasePat p caseExp loc) =
   bindingPattern [] p (Ascribed $ vacuousShapeAnnotations mt) $ \_ p' -> do
     caseExp' <- checkExp caseExp
     caseType <- expType caseExp'
-    unify loc (toStructural ct) (toStructural caseType)
-    return $ CasePat p' caseExp' loc
+    return (CasePat p' caseExp' loc, caseType)
 
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.
@@ -1505,10 +1502,8 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
     _ -> return ()
 
   occur $ dflow `seqOccurences` occurs
-
-  return (vacuousShapeAnnotations tp1',
-          vacuousShapeAnnotations $
-           returnType (toStruct tp2') [diet tp1'] [argtype'])
+  let tp2'' = vacuousShapeAnnotations $ returnType tp2' (diet tp1') argtype'
+  return (vacuousShapeAnnotations tp1', tp2'')
 
 checkApply loc tfun@TypeVar{} arg = do
   tv <- newTypeVar loc "b"
@@ -1524,12 +1519,12 @@ checkApply loc ftype arg =
 consumeArg :: SrcLoc -> CompType -> Diet -> TermTypeM [Occurence]
 consumeArg loc (Record ets) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
-consumeArg loc (Array _ _ Nonunique) Consume =
+consumeArg loc (Array _ Nonunique _ _) Consume =
   typeError loc "Consuming parameter passed non-unique argument."
 consumeArg loc (Arrow _ _ t1 _) (FuncDiet d _)
   | not $ contravariantArg t1 d =
       typeError loc "Non-consuming higher-order parameter passed consuming argument."
-  where contravariantArg (Array _ _ Unique) Observe =
+  where contravariantArg (Array _ Unique _ _) Observe =
           False
         contravariantArg (TypeVar _ Unique _ _) Observe =
           False
@@ -1554,6 +1549,8 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   return (tparams, e'')
 
 -- | Type-check a top-level (or module-level) function definition.
+-- Despite the name, this is also used for checking constant
+-- definitions, by treating them as 0-ary functions.
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
                 [UncheckedTypeParam], [UncheckedPattern],
                 UncheckedExp, SrcLoc)
@@ -1638,14 +1635,35 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
       Just (retdecl', retdecl_type, _) -> do
         let rettype_structural = toStructural retdecl_type
         checkReturnAlias rettype_structural params'' body_t
+
+        when (null params) $ nothingMustBeUnique loc rettype_structural
+
         return (Just retdecl', retdecl_type)
-      Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct body_t)
+      Nothing
+        | null params ->
+            return (Nothing, vacuousShapeAnnotations $ toStruct $ body_t `setUniqueness` Nonunique)
+        | otherwise ->
+            return (Nothing, inferReturnUniqueness params'' body_t)
 
     tparams'' <- letGeneralise tparams' (rettype : map patternStructType params'') then_substs
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
-      return (fname', tparams'', params'', maybe_retdecl'', rettype, body')
+      vtable <- asks scopeVtable
+      let isLocal v = case v `M.lookup` vtable of
+                        Just (BoundV Local _ _) -> True
+                        _ -> False
+      let als = filter (not . isLocal) $ S.toList $
+                boundArrayAliases body_t `S.difference`
+                S.map identName (mconcat (map patIdentSet params'))
+      case als of
+        v:_ | not $ null params ->
+          typeError loc $
+          unlines [ "Function result aliases the free variable " <>
+                    quote (prettyName v) <> "."
+                  , "Use " ++ quote "copy" ++ " to break the aliasing."]
+        _ ->
+          return (fname', tparams'', params'', maybe_retdecl'', rettype, body')
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -1653,10 +1671,10 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           foldM_ (checkReturnAlias' params') S.empty . returnAliasing rettp
         checkReturnAlias' params' seen (Unique, names)
           | any (`S.member` S.map snd seen) $ S.toList names =
-            uniqueReturnAliased fname loc
+              uniqueReturnAliased fname loc
           | otherwise = do
-            notAliasingParam params' names
-            return $ seen `S.union` tag Unique names
+              notAliasingParam params' names
+              return $ seen `S.union` tag Unique names
         checkReturnAlias' _ seen (Nonunique, names)
           | any (`S.member` seen) $ S.toList $ tag Unique names =
             uniqueReturnAliased fname loc
@@ -1676,7 +1694,58 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
 
         returnAliasing (Record ets1) (Record ets2) =
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
-        returnAliasing expected got = [(uniqueness expected, aliases got)]
+        returnAliasing expected got =
+          [(uniqueness expected, S.map aliasVar $ aliases got)]
+
+inferReturnUniqueness :: [Pattern] -> CompType -> StructType
+inferReturnUniqueness params t =
+  let forbidden = aliasesMultipleTimes t
+      uniques = uniqueParamNames params
+      delve (Record fs) =
+        Record $ M.map delve fs
+      delve t'
+        | all (`S.member` uniques) (boundArrayAliases t'),
+          not $ any ((`S.member` forbidden) . aliasVar) (aliases t') =
+            toStruct t'
+        | otherwise =
+            toStruct $ t' `setUniqueness` Nonunique
+  in vacuousShapeAnnotations $ delve t
+
+-- An alias inhibits uniqueness if it is used in disjoint values.
+aliasesMultipleTimes :: CompType -> Names
+aliasesMultipleTimes = S.fromList . map fst . filter ((>1) . snd) . M.toList . delve
+  where delve (Record fs) =
+          foldl' (M.unionWith (+)) mempty $ map delve $ M.elems fs
+        delve t =
+          M.fromList $ zip (map aliasVar $ S.toList (aliases t)) $ repeat (1::Int)
+
+uniqueParamNames :: [Pattern] -> Names
+uniqueParamNames =
+  S.fromList . map identName
+  . filter (unique . unInfo . identType)
+  . S.toList . mconcat . map patIdentSet
+
+boundArrayAliases :: CompType -> S.Set VName
+boundArrayAliases (Array als _ _ _) = boundAliases als
+boundArrayAliases Prim{} = mempty
+boundArrayAliases Enum{} = mempty
+boundArrayAliases (Record fs) = foldMap boundArrayAliases fs
+boundArrayAliases (TypeVar als _ _ _) = boundAliases als
+boundArrayAliases Arrow{} = mempty
+
+-- | The set of in-scope variables that are being aliased.
+boundAliases :: Aliasing -> S.Set VName
+boundAliases = S.map aliasVar . S.filter bound
+  where bound AliasBound{} = True
+        bound AliasFree{} = False
+
+nothingMustBeUnique :: SrcLoc -> TypeBase () () -> TermTypeM ()
+nothingMustBeUnique loc = check
+  where check (Array _ Unique _ _) = bad
+        check (TypeVar _ Unique _ _) = bad
+        check (Record fs) = mapM_ check fs
+        check _ = return ()
+        bad = typeError loc "A top-level constant cannot have a unique type."
 
 letGeneralise :: [TypeParam]
               -> [StructType]
@@ -1728,9 +1797,9 @@ checkFunBody body maybe_rettype _loc = do
       rettype_structural' <- normaliseType rettype_structural
       body_t <- expType body'
       unless (body_t `subtypeOf` rettype_structural') $
-        typeError (srclocOf body) $ "Body type `" ++ pretty body_t ++
-        "' is not a subtype of annotated type `" ++
-        pretty rettype_structural' ++ "'."
+        typeError (srclocOf body) $ "Body type " ++ quote (pretty body_t) ++
+        " is not a subtype of annotated type " ++
+        quote (pretty rettype_structural') ++ "."
 
     Nothing -> return ()
 
@@ -1754,8 +1823,8 @@ closeOverTypes substs tparams ts =
             k `elem` map typeParamName tparams = return ()
           | otherwise =
               typeError (srclocOf v) $
-              unlines ["Type variable `" ++ prettyName k ++
-                        "' not closed over by type parameters " ++
+              unlines ["Type variable " ++ quote (prettyName k) ++
+                        " not closed over by type parameters " ++
                         intercalate ", " (map pretty tparams) ++ ".",
                         "This is usually because a parameter needs a type annotation."]
 
@@ -1774,19 +1843,29 @@ occur = tell
 -- | Proclaim that we have made read-only use of the given variable.
 observe :: Ident -> TermTypeM ()
 observe (Ident nm (Info t) loc) =
-  let als = nm `S.insert` aliases t
+  let als = AliasBound nm `S.insert` aliases t
   in occur [observation als loc]
 
 -- | Proclaim that we have written to the given variable.
-consume :: SrcLoc -> Names -> TermTypeM ()
-consume loc als = occur [consumption als loc]
+consume :: SrcLoc -> Aliasing -> TermTypeM ()
+consume loc als = do
+  vtable <- asks scopeVtable
+  let consumable v = case M.lookup v vtable of
+                       Just (BoundV Local _ t)
+                         | arrayRank t > 0 -> unique t
+                         | otherwise -> True
+                       _ -> False
+  case filter (not . consumable) $ map aliasVar $ S.toList als of
+    v:_ -> typeError loc $ "Attempt to consume variable " ++ quote (prettyName v)
+           ++ ", which is not allowed."
+    [] -> occur [consumption als loc]
 
 -- | Proclaim that we have written to the given variable, and mark
 -- accesses to it and all of its aliases as invalid inside the given
 -- computation.
 consuming :: Ident -> TermTypeM a -> TermTypeM a
 consuming (Ident name (Info t) loc) m = do
-  consume loc $ name `S.insert` aliases t
+  consume loc $ AliasBound name `S.insert` aliases t
   local consume' m
   where consume' scope =
           scope { scopeVtable = M.insert name (WasConsumed loc) $ scopeVtable scope }
@@ -1806,7 +1885,7 @@ checkIfUsed :: Occurences -> Ident -> TermTypeM ()
 checkIfUsed occs v
   | not $ identName v `S.member` allOccuring occs,
     not $ "_" `isPrefixOf` prettyName (identName v) =
-      warn (srclocOf v) $ "Unused variable '"++pretty (baseName $ identName v)++"'."
+      warn (srclocOf v) $ "Unused variable " ++ quote (pretty $ baseName $ identName v) ++ "."
   | otherwise =
       return ()
 
@@ -1822,7 +1901,7 @@ alternative m1 m2 = pass $ do
 -- | Make all bindings nonunique.
 noUnique :: TermTypeM a -> TermTypeM a
 noUnique = local (\scope -> scope { scopeVtable = M.map set $ scopeVtable scope})
-  where set (BoundV tparams t)      = BoundV tparams $ t `setUniqueness` Nonunique
+  where set (BoundV l tparams t)    = BoundV l tparams $ t `setUniqueness` Nonunique
         set (OverloadedF ts pts rt) = OverloadedF ts pts rt
         set EqualityF               = EqualityF
         set OpaqueF                 = OpaqueF
@@ -1830,7 +1909,8 @@ noUnique = local (\scope -> scope { scopeVtable = M.map set $ scopeVtable scope}
 
 onlySelfAliasing :: TermTypeM a -> TermTypeM a
 onlySelfAliasing = local (\scope -> scope { scopeVtable = M.mapWithKey set $ scopeVtable scope})
-  where set k (BoundV tparams t)      = BoundV tparams $ t `addAliases` S.intersection (S.singleton k)
+  where set k (BoundV l tparams t)    = BoundV l tparams $
+                                        t `addAliases` S.intersection (S.singleton (AliasBound k))
         set _ (OverloadedF ts pts rt) = OverloadedF ts pts rt
         set _ EqualityF               = EqualityF
         set _ OpaqueF                 = OpaqueF

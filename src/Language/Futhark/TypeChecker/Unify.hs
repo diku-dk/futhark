@@ -60,9 +60,11 @@ instance Located Constraint where
   locOf (Equality loc) = locOf loc
   locOf (HasConstrs _ loc) = locOf loc
 
-lookupSubst :: VName -> Constraints -> Maybe (TypeBase () ())
-lookupSubst v constraints = do Constraint t _ <- M.lookup v constraints
-                               Just t
+lookupSubst :: VName -> Constraints -> Maybe (Subst (TypeBase () ()))
+lookupSubst v constraints = case M.lookup v constraints of
+                              Just (Constraint t _) -> Just $ Subst t
+                              Just Overloaded{} -> Just PrimSubst
+                              _ -> Nothing
 
 class (MonadBreadCrumbs m, MonadError TypeError m) => MonadUnify m where
   getConstraints :: m Constraints
@@ -153,9 +155,9 @@ unify loc orig_t1 orig_t2 = do
 
 applySubstInConstraint :: VName -> TypeBase () () -> Constraint -> Constraint
 applySubstInConstraint vn tp (Constraint t loc) =
-  Constraint (applySubst (`M.lookup` M.singleton vn tp) t) loc
+  Constraint (applySubst (flip M.lookup $ M.singleton vn $ Subst tp) t) loc
 applySubstInConstraint vn tp (HasFields fs loc) =
-  HasFields (M.map (applySubst (`M.lookup` M.singleton vn tp)) fs) loc
+  HasFields (M.map (applySubst (flip M.lookup $ M.singleton vn $ Subst tp)) fs) loc
 applySubstInConstraint _ _ (NoConstraint l loc) = NoConstraint l loc
 applySubstInConstraint _ _ (Overloaded ts loc) = Overloaded ts loc
 applySubstInConstraint _ _ (Equality loc) = Equality loc
@@ -343,7 +345,7 @@ mustHaveField loc l t = do
           return l_type
       | Just (HasFields fields _) <- M.lookup tn constraints -> do
           case M.lookup l fields of
-            Just t' -> unify loc (toStructural t) t'
+            Just t' -> unify loc l_type' t'
             Nothing -> modifyConstraints $ M.insert tn $
                        HasFields (M.insert l l_type' fields) loc
           return l_type
