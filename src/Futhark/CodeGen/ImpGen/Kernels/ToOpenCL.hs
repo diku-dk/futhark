@@ -150,7 +150,7 @@ onKernel target kernel = do
         prepareLocalMemory TargetCUDA (mem, Right size) = do
           let size' = compilePrimExp size
           return (Nothing,
-                  [CUDAC.citem|__shared__ volatile char *$id:mem[$exp:size'];|])
+                  [CUDAC.citem|__shared__ volatile char $id:mem[$exp:size'];|])
         name = nameToString $ kernelName kernel
         num_groups = kernelNumGroups kernel
         group_size = kernelGroupSize kernel
