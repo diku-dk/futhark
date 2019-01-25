@@ -376,7 +376,9 @@ synopsisValBindBind :: (VName, BoundV) -> DocM Html
 synopsisValBindBind (name, BoundV tps t) = do
   let tps' = map typeParamHtml tps
   t' <- typeHtml t
-  return $ keyword "val " <> vnameHtml name <> joinBy " " tps' <> ": " <> t'
+  return $
+    keyword "val " <> vnameHtml name <>
+    mconcat (map (" "<>) tps') <> ": " <> t'
 
 prettyEnum :: [Name] -> Html
 prettyEnum cs = pipes $ map (("#"<>) . renderName) cs
