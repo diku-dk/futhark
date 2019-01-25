@@ -192,7 +192,7 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
       shared_offsets_sc = mkOffsets shared_sizes
       shared_args = zip shared_offsets shared_offsets_sc
       shared_tot = last shared_offsets_sc
-  mapM_ (\(arg,offset) -> do
+  mapM_ (\(arg,offset) ->
            GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
         ) shared_args
 
@@ -233,7 +233,7 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
     mkDims (x:y:z:_) = (x, y, z)
     addExp x y = [C.cexp|$exp:x + $exp:y|]
     alignExp e = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
-    mkOffsets = scanl (\a b -> a `addExp` (alignExp b)) [C.cexp|0|]
+    mkOffsets = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
     expNotZero e = [C.cexp|$exp:e != 0|]
     expAnd a b = [C.cexp|$exp:a && $exp:b|]
     expsNotZero = foldl expAnd [C.cexp|1|] . map expNotZero
@@ -255,4 +255,3 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
       intercalate [[C.cstm|fprintf(stderr, ", ");|]] . map printSize
     printSize e =
       [[C.cstm|fprintf(stderr, "%zu", $exp:e);|]]
-

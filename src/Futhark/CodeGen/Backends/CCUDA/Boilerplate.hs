@@ -21,7 +21,7 @@ generateBoilerplate :: String -> String -> [String]
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenCL () ()
 generateBoilerplate cuda_program cuda_prelude kernel_names sizes = do
-  GC.earlyDecls $ [C.cunit|
+  GC.earlyDecls [C.cunit|
       $esc:("#define FUTHARK_CUDA")
       $esc:free_list_h
       $esc:cuda_h
@@ -78,7 +78,7 @@ generateConfigFuns sizes = do
                             };|])
 
   let size_value_inits = map (\i -> [C.cstm|cfg->sizes[$int:i] = 0;|])
-                          $ [0..M.size sizes-1]
+                           [0..M.size sizes-1]
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {
@@ -189,7 +189,7 @@ generateContextFuns cfg kernel_names sizes = do
   final_inits <- GC.contextFinalInits
   (fields, init_fields) <- GC.contextContents
   let kernel_fields = map (\k -> [C.csdecl|typename CUfunction $id:k;|])
-                        $ kernel_names
+                        kernel_names
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
