@@ -328,8 +328,8 @@ static inline void mem_fence(int x)
     __threadfence();
   }
 }
-$esc:("#define NAN __longlong_as_double(0x7ff0000000000001ULL)")
-$esc:("#define INFINITY __longlong_as_double(0x7ff0000000000000ULL)")
+$esc:("#define NAN (0.0/0.0)")
+$esc:("#define INFINITY (1.0/0.0)")
 extern volatile __shared__ char shared_mem[];
 |]
 
