@@ -312,10 +312,21 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
   $stms:(map sizeHeuristicsCode sizeHeuristicsTable)
 }|]]
 
+        free_list_h = $(embedStringFile "rts/c/free_list.h")
         openCL_h = $(embedStringFile "rts/c/opencl.h")
 
         program_fragments = opencl_program_fragments ++ [[C.cinit|NULL|]]
         openCL_boilerplate = [C.cunit|
+
+          $esc:("#define CL_USE_DEPRECATED_OPENCL_1_2_APIS")
+          $esc:("#define CL_SILENCE_DEPRECATION // For macOS.")
+          $esc:("#ifdef __APPLE__")
+          $esc:("  #include <OpenCL/cl.h>")
+          $esc:("#else")
+          $esc:("  #include <CL/cl.h>")
+          $esc:("#endif")
+          $esc:("typedef cl_mem fl_mem_t;")
+          $esc:free_list_h
           $esc:openCL_h
           const char *opencl_program[] = {$inits:program_fragments};|]
 

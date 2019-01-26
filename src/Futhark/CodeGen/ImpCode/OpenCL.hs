@@ -14,6 +14,7 @@ module Futhark.CodeGen.ImpCode.OpenCL
        , KernelName
        , KernelArg (..)
        , OpenCL (..)
+       , KernelTarget (..)
        , module Futhark.CodeGen.ImpCode
        , module Futhark.Representation.Kernels.Sizes
        )
@@ -64,6 +65,11 @@ data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
             | CmpSizeLe VName Name Exp
             | GetSizeMax VName SizeClass
             deriving (Show)
+
+-- | The target platform when compiling imperative code to a 'Program'
+data KernelTarget = TargetOpenCL
+                  | TargetCUDA
+                  deriving (Eq)
 
 instance Pretty OpenCL where
   ppr = text . show
