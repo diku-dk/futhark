@@ -121,6 +121,19 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          cfg->opencl.load_program_from = path;
                        }|])
 
+
+  GC.publicDef_ "context_config_dump_binary_to" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
+                         cfg->opencl.dump_binary_to = path;
+                       }|])
+
+  GC.publicDef_ "context_config_load_binary_from" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
+                         cfg->opencl.load_binary_from = path;
+                       }|])
+
   GC.publicDef_ "context_config_set_default_group_size" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg, int size);|],
      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
@@ -333,7 +346,7 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{
   ctx->$id:name = clCreateKernel(prog, $string:name, &error);
-  assert(error == 0);
+  OPENCL_SUCCEED_FATAL(error);
   if (ctx->debugging) {
     fprintf(stderr, "Created kernel %s.\n", $string:name);
   }

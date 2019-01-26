@@ -30,6 +30,8 @@ struct opencl_config {
 
   const char* dump_program_to;
   const char* load_program_from;
+  const char* dump_binary_to;
+  const char* load_binary_from;
 
   size_t default_group_size;
   size_t default_num_groups;
@@ -59,6 +61,8 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->preferred_device = "";
   cfg->dump_program_to = NULL;
   cfg->load_program_from = NULL;
+  cfg->dump_binary_to = NULL;
+  cfg->load_binary_from = NULL;
 
   // The following are dummy sizes that mean the concrete defaults
   // will be set during initialisation via hardware-inspection-based
@@ -119,6 +123,30 @@ static char *strclone(const char *str) {
 
   memcpy(copy, str, size);
   return copy;
+}
+
+// Read a file into a NUL-terminated string; returns NULL on error.
+static char* slurp_file(const char *filename, size_t *size) {
+  char *s;
+  FILE *f = fopen(filename, "rb"); // To avoid Windows messing with linebreaks.
+  if (f == NULL) return NULL;
+  fseek(f, 0, SEEK_END);
+  size_t src_size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  s = (char*) malloc(src_size + 1);
+  if (fread(s, 1, src_size, f) != src_size) {
+    free(s);
+    s = NULL;
+  } else {
+    s[src_size] = '\0';
+  }
+  fclose(f);
+
+  if (size) {
+    *size = src_size;
+  }
+
+  return s;
 }
 
 static const char* opencl_error_string(unsigned int err)
@@ -530,14 +558,8 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
   // Maybe we have to read OpenCL source from somewhere else (used for debugging).
   if (ctx->cfg.load_program_from != NULL) {
-    FILE *f = fopen(ctx->cfg.load_program_from, "r");
-    assert(f != NULL);
-    fseek(f, 0, SEEK_END);
-    src_size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    fut_opencl_src = malloc(src_size);
-    assert(fread(fut_opencl_src, 1, src_size, f) == src_size);
-    fclose(f);
+    fut_opencl_src = slurp_file(ctx->cfg.load_program_from, NULL);
+    assert(fut_opencl_src != NULL);
   } else {
     // Build the OpenCL program.  First we have to concatenate all the fragments.
     for (const char **src = srcs; src && *src; src++) {
@@ -566,29 +588,61 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     fclose(f);
   }
 
-  prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
-  assert(error == 0);
+  if (ctx->cfg.load_binary_from == NULL) {
+    prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
+    assert(error == 0);
 
-  int compile_opts_size = 1024;
-  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
-    compile_opts_size += strlen(ctx->cfg.size_names[i]) + 20;
+    int compile_opts_size = 1024;
+    for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+      compile_opts_size += strlen(ctx->cfg.size_names[i]) + 20;
+    }
+    char *compile_opts = malloc(compile_opts_size);
+
+    int w = snprintf(compile_opts, compile_opts_size,
+                     "-DLOCKSTEP_WIDTH=%d ",
+                     (int)ctx->lockstep_width);
+
+    for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+      w += snprintf(compile_opts+w, compile_opts_size-w,
+                    "-D%s=%d ",
+                    ctx->cfg.size_vars[i],
+                    (int)ctx->cfg.size_values[i]);
+    }
+
+    OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
+
+    free(compile_opts);
+  } else {
+    size_t binary_size;
+    char *fut_opencl_bin = slurp_file(ctx->cfg.load_binary_from, &binary_size);
+    assert(fut_opencl_src != NULL);
+    const unsigned char *binaries[1] = { fut_opencl_bin };
+    cl_int status = 0;
+
+    prog = clCreateProgramWithBinary(ctx->ctx, 1, &device_option.device,
+                                     &binary_size, binaries,
+                                     &status, &error);
+
+    OPENCL_SUCCEED_FATAL(status);
+    OPENCL_SUCCEED_FATAL(error);
   }
-  char *compile_opts = malloc(compile_opts_size);
 
-  int w = snprintf(compile_opts, compile_opts_size,
-                   "-DLOCKSTEP_WIDTH=%d ",
-                   (int)ctx->lockstep_width);
-
-  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
-    w += snprintf(compile_opts+w, compile_opts_size-w,
-                  "-D%s=%d ",
-                  ctx->cfg.size_vars[i],
-                  (int)ctx->cfg.size_values[i]);
-  }
-
-  OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
-  free(compile_opts);
   free(fut_opencl_src);
+
+  if (ctx->cfg.dump_binary_to != NULL) {
+    size_t binary_size;
+    OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARY_SIZES,
+                                          sizeof(size_t), &binary_size, NULL));
+    unsigned char *binary = malloc(binary_size);
+    unsigned char *binaries[1] = { binary };
+    OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARIES,
+                                          sizeof(unsigned char*), binaries, NULL));
+
+    FILE *f = fopen(ctx->cfg.dump_binary_to, "w");
+    assert(f != NULL);
+    fwrite(binary, sizeof(char), binary_size, f);
+    fclose(f);
+  }
 
   return prog;
 }

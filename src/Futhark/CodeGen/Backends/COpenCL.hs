@@ -91,6 +91,16 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionArgument = RequiredArgument
                       , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
                       }
+             , Option { optionLongName = "dump-opencl-binary"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_dump_binary_to(cfg, optarg);|]
+                      }
+             , Option { optionLongName = "load-opencl-binary"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_load_binary_from(cfg, optarg);|]
+                      }
              , Option { optionLongName = "print-sizes"
                       , optionShortName = Nothing
                       , optionArgument = NoArgument
