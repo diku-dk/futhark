@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `futhark cuda`: a new CUDA backend by Jakob Stokholm Bertelsen.
+
   * New command for comparing data files: `futhark datacmp`.
 
 ### Removed
