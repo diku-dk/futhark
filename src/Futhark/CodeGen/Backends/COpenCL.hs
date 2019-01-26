@@ -274,11 +274,11 @@ callKernel (GetSizeMax v size_class) =
 callKernel (HostCode c) =
   GC.compileCode c
 
-callKernel (LaunchKernel name args kernel_size workgroup_size) = do
+callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args
-  kernel_size' <- mapM GC.compileExp kernel_size
+  num_workgroups' <- mapM GC.compileExp num_workgroups
   workgroup_size' <- mapM GC.compileExp workgroup_size
-  launchKernel name kernel_size' workgroup_size'
+  launchKernel name num_workgroups' workgroup_size'
   where setKernelArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName "kernel_arg" bt e
           GC.stm [C.cstm|
@@ -299,7 +299,7 @@ callKernel (LaunchKernel name args kernel_size workgroup_size) = do
 
 launchKernel :: C.ToExp a =>
                 String -> [a] -> [a] -> GC.CompilerM op s ()
-launchKernel kernel_name kernel_dims workgroup_dims = do
+launchKernel kernel_name num_workgroups workgroup_dims = do
   global_work_size <- newVName "global_work_size"
   time_start <- newVName "time_start"
   time_end <- newVName "time_end"
@@ -334,6 +334,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       }
     }|]
   where kernel_rank = length kernel_dims
+        kernel_dims = zipWith multExp num_workgroups workgroup_dims
         kernel_dims' = map toInit kernel_dims
         workgroup_dims' = map toInit workgroup_dims
         total_elements = foldl multExp [C.cexp|1|] kernel_dims
