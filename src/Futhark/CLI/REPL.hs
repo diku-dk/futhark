@@ -388,7 +388,7 @@ any declarations entered at the REPL.
 
 |])),
             ("type", (typeCommand, [text|
-Show the type of an expression.
+Show the type of an expression, which must fit on a single line.
 |])),
             ("unbreak", (unbreakCommand, [text|
 Skip all future occurences of the current breakpoint.
