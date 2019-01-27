@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker
   ( checkProg
   , checkExp
   , checkDec
+  , checkModExp
   , TypeError
   , Warnings
   , initialEnv
@@ -66,7 +67,7 @@ checkExp files src env e = do
   where files' = M.map fileEnv $ M.fromList files
 
 -- | Type check a single declaration containing no type information,
--- yielding either a type error or the same expression annotated with
+-- yielding either a type error or the same declaration annotated with
 -- type information along the Env produced by that declaration.  See
 -- also 'checkProg'.
 checkDec :: Imports
@@ -80,6 +81,20 @@ checkDec files src env name d = do
     (_, env', d') <- checkOneDec d
     return (env' <> env, d')
   return (env', d', src')
+  where files' = M.map fileEnv $ M.fromList files
+
+-- | Type check a single module expression containing no type information,
+-- yielding either a type error or the same expression annotated with
+-- type information along the Env produced by that declaration.  See
+-- also 'checkProg'.
+checkModExp :: Imports
+            -> VNameSource
+            -> Env
+            -> ModExpBase NoInfo Name
+            -> Either TypeError (MTy, ModExpBase Info VName)
+checkModExp files src env me = do
+  (x, _, _) <- runTypeM env files' (mkInitialImport "") src $ checkOneModExp me
+  return x
   where files' = M.map fileEnv $ M.fromList files
 
 -- | An initial environment for the type checker, containing
@@ -277,48 +292,48 @@ checkSigBind (SigBind name e doc loc) = do
                    },
             SigBind name' e' doc loc)
 
-checkModExp :: ModExpBase NoInfo Name -> TypeM (MTy, ModExpBase Info VName)
-checkModExp (ModParens e loc) = do
-  (mty, e') <- checkModExp e
+checkOneModExp :: ModExpBase NoInfo Name -> TypeM (MTy, ModExpBase Info VName)
+checkOneModExp (ModParens e loc) = do
+  (mty, e') <- checkOneModExp e
   return (mty, ModParens e' loc)
-checkModExp (ModDecs decs loc) = do
+checkOneModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
   (abstypes, env, decs') <- checkDecs decs
   return (MTy abstypes $ ModEnv env,
           ModDecs decs' loc)
-checkModExp (ModVar v loc) = do
+checkOneModExp (ModVar v loc) = do
   (v', env) <- lookupMod loc v
   when (baseName (qualLeaf v') == nameFromString "intrinsics" &&
         baseTag (qualLeaf v') <= maxIntrinsicTag) $
     throwError $ TypeError loc "The 'intrinsics' module may not be used in module expressions."
   return (MTy mempty env, ModVar v' loc)
-checkModExp (ModImport name NoInfo loc) = do
+checkOneModExp (ModImport name NoInfo loc) = do
   (name', env) <- lookupImport loc name
   return (MTy mempty $ ModEnv env,
           ModImport name (Info name') loc)
-checkModExp (ModApply f e NoInfo NoInfo loc) = do
-  (f_mty, f') <- checkModExp f
+checkOneModExp (ModApply f e NoInfo NoInfo loc) = do
+  (f_mty, f') <- checkOneModExp f
   case mtyMod f_mty of
     ModFun functor -> do
-      (e_mty, e') <- checkModExp e
+      (e_mty, e') <- checkOneModExp e
       (mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
       return (mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
     _ ->
       throwError $ TypeError loc "Cannot apply non-parametric module."
-checkModExp (ModAscript me se NoInfo loc) = do
-  (me_mod, me') <- checkModExp me
+checkOneModExp (ModAscript me se NoInfo loc) = do
+  (me_mod, me') <- checkOneModExp me
   (se_mty, se') <- checkSigExp se
   match_subst <- badOnLeft $ matchMTys me_mod se_mty loc
   return (se_mty, ModAscript me' se' (Info match_subst) loc)
-checkModExp (ModLambda param maybe_fsig_e body_e loc) =
+checkOneModExp (ModLambda param maybe_fsig_e body_e loc) =
   withModParam param $ \param' param_abs param_mod -> do
   (maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
   return (MTy mempty $ ModFun $ FunSig param_abs param_mod mty,
           ModLambda param' maybe_fsig_e' body_e' loc)
 
-checkModExpToEnv :: ModExpBase NoInfo Name -> TypeM (TySet, Env, ModExpBase Info VName)
-checkModExpToEnv e = do
-  (MTy abs mod, e') <- checkModExp e
+checkOneModExpToEnv :: ModExpBase NoInfo Name -> TypeM (TySet, Env, ModExpBase Info VName)
+checkOneModExpToEnv e = do
+  (MTy abs mod, e') <- checkOneModExp e
   case mod of
     ModEnv env -> return (abs, env, e')
     ModFun{}   -> unappliedFunctor $ srclocOf e
@@ -348,7 +363,7 @@ checkModBody :: Maybe (SigExpBase NoInfo Name)
              -> TypeM (Maybe (SigExp, Info (M.Map VName VName)),
                        ModExp, MTy)
 checkModBody maybe_fsig_e body_e loc = do
-  (body_mty, body_e') <- checkModExp body_e
+  (body_mty, body_e') <- checkOneModExp body_e
   case maybe_fsig_e of
     Nothing ->
       return (Nothing, body_e', body_mty)
@@ -516,7 +531,7 @@ checkOneDec (TypeDec tdec) = do
   return (mempty, tenv, TypeDec tdec')
 
 checkOneDec (OpenDec x loc) = do
-  (x_abs, x_env, x') <- checkModExpToEnv x
+  (x_abs, x_env, x') <- checkOneModExpToEnv x
   return (x_abs, x_env, OpenDec x' loc)
 
 checkOneDec (LocalDec d loc) = do

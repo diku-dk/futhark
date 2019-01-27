@@ -5,6 +5,7 @@
 module Language.Futhark.Parser.Parser
   ( prog
   , expression
+  , modExpression
   , futharkType
   , anyValue
   , anyValues
@@ -40,6 +41,7 @@ import Language.Futhark.Parser.Lexer
 %name prog Prog
 %name futharkType TypeExp
 %name expression Exp
+%name modExpression ModExp
 %name declaration Dec
 %name anyValue Value
 %name anyValues CatValues

@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * New command for comparing data files: `futhark datacmp`.
 
+  * An `:mtype` command for `futhark repl` that shows the type of a
+    module expression.
+
 ### Removed
 
 ### Changed
