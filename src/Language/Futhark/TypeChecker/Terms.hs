@@ -295,7 +295,8 @@ instance MonadTypeChecker TermTypeM where
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
 
     t <- case M.lookup name $ scopeVtable scope of
-      Nothing -> unknownVariableError Term qn loc
+      Nothing -> throwError $ TypeError loc $
+                 "Missing component for module " ++ quote (pretty qn) ++ "."
 
       Just (WasConsumed wloc) -> useAfterConsume (baseName name) loc wloc
 
