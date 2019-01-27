@@ -2,6 +2,7 @@
 module Language.Futhark.Parser
   ( parseFuthark
   , parseExp
+  , parseModExp
   , parseType
 
   , parseValue
@@ -35,6 +36,12 @@ parseFuthark = parse prog
 parseExp :: FilePath -> T.Text
          -> Either ParseError UncheckedExp
 parseExp = parse expression
+
+-- | Parse a Futhark module expression from the given 'String', using the
+-- 'FilePath' as the source name for error messages.
+parseModExp :: FilePath -> T.Text
+            -> Either ParseError (ModExpBase NoInfo Name)
+parseModExp = parse modExpression
 
 -- | Parse an Futhark type from the given 'String', using the
 -- 'FilePath' as the source name for error messages.

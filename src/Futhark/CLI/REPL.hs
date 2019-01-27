@@ -328,20 +328,30 @@ loadCommand file = do
     (True, Nothing) -> liftIO $ T.putStrLn "No file specified and no file previously loaded."
     (False, _) -> throwError $ Load $ T.unpack file
 
-typeCommand :: Command
-typeCommand e = do
+genTypeCommand :: (Show err1, Show err2) =>
+                  (String -> T.Text -> Either err1 a)
+               -> (Imports -> VNameSource -> T.Env -> a -> Either err2 b)
+               -> (b -> String)
+               -> Command
+genTypeCommand f g h e = do
   prompt <- getPrompt
-  case parseExp prompt e of
+  case f prompt e of
     Left err -> liftIO $ print err
     Right e' -> do
       imports <- gets futharkiImports
       src <- gets futharkiNameSource
       (tenv, _) <- gets futharkiEnv
-      case T.checkExp imports src tenv e' of
+      case g imports src tenv e' of
         Left err -> liftIO $ print err
-        Right (ps, e'') -> liftIO $ putStrLn $
-          pretty e' <> concatMap ((" "<>) . pretty) ps <>
-          " : " <> pretty (typeOf e'')
+        Right x -> liftIO $ putStrLn $ h x
+
+typeCommand :: Command
+typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
+  pretty e <> concatMap ((" "<>) . pretty) ps <>
+  " : " <> pretty (typeOf e)
+
+mtypeCommand :: Command
+mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
 
 unbreakCommand :: Command
 unbreakCommand _ = do
@@ -389,6 +399,9 @@ any declarations entered at the REPL.
 |])),
             ("type", (typeCommand, [text|
 Show the type of an expression, which must fit on a single line.
+|])),
+            ("mtype", (mtypeCommand, [text|
+Show the type of a module expression, which must fit on a single line.
 |])),
             ("unbreak", (unbreakCommand, [text|
 Skip all future occurences of the current breakpoint.

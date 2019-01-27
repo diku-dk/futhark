@@ -29,8 +29,11 @@ import qualified Data.Semigroup as Sem
 import qualified System.FilePath.Posix as Posix
 import qualified System.FilePath as Native
 
+import Prelude hiding (mod)
+
 import Language.Futhark
 import Futhark.Util (dropLast, toPOSIX, fromPOSIX)
+import Futhark.Util.Pretty
 
 -- | Canonical reference to a Futhark code file.  Does not include the
 -- @.fut@ extension.  This is most often a path relative to the
@@ -138,3 +141,30 @@ instance Sem.Semigroup Env where
 instance Monoid Env where
   mempty = Env mempty mempty mempty mempty mempty
   mappend = (Sem.<>)
+
+instance Pretty MTy where
+  ppr = ppr . mtyMod
+
+instance Pretty Mod where
+  ppr (ModEnv e) = ppr e
+  ppr (ModFun (FunSig _ mod mty)) = ppr mod <+> text "->" </> ppr mty
+
+instance Pretty Env where
+  ppr (Env vtable ttable sigtable modtable _) =
+    nestedBlock "{" "}" $ stack $ punctuate line $ concat
+    [map renderTypeBind (M.toList ttable),
+     map renderValBind (M.toList vtable),
+     map renderModType (M.toList sigtable),
+     map renderMod (M.toList modtable)]
+    where renderTypeBind (name, TypeAbbr l tps tp) =
+            p l <+> pprName name <> mconcat (map ((text " "<>) . ppr) tps) <>
+            text " =" <+> ppr tp
+            where p Lifted = text "type^"
+                  p Unlifted = text "type"
+          renderValBind (name, BoundV tps t) =
+            text "val" <+> pprName name <> mconcat (map ((text " "<>) . ppr) tps) <>
+            text " =" <+> ppr t
+          renderModType (name, _sig) =
+            text "module type" <+> pprName name
+          renderMod (name, mod) =
+            text "module" <+> pprName name <> text " =" <+> ppr mod
