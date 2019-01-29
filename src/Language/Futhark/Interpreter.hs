@@ -336,27 +336,22 @@ matchValueToType :: Env -> M.Map VName (Maybe T.BoundV, Value)
                  -> Value
                  -> Either String (M.Map VName (Maybe T.BoundV, Value))
 
--- Empty arrays always match.
-matchValueToType env m t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr)
-  | any zeroDim ds, emptyShape (valueShape val) =
-      Right $ m <> mconcat (map namedAreZero ds)
-
-  | otherwise =
-      case d of
-        NamedDim v
-          | Just x <- look v ->
-              if x == arr_n
-              then continue m
-              else wrong $ "`" <> pretty v <> "` (" <> pretty x <> ")"
-          | otherwise ->
-              continue $ M.insert (qualLeaf v)
-              (Just $ T.BoundV [] $ Prim $ Signed Int32,
-               ValuePrim $ SignedValue $ Int32Value arr_n)
-              m
-        AnyDim -> continue m
-        ConstDim x
-          | fromIntegral x == arr_n -> continue m
-          | otherwise -> wrong $ pretty x
+matchValueToType env m t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr) =
+  case d of
+    NamedDim v
+      | Just x <- look v ->
+          if x == arr_n
+          then continue m
+          else emptyOrWrong $ "`" <> pretty v <> "` (" <> pretty x <> ")"
+      | otherwise ->
+          continue $ M.insert (qualLeaf v)
+          (Just $ T.BoundV [] $ Prim $ Signed Int32,
+           ValuePrim $ SignedValue $ Int32Value arr_n)
+          m
+    AnyDim -> continue m
+    ConstDim x
+      | fromIntegral x == arr_n -> continue m
+      | otherwise -> emptyOrWrong $ pretty x
   where arr_n = arrayLength arr
 
         look v
@@ -367,8 +362,18 @@ matchValueToType env m t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr)
           | otherwise = Nothing
 
         continue m' = case elems arr of
-          [] -> return m'
-          v:_ -> matchValueToType env m' (stripArray 1 t) v
+          [] ->
+            -- We have to ensure that remaining unbound shape
+            -- parameters become zeroes.
+            return $ m' <> mconcat (map namedAreZero ds)
+          v:_ ->
+            matchValueToType env m' (stripArray 1 t) v
+
+        -- Empty arrays always match if nothing else does.
+        emptyOrWrong x
+          | any zeroDim ds, emptyShape (valueShape val) =
+              Right $ m <> mconcat (map namedAreZero ds)
+          | otherwise = wrong x
 
         wrong x = Left $ "Size annotation " <> x <>
                   " does not match observed size " <> pretty arr_n <> "."
@@ -580,8 +585,8 @@ eval env (Ascript e td loc) = do
   t <- evalType env $ unInfo $ expandedType td
   case matchValueToType env mempty t v of
     Right _ -> return v
-    Left _ -> bad loc env $ "Value `" <> pretty v <> "` cannot match shape of type `" <>
-              pretty (declaredType td) <> "` (`" <> pretty t <> "`)."
+    Left err -> bad loc env $ "Value `" <> pretty v <> "` cannot match shape of type `" <>
+                pretty (declaredType td) <> "` (`" <> pretty t <> "`): " ++ err
 
 eval env (LetPat _ p e body _) = do
   v <- eval env e
@@ -692,8 +697,9 @@ eval env (Lambda _ [] body _ (Info (_, t)) loc) = do
   where match vt v =
           case matchValueToType env mempty vt v of
             Right _ -> return v
-            Left _ -> bad loc env $ "Value `" <> pretty v <>
-                      "` cannot match type `" <> pretty vt <> "`."
+            Left err ->
+              bad loc env $ "Value `" <> pretty v <>
+              "` cannot match type `" <> pretty vt <> "`: " ++ err
 
 eval env (Lambda tparams (p:ps) body mrd (Info (als, ret)) loc) =
   return $ ValueFun $ \v -> do
