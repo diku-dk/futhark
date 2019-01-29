@@ -152,14 +152,20 @@ type Body = BodyT
 -- | The new dimension in a 'Reshape'-like operation.  This allows us to
 -- disambiguate "real" reshapes, that change the actual shape of the
 -- array, from type coercions that are just present to make the types
--- work out.
+-- work out.  The two constructors are considered equal for purposes of 'Eq'.
 data DimChange d = DimCoercion d
                    -- ^ The new dimension is guaranteed to be numerically
                    -- equal to the old one.
                  | DimNew d
                    -- ^ The new dimension is not necessarily numerically
                    -- equal to the old one.
-                 deriving (Eq, Ord, Show)
+                 deriving (Ord, Show)
+
+instance Eq d => Eq (DimChange d) where
+  DimCoercion x == DimNew y = x == y
+  DimCoercion x == DimCoercion y = x == y
+  DimNew x == DimCoercion y = x == y
+  DimNew x == DimNew y = x == y
 
 instance Functor DimChange where
   fmap f (DimCoercion d) = DimCoercion $ f d
