@@ -272,7 +272,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       forM flat_arrs $ \flat_arr -> do
         flat_arr_t <- lookupType flat_arr
         let new_shape' = reshapeOuter (map (DimNew . constant) new_shape)
-                         (length new_shape) $ arrayShape flat_arr_t
+                         1 $ arrayShape flat_arr_t
         letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
 
   | otherwise = do
