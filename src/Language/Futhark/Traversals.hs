@@ -147,8 +147,8 @@ instance ASTMappable (ExpBase Info VName) where
     DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
     mapOnExp tv mergeexp <*> astMap tv form <*>
     mapOnExp tv loopbody <*> pure loc
-  astMap tv (VConstr0 name t loc) =
-    VConstr0 name <$> traverse (mapOnPatternType tv) t <*> pure loc
+  astMap tv (Constr name es ts loc) =
+    Constr name <$> traverse (mapOnExp tv) es <*> traverse (mapOnPatternType tv) ts <*> pure loc
   astMap tv (Match e cases t loc) =
     Match <$> mapOnExp tv e <*> astMap tv cases
           <*> traverse (mapOnPatternType tv) t <*> pure loc
@@ -170,7 +170,8 @@ instance ASTMappable (TypeExp VName) where
     TEApply <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
   astMap tv (TEArrow v t1 t2 loc) =
     TEArrow v <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
-  astMap _ te@TEEnum{} = pure te
+  astMap tv (TESum cs loc) =
+    TESum <$> traverse (traverse $ astMap tv) cs <*> pure loc
 
 instance ASTMappable (TypeArgExp VName) where
   astMap tv (TypeArgExpDim dim loc) =
@@ -215,7 +216,7 @@ traverseType f g h (TypeVar als u t args) =
   TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
 traverseType f g h (Arrow als v t1 t2) =
   Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
-traverseType _ _ _ (Enum cs) = pure $ Enum cs
+traverseType f g h (SumT cs) = SumT <$> (traverse . traverse) (traverseType f g h) cs
 
 traverseArrayElemType :: Applicative f =>
                          (TypeName -> f TypeName) -> (dim1 -> f dim2)
@@ -226,9 +227,9 @@ traverseArrayElemType f g (ArrayPolyElem t args) =
   ArrayPolyElem <$> f t <*> traverse (traverseTypeArg f g) args
 traverseArrayElemType f g (ArrayRecordElem fs) =
   ArrayRecordElem <$> traverse (traverseRecordArrayElemType f g) fs
-traverseArrayElemType _ _ (ArrayEnumElem cs) =
-  pure $ ArrayEnumElem cs
-
+traverseArrayElemType f g (ArraySumElem cs) =
+  ArraySumElem <$> (traverse . traverse) (traverseRecordArrayElemType f g) cs
+  
 traverseRecordArrayElemType :: Applicative f =>
                                (TypeName -> f TypeName) -> (dim1 -> f dim2)
                             -> RecordArrayElemTypeBase dim1 -> f (RecordArrayElemTypeBase dim2)
@@ -274,6 +275,8 @@ instance ASTMappable (PatternBase Info VName) where
     Wildcard <$> (Info <$> mapOnPatternType tv t) <*> pure loc
   astMap tv (PatternLit e (Info t) loc) =
     PatternLit <$> astMap tv e <*> (Info <$> mapOnPatternType tv t) <*>  pure loc
+  astMap tv (PatternConstr n (Info t) ps loc) =
+    PatternConstr n <$> (Info <$> mapOnPatternType tv t) <*> mapM (astMap tv) ps <*> pure loc
 
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =

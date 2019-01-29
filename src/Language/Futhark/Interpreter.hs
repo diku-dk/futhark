@@ -85,13 +85,13 @@ data Value = ValuePrim !PrimValue
            | ValueArray !(Array Int Value)
            | ValueRecord (M.Map Name Value)
            | ValueFun (Value -> EvalM Value)
-           | ValueEnum Name
+           | ValueSum Name [Value]
 
 instance Eq Value where
   ValuePrim x == ValuePrim y = x == y
   ValueArray x == ValueArray y = x == y
   ValueRecord x == ValueRecord y = x == y
-  ValueEnum x == ValueEnum y = x == y
+  (ValueSum n1 vs1) == (ValueSum n2 vs2) = n1 == n2 && vs1 == vs2
   _ == _ = False
 
 prettyRecord :: Pretty a => M.Map Name a -> Doc
@@ -114,7 +114,7 @@ instance Pretty Value where
 
   ppr (ValueRecord m) = prettyRecord m
   ppr ValueFun{} = text "#<fun>"
-  ppr (ValueEnum n) = text "#" <> ppr n
+  ppr (ValueSum n vs) = text "#" <> ppr n <+> sep (map ppr vs)
 
 -- | Create an array value; failing if that would result in an
 -- irregular array.
@@ -326,7 +326,9 @@ patternMatch env (PatternLit e _ _) v = do
   if v == v'
     then pure env
     else mzero
-
+patternMatch env (PatternConstr n _ ps _) (ValueSum n' vs)
+  | n == n' =
+    foldM (\env' (p,v) -> patternMatch env' p v) env $ zip ps vs
 patternMatch _ _ _ = mzero
 
 -- | For matching size annotations (the actual type will have been
@@ -537,7 +539,7 @@ evalType env t@(TypeVar () _ tn args) =
           let t'' = evalType env t'
           in (mempty, M.singleton p $ T.TypeAbbr l [] t'')
         matchPtoA _ _ = mempty
-evalType _ (Enum cs) = Enum cs
+evalType env (SumT cs) = SumT $ (fmap . fmap) (evalType env) cs
 
 eval :: Env -> Exp -> EvalM Value
 
@@ -783,7 +785,9 @@ eval env (Assert what e (Info s) loc) = do
   unless cond $ bad loc env s
   eval env e
 
-eval _ (VConstr0 c _ _) = return $ ValueEnum c
+eval env (Constr c es _ _) = do
+  vs <- mapM (eval env) es
+  return $ ValueSum c vs
 
 eval env (Match e cs _ _) = do
   v <- eval env e

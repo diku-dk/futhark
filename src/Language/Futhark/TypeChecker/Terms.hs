@@ -565,6 +565,25 @@ checkPattern' (PatternLit e NoInfo loc) NoneInferred = do
   t' <- expType e'
   return $ PatternLit e' (Info t') loc
 
+checkPattern' (PatternConstr n NoInfo ps loc) (Ascribed (SumT cs))
+  | Just ts <- M.lookup n cs = do
+      ps' <- mapM (uncurry checkPattern') $ zip ps $ map Ascribed ts
+      return $ PatternConstr n (Info (SumT cs)) ps' loc
+
+checkPattern' (PatternConstr n NoInfo ps loc) (Ascribed t) = do
+  t' <- newTypeVar loc "t"
+  ps' <- mapM ((flip checkPattern') NoneInferred) ps
+  mustHaveConstr loc n t' (toStructural . patternType <$> ps')
+  unify loc t' (toStructural t)
+  t'' <- normaliseType t
+  return $ PatternConstr n (Info t'') ps' loc
+
+checkPattern' (PatternConstr n NoInfo ps loc) NoneInferred = do
+  ps' <- mapM ((flip checkPattern') NoneInferred) ps
+  t <- newTypeVar loc "t"
+  mustHaveConstr loc n t (toStructural . patternType <$> ps')
+  return $ PatternConstr n (Info t) ps' loc
+
 bindPatternNames :: PatternBase NoInfo Name -> TermTypeM a -> TermTypeM a
 bindPatternNames = bindSpaced . map asTerm . S.toList . patternIdents
   where asTerm v = (Term, identName v)
@@ -685,12 +704,12 @@ bindingPattern tps p t m = do
   checkForDuplicateNames [p]
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
     checkPattern p t $ \p' -> binding (S.toList $ patternIdents p') $ do
-      -- Perform an observation of every declared dimension.  This
-      -- prevents unused-name warnings for otherwise unused dimensions.
-      mapM_ observe $ patternDims p'
-      checkShapeParamUses patternUses tps' [p']
+    -- Perform an observation of every declared dimension.  This
+    -- prevents unused-name warnings for otherwise unused dimensions.
+    mapM_ observe $ patternDims p'
+    checkShapeParamUses patternUses tps' [p']
 
-      m tps' p'
+    m tps' p'
 
 -- | Return the shapes used in a given pattern in postive and negative
 -- position, respectively.
@@ -703,6 +722,7 @@ patternUses (TuplePattern ps _) = foldMap patternUses ps
 patternUses (RecordPattern fs _) = foldMap (patternUses . snd) fs
 patternUses (PatternAscription p (TypeDecl declte _) _) =
   patternUses p <> typeExpUses declte
+patternUses (PatternConstr _ _ ps _) = foldMap patternUses ps
 
 noTypeParamsPermitted :: [UncheckedTypeParam] -> TermTypeM ()
 noTypeParamsPermitted ps =
@@ -1204,6 +1224,8 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
           uniquePat (PatternAscription p t ploc) =
             PatternAscription p t ploc
           uniquePat p@PatternLit{} = p
+          uniquePat (PatternConstr n t ps ploc) =
+            PatternConstr n t (map uniquePat ps) ploc
 
           -- Make the pattern unique where needed.
           pat' = uniquePat pat
@@ -1255,17 +1277,20 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         then return pat'
         else convergePattern pat' body_cons' body_t' body_loc
 
-checkExp (VConstr0 name NoInfo loc) = do
+checkExp (Constr name es NoInfo loc) = do
   t <- newTypeVar loc "t"
-  mustHaveConstr loc name t
-  return $ VConstr0 name (Info t) loc
+  es' <- mapM checkExp es
+  ets <- mapM expType es'
+  mustHaveConstr loc name t (toStructural <$> ets)
+  return $ Constr name es' (Info t) loc
 
 checkExp (Match _ [] NoInfo loc) =
   typeError loc "Match expressions must have at least one case."
 
-checkExp (Match e (c:cs) NoInfo loc) =
+checkExp (Match e (c:cs) NoInfo loc) = do
   sequentially (checkExp e) $ \e' _ -> do
     mt <- expType e'
+    traceM' $ unlines ["mt" ++ show mt]
     (cs', t) <- checkCases mt c cs
     zeroOrderType loc "returned from pattern match" t
     return $ Match e' cs' (Info t) loc
@@ -1297,7 +1322,7 @@ checkCase mt (CasePat p caseExp loc) =
 -- unmatched pattern warnings by the type checker.
 data Unmatched p = UnmatchedNum p [ExpBase Info VName]
                  | UnmatchedBool p
-                 | UnmatchedEnum p
+                 | UnmatchedConstr p
                  | Unmatched p
                  deriving (Functor, Show)
 
@@ -1305,7 +1330,7 @@ instance Pretty (Unmatched (PatternBase Info VName)) where
   ppr um = case um of
       (UnmatchedNum p nums) -> ppr' p <+> text "where p is not one of" <+> ppr nums
       (UnmatchedBool p)     -> ppr' p
-      (UnmatchedEnum p)     -> ppr' p
+      (UnmatchedConstr p)     -> ppr' p
       (Unmatched p)         -> ppr' p
     where
       ppr' (PatternAscription p t _) = ppr p <> text ":" <+> ppr t
@@ -1316,6 +1341,7 @@ instance Pretty (Unmatched (PatternBase Info VName)) where
         where ppField (name, t)      = text (nameToString name) <> equals <> ppr' t
       ppr' Wildcard{}                = text "_"
       ppr' (PatternLit e _ _)        = ppr e
+      ppr' (PatternConstr n _ ps _)   = text "#" <> ppr n <+> sep (map ppr' ps)
 
 unpackPat :: Pattern -> [Maybe Pattern]
 unpackPat Wildcard{} = [Nothing]
@@ -1325,6 +1351,7 @@ unpackPat (TuplePattern ps _) = Just <$> ps
 unpackPat (RecordPattern fs _) = Just . snd <$> sortFields (M.fromList fs)
 unpackPat (PatternAscription p _ _) = unpackPat p
 unpackPat p@PatternLit{} = [Just p]
+unpackPat p@(PatternConstr _ _  ps _) = (Just p) : (Just <$> ps)-- concatMap unpackPat ps
 
 wildPattern :: Pattern -> Int -> Unmatched Pattern -> Unmatched Pattern
 wildPattern (TuplePattern ps loc) pos um = f <$> um
@@ -1361,6 +1388,8 @@ unmatched :: (Unmatched Pattern -> Unmatched Pattern) -> [Pattern] -> [Unmatched
 unmatched hole (p:ps)
   | sameStructure labeledCols = do
     (i, cols) <- labeledCols
+    traceM' $ unlines ["unmatched", "(p:ps): " ++ show (p:ps),
+                       "labeledCols: " ++ show (i, cols)]
     let hole' p' = hole $ wildPattern p i p'
     case sequence cols of
       Nothing      -> []
@@ -1374,9 +1403,10 @@ unmatched hole (p:ps)
         localUnmatched [] = []
         localUnmatched ps'@(p':_) =
           case patternType p'  of
-            Enum cs'' ->
-              let matched = nub $ mapMaybe (pExp >=> constr) ps'
-              in map (UnmatchedEnum . buildEnum (Enum cs'')) $ cs'' \\ matched
+            SumT cs'' ->
+              let constrs = M.keys cs''
+                  matched = nub $ mapMaybe constr ps'
+              in map (UnmatchedConstr . buildConstr (SumT cs'')) $ constrs \\ matched
             Prim t
               | not (any idOrWild ps') ->
                 case t of
@@ -1395,13 +1425,14 @@ unmatched hole (p:ps)
         pExp (PatternLit e' _ _) = Just e'
         pExp _ = Nothing
 
-        constr (VConstr0 c _ _) = Just c
-        constr (Ascript e' _ _ _)  = constr e'
+        constr (PatternConstr c _ _ _) = Just c
+        constr (PatternAscription p' _ _)  = constr p'
         constr _ = Nothing
 
         isPatternLit PatternLit{} = True
         isPatternLit (PatternAscription p' _ _) = isPatternLit p'
         isPatternLit (PatternParens p' _)  = isPatternLit p'
+        isPatternLit PatternConstr{} = True
         isPatternLit _ = False
 
         idOrWild Id{} = True
@@ -1413,8 +1444,9 @@ unmatched hole (p:ps)
         bool (Literal (BoolValue b) _ ) = Just b
         bool _ = Nothing
 
-        buildEnum t c =
-          PatternLit (VConstr0 c (Info t) noLoc) (Info t) noLoc
+        buildConstr t c =
+          PatternConstr c (Info t) [] noLoc
+          -- PatternLit (VConstr0 c (Info t) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
         buildBool t b =
           PatternLit (Literal (BoolValue b) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
         buildId t n =
@@ -1515,7 +1547,8 @@ returnType (TypeVar als Nonunique t targs) d arg =
 returnType (Arrow _ v t1 t2) d arg =
   Arrow als v (t1 `setAliases` mempty) (t2 `setAliases` als)
   where als = aliases $ maskAliases arg d
-returnType (Enum cs) _ _ = Enum cs
+returnType (SumT cs) d arg =
+  SumT $ (fmap . fmap) (\et -> returnType et d arg) cs
 
 -- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
@@ -1582,6 +1615,8 @@ checkFunDef f = fmap fst $ runTermTypeM $ do
   maybe_retdecl' <- traverse updateExpTypes maybe_retdecl
   rettype' <- normaliseType rettype
 
+  constraints <- getConstraints
+  traceM' $ unlines ["checkFunDef", "f: " ++ show f, "body':" ++ show body', "constraints:" ++ show constraints]
   -- Check if pattern matches are exhaustive and yield
   -- errors if not.
   checkUnmatched body'
@@ -1619,9 +1654,8 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
                 field (l, t) = pretty l ++ ": " ++ pretty t
 
         fixOverloaded (_, HasConstrs cs loc) =
-          typeError loc $ unlines [ "Type is ambiguous (must be an enum with constructors: " ++ cs' ++ ")."
+          typeError loc $ unlines [ "Type is ambiguous (must be a sum type with constructors: " ++ pretty (SumT cs) ++ ")."
                                     ,"Add a type annotation to disambiguate the type."]
-          where cs' = intercalate " | " $ map (\c -> '#' : pretty c) cs
 
         fixOverloaded _ = return ()
 
@@ -1767,10 +1801,10 @@ uniqueParamNames =
 boundArrayAliases :: PatternType -> S.Set VName
 boundArrayAliases (Array als _ _ _) = boundAliases als
 boundArrayAliases Prim{} = mempty
-boundArrayAliases Enum{} = mempty
 boundArrayAliases (Record fs) = foldMap boundArrayAliases fs
 boundArrayAliases (TypeVar als _ _ _) = boundAliases als
 boundArrayAliases Arrow{} = mempty
+boundArrayAliases SumT{} = mempty -- TODO: fix
 
 -- | The set of in-scope variables that are being aliased.
 boundAliases :: Aliasing -> S.Set VName

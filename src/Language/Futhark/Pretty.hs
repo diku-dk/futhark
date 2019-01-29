@@ -123,8 +123,9 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim) where
     | otherwise =
         braces (commasep $ map ppField $ M.toList fs)
     where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
-  ppr (ArrayEnumElem cs) =
-    cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
+  ppr (ArraySumElem cs) =
+    cat $ punctuate (text " | ") $ map ppConstr $ M.toList cs
+    where ppConstr (name, fs) = text "#" <> ppr name <+> sep (map ppr fs)
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr = pprPrec 0
@@ -143,8 +144,9 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
     parens (pprName v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
   pprPrec p (Arrow _ Nothing t1 t2) =
     parensIf (p > 0) $ pprPrec 1 t1 <+> text "->" <+> ppr t2
-  pprPrec _ (Enum cs) =
-    cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
+  pprPrec _ (SumT cs) =
+    cat $ punctuate (text " | ") $ map ppConstr $ M.toList cs
+    where ppConstr (name, fs) = sep $ (text "#" <> ppr name) : (map ppr fs)
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
@@ -161,8 +163,9 @@ instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
   ppr (TEArrow (Just v) t1 t2 _) = parens v' <+> text "->" <+> ppr t2
     where v' = pprName v <> colon <+> ppr t1
   ppr (TEArrow Nothing t1 t2 _) = ppr t1 <+> text "->" <+> ppr t2
-  ppr (TEEnum cs _) =
-    cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
+  ppr (TESum cs _) =
+    cat $ punctuate (text " | ") $ map ppConstr cs
+    where ppConstr (name, fs) = text "#" <> ppr name <+> sep (map ppr fs)
 
 instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = ppr $ ShapeDecl [d]
@@ -294,7 +297,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "loop" <+> spread (map ppr tparams ++ [ppr pat]) <+>
     equals <+> ppr initexp <+> ppr form <+> text "do" </>
     indent 2 (ppr loopbody)
-  pprPrec _ (VConstr0 n _ _) = text "#" <> ppr n
+  pprPrec _ (Constr n cs _ _) = text "#" <> ppr n <+> sep (map ppr cs)
   pprPrec _ (Match e cs _ _) = text "match" <+> ppr e </> ppr cs
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
@@ -325,6 +328,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
                                     Just t' -> parens $ text "_" <> colon <+> ppr t'
                                     Nothing -> text "_"
   ppr (PatternLit e _ _)        = ppr e
+  ppr (PatternConstr n _ ps _)  = text "#" <> ppr n <+> sep (map ppr ps)
 
 ppAscription :: Pretty t => Maybe t -> Doc
 ppAscription Nothing  = mempty
