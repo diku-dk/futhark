@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * An `:mtype` command for `futhark repl` that shows the type of a
     module expression.
 
+  * `futhark run` takes a `-w` option for disabling warnings.
+
 ### Removed
 
 ### Changed
