@@ -41,7 +41,7 @@ main = mainWithOptions interpreterConfig options "options... program" run
 
 interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config fp = do
-  pr <- newFutharkiState fp
+  pr <- newFutharkiState config fp
   (tenv, ienv) <- case pr of Left err -> do hPutStrLn stderr err
                                             exitFailure
                              Right env -> return env
@@ -88,26 +88,34 @@ convertValue :: Value -> Maybe I.Value
 convertValue (PrimValue p) = Just $ I.ValuePrim p
 convertValue (ArrayValue arr _) = I.mkArray =<< mapM convertValue (elems arr)
 
-newtype InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }
+data InterpreterConfig =
+  InterpreterConfig { interpreterEntryPoint :: Name
+                    , interpreterPrintWarnings :: Bool
+                    }
 
 interpreterConfig :: InterpreterConfig
-interpreterConfig = InterpreterConfig defaultEntryPoint
+interpreterConfig = InterpreterConfig defaultEntryPoint True
 
 options :: [FunOptDescr InterpreterConfig]
 options = [ Option "e" ["entry-point"]
-          (ReqArg (\entry -> Right $ \config ->
-                      config { interpreterEntryPoint = nameFromString entry })
-           "NAME")
+            (ReqArg (\entry -> Right $ \config ->
+                        config { interpreterEntryPoint = nameFromString entry })
+             "NAME")
             "The entry point to execute."
+          , Option "w" ["no-warnings"]
+            (NoArg $ Right $ \config -> config { interpreterPrintWarnings = False })
+            "Do not print warnings."
           ]
 
-newFutharkiState :: FilePath -> IO (Either String (T.Env, I.Ctx))
-newFutharkiState file = runExceptT $ do
+newFutharkiState :: InterpreterConfig -> FilePath
+                 -> IO (Either String (T.Env, I.Ctx))
+newFutharkiState cfg file = runExceptT $ do
   (ws, imports, src) <-
     badOnLeft =<< liftIO (runExceptT (readProgram file)
                           `Haskeline.catch` \(err::IOException) ->
                              return (Left (ExternalError (T.pack $ show err))))
-  liftIO $ hPrint stderr ws
+  when (interpreterPrintWarnings cfg) $
+    liftIO $ hPrint stderr ws
 
   let imp = T.mkInitialImport "."
   ienv1 <- foldM (\ctx -> badOnLeft <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $

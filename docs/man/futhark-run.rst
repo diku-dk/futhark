@@ -44,6 +44,9 @@ OPTIONS
 -V
   Print version information on standard output and exit.
 
+-w, --no-warnings
+  Disable interpreter warnings.
+
 SEE ALSO
 ========
 
