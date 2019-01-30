@@ -43,6 +43,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark.rst
    man/futhark-c.rst
    man/futhark-opencl.rst
+   man/futhark-cuda.rst
    man/futhark-python.rst
    man/futhark-pyopencl.rst
    man/futhark-csharp.rst
