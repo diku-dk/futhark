@@ -263,6 +263,8 @@ man_pages = [
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-opencl', 'futhark-opencl', 'compile Futhark to OpenCL',
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
+    ('man/futhark-cuda', 'futhark-cuda', 'compile Futhark to CUDA',
+     ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-python', 'futhark-python', 'compile Futhark to sequential Python',
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-pyopencl', 'futhark-pyopencl', 'compile Futhark to Python and OpenCL',
