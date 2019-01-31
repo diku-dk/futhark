@@ -92,7 +92,7 @@ replaceInPrimExp f (LeafExp v pt) =
 replaceInPrimExp _ (ValueExp v) =
   ValueExp v
 replaceInPrimExp f (BinOpExp bop pe1 pe2) =
-  BinOpExp bop (replaceInPrimExp f pe1) (replaceInPrimExp f pe2)
+  constFoldPrimExp $ BinOpExp bop (replaceInPrimExp f pe1) (replaceInPrimExp f pe2)
 replaceInPrimExp f (CmpOpExp cop pe1 pe2) =
   CmpOpExp cop (replaceInPrimExp f pe1) (replaceInPrimExp f pe2)
 replaceInPrimExp f (UnOpExp uop pe) =
