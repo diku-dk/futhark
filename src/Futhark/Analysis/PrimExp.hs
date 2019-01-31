@@ -8,6 +8,7 @@ module Futhark.Analysis.PrimExp
   , coerceIntPrimExp
   , true
   , false
+  , constFoldPrimExp
 
   , module Futhark.Representation.Primitive
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
@@ -22,7 +23,9 @@ import           Futhark.Representation.Primitive
 import           Futhark.Util.IntegralExp
 import           Futhark.Util.Pretty
 
--- | A primitive expression parametrised over the representation of free variables.
+-- | A primitive expression parametrised over the representation of
+-- free variables.  Note that the 'Functor', 'Traversable', and 'Num'
+-- instances perform automatic (but simple) constant folding.
 data PrimExp v = LeafExp v PrimType
                | ValueExp PrimValue
                | BinOpExp BinOp (PrimExp v) (PrimExp v)
@@ -66,7 +69,7 @@ instance Traversable PrimExp where
   traverse _ (ValueExp v) =
     pure $ ValueExp v
   traverse f (BinOpExp op x y) =
-    BinOpExp op <$> traverse f x <*> traverse f y
+    constFoldPrimExp <$> (BinOpExp op <$> traverse f x <*> traverse f y)
   traverse f (CmpOpExp op x y) =
     CmpOpExp op <$> traverse f x <*> traverse f y
   traverse f (ConvOpExp op x) =
@@ -78,6 +81,29 @@ instance Traversable PrimExp where
 
 instance FreeIn v => FreeIn (PrimExp v) where
   freeIn = foldMap freeIn
+
+-- | Perform quick and dirty constant folding on the top level of a
+-- PrimExp.  This is necessary because we want to consider
+-- e.g. equality modulo constant folding.
+constFoldPrimExp :: PrimExp v -> PrimExp v
+constFoldPrimExp (BinOpExp Add{} x y)
+  | zeroIshExp x = y
+  | zeroIshExp y = x
+constFoldPrimExp (BinOpExp Sub{} x y)
+  | zeroIshExp y = x
+constFoldPrimExp (BinOpExp Mul{} x y)
+  | oneIshExp x = y
+  | oneIshExp y = x
+constFoldPrimExp (BinOpExp SDiv{} x y)
+  | oneIshExp y = x
+constFoldPrimExp (BinOpExp SQuot{} x y)
+  | oneIshExp y = x
+constFoldPrimExp (BinOpExp UDiv{} x y)
+  | oneIshExp y = x
+constFoldPrimExp (BinOpExp bop (ValueExp x) (ValueExp y))
+  | Just z <- doBinOp bop x y =
+      ValueExp z
+constFoldPrimExp e = e
 
 -- The Num instance performs a little bit of magic: whenever an
 -- expression and a constant is combined with a binary operator, the
@@ -93,32 +119,13 @@ instance FreeIn v => FreeIn (PrimExp v) where
 -- expressions to constants so that the above works.  However, it is
 -- still a bit of a hack.
 instance Pretty v => Num (PrimExp v) where
-  x + y | zeroIshExp x = y
-        | zeroIshExp y = x
-        | IntType t <- primExpType x,
-          Just z <- constFold (doBinOp $ Add t) x y = z
-        | FloatType t <- primExpType x,
-          Just z <- constFold (doBinOp $ FAdd t) x y = z
-        | Just z <- msum [asIntOp Add x y, asFloatOp FAdd x y] = z
+  x + y | Just z <- msum [asIntOp Add x y, asFloatOp FAdd x y] = constFoldPrimExp z
         | otherwise = numBad "+" (x,y)
 
-  x - y | zeroIshExp y = x
-        | IntType t <- primExpType x,
-          Just z <- constFold (doBinOp $ Sub t) x y = z
-        | FloatType t <- primExpType x,
-          Just z <- constFold (doBinOp $ FSub t) x y = z
-        | Just z <- msum [asIntOp Sub x y, asFloatOp FSub x y] = z
+  x - y | Just z <- msum [asIntOp Sub x y, asFloatOp FSub x y] = constFoldPrimExp z
         | otherwise = numBad "-" (x,y)
 
-  x * y | zeroIshExp x = x
-        | zeroIshExp y = y
-        | oneIshExp x = y
-        | oneIshExp y = x
-        | IntType t <- primExpType x,
-          Just z <- constFold (doBinOp $ Mul t) x y = z
-        | FloatType t <- primExpType x,
-          Just z <- constFold (doBinOp $ FMul t) x y = z
-        | Just z <- msum [asIntOp Mul x y, asFloatOp FMul x y] = z
+  x * y | Just z <- msum [asIntOp Mul x y, asFloatOp FMul x y] = constFoldPrimExp z
         | otherwise = numBad "*" (x,y)
 
   abs x | IntType t <- primExpType x = UnOpExp (Abs t) x
@@ -131,18 +138,17 @@ instance Pretty v => Num (PrimExp v) where
   fromInteger = fromInt32 . fromInteger
 
 instance Pretty v => IntegralExp (PrimExp v) where
-  x `div` y | oneIshExp y = x
-            | Just z <- msum [asIntOp SDiv x y, asFloatOp FDiv x y] = z
+  x `div` y | Just z <- msum [asIntOp SDiv x y, asFloatOp FDiv x y] = constFoldPrimExp z
             | otherwise = numBad "div" (x,y)
 
   x `mod` y | Just z <- msum [asIntOp SMod x y] = z
             | otherwise = numBad "mod" (x,y)
 
   x `quot` y | oneIshExp y = x
-             | Just z <- msum [asIntOp SQuot x y] = z
+             | Just z <- msum [asIntOp SQuot x y] = constFoldPrimExp z
              | otherwise = numBad "quot" (x,y)
 
-  x `rem` y | Just z <- msum [asIntOp SRem x y] = z
+  x `rem` y | Just z <- msum [asIntOp SRem x y] = constFoldPrimExp z
             | otherwise = numBad "rem" (x,y)
 
   sgn (ValueExp (IntValue i)) = Just $ signum $ valueIntegral i
@@ -220,13 +226,6 @@ asFloatExp t (ValueExp (IntValue v)) =
 asFloatExp _ _ =
   Nothing
 
-constFold :: (PrimValue -> PrimValue -> Maybe PrimValue)
-            -> PrimExp v -> PrimExp v
-            -> Maybe (PrimExp v)
-constFold f x y = do x' <- valueExp x
-                     y' <- valueExp y
-                     ValueExp <$> f x' y'
-
 numBad :: Pretty a => String -> a -> b
 numBad s x =
   error $ "Invalid argument to PrimExp method " ++ s ++ ": " ++ pretty x
@@ -279,11 +278,6 @@ zeroIshExp _            = False
 oneIshExp :: PrimExp v -> Bool
 oneIshExp (ValueExp v) = oneIsh v
 oneIshExp _            = False
-
--- | Is the expression a constant value?
-valueExp :: PrimExp v -> Maybe PrimValue
-valueExp (ValueExp v) = Just v
-valueExp _            = Nothing
 
 -- | If the given 'PrimExp' is a constant of the wrong integer type,
 -- coerce it to the given integer type.  This is a workaround for an
