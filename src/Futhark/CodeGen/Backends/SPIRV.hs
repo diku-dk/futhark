@@ -1138,9 +1138,16 @@ compileAtomicOp op = do
 compileKernelOp :: KernelOp -> CompilerM ()
 compileKernelOp (GetGroupId name i) = readBuiltinTo WorkgroupId (fromIntegral i) name
 compileKernelOp (GetLocalId name i) = readBuiltinTo LocalInvocationId (fromIntegral i) name
-compileKernelOp (GetGlobalSize name i) = readBuiltinTo NumWorkgroups (fromIntegral i) name
 compileKernelOp (GetGlobalId name i) = readBuiltinTo GlobalInvocationId (fromIntegral i) name
 compileKernelOp (GetLocalSize name i) = readWorkgroupSizeTo (fromIntegral i) name
+compileKernelOp (GetGlobalSize name i) = do
+  let r_t   = Scalar int32
+      ws_id = reservedId WorkgroupSize
+  (wg_size_id, _) <- insertReturnOp r_t $ opCompositeExtract ws_id (fromIntegral i)
+  (num_groups_id, _) <- readBuiltin NumWorkgroups (fromIntegral i)
+  (gsize_id, _) <- insertReturnOp r_t $ opIMul wg_size_id num_groups_id
+  gs_var <- getVarInfo name
+  insertVarStore gs_var gsize_id
 compileKernelOp (GetLockstepWidth name) = do
   ls_var <- getVarInfo name
   insertVarStore ls_var $ reservedSpecId LockstepWidthSpec
@@ -1172,9 +1179,9 @@ compileCode (DeclareArray name space t vs) = do
   let len     = length vs
       scope   = spaceToScope space
   zipWithM_ (insertInternalArrayWrite name scope t) [0..len-1] vs
-compileCode (DeclareMem name space) = fail "DeclareMem not implemented."
-compileCode (SetMem dest src space) = fail "SetMem not implemented."
-compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) space (Count size)) = fail "Copy not implemented."
+compileCode DeclareMem{} = fail "DeclareMem not implemented."
+compileCode SetMem{} = fail "SetMem not implemented."
+compileCode Copy{} = fail "Copy not implemented."
 compileCode (Write dest (Count idx) elemtype space vol elemexp) = do
   (elem_id, _) <- compileExp elemexp
   (i_id, _) <- compileExp idx

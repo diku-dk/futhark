@@ -954,7 +954,8 @@ static void vulkan_cleanup(struct vulkan_context *ctx) {
   vulkan_free_all_scalars(ctx);
   vulkan_free_all(ctx);
   vulkan_free_all_command_buffers(ctx);
-  free(ctx->descriptor_pools);
+  if (ctx->max_descriptor_set_size)
+    free(ctx->descriptor_pools);
   free(ctx->command_buffers);
   vkDestroyCommandPool(ctx->device, ctx->command_pool, 0);
   vkDestroyDevice(ctx->device, 0);
