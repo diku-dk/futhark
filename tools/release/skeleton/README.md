@@ -12,8 +12,6 @@ You can install the Futhark compiler and its manual pages by invoking:
 
     make install
 
-The names of all installed programs begin with `futhark-`.
-
 If you wish to install to a specific location, you can set the
 `PREFIX` environment variable:
 
