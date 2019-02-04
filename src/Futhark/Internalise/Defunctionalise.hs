@@ -926,17 +926,18 @@ combineRecordArrayTypeInfo _ new_tp = new_tp
 defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind True name retdecl (Info rettype) tparams params body _ loc)
+defuncValBind (ValBind True name _ (Info rettype) tparams params body _ loc)
   | (rettype_ps, rettype') <- unfoldFunType rettype,
     not $ null rettype_ps = do
       (body_pats, body', _) <- etaExpand body
-      --- CHECKME: are we messing up by removing the shape annotations
-      --- from the return type?  The motivation is that they may refer
-      --- to some parameters (rettype_ps) that are now no longer in
-      --- scope.
-      defuncValBind $ ValBind True name retdecl
-        (Info $ vacuousShapeAnnotations rettype')
+      -- FIXME: we should also handle non-constant size annotations
+      -- here.
+      defuncValBind $ ValBind True name Nothing
+        (Info $ onlyConstantDims rettype')
         tparams (params <> body_pats) body' Nothing loc
+  where onlyConstantDims = bimap onDim id
+        onDim (ConstDim x) = ConstDim x
+        onDim _            = AnyDim
 
 defuncValBind valbind@(ValBind _ name retdecl rettype tparams params body _ _) = do
   let env = envFromShapeParams tparams
