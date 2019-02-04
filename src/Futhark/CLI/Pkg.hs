@@ -51,7 +51,7 @@ installInDir (BuildList bl) dir = do
         -- claims to encode filepaths with '/' directory seperators no
         -- matter the host OS.
         when (".." `elem` Posix.splitPath (Zip.eRelativePath entry)) $
-          fail $ "Zip archive for " <> pdir <> " contains suspicuous path: " <>
+          fail $ "Zip archive for " <> pdir <> " contains suspicious path: " <>
           Zip.eRelativePath entry
         let f = pdir </> makeRelative from_dir (Zip.eRelativePath entry)
         createDirectoryIfMissing True $ takeDirectory f
