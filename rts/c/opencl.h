@@ -614,9 +614,10 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     free(compile_opts);
   } else {
     size_t binary_size;
-    char *fut_opencl_bin = slurp_file(ctx->cfg.load_binary_from, &binary_size);
+    unsigned char *fut_opencl_bin =
+      (unsigned char*) slurp_file(ctx->cfg.load_binary_from, &binary_size);
     assert(fut_opencl_src != NULL);
-    const char *binaries[1] = { fut_opencl_bin };
+    const unsigned char *binaries[1] = { fut_opencl_bin };
     cl_int status = 0;
 
     prog = clCreateProgramWithBinary(ctx->ctx, 1, &device_option.device,
