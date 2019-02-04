@@ -14,9 +14,9 @@ Basic Concepts
 
 A package is uniquely identified with a *package path*, which is
 similar to a URL, except without a protocol.  At the moment, package
-paths are always links to Git repositories hosted on GitHub.  In the
-future, this will become more flexible.  As an example, a package path
-may be ``github.com/athas/fut-foo``.
+paths are always links to Git repositories hosted on GitHub or GitLab.
+In the future, this will become more flexible.  As an example, a
+package path may be ``github.com/athas/fut-foo``.
 
 Packages are versioned with `semantic version numbers
 <https://semver.org/>`_ of the form ``X.Y.Z``.  Whenever versions are
