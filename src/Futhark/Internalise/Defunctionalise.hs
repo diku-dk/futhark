@@ -930,7 +930,12 @@ defuncValBind (ValBind True name retdecl (Info rettype) tparams params body _ lo
   | (rettype_ps, rettype') <- unfoldFunType rettype,
     not $ null rettype_ps = do
       (body_pats, body', _) <- etaExpand body
-      defuncValBind $ ValBind True name retdecl (Info rettype')
+      --- CHECKME: are we messing up by removing the shape annotations
+      --- from the return type?  The motivation is that they may refer
+      --- to some parameters (rettype_ps) that are now no longer in
+      --- scope.
+      defuncValBind $ ValBind True name retdecl
+        (Info $ vacuousShapeAnnotations rettype')
         tparams (params <> body_pats) body' Nothing loc
 
 defuncValBind valbind@(ValBind _ name retdecl rettype tparams params body _ _) = do
