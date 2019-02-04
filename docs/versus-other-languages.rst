@@ -80,11 +80,8 @@ library functions (in particular ``map``, ``reduce``, ``scan``, and
 
 Currying and partial application works as usual (although functions
 are not fully first class; see `Types`_).  Some Futhark language
-constructs look like functions, but are not (yet).  This means they
-cannot be partially applied, and may not interact well with type
-inference.  These include ``unzip`` and ``zip``.  Usually there are
-more well-behaved wrappers to be found in `the basis library
-<https://futhark-lang.org/docs/>`_.
+constructs look like functions, but are not.  This means they cannot
+be partially applied.  These include ``unsafe`` and ``assert``.
 
 Lambda terms are written as ``\x -> x + 2``, as in Haskell.
 
