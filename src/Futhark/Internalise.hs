@@ -1385,8 +1385,7 @@ isOverloadedFunction qname args loc = do
       where isCharLit (Literal (SignedValue iv) _) = Just $ chr $ fromIntegral $ intToInt64 iv
             isCharLit _                            = Nothing
 
-    handle [E.TupLit [n, m, arr] _] f
-      | f `elem` ["unflatten", "cosmin_unflatten"] = Just $ \desc -> do
+    handle [E.TupLit [n, m, arr] _] "unflatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "unflatten_arr" arr
       n' <- internaliseExp1 "n" n
       m' <- internaliseExp1 "m" m
@@ -1403,8 +1402,7 @@ isOverloadedFunction qname args loc = do
         letSubExp desc $ I.BasicOp $
           I.Reshape (reshapeOuter [DimNew n', DimNew m'] 1 $ arrayShape arr_t) arr'
 
-    handle [arr] f
-      | f `elem` ["flatten", "cosmin_flatten"] = Just $ \desc -> do
+    handle [arr] "flatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do
         arr_t <- lookupType arr'
