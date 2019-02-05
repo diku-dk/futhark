@@ -43,8 +43,13 @@ import           Language.Futhark.TypeChecker.Types
 
 -- | The monomorphization monad reads 'PolyBinding's and writes 'ValBinding's.
 -- The 'TypeParam's in a 'ValBinding' can only be shape parameters.
-newtype PolyBinding = PolyBinding (VName, [TypeParam], [Pattern],
-                                   Maybe (TypeExp VName), StructType, Exp, SrcLoc)
+--
+-- Each 'Polybinding' is also connected with the 'RecordReplacements'
+-- that were active when the binding was defined.  This is used only
+-- in local functions.
+data PolyBinding = PolyBinding RecordReplacements
+                   (VName, [TypeParam], [Pattern],
+                     Maybe (TypeExp VName), StructType, Exp, SrcLoc)
 
 -- | Mapping from record names to the variable names that contain the
 -- fields.  This is used because the monomorphiser also expands all
@@ -75,10 +80,10 @@ extendEnv vn binding = localEnv
   mempty { envPolyBindings = M.singleton vn binding }
 
 withRecordReplacements :: RecordReplacements -> MonoM a -> MonoM a
-withRecordReplacements rr = localEnv mempty { envRecordReplacements = rr}
+withRecordReplacements rr = localEnv mempty { envRecordReplacements = rr }
 
-noRecordReplacements :: MonoM a -> MonoM a
-noRecordReplacements = local $ \env -> env { envRecordReplacements = mempty }
+replaceRecordReplacements :: RecordReplacements -> MonoM a -> MonoM a
+replaceRecordReplacements rr = local $ \env -> env { envRecordReplacements = rr }
 
 -- | The monomorphization monad.
 newtype MonoM a = MonoM (RWST Env (Seq.Seq (VName, ValBind)) VNameSource
@@ -194,7 +199,8 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
       -- Retrieve the lifted monomorphic function bindings that are produced,
       -- filter those that are monomorphic versions of the current let-bound
       -- function and insert them at this point, and propagate the rest.
-      let funbind = PolyBinding (fname, tparams, params, retdecl, ret, body, loc)
+      rr <- asks envRecordReplacements
+      let funbind = PolyBinding rr (fname, tparams, params, retdecl, ret, body, loc)
       pass $ do
         (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
@@ -469,8 +475,8 @@ expandRecordPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
 monomorphizeBinding :: PolyBinding -> TypeBase () () -> MonoM (VName, ValBind)
-monomorphizeBinding (PolyBinding (name, tparams, params, retdecl, rettype, body, loc)) t =
-  noRecordReplacements $ do
+monomorphizeBinding (PolyBinding rr (name, tparams, params, retdecl, rettype, body, loc)) t =
+  replaceRecordReplacements rr $ do
   t' <- removeTypeVariablesInType t
   let bind_t = foldFunType (map (toStructural . patternType) params) $
                toStructural rettype
@@ -542,7 +548,7 @@ substPattern f pat = case pat of
 
 toPolyBinding :: ValBind -> PolyBinding
 toPolyBinding (ValBind _ name retdecl (Info rettype) tparams params body _ loc) =
-  PolyBinding (name, tparams, params, retdecl, rettype, body, loc)
+  PolyBinding mempty (name, tparams, params, retdecl, rettype, body, loc)
 
 -- | Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: ValBind -> MonoM ValBind
