@@ -198,12 +198,32 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
 
   (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
   (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp block_size
-  let args'' = [ [C.cinit|&$id:a|] | a <- args' ]
+  let perm_args
+        | length num_blocks == 3 = [ [C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|] ]
+        | otherwise = []
+  let args'' = perm_args ++ [ [C.cinit|&$id:a|] | a <- args' ]
       sizes_nonzero = expsNotZero [grid_x, grid_y, grid_z,
                       block_x, block_y, block_z]
   GC.stm [C.cstm|
     if ($exp:sizes_nonzero) {
-      void *$id:args_arr[] = {$inits:args''};
+      int perm[3] = { 0, 1, 2 };
+
+      if ($exp:grid_y > (1<<16)) {
+        perm[1] = perm[0];
+        perm[0] = 1;
+      }
+
+      if ($exp:grid_z > (1<<16)) {
+        perm[2] = perm[0];
+        perm[0] = 2;
+      }
+
+      size_t grid[3];
+      grid[perm[0]] = $exp:grid_x;
+      grid[perm[1]] = $exp:grid_y;
+      grid[perm[2]] = $exp:grid_z;
+
+      void *$id:args_arr[] = { $inits:args'' };
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
         fprintf(stderr, "Launching %s with grid size (", $string:name);
@@ -215,7 +235,7 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
       }
       CUDA_SUCCEED(
         cuLaunchKernel(ctx->$id:name,
-                       $exp:grid_x, $exp:grid_y, $exp:grid_z,
+                       grid[0], grid[1], grid[2],
                        $exp:block_x, $exp:block_y, $exp:block_z,
                        $exp:shared_tot, NULL,
                        $id:args_arr, NULL));
