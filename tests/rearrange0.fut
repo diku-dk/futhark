@@ -38,7 +38,13 @@
 --   0i32], [6i32, 3i32, 7i32, 10i32, 10i32, 6i32, 9i32], [9i32, 7i32,
 --   5i32, 5i32, 7i32, 7i32, 8i32]]]
 -- }
---
+-- compiled random input { [2][10][10]i32 } auto output
+-- compiled random input { [2][64][4]i32 } auto output
+-- compiled random input { [2][4][64]i32 } auto output
+-- compiled random input { [2][64][64]i32 } auto output
+-- compiled random input { [64][2][64]i32 } auto output
+-- compiled random input { [64][64][2]i32 } auto output
+-- compiled random input { [128][128][128]i32 } auto output
 
 let main xss: [][][]i32 =
   xss |> map transpose |> transpose
