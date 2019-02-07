@@ -120,21 +120,46 @@ onKernel target kernel = do
         flip evalState (blankNameSource :: VNameSource) $
         mapM (prepareLocalMemory target) $ kernelLocalMemory kernel
 
-      params = catMaybes local_memory_params ++ use_params
+      -- CUDA has very strict restrictions on the number of blocks
+      -- permitted along the 'y' and 'z' dimensions of the grid
+      -- (1<<16).  To work around this, we are going to dynamically
+      -- permute the block dimensions to move the largest one to the
+      -- 'x' dimension, which has a higher limit (1<<31).  This means
+      -- we need to extend the kernel with extra parameters that
+      -- contain information about this permutation, but we only do
+      -- this for multidimensional kernels (at the time of this
+      -- writing, only transposes).  The corresponding arguments are
+      -- added automatically in CCUDA.hs.
+      (perm_params, block_dim_init) =
+        case (target, num_groups) of
+          (TargetCUDA, [_, _, _]) -> ([[C.cparam|const int block_dim0|],
+                                       [C.cparam|const int block_dim1|],
+                                       [C.cparam|const int block_dim2|]],
+                                      mempty)
+          _ -> (mempty,
+                [[C.citem|const int block_dim0 = 0;|],
+                 [C.citem|const int block_dim1 = 1;|],
+                 [C.citem|const int block_dim2 = 2;|]])
+
+      params = perm_params ++ catMaybes local_memory_params ++ use_params
 
   tell mempty { clExtraFuns = mempty
-                , clKernels = M.singleton name
-                              [C.cfun|__kernel void $id:name ($params:params) {
-                                  $items:local_memory_init
-                                  $items:kernel_body
-                                  }|]
-               , clRequirements = OpenClRequirements
-                                  (typesInKernel kernel)
-                                  (mapMaybe useAsConst $ kernelUses kernel)
-               }
+              , clKernels = M.singleton name
+                            [C.cfun|__kernel void $id:name ($params:params) {
+                                $items:block_dim_init
+                                $items:local_memory_init
+                                $items:kernel_body
+                                }|]
+              , clRequirements = OpenClRequirements
+                                 (typesInKernel kernel)
+                                 (mapMaybe useAsConst $ kernelUses kernel)
+              }
 
   return $ LaunchKernel name (kernelArgs kernel) num_groups group_size
-  where
+  where name = nameToString $ kernelName kernel
+        num_groups = kernelNumGroups kernel
+        group_size = kernelGroupSize kernel
+
         prepareLocalMemory TargetOpenCL (mem, Left _) = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
           return (Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
@@ -151,9 +176,6 @@ onKernel target kernel = do
           let size' = compilePrimExp size
           return (Nothing,
                   [CUDAC.citem|__shared__ volatile char $id:mem[$exp:size'];|])
-        name = nameToString $ kernelName kernel
-        num_groups = kernelNumGroups kernel
-        group_size = kernelGroupSize kernel
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
@@ -260,8 +282,14 @@ $esc:("#define __private")
 $esc:("#define __constant")
 $esc:("#define __write_only")
 $esc:("#define __read_only")
-static inline int get_group_id(int d)
+
+static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int d)
 {
+  switch (d) {
+    case 0: d = block_dim0; break;
+    case 1: d = block_dim1; break;
+    case 2: d = block_dim2; break;
+  }
   switch (d) {
     case 0: return blockIdx.x;
     case 1: return blockIdx.y;
@@ -269,8 +297,15 @@ static inline int get_group_id(int d)
     default: return 0;
   }
 }
-static inline int get_num_groups(int d)
+$esc:("#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, d)")
+
+static inline int get_num_groups_fn(int block_dim0, int block_dim1, int block_dim2, int d)
 {
+  switch (d) {
+    case 0: d = block_dim0; break;
+    case 1: d = block_dim1; break;
+    case 2: d = block_dim2; break;
+  }
   switch(d) {
     case 0: return gridDim.x;
     case 1: return gridDim.y;
@@ -278,6 +313,8 @@ static inline int get_num_groups(int d)
     default: return 0;
   }
 }
+$esc:("#define get_num_groups(d) get_num_groups_fn(block_dim0, block_dim1, block_dim2, d)")
+
 static inline int get_local_id(int d)
 {
   switch (d) {
@@ -287,6 +324,7 @@ static inline int get_local_id(int d)
     default: return 0;
   }
 }
+
 static inline int get_local_size(int d)
 {
   switch (d) {
@@ -296,24 +334,18 @@ static inline int get_local_size(int d)
     default: return 0;
   }
 }
-static inline int get_global_id(int d)
+
+static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int d)
 {
-  switch (d) {
-    case 0: return blockIdx.x * blockDim.x + threadIdx.x;
-    case 1: return blockIdx.y * blockDim.y + threadIdx.y;
-    case 2: return blockIdx.z * blockDim.z + threadIdx.z;
-    default: return 0;
-  }
+  return get_group_id(d) * get_local_size(d) + get_local_id(d);
 }
-static inline int get_global_size(int d)
+$esc:("#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, d)")
+
+static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d)
 {
-  switch (d) {
-    case 0: return gridDim.x * blockDim.x;
-    case 1: return gridDim.y * blockDim.y;
-    case 2: return gridDim.z * blockDim.z;
-    default: return 0;
-  }
+  return get_num_groups(d) * get_local_size(d);
 }
+
 $esc:("#define CLK_LOCAL_MEM_FENCE 1")
 $esc:("#define CLK_GLOBAL_MEM_FENCE 2")
 static inline void barrier(int x)
