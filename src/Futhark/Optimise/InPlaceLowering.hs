@@ -66,7 +66,6 @@ module Futhark.Optimise.InPlaceLowering
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import qualified Data.Semigroup as Sem
 
 import Futhark.Analysis.Alias
 import Futhark.Representation.Aliases
@@ -196,13 +195,12 @@ data BottomUp lore = BottomUp { bottomUpSeen :: Names
                               , forwardThese :: [DesiredUpdate (LetAttr (Aliases lore))]
                               }
 
-instance Sem.Semigroup (BottomUp lore) where
+instance Semigroup (BottomUp lore) where
   BottomUp seen1 forward1 <> BottomUp seen2 forward2 =
     BottomUp (seen1 <> seen2) (forward1 <> forward2)
 
 instance Monoid (BottomUp lore) where
   mempty = BottomUp mempty mempty
-  mappend = (Sem.<>)
 
 updateStm :: Constraints lore => DesiredUpdate (LetAttr (Aliases lore)) -> Stm (Aliases lore)
 updateStm fwd =

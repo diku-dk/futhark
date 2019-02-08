@@ -38,7 +38,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        where
 
 import Data.Maybe
-import Data.Semigroup ((<>))
 import Data.Foldable
 import qualified Data.Set as S
 

@@ -22,7 +22,6 @@ import Control.Monad.Reader
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.List
-import Data.Semigroup ((<>))
 import Data.Maybe
 
 import Futhark.MonadFreshNames

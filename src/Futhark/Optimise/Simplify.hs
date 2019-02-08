@@ -18,8 +18,6 @@ module Futhark.Optimise.Simplify
   )
   where
 
-import Data.Semigroup ((<>))
-
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine

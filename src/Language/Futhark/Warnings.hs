@@ -6,7 +6,6 @@ module Language.Futhark.Warnings
 import Data.Monoid
 import Data.List
 import Data.Loc
-import qualified Data.Semigroup as Sem
 
 import Prelude
 
@@ -16,12 +15,11 @@ import Language.Futhark.Core (locStr)
 -- produces a human-readable description.
 newtype Warnings = Warnings [(SrcLoc, String)] deriving (Eq)
 
-instance Sem.Semigroup Warnings where
+instance Semigroup Warnings where
   Warnings ws1 <> Warnings ws2 = Warnings $ ws1 <> ws2
 
 instance Monoid Warnings where
   mempty = Warnings mempty
-  mappend = (Sem.<>)
 
 instance Show Warnings where
   show (Warnings []) = ""

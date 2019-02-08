@@ -22,7 +22,6 @@ import qualified Data.Text as T
 import Data.String
 import Data.List
 import qualified Data.Map.Strict as M
-import qualified Data.Semigroup as Sem
 
 import Futhark.Representation.AST
 
@@ -48,12 +47,11 @@ instance OpMetrics () where
 
 newtype CountMetrics = CountMetrics [([Text], Text)]
 
-instance Sem.Semigroup CountMetrics where
+instance Semigroup CountMetrics where
   CountMetrics x <> CountMetrics y = CountMetrics $ x <> y
 
 instance Monoid CountMetrics where
   mempty = CountMetrics mempty
-  mappend = (Sem.<>)
 
 actualMetrics :: CountMetrics -> AstMetrics
 actualMetrics (CountMetrics metrics) =

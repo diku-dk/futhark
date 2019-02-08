@@ -6,7 +6,6 @@ import Data.Maybe
 import Control.Exception
 import Control.Monad
 import Data.List
-import Data.Semigroup ((<>))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import System.IO

@@ -13,7 +13,6 @@ import qualified Data.ByteString as SBS
 import qualified Data.ByteString.Lazy as LBS
 
 import Data.List
-import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T

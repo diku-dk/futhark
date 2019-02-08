@@ -7,7 +7,6 @@ module Futhark.CodeGen.ImpGen.Kernels.Transpose
   where
 
 import qualified Data.Set as S
-import Data.Semigroup ((<>))
 
 import Prelude hiding (quot, rem)
 

@@ -15,7 +15,6 @@ import Control.Monad.Reader
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import qualified Data.Semigroup as Sem
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
@@ -71,13 +70,12 @@ data OpenClRequirements =
                      , _kernelConstants :: [(VName, KernelConstExp)]
                      }
 
-instance Sem.Semigroup OpenClRequirements where
+instance Semigroup OpenClRequirements where
   OpenClRequirements ts1 consts1 <> OpenClRequirements ts2 consts2 =
     OpenClRequirements (ts1 <> ts2) (consts1 <> consts2)
 
 instance Monoid OpenClRequirements where
   mempty = OpenClRequirements mempty mempty
-  mappend = (Sem.<>)
 
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
@@ -85,13 +83,12 @@ data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clSizes :: M.Map Name SizeClass
                          }
 
-instance Sem.Semigroup ToOpenCL where
+instance Semigroup ToOpenCL where
   ToOpenCL f1 k1 r1 sz1 <> ToOpenCL f2 k2 r2 sz2 =
     ToOpenCL (f1<>f2) (k1<>k2) (r1<>r2) (sz1<>sz2)
 
 instance Monoid ToOpenCL where
   mempty = ToOpenCL mempty mempty mempty mempty
-  mappend = (Sem.<>)
 
 type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 

@@ -14,7 +14,6 @@ import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Semigroup ((<>))
 import Data.List
 import Data.Loc
 import Data.Char (chr)

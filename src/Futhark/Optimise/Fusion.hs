@@ -10,9 +10,7 @@ module Futhark.Optimise.Fusion ( fuseSOACs )
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Except
-import qualified Data.Semigroup as Sem
 import Data.Maybe
-import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
 import qualified Data.List         as L
@@ -245,7 +243,7 @@ data FusedRes = FusedRes {
   -- ^ The map recording the uses
   }
 
-instance Sem.Semigroup FusedRes where
+instance Semigroup FusedRes where
   res1 <> res2 =
     FusedRes (rsucc     res1       ||      rsucc     res2)
              (outArr    res1    `M.union`  outArr    res2)
@@ -256,7 +254,6 @@ instance Sem.Semigroup FusedRes where
 instance Monoid FusedRes where
   mempty = FusedRes { rsucc     = False,   outArr = M.empty, inpArr  = M.empty,
                       infusible = S.empty, kernels = M.empty }
-  mappend = (Sem.<>)
 
 isInpArrInResModKers :: FusedRes -> S.Set KernName -> VName -> Bool
 isInpArrInResModKers ress kers nm =

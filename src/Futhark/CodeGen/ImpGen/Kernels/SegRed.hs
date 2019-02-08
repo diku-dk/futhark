@@ -48,7 +48,6 @@ module Futhark.CodeGen.ImpGen.Kernels.SegRed
 
 import Control.Monad.Except
 import Data.Maybe
-import Data.Semigroup ((<>))
 import qualified Data.Set as S
 import Data.List
 

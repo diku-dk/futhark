@@ -35,7 +35,6 @@ module Futhark.Optimise.CSE
 import Control.Monad.Reader
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import Data.Semigroup ((<>))
 
 import Futhark.Analysis.Alias
 import Futhark.Representation.AST

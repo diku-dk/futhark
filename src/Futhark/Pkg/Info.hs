@@ -25,7 +25,6 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.ByteString as BS
 import qualified Data.Text.Encoding as T
-import qualified Data.Semigroup as Sem
 import Data.List
 import Data.Monoid ((<>))
 import qualified System.FilePath.Posix as Posix
@@ -255,12 +254,11 @@ glPkgInfo owner repo versions =
 -- monoidically.  In essence, the PkgRegistry is just a cache.
 newtype PkgRegistry m = PkgRegistry (M.Map PkgPath (PkgInfo m))
 
-instance Sem.Semigroup (PkgRegistry m) where
+instance Semigroup (PkgRegistry m) where
   PkgRegistry x <> PkgRegistry y = PkgRegistry $ x <> y
 
 instance Monoid (PkgRegistry m) where
   mempty = PkgRegistry mempty
-  mappend = (Sem.<>)
 
 lookupKnownPackage :: PkgPath -> PkgRegistry m -> Maybe (PkgInfo m)
 lookupKnownPackage p (PkgRegistry m) = M.lookup p m

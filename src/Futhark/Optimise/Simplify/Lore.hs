@@ -29,7 +29,6 @@ module Futhark.Optimise.Simplify.Lore
 
 import Control.Monad.Identity
 import Control.Monad.Reader
-import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST

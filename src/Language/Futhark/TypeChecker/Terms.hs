@@ -22,7 +22,6 @@ import Data.Char (isAlpha)
 import Data.List
 import Data.Loc
 import Data.Maybe
-import qualified Data.Semigroup as Sem
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
@@ -156,13 +155,12 @@ data TermScope = TermScope { scopeVtable  :: M.Map VName ValBinding
                              -- ^ Most recent first.
                            } deriving (Show)
 
-instance Sem.Semigroup TermScope where
+instance Semigroup TermScope where
   TermScope vt1 tt1 nt1 bc1 <> TermScope vt2 tt2 nt2 bc2 =
     TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (nt2 `M.union` nt1) (bc1 <> bc2)
 
 instance Monoid TermScope where
   mempty = TermScope mempty mempty mempty mempty
-  mappend = (Sem.<>)
 
 envToTermScope :: Env -> TermScope
 envToTermScope env = TermScope vtable (envTypeTable env) (envNameMap env) mempty

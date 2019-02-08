@@ -7,7 +7,6 @@ module Futhark.Analysis.DataDependencies
   )
   where
 
-import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 

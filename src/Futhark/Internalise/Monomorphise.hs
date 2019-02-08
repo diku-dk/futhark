@@ -31,7 +31,6 @@ import           Control.Monad.RWS
 import           Control.Monad.State
 import           Data.Loc
 import qualified Data.Map.Strict as M
-import qualified Data.Semigroup as Sem
 import qualified Data.Sequence as Seq
 import           Data.Foldable
 
@@ -65,12 +64,11 @@ data Env = Env { envPolyBindings :: M.Map VName PolyBinding
                , envRecordReplacements :: RecordReplacements
                }
 
-instance Sem.Semigroup Env where
+instance Semigroup Env where
   Env tb1 pb1 rr1 <> Env tb2 pb2 rr2 = Env (tb1 <> tb2) (pb1 <> pb2) (rr1 <> rr2)
 
 instance Monoid Env where
   mempty  = Env mempty mempty mempty
-  mappend = (Sem.<>)
 
 localEnv :: Env -> MonoM a -> MonoM a
 localEnv env = local (env <>)

@@ -20,7 +20,6 @@ module Futhark.Tools
 where
 
 import Control.Monad.Identity
-import Data.Semigroup ((<>))
 
 import Futhark.Representation.AST
 import Futhark.Representation.SOACS.SOAC

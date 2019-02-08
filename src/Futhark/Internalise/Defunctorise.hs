@@ -10,7 +10,6 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Maybe
 import Data.Loc
-import qualified Data.Semigroup as Sem
 
 import Prelude hiding (mod, abs)
 
@@ -53,13 +52,11 @@ lookupSubstInScope qn@(QualName quals name) scope@(Scope substs mods) =
            Just (ModMod mod_scope) -> lookupSubstInScope (QualName qs name) mod_scope
            _ -> (qn, scope)
 
-instance Sem.Semigroup Scope where
-  Scope ss1 mt1 <> Scope ss2 mt2 =
-    Scope (ss1<>ss2) (mt1<>mt2)
+instance Semigroup Scope where
+  Scope ss1 mt1 <> Scope ss2 mt2 = Scope (ss1<>ss2) (mt1<>mt2)
 
 instance Monoid Scope where
   mempty = Scope mempty mempty
-  mappend = (Sem.<>)
 
 type TySet = S.Set VName
 

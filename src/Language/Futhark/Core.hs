@@ -36,7 +36,6 @@ import Data.Int (Int8, Int16, Int32, Int64)
 import Data.String
 import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Loc
-import qualified Data.Semigroup as Sem
 import qualified Data.Text as T
 
 import Futhark.Util.Pretty
@@ -48,12 +47,11 @@ data Uniqueness = Nonunique -- ^ May have references outside current function.
                 | Unique    -- ^ No references outside current function.
                   deriving (Eq, Ord, Show)
 
-instance Sem.Semigroup Uniqueness where
+instance Semigroup Uniqueness where
   (<>) = min
 
 instance Monoid Uniqueness where
   mempty = Unique
-  mappend = (Sem.<>)
 
 instance Pretty Uniqueness where
   ppr Unique = star
@@ -69,12 +67,11 @@ data Commutativity = Noncommutative
                    | Commutative
                      deriving (Eq, Ord, Show)
 
-instance Sem.Semigroup Commutativity where
+instance Semigroup Commutativity where
   (<>) = min
 
 instance Monoid Commutativity where
   mempty = Commutative
-  mappend = (Sem.<>)
 
 -- | The name of the default program entry point (main).
 defaultEntryPoint :: Name
@@ -84,7 +81,7 @@ defaultEntryPoint = nameFromString "main"
 -- compiler.  'String's, being lists of characters, are very slow,
 -- while 'T.Text's are based on byte-arrays.
 newtype Name = Name T.Text
-  deriving (Show, Eq, Ord, IsString, Sem.Semigroup)
+  deriving (Show, Eq, Ord, IsString, Semigroup)
 
 instance Pretty Name where
   ppr = text . nameToString
