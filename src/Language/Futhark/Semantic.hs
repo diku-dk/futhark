@@ -33,7 +33,7 @@ import Prelude hiding (mod)
 
 import Language.Futhark
 import Futhark.Util (dropLast, toPOSIX, fromPOSIX)
-import Futhark.Util.Pretty hiding ((<>))
+import Futhark.Util.Pretty
 
 -- | Canonical reference to a Futhark code file.  Does not include the
 -- @.fut@ extension.  This is most often a path relative to the
