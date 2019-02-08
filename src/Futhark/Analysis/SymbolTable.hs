@@ -59,12 +59,10 @@ import Control.Monad
 import Control.Monad.Reader
 import Data.Ord
 import Data.Maybe
-import Data.Semigroup ((<>))
 import Data.List hiding (elem, lookup)
 import qualified Data.List as L
 import qualified Data.Set        as S
 import qualified Data.Map.Strict as M
-import qualified Data.Semigroup as Sem
 
 import Prelude hiding (elem, lookup)
 
@@ -88,7 +86,7 @@ data SymbolTable lore = SymbolTable {
     -- loop?
   }
 
-instance Sem.Semigroup (SymbolTable lore) where
+instance Semigroup (SymbolTable lore) where
   table1 <> table2 =
     SymbolTable { loopDepth = max (loopDepth table1) (loopDepth table2)
                 , bindings = bindings table1 <> bindings table2
@@ -98,7 +96,6 @@ instance Sem.Semigroup (SymbolTable lore) where
 
 instance Monoid (SymbolTable lore) where
   mempty = empty
-  mappend = (Sem.<>)
 
 empty :: SymbolTable lore
 empty = SymbolTable 0 M.empty mempty

@@ -97,7 +97,6 @@ import           Data.Monoid
 import           Data.Ord
 import qualified Data.Set                         as S
 import           Data.Traversable
-import qualified Data.Semigroup as Sem
 import           Data.List
 import           Prelude
 
@@ -249,12 +248,11 @@ instance Traversable ShapeDecl where
 instance Functor ShapeDecl where
   fmap f (ShapeDecl ds) = ShapeDecl $ map f ds
 
-instance Sem.Semigroup (ShapeDecl dim) where
+instance Semigroup (ShapeDecl dim) where
   ShapeDecl l1 <> ShapeDecl l2 = ShapeDecl $ l1 ++ l2
 
 instance Monoid (ShapeDecl dim) where
   mempty = ShapeDecl []
-  mappend = (Sem.<>)
 
 -- | The number of dimensions contained in a shape.
 shapeRank :: ShapeDecl dim -> Int

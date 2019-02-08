@@ -27,7 +27,6 @@ import Data.Bifunctor (bimap)
 import Data.List hiding (break)
 import Data.Maybe
 import qualified Data.Map as M
-import qualified Data.Semigroup as Sem
 import Data.Monoid
 import Data.Loc
 
@@ -210,9 +209,8 @@ data Env = Env { envTerm :: M.Map VName TermBinding
 
 instance Monoid Env where
   mempty = Env mempty mempty
-  mappend = (Sem.<>)
 
-instance Sem.Semigroup Env where
+instance Semigroup Env where
   Env vm1 tm1 <> Env vm2 tm2 = Env (vm1 <> vm2) (tm1 <> tm2)
 
 newtype InterpreterError = InterpreterError String

@@ -69,7 +69,6 @@ module Futhark.Representation.AST.Syntax
 import Data.Foldable
 import Data.Loc
 import qualified Data.Sequence as Seq
-import qualified Data.Semigroup as Sem
 
 import Language.Futhark.Core
 import Futhark.Representation.AST.Annotations
@@ -90,12 +89,11 @@ data PatternT attr =
 instance Functor PatternT where
   fmap f (Pattern ctx val) = Pattern (map (fmap f) ctx) (map (fmap f) val)
 
-instance Sem.Semigroup (PatternT attr) where
+instance Semigroup (PatternT attr) where
   Pattern cs1 vs1 <> Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
 instance Monoid (PatternT attr) where
   mempty = Pattern [] []
-  mappend = (Sem.<>)
 
 -- | A type alias for namespace control.
 type Pattern lore = PatternT (LetAttr lore)

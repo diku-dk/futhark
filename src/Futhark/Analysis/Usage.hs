@@ -8,7 +8,6 @@ module Futhark.Analysis.Usage
        )
        where
 
-import Data.Semigroup ((<>))
 import Data.Foldable
 import qualified Data.Set as S
 

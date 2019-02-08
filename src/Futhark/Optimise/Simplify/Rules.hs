@@ -24,7 +24,6 @@ import Data.Either
 import Data.Foldable (all)
 import Data.List hiding (all)
 import Data.Maybe
-import Data.Semigroup ((<>))
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S

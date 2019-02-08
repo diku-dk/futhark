@@ -12,7 +12,6 @@ where
 
 import Control.Monad
 import qualified Data.Set as S
-import Data.Semigroup ((<>))
 import Data.Maybe
 import Data.List
 

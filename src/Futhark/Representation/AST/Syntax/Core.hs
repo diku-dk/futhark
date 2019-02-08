@@ -59,7 +59,6 @@ import Data.Monoid ((<>))
 import Data.String
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import qualified Data.Semigroup as Sem
 import Data.Traversable
 
 import Language.Futhark.Core
@@ -101,12 +100,11 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | Check whether one shape if a subset of another shape.
   subShapeOf :: a -> a -> Bool
 
-instance Sem.Semigroup (ShapeBase d) where
+instance Semigroup (ShapeBase d) where
   Shape l1 <> Shape l2 = Shape $ l1 `mappend` l2
 
 instance Monoid (ShapeBase d) where
   mempty = Shape mempty
-  mappend = (Sem.<>)
 
 instance Functor ShapeBase where
   fmap f = Shape . map f . shapeDims
@@ -135,12 +133,11 @@ instance ArrayShape (ShapeBase ExtSize) where
               Nothing -> do put $ M.insert y x extmap
                             return True
 
-instance Sem.Semigroup Rank where
+instance Semigroup Rank where
   Rank x <> Rank y = Rank $ x + y
 
 instance Monoid Rank where
   mempty = Rank 0
-  mappend = (Sem.<>)
 
 instance ArrayShape Rank where
   shapeRank (Rank x) = x
@@ -214,12 +211,11 @@ instance Ord Ident where
 newtype Certificates = Certificates { unCertificates :: [VName] }
                      deriving (Eq, Ord, Show)
 
-instance Sem.Semigroup Certificates where
+instance Semigroup Certificates where
   Certificates x <> Certificates y = Certificates (x <> y)
 
 instance Monoid Certificates where
   mempty = Certificates mempty
-  mappend = (Sem.<>)
 
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is

@@ -40,7 +40,6 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Control.Monad.Fail as Fail
 import qualified Data.Map.Strict as M
-import qualified Data.Semigroup as Sem
 
 import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
@@ -75,7 +74,7 @@ data InternaliseState = InternaliseState {
   }
 
 newtype InternaliseResult = InternaliseResult [FunDef]
-  deriving (Sem.Semigroup, Monoid)
+  deriving (Semigroup, Monoid)
 
 newtype InternaliseM  a = InternaliseM (BinderT SOACS
                                         (RWST

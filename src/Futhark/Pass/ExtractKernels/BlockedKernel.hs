@@ -27,7 +27,6 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
 import Control.Monad
 import Data.Maybe
 import Data.List
-import Data.Semigroup ((<>))
 import qualified Data.Set as S
 
 import Prelude hiding (quot)

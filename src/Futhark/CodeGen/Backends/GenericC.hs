@@ -77,7 +77,6 @@ import Data.List
 import Data.Loc
 import Data.Maybe
 import Data.FileEmbed
-import qualified Data.Semigroup as Sem
 import Text.Printf
 
 import qualified Language.C.Syntax as C
@@ -228,13 +227,12 @@ newtype CompilerAcc op s = CompilerAcc {
     accItems :: DL.DList C.BlockItem
   }
 
-instance Sem.Semigroup (CompilerAcc op s) where
+instance Semigroup (CompilerAcc op s) where
   CompilerAcc items1 <> CompilerAcc items2 =
     CompilerAcc (items1<>items2)
 
 instance Monoid (CompilerAcc op s) where
   mempty = CompilerAcc mempty
-  mappend = (Sem.<>)
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
 envOpCompiler = opsCompiler . envOperations

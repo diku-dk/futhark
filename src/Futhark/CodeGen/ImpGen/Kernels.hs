@@ -10,7 +10,6 @@ module Futhark.CodeGen.ImpGen.Kernels
 import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Maybe
-import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import Data.List
 

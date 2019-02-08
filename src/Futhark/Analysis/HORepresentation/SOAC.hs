@@ -72,7 +72,6 @@ import Data.Foldable as Foldable
 import Data.Maybe
 import Data.Monoid ((<>))
 import qualified Data.Sequence as Seq
-import qualified Data.Semigroup as Sem
 
 import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.SOACS.SOAC
@@ -126,14 +125,13 @@ instance Substitute ArrayTransform where
 newtype ArrayTransforms = ArrayTransforms (Seq.Seq ArrayTransform)
   deriving (Eq, Ord, Show)
 
-instance Sem.Semigroup ArrayTransforms where
+instance Semigroup ArrayTransforms where
   ts1 <> ts2 = case viewf ts2 of
                  t :< ts2' -> (ts1 |> t) <> ts2'
                  EmptyF    -> ts1
 
 instance Monoid ArrayTransforms where
   mempty = noTransforms
-  mappend = (Sem.<>)
 
 instance Substitute ArrayTransforms where
   substituteNames substs (ArrayTransforms ts) =

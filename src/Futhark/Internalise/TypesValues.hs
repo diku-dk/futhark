@@ -24,7 +24,6 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
 import Data.Monoid ((<>))
-import Data.Semigroup (Semigroup)
 
 import qualified Language.Futhark as E
 import Futhark.Representation.SOACS as I

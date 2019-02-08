@@ -8,7 +8,6 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State
 import Data.FileEmbed
 import Data.List
-import Data.Semigroup ((<>))
 import System.FilePath
 import System.Directory (createDirectoryIfMissing)
 import System.Console.GetOpt

@@ -18,7 +18,6 @@ module Futhark.Optimise.Fusion.Composing
   where
 
 import Data.List
-import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe

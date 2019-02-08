@@ -11,7 +11,6 @@ import           Data.List
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import qualified Data.Semigroup as Sem
 import qualified Data.Sequence as Seq
 
 import           Futhark.MonadFreshNames
@@ -776,12 +775,11 @@ svFromType t           = Dynamic t
 -- A set of names where we also track uniqueness.
 newtype NameSet = NameSet (M.Map VName Uniqueness)
 
-instance Sem.Semigroup NameSet where
+instance Semigroup NameSet where
   NameSet x <> NameSet y = NameSet $ M.unionWith max x y
 
 instance Monoid NameSet where
   mempty = NameSet mempty
-  mappend = (Sem.<>)
 
 without :: NameSet -> NameSet -> NameSet
 without (NameSet x) (NameSet y) = NameSet $ x `M.difference` y

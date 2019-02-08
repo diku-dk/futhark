@@ -51,9 +51,7 @@ module Futhark.Optimise.Simplify.Rule
        , bottomUpSimplifyStm
        ) where
 
-import Data.Semigroup ((<>))
 import Control.Monad.State
-import qualified Data.Semigroup as Sem
 import qualified Control.Monad.Fail as Fail
 import Control.Monad.Except
 
@@ -137,13 +135,12 @@ data Rules lore a = Rules { rulesAny :: [SimplificationRule lore a]
                        , rulesOp :: [SimplificationRule lore a]
                        }
 
-instance Sem.Semigroup (Rules lore a) where
+instance Semigroup (Rules lore a) where
   Rules as1 bs1 cs1 ds1 es1 <> Rules as2 bs2 cs2 ds2 es2 =
     Rules (as1<>as2) (bs1<>bs2) (cs1<>cs2) (ds1<>ds2) (es1<>es2)
 
 instance Monoid (Rules lore a) where
   mempty = Rules mempty mempty mempty mempty mempty
-  mappend = (Sem.<>)
 
 -- | Context for a rule applied during top-down traversal of the
 -- program.  Takes a symbol table as argument.
@@ -178,12 +175,11 @@ data RuleBook lore = RuleBook { bookTopDownRules :: TopDownRules lore
                               , bookBottomUpRules :: BottomUpRules lore
                               }
 
-instance Sem.Semigroup (RuleBook lore) where
+instance Semigroup (RuleBook lore) where
   RuleBook ts1 bs1 <> RuleBook ts2 bs2 = RuleBook (ts1<>ts2) (bs1<>bs2)
 
 instance Monoid (RuleBook lore) where
   mempty = RuleBook mempty mempty
-  mappend = (Sem.<>)
 
 -- | Construct a rule book from a collection of rules.
 ruleBook :: [TopDownRule m]

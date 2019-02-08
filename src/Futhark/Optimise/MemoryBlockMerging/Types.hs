@@ -18,7 +18,6 @@ module Futhark.Optimise.MemoryBlockMerging.Types
 where
 
 import qualified Data.Map.Strict as M
-import qualified Data.Semigroup as Sem
 
 import Futhark.Representation.AST
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
@@ -83,9 +82,8 @@ type ActualVariables = M.Map VName Names
 newtype Log = Log (M.Map VName [(String, String)])
   deriving (Show, Eq, Ord)
 
-instance Sem.Semigroup Log where
+instance Semigroup Log where
   Log a <> Log b = Log $ M.unionWith (++) a b
 
 instance Monoid Log where
   mempty = Log M.empty
-  mappend = (Sem.<>)

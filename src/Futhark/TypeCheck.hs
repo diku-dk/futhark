@@ -60,7 +60,6 @@ import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
-import qualified Data.Semigroup as Sem
 
 import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
@@ -225,7 +224,7 @@ data Consumption = ConsumptionError String
                  | Consumption Occurences
                  deriving (Show)
 
-instance Sem.Semigroup Consumption where
+instance Semigroup Consumption where
   ConsumptionError e <> _ = ConsumptionError e
   _ <> ConsumptionError e = ConsumptionError e
   Consumption o1 <> Consumption o2
@@ -238,7 +237,6 @@ instance Sem.Semigroup Consumption where
 
 instance Monoid Consumption where
   mempty = Consumption mempty
-  mappend = (Sem.<>)
 
 -- | The environment contains a variable table and a function table.
 -- Type checking happens with access to this environment.  The

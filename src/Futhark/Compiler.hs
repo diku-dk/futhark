@@ -15,7 +15,6 @@ module Futhark.Compiler
        )
 where
 
-import Data.Semigroup ((<>))
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Except

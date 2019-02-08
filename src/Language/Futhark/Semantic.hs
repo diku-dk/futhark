@@ -22,10 +22,8 @@ module Language.Futhark.Semantic
   )
 where
 
-import Data.Semigroup ((<>))
 import Data.Loc
 import qualified Data.Map.Strict as M
-import qualified Data.Semigroup as Sem
 import qualified System.FilePath.Posix as Posix
 import qualified System.FilePath as Native
 
@@ -134,13 +132,12 @@ data Env = Env { envVtable :: M.Map VName BoundV
                , envNameMap :: NameMap
                } deriving (Show)
 
-instance Sem.Semigroup Env where
+instance Semigroup Env where
   Env vt1 tt1 st1 mt1 nt1 <> Env vt2 tt2 st2 mt2 nt2 =
     Env (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
 
 instance Monoid Env where
   mempty = Env mempty mempty mempty mempty mempty
-  mappend = (Sem.<>)
 
 instance Pretty MTy where
   ppr = ppr . mtyMod

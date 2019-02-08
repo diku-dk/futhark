@@ -27,10 +27,8 @@ import Control.Arrow (first)
 import Data.Bits
 import qualified Data.Foldable as Foldable
 import Data.List (foldl')
-import Data.Semigroup ((<>))
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import qualified Data.Semigroup as Sem
 
 import Prelude hiding (lookup)
 
@@ -40,13 +38,12 @@ import Futhark.Representation.AST
 newtype UsageTable = UsageTable (M.Map VName Usages)
                    deriving (Eq, Show)
 
-instance Sem.Semigroup UsageTable where
+instance Semigroup UsageTable where
   UsageTable table1 <> UsageTable table2 =
     UsageTable $ M.unionWith (<>) table1 table2
 
 instance Monoid UsageTable where
   mempty = empty
-  mappend = (Sem.<>)
 
 instance Substitute UsageTable where
   substituteNames subst (UsageTable table)
@@ -115,12 +112,11 @@ inResultUsage name = UsageTable $ M.singleton name inResultU
 newtype Usages = Usages Int
   deriving (Eq, Ord, Show)
 
-instance Sem.Semigroup Usages where
+instance Semigroup Usages where
   Usages x <> Usages y = Usages $ x .|. y
 
 instance Monoid Usages where
   mempty = Usages 0
-  mappend = (Sem.<>)
 
 consumedU, inResultU, presentU :: Usages
 consumedU = Usages 1

@@ -42,8 +42,6 @@ import Data.List
 import Data.Maybe
 import Data.Traversable
 import Data.Void
-import Data.Semigroup ((<>))
-import qualified Data.Semigroup as Sem
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Map as M
@@ -102,12 +100,11 @@ semver' = SemVer <$> majorP <*> minorP <*> patchP <*> preRel <*> metaData
 newtype PkgRevDeps = PkgRevDeps (M.Map PkgPath (SemVer, Maybe T.Text))
   deriving (Show)
 
-instance Sem.Semigroup PkgRevDeps where
+instance Semigroup PkgRevDeps where
   PkgRevDeps x <> PkgRevDeps y = PkgRevDeps $ x <> y
 
 instance Monoid PkgRevDeps where
   mempty = PkgRevDeps mempty
-  mappend = (Sem.<>)
 
 --- Package manifest
 

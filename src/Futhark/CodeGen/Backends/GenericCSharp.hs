@@ -75,7 +75,6 @@ import Control.Arrow((&&&))
 import Data.Maybe
 import Data.List
 import qualified Data.Map.Strict as M
-import qualified Data.Semigroup as Sem
 
 import Futhark.Representation.Primitive hiding (Bool)
 import Futhark.MonadFreshNames
@@ -184,13 +183,12 @@ data CompilerAcc op s = CompilerAcc {
   , accFreedMem :: [VName]
   }
 
-instance Sem.Semigroup (CompilerAcc op s) where
+instance Semigroup (CompilerAcc op s) where
   CompilerAcc items1 freed1 <> CompilerAcc items2 freed2 =
     CompilerAcc (items1<>items2) (freed1<>freed2)
 
 instance Monoid (CompilerAcc op s) where
   mempty = CompilerAcc mempty mempty
-  mappend = (Sem.<>)
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
 envOpCompiler = opsCompiler . envOperations

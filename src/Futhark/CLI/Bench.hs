@@ -12,7 +12,6 @@ import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.Map as M
 import Data.Either
 import Data.Maybe
-import Data.Semigroup ((<>))
 import Data.List
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
