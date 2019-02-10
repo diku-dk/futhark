@@ -459,11 +459,11 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
 
     mergeinit_ts' <- mapM subExpType mergeinit'
 
-    let ctxinit = argShapes
-                  (map I.paramName shapepat)
-                  (map I.paramType mergepat')
-                  mergeinit_ts'
-        ctxmerge = zip shapepat ctxinit
+    ctxinit <- argShapes
+               (map I.paramName shapepat)
+               (map I.paramType mergepat')
+               mergeinit_ts'
+    let ctxmerge = zip shapepat ctxinit
         valmerge = zip mergepat' mergeinit'
         merge = ctxmerge ++ valmerge
         dropCond = case form of E.While{} -> drop 1
@@ -487,10 +487,10 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
       inScopeOf form' $ internaliseBodyStms loopbody $ \ses -> do
       sets <- mapM subExpType ses
       let mergepat' = concat nested_mergepat
-          shapeargs = argShapes
-                      (map I.paramName shapepat)
-                      (map I.paramType mergepat')
-                      sets
+      shapeargs <- argShapes
+                   (map I.paramName shapepat)
+                   (map I.paramType mergepat')
+                   sets
       return (resultBody $ shapeargs ++ ses,
               (form',
                shapepat,
@@ -536,10 +536,10 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
         -- next iteration?).  This is safe, as the type rules for
         -- the external language guarantees that 'cond' does not
         -- consume anything.
-        let shapeinit = argShapes
-                        (map I.paramName shapepat)
-                        (map I.paramType mergepat')
-                        mergeinit_ts
+        shapeinit <- argShapes
+                     (map I.paramName shapepat)
+                     (map I.paramType mergepat')
+                     mergeinit_ts
 
         (loop_initial_cond, init_loop_cond_bnds) <- collectStms $ do
           forM_ (zip shapepat shapeinit) $ \(p, se) ->
@@ -555,10 +555,10 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
         internaliseBodyStms loopbody $ \ses -> do
           sets <- mapM subExpType ses
           loop_while <- newParam "loop_while" $ I.Prim I.Bool
-          let shapeargs = argShapes
-                          (map I.paramName shapepat)
-                          (map I.paramType mergepat')
-                          sets
+          shapeargs <- argShapes
+                       (map I.paramName shapepat)
+                       (map I.paramType mergepat')
+                       sets
 
           -- Careful not to clobber anything.
           loop_end_cond_body <- renameBody <=< insertStmsM $ do
@@ -1635,8 +1635,8 @@ funcall desc (QualName _ fname) args loc = do
   (constargs, const_ds, _) <- unzip3 <$> constFunctionArgs loc constparams
   argts <- mapM subExpType args
   closure_ts <- mapM lookupType closure
-  let shapeargs = argShapes shapes value_paramts argts
-      diets = const_ds ++ replicate (length closure + length shapeargs) I.Observe ++
+  shapeargs <- argShapes shapes value_paramts argts
+  let diets = const_ds ++ replicate (length closure + length shapeargs) I.Observe ++
               map I.diet value_paramts
       constOrShape = const $ I.Prim int32
       paramts = map constOrShape constargs ++ closure_ts ++

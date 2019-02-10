@@ -363,14 +363,14 @@ matchValueToType env m t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr)
           [] ->
             -- We have to ensure that remaining unbound shape
             -- parameters become zeroes.
-            return $ m' <> mconcat (map namedAreZero ds)
+            return m'
           v:_ ->
             matchValueToType env m' (stripArray 1 t) v
 
         -- Empty arrays always match if nothing else does.
         emptyOrWrong x
           | any zeroDim ds, emptyShape (valueShape val) =
-              Right $ m <> mconcat (map namedAreZero ds)
+              Right m
           | otherwise = wrong x
 
         wrong x = Left $ "Size annotation " <> x <>
@@ -380,19 +380,16 @@ matchValueToType env m t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr)
         zeroDim AnyDim = True
         zeroDim (ConstDim x) = x == 0
 
-        namedAreZero (NamedDim v)
-          | isNothing $ look v =
-              M.singleton (qualLeaf v) (Just $ T.BoundV [] $ Prim $ Signed Int32,
-                                        ValuePrim $ SignedValue $ Int32Value 0)
-          | otherwise =
-              mempty
-        namedAreZero _ = mempty
-
 matchValueToType env m (Record fs) (ValueRecord arr) =
   foldM (\m' (t, v) -> matchValueToType env m' t v) m $
   M.intersectionWith (,) fs arr
 
 matchValueToType _ m _ _ = return m
+
+bindToZero :: [VName] -> Env
+bindToZero = valEnv . M.fromList . map f
+  where f v = (v, (Just $ T.BoundV [] $ Prim $ Signed Int32,
+                   ValuePrim $ SignedValue $ Int32Value 0))
 
 data Indexing = IndexingFix Int32
               | IndexingSlice (Maybe Int32) (Maybe Int32) (Maybe Int32)
@@ -684,8 +681,12 @@ eval env (LetWith dest src is v body loc) = do
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
-eval env (Lambda _ [] body _ (Info (_, t)) loc) = do
-  v <- eval env body
+eval env (Lambda tparams [] body _ (Info (_, t)) loc) = do
+  -- All remaining size parameters that have not yet been assigned a
+  -- value (because they were inner dimensions of empty arrays) are
+  -- now assigned a zero.
+  let unbound_dims = bindToZero $ map typeParamName $ filter isDimParam tparams
+  v <- eval (env <> unbound_dims) body
   case (t, v) of
     (Arrow _ _ _ rt, ValueFun f) ->
       return $ ValueFun $ \arg -> do r <- f arg
@@ -698,6 +699,9 @@ eval env (Lambda _ [] body _ (Info (_, t)) loc) = do
             Left err ->
               bad loc env $ "Value `" <> pretty v <>
               "` cannot match type `" <> pretty vt <> "`: " ++ err
+
+        isDimParam TypeParamDim{} = True
+        isDimParam _ = False
 
 eval env (Lambda tparams (p:ps) body mrd (Info (als, ret)) loc) =
   return $ ValueFun $ \v -> do
