@@ -89,30 +89,6 @@ executables:
     dependencies:
       - futhark
     ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg"
-  futhark-c:
-    main: src/wrapper.hs
-  futhark-opencl:
-    main: src/wrapper.hs
-  futhark-py:
-    main: src/wrapper.hs
-  futhark-pyopencl:
-    main: src/wrapper.hs
-  futhark-cs:
-    main: src/wrapper.hs
-  futhark-csopencl:
-    main: src/wrapper.hs
-  futhark-dataset:
-    main: src/wrapper.hs
-  futhark-doc:
-    main: src/wrapper.hs
-  futhark-test:
-    main: src/wrapper.hs
-  futhark-bench:
-    main: src/wrapper.hs
-  futhark-pkg:
-    main: src/wrapper.hs
-  futharki:
-    main: src/futharki.hs
 
 tests:
   unit:
