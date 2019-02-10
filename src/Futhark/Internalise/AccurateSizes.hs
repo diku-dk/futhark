@@ -15,6 +15,7 @@ module Futhark.Internalise.AccurateSizes
 import Control.Monad
 import Data.Loc
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Futhark.Construct
 import Futhark.Representation.AST
@@ -26,7 +27,7 @@ shapeBody shapenames ts body =
   runBodyBinder $ do
     ses <- bodyBind body
     sets <- mapM subExpType ses
-    return $ resultBody $ argShapes shapenames ts sets
+    resultBody <$> argShapes shapenames ts sets
 
 annotateArrayShape :: ArrayShape shape =>
                       TypeBase shape u -> [Int] -> TypeBase Shape u
@@ -34,13 +35,25 @@ annotateArrayShape t newshape =
   t `setArrayShape` Shape (take (arrayRank t) $
                            map (intConst Int32 . toInteger) $ newshape ++ repeat 0)
 
-argShapes :: [VName] -> [TypeBase Shape u0] -> [TypeBase Shape u1] -> [SubExp]
+-- Some trickery is needed here to predict sensible values for
+-- dimensions that are used exclusively as the inner dimension of an
+-- array.  The issue is that the dimension may be inside an empty
+-- array.  In this case, the dimension inside the empty array should
+-- not count, as it will be zero.  The solution we use is to take the
+-- maximum of such sizes; this will effectively disregard the zeroes.
+argShapes :: MonadBinder m =>
+             [VName] -> [TypeBase Shape u0] -> [TypeBase Shape u1] -> m [SubExp]
 argShapes shapes valts valargts =
-  map addShape shapes
+  mapM addShape shapes
   where mapping = shapeMapping valts valargts
-        addShape name
-          | Just se <- M.lookup name mapping = se
-          | otherwise                        = intConst Int32 0
+        outer_dims = map (arraySize 0) valts
+        addShape name =
+          case M.lookup name mapping of
+            Just s | x:xs <- S.toList s ->
+                       if Var name `elem` outer_dims
+                       then return x
+                       else letSubExp "size" =<< foldBinOp (SMax Int32) x xs
+            _ -> return $ intConst Int32 0
 
 ensureResultShape :: MonadBinder m =>
                      (m Certificates -> m Certificates)

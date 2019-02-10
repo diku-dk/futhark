@@ -72,7 +72,7 @@ module Futhark.Representation.AST.Attributes.Types
 import Control.Monad.State
 import Data.Maybe
 import Data.Monoid ((<>))
-import Data.List (elemIndex)
+import Data.List (elemIndex, foldl')
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 
@@ -430,32 +430,34 @@ existentialiseExtTypes inaccessible = map makeBoundShapesFree
 -- be of equal length and their corresponding elements have the same
 -- types modulo exact dimensions (but matching array rank is
 -- important).  The result is a mapping from named dimensions of @ts1@
--- to the corresponding dimension in @ts2@.
+-- to a set of the corresponding dimensions in @ts2@ (because they may
+-- not fit exactly).
 --
 -- This function is useful when @ts1@ are the value parameters of some
 -- function and @ts2@ are the value arguments, and we need to figure
 -- out which shape context to pass.
-shapeMapping :: [TypeBase Shape u0] -> [TypeBase Shape u1] -> M.Map VName SubExp
+shapeMapping :: [TypeBase Shape u0] -> [TypeBase Shape u1] -> M.Map VName (S.Set SubExp)
 shapeMapping ts = shapeMapping' ts . map arrayDims
 
 -- | Like @shapeMapping@, but works with explicit dimensions.
-shapeMapping' :: [TypeBase Shape u] -> [[a]] -> M.Map VName a
-shapeMapping' = dimMapping arrayDims id match
+shapeMapping' :: Ord a => [TypeBase Shape u] -> [[a]] -> M.Map VName (S.Set a)
+shapeMapping' = dimMapping arrayDims id match (M.unionWith (<>))
   where match Constant{} _ = M.empty
-        match (Var v) dim  = M.singleton v dim
+        match (Var v) dim  = M.singleton v $ S.singleton dim
 
 -- | Like 'shapeMapping', but produces a mapping for the dimensions context.
 shapeExtMapping :: [TypeBase ExtShape u] -> [TypeBase Shape u1] -> M.Map Int SubExp
-shapeExtMapping = dimMapping arrayExtDims arrayDims match
+shapeExtMapping = dimMapping arrayExtDims arrayDims match mappend
   where match Free{} _ =  mempty
         match (Ext i) dim = M.singleton i dim
 
 dimMapping :: Monoid res =>
               (t1 -> [dim1]) -> (t2 -> [dim2]) -> (dim1 -> dim2 -> res)
+           -> (res -> res -> res)
            -> [t1] -> [t2]
            -> res
-dimMapping getDims1 getDims2 f ts1 ts2 =
-  mconcat $ concat $ zipWith (zipWith f) (map getDims1 ts1) (map getDims2 ts2)
+dimMapping getDims1 getDims2 f comb ts1 ts2 =
+  foldl' comb mempty $ concat $ zipWith (zipWith f) (map getDims1 ts1) (map getDims2 ts2)
 
 int8 :: PrimType
 int8 = IntType Int8

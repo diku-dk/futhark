@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * An significant problematic interaction between empty arrays and
+    inner size declarations has been closed (#714).  This follows a
+    range of lesser empty-array fixes from 0.9.1.
+
 ## [0.9.1]
 
 ### Added
