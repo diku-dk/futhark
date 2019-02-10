@@ -509,12 +509,12 @@ getGenBS dir gen = do
 
 genValues :: [GenValue] -> IO SBS.ByteString
 genValues gens = do
-  (code, stdout, stderr) <- readProcessWithExitCode "futhark-dataset" args mempty
+  (code, stdout, stderr) <- readProcessWithExitCode "futhark dataset" args mempty
   case code of
     ExitSuccess ->
       return stdout
     ExitFailure e ->
-      fail $ "futhark-dataset failed with exit code " ++ show e ++ " and stderr:\n" ++
+      fail $ "'futhark dataset' failed with exit code " ++ show e ++ " and stderr:\n" ++
       map (chr . fromIntegral) (SBS.unpack stderr)
   where args = "-b" : concatMap argForGen gens
         argForGen g = ["-g", genValueType g]
