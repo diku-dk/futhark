@@ -509,7 +509,7 @@ getGenBS dir gen = do
 
 genValues :: [GenValue] -> IO SBS.ByteString
 genValues gens = do
-  (code, stdout, stderr) <- readProcessWithExitCode "futhark dataset" args mempty
+  (code, stdout, stderr) <- readProcessWithExitCode "futhark" ("dataset":args) mempty
   case code of
     ExitSuccess ->
       return stdout
