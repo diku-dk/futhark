@@ -53,7 +53,6 @@ module Futhark.Representation.AST.Attributes.Types
        , generaliseExtTypes
        , existentialiseExtTypes
        , shapeMapping
-       , shapeMapping'
        , shapeExtMapping
 
          -- * Abbreviations
