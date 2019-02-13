@@ -43,8 +43,13 @@ dependencies::
 
   $ stack build
 
-The Futhark compiler and its tools will now be built. You can copy
-them to your ``$HOME/.local/bin`` directory by running::
+The Futhark compiler and its tools will now be built.  This step
+typically requires at least 8GiB of memory.  You may be able to build
+it on a smaller machine by adding the ``--fast`` option, although the
+resulting Futhark compiler binary will run slower.
+
+After building, you can copy the binaries to your ``$HOME/.local/bin``
+directory by running::
 
   $ stack install
 
