@@ -251,7 +251,7 @@ commandLineOptions =
   , Option "t" ["type-check"]
     (NoArg $ Right $ \opts ->
         opts { futharkPipeline = TypeCheck })
-    "Type-check the program and print errors on standard error."
+    "Print on standard output the type-checked program."
 
   , Option [] ["pretty-print"]
     (NoArg $ Right $ \opts ->
@@ -336,15 +336,15 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
           Nothing
         m file config =
           case futharkPipeline config of
-            TypeCheck -> do
-              -- No pipeline; just read the program and type check
-              (warnings, _, _) <- readProgram file
-              liftIO $ hPutStr stderr $ show warnings
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file
               case maybe_prog of
                 Left err  -> fail $ show err
                 Right prog -> putStrLn $ pretty prog
+            TypeCheck -> do
+              (_, imports, _) <- readProgram file
+              liftIO $ forM_ (map snd imports) $ \fm ->
+                putStrLn $ pretty $ fileProg fm
             Defunctorise -> do
               (_, imports, src) <- readProgram file
               liftIO $ mapM_ (putStrLn . pretty) $
