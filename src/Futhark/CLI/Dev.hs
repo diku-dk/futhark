@@ -66,6 +66,9 @@ data Config = Config { futharkConfig :: FutharkConfig
                      -- ^ Nothing is distinct from a empty pipeline -
                      -- it means we don't even run the internaliser.
                      , futharkAction :: UntypedAction
+                     , futharkPrintAST :: Bool
+                     -- ^ If true, prints programs as raw ASTs instead
+                     -- of their prettyprinted form.
                      }
 
 
@@ -121,7 +124,8 @@ instance Representation UntypedAction where
   representation PolyAction{} = "<any>"
 
 newConfig :: Config
-newConfig = Config newFutharkConfig (Pipeline []) $ PolyAction printAction printAction printAction
+newConfig = Config newFutharkConfig (Pipeline [])
+            (PolyAction printAction printAction printAction) False
 
 changeFutharkConfig :: (FutharkConfig -> FutharkConfig)
                     -> Config -> Config
@@ -284,6 +288,9 @@ commandLineOptions =
   , Option [] ["defunctionalise"]
     (NoArg $ Right $ \opts -> opts { futharkPipeline = Defunctionalise })
     "Defunctionalise the program."
+  , Option [] ["ast"]
+    (NoArg $ Right $ \opts -> opts { futharkPrintAST = True })
+    "Output ASTs instead of prettyprinted programs."
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineAndRemoveDeadFunctions []
@@ -340,23 +347,28 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               maybe_prog <- parseFuthark file <$> T.readFile file
               case maybe_prog of
                 Left err  -> fail $ show err
-                Right prog -> putStrLn $ pretty prog
+                Right prog | futharkPrintAST config -> print prog
+                           | otherwise -> putStrLn $ pretty prog
             TypeCheck -> do
               (_, imports, _) <- readProgram file
               liftIO $ forM_ (map snd imports) $ \fm ->
-                putStrLn $ pretty $ fileProg fm
+                putStrLn $ if futharkPrintAST config
+                           then show $ fileProg fm
+                           else pretty $ fileProg fm
             Defunctorise -> do
               (_, imports, src) <- readProgram file
-              liftIO $ mapM_ (putStrLn . pretty) $
+              liftIO $ mapM_ (putStrLn . if futharkPrintAST config then show else pretty) $
                 evalState (Defunctorise.transformProg imports) src
             Monomorphise -> do
               (_, imports, src) <- readProgram file
-              liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
+              liftIO $ mapM_ (putStrLn . if futharkPrintAST config then show else pretty) $
+                flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
             Defunctionalise -> do
               (_, imports, src) <- readProgram file
-              liftIO $ mapM_ (putStrLn . pretty) $ flip evalState src $
+              liftIO $ mapM_ (putStrLn . if futharkPrintAST config then show else pretty) $
+                flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
                 >>= Defunctionalise.transformProg
