@@ -311,7 +311,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
 -- Try to prepend qualifiers to the type names such that they
 -- represent how to access the type in some scope.
 qualifyTypeVars :: ASTMappable t => Env -> [VName] -> [VName] -> t -> t
-qualifyTypeVars outer_env except qs = runIdentity . astMap mapper
+qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper
   where mapper = ASTMapper { mapOnExp = pure
                            , mapOnName = pure
                            , mapOnQualName = pure . qual
@@ -321,9 +321,16 @@ qualifyTypeVars outer_env except qs = runIdentity . astMap mapper
                            , mapOnPatternType = pure
                            }
         qual (QualName orig_qs name)
-          | name `elem` except ||
-            reachable orig_qs name outer_env = QualName orig_qs name
-          | otherwise                        = QualName (qs<>orig_qs) name
+          | name `elem` except || reachable orig_qs name outer_env =
+              QualName orig_qs name
+          | otherwise =
+              prependAsNecessary [] ref_qs $ QualName orig_qs name
+
+        prependAsNecessary qs rem_qs (QualName orig_qs name)
+          | reachable (qs++orig_qs) name outer_env = QualName (qs++orig_qs) name
+          | otherwise = case rem_qs of
+                          q:rem_qs' -> prependAsNecessary (qs++[q]) rem_qs' (QualName orig_qs name)
+                          []       -> QualName (qs++orig_qs) name
 
         reachable [] name env =
           isJust $ find matches $ M.elems (envTypeTable env)
