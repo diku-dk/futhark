@@ -184,6 +184,10 @@ lexeme' p = p <* many (oneOf (" \t" :: String))
 lexstr :: T.Text -> Parser ()
 lexstr = void . try . lexeme . string
 
+-- | Like 'lexstr', but does not consume trailing linebreaks.
+lexstr' :: T.Text -> Parser ()
+lexstr' = void . try . lexeme' . string
+
 braces :: Parser a -> Parser a
 braces p = lexstr "{" *> p <* lexstr "}"
 
@@ -210,7 +214,7 @@ tagConstituent :: Char -> Bool
 tagConstituent c = isAlphaNum c || c == '_' || c == '-'
 
 parseAction :: Parser TestAction
-parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
+parseAction = CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError) <|>
               (RunCases <$> parseInputOutputs <*>
                many parseExpectedStructure <*> many parseWarning)
 
