@@ -360,12 +360,8 @@ matchValueToType env m t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr)
           | otherwise = Nothing
 
         continue m' = case elems arr of
-          [] ->
-            -- We have to ensure that remaining unbound shape
-            -- parameters become zeroes.
-            return m'
-          v:_ ->
-            matchValueToType env m' (stripArray 1 t) v
+          [] -> return m'
+          v:_ -> matchValueToType env m' (stripArray 1 t) v
 
         -- Empty arrays always match if nothing else does.
         emptyOrWrong x
