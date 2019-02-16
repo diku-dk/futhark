@@ -46,6 +46,11 @@ A Futhark compiler development command, intentionally undocumented and
 intended for use in developing the Futhark compiler, not for
 programmers writing in Futhark.
 
+futhark imports PROGRAM
+---------------------
+
+Print all non-library imported Futhark files to standard out and exit.
+
 SEE ALSO
 ========
 
