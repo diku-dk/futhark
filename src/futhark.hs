@@ -63,6 +63,7 @@ commands = sortOn fst
            , ("pkg", (Pkg.main, "Manage local packages."))
 
            , ("check", (Misc.mainCheck, "Type check a program."))
+           , ("imports", (Misc.imports, "Print all non-library imported Futhark files to standard out and exit."))
            ]
 
 msg :: String
