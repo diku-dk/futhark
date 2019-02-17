@@ -287,86 +287,82 @@ apply2 :: SrcLoc -> Env -> Value -> Value -> Value -> EvalM Value
 apply2 loc env f x y = stacking loc env $ do f' <- apply noLoc mempty f x
                                              apply noLoc mempty f' y
 
-matchPattern :: Env -> Pattern -> Value
-             -> EvalM (M.Map VName (Maybe T.BoundV, Value))
+matchPattern :: Env -> Pattern -> Value -> EvalM Env
 matchPattern env p v = do
-  m <- runMaybeT $ patternMatch env mempty p v
+  m <- runMaybeT $ patternMatch env p v
   case m of
     Nothing    -> error $ "matchPattern: missing case for " ++ pretty p ++ " and " ++ pretty v
-    Just binds -> return binds
+    Just env' -> return env'
 
-patternMatch :: Env -> M.Map VName (Maybe T.BoundV, Value)
-             -> Pattern -> Value
-             -> MaybeT EvalM (M.Map VName (Maybe T.BoundV, Value))
-patternMatch _ m (Id v (Info t) _) val =
-  lift $ pure $ M.insert v (Just $ T.BoundV [] $ toStruct t, val) m
-patternMatch _ m Wildcard{} _ =
-  lift $ pure m
-patternMatch env m (TuplePattern ps _) (ValueRecord vs)
+patternMatch :: Env -> Pattern -> Value -> MaybeT EvalM Env
+patternMatch env (Id v (Info t) _) val =
+  lift $ pure $ valEnv (M.singleton v (Just $ T.BoundV [] $ toStruct t, val)) <> env
+patternMatch env Wildcard{} _ =
+  lift $ pure env
+patternMatch env (TuplePattern ps _) (ValueRecord vs)
   | length ps == length vs' =
-    foldM (\m' (p,v) -> patternMatch env m' p v) m $
+    foldM (\env' (p,v) -> patternMatch env' p v) env $
     zip ps (map snd $ sortFields vs)
     where vs' = sortFields vs
-patternMatch env m (RecordPattern ps _) (ValueRecord vs)
+patternMatch env (RecordPattern ps _) (ValueRecord vs)
   | length ps == length vs' =
-    foldM (\m' (p,v) -> patternMatch env m' p v) m $
+    foldM (\env' (p,v) -> patternMatch env' p v) env $
     zip (map snd $ sortFields $ M.fromList ps) (map snd $ sortFields vs)
     where vs' = sortFields vs
-patternMatch env m (PatternParens p _) v = patternMatch env m p v
-patternMatch env m (PatternAscription p td loc) v = do
+patternMatch env (PatternParens p _) v = patternMatch env p v
+patternMatch env (PatternAscription p td loc) v = do
   t <- lift $ evalType env $ unInfo $ expandedType td
-  case matchValueToType env m t v of
+  case matchValueToType env t v of
     Left err -> lift $ bad loc env err
-    Right m' -> patternMatch env m' p v
-patternMatch env m (PatternLit e _ _) v = do
+    Right env' -> patternMatch env' p v
+patternMatch env (PatternLit e _ _) v = do
   v' <- lift $ eval env e
   if v == v'
-    then pure m
+    then pure env
     else mzero
 
-patternMatch _ _ _ _ = mzero
+patternMatch _ _ _ = mzero
 
 -- | For matching size annotations (the actual type will have been
 -- verified by the type checker).  It is assumed that previously
 -- unbound names are in binding position here.
-matchValueToType :: Env -> M.Map VName (Maybe T.BoundV, Value)
+matchValueToType :: Env
                  -> StructType
                  -> Value
-                 -> Either String (M.Map VName (Maybe T.BoundV, Value))
+                 -> Either String Env
 
-matchValueToType env m t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr) =
+matchValueToType env t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr) =
   case d of
     NamedDim v
       | Just x <- look v ->
           if x == arr_n
-          then continue m
+          then continue env
           else emptyOrWrong $ "`" <> pretty v <> "` (" <> pretty x <> ")"
       | otherwise ->
-          continue $ M.insert (qualLeaf v)
-          (Just $ T.BoundV [] $ Prim $ Signed Int32,
-           ValuePrim $ SignedValue $ Int32Value arr_n)
-          m
-    AnyDim -> continue m
+          continue $
+          valEnv (M.singleton (qualLeaf v)
+                   (Just $ T.BoundV [] $ Prim $ Signed Int32,
+                    ValuePrim $ SignedValue $ Int32Value arr_n))
+          <> env
+    AnyDim -> continue env
     ConstDim x
-      | fromIntegral x == arr_n -> continue m
+      | fromIntegral x == arr_n -> continue env
       | otherwise -> emptyOrWrong $ pretty x
   where arr_n = arrayLength arr
 
         look v
           | Just (TermValue _ (ValuePrim (SignedValue (Int32Value x)))) <-
               lookupVar v env = Just x
-          | Just (_, ValuePrim (SignedValue (Int32Value x))) <-
-              M.lookup (qualLeaf v) m = Just x
           | otherwise = Nothing
 
-        continue m' = case elems arr of
-          [] -> return m'
-          v:_ -> matchValueToType env m' (stripArray 1 t) v
+        continue env' = case elems arr of
+          [] -> return env'
+          v:_ -> matchValueToType env' (stripArray 1 t) v
 
         -- Empty arrays always match if nothing else does.
         emptyOrWrong x
           | any zeroDim ds, emptyShape (valueShape val) =
-              Right m
+              Right env
           | otherwise = wrong x
 
         wrong x = Left $ "Size annotation " <> x <>
@@ -376,11 +372,11 @@ matchValueToType env m t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr)
         zeroDim AnyDim = True
         zeroDim (ConstDim x) = x == 0
 
-matchValueToType env m (Record fs) (ValueRecord arr) =
-  foldM (\m' (t, v) -> matchValueToType env m' t v) m $
+matchValueToType env (Record fs) (ValueRecord arr) =
+  foldM (\env' (t, v) -> matchValueToType env' t v) env $
   M.intersectionWith (,) fs arr
 
-matchValueToType _ m _ _ = return m
+matchValueToType env _ _ = return env
 
 bindToZero :: [VName] -> Env
 bindToZero = valEnv . M.fromList . map f
@@ -574,15 +570,15 @@ eval env (Var qv _ _) = evalTermVar env qv
 eval env (Ascript e td loc) = do
   v <- eval env e
   t <- evalType env $ unInfo $ expandedType td
-  case matchValueToType env mempty t v of
+  case matchValueToType env t v of
     Right _ -> return v
     Left err -> bad loc env $ "Value `" <> pretty v <> "` cannot match shape of type `" <>
                 pretty (declaredType td) <> "` (`" <> pretty t <> "`): " ++ err
 
 eval env (LetPat _ p e body _) = do
   v <- eval env e
-  p_env <- valEnv <$> matchPattern env p v
-  eval (p_env <> env) body
+  env' <- matchPattern env p v
+  eval env' body
 
 eval env (LetFun f (tparams, pats, _, Info ret, fbody) body loc) = do
   v <- eval env $ Lambda tparams pats fbody Nothing (Info (mempty, ret)) loc
@@ -690,7 +686,7 @@ eval env (Lambda tparams [] body _ (Info (_, t)) loc) = do
                                      match rt' r
     _ -> match t v
   where match vt v =
-          case matchValueToType env mempty vt v of
+          case matchValueToType env vt v of
             Right _ -> return v
             Left err ->
               bad loc env $ "Value `" <> pretty v <>
@@ -701,8 +697,8 @@ eval env (Lambda tparams [] body _ (Info (_, t)) loc) = do
 
 eval env (Lambda tparams (p:ps) body mrd (Info (als, ret)) loc) =
   return $ ValueFun $ \v -> do
-    p_env <- valEnv <$> matchPattern env p v
-    eval (p_env <> env) $ Lambda tparams ps body mrd (Info (als, ret)) loc
+    env' <- matchPattern env p v
+    eval env' $ Lambda tparams ps body mrd (Info (als, ret)) loc
 
 eval env (OpSection qv _  _) = evalTermVar env qv
 
@@ -733,7 +729,7 @@ eval env (DoLoop _ pat init_e form body _) = do
                  foldM (forInLoop in_pat) init_v in_vs
                While cond ->
                  whileLoop cond init_v
-  where withLoopParams v = (<>env) . valEnv <$> matchPattern env pat v
+  where withLoopParams = matchPattern env pat
 
         inc = (`P.doAdd` Int64Value 1)
         zero = (`P.doMul` Int64Value 0)
@@ -755,8 +751,8 @@ eval env (DoLoop _ pat init_e form body _) = do
 
         forInLoop in_pat v in_v = do
           env' <- withLoopParams v
-          pat_env <- matchPattern env' in_pat in_v
-          eval (valEnv pat_env <> env') body
+          env'' <- matchPattern env' in_pat in_v
+          eval env'' body
 
 eval env (Project f e _ _) = do
   v <- eval env e
@@ -789,8 +785,8 @@ eval _ e = error $ "eval not yet: " ++ show e
 evalCase :: Value -> Env -> CaseBase Info VName
          -> EvalM (Maybe Value)
 evalCase v env (CasePat p cExp _) = runMaybeT $ do
-  pEnv <- valEnv <$> patternMatch env mempty p v
-  lift $ eval (pEnv <> env) cExp
+  env' <- patternMatch env p v
+  lift $ eval env' cExp
 
 substituteInModule :: M.Map VName VName -> Module -> Module
 substituteInModule substs = onModule
