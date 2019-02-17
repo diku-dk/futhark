@@ -2,7 +2,7 @@
 -- Various small subcommands that are too simple to deserve their own file.
 module Futhark.CLI.Misc
   ( mainCheck
-  , imports
+  , mainImports
   )
 where
 
@@ -32,14 +32,13 @@ mainCheck = mainWithOptions () [] "program" $ \args () ->
   where check file = do (warnings, _, _) <- readProgram file
                         liftIO $ hPutStr stderr $ show warnings
 
-imports :: String -> [String] -> IO ()
-imports = mainWithOptions () [] "program" $ \args () ->
+mainImports :: String -> [String] -> IO ()
+mainImports = mainWithOptions () [] "program" $ \args () ->
   case args of
     [file] -> Just $ runFutharkM' $ findImports file
     _ -> Nothing
   where findImports file = do
           (_, prog_imports, _) <- readProgram file
-          liftIO $ putStrLn $ unwords $ map (++ ".fut")
-            $ filter (\f -> not (("futlib/" `isPrefixOf` f) ||
-                                 ("lib/" `isPrefixOf` f)))
+          liftIO $ putStr $ unlines $ map (++ ".fut")
+            $ filter (\f -> not ("futlib/" `isPrefixOf` f))
             $ map fst prog_imports

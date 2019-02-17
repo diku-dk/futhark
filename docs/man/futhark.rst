@@ -49,7 +49,7 @@ programmers writing in Futhark.
 futhark imports PROGRAM
 ---------------------
 
-Print all non-library imported Futhark files to standard out and exit.
+Print all non-builtin imported Futhark files to stdout, one per line.
 
 SEE ALSO
 ========
