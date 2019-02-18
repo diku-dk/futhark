@@ -554,7 +554,7 @@ matchFunctionReturnType rettype result = do
                   TC.bad $ TC.TypeError $
                   "Array " ++ pretty v ++
                   " returned by function, but has nontrivial index function " ++
-                  pretty ixfun ++ " " ++ show ixfun
+                  pretty ixfun
 
 matchBranchReturnType :: ExplicitMemorish lore =>
                          [BodyReturns]
@@ -644,7 +644,7 @@ matchReturnType rettype res ts = do
               let x_ixfun' = substConstsInExtIndFun x_ixfun
                   y_ixfun' = existentialiseIxFun0   y_ixfun
               unless (x_ixfun' == y_ixfun') $
-                throwError $ unwords  ["Index function unification fails1!",
+                throwError $ unwords  ["Index function unification failed (ReturnsInBlock)",
                     "\nixfun of body result: ", pretty y_ixfun',
                     "\nixfun of return type: ", pretty x_ixfun',
                     "\nand context elements: ", pretty ctx_res]
@@ -654,7 +654,7 @@ matchReturnType rettype res ts = do
         let x_ixfun' = substConstsInExtIndFun x_ixfun
             y_ixfun' = existentialiseIxFun0   y_ixfun
         unless (x_ixfun' == y_ixfun') $
-          throwError $ unwords  ["Index function unification fails2!",
+          throwError $ unwords  ["Index function unification failed (ReturnsNewBlock)",
             "\nixfun of body result: ", pretty y_ixfun',
             "\nixfun of return type: ", pretty x_ixfun',
             "\nand context elements: ", pretty ctx_res]
