@@ -311,7 +311,7 @@ patternMatch env (RecordPattern ps _) (ValueRecord vs)
     where vs' = sortFields vs
 patternMatch env (PatternParens p _) v = patternMatch env p v
 patternMatch env (PatternAscription p td loc) v = do
-  t <- lift $ evalType env $ unInfo $ expandedType td
+  let t = evalType env $ unInfo $ expandedType td
   case matchValueToType env t v of
     Left err -> lift $ bad loc env err
     Right env' -> patternMatch env' p v
@@ -486,41 +486,40 @@ evalTermVar env qv =
 
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
-evalType :: Env -> StructType -> EvalM StructType
-evalType _ (Prim pt) = return $ Prim pt
-evalType env (Record fs) = Record <$> traverse (evalType env) fs
+evalType :: Env -> StructType -> StructType
+evalType _ (Prim pt) = Prim pt
+evalType env (Record fs) = Record $ fmap (evalType env) fs
 evalType env (Arrow () p t1 t2) =
-  Arrow () p <$> evalType env t1 <*> evalType env t2
-evalType env t@(Array _ u _ shape) = do
+  Arrow () p (evalType env t1) (evalType env t2)
+evalType env t@(Array _ u _ shape) =
   let et = stripArray (shapeRank shape) t
-  et' <- evalType env et
-  shape' <- traverse evalDim shape
-  return $
-    fromMaybe (error "Cannot construct array after substitution") $
-    arrayOf et' shape' u
+      et' = evalType env et
+      shape' = fmap evalDim shape
+  in fromMaybe (error "Cannot construct array after substitution") $
+     arrayOf et' shape' u
   where evalDim (NamedDim qn)
           | Just (TermValue _ (ValuePrim (SignedValue (Int32Value x)))) <-
               lookupVar qn env =
-              return $ ConstDim $ fromIntegral x
-        evalDim d = return d
+              ConstDim $ fromIntegral x
+        evalDim d = d
 evalType env t@(TypeVar () _ tn args) =
   case lookupType (qualNameFromTypeName tn) env of
-    Just (T.TypeAbbr _ ps t') -> do
-      (substs, types) <- mconcat <$> zipWithM matchPtoA ps args
-      let onDim (NamedDim v) = fromMaybe (NamedDim v) $ M.lookup (qualLeaf v) substs
+    Just (T.TypeAbbr _ ps t') ->
+      let (substs, types) = mconcat $ zipWith matchPtoA ps args
+          onDim (NamedDim v) = fromMaybe (NamedDim v) $ M.lookup (qualLeaf v) substs
           onDim d = d
-      if null ps then return $ bimap onDim id t'
-      else evalType (Env mempty types <> env) $ bimap onDim id t'
-    Nothing -> return t
+      in if null ps then bimap onDim id t'
+         else evalType (Env mempty types <> env) $ bimap onDim id t'
+    Nothing -> t
   where matchPtoA (TypeParamDim p _) (TypeArgDim (NamedDim qv) _) =
-          return (M.singleton p $ NamedDim qv, mempty)
+          (M.singleton p $ NamedDim qv, mempty)
         matchPtoA (TypeParamDim p _) (TypeArgDim (ConstDim k) _) =
-          return (M.singleton p $ ConstDim k, mempty)
-        matchPtoA (TypeParamType l p _) (TypeArgType t' _) = do
-          t'' <- evalType env t'
-          return (mempty, M.singleton p $ T.TypeAbbr l [] t'')
-        matchPtoA _ _ = return mempty
-evalType _ (Enum cs) = return $ Enum cs
+          (M.singleton p $ ConstDim k, mempty)
+        matchPtoA (TypeParamType l p _) (TypeArgType t' _) =
+          let t'' = evalType env t'
+          in (mempty, M.singleton p $ T.TypeAbbr l [] t'')
+        matchPtoA _ _ = mempty
+evalType _ (Enum cs) = Enum cs
 
 eval :: Env -> Exp -> EvalM Value
 
@@ -569,7 +568,7 @@ eval env (Var qv _ _) = evalTermVar env qv
 
 eval env (Ascript e td loc) = do
   v <- eval env e
-  t <- evalType env $ unInfo $ expandedType td
+  let t = evalType env $ unInfo $ expandedType td
   case matchValueToType env t v of
     Right _ -> return v
     Left err -> bad loc env $ "Value `" <> pretty v <> "` cannot match shape of type `" <>
@@ -682,8 +681,7 @@ eval env (Lambda tparams [] body _ (Info (_, t)) loc) = do
   case (t, v) of
     (Arrow _ _ _ rt, ValueFun f) ->
       return $ ValueFun $ \arg -> do r <- f arg
-                                     rt' <- evalType env rt
-                                     match rt' r
+                                     match (evalType env rt) r
     _ -> match t v
   where match vt v =
           case matchValueToType env vt v of
@@ -853,8 +851,8 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
 evalDec :: Env -> Dec -> EvalM Env
 
 evalDec env (ValDec (ValBind _ v _ (Info t) tps ps def _ loc)) = do
-  t' <- evalType env t
-  let ftype = T.BoundV tps $ foldr (uncurry (Arrow ()) . patternParam) t' ps
+  let t' = evalType env t
+      ftype = T.BoundV tps $ foldr (uncurry (Arrow ()) . patternParam) t' ps
   val <- eval env $ Lambda tps ps def Nothing (Info (mempty, t')) loc
   return $ valEnv (M.singleton v (Just ftype, val)) <> env
 
@@ -868,8 +866,8 @@ evalDec env (ImportDec name name' loc) =
 evalDec env (LocalDec d _) = evalDec env d
 evalDec env SigDec{} = return env
 evalDec env (TypeDec (TypeBind v ps t _ _)) = do
-  t' <- evalType env $ unInfo $ expandedType t
-  let abbr = T.TypeAbbr Lifted ps t'
+  let abbr = T.TypeAbbr Lifted ps $
+             evalType env $ unInfo $ expandedType t
   return env { envType = M.insert v abbr $ envType env }
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   mod <- evalModExp env $ wrapInLambda ps
