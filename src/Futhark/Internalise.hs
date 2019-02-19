@@ -1420,48 +1420,9 @@ isOverloadedFunction qname args loc = do
       ressize <- foldM sumdims outer_size =<<
                  mapM (fmap (arraysSize 0) . mapM lookupType) [ys]
 
-      let conc xarr yarr = do
-            -- All dimensions except the outermost must match.  An
-            -- empty array matches anything.
-            xt <- lookupType xarr
-            yt <- lookupType yarr
-            let matches n m =
-                  letSubExp "match" $
-                  I.BasicOp $ I.CmpOp (I.CmpEq I.int32) n m
-
-                emptyRow arr_t =
-                  letSubExp "empty_row" =<<
-                  foldBinOp I.LogOr (constant False) =<<
-                  mapM (matches (intConst Int32 0)) (arrayDims $ rowType arr_t)
-
-            all_match <- letSubExp "all_match" =<<
-                         foldBinOp I.LogAnd (constant True) =<<
-                         zipWithM matches
-                         (arrayDims (rowType xt)) (arrayDims (rowType yt))
-            xarr_empty <- emptyRow xt
-            yarr_empty <- emptyRow yt
-            either_empty <- letSubExp "either_empty" $
-                            I.BasicOp $ I.BinOp I.LogOr xarr_empty yarr_empty
-            matchcs <- assertingOne $ letExp "concat_ok" =<<
-                       eAssert (pure $ I.BasicOp $ I.BinOp I.LogOr either_empty all_match)
-                       "row sizes do not match when concatenating" loc
-
-            let updims (j, xd, yd)
-                  | j == 0    =
-                      return (xd, yd)
-                  | otherwise = do
-                      d <- letSubExp "dim" $ I.BasicOp $ I.BinOp (SMax Int32) xd yd
-                      return (d, d)
-
-            (xdims, ydims) <- unzip <$>
-              mapM updims (zip3 [(0::Int)..] (I.arrayDims xt) (I.arrayDims yt))
-
-            xarr' <- certifying matchcs $ letExp "concat_x_reshaped" $
-                     shapeCoerce xdims xarr
-            yarr' <- certifying matchcs $ letExp "concat_y_reshaped" $
-                     shapeCoerce ydims yarr
-            return $ I.BasicOp $ I.Concat 0 xarr' [yarr'] ressize
-      letSubExps desc =<< zipWithM conc xs ys
+      let conc xarr yarr =
+            I.BasicOp $ I.Concat 0 xarr [yarr] ressize
+      letSubExps desc $ zipWith conc xs ys
 
     handle [TupLit [offset, e] _] "rotate" = Just $ \desc -> do
       offset' <- internaliseExp1 "rotation_offset" offset
