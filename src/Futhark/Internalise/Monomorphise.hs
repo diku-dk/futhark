@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | This monomorphization module converts a well-typed, polymorphic,
 -- module-free Futhark program into an equivalent monomorphic program.
 --
@@ -29,6 +30,8 @@ module Futhark.Internalise.Monomorphise
 
 import           Control.Monad.RWS
 import           Control.Monad.State
+import           Control.Monad.Writer
+import           Data.Bitraversable
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import qualified Data.Sequence as Seq
@@ -478,18 +481,21 @@ monomorphizeBinding (PolyBinding rr (name, tparams, params, retdecl, rettype, bo
   t' <- removeTypeVariablesInType t
   let bind_t = foldFunType (map (toStructural . patternType) params) $
                toStructural rettype
-      substs = M.map Subst $ typeSubsts bind_t t'
-      rettype' = applySubst (`M.lookup` substs) rettype
-      params' = map (substPattern $ applySubst (`M.lookup` substs)) params
+  (substs, t_shape_params) <- typeSubstsM loc bind_t t'
+  let substs' = M.map Subst substs
+      rettype' = substTypesAny (`M.lookup` substs') rettype
+      substPatternType =
+        substTypesAny (fmap (fmap fromStruct) . (`M.lookup` substs'))
+      params' = map (substPattern substPatternType) params
 
   (params'', rrs) <- unzip <$> mapM expandRecordPattern params'
 
   mapM_ noticeDims $ rettype : map patternStructType params''
 
-  body' <- updateExpTypes (`M.lookup` substs) body
+  body' <- updateExpTypes (`M.lookup` M.map (fmap toStructural) substs') body
   body'' <- withRecordReplacements (mconcat rrs) $ transformExp body'
   name' <- if null tparams then return name else newName name
-  return (name', toValBinding name' params'' rettype' body'')
+  return (name', toValBinding t_shape_params name' params'' rettype' body'')
 
   where shape_params = filter (not . isTypeParam) tparams
 
@@ -503,34 +509,57 @@ monomorphizeBinding (PolyBinding rr (name, tparams, params, retdecl, rettype, bo
                                   , mapOnPatternType = pure . applySubst substs
                                   }
 
-        toValBinding name' params'' rettype' body'' =
+        toValBinding t_shape_params name' params'' rettype' body'' =
           ValBind { valBindEntryPoint = False
                   , valBindName       = name'
                   , valBindRetDecl    = retdecl
                   , valBindRetType    = Info rettype'
-                  , valBindTypeParams = shape_params
+                  , valBindTypeParams = shape_params ++ t_shape_params
                   , valBindParams     = params''
                   , valBindBody       = body''
                   , valBindDoc        = Nothing
                   , valBindLocation   = loc
                   }
 
-typeSubsts :: TypeBase () () -> TypeBase () ()
-           -> M.Map VName (TypeBase () ())
-typeSubsts (Record fields1) (Record fields2) =
-  mconcat $ zipWith typeSubsts
-  (map snd $ sortFields fields1) (map snd $ sortFields fields2)
-typeSubsts (TypeVar _ _ v _) t =
-  M.singleton (typeLeaf v) t
-typeSubsts Prim{} Prim{} = mempty
-typeSubsts (Arrow _ _ t1a t1b) (Arrow _ _ t2a t2b) =
-  typeSubsts t1a t2a <> typeSubsts t1b t2b
-typeSubsts t1@Array{} t2@Array{}
-  | Just t1' <- peelArray (arrayRank t1) t1,
-    Just t2' <- peelArray (arrayRank t1) t2 =
-      typeSubsts t1' t2'
-typeSubsts Enum{} Enum{} = mempty
-typeSubsts t1 t2 = error $ unlines ["typeSubsts: mismatched types:", pretty t1, pretty t2]
+-- Careful not to introduce size parameters for non-positive positions
+-- (i.e. function parameters).
+typeSubstsM :: MonadFreshNames m =>
+               SrcLoc -> TypeBase () () -> TypeBase () ()
+            -> m (M.Map VName StructType, [TypeParam])
+typeSubstsM loc orig_t1 orig_t2 =
+  let (t1_pts, t1_rt) = unfoldFunType orig_t1
+      (t2_pts, t2_rt) = unfoldFunType orig_t2
+      m = do zipWithM_ (sub True) t1_pts t2_pts
+             sub False t1_rt t2_rt
+  in runWriterT $ execStateT m mempty
+
+  where sub pos (TypeVar _ _ v _) t = addSubst pos v t
+        sub pos (Record fields1) (Record fields2) =
+          zipWithM_ (sub pos)
+          (map snd $ sortFields fields1) (map snd $ sortFields fields2)
+        sub _ Prim{} Prim{} = return ()
+        sub _ Enum{} Enum{} = return ()
+        sub pos t1@Array{} t2@Array{}
+          | Just t1' <- peelArray (arrayRank t1) t1,
+            Just t2' <- peelArray (arrayRank t1) t2 =
+              sub pos t1' t2'
+        sub pos (Arrow _ _ t1a t1b) (Arrow _ _ t2a t2b) = do
+          sub False t1a t2a
+          sub pos t1b t2b
+
+        sub _ t1 t2 = error $ unlines ["typeSubsts: mismatched types:", pretty t1, pretty t2]
+
+        addSubst pos (TypeName _ v) t = do
+          exists <- gets $ M.member v
+          unless exists $ do
+            t' <- if pos
+                  then bitraverse onDim pure t
+                  else pure $ vacuousShapeAnnotations t
+            modify $ M.insert v t'
+
+        onDim () = do d <- lift $ lift $ newVName "d"
+                      tell [TypeParamDim d loc]
+                      return $ NamedDim $ qualName d
 
 -- | Perform a given substitution on the types in a pattern.
 substPattern :: (PatternType -> PatternType) -> Pattern -> Pattern
