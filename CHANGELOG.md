@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * If an array is passed for a function parameter of a polymorphic
+    type, all arrays passed for parameters of that type must have the
+    same shape.  For example, given a function
+
+        let pair 't (x: t) (y: t) = (x, y)
+
+    The application `pair [1] [2,3]` will now fail at run-time.
+
 ### Fixed
 
   * An significant problematic interaction between empty arrays and

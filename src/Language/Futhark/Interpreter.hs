@@ -205,24 +205,30 @@ data Module = Module Env
 
 data Env = Env { envTerm :: M.Map VName TermBinding
                , envType :: M.Map VName T.TypeBinding
+               , envShapes :: M.Map VName Shape
+                 -- ^ A mapping from type parameters to the shapes of
+                 -- the value to which they were initially bound.
                }
 
 instance Monoid Env where
-  mempty = Env mempty mempty
+  mempty = Env mempty mempty mempty
 
 instance Semigroup Env where
-  Env vm1 tm1 <> Env vm2 tm2 = Env (vm1 <> vm2) (tm1 <> tm2)
+  Env vm1 tm1 sm1 <> Env vm2 tm2 sm2 =
+    Env (vm1 <> vm2) (tm1 <> tm2) (sm1 <> sm2)
 
 newtype InterpreterError = InterpreterError String
 
 valEnv :: M.Map VName (Maybe T.BoundV, Value) -> Env
 valEnv m = Env { envTerm = M.map (uncurry TermValue) m
                , envType = mempty
+               , envShapes = mempty
                }
 
 modEnv :: M.Map VName Module -> Env
 modEnv m = Env { envTerm = M.map TermModule m
                , envType = mempty
+               , envShapes = mempty
                }
 
 instance Show InterpreterError where
@@ -330,6 +336,16 @@ matchValueToType :: Env
                  -> StructType
                  -> Value
                  -> Either String Env
+
+matchValueToType env t@(TypeVar _ _ tn []) val
+  | Just shape <- M.lookup (typeLeaf tn) $ envShapes env,
+    shape /= valueShape val =
+      Left $ "Value passed for type parameter `" <> prettyName (typeLeaf tn) <>
+      "` does not match shape " <> pretty shape <>
+      " of previously observed value."
+  | Nothing <- M.lookup (typeLeaf tn) $ envShapes env =
+      matchValueToType (tnenv <> env) t val
+      where tnenv = Env mempty mempty $ M.singleton (typeLeaf tn) (valueShape val)
 
 matchValueToType env t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr) =
   case d of
@@ -509,8 +525,9 @@ evalType env t@(TypeVar () _ tn args) =
           onDim (NamedDim v) = fromMaybe (NamedDim v) $ M.lookup (qualLeaf v) substs
           onDim d = d
       in if null ps then bimap onDim id t'
-         else evalType (Env mempty types <> env) $ bimap onDim id t'
+         else evalType (Env mempty types mempty <> env) $ bimap onDim id t'
     Nothing -> t
+
   where matchPtoA (TypeParamDim p _) (TypeArgDim (NamedDim qv) _) =
           (M.singleton p $ NamedDim qv, mempty)
         matchPtoA (TypeParamDim p _) (TypeArgDim (ConstDim k) _) =
@@ -795,8 +812,8 @@ substituteInModule substs = onModule
     replaceM f m = M.fromList $ do
       (k, v) <- M.toList m
       return (replace k, f v)
-    onModule (Module (Env terms types)) =
-      Module $ Env (replaceM onTerm terms) (replaceM onType types)
+    onModule (Module (Env terms types _)) =
+      Module $ Env (replaceM onTerm terms) (replaceM onType types) mempty
     onModule (ModuleFun f) =
       ModuleFun $ \m -> onModule <$> f (substituteInModule rev_substs m)
     onTerm (TermValue t v) = TermValue t v
@@ -823,10 +840,11 @@ evalModExp _ (ModImport _ (Info f) _) = do
              Just m -> return $ Module m
 
 evalModExp env (ModDecs ds _) = do
-  Env terms types <- foldM evalDec env ds
+  Env terms types _ <- foldM evalDec env ds
   -- Remove everything that was present in the original Env.
   return $ Module $ Env (terms `M.difference` envTerm env)
                         (types `M.difference` envType env)
+                        mempty
 
 evalModExp env (ModVar qv _) =
   evalModuleVar env qv
@@ -886,8 +904,8 @@ data Ctx = Ctx { ctxEnv :: Env
 initialCtx :: Ctx
 initialCtx =
   Ctx (Env (M.insert (VName (nameFromString "intrinsics") 0)
-            (TermModule (Module $ Env terms types)) terms)
-        types)
+            (TermModule (Module $ Env terms types mempty)) terms)
+        types mempty)
       mempty
   where
     terms = M.mapMaybeWithKey (const . def . baseString) intrinsics
