@@ -208,7 +208,14 @@ way as for `Type Abbreviations`_::
   let reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
 Shape and type parameters are not passed explicitly when calling
-function, but are automatically derived.
+function, but are automatically derived.  If an array value *v* is
+passed for a type parameter *t*, all other arguments passed of type
+*t* must have the same shape as *v*.  For example, consider the following
+definition::
+
+  let pair 't (x: t) (y: t) = (x, y)
+
+The application ``pair [1] [2,3]`` will fail at run-time.
 
 To simplify the handling of in-inplace updates (see
 :ref:`in-place-updates`), the value returned by a function may not
