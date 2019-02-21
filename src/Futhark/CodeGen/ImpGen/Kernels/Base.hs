@@ -379,8 +379,11 @@ atomicUpdate arrs bucket op values locking = do
         sOp $ Imp.Atomic $
         Imp.AtomicCmpXchg old locks' locks_offset (lockingIsUnlocked locking) (lockingToLock locking)
       lock_acquired = Imp.var old int32 .==. lockingIsUnlocked locking
-      release_lock = ImpGen.everythingVolatile $
-                     ImpGen.sWrite (lockingArray locking) bucket' $ lockingToUnlock locking
+      -- Even the releasing is done with an atomic rather than a
+      -- simple write, for memory coherency reasons.
+      release_lock =
+        sOp $ Imp.Atomic $
+        Imp.AtomicCmpXchg old locks' locks_offset (lockingToLock locking) (lockingToUnlock locking)
       break_loop = continue <-- false
 
   -- We copy the current value and the new value to the parameters.
