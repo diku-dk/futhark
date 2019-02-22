@@ -6,6 +6,7 @@
 -- Oh, and it cannot handle non-meaningful inputs.
 --
 -- ==
+-- tags { no_csharp }
 -- input { [1] 0 } output { 1 }
 -- input { [4, -8, 2, 2, 0, 0, 5, 9, -6, 2] 7 } output { 4 }
 
