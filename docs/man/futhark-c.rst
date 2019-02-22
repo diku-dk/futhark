@@ -9,7 +9,7 @@ futhark-c
 SYNOPSIS
 ========
 
-futhark c [-V] [-o outfile] infile
+futhark c [options...] infile
 
 DESCRIPTION
 ===========

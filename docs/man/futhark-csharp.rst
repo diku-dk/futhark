@@ -9,7 +9,7 @@ futhark-csharp
 SYNOPSIS
 ========
 
-futhark csharp [-V] [-o outfile] infile
+futhark csharp [options...] infile
 
 DESCRIPTION
 ===========

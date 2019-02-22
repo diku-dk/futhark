@@ -9,7 +9,7 @@ futhark-csopencl
 SYNOPSIS
 ========
 
-futhark csopencl [-V] [-o outfile] infile
+futhark csopencl [options...] infile
 
 DESCRIPTION
 ===========

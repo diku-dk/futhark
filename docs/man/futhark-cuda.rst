@@ -9,7 +9,7 @@ futhark-cuda
 SYNOPSIS
 ========
 
-futhark cuda [-V] [-o outfile] infile
+futhark cuda [options...] infile
 
 DESCRIPTION
 ===========

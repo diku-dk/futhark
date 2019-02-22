@@ -9,7 +9,7 @@ futhark-dataset
 SYNOPSIS
 ========
 
-futhark dataset options...
+futhark dataset [options...]
 
 DESCRIPTION
 ===========

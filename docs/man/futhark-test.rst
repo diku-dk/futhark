@@ -9,7 +9,7 @@ futhark-test
 SYNOPSIS
 ========
 
-futhark test [-c | -C | -t | -i] infiles...
+futhark test [options...] infiles...
 
 DESCRIPTION
 ===========
