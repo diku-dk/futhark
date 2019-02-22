@@ -617,8 +617,10 @@ ensureReferenceOutput futhark compiler prog ios = do
           fail $ "Reference dataset generation failed with exit code " ++
           show e ++ " and stderr:\n" ++
           map (chr . fromIntegral) (SBS.unpack stderr)
-        ExitSuccess ->
-          SBS.writeFile (file (entry, tr)) stdout
+        ExitSuccess -> do
+          let f = file (entry, tr)
+          liftIO $ createDirectoryIfMissing True $ takeDirectory f
+          SBS.writeFile f stdout
   where file (entry, tr) =
           takeDirectory prog </> testRunReferenceOutput prog entry tr
 
