@@ -715,10 +715,9 @@ describeDec _ LocalDec{} = Nothing
 describeDec _ ImportDec{} = Nothing
 
 valBindWhat :: ValBind -> IndexWhat
-valBindWhat vb =
-  if null (valBindParams vb) && orderZero (unInfo (valBindRetType vb))
-  then IndexValue
-  else IndexFunction
+valBindWhat vb | null (valBindParams vb),
+                 orderZero (unInfo (valBindRetType vb)) = IndexValue
+               | otherwise                              = IndexFunction
 
 describeSpecs :: [Spec] -> DocM Html
 describeSpecs specs =
