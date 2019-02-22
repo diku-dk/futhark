@@ -9,7 +9,7 @@ futhark-doc
 SYNOPSIS
 ========
 
-futhark doc [-o outdir] dir
+futhark doc [options...] dir
 
 DESCRIPTION
 ===========

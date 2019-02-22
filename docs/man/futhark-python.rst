@@ -9,7 +9,7 @@ futhark-python
 SYNOPSIS
 ========
 
-futhark python [-V] [-o outfile] infile
+futhark python [options...] infile
 
 DESCRIPTION
 ===========

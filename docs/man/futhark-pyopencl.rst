@@ -9,7 +9,7 @@ futhark-pyopencl
 SYNOPSIS
 ========
 
-futhark pyopencl [-V] [-o outfile] infile
+futhark pyopencl [options...] infile
 
 DESCRIPTION
 ===========

@@ -9,7 +9,7 @@ futhark-opencl
 SYNOPSIS
 ========
 
-futhark opencl [-V] [-o outfile] infile
+futhark opencl [options...] infile
 
 DESCRIPTION
 ===========
