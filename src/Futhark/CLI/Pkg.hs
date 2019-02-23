@@ -283,7 +283,7 @@ doAdd = cmdMain "PKGPATH" $ \args cfg ->
         Nothing ->
           liftIO $ T.putStrLn $ "Added new required package " <> p <> " " <> prettySemVer v <> "."
       putPkgManifest m'
-      liftIO $ T.putStrLn "Remember to run 'futhark-pkg sync'."
+      liftIO $ T.putStrLn "Remember to run 'futhark pkg sync'."
 
 doRemove :: String -> [String] -> IO ()
 doRemove = cmdMain "PKGPATH" $ \args cfg ->
