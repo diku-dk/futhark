@@ -274,4 +274,4 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
     printSizes =
       intercalate [[C.cstm|fprintf(stderr, ", ");|]] . map printSize
     printSize e =
-      [[C.cstm|fprintf(stderr, "%zu", $exp:e);|]]
+      [[C.cstm|fprintf(stderr, "%d", $exp:e);|]]
