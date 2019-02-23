@@ -356,7 +356,7 @@ static void cuda_size_setup(struct cuda_context *ctx)
     if (*size_value == 0) {
       *size_value = default_value;
     } else if (max_value > 0 && *size_value > max_value) {
-      fprintf(stderr, "Note: Device limits %zu to %zu (down from %zu)\n",
+      fprintf(stderr, "Note: Device limits %s to %zu (down from %zu)\n",
               size_name, max_value, *size_value);
       *size_value = max_value;
     }
