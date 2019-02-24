@@ -447,7 +447,8 @@ indexesFor start end stride arr
 
 -- | 'signum', but with 0 as 1.
 signum' :: (Eq p, Num p) => p -> p
-signum' x = if x == 0 then 1 else signum x
+signum' 0 = 1
+signum' x = signum x
 
 indexArray :: [Indexing] -> Value -> Maybe Value
 indexArray (IndexingFix i:is) (ValueArray arr)
