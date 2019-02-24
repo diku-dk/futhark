@@ -380,8 +380,10 @@ runTests config paths = do
   _ <- forkIO $ mapM_ (putMVar testmvar) included
   isTTY <- (&& not (configLineOutput config)) <$> hIsTerminalDevice stdout
 
-  let report = if isTTY then reportTable else reportText
-      clear  = if isTTY then clearFromCursorToScreenEnd else putStr "\n"
+  let report | isTTY = reportTable
+             | otherwise = reportText
+      clear | isTTY = clearFromCursorToScreenEnd
+            |otherwise = putStr "\n"
 
       numTestCases tc =
         case testAction $ testCaseTest tc of
@@ -442,9 +444,8 @@ runTests config paths = do
   -- Removes "Now testing" output.
   when isTTY $ cursorUpLine 1 >> clearLine
 
-  let excluded_str = if null excluded
-                     then ""
-                     else " (" ++ show (length excluded) ++ " program(s) excluded).\n"
+  let excluded_str | null excluded = ""
+                   | otherwise = " (" ++ show (length excluded) ++ " program(s) excluded).\n"
   putStr excluded_str
   exitWith $ case testStatusFail ts of 0 -> ExitSuccess
                                        _ -> ExitFailure 1
