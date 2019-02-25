@@ -104,14 +104,14 @@ instance Pretty Monotonicity where
 
 instance Pretty num => Pretty (LMAD num) where
   ppr (LMAD offset dims) =
-    braces $ semisep [ text "offset: " <> ppr offset
+    braces $ semisep [ text "offset: " <> oneLine (ppr offset)
                      , text "strides: " <> p ldStride
                      , text "rotates: " <> p ldRotate
                      , text "shape: " <> p ldShape
                      , text "permutation: " <> p ldPerm
                      , text "monotonicity: " <> p ldMon
                      ]
-    where p f = brackets $ commasep $ map (ppr . f) dims
+    where p f = oneLine $ brackets $ commasep $ map (ppr . f) dims
 
 instance Pretty num => Pretty (IxFun num) where
   ppr (IxFun lmads oshp cg) =
