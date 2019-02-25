@@ -108,11 +108,6 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
                                show (baseTag $ kernelGlobalThreadIdVar constants)
             }
 
--- First handle the simple case of a non-segmented reduction.  Our
--- strategy is the conventional approach of generating two kernels:
--- one where each group is given a chunk of the total input and
--- produces a partial result per group, and then a final kernel that
--- combines the per-group partial results.
 kernelCompiler pat (SegRed space comm red_op nes _ body) =
   compileSegRed pat space comm red_op nes body
 
