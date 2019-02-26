@@ -545,6 +545,13 @@ handleKernel (SegRed space comm red_op nes ts body) = do
   red_op' <- allocInSegRedLambda (spaceGlobalId space) (spaceNumThreads space) red_op
   return $ Inner $ SegRed space comm red_op' nes ts body'
 
+handleKernel (SegGenRed space ops ts body) = do
+  body' <- subInKernel $ localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
+  ops' <- forM ops $ \op -> do
+    lam <- allocInSegRedLambda (spaceGlobalId space) (spaceNumThreads space) $ genReduceOp op
+    return op { genReduceOp = lam }
+  return $ Inner $ SegGenRed space ops' ts body'
+
 subInKernel :: AllocM InInKernel OutInKernel a
             -> AllocM fromlore2 ExplicitMemory a
 subInKernel = subAllocM handleKernelExp True
