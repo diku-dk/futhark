@@ -118,8 +118,52 @@ transformExp (Op (Inner (SegRed kspace comm red_op nes ts kbody))) = do
           M.keys (scopeOfKernelSpace kspace <>
                   scopeOf (bodyStms kbody))
 
+transformExp (Op (Inner (SegGenRed kspace ops ts kbody))) = do
+  let (kbody', kbody_allocs) = extractBodyAllocations kbody
+      (ops', ops_allocs) = unzip $ map extractGenRedOpAllocations ops
+      variantAlloc (Var v) = v `S.member` bound_in_kernel
+      variantAlloc _ = False
+      allocs = kbody_allocs <> mconcat ops_allocs
+      (variant_allocs, invariant_allocs) = M.partition (variantAlloc . fst) allocs
+
+  allocsForBody variant_allocs invariant_allocs kspace kbody' $ \alloc_stms kbody'' -> do
+    ops'' <- mapM offsetMemoryInGenRedOp ops'
+
+    return (alloc_stms,
+            Op $ Inner $ SegGenRed kspace ops'' ts kbody'')
+
+  where bound_in_kernel =
+          S.fromList $ map fst (spaceDimensions kspace) ++
+          M.keys (scopeOfKernelSpace kspace <>
+                  scopeOf (bodyStms kbody))
+
+        extractGenRedOpAllocations op =
+          let (lam, allocs) = extractLambdaAllocations $ genReduceOp op
+          in (op { genReduceOp = lam }, allocs)
+
+        offsetMemoryInGenRedOp op = do
+          lam <- localScope (scopeOf (genReduceOp op)) $
+                 offsetMemoryInLambda $ genReduceOp op
+          return op { genReduceOp = lam }
+
 transformExp e =
   return (mempty, e)
+
+allocsForBody :: M.Map VName (SubExp, Space)
+              -> M.Map VName (SubExp, Space)
+              -> KernelSpace
+              -> Body InKernel
+              -> (Stms ExplicitMemory -> Body InKernel -> OffsetM b)
+              -> ExpandM b
+allocsForBody variant_allocs invariant_allocs kspace kbody' m = do
+  (alloc_stms, alloc_offsets) <-
+    memoryRequirements kspace (bodyStms kbody') variant_allocs invariant_allocs
+
+  scope <- askScope
+  let scope' = scopeOfKernelSpace kspace <> M.map nameInfoConv scope
+  either compilerLimitationS pure $ runOffsetM scope' alloc_offsets $ do
+    kbody'' <- offsetMemoryInBody kbody'
+    m alloc_stms kbody''
 
 memoryRequirements :: KernelSpace
                    -> Stms InKernel
