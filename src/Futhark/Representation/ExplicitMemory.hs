@@ -1017,6 +1017,8 @@ instance OpReturns ExplicitMemory where
             extendedScope (varReturns arr)
             (castScope $ scopeOf $ kernelBodyStms body)
           correct _ ret = return ret
+  opReturns (Inner (SegGenRed _ ops _ _)) =
+    concat <$> mapM (mapM varReturns . genReduceDest) ops
   opReturns k =
     extReturns <$> opType k
 

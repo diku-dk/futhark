@@ -42,7 +42,7 @@ import Futhark.Transform.Rename
 import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.Alias as Alias
-import Futhark.Representation.SOACS.SOAC (composeLambda, Scan, Reduce, nilFn, GenReduceOp(..))
+import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import Futhark.Util
 import Futhark.Util.IntegralExp
 
@@ -345,7 +345,7 @@ blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                  -> [(VName, SubExp)] -> [SubExp] -> [VName]
                  -> m (Stms Kernels)
 blockedReduction pat w comm reduce_lam map_lam ispace nes arrs = runBinder_ $ do
-  fold_lam <- composeLambda nilFn reduce_lam map_lam
+  fold_lam <- SOAC.composeLambda SOAC.nilFn reduce_lam map_lam
   fold_lam' <- chunkLambda pat nes fold_lam
 
   let arr_idents = drop (length nes) $ patternIdents pat
@@ -361,149 +361,71 @@ blockedGenReduce :: (MonadFreshNames m, HasScope Kernels m) =>
                     SubExp
                  -> [(VName,SubExp)] -- ^ Segment indexes and sizes.
                  -> [KernelInput]
-                 -> [GenReduceOp InKernel]
+                 -> [SOAC.GenReduceOp InKernel]
                  -> Lambda InKernel -> [VName]
                  -> m ([VName], Stms Kernels)
-blockedGenReduce arr_w segments inputs ops lam arrs = runBinder $ do
-  let (segment_is, segment_sizes) = unzip segments
-      depth = length segments
+blockedGenReduce arr_w ispace inps ops lam arrs = runBinder $ do
+  let (_, segment_sizes) = unzip ispace
+      depth = length ispace
   arr_w_64 <- letSubExp "arr_w_64" =<< eConvOp (SExt Int32 Int64) (toExp arr_w)
   segment_sizes_64 <- mapM (letSubExp "segment_size_64" <=< eConvOp (SExt Int32 Int64) . toExp) segment_sizes
   total_w <- letSubExp "genreduce_elems" =<< foldBinOp (Mul Int64) arr_w_64 segment_sizes_64
-  (_, KernelSize num_groups group_size elems_per_thread_64 _ num_threads) <-
+  (_, KernelSize num_groups group_size _ _ num_threads) <-
     blockedKernelSize total_w
 
-  kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
-  let ltid = spaceLocalId kspace
-      gtid = spaceGlobalId kspace
-      nthreads = spaceNumThreads kspace
+  gtid <- newVName "gtid"
+  kspace <- newKernelSpace (num_groups, group_size, num_threads) $
+            FlatThreadSpace $ ispace ++ [(gtid, arr_w)]
+  let nthreads = spaceNumThreads kspace
 
   -- Determining the degree of cooperation (heuristic):
   -- coop_lvl   := size of histogram (Cooperation level)
   -- num_histos := (threads / coop_lvl) (Number of histograms)
   -- threads    := min(physical_threads, segment_size)
-  num_histos <- forM ops $ \(GenReduceOp w _ _ _) ->
-    letSubExp "num_histos" =<< eDivRoundingUp Int32 (eSubExp nthreads)
-    (foldBinOp (Mul Int32) w segment_sizes)
+  ops' <- forM ops $ \(SOAC.GenReduceOp w dests nes op) -> do
+    num_histos <- letSubExp "num_histos" =<< eDivRoundingUp Int32 (eSubExp nthreads)
+                  (foldBinOp (Mul Int32) w segment_sizes)
 
-  -- Initialize sub-histograms.
-  sub_histos <- forM (zip ops num_histos) $ \(GenReduceOp w dests nes _, num_histos') -> do
-    -- If num_histos' is 1, then we just reuse the original
+    -- Initialize sub-histograms.
+    --
+    -- If num_histos is 1, then we just reuse the original
     -- destination.  The idea is to avoid a copy if we are writing a
     -- small number of values into a very large prior histogram.  This
     -- only works if neither the Reshape nor the If results in a copy.
-    let num_histos_is_one = BasicOp $ CmpOp (CmpEq int32) num_histos' $ intConst Int32 1
+    let num_histos_is_one = BasicOp $ CmpOp (CmpEq int32) num_histos $ intConst Int32 1
 
         reuse_dest =
           fmap resultBody $ forM dests $ \dest -> do
             (segment_dims, hist_dims) <- splitAt depth . arrayDims <$> lookupType dest
             letSubExp "sub_histo" $ BasicOp $
-              Reshape (map DimNew $ segment_dims ++ num_histos' : hist_dims) dest
+              Reshape (map DimNew $ segment_dims ++ num_histos : hist_dims) dest
 
         make_subhistograms =
           -- To incorporate the original values of the genreduce target, we
           -- copy those values to the first subhistogram here.
           fmap resultBody $ forM (zip nes dests) $ \(ne, dest) -> do
             blank <- letExp "sub_histo_blank" $
-              BasicOp $ Replicate (Shape $ segment_sizes ++ [num_histos', w]) ne
+              BasicOp $ Replicate (Shape $ segment_sizes ++ [num_histos, w]) ne
             let (zero, one) = (intConst Int32 0, intConst Int32 1)
             slice <- fullSlice <$> lookupType blank <*>
                      pure (map (flip (DimSlice zero) one) segment_sizes ++ [DimFix zero])
             letSubExp "sub_histo" $ BasicOp $ Update blank slice $ Var dest
 
-    letTupExp "histo_dests" =<<
+    histo_dests <-
+      letTupExp "histo_dests" =<<
       eIf (pure num_histos_is_one) reuse_dest make_subhistograms
 
-  let sub_histos' = concat sub_histos
-  dest_ts <- mapM lookupType sub_histos'
+    return $ GenReduceOp w num_histos histo_dests nes op
 
-  lock_arrs <- forM (zip ops num_histos) $ \(GenReduceOp w _ _ _, num_histos') ->
-    letExp "locks_arr" $ BasicOp $
-    Replicate (Shape $ segment_sizes ++ [num_histos', w]) (intConst Int32 0)
+  body <- runBodyBinder $ localScope (scopeOfKernelSpace kspace) $ do
+    mapM_ (addStm <=< readKernelInput) inps
+    forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) -> do
+      arr_t <- lookupType arr
+      letBindNames_ [paramName p] $
+        BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
+    return $ lambdaBody lam
 
-  (kres, kstms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
-    let toInt64 = eConvOp (SExt Int32 Int64)
-    i <- newVName "i"
-    -- The merge parameters are the histogram we are constructing.
-    merge_params <- zipWithM newParam (map baseString sub_histos')
-                                      (map (`toDecl` Unique) dest_ts)
-    group_size_64 <- letSubExp "group_size_64" =<<
-                     toInt64 (toExp group_size)
-    let merge = zip merge_params $ map Var sub_histos'
-        form = ForLoop i Int64 elems_per_thread_64 []
-
-    loop_body <- runBodyBinder $ localScope (scopeOfFParams (map fst merge) <>
-                                             scopeOf form) $ do
-      -- Compute the offset into the input and output.  To this a
-      -- thread can add its local ID to figure out which element it is
-      -- responsible for.  The calculation is done with 64-bit
-      -- integers to avoid overflow, but the final segment indexes are
-      -- 32 bit.
-      offset <- letSubExp "offset" =<<
-                eBinOp (Add Int64)
-                (eBinOp (Mul Int64)
-                 (toInt64 $ toExp $ spaceGroupId kspace)
-                 (eBinOp (Mul Int64) (toExp elems_per_thread_64) (toExp group_size_64)))
-                (eBinOp (Mul Int64) (toExp i) (toExp group_size_64))
-
-      -- Construct segment indices.
-      j <- letSubExp "j" =<< eBinOp (Add Int64) (toExp offset) (toInt64 $ toExp ltid)
-      l <- newVName "l"
-      let bindIndex v = letBindNames_ [v] <=< toExp
-      zipWithM_ bindIndex (segment_is++[l]) $
-        map (ConvOpExp (SExt Int64 Int32)) .
-        unflattenIndex (map (ConvOpExp (SExt Int32 Int64) .
-                             primExpFromSubExp int32) $ segment_sizes ++ [arr_w]) $
-        primExpFromSubExp int64 j
-
-      -- We execute the bucket function once and update each histogram serially.
-      -- We apply the bucket function if j=offset+ltid is less than
-      -- num_elements.  This also involves writing to the mapout
-      -- arrays.
-      let in_bounds = pure $ BasicOp $ CmpOp (CmpSlt Int64) j total_w
-
-          in_bounds_branch = do
-            -- Read segment inputs.
-            mapM_ (addStm <=< readKernelInput) inputs
-
-            -- Read array input.
-            arr_elems <- forM arrs $ \a -> do
-              a_t <- lookupType a
-              let slice = fullSlice a_t [DimFix $ Var l]
-              letSubExp (baseString a ++ "_elem") $ BasicOp $ Index a slice
-
-            -- Apply bucket function.
-            resultBody <$> eLambda lam (map eSubExp arr_elems)
-
-          not_in_bounds_branch =
-            return $ resultBody $ replicate (length ops) (intConst Int32 (-1)) ++
-            concatMap genReduceNeutral ops
-
-      lam_res <- letTupExp "bucket_fun_res" =<<
-                  eIf in_bounds in_bounds_branch not_in_bounds_branch
-
-      let (buckets, vs) = splitAt (length ops) $ map Var lam_res
-          perOp :: [a] -> [[a]]
-          perOp = chunks $ map (length . genReduceDest) ops
-
-      ops_res <- forM (zip6 ops (perOp $ map paramName merge_params) buckets (perOp vs) lock_arrs num_histos) $
-        \(GenReduceOp dest_w _ _ comb_op, subhistos, bucket, vs', lock_arrs', num_histos') -> do
-          -- Compute subhistogram index for each thread.
-          subhisto_ind <- letSubExp "subhisto_ind" =<<
-                          eBinOp (SDiv Int32)
-                          (toExp gtid)
-                          (eDivRoundingUp Int32 (toExp nthreads) (eSubExp num_histos'))
-          fmap (map Var) $ letTupExp "genreduce_res" $ Op $
-            GroupGenReduce (segment_sizes ++ [num_histos', dest_w])
-            subhistos comb_op (map Var segment_is ++ [subhisto_ind, bucket]) vs' lock_arrs'
-
-      return $ resultBody $ concat ops_res
-
-    result <- letTupExp "result" $ DoLoop [] merge form loop_body
-    return $ map KernelInPlaceReturn result
-
-  let kbody = KernelBody () kstms kres
-  letTupExp "histograms" $ Op $ Kernel (KernelDebugHints "gen_reduce" []) kspace dest_ts kbody
+  letTupExp "histograms" $ Op $ SegGenRed kspace ops' (lambdaReturnType lam) body
 
 blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
               Pattern Kernels -> SubExp
@@ -653,8 +575,8 @@ blockedKernelSize w = do
 -- First stage scan kernel.
 scanKernel1 :: (MonadBinder m, Lore m ~ Kernels) =>
                SubExp -> KernelSize
-            -> Scan InKernel
-            -> Reduce InKernel
+            -> SOAC.Scan InKernel
+            -> SOAC.Reduce InKernel
             -> Lambda InKernel -> [VName]
             -> m (Kernel InKernel)
 scanKernel1 w scan_sizes (scan_lam, scan_nes) (_comm, red_lam, red_nes) foldlam arrs = do
@@ -902,13 +824,13 @@ scanKernel2 scan_sizes lam input = do
 -- need them.
 blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                Pattern Kernels -> SubExp
-            -> Scan InKernel
-            -> Reduce InKernel
+            -> SOAC.Scan InKernel
+            -> SOAC.Reduce InKernel
             -> Lambda InKernel -> SubExp -> [(VName, SubExp)] -> [KernelInput]
             -> [VName]
             -> m [VName]
 blockedScan pat w (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam segment_size ispace inps arrs = do
-  foldlam <- composeLambda scan_lam red_lam map_lam
+  foldlam <- SOAC.composeLambda scan_lam red_lam map_lam
 
   (_, first_scan_size) <- blockedKernelSize =<< asIntS Int64 w
   my_index <- newVName "my_index"

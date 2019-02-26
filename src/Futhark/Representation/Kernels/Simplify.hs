@@ -92,8 +92,64 @@ simplifyKernelOp mk_ops env (SegRed space comm red_op nes ts body) = do
     Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
   red_op_hoisted' <- mapM processHoistedStm red_op_hoisted
 
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
+
+  return (SegRed space' comm red_op' nes' ts' body',
+          red_op_hoisted' <> body_hoisted)
+
+  where scope_vtable = ST.fromScope scope
+        scope = scopeOfKernelSpace space
+
+simplifyKernelOp mk_ops env (SegGenRed space ops ts body) = do
+  outer_vtable <- Engine.askVtable
+
+  space' <- Engine.simplify space
+  ts' <- mapM Engine.simplify ts
+
+  (ops', ops_hoisted) <- fmap unzip $ forM ops $
+    \(GenReduceOp w num_histos arrs nes lam) -> do
+      w' <- Engine.simplify w
+      num_histos' <- Engine.simplify num_histos
+      arrs' <- Engine.simplify arrs
+      nes' <- Engine.simplify nes
+      (lam', op_hoisted) <-
+        Engine.subSimpleM (mk_ops space) env outer_vtable $
+        Engine.localVtable (<>scope_vtable) $
+        Engine.simplifyLambda lam $
+        replicate (length nes * 2) Nothing
+      return (GenReduceOp w' num_histos' arrs' nes' lam',
+              op_hoisted)
+
+  red_op_hoisted' <- mapM processHoistedStm $ mconcat ops_hoisted
+
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
+
+  return (SegGenRed space' ops' ts' body',
+          red_op_hoisted' <> body_hoisted)
+
+  where scope_vtable = ST.fromScope scope
+        scope = scopeOfKernelSpace space
+
+simplifyKernelOp _ _ (GetSize key size_class) = return (GetSize key size_class, mempty)
+simplifyKernelOp _ _ (GetSizeMax size_class) = return (GetSizeMax size_class, mempty)
+simplifyKernelOp _ _ (CmpSizeLe key size_class x) = do
+  x' <- Engine.simplify x
+  return (CmpSizeLe key size_class x', mempty)
+
+hoistFromBody :: (Engine.SimplifiableLore lore,
+                  SameScope lore outerlore,
+                  BodyAttr outerlore ~ (), BodyAttr lore ~ (),
+                  ExpAttr lore ~ ExpAttr outerlore,
+                  RetType lore ~ RetType outerlore,
+                  BranchType lore ~ BranchType outerlore) =>
+                 KernelSpace -> Simplify.SimpleOps lore -> Engine.Env lore
+              -> [Type] -> Body lore
+              -> Engine.SimpleM outerlore (Body (Wise lore), Stms (Wise outerlore))
+hoistFromBody kspace ops env ts body = do
+  outer_vtable <- Engine.askVtable
+
   ((body_stms, body_res), body_hoisted) <-
-    Engine.subSimpleM (mk_ops space) env outer_vtable $ do
+    Engine.subSimpleM ops env outer_vtable $ do
       par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
       Engine.localVtable (<>scope_vtable) $
         Engine.blockIf (Engine.hasFree bound_here
@@ -101,21 +157,15 @@ simplifyKernelOp mk_ops env (SegRed space comm red_op nes ts body) = do
                         `Engine.orIf` par_blocker
                         `Engine.orIf` Engine.isConsumed) $
         Engine.simplifyBody (replicate (length ts) Observe) body
+
   body_hoisted' <- mapM processHoistedStm body_hoisted
 
-  return (SegRed space' comm red_op' nes' ts' $
-          mkWiseBody () body_stms body_res,
-          red_op_hoisted' <> body_hoisted')
+  return (mkWiseBody () body_stms body_res,
+          body_hoisted')
 
   where scope_vtable = ST.fromScope scope
-        scope = scopeOfKernelSpace space
+        scope = scopeOfKernelSpace kspace
         bound_here = S.fromList $ M.keys scope
-
-simplifyKernelOp _ _ (GetSize key size_class) = return (GetSize key size_class, mempty)
-simplifyKernelOp _ _ (GetSizeMax size_class) = return (GetSizeMax size_class, mempty)
-simplifyKernelOp _ _ (CmpSizeLe key size_class x) = do
-  x' <- Engine.simplify x
-  return (CmpSizeLe key size_class x', mempty)
 
 processHoistedStm :: (Monad m,
                       PrettyLore from,
