@@ -91,7 +91,7 @@ repl = do
 
 confirmQuit :: Haskeline.InputT IO Bool
 confirmQuit = do
-  c <- Haskeline.getInputChar "Quit futharki? (y/n) "
+  c <- Haskeline.getInputChar "Quit REPL? (y/n) "
   case c of
     Nothing -> return True -- EOF
     Just 'y' -> return True
