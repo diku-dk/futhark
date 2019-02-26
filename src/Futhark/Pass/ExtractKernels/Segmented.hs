@@ -13,7 +13,7 @@ import Futhark.Transform.Rename
 import Futhark.Representation.Kernels
 import Futhark.Representation.SOACS.SOAC (nilFn)
 import Futhark.MonadFreshNames
-import Futhark.Tools hiding (true, false)
+import Futhark.Tools hiding (false)
 import Futhark.Pass.ExtractKernels.BlockedKernel
 
 addFlagToLambda :: (MonadBinder m, Lore m ~ Kernels) =>

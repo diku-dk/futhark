@@ -29,11 +29,9 @@ import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import Prelude hiding (mod)
-
 import Language.Futhark
-import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
-import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
+import Language.Futhark.TypeChecker.Monad hiding (BoundV)
+import Language.Futhark.TypeChecker.Types
 import Futhark.Util.Pretty (Pretty)
 
 -- | Mapping from fresh type variables, instantiated from the type
