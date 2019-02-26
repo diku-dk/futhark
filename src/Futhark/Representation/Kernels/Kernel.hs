@@ -11,6 +11,7 @@ module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
        , kernelType
        , KernelDebugHints(..)
+       , GenReduceOp(..)
        , KernelBody(..)
        , KernelSpace(..)
        , spaceDimensions
@@ -79,6 +80,14 @@ data KernelDebugHints =
                    }
   deriving (Eq, Show, Ord)
 
+data GenReduceOp lore = GenReduceOp { genReduceWidth :: SubExp
+                                    , genReduceNumHistograms :: SubExp
+                                    , genReduceDest :: [VName]
+                                    , genReduceNeutral :: [SubExp]
+                                    , genReduceOp :: LambdaT lore
+                                    }
+                      deriving (Eq, Ord, Show)
+
 data Kernel lore =
     GetSize Name SizeClass -- ^ Produce some runtime-configurable size.
   | GetSizeMax SizeClass -- ^ The maximum size of some class.
@@ -88,6 +97,7 @@ data Kernel lore =
   | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (Body lore)
     -- ^ The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
+  | SegGenRed KernelSpace [GenReduceOp lore] [Type] (Body lore)
     deriving (Eq, Show, Ord)
 
 data KernelSpace = KernelSpace { spaceGlobalId :: VName
@@ -200,6 +210,18 @@ mapKernelM tv (SegRed space comm red_op nes ts lam) =
   <*> mapM (mapOnKernelSubExp tv) nes
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
   <*> mapOnKernelBody tv lam
+mapKernelM tv (SegGenRed space ops ts body) =
+  SegGenRed
+  <$> mapOnKernelSpace tv space
+  <*> mapM onGenRedOp ops
+  <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
+  <*> mapOnKernelBody tv body
+  where onGenRedOp (GenReduceOp w num_histos arrs nes op) =
+          GenReduceOp <$> mapOnKernelSubExp tv w
+          <*> mapOnKernelSubExp tv num_histos
+          <*> mapM (mapOnKernelVName tv) arrs
+          <*> mapM (mapOnKernelSubExp tv) nes
+          <*> mapOnKernelLambda tv op
 mapKernelM tv (Kernel desc space ts kernel_body) =
   Kernel <$> mapOnKernelDebugHints desc <*>
   mapOnKernelSpace tv space <*>
@@ -421,6 +443,13 @@ kernelType (SegRed space _ _ nes ts _) =
         dims = map snd $ spaceDimensions space
         outer_dims = init dims
 
+kernelType (SegGenRed space ops _ _) = do
+  op <- ops
+  let shape = Shape $ segment_dims <> [genReduceNumHistograms op, genReduceWidth op]
+  map (`arrayOfShape` shape) (lambdaReturnType $ genReduceOp op)
+  where dims = map snd $ spaceDimensions space
+        segment_dims = init dims
+
 kernelType GetSize{} = [Prim int32]
 kernelType GetSizeMax{} = [Prim int32]
 kernelType CmpSizeLe{} = [Prim Bool]
@@ -442,6 +471,9 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
     mconcat (map consumedByReturn (kernelBodyResult kbody))
     where consumedByReturn (WriteReturn _ a _) = S.singleton a
           consumedByReturn _                   = mempty
+  consumedInOp (SegGenRed _ ops _ body) =
+    S.fromList (concatMap genReduceDest ops) <>
+    consumedInBody body
   consumedInOp _ = mempty
 
 aliasAnalyseKernelBody :: (Attributes lore,
@@ -567,6 +599,9 @@ instance Aliased lore => UsageInOp (Kernel lore) where
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
   usageInOp (SegRed _ _ _ _ _ body) =
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
+  usageInOp (SegGenRed _ ops _ body) =
+    mconcat $ map UT.consumedUsage $ S.toList (consumedInBody body) <>
+    concatMap genReduceDest ops
   usageInOp GetSize{} = mempty
   usageInOp GetSizeMax{} = mempty
   usageInOp CmpSizeLe{} = mempty
@@ -597,6 +632,43 @@ typeCheckKernel (SegRed space _ red_op nes ts body) = do
       "SegRed: wrong type for reduction or neutral elements."
 
     TC.checkLambdaBody ts body
+
+typeCheckKernel (SegGenRed space ops ts body) = do
+  checkSpace space
+  mapM_ TC.checkType ts
+
+  TC.binding (scopeOfKernelSpace space) $ do
+    forM_ ops $ \(GenReduceOp dest_w num_histos dests nes op) -> do
+      nes' <- mapM TC.checkArg nes
+      TC.require [Prim int32] dest_w
+      TC.require [Prim int32] num_histos
+
+      -- Operator type must match the type of neutral elements.
+      TC.checkLambda op $ map TC.noArgAliases $ nes' ++ nes'
+      let nes_t = map TC.argType nes'
+      unless (nes_t == lambdaReturnType op) $
+        TC.bad $ TC.TypeError $ "SegGenRed operator has return type " ++
+        prettyTuple (lambdaReturnType op) ++ " but neutral element has type " ++
+        prettyTuple nes_t
+
+      -- Arrays must have proper type.
+      let shape = Shape $ segment_dims <> [num_histos, dest_w]
+      forM_ (zip nes_t dests) $ \(t, dest) -> do
+        TC.requireI [t `arrayOfShape` shape] dest
+        TC.consume =<< TC.lookupAliases dest
+
+    TC.checkLambdaBody ts body
+
+    -- Return type of bucket function must be an index for each
+    -- operation followed by the values to write.
+    nes_ts <- concat <$> mapM (mapM subExpType . genReduceNeutral) ops
+    let bucket_ret_t = replicate (length ops) (Prim int32) ++ nes_ts
+    unless (bucket_ret_t == ts) $
+      TC.bad $ TC.TypeError $ "SegGenRed body has return type " ++
+      prettyTuple ts ++ " but should have type " ++
+      prettyTuple bucket_ret_t
+
+  where segment_dims = init $ map snd $ spaceDimensions space
 
 typeCheckKernel (Kernel _ space kts kbody) = do
   checkSpace space
@@ -664,6 +736,9 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
           kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
   opMetrics (SegRed _ _ red_op _ _ body) =
     inside "SegRed" $ lambdaMetrics red_op >> bodyMetrics body
+  opMetrics (SegGenRed _ ops _ body) =
+    inside "SegGenRed" $ do mapM_ (lambdaMetrics . genReduceOp) ops
+                            bodyMetrics body
   opMetrics GetSize{} = seen "GetSize"
   opMetrics GetSizeMax{} = seen "GetSizeMax"
   opMetrics CmpSizeLe{} = seen "CmpSizeLe"
@@ -691,6 +766,16 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
     PP.nestedBlock "{" "}" (ppr body)
     where name = case comm of Commutative    -> "segred_comm"
                               Noncommutative -> "segred"
+
+  ppr (SegGenRed space ops ts body) =
+    text "seggenred" <>
+    PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)) </>
+    PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
+    PP.nestedBlock "{" "}" (ppr body)
+    where ppOp (GenReduceOp w num_histos dests nes op) =
+            ppr w <> PP.comma <+> ppr num_histos <> PP.comma </>
+            PP.braces (PP.commasep $ map ppr dests) <> PP.comma </>
+            PP.braces (PP.commasep $ map ppr nes) <> PP.comma </> ppr op
 
 instance Pretty KernelSpace where
   ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size structure) =

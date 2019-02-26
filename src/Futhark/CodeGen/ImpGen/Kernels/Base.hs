@@ -19,6 +19,11 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , groupScan
   , isActive
   , sKernel
+
+  , atomicUpdate
+  , atomicUpdateLocking
+  , Locking(..)
+  , AtomicUpdate
   )
   where
 
@@ -276,7 +281,7 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   where indexInBounds inds bounds =
           foldl1 (.&&.) $ zipWith checkBound inds bounds
           where checkBound ind bound = 0 .<=. ind .&&. ind .<. bound
-        locking = Locking locks 0 1 0
+        locking = Locking locks 0 1 0 id
 
 compileKernelExp _ dest e =
   compilerBugS $ unlines ["Invalid target", "  " ++ show dest,
@@ -290,19 +295,42 @@ streaming constants chunksize bound m = do
   ImpGen.emit =<< ImpGen.subImpM_ (inKernelOperations constants') m
 
 -- | Locking strategy used for an atomic update.
-data Locking = Locking { lockingArray :: VName -- ^ Array containing the lock.
-                       , lockingIsUnlocked :: Imp.Exp -- ^ Value for us to consider the lock free.
-                       , lockingToLock :: Imp.Exp -- ^ What to write when we lock it.
-                       , lockingToUnlock :: Imp.Exp -- ^ What to write when we unlock it.
-                       }
+data Locking =
+  Locking { lockingArray :: VName
+            -- ^ Array containing the lock.
+          , lockingIsUnlocked :: Imp.Exp
+            -- ^ Value for us to consider the lock free.
+          , lockingToLock :: Imp.Exp
+            -- ^ What to write when we lock it.
+          , lockingToUnlock :: Imp.Exp
+            -- ^ What to write when we unlock it.
+          , lockingMapping :: Imp.Exp -> Imp.Exp
+            -- ^ A transformation from the logical lock index to the
+            -- physical position in the array.  This can be used to
+            -- make the lock array smaller.
+          }
+
+-- | A function for generating code for an atomic update.
+type AtomicUpdate lore =
+  [VName] -> [SubExp] -> [SubExp] -> ImpGen.ImpM lore Imp.KernelOp ()
 
 atomicUpdate :: ExplicitMemorish lore =>
                 [VName] -> [SubExp] -> Lambda lore -> [SubExp] -> Locking
              -> ImpGen.ImpM lore Imp.KernelOp ()
+atomicUpdate arrs bucket lam values locking =
+  case atomicUpdateLocking lam of
+    Left f -> f arrs bucket values
+    Right f -> f locking arrs bucket values
 
-atomicUpdate arrs bucket lam values _
+-- | 'atomicUpdate', but where it is explicitly visible whether a
+-- locking strategy is necessary.
+atomicUpdateLocking :: ExplicitMemorish lore =>
+                       Lambda lore
+                    -> Either (AtomicUpdate lore) (Locking -> AtomicUpdate lore)
+
+atomicUpdateLocking lam
   | Just ops_and_ts <- splitOp lam,
-    all ((==32) . primBitSize . snd) ops_and_ts =
+    all ((==32) . primBitSize . snd) ops_and_ts = Left $ \arrs bucket values ->
   -- If the operator is a vectorised binary operator on 32-bit values,
   -- we can use a particularly efficient implementation. If the
   -- operator has an atomic implementation we use that, otherwise it
@@ -359,7 +387,7 @@ atomicUpdate arrs bucket lam values _
           let atomic f = Imp.Atomic . f old arr' bucket'
           atomic <$> Imp.atomicBinOp bop
 
-atomicUpdate arrs bucket op values locking = do
+atomicUpdateLocking op = Right $ \locking arrs bucket values -> do
   old <- dPrim "old" int32
   continue <- dPrimV "continue" true
 

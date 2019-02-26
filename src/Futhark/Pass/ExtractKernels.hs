@@ -171,6 +171,7 @@ import Data.Maybe
 import Data.List
 
 import Futhark.Representation.SOACS
+import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import Futhark.Representation.SOACS.Simplify (simplifyStms, simpleSOACS)
 import qualified Futhark.Representation.Kernels as Out
 import Futhark.Representation.Kernels.Kernel
@@ -1281,7 +1282,7 @@ segmentedGenReduceKernel :: KernelNest
                          -> [Int]
                          -> Certificates
                          -> SubExp
-                         -> [GenReduceOp SOACS]
+                         -> [SOAC.GenReduceOp SOACS]
                          -> InKernelLambda
                          -> [VName]
                          -> KernelM KernelsStms
@@ -1296,8 +1297,8 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
   -- The input/output arrays _must_ correspond to some kernel input,
   -- or else the original nested GenReduce would have been ill-typed.
   -- Find them.
-  ops' <- forM ops $ \(GenReduceOp num_bins dests nes op) ->
-    GenReduceOp num_bins
+  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) ->
+    SOAC.GenReduceOp num_bins
     <$> mapM (fmap kernelInputArray . findInput inputs) dests
     <*> pure nes
     <*> pure op
@@ -1305,7 +1306,7 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
   -- the generated code may be ill-typed (referencing a consumed
   -- array).  They will not be used anywhere else (due to uniqueness
   -- constraints), so this is safe.
-  let all_dests = concatMap genReduceDest ops'
+  let all_dests = concatMap SOAC.genReduceDest ops'
   liftDistribM $ (nest_stms<>) <$>
     inScopeOf nest_stms
     (genReduceKernel path (kernelNestLoops $ removeArraysFromNest all_dests nest)
@@ -1316,20 +1317,20 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
 
 genReduceKernel :: KernelPath -> [LoopNesting]
                 -> Pattern -> [(VName, SubExp)] -> [KernelInput]
-                -> Certificates -> SubExp -> [GenReduceOp SOACS]
+                -> Certificates -> SubExp -> [SOAC.GenReduceOp SOACS]
                 -> InKernelLambda -> [VName]
                 -> DistribM KernelsStms
 genReduceKernel path nests orig_pat ispace inputs cs genred_w ops lam arrs = do
-  ops' <- forM ops $ \(GenReduceOp num_bins dests nes op) ->
-    GenReduceOp num_bins dests nes <$> Kernelise.transformLambda op
+  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) ->
+    SOAC.GenReduceOp num_bins dests nes <$> Kernelise.transformLambda op
 
-  let isDest = flip elem $ concatMap genReduceDest ops'
+  let isDest = flip elem $ concatMap SOAC.genReduceDest ops'
       inputs' = filter (not . isDest . kernelInputArray) inputs
 
   (histos, k_stms) <- blockedGenReduce genred_w ispace inputs' ops' lam arrs
 
-  let histos' = chunks (map (length . genReduceDest) ops') histos
-      pes = chunks (map (length . genReduceDest) ops') $ patternElements orig_pat
+  let histos' = chunks (map (length . SOAC.genReduceDest) ops') histos
+      pes = chunks (map (length . SOAC.genReduceDest) ops') $ patternElements orig_pat
 
   (fmap (certify cs) k_stms<>) . mconcat <$>
     inScopeOf k_stms (mapM combineIntermediateResults (zip3 pes ops histos'))
@@ -1370,7 +1371,7 @@ genReduceKernel path nests orig_pat ispace inputs cs genred_w ops lam arrs = do
 
           return (body_with_reshape, collapse_body)
 
-        combineIntermediateResults (pes, GenReduceOp num_bins _ nes op, histos) = do
+        combineIntermediateResults (pes, SOAC.GenReduceOp num_bins _ nes op, histos) = do
           num_histos <- arraysSize depth <$> mapM lookupType histos
 
           ((body_with_reshape, collapse_body), aux_stms) <- mkBodies num_histos pes num_bins nes op histos
