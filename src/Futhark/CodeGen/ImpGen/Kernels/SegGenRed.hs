@@ -35,7 +35,7 @@ compileSegGenRed (Pattern _ pes) space ops body = do
       total_w_64 = product space_sizes_64
 
   elems_per_thread_64 <- dPrimV "elems_per_thread_64" $
-                         ConvOpExp (SExt Int32 Int64) total_w_64 `quotRoundingUp`
+                         total_w_64 `quotRoundingUp`
                          ConvOpExp (SExt Int32 Int64) (kernelNumThreads constants)
 
   -- We need a separate lock array if the opterators are not all of a
