@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     inner size declarations has been closed (#714).  This follows a
     range of lesser empty-array fixes from 0.9.1.
 
+  * `futhark datacmp` now prints to stdout, not stderr.
+
 ## [0.9.1]
 
 ### Added
