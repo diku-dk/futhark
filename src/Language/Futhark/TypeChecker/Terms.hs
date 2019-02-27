@@ -28,6 +28,7 @@ import qualified Data.Set as S
 import Prelude hiding (mod)
 
 import Language.Futhark
+import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
 import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
@@ -347,6 +348,9 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
 checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkIntrinsic space qn@(QualName _ name) loc
   | Just v <- M.lookup (space, name) intrinsicsNameMap = do
+      me <- liftTypeM askImportName
+      unless ("/futlib" `isPrefixOf` includeToString me) $
+        warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
       scope <- ask
       return (scope, v)
   | otherwise =
