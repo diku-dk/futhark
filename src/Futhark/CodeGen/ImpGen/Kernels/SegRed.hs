@@ -300,6 +300,10 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
         ImpGen.copyDWIM (patElemName pe) gtids'
                         (Var arr) [(ltid+1) * segment_size - 1]
 
+      -- Finally another barrier, because we will be writing to the
+      -- local memory array first thing in the next iteration.
+      sOp Imp.LocalBarrier
+
 largeSegmentsReduction :: Pattern ExplicitMemory
                        -> KernelSpace
                        -> Commutativity -> Lambda InKernel -> [SubExp]
