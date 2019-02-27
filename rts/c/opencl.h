@@ -397,31 +397,29 @@ static void describe_device_option(struct opencl_device_option device) {
 }
 
 static cl_build_status build_opencl_program(cl_program program, cl_device_id device, const char* options) {
-  cl_int ret_val = clBuildProgram(program, 1, &device, options, NULL, NULL);
+  cl_int clBuildProgram_error = clBuildProgram(program, 1, &device, options, NULL, NULL);
 
   // Avoid termination due to CL_BUILD_PROGRAM_FAILURE
-  if (ret_val != CL_SUCCESS && ret_val != CL_BUILD_PROGRAM_FAILURE) {
-    assert(ret_val == 0);
+  if (clBuildProgram_error != CL_SUCCESS &&
+      clBuildProgram_error != CL_BUILD_PROGRAM_FAILURE) {
+    OPENCL_SUCCEED_FATAL(clBuildProgram_error);
   }
 
   cl_build_status build_status;
-  ret_val = clGetProgramBuildInfo(program,
-                                  device,
-                                  CL_PROGRAM_BUILD_STATUS,
-                                  sizeof(cl_build_status),
-                                  &build_status,
-                                  NULL);
-  assert(ret_val == 0);
+  OPENCL_SUCCEED_FATAL(clGetProgramBuildInfo(program,
+                                             device,
+                                             CL_PROGRAM_BUILD_STATUS,
+                                             sizeof(cl_build_status),
+                                             &build_status,
+                                             NULL));
 
   if (build_status != CL_SUCCESS) {
     char *build_log;
     size_t ret_val_size;
-    ret_val = clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &ret_val_size);
-    assert(ret_val == 0);
+    OPENCL_SUCCEED_FATAL(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &ret_val_size));
 
     build_log = malloc(ret_val_size+1);
-    clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, ret_val_size, build_log, NULL);
-    assert(ret_val == 0);
+    OPENCL_SUCCEED_FATAL(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, ret_val_size, build_log, NULL));
 
     // The spec technically does not say whether the build log is zero-terminated, so let's be careful.
     build_log[ret_val_size] = '\0';
@@ -578,7 +576,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   }
 
   cl_program prog;
-  error = 0;
+  error = CL_SUCCESS;
   const char* src_ptr[] = {fut_opencl_src};
 
   if (ctx->cfg.dump_program_to != NULL) {
@@ -590,7 +588,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
   if (ctx->cfg.load_binary_from == NULL) {
     prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
-    assert(error == 0);
+    OPENCL_SUCCEED_FATAL(error);
 
     int compile_opts_size = 1024;
     for (int i = 0; i < ctx->cfg.num_sizes; i++) {
@@ -669,13 +667,13 @@ static cl_program setup_opencl(struct opencl_context *ctx,
     0
   };
 
-  cl_int error;
+  cl_int clCreateContext_error;
+  ctx->ctx = clCreateContext(properties, 1, &device_option.device, NULL, NULL, &clCreateContext_error);
+  OPENCL_SUCCEED_FATAL(clCreateContext_error);
 
-  ctx->ctx = clCreateContext(properties, 1, &device_option.device, NULL, NULL, &error);
-  assert(error == 0);
-
-  cl_command_queue queue = clCreateCommandQueue(ctx->ctx, device_option.device, 0, &error);
-  assert(error == 0);
+  cl_int clCreateCommandQueue_error;
+  cl_command_queue queue = clCreateCommandQueue(ctx->ctx, device_option.device, 0, &clCreateCommandQueue_error);
+  OPENCL_SUCCEED_FATAL(clCreateCommandQueue_error);
 
   return setup_opencl_with_command_queue(ctx, queue, srcs, required_types);
 }
