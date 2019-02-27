@@ -463,9 +463,9 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
     addStms bnds
     letBind_ pat $ Op kernel
 
-transformStm path (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = do
+transformStm _ (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = do
   bfun' <- Kernelise.transformLambda bucket_fun
-  genReduceKernel path [] orig_pat [] [] cs w ops bfun' imgs
+  genReduceKernel orig_pat [] [] cs w ops bfun' imgs
 
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
@@ -1293,7 +1293,7 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
   (nest_stms, _, ispace, inputs, _rets) <- flatKernel nest
   let orig_pat = Pattern [] $ rearrangeShape perm $
                  patternValueElements $ loopNestingPattern $ fst nest
-  path <- asks kernelPath
+
   -- The input/output arrays _must_ correspond to some kernel input,
   -- or else the original nested GenReduce would have been ill-typed.
   -- Find them.
@@ -1302,120 +1302,39 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
     <$> mapM (fmap kernelInputArray . findInput inputs) dests
     <*> pure nes
     <*> pure op
-  -- We should also remove those from the kernel nest, as otherwise
-  -- the generated code may be ill-typed (referencing a consumed
-  -- array).  They will not be used anywhere else (due to uniqueness
-  -- constraints), so this is safe.
-  let all_dests = concatMap SOAC.genReduceDest ops'
   liftDistribM $ (nest_stms<>) <$>
     inScopeOf nest_stms
-    (genReduceKernel path (kernelNestLoops $ removeArraysFromNest all_dests nest)
-     orig_pat ispace inputs cs genred_w ops' lam arrs)
+    (genReduceKernel orig_pat ispace inputs cs genred_w ops' lam arrs)
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = fail "Ill-typed nested GenReduce encountered."
 
-genReduceKernel :: KernelPath -> [LoopNesting]
-                -> Pattern -> [(VName, SubExp)] -> [KernelInput]
+genReduceKernel :: Pattern -> [(VName, SubExp)] -> [KernelInput]
                 -> Certificates -> SubExp -> [SOAC.GenReduceOp SOACS]
                 -> InKernelLambda -> [VName]
                 -> DistribM KernelsStms
-genReduceKernel path nests orig_pat ispace inputs cs genred_w ops lam arrs = do
-  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) ->
-    SOAC.GenReduceOp num_bins dests nes <$> Kernelise.transformLambda op
+genReduceKernel orig_pat ispace inputs cs genred_w ops lam arrs = do
+  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) -> do
+    let (shape, op') = isVectorMap op
+    Out.GenReduceOp num_bins dests nes shape <$> Kernelise.transformLambda op'
 
-  let isDest = flip elem $ concatMap SOAC.genReduceDest ops'
+  let isDest = flip elem $ concatMap Out.genReduceDest ops'
       inputs' = filter (not . isDest . kernelInputArray) inputs
 
-  (histos, k_stms) <- blockedGenReduce genred_w ispace inputs' ops' lam arrs
+  k_stms <- blockedGenReduce orig_pat genred_w ispace inputs' ops' lam arrs
 
-  let histos' = chunks (map (length . SOAC.genReduceDest) ops') histos
-      pes = chunks (map (length . SOAC.genReduceDest) ops') $ patternElements orig_pat
+  return $ certify cs <$> k_stms
 
-  (fmap (certify cs) k_stms<>) . mconcat <$>
-    inScopeOf k_stms (mapM combineIntermediateResults (zip3 pes ops histos'))
-
-  where depth = length nests
-
-        mkBodies num_histos pes num_bins nes op histos = runBinder $ do
-          body_with_reshape <- runBodyBinder $
-            fmap resultBody $ forM histos $ \histo -> do
-              histo_dims <- arrayDims <$> lookupType histo
-              -- Drop the num_histos dimension dimension.
-              let final_dims = take depth histo_dims ++ drop (depth+1) histo_dims
-              letSubExp "histo_flattened" $ BasicOp $ Reshape (map DimNew final_dims) histo
-
-          -- Move the num_histos dimension innermost wrt. segments and bins.
-          histos_tr <- forM histos $ \h -> do
-            h_t <- lookupType h
-            let histo_perm = [0..depth-1] ++ [depth+1,depth] ++ [depth+2..arrayRank h_t-1]
-            letExp (baseString h <> "_tr") $ BasicOp $ Rearrange histo_perm h
-          histos_tr_t <- mapM lookupType histos_tr
-
-          op_renamed <- renameLambda op
-          map_params <- forM (lambdaReturnType op) $ \t ->
-            newParam "bin" $ t `arrayOfRow` num_histos
-          (map_res, map_stms) <- runBinder $ do
-            form <- reduceSOAC Commutative op_renamed nes
-            letTupExp "bin_combined" $ Op $
-              Screma num_histos form $ map paramName map_params
-          inner_segred_pat <- fmap (Pattern []) <$> forM pes $ \pe ->
-            PatElem <$> newVName "inner_segred" <*>
-            pure (stripArray depth $ patElemType pe)
-          nests' <-
-            moreArrays (map paramName map_params) histos_tr_t histos_tr $
-            nests ++ [MapNesting inner_segred_pat cs num_bins $ zip (lambdaParams lam) arrs]
-
-          let collapse_body = reconstructMapNest nests' (map (rowType . patElemType) pes) $
-                              mkBody map_stms $ map Var map_res
-
-          return (body_with_reshape, collapse_body)
-
-        combineIntermediateResults (pes, SOAC.GenReduceOp num_bins _ nes op, histos) = do
-          num_histos <- arraysSize depth <$> mapM lookupType histos
-
-          ((body_with_reshape, collapse_body), aux_stms) <- mkBodies num_histos pes num_bins nes op histos
-
-          segmented_reduce_stms <-
-            inScopeOf aux_stms $ transformStms path $ stmsToList $ bodyStms collapse_body
-
-          let body_with_segred = mkBody segmented_reduce_stms $
-                                 bodyResult collapse_body
-
-          runBinder_ $ do
-            addStms aux_stms
-
-            -- Avoid the segmented reduction if num_histos is 1.
-            num_histos_is_one <-
-              letSubExp "num_histos_is_one" $
-              BasicOp $ CmpOp (CmpEq int32) num_histos $ intConst Int32 1
-
-            letBindNames (map patElemName pes) $
-              If num_histos_is_one body_with_reshape body_with_segred $
-              IfAttr (staticShapes $ map patElemType pes) IfNormal
-
-reconstructMapNest :: [LoopNesting] -> [Type] -> BodyT SOACS -> BodyT SOACS
-reconstructMapNest [] _ body = body
-reconstructMapNest (MapNesting pat cs w ps_and_arrs : nests) ts body =
-  mkBody (oneStm $ Let pat (StmAux cs ()) $ Op $ Screma w (mapSOAC map_lam) arrs) $
-  map Var $ patternNames pat
-  where (ps, arrs) = unzip ps_and_arrs
-        map_lam = Lambda { lambdaReturnType = ts
-                         , lambdaParams = ps
-                         , lambdaBody = reconstructMapNest nests (map rowType ts) body
-                         }
-
-moreArrays :: MonadFreshNames m =>
-              [VName] -> [Type] -> [VName] -> [LoopNesting]
-           -> m [LoopNesting]
-moreArrays _ _ _ [] = return []
-moreArrays ps more_ts more_arrs (MapNesting pat cs w ps_and_arrs : nests) = do
-  ps' <- case nests of [] -> return $ zipWith Param ps row_ts
-                       _  -> zipWithM newParam (map baseString ps) row_ts
-  pat' <- renamePattern pat
-  let outer = MapNesting pat' cs w $ ps_and_arrs ++ zip ps' more_arrs
-  (outer:) <$> moreArrays ps row_ts (map paramName ps') nests
-  where row_ts = map rowType more_ts
+isVectorMap :: Lambda -> (Shape, Lambda)
+isVectorMap lam
+  | [Let (Pattern [] pes) _ (Op (Screma w form arrs))] <-
+      stmsToList $ bodyStms $ lambdaBody lam,
+    bodyResult (lambdaBody lam) == map (Var . patElemName) pes,
+    Just map_lam <- isMapSOAC form,
+    arrs == map paramName (lambdaParams lam) =
+      let (shape, lam') = isVectorMap map_lam
+      in (Shape [w] <> shape, lam')
+  | otherwise = (mempty, lam)
 
 segmentedScanomapKernel :: KernelNest
                         -> [Int]

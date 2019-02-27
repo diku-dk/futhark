@@ -36,6 +36,7 @@ module Futhark.Representation.Kernels.Kernel
        )
        where
 
+import Control.Arrow (first)
 import Control.Monad.Writer hiding (mapM_)
 import Control.Monad.Identity hiding (mapM_)
 import qualified Data.Set as S
@@ -80,13 +81,19 @@ data KernelDebugHints =
                    }
   deriving (Eq, Show, Ord)
 
-data GenReduceOp lore = GenReduceOp { genReduceWidth :: SubExp
-                                    , genReduceNumHistograms :: SubExp
-                                    , genReduceDest :: [VName]
-                                    , genReduceNeutral :: [SubExp]
-                                    , genReduceOp :: LambdaT lore
-                                    }
-                      deriving (Eq, Ord, Show)
+data GenReduceOp lore =
+  GenReduceOp { genReduceWidth :: SubExp
+              , genReduceDest :: [VName]
+              , genReduceNeutral :: [SubExp]
+              , genReduceShape :: Shape
+                -- ^ In case this operator is semantically a
+                -- vectorised operator (corresponding to a perfect map
+                -- nest in the SOACS representation), these are the
+                -- logical "dimensions".  This is used to generate
+                -- more efficient code.
+              , genReduceOp :: LambdaT lore
+              }
+  deriving (Eq, Ord, Show)
 
 data Kernel lore =
     GetSize Name SizeClass -- ^ Produce some runtime-configurable size.
@@ -216,11 +223,11 @@ mapKernelM tv (SegGenRed space ops ts body) =
   <*> mapM onGenRedOp ops
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
   <*> mapOnKernelBody tv body
-  where onGenRedOp (GenReduceOp w num_histos arrs nes op) =
+  where onGenRedOp (GenReduceOp w arrs nes shape op) =
           GenReduceOp <$> mapOnKernelSubExp tv w
-          <*> mapOnKernelSubExp tv num_histos
           <*> mapM (mapOnKernelVName tv) arrs
           <*> mapM (mapOnKernelSubExp tv) nes
+          <*> (Shape <$> mapM (mapOnKernelSubExp tv) (shapeDims shape))
           <*> mapOnKernelLambda tv op
 mapKernelM tv (Kernel desc space ts kernel_body) =
   Kernel <$> mapOnKernelDebugHints desc <*>
@@ -445,7 +452,7 @@ kernelType (SegRed space _ _ nes ts _) =
 
 kernelType (SegGenRed space ops _ _) = do
   op <- ops
-  let shape = Shape $ segment_dims <> [genReduceNumHistograms op, genReduceWidth op]
+  let shape = Shape (segment_dims <> [genReduceWidth op]) <> genReduceShape op
   map (`arrayOfShape` shape) (lambdaReturnType $ genReduceOp op)
   where dims = map snd $ spaceDimensions space
         segment_dims = init dims
@@ -638,23 +645,24 @@ typeCheckKernel (SegGenRed space ops ts body) = do
   mapM_ TC.checkType ts
 
   TC.binding (scopeOfKernelSpace space) $ do
-    forM_ ops $ \(GenReduceOp dest_w num_histos dests nes op) -> do
-      nes' <- mapM TC.checkArg nes
+    forM_ ops $ \(GenReduceOp dest_w dests nes shape op) -> do
       TC.require [Prim int32] dest_w
-      TC.require [Prim int32] num_histos
+      nes' <- mapM TC.checkArg nes
+      mapM_ (TC.require [Prim int32]) $ shapeDims shape
 
       -- Operator type must match the type of neutral elements.
-      TC.checkLambda op $ map TC.noArgAliases $ nes' ++ nes'
+      let stripVecDims = stripArray $ shapeRank shape
+      TC.checkLambda op $ map (TC.noArgAliases .first stripVecDims) $ nes' ++ nes'
       let nes_t = map TC.argType nes'
-      unless (nes_t == lambdaReturnType op) $
+      unless (nes_t == map (`arrayOfShape` shape) (lambdaReturnType op)) $
         TC.bad $ TC.TypeError $ "SegGenRed operator has return type " ++
         prettyTuple (lambdaReturnType op) ++ " but neutral element has type " ++
         prettyTuple nes_t
 
       -- Arrays must have proper type.
-      let shape = Shape $ segment_dims <> [num_histos, dest_w]
+      let dest_shape = Shape $ segment_dims <> [dest_w]
       forM_ (zip nes_t dests) $ \(t, dest) -> do
-        TC.requireI [t `arrayOfShape` shape] dest
+        TC.requireI [t `arrayOfShape` dest_shape] dest
         TC.consume =<< TC.lookupAliases dest
 
     TC.checkLambdaBody ts body
@@ -772,10 +780,12 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
     PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)) </>
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
     PP.nestedBlock "{" "}" (ppr body)
-    where ppOp (GenReduceOp w num_histos dests nes op) =
-            ppr w <> PP.comma <+> ppr num_histos <> PP.comma </>
+    where ppOp (GenReduceOp w dests nes shape op) =
+            ppr w <> PP.comma </>
             PP.braces (PP.commasep $ map ppr dests) <> PP.comma </>
-            PP.braces (PP.commasep $ map ppr nes) <> PP.comma </> ppr op
+            PP.braces (PP.commasep $ map ppr nes) <> PP.comma </>
+            ppr shape <> PP.comma </>
+            ppr op
 
 instance Pretty KernelSpace where
   ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size structure) =
