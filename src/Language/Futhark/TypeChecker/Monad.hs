@@ -6,6 +6,7 @@ module Language.Futhark.TypeChecker.Monad
   , runTypeM
   , askEnv
   , askRootEnv
+  , askImportName
   , localTmpEnv
   , checkQualNameWithEnv
   , bindSpaced
@@ -153,6 +154,10 @@ runTypeM env imports fpath src (TypeM m) = do
 askEnv, askRootEnv :: TypeM Env
 askEnv = asks contextEnv
 askRootEnv = asks contextRootEnv
+
+-- | The name of the current file/import.
+askImportName :: TypeM ImportName
+askImportName = asks contextImportName
 
 localTmpEnv :: Env -> TypeM a -> TypeM a
 localTmpEnv env = local $ \ctx ->

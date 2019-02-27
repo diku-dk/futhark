@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Using definitions from the `intrinsic` module outside the prelude
+    now results in a warning.
+
 ### Removed
 
   * The old `futhark-*` executables have been removed.
