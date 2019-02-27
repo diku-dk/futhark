@@ -78,9 +78,9 @@ module Futhark.CodeGen.ImpGen
   , sComment
   , sIf, sWhen, sUnless
   , sOp
-  , sAlloc
+  , sDeclareMem, sAlloc, sAlloc_
   , sArray, sAllocArray, sStaticArray
-  , sWrite
+  , sWrite, sUpdate
   , (<--)
   )
   where
@@ -675,11 +675,8 @@ defCompileBasicOp (Pattern _ [pe]) (Index src slice)
 defCompileBasicOp _ Index{} =
   return ()
 
-defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) = do
-  MemLocation mem shape ixfun <- entryArrayLocation <$> lookupArray (patElemName pe)
-  let memdest = sliceArray (MemLocation mem shape ixfun) $
-                map (fmap (compileSubExpOfType int32)) slice
-  copyDWIMDest (ArrayDestination $ Just memdest) [] se []
+defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) =
+  sUpdate (patElemName pe) (map (fmap (compileSubExpOfType int32)) slice) se
 
 defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM compileSubExp ds
@@ -1246,14 +1243,24 @@ dSize size =
             size_var <-- Imp.innerExp size
             return $ Imp.VarSize size_var
 
-sAlloc :: String -> Count Bytes -> Space -> ImpM lore op VName
-sAlloc name size space = do
+sDeclareMem :: String -> Count Bytes -> Space -> ImpM lore op (VName, Imp.MemSize)
+sDeclareMem name size space = do
+
   name' <- newVName name
   size' <- dSize size
   emit $ Imp.DeclareMem name' space
-  fake <- asks $ elem space . envFakeMemory
-  unless fake $ emit $ Imp.Allocate name' size space
   addVar name' $ MemVar Nothing $ MemEntry size' space
+  return (name', size')
+
+sAlloc_ :: VName -> Imp.MemSize -> Space -> ImpM lore op ()
+sAlloc_ name' size' space = do
+  fake <- asks $ elem space . envFakeMemory
+  unless fake $ emit $ Imp.Allocate name' (Imp.memSizeToExp size') space
+
+sAlloc :: String -> Count Bytes -> Space -> ImpM lore op VName
+sAlloc name size space = do
+  (name', size') <- sDeclareMem name size space
+  sAlloc_ name' size' space
   return name'
 
 sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName
@@ -1288,6 +1295,12 @@ sWrite arr is v = do
   (mem, space, offset) <- fullyIndexArray arr is
   vol <- asks envVolatility
   emit $ Imp.Write mem offset (primExpType v) space vol v
+
+sUpdate :: VName -> Slice Imp.Exp -> SubExp -> ImpM lore op ()
+sUpdate arr slice v = do
+  MemLocation mem shape ixfun <- entryArrayLocation <$> lookupArray arr
+  let memdest = sliceArray (MemLocation mem shape ixfun) slice
+  copyDWIMDest (ArrayDestination $ Just memdest) [] v []
 
 -- | ASsignment.
 (<--) :: VName -> Imp.Exp -> ImpM lore op ()

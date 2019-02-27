@@ -107,17 +107,17 @@ simplifyKernelOp mk_ops env (SegGenRed space ops ts body) = do
   ts' <- mapM Engine.simplify ts
 
   (ops', ops_hoisted) <- fmap unzip $ forM ops $
-    \(GenReduceOp w num_histos arrs nes lam) -> do
+    \(GenReduceOp w arrs nes dims lam) -> do
       w' <- Engine.simplify w
-      num_histos' <- Engine.simplify num_histos
       arrs' <- Engine.simplify arrs
       nes' <- Engine.simplify nes
+      dims' <- Engine.simplify dims
       (lam', op_hoisted) <-
         Engine.subSimpleM (mk_ops space) env outer_vtable $
         Engine.localVtable (<>scope_vtable) $
         Engine.simplifyLambda lam $
         replicate (length nes * 2) Nothing
-      return (GenReduceOp w' num_histos' arrs' nes' lam',
+      return (GenReduceOp w' arrs' nes' dims' lam',
               op_hoisted)
 
   red_op_hoisted' <- mapM processHoistedStm $ mconcat ops_hoisted

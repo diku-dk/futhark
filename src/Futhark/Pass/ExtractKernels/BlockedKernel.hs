@@ -358,15 +358,15 @@ blockedReduction pat w comm reduce_lam map_lam ispace nes arrs = runBinder_ $ do
     ispace nes (arrs ++ map_out_arrs)
 
 blockedGenReduce :: (MonadFreshNames m, HasScope Kernels m) =>
-                    SubExp
+                    Pattern Kernels
+                 -> SubExp
                  -> [(VName,SubExp)] -- ^ Segment indexes and sizes.
                  -> [KernelInput]
-                 -> [SOAC.GenReduceOp InKernel]
+                 -> [GenReduceOp InKernel]
                  -> Lambda InKernel -> [VName]
-                 -> m ([VName], Stms Kernels)
-blockedGenReduce arr_w ispace inps ops lam arrs = runBinder $ do
+                 -> m (Stms Kernels)
+blockedGenReduce pat arr_w ispace inps ops lam arrs = runBinder_ $ do
   let (_, segment_sizes) = unzip ispace
-      depth = length ispace
   arr_w_64 <- letSubExp "arr_w_64" =<< eConvOp (SExt Int32 Int64) (toExp arr_w)
   segment_sizes_64 <- mapM (letSubExp "segment_size_64" <=< eConvOp (SExt Int32 Int64) . toExp) segment_sizes
   total_w <- letSubExp "genreduce_elems" =<< foldBinOp (Mul Int64) arr_w_64 segment_sizes_64
@@ -376,46 +376,6 @@ blockedGenReduce arr_w ispace inps ops lam arrs = runBinder $ do
   gtid <- newVName "gtid"
   kspace <- newKernelSpace (num_groups, group_size, num_threads) $
             FlatThreadSpace $ ispace ++ [(gtid, arr_w)]
-  let nthreads = spaceNumThreads kspace
-
-  -- Determining the degree of cooperation (heuristic):
-  -- coop_lvl   := size of histogram (Cooperation level)
-  -- num_histos := (threads / coop_lvl) (Number of histograms)
-  -- threads    := min(physical_threads, segment_size)
-  ops' <- forM ops $ \(SOAC.GenReduceOp w dests nes op) -> do
-    num_histos <- letSubExp "num_histos" =<< eDivRoundingUp Int32 (eSubExp nthreads)
-                  (foldBinOp (Mul Int32) w segment_sizes)
-
-    -- Initialize sub-histograms.
-    --
-    -- If num_histos is 1, then we just reuse the original
-    -- destination.  The idea is to avoid a copy if we are writing a
-    -- small number of values into a very large prior histogram.  This
-    -- only works if neither the Reshape nor the If results in a copy.
-    let num_histos_is_one = BasicOp $ CmpOp (CmpEq int32) num_histos $ intConst Int32 1
-
-        reuse_dest =
-          fmap resultBody $ forM dests $ \dest -> do
-            (segment_dims, hist_dims) <- splitAt depth . arrayDims <$> lookupType dest
-            letSubExp "sub_histo" $ BasicOp $
-              Reshape (map DimNew $ segment_dims ++ num_histos : hist_dims) dest
-
-        make_subhistograms =
-          -- To incorporate the original values of the genreduce target, we
-          -- copy those values to the first subhistogram here.
-          fmap resultBody $ forM (zip nes dests) $ \(ne, dest) -> do
-            blank <- letExp "sub_histo_blank" $
-              BasicOp $ Replicate (Shape $ segment_sizes ++ [num_histos, w]) ne
-            let (zero, one) = (intConst Int32 0, intConst Int32 1)
-            slice <- fullSlice <$> lookupType blank <*>
-                     pure (map (flip (DimSlice zero) one) segment_sizes ++ [DimFix zero])
-            letSubExp "sub_histo" $ BasicOp $ Update blank slice $ Var dest
-
-    histo_dests <-
-      letTupExp "histo_dests" =<<
-      eIf (pure num_histos_is_one) reuse_dest make_subhistograms
-
-    return $ GenReduceOp w num_histos histo_dests nes op
 
   body <- runBodyBinder $ localScope (scopeOfKernelSpace kspace) $ do
     mapM_ (addStm <=< readKernelInput) inps
@@ -425,7 +385,7 @@ blockedGenReduce arr_w ispace inps ops lam arrs = runBinder $ do
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
     return $ lambdaBody lam
 
-  letTupExp "histograms" $ Op $ SegGenRed kspace ops' (lambdaReturnType lam) body
+  letBind_ pat $ Op $ SegGenRed kspace ops (lambdaReturnType lam) body
 
 blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
               Pattern Kernels -> SubExp
