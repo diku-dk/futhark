@@ -129,8 +129,8 @@ unitSegmentsReduction (Pattern _ segred_pes) space nes body = do
     init_constants
     virtualiseGroups constants required_groups $ \group_id -> do
       setSpaceIndices (group_id * kernelGroupSize constants + kernelLocalThreadId constants) space
-      ImpGen.compileStms mempty (stmsToList $ bodyStms body) $
-        sWhen (kernelThreadActive constants) $ do
+      sWhen (kernelThreadActive constants) $
+        ImpGen.compileStms mempty (stmsToList $ bodyStms body) $ do
         let (redout_ses, mapout_ses) = splitAt (length nes) $ bodyResult body
         forM_ (zip redout_pes redout_ses) $ \(pe, se) ->
           ImpGen.copyDWIM (patElemName pe)
