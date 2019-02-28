@@ -255,10 +255,8 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
       last gtids <-- index_within_segment
 
       let toLocalMemory ses =
-            forM_ (zip red_arrs ses) $ \(arr, se) -> do
-            se_t <- subExpType se
-            when (primType se_t) $
-              ImpGen.copyDWIM arr [ltid] se []
+            forM_ (zip red_arrs ses) $ \(arr, se) ->
+            ImpGen.copyDWIM arr [ltid] se []
 
           in_bounds =
             ImpGen.compileStms mempty (stmsToList $ bodyStms body) $ do
