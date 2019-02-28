@@ -103,11 +103,11 @@ instance Pretty KernelConst where
 
 instance Pretty KernelUse where
   ppr (ScalarUse name t) =
-    text "scalar_copy" <> parens (commasep [ppr name, ppr t])
+    oneLine $ text "scalar_copy" <> parens (commasep [ppr name, ppr t])
   ppr (MemoryUse name) =
-    text "mem_copy" <> parens (commasep [ppr name])
+    oneLine $ text "mem_copy" <> parens (commasep [ppr name])
   ppr (ConstUse name e) =
-    text "const" <> parens (commasep [ppr name, ppr e])
+    oneLine $ text "const" <> parens (commasep [ppr name, ppr e])
 
 instance Pretty HostOp where
   ppr (GetSize dest key size_class) =
