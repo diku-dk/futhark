@@ -161,7 +161,7 @@ type Allocate op s = C.Exp -> C.Exp -> C.Exp -> SpaceId
 type Deallocate op s = C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
 
 -- | Create a static array of values - initialised at load time.
-type StaticArray op s = VName -> SpaceId -> PrimType -> [PrimValue] -> CompilerM op s ()
+type StaticArray op s = VName -> SpaceId -> PrimType -> ArrayContents -> CompilerM op s ()
 
 -- | Copy from one memory block to another.
 type Copy op s = C.Exp -> C.Exp -> Space ->
@@ -1805,10 +1805,14 @@ compileCode (DeclareScalar name t) = do
   decl [C.cdecl|$ty:ct $id:name;|]
 
 compileCode (DeclareArray name DefaultSpace t vs) = do
-  let ct = primTypeToCType t
-      vs' = [[C.cinit|$exp:(compilePrimValue v)|] | v <- vs]
   name_realtype <- newVName $ baseString name ++ "_realtype"
-  libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs)] = {$inits:vs'};|]
+  let ct = primTypeToCType t
+  case vs of
+    ArrayValues vs' -> do
+      let vs'' = [[C.cinit|$exp:(compilePrimValue v)|] | v <- vs']
+      libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
+    ArrayZeros n ->
+      libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.
   contextField (pretty name)
     [C.cty|struct memblock|] $

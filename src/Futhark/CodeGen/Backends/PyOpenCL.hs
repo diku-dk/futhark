@@ -216,14 +216,22 @@ staticOpenCLArray :: Py.StaticArray Imp.OpenCL ()
 staticOpenCLArray name "device" t vs = do
   mapM_ Py.atInit <=< Py.collect $ do
     -- Create host-side Numpy array with intended values.
-    Py.stm $ Assign (Var name') $
-      Call (Var "np.array")
-      [Arg $ List $ map Py.compilePrimValue vs,
-       ArgKeyword "dtype" $ Var $ Py.compilePrimToNp t]
+    Py.stm $ Assign (Var name') $ case vs of
+      Imp.ArrayValues vs' ->
+        Call (Var "np.array")
+        [Arg $ List $ map Py.compilePrimValue vs',
+         ArgKeyword "dtype" $ Var $ Py.compilePrimToNp t]
+      Imp.ArrayZeros n ->
+        Call (Var "np.zeros")
+        [Arg $ Integer $ fromIntegral n,
+         ArgKeyword "dtype" $ Var $ Py.compilePrimToNp t]
+
+    let num_elems = case vs of Imp.ArrayValues vs' -> length vs'
+                               Imp.ArrayZeros n -> n
 
     -- Create memory block on the device.
     static_mem <- newVName "static_mem"
-    let size = Integer $ fromIntegral (length vs) * Imp.primByteSize t
+    let size = Integer $ toInteger num_elems * Imp.primByteSize t
     allocateOpenCLBuffer static_mem size "device"
 
     -- Copy Numpy array to the device memory block.

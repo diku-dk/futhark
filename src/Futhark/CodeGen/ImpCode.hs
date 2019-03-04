@@ -34,6 +34,7 @@ module Futhark.CodeGen.ImpCode
   , index
   , ErrorMsg(..)
   , ErrorMsgPart(..)
+  , ArrayContents(..)
 
     -- * Typed enumerations
   , Count (..)
@@ -137,13 +138,22 @@ data FunctionT a = Function { functionEntry :: Bool
 -- | Type alias for namespace control.
 type Function = FunctionT
 
+-- | The contents of a statically declared constant array.  Such
+-- arrays are always unidimensional, and reshaped if necessary in the
+-- code that uses them.
+data ArrayContents = ArrayValues [PrimValue]
+                     -- ^ Precisely these values.
+                   | ArrayZeros Int
+                     -- ^ This many zeroes.
+                     deriving (Show)
+
 data Code a = Skip
             | Code a :>>: Code a
             | For VName IntType Exp (Code a)
             | While Exp (Code a)
             | DeclareMem VName Space
             | DeclareScalar VName PrimType
-            | DeclareArray VName Space PrimType [PrimValue]
+            | DeclareArray VName Space PrimType ArrayContents
               -- ^ Create an array containing the given values.  The
               -- lifetime of the array will be the entire application.
               -- This is mostly used for constant arrays, but also for
@@ -295,6 +305,10 @@ instance Pretty Size where
   ppr (ConstSize x) = ppr x
   ppr (VarSize v)   = ppr v
 
+instance Pretty ArrayContents where
+  ppr (ArrayValues vs) = braces (commasep $ map ppr vs)
+  ppr (ArrayZeros n) = braces (text "0") <+> text "*" <+> ppr n
+
 instance Pretty op => Pretty (Code op) where
   ppr (Op op) = ppr op
   ppr Skip   = text "skip"
@@ -313,7 +327,7 @@ instance Pretty op => Pretty (Code op) where
     text "var" <+> ppr name <> text ":" <+> ppr t
   ppr (DeclareArray name space t vs) =
     text "array" <+> ppr name <> text "@" <> ppr space <+> text ":" <+> ppr t <+>
-    equals <+> braces (commasep $ map ppr vs)
+    equals <+> ppr vs
   ppr (Allocate name e space) =
     ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
   ppr (Free name space) =

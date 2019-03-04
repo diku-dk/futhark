@@ -736,7 +736,7 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
       dest_space <- entryMemSpace <$> lookupMemory (memLocationName dest_mem)
       let t = primValueType v
       static_array <- newVName "static_array"
-      emit $ Imp.DeclareArray static_array dest_space t vs
+      emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
       let static_src = MemLocation static_array [Imp.ConstSize $ fromIntegral $ length es] $
                        IxFun.iota [fromIntegral $ length es]
           num_bytes = Imp.ConstSize $ fromIntegral (length es) * primByteSize t
@@ -1237,15 +1237,19 @@ sUnless cond = sIf cond (return ())
 sOp :: op -> ImpM lore op ()
 sOp = emit . Imp.Op
 
+dSize :: Imp.Count u -> ImpM lore op Imp.Size
+dSize size =
+  case Imp.innerExp size of
+    Imp.LeafExp (Imp.ScalarVar size') _ -> return $ Imp.VarSize size'
+    Imp.ValueExp (IntValue (Int64Value v)) -> return $ Imp.ConstSize v
+    _ -> do size_var <- dPrim "local_buf_size" int32
+            size_var <-- Imp.innerExp size
+            return $ Imp.VarSize size_var
+
 sAlloc :: String -> Count Bytes -> Space -> ImpM lore op VName
 sAlloc name size space = do
   name' <- newVName name
-  size' <- case Imp.innerExp size of
-             Imp.LeafExp (Imp.ScalarVar size') _ -> return $ Imp.VarSize size'
-             Imp.ValueExp (IntValue (Int64Value v)) -> return $ Imp.ConstSize v
-             _ -> do size_var <- dPrim "local_buf_size" int32
-                     size_var <-- Imp.innerExp size
-                     return $ Imp.VarSize size_var
+  size' <- dSize size
   emit $ Imp.DeclareMem name' space
   fake <- asks $ elem space . envFakeMemory
   unless fake $ emit $ Imp.Allocate name' size space
@@ -1268,15 +1272,16 @@ sAllocArray name pt shape space = do
     ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
 
 -- | Uses linear/iota index function.
-sStaticArray :: String -> Space -> PrimType -> [PrimValue] -> ImpM lore op VName
+sStaticArray :: String -> Space -> PrimType -> Imp.ArrayContents -> ImpM lore op VName
 sStaticArray name space pt vs = do
-  let shape = Shape [constant $ length vs]
-      size = Imp.ConstSize $ fromIntegral (length vs) * primByteSize pt
+  let num_elems = case vs of Imp.ArrayValues vs' -> genericLength vs'
+                             Imp.ArrayZeros n -> fromIntegral n
+      shape = Shape [constant num_elems]
+      mem_size = Imp.ConstSize $ num_elems * primByteSize pt
   mem <- newVName $ name ++ "_mem"
   emit $ Imp.DeclareArray mem space pt vs
-  addVar mem $ MemVar Nothing $ MemEntry size space
-  sArray name pt shape $
-    ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
+  addVar mem $ MemVar Nothing $ MemEntry mem_size space
+  sArray name pt shape $ ArrayIn mem $ IxFun.iota [fromIntegral num_elems]
 
 sWrite :: VName -> [Imp.Exp] -> PrimExp Imp.ExpLeaf -> ImpM lore op ()
 sWrite arr is v = do
