@@ -143,7 +143,7 @@ data CSExp = Integer Integer
            | Call CSExp [CSArg]
            | CallMethod CSExp CSExp [CSArg]
            | CreateObject CSExp [CSArg]
-           | CreateArray CSType Int [CSExp]
+           | CreateArray CSType (Either Int [CSExp])
            | CreateSystemTuple [CSExp]
            | AllocArray CSType CSExp
            | Cast CSType CSExp
@@ -182,7 +182,8 @@ instance Pretty CSExp where
   ppr (Call fun args) = ppr fun <> parens(commasep $ map ppr args)
   ppr (CallMethod obj method args) = ppr obj <> dot <> ppr method <> parens(commasep $ map ppr args)
   ppr (CreateObject className args) = text "new" <+> ppr className <> parens(commasep $ map ppr args)
-  ppr (CreateArray t n vs) = text "new" <+> ppr t <> brackets (ppr n) <+> braces(commasep $ map ppr vs)
+  ppr (CreateArray t (Left n)) = text "new" <+> ppr t <> brackets (ppr n)
+  ppr (CreateArray t (Right vs)) = text "new" <+> ppr t <> text "[]" <+> braces(commasep $ map ppr vs)
   ppr (CreateSystemTuple exps) = text "Tuple.Create" <> parens(commasep $ map ppr exps)
   ppr (Tuple exps) = parens(commasep $ map ppr exps)
   ppr (Array exps) = braces(commasep $ map ppr exps) -- uhoh is this right?
