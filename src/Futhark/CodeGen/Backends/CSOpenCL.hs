@@ -339,9 +339,9 @@ staticOpenCLArray name "device" t vs = do
   let t' = CS.compilePrimTypeToAST t
   CS.staticMemDecl $ AssignTyped (Composite $ ArrayT t') (Var tmp_arr) $ Just $
     case vs of Imp.ArrayValues vs' ->
-                 CreateArray (CS.compilePrimTypeToAST t) (length vs') (map CS.compilePrimValue vs')
+                 CreateArray (CS.compilePrimTypeToAST t) $ Right $ map CS.compilePrimValue vs'
                Imp.ArrayZeros n ->
-                 CreateArray (CS.compilePrimTypeToAST t) n []
+                 CreateArray (CS.compilePrimTypeToAST t) $ Left n
 
   -- Create memory block on the device.
   ptr <- newVName' "ptr"
@@ -381,7 +381,7 @@ packArrayOutput mem "device" bt ept dims = do
   let createTuple = "createTuple_"++ pretty bt'
 
   return $ CS.simpleCall createTuple [ memblockFromMem mem, Var "Ctx.OpenCL.Queue", nbytes
-                                     , CreateArray (Primitive $ CSInt Int64T) (length dims') dims']
+                                     , CreateArray (Primitive $ CSInt Int64T) $ Right dims']
   where dims' = map CS.compileDim dims
 
 packArrayOutput _ sid _ _ _ =

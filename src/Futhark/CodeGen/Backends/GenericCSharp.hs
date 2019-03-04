@@ -644,7 +644,7 @@ entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) =
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ Imp.DefaultSpace bt ept dims)) = do
   let src = Var $ compileName mem
   let createTuple = "createTuple_" ++ compilePrimTypeExt bt ept
-  return $ simpleCall createTuple [src, CreateArray (Primitive $ CSInt Int64T) (length dims) $ map compileDim dims]
+  return $ simpleCall createTuple [src, CreateArray (Primitive $ CSInt Int64T) $ Right $ map compileDim dims]
 
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ (Imp.Space sid) bt ept dims)) = do
   unRefMem mem (Imp.Space sid)
@@ -804,7 +804,7 @@ printStm (Imp.ArrayValue _ _ _ _ _ []) ind e = do
 printStm (Imp.ArrayValue mem memsize space bt ept (outer:shape)) ind e = do
   ptr <- newVName "shapePtr"
   first <- newVName "printFirst"
-  let size = callMethod (CreateArray (Primitive $ CSInt Int32T) (1+length shape) $ map compileDim $ outer:shape)
+  let size = callMethod (CreateArray (Primitive $ CSInt Int32T) $ Right $ map compileDim $ outer:shape)
                  "Aggregate" [ Integer 1
                              , Lambda (Tuple [Var "acc", Var "val"])
                                       [Exp $ BinOp "*" (Var "acc") (Var "val")]
@@ -1258,9 +1258,9 @@ compileCode (Imp.DeclareArray name DefaultSpace t vs) =
         simpleCall "unwrapArray"
          [
            case vs of Imp.ArrayValues vs' ->
-                        CreateArray (compilePrimTypeToAST t) (length vs') (map compilePrimValue vs')
+                        CreateArray (compilePrimTypeToAST t) $ Right $ map compilePrimValue vs'
                       Imp.ArrayZeros n ->
-                        CreateArray (compilePrimTypeToAST t) n []
+                        CreateArray (compilePrimTypeToAST t) $ Left n
          , simpleCall "sizeof" [Var $ compilePrimType t]
          ]
        , Assign (Var name') $ Var ("init_"++name')
