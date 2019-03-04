@@ -91,7 +91,7 @@ type Copy op s = VName -> PyExp -> Imp.Space ->
                  CompilerM op s ()
 
 -- | Create a static array of values - initialised at load time.
-type StaticArray op s = VName -> Imp.SpaceId -> PrimType -> [PrimValue] -> CompilerM op s ()
+type StaticArray op s = VName -> Imp.SpaceId -> PrimType -> Imp.ArrayContents -> CompilerM op s ()
 
 -- | Construct the Python array being returned from an entry point.
 type EntryOutput op s = VName -> Imp.SpaceId ->
@@ -879,9 +879,15 @@ compileCode (Imp.DeclareArray name DefaultSpace t vs) = do
   -- to prevent it from going "out-of-scope" before calling
   -- unwrapArray (which internally uses the .ctype method); see
   -- https://docs.scipy.org/doc/numpy/reference/generated/numpy.ndarray.ctypes.html
-  atInit $ Assign (Field (Var "self") arr_name) $ Call (Var "np.array")
-    [Arg $ List $ map compilePrimValue vs,
-     ArgKeyword "dtype" $ Var $ compilePrimToNp t]
+  atInit $ Assign (Field (Var "self") arr_name) $ case vs of
+    Imp.ArrayValues vs' ->
+      Call (Var "np.array")
+      [Arg $ List $ map compilePrimValue vs',
+       ArgKeyword "dtype" $ Var $ compilePrimToNp t]
+    Imp.ArrayZeros n ->
+      Call (Var "np.zeros")
+      [Arg $ Integer $ fromIntegral n,
+       ArgKeyword "dtype" $ Var $ compilePrimToNp t]
   atInit $
     Assign (Field (Var "self") name') $
     simpleCall "unwrapArray" [Field (Var "self") arr_name]

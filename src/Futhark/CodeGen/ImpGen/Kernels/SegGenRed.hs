@@ -123,6 +123,6 @@ prepareAtomicUpdate l op =
       let num_locks = 1000
       locks <-
         ImpGen.sStaticArray "genred_locks" (Space "device") int32 $
-        replicate num_locks $ IntValue $ Int32Value 0
+        Imp.ArrayZeros num_locks
       let l' = Locking locks 0 1 0 (`rem` fromIntegral num_locks)
       return (Just l', f l' $ genReduceDest op)

@@ -166,7 +166,7 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
 
   counter <-
     ImpGen.sStaticArray "counter" (Space "device") int32 $
-    replicate 1 $ IntValue $ Int32Value 0
+    Imp.ArrayValues $ replicate 1 $ IntValue $ Int32Value 0
 
   group_res_arrs <- forM (lambdaReturnType red_op) $ \t -> do
     let pt = elemType t
@@ -370,7 +370,7 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
   let num_counters = 1024
   counter <-
     ImpGen.sStaticArray "counter" (Space "device") int32 $
-    replicate num_counters $ IntValue $ Int32Value 0
+    Imp.ArrayZeros num_counters
 
   sync_arr <- ImpGen.sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 

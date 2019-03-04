@@ -337,11 +337,17 @@ staticOpenCLArray name "device" t vs = do
   -- Create host-side C# array with intended values.
   tmp_arr <- newVName' "tmpArr"
   let t' = CS.compilePrimTypeToAST t
-  CS.staticMemDecl $ AssignTyped (Composite $ ArrayT t') (Var tmp_arr) (Just $ CreateArray t' $ map CS.compilePrimValue vs)
+  CS.staticMemDecl $ AssignTyped (Composite $ ArrayT t') (Var tmp_arr) $ Just $
+    case vs of Imp.ArrayValues vs' ->
+                 CreateArray (CS.compilePrimTypeToAST t) (length vs') (map CS.compilePrimValue vs')
+               Imp.ArrayZeros n ->
+                 CreateArray (CS.compilePrimTypeToAST t) n []
 
   -- Create memory block on the device.
   ptr <- newVName' "ptr"
-  let size = Integer $ genericLength vs * Imp.primByteSize t
+  let num_elems = case vs of Imp.ArrayValues vs' -> length vs'
+                             Imp.ArrayZeros n -> n
+      size = Integer $ toInteger num_elems * Imp.primByteSize t
 
   CS.staticMemAlloc $ Reassign (Var name') (CS.simpleCall "EmptyMemblock" [Var "Ctx.EMPTY_MEM_HANDLE"])
   errcode <- CS.compileName <$> newVName "errCode"
@@ -375,7 +381,7 @@ packArrayOutput mem "device" bt ept dims = do
   let createTuple = "createTuple_"++ pretty bt'
 
   return $ CS.simpleCall createTuple [ memblockFromMem mem, Var "Ctx.OpenCL.Queue", nbytes
-                                     , CreateArray (Primitive $ CSInt Int64T) dims']
+                                     , CreateArray (Primitive $ CSInt Int64T) (length dims') dims']
   where dims' = map CS.compileDim dims
 
 packArrayOutput _ sid _ _ _ =
