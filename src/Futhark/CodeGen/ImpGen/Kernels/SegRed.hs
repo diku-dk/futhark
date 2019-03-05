@@ -98,47 +98,9 @@ compileSegRed pat space comm red_op nes body
         ImpGen.compileSubExp $ last $ map snd $ spaceDimensions space
       group_size <- ImpGen.compileSubExp $ spaceGroupSize space
       let use_small_segments = segment_size * 2 .<. group_size
-      sIf (segment_size .==. 1)
-        (unitSegmentsReduction pat space nes body) $
-        sIf use_small_segments
+      sIf use_small_segments
         (smallSegmentsReduction pat space red_op nes body)
         (largeSegmentsReduction pat space comm red_op nes body)
-
--- Handle degenerate case where segments are of size 1, meaning
--- that it is really just a 'map' in disguise.
-unitSegmentsReduction :: Pattern ExplicitMemory
-                      -> KernelSpace
-                      -> [SubExp]
-                      -> Body InKernel
-                      -> CallKernelGen ()
-unitSegmentsReduction (Pattern _ segred_pes) space nes body = do
-  (constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
-
-  let (gtids, dims) = unzip $ spaceDimensions space
-      (redout_pes, mapout_pes) = splitAt (length nes) segred_pes
-
-  dims' <- mapM ImpGen.compileSubExp dims
-
-  let num_segments = product $ init dims'
-      required_groups = num_segments `quotRoundingUp` kernelGroupSize constants
-
-  ImpGen.emit $ Imp.DebugPrint "num_segments" int32 num_segments
-  ImpGen.emit $ Imp.DebugPrint "required_groups" int32 required_groups
-
-  sKernel constants "segred_mapseg" $ do
-    init_constants
-    virtualiseGroups constants required_groups $ \group_id -> do
-      setSpaceIndices (group_id * kernelGroupSize constants + kernelLocalThreadId constants) space
-      sWhen (kernelThreadActive constants) $
-        ImpGen.compileStms mempty (stmsToList $ bodyStms body) $ do
-        let (redout_ses, mapout_ses) = splitAt (length nes) $ bodyResult body
-        forM_ (zip redout_pes redout_ses) $ \(pe, se) ->
-          ImpGen.copyDWIM (patElemName pe)
-          (map (`Imp.var` int32) (init gtids)) se []
-
-        forM_ (zip mapout_pes mapout_ses) $ \(pe, se) ->
-          ImpGen.copyDWIM (patElemName pe)
-          (map (`Imp.var` int32) gtids) se []
 
 nonsegmentedReduction :: Pattern ExplicitMemory
                       -> KernelSpace
