@@ -429,6 +429,8 @@ reductionStageOne constants (Pattern _ segred_pes) num_elements global_tid elems
 
         groupReduce constants (kernelGroupSize constants) red_op_renamed red_arrs
 
+        sOp Imp.LocalBarrier
+
   i <- newVName "i"
   -- If this is a non-commutative reduction, each thread must run the
   -- loop the same number of iterations, because we will be performing
