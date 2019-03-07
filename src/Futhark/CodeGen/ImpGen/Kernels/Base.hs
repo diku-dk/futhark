@@ -19,6 +19,9 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , groupScan
   , isActive
   , sKernel
+  , sReplicate
+  , sIota
+  , sCopy
 
   , atomicUpdate
   , atomicUpdateLocking
@@ -35,7 +38,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List
 
-import Prelude hiding (quot)
+import Prelude hiding (quot, rem)
 
 import Futhark.Error
 import Futhark.MonadFreshNames
@@ -50,7 +53,7 @@ import Futhark.CodeGen.ImpGen ((<--),
                                dPrim, dPrim_, dPrimV)
 import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralExp)
-import Futhark.Util (splitAt3, maybeNth)
+import Futhark.Util (splitAt3, maybeNth, takeLast)
 
 type CallKernelGen = ImpGen.ImpM ExplicitMemory Imp.HostOp
 type InKernelGen = ImpGen.ImpM InKernel Imp.KernelOp
@@ -276,12 +279,17 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   -- Check if bucket is in-bounds
   bucket' <- mapM ImpGen.compileSubExp bucket
   w' <- mapM ImpGen.compileSubExp w
-  sWhen (indexInBounds bucket' w') $
-    atomicUpdate arrs bucket op values locking
+  num_locks <- ImpGen.compileSubExpOfType int32 . arraySize 0 <$> lookupType locks
+  let locking = Locking locks 0 1 0 $ (`rem` num_locks) . sum
+      values_params = takeLast (length values) $ lambdaParams op
+
+  sWhen (indexInBounds bucket' w') $ do
+    forM_ (zip values_params values) $ \(p, v) ->
+      ImpGen.copyDWIM (paramName p) [] v []
+    atomicUpdate arrs bucket' op locking
   where indexInBounds inds bounds =
           foldl1 (.&&.) $ zipWith checkBound inds bounds
           where checkBound ind bound = 0 .<=. ind .&&. ind .<. bound
-        locking = Locking locks 0 1 0 id
 
 compileKernelExp _ dest e =
   compilerBugS $ unlines ["Invalid target", "  " ++ show dest,
@@ -304,23 +312,24 @@ data Locking =
             -- ^ What to write when we lock it.
           , lockingToUnlock :: Imp.Exp
             -- ^ What to write when we unlock it.
-          , lockingMapping :: Imp.Exp -> Imp.Exp
+          , lockingMapping :: [Imp.Exp] -> Imp.Exp
             -- ^ A transformation from the logical lock index to the
-            -- physical position in the array.  This can be used to
-            -- make the lock array smaller.
+            -- physical position in the array.  This can also be used
+            -- to make the lock array smaller.
           }
 
--- | A function for generating code for an atomic update.
+-- | A function for generating code for an atomic update.  Assumes
+-- that the bucket is in-bounds.
 type AtomicUpdate lore =
-  [VName] -> [SubExp] -> [SubExp] -> ImpGen.ImpM lore Imp.KernelOp ()
+  [VName] -> [Imp.Exp] -> ImpGen.ImpM lore Imp.KernelOp ()
 
 atomicUpdate :: ExplicitMemorish lore =>
-                [VName] -> [SubExp] -> Lambda lore -> [SubExp] -> Locking
+                [VName] -> [Imp.Exp] -> Lambda lore -> Locking
              -> ImpGen.ImpM lore Imp.KernelOp ()
-atomicUpdate arrs bucket lam values locking =
+atomicUpdate arrs bucket lam locking =
   case atomicUpdateLocking lam of
-    Left f -> f arrs bucket values
-    Right f -> f locking arrs bucket values
+    Left f -> f arrs bucket
+    Right f -> f locking arrs bucket
 
 -- | 'atomicUpdate', but where it is explicitly visible whether a
 -- locking strategy is necessary.
@@ -330,23 +339,21 @@ atomicUpdateLocking :: ExplicitMemorish lore =>
 
 atomicUpdateLocking lam
   | Just ops_and_ts <- splitOp lam,
-    all ((==32) . primBitSize . snd) ops_and_ts = Left $ \arrs bucket values ->
+    all (\(_, t, _) -> primBitSize t == 32) ops_and_ts = Left $ \arrs bucket ->
   -- If the operator is a vectorised binary operator on 32-bit values,
   -- we can use a particularly efficient implementation. If the
   -- operator has an atomic implementation we use that, otherwise it
   -- is still a binary operator which can be implemented by atomic
   -- compare-and-swap if 32 bits.
-  forM_ (zip3 arrs ops_and_ts values) $ \(a, (op, t), val) -> do
+  forM_ (zip arrs ops_and_ts) $ \(a, (op, t, val)) -> do
 
   -- Common variables.
   old <- dPrim "old" t
-  bucket' <- mapM ImpGen.compileSubExp bucket
 
-  (arr', _a_space, bucket_offset) <- ImpGen.fullyIndexArray a bucket'
+  (arr', _a_space, bucket_offset) <- ImpGen.fullyIndexArray a bucket
 
-  val' <- ImpGen.compileSubExp val
   case opHasAtomicSupport old arr' bucket_offset op of
-    Just f -> sOp $ f val'
+    Just f -> sOp $ f val
 
     Nothing -> do
       -- Code generation target:
@@ -359,7 +366,7 @@ atomicUpdateLocking lam
       -- } while(assumed != old);
       assumed <- dPrim "assumed" t
       run_loop <- dPrimV "run_loop" 1
-      ImpGen.copyDWIM old [] (Var a) bucket'
+      ImpGen.copyDWIM old [] (Var a) bucket
 
       -- Critical section
       x <- dPrim "x" t
@@ -372,7 +379,7 @@ atomicUpdateLocking lam
                       _                 -> (id, id)
       sWhile (Imp.var run_loop int32) $ do
         assumed <-- Imp.var old t
-        x <-- val'
+        x <-- val
         y <-- Imp.var assumed t
         x <-- Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
         old_bits <- dPrim "old_bits" int32
@@ -387,20 +394,13 @@ atomicUpdateLocking lam
           let atomic f = Imp.Atomic . f old arr' bucket'
           atomic <$> Imp.atomicBinOp bop
 
-atomicUpdateLocking op = Right $ \locking arrs bucket values -> do
+atomicUpdateLocking op = Right $ \locking arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimV "continue" true
 
-  -- Check if bucket is in-bounds
-  bucket' <- mapM ImpGen.compileSubExp bucket
-
   -- Correctly index into locks.
   (locks', _locks_space, locks_offset) <-
-    ImpGen.fullyIndexArray (lockingArray locking) bucket'
-
-  -- Preparing parameters
-  let (acc_params, arr_params) =
-        splitAt (length values) $ lambdaParams op
+    ImpGen.fullyIndexArray (lockingArray locking) [lockingMapping locking bucket]
 
   -- Critical section
   let try_acquire_lock =
@@ -414,45 +414,38 @@ atomicUpdateLocking op = Right $ \locking arrs bucket values -> do
         Imp.AtomicCmpXchg old locks' locks_offset (lockingToLock locking) (lockingToUnlock locking)
       break_loop = continue <-- false
 
-  -- We copy the current value and the new value to the parameters.
-  -- It is important that the right-hand-side is bound first for the
-  -- (rare) case when we are dealing with arrays.
-  let bind_acc_params =
+  -- Preparing parameters. It is assumed that the caller has already
+  -- filled the arr_params. We copy the current value to the
+  -- accumulator parameters.
+  let (acc_params, _arr_params) = splitAt (length arrs) $ lambdaParams op
+      bind_acc_params =
         ImpGen.sComment "bind lhs" $
         forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
-        ImpGen.copyDWIM (paramName acc_p) [] (Var arr) bucket'
-
-  let bind_arr_params =
-        ImpGen.sComment "bind rhs" $
-        forM_ (zip arr_params values) $ \(arr_p, val) ->
-        ImpGen.copyDWIM (paramName arr_p) [] val []
+        ImpGen.copyDWIM (paramName acc_p) [] (Var arr) bucket
 
   let op_body = ImpGen.sComment "execute operation" $
                 ImpGen.compileBody' acc_params $ lambdaBody op
 
       do_gen_reduce = ImpGen.sComment "update global result" $
-                      zipWithM_ (writeArray bucket') arrs $ map (Var . paramName) acc_params
+                      zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
   -- While-loop: Try to insert your value
   sWhile (Imp.var continue Bool) $ do
     try_acquire_lock
     sWhen lock_acquired $ do
-      ImpGen.dLParams $ lambdaParams op
-      bind_arr_params
+      ImpGen.dLParams acc_params
       bind_acc_params
       op_body
       do_gen_reduce
       release_lock
       break_loop
     sOp Imp.MemFence
-  where writeArray bucket' arr val =
-          ImpGen.copyDWIM arr bucket' val []
+  where writeArray bucket arr val = ImpGen.copyDWIM arr bucket val []
 
 -- | Horizontally fission a lambda that models a binary operator.
-splitOp :: Attributes lore => Lambda lore -> Maybe [(BinOp, PrimType)]
+splitOp :: Attributes lore => Lambda lore -> Maybe [(BinOp, PrimType, Imp.Exp)]
 splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
   where n = length $ lambdaReturnType lam
-        splitStm :: SubExp -> Maybe (BinOp, PrimType)
         splitStm (Var res) = do
           Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
             find (([res]==) . patternNames . stmPattern) $
@@ -463,7 +456,7 @@ splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
           guard $ paramName xp == x
           guard $ paramName yp == y
           Prim t <- Just $ patElemType pe
-          return (op, t)
+          return (op, t, Imp.var (paramName yp) t)
         splitStm _ = Nothing
 
 computeKernelUses :: FreeIn a =>
@@ -975,6 +968,39 @@ groupStmsByGuard constants bnds =
         collapse l@((g,_):_) =
           (g, map snd l)
 
+computeMapKernelGroups :: Imp.Exp -> CallKernelGen (Imp.Exp, Imp.Exp)
+computeMapKernelGroups kernel_size = do
+  group_size <- dPrim "group_size" int32
+  fname <- asks ImpGen.envFunction
+  let group_size_var = Imp.var group_size int32
+      group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty group_size
+  sOp $ Imp.GetSize group_size group_size_key Imp.SizeGroup
+  num_groups <- dPrimV "num_groups" $ kernel_size `quotRoundingUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
+  return (Imp.var group_size int32, Imp.var num_groups int32)
+
+simpleKernelConstants :: Imp.Exp -> String
+                      -> CallKernelGen (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
+simpleKernelConstants kernel_size desc = do
+  thread_gtid <- newVName $ desc ++ "_gtid"
+  thread_ltid <- newVName $ desc ++ "_ltid"
+  group_id <- newVName $ desc ++ "_gid"
+  (group_size, num_groups) <- computeMapKernelGroups kernel_size
+  let set_constants = do
+        dPrim_ thread_gtid int32
+        dPrim_ thread_ltid int32
+        dPrim_ group_id int32
+        sOp (Imp.GetGlobalId thread_gtid 0)
+        sOp (Imp.GetLocalId thread_ltid 0)
+        sOp (Imp.GetGroupId group_id 0)
+
+  return (KernelConstants
+          (Imp.var thread_gtid int32) (Imp.var thread_ltid int32) (Imp.var group_id int32)
+          thread_gtid thread_ltid group_id
+          group_size num_groups (group_size*num_groups) 0
+          [] (Imp.var thread_gtid int32 .<. kernel_size) mempty,
+
+          set_constants)
+
 sKernel :: KernelConstants -> String -> ImpGen.ImpM InKernel Imp.KernelOp a -> CallKernelGen ()
 sKernel constants name m = do
   body <- makeAllMemoryGlobal $
@@ -989,3 +1015,69 @@ sKernel constants name m = do
     , Imp.kernelName =
         nameFromString $ name ++ "_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
     }
+
+-- | Perform a Replicate with a kernel.
+sReplicate :: VName -> Shape -> SubExp
+           -> CallKernelGen ()
+sReplicate arr (Shape ds) se = do
+  t <- subExpType se
+
+  dims <- mapM ImpGen.compileSubExp $ ds ++ arrayDims t
+  (constants, set_constants) <-
+    simpleKernelConstants (product dims) "replicate"
+
+  let is' = unflattenIndex dims $ kernelGlobalThreadId constants
+
+  sKernel constants "replicate" $ do
+    set_constants
+    sWhen (kernelThreadActive constants) $
+      ImpGen.copyDWIM arr is' se $ drop (length ds) is'
+
+-- | Perform an Iota with a kernel.
+sIota :: VName -> Imp.Exp -> Imp.Exp -> Imp.Exp -> IntType
+      -> CallKernelGen ()
+sIota arr n x s et = do
+  destloc <- ImpGen.entryArrayLocation <$> ImpGen.lookupArray arr
+  (constants, set_constants) <- simpleKernelConstants n "iota"
+
+  sKernel constants "iota" $ do
+    set_constants
+    let gtid = kernelGlobalThreadId constants
+    sWhen (kernelThreadActive constants) $ do
+      (destmem, destspace, destidx) <-
+        ImpGen.fullyIndexArray' destloc [gtid] (IntType et)
+
+      ImpGen.emit $
+        Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
+        Imp.ConvOpExp (SExt Int32 et) gtid * s + x
+
+sCopy :: PrimType
+      -> ImpGen.MemLocation
+      -> ImpGen.MemLocation
+      -> Imp.Count Imp.Elements
+      -> CallKernelGen ()
+sCopy bt
+  destloc@(ImpGen.MemLocation destmem _ _)
+  srcloc@(ImpGen.MemLocation srcmem srcshape _)
+  n = do
+  -- Note that the shape of the destination and the source are
+  -- necessarily the same.
+  let shape = map Imp.sizeToExp srcshape
+      shape_se = map (Imp.innerExp . ImpGen.dimSizeToExp) srcshape
+      kernel_size = Imp.innerExp n * product (drop 1 shape)
+
+  (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
+
+  sKernel constants "copy" $ do
+    set_constants
+
+    let gtid = kernelGlobalThreadId constants
+        dest_is = unflattenIndex shape_se gtid
+        src_is = dest_is
+
+    (_, destspace, destidx) <- ImpGen.fullyIndexArray' destloc dest_is bt
+    (_, srcspace, srcidx) <- ImpGen.fullyIndexArray' srcloc src_is bt
+
+    sWhen (gtid .<. kernel_size) $ ImpGen.emit $
+      Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
+      Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
