@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Using definitions from the `intrinsic` module outside the prelude
     now results in a warning.
 
+  * `reduce_by_index` with vectorised operators (e.g. `map2 (+)`) is
+    orders of magnitude faster than before.
+
 ### Removed
 
   * The old `futhark-*` executables have been removed.
