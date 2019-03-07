@@ -55,6 +55,10 @@ def get_prefered_context(interactive=False, platform_pref=None, device_pref=None
                 device_matches += 1
     raise Exception('No OpenCL platform and device matching constraints found.')
 
+def size_assignment(s):
+    name, value = s.split('=')
+    return (name, int(value))
+
 def check_types(self, required_types):
     if 'f64' in required_types:
         if self.device.get_info(cl.device_info.PREFERRED_VECTOR_WIDTH_DOUBLE) == 0:

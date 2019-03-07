@@ -249,7 +249,7 @@ standardOptions :: [Option]
 standardOptions = [
   Option { optionLongName = "write-runtime-to"
          , optionShortName = Just 't'
-         , optionArgument = RequiredArgument
+         , optionArgument = RequiredArgument "str"
          , optionAction =
            [
              If (Var "runtime_file")
@@ -260,7 +260,7 @@ standardOptions = [
          },
   Option { optionLongName = "runs"
          , optionShortName = Just 'r'
-         , optionArgument = RequiredArgument
+         , optionArgument = RequiredArgument "str"
          , optionAction =
            [ Assign (Var "num_runs") $ Var "optarg"
            , Assign (Var "do_warmup_run") $ Bool True
@@ -268,7 +268,7 @@ standardOptions = [
          },
   Option { optionLongName = "entry-point"
          , optionShortName = Just 'e'
-         , optionArgument = RequiredArgument
+         , optionArgument = RequiredArgument "str"
          , optionAction =
            [ Assign (Var "entry_point") $ Var "optarg" ]
          },
