@@ -24,7 +24,7 @@ data Option = Option { optionLongName :: String
 
 -- | Whether an option accepts an argument.
 data OptionArgument = NoArgument
-                    | RequiredArgument
+                    | RequiredArgument String
                     | OptionalArgument
 
 -- | Generate option parsing code that accepts the given command line options.  Will read from @sys.argv@.
@@ -43,13 +43,15 @@ generateOptionParser options =
   map executeOption options
   where parseOption option =
           Exp $ Call (Var "parser.add_argument") $
-          map (Arg . String) name_args ++ argument_args
+          map (Arg . String) name_args ++
+          argument_args
           where name_args = maybe id ((:) . ('-':) . (:[])) (optionShortName option)
                             ["--" ++ optionLongName option]
                 argument_args = case optionArgument option of
-                  RequiredArgument ->
+                  RequiredArgument t ->
                     [ArgKeyword "action" (String "append"),
-                     ArgKeyword "default" $ List []]
+                     ArgKeyword "default" $ List [],
+                     ArgKeyword "type" $ Var t]
 
                   NoArgument ->
                     [ArgKeyword "action" (String "append_const"),

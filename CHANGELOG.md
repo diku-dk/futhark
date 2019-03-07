@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `reduce_by_index` with vectorised operators (e.g. `map2 (+)`) is
     orders of magnitude faster than before.
 
+  * Executables generated with the `pyopencl` backend now support the
+    options `--default-tile-size`, `--default-group-size`,
+    `--default-num-groups`, `--default-threshold`, and `--size`.
+
 ### Removed
 
   * The old `futhark-*` executables have been removed.

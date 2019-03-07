@@ -34,6 +34,11 @@ compileProg module_name prog = do
             [Assign (Var "synchronous") $ Bool False,
              Assign (Var "preferred_platform") None,
              Assign (Var "preferred_device") None,
+             Assign (Var "default_threshold") None,
+             Assign (Var "default_group_size") None,
+             Assign (Var "default_num_groups") None,
+             Assign (Var "default_tile_size") None,
+             Assign (Var "sizes") $ Dict [],
              Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
              Escape pyValues,
              Escape pyFunctions,
@@ -50,23 +55,59 @@ compileProg module_name prog = do
                                        , "interactive=False"
                                        , "platform_pref=preferred_platform"
                                        , "device_pref=preferred_device"
-                                       , "default_group_size=None"
-                                       , "default_num_groups=None"
-                                       , "default_tile_size=None"
-                                       , "sizes={}"]
+                                       , "default_group_size=default_group_size"
+                                       , "default_num_groups=default_num_groups"
+                                       , "default_tile_size=default_tile_size"
+                                       , "default_threshold=default_threshold"
+                                       , "sizes=sizes"]
                         [Escape $ openClInit types assign sizes]
           options = [ Option { optionLongName = "platform"
                              , optionShortName = Just 'p'
-                             , optionArgument = RequiredArgument
+                             , optionArgument = RequiredArgument "str"
                              , optionAction =
                                [ Assign (Var "preferred_platform") $ Var "optarg" ]
                              }
                     , Option { optionLongName = "device"
                              , optionShortName = Just 'd'
-                             , optionArgument = RequiredArgument
+                             , optionArgument = RequiredArgument "str"
                              , optionAction =
                                [ Assign (Var "preferred_device") $ Var "optarg" ]
-                             }]
+                             }
+                    , Option { optionLongName = "default-threshold"
+                             , optionShortName = Nothing
+                             , optionArgument = RequiredArgument "int"
+                             , optionAction =
+                               [ Assign (Var "default_threshold") $ Var "optarg" ]
+                             }
+                    , Option { optionLongName = "default-group-size"
+                             , optionShortName = Nothing
+                             , optionArgument = RequiredArgument "int"
+                             , optionAction =
+                               [ Assign (Var "default_group_size") $ Var "optarg" ]
+                             }
+                    , Option { optionLongName = "default-num-groups"
+                             , optionShortName = Nothing
+                             , optionArgument = RequiredArgument "int"
+                             , optionAction =
+                               [ Assign (Var "default_num_groups") $ Var "optarg" ]
+                             }
+                    , Option { optionLongName = "default-tile-size"
+                             , optionShortName = Nothing
+                             , optionArgument = RequiredArgument "int"
+                             , optionAction =
+                               [ Assign (Var "default_tile_size") $ Var "optarg" ]
+                             }
+                    , Option { optionLongName = "size"
+                             , optionShortName = Nothing
+                             , optionArgument = RequiredArgument "size_assignment"
+                             , optionAction =
+                                 [Assign (Index (Var "sizes")
+                                          (IdxExp (Index (Var "optarg")
+                                                   (IdxExp (Integer 0)))))
+                                   (Index (Var "optarg") (IdxExp (Integer 1)))
+                                 ]
+                             }
+                    ]
 
       Right <$> Py.compileProg module_name constructor imports defines operations ()
         [Exp $ Py.simpleCall "self.queue.finish" []] options prog'
