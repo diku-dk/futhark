@@ -29,7 +29,7 @@ import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (pretty, prettyOneLine)
+import Futhark.Util.Pretty (pretty)
 
 kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program
                                -> Either InternalError ImpOpenCL.Program
@@ -65,17 +65,15 @@ pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL kernel addres
 
 type UsedFunctions = [(String,C.Func)] -- The ordering is important!
 
-data OpenClRequirements =
-  OpenClRequirements { kernelUsedTypes :: S.Set PrimType
-                     , _kernelConstants :: [(VName, KernelConstExp)]
-                     }
+newtype OpenClRequirements =
+  OpenClRequirements { kernelUsedTypes :: S.Set PrimType }
 
 instance Semigroup OpenClRequirements where
-  OpenClRequirements ts1 consts1 <> OpenClRequirements ts2 consts2 =
-    OpenClRequirements (ts1 <> ts2) (consts1 <> consts2)
+  OpenClRequirements ts1 <> OpenClRequirements ts2 =
+    OpenClRequirements (ts1 <> ts2)
 
 instance Monoid OpenClRequirements where
-  mempty = OpenClRequirements mempty mempty
+  mempty = OpenClRequirements mempty
 
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
@@ -140,16 +138,17 @@ onKernel target kernel = do
 
       params = perm_params ++ catMaybes local_memory_params ++ use_params
 
+      const_defs = mapMaybe constDef $ kernelUses kernel
+
   tell mempty { clExtraFuns = mempty
               , clKernels = M.singleton name
                             [C.cfun|__kernel void $id:name ($params:params) {
+                                $items:const_defs
                                 $items:block_dim_init
                                 $items:local_memory_init
                                 $items:kernel_body
                                 }|]
-              , clRequirements = OpenClRequirements
-                                 (typesInKernel kernel)
-                                 (mapMaybe useAsConst $ kernelUses kernel)
+              , clRequirements = OpenClRequirements (typesInKernel kernel)
               }
 
   return $ LaunchKernel name (kernelArgs kernel) num_groups group_size
@@ -186,9 +185,11 @@ useAsParam (MemoryUse name) =
 useAsParam ConstUse{} =
   Nothing
 
-useAsConst :: KernelUse -> Maybe (VName, KernelConstExp)
-useAsConst (ConstUse v e) = Just (v,e)
-useAsConst _ = Nothing
+constDef :: KernelUse -> Maybe C.BlockItem
+constDef (ConstUse v e) = Just [C.citem|const $ty:t $id:v = $exp:e';|]
+  where t = GenericC.primTypeToCType $ primExpType e
+        e' = compilePrimExp e
+constDef _ = Nothing
 
 openClCode :: [C.Func] -> String
 openClCode kernels =
@@ -198,7 +199,7 @@ openClCode kernels =
            kernel_func <- kernels ]
 
 genOpenClPrelude :: OpenClRequirements -> [C.Definition]
-genOpenClPrelude (OpenClRequirements ts consts) =
+genOpenClPrelude (OpenClRequirements ts) =
   -- Clang-based OpenCL implementations need this for 'static' to work.
   [ [C.cedecl|$esc:("#ifdef cl_clang_storage_class_specifiers")|]
   , [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable")|]
@@ -227,8 +228,7 @@ typedef ulong uint64_t;
 $esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attribute__ ((align))")
 |] ++
   cIntOps ++ cFloat32Ops ++ cFloat32Funs ++
-  (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else []) ++
-  [ [C.cedecl|$esc:def|] | def <- map constToDefine consts ]
+  (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else [])
   where uses_float64 = FloatType Float64 `S.member` ts
 
 
@@ -257,11 +257,10 @@ cudaAtomicOps = (return mkOp <*> opNames <*> types) ++ extraOps
                 }|] | t <- types]
 
 genCUDAPrelude :: OpenClRequirements -> [C.Definition]
-genCUDAPrelude (OpenClRequirements _ consts) =
-  cudafy ++ cudaAtomicOps ++ defs ++ ops
+genCUDAPrelude (OpenClRequirements _) =
+  cudafy ++ cudaAtomicOps ++ ops
   where ops = cIntOps ++ cFloat32Ops ++ cFloat32Funs ++ cFloat64Ops
                 ++ cFloat64Funs ++ cFloatConvOps
-        defs = [ [C.cedecl|$esc:def|] | def <- map constToDefine consts ]
         cudafy = [CUDAC.cunit|
 typedef char int8_t;
 typedef short int16_t;
@@ -364,12 +363,6 @@ $esc:("#define NAN (0.0/0.0)")
 $esc:("#define INFINITY (1.0/0.0)")
 extern volatile __shared__ char shared_mem[];
 |]
-
-constToDefine :: (VName, KernelConstExp) -> String
-constToDefine (name, e) =
-  let e' = compilePrimExp e
-  in unwords ["#define", zEncodeString (pretty name), "("++prettyOneLine e'++")"]
-
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
