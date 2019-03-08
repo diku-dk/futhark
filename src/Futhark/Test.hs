@@ -236,7 +236,7 @@ parseRunTags = many parseTag
                                      return s
 
 parseRunCases :: Parser [TestRun]
-parseRunCases = parseRunCases' (0::Int)
+parseRunCases = parseRunCases' (1::Int)
   where parseRunCases' i = (:) <$> parseRunCase i <*> parseRunCases' (i+1)
                            <|> pure []
         parseRunCase i = do
