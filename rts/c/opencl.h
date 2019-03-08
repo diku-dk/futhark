@@ -70,8 +70,7 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->default_group_size = 0;
   cfg->default_num_groups = 0;
   cfg->default_tile_size = 0;
-
-  cfg->default_threshold = 32*1024;
+  cfg->default_threshold = 0;
 
   cfg->default_group_size_changed = 0;
   cfg->default_tile_size_changed = 0;
