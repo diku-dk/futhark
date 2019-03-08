@@ -518,10 +518,10 @@ isConstExp v = do
         hasExp (ImpGen.ScalarVar e _) = e
         hasExp (ImpGen.MemVar e _) = e
 
--- | Only some constant expressions quality as *static* expressions,
+-- | Only some constant expressions qualify as *static* expressions,
 -- which we can use for static memory allocation.  This is a bit of a
 -- hack, as it is primarly motivated by what you can put as the size
--- when daring an array in C.
+-- when declaring an array in C.
 isStaticExp :: Imp.KernelConstExp -> Bool
 isStaticExp LeafExp{} = True
 isStaticExp ValueExp{} = True
