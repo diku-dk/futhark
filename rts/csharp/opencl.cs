@@ -374,10 +374,13 @@ private void OpenCLConfigInit(out OpenCLConfig cfg,
     cfg.DumpProgramTo = null;
     cfg.LoadProgramFrom = null;
 
-    cfg.DefaultGroupSize = 256;
-    cfg.DefaultNumGroups = 128;
-    cfg.DefaultTileSize = 32;
-    cfg.DefaultThreshold = 32*1024;
+    // The following are dummy sizes that mean the concrete defaults
+    // will be set during initialisation via hardware-inspection-based
+    // heuristics.
+    cfg.DefaultGroupSize = 0;
+    cfg.DefaultNumGroups = 0;
+    cfg.DefaultTileSize = 0;
+    cfg.DefaultThreshold = 0;
 
     cfg.NumSizes = num_sizes;
     cfg.SizeNames = size_names;

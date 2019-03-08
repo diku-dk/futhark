@@ -271,6 +271,7 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
                    NumGroups ->     Var "Ctx.OpenCL.Cfg.DefaultNumGroups"
                    GroupSize ->     Var "Ctx.OpenCL.Cfg.DefaultGroupSize"
                    TileSize ->      Var "Ctx.OpenCL.Cfg.DefaultTileSize"
+                   Threshold ->     Var "Ctx.OpenCL.Cfg.DefaultThreshold"
 
         get_size = case what of
                      HeuristicConst x ->
