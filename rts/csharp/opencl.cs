@@ -777,6 +777,9 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
 
     int MaxTileSize = (int) Math.Sqrt(MaxGroupSize);
 
+    // Make sure this function is defined.
+    PostOpenCLSetup(ref ctx, ref device_option);
+
     if (MaxGroupSize < ctx.OpenCL.Cfg.DefaultGroupSize) {
         Console.Error.WriteLine("Note: Device limits default group size to {0} (down from {1}).\n",
                                 MaxGroupSize, ctx.OpenCL.Cfg.DefaultGroupSize);
@@ -837,9 +840,6 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
 
     ctx.OpenCL.Queue = CL10.CreateCommandQueue(ctx.OpenCL.Context, device, 0, out error);
     Debug.Assert(error == 0);
-
-    // Make sure this function is defined.
-    PostOpenCLSetup(ref ctx, ref device_option);
 
     if (ctx.Debugging) {
         Console.Error.WriteLine("Lockstep width: {0}\n", (int)ctx.OpenCL.LockstepWidth);
