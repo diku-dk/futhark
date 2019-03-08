@@ -117,7 +117,7 @@ class FutharkTuner(MeasurementInterface):
     as timeout-value, plus the (estimated) overhead of initialisation.
     """
     with tempfile.NamedTemporaryFile() as json_tmp:
-      base_cmd = '{} --json={}'.format(self.futhark_bench_cmd_base(), json_tmp)
+      base_cmd = '{} --json={}'.format(self.futhark_bench_cmd_base(), json_tmp.name)
       wall_start = time.time()
       base_res = self.call_critical_program(base_cmd)
       wall_duration = time.time() - wall_start
@@ -331,7 +331,7 @@ class FutharkTuner(MeasurementInterface):
       return '--pass-option --size={}={}'.format(size, cfg[size])
     size_options = ' '.join(map(sizeOption, cfg.keys()))
     return '{} {} --timeout {}'.format(
-      self.base_futhark_bench_cmd(), size_options, self.args.timeout)
+      self.futhark_bench_cmd_base(), size_options, self.args.timeout)
 
   def get_branch(self, start, cfg, datasets, result):
     """
