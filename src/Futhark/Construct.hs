@@ -30,6 +30,7 @@ module Futhark.Construct
   , eSliceArray
   , eSplitArray
 
+  , eOutOfBounds
   , eWriteArray
 
   , asIntZ, asIntS
@@ -285,16 +286,13 @@ eSplitArray arr sizes = do
           offset' <- letSubExp "offset" $ BasicOp $ BinOp (Add Int32) offset size
           return (offset', offset)
 
--- | Write to an index of the array, if within bounds.  Otherwise,
--- nothing.  Produces the updated array.
-eWriteArray :: (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
-               VName -> [m (Exp (Lore m))] -> m (Exp (Lore m))
-            -> m (Exp (Lore m))
-eWriteArray arr is v = do
+-- | Are these indexes out-of-bounds for the array?
+eOutOfBounds :: MonadBinder m =>
+                VName -> [m (Exp (Lore m))] -> m (Exp (Lore m))
+eOutOfBounds arr is = do
   arr_t <- lookupType arr
   let ws = arrayDims arr_t
   is' <- mapM (letSubExp "write_i") =<< sequence is
-  v' <- letSubExp "write_v" =<< v
   let checkDim w i = do
         less_than_zero <- letSubExp "less_than_zero" $
           BasicOp $ CmpOp (CmpSlt Int32) i (constant (0::Int32))
@@ -302,11 +300,19 @@ eWriteArray arr is v = do
           BasicOp $ CmpOp (CmpSle Int32) w i
         letSubExp "outside_bounds_dim" $
           BasicOp $ BinOp LogOr less_than_zero greater_than_size
+  foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
 
-  outside_bounds <-
-    letSubExp "outside_bounds" =<<
-    foldBinOp LogOr (constant False) =<<
-    zipWithM checkDim ws is'
+-- | Write to an index of the array, if within bounds.  Otherwise,
+-- nothing.  Produces the updated array.
+eWriteArray :: (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
+               VName -> [m (Exp (Lore m))] -> m (Exp (Lore m))
+            -> m (Exp (Lore m))
+eWriteArray arr is v = do
+  arr_t <- lookupType arr
+  is' <- mapM (letSubExp "write_i") =<< sequence is
+  v' <- letSubExp "write_v" =<< v
+
+  outside_bounds <- letSubExp "outside_bounds" =<< eOutOfBounds arr is
 
   outside_bounds_branch <- insertStmsM $ resultBodyM [Var arr]
 
