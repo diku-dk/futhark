@@ -25,6 +25,7 @@ import Control.Monad.Except
 import Control.Monad.State
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import Data.List (zip4)
 
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.SOACS
@@ -221,22 +222,32 @@ transformSOAC pat (GenReduce len ops bucket_fun imgs) = do
         hists_out' = chunks (map (length . lambdaReturnType . genReduceOp) ops) $
                      map identName hists_out
 
-    -- Read values from histograms.
-    h_vals <- forM (zip inds hists_out') $ \(idx, hist) ->
-      forM hist $ \arr -> do
-        arr_t <- lookupType arr
-        letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
+    hists_out'' <- forM (zip4 hists_out' ops inds vals) $ \(hist, op, idx, val) -> do
+      -- Check whether the indexes are in-bound.  If they are not, we
+      -- return the histograms unchanged.
+      let outside_bounds_branch = insertStmsM $ resultBodyM $ map Var hist
 
-    -- Apply operators.
-    h_vals' <- forM (zip3 (map genReduceOp ops) vals h_vals) $ \(op, ne_val, h_val) ->
-      bindLambda op $ map (BasicOp . SubExp) $ ne_val ++ h_val
+      letTupExp "new_histo" <=<
+        eIf (eOutOfBounds (head hist) [eSubExp idx]) outside_bounds_branch $ do
+        -- Read values from histogram.
+        h_val <- forM hist $ \arr -> do
+          arr_t <- lookupType arr
+          letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
 
-    -- Write values back to histograms.
-    ress <- forM (zip3 inds h_vals' hists_out') $ \(idx, val, hist) ->
-      forM (zip val hist) $  \(v, arr) ->
-        letExp "write_hist" =<< eWriteArray arr [eSubExp idx] (eSubExp v)
+        -- Apply operator.
+        h_val' <- bindLambda (genReduceOp op) $
+                  map (BasicOp . SubExp) $ h_val ++ val
 
-    return $ resultBody $ map Var $ concat ress
+        -- Write values back to histograms.
+        hist' <- forM (zip hist h_val') $  \(arr, v) -> do
+          arr_t <- lookupType arr
+          letInPlace "hist_out" arr (fullSlice arr_t [DimFix idx]) $
+            BasicOp $ SubExp v
+
+        return $ resultBody $ map Var hist'
+
+    return $ resultBody $ map Var $ concat hists_out''
+
   -- Wrap up the above into a for-loop.
   letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 

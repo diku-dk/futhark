@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark datacmp` now prints to stdout, not stderr.
 
+  * Fixed a major potential out-of-bounds access when sequentialising
+    `reduce_by_index` (in most cases the bug was hidden by subsequent
+    C compiler optimisations).
+
 ## [0.9.1]
 
 ### Added
