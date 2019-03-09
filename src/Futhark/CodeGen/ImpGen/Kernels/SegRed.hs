@@ -548,6 +548,8 @@ reductionStageTwo constants segred_pat
         when (primType $ paramType p) $
           ImpGen.copyDWIM arr [local_tid] (Var $ paramName p) []
 
+    sOp Imp.LocalBarrier
+
     sComment "reduce the per-group results" $ do
       groupReduce constants group_size red_op_renamed red_arrs
 
