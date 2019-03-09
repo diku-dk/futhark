@@ -226,9 +226,11 @@ transformSOAC pat (GenReduce len ops bucket_fun imgs) = do
       -- Check whether the indexes are in-bound.  If they are not, we
       -- return the histograms unchanged.
       let outside_bounds_branch = insertStmsM $ resultBodyM $ map Var hist
+          oob = case hist of [] -> eSubExp $ constant True
+                             arr:_ -> eOutOfBounds arr [eSubExp idx]
 
       letTupExp "new_histo" <=<
-        eIf (eOutOfBounds (head hist) [eSubExp idx]) outside_bounds_branch $ do
+        eIf oob outside_bounds_branch $ do
         -- Read values from histogram.
         h_val <- forM hist $ \arr -> do
           arr_t <- lookupType arr
