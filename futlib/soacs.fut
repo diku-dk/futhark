@@ -87,10 +87,10 @@ let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [
 let reduce 'a (op: a -> a -> a) (ne: a) (as: []a): a =
   intrinsics.reduce (op, ne, as)
 
--- | As `reduce`, but the operator must also be commutative.  This
--- is potentially faster than `reduce`.  For simple built-in
--- operators, like addition, the compiler already knows that the
--- operator is associative.
+-- | As `reduce`, but the operator must also be commutative.  This is
+-- potentially faster than `reduce`.  For simple built-in operators,
+-- like addition, the compiler already knows that the operator is
+-- commutative, so plain `reduce`@term will work just as well.
 --
 -- **Work:** *O(n)*
 --
