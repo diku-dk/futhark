@@ -51,22 +51,22 @@ compileProg prog = do
 cliOptions :: [Option]
 cliOptions = [ Option { optionLongName = "dump-cuda"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_dump_program_to(cfg, optarg);|]
                       }
              , Option { optionLongName = "load-cuda"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
                       }
              , Option { optionLongName = "dump-ptx"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_dump_ptx_to(cfg, optarg);|]
                       }
              , Option { optionLongName = "load-ptx"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
                       }
              , Option { optionLongName = "print-sizes"
