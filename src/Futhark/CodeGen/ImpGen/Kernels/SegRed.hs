@@ -189,7 +189,9 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
 
   let segment_size = last dims'
       num_segments = product $ init dims'
-      segments_per_group = kernelGroupSize constants `quot` segment_size
+      -- Careful to avoid division by zero now.
+      segments_per_group = kernelGroupSize constants `quot`
+                           BinOpExp (SMax Int32) 1 segment_size
       required_groups = num_segments `quotRoundingUp` segments_per_group
 
   let red_op_params = lambdaParams red_op
