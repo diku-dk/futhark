@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     options `--default-tile-size`, `--default-group-size`,
     `--default-num-groups`, `--default-threshold`, and `--size`.
 
+  * Executables generated with `c` and `opencl` now print a help text
+    if run with invalid options.  The `py` and `pyopencl` backends
+    already did this.
+
 ### Removed
 
   * The old `futhark-*` executables have been removed.

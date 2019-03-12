@@ -54,52 +54,52 @@ compileProg prog = do
 cliOptions :: [Option]
 cliOptions = [ Option { optionLongName = "platform"
                       , optionShortName = Just 'p'
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "NAME"
                       , optionAction = [C.cstm|futhark_context_config_set_platform(cfg, optarg);|]
                       }
              , Option { optionLongName = "device"
                       , optionShortName = Just 'd'
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "NAME"
                       , optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
                       }
              , Option { optionLongName = "default-group-size"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "INT"
                       , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
                       }
              , Option { optionLongName = "default-num-groups"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "INT"
                       , optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
                       }
              , Option { optionLongName = "default-tile-size"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "INT"
                       , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
                       }
              , Option { optionLongName = "default-threshold"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "INT"
                       , optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
                       }
              , Option { optionLongName = "dump-opencl"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_dump_program_to(cfg, optarg);|]
                       }
              , Option { optionLongName = "load-opencl"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
                       }
              , Option { optionLongName = "dump-opencl-binary"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_dump_binary_to(cfg, optarg);|]
                       }
              , Option { optionLongName = "load-opencl-binary"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_load_binary_from(cfg, optarg);|]
                       }
              , Option { optionLongName = "print-sizes"
@@ -116,7 +116,7 @@ cliOptions = [ Option { optionLongName = "platform"
                       }
              , Option { optionLongName = "size"
                       , optionShortName = Nothing
-                      , optionArgument = RequiredArgument
+                      , optionArgument = RequiredArgument "NAME=INT"
                       , optionAction = [C.cstm|{
                           char *name = optarg;
                           char *equals = strstr(optarg, "=");

@@ -28,7 +28,8 @@ data Option = Option { optionLongName :: String
 
 -- | Whether an option accepts an argument.
 data OptionArgument = NoArgument
-                    | RequiredArgument
+                    | RequiredArgument String
+                    -- ^ The 'String' becomes part of the help text.
                     | OptionalArgument
 
 -- | Generate an option parser as a function of the given name, that
@@ -52,7 +53,8 @@ generateOptionParser fname options =
            panic(-1, "Missing argument for option %s\n", argv[optind-1]);
          }
          if ($id:chosen_option == '?') {
-           panic(-1, "Unknown option %s\n", argv[optind-1]);
+           fprintf(stderr, "Usage: %s: %s\n", fut_progname, $string:option_descriptions);
+           panic(1, "Unknown option: %s\n", argv[optind-1]);
          }
        }
        return optind;
@@ -62,15 +64,28 @@ generateOptionParser fname options =
         option_string = ':' : optionString options
         option_applications = optionApplications chosen_option options
         option_fields = optionFields options
+        option_descriptions = unwords $ map describeOption options
+
+describeOption :: Option -> String
+describeOption opt =
+  concat [ "["
+         , maybe "" (\c -> "-" ++ [c] ++ "/") $ optionShortName opt
+         , "--" ++ optionLongName opt
+         , case optionArgument opt of
+             NoArgument -> ""
+             RequiredArgument what -> " " ++ what
+             OptionalArgument -> " [ARG]"
+         , "]"
+         ]
 
 optionFields :: [Option] -> [C.Initializer]
 optionFields = zipWith field [(1::Int)..]
   where field i option =
           [C.cinit| { $string:(optionLongName option), $id:arg, NULL, $int:i } |]
           where arg = case optionArgument option of
-                        NoArgument       -> "no_argument"
-                        RequiredArgument -> "required_argument"
-                        OptionalArgument -> "optional_argument"
+                        NoArgument         -> "no_argument"
+                        RequiredArgument _ -> "required_argument"
+                        OptionalArgument   -> "optional_argument"
 
 optionApplications :: String -> [Option] -> [C.Stm]
 optionApplications chosen_option = zipWith check [(1::Int)..]
@@ -86,6 +101,6 @@ optionString = concat . mapMaybe optionStringChunk
           short <- optionShortName option
           return $ short :
             case optionArgument option of
-              NoArgument       -> ""
-              RequiredArgument -> ":"
-              OptionalArgument -> "::"
+              NoArgument         -> ""
+              RequiredArgument _ -> ":"
+              OptionalArgument   -> "::"

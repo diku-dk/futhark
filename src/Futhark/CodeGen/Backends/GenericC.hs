@@ -1221,12 +1221,12 @@ benchmarkOptions :: [Option]
 benchmarkOptions =
    [ Option { optionLongName = "write-runtime-to"
             , optionShortName = Just 't'
-            , optionArgument = RequiredArgument
+            , optionArgument = RequiredArgument "FILE"
             , optionAction = set_runtime_file
             }
    , Option { optionLongName = "runs"
             , optionShortName = Just 'r'
-            , optionArgument = RequiredArgument
+            , optionArgument = RequiredArgument "INT"
             , optionAction = set_num_runs
             }
    , Option { optionLongName = "debugging"
@@ -1241,7 +1241,7 @@ benchmarkOptions =
             }
    , Option { optionLongName = "entry-point"
             , optionShortName = Just 'e'
-            , optionArgument = RequiredArgument
+            , optionArgument = RequiredArgument "NAME"
             , optionAction = [C.cstm|entry_point = optarg;|]
             }
    , Option { optionLongName = "binary-output"
