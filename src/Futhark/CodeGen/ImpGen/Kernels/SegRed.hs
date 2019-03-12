@@ -188,10 +188,12 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
   dims' <- mapM ImpGen.compileSubExp dims
 
   let segment_size = last dims'
+  -- Careful to avoid division by zero now.
+  segment_size_nonzero_v <- dPrimV "segment_size_nonzero" $
+                            BinOpExp (SMax Int32) 1 segment_size
+  let segment_size_nonzero = Imp.var segment_size_nonzero_v int32
       num_segments = product $ init dims'
-      -- Careful to avoid division by zero now.
-      segments_per_group = kernelGroupSize constants `quot`
-                           BinOpExp (SMax Int32) 1 segment_size
+      segments_per_group = kernelGroupSize constants `quot` segment_size_nonzero
       required_groups = num_segments `quotRoundingUp` segments_per_group
 
   let red_op_params = lambdaParams red_op
@@ -223,7 +225,7 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
       -- the segment ID, and are computed from the group id.  The inner
       -- is computed from the local thread id, and may be out-of-bounds.
       let ltid = kernelLocalThreadId constants
-          segment_index = (ltid `quot` segment_size) + (group_id' * segments_per_group)
+          segment_index = (ltid `quot` segment_size_nonzero) + (group_id' * segments_per_group)
           index_within_segment = ltid `rem` segment_size
 
       zipWithM_ (<--) (init gtids) $ unflattenIndex (init dims') segment_index
@@ -239,20 +241,21 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
                   repeat $ map (`Imp.var` int32) gtids)
 
       sComment "apply map function if in bounds" $
-        sIf (isActive (init $ zip gtids dims) .&&.
+        sIf (segment_size .>. 0 .&&.
+             isActive (init $ zip gtids dims) .&&.
              ltid .<. segment_size * segments_per_group) in_bounds (toLocalMemory nes)
 
       sOp Imp.LocalBarrier
 
       index_i <- newVName "index_i"
       index_j <- newVName "index_j"
-      let crossesSegment from to =
-            (to-from) .>. (to `rem` segment_size)
+      let crossesSegment from to = (to-from) .>. (to `rem` segment_size)
           red_op' = red_op { lambdaParams = Param index_i (MemPrim int32) :
                                             Param index_j (MemPrim int32) :
                                             lambdaParams red_op }
 
-      sComment "perform segmented scan to imitate reduction" $
+      sWhen (segment_size .>. 0) $
+        sComment "perform segmented scan to imitate reduction" $
         groupScan constants (Just crossesSegment) (segment_size*segments_per_group) red_op' red_arrs
 
       sOp Imp.LocalBarrier
@@ -265,7 +268,7 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
         let flat_segment_index = group_id' * segments_per_group + ltid
             gtids' = unflattenIndex (init dims') flat_segment_index
         ImpGen.copyDWIM (patElemName pe) gtids'
-                        (Var arr) [(ltid+1) * segment_size - 1]
+                        (Var arr) [(ltid+1) * segment_size_nonzero - 1]
 
       -- Finally another barrier, because we will be writing to the
       -- local memory array first thing in the next iteration.
