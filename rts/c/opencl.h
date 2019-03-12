@@ -475,7 +475,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE,
                                    sizeof(cl_uint), &supported, NULL));
     if (!supported) {
-      panic(1, "Program uses double-precision floats, but this is not supported on the chosen device: %s",
+      panic(1, "Program uses double-precision floats, but this is not supported on the chosen device: %s\n",
             device_option.device_name);
     }
   }
