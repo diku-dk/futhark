@@ -377,11 +377,12 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
 
     sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
 
+-- Careful to avoid division by zero here.
 groupsPerSegmentAndElementsPerThread :: Imp.Exp -> Imp.Exp -> Imp.Exp -> Imp.Exp
                                      -> (Imp.Exp, Imp.Count Imp.Elements)
 groupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint group_size =
   let groups_per_segment =
-        num_groups_hint `quotRoundingUp` num_segments
+        num_groups_hint `quotRoundingUp` BinOpExp (SMax Int32) 1 num_segments
       elements_per_thread =
         segment_size `quotRoundingUp` (group_size * groups_per_segment)
   in (groups_per_segment, Imp.elements elements_per_thread)

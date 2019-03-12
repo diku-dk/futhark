@@ -32,6 +32,14 @@
 -- output {
 --   [0, 0, 0, 0, 0]
 -- }
+--
+-- input {
+--   empty(i32)
+--   empty(i32)
+-- }
+-- output {
+--   empty(i32)
+-- }
 
 let main [m][n] (hist : *[n]i32) (image : [m]i32) : [n]i32 =
   reduce_by_index hist (+) 0 image image
