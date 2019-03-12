@@ -69,8 +69,10 @@ prepareIntermediateArrays segment_dims num_threads = fmap snd . mapAccumLM onOp 
       -- coop_lvl   := size of histogram (Cooperation level)
       -- num_histos := (threads / coop_lvl) (Number of histograms)
       -- threads    := min(physical_threads, segment_size)
+      --
+      -- Careful to avoid division by zero when genReduceWidth==0.
       num_histos <- dPrimV "num_histos" $ num_threads `quotRoundingUp`
-                    ImpGen.compileSubExpOfType int32 (genReduceWidth op)
+                    BinOpExp (SMax Int32) 1 (ImpGen.compileSubExpOfType int32 (genReduceWidth op))
 
       ImpGen.emit $ Imp.DebugPrint "num_histograms" int32 $ Imp.var num_histos int32
 
