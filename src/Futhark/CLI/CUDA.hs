@@ -2,8 +2,11 @@
 module Futhark.CLI.CUDA (main) where
 
 import Control.Monad.IO.Class
+import Data.Maybe
 import System.FilePath
 import System.Exit
+import System.Environment
+import qualified System.Info
 
 import Futhark.Pipeline
 import Futhark.Passes
@@ -18,11 +21,17 @@ main = compilerMain () []
        gpuPipeline $ \() mode outpath prog -> do
          cprog <- either (`internalError` prettyText prog) return =<<
                   CCUDA.compileProg prog
+         cuda_sdk <- liftIO $ fromMaybe "." <$> lookupEnv "CUDA_PATH"
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
-             extra_options = [ "-lcuda"
-                             , "-lnvrtc"
-                             ]
+             extra_options
+              | System.Info.os == "mingw32" =
+                [ "-I" ++ cuda_sdk ++ "\\include",
+                  "-L" ++ cuda_sdk ++ "\\lib\\x64",
+                  "-lcuda",
+                  "-lnvrtc"
+                ]
+              | otherwise = [ "-lcuda", "-lnvrtc"]
          case mode of
            ToLibrary -> do
              let (header, impl) = CCUDA.asLibrary cprog

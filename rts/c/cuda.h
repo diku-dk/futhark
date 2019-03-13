@@ -85,14 +85,18 @@ void cuda_config_init(struct cuda_config *cfg,
   cfg->size_classes = size_classes;
 }
 
-struct cuda_context {
+struct cuda_node_context {
   CUdevice dev;
   CUcontext cu_ctx;
-  CUmodule module;
-
-  struct cuda_config cfg;
 
   struct free_list free_list;
+};
+
+struct cuda_context {
+  struct cuda_node_context *nodes;
+  size_t num_nodes;
+  
+  CUmodule module;
 
   size_t max_block_size;
   size_t max_grid_size;
@@ -100,6 +104,8 @@ struct cuda_context {
   size_t max_threshold;
 
   size_t lockstep_width;
+
+  struct cuda_config cfg;
 };
 
 #define CU_DEV_ATTR(x) (CU_DEVICE_ATTRIBUTE_##x)
@@ -125,62 +131,99 @@ void set_preferred_device(struct cuda_config *cfg, const char *s)
   cfg->preferred_device = s;
 }
 
-static int cuda_device_setup(struct cuda_context *ctx)
-{
-  char name[256];
-  int count, chosen = -1, best_cc = -1;
-  int cc_major_best, cc_minor_best;
-  int cc_major, cc_minor;
+struct cuda_device_entry {
   CUdevice dev;
+  char name[256];
+  int cc_major, cc_minor, id;
+};
+
+static int cuda_devices_setup(struct cuda_context *ctx)
+{
+  int count;
+  int contains_valid = 0;
 
   CUDA_SUCCEED(cuDeviceGetCount(&count));
-  if (count == 0) { return 1; }
+  if (count == 0) {
+    panic(-1, "No suitable CUDA device found.\n");
+  }
 
-  // XXX: Current device selection policy is to choose the device with the
-  // highest compute capability (if no preferred device is set).
-  // This should maybe be changed, since greater compute capability is not
-  // necessarily an indicator of better performance.
-  for (int i = 0; i < count; i++) {
-    CUDA_SUCCEED(cuDeviceGet(&dev, i));
+  struct cuda_device_entry *devs = calloc(count, sizeof(struct cuda_device_entry));
+  
+  for (int i = 0; i < count; ++i) {
+    devs[i].id = i;
+    CUDA_SUCCEED(cuDeviceGet(&devs[i].dev, i));
 
-    cc_major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
-    cc_minor = device_query(dev, COMPUTE_CAPABILITY_MINOR);
-
-    CUDA_SUCCEED(cuDeviceGetName(name, sizeof(name)/sizeof(name[0]) - 1, dev));
-    name[sizeof(name)/sizeof(name[0])] = 0;
-
-    if (ctx->cfg.debugging) {
-      fprintf(stderr, "Device #%d: name=\"%s\", compute capability=%d.%d\n",
-          i, name, cc_major, cc_minor);
-    }
-
-    if (device_query(dev, COMPUTE_MODE) == CU_COMPUTEMODE_PROHIBITED) {
+    if (device_query(devs[i].dev, COMPUTE_MODE) == CU_COMPUTEMODE_PROHIBITED) {
       if (ctx->cfg.debugging) {
         fprintf(stderr, "Device #%d is compute-prohibited, ignoring\n", i);
       }
       continue;
     }
 
-    if (best_cc == -1 || cc_major > cc_major_best ||
-        (cc_major == cc_major_best && cc_minor > cc_minor_best)) {
-      best_cc = i;
-      cc_major_best = cc_major;
-      cc_minor_best = cc_minor;
+    devs[i].cc_major = device_query(devs[i].dev, COMPUTE_CAPABILITY_MAJOR);
+    devs[i].cc_minor = device_query(devs[i].dev, COMPUTE_CAPABILITY_MINOR);
+    
+    CUDA_SUCCEED(cuDeviceGetName(devs[i].name, sizeof(devs[i].name)/sizeof(devs[i].name[0]) - 1,
+                                 devs[i].dev));
+    // ^ NULL-terminated by calloc
+
+    if (ctx->cfg.debugging) {
+      fprintf(stderr, "Device #%d: name=\"%s\", compute capability=%d.%d\n",
+          i, devs[i].name, devs[i].cc_major, devs[i].cc_minor);
     }
 
-    if (chosen == -1 && strstr(name, ctx->cfg.preferred_device) == name) {
-      chosen = i;
+    contains_valid = 1;
+  }
+
+  if (!contains_valid) {
+    panic(-1, "No compute-enabled devices found.");
+  }
+
+  int dev_count = 0;
+  if (strcmp(ctx->cfg.preferred_device, "")) {
+    // Sort by compute capability.
+    for (int i = 0; i < count; ++i) {
+      for (int j = 0; j < count; ++j) {
+        int lower_cc = devs[j].cc_major < devs[i].cc_major ||
+                       devs[j].cc_minor < devs[i].cc_minor;
+        int same_cc = devs[j].cc_major == devs[i].cc_major &&
+                      devs[j].cc_minor == devs[i].cc_minor;
+        if (lower_cc || same_cc && strcmp(devs[j].name, devs[i].name) < 0) {
+          struct cuda_device_entry temp = devs[i];
+          devs[i] = devs[j];
+          devs[j] = temp;
+        }
+      }
+    }
+
+    // XXX: Selecting devices with highest compute capability. Is there a better way?
+    dev_count = 1;
+    for (; dev_count < count && strcmp(devs[0].name, devs[dev_count].name); ++dev_count) {}
+  } else {
+    // Place all devices matching the preferred device in front of the list.
+    for (int i = 0; i < count; ++i) {
+      if (strstr(devs[i].name, ctx->cfg.preferred_device) == devs[i].name) {
+        devs[dev_count++] = devs[i];
+      }
     }
   }
 
-  if (chosen == -1) { chosen = best_cc; }
-  if (chosen == -1) { return 1; }
-
-  if (ctx->cfg.debugging) {
-    fprintf(stderr, "Using device #%d\n", chosen);
+  if (ctx->num_nodes != 0 && dev_count < ctx->num_nodes) {
+    panic(-1, "Found only %d \"%s\" devices, but %d was requested.\n",
+          dev_count, devs[0].name, ctx->num_nodes);
   }
 
-  CUDA_SUCCEED(cuDeviceGet(&ctx->dev, chosen));
+  if (ctx->num_nodes == 0)
+    ctx->num_nodes = dev_count;
+  ctx->nodes = malloc(sizeof(struct cuda_node_context) * ctx->num_nodes);
+
+  for (int i = 0; i < ctx->num_nodes; ++i)
+    ctx->nodes[i].dev = devs[i].dev;
+
+  if(ctx->cfg.debugging)
+    fprintf(stderr, "Using %d \"%s\" devices.\n", ctx->num_nodes, devs[0].name);
+
+  free(devs);
   return 0;
 }
 
@@ -221,7 +264,8 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev)
     { 6, 1, "compute_61" },
     { 6, 2, "compute_62" },
     { 7, 0, "compute_70" },
-    { 7, 2, "compute_72" }
+    { 7, 2, "compute_72" },
+    { 7, 5, "compute_75" }
   };
 
   int major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
@@ -250,7 +294,7 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src)
   size_t n_opts, i = 0, i_dyn, n_opts_alloc = 20 + ctx->cfg.num_sizes;
   const char **opts = malloc(n_opts_alloc * sizeof(const char *));
   opts[i++] = "-arch";
-  opts[i++] = cuda_nvrtc_get_arch(ctx->dev);
+  opts[i++] = cuda_nvrtc_get_arch(ctx->nodes[0].dev);
   opts[i++] = "-default-device";
   if (ctx->cfg.debugging) {
     opts[i++] = "-G";
@@ -435,19 +479,20 @@ static void cuda_module_setup(struct cuda_context *ctx,
 void cuda_setup(struct cuda_context *ctx, const char *src_fragments[])
 {
   CUDA_SUCCEED(cuInit(0));
+  cuda_devices_setup(ctx);
 
-  if (cuda_device_setup(ctx) != 0) {
-    panic(-1, "No suitable CUDA device found.\n");
+  for (int i = 0; i < ctx->num_nodes; ++i) {
+    fprintf(stderr, "Device %d %d\n", i, ctx->nodes[i].dev);
+    CUDA_SUCCEED(cuCtxCreate(&ctx->nodes[i].cu_ctx, 0, ctx->nodes[i].dev));
+    free_list_init(&ctx->nodes[i].free_list);
   }
-  CUDA_SUCCEED(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
 
-  free_list_init(&ctx->free_list);
-
-  ctx->max_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
-  ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
+  // All devices are identical, so use the properties from the first.
+  ctx->max_block_size = device_query(ctx->nodes[0].dev, MAX_THREADS_PER_BLOCK);
+  ctx->max_grid_size = device_query(ctx->nodes[0].dev, MAX_GRID_DIM_X);
   ctx->max_tile_size = sqrt(ctx->max_block_size);
   ctx->max_threshold = 0;
-  ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
+  ctx->lockstep_width = device_query(ctx->nodes[0].dev, WARP_SIZE);
 
   cuda_size_setup(ctx);
   cuda_module_setup(ctx, src_fragments);
@@ -459,10 +504,11 @@ void cuda_cleanup(struct cuda_context *ctx)
 {
   CUDA_SUCCEED(cuda_free_all(ctx));
   CUDA_SUCCEED(cuModuleUnload(ctx->module));
-  CUDA_SUCCEED(cuCtxDestroy(ctx->cu_ctx));
+  for (int i = 0; i < ctx->num_nodes; ++i)
+    CUDA_SUCCEED(cuCtxDestroy(ctx->nodes[i].cu_ctx));
 }
 
-CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
+CUresult cuda_alloc(struct cuda_context *ctx, int node, size_t min_size,
     const char *tag, CUdeviceptr *mem_out)
 {
   if (min_size < sizeof(int)) {
@@ -470,7 +516,7 @@ CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
   }
 
   size_t size;
-  if (free_list_find(&ctx->free_list, tag, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->nodes[node].free_list, tag, &size, mem_out) == 0) {
     if (size >= min_size) {
       return CUDA_SUCCESS;
     } else {
@@ -484,7 +530,7 @@ CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
   CUresult res = cuMemAlloc(mem_out, min_size);
   while (res == CUDA_ERROR_OUT_OF_MEMORY) {
     CUdeviceptr mem;
-    if (free_list_first(&ctx->free_list, &mem) == 0) {
+    if (free_list_first(&ctx->nodes[node].free_list, &mem) == 0) {
       res = cuMemFree(mem);
       if (res != CUDA_SUCCESS) {
         return res;
@@ -498,14 +544,14 @@ CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
   return res;
 }
 
-CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
+CUresult cuda_free(struct cuda_context *ctx, int node, CUdeviceptr mem,
     const char *tag)
 {
   size_t size;
   CUdeviceptr existing_mem;
 
   // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0) {
+  if (free_list_find(&ctx->nodes[node].free_list, tag, &size, &existing_mem) == 0) {
     CUresult res = cuMemFree(existing_mem);
     if (res != CUDA_SUCCESS) {
       return res;
@@ -514,7 +560,7 @@ CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
 
   CUresult res = cuMemGetAddressRange(NULL, &size, mem);
   if (res == CUDA_SUCCESS) {
-    free_list_insert(&ctx->free_list, size, mem, tag);
+    free_list_insert(&ctx->nodes[node].free_list, size, mem, tag);
   }
 
   return res;
@@ -522,11 +568,13 @@ CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
 
 CUresult cuda_free_all(struct cuda_context *ctx) {
   CUdeviceptr mem;
-  free_list_pack(&ctx->free_list);
-  while (free_list_first(&ctx->free_list, &mem) == 0) {
-    CUresult res = cuMemFree(mem);
-    if (res != CUDA_SUCCESS) {
-      return res;
+  for (int i = 0; i < ctx->num_nodes; ++i) {
+    free_list_pack(&ctx->nodes[i].free_list);
+    while (free_list_first(&ctx->nodes[i].free_list, &mem) == 0) {
+      CUresult res = cuMemFree(mem);
+      if (res != CUDA_SUCCESS) {
+        return res;
+      }
     }
   }
 
