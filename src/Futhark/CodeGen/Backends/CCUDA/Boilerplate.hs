@@ -222,6 +222,8 @@ generateContextFuns cfg kernel_names sizes = do
                           create_lock(&ctx->lock);
                           $stms:init_fields
 
+                          ctx->cuda.num_nodes = 1; // TODO: Change
+
                           cuda_setup(&ctx->cuda, cuda_program);
                           $stms:(map (loadKernelByName) kernel_names)
 

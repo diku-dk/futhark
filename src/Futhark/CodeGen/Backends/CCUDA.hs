@@ -110,14 +110,16 @@ readCUDAScalar _ _ _ space _ =
 
 allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED(cuda_alloc(&ctx->cuda, $exp:size, $exp:tag, &$exp:mem));|]
+  -- TODO: Replace 0 with node id
+  GC.stm [C.cstm|CUDA_SUCCEED(cuda_alloc(&ctx->cuda, 0, $exp:size, $exp:tag, &$exp:mem));|]
 allocateCUDABuffer _ _ _ "local" = return ()
 allocateCUDABuffer _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateCUDABuffer :: GC.Deallocate OpenCL ()
 deallocateCUDABuffer mem tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED(cuda_free(&ctx->cuda, $exp:mem, $exp:tag));|]
+  -- TODO: Replace 0 with node id
+  GC.stm [C.cstm|CUDA_SUCCEED(cuda_free(&ctx->cuda, 0, $exp:mem, $exp:tag));|]
 deallocateCUDABuffer _ _ "local" = return ()
 deallocateCUDABuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' memory space."
