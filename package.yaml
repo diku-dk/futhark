@@ -1,7 +1,15 @@
 name: futhark
 version: "0.10.0"
 synopsis: An optimising compiler for a functional, array-oriented language.
-description: See the website at https://futhark-lang.org
+description: |
+  Futhark is a small programming language designed to be compiled to
+  efficient parallel code. It is a statically typed, data-parallel,
+  and purely functional array language in the ML family, and comes
+  with a heavily optimising ahead-of-time compiler that presently
+  generates GPU code via CUDA and OpenCL, although the language itself
+  is hardware-agnostic.
+
+  For more information, see the website at https://futhark-lang.org
 homepage: https://futhark-lang.org
 maintainer: Troels Henriksen athas@sigkill.dk
 license: ISC
