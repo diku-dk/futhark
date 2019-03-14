@@ -38,11 +38,11 @@ compileProg module_name prog = do
              Assign (Var "default_group_size") None,
              Assign (Var "default_num_groups") None,
              Assign (Var "default_tile_size") None,
-             Assign (Var "sizes") $ Dict [],
              Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
              Escape pyValues,
              Escape pyFunctions,
-             Escape pyPanic]
+             Escape pyPanic,
+             Escape pyTuning]
       let imports = [Import "sys" Nothing,
                      Import "numpy" $ Just "np",
                      Import "ctypes" $ Just "ct",

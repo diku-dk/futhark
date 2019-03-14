@@ -4,6 +4,7 @@ module Futhark.CodeGen.Backends.GenericPython.Definitions
   , pyUtility
   , pyValues
   , pyPanic
+  , pyTuning
   ) where
 
 import Data.FileEmbed
@@ -19,3 +20,6 @@ pyValues = $(embedStringFile "rts/python/values.py")
 
 pyPanic :: String
 pyPanic = $(embedStringFile "rts/python/panic.py")
+
+pyTuning :: String
+pyTuning = $(embedStringFile "rts/python/tuning.py")

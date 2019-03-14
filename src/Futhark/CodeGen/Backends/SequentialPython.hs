@@ -27,7 +27,7 @@ compileProg module_name =
                    Import "numpy" $ Just "np",
                    Import "ctypes" $ Just "ct",
                    Import "time" Nothing]
-        defines = [Escape pyValues, Escape pyFunctions, Escape pyPanic]
+        defines = [Escape pyValues, Escape pyFunctions, Escape pyPanic, Escape pyTuning]
         operations :: GenericPython.Operations Imp.Sequential ()
         operations = GenericPython.defaultOperations
                      { GenericPython.opsCompiler = const $ return ()
