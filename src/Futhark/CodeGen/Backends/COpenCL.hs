@@ -131,6 +131,17 @@ cliOptions = [ Option { optionLongName = "platform"
                             panic(1, "Invalid argument for size option: %s\n", optarg);
                           }}|]
                       }
+             , Option { optionLongName = "tuning"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "FILE"
+                      , optionAction = [C.cstm|{
+                          char *fname = optarg;
+                          char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
+                                                                    futhark_context_config_set_size);
+                          if (ret != NULL) {
+                            panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                          }}|]
+                      }
              ]
 
 -- We detect the special case of writing a constant and turn it into a

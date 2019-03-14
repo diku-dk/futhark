@@ -1358,6 +1358,8 @@ static int perform_warmup = 0;
 static int num_runs = 1;
 static const char *entry_point = "main";
 
+$esc:tuning_h
+
 $func:option_parser
 
 $edecls:cli_entry_point_decls
@@ -1489,6 +1491,7 @@ $edecls:entry_point_decls
         values_h = $(embedStringFile "rts/c/values.h")
         timing_h = $(embedStringFile "rts/c/timing.h")
         lock_h = $(embedStringFile "rts/c/lock.h")
+        tuning_h = $(embedStringFile "rts/c/tuning.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
