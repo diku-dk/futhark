@@ -81,6 +81,17 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
                           exit(0);
                         }|]
                       }
+             , Option { optionLongName = "tuning"
+                 , optionShortName = Nothing
+                 , optionArgument = RequiredArgument "FILE"
+                 , optionAction = [C.cstm|{
+                     char *fname = optarg;
+                     char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
+                                                               futhark_context_config_set_size);
+                     if (ret != NULL) {
+                       panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                     }}|]
+                 }
              ]
 
 writeCUDAScalar :: GC.WriteScalar OpenCL ()
