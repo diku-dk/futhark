@@ -20,11 +20,16 @@ version = Paths_futhark.version
 
 -- | The version of Futhark that we are using, as a 'String'
 versionString :: String
-versionString = showVersion version ++ "\n" ++ gitversion
+versionString = showVersion version ++
+                if used_hash /= "UNKNOWN"
+                then "\n" ++ gitversion
+                else ""
   where
+    used_hash = take 7 $(gitHash)
+
     gitversion = concat ["git: "
                         , branch
-                        , take 7 $(gitHash)
+                        , used_hash
                         , " (", $(gitCommitDate), ")"
                         , dirty
                         ]
