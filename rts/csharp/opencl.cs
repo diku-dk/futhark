@@ -804,16 +804,16 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
         string size_name = ctx.OpenCL.Cfg.SizeNames[i];
         int max_value, default_value;
         max_value = default_value = 0;
-        if (size_class == "group_size") {
+        if (size_class.StartsWith("group_size")) {
             max_value = MaxGroupSize;
             default_value = ctx.OpenCL.Cfg.DefaultGroupSize;
-        } else if (size_class == "num_groups") {
+        } else if (size_class.StartsWith("num_groups")) {
             max_value = MaxGroupSize; // Futhark assumes this constraint.
             default_value = ctx.OpenCL.Cfg.DefaultNumGroups;
-        } else if (size_class == "tile_size"){
+        } else if (size_class.StartsWith("tile_size")){
             max_value = (int) Math.Sqrt(MaxGroupSize);
             default_value = ctx.OpenCL.Cfg.DefaultTileSize;
-        } else if (size_class == "threshold") {
+        } else if (size_class.StartsWith("threshold")) {
             max_value = 0; // No limit.
             default_value = ctx.OpenCL.Cfg.DefaultThreshold;
         } else {
