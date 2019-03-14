@@ -924,3 +924,14 @@ private void FutharkConfigSetSize(ref FutharkContextConfig config, string optarg
         panic(1, "Unknown size: {0}", name);
     }
 }
+
+private void FutharkConfigLoadTuning(ref FutharkContextConfig config, string fname)
+{
+    StreamReader file = new StreamReader(fname);
+    String line;
+    while((line = file.ReadLine()) != null)
+    {
+        FutharkConfigSetSize(ref config, line);
+    }
+    file.Close();
+}
