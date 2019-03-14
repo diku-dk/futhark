@@ -141,7 +141,7 @@ def initialise_opencl_object(self,
         if k in all_sizes:
             all_sizes[k]['value'] = v
         else:
-            raise Exception('Unknown size: {}'.format(k))
+            raise Exception('Unknown size: {}\nKnown sizes: {}'.format(k, ' '.join(all_sizes.keys())))
 
     self.sizes = {}
     for (k,v) in all_sizes.items():
