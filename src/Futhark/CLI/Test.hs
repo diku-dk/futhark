@@ -169,9 +169,13 @@ runTestCase (TestCase mode program testcase progs) =
         context ("Compiling with --backend=" <> T.pack backend) $ do
           compileTestProgram extra_options futhark backend program warnings
           mapM_ (testMetrics progs program) structures
-          unless (mode == Compile) $
+          unless (mode == Compile) $ do
+            (tuning_opts, _) <-
+              liftIO $ determineTuning (configTuning progs) program
+            let progs' = progs { configExtraOptions =
+                                 tuning_opts ++ configExtraOptions progs }
             context "Running compiled program" $
-            accErrors_ $ map (runCompiledEntry program progs) ios
+              accErrors_ $ map (runCompiledEntry program progs') ios
       unless (mode == Compile || mode == Compiled) $
         context "Interpreting" $
           accErrors_ $ map (runInterpretedEntry futhark program) ios
@@ -474,6 +478,7 @@ defaultConfig = TestConfig { configTestMode = Everything
                              , configRunner = ""
                              , configExtraOptions = []
                              , configExtraCompilerOptions = []
+                             , configTuning = Just "tuning"
                              }
                            , configLineOutput = False
                            }
@@ -483,6 +488,7 @@ data ProgConfig = ProgConfig
                   , configFuthark :: FilePath
                   , configRunner :: FilePath
                   , configExtraCompilerOptions :: [String]
+                  , configTuning :: Maybe String
                   , configExtraOptions :: [String]
                   -- ^ Extra options passed to the programs being run.
                   }

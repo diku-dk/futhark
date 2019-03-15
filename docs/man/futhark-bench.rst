@@ -80,6 +80,18 @@ OPTIONS
   Do not run the compiler, and instead assume that each benchmark
   program has already been compiled.  Use with caution.
 
+--no-tuning
+
+  Do not look for tuning files.
+
+--tuning=EXTENSION
+
+  For each program being run, look for a tuning file with this
+  extension, which is suffixed to the name of the program.  For
+  example, given ``--tuning=tuning`` (the default), the program
+  ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
+  exists.
+
 --exclude-case=TAG
 
   Do not run test cases that contain the given tag.  Cases marked with

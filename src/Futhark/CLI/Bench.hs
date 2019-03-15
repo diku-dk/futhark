@@ -45,11 +45,12 @@ data BenchOptions = BenchOptions
                    , optExcludeCase :: [String]
                    , optIgnoreFiles :: [Regex]
                    , optEntryPoint :: Maybe String
+                   , optTuning :: Maybe String
                    }
 
 initialBenchOptions :: BenchOptions
 initialBenchOptions = BenchOptions "c" "futhark" "" 10 [] Nothing (-1) False
-                      ["nobench", "disable"] [] Nothing
+                      ["nobench", "disable"] [] Nothing (Just "tuning")
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -158,9 +159,13 @@ compileBenchmark opts (program, spec) =
 runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO [BenchResult]
 runBenchmark opts (program, cases) = mapM forInputOutputs $ filter relevant cases
   where forInputOutputs (InputOutputs entry_name runs) = do
-          putStr $ "Results for " ++ program' ++ ":\n"
+          (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
+
+          putStr $ "Results for " ++ program' ++ tuning_desc ++ ":\n"
+          let opts' = opts { optExtraOptions =
+                               optExtraOptions opts ++ tuning_opts }
           BenchResult program' . catMaybes <$>
-            mapM (runBenchmarkCase opts program entry_name pad_to) runs
+            mapM (runBenchmarkCase opts' program entry_name pad_to) runs
           where program' = if entry_name == "main"
                            then program
                            else program ++ ":" ++ T.unpack entry_name
@@ -368,6 +373,13 @@ commandLineOptions = [
                 config { optEntryPoint = Just s })
       "NAME")
     "Only run this entry point."
+  , Option [] ["tuning"]
+    (ReqArg (\s -> Right $ \config -> config { optTuning = Just s })
+    "EXTENSION")
+    "Look for tuning files with this extension (defaults: .tuning)."
+  , Option [] ["no-tuning"]
+    (NoArg $ Right $ \config -> config { optTuning = Nothing })
+    "Do not load tuning files."
   ]
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000
