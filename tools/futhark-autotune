@@ -2,6 +2,17 @@
 #
 # A simple autotuner for calibrating parameters of Futhark programs.
 # Based on OpenTuner.  Requires Python 2.
+#
+# To save the result of futhark-autotune in a machine-readable format,
+# use the --tuning option.  For example, if tuning a program
+# 'matmul.fut' with the OpenCL backend, use:
+#
+#     $ futhark-autotune matmul.fut --tuning=matmul.fut.tuning
+#
+# When you later use 'futhark bench' or 'futhark test' to run
+# 'matmul.fut', the contents of 'matmul.fut.tuning' will automatically
+# be picked up.  See the manpages for futhark-bench/futhark-test for
+# more details.
 
 from __future__ import print_function
 
@@ -401,12 +412,18 @@ class FutharkTuner(MeasurementInterface):
 
   def save_final_config(self, configuration):
     """called at the end of tuning"""
-    filename = self.args.save_json
-    if filename != None:
-      print("Optimal parameter values written to %s: %s" % (filename, configuration.data))
-      self.manipulator().save_to_file(configuration.data, filename)
-    else:
-      print("--save-json not given, so not writing parameter values to file.")
+    json_filename = self.args.save_json
+    tuning_filename = self.args.tuning
+    if json_filename != None:
+      print("Optimal parameter values written in JSON format to %s." % json_filename)
+      self.manipulator().save_to_file(configuration.data, json_filename)
+    if tuning_filename != None:
+      print("Optimal parameter values written to %s." % tuning_filename)
+      with open(tuning_filename, 'w') as out:
+        for (k,v) in configuration.data.items():
+          out.write('{}={}\n'.format(k,v))
+    if not json_filename and not tuning_filename:
+      print("Neither --save-json or --tuning given, so not writing parameter values to file.")
     print("Reproduce with command:")
     print(self.futhark_bench_cmd(configuration.data))
 
@@ -419,6 +436,7 @@ if __name__ == '__main__':
   argparser.add_argument('--entry-point', '-e', type=str, metavar='NAME', default='main')
   argparser.add_argument('--pass-option', type=str, metavar='OPTION', action='append', default=[])
   argparser.add_argument('--save-json', type=str, metavar='FILENAME', default=None)
+  argparser.add_argument('--tuning', type=str, metavar='FILENAME', default=None)
   argparser.add_argument('--calc-timeout', action='store_true')
 
   args = argparser.parse_args()
