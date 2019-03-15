@@ -30,6 +30,9 @@ detected.
 OPTIONS
 =======
 
+-b, --binary
+  Output data in binary Futhark format (must precede --generate).
+
 -g type, --generate type
   Generate a value of the indicated type, e.g. ``-g i32`` or ``-g [10]f32``.
 
@@ -49,9 +52,6 @@ before data generation (--generate):
 
 --text
   Output data in text format (must precede --generate). Default.
-
--b, --binary
-  Output data in binary Futhark format (must precede --generate).
 
 -t, --type
   Output the types of values (textually) instead of the values
