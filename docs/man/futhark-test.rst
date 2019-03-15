@@ -158,6 +158,18 @@ OPTIONS
 
     futhark-bench prog.fut --backend=opencl --pass-option=-dHawaii
 
+--no-tuning
+
+  Do not look for tuning files.
+
+--tuning=EXTENSION
+
+  For each program being run, look for a tuning file with this
+  extension, which is suffixed to the name of the program.  For
+  example, given ``--tuning=tuning`` (the default), the program
+  ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
+  exists.
+
 EXAMPLES
 ========
 

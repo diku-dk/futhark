@@ -17,6 +17,7 @@ module Futhark.Test
        , compileProgram
        , runProgram
        , ensureReferenceOutput
+       , determineTuning
        , Mismatch
 
        , ProgramTest (..)
@@ -631,3 +632,15 @@ ensureReferenceOutput futhark compiler prog ios = do
               liftIO . fmap not . doesFileExist . file $ (entry, tr)
           | otherwise =
               return False
+
+-- | Determine the --tuning options to pass to the program.  The first
+-- argument is the extension of the tuning file, or 'Nothing' if none
+-- should be used.
+determineTuning :: MonadIO m => Maybe FilePath -> FilePath -> m ([String], String)
+determineTuning Nothing _ = return ([], mempty)
+determineTuning (Just ext) program = do
+  exists <- liftIO $ doesFileExist (program <.> ext)
+  if exists
+    then return (["--tuning", program <.> ext],
+                 " (using " <> takeFileName (program <.> ext) <> ")")
+    else return ([], mempty)
