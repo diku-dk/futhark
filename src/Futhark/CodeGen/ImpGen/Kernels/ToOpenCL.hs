@@ -203,7 +203,8 @@ genOpenClPrelude (OpenClRequirements ts) =
   -- Clang-based OpenCL implementations need this for 'static' to work.
   [ [C.cedecl|$esc:("#ifdef cl_clang_storage_class_specifiers")|]
   , [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable")|]
-  , [C.cedecl|$esc:("#endif")|]]
+  , [C.cedecl|$esc:("#endif")|]
+  , [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable")|]]
   ++
   [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64] ++
   [C.cunit|
