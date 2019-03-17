@@ -618,9 +618,6 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
           return $ bef ++ src'' ++ aft
         replace _ _ ve' _ = return ve'
 
-internaliseExp desc (E.Unzip e _ _) =
-  internaliseExp desc e
-
 internaliseExp desc (E.Unsafe e _) =
   local (\env -> env { envDoBoundsChecks = False }) $
   internaliseExp desc e
@@ -635,33 +632,6 @@ internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
           v' <- newVName "assert_res"
           letBindNames_ [v'] $ I.BasicOp $ I.SubExp v
           return $ I.Var v'
-
-internaliseExp _ (E.Zip _ e es _ loc) = do
-  e' <- internaliseExpToVars "zip_arg" $ TupLit (e:es) loc
-  case e' of
-    e_key:es_unchecked -> do
-      -- We will reshape all of es_unchecked' to have the same outer
-      -- size as ts.  We will not change any of the inner dimensions.
-      -- This will cause a runtime error if the outer sizes do not match,
-      -- thus preserving the semantics of zip().
-      w <- arraySize 0 <$> lookupType e_key
-      let reshapeToOuter e_unchecked' = do
-            unchecked_t <- lookupType e_unchecked'
-            case I.arrayDims unchecked_t of
-              outer:inner | w /= outer -> do
-                cmp <- letSubExp "zip_cmp" $ I.BasicOp $
-                       I.CmpOp (I.CmpEq I.int32) w outer
-                c   <- assertingOne $
-                       letExp "zip_assert" $ I.BasicOp $
-                       I.Assert cmp "arrays differ in length" (loc, mempty)
-                certifying c $ letExp (postfix e_unchecked' "_zip_res") $
-                  shapeCoerce (w:inner) e_unchecked'
-              _ -> return e_unchecked'
-      es' <- mapM reshapeToOuter es_unchecked
-      return $ map I.Var $ e_key : es'
-    [] -> return []
-
-  where postfix i s = baseString i ++ s
 
 internaliseExp desc (E.Map lam arr _ _) = do
   arr' <- internaliseExpToVars "map_arr" arr

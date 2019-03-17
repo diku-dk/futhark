@@ -1024,44 +1024,6 @@ checkExp (Index e idxes NoInfo loc) = do
   where isFix DimFix{} = True
         isFix _        = False
 
-checkExp (Zip i e es NoInfo loc) = do
-  let checkInput inp = do (arr_t, _) <- newArrayType (srclocOf e) "e" (1+i)
-                          unifies arr_t =<< checkExp inp
-  e' <- checkInput e
-  es' <- mapM checkInput es
-
-  e_ts <- mapM expType $ e':es'
-  ts <- forM (zip (e':es') e_ts) $ \(arr_e, arr_e_t) ->
-    case typeToRecordArrayElem =<< peelArray (i+1) arr_e_t of
-      Just t -> return t
-      Nothing -> typeError (srclocOf arr_e) $
-                 "Expected array with at least " ++ show (1+i) ++
-                 " dimensions, but got " ++ pretty arr_e_t ++ "."
-
-  let u = mconcat $ map (uniqueness . typeOf) $ e':es'
-      t = Array (mconcat $ map aliases e_ts) u
-          (ArrayRecordElem $ M.fromList $ zip tupleFieldNames ts)
-          (rank (1+i))
-  return $ Zip i e' es' (Info t) loc
-
-checkExp (Unzip e _ loc) = do
-  e' <- checkExp e
-  e_t <- expType e'
-  case e_t of
-    Array _ u (ArrayRecordElem fs) shape
-      | Just ets <- map (componentType shape u) <$> areTupleFields fs ->
-          return $ Unzip e' (map Info ets) loc
-    t ->
-      typeError loc $
-      "Argument to unzip is not an array of tuples, but " ++
-      pretty t ++ "."
-  where componentType shape u et =
-          case et of
-            RecordArrayElem et' ->
-              Array mempty u et' shape
-            RecordArrayArrayElem et' et_shape ->
-              Array mempty u et' (shape <> et_shape)
-
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc
 
