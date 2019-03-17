@@ -522,7 +522,8 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
         else do
           -- Lift lambda to top-level function definition.
           let params = [closure_pat, pat']
-              rettype = buildRetType closure_env params e0_t $ typeOf e0'
+              rettype = buildRetType closure_env params e0_t $
+                        typeOf e0' `addAliases` (<>aliases (typeOf e0))
 
               -- Embed some information about the original function
               -- into the name of the lifted function, to make the
@@ -548,7 +549,8 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
     -- a higher-order term.
     DynamicFun _ sv ->
       let (argtypes', rettype) = dynamicFunType sv argtypes
-          apply_e = Apply e1' e2' d (Info $ foldFunType argtypes' rettype) loc
+          apply_e = Apply e1' e2' d (Info $ foldFunType argtypes' rettype
+                                    `setAliases` aliases ret) loc
       in return (apply_e, sv)
 
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
@@ -672,7 +674,7 @@ buildRetType env pats = comb
         comb (Record fs_annot) (Record fs_got) =
           Record $ M.intersectionWith comb fs_annot fs_got
         comb Arrow{} t = vacuousShapeAnnotations $ descend t
-        comb got _ = fromStruct got
+        comb got et = descend $ fromStruct got `setUniqueness` uniqueness et `setAliases` aliases et
 
         descend t@Array{}
           | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
