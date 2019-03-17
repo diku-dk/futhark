@@ -125,11 +125,6 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (GenReduce hist op ne bfun img loc) =
     GenReduce <$> mapOnExp tv hist <*> mapOnExp tv op <*> mapOnExp tv ne
     <*> mapOnExp tv bfun <*> mapOnExp tv img <*> pure loc
-  astMap tv (Zip i e es t loc) =
-    Zip i <$> mapOnExp tv e <*> mapM (mapOnExp tv) es <*>
-    traverse (mapOnCompType tv) t <*> pure loc
-  astMap tv (Unzip e ts loc) =
-    Unzip <$> mapOnExp tv e <*> mapM (traverse $ mapOnCompType tv) ts <*> pure loc
   astMap tv (Unsafe e loc) =
     Unsafe <$> mapOnExp tv e <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =

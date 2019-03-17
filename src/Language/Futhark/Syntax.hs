@@ -711,14 +711,6 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
-            | Zip Int (ExpBase f vn) [ExpBase f vn] (f CompType) SrcLoc
-            -- ^ Conventional zip taking nonzero arrays as arguments.
-            -- All arrays must have the exact same length.
-
-            | Unzip (ExpBase f vn) [f CompType] SrcLoc
-            -- ^ Unzip that can unzip to tuples of arbitrary size.
-            -- The types are the elements of the tuple.
-
             | Unsafe (ExpBase f vn) SrcLoc
             -- ^ Explore the Danger Zone and elide safety checks on
             -- array operations and other assertions during execution
@@ -768,8 +760,6 @@ instance Located (ExpBase f vn) where
   locOf (Map _ _ _ loc)                = locOf loc
   locOf (Reduce _ _ _ _ pos)           = locOf pos
   locOf (GenReduce _ _ _ _ _ pos)      = locOf pos
-  locOf (Zip _ _ _ _ loc)              = locOf loc
-  locOf (Unzip _ _ pos)                = locOf pos
   locOf (Scan _ _ _ pos)               = locOf pos
   locOf (Filter _ _ pos)               = locOf pos
   locOf (Partition _ _ _ loc)          = locOf loc

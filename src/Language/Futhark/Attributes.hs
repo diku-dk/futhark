@@ -456,9 +456,6 @@ typeOf (LetWith dest _ _ _ body _) =
 typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = removeShapeAnnotations t
-typeOf (Zip _ _ _ (Info t) _) = t
-typeOf (Unzip _ ts _) =
-  tupleRecord $ map unInfo ts
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (Map _ _ (Info t) _) = t `setUniqueness` Unique

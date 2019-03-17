@@ -367,14 +367,6 @@ transformExp (GenReduce e1 e2 e3 e4 e5 loc) =
     <*> transformExp e5 -- input image
     <*> pure loc
 
-transformExp (Zip i e1 es t loc) = do
-  e1' <- transformExp e1
-  es' <- mapM transformExp es
-  return $ Zip i e1' es' t loc
-
-transformExp (Unzip e0 tps loc) =
-  Unzip <$> transformExp e0 <*> pure tps <*> pure loc
-
 transformExp (Unsafe e1 loc) =
   Unsafe <$> transformExp e1 <*> pure loc
 
