@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     if run with invalid options.  The `py` and `pyopencl` backends
     already did this.
 
+  * Generated executables now support a `--tuning` flag for passing
+    many tuned sizes in a file.
+
 ### Removed
 
   * The old `futhark-*` executables have been removed.
