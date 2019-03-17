@@ -40,7 +40,7 @@ import           Data.Foldable
 import           Futhark.MonadFreshNames
 import           Language.Futhark
 import           Language.Futhark.Traversals
-import           Language.Futhark.TypeChecker.Monad (TypeBinding(..))
+import           Language.Futhark.Semantic (TypeBinding(..))
 import           Language.Futhark.TypeChecker.Types
 
 -- | The monomorphization monad reads 'PolyBinding's and writes 'ValBinding's.
@@ -547,7 +547,7 @@ typeSubstsM loc orig_t1 orig_t2 =
           sub False t1a t2a
           sub pos t1b t2b
 
-        sub _ t1 t2 = error $ unlines ["typeSubsts: mismatched types:", pretty t1, pretty t2]
+        sub _ t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", pretty t1, pretty t2]
 
         addSubst pos (TypeName _ v) t = do
           exists <- gets $ M.member v
@@ -581,24 +581,23 @@ toPolyBinding (ValBind _ name retdecl (Info rettype) tparams params body _ loc) 
 removeTypeVariables :: ValBind -> MonoM ValBind
 removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
-  let substPatternType = fromStruct . substituteTypes subs . toStruct
-      mapper = ASTMapper {
+  let mapper = ASTMapper {
           mapOnExp         = astMap mapper
         , mapOnName        = pure
         , mapOnQualName    = pure
         , mapOnType        = pure . removeShapeAnnotations .
                              substituteTypes subs . vacuousShapeAnnotations
-        , mapOnCompType    = pure . fromStruct . removeShapeAnnotations .
+        , mapOnCompType    = pure . removeShapeAnnotations .
                              substituteTypes subs .
-                             vacuousShapeAnnotations . toStruct
+                             vacuousShapeAnnotations
         , mapOnStructType  = pure . substituteTypes subs
-        , mapOnPatternType = pure . substPatternType
+        , mapOnPatternType = pure . substituteTypes subs
         }
 
   body' <- astMap mapper body
 
   return valbind { valBindRetType = Info $ substituteTypes subs rettype
-                 , valBindParams  = map (substPattern substPatternType) pats
+                 , valBindParams  = map (substPattern $ substituteTypes subs) pats
                  , valBindBody    = body'
                  }
 
