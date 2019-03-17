@@ -237,7 +237,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
      then equals </> indent 2 (ppr e)
      else equals <+> align (ppr e)) </>
     (case body of LetPat{} -> ppr body
-                  _        -> text "in" <+> ppr body)
+                  _        -> text "in" <+> align (ppr body))
     where linebreak = case e of
                         Map{}       -> True
                         Reduce{}    -> True
