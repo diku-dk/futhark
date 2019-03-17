@@ -375,18 +375,18 @@ data TypeSub = TypeSub TypeBinding
 
 type TypeSubs = M.Map VName TypeSub
 
-substituteTypes :: TypeSubs -> StructType -> StructType
+substituteTypes :: Monoid als => TypeSubs -> TypeBase (DimDecl VName) als -> TypeBase (DimDecl VName) als
 substituteTypes substs ot = case ot of
   Array als u at shape ->
     maybe nope (`addAliases` (<>als)) $
     arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
   Prim t -> Prim t
-  TypeVar () u v targs
+  TypeVar als u v targs
     | Just (TypeSub (TypeAbbr _ ps t)) <-
         M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
-        applyType ps t (map substituteInTypeArg targs)
-        `setUniqueness` u
-    | otherwise -> TypeVar () u v $ map substituteInTypeArg targs
+        applyType ps (t `setAliases` mempty) (map substituteInTypeArg targs)
+        `setUniqueness` u `addAliases` (<>als)
+    | otherwise -> TypeVar als u v $ map substituteInTypeArg targs
   Record ts ->
     Record $ fmap (substituteTypes substs) ts
   Arrow als v t1 t2 ->
@@ -399,9 +399,9 @@ substituteTypes substs ot = case ot of
         substituteTypesInArrayElem (ArrayPolyElem v targs)
           | Just (TypeSub (TypeAbbr _ ps t)) <-
               M.lookup (qualLeaf (qualNameFromTypeName v)) substs =
-              applyType ps t (map substituteInTypeArg targs)
+              applyType ps (t `setAliases` mempty) (map substituteInTypeArg targs)
           | otherwise =
-              TypeVar () Nonunique v (map substituteInTypeArg targs)
+              TypeVar mempty Nonunique v (map substituteInTypeArg targs)
         substituteTypesInArrayElem (ArrayRecordElem ts) =
           Record ts'
           where ts' = fmap (substituteTypes substs . recordArrayElemToType) ts
@@ -424,7 +424,8 @@ substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
 substituteTypesInBoundV substs (BoundV tps t) =
   BoundV tps (substituteTypes substs t)
 
-applyType :: [TypeParam] -> StructType -> [StructTypeArg] -> StructType
+applyType :: Monoid als =>
+             [TypeParam] -> TypeBase (DimDecl VName) als -> [StructTypeArg] -> TypeBase (DimDecl VName) als
 applyType ps t args =
   substituteTypes substs t
   where substs = M.fromList $ zipWith mkSubst ps args
