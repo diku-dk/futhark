@@ -111,6 +111,22 @@ def initialise_opencl_object(self,
     self.max_num_groups = 0
     self.free_list = {}
 
+    if 'default_group_size' in sizes:
+        default_group_size = sizes['default_group_size']
+        del sizes['default_group_size']
+
+    if 'default_num_groups' in sizes:
+        default_num_groups = sizes['default_num_groups']
+        del sizes['default_num_groups']
+
+    if 'default_tile_size' in sizes:
+        default_tile_size = sizes['default_tile_size']
+        del sizes['default_tile_size']
+
+    if 'default_threshold' in sizes:
+        default_threshold = sizes['default_threshold']
+        del sizes['default_threshold']
+
     default_group_size_set = default_group_size != None
     default_tile_size_set = default_tile_size != None
     default_sizes = apply_size_heuristics(self, size_heuristics,

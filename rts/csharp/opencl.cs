@@ -919,7 +919,19 @@ private void FutharkConfigSetSize(ref FutharkContextConfig config, string optarg
 
     var name = name_and_value[0];
     var value = Convert.ToInt32(name_and_value[1]);
-    if (!FutharkContextConfigSetSize(ref config, name, value))
+    if (name == "default_num_groups") {
+        config.OpenCL.DefaultNumGroups = value;
+    }
+    else if (name == "default_group_size") {
+        config.OpenCL.DefaultGroupSize = value;
+    }
+    else if (name == "default_tile_size") {
+        config.OpenCL.DefaultTileSize = value;
+    }
+    else if (name == "default_threshold") {
+        config.OpenCL.DefaultThreshold = value;
+    }
+    else if (!FutharkContextConfigSetSize(ref config, name, value))
     {
         panic(1, "Unknown size: {0}", name);
     }

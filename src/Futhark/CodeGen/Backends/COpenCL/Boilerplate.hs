@@ -170,6 +170,27 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                              return 0;
                            }
                          }
+
+                         if (strcmp(size_name, "default_group_size") == 0) {
+                           cfg->opencl.default_group_size = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_num_groups") == 0) {
+                           cfg->opencl.default_num_groups = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_threshold") == 0) {
+                           cfg->opencl.default_threshold = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_tile_size") == 0) {
+                           cfg->opencl.default_tile_size = size_value;
+                           return 0;
+                         }
+
                          return 1;
                        }|])
 
