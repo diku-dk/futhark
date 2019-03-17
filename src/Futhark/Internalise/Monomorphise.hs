@@ -32,8 +32,10 @@ import           Control.Monad.RWS
 import           Control.Monad.State
 import           Control.Monad.Writer
 import           Data.Bitraversable
+import           Data.Bifunctor
 import           Data.Loc
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import           Data.Foldable
 
@@ -143,6 +145,19 @@ transformFName fname t
           addLifted fname t fname'
           return fname'
 
+-- | This carries out record replacements in the alias information of a type.
+transformType :: TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
+transformType t = do
+  rrs <- asks envRecordReplacements
+  let replace (AliasBound v) | Just d <- M.lookup v rrs =
+                                 S.fromList $ map (AliasBound . fst) $ M.elems d
+      replace x = S.singleton x
+  -- As an attempt at an optimisation, only transform the aliases if
+  -- they refer to a variable we have record-replaced.
+  return $ if any ((`M.member` rrs) . aliasVar) $ aliases t
+           then bimap id (mconcat . map replace . S.toList) t
+           else t
+
 -- | Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
 transformExp e@Literal{} = return e
@@ -162,9 +177,10 @@ transformExp (RecordLit fs loc) =
   RecordLit <$> mapM transformField fs <*> pure loc
   where transformField (RecordFieldExplicit name e loc') =
           RecordFieldExplicit name <$> transformExp e <*> pure loc'
-        transformField (RecordFieldImplicit v t _) =
+        transformField (RecordFieldImplicit v t _) = do
+          t' <- traverse transformType t
           transformField $ RecordFieldExplicit (baseName v)
-          (Var (qualName v) (vacuousShapeAnnotations <$> t) loc) loc
+            (Var (qualName v) (vacuousShapeAnnotations <$> t') loc) loc
 
 transformExp (ArrayLit es tp loc) =
   ArrayLit <$> mapM transformExp es <*> pure tp <*> pure loc
@@ -179,13 +195,15 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
   maybe_fs <- lookupRecordReplacement fname
   case maybe_fs of
     Just fs -> do
-      let toField (f, (f_v, f_t)) =
-            let f_v' = Var (qualName f_v) (Info $ vacuousShapeAnnotations f_t) loc
-            in RecordFieldExplicit f f_v' loc
-      return $ RecordLit (map toField $ M.toList fs) loc
+      let toField (f, (f_v, f_t)) = do
+            f_t' <- transformType f_t
+            let f_v' = Var (qualName f_v) (Info $ vacuousShapeAnnotations f_t') loc
+            return $ RecordFieldExplicit f f_v' loc
+      RecordLit <$> mapM toField (M.toList fs) <*> pure loc
     Nothing -> do
       fname' <- transformFName fname (toStructural t)
-      return $ Var (QualName qs fname') (Info t) loc
+      t' <- transformType t
+      return $ Var (QualName qs fname') (Info t') loc
 
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
@@ -216,7 +234,8 @@ transformExp (If e1 e2 e3 tp loc) = do
   e1' <- transformExp e1
   e2' <- transformExp e2
   e3' <- transformExp e3
-  return $ If e1' e2' e3' tp loc
+  tp' <- traverse transformType tp
+  return $ If e1' e2' e3' tp' loc
 
 transformExp (Apply e1 e2 d tp loc) =
   -- We handle on an ad-hoc basis certain polymorphic higher-order
@@ -257,7 +276,8 @@ transformExp (Apply e1 e2 d tp loc) =
     _ -> do
       e1' <- transformExp e1
       e2' <- transformExp e2
-      return $ Apply e1' e2' d tp loc
+      tp' <- traverse transformType tp
+      return $ Apply e1' e2' d tp' loc
   where intrinsic s (QualName _ v) =
           baseTag v <= maxIntrinsicTag && baseName v == nameFromString s
 
@@ -375,7 +395,7 @@ transformExp (Assert e1 e2 desc loc) =
 
 transformExp e@VConstr0{} = return e
 transformExp (Match e cs t loc) =
-  Match <$> transformExp e <*> mapM transformCase cs <*> pure t <*> pure loc
+  Match <$> transformExp e <*> mapM transformCase cs <*> traverse transformType t <*> pure loc
 
 transformCase :: Case -> MonoM Case
 transformCase (CasePat p e loc) = do
