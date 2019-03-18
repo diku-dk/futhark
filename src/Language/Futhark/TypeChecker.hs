@@ -168,6 +168,12 @@ bindingTypeParams tparams = localEnv env
           mempty { envTypeTable =
                      M.singleton v $ TypeAbbr l [] $ TypeVar () Nonunique (typeName v) [] }
 
+-- In this function, after the recursion, we add the Env of the
+-- current Spec *after* the one that is returned from the recursive
+-- call.  This implements the behaviour that specs later in a module
+-- type can override those earlier (it rarely matters, but it affects
+-- the specific structure of substitutions in case some module type is
+-- redundantly imported multiple times).
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName])
 
 checkSpecs [] = return (mempty, mempty, [])
@@ -195,7 +201,7 @@ checkSpecs (TypeAbbrSpec tdec : specs) =
     (tenv, tdec') <- checkTypeBind tdec
     (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     return (abstypes,
-            tenv <> env,
+            env <> tenv,
             TypeAbbrSpec tdec' : specs')
 
 checkSpecs (TypeSpec l name ps doc loc : specs) =
@@ -211,7 +217,7 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
                }
     (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     return (M.insert (qualName name') l abstypes,
-            tenv <> env,
+            env <> tenv,
             TypeSpec l name' ps' doc loc : specs')
 
 checkSpecs (ModSpec name sig doc loc : specs) =
@@ -223,7 +229,7 @@ checkSpecs (ModSpec name sig doc loc : specs) =
                       }
     (abstypes, env, specs') <- localEnv senv $ checkSpecs specs
     return (M.mapKeys (qualify name') (mtyAbs mty) <> abstypes,
-            senv <> env,
+            env <> senv,
             ModSpec name' sig' doc loc : specs')
 
 checkSpecs (IncludeSpec e loc : specs) = do
@@ -232,8 +238,8 @@ checkSpecs (IncludeSpec e loc : specs) = do
   mapM_ (warnIfShadowing . fmap baseName) $ M.keys e_abs
 
   (abstypes, env, specs') <- localEnv e_env $ checkSpecs specs
-  return (e_abs <> abstypes,
-          e_env <> env,
+  return (abstypes <> e_abs,
+          env <> e_env,
           IncludeSpec e' loc : specs')
   where warnIfShadowing qn =
           (lookupType loc qn >> warnAbout qn)
