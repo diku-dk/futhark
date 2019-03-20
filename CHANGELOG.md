@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     `reduce_by_index` (in most cases the bug was hidden by subsequent
     C compiler optimisations).
 
+  * The result of an anonymous function is now also forbidden from
+    aliasing a global variable, just as with named functions.
+
 ## [0.9.1]
 
 ### Added
