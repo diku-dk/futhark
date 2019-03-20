@@ -1046,14 +1046,15 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
     maybe_retdecl' <- traverse checkTypeDecl maybe_retdecl
     (body', closure) <- tapOccurences $ noUnique $
                         checkFunBody body (unInfo . expandedType <$> maybe_retdecl') loc
-    (maybe_retdecl'', rettype) <- case maybe_retdecl' of
-      Just retdecl'@(TypeDecl _ (Info st)) -> return (Just retdecl', st)
-      Nothing -> do
-        body_t <- expType body'
-        return (Nothing, inferReturnUniqueness params' body_t)
+    body_t <- expType body'
+    let (maybe_retdecl'', rettype) =
+          case maybe_retdecl' of
+            Just retdecl'@(TypeDecl _ (Info st)) -> (Just retdecl', st)
+            Nothing -> (Nothing, inferReturnUniqueness params' body_t)
+
+    checkGlobalAliases params' body_t loc
 
     closure' <- lexicalClosure params' closure
-
     return $ Lambda tparams' params' body' maybe_retdecl'' (Info (closure', rettype)) loc
 
 checkExp (OpSection op _ loc) = do
@@ -1620,21 +1621,8 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
-      vtable <- asks scopeVtable
-      let isLocal v = case v `M.lookup` vtable of
-                        Just (BoundV Local _ _) -> True
-                        _ -> False
-      let als = filter (not . isLocal) $ S.toList $
-                boundArrayAliases body_t `S.difference`
-                S.map identName (mconcat (map patIdentSet params'))
-      case als of
-        v:_ | not $ null params ->
-          typeError loc $
-          unlines [ "Function result aliases the free variable " <>
-                    quote (prettyName v) <> "."
-                  , "Use " ++ quote "copy" ++ " to break the aliasing."]
-        _ ->
-          return (fname', tparams'', params'', maybe_retdecl'', rettype, body')
+      checkGlobalAliases params'' body_t loc
+      return (fname', tparams'', params'', maybe_retdecl'', rettype, body')
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -1667,6 +1655,25 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
         returnAliasing expected got =
           [(uniqueness expected, S.map aliasVar $ aliases got)]
+
+checkGlobalAliases :: [Pattern] -> CompType -> SrcLoc -> TermTypeM ()
+checkGlobalAliases params body_t loc = do
+  vtable <- asks scopeVtable
+  let isLocal v = case v `M.lookup` vtable of
+                    Just (BoundV Local _ _) -> True
+                    _ -> False
+  let als = filter (not . isLocal) $ S.toList $
+            boundArrayAliases body_t `S.difference`
+            S.map identName (mconcat (map patIdentSet params))
+  case als of
+    v:_ | not $ null params ->
+      typeError loc $
+      unlines [ "Function result aliases the free variable " <>
+                quote (prettyName v) <> "."
+              , "Use " ++ quote "copy" ++ " to break the aliasing."]
+    _ ->
+      return ()
+
 
 inferReturnUniqueness :: [Pattern] -> CompType -> StructType
 inferReturnUniqueness params t =
