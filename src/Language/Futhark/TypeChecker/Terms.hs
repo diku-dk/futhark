@@ -424,14 +424,14 @@ badLetWithValue loc =
 returnAliased :: MonadTypeChecker m => Name -> Name -> SrcLoc -> m ()
 returnAliased fname name loc =
   throwError $ TypeError loc $
-  "Unique return value of function " ++ nameToString fname ++
-  " is aliased to " ++ pretty name ++ ", which is not consumed."
+  "Unique return value of function " ++ quote (pretty fname) ++
+  " is aliased to " ++ quote (pretty name) ++ ", which is not consumed."
 
 uniqueReturnAliased :: MonadTypeChecker m => Name -> SrcLoc -> m a
 uniqueReturnAliased fname loc =
   throwError $ TypeError loc $
-  "A unique tuple element of return value of " ++
-  quote (nameToString fname) ++ " is aliased to some other tuple component."
+  "A unique tuple element of return value of `" ++
+  quote (pretty fname) ++ "` is aliased to some other tuple component."
 
 --- Basic checking
 
@@ -1218,8 +1218,8 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       let checkMergeReturn (Id pat_v (Info pat_v_t) _) t
             | unique pat_v_t,
               v:_ <- S.toList $ S.map aliasVar (aliases t) `S.intersection` bound_outside =
-                lift $ typeError loc $ "Loop return value corresponding to merge parameter `" ++
-                quote (prettyName pat_v) ++ "` aliases " ++ prettyName v ++ "."
+                lift $ typeError loc $ "Loop return value corresponding to merge parameter " ++
+                quote (prettyName pat_v) ++ " aliases " ++ prettyName v ++ "."
             | otherwise = do
                 (cons,obs) <- get
                 unless (S.null $ aliases t `S.intersection` cons) $
