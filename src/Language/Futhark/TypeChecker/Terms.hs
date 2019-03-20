@@ -1228,7 +1228,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
                 when (unique pat_v_t &&
                       not (S.null (aliases t `S.intersection` (cons<>obs)))) $
                   lift $ typeError loc $ "Loop return value for consuming merge parameter " ++
-                  quote (prettyName pat_v) ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
+                  quote (prettyName pat_v) ++ " aliases previously returned value."
                 if unique pat_v_t
                   then put (cons<>aliases t, obs)
                   else put (cons, obs<>aliases t)
