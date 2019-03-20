@@ -1,6 +1,6 @@
 -- A partially applied function whose closure has been consumed.
 -- ==
--- error: consumed
+-- error: consumable
 
 let const x _ = x[0]
 

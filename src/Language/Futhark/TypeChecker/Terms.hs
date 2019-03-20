@@ -959,7 +959,7 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
 
     return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
 
-checkExp (LetWith dest src idxes ve body pos) = do
+checkExp (LetWith dest src idxes ve body loc) = do
   (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
   let elemt = stripArray (length $ filter isFix idxes) t
   sequentially (checkIdent src) $ \src' _ -> do
@@ -969,18 +969,26 @@ checkExp (LetWith dest src idxes ve body pos) = do
     void $ unifies t src''
 
     unless (unique $ unInfo $ identType src') $
-      typeError pos $ "Source " ++ quote (pretty (identName src)) ++
-      " has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
+      typeError loc $ "Source " ++ quote (pretty (identName src)) ++
+      " has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique."
+    vtable <- asks scopeVtable
+    forM_ (aliases $ unInfo $ identType src') $ \v ->
+      case aliasVar v `M.lookup` vtable of
+        Just (BoundV Local _ v_t)
+          | not $ unique v_t ->
+              typeError loc $ "Source " ++ quote (pretty (identName src)) ++
+              " aliases " ++ quote (prettyName (aliasVar v)) ++ ", which is not consumable."
+        _ -> return ()
 
     idxes' <- mapM checkDimIndex idxes
     sequentially (unifies elemt =<< checkExp ve) $ \ve' _ -> do
       ve_t <- expType ve'
       when (AliasBound (identName src') `S.member` aliases ve_t) $
-        badLetWithValue pos
+        badLetWithValue loc
 
       bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
         body' <- consuming src' $ checkExp body
-        return $ LetWith dest' src' idxes' ve' body' pos
+        return $ LetWith dest' src' idxes' ve' body' loc
   where isFix DimFix{} = True
         isFix _        = False
 
