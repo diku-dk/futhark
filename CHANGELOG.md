@@ -59,6 +59,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The result of an anonymous function is now also forbidden from
     aliasing a global variable, just as with named functions.
 
+  * Parallel scans now work correctly when using a CPU OpenCL
+    implementation.
+
 ## [0.9.1]
 
 ### Added
