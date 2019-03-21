@@ -522,8 +522,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
         else do
           -- Lift lambda to top-level function definition.
           let params = [closure_pat, pat']
-              rettype = buildRetType closure_env params e0_t $
-                        typeOf e0' `addAliases` (<>aliases (typeOf e0))
+              rettype = buildRetType closure_env params e0_t $ typeOf e0'
 
               -- Embed some information about the original function
               -- into the name of the lifted function, to make the
