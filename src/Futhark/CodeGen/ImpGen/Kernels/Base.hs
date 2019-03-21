@@ -877,6 +877,8 @@ groupScan constants seg_flag w lam arrs = do
   sComment "restore correct values for first block" $
     sWhen is_first_block write_final_result
 
+  sOp Imp.LocalBarrier
+
 inBlockScan :: Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
             -> Imp.Exp
             -> Imp.Exp
