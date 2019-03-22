@@ -55,4 +55,4 @@ OPTIONS
 SEE ALSO
 ========
 
-futharki(1), futhark-test(1), futhark-c(1)
+futhark-test(1), futhark-cuda(1), futhark-c(1)

@@ -24,7 +24,7 @@ pipeline is used, and ``csc`` is invoked with ``-lib:$MONO_PATH``,
 The resulting program will read the arguments to the entry point
 (``main`` by default) from standard input and print its return value
 on standard output.  The arguments are read and printed in Futhark
-syntax, just like futharki(1).
+syntax.
 
 OPTIONS
 =======
