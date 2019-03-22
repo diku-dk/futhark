@@ -69,6 +69,11 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
                       , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
                       }
+             , Option { optionLongName = "nvrtc-option"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "OPT"
+                      , optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
+                      }
              , Option { optionLongName = "print-sizes"
                       , optionShortName = Nothing
                       , optionArgument = NoArgument
