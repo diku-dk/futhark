@@ -60,14 +60,11 @@ compiled to libraries.  If an entry point *returns* any such value,
 its printed representation is unspecified.  As a special case, an
 entry point is allowed to return a flat tuple.
 
-Instead of compiling, there is also an interpreter, ``futharki``.  Be
-aware that it is very slow, and does not produce better error messages
-than the compiler.  **Note:** If you run ``futharki`` without any
-options, you will see something that looks deceptively like a `REPL`_,
-but it is not yet finished, and only marginally useful in its present
-state.
+Instead of compiling, there is also an interpreter, accessible as
+``futhark run`` and ``futhark repl``.  The latter is an interactive
+prompt, useful for experimenting with Futhark expressions.  Be aware
+that the interpreter runs code very slowly.
 
-.. _REPL: https://en.wikipedia.org/wiki/Read%E2%80%93eval%E2%80%93print_loop
 
 .. _executable-options:
 
