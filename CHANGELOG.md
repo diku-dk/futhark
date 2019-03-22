@@ -68,6 +68,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Parallel scans now work correctly when using a CPU OpenCL
     implementation.
 
+  * `reduce_by_index` was broken on newer NVIDIA GPUs when using fancy
+    operators.  This has been fixed.
+
 ## [0.9.1]
 
 ### Added
