@@ -157,8 +157,9 @@ first class.  See `Higher-order functions`_ for the details.
    stringlit: '"' `stringchar` '"'
    stringchar: <any source character except "\" or newline or quotes>
 
-String literals are supported, but only as syntactic sugar for arrays
-of ``i32`` values.  There is no character type in Futhark.
+String literals are supported, but only as syntactic sugar for UTF-8
+encoded arrays of ``u8`` values.  There is no character type in
+Futhark.
 
 Declarations
 ------------

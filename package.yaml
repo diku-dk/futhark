@@ -74,6 +74,7 @@ dependencies:
   - temporary
   - aeson
   - haskeline
+  - utf8-string >= 1
 
 when:
 - condition: "!impl(ghc >= 8.0)"
