@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Generated executables now support a `--tuning` flag for passing
     many tuned sizes in a file.
 
+  * Executables generated with the `cuda` backend now take an
+    `--nvrtc-option` option.
+
 ### Removed
 
   * The old `futhark-*` executables have been removed.

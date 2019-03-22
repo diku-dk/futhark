@@ -209,6 +209,14 @@ The following options are supported by executables generated the
 
     Load compiled PTX code from the indicated file.
 
+  ``--nvrtc-option=OPT``
+
+    Add the given option to the command line used to compile CUDA
+    kernels with NVRTC.  The list supported options varies on the
+    version of CUDA being used and is `found in the NVRTC
+    documentation
+    <https://docs.nvidia.com/cuda/nvrtc/index.html#group__options>`_.
+
 Compiling to Library
 --------------------
 

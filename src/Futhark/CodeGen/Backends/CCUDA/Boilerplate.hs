@@ -77,6 +77,8 @@ generateConfigFuns sizes = do
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s { struct cuda_config cu_cfg;
                               size_t sizes[$int:num_sizes];
+                              int num_nvrtc_opts;
+                              const char **nvrtc_opts;
                             };|])
 
   let size_value_inits = map (\i -> [C.cstm|cfg->sizes[$int:i] = 0;|])
@@ -89,6 +91,9 @@ generateConfigFuns sizes = do
                            return NULL;
                          }
 
+                         cfg->num_nvrtc_opts = 0;
+                         cfg->nvrtc_opts = malloc(sizeof(const char*));
+                         cfg->nvrtc_opts[0] = NULL;
                          $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
                                           size_names, size_vars,
@@ -99,7 +104,17 @@ generateConfigFuns sizes = do
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg);|],
      [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         free(cfg->nvrtc_opts);
                          free(cfg);
+                       }|])
+
+  GC.publicDef_ "context_config_add_nvrtc_option" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt) {
+                         cfg->nvrtc_opts[cfg->num_nvrtc_opts] = opt;
+                         cfg->num_nvrtc_opts++;
+                         cfg->nvrtc_opts = realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts+1) * sizeof(const char*));
+                         cfg->nvrtc_opts[cfg->num_nvrtc_opts] = NULL;
                        }|])
 
   GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
@@ -222,7 +237,7 @@ generateContextFuns cfg kernel_names sizes = do
                           create_lock(&ctx->lock);
                           $stms:init_fields
 
-                          cuda_setup(&ctx->cuda, cuda_program);
+                          cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
                           $stms:(map (loadKernelByName) kernel_names)
 
                           $stms:final_inits
