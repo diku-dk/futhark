@@ -462,7 +462,7 @@ expandRecordPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
 expandRecordPattern (Id v (Info (Record fs)) loc) = do
   let fs' = M.toList fs
   (fs_ks, fs_ts) <- fmap unzip $ forM fs' $ \(f, ft) ->
-    (,) <$> newVName (nameToString f) <*> pure ft
+    (,) <$> newVName (nameToString f) <*> transformType ft
   return (RecordPattern (zip (map fst fs')
                              (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
                         loc,
@@ -478,7 +478,9 @@ expandRecordPattern (RecordPattern fields loc) = do
 expandRecordPattern (PatternParens pat loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternParens pat' loc, rr)
-expandRecordPattern (Wildcard t loc) = return (Wildcard t loc, mempty)
+expandRecordPattern (Wildcard t loc) = do
+  t' <- traverse transformType t
+  return (Wildcard t' loc, mempty)
 expandRecordPattern (PatternAscription pat td loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternAscription pat' td loc, rr)
