@@ -19,8 +19,7 @@ code.
 
 The resulting program will read the arguments to the ``main`` function
 from standard input and print its return value on standard output.
-The arguments are read and printed in Futhark syntax, just like
-futharki(1).
+The arguments are read and printed in Futhark syntax.
 
 The generated code is very slow, likely too slow to be useful.  It is
 more interesting to use this command's big brother,

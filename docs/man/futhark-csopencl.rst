@@ -66,4 +66,4 @@ Cloo.clSharp is available on https://www.nuget.org/packages/Cloo.clSharp/
 SEE ALSO
 ========
 
-futharki(1), futhark-test(1), futhark-cs(1)
+futhark-test(1), futhark-cs(1)

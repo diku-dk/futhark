@@ -218,4 +218,4 @@ randomly generated data::
 SEE ALSO
 ========
 
-futhark-c(1), futharki(1)
+futhark-bench(1), futhark-repl(1)

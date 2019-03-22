@@ -23,7 +23,7 @@ GCC is invoked with ``-O3``, ``-lm``, and ``-std=c99``.
 The resulting program will read the arguments to the entry point
 (``main`` by default) from standard input and print its return value
 on standard output.  The arguments are read and printed in Futhark
-syntax, just like futharki(1).
+syntax.
 
 OPTIONS
 =======
@@ -57,4 +57,4 @@ OPTIONS
 SEE ALSO
 ========
 
-futharki(1), futhark-test(1)
+futhark-opencl(1), futhark-cuda(1), futhark-test(1)
