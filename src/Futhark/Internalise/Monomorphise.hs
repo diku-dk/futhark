@@ -140,7 +140,7 @@ transformFName fname t
         (Nothing, Nothing) -> return fname
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
-          (fname', funbind') <- monomorphizeBinding funbind t
+          (fname', funbind') <- monomorphizeBinding False funbind t
           tell $ Seq.singleton (fname, funbind')
           addLifted fname t fname'
           return fname'
@@ -489,8 +489,8 @@ expandRecordPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
 -- | Monomorphize a polymorphic function at the types given in the instance
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
-monomorphizeBinding :: PolyBinding -> TypeBase () () -> MonoM (VName, ValBind)
-monomorphizeBinding (PolyBinding rr (name, tparams, params, retdecl, rettype, body, loc)) t =
+monomorphizeBinding :: Bool -> PolyBinding -> TypeBase () () -> MonoM (VName, ValBind)
+monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, rettype, body, loc)) t =
   replaceRecordReplacements rr $ do
   t' <- removeTypeVariablesInType t
   let bind_t = foldFunType (map (toStructural . patternType) params) $
@@ -500,7 +500,7 @@ monomorphizeBinding (PolyBinding rr (name, tparams, params, retdecl, rettype, bo
       rettype' = substTypesAny (`M.lookup` substs') rettype
       substPatternType =
         substTypesAny (fmap (fmap fromStruct) . (`M.lookup` substs'))
-      params' = map (substPattern substPatternType) params
+      params' = map (substPattern entry substPatternType) params
 
   (params'', rrs) <- unzip <$> mapM expandRecordPattern params'
 
@@ -576,15 +576,16 @@ typeSubstsM loc orig_t1 orig_t2 =
                       return $ NamedDim $ qualName d
 
 -- | Perform a given substitution on the types in a pattern.
-substPattern :: (PatternType -> PatternType) -> Pattern -> Pattern
-substPattern f pat = case pat of
-  TuplePattern pats loc       -> TuplePattern (map (substPattern f) pats) loc
+substPattern :: Bool -> (PatternType -> PatternType) -> Pattern -> Pattern
+substPattern entry f pat = case pat of
+  TuplePattern pats loc       -> TuplePattern (map (substPattern entry f) pats) loc
   RecordPattern fs loc        -> RecordPattern (map substField fs) loc
-    where substField (n, p) = (n, substPattern f p)
-  PatternParens p loc         -> PatternParens (substPattern f p) loc
+    where substField (n, p) = (n, substPattern entry f p)
+  PatternParens p loc         -> PatternParens (substPattern entry f p) loc
   Id vn (Info tp) loc         -> Id vn (Info $ f tp) loc
   Wildcard (Info tp) loc      -> Wildcard (Info $ f tp) loc
-  PatternAscription p td loc  -> PatternAscription (substPattern f p) td loc
+  PatternAscription p td loc | entry     -> PatternAscription (substPattern False f p) td loc
+                             | otherwise -> substPattern False f p
   PatternLit e (Info tp) loc  -> PatternLit e (Info $ f tp) loc
 
 toPolyBinding :: ValBind -> PolyBinding
@@ -592,8 +593,8 @@ toPolyBinding (ValBind _ name retdecl (Info rettype) tparams params body _ loc) 
   PolyBinding mempty (name, tparams, params, retdecl, rettype, body, loc)
 
 -- | Remove all type variables and type abbreviations from a value binding.
-removeTypeVariables :: ValBind -> MonoM ValBind
-removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
+removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
+removeTypeVariables entry valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   let mapper = ASTMapper {
           mapOnExp         = astMap mapper
@@ -611,7 +612,7 @@ removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
   body' <- astMap mapper body
 
   return valbind { valBindRetType = Info $ substituteTypes subs rettype
-                 , valBindParams  = map (substPattern $ substituteTypes subs) pats
+                 , valBindParams  = map (substPattern entry $ substituteTypes subs) pats
                  , valBindBody    = body'
                  }
 
@@ -622,12 +623,12 @@ removeTypeVariablesInType t = do
 
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
-  valbind' <- toPolyBinding <$> removeTypeVariables valbind
+  valbind' <- toPolyBinding <$> removeTypeVariables (valBindEntryPoint valbind) valbind
   when (valBindEntryPoint valbind) $ do
     t <- removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
          (map patternStructType (valBindParams valbind)) $
          unInfo $ valBindRetType valbind
-    (name, valbind'') <- monomorphizeBinding valbind' t
+    (name, valbind'') <- monomorphizeBinding True valbind' t
     tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = True})
     addLifted (valBindName valbind) t name
   return mempty { envPolyBindings = M.singleton (valBindName valbind) valbind' }
