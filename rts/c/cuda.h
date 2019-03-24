@@ -514,8 +514,6 @@ void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const cha
   CUDA_SUCCEED(cuInit(0));
   cuda_devices_setup(ctx);
 
-  cuda_devices_setup(ctx);
-
   for (int i = 0; i < ctx->max_num_nodes; ++i) {
     CUDA_SUCCEED(cuCtxCreate(&ctx->nodes[i].cu_ctx, 0, ctx->nodes[i].dev));
     free_list_init(&ctx->nodes[i].free_list);
