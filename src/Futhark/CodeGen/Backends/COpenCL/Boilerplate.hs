@@ -61,6 +61,8 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s { struct opencl_config opencl;
                               size_t sizes[$int:num_sizes];
+                              int num_build_opts;
+                              const char **build_opts;
                             };|])
 
   let size_value_inits = map (\i -> [C.cstm|cfg->sizes[$int:i] = 0;|]) [0..M.size sizes-1]
@@ -72,6 +74,9 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                            return NULL;
                          }
 
+                         cfg->num_build_opts = 0;
+                         cfg->build_opts = malloc(sizeof(const char*));
+                         cfg->build_opts[0] = NULL;
                          $stms:size_value_inits
                          opencl_config_init(&cfg->opencl, $int:num_sizes,
                                             size_names, size_vars,
@@ -82,7 +87,17 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg);|],
      [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         free(cfg->build_opts);
                          free(cfg);
+                       }|])
+
+  GC.publicDef_ "context_config_add_build_option" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt) {
+                         cfg->build_opts[cfg->num_build_opts] = opt;
+                         cfg->num_build_opts++;
+                         cfg->build_opts = realloc(cfg->build_opts, (cfg->num_build_opts+1) * sizeof(const char*));
+                         cfg->build_opts[cfg->num_build_opts] = NULL;
                        }|])
 
   GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
@@ -252,7 +267,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           $stms:set_required_types
 
                           init_context_early(cfg, ctx);
-                          typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types);
+                          typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types, cfg->build_opts);
                           init_context_late(cfg, ctx, prog);
                           return ctx;
                        }|])
@@ -269,7 +284,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           $stms:set_required_types
 
                           init_context_early(cfg, ctx);
-                          typename cl_program prog = setup_opencl_with_command_queue(&ctx->opencl, queue, opencl_program, required_types);
+                          typename cl_program prog = setup_opencl_with_command_queue(&ctx->opencl, queue, opencl_program, required_types, cfg->build_opts);
                           init_context_late(cfg, ctx, prog);
                           return ctx;
                        }|])
