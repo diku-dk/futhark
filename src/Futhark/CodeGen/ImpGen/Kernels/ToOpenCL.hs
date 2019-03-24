@@ -230,7 +230,7 @@ $esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attr
 
 // NVIDIAs OpenCL does not create device-wide memory fences (see #734), so we
 // use inline assembly if we detect we are on an NVIDIA GPU.
-$esc:("#ifdef cl_nv_compiler_options")
+$esc:("#ifdef cl_nv_pragma_unroll")
 static inline void mem_fence_global() {
   asm("membar.gl;");
 }
