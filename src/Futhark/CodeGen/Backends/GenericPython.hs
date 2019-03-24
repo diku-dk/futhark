@@ -277,6 +277,11 @@ standardOptions = [
          , optionShortName = Just 'b'
          , optionArgument = NoArgument
          , optionAction = [Pass]
+         },
+  Option { optionLongName = "tuning"
+         , optionShortName = Nothing
+         , optionArgument = RequiredArgument "open"
+         , optionAction = [Exp $ simpleCall "read_tuning_file" [Var "sizes", Var "optarg"]]
          }
   ]
 
@@ -312,7 +317,9 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
                             Just _  -> ""
   return $ maybe_shebang ++
     pretty (PyProg $ imports ++
-            [Import "argparse" Nothing] ++
+            [ Import "argparse" Nothing
+            , Assign (Var "sizes") $ Dict []
+            ] ++
             defines ++
             [Escape pyUtility] ++
             prog')

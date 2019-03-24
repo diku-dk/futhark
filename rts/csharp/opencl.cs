@@ -804,16 +804,16 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
         string size_name = ctx.OpenCL.Cfg.SizeNames[i];
         int max_value, default_value;
         max_value = default_value = 0;
-        if (size_class == "group_size") {
+        if (size_class.StartsWith("group_size")) {
             max_value = MaxGroupSize;
             default_value = ctx.OpenCL.Cfg.DefaultGroupSize;
-        } else if (size_class == "num_groups") {
+        } else if (size_class.StartsWith("num_groups")) {
             max_value = MaxGroupSize; // Futhark assumes this constraint.
             default_value = ctx.OpenCL.Cfg.DefaultNumGroups;
-        } else if (size_class == "tile_size"){
+        } else if (size_class.StartsWith("tile_size")){
             max_value = (int) Math.Sqrt(MaxGroupSize);
             default_value = ctx.OpenCL.Cfg.DefaultTileSize;
-        } else if (size_class == "threshold") {
+        } else if (size_class.StartsWith("threshold")) {
             max_value = 0; // No limit.
             default_value = ctx.OpenCL.Cfg.DefaultThreshold;
         } else {
@@ -919,8 +919,31 @@ private void FutharkConfigSetSize(ref FutharkContextConfig config, string optarg
 
     var name = name_and_value[0];
     var value = Convert.ToInt32(name_and_value[1]);
-    if (!FutharkContextConfigSetSize(ref config, name, value))
+    if (name == "default_num_groups") {
+        config.OpenCL.DefaultNumGroups = value;
+    }
+    else if (name == "default_group_size") {
+        config.OpenCL.DefaultGroupSize = value;
+    }
+    else if (name == "default_tile_size") {
+        config.OpenCL.DefaultTileSize = value;
+    }
+    else if (name == "default_threshold") {
+        config.OpenCL.DefaultThreshold = value;
+    }
+    else if (!FutharkContextConfigSetSize(ref config, name, value))
     {
         panic(1, "Unknown size: {0}", name);
     }
+}
+
+private void FutharkConfigLoadTuning(ref FutharkContextConfig config, string fname)
+{
+    StreamReader file = new StreamReader(fname);
+    String line;
+    while((line = file.ReadLine()) != null)
+    {
+        FutharkConfigSetSize(ref config, line);
+    }
+    file.Close();
 }

@@ -25,6 +25,7 @@ import Control.Monad.Trans.State
 import Control.Arrow
 import Data.Array
 import qualified Data.Text as T
+import Codec.Binary.UTF8.String (encode)
 import Data.Char (ord)
 import Data.Maybe (fromMaybe, fromJust)
 import Data.Loc hiding (L) -- Lexer has replacements.
@@ -598,7 +599,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | intlit         { let L loc (INTLIT x) = $1 in IntLit x NoInfo loc }
      | floatlit       { let L loc (FLOATLIT x) = $1 in FloatLit x NoInfo loc }
      | stringlit      { let L loc (STRINGLIT s) = $1 in
-                        ArrayLit (map (flip Literal loc . SignedValue . Int32Value . fromIntegral . ord) s) NoInfo loc }
+                        ArrayLit (map (flip Literal loc . UnsignedValue . Int8Value . fromIntegral) $ encode s) NoInfo loc }
      | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 (srcspan $1 $3))
@@ -763,7 +764,7 @@ CaseLiteral :: { (UncheckedExp, SrcLoc) }
              | intlit         { let L loc (INTLIT x) = $1 in (IntLit x NoInfo loc, loc) }
              | floatlit       { let L loc (FLOATLIT x) = $1 in (FloatLit x NoInfo loc, loc) }
              | stringlit      { let L loc (STRINGLIT s) = $1 in
-                              (ArrayLit (map (flip Literal loc . SignedValue . Int32Value . fromIntegral . ord) s) NoInfo loc, loc) }
+                              (ArrayLit (map (flip Literal loc . UnsignedValue . Int8Value . fromIntegral) $ encode s) NoInfo loc, loc) }
              | VConstr0       { (VConstr0 (fst $1) NoInfo (snd $1), snd $1) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
@@ -874,7 +875,7 @@ FloatValue :: { Value }
 
 StringValue :: { Value }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in
-                           ArrayValue (arrayFromList $ map (PrimValue . SignedValue . Int32Value . fromIntegral . ord) s) $ Prim $ Signed Int32 }
+                           ArrayValue (arrayFromList $ map (PrimValue . UnsignedValue . Int8Value . fromIntegral) $ encode s) $ Prim $ Signed Int32 }
 
 BoolValue :: { Value }
 BoolValue : true           { PrimValue $ BoolValue True }

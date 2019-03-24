@@ -47,7 +47,7 @@ intended for use in developing the Futhark compiler, not for
 programmers writing in Futhark.
 
 futhark imports PROGRAM
----------------------
+-----------------------
 
 Print all non-builtin imported Futhark files to stdout, one per line.
 

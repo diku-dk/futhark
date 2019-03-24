@@ -204,7 +204,8 @@ genOpenClPrelude (OpenClRequirements ts) =
   -- Clang-based OpenCL implementations need this for 'static' to work.
   [ [C.cedecl|$esc:("#ifdef cl_clang_storage_class_specifiers")|]
   , [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable")|]
-  , [C.cedecl|$esc:("#endif")|]]
+  , [C.cedecl|$esc:("#endif")|]
+  , [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable")|]]
   ++
   [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64] ++
   [C.cunit|
@@ -227,6 +228,21 @@ typedef uint uint32_t;
 typedef ulong uint64_t;
 
 $esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attribute__ ((align))")
+
+// NVIDIAs OpenCL does not create device-wide memory fences (see #734), so we
+// use inline assembly if we detect we are on an NVIDIA GPU.
+$esc:("#ifdef cl_nv_pragma_unroll")
+static inline void mem_fence_global() {
+  asm("membar.gl;");
+}
+$esc:("#else")
+static inline void mem_fence_global() {
+  mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
+}
+$esc:("#endif")
+static inline void mem_fence_local() {
+  mem_fence(CLK_LOCAL_MEM_FENCE);
+}
 |] ++
   cIntOps ++ cFloat32Ops ++ cFloat32Funs ++
   (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else [])
@@ -352,13 +368,11 @@ static inline void barrier(int x)
 {
   __syncthreads();
 }
-static inline void mem_fence(int x)
-{
-  if (x == CLK_LOCAL_MEM_FENCE) {
-    __threadfence_block();
-  } else {
-    __threadfence();
-  }
+static inline void mem_fence_local() {
+  __threadfence_block();
+}
+static inline void mem_fence_global() {
+  __threadfence();
 }
 $esc:("#define NAN (0.0/0.0)")
 $esc:("#define INFINITY (1.0/0.0)")
@@ -410,7 +424,7 @@ inKernelOperations = GenericC.Operations
         kernelOps GlobalBarrier =
           GenericC.stm [C.cstm|barrier(CLK_GLOBAL_MEM_FENCE);|]
         kernelOps MemFence =
-          GenericC.stm [C.cstm|mem_fence(CLK_GLOBAL_MEM_FENCE);|]
+          GenericC.stm [C.cstm|mem_fence_global();|]
         kernelOps (Atomic aop) = atomicOps aop
 
         atomicOps (AtomicAdd old arr ind val) = do

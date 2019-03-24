@@ -4,7 +4,7 @@ C Porting Guide
 ===============
 
 This short document contains a collection of tips and tricks for
-porting simple numerical C code to futhark.  Futhark's sequential
+porting simple numerical C code to Futhark.  Futhark's sequential
 fragment is powerful enough to permit a rather straightforward
 translation of sequential C code that does not rely on pointer
 mutation.  Additionally, we provide hints on how to recognise C coding

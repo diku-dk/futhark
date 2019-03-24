@@ -34,14 +34,8 @@ The generated code requires at least PyOpenCL version 2015.2.
 OPTIONS
 =======
 
--o outfile
-  Where to write the resulting binary.  By default, if the source
-  program is named 'foo.fut', the binary will be named 'foo'.
-
--v verbose
-  Enable debugging output.  If compilation fails due to a compiler
-  error, the result of the last successful compiler step will be
-  printed to standard error.
+-h
+  Print help text to standard output and exit.
 
 --library
   Instead of compiling to an executable program, generate a Python
@@ -51,17 +45,23 @@ OPTIONS
   point in the Futhark program, with matching parameters and return
   value.
 
---Werror
-  Treat warnings as errors.
+-o outfile
+  Where to write the resulting binary.  By default, if the source
+  program is named 'foo.fut', the binary will be named 'foo'.
 
 --safe
   Ignore ``unsafe`` in program and perform safety checks unconditionally.
 
--h
-  Print help text to standard output and exit.
+-v verbose
+  Enable debugging output.  If compilation fails due to a compiler
+  error, the result of the last successful compiler step will be
+  printed to standard error.
 
 -V
   Print version information on standard output and exit.
+
+--Werror
+  Treat warnings as errors.
 
 SEE ALSO
 ========

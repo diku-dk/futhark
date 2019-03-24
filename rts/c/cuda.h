@@ -290,15 +290,33 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev)
   return x[chosen].arch_str;
 }
 
-static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src)
+static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
+                              const char *extra_opts[])
 {
   nvrtcProgram prog;
   NVRTC_SUCCEED(nvrtcCreateProgram(&prog, src, "futhark-cuda", 0, NULL, NULL));
+  int arch_set = 0, num_extra_opts;
 
-  size_t n_opts, i = 0, i_dyn, n_opts_alloc = 20 + ctx->cfg.num_sizes;
+  // nvrtc cannot handle multiple -arch options.  Hence, if one of the
+  // extra_opts is -arch, we have to be careful not to do our usual
+  // automatic generation.
+  for (num_extra_opts = 0; extra_opts[num_extra_opts] != NULL; num_extra_opts++) {
+    if (strstr(extra_opts[num_extra_opts], "-arch")
+        == extra_opts[num_extra_opts] ||
+        strstr(extra_opts[num_extra_opts], "--gpu-architecture")
+        == extra_opts[num_extra_opts]) {
+      arch_set = 1;
+    }
+  }
+
+  size_t n_opts, i = 0, i_dyn, n_opts_alloc = 20 + num_extra_opts + ctx->cfg.num_sizes;
   const char **opts = malloc(n_opts_alloc * sizeof(const char *));
-  opts[i++] = "-arch";
-  opts[i++] = cuda_nvrtc_get_arch(ctx->nodes[0].dev);
+  
+  if (!arch_set) {
+    opts[i++] = "-arch";
+    opts[i++] = cuda_nvrtc_get_arch(ctx->nodes[0].dev);
+  }
+  
   opts[i++] = "-default-device";
   if (ctx->cfg.debugging) {
     opts[i++] = "-G";
@@ -313,6 +331,13 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src)
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
   opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_block_size);
+
+  // It is crucial that the extra_opts are last, so that the free()
+  // logic below does not cause problems.
+  for (int j = 0; extra_opts[j] != NULL; j++) {
+    opts[i++] = extra_opts[j];
+  }
+
   n_opts = i;
 
   if (ctx->cfg.debugging) {
@@ -336,7 +361,7 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src)
     NVRTC_SUCCEED(res);
   }
 
-  for (i = i_dyn; i < n_opts; i++) { free((char *)opts[i]); }
+  for (i = i_dyn; i < n_opts-num_extra_opts; i++) { free((char *)opts[i]); }
   free(opts);
 
   char *ptx;
@@ -445,16 +470,17 @@ static void load_string_from_file(const char *file, char **obuf, size_t *olen)
 }
 
 static void cuda_module_setup(struct cuda_context *ctx,
-    const char *src_fragments[])
+                              const char *src_fragments[],
+                              const char *extra_opts[])
 {
   char *ptx = NULL, *src = NULL;
 
   if (ctx->cfg.load_ptx_from == NULL && ctx->cfg.load_program_from == NULL) {
     src = concat_fragments(src_fragments);
-    ptx = cuda_nvrtc_build(ctx, src);
+    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
   } else if (ctx->cfg.load_ptx_from == NULL) {
     load_string_from_file(ctx->cfg.load_program_from, &src, NULL);
-    ptx = cuda_nvrtc_build(ctx, src);
+    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
   } else {
     if (ctx->cfg.load_program_from != NULL) {
       fprintf(stderr,
@@ -483,7 +509,7 @@ static void cuda_module_setup(struct cuda_context *ctx,
   }
 }
 
-void cuda_setup(struct cuda_context *ctx, const char *src_fragments[])
+void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const char *extra_opts[])
 {
   CUDA_SUCCEED(cuInit(0));
 
@@ -502,7 +528,7 @@ void cuda_setup(struct cuda_context *ctx, const char *src_fragments[])
   ctx->lockstep_width = device_query(ctx->nodes[0].dev, WARP_SIZE);
 
   cuda_size_setup(ctx);
-  cuda_module_setup(ctx, src_fragments);
+  cuda_module_setup(ctx, src_fragments, extra_opts);
 }
 
 CUresult cuda_free_all(struct cuda_context *ctx);

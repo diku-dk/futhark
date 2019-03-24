@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     if run with invalid options.  The `py` and `pyopencl` backends
     already did this.
 
+  * Generated executables now support a `--tuning` flag for passing
+    many tuned sizes in a file.
+
+  * Executables generated with the `cuda` backend now take an
+    `--nvrtc-option` option.
+
 ### Removed
 
   * The old `futhark-*` executables have been removed.
@@ -41,6 +47,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     0.  This only affects the text output and the generated JSON
     files, and fits the tuple element ordering in Futhark.
 
+  * String literals are now of type `[]u8` and contain UTF-8 encode
+    bytes.
+
 ### Fixed
 
   * An significant problematic interaction between empty arrays and
@@ -52,6 +61,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed a major potential out-of-bounds access when sequentialising
     `reduce_by_index` (in most cases the bug was hidden by subsequent
     C compiler optimisations).
+
+  * The result of an anonymous function is now also forbidden from
+    aliasing a global variable, just as with named functions.
+
+  * Parallel scans now work correctly when using a CPU OpenCL
+    implementation.
+
+  * `reduce_by_index` was broken on newer NVIDIA GPUs when using fancy
+    operators.  This has been fixed.
 
 ## [0.9.1]
 

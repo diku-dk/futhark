@@ -1,7 +1,7 @@
 -- This is not OK, because it would imply consuming the original
 -- non-unique array.
 -- ==
--- error: consume variable `xs`
+-- error: consumable
 
 let polyid 't (x: t) = x
 

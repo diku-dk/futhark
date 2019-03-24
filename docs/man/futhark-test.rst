@@ -115,32 +115,43 @@ Futhark source directory.  A simple example can be found in
 OPTIONS
 =======
 
---no-terminal
-  Print each result on a line by itself, without line buffering.
-
---exclude=tag
-  Ignore benchmarks with the specified tag.
-
--c
-  Only run compiled code - do not run any interpreters.
-
--i
-  Only interpret - do not run any compilers.
-
--C
-  Compile the programs, but do not run them.
-
--t
-  Type-check the programs, but do not run them.
-
 --backend=program
 
   The backend used when compiling Futhark programs (without leading
   ``futhark``, e.g. just ``opencl``).
 
+-c
+  Only run compiled code - do not run any interpreters.
+
+-C
+  Compile the programs, but do not run them.
+
+--exclude=tag
+  Ignore benchmarks with the specified tag.
+
+-i
+  Only interpret - do not run any compilers.
+
+-t
+  Type-check the programs, but do not run them.
+
 --futhark=program
 
   The program used to perform operations.  Defaults to ``futhark``.
+
+--no-terminal
+  Print each result on a line by itself, without line buffering.
+
+--no-tuning
+
+  Do not look for tuning files.
+
+--pass-option=opt
+
+  Pass an option to benchmark programs that are being run.  For
+  example, we might want to run OpenCL programs on a specific device::
+
+    futhark-bench prog.fut --backend=opencl --pass-option=-dHawaii
 
 --runner=program
 
@@ -151,12 +162,13 @@ OPTIONS
   cannot be executed directly (like ``futhark cs``), or when you wish
   to run the program on a remote machine.
 
---pass-option=opt
+--tuning=EXTENSION
 
-  Pass an option to benchmark programs that are being run.  For
-  example, we might want to run OpenCL programs on a specific device::
-
-    futhark-bench prog.fut --backend=opencl --pass-option=-dHawaii
+  For each program being run, look for a tuning file with this
+  extension, which is suffixed to the name of the program.  For
+  example, given ``--tuning=tuning`` (the default), the program
+  ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
+  exists.
 
 EXAMPLES
 ========
@@ -206,4 +218,4 @@ randomly generated data::
 SEE ALSO
 ========
 
-futhark-c(1), futharki(1)
+futhark-bench(1), futhark-repl(1)

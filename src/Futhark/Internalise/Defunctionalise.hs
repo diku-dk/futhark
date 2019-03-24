@@ -363,15 +363,6 @@ defuncExp e@(Stream form lam arr loc) = do
   arr' <- defuncExp' arr
   return (Stream form' lam' arr' loc, Dynamic $ typeOf e)
 
-defuncExp e@(Zip i e1 es t loc) = do
-  e1' <- defuncExp' e1
-  es' <- mapM defuncExp' es
-  return (Zip i e1' es' t loc, Dynamic $ typeOf e)
-
-defuncExp e@(Unzip e0 tps loc) = do
-  e0' <- defuncExp' e0
-  return (Unzip e0' tps loc, Dynamic $ typeOf e)
-
 defuncExp (Unsafe e1 loc) = do
   (e1', sv) <- defuncExp e1
   return (Unsafe e1' loc, sv)
@@ -497,67 +488,42 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
       let closure_pat = buildEnvPattern closure_env
           pat' = updatePattern pat sv2
 
-      -- Inline certain trivial lifted functions immediately.  This is
-      -- purely an optimisation to avoid having the rest of the
-      -- compiler spend a lot of time processing them (they will end
-      -- up being inlined later anyway).  We also try to simplify away
-      -- some let-bindings, to make the generated code look slightly
-      -- more comprehensible.
-      --
-      -- If you are debugging the defunctionaliser, you may want to
-      -- turn this off to see the original structure of the generated
-      -- code instead.
-      let letPat (RecordPattern [] _) _ pbody = pbody
-          letPat (PatternParens pp _) pe pbody = letPat pp pe pbody
-          letPat (Id v1 _ _) pe (RecordLit [RecordFieldExplicit f (Var v2 _ _) floc] rloc)
-            | v1 == qualLeaf v2 =
-                RecordLit [RecordFieldExplicit f pe floc] rloc
-          letPat (RecordPattern [(pf,p)] _) (RecordLit [RecordFieldExplicit f pe _] _) pbody
-            | pf == f =
-                letPat p pe pbody
-          letPat pp pe pbody = LetPat [] pp pe pbody noLoc
+      -- Lift lambda to top-level function definition.  We put in
+      -- a lot of effort to try to infer the uniqueness attributes
+      -- of the lifted function, but this is ultimately all a sham
+      -- and a hack.  There is some piece we're missing.
+      let params = [closure_pat, pat']
+          params_for_rettype = params ++ svParams sv1 ++ svParams sv2
+          svParams (LambdaSV _ sv_pat _ _ _) = [sv_pat]
+          svParams _                         = []
+          rettype = buildRetType closure_env params_for_rettype e0_t $ typeOf e0'
 
-          inline RecordLit{} = True
-          inline TupLit{} = True
-          inline (Apply x y _ _ _) = inline x && inline y
-          inline (BinOp _ _ (x, _) (y, _) _ _) = inline x && inline y
-          inline Var{} = True
-          inline Literal{} = True
-          inline (LetPat _ _ x y _) = inline x && inline y
-          inline Negate{} = True
-          inline _ = False
-      if inline e0' && null dims
-        then return (letPat closure_pat e1' $ letPat pat' e2' e0', sv)
-        else do
-          -- Lift lambda to top-level function definition.
-          let params = [closure_pat, pat']
-              rettype = buildRetType closure_env params e0_t $ typeOf e0'
+          -- Embed some information about the original function
+          -- into the name of the lifted function, to make the
+          -- result slightly more human-readable.
+          liftedName i (Var f _ _) =
+            "lifted_" ++ show i ++ "_" ++ baseString (qualLeaf f)
+          liftedName i (Apply f _ _ _ _) =
+            liftedName (i+1) f
+          liftedName _ _ = "lifted"
+      fname <- newNameFromString $ liftedName (0::Int) e1
+      liftValDec fname rettype dims params e0'
 
-              -- Embed some information about the original function
-              -- into the name of the lifted function, to make the
-              -- result slightly more human-readable.
-              liftedName i (Var f _ _) =
-                "lifted_" ++ show i ++ "_" ++ baseString (qualLeaf f)
-              liftedName i (Apply f _ _ _ _) =
-                liftedName (i+1) f
-              liftedName _ _ = "lifted"
-          fname <- newNameFromString $ liftedName (0::Int) e1
-          liftValDec fname rettype dims params e0'
-
-          let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
-              t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
-              fname' = qualName fname
-          return (Parens (Apply (Apply (Var fname' (Info (Arrow mempty Nothing (fromStruct t1) $
-                                                          Arrow mempty Nothing (fromStruct t2) rettype)) loc)
-                                 e1' (Info Observe) (Info $ Arrow mempty Nothing (fromStruct t2) rettype) loc)
-                          e2' d (Info rettype) loc) noLoc, sv)
+      let t1 = vacuousShapeAnnotations . toStruct $ typeOf e1'
+          t2 = vacuousShapeAnnotations . toStruct $ typeOf e2'
+          fname' = qualName fname
+      return (Parens (Apply (Apply (Var fname' (Info (Arrow mempty Nothing (fromStruct t1) $
+                                                      Arrow mempty Nothing (fromStruct t2) rettype)) loc)
+                             e1' (Info Observe) (Info $ Arrow mempty Nothing (fromStruct t2) rettype) loc)
+                      e2' d (Info rettype) loc) noLoc, sv)
 
     -- If e1 is a dynamic function, we just leave the application in place,
     -- but we update the types since it may be partially applied or return
     -- a higher-order term.
     DynamicFun _ sv ->
       let (argtypes', rettype) = dynamicFunType sv argtypes
-          apply_e = Apply e1' e2' d (Info $ foldFunType argtypes' rettype) loc
+          apply_e = Apply e1' e2' d (Info $ foldFunType argtypes' rettype
+                                    `setAliases` aliases ret) loc
       in return (apply_e, sv)
 
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
@@ -681,7 +647,7 @@ buildRetType env pats = comb
         comb (Record fs_annot) (Record fs_got) =
           Record $ M.intersectionWith comb fs_annot fs_got
         comb Arrow{} t = vacuousShapeAnnotations $ descend t
-        comb got _ = fromStruct got
+        comb got et = descend $ fromStruct got `setUniqueness` uniqueness et `setAliases` aliases et
 
         descend t@Array{}
           | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
@@ -865,8 +831,6 @@ freeVars expr = case expr of
     where freeInForm (RedLike _ _ e) = freeVars e
           freeInForm _ = mempty
 
-  Zip _ e es _ _      -> freeVars e <> foldMap freeVars es
-  Unzip e _ _         -> freeVars e
   Unsafe e _          -> freeVars e
   Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
   VConstr0{}          -> mempty

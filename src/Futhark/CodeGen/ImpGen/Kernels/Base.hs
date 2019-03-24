@@ -418,8 +418,16 @@ atomicUpdateLocking op = Right $ \locking arrs bucket -> do
   -- Preparing parameters. It is assumed that the caller has already
   -- filled the arr_params. We copy the current value to the
   -- accumulator parameters.
+  --
+  -- Note the use of 'everythingVolatile' when reading and writing the
+  -- buckets.  This was necessary to ensure correct execution on a
+  -- newer NVIDIA GPU (RTX 2080).  The 'volatile' modifiers likely
+  -- make the writes pass through the (SM-local) L1 cache, which is
+  -- necessary here, because we are really doing device-wide
+  -- synchronisation without atomics (naughty!).
   let (acc_params, _arr_params) = splitAt (length arrs) $ lambdaParams op
       bind_acc_params =
+        ImpGen.everythingVolatile $
         ImpGen.sComment "bind lhs" $
         forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
         ImpGen.copyDWIM (paramName acc_p) [] (Var arr) bucket
@@ -427,8 +435,10 @@ atomicUpdateLocking op = Right $ \locking arrs bucket -> do
   let op_body = ImpGen.sComment "execute operation" $
                 ImpGen.compileBody' acc_params $ lambdaBody op
 
-      do_gen_reduce = ImpGen.sComment "update global result" $
-                      zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
+      do_gen_reduce =
+        ImpGen.everythingVolatile $
+        ImpGen.sComment "update global result" $
+        zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
   -- While-loop: Try to insert your value
   sWhile (Imp.var continue Bool) $ do
@@ -438,6 +448,7 @@ atomicUpdateLocking op = Right $ \locking arrs bucket -> do
       bind_acc_params
       op_body
       do_gen_reduce
+      sOp Imp.MemFence
       release_lock
       break_loop
     sOp Imp.MemFence
@@ -877,6 +888,8 @@ groupScan constants seg_flag w lam arrs = do
 
   sComment "restore correct values for first block" $
     sWhen is_first_block write_final_result
+
+  sOp Imp.LocalBarrier
 
 inBlockScan :: Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
             -> Imp.Exp

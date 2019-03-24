@@ -63,13 +63,14 @@ inlineInBody :: [FunDef] -> Body -> Body
 inlineInBody inlcallees (Body attr stms res) = Body attr stms' res
   where stms' = stmsFromList (concatMap inline $ stmsToList stms)
 
-        inline (Let pat _ (Apply fname args _ (safety,loc,locs)))
+        inline (Let pat aux (Apply fname args _ (safety,loc,locs)))
           | fun:_ <- filter ((== fname) . funDefName) inlcallees =
               let param_stms = zipWith reshapeIfNecessary (map paramIdent $ funDefParams fun) (map fst args)
                   body_stms = stmsToList $ addLocations safety
                               (filter notNoLoc (loc:locs)) $ bodyStms $ funDefBody fun
-                  res_stms = zipWith reshapeIfNecessary (patternIdents pat)
-                             (bodyResult $ funDefBody fun)
+                  res_stms = map (certify $ stmAuxCerts aux) $
+                             zipWith reshapeIfNecessary (patternIdents pat) $
+                             bodyResult $ funDefBody fun
               in param_stms ++ body_stms ++ res_stms
         inline stm = [inlineInStm inlcallees stm]
 

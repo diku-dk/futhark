@@ -85,7 +85,8 @@ cliOptions = [ Option { optionLongName = "platform"
              , Option { optionLongName = "dump-opencl"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument "FILE"
-                      , optionAction = [C.cstm|futhark_context_config_dump_program_to(cfg, optarg);|]
+                      , optionAction = [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
+                                                entry_point = NULL;}|]
                       }
              , Option { optionLongName = "load-opencl"
                       , optionShortName = Nothing
@@ -95,7 +96,8 @@ cliOptions = [ Option { optionLongName = "platform"
              , Option { optionLongName = "dump-opencl-binary"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument "FILE"
-                      , optionAction = [C.cstm|futhark_context_config_dump_binary_to(cfg, optarg);|]
+                      , optionAction = [C.cstm|{futhark_context_config_dump_binary_to(cfg, optarg);
+                                                entry_point = NULL;}|]
                       }
              , Option { optionLongName = "load-opencl-binary"
                       , optionShortName = Nothing
@@ -129,6 +131,17 @@ cliOptions = [ Option { optionLongName = "platform"
                             }
                           } else {
                             panic(1, "Invalid argument for size option: %s\n", optarg);
+                          }}|]
+                      }
+             , Option { optionLongName = "tuning"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "FILE"
+                      , optionAction = [C.cstm|{
+                          char *fname = optarg;
+                          char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
+                                                                    futhark_context_config_set_size);
+                          if (ret != NULL) {
+                            panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                           }}|]
                       }
              ]

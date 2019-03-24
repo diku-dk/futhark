@@ -32,15 +32,17 @@ import           Control.Monad.RWS
 import           Control.Monad.State
 import           Control.Monad.Writer
 import           Data.Bitraversable
+import           Data.Bifunctor
 import           Data.Loc
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import           Data.Foldable
 
 import           Futhark.MonadFreshNames
 import           Language.Futhark
 import           Language.Futhark.Traversals
-import           Language.Futhark.TypeChecker.Monad (TypeBinding(..))
+import           Language.Futhark.Semantic (TypeBinding(..))
 import           Language.Futhark.TypeChecker.Types
 
 -- | The monomorphization monad reads 'PolyBinding's and writes 'ValBinding's.
@@ -138,10 +140,23 @@ transformFName fname t
         (Nothing, Nothing) -> return fname
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
-          (fname', funbind') <- monomorphizeBinding funbind t
+          (fname', funbind') <- monomorphizeBinding False funbind t
           tell $ Seq.singleton (fname, funbind')
           addLifted fname t fname'
           return fname'
+
+-- | This carries out record replacements in the alias information of a type.
+transformType :: TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
+transformType t = do
+  rrs <- asks envRecordReplacements
+  let replace (AliasBound v) | Just d <- M.lookup v rrs =
+                                 S.fromList $ map (AliasBound . fst) $ M.elems d
+      replace x = S.singleton x
+  -- As an attempt at an optimisation, only transform the aliases if
+  -- they refer to a variable we have record-replaced.
+  return $ if any ((`M.member` rrs) . aliasVar) $ aliases t
+           then bimap id (mconcat . map replace . S.toList) t
+           else t
 
 -- | Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
@@ -162,9 +177,10 @@ transformExp (RecordLit fs loc) =
   RecordLit <$> mapM transformField fs <*> pure loc
   where transformField (RecordFieldExplicit name e loc') =
           RecordFieldExplicit name <$> transformExp e <*> pure loc'
-        transformField (RecordFieldImplicit v t _) =
+        transformField (RecordFieldImplicit v t _) = do
+          t' <- traverse transformType t
           transformField $ RecordFieldExplicit (baseName v)
-          (Var (qualName v) (vacuousShapeAnnotations <$> t) loc) loc
+            (Var (qualName v) (vacuousShapeAnnotations <$> t') loc) loc
 
 transformExp (ArrayLit es tp loc) =
   ArrayLit <$> mapM transformExp es <*> pure tp <*> pure loc
@@ -179,13 +195,15 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
   maybe_fs <- lookupRecordReplacement fname
   case maybe_fs of
     Just fs -> do
-      let toField (f, (f_v, f_t)) =
-            let f_v' = Var (qualName f_v) (Info $ vacuousShapeAnnotations f_t) loc
-            in RecordFieldExplicit f f_v' loc
-      return $ RecordLit (map toField $ M.toList fs) loc
+      let toField (f, (f_v, f_t)) = do
+            f_t' <- transformType f_t
+            let f_v' = Var (qualName f_v) (Info $ vacuousShapeAnnotations f_t') loc
+            return $ RecordFieldExplicit f f_v' loc
+      RecordLit <$> mapM toField (M.toList fs) <*> pure loc
     Nothing -> do
       fname' <- transformFName fname (toStructural t)
-      return $ Var (QualName qs fname') (Info t) loc
+      t' <- transformType t
+      return $ Var (QualName qs fname') (Info t') loc
 
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
@@ -216,7 +234,8 @@ transformExp (If e1 e2 e3 tp loc) = do
   e1' <- transformExp e1
   e2' <- transformExp e2
   e3' <- transformExp e3
-  return $ If e1' e2' e3' tp loc
+  tp' <- traverse transformType tp
+  return $ If e1' e2' e3' tp' loc
 
 transformExp (Apply e1 e2 d tp loc) =
   -- We handle on an ad-hoc basis certain polymorphic higher-order
@@ -257,7 +276,8 @@ transformExp (Apply e1 e2 d tp loc) =
     _ -> do
       e1' <- transformExp e1
       e2' <- transformExp e2
-      return $ Apply e1' e2' d tp loc
+      tp' <- traverse transformType tp
+      return $ Apply e1' e2' d tp' loc
   where intrinsic s (QualName _ v) =
           baseTag v <= maxIntrinsicTag && baseName v == nameFromString s
 
@@ -367,14 +387,6 @@ transformExp (GenReduce e1 e2 e3 e4 e5 loc) =
     <*> transformExp e5 -- input image
     <*> pure loc
 
-transformExp (Zip i e1 es t loc) = do
-  e1' <- transformExp e1
-  es' <- mapM transformExp es
-  return $ Zip i e1' es' t loc
-
-transformExp (Unzip e0 tps loc) =
-  Unzip <$> transformExp e0 <*> pure tps <*> pure loc
-
 transformExp (Unsafe e1 loc) =
   Unsafe <$> transformExp e1 <*> pure loc
 
@@ -383,7 +395,7 @@ transformExp (Assert e1 e2 desc loc) =
 
 transformExp e@VConstr0{} = return e
 transformExp (Match e cs t loc) =
-  Match <$> transformExp e <*> mapM transformCase cs <*> pure t <*> pure loc
+  Match <$> transformExp e <*> mapM transformCase cs <*> traverse transformType t <*> pure loc
 
 transformCase :: Case -> MonoM Case
 transformCase (CasePat p e loc) = do
@@ -450,7 +462,7 @@ expandRecordPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
 expandRecordPattern (Id v (Info (Record fs)) loc) = do
   let fs' = M.toList fs
   (fs_ks, fs_ts) <- fmap unzip $ forM fs' $ \(f, ft) ->
-    (,) <$> newVName (nameToString f) <*> pure ft
+    (,) <$> newVName (nameToString f) <*> transformType ft
   return (RecordPattern (zip (map fst fs')
                              (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
                         loc,
@@ -466,7 +478,9 @@ expandRecordPattern (RecordPattern fields loc) = do
 expandRecordPattern (PatternParens pat loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternParens pat' loc, rr)
-expandRecordPattern (Wildcard t loc) = return (Wildcard t loc, mempty)
+expandRecordPattern (Wildcard t loc) = do
+  t' <- traverse transformType t
+  return (Wildcard t' loc, mempty)
 expandRecordPattern (PatternAscription pat td loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternAscription pat' td loc, rr)
@@ -475,8 +489,8 @@ expandRecordPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
 -- | Monomorphize a polymorphic function at the types given in the instance
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
-monomorphizeBinding :: PolyBinding -> TypeBase () () -> MonoM (VName, ValBind)
-monomorphizeBinding (PolyBinding rr (name, tparams, params, retdecl, rettype, body, loc)) t =
+monomorphizeBinding :: Bool -> PolyBinding -> TypeBase () () -> MonoM (VName, ValBind)
+monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, rettype, body, loc)) t =
   replaceRecordReplacements rr $ do
   t' <- removeTypeVariablesInType t
   let bind_t = foldFunType (map (toStructural . patternType) params) $
@@ -486,7 +500,7 @@ monomorphizeBinding (PolyBinding rr (name, tparams, params, retdecl, rettype, bo
       rettype' = substTypesAny (`M.lookup` substs') rettype
       substPatternType =
         substTypesAny (fmap (fmap fromStruct) . (`M.lookup` substs'))
-      params' = map (substPattern substPatternType) params
+      params' = map (substPattern entry substPatternType) params
 
   (params'', rrs) <- unzip <$> mapM expandRecordPattern params'
 
@@ -547,7 +561,7 @@ typeSubstsM loc orig_t1 orig_t2 =
           sub False t1a t2a
           sub pos t1b t2b
 
-        sub _ t1 t2 = error $ unlines ["typeSubsts: mismatched types:", pretty t1, pretty t2]
+        sub _ t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", pretty t1, pretty t2]
 
         addSubst pos (TypeName _ v) t = do
           exists <- gets $ M.member v
@@ -562,15 +576,16 @@ typeSubstsM loc orig_t1 orig_t2 =
                       return $ NamedDim $ qualName d
 
 -- | Perform a given substitution on the types in a pattern.
-substPattern :: (PatternType -> PatternType) -> Pattern -> Pattern
-substPattern f pat = case pat of
-  TuplePattern pats loc       -> TuplePattern (map (substPattern f) pats) loc
+substPattern :: Bool -> (PatternType -> PatternType) -> Pattern -> Pattern
+substPattern entry f pat = case pat of
+  TuplePattern pats loc       -> TuplePattern (map (substPattern entry f) pats) loc
   RecordPattern fs loc        -> RecordPattern (map substField fs) loc
-    where substField (n, p) = (n, substPattern f p)
-  PatternParens p loc         -> PatternParens (substPattern f p) loc
+    where substField (n, p) = (n, substPattern entry f p)
+  PatternParens p loc         -> PatternParens (substPattern entry f p) loc
   Id vn (Info tp) loc         -> Id vn (Info $ f tp) loc
   Wildcard (Info tp) loc      -> Wildcard (Info $ f tp) loc
-  PatternAscription p td loc  -> PatternAscription (substPattern f p) td loc
+  PatternAscription p td loc | entry     -> PatternAscription (substPattern False f p) td loc
+                             | otherwise -> substPattern False f p
   PatternLit e (Info tp) loc  -> PatternLit e (Info $ f tp) loc
 
 toPolyBinding :: ValBind -> PolyBinding
@@ -578,27 +593,26 @@ toPolyBinding (ValBind _ name retdecl (Info rettype) tparams params body _ loc) 
   PolyBinding mempty (name, tparams, params, retdecl, rettype, body, loc)
 
 -- | Remove all type variables and type abbreviations from a value binding.
-removeTypeVariables :: ValBind -> MonoM ValBind
-removeTypeVariables valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
+removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
+removeTypeVariables entry valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
-  let substPatternType = fromStruct . substituteTypes subs . toStruct
-      mapper = ASTMapper {
+  let mapper = ASTMapper {
           mapOnExp         = astMap mapper
         , mapOnName        = pure
         , mapOnQualName    = pure
         , mapOnType        = pure . removeShapeAnnotations .
                              substituteTypes subs . vacuousShapeAnnotations
-        , mapOnCompType    = pure . fromStruct . removeShapeAnnotations .
+        , mapOnCompType    = pure . removeShapeAnnotations .
                              substituteTypes subs .
-                             vacuousShapeAnnotations . toStruct
+                             vacuousShapeAnnotations
         , mapOnStructType  = pure . substituteTypes subs
-        , mapOnPatternType = pure . substPatternType
+        , mapOnPatternType = pure . substituteTypes subs
         }
 
   body' <- astMap mapper body
 
   return valbind { valBindRetType = Info $ substituteTypes subs rettype
-                 , valBindParams  = map (substPattern substPatternType) pats
+                 , valBindParams  = map (substPattern entry $ substituteTypes subs) pats
                  , valBindBody    = body'
                  }
 
@@ -609,12 +623,12 @@ removeTypeVariablesInType t = do
 
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
-  valbind' <- toPolyBinding <$> removeTypeVariables valbind
+  valbind' <- toPolyBinding <$> removeTypeVariables (valBindEntryPoint valbind) valbind
   when (valBindEntryPoint valbind) $ do
     t <- removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
          (map patternStructType (valBindParams valbind)) $
          unInfo $ valBindRetType valbind
-    (name, valbind'') <- monomorphizeBinding valbind' t
+    (name, valbind'') <- monomorphizeBinding True valbind' t
     tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = True})
     addLifted (valBindName valbind) t name
   return mempty { envPolyBindings = M.singleton (valBindName valbind) valbind' }

@@ -1242,7 +1242,7 @@ benchmarkOptions =
    , Option { optionLongName = "entry-point"
             , optionShortName = Just 'e'
             , optionArgument = RequiredArgument "NAME"
-            , optionAction = [C.cstm|entry_point = optarg;|]
+            , optionAction = [C.cstm|if (entry_point != NULL) entry_point = optarg;|]
             }
    , Option { optionLongName = "binary-output"
             , optionShortName = Just 'b'
@@ -1356,7 +1356,10 @@ static int binary_output = 0;
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
 static int num_runs = 1;
+// If the entry point is NULL, the program will terminate after doing initialisation and such.
 static const char *entry_point = "main";
+
+$esc:tuning_h
 
 $func:option_parser
 
@@ -1390,31 +1393,33 @@ int main(int argc, char** argv) {
   struct futhark_context *ctx = futhark_context_new(cfg);
   assert (ctx != NULL);
 
-  int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
-  entry_point_fun *entry_point_fun = NULL;
-  for (int i = 0; i < num_entry_points; i++) {
-    if (strcmp(entry_points[i].name, entry_point) == 0) {
-      entry_point_fun = entry_points[i].fun;
-      break;
-    }
-  }
-
-  if (entry_point_fun == NULL) {
-    fprintf(stderr, "No entry point '%s'.  Select another with --entry-point.  Options are:\n",
-                    entry_point);
+  if (entry_point != NULL) {
+    int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
+    entry_point_fun *entry_point_fun = NULL;
     for (int i = 0; i < num_entry_points; i++) {
-      fprintf(stderr, "%s\n", entry_points[i].name);
+      if (strcmp(entry_points[i].name, entry_point) == 0) {
+        entry_point_fun = entry_points[i].fun;
+        break;
+      }
     }
-    return 1;
+
+    if (entry_point_fun == NULL) {
+      fprintf(stderr, "No entry point '%s'.  Select another with --entry-point.  Options are:\n",
+                      entry_point);
+      for (int i = 0; i < num_entry_points; i++) {
+        fprintf(stderr, "%s\n", entry_points[i].name);
+      }
+      return 1;
+    }
+
+    entry_point_fun(ctx);
+
+    if (runtime_file != NULL) {
+      fclose(runtime_file);
+    }
+
+    futhark_debugging_report(ctx);
   }
-
-  entry_point_fun(ctx);
-
-  if (runtime_file != NULL) {
-    fclose(runtime_file);
-  }
-
-  futhark_debugging_report(ctx);
 
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
@@ -1489,6 +1494,7 @@ $edecls:entry_point_decls
         values_h = $(embedStringFile "rts/c/values.h")
         timing_h = $(embedStringFile "rts/c/timing.h")
         lock_h = $(embedStringFile "rts/c/lock.h")
+        tuning_h = $(embedStringFile "rts/c/tuning.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do

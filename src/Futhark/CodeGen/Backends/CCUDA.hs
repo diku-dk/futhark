@@ -52,7 +52,8 @@ cliOptions :: [Option]
 cliOptions = [ Option { optionLongName = "dump-cuda"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument "FILE"
-                      , optionAction = [C.cstm|futhark_context_config_dump_program_to(cfg, optarg);|]
+                      , optionAction = [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
+                                                entry_point = NULL;}|]
                       }
              , Option { optionLongName = "load-cuda"
                       , optionShortName = Nothing
@@ -62,7 +63,8 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
              , Option { optionLongName = "dump-ptx"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument "FILE"
-                      , optionAction = [C.cstm|futhark_context_config_dump_ptx_to(cfg, optarg);|]
+                      , optionAction = [C.cstm|{futhark_context_config_dump_ptx_to(cfg, optarg);
+                                                entry_point = NULL;}|]
                       }
              , Option { optionLongName = "load-ptx"
                       , optionShortName = Nothing
@@ -73,6 +75,11 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument "INT"
                       , optionAction = [C.cstm|futhark_context_config_set_default_num_nodes(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "nvrtc-option"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "OPT"
+                      , optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
                       }
              , Option { optionLongName = "print-sizes"
                       , optionShortName = Nothing
@@ -86,6 +93,17 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
                           exit(0);
                         }|]
                       }
+             , Option { optionLongName = "tuning"
+                 , optionShortName = Nothing
+                 , optionArgument = RequiredArgument "FILE"
+                 , optionAction = [C.cstm|{
+                     char *fname = optarg;
+                     char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
+                                                               futhark_context_config_set_size);
+                     if (ret != NULL) {
+                       panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                     }}|]
+                 }
              ]
 
 writeCUDAScalar :: GC.WriteScalar OpenCL ()

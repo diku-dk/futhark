@@ -23,22 +23,22 @@ GCC is invoked with ``-O3``, ``-lm``, and ``-std=c99``.
 The resulting program will read the arguments to the entry point
 (``main`` by default) from standard input and print its return value
 on standard output.  The arguments are read and printed in Futhark
-syntax, just like futharki(1).
+syntax.
 
 OPTIONS
 =======
 
--o outfile
-  Where to write the result.  If the source program is named
-  'foo.fut', this defaults to 'foo'.
+-h
+  Print help text to standard output and exit.
 
 --library
   Generate a library instead of an executable.  Appends ``.c``/``.h``
   to the name indicated by the ``-o`` option to determine output
   file names.
 
---Werror
-  Treat warnings as errors.
+-o outfile
+  Where to write the result.  If the source program is named
+  ``foo.fut``, this defaults to ``foo``.
 
 --safe
   Ignore ``unsafe`` in program and perform safety checks unconditionally.
@@ -48,13 +48,13 @@ OPTIONS
   error, the result of the last successful compiler step will be
   printed to standard error.
 
--h
-  Print help text to standard output and exit.
-
 -V
   Print version information on standard output and exit.
+
+--Werror
+  Treat warnings as errors.
 
 SEE ALSO
 ========
 
-futharki(1), futhark-test(1)
+futhark-opencl(1), futhark-cuda(1), futhark-test(1)

@@ -28,10 +28,6 @@ non-zero exit code will be returned at the end.
 OPTIONS
 =======
 
---runs=count
-
-  The number of runs per data set.
-
 --backend=name
 
   The backend used when compiling Futhark programs (without leading
@@ -41,9 +37,34 @@ OPTIONS
 
   Only run entry points with this name.
 
+
+--exclude-case=TAG
+
+  Do not run test cases that contain the given tag.  Cases marked with
+  "nobench" or "disable" are ignored by default.
+
 --futhark=program
 
   The binary used to perform operations.  Defaults to ``futhark``.
+
+--ignore-files=REGEX
+
+  Ignore files whose path match the given regular expression.
+
+--json=file
+
+  Write raw results in JSON format to the specified file.
+
+--no-tuning
+
+  Do not look for tuning files.
+
+--pass-option=opt
+
+  Pass an option to benchmark programs that are being run.  For
+  example, we might want to run OpenCL programs on a specific device::
+
+    futhark bench prog.fut --codegen=opencl --pass-option=-dHawaii
 
 --runner=program
 
@@ -54,16 +75,14 @@ OPTIONS
   cannot be executed directly (as with `futhark-cs(1)`), or when you
   wish to run the program on a remote machine.
 
---json=file
+--runs=count
 
-  Write raw results in JSON format to the specified file.
+  The number of runs per data set.
 
---pass-option=opt
+--skip-compilation
 
-  Pass an option to benchmark programs that are being run.  For
-  example, we might want to run OpenCL programs on a specific device::
-
-    futhark bench prog.fut --codegen=opencl --pass-option=-dHawaii
+  Do not run the compiler, and instead assume that each benchmark
+  program has already been compiled.  Use with caution.
 
 --timeout=seconds
 
@@ -75,19 +94,13 @@ OPTIONS
 
   A negative timeout means to wait indefinitely.
 
---skip-compilation
+--tuning=EXTENSION
 
-  Do not run the compiler, and instead assume that each benchmark
-  program has already been compiled.  Use with caution.
-
---exclude-case=TAG
-
-  Do not run test cases that contain the given tag.  Cases marked with
-  "nobench" or "disable" are ignored by default.
-
---ignore-files=REGEX
-
-  Ignore files whose path match the given regular expression.
+  For each program being run, look for a tuning file with this
+  extension, which is suffixed to the name of the program.  For
+  example, given ``--tuning=tuning`` (the default), the program
+  ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
+  exists.
 
 EXAMPLES
 ========

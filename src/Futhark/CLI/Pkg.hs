@@ -326,6 +326,9 @@ doUpgrade = cmdMain "" $ \args cfg ->
       m <- getPkgManifest
       rs <- traverse (mapM (traverse upgrade)) $ manifestRequire m
       putPkgManifest m { manifestRequire = rs }
+      if rs == manifestRequire m
+        then liftIO $ T.putStrLn "Nothing to upgrade."
+        else liftIO $ T.putStrLn "Remember to run 'futhark pkg sync'."
     _ -> Nothing
   where upgrade req = do
           v <- lookupNewestRev $ requiredPkg req

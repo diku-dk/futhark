@@ -28,25 +28,31 @@ one compiled with ``futhark-cs``.
 OPTIONS
 =======
 
--o outfile
-  Where to write the result.  If the source program is named
-  'foo.fut', this defaults to 'foo'.
+-h
+  Print help text to standard output and exit.
 
 --library
-  Generate a library instead of an executable.  Appends ``.c``/``.h``
+  Generate a library instead of an executable.  Appends ``.dll``
   to the name indicated by the ``-o`` option to determine output
   file names.
+
+-o outfile
+  Where to write the result.  If the source program is named
+  ``foo.fut``, this defaults to ``foo``.
+
+--safe
+  Ignore ``unsafe`` in program and perform safety checks unconditionally.
 
 -v verbose
   Enable debugging output.  If compilation fails due to a compiler
   error, the result of the last successful compiler step will be
   printed to standard error.
 
--h
-  Print help text to standard output and exit.
-
 -V
   Print version information on standard output and exit.
+
+--Werror
+  Treat warnings as errors.
 
 REQUIREMENTS
 ============
@@ -60,4 +66,4 @@ Cloo.clSharp is available on https://www.nuget.org/packages/Cloo.clSharp/
 SEE ALSO
 ========
 
-futharki(1), futhark-test(1), futhark-cs(1)
+futhark-test(1), futhark-cs(1)
