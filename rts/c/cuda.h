@@ -512,6 +512,7 @@ static void cuda_module_setup(struct cuda_context *ctx,
 void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const char *extra_opts[])
 {
   CUDA_SUCCEED(cuInit(0));
+  cuda_devices_setup(ctx);
 
   cuda_devices_setup(ctx);
 
