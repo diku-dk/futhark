@@ -442,7 +442,8 @@ enum opencl_required_type { OPENCL_F64 = 1 };
 static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
                                                   cl_command_queue queue,
                                                   const char *srcs[],
-                                                  int required_types) {
+                                                  int required_types,
+                                                  const char *extra_build_opts[]) {
   int error;
 
   ctx->queue = queue;
@@ -590,9 +591,15 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     OPENCL_SUCCEED_FATAL(error);
 
     int compile_opts_size = 1024;
+
     for (int i = 0; i < ctx->cfg.num_sizes; i++) {
       compile_opts_size += strlen(ctx->cfg.size_names[i]) + 20;
     }
+
+    for (int i = 0; extra_build_opts[i] != NULL; i++) {
+      compile_opts_size += strlen(extra_build_opts[i] + 1);
+    }
+
     char *compile_opts = malloc(compile_opts_size);
 
     int w = snprintf(compile_opts, compile_opts_size,
@@ -604,6 +611,11 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
                     "-D%s=%d ",
                     ctx->cfg.size_vars[i],
                     (int)ctx->cfg.size_values[i]);
+    }
+
+    for (int i = 0; extra_build_opts[i] != NULL; i++) {
+      w += snprintf(compile_opts+w, compile_opts_size-w,
+                    "%s ", extra_build_opts[i]);
     }
 
     OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
@@ -647,7 +659,8 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
 static cl_program setup_opencl(struct opencl_context *ctx,
                                const char *srcs[],
-                               int required_types) {
+                               int required_types,
+                               const char *extra_build_opts[]) {
 
   ctx->lockstep_width = 0; // Real value set later.
 
@@ -674,7 +687,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
   cl_command_queue queue = clCreateCommandQueue(ctx->ctx, device_option.device, 0, &clCreateCommandQueue_error);
   OPENCL_SUCCEED_FATAL(clCreateCommandQueue_error);
 
-  return setup_opencl_with_command_queue(ctx, queue, srcs, required_types);
+  return setup_opencl_with_command_queue(ctx, queue, srcs, required_types, extra_build_opts);
 }
 
 // Allocate memory from driver. The problem is that OpenCL may perform

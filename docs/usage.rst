@@ -174,6 +174,13 @@ OpenCL backends (``opencl``, ``pyopencl``, and ``csopencl``):
 
     Load an OpenCL binary from the indicated file.
 
+  ``--build-option OPT``
+
+    Add an additional build option to the string passed to
+    ``clBuildProgram()``.  Refer to the OpenCL documentation for which
+    options are supported.  Be careful - some options can easily
+    result in invalid results.
+
 There is rarely a need to use both ``-p`` and ``-d``.  For example, to
 run on the first available NVIDIA GPU, ``-p NVIDIA`` is sufficient, as
 there is likely only a single device associated with this platform.

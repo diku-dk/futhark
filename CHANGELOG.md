@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Executables generated with the `cuda` backend now take an
     `--nvrtc-option` option.
 
+  * Executables generated with the `opencl` backend now take a
+    `--build-option` option.
+
 ### Removed
 
   * The old `futhark-*` executables have been removed.
