@@ -152,8 +152,9 @@ OpenCL backends (``opencl``, ``pyopencl``, and ``csopencl``):
 
   ``--dump-opencl FILE``
 
-    Dump the embedded OpenCL program to the indicated file.  Useful if
-    you want to see what is actually being executed.
+    Don't run the program, but instead dump the embedded OpenCL
+    program to the indicated file.  Useful if you want to see what is
+    actually being executed.
 
   ``--load-opencl FILE``
 
@@ -164,8 +165,10 @@ OpenCL backends (``opencl``, ``pyopencl``, and ``csopencl``):
 
   ``--dump-opencl-binary FILE``
 
-    Dump the compiled version of the embedded OpenCL program to the
-    indicated file.  On NVIDIA platforms, this will be PTX code.
+    Don't run the program, but instead dump the compiled version of
+    the embedded OpenCL program to the indicated file.  On NVIDIA
+    platforms, this will be PTX code.  If this option is set, no entry
+    point will be run.
 
   ``--load-opencl-binary FILE``
 
@@ -188,8 +191,9 @@ The following options are supported by executables generated the
 
   ``--dump-cuda FILE``
 
-    Dump the embedded CUDA program to the indicated file.  Useful if
-    you want to see what is actually being executed.
+    Don't run the program, but instead dump the embedded CUDA program
+    to the indicated file.  Useful if you want to see what is actually
+    being executed.
 
   ``--load-cuda FILE``
 
@@ -204,7 +208,8 @@ The following options are supported by executables generated the
 
   ``--load-ptx FILE``
 
-    Load compiled PTX code from the indicated file.
+    Don't run the program, but instead load compiled PTX code from the
+    indicated file.
 
   ``--nvrtc-option=OPT``
 
