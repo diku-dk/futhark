@@ -24,8 +24,7 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
-import Futhark.CodeGen.ImpGen (sFor, sWhen,
-                               sOp)
+import Futhark.CodeGen.ImpGen (sFor, sWhen, sOp)
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
@@ -114,9 +113,22 @@ kernelCompiler pat (SegRed space comm red_op nes _ body) =
 kernelCompiler pat (SegGenRed space ops _ body) =
   compileSegGenRed pat space ops body
 
+kernelCompiler pat (Husk hspace kern red) =
+  compileHusk pat hspace kern red
+
 kernelCompiler pat e =
   compilerBugS $ "ImpGen.kernelCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
+
+compileHusk :: Pattern ExplicitMemory
+             -> HuskSpace
+             -> Kernel InKernel
+             -> Kernel InKernel
+             -> CallKernelGen ()
+compileHusk pat hspace kern red = do
+  sDistributeHusk hspace $ kernelCompiler pat kern
+  -- TODO: ^ What should be done with pattern?
+  kernelCompiler pat red
 
 expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
 

@@ -19,6 +19,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , groupScan
   , isActive
   , sKernel
+  , sDistributeHusk
   , sReplicate
   , sIota
   , sCopy
@@ -1015,6 +1016,12 @@ sKernel constants name m = do
     , Imp.kernelName =
         nameFromString $ name ++ "_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
     }
+
+sDistributeHusk :: HuskSpace -> CallKernelGen () -> CallKernelGen ()
+sDistributeHusk (HuskSpace _ _ _ _ num_nodes _) body = do
+  body' <- ImpGen.collect body
+  num_nodes' <- ImpGen.compileSubExp num_nodes
+  ImpGen.emit $ Imp.Op $ Imp.DistributeHusk num_nodes' body'
 
 -- | Perform a Replicate with a kernel.
 sReplicate :: VName -> Shape -> SubExp

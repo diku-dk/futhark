@@ -101,6 +101,7 @@ onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
 
+
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
 
 onKernel target kernel = do

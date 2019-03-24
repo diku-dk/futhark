@@ -69,6 +69,11 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
                       , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
                       }
+             , Option { optionLongName = "nodes"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "INT"
+                      , optionAction = [C.cstm|futhark_context_config_set_default_num_nodes(cfg, atoi(optarg));|]
+                      }
              , Option { optionLongName = "print-sizes"
                       , optionShortName = Nothing
                       , optionArgument = NoArgument
@@ -190,6 +195,7 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
+    cudaSizeClass SizeNumNodes = "num_nodes"
 callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   time_start <- newVName "time_start"

@@ -40,6 +40,7 @@ struct cuda_config {
   size_t default_grid_size;
   size_t default_tile_size;
   size_t default_threshold;
+  size_t default_num_nodes;
 
   int default_block_size_changed;
   int default_grid_size_changed;
@@ -73,6 +74,7 @@ void cuda_config_init(struct cuda_config *cfg,
   cfg->default_grid_size = 128;
   cfg->default_tile_size = 32;
   cfg->default_threshold = 32*1024;
+  cfg->default_num_nodes = 1;
 
   cfg->default_block_size_changed = 0;
   cfg->default_grid_size_changed = 0;
@@ -94,7 +96,6 @@ struct cuda_node_context {
 
 struct cuda_context {
   struct cuda_node_context *nodes;
-  size_t num_nodes;
   
   CUmodule module;
 
@@ -102,6 +103,7 @@ struct cuda_context {
   size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
+  size_t max_num_nodes;
 
   size_t lockstep_width;
 
@@ -141,6 +143,8 @@ static int cuda_devices_setup(struct cuda_context *ctx)
 {
   int count;
   int contains_valid = 0;
+
+  ctx->max_num_nodes = ctx->cfg.default_num_nodes;
 
   CUDA_SUCCEED(cuDeviceGetCount(&count));
   if (count == 0) {
@@ -208,20 +212,20 @@ static int cuda_devices_setup(struct cuda_context *ctx)
     }
   }
 
-  if (ctx->num_nodes != 0 && dev_count < ctx->num_nodes) {
+  if (ctx->max_num_nodes != 0 && dev_count < ctx->max_num_nodes) {
     panic(-1, "Found only %d \"%s\" devices, but %d was requested.\n",
-          dev_count, devs[0].name, ctx->num_nodes);
+          dev_count, devs[0].name, ctx->max_num_nodes);
   }
 
-  if (ctx->num_nodes == 0)
-    ctx->num_nodes = dev_count;
-  ctx->nodes = malloc(sizeof(struct cuda_node_context) * ctx->num_nodes);
+  if (ctx->max_num_nodes == 0)
+    ctx->cfg.default_num_nodes = ctx->max_num_nodes = dev_count;
+  ctx->nodes = malloc(sizeof(struct cuda_node_context) * ctx->max_num_nodes);
 
-  for (int i = 0; i < ctx->num_nodes; ++i)
+  for (int i = 0; i < ctx->max_num_nodes; ++i)
     ctx->nodes[i].dev = devs[i].dev;
 
   if(ctx->cfg.debugging)
-    fprintf(stderr, "Using %d \"%s\" devices.\n", ctx->num_nodes, devs[0].name);
+    fprintf(stderr, "Using %d \"%s\" devices.\n", ctx->max_num_nodes, devs[0].name);
 
   free(devs);
   return 0;
@@ -393,6 +397,9 @@ static void cuda_size_setup(struct cuda_context *ctx)
     } else if (strstr(size_class, "threshold") == size_class) {
       max_value = ctx->max_threshold;
       default_value = ctx->cfg.default_threshold;
+    } else if (strstr(size_class, "num_nodes") == size_class) {
+      max_value = ctx->max_num_nodes;
+      default_value = ctx->cfg.default_num_nodes;
     } else {
       panic(1, "Unknown size class for size '%s': %s\n", size_name, size_class);
     }
@@ -479,10 +486,10 @@ static void cuda_module_setup(struct cuda_context *ctx,
 void cuda_setup(struct cuda_context *ctx, const char *src_fragments[])
 {
   CUDA_SUCCEED(cuInit(0));
+
   cuda_devices_setup(ctx);
 
-  for (int i = 0; i < ctx->num_nodes; ++i) {
-    fprintf(stderr, "Device %d %d\n", i, ctx->nodes[i].dev);
+  for (int i = 0; i < ctx->max_num_nodes; ++i) {
     CUDA_SUCCEED(cuCtxCreate(&ctx->nodes[i].cu_ctx, 0, ctx->nodes[i].dev));
     free_list_init(&ctx->nodes[i].free_list);
   }
@@ -504,7 +511,7 @@ void cuda_cleanup(struct cuda_context *ctx)
 {
   CUDA_SUCCEED(cuda_free_all(ctx));
   CUDA_SUCCEED(cuModuleUnload(ctx->module));
-  for (int i = 0; i < ctx->num_nodes; ++i)
+  for (int i = 0; i < ctx->max_num_nodes; ++i)
     CUDA_SUCCEED(cuCtxDestroy(ctx->nodes[i].cu_ctx));
 }
 
@@ -568,7 +575,7 @@ CUresult cuda_free(struct cuda_context *ctx, int node, CUdeviceptr mem,
 
 CUresult cuda_free_all(struct cuda_context *ctx) {
   CUdeviceptr mem;
-  for (int i = 0; i < ctx->num_nodes; ++i) {
+  for (int i = 0; i < ctx->max_num_nodes; ++i) {
     free_list_pack(&ctx->nodes[i].free_list);
     while (free_list_first(&ctx->nodes[i].free_list, &mem) == 0) {
       CUresult res = cuMemFree(mem);

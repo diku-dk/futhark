@@ -75,7 +75,7 @@ instance (Attributes lore, Monad m) =>
   lookupType name = do
     t <- BinderT $ gets $ M.lookup name . snd
     case t of
-      Nothing -> fail $ "BinderT.lookupType: unknown variable " ++ pretty name
+      Nothing -> error $ "BinderT.lookupType: unknown variable " ++ pretty name
       Just t' -> return $ typeOf t'
   askScope = BinderT $ gets snd
 

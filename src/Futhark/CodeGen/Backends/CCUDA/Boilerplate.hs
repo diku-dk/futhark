@@ -170,6 +170,12 @@ generateConfigFuns sizes = do
                          cfg->cu_cfg.default_threshold = size;
                        }|])
 
+  GC.publicDef_ "context_config_set_default_num_nodes" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
+                         cfg->cu_cfg.default_threshold = size;
+                       }|])
+
   GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
@@ -221,8 +227,6 @@ generateContextFuns cfg kernel_names sizes = do
                           ctx->cuda.cfg = cfg->cu_cfg;
                           create_lock(&ctx->lock);
                           $stms:init_fields
-
-                          ctx->cuda.num_nodes = 1; // TODO: Change
 
                           cuda_setup(&ctx->cuda, cuda_program);
                           $stms:(map (loadKernelByName) kernel_names)

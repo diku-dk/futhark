@@ -48,6 +48,7 @@ newtype KernelConst = SizeConst Name
 type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel Kernel
+            | DistributeHusk Imp.Exp (Imp.Code HostOp)
             | GetSize VName Name SizeClass
             | CmpSizeLe VName Name SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
@@ -82,6 +83,8 @@ getKernels :: Program -> [Kernel]
 getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
   where getFunKernels (CallKernel kernel) =
           tell [kernel]
+        getFunKernels (DistributeHusk _ body) =
+          tell $ execWriter $ traverse getFunKernels body
         getFunKernels _ =
           return ()
         sameKernel _ _ = False
@@ -119,11 +122,15 @@ instance Pretty HostOp where
     ppr dest <+> text "<-" <+>
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
+  ppr (DistributeHusk num_nodes c) =
+    text "distribute" <> parens (ppr num_nodes) <+>
+    text "{" <+> ppr c <+> text "}"
   ppr (CallKernel c) =
     ppr c
 
 instance FreeIn HostOp where
   freeIn (CallKernel c) = freeIn c
+  freeIn (DistributeHusk _ c) = freeIn c
   freeIn (CmpSizeLe dest _ _ x) =
     freeIn dest <> freeIn x
   freeIn (GetSizeMax dest _) =
