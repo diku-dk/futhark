@@ -3,12 +3,15 @@
 Installation
 ============
 
-There are two ways to install the Futhark compiler: using a
+There are two main ways to install the Futhark compiler: using a
 precompiled tarball or compiling from source.  Both methods are
 discussed below.  If you are using Linux, see
 :ref:`linux-installation`.  If you are using Windows, make sure to
 read :ref:`windows-installation`.  If you are using macOS, read
 :ref:`macos-installation`.
+
+Futhark is also available via `Nix <https://nixos.org/nix/>`_.  If you
+are using Nix, simply install the ``futhark`` derivation from Nixpkgs.
 
 Compiling from source
 ---------------------
@@ -61,6 +64,7 @@ Installing from a precompiled snapshot
 Tarballs of binary releases can be `found online
 <https://futhark-lang.org/releases/>`_, but are available only for
 very few platforms (as of this writing, only GNU/Linux on x86_64).
+See the enclosed ``README.md`` for installation instructions.
 
 Furthermore, every day a program automatically clones the Git
 repository, builds the compiler, and packages a simple tarball
@@ -140,7 +144,7 @@ generated Futhark executable.
 
 .. _windows-installation:
 
-Installing Futhark on Windows
+Setting up Futhark on Windows
 -----------------------------
 
 While the Futhark compiler itself is easily installed on Windows via
