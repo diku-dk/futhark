@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     0.  This only affects the text output and the generated JSON
     files, and fits the tuple element ordering in Futhark.
 
-  * String literals are now of type `[]u8` and contain UTF-8 encode
+  * String literals are now of type `[]u8` and contain UTF-8 encoded
     bytes.
 
 ### Fixed
