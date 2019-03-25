@@ -9,7 +9,7 @@ import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST
 import Futhark.Analysis.ScalExp
-import Futhark.Analysis.ScalExpTests (parseScalExp')
+import Futhark.Analysis.ScalExpTests (parseScalExp)
 import Futhark.Analysis.AlgSimplify
 
 tests :: TestTree
@@ -33,7 +33,7 @@ constantFoldTests =
   ]
   where vars = declareVars [("x", int32)]
         simplify'' e = simplify' vars e []
-        scalExp = parseScalExp' vars
+        scalExp = parseScalExp vars
 
         cfoldTest input expected =
           testCase ("constant-fold " ++ input) $
@@ -85,11 +85,11 @@ instantiateRanges varinfo r =
            (lookupVarName name varinfo,
             (i, fixBound lower, fixBound upper)))
         fixBound "" = Nothing
-        fixBound s  = Just $ parseScalExp' varinfo s
+        fixBound s  = Just $ parseScalExp varinfo s
 
 simplify' :: VarInfo -> String -> RangesRep' -> ScalExp
 simplify' varinfo s r = simplify e r'
-  where e = parseScalExp' varinfo s
+  where e = parseScalExp varinfo s
         r' = instantiateRanges varinfo r
 
 mkSuffConds' :: VarInfo -> String -> RangesRep' -> [[ScalExp]]
@@ -97,5 +97,5 @@ mkSuffConds' varinfo s r =
   case mkSuffConds e r' of
     Left _ -> [[e]]
     Right sc -> sc
-  where e = simplify (parseScalExp' varinfo s) r'
+  where e = simplify (parseScalExp varinfo s) r'
         r' = instantiateRanges varinfo r

@@ -7,7 +7,6 @@ where
 
 import Test.Tasty
 
-import Futhark.Representation.AST.SyntaxTests ()
 import qualified Futhark.Representation.AST.Attributes.ReshapeTests
 import qualified Futhark.Representation.AST.Attributes.RearrangeTests
 
