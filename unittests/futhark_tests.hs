@@ -6,6 +6,7 @@ import qualified Futhark.Representation.AST.AttributesTests
 import qualified Futhark.Representation.ExplicitMemory.IndexFunctionTests
 import qualified Futhark.Optimise.AlgSimplifyTests
 import qualified Futhark.Pkg.SolveTests
+import qualified Futhark.Representation.PrimitiveTests
 
 import Test.Tasty
 
@@ -18,6 +19,7 @@ allTests =
   , Futhark.Representation.AST.Syntax.CoreTests.tests
   , Futhark.Pkg.SolveTests.tests
   , Futhark.Representation.ExplicitMemory.IndexFunctionTests.tests
+  , Futhark.Representation.PrimitiveTests.tests
   ]
 
 main :: IO ()
