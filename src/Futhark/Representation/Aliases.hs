@@ -56,7 +56,6 @@ import Futhark.Transform.Rename
 import Futhark.Binder
 import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
-import Futhark.Representation.AST.Attributes.Ranges()
 import qualified Futhark.Util.Pretty as PP
 
 -- | The lore for the basic representation.
