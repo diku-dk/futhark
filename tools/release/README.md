@@ -26,6 +26,9 @@ corresponds exactly to the state of the Git repository at some point.
 
  * Verify the version number in `package.yaml`.
 
+ * Make sure you've committed any changes you may have made due to the
+   previous two steps.
+
  * Run `git tag vX.Y.Z`.
 
  * Push the tag: `git push --tags`.  This counts as a release on
