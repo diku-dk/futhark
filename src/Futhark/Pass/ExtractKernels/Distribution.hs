@@ -253,7 +253,7 @@ constructKernel kernel_nest inner_body = do
   let kbnds = w_bnds <> ksize_bnds
   return (kbnds,
           w,
-          Let (loopNestingPattern first_nest) (StmAux cs ()) $ Op k)
+          Let (loopNestingPattern first_nest) (StmAux cs ()) $ Op $ HostOp k)
   where
     first_nest = fst kernel_nest
     inputIsUsed input = kernelInputName input `S.member`

@@ -33,6 +33,10 @@ module Futhark.Representation.Kernels.Kernel
        , KernelWalker(..)
        , identityKernelWalker
        , walkKernelM
+
+       -- * Host operations
+       , HostOp(..)
+       , typeCheckHostOp
        )
        where
 
@@ -95,12 +99,8 @@ data GenReduceOp lore =
               }
   deriving (Eq, Ord, Show)
 
-data Kernel lore =
-    GetSize Name SizeClass -- ^ Produce some runtime-configurable size.
-  | GetSizeMax SizeClass -- ^ The maximum size of some class.
-  | CmpSizeLe Name SizeClass SubExp
-    -- ^ Compare size (likely a threshold) with some Int32 value.
-  | Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
+data Kernel lore
+  = Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
   | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (Body lore)
     -- ^ The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
@@ -203,12 +203,6 @@ identityKernelMapper = KernelMapper { mapOnKernelSubExp = return
 -- and is done left-to-right.
 mapKernelM :: (Applicative m, Monad m) =>
               KernelMapper flore tlore m -> Kernel flore -> m (Kernel tlore)
-mapKernelM _ (GetSize name size_class) =
-  pure $ GetSize name size_class
-mapKernelM _ (GetSizeMax size_class) =
-  pure $ GetSizeMax size_class
-mapKernelM tv (CmpSizeLe name size_class x) =
-  CmpSizeLe name size_class <$> mapOnKernelSubExp tv x
 mapKernelM tv (SegRed space comm red_op nes ts lam) =
   SegRed
   <$> mapOnKernelSpace tv space
@@ -457,10 +451,6 @@ kernelType (SegGenRed space ops _ _) = do
   where dims = map snd $ spaceDimensions space
         segment_dims = init dims
 
-kernelType GetSize{} = [Prim int32]
-kernelType GetSizeMax{} = [Prim int32]
-kernelType CmpSizeLe{} = [Prim Bool]
-
 chunkedKernelNonconcatOutputs :: Lambda lore -> Int
 chunkedKernelNonconcatOutputs fun =
   length $ takeWhile (not . outerSizeIsChunk) $ lambdaReturnType fun
@@ -609,9 +599,6 @@ instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (SegGenRed _ ops _ body) =
     mconcat $ map UT.consumedUsage $ S.toList (consumedInBody body) <>
     concatMap genReduceDest ops
-  usageInOp GetSize{} = mempty
-  usageInOp GetSizeMax{} = mempty
-  usageInOp CmpSizeLe{} = mempty
 
 consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
@@ -619,10 +606,6 @@ consumedInKernelBody (KernelBody attr stms _) =
   consumedInBody $ Body attr stms []
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
-
-typeCheckKernel GetSize{} = return ()
-typeCheckKernel GetSizeMax{} = return ()
-typeCheckKernel (CmpSizeLe _ _ x) = TC.require [Prim int32] x
 
 typeCheckKernel (SegRed space _ red_op nes ts body) = do
   checkSpace space
@@ -747,21 +730,8 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (SegGenRed _ ops _ body) =
     inside "SegGenRed" $ do mapM_ (lambdaMetrics . genReduceOp) ops
                             bodyMetrics body
-  opMetrics GetSize{} = seen "GetSize"
-  opMetrics GetSizeMax{} = seen "GetSizeMax"
-  opMetrics CmpSizeLe{} = seen "CmpSizeLe"
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
-  ppr (GetSize name size_class) =
-    text "get_size" <> parens (commasep [ppr name, ppr size_class])
-
-  ppr (GetSizeMax size_class) =
-    text "get_size_max" <> parens (ppr size_class)
-
-  ppr (CmpSizeLe name size_class x) =
-    text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
-    text "<" <+> ppr x
-
   ppr (Kernel desc space ts body) =
     text "kernel" <+> text (kernelName desc) <>
     PP.align (ppr space) <+>
@@ -835,3 +805,129 @@ instance Pretty KernelResult where
                                        Just se -> "," <+> "offset=" <> ppr se
   ppr (KernelInPlaceReturn what) =
     text "kernel returns" <+> ppr what
+
+--- Host operations
+
+-- | A host-level operation; parameterised by what else it can do.
+data HostOp lore inner
+  = GetSize Name SizeClass
+    -- ^ Produce some runtime-configurable size.
+  | GetSizeMax SizeClass
+    -- ^ The maximum size of some class.
+  | CmpSizeLe Name SizeClass SubExp
+    -- ^ Compare size (likely a threshold) with some Int32 value.
+  | HostOp inner
+    -- ^ The arbitrary operation.
+  deriving (Eq, Ord, Show)
+
+instance Substitute inner => Substitute (HostOp lore inner) where
+  substituteNames substs (HostOp op) =
+    HostOp $ substituteNames substs op
+  substituteNames substs (CmpSizeLe name sclass x) =
+    CmpSizeLe name sclass $ substituteNames substs x
+  substituteNames _ x = x
+
+instance Rename inner => Rename (HostOp lore inner) where
+  rename (HostOp op) = HostOp <$> rename op
+  rename (CmpSizeLe name sclass x) = CmpSizeLe name sclass <$> rename x
+  rename x = pure x
+
+instance IsOp inner => IsOp (HostOp lore inner) where
+  safeOp (HostOp op) = safeOp op
+  safeOp _ = True
+  cheapOp (HostOp op) = cheapOp op
+  cheapOp _ = True
+
+instance TypedOp inner => TypedOp (HostOp lore inner) where
+  opType GetSize{} = pure [Prim int32]
+  opType GetSizeMax{} = pure [Prim int32]
+  opType CmpSizeLe{} = pure [Prim Bool]
+  opType (HostOp op) = opType op
+
+instance AliasedOp inner => AliasedOp (HostOp lore inner) where
+  opAliases (HostOp op) = opAliases op
+  opAliases _ = [mempty]
+
+  consumedInOp (HostOp op) = consumedInOp op
+  consumedInOp _ = mempty
+
+instance RangedOp inner => RangedOp (HostOp lore inner) where
+  opRanges (HostOp op) = opRanges op
+  opRanges _ = [unknownRange]
+
+instance FreeIn inner => FreeIn (HostOp lore inner) where
+  freeIn (HostOp op) = freeIn op
+  freeIn (CmpSizeLe _ _ x) = freeIn x
+  freeIn _ = mempty
+
+instance CanBeAliased inner => CanBeAliased (HostOp lore inner) where
+  type OpWithAliases (HostOp lore inner) = HostOp (Aliases lore) (OpWithAliases inner)
+
+  addOpAliases (HostOp op) = HostOp $ addOpAliases op
+  addOpAliases (GetSize name sclass) = GetSize name sclass
+  addOpAliases (GetSizeMax sclass) = GetSizeMax sclass
+  addOpAliases (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+
+  removeOpAliases (HostOp op) = HostOp $ removeOpAliases op
+  removeOpAliases (GetSize name sclass) = GetSize name sclass
+  removeOpAliases (GetSizeMax sclass) = GetSizeMax sclass
+  removeOpAliases (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+
+instance CanBeRanged inner => CanBeRanged (HostOp lore inner) where
+  type OpWithRanges (HostOp lore inner) = HostOp (Ranges lore) (OpWithRanges inner)
+
+  addOpRanges (HostOp op) = HostOp $ addOpRanges op
+  addOpRanges (GetSize name sclass) = GetSize name sclass
+  addOpRanges (GetSizeMax sclass) = GetSizeMax sclass
+  addOpRanges (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+
+  removeOpRanges (HostOp op) = HostOp $ removeOpRanges op
+  removeOpRanges (GetSize name sclass) = GetSize name sclass
+  removeOpRanges (GetSizeMax sclass) = GetSizeMax sclass
+  removeOpRanges (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+
+instance CanBeWise inner => CanBeWise (HostOp lore inner) where
+  type OpWithWisdom (HostOp lore inner) = HostOp (Wise lore) (OpWithWisdom inner)
+
+  removeOpWisdom (HostOp op) = HostOp $ removeOpWisdom op
+  removeOpWisdom (GetSize name sclass) = GetSize name sclass
+  removeOpWisdom (GetSizeMax sclass) = GetSizeMax sclass
+  removeOpWisdom (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+
+instance ST.IndexOp op => ST.IndexOp (HostOp lore op) where
+  indexOp vtable k (HostOp op) is = ST.indexOp vtable k op is
+  indexOp _ _ _ _ = Nothing
+
+instance PP.Pretty inner => PP.Pretty (HostOp lore inner) where
+  ppr (GetSize name size_class) =
+    text "get_size" <> parens (commasep [ppr name, ppr size_class])
+
+  ppr (GetSizeMax size_class) =
+    text "get_size_max" <> parens (ppr size_class)
+
+  ppr (CmpSizeLe name size_class x) =
+    text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
+    text "<" <+> ppr x
+
+  ppr (HostOp op) = ppr op
+
+instance OpMetrics inner => OpMetrics (HostOp lore inner) where
+  opMetrics GetSize{} = seen "GetSize"
+  opMetrics GetSizeMax{} = seen "GetSizeMax"
+  opMetrics CmpSizeLe{} = seen "CmpSizeLe"
+  opMetrics (HostOp op) = opMetrics op
+
+instance UsageInOp inner => UsageInOp (HostOp lore inner) where
+  usageInOp GetSize{} = mempty
+  usageInOp GetSizeMax{} = mempty
+  usageInOp CmpSizeLe{} = mempty
+  usageInOp (HostOp op) = usageInOp op
+
+typeCheckHostOp :: TC.Checkable lore =>
+                   (inner -> TC.TypeM lore ())
+                -> HostOp (Aliases lore) inner
+                -> TC.TypeM lore ()
+typeCheckHostOp _ GetSize{} = return ()
+typeCheckHostOp _ GetSizeMax{} = return ()
+typeCheckHostOp _ (CmpSizeLe _ _ x) = TC.require [Prim int32] x
+typeCheckHostOp f (HostOp op) = f op

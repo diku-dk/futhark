@@ -46,7 +46,7 @@ import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import Futhark.Util
 import Futhark.Util.IntegralExp
 
-getSize :: (MonadBinder m, Op (Lore m) ~ Kernel innerlore) =>
+getSize :: (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
            String -> SizeClass -> m SubExp
 getSize desc size_class = do
   size_key <- nameFromString . pretty <$> newVName desc
@@ -95,7 +95,7 @@ blockedReductionStream pat w comm reduce_lam fold_lam ispace nes arrs = runBinde
 
   step_one <- chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam'
               ispace nes arrs_copies
-  addStm =<< renameStm (Let step_one_pat (defAux ()) $ Op step_one)
+  addStm =<< renameStm (Let step_one_pat (defAux ()) $ Op $ HostOp step_one)
 
   step_two_pat <- basicPattern [] <$>
                   mapM (mkIntermediateIdent $ constant (1 :: Int32)) acc_idents
@@ -104,7 +104,7 @@ blockedReductionStream pat w comm reduce_lam fold_lam ispace nes arrs = runBinde
 
   step_two <- reduceKernel step_two_size reduce_lam' nes $ take (length nes) $ patternNames step_one_pat
 
-  addStm $ Let step_two_pat (defAux ()) $ Op step_two
+  addStm $ Let step_two_pat (defAux ()) $ Op $ HostOp step_two
 
   forM_ (zip (patternIdents step_two_pat) (patternIdents pat)) $ \(arr, x) ->
     addStm $ mkLet [] [x] $ BasicOp $ Index (identName arr) $
@@ -308,7 +308,7 @@ segRed pat total_num_elements w comm reduce_lam map_lam nes arrs ispace inps = r
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
     return $ lambdaBody map_lam
 
-  letBind_ pat $ Op $
+  letBind_ pat $ Op $ HostOp $
     SegRed kspace comm reduce_lam nes (lambdaReturnType map_lam) body
 
 nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
@@ -385,7 +385,7 @@ blockedGenReduce pat arr_w ispace inps ops lam arrs = runBinder_ $ do
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
     return $ lambdaBody lam
 
-  letBind_ pat $ Op $ SegGenRed kspace ops (lambdaReturnType lam) body
+  letBind_ pat $ Op $ HostOp $ SegGenRed kspace ops (lambdaReturnType lam) body
 
 blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
               Pattern Kernels -> SubExp
@@ -421,7 +421,7 @@ blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
   concat_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering' w elems_per_thread Nothing $ patElemName pe
 
-  return $ Let pat (defAux ()) $ Op $ Kernel (KernelDebugHints "chunked_map" []) space ts $
+  return $ Let pat (defAux ()) $ Op $ HostOp $ Kernel (KernelDebugHints "chunked_map" []) space ts $
     KernelBody () chunk_and_fold $ nonconcat_rets ++ concat_rets
 
 blockedPerThread :: (MonadBinder m, Lore m ~ InKernel) =>
@@ -835,7 +835,7 @@ blockedScan pat w (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam segment_
               mapM (mkIntermediateIdent "red_carry_out" [num_groups]) red_idents,
               pure arr_idents]
 
-  addStm . Let first_scan_pat (defAux ()) . Op =<< scanKernel1 w first_scan_size
+  addStm . Let first_scan_pat (defAux ()) . Op . HostOp =<< scanKernel1 w first_scan_size
     (first_scan_lam, scan_nes)
     (comm, first_scan_red_lam, red_nes)
     first_scan_foldlam arrs
@@ -846,7 +846,7 @@ blockedScan pat w (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam segment_
   let second_scan_size = KernelSize one num_groups one num_groups num_groups
   unless (null group_red_res) $ do
     second_stage_red_lam <- renameLambda first_scan_red_lam
-    red_res <- letTupExp "red_res" . Op =<<
+    red_res <- letTupExp "red_res" . Op . HostOp =<<
                reduceKernel second_scan_size second_stage_red_lam red_nes group_red_res
     forM_ (zip red_idents red_res) $ \(dest, arr) -> do
       arr_t <- lookupType arr
@@ -856,7 +856,7 @@ blockedScan pat w (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam segment_
   second_scan_lam <- renameLambda first_scan_lam
 
   group_carry_out_scanned <-
-    letTupExp "group_carry_out_scanned" . Op =<<
+    letTupExp "group_carry_out_scanned" . Op . HostOp =<<
     scanKernel2 second_scan_size
     second_scan_lam (zip scan_nes group_carry_out)
 
@@ -902,7 +902,7 @@ blockedScan pat w (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam segment_
   (mapk_bnds, mapk) <- mapKernelFromBody w (FlatThreadSpace [(j, w)]) result_map_input
                        (lambdaReturnType scan_lam) result_map_body
   addStms mapk_bnds
-  letBind_ final_res_pat $ Op mapk
+  letBind_ final_res_pat $ Op $ HostOp mapk
 
   return carries
   where one = constant (1 :: Int32)
@@ -936,7 +936,7 @@ mapKernelSkeleton w ispace inputs = do
 
 -- Given the desired minium number of threads, compute the group size,
 -- number of groups and total number of threads.
-numThreadsAndGroups :: (MonadBinder m, Op (Lore m) ~ Kernel innerlore) =>
+numThreadsAndGroups :: (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
                        SubExp -> m (SubExp, SubExp, SubExp)
 numThreadsAndGroups w = do
   group_size <- getSize "group_size" SizeGroup

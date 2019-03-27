@@ -102,7 +102,7 @@ mkRegTileSe = constant
 --     }
 --
 doRegTiling3D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
-doRegTiling3D (Let pat aux (Op old_kernel))
+doRegTiling3D (Let pat aux (Op (HostOp old_kernel)))
   | Kernel kerhint space kertp (KernelBody () kstms kres) <- old_kernel,
     FlatThreadSpace gspace <- spaceStructure space,
     initial_variance <- M.map mempty $ scopeOfKernelSpace space,
@@ -211,7 +211,7 @@ doRegTiling3D (Let pat aux (Op old_kernel))
       -- finally, put everything together
           kstms' = stmsFromList $ mask_stm : mm_stmt : stm_loop : (code2_inv ++ unrolled_code)
           ker_body = KernelBody () kstms' kres'
-          new_ker = Op $ Kernel kerhint kspace' kertp' ker_body
+          new_ker = Op $ HostOp $ Kernel kerhint kspace' kertp' ker_body
           extra_stms = space_stms <> stmsFromList (scratch_stms ++ manif_stms)
       return $ Just (extra_stms, Let pat aux new_ker)
 

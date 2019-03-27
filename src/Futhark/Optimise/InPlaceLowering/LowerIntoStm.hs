@@ -65,14 +65,14 @@ lowerUpdate _ _ =
 
 lowerUpdateKernels :: MonadFreshNames m => LowerUpdate Kernels m
 lowerUpdateKernels
-  (Let (Pattern [] [PatElem v v_attr]) aux (Op (Kernel debug kspace ts kbody)))
+  (Let (Pattern [] [PatElem v v_attr]) aux (Op (HostOp (Kernel debug kspace ts kbody))))
   [update@(DesiredUpdate bindee_nm bindee_attr cs _src is val)]
   | v == val = do
     kbody' <- lowerUpdateIntoKernel update kspace kbody
     let is' = fullSlice (typeOf bindee_attr) is
     Just $ return [certify (stmAuxCerts aux <> cs) $
                     mkLet [] [Ident bindee_nm $ typeOf bindee_attr] $
-                    Op $ Kernel debug kspace ts kbody',
+                    Op $ HostOp $ Kernel debug kspace ts kbody',
                    mkLet [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
 lowerUpdateKernels stm updates = lowerUpdate stm updates
 

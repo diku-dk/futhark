@@ -60,10 +60,10 @@ optimiseFunDef fundec = modifyNameSource $ \src ->
   in (fundec { funDefBody = body' }, src')
   where env = Env mempty optimiseKernelOp doNotTouchLoop
 
-        optimiseKernelOp (Inner k) = do
+        optimiseKernelOp (Inner (HostOp k)) = do
           scope <- castScope <$> askScope
           modifyNameSource $
-            runState (runReaderT (runDoubleBufferM $ Inner <$> optimiseKernel k) $
+            runState (runReaderT (runDoubleBufferM $ Inner . HostOp <$> optimiseKernel k) $
                       Env scope optimiseInKernelOp optimiseLoop)
           where optimiseKernel =
                   mapKernelM identityKernelMapper

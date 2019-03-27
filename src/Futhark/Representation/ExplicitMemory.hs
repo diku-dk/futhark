@@ -231,7 +231,7 @@ instance Annotations ExplicitMemory where
   type LParamAttr ExplicitMemory = MemInfo SubExp NoUniqueness MemBind
   type RetType    ExplicitMemory = FunReturns
   type BranchType ExplicitMemory = BodyReturns
-  type Op         ExplicitMemory = MemOp (Kernel InKernel)
+  type Op         ExplicitMemory = MemOp (HostOp ExplicitMemory (Kernel InKernel))
 
 instance Annotations InKernel where
   type LetAttr    InKernel = MemInfo SubExp NoUniqueness MemBind
@@ -505,7 +505,7 @@ bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
 instance TC.CheckableOp ExplicitMemory where
   checkOp (Alloc size _) = TC.require [Prim int64] size
-  checkOp (Inner k) = TC.subCheck $ typeCheckKernel k
+  checkOp (Inner op) = typeCheckHostOp (TC.subCheck . typeCheckKernel) op
 
 instance TC.CheckableOp InKernel where
   checkOp (Alloc size _) = TC.require [Prim int64] size
@@ -1010,14 +1010,14 @@ class TypedOp (Op lore) => OpReturns lore where
 instance OpReturns ExplicitMemory where
   opReturns (Alloc size space) =
     return [MemMem (Free size) space]
-  opReturns (Inner k@(Kernel _ _ _ body)) =
+  opReturns (Inner (HostOp k@(Kernel _ _ _ body))) =
     zipWithM correct (kernelBodyResult body) =<< (extReturns <$> opType k)
     where correct (WriteReturn _ arr _) _ = varReturns arr
           correct (KernelInPlaceReturn arr) _ =
             extendedScope (varReturns arr)
             (castScope $ scopeOf $ kernelBodyStms body)
           correct _ ret = return ret
-  opReturns (Inner (SegGenRed _ ops _ _)) =
+  opReturns (Inner (HostOp (SegGenRed _ ops _ _))) =
     concat <$> mapM (mapM varReturns . genReduceDest) ops
   opReturns k =
     extReturns <$> opType k

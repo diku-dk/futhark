@@ -72,7 +72,7 @@ nameInfoConv (IndexInfo it) = IndexInfo it
 
 transformExp :: Exp ExplicitMemory -> ExpandM (Stms ExplicitMemory, Exp ExplicitMemory)
 
-transformExp (Op (Inner (Kernel desc kspace ts kbody))) = do
+transformExp (Op (Inner (HostOp (Kernel desc kspace ts kbody)))) = do
   let (kbody', allocs) = extractKernelBodyAllocations kbody
       variantAlloc (Var v) = v `S.member` bound_in_kernel
       variantAlloc _ = False
@@ -87,13 +87,13 @@ transformExp (Op (Inner (Kernel desc kspace ts kbody))) = do
              runOffsetM scope' alloc_offsets $ offsetMemoryInKernelBody kbody'
 
   return (alloc_stms,
-          Op $ Inner $ Kernel desc kspace ts kbody'')
+          Op $ Inner $ HostOp $ Kernel desc kspace ts kbody'')
 
   where bound_in_kernel =
           S.fromList $ M.keys $ scopeOfKernelSpace kspace <>
           scopeOf (kernelBodyStms kbody)
 
-transformExp (Op (Inner (SegRed kspace comm red_op nes ts kbody))) = do
+transformExp (Op (Inner (HostOp (SegRed kspace comm red_op nes ts kbody)))) = do
   let (kbody', kbody_allocs) = extractBodyAllocations kbody
       (red_op', red_op_allocs) = extractLambdaAllocations red_op
       variantAlloc (Var v) = v `S.member` bound_in_kernel
@@ -111,14 +111,14 @@ transformExp (Op (Inner (SegRed kspace comm red_op nes ts kbody))) = do
     red_op'' <- localScope (scopeOf red_op') $ offsetMemoryInLambda red_op'
 
     return (alloc_stms,
-            Op $ Inner $ SegRed kspace comm red_op'' nes ts kbody'')
+            Op $ Inner $ HostOp $ SegRed kspace comm red_op'' nes ts kbody'')
 
   where bound_in_kernel =
           S.fromList $ map fst (spaceDimensions kspace) ++
           M.keys (scopeOfKernelSpace kspace <>
                   scopeOf (bodyStms kbody))
 
-transformExp (Op (Inner (SegGenRed kspace ops ts kbody))) = do
+transformExp (Op (Inner (HostOp (SegGenRed kspace ops ts kbody)))) = do
   let (kbody', kbody_allocs) = extractBodyAllocations kbody
       (ops', ops_allocs) = unzip $ map extractGenRedOpAllocations ops
       variantAlloc (Var v) = v `S.member` bound_in_kernel
@@ -130,7 +130,7 @@ transformExp (Op (Inner (SegGenRed kspace ops ts kbody))) = do
     ops'' <- mapM offsetMemoryInGenRedOp ops'
 
     return (alloc_stms,
-            Op $ Inner $ SegGenRed kspace ops'' ts kbody'')
+            Op $ Inner $ HostOp $ SegGenRed kspace ops'' ts kbody'')
 
   where bound_in_kernel =
           S.fromList $ map fst (spaceDimensions kspace) ++

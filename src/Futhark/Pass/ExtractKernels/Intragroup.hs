@@ -103,7 +103,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
         return $ PatElem name t'
   flat_pat <- lift $ Pattern [] <$> mapM flatPatElem (patternValueElements nested_pat)
 
-  let kstm = Let flat_pat (StmAux cs ()) $ Op $
+  let kstm = Let flat_pat (StmAux cs ()) $ Op $ HostOp $
              Kernel (KernelDebugHints "map_intra_group" []) kspace rts kbody'
       reshapeStm nested_pe flat_pe =
         Let (Pattern [] [nested_pe]) (StmAux cs ()) $
