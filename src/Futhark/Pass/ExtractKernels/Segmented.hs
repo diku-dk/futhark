@@ -69,7 +69,7 @@ regularSegmentedScan segment_size pat w lam map_lam ispace inps nes arrs = do
       return $ resultBody [flag]
   (mapk_bnds, mapk) <- mapKernelFromBody w (FlatThreadSpace [(flags_i, w)]) [] [Prim Bool] flags_body
   addStms mapk_bnds
-  flags <- letExp "flags" $ Op mapk
+  flags <- letExp "flags" $ Op $ HostOp mapk
 
   lam' <- addFlagToLambda nes lam
 

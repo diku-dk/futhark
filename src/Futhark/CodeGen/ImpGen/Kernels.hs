@@ -48,8 +48,22 @@ opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
            -> CallKernelGen ()
 opCompiler dest (Alloc e space) =
   ImpGen.compileAlloc dest e space
-opCompiler dest (Inner kernel) =
+opCompiler (Pattern _ [pe]) (Inner (GetSize key size_class)) = do
+  fname <- asks ImpGen.envFunction
+  sOp $ Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
+    sizeClassWithEntryPoint fname size_class
+opCompiler (Pattern _ [pe]) (Inner (CmpSizeLe key size_class x)) = do
+  fname <- asks ImpGen.envFunction
+  let size_class' = sizeClassWithEntryPoint fname size_class
+  sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
+    =<< ImpGen.compileSubExp x
+opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
+  sOp $ Imp.GetSizeMax (patElemName pe) size_class
+opCompiler dest (Inner (HostOp kernel)) =
   kernelCompiler dest kernel
+opCompiler pat e =
+  compilerBugS $ "ImpGen.opCompiler: Invalid pattern\n  " ++
+  pretty pat ++ "\nfor expression\n  " ++ pretty e
 
 sizeClassWithEntryPoint :: Name -> Imp.SizeClass -> Imp.SizeClass
 sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
@@ -59,20 +73,6 @@ sizeClassWithEntryPoint _ size_class = size_class
 
 kernelCompiler :: Pattern ExplicitMemory -> Kernel InKernel
                -> CallKernelGen ()
-
-kernelCompiler (Pattern _ [pe]) (GetSize key size_class) = do
-  fname <- asks ImpGen.envFunction
-  sOp $ Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
-    sizeClassWithEntryPoint fname size_class
-
-kernelCompiler (Pattern _ [pe]) (CmpSizeLe key size_class x) = do
-  fname <- asks ImpGen.envFunction
-  let size_class' = sizeClassWithEntryPoint fname size_class
-  sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
-    =<< ImpGen.compileSubExp x
-
-kernelCompiler (Pattern _ [pe]) (GetSizeMax size_class) =
-  sOp $ Imp.GetSizeMax (patElemName pe) size_class
 
 kernelCompiler pat (Kernel desc space _ kernel_body) = do
   (constants, init_constants) <- kernelInitialisation space
@@ -113,10 +113,6 @@ kernelCompiler pat (SegRed space comm red_op nes _ body) =
 
 kernelCompiler pat (SegGenRed space ops _ body) =
   compileSegGenRed pat space ops body
-
-kernelCompiler pat e =
-  compilerBugS $ "ImpGen.kernelCompiler: Invalid pattern\n  " ++
-  pretty pat ++ "\nfor expression\n  " ++ pretty e
 
 expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
 

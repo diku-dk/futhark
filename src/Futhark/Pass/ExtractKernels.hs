@@ -461,7 +461,7 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
     mapKernel w (FlatThreadSpace [(write_i,w)]) inputs (map rowType $ patternTypes pat) body
   certifying cs $ do
     addStms bnds
-    letBind_ pat $ Op kernel
+    letBind_ pat $ Op $ HostOp kernel
 
 transformStm _ (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = do
   bfun' <- Kernelise.transformLambda bucket_fun
@@ -1268,7 +1268,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    certifying cs $ letBind_ pat $ Op k
+    certifying cs $ letBind_ pat $ Op $ HostOp k
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = fail "Ill-typed nested scatter encountered."

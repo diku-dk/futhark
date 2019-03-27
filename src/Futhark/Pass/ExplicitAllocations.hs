@@ -503,7 +503,7 @@ explicitAllocationsInStms :: (MonadFreshNames m, HasScope ExplicitMemory m) =>
                              Stms Kernels -> m (Stms ExplicitMemory)
 explicitAllocationsInStms stms = do
   scope <- askScope
-  runAllocM handleKernel $ localScope scope $ allocInStms stms return
+  runAllocM handleHostOp $ localScope scope $ allocInStms stms return
 
 memoryInRetType :: [RetType Kernels] -> [RetType ExplicitMemory]
 memoryInRetType ts = evalState (mapM addAttr ts) $ startOfFreeIDRange ts
@@ -522,35 +522,35 @@ startOfFreeIDRange = S.size . shapeContext
 
 allocInFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef ExplicitMemory)
 allocInFun (FunDef entry fname rettype params fbody) =
-  runAllocM handleKernel $
+  runAllocM handleHostOp $
   allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
     fbody' <- insertStmsM $ allocInFunBody
               (map (const $ Just DefaultSpace) rettype) fbody
     return $ FunDef entry fname (memoryInRetType rettype) params' fbody'
 
-handleKernel :: Kernel InInKernel
-             -> AllocM Kernels ExplicitMemory (MemOp (Kernel OutInKernel))
-handleKernel (GetSize key size_class) =
+handleHostOp :: HostOp Kernels (Kernel InInKernel)
+             -> AllocM Kernels ExplicitMemory (MemOp (HostOp ExplicitMemory (Kernel OutInKernel)))
+handleHostOp (GetSize key size_class) =
   return $ Inner $ GetSize key size_class
-handleKernel (GetSizeMax size_class) =
+handleHostOp (GetSizeMax size_class) =
   return $ Inner $ GetSizeMax size_class
-handleKernel (CmpSizeLe key size_class x) =
+handleHostOp (CmpSizeLe key size_class x) =
   return $ Inner $ CmpSizeLe key size_class x
-handleKernel (Kernel desc space kernel_ts kbody) = subInKernel $
-  Inner . Kernel desc space kernel_ts <$>
+handleHostOp (HostOp (Kernel desc space kernel_ts kbody)) = subInKernel $
+  Inner . HostOp . Kernel desc space kernel_ts <$>
   localScope (scopeOfKernelSpace space) (allocInKernelBody kbody)
 
-handleKernel (SegRed space comm red_op nes ts body) = do
+handleHostOp (HostOp (SegRed space comm red_op nes ts body)) = do
   body' <- subInKernel $ localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
   red_op' <- allocInSegRedLambda (spaceGlobalId space) (spaceNumThreads space) red_op
-  return $ Inner $ SegRed space comm red_op' nes ts body'
+  return $ Inner $ HostOp $ SegRed space comm red_op' nes ts body'
 
-handleKernel (SegGenRed space ops ts body) = do
+handleHostOp (HostOp (SegGenRed space ops ts body)) = do
   body' <- subInKernel $ localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
   ops' <- forM ops $ \op -> do
     lam <- allocInSegRedLambda (spaceGlobalId space) (spaceNumThreads space) $ genReduceOp op
     return op { genReduceOp = lam }
-  return $ Inner $ SegGenRed space ops' ts body'
+  return $ Inner $ HostOp $ SegGenRed space ops' ts body'
 
 subInKernel :: AllocM InInKernel OutInKernel a
             -> AllocM fromlore2 ExplicitMemory a
@@ -873,6 +873,10 @@ allocInKernelBody (KernelBody () stms res) =
 class SizeSubst op where
   opSizeSubst :: PatternT attr -> op -> ChunkMap
 
+instance SizeSubst op => SizeSubst (HostOp lore op) where
+  opSizeSubst pat (HostOp op) = opSizeSubst pat op
+  opSizeSubst _ _ = mempty
+
 instance SizeSubst (Kernel lore) where
   opSizeSubst _ _ = mempty
 
@@ -1010,7 +1014,7 @@ bindPatternWithAllocations types names e = do
 data ExpHint = NoHint
              | Hint IxFun Space
 
-kernelExpHints :: (Allocator lore m, Op lore ~ MemOp (Kernel somelore)) =>
+kernelExpHints :: (Allocator lore m, Op lore ~ MemOp (HostOp lore (Kernel somelore))) =>
                   Exp lore -> m [ExpHint]
 kernelExpHints (BasicOp (Manifest perm v)) = do
   dims <- arrayDims <$> lookupType v
@@ -1020,7 +1024,7 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
               perm_inv
   return [Hint ixfun DefaultSpace]
 
-kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
+kernelExpHints (Op (Inner (HostOp (Kernel _ space rets kbody)))) =
   zipWithM hint rets $ kernelBodyResult kbody
   where num_threads = spaceNumThreads space
 
@@ -1053,7 +1057,7 @@ kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
 
         hint _ _ = return NoHint
 
-kernelExpHints (Op (Inner (SegRed space _ _ nes ts body))) =
+kernelExpHints (Op (Inner (HostOp (SegRed space _ _ nes ts body)))) =
   (map (const NoHint) red_res <>) <$> zipWithM mapHint (drop (length nes) ts) map_res
   where (red_res, map_res) = splitAt (length nes) $ bodyResult body
 

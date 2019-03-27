@@ -40,7 +40,7 @@ optimiseBody (Body () bnds res) = localScope (scopeOf bnds) $
   Body () <$> (mconcat <$> mapM optimiseStm (stmsToList bnds)) <*> pure res
 
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
-optimiseStm stmt@(Let pat aux (Op old_kernel@(Kernel desc space ts body))) = do
+optimiseStm stmt@(Let pat aux (Op (HostOp old_kernel@(Kernel desc space ts body)))) = do
   res3dtiling <- doRegTiling3D stmt
   case res3dtiling of
     Just (extra_bnds, stmt') -> return $ extra_bnds <> oneStm stmt'
@@ -51,8 +51,8 @@ optimiseStm stmt@(Let pat aux (Op old_kernel@(Kernel desc space ts body))) = do
           -- changing the number of groups being used for a kernel that
           -- returns a result-per-group).
           if kernelType old_kernel == kernelType new_kernel
-            then return $ extra_bnds <> oneStm (Let pat aux $ Op new_kernel)
-            else return $ oneStm $ Let pat aux $ Op old_kernel
+            then return $ extra_bnds <> oneStm (Let pat aux $ Op $ HostOp new_kernel)
+            else return $ oneStm $ Let pat aux $ Op $ HostOp old_kernel
   where initial_variance = M.map mempty $ scopeOfKernelSpace space
 optimiseStm (Let pat aux e) =
   pure <$> (Let pat aux <$> mapExpM optimise e)
