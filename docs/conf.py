@@ -109,14 +109,17 @@ class FutharkLexer(RegexLexer):
 
     tokens = {
         'root': [
-            (r'if|then|else|let|loop|in|val|for|do|with|local|open|include|import|type|entry|module|empty|while|unsafe|module', token.Keyword),
+            (r'if|then|else|let|loop|in|val|for|do|with|local|open|include|import|type|entry|module|while|unsafe|module', token.Keyword),
             (r"[a-zA-Z_][a-zA-Z0-9_']*", token.Name),
+            (r"-- .*", token.Comment),
             (r'.', token.Text)
         ]
     }
 
 
 lexers['futhark'] = FutharkLexer()
+
+highlight_language = 'futhark'
 
 # A list of ignored prefixes for module index sorting.
 #modindex_common_prefix = []
