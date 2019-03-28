@@ -234,7 +234,7 @@ For example::
   let (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
 
 We can also define operators by enclosing the operator name in
-parentheses and suffixing the parameters, as an ordinary function:
+parentheses and suffixing the parameters, as an ordinary function::
 
   let (+^) (a:i32,b:i32) (c:i32,d:i32) = (a+c, b+d)
 
