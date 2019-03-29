@@ -434,6 +434,20 @@ static int write_str_bool(FILE *out, void *src) {
 #define BINARY_FORMAT_VERSION 2
 #define IS_BIG_ENDIAN (!*(unsigned char *)&(uint16_t){1})
 
+// On Windows we need to explicitly set the file mode to not mangle
+// newline characters.  On *nix there is no difference.
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.H
+static void set_binary_mode(FILE *f) {
+  setmode(fileno(f), O_BINARY);
+}
+#else
+static void set_binary_mode(FILE *f) {
+  (void)f;
+}
+#endif
+
 // Reading little-endian byte sequences.  On big-endian hosts, we flip
 // the resulting bytes.
 
