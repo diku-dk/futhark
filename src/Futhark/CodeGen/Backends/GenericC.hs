@@ -1186,6 +1186,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
     int time_runs;
 
     /* Declare and read input. */
+    set_binary_mode(stdin);
     $items:input_items
     $items:output_decls
 
@@ -1208,6 +1209,9 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
     $stms:free_parsed
 
     /* Print the final result. */
+    if (binary_output) {
+      set_binary_mode(stdout);
+    }
     $stms:printstms
 
     $stms:free_outputs
