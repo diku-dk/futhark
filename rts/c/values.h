@@ -438,7 +438,7 @@ static int write_str_bool(FILE *out, void *src) {
 // newline characters.  On *nix there is no difference.
 #ifdef _WIN32
 #include <io.h>
-#include <fcntl.H
+#include <fcntl.h>
 static void set_binary_mode(FILE *f) {
   setmode(fileno(f), O_BINARY);
 }
