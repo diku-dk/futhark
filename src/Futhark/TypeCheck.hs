@@ -17,8 +17,6 @@ module Futhark.TypeCheck
   , lookupVar
   , lookupAliases
   , Occurences
-  , UsageMap
-  , usageMap
   , collectOccurences
   , subCheck
 
@@ -183,15 +181,6 @@ nullOccurence :: Occurence -> Bool
 nullOccurence occ = S.null (observed occ) && S.null (consumed occ)
 
 type Occurences = [Occurence]
-
-type UsageMap = M.Map VName [Usage]
-
-usageMap :: Occurences -> UsageMap
-usageMap = foldl comb M.empty
-  where comb m (Occurence obs cons) =
-          let m' = S.foldl' (ins Observed) m obs
-          in S.foldl' (ins Consumed) m' cons
-        ins v m k = M.insertWith (++) k [v] m
 
 allConsumed :: Occurences -> Names
 allConsumed = S.unions . map consumed
