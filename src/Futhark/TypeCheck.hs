@@ -511,7 +511,7 @@ checkFun (FunDef _ fname rettype params body) =
                body) consumable $ do
       checkFunParams params
       checkRetType rettype
-      checkFunBody rettype body
+      context "When checking function body" $ checkFunBody rettype body
         where consumable = [ (paramName param, mempty)
                            | param <- params
                            , unique $ paramDeclType param
@@ -550,7 +550,8 @@ checkFun' (fname, rettype, params, body) consumable check = do
       check
       scope <- askScope
       let isArray = maybe False ((>0) . arrayRank . typeOf) . (`M.lookup` scope)
-      checkReturnAlias $ map (S.filter isArray) $ bodyAliases body
+      context ("When checking the body aliases: " ++ pretty (bodyAliases body)) $
+        checkReturnAlias $ map (S.filter isArray) $ bodyAliases body
   where param_names = map fst params
 
         checkNoDuplicateParams = foldM_ expand [] param_names
@@ -928,7 +929,8 @@ checkBinOpArgs t e1 e2 = do
 
 checkPatElem :: Checkable lore =>
                 PatElemT (LetAttr lore) -> TypeM lore ()
-checkPatElem (PatElem name attr) = checkLetBoundLore name attr
+checkPatElem (PatElem name attr) = context ("When checking pattern element " ++ pretty name) $
+                                   checkLetBoundLore name attr
 
 checkDimIndex :: Checkable lore =>
                  DimIndex SubExp -> TypeM lore ()
@@ -940,8 +942,8 @@ checkStm :: Checkable lore =>
          -> TypeM lore a
          -> TypeM lore a
 checkStm stm@(Let pat (StmAux (Certificates cs) (_,attr)) e) m = do
-  mapM_ (requireI [Prim Cert]) cs
-  checkExpLore attr
+  context "When checking certificates" $ mapM_ (requireI [Prim Cert]) cs
+  context "When checking expression annotation" $ checkExpLore attr
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPattern pat e
   binding (scopeOf stm) $ do
