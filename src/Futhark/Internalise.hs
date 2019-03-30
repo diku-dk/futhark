@@ -1204,27 +1204,7 @@ internaliseLambda (E.Lambda tparams params body _ (Info (_, rettype)) loc) rowty
     mapM_ (uncurry (internaliseDimConstant loc)) $ pcm<>rcm
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda E.OpSection{} _ = fail "internaliseLambda: unexpected OpSection"
-
-internaliseLambda E.OpSectionLeft{} _ = fail "internaliseLambda: unexpected OpSectionLeft"
-
-internaliseLambda E.OpSectionRight{} _ = fail "internaliseLambda: unexpected OpSectionRight"
-
-internaliseLambda e rowtypes = do
-  (_, _, remaining_params_ts) <- findFuncall e
-  (params, param_args) <- fmap unzip $ forM remaining_params_ts $ \et -> do
-    name <- newVName "not_curried"
-    return (E.Id name (Info $ E.vacuousShapeAnnotations $ et `setAliases` mempty) loc,
-            E.Var (E.qualName name)
-             (Info (et `setAliases` mempty)) loc)
-  let rettype = E.typeOf e
-      body = foldl (\f arg -> E.Apply f arg (Info E.Observe)
-                              (Info $ E.vacuousShapeAnnotations rettype) loc)
-                   e
-                   param_args
-      rettype' = E.vacuousShapeAnnotations $ rettype `E.setAliases` ()
-  internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowtypes
-  where loc = srclocOf e
+internaliseLambda e _ = fail $ "internaliseLambda: unexpected expression:\n" ++ pretty e
 
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()
 internaliseDimConstant loc fname name =
