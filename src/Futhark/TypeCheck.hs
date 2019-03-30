@@ -367,19 +367,11 @@ binding bnds = check . local (`bindVars` bnds)
         bindVar env name (LetInfo (Names' als, attr)) =
           let als' | primType (typeOf attr) = mempty
                    | otherwise = expandAliases als env
-              inedges = S.toList als'
-              update (LetInfo (Names' thesenames, thisattr)) =
-                LetInfo (Names' $ S.insert name thesenames, thisattr)
-              update b = b
           in env { envVtable =
-                      M.insert name (LetInfo (Names' als', attr)) $
-                      adjustSeveral update inedges $
-                      envVtable env
+                     M.insert name (LetInfo (Names' als', attr)) $ envVtable env
                  }
         bindVar env name attr =
           env { envVtable = M.insert name attr $ envVtable env }
-
-        adjustSeveral f = flip $ foldl $ flip $ M.adjust f
 
         -- Check whether the bound variables have been used correctly
         -- within their scope.

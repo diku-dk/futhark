@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fix reading and writing of binary files for C-compiled executables
     on Windows.
 
+  * Fixed a couple of overly strict internal sanity checks related to
+    in-place updates (#735, #736).
+
 ## [0.10.1]
 
 ### Added
