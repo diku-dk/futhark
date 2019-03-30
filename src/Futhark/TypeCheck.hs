@@ -1020,7 +1020,7 @@ checkFuncall fname paramts args = do
   forM_ (zip (map diet paramts) args) $ \(d, (_, als)) ->
     occur [consumption (consumeArg als d)]
   where consumeArg als Consume = als
-        consumeArg _   Observe = mempty
+        consumeArg _   _       = mempty
 
 checkLambda :: Checkable lore =>
                Lambda (Aliases lore) -> [Arg] -> TypeM lore ()

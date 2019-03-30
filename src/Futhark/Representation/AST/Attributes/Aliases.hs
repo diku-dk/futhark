@@ -102,7 +102,7 @@ expAliases (Apply _ args t _) =
   funcallAliases args $ retTypeValues t
 expAliases (Op op) = opAliases op
 
-returnAliases :: [TypeBase shaper Uniqueness] -> [(Names, Diet)] -> [Names]
+returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]
 returnAliases rts args = map returnType' rts
   where returnType' (Array _ _ Nonunique) =
           mconcat $ map (uncurry maskAliases) args
@@ -115,6 +115,7 @@ returnAliases rts args = map returnType' rts
 
 maskAliases :: Names -> Diet -> Names
 maskAliases _   Consume = mempty
+maskAliases _   ObservePrim = mempty
 maskAliases als Observe = als
 
 consumedInStm :: Aliased lore => Stm lore -> Names
@@ -124,7 +125,7 @@ consumedInExp :: (Aliased lore) => Exp lore -> Names
 consumedInExp (Apply _ args _ _) =
   mconcat (map (consumeArg . first subExpAliases) args)
   where consumeArg (als, Consume) = als
-        consumeArg (_,   Observe) = mempty
+        consumeArg _              = mempty
 consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
 consumedInExp (DoLoop _ merge _ _) =
