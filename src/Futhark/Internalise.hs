@@ -1556,7 +1556,7 @@ constFunctionArgs loc = mapM arg
           safety <- askSafety
           se <- letSubExp (baseString name ++ "_arg") $
                 I.Apply fname [] [I.Prim I.int32] (safety, loc, [])
-          return (se, I.Observe, I.Prim I.int32)
+          return (se, I.ObservePrim, I.Prim I.int32)
 
 funcall :: String -> QualName VName -> [SubExp] -> SrcLoc
         -> InternaliseM ([SubExp], [I.ExtType])
@@ -1567,7 +1567,7 @@ funcall desc (QualName _ fname) args loc = do
   argts <- mapM subExpType args
   closure_ts <- mapM lookupType closure
   shapeargs <- argShapes shapes value_paramts argts
-  let diets = const_ds ++ replicate (length closure + length shapeargs) I.Observe ++
+  let diets = const_ds ++ replicate (length closure + length shapeargs) I.ObservePrim ++
               map I.diet value_paramts
       constOrShape = const $ I.Prim int32
       paramts = map constOrShape constargs ++ closure_ts ++
