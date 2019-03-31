@@ -418,17 +418,22 @@ valueType (ArrayValue _ t) = t
 rank :: Int -> ShapeDecl ()
 rank n = ShapeDecl $ replicate n ()
 
-unscopeAliases :: S.Set VName -> CompType -> CompType
-unscopeAliases bound_here t = t `addAliases` S.map unbind
+-- | The type is leaving a scope, so clean up any aliases that
+-- reference the bound variables, and turn any dimensions that name
+-- them into AnyDim instead.
+unscopeType :: S.Set VName -> PatternType -> PatternType
+unscopeType bound_here t = modifyShapeAnnotations onDim $ t `addAliases` S.map unbind
   where unbind (AliasBound v) | v `S.member` bound_here = AliasFree v
         unbind a = a
+        onDim (NamedDim qn) | qualLeaf qn `S.member` bound_here = AnyDim
+        onDim d = d
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: ExpBase Info VName -> CompType
+typeOf :: ExpBase Info VName -> PatternType
 typeOf (Literal val _) = Prim $ primValueType val
-typeOf (IntLit _ (Info t) _) = fromStruct t
-typeOf (FloatLit _ (Info t) _) = fromStruct t
+typeOf (IntLit _ (Info t) _) = vacuousShapeAnnotations $ fromStruct t
+typeOf (FloatLit _ (Info t) _) = vacuousShapeAnnotations $ fromStruct t
 typeOf (Parens e _) = typeOf e
 typeOf (QualParens _ e _) = typeOf e
 typeOf (TupLit es _) = tupleRecord $ map typeOf es
@@ -437,44 +442,43 @@ typeOf (RecordLit fs _) =
   Record $ M.unions $ reverse $ map record fs
   where record (RecordFieldExplicit name e _) = M.singleton name $ typeOf e
         record (RecordFieldImplicit name (Info t) _) =
-          M.singleton (baseName name) $ removeShapeAnnotations t
+          M.singleton (baseName name) $ t
           `addAliases` S.insert (AliasBound name)
-typeOf (ArrayLit _ (Info t) _) = removeShapeAnnotations t
-typeOf (Range _ _ _ (Info t) _) = removeShapeAnnotations t
-typeOf (BinOp _ _ _ _ (Info t) _) = removeShapeAnnotations t
-typeOf (Project _ _ (Info t) _) = removeShapeAnnotations t
-typeOf (If _ _ _ (Info t) _) = removeShapeAnnotations t
-typeOf (Var _ (Info t) _) = removeShapeAnnotations t
+typeOf (ArrayLit _ (Info t) _) = t
+typeOf (Range _ _ _ (Info t) _) = t
+typeOf (BinOp _ _ _ _ (Info t) _) = t
+typeOf (Project _ _ (Info t) _) = t
+typeOf (If _ _ _ (Info t) _) = t
+typeOf (Var _ (Info t) _) = t
 typeOf (Ascript e _ _) = typeOf e
-typeOf (Apply _ _ _ (Info t) _) = removeShapeAnnotations t
+typeOf (Apply _ _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ pat _ body _) =
-  unscopeAliases (S.map identName $ patIdentSet pat) $ typeOf body
+  unscopeType (S.map identName $ patIdentSet pat) $ typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith dest _ _ _ body _) =
-  unscopeAliases (S.singleton $ identName dest) $ typeOf body
-typeOf (Index _ _ (Info t) _) = removeShapeAnnotations t
+  unscopeType (S.singleton $ identName dest) $ typeOf body
+typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
-typeOf (RecordUpdate _ _ _ (Info t) _) = removeShapeAnnotations t
+typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 typeOf (Lambda tparams params _ _ (Info (als, t)) _) =
-  unscopeAliases bound_here $
-  removeShapeAnnotations (foldr (uncurry (Arrow ()) . patternParam) t params)
-  `setAliases` als
+  unscopeType bound_here $
+  foldr (uncurry (Arrow ()) . patternParam) t params `setAliases` als
   where bound_here = S.fromList (map typeParamName tparams) <>
                      S.map identName (mconcat $ map patIdentSet params)
 typeOf (OpSection _ (Info t) _) =
-  removeShapeAnnotations t
+  t
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
-  removeShapeAnnotations $ foldFunType [fromStruct pt2] ret
+  foldFunType [fromStruct pt2] ret
 typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
-  removeShapeAnnotations $ foldFunType [fromStruct pt1] ret
-typeOf (ProjectSection _ (Info t) _) = removeShapeAnnotations t
-typeOf (IndexSection _ (Info t) _) = removeShapeAnnotations t
-typeOf (VConstr0 _ (Info t) _)  = removeShapeAnnotations t
-typeOf (Match _ _ (Info t) _) = removeShapeAnnotations t
+  foldFunType [fromStruct pt1] ret
+typeOf (ProjectSection _ (Info t) _) = t
+typeOf (IndexSection _ (Info t) _) = t
+typeOf (VConstr0 _ (Info t) _)  = t
+typeOf (Match _ _ (Info t) _) = t
 
 foldFunType :: Monoid as => [TypeBase dim as] -> TypeBase dim as -> TypeBase dim as
 foldFunType ps ret = foldr (Arrow mempty Nothing) ret ps
@@ -509,12 +513,12 @@ typeVars t =
         typeArgFree (TypeArgType ta _) = typeVars ta
         typeArgFree TypeArgDim{} = mempty
 
--- | The result of applying the arguments of the given types to a
--- function with the given return type, consuming its parameters with
--- the given diets.
+-- | @returnType ret_type arg_diet arg_type@ gives result of applying
+-- an argument the given types to a function with the given return
+-- type, consuming the argument with the given diet.
 returnType :: TypeBase dim Aliasing
            -> Diet
-           -> CompType
+           -> PatternType
            -> TypeBase dim Aliasing
 returnType (Array _ Unique et shape) _ _ =
   Array mempty Unique et shape
@@ -602,14 +606,14 @@ patIdentSet (PatternAscription p _ _) = patIdentSet p
 patIdentSet PatternLit{}              = mempty
 
 -- | The type of values bound by the pattern.
-patternType :: PatternBase Info VName -> CompType
-patternType (Wildcard (Info t) _)     = removeShapeAnnotations t
+patternType :: PatternBase Info VName -> PatternType
+patternType (Wildcard (Info t) _)     = t
 patternType (PatternParens p _)       = patternType p
-patternType (Id _ (Info t) _)         = removeShapeAnnotations t
+patternType (Id _ (Info t) _)         = t
 patternType (TuplePattern pats _)     = tupleRecord $ map patternType pats
 patternType (RecordPattern fs _)      = Record $ patternType <$> M.fromList fs
 patternType (PatternAscription p _ _) = patternType p
-patternType (PatternLit _ (Info t) _) = removeShapeAnnotations t
+patternType (PatternLit _ (Info t) _) = t
 
 -- | The type of a pattern, including shape annotations.
 patternPatternType :: PatternBase Info VName -> PatternType

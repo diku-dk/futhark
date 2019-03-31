@@ -722,9 +722,9 @@ andExp :: E.Exp -> E.Exp -> E.Exp
 andExp l r = E.If l r (E.Literal (E.BoolValue False) noLoc) (Info (E.Prim E.Bool)) noLoc
 
 eqExp :: E.Exp -> E.Exp -> E.Exp
-eqExp l r = E.BinOp eq (Info $ vacuousShapeAnnotations ft)
+eqExp l r = E.BinOp eq (Info ft)
             (l, sType l) (r, sType r) (Info (E.Prim E.Bool)) noLoc
-  where sType e = Info $ toStruct $ vacuousShapeAnnotations $ E.typeOf e
+  where sType e = Info $ toStruct $ E.typeOf e
         arrow   = Arrow S.empty Nothing
         ft      = E.typeOf l `arrow` E.typeOf r `arrow` E.Prim E.Bool
         eq      = qualName $ VName "==" (-1)
