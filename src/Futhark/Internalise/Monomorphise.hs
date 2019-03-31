@@ -237,53 +237,11 @@ transformExp (If e1 e2 e3 tp loc) = do
   tp' <- traverse transformType tp
   return $ If e1' e2' e3' tp' loc
 
-transformExp (Apply e1 e2 d tp loc) =
-  -- We handle on an ad-hoc basis certain polymorphic higher-order
-  -- intrinsics here.  They can only be used in very particular ways,
-  -- or the compiler will fail.  In practice they will only be used
-  -- once, in the basis library, to define normal functions.
-  case (e1, e2) of
-    (Var v _ _, TupLit [op, ne, arr] _)
-      | intrinsic "reduce" v ->
-          transformExp $ Reduce Noncommutative op ne arr loc
-      | intrinsic "reduce_comm" v ->
-          transformExp $ Reduce Commutative op ne arr loc
-      | intrinsic "scan" v ->
-          transformExp $ Scan op ne arr loc
-    (Var v _ _, TupLit [f, arr] _)
-      | intrinsic "map" v ->
-          transformExp $ Map f arr tp loc
-      | intrinsic "filter" v ->
-          transformExp $ Filter f arr loc
-    (Var v _ _, TupLit [k, f, arr] _)
-      | intrinsic "partition" v,
-        Just k' <- isInt32 k ->
-          transformExp $ Partition (fromIntegral k') f arr loc
-    (Var v _ _, TupLit [op, f, arr] _)
-      | intrinsic "stream_red" v ->
-          transformExp $ Stream (RedLike InOrder Noncommutative op) f arr loc
-      | intrinsic "stream_red_per" v ->
-          transformExp $ Stream (RedLike Disorder Commutative op) f arr loc
-    (Var v _ _, TupLit [f, arr] _)
-      | intrinsic "stream_map" v ->
-          transformExp $ Stream (MapLike InOrder) f arr loc
-      | intrinsic "stream_map_per" v ->
-          transformExp $ Stream (MapLike Disorder) f arr loc
-    (Var v _ _, TupLit [dest, op, ne, buckets, img] _)
-      | intrinsic "gen_reduce" v ->
-          transformExp $ GenReduce dest op ne buckets img loc
-
-    _ -> do
-      e1' <- transformExp e1
-      e2' <- transformExp e2
-      tp' <- traverse transformType tp
-      return $ Apply e1' e2' d tp' loc
-  where intrinsic s (QualName _ v) =
-          baseTag v <= maxIntrinsicTag && baseName v == nameFromString s
-
-        isInt32 (Literal (SignedValue (Int32Value k)) _) = Just k
-        isInt32 (IntLit k (Info (Prim (Signed Int32))) _) = Just $ fromInteger k
-        isInt32 _ = Nothing
+transformExp (Apply e1 e2 d tp loc) = do
+  e1' <- transformExp e1
+  e2' <- transformExp e2
+  tp' <- traverse transformType tp
+  return $ Apply e1' e2' d tp' loc
 
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
@@ -355,37 +313,6 @@ transformExp (Update e1 idxs e2 loc) =
 transformExp (RecordUpdate e1 fs e2 t loc) =
   RecordUpdate <$> transformExp e1 <*> pure fs
                <*> transformExp e2 <*> pure t <*> pure loc
-
-transformExp (Map e1 es t loc) =
-  Map <$> transformExp e1 <*> transformExp es <*> pure t <*> pure loc
-
-transformExp (Reduce comm e1 e2 e3 loc) =
-  Reduce comm <$> transformExp e1 <*> transformExp e2
-              <*> transformExp e3 <*> pure loc
-
-transformExp (Scan e1 e2 e3 loc) =
-  Scan <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc
-
-transformExp (Filter e1 e2 loc) =
-  Filter <$> transformExp e1 <*> transformExp e2 <*> pure loc
-
-transformExp (Partition k f e0 loc) =
-  Partition k <$> transformExp f <*> transformExp e0 <*> pure loc
-
-transformExp (Stream form e1 e2 loc) = do
-  form' <- case form of
-             MapLike _         -> return form
-             RedLike so comm e -> RedLike so comm <$> transformExp e
-  Stream form' <$> transformExp e1 <*> transformExp e2 <*> pure loc
-
-transformExp (GenReduce e1 e2 e3 e4 e5 loc) =
-  GenReduce
-    <$> transformExp e1 -- hist
-    <*> transformExp e2 -- operator
-    <*> transformExp e3 -- neutral element
-    <*> transformExp e4 -- buckets
-    <*> transformExp e5 -- input image
-    <*> pure loc
 
 transformExp (Unsafe e1 loc) =
   Unsafe <$> transformExp e1 <*> pure loc

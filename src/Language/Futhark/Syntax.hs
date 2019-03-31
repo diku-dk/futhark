@@ -54,7 +54,6 @@ module Language.Futhark.Syntax
   , CaseBase(..)
   , LoopFormBase (..)
   , PatternBase(..)
-  , StreamForm(..)
 
   -- * Module language
   , SpecBase(..)
@@ -660,57 +659,6 @@ data ExpBase f vn =
 
             | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
 
-            -- Second-Order Array Combinators accept curried and
-            -- anonymous functions as first params.
-            | Map (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
-             -- ^ @map (+1) [1, 2, ..., n] = [2, 3, ..., n+1]@.
-
-            | Reduce Commutativity (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @reduce (+) 0 ([1,2,...,n]) = (0+1+2+...+n)@.
-
-            | GenReduce (ExpBase f vn) (ExpBase f vn) (ExpBase f vn)
-                        (ExpBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @gen_reduce [1,1,1] (+) 0 [1,1,1] [1,1,1] = [4,1,1]@
-
-            | Scan (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @scan (+) 0 ([ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
-
-            | Filter (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ Return those elements of the array that satisfy the
-            -- predicate.
-
-            | Partition Int (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ @partition k f a@, where @f@ returns an integer,
-            -- returns a tuple @(a', is)@ that describes a
-            -- partitioning of @a@ into @n@ equivalence classes.
-            -- Here, @a'@ is a re-ordering of @a@, and @is@ is an
-            -- array of @k@ offsets into @a'@.
-
-            | Stream (StreamForm f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ Streaming: intuitively, this gives a size-parameterized
-            -- composition for SOACs that cannot be fused, e.g., due to scan.
-            -- For example, assuming @A : [int], f : int->int, g : real->real@,
-            -- the code: @let x = map(f,A) in let y = scan(op+,0,x) in map(g,y)@
-            -- can be re-written (streamed) in the source-Futhark language as:
-            -- @let (acc, z) =@
-            -- @  stream (fn (int,[real]) (real chunk, real acc, [int] a) =>@
-            -- @            let x = map (f,         A )@
-            -- @            let y0= scan(op +, 0,   x )@
-            -- @            let y = map (op +(acc), y0)@
-            -- @            ( acc+y0[chunk-1], map(g, y) )@
-            -- @         ) 0 A@
-            -- where (i)  @chunk@ is a symbolic int denoting the chunk
-            -- size, (ii) @0@ is the initial value of the accumulator,
-            -- which allows the streaming of @scan@.
-            -- Finally, the unnamed function (@fn...@) implements the a fold that:
-            -- computes the accumulator of @scan@, as defined inside its body, AND
-            -- implicitly concatenates each of the result arrays across
-            -- the iteration space.
-            -- In essence, sequential codegen can choose chunk = 1 and thus
-            -- eliminate the SOACs on the outermost level, while parallel codegen
-            -- may choose the maximal chunk size that still satisfies the memory
-            -- requirements of the device.
-
             | Unsafe (ExpBase f vn) SrcLoc
             -- ^ Explore the Danger Zone and elide safety checks on
             -- array operations and other assertions during execution
@@ -729,10 +677,6 @@ data ExpBase f vn =
             -- ^ A match expression.
 
 deriving instance Showable f vn => Show (ExpBase f vn)
-
-data StreamForm f vn = MapLike    StreamOrd
-                     | RedLike    StreamOrd Commutativity (ExpBase f vn)
-deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc)                = locOf loc
@@ -757,12 +701,6 @@ instance Located (ExpBase f vn) where
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
   locOf (RecordUpdate _ _ _ _ pos)     = locOf pos
-  locOf (Map _ _ _ loc)                = locOf loc
-  locOf (Reduce _ _ _ _ pos)           = locOf pos
-  locOf (GenReduce _ _ _ _ _ pos)      = locOf pos
-  locOf (Scan _ _ _ pos)               = locOf pos
-  locOf (Filter _ _ pos)               = locOf pos
-  locOf (Partition _ _ _ loc)          = locOf loc
   locOf (Lambda _ _ _ _ _ loc)         = locOf loc
   locOf (OpSection _ _ loc)            = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc
@@ -770,7 +708,6 @@ instance Located (ExpBase f vn) where
   locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (IndexSection _ _ loc)         = locOf loc
   locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
-  locOf (Stream _ _ _  pos)            = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
   locOf (VConstr0 _ _ loc)             = locOf loc

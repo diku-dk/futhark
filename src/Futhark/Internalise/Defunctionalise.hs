@@ -204,6 +204,14 @@ defuncExp (If e1 e2 e3 tp loc) = do
   (e3', _ ) <- defuncExp e3
   return (If e1' e2' e3' tp loc, sv)
 
+defuncExp e@(Apply f@(Var f' _ _) arg d t loc)
+  | baseTag (qualLeaf f') <= maxIntrinsicTag,
+    TupLit es tuploc <- arg = do
+      -- defuncSoacExp also works fine for non-SOACs.
+      es' <- mapM defuncSoacExp es
+      return (Apply f (TupLit es' tuploc) d t loc,
+              Dynamic $ typeOf e)
+
 defuncExp e@Apply{} = defuncApply 0 e
 
 defuncExp (Negate e0 loc) = do
@@ -321,48 +329,6 @@ defuncExp (RecordUpdate e1 fs e2 _ loc) = do
         staticField (Dynamic t@Record{}) sv2 fs'@(_:_) =
           staticField (svFromType t) sv2 fs'
         staticField _ sv2 _ = sv2
-
-defuncExp e@(Map fun arr t loc) = do
-  fun' <- defuncSoacExp fun
-  arr' <- defuncExp' arr
-  return (Map fun' arr' t loc, Dynamic $ typeOf e)
-
-defuncExp e@(Reduce comm fun ne arr loc) = do
-  fun' <- defuncSoacExp fun
-  ne' <- defuncExp' ne
-  arr' <- defuncExp' arr
-  return (Reduce comm fun' ne' arr' loc, Dynamic $ typeOf e)
-
-defuncExp e@(GenReduce hist op ne bfun img loc) = do
-  hist' <- defuncExp' hist
-  op' <- defuncSoacExp op
-  ne' <- defuncExp' ne
-  bfun' <- defuncSoacExp bfun
-  img' <- defuncExp' img
-  return (GenReduce hist' op' ne' bfun' img' loc, Dynamic $ typeOf e)
-
-defuncExp e@(Scan fun ne arr loc) =
-  (,) <$> (Scan <$> defuncSoacExp fun <*> defuncExp' ne <*> defuncExp' arr
-                <*> pure loc)
-      <*> pure (Dynamic $ typeOf e)
-
-defuncExp e@(Filter fun arr loc) = do
-  fun' <- defuncSoacExp fun
-  arr' <- defuncExp' arr
-  return (Filter fun' arr' loc, Dynamic $ typeOf e)
-
-defuncExp e@(Partition k fun arr loc) = do
-  fun' <- defuncSoacExp fun
-  arr' <- defuncExp' arr
-  return (Partition k fun' arr' loc, Dynamic $ typeOf e)
-
-defuncExp e@(Stream form lam arr loc) = do
-  form' <- case form of
-             MapLike _          -> return form
-             RedLike so comm e' -> RedLike so comm <$> defuncSoacExp e'
-  lam' <- defuncSoacExp lam
-  arr' <- defuncExp' arr
-  return (Stream form' lam' arr' loc, Dynamic $ typeOf e)
 
 defuncExp (Unsafe e1 loc) = do
   (e1', sv) <- defuncExp e1
@@ -820,17 +786,6 @@ freeVars expr = case expr of
   Index e idxs _ _    -> freeVars e  <> foldMap freeDimIndex idxs
   Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2
   RecordUpdate e1 _ e2 _ _ -> freeVars e1 <> freeVars e2
-
-  Map e1 e2 _ _       -> freeVars e1 <> freeVars e2
-  Reduce _ e1 e2 e3 _ -> freeVars e1 <> freeVars e2 <> freeVars e3
-  GenReduce e1 e2 e3 e4 e5 _ -> freeVars e1 <> freeVars e2 <> freeVars e3 <>
-                                freeVars e4 <> freeVars e5
-  Scan e1 e2 e3 _     -> freeVars e1 <> freeVars e2 <> freeVars e3
-  Filter e1 e2 _      -> freeVars e1 <> freeVars e2
-  Partition _ e1 e2 _ -> freeVars e1 <> freeVars e2
-  Stream form e1 e2 _ -> freeInForm form <> freeVars e1 <> freeVars e2
-    where freeInForm (RedLike _ _ e) = freeVars e
-          freeInForm _ = mempty
 
   Unsafe e _          -> freeVars e
   Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
