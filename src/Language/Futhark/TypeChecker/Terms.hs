@@ -322,7 +322,7 @@ instance MonadTypeChecker TermTypeM where
         let (pts', rt') = instOverloaded argtype pts rt
         return $ fromStruct $ foldr (Arrow mempty Nothing) rt' pts'
 
-    observe $ Ident name (Info t) loc
+    observe $ Ident name (Info $ vacuousShapeAnnotations t) loc
     return (qn', t)
 
       where instOverloaded argtype pts rt =
@@ -649,7 +649,7 @@ typeParamIdent (TypeParamDim v loc) =
   Just $ Ident v (Info (Prim (Signed Int32))) loc
 typeParamIdent _ = Nothing
 
-bindingIdent :: IdentBase NoInfo Name -> CompType -> (Ident -> TermTypeM a)
+bindingIdent :: IdentBase NoInfo Name -> PatternType -> (Ident -> TermTypeM a)
              -> TermTypeM a
 bindingIdent (Ident v NoInfo vloc) t m =
   bindSpaced [(Term, v)] $ do
@@ -777,7 +777,7 @@ checkExp (RecordLit fs loc) = do
           errIfAlreadySet name rloc
           (QualName _ name', t) <- lift $ lookupVar rloc $ qualName name
           modify $ M.insert name rloc
-          return $ RecordFieldImplicit name' (Info t) rloc
+          return $ RecordFieldImplicit name' (Info $ vacuousShapeAnnotations t) rloc
 
         errIfAlreadySet f rloc = do
           maybe_sloc <- gets $ M.lookup f
@@ -796,14 +796,14 @@ checkExp (ArrayLit all_es _ loc) =
   case all_es of
     [] -> do et <- newTypeVar loc "t"
              t <- arrayOfM loc et (rank 1) Unique
-             return $ ArrayLit [] (Info t) loc
+             return $ ArrayLit [] (Info $ vacuousShapeAnnotations t) loc
     e:es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies (toStructural et) <=< checkExp) es
       et' <- normaliseType et
       t <- arrayOfM loc et' (rank 1) Unique
-      return $ ArrayLit (e':es') (Info t) loc
+      return $ ArrayLit (e':es') (Info $ vacuousShapeAnnotations t) loc
 
 checkExp (Range start maybe_step end NoInfo loc) = do
   start' <- require anyIntType =<< checkExp start
@@ -825,7 +825,8 @@ checkExp (Range start maybe_step end NoInfo loc) = do
 
   t <- arrayOfM loc start_t (rank 1) Unique
 
-  return $ Range start' maybe_step' end' (Info (t `setAliases` mempty)) loc
+  return $ Range start' maybe_step' end'
+    (Info (vacuousShapeAnnotations t `setAliases` mempty)) loc
 
 checkExp (Ascript e decl loc) = do
   decl' <- checkTypeDecl decl
@@ -860,7 +861,7 @@ checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   t <- expType e'
   kt <- mustHaveField loc k t
-  return $ Project k e' (Info kt) loc
+  return $ Project k e' (Info $ vacuousShapeAnnotations kt) loc
 
 checkExp (If e1 e2 e3 _ loc) =
   sequentially checkCond $ \e1' _ -> do
@@ -868,7 +869,7 @@ checkExp (If e1 e2 e3 _ loc) =
   brancht <- unifyExpTypes e2' e3'
   let t' = addAliases brancht (`S.difference` S.map AliasBound (allConsumed dflow))
   zeroOrderType loc "returned from branch" t'
-  return $ If e1' e2' e3' (Info t') loc
+  return $ If e1' e2' e3' (Info $ vacuousShapeAnnotations t') loc
   where checkCond = do
           e1' <- checkExp e1
           unify (srclocOf e1') (Prim Bool) . toStruct =<< expType e1'
@@ -916,7 +917,7 @@ checkExp (Var qn NoInfo loc) = do
         checkField e k = do
           t <- expType e
           kt <- mustHaveField loc k t
-          return $ Project k e (Info kt) loc
+          return $ Project k e (Info $ vacuousShapeAnnotations kt) loc
 
 checkExp (Negate arg loc) = do
   arg' <- require anyNumberType =<< checkExp arg
@@ -1028,7 +1029,7 @@ checkExp (Index e idxes NoInfo loc) = do
   e' <- unifies t =<< checkExp e
   idxes' <- mapM checkDimIndex idxes
   t' <- stripArray (length $ filter isFix idxes) <$> normaliseType (typeOf e')
-  return $ Index e' idxes' (Info t') loc
+  return $ Index e' idxes' (Info $ vacuousShapeAnnotations t') loc
   where isFix DimFix{} = True
         isFix _        = False
 
@@ -1129,7 +1130,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       For i uboundexp -> do
         uboundexp' <- require anySignedType =<< checkExp uboundexp
         bound_t <- expType uboundexp'
-        bindingIdent i bound_t $ \i' ->
+        bindingIdent i (vacuousShapeAnnotations bound_t) $ \i' ->
           noUnique $ bindingPattern tparams mergepat merge_t $
           \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
             loopbody' <- checkExp loopbody
@@ -1270,7 +1271,7 @@ checkExp (Match e (c:cs) NoInfo loc) =
     mt <- expType e'
     (cs', t) <- checkCases mt c cs
     zeroOrderType loc "returned from pattern match" t
-    return $ Match e' cs' (Info t) loc
+    return $ Match e' cs' (Info $ vacuousShapeAnnotations t) loc
 
 checkCases :: CompType
            -> CaseBase NoInfo Name
@@ -1431,7 +1432,7 @@ unmatched _ _ = []
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
   (QualName _ name', vt) <- lookupVar loc (qualName name)
-  return $ Ident name' (Info vt) loc
+  return $ Ident name' (Info $ vacuousShapeAnnotations vt) loc
 
 checkDimIndex :: DimIndexBase NoInfo Name -> TermTypeM DimIndex
 checkDimIndex (DimFix i) =

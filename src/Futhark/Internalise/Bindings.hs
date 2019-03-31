@@ -131,8 +131,7 @@ flattenPattern = flattenPattern'
           flattenPattern' $ E.Id name t loc
         flattenPattern' (E.Id v (Info t) loc) = do
           new_name <- newVName $ baseString v
-          return [((E.Ident v (Info (E.removeShapeAnnotations t)) loc,
-                    new_name),
+          return [((E.Ident v (Info t) loc, new_name),
                    t `E.setAliases` ())]
         flattenPattern' (E.TuplePattern pats _) =
           concat <$> mapM flattenPattern' pats
