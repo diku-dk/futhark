@@ -66,6 +66,7 @@ module Language.Futhark.Attributes
   , setArrayShape
   , removeShapeAnnotations
   , vacuousShapeAnnotations
+  , anyDimShapeAnnotations
   , typeToRecordArrayElem
   , recordArrayElemToType
   , tupleRecord
@@ -163,12 +164,16 @@ setArrayShape (Array a u t _) ds = Array a u t ds
 setArrayShape t _ = t
 
 -- | Change the shape of a type to be just the 'Rank'.
-removeShapeAnnotations :: TypeBase dim as -> TypeBase () as
+removeShapeAnnotations :: TypeBase (DimDecl vn) as -> TypeBase () as
 removeShapeAnnotations = modifyShapeAnnotations $ const ()
 
--- | Change all size annotations to be 'AnyDim'.
-vacuousShapeAnnotations :: TypeBase dim as -> TypeBase (DimDecl vn) as
+-- | Add size annotations that are all 'AnyDim'.
+vacuousShapeAnnotations :: TypeBase () as -> TypeBase (DimDecl vn) as
 vacuousShapeAnnotations = modifyShapeAnnotations $ const AnyDim
+
+-- | Change all size annotations to be 'AnyDim'.
+anyDimShapeAnnotations :: TypeBase (DimDecl vn) as -> TypeBase (DimDecl vn) as
+anyDimShapeAnnotations = modifyShapeAnnotations $ const AnyDim
 
 -- | Change the size annotations of a type.
 modifyShapeAnnotations :: (oldshape -> newshape)
@@ -219,7 +224,7 @@ maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 -- information, and no embedded names.
 toStructural :: TypeBase dim as
              -> TypeBase () ()
-toStructural = removeNames . removeShapeAnnotations
+toStructural = flip setAliases () . modifyShapeAnnotations (const ())
 
 -- | Remove aliasing information from a type.
 toStruct :: TypeBase dim as
@@ -257,12 +262,6 @@ peelArray n (Array als u et shape) = do
   shape' <- stripDims n shape
   return $ Array als u et shape'
 peelArray _ _ = Nothing
-
--- | Remove names from a type - this involves removing all size
--- annotations from arrays, as well as all aliasing.
-removeNames :: TypeBase dim as
-            -> TypeBase () ()
-removeNames = flip setAliases () . removeShapeAnnotations
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -655,19 +654,19 @@ patternParam p =
 patternNoShapeAnnotations :: PatternBase Info VName -> PatternBase Info VName
 patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t)) loc) =
   PatternAscription (patternNoShapeAnnotations p)
-  (TypeDecl te $ Info $ vacuousShapeAnnotations t) loc
+  (TypeDecl te $ Info $ anyDimShapeAnnotations t) loc
 patternNoShapeAnnotations (PatternParens p loc) =
   PatternParens (patternNoShapeAnnotations p) loc
 patternNoShapeAnnotations (Id v (Info t) loc) =
-  Id v (Info $ vacuousShapeAnnotations t) loc
+  Id v (Info $ anyDimShapeAnnotations t) loc
 patternNoShapeAnnotations (TuplePattern ps loc) =
   TuplePattern (map patternNoShapeAnnotations ps) loc
 patternNoShapeAnnotations (RecordPattern ps loc) =
   RecordPattern (map (fmap patternNoShapeAnnotations) ps) loc
 patternNoShapeAnnotations (Wildcard (Info t) loc) =
-  Wildcard (Info (vacuousShapeAnnotations t)) loc
+  Wildcard (Info (anyDimShapeAnnotations t)) loc
 patternNoShapeAnnotations (PatternLit e (Info t) loc) =
-  PatternLit e (Info (vacuousShapeAnnotations t)) loc
+  PatternLit e (Info (anyDimShapeAnnotations t)) loc
 
 -- | Names of primitive types to types.  This is only valid if no
 -- shadowing is going on, but useful for tools.

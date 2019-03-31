@@ -128,7 +128,7 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) 
   -- parameters here.
   bindingParams [] (map E.patternNoShapeAnnotations params) $
   \_ shapeparams params' -> do
-    (entry_rettype, _) <- internaliseEntryReturnType $ E.vacuousShapeAnnotations rettype
+    (entry_rettype, _) <- internaliseEntryReturnType $ anyDimShapeAnnotations rettype
     let entry' = entryPoint (zip params params') (retdecl, rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
@@ -252,7 +252,7 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           M.singleton name <$> internaliseExp desc e
         internaliseField (E.RecordFieldImplicit name t loc) =
           internaliseField $ E.RecordFieldExplicit (baseName name)
-          (E.Var (E.qualName name) (vacuousShapeAnnotations <$> t) loc) loc
+          (E.Var (E.qualName name) t loc) loc
 
 internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   -- If this is a multidimensional array literal of primitives, we
@@ -581,8 +581,8 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
                    init_loop_cond_bnds))
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
-  let pat = E.Id (E.identName name) (E.vacuousShapeAnnotations <$> E.identType name) loc
-      src_t = E.fromStruct . E.vacuousShapeAnnotations <$> E.identType src
+  let pat = E.Id (E.identName name) (E.identType name) loc
+      src_t = E.fromStruct <$> E.identType src
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
   internaliseExp desc $ E.LetPat [] pat e body loc
 

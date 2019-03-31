@@ -101,8 +101,7 @@ processFlatPattern x y = processFlatPattern' [] x y
       -- XXX: we gotta be screwing up somehow by ignoring the extra
       -- return values.  If not, why not?
       (tss, _) <- internaliseParamTypes nothing_bound mempty
-                  [flip E.setAliases () $ E.vacuousShapeAnnotations $
-                   E.unInfo $ E.identType bindee]
+                  [flip E.setAliases () $ E.unInfo $ E.identType bindee]
       case concat tss of
         [t] -> return [(name, t)]
         tss' -> forM tss' $ \t -> do

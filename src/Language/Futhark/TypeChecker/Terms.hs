@@ -592,7 +592,7 @@ binding bnds = check . local (`bindVars` bnds)
                 | otherwise = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
               update b = b
 
-              tp' = vacuousShapeAnnotations tp `addAliases` S.insert (AliasBound name)
+              tp' = tp `addAliases` S.insert (AliasBound name)
           in scope { scopeVtable = M.insert name (BoundV Local [] tp') $
                                    adjustSeveral update inedges $
                                    scopeVtable scope
@@ -964,9 +964,7 @@ checkExp (LetWith dest src idxes ve body loc) = do
   (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
   let elemt = stripArray (length $ filter isFix idxes) t
   sequentially (checkIdent src) $ \src' _ -> do
-    let src'' = Var (qualName $ identName src')
-                    (vacuousShapeAnnotations <$> identType src')
-                    (srclocOf src)
+    let src'' = Var (qualName $ identName src') (identType src') (srclocOf src)
     void $ unifies t src''
 
     unless (unique $ unInfo $ identType src') $
@@ -1419,7 +1417,7 @@ unmatched hole (p:ps)
         bool _ = Nothing
 
         buildEnum t c =
-          PatternLit (VConstr0 c (Info t) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
+          PatternLit (VConstr0 c (Info t) noLoc) (Info t) noLoc
         buildBool t b =
           PatternLit (Literal (BoolValue b) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
         buildId t n =

@@ -555,7 +555,7 @@ eval env (RecordLit fields _) =
           v <- eval env e
           return (k, v)
         evalField (RecordFieldImplicit k t loc) = do
-          v <- eval env $ Var (qualName k) (vacuousShapeAnnotations <$> t) loc
+          v <- eval env $ Var (qualName k) t loc
           return (baseName k, v)
 
 eval env (ArrayLit vs _ _) = toArray =<< mapM (eval env) vs
@@ -681,7 +681,7 @@ eval env (LetWith dest src is v body loc) = do
   dest' <- maybe oob return =<<
     updateArray <$> mapM (evalDimIndex env) is <*>
     evalTermVar env (qualName $ identName src) <*> eval env v
-  let t = T.BoundV [] $ vacuousShapeAnnotations $ toStruct $ unInfo $ identType dest
+  let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where oob = bad loc env "Bad update"
 
