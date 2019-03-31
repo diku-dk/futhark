@@ -116,33 +116,10 @@ instance ASTMappable (ExpBase Info VName) where
          mapM (astMap tv) idxexps <*>
          traverse (mapOnPatternType tv) t <*>
          pure loc
-  astMap tv (Map fun e t loc) =
-    Map <$> mapOnExp tv fun <*> mapOnExp tv e <*>
-    traverse (mapOnPatternType tv) t <*> pure loc
-  astMap tv (Reduce comm fun startexp arrexp loc) =
-    Reduce comm <$> mapOnExp tv fun <*>
-    mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
-  astMap tv (GenReduce hist op ne bfun img loc) =
-    GenReduce <$> mapOnExp tv hist <*> mapOnExp tv op <*> mapOnExp tv ne
-    <*> mapOnExp tv bfun <*> mapOnExp tv img <*> pure loc
   astMap tv (Unsafe e loc) =
     Unsafe <$> mapOnExp tv e <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
     Assert <$> mapOnExp tv e1 <*> mapOnExp tv e2 <*> pure desc <*> pure loc
-  astMap tv (Scan fun startexp arrexp loc) =
-    pure Scan <*> mapOnExp tv fun <*>
-         mapOnExp tv startexp <*> mapOnExp tv arrexp <*>
-         pure loc
-  astMap tv (Filter fun arrexp loc) =
-    pure Filter <*> mapOnExp tv fun <*> mapOnExp tv arrexp <*> pure loc
-  astMap tv (Partition k fun arrexp loc) =
-    Partition k <$> mapOnExp tv fun <*> mapOnExp tv arrexp <*> pure loc
-  astMap tv (Stream form fun arr loc) =
-    pure Stream <*> mapOnStreamForm form <*> mapOnExp tv fun <*>
-         mapOnExp tv arr <*> pure loc
-    where mapOnStreamForm (MapLike o) = pure $ MapLike o
-          mapOnStreamForm (RedLike o comm lam) =
-              RedLike o comm <$> mapOnExp tv lam
   astMap tv (Lambda tparams params body ret t loc) =
     Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*>

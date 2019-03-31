@@ -1039,14 +1039,6 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   e2' <- checkExp e2
   return $ Assert e1' e2' (Info (pretty e1)) loc
 
-checkExp Map{} = error "Map nodes should not appear in source program"
-checkExp Reduce{} = error "Reduce nodes should not appear in source program"
-checkExp GenReduce{} = error "GenReduce nodes should not appear in source program"
-checkExp Scan{} = error "Scan nodes should not appear in source program"
-checkExp Filter{} = error "Filter nodes should not appear in source program"
-checkExp Partition{} = error "Partition nodes should not appear in source program"
-checkExp Stream{} = error "Stream nodes should not appear in source program"
-
 checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
   removeSeminullOccurences $
   bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do

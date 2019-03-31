@@ -458,20 +458,6 @@ typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
-typeOf (Map _ _ (Info t) _) = removeShapeAnnotations t `setUniqueness` Unique
-typeOf (Reduce _ _ _ arr _) =
-  stripArray 1 (typeOf arr) `setAliases` mempty
-typeOf (GenReduce hist _ _ _ _ _) =
-  typeOf hist `setAliases` mempty `setUniqueness` Unique
-typeOf (Scan _ _ arr _) = typeOf arr `setAliases` mempty `setUniqueness` Unique
-typeOf (Filter _ arr _) = typeOf arr `setAliases` mempty `setUniqueness` Unique
-typeOf (Partition _ _ arr _) =
-  tupleRecord [typeOf arr `setAliases` mempty `setUniqueness` Unique,
-               Array mempty Unique (ArrayPrimElem (Signed Int32)) (rank 1)]
-typeOf (Stream _ lam _ _) =
-  rettype (typeOf lam) `setUniqueness` Unique
-  where rettype (Arrow _ _ _ t) = rettype t
-        rettype t = t
 typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 typeOf (Lambda tparams params _ _ (Info (als, t)) _) =
   unscopeAliases bound_here $

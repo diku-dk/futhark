@@ -796,8 +796,6 @@ eval env (Match e cs _ _) = do
             Just v' -> return v'
             Nothing -> match v cs'
 
-eval _ e = error $ "eval not yet: " ++ show e
-
 evalCase :: Value -> Env -> CaseBase Info VName
          -> EvalM (Maybe Value)
 evalCase v env (CasePat p cExp _) = runMaybeT $ do
