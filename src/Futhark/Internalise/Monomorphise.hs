@@ -228,7 +228,7 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
   | otherwise =
       transformExp $ LetPat [] (Id fname (Info ft) loc) lam e loc
         where lam = Lambda tparams params body Nothing (Info (mempty, ret)) loc
-              ft = foldFunType (map (vacuousShapeAnnotations . patternType) params) $ fromStruct ret
+              ft = foldFunType (map patternType params) $ fromStruct ret
 
 transformExp (If e1 e2 e3 tp loc) = do
   e1' <- transformExp e1
@@ -359,7 +359,7 @@ desugarProjectSection fields (Arrow _ _ t1 t2) loc = do
   where project e field =
           case typeOf e of
             Record fs | Just t <- M.lookup field fs ->
-                          Project field e (Info $ vacuousShapeAnnotations t) noLoc
+                          Project field e (Info t) noLoc
             t -> error $ "desugarOpSection: type " ++ pretty t ++
                  " does not have field " ++ pretty field
 desugarProjectSection  _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
