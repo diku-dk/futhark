@@ -610,7 +610,7 @@ envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Prim $ Signed Int32)
 liftValDec :: VName -> PatternType -> [VName] -> [Pattern] -> Exp -> DefM ()
 liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
   where dims' = map (flip TypeParamDim noLoc) dims
-        rettype_st = vacuousShapeAnnotations $ toStruct rettype
+        rettype_st = anyDimShapeAnnotations $ toStruct rettype
         dec = ValBind
           { valBindEntryPoint = False
           , valBindName       = fname

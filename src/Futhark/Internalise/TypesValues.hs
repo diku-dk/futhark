@@ -139,7 +139,7 @@ internaliseTypeM orig_t =
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
 internalisedTypeSize :: E.TypeBase dim () -> InternaliseM Int
-internalisedTypeSize = fmap length . internaliseType . E.removeShapeAnnotations
+internalisedTypeSize = fmap length . internaliseType . E.toStructural
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType

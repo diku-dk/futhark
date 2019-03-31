@@ -180,7 +180,7 @@ transformExp (RecordLit fs loc) =
         transformField (RecordFieldImplicit v t _) = do
           t' <- traverse transformType t
           transformField $ RecordFieldExplicit (baseName v)
-            (Var (qualName v) (vacuousShapeAnnotations <$> t') loc) loc
+            (Var (qualName v) t' loc) loc
 
 transformExp (ArrayLit es tp loc) =
   ArrayLit <$> mapM transformExp es <*> pure tp <*> pure loc
@@ -197,7 +197,7 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
     Just fs -> do
       let toField (f, (f_v, f_t)) = do
             f_t' <- transformType f_t
-            let f_v' = Var (qualName f_v) (Info $ vacuousShapeAnnotations f_t') loc
+            let f_v' = Var (qualName f_v) (Info f_t') loc
             return $ RecordFieldExplicit f f_v' loc
       RecordLit <$> mapM toField (M.toList fs) <*> pure loc
     Nothing -> do
@@ -334,7 +334,7 @@ transformExp (Project n e tp loc) = do
     _          -> return Nothing
   case maybe_fs of
     Just m | Just (v, _) <- M.lookup n m ->
-               return $ Var (qualName v) (vacuousShapeAnnotations <$> tp) loc
+               return $ Var (qualName v) tp loc
     _ -> do
       e' <- transformExp e
       return $ Project n e' tp loc
@@ -415,7 +415,7 @@ desugarBinOpSection qn e_left e_right t xtype ytype rettype loc = do
   (e1, p1) <- makeVarParam e_left $ fromStruct xtype
   (e2, p2) <- makeVarParam e_right $ fromStruct ytype
   let body = BinOp qn (Info t) (e1, Info xtype) (e2, Info ytype) (Info rettype) loc
-      rettype' = vacuousShapeAnnotations $ toStruct rettype
+      rettype' = toStruct rettype
   return $ Lambda [] (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
 
   where makeVarParam (Just e) _ = return (e, [])
@@ -615,7 +615,7 @@ removeTypeVariables entry valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _)
                  , valBindBody    = body'
                  }
 
-removeTypeVariablesInType :: TypeBase dim () -> MonoM (TypeBase () ())
+removeTypeVariablesInType :: TypeBase () () -> MonoM (TypeBase () ())
 removeTypeVariablesInType t = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   return $ removeShapeAnnotations $ substituteTypes subs $ vacuousShapeAnnotations t
