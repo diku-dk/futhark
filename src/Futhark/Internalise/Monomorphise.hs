@@ -252,7 +252,7 @@ transformExp (Apply e1 e2 d tp loc) =
           transformExp $ Scan op ne arr loc
     (Var v _ _, TupLit [f, arr] _)
       | intrinsic "map" v ->
-          transformExp $ Map f arr (removeShapeAnnotations <$> tp) loc
+          transformExp $ Map f arr tp loc
       | intrinsic "filter" v ->
           transformExp $ Filter f arr loc
     (Var v _ _, TupLit [k, f, arr] _)
@@ -432,7 +432,7 @@ desugarProjectSection fields (Arrow _ _ t1 t2) loc = do
   where project e field =
           case typeOf e of
             Record fs | Just t <- M.lookup field fs ->
-                          Project field e (Info t) noLoc
+                          Project field e (Info $ vacuousShapeAnnotations t) noLoc
             t -> error $ "desugarOpSection: type " ++ pretty t ++
                  " does not have field " ++ pretty field
 desugarProjectSection  _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
@@ -440,9 +440,8 @@ desugarProjectSection  _ t _ = error $ "desugarOpSection: not a function type: "
 desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Arrow _ _ t1 t2) loc = do
   p <- newVName "index_i"
-  let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2') loc
+  let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2) loc
   return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
-  where t2' = removeShapeAnnotations t2
 desugarIndexSection  _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()

@@ -145,18 +145,18 @@ defuncExp (RecordLit fs loc) = do
                                                 (vn', sv'))
             -- The field may refer to a functional expression, so we get the
             -- type from the static value and not the one from the AST.
-            _ -> let tp = Info $ typeFromSV sv
+            _ -> let tp = Info $ vacuousShapeAnnotations $ typeFromSV sv
                  in return (RecordFieldImplicit vn tp loc', (baseName vn, sv))
 
 defuncExp (ArrayLit es t@(Info t') loc) = do
   es' <- mapM defuncExp' es
-  return (ArrayLit es' t loc, Dynamic t')
+  return (ArrayLit es' t loc, Dynamic $ removeShapeAnnotations t')
 
 defuncExp (Range e1 me incl t@(Info t') loc) = do
   e1' <- defuncExp' e1
   me' <- mapM defuncExp' me
   incl' <- mapM defuncExp' incl
-  return (Range e1' me' incl' t loc, Dynamic t')
+  return (Range e1' me' incl' t loc, Dynamic $ removeShapeAnnotations t')
 
 defuncExp e@(Var qn _ loc) = do
   sv <- lookupVar loc (qualLeaf qn)
@@ -267,7 +267,8 @@ defuncExp (DoLoop tparams pat e1 form e3 loc) = do
                         return (While e2', mempty)
   (e3', sv) <- localEnv (env1 <> env2 <> env_dim) $ defuncExp e3
   return (DoLoop tparams pat e1' form' e3' loc, sv)
-  where envFromIdent (Ident vn (Info tp) _) = M.singleton vn $ Dynamic tp
+  where envFromIdent (Ident vn (Info tp) _) =
+          M.singleton vn $ Dynamic $ removeShapeAnnotations tp
 
 -- We handle BinOps by turning them into ordinary function applications.
 defuncExp (BinOp qn (Info t) (e1, Info pt1) (e2, Info pt2) (Info ret) loc) =
@@ -279,9 +280,9 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
   (e0', sv0) <- defuncExp e0
   case sv0 of
     RecordSV svs -> case lookup vn svs of
-      Just sv -> return (Project vn e0' (Info $ typeFromSV sv) loc, sv)
+      Just sv -> return (Project vn e0' (Info $ vacuousShapeAnnotations $ typeFromSV sv) loc, sv)
       Nothing -> error "Invalid record projection."
-    Dynamic _ -> return (Project vn e0' tp loc, Dynamic tp')
+    Dynamic _ -> return (Project vn e0' tp loc, Dynamic $ removeShapeAnnotations tp')
     _ -> error $ "Projection of an expression with static value " ++ show sv0
 
 defuncExp (LetWith id1 id2 idxs e1 body loc) = do

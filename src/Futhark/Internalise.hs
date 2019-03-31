@@ -232,8 +232,7 @@ internaliseExp _ (E.Var (E.QualName _ name) (Info t) loc) = do
       is_const <- lookupConstant loc name
       case is_const of
         Just ses -> return ses
-        Nothing -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t') loc)
-  where t' = removeShapeAnnotations t
+        Nothing -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
 
 internaliseExp desc (E.Index e idxs _ loc) = do
   vs <- internaliseExpToVars "indexed" e
@@ -278,7 +277,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   es' <- mapM (internaliseExp "arr_elem") es
   case es' of
     [] -> do
-      rowtypes <- internaliseType (rowtype `setAliases` ())
+      rowtypes <- internaliseType $ toStructural rowtype
       let arraylit rt = I.BasicOp $ I.ArrayLit [] rt
       letSubExps desc $ map (arraylit . zeroDim . fromDecl) rowtypes
     e' : _ -> do
@@ -871,7 +870,7 @@ generateCond :: E.Pattern -> E.Exp -> E.Exp
 generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
   where conds = mapMaybe ((<*> pure e) . fst) $ generateCond' p
 
-        generateCond' :: E.Pattern -> [(Maybe (E.Exp -> E.Exp), CompType)]
+        generateCond' :: E.Pattern -> [(Maybe (E.Exp -> E.Exp), PatternType)]
         generateCond' (E.TuplePattern ps loc) = generateCond' (E.RecordPattern fs loc)
           where fs = zipWith (\i p' -> (nameFromString (show i), p')) ([1..] :: [Integer]) ps
         generateCond' (E.RecordPattern fs _) = concatMap instCond holes
@@ -885,12 +884,12 @@ generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
                 instCond (condHoles, f) = map (projectHole f) condHoles
         generateCond' (E.PatternParens p' _) = generateCond' p'
         generateCond' (E.Id _ (Info t) _) =
-          [(Nothing, removeShapeAnnotations t)]
+          [(Nothing, t)]
         generateCond' (E.Wildcard (Info t) _)=
-          [(Nothing, removeShapeAnnotations t)]
+          [(Nothing, t)]
         generateCond' (E.PatternAscription p' _ _) = generateCond' p'
         generateCond' (E.PatternLit ePat (Info t) _) =
-          [(Just (eqExp ePat), removeShapeAnnotations t)]
+          [(Just (eqExp ePat), t)]
 
 
 generateCaseIf :: String -> E.Exp -> Case -> I.Body -> InternaliseM I.Exp

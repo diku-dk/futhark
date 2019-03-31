@@ -438,12 +438,13 @@ typeOf (RecordLit fs _) =
   Record $ M.unions $ reverse $ map record fs
   where record (RecordFieldExplicit name e _) = M.singleton name $ typeOf e
         record (RecordFieldImplicit name (Info t) _) =
-          M.singleton (baseName name) $ t `addAliases` S.insert (AliasBound name)
-typeOf (ArrayLit _ (Info t) _) = t
-typeOf (Range _ _ _ (Info t) _) = t
+          M.singleton (baseName name) $ removeShapeAnnotations t
+          `addAliases` S.insert (AliasBound name)
+typeOf (ArrayLit _ (Info t) _) = removeShapeAnnotations t
+typeOf (Range _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (BinOp _ _ _ _ (Info t) _) = removeShapeAnnotations t
-typeOf (Project _ _ (Info t) _) = t
-typeOf (If _ _ _ (Info t) _) = t
+typeOf (Project _ _ (Info t) _) = removeShapeAnnotations t
+typeOf (If _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Var _ (Info t) _) = removeShapeAnnotations t
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Apply _ _ _ (Info t) _) = removeShapeAnnotations t
@@ -453,12 +454,12 @@ typeOf (LetPat _ pat _ body _) =
 typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith dest _ _ _ body _) =
   unscopeAliases (S.singleton $ identName dest) $ typeOf body
-typeOf (Index _ _ (Info t) _) = t
+typeOf (Index _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = removeShapeAnnotations t
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
-typeOf (Map _ _ (Info t) _) = t `setUniqueness` Unique
+typeOf (Map _ _ (Info t) _) = removeShapeAnnotations t `setUniqueness` Unique
 typeOf (Reduce _ _ _ arr _) =
   stripArray 1 (typeOf arr) `setAliases` mempty
 typeOf (GenReduce hist _ _ _ _ _) =
@@ -485,12 +486,10 @@ typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
   removeShapeAnnotations $ foldFunType [fromStruct pt2] ret
 typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
   removeShapeAnnotations $ foldFunType [fromStruct pt1] ret
-typeOf (ProjectSection _ (Info t) _) =
-  removeShapeAnnotations t
-typeOf (IndexSection _ (Info t) _) =
-  removeShapeAnnotations t
-typeOf (VConstr0 _ (Info t) _)  = t
-typeOf (Match _ _ (Info t) _) = t
+typeOf (ProjectSection _ (Info t) _) = removeShapeAnnotations t
+typeOf (IndexSection _ (Info t) _) = removeShapeAnnotations t
+typeOf (VConstr0 _ (Info t) _)  = removeShapeAnnotations t
+typeOf (Match _ _ (Info t) _) = removeShapeAnnotations t
 
 foldFunType :: Monoid as => [TypeBase dim as] -> TypeBase dim as -> TypeBase dim as
 foldFunType ps ret = foldr (Arrow mempty Nothing) ret ps
@@ -609,7 +608,7 @@ patternOrderZero pat = case pat of
 
 -- | The set of identifiers bound in a pattern.
 patIdentSet :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
-patIdentSet (Id v t loc)              = S.singleton $ Ident v (removeShapeAnnotations <$> t) loc
+patIdentSet (Id v t loc)              = S.singleton $ Ident v t loc
 patIdentSet (PatternParens p _)       = patIdentSet p
 patIdentSet (TuplePattern pats _)     = mconcat $ map patIdentSet pats
 patIdentSet (RecordPattern fs _)      = mconcat $ map (patIdentSet . snd) fs

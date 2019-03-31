@@ -473,7 +473,7 @@ data Value = PrimValue !PrimValue
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
 data IdentBase f vn = Ident { identName   :: vn
-                            , identType   :: f CompType
+                            , identType   :: f PatternType
                             , identSrcLoc :: SrcLoc
                             }
 deriving instance Showable f vn => Show (IdentBase f vn)
@@ -596,11 +596,11 @@ data ExpBase f vn =
             | RecordLit [FieldBase f vn] SrcLoc
             -- ^ Record literals, e.g. @{x=2,y=3,z}@.
 
-            | ArrayLit  [ExpBase f vn] (f CompType) SrcLoc
+            | ArrayLit  [ExpBase f vn] (f PatternType) SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the row type of the rows of the array.
 
-            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) (f CompType) SrcLoc
+            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) (f PatternType) SrcLoc
 
             | Var (QualName vn) (f PatternType) SrcLoc
 
@@ -612,7 +612,7 @@ data ExpBase f vn =
             | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
               (ExpBase f vn) SrcLoc
 
-            | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
+            | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
 
             | Apply (ExpBase f vn) (ExpBase f vn) (f Diet) (f PatternType) SrcLoc
 
@@ -647,14 +647,14 @@ data ExpBase f vn =
               (ExpBase f vn, f StructType) (ExpBase f vn, f StructType)
               (f PatternType) SrcLoc
 
-            | Project Name (ExpBase f vn) (f CompType) SrcLoc
+            | Project Name (ExpBase f vn) (f PatternType) SrcLoc
 
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
                       [DimIndexBase f vn] (ExpBase f vn)
                       (ExpBase f vn) SrcLoc
 
-            | Index (ExpBase f vn) [DimIndexBase f vn] (f CompType) SrcLoc
+            | Index (ExpBase f vn) [DimIndexBase f vn] (f PatternType) SrcLoc
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
@@ -662,7 +662,7 @@ data ExpBase f vn =
 
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
-            | Map (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
+            | Map (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
              -- ^ @map (+1) [1, 2, ..., n] = [2, 3, ..., n+1]@.
 
             | Reduce Commutativity (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
@@ -722,10 +722,10 @@ data ExpBase f vn =
             -- and return the value of the second expression if it
             -- does.
 
-            | VConstr0 Name (f CompType) SrcLoc
+            | VConstr0 Name (f PatternType) SrcLoc
             -- ^ An enum element, e.g., @#foo@.
 
-            | Match (ExpBase f vn) [CaseBase f vn] (f CompType) SrcLoc
+            | Match (ExpBase f vn) [CaseBase f vn] (f PatternType) SrcLoc
             -- ^ A match expression.
 
 deriving instance Showable f vn => Show (ExpBase f vn)
@@ -778,7 +778,7 @@ instance Located (ExpBase f vn) where
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
-                    | RecordFieldImplicit vn (f CompType) SrcLoc
+                    | RecordFieldImplicit vn (f PatternType) SrcLoc
 
 deriving instance Showable f vn => Show (FieldBase f vn)
 
