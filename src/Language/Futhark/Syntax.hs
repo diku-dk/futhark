@@ -31,7 +31,6 @@ module Language.Futhark.Syntax
   , TypeArgExp(..)
   , RecordArrayElemTypeBase(..)
   , ArrayElemTypeBase(..)
-  , CompType
   , PatternType
   , StructType
   , Diet(..)
@@ -112,7 +111,6 @@ class (Show vn,
        Show (f String),
        Show (f [VName]),
        Show (f PatternType),
-       Show (f CompType),
        Show (f Int),
        Show (f StructType),
        Show (f (Aliasing, StructType)),
@@ -392,13 +390,13 @@ data Alias = AliasBound { aliasVar :: VName }
 -- aliased.
 type Aliasing = S.Set Alias
 
--- | A type with aliasing information and no shape annotations, used
--- for describing the type of a computation.
-type CompType = TypeBase () Aliasing
-
 -- | A type with aliasing information and shape annotations, used for
--- describing the type of a pattern.
+-- describing the type patterns and expressions.
 type PatternType = TypeBase (DimDecl VName) Aliasing
+
+-- | A "structural" type with shape annotations and no aliasing
+-- information, used for declarations.
+type StructType = TypeBase (DimDecl VName) ()
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
@@ -429,10 +427,6 @@ data TypeArgExp vn = TypeArgExpDim (DimDecl vn) SrcLoc
 instance Located (TypeArgExp vn) where
   locOf (TypeArgExpDim _ loc) = locOf loc
   locOf (TypeArgExpType t)    = locOf t
-
--- | A "structural" type with shape annotations and no aliasing
--- information, used for declarations.
-type StructType = TypeBase (DimDecl VName) ()
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =

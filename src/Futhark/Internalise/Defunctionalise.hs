@@ -459,7 +459,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
           svParams (LambdaSV _ sv_pat _ _ _) = [sv_pat]
           svParams _                         = []
           rettype = buildRetType closure_env params_for_rettype e0_t $
-                    removeShapeAnnotations $ typeOf e0'
+                    anyDimShapeAnnotations $ typeOf e0'
 
           -- Embed some information about the original function
           -- into the name of the lifted function, to make the
@@ -599,7 +599,7 @@ buildEnvPattern env = RecordPattern (map buildField $ M.toList env) noLoc
 -- lifted function can create unique arrays as long as they do not
 -- alias any of its parameters.  XXX: it is not clear that this is a
 -- sufficient property, unfortunately.
-buildRetType :: Env -> [Pattern] -> StructType -> CompType -> PatternType
+buildRetType :: Env -> [Pattern] -> StructType -> PatternType -> PatternType
 buildRetType env pats = comb
   where bound = foldMap oneName (M.keys env) <> foldMap patternVars pats
         boundAsUnique v =
@@ -608,7 +608,7 @@ buildRetType env pats = comb
         problematic v = (v `member` bound) && not (boundAsUnique v)
         comb (Record fs_annot) (Record fs_got) =
           Record $ M.intersectionWith comb fs_annot fs_got
-        comb Arrow{} t = vacuousShapeAnnotations $ descend t
+        comb Arrow{} t = descend t
         comb got et = descend $ fromStruct got `setUniqueness` uniqueness et `setAliases` aliases et
 
         descend t@Array{}
