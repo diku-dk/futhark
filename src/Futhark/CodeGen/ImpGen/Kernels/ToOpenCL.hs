@@ -92,6 +92,8 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
+onHostOp target (Husk hspace kern comb_red) =
+  onHusk target hspace kern comb_red
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
@@ -103,7 +105,6 @@ onHostOp _ (ImpKernels.GetSizeMax v size_class) =
 
 
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
-
 onKernel target kernel = do
   let (kernel_body, _) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
@@ -173,6 +174,17 @@ onKernel target kernel = do
           let size' = compilePrimExp size
           return (Nothing,
                   [CUDAC.citem|__shared__ volatile char $id:mem[$exp:size'];|])
+
+
+onHusk :: KernelTarget
+          -> ImpKernels.HuskSpace
+          -> ImpKernels.Code 
+          -> ImpKernels.Code
+          -> OnKernelM OpenCL
+onHusk target hspace kernel red_kern = do
+  kernel' <- traverse (onHostOp target) kernel
+  red_kern' <- traverse (onHostOp target) red_kern
+  return $ DistributeHusk hspace kernel' red_kern'
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
@@ -357,10 +369,11 @@ static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim
 }
 $esc:("#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, d)")
 
-static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d)
+static inline int get_global_size_fn(int block_dim0, int block_dim1, int block_dim2, int d)
 {
   return get_num_groups(d) * get_local_size(d);
 }
+$esc:("#define get_global_size(d) get_global_size_fn(block_dim0, block_dim1, block_dim2, d)")
 
 $esc:("#define CLK_LOCAL_MEM_FENCE 1")
 $esc:("#define CLK_GLOBAL_MEM_FENCE 2")

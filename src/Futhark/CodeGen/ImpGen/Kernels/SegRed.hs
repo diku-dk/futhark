@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 -- | We generate code for non-segmented/single-segment SegRed using
 -- the basic approach outlined in the paper "Design and GPGPU
 -- Performance of Futhark’s Redomap Construct" (ARRAY '16).  The main
@@ -42,7 +43,8 @@
 --   large strategy, but at most 50% of the threads in the group would
 --   have any element to read, which becomes highly inefficient.
 module Futhark.CodeGen.ImpGen.Kernels.SegRed
-  ( compileSegRed
+  ( compileSegRedHusk
+  , compileSegRed
   , compileSegRed'
   )
   where
@@ -50,13 +52,16 @@ module Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Control.Monad.Except
 import Data.Maybe
 import Data.List
+import qualified Data.Map as M
 
 import Prelude hiding (quot, rem)
 
-import Futhark.MonadFreshNames
+import Futhark.Binder
 import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
+import Futhark.Transform.Substitute
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import Futhark.CodeGen.ImpCode( Code( (:>>:) ) )
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen ((<--),
                                sFor, sComment, sIf, sWhen,
@@ -82,6 +87,82 @@ virtualiseGroups constants required_groups m = do
       iterations = (required_groups - group_id) `quotRoundingUp` kernelNumGroups constants
   i <- newVName "i"
   sFor i Int32 iterations $ m $ group_id + Imp.var i int32 * kernelNumGroups constants
+
+insertGlobalOffset :: VName -> Code Imp.KernelOp -> CallKernelGen (Code Imp.KernelOp)
+insertGlobalOffset node_id (c1 :>>: c2) = do
+  c1' <- insertGlobalOffset node_id c1
+  c2' <- insertGlobalOffset node_id c2
+  return $ c1' :>>: c2'
+insertGlobalOffset node_id (Imp.For i t e c) = do
+  c' <- insertGlobalOffset node_id c
+  return $ Imp.For i t e c'
+insertGlobalOffset node_id (Imp.While e c) = do
+  c' <- insertGlobalOffset node_id c
+  return $ Imp.While e c'
+insertGlobalOffset node_id (Imp.If e c1 c2) = do
+  c1' <- insertGlobalOffset node_id c1
+  c2' <- insertGlobalOffset node_id c2
+  return $ Imp.If e c1' c2'
+insertGlobalOffset node_id (Imp.Op (Imp.GetGlobalId gtid i)) = do
+  dev_gid <- newVName "dev_gid"
+  dev_gsize <- newVName "dev_gize"
+  return $ Imp.DeclareScalar dev_gid int32
+            :>>: Imp.DeclareScalar dev_gsize int32
+            :>>: Imp.Op (Imp.GetGlobalId dev_gid i)
+            :>>: Imp.Op (Imp.GetGlobalSize dev_gsize i)
+            :>>: Imp.SetScalar gtid ( Imp.LeafExp (Imp.ScalarVar dev_gid) int32
+                                    + Imp.LeafExp (Imp.ScalarVar node_id) int32
+                                    * Imp.LeafExp (Imp.ScalarVar dev_gsize) int32)
+insertGlobalOffset node_id (Imp.Op (Imp.GetGlobalSize gsize i)) = do
+  dev_gsize <- newVName "dev_gsize"
+  return $ Imp.DeclareScalar dev_gsize int32
+            :>>: Imp.Op (Imp.GetGlobalSize dev_gsize i)
+            :>>: Imp.SetScalar gsize ( Imp.LeafExp (Imp.ScalarVar node_id) int32
+                                     * Imp.LeafExp (Imp.ScalarVar dev_gsize) int32)
+insertGlobalOffset _ c = return c
+
+huskAdjustKernel :: VName -> VName -> Imp.HostOp -> CallKernelGen Imp.HostOp
+huskAdjustKernel node_id num_nodes (Imp.CallKernel kernel) = do
+  kbody <- insertGlobalOffset node_id $ Imp.kernelBody kernel
+  return $ Imp.CallKernel (kernel {
+    Imp.kernelBody = kbody,
+    Imp.kernelUses = Imp.ScalarUse node_id int32 : Imp.kernelUses kernel,
+    Imp.kernelNumGroups = map splitNumGroups $ Imp.kernelNumGroups kernel
+  })
+  where num_nodes_exp = Imp.LeafExp (Imp.ScalarVar num_nodes) int32
+        const_one = Imp.ValueExp $ IntValue $ intValue Int32 (1::Int)
+        splitNumGroups e = Imp.BinOpExp (Imp.SDiv Int32)
+                                        (e + num_nodes_exp - const_one)
+                                        num_nodes_exp
+huskAdjustKernel _ _ hop = return hop
+
+-- | Compile 'SegRed' instance to host-level code with calls to
+-- various kernels using husks.
+compileSegRedHusk :: Pattern ExplicitMemory
+                  -> KernelSpace
+                  -> Commutativity -> Lambda InKernel -> [SubExp]
+                  -> Body InKernel
+                  -> CallKernelGen ()
+compileSegRedHusk pat@(Pattern _ res) space comm red_op nes body = do
+  dist_red <- ImpGen.collect $ compileSegRed pat space comm red_op nes body
+  red_op' <- renameLambda red_op
+  comb_red <- ImpGen.collect $ compileSegRed pat space comm red_op' nes body
+  -- ^ Body should be changed to identity
+  kernel_mem_uses <- concatMap extractMemName . fst <$> computeKernelUses dist_red mempty
+  res_mems <- mapM extractPatMem res
+  let inp_mems = kernel_mem_uses \\ res_mems
+  interm_res <- zip res_mems <$> replicateM (length res_mems) (newVName "interm_res")
+  parts <- zip inp_mems <$> replicateM (length inp_mems) (newVName "partition")
+  node_id <- newVName "node_id"
+  num_nodes <- newVName "num_nodes"
+  let hspace = Imp.HuskSpace node_id num_nodes parts interm_res
+  dist_red' <- traverse (huskAdjustKernel node_id num_nodes) $
+                  substituteNames (M.fromList (interm_res ++ parts)) dist_red
+  sOp $ Imp.Husk hspace dist_red' comb_red
+  where extractMemName (Imp.MemoryUse name) = [name]
+        extractMemName _ = []
+        extractPatMem (PatElem _ (MemArray _ _ _ (ArrayIn mem _))) = pure mem
+        extractPatMem _ = fail "Invalid pattern for SegRed husk."
 
 -- | Compile 'SegRed' instance to host-level code with calls to
 -- various kernels.

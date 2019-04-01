@@ -552,13 +552,6 @@ handleKernel (SegGenRed space ops ts body) = do
     return op { genReduceOp = lam }
   return $ Inner $ SegGenRed space ops' ts body'
 
-handleKernel (Husk hspace kern red) = do
-  hscope <- scopeOfHuskSpace hspace
-  Inner kern' <- localScope hscope $ handleKernel kern
-  Inner red' <- localScope hscope $ handleKernel red
-  -- TODO: How about allocations of memory in hspace?
-  return $ Inner $ Husk hspace kern' red'
-
 subInKernel :: AllocM InInKernel OutInKernel a
             -> AllocM fromlore2 ExplicitMemory a
 subInKernel = subAllocM handleKernelExp True

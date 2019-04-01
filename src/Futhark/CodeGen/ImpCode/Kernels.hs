@@ -13,6 +13,7 @@ module Futhark.CodeGen.ImpCode.Kernels
   , KernelOp (..)
   , AtomicOp (..)
   , Kernel (..)
+  , HuskSpace (..)
   , LocalMemoryUse
   , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
@@ -32,6 +33,7 @@ import Futhark.Representation.Kernels.Sizes
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
+import Futhark.Transform.Substitute
 
 type Program = Functions HostOp
 type Function = Imp.Function HostOp
@@ -48,7 +50,7 @@ newtype KernelConst = SizeConst Name
 type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel Kernel
-            | DistributeHusk Imp.Exp (Imp.Code HostOp)
+            | Husk HuskSpace Code Code
             | GetSize VName Name SizeClass
             | CmpSizeLe VName Name SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
@@ -71,6 +73,14 @@ data Kernel = Kernel
               }
             deriving (Show)
 
+data HuskSpace = HuskSpace
+                 { hspaceNodeId :: VName
+                 , hspaceNumNodes :: VName
+                 , hspacePartitions :: [(VName, VName)]
+                 , hspaceIntermediateResults :: [(VName, VName)]
+                 }
+                deriving (Show)
+
 -- ^ In-kernel name and per-workgroup size in bytes.
 type LocalMemoryUse = (VName, Either MemSize KernelConstExp)
 
@@ -83,8 +93,6 @@ getKernels :: Program -> [Kernel]
 getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
   where getFunKernels (CallKernel kernel) =
           tell [kernel]
-        getFunKernels (DistributeHusk _ body) =
-          tell $ execWriter $ traverse getFunKernels body
         getFunKernels _ =
           return ()
         sameKernel _ _ = False
@@ -112,6 +120,14 @@ instance Pretty KernelUse where
   ppr (ConstUse name e) =
     oneLine $ text "const" <> parens (commasep [ppr name, ppr e])
 
+instance Substitute KernelUse where
+  substituteNames m (ScalarUse name t) =
+    ScalarUse (substituteNames m name) t
+  substituteNames m (MemoryUse name) =
+    MemoryUse $ substituteNames m name
+  substituteNames m (ConstUse name e) =
+    ConstUse (substituteNames m name) e
+
 instance Pretty HostOp where
   ppr (GetSize dest key size_class) =
     ppr dest <+> text "<-" <+>
@@ -122,21 +138,27 @@ instance Pretty HostOp where
     ppr dest <+> text "<-" <+>
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
-  ppr (DistributeHusk num_nodes c) =
-    text "distribute" <> parens (ppr num_nodes) <+>
-    text "{" <+> ppr c <+> text "}"
   ppr (CallKernel c) =
     ppr c
 
 instance FreeIn HostOp where
   freeIn (CallKernel c) = freeIn c
-  freeIn (DistributeHusk _ c) = freeIn c
   freeIn (CmpSizeLe dest _ _ x) =
     freeIn dest <> freeIn x
   freeIn (GetSizeMax dest _) =
     freeIn dest
   freeIn (GetSize dest _ _) =
     freeIn dest
+
+instance Substitute HostOp where
+  substituteNames m (GetSize dest key size_class) =
+    GetSize (substituteNames m dest) key size_class
+  substituteNames m (GetSizeMax dest size_class) =
+    GetSizeMax (substituteNames m dest) size_class
+  substituteNames m (CmpSizeLe dest name size_class x) =
+    CmpSizeLe (substituteNames m dest) name size_class (substituteNames m x)
+  substituteNames m (CallKernel c) =
+    CallKernel (substituteNames m c)
 
 instance FreeIn Kernel where
   freeIn kernel = freeIn (kernelBody kernel) <>
@@ -156,6 +178,11 @@ instance Pretty Kernel where
             ppr name <+> parens (ppr size <+> text "bytes")
           ppLocalMemory (name, Right size) =
             ppr name <+> parens (ppr size <+> text "bytes (const)")
+
+instance Substitute Kernel where
+  substituteNames m (Kernel body local uses ng gs name) =
+    Kernel (substituteNames m body) local (substituteNames m uses)
+      (substituteNames m ng) (substituteNames m gs) name
 
 data KernelOp = GetGroupId VName Int
               | GetLocalId VName Int
@@ -194,6 +221,29 @@ instance FreeIn AtomicOp where
   freeIn (AtomicXor _ arr i x) = freeIn arr <> freeIn i <> freeIn x
   freeIn (AtomicCmpXchg _ arr i x y) = freeIn arr <> freeIn i <> freeIn x <> freeIn y
   freeIn (AtomicXchg _ arr i x) = freeIn arr <> freeIn i <> freeIn x
+
+instance Substitute AtomicOp where
+  substituteNames m (AtomicAdd vn arr i x) = 
+    AtomicAdd (substituteNames m vn) (substituteNames m arr) i (substituteNames m x)
+  substituteNames m (AtomicSMax vn arr i x) = 
+    AtomicSMax (substituteNames m vn) (substituteNames m arr) i (substituteNames m x)
+  substituteNames m (AtomicSMin vn arr i x) = 
+    AtomicSMin (substituteNames m vn) (substituteNames m arr) i (substituteNames m x)
+  substituteNames m (AtomicUMax vn arr i x) = 
+    AtomicUMax (substituteNames m vn) (substituteNames m arr) i (substituteNames m x)
+  substituteNames m (AtomicUMin vn arr i x) = 
+    AtomicUMin (substituteNames m vn) (substituteNames m arr) i (substituteNames m x)
+  substituteNames m (AtomicAnd vn arr i x) = 
+    AtomicAnd (substituteNames m vn) (substituteNames m arr) i (substituteNames m x)
+  substituteNames m (AtomicOr vn arr i x) = 
+    AtomicOr (substituteNames m vn) (substituteNames m arr) i (substituteNames m x)
+  substituteNames m (AtomicXor vn arr i x) = 
+    AtomicXor (substituteNames m vn) (substituteNames m arr) i (substituteNames m x)
+  substituteNames m (AtomicCmpXchg vn arr i x y) = 
+    AtomicCmpXchg (substituteNames m vn) (substituteNames m arr) i
+      (substituteNames m x) (substituteNames m y)
+  substituteNames m (AtomicXchg vn arr i x) = 
+    AtomicXchg (substituteNames m vn) (substituteNames m arr) i (substituteNames m x)
 
 instance Pretty KernelOp where
   ppr (GetGroupId dest i) =
@@ -254,6 +304,23 @@ instance Pretty KernelOp where
 instance FreeIn KernelOp where
   freeIn (Atomic op) = freeIn op
   freeIn _ = mempty
+
+instance Substitute KernelOp where
+  substituteNames m (GetGroupId name i) =
+    GetGroupId (substituteNames m name) i
+  substituteNames m (GetLocalId name i) =
+    GetLocalId (substituteNames m name) i
+  substituteNames m (GetLocalSize name i) =
+    GetLocalSize (substituteNames m name) i
+  substituteNames m (GetGlobalSize name i) =
+    GetGlobalSize (substituteNames m name) i
+  substituteNames m (GetGlobalId name i) =
+    GetGlobalId (substituteNames m name) i
+  substituteNames m (GetLockstepWidth name) =
+    GetLockstepWidth $ substituteNames m name
+  substituteNames m (Atomic aop) =
+    Atomic $ substituteNames m aop
+  substituteNames _ ko = ko
 
 brace :: Doc -> Doc
 brace body = text " {" </> indent 2 body </> text "}"

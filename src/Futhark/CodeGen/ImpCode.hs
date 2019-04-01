@@ -72,6 +72,7 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
 import Futhark.Analysis.PrimExp
+import Futhark.Transform.Substitute
 import Futhark.Util.Pretty hiding (space)
 
 data Size = ConstSize Int64
@@ -511,3 +512,49 @@ instance FreeIn Arg where
 instance FreeIn Size where
   freeIn (VarSize name) = S.singleton name
   freeIn (ConstSize _) = mempty
+
+instance Substitute a => Substitute (Code a) where
+  substituteNames _ Skip = Skip
+  substituteNames m (x :>>: y) =
+    substituteNames m x :>>: substituteNames m y
+  substituteNames m (For i it limit body) =
+    For (substituteNames m i) it (substituteNames m limit) (substituteNames m body)
+  substituteNames m (While cond body) =
+    While (substituteNames m cond) (substituteNames m body)
+  substituteNames m (DeclareMem name space) =
+    DeclareMem (substituteNames m name) space
+  substituteNames m (DeclareScalar name t) =
+    DeclareScalar (substituteNames m name) t
+  substituteNames m (DeclareArray name space t vs) =
+    DeclareArray (substituteNames m name) space t vs
+  substituteNames m (Allocate name size s) =
+    Allocate (substituteNames m name) size s
+  substituteNames m (Free name space) =
+    Free (substituteNames m name) space
+  substituteNames m (Copy dest destoffset destspace src srcoffset srcspace size) =
+    Copy (substituteNames m dest) destoffset destspace (substituteNames m src) srcoffset srcspace size
+  substituteNames m (SetMem dest from space) =
+    SetMem (substituteNames m dest) (substituteNames m from) space
+  substituteNames m (Write name i bt space vol val) =
+    Write (substituteNames m name) i bt space vol (substituteNames m val)
+  substituteNames m (SetScalar x y) =
+    SetScalar (substituteNames m x) (substituteNames m y)
+  substituteNames m (Call dests fname args) =
+    Call (substituteNames m dests) fname args
+  substituteNames m (If cond t f) =
+    If (substituteNames m cond) (substituteNames m t) (substituteNames m f)
+  substituteNames m (Assert e msg loc) =
+    Assert (substituteNames m e) msg loc
+  substituteNames m (Op op) =
+    Op $ substituteNames m op
+  substituteNames m (Comment cmt code) =
+    Comment cmt $ substituteNames m code
+  substituteNames m (DebugPrint s t e) =
+    DebugPrint s t $ substituteNames m e
+    
+instance Substitute ExpLeaf where
+  substituteNames m (ScalarVar name) =
+    ScalarVar $ substituteNames m name
+  substituteNames m (Index name bt t space vol) =
+    Index (substituteNames m name) bt t space vol
+  substituteNames _ e = e

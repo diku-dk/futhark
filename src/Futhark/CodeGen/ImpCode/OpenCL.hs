@@ -15,6 +15,7 @@ module Futhark.CodeGen.ImpCode.OpenCL
        , KernelArg (..)
        , OpenCL (..)
        , KernelTarget (..)
+       , ImpKernels.HuskSpace (..)
        , module Futhark.CodeGen.ImpCode
        , module Futhark.Representation.Kernels.Sizes
        )
@@ -25,6 +26,7 @@ import qualified Data.Map as M
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import Futhark.Representation.Kernels.Sizes
 import qualified Futhark.CodeGen.ImpCode as Imp
+import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 
 import Futhark.Util.Pretty
 
@@ -60,7 +62,7 @@ data KernelArg = ValueKArg Exp PrimType
 
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
-            | DistributeCode VName Code
+            | DistributeHusk ImpKernels.HuskSpace Code Code
             | HostCode Code
             | GetSize VName Name
             | CmpSizeLe VName Name Exp

@@ -14,11 +14,9 @@ module Futhark.Representation.Kernels.Kernel
        , GenReduceOp(..)
        , KernelBody(..)
        , KernelSpace(..)
-       , HuskSpace(..)
        , spaceDimensions
        , SpaceStructure(..)
        , scopeOfKernelSpace
-       , scopeOfHuskSpace
        , WhichThreads(..)
        , KernelResult(..)
        , kernelResultSubExp
@@ -107,7 +105,6 @@ data Kernel lore =
     -- ^ The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
   | SegGenRed KernelSpace [GenReduceOp lore] [Type] (Body lore)
-  | Husk HuskSpace (Kernel lore) (Kernel lore)
     deriving (Eq, Show, Ord)
 
 data KernelSpace = KernelSpace { spaceGlobalId :: VName
@@ -143,15 +140,6 @@ spaceDimensions = structureDimensions . spaceStructure
         structureDimensions (NestedThreadSpace dims) =
           let (gtids, gdim_sizes, _, _) = unzip4 dims
           in zip gtids gdim_sizes
-
-data HuskSpace = HuskSpace { spacePartitionSource :: [VName]
-                           , spaceDataSource :: [VName]
-                           , spaceIntermediateResult :: [VName]
-                           , spaceIntermediateType :: [Type]
-                           , spaceNumNodes :: SubExp
-                           , spacePartitionSize :: SubExp
-                           }
-                 deriving (Eq, Show, Ord)
 
 -- | The body of a 'Kernel'.
 data KernelBody lore = KernelBody { kernelBodyLore :: BodyAttr lore
@@ -249,11 +237,6 @@ mapKernelM tv (Kernel desc space ts kernel_body) =
   where mapOnKernelDebugHints (KernelDebugHints name kvs) =
           KernelDebugHints name <$>
           (zip (map fst kvs) <$> mapM (mapOnKernelSubExp tv . snd) kvs)
-mapKernelM tv (Husk hspace kern red) =
-  Husk
-  <$> mapOnHuskSpace tv hspace
-  <*> mapKernelM tv kern
-  <*> mapKernelM tv red
 
 mapOnKernelSpace :: Monad f =>
                     KernelMapper flore tlore f -> KernelSpace -> f KernelSpace
@@ -272,13 +255,6 @@ mapOnKernelSpace tv (KernelSpace gtid ltid gid num_threads num_groups group_size
                                  <*> pure ltids
                                  <*> mapM (mapOnKernelSubExp tv) ldim_sizes)
           where (gtids, gdim_sizes, ltids, ldim_sizes) = unzip4 dims
-
-mapOnHuskSpace :: Monad f =>
-                  KernelMapper flore tlore f -> HuskSpace -> f HuskSpace
-mapOnHuskSpace tv (HuskSpace part_src src interm_res interm_ts num_nodes part_size) =
-  HuskSpace part_src src interm_res interm_ts
-  <$> mapOnKernelSubExp tv num_nodes
-  <*> mapOnKernelSubExp tv part_size
 
 mapOnKernelType :: Monad m =>
                    KernelMapper flore tlore m -> Type -> m Type
@@ -442,12 +418,6 @@ scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
                          let (gtids, _, ltids, _) = unzip4 dims
                          in gtids ++ ltids
 
-scopeOfHuskSpace :: (Monad m, HasScope lore m) => HuskSpace -> m (Scope lore)
-scopeOfHuskSpace (HuskSpace part_src src interm_res interm_ts _ part_size) = do
-  src_info <- mapM lookupInfo src
-  return $ M.fromList $ zip part_src src_info ++ zip interm_res src_info
-  -- TODO: ^ Change shape of src_info and convert interm_ts to scope value
-
 instance Attributes lore => Rename (Kernel lore) where
   rename = mapKernelM renamer
     where renamer = KernelMapper rename rename rename rename rename rename
@@ -479,8 +449,6 @@ kernelType (SegRed space _ _ nes ts _) =
   where (red_ts, map_ts) = splitAt (length nes) ts
         dims = map snd $ spaceDimensions space
         outer_dims = init dims
-
-kernelType (Husk _ _ red) = kernelType red -- TODO: Is this correct?
 
 kernelType (SegGenRed space ops _ _) = do
   op <- ops
@@ -641,9 +609,6 @@ instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (SegGenRed _ ops _ body) =
     mconcat $ map UT.consumedUsage $ S.toList (consumedInBody body) <>
     concatMap genReduceDest ops
-  usageInOp (Husk (HuskSpace _ src _ _ _ _) kern red) =
-    mconcat [usageInOp kern, usageInOp red] <>
-    UT.usages (S.fromList src)
   usageInOp GetSize{} = mempty
   usageInOp GetSizeMax{} = mempty
   usageInOp CmpSizeLe{} = mempty
@@ -658,13 +623,6 @@ typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore (
 typeCheckKernel GetSize{} = return ()
 typeCheckKernel GetSizeMax{} = return ()
 typeCheckKernel (CmpSizeLe _ _ x) = TC.require [Prim int32] x
-
-typeCheckKernel (Husk hspace kern red) = do
-  checkHuskSpace hspace
-  hscope <- scopeOfHuskSpace hspace
-  TC.binding hscope $ do
-    typeCheckKernel kern
-    typeCheckKernel red
 
 typeCheckKernel (SegRed space _ red_op nes ts body) = do
   checkSpace space
@@ -779,10 +737,6 @@ checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
       let (_, gdim_sizes, _, ldim_sizes) = unzip4 dims
       in mapM_ (TC.require [Prim int32]) $ gdim_sizes ++ ldim_sizes
 
-checkHuskSpace :: TC.Checkable lore => HuskSpace -> TC.TypeM lore ()
-checkHuskSpace (HuskSpace _ _ _ _ num_nodes part_size) =
-  mapM_ (TC.require [Prim int32]) [num_nodes, part_size]
-
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
@@ -793,8 +747,6 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (SegGenRed _ ops _ body) =
     inside "SegGenRed" $ do mapM_ (lambdaMetrics . genReduceOp) ops
                             bodyMetrics body
-  opMetrics (Husk _ kern red) =
-    inside "Husk" $ opMetrics kern >> opMetrics red
   opMetrics GetSize{} = seen "GetSize"
   opMetrics GetSizeMax{} = seen "GetSizeMax"
   opMetrics CmpSizeLe{} = seen "CmpSizeLe"
@@ -835,13 +787,6 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             ppr shape <> PP.comma </>
             ppr op
 
-  ppr (Husk hspace kern red) =
-    text "husk" <>
-    ppr hspace <+> PP.colon <+>
-    PP.nestedBlock "{" "}" (ppr kern) <+>
-    PP.comma <+>
-    PP.nestedBlock "{" "}" (ppr red)
-
 instance Pretty KernelSpace where
   ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size structure) =
     parens (commasep [text "num groups:" <+> ppr num_groups,
@@ -860,15 +805,6 @@ instance Pretty KernelSpace where
           flat dims = parens $ commasep $ do
             (i,d) <- dims
             return $ ppr i <+> "<" <+> ppr d
-
-instance Pretty HuskSpace where
-  ppr (HuskSpace part_src src interm_res interm_ts num_nodes part_size) =
-    parens (commasep [text "partition source:" <+> ppr part_src,
-                      text "data source:" <+> ppr src,
-                      text "intermediate result:" <+> ppr interm_res,
-                      text "intermediate type:" <+> ppr interm_ts,
-                      text "number of nodes:" <+> ppr num_nodes,
-                      text "partition size:" <+> ppr part_size])
 
 instance PrettyLore lore => Pretty (KernelBody lore) where
   ppr (KernelBody _ stms res) =

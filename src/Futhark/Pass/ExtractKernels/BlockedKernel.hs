@@ -36,7 +36,6 @@ import Futhark.Representation.AST
 import Futhark.Representation.Kernels
        hiding (Prog, Body, Stm, Pattern, PatElem,
                BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
-import Futhark.Representation.SOACS.SOAC hiding (GenReduceOp)
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -173,7 +172,9 @@ reduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
 reduceKernel step_two_size reduce_lam' nes arrs = do
   let group_size = kernelWorkgroupSize step_two_size
       red_ts = lambdaReturnType reduce_lam'
-  space <- newKernelSpace (kernelWorkgroups step_two_size, group_size, kernelNumThreads step_two_size) $
+  space <- newKernelSpace ( kernelWorkgroups step_two_size
+                          , group_size
+                          , kernelNumThreads step_two_size) $
            FlatThreadSpace []
   let thread_id = spaceGlobalId space
 
@@ -330,48 +331,6 @@ segRed pat total_num_elements w comm reduce_lam map_lam nes arrs ispace inps = r
   letBind_ pat $ Op $
     SegRed kspace comm reduce_lam nes (lambdaReturnType map_lam) body
 
-huskedNonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
-                   Pattern Kernels
-                -> SubExp
-                -> Commutativity
-                -> Lambda InKernel -> Lambda InKernel
-                -> [SubExp] -> [VName]
-                -> m (Stms Kernels)
-huskedNonSegRed pat total_num_elements comm reduce_lam map_lam nes arrs = runBinder_ $ do
-  part <- replicateM (length arrs) (newVName "part")
-  num_nodes <- getSize "num_nodes" SizeNumNodes
-  kern_dummy <- newVName "dummy"
-  kern_gtid <- newVName "gtid"
-  red_dummy <- newVName "dummy"
-  red_gtid <- newVName "gtid"
-
-  let reduce_ret_ts = lambdaReturnType reduce_lam
-      interm_ts = map (`arrayOfRow` num_nodes) reduce_ret_ts
-  interm_res <- replicateM (length reduce_ret_ts) (newVName "interm_res")
-  
-  part_size <- letSubExp "per_part_elements" =<<
-    eDivRoundingUp Int32 (toExp =<< asIntS Int32 total_num_elements)
-                         (toExp =<< asIntS Int32 num_nodes)
-
-  let hspace = HuskSpace part arrs interm_res interm_ts num_nodes part_size
-  hscope <- scopeOfHuskSpace hspace
-
-  (kern, red) <- localScope hscope $ do
-    (_, kern_size) <- blockedKernelSize =<< asIntS Int64 part_size
-    kern_space <- segRedSpace kern_gtid part_size kern_size [(kern_dummy, intConst Int32 1)]
-    kern_body <- localScope hscope $ segRedBody kern_space kern_gtid map_lam part []
-
-    (_, red_size) <- blockedKernelSize =<< asIntS Int64 num_nodes
-    id_lam <- mkIdentityLambda reduce_ret_ts
-    reduce_lam' <- renameLambda reduce_lam
-    red_space <- segRedSpace red_gtid num_nodes red_size [(red_dummy, intConst Int32 1)]
-    red_body <- localScope hscope $ segRedBody red_space red_gtid id_lam interm_res []
-    return (SegRed kern_space comm reduce_lam nes (lambdaReturnType map_lam) kern_body,
-            SegRed red_space comm reduce_lam' nes (lambdaReturnType map_lam) red_body)
-    -- TODO: Is ts of red wrong?
-
-  letBind_ pat $ Op $ Husk hspace kern red
-
 nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels
           -> SubExp
@@ -390,7 +349,9 @@ nonSegRed pat w comm red_lam map_lam nes arrs = runBinder_ $ do
   -- may be on the device).
   let addDummyDim t = t `arrayOfRow` intConst Int32 1
   pat' <- fmap addDummyDim <$> renamePattern pat
-  addStms =<< huskedNonSegRed pat' w comm red_lam map_lam nes arrs
+  dummy <- newVName "dummy"
+  addStms =<<
+    segRed pat' w w comm red_lam map_lam nes arrs [(dummy, intConst Int32 1)] []
 
   forM_ (zip (patternNames pat') (patternNames pat)) $ \(from, to) -> do
     from_t <- lookupType from

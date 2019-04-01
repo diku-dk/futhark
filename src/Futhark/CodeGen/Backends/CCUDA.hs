@@ -9,6 +9,7 @@ module Futhark.CodeGen.Backends.CCUDA
 
 import qualified Language.C.Quote.OpenCL as C
 import Data.List
+import Control.Monad
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
@@ -74,7 +75,7 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
              , Option { optionLongName = "nodes"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument "INT"
-                      , optionAction = [C.cstm|futhark_context_config_set_default_num_nodes(cfg, atoi(optarg));|]
+                      , optionAction = [C.cstm|futhark_context_config_set_num_nodes(cfg, atoi(optarg));|]
                       }
              , Option { optionLongName = "nvrtc-option"
                       , optionShortName = Nothing
@@ -213,7 +214,59 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
-    cudaSizeClass SizeNumNodes = "num_nodes"
+callKernel (DistributeHusk (HuskSpace node_id num_nodes parts interms) kernel comb_red) = do
+  kernel' <- GC.blockScope $ GC.compileCode kernel
+  comb_red' <- GC.blockScope $ GC.compileCode comb_red
+  part_mems <- replicateM (length parts) (newVName "partitions")
+  interm_mems <- replicateM (length interms) (newVName "intermediates")
+  node <- newVName "node"
+  let single_interm_cpy = [[C.cstm|
+          CUDA_SUCCEED(cuMemcpyDtoD($id:interm_src.mem, $id:interm_mem[0].mem, $id:interm_src.size));
+        |] | ((interm_src, _), interm_mem) <- zip interms interm_mems]
+  GC.item [C.citem|typename int32_t $id:num_nodes = ctx->cuda.cfg.num_nodes;|]
+  mapM_ GC.item [[C.citem|
+    struct memblock_device *$id:part_mem =
+      malloc($id:num_nodes * sizeof(struct memblock_device));
+    |] | part_mem <- part_mems]
+  mapM_ GC.item [[C.citem|
+    struct memblock_device *$id:interm_mem =
+      malloc($id:num_nodes * sizeof(struct memblock_device));
+    |] | interm_mem <- interm_mems]
+  GC.stm [C.cstm|
+    for (int $id:node_id = 0; $id:node_id < $id:num_nodes; ++$id:node_id) {
+      struct cuda_node_context $id:node = ctx->cuda.nodes[$id:node_id];
+      cuCtxSetCurrent($id:node.cu_ctx);
+
+      $stms:(zipWith allocs interms interm_mems)
+      $items:(zipWith setMem interms interm_mems)
+      
+      $stms:(zipWith allocs parts part_mems)
+      $items:(zipWith setMem parts part_mems)
+      $stms:(map (cpyToPeer node) parts)
+
+      $items:kernel'
+
+      
+    }|]
+  mapM_ GC.stm [[C.cstm|free($id:part_mem);|] | part_mem <- part_mems]
+  GC.stm [C.cstm|cuCtxSetCurrent(ctx->cuda.nodes[0].cu_ctx);|]
+  GC.stm [C.cstm|if ($id:num_nodes != 1) {
+    $items:comb_red'
+  } else {
+    $stms:single_interm_cpy
+  }|]
+  where allocs (src, mem) col = [C.cstm|
+            if(memblock_alloc_device(ctx, $id:col + $id:node_id,
+                                     $id:src.size, $string:(pretty mem)))
+              return 1;
+          |]
+        setMem (_, mem) col = [C.citem|
+            struct memblock_device $id:mem = $id:col[$id:node_id];
+          |]
+        cpyToPeer node (src, mem) = [C.cstm|
+            CUDA_SUCCEED(cuMemcpyPeer($id:mem.mem, $id:node.cu_ctx, $id:src.mem,
+                                      ctx->cuda.nodes[0].cu_ctx, $id:src.size));
+          |]
 callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   time_start <- newVName "time_start"

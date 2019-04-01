@@ -185,10 +185,10 @@ generateConfigFuns sizes = do
                          cfg->cu_cfg.default_threshold = size;
                        }|])
 
-  GC.publicDef_ "context_config_set_default_num_nodes" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_config_set_num_nodes" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
-     [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
-                         cfg->cu_cfg.default_threshold = size;
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int num) {
+                         cfg->cu_cfg.num_nodes = num;
                        }|])
 
   GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->

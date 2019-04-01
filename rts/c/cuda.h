@@ -40,11 +40,12 @@ struct cuda_config {
   size_t default_grid_size;
   size_t default_tile_size;
   size_t default_threshold;
-  size_t default_num_nodes;
 
   int default_block_size_changed;
   int default_grid_size_changed;
   int default_tile_size_changed;
+
+  int num_nodes;
 
   int num_sizes;
   const char **size_names;
@@ -74,11 +75,12 @@ void cuda_config_init(struct cuda_config *cfg,
   cfg->default_grid_size = 128;
   cfg->default_tile_size = 32;
   cfg->default_threshold = 32*1024;
-  cfg->default_num_nodes = 1;
 
   cfg->default_block_size_changed = 0;
   cfg->default_grid_size_changed = 0;
   cfg->default_tile_size_changed = 0;
+
+  cfg->num_nodes = 1;
 
   cfg->num_sizes = num_sizes;
   cfg->size_names = size_names;
@@ -103,7 +105,6 @@ struct cuda_context {
   size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
-  size_t max_num_nodes;
 
   size_t lockstep_width;
 
@@ -143,8 +144,6 @@ static int cuda_devices_setup(struct cuda_context *ctx)
 {
   int count;
   int contains_valid = 0;
-
-  ctx->max_num_nodes = ctx->cfg.default_num_nodes;
 
   CUDA_SUCCEED(cuDeviceGetCount(&count));
   if (count == 0) {
@@ -212,20 +211,20 @@ static int cuda_devices_setup(struct cuda_context *ctx)
     }
   }
 
-  if (ctx->max_num_nodes != 0 && dev_count < ctx->max_num_nodes) {
+  if (ctx->cfg.num_nodes != 0 && dev_count < ctx->cfg.num_nodes) {
     panic(-1, "Found only %d \"%s\" devices, but %d was requested.\n",
-          dev_count, devs[0].name, ctx->max_num_nodes);
+          dev_count, devs[0].name, ctx->cfg.num_nodes);
   }
 
-  if (ctx->max_num_nodes == 0)
-    ctx->cfg.default_num_nodes = ctx->max_num_nodes = dev_count;
-  ctx->nodes = malloc(sizeof(struct cuda_node_context) * ctx->max_num_nodes);
+  if (ctx->cfg.num_nodes == 0)
+    ctx->cfg.num_nodes = dev_count;
+  ctx->nodes = malloc(sizeof(struct cuda_node_context) * ctx->cfg.num_nodes);
 
-  for (int i = 0; i < ctx->max_num_nodes; ++i)
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i)
     ctx->nodes[i].dev = devs[i].dev;
 
   if(ctx->cfg.debugging)
-    fprintf(stderr, "Using %d \"%s\" devices.\n", ctx->max_num_nodes, devs[0].name);
+    fprintf(stderr, "Using %d \"%s\" devices.\n", ctx->cfg.num_nodes, devs[0].name);
 
   free(devs);
   return 0;
@@ -422,9 +421,6 @@ static void cuda_size_setup(struct cuda_context *ctx)
     } else if (strstr(size_class, "threshold") == size_class) {
       max_value = ctx->max_threshold;
       default_value = ctx->cfg.default_threshold;
-    } else if (strstr(size_class, "num_nodes") == size_class) {
-      max_value = ctx->max_num_nodes;
-      default_value = ctx->cfg.default_num_nodes;
     } else {
       panic(1, "Unknown size class for size '%s': %s\n", size_name, size_class);
     }
@@ -477,10 +473,8 @@ static void cuda_module_setup(struct cuda_context *ctx,
 
   if (ctx->cfg.load_ptx_from == NULL && ctx->cfg.load_program_from == NULL) {
     src = concat_fragments(src_fragments);
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
   } else if (ctx->cfg.load_ptx_from == NULL) {
     load_string_from_file(ctx->cfg.load_program_from, &src, NULL);
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
   } else {
     if (ctx->cfg.load_program_from != NULL) {
       fprintf(stderr,
@@ -501,6 +495,10 @@ static void cuda_module_setup(struct cuda_context *ctx,
     dump_string_to_file(ctx->cfg.dump_ptx_to, ptx);
   }
 
+  if (ctx->cfg.load_ptx_from == NULL) {
+    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
+  }
+
   CUDA_SUCCEED(cuModuleLoadData(&ctx->module, ptx));
 
   free(ptx);
@@ -514,9 +512,18 @@ void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const cha
   CUDA_SUCCEED(cuInit(0));
   cuda_devices_setup(ctx);
 
-  for (int i = 0; i < ctx->max_num_nodes; ++i) {
+  for (int i = ctx->cfg.num_nodes - 1; i >= 0; --i) {
+    // Move backwards through nodes to have node 0 be the current context after
     CUDA_SUCCEED(cuCtxCreate(&ctx->nodes[i].cu_ctx, 0, ctx->nodes[i].dev));
     free_list_init(&ctx->nodes[i].free_list);
+  }
+
+  for (int i = 1; i < ctx->cfg.num_nodes; ++i) {
+    int peer_access;
+    cuDeviceCanAccessPeer(&peer_access, ctx->nodes[0].dev, ctx->nodes[i].dev);
+    if (peer_access) {
+      CUDA_SUCCEED(cuCtxEnablePeerAccess(ctx->nodes[i].cu_ctx, 0));
+    }
   }
 
   // All devices are identical, so use the properties from the first.
@@ -536,7 +543,7 @@ void cuda_cleanup(struct cuda_context *ctx)
 {
   CUDA_SUCCEED(cuda_free_all(ctx));
   CUDA_SUCCEED(cuModuleUnload(ctx->module));
-  for (int i = 0; i < ctx->max_num_nodes; ++i)
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i)
     CUDA_SUCCEED(cuCtxDestroy(ctx->nodes[i].cu_ctx));
 }
 
@@ -600,7 +607,7 @@ CUresult cuda_free(struct cuda_context *ctx, int node, CUdeviceptr mem,
 
 CUresult cuda_free_all(struct cuda_context *ctx) {
   CUdeviceptr mem;
-  for (int i = 0; i < ctx->max_num_nodes; ++i) {
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
     free_list_pack(&ctx->nodes[i].free_list);
     while (free_list_first(&ctx->nodes[i].free_list, &mem) == 0) {
       CUresult res = cuMemFree(mem);

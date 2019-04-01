@@ -130,22 +130,6 @@ simplifyKernelOp mk_ops env (SegGenRed space ops ts body) = do
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
 
-simplifyKernelOp mk_ops env (Husk hspace kern red) = do
-  hspace' <- Engine.simplify hspace
-  scope <- scopeOfHuskSpace hspace'
-  let scope_vtable = ST.fromScope scope
-
-  (kern', kern_hoisted) <-
-    Engine.localVtable (<>scope_vtable) $
-    simplifyKernelOp mk_ops env kern
-  -- TODO: ^ Should we actually hoist from kernel?
-
-  (red', red_hoisted) <-
-    Engine.localVtable (<>scope_vtable) $
-    simplifyKernelOp mk_ops env red
-  
-  return (Husk hspace' kern' red', kern_hoisted <> red_hoisted)
-
 simplifyKernelOp _ _ (GetSize key size_class) = return (GetSize key size_class, mempty)
 simplifyKernelOp _ _ (GetSizeMax size_class) = return (GetSizeMax size_class, mempty)
 simplifyKernelOp _ _ (CmpSizeLe key size_class x) = do
@@ -338,12 +322,6 @@ instance Engine.Simplifiable KernelSpace where
     <*> Engine.simplify num_groups
     <*> Engine.simplify group_size
     <*> Engine.simplify structure
-
-instance Engine.Simplifiable HuskSpace where
-  simplify (HuskSpace part_src src interm_res interm_ts num_nodes part_size) =
-    HuskSpace part_src src interm_res interm_ts
-    <$> Engine.simplify num_nodes
-    <*> Engine.simplify part_size
 
 instance Engine.Simplifiable SpaceStructure where
   simplify (FlatThreadSpace dims) =
