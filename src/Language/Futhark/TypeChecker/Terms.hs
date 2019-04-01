@@ -380,19 +380,19 @@ instantiateTypeScheme :: SrcLoc -> [TypeParam] -> PatternType
 instantiateTypeScheme loc tparams t = do
   let tparams' = filter isTypeParam tparams
       tnames = map typeParamName tparams'
-  (fresh_tnames, inst_list) <- unzip <$> mapM (instantiateTypeParam loc) tparams'
-  let substs = M.fromList $ zip tnames $ map Subst inst_list
-      t' = substTypesAny (`M.lookup` substs) t
+  (fresh_tnames, substs) <- unzip <$> mapM (instantiateTypeParam loc) tparams'
+  let substs' = M.fromList $ zip tnames substs
+      t' = substTypesAny (`M.lookup` substs') t
   return (fresh_tnames, t')
 
 -- | Create a new type name and insert it (unconstrained) in the
 -- substitution map.
-instantiateTypeParam :: Monoid as => SrcLoc -> TypeParam -> TermTypeM (VName, TypeBase dim as)
+instantiateTypeParam :: Monoid as => SrcLoc -> TypeParam -> TermTypeM (VName, Subst (TypeBase dim as))
 instantiateTypeParam loc tparam = do
   i <- incCounter
   v <- newID $ mkTypeVarName (takeWhile isAlpha (baseString (typeParamName tparam))) i
   modifyConstraints $ M.insert v $ NoConstraint (Just l) loc
-  return (v, TypeVar mempty Nonunique (typeName v) [])
+  return (v, Subst $ TypeVar mempty Nonunique (typeName v) [])
   where l = case tparam of TypeParamType x _ _ -> x
                            _                   -> Lifted
 
