@@ -320,8 +320,6 @@ qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper
   where mapper = ASTMapper { mapOnExp = pure
                            , mapOnName = pure
                            , mapOnQualName = pure . qual
-                           , mapOnType = pure
-                           , mapOnCompType = pure
                            , mapOnStructType = pure
                            , mapOnPatternType = pure
                            }

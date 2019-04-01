@@ -755,12 +755,12 @@ checkExp (Literal val loc) =
 checkExp (IntLit val NoInfo loc) = do
   t <- newTypeVar loc "t"
   mustBeOneOf anyNumberType loc t
-  return $ IntLit val (Info t) loc
+  return $ IntLit val (Info $ vacuousShapeAnnotations $ fromStruct t) loc
 
 checkExp (FloatLit val NoInfo loc) = do
   t <- newTypeVar loc "t"
   mustBeOneOf anyFloatType loc t
-  return $ FloatLit val (Info t) loc
+  return $ FloatLit val (Info $ vacuousShapeAnnotations $ fromStruct t) loc
 
 checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
@@ -1347,8 +1347,6 @@ checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
                            \e' -> checkUnmatched' e' >> return e'
                        , mapOnName        = pure
                        , mapOnQualName    = pure
-                       , mapOnType        = pure
-                       , mapOnCompType    = pure
                        , mapOnStructType  = pure
                        , mapOnPatternType = pure
                        }
@@ -1914,8 +1912,6 @@ updateExpTypes e = do
       tv = ASTMapper { mapOnExp         = astMap tv
                      , mapOnName        = pure
                      , mapOnQualName    = pure
-                     , mapOnType        = pure . applySubst look
-                     , mapOnCompType    = pure . applySubst look
                      , mapOnStructType  = pure . applySubst look
                      , mapOnPatternType = pure . applySubst look
                      }
