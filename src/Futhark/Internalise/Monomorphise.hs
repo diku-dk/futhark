@@ -205,8 +205,8 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
       t' <- transformType t
       return $ Var (QualName qs fname') (Info t') loc
 
-transformExp (Ascript e tp loc) =
-  Ascript <$> transformExp e <*> pure tp <*> pure loc
+transformExp (Ascript e tp t loc) =
+  Ascript <$> transformExp e <*> pure tp <*> pure t <*> pure loc
 
 transformExp (LetPat tparams pat e1 e2 loc) = do
   (pat', rr) <- expandRecordPattern pat

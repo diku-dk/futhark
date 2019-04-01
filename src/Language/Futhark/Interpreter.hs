@@ -584,7 +584,7 @@ eval env (Range start maybe_second end (Info t) _) = do
 
 eval env (Var qv _ _) = evalTermVar env qv
 
-eval env (Ascript e td loc) = do
+eval env (Ascript e td _ loc) = do
   v <- eval env e
   let t = evalType env $ unInfo $ expandedType td
   case matchValueToType env t v of

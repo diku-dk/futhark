@@ -828,7 +828,7 @@ checkExp (Range start maybe_step end NoInfo loc) = do
   return $ Range start' maybe_step' end'
     (Info (vacuousShapeAnnotations t `setAliases` mempty)) loc
 
-checkExp (Ascript e decl loc) = do
+checkExp (Ascript e decl NoInfo loc) = do
   decl' <- checkTypeDecl decl
   e' <- checkExp e
   t <- expType e'
@@ -843,7 +843,7 @@ checkExp (Ascript e decl loc) = do
     typeError loc $ "Type " ++ quote (pretty t') ++ " is not a subtype of " ++
     quote (pretty decl_t') ++ "."
 
-  return $ Ascript e' decl' loc
+  return $ Ascript e' decl' (Info (combineTypeShapes t $ fromStruct decl_t)) loc
 
 checkExp (BinOp op NoInfo (e1,_) (e2,_) NoInfo loc) = do
   (op', ftype) <- lookupVar loc op
@@ -1390,7 +1390,7 @@ unmatched hole (p:ps)
         pExp _ = Nothing
 
         constr (VConstr0 c _ _) = Just c
-        constr (Ascript e' _ _)  = constr e'
+        constr (Ascript e' _ _ _)  = constr e'
         constr _ = Nothing
 
         isPatternLit PatternLit{} = True

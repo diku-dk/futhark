@@ -593,7 +593,7 @@ data ExpBase f vn =
 
             | Var (QualName vn) (f PatternType) SrcLoc
 
-            | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
+            | Ascript (ExpBase f vn) (TypeDeclBase f vn) (f PatternType) SrcLoc
             -- ^ Type ascription: @e : t@.
 
             | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
@@ -682,7 +682,7 @@ instance Located (ExpBase f vn) where
   locOf (BinOp _ _ _ _ _ pos)          = locOf pos
   locOf (If _ _ _ _ pos)               = locOf pos
   locOf (Var _ _ loc)                  = locOf loc
-  locOf (Ascript _ _ loc)              = locOf loc
+  locOf (Ascript _ _ _ loc)            = locOf loc
   locOf (Negate _ pos)                 = locOf pos
   locOf (Apply _ _ _ _ pos)            = locOf pos
   locOf (LetPat _ _ _ _ pos)           = locOf pos
