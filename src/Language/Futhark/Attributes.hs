@@ -43,7 +43,6 @@ module Language.Futhark.Attributes
   , arrayRank
   , nestedDims
   , returnType
-  , concreteType
   , orderZero
   , unfoldFunType
   , foldFunType
@@ -55,19 +54,15 @@ module Language.Futhark.Attributes
   , peelArray
   , stripArray
   , arrayOf
-  , arrayOfWithAliases
   , toStructural
   , toStruct
   , fromStruct
   , setAliases
   , addAliases
   , setUniqueness
-  , modifyShapeAnnotations
-  , setArrayShape
   , removeShapeAnnotations
   , vacuousShapeAnnotations
   , anyDimShapeAnnotations
-  , typeToRecordArrayElem
   , recordArrayElemToType
   , tupleRecord
   , isTupleRecord
@@ -157,12 +152,6 @@ nestedDims t =
 
         notV Nothing  = const True
         notV (Just v) = (/=NamedDim (qualName v))
-
--- | Set the dimensions of an array.  If the given type is not an
--- array, return the type unchanged.
-setArrayShape :: TypeBase dim as -> ShapeDecl dim -> TypeBase dim as
-setArrayShape (Array a u t _) ds = Array a u t ds
-setArrayShape t _ = t
 
 -- | Change the shape of a type to be just the 'Rank'.
 removeShapeAnnotations :: TypeBase (DimDecl vn) as -> TypeBase () as
@@ -571,22 +560,6 @@ returnType (Arrow _ v t1 t2) d arg =
   Arrow als v (bimap id (const mempty) t1) (t2 `setAliases` als)
   where als = aliases $ maskAliases arg d
 returnType (Enum cs) _ _ = Enum cs
-
--- | Is the type concrete, i.e, without any type variables or function arrows?
-concreteType :: TypeBase f vn -> Bool
-concreteType Prim{} = True
-concreteType TypeVar{} = False
-concreteType Arrow{} = False
-concreteType (Record ts) = all concreteType ts
-concreteType Enum{} = True
-concreteType (Array _ _ at _) = concreteArrayType at
-  where concreteArrayType ArrayPrimElem{}      = True
-        concreteArrayType ArrayPolyElem{}      = False
-        concreteArrayType (ArrayRecordElem ts) = all concreteRecordArrayElem ts
-        concreteArrayType ArrayEnumElem{}      = True
-
-        concreteRecordArrayElem (RecordArrayElem et) = concreteArrayType et
-        concreteRecordArrayElem (RecordArrayArrayElem et _) = concreteArrayType et
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
 -- a function type, does not contain a function type as a subcomponent, and may
