@@ -432,8 +432,8 @@ unscopeType bound_here t = modifyShapeAnnotations onDim $ t `addAliases` S.map u
 -- the term is a non-tuple-typed variable.
 typeOf :: ExpBase Info VName -> PatternType
 typeOf (Literal val _) = Prim $ primValueType val
-typeOf (IntLit _ (Info t) _) = vacuousShapeAnnotations $ fromStruct t
-typeOf (FloatLit _ (Info t) _) = vacuousShapeAnnotations $ fromStruct t
+typeOf (IntLit _ (Info t) _) = t
+typeOf (FloatLit _ (Info t) _) = t
 typeOf (Parens e _) = typeOf e
 typeOf (QualParens _ e _) = typeOf e
 typeOf (TupLit es _) = tupleRecord $ map typeOf es

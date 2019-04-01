@@ -113,16 +113,12 @@ class (Show vn,
        Show (f [VName]),
        Show (f PatternType),
        Show (f CompType),
-       Show (f (TypeBase () ())),
        Show (f Int),
-       Show (f [TypeBase () ()]),
        Show (f StructType),
        Show (f (Aliasing, StructType)),
-       Show (f ([TypeBase () ()], PatternType)),
        Show (f (M.Map VName VName)),
        Show (f [RecordArrayElemTypeBase ()]),
-       Show (f Uniqueness),
-       Show (f ([CompType], CompType))) => Showable f vn where
+       Show (f Uniqueness)) => Showable f vn where
 
 -- | No information functor.  Usually used for placeholder type- or
 -- aliasing information.
@@ -578,10 +574,10 @@ instance Traversable QualName where
 data ExpBase f vn =
               Literal PrimValue SrcLoc
 
-            | IntLit Integer (f (TypeBase () ())) SrcLoc
+            | IntLit Integer (f PatternType) SrcLoc
             -- ^ A polymorphic integral literal.
 
-            | FloatLit Double (f (TypeBase () ())) SrcLoc
+            | FloatLit Double (f PatternType) SrcLoc
             -- ^ A polymorphic decimal literal.
 
             | Parens (ExpBase f vn) SrcLoc

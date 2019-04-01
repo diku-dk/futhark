@@ -35,8 +35,6 @@ data ASTMapper m = ASTMapper {
     mapOnExp         :: ExpBase Info VName -> m (ExpBase Info VName)
   , mapOnName        :: VName -> m VName
   , mapOnQualName    :: QualName VName -> m (QualName VName)
-  , mapOnType        :: TypeBase () () -> m (TypeBase () ())
-  , mapOnCompType    :: CompType -> m CompType
   , mapOnStructType  :: StructType -> m StructType
   , mapOnPatternType :: PatternType -> m PatternType
   }
@@ -55,9 +53,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap _ (Literal val loc) =
     pure $ Literal val loc
   astMap tv (IntLit val t loc) =
-    IntLit val <$> traverse (mapOnType tv) t <*> pure loc
+    IntLit val <$> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (FloatLit val t loc) =
-    FloatLit val <$> traverse (mapOnType tv) t <*> pure loc
+    FloatLit val <$> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Parens e loc) =
     Parens <$> mapOnExp tv e <*> pure loc
   astMap tv (QualParens name e loc) =

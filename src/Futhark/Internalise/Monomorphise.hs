@@ -443,8 +443,6 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
         mapper substs = ASTMapper { mapOnExp         = astMap $ mapper substs
                                   , mapOnName        = pure
                                   , mapOnQualName    = pure
-                                  , mapOnType        = pure . applySubst substs
-                                  , mapOnCompType    = pure . applySubst substs
                                   , mapOnStructType  = pure . applySubst substs
                                   , mapOnPatternType = pure . applySubst substs
                                   }
@@ -526,11 +524,6 @@ removeTypeVariables entry valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _)
           mapOnExp         = astMap mapper
         , mapOnName        = pure
         , mapOnQualName    = pure
-        , mapOnType        = pure . removeShapeAnnotations .
-                             substituteTypes subs . vacuousShapeAnnotations
-        , mapOnCompType    = pure . removeShapeAnnotations .
-                             substituteTypes subs .
-                             vacuousShapeAnnotations
         , mapOnStructType  = pure . substituteTypes subs
         , mapOnPatternType = pure . substituteTypes subs
         }

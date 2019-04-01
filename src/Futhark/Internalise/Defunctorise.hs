@@ -196,8 +196,6 @@ transformNames x = do
                         return $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope
                     , mapOnQualName = \v ->
                         return $ fst $ lookupSubstInScope v scope
-                    , mapOnType = astMap (substituter scope)
-                    , mapOnCompType = astMap (substituter scope)
                     , mapOnStructType = astMap (substituter scope)
                     , mapOnPatternType = astMap (substituter scope)
                     }
