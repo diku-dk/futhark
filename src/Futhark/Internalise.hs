@@ -390,7 +390,7 @@ internaliseExp desc (E.Range start maybe_second end _ _) = do
                (eBody [eDivRoundingUp Int32 (eSubExp distance) (eSubExp pos_step)])
   pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
 
-internaliseExp desc (E.Ascript e (TypeDecl dt (Info et)) loc) = do
+internaliseExp desc (E.Ascript e (TypeDecl dt (Info et)) _ loc) = do
   es <- internaliseExp desc e
   (ts, cm) <- internaliseReturnType et
   mapM_ (uncurry (internaliseDimConstant loc)) cm

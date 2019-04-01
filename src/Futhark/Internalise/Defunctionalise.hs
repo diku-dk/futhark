@@ -173,9 +173,9 @@ defuncExp e@(Var qn _ loc) = do
     _ -> let tp = typeFromSV sv
          in return (Var qn (Info tp) loc, sv)
 
-defuncExp (Ascript e0 tydecl loc)
+defuncExp (Ascript e0 tydecl t loc)
   | orderZero (typeOf e0) = do (e0', sv) <- defuncExp e0
-                               return (Ascript e0' tydecl loc, sv)
+                               return (Ascript e0' tydecl t loc, sv)
   | otherwise = defuncExp e0
 
 defuncExp (LetPat tparams pat e1 e2 loc) = do
@@ -741,7 +741,7 @@ freeVars expr = case expr of
   Range e me incl _ _  -> freeVars e <> foldMap freeVars me <>
                           foldMap freeVars incl
   Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
-  Ascript e t _        -> freeVars e <> names (typeDimNames $ unInfo $ expandedType t)
+  Ascript e t _ _      -> freeVars e <> names (typeDimNames $ unInfo $ expandedType t)
   LetPat _ pat e1 e2 _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
                                           `without` patternVars pat)
 
@@ -796,40 +796,6 @@ freeDimIndex (DimSlice me1 me2 me3) =
 -- | Extract all the variable names bound in a pattern.
 patternVars :: Pattern -> NameSet
 patternVars = mconcat . map ident . S.toList . patIdentSet
-
--- | Combine the shape information of types as much as possible. The first
--- argument is the orignal type and the second is the type of the transformed
--- expression. This is necessary since the original type may contain additional
--- information (e.g., shape restrictions) from the user given annotation.
-combineTypeShapes :: (Monoid as, ArrayDim dim) =>
-                     TypeBase dim as -> TypeBase dim as -> TypeBase dim as
-combineTypeShapes (Record ts1) (Record ts2)
-  | M.keys ts1 == M.keys ts2 =
-      Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
-combineTypeShapes (Array als1 u1 et1 shape1) (Array als2 _u2 et2 shape2)
-  | Just new_shape <- unifyShapes shape1 shape2 =
-      Array (als1<>als2) u1 (combineElemTypeInfo et1 et2) new_shape
-combineTypeShapes _ new_tp = new_tp
-
-combineElemTypeInfo :: ArrayDim dim =>
-                       ArrayElemTypeBase dim
-                    -> ArrayElemTypeBase dim -> ArrayElemTypeBase dim
-combineElemTypeInfo (ArrayRecordElem et1) (ArrayRecordElem et2) =
-  ArrayRecordElem $ M.map (uncurry combineRecordArrayTypeInfo)
-                          (M.intersectionWith (,) et1 et2)
-combineElemTypeInfo _ new_tp = new_tp
-
-combineRecordArrayTypeInfo :: ArrayDim dim =>
-                              RecordArrayElemTypeBase dim
-                           -> RecordArrayElemTypeBase dim
-                           -> RecordArrayElemTypeBase dim
-combineRecordArrayTypeInfo (RecordArrayElem et1) (RecordArrayElem et2) =
-  RecordArrayElem $ combineElemTypeInfo et1 et2
-combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1)
-                           (RecordArrayArrayElem et2 shape2)
-  | Just new_shape <- unifyShapes shape1 shape2 =
-      RecordArrayArrayElem (combineElemTypeInfo et1 et2) new_shape
-combineRecordArrayTypeInfo _ new_tp = new_tp
 
 -- | Defunctionalize a top-level value binding. Returns the
 -- transformed result as well as an environment that binds the name of

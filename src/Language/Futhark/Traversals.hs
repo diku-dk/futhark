@@ -69,8 +69,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Range start next end t loc) =
     Range <$> mapOnExp tv start <*> traverse (mapOnExp tv) next <*>
     traverse (mapOnExp tv) end <*> traverse (mapOnPatternType tv) t <*> pure loc
-  astMap tv (Ascript e tdecl loc) =
-    Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
+  astMap tv (Ascript e tdecl t loc) =
+    Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*>
+    traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (BinOp fname t (x,xt) (y,yt) (Info rt) loc) =
     BinOp <$> mapOnQualName tv fname <*> traverse (mapOnPatternType tv) t <*>
     ((,) <$> mapOnExp tv x <*> traverse (mapOnStructType tv) xt) <*>

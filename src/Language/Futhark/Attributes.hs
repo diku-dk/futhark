@@ -75,6 +75,7 @@ module Language.Futhark.Attributes
   , tupleFieldNames
   , sortFields
   , isTypeParam
+  , combineTypeShapes
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -369,6 +370,39 @@ isTypeParam :: TypeParamBase vn -> Bool
 isTypeParam TypeParamType{}       = True
 isTypeParam TypeParamDim{}        = False
 
+-- | Combine the shape information of types as much as possible. The first
+-- argument is the orignal type and the second is the type of the transformed
+-- expression. This is necessary since the original type may contain additional
+-- information (e.g., shape restrictions) from the user given annotation.
+combineTypeShapes :: (Monoid as, ArrayDim dim) =>
+                     TypeBase dim as -> TypeBase dim as -> TypeBase dim as
+combineTypeShapes (Record ts1) (Record ts2)
+  | M.keys ts1 == M.keys ts2 =
+      Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
+combineTypeShapes (Array als1 u1 et1 shape1) (Array als2 _u2 et2 shape2)
+  | Just new_shape <- unifyShapes shape1 shape2 =
+      Array (als1<>als2) u1 (combineElemTypeInfo et1 et2) new_shape
+combineTypeShapes _ new_tp = new_tp
+
+combineElemTypeInfo :: ArrayDim dim =>
+                       ArrayElemTypeBase dim
+                    -> ArrayElemTypeBase dim -> ArrayElemTypeBase dim
+combineElemTypeInfo (ArrayRecordElem et1) (ArrayRecordElem et2) =
+  ArrayRecordElem $ M.map (uncurry combineRecordArrayTypeInfo)
+                          (M.intersectionWith (,) et1 et2)
+combineElemTypeInfo _ new_tp = new_tp
+
+combineRecordArrayTypeInfo :: ArrayDim dim =>
+                              RecordArrayElemTypeBase dim
+                           -> RecordArrayElemTypeBase dim
+                           -> RecordArrayElemTypeBase dim
+combineRecordArrayTypeInfo (RecordArrayElem et1) (RecordArrayElem et2) =
+  RecordArrayElem $ combineElemTypeInfo et1 et2
+combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1)
+                           (RecordArrayArrayElem et2 shape2)
+  | Just new_shape <- unifyShapes shape1 shape2 =
+      RecordArrayArrayElem (combineElemTypeInfo et1 et2) new_shape
+combineRecordArrayTypeInfo _ new_tp = new_tp
 
 -- | Set the uniqueness attribute of a type.  If the type is a tuple,
 -- the uniqueness of its components will be modified.
@@ -450,7 +484,7 @@ typeOf (BinOp _ _ _ _ (Info t) _) = t
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
-typeOf (Ascript e _ _) = typeOf e
+typeOf (Ascript _ _ (Info t) _) = t
 typeOf (Apply _ _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ pat _ body _) =
