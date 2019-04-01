@@ -42,7 +42,6 @@ module Language.Futhark.Attributes
   , diet
   , arrayRank
   , nestedDims
-  , returnType
   , orderZero
   , unfoldFunType
   , foldFunType
@@ -196,19 +195,6 @@ diet (Arrow _ _ t1 t2)       = FuncDiet (diet t1) (diet t2)
 diet (Array _ Unique _ _)    = Consume
 diet (Array _ Nonunique _ _) = Observe
 diet (Enum _)                = Observe
-
--- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
--- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
-maskAliases :: Monoid as =>
-               TypeBase shape as
-            -> Diet
-            -> TypeBase shape as
-maskAliases t Consume = t `setAliases` mempty
-maskAliases t Observe = t
-maskAliases (Record ets) (RecordDiet ds) =
-  Record $ M.intersectionWith maskAliases ets ds
-maskAliases t FuncDiet{} = t
-maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
@@ -535,31 +521,6 @@ typeVars t =
   where typeVarFree = S.singleton . typeLeaf
         typeArgFree (TypeArgType ta _) = typeVars ta
         typeArgFree TypeArgDim{} = mempty
-
--- | @returnType ret_type arg_diet arg_type@ gives result of applying
--- an argument the given types to a function with the given return
--- type, consuming the argument with the given diet.
-returnType :: TypeBase dim Aliasing
-           -> Diet
-           -> PatternType
-           -> TypeBase dim Aliasing
-returnType (Array _ Unique et shape) _ _ =
-  Array mempty Unique et shape
-returnType (Array als Nonunique et shape) d arg =
-  Array (als<>arg_als) Unique et shape -- Intentional!
-  where arg_als = aliases $ maskAliases arg d
-returnType (Record fs) d arg =
-  Record $ fmap (\et -> returnType et d arg) fs
-returnType (Prim t) _ _ = Prim t
-returnType (TypeVar _ Unique t targs) _ _ =
-  TypeVar mempty Unique t targs
-returnType (TypeVar als Nonunique t targs) d arg =
-  TypeVar (als<>arg_als) Unique t targs -- Intentional!
-  where arg_als = aliases $ maskAliases arg d
-returnType (Arrow _ v t1 t2) d arg =
-  Arrow als v (bimap id (const mempty) t1) (t2 `setAliases` als)
-  where als = aliases $ maskAliases arg d
-returnType (Enum cs) _ _ = Enum cs
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
 -- a function type, does not contain a function type as a subcomponent, and may
