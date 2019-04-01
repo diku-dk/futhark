@@ -242,14 +242,6 @@ traverseTypeArg :: Applicative f =>
 traverseTypeArg _ g (TypeArgDim d loc) = TypeArgDim <$> g d <*> pure loc
 traverseTypeArg f g (TypeArgType t loc) = TypeArgType <$> traverseType f g pure t <*> pure loc
 
-instance ASTMappable (TypeBase () ()) where
-  astMap tv = traverseType f pure pure
-    where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
-
-instance ASTMappable CompType where
-  astMap tv = traverseType f pure (astMap tv)
-    where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
-
 instance ASTMappable StructType where
   astMap tv = traverseType f (astMap tv) pure
     where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
