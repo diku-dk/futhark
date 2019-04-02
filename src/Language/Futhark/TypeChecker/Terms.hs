@@ -1551,7 +1551,7 @@ checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e
   let t = toStruct $ typeOf e'
-  tparams <- letGeneralise [] [t] mempty
+  tparams <- letGeneralise [] t mempty
   fixOverloadedTypes
   e'' <- updateExpTypes e'
   return (tparams, e'')
@@ -1653,7 +1653,8 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         | otherwise ->
             return (Nothing, inferReturnUniqueness params'' body_t)
 
-    tparams'' <- letGeneralise tparams' (rettype : map patternStructType params'') then_substs
+    let fun_t = foldFunType (map patternStructType params'') rettype
+    tparams'' <- letGeneralise tparams' fun_t then_substs
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
@@ -1762,10 +1763,10 @@ nothingMustBeUnique loc = check
         bad = typeError loc "A top-level constant cannot have a unique type."
 
 letGeneralise :: [TypeParam]
-              -> [StructType]
+              -> StructType
               -> Constraints
               -> TermTypeM [TypeParam]
-letGeneralise tparams ts then_substs = do
+letGeneralise tparams t then_substs = do
   now_substs <- getConstraints
   -- Candidates for let-generalisation are those type variables that
   --
@@ -1786,7 +1787,7 @@ letGeneralise tparams ts then_substs = do
                             overloadedTypeVars now_substs
 
   let new_substs = M.filterWithKey (\k _ -> not (k `S.member` keep_type_variables)) now_substs
-  tparams' <- closeOverTypes new_substs tparams ts
+  tparams' <- closeOverTypes new_substs tparams t
 
   -- We keep those type variables that were not closed over by
   -- let-generalisation.
@@ -1823,14 +1824,14 @@ checkFunBody body maybe_rettype _loc = do
 -- the constraints, and produce type parameters that close over them.
 -- Produce an error if the given list of type parameters is non-empty,
 -- yet does not cover all type variables in the type.
-closeOverTypes :: Constraints -> [TypeParam] -> [StructType] -> TermTypeM [TypeParam]
-closeOverTypes substs tparams ts =
+closeOverTypes :: Constraints -> [TypeParam] -> StructType -> TermTypeM [TypeParam]
+closeOverTypes substs tparams t =
   case tparams of
     [] -> fmap catMaybes $ mapM closeOver $ M.toList substs'
     _ -> do mapM_ checkClosedOver $ M.toList substs'
             return tparams
   where substs' = M.filterWithKey (\k _ -> k `S.member` visible) substs
-        visible = mconcat (map typeVars ts)
+        visible = typeVars t
 
         checkClosedOver (k, v)
           | not (canBeClosedOver v) ||
