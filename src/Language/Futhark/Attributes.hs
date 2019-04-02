@@ -695,7 +695,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                          [arr_a, arr_a] uarr_a),
               ("rotate", IntrinsicPolyFun [tp_a]
                          [Prim $ Signed Int32, arr_a] arr_a),
-              ("transpose", IntrinsicPolyFun [tp_a] [arr_a] arr_a),
+              ("transpose", IntrinsicPolyFun [tp_a] [arr_2d_a] arr_2d_a),
 
               ("cmp_threshold", IntrinsicPolyFun []
                                 [Prim $ Signed Int32,
@@ -755,6 +755,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         tv_a' = typeName tv_a
         t_a = TypeVar () Nonunique tv_a' []
         arr_a = Array () Nonunique (ArrayPolyElem tv_a' []) (rank 1)
+        arr_2d_a = Array () Nonunique (ArrayPolyElem tv_a' []) (rank 2)
         uarr_a = Array () Unique (ArrayPolyElem tv_a' []) (rank 1)
         tp_a = TypeParamType Unlifted tv_a noLoc
 
