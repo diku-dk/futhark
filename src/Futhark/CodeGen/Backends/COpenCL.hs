@@ -104,6 +104,11 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|futhark_context_config_load_binary_from(cfg, optarg);|]
                       }
+             , Option { optionLongName = "build-option"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "OPT"
+                      , optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
+                      }
              , Option { optionLongName = "print-sizes"
                       , optionShortName = Nothing
                       , optionArgument = NoArgument

@@ -208,7 +208,7 @@ class MonadError TypeError m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
   lookupImport :: SrcLoc -> FilePath -> m (FilePath, Env)
-  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, CompType)
+  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatternType)
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
@@ -278,7 +278,7 @@ instance MonadTypeChecker TypeM where
             case getType t of
               Left{} -> throwError $ TypeError loc $
                         "Attempt to use function " ++ baseString name ++ " as value."
-              Right t' -> return (qn', removeShapeAnnotations $ fromStruct $
+              Right t' -> return (qn', fromStruct $
                                        qualifyTypeVars outer_env mempty qs t')
 
 -- | Extract from a type either a function type comprising a list of
@@ -320,8 +320,6 @@ qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper
   where mapper = ASTMapper { mapOnExp = pure
                            , mapOnName = pure
                            , mapOnQualName = pure . qual
-                           , mapOnType = pure
-                           , mapOnCompType = pure
                            , mapOnStructType = pure
                            , mapOnPatternType = pure
                            }

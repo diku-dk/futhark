@@ -56,7 +56,7 @@ nonlinearInMemory name m =
     Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just $ rearrangeInverse perm
     Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
-    Just (Let pat _ (Op (Kernel _ _ ts _))) ->
+    Just (Let pat _ (Op (HostOp (Kernel _ _ ts _)))) ->
       nonlinear =<< find ((==name) . patElemName . fst)
       (zip (patternElements pat) ts)
     _ -> Nothing
@@ -68,7 +68,7 @@ nonlinearInMemory name m =
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
-transformStm expmap (Let pat aux ke@(Op (Kernel desc space ts kbody))) = do
+transformStm expmap (Let pat aux ke@(Op (HostOp (Kernel desc space ts kbody)))) = do
   -- Go spelunking for accesses to arrays that are defined outside the
   -- kernel body and where the indices are kernel thread indices.
   scope <- askScope
@@ -83,7 +83,7 @@ transformStm expmap (Let pat aux ke@(Op (Kernel desc space ts kbody))) = do
                          kbody)
              mempty
 
-  let bnd' = Let pat aux $ Op $ Kernel desc space ts kbody''
+  let bnd' = Let pat aux $ Op $ HostOp $ Kernel desc space ts kbody''
   addStm bnd'
   return $ M.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
   where num_threads = spaceNumThreads space

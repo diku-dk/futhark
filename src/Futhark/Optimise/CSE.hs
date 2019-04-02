@@ -177,6 +177,10 @@ subCSE m = do
   CSEState _ cse_arrays <- ask
   return $ runReader m $ newCSEState cse_arrays
 
+instance CSEInOp op => CSEInOp (Kernel.HostOp lore op) where
+  cseInOp (Kernel.HostOp op) = Kernel.HostOp <$> cseInOp op
+  cseInOp x = return x
+
 instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) => CSEInOp (Kernel.Kernel lore) where
   cseInOp = subCSE .
             Kernel.mapKernelM

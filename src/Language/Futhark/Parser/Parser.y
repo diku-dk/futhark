@@ -512,7 +512,7 @@ QualName :: { (QualName Name, SrcLoc) }
 -- permit inside array indices operations (there is an ambiguity with
 -- array slices).
 Exp :: { UncheckedExp }
-     : Exp ':' TypeExpDecl { Ascript $1 $3 (srcspan $1 $>) }
+     : Exp ':' TypeExpDecl { Ascript $1 $3 NoInfo (srcspan $1 $>) }
      | Exp2 %prec ':'      { $1 }
 
 Exp2 :: { UncheckedExp }

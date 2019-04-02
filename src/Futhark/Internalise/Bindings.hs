@@ -101,8 +101,7 @@ processFlatPattern x y = processFlatPattern' [] x y
       -- XXX: we gotta be screwing up somehow by ignoring the extra
       -- return values.  If not, why not?
       (tss, _) <- internaliseParamTypes nothing_bound mempty
-                  [flip E.setAliases () $ E.vacuousShapeAnnotations $
-                   E.unInfo $ E.identType bindee]
+                  [flip E.setAliases () $ E.unInfo $ E.identType bindee]
       case concat tss of
         [t] -> return [(name, t)]
         tss' -> forM tss' $ \t -> do
@@ -131,8 +130,7 @@ flattenPattern = flattenPattern'
           flattenPattern' $ E.Id name t loc
         flattenPattern' (E.Id v (Info t) loc) = do
           new_name <- newVName $ baseString v
-          return [((E.Ident v (Info (E.removeShapeAnnotations t)) loc,
-                    new_name),
+          return [((E.Ident v (Info t) loc, new_name),
                    t `E.setAliases` ())]
         flattenPattern' (E.TuplePattern pats _) =
           concat <$> mapM flattenPattern' pats

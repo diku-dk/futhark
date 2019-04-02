@@ -183,7 +183,7 @@ overloadedTypeVars = mconcat . map f . M.elems
 -- | Get the type of an expression, with all type variables
 -- substituted.  Never call 'typeOf' directly (except in a few
 -- carefully inspected locations)!
-expType :: Exp -> TermTypeM CompType
+expType :: Exp -> TermTypeM PatternType
 expType = normaliseType . typeOf
 
 -- | The state is a set of constraints and a counter for generating
@@ -304,7 +304,7 @@ instance MonadTypeChecker TermTypeM where
         | otherwise -> do
             (tnames, t') <- instantiateTypeScheme loc tparams t
             let qual = qualifyTypeVars outer_env tnames qs
-            qual . removeShapeAnnotations <$> normaliseType t'
+            qual . anyDimShapeAnnotations <$> normaliseType t'
 
       Just OpaqueF -> do
         argtype <- newTypeVar loc "t"
@@ -320,7 +320,8 @@ instance MonadTypeChecker TermTypeM where
         argtype <- newTypeVar loc "t"
         mustBeOneOf ts loc argtype
         let (pts', rt') = instOverloaded argtype pts rt
-        return $ fromStruct $ foldr (Arrow mempty Nothing) rt' pts'
+        return $ fromStruct $ vacuousShapeAnnotations $
+         foldr (Arrow mempty Nothing) rt' pts'
 
     observe $ Ident name (Info t) loc
     return (qn', t)
@@ -379,20 +380,19 @@ instantiateTypeScheme :: SrcLoc -> [TypeParam] -> PatternType
 instantiateTypeScheme loc tparams t = do
   let tparams' = filter isTypeParam tparams
       tnames = map typeParamName tparams'
-  (fresh_tnames, inst_list) <- unzip <$> mapM (instantiateTypeParam loc) tparams'
-  let substs = M.fromList $ zip tnames $
-               map (Subst . vacuousShapeAnnotations) inst_list
-      t' = substTypesAny (`M.lookup` substs) t
+  (fresh_tnames, substs) <- unzip <$> mapM (instantiateTypeParam loc) tparams'
+  let substs' = M.fromList $ zip tnames substs
+      t' = substTypesAny (`M.lookup` substs') t
   return (fresh_tnames, t')
 
 -- | Create a new type name and insert it (unconstrained) in the
 -- substitution map.
-instantiateTypeParam :: Monoid as => SrcLoc -> TypeParam -> TermTypeM (VName, TypeBase dim as)
+instantiateTypeParam :: Monoid as => SrcLoc -> TypeParam -> TermTypeM (VName, Subst (TypeBase dim as))
 instantiateTypeParam loc tparam = do
   i <- incCounter
   v <- newID $ mkTypeVarName (takeWhile isAlpha (baseString (typeParamName tparam))) i
   modifyConstraints $ M.insert v $ NoConstraint (Just l) loc
-  return (v, TypeVar mempty Nonunique (typeName v) [])
+  return (v, Subst $ TypeVar mempty Nonunique (typeName v) [])
   where l = case tparam of TypeParamType x _ _ -> x
                            _                   -> Lifted
 
@@ -438,15 +438,15 @@ uniqueReturnAliased fname loc =
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a 'TypeError' if they fail to match, and otherwise returns
 -- one of them.
-unifyExpTypes :: Exp -> Exp -> TermTypeM CompType
+unifyExpTypes :: Exp -> Exp -> TermTypeM PatternType
 unifyExpTypes e1 e2 = do
   e1_t <- expType e1
   e2_t <- expType e2
-  unify (srclocOf e2) (toStruct e1_t) (toStruct e2_t)
+  unify (srclocOf e2) (toStructural e1_t) (toStructural e2_t)
   return $ unifyTypeAliases e1_t e2_t
 
 -- | Assumes that the two types have already been unified.
-unifyTypeAliases :: CompType -> CompType -> CompType
+unifyTypeAliases :: PatternType -> PatternType -> PatternType
 unifyTypeAliases t1 t2 =
   case (t1, t2) of
     (Array als1 u1 et1 shape1, Array als2 u2 et2 _) ->
@@ -558,12 +558,12 @@ checkPattern' (PatternLit e NoInfo loc) (Ascribed t) = do
   e' <- checkExp e
   t' <- expType e'
   unify loc (toStructural t') (toStructural t)
-  return $ PatternLit e' (Info (vacuousShapeAnnotations t')) loc
+  return $ PatternLit e' (Info t') loc
 
 checkPattern' (PatternLit e NoInfo loc) NoneInferred = do
   e' <- checkExp e
   t' <- expType e'
-  return $ PatternLit e' (Info (vacuousShapeAnnotations t')) loc
+  return $ PatternLit e' (Info t') loc
 
 bindPatternNames :: PatternBase NoInfo Name -> TermTypeM a -> TermTypeM a
 bindPatternNames = bindSpaced . map asTerm . S.toList . patIdentSet
@@ -592,7 +592,7 @@ binding bnds = check . local (`bindVars` bnds)
                 | otherwise = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
               update b = b
 
-              tp' = vacuousShapeAnnotations tp `addAliases` S.insert (AliasBound name)
+              tp' = tp `addAliases` S.insert (AliasBound name)
           in scope { scopeVtable = M.insert name (BoundV Local [] tp') $
                                    adjustSeveral update inedges $
                                    scopeVtable scope
@@ -649,7 +649,7 @@ typeParamIdent (TypeParamDim v loc) =
   Just $ Ident v (Info (Prim (Signed Int32))) loc
 typeParamIdent _ = Nothing
 
-bindingIdent :: IdentBase NoInfo Name -> CompType -> (Ident -> TermTypeM a)
+bindingIdent :: IdentBase NoInfo Name -> PatternType -> (Ident -> TermTypeM a)
              -> TermTypeM a
 bindingIdent (Ident v NoInfo vloc) t m =
   bindSpaced [(Term, v)] $ do
@@ -658,13 +658,13 @@ bindingIdent (Ident v NoInfo vloc) t m =
     binding [ident] $ m ident
 
 bindingPatternGroup :: [UncheckedTypeParam]
-                    -> [(UncheckedPattern, InferredType)]
+                    -> [UncheckedPattern]
                     -> ([TypeParam] -> [Pattern] -> TermTypeM a) -> TermTypeM a
 bindingPatternGroup tps orig_ps m = do
-  checkForDuplicateNames $ map fst orig_ps
+  checkForDuplicateNames orig_ps
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
-    let descend ps' ((p,t):ps) =
-          checkPattern p t $ \p' ->
+    let descend ps' (p:ps) =
+          checkPattern p NoneInferred $ \p' ->
             binding (S.toList $ patIdentSet p') $ descend (p':ps') ps
         descend ps' [] = do
           -- Perform an observation of every type parameter.  This
@@ -727,12 +727,12 @@ patternDims _ = []
 -- | @require ts e@ causes a 'TypeError' if @expType e@ is not one of
 -- the types in @ts@.  Otherwise, simply returns @e@.
 require :: [PrimType] -> Exp -> TermTypeM Exp
-require ts e = do mustBeOneOf ts (srclocOf e) . toStruct =<< expType e
+require ts e = do mustBeOneOf ts (srclocOf e) . toStructural =<< expType e
                   return e
 
 unifies :: TypeBase () () -> Exp -> TermTypeM Exp
 unifies t e = do
-  unify (srclocOf e) t =<< toStruct <$> expType e
+  unify (srclocOf e) t =<< toStructural <$> expType e
   return e
 
 -- The closure of a lambda or local function are those variables that
@@ -755,12 +755,12 @@ checkExp (Literal val loc) =
 checkExp (IntLit val NoInfo loc) = do
   t <- newTypeVar loc "t"
   mustBeOneOf anyNumberType loc t
-  return $ IntLit val (Info t) loc
+  return $ IntLit val (Info $ vacuousShapeAnnotations $ fromStruct t) loc
 
 checkExp (FloatLit val NoInfo loc) = do
   t <- newTypeVar loc "t"
   mustBeOneOf anyFloatType loc t
-  return $ FloatLit val (Info t) loc
+  return $ FloatLit val (Info $ vacuousShapeAnnotations $ fromStruct t) loc
 
 checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
@@ -795,14 +795,14 @@ checkExp (ArrayLit all_es _ loc) =
   -- multidimensional array literals.
   case all_es of
     [] -> do et <- newTypeVar loc "t"
-             t <- arrayOfM loc et (rank 1) Unique
+             t <- arrayOfM loc et (ShapeDecl [AnyDim]) Unique
              return $ ArrayLit [] (Info t) loc
     e:es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies (toStructural et) <=< checkExp) es
       et' <- normaliseType et
-      t <- arrayOfM loc et' (rank 1) Unique
+      t <- arrayOfM loc et' (ShapeDecl [AnyDim]) Unique
       return $ ArrayLit (e':es') (Info t) loc
 
 checkExp (Range start maybe_step end NoInfo loc) = do
@@ -825,24 +825,25 @@ checkExp (Range start maybe_step end NoInfo loc) = do
 
   t <- arrayOfM loc start_t (rank 1) Unique
 
-  return $ Range start' maybe_step' end' (Info (t `setAliases` mempty)) loc
+  return $ Range start' maybe_step' end'
+    (Info (vacuousShapeAnnotations t `setAliases` mempty)) loc
 
-checkExp (Ascript e decl loc) = do
+checkExp (Ascript e decl NoInfo loc) = do
   decl' <- checkTypeDecl decl
   e' <- checkExp e
-  t <- toStruct <$> expType e'
-  let decl_t = removeShapeAnnotations $ unInfo $ expandedType decl'
-  unify loc decl_t t
+  t <- expType e'
+  let decl_t = unInfo $ expandedType decl'
+  unify loc (toStructural decl_t) (toStructural t)
 
   -- We also have to make sure that uniqueness matches.  This is done
   -- explicitly, because uniqueness is ignored by unification.
   t' <- normaliseType t
   decl_t' <- normaliseType decl_t
-  unless (t' `subtypeOf` decl_t') $
-    typeError loc $ "Type \"" ++ pretty t' ++ " is not a subtype of \"" ++
-    pretty decl_t' ++ "\"."
+  unless (t' `subtypeOf` anyDimShapeAnnotations decl_t') $
+    typeError loc $ "Type " ++ quote (pretty t') ++ " is not a subtype of " ++
+    quote (pretty decl_t') ++ "."
 
-  return $ Ascript e' decl' loc
+  return $ Ascript e' decl' (Info (combineTypeShapes t $ fromStruct decl_t)) loc
 
 checkExp (BinOp op NoInfo (e1,_) (e2,_) NoInfo loc) = do
   (op', ftype) <- lookupVar loc op
@@ -850,9 +851,9 @@ checkExp (BinOp op NoInfo (e1,_) (e2,_) NoInfo loc) = do
   (e2', e2_arg) <- checkArg e2
 
   (p1_t, rt) <- checkApply loc ftype e1_arg
-  (p2_t, rt') <- checkApply loc (removeShapeAnnotations rt) e2_arg
+  (p2_t, rt') <- checkApply loc rt e2_arg
 
-  return $ BinOp op' (Info (vacuousShapeAnnotations ftype))
+  return $ BinOp op' (Info ftype)
     (e1', Info $ toStruct p1_t) (e2', Info $ toStruct p2_t)
     (Info rt') loc
 
@@ -871,7 +872,7 @@ checkExp (If e1 e2 e3 _ loc) =
   return $ If e1' e2' e3' (Info t') loc
   where checkCond = do
           e1' <- checkExp e1
-          unify (srclocOf e1') (Prim Bool) . toStruct =<< expType e1'
+          unify (srclocOf e1') (Prim Bool) . toStructural =<< expType e1'
           return e1'
 
 checkExp (Parens e loc) =
@@ -899,7 +900,7 @@ checkExp (Var qn NoInfo loc) = do
 
   (qn', t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
 
-  foldM checkField (Var qn' (Info $ vacuousShapeAnnotations t) loc) fields
+  foldM checkField (Var qn' (Info t) loc) fields
 
   where findRootVar qs name =
           (whenFound <$> lookupVar loc (QualName qs name)) `catchError` notFound qs name
@@ -940,7 +941,7 @@ checkExp (LetPat tparams pat e body loc) = do
         let msg = "of value computed with consumption at " ++ locStr (location c)
         in zeroOrderType loc msg t
       _ -> return ()
-    bindingPattern tparams pat (Ascribed $ vacuousShapeAnnotations t) $ \tparams' pat' -> do
+    bindingPattern tparams pat (Ascribed $ anyDimShapeAnnotations t) $ \tparams' pat' -> do
       body' <- checkExp body
       return $ LetPat tparams' pat' e' body' loc
 
@@ -963,9 +964,7 @@ checkExp (LetWith dest src idxes ve body loc) = do
   (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
   let elemt = stripArray (length $ filter isFix idxes) t
   sequentially (checkIdent src) $ \src' _ -> do
-    let src'' = Var (qualName $ identName src')
-                    (vacuousShapeAnnotations <$> identType src')
-                    (srclocOf src)
+    let src'' = Var (qualName $ identName src') (identType src') (srclocOf src)
     void $ unifies t src''
 
     unless (unique $ unInfo $ identType src') $
@@ -1019,15 +1018,16 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   ve' <- checkExp ve
   a <- expType src'
   r <- foldM (flip $ mustHaveField loc) a fields
-  unify loc (toStruct r) . toStruct =<< expType ve'
-  return $ RecordUpdate src' fields ve'
-    (Info $ vacuousShapeAnnotations $ fromStruct a) loc
+  unify loc (toStructural r) . toStructural =<< expType ve'
+  return $ RecordUpdate src' fields ve' (Info $ fromStruct a) loc
 
 checkExp (Index e idxes NoInfo loc) = do
   (t, _) <- newArrayType (srclocOf e) "e" $ length idxes
   e' <- unifies t =<< checkExp e
   idxes' <- mapM checkDimIndex idxes
-  t' <- stripArray (length $ filter isFix idxes) <$> normaliseType (typeOf e')
+  t' <- anyDimShapeAnnotations .
+        stripArray (length $ filter isFix idxes) <$>
+        normaliseType (typeOf e')
   return $ Index e' idxes' (Info t') loc
   where isFix DimFix{} = True
         isFix _        = False
@@ -1040,17 +1040,9 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   e2' <- checkExp e2
   return $ Assert e1' e2' (Info (pretty e1)) loc
 
-checkExp Map{} = error "Map nodes should not appear in source program"
-checkExp Reduce{} = error "Reduce nodes should not appear in source program"
-checkExp GenReduce{} = error "GenReduce nodes should not appear in source program"
-checkExp Scan{} = error "Scan nodes should not appear in source program"
-checkExp Filter{} = error "Filter nodes should not appear in source program"
-checkExp Partition{} = error "Partition nodes should not appear in source program"
-checkExp Stream{} = error "Stream nodes should not appear in source program"
-
 checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
   removeSeminullOccurences $
-  bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
+  bindingPatternGroup tparams params $ \tparams' params' -> do
     maybe_retdecl' <- traverse checkTypeDecl maybe_retdecl
     (body', closure) <- tapOccurences $ noUnique $
                         checkFunBody body (unInfo . expandedType <$> maybe_retdecl') loc
@@ -1067,7 +1059,7 @@ checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
 
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
-  return $ OpSection op' (Info $ vacuousShapeAnnotations ftype) loc
+  return $ OpSection op' (Info ftype) loc
 
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
@@ -1075,7 +1067,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
   (t1, rt) <- checkApply loc ftype e_arg
   case rt of
     Arrow _ _ t2 rettype ->
-      return $ OpSectionLeft op' (Info (vacuousShapeAnnotations ftype)) e'
+      return $ OpSectionLeft op' (Info ftype) e'
       (Info $ toStruct t1, Info $ toStruct t2) (Info rettype) loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
@@ -1087,7 +1079,7 @@ checkExp (OpSectionRight op _ e _ _ loc) = do
     Arrow as1 m1 t1 (Arrow as2 m2 t2 ret) -> do
       (t2', Arrow _ _ t1' rettype) <-
         checkApply loc (Arrow as2 m2 t2 (Arrow as1 m1 t1 ret)) e_arg
-      return $ OpSectionRight op' (Info (vacuousShapeAnnotations ftype)) e'
+      return $ OpSectionRight op' (Info ftype) e'
         (Info $ toStruct t1', Info $ toStruct t2') (Info rettype) loc
     _ -> typeError loc $
          "Operator section with invalid operator of type " ++ pretty ftype
@@ -1115,7 +1107,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
 
   merge_t <- do
     merge_t <- expType mergeexp'
-    return $ Ascribed $ vacuousShapeAnnotations $ merge_t `setAliases` mempty
+    return $ Ascribed $ anyDimShapeAnnotations $ merge_t `setAliases` mempty
 
   -- First we do a basic check of the loop body to figure out which of
   -- the merge parameters are being consumed.  For this, we first need
@@ -1144,7 +1136,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         t <- expType e'
         case t of
           _ | Just t' <- peelArray 1 t ->
-                bindingPattern [] xpat (Ascribed $ vacuousShapeAnnotations t') $ \_ xpat' ->
+                bindingPattern [] xpat (Ascribed t') $ \_ xpat' ->
                 noUnique $ bindingPattern tparams mergepat merge_t $
                 \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
                   loopbody' <- checkExp loopbody
@@ -1211,7 +1203,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
           pat' = uniquePat pat
 
       -- Now check that the loop returned the right type.
-      unify body_loc (toStruct body_t) $ toStruct $ patternType pat'
+      unify body_loc (toStructural body_t) $ toStructural $ patternType pat'
       body_t' <- normaliseType body_t
       pat_t <- normaliseType $ patternType pat'
       unless (body_t' `subtypeOf` pat_t) $
@@ -1272,25 +1264,25 @@ checkExp (Match e (c:cs) NoInfo loc) =
     zeroOrderType loc "returned from pattern match" t
     return $ Match e' cs' (Info t) loc
 
-checkCases :: CompType
+checkCases :: PatternType
            -> CaseBase NoInfo Name
            -> [CaseBase NoInfo Name]
-           -> TermTypeM ([CaseBase Info VName], CompType)
+           -> TermTypeM ([CaseBase Info VName], PatternType)
 checkCases mt c [] = do
   (c', t) <- checkCase mt c
   return ([c'], t)
 checkCases mt c (c2:cs) = do
   (((c', c_t), (cs', cs_t)), dflow) <-
     tapOccurences $ checkCase mt c `alternative` checkCases mt c2 cs
-  unify (srclocOf c) (toStruct c_t) (toStruct cs_t)
+  unify (srclocOf c) (toStructural c_t) (toStructural cs_t)
   let t = unifyTypeAliases c_t cs_t `addAliases`
         (`S.difference` S.map AliasBound (allConsumed dflow))
   return (c':cs', t)
 
-checkCase :: CompType -> CaseBase NoInfo Name
-          -> TermTypeM (CaseBase Info VName, CompType)
+checkCase :: PatternType -> CaseBase NoInfo Name
+          -> TermTypeM (CaseBase Info VName, PatternType)
 checkCase mt (CasePat p caseExp loc) =
-  bindingPattern [] p (Ascribed $ vacuousShapeAnnotations mt) $ \_ p' -> do
+  bindingPattern [] p (Ascribed mt) $ \_ p' -> do
     caseExp' <- checkExp caseExp
     caseType <- expType caseExp'
     return (CasePat p' caseExp' loc, caseType)
@@ -1355,8 +1347,6 @@ checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
                            \e' -> checkUnmatched' e' >> return e'
                        , mapOnName        = pure
                        , mapOnQualName    = pure
-                       , mapOnType        = pure
-                       , mapOnCompType    = pure
                        , mapOnStructType  = pure
                        , mapOnPatternType = pure
                        }
@@ -1377,7 +1367,7 @@ unmatched hole (p:ps)
         localUnmatched :: [Pattern] -> [Unmatched Pattern]
         localUnmatched [] = []
         localUnmatched ps'@(p':_) =
-          case vacuousShapeAnnotations $ patternType p'  of
+          case patternType p'  of
             Enum cs'' ->
               let matched = nub $ mapMaybe (pExp >=> constr) ps'
               in map (UnmatchedEnum . buildEnum (Enum cs'')) $ cs'' \\ matched
@@ -1400,7 +1390,7 @@ unmatched hole (p:ps)
         pExp _ = Nothing
 
         constr (VConstr0 c _ _) = Just c
-        constr (Ascript e' _ _)  = constr e'
+        constr (Ascript e' _ _ _)  = constr e'
         constr _ = Nothing
 
         isPatternLit PatternLit{} = True
@@ -1418,7 +1408,7 @@ unmatched hole (p:ps)
         bool _ = Nothing
 
         buildEnum t c =
-          PatternLit (VConstr0 c (Info t) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
+          PatternLit (VConstr0 c (Info t) noLoc) (Info t) noLoc
         buildBool t b =
           PatternLit (Literal (BoolValue b) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
         buildId t n =
@@ -1449,9 +1439,9 @@ sequentially m1 m2 = do
   occur $ m1flow `seqOccurences` m2flow
   return b
 
-type Arg = (CompType, Occurences, SrcLoc)
+type Arg = (PatternType, Occurences, SrcLoc)
 
-argType :: Arg -> CompType
+argType :: Arg -> PatternType
 argType (t, _, _) = t
 
 checkArg :: UncheckedExp -> TermTypeM (Exp, Arg)
@@ -1460,10 +1450,10 @@ checkArg arg = do
   arg_t <- expType arg'
   return (arg', (arg_t, dflow, srclocOf arg'))
 
-checkApply :: SrcLoc -> CompType -> Arg
+checkApply :: SrcLoc -> PatternType -> Arg
            -> TermTypeM (PatternType, PatternType)
 checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
-  unify argloc (toStruct tp1) (toStruct argtype)
+  unify argloc (toStructural tp1) (toStructural argtype)
 
   -- Perform substitutions of instantiated variables in the types.
   tp1' <- normaliseType tp1
@@ -1482,12 +1472,12 @@ checkApply loc (Arrow as _ tp1 tp2) (argtype, dflow, argloc) = do
     _ -> return ()
 
   occur $ dflow `seqOccurences` occurs
-  let tp2'' = vacuousShapeAnnotations $ returnType tp2' (diet tp1') argtype'
-  return (vacuousShapeAnnotations tp1', tp2'')
+  let tp2'' = anyDimShapeAnnotations $ returnType tp2' (diet tp1') argtype'
+  return (tp1', tp2'')
 
 checkApply loc tfun@TypeVar{} arg = do
   tv <- newTypeVar loc "b"
-  unify loc (toStruct tfun) $ Arrow mempty Nothing (toStruct (argType arg)) tv
+  unify loc (toStructural tfun) $ Arrow mempty Nothing (toStructural (argType arg)) tv
   constraints <- getConstraints
   checkApply loc (applySubst (`lookupSubst` constraints) tfun) arg
 
@@ -1496,7 +1486,45 @@ checkApply loc ftype arg =
   "Attempt to apply an expression of type " ++ pretty ftype ++
   " to an argument of type " ++ pretty (argType arg) ++ "."
 
-consumeArg :: SrcLoc -> CompType -> Diet -> TermTypeM [Occurence]
+-- | @returnType ret_type arg_diet arg_type@ gives result of applying
+-- an argument the given types to a function with the given return
+-- type, consuming the argument with the given diet.
+returnType :: PatternType
+           -> Diet
+           -> PatternType
+           -> PatternType
+returnType (Array _ Unique et shape) _ _ =
+  Array mempty Unique et shape
+returnType (Array als Nonunique et shape) d arg =
+  Array (als<>arg_als) Unique et shape -- Intentional!
+  where arg_als = aliases $ maskAliases arg d
+returnType (Record fs) d arg =
+  Record $ fmap (\et -> returnType et d arg) fs
+returnType (Prim t) _ _ = Prim t
+returnType (TypeVar _ Unique t targs) _ _ =
+  TypeVar mempty Unique t targs
+returnType (TypeVar als Nonunique t targs) d arg =
+  TypeVar (als<>arg_als) Unique t targs -- Intentional!
+  where arg_als = aliases $ maskAliases arg d
+returnType (Arrow _ v t1 t2) d arg =
+  Arrow als v (t1 `setAliases` mempty) (t2 `setAliases` als)
+  where als = aliases $ maskAliases arg d
+returnType (Enum cs) _ _ = Enum cs
+
+-- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
+-- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
+maskAliases :: Monoid as =>
+               TypeBase shape as
+            -> Diet
+            -> TypeBase shape as
+maskAliases t Consume = t `setAliases` mempty
+maskAliases t Observe = t
+maskAliases (Record ets) (RecordDiet ds) =
+  Record $ M.intersectionWith maskAliases ets ds
+maskAliases t FuncDiet{} = t
+maskAliases _ _ = error "Invalid arguments passed to maskAliases."
+
+consumeArg :: SrcLoc -> PatternType -> Diet -> TermTypeM [Occurence]
 consumeArg loc (Record ets) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
 consumeArg loc (Array _ Nonunique _ _) Consume =
@@ -1522,7 +1550,7 @@ consumeArg loc at _       = return [observation (aliases at) loc]
 checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e
-  let t = vacuousShapeAnnotations $ toStruct $ typeOf e'
+  let t = toStruct $ typeOf e'
   tparams <- letGeneralise [] [t] mempty
   fixOverloadedTypes
   e'' <- updateExpTypes e'
@@ -1603,7 +1631,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
 
   then_substs <- getConstraints
 
-  bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
+  bindingPatternGroup tparams params $ \tparams' params' -> do
     maybe_retdecl' <- traverse checkTypeExp maybe_retdecl
 
     body' <- checkFunBody body ((\(_,t,_)->t) <$> maybe_retdecl') (maybe loc srclocOf maybe_retdecl)
@@ -1621,7 +1649,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         return (Just retdecl', retdecl_type)
       Nothing
         | null params ->
-            return (Nothing, vacuousShapeAnnotations $ toStruct $ body_t `setUniqueness` Nonunique)
+            return (Nothing, toStruct $ body_t `setUniqueness` Nonunique)
         | otherwise ->
             return (Nothing, inferReturnUniqueness params'' body_t)
 
@@ -1664,7 +1692,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         returnAliasing expected got =
           [(uniqueness expected, S.map aliasVar $ aliases got)]
 
-checkGlobalAliases :: [Pattern] -> CompType -> SrcLoc -> TermTypeM ()
+checkGlobalAliases :: [Pattern] -> PatternType -> SrcLoc -> TermTypeM ()
 checkGlobalAliases params body_t loc = do
   vtable <- asks scopeVtable
   let isLocal v = case v `M.lookup` vtable of
@@ -1683,7 +1711,7 @@ checkGlobalAliases params body_t loc = do
       return ()
 
 
-inferReturnUniqueness :: [Pattern] -> CompType -> StructType
+inferReturnUniqueness :: [Pattern] -> PatternType -> StructType
 inferReturnUniqueness params t =
   let forbidden = aliasesMultipleTimes t
       uniques = uniqueParamNames params
@@ -1695,10 +1723,10 @@ inferReturnUniqueness params t =
             toStruct t'
         | otherwise =
             toStruct $ t' `setUniqueness` Nonunique
-  in vacuousShapeAnnotations $ delve t
+  in delve t
 
 -- An alias inhibits uniqueness if it is used in disjoint values.
-aliasesMultipleTimes :: CompType -> Names
+aliasesMultipleTimes :: PatternType -> Names
 aliasesMultipleTimes = S.fromList . map fst . filter ((>1) . snd) . M.toList . delve
   where delve (Record fs) =
           foldl' (M.unionWith (+)) mempty $ map delve $ M.elems fs
@@ -1711,7 +1739,7 @@ uniqueParamNames =
   . filter (unique . unInfo . identType)
   . S.toList . mconcat . map patIdentSet
 
-boundArrayAliases :: CompType -> S.Set VName
+boundArrayAliases :: PatternType -> S.Set VName
 boundArrayAliases (Array als _ _ _) = boundAliases als
 boundArrayAliases Prim{} = mempty
 boundArrayAliases Enum{} = mempty
@@ -1780,12 +1808,12 @@ checkFunBody body maybe_rettype _loc = do
       void $ unifies rettype_structural body'
       -- We also have to make sure that uniqueness matches.  This is done
       -- explicitly, because uniqueness is ignored by unification.
-      rettype_structural' <- normaliseType rettype_structural
+      rettype' <- normaliseType rettype
       body_t <- expType body'
-      unless (body_t `subtypeOf` rettype_structural') $
+      unless (body_t `subtypeOf` anyDimShapeAnnotations rettype') $
         typeError (srclocOf body) $ "Body type " ++ quote (pretty body_t) ++
         " is not a subtype of annotated type " ++
-        quote (pretty rettype_structural') ++ "."
+        quote (pretty rettype') ++ "."
 
     Nothing -> return ()
 
@@ -1922,8 +1950,6 @@ updateExpTypes e = do
       tv = ASTMapper { mapOnExp         = astMap tv
                      , mapOnName        = pure
                      , mapOnQualName    = pure
-                     , mapOnType        = pure . applySubst look
-                     , mapOnCompType    = pure . applySubst look
                      , mapOnStructType  = pure . applySubst look
                      , mapOnPatternType = pure . applySubst look
                      }

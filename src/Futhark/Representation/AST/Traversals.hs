@@ -1,4 +1,3 @@
------------------------------------------------------------------------------
 -- |
 --
 -- Functions for generic traversals across Futhark syntax trees.  The
@@ -16,14 +15,12 @@
 -- tree.  The implementation is rather tedious, but the interface is
 -- easy to use.
 --
--- A traversal of the Futhark syntax tree is expressed as a tuple of
+-- A traversal of the Futhark syntax tree is expressed as a record of
 -- functions expressing the operations to be performed on the various
 -- types of nodes.
 --
--- The "Futhark.Transform.Rename" is a simple example of how to use
--- this facility.
---
------------------------------------------------------------------------------
+-- The "Futhark.Transform.Rename" module is a simple example of how to
+-- use this facility.
 module Futhark.Representation.AST.Traversals
   (
   -- * Mapping

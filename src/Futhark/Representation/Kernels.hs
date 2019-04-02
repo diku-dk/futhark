@@ -34,7 +34,7 @@ import qualified Futhark.TypeCheck as TypeCheck
 data Kernels
 
 instance Annotations Kernels where
-  type Op Kernels = Kernel InKernel
+  type Op Kernels = HostOp Kernels (Kernel InKernel)
 instance Attributes Kernels where
   expTypesFromPattern = return . expExtTypesFromPattern
 
@@ -46,7 +46,7 @@ instance Attributes InKernel where
 instance PrettyLore InKernel where
 
 instance TypeCheck.CheckableOp Kernels where
-  checkOp = TypeCheck.subCheck . typeCheckKernel
+  checkOp = typeCheckHostOp $ TypeCheck.subCheck . typeCheckKernel
 
 instance TypeCheck.CheckableOp InKernel where
   checkOp = TypeCheck.subCheck . typeCheckKernelExp

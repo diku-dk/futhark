@@ -5,7 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.10.0]
+
+## [0.11.0]
+
+### Added
+
+  * `reduce_by_index` is now a good bit faster on operators whose
+    arguments are two 32-bit values.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Fix reading and writing of binary files for C-compiled executables
+    on Windows.
+
+  * Fixed a couple of overly strict internal sanity checks related to
+    in-place updates (#735, #736).
+
+## [0.10.1]
 
 ### Added
 
@@ -29,6 +49,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Executables generated with the `cuda` backend now take an
     `--nvrtc-option` option.
 
+  * Executables generated with the `opencl` backend now take a
+    `--build-option` option.
+
 ### Removed
 
   * The old `futhark-*` executables have been removed.
@@ -47,7 +70,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     0.  This only affects the text output and the generated JSON
     files, and fits the tuple element ordering in Futhark.
 
-  * String literals are now of type `[]u8` and contain UTF-8 encode
+  * String literals are now of type `[]u8` and contain UTF-8 encoded
     bytes.
 
 ### Fixed

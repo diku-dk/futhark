@@ -234,7 +234,7 @@ For example::
   let (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
 
 We can also define operators by enclosing the operator name in
-parentheses and suffixing the parameters, as an ordinary function:
+parentheses and suffixing the parameters, as an ordinary function::
 
   let (+^) (a:i32,b:i32) (c:i32,d:i32) = (a+c, b+d)
 
@@ -1151,9 +1151,9 @@ You can refer to external files in a Futhark file like this::
 
   import "module"
 
-The above will include all top-level definitions from ``module.fut``
-is and make them available in the current Futhark program.  The
-``.fut`` extension is implied.
+The above will include all non-``local`` top-level definitions from
+``module.fut`` is and make them available in the current file (but
+will not export them).  The ``.fut`` extension is implied.
 
 You can also include files from subdirectories::
 

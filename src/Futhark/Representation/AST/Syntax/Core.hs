@@ -191,7 +191,10 @@ type DeclExtType = TypeBase ExtShape Uniqueness
 -- Observe]@.
 data Diet = Consume -- ^ Consumes this value.
           | Observe -- ^ Only observes value in this position, does
-                    -- not consume.
+                    -- not consume.  A result may alias this.
+          | ObservePrim -- ^ As 'Observe', but the result will not
+                        -- alias, because the parameter does not carry
+                        -- aliases.
             deriving (Eq, Ord, Show)
 
 -- | An identifier consists of its name and the type of the value
