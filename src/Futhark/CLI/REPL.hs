@@ -84,7 +84,7 @@ repl = do
 
   maybe_init_state <- liftIO $ newFutharkiState 0 Nothing
   case maybe_init_state of
-    Left err -> error $ "Failed to initialise intepreter state: " ++ err
+    Left err -> error $ "Failed to initialise interpreter state: " ++ err
     Right init_state -> Haskeline.runInputT Haskeline.defaultSettings $ toploop init_state
 
   putStrLn "Leaving futharki."
