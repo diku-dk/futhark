@@ -696,8 +696,11 @@ matchMTys = matchMTys' mempty
     matchVal loc spec_name spec_t name t
       | matchFunBinding loc spec_t t = return (spec_name, name)
     matchVal loc spec_name spec_v _ v =
-      Left $ TypeError loc $ "Value " ++ quote (baseString spec_name) ++ " specified as type " ++
-      ppValBind spec_v ++ " in signature, but has " ++ ppValBind v ++ " in structure."
+      Left $ TypeError loc $ unlines $
+      ["Module type specifies"] ++
+      map ("  "++) (lines $ ppValBind spec_name spec_v) ++
+      ["but module provides"] ++
+      map ("  "++) (lines $ppValBind spec_name v)
 
     matchFunBinding :: SrcLoc -> BoundV -> BoundV -> Bool
     matchFunBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
@@ -752,7 +755,8 @@ matchMTys = matchMTys' mempty
                indent $ ppTypeAbbr abs name mod_t,
                "but module type requires this type to be non-functional."]
 
-    ppValBind (BoundV tps t) = unwords $ map pretty tps ++ [pretty t]
+    ppValBind v (BoundV tps t) =
+      unwords $ ["val", prettyName v] ++ map pretty tps ++ [":", pretty t]
 
     ppTypeAbbr abs name (ps, t) =
       "type " ++ unwords (pretty name : map pretty ps) ++ t'
