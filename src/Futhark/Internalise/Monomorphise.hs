@@ -481,9 +481,9 @@ typeSubstsM loc orig_t1 orig_t2 =
           | Just t1' <- peelArray (arrayRank t1) t1,
             Just t2' <- peelArray (arrayRank t1) t2 =
               sub pos t1' t2'
-        sub pos (Arrow _ _ t1a t1b) (Arrow _ _ t2a t2b) = do
+        sub _ (Arrow _ _ t1a t1b) (Arrow _ _ t2a t2b) = do
           sub False t1a t2a
-          sub pos t1b t2b
+          sub False t1b t2b
 
         sub _ t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", pretty t1, pretty t2]
 
