@@ -201,7 +201,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Var name _ _) = ppr name
   pprPrec _ (Parens e _) = align $ parens $ ppr e
   pprPrec _ (QualParens v e _) = ppr v <> text "." <> align (parens $ ppr e)
-  pprPrec _ (Ascript e t _) = pprPrec 0 e <> colon <+> pprPrec 0 t
+  pprPrec _ (Ascript e t _ _) = pprPrec 0 e <> colon <+> pprPrec 0 t
   pprPrec _ (Literal v _) = ppr v
   pprPrec _ (IntLit v _ _) = ppr v
   pprPrec _ (FloatLit v _ _) = ppr v
@@ -239,11 +239,6 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     (case body of LetPat{} -> ppr body
                   _        -> text "in" <+> align (ppr body))
     where linebreak = case e of
-                        Map{}       -> True
-                        Reduce{}    -> True
-                        GenReduce{} -> True
-                        Filter{}    -> True
-                        Scan{}      -> True
                         DoLoop{}    -> True
                         LetPat{}    -> True
                         LetWith{}   -> True
@@ -277,26 +272,6 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "<-" <+> align (ppr ve)
   pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
-  pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduce_comm" [lam] [e, a]
-  pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
-  pprPrec _ (GenReduce hist op ne bfun img _) =
-    ppSOAC "gen_reduce" [op, bfun] [hist, ne, img] -- do this manually
-  pprPrec _ (Stream form lam arr _) =
-    case form of
-      MapLike o ->
-        let ord_str = if o == Disorder then "_per" else ""
-        in  text ("stream_map"++ord_str) <>
-            ppr lam </> pprPrec 10 arr
-      RedLike o comm lam0 ->
-        let ord_str = if o == Disorder then "_per" else ""
-            comm_str = case comm of Commutative    -> "_comm"
-                                    Noncommutative -> ""
-        in  text ("stream_red"++ord_str++comm_str) <>
-            ppr lam0 </> ppr lam </> pprPrec 10 arr
-  pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
-  pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
-  pprPrec _ (Partition k lam a _) = text "partition" <+> ppr k <+> spread (map (pprPrec 10) [lam, a])
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec (-1) e
   pprPrec _ (Assert e1 e2 _ _) = text "assert" <+> pprPrec 10 e1 <+> pprPrec 10 e2
   pprPrec p (Lambda tparams params body ascript _ _) =
@@ -474,9 +449,3 @@ prettyBinOp p bop x y = parensIf (p > symPrecedence) $
         rprecedence Minus  = 10
         rprecedence Divide = 10
         rprecedence op     = precedence op
-
-ppSOAC :: (Eq vn, IsName vn, Pretty fn, Annot f) =>
-          String -> [fn] -> [ExpBase f vn] -> Doc
-ppSOAC name funs es =
-  text name <+> align (spread (map (parens . ppr) funs) </>
-                       spread (map (pprPrec 10) es))

@@ -3,7 +3,6 @@
 module Futhark.Analysis.ScalExpTests
   ( tests
   , parseScalExp
-  , parseScalExp'
   )
 where
 
@@ -24,11 +23,8 @@ import Futhark.Representation.AST hiding (constant, SDiv)
 tests :: TestTree
 tests = testGroup "ScalExpTests" []
 
-parseScalExp :: String -> ScalExp
-parseScalExp = parseScalExp' M.empty
-
-parseScalExp' :: M.Map String (Int, Type) -> String -> ScalExp
-parseScalExp' m s = case evalState (runParserT expr ("string: " ++ s) s) (0, m) of
+parseScalExp :: M.Map String (Int, Type) -> String -> ScalExp
+parseScalExp m s = case evalState (runParserT expr ("string: " ++ s) s) (0, m) of
   Left err -> error $ show err
   Right e  -> e
 

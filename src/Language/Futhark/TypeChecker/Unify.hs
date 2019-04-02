@@ -151,11 +151,11 @@ unify loc orig_t1 orig_t2 = do
             unifyTypeArg _ _ = typeError loc
               "Cannot unify a type argument with a dimension argument (or vice versa)."
 
-applySubstInConstraint :: VName -> TypeBase () () -> Constraint -> Constraint
-applySubstInConstraint vn tp (Constraint t loc) =
-  Constraint (applySubst (flip M.lookup $ M.singleton vn $ Subst tp) t) loc
-applySubstInConstraint vn tp (HasFields fs loc) =
-  HasFields (M.map (applySubst (flip M.lookup $ M.singleton vn $ Subst tp)) fs) loc
+applySubstInConstraint :: VName -> Subst (TypeBase () ()) -> Constraint -> Constraint
+applySubstInConstraint vn subst (Constraint t loc) =
+  Constraint (applySubst (flip M.lookup $ M.singleton vn subst) t) loc
+applySubstInConstraint vn subst (HasFields fs loc) =
+  HasFields (M.map (applySubst (flip M.lookup $ M.singleton vn subst)) fs) loc
 applySubstInConstraint _ _ (NoConstraint l loc) = NoConstraint l loc
 applySubstInConstraint _ _ (Overloaded ts loc) = Overloaded ts loc
 applySubstInConstraint _ _ (Equality loc) = Equality loc
@@ -169,7 +169,7 @@ linkVarToType loc vn tp = do
     then typeError loc $ "Occurs check: cannot instantiate " ++
          prettyName vn ++ " with " ++ pretty tp'
     else do modifyConstraints $ M.insert vn $ Constraint tp' loc
-            modifyConstraints $ M.map $ applySubstInConstraint vn tp'
+            modifyConstraints $ M.map $ applySubstInConstraint vn $ Subst tp'
             case M.lookup vn constraints of
               Just (NoConstraint (Just Unlifted) unlift_loc) ->
                 zeroOrderType loc ("used at " ++ locStr unlift_loc) tp'

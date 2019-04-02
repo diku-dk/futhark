@@ -59,8 +59,11 @@ simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      RetType lore ~ RetType outerlore,
                      BranchType lore ~ BranchType outerlore) =>
                     (KernelSpace -> Engine.SimpleOps lore) -> Engine.Env lore
-                 -> Kernel lore -> Engine.SimpleM outerlore (Kernel (Wise lore), Stms (Wise outerlore))
-simplifyKernelOp mk_ops env (Kernel desc space ts kbody) = do
+                 -> HostOp outerlore (Kernel lore)
+                 -> Engine.SimpleM outerlore (HostOp (Wise outerlore) (Kernel (Wise lore)),
+                                              Stms (Wise outerlore))
+
+simplifyKernelOp mk_ops env (HostOp (Kernel desc space ts kbody)) = do
   space' <- Engine.simplify space
   ts' <- mapM Engine.simplify ts
   outer_vtable <- Engine.askVtable
@@ -74,13 +77,13 @@ simplifyKernelOp mk_ops env (Kernel desc space ts kbody) = do
                         `Engine.orIf` Engine.isConsumed) $
         simplifyKernelBodyM kbody
   kbody_hoisted' <- mapM processHoistedStm kbody_hoisted
-  return (Kernel desc space' ts' $ mkWiseKernelBody () kbody_stms kbody_res,
+  return (HostOp $ Kernel desc space' ts' $ mkWiseKernelBody () kbody_stms kbody_res,
           kbody_hoisted')
   where scope = scopeOfKernelSpace space
         scope_vtable = ST.fromScope scope
         bound_here = S.fromList $ M.keys scope
 
-simplifyKernelOp mk_ops env (SegRed space comm red_op nes ts body) = do
+simplifyKernelOp mk_ops env (HostOp (SegRed space comm red_op nes ts body)) = do
   space' <- Engine.simplify space
   nes' <- mapM Engine.simplify nes
   ts' <- mapM Engine.simplify ts
@@ -94,13 +97,13 @@ simplifyKernelOp mk_ops env (SegRed space comm red_op nes ts body) = do
 
   (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
 
-  return (SegRed space' comm red_op' nes' ts' body',
+  return (HostOp $ SegRed space' comm red_op' nes' ts' body',
           red_op_hoisted' <> body_hoisted)
 
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
 
-simplifyKernelOp mk_ops env (SegGenRed space ops ts body) = do
+simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
   outer_vtable <- Engine.askVtable
 
   space' <- Engine.simplify space
@@ -124,14 +127,16 @@ simplifyKernelOp mk_ops env (SegGenRed space ops ts body) = do
 
   (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
 
-  return (SegGenRed space' ops' ts' body',
+  return (HostOp $ SegGenRed space' ops' ts' body',
           red_op_hoisted' <> body_hoisted)
 
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
 
-simplifyKernelOp _ _ (GetSize key size_class) = return (GetSize key size_class, mempty)
-simplifyKernelOp _ _ (GetSizeMax size_class) = return (GetSizeMax size_class, mempty)
+simplifyKernelOp _ _ (GetSize key size_class) =
+  return (GetSize key size_class, mempty)
+simplifyKernelOp _ _ (GetSizeMax size_class) =
+  return (GetSizeMax size_class, mempty)
 simplifyKernelOp _ _ (CmpSizeLe key size_class x) = do
   x' <- Engine.simplify x
   return (CmpSizeLe key size_class x', mempty)
@@ -410,7 +415,7 @@ isIota vtable chunk arr
 -- into a replicate.
 removeInvariantKernelResults :: TopDownRuleOp (Wise Kernels)
 removeInvariantKernelResults vtable (Pattern [] kpes) attr
-                                    (Kernel desc space ts (KernelBody _ kstms kres)) = do
+                             (HostOp (Kernel desc space ts (KernelBody _ kstms kres))) = do
   (ts', kpes', kres') <-
     unzip3 <$> filterM checkForInvarianceResult (zip3 ts kpes kres)
 
@@ -418,7 +423,7 @@ removeInvariantKernelResults vtable (Pattern [] kpes) attr
   when (kres == kres')
     cannotSimplify
 
-  addStm $ Let (Pattern [] kpes') attr $ Op $ Kernel desc space ts' $
+  addStm $ Let (Pattern [] kpes') attr $ Op $ HostOp $ Kernel desc space ts' $
     mkWiseKernelBody () kstms kres'
   where isInvariant Constant{} = True
         isInvariant (Var v) = isJust $ ST.lookup v vtable
@@ -447,7 +452,7 @@ removeInvariantKernelResults _ _ _ _ = cannotSimplify
 -- simplify further analysis.
 distributeKernelResults :: BottomUpRuleOp (Wise Kernels)
 distributeKernelResults (vtable, used)
-  (Pattern [] kpes) attr (Kernel desc kspace kts (KernelBody _ kstms kres)) = do
+  (Pattern [] kpes) attr (HostOp (Kernel desc kspace kts (KernelBody _ kstms kres))) = do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.
@@ -457,8 +462,8 @@ distributeKernelResults (vtable, used)
   when (kpes' == kpes)
     cannotSimplify
 
-  addStm $ Let (Pattern [] kpes') attr $
-    Op $ Kernel desc kspace kts' $ mkWiseKernelBody () (stmsFromList $ reverse kstms_rev) kres'
+  addStm $ Let (Pattern [] kpes') attr $ Op $ HostOp $
+    Kernel desc kspace kts' $ mkWiseKernelBody () (stmsFromList $ reverse kstms_rev) kres'
   where
     free_in_kstms = fold $ fmap freeInStm kstms
 

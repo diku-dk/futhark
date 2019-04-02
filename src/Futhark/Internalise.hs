@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# OPTIONS_GHC -fmax-pmcheck-iterations=2500000#-}
+{-# OPTIONS_GHC -fmax-pmcheck-iterations=25000000#-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -128,7 +128,7 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) 
   -- parameters here.
   bindingParams [] (map E.patternNoShapeAnnotations params) $
   \_ shapeparams params' -> do
-    (entry_rettype, _) <- internaliseEntryReturnType $ E.vacuousShapeAnnotations rettype
+    (entry_rettype, _) <- internaliseEntryReturnType $ anyDimShapeAnnotations rettype
     let entry' = entryPoint (zip params params') (retdecl, rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
@@ -232,8 +232,7 @@ internaliseExp _ (E.Var (E.QualName _ name) (Info t) loc) = do
       is_const <- lookupConstant loc name
       case is_const of
         Just ses -> return ses
-        Nothing -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t') loc)
-  where t' = removeShapeAnnotations t
+        Nothing -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
 
 internaliseExp desc (E.Index e idxs _ loc) = do
   vs <- internaliseExpToVars "indexed" e
@@ -253,7 +252,7 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           M.singleton name <$> internaliseExp desc e
         internaliseField (E.RecordFieldImplicit name t loc) =
           internaliseField $ E.RecordFieldExplicit (baseName name)
-          (E.Var (E.qualName name) (vacuousShapeAnnotations <$> t) loc) loc
+          (E.Var (E.qualName name) t loc) loc
 
 internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   -- If this is a multidimensional array literal of primitives, we
@@ -278,7 +277,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   es' <- mapM (internaliseExp "arr_elem") es
   case es' of
     [] -> do
-      rowtypes <- internaliseType (rowtype `setAliases` ())
+      rowtypes <- internaliseType $ toStructural rowtype
       let arraylit rt = I.BasicOp $ I.ArrayLit [] rt
       letSubExps desc $ map (arraylit . zeroDim . fromDecl) rowtypes
     e' : _ -> do
@@ -391,7 +390,7 @@ internaliseExp desc (E.Range start maybe_second end _ _) = do
                (eBody [eDivRoundingUp Int32 (eSubExp distance) (eSubExp pos_step)])
   pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
 
-internaliseExp desc (E.Ascript e (TypeDecl dt (Info et)) loc) = do
+internaliseExp desc (E.Ascript e (TypeDecl dt (Info et)) _ loc) = do
   es <- internaliseExp desc e
   (ts, cm) <- internaliseReturnType et
   mapM_ (uncurry (internaliseDimConstant loc)) cm
@@ -582,8 +581,8 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
                    init_loop_cond_bnds))
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
-  let pat = E.Id (E.identName name) (E.vacuousShapeAnnotations <$> E.identType name) loc
-      src_t = E.fromStruct . E.vacuousShapeAnnotations <$> E.identType src
+  let pat = E.Id (E.identName name) (E.identType name) loc
+      src_t = E.fromStruct <$> E.identType src
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
   internaliseExp desc $ E.LetPat [] pat e body loc
 
@@ -632,143 +631,6 @@ internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
           v' <- newVName "assert_res"
           letBindNames_ [v'] $ I.BasicOp $ I.SubExp v
           return $ I.Var v'
-
-internaliseExp desc (E.Map lam arr _ _) = do
-  arr' <- internaliseExpToVars "map_arr" arr
-  lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
-  w <- arraysSize 0 <$> mapM lookupType arr'
-  letTupExp' desc $ I.Op $
-    I.Screma w (I.mapSOAC lam') arr'
-
-internaliseExp desc (E.Reduce comm lam ne arr loc) =
-  internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
-  where reduce w red_lam nes arrs =
-          I.Screma w <$> I.reduceSOAC comm red_lam nes <*> pure arrs
-
-internaliseExp desc (E.GenReduce hist op ne buckets img loc) = do
-  ne' <- internaliseExp "gen_reduce_ne" ne
-  hist' <- internaliseExpToVars "gen_reduce_hist" hist
-  buckets' <- letExp "gen_reduce_buckets" . BasicOp . SubExp =<<
-              internaliseExp1 "gen_reduce_buckets" buckets
-  img' <- internaliseExpToVars "gen_reduce_img" img
-
-  -- reshape neutral element to have same size as the destination array
-  ne_shp <- forM (zip ne' hist') $ \(n, h) -> do
-    rowtype <- I.stripArray 1 <$> lookupType h
-    ensureShape asserting
-      "Row shape of destination array does not match shape of neutral element"
-      loc rowtype "gen_reduce_ne_right_shape" n
-  ne_ts <- mapM I.subExpType ne_shp
-  his_ts <- mapM lookupType hist'
-  op' <- internaliseFoldLambda internaliseLambda op ne_ts his_ts
-
-  -- reshape return type of bucket function to have same size as neutral element
-  -- (modulo the index)
-  bucket_param <- newParam "bucket_p" $ I.Prim int32
-  img_params <- mapM (newParam "img_p" . rowType) =<< mapM lookupType img'
-  let params = bucket_param : img_params
-      rettype = I.Prim int32 : ne_ts
-      body = mkBody mempty $ map (I.Var . paramName) params
-  body' <- localScope (scopeOfLParams params) $
-           ensureResultShape asserting
-           "Row shape of value array does not match row shape of gen_reduce target"
-           (srclocOf img) rettype body
-
-  -- get sizes of histogram and image arrays
-  w_hist <- arraysSize 0 <$> mapM lookupType hist'
-  w_img <- arraysSize 0 <$> mapM lookupType img'
-
-  -- Generate an assertion and reshapes to ensure that buckets' and
-  -- img' are the same size.
-  b_shape <- arrayShape <$> lookupType buckets'
-  let b_w = shapeSize 0 b_shape
-  cmp <- letSubExp "bucket_cmp" $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) b_w w_img
-  c <- assertingOne $
-    letExp "bucket_cert" $ I.BasicOp $
-    I.Assert cmp "length of index and value array does not match" (loc, mempty)
-  buckets'' <- certifying c $ letExp (baseString buckets') $
-    I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
-
-  letTupExp' desc $ I.Op $
-    I.GenReduce w_img [GenReduceOp w_hist hist' ne_shp op'] (I.Lambda params body' rettype) $ buckets'' : img'
-
-internaliseExp desc (E.Scan lam ne arr loc) =
-  internaliseScanOrReduce desc "scan" scan (lam, ne, arr, loc)
-  where scan w scan_lam nes arrs =
-          I.Screma w <$> I.scanSOAC scan_lam nes <*> pure arrs
-
-internaliseExp _ (E.Filter lam arr _) = do
-  arrs <- internaliseExpToVars "filter_input" arr
-  lam' <- internalisePartitionLambda internaliseLambda 1 lam $ map I.Var arrs
-  uncurry (++) <$> partitionWithSOACS 1 lam' arrs
-
-internaliseExp _ (E.Partition k lam arr _) = do
-  arrs <- internaliseExpToVars "partition_input" arr
-  lam' <- internalisePartitionLambda internaliseLambda k lam $ map I.Var arrs
-  uncurry (++) <$> partitionWithSOACS k lam' arrs
-
-internaliseExp desc (E.Stream (E.MapLike o) lam arr _) = do
-  arrs <- internaliseExpToVars "stream_input" arr
-  lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) []) []
-  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
-
--- If the stream form is a reduce, we also have to fiddle with the
--- lambda to incorporate the reduce function.  FIXME: can't we just
--- modify the internal representation of reduction streams?
-internaliseExp desc (E.Stream (E.RedLike o comm lam0) lam arr _) = do
-  arrs <- internaliseExpToVars "stream_input" arr
-  rowts <- mapM (fmap I.rowType . lookupType) arrs
-  (lam_params, lam_body) <-
-    internaliseStreamLambda internaliseLambda lam rowts
-  let (chunk_param, _, lam_val_params) =
-        partitionChunkedFoldParameters 0 lam_params
-
-  -- Synthesize neutral elements by applying the fold function
-  -- to an empty chunk.
-  letBindNames_ [I.paramName chunk_param] $
-    I.BasicOp $ I.SubExp $ constant (0::Int32)
-  forM_ lam_val_params $ \p ->
-    letBindNames_ [I.paramName p] $
-    I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
-    I.arrayDims $ I.paramType p
-  accs <- bodyBind =<< renameBody lam_body
-
-  acctps <- mapM I.subExpType accs
-  outsz  <- arraysSize 0 <$> mapM lookupType arrs
-  let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
-  lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
-  let lam0_acc_params = fst $ splitAt (length accs) $ I.lambdaParams lam0'
-  acc_params <- forM lam0_acc_params $ \p -> do
-    name <- newVName $ baseString $ I.paramName p
-    return p { I.paramName = name }
-
-  body_with_lam0 <-
-    ensureResultShape asserting "shape of result does not match shape of initial value"
-    (srclocOf lam0) acctps <=< insertStmsM $ do
-      lam_res <- bodyBind lam_body
-
-      let consumed = consumedByLambda $ Alias.analyseLambda lam0'
-          copyIfConsumed p (I.Var v)
-            | I.paramName p `S.member` consumed =
-                letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
-          copyIfConsumed _ x = return x
-
-      accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
-      lam_res' <- ensureArgShapes asserting
-                  "shape of chunk function result does not match shape of initial value"
-                  (srclocOf lam) [] (map I.typeOf $ I.lambdaParams lam0') lam_res
-      new_lam_res <- eLambda lam0' $ map eSubExp $ accs' ++ lam_res'
-      return $ resultBody new_lam_res
-
-  -- Make sure the chunk size parameter comes first.
-  let form = I.Parallel o comm lam0' accs
-      lam' = I.Lambda { lambdaParams = chunk_param : acc_params ++ lam_val_params
-                      , lambdaBody = body_with_lam0
-                      , lambdaReturnType = acctps }
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
 
 internaliseExp _ (E.VConstr0 c (Info t) loc) =
   case t of
@@ -860,9 +722,9 @@ andExp :: E.Exp -> E.Exp -> E.Exp
 andExp l r = E.If l r (E.Literal (E.BoolValue False) noLoc) (Info (E.Prim E.Bool)) noLoc
 
 eqExp :: E.Exp -> E.Exp -> E.Exp
-eqExp l r = E.BinOp eq (Info $ vacuousShapeAnnotations ft)
+eqExp l r = E.BinOp eq (Info ft)
             (l, sType l) (r, sType r) (Info (E.Prim E.Bool)) noLoc
-  where sType e = Info $ toStruct $ vacuousShapeAnnotations $ E.typeOf e
+  where sType e = Info $ toStruct $ E.typeOf e
         arrow   = Arrow S.empty Nothing
         ft      = E.typeOf l `arrow` E.typeOf r `arrow` E.Prim E.Bool
         eq      = qualName $ VName "==" (-1)
@@ -871,7 +733,7 @@ generateCond :: E.Pattern -> E.Exp -> E.Exp
 generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
   where conds = mapMaybe ((<*> pure e) . fst) $ generateCond' p
 
-        generateCond' :: E.Pattern -> [(Maybe (E.Exp -> E.Exp), CompType)]
+        generateCond' :: E.Pattern -> [(Maybe (E.Exp -> E.Exp), PatternType)]
         generateCond' (E.TuplePattern ps loc) = generateCond' (E.RecordPattern fs loc)
           where fs = zipWith (\i p' -> (nameFromString (show i), p')) ([1..] :: [Integer]) ps
         generateCond' (E.RecordPattern fs _) = concatMap instCond holes
@@ -885,12 +747,12 @@ generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
                 instCond (condHoles, f) = map (projectHole f) condHoles
         generateCond' (E.PatternParens p' _) = generateCond' p'
         generateCond' (E.Id _ (Info t) _) =
-          [(Nothing, removeShapeAnnotations t)]
+          [(Nothing, t)]
         generateCond' (E.Wildcard (Info t) _)=
-          [(Nothing, removeShapeAnnotations t)]
+          [(Nothing, t)]
         generateCond' (E.PatternAscription p' _ _) = generateCond' p'
         generateCond' (E.PatternLit ePat (Info t) _) =
-          [(Just (eqExp ePat), removeShapeAnnotations t)]
+          [(Just (eqExp ePat), t)]
 
 
 generateCaseIf :: String -> E.Exp -> Case -> I.Body -> InternaliseM I.Exp
@@ -1023,6 +885,121 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc . I.Op =<< f w lam' nes' arrs
+
+internaliseGenReduce :: String
+                     -> E.Exp -> E.Exp -> E.Exp -> E.Exp -> E.Exp -> SrcLoc
+                     -> InternaliseM [SubExp]
+internaliseGenReduce desc hist op ne buckets img loc = do
+  ne' <- internaliseExp "gen_reduce_ne" ne
+  hist' <- internaliseExpToVars "gen_reduce_hist" hist
+  buckets' <- letExp "gen_reduce_buckets" . BasicOp . SubExp =<<
+              internaliseExp1 "gen_reduce_buckets" buckets
+  img' <- internaliseExpToVars "gen_reduce_img" img
+
+  -- reshape neutral element to have same size as the destination array
+  ne_shp <- forM (zip ne' hist') $ \(n, h) -> do
+    rowtype <- I.stripArray 1 <$> lookupType h
+    ensureShape asserting
+      "Row shape of destination array does not match shape of neutral element"
+      loc rowtype "gen_reduce_ne_right_shape" n
+  ne_ts <- mapM I.subExpType ne_shp
+  his_ts <- mapM lookupType hist'
+  op' <- internaliseFoldLambda internaliseLambda op ne_ts his_ts
+
+  -- reshape return type of bucket function to have same size as neutral element
+  -- (modulo the index)
+  bucket_param <- newParam "bucket_p" $ I.Prim int32
+  img_params <- mapM (newParam "img_p" . rowType) =<< mapM lookupType img'
+  let params = bucket_param : img_params
+      rettype = I.Prim int32 : ne_ts
+      body = mkBody mempty $ map (I.Var . paramName) params
+  body' <- localScope (scopeOfLParams params) $
+           ensureResultShape asserting
+           "Row shape of value array does not match row shape of gen_reduce target"
+           (srclocOf img) rettype body
+
+  -- get sizes of histogram and image arrays
+  w_hist <- arraysSize 0 <$> mapM lookupType hist'
+  w_img <- arraysSize 0 <$> mapM lookupType img'
+
+  -- Generate an assertion and reshapes to ensure that buckets' and
+  -- img' are the same size.
+  b_shape <- arrayShape <$> lookupType buckets'
+  let b_w = shapeSize 0 b_shape
+  cmp <- letSubExp "bucket_cmp" $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) b_w w_img
+  c <- assertingOne $
+    letExp "bucket_cert" $ I.BasicOp $
+    I.Assert cmp "length of index and value array does not match" (loc, mempty)
+  buckets'' <- certifying c $ letExp (baseString buckets') $
+    I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
+
+  letTupExp' desc $ I.Op $
+    I.GenReduce w_img [GenReduceOp w_hist hist' ne_shp op'] (I.Lambda params body' rettype) $ buckets'' : img'
+
+internaliseStreamMap :: String -> StreamOrd -> E.Exp -> E.Exp
+                     -> InternaliseM [SubExp]
+internaliseStreamMap desc o lam arr = do
+  arrs <- internaliseExpToVars "stream_input" arr
+  lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) []) []
+  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
+
+internaliseStreamRed :: String -> StreamOrd -> Commutativity
+                     -> E.Exp -> E.Exp -> E.Exp
+                     -> InternaliseM [SubExp]
+internaliseStreamRed desc o comm lam0 lam arr = do
+  arrs <- internaliseExpToVars "stream_input" arr
+  rowts <- mapM (fmap I.rowType . lookupType) arrs
+  (lam_params, lam_body) <-
+    internaliseStreamLambda internaliseLambda lam rowts
+  let (chunk_param, _, lam_val_params) =
+        partitionChunkedFoldParameters 0 lam_params
+
+  -- Synthesize neutral elements by applying the fold function
+  -- to an empty chunk.
+  letBindNames_ [I.paramName chunk_param] $
+    I.BasicOp $ I.SubExp $ constant (0::Int32)
+  forM_ lam_val_params $ \p ->
+    letBindNames_ [I.paramName p] $
+    I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
+    I.arrayDims $ I.paramType p
+  accs <- bodyBind =<< renameBody lam_body
+
+  acctps <- mapM I.subExpType accs
+  outsz  <- arraysSize 0 <$> mapM lookupType arrs
+  let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
+  lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
+  let lam0_acc_params = fst $ splitAt (length accs) $ I.lambdaParams lam0'
+  acc_params <- forM lam0_acc_params $ \p -> do
+    name <- newVName $ baseString $ I.paramName p
+    return p { I.paramName = name }
+
+  body_with_lam0 <-
+    ensureResultShape asserting "shape of result does not match shape of initial value"
+    (srclocOf lam0) acctps <=< insertStmsM $ do
+      lam_res <- bodyBind lam_body
+
+      let consumed = consumedByLambda $ Alias.analyseLambda lam0'
+          copyIfConsumed p (I.Var v)
+            | I.paramName p `S.member` consumed =
+                letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
+          copyIfConsumed _ x = return x
+
+      accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
+      lam_res' <- ensureArgShapes asserting
+                  "shape of chunk function result does not match shape of initial value"
+                  (srclocOf lam) [] (map I.typeOf $ I.lambdaParams lam0') lam_res
+      new_lam_res <- eLambda lam0' $ map eSubExp $ accs' ++ lam_res'
+      return $ resultBody new_lam_res
+
+  -- Make sure the chunk size parameter comes first.
+  let form = I.Parallel o comm lam0' accs
+      lam' = I.Lambda { lambdaParams = chunk_param : acc_params ++ lam_val_params
+                      , lambdaBody = body_with_lam0
+                      , lambdaReturnType = acctps }
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1204,27 +1181,7 @@ internaliseLambda (E.Lambda tparams params body _ (Info (_, rettype)) loc) rowty
     mapM_ (uncurry (internaliseDimConstant loc)) $ pcm<>rcm
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda E.OpSection{} _ = fail "internaliseLambda: unexpected OpSection"
-
-internaliseLambda E.OpSectionLeft{} _ = fail "internaliseLambda: unexpected OpSectionLeft"
-
-internaliseLambda E.OpSectionRight{} _ = fail "internaliseLambda: unexpected OpSectionRight"
-
-internaliseLambda e rowtypes = do
-  (_, _, remaining_params_ts) <- findFuncall e
-  (params, param_args) <- fmap unzip $ forM remaining_params_ts $ \et -> do
-    name <- newVName "not_curried"
-    return (E.Id name (Info $ E.vacuousShapeAnnotations $ et `setAliases` mempty) loc,
-            E.Var (E.qualName name)
-             (Info (et `setAliases` mempty)) loc)
-  let rettype = E.typeOf e
-      body = foldl (\f arg -> E.Apply f arg (Info E.Observe)
-                              (Info $ E.vacuousShapeAnnotations rettype) loc)
-                   e
-                   param_args
-      rettype' = E.vacuousShapeAnnotations $ rettype `E.setAliases` ()
-  internaliseLambda (E.Lambda [] params body Nothing (Info (mempty, rettype')) loc) rowtypes
-  where loc = srclocOf e
+internaliseLambda e _ = fail $ "internaliseLambda: unexpected expression:\n" ++ pretty e
 
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()
 internaliseDimConstant loc fname name =
@@ -1411,6 +1368,60 @@ isOverloadedFunction qname args loc = do
       (++) <$> internaliseExp (desc ++ "_zip_x") x
            <*> internaliseExp (desc ++ "_zip_y") y
 
+    handle [TupLit [lam, arr] _] "map" = Just $ \desc -> do
+      arr' <- internaliseExpToVars "map_arr" arr
+      lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
+      w <- arraysSize 0 <$> mapM lookupType arr'
+      letTupExp' desc $ I.Op $
+        I.Screma w (I.mapSOAC lam') arr'
+
+    handle [TupLit [lam, arr] _] "filter" = Just $ \_desc -> do
+      arrs <- internaliseExpToVars "filter_input" arr
+      lam' <- internalisePartitionLambda internaliseLambda 1 lam $ map I.Var arrs
+      uncurry (++) <$> partitionWithSOACS 1 lam' arrs
+
+    handle [TupLit [k, lam, arr] _] "partition" = do
+      k' <- fromIntegral <$> isInt32 k
+      Just $ \_desc -> do
+        arrs <- internaliseExpToVars "partition_input" arr
+        lam' <- internalisePartitionLambda internaliseLambda k' lam $ map I.Var arrs
+        uncurry (++) <$> partitionWithSOACS k' lam' arrs
+        where isInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
+              isInt32 (IntLit k' (Info (E.Prim (Signed Int32))) _) = Just $ fromInteger k'
+              isInt32 _ = Nothing
+
+    handle [TupLit [lam, ne, arr] _] "reduce" = Just $ \desc ->
+      internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
+      where reduce w red_lam nes arrs =
+              I.Screma w <$>
+              I.reduceSOAC Noncommutative red_lam nes <*> pure arrs
+
+    handle [TupLit [lam, ne, arr] _] "reduce_comm" = Just $ \desc ->
+      internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
+      where reduce w red_lam nes arrs =
+              I.Screma w <$>
+              I.reduceSOAC Commutative red_lam nes <*> pure arrs
+
+    handle [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
+      internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)
+      where reduce w scan_lam nes arrs =
+              I.Screma w <$> I.scanSOAC scan_lam nes <*> pure arrs
+
+    handle [TupLit [op, f, arr] _] "stream_red" = Just $ \desc ->
+      internaliseStreamRed desc InOrder Noncommutative op f arr
+
+    handle [TupLit [op, f, arr] _] "stream_red_per" = Just $ \desc ->
+      internaliseStreamRed desc Disorder Commutative op f arr
+
+    handle [TupLit [f, arr] _] "stream_map" = Just $ \desc ->
+      internaliseStreamMap desc InOrder f arr
+
+    handle [TupLit [f, arr] _] "stream_map_per" = Just $ \desc ->
+      internaliseStreamMap desc Disorder f arr
+
+    handle [TupLit [dest, op, ne, buckets, img] _] "gen_reduce" = Just $ \desc ->
+      internaliseGenReduce desc dest op ne buckets img loc
+
     handle [x] "unzip" = Just $ flip internaliseExp x
     handle [x] "trace" = Just $ flip internaliseExp x
     handle [x] "break" = Just $ flip internaliseExp x
@@ -1556,7 +1567,7 @@ constFunctionArgs loc = mapM arg
           safety <- askSafety
           se <- letSubExp (baseString name ++ "_arg") $
                 I.Apply fname [] [I.Prim I.int32] (safety, loc, [])
-          return (se, I.Observe, I.Prim I.int32)
+          return (se, I.ObservePrim, I.Prim I.int32)
 
 funcall :: String -> QualName VName -> [SubExp] -> SrcLoc
         -> InternaliseM ([SubExp], [I.ExtType])
@@ -1567,7 +1578,7 @@ funcall desc (QualName _ fname) args loc = do
   argts <- mapM subExpType args
   closure_ts <- mapM lookupType closure
   shapeargs <- argShapes shapes value_paramts argts
-  let diets = const_ds ++ replicate (length closure + length shapeargs) I.Observe ++
+  let diets = const_ds ++ replicate (length closure + length shapeargs) I.ObservePrim ++
               map I.diet value_paramts
       constOrShape = const $ I.Prim int32
       paramts = map constOrShape constargs ++ closure_ts ++

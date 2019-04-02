@@ -31,7 +31,6 @@ module Language.Futhark.Syntax
   , TypeArgExp(..)
   , RecordArrayElemTypeBase(..)
   , ArrayElemTypeBase(..)
-  , CompType
   , PatternType
   , StructType
   , Diet(..)
@@ -54,7 +53,6 @@ module Language.Futhark.Syntax
   , CaseBase(..)
   , LoopFormBase (..)
   , PatternBase(..)
-  , StreamForm(..)
 
   -- * Module language
   , SpecBase(..)
@@ -113,17 +111,12 @@ class (Show vn,
        Show (f String),
        Show (f [VName]),
        Show (f PatternType),
-       Show (f CompType),
-       Show (f (TypeBase () ())),
        Show (f Int),
-       Show (f [TypeBase () ()]),
        Show (f StructType),
        Show (f (Aliasing, StructType)),
-       Show (f ([TypeBase () ()], PatternType)),
        Show (f (M.Map VName VName)),
        Show (f [RecordArrayElemTypeBase ()]),
-       Show (f Uniqueness),
-       Show (f ([CompType], CompType))) => Showable f vn where
+       Show (f Uniqueness)) => Showable f vn where
 
 -- | No information functor.  Usually used for placeholder type- or
 -- aliasing information.
@@ -397,13 +390,13 @@ data Alias = AliasBound { aliasVar :: VName }
 -- aliased.
 type Aliasing = S.Set Alias
 
--- | A type with aliasing information and no shape annotations, used
--- for describing the type of a computation.
-type CompType = TypeBase () Aliasing
-
 -- | A type with aliasing information and shape annotations, used for
--- describing the type of a pattern.
+-- describing the type patterns and expressions.
 type PatternType = TypeBase (DimDecl VName) Aliasing
+
+-- | A "structural" type with shape annotations and no aliasing
+-- information, used for declarations.
+type StructType = TypeBase (DimDecl VName) ()
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
@@ -434,10 +427,6 @@ data TypeArgExp vn = TypeArgExpDim (DimDecl vn) SrcLoc
 instance Located (TypeArgExp vn) where
   locOf (TypeArgExpDim _ loc) = locOf loc
   locOf (TypeArgExpType t)    = locOf t
-
--- | A "structural" type with shape annotations and no aliasing
--- information, used for declarations.
-type StructType = TypeBase (DimDecl VName) ()
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
@@ -473,7 +462,7 @@ data Value = PrimValue !PrimValue
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
 data IdentBase f vn = Ident { identName   :: vn
-                            , identType   :: f CompType
+                            , identType   :: f PatternType
                             , identSrcLoc :: SrcLoc
                             }
 deriving instance Showable f vn => Show (IdentBase f vn)
@@ -579,10 +568,10 @@ instance Traversable QualName where
 data ExpBase f vn =
               Literal PrimValue SrcLoc
 
-            | IntLit Integer (f (TypeBase () ())) SrcLoc
+            | IntLit Integer (f PatternType) SrcLoc
             -- ^ A polymorphic integral literal.
 
-            | FloatLit Double (f (TypeBase () ())) SrcLoc
+            | FloatLit Double (f PatternType) SrcLoc
             -- ^ A polymorphic decimal literal.
 
             | Parens (ExpBase f vn) SrcLoc
@@ -596,15 +585,15 @@ data ExpBase f vn =
             | RecordLit [FieldBase f vn] SrcLoc
             -- ^ Record literals, e.g. @{x=2,y=3,z}@.
 
-            | ArrayLit  [ExpBase f vn] (f CompType) SrcLoc
+            | ArrayLit  [ExpBase f vn] (f PatternType) SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the row type of the rows of the array.
 
-            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) (f CompType) SrcLoc
+            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) (f PatternType) SrcLoc
 
             | Var (QualName vn) (f PatternType) SrcLoc
 
-            | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
+            | Ascript (ExpBase f vn) (TypeDeclBase f vn) (f PatternType) SrcLoc
             -- ^ Type ascription: @e : t@.
 
             | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
@@ -612,7 +601,7 @@ data ExpBase f vn =
             | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
               (ExpBase f vn) SrcLoc
 
-            | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
+            | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
 
             | Apply (ExpBase f vn) (ExpBase f vn) (f Diet) (f PatternType) SrcLoc
 
@@ -647,69 +636,18 @@ data ExpBase f vn =
               (ExpBase f vn, f StructType) (ExpBase f vn, f StructType)
               (f PatternType) SrcLoc
 
-            | Project Name (ExpBase f vn) (f CompType) SrcLoc
+            | Project Name (ExpBase f vn) (f PatternType) SrcLoc
 
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
                       [DimIndexBase f vn] (ExpBase f vn)
                       (ExpBase f vn) SrcLoc
 
-            | Index (ExpBase f vn) [DimIndexBase f vn] (f CompType) SrcLoc
+            | Index (ExpBase f vn) [DimIndexBase f vn] (f PatternType) SrcLoc
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
             | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
-
-            -- Second-Order Array Combinators accept curried and
-            -- anonymous functions as first params.
-            | Map (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
-             -- ^ @map (+1) [1, 2, ..., n] = [2, 3, ..., n+1]@.
-
-            | Reduce Commutativity (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @reduce (+) 0 ([1,2,...,n]) = (0+1+2+...+n)@.
-
-            | GenReduce (ExpBase f vn) (ExpBase f vn) (ExpBase f vn)
-                        (ExpBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @gen_reduce [1,1,1] (+) 0 [1,1,1] [1,1,1] = [4,1,1]@
-
-            | Scan (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @scan (+) 0 ([ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
-
-            | Filter (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ Return those elements of the array that satisfy the
-            -- predicate.
-
-            | Partition Int (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ @partition k f a@, where @f@ returns an integer,
-            -- returns a tuple @(a', is)@ that describes a
-            -- partitioning of @a@ into @n@ equivalence classes.
-            -- Here, @a'@ is a re-ordering of @a@, and @is@ is an
-            -- array of @k@ offsets into @a'@.
-
-            | Stream (StreamForm f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ Streaming: intuitively, this gives a size-parameterized
-            -- composition for SOACs that cannot be fused, e.g., due to scan.
-            -- For example, assuming @A : [int], f : int->int, g : real->real@,
-            -- the code: @let x = map(f,A) in let y = scan(op+,0,x) in map(g,y)@
-            -- can be re-written (streamed) in the source-Futhark language as:
-            -- @let (acc, z) =@
-            -- @  stream (fn (int,[real]) (real chunk, real acc, [int] a) =>@
-            -- @            let x = map (f,         A )@
-            -- @            let y0= scan(op +, 0,   x )@
-            -- @            let y = map (op +(acc), y0)@
-            -- @            ( acc+y0[chunk-1], map(g, y) )@
-            -- @         ) 0 A@
-            -- where (i)  @chunk@ is a symbolic int denoting the chunk
-            -- size, (ii) @0@ is the initial value of the accumulator,
-            -- which allows the streaming of @scan@.
-            -- Finally, the unnamed function (@fn...@) implements the a fold that:
-            -- computes the accumulator of @scan@, as defined inside its body, AND
-            -- implicitly concatenates each of the result arrays across
-            -- the iteration space.
-            -- In essence, sequential codegen can choose chunk = 1 and thus
-            -- eliminate the SOACs on the outermost level, while parallel codegen
-            -- may choose the maximal chunk size that still satisfies the memory
-            -- requirements of the device.
 
             | Unsafe (ExpBase f vn) SrcLoc
             -- ^ Explore the Danger Zone and elide safety checks on
@@ -722,17 +660,13 @@ data ExpBase f vn =
             -- and return the value of the second expression if it
             -- does.
 
-            | VConstr0 Name (f CompType) SrcLoc
+            | VConstr0 Name (f PatternType) SrcLoc
             -- ^ An enum element, e.g., @#foo@.
 
-            | Match (ExpBase f vn) [CaseBase f vn] (f CompType) SrcLoc
+            | Match (ExpBase f vn) [CaseBase f vn] (f PatternType) SrcLoc
             -- ^ A match expression.
 
 deriving instance Showable f vn => Show (ExpBase f vn)
-
-data StreamForm f vn = MapLike    StreamOrd
-                     | RedLike    StreamOrd Commutativity (ExpBase f vn)
-deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc)                = locOf loc
@@ -748,7 +682,7 @@ instance Located (ExpBase f vn) where
   locOf (BinOp _ _ _ _ _ pos)          = locOf pos
   locOf (If _ _ _ _ pos)               = locOf pos
   locOf (Var _ _ loc)                  = locOf loc
-  locOf (Ascript _ _ loc)              = locOf loc
+  locOf (Ascript _ _ _ loc)            = locOf loc
   locOf (Negate _ pos)                 = locOf pos
   locOf (Apply _ _ _ _ pos)            = locOf pos
   locOf (LetPat _ _ _ _ pos)           = locOf pos
@@ -757,12 +691,6 @@ instance Located (ExpBase f vn) where
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
   locOf (RecordUpdate _ _ _ _ pos)     = locOf pos
-  locOf (Map _ _ _ loc)                = locOf loc
-  locOf (Reduce _ _ _ _ pos)           = locOf pos
-  locOf (GenReduce _ _ _ _ _ pos)      = locOf pos
-  locOf (Scan _ _ _ pos)               = locOf pos
-  locOf (Filter _ _ pos)               = locOf pos
-  locOf (Partition _ _ _ loc)          = locOf loc
   locOf (Lambda _ _ _ _ _ loc)         = locOf loc
   locOf (OpSection _ _ loc)            = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc
@@ -770,7 +698,6 @@ instance Located (ExpBase f vn) where
   locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (IndexSection _ _ loc)         = locOf loc
   locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
-  locOf (Stream _ _ _  pos)            = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
   locOf (VConstr0 _ _ loc)             = locOf loc
@@ -778,7 +705,7 @@ instance Located (ExpBase f vn) where
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
-                    | RecordFieldImplicit vn (f CompType) SrcLoc
+                    | RecordFieldImplicit vn (f PatternType) SrcLoc
 
 deriving instance Showable f vn => Show (FieldBase f vn)
 

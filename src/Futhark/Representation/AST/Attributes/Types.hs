@@ -301,7 +301,7 @@ rearrangeType perm t =
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
 diet :: TypeBase shape Uniqueness -> Diet
-diet (Prim _) = Observe
+diet (Prim _) = ObservePrim
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
 diet Mem{} = Observe

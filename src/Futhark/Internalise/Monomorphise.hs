@@ -180,7 +180,7 @@ transformExp (RecordLit fs loc) =
         transformField (RecordFieldImplicit v t _) = do
           t' <- traverse transformType t
           transformField $ RecordFieldExplicit (baseName v)
-            (Var (qualName v) (vacuousShapeAnnotations <$> t') loc) loc
+            (Var (qualName v) t' loc) loc
 
 transformExp (ArrayLit es tp loc) =
   ArrayLit <$> mapM transformExp es <*> pure tp <*> pure loc
@@ -197,7 +197,7 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
     Just fs -> do
       let toField (f, (f_v, f_t)) = do
             f_t' <- transformType f_t
-            let f_v' = Var (qualName f_v) (Info $ vacuousShapeAnnotations f_t') loc
+            let f_v' = Var (qualName f_v) (Info f_t') loc
             return $ RecordFieldExplicit f f_v' loc
       RecordLit <$> mapM toField (M.toList fs) <*> pure loc
     Nothing -> do
@@ -205,8 +205,8 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
       t' <- transformType t
       return $ Var (QualName qs fname') (Info t') loc
 
-transformExp (Ascript e tp loc) =
-  Ascript <$> transformExp e <*> pure tp <*> pure loc
+transformExp (Ascript e tp t loc) =
+  Ascript <$> transformExp e <*> pure tp <*> pure t <*> pure loc
 
 transformExp (LetPat tparams pat e1 e2 loc) = do
   (pat', rr) <- expandRecordPattern pat
@@ -228,7 +228,7 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
   | otherwise =
       transformExp $ LetPat [] (Id fname (Info ft) loc) lam e loc
         where lam = Lambda tparams params body Nothing (Info (mempty, ret)) loc
-              ft = foldFunType (map (vacuousShapeAnnotations . patternType) params) $ fromStruct ret
+              ft = foldFunType (map patternType params) $ fromStruct ret
 
 transformExp (If e1 e2 e3 tp loc) = do
   e1' <- transformExp e1
@@ -237,53 +237,11 @@ transformExp (If e1 e2 e3 tp loc) = do
   tp' <- traverse transformType tp
   return $ If e1' e2' e3' tp' loc
 
-transformExp (Apply e1 e2 d tp loc) =
-  -- We handle on an ad-hoc basis certain polymorphic higher-order
-  -- intrinsics here.  They can only be used in very particular ways,
-  -- or the compiler will fail.  In practice they will only be used
-  -- once, in the basis library, to define normal functions.
-  case (e1, e2) of
-    (Var v _ _, TupLit [op, ne, arr] _)
-      | intrinsic "reduce" v ->
-          transformExp $ Reduce Noncommutative op ne arr loc
-      | intrinsic "reduce_comm" v ->
-          transformExp $ Reduce Commutative op ne arr loc
-      | intrinsic "scan" v ->
-          transformExp $ Scan op ne arr loc
-    (Var v _ _, TupLit [f, arr] _)
-      | intrinsic "map" v ->
-          transformExp $ Map f arr (removeShapeAnnotations <$> tp) loc
-      | intrinsic "filter" v ->
-          transformExp $ Filter f arr loc
-    (Var v _ _, TupLit [k, f, arr] _)
-      | intrinsic "partition" v,
-        Just k' <- isInt32 k ->
-          transformExp $ Partition (fromIntegral k') f arr loc
-    (Var v _ _, TupLit [op, f, arr] _)
-      | intrinsic "stream_red" v ->
-          transformExp $ Stream (RedLike InOrder Noncommutative op) f arr loc
-      | intrinsic "stream_red_per" v ->
-          transformExp $ Stream (RedLike Disorder Commutative op) f arr loc
-    (Var v _ _, TupLit [f, arr] _)
-      | intrinsic "stream_map" v ->
-          transformExp $ Stream (MapLike InOrder) f arr loc
-      | intrinsic "stream_map_per" v ->
-          transformExp $ Stream (MapLike Disorder) f arr loc
-    (Var v _ _, TupLit [dest, op, ne, buckets, img] _)
-      | intrinsic "gen_reduce" v ->
-          transformExp $ GenReduce dest op ne buckets img loc
-
-    _ -> do
-      e1' <- transformExp e1
-      e2' <- transformExp e2
-      tp' <- traverse transformType tp
-      return $ Apply e1' e2' d tp' loc
-  where intrinsic s (QualName _ v) =
-          baseTag v <= maxIntrinsicTag && baseName v == nameFromString s
-
-        isInt32 (Literal (SignedValue (Int32Value k)) _) = Just k
-        isInt32 (IntLit k (Info (Prim (Signed Int32))) _) = Just $ fromInteger k
-        isInt32 _ = Nothing
+transformExp (Apply e1 e2 d tp loc) = do
+  e1' <- transformExp e1
+  e2' <- transformExp e2
+  tp' <- traverse transformType tp
+  return $ Apply e1' e2' d tp' loc
 
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
@@ -334,7 +292,7 @@ transformExp (Project n e tp loc) = do
     _          -> return Nothing
   case maybe_fs of
     Just m | Just (v, _) <- M.lookup n m ->
-               return $ Var (qualName v) (vacuousShapeAnnotations <$> tp) loc
+               return $ Var (qualName v) tp loc
     _ -> do
       e' <- transformExp e
       return $ Project n e' tp loc
@@ -355,37 +313,6 @@ transformExp (Update e1 idxs e2 loc) =
 transformExp (RecordUpdate e1 fs e2 t loc) =
   RecordUpdate <$> transformExp e1 <*> pure fs
                <*> transformExp e2 <*> pure t <*> pure loc
-
-transformExp (Map e1 es t loc) =
-  Map <$> transformExp e1 <*> transformExp es <*> pure t <*> pure loc
-
-transformExp (Reduce comm e1 e2 e3 loc) =
-  Reduce comm <$> transformExp e1 <*> transformExp e2
-              <*> transformExp e3 <*> pure loc
-
-transformExp (Scan e1 e2 e3 loc) =
-  Scan <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc
-
-transformExp (Filter e1 e2 loc) =
-  Filter <$> transformExp e1 <*> transformExp e2 <*> pure loc
-
-transformExp (Partition k f e0 loc) =
-  Partition k <$> transformExp f <*> transformExp e0 <*> pure loc
-
-transformExp (Stream form e1 e2 loc) = do
-  form' <- case form of
-             MapLike _         -> return form
-             RedLike so comm e -> RedLike so comm <$> transformExp e
-  Stream form' <$> transformExp e1 <*> transformExp e2 <*> pure loc
-
-transformExp (GenReduce e1 e2 e3 e4 e5 loc) =
-  GenReduce
-    <$> transformExp e1 -- hist
-    <*> transformExp e2 -- operator
-    <*> transformExp e3 -- neutral element
-    <*> transformExp e4 -- buckets
-    <*> transformExp e5 -- input image
-    <*> pure loc
 
 transformExp (Unsafe e1 loc) =
   Unsafe <$> transformExp e1 <*> pure loc
@@ -415,7 +342,7 @@ desugarBinOpSection qn e_left e_right t xtype ytype rettype loc = do
   (e1, p1) <- makeVarParam e_left $ fromStruct xtype
   (e2, p2) <- makeVarParam e_right $ fromStruct ytype
   let body = BinOp qn (Info t) (e1, Info xtype) (e2, Info ytype) (Info rettype) loc
-      rettype' = vacuousShapeAnnotations $ toStruct rettype
+      rettype' = toStruct rettype
   return $ Lambda [] (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
 
   where makeVarParam (Just e) _ = return (e, [])
@@ -440,9 +367,8 @@ desugarProjectSection  _ t _ = error $ "desugarOpSection: not a function type: "
 desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Arrow _ _ t1 t2) loc = do
   p <- newVName "index_i"
-  let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2') loc
+  let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2) loc
   return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
-  where t2' = removeShapeAnnotations t2
 desugarIndexSection  _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()
@@ -517,8 +443,6 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
         mapper substs = ASTMapper { mapOnExp         = astMap $ mapper substs
                                   , mapOnName        = pure
                                   , mapOnQualName    = pure
-                                  , mapOnType        = pure . applySubst substs
-                                  , mapOnCompType    = pure . applySubst substs
                                   , mapOnStructType  = pure . applySubst substs
                                   , mapOnPatternType = pure . applySubst substs
                                   }
@@ -600,11 +524,6 @@ removeTypeVariables entry valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _)
           mapOnExp         = astMap mapper
         , mapOnName        = pure
         , mapOnQualName    = pure
-        , mapOnType        = pure . removeShapeAnnotations .
-                             substituteTypes subs . vacuousShapeAnnotations
-        , mapOnCompType    = pure . removeShapeAnnotations .
-                             substituteTypes subs .
-                             vacuousShapeAnnotations
         , mapOnStructType  = pure . substituteTypes subs
         , mapOnPatternType = pure . substituteTypes subs
         }
@@ -616,7 +535,7 @@ removeTypeVariables entry valbind@(ValBind _ _ _ (Info rettype) _ pats body _ _)
                  , valBindBody    = body'
                  }
 
-removeTypeVariablesInType :: TypeBase dim () -> MonoM (TypeBase () ())
+removeTypeVariablesInType :: TypeBase () () -> MonoM (TypeBase () ())
 removeTypeVariablesInType t = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   return $ removeShapeAnnotations $ substituteTypes subs $ vacuousShapeAnnotations t

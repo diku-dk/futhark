@@ -35,8 +35,6 @@ data ASTMapper m = ASTMapper {
     mapOnExp         :: ExpBase Info VName -> m (ExpBase Info VName)
   , mapOnName        :: VName -> m VName
   , mapOnQualName    :: QualName VName -> m (QualName VName)
-  , mapOnType        :: TypeBase () () -> m (TypeBase () ())
-  , mapOnCompType    :: CompType -> m CompType
   , mapOnStructType  :: StructType -> m StructType
   , mapOnPatternType :: PatternType -> m PatternType
   }
@@ -55,9 +53,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap _ (Literal val loc) =
     pure $ Literal val loc
   astMap tv (IntLit val t loc) =
-    IntLit val <$> traverse (mapOnType tv) t <*> pure loc
+    IntLit val <$> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (FloatLit val t loc) =
-    FloatLit val <$> traverse (mapOnType tv) t <*> pure loc
+    FloatLit val <$> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Parens e loc) =
     Parens <$> mapOnExp tv e <*> pure loc
   astMap tv (QualParens name e loc) =
@@ -67,12 +65,13 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (RecordLit fields loc) =
     RecordLit <$> astMap tv fields <*> pure loc
   astMap tv (ArrayLit els t loc) =
-    ArrayLit <$> mapM (mapOnExp tv) els <*> traverse (mapOnCompType tv) t <*> pure loc
+    ArrayLit <$> mapM (mapOnExp tv) els <*> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Range start next end t loc) =
     Range <$> mapOnExp tv start <*> traverse (mapOnExp tv) next <*>
-    traverse (mapOnExp tv) end <*> traverse (mapOnCompType tv) t <*> pure loc
-  astMap tv (Ascript e tdecl loc) =
-    Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
+    traverse (mapOnExp tv) end <*> traverse (mapOnPatternType tv) t <*> pure loc
+  astMap tv (Ascript e tdecl t loc) =
+    Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*>
+    traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (BinOp fname t (x,xt) (y,yt) (Info rt) loc) =
     BinOp <$> mapOnQualName tv fname <*> traverse (mapOnPatternType tv) t <*>
     ((,) <$> mapOnExp tv x <*> traverse (mapOnStructType tv) xt) <*>
@@ -82,7 +81,7 @@ instance ASTMappable (ExpBase Info VName) where
     Negate <$> mapOnExp tv x <*> pure loc
   astMap tv (If c texp fexp t loc) =
     If <$> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
-    traverse (mapOnCompType tv) t <*> pure loc
+    traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Apply f arg d (Info t) loc) =
     Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*>
     pure d <*> (Info <$> mapOnPatternType tv t) <*>
@@ -109,40 +108,17 @@ instance ASTMappable (ExpBase Info VName) where
     RecordUpdate <$> mapOnExp tv src <*> pure fs <*>
     mapOnExp tv v <*> (Info <$> mapOnPatternType tv t) <*> pure loc
   astMap tv (Project field e t loc) =
-    Project field <$> mapOnExp tv e <*> traverse (mapOnCompType tv) t <*> pure loc
+    Project field <$> mapOnExp tv e <*> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Index arr idxexps t loc) =
     pure Index <*>
          astMap tv arr <*>
          mapM (astMap tv) idxexps <*>
-         traverse (mapOnCompType tv) t <*>
+         traverse (mapOnPatternType tv) t <*>
          pure loc
-  astMap tv (Map fun e t loc) =
-    Map <$> mapOnExp tv fun <*> mapOnExp tv e <*>
-    traverse (mapOnCompType tv) t <*> pure loc
-  astMap tv (Reduce comm fun startexp arrexp loc) =
-    Reduce comm <$> mapOnExp tv fun <*>
-    mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
-  astMap tv (GenReduce hist op ne bfun img loc) =
-    GenReduce <$> mapOnExp tv hist <*> mapOnExp tv op <*> mapOnExp tv ne
-    <*> mapOnExp tv bfun <*> mapOnExp tv img <*> pure loc
   astMap tv (Unsafe e loc) =
     Unsafe <$> mapOnExp tv e <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
     Assert <$> mapOnExp tv e1 <*> mapOnExp tv e2 <*> pure desc <*> pure loc
-  astMap tv (Scan fun startexp arrexp loc) =
-    pure Scan <*> mapOnExp tv fun <*>
-         mapOnExp tv startexp <*> mapOnExp tv arrexp <*>
-         pure loc
-  astMap tv (Filter fun arrexp loc) =
-    pure Filter <*> mapOnExp tv fun <*> mapOnExp tv arrexp <*> pure loc
-  astMap tv (Partition k fun arrexp loc) =
-    Partition k <$> mapOnExp tv fun <*> mapOnExp tv arrexp <*> pure loc
-  astMap tv (Stream form fun arr loc) =
-    pure Stream <*> mapOnStreamForm form <*> mapOnExp tv fun <*>
-         mapOnExp tv arr <*> pure loc
-    where mapOnStreamForm (MapLike o) = pure $ MapLike o
-          mapOnStreamForm (RedLike o comm lam) =
-              RedLike o comm <$> mapOnExp tv lam
   astMap tv (Lambda tparams params body ret t loc) =
     Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*>
@@ -172,10 +148,10 @@ instance ASTMappable (ExpBase Info VName) where
     mapOnExp tv mergeexp <*> astMap tv form <*>
     mapOnExp tv loopbody <*> pure loc
   astMap tv (VConstr0 name t loc) =
-    VConstr0 name <$> traverse (mapOnCompType tv) t <*> pure loc
+    VConstr0 name <$> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Match e cases t loc) =
     Match <$> mapOnExp tv e <*> astMap tv cases
-          <*> traverse (mapOnCompType tv) t <*> pure loc
+          <*> traverse (mapOnPatternType tv) t <*> pure loc
 
 instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (For i bound) = For <$> astMap tv i <*> astMap tv bound
@@ -267,14 +243,6 @@ traverseTypeArg :: Applicative f =>
 traverseTypeArg _ g (TypeArgDim d loc) = TypeArgDim <$> g d <*> pure loc
 traverseTypeArg f g (TypeArgType t loc) = TypeArgType <$> traverseType f g pure t <*> pure loc
 
-instance ASTMappable (TypeBase () ()) where
-  astMap tv = traverseType f pure pure
-    where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
-
-instance ASTMappable CompType where
-  astMap tv = traverseType f pure (astMap tv)
-    where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
-
 instance ASTMappable StructType where
   astMap tv = traverseType f (astMap tv) pure
     where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
@@ -289,7 +257,7 @@ instance ASTMappable (TypeDeclBase Info VName) where
 
 instance ASTMappable (IdentBase Info VName) where
   astMap tv (Ident name (Info t) loc) =
-    Ident <$> mapOnName tv name <*> (Info <$> mapOnCompType tv t) <*> pure loc
+    Ident <$> mapOnName tv name <*> (Info <$> mapOnPatternType tv t) <*> pure loc
 
 instance ASTMappable (PatternBase Info VName) where
   astMap tv (Id name (Info t) loc) =
@@ -312,7 +280,7 @@ instance ASTMappable (FieldBase Info VName) where
     RecordFieldExplicit name <$> mapOnExp tv e <*> pure loc
   astMap tv (RecordFieldImplicit name t loc) =
     RecordFieldImplicit <$> mapOnName tv name
-    <*> traverse (mapOnCompType tv) t <*> pure loc
+    <*> traverse (mapOnPatternType tv) t <*> pure loc
 
 instance ASTMappable (CaseBase Info VName) where
   astMap tv (CasePat pat e loc) =
