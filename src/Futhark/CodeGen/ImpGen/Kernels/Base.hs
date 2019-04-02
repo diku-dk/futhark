@@ -339,13 +339,13 @@ atomicUpdateLocking :: ExplicitMemorish lore =>
 
 atomicUpdateLocking lam
   | Just ops_and_ts <- splitOp lam,
-    all (\(_, t, _) -> primBitSize t == 32) ops_and_ts = Left $ \arrs bucket ->
+    all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts = Left $ \arrs bucket ->
   -- If the operator is a vectorised binary operator on 32-bit values,
   -- we can use a particularly efficient implementation. If the
   -- operator has an atomic implementation we use that, otherwise it
   -- is still a binary operator which can be implemented by atomic
   -- compare-and-swap if 32 bits.
-  forM_ (zip arrs ops_and_ts) $ \(a, (op, t, val)) -> do
+  forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
 
   -- Common variables.
   old <- dPrim "old" t
@@ -353,46 +353,25 @@ atomicUpdateLocking lam
   (arr', _a_space, bucket_offset) <- ImpGen.fullyIndexArray a bucket
 
   case opHasAtomicSupport old arr' bucket_offset op of
-    Just f -> sOp $ f val
+    Just f -> sOp $ f $ Imp.var y t
 
-    Nothing -> do
-      -- Code generation target:
-      --
-      -- old = d_his[idx];
-      -- do {
-      --   assumed = old;
-      --   tmp = OP::apply(val, assumed);
-      --   old = atomicCAS(&d_his[idx], assumed, tmp);
-      -- } while(assumed != old);
-      assumed <- dPrim "assumed" t
-      run_loop <- dPrimV "run_loop" 1
-      ImpGen.copyDWIM old [] (Var a) bucket
-
-      -- Critical section
-      x <- dPrim "x" t
-      y <- dPrim "y" t
-
-      -- While-loop: Try to insert your value
-      let (toBits, fromBits) =
-            case t of FloatType Float32 -> (\v -> Imp.FunExp "to_bits32" [v] int32,
-                                            \v -> Imp.FunExp "from_bits32" [v] t)
-                      _                 -> (id, id)
-      sWhile (Imp.var run_loop int32) $ do
-        assumed <-- Imp.var old t
-        x <-- val
-        y <-- Imp.var assumed t
-        x <-- Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
-        old_bits <- dPrim "old_bits" int32
-        sOp $ Imp.Atomic $
-          Imp.AtomicCmpXchg old_bits arr' bucket_offset
-          (toBits (Imp.var assumed t)) (toBits (Imp.var x t))
-        old <-- fromBits (Imp.var old_bits int32)
-        sWhen (toBits (Imp.var assumed t) .==. Imp.var old_bits int32)
-          (run_loop <-- 0)
+    Nothing -> atomicUpdateCAS t a old bucket x $
+      x <-- Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
 
   where opHasAtomicSupport old arr' bucket' bop = do
           let atomic f = Imp.Atomic . f old arr' bucket'
           atomic <$> Imp.atomicBinOp bop
+
+-- If the operator functions purely on single 32-bit values, we can
+-- use an implementation based on CAS, no matter what the operator
+-- does.
+atomicUpdateLocking op
+  | [Prim t] <- lambdaReturnType op,
+    [xp, _] <- lambdaParams op,
+    primBitSize t == 32 = Left $ \[arr] bucket -> do
+      old <- dPrim "old" t
+      atomicUpdateCAS t arr old bucket (paramName xp) $
+        ImpGen.compileBody' [xp] $ lambdaBody op
 
 atomicUpdateLocking op = Right $ \locking arrs bucket -> do
   old <- dPrim "old" int32
@@ -453,8 +432,45 @@ atomicUpdateLocking op = Right $ \locking arrs bucket -> do
     sOp Imp.MemFence
   where writeArray bucket arr val = ImpGen.copyDWIM arr bucket val []
 
+atomicUpdateCAS :: PrimType
+                -> VName -> VName
+                -> [Imp.Exp] -> VName
+                -> ImpGen.ImpM lore Imp.KernelOp ()
+                -> ImpGen.ImpM lore Imp.KernelOp ()
+atomicUpdateCAS t arr old bucket x do_op = do
+  -- Code generation target:
+  --
+  -- old = d_his[idx];
+  -- do {
+  --   assumed = old;
+  --   x = do_op(assumed, y);
+  --   old = atomicCAS(&d_his[idx], assumed, tmp);
+  -- } while(assumed != old);
+  assumed <- dPrim "assumed" t
+  run_loop <- dPrimV "run_loop" 1
+  ImpGen.copyDWIM old [] (Var arr) bucket
+
+  (arr', _a_space, bucket_offset) <- ImpGen.fullyIndexArray arr bucket
+
+  -- While-loop: Try to insert your value
+  let (toBits, fromBits) =
+        case t of FloatType Float32 -> (\v -> Imp.FunExp "to_bits32" [v] int32,
+                                        \v -> Imp.FunExp "from_bits32" [v] t)
+                  _                 -> (id, id)
+  sWhile (Imp.var run_loop int32) $ do
+    assumed <-- Imp.var old t
+    x <-- Imp.var assumed t
+    do_op
+    old_bits <- dPrim "old_bits" int32
+    sOp $ Imp.Atomic $
+      Imp.AtomicCmpXchg old_bits arr' bucket_offset
+      (toBits (Imp.var assumed t)) (toBits (Imp.var x t))
+    old <-- fromBits (Imp.var old_bits int32)
+    sWhen (toBits (Imp.var assumed t) .==. Imp.var old_bits int32)
+      (run_loop <-- 0)
+
 -- | Horizontally fission a lambda that models a binary operator.
-splitOp :: Attributes lore => Lambda lore -> Maybe [(BinOp, PrimType, Imp.Exp)]
+splitOp :: Attributes lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
 splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
   where n = length $ lambdaReturnType lam
         splitStm (Var res) = do
@@ -467,7 +483,7 @@ splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
           guard $ paramName xp == x
           guard $ paramName yp == y
           Prim t <- Just $ patElemType pe
-          return (op, t, Imp.var (paramName yp) t)
+          return (op, t, paramName xp, paramName yp)
         splitStm _ = Nothing
 
 computeKernelUses :: FreeIn a =>
