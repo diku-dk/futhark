@@ -16,7 +16,7 @@
 -- tree.  The implementation is rather tedious, but the interface is
 -- easy to use.
 --
--- A traversal of the Futhark syntax tree is expressed as a tuple of
+-- A traversal of the Futhark syntax tree is expressed as a record of
 -- functions expressing the operations to be performed on the various
 -- types of nodes.
 module Language.Futhark.Traversals
