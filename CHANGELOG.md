@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `reduce_by_index` is now a good bit faster on operators whose
+    arguments are two 32-bit values.
+
 ### Removed
 
 ### Changed

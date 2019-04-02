@@ -202,7 +202,7 @@ genRedKernel map_pes space ops body = do
                 vs_params = takeLast (length vs') $ lambdaParams lam
 
             sWhen bucket_in_bounds $ do
-              ImpGen.dLParams vs_params
+              ImpGen.dLParams $ lambdaParams lam
               vectorLoops [] (shapeDims shape) $ \is -> do
                 forM_ (zip vs_params vs') $ \(p, v) ->
                   ImpGen.copyDWIM (paramName p) [] v is
