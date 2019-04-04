@@ -295,7 +295,7 @@ instance MonadTypeChecker TermTypeM where
 
     t <- case M.lookup name $ scopeVtable scope of
       Nothing -> throwError $ TypeError loc $
-                 "Missing component for module " ++ quote (pretty qn) ++ "."
+                 "Unknown variable " ++ quote (pretty qn) ++ "."
 
       Just (WasConsumed wloc) -> useAfterConsume (baseName name) loc wloc
 
@@ -1551,7 +1551,7 @@ checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e
   let t = toStruct $ typeOf e'
-  tparams <- letGeneralise [] [t] mempty
+  tparams <- letGeneralise [] t mempty
   fixOverloadedTypes
   e'' <- updateExpTypes e'
   return (tparams, e'')
@@ -1646,6 +1646,8 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
 
         when (null params) $ nothingMustBeUnique loc rettype_structural
 
+        warnOnDubiousShapeAnnotations loc params'' retdecl_type
+
         return (Just retdecl', retdecl_type)
       Nothing
         | null params ->
@@ -1653,7 +1655,8 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
         | otherwise ->
             return (Nothing, inferReturnUniqueness params'' body_t)
 
-    tparams'' <- letGeneralise tparams' (rettype : map patternStructType params'') then_substs
+    let fun_t = foldFunType (map patternStructType params'') rettype
+    tparams'' <- letGeneralise tparams' fun_t then_substs
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
@@ -1691,6 +1694,22 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
         returnAliasing expected got =
           [(uniqueness expected, S.map aliasVar $ aliases got)]
+
+warnOnDubiousShapeAnnotations :: SrcLoc -> [Pattern] -> StructType -> TermTypeM ()
+warnOnDubiousShapeAnnotations loc params rettype =
+  onDubiousNames $ S.filter patternNameButNotParamName $
+  mconcat $ map typeDimNames $
+  rettype : map patternStructType params
+  where param_names = S.fromList $ mapMaybe (fst . patternParam) params
+        all_pattern_names = S.map identName $ mconcat $ map patIdentSet params
+        patternNameButNotParamName v = v `S.member` all_pattern_names && not (v `S.member` param_names)
+        onDubiousNames dubious
+          | S.null dubious = return ()
+          | otherwise = warn loc $ unlines
+                        [ "Size annotations in parameter and/or return type refers to the following names,"
+                        , "which will not be visible to the caller, because they are nested in tuples or records:"
+                        , "  " ++ intercalate ", " (map (quote . prettyName) $ S.toList dubious)
+                        , "To eliminate this warning, make these names parameters on their own."]
 
 checkGlobalAliases :: [Pattern] -> PatternType -> SrcLoc -> TermTypeM ()
 checkGlobalAliases params body_t loc = do
@@ -1762,10 +1781,10 @@ nothingMustBeUnique loc = check
         bad = typeError loc "A top-level constant cannot have a unique type."
 
 letGeneralise :: [TypeParam]
-              -> [StructType]
+              -> StructType
               -> Constraints
               -> TermTypeM [TypeParam]
-letGeneralise tparams ts then_substs = do
+letGeneralise tparams t then_substs = do
   now_substs <- getConstraints
   -- Candidates for let-generalisation are those type variables that
   --
@@ -1786,7 +1805,7 @@ letGeneralise tparams ts then_substs = do
                             overloadedTypeVars now_substs
 
   let new_substs = M.filterWithKey (\k _ -> not (k `S.member` keep_type_variables)) now_substs
-  tparams' <- closeOverTypes new_substs tparams ts
+  tparams' <- closeOverTypes new_substs tparams t
 
   -- We keep those type variables that were not closed over by
   -- let-generalisation.
@@ -1823,14 +1842,14 @@ checkFunBody body maybe_rettype _loc = do
 -- the constraints, and produce type parameters that close over them.
 -- Produce an error if the given list of type parameters is non-empty,
 -- yet does not cover all type variables in the type.
-closeOverTypes :: Constraints -> [TypeParam] -> [StructType] -> TermTypeM [TypeParam]
-closeOverTypes substs tparams ts =
+closeOverTypes :: Constraints -> [TypeParam] -> StructType -> TermTypeM [TypeParam]
+closeOverTypes substs tparams t =
   case tparams of
     [] -> fmap catMaybes $ mapM closeOver $ M.toList substs'
     _ -> do mapM_ checkClosedOver $ M.toList substs'
             return tparams
   where substs' = M.filterWithKey (\k _ -> k `S.member` visible) substs
-        visible = mconcat (map typeVars ts)
+        visible = typeVars t
 
         checkClosedOver (k, v)
           | not (canBeClosedOver v) ||
