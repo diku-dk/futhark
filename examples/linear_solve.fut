@@ -7,8 +7,6 @@
 --         [1.0f32, 2.0f32, 3.0f32] }
 -- output { [0.5f32, -0.5f32, 1.5f32] }
 
-import "/futlib/array"
-
 let Gauss_Jordan [n][m] (A: [n][m]f32): [n][m]f32 =
   loop (A) for i < n do
     let irow = A[0]

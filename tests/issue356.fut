@@ -169,8 +169,6 @@ module sobol_dir : {
 }
 
 
-module array = import "/futlib/array"
-
 module type sobol_dir = {
   val a: []u32
   val s: []i32
@@ -313,4 +311,4 @@ let main (n: i32) =
   let offs = 2323234545
   let a = S2.chunki offs n
   let b = map S2.independent (map (+offs) (iota n))
-  in (means (array.transpose (normss a)), means (array.transpose (normss b)))
+  in (means (transpose (normss a)), means (transpose (normss b)))
