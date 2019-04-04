@@ -295,7 +295,7 @@ instance MonadTypeChecker TermTypeM where
 
     t <- case M.lookup name $ scopeVtable scope of
       Nothing -> throwError $ TypeError loc $
-                 "Missing component for module " ++ quote (pretty qn) ++ "."
+                 "Unknown variable " ++ quote (pretty qn) ++ "."
 
       Just (WasConsumed wloc) -> useAfterConsume (baseName name) loc wloc
 
