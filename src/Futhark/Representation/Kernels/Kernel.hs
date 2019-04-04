@@ -605,6 +605,15 @@ consumedInKernelBody :: Aliased lore =>
 consumedInKernelBody (KernelBody attr stms _) =
   consumedInBody $ Body attr stms []
 
+typeCheckReduceLambda :: TC.Checkable lore => [Type] -> [Type] -> Lambda (Aliases lore) -> TC.TypeM lore ()
+typeCheckReduceLambda ts ne_ts red_op = do
+  let asArg t = (t, mempty)
+  TC.checkLambda red_op $ map asArg $ ne_ts ++ ne_ts
+  unless (lambdaReturnType red_op == ne_ts &&
+          take (length ne_ts) ts == ne_ts) $
+    TC.bad $ TC.TypeError
+    "SegRed: wrong type for reduction or neutral elements."
+
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
 typeCheckKernel (SegRed space _ red_op nes ts body) = do
@@ -613,14 +622,8 @@ typeCheckKernel (SegRed space _ red_op nes ts body) = do
 
   ne_ts <- mapM subExpType nes
 
-  let asArg t = (t, mempty)
   TC.binding (scopeOfKernelSpace space) $ do
-    TC.checkLambda red_op $ map asArg $ ne_ts ++ ne_ts
-    unless (lambdaReturnType red_op == ne_ts &&
-            take (length nes) ts == ne_ts) $
-      TC.bad $ TC.TypeError
-      "SegRed: wrong type for reduction or neutral elements."
-
+    typeCheckReduceLambda ts ne_ts red_op
     TC.checkLambdaBody ts body
 
 typeCheckKernel (SegGenRed space ops ts body) = do
@@ -816,23 +819,32 @@ data HostOp lore inner
     -- ^ The maximum size of some class.
   | CmpSizeLe Name SizeClass SubExp
     -- ^ Compare size (likely a threshold) with some Int32 value.
+  | Husk (Lambda lore) [SubExp] [Type] (Body lore)
   | HostOp inner
     -- ^ The arbitrary operation.
   deriving (Eq, Ord, Show)
 
-instance Substitute inner => Substitute (HostOp lore inner) where
+instance (Attributes lore, Substitute inner) => Substitute (HostOp lore inner) where
   substituteNames substs (HostOp op) =
     HostOp $ substituteNames substs op
   substituteNames substs (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass $ substituteNames substs x
+  substituteNames substs (Husk red_op nes ts body) =
+    Husk (substituteNames substs red_op) (substituteNames substs nes)
+         ts (substituteNames substs body)
   substituteNames _ x = x
 
-instance Rename inner => Rename (HostOp lore inner) where
+instance (Attributes lore, Rename inner) => Rename (HostOp lore inner) where
   rename (HostOp op) = HostOp <$> rename op
+  rename (Husk red_op nes ts body) = do
+    red_op' <- rename red_op
+    nes' <- rename nes
+    body' <- rename body
+    return $ Husk red_op' nes' ts body'
   rename (CmpSizeLe name sclass x) = CmpSizeLe name sclass <$> rename x
   rename x = pure x
 
-instance IsOp inner => IsOp (HostOp lore inner) where
+instance (Attributes lore, IsOp inner) => IsOp (HostOp lore inner) where
   safeOp (HostOp op) = safeOp op
   safeOp _ = True
   cheapOp (HostOp op) = cheapOp op
@@ -843,15 +855,17 @@ instance TypedOp inner => TypedOp (HostOp lore inner) where
   opType GetSizeMax{} = pure [Prim int32]
   opType CmpSizeLe{} = pure [Prim Bool]
   opType (HostOp op) = opType op
+  opType (Husk red_op _ _ _) =
+    pure $ staticShapes $ lambdaReturnType red_op
 
-instance AliasedOp inner => AliasedOp (HostOp lore inner) where
+instance (Attributes lore, AliasedOp inner) => AliasedOp (HostOp lore inner) where
   opAliases (HostOp op) = opAliases op
   opAliases _ = [mempty]
 
   consumedInOp (HostOp op) = consumedInOp op
   consumedInOp _ = mempty
 
-instance RangedOp inner => RangedOp (HostOp lore inner) where
+instance (Attributes lore, RangedOp inner) => RangedOp (HostOp lore inner) where
   opRanges (HostOp op) = opRanges op
   opRanges _ = [unknownRange]
 
@@ -860,45 +874,63 @@ instance FreeIn inner => FreeIn (HostOp lore inner) where
   freeIn (CmpSizeLe _ _ x) = freeIn x
   freeIn _ = mempty
 
-instance CanBeAliased inner => CanBeAliased (HostOp lore inner) where
+instance (Attributes lore,
+          CanBeAliased (Op lore),
+          CanBeAliased inner) => CanBeAliased (HostOp lore inner) where
   type OpWithAliases (HostOp lore inner) = HostOp (Aliases lore) (OpWithAliases inner)
 
   addOpAliases (HostOp op) = HostOp $ addOpAliases op
   addOpAliases (GetSize name sclass) = GetSize name sclass
   addOpAliases (GetSizeMax sclass) = GetSizeMax sclass
   addOpAliases (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+  addOpAliases (Husk red_op nes ts body) =
+    Husk (Alias.analyseLambda red_op) nes ts (Alias.analyseBody body)
 
   removeOpAliases (HostOp op) = HostOp $ removeOpAliases op
   removeOpAliases (GetSize name sclass) = GetSize name sclass
   removeOpAliases (GetSizeMax sclass) = GetSizeMax sclass
   removeOpAliases (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+  removeOpAliases (Husk red_op nes ts body) =
+    Husk (removeLambdaAliases red_op) nes ts (removeBodyAliases body)
 
-instance CanBeRanged inner => CanBeRanged (HostOp lore inner) where
+instance (Attributes lore,
+          CanBeRanged (Op lore),
+          CanBeRanged inner) => CanBeRanged (HostOp lore inner) where
   type OpWithRanges (HostOp lore inner) = HostOp (Ranges lore) (OpWithRanges inner)
 
   addOpRanges (HostOp op) = HostOp $ addOpRanges op
   addOpRanges (GetSize name sclass) = GetSize name sclass
   addOpRanges (GetSizeMax sclass) = GetSizeMax sclass
   addOpRanges (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+  addOpRanges (Husk red_op nes ts body) =
+    let red_op' = Range.runRangeM $ Range.analyseLambda red_op
+        body' = Range.runRangeM $ Range.analyseBody body
+    in Husk red_op' nes ts body'
 
   removeOpRanges (HostOp op) = HostOp $ removeOpRanges op
   removeOpRanges (GetSize name sclass) = GetSize name sclass
   removeOpRanges (GetSizeMax sclass) = GetSizeMax sclass
   removeOpRanges (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+  removeOpRanges (Husk red_op nes ts body) =
+    Husk (removeLambdaRanges red_op) nes ts (removeBodyRanges body)
 
-instance CanBeWise inner => CanBeWise (HostOp lore inner) where
+instance (Attributes lore,
+          CanBeWise (Op lore),
+          CanBeWise inner) => CanBeWise (HostOp lore inner) where
   type OpWithWisdom (HostOp lore inner) = HostOp (Wise lore) (OpWithWisdom inner)
 
   removeOpWisdom (HostOp op) = HostOp $ removeOpWisdom op
   removeOpWisdom (GetSize name sclass) = GetSize name sclass
   removeOpWisdom (GetSizeMax sclass) = GetSizeMax sclass
   removeOpWisdom (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
+  removeOpWisdom (Husk red_op nes ts body) =
+    Husk (removeLambdaWisdom red_op) nes ts (removeBodyWisdom body)
 
 instance ST.IndexOp op => ST.IndexOp (HostOp lore op) where
   indexOp vtable k (HostOp op) is = ST.indexOp vtable k op is
   indexOp _ _ _ _ = Nothing
 
-instance PP.Pretty inner => PP.Pretty (HostOp lore inner) where
+instance (PrettyLore lore, PP.Pretty inner) => PP.Pretty (HostOp lore inner) where
   ppr (GetSize name size_class) =
     text "get_size" <> parens (commasep [ppr name, ppr size_class])
 
@@ -909,19 +941,29 @@ instance PP.Pretty inner => PP.Pretty (HostOp lore inner) where
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
 
+  ppr (Husk red_op nes ts body) =
+    text "husk" <> PP.parens (ppr red_op <> PP.comma </>
+                              PP.braces (PP.commasep $ map ppr nes)) </>
+    PP.align (ppTuple' ts) <+>
+    PP.nestedBlock "{" "}" (ppr body)
+
   ppr (HostOp op) = ppr op
 
-instance OpMetrics inner => OpMetrics (HostOp lore inner) where
+instance (OpMetrics (Op lore), OpMetrics inner) => OpMetrics (HostOp lore inner) where
   opMetrics GetSize{} = seen "GetSize"
   opMetrics GetSizeMax{} = seen "GetSizeMax"
   opMetrics CmpSizeLe{} = seen "CmpSizeLe"
   opMetrics (HostOp op) = opMetrics op
+  opMetrics (Husk red_op _ _ body) = 
+    inside "Husk" $ lambdaMetrics red_op >> bodyMetrics body
 
-instance UsageInOp inner => UsageInOp (HostOp lore inner) where
+instance (Aliased lore, UsageInOp inner) => UsageInOp (HostOp lore inner) where
   usageInOp GetSize{} = mempty
   usageInOp GetSizeMax{} = mempty
   usageInOp CmpSizeLe{} = mempty
   usageInOp (HostOp op) = usageInOp op
+  usageInOp (Husk _ _ _ body) = 
+    mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
 
 typeCheckHostOp :: TC.Checkable lore =>
                    (inner -> TC.TypeM lore ())
@@ -931,3 +973,8 @@ typeCheckHostOp _ GetSize{} = return ()
 typeCheckHostOp _ GetSizeMax{} = return ()
 typeCheckHostOp _ (CmpSizeLe _ _ x) = TC.require [Prim int32] x
 typeCheckHostOp f (HostOp op) = f op
+typeCheckHostOp _ (Husk red_op nes ts body) = do
+  mapM_ TC.checkType ts
+  ne_ts <- mapM subExpType nes
+  typeCheckReduceLambda ts ne_ts red_op
+  TC.checkBody body

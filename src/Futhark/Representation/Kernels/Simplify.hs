@@ -133,6 +133,17 @@ simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
 
+simplifyKernelOp _ _ (Husk red_op nes ts body) = do
+  nes' <- mapM Engine.simplify nes
+  ts' <- mapM Engine.simplify ts
+  (red_op', red_op_hoisted) <- Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
+  par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
+  ((body_stms', body_res'), body_hoisted) <-
+    Engine.blockIf par_blocker $
+    Engine.simplifyBody (replicate (length ts) Observe) body
+  body' <- Engine.constructBody body_stms' body_res'
+  return (Husk red_op' nes' ts' body', red_op_hoisted <> body_hoisted)
+
 simplifyKernelOp _ _ (GetSize key size_class) =
   return (GetSize key size_class, mempty)
 simplifyKernelOp _ _ (GetSizeMax size_class) =
