@@ -2,9 +2,9 @@
 -- operator was not registered properly.
 --
 -- ==
--- error:
+-- error: previously consumed
 
-let main(row : *[#w]i32) : [#w]u8 =
+let main [w] (row : *[w]i32) : [w]u8 =
   let b = row -- b now aliases row
   let row[0] = 2 -- consume row
-  in map u8 b -- fail, because row has been consumed
+  in map u8.i32 b -- fail, because row has been consumed

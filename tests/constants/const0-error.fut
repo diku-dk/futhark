@@ -1,7 +1,7 @@
 -- Constants are properly type checked.
 -- ==
--- error:
+-- error: i32
 
-val x: i32 = 2.0
+let x: i32 = 2.0
 
 let main(): i32 = 2
