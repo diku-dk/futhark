@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `reduce_by_index` is now a good bit faster on operators whose
     arguments are two 32-bit values.
 
+  * The type checker warns on size annotations for function parameters
+    and return types that will not be visible from the outside,
+    because they prefer to names nested inside tuples or records.  For
+    example, the function
+
+        let f (n: i32, m: i32): [n][m]i32 = ...
+
+    will cause such a warning.  It should instead be written
+
+        let f (n: i32) (m: i32): [n][m]i32 = ...
+
 ### Removed
 
 ### Changed

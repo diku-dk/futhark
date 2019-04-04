@@ -1646,6 +1646,8 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
 
         when (null params) $ nothingMustBeUnique loc rettype_structural
 
+        warnOnDubiousShapeAnnotations loc params'' retdecl_type
+
         return (Just retdecl', retdecl_type)
       Nothing
         | null params ->
@@ -1692,6 +1694,22 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
         returnAliasing expected got =
           [(uniqueness expected, S.map aliasVar $ aliases got)]
+
+warnOnDubiousShapeAnnotations :: SrcLoc -> [Pattern] -> StructType -> TermTypeM ()
+warnOnDubiousShapeAnnotations loc params rettype =
+  onDubiousNames $ S.filter patternNameButNotParamName $
+  mconcat $ map typeDimNames $
+  rettype : map patternStructType params
+  where param_names = S.fromList $ mapMaybe (fst . patternParam) params
+        all_pattern_names = S.map identName $ mconcat $ map patIdentSet params
+        patternNameButNotParamName v = v `S.member` all_pattern_names && not (v `S.member` param_names)
+        onDubiousNames dubious
+          | S.null dubious = return ()
+          | otherwise = warn loc $ unlines
+                        [ "Size annotations in parameter and/or return type refers to the following names,"
+                        , "which will not be visible to the caller, because they are nested in tuples or records:"
+                        , "  " ++ intercalate ", " (map (quote . prettyName) $ S.toList dubious)
+                        , "To eliminate this warning, make these names parameters on their own."]
 
 checkGlobalAliases :: [Pattern] -> PatternType -> SrcLoc -> TermTypeM ()
 checkGlobalAliases params body_t loc = do
