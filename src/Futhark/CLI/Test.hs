@@ -22,6 +22,7 @@ import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import System.FilePath
 import System.Console.GetOpt
+import qualified System.Console.Terminal.Size as Terminal
 import System.IO
 import Text.Regex.TDFA
 
@@ -348,9 +349,10 @@ reportTable ts = do
   moveCursorToTableTop
   putStrLn $ statusTable ts
   clearLine
-  putStrLn $ atMostChars 60 running
-  where running    = "Now testing: " ++
-                     (unwords . reverse . map testCaseProgram . testStatusRun) ts
+  w <- maybe 80 Terminal.width <$> Terminal.size
+  putStrLn $ atMostChars (w-length labelstr) running
+  where running = labelstr ++ (unwords . reverse . map testCaseProgram . testStatusRun) ts
+        labelstr = "Now testing: "
 
 moveCursorToTableTop :: IO ()
 moveCursorToTableTop = cursorUpLine tableLines
