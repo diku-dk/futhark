@@ -604,7 +604,7 @@ buildRetType env pats = comb
   where bound = foldMap oneName (M.keys env) <> foldMap patternVars pats
         boundAsUnique v =
           maybe False (unique . unInfo . identType) $
-          find ((==v) . identName) $ S.toList $ foldMap patIdentSet pats
+          find ((==v) . identName) $ S.toList $ foldMap patternIdents pats
         problematic v = (v `member` bound) && not (boundAsUnique v)
         comb (Record fs_annot) (Record fs_got) =
           Record $ M.intersectionWith comb fs_annot fs_got
@@ -795,7 +795,7 @@ freeDimIndex (DimSlice me1 me2 me3) =
 
 -- | Extract all the variable names bound in a pattern.
 patternVars :: Pattern -> NameSet
-patternVars = mconcat . map ident . S.toList . patIdentSet
+patternVars = mconcat . map ident . S.toList . patternIdents
 
 -- | Defunctionalize a top-level value binding. Returns the
 -- transformed result as well as an environment that binds the name of

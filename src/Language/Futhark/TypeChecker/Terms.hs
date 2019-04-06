@@ -566,7 +566,7 @@ checkPattern' (PatternLit e NoInfo loc) NoneInferred = do
   return $ PatternLit e' (Info t') loc
 
 bindPatternNames :: PatternBase NoInfo Name -> TermTypeM a -> TermTypeM a
-bindPatternNames = bindSpaced . map asTerm . S.toList . patIdentSet
+bindPatternNames = bindSpaced . map asTerm . S.toList . patternIdents
   where asTerm v = (Term, identName v)
 
 checkPattern :: UncheckedPattern -> InferredType -> (Pattern -> TermTypeM a)
@@ -665,7 +665,7 @@ bindingPatternGroup tps orig_ps m = do
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
     let descend ps' (p:ps) =
           checkPattern p NoneInferred $ \p' ->
-            binding (S.toList $ patIdentSet p') $ descend (p':ps') ps
+            binding (S.toList $ patternIdents p') $ descend (p':ps') ps
         descend ps' [] = do
           -- Perform an observation of every type parameter.  This
           -- prevents unused-name warnings for otherwise unused
@@ -684,7 +684,7 @@ bindingPattern :: [UncheckedTypeParam]
 bindingPattern tps p t m = do
   checkForDuplicateNames [p]
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
-    checkPattern p t $ \p' -> binding (S.toList $ patIdentSet p') $ do
+    checkPattern p t $ \p' -> binding (S.toList $ patternIdents p') $ do
       -- Perform an observation of every declared dimension.  This
       -- prevents unused-name warnings for otherwise unused dimensions.
       mapM_ observe $ patternDims p'
@@ -745,7 +745,7 @@ lexicalClosure params closure = do
                     _ -> False
   return $ S.map AliasBound $ S.filter isLocal $
     allOccuring closure S.\\
-    S.map identName (mconcat (map patIdentSet params))
+    S.map identName (mconcat (map patternIdents params))
 
 checkExp :: UncheckedExp -> TermTypeM Exp
 
@@ -943,7 +943,7 @@ checkExp (LetPat tparams pat e body NoInfo loc) = do
       _ -> return ()
     bindingPattern tparams pat (Ascribed $ anyDimShapeAnnotations t) $ \tparams' pat' -> do
       body' <- checkExp body
-      body_t <- unscopeType (S.map identName $ patIdentSet pat') <$> expType body'
+      body_t <- unscopeType (S.map identName $ patternIdents pat') <$> expType body'
       return $ LetPat tparams' pat' e' body' (Info body_t) loc
 
 checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
@@ -1183,7 +1183,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
 
   where
     convergePattern pat body_cons body_t body_loc = do
-      let consumed_merge = S.map identName (patIdentSet pat) `S.intersection`
+      let consumed_merge = S.map identName (patternIdents pat) `S.intersection`
                            body_cons
           uniquePat (Wildcard (Info t) wloc) =
             Wildcard (Info $ t `setUniqueness` Nonunique) wloc
@@ -1688,7 +1688,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           forM_ params' $ \p ->
           let consumedNonunique p' =
                 not (unique $ unInfo $ identType p') && (identName p' `S.member` names)
-          in case find consumedNonunique $ S.toList $ patIdentSet p of
+          in case find consumedNonunique $ S.toList $ patternIdents p of
                Just p' ->
                  returnAliased fname (baseName $ identName p') loc
                Nothing ->
@@ -1707,7 +1707,7 @@ warnOnDubiousShapeAnnotations loc params rettype =
   mconcat $ map typeDimNames $
   rettype : map patternStructType params
   where param_names = S.fromList $ mapMaybe (fst . patternParam) params
-        all_pattern_names = S.map identName $ mconcat $ map patIdentSet params
+        all_pattern_names = S.map identName $ mconcat $ map patternIdents params
         patternNameButNotParamName v = v `S.member` all_pattern_names && not (v `S.member` param_names)
         onDubiousNames dubious
           | S.null dubious = return ()
@@ -1725,7 +1725,7 @@ checkGlobalAliases params body_t loc = do
                     _ -> False
   let als = filter (not . isLocal) $ S.toList $
             boundArrayAliases body_t `S.difference`
-            S.map identName (mconcat (map patIdentSet params))
+            S.map identName (mconcat (map patternIdents params))
   case als of
     v:_ | not $ null params ->
       typeError loc $
@@ -1762,7 +1762,7 @@ uniqueParamNames :: [Pattern] -> Names
 uniqueParamNames =
   S.fromList . map identName
   . filter (unique . unInfo . identType)
-  . S.toList . mconcat . map patIdentSet
+  . S.toList . mconcat . map patternIdents
 
 boundArrayAliases :: PatternType -> S.Set VName
 boundArrayAliases (Array als _ _ _) = boundAliases als
