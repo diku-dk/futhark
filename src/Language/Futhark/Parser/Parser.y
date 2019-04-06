@@ -696,9 +696,9 @@ Fields1 :: { [FieldBase NoInfo Name] }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
-                      { LetPat [] $2 $4 $5 (srcspan $1 $>) }
+                      { LetPat [] $2 $4 $5 NoInfo (srcspan $1 $>) }
      | let TypeParams1 Pattern '=' Exp LetBody
-                      { LetPat (fst $2 : snd $2) $3 $5 $6 (srcspan $1 $>) }
+                      { LetPat (fst $2 : snd $2) $3 $5 $6 NoInfo (srcspan $1 $>) }
 
      | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
        { let L _ (ID name) = $2
@@ -706,7 +706,7 @@ LetExp :: { UncheckedExp }
 
      | let VarSlice '=' Exp LetBody
                       { let (v,slice,loc) = $2; ident = Ident v NoInfo loc
-                        in LetWith ident ident slice $4 $5 (srcspan $1 $>) }
+                        in LetWith ident ident slice $4 $5 NoInfo (srcspan $1 $>) }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }

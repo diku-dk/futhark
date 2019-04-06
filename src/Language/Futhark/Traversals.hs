@@ -86,21 +86,21 @@ instance ASTMappable (ExpBase Info VName) where
     Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*>
     pure d <*> (Info <$> mapOnPatternType tv t) <*>
     pure loc
-  astMap tv (LetPat tparams pat e body loc) =
+  astMap tv (LetPat tparams pat e body t loc) =
     LetPat <$> mapM (astMap tv) tparams <*>
     astMap tv pat <*> mapOnExp tv e <*>
-    mapOnExp tv body <*> pure loc
+    mapOnExp tv body <*> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (LetFun name (fparams, params, ret, t, e) body loc) =
     LetFun <$> mapOnName tv name <*>
     ((,,,,) <$> mapM (astMap tv) fparams <*> mapM (astMap tv) params <*>
      traverse (astMap tv) ret <*> traverse (mapOnStructType tv) t <*>
      mapOnExp tv e) <*>
     mapOnExp tv body <*> pure loc
-  astMap tv (LetWith dest src idxexps vexp body loc) =
+  astMap tv (LetWith dest src idxexps vexp body t loc) =
     pure LetWith <*>
          astMap tv dest <*> astMap tv src <*>
          mapM (astMap tv) idxexps <*> mapOnExp tv vexp <*>
-         mapOnExp tv body <*> pure loc
+         mapOnExp tv body <*> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Update src slice v loc) =
     Update <$> mapOnExp tv src <*> mapM (astMap tv) slice <*>
     mapOnExp tv v <*> pure loc

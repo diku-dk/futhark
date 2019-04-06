@@ -592,7 +592,7 @@ eval env (Ascript e td _ loc) = do
     Left err -> bad loc env $ "Value `" <> pretty v <> "` cannot match shape of type `" <>
                 pretty (declaredType td) <> "` (`" <> pretty t <> "`): " ++ err
 
-eval env (LetPat _ p e body _) = do
+eval env (LetPat _ p e body _ _) = do
   v <- eval env e
   env' <- matchPattern env p v
   eval env' body
@@ -677,7 +677,7 @@ eval env (RecordUpdate src all_fs v _ _) =
               ValueRecord $ M.insert f (update f_v fs v') src'
         update _ _ _ = error "eval RecordUpdate: invalid value."
 
-eval env (LetWith dest src is v body loc) = do
+eval env (LetWith dest src is v body _ loc) = do
   dest' <- maybe oob return =<<
     updateArray <$> mapM (evalDimIndex env) is <*>
     evalTermVar env (qualName $ identName src) <*> eval env v

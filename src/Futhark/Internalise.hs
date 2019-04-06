@@ -431,7 +431,7 @@ internaliseExp desc e@E.Apply{} = do
            args' <- concat <$> mapM (internaliseExp "arg") args
            fst <$> funcall desc qfname args' loc
 
-internaliseExp desc (E.LetPat tparams pat e body loc) =
+internaliseExp desc (E.LetPat tparams pat e body _ loc) =
   internalisePat desc tparams pat e body loc (internaliseExp desc)
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
@@ -580,11 +580,11 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
                    loop_initial_cond : mergeinit,
                    init_loop_cond_bnds))
 
-internaliseExp desc (E.LetWith name src idxs ve body loc) = do
+internaliseExp desc (E.LetWith name src idxs ve body t loc) = do
   let pat = E.Id (E.identName name) (E.identType name) loc
       src_t = E.fromStruct <$> E.identType src
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
-  internaliseExp desc $ E.LetPat [] pat e body loc
+  internaliseExp desc $ E.LetPat [] pat e body t loc
 
 internaliseExp desc (E.Update src slice ve loc) = do
   ves <- internaliseExp "lw_val" ve

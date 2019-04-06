@@ -930,7 +930,7 @@ checkExp (Apply e1 e2 NoInfo NoInfo loc) = do
   (t1, rt) <- checkApply loc t arg
   return $ Apply e1' e2' (Info $ diet t1) (Info rt) loc
 
-checkExp (LetPat tparams pat e body loc) = do
+checkExp (LetPat tparams pat e body NoInfo loc) = do
   noTypeParamsPermitted tparams
   sequentially (checkExp e) $ \e' e_occs -> do
     -- Not technically an ascription, but we want the pattern to have
@@ -943,7 +943,8 @@ checkExp (LetPat tparams pat e body loc) = do
       _ -> return ()
     bindingPattern tparams pat (Ascribed $ anyDimShapeAnnotations t) $ \tparams' pat' -> do
       body' <- checkExp body
-      return $ LetPat tparams' pat' e' body' loc
+      body_t <- unscopeType (S.map identName $ patIdentSet pat') <$> expType body'
+      return $ LetPat tparams' pat' e' body' (Info body_t) loc
 
 checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
@@ -960,7 +961,7 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
 
     return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
 
-checkExp (LetWith dest src idxes ve body loc) = do
+checkExp (LetWith dest src idxes ve body NoInfo loc) = do
   (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
   let elemt = stripArray (length $ filter isFix idxes) t
   sequentially (checkIdent src) $ \src' _ -> do
@@ -987,7 +988,8 @@ checkExp (LetWith dest src idxes ve body loc) = do
 
       bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
         body' <- consuming src' $ checkExp body
-        return $ LetWith dest' src' idxes' ve' body' loc
+        body_t <- unscopeType (S.singleton $ identName dest') <$> expType body'
+        return $ LetWith dest' src' idxes' ve' body' (Info body_t) loc
   where isFix DimFix{} = True
         isFix _        = False
 
