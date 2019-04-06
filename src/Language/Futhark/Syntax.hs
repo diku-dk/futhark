@@ -596,7 +596,7 @@ data ExpBase f vn =
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) (f PatternType) SrcLoc
             -- ^ Type ascription: @e : t@.
 
-            | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
 
             | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
               (ExpBase f vn) SrcLoc
@@ -641,7 +641,7 @@ data ExpBase f vn =
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
                       [DimIndexBase f vn] (ExpBase f vn)
-                      (ExpBase f vn) SrcLoc
+                      (ExpBase f vn) (f PatternType) SrcLoc
 
             | Index (ExpBase f vn) [DimIndexBase f vn] (f PatternType) SrcLoc
 
@@ -685,9 +685,9 @@ instance Located (ExpBase f vn) where
   locOf (Ascript _ _ _ loc)            = locOf loc
   locOf (Negate _ pos)                 = locOf pos
   locOf (Apply _ _ _ _ pos)            = locOf pos
-  locOf (LetPat _ _ _ _ pos)           = locOf pos
+  locOf (LetPat _ _ _ _ _ loc)         = locOf loc
   locOf (LetFun _ _ _ loc)             = locOf loc
-  locOf (LetWith _ _ _ _ _ pos)        = locOf pos
+  locOf (LetWith _ _ _ _ _ _ loc)      = locOf loc
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
   locOf (RecordUpdate _ _ _ _ pos)     = locOf pos

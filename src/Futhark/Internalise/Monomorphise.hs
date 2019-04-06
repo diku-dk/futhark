@@ -208,10 +208,12 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
 transformExp (Ascript e tp t loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure t <*> pure loc
 
-transformExp (LetPat tparams pat e1 e2 loc) = do
+transformExp (LetPat tparams pat e1 e2 (Info t) loc) = do
   (pat', rr) <- expandRecordPattern pat
+  t' <- transformType t
   LetPat tparams pat' <$> transformExp e1 <*>
-    withRecordReplacements rr (transformExp e2) <*> pure loc
+    withRecordReplacements rr (transformExp e2) <*>
+    pure (Info t') <*> pure loc
 
 transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
   | any isTypeParam tparams = do
@@ -226,7 +228,7 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
         return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
 
   | otherwise =
-      transformExp $ LetPat [] (Id fname (Info ft) loc) lam e loc
+      transformExp $ LetPat [] (Id fname (Info ft) loc) lam e (Info $ fromStruct ret) loc
         where lam = Lambda tparams params body Nothing (Info (mempty, ret)) loc
               ft = foldFunType (map patternType params) $ fromStruct ret
 
@@ -297,11 +299,12 @@ transformExp (Project n e tp loc) = do
       e' <- transformExp e
       return $ Project n e' tp loc
 
-transformExp (LetWith id1 id2 idxs e1 body loc) = do
+transformExp (LetWith id1 id2 idxs e1 body (Info t) loc) = do
   idxs' <- mapM transformDimIndex idxs
   e1' <- transformExp e1
   body' <- transformExp body
-  return $ LetWith id1 id2 idxs' e1' body' loc
+  t' <- transformType t
+  return $ LetWith id1 id2 idxs' e1' body' (Info t') loc
 
 transformExp (Index e0 idxs info loc) =
   Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure info <*> pure loc

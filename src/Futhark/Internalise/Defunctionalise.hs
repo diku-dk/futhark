@@ -178,13 +178,13 @@ defuncExp (Ascript e0 tydecl t loc)
                                return (Ascript e0' tydecl t loc, sv)
   | otherwise = defuncExp e0
 
-defuncExp (LetPat tparams pat e1 e2 loc) = do
+defuncExp (LetPat tparams pat e1 e2 _ loc) = do
   let env_dim = envFromShapeParams tparams
   (e1', sv1) <- localEnv env_dim $ defuncExp e1
   let env  = matchPatternSV pat sv1
       pat' = updatePattern pat sv1
   (e2', sv2) <- localEnv (env <> env_dim) $ defuncExp e2
-  return (LetPat tparams pat' e1' e2' loc, sv2)
+  return (LetPat tparams pat' e1' e2' (Info $ typeFromSV sv2) loc, sv2)
 
 defuncExp (LetFun vn (dims, pats, _, rettype@(Info ret), e1) e2 loc) = do
   let env_dim = envFromShapeParams dims
@@ -192,7 +192,7 @@ defuncExp (LetFun vn (dims, pats, _, rettype@(Info ret), e1) e2 loc) = do
   (e2', sv2) <- extendEnv vn sv1 $ defuncExp e2
   case pats' of
     []  -> let t1 = combineTypeShapes (fromStruct ret) $ typeOf e1'
-           in return (LetPat dims (Id vn (Info t1) noLoc) e1' e2' loc, sv2)
+           in return (LetPat dims (Id vn (Info t1) noLoc) e1' e2' (Info $ typeFromSV sv2) loc, sv2)
     _:_ -> let t1 = combineTypeShapes ret $ toStruct $ typeOf e1'
            in return (LetFun vn (dims, pats', Nothing, Info t1, e1') e2' loc, sv2)
 
@@ -291,12 +291,12 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
     Dynamic _ -> return (Project vn e0' tp loc, Dynamic tp')
     _ -> error $ "Projection of an expression with static value " ++ show sv0
 
-defuncExp (LetWith id1 id2 idxs e1 body loc) = do
+defuncExp (LetWith id1 id2 idxs e1 body t loc) = do
   e1' <- defuncExp' e1
   sv1 <- lookupVar (identSrcLoc id2) $ identName id2
   idxs' <- mapM defuncDimIndex idxs
   (body', sv) <- extendEnv (identName id1) sv1 $ defuncExp body
-  return (LetWith id1 id2 idxs' e1' body' loc, sv)
+  return (LetWith id1 id2 idxs' e1' body' t loc, sv)
 
 defuncExp expr@(Index e0 idxs info loc) = do
   e0' <- defuncExp' e0
@@ -742,8 +742,8 @@ freeVars expr = case expr of
                           foldMap freeVars incl
   Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
   Ascript e t _ _      -> freeVars e <> names (typeDimNames $ unInfo $ expandedType t)
-  LetPat _ pat e1 e2 _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
-                                          `without` patternVars pat)
+  LetPat _ pat e1 e2 _ _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
+                                            `without` patternVars pat)
 
   LetFun vn (_, pats, _, _, e1) e2 _ ->
     ((freeVars e1 <> names (foldMap patternDimNames pats))
@@ -773,7 +773,7 @@ freeVars expr = case expr of
                                     freeVars e1 <> freeVars e2
   Project _ e _ _                -> freeVars e
 
-  LetWith id1 id2 idxs e1 e2 _ ->
+  LetWith id1 id2 idxs e1 e2 _ _ ->
     ident id2 <> foldMap freeDimIndex idxs <> freeVars e1 <>
     (freeVars e2 `without` ident id1)
 

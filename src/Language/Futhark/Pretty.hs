@@ -230,7 +230,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec p (Apply f arg _ _ _) =
     parensIf (p >= 10) $ ppr f <+> pprPrec 10 arg
   pprPrec _ (Negate e _) = text "-" <> ppr e
-  pprPrec p (LetPat tparams pat e body _) =
+  pprPrec p (LetPat tparams pat e body _ _) =
     parensIf (p /= -1) $ align $
     text "let" <+> align (spread $ map ppr tparams ++ [ppr pat]) <+>
     (if linebreak
@@ -252,7 +252,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     where retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
                        Just rettype' -> text ":" <+> rettype'
                        Nothing       -> mempty
-  pprPrec _ (LetWith dest src idxs ve body _)
+  pprPrec _ (LetWith dest src idxs ve body _ _)
     | dest == src =
       text "let" <+> ppr dest <> list (map ppr idxs) <+>
       equals <+> align (ppr ve) <+>

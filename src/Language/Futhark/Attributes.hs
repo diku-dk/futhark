@@ -70,6 +70,7 @@ module Language.Futhark.Attributes
   , sortFields
   , isTypeParam
   , combineTypeShapes
+  , unscopeType
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -462,11 +463,9 @@ typeOf (Var _ (Info t) _) = t
 typeOf (Ascript _ _ (Info t) _) = t
 typeOf (Apply _ _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ pat _ body _) =
-  unscopeType (S.map identName $ patIdentSet pat) $ typeOf body
+typeOf (LetPat _ _ _ _ (Info t) _) = t
 typeOf (LetFun _ _ body _) = typeOf body
-typeOf (LetWith dest _ _ _ body _) =
-  unscopeType (S.singleton $ identName dest) $ typeOf body
+typeOf (LetWith _ _ _ _ _ (Info t) _) = t
 typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
