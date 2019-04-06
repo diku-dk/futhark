@@ -311,7 +311,7 @@ valBindHtml :: Html -> ValBind -> DocM (Html, Html, Html)
 valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _) = do
   let tparams' = mconcat $ map ((" "<>) . typeParamHtml) tparams
       noLink' = noLink $ map typeParamName tparams ++
-                map identName (S.toList $ mconcat $ map patIdentSet params)
+                map identName (S.toList $ mconcat $ map patternIdents params)
   rettype' <- noLink' $ maybe (typeHtml rettype) typeExpHtml retdecl
   params' <- noLink' $ mapM patternHtml params
   return (keyword "val " <> (H.span ! A.class_ "decl_name") name,

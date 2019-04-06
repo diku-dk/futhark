@@ -26,7 +26,7 @@ module Language.Futhark.Attributes
   , typeOf
 
   -- * Queries on patterns and params
-  , patIdentSet
+  , patternIdents
   , patternType
   , patternStructType
   , patternPatternType
@@ -476,7 +476,7 @@ typeOf (Lambda tparams params _ _ (Info (als, t)) _) =
   unscopeType bound_here $
   foldr (uncurry (Arrow ()) . patternParam) t params `setAliases` als
   where bound_here = S.fromList (map typeParamName tparams) <>
-                     S.map identName (mconcat $ map patIdentSet params)
+                     S.map identName (mconcat $ map patternIdents params)
 typeOf (OpSection _ (Info t) _) =
   t
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
@@ -563,14 +563,14 @@ patternOrderZero pat = case pat of
   PatternLit _ (Info t) _ -> orderZero t
 
 -- | The set of identifiers bound in a pattern.
-patIdentSet :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
-patIdentSet (Id v t loc)              = S.singleton $ Ident v t loc
-patIdentSet (PatternParens p _)       = patIdentSet p
-patIdentSet (TuplePattern pats _)     = mconcat $ map patIdentSet pats
-patIdentSet (RecordPattern fs _)      = mconcat $ map (patIdentSet . snd) fs
-patIdentSet Wildcard{}                = mempty
-patIdentSet (PatternAscription p _ _) = patIdentSet p
-patIdentSet PatternLit{}              = mempty
+patternIdents :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
+patternIdents (Id v t loc)              = S.singleton $ Ident v t loc
+patternIdents (PatternParens p _)       = patternIdents p
+patternIdents (TuplePattern pats _)     = mconcat $ map patternIdents pats
+patternIdents (RecordPattern fs _)      = mconcat $ map (patternIdents . snd) fs
+patternIdents Wildcard{}                = mempty
+patternIdents (PatternAscription p _ _) = patternIdents p
+patternIdents PatternLit{}              = mempty
 
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> PatternType
