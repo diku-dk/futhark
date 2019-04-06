@@ -1040,22 +1040,26 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   e2' <- checkExp e2
   return $ Assert e1' e2' (Info (pretty e1)) loc
 
-checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
+checkExp (Lambda tparams params body rettype_te NoInfo loc) =
   removeSeminullOccurences $
   bindingPatternGroup tparams params $ \tparams' params' -> do
-    maybe_retdecl' <- traverse checkTypeDecl maybe_retdecl
-    (body', closure) <- tapOccurences $ noUnique $
-                        checkFunBody body (unInfo . expandedType <$> maybe_retdecl') loc
+    rettype_checked <- traverse checkTypeExp rettype_te
+    let declared_rettype =
+          case rettype_checked of Just (_, st, _) -> Just st
+                                  Nothing -> Nothing
+    (body', closure) <-
+      tapOccurences $ noUnique $ checkFunBody body declared_rettype loc
     body_t <- expType body'
-    let (maybe_retdecl'', rettype) =
-          case maybe_retdecl' of
-            Just retdecl'@(TypeDecl _ (Info st)) -> (Just retdecl', st)
+    let (rettype', rettype_st) =
+          case rettype_checked of
+            Just (te, st, _) -> (Just te, st)
             Nothing -> (Nothing, inferReturnUniqueness params' body_t)
 
     checkGlobalAliases params' body_t loc
 
     closure' <- lexicalClosure params' closure
-    return $ Lambda tparams' params' body' maybe_retdecl'' (Info (closure', rettype)) loc
+
+    return $ Lambda tparams' params' body' rettype' (Info (closure', rettype_st)) loc
 
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
