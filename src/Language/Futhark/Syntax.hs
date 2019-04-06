@@ -609,7 +609,7 @@ data ExpBase f vn =
               -- ^ Numeric negation (ugly special case; Haskell did it first).
 
             | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
-              (Maybe (TypeDeclBase f vn)) (f (Aliasing, StructType)) SrcLoc
+              (Maybe (TypeExp vn)) (f (Aliasing, StructType)) SrcLoc
 
             | OpSection (QualName vn) (f PatternType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.

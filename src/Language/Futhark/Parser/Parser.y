@@ -581,7 +581,7 @@ Exp2 :: { UncheckedExp }
        { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
 
      | '\\' TypeParams FunParams1 maybeAscription(TypeExpTerm) '->' Exp
-       { Lambda $2 (fst $3 : snd $3) $6 (fmap (flip TypeDecl NoInfo) $4) NoInfo (srcspan $1 $>) }
+       { Lambda $2 (fst $3 : snd $3) $6 $4 NoInfo (srcspan $1 $>) }
 
      | Apply { $1 }
 

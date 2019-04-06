@@ -274,10 +274,10 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec (-1) e
   pprPrec _ (Assert e1 e2 _ _) = text "assert" <+> pprPrec 10 e1 <+> pprPrec 10 e2
-  pprPrec p (Lambda tparams params body ascript _ _) =
+  pprPrec p (Lambda tparams params body rettype _ _) =
     parensIf (p /= -1) $
     text "\\" <> spread (map ppr tparams ++ map ppr params) <>
-    ppAscription ascript <+>
+    ppAscription rettype <+>
     text "->" </> indent 2 (ppr body)
   pprPrec _ (OpSection binop _ _) =
     parens $ ppr binop
@@ -326,7 +326,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
                                     Nothing -> text "_"
   ppr (PatternLit e _ _)        = ppr e
 
-ppAscription :: (Eq vn, IsName vn, Annot f) => Maybe (TypeDeclBase f vn) -> Doc
+ppAscription :: Pretty t => Maybe t -> Doc
 ppAscription Nothing  = mempty
 ppAscription (Just t) = text ":" <> ppr t
 
