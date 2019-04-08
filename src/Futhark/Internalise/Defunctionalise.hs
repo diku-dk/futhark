@@ -184,7 +184,7 @@ defuncExp (LetPat tparams pat e1 e2 _ loc) = do
   let env  = matchPatternSV pat sv1
       pat' = updatePattern pat sv1
   (e2', sv2) <- localEnv (env <> env_dim) $ defuncExp e2
-  return (LetPat tparams pat' e1' e2' (Info $ typeFromSV sv2) loc, sv2)
+  return (LetPat tparams pat' e1' e2' (Info $ typeOf e2') loc, sv2)
 
 defuncExp (LetFun vn (dims, pats, _, rettype@(Info ret), e1) e2 loc) = do
   let env_dim = envFromShapeParams dims
@@ -192,7 +192,7 @@ defuncExp (LetFun vn (dims, pats, _, rettype@(Info ret), e1) e2 loc) = do
   (e2', sv2) <- extendEnv vn sv1 $ defuncExp e2
   case pats' of
     []  -> let t1 = combineTypeShapes (fromStruct ret) $ typeOf e1'
-           in return (LetPat dims (Id vn (Info t1) noLoc) e1' e2' (Info $ typeFromSV sv2) loc, sv2)
+           in return (LetPat dims (Id vn (Info t1) noLoc) e1' e2' (Info $ typeOf e2') loc, sv2)
     _:_ -> let t1 = combineTypeShapes ret $ toStruct $ typeOf e1'
            in return (LetFun vn (dims, pats', Nothing, Info t1, e1') e2' loc, sv2)
 
