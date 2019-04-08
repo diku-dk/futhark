@@ -389,8 +389,11 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
 
   -- Apply type abbreviations from a_mty to body_mty.
   let a_abbrs = mtyTypeAbbrs a_mty
-  let type_subst = M.mapMaybe (fmap TypeSub . (`M.lookup` a_abbrs)) p_subst
-  let body_mty' = substituteTypesInMTy type_subst body_mty
+      isSub v = case M.lookup v a_abbrs of
+                  Just abbr -> Just $ TypeSub abbr
+                  _  -> Just $ DimSub $ NamedDim $ qualName v
+      type_subst = M.mapMaybe isSub p_subst
+      body_mty' = substituteTypesInMTy type_subst body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'
   return (body_mty'', p_subst, body_subst)
 
@@ -808,6 +811,10 @@ substituteTypesInEnv substs env =
   where subT name _
           | Just (TypeSub (TypeAbbr l ps t)) <- M.lookup name substs = TypeAbbr l ps t
         subT _ (TypeAbbr l ps t) = TypeAbbr l ps $ substituteTypes substs t
+
+substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
+substituteTypesInBoundV substs (BoundV tps t) =
+  BoundV tps (substituteTypes substs t)
 
 allNamesInMTy :: MTy -> S.Set VName
 allNamesInMTy (MTy abs mod) =
