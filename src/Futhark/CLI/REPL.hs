@@ -87,7 +87,7 @@ repl = do
     Left err -> error $ "Failed to initialise interpreter state: " ++ err
     Right init_state -> Haskeline.runInputT Haskeline.defaultSettings $ toploop init_state
 
-  putStrLn "Leaving futharki."
+  putStrLn "Leaving 'futhark repl'."
 
 confirmQuit :: Haskeline.InputT IO Bool
 confirmQuit = do
