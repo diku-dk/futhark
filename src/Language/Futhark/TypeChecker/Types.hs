@@ -16,7 +16,6 @@ module Language.Futhark.TypeChecker.Types
   , TypeSub(..)
   , TypeSubs
   , substituteTypes
-  , substituteTypesInBoundV
 
   , Subst(..)
   , Substitutable(..)
@@ -419,10 +418,6 @@ substituteTypes substs ot = case ot of
         substituteInDim (NamedDim v)
           | Just (DimSub d) <- M.lookup (qualLeaf v) substs = d
         substituteInDim d = d
-
-substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
-substituteTypesInBoundV substs (BoundV tps t) =
-  BoundV tps (substituteTypes substs t)
 
 applyType :: Monoid als =>
              [TypeParam] -> TypeBase (DimDecl VName) als -> [StructTypeArg] -> TypeBase (DimDecl VName) als
