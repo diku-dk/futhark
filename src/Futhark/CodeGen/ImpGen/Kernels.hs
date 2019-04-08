@@ -23,6 +23,7 @@ import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
+import Futhark.CodeGen.ImpGen.Kernels.SegScan
 import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
 import Futhark.CodeGen.ImpGen (sFor, sWhen,
                                sOp)
@@ -110,6 +111,9 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
 
 kernelCompiler pat (SegRed space comm red_op nes _ body) =
   compileSegRed pat space comm red_op nes body
+
+kernelCompiler pat (SegScan space red_op nes _ body) =
+  compileSegScan pat space red_op nes body
 
 kernelCompiler pat (SegGenRed space ops _ body) =
   compileSegGenRed pat space ops body

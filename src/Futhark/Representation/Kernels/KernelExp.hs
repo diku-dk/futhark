@@ -552,12 +552,9 @@ checkScanOrReduce :: TC.Checkable lore =>
 checkScanOrReduce w lam input = do
   TC.require [Prim int32] w
   let (nes, arrs) = unzip input
-      asArg t = (t, mempty)
   neargs <- mapM TC.checkArg nes
   arrargs <- TC.checkSOACArrayArgs w arrs
-  TC.checkLambda lam $
-    map asArg [Prim int32, Prim int32] ++
-    map TC.noArgAliases (neargs ++ arrargs)
+  TC.checkLambda lam $ map TC.noArgAliases (neargs ++ arrargs)
 
 instance Scoped lore (GroupStreamLambda lore) where
   scopeOf (GroupStreamLambda chunk_size chunk_offset acc_params arr_params _) =

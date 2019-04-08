@@ -104,6 +104,7 @@ data Kernel lore
   | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (Body lore)
     -- ^ The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
+  | SegScan KernelSpace (Lambda lore) [SubExp] [Type] (Body lore)
   | SegGenRed KernelSpace [GenReduceOp lore] [Type] (Body lore)
     deriving (Eq, Show, Ord)
 
@@ -203,14 +204,21 @@ identityKernelMapper = KernelMapper { mapOnKernelSubExp = return
 -- and is done left-to-right.
 mapKernelM :: (Applicative m, Monad m) =>
               KernelMapper flore tlore m -> Kernel flore -> m (Kernel tlore)
-mapKernelM tv (SegRed space comm red_op nes ts lam) =
+mapKernelM tv (SegRed space comm red_op nes ts body) =
   SegRed
   <$> mapOnKernelSpace tv space
   <*> pure comm
   <*> mapOnKernelLambda tv red_op
   <*> mapM (mapOnKernelSubExp tv) nes
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
-  <*> mapOnKernelBody tv lam
+  <*> mapOnKernelBody tv body
+mapKernelM tv (SegScan space scan_op nes ts body) =
+  SegScan
+  <$> mapOnKernelSpace tv space
+  <*> mapOnKernelLambda tv scan_op
+  <*> mapM (mapOnKernelSubExp tv) nes
+  <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
+  <*> mapOnKernelBody tv body
 mapKernelM tv (SegGenRed space ops ts body) =
   SegGenRed
   <$> mapOnKernelSpace tv space
@@ -444,6 +452,10 @@ kernelType (SegRed space _ _ nes ts _) =
         dims = map snd $ spaceDimensions space
         outer_dims = init dims
 
+kernelType (SegScan space _ _ ts _) =
+  map (`arrayOfShape` Shape dims) ts
+  where dims = map snd $ spaceDimensions space
+
 kernelType (SegGenRed space ops _ _) = do
   op <- ops
   let shape = Shape (segment_dims <> [genReduceWidth op]) <> genReduceShape op
@@ -596,6 +608,8 @@ instance Aliased lore => UsageInOp (Kernel lore) where
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
   usageInOp (SegRed _ _ _ _ _ body) =
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
+  usageInOp (SegScan _ _ _ _ body) =
+    mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
   usageInOp (SegGenRed _ ops _ body) =
     mconcat $ map UT.consumedUsage $ S.toList (consumedInBody body) <>
     concatMap genReduceDest ops
@@ -607,21 +621,11 @@ consumedInKernelBody (KernelBody attr stms _) =
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
-typeCheckKernel (SegRed space _ red_op nes ts body) = do
-  checkSpace space
-  mapM_ TC.checkType ts
+typeCheckKernel (SegRed space _ red_op nes ts body) =
+  checkScanRed space red_op nes ts body
 
-  ne_ts <- mapM subExpType nes
-
-  let asArg t = (t, mempty)
-  TC.binding (scopeOfKernelSpace space) $ do
-    TC.checkLambda red_op $ map asArg $ ne_ts ++ ne_ts
-    unless (lambdaReturnType red_op == ne_ts &&
-            take (length nes) ts == ne_ts) $
-      TC.bad $ TC.TypeError
-      "SegRed: wrong type for reduction or neutral elements."
-
-    TC.checkLambdaBody ts body
+typeCheckKernel (SegScan space scan_op nes ts body) =
+  checkScanRed space scan_op nes ts body
 
 typeCheckKernel (SegGenRed space ops ts body) = do
   checkSpace space
@@ -710,6 +714,28 @@ typeCheckKernel (Kernel _ space kts kbody) = do
           mapM_ (TC.requireI [Prim int32] . fst) limit
           mapM_ (TC.require [Prim int32] . snd) limit
 
+checkScanRed :: TC.Checkable lore =>
+                KernelSpace
+             -> Lambda (Aliases lore)
+             -> [SubExp]
+             -> [Type]
+             -> Body (Aliases lore)
+             -> TC.TypeM lore ()
+checkScanRed space scan_op nes ts body = do
+  checkSpace space
+  mapM_ TC.checkType ts
+
+  ne_ts <- mapM subExpType nes
+
+  let asArg t = (t, mempty)
+  TC.binding (scopeOfKernelSpace space) $ do
+    TC.checkLambda scan_op $ map asArg $ ne_ts ++ ne_ts
+    unless (lambdaReturnType scan_op == ne_ts &&
+            take (length nes) ts == ne_ts) $
+      TC.bad $ TC.TypeError "wrong type for reduction or neutral elements."
+
+    TC.checkLambdaBody ts body
+
 checkSpace :: TC.Checkable lore => KernelSpace -> TC.TypeM lore ()
 checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
   mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size]
@@ -727,6 +753,8 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
           kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
   opMetrics (SegRed _ _ red_op _ _ body) =
     inside "SegRed" $ lambdaMetrics red_op >> bodyMetrics body
+  opMetrics (SegScan _ scan_op _ _ body) =
+    inside "SegScan" $ lambdaMetrics scan_op >> bodyMetrics body
   opMetrics (SegGenRed _ ops _ body) =
     inside "SegGenRed" $ do mapM_ (lambdaMetrics . genReduceOp) ops
                             bodyMetrics body
@@ -744,6 +772,12 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
     PP.nestedBlock "{" "}" (ppr body)
     where name = case comm of Commutative    -> "segred_comm"
                               Noncommutative -> "segred"
+
+  ppr (SegScan space scan_op nes ts body) =
+    text "segscan" <> PP.parens (ppr scan_op <> PP.comma </>
+                                 PP.braces (PP.commasep $ map ppr nes)) </>
+    PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
+    PP.nestedBlock "{" "}" (ppr body)
 
   ppr (SegGenRed space ops ts body) =
     text "seggenred" <>

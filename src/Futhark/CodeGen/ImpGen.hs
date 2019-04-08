@@ -72,7 +72,7 @@ module Futhark.CodeGen.ImpGen
   , dScope
   , dScopes
   , dArray
-  , dPrim, dPrim_, dPrimV
+  , dPrim, dPrim_, dPrimV_, dPrimV
 
   , sFor, sWhile
   , sComment
@@ -805,6 +805,10 @@ dPrim :: String -> PrimType -> ImpM lore op VName
 dPrim name t = do name' <- newVName name
                   dPrim_ name' t
                   return name'
+
+dPrimV_ :: VName -> Imp.Exp -> ImpM lore op ()
+dPrimV_ name e = do dPrim_ name $ primExpType e
+                    name <-- e
 
 dPrimV :: String -> Imp.Exp -> ImpM lore op VName
 dPrimV name e = do name' <- dPrim name $ primExpType e

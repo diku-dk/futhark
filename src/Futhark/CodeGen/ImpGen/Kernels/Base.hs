@@ -9,7 +9,9 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , CallKernelGen
   , InKernelGen
   , computeThreadChunkSize
+  , simpleKernelConstants
   , kernelInitialisation
+  , kernelInitialisationSimple
   , kernelInitialisationSetSpace
   , setSpaceIndices
   , makeAllMemoryGlobal
@@ -51,7 +53,6 @@ import Futhark.CodeGen.ImpGen ((<--),
                                sFor, sWhile, sComment, sIf, sWhen, sUnless,
                                sOp,
                                dPrim, dPrim_, dPrimV)
-import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralExp)
 import Futhark.Util (splitAt3, maybeNth, takeLast)
 
@@ -189,14 +190,8 @@ compileKernelExp constants pat (Combine (CombineSpace scatter cspace) _ aspace b
         local_index = map (ImpGen.compileSubExpOfType int32 . Var . fst) cspace
 
 compileKernelExp constants (Pattern _ dests) (GroupReduce w lam input) = do
-  let [my_index_param, offset_param] = take 2 $ lambdaParams lam
-      lam' = lam { lambdaParams = drop 2 $ lambdaParams lam }
-
-  dPrim_ (paramName my_index_param) int32
-  dPrim_ (paramName offset_param) int32
-  paramName my_index_param <-- kernelGlobalThreadId constants
   w' <- ImpGen.compileSubExp w
-  groupReduceWithOffset constants (paramName offset_param) w' lam' $ map snd input
+  groupReduce constants w' lam $ map snd input
 
   sOp Imp.LocalBarrier
 
@@ -590,36 +585,37 @@ computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elem
           Imp.innerExp num_elements .<.
           (thread_index + 1) * Imp.innerExp elements_per_thread
 
-kernelInitialisationSetSpace :: KernelSpace -> InKernelGen ()
-                             -> ImpGen.ImpM lore op (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
-kernelInitialisationSetSpace space set_space = do
-  group_size' <- ImpGen.compileSubExp $ spaceGroupSize space
-  num_threads' <- ImpGen.compileSubExp $ spaceNumThreads space
-  num_groups <- ImpGen.compileSubExp $ spaceNumGroups space
-
-  let global_tid = spaceGlobalId space
-      local_tid = spaceLocalId space
-      group_id = spaceGroupId space
+kernelInitialisationSimple :: Imp.Exp -> Imp.Exp
+                           -> Maybe (VName, VName, VName)
+                           -> ImpGen.ImpM lore op (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
+kernelInitialisationSimple num_groups group_size names = do
+  (global_tid, local_tid, group_id) <-
+    case names of Nothing ->
+                    (,,)
+                    <$> newVName "global_tid"
+                    <*> newVName "local_tid"
+                    <*> newVName "group_id"
+                  Just (global_tid, local_tid, group_id) ->
+                    return (global_tid, local_tid, group_id)
   wave_size <- newVName "wave_size"
   inner_group_size <- newVName "group_size"
 
-  let (space_is, space_dims) = unzip $ spaceDimensions space
-  space_dims' <- mapM ImpGen.compileSubExp space_dims
   let constants =
         KernelConstants
         (Imp.var global_tid int32)
         (Imp.var local_tid int32)
         (Imp.var group_id int32)
         global_tid local_tid group_id
-        group_size' num_groups num_threads'
-        (Imp.var wave_size int32) (zip space_is space_dims')
-        (if null (spaceDimensions space)
-         then true else isActive (spaceDimensions space)) mempty
+        group_size num_groups (group_size*num_groups)
+        (Imp.var wave_size int32) []
+        true mempty
 
   let set_constants = do
-        dPrim_ wave_size int32
+        dPrim_ global_tid int32
+        dPrim_ local_tid int32
         dPrim_ inner_group_size int32
-        ImpGen.dScope Nothing (scopeOfKernelSpace space)
+        dPrim_ wave_size int32
+        dPrim_ group_id int32
 
         sOp (Imp.GetGlobalId global_tid 0)
         sOp (Imp.GetLocalId local_tid 0)
@@ -627,9 +623,39 @@ kernelInitialisationSetSpace space set_space = do
         sOp (Imp.GetLockstepWidth wave_size)
         sOp (Imp.GetGroupId group_id 0)
 
+  return (constants, set_constants)
+
+kernelInitialisationSetSpace :: KernelSpace -> InKernelGen ()
+                             -> ImpGen.ImpM lore op (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
+kernelInitialisationSetSpace space set_space = do
+  group_size <- ImpGen.compileSubExp $ spaceGroupSize space
+  num_groups <- ImpGen.compileSubExp $ spaceNumGroups space
+
+  (constants, set_constants) <-
+    kernelInitialisationSimple num_groups group_size $
+    Just (spaceGlobalId space, spaceLocalId space, spaceGroupId space)
+
+  let set_constants' = do
+        set_constants
+        case spaceStructure space of
+          FlatThreadSpace is_and_dims ->
+            mapM_ ((`dPrim_` int32) . fst) is_and_dims
+          NestedThreadSpace is_and_dims -> do
+            let (gtids, _, ltids, _) = unzip4 is_and_dims
+            mapM_ (`dPrim_` int32) $ gtids ++ ltids
         set_space
 
-  return (constants, set_constants)
+  let (space_is, space_dims) = unzip $ spaceDimensions space
+  space_dims' <- mapM ImpGen.compileSubExp space_dims
+
+  return (constants { kernelThreadActive =
+                        if null $ spaceDimensions space
+                        then true
+                        else isActive $ spaceDimensions space
+                    , kernelDimensions =
+                        zip space_is space_dims'
+                    },
+          set_constants')
 
 kernelInitialisation :: KernelSpace
                      -> ImpGen.ImpM lore op (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
@@ -652,8 +678,7 @@ setSpaceIndices gtid space =
   where flatSpaceWith base is_and_dims = do
           let (is, dims) = unzip is_and_dims
           dims' <- mapM ImpGen.compileSubExp dims
-          let index_expressions = unflattenIndex dims' base
-          zipWithM_ (<--) is index_expressions
+          zipWithM_ (<--) is $ unflattenIndex dims' base
 
 isActive :: [(VName, SubExp)] -> Imp.Exp
 isActive limit = case actives of
@@ -712,13 +737,13 @@ writeParamToLocalMemory i (mem, _) param
         bt = elemType $ paramType param
 
 readParamFromLocalMemory :: Typed (MemBound u) =>
-                            VName -> Imp.Exp -> Param (MemBound u) -> (VName, t)
+                            Imp.Exp -> Param (MemBound u) -> (VName, t)
                          -> ImpGen.ImpM lore op ()
-readParamFromLocalMemory index i param (l_mem, _)
+readParamFromLocalMemory i param (l_mem, _)
   | Prim _ <- paramType param =
       paramName param <--
       Imp.index l_mem (bytes i') bt (Space "local") Imp.Volatile
-  | otherwise = index <-- i
+  | otherwise = return ()
   where i' = i * Imp.LeafExp (Imp.SizeOf bt) int32
         bt = elemType $ paramType param
 
@@ -834,12 +859,9 @@ groupScan constants seg_flag w lam arrs = do
                          ImpGen.lookupArray) arrs
 
   let ltid = kernelLocalThreadId constants
-      (lam_i, other_index_param, actual_params) =
-        partitionChunkedKernelLambdaParameters $ lambdaParams lam
-      (x_params, y_params) = splitAt (length arrs) actual_params
+      (x_params, y_params) = splitAt (length arrs) $ lambdaParams lam
 
   ImpGen.dLParams (lambdaParams lam++lambdaParams renamed_lam)
-  lam_i <-- ltid
 
   -- The scan works by splitting the group into blocks, which are
   -- scanned separately.  Typically, these blocks are smaller than
@@ -880,8 +902,7 @@ groupScan constants seg_flag w lam arrs = do
   sOp Imp.LocalBarrier
 
   let read_carry_in =
-        zipWithM_ (readParamFromLocalMemory
-                   (paramName other_index_param) (block_id - 1))
+        zipWithM_ (readParamFromLocalMemory (block_id - 1))
         x_params acc_local_mem
 
   let op_to_y
@@ -918,19 +939,16 @@ inBlockScan seg_flag lockstep_width block_size active ltid acc_local_mem scan_la
   skip_threads <- dPrim "skip_threads" int32
   let in_block_thread_active =
         Imp.var skip_threads int32 .<=. in_block_id
-      (scan_lam_i, other_index_param, actual_params) =
-        partitionChunkedKernelLambdaParameters $ lambdaParams scan_lam
+      actual_params = lambdaParams scan_lam
       (x_params, y_params) =
         splitAt (length actual_params `div` 2) actual_params
       read_operands =
-        zipWithM_ (readParamFromLocalMemory (paramName other_index_param) $
-                   ltid - Imp.var skip_threads int32)
+        zipWithM_ (readParamFromLocalMemory $ ltid - Imp.var skip_threads int32)
         x_params acc_local_mem
 
   -- Set initial y values
   sWhen active $
-    zipWithM_ (readParamFromLocalMemory scan_lam_i ltid)
-    y_params acc_local_mem
+    zipWithM_ (readParamFromLocalMemory ltid) y_params acc_local_mem
 
   let op_to_y
         | Nothing <- seg_flag =
