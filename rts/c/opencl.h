@@ -415,9 +415,9 @@ static struct opencl_device_option get_preferred_device(const struct opencl_conf
     struct opencl_device_option device = devices[i];
     if (strstr(device.platform_name, cfg->preferred_platform) != NULL &&
         strstr(device.device_name, cfg->preferred_device) != NULL &&
-        num_device_matches++ == cfg->preferred_device_num &&
         (cfg->ignore_blacklist ||
-         !is_blacklisted(device.platform_name, device.device_name, cfg))) {
+         !is_blacklisted(device.platform_name, device.device_name, cfg)) &&
+        num_device_matches++ == cfg->preferred_device_num) {
       // Free all the platform and device names, except the ones we have chosen.
       for (size_t j = 0; j < num_devices; j++) {
         if (j != i) {
