@@ -144,12 +144,23 @@ substituteInMod substs (ModFun abs (Scope mod_substs mod_mods) mparam mbody) =
   where forward v = lookupSubst v mod_substs
         substs' = M.map forward substs
 
+extendAbsTypes :: Substitutions -> TransformM a -> TransformM a
+extendAbsTypes ascript_substs m = do
+  abs <- asks envAbs
+  -- Some abstract types may have a different name on the inside, and
+  -- we need to make them visible, because substitutions involving
+  -- abstract types must be lifted out in transformModBind.
+  let subst_abs = S.fromList $ map snd $ filter ((`S.member` abs) . fst) $
+                  M.toList ascript_substs
+  bindingAbs subst_abs m
+
 evalModExp :: ModExp -> TransformM Mod
 evalModExp (ModVar qn _) = lookupMod qn
 evalModExp (ModParens e _) = evalModExp e
 evalModExp (ModDecs decs _) = ModMod <$> transformDecs decs
 evalModExp (ModImport _ (Info fpath) _) = ModMod <$> lookupImport fpath
 evalModExp (ModAscript me _ (Info ascript_substs) _) =
+  extendAbsTypes ascript_substs $
   substituteInMod ascript_substs <$> evalModExp me
 evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
   f_mod <- evalModExp f
@@ -159,7 +170,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
       fail $ "Cannot apply non-parametric module at " ++ locStr loc
     ModFun f_abs f_closure f_p f_body ->
       bindingAbs (f_abs <> S.fromList (unInfo (modParamAbs f_p))) $
-      extendScope f_closure $ generating $ do
+      extendAbsTypes b_substs $ extendScope f_closure $ generating $ do
         outer_substs <- scopeSubsts <$> askScope
         abs <- asks envAbs
         let forward (k,v) = (lookupSubst k outer_substs, v)
@@ -245,7 +256,12 @@ transformModBind mb = do
          (maybeAscript (srclocOf mb) (modSignature mb) $ modExp mb) $
          modParams mb
   mname <- transformName $ modName mb
-  return $ Scope mempty $ M.singleton mname mod
+  abs <- asks envAbs
+  -- Copy substitutions involving abstract types out, because they are
+  -- always resolved at the outermost level.
+  let abs_substs = M.filterWithKey (const . flip S.member abs) $
+                   scopeSubsts $ modScope mod
+  return $ Scope abs_substs $ M.singleton mname mod
 
 transformDecs :: [Dec] -> TransformM Scope
 transformDecs ds =

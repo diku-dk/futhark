@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed a couple of overly strict internal sanity checks related to
     in-place updates (#735, #736).
 
+  * Fixed a couple of convoluted defunctorisation bugs (#739).
+
 ## [0.10.1]
 
 ### Added
