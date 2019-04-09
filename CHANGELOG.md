@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
         let f (n: i32) (m: i32): [n][m]i32 = ...
 
+  * A new library function
+    `futhark_context_config_select_device_interactively()` has been
+    added.
+
 ### Removed
 
 ### Changed

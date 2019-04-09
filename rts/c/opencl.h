@@ -27,6 +27,7 @@ struct opencl_config {
   int preferred_device_num;
   const char *preferred_platform;
   const char *preferred_device;
+  int ignore_blacklist;
 
   const char* dump_program_to;
   const char* load_program_from;
@@ -59,6 +60,7 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->preferred_device_num = 0;
   cfg->preferred_platform = "";
   cfg->preferred_device = "";
+  cfg->ignore_blacklist = 0;
   cfg->dump_program_to = NULL;
   cfg->load_program_from = NULL;
   cfg->dump_binary_to = NULL;
@@ -225,6 +227,7 @@ static char* opencl_succeed_nonfatal(unsigned int ret,
 
 void set_preferred_platform(struct opencl_config *cfg, const char *s) {
   cfg->preferred_platform = s;
+  cfg->ignore_blacklist = 1;
 }
 
 void set_preferred_device(struct opencl_config *cfg, const char *s) {
@@ -241,6 +244,7 @@ void set_preferred_device(struct opencl_config *cfg, const char *s) {
   }
   cfg->preferred_device = s;
   cfg->preferred_device_num = x;
+  cfg->ignore_blacklist = 1;
 }
 
 static char* opencl_platform_info(cl_platform_id platform,
@@ -347,6 +351,45 @@ static void opencl_all_device_options(struct opencl_device_option **devices_out,
   *num_devices_out = num_devices;
 }
 
+// Returns 0 on success.
+static int select_device_interactively(struct opencl_config *cfg) {
+  struct opencl_device_option *devices;
+  size_t num_devices;
+  int ret = 1;
+
+  opencl_all_device_options(&devices, &num_devices);
+
+  printf("Choose OpenCL device:\n");
+  const char *cur_platform = "";
+  for (size_t i = 0; i < num_devices; i++) {
+    struct opencl_device_option device = devices[i];
+    if (strcmp(cur_platform, device.platform_name) != 0) {
+      printf("Platform: %s\n", device.platform_name);
+      cur_platform = device.platform_name;
+    }
+    printf("[%d] %s\n", (int)i, device.device_name);
+  }
+
+  int selection;
+  printf("Choice: ");
+  if (scanf("%d", &selection) == 1) {
+    ret = 0;
+    cfg->preferred_platform = "";
+    cfg->preferred_device = "";
+    cfg->preferred_device_num = selection;
+    cfg->ignore_blacklist = 1;
+  }
+
+  // Free all the platform and device names.
+  for (size_t j = 0; j < num_devices; j++) {
+    free(devices[j].platform_name);
+    free(devices[j].device_name);
+  }
+  free(devices);
+
+  return ret;
+}
+
 static int is_blacklisted(const char *platform_name, const char *device_name,
                           const struct opencl_config *cfg) {
   if (strcmp(cfg->preferred_platform, "") != 0 ||
@@ -370,10 +413,11 @@ static struct opencl_device_option get_preferred_device(const struct opencl_conf
 
   for (size_t i = 0; i < num_devices; i++) {
     struct opencl_device_option device = devices[i];
-    if (!is_blacklisted(device.platform_name, device.device_name, cfg) &&
-        strstr(device.platform_name, cfg->preferred_platform) != NULL &&
+    if (strstr(device.platform_name, cfg->preferred_platform) != NULL &&
         strstr(device.device_name, cfg->preferred_device) != NULL &&
-        num_device_matches++ == cfg->preferred_device_num) {
+        num_device_matches++ == cfg->preferred_device_num &&
+        (cfg->ignore_blacklist ||
+         !is_blacklisted(device.platform_name, device.device_name, cfg))) {
       // Free all the platform and device names, except the ones we have chosen.
       for (size_t j = 0; j < num_devices; j++) {
         if (j != i) {
