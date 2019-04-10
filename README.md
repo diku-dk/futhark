@@ -23,11 +23,11 @@ Usage
 
 To compile a Futhark program to sequential C:
 
-    futhark-c prog.fut -o prog
+    futhark c prog.fut -o prog
 
 Or maybe OpenCL:
 
-    futhark-opencl prog.fut -o prog
+    futhark opencl prog.fut -o prog
 
 And then run it:
 
@@ -35,7 +35,7 @@ And then run it:
 
 To interpret a Futhark program:
 
-    futharki prog.fut < prog.input
+    futhark run prog.fut < prog.input
 
 Hacking
 =======
@@ -48,6 +48,6 @@ do not require deep knowledge of the code base.
 Testing
 =======
 
-Run the `futhark-test tests` to check how well we're doing.  Use
-`futhark-test -t` if you're in a hurry and only want to check that all
-the tests type-check.
+Run `futhark test tests` to check how well we're doing.  Use `futhark
+test -t` if you're in a hurry and only want to check that all the
+tests type-check.
