@@ -23,7 +23,7 @@ other code..  The standard Futhark optimisation pipeline is used, and
 ``-r:Mono.Options.dll``, and ``/unsafe``.
 
 The resulting program will otherwise behave exactly as
-one compiled with ``futhark-cs``.
+one compiled with ``futhark csharp``.
 
 OPTIONS
 =======
@@ -66,4 +66,4 @@ Cloo.clSharp is available on https://www.nuget.org/packages/Cloo.clSharp/
 SEE ALSO
 ========
 
-futhark-test(1), futhark-cs(1)
+:ref:`futhark-test(1)`, :ref:`futhark-csharp(1)`

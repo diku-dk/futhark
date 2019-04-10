@@ -62,4 +62,4 @@ Mono.Options is available on https://www.nuget.org/packages/Mono.Options/5.3.0.1
 SEE ALSO
 ========
 
-futhark-csopencl(1)
+:ref:`futhark-csopencl(1)`

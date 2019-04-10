@@ -66,4 +66,4 @@ OPTIONS
 SEE ALSO
 ========
 
-futhark-py(1), futhark-opencl(1)
+:ref:`futhark-py(1)`, :ref:`futhark-opencl(1)`

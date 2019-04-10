@@ -43,7 +43,7 @@ If ``compiled`` is present before the ``input`` keyword, this test
 case will never be passed to the interpreter.  This is useful for test
 cases that are annoyingly slow to interpret.  The ``nobench`` keyword
 is for data sets that are too small to be worth benchmarking, and only
-has meaning to futhark-bench(1).
+has meaning to :ref:`futhark-bench(1)`.
 
 If ``input`` is preceded by ``random``, the text between the curly
 braces must consist of a sequence of Futhark types, including sizes in
@@ -218,4 +218,4 @@ randomly generated data::
 SEE ALSO
 ========
 
-futhark-bench(1), futhark-repl(1)
+:ref:`futhark-bench(1)`, :ref:`futhark-repl(1)`

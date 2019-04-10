@@ -54,4 +54,4 @@ Print all non-builtin imported Futhark files to stdout, one per line.
 SEE ALSO
 ========
 
-futhark-opencl(1), futhark-c(1), futhark-py(1), futhark-pyopencl(1), futhark-dataset(1), futhark-doc(1), futhark-test(1), futhark-bench(1)
+:ref:`futhark-opencl(1)`, :ref:`futhark-c(1)`, :ref:`futhark-py(1)`, :ref:`futhark-pyopencl(1)`, :ref:`futhark-dataset(1)`, :ref:`futhark-doc(1)`, :ref:`futhark-test(1)`, :ref:`futhark-bench(1)`, :ref:`futhark-run(1)`, :ref:`futhark-repl(1)`

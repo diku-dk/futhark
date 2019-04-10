@@ -164,4 +164,4 @@ Only GitHub and GitLab are supported as code hosting sites.
 SEE ALSO
 ========
 
-futhark-test(1), futhark-bench(1)
+:ref:`futhark-test(1)`, :ref:`futhark-doc(1)`

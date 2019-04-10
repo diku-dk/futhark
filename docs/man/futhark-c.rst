@@ -57,4 +57,4 @@ OPTIONS
 SEE ALSO
 ========
 
-futhark-opencl(1), futhark-cuda(1), futhark-test(1)
+:ref:`futhark-opencl(1)`, :ref:`futhark-cuda(1)`, :ref:`futhark-test(1)`

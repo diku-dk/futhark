@@ -23,7 +23,7 @@ The arguments are read and printed in Futhark syntax.
 
 The generated code is very slow, likely too slow to be useful.  It is
 more interesting to use this command's big brother,
-``futhark pyopencl``.
+:ref:`futhark-pyopencl(1)`.
 
 OPTIONS
 =======
@@ -60,4 +60,4 @@ OPTIONS
 SEE ALSO
 ========
 
-futhark-pyopencl(1)
+:ref:`futhark-pyopencl(1)`
