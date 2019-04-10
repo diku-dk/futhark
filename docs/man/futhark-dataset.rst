@@ -84,4 +84,4 @@ Determine the types of values contained in a data file::
 SEE ALSO
 ========
 
-futhark-test(1), futhark-bench(1)
+:ref:`futhark-test(1)`, :ref:`futhark-bench(1)`
