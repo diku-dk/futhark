@@ -64,7 +64,7 @@ OPTIONS
   Pass an option to benchmark programs that are being run.  For
   example, we might want to run OpenCL programs on a specific device::
 
-    futhark bench prog.fut --codegen=opencl --pass-option=-dHawaii
+    futhark bench prog.fut --backend=opencl --pass-option=-dHawaii
 
 --runner=program
 
