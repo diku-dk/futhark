@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 
-## [0.11.0]
+## [0.10.2]
 
 ### Added
 
@@ -27,10 +27,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * A new library function
     `futhark_context_config_select_device_interactively()` has been
     added.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
