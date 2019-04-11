@@ -24,7 +24,7 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
-import Futhark.CodeGen.ImpGen (sFor, sWhen, sOp)
+import Futhark.CodeGen.ImpGen (sFor, sWhen, sOp, (<--))
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
@@ -60,6 +60,28 @@ opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler dest (Inner (HostOp kernel)) =
   kernelCompiler dest kernel
+opCompiler pat (Inner (Husk hspace red_op nes ts body)) = do
+  let HuskSpace _ num_nodes src _ parts_mem parts_res red_src red_src_mem = hspace
+      num_nodes_var = Imp.var num_nodes int32
+      body_pat = Pattern [] $ zipWith PatElem parts_res ts
+      red_op_params = lambdaParams red_op
+      (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
+  i <- newVName "i"
+  zipWithM_ (ImpGen.dReplicateMemFromArray (Space "device")) parts_mem src
+  ImpGen.dScope Nothing $ scopeOfHuskSpace hspace
+  body_code <- ImpGen.collect $ ImpGen.compileBody pat body
+  ImpGen.dLParams red_op_params
+  red_param_bsizes <- mapM (ImpGen.getVarBytesSize . paramName) red_op_params
+  zipWithM_ (\n s -> ImpGen.sAllocNamed n s DefaultSpace) red_src_mem $
+            map (bytes . (num_nodes_var *) . Imp.innerExp) red_param_bsizes
+  nes_e <- mapM ImpGen.compileSubExp nes
+  red_code <- ImpGen.collect $ do
+    zipWithM_ (<--) (map paramName red_acc_params) nes_e
+    sFor i Int32 num_nodes_var $ do
+      zipWithM_ (\nvar arr -> ImpGen.copyDWIM nvar [] arr [LeafExp (Imp.ScalarVar i) int32])
+                (map paramName red_next_params) (map (Var . paramName) red_src)
+      ImpGen.compileBody' red_acc_params $ lambdaBody red_op
+  sOp $ Imp.Husk hspace red_code body_code
 opCompiler pat e =
   compilerBugS $ "ImpGen.opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
@@ -108,7 +130,7 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
             }
 
 kernelCompiler pat (SegRed space comm red_op nes _ body) =
-  compileSegRedHusk pat space comm red_op nes body
+  compileSegRed pat space comm red_op nes body
 
 kernelCompiler pat (SegGenRed space ops _ body) =
   compileSegGenRed pat space ops body

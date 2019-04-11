@@ -13,7 +13,6 @@ module Futhark.CodeGen.ImpCode.Kernels
   , KernelOp (..)
   , AtomicOp (..)
   , Kernel (..)
-  , HuskSpace (..)
   , LocalMemoryUse
   , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
@@ -25,11 +24,14 @@ module Futhark.CodeGen.ImpCode.Kernels
   where
 
 import Control.Monad.Writer
+import qualified Data.Set as S
 import Data.List
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.Kernels.Sizes
+import Futhark.Representation.Kernels.Kernel (HuskSpace(..), boundByHuskSpace)
+import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
@@ -50,7 +52,7 @@ newtype KernelConst = SizeConst Name
 type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel Kernel
-            | Husk HuskSpace Code Code
+            | Husk (HuskSpace ExplicitMemory) Code Code
             | GetSize VName Name SizeClass
             | CmpSizeLe VName Name SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
@@ -72,14 +74,6 @@ data Kernel = Kernel
                -- alphanumeric and without spaces.
               }
             deriving (Show)
-
-data HuskSpace = HuskSpace
-                 { hspaceNodeId :: VName
-                 , hspaceNumNodes :: VName
-                 , hspacePartitions :: [(VName, VName)]
-                 , hspaceIntermediateResults :: [(VName, VName)]
-                 }
-                deriving (Show)
 
 -- ^ In-kernel name and per-workgroup size in bytes.
 type LocalMemoryUse = (VName, Either MemSize KernelConstExp)
@@ -138,11 +132,18 @@ instance Pretty HostOp where
     ppr dest <+> text "<-" <+>
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
+  ppr (Husk hspace red body) =
+    text "husk" </>
+    align (ppr hspace) <+>
+    nestedBlock "{" "}" (ppr body) <+>
+    nestedBlock "{" "}" (ppr red)
   ppr (CallKernel c) =
     ppr c
 
 instance FreeIn HostOp where
   freeIn (CallKernel c) = freeIn c
+  freeIn (Husk hspace red body) =
+    (freeIn red <> freeIn body) `S.difference` boundByHuskSpace hspace
   freeIn (CmpSizeLe dest _ _ x) =
     freeIn dest <> freeIn x
   freeIn (GetSizeMax dest _) =
@@ -157,6 +158,8 @@ instance Substitute HostOp where
     GetSizeMax (substituteNames m dest) size_class
   substituteNames m (CmpSizeLe dest name size_class x) =
     CmpSizeLe (substituteNames m dest) name size_class (substituteNames m x)
+  substituteNames m (Husk hspace red body) =
+    Husk (substituteNames m hspace) (substituteNames m red) (substituteNames m body)
   substituteNames m (CallKernel c) =
     CallKernel (substituteNames m c)
 

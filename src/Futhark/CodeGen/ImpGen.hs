@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE TupleSections #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
     compileProg
@@ -60,6 +61,7 @@ module Futhark.CodeGen.ImpGen
   , fullyIndexArray'
   , varIndex
   , Imp.dimSizeToExp
+  , getVarBytesSize
   , dimSizeToSubExp
   , copy
   , copyDWIM
@@ -72,13 +74,14 @@ module Futhark.CodeGen.ImpGen
   , dScope
   , dScopes
   , dArray
+  , dReplicateMemFromArray
   , dPrim, dPrim_, dPrimV
 
   , sFor, sWhile
   , sComment
   , sIf, sWhen, sUnless
   , sOp
-  , sDeclareMem, sAlloc, sAlloc_
+  , sDeclareNamedMem, sDeclareMem, sAllocNamed, sAlloc, sAlloc_
   , sArray, sAllocArray, sStaticArray
   , sWrite, sUpdate
   , (<--)
@@ -855,6 +858,15 @@ dArray name bt shape membind = do
   entry <- memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
   addVar name entry
 
+dReplicateMemFromArray :: Space -> VName -> VName -> ImpM lore op ()
+dReplicateMemFromArray space repl_mem origin_arr = do
+  mem_size <- getArrayMemSize origin_arr
+  addVar repl_mem $ MemVar Nothing $ MemEntry mem_size space
+  where getArrayMemSize arr = do
+          arr_loc <- entryArrayLocation <$> lookupArray arr
+          arr_mem <- lookupMemory $ memLocationName arr_loc
+          return $ entryMemSize arr_mem
+
 everythingVolatile :: ImpM lore op a -> ImpM lore op a
 everythingVolatile = local $ \env -> env { envVolatility = Imp.Volatile }
 
@@ -1201,6 +1213,17 @@ dimSizeToSubExp (Imp.VarSize v) = Var v
 dimSizeToExp :: Imp.Size -> Imp.Exp
 dimSizeToExp = compilePrimExp . primExpFromSubExp int32 . dimSizeToSubExp
 
+getVarBytesSize :: VName -> ImpM lore op (Count Bytes)
+getVarBytesSize name = do
+  var <- lookupVar name
+  case var of
+    ArrayVar _ entry ->
+      return $ arrayOuterSize entry `Imp.withElemType` entryArrayElemType entry
+    MemVar _ entry ->
+      return $ Imp.memSizeToExp $ entryMemSize entry
+    ScalarVar _ entry ->
+      return $ bytes $ LeafExp (Imp.SizeOf $ entryScalarType entry) (IntType Int32)
+
 --- Building blocks for constructing code.
 
 sFor :: VName -> IntType -> Imp.Exp -> ImpM lore op () -> ImpM lore op ()
@@ -1243,14 +1266,17 @@ dSize size =
             size_var <-- Imp.innerExp size
             return $ Imp.VarSize size_var
 
+sDeclareNamedMem :: VName -> Count Bytes -> Space -> ImpM lore op Imp.MemSize
+sDeclareNamedMem name size space = do
+  size' <- dSize size
+  emit $ Imp.DeclareMem name space
+  addVar name $ MemVar Nothing $ MemEntry size' space
+  return size'
+
 sDeclareMem :: String -> Count Bytes -> Space -> ImpM lore op (VName, Imp.MemSize)
 sDeclareMem name size space = do
-
   name' <- newVName name
-  size' <- dSize size
-  emit $ Imp.DeclareMem name' space
-  addVar name' $ MemVar Nothing $ MemEntry size' space
-  return (name', size')
+  sDeclareNamedMem name' size space >>= return . (name',)
 
 sAlloc_ :: VName -> Imp.MemSize -> Space -> ImpM lore op ()
 sAlloc_ name' size' space = do
@@ -1262,6 +1288,11 @@ sAlloc name size space = do
   (name', size') <- sDeclareMem name size space
   sAlloc_ name' size' space
   return name'
+
+sAllocNamed :: VName -> Count Bytes -> Space -> ImpM lore op ()
+sAllocNamed name size space = do
+  size' <- sDeclareNamedMem name size space
+  sAlloc_ name size' space
 
 sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName
 sArray name bt shape membind = do

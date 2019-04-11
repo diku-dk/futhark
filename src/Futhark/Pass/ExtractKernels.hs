@@ -335,10 +335,12 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
 
   let paralleliseOuter = runBinder_ $ do
         red_lam_sequential <- Kernelise.transformLambda red_lam
+        red_lam_firstorder <- FOT.transformLambda red_lam
         map_lam_sequential <- Kernelise.transformLambda map_lam
         addStms =<<
           (fmap (certify cs) <$>
-           nonSegRed pat w comm' red_lam_sequential map_lam_sequential nes arrs)
+           huskedNonSegRed pat w comm' red_lam_sequential red_lam_firstorder
+                           map_lam_sequential nes arrs)
 
       outerParallelBody =
         renameBody =<<

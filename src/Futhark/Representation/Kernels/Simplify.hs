@@ -133,16 +133,21 @@ simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
 
-simplifyKernelOp _ _ (Husk red_op nes ts body) = do
+simplifyKernelOp _ _ (Husk hspace red_op nes ts body) = do
+  let hspace' = convertHuskSpace hspace
+      scope_vtable = ST.fromScope $ scopeOfHuskSpace hspace'
   nes' <- mapM Engine.simplify nes
   ts' <- mapM Engine.simplify ts
-  (red_op', red_op_hoisted) <- Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
-  par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
   ((body_stms', body_res'), body_hoisted) <-
-    Engine.blockIf par_blocker $
+    Engine.localVtable (<>scope_vtable) $
+    Engine.blockIf (Engine.isFalse False) $
     Engine.simplifyBody (replicate (length ts) Observe) body
+  -- TODO: ^ Should we be less restrictive in hoist-blocking?
   body' <- Engine.constructBody body_stms' body_res'
-  return (Husk red_op' nes' ts' body', red_op_hoisted <> body_hoisted)
+  (red_op', red_op_hoisted) <-
+    Engine.localVtable (<>scope_vtable) $
+    Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
+  return (Husk hspace' red_op' nes' ts' body', red_op_hoisted <> body_hoisted)
 
 simplifyKernelOp _ _ (GetSize key size_class) =
   return (GetSize key size_class, mempty)

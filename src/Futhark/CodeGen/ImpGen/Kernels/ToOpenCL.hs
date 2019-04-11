@@ -27,6 +27,8 @@ import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
+import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.Kernels.Kernel (HuskSpace(..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty)
@@ -92,8 +94,8 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp target (Husk hspace kern comb_red) =
-  onHusk target hspace kern comb_red
+onHostOp target (Husk hspace red body) =
+  onHusk target hspace red body
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
@@ -177,14 +179,14 @@ onKernel target kernel = do
 
 
 onHusk :: KernelTarget
-          -> ImpKernels.HuskSpace
+          -> (HuskSpace ExplicitMemory)
           -> ImpKernels.Code 
           -> ImpKernels.Code
           -> OnKernelM OpenCL
-onHusk target hspace kernel red_kern = do
-  kernel' <- traverse (onHostOp target) kernel
-  red_kern' <- traverse (onHostOp target) red_kern
-  return $ DistributeHusk hspace kernel' red_kern'
+onHusk target hspace red body = do
+  red' <- traverse (onHostOp target) red
+  body' <- traverse (onHostOp target) body
+  return $ DistributeHusk hspace red' body'
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =

@@ -552,6 +552,15 @@ handleHostOp (HostOp (SegGenRed space ops ts body)) = do
     return op { genReduceOp = lam }
   return $ Inner $ HostOp $ SegGenRed space ops' ts body'
 
+handleHostOp (Husk hspace red_op nes ts body) = do
+  let hspace' = huskSpaceMemInfo hspace
+  (body', red_op') <- localScope (scopeOfHuskSpace hspace') $ do
+    b <- allocInBodyNoDirect body
+    summaries <- mapM (lookupArraySummary . paramName) $ hspaceReductionSource hspace
+    r <- allocInReduceLambda red_op summaries
+    return (b, r)
+  return $ Inner $ Husk hspace' red_op' nes ts body'
+
 subInKernel :: AllocM InInKernel OutInKernel a
             -> AllocM fromlore2 ExplicitMemory a
 subInKernel = subAllocM handleKernelExp True
@@ -763,9 +772,11 @@ allocInLoopForm (ForLoop i it n loopvars) =
             Mem size space ->
               return (p { paramAttr = MemMem size space }, a)
 
-allocInReduceLambda :: Lambda InInKernel
+allocInReduceLambda :: (Allocable fromlore tolore,
+                        Allocator tolore (AllocM fromlore tolore))
+                    => Lambda fromlore
                     -> [(VName, IxFun)]
-                    -> AllocM InInKernel OutInKernel (Lambda OutInKernel)
+                    -> AllocM fromlore tolore (Lambda tolore)
 allocInReduceLambda lam input_summaries = do
   let (i, j_param, actual_params) =
         partitionChunkedKernelLambdaParameters $ lambdaParams lam
@@ -785,9 +796,10 @@ allocInReduceLambda lam input_summaries = do
                  acc_params' ++ arr_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
-allocInReduceParameters :: PrimExp VName
-                        -> [(LParam InInKernel, (VName, IxFun))]
-                        -> AllocM InInKernel OutInKernel [LParam ExplicitMemory]
+allocInReduceParameters :: (Allocable fromlore tolore)
+                        => PrimExp VName
+                        -> [(LParam fromlore, (VName, IxFun))]
+                        -> AllocM fromlore tolore [LParam ExplicitMemory]
 allocInReduceParameters my_id = mapM allocInReduceParameter
   where allocInReduceParameter (p, (mem, ixfun)) =
           case paramType p of
@@ -856,8 +868,9 @@ allocInChunkedParameters offset = mapM allocInChunkedParameter
             Mem size space ->
               return p { paramAttr = MemMem size space }
 
-allocInLambda :: [LParam OutInKernel] -> Body InInKernel -> [Type]
-              -> AllocM InInKernel OutInKernel (Lambda OutInKernel)
+allocInLambda :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                 [LParam tolore] -> Body fromlore -> [Type]
+              -> AllocM fromlore tolore (Lambda tolore)
 allocInLambda params body rettype = do
   body' <- localScope (scopeOfLParams params) $
            allocInStms (bodyStms body) $ \bnds' ->

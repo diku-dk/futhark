@@ -9,6 +9,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
 
        , segRed
        , nonSegRed
+       , huskedNonSegRed
 
        , mapKernel
        , mapKernelFromBody
@@ -356,6 +357,26 @@ nonSegRed pat w comm red_lam map_lam nes arrs = runBinder_ $ do
   forM_ (zip (patternNames pat') (patternNames pat)) $ \(from, to) -> do
     from_t <- lookupType from
     letBindNames_ [to] $ BasicOp $ Index from $ fullSlice from_t [DimFix $ intConst Int32 0]
+
+huskedNonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
+             Pattern Kernels
+          -> SubExp
+          -> Commutativity
+          -> Lambda InKernel
+          -> Lambda Kernels
+          -> Lambda InKernel
+          -> [SubExp]
+          -> [VName]
+          -> m (Stms Kernels)
+huskedNonSegRed pat w comm red_lam_seq red_lam_fot map_lam nes arrs = runBinder_ $ do
+  let ret_ts = lambdaReturnType map_lam
+  red_lam_fot' <- renameLambda red_lam_fot
+  hspace@(HuskSpace _ _ _ parts _ parts_res _ _) <- constructHuskSpace arrs ret_ts
+  let body_pat = Pattern [] $ zipWith PatElem (hspacePartitionResults hspace) ret_ts
+      hscope = scopeOfHuskSpace hspace
+      parts_names = map paramName parts
+  body_stms <- localScope hscope $ nonSegRed body_pat w comm red_lam_seq map_lam nes parts_names
+  letBind_ pat $ Op $ Husk hspace red_lam_fot' nes ret_ts $ mkBody body_stms $ map Var parts_res
 
 blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                     Pattern Kernels
