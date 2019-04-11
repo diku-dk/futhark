@@ -907,7 +907,7 @@ instance PP.Pretty inner => PP.Pretty (HostOp lore inner) where
 
   ppr (CmpSizeLe name size_class x) =
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
-    text "<" <+> ppr x
+    text "<=" <+> ppr x
 
   ppr (HostOp op) = ppr op
 
