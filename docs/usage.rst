@@ -233,7 +233,7 @@ While compiling a Futhark program to an executable is useful for
 testing, it is not suitable for production use.  Instead, a Futhark
 program should be compiled into a reusable library in some target
 language, enabling integration into a larger program.  Four of the
-Futhark compilers support this: ``futhark c``, ``futhark opencl``,
+Futhark compilers support this: ``futhark c``, ``futhark opencl``, ``futhark cuda``,
 ``futhark py``, and ``futhark pyopencl``.
 
 General Concerns
@@ -251,7 +251,7 @@ Arrays of tuples are the most common case.  In such cases, *opaque
 types* are used in the generated code.  Values of these types cannot
 be directly inspected, but can be passed back to Futhark entry points.
 In the general case, these types will be named with a random hash.
-However, you if you insert explicit type annotations (and the type
+However, if you insert an explicit type annotation (and the type
 name contains only characters valid for identifiers for the used
 backend), the indicated name will be used.  Note that arrays contain
 brackets, which are usually not valid in identifiers.  Defining a
