@@ -1290,7 +1290,6 @@ checkExp (Match _ [] NoInfo loc) =
 checkExp (Match e (c:cs) NoInfo loc) = do
   sequentially (checkExp e) $ \e' _ -> do
     mt <- expType e'
-    traceM' $ unlines ["mt" ++ show mt]
     (cs', t) <- checkCases mt c cs
     zeroOrderType loc "returned from pattern match" t
     return $ Match e' cs' (Info t) loc
@@ -1351,20 +1350,24 @@ unpackPat (TuplePattern ps _) = Just <$> ps
 unpackPat (RecordPattern fs _) = Just . snd <$> sortFields (M.fromList fs)
 unpackPat (PatternAscription p _ _) = unpackPat p
 unpackPat p@PatternLit{} = [Just p]
-unpackPat p@(PatternConstr _ _  ps _) = (Just p) : (Just <$> ps)-- concatMap unpackPat ps
+unpackPat p@PatternConstr{} = [Just p]
 
 wildPattern :: Pattern -> Int -> Unmatched Pattern -> Unmatched Pattern
-wildPattern (TuplePattern ps loc) pos um = f <$> um
-  where f p = TuplePattern (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
+wildPattern (TuplePattern ps loc) pos um = wildTuple <$> um
+  where wildTuple p = TuplePattern (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
         ps' = map wildOut ps
         wildOut p = Wildcard (Info (patternPatternType p)) (srclocOf p)
 wildPattern (RecordPattern fs loc) pos um = wildRecord <$> um
-    where wildRecord p =
-            RecordPattern (take (pos - 1) fs' ++ [(fst (fs!!(pos - 1)), p)] ++ drop pos fs') loc
-          fs' = map wildOut fs
-          wildOut (f,p) = (f, Wildcard (Info (patternPatternType p)) (srclocOf p))
+  where wildRecord p =
+          RecordPattern (take (pos - 1) fs' ++ [(fst (fs!!(pos - 1)), p)] ++ drop pos fs') loc
+        fs' = map wildOut fs
+        wildOut (f,p) = (f, Wildcard (Info (patternPatternType p)) (srclocOf p))
 wildPattern (PatternAscription p _ _) pos um = wildPattern p pos um
 wildPattern (PatternParens p _) pos um = wildPattern p pos um
+wildPattern (PatternConstr n t ps loc) pos um = wildConstr <$> um
+  where wildConstr p = PatternConstr n t (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
+        ps' = map wildOut ps
+        wildOut p = Wildcard (Info (patternPatternType p)) (srclocOf p)
 wildPattern _ _ um = um
 
 checkUnmatched :: (MonadBreadCrumbs m, MonadTypeChecker m) => Exp -> m ()
@@ -1388,11 +1391,9 @@ unmatched :: (Unmatched Pattern -> Unmatched Pattern) -> [Pattern] -> [Unmatched
 unmatched hole (p:ps)
   | sameStructure labeledCols = do
     (i, cols) <- labeledCols
-    traceM' $ unlines ["unmatched", "(p:ps): " ++ show (p:ps),
-                       "labeledCols: " ++ show (i, cols)]
-    let hole' p' = hole $ wildPattern p i p'
+    let hole' = if isConstr p then hole else hole . wildPattern p i
     case sequence cols of
-      Nothing      -> []
+      Nothing -> []
       Just cs
         | all isPatternLit cs  -> map hole' $ localUnmatched cs
         | otherwise            -> unmatched hole' cs
@@ -1404,9 +1405,22 @@ unmatched hole (p:ps)
         localUnmatched ps'@(p':_) =
           case patternType p'  of
             SumT cs'' ->
-              let constrs = M.keys cs''
-                  matched = nub $ mapMaybe constr ps'
-              in map (UnmatchedConstr . buildConstr (SumT cs'')) $ constrs \\ matched
+              let constrs   = M.keys cs''
+                  matched   = nub $ mapMaybe constr ps'
+                  unmatched' = map (UnmatchedConstr . buildConstr (SumT cs'')) $ constrs \\ matched
+             in case unmatched' of
+                [] ->
+                  let constrGroups   = groupBy sameConstr (sortBy compareConstr ps')
+                      removedConstrs = map stripConstrs constrGroups
+                      transposed     = (fmap . fmap) transpose removedConstrs
+                      findUnmatched (p, trans) = do
+                        col <- trans
+                        case col of
+                          []           -> []
+                          ((i, _):_) -> unmatched (wilder i p) (map snd col)
+                      wilder i p = \s -> (\p' -> PatternParens p' noLoc) <$> wildPattern p i s
+                  in concatMap findUnmatched transposed
+                ps -> ps
             Prim t
               | not (any idOrWild ps') ->
                 case t of
@@ -1417,6 +1431,18 @@ unmatched hole (p:ps)
                     let matched = mapMaybe pExp $ filter isPatternLit ps'
                     in [UnmatchedNum (buildId (Info (Prim t)) "p") matched]
             _ -> []
+
+        isConstr PatternConstr{} = True
+        isConstr _ = False
+
+        stripConstrs :: [Pattern] -> (Pattern, [[(Int, Pattern)]])
+        stripConstrs (p@PatternConstr{} : cs') = (p, stripConstr p : map stripConstr cs')
+
+        stripConstr :: Pattern -> [(Int, Pattern)]
+        stripConstr (PatternConstr _ _  ps' _) = zip [1..] ps'
+
+        (PatternConstr n1 _ _ _) `sameConstr` (PatternConstr n2 _ _ _)    = n1 == n2
+        (PatternConstr n1 _ _ _) `compareConstr` (PatternConstr n2 _ _ _) = n1 `compare` n2
 
         sameStructure [] = True
         sameStructure (x:xs) = all (\y -> length y == length x' ) xs'
@@ -1444,9 +1470,12 @@ unmatched hole (p:ps)
         bool (Literal (BoolValue b) _ ) = Just b
         bool _ = Nothing
 
-        buildConstr t c =
-          PatternConstr c (Info t) [] noLoc
-          -- PatternLit (VConstr0 c (Info t) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
+        buildConstr t@(SumT m) c =
+          let cs     = m M.! c
+              wildCS = map (\t -> Wildcard (Info t) (noLoc)) cs
+          in if null wildCS
+               then PatternConstr c (Info t) [] noLoc
+               else PatternParens (PatternConstr c (Info t) wildCS noLoc) noLoc
         buildBool t b =
           PatternLit (Literal (BoolValue b) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
         buildId t n =

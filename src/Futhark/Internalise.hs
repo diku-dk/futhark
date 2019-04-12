@@ -637,7 +637,7 @@ internaliseExp _ e@E.Constr{} =
 
 internaliseExp desc (E.Match  e cs _ loc) = do
   case cs of
-    [CasePat _ eCase _] -> internaliseExp desc eCase
+    [CasePat pCase eCase locCase] -> internalisePat desc [] pCase e eCase locCase (internaliseExp desc)
     (c:cs') -> do
       bFalse <- bFalseM
       letTupExp' desc =<< generateCaseIf desc e c bFalse
