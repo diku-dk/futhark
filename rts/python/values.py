@@ -647,7 +647,7 @@ def construct_binary_value(v):
 
     num_bytes = 1 + 1 + 1 + 4 + len(shape) * 8 + elems * t.itemsize
     bytes = bytearray(num_bytes)
-    bytes[0] = b'b'
+    bytes[0] = np.int8(ord('b'))
     bytes[1] = 2
     bytes[2] = np.int8(len(shape))
     bytes[3:7] = type_strs[t]
