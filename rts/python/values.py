@@ -549,8 +549,10 @@ def read_array(f, expected_type, rank):
 
 if sys.version_info >= (3,0):
     input_reader = ReaderInput(sys.stdin.buffer)
+    output_writer = sys.stdout.buffer
 else:
     input_reader = ReaderInput(sys.stdin)
+    output_writer = sys.stdout
 
 import re
 
@@ -568,7 +570,7 @@ representation of the Futhark type."""
             return read_scalar(reader, basetype)
         return (dims, basetype)
 
-def write_value_text(v, out=sys.stdout):
+def write_value_text(v, out=output_writer):
     if type(v) == np.uint8:
         out.write("%uu8" % v)
     elif type(v) == np.uint16:
@@ -659,10 +661,10 @@ def construct_binary_value(v):
 
     return bytes
 
-def write_value_binary(v, out=sys.stdout):
+def write_value_binary(v, out=output_writer):
     out.write(construct_binary_value(v))
 
-def write_value(v, out=sys.stdout, binary=False):
+def write_value(v, out=output_writer, binary=False):
     if binary:
         return write_value_binary(v, out=out)
     else:
