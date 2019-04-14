@@ -227,7 +227,7 @@ scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
                      (Imp.var orig_group int32 + 1) * elems_per_group - 1
         no_carry_in = Imp.var orig_group int32 .==. 0 .||. is_a_carry .||. crosses_segment
 
-    sUnless no_carry_in $ do
+    sWhen (kernelThreadActive constants) $ sUnless no_carry_in $ do
       ImpGen.dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
       let (scan_x_params, scan_y_params) =
             splitAt (length nes) $ lambdaParams scan_op
