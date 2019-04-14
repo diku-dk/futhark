@@ -76,7 +76,8 @@ def parse_specific_string(f, s):
             read.append(c)
         return True
     except ValueError:
-        map(f.unget_char, read[::-1])
+        for c in read[::-1]:
+            f.unget_char(c)
         raise
 
 def optional(p, *args):
@@ -112,21 +113,20 @@ def parse_hex_int(f):
     s = b''
     c = f.get_char()
     while c != None:
-        if c in string.hexdigits:
+        if c in b'01234556789ABCDEFabcdef':
             s += c
             c = f.get_char()
-        elif c == '_':
+        elif c == b'_':
             c = f.get_char() # skip _
         else:
             f.unget_char(c)
             break
-    return str(int(s, 16))
-
+    return s
 
 def parse_int(f):
     s = b''
     c = f.get_char()
-    if c == b'0' and f.peek_char() in [b'x', b'X']:
+    if c == b'0' and f.peek_char() in b'xX':
         c = f.get_char() # skip X
         s += parse_hex_int(f)
     else:
@@ -134,7 +134,7 @@ def parse_int(f):
             if c.isdigit():
                 s += c
                 c = f.get_char()
-            elif c == '_':
+            elif c == b'_':
                 c = f.get_char() # skip _
             else:
                 f.unget_char(c)
