@@ -9,7 +9,7 @@
 --
 -- ==
 --
--- structure distributed { Kernel 6 }
+-- structure distributed { SegScan 2 }
 
 let main [n][m] (a: [][n][m]i32): [][][]i32 =
   map (\(a_row: [][]i32): [m][n]i32  ->

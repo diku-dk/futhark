@@ -103,6 +103,27 @@ simplifyKernelOp mk_ops env (HostOp (SegRed space comm red_op nes ts body)) = do
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
 
+simplifyKernelOp mk_ops env (HostOp (SegScan space scan_op nes ts body)) = do
+  outer_vtable <- Engine.askVtable
+  space' <- Engine.simplify space
+
+  (scan_op', scan_op_hoisted) <-
+    Engine.subSimpleM (mk_ops space) env outer_vtable $
+    Engine.localVtable (<>scope_vtable) $
+    Engine.simplifyLambda scan_op $ replicate (length nes * 2) Nothing
+  scan_op_hoisted' <- mapM processHoistedStm scan_op_hoisted
+
+  nes' <- mapM Engine.simplify nes
+  ts' <- mapM Engine.simplify ts
+
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
+
+  return (HostOp $ SegScan space' scan_op' nes' ts' body',
+          scan_op_hoisted' <> body_hoisted)
+
+  where scope_vtable = ST.fromScope scope
+        scope = scopeOfKernelSpace space
+
 simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
   outer_vtable <- Engine.askVtable
 

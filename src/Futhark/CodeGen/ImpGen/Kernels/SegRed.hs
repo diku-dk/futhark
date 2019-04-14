@@ -247,16 +247,10 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
 
       sOp Imp.LocalBarrier
 
-      index_i <- newVName "index_i"
-      index_j <- newVName "index_j"
       let crossesSegment from to = (to-from) .>. (to `rem` segment_size)
-          red_op' = red_op { lambdaParams = Param index_i (MemPrim int32) :
-                                            Param index_j (MemPrim int32) :
-                                            lambdaParams red_op }
-
       sWhen (segment_size .>. 0) $
         sComment "perform segmented scan to imitate reduction" $
-        groupScan constants (Just crossesSegment) (segment_size*segments_per_group) red_op' red_arrs
+        groupScan constants (Just crossesSegment) (segment_size*segments_per_group) red_op red_arrs
 
       sOp Imp.LocalBarrier
 
