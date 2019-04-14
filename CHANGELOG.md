@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fixes to reading values under Python 3.
+
 ## [0.10.2]
 
 ### Added
