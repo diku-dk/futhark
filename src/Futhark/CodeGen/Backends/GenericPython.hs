@@ -272,11 +272,10 @@ standardOptions = [
          , optionAction =
            [ Assign (Var "entry_point") $ Var "optarg" ]
          },
-  -- The -b option is just a dummy for now.
   Option { optionLongName = "binary-output"
          , optionShortName = Just 'b'
          , optionArgument = NoArgument
-         , optionAction = [Pass]
+         , optionAction = [Assign (Var "binary_output") $ Bool True]
          },
   Option { optionLongName = "tuning"
          , optionShortName = Nothing
@@ -353,6 +352,7 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
           Assign (Var "do_warmup_run") (Bool False) :
           Assign (Var "num_runs") (Integer 1) :
           Assign (Var "entry_point") (String "main") :
+          Assign (Var "binary_output") (Bool False) :
           generateOptionParser (standardOptions ++ options)
 
         selectEntryPoint entry_point_names entry_points =
@@ -546,7 +546,9 @@ printValue = fmap concat . mapM (uncurry printValue')
           printValue' (Imp.TransparentValue (Imp.ArrayValue mem memsize DefaultSpace bt ept shape)) $
           simpleCall (pretty e ++ ".get") []
         printValue' (Imp.TransparentValue _) e =
-          return [Exp $ simpleCall "write_value" [e],
+          return [Exp $ Call (Var "write_value")
+                   [Arg e,
+                    ArgKeyword "binary" (Var "binary_output")],
                   Exp $ simpleCall "sys.stdout.write" [String "\n"]]
 
 prepareEntry :: (Name, Imp.Function op) -> CompilerM op s
@@ -751,7 +753,7 @@ compilePrimToExtNp bt ept =
     (IntType Int64, _) -> "np.int64"
     (FloatType Float32, _) -> "np.float32"
     (FloatType Float64, _) -> "np.float64"
-    (Imp.Bool, _) -> "np.bool"
+    (Imp.Bool, _) -> "np.bool_"
     (Cert, _) -> "np.byte"
 
 compilePrimValue :: Imp.PrimValue -> PyExp
