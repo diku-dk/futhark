@@ -536,25 +536,34 @@ handleHostOp (GetSizeMax size_class) =
   return $ Inner $ GetSizeMax size_class
 handleHostOp (CmpSizeLe key size_class x) =
   return $ Inner $ CmpSizeLe key size_class x
-handleHostOp (HostOp (Kernel desc space kernel_ts kbody)) = subInKernel $
+handleHostOp (HostOp (Kernel desc space kernel_ts kbody)) =
+  subInKernel space $
   Inner . HostOp . Kernel desc space kernel_ts <$>
   localScope (scopeOfKernelSpace space) (allocInKernelBody kbody)
 
 handleHostOp (HostOp (SegRed space comm red_op nes ts body)) = do
-  body' <- subInKernel $ localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
-  red_op' <- allocInSegRedLambda (spaceGlobalId space) (spaceNumThreads space) red_op
+  body' <- subInKernel space $
+           localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
+  red_op' <- allocInSegRedLambda space red_op
   return $ Inner $ HostOp $ SegRed space comm red_op' nes ts body'
 
+handleHostOp (HostOp (SegScan space scan_op nes ts body)) = do
+  body' <- subInKernel space $
+           localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
+  scan_op' <- allocInSegRedLambda space scan_op
+  return $ Inner $ HostOp $ SegScan space scan_op' nes ts body'
+
 handleHostOp (HostOp (SegGenRed space ops ts body)) = do
-  body' <- subInKernel $ localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
+  body' <- subInKernel space $
+           localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
   ops' <- forM ops $ \op -> do
-    lam <- allocInSegRedLambda (spaceGlobalId space) (spaceNumThreads space) $ genReduceOp op
+    lam <- allocInSegRedLambda space $ genReduceOp op
     return op { genReduceOp = lam }
   return $ Inner $ HostOp $ SegGenRed space ops' ts body'
 
-subInKernel :: AllocM InInKernel OutInKernel a
+subInKernel :: KernelSpace -> AllocM InInKernel OutInKernel a
             -> AllocM fromlore2 ExplicitMemory a
-subInKernel = subAllocM handleKernelExp True
+subInKernel space = subAllocM handleKernelExp True
   where handleKernelExp (Barrier se) =
           return $ Inner $ Barrier se
 
@@ -566,13 +575,13 @@ subInKernel = subAllocM handleKernelExp True
 
         handleKernelExp (GroupReduce w lam input) = do
           summaries <- mapM lookupArraySummary arrs
-          lam' <- allocInReduceLambda lam summaries
+          lam' <- allocInReduceLambda space lam summaries
           return $ Inner $ GroupReduce w lam' input
           where arrs = map snd input
 
         handleKernelExp (GroupScan w lam input) = do
           summaries <- mapM lookupArraySummary arrs
-          lam' <- allocInReduceLambda lam summaries
+          lam' <- allocInReduceLambda space lam summaries
           return $ Inner $ GroupScan w lam' input
           where arrs = map snd input
 
@@ -763,16 +772,16 @@ allocInLoopForm (ForLoop i it n loopvars) =
             Mem size space ->
               return (p { paramAttr = MemMem size space }, a)
 
-allocInReduceLambda :: Lambda InInKernel
+allocInReduceLambda :: KernelSpace
+                    -> Lambda InInKernel
                     -> [(VName, IxFun)]
                     -> AllocM InInKernel OutInKernel (Lambda OutInKernel)
-allocInReduceLambda lam input_summaries = do
-  let (i, j_param, actual_params) =
-        partitionChunkedKernelLambdaParameters $ lambdaParams lam
-      (acc_params, arr_params) =
-        splitAt (length input_summaries) actual_params
-      this_index = LeafExp i int32
-      other_index = this_index + LeafExp (paramName j_param) int32
+allocInReduceLambda space lam input_summaries = do
+  let (acc_params, arr_params) =
+        splitAt (length input_summaries) $ lambdaParams lam
+      this_index = LeafExp (spaceGlobalId space) int32
+      other_index = this_index + primExpFromSubExp int32 (spaceNumThreads space)
+
   acc_params' <-
     allocInReduceParameters this_index $
     zip acc_params input_summaries
@@ -780,9 +789,7 @@ allocInReduceLambda lam input_summaries = do
     allocInReduceParameters other_index $
     zip arr_params input_summaries
 
-  allocInLambda (Param i (MemPrim int32) :
-                 j_param { paramAttr = MemPrim int32 } :
-                 acc_params' ++ arr_params')
+  allocInLambda (acc_params' ++ arr_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
 allocInReduceParameters :: PrimExp VName
@@ -800,17 +807,17 @@ allocInReduceParameters my_id = mapM allocInReduceParameter
             Mem size space ->
               return p { paramAttr = MemMem size space }
 
-allocInSegRedLambda :: VName -> SubExp -> Lambda InInKernel
+allocInSegRedLambda :: KernelSpace -> Lambda InInKernel
                     -> AllocM Kernels ExplicitMemory (Lambda OutInKernel)
-allocInSegRedLambda gtid num_threads lam = do
+allocInSegRedLambda space lam = do
   let (acc_params, arr_params) =
         splitAt (length (lambdaParams lam) `div` 2) $ lambdaParams lam
-      this_index = LeafExp gtid int32
-      other_index = this_index + primExpFromSubExp int32 num_threads
+      this_index = LeafExp (spaceGlobalId space) int32
+      other_index = this_index + primExpFromSubExp int32 (spaceNumThreads space)
   (acc_params', arr_params') <-
-    allocInSegRedParameters num_threads this_index other_index acc_params arr_params
+    allocInSegRedParameters (spaceNumThreads space) this_index other_index acc_params arr_params
 
-  subInKernel $ allocInLambda (acc_params' ++ arr_params')
+  subInKernel space $ allocInLambda (acc_params' ++ arr_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
 allocInSegRedParameters :: SubExp
