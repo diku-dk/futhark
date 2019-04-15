@@ -636,6 +636,17 @@ allocInFunBody space_oks (Body _ bnds res) =
             else do (_, _, v') <- ensureDirectArray space_ok v
                     return v'
 
+allocInIfBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                  [Maybe Space] -> Body fromlore -> AllocM fromlore tolore (Body tolore)
+allocInIfBody space_oks (Body _ bnds res) =
+  allocInStms bnds $ \bnds' -> do
+    (res'', allocs) <- collectStms $ do
+      let (ctx_res, val_res) = splitFromEnd num_vals res
+      mem_ctx_res <- concat <$> mapM bodyReturnMemCtx val_res
+      return $ ctx_res <> mem_ctx_res <> val_res
+    return $ Body () (bnds'<>allocs) res''
+  where num_vals = length space_oks
+
 allocInStms :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                Stms fromlore -> (Stms tolore -> AllocM fromlore tolore a)
             -> AllocM fromlore tolore a
@@ -686,6 +697,39 @@ allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype) loc
 allocInExp (If cond tbranch fbranch (IfAttr rets ifsort)) = do
+  tbranch'  <- allocInFunBody (map (const Nothing) rets) tbranch
+  space_oks <- mkSpaceOks (length rets) tbranch'
+  fbranch'  <- allocInFunBody space_oks fbranch
+  -- here we have to get the index functions of then-else results
+  -- and antiunify them
+  
+  let rets' = createBodyReturns rets space_oks
+      res_then = bodyResult tbranch'
+      res_else = bodyResult fbranch'
+      size_ext = length res_then - length rets'
+      (ind_ses0, r_then_else) =
+        foldl (\(acc_ise,acc_ext) (r_then, r_else, i) ->
+                if r_then == r_else then ((i,r_then):acc_ise, acc_ext)
+                else (acc_ise, (r_then, r_else):acc_ext)
+              ) ([],[]) $ reverse $ zip3 res_then res_else [0..size_ext-1]
+      (r_then_ext, r_else_ext) = unzip r_then_else
+      ind_ses = zipWith (\(i,se) k -> (i-k,se)) ind_ses0 [0..length ind_ses0 - 1]
+      rets'' = foldl (\acc (i,se) -> fixExt i se acc) rets' ind_ses
+      tbranch'' = tbranch' { bodyResult = r_then_ext ++ drop size_ext res_then }
+      fbranch'' = fbranch' { bodyResult = r_else_ext ++ drop size_ext res_else }
+  return $ If cond tbranch'' fbranch'' $ IfAttr rets'' ifsort
+allocInExp e = mapExpM alloc e
+  where alloc =
+          identityMapper { mapOnBody = fail "Unhandled Body in ExplicitAllocations"
+                         , mapOnRetType = fail "Unhandled RetType in ExplicitAllocations"
+                         , mapOnBranchType = fail "Unhandled BranchType in ExplicitAllocations"
+                         , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
+                         , mapOnLParam = fail "Unhandled LParam in ExplicitAllocations"
+                         , mapOnOp = \op -> do handle <- asks allocInOp
+                                               handle op
+                         }
+{--
+allocInExp (If cond tbranch fbranch (IfAttr rets ifsort)) = do
   tbranch' <- allocInFunBody (map (const Nothing) rets) tbranch
   space_oks <- mkSpaceOks (length rets) tbranch'
   fbranch' <- allocInFunBody space_oks fbranch
@@ -714,7 +758,7 @@ allocInExp e = mapExpM alloc e
                          , mapOnOp = \op -> do handle <- asks allocInOp
                                                handle op
                          }
-
+--}
 mkSpaceOks :: (ExplicitMemorish tolore, LocalScope tolore m) =>
               Int -> Body tolore -> m [Maybe Space]
 mkSpaceOks num_vals (Body _ stms res) =
