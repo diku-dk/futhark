@@ -121,14 +121,14 @@ def parse_hex_int(f):
         else:
             f.unget_char(c)
             break
-    return s
+    return int(s, 16)
 
 def parse_int(f):
     s = b''
     c = f.get_char()
     if c == b'0' and f.peek_char() in b'xX':
         c = f.get_char() # skip X
-        s += parse_hex_int(f)
+        return parse_hex_int(f)
     else:
         while c != None:
             if c.isdigit():
@@ -139,22 +139,20 @@ def parse_int(f):
             else:
                 f.unget_char(c)
                 break
-    if len(s) == 0:
-        raise ValueError
-    return s
+        if len(s) == 0:
+            raise ValueError
+        return int(s)
 
 def parse_int_signed(f):
     s = b''
     c = f.get_char()
 
     if c == b'-' and f.peek_char().isdigit():
-      s = c + parse_int(f)
+      return -parse_int(f)
     else:
       if c != b'+':
           f.unget_char(c)
-      s = parse_int(f)
-
-    return s
+      return parse_int(f)
 
 def read_str_comma(f):
     skip_spaces(f)
@@ -163,13 +161,13 @@ def read_str_comma(f):
 
 def read_str_int(f, s):
     skip_spaces(f)
-    x = int(parse_int_signed(f))
+    x = parse_int_signed(f)
     optional_specific_string(f, s)
     return x
 
 def read_str_uint(f, s):
     skip_spaces(f)
-    x = int(parse_int(f))
+    x = parse_int(f)
     optional_specific_string(f, s)
     return x
 
@@ -549,10 +547,8 @@ def read_array(f, expected_type, rank):
 
 if sys.version_info >= (3,0):
     input_reader = ReaderInput(sys.stdin.buffer)
-    output_writer = sys.stdout.buffer
 else:
     input_reader = ReaderInput(sys.stdin)
-    output_writer = sys.stdout
 
 import re
 
@@ -570,7 +566,7 @@ representation of the Futhark type."""
             return read_scalar(reader, basetype)
         return (dims, basetype)
 
-def write_value_text(v, out=output_writer):
+def write_value_text(v, out=sys.stdout):
     if type(v) == np.uint8:
         out.write("%uu8" % v)
     elif type(v) == np.uint16:
@@ -661,10 +657,12 @@ def construct_binary_value(v):
 
     return bytes
 
-def write_value_binary(v, out=output_writer):
+def write_value_binary(v, out=sys.stdout):
+    if sys.version_info >= (3,0):
+        out = out.buffer
     out.write(construct_binary_value(v))
 
-def write_value(v, out=output_writer, binary=False):
+def write_value(v, out=sys.stdout, binary=False):
     if binary:
         return write_value_binary(v, out=out)
     else:
