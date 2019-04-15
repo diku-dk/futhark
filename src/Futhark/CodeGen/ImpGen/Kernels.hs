@@ -60,28 +60,26 @@ opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler dest (Inner (HostOp kernel)) =
   kernelCompiler dest kernel
-opCompiler pat (Inner (Husk hspace red_op nes ts body)) = do
-  let HuskSpace _ num_nodes src _ parts_mem parts_res red_src red_src_mem = hspace
-      num_nodes_var = Imp.var num_nodes int32
-      body_pat = Pattern [] $ zipWith PatElem parts_res ts
+opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes _ (Body _ bnds ses))) = do
+  let HuskSpace _ _ src _ parts_mem node_res = hspace
       red_op_params = lambdaParams red_op
       (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
-  i <- newVName "i"
-  zipWithM_ (ImpGen.dReplicateMemFromArray (Space "device")) parts_mem src
+  src_mems <- mapM ImpGen.lookupArray src
+  let src_mems_names = map (ImpGen.memLocationName . ImpGen.entryArrayLocation) src_mems
   ImpGen.dScope Nothing $ scopeOfHuskSpace hspace
-  body_code <- ImpGen.collect $ ImpGen.compileBody pat body
   ImpGen.dLParams red_op_params
-  red_param_bsizes <- mapM (ImpGen.getVarBytesSize . paramName) red_op_params
-  zipWithM_ (\n s -> ImpGen.sAllocNamed n s DefaultSpace) red_src_mem $
-            map (bytes . (num_nodes_var *) . Imp.innerExp) red_param_bsizes
+  zipWithM_ (ImpGen.dReplicateMemFromArray DefaultSpace) parts_mem src
   nes_e <- mapM ImpGen.compileSubExp nes
+  zipWithM_ (<--) (map paramName red_acc_params) nes_e
+  body_code <- ImpGen.collect $ ImpGen.compileStms (freeIn ses) (stmsToList bnds) $ pure ()
   red_code <- ImpGen.collect $ do
-    zipWithM_ (<--) (map paramName red_acc_params) nes_e
-    sFor i Int32 num_nodes_var $ do
-      zipWithM_ (\nvar arr -> ImpGen.copyDWIM nvar [] arr [LeafExp (Imp.ScalarVar i) int32])
-                (map paramName red_next_params) (map (Var . paramName) red_src)
-      ImpGen.compileBody' red_acc_params $ lambdaBody red_op
-  sOp $ Imp.Husk hspace red_code body_code
+    zipWithM_ (\x y -> ImpGen.copyDWIM x [] y [ValueExp $ IntValue $ Int32Value 0])
+              (map paramName red_next_params) $ map Var node_res
+    ImpGen.compileBody' red_acc_params $ lambdaBody red_op
+  after_code <- ImpGen.collect $
+    zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) (map patElemName pes) $
+              map (Var . paramName) red_acc_params
+  sOp $ Imp.Husk hspace src_mems_names red_code body_code after_code
 opCompiler pat e =
   compilerBugS $ "ImpGen.opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e

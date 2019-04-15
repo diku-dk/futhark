@@ -552,14 +552,21 @@ handleHostOp (HostOp (SegGenRed space ops ts body)) = do
     return op { genReduceOp = lam }
   return $ Inner $ HostOp $ SegGenRed space ops' ts body'
 
-handleHostOp (Husk hspace red_op nes ts body) = do
+handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
   let hspace' = huskSpaceMemInfo hspace
+      lp' = zipWith paramMemInfo lp $ concat $ replicate 2 $ hspaceNodeResults hspace
   (body', red_op') <- localScope (scopeOfHuskSpace hspace') $ do
     b <- allocInBodyNoDirect body
-    summaries <- mapM (lookupArraySummary . paramName) $ hspaceReductionSource hspace
-    r <- allocInReduceLambda red_op summaries
+    r <- allocInLambda lp' lb lr
     return (b, r)
   return $ Inner $ Husk hspace' red_op' nes ts body'
+  where directIxf shape = IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
+        paramMemInfo (Param name (Prim pt)) _ =
+          Param name $ MemPrim pt
+        paramMemInfo (Param name (Mem size space)) _ =
+          Param name $ MemMem size space
+        paramMemInfo (Param name (Array pt shape u)) mem =
+          Param name $ MemArray pt shape u $ ArrayIn mem $ directIxf shape
 
 subInKernel :: AllocM InInKernel OutInKernel a
             -> AllocM fromlore2 ExplicitMemory a

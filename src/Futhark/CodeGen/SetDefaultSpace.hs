@@ -4,14 +4,15 @@ module Futhark.CodeGen.SetDefaultSpace
        where
 
 import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.ImpCode.Kernels (HostOp(..))
 
 -- | Set all uses of 'DefaultSpace' in the given functions to another memory space.
-setDefaultSpace :: Space -> Functions op -> Functions op
+setDefaultSpace :: Space -> Functions HostOp -> Functions HostOp
 setDefaultSpace space (Functions fundecs) =
   Functions [ (fname, setFunctionSpace space func)
             | (fname, func) <- fundecs ]
 
-setFunctionSpace :: Space -> Function op -> Function op
+setFunctionSpace :: Space -> Function HostOp -> Function HostOp
 setFunctionSpace space (Function entry outputs inputs body results args) =
   Function entry
   (map (setParamSpace space) outputs)
@@ -38,7 +39,7 @@ setValueSpace space (ArrayValue mem memsize _ bt ept shape) =
 setValueSpace _ (ScalarValue bt ept v) =
   ScalarValue bt ept v
 
-setBodySpace :: Space -> Code op -> Code op
+setBodySpace :: Space -> Code HostOp -> Code HostOp
 setBodySpace space (Allocate v e old_space) =
   Allocate v (setCountSpace space e) $ setSpace space old_space
 setBodySpace space (Free v old_space) =
@@ -83,8 +84,14 @@ setBodySpace space (Assert e msg loc) =
   Assert (setExpSpace space e) msg loc
 setBodySpace space (DebugPrint s t e) =
   DebugPrint s t (setExpSpace space e)
-setBodySpace _ (Op op) =
-  Op op
+setBodySpace space (Op op) =
+  Op $ setHostOpDefaultSpace space op
+
+setHostOpDefaultSpace :: Space -> HostOp -> HostOp
+setHostOpDefaultSpace space (Husk hspace interm red body after) =
+  Husk hspace interm (setBodySpace space red) (setBodySpace space body)
+       (setBodySpace space after)
+setHostOpDefaultSpace _ op = op
 
 setCountSpace :: Space -> Count a -> Count a
 setCountSpace space (Count e) =

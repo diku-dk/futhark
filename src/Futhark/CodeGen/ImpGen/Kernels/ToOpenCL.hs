@@ -94,8 +94,8 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp target (Husk hspace red body) =
-  onHusk target hspace red body
+onHostOp target (Husk hspace src_mem red body after) =
+  onHusk target hspace src_mem red body after
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
@@ -179,14 +179,17 @@ onKernel target kernel = do
 
 
 onHusk :: KernelTarget
-          -> (HuskSpace ExplicitMemory)
+          -> HuskSpace ExplicitMemory
+          -> [VName]
           -> ImpKernels.Code 
           -> ImpKernels.Code
+          -> ImpKernels.Code
           -> OnKernelM OpenCL
-onHusk target hspace red body = do
+onHusk target hspace src_mem red body after = do
   red' <- traverse (onHostOp target) red
   body' <- traverse (onHostOp target) body
-  return $ DistributeHusk hspace red' body'
+  after' <- traverse (onHostOp target) after
+  return $ DistributeHusk hspace src_mem red' body' after'
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
