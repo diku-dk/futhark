@@ -21,6 +21,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , isDirect
        , isLinear
        , substituteInIxFun
+       , antiUnifyIxFun
        )
        where
 
@@ -33,6 +34,7 @@ import Data.Maybe (isJust)
 import Control.Monad.Identity
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
+import qualified Data.Maybe as Mb
 
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -42,7 +44,8 @@ import Futhark.Representation.AST.Attributes
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Futhark.Analysis.PrimExp.Convert
-
+import Futhark.MonadFreshNames
+import Language.Futhark.Core (VName)
 
 -- | LMAD's representation consists of a permutation, a general offset, and, for
 -- each dimension a stride, rotate factor, number of elements, permutation, and
@@ -787,3 +790,51 @@ ixfunMonotonicityRots ignore_rots (IxFun (lmad :| lmads) _ _) =
                     Monotonicity -> LMADDim num -> Bool
         isMonDim mon (LMADDim s r _ _ ldmon) =
           s == 0 || ((ignore_rots || r == 0) && mon == ldmon)
+
+-- | Anti-unification of two index functions is supported under the following conditions:
+--   0. Both index functions are represented by ONE lmad (assumed common case!)
+--   1. The support array of the two indexfuns have the same dimensionality
+--      (we can relax this condition if we use a 1D support, as we probably should!)
+--   2. The contiguous property and the per-dimension monotonicity are the same
+--      (otherwise we might loose important information; this can be relaxed!)
+--   3. Most importantly, both index functions correspond to the same permutation
+--      (since the permutation is represented by INTs, this restriction cannot
+--       be relaxed, unless we move to a gated-LMAD representation!)
+antiUnifyIxFun :: MonadFreshNames m => IxFun (PrimExp VName) -> IxFun (PrimExp VName) ->
+               m (Maybe (IxFun (PrimExp VName), M.Map VName (PrimExp VName, PrimExp VName)))
+antiUnifyIxFun (IxFun (lmad1 :| []) oshp1 ctg1)
+               (IxFun (lmad2 :| []) oshp2 ctg2) =
+  if (length oshp1 /= length oshp2) || (ctg1 /= ctg2) ||
+     (lmadPermutation lmad1 /= lmadPermutation lmad2) ||
+     (lmadDMon lmad1 /= lmadDMon lmad1)
+  then return Nothing
+  else do
+    let (ctg, dperm, dmon) = (ctg1, lmadPermutation lmad1, lmadDMon lmad1)
+    (s1, oshp, tab1) <- antiUnifyExps oshp1 oshp2
+    (s2, dstd, tab2) <- antiUnifyExps (lmadDSrd lmad1) (lmadDSrd lmad2)
+    (s3, dshp, tab3) <- antiUnifyExps (lmadDShp lmad1) (lmadDShp lmad2)
+    (s4, drot, tab4) <- antiUnifyExps (lmadDRot lmad1) (lmadDRot lmad2)
+    tmp <- antiUnifyPrimExps (lmadOffset lmad1) (lmadOffset lmad2)
+    let (s5, offt, tab5) =
+          case tmp of
+            Just(e,t) -> (True, e, t)
+            Nothing   -> (False, lmadOffset lmad1, M.empty)
+    if s1 && s2 && s3 && s4 && s5
+    then do let lmad_dims = map (\(a,b,c,d,e) -> LMADDim a b c d e) $
+                             zip5 dstd drot dshp dperm dmon
+                lmad = LMAD offt lmad_dims
+            return $ Just (IxFun (lmad :| []) oshp ctg, M.unions [tab1, tab2, tab3, tab4, tab5])
+    else return Nothing
+  where lmadDMon = map ldMon    . lmadDims
+        lmadDSrd = map ldStride . lmadDims
+        lmadDShp = map ldShape  . lmadDims
+        lmadDRot = map ldRotate . lmadDims
+        antiUnifyExps l1 l2 = do
+            let n = length l1
+            tmp <- zipWithM antiUnifyPrimExps l1 l2
+            let res = Mb.catMaybes tmp
+            if (n /= length res) || (n /= length l2)
+            then return (False, l1, M.empty)
+            else do let (es, tabs) = unzip res
+                    return (True, es, M.unions tabs)
+antiUnifyIxFun _ _ = return Nothing
