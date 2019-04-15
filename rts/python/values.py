@@ -121,7 +121,7 @@ def parse_hex_int(f):
         else:
             f.unget_char(c)
             break
-    return int(s, 16)
+    return bytes(str(int(s, 16)))
 
 def parse_int(f):
     s = b''
@@ -141,14 +141,14 @@ def parse_int(f):
                 break
         if len(s) == 0:
             raise ValueError
-        return int(s)
+        return s
 
 def parse_int_signed(f):
     s = b''
     c = f.get_char()
 
     if c == b'-' and f.peek_char().isdigit():
-      return -parse_int(f)
+      return c + parse_int(f)
     else:
       if c != b'+':
           f.unget_char(c)
@@ -161,13 +161,13 @@ def read_str_comma(f):
 
 def read_str_int(f, s):
     skip_spaces(f)
-    x = parse_int_signed(f)
+    x = int(parse_int_signed(f))
     optional_specific_string(f, s)
     return x
 
 def read_str_uint(f, s):
     skip_spaces(f)
-    x = parse_int(f)
+    x = int(parse_int(f))
     optional_specific_string(f, s)
     return x
 
