@@ -121,7 +121,7 @@ def parse_hex_int(f):
         else:
             f.unget_char(c)
             break
-    return bytes(str(int(s, 16)))
+    return str(int(s, 16)).encode('utf8') # ugh
 
 def parse_int(f):
     s = b''
