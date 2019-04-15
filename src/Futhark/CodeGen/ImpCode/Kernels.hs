@@ -160,6 +160,7 @@ data KernelOp = GetGroupId VName Int
               | LocalBarrier
               | GlobalBarrier
               | MemFence
+              | PrivateAlloc VName (Count Bytes)
               deriving (Show)
 
 -- Atomic operations return the value stored before the update.
@@ -213,6 +214,8 @@ instance Pretty KernelOp where
     text "global_barrier()"
   ppr MemFence =
     text "mem_fence()"
+  ppr (PrivateAlloc name size) =
+    ppr name <+> equals <+> text "alloc" <> parens (ppr size)
   ppr (Atomic (AtomicAdd old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_add" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])

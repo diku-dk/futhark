@@ -1096,6 +1096,17 @@ inKernelExpHints (Op (Inner (Combine (CombineSpace scatter cspace) ts _ _))) =
     return $ Hint ixfun $ Space "local"
   where dims = map snd cspace
         (_, ns, _) = unzip3 scatter
-
 inKernelExpHints e =
-  return $ replicate (expExtTypeSize e) NoHint
+  mapM maybePrivate =<< expExtType e
+  where maybePrivate t
+          | arrayRank t > 0,
+            Just t' <- hasStaticShape t,
+            all semiStatic $ arrayDims t' = do
+              alloc_dims <- mapM dimAllocationSize $ arrayDims t'
+              let ixfun = IxFun.iota $ map (primExpFromSubExp int32) alloc_dims
+              return $ Hint ixfun $ Space "private"
+          | otherwise =
+              return NoHint
+
+        semiStatic Constant{} = True
+        semiStatic _ = False
