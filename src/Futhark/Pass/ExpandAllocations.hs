@@ -240,7 +240,8 @@ extractThreadAllocations :: Stms InKernel
 extractThreadAllocations bnds =
   let (allocs, bnds') = mapAccumL isAlloc M.empty $ stmsToList bnds
   in (stmsFromList $ catMaybes bnds', allocs)
-  where isAlloc allocs (Let (Pattern [] [patElem]) _ (Op (Alloc size space))) =
+  where isAlloc allocs (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
+          | space /= Space "private" =
           (M.insert (patElemName patElem) (size, space) allocs,
            Nothing)
 

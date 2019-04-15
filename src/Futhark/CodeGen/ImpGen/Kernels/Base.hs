@@ -95,6 +95,9 @@ inKernelCopy = ImpGen.copyElementWise
 
 compileInKernelOp :: KernelConstants -> Pattern InKernel -> Op InKernel
                   -> InKernelGen ()
+compileInKernelOp _ (Pattern _ [mem]) (Alloc size (Space "private")) = do
+  size' <- ImpGen.compileSubExp size
+  sOp $ Imp.PrivateAlloc (patElemName mem) $ Imp.bytes size'
 compileInKernelOp _ (Pattern _ [mem]) Alloc{} =
   compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
 compileInKernelOp _ dest Alloc{} =

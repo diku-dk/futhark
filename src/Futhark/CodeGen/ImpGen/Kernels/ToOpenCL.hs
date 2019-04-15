@@ -424,6 +424,11 @@ inKernelOperations = GenericC.Operations
           GenericC.stm [C.cstm|barrier(CLK_GLOBAL_MEM_FENCE);|]
         kernelOps MemFence =
           GenericC.stm [C.cstm|mem_fence_global();|]
+        kernelOps (PrivateAlloc name size) = do
+          size' <- GenericC.compileExp $ innerExp size
+          name' <- newVName $ pretty name ++ "_backing"
+          GenericC.item [C.citem|__private char $id:name'[$exp:size'];|]
+          GenericC.stm [C.cstm|$id:name = $id:name';|]
         kernelOps (Atomic aop) = atomicOps aop
 
         atomicOps (AtomicAdd old arr ind val) = do
