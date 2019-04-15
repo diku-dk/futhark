@@ -24,7 +24,7 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
 
 import Futhark.CodeGen.ImpCode
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (pretty, prettyOneLine)
 import Futhark.Util (zEncodeString)
 
 -- | The C type corresponding to a signed integer type.
@@ -158,6 +158,12 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         mkSlt = intCmpOp "slt" [C.cexp|x < y|]
         mkSle = intCmpOp "sle" [C.cexp|x <= y|]
 
+        -- We define some operations as macros rather than functions,
+        -- because this allows us to use them as constant expressions
+        -- in things like array sizes and static initialisers.
+        macro name rhs =
+          [C.cedecl|$esc:("#define " ++ name ++ "(x) (" ++ prettyOneLine rhs ++ ")")|]
+
         mkPow t =
           let ct = intTypeToCType t
           in [C.cedecl|static inline $ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
@@ -172,16 +178,12 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
                          return res;
               }|]
 
-        mkSExt from_t to_t =
-          [C.cedecl|static inline $ty:to_ct
-                    $id:name($ty:from_ct x) { return x;} |]
+        mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
           where name = "sext_"++pretty from_t++"_"++pretty to_t
                 from_ct = intTypeToCType from_t
                 to_ct = intTypeToCType to_t
 
-        mkZExt from_t to_t =
-          [C.cedecl|static inline $ty:to_ct
-                    $id:name($ty:from_ct x) { return x;} |]
+        mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
           where name = "zext_"++pretty from_t++"_"++pretty to_t
                 from_ct = uintTypeToCType from_t
                 to_ct = uintTypeToCType to_t

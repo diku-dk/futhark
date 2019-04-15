@@ -547,6 +547,8 @@ isConstExp v = do
 isStaticExp :: Imp.KernelConstExp -> Bool
 isStaticExp LeafExp{} = True
 isStaticExp ValueExp{} = True
+isStaticExp (ConvOpExp ZExt{} x) = isStaticExp x
+isStaticExp (ConvOpExp SExt{} x) = isStaticExp x
 isStaticExp (BinOpExp Add{} x y) = isStaticExp x && isStaticExp y
 isStaticExp (BinOpExp Sub{} x y) = isStaticExp x && isStaticExp y
 isStaticExp (BinOpExp Mul{} x y) = isStaticExp x && isStaticExp y
