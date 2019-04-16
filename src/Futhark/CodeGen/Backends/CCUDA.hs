@@ -9,6 +9,7 @@ module Futhark.CodeGen.Backends.CCUDA
 
 import qualified Language.C.Quote.OpenCL as C
 import Data.List
+import Control.Monad
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
@@ -133,16 +134,14 @@ readCUDAScalar _ _ _ space _ =
 
 allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
-  -- TODO: Replace 0 with node id
-  GC.stm [C.cstm|CUDA_SUCCEED(cuda_alloc(&ctx->cuda, 0, $exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm [C.cstm|CUDA_SUCCEED(cuda_alloc(&ctx->cuda, $exp:size, $exp:tag, &$exp:mem));|]
 allocateCUDABuffer _ _ _ "local" = return ()
 allocateCUDABuffer _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateCUDABuffer :: GC.Deallocate OpenCL ()
 deallocateCUDABuffer mem tag "device" =
-  -- TODO: Replace 0 with node id
-  GC.stm [C.cstm|CUDA_SUCCEED(cuda_free(&ctx->cuda, 0, $exp:mem, $exp:tag));|]
+  GC.stm [C.cstm|CUDA_SUCCEED(cuda_free(&ctx->cuda, $exp:mem, $exp:tag));|]
 deallocateCUDABuffer _ _ "local" = return ()
 deallocateCUDABuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' memory space."
@@ -158,7 +157,7 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
   where
     memcpyFun DefaultSpace (Space "device")     = return "cuMemcpyDtoH"
     memcpyFun (Space "device") DefaultSpace     = return "cuMemcpyHtoD"
-    memcpyFun (Space "device") (Space "device") = return "cuMemcpy"
+    memcpyFun (Space "device") (Space "device") = return "cuMemcpyDtoD"
     memcpyFun _ _ = fail $ "Cannot copy to '" ++ show dstSpace
                            ++ "' from '" ++ show srcSpace ++ "'."
 
@@ -174,20 +173,20 @@ staticCUDAArray name "device" t vs = do
     ArrayZeros n -> do
       GC.libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
       return n
-  -- Fake a memory block.
-  GC.contextField (pretty name) [C.cty|struct memblock_device|] Nothing
+  GC.nodeContextField $ pretty name
   -- During startup, copy the data to where we need it.
-  GC.atInit [C.cstm|{
-    ctx->$id:name.references = NULL;
-    ctx->$id:name.size = 0;
-    CUDA_SUCCEED(cuMemAlloc(&ctx->$id:name.mem,
+  GC.atInit [C.cstm|for(int i = ctx->cuda.cfg.num_nodes - 1; i >= 0; --i) {
+    cuda_set_active_node(&ctx->cuda, i);
+    ctx->node_ctx[i].$id:name.references = NULL;
+    ctx->node_ctx[i].$id:name.size = 0;
+    CUDA_SUCCEED(cuMemAlloc(&ctx->node_ctx[i].$id:name.mem,
                             ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct)));
     if ($int:num_elems > 0) {
-      CUDA_SUCCEED(cuMemcpyHtoD(ctx->$id:name.mem, $id:name_realtype,
+      CUDA_SUCCEED(cuMemcpyHtoD(ctx->node_ctx[i].$id:name.mem, $id:name_realtype,
                                 $int:num_elems*sizeof($ty:ct)));
     }
   }|]
-  GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
+  GC.item [C.citem|struct memblock_device $id:name = ctx->node_ctx[ctx->cuda.active_node].$id:name;|]
 staticCUDAArray _ space _ _ =
   fail $ "CUDA backend cannot create static array in '" ++ space
           ++ "' memory space"
@@ -213,48 +212,64 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
-callKernel (DistributeHusk hspace src_mems red body after) = do
+callKernel (DistributeHusk hspace src_mem interm_mem interm_size red body after) = do
   let HuskSpace node_id num_nodes _ _ parts_mem _ = hspace
   body' <- GC.blockScope $ GC.compileCode body
   red' <- GC.blockScope $ GC.compileCode red
   after' <- GC.blockScope $ GC.compileCode after
-  let declMem mem = [C.citem|
-          struct memblock_device $id:mem;
-        |]
-      allocs src mem = [C.cstm|
-          if(memblock_alloc_device(ctx, &$id:mem,
-                                    $id:src.size, $string:(pretty mem)))
+  interm_cols <- replicateM (length interm_mem) $ newVName "interm_col"
+  interm_size_e <- mapM (GC.compileExp . sizeToExp) interm_size
+  let decl_parts = [[C.citem|struct memblock_device $id:part;|] | part <- parts_mem]
+      alloc_parts = [[C.cstm|
+          if(memblock_alloc_device(ctx, &$id:part, $id:src.size, $string:(pretty part)))
             return 1;
-        |]
-      cpyToNode target src target_mem src_mem = [C.cstm|
-          CUDA_SUCCEED(cuMemcpyPeer($id:target_mem.mem,
-                                    ctx->cuda.nodes[$exp:target].cu_ctx,
-                                    $id:src_mem.mem, ctx->cuda.nodes[$exp:src].cu_ctx,
-                                    $id:src_mem.size));
-        |]
-      release mem = [C.cstm|
+        |] | (src, part) <- zip src_mem parts_mem]
+      alloc_interm_col = [[C.cstm|
+          if(memblock_alloc_device(ctx, $id:col + $id:node_id, $exp:size, $string:(pretty col)))
+            return 1;
+        |] | (col, size) <- zip interm_cols interm_size_e]
+      get_interm_col = [[C.cstm|
+          $id:interm = $id:col[$id:node_id];
+        |] | (col, interm) <- zip interm_cols interm_mem]
+      release mems = [[C.cstm|
           if(memblock_unref_device(ctx, &$id:mem, $string:(pretty mem)) != 0)
             return 1;
+        |] | mem <- mems]
+      cpyToNode to from to_mem from_mem = [C.cstm|
+          CUDA_SUCCEED(cuMemcpyPeer($id:to_mem.mem,
+                                    ctx->cuda.nodes[$exp:to].cu_ctx,
+                                    $id:from_mem.mem, ctx->cuda.nodes[$exp:from].cu_ctx,
+                                    $id:from_mem.size));
         |]
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
+  mapM_ GC.decl [[C.cdecl|struct memblock_device $id:interm;|] | interm <- interm_mem]
+  mapM_ GC.decl [[C.cdecl|
+      struct memblock_device *$id:col = calloc($id:num_nodes, sizeof(struct memblock_device));
+    |] | col <- interm_cols]
   GC.stm [C.cstm|
     for (int $id:node_id = 0; $id:node_id < $id:num_nodes; ++$id:node_id) {
-      cuCtxSetCurrent(ctx->cuda.nodes[$id:node_id].cu_ctx);
+      CUDA_SUCCEED(cuda_set_active_node(&ctx->cuda, $id:node_id));
       
-      $items:(map declMem parts_mem)
-      $stms:(zipWith allocs src_mems parts_mem)
-      $stms:(zipWith (cpyToNode node_id (0::Int32)) parts_mem src_mems)
+      $stms:alloc_interm_col
+      $stms:get_interm_col
+
+      $items:decl_parts
+      $stms:alloc_parts
+      $stms:(zipWith (cpyToNode node_id (0::Int32)) parts_mem src_mem)
 
       $items:body'
 
-      $stms:(map release parts_mem)
+      $stms:(release parts_mem)
     }|]
   GC.stm [C.cstm|
     for (int $id:node_id = 0; $id:node_id < $id:num_nodes; ++$id:node_id) {
-      cuCtxSetCurrent(ctx->cuda.nodes[$id:node_id].cu_ctx);
+      CUDA_SUCCEED(cuda_set_active_node(&ctx->cuda, $id:node_id));
+      $stms:get_interm_col
       $items:red'
+      $stms:(release interm_mem)
     }|]
-  GC.stm [C.cstm|cuCtxSetCurrent(ctx->cuda.nodes[0].cu_ctx);|]
+  GC.stms [[C.cstm|free($id:col);|] | col <- interm_cols]
+  GC.stm [C.cstm|CUDA_SUCCEED(cuda_set_active_node(&ctx->cuda, 0));|]
   mapM_ GC.item after'
 callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
@@ -307,7 +322,7 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
         $id:time_start = get_wall_time();
       }
       CUDA_SUCCEED(
-        cuLaunchKernel(ctx->$id:name,
+        cuLaunchKernel(ctx->node_ctx[ctx->cuda.active_node].$id:name,
                        grid[0], grid[1], grid[2],
                        $exp:block_x, $exp:block_y, $exp:block_z,
                        $exp:shared_tot, NULL,

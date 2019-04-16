@@ -71,15 +71,20 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes _ (Body _ bnds ses))) 
   zipWithM_ (ImpGen.dReplicateMemFromArray DefaultSpace) parts_mem src
   nes_e <- mapM ImpGen.compileSubExp nes
   zipWithM_ (<--) (map paramName red_acc_params) nes_e
-  body_code <- ImpGen.collect $ ImpGen.compileStms (freeIn ses) (stmsToList bnds) $ pure ()
+  interm <- replicateM (length node_res) $ newVName "interm"
+  interm_mem <- replicateM (length node_res) $ newVName "interm_mem"
+  body_code <- ImpGen.collect $ ImpGen.compileStms (freeIn ses) (stmsToList bnds) $ do
+    mapM_ (\(x, y, z) -> ImpGen.dReplicateArray DefaultSpace x y z) $ zip3 interm interm_mem node_res
+    zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) interm $ map Var node_res
+  interm_size <- map ImpGen.entryMemSize <$> mapM ImpGen.lookupMemory interm_mem
   red_code <- ImpGen.collect $ do
     zipWithM_ (\x y -> ImpGen.copyDWIM x [] y [ValueExp $ IntValue $ Int32Value 0])
-              (map paramName red_next_params) $ map Var node_res
+              (map paramName red_next_params) $ map Var interm
     ImpGen.compileBody' red_acc_params $ lambdaBody red_op
   after_code <- ImpGen.collect $
     zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) (map patElemName pes) $
               map (Var . paramName) red_acc_params
-  sOp $ Imp.Husk hspace src_mems_names red_code body_code after_code
+  sOp $ Imp.Husk hspace src_mems_names interm_mem interm_size red_code body_code after_code
 opCompiler pat e =
   compilerBugS $ "ImpGen.opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e

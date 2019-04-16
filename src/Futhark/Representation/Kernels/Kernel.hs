@@ -849,7 +849,7 @@ scopeOfHuskSpace (HuskSpace node_id num_nodes _ parts _ _) =
   where scalar_ts = [(node_id, IndexInfo Int32), (num_nodes, IndexInfo Int32)]
 
 boundByHuskSpace :: HuskSpace lore -> Names
-boundByHuskSpace (HuskSpace node_id num_nodes _ parts parts_mem node_res) =
+boundByHuskSpace (HuskSpace node_id num_nodes _ _ parts_mem node_res) =
   S.fromList $ concat [[node_id, num_nodes], parts_mem, node_res]
 
 constructHuskSpace :: (MonadFreshNames m, HasScope lore m, LParamAttr lore ~ Type)
@@ -1033,13 +1033,13 @@ instance (OpMetrics (Op lore), OpMetrics inner) => OpMetrics (HostOp lore inner)
   opMetrics (Husk _ red_op _ _ body) = 
     inside "Husk" $ lambdaMetrics red_op >> bodyMetrics body
 
-instance (Aliased lore, UsageInOp inner) => UsageInOp (HostOp lore inner) where
+instance (Attributes lore, UsageInOp (Op lore), Aliased lore, UsageInOp inner) => UsageInOp (HostOp lore inner) where
   usageInOp GetSize{} = mempty
   usageInOp GetSizeMax{} = mempty
   usageInOp CmpSizeLe{} = mempty
   usageInOp (HostOp op) = usageInOp op
-  usageInOp (Husk hspace red_op _ _ body) = 
-    mconcat $ map UT.consumedUsage (S.toList $ consumedInBody body)
+  usageInOp (Husk hspace red_op _ _ (Body _ body_stms _)) = 
+    mconcat $ map usageInStm (toList body_stms)
             ++ [ usageInLambda red_op (hspaceNodeResults hspace)
                , UT.usages (S.fromList $ hspaceSource hspace)
                , UT.usages (S.fromList $ hspaceNodeResults hspace)]

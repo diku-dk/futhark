@@ -88,8 +88,8 @@ setBodySpace space (Op op) =
   Op $ setHostOpDefaultSpace space op
 
 setHostOpDefaultSpace :: Space -> HostOp -> HostOp
-setHostOpDefaultSpace space (Husk hspace interm red body after) =
-  Husk hspace interm (setBodySpace space red) (setBodySpace space body)
+setHostOpDefaultSpace space (Husk hspace src_mem interm_mem interm_size red body after) =
+  Husk hspace src_mem interm_mem interm_size (setBodySpace space red) (setBodySpace space body)
        (setBodySpace space after)
 setHostOpDefaultSpace _ op = op
 

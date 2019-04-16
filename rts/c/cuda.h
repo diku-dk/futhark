@@ -92,14 +92,14 @@ void cuda_config_init(struct cuda_config *cfg,
 struct cuda_node_context {
   CUdevice dev;
   CUcontext cu_ctx;
+  CUmodule module;
 
   struct free_list free_list;
 };
 
 struct cuda_context {
   struct cuda_node_context *nodes;
-  
-  CUmodule module;
+  int32_t active_node;
 
   size_t max_block_size;
   size_t max_grid_size;
@@ -225,6 +225,8 @@ static int cuda_devices_setup(struct cuda_context *ctx)
 
   if(ctx->cfg.debugging)
     fprintf(stderr, "Using %d \"%s\" devices.\n", ctx->cfg.num_nodes, devs[0].name);
+
+  ctx->active_node = 0;
 
   free(devs);
   return 0;
@@ -465,6 +467,13 @@ static void load_string_from_file(const char *file, char **obuf, size_t *olen)
   assert(fclose(f) == 0);
 }
 
+CUresult cuda_set_active_node(struct cuda_context *ctx, int node) {
+  if (ctx->active_node == node)
+    return CUDA_SUCCESS;
+  ctx->active_node = node;
+  return cuCtxSetCurrent(ctx->nodes[node].cu_ctx);
+}
+
 static void cuda_module_setup(struct cuda_context *ctx,
                               const char *src_fragments[],
                               const char *extra_opts[])
@@ -499,7 +508,10 @@ static void cuda_module_setup(struct cuda_context *ctx,
     ptx = cuda_nvrtc_build(ctx, src, extra_opts);
   }
 
-  CUDA_SUCCEED(cuModuleLoadData(&ctx->module, ptx));
+  for (int i = ctx->cfg.num_nodes - 1; i >= 0; --i) {
+    cuda_set_active_node(ctx, i);
+    CUDA_SUCCEED(cuModuleLoadData(&ctx->nodes[ctx->active_node].module, ptx));
+  }
 
   free(ptx);
   if (src != NULL) {
@@ -541,13 +553,15 @@ CUresult cuda_free_all(struct cuda_context *ctx);
 
 void cuda_cleanup(struct cuda_context *ctx)
 {
-  CUDA_SUCCEED(cuda_free_all(ctx));
-  CUDA_SUCCEED(cuModuleUnload(ctx->module));
-  for (int i = 0; i < ctx->cfg.num_nodes; ++i)
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    cuda_set_active_node(ctx, i);
+    CUDA_SUCCEED(cuda_free_all(ctx));
+    CUDA_SUCCEED(cuModuleUnload(ctx->nodes[i].module));
     CUDA_SUCCEED(cuCtxDestroy(ctx->nodes[i].cu_ctx));
+  }
 }
 
-CUresult cuda_alloc(struct cuda_context *ctx, int node, size_t min_size,
+CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
     const char *tag, CUdeviceptr *mem_out)
 {
   if (min_size < sizeof(int)) {
@@ -555,7 +569,7 @@ CUresult cuda_alloc(struct cuda_context *ctx, int node, size_t min_size,
   }
 
   size_t size;
-  if (free_list_find(&ctx->nodes[node].free_list, tag, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->nodes[ctx->active_node].free_list, tag, &size, mem_out) == 0) {
     if (size >= min_size) {
       return CUDA_SUCCESS;
     } else {
@@ -569,7 +583,7 @@ CUresult cuda_alloc(struct cuda_context *ctx, int node, size_t min_size,
   CUresult res = cuMemAlloc(mem_out, min_size);
   while (res == CUDA_ERROR_OUT_OF_MEMORY) {
     CUdeviceptr mem;
-    if (free_list_first(&ctx->nodes[node].free_list, &mem) == 0) {
+    if (free_list_first(&ctx->nodes[ctx->active_node].free_list, &mem) == 0) {
       res = cuMemFree(mem);
       if (res != CUDA_SUCCESS) {
         return res;
@@ -583,14 +597,13 @@ CUresult cuda_alloc(struct cuda_context *ctx, int node, size_t min_size,
   return res;
 }
 
-CUresult cuda_free(struct cuda_context *ctx, int node, CUdeviceptr mem,
-    const char *tag)
+CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem, const char *tag)
 {
   size_t size;
   CUdeviceptr existing_mem;
 
   // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->nodes[node].free_list, tag, &size, &existing_mem) == 0) {
+  if (free_list_find(&ctx->nodes[ctx->active_node].free_list, tag, &size, &existing_mem) == 0) {
     CUresult res = cuMemFree(existing_mem);
     if (res != CUDA_SUCCESS) {
       return res;
@@ -599,7 +612,7 @@ CUresult cuda_free(struct cuda_context *ctx, int node, CUdeviceptr mem,
 
   CUresult res = cuMemGetAddressRange(NULL, &size, mem);
   if (res == CUDA_SUCCESS) {
-    free_list_insert(&ctx->nodes[node].free_list, size, mem, tag);
+    free_list_insert(&ctx->nodes[ctx->active_node].free_list, size, mem, tag);
   }
 
   return res;
@@ -607,13 +620,11 @@ CUresult cuda_free(struct cuda_context *ctx, int node, CUdeviceptr mem,
 
 CUresult cuda_free_all(struct cuda_context *ctx) {
   CUdeviceptr mem;
-  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
-    free_list_pack(&ctx->nodes[i].free_list);
-    while (free_list_first(&ctx->nodes[i].free_list, &mem) == 0) {
-      CUresult res = cuMemFree(mem);
-      if (res != CUDA_SUCCESS) {
-        return res;
-      }
+  free_list_pack(&ctx->nodes[ctx->active_node].free_list);
+  while (free_list_first(&ctx->nodes[ctx->active_node].free_list, &mem) == 0) {
+    CUresult res = cuMemFree(mem);
+    if (res != CUDA_SUCCESS) {
+      return res;
     }
   }
 

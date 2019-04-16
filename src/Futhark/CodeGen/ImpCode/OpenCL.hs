@@ -62,7 +62,7 @@ data KernelArg = ValueKArg Exp PrimType
 
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
-            | DistributeHusk (HuskSpace ExplicitMemory) [VName] Code Code Code
+            | DistributeHusk (HuskSpace ExplicitMemory) [VName] [VName] [Imp.MemSize] Code Code Code
             | HostCode Code
             | GetSize VName Name
             | CmpSizeLe VName Name Exp

@@ -32,6 +32,7 @@ module Futhark.CodeGen.Backends.GenericC
   , putUserState
   , modifyUserState
   , contextContents
+  , nodeContextFields
   , contextFinalInits
   , runCompilerM
   , blockScope
@@ -58,6 +59,7 @@ module Futhark.CodeGen.Backends.GenericC
   , publicName
   , contextType
   , contextField
+  , nodeContextField
 
   -- * Building Blocks
   , primTypeToCType
@@ -101,6 +103,7 @@ data CompilerState s = CompilerState {
   , compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition)
   , compLibDecls :: DL.DList C.Definition
   , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
+  , compNodeCtxFields :: DL.DList String
   , compDebugItems :: DL.DList C.BlockItem
   , compDeclaredMem :: [(VName,Space)]
   }
@@ -116,6 +119,7 @@ newCompilerState src s = CompilerState { compTypeStructs = []
                                        , compHeaderDecls = mempty
                                        , compLibDecls = mempty
                                        , compCtxFields = mempty
+                                       , compNodeCtxFields = mempty
                                        , compDebugItems = mempty
                                        , compDeclaredMem = mempty
                                        }
@@ -298,6 +302,9 @@ contextContents = do
                     | (name, Just e) <- zip field_names field_values ]
   return (fields, init_fields)
 
+nodeContextFields :: CompilerM op s [String]
+nodeContextFields = DL.toList <$> gets compNodeCtxFields
+
 contextFinalInits :: CompilerM op s [C.Stm]
 contextFinalInits = gets compInit
 
@@ -407,6 +414,10 @@ earlyDecls def = modify $ \s ->
 contextField :: String -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
   s { compCtxFields = compCtxFields s <> DL.singleton (name,ty,initial) }
+
+nodeContextField :: String -> CompilerM op s ()
+nodeContextField name = modify $ \s ->
+  s { compNodeCtxFields = compNodeCtxFields s <> DL.singleton name }
 
 debugReport :: C.BlockItem -> CompilerM op s ()
 debugReport x = modify $ \s ->

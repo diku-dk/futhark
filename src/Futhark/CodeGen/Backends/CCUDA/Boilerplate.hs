@@ -211,8 +211,19 @@ generateContextFuns :: String -> [String]
 generateContextFuns cfg kernel_names sizes = do
   final_inits <- GC.contextFinalInits
   (fields, init_fields) <- GC.contextContents
+  node_field_names <- GC.nodeContextFields
+
   let kernel_fields = map (\k -> [C.csdecl|typename CUfunction $id:k;|])
                         kernel_names
+      node_fields = map (\n -> [C.csdecl|struct memblock_device $id:n;|])
+                      node_field_names
+
+  node_ctx <- GC.publicDef "node_context" GC.InitDecl $ \s ->
+    ([C.cedecl|struct $id:s;|],
+     [C.cedecl|struct $id:s {
+                           $sdecls:kernel_fields
+                           $sdecls:node_fields 
+                        };|])
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
@@ -222,7 +233,7 @@ generateContextFuns cfg kernel_names sizes = do
                          typename lock_t lock;
                          char *error;
                          $sdecls:fields
-                         $sdecls:kernel_fields
+                         struct $id:node_ctx *node_ctx;
                          struct cuda_context cuda;
                          struct sizes sizes;
                        };|])
@@ -243,8 +254,13 @@ generateContextFuns cfg kernel_names sizes = do
                           create_lock(&ctx->lock);
                           $stms:init_fields
 
+                          ctx->node_ctx = malloc(sizeof(struct $id:node_ctx) * ctx->cuda.cfg.num_nodes);
+
                           cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
-                          $stms:(map (loadKernelByName) kernel_names)
+                          for (int i = ctx->cuda.cfg.num_nodes - 1; i >= 0; --i) {
+                            cuda_set_active_node(&ctx->cuda, i);
+                            $stms:(map loadKernelByName kernel_names)
+                          }
 
                           $stms:final_inits
                           $stms:set_sizes
@@ -256,6 +272,7 @@ generateContextFuns cfg kernel_names sizes = do
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
+                                 free(ctx->node_ctx);
                                  free(ctx);
                                }|])
 
@@ -273,5 +290,7 @@ generateContextFuns cfg kernel_names sizes = do
                        }|])
   where
     loadKernelByName name =
-      [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(&ctx->$id:name,
-                ctx->cuda.module, $string:name));|]
+      [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(
+                &ctx->node_ctx[ctx->cuda.active_node].$id:name,
+                ctx->cuda.nodes[ctx->cuda.active_node].module,
+                $string:name));|]

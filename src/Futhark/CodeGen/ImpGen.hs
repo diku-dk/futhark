@@ -75,6 +75,7 @@ module Futhark.CodeGen.ImpGen
   , dScopes
   , dArray
   , dReplicateMemFromArray
+  , dReplicateArray
   , dPrim, dPrim_, dPrimV
 
   , sFor, sWhile
@@ -866,6 +867,16 @@ dReplicateMemFromArray space repl_mem origin_arr = do
           arr_loc <- entryArrayLocation <$> lookupArray arr
           arr_mem <- lookupMemory $ memLocationName arr_loc
           return $ entryMemSize arr_mem
+
+dReplicateArray :: Space -> VName -> VName -> VName -> ImpM lore op ()
+dReplicateArray space repl_arr repl_mem origin_arr = do
+  dReplicateMemFromArray space repl_mem origin_arr
+  origin_ent <- lookupArray origin_arr
+  addVar repl_arr $ ArrayVar Nothing $ origin_ent {
+      entryArrayLocation = (entryArrayLocation origin_ent) {
+          memLocationName = repl_mem
+        }
+    }
 
 everythingVolatile :: ImpM lore op a -> ImpM lore op a
 everythingVolatile = local $ \env -> env { envVolatility = Imp.Volatile }
