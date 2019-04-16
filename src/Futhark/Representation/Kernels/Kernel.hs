@@ -164,14 +164,12 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                     SubExp -- Per-thread (max) chunk size.
                     (Maybe SubExp) -- Optional precalculated offset.
                     VName -- Chunk by this thread.
-                  | KernelInPlaceReturn VName -- HACK!
                   deriving (Eq, Show, Ord)
 
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (ThreadsReturn _ se) = se
 kernelResultSubExp (WriteReturn _ arr _) = Var arr
 kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
-kernelResultSubExp (KernelInPlaceReturn v) = Var v
 
 data WhichThreads = AllThreads
                   | OneResultPerGroup
@@ -321,7 +319,6 @@ instance FreeIn KernelResult where
   freeIn (WriteReturn rws arr res) = freeIn rws <> freeIn arr <> freeIn res
   freeIn (ConcatReturns o w per_thread_elems moffset v) =
     freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn moffset <> freeIn v
-  freeIn (KernelInPlaceReturn what) = freeIn what
 
 instance FreeIn WhichThreads where
   freeIn AllThreads = mempty
@@ -357,8 +354,6 @@ instance Substitute KernelResult where
     (substituteNames subst per_thread_elems)
     (substituteNames subst moffset)
     (substituteNames subst v)
-  substituteNames subst (KernelInPlaceReturn what) =
-    KernelInPlaceReturn (substituteNames subst what)
 
 instance Substitute WhichThreads where
   substituteNames _ AllThreads = AllThreads
@@ -442,8 +437,6 @@ kernelType (Kernel _ space ts body) =
           foldr (flip arrayOfRow) t dims
         resultShape t (ConcatReturns _ w _ _ _) =
           t `arrayOfRow` w
-        resultShape t KernelInPlaceReturn{} =
-          t
 
 kernelType (SegRed space _ _ nes ts _) =
   map (`arrayOfShape` Shape outer_dims) red_ts ++
@@ -498,8 +491,6 @@ aliasAnalyseKernelBody (KernelBody attr stms res) =
           WriteReturn rws arr res'
         aliasAnalyseKernelResult (ConcatReturns o w per_thread_elems moffset v) =
           ConcatReturns o w per_thread_elems moffset v
-        aliasAnalyseKernelResult (KernelInPlaceReturn what) =
-          KernelInPlaceReturn what
 
 instance (Attributes lore,
           Attributes (Aliases lore),
@@ -551,8 +542,6 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) w
             return $ WriteReturn rws arr res
           addKernelResultRanges (ConcatReturns o w per_thread_elems moffset v) =
             return $ ConcatReturns o w per_thread_elems moffset v
-          addKernelResultRanges (KernelInPlaceReturn what) =
-            return $ KernelInPlaceReturn what
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
   type OpWithWisdom (Kernel lore) = Kernel (Wise lore)
@@ -704,8 +693,6 @@ typeCheckKernel (Kernel _ space kts kbody) = do
           vt <- lookupType v
           unless (vt == t `arrayOfRow` arraySize 0 vt) $
             TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
-        checkKernelResult (KernelInPlaceReturn what) t =
-          TC.requireI [t] what
 
         checkWhich AllThreads = return ()
         checkWhich OneResultPerGroup = return ()
@@ -837,8 +824,6 @@ instance Pretty KernelResult where
                            SplitStrided stride -> text "Strided" <> parens (ppr stride)
           offset_text = case offset of Nothing -> ""
                                        Just se -> "," <+> "offset=" <> ppr se
-  ppr (KernelInPlaceReturn what) =
-    text "kernel returns" <+> ppr what
 
 --- Host operations
 

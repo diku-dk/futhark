@@ -1013,9 +1013,6 @@ instance OpReturns ExplicitMemory where
   opReturns (Inner (HostOp k@(Kernel _ _ _ body))) =
     zipWithM correct (kernelBodyResult body) =<< (extReturns <$> opType k)
     where correct (WriteReturn _ arr _) _ = varReturns arr
-          correct (KernelInPlaceReturn arr) _ =
-            extendedScope (varReturns arr)
-            (castScope $ scopeOf $ kernelBodyStms body)
           correct _ ret = return ret
   opReturns (Inner (HostOp (SegGenRed _ ops _ _))) =
     concat <$> mapM (mapM varReturns . genReduceDest) ops
