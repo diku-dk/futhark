@@ -410,10 +410,6 @@ compileKernelResult constants pe (WriteReturn rws _arr dests) = do
                 zipWith condInBounds is' rws'
     sWhen write $ ImpGen.copyDWIM (patElemName pe) (map (ImpGen.compileSubExpOfType int32) is) e []
 
-compileKernelResult _ _ KernelInPlaceReturn{} =
-  -- Already in its place... said it was a hack.
-  return ()
-
 arrayInLocalMemory :: SubExp -> InKernelGen Bool
 arrayInLocalMemory (Var name) = do
   res <- ImpGen.lookupVar name

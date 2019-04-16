@@ -216,7 +216,6 @@ mkWiseKernelBody attr bnds res =
         resValue (ThreadsReturn _ se) = se
         resValue (WriteReturn _ arr _) = Var arr
         resValue (ConcatReturns _ _ _ _ v) = Var v
-        resValue (KernelInPlaceReturn v) = Var v
 
 inKernelEnv :: Engine.Env InKernel
 inKernelEnv = Engine.emptyEnv inKernelRules Simplify.noExtraHoistBlockers
@@ -373,8 +372,6 @@ instance Engine.Simplifiable KernelResult where
     <*> Engine.simplify pte
     <*> Engine.simplify moffset
     <*> Engine.simplify what
-  simplify (KernelInPlaceReturn what) =
-    KernelInPlaceReturn <$> Engine.simplify what
 
 instance Engine.Simplifiable WhichThreads where
   simplify AllThreads = pure AllThreads
