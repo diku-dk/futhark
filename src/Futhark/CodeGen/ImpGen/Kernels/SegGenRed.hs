@@ -269,7 +269,7 @@ compileSegGenRed (Pattern _ pes) genred_space ops body = do
             }
 
       compileSegRed' (Pattern [] red_pes) segred_space
-        Commutative lam (genReduceNeutral op) $ \red_dests _ ->
+        Commutative lam (genReduceNeutral op) $ \red_dests ->
         forM_ (zip red_dests subhistos) $ \((d, is), subhisto) ->
           ImpGen.copyDWIM d is (Var subhisto) $ map (`Imp.var` int32) $
           map fst segment_dims ++ [subhistogram_id, bucket_id] ++ vector_ids
