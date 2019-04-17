@@ -1306,7 +1306,7 @@ genReduceKernel orig_pat ispace inputs cs genred_w ops lam arrs = do
   let isDest = flip elem $ concatMap Out.genReduceDest ops'
       inputs' = filter (not . isDest . kernelInputArray) inputs
 
-  k_stms <- blockedGenReduce orig_pat genred_w ispace inputs' ops' lam arrs
+  k_stms <- segGenRed orig_pat genred_w ispace inputs' ops' lam arrs
 
   return $ certify cs <$> k_stms
 
