@@ -171,8 +171,7 @@ kernelResultSubExp (ThreadsReturn _ se) = se
 kernelResultSubExp (WriteReturn _ arr _) = Var arr
 kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
 
-data WhichThreads = AllThreads
-                  | OneResultPerGroup
+data WhichThreads = OneResultPerGroup
                   | ThreadsInSpace
                   deriving (Eq, Show, Ord)
 
@@ -320,7 +319,6 @@ instance FreeIn KernelResult where
     freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn moffset <> freeIn v
 
 instance FreeIn WhichThreads where
-  freeIn AllThreads = mempty
   freeIn OneResultPerGroup = mempty
   freeIn ThreadsInSpace = mempty
 
@@ -354,7 +352,6 @@ instance Substitute KernelResult where
     (substituteNames subst v)
 
 instance Substitute WhichThreads where
-  substituteNames _ AllThreads = AllThreads
   substituteNames _ OneResultPerGroup = OneResultPerGroup
   substituteNames _ ThreadsInSpace = ThreadsInSpace
 
@@ -420,11 +417,8 @@ kernelType (Kernel _ space ts body) =
   zipWith resultShape ts $ kernelBodyResult body
   where dims = map snd $ spaceDimensions space
         num_groups = spaceNumGroups space
-        num_threads = spaceNumThreads space
         resultShape t (WriteReturn rws _ _) =
           t `arrayOfShape` Shape rws
-        resultShape t (ThreadsReturn AllThreads _) =
-          t `arrayOfRow` num_threads
         resultShape t (ThreadsReturn OneResultPerGroup _) =
           t `arrayOfRow` num_groups
         resultShape t (ThreadsReturn ThreadsInSpace _) =
@@ -557,8 +551,6 @@ instance Attributes lore => ST.IndexOp (Kernel lore) where
     ThreadsReturn which se <- maybeNth k $ kernelBodyResult kbody
 
     prim_table <- case (which, is) of
-      (AllThreads, [i]) ->
-        Just $ M.singleton (spaceGlobalId space) (i,mempty)
       (ThreadsInSpace, _)
         | (gtids, _) <- unzip $ spaceDimensions space,
           length gtids == length is ->
@@ -688,7 +680,6 @@ typeCheckKernel (Kernel _ space kts kbody) = do
           unless (vt == t `arrayOfRow` arraySize 0 vt) $
             TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
 
-        checkWhich AllThreads = return ()
         checkWhich OneResultPerGroup = return ()
         checkWhich ThreadsInSpace = return ()
 
@@ -794,8 +785,6 @@ instance PrettyLore lore => Pretty (KernelBody lore) where
     text "return" <+> PP.braces (PP.commasep $ map ppr res)
 
 instance Pretty KernelResult where
-  ppr (ThreadsReturn AllThreads what) =
-    ppr what
   ppr (ThreadsReturn OneResultPerGroup what) =
     text "group" <+> "returns" <+> ppr what
   ppr (ThreadsReturn ThreadsInSpace what) =

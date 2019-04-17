@@ -338,7 +338,9 @@ blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
         case ordering of InOrder -> SplitContiguous
                          Disorder -> SplitStrided $ kernelNumThreads kernel_size
 
-  space <- newKernelSpace (num_groups, group_size, num_threads) (FlatThreadSpace [])
+  unused_gtid <- newVName "unused_gtid"
+  space <- newKernelSpace (num_groups, group_size, num_threads)
+                          (FlatThreadSpace [(unused_gtid, kernelNumThreads kernel_size)])
   lam' <- kerneliseLambda nes lam
   ((chunk_red_pes, chunk_map_pes), chunk_and_fold) <- runBinder $
     blockedPerThread (spaceGlobalId space) w kernel_size ordering lam' num_nonconcat arrs
@@ -353,7 +355,7 @@ blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
            map (rowType . patElemType) chunk_map_pes
 
   nonconcat_rets <- forM chunk_red_pes $ \pe ->
-    return $ ThreadsReturn AllThreads $ Var $ patElemName pe
+    return $ ThreadsReturn ThreadsInSpace $ Var $ patElemName pe
   elems_per_thread <- asIntS Int32 $ kernelElementsPerThread kernel_size
   concat_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering' w elems_per_thread Nothing $ patElemName pe

@@ -374,7 +374,6 @@ instance Engine.Simplifiable KernelResult where
     <*> Engine.simplify what
 
 instance Engine.Simplifiable WhichThreads where
-  simplify AllThreads = pure AllThreads
   simplify OneResultPerGroup = pure OneResultPerGroup
   simplify ThreadsInSpace = pure ThreadsInSpace
 
@@ -444,16 +443,11 @@ removeInvariantKernelResults vtable (Pattern [] kpes) attr
   where isInvariant Constant{} = True
         isInvariant (Var v) = isJust $ ST.lookup v vtable
 
-        num_threads = spaceNumThreads space
         space_dims = map snd $ spaceDimensions space
 
         checkForInvarianceResult (_, pe, ThreadsReturn threads se)
           | isInvariant se =
               case threads of
-                AllThreads -> do
-                  letBindNames_ [patElemName pe] $ BasicOp $
-                    Replicate (Shape [num_threads]) se
-                  return False
                 ThreadsInSpace -> do
                   let rep a d = BasicOp . Replicate (Shape [d]) <$> letSubExp "rep" a
                   letBindNames_ [patElemName pe] =<<
