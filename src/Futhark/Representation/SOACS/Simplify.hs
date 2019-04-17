@@ -507,6 +507,11 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
 fuseConcatScatter _ _ _ _ = cannotSimplify
 
 simplifyClosedFormReduce :: TopDownRuleOp (Wise SOACS)
+simplifyClosedFormReduce _ pat _ (Screma (Constant w) form _)
+  | Just (_, _, nes, _) <- isRedomapSOAC form,
+    zeroIsh w =
+      forM_ (zip (patternNames pat) nes) $ \(v, ne) ->
+      letBindNames_ [v] $ BasicOp $ SubExp ne
 simplifyClosedFormReduce vtable pat _ (Screma _ form arrs)
   | Just (_, red_fun, nes) <- isReduceSOAC form =
       foldClosedForm (`ST.lookupExp` vtable) pat red_fun nes arrs
