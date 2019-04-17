@@ -14,11 +14,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , KernelInput(..)
        , readKernelInput
 
-       -- Helper functions shared with at least Segmented.hs
-       , kerneliseLambda
        , newKernelSpace
-       , chunkLambda
-       , splitArrays
        , getSize
        )
        where
@@ -38,7 +34,6 @@ import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
-import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.Alias as Alias
 
@@ -200,55 +195,6 @@ reduceKernel step_two_size reduce_lam nes arrs = do
 
   return $ Kernel (KernelDebugHints "reduce" []) space (lambdaReturnType reduce_lam)  $
     KernelBody () kstms rets
-
--- | Requires a fold lambda that includes accumulator parameters.
-chunkLambda :: (MonadFreshNames m, HasScope Kernels m) =>
-               Pattern Kernels -> [SubExp] -> Lambda InKernel -> m (Lambda InKernel)
-chunkLambda pat nes fold_lam = do
-  chunk_size <- newVName "chunk_size"
-
-  let arr_idents = drop (length nes) $ patternIdents pat
-      (fold_acc_params, fold_arr_params) =
-        splitAt (length nes) $ lambdaParams fold_lam
-      chunk_size_param = Param chunk_size (Prim int32)
-  arr_chunk_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_arr_params
-
-  map_arr_params <- forM arr_idents $ \arr ->
-    newParam (baseString (identName arr) <> "_in") $
-    setOuterSize (identType arr) (Var chunk_size)
-
-  fold_acc_params' <- forM fold_acc_params $ \p ->
-    newParam (baseString $ paramName p) $ paramType p
-
-  let seq_rt =
-        let (acc_ts, arr_ts) =
-              splitAt (length nes) $ lambdaReturnType fold_lam
-        in acc_ts ++ map (`arrayOfRow` Var chunk_size) arr_ts
-
-      res_idents = zipWith Ident (patternValueNames pat) seq_rt
-
-      param_scope =
-        scopeOfLParams $ fold_acc_params' ++ arr_chunk_params ++ map_arr_params
-
-  seq_loop_stms <-
-    runBinder_ $ localScope param_scope $
-    Kernelise.groupStreamMapAccumL
-    (patternElements (basicPattern [] res_idents))
-    (Var chunk_size) fold_lam (map (Var . paramName) fold_acc_params')
-    (map paramName arr_chunk_params)
-
-  let seq_body = mkBody seq_loop_stms $ map (Var . identName) res_idents
-
-  return Lambda { lambdaParams = chunk_size_param :
-                                 fold_acc_params' ++
-                                 arr_chunk_params ++
-                                 map_arr_params
-                , lambdaReturnType = seq_rt
-                , lambdaBody = seq_body
-                }
-  where mkArrChunkParam chunk_size arr_param =
-          newParam (baseString (paramName arr_param) <> "_chunk") $
-            arrayOfRow (paramType arr_param) chunk_size
 
 -- | Given a chunked fold lambda that takes its initial accumulator
 -- value as parameters, bind those parameters to the neutral element
