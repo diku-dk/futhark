@@ -173,7 +173,6 @@ kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
 
 data WhichThreads = AllThreads
                   | OneResultPerGroup
-                  | ThreadsPerGroup [(VName,SubExp)] -- All threads before this one.
                   | ThreadsInSpace
                   deriving (Eq, Show, Ord)
 
@@ -323,7 +322,6 @@ instance FreeIn KernelResult where
 instance FreeIn WhichThreads where
   freeIn AllThreads = mempty
   freeIn OneResultPerGroup = mempty
-  freeIn (ThreadsPerGroup limit) = freeIn limit
   freeIn ThreadsInSpace = mempty
 
 instance Attributes lore => FreeIn (KernelBody lore) where
@@ -359,8 +357,6 @@ instance Substitute WhichThreads where
   substituteNames _ AllThreads = AllThreads
   substituteNames _ OneResultPerGroup = OneResultPerGroup
   substituteNames _ ThreadsInSpace = ThreadsInSpace
-  substituteNames subst (ThreadsPerGroup limit) =
-    ThreadsPerGroup $ substituteNames subst limit
 
 instance Substitute KernelSpace where
   substituteNames subst (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
@@ -431,8 +427,6 @@ kernelType (Kernel _ space ts body) =
           t `arrayOfRow` num_threads
         resultShape t (ThreadsReturn OneResultPerGroup _) =
           t `arrayOfRow` num_groups
-        resultShape t (ThreadsReturn (ThreadsPerGroup limit) _) =
-          t `arrayOfShape` Shape (map snd limit) `arrayOfRow` num_groups
         resultShape t (ThreadsReturn ThreadsInSpace _) =
           foldr (flip arrayOfRow) t dims
         resultShape t (ConcatReturns _ w _ _ _) =
@@ -697,9 +691,6 @@ typeCheckKernel (Kernel _ space kts kbody) = do
         checkWhich AllThreads = return ()
         checkWhich OneResultPerGroup = return ()
         checkWhich ThreadsInSpace = return ()
-        checkWhich (ThreadsPerGroup limit) = do
-          mapM_ (TC.requireI [Prim int32] . fst) limit
-          mapM_ (TC.require [Prim int32] . snd) limit
 
 checkScanRed :: TC.Checkable lore =>
                 KernelSpace
@@ -807,8 +798,6 @@ instance Pretty KernelResult where
     ppr what
   ppr (ThreadsReturn OneResultPerGroup what) =
     text "group" <+> "returns" <+> ppr what
-  ppr (ThreadsReturn (ThreadsPerGroup limit) what) =
-    text "thread <" <+> ppr limit <+> text "returns" <+> ppr what
   ppr (ThreadsReturn ThreadsInSpace what) =
     text "thread in space returns" <+> ppr what
   ppr (WriteReturn rws arr res) =

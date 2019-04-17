@@ -377,8 +377,6 @@ instance Engine.Simplifiable WhichThreads where
   simplify AllThreads = pure AllThreads
   simplify OneResultPerGroup = pure OneResultPerGroup
   simplify ThreadsInSpace = pure ThreadsInSpace
-  simplify (ThreadsPerGroup limit) =
-    ThreadsPerGroup <$> mapM Engine.simplify limit
 
 instance BinderOps (Wise Kernels) where
   mkExpAttrB = bindableMkExpAttrB
