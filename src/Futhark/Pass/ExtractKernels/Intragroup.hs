@@ -303,4 +303,4 @@ intraGroupParalleliseBody deps group_variant ltid body = do
   (min_ws, avail_ws, kstms) <- runIntraGroupM (Env ltid deps group_variant) $
                  mapM_ intraGroupStm $ bodyStms body
   return (min_ws, avail_ws,
-          KernelBody () kstms $ map (ThreadsReturn OneResultPerGroup) $ bodyResult body)
+          KernelBody () kstms $ map ThreadsReturn $ bodyResult body)

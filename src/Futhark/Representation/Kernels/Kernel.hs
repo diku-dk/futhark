@@ -17,7 +17,6 @@ module Futhark.Representation.Kernels.Kernel
        , spaceDimensions
        , SpaceStructure(..)
        , scopeOfKernelSpace
-       , WhichThreads(..)
        , KernelResult(..)
        , kernelResultSubExp
        , KernelPath
@@ -152,7 +151,11 @@ deriving instance Annotations lore => Ord (KernelBody lore)
 deriving instance Annotations lore => Show (KernelBody lore)
 deriving instance Annotations lore => Eq (KernelBody lore)
 
-data KernelResult = ThreadsReturn WhichThreads SubExp
+data KernelResult = ThreadsReturn SubExp
+                    -- ^ Each thread in the kernel space (which must
+                    -- be non-empty) returns this.
+                  | GroupsReturn SubExp
+                    -- ^ Each group returns this.
                   | WriteReturn
                     [SubExp] -- Size of array.  Must match number of dims.
                     VName -- Which array
@@ -167,13 +170,10 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                   deriving (Eq, Show, Ord)
 
 kernelResultSubExp :: KernelResult -> SubExp
-kernelResultSubExp (ThreadsReturn _ se) = se
+kernelResultSubExp (ThreadsReturn se) = se
+kernelResultSubExp (GroupsReturn se) = se
 kernelResultSubExp (WriteReturn _ arr _) = Var arr
 kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
-
-data WhichThreads = OneResultPerGroup
-                  | ThreadsInSpace
-                  deriving (Eq, Show, Ord)
 
 -- | Like 'Mapper', but just for 'Kernel's.
 data KernelMapper flore tlore m = KernelMapper {
@@ -313,14 +313,11 @@ walkKernelM f = void . mapKernelM m
   where m = walkKernelMapper f
 
 instance FreeIn KernelResult where
-  freeIn (ThreadsReturn which what) = freeIn which <> freeIn what
+  freeIn (GroupsReturn what) = freeIn what
+  freeIn (ThreadsReturn what) = freeIn what
   freeIn (WriteReturn rws arr res) = freeIn rws <> freeIn arr <> freeIn res
   freeIn (ConcatReturns o w per_thread_elems moffset v) =
     freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn moffset <> freeIn v
-
-instance FreeIn WhichThreads where
-  freeIn OneResultPerGroup = mempty
-  freeIn ThreadsInSpace = mempty
 
 instance Attributes lore => FreeIn (KernelBody lore) where
   freeIn (KernelBody attr stms res) =
@@ -337,8 +334,10 @@ instance Attributes lore => Substitute (KernelBody lore) where
     (substituteNames subst res)
 
 instance Substitute KernelResult where
-  substituteNames subst (ThreadsReturn who se) =
-    ThreadsReturn (substituteNames subst who) (substituteNames subst se)
+  substituteNames subst (GroupsReturn se) =
+    GroupsReturn $ substituteNames subst se
+  substituteNames subst (ThreadsReturn se) =
+    ThreadsReturn $ substituteNames subst se
   substituteNames subst (WriteReturn rws arr res) =
     WriteReturn
     (substituteNames subst rws) (substituteNames subst arr)
@@ -350,10 +349,6 @@ instance Substitute KernelResult where
     (substituteNames subst per_thread_elems)
     (substituteNames subst moffset)
     (substituteNames subst v)
-
-instance Substitute WhichThreads where
-  substituteNames _ OneResultPerGroup = OneResultPerGroup
-  substituteNames _ ThreadsInSpace = ThreadsInSpace
 
 instance Substitute KernelSpace where
   substituteNames subst (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
@@ -396,9 +391,6 @@ instance Attributes lore => Rename (KernelBody lore) where
 instance Rename KernelResult where
   rename = substituteRename
 
-instance Rename WhichThreads where
-  rename = substituteRename
-
 scopeOfKernelSpace :: KernelSpace -> Scope lore
 scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
   M.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat $ IndexInfo Int32
@@ -419,9 +411,9 @@ kernelType (Kernel _ space ts body) =
         num_groups = spaceNumGroups space
         resultShape t (WriteReturn rws _ _) =
           t `arrayOfShape` Shape rws
-        resultShape t (ThreadsReturn OneResultPerGroup _) =
+        resultShape t (GroupsReturn _) =
           t `arrayOfRow` num_groups
-        resultShape t (ThreadsReturn ThreadsInSpace _) =
+        resultShape t (ThreadsReturn _) =
           foldr (flip arrayOfRow) t dims
         resultShape t (ConcatReturns _ w _ _ _) =
           t `arrayOfRow` w
@@ -472,13 +464,7 @@ aliasAnalyseKernelBody :: (Attributes lore,
                        -> KernelBody (Aliases lore)
 aliasAnalyseKernelBody (KernelBody attr stms res) =
   let Body attr' stms' _ = Alias.analyseBody $ Body attr stms []
-  in KernelBody attr' stms' $ map aliasAnalyseKernelResult res
-  where aliasAnalyseKernelResult (ThreadsReturn which what) =
-          ThreadsReturn which what
-        aliasAnalyseKernelResult (WriteReturn rws arr res') =
-          WriteReturn rws arr res'
-        aliasAnalyseKernelResult (ConcatReturns o w per_thread_elems moffset v) =
-          ConcatReturns o w per_thread_elems moffset v
+  in KernelBody attr' stms' res
 
 instance (Attributes lore,
           Attributes (Aliases lore),
@@ -521,15 +507,7 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) w
           addKernelBodyRanges (KernelBody attr stms res) =
             Range.analyseStms stms $ \stms' -> do
             let attr' = (mkBodyRanges stms $ map kernelResultSubExp res, attr)
-            res' <- mapM addKernelResultRanges res
-            return $ KernelBody attr' stms' res'
-
-          addKernelResultRanges (ThreadsReturn which what) =
-            return $ ThreadsReturn which what
-          addKernelResultRanges (WriteReturn rws arr res) =
-            return $ WriteReturn rws arr res
-          addKernelResultRanges (ConcatReturns o w per_thread_elems moffset v) =
-            return $ ConcatReturns o w per_thread_elems moffset v
+            return $ KernelBody attr' stms' res
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
   type OpWithWisdom (Kernel lore) = Kernel (Wise lore)
@@ -548,17 +526,11 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
 
 instance Attributes lore => ST.IndexOp (Kernel lore) where
   indexOp vtable k (Kernel _ space _ kbody) is = do
-    ThreadsReturn which se <- maybeNth k $ kernelBodyResult kbody
-
-    prim_table <- case (which, is) of
-      (ThreadsInSpace, _)
-        | (gtids, _) <- unzip $ spaceDimensions space,
-          length gtids == length is ->
-            Just $ M.fromList $ zip gtids $ zip is $ repeat mempty
-      _ ->
-        Nothing
-
-    let prim_table' = foldl expandPrimExpTable prim_table $ kernelBodyStms kbody
+    ThreadsReturn se <- maybeNth k $ kernelBodyResult kbody
+    let (gtids, _) = unzip $ spaceDimensions space
+    guard $ length gtids == length is
+    let prim_table = M.fromList $ zip gtids $ zip is $ repeat mempty
+        prim_table' = foldl expandPrimExpTable prim_table $ kernelBodyStms kbody
     case se of
       Var v -> M.lookup v prim_table'
       _ -> Nothing
@@ -655,8 +627,9 @@ typeCheckKernel (Kernel _ space kts kbody) = do
               ", but body returns " ++ show (length res) ++ " values."
             zipWithM_ checkKernelResult res ts
 
-        checkKernelResult (ThreadsReturn which what) t = do
-          checkWhich which
+        checkKernelResult (GroupsReturn what) t =
+          TC.require [t] what
+        checkKernelResult (ThreadsReturn what) t =
           TC.require [t] what
         checkKernelResult (WriteReturn rws arr res) t = do
           mapM_ (TC.require [Prim int32]) rws
@@ -679,9 +652,6 @@ typeCheckKernel (Kernel _ space kts kbody) = do
           vt <- lookupType v
           unless (vt == t `arrayOfRow` arraySize 0 vt) $
             TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
-
-        checkWhich OneResultPerGroup = return ()
-        checkWhich ThreadsInSpace = return ()
 
 checkScanRed :: TC.Checkable lore =>
                 KernelSpace
@@ -785,10 +755,10 @@ instance PrettyLore lore => Pretty (KernelBody lore) where
     text "return" <+> PP.braces (PP.commasep $ map ppr res)
 
 instance Pretty KernelResult where
-  ppr (ThreadsReturn OneResultPerGroup what) =
-    text "group" <+> "returns" <+> ppr what
-  ppr (ThreadsReturn ThreadsInSpace what) =
-    text "thread in space returns" <+> ppr what
+  ppr (GroupsReturn what) =
+    text "group returns" <+> ppr what
+  ppr (ThreadsReturn what) =
+    text "thread returns" <+> ppr what
   ppr (WriteReturn rws arr res) =
     ppr arr <+> text "with" <+> PP.apply (map ppRes res)
     where ppRes (is, e) =

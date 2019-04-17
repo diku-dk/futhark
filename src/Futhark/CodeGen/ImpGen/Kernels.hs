@@ -339,7 +339,7 @@ compileKernelBody pat constants kbody =
 compileKernelResult :: KernelConstants -> PatElem InKernel -> KernelResult
                     -> InKernelGen ()
 
-compileKernelResult constants pe (ThreadsReturn OneResultPerGroup what) = do
+compileKernelResult constants pe (GroupsReturn what) = do
   i <- newVName "i"
 
   in_local_memory <- arrayInLocalMemory what
@@ -369,7 +369,7 @@ compileKernelResult constants pe (ThreadsReturn OneResultPerGroup what) = do
       sFor i Int32 to_write $
         ImpGen.copyDWIM (patElemName pe) (kernelGroupId constants : is) what is
 
-compileKernelResult constants pe (ThreadsReturn ThreadsInSpace what) = do
+compileKernelResult constants pe (ThreadsReturn what) = do
   let is = map (ImpGen.varIndex . fst) $ kernelDimensions constants
   sWhen (kernelThreadActive constants) $ ImpGen.copyDWIM (patElemName pe) is what []
 

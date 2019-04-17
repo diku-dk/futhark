@@ -48,9 +48,9 @@ blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                        -> SubExp
                        -> Commutativity
                        -> Lambda InKernel -> Lambda InKernel
-                       -> [(VName, SubExp)] -> [SubExp] -> [VName]
+                       -> [SubExp] -> [VName]
                        -> m (Stms Kernels)
-blockedReductionStream pat w comm reduce_lam fold_lam ispace nes arrs = runBinder_ $ do
+blockedReductionStream pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   (max_step_one_num_groups, step_one_size) <- blockedKernelSize =<< asIntS Int64 w
 
   let one = constant (1 :: Int32)
@@ -77,7 +77,7 @@ blockedReductionStream pat w comm reduce_lam fold_lam ispace nes arrs = runBinde
     else return arr
 
   step_one <- chunkedReduceKernel w step_one_size comm reduce_lam fold_lam'
-              ispace nes arrs_copies
+              nes arrs_copies
   addStm =<< renameStm (Let step_one_pat (defAux ()) $ Op $ HostOp step_one)
 
   step_two_pat <- basicPattern [] <$>
@@ -101,15 +101,16 @@ chunkedReduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
                     -> KernelSize
                     -> Commutativity
                     -> Lambda InKernel -> Lambda InKernel
-                    -> [(VName, SubExp)] -> [SubExp] -> [VName]
+                    -> [SubExp] -> [VName]
                     -> m (Kernel InKernel)
-chunkedReduceKernel w step_one_size comm reduce_lam fold_lam' ispace nes arrs = do
+chunkedReduceKernel w step_one_size comm reduce_lam fold_lam' nes arrs = do
   let ordering = case comm of Commutative -> Disorder
                               Noncommutative -> InOrder
       group_size = kernelWorkgroupSize step_one_size
       num_nonconcat = length nes
 
-  space <- newKernelSpace (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size) $ FlatThreadSpace ispace
+  space <- newKernelSpace (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size) $
+           FlatThreadSpace []
   ((chunk_red_pes, chunk_map_pes), chunk_and_fold) <-
     runBinder $ blockedPerThread (spaceGlobalId space)
     w step_one_size ordering fold_lam' num_nonconcat arrs
@@ -137,7 +138,7 @@ chunkedReduceKernel w step_one_size comm reduce_lam fold_lam' ispace nes arrs = 
                      zip nes $ map patElemName chunk_red_pes'
 
   red_rets <- forM final_red_pes $ \pe ->
-    return $ ThreadsReturn OneResultPerGroup $ Var $ patElemName pe
+    return $ GroupsReturn $ Var $ patElemName pe
   elems_per_thread <- asIntS Int32 $ kernelElementsPerThread step_one_size
   map_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering' w elems_per_thread Nothing $ patElemName pe
@@ -191,7 +192,7 @@ reduceKernel step_two_size reduce_lam nes arrs = do
       Op $ GroupReduce group_size reduce_lam $ zip nes arrs'
 
     forM final_res_pes $ \pe ->
-      return $ ThreadsReturn OneResultPerGroup $ Var $ patElemName pe
+      return $ GroupsReturn $ Var $ patElemName pe
 
   return $ Kernel (KernelDebugHints "reduce" []) space (lambdaReturnType reduce_lam)  $
     KernelBody () kstms rets
@@ -355,7 +356,7 @@ blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
            map (rowType . patElemType) chunk_map_pes
 
   nonconcat_rets <- forM chunk_red_pes $ \pe ->
-    return $ ThreadsReturn ThreadsInSpace $ Var $ patElemName pe
+    return $ ThreadsReturn $ Var $ patElemName pe
   elems_per_thread <- asIntS Int32 $ kernelElementsPerThread kernel_size
   concat_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering' w elems_per_thread Nothing $ patElemName pe
@@ -516,7 +517,7 @@ mapKernelFromBody :: (HasScope Kernels m, MonadFreshNames m) =>
 mapKernelFromBody w ispace inputs rts body =
   mapKernel w ispace inputs rts kbody
   where kbody = KernelBody () (bodyStms body) krets
-        krets = map (ThreadsReturn ThreadsInSpace) $ bodyResult body
+        krets = map ThreadsReturn $ bodyResult body
 
 data KernelInput = KernelInput { kernelInputName :: VName
                                , kernelInputType :: Type

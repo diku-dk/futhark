@@ -399,7 +399,7 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
           red_fun_sequential <- Kernelise.transformLambda red_fun
           fold_fun_sequential <- Kernelise.transformLambda fold_fun
           fmap (certify cs) <$>
-            blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential [] nes arrs
+            blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential nes arrs
 
     outerParallelBody path' =
       renameBody =<<
@@ -838,7 +838,7 @@ distributeInnerMap maploop@(MapLoop pat cs w lam arrs) acc
           localScope (scopeOfLParams (lambdaParams lam)) $ runBinder_ $
           Kernelise.transformStms lam_bnds
         let kbody = KernelBody () sequentialised_map_body $
-                    map (ThreadsReturn ThreadsInSpace) lam_res'
+                    map ThreadsReturn lam_res'
         constructKernel nest' kbody
 
       let outer_pat = loopNestingPattern $ fst nest
