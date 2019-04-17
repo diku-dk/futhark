@@ -1035,7 +1035,6 @@ kernelExpHints (Op (Inner (HostOp (Kernel _ space rets kbody)))) =
   zipWithM hint rets $ kernelBodyResult kbody
   where num_threads = spaceNumThreads space
 
-        spacy AllThreads = Just [num_threads]
         spacy ThreadsInSpace = Just $ map snd $ spaceDimensions space
         spacy _ = Nothing
 
