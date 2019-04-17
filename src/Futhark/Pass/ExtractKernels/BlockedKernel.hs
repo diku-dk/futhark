@@ -2,12 +2,12 @@
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.BlockedKernel
        ( blockedReductionStream
-       , blockedGenReduce
        , blockedMap
 
        , segRed
        , nonSegRed
        , segScan
+       , segGenRed
 
        , mapKernel
        , mapKernelFromBody
@@ -348,15 +348,15 @@ nonSegRed pat w comm red_lam map_lam nes arrs = runBinder_ $ do
     from_t <- lookupType from
     letBindNames_ [to] $ BasicOp $ Index from $ fullSlice from_t [DimFix $ intConst Int32 0]
 
-blockedGenReduce :: (MonadFreshNames m, HasScope Kernels m) =>
-                    Pattern Kernels
-                 -> SubExp
-                 -> [(VName,SubExp)] -- ^ Segment indexes and sizes.
-                 -> [KernelInput]
-                 -> [GenReduceOp InKernel]
-                 -> Lambda InKernel -> [VName]
-                 -> m (Stms Kernels)
-blockedGenReduce pat arr_w ispace inps ops lam arrs = runBinder_ $ do
+segGenRed :: (MonadFreshNames m, HasScope Kernels m) =>
+             Pattern Kernels
+          -> SubExp
+          -> [(VName,SubExp)] -- ^ Segment indexes and sizes.
+          -> [KernelInput]
+          -> [GenReduceOp InKernel]
+          -> Lambda InKernel -> [VName]
+          -> m (Stms Kernels)
+segGenRed pat arr_w ispace inps ops lam arrs = runBinder_ $ do
   let (_, segment_sizes) = unzip ispace
   arr_w_64 <- letSubExp "arr_w_64" =<< eConvOp (SExt Int32 Int64) (toExp arr_w)
   segment_sizes_64 <- mapM (letSubExp "segment_size_64" <=< eConvOp (SExt Int32 Int64) . toExp) segment_sizes
