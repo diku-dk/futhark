@@ -543,19 +543,19 @@ handleHostOp (HostOp (Kernel desc space kernel_ts kbody)) =
 
 handleHostOp (HostOp (SegRed space comm red_op nes ts body)) = do
   body' <- subInKernel space $
-           localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
+           localScope (scopeOfKernelSpace space) $ allocInKernelBody body
   red_op' <- allocInSegRedLambda space red_op
   return $ Inner $ HostOp $ SegRed space comm red_op' nes ts body'
 
 handleHostOp (HostOp (SegScan space scan_op nes ts body)) = do
   body' <- subInKernel space $
-           localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
+           localScope (scopeOfKernelSpace space) $ allocInKernelBody body
   scan_op' <- allocInSegRedLambda space scan_op
   return $ Inner $ HostOp $ SegScan space scan_op' nes ts body'
 
 handleHostOp (HostOp (SegGenRed space ops ts body)) = do
   body' <- subInKernel space $
-           localScope (scopeOfKernelSpace space) $ allocInBodyNoDirect body
+           localScope (scopeOfKernelSpace space) $ allocInKernelBody body
   ops' <- forM ops $ \op -> do
     lam <- allocInSegRedLambda space $ genReduceOp op
     return op { genReduceOp = lam }
@@ -1062,7 +1062,7 @@ kernelExpHints (Op (Inner (HostOp (Kernel _ space rets kbody)))) =
 
 kernelExpHints (Op (Inner (HostOp (SegRed space _ _ nes ts body)))) =
   (map (const NoHint) red_res <>) <$> zipWithM mapHint (drop (length nes) ts) map_res
-  where (red_res, map_res) = splitAt (length nes) $ bodyResult body
+  where (red_res, map_res) = splitAt (length nes) $ kernelBodyResult body
 
         mapHint t _ = do
           t_dims <- mapM dimAllocationSize $ arrayDims t
