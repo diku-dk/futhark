@@ -83,33 +83,33 @@ virtualiseGroups constants required_groups m = do
   i <- newVName "i"
   sFor i Int32 iterations $ m $ group_id + Imp.var i int32 * kernelNumGroups constants
 
+type DoSegBody = (KernelConstants -> [(VName, [Imp.Exp])] -> InKernelGen ())
+
 -- | Compile 'SegRed' instance to host-level code with calls to
 -- various kernels.
 compileSegRed :: Pattern ExplicitMemory
               -> KernelSpace
               -> Commutativity -> Lambda InKernel -> [SubExp]
-              -> Body InKernel
+              -> KernelBody InKernel
               -> CallKernelGen ()
 compileSegRed pat space comm red_op nes body =
-  compileSegRed' pat space comm red_op nes $ \red_dests ->
-  ImpGen.compileStms mempty (stmsToList $ bodyStms body) $ do
-  let (red_res, map_res) = splitAt (length nes) $ bodyResult body
+  compileSegRed' pat space comm red_op nes $ \constants red_dests ->
+  ImpGen.compileStms mempty (stmsToList $ kernelBodyStms body) $ do
+  let (red_res, map_res) = splitAt (length nes) $ kernelBodyResult body
 
   sComment "save results to be reduced" $
-    forM_ (zip red_dests red_res) $ \((d,is), se) ->
-    ImpGen.copyDWIM d is se []
+    forM_ (zip red_dests red_res) $ \((d,is), res) ->
+    ImpGen.copyDWIM d is (kernelResultSubExp res) []
 
   sComment "save map-out results" $ do
-    let map_arrs = drop (length nes) $ patternNames pat
-        gtids = map fst $ spaceDimensions space
-    forM_ (zip map_arrs map_res) $ \(arr, se) ->
-      ImpGen.copyDWIM arr (map (`Imp.var` int32) gtids) se []
+    let map_arrs = drop (length nes) $ patternElements pat
+    zipWithM_ (compileKernelResult constants) map_arrs map_res
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' :: Pattern ExplicitMemory
                -> KernelSpace
                -> Commutativity -> Lambda InKernel -> [SubExp]
-               -> ([(VName, [Imp.Exp])] -> InKernelGen ())
+               -> DoSegBody
                -> CallKernelGen ()
 compileSegRed' pat space comm red_op nes body
   | [(_, Constant (IntValue (Int32Value 1))), _] <- spaceDimensions space =
@@ -126,7 +126,7 @@ compileSegRed' pat space comm red_op nes body
 nonsegmentedReduction :: Pattern ExplicitMemory
                       -> KernelSpace
                       -> Commutativity -> Lambda InKernel -> [SubExp]
-                      -> ([(VName, [Imp.Exp])] -> InKernelGen ())
+                      -> DoSegBody
                       -> CallKernelGen ()
 nonsegmentedReduction segred_pat space comm red_op nes body = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
@@ -184,7 +184,7 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
 smallSegmentsReduction :: Pattern ExplicitMemory
                        -> KernelSpace
                        -> Lambda InKernel -> [SubExp]
-                       -> ([(VName, [Imp.Exp])] -> InKernelGen ())
+                       -> DoSegBody
                        -> CallKernelGen ()
 smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
@@ -241,7 +241,7 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
             forM_ (zip red_arrs ses) $ \(arr, se) ->
             ImpGen.copyDWIM arr [ltid] se []
 
-          in_bounds = body $ zip red_arrs $ repeat [ltid]
+          in_bounds = body constants $ zip red_arrs $ repeat [ltid]
 
       sComment "apply map function if in bounds" $
         sIf (segment_size .>. 0 .&&.
@@ -274,7 +274,7 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
 largeSegmentsReduction :: Pattern ExplicitMemory
                        -> KernelSpace
                        -> Commutativity -> Lambda InKernel -> [SubExp]
-                       -> ([(VName, [Imp.Exp])] -> InKernelGen ())
+                       -> DoSegBody
                        -> CallKernelGen ()
 largeSegmentsReduction segred_pat space comm red_op nes body = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
@@ -398,7 +398,7 @@ reductionStageOne :: KernelConstants
                   -> LambdaT InKernel
                   -> [SubExp]
                   -> [VName]
-                  -> ([(VName, [Imp.Exp])] -> InKernelGen ())
+                  -> DoSegBody
                   -> InKernelGen ([LParam InKernel], Lambda InKernel)
 reductionStageOne constants num_elements global_tid elems_per_thread threads_per_segment comm red_op nes red_arrs body = do
 
@@ -458,7 +458,7 @@ reductionStageOne constants num_elements global_tid elems_per_thread threads_per
     let red_dests = zip (map paramName red_next_params) $ repeat []
 
     check_bounds $ sComment "apply map function" $ do
-      body red_dests
+      body constants red_dests
 
       sComment "apply reduction operator" $
         ImpGen.compileBody' red_acc_params $ lambdaBody red_op

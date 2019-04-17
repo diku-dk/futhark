@@ -100,11 +100,11 @@ data GenReduceOp lore =
 
 data Kernel lore
   = Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
-  | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (Body lore)
+  | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (KernelBody lore)
     -- ^ The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
-  | SegScan KernelSpace (Lambda lore) [SubExp] [Type] (Body lore)
-  | SegGenRed KernelSpace [GenReduceOp lore] [Type] (Body lore)
+  | SegScan KernelSpace (Lambda lore) [SubExp] [Type] (KernelBody lore)
+  | SegGenRed KernelSpace [GenReduceOp lore] [Type] (KernelBody lore)
     deriving (Eq, Show, Ord)
 
 data KernelSpace = KernelSpace { spaceGlobalId :: VName
@@ -207,20 +207,20 @@ mapKernelM tv (SegRed space comm red_op nes ts body) =
   <*> mapOnKernelLambda tv red_op
   <*> mapM (mapOnKernelSubExp tv) nes
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
-  <*> mapOnKernelBody tv body
+  <*> mapOnKernelKernelBody tv body
 mapKernelM tv (SegScan space scan_op nes ts body) =
   SegScan
   <$> mapOnKernelSpace tv space
   <*> mapOnKernelLambda tv scan_op
   <*> mapM (mapOnKernelSubExp tv) nes
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
-  <*> mapOnKernelBody tv body
+  <*> mapOnKernelKernelBody tv body
 mapKernelM tv (SegGenRed space ops ts body) =
   SegGenRed
   <$> mapOnKernelSpace tv space
   <*> mapM onGenRedOp ops
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
-  <*> mapOnKernelBody tv body
+  <*> mapOnKernelKernelBody tv body
   where onGenRedOp (GenReduceOp w arrs nes shape op) =
           GenReduceOp <$> mapOnKernelSubExp tv w
           <*> mapM (mapOnKernelVName tv) arrs
@@ -453,10 +453,13 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
     mconcat (map consumedByReturn (kernelBodyResult kbody))
     where consumedByReturn (WriteReturn _ a _) = S.singleton a
           consumedByReturn _                   = mempty
-  consumedInOp (SegGenRed _ ops _ body) =
+  consumedInOp (SegGenRed _ ops _ kbody) =
     S.fromList (concatMap genReduceDest ops) <>
-    consumedInBody body
-  consumedInOp _ = mempty
+    consumedInKernelBody kbody
+  consumedInOp (SegRed _ _ _ _ _ kbody) =
+    consumedInKernelBody kbody
+  consumedInOp (SegScan _ _ _ _ kbody) =
+    consumedInKernelBody kbody
 
 aliasAnalyseKernelBody :: (Attributes lore,
                            CanBeAliased (Op lore)) =>
@@ -554,11 +557,11 @@ instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
   usageInOp (SegRed _ _ _ _ _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
+    mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody body
   usageInOp (SegScan _ _ _ _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
+    mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody body
   usageInOp (SegGenRed _ ops _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList (consumedInBody body) <>
+    mconcat $ map UT.consumedUsage $ S.toList (consumedInKernelBody body) <>
     concatMap genReduceDest ops
 
 consumedInKernelBody :: Aliased lore =>
@@ -599,7 +602,7 @@ typeCheckKernel (SegGenRed space ops ts body) = do
         TC.requireI [t `arrayOfShape` dest_shape] dest
         TC.consume =<< TC.lookupAliases dest
 
-    TC.checkLambdaBody ts body
+    checkKernelBody ts body
 
     -- Return type of bucket function must be an index for each
     -- operation followed by the values to write.
@@ -619,15 +622,18 @@ typeCheckKernel (Kernel _ space kts kbody) = do
 
   TC.binding (scopeOfKernelSpace space) $
     checkKernelBody kts kbody
-  where checkKernelBody ts (KernelBody (_, attr) stms res) = do
-          TC.checkBodyLore attr
-          TC.checkStms stms $ do
-            unless (length ts == length res) $
-              TC.bad $ TC.TypeError $ "Kernel return type is " ++ prettyTuple ts ++
-              ", but body returns " ++ show (length res) ++ " values."
-            zipWithM_ checkKernelResult res ts
 
-        checkKernelResult (GroupsReturn what) t =
+checkKernelBody :: TC.Checkable lore =>
+                   [Type] -> KernelBody (Aliases lore) -> TC.TypeM lore ()
+checkKernelBody ts (KernelBody (_, attr) stms kres) = do
+  TC.checkBodyLore attr
+  TC.checkStms stms $ do
+    unless (length ts == length kres) $
+      TC.bad $ TC.TypeError $ "Kernel return type is " ++ prettyTuple ts ++
+      ", but body returns " ++ show (length kres) ++ " values."
+    zipWithM_ checkKernelResult kres ts
+
+  where checkKernelResult (GroupsReturn what) t =
           TC.require [t] what
         checkKernelResult (ThreadsReturn what) t =
           TC.require [t] what
@@ -658,9 +664,9 @@ checkScanRed :: TC.Checkable lore =>
              -> Lambda (Aliases lore)
              -> [SubExp]
              -> [Type]
-             -> Body (Aliases lore)
+             -> KernelBody (Aliases lore)
              -> TC.TypeM lore ()
-checkScanRed space scan_op nes ts body = do
+checkScanRed space scan_op nes ts kbody = do
   checkSpace space
   mapM_ TC.checkType ts
 
@@ -673,7 +679,7 @@ checkScanRed space scan_op nes ts body = do
             take (length nes) ts == ne_ts) $
       TC.bad $ TC.TypeError "wrong type for reduction or neutral elements."
 
-    TC.checkLambdaBody ts body
+    checkKernelBody ts kbody
 
 checkSpace :: TC.Checkable lore => KernelSpace -> TC.TypeM lore ()
 checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
@@ -688,15 +694,16 @@ checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
-    where kernelBodyMetrics :: KernelBody lore -> MetricsM ()
-          kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
   opMetrics (SegRed _ _ red_op _ _ body) =
-    inside "SegRed" $ lambdaMetrics red_op >> bodyMetrics body
+    inside "SegRed" $ lambdaMetrics red_op >> kernelBodyMetrics body
   opMetrics (SegScan _ scan_op _ _ body) =
-    inside "SegScan" $ lambdaMetrics scan_op >> bodyMetrics body
+    inside "SegScan" $ lambdaMetrics scan_op >> kernelBodyMetrics body
   opMetrics (SegGenRed _ ops _ body) =
     inside "SegGenRed" $ do mapM_ (lambdaMetrics . genReduceOp) ops
-                            bodyMetrics body
+                            kernelBodyMetrics body
+
+kernelBodyMetrics :: OpMetrics (Op lore) => KernelBody lore -> MetricsM ()
+kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr (Kernel desc space ts body) =

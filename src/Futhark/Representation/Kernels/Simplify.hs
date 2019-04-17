@@ -95,7 +95,7 @@ simplifyKernelOp mk_ops env (HostOp (SegRed space comm red_op nes ts body)) = do
     Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
   red_op_hoisted' <- mapM processHoistedStm red_op_hoisted
 
-  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env body
 
   return (HostOp $ SegRed space' comm red_op' nes' ts' body',
           red_op_hoisted' <> body_hoisted)
@@ -116,7 +116,7 @@ simplifyKernelOp mk_ops env (HostOp (SegScan space scan_op nes ts body)) = do
   nes' <- mapM Engine.simplify nes
   ts' <- mapM Engine.simplify ts
 
-  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env body
 
   return (HostOp $ SegScan space' scan_op' nes' ts' body',
           scan_op_hoisted' <> body_hoisted)
@@ -146,7 +146,7 @@ simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
 
   red_op_hoisted' <- mapM processHoistedStm $ mconcat ops_hoisted
 
-  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env body
 
   return (HostOp $ SegGenRed space' ops' ts' body',
           red_op_hoisted' <> body_hoisted)
@@ -169,9 +169,9 @@ hoistFromBody :: (Engine.SimplifiableLore lore,
                   RetType lore ~ RetType outerlore,
                   BranchType lore ~ BranchType outerlore) =>
                  KernelSpace -> Simplify.SimpleOps lore -> Engine.Env lore
-              -> [Type] -> Body lore
-              -> Engine.SimpleM outerlore (Body (Wise lore), Stms (Wise outerlore))
-hoistFromBody kspace ops env ts body = do
+              -> KernelBody lore
+              -> Engine.SimpleM outerlore (KernelBody (Wise lore), Stms (Wise outerlore))
+hoistFromBody kspace ops env kbody = do
   outer_vtable <- Engine.askVtable
 
   ((body_stms, body_res), body_hoisted) <-
@@ -182,11 +182,11 @@ hoistFromBody kspace ops env ts body = do
                         `Engine.orIf` Engine.isOp
                         `Engine.orIf` par_blocker
                         `Engine.orIf` Engine.isConsumed) $
-        Engine.simplifyBody (replicate (length ts) Observe) body
+        simplifyKernelBodyM kbody
 
   body_hoisted' <- mapM processHoistedStm body_hoisted
 
-  return (mkWiseBody () body_stms body_res,
+  return (mkWiseKernelBody () body_stms body_res,
           body_hoisted')
 
   where scope_vtable = ST.fromScope scope

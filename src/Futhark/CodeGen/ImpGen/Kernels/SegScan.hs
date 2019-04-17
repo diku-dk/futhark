@@ -46,9 +46,9 @@ type CrossesSegment = Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
 scanStage1 :: Pattern ExplicitMemory
            -> KernelSpace
            -> Lambda InKernel -> [SubExp]
-           -> Body InKernel
+           -> KernelBody InKernel
            -> CallKernelGen (Imp.Exp, CrossesSegment)
-scanStage1 (Pattern _ pes) space scan_op nes body = do
+scanStage1 (Pattern _ pes) space scan_op nes kbody = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
   let (gtids, dims) = unzip $ spaceDimensions space
   dims' <- mapM ImpGen.compileSubExp dims
@@ -93,14 +93,15 @@ scanStage1 (Pattern _ pes) space scan_op nes body = do
 
       let in_bounds =
             foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
-          when_in_bounds = ImpGen.compileStms mempty (stmsToList $ bodyStms body) $ do
-            let (scan_res, map_res) = splitAt (length nes) $ bodyResult body
+          when_in_bounds = ImpGen.compileStms mempty (stmsToList $ kernelBodyStms kbody) $ do
+            let (scan_res, map_res) = splitAt (length nes) $ kernelBodyResult kbody
             sComment "write to-scan values to parameters" $
               forM_ (zip scan_y_params scan_res) $ \(p, se) ->
-              ImpGen.copyDWIM (paramName p) [] se []
+              ImpGen.copyDWIM (paramName p) [] (kernelResultSubExp se) []
             sComment "write mapped values results to global memory" $
               forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
-              ImpGen.copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids) se []
+              ImpGen.copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
+              (kernelResultSubExp se) []
           when_out_of_bounds = forM_ (zip scan_y_params nes) $ \(p, ne) ->
             ImpGen.copyDWIM (paramName p) [] ne []
 
@@ -244,10 +245,10 @@ scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
 compileSegScan :: Pattern ExplicitMemory
                -> KernelSpace
                -> Lambda InKernel -> [SubExp]
-               -> Body InKernel
+               -> KernelBody InKernel
                -> CallKernelGen ()
-compileSegScan pat space scan_op nes body = do
-  (elems_per_group, crossesSegment) <- scanStage1 pat space scan_op nes body
+compileSegScan pat space scan_op nes kbody = do
+  (elems_per_group, crossesSegment) <- scanStage1 pat space scan_op nes kbody
 
   ImpGen.emit $ Imp.DebugPrint "elems_per_group" int32 elems_per_group
 

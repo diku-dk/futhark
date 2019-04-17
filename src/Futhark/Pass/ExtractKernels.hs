@@ -399,7 +399,7 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
           red_fun_sequential <- Kernelise.transformLambda red_fun
           fold_fun_sequential <- Kernelise.transformLambda fold_fun
           fmap (certify cs) <$>
-            blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential nes arrs
+            blockedSegRed pat w comm' red_fun_sequential fold_fun_sequential nes arrs
 
     outerParallelBody path' =
       renameBody =<<

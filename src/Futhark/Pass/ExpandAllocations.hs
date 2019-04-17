@@ -104,7 +104,7 @@ transformExp (Op (Inner (HostOp (SegScan kspace scan_op nes ts kbody)))) = do
           Op $ Inner $ HostOp $ SegScan kspace scan_op' nes ts kbody')
 
 transformExp (Op (Inner (HostOp (SegGenRed kspace ops ts kbody)))) = do
-  let (kbody', kbody_allocs) = extractBodyAllocations kbody
+  let (kbody', kbody_allocs) = extractKernelBodyAllocations kbody
       (ops', ops_allocs) = unzip $ map extractGenRedOpAllocations ops
       variantAlloc (Var v) = v `S.member` bound_in_kernel
       variantAlloc _ = False
@@ -120,7 +120,7 @@ transformExp (Op (Inner (HostOp (SegGenRed kspace ops ts kbody)))) = do
   where bound_in_kernel =
           S.fromList $ map fst (spaceDimensions kspace) ++
           M.keys (scopeOfKernelSpace kspace <>
-                  scopeOf (bodyStms kbody))
+                  scopeOf (kernelBodyStms kbody))
 
         extractGenRedOpAllocations op =
           let (lam, allocs) = extractLambdaAllocations $ genReduceOp op
@@ -136,46 +136,39 @@ transformExp e =
 
 transformScanRed :: KernelSpace
                  -> Lambda InKernel
-                 -> Body InKernel
-                 -> ExpandM (Stms ExplicitMemory, (Lambda InKernel, Body InKernel))
+                 -> KernelBody InKernel
+                 -> ExpandM (Stms ExplicitMemory, (Lambda InKernel, KernelBody InKernel))
 transformScanRed kspace op kbody = do
-  let (kbody', kbody_allocs) = extractBodyAllocations kbody
+  let (kbody', kbody_allocs) = extractKernelBodyAllocations kbody
       (op', op_allocs) = extractLambdaAllocations op
       variantAlloc (Var v) = v `S.member` bound_in_kernel
       variantAlloc _ = False
       allocs = kbody_allocs <> op_allocs
       (variant_allocs, invariant_allocs) = M.partition (variantAlloc . fst) allocs
 
-  (alloc_stms, alloc_offsets) <-
-    memoryRequirements kspace (bodyStms kbody) variant_allocs invariant_allocs
-
-  scope <- askScope
-  let scope' = scopeOfKernelSpace kspace <> M.map nameInfoConv scope
-  either compilerLimitationS pure $ runOffsetM scope' alloc_offsets $ do
-    kbody'' <- offsetMemoryInBody kbody'
+  allocsForBody variant_allocs invariant_allocs kspace kbody' $ \alloc_stms kbody'' -> do
     op'' <- localScope (scopeOf op') $ offsetMemoryInLambda op'
-
     return (alloc_stms, (op'', kbody''))
 
   where bound_in_kernel =
           S.fromList $ map fst (spaceDimensions kspace) ++
           M.keys (scopeOfKernelSpace kspace <>
-                  scopeOf (bodyStms kbody))
+                  scopeOf (kernelBodyStms kbody))
 
 allocsForBody :: M.Map VName (SubExp, Space)
               -> M.Map VName (SubExp, Space)
               -> KernelSpace
-              -> Body InKernel
-              -> (Stms ExplicitMemory -> Body InKernel -> OffsetM b)
+              -> KernelBody InKernel
+              -> (Stms ExplicitMemory -> KernelBody InKernel -> OffsetM b)
               -> ExpandM b
 allocsForBody variant_allocs invariant_allocs kspace kbody' m = do
   (alloc_stms, alloc_offsets) <-
-    memoryRequirements kspace (bodyStms kbody') variant_allocs invariant_allocs
+    memoryRequirements kspace (kernelBodyStms kbody') variant_allocs invariant_allocs
 
   scope <- askScope
   let scope' = scopeOfKernelSpace kspace <> M.map nameInfoConv scope
   either compilerLimitationS pure $ runOffsetM scope' alloc_offsets $ do
-    kbody'' <- offsetMemoryInBody kbody'
+    kbody'' <- offsetMemoryInKernelBody kbody'
     m alloc_stms kbody''
 
 memoryRequirements :: KernelSpace
@@ -220,8 +213,7 @@ extractLambdaAllocations :: Lambda InKernel
                          -> (Lambda InKernel,
                              M.Map VName (SubExp, Space))
 extractLambdaAllocations lam = (lam { lambdaBody = body' }, allocs)
-  where (body', allocs) = extractGenericBodyAllocations bodyStms
-                          (\stms body -> body { bodyStms = stms }) $ lambdaBody lam
+  where (body', allocs) = extractBodyAllocations $ lambdaBody lam
 
 extractGenericBodyAllocations :: (body -> Stms InKernel)
                               -> (Stms InKernel -> body -> body)

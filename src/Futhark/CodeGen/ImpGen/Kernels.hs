@@ -25,12 +25,11 @@ import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegScan
 import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
-import Futhark.CodeGen.ImpGen (sFor, sWhen,
-                               sOp)
+import Futhark.CodeGen.ImpGen (sOp)
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
-import Futhark.Util.IntegralExp (quotRoundingUp, quot, IntegralExp)
+import Futhark.Util.IntegralExp (quot, IntegralExp)
 
 callKernelOperations :: ImpGen.Operations ExplicitMemory Imp.HostOp
 callKernelOperations =
@@ -112,8 +111,8 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
 kernelCompiler pat (SegRed space comm red_op nes _ body) =
   compileSegRed pat space comm red_op nes body
 
-kernelCompiler pat (SegScan space red_op nes _ body) =
-  compileSegScan pat space red_op nes body
+kernelCompiler pat (SegScan space red_op nes _ kbody) =
+  compileSegScan pat space red_op nes kbody
 
 kernelCompiler pat (SegGenRed space ops _ body) =
   compileSegGenRed pat space ops body
@@ -335,80 +334,3 @@ compileKernelBody pat constants kbody =
   compileKernelStms constants (stmsToList $ kernelBodyStms kbody) $
   zipWithM_ (compileKernelResult constants) (patternElements pat) $
   kernelBodyResult kbody
-
-compileKernelResult :: KernelConstants -> PatElem InKernel -> KernelResult
-                    -> InKernelGen ()
-
-compileKernelResult constants pe (GroupsReturn what) = do
-  i <- newVName "i"
-
-  in_local_memory <- arrayInLocalMemory what
-  let me = kernelLocalThreadId constants
-
-  if not in_local_memory then do
-    who' <- ImpGen.compileSubExp $ intConst Int32 0
-    sWhen (me .==. who') $
-      ImpGen.copyDWIM (patElemName pe) [kernelGroupId constants] what []
-    else do
-      -- If the result of the group is an array in local memory, we
-      -- store it by collective copying among all the threads of the
-      -- group.  TODO: also do this if the array is in global memory
-      -- (but this is a bit more tricky, synchronisation-wise).
-      --
-      -- We do the reads/writes multidimensionally, but the loop is
-      -- single-dimensional.
-      ws <- mapM ImpGen.compileSubExp . arrayDims =<< subExpType what
-      -- Compute how many elements this thread is responsible for.
-      -- Formula: (w - ltid) / group_size (rounded up).
-      let w = product ws
-          ltid = kernelLocalThreadId constants
-          group_size = kernelGroupSize constants
-          to_write = (w - ltid) `quotRoundingUp` group_size
-          is = unflattenIndex ws $ ImpGen.varIndex i * group_size + ltid
-
-      sFor i Int32 to_write $
-        ImpGen.copyDWIM (patElemName pe) (kernelGroupId constants : is) what is
-
-compileKernelResult constants pe (ThreadsReturn what) = do
-  let is = map (ImpGen.varIndex . fst) $ kernelDimensions constants
-  sWhen (kernelThreadActive constants) $ ImpGen.copyDWIM (patElemName pe) is what []
-
-compileKernelResult constants pe (ConcatReturns SplitContiguous _ per_thread_elems moffset what) = do
-  dest_loc <- ImpGen.entryArrayLocation <$> ImpGen.lookupArray (patElemName pe)
-  let dest_loc_offset = ImpGen.offsetArray dest_loc offset
-      dest' = ImpGen.arrayDestination dest_loc_offset
-  ImpGen.copyDWIMDest dest' [] (Var what) []
-  where offset = case moffset of
-                   Nothing -> ImpGen.compileSubExpOfType int32 per_thread_elems *
-                              kernelGlobalThreadId constants
-                   Just se -> ImpGen.compileSubExpOfType int32 se
-
-compileKernelResult constants pe (ConcatReturns (SplitStrided stride) _ _ moffset what) = do
-  dest_loc <- ImpGen.entryArrayLocation <$> ImpGen.lookupArray (patElemName pe)
-  let dest_loc' = ImpGen.strideArray
-                  (ImpGen.offsetArray dest_loc offset) $
-                  ImpGen.compileSubExpOfType int32 stride
-      dest' = ImpGen.arrayDestination dest_loc'
-  ImpGen.copyDWIMDest dest' [] (Var what) []
-  where offset = case moffset of
-                   Nothing -> kernelGlobalThreadId constants
-                   Just se -> ImpGen.compileSubExpOfType int32 se
-
-compileKernelResult constants pe (WriteReturn rws _arr dests) = do
-  rws' <- mapM ImpGen.compileSubExp rws
-  forM_ dests $ \(is, e) -> do
-    is' <- mapM ImpGen.compileSubExp is
-    let condInBounds i rw = 0 .<=. i .&&. i .<. rw
-        write = foldl (.&&.) (kernelThreadActive constants) $
-                zipWith condInBounds is' rws'
-    sWhen write $ ImpGen.copyDWIM (patElemName pe) (map (ImpGen.compileSubExpOfType int32) is) e []
-
-arrayInLocalMemory :: SubExp -> InKernelGen Bool
-arrayInLocalMemory (Var name) = do
-  res <- ImpGen.lookupVar name
-  case res of
-    ImpGen.ArrayVar _ entry ->
-      (Space "local"==) . ImpGen.entryMemSpace <$>
-      ImpGen.lookupMemory (ImpGen.memLocationName (ImpGen.entryArrayLocation entry))
-    _ -> return False
-arrayInLocalMemory Constant{} = return False
