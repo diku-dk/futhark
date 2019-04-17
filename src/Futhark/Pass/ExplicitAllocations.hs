@@ -1035,18 +1035,15 @@ kernelExpHints (Op (Inner (HostOp (Kernel _ space rets kbody)))) =
   zipWithM hint rets $ kernelBodyResult kbody
   where num_threads = spaceNumThreads space
 
-        spacy ThreadsInSpace = Just $ map snd $ spaceDimensions space
-        spacy _ = Nothing
-
         -- Heuristic: do not rearrange for returned arrays that are
         -- sufficiently small.
         coalesceReturnOfShape _ [] = False
         coalesceReturnOfShape bs [Constant (IntValue (Int32Value d))] = bs * d > 4
         coalesceReturnOfShape _ _ = True
 
-        hint t (ThreadsReturn threads _)
-          | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t,
-            Just space_dims <- spacy threads = do
+        hint t (ThreadsReturn _)
+          | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t = do
+              let space_dims = map snd $ spaceDimensions space
               t_dims <- mapM dimAllocationSize $ arrayDims t
               return $ Hint (innermost space_dims t_dims) DefaultSpace
 

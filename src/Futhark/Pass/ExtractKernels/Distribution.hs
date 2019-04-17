@@ -527,8 +527,7 @@ tryDistribute nest targets stms =
     Nothing ->
       return Nothing
   where (dist_body, inner_body_res) = distributionBodyFromStms targets stms
-        inner_body = KernelBody () stms $
-                     map (ThreadsReturn ThreadsInSpace) inner_body_res
+        inner_body = KernelBody () stms $ map ThreadsReturn inner_body_res
 
 tryDistributeStm :: (MonadFreshNames m, HasScope t m, Attributes lore) =>
                     Nestings -> Targets -> Stm lore

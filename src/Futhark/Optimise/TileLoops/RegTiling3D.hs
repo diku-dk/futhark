@@ -203,7 +203,7 @@ doRegTiling3D (Let pat aux (Op (HostOp old_kernel)))
       let ker_res_ip_tp_tab = M.fromList $ zip ker_var_res ip_out_nms
           (kres', kertp') = unzip $
             zipWith (\r tp -> case M.lookup r ker_res_ip_tp_tab of
-                                Nothing -> (ThreadsReturn ThreadsInSpace (Var r), tp)
+                                Nothing -> (ThreadsReturn (Var r), tp)
                                 Just (dims, arr, ivs) -> (WriteReturn dims arr ivs, tp)
                     ) ker_res_nms kertp
 
@@ -262,7 +262,7 @@ doRegTiling3D (Let pat aux (Op (HostOp old_kernel)))
             mkLet [] [Ident res_nm0 $ Prim int32] $
               BasicOp $ BinOp (Mul Int32) op1_se op2_se
 
-        retThreadInSpace (ThreadsReturn ThreadsInSpace (Var r)) = Just r
+        retThreadInSpace (ThreadsReturn (Var r)) = Just r
         retThreadInSpace _ = Nothing
 
 doRegTiling3D _ = return Nothing

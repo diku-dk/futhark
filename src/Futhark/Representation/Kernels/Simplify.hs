@@ -212,10 +212,7 @@ mkWiseKernelBody :: (Attributes lore, CanBeWise (Op lore)) =>
 mkWiseKernelBody attr bnds res =
   let Body attr' _ _ = mkWiseBody attr bnds res_vs
   in KernelBody attr' bnds res
-  where res_vs = map resValue res
-        resValue (ThreadsReturn _ se) = se
-        resValue (WriteReturn _ arr _) = Var arr
-        resValue (ConcatReturns _ _ _ _ v) = Var v
+  where res_vs = map kernelResultSubExp res
 
 inKernelEnv :: Engine.Env InKernel
 inKernelEnv = Engine.emptyEnv inKernelRules Simplify.noExtraHoistBlockers
@@ -361,8 +358,10 @@ instance Engine.Simplifiable SpaceStructure where
     where (gtids, gdims, ltids, ldims) = unzip4 dims
 
 instance Engine.Simplifiable KernelResult where
-  simplify (ThreadsReturn threads what) =
-    ThreadsReturn <$> Engine.simplify threads <*> Engine.simplify what
+  simplify (GroupsReturn what) =
+    GroupsReturn <$> Engine.simplify what
+  simplify (ThreadsReturn what) =
+    ThreadsReturn <$> Engine.simplify what
   simplify (WriteReturn ws a res) =
     WriteReturn <$> Engine.simplify ws <*> Engine.simplify a <*> Engine.simplify res
   simplify (ConcatReturns o w pte moffset what) =
@@ -372,10 +371,6 @@ instance Engine.Simplifiable KernelResult where
     <*> Engine.simplify pte
     <*> Engine.simplify moffset
     <*> Engine.simplify what
-
-instance Engine.Simplifiable WhichThreads where
-  simplify OneResultPerGroup = pure OneResultPerGroup
-  simplify ThreadsInSpace = pure ThreadsInSpace
 
 instance BinderOps (Wise Kernels) where
   mkExpAttrB = bindableMkExpAttrB
@@ -445,15 +440,12 @@ removeInvariantKernelResults vtable (Pattern [] kpes) attr
 
         space_dims = map snd $ spaceDimensions space
 
-        checkForInvarianceResult (_, pe, ThreadsReturn threads se)
-          | isInvariant se =
-              case threads of
-                ThreadsInSpace -> do
-                  let rep a d = BasicOp . Replicate (Shape [d]) <$> letSubExp "rep" a
-                  letBindNames_ [patElemName pe] =<<
-                    foldM rep (BasicOp (SubExp se)) (reverse space_dims)
-                  return False
-                _ -> return True
+        checkForInvarianceResult (_, pe, ThreadsReturn se)
+          | isInvariant se = do
+              let rep a d = BasicOp . Replicate (Shape [d]) <$> letSubExp "rep" a
+              letBindNames_ [patElemName pe] =<<
+                foldM rep (BasicOp (SubExp se)) (reverse space_dims)
+              return False
         checkForInvarianceResult _ =
           return True
 removeInvariantKernelResults _ _ _ _ = cannotSimplify
@@ -511,7 +503,7 @@ distributeKernelResults (vtable, used)
           | (kpes'', kts'', kres'') <- unzip3 kpes_and_kres ->
               Just (kpe, kpes'', kts'', kres'')
         _ -> Nothing
-      where matches (_, _, kre) = kre == ThreadsReturn ThreadsInSpace (Var $ patElemName pe)
+      where matches (_, _, kre) = kre == ThreadsReturn (Var $ patElemName pe)
 distributeKernelResults _ _ _ _ = cannotSimplify
 
 simplifyKnownIterationStream :: TopDownRuleOp (Wise InKernel)

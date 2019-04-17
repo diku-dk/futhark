@@ -83,7 +83,7 @@ lowerUpdateIntoKernel :: DesiredUpdate (LetAttr (Aliases Kernels))
                       -> KernelSpace -> KernelBody (Aliases InKernel)
                       -> Maybe (KernelBody (Aliases InKernel))
 lowerUpdateIntoKernel update kspace kbody = do
-  [ThreadsReturn ThreadsInSpace se] <- Just $ kernelBodyResult kbody
+  [ThreadsReturn se] <- Just $ kernelBodyResult kbody
   is' <- mapM dimFix is
   let ret = WriteReturn (arrayDims $ snd bindee_attr) src [(is'++map Var gtids, se)]
   return kbody { kernelBodyResult = [ret] }
