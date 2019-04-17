@@ -1,8 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.BlockedKernel
-       ( blockedReduction
-       , blockedReductionStream
+       ( blockedReductionStream
        , blockedGenReduce
        , blockedMap
 
@@ -42,7 +41,6 @@ import Futhark.Transform.Rename
 import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Representation.SOACS.SOAC as SOAC
 
 getSize :: (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
            String -> SizeClass -> m SubExp
@@ -349,26 +347,6 @@ nonSegRed pat w comm red_lam map_lam nes arrs = runBinder_ $ do
   forM_ (zip (patternNames pat') (patternNames pat)) $ \(from, to) -> do
     from_t <- lookupType from
     letBindNames_ [to] $ BasicOp $ Index from $ fullSlice from_t [DimFix $ intConst Int32 0]
-
-blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
-                    Pattern Kernels
-                 -> SubExp
-                 -> Commutativity
-                 -> Lambda InKernel -> Lambda InKernel
-                 -> [(VName, SubExp)] -> [SubExp] -> [VName]
-                 -> m (Stms Kernels)
-blockedReduction pat w comm reduce_lam map_lam ispace nes arrs = runBinder_ $ do
-  fold_lam <- SOAC.composeLambda SOAC.nilFn reduce_lam map_lam
-  fold_lam' <- chunkLambda pat nes fold_lam
-
-  let arr_idents = drop (length nes) $ patternIdents pat
-  map_out_arrs <- forM arr_idents $ \(Ident name t) ->
-    letExp (baseString name <> "_out_in") $
-    BasicOp $ Scratch (elemType t) (arrayDims t)
-
-  addStms =<<
-    blockedReductionStream pat w comm reduce_lam fold_lam'
-    ispace nes (arrs ++ map_out_arrs)
 
 blockedGenReduce :: (MonadFreshNames m, HasScope Kernels m) =>
                     Pattern Kernels
