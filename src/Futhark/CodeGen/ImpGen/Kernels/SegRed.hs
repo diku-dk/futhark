@@ -94,7 +94,7 @@ compileSegRed :: Pattern ExplicitMemory
               -> CallKernelGen ()
 compileSegRed pat space comm red_op nes body =
   compileSegRed' pat space comm red_op nes $ \constants red_dests ->
-  ImpGen.compileStms mempty (stmsToList $ kernelBodyStms body) $ do
+  compileKernelStms constants (stmsToList $ kernelBodyStms body) $ do
   let (red_res, map_res) = splitAt (length nes) $ kernelBodyResult body
 
   sComment "save results to be reduced" $
