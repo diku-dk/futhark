@@ -372,10 +372,6 @@ compileKernelResult constants pe (ThreadsReturn OneResultPerGroup what) = do
 compileKernelResult constants pe (ThreadsReturn AllThreads what) =
   ImpGen.copyDWIM (patElemName pe) [kernelGlobalThreadId constants] what []
 
-compileKernelResult constants pe (ThreadsReturn (ThreadsPerGroup limit) what) =
-  sWhen (isActive limit) $
-  ImpGen.copyDWIM (patElemName pe) [kernelGroupId constants] what []
-
 compileKernelResult constants pe (ThreadsReturn ThreadsInSpace what) = do
   let is = map (ImpGen.varIndex . fst) $ kernelDimensions constants
   sWhen (kernelThreadActive constants) $ ImpGen.copyDWIM (patElemName pe) is what []
