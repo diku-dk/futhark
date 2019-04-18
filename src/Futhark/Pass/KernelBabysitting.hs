@@ -71,31 +71,20 @@ nonlinearInMemory name m =
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
-transformStm expmap (Let pat aux ke@(Op (HostOp (Kernel desc space ts kbody)))) = do
-  -- Go spelunking for accesses to arrays that are defined outside the
-  -- kernel body and where the indices are kernel thread indices.
-  scope <- askScope
-  let thread_gids = map fst $ spaceDimensions space
-      thread_local = S.fromList $ spaceGlobalId space : spaceLocalId space : thread_gids
-      free_ker_vars = freeInExp ke `S.difference` getKerVariantIds space
-  kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
-                         free_ker_vars
-                         thread_local
-                         (castScope scope <> scopeOfKernelSpace space)
-                         (ensureCoalescedAccess expmap (spaceDimensions space) num_threads)
-                         kbody)
-             mempty
+transformStm expmap (Let pat aux (Op (HostOp op))) = do
+  let kspace = case op of Kernel _ space _ _ -> space
+                          SegMap space _ _ -> space
+                          SegRed space _ _ _ _ _ -> space
+                          SegScan space _ _ _ _ -> space
+                          SegGenRed space _ _ _ -> space
+      mapper = identityKernelMapper { mapOnKernelKernelBody =
+                                        transformKernelBody expmap kspace
+                                    }
 
-  let bnd' = Let pat aux $ Op $ HostOp $ Kernel desc space ts kbody''
-  addStm bnd'
-  return $ M.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
-  where num_threads = spaceNumThreads space
-        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ (FlatThreadSpace strct)) =
-            let (gids, _) = unzip strct
-            in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids
-        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ (NestedThreadSpace strct)) =
-            let (gids, _, lids, _) = unzip4 strct
-            in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids ++ lids
+  op' <- mapKernelM mapper op
+  let stm' = Let pat aux $ Op $ HostOp op'
+  addStm stm'
+  return $ M.fromList [ (name, stm') | name <- patternNames pat ] <> expmap
 
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
@@ -106,6 +95,30 @@ transformStm expmap (Let pat aux e) = do
 transform :: ExpMap -> Mapper Kernels Kernels BabysitM
 transform expmap =
   identityMapper { mapOnBody = \scope -> localScope scope . transformBody expmap }
+
+transformKernelBody :: ExpMap -> KernelSpace -> KernelBody InKernel
+                    -> BabysitM (KernelBody InKernel)
+transformKernelBody expmap space kbody = do
+  -- Go spelunking for accesses to arrays that are defined outside the
+  -- kernel body and where the indices are kernel thread indices.
+  scope <- askScope
+  let thread_gids = map fst $ spaceDimensions space
+      thread_local = S.fromList $ spaceGlobalId space : spaceLocalId space : thread_gids
+      free_ker_vars = freeIn kbody `S.difference` getKerVariantIds space
+  evalStateT (traverseKernelBodyArrayIndexes
+              free_ker_vars
+              thread_local
+              (castScope scope <> scopeOfKernelSpace space)
+              (ensureCoalescedAccess expmap (spaceDimensions space) num_threads)
+              kbody)
+    mempty
+  where num_threads = spaceNumThreads space
+        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ (FlatThreadSpace strct)) =
+            let (gids, _) = unzip strct
+            in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids
+        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ (NestedThreadSpace strct)) =
+            let (gids, _, lids, _) = unzip4 strct
+            in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids ++ lids
 
 type ArrayIndexTransform m =
   Names ->
