@@ -1031,8 +1031,19 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
               perm_inv
   return [Hint ixfun DefaultSpace]
 
-kernelExpHints (Op (Inner (HostOp (Kernel _ space rets kbody)))) =
-  zipWithM hint rets $ kernelBodyResult kbody
+kernelExpHints (Op (Inner (HostOp (Kernel _ space ts kbody)))) =
+  zipWithM (mapResultHint space) ts $ kernelBodyResult kbody
+
+kernelExpHints (Op (Inner (HostOp (SegRed space _ _ nes ts body)))) =
+  (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint space) (drop (length nes) ts) map_res
+  where (red_res, map_res) = splitAt (length nes) $ kernelBodyResult body
+
+kernelExpHints e =
+  return $ replicate (expExtTypeSize e) NoHint
+
+mapResultHint :: Allocator lore m =>
+                 KernelSpace -> Type -> KernelResult -> m ExpHint
+mapResultHint space = hint
   where num_threads = spaceNumThreads space
 
         -- Heuristic: do not rearrange for returned arrays that are
@@ -1059,17 +1070,6 @@ kernelExpHints (Op (Inner (HostOp (Kernel _ space rets kbody)))) =
           return $ Hint ixfun DefaultSpace
 
         hint _ _ = return NoHint
-
-kernelExpHints (Op (Inner (HostOp (SegRed space _ _ nes ts body)))) =
-  (map (const NoHint) red_res <>) <$> zipWithM mapHint (drop (length nes) ts) map_res
-  where (red_res, map_res) = splitAt (length nes) $ kernelBodyResult body
-
-        mapHint t _ = do
-          t_dims <- mapM dimAllocationSize $ arrayDims t
-          return $ Hint (innermost (map snd $ spaceDimensions space) t_dims) DefaultSpace
-
-kernelExpHints e =
-  return $ replicate (expExtTypeSize e) NoHint
 
 innermost :: [SubExp] -> [SubExp] -> IxFun
 innermost space_dims t_dims =

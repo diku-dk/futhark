@@ -113,6 +113,27 @@ segScan pat total_num_elements w scan_lam map_lam nes arrs ispace inps = runBind
   letBind_ pat $ Op $ HostOp $
     SegScan kspace scan_lam nes (lambdaReturnType map_lam) kbody
 
+dummyDim :: (MonadFreshNames m, MonadBinder m) =>
+            Pattern Kernels
+         -> m (Pattern Kernels, [(VName, SubExp)], m ())
+dummyDim pat = do
+  -- We add a unit-size segment on top to ensure that the result
+  -- of the SegRed is an array, which we then immediately index.
+  -- This is useful in the case that the value is used on the
+  -- device afterwards, as this may save an expensive
+  -- host-device copy (scalars are kept on the host, but arrays
+  -- may be on the device).
+  let addDummyDim t = t `arrayOfRow` intConst Int32 1
+  pat' <- fmap addDummyDim <$> renamePattern pat
+  dummy <- newVName "dummy"
+  let ispace = [(dummy, intConst Int32 1)]
+
+  return (pat', ispace,
+          forM_ (zip (patternNames pat') (patternNames pat)) $ \(from, to) -> do
+             from_t <- lookupType from
+             letBindNames_ [to] $ BasicOp $ Index from $
+               fullSlice from_t [DimFix $ intConst Int32 0])
+
 nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels
           -> SubExp
@@ -123,22 +144,9 @@ nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
           -> [VName]
           -> m (Stms Kernels)
 nonSegRed pat w comm red_lam map_lam nes arrs = runBinder_ $ do
-  -- We add a unit-size segment on top to ensure that the result
-  -- of the SegRed is an array, which we then immediately index.
-  -- This is useful in the case that the value is used on the
-  -- device afterwards, as this may save an expensive
-  -- host-device copy (scalars are kept on the host, but arrays
-  -- may be on the device).
-  let addDummyDim t = t `arrayOfRow` intConst Int32 1
-  pat' <- fmap addDummyDim <$> renamePattern pat
-  dummy <- newVName "dummy"
-  addStms =<<
-    segRed pat' w w comm red_lam map_lam nes arrs [(dummy, intConst Int32 1)] []
-
-  forM_ (zip (patternNames pat') (patternNames pat)) $ \(from, to) -> do
-    from_t <- lookupType from
-    letBindNames_ [to] $ BasicOp $ Index from $ fullSlice from_t [DimFix $ intConst Int32 0]
-
+  (pat', ispace, read_dummy) <- dummyDim pat
+  addStms =<< segRed pat' w w comm red_lam map_lam nes arrs ispace []
+  read_dummy
 
 blockedSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
                  Pattern Kernels
@@ -151,27 +159,38 @@ blockedSegRed pat w comm red_lam fold_lam nes arrs = runBinder_ $ do
   -- The strategy here is to rephrase the stream reduction as a
   -- non-segmented SegRed that does explicit chunking within its body.
   -- First, figure out how many threads to use for this.
-  (_, size) <- blockedKernelSize =<< asIntS Int64 w
-
-  gtid_lparam <- Param <$> newVName "gtid" <*> pure (Prim (IntType Int32))
-
-  let ordering = case comm of Commutative -> Disorder
-                              Noncommutative -> InOrder
+  (_, size@(KernelSize num_groups group_size elems_per_thread _ num_threads)) <- blockedKernelSize =<< asIntS Int64 w
 
   fold_lam' <- kerneliseLambda nes fold_lam
 
-  map_body <- runBodyBinder $ localScope (scopeOfLParams [gtid_lparam]) $ do
+  let (redout_pes, mapout_pes) = splitAt (length nes) $ patternElements pat
+  (redout_pat, ispace, read_dummy) <- dummyDim $ Pattern [] redout_pes
+  let pat' = Pattern [] $ patternElements redout_pat ++ mapout_pes
+
+  elems_per_thread_32 <- asIntS Int32 elems_per_thread
+
+  let (ordering, split_ordering) =
+        case comm of Commutative -> (Disorder, SplitStrided num_threads)
+                     Noncommutative -> (InOrder, SplitContiguous)
+
+  gtid <- newVName "gtid"
+  kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace $
+            ispace ++ [(gtid, w)]
+  kbody <- fmap (uncurry (flip (KernelBody ()))) $ runBinder $
+           localScope (scopeOfKernelSpace kspace) $ do
     (chunk_red_pes, chunk_map_pes) <-
-      blockedPerThread (paramName gtid_lparam)
-      w size ordering fold_lam' (length nes) arrs
-    resultBodyM $ map (Var . patElemName) $ chunk_red_pes ++ chunk_map_pes
+      blockedPerThread gtid w size ordering fold_lam' (length nes) arrs
+    let concatReturns pe =
+          ConcatReturns split_ordering w elems_per_thread_32 Nothing $ patElemName pe
+    return (map (ThreadsReturn . Var . patElemName) chunk_red_pes ++
+            map concatReturns chunk_map_pes)
 
-  let map_lam = Lambda { lambdaParams = [gtid_lparam]
-                       , lambdaReturnType = lambdaReturnType fold_lam
-                       , lambdaBody = map_body
-                       }
+  let ts = map patElemType redout_pes ++
+           map (rowType . patElemType) mapout_pes
 
-  addStms =<< nonSegRed pat (kernelNumThreads size) comm red_lam map_lam nes arrs
+  letBind_ pat' $ Op $ HostOp $ SegRed kspace comm red_lam nes ts kbody
+
+  read_dummy
 
 segGenRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels

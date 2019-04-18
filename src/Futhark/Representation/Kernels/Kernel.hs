@@ -404,26 +404,27 @@ instance Attributes lore => Rename (Kernel lore) where
   rename = mapKernelM renamer
     where renamer = KernelMapper rename rename rename rename rename rename
 
+
+kernelResultShape :: KernelSpace -> Type -> KernelResult -> Type
+kernelResultShape _ t (WriteReturn rws _ _) =
+  t `arrayOfShape` Shape rws
+kernelResultShape space t (GroupsReturn _) =
+  t `arrayOfRow` spaceNumGroups space
+kernelResultShape space t (ThreadsReturn _) =
+  foldr (flip arrayOfRow . snd) t $ spaceDimensions space
+kernelResultShape _ t (ConcatReturns _ w _ _ _) =
+  t `arrayOfRow` w
+
 kernelType :: Kernel lore -> [Type]
 kernelType (Kernel _ space ts body) =
-  zipWith resultShape ts $ kernelBodyResult body
-  where dims = map snd $ spaceDimensions space
-        num_groups = spaceNumGroups space
-        resultShape t (WriteReturn rws _ _) =
-          t `arrayOfShape` Shape rws
-        resultShape t (GroupsReturn _) =
-          t `arrayOfRow` num_groups
-        resultShape t (ThreadsReturn _) =
-          foldr (flip arrayOfRow) t dims
-        resultShape t (ConcatReturns _ w _ _ _) =
-          t `arrayOfRow` w
+  zipWith (kernelResultShape space) ts $ kernelBodyResult body
 
-kernelType (SegRed space _ _ nes ts _) =
+kernelType (SegRed space _ _ nes ts body) =
   map (`arrayOfShape` Shape outer_dims) red_ts ++
-  map (`arrayOfShape` Shape dims) map_ts
-  where (red_ts, map_ts) = splitAt (length nes) ts
-        dims = map snd $ spaceDimensions space
-        outer_dims = init dims
+  zipWith (kernelResultShape space) map_ts
+  (drop (length red_ts) $ kernelBodyResult body)
+  where outer_dims = init $ map snd $ spaceDimensions space
+        (red_ts, map_ts) = splitAt (length nes) ts
 
 kernelType (SegScan space _ _ ts _) =
   map (`arrayOfShape` Shape dims) ts
