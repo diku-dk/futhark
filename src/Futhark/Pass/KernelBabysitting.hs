@@ -59,6 +59,9 @@ nonlinearInMemory name m =
     Just (Let pat _ (Op (HostOp (Kernel _ _ ts _)))) ->
       nonlinear =<< find ((==name) . patElemName . fst)
       (zip (patternElements pat) ts)
+    Just (Let pat _ (Op (HostOp (SegMap _ ts _)))) ->
+      nonlinear =<< find ((==name) . patElemName . fst)
+      (zip (patternElements pat) ts)
     _ -> Nothing
   where nonlinear (pe, t)
           | inner_r <- arrayRank t, inner_r > 0 = do
