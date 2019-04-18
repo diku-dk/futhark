@@ -10,7 +10,6 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , streamMap
 
        , mapKernel
-       , mapKernelFromBody
        , KernelInput(..)
        , readKernelInput
 
@@ -403,15 +402,6 @@ mapKernel w ispace inputs rts (KernelBody () kstms krets) = do
 
   let kbody' = KernelBody () (read_input_bnds <> kstms) krets
   return (ksize_bnds, Kernel (KernelDebugHints "map" []) space rts kbody')
-
-mapKernelFromBody :: (HasScope Kernels m, MonadFreshNames m) =>
-                     SubExp -> SpaceStructure -> [KernelInput]
-                  -> [Type] -> Body InKernel
-                  -> m (Stms Kernels, Kernel InKernel)
-mapKernelFromBody w ispace inputs rts body =
-  mapKernel w ispace inputs rts kbody
-  where kbody = KernelBody () (bodyStms body) krets
-        krets = map ThreadsReturn $ bodyResult body
 
 data KernelInput = KernelInput { kernelInputName :: VName
                                , kernelInputType :: Type
