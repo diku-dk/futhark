@@ -1,13 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.BlockedKernel
-       ( blockedMap
-
-       , segRed
+       ( segRed
        , nonSegRed
        , segScan
        , segGenRed
-       , blockedSegRed
+
+       , streamRed
+       , streamMap
 
        , mapKernel
        , mapKernelFromBody
@@ -148,34 +148,28 @@ nonSegRed pat w comm red_lam map_lam nes arrs = runBinder_ $ do
   addStms =<< segRed pat' w w comm red_lam map_lam nes arrs ispace []
   read_dummy
 
-blockedSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
-                 Pattern Kernels
+prepareStream :: (MonadBinder m, Lore m ~ Kernels) =>
+                 KernelSize
+              -> [(VName, SubExp)]
               -> SubExp
               -> Commutativity
-              -> Lambda InKernel -> Lambda InKernel
-              -> [SubExp] -> [VName]
-              -> m (Stms Kernels)
-blockedSegRed pat w comm red_lam fold_lam nes arrs = runBinder_ $ do
-  -- The strategy here is to rephrase the stream reduction as a
-  -- non-segmented SegRed that does explicit chunking within its body.
-  -- First, figure out how many threads to use for this.
-  (_, size@(KernelSize num_groups group_size elems_per_thread _ num_threads)) <- blockedKernelSize =<< asIntS Int64 w
-
-  fold_lam' <- kerneliseLambda nes fold_lam
-
-  let (redout_pes, mapout_pes) = splitAt (length nes) $ patternElements pat
-  (redout_pat, ispace, read_dummy) <- dummyDim $ Pattern [] redout_pes
-  let pat' = Pattern [] $ patternElements redout_pat ++ mapout_pes
-
-  elems_per_thread_32 <- asIntS Int32 elems_per_thread
-
+              -> Lambda InKernel
+              -> [SubExp]
+              -> [VName]
+              -> m (KernelSpace, [Type], KernelBody InKernel)
+prepareStream size ispace w comm fold_lam nes arrs = do
+  let (KernelSize num_groups group_size elems_per_thread _ num_threads) = size
   let (ordering, split_ordering) =
         case comm of Commutative -> (Disorder, SplitStrided num_threads)
                      Noncommutative -> (InOrder, SplitContiguous)
 
+  fold_lam' <- kerneliseLambda nes fold_lam
+
+  elems_per_thread_32 <- asIntS Int32 elems_per_thread
+
   gtid <- newVName "gtid"
   kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace $
-            ispace ++ [(gtid, w)]
+            ispace ++ [(gtid, num_threads)]
   kbody <- fmap (uncurry (flip (KernelBody ()))) $ runBinder $
            localScope (scopeOfKernelSpace kspace) $ do
     (chunk_red_pes, chunk_map_pes) <-
@@ -185,12 +179,53 @@ blockedSegRed pat w comm red_lam fold_lam nes arrs = runBinder_ $ do
     return (map (ThreadsReturn . Var . patElemName) chunk_red_pes ++
             map concatReturns chunk_map_pes)
 
-  let ts = map patElemType redout_pes ++
-           map (rowType . patElemType) mapout_pes
+  let (redout_ts, mapout_ts) = splitAt (length nes) $ lambdaReturnType fold_lam
+      ts = redout_ts ++ map rowType mapout_ts
+
+  return (kspace, ts, kbody)
+
+streamRed :: (MonadFreshNames m, HasScope Kernels m) =>
+             Pattern Kernels
+          -> SubExp
+          -> Commutativity
+          -> Lambda InKernel -> Lambda InKernel
+          -> [SubExp] -> [VName]
+          -> m (Stms Kernels)
+streamRed pat w comm red_lam fold_lam nes arrs = runBinder_ $ do
+  -- The strategy here is to rephrase the stream reduction as a
+  -- non-segmented SegRed that does explicit chunking within its body.
+  -- First, figure out how many threads to use for this.
+  (_, size) <- blockedKernelSize =<< asIntS Int64 w
+
+  let (redout_pes, mapout_pes) = splitAt (length nes) $ patternElements pat
+  (redout_pat, ispace, read_dummy) <- dummyDim $ Pattern [] redout_pes
+  let pat' = Pattern [] $ patternElements redout_pat ++ mapout_pes
+
+  (kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 
   letBind_ pat' $ Op $ HostOp $ SegRed kspace comm red_lam nes ts kbody
 
   read_dummy
+
+-- Similar to streamRed, but without the last reduction.
+streamMap :: (MonadFreshNames m, HasScope Kernels m) =>
+              [String] -> [PatElem Kernels] -> SubExp
+           -> Commutativity -> Lambda InKernel -> [SubExp] -> [VName]
+           -> m ((SubExp, [VName]), Stms Kernels)
+streamMap out_desc mapout_pes w comm fold_lam nes arrs = runBinder $ do
+  (_, size) <- blockedKernelSize =<< asIntS Int64 w
+
+  (kspace, ts, kbody) <- prepareStream size [] w comm fold_lam nes arrs
+
+  let redout_ts = take (length nes) ts
+
+  redout_pes <- forM (zip out_desc redout_ts) $ \(desc, t) ->
+    PatElem <$> newVName desc <*> pure (t `arrayOfRow` spaceNumThreads kspace)
+
+  let pat = Pattern [] $ redout_pes ++ mapout_pes
+  letBind_ pat $ Op $ HostOp $ SegMap kspace ts kbody
+
+  return (spaceNumThreads kspace, map patElemName redout_pes)
 
 segGenRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels
@@ -222,45 +257,6 @@ segGenRed pat arr_w ispace inps ops lam arrs = runBinder_ $ do
     map ThreadsReturn <$> bodyBind (lambdaBody lam)
 
   letBind_ pat $ Op $ HostOp $ SegGenRed kspace ops (lambdaReturnType lam) kbody
-
-blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
-              Pattern Kernels -> SubExp
-           -> StreamOrd -> Lambda InKernel -> [SubExp] -> [VName]
-           -> m (Stm Kernels, Stms Kernels)
-blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
-  (_, kernel_size) <- blockedKernelSize =<< asIntS Int64 w
-  let num_nonconcat = length (lambdaReturnType lam) - patternSize concat_pat
-      num_groups = kernelWorkgroups kernel_size
-      group_size = kernelWorkgroupSize kernel_size
-      num_threads = kernelNumThreads kernel_size
-      ordering' =
-        case ordering of InOrder -> SplitContiguous
-                         Disorder -> SplitStrided $ kernelNumThreads kernel_size
-
-  unused_gtid <- newVName "unused_gtid"
-  space <- newKernelSpace (num_groups, group_size, num_threads)
-                          (FlatThreadSpace [(unused_gtid, kernelNumThreads kernel_size)])
-  lam' <- kerneliseLambda nes lam
-  ((chunk_red_pes, chunk_map_pes), chunk_and_fold) <- runBinder $
-    blockedPerThread (spaceGlobalId space) w kernel_size ordering lam' num_nonconcat arrs
-
-  nonconcat_pat <-
-    fmap (Pattern []) $ forM (take num_nonconcat $ lambdaReturnType lam) $ \t -> do
-      name <- newVName "nonconcat"
-      return $ PatElem name $ t `arrayOfRow` num_threads
-
-  let pat = nonconcat_pat <> concat_pat
-      ts = map patElemType chunk_red_pes ++
-           map (rowType . patElemType) chunk_map_pes
-
-  nonconcat_rets <- forM chunk_red_pes $ \pe ->
-    return $ ThreadsReturn $ Var $ patElemName pe
-  elems_per_thread <- asIntS Int32 $ kernelElementsPerThread kernel_size
-  concat_rets <- forM chunk_map_pes $ \pe ->
-    return $ ConcatReturns ordering' w elems_per_thread Nothing $ patElemName pe
-
-  return $ Let pat (defAux ()) $ Op $ HostOp $ Kernel (KernelDebugHints "chunked_map" []) space ts $
-    KernelBody () chunk_and_fold $ nonconcat_rets ++ concat_rets
 
 blockedPerThread :: (MonadBinder m, Lore m ~ InKernel) =>
                     VName -> SubExp -> KernelSize -> StreamOrd -> Lambda InKernel

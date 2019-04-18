@@ -100,6 +100,7 @@ data GenReduceOp lore =
 
 data Kernel lore
   = Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
+  | SegMap KernelSpace [Type] (KernelBody lore)
   | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (KernelBody lore)
     -- ^ The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
@@ -200,6 +201,11 @@ identityKernelMapper = KernelMapper { mapOnKernelSubExp = return
 -- and is done left-to-right.
 mapKernelM :: (Applicative m, Monad m) =>
               KernelMapper flore tlore m -> Kernel flore -> m (Kernel tlore)
+mapKernelM tv (SegMap space ts body) =
+  SegMap
+  <$> mapOnKernelSpace tv space
+  <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
+  <*> mapOnKernelKernelBody tv body
 mapKernelM tv (SegRed space comm red_op nes ts body) =
   SegRed
   <$> mapOnKernelSpace tv space
@@ -419,6 +425,9 @@ kernelType :: Kernel lore -> [Type]
 kernelType (Kernel _ space ts body) =
   zipWith (kernelResultShape space) ts $ kernelBodyResult body
 
+kernelType (SegMap space ts body) =
+  zipWith (kernelResultShape space) ts $ kernelBodyResult body
+
 kernelType (SegRed space _ _ nes ts body) =
   map (`arrayOfShape` Shape outer_dims) red_ts ++
   zipWith (kernelResultShape space) map_ts
@@ -456,6 +465,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
           consumedByReturn _                   = mempty
   consumedInOp (SegGenRed _ ops _ kbody) =
     S.fromList (concatMap genReduceDest ops) <>
+    consumedInKernelBody kbody
+  consumedInOp (SegMap _ _ kbody) =
     consumedInKernelBody kbody
   consumedInOp (SegRed _ _ _ _ _ kbody) =
     consumedInKernelBody kbody
@@ -557,6 +568,8 @@ instance Attributes lore => ST.IndexOp (Kernel lore) where
 instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
+  usageInOp (SegMap _ _ body) =
+    mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody body
   usageInOp (SegRed _ _ _ _ _ body) =
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody body
   usageInOp (SegScan _ _ _ _ body) =
@@ -571,6 +584,11 @@ consumedInKernelBody (KernelBody attr stms _) =
   consumedInBody $ Body attr stms []
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
+
+typeCheckKernel (SegMap space ts kbody) = do
+  checkSpace space
+  mapM_ TC.checkType ts
+  TC.binding (scopeOfKernelSpace space) $ checkKernelBody ts kbody
 
 typeCheckKernel (SegRed space _ red_op nes ts body) =
   checkScanRed space red_op nes ts body
@@ -695,6 +713,8 @@ checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
+  opMetrics (SegMap _ _ body) =
+    inside "SegMap" $ kernelBodyMetrics body
   opMetrics (SegRed _ _ red_op _ _ body) =
     inside "SegRed" $ lambdaMetrics red_op >> kernelBodyMetrics body
   opMetrics (SegScan _ scan_op _ _ body) =
@@ -711,6 +731,11 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
     text "kernel" <+> text (kernelName desc) <>
     PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
+
+  ppr (SegMap space ts body) =
+    text "segmap" <>
+    PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
+    PP.nestedBlock "{" "}" (ppr body)
 
   ppr (SegRed space comm red_op nes ts body) =
     text name <> PP.parens (ppr red_op <> PP.comma </>

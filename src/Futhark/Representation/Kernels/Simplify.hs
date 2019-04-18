@@ -83,6 +83,15 @@ simplifyKernelOp mk_ops env (HostOp (Kernel desc space ts kbody)) = do
         scope_vtable = ST.fromScope scope
         bound_here = S.fromList $ M.keys scope
 
+simplifyKernelOp mk_ops env (HostOp (SegMap space ts body)) = do
+  space' <- Engine.simplify space
+  ts' <- mapM Engine.simplify ts
+
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env body
+
+  return (HostOp $ SegMap space' ts' body',
+          body_hoisted)
+
 simplifyKernelOp mk_ops env (HostOp (SegRed space comm red_op nes ts body)) = do
   space' <- Engine.simplify space
   nes' <- mapM Engine.simplify nes

@@ -93,6 +93,14 @@ transformExp (Op (Inner (HostOp (Kernel desc kspace ts kbody)))) = do
           S.fromList $ M.keys $ scopeOfKernelSpace kspace <>
           scopeOf (kernelBodyStms kbody)
 
+transformExp (Op (Inner (HostOp (SegMap kspace ts kbody)))) = do
+  (alloc_stms, (_, kbody')) <- transformScanRed kspace no_op kbody
+  return (alloc_stms,
+          Op $ Inner $ HostOp $ SegMap kspace ts kbody')
+  where no_op = Lambda { lambdaParams = mempty
+                       , lambdaBody = Body mempty mempty mempty
+                       , lambdaReturnType = mempty }
+
 transformExp (Op (Inner (HostOp (SegRed kspace comm red_op nes ts kbody)))) = do
   (alloc_stms, (red_op', kbody')) <- transformScanRed kspace red_op kbody
   return (alloc_stms,

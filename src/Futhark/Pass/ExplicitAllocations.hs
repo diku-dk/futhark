@@ -541,6 +541,11 @@ handleHostOp (HostOp (Kernel desc space kernel_ts kbody)) =
   Inner . HostOp . Kernel desc space kernel_ts <$>
   localScope (scopeOfKernelSpace space) (allocInKernelBody kbody)
 
+handleHostOp (HostOp (SegMap space ts body)) = do
+  body' <- subInKernel space $
+           localScope (scopeOfKernelSpace space) $ allocInKernelBody body
+  return $ Inner $ HostOp $ SegMap space ts body'
+
 handleHostOp (HostOp (SegRed space comm red_op nes ts body)) = do
   body' <- subInKernel space $
            localScope (scopeOfKernelSpace space) $ allocInKernelBody body
@@ -1033,6 +1038,9 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
 
 kernelExpHints (Op (Inner (HostOp (Kernel _ space ts kbody)))) =
   zipWithM (mapResultHint space) ts $ kernelBodyResult kbody
+
+kernelExpHints (Op (Inner (HostOp (SegMap space ts body)))) =
+  zipWithM (mapResultHint space) ts $ kernelBodyResult body
 
 kernelExpHints (Op (Inner (HostOp (SegRed space _ _ nes ts body)))) =
   (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint space) (drop (length nes) ts) map_res
