@@ -22,6 +22,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
+import Futhark.CodeGen.ImpGen.Kernels.SegMap
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegScan
 import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
@@ -80,7 +81,9 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
   kernel_body' <-
     makeAllMemoryGlobal $ ImpGen.subImpM_ (inKernelOperations constants) $ do
     init_constants
-    compileKernelBody pat constants kernel_body
+    compileKernelStms constants (stmsToList $ kernelBodyStms kernel_body) $
+      zipWithM_ (compileKernelResult constants) (patternElements pat) $
+      kernelBodyResult kernel_body
 
   let bound_in_kernel =
         M.keys $
@@ -107,6 +110,10 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
             , Imp.kernelName = nameFromString $ kernelName desc ++ "_" ++
                                show (baseTag $ kernelGlobalThreadIdVar constants)
             }
+
+
+kernelCompiler pat (SegMap space _ body) =
+  compileSegMap pat space body
 
 kernelCompiler pat (SegRed space comm red_op nes _ body) =
   compileSegRed pat space comm red_op nes body
@@ -325,12 +332,3 @@ isMapTransposeKernel bt
           let (mapped, notmapped) = splitAt r1 shape
               (pretrans, posttrans) = f $ splitAt r2 notmapped
           in (product mapped, product pretrans, product posttrans)
-
-compileKernelBody :: Pattern InKernel
-                  -> KernelConstants
-                  -> KernelBody InKernel
-                  -> InKernelGen ()
-compileKernelBody pat constants kbody =
-  compileKernelStms constants (stmsToList $ kernelBodyStms kbody) $
-  zipWithM_ (compileKernelResult constants) (patternElements pat) $
-  kernelBodyResult kbody

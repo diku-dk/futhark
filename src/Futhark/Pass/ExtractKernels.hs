@@ -383,23 +383,23 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
           let (red_pat_elems, concat_pat_elems) =
                 splitAt (length nes) $ patternValueElements pat
               red_pat = Pattern [] red_pat_elems
-              concat_pat = Pattern [] concat_pat_elems
 
-          (map_bnd, map_misc_bnds) <- blockedMap concat_pat w InOrder fold_fun_sequential nes arrs
-          let num_threads = arraysSize 0 $ patternTypes $ stmPattern map_bnd
+          ((num_threads, red_results), stms) <-
+            streamMap (map (baseString . patElemName) red_pat_elems) concat_pat_elems w
+            Noncommutative fold_fun_sequential nes arrs
 
           reduce_soac <- reduceSOAC comm' red_fun nes
 
-          ((map_misc_bnds<>oneStm map_bnd)<>) <$>
-            inScopeOf (map_misc_bnds<>oneStm map_bnd)
+          (stms<>) <$>
+            inScopeOf stms
             (transformStm path' $ Let red_pat aux $
-             Op (Screma num_threads reduce_soac $ patternNames $ stmPattern map_bnd))
+             Op (Screma num_threads reduce_soac red_results))
 
       | otherwise = do
           red_fun_sequential <- Kernelise.transformLambda red_fun
           fold_fun_sequential <- Kernelise.transformLambda fold_fun
           fmap (certify cs) <$>
-            blockedSegRed pat w comm' red_fun_sequential fold_fun_sequential nes arrs
+            streamRed pat w comm' red_fun_sequential fold_fun_sequential nes arrs
 
     outerParallelBody path' =
       renameBody =<<
