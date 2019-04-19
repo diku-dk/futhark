@@ -42,14 +42,9 @@ optimiseStm :: Stm Kernels -> UnstreamM [Stm Kernels]
 optimiseStm (Let pat aux (Op (HostOp op))) = do
   inv <- S.fromList . M.keys <$> askScope
 
-  let kspace = case op of Kernel _ space _ _ -> space
-                          SegMap space _ _ -> space
-                          SegRed space _ _ _ _ _ -> space
-                          SegScan space _ _ _ _ -> space
-                          SegGenRed space _ _ _ -> space
-      mapper = identityKernelMapper { mapOnKernelKernelBody = onKernelBody }
+  let mapper = identityKernelMapper { mapOnKernelKernelBody = onKernelBody }
       onKernelBody kbody = do
-        stms' <- localScope (scopeOfKernelSpace kspace) $
+        stms' <- localScope (scopeOfKernelSpace (kernelSpace op)) $
                  runBinder_ $ optimiseInKernelStms inv $ kernelBodyStms kbody
         return kbody { kernelBodyStms = stms' }
 
