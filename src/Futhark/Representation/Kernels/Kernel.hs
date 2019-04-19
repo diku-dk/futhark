@@ -10,6 +10,7 @@
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
        , kernelType
+       , kernelSpace
        , KernelDebugHints(..)
        , GenReduceOp(..)
        , KernelBody(..)
@@ -107,6 +108,13 @@ data Kernel lore
   | SegScan KernelSpace (Lambda lore) [SubExp] [Type] (KernelBody lore)
   | SegGenRed KernelSpace [GenReduceOp lore] [Type] (KernelBody lore)
     deriving (Eq, Show, Ord)
+
+kernelSpace :: Kernel lore -> KernelSpace
+kernelSpace (Kernel _ kspace _ _) = kspace
+kernelSpace (SegMap kspace _ _) = kspace
+kernelSpace (SegRed kspace _ _ _ _ _) = kspace
+kernelSpace (SegScan kspace _ _ _ _) = kspace
+kernelSpace (SegGenRed kspace _ _ _) = kspace
 
 data KernelSpace = KernelSpace { spaceGlobalId :: VName
                                , spaceLocalId :: VName

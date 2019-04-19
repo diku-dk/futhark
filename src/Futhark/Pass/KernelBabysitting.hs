@@ -72,15 +72,9 @@ nonlinearInMemory name m =
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
 transformStm expmap (Let pat aux (Op (HostOp op))) = do
-  let kspace = case op of Kernel _ space _ _ -> space
-                          SegMap space _ _ -> space
-                          SegRed space _ _ _ _ _ -> space
-                          SegScan space _ _ _ _ -> space
-                          SegGenRed space _ _ _ -> space
-      mapper = identityKernelMapper { mapOnKernelKernelBody =
-                                        transformKernelBody expmap kspace
+  let mapper = identityKernelMapper { mapOnKernelKernelBody =
+                                        transformKernelBody expmap (kernelSpace op)
                                     }
-
   op' <- mapKernelM mapper op
   let stm' = Let pat aux $ Op $ HostOp op'
   addStm stm'

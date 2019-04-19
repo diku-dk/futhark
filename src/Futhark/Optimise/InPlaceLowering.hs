@@ -156,13 +156,16 @@ optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = const optimiseBody
                                   }
 onKernelOp :: OnOp Kernels
-onKernelOp (HostOp (Kernel debug kspace ts kbody)) = do
+onKernelOp (HostOp op) = do
   old_scope <- askScope
   modifyNameSource $ runForwardingM lowerUpdateInKernel onKernelExp $
-    bindingScope (castScope old_scope <> scopeOfKernelSpace kspace) $ do
-    stms <- deepen $ optimiseStms (stmsToList (kernelBodyStms kbody)) $
-            mapM_ seenVar $ freeIn $ kernelBodyResult kbody
-    return $ HostOp $ Kernel debug kspace ts $ kbody { kernelBodyStms = stmsFromList stms }
+    bindingScope (castScope old_scope <> scopeOfKernelSpace (kernelSpace op)) $ do
+      let mapper = identityKernelMapper { mapOnKernelKernelBody = onKernelBody }
+          onKernelBody kbody = do
+            stms <- deepen $ optimiseStms (stmsToList (kernelBodyStms kbody)) $
+                    mapM_ seenVar $ freeIn $ kernelBodyResult kbody
+            return kbody { kernelBodyStms = stmsFromList stms }
+      HostOp <$> mapKernelM mapper op
 onKernelOp op = return op
 
 onKernelExp :: OnOp InKernel
