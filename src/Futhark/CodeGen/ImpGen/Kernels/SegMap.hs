@@ -21,6 +21,6 @@ compileSegMap pat space kbody = do
 
   sKernel constants "segmap" $ do
     init_constants
-    compileKernelStms constants (stmsToList $ kernelBodyStms kbody) $
+    compileKernelStms constants (kernelBodyStms kbody) $
       zipWithM_ (compileKernelResult constants) (patternElements pat) $
       kernelBodyResult kbody

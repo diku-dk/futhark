@@ -171,7 +171,7 @@ compileKernelExp constants pat (Combine (CombineSpace scatter cspace) _ aspace b
 
     -- Execute the body if we are within bounds.
     sWhen (isActive cspace .&&. isActive aspace) $ allThreads constants $
-      ImpGen.compileStms (freeIn $ bodyResult body) (stmsToList $ bodyStms body) $ do
+      ImpGen.compileStms (freeIn $ bodyResult body) (bodyStms body) $ do
 
       forM_ (zip4 scatter_ws_repl res_is res_vs scatter_pes) $
         \(w, res_i, res_v, scatter_pe) -> do
@@ -986,11 +986,11 @@ inBlockScan seg_flag lockstep_width block_size active ltid acc_local_mem scan_la
   where block_id = ltid `quot` block_size
         in_block_id = ltid - block_id * block_size
 
-compileKernelStms :: KernelConstants -> [Stm InKernel]
+compileKernelStms :: KernelConstants -> Stms InKernel
                   -> InKernelGen a
                   -> InKernelGen a
 compileKernelStms constants ungrouped_bnds m =
-  compileGroupedKernelStms' $ groupStmsByGuard constants ungrouped_bnds
+  compileGroupedKernelStms' $ groupStmsByGuard constants $ stmsToList ungrouped_bnds
   where compileGroupedKernelStms' [] = m
         compileGroupedKernelStms' ((g, bnds):rest_bnds) = do
           ImpGen.dScopes (map ((Just . stmExp) &&& (castScope . scopeOf)) bnds)
