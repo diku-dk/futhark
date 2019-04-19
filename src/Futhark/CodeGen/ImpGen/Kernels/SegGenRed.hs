@@ -178,7 +178,7 @@ genRedKernel map_pes space ops kbody = do
       -- arrays.
       let input_in_bounds = Imp.var j int32 .<. total_w_64
 
-      sWhen input_in_bounds $ ImpGen.compileStms mempty (stmsToList $ kernelBodyStms kbody) $ do
+      sWhen input_in_bounds $ ImpGen.compileStms mempty (kernelBodyStms kbody) $ do
         let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
 
         sComment "save map-out results" $

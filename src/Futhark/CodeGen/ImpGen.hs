@@ -114,7 +114,7 @@ import Futhark.Util
 type OpCompiler lore op = Pattern lore -> Op lore -> ImpM lore op ()
 
 -- | How to compile some 'Stms'.
-type StmsCompiler lore op = Names -> [Stm lore] -> ImpM lore op () -> ImpM lore op ()
+type StmsCompiler lore op = Names -> Stms lore -> ImpM lore op () -> ImpM lore op ()
 
 -- | How to compile an 'Exp'.
 type ExpCompiler lore op = Pattern lore -> Exp lore -> ImpM lore op ()
@@ -496,7 +496,7 @@ compileFunDef (FunDef entry fname rettype params body) = do
           addArrays arrayds
 
           let Body _ stms ses = body
-          compileStms (freeIn ses) (stmsToList stms) $
+          compileStms (freeIn ses) stms $
             forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
 
           return (outparams, inparams, results, args)
@@ -504,7 +504,7 @@ compileFunDef (FunDef entry fname rettype params body) = do
 compileBody :: (ExplicitMemorish lore) => Pattern lore -> Body lore -> ImpM lore op ()
 compileBody pat (Body _ bnds ses) = do
   Destination _ dests <- destinationFromPattern pat
-  compileStms (freeIn ses) (stmsToList bnds) $
+  compileStms (freeIn ses) bnds $
     forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
 
 compileBody' :: (ExplicitMemorish lore, attr ~ LetAttr lore)
@@ -520,7 +520,7 @@ compileLoopBody mergenames (Body _ bnds ses) = do
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
   tmpnames <- mapM (newVName . (++"_tmp") . baseString) mergenames
-  compileStms (freeIn ses) (stmsToList bnds) $ do
+  compileStms (freeIn ses) bnds $ do
     copy_to_merge_params <- forM (zip3 mergenames tmpnames ses) $ \(d,tmp,se) ->
       subExpType se >>= \case
         Prim bt  -> do
@@ -535,19 +535,19 @@ compileLoopBody mergenames (Body _ bnds ses) = do
         _ -> return $ return ()
     sequence_ copy_to_merge_params
 
-compileStms :: Names -> [Stm lore] -> ImpM lore op () -> ImpM lore op ()
+compileStms :: Names -> Stms lore -> ImpM lore op () -> ImpM lore op ()
 compileStms alive_after_stms all_stms m = do
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 
 defCompileStms :: (ExplicitMemorish lore, FreeIn op) =>
-                  Names -> [Stm lore] -> ImpM lore op () -> ImpM lore op ()
+                  Names -> Stms lore -> ImpM lore op () -> ImpM lore op ()
 defCompileStms alive_after_stms all_stms m =
   -- We keep track of any memory blocks produced by the statements,
   -- and after the last time that memory block is used, we insert a
   -- Free.  This is very conservative, but can cut down on lifetimes
   -- in some cases.
-  void $ compileStms' mempty all_stms
+  void $ compileStms' mempty $ stmsToList all_stms
   where compileStms' allocs (Let pat _ e:bs) = do
           dVars (Just e) (patternElements pat)
 

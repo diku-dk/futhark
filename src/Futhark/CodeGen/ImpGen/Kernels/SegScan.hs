@@ -93,7 +93,7 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
 
       let in_bounds =
             foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
-          when_in_bounds = ImpGen.compileStms mempty (stmsToList $ kernelBodyStms kbody) $ do
+          when_in_bounds = ImpGen.compileStms mempty (kernelBodyStms kbody) $ do
             let (scan_res, map_res) = splitAt (length nes) $ kernelBodyResult kbody
             sComment "write to-scan values to parameters" $
               forM_ (zip scan_y_params scan_res) $ \(p, se) ->
@@ -109,7 +109,7 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
         sIf in_bounds when_in_bounds when_out_of_bounds
 
       sComment "combine with carry and write to local memory" $
-        ImpGen.compileStms mempty (stmsToList $ bodyStms $ lambdaBody scan_op) $
+        ImpGen.compileStms mempty (bodyStms $ lambdaBody scan_op) $
         forM_ (zip local_arrs $ bodyResult $ lambdaBody scan_op) $ \(arr, se) ->
           ImpGen.copyDWIM arr [kernelLocalThreadId constants] se []
 

@@ -81,7 +81,7 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
   kernel_body' <-
     makeAllMemoryGlobal $ ImpGen.subImpM_ (inKernelOperations constants) $ do
     init_constants
-    compileKernelStms constants (stmsToList $ kernelBodyStms kernel_body) $
+    compileKernelStms constants (kernelBodyStms kernel_body) $
       zipWithM_ (compileKernelResult constants) (patternElements pat) $
       kernelBodyResult kernel_body
 
