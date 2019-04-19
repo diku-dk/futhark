@@ -559,7 +559,6 @@ unAllocInKernelStms = unAllocStms False
                       , mapOnOp = unAllocOp
                       , mapOnSubExp = Right
                       , mapOnVName = Right
-                      , mapOnCertificates = Right
                       }
 
 unAttr :: MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)

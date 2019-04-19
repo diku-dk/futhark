@@ -268,7 +268,6 @@ instance Renameable lore => Rename (Exp lore) where
                       mapOnBody = const rename
                     , mapOnSubExp = rename
                     , mapOnVName = rename
-                    , mapOnCertificates = rename
                     , mapOnRetType = rename
                     , mapOnBranchType = rename
                     , mapOnFParam = rename
