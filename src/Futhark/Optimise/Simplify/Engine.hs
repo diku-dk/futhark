@@ -721,7 +721,6 @@ simplifyExpBase = mapExpM hoist
                 -- Lambdas are handled explicitly because we need to
                 -- bind their parameters.
                 , mapOnVName = simplify
-                , mapOnCertificates = simplify
                 , mapOnRetType = simplify
                 , mapOnBranchType = simplify
                 , mapOnFParam =

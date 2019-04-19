@@ -113,7 +113,6 @@ replace substs = Mapper {
                    mapOnVName = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
                  , mapOnBody = const $ return . substituteNames substs
-                 , mapOnCertificates = return . substituteNames substs
                  , mapOnRetType = return . substituteNames substs
                  , mapOnBranchType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs

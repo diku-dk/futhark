@@ -50,7 +50,6 @@ analyseExp :: (Attributes lore, CanBeAliased (Op lore)) =>
 analyseExp = mapExp analyse
   where analyse =
           Mapper { mapOnSubExp = return
-                 , mapOnCertificates = return
                  , mapOnVName = return
                  , mapOnBody = const $ return . analyseBody
                  , mapOnRetType = return

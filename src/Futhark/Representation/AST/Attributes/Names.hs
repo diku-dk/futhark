@@ -45,7 +45,6 @@ freeWalker = identityWalker {
                walkOnSubExp = tell . freeIn
              , walkOnBody = tell . freeInBody
              , walkOnVName = tell . S.singleton
-             , walkOnCertificates = tell . freeIn
              , walkOnOp = tell . freeIn
              }
 
