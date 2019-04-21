@@ -134,20 +134,26 @@ simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
         scope = scopeOfKernelSpace space
 
 simplifyKernelOp _ _ (Husk hspace red_op nes ts body) = do
-  let hspace' = convertHuskSpace hspace
-      scope_vtable = ST.fromScope $ scopeOfHuskSpace hspace'
+  hspace' <- Engine.simplify $ convertHuskSpace hspace
+  let scope_vtable = ST.fromScope $ scopeOfHuskSpace hspace'
+      bound_here = boundByHuskSpace hspace'
   nes' <- mapM Engine.simplify nes
   ts' <- mapM Engine.simplify ts
+  par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
   ((body_stms', body_res'), body_hoisted) <-
     Engine.localVtable (<>scope_vtable) $
-    Engine.blockIf (Engine.isFalse False) $
+    Engine.blockIf (Engine.hasFree bound_here
+                    `Engine.orIf` par_blocker
+                    `Engine.orIf` Engine.isConsumed
+                    `Engine.orIf` Engine.isOp) $
     Engine.simplifyBody (replicate (length ts) Observe) body
-  -- TODO: ^ Should we be less restrictive in hoist-blocking?
+  body_hoisted' <- mapM processHoistedStm body_hoisted
   body' <- Engine.constructBody body_stms' body_res'
   (red_op', red_op_hoisted) <-
     Engine.localVtable (<>scope_vtable) $
     Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
-  return (Husk hspace' red_op' nes' ts' body', red_op_hoisted <> body_hoisted)
+  red_op_hoisted' <- mapM processHoistedStm red_op_hoisted
+  return (Husk hspace' red_op' nes' ts' body', red_op_hoisted' <> body_hoisted')
 
 simplifyKernelOp _ _ (GetSize key size_class) =
   return (GetSize key size_class, mempty)
@@ -343,6 +349,13 @@ instance Engine.Simplifiable KernelSpace where
     <*> Engine.simplify num_groups
     <*> Engine.simplify group_size
     <*> Engine.simplify structure
+
+instance Engine.Simplifiable (HuskSpace lore) where
+  simplify (HuskSpace src src_elems parts parts_elems parts_mem node_res) = do
+    src' <- Engine.simplify src
+    parts_mem' <- Engine.simplify parts_mem
+    node_res' <- Engine.simplify node_res
+    return $ HuskSpace src' src_elems parts parts_elems parts_mem' node_res'
 
 instance Engine.Simplifiable SpaceStructure where
   simplify (FlatThreadSpace dims) =

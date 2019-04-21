@@ -7,6 +7,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
        , kernelType
@@ -37,6 +38,7 @@ module Futhark.Representation.Kernels.Kernel
        -- * Host operations
        , HostOp(..)
        , HuskSpace(..)
+       , addHuskMapDim
        , scopeOfHuskSpace
        , boundByHuskSpace
        , constructHuskSpace
@@ -831,10 +833,10 @@ data HostOp lore inner
   deriving (Eq, Ord, Show)
 
 data HuskSpace lore = HuskSpace
-                    { hspaceNodeId :: VName
-                    , hspaceNumNodes :: VName
-                    , hspaceSource :: [VName]
+                    { hspaceSource :: [VName]
+                    , hspaceSourceElems :: SubExp
                     , hspacePartitions :: [LParam lore]
+                    , hspacePartitionElems :: VName
                     , hspacePartitionsMemory :: [VName]
                     , hspaceNodeResults :: [VName]
                     }
@@ -844,30 +846,29 @@ deriving instance Annotations lore => Ord (HuskSpace lore)
 deriving instance Annotations lore => Show (HuskSpace lore)
 
 scopeOfHuskSpace :: HuskSpace lore -> Scope lore
-scopeOfHuskSpace (HuskSpace node_id num_nodes _ parts _ _) =
-  M.fromList scalar_ts <> scopeOfLParams parts
-  where scalar_ts = [(node_id, IndexInfo Int32), (num_nodes, IndexInfo Int32)]
+scopeOfHuskSpace (HuskSpace _ _ parts parts_elems _ _) =
+  M.singleton parts_elems (IndexInfo Int32) <> scopeOfLParams parts
 
 boundByHuskSpace :: HuskSpace lore -> Names
-boundByHuskSpace (HuskSpace node_id num_nodes _ _ parts_mem node_res) =
-  S.fromList $ concat [[node_id, num_nodes], parts_mem, node_res]
+boundByHuskSpace (HuskSpace _ _ _ parts_elems parts_mem node_res) =
+  S.fromList $ concat [[parts_elems], parts_mem, node_res]
 
 constructHuskSpace :: (MonadFreshNames m, HasScope lore m, LParamAttr lore ~ Type)
-                   => [VName] -> [Type] -> m (HuskSpace lore)
-constructHuskSpace src red_ts = do
-  node_id <- newVName "node_id"
-  num_nodes <- newVName "num_nodes"
+                   => [VName] -> SubExp -> [Type] -> m (HuskSpace lore)
+constructHuskSpace src src_elems ts = do
   parts_names <- replicateM (length src) (newVName "partition")
+  parts_elems <- newVName "partition_elems"
   parts_mem <- replicateM (length src) (newVName "partition_mem")
-  parts_ts <- mapM lookupType src
-  node_res <- replicateM (length red_ts) (newVName "node_res")
-  let parts = zipWith Param parts_names parts_ts
-  return $ HuskSpace node_id num_nodes src parts parts_mem node_res
+  node_res <- replicateM (length ts) (newVName "node_res")
+  src_ts <- mapM lookupType src
+  let parts_ts = map (\t -> setOuterSize t $ Var parts_elems) src_ts
+      parts = zipWith Param parts_names parts_ts
+  return $ HuskSpace src src_elems parts parts_elems parts_mem node_res
 
 convertHuskSpace :: LParamAttr fromlore ~ LParamAttr tolore
                  => HuskSpace fromlore -> HuskSpace tolore
-convertHuskSpace (HuskSpace node_id num_nodes src parts parts_mem node_res) =
-  HuskSpace node_id num_nodes src parts parts_mem node_res
+convertHuskSpace (HuskSpace src src_elems parts parts_elems parts_mem node_res) =
+  HuskSpace src src_elems parts parts_elems parts_mem node_res
 
 instance (Attributes lore, Substitute inner) => Substitute (HostOp lore inner) where
   substituteNames substs (HostOp op) =
@@ -880,9 +881,9 @@ instance (Attributes lore, Substitute inner) => Substitute (HostOp lore inner) w
   substituteNames _ x = x
 
 instance Substitute (LParamAttr lore) => Substitute (HuskSpace lore) where
-  substituteNames substs (HuskSpace node_id num_nodes src parts parts_mem node_res) =
-    HuskSpace (substituteNames substs node_id) (substituteNames substs num_nodes)
-              (substituteNames substs src) (substituteNames substs parts)
+  substituteNames substs (HuskSpace src src_elems parts parts_elems parts_mem node_res) =
+    HuskSpace (substituteNames substs src) (substituteNames substs src_elems)
+              (substituteNames substs parts) (substituteNames substs parts_elems)
               (substituteNames substs parts_mem) (substituteNames substs node_res)
 
 instance (Attributes lore, Rename inner) => Rename (HostOp lore inner) where
@@ -897,13 +898,12 @@ instance (Attributes lore, Rename inner) => Rename (HostOp lore inner) where
   rename x = pure x
 
 instance Renameable lore => Rename (HuskSpace lore) where
-  rename (HuskSpace node_id num_nodes src parts parts_mem node_res) = do
-    node_id' <- rename node_id
-    num_nodes' <- rename num_nodes
+  rename (HuskSpace src src_elems parts parts_elems parts_mem node_res) = do
     parts' <- rename parts
+    parts_elems' <- rename parts_elems
     parts_mem' <- rename parts_mem
     node_res' <- rename node_res
-    return $ HuskSpace node_id' num_nodes' src parts' parts_mem' node_res'
+    return $ HuskSpace src src_elems parts' parts_elems' parts_mem' node_res'
 
 instance (Attributes lore, IsOp inner) => IsOp (HostOp lore inner) where
   safeOp (HostOp op) = safeOp op
@@ -916,11 +916,17 @@ instance TypedOp inner => TypedOp (HostOp lore inner) where
   opType GetSizeMax{} = pure [Prim int32]
   opType CmpSizeLe{} = pure [Prim Bool]
   opType (HostOp op) = opType op
-  opType (Husk _ red_op _ _ _) =
-    pure $ staticShapes $ lambdaReturnType red_op
+  opType (Husk hspace _ nes ts _) =
+    pure $ staticShapes $ addHuskMapDim ts nes $ hspaceSourceElems hspace
+
+addHuskMapDim :: [Type] -> [SubExp] -> SubExp -> [Type]
+addHuskMapDim ts nes num_elems =
+  let (red_ts, map_ts) = splitAt (length nes) ts
+  in red_ts ++ map (`arrayOfShape` Shape [num_elems]) map_ts
 
 instance (Attributes lore, AliasedOp inner) => AliasedOp (HostOp lore inner) where
   opAliases (HostOp op) = opAliases op
+  opAliases (Husk _ _ _ ts _) = map (const mempty) ts
   opAliases _ = [mempty]
 
   consumedInOp (HostOp op) = consumedInOp op
@@ -928,10 +934,17 @@ instance (Attributes lore, AliasedOp inner) => AliasedOp (HostOp lore inner) whe
 
 instance (Attributes lore, RangedOp inner) => RangedOp (HostOp lore inner) where
   opRanges (HostOp op) = opRanges op
+  opRanges (Husk _ _ _ ts _) = replicate (length ts) unknownRange
   opRanges _ = [unknownRange]
 
-instance FreeIn inner => FreeIn (HostOp lore inner) where
+instance (Attributes lore, FreeIn inner) => FreeIn (HostOp lore inner) where
   freeIn (HostOp op) = freeIn op
+  freeIn (Husk hspace red_op _ _ body) =
+    mconcat [ freeInLambda red_op
+            , freeInBody body
+            , S.fromList $ hspaceSource hspace
+            , freeIn $ hspaceSourceElems hspace]
+    `S.difference` boundByHuskSpace hspace
   freeIn (CmpSizeLe _ _ x) = freeIn x
   freeIn _ = mempty
 
@@ -1017,13 +1030,13 @@ instance (PrettyLore lore, PP.Pretty inner) => PP.Pretty (HostOp lore inner) whe
   ppr (HostOp op) = ppr op
 
 instance Pretty (HuskSpace lore) where
-  ppr (HuskSpace node_id num_nodes src parts parts_mem node_res) =
+  ppr (HuskSpace src src_elems parts parts_elems parts_mem node_res) =
     parens (commasep [text "source data:" <+> ppr src,
+                      text "number of source elements:" <+> ppr src_elems,
                       text "intermediate results ->" <+> ppr node_res,
                       text "partitions ->" <+> ppr (map paramName parts),
                       text "partition memory ->" <+> ppr parts_mem,
-                      text "node id ->" <+> ppr node_id,
-                      text "number of nodes ->" <+> ppr num_nodes])
+                      text "number of partition elements ->" <+> ppr parts_elems])
 
 instance (OpMetrics (Op lore), OpMetrics inner) => OpMetrics (HostOp lore inner) where
   opMetrics GetSize{} = seen "GetSize"
@@ -1033,16 +1046,19 @@ instance (OpMetrics (Op lore), OpMetrics inner) => OpMetrics (HostOp lore inner)
   opMetrics (Husk _ red_op _ _ body) = 
     inside "Husk" $ lambdaMetrics red_op >> bodyMetrics body
 
-instance (Attributes lore, UsageInOp (Op lore), Aliased lore, UsageInOp inner) => UsageInOp (HostOp lore inner) where
+instance (Aliased lore, UsageInOp inner) => UsageInOp (HostOp lore inner) where
   usageInOp GetSize{} = mempty
   usageInOp GetSizeMax{} = mempty
   usageInOp CmpSizeLe{} = mempty
   usageInOp (HostOp op) = usageInOp op
-  usageInOp (Husk hspace red_op _ _ (Body _ body_stms _)) = 
-    mconcat $ map usageInStm (toList body_stms)
+  usageInOp (Husk hspace red_op _ _ body) = 
+    mconcat $ map UT.consumedUsage (S.toList $ consumedInBody body)
             ++ [ usageInLambda red_op (hspaceNodeResults hspace)
+               , UT.usages (S.fromList $ hspacePartitionElems hspace : varInSubExp (hspaceSourceElems hspace))
                , UT.usages (S.fromList $ hspaceSource hspace)
                , UT.usages (S.fromList $ hspaceNodeResults hspace)]
+    where varInSubExp (Var n) = [n]
+          varInSubExp _ = []
 
 typeCheckHostOp :: TC.Checkable lore =>
                    (inner -> TC.TypeM lore ())

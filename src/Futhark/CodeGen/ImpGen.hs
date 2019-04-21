@@ -61,7 +61,6 @@ module Futhark.CodeGen.ImpGen
   , fullyIndexArray'
   , varIndex
   , Imp.dimSizeToExp
-  , getVarBytesSize
   , dimSizeToSubExp
   , copy
   , copyDWIM
@@ -1223,17 +1222,6 @@ dimSizeToSubExp (Imp.VarSize v) = Var v
 
 dimSizeToExp :: Imp.Size -> Imp.Exp
 dimSizeToExp = compilePrimExp . primExpFromSubExp int32 . dimSizeToSubExp
-
-getVarBytesSize :: VName -> ImpM lore op (Count Bytes)
-getVarBytesSize name = do
-  var <- lookupVar name
-  case var of
-    ArrayVar _ entry ->
-      return $ arrayOuterSize entry `Imp.withElemType` entryArrayElemType entry
-    MemVar _ entry ->
-      return $ Imp.memSizeToExp $ entryMemSize entry
-    ScalarVar _ entry ->
-      return $ bytes $ LeafExp (Imp.SizeOf $ entryScalarType entry) (IntType Int32)
 
 --- Building blocks for constructing code.
 

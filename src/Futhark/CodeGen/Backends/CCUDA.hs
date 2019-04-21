@@ -13,6 +13,7 @@ import Control.Monad
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
+import Futhark.CodeGen.ImpGen (compileSubExpOfType)
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.MonadFreshNames
@@ -213,58 +214,83 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
 callKernel (DistributeHusk hspace src_mem interm_mem interm_size red body after) = do
-  let HuskSpace node_id num_nodes _ _ parts_mem _ = hspace
+  let HuskSpace _ src_elems _ parts_elems parts_mem _ = hspace
+  body_node_id <- newVName "body_node_id"
+  red_node_id <- newVName "red_node_id"
+  elems_per_node <- newVName "elems_per_node"
+  parts_elems_offset <- newVName "parts_elems_offset"
+  interm_cols <- replicateM (length interm_mem) $ newVName "interm_col"
   body' <- GC.blockScope $ GC.compileCode body
   red' <- GC.blockScope $ GC.compileCode red
   after' <- GC.blockScope $ GC.compileCode after
-  interm_cols <- replicateM (length interm_mem) $ newVName "interm_col"
   interm_size_e <- mapM (GC.compileExp . sizeToExp) interm_size
+  src_elems_e <- GC.compileExp $ compileSubExpOfType int32 src_elems
   let decl_parts = [[C.citem|struct memblock_device $id:part;|] | part <- parts_mem]
+      elem_sizes = [[C.cexp|$id:src.size / $exp:src_elems_e|] | src <- src_mem]
+      parts_sizes = [[C.cexp|$exp:elem_size * $id:parts_elems|] | elem_size <- elem_sizes]
       alloc_parts = [[C.cstm|
-          if(memblock_alloc_device(ctx, &$id:part, $id:src.size, $string:(pretty part)))
+          if(memblock_alloc_device(ctx, &$id:part, $exp:size, $string:(pretty part)))
             return 1;
-        |] | (src, part) <- zip src_mem parts_mem]
+        |] | (part, size) <- zip parts_mem parts_sizes]
       alloc_interm_col = [[C.cstm|
-          if(memblock_alloc_device(ctx, $id:col + $id:node_id, $exp:size, $string:(pretty col)))
+          if(memblock_alloc_device(ctx, $id:col + $id:body_node_id, $exp:size, $string:(pretty col)))
             return 1;
         |] | (col, size) <- zip interm_cols interm_size_e]
-      get_interm_col = [[C.cstm|
+      get_interm_col node_id = [[C.cstm|
           $id:interm = $id:col[$id:node_id];
         |] | (col, interm) <- zip interm_cols interm_mem]
+      main_node_set_part = [[C.cstm|
+          $id:part = $id:src;
+        |] | (part, src) <- zip parts_mem src_mem]
+      src_mem_off = [[C.cexp|
+          $id:src.mem + $id:parts_elems_offset * $exp:elem_size
+        |] | (src, elem_size) <- zip src_mem elem_sizes]
+      parts_memr = [[C.cexp|$id:part.mem|] | part <- parts_mem]
       release mems = [[C.cstm|
           if(memblock_unref_device(ctx, &$id:mem, $string:(pretty mem)) != 0)
             return 1;
         |] | mem <- mems]
-      cpyToNode to from to_mem from_mem = [C.cstm|
-          CUDA_SUCCEED(cuMemcpyPeer($id:to_mem.mem,
+      cpyToNode to from to_mem from_mem size = [C.cstm|
+          CUDA_SUCCEED(cuMemcpyPeer($exp:to_mem,
                                     ctx->cuda.nodes[$exp:to].cu_ctx,
-                                    $id:from_mem.mem, ctx->cuda.nodes[$exp:from].cu_ctx,
-                                    $id:from_mem.size));
+                                    $exp:from_mem, ctx->cuda.nodes[$exp:from].cu_ctx,
+                                    $exp:size));
         |]
-  GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
+  GC.decl [C.cdecl|
+      typename int32_t $id:elems_per_node = ($exp:src_elems_e + ctx->cuda.cfg.num_nodes - 1) / ctx->cuda.cfg.num_nodes;
+    |]
   mapM_ GC.decl [[C.cdecl|struct memblock_device $id:interm;|] | interm <- interm_mem]
   mapM_ GC.decl [[C.cdecl|
-      struct memblock_device *$id:col = calloc($id:num_nodes, sizeof(struct memblock_device));
+      struct memblock_device *$id:col = calloc(ctx->cuda.cfg.num_nodes, sizeof(struct memblock_device));
     |] | col <- interm_cols]
   GC.stm [C.cstm|
-    for (int $id:node_id = 0; $id:node_id < $id:num_nodes; ++$id:node_id) {
-      CUDA_SUCCEED(cuda_set_active_node(&ctx->cuda, $id:node_id));
+    for (int $id:body_node_id = ctx->cuda.cfg.num_nodes - 1; $id:body_node_id >= 0; --$id:body_node_id) {
+      CUDA_SUCCEED(cuda_set_active_node(&ctx->cuda, $id:body_node_id));
+
+      typename int32_t $id:parts_elems_offset = $id:body_node_id * $id:elems_per_node;
+      typename int32_t $id:parts_elems = min($id:elems_per_node, $exp:src_elems_e - $id:parts_elems_offset);
       
       $stms:alloc_interm_col
-      $stms:get_interm_col
+      $stms:(get_interm_col body_node_id)
 
       $items:decl_parts
-      $stms:alloc_parts
-      $stms:(zipWith (cpyToNode node_id (0::Int32)) parts_mem src_mem)
+      if ($id:body_node_id != 0) {
+        $stms:alloc_parts
+        $stms:(zipWith3 (cpyToNode body_node_id (0::Int32)) parts_memr src_mem_off parts_sizes)
+      } else {
+        $stms:main_node_set_part
+      }
 
       $items:body'
 
-      $stms:(release parts_mem)
+      if ($id:body_node_id != 0) {
+        $stms:(release parts_mem)
+      }
     }|]
   GC.stm [C.cstm|
-    for (int $id:node_id = 0; $id:node_id < $id:num_nodes; ++$id:node_id) {
-      CUDA_SUCCEED(cuda_set_active_node(&ctx->cuda, $id:node_id));
-      $stms:get_interm_col
+    for (int $id:red_node_id = ctx->cuda.cfg.num_nodes - 1; $id:red_node_id >= 0; --$id:red_node_id) {
+      CUDA_SUCCEED(cuda_set_active_node(&ctx->cuda, $id:red_node_id));
+      $stms:(get_interm_col red_node_id)
       $items:red'
       $stms:(release interm_mem)
     }|]
@@ -314,7 +340,8 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
       void *$id:args_arr[] = { $inits:args'' };
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
-        fprintf(stderr, "Launching %s with grid size (", $string:name);
+        fprintf(stderr, "Launching %s on node %d with grid size (", $string:name,
+                ctx->cuda.active_node);
         $stms:(printSizes [grid_x, grid_y, grid_z])
         fprintf(stderr, ") and block size (");
         $stms:(printSizes [block_x, block_y, block_z])

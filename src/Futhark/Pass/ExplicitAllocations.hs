@@ -560,13 +560,21 @@ handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
     r <- allocInLambda lp' lb lr
     return (b, r)
   return $ Inner $ Husk hspace' red_op' nes ts body'
-  where directIxf shape = IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
-        paramMemInfo (Param name (Prim pt)) _ =
-          Param name $ MemPrim pt
-        paramMemInfo (Param name (Mem size space)) _ =
-          Param name $ MemMem size space
-        paramMemInfo (Param name (Array pt shape u)) mem =
-          Param name $ MemArray pt shape u $ ArrayIn mem $ directIxf shape
+  where paramMemInfo (Param name (Prim pt)) _ = Param name $ MemPrim pt
+        paramMemInfo (Param name (Mem size space)) _ = Param name $ MemMem size space
+        paramMemInfo (Param name t@(Array pt shape u)) mem =
+          Param name $ directIndexFunction pt shape u mem t
+
+huskSpaceMemInfo :: (LParamAttr fromlore ~ Type,
+                     LParamAttr tolore ~ MemInfo SubExp NoUniqueness MemBind)
+                 => HuskSpace fromlore -> HuskSpace tolore
+huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_mem node_res) =
+  HuskSpace src src_elems parts' parts_elems parts_mem node_res
+  where parts' = zipWith convert parts parts_mem
+        convert (Param name (Prim pt)) _ = Param name $ MemPrim pt
+        convert (Param name (Mem size space)) _ = Param name $ MemMem size space
+        convert (Param name t@(Array pt shape u)) mem =
+          Param name $ directIndexFunction pt shape u mem t
 
 subInKernel :: AllocM InInKernel OutInKernel a
             -> AllocM fromlore2 ExplicitMemory a

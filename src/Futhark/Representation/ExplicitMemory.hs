@@ -73,7 +73,6 @@ module Futhark.Representation.ExplicitMemory
        , ExplicitMemorish
        , expReturns
        , extReturns
-       , huskSpaceMemInfo
        , sliceInfo
        , lookupMemInfo
        , subExpMemInfo
@@ -314,19 +313,6 @@ instance (Substitute d, Substitute ret) => Substitute (MemInfo d u ret) where
 
 instance (Substitute d, Substitute ret) => Rename (MemInfo d u ret) where
   rename = substituteRename
-
-huskSpaceMemInfo :: (LParamAttr fromlore ~ Type,
-                     LParamAttr tolore ~ MemInfo SubExp NoUniqueness MemBind)
-                 => HuskSpace fromlore -> HuskSpace tolore
-huskSpaceMemInfo (HuskSpace node_id num_nodes src parts parts_mem node_res) =
-  HuskSpace node_id num_nodes src parts' parts_mem node_res
-  where parts' = zipWith (convert directIxf) parts parts_mem
-        -- TODO: ^ Change this to offset index-function
-        directIxf shape = IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
-        convert _ (Param name (Prim pt)) _ = Param name $ MemPrim pt
-        convert _ (Param name (Mem size space)) _ = Param name $ MemMem size space
-        convert ixf (Param name (Array pt shape u)) mem = Param name $
-          MemArray pt shape u $ ArrayIn mem $ ixf shape
 
 simplifyIxFun :: Engine.SimplifiableLore lore =>
                  IxFun -> Engine.SimpleM lore IxFun
