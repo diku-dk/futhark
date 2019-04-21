@@ -51,7 +51,7 @@ static void lock_unlock(lock_t *lock) {
 
 static void free_lock(lock_t *lock) {
   /* Nothing to do for pthreads. */
-  lock = lock;
+  (void)lock;
 }
 
 #endif
