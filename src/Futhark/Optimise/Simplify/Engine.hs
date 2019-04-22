@@ -388,7 +388,7 @@ provides = patternNames . stmPattern
 requires :: Attributes lore => Stm lore -> Names
 requires = freeInStm
 
-expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
+expandUsage :: (Attributes lore, Aliased lore) =>
                ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> UT.UsageTable
 expandUsage vtable utable bnd =
   UT.expand (`ST.lookupAliases` vtable) (usageInStm bnd <> usageThroughAliases) <>

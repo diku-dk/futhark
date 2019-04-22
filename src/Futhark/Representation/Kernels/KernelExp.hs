@@ -437,12 +437,6 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
 
 instance ST.IndexOp (KernelExp lore) where
 
-instance Aliased lore => UsageInOp (KernelExp lore) where
-  usageInOp (Combine cspace _ _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList (consumedInBody body) <>
-    [ arr | (_, _, arr) <- cspaceScatter cspace ]
-  usageInOp _ = mempty
-
 instance OpMetrics (Op lore) => OpMetrics (KernelExp lore) where
   opMetrics SplitSpace{} = seen "SplitSpace"
   opMetrics Combine{} = seen "Combine"

@@ -573,19 +573,6 @@ instance Attributes lore => ST.IndexOp (Kernel lore) where
 
   indexOp _ _ _ _ = Nothing
 
-instance Aliased lore => UsageInOp (Kernel lore) where
-  usageInOp (Kernel _ _ _ kbody) =
-    mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
-  usageInOp (SegMap _ _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody body
-  usageInOp (SegRed _ _ _ _ _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody body
-  usageInOp (SegScan _ _ _ _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody body
-  usageInOp (SegGenRed _ ops _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList (consumedInKernelBody body) <>
-    concatMap genReduceDest ops
-
 consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
 consumedInKernelBody (KernelBody attr stms _) =
@@ -924,12 +911,6 @@ instance OpMetrics inner => OpMetrics (HostOp lore inner) where
   opMetrics GetSizeMax{} = seen "GetSizeMax"
   opMetrics CmpSizeLe{} = seen "CmpSizeLe"
   opMetrics (HostOp op) = opMetrics op
-
-instance UsageInOp inner => UsageInOp (HostOp lore inner) where
-  usageInOp GetSize{} = mempty
-  usageInOp GetSizeMax{} = mempty
-  usageInOp CmpSizeLe{} = mempty
-  usageInOp (HostOp op) = usageInOp op
 
 typeCheckHostOp :: TC.Checkable lore =>
                    (inner -> TC.TypeM lore ())

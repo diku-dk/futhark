@@ -487,10 +487,6 @@ instance Annotations lore => ST.IndexOp (SOAC lore) where
               | otherwise = lift Nothing
   indexOp _ _ _ _ = Nothing
 
-instance Aliased lore => UsageInOp (SOAC lore) where
-  usageInOp (Screma _ (ScremaForm _ _ f) arrs) = usageInLambda f arrs
-  usageInOp _ = mempty
-
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
 typeCheckSOAC (CmpThreshold what _) = TC.require [Prim int32] what
 typeCheckSOAC (Stream size form lam arrexps) = do
