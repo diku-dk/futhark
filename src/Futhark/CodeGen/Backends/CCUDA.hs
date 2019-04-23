@@ -214,11 +214,10 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
 callKernel (DistributeHusk hspace src_mem interm_mem interm_size red body after) = do
-  let HuskSpace _ src_elems _ parts_elems parts_mem _ = hspace
+  let HuskSpace _ src_elems _ parts_elems parts_elems_offset parts_mem _ = hspace
   body_node_id <- newVName "body_node_id"
   red_node_id <- newVName "red_node_id"
   elems_per_node <- newVName "elems_per_node"
-  parts_elems_offset <- newVName "parts_elems_offset"
   interm_cols <- replicateM (length interm_mem) $ newVName "interm_col"
   body' <- GC.blockScope $ GC.compileCode body
   red' <- GC.blockScope $ GC.compileCode red

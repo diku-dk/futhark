@@ -837,6 +837,7 @@ data HuskSpace lore = HuskSpace
                     , hspaceSourceElems :: SubExp
                     , hspacePartitions :: [LParam lore]
                     , hspacePartitionElems :: VName
+                    , hspacePartitionElemOffset :: VName
                     , hspacePartitionsMemory :: [VName]
                     , hspaceNodeResults :: [VName]
                     }
@@ -846,29 +847,31 @@ deriving instance Annotations lore => Ord (HuskSpace lore)
 deriving instance Annotations lore => Show (HuskSpace lore)
 
 scopeOfHuskSpace :: HuskSpace lore -> Scope lore
-scopeOfHuskSpace (HuskSpace _ _ parts parts_elems _ _) =
-  M.singleton parts_elems (IndexInfo Int32) <> scopeOfLParams parts
+scopeOfHuskSpace (HuskSpace _ _ parts parts_elems parts_elem_offset _ _) =
+  M.fromList [(parts_elems, IndexInfo Int32), (parts_elem_offset, IndexInfo Int32)]
+  <> scopeOfLParams parts
 
 boundByHuskSpace :: HuskSpace lore -> Names
-boundByHuskSpace (HuskSpace _ _ _ parts_elems parts_mem node_res) =
-  S.fromList $ concat [[parts_elems], parts_mem, node_res]
+boundByHuskSpace (HuskSpace _ _ _ parts_elems parts_elem_offset parts_mem node_res) =
+  S.fromList $ concat [[parts_elems, parts_elem_offset], parts_mem, node_res]
 
 constructHuskSpace :: (MonadFreshNames m, HasScope lore m, LParamAttr lore ~ Type)
                    => [VName] -> SubExp -> [Type] -> m (HuskSpace lore)
 constructHuskSpace src src_elems ts = do
   parts_names <- replicateM (length src) (newVName "partition")
   parts_elems <- newVName "partition_elems"
+  parts_elem_offset <- newVName "parts_elem_offset"
   parts_mem <- replicateM (length src) (newVName "partition_mem")
   node_res <- replicateM (length ts) (newVName "node_res")
   src_ts <- mapM lookupType src
   let parts_ts = map (\t -> setOuterSize t $ Var parts_elems) src_ts
       parts = zipWith Param parts_names parts_ts
-  return $ HuskSpace src src_elems parts parts_elems parts_mem node_res
+  return $ HuskSpace src src_elems parts parts_elems parts_elem_offset parts_mem node_res
 
 convertHuskSpace :: LParamAttr fromlore ~ LParamAttr tolore
                  => HuskSpace fromlore -> HuskSpace tolore
-convertHuskSpace (HuskSpace src src_elems parts parts_elems parts_mem node_res) =
-  HuskSpace src src_elems parts parts_elems parts_mem node_res
+convertHuskSpace (HuskSpace src src_elems parts parts_elems parts_elem_offset parts_mem node_res) =
+  HuskSpace src src_elems parts parts_elems parts_elem_offset parts_mem node_res
 
 instance (Attributes lore, Substitute inner) => Substitute (HostOp lore inner) where
   substituteNames substs (HostOp op) =
@@ -881,10 +884,11 @@ instance (Attributes lore, Substitute inner) => Substitute (HostOp lore inner) w
   substituteNames _ x = x
 
 instance Substitute (LParamAttr lore) => Substitute (HuskSpace lore) where
-  substituteNames substs (HuskSpace src src_elems parts parts_elems parts_mem node_res) =
+  substituteNames substs (HuskSpace src src_elems parts parts_elems parts_elem_offset parts_mem node_res) =
     HuskSpace (substituteNames substs src) (substituteNames substs src_elems)
               (substituteNames substs parts) (substituteNames substs parts_elems)
-              (substituteNames substs parts_mem) (substituteNames substs node_res)
+              (substituteNames substs parts_elem_offset) (substituteNames substs parts_mem)
+              (substituteNames substs node_res)
 
 instance (Attributes lore, Rename inner) => Rename (HostOp lore inner) where
   rename (HostOp op) = HostOp <$> rename op
@@ -898,12 +902,13 @@ instance (Attributes lore, Rename inner) => Rename (HostOp lore inner) where
   rename x = pure x
 
 instance Renameable lore => Rename (HuskSpace lore) where
-  rename (HuskSpace src src_elems parts parts_elems parts_mem node_res) = do
+  rename (HuskSpace src src_elems parts parts_elems parts_elem_offset parts_mem node_res) = do
     parts' <- rename parts
     parts_elems' <- rename parts_elems
+    parts_elem_offset' <- rename parts_elem_offset
     parts_mem' <- rename parts_mem
     node_res' <- rename node_res
-    return $ HuskSpace src src_elems parts' parts_elems' parts_mem' node_res'
+    return $ HuskSpace src src_elems parts' parts_elems' parts_elem_offset' parts_mem' node_res'
 
 instance (Attributes lore, IsOp inner) => IsOp (HostOp lore inner) where
   safeOp (HostOp op) = safeOp op
@@ -1030,9 +1035,10 @@ instance (PrettyLore lore, PP.Pretty inner) => PP.Pretty (HostOp lore inner) whe
   ppr (HostOp op) = ppr op
 
 instance Pretty (HuskSpace lore) where
-  ppr (HuskSpace src src_elems parts parts_elems parts_mem node_res) =
+  ppr (HuskSpace src src_elems parts parts_elems parts_elem_offset parts_mem node_res) =
     parens (commasep [text "source data:" <+> ppr src,
                       text "number of source elements:" <+> ppr src_elems,
+                      text "offset of source elements:" <+> ppr parts_elem_offset,
                       text "intermediate results ->" <+> ppr node_res,
                       text "partitions ->" <+> ppr (map paramName parts),
                       text "partition memory ->" <+> ppr parts_mem,

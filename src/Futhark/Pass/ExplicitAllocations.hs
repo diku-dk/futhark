@@ -554,27 +554,23 @@ handleHostOp (HostOp (SegGenRed space ops ts body)) = do
 
 handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
   let hspace' = huskSpaceMemInfo hspace
-      lp' = zipWith paramMemInfo lp $ concat $ replicate 2 $ hspaceNodeResults hspace
+      lp' = zipWith huskParamMemInfo lp $ concat $ replicate 2 $ hspaceNodeResults hspace
   (body', red_op') <- localScope (scopeOfHuskSpace hspace') $ do
     b <- allocInBodyNoDirect body
     r <- allocInLambda lp' lb lr
     return (b, r)
   return $ Inner $ Husk hspace' red_op' nes ts body'
-  where paramMemInfo (Param name (Prim pt)) _ = Param name $ MemPrim pt
-        paramMemInfo (Param name (Mem size space)) _ = Param name $ MemMem size space
-        paramMemInfo (Param name t@(Array pt shape u)) mem =
-          Param name $ directIndexFunction pt shape u mem t
 
-huskSpaceMemInfo :: (LParamAttr fromlore ~ Type,
-                     LParamAttr tolore ~ MemInfo SubExp NoUniqueness MemBind)
-                 => HuskSpace fromlore -> HuskSpace tolore
-huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_mem node_res) =
-  HuskSpace src src_elems parts' parts_elems parts_mem node_res
-  where parts' = zipWith convert parts parts_mem
-        convert (Param name (Prim pt)) _ = Param name $ MemPrim pt
-        convert (Param name (Mem size space)) _ = Param name $ MemMem size space
-        convert (Param name t@(Array pt shape u)) mem =
-          Param name $ directIndexFunction pt shape u mem t
+huskSpaceMemInfo :: HuskSpace Kernels -> HuskSpace ExplicitMemory
+huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_elem_offset parts_mem node_res) =
+  HuskSpace src src_elems parts' parts_elems parts_elem_offset parts_mem node_res
+  where parts' = zipWith huskParamMemInfo parts parts_mem
+
+huskParamMemInfo :: LParam Kernels -> VName -> LParam ExplicitMemory
+huskParamMemInfo (Param name (Prim pt)) _ = Param name $ MemPrim pt
+huskParamMemInfo (Param name (Mem size space)) _ = Param name $ MemMem size space
+huskParamMemInfo (Param name t@(Array pt shape u)) mem =
+  Param name $ directIndexFunction pt shape u mem t
 
 subInKernel :: AllocM InInKernel OutInKernel a
             -> AllocM fromlore2 ExplicitMemory a

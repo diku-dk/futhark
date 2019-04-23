@@ -61,7 +61,7 @@ opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
 opCompiler dest (Inner (HostOp kernel)) =
   kernelCompiler dest kernel
 opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes _ (Body _ bnds ses))) = do
-  let HuskSpace src _ _ _ parts_mem node_res = hspace
+  let HuskSpace src _ _ _ _ parts_mem node_res = hspace
       red_op_params = lambdaParams red_op
       (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
   src_mems <- mapM ImpGen.lookupArray src
