@@ -435,10 +435,11 @@ fuseStreamIota _ _ _ _ = cannotSimplify
 
 fuseHuskIota :: TopDownRuleOp (Wise Kernels)
 fuseHuskIota vtable pat _ (Husk hspace red_op nes ts body)
-  | ([(iota_cs, iota_part, iota_start, iota_stride, iota_t)], zsrc) <- partitionEithers $
-        zipWith (isIota vtable) (hspacePartitions hspace) (hspaceSource hspace) = do
+  | ([(iota_cs, (iota_part, _), iota_start, iota_stride, iota_t)], zsrc) <- partitionEithers $
+        zipWith (isIota vtable) partm (hspaceSource hspace) = do
 
-      let (parts', src') = unzip zsrc
+      let (partm', src') = unzip zsrc
+          (parts', part_mem') = unzip partm'
           elems = hspacePartitionElems hspace
           offset = hspacePartitionElemOffset hspace
 
@@ -454,8 +455,10 @@ fuseHuskIota vtable pat _ (Husk hspace red_op nes ts body)
         return body
       let hspace' = hspace { hspaceSource = src'
                            , hspacePartitions = parts'
+                           , hspacePartitionsMemory = part_mem'
                            }
       letBind_ pat $ Op $ Husk hspace' red_op nes ts body'
+  where partm = zip (hspacePartitions hspace) (hspacePartitionsMemory hspace)
 fuseHuskIota _ _ _ _ = cannotSimplify
 
 isIota :: ST.SymbolTable lore -> a -> VName
