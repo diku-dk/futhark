@@ -50,7 +50,6 @@ import Data.List
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Util.Pretty as PP
@@ -67,7 +66,6 @@ import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeBodyAliases, removeStmAliases)
 import Futhark.Representation.Kernels.KernelExp (SplitOrdering(..))
 import Futhark.Representation.Kernels.Sizes
-import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import Futhark.Tools (partitionChunkedKernelLambdaParameters)
