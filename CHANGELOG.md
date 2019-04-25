@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * The array creation functions exported by generated C code now take
+    `int64_t` arguments for the shape, rather than `int`.  This is in
+    line with what the shape functions return.
+
 ### Fixed
 
   * Fixes to reading values under Python 3.
