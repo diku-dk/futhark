@@ -10,7 +10,6 @@ module Futhark.CodeGen.ImpGen.Kernels
 import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Maybe
-import qualified Data.Map.Strict as M
 import Data.List
 
 import Prelude hiding (quot)
@@ -78,19 +77,6 @@ kernelCompiler :: Pattern ExplicitMemory -> Kernel InKernel
 kernelCompiler pat (Kernel desc space _ kernel_body) = do
   (constants, init_constants) <- kernelInitialisation space
 
-  kernel_body' <-
-    makeAllMemoryGlobal $ ImpGen.subImpM_ (inKernelOperations constants) $ do
-    init_constants
-    compileKernelStms constants (kernelBodyStms kernel_body) $
-      zipWithM_ (compileKernelResult constants) (patternElements pat) $
-      kernelBodyResult kernel_body
-
-  let bound_in_kernel =
-        M.keys $
-        scopeOfKernelSpace space <>
-        scopeOf (kernelBodyStms kernel_body)
-  (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
-
   forM_ (kernelHints desc) $ \(s,v) -> do
     ty <- case v of
       Constant pv -> return $ Prim $ primValueType pv
@@ -101,15 +87,11 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
 
     ImpGen.compileSubExp v >>= ImpGen.emit . Imp.DebugPrint s (elemType ty)
 
-  sOp $ Imp.CallKernel Imp.Kernel
-            { Imp.kernelBody = kernel_body'
-            , Imp.kernelLocalMemory = local_memory
-            , Imp.kernelUses = uses
-            , Imp.kernelNumGroups = [ImpGen.compileSubExpOfType int32 $ spaceNumGroups space]
-            , Imp.kernelGroupSize = [ImpGen.compileSubExpOfType int32 $ spaceGroupSize space]
-            , Imp.kernelName = nameFromString $ kernelName desc ++ "_" ++
-                               show (baseTag $ kernelGlobalThreadIdVar constants)
-            }
+  sKernel constants (kernelName desc) $ do
+    init_constants
+    compileKernelStms constants (kernelBodyStms kernel_body) $
+      zipWithM_ (compileKernelResult constants) (patternElements pat) $
+      kernelBodyResult kernel_body
 
 
 kernelCompiler pat (SegMap space _ body) =
