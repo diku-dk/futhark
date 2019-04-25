@@ -704,7 +704,7 @@ arrayLibraryFunctions space pt signed shape = do
   shape_array <- publicName $ "shape_" ++ name
 
   let shape_names = [ "dim"++show i | i <- [0..rank-1] ]
-      shape_params = [ [C.cparam|int $id:k|] | k <- shape_names ]
+      shape_params = [ [C.cparam|typename int64_t $id:k|] | k <- shape_names ]
       arr_size = cproduct [ [C.cexp|$id:k|] | k <- shape_names ]
       arr_size_array = cproduct [ [C.cexp|arr->shape[$int:i]|] | i <- [0..rank-1] ]
   copy <- asks envCopy
