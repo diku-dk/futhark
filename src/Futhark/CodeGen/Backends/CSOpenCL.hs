@@ -129,6 +129,7 @@ callKernel (Imp.GetSizeMax v size_class) =
                      Imp.SizeNumGroups -> "MaxNumGroups"
                      Imp.SizeTile -> "MaxTileSize"
                      Imp.SizeThreshold{} -> "MaxThreshold"
+                     Imp.SizeLocalMemory -> "MaxLocalMemory"
 
 callKernel (Imp.HostCode c) = CS.compileCode c
 
