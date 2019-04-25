@@ -97,6 +97,7 @@ struct opencl_context {
   size_t max_num_groups;
   size_t max_tile_size;
   size_t max_threshold;
+  size_t max_local_memory;
 
   size_t lockstep_width;
 };
@@ -531,6 +532,10 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
   size_t max_tile_size = sqrt(max_group_size);
 
+  cl_ulong max_local_memory;
+  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_LOCAL_MEM_SIZE,
+                                       sizeof(size_t), &max_local_memory, NULL));
+
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
@@ -553,6 +558,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   ctx->max_group_size = max_group_size;
   ctx->max_tile_size = max_tile_size; // No limit.
   ctx->max_threshold = ctx->max_num_groups = 0; // No limit.
+  ctx->max_local_memory = max_local_memory;
 
   // Now we go through all the sizes, clamp them to the valid range,
   // or set them to the default.

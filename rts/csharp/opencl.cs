@@ -401,6 +401,7 @@ public struct OpenCLContext {
    public int MaxNumGroups;
    public int MaxTileSize;
    public int MaxThreshold;
+   public int MaxLocalMemory;
 
    public int LockstepWidth;
 }
@@ -734,7 +735,7 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
     ComputeErrorCode error;
     CLPlatformHandle platform;
     CLDeviceHandle device;
-    int MaxGroupSize;
+    int MaxGroupSize, MaxLocalMemory;
 
     ctx.OpenCL.LockstepWidth = 0;
 
@@ -777,6 +778,16 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
 
     int MaxTileSize = (int) Math.Sqrt(MaxGroupSize);
 
+    unsafe
+    {
+        IntPtr throwaway1 = new IntPtr();
+        OPENCL_SUCCEED(CL10.GetDeviceInfo(device,
+                                          ComputeDeviceInfo.LocalMemorySize,
+                                          new IntPtr(sizeof(IntPtr)),
+                                          new IntPtr(&MaxLocalMemory),
+                                          out throwaway1));
+    }
+
     // Make sure this function is defined.
     PostOpenCLSetup(ref ctx, ref device_option);
 
@@ -795,6 +806,7 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
     ctx.OpenCL.MaxGroupSize = MaxGroupSize;
     ctx.OpenCL.MaxTileSize = MaxTileSize; // No limit.
     ctx.OpenCL.MaxThreshold = ctx.OpenCL.MaxNumGroups; // No limit.
+    ctx.OpenCL.MaxLocalMemory = MaxLocalMemory;
 
     // Now we go through all the sizes, clamp them to the valid range,
     // or set them to the default.

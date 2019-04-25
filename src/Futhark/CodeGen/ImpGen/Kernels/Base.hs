@@ -1059,6 +1059,7 @@ sKernel constants name m = do
   body <- makeAllMemoryGlobal $
           ImpGen.subImpM_ (inKernelOperations constants) m
   (uses, local_memory) <- computeKernelUses body mempty
+
   ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
     { Imp.kernelBody = body
     , Imp.kernelLocalMemory = local_memory
