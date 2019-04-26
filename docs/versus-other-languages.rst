@@ -3,23 +3,23 @@
 Futhark Compared to Other Functional Languages
 ==============================================
 
-This guide is intended to quickly get programmers who are familiar
-with other functional languages acquainted with Futhark.
+This guide is intended for programmers who are familiar with other functional
+languages and want to start working with Futhark.
 
 Futhark is a simple language with a complex compiler.
 Functional programming is fundamentally well suited to
 data-parallelism, so Futhark's syntax and underlying concepts are taken directly
 from established functional languages; mostly from Haskell and the
-members of the ML familiy.  While Futhark does add a few small
+members of the ML family.  While Futhark does add a few small
 conveniences (built-in array types) and one complicated and unusual
 feature (in-place updates via uniqueness types, see
 :ref:`in-place-updates`), a programmer familiar with a common
-functional language should be able to easily understand the meaning of a
-Futhark program, and quickly start writing their own programs.  To
-speed up this process, we describe, in the following, some of the various
-quirks and unexpected limitations imposed by Futhark.  It is
-recommended to read some of the `example programs`_ along with this guide.
-This guide does *not* cover all Futhark features worth knowing, so do also
+functional language should be able to understand the meaning of a
+Futhark program, and quickly begin writing their own programs.  To
+speed up this process, we describe here some of the various
+quirks and unexpected limitations imposed by Futhark. We also
+recommended reading some of the `example programs`_ along with this guide.
+The guide does *not* cover all Futhark features worth knowing, so do also
 skim :ref:`language-reference`.
 
 .. _`example programs`: https://github.com/diku-dk/futhark/tree/master/examples
@@ -49,7 +49,7 @@ ML).
 User-defined operators are possible, but the fixity of the operator
 depends on its name.  Specifically, the fixity of a user-defined
 operator *op* is equal to the fixity of the built-in operator that is
-the longest prefix of *op*.  So, for example, ``<<=`` would have the
+the longest prefix of *op*.  For example, ``<<=`` would have the
 same fixity as ``<<``, and ``=<<`` the same as ``=``.  This rule is the
 same as the rule found in OCaml and F#.
 
@@ -73,12 +73,12 @@ Futhark program.
 
 The evaluation semantics are entirely sequential, with parallelism
 being solely an operational detail.  Hence, race conditions are
-impossible.  However, the Futhark compiler does not automatically go
+impossible. The Futhark compiler does not automatically go
 looking for parallelism.  Only certain special constructs and built-in
 library functions (in particular ``map``, ``reduce``, ``scan``, and
 ``filter``) may be executed in parallel.
 
-Currying and partial application works as usual (although functions
+Currying and partial application work as usual (although functions
 are not fully first class; see `Types`_).  Some Futhark language
 constructs look like functions, but are not.  This means they cannot
 be partially applied.  These include ``unsafe`` and ``assert``.
@@ -86,7 +86,7 @@ be partially applied.  These include ``unsafe`` and ``assert``.
 Lambda terms are written as ``\x -> x + 2``, as in Haskell.
 
 A Futhark program is read top-down, and all functions must be declared
-in the order they are used, similarly to Standard ML.  Unlike just
+in the order they are used, like Standard ML.  Unlike just
 about all functional languages, recursive functions are *not*
 supported.  Most of the time, you will use bulk array operations
 instead, but there is also a dedicated ``loop`` language construct,
@@ -154,7 +154,7 @@ restrictions), so we could also just write it as::
 
   let id x = x
 
-Type appreviations are possible::
+Type abbreviations are possible::
 
   type foo = (i32, i32)
 
