@@ -10,6 +10,7 @@ module Futhark.Analysis.PrimExp
   , false
   , constFoldPrimExp
   , antiUnifyPrimExps
+  , getPrimExpExtsWithPTp
 
   , module Futhark.Representation.Primitive
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
@@ -18,11 +19,10 @@ module Futhark.Analysis.PrimExp
 import           Data.Foldable
 import           Data.Traversable
 import qualified Data.Map.Strict as M
-import qualified Data.Maybe as Mb
-import           Control.Monad(zipWithM)
+import qualified Data.Set as S
 
-import           Futhark.MonadFreshNames
 import           Language.Futhark.Core (VName)
+import           Futhark.Representation.AST.Syntax.Core (Ext(..))
 import           Futhark.Representation.AST.Attributes.Names
 import           Futhark.Representation.Primitive
 import           Futhark.Util.IntegralExp
@@ -311,66 +311,69 @@ instance Pretty v => Pretty (PrimExp v) where
   ppr (UnOpExp op x)    = ppr op <+> parens (ppr x)
   ppr (FunExp h args _) = text h <+> parens (commasep $ map ppr args)
 
+getPrimExpExtsWithPTp :: PrimExp (Ext VName) -> S.Set (Int,PrimType)
+getPrimExpExtsWithPTp (LeafExp (Ext i) ptp) = S.singleton (i,ptp)
+getPrimExpExtsWithPTp (LeafExp (Free _) _) = S.empty
+getPrimExpExtsWithPTp (ValueExp _) = S.empty
+getPrimExpExtsWithPTp (UnOpExp _ e) = getPrimExpExtsWithPTp e
+getPrimExpExtsWithPTp (ConvOpExp _ e) = getPrimExpExtsWithPTp e
+getPrimExpExtsWithPTp (BinOpExp _ e1 e2) =
+  S.union (getPrimExpExtsWithPTp e1) (getPrimExpExtsWithPTp e2)
+getPrimExpExtsWithPTp (CmpOpExp _ e1 e2) =
+  S.union (getPrimExpExtsWithPTp e1) (getPrimExpExtsWithPTp e2)
+getPrimExpExtsWithPTp (FunExp _ pes _) =
+  S.unions $ map getPrimExpExtsWithPTp pes
 
-type MapPExp = M.Map VName (PrimExp VName, PrimExp VName)
+type MapPExp = M.Map Int (PrimExp VName, PrimExp VName)
 
 -- | Anti-Unification of two primary expressions `e1` and `e2` computes
 --   a more general (generic) expression `e`, and two substitutions `m1`
 --   and `m2` such that applying the substitutions `m1` and `m2` to `e`
 --   can be symbolically simplified to `e1` and `e2`.
-antiUnifyPrimExps :: MonadFreshNames m => PrimExp VName -> PrimExp VName
-                                  -> m (Maybe (PrimExp VName, MapPExp))
-antiUnifyPrimExps exp1@(LeafExp v1 ptp1) exp2@(LeafExp v2 ptp2) =
+--   It assumes the two expressions are of the same type, hence
+--   antiunification is always possible.
+antiUnifyPrimExps :: Int -> PrimExp VName -> PrimExp VName
+                  -> (Int, PrimExp (Ext VName), MapPExp)
+antiUnifyPrimExps k exp1@(LeafExp v1 ptp1) exp2@(LeafExp v2 ptp2) =
   if v1 == v2 && ptp1 == ptp2
-  then return $ Just (LeafExp v1 ptp1, M.empty)
-  else aggrAntiUnify exp1 exp2
-antiUnifyPrimExps exp1@(ValueExp v1) exp2@(ValueExp v2) =
-  if v1 == v2 then return $ Just (ValueExp v1, M.empty)
-  else aggrAntiUnify exp1 exp2
-antiUnifyPrimExps exp1@(UnOpExp u1 e1) exp2@(UnOpExp u2 e2) =
+  then (k, LeafExp (Free v1) ptp1, M.empty)
+  else aggrAntiUnify k exp1 exp2
+antiUnifyPrimExps k exp1@(ValueExp v1) exp2@(ValueExp v2) =
+  if v1 == v2 then (k, ValueExp v1, M.empty)
+  else aggrAntiUnify k exp1 exp2
+antiUnifyPrimExps k exp1@(UnOpExp u1 e1) exp2@(UnOpExp u2 e2) =
   if u1 == u2
-  then do tmp <- antiUnifyPrimExps e1 e2
-          case tmp of
-            Just(e,t) -> return $ Just (UnOpExp u1 e, t)
-            _ -> return Nothing
-  else aggrAntiUnify exp1 exp2
-antiUnifyPrimExps exp1@(ConvOpExp cvop1 e1) exp2@(ConvOpExp cvop2 e2) =
+  then let (k', e, t) = antiUnifyPrimExps k e1 e2
+       in  (k', UnOpExp u1 e, t)
+  else aggrAntiUnify k exp1 exp2
+antiUnifyPrimExps k exp1@(ConvOpExp cvop1 e1) exp2@(ConvOpExp cvop2 e2) =
   if cvop1 == cvop2
-  then do tmp <- antiUnifyPrimExps e1 e2
-          case tmp of
-            Just(e,t) -> return $ Just (ConvOpExp cvop1 e, t)
-            _ -> return Nothing
-  else aggrAntiUnify exp1 exp2
-antiUnifyPrimExps exp1@(BinOpExp bop1 e11 e12) exp2@(BinOpExp bop2 e21 e22) =
+  then let (k', e, t) = antiUnifyPrimExps k e1 e2
+       in  (k', ConvOpExp cvop1 e, t)
+  else aggrAntiUnify k exp1 exp2
+antiUnifyPrimExps k exp1@(BinOpExp bop1 e11 e12) exp2@(BinOpExp bop2 e21 e22) =
   if bop1 == bop2
-  then do tmp1 <- antiUnifyPrimExps e11 e21
-          tmp2 <- antiUnifyPrimExps e12 e22
-          case (tmp1, tmp2) of
-            (Just (e1,t1), Just(e2,t2)) -> return $ Just (BinOpExp bop1 e1 e2, t1 `M.union` t2)
-            (_, _) -> return Nothing
-  else aggrAntiUnify exp1 exp2
-antiUnifyPrimExps exp1@(CmpOpExp cop1 e11 e12) exp2@(CmpOpExp cop2 e21 e22) =
+  then let (k', e1, t1) = antiUnifyPrimExps k  e11 e21
+           (k'',e2, t2) = antiUnifyPrimExps k' e12 e22
+       in  (k'', BinOpExp bop1 e1 e2, t1 `M.union` t2)
+  else aggrAntiUnify k exp1 exp2
+antiUnifyPrimExps k exp1@(CmpOpExp cop1 e11 e12) exp2@(CmpOpExp cop2 e21 e22) =
   if cop1 == cop2
-  then do tmp1 <- antiUnifyPrimExps e11 e21
-          tmp2 <- antiUnifyPrimExps e12 e22
-          case (tmp1, tmp2) of
-            (Just(e1,t1), Just(e2,t2)) -> return $ Just (CmpOpExp cop1 e1 e2, t1 `M.union` t2)
-            (_, _) -> return Nothing
-  else aggrAntiUnify exp1 exp2
-antiUnifyPrimExps exp1@(FunExp fnm1 args1 tp1) exp2@(FunExp fnm2 args2 tp2) = do
-  tmp <- zipWithM antiUnifyPrimExps args1 args2
-  let args = Mb.catMaybes tmp
-  if (tp1 == tp2) && (length args1 == length args2) && (length args == length args1)
-  then if fnm1 == fnm2
-       then return $ Just (FunExp fnm1 (map fst args) tp1, M.unions (map snd args))
-       else aggrAntiUnify exp1 exp2
-  else return Nothing
-antiUnifyPrimExps exp1 exp2 = aggrAntiUnify exp1 exp2
+  then let (k', e1, t1) = antiUnifyPrimExps k  e11 e21
+           (k'',e2, t2) = antiUnifyPrimExps k' e12 e22
+       in  (k'', CmpOpExp cop1 e1 e2, t1 `M.union` t2)
+  else aggrAntiUnify k exp1 exp2
+antiUnifyPrimExps k exp1@(FunExp fnm1 args1 tp1) exp2@(FunExp fnm2 args2 tp2) =
+  if (fnm1 == fnm2) && (tp1 == tp2) && (length args1 == length args2)
+  then let (k', args', tab) =
+            foldl (\(k_acc, arg_acc, tab_acc) (a1,a2) ->
+                    let (k_acc', a, t) = antiUnifyPrimExps k_acc a1 a2
+                    in  (k_acc', arg_acc++[a], tab_acc `M.union` t)
+                  ) (k, [], M.empty) (zip args1 args2)
+       in  (k', FunExp fnm1 args' tp1, tab)
+  else aggrAntiUnify k exp1 exp2
+antiUnifyPrimExps k exp1 exp2 = aggrAntiUnify k exp1 exp2
 
-aggrAntiUnify :: MonadFreshNames m => PrimExp VName -> PrimExp VName
-                                   -> m (Maybe (PrimExp VName, MapPExp))
-aggrAntiUnify e1 e2 = do
-  let tp = primExpType e1
-  if tp /= primExpType e2 then return Nothing
-  else do nm <- newVName "antiunif"
-          return $ Just (LeafExp nm tp, M.singleton nm (e1, e2))
+aggrAntiUnify :: Int -> PrimExp VName -> PrimExp VName
+              -> (Int, PrimExp (Ext VName), MapPExp)
+aggrAntiUnify k e1 e2 = (k+1, LeafExp (Ext k) (primExpType e1), M.singleton k (e1, e2))

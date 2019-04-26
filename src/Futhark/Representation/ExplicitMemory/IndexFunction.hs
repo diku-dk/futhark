@@ -34,17 +34,15 @@ import Data.Maybe (isJust)
 import Control.Monad.Identity
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
-import qualified Data.Maybe as Mb
 
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Representation.AST.Syntax
-  (ShapeChange, DimChange(..), DimIndex(..), Slice, unitSlice, dimFix)
+  (ShapeChange, DimChange(..), DimIndex(..), Slice, unitSlice, dimFix, Ext(..))
 import Futhark.Representation.AST.Attributes
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.MonadFreshNames
 import Language.Futhark.Core (VName)
 
 -- | LMAD's representation consists of a permutation, a general offset, and, for
@@ -800,41 +798,32 @@ ixfunMonotonicityRots ignore_rots (IxFun (lmad :| lmads) _ _) =
 --   3. Most importantly, both index functions correspond to the same permutation
 --      (since the permutation is represented by INTs, this restriction cannot
 --       be relaxed, unless we move to a gated-LMAD representation!)
-antiUnifyIxFun :: MonadFreshNames m => IxFun (PrimExp VName) -> IxFun (PrimExp VName) ->
-               m (Maybe (IxFun (PrimExp VName), M.Map VName (PrimExp VName, PrimExp VName)))
-antiUnifyIxFun (IxFun (lmad1 :| []) oshp1 ctg1)
-               (IxFun (lmad2 :| []) oshp2 ctg2) =
+antiUnifyIxFun :: Int -> IxFun (PrimExp VName) -> IxFun (PrimExp VName) ->
+                  Maybe (Int, IxFun (PrimExp (Ext VName)), M.Map Int (PrimExp VName, PrimExp VName))
+antiUnifyIxFun k0 (IxFun (lmad1 :| []) oshp1 ctg1)
+                  (IxFun (lmad2 :| []) oshp2 ctg2) =
   if (length oshp1 /= length oshp2) || (ctg1 /= ctg2) ||
      (lmadPermutation lmad1 /= lmadPermutation lmad2) ||
      (lmadDMon lmad1 /= lmadDMon lmad1)
-  then return Nothing
-  else do
+  then Nothing
+  else
     let (ctg, dperm, dmon) = (ctg1, lmadPermutation lmad1, lmadDMon lmad1)
-    (s1, oshp, tab1) <- antiUnifyExps oshp1 oshp2
-    (s2, dstd, tab2) <- antiUnifyExps (lmadDSrd lmad1) (lmadDSrd lmad2)
-    (s3, dshp, tab3) <- antiUnifyExps (lmadDShp lmad1) (lmadDShp lmad2)
-    (s4, drot, tab4) <- antiUnifyExps (lmadDRot lmad1) (lmadDRot lmad2)
-    tmp <- antiUnifyPrimExps (lmadOffset lmad1) (lmadOffset lmad2)
-    let (s5, offt, tab5) =
-          case tmp of
-            Just(e,t) -> (True, e, t)
-            Nothing   -> (False, lmadOffset lmad1, M.empty)
-    if s1 && s2 && s3 && s4 && s5
-    then do let lmad_dims = map (\(a,b,c,d,e) -> LMADDim a b c d e) $
-                             zip5 dstd drot dshp dperm dmon
-                lmad = LMAD offt lmad_dims
-            return $ Just (IxFun (lmad :| []) oshp ctg, M.unions [tab1, tab2, tab3, tab4, tab5])
-    else return Nothing
+        (k1, oshp, tab1) = antiUnifyExps k0 oshp1 oshp2
+        (k2, dstd, tab2) = antiUnifyExps k1 (lmadDSrd lmad1) (lmadDSrd lmad2)
+        (k3, dshp, tab3) = antiUnifyExps k2 (lmadDShp lmad1) (lmadDShp lmad2)
+        (k4, drot, tab4) = antiUnifyExps k3 (lmadDRot lmad1) (lmadDRot lmad2)
+        (k5, offt, tab5) = antiUnifyPrimExps k4 (lmadOffset lmad1) (lmadOffset lmad2)
+        lmad_dims = map (\(a,b,c,d,e) -> LMADDim a b c d e) $
+                        zip5 dstd drot dshp dperm dmon
+        lmad = LMAD offt lmad_dims
+    in  Just (k5, IxFun (lmad :| []) oshp ctg, M.unions [tab1, tab2, tab3, tab4, tab5])
   where lmadDMon = map ldMon    . lmadDims
         lmadDSrd = map ldStride . lmadDims
         lmadDShp = map ldShape  . lmadDims
         lmadDRot = map ldRotate . lmadDims
-        antiUnifyExps l1 l2 = do
-            let n = length l1
-            tmp <- zipWithM antiUnifyPrimExps l1 l2
-            let res = Mb.catMaybes tmp
-            if (n /= length res) || (n /= length l2)
-            then return (False, l1, M.empty)
-            else do let (es, tabs) = unzip res
-                    return (True, es, M.unions tabs)
-antiUnifyIxFun _ _ = return Nothing
+        antiUnifyExps k l1 l2 =
+          foldl (\(k_acc, l_acc, tab) (pe1,pe2) ->
+                    let (k_acc', e, t) = antiUnifyPrimExps k_acc pe1 pe2
+                    in  (k_acc', l_acc++[e], M.union t tab)
+                ) (k,[],M.empty) (zip l1 l2)
+antiUnifyIxFun _ _ _ = Nothing
