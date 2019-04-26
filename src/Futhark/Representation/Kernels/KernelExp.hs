@@ -27,13 +27,11 @@ import qualified Data.Map.Strict as M
 
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.Range as Range
-import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Representation.Aliases
 import Futhark.Representation.Ranges
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplify.Lore
-import Futhark.Analysis.Usage
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.SymbolTable as ST

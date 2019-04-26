@@ -63,7 +63,6 @@ import Futhark.Optimise.Simplify.Lore
 import Futhark.Representation.Ranges (Ranges, removeLambdaRanges)
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.Aliases (Aliases, removeLambdaAliases)
-import Futhark.Analysis.Usage
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.TypeCheck as TC
