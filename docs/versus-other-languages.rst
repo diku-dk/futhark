@@ -10,7 +10,7 @@ Futhark is a simple language with a complex compiler.
 Functional programming is fundamentally well suited to
 data-parallelism, so Futhark's syntax and underlying concepts are taken directly
 from established functional languages; mostly from Haskell and the
-members of the ML familiy.  While Futhark does add a few small
+members of the ML family.  While Futhark does add a few small
 conveniences (built-in array types) and one complicated and unusual
 feature (in-place updates via uniqueness types, see
 :ref:`in-place-updates`), a programmer familiar with a common
@@ -154,7 +154,7 @@ restrictions), so we could also just write it as::
 
   let id x = x
 
-Type appreviations are possible::
+Type abbreviations are possible::
 
   type foo = (i32, i32)
 
