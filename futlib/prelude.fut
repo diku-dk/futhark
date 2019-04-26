@@ -23,12 +23,12 @@ let t64 (x: f64): i32 = i32.f64 x
 let opaque 't (x: t): t =
   intrinsics.opaque x
 
--- | Semantically just identity, but in `futharki` the argument value
--- will be printed.
+-- | Semantically just identity, but when run in the interpreter, the
+-- argument value will be printed.
 let trace 't (x: t): t =
   intrinsics.trace x
 
 -- | Semantically just identity, but acts as a break point in
--- `futharki`.
+-- `futhark repl`.
 let break 't (x: t): t =
   intrinsics.break x
