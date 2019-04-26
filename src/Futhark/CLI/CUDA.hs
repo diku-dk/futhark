@@ -24,14 +24,13 @@ main = compilerMain () []
          cuda_sdk <- liftIO $ fromMaybe "." <$> lookupEnv "CUDA_PATH"
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
-             extra_options
+             os_options
               | System.Info.os == "mingw32" =
                 [ "-I" ++ cuda_sdk ++ "\\include",
-                  "-L" ++ cuda_sdk ++ "\\lib\\x64",
-                  "-lcuda",
-                  "-lnvrtc"
+                  "-L" ++ cuda_sdk ++ "\\lib\\x64"
                 ]
-              | otherwise = [ "-lcuda", "-lnvrtc"]
+              | otherwise = []
+             extra_options = os_options ++ [ "-lcuda", "-lnvrtc", "-lpthread"]
          case mode of
            ToLibrary -> do
              let (header, impl) = CCUDA.asLibrary cprog

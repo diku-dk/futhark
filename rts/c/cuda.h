@@ -89,17 +89,37 @@ void cuda_config_init(struct cuda_config *cfg,
   cfg->size_classes = size_classes;
 }
 
+enum cuda_node_message_type {
+  ALLOC,
+  UNREF,
+  MEMCPY_D,
+  MEMCPY_H_TO_D,
+  MEMCPY_D_TO_H,
+  MEMCPY_P_TO_P,
+  LAUNCH
+};
+
+struct cuda_node_message {
+  enum cuda_node_message_type type;
+  void *content;
+};
+
 struct cuda_node_context {
   CUdevice dev;
   CUcontext cu_ctx;
   CUmodule module;
 
   struct free_list free_list;
+  
+  pthread_t thread;
+  struct cuda_node_message current_message;
+  sem_t *message_signal;
 };
 
 struct cuda_context {
   struct cuda_node_context *nodes;
   int32_t active_node;
+  pthread_barrier_t node_sync_point;
 
   size_t max_block_size;
   size_t max_grid_size;
@@ -140,7 +160,7 @@ struct cuda_device_entry {
   int cc_major, cc_minor, id;
 };
 
-static int cuda_devices_setup(struct cuda_context *ctx)
+static int cuda_devices_select(struct cuda_context *ctx)
 {
   int count;
   int contains_valid = 0;
@@ -291,8 +311,7 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev)
   return x[chosen].arch_str;
 }
 
-static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
-                              const char *extra_opts[])
+static char *cuda_compile_ptx(struct cuda_context *ctx, const char *src, const char *extra_opts[])
 {
   nvrtcProgram prog;
   NVRTC_SUCCEED(nvrtcCreateProgram(&prog, src, "futhark-cuda", 0, NULL, NULL));
@@ -474,9 +493,16 @@ CUresult cuda_set_active_node(struct cuda_context *ctx, int node) {
   return cuCtxSetCurrent(ctx->nodes[node].cu_ctx);
 }
 
-static void cuda_module_setup(struct cuda_context *ctx,
-                              const char *src_fragments[],
-                              const char *extra_opts[])
+void cuda_node_setup(struct cuda_node_context *ctx, char *ptx)
+{
+  CUDA_SUCCEED(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
+  free_list_init(&ctx->free_list);
+  CUDA_SUCCEED(cuModuleLoadData(&ctx->module, ptx));
+}
+
+static char *cuda_get_ptx(struct cuda_context *ctx,
+                          const char *src_fragments[],
+                          const char *extra_opts[])
 {
   char *ptx = NULL, *src = NULL;
 
@@ -505,31 +531,17 @@ static void cuda_module_setup(struct cuda_context *ctx,
   }
 
   if (ctx->cfg.load_ptx_from == NULL) {
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
+    ptx = cuda_compile_ptx(ctx, src, extra_opts);
   }
 
-  for (int i = ctx->cfg.num_nodes - 1; i >= 0; --i) {
-    cuda_set_active_node(ctx, i);
-    CUDA_SUCCEED(cuModuleLoadData(&ctx->nodes[ctx->active_node].module, ptx));
-  }
-
-  free(ptx);
   if (src != NULL) {
     free(src);
   }
+
+  return ptx;
 }
 
-void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const char *extra_opts[])
-{
-  CUDA_SUCCEED(cuInit(0));
-  cuda_devices_setup(ctx);
-
-  for (int i = ctx->cfg.num_nodes - 1; i >= 0; --i) {
-    // Move backwards through nodes to have node 0 be the current context after
-    CUDA_SUCCEED(cuCtxCreate(&ctx->nodes[i].cu_ctx, 0, ctx->nodes[i].dev));
-    free_list_init(&ctx->nodes[i].free_list);
-  }
-
+void cuda_enable_peer_access(struct cuda_context *ctx) {
   for (int i = 1; i < ctx->cfg.num_nodes; ++i) {
     int peer_access;
     cuDeviceCanAccessPeer(&peer_access, ctx->nodes[0].dev, ctx->nodes[i].dev);
@@ -537,6 +549,12 @@ void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const cha
       CUDA_SUCCEED(cuCtxEnablePeerAccess(ctx->nodes[i].cu_ctx, 0));
     }
   }
+}
+
+void cuda_setup(struct cuda_context *ctx)
+{
+  CUDA_SUCCEED(cuInit(0));
+  cuda_devices_select(ctx);
 
   // All devices are identical, so use the properties from the first.
   ctx->max_block_size = device_query(ctx->nodes[0].dev, MAX_THREADS_PER_BLOCK);
@@ -546,13 +564,15 @@ void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const cha
   ctx->lockstep_width = device_query(ctx->nodes[0].dev, WARP_SIZE);
 
   cuda_size_setup(ctx);
-  cuda_module_setup(ctx, src_fragments, extra_opts);
+
+  pthread_barrier_init(&ctx->node_sync_point, NULL, ctx->cfg.num_nodes + 1);
 }
 
 CUresult cuda_free_all(struct cuda_context *ctx);
 
 void cuda_cleanup(struct cuda_context *ctx)
 {
+  pthread_barrier_destroy(&ctx->node_sync_point);
   for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
     cuda_set_active_node(ctx, i);
     CUDA_SUCCEED(cuda_free_all(ctx));
@@ -562,7 +582,7 @@ void cuda_cleanup(struct cuda_context *ctx)
 }
 
 CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
-    const char *tag, CUdeviceptr *mem_out)
+                    const char *tag, CUdeviceptr *mem_out)
 {
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
@@ -629,5 +649,11 @@ CUresult cuda_free_all(struct cuda_context *ctx) {
   }
 
   return CUDA_SUCCESS;
+}
+
+void cuda_thread_sync(pthread_barrier_t *barrier) {
+  int wait_res = pthread_barrier_wait(barrier);
+  if(wait_res != PTHREAD_BARRIER_SERIAL_THREAD && wait_res != 0)
+    panic(-1, "Thread barrier synchronization error.");
 }
 

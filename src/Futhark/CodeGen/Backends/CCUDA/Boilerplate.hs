@@ -24,6 +24,8 @@ generateBoilerplate cuda_program cuda_prelude kernel_names sizes = do
   GC.earlyDecls [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
+      $esc:("#include <pthread.h>")
+      $esc:("#include <semaphore.h>")
       $esc:("typedef CUdeviceptr fl_mem_t;")
       $esc:free_list_h
       $esc:cuda_h
@@ -241,6 +243,30 @@ generateContextFuns cfg kernel_names sizes = do
   let set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
                           [(0::Int)..] $ M.keys sizes
 
+  node_launch_params <- GC.publicDef "node_launch_params" GC.InitDecl $ \s ->
+    ([C.cedecl|struct $id:s;|],
+     [C.cedecl|struct $id:s {
+                         typename int32_t node_id;
+                         struct $id:ctx *ctx;
+                         char *ptx;
+                       };|])
+
+  run_node <- GC.publicDef "run_node_thread" GC.InitDecl $ \s ->
+    ([C.cedecl|void *$id:s(void *p);|],
+     [C.cedecl|void *$id:s(void *p) {
+      struct $id:node_launch_params *params = (struct $id:node_launch_params*)p;
+      typename int32_t node_id = params->node_id;
+      struct $id:ctx *ctx = params->ctx;
+
+      cuda_node_setup(&ctx->cuda.nodes[node_id], params->ptx);
+      
+      $stms:(map loadKernelByName kernel_names)
+
+      cuda_thread_sync(&ctx->cuda.node_sync_point);
+
+      free(p);
+     }|])
+
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
@@ -254,13 +280,28 @@ generateContextFuns cfg kernel_names sizes = do
                           create_lock(&ctx->lock);
                           $stms:init_fields
 
+                          cuda_setup(&ctx->cuda);
+
                           ctx->node_ctx = malloc(sizeof(struct $id:node_ctx) * ctx->cuda.cfg.num_nodes);
 
-                          cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
-                          for (int i = ctx->cuda.cfg.num_nodes - 1; i >= 0; --i) {
-                            cuda_set_active_node(&ctx->cuda, i);
-                            $stms:(map loadKernelByName kernel_names)
+                          char *ptx = cuda_get_ptx(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+
+                          for (int i = 0; i < ctx->cuda.cfg.num_nodes; ++i) {
+                            struct $id:node_launch_params *node_params = malloc(sizeof(struct $id:node_launch_params));
+                            node_params->ctx = ctx;
+                            node_params->node_id = i;
+                            node_params->ptx = ptx;
+
+                            if(pthread_create(&ctx->cuda.nodes[i].thread, NULL, $id:run_node, node_params))
+                              panic(-1, "Error creating thread.");
                           }
+
+                          cuda_thread_sync(&ctx->cuda.node_sync_point);
+                          
+                          free(ptx);
+
+                          cuCtxSetCurrent(ctx->cuda.nodes[0].cu_ctx);
+                          cuda_enable_peer_access(&ctx->cuda);
 
                           $stms:final_inits
                           $stms:set_sizes
@@ -291,6 +332,6 @@ generateContextFuns cfg kernel_names sizes = do
   where
     loadKernelByName name =
       [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(
-                &ctx->node_ctx[ctx->cuda.active_node].$id:name,
-                ctx->cuda.nodes[ctx->cuda.active_node].module,
+                &ctx->node_ctx[node_id].$id:name,
+                ctx->cuda.nodes[node_id].module,
                 $string:name));|]
