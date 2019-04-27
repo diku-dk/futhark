@@ -30,7 +30,7 @@ compileProg prog = do
       let extra = generateBoilerplate cuda_code cuda_prelude
                                       kernel_names sizes
       in Right <$> GC.compileProg operations extra cuda_includes
-                   [Space "device", Space "local", DefaultSpace] cliOptions prog'
+                   [Space "device", DefaultSpace] cliOptions prog'
   where
     operations :: GC.Operations OpenCL ()
     operations = GC.Operations
