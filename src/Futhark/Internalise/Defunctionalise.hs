@@ -186,14 +186,14 @@ defuncExp (LetPat tparams pat e1 e2 _ loc) = do
   (e2', sv2) <- localEnv (env <> env_dim) $ defuncExp e2
   return (LetPat tparams pat' e1' e2' (Info $ typeOf e2') loc, sv2)
 
-defuncExp (LetFun vn (dims, pats, _, rettype@(Info ret), e1) e2 loc) = do
+defuncExp (LetFun vn (dims, pats, _, Info ret, e1) e2 loc) = do
   let env_dim = envFromShapeParams dims
-  (pats', e1', sv1) <- localEnv env_dim $ defuncLet dims pats e1 rettype
+  (pats', e1', sv1) <- localEnv env_dim $ defuncLet dims pats e1 $ Info ret
   (e2', sv2) <- extendEnv vn sv1 $ defuncExp e2
   case pats' of
     []  -> let t1 = combineTypeShapes (fromStruct ret) $ typeOf e1'
            in return (LetPat dims (Id vn (Info t1) noLoc) e1' e2' (Info $ typeOf e2') loc, sv2)
-    _:_ -> let t1 = combineTypeShapes ret $ toStruct $ typeOf e1'
+    _:_ -> let t1 = combineTypeShapes ret $ anyDimShapeAnnotations $ toStruct $ typeOf e1'
            in return (LetFun vn (dims, pats', Nothing, Info t1, e1') e2' loc, sv2)
 
 defuncExp (If e1 e2 e3 tp loc) = do
