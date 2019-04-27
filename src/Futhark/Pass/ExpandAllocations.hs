@@ -241,7 +241,7 @@ extractThreadAllocations bnds =
   let (allocs, bnds') = mapAccumL isAlloc M.empty $ stmsToList bnds
   in (stmsFromList $ catMaybes bnds', allocs)
   where isAlloc allocs (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
-          | space /= Space "private" =
+          | space `notElem` [Space "private", Space "local"] =
           (M.insert (patElemName patElem) (size, space) allocs,
            Nothing)
 
@@ -260,14 +260,7 @@ expandedInvariantAllocations (num_threads64, num_groups, group_size)
   (alloc_bnds, rebases) <- unzip <$> mapM expand (M.toList invariant_allocs)
 
   return (mconcat alloc_bnds, mconcat rebases)
-  where expand (mem, (per_thread_size, Space "local")) = do
-          let allocpat = Pattern [] [PatElem mem $
-                                     MemMem per_thread_size $ Space "local"]
-          return (oneStm $ Let allocpat (defAux ()) $
-                   Op $ Alloc per_thread_size $ Space "local",
-                  mempty)
-
-        expand (mem, (per_thread_size, space)) = do
+  where expand (mem, (per_thread_size, space)) = do
           total_size <- newVName "total_size"
           let sizepat = Pattern [] [PatElem total_size $ MemPrim int64]
               allocpat = Pattern [] [PatElem mem $

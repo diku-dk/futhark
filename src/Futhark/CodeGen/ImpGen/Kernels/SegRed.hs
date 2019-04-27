@@ -123,6 +123,27 @@ compileSegRed' pat space comm red_op nes body
         (smallSegmentsReduction pat space red_op nes body)
         (largeSegmentsReduction pat space comm red_op nes body)
 
+-- | Prepare intermediate arrays for the reduction.  Prim-typed
+-- arguments go in local memory (so we need to do the allocation of
+-- those arrays inside the kernel), while array-typed arguments go in
+-- global memory.  Allocations for the former have already been
+-- performed.  This policy is baked into how the allocations are done
+-- in ExplicitAllocator.
+intermediateArrays :: KernelSpace -> Lambda InKernel -> [SubExp] -> InKernelGen [VName]
+intermediateArrays space red_op nes = do
+  let red_op_params = lambdaParams red_op
+      (red_acc_params, _) = splitAt (length nes) red_op_params
+  forM red_acc_params $ \p ->
+    case paramAttr p of
+      MemArray pt shape _ (ArrayIn mem _) -> do
+        let shape' = Shape [spaceNumThreads space] <> shape
+        ImpGen.sArray "red_arr" pt shape' $
+          ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape'
+      _ -> do
+        let pt = elemType $ paramType p
+            shape = Shape [spaceGroupSize space]
+        ImpGen.sAllocArray "red_arr" pt shape $ Space "local"
+
 nonsegmentedReduction :: Pattern ExplicitMemory
                       -> KernelSpace
                       -> Commutativity -> Lambda InKernel -> [SubExp]
@@ -134,19 +155,6 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
       global_tid = kernelGlobalThreadId constants
       (_, w) = last $ spaceDimensions space
 
-  let red_op_params = lambdaParams red_op
-      (red_acc_params, _) = splitAt (length nes) red_op_params
-  red_arrs <- forM red_acc_params $ \p ->
-    case paramAttr p of
-      MemArray pt shape _ (ArrayIn mem _) -> do
-        let shape' = Shape [spaceNumThreads space] <> shape
-        ImpGen.sArray "red_arr" pt shape' $
-          ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape'
-      _ -> do
-        let pt = elemType $ paramType p
-            shape = Shape [spaceGroupSize space]
-        ImpGen.sAllocArray "red_arr" pt shape $ Space "local"
-
   counter <-
     ImpGen.sStaticArray "counter" (Space "device") int32 $
     Imp.ArrayValues $ replicate 1 $ IntValue $ Int32Value 0
@@ -156,12 +164,13 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
         shape = Shape [spaceNumGroups space] <> arrayShape t
     ImpGen.sAllocArray "group_res_arr" pt shape $ Space "device"
 
-  sync_arr <- ImpGen.sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
-
   num_threads <- dPrimV "num_threads" $ kernelNumThreads constants
 
   sKernel constants "segred_nonseg" $ allThreads constants $ do
     init_constants
+
+    red_arrs <- intermediateArrays space red_op nes
+    sync_arr <- ImpGen.sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- Since this is the nonsegmented case, all outer segment IDs must
     -- necessarily be 0.
@@ -177,6 +186,7 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
       global_tid elems_per_thread num_threads
       comm red_op nes red_arrs body
 
+    let red_acc_params = take (length nes) $ lambdaParams red_op
     reductionStageTwo constants segred_pat 0 [0] 0
       (kernelNumGroups constants) group_result_params red_acc_params red_op_renamed nes
       1 counter sync_arr group_res_arrs red_arrs
@@ -202,19 +212,6 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
       segments_per_group = kernelGroupSize constants `quot` segment_size_nonzero
       required_groups = num_segments `quotRoundingUp` segments_per_group
 
-  let red_op_params = lambdaParams red_op
-      (red_acc_params, _red_next_params) = splitAt (length nes) red_op_params
-  red_arrs <- forM red_acc_params $ \p ->
-    case paramAttr p of
-      MemArray pt shape _ (ArrayIn mem _) -> do
-        let shape' = Shape [spaceNumThreads space] <> shape
-        ImpGen.sArray "red_arr" pt shape' $
-          ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape'
-      _ -> do
-        let pt = elemType $ paramType p
-            shape = Shape [spaceGroupSize space]
-        ImpGen.sAllocArray "red_arr" pt shape $ Space "local"
-
   ImpGen.emit $ Imp.DebugPrint "num_segments" int32 num_segments
   ImpGen.emit $ Imp.DebugPrint "segment_size" int32 segment_size
   ImpGen.emit $ Imp.DebugPrint "segments_per_group" int32 segments_per_group
@@ -222,6 +219,8 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
 
   sKernel constants "segred_small" $ allThreads constants $ do
     init_constants
+
+    red_arrs <- intermediateArrays space red_op nes
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
@@ -308,19 +307,6 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
   ImpGen.emit $ Imp.DebugPrint "elems_per_thread" int32 $ Imp.innerExp elems_per_thread
   ImpGen.emit $ Imp.DebugPrint "groups_per_segment" int32 groups_per_segment
 
-  let red_op_params = lambdaParams red_op
-      (red_acc_params, _) = splitAt (length nes) red_op_params
-  red_arrs <- forM red_acc_params $ \p ->
-    case paramAttr p of
-      MemArray pt shape _ (ArrayIn mem _) -> do
-        let shape' = Shape [Var num_threads] <> shape
-        ImpGen.sArray "red_arr" pt shape' $
-          ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape'
-      _ -> do
-        let pt = elemType $ paramType p
-            shape = Shape [spaceGroupSize space]
-        ImpGen.sAllocArray "red_arr" pt shape $ Space "local"
-
   group_res_arrs <- forM (lambdaReturnType red_op) $ \t -> do
     let pt = elemType t
         shape = Shape [Var num_groups] <> arrayShape t
@@ -341,10 +327,13 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
     ImpGen.sStaticArray "counter" (Space "device") int32 $
     Imp.ArrayZeros num_counters
 
-  sync_arr <- ImpGen.sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
-
   sKernel constants "segred_large" $ allThreads constants $ do
     init_constants
+
+    let red_acc_params = take (length nes) $ lambdaParams red_op
+    red_arrs <- intermediateArrays space red_op nes
+    sync_arr <- ImpGen.sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
+
     let segment_gtids = init gtids
         group_id = kernelGroupId constants
         group_size = kernelGroupSize constants

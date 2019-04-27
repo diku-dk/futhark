@@ -218,8 +218,9 @@ mapTransposeKernel :: String -> Integer -> TransposeArgs -> PrimType -> Transpos
                    -> Kernel
 mapTransposeKernel desc block_dim_int args t kind =
   Kernel
-  { kernelBody = mapTranspose block_dim args t kind
-  , kernelLocalMemory = [(block, Right block_size)]
+  { kernelBody = DeclareMem block (Space "local") <>
+                 Op (LocalAlloc block (Right block_size)) <>
+                 mapTranspose block_dim args t kind
   , kernelUses = uses
   , kernelNumGroups = num_groups
   , kernelGroupSize = group_size
