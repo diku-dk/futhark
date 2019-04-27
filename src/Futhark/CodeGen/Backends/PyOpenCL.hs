@@ -312,8 +312,7 @@ unpackArrayInput mem "device" t s dims e = do
 
   zipWithM_ (Py.unpackDim e) dims [0..]
 
-  let memsize' = Py.simpleCall "np.int64"
-                 [Field (Var $ Py.compileName mem) "nbytes"]
+  let memsize' = Py.simpleCall "np.int64" [Field e "nbytes"]
       pyOpenCLArrayCase =
         [Assign mem_dest $ Field e "data"]
   numpyArrayCase <- Py.collect $ do
