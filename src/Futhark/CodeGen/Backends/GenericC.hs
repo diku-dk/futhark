@@ -426,7 +426,7 @@ decl x = item [C.citem|$decl:x;|]
 addrOf :: C.Exp -> C.Exp
 addrOf e = [C.cexp|&$exp:e|]
 
--- | Public names must have a consitent prefix.
+-- | Public names must have a consistent prefix.
 publicName :: String -> CompilerM op s String
 publicName s = return $ "futhark_" ++ s
 
@@ -1304,9 +1304,11 @@ compileProg ops extra header_extra spaces options prog@(Functions funs) = do
         runCompilerM prog ops src () compileProg'
       (entry_point_decls, cli_entry_point_decls, entry_point_inits) =
         unzip3 entry_points
-      option_parser = generateOptionParser "parse_options" $ benchmarkOptions++options
+      option_parser = generateOptionParser "parse_options" $ benchmarkOptions <> options
+
 
   let headerdefs = [C.cunit|
+$esc:("#ifndef " <> headerGuard <> "\n#define " <> headerGuard <> "\n")
 $esc:("/*\n * Headers\n*/\n")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
@@ -1328,6 +1330,7 @@ $edecls:(entryDecls endstate)
 $esc:("\n/*\n * Miscellaneous\n*/\n")
 $edecls:(miscDecls endstate)
                            |]
+
 
   let utildefs = [C.cunit|
 $esc:("#include <stdio.h>")
@@ -1430,7 +1433,6 @@ int main(int argc, char** argv) {
   return 0;
 }
                         |]
-
   let early_decls = DL.toList $ compEarlyDecls endstate
   let lib_decls = DL.toList $ compLibDecls endstate
   let libdefs = [C.cunit|
@@ -1460,6 +1462,7 @@ $edecls:(arrayDefinitions endstate)
 $edecls:(opaqueDefinitions endstate)
 
 $edecls:entry_point_decls
+
   |]
 
   return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
@@ -1475,7 +1478,10 @@ $edecls:entry_point_decls
           debugreport <- gets $ DL.toList . compDebugItems
 
           ctx_ty <- contextType
+
           headerDecl MiscDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx);|]
+          headerDecl MiscDecl [C.cedecl|$esc:("\n#endif // " <> headerGuard <> "\n")|]
+
           libDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx) {
   if (ctx->detail_memory) {
     $items:memreport
@@ -1493,6 +1499,8 @@ $edecls:entry_point_decls
 
         builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
                   cFloat32Funs ++ cFloat64Funs
+
+        headerGuard = "FUTHARK_H"
 
         panic_h = $(embedStringFile "rts/c/panic.h")
         values_h = $(embedStringFile "rts/c/values.h")
