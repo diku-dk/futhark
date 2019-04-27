@@ -90,7 +90,7 @@ prepareIntermediateArrays segment_dims num_threads = fmap snd . mapAccumLM onOp 
                         arrayDims dest_t
         let size = Imp.elements num_elems `Imp.withElemType` int32
 
-        (sub_mem, size') <-
+        (sub_mem, _) <-
           ImpGen.sDeclareMem "subhistogram_mem" size $ Space "device"
 
         let num_segments = length segment_dims
@@ -106,7 +106,7 @@ prepareIntermediateArrays segment_dims num_threads = fmap snd . mapAccumLM onOp 
               Space "device"
 
             multiHistoCase = do
-              ImpGen.sAlloc_ sub_mem size' $ Space "device"
+              ImpGen.sAlloc_ sub_mem size $ Space "device"
               sReplicate subhisto (Shape $ segment_dims ++ [Var num_histos, genReduceWidth op]) ne
               subhisto_t <- lookupType subhisto
               let slice = fullSliceNum (map (ImpGen.compileSubExpOfType int32) $ arrayDims subhisto_t) $

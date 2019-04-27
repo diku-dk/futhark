@@ -61,7 +61,8 @@ type CallKernelGen = ImpGen.ImpM ExplicitMemory Imp.HostOp
 type InKernelGen = ImpGen.ImpM InKernel Imp.KernelOp
 
 data KernelConstants = KernelConstants
-                       { kernelGlobalThreadId :: Imp.Exp
+                       { kernelOuterVTable :: ImpGen.VTable ExplicitMemory -- XXX
+                       , kernelGlobalThreadId :: Imp.Exp
                        , kernelLocalThreadId :: Imp.Exp
                        , kernelGroupId :: Imp.Exp
                        , kernelGlobalThreadIdVar :: VName
@@ -79,11 +80,21 @@ data KernelConstants = KernelConstants
                        }
 
 inKernelOperations :: KernelConstants -> ImpGen.Operations InKernel Imp.KernelOp
-inKernelOperations constants = (ImpGen.defaultOperations $ compileInKernelOp constants)
-                               { ImpGen.opsCopyCompiler = inKernelCopy
-                               , ImpGen.opsExpCompiler = inKernelExpCompiler
-                               , ImpGen.opsStmsCompiler = \_ -> compileKernelStms constants
-                               }
+inKernelOperations constants =
+  (ImpGen.defaultOperations $ compileInKernelOp constants)
+  { ImpGen.opsCopyCompiler = inKernelCopy
+  , ImpGen.opsExpCompiler = inKernelExpCompiler
+  , ImpGen.opsStmsCompiler = \_ -> compileKernelStms constants
+  , ImpGen.opsAllocCompilers =
+      M.fromList [ (Space "local", allocLocal)
+                 , (Space "private", allocPrivate) ]
+  }
+  where allocLocal :: ImpGen.AllocCompiler InKernel Imp.KernelOp
+        allocLocal mem size = do
+          size' <- localMemSize (kernelOuterVTable constants) size
+          sOp $ Imp.LocalAlloc mem size'
+        allocPrivate mem size =
+          sOp $ Imp.PrivateAlloc mem size
 
 keyWithEntryPoint :: Name -> Name -> Name
 keyWithEntryPoint fname key =
@@ -99,6 +110,10 @@ compileInKernelOp :: KernelConstants -> Pattern InKernel -> Op InKernel
 compileInKernelOp _ (Pattern _ [mem]) (Alloc size (Space "private")) = do
   size' <- ImpGen.compileSubExp size
   sOp $ Imp.PrivateAlloc (patElemName mem) $ Imp.bytes size'
+compileInKernelOp constants (Pattern _ [mem]) (Alloc size (Space "local")) = do
+  size' <- localMemSize (kernelOuterVTable constants) . Imp.bytes =<<
+           ImpGen.compileSubExp size
+  sOp $ Imp.LocalAlloc (patElemName mem) size'
 compileInKernelOp _ (Pattern _ [mem]) Alloc{} =
   compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
 compileInKernelOp _ dest Alloc{} =
@@ -487,59 +502,47 @@ splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
 
 computeKernelUses :: FreeIn a =>
                      a -> [VName]
-                  -> CallKernelGen ([Imp.KernelUse], [Imp.LocalMemoryUse])
+                  -> CallKernelGen [Imp.KernelUse]
 computeKernelUses kernel_body bound_in_kernel = do
   let actually_free = freeIn kernel_body `S.difference` S.fromList bound_in_kernel
-
   -- Compute the variables that we need to pass to the kernel.
-  reads_from <- readsFromSet actually_free
-
-  -- Are we using any local memory?
-  local_memory <- computeLocalMemoryUse actually_free
-  return (nub reads_from, nub local_memory)
+  nub <$> readsFromSet actually_free
 
 readsFromSet :: Names -> CallKernelGen [Imp.KernelUse]
 readsFromSet free =
   fmap catMaybes $
   forM (S.toList free) $ \var -> do
     t <- lookupType var
+    vtable <- ImpGen.getVTable
     case t of
       Array {} -> return Nothing
       Mem _ (Space "local") -> return Nothing
       Mem {} -> return $ Just $ Imp.MemoryUse var
       Prim bt ->
-        isConstExp var >>= \case
+        isConstExp vtable (Imp.var var bt) >>= \case
           Just ce -> return $ Just $ Imp.ConstUse var ce
           Nothing | bt == Cert -> return Nothing
                   | otherwise  -> return $ Just $ Imp.ScalarUse var bt
 
-computeLocalMemoryUse :: Names -> CallKernelGen [Imp.LocalMemoryUse]
-computeLocalMemoryUse free =
-  fmap catMaybes $
-  forM (S.toList free) $ \var -> do
-    t <- lookupType var
-    case t of
-      Mem memsize (Space "local") -> do
-        memsize' <- localMemSize =<< ImpGen.subExpToDimSize memsize
-        return $ Just (var, memsize')
-      _ -> return Nothing
+localMemSize :: ImpGen.VTable ExplicitMemory -> Imp.Count Imp.Bytes
+             -> ImpGen.ImpM lore op (Either (Imp.Count Imp.Bytes) Imp.KernelConstExp)
+localMemSize vtable e = isConstExp vtable (Imp.innerExp e) >>= \case
+  Just e' | isStaticExp e' -> return $ Right e'
+  _ -> return $ Left e
 
-localMemSize :: Imp.MemSize -> CallKernelGen (Either Imp.MemSize Imp.KernelConstExp)
-localMemSize (Imp.ConstSize x) =
-  return $ Right $ ValueExp $ IntValue $ Int64Value x
-localMemSize (Imp.VarSize v) = isConstExp v >>= \case
-  Just e | isStaticExp e -> return $ Right e
-  _ -> return $ Left $ Imp.VarSize v
-
-isConstExp :: VName -> CallKernelGen (Maybe Imp.KernelConstExp)
-isConstExp v = do
-  vtable <- ImpGen.getVTable
+isConstExp :: ImpGen.VTable ExplicitMemory -> Imp.Exp
+           -> ImpGen.ImpM lore op (Maybe Imp.KernelConstExp)
+isConstExp vtable size = do
   fname <- asks ImpGen.envFunction
-  let lookupConstExp name = constExp =<< hasExp =<< M.lookup name vtable
+  let onLeaf (Imp.ScalarVar name) _ = lookupConstExp name
+      onLeaf (Imp.SizeOf pt) _ = Just $ primByteSize pt
+      onLeaf Imp.Index{} _ = Nothing
+      lookupConstExp name =
+        constExp =<< hasExp =<< M.lookup name vtable
       constExp (Op (Inner (GetSize key _))) =
         Just $ LeafExp (Imp.SizeConst $ keyWithEntryPoint fname key) int32
       constExp e = primExpFromExp lookupConstExp e
-  return $ lookupConstExp v
+  return $ replaceInPrimExpM onLeaf size
   where hasExp (ImpGen.ArrayVar e _) = e
         hasExp (ImpGen.ScalarVar e _) = e
         hasExp (ImpGen.MemVar e _) = e
@@ -593,7 +596,7 @@ computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elem
 
 kernelInitialisationSimple :: Imp.Exp -> Imp.Exp
                            -> Maybe (VName, VName, VName)
-                           -> ImpGen.ImpM lore op (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
+                           -> CallKernelGen (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
 kernelInitialisationSimple num_groups group_size names = do
   (global_tid, local_tid, group_id) <-
     case names of Nothing ->
@@ -605,9 +608,9 @@ kernelInitialisationSimple num_groups group_size names = do
                     return (global_tid, local_tid, group_id)
   wave_size <- newVName "wave_size"
   inner_group_size <- newVName "group_size"
-
+  vtable <- ImpGen.getVTable
   let constants =
-        KernelConstants
+        KernelConstants vtable
         (Imp.var global_tid int32)
         (Imp.var local_tid int32)
         (Imp.var group_id int32)
@@ -632,7 +635,7 @@ kernelInitialisationSimple num_groups group_size names = do
   return (constants, set_constants)
 
 kernelInitialisationSetSpace :: KernelSpace -> InKernelGen ()
-                             -> ImpGen.ImpM lore op (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
+                             -> CallKernelGen (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
 kernelInitialisationSetSpace space set_space = do
   group_size <- ImpGen.compileSubExp $ spaceGroupSize space
   num_groups <- ImpGen.compileSubExp $ spaceNumGroups space
@@ -664,7 +667,7 @@ kernelInitialisationSetSpace space set_space = do
           set_constants')
 
 kernelInitialisation :: KernelSpace
-                     -> ImpGen.ImpM lore op (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
+                     -> CallKernelGen (KernelConstants, ImpGen.ImpM InKernel Imp.KernelOp ())
 kernelInitialisation space =
   kernelInitialisationSetSpace space $
   setSpaceIndices (Imp.var (spaceGlobalId space) int32) space
@@ -1046,7 +1049,9 @@ simpleKernelConstants kernel_size desc = do
         sOp (Imp.GetLocalId thread_ltid 0)
         sOp (Imp.GetGroupId group_id 0)
 
-  return (KernelConstants
+
+  vtable <- ImpGen.getVTable
+  return (KernelConstants vtable
           (Imp.var thread_gtid int32) (Imp.var thread_ltid int32) (Imp.var group_id int32)
           thread_gtid thread_ltid group_id
           group_size num_groups (group_size*num_groups) 0
@@ -1058,11 +1063,10 @@ sKernel :: KernelConstants -> String -> ImpGen.ImpM InKernel Imp.KernelOp a -> C
 sKernel constants name m = do
   body <- makeAllMemoryGlobal $
           ImpGen.subImpM_ (inKernelOperations constants) m
-  (uses, local_memory) <- computeKernelUses body mempty
+  uses <- computeKernelUses body mempty
 
   ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
     { Imp.kernelBody = body
-    , Imp.kernelLocalMemory = local_memory
     , Imp.kernelUses = uses
     , Imp.kernelNumGroups = [kernelNumGroups constants]
     , Imp.kernelGroupSize = [kernelGroupSize constants]

@@ -22,22 +22,20 @@ import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 
-makeLocalArrays :: KernelConstants -> [SubExp] -> Lambda InKernel
-                -> CallKernelGen [VName]
-makeLocalArrays constants nes scan_op = do
+makeLocalArrays :: SubExp -> SubExp -> [SubExp] -> Lambda InKernel
+                -> InKernelGen [VName]
+makeLocalArrays group_size num_threads nes scan_op = do
   let (scan_x_params, _scan_y_params) =
         splitAt (length nes) $ lambdaParams scan_op
   forM scan_x_params $ \p ->
     case paramAttr p of
       MemArray pt shape _ (ArrayIn mem _) -> do
-        num_threads <- dPrimV "num_threads" $ kernelNumThreads constants
-        let shape' = Shape [Var num_threads] <> shape
+        let shape' = Shape [num_threads] <> shape
         ImpGen.sArray "scan_arr" pt shape' $
           ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape'
       _ -> do
-        group_size <- dPrimV "group_size" $ kernelGroupSize constants
         let pt = elemType $ paramType p
-            shape = Shape [Var group_size]
+            shape = Shape [group_size]
         ImpGen.sAllocArray "scan_arr" pt shape $ Space "local"
 
 type CrossesSegment = Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
@@ -61,8 +59,6 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
   -- can pass to groupScan.
   scan_op_renamed <- renameLambda scan_op
 
-  local_arrs <- makeLocalArrays constants nes scan_op
-
   let crossesSegment =
         case reverse dims' of
           segment_size : _ : _ -> Just $ \from to ->
@@ -71,6 +67,10 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
 
   sKernel constants "scan_stage1" $ allThreads constants $ do
     init_constants
+
+    local_arrs <-
+      makeLocalArrays (spaceGroupSize space) (spaceNumThreads space)
+      nes scan_op
 
     -- The variables from scan_op will be used for the carry and such
     -- in the big chunking loop.
@@ -160,8 +160,6 @@ scanStage2 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
   (constants, init_constants) <-
     kernelInitialisationSimple 1 group_size Nothing
 
-  local_arrs <- makeLocalArrays constants nes scan_op
-
   let (gtids, dims) = unzip $ spaceDimensions space
   dims' <- mapM ImpGen.compileSubExp dims
   let crossesSegment' = do
@@ -171,6 +169,10 @@ scanStage2 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
 
   sKernel constants "scan_stage2" $ do
     init_constants
+
+    local_arrs <- makeLocalArrays (spaceNumGroups space) (spaceNumGroups space)
+                  nes scan_op
+
     flat_idx <- dPrimV "flat_idx" $
       (kernelLocalThreadId constants + 1) * elems_per_group - 1
     -- Construct segment indices.

@@ -10,6 +10,7 @@ module Futhark.CodeGen.ImpGen
   , ExpCompiler
   , CopyCompiler
   , StmsCompiler
+  , AllocCompiler
   , Operations (..)
   , defaultOperations
   , ValueDestination
@@ -125,10 +126,14 @@ type CopyCompiler lore op = PrimType
                            -> Count Elements -- ^ Number of row elements of the source.
                            -> ImpM lore op ()
 
+-- | An alternate way of compiling an allocation.
+type AllocCompiler lore op = VName -> Count Bytes -> ImpM lore op ()
+
 data Operations lore op = Operations { opsExpCompiler :: ExpCompiler lore op
                                      , opsOpCompiler :: OpCompiler lore op
                                      , opsStmsCompiler :: StmsCompiler lore op
                                      , opsCopyCompiler :: CopyCompiler lore op
+                                     , opsAllocCompilers :: M.Map Space (AllocCompiler lore op)
                                      }
 
 -- | An operations set for which the expression compiler always
@@ -139,6 +144,7 @@ defaultOperations opc = Operations { opsExpCompiler = defCompileExp
                                    , opsOpCompiler = opc
                                    , opsStmsCompiler = defCompileStms
                                    , opsCopyCompiler = defaultCopy
+                                   , opsAllocCompilers = mempty
                                    }
 
 -- | When an array is dared, this is where it is stored.
@@ -200,23 +206,22 @@ data Env lore op = Env {
   , envStmsCompiler :: StmsCompiler lore op
   , envOpCompiler :: OpCompiler lore op
   , envCopyCompiler :: CopyCompiler lore op
+  , envAllocCompilers :: M.Map Space (AllocCompiler lore op)
   , envDefaultSpace :: Imp.Space
   , envVolatility :: Imp.Volatility
-  , envFakeMemory :: [Space]
-    -- ^ Do not actually generate allocations for these memory spaces.
   , envFunction :: Name
     -- ^ Name of the function we are compiling.
   }
 
-newEnv :: Operations lore op -> Imp.Space -> [Imp.Space] -> Name -> Env lore op
-newEnv ops ds fake fname =
+newEnv :: Operations lore op -> Imp.Space -> Name -> Env lore op
+newEnv ops ds fname =
   Env { envExpCompiler = opsExpCompiler ops
       , envStmsCompiler = opsStmsCompiler ops
       , envOpCompiler = opsOpCompiler ops
       , envCopyCompiler = opsCopyCompiler ops
+      , envAllocCompilers = mempty
       , envDefaultSpace = ds
       , envVolatility = Imp.Nonvolatile
-      , envFakeMemory = fake
       , envFunction = fname
       }
 
@@ -258,10 +263,9 @@ instance HasScope SOACS (ImpM lore op) where
             Prim $ entryScalarType scalarEntry
 
 runImpM :: ImpM lore op a
-        -> Operations lore op -> Imp.Space -> [Imp.Space] -> Name -> State lore op
+        -> Operations lore op -> Imp.Space -> Name -> State lore op
         -> Either InternalError (a, State lore op, Imp.Code op)
-runImpM (ImpM m) comp space fake fname =
-  runRWST m (newEnv comp space fake fname)
+runImpM (ImpM m) ops space fname = runRWST m $ newEnv ops space fname
 
 subImpM_ :: Operations lore' op' -> ImpM lore' op' a
          -> ImpM lore op (Imp.Code op')
@@ -276,6 +280,7 @@ subImpM ops (ImpM m) = do
                      , envStmsCompiler = opsStmsCompiler ops
                      , envCopyCompiler = opsCopyCompiler ops
                      , envOpCompiler = opsOpCompiler ops
+                     , envAllocCompilers = opsAllocCompilers ops
                      }
                  s { stateVTable = M.map scrubExps $ stateVTable s
                    , stateFunctions = mempty } of
@@ -321,16 +326,16 @@ hasFunction fname = gets $ \s -> let Imp.Functions fs = stateFunctions s
                                  in isJust $ lookup fname fs
 
 compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
-               Operations lore op -> Imp.Space -> [Imp.Space]
+               Operations lore op -> Imp.Space
             -> Prog lore -> m (Either InternalError (Imp.Functions op))
-compileProg ops space fake prog =
+compileProg ops space prog =
   modifyNameSource $ \src ->
   case foldM compileFunDef' (newState src) (progFunctions prog) of
     Left err -> (Left err, src)
     Right s -> (Right $ stateFunctions s, stateNameSource s)
   where compileFunDef' s fdef = do
           ((), s', _) <-
-            runImpM (compileFunDef fdef) ops space fake (funDefName fdef) s
+            runImpM (compileFunDef fdef) ops space (funDefName fdef) s
           return s'
 
 compileInParam :: ExplicitMemorish lore =>
@@ -1192,9 +1197,11 @@ compileAlloc :: ExplicitMemorish lore =>
                 Pattern lore -> SubExp -> Space
              -> ImpM lore op ()
 compileAlloc (Pattern [] [mem]) e space = do
-  e' <- compileSubExp e
-  fake <- asks $ elem space . envFakeMemory
-  unless fake $ emit $ Imp.Allocate (patElemName mem) (Imp.bytes e') space
+  e' <- Imp.bytes <$> compileSubExp e
+  allocator <- asks $ M.lookup space . envAllocCompilers
+  case allocator of
+    Nothing -> emit $ Imp.Allocate (patElemName mem) e' space
+    Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
   compilerBugS $ "compileAlloc: Invalid pattern: " ++ pretty pat
 
@@ -1256,15 +1263,17 @@ sDeclareMem name size space = do
   addVar name' $ MemVar Nothing $ MemEntry size' space
   return (name', size')
 
-sAlloc_ :: VName -> Imp.MemSize -> Space -> ImpM lore op ()
+sAlloc_ :: VName -> Count Bytes -> Space -> ImpM lore op ()
 sAlloc_ name' size' space = do
-  fake <- asks $ elem space . envFakeMemory
-  unless fake $ emit $ Imp.Allocate name' (Imp.memSizeToExp size') space
+  allocator <- asks $ M.lookup space . envAllocCompilers
+  case allocator of
+    Nothing -> emit $ Imp.Allocate name' size' space
+    Just allocator' -> allocator' name' size'
 
 sAlloc :: String -> Count Bytes -> Space -> ImpM lore op VName
 sAlloc name size space = do
-  (name', size') <- sDeclareMem name size space
-  sAlloc_ name' size' space
+  (name', _) <- sDeclareMem name size space
+  sAlloc_ name' size space
   return name'
 
 sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName

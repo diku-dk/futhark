@@ -29,7 +29,7 @@ compileProg prog = do
     Right (Program opencl_code opencl_prelude kernel_names types sizes prog') ->
       Right <$> GC.compileProg operations
                 (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes)
-                include_opencl_h [Space "device", Space "local", DefaultSpace]
+                include_opencl_h [Space "device", DefaultSpace]
                 cliOptions prog'
   where operations :: GC.Operations OpenCL ()
         operations = GC.Operations
@@ -191,16 +191,12 @@ readOpenCLScalar _ _ _ space _ =
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
 allocateOpenCLBuffer mem size tag "device" =
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, $exp:size, $exp:tag, &$exp:mem));|]
-allocateOpenCLBuffer _ _ _ "local" =
-  return () -- Hack - these memory blocks do not actually exist.
 allocateOpenCLBuffer _ _ _ space =
-  fail $ "Cannot allocate in '" ++ space ++ "' space"
+  fail $ "Cannot allocate in '" ++ space ++ "' space."
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
 deallocateOpenCLBuffer mem tag "device" =
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_free(&ctx->opencl, $exp:mem, $exp:tag));|]
-deallocateOpenCLBuffer _ _ "local" =
-  return () -- Hack - these memory blocks do not actually exist.
 deallocateOpenCLBuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' space"
 
@@ -252,7 +248,6 @@ copyOpenCLMemory _ _ destspace _ _ srcspace _ =
 
 openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]
-openclMemoryType "local" = pure [C.cty|unsigned char|] -- dummy type
 openclMemoryType space =
   fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
 
