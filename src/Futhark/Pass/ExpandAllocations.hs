@@ -263,8 +263,7 @@ expandedInvariantAllocations (num_threads64, num_groups, group_size)
   where expand (mem, (per_thread_size, space)) = do
           total_size <- newVName "total_size"
           let sizepat = Pattern [] [PatElem total_size $ MemPrim int64]
-              allocpat = Pattern [] [PatElem mem $
-                                     MemMem (Var total_size) space]
+              allocpat = Pattern [] [PatElem mem $ MemMem space]
           return (stmsFromList
                   [Let sizepat (defAux ()) $
                     BasicOp $ BinOp (Mul Int64) num_threads64 per_thread_size,
@@ -313,8 +312,7 @@ expandedVariantAllocations kspace kstms variant_allocs = do
 
   return (slice_stms' <> stmsFromList alloc_bnds, mconcat rebases)
   where expand (mem, (offset, total_size, space)) = do
-          let allocpat = Pattern [] [PatElem mem $
-                                     MemMem total_size space]
+          let allocpat = Pattern [] [PatElem mem $ MemMem space]
           return (Let allocpat (defAux ()) $ Op $ Alloc total_size space,
                   M.singleton mem $ newBase offset)
 
@@ -409,7 +407,7 @@ offsetMemoryInPattern (Pattern ctx vals) = do
           new_attr <- offsetMemoryInMemBound $ patElemAttr patElem
           return patElem { patElemAttr = new_attr }
         inspectCtx patElem
-          | Mem _ space <- patElemType patElem,
+          | Mem space <- patElemType patElem,
             space /= Space "local" =
               throwError $ unwords ["Cannot deal with existential memory block",
                                     pretty (patElemName patElem),

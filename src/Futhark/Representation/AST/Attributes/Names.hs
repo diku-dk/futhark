@@ -172,7 +172,7 @@ instance FreeIn d => FreeIn (Ext d) where
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn (Array _ shape _) = freeIn shape
-  freeIn (Mem size _)      = freeIn size
+  freeIn (Mem _)           = mempty
   freeIn (Prim _)          = mempty
 
 instance FreeIn attr => FreeIn (ParamT attr) where

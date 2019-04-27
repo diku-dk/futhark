@@ -90,8 +90,7 @@ prepareIntermediateArrays segment_dims num_threads = fmap snd . mapAccumLM onOp 
                         arrayDims dest_t
         let size = Imp.elements num_elems `Imp.withElemType` int32
 
-        (sub_mem, _) <-
-          ImpGen.sDeclareMem "subhistogram_mem" size $ Space "device"
+        sub_mem <- ImpGen.sDeclareMem "subhistogram_mem" $ Space "device"
 
         let num_segments = length segment_dims
             sub_shape = Shape (segment_dims++[Var num_histos]) <>

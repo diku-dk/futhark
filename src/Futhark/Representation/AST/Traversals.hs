@@ -169,7 +169,7 @@ mapOnExtType tv (Array bt (Shape shape) u) =
   where mapOnExtSize (Ext x)   = return $ Ext x
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
 mapOnExtType _ (Prim bt) = return $ Prim bt
-mapOnExtType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
+mapOnExtType _ (Mem space) = pure $ Mem space
 
 mapOnLoopForm :: Monad m =>
                  Mapper flore tlore m -> LoopForm flore -> m (LoopForm tlore)
@@ -187,7 +187,7 @@ mapExp m = runIdentity . mapExpM m
 mapOnType :: Monad m =>
              (SubExp -> m SubExp) -> Type -> m Type
 mapOnType _ (Prim bt) = return $ Prim bt
-mapOnType f (Mem size space) = Mem <$> f size <*> pure space
+mapOnType _ (Mem space) = pure $ Mem space
 mapOnType f (Array bt shape u) =
   Array bt <$> (Shape <$> mapM f (shapeDims shape)) <*> pure u
 

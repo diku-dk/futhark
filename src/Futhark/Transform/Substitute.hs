@@ -141,8 +141,8 @@ instance Substitute shape => Substitute (TypeBase shape u) where
   substituteNames _ (Prim et) = Prim et
   substituteNames substs (Array et sz u) =
     Array et (substituteNames substs sz) u
-  substituteNames substs (Mem sz space) =
-    Mem (substituteNames substs sz) space
+  substituteNames _ (Mem space) =
+    Mem space
 
 instance Substitutable lore => Substitute (Lambda lore) where
   substituteNames substs (Lambda params body rettype) =

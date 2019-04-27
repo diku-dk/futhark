@@ -809,8 +809,8 @@ instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) = do
     shape' <- simplify shape
     return $ Array et shape' u
-  simplify (Mem size space) =
-    Mem <$> simplify size <*> pure space
+  simplify (Mem space) =
+    pure $ Mem space
   simplify (Prim bt) =
     return $ Prim bt
 
