@@ -33,12 +33,15 @@ import qualified Data.Set as S
 import           Data.Maybe
 import           Data.List
 
-import           Futhark.MonadFreshNames
+import           Futhark.Construct
 import           Futhark.Representation.AST
+import           Futhark.Pass.ExplicitAllocations (arraySizeInBytesExp)
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import           Futhark.Representation.ExplicitMemory
                  hiding (Prog, Body, Stm, Pattern, PatElem,
                          BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
 import           Futhark.Pass
+import           Futhark.Util (maybeHead)
 
 doubleBuffer :: Pass ExplicitMemory ExplicitMemory
 doubleBuffer =
@@ -98,7 +101,8 @@ instance Annotations lore => LocalScope lore (DoubleBufferM lore) where
 -- | Bunch up all the constraints for less typing.
 type LoreConstraints lore inner =
   (ExpAttr lore ~ (), BodyAttr lore ~ (),
-   ExplicitMemorish lore, Op lore ~ MemOp inner)
+   ExplicitMemorish lore, Op lore ~ MemOp inner,
+   BinderOps lore)
 
 optimiseBody :: LoreConstraints lore inner =>
                 Body lore -> DoubleBufferM lore (Body lore)
@@ -130,7 +134,7 @@ optimiseStm (Let pat aux e) =
                                       -- necessary to prevent the GHC
                                       -- 8.4 type checker from going
                                       -- nuts.
-                                      (optimiseBody x :: DoubleBufferM lore (Body lore))
+                                      optimiseBody x :: DoubleBufferM lore (Body lore)
                                   , mapOnOp = optimiseOp
                                   }
 
@@ -182,7 +186,7 @@ optimiseLoop ctx val body = do
 
 -- | The booleans indicate whether we should also play with the
 -- initial merge values.
-data DoubleBuffer lore = BufferAlloc VName SubExp Space Bool
+data DoubleBuffer lore = BufferAlloc VName (PrimExp VName) Space Bool
                        | BufferCopy VName IxFun VName Bool
                        -- ^ First name is the memory block to copy to,
                        -- second is the name of the array copy.
@@ -211,13 +215,24 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
             Nothing ->
               Just (Var v, True)
 
+        sizeForMem mem = maybeHead $ mapMaybe (arrayInMem . paramAttr) val_params
+          where arrayInMem (MemArray pt shape _ (ArrayIn arraymem ixfun))
+                  | IxFun.isDirect ixfun,
+                    Just (dims, b) <-
+                      mapAndUnzipM loopInvariantSize $ shapeDims shape,
+                    mem == arraymem =
+                      Just (arraySizeInBytesExp $
+                             Array pt (Shape dims) NoUniqueness,
+                            or b)
+                arrayInMem _ = Nothing
+
         buffer fparam = case paramType fparam of
-          Mem size space
-            | Just (size', b) <- loopInvariantSize size -> do
+          Mem space
+            | Just (size, b) <- sizeForMem $ paramName fparam -> do
                 -- Let us double buffer this!
                 bufname <- lift $ newVName "double_buffer_mem"
                 modify $ M.insert (paramName fparam) (bufname, b)
-                return $ BufferAlloc bufname size' space b
+                return $ BufferAlloc bufname size space b
           Array {}
             | MemArray _ _ _ (ArrayIn mem ixfun) <- paramAttr fparam -> do
                 buffered <- gets $ M.lookup mem
@@ -234,9 +249,11 @@ allocStms :: LoreConstraints lore inner =>
           -> DoubleBufferM lore ([(FParam lore, SubExp)], [Stm lore])
 allocStms merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
-          tell [Let (Pattern [] [PatElem name $ MemMem size space]) (defAux ()) $
-                Op $ Alloc size space]
-          if b then return (Param pname $ MemMem size space, Var name)
+          stms <- lift $ runBinder_ $ do
+            size' <- letSubExp "double_buffer_size" =<< toExp size
+            letBindNames_ [name] $ Op $ Alloc size' space
+          tell $ stmsToList stms
+          if b then return (Param pname $ MemMem space, Var name)
                else return m
         allocation (f, Var v) (BufferCopy mem _ _ b) | b = do
           v_copy <- lift $ newVName $ baseString v ++ "_double_buffer_copy"

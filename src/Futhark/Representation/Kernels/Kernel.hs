@@ -271,7 +271,7 @@ mapOnKernelType :: Monad m =>
 mapOnKernelType _tv (Prim pt) = pure $ Prim pt
 mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
-mapOnKernelType _tv (Mem se s) = pure $ Mem se s
+mapOnKernelType _tv (Mem s) = pure $ Mem s
 
 instance (Attributes lore, FreeIn (LParamAttr lore)) =>
          FreeIn (Kernel lore) where

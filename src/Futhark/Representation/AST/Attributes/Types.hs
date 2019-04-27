@@ -84,7 +84,7 @@ import Futhark.Representation.AST.Attributes.Rearrange
 rankShaped :: ArrayShape shape => TypeBase shape u -> TypeBase Rank u
 rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
 rankShaped (Prim et) = Prim et
-rankShaped (Mem size space) = Mem size space
+rankShaped (Mem space) = Mem space
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -107,8 +107,8 @@ modifyArrayShape f (Array t ds u)
   | shapeRank ds' == 0 = Prim t
   | otherwise          = Array t (f ds) u
   where ds' = f ds
-modifyArrayShape _ (Prim t)        = Prim t
-modifyArrayShape _ (Mem size space) = Mem size space
+modifyArrayShape _ (Prim t)    = Prim t
+modifyArrayShape _ (Mem space) = Mem space
 
 -- | Set the shape of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -152,8 +152,8 @@ staticShapes1 (Prim bt) =
   Prim bt
 staticShapes1 (Array bt (Shape shape) u) =
   Array bt (Shape $ map Free shape) u
-staticShapes1 (Mem size space) =
-  Mem size space
+staticShapes1 (Mem space) =
+  Mem space
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -317,7 +317,7 @@ subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
   t1 == t2 &&
   shape1 `subShapeOf` shape2
 subtypeOf (Prim t1) (Prim t2) = t1 == t2
-subtypeOf (Mem _ space1) (Mem _ space2) = space1 == space2
+subtypeOf (Mem space1) (Mem space2) = space1 == space2
 subtypeOf _ _ = False
 
 -- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,
@@ -335,13 +335,13 @@ toDecl :: TypeBase shape NoUniqueness
        -> TypeBase shape Uniqueness
 toDecl (Prim bt) _ = Prim bt
 toDecl (Array et shape _) u = Array et shape u
-toDecl (Mem size space) _ = Mem size space
+toDecl (Mem space) _ = Mem space
 
 fromDecl :: TypeBase shape Uniqueness
          -> TypeBase shape NoUniqueness
 fromDecl (Prim bt) = Prim bt
 fromDecl (Array et shape _) = Array et shape NoUniqueness
-fromDecl (Mem size space) = Mem size space
+fromDecl (Mem space) = Mem space
 
 -- | Given the existential return type of a function, and the shapes
 -- of the values returned by the function, return the existential
@@ -374,10 +374,8 @@ shapeContextSize = S.size . shapeContext
 -- | If all dimensions of the given 'RetType' are statically known,
 -- return the corresponding list of 'Type'.
 hasStaticShape :: ExtType -> Maybe Type
-hasStaticShape (Prim bt) =
-  Just $ Prim bt
-hasStaticShape (Mem size space) =
-  Just $ Mem size space
+hasStaticShape (Prim bt) = Just $ Prim bt
+hasStaticShape (Mem space) = Just $ Mem space
 hasStaticShape (Array bt (Shape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
   where isFree (Free s) = Just s

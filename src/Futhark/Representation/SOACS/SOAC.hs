@@ -401,8 +401,7 @@ instance Attributes lore => IsOp (SOAC lore) where
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ tp@(Prim _) = tp
-substNamesInType subs (Mem se space) =
-  Mem (substNamesInSubExp subs se) space
+substNamesInType _ (Mem space) = Mem space
 substNamesInType subs (Array btp shp u) =
   let shp' = Shape $ map (substNamesInSubExp subs) (shapeDims shp)
   in  Array btp shp' u

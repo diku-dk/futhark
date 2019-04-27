@@ -265,7 +265,7 @@ mkPatternAliases pat e =
           where names' =
                   case patElemType bindee of
                     Array {} -> names
-                    Mem _ _  -> names
+                    Mem _    -> names
                     _        -> mempty
 
 mkContextAliases :: (Attributes lore, Aliased lore) =>

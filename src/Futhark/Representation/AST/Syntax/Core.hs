@@ -165,7 +165,7 @@ data NoUniqueness = NoUniqueness
 -- comparing types for equality with '==', shapes must match.
 data TypeBase shape u = Prim PrimType
                       | Array PrimType shape u
-                      | Mem SubExp Space
+                      | Mem Space
                     deriving (Show, Eq, Ord)
 
 -- | A type with shape information, used for describing the type of

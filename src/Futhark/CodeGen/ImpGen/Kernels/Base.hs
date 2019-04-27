@@ -516,7 +516,7 @@ readsFromSet free =
     vtable <- ImpGen.getVTable
     case t of
       Array {} -> return Nothing
-      Mem _ (Space "local") -> return Nothing
+      Mem (Space "local") -> return Nothing
       Mem {} -> return $ Just $ Imp.MemoryUse var
       Prim bt ->
         isConstExp vtable (Imp.var var bt) >>= \case

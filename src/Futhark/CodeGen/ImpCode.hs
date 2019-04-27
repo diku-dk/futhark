@@ -105,7 +105,7 @@ data Signedness = TypeUnsigned
                 deriving (Eq, Show)
 
 -- | A description of an externally meaningful value.
-data ValueDesc = ArrayValue VName MemSize Space PrimType Signedness [DimSize]
+data ValueDesc = ArrayValue VName Space PrimType Signedness [DimSize]
                -- ^ An array with memory block, memory block size,
                -- memory space, element type, signedness of element
                -- type (if applicable), and shape.
@@ -286,8 +286,8 @@ instance Pretty ValueDesc where
     ppr t <+> ppr name <> ept'
     where ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
-  ppr (ArrayValue mem memsize space et ept shape) =
-    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> parens (ppr memsize) <> space' <+> ept'
+  ppr (ArrayValue mem space et ept shape) =
+    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> space' <+> ept'
     where f e s = brackets $ s <> comma <> ppr e
           ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
