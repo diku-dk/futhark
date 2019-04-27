@@ -441,7 +441,7 @@ inKernelOperations = GenericC.Operations
         kernelOps (LocalAlloc name size) = do
           name' <- newVName $ pretty name ++ "_backing"
           GenericC.modifyUserState (<>KernelRequirements [(name', size)])
-          GenericC.stm [C.cstm|$id:name = $id:name';|]
+          GenericC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
         kernelOps (Atomic aop) = atomicOps aop
 
         atomicOps (AtomicAdd old arr ind val) = do
