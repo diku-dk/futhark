@@ -1072,7 +1072,7 @@ copyArrayDWIM bt
       if destrank /= srcrank
         then fail $ "copyArrayDWIM: cannot copy to " ++
              pretty (memLocationName destlocation') ++
-             " from " ++ pretty (memLocationName destlocation') ++
+             " from " ++ pretty (memLocationName srclocation') ++
              " because ranks do not match (" ++ pretty destrank ++
              " vs " ++ pretty srcrank ++ ")"
       else if destlocation' == srclocation'
