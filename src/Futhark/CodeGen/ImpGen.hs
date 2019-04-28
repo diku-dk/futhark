@@ -66,6 +66,7 @@ module Futhark.CodeGen.ImpGen
   , copyDWIM
   , copyDWIMDest
   , copyElementWise
+  , typeSize
 
   -- * Constructing code.
   , dLParams
@@ -1066,7 +1067,15 @@ copyArrayDWIM bt
           srclocation'  =
             sliceArray srclocation $
             fullSliceNum (IxFun.shape src_ixfun) $ map DimFix srcis
-      if destlocation' == srclocation'
+          destrank = length (memLocationShape destlocation')
+          srcrank = length (memLocationShape srclocation')
+      if destrank /= srcrank
+        then fail $ "copyArrayDWIM: cannot copy to " ++
+             pretty (memLocationName destlocation') ++
+             " from " ++ pretty (memLocationName destlocation') ++
+             " because ranks do not match (" ++ pretty destrank ++
+             " vs " ++ pretty srcrank ++ ")"
+      else if destlocation' == srclocation'
         then return mempty -- Copy would be no-op.
         else collect $ copy bt destlocation' srclocation' $
              product $ map Imp.dimSizeToExp $
@@ -1186,6 +1195,12 @@ dimSizeToSubExp (Imp.VarSize v) = Var v
 dimSizeToExp :: Imp.Size -> Imp.Exp
 dimSizeToExp = compilePrimExp . primExpFromSubExp int32 . dimSizeToSubExp
 
+-- | The number of bytes needed to represent the array in a
+-- straightforward contiguous format.
+typeSize :: Type -> Count Bytes
+typeSize t = Imp.bytes $ Imp.LeafExp (Imp.SizeOf $ elemType t) int32 *
+             product (map (compileSubExpOfType int32) (arrayDims t))
+
 --- Building blocks for constructing code.
 
 sFor :: VName -> IntType -> Imp.Exp -> ImpM lore op () -> ImpM lore op ()
@@ -1248,9 +1263,7 @@ sArray name bt shape membind = do
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
 sAllocArray name pt shape space = do
-  let arr_bytes = Imp.bytes $ Imp.LeafExp (Imp.SizeOf pt) int32 *
-                  product (map (compileSubExpOfType int32) (shapeDims shape))
-  mem <- sAlloc (name ++ "_mem") arr_bytes space
+  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
   sArray name pt shape $
     ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
 

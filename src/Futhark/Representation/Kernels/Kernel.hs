@@ -594,7 +594,7 @@ typeCheckKernel (SegGenRed space ops ts body) = do
   mapM_ TC.checkType ts
 
   TC.binding (scopeOfKernelSpace space) $ do
-    forM_ ops $ \(GenReduceOp dest_w dests nes shape op) -> do
+    nes_ts <- forM ops $ \(GenReduceOp dest_w dests nes shape op) -> do
       TC.require [Prim int32] dest_w
       nes' <- mapM TC.checkArg nes
       mapM_ (TC.require [Prim int32]) $ shapeDims shape
@@ -603,23 +603,24 @@ typeCheckKernel (SegGenRed space ops ts body) = do
       let stripVecDims = stripArray $ shapeRank shape
       TC.checkLambda op $ map (TC.noArgAliases .first stripVecDims) $ nes' ++ nes'
       let nes_t = map TC.argType nes'
-      unless (nes_t == map (`arrayOfShape` shape) (lambdaReturnType op)) $
+      unless (nes_t == lambdaReturnType op) $
         TC.bad $ TC.TypeError $ "SegGenRed operator has return type " ++
         prettyTuple (lambdaReturnType op) ++ " but neutral element has type " ++
         prettyTuple nes_t
 
       -- Arrays must have proper type.
-      let dest_shape = Shape $ segment_dims <> [dest_w]
+      let dest_shape = Shape (segment_dims <> [dest_w]) <> shape
       forM_ (zip nes_t dests) $ \(t, dest) -> do
         TC.requireI [t `arrayOfShape` dest_shape] dest
         TC.consume =<< TC.lookupAliases dest
+
+      return $ map (`arrayOfShape` shape) nes_t
 
     checkKernelBody ts body
 
     -- Return type of bucket function must be an index for each
     -- operation followed by the values to write.
-    nes_ts <- concat <$> mapM (mapM subExpType . genReduceNeutral) ops
-    let bucket_ret_t = replicate (length ops) (Prim int32) ++ nes_ts
+    let bucket_ret_t = replicate (length ops) (Prim int32) ++ concat nes_ts
     unless (bucket_ret_t == ts) $
       TC.bad $ TC.TypeError $ "SegGenRed body has return type " ++
       prettyTuple ts ++ " but should have type " ++
