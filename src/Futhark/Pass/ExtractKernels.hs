@@ -1298,17 +1298,27 @@ genReduceKernel :: Pattern -> [(VName, SubExp)] -> [KernelInput]
                 -> Certificates -> SubExp -> [SOAC.GenReduceOp SOACS]
                 -> InKernelLambda -> [VName]
                 -> DistribM KernelsStms
-genReduceKernel orig_pat ispace inputs cs genred_w ops lam arrs = do
-  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) -> do
-    let (shape, op') = isVectorMap op
-    Out.GenReduceOp num_bins dests nes shape <$> Kernelise.transformLambda op'
+genReduceKernel orig_pat ispace inputs cs genred_w ops lam arrs = runBinder_ $ do
+  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) ->
+    -- FIXME? We are assuming that the accumulator is a replicate, and
+    -- we fish out its value in a gross way.
+    case mapM subExpVar nes of
+      Just ne_vs' -> do
+        let (shape, op') = isVectorMap op
+        nes' <- forM ne_vs' $ \ne_v -> do
+          ne_v_t <- lookupType ne_v
+          letSubExp "genred_ne" $
+            BasicOp $ Index ne_v $ fullSlice ne_v_t $
+            replicate (shapeRank shape) $ DimFix $ intConst Int32 0
+        Out.GenReduceOp num_bins dests nes' shape <$> Kernelise.transformLambda op'
+      Nothing ->
+        Out.GenReduceOp num_bins dests nes mempty <$> Kernelise.transformLambda op
 
   let isDest = flip elem $ concatMap Out.genReduceDest ops'
       inputs' = filter (not . isDest . kernelInputArray) inputs
 
-  k_stms <- segGenRed orig_pat genred_w ispace inputs' ops' lam arrs
-
-  return $ certify cs <$> k_stms
+  certifying cs $
+    addStms =<< segGenRed orig_pat genred_w ispace inputs' ops' lam arrs
 
 isVectorMap :: Lambda -> (Shape, Lambda)
 isVectorMap lam
