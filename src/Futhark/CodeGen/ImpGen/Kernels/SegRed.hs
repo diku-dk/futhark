@@ -505,7 +505,7 @@ reductionStageTwo constants segred_pat
     sOp Imp.MemFence
     -- Increment the counter, thus stating that our result is
     -- available.
-    sOp $ Imp.Atomic $ Imp.AtomicAdd old_counter counter_mem counter_offset 1
+    sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd old_counter counter_mem counter_offset 1
     -- Now check if we were the last group to write our result.  If
     -- so, it is our responsibility to produce the final result.
     ImpGen.sWrite sync_arr [0] $ Imp.var old_counter int32 .==. groups_per_segment - 1
@@ -522,7 +522,7 @@ reductionStageTwo constants segred_pat
     -- with an atomic to avoid warnings about write/write
     -- races in oclgrind.
     sWhen (local_tid .==. 0) $
-      sOp $ Imp.Atomic $ Imp.AtomicAdd old_counter counter_mem counter_offset $
+      sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd old_counter counter_mem counter_offset $
       negate groups_per_segment
     ImpGen.comment "read in the per-group-results" $
       forM_ (zip4 red_acc_params red_arrs nes group_res_arrs) $
