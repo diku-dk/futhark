@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Segmented scans are a good bit faster.
 
+  * `reduce_by_index` has received a new implementation that uses
+    local memory, and is now often a good bit faster when the target
+    array is not too large.
+
 ### Removed
 
 ### Changed

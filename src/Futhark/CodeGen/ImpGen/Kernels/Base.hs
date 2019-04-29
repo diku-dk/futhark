@@ -4,7 +4,6 @@
 module Futhark.CodeGen.ImpGen.Kernels.Base
   ( KernelConstants (..)
   , inKernelOperations
-  , computeKernelUses
   , keyWithEntryPoint
   , CallKernelGen
   , InKernelGen
@@ -300,7 +299,7 @@ compileKernelExp _ _ (GroupGenReduce w arrs op bucket values locks) = do
   sWhen (indexInBounds bucket' w') $ do
     forM_ (zip values_params values) $ \(p, v) ->
       ImpGen.copyDWIM (paramName p) [] v []
-    atomicUpdate arrs bucket' op locking
+    atomicUpdate DefaultSpace arrs bucket' op locking
   where indexInBounds inds bounds =
           foldl1 (.&&.) $ zipWith checkBound inds bounds
           where checkBound ind bound = 0 .<=. ind .&&. ind .<. bound
@@ -335,15 +334,15 @@ data Locking =
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
 type AtomicUpdate lore =
-  [VName] -> [Imp.Exp] -> ImpGen.ImpM lore Imp.KernelOp ()
+  Space -> [VName] -> [Imp.Exp] -> ImpGen.ImpM lore Imp.KernelOp ()
 
 atomicUpdate :: ExplicitMemorish lore =>
-                [VName] -> [Imp.Exp] -> Lambda lore -> Locking
+                Space -> [VName] -> [Imp.Exp] -> Lambda lore -> Locking
              -> ImpGen.ImpM lore Imp.KernelOp ()
-atomicUpdate arrs bucket lam locking =
+atomicUpdate space arrs bucket lam locking =
   case atomicUpdateLocking lam of
-    Left f -> f arrs bucket
-    Right f -> f locking arrs bucket
+    Left f -> f space arrs bucket
+    Right f -> f locking space arrs bucket
 
 -- | 'atomicUpdate', but where it is explicitly visible whether a
 -- locking strategy is necessary.
@@ -353,7 +352,7 @@ atomicUpdateLocking :: ExplicitMemorish lore =>
 
 atomicUpdateLocking lam
   | Just ops_and_ts <- splitOp lam,
-    all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts = Left $ \arrs bucket ->
+    all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts = Left $ \space arrs bucket ->
   -- If the operator is a vectorised binary operator on 32-bit values,
   -- we can use a particularly efficient implementation. If the
   -- operator has an atomic implementation we use that, otherwise it
@@ -366,14 +365,13 @@ atomicUpdateLocking lam
 
   (arr', _a_space, bucket_offset) <- ImpGen.fullyIndexArray a bucket
 
-  case opHasAtomicSupport old arr' bucket_offset op of
+  case opHasAtomicSupport space old arr' bucket_offset op of
     Just f -> sOp $ f $ Imp.var y t
-
-    Nothing -> atomicUpdateCAS t a old bucket x $
+    Nothing -> atomicUpdateCAS space t a old bucket x $
       x <-- Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
 
-  where opHasAtomicSupport old arr' bucket' bop = do
-          let atomic f = Imp.Atomic . f old arr' bucket'
+  where opHasAtomicSupport space old arr' bucket' bop = do
+          let atomic f = Imp.Atomic space . f old arr' bucket'
           atomic <$> Imp.atomicBinOp bop
 
 -- If the operator functions purely on single 32-bit values, we can
@@ -382,12 +380,12 @@ atomicUpdateLocking lam
 atomicUpdateLocking op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
-    primBitSize t == 32 = Left $ \[arr] bucket -> do
+    primBitSize t == 32 = Left $ \space [arr] bucket -> do
       old <- dPrim "old" t
-      atomicUpdateCAS t arr old bucket (paramName xp) $
+      atomicUpdateCAS space t arr old bucket (paramName xp) $
         ImpGen.compileBody' [xp] $ lambdaBody op
 
-atomicUpdateLocking op = Right $ \locking arrs bucket -> do
+atomicUpdateLocking op = Right $ \locking space arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimV "continue" true
 
@@ -397,13 +395,13 @@ atomicUpdateLocking op = Right $ \locking arrs bucket -> do
 
   -- Critical section
   let try_acquire_lock =
-        sOp $ Imp.Atomic $
+        sOp $ Imp.Atomic space $
         Imp.AtomicCmpXchg old locks' locks_offset (lockingIsUnlocked locking) (lockingToLock locking)
       lock_acquired = Imp.var old int32 .==. lockingIsUnlocked locking
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
       release_lock =
-        sOp $ Imp.Atomic $
+        sOp $ Imp.Atomic space $
         Imp.AtomicCmpXchg old locks' locks_offset (lockingToLock locking) (lockingToUnlock locking)
       break_loop = continue <-- false
 
@@ -446,12 +444,12 @@ atomicUpdateLocking op = Right $ \locking arrs bucket -> do
     sOp Imp.MemFence
   where writeArray bucket arr val = ImpGen.copyDWIM arr bucket val []
 
-atomicUpdateCAS :: PrimType
+atomicUpdateCAS :: Space -> PrimType
                 -> VName -> VName
                 -> [Imp.Exp] -> VName
                 -> ImpGen.ImpM lore Imp.KernelOp ()
                 -> ImpGen.ImpM lore Imp.KernelOp ()
-atomicUpdateCAS t arr old bucket x do_op = do
+atomicUpdateCAS space t arr old bucket x do_op = do
   -- Code generation target:
   --
   -- old = d_his[idx];
@@ -476,7 +474,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
     x <-- Imp.var assumed t
     do_op
     old_bits <- dPrim "old_bits" int32
-    sOp $ Imp.Atomic $
+    sOp $ Imp.Atomic space $
       Imp.AtomicCmpXchg old_bits arr' bucket_offset
       (toBits (Imp.var assumed t)) (toBits (Imp.var x t))
     old <-- fromBits (Imp.var old_bits int32)
