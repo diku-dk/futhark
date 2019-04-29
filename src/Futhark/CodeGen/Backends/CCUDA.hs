@@ -215,13 +215,14 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeTile = "tile_size"
 callKernel (DistributeHusk hspace src_mem interm_mem interm_size red body after) = do
   let HuskSpace _ src_elems _ parts_elems parts_elems_offset parts_mem _ = hspace
+      num_nodes_e = [C.cexp|ctx->cuda.cfg.num_nodes|]
   body_node_id <- newVName "body_node_id"
   red_node_id <- newVName "red_node_id"
   elems_per_node <- newVName "elems_per_node"
   interm_cols <- replicateM (length interm_mem) $ newVName "interm_col"
-  body' <- GC.blockScope $ GC.compileCode body
-  red' <- GC.blockScope $ GC.compileCode red
-  after' <- GC.blockScope $ GC.compileCode after
+  body' <- GC.localNodeCount num_nodes_e $ GC.blockScope $ GC.compileCode body
+  red' <- GC.localNodeCount num_nodes_e $ GC.blockScope $ GC.compileCode red
+  after' <- GC.localNodeCount num_nodes_e $ GC.blockScope $ GC.compileCode after
   interm_size_e <- mapM (GC.compileExp . sizeToExp) interm_size
   src_elems_e <- GC.compileExp $ compileSubExpOfType int32 src_elems
   let decl_parts = [[C.citem|struct memblock_device $id:part;|] | part <- parts_mem]
@@ -256,14 +257,14 @@ callKernel (DistributeHusk hspace src_mem interm_mem interm_size red body after)
                                     $exp:size));
         |]
   GC.decl [C.cdecl|
-      typename int32_t $id:elems_per_node = ($exp:src_elems_e + ctx->cuda.cfg.num_nodes - 1) / ctx->cuda.cfg.num_nodes;
+      typename int32_t $id:elems_per_node = ($exp:src_elems_e + $exp:num_nodes_e - 1) / $exp:num_nodes_e;
     |]
   mapM_ GC.decl [[C.cdecl|struct memblock_device $id:interm;|] | interm <- interm_mem]
   mapM_ GC.decl [[C.cdecl|
-      struct memblock_device *$id:col = calloc(ctx->cuda.cfg.num_nodes, sizeof(struct memblock_device));
+      struct memblock_device *$id:col = calloc($exp:num_nodes_e, sizeof(struct memblock_device));
     |] | col <- interm_cols]
   GC.stm [C.cstm|
-    for (int $id:body_node_id = ctx->cuda.cfg.num_nodes - 1; $id:body_node_id >= 0; --$id:body_node_id) {
+    for (int $id:body_node_id = $exp:num_nodes_e - 1; $id:body_node_id >= 0; --$id:body_node_id) {
       CUDA_SUCCEED(cuda_set_active_node(&ctx->cuda, $id:body_node_id));
 
       typename int32_t $id:parts_elems_offset = $id:body_node_id * $id:elems_per_node;
@@ -287,7 +288,7 @@ callKernel (DistributeHusk hspace src_mem interm_mem interm_size red body after)
       }
     }|]
   GC.stm [C.cstm|
-    for (int $id:red_node_id = ctx->cuda.cfg.num_nodes - 1; $id:red_node_id >= 0; --$id:red_node_id) {
+    for (int $id:red_node_id = $exp:num_nodes_e - 1; $id:red_node_id >= 0; --$id:red_node_id) {
       CUDA_SUCCEED(cuda_set_active_node(&ctx->cuda, $id:red_node_id));
       $stms:(get_interm_col red_node_id)
       $items:red'

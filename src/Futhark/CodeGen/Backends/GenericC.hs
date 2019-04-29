@@ -24,6 +24,7 @@ module Futhark.CodeGen.Backends.GenericC
   , Deallocate
   , Copy
   , StaticArray
+  , localNodeCount
 
   -- * Monadic compiler interface
   , CompilerM
@@ -225,6 +226,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
   , envFtable     :: M.Map Name [Type]
+  , envNodeCount :: Maybe C.Exp
   }
 
 newtype CompilerAcc op s = CompilerAcc {
@@ -270,12 +272,16 @@ newCompilerEnv :: Functions op -> Operations op s
 newCompilerEnv (Functions funs) ops =
   CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
+              , envNodeCount = Nothing
               }
   where ftable = M.fromList $ map funReturn funs
         funReturn (name, fun) =
           (name, paramsTypes $ functionOutput fun)
         builtinFtable =
           M.map (map Scalar . snd) builtInFunctions
+          
+localNodeCount :: C.Exp -> CompilerM op s a -> CompilerM op s a
+localNodeCount nc = local $ \env -> env { envNodeCount = Just nc }
 
 tupleDefinitions, arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
 tupleDefinitions = map (snd . snd) . compTypeStructs
