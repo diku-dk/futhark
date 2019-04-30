@@ -1,6 +1,4 @@
-### start of tuning.py
-###
-### Reading the .tuning file.
+# Start of tuning.py
 
 def read_tuning_file(kvs, f):
     for line in f.read().splitlines():
@@ -8,4 +6,4 @@ def read_tuning_file(kvs, f):
         kvs[size] = int(value)
     return kvs
 
-### end of tuning.py
+# End of tuning.py.

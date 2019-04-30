@@ -1,4 +1,4 @@
-# Scalar functions.
+# Start of scalar.py.
 
 import numpy as np
 import struct
@@ -364,3 +364,5 @@ def futhark_to_bits32(x):
 def futhark_from_bits32(x):
   s = struct.pack('>l', x)
   return np.float32(struct.unpack('>f', s)[0])
+
+# End of scalar.py.
