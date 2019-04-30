@@ -267,7 +267,7 @@ using either::
 
 Or::
 
-  $ futhark c --library futlib.fut
+  $ futhark opencl --library futlib.fut
 
 This produces two files in the current directory: ``futlib.c`` and
 ``futlib.h``.  If we wish (and are on a Unix system), we can then
