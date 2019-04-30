@@ -1303,6 +1303,7 @@ compileProg ops extra header_extra spaces options prog@(Functions funs) = do
       option_parser = generateOptionParser "parse_options" $ benchmarkOptions++options
 
   let headerdefs = [C.cunit|
+$esc:("#pragma once\n")
 $esc:("/*\n * Headers\n*/\n")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
@@ -1459,7 +1460,8 @@ $edecls:entry_point_decls
   |]
 
   return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
-  where compileProg' = do
+    where
+      compileProg' = do
           (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
 
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
@@ -1473,28 +1475,29 @@ $edecls:entry_point_decls
           ctx_ty <- contextType
           headerDecl MiscDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx);|]
           libDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx) {
-  if (ctx->detail_memory) {
-    $items:memreport
-  }
-  if (ctx->debugging) {
-    $items:debugreport
-  }
-}|]
+                      if (ctx->detail_memory) {
+                        $items:memreport
+                      }
+                      if (ctx->debugging) {
+                        $items:debugreport
+                      }
+                    }|]
 
           return (prototypes, definitions, entry_points)
-        funcToDef func = C.FuncDef func loc
-          where loc = case func of
-                        C.OldFunc _ _ _ _ _ _ l -> l
-                        C.Func _ _ _ _ _ l      -> l
 
-        builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
-                  cFloat32Funs ++ cFloat64Funs
+      funcToDef func = C.FuncDef func loc
+        where loc = case func of
+                       C.OldFunc _ _ _ _ _ _ l -> l
+                       C.Func _ _ _ _ _ l      -> l
 
-        panic_h = $(embedStringFile "rts/c/panic.h")
-        values_h = $(embedStringFile "rts/c/values.h")
-        timing_h = $(embedStringFile "rts/c/timing.h")
-        lock_h = $(embedStringFile "rts/c/lock.h")
-        tuning_h = $(embedStringFile "rts/c/tuning.h")
+      builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
+                cFloat32Funs ++ cFloat64Funs
+
+      panic_h  = $(embedStringFile "rts/c/panic.h")
+      values_h = $(embedStringFile "rts/c/values.h")
+      timing_h = $(embedStringFile "rts/c/timing.h")
+      lock_h   = $(embedStringFile "rts/c/lock.h")
+      tuning_h = $(embedStringFile "rts/c/tuning.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
