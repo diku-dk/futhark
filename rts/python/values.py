@@ -1,3 +1,5 @@
+# Start of values.py.
+
 # Hacky parser/reader/writer for values written in Futhark syntax.
 # Used for reading stdin when compiling standalone programs with the
 # Python code generator.
@@ -668,6 +670,4 @@ def write_value(v, out=sys.stdout, binary=False):
     else:
         return write_value_text(v, out=out)
 
-################################################################################
-### end of values.py
-################################################################################
+# End of values.py.
