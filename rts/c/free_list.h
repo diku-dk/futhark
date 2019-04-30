@@ -1,4 +1,4 @@
-/* Free list management */
+// Start of free_list.h.
 
 /* An entry in the free list.  May be invalid, to avoid having to
    deallocate entries as soon as they are removed.  There is also a
@@ -108,3 +108,4 @@ int free_list_first(struct free_list *l, fl_mem_t *mem_out) {
   return 1;
 }
 
+// End of free_list.h.

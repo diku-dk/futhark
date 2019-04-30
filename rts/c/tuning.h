@@ -1,4 +1,4 @@
-// Start of tuning.h
+// Start of tuning.h.
 
 static char* load_tuning_file(const char *fname,
                               void *cfg,
@@ -37,4 +37,4 @@ static char* load_tuning_file(const char *fname,
   return NULL;
 }
 
-// End of tuning.h
+// End of tuning.h.

@@ -1,4 +1,4 @@
-/* Simple CUDA runtime framework */
+// Start of cuda.h.
 
 #define CUDA_SUCCEED(x) cuda_api_succeed(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED(x) nvrtc_api_succeed(x, #x, __FILE__, __LINE__)
@@ -557,3 +557,4 @@ CUresult cuda_free_all(struct cuda_context *ctx) {
   return CUDA_SUCCESS;
 }
 
+// End of cuda.h.

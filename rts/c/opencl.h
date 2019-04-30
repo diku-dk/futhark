@@ -1,4 +1,4 @@
-/* The simple OpenCL runtime framework used by Futhark. */
+// Start of opencl.h.
 
 #define OPENCL_SUCCEED_FATAL(e) opencl_succeed_fatal(e, #e, __FILE__, __LINE__)
 #define OPENCL_SUCCEED_NONFATAL(e) opencl_succeed_nonfatal(e, #e, __FILE__, __LINE__)
@@ -857,3 +857,5 @@ int opencl_free_all(struct opencl_context *ctx) {
 
   return CL_SUCCESS;
 }
+
+// End of opencl.h.
