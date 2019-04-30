@@ -1307,6 +1307,7 @@ compileProg ops extra header_extra spaces options prog@(Functions funs) = do
       option_parser = generateOptionParser "parse_options" $ benchmarkOptions++options
 
   let headerdefs = [C.cunit|
+$esc:("#pragma once\n")
 $esc:("/*\n * Headers\n*/\n")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
