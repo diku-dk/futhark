@@ -1,4 +1,4 @@
-/* Crash and burn. */
+// Start of panic.h.
 
 #include <stdarg.h>
 
@@ -26,3 +26,5 @@ static char* msgprintf(const char *s, ...) {
   vsnprintf(buffer, needed, s, vl);
   return buffer;
 }
+
+// End of panic.h.

@@ -1,8 +1,7 @@
-/* Some simple utilities for wall-clock timing.
+// Start of timing.h.
 
-   The function get_wall_time() returns the wall time in microseconds
-   (with an unspecified offset).
-*/
+// The function get_wall_time() returns the wall time in microseconds
+// (with an unspecified offset).
 
 #ifdef _WIN32
 
@@ -28,3 +27,5 @@ static int64_t get_wall_time(void) {
 }
 
 #endif
+
+// End of timing.h.

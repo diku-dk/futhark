@@ -1,3 +1,5 @@
+// Start of lock.h.
+
 /* A very simple cross-platform implementation of locks.  Uses
    pthreads on Unix and some Windows thing there.  Futhark's
    host-level code is not multithreaded, but user code may be, so we
@@ -55,3 +57,5 @@ static void free_lock(lock_t *lock) {
 }
 
 #endif
+
+// End of lock.h.
