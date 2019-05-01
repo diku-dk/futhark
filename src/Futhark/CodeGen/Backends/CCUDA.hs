@@ -203,7 +203,7 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
-    cudaSizeClass SizeLocalMemory = "local_memory"
+    cudaSizeClass SizeLocalMemory = "shared_memory"
 callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   time_start <- newVName "time_start"
