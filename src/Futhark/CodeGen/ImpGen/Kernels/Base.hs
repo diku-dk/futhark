@@ -430,6 +430,10 @@ atomicUpdateLocking op = Right $ \locking space arrs bucket -> do
         ImpGen.sComment "update global result" $
         zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
+      fence = case space of Space "local" -> sOp Imp.MemFenceLocal
+                            _             -> sOp Imp.MemFenceGlobal
+
+
   -- While-loop: Try to insert your value
   sWhile (Imp.var continue Bool) $ do
     try_acquire_lock
@@ -438,10 +442,10 @@ atomicUpdateLocking op = Right $ \locking space arrs bucket -> do
       bind_acc_params
       op_body
       do_gen_reduce
-      sOp Imp.MemFence
+      fence
       release_lock
       break_loop
-    sOp Imp.MemFence
+    fence
   where writeArray bucket arr val = ImpGen.copyDWIM arr bucket val []
 
 atomicUpdateCAS :: Space -> PrimType

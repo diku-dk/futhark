@@ -498,11 +498,11 @@ reductionStageTwo constants segred_pat
       group_size = kernelGroupSize constants
   old_counter <- dPrim "old_counter" int32
   (counter_mem, _, counter_offset) <- ImpGen.fullyIndexArray counter [flat_segment_id `rem` num_counters]
-  ImpGen.comment "first thread in group saves group result to memory" $
+  ImpGen.comment "first thread in group saves group result to global memory" $
     sWhen (local_tid .==. 0) $ do
     forM_ (take (length nes) $ zip group_res_arrs group_result_params) $ \(v, p) ->
       ImpGen.copyDWIM v [group_id] (Var $ paramName p) []
-    sOp Imp.MemFence
+    sOp Imp.MemFenceGlobal
     -- Increment the counter, thus stating that our result is
     -- available.
     sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd old_counter counter_mem counter_offset 1
