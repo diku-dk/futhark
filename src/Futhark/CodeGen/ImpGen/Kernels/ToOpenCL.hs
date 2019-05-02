@@ -431,7 +431,9 @@ inKernelOperations = GenericC.Operations
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
         kernelOps GlobalBarrier =
           GenericC.stm [C.cstm|barrier(CLK_GLOBAL_MEM_FENCE);|]
-        kernelOps MemFence =
+        kernelOps MemFenceLocal =
+          GenericC.stm [C.cstm|mem_fence_local();|]
+        kernelOps MemFenceGlobal =
           GenericC.stm [C.cstm|mem_fence_global();|]
         kernelOps (PrivateAlloc name size) = do
           size' <- GenericC.compileExp $ innerExp size

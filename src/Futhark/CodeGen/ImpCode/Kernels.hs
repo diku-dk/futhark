@@ -150,7 +150,8 @@ data KernelOp = GetGroupId VName Int
               | Atomic Space AtomicOp
               | LocalBarrier
               | GlobalBarrier
-              | MemFence
+              | MemFenceLocal
+              | MemFenceGlobal
               | PrivateAlloc VName (Count Bytes)
               | LocalAlloc VName (Either (Count Bytes) KernelConstExp)
               deriving (Show)
@@ -204,8 +205,10 @@ instance Pretty KernelOp where
     text "local_barrier()"
   ppr GlobalBarrier =
     text "global_barrier()"
-  ppr MemFence =
-    text "mem_fence()"
+  ppr MemFenceLocal =
+    text "mem_fence_local()"
+  ppr MemFenceGlobal =
+    text "mem_fence_global()"
   ppr (PrivateAlloc name size) =
     ppr name <+> equals <+> text "private_alloc" <> parens (ppr size)
   ppr (LocalAlloc name size) =
