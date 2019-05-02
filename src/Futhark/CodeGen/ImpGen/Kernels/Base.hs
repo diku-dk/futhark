@@ -236,7 +236,7 @@ compileKernelExp constants (Pattern _ final) (GroupStream w maxchunk lam accs _a
     Just stms' | ValueExp x <- max_block_size, oneIsh x -> do
       let body' = body { bodyStms = stmsFromList stms' }
           body'' = allThreads constants $
-                   ImpGen.compileLoopBody (map paramName acc_params) body'
+                   ImpGen.compileLoopBody acc_params body'
       block_size <-- 1
 
       -- Check if loop is candidate for unrolling.
