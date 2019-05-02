@@ -249,6 +249,8 @@ instance MonadFreshNames (ImpM lore op) where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
 
+-- Cannot be an ExplicitMemory scope because the index functions have
+-- the wrong leaves (VName instead of Imp.Exp).
 instance HasScope SOACS (ImpM lore op) where
   askScope = M.map (LetInfo . entryType) <$> gets stateVTable
     where entryType (MemVar _ memEntry) =
@@ -496,27 +498,27 @@ compileBody' :: (ExplicitMemorish lore, attr ~ LetAttr lore)
              => [Param attr] -> Body lore -> ImpM lore op ()
 compileBody' = compileBody . patternFromParams
 
-compileLoopBody :: [VName] -> Body lore -> ImpM lore op ()
-compileLoopBody mergenames (Body _ bnds ses) = do
+compileLoopBody :: Typed attr => [Param attr] -> Body lore -> ImpM lore op ()
+compileLoopBody mergeparams (Body _ bnds ses) = do
   -- We cannot write the results to the merge parameters immediately,
   -- as some of the results may actually *be* merge parameters, and
   -- would thus be clobbered.  Therefore, we first copy to new
   -- variables mirroring the merge parameters, and then copy this
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
-  tmpnames <- mapM (newVName . (++"_tmp") . baseString) mergenames
+  tmpnames <- mapM (newVName . (++"_tmp") . baseString . paramName) mergeparams
   compileStms (freeIn ses) bnds $ do
-    copy_to_merge_params <- forM (zip3 mergenames tmpnames ses) $ \(d,tmp,se) ->
-      subExpType se >>= \case
+    copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p,tmp,se) ->
+      case typeOf p of
         Prim bt  -> do
           se' <- compileSubExp se
           emit $ Imp.DeclareScalar tmp bt
           emit $ Imp.SetScalar tmp se'
-          return $ emit $ Imp.SetScalar d $ Imp.var tmp bt
+          return $ emit $ Imp.SetScalar (paramName p) $ Imp.var tmp bt
         Mem space | Var v <- se -> do
           emit $ Imp.DeclareMem tmp space
           emit $ Imp.SetMem tmp v space
-          return $ emit $ Imp.SetMem d tmp space
+          return $ emit $ Imp.SetMem (paramName p) tmp space
         _ -> return $ return ()
     sequence_ copy_to_merge_params
 
@@ -587,12 +589,11 @@ defCompileExp pat (BasicOp op) = defCompileBasicOp pat op
 
 defCompileExp pat (DoLoop ctx val form body) = do
   dFParams mergepat
-  forM_ merge $ \(p, se) -> do
-    na <- subExpNotArray se
-    when na $
-      copyDWIM (paramName p) [] se []
+  forM_ merge $ \(p, se) ->
+    when ((==0) $ arrayRank $ paramType p) $
+    copyDWIM (paramName p) [] se []
 
-  let doBody = compileLoopBody mergenames body
+  let doBody = compileLoopBody mergepat body
 
   case form of
     ForLoop i it bound loopvars -> do
@@ -615,7 +616,6 @@ defCompileExp pat (DoLoop ctx val form body) = do
 
   where merge = ctx ++ val
         mergepat = map fst merge
-        mergenames = map paramName mergepat
 
 defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
@@ -693,7 +693,6 @@ defCompileBasicOp (Pattern _ [pe]) (Manifest _ src) =
 defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
     MemLocation destmem destshape destixfun <-
       entryArrayLocation <$> lookupArray (patElemName pe)
-    xtype <- lookupType x
     offs_glb <- dPrim "tmp_offs" int32
     emit $ Imp.SetScalar offs_glb 0
     let perm = [i] ++ [0..i-1] ++ [i+1..length destshape-1]
@@ -709,7 +708,7 @@ defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
           rows = case drop i $ entryArrayShape yentry of
                   []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
                   r:_ -> innerExp $ Imp.dimSizeToExp r
-      copy (elemType xtype) destloc srcloc $ arrayOuterSize yentry
+      copy (elemType $ patElemType pe) destloc srcloc $ arrayOuterSize yentry
       emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
 defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
@@ -870,11 +869,11 @@ compileSubExpTo d se = copyDWIM d [] se []
 compileSubExp :: SubExp -> ImpM lore op Imp.Exp
 compileSubExp (Constant v) =
   return $ Imp.ValueExp v
-compileSubExp (Var v) = do
-  t <- lookupType v
-  case t of
-    Prim pt -> return $ Imp.var v pt
-    _       -> compilerBugS $ "compileSubExp: SubExp is not a primitive type: " ++ pretty v
+compileSubExp (Var v) =
+  lookupVar v >>= \case
+  ScalarVar _ (ScalarEntry pt) ->
+    return $ Imp.var v pt
+  _       -> compilerBugS $ "compileSubExp: SubExp is not a primitive type: " ++ pretty v
 
 compileSubExpOfType :: PrimType -> SubExp -> Imp.Exp
 compileSubExpOfType _ (Constant v) = Imp.ValueExp v
@@ -983,11 +982,6 @@ strideArray :: MemLocation
             -> MemLocation
 strideArray (MemLocation mem shape ixfun) stride =
   MemLocation mem shape $ IxFun.strideIndex ixfun stride
-
-subExpNotArray :: SubExp -> ImpM lore op Bool
-subExpNotArray se = subExpType se >>= \case
-  Array {} -> return False
-  _        -> return True
 
 arrayOuterSize :: ArrayEntry -> Count Elements
 arrayOuterSize = arrayDimSize 0
