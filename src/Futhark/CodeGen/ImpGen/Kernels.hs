@@ -3,7 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
 module Futhark.CodeGen.ImpGen.Kernels
-  ( compileProg
+  ( Futhark.CodeGen.ImpGen.Kernels.compileProg
   )
   where
 
@@ -19,8 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
-import Futhark.CodeGen.ImpGen (ToExp(..), sOp)
-import qualified Futhark.CodeGen.ImpGen as ImpGen
+import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegMap
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
@@ -31,30 +30,30 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Util.IntegralExp (quot, IntegralExp)
 
-callKernelOperations :: ImpGen.Operations ExplicitMemory Imp.HostOp
+callKernelOperations :: Operations ExplicitMemory Imp.HostOp
 callKernelOperations =
-  ImpGen.Operations { ImpGen.opsExpCompiler = expCompiler
-                    , ImpGen.opsCopyCompiler = callKernelCopy
-                    , ImpGen.opsOpCompiler = opCompiler
-                    , ImpGen.opsStmsCompiler = ImpGen.defCompileStms
-                    , ImpGen.opsAllocCompilers = mempty
+  Operations { opsExpCompiler = expCompiler
+                    , opsCopyCompiler = callKernelCopy
+                    , opsOpCompiler = opCompiler
+                    , opsStmsCompiler = defCompileStms
+                    , opsAllocCompilers = mempty
                     }
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Imp.Program)
 compileProg prog =
   fmap (setDefaultSpace (Imp.Space "device")) <$>
-  ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
+  Futhark.CodeGen.ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
 
 opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
            -> CallKernelGen ()
 opCompiler dest (Alloc e space) =
-  ImpGen.compileAlloc dest e space
+  compileAlloc dest e space
 opCompiler (Pattern _ [pe]) (Inner (GetSize key size_class)) = do
-  fname <- asks ImpGen.envFunction
+  fname <- asks envFunction
   sOp $ Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
     sizeClassWithEntryPoint fname size_class
 opCompiler (Pattern _ [pe]) (Inner (CmpSizeLe key size_class x)) = do
-  fname <- asks ImpGen.envFunction
+  fname <- asks envFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
   sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
     =<< toExp x
@@ -63,7 +62,7 @@ opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
 opCompiler dest (Inner (HostOp kernel)) =
   kernelCompiler dest kernel
 opCompiler pat e =
-  compilerBugS $ "ImpGen.opCompiler: Invalid pattern\n  " ++
+  compilerBugS $ "opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
 
 sizeClassWithEntryPoint :: Name -> Imp.SizeClass -> Imp.SizeClass
@@ -86,7 +85,7 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
                                          , " in kernel '", kernelName desc, "'"
                                          , " did not have primType value." ]
 
-    toExp v >>= ImpGen.emit . Imp.DebugPrint s (elemType ty)
+    toExp v >>= emit . Imp.DebugPrint s (elemType ty)
 
   sKernel constants (kernelName desc) $ do
     init_constants
@@ -107,7 +106,7 @@ kernelCompiler pat (SegScan space red_op nes _ kbody) =
 kernelCompiler pat (SegGenRed space ops _ body) =
   compileSegGenRed pat space ops body
 
-expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
+expCompiler :: ExpCompiler ExplicitMemory Imp.HostOp
 
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
@@ -125,19 +124,19 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
   return ()
 
 expCompiler dest e =
-  ImpGen.defCompileExp dest e
+  defCompileExp dest e
 
-callKernelCopy :: ImpGen.CopyCompiler ExplicitMemory Imp.HostOp
+callKernelCopy :: CopyCompiler ExplicitMemory Imp.HostOp
 callKernelCopy bt
-  destloc@(ImpGen.MemLocation destmem destshape destIxFun)
-  srcloc@(ImpGen.MemLocation srcmem srcshape srcIxFun)
+  destloc@(MemLocation destmem destshape destIxFun)
+  srcloc@(MemLocation srcmem srcshape srcIxFun)
   n
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
           src_elems, dest_elems) <- isMapTransposeKernel bt destloc srcloc = do
 
       fname <- mapTransposeForType bt
-      ImpGen.emit $ Imp.Call [] fname
+      emit $ Imp.Call [] fname
         [Imp.MemArg destmem, Imp.ExpArg destoffset,
          Imp.MemArg srcmem, Imp.ExpArg srcoffset,
          Imp.ExpArg num_arrays, Imp.ExpArg size_x, Imp.ExpArg size_y,
@@ -152,25 +151,25 @@ callKernelCopy bt
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
       IxFun.linearWithOffset srcIxFun bt_size = do
-        let row_size = product $ map ImpGen.dimSizeToExp $ drop 1 srcshape
-        srcspace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory srcmem
-        destspace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory destmem
-        ImpGen.emit $ Imp.Copy
+        let row_size = product $ map dimSizeToExp $ drop 1 srcshape
+        srcspace <- entryMemSpace <$> lookupMemory srcmem
+        destspace <- entryMemSpace <$> lookupMemory destmem
+        emit $ Imp.Copy
           destmem (bytes destoffset) destspace
           srcmem (bytes srcoffset) srcspace $
           (n * row_size) `Imp.withElemType` bt
 
   | otherwise = sCopy bt destloc srcloc n
 
-mapTransposeForType :: PrimType -> ImpGen.ImpM ExplicitMemory Imp.HostOp Name
+mapTransposeForType :: PrimType -> ImpM ExplicitMemory Imp.HostOp Name
 mapTransposeForType bt = do
   -- XXX: The leading underscore is to avoid clashes with a
   -- programmer-defined function of the same name (this is a bad
   -- solution...).
   let fname = nameFromString $ "_" <> mapTransposeName bt
 
-  exists <- ImpGen.hasFunction fname
-  unless exists $ ImpGen.emitFunction fname $ mapTransposeFunction bt
+  exists <- hasFunction fname
+  unless exists $ emitFunction fname $ mapTransposeFunction bt
 
   return fname
 
@@ -281,13 +280,13 @@ mapTransposeFunction bt =
             v32 mulx, v32 muly, v32 num_arrays,
             block) bt
 
-isMapTransposeKernel :: PrimType -> ImpGen.MemLocation -> ImpGen.MemLocation
+isMapTransposeKernel :: PrimType -> MemLocation -> MemLocation
                      -> Maybe (Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp)
 isMapTransposeKernel bt
-  (ImpGen.MemLocation _ _ destIxFun)
-  (ImpGen.MemLocation _ _ srcIxFun)
+  (MemLocation _ _ destIxFun)
+  (MemLocation _ _ srcIxFun)
   | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     (perm, destshape) <- unzip perm_and_destshape,
     srcshape' <- IxFun.shape srcIxFun,
