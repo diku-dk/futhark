@@ -42,10 +42,7 @@ module Futhark.CodeGen.ImpGen
   , lookupMemory
 
     -- * Building Blocks
-  , compileSubExp
-  , compileSubExpOfType
-  , compileSubExpTo
-  , compilePrimExp
+  , ToExp(..)
   , compileAlloc
   , subExpToDimSize
   , everythingVolatile
@@ -60,7 +57,6 @@ module Futhark.CodeGen.ImpGen
   , strideArray
   , fullyIndexArray
   , fullyIndexArray'
-  , varIndex
   , Imp.dimSizeToExp
   , dimSizeToSubExp
   , copy
@@ -349,7 +345,7 @@ compileInParam fparam = case paramAttr fparam of
   MemArray bt shape _ (ArrayIn mem ixfun) -> do
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt $
-      MemLocation mem shape' $ fmap compilePrimExp ixfun
+      MemLocation mem shape' $ fmap (toExp' int32) ixfun
   where name = paramName fparam
 
 data ArrayDecl = ArrayDecl VName PrimType MemLocation
@@ -510,11 +506,10 @@ compileLoopBody mergeparams (Body _ bnds ses) = do
   compileStms (freeIn ses) bnds $ do
     copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p,tmp,se) ->
       case typeOf p of
-        Prim bt  -> do
-          se' <- compileSubExp se
-          emit $ Imp.DeclareScalar tmp bt
-          emit $ Imp.SetScalar tmp se'
-          return $ emit $ Imp.SetScalar (paramName p) $ Imp.var tmp bt
+        Prim pt  -> do
+          emit $ Imp.DeclareScalar tmp pt
+          emit $ Imp.SetScalar tmp $ toExp' pt se
+          return $ emit $ Imp.SetScalar (paramName p) $ Imp.var tmp pt
         Mem space | Var v <- se -> do
           emit $ Imp.DeclareMem tmp space
           emit $ Imp.SetMem tmp v space
@@ -568,10 +563,9 @@ defCompileExp :: (ExplicitMemorish lore) =>
                  Pattern lore -> Exp lore -> ImpM lore op ()
 
 defCompileExp pat (If cond tbranch fbranch _) = do
-  cond' <- compileSubExp cond
   tcode <- collect $ compileBody pat tbranch
   fcode <- collect $ compileBody pat fbranch
-  emit $ Imp.If cond' tcode fcode
+  emit $ Imp.If (toExp' Bool cond) tcode fcode
 
 defCompileExp pat (Apply fname args _ _) = do
   dest <- destinationFromPattern pat
@@ -581,7 +575,7 @@ defCompileExp pat (Apply fname args _ _) = do
   where compileArg (se, _) = do
           t <- subExpType se
           case (se, t) of
-            (_, Prim pt)    -> return $ Just $ Imp.ExpArg $ compileSubExpOfType pt se
+            (_, Prim pt)   -> return $ Just $ Imp.ExpArg $ toExp' pt se
             (Var v, Mem{}) -> return $ Just $ Imp.MemArg v
             _              -> return Nothing
 
@@ -597,16 +591,15 @@ defCompileExp pat (DoLoop ctx val form body) = do
 
   case form of
     ForLoop i it bound loopvars -> do
-      bound' <- compileSubExp bound
-
       let setLoopParam (p,a)
             | Prim _ <- paramType p =
-                copyDWIM (paramName p) [] (Var a) [varIndex i]
+                copyDWIM (paramName p) [] (Var a) [Imp.vi32 i]
             | otherwise =
                 return ()
 
       dLParams $ map fst loopvars
-      sFor i it bound' $ mapM_ setLoopParam loopvars >> doBody
+      sFor i it (toExp' (IntType it) bound) $
+        mapM_ setLoopParam loopvars >> doBody
     WhileLoop cond ->
       sWhile (Imp.var cond Bool) doBody
 
@@ -631,42 +624,42 @@ defCompileBasicOp (Pattern _ [pe]) (Opaque se) =
   copyDWIM (patElemName pe) [] se []
 
 defCompileBasicOp (Pattern _ [pe]) (UnOp op e) = do
-  e' <- compileSubExp e
+  e' <- toExp e
   patElemName pe <-- Imp.UnOpExp op e'
 
 defCompileBasicOp (Pattern _ [pe]) (ConvOp conv e) = do
-  e' <- compileSubExp e
+  e' <- toExp e
   patElemName pe <-- Imp.ConvOpExp conv e'
 
 defCompileBasicOp (Pattern _ [pe]) (BinOp bop x y) = do
-  x' <- compileSubExp x
-  y' <- compileSubExp y
+  x' <- toExp x
+  y' <- toExp y
   patElemName pe <-- Imp.BinOpExp bop x' y'
 
 defCompileBasicOp (Pattern _ [pe]) (CmpOp bop x y) = do
-  x' <- compileSubExp x
-  y' <- compileSubExp y
+  x' <- toExp x
+  y' <- toExp y
   patElemName pe <-- Imp.CmpOpExp bop x' y'
 
 defCompileBasicOp _ (Assert e msg loc) = do
-  e' <- compileSubExp e
-  msg' <- traverse compileSubExp msg
+  e' <- toExp e
+  msg' <- traverse toExp msg
   emit $ Imp.Assert e' msg' loc
 
 defCompileBasicOp (Pattern _ [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
-      copyDWIM (patElemName pe) [] (Var src) $ map (compileSubExpOfType int32) idxs
+      copyDWIM (patElemName pe) [] (Var src) $ map (toExp' int32) idxs
 
 defCompileBasicOp _ Index{} =
   return ()
 
 defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) =
-  sUpdate (patElemName pe) (map (fmap (compileSubExpOfType int32)) slice) se
+  sUpdate (patElemName pe) (map (fmap (toExp' int32)) slice) se
 
 defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
-  ds' <- mapM compileSubExp ds
+  ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")
-  copy_elem <- collect $ copyDWIM (patElemName pe) (map varIndex is) se []
+  copy_elem <- collect $ copyDWIM (patElemName pe) (map Imp.vi32 is) se []
   emit $ foldl (.) id (zipWith (`Imp.For` Int32) is ds') copy_elem
 
 defCompileBasicOp _ Scratch{} =
@@ -675,14 +668,14 @@ defCompileBasicOp _ Scratch{} =
 defCompileBasicOp (Pattern [] [pe]) (Iota n e s et) = do
   i <- newVName "i"
   x <- newVName "x"
-  n' <- compileSubExp n
-  e' <- compileSubExp e
-  s' <- compileSubExp s
+  n' <- toExp n
+  e' <- toExp e
+  s' <- toExp s
   let i' = ConvOpExp (SExt Int32 et) $ Imp.var i $ IntType Int32
   dPrim_ x $ IntType et
   sFor i Int32 n' $ do
     x <-- e' + i' * s'
-    copyDWIM (patElemName pe) [varIndex i] (Var x) []
+    copyDWIM (patElemName pe) [Imp.vi32 i] (Var x) []
 
 defCompileBasicOp (Pattern _ [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
@@ -699,7 +692,7 @@ defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
         invperm = rearrangeInverse perm
         destloc = MemLocation destmem destshape
                   (IxFun.permute (IxFun.offsetIndex (IxFun.permute destixfun perm) $
-                                  varIndex offs_glb)
+                                  Imp.vi32 offs_glb)
                    invperm)
 
     forM_ (x:ys) $ \y -> do
@@ -725,7 +718,7 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
       copy t dest_mem static_src $ fromIntegral $ length es
   | otherwise =
     forM_ (zip [0..] es) $ \(i,e) ->
-      copyDWIM (patElemName pe) [constIndex i] e []
+      copyDWIM (patElemName pe) [fromInteger i] e []
 
   where isLiteral (Constant v) = Just v
         isLiteral _ = Nothing
@@ -806,7 +799,7 @@ memBoundToVarEntry e (MemMem space) =
   return $ MemVar e $ MemEntry space
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) = do
   shape' <- mapM subExpToDimSize $ shapeDims shape
-  let location = MemLocation mem shape' $ fmap compilePrimExp ixfun
+  let location = MemLocation mem shape' $ fmap (toExp' int32) ixfun
   return $ ArrayVar e ArrayEntry { entryArrayLocation = location
                                  , entryArrayElemType = bt
                                  }
@@ -863,30 +856,29 @@ subExpToDimSize (Constant (IntValue (Int32Value i))) =
 subExpToDimSize Constant{} =
   compilerBugS "Size subexp is not an int32 or int64 constant."
 
-compileSubExpTo :: VName -> SubExp -> ImpM lore op ()
-compileSubExpTo d se = copyDWIM d [] se []
+-- | Compile things to 'Imp.Exp'.
+class ToExp a where
+  -- | Compile to an 'Imp.Exp', where the type (must must still be a
+  -- primitive) is deduced monadically.
+  toExp :: a -> ImpM lore op Imp.Exp
+  -- | Compile where we know the type in advance.
+  toExp' :: PrimType -> a -> Imp.Exp
 
-compileSubExp :: SubExp -> ImpM lore op Imp.Exp
-compileSubExp (Constant v) =
-  return $ Imp.ValueExp v
-compileSubExp (Var v) =
-  lookupVar v >>= \case
-  ScalarVar _ (ScalarEntry pt) ->
-    return $ Imp.var v pt
-  _       -> compilerBugS $ "compileSubExp: SubExp is not a primitive type: " ++ pretty v
+instance ToExp SubExp where
+  toExp (Constant v) =
+    return $ Imp.ValueExp v
+  toExp (Var v) =
+    lookupVar v >>= \case
+    ScalarVar _ (ScalarEntry pt) ->
+      return $ Imp.var v pt
+    _       -> compilerBugS $ "toExp SubExp: SubExp is not a primitive type: " ++ pretty v
 
-compileSubExpOfType :: PrimType -> SubExp -> Imp.Exp
-compileSubExpOfType _ (Constant v) = Imp.ValueExp v
-compileSubExpOfType t (Var v) = Imp.var v t
+  toExp' _ (Constant v) = Imp.ValueExp v
+  toExp' t (Var v) = Imp.var v t
 
-compilePrimExp :: PrimExp VName -> Imp.Exp
-compilePrimExp = fmap Imp.ScalarVar
-
-varIndex :: VName -> Imp.Exp
-varIndex name = LeafExp (Imp.ScalarVar name) int32
-
-constIndex :: Int -> Imp.Exp
-constIndex = fromIntegral
+instance ToExp (PrimExp VName) where
+  toExp = pure . fmap Imp.ScalarVar
+  toExp' _ = fmap Imp.ScalarVar
 
 addVar :: VName -> VarEntry lore -> ImpM lore op ()
 addVar name entry =
@@ -1024,7 +1016,7 @@ defaultCopy bt dest src n
 copyElementWise :: CopyCompiler lore op
 copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
-    let ivars = map varIndex is
+    let ivars = map Imp.vi32 is
         destidx = IxFun.index destIxFun ivars bt_size
         srcidx = IxFun.index srcIxFun ivars bt_size
         bounds = map innerExp $ n : drop 1 (map Imp.dimSizeToExp srcshape)
@@ -1175,7 +1167,7 @@ compileAlloc :: ExplicitMemorish lore =>
                 Pattern lore -> SubExp -> Space
              -> ImpM lore op ()
 compileAlloc (Pattern [] [mem]) e space = do
-  e' <- Imp.bytes <$> compileSubExp e
+  e' <- Imp.bytes <$> toExp e
   allocator <- asks $ M.lookup space . envAllocCompilers
   case allocator of
     Nothing -> emit $ Imp.Allocate (patElemName mem) e' space
@@ -1188,13 +1180,13 @@ dimSizeToSubExp (Imp.ConstSize n) = constant n
 dimSizeToSubExp (Imp.VarSize v) = Var v
 
 dimSizeToExp :: Imp.Size -> Imp.Exp
-dimSizeToExp = compilePrimExp . primExpFromSubExp int32 . dimSizeToSubExp
+dimSizeToExp = toExp' int32 . primExpFromSubExp int32 . dimSizeToSubExp
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format.
 typeSize :: Type -> Count Bytes
 typeSize t = Imp.bytes $ Imp.LeafExp (Imp.SizeOf $ elemType t) int32 *
-             product (map (compileSubExpOfType int32) (arrayDims t))
+             product (map (toExp' int32) (arrayDims t))
 
 --- Building blocks for constructing code.
 

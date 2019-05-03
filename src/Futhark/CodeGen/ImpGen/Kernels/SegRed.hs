@@ -58,7 +58,7 @@ import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
-import Futhark.CodeGen.ImpGen ((<--),
+import Futhark.CodeGen.ImpGen ((<--), ToExp(..),
                                sFor, sComment, sIf, sWhen,
                                sOp,
                                dPrim, dPrimV)
@@ -116,8 +116,8 @@ compileSegRed' pat space comm red_op nes body
       nonsegmentedReduction pat space comm red_op nes body
   | otherwise = do
       segment_size <-
-        ImpGen.compileSubExp $ last $ map snd $ spaceDimensions space
-      group_size <- ImpGen.compileSubExp $ spaceGroupSize space
+        toExp $ last $ map snd $ spaceDimensions space
+      group_size <- toExp $ spaceGroupSize space
       let use_small_segments = segment_size * 2 .<. group_size
       sIf use_small_segments
         (smallSegmentsReduction pat space red_op nes body)
@@ -178,7 +178,7 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
     forM_ (init gtids) $ \v ->
       v <-- 0
 
-    num_elements <- Imp.elements <$> ImpGen.compileSubExp w
+    num_elements <- Imp.elements <$> toExp w
     let elems_per_thread = num_elements `quotRoundingUp` Imp.elements (kernelNumThreads constants)
 
     (group_result_params, red_op_renamed) <-
@@ -201,7 +201,7 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
   let constants = base_constants { kernelThreadActive = true }
 
   let (gtids, dims) = unzip $ spaceDimensions space
-  dims' <- mapM ImpGen.compileSubExp dims
+  dims' <- mapM toExp dims
 
   let segment_size = last dims'
   -- Careful to avoid division by zero now.
@@ -278,7 +278,7 @@ largeSegmentsReduction :: Pattern ExplicitMemory
 largeSegmentsReduction segred_pat space comm red_op nes body = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
   let (gtids, dims) = unzip $ spaceDimensions space
-  dims' <- mapM ImpGen.compileSubExp dims
+  dims' <- mapM toExp dims
   let segment_size = last dims'
       num_segments = product $ init dims'
 
@@ -346,7 +346,7 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
         first_group_for_segment = flat_segment_id * groups_per_segment
 
     zipWithM_ (<--) segment_gtids $ unflattenIndex (init dims') flat_segment_id
-    num_elements <- Imp.elements <$> ImpGen.compileSubExp w
+    num_elements <- Imp.elements <$> toExp w
 
     (group_result_params, red_op_renamed) <-
       reductionStageOne constants num_elements

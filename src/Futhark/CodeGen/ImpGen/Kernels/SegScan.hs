@@ -17,7 +17,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen (sFor, sComment, sIf, sWhen, sUnless,
                                sOp,
-                               (<--), dPrimV, dPrimV_)
+                               (<--), dPrimV, dPrimV_, ToExp(..))
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
@@ -49,7 +49,7 @@ scanStage1 :: Pattern ExplicitMemory
 scanStage1 (Pattern _ pes) space scan_op nes kbody = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
   let (gtids, dims) = unzip $ spaceDimensions space
-  dims' <- mapM ImpGen.compileSubExp dims
+  dims' <- mapM toExp dims
   let constants = base_constants { kernelThreadActive = true }
       num_elements = product dims'
       elems_per_thread = num_elements `quotRoundingUp` kernelNumThreads constants
@@ -156,12 +156,12 @@ scanStage2 :: Pattern ExplicitMemory
            -> CallKernelGen ()
 scanStage2 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
   -- A single group, with one thread for each group in stage 1.
-  group_size <- ImpGen.compileSubExp $ spaceNumGroups space
+  group_size <- toExp $ spaceNumGroups space
   (constants, init_constants) <-
     kernelInitialisationSimple 1 group_size Nothing
 
   let (gtids, dims) = unzip $ spaceDimensions space
-  dims' <- mapM ImpGen.compileSubExp dims
+  dims' <- mapM toExp dims
   let crossesSegment' = do
         f <- crossesSegment
         Just $ \from to ->
@@ -203,7 +203,7 @@ scanStage3 :: Pattern ExplicitMemory
            -> CallKernelGen ()
 scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
   let (gtids, dims) = unzip $ spaceDimensions space
-  dims' <- mapM ImpGen.compileSubExp dims
+  dims' <- mapM toExp dims
   (constants, init_constants) <- simpleKernelConstants (product dims') "scan"
   sKernel constants "scan_stage3" $ do
     init_constants
