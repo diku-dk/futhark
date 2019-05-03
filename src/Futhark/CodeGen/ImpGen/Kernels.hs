@@ -19,13 +19,13 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
+import Futhark.CodeGen.ImpGen (ToExp(..), sOp)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegMap
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegScan
 import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
-import Futhark.CodeGen.ImpGen (sOp)
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
@@ -57,7 +57,7 @@ opCompiler (Pattern _ [pe]) (Inner (CmpSizeLe key size_class x)) = do
   fname <- asks ImpGen.envFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
   sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
-    =<< ImpGen.compileSubExp x
+    =<< toExp x
 opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler dest (Inner (HostOp kernel)) =
@@ -86,7 +86,7 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
                                          , " in kernel '", kernelName desc, "'"
                                          , " did not have primType value." ]
 
-    ImpGen.compileSubExp v >>= ImpGen.emit . Imp.DebugPrint s (elemType ty)
+    toExp v >>= ImpGen.emit . Imp.DebugPrint s (elemType ty)
 
   sKernel constants (kernelName desc) $ do
     init_constants
@@ -111,9 +111,9 @@ expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
 
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
-  n' <- ImpGen.compileSubExp n
-  x' <- ImpGen.compileSubExp x
-  s' <- ImpGen.compileSubExp s
+  n' <- toExp n
+  x' <- toExp x
+  s' <- toExp s
 
   sIota (patElemName pe) n' x' s' et
 

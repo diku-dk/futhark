@@ -54,7 +54,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Pass.ExplicitAllocations()
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
-import Futhark.CodeGen.ImpGen ((<--),
+import Futhark.CodeGen.ImpGen ((<--), ToExp(..),
                                sFor, sComment, sIf, sWhen, sUnless,
                                dPrim, dPrim_, dPrimV)
 import Futhark.CodeGen.ImpGen.Kernels.SegRed (compileSegRed')
@@ -69,7 +69,7 @@ vectorLoops :: [Imp.Exp] -> [SubExp]
 vectorLoops is [] f = f $ reverse is
 vectorLoops is (d:ds) f = do
   i <- newVName "vect_i"
-  d' <- ImpGen.compileSubExp d
+  d' <- toExp d
   ImpGen.sFor i Int32 d' $ vectorLoops (Imp.var i int32:is) ds f
 
 i32Toi64 :: PrimExp v -> PrimExp v
@@ -120,7 +120,7 @@ computeHistoUsage space op = do
 
           multiHistoCase = do
             let num_elems = foldl' (*) (Imp.var num_subhistos int32) $
-                            map (ImpGen.compileSubExpOfType int32) $
+                            map (toExp' int32) $
                             arrayDims dest_t
 
             let subhistos_mem_size =
@@ -132,8 +132,8 @@ computeHistoUsage space op = do
                                          [Var num_subhistos, genReduceWidth op]) <>
                                   genReduceShape op) ne
             subhistos_t <- lookupType subhistos
-            let slice = fullSliceNum (map (ImpGen.compileSubExpOfType int32) $ arrayDims subhistos_t) $
-                        map (unitSlice 0 . ImpGen.compileSubExpOfType int32 . snd) segment_dims ++
+            let slice = fullSliceNum (map (toExp' int32) $ arrayDims subhistos_t) $
+                        map (unitSlice 0 . toExp' int32 . snd) segment_dims ++
                         [DimFix 0]
             ImpGen.sUpdate subhistos slice $ Var dest
 
@@ -192,7 +192,7 @@ prepareIntermediateArraysGlobal num_threads = fmap snd . mapAccumLM onOp Nothing
       -- Careful to avoid division by zero when genReduceWidth==0.
       num_subhistos <--
         num_threads `quotRoundingUp`
-        BinOpExp (SMax Int32) 1 (ImpGen.compileSubExpOfType int32 (genReduceWidth op))
+        BinOpExp (SMax Int32) 1 (toExp' int32 (genReduceWidth op))
 
       ImpGen.emit $ Imp.DebugPrint "Number of subhistograms" int32 $
         Imp.var num_subhistos int32
@@ -233,7 +233,7 @@ genRedKernelGlobal map_pes space slugs kbody = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
   let constants = base_constants { kernelThreadActive = true }
       (space_is, space_sizes) = unzip $ spaceDimensions space
-      space_sizes_64 = map (i32Toi64 . ImpGen.compileSubExpOfType int32) space_sizes
+      space_sizes_64 = map (i32Toi64 . toExp' int32) space_sizes
       total_w_64 = product space_sizes_64
 
   histograms <- prepareIntermediateArraysGlobal (kernelNumThreads constants) slugs
@@ -295,8 +295,8 @@ genRedKernelGlobal map_pes space slugs kbody = do
           \(GenReduceOp dest_w _ _ shape lam,
             (_, _, do_op), bucket, vs', subhisto_ind) -> do
 
-            let bucket' = ImpGen.compileSubExpOfType int32 $ kernelResultSubExp bucket
-                dest_w' = ImpGen.compileSubExpOfType int32 dest_w
+            let bucket' = toExp' int32 $ kernelResultSubExp bucket
+                dest_w' = toExp' int32 dest_w
                 bucket_in_bounds = 0 .<=. bucket' .&&. bucket' .<. dest_w'
                 bucket_is = map (`Imp.var` int32) (init space_is) ++
                             [Imp.var subhisto_ind int32, bucket']
@@ -321,7 +321,7 @@ prepareIntermediateArraysLocal space constants num_subhistos_per_group =
     onOp l (SegGenRedSlug op num_subhistos subhisto_info) = do
 
       num_subhistos <--
-        ImpGen.compileSubExpOfType int32 (spaceNumGroups space)
+        toExp' int32 (spaceNumGroups space)
 
       -- Some trickery is afoot here because we need to construct a
       -- Locking structure in the CallKernelGen monad, but the actual
@@ -334,7 +334,7 @@ prepareIntermediateArraysLocal space constants num_subhistos_per_group =
           (Just l', Right f) -> return (l, return $ f l')
           (Nothing, Right f) -> do
             locks <- newVName "locks"
-            num_locks <- ImpGen.compileSubExp $ spaceGroupSize space
+            num_locks <- toExp $ spaceGroupSize space
             let l' = Locking locks 0 1 0 ((`rem` num_locks) . sum)
                 locks_t = localMemLockArray space
 
@@ -386,7 +386,7 @@ genRedKernelLocal coop_lvl num_subhistos_per_group_var map_pes space slugs kbody
       segment_dims = init space_sizes
       num_segments = length segment_dims
       constants = base_constants { kernelThreadActive = true }
-      space_sizes_64 = map (i32Toi64 . ImpGen.compileSubExpOfType int32) space_sizes
+      space_sizes_64 = map (i32Toi64 . toExp' int32) space_sizes
       total_w_64 = product space_sizes_64
       num_threads = kernelNumThreads constants
 
@@ -424,7 +424,7 @@ genRedKernelLocal coop_lvl num_subhistos_per_group_var map_pes space slugs kbody
 
     let onSlugs f = forM_ (zip slugs histograms) $ \(slug, (dests, _)) -> do
           let histo_dims =
-                map (ImpGen.compileSubExpOfType int32) $
+                map (toExp' int32) $
                 segment_dims ++
                 genReduceWidth (slugOp slug) : shapeDims (genReduceShape (slugOp slug))
           histo_size <- fmap (`Imp.var` int32) $ dPrimV "histo_size" $
@@ -506,8 +506,8 @@ genRedKernelLocal coop_lvl num_subhistos_per_group_var map_pes space slugs kbody
           \(GenReduceOp dest_w _ _ shape lam,
             (_, do_op), bucket, vs') -> do
 
-            let bucket' = ImpGen.compileSubExpOfType int32 bucket
-                dest_w' = ImpGen.compileSubExpOfType int32 dest_w
+            let bucket' = toExp' int32 bucket
+                dest_w' = toExp' int32 dest_w
                 bucket_in_bounds = 0 .<=. bucket' .&&. bucket' .<. dest_w'
                 bucket_is = thread_local_subhisto_i :
                             map (`Imp.var` int32) (init space_is) ++ [bucket']
@@ -598,7 +598,7 @@ compileSegGenRed (Pattern _ pes) space ops kbody = do
       (all_red_pes, map_pes) = splitAt num_red_res pes
 
   let t = 8 * 4
-  g <- ImpGen.compileSubExp $ spaceGroupSize space
+  g <- toExp $ spaceGroupSize space
   lmax <- dPrim "lmax" int32
   ImpGen.sOp $ Imp.GetSizeMax lmax Imp.SizeLocalMemory
 

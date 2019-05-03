@@ -31,6 +31,7 @@ module Futhark.CodeGen.ImpCode
   , Volatility (..)
   , Arg (..)
   , var
+  , vi32
   , index
   , ErrorMsg(..)
   , ErrorMsgPart(..)
@@ -252,6 +253,10 @@ sizeToExp (ConstSize x) = ValueExp $ IntValue $ Int32Value $ fromIntegral x
 
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
+
+-- | Turn a 'VName' into a 'int32' 'Imp.ScalarVar'.
+vi32 :: VName -> Exp
+vi32 = flip var $ IntType Int32
 
 index :: VName -> Count Bytes -> PrimType -> Space -> Volatility -> Exp
 index arr i t s vol = LeafExp (Index arr i t s vol) t
