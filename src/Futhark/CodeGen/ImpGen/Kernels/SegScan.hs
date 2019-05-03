@@ -14,10 +14,7 @@ import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
-import qualified Futhark.CodeGen.ImpGen as ImpGen
-import Futhark.CodeGen.ImpGen (sFor, sComment, sIf, sWhen, sUnless,
-                               sOp,
-                               (<--), dPrimV, dPrimV_, ToExp(..))
+import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
@@ -31,12 +28,12 @@ makeLocalArrays group_size num_threads nes scan_op = do
     case paramAttr p of
       MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [num_threads] <> shape
-        ImpGen.sArray "scan_arr" pt shape' $
+        sArray "scan_arr" pt shape' $
           ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape'
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [group_size]
-        ImpGen.sAllocArray "scan_arr" pt shape $ Space "local"
+        sAllocArray "scan_arr" pt shape $ Space "local"
 
 type CrossesSegment = Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
 
@@ -74,12 +71,12 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
 
     -- The variables from scan_op will be used for the carry and such
     -- in the big chunking loop.
-    ImpGen.dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
+    dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
     let (scan_x_params, scan_y_params) =
           splitAt (length nes) $ lambdaParams scan_op
 
     forM_ (zip scan_x_params nes) $ \(p, ne) ->
-      ImpGen.copyDWIM (paramName p) [] ne []
+      copyDWIM (paramName p) [] ne []
 
     j <- newVName "j"
     sFor j Int32 elems_per_thread $ do
@@ -93,25 +90,25 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
 
       let in_bounds =
             foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
-          when_in_bounds = ImpGen.compileStms mempty (kernelBodyStms kbody) $ do
+          when_in_bounds = compileStms mempty (kernelBodyStms kbody) $ do
             let (scan_res, map_res) = splitAt (length nes) $ kernelBodyResult kbody
             sComment "write to-scan values to parameters" $
               forM_ (zip scan_y_params scan_res) $ \(p, se) ->
-              ImpGen.copyDWIM (paramName p) [] (kernelResultSubExp se) []
+              copyDWIM (paramName p) [] (kernelResultSubExp se) []
             sComment "write mapped values results to global memory" $
               forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
-              ImpGen.copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
+              copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
               (kernelResultSubExp se) []
           when_out_of_bounds = forM_ (zip scan_y_params nes) $ \(p, ne) ->
-            ImpGen.copyDWIM (paramName p) [] ne []
+            copyDWIM (paramName p) [] ne []
 
       sComment "threads in bounds read input; others get neutral element" $
         sIf in_bounds when_in_bounds when_out_of_bounds
 
       sComment "combine with carry and write to local memory" $
-        ImpGen.compileStms mempty (bodyStms $ lambdaBody scan_op) $
+        compileStms mempty (bodyStms $ lambdaBody scan_op) $
         forM_ (zip local_arrs $ bodyResult $ lambdaBody scan_op) $ \(arr, se) ->
-          ImpGen.copyDWIM arr [kernelLocalThreadId constants] se []
+          copyDWIM arr [kernelLocalThreadId constants] se []
 
       let crossesSegment' = do
             f <- crossesSegment
@@ -125,17 +122,17 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
 
       sComment "threads in bounds write partial scan result" $
         sWhen in_bounds $ forM_ (zip pes local_arrs) $ \(pe, arr) ->
-        ImpGen.copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
+        copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
         (Var arr) [kernelLocalThreadId constants]
 
       sOp Imp.LocalBarrier
 
       let load_carry =
             forM_ (zip local_arrs scan_x_params) $ \(arr, p) ->
-            ImpGen.copyDWIM (paramName p) [] (Var arr) [kernelGroupSize constants - 1]
+            copyDWIM (paramName p) [] (Var arr) [kernelGroupSize constants - 1]
           load_neutral =
             forM_ (zip nes scan_x_params) $ \(ne, p) ->
-            ImpGen.copyDWIM (paramName p) [] ne []
+            copyDWIM (paramName p) [] ne []
 
       sComment "first thread reads last element as carry-in for next iteration" $
         sWhen (kernelLocalThreadId constants .==. 0) $
@@ -181,10 +178,10 @@ scanStage2 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
     let in_bounds =
           foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
         when_in_bounds = forM_ (zip local_arrs pes) $ \(arr, pe) ->
-          ImpGen.copyDWIM arr [kernelLocalThreadId constants]
+          copyDWIM arr [kernelLocalThreadId constants]
           (Var $ patElemName pe) $ map (`Imp.var` int32) gtids
         when_out_of_bounds = forM_ (zip local_arrs nes) $ \(arr, ne) ->
-          ImpGen.copyDWIM arr [kernelLocalThreadId constants] ne []
+          copyDWIM arr [kernelLocalThreadId constants] ne []
 
     sComment "threads in bound read carries; others get neutral element" $
       sIf in_bounds when_in_bounds when_out_of_bounds
@@ -194,7 +191,7 @@ scanStage2 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
 
     sComment "threads in bounds write scanned carries" $
       sWhen in_bounds $ forM_ (zip pes local_arrs) $ \(pe, arr) ->
-      ImpGen.copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
+      copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
       (Var arr) [kernelLocalThreadId constants]
 
 scanStage3 :: Pattern ExplicitMemory
@@ -208,7 +205,7 @@ scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
   sKernel constants "scan_stage3" $ do
     init_constants
     -- Compute our logical index.
-    zipWithM_ ImpGen.dPrimV_ gtids $ unflattenIndex dims' $ kernelGlobalThreadId constants
+    zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ kernelGlobalThreadId constants
     -- Figure out which group this element was originally in.
     orig_group <- dPrimV "orig_group" $
                   kernelGlobalThreadId constants `quot` elems_per_group
@@ -231,16 +228,16 @@ scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
         no_carry_in = Imp.var orig_group int32 .==. 0 .||. is_a_carry .||. crosses_segment
 
     sWhen (kernelThreadActive constants) $ sUnless no_carry_in $ do
-      ImpGen.dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
+      dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
       let (scan_x_params, scan_y_params) =
             splitAt (length nes) $ lambdaParams scan_op
       forM_ (zip scan_x_params pes) $ \(p, pe) ->
-        ImpGen.copyDWIM (paramName p) [] (Var $ patElemName pe) carry_in_idx
+        copyDWIM (paramName p) [] (Var $ patElemName pe) carry_in_idx
       forM_ (zip scan_y_params pes) $ \(p, pe) ->
-        ImpGen.copyDWIM (paramName p) [] (Var $ patElemName pe) $ map (`Imp.var` int32) gtids
-      ImpGen.compileBody' scan_x_params $ lambdaBody scan_op
+        copyDWIM (paramName p) [] (Var $ patElemName pe) $ map (`Imp.var` int32) gtids
+      compileBody' scan_x_params $ lambdaBody scan_op
       forM_ (zip scan_x_params pes) $ \(p, pe) ->
-        ImpGen.copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids) (Var $ paramName p) []
+        copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids) (Var $ paramName p) []
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
@@ -252,7 +249,7 @@ compileSegScan :: Pattern ExplicitMemory
 compileSegScan pat space scan_op nes kbody = do
   (elems_per_group, crossesSegment) <- scanStage1 pat space scan_op nes kbody
 
-  ImpGen.emit $ Imp.DebugPrint "elems_per_group" int32 elems_per_group
+  emit $ Imp.DebugPrint "elems_per_group" int32 elems_per_group
 
   scan_op' <- renameLambda scan_op
   scan_op'' <- renameLambda scan_op
