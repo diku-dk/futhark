@@ -186,12 +186,13 @@ data Code a = Skip
               -- ^ Has the same semantics as the contained code, but
               -- the comment should show up in generated code for ease
               -- of inspection.
-            | DebugPrint String PrimType Exp
+            | DebugPrint String (Maybe (PrimType, Exp))
               -- ^ Print the given value (of the given type) to the
               -- screen, somehow annotated with the given string as a
-              -- description.  This has no semantic meaning, but is
-              -- used entirely for debugging.  Code generators are
-              -- free to ignore this statement.
+              -- description.  If no type/value pair, just print the
+              -- string.  This has no semantic meaning, but is used
+              -- entirely for debugging.  Code generators are free to
+              -- ignore this statement.
             | Op a
             deriving (Show)
 
@@ -366,8 +367,10 @@ instance Pretty op => Pretty (Code op) where
     ppr fname <> parens (commasep $ map ppr args)
   ppr (Comment s code) =
     text "--" <+> text s </> ppr code
-  ppr (DebugPrint desc pt e) =
+  ppr (DebugPrint desc (Just (pt, e))) =
     text "debug" <+> parens (commasep [text (show desc), ppr pt, ppr e])
+  ppr (DebugPrint desc Nothing) =
+    text "debug" <+> parens (text (show desc))
 
 instance Pretty Arg where
   ppr (MemArg m) = ppr m
@@ -450,8 +453,8 @@ instance Traversable Code where
     pure $ Call dests fname args
   traverse f (Comment s code) =
     Comment s <$> traverse f code
-  traverse _ (DebugPrint s t e) =
-    pure $ DebugPrint s t e
+  traverse _ (DebugPrint s v) =
+    pure $ DebugPrint s v
 
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = S.singleton name
@@ -501,8 +504,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn op
   freeIn (Comment _ code) =
     freeIn code
-  freeIn (DebugPrint _ _ e) =
-    freeIn e
+  freeIn (DebugPrint _ v) =
+    maybe mempty (freeIn . snd) v
 
 instance FreeIn ExpLeaf where
   freeIn (Index v e _ _ _) = freeIn v <> freeIn e

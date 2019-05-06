@@ -208,10 +208,11 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
       segments_per_group = kernelGroupSize constants `quot` segment_size_nonzero
       required_groups = num_segments `quotRoundingUp` segments_per_group
 
-  emit $ Imp.DebugPrint "num_segments" int32 num_segments
-  emit $ Imp.DebugPrint "segment_size" int32 segment_size
-  emit $ Imp.DebugPrint "segments_per_group" int32 segments_per_group
-  emit $ Imp.DebugPrint "required_groups" int32 required_groups
+  emit $ Imp.DebugPrint "\n# SegRed-small" Nothing
+  emit $ Imp.DebugPrint "num_segments" $ Just (int32, num_segments)
+  emit $ Imp.DebugPrint "segment_size" $ Just (int32, segment_size)
+  emit $ Imp.DebugPrint "segments_per_group" $ Just (int32, segments_per_group)
+  emit $ Imp.DebugPrint "required_groups" $ Just (int32, required_groups)
 
   sKernel constants "segred_small" $ allThreads constants $ do
     init_constants
@@ -296,12 +297,13 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
                   , kernelNumThreads = Imp.var num_threads int32
                   }
 
-  emit $ Imp.DebugPrint "num_segments" int32 num_segments
-  emit $ Imp.DebugPrint "segment_size" int32 segment_size
-  emit $ Imp.DebugPrint "num_groups" int32 (Imp.var num_groups int32)
-  emit $ Imp.DebugPrint "group_size" int32 (kernelGroupSize constants)
-  emit $ Imp.DebugPrint "elems_per_thread" int32 $ Imp.innerExp elems_per_thread
-  emit $ Imp.DebugPrint "groups_per_segment" int32 groups_per_segment
+  emit $ Imp.DebugPrint "\n# SegRed-large" Nothing
+  emit $ Imp.DebugPrint "num_segments" $ Just (int32, num_segments)
+  emit $ Imp.DebugPrint "segment_size" $ Just (int32, segment_size)
+  emit $ Imp.DebugPrint "num_groups" $ Just (int32, Imp.var num_groups int32)
+  emit $ Imp.DebugPrint "group_size" $ Just (int32, kernelGroupSize constants)
+  emit $ Imp.DebugPrint "elems_per_thread" $ Just (int32, Imp.innerExp elems_per_thread)
+  emit $ Imp.DebugPrint "groups_per_segment" $ Just (int32, groups_per_segment)
 
   group_res_arrs <- forM (lambdaReturnType red_op) $ \t -> do
     let pt = elemType t

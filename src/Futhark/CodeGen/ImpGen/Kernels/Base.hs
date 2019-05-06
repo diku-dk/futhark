@@ -1064,9 +1064,6 @@ sKernel constants name m = do
           subImpM_ (inKernelOperations constants) m
   uses <- computeKernelUses body mempty
 
-  emit $ Imp.DebugPrint ("\n# Kernel " ++ name) int32 $
-    ValueExp $ IntValue $ Int32Value $ fromIntegral tag
-
   emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
     { Imp.kernelBody = body
     , Imp.kernelUses = uses
