@@ -191,7 +191,7 @@ prepareIntermediateArraysGlobal num_threads = fmap snd . mapAccumLM onOp Nothing
         num_threads `quotRoundingUp`
         BinOpExp (SMax Int32) 1 (toExp' int32 (genReduceWidth op))
 
-      emit $ Imp.DebugPrint "Number of subhistograms" $
+      emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
         Just (int32, Imp.vi32 num_subhistos)
 
       -- Initialise sub-histograms.
@@ -320,6 +320,9 @@ prepareIntermediateArraysLocal space constants num_subhistos_per_group =
       num_subhistos <--
         toExp' int32 (spaceNumGroups space)
 
+      emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
+        Just (int32, Imp.vi32 num_subhistos)
+
       -- Some trickery is afoot here because we need to construct a
       -- Locking structure in the CallKernelGen monad, but the actual
       -- initialisation of the locks array must happen on the device.
@@ -385,18 +388,15 @@ genRedKernelLocal num_subhistos_per_group_var map_pes space slugs kbody = do
       constants = base_constants { kernelThreadActive = true }
       space_sizes_64 = map (i32Toi64 . toExp' int32) space_sizes
       total_w_64 = product space_sizes_64
-      num_threads = kernelNumThreads constants
+      num_subhistos_per_group = Imp.var num_subhistos_per_group_var int32
+
+  emit $ Imp.DebugPrint "Number of local subhistograms per group" $ Just (int32, num_subhistos_per_group)
 
   init_histograms <- prepareIntermediateArraysLocal space constants num_subhistos_per_group_var slugs
 
   elems_per_thread_64 <- dPrimV "elems_per_thread_64" $
                          total_w_64 `quotRoundingUp`
                          ConvOpExp (SExt Int32 Int64) (kernelNumThreads constants)
-
-  let num_subhistos_per_group = Imp.var num_subhistos_per_group_var int32
-  forM_ [ ("Number of threads", num_threads)
-        , ("Number of subhistograms per group", num_subhistos_per_group) ] $
-    \(v, e) -> emit $ Imp.DebugPrint v $ Just (int32, e)
 
   sKernel constants "seggenred_local" $ allThreads constants $ do
     init_constants
