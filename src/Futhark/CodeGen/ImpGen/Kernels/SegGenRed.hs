@@ -609,6 +609,10 @@ compileSegGenRed (Pattern _ pes) space ops kbody = do
   sUnless (h .==. 0) $ do
     lh <- dPrimV "lh" $ (g * t) `quotRoundingUp` h
 
+    emit $ Imp.DebugPrint "# SegGenRed\nCooperation level" int32 coop
+    emit $ Imp.DebugPrint "Memory per set of subhistograms" int32 h
+    emit $ Imp.DebugPrint "Desired group size" int32 g
+
     forM_ slugs $
       emit . Imp.DebugPrint "Number of subhistograms" int32 .
       (`Imp.var` int32) . slugNumSubhistos
