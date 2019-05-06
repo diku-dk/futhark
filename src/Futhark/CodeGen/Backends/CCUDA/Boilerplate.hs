@@ -21,12 +21,17 @@ generateBoilerplate :: String -> String -> [String]
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenCL () ()
 generateBoilerplate cuda_program cuda_prelude kernel_names sizes = do
+  GC.headerDecl GC.InitDecl [C.cedecl|struct cuda_mem_ptrs;|]
   GC.earlyDecls [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
       $esc:("#include <pthread.h>")
       $esc:("#include <semaphore.h>")
       $esc:("typedef CUdeviceptr fl_mem_t;")
+      struct cuda_mem_ptrs {
+        typename CUdeviceptr *mems;
+        size_t count;
+      };
       $esc:free_list_h
       $esc:cuda_h
       const char *cuda_program[] = {$inits:fragments, NULL};
@@ -215,17 +220,14 @@ generateContextFuns cfg kernel_names sizes = do
   (fields, init_fields) <- GC.contextContents
   node_field_names <- GC.nodeContextFields
 
-  let kernel_fields = map (\k -> [C.csdecl|typename CUfunction $id:k;|])
+  let kernel_fields = map (\k -> [C.csdecl|typename CUfunction *$id:k;|])
                         kernel_names
+      kernel_fields_malloc =
+        map (\k -> [C.cstm|ctx->$id:k = malloc(sizeof(CUfunction) * ctx->cuda.cfg.num_nodes);|])
+            kernel_names
+      kernel_fields_free = map (\n -> [C.cstm|free(ctx->$id:n);|]) kernel_names
       node_fields = map (\n -> [C.csdecl|struct memblock_device $id:n;|])
                       node_field_names
-
-  node_ctx <- GC.publicDef "node_context" GC.InitDecl $ \s ->
-    ([C.cedecl|struct $id:s;|],
-     [C.cedecl|struct $id:s {
-                           $sdecls:kernel_fields
-                           $sdecls:node_fields 
-                        };|])
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
@@ -235,7 +237,9 @@ generateContextFuns cfg kernel_names sizes = do
                          typename lock_t lock;
                          char *error;
                          $sdecls:fields
-                         struct $id:node_ctx *node_ctx;
+                         $sdecls:kernel_fields
+                         $sdecls:node_fields
+                         struct memblock_device device_node_ids;
                          struct cuda_context cuda;
                          struct sizes sizes;
                        };|])
@@ -257,14 +261,62 @@ generateContextFuns cfg kernel_names sizes = do
       struct $id:node_launch_params *params = (struct $id:node_launch_params*)p;
       typename int32_t node_id = params->node_id;
       struct $id:ctx *ctx = params->ctx;
+      struct cuda_node_context *nctx = &ctx->cuda.nodes[node_id];
 
-      cuda_node_setup(&ctx->cuda.nodes[node_id], params->ptx);
+      cuda_node_setup(nctx, params->ptx);
       
       $stms:(map loadKernelByName kernel_names)
+
+      CUDA_SUCCEED(cuMemAlloc(ctx->device_node_ids.mem.mems + node_id, sizeof(int32_t)));
+      CUDA_SUCCEED(cuMemcpyHtoD(ctx->device_node_ids.mem.mems[node_id], &node_id, sizeof(int32_t)));
 
       cuda_thread_sync(&ctx->cuda.node_sync_point);
 
       free(p);
+
+      bool running = true;
+      while (running) {
+        sem_wait(&nctx->message_signal);
+    
+        switch (nctx->current_message.type) {
+          case NODE_MSG_STATIC:
+            cuda_handle_node_static(nctx);
+            break;
+          case NODE_MSG_ALLOC:
+            cuda_handle_node_alloc(&ctx->cuda, nctx);
+            break;
+          case NODE_MSG_FREE:
+            cuda_handle_node_free(&ctx->cuda, nctx);
+            break;
+          case NODE_MSG_MEMCPY_D_TO_D:
+            cuda_handle_node_memcpy_dtod(nctx);
+            break;
+          case NODE_MSG_MEMCPY_H_TO_D:
+            cuda_handle_node_memcpy_htod(nctx);
+            break;
+          case NODE_MSG_MEMCPY_D_TO_H:
+            cuda_handle_node_memcpy_dtoh(nctx);
+            break;
+          case NODE_MSG_MEMCPY_P_TO_P:
+            cuda_handle_node_memcpy_peer(nctx);
+            break;
+          case NODE_MSG_LAUNCH:
+            cuda_handle_node_launch(nctx);
+            break;
+          case NODE_MSG_SYNC:
+            CUDA_SUCCEED(cuCtxSynchronize());
+            break;
+          case NODE_MSG_EXIT:
+            CUDA_SUCCEED(cuMemFree(ctx->device_node_ids.mem.mems[node_id]));
+            cuda_node_cleanup(nctx);
+            running = false;
+            break;
+          default:
+            panic(-1, "Unrecognized message received by node %d.", node_id);
+        }
+    
+        cuda_thread_sync(&ctx->cuda.node_sync_point);
+      }
      }|])
 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
@@ -282,7 +334,12 @@ generateContextFuns cfg kernel_names sizes = do
 
                           cuda_setup(&ctx->cuda);
 
-                          ctx->node_ctx = malloc(sizeof(struct $id:node_ctx) * ctx->cuda.cfg.num_nodes);
+                          $stms:kernel_fields_malloc
+
+                          ctx->device_node_ids.size = 0;
+                          ctx->device_node_ids.references = NULL;
+                          ctx->device_node_ids.mem.count = ctx->cuda.cfg.num_nodes;
+                          ctx->device_node_ids.mem.mems = malloc(ctx->cuda.cfg.num_nodes * sizeof(CUdeviceptr));
 
                           char *ptx = cuda_get_ptx(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
 
@@ -311,9 +368,11 @@ generateContextFuns cfg kernel_names sizes = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 cuda_send_node_exit(&ctx->cuda);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
-                                 free(ctx->node_ctx);
+                                 $stms:kernel_fields_free
+                                 free(ctx->device_node_ids.mem.mems);
                                  free(ctx);
                                }|])
 
@@ -332,6 +391,6 @@ generateContextFuns cfg kernel_names sizes = do
   where
     loadKernelByName name =
       [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(
-                &ctx->node_ctx[node_id].$id:name,
+                ctx->$id:name + node_id,
                 ctx->cuda.nodes[node_id].module,
                 $string:name));|]

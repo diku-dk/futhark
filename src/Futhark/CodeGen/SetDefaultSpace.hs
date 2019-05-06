@@ -3,106 +3,127 @@ module Futhark.CodeGen.SetDefaultSpace
        )
        where
 
+import qualified Data.Set as S
+import Control.Monad.Reader
+
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.ImpCode.Kernels (HostOp(..))
+
+type SetDefaultSpaceM = Reader (S.Set VName)
+
+localExclude :: S.Set VName -> SetDefaultSpaceM a -> SetDefaultSpaceM a
+localExclude s = local (<>s)
 
 -- | Set all uses of 'DefaultSpace' in the given functions to another memory space.
 setDefaultSpace :: Space -> Functions HostOp -> Functions HostOp
 setDefaultSpace space (Functions fundecs) =
-  Functions [ (fname, setFunctionSpace space func)
+  Functions [ (fname, runReader (setFunctionSpace space func) S.empty)
             | (fname, func) <- fundecs ]
 
-setFunctionSpace :: Space -> Function HostOp -> Function HostOp
-setFunctionSpace space (Function entry outputs inputs body results args) =
-  Function entry
-  (map (setParamSpace space) outputs)
-  (map (setParamSpace space) inputs)
-  (setBodySpace space body)
-  (map (setExtValueSpace space) results)
-  (map (setExtValueSpace space) args)
+setFunctionSpace :: Space -> Function HostOp -> SetDefaultSpaceM (Function HostOp)
+setFunctionSpace space (Function entry outputs inputs body results args) = do
+  outputs' <- mapM (setParamSpace space) outputs
+  inputs' <- mapM (setParamSpace space) inputs
+  body' <- setBodySpace space body 
+  results' <- mapM (setExtValueSpace space) results
+  args' <- mapM (setExtValueSpace space) args
+  return $ Function entry outputs' inputs' body' results' args'
 
-setParamSpace :: Space -> Param -> Param
-setParamSpace space (MemParam name DefaultSpace) =
-  MemParam name space
+setParamSpace :: Space -> Param -> SetDefaultSpaceM Param
+setParamSpace space (MemParam name old_space) =
+  MemParam name <$> setSpace name space old_space
 setParamSpace _ param =
-  param
+  return param
 
-setExtValueSpace :: Space -> ExternalValue -> ExternalValue
+setExtValueSpace :: Space -> ExternalValue -> SetDefaultSpaceM ExternalValue
 setExtValueSpace space (OpaqueValue desc vs) =
-  OpaqueValue desc $ map (setValueSpace space) vs
+  OpaqueValue desc <$> mapM (setValueSpace space) vs
 setExtValueSpace space (TransparentValue v) =
-  TransparentValue $ setValueSpace space v
+  TransparentValue <$> setValueSpace space v
 
-setValueSpace :: Space -> ValueDesc -> ValueDesc
+setValueSpace :: Space -> ValueDesc -> SetDefaultSpaceM ValueDesc
 setValueSpace space (ArrayValue mem memsize _ bt ept shape) =
-  ArrayValue mem memsize space bt ept shape
+  return $ ArrayValue mem memsize space bt ept shape
 setValueSpace _ (ScalarValue bt ept v) =
-  ScalarValue bt ept v
+  return $ ScalarValue bt ept v
 
-setBodySpace :: Space -> Code HostOp -> Code HostOp
+setBodySpace :: Space -> Code HostOp -> SetDefaultSpaceM (Code HostOp)
 setBodySpace space (Allocate v e old_space) =
-  Allocate v (setCountSpace space e) $ setSpace space old_space
+  Allocate v <$> setCountSpace space e <*> setSpace v space old_space
 setBodySpace space (Free v old_space) =
-  Free v $ setSpace space old_space
+  Free v <$> setSpace v space old_space
 setBodySpace space (DeclareMem name old_space) =
-  DeclareMem name $ setSpace space old_space
+  DeclareMem name <$> setSpace name space old_space
 setBodySpace space (DeclareArray name _ t vs) =
-  DeclareArray name space t vs
-setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
-  Copy
-  dest (setCountSpace space dest_offset) dest_space'
-  src (setCountSpace space src_offset) src_space' $
-  setCountSpace space n
-  where dest_space' = setSpace space dest_space
-        src_space' = setSpace space src_space
-setBodySpace space (Write dest dest_offset bt dest_space vol e) =
-  Write dest (setCountSpace space dest_offset) bt (setSpace space dest_space)
-  vol (setExpSpace space e)
-setBodySpace space (c1 :>>: c2) =
-  setBodySpace space c1 :>>: setBodySpace space c2
+  return $ DeclareArray name space t vs
+setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n) = do
+  dest_offset' <- setCountSpace space dest_offset
+  src_offset' <- setCountSpace space src_offset
+  dest_space' <- setSpace dest space dest_space
+  src_space' <- setSpace src space src_space
+  Copy dest dest_offset' dest_space' src src_offset' src_space' <$>
+    setCountSpace space n
+setBodySpace space (Partition dest part_size src src_size old_space) =
+  Partition dest
+  <$> setCountSpace space part_size
+  <*> pure src
+  <*> setCountSpace space src_size
+  <*> setSpace dest space old_space
+setBodySpace space (Write dest dest_offset bt dest_space vol e) = do
+  dest_offset' <- setCountSpace space dest_offset
+  dest_space' <- setSpace dest space dest_space
+  Write dest dest_offset' bt dest_space' vol <$> setExpSpace space e
+setBodySpace space (c1 :>>: c2) = do
+  c1' <- setBodySpace space c1
+  c2' <- setBodySpace space c2
+  return $ c1' :>>: c2'
 setBodySpace space (For i it e body) =
-  For i it (setExpSpace space e) $ setBodySpace space body
+  For i it <$> setExpSpace space e <*> setBodySpace space body
 setBodySpace space (While e body) =
-  While (setExpSpace space e) $ setBodySpace space body
+  While <$> setExpSpace space e <*> setBodySpace space body
 setBodySpace space (If e c1 c2) =
-  If (setExpSpace space e) (setBodySpace space c1) (setBodySpace space c2)
+  If <$> setExpSpace space e <*> setBodySpace space c1 <*> setBodySpace space c2
 setBodySpace space (Comment s c) =
-  Comment s $ setBodySpace space c
+  Comment s <$> setBodySpace space c
 setBodySpace _ Skip =
-  Skip
+  return Skip
 setBodySpace _ (DeclareScalar name bt) =
-  DeclareScalar name bt
+  return $ DeclareScalar name bt
 setBodySpace space (SetScalar name e) =
-  SetScalar name $ setExpSpace space e
+  SetScalar name <$> setExpSpace space e
 setBodySpace space (SetMem to from old_space) =
-  SetMem to from $ setSpace space old_space
+  SetMem to from <$> setSpace to space old_space
 setBodySpace space (Call dests fname args) =
-  Call dests fname $ map setArgSpace args
-  where setArgSpace (MemArg m) = MemArg m
-        setArgSpace (ExpArg e) = ExpArg $ setExpSpace space e
-setBodySpace space (Assert e msg loc) =
-  Assert (setExpSpace space e) msg loc
+  Call dests fname <$> mapM setArgSpace args
+  where setArgSpace (MemArg m) = return $ MemArg m
+        setArgSpace (ExpArg e) = ExpArg <$> setExpSpace space e
+setBodySpace space (Assert e msg loc) = do
+  e' <- setExpSpace space e
+  return $ Assert e' msg loc
 setBodySpace space (DebugPrint s t e) =
-  DebugPrint s t (setExpSpace space e)
+  DebugPrint s t <$> setExpSpace space e
 setBodySpace space (Op op) =
-  Op $ setHostOpDefaultSpace space op
+  Op <$> setHostOpDefaultSpace space op
 
-setHostOpDefaultSpace :: Space -> HostOp -> HostOp
-setHostOpDefaultSpace space (Husk hspace src_mem interm_mem interm_size red body after) =
-  Husk hspace src_mem interm_mem interm_size (setBodySpace space red) (setBodySpace space body)
-       (setBodySpace space after)
-setHostOpDefaultSpace _ op = op
+setHostOpDefaultSpace :: Space -> HostOp -> SetDefaultSpaceM HostOp
+setHostOpDefaultSpace space (Husk hspace src_mem keep_host num_nodes body) =
+  localExclude (S.fromList keep_host) $
+    Husk hspace src_mem keep_host num_nodes <$> setBodySpace space body
+setHostOpDefaultSpace _ op = return op
 
-setCountSpace :: Space -> Count a -> Count a
+setCountSpace :: Space -> Count a -> SetDefaultSpaceM (Count a)
 setCountSpace space (Count e) =
-  Count $ setExpSpace space e
+  Count <$> setExpSpace space e
 
-setExpSpace :: Space -> Exp -> Exp
-setExpSpace space = fmap setLeafSpace
-  where setLeafSpace (Index mem i bt DefaultSpace vol) =
-          Index mem i bt space vol
-        setLeafSpace e = e
+setExpSpace :: Space -> Exp -> SetDefaultSpaceM Exp
+setExpSpace space = traverse setLeafSpace
+  where setLeafSpace (Index mem i bt old_space vol) = do
+          new_space <- setSpace mem space old_space
+          return $ Index mem i bt new_space vol
+        setLeafSpace e = return e
 
-setSpace :: Space -> Space -> Space
-setSpace space DefaultSpace = space
-setSpace _     space        = space
+setSpace :: VName -> Space -> Space -> SetDefaultSpaceM Space
+setSpace name space DefaultSpace = do
+  exclude <- ask
+  if name `S.member` exclude then return DefaultSpace else return space
+setSpace _    _     space        = return space

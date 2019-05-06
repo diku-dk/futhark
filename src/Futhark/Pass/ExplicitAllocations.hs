@@ -562,9 +562,10 @@ handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
   return $ Inner $ Husk hspace' red_op' nes ts body'
 
 huskSpaceMemInfo :: HuskSpace Kernels -> HuskSpace ExplicitMemory
-huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_elem_offset parts_mem node_res) =
-  HuskSpace src src_elems parts' parts_elems parts_elem_offset parts_mem node_res
+huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_mem node_res node_id node_id_mem) =
+  HuskSpace src src_elems parts' parts_elems parts_mem node_res node_id' node_id_mem
   where parts' = zipWith huskParamMemInfo parts parts_mem
+        node_id' = huskParamMemInfo node_id node_id_mem
 
 huskParamMemInfo :: LParam Kernels -> VName -> LParam ExplicitMemory
 huskParamMemInfo (Param name (Prim pt)) _ = Param name $ MemPrim pt

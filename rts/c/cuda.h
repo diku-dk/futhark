@@ -90,13 +90,54 @@ void cuda_config_init(struct cuda_config *cfg,
 }
 
 enum cuda_node_message_type {
-  ALLOC,
-  UNREF,
-  MEMCPY_D,
-  MEMCPY_H_TO_D,
-  MEMCPY_D_TO_H,
-  MEMCPY_P_TO_P,
-  LAUNCH
+  NODE_MSG_STATIC,
+  NODE_MSG_ALLOC,
+  NODE_MSG_FREE,
+  NODE_MSG_MEMCPY_D_TO_D,
+  NODE_MSG_MEMCPY_H_TO_D,
+  NODE_MSG_MEMCPY_D_TO_H,
+  NODE_MSG_MEMCPY_P_TO_P,
+  NODE_MSG_LAUNCH,
+  NODE_MSG_SYNC,
+  NODE_MSG_EXIT
+};
+
+struct cuda_node_static_content {
+  CUdeviceptr *mem;
+  void *src;
+  size_t num_elems;
+  size_t elem_size;
+};
+
+struct cuda_node_alloc_content {
+  CUdeviceptr *mem;
+  const char *tag;
+  size_t bytes;
+};
+
+struct cuda_node_free_content {
+  CUdeviceptr mem;
+  const char *tag;
+};
+
+struct cuda_node_memcpy_content {
+  void *src;
+  CUcontext src_ctx;
+  void *dest;
+  CUcontext dest_ctx;
+  size_t bytes;
+};
+
+struct cuda_node_launch_content {
+  CUfunction kernel;
+  size_t grid_x;
+  size_t grid_y;
+  size_t grid_z;
+  size_t block_x;
+  size_t block_y;
+  size_t block_z;
+  size_t shared_bytes;
+  void **params;
 };
 
 struct cuda_node_message {
@@ -113,7 +154,7 @@ struct cuda_node_context {
   
   pthread_t thread;
   struct cuda_node_message current_message;
-  sem_t *message_signal;
+  sem_t message_signal;
 };
 
 struct cuda_context {
@@ -496,8 +537,9 @@ CUresult cuda_set_active_node(struct cuda_context *ctx, int node) {
 void cuda_node_setup(struct cuda_node_context *ctx, char *ptx)
 {
   CUDA_SUCCEED(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
-  free_list_init(&ctx->free_list);
   CUDA_SUCCEED(cuModuleLoadData(&ctx->module, ptx));
+  free_list_init(&ctx->free_list);
+  sem_init(&ctx->message_signal, 0, 0);
 }
 
 static char *cuda_get_ptx(struct cuda_context *ctx,
@@ -568,17 +610,19 @@ void cuda_setup(struct cuda_context *ctx)
   pthread_barrier_init(&ctx->node_sync_point, NULL, ctx->cfg.num_nodes + 1);
 }
 
-CUresult cuda_free_all(struct cuda_context *ctx);
+CUresult cuda_free_all(struct cuda_node_context *ctx);
 
 void cuda_cleanup(struct cuda_context *ctx)
 {
   pthread_barrier_destroy(&ctx->node_sync_point);
-  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
-    cuda_set_active_node(ctx, i);
-    CUDA_SUCCEED(cuda_free_all(ctx));
-    CUDA_SUCCEED(cuModuleUnload(ctx->nodes[i].module));
-    CUDA_SUCCEED(cuCtxDestroy(ctx->nodes[i].cu_ctx));
-  }
+}
+
+void cuda_node_cleanup(struct cuda_node_context *ctx)
+{
+  CUDA_SUCCEED(cuda_free_all(ctx));
+  CUDA_SUCCEED(cuModuleUnload(ctx->module));
+  CUDA_SUCCEED(cuCtxDestroy(ctx->cu_ctx));
+  sem_destroy(&ctx->message_signal);
 }
 
 CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
@@ -638,10 +682,10 @@ CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem, const char *tag)
   return res;
 }
 
-CUresult cuda_free_all(struct cuda_context *ctx) {
+CUresult cuda_free_all(struct cuda_node_context *ctx) {
   CUdeviceptr mem;
-  free_list_pack(&ctx->nodes[ctx->active_node].free_list);
-  while (free_list_first(&ctx->nodes[ctx->active_node].free_list, &mem) == 0) {
+  free_list_pack(&ctx->free_list);
+  while (free_list_first(&ctx->free_list, &mem) == 0) {
     CUresult res = cuMemFree(mem);
     if (res != CUDA_SUCCESS) {
       return res;
@@ -655,5 +699,231 @@ void cuda_thread_sync(pthread_barrier_t *barrier) {
   int wait_res = pthread_barrier_wait(barrier);
   if(wait_res != PTHREAD_BARRIER_SERIAL_THREAD && wait_res != 0)
     panic(-1, "Thread barrier synchronization error.");
+}
+
+void cuda_send_node_base_message(struct cuda_context *ctx, enum cuda_node_message_type msg_type) {
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    ctx->nodes[i].current_message.type = msg_type;
+    sem_post(&ctx->nodes[i].message_signal);
+  }
+  cuda_thread_sync(&ctx->node_sync_point);
+}
+
+void cuda_send_node_messages(struct cuda_context *ctx, enum cuda_node_message_type msg_type,
+                             void *contents, size_t content_size) {
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    ctx->nodes[i].current_message.type = msg_type;
+    ctx->nodes[i].current_message.content = contents + i * content_size;
+    sem_post(&ctx->nodes[i].message_signal);
+  }
+  cuda_thread_sync(&ctx->node_sync_point);
+}
+
+void cuda_send_node_static(struct cuda_context *ctx, struct cuda_mem_ptrs mems, void *src,
+                           size_t num_elems, size_t elem_size) {
+  struct cuda_node_static_content *static_contents =
+    malloc(sizeof(struct cuda_node_static_content) * ctx->cfg.num_nodes);
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    static_contents[i].mem = mems.mems + i;
+    static_contents[i].src = src;
+    static_contents[i].num_elems = num_elems;
+    static_contents[i].elem_size = elem_size;
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_STATIC, static_contents, sizeof(struct cuda_node_static_content));
+  free(static_contents);
+}
+
+void cuda_send_node_alloc(struct cuda_context *ctx, struct cuda_mem_ptrs mems, const char *tag, size_t bytes) {
+  struct cuda_node_alloc_content *alloc_contents =
+    malloc(sizeof(struct cuda_node_alloc_content) * ctx->cfg.num_nodes);
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    alloc_contents[i].mem = mems.mems + i;
+    alloc_contents[i].tag = tag;
+    alloc_contents[i].bytes = bytes;
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_ALLOC, alloc_contents, sizeof(struct cuda_node_alloc_content));
+  free(alloc_contents);
+}
+
+void cuda_send_node_free(struct cuda_context *ctx, struct cuda_mem_ptrs mems, const char *tag) {
+  struct cuda_node_free_content *free_contents =
+    malloc(sizeof(struct cuda_node_free_content) * ctx->cfg.num_nodes);
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    free_contents[i].mem = mems.mems[i];
+    free_contents[i].tag = tag;
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_FREE, free_contents, sizeof(struct cuda_node_free_content));
+  free(free_contents);
+}
+
+void cuda_send_node_memcpy_dtod(struct cuda_context *ctx, struct cuda_mem_ptrs srcs, size_t src_offset,
+                                struct cuda_mem_ptrs dests, size_t dest_offset, size_t bytes) {
+  struct cuda_node_memcpy_content *mcpy_contents =
+    malloc(sizeof(struct cuda_node_memcpy_content) * ctx->cfg.num_nodes);
+  CUdeviceptr *src_ptrs = malloc(ctx->cfg.num_nodes * sizeof(CUdeviceptr));
+  CUdeviceptr *dest_ptrs = malloc(ctx->cfg.num_nodes * sizeof(CUdeviceptr));
+  
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    src_ptrs[i] = srcs.mems[i] + src_offset;
+    dest_ptrs[i] = dests.mems[i] + dest_offset;
+    mcpy_contents[i].src = src_ptrs + i;
+    mcpy_contents[i].dest = dest_ptrs + i;
+    mcpy_contents[i].bytes = bytes;
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_MEMCPY_D_TO_D, mcpy_contents,
+                          sizeof(struct cuda_node_memcpy_content));
+  free(mcpy_contents);
+  free(src_ptrs);
+  free(dest_ptrs);
+}
+
+void cuda_send_node_memcpy_dtoh(struct cuda_context *ctx, struct cuda_mem_ptrs srcs,
+                                size_t src_offset, void *dest, size_t bytes) {
+  struct cuda_node_memcpy_content *mcpy_contents =
+    malloc(sizeof(struct cuda_node_memcpy_content) * ctx->cfg.num_nodes);
+  CUdeviceptr *src_ptrs = malloc(ctx->cfg.num_nodes * sizeof(CUdeviceptr));
+  
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    src_ptrs[i] = srcs.mems[i] + src_offset;
+    mcpy_contents[i].src = src_ptrs + i;
+    mcpy_contents[i].dest = dest + i * bytes;
+    mcpy_contents[i].bytes = bytes;
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_MEMCPY_D_TO_H, mcpy_contents,
+                          sizeof(struct cuda_node_memcpy_content));
+  free(mcpy_contents);
+  free(src_ptrs);
+}
+
+void cuda_send_node_memcpy_htod(struct cuda_context *ctx, void *src,
+                                struct cuda_mem_ptrs dests, size_t dest_offset,
+                                size_t bytes) {
+  struct cuda_node_memcpy_content *mcpy_contents =
+    malloc(sizeof(struct cuda_node_memcpy_content) * ctx->cfg.num_nodes);
+  CUdeviceptr *dest_ptrs = malloc(ctx->cfg.num_nodes * sizeof(CUdeviceptr));
+  
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    dest_ptrs[i] = dests.mems[i] + dest_offset;
+    mcpy_contents[i].src = src;
+    mcpy_contents[i].dest = dest_ptrs + i;
+    mcpy_contents[i].bytes = bytes;
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_MEMCPY_H_TO_D, mcpy_contents,
+                          sizeof(struct cuda_node_memcpy_content));
+  free(mcpy_contents);
+  free(dest_ptrs);
+}
+
+void cuda_send_node_memcpy_partition(struct cuda_context *ctx, struct cuda_mem_ptrs dests,
+                                     struct cuda_mem_ptrs src, size_t src_size, size_t bytes) {
+  struct cuda_node_memcpy_content *mcpy_contents =
+    malloc(sizeof(struct cuda_node_memcpy_content) * ctx->cfg.num_nodes);
+  CUdeviceptr *src_ptrs = malloc(ctx->cfg.num_nodes * sizeof(CUdeviceptr));
+  
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    size_t offset = bytes * i;
+    size_t rem = src_size - offset;
+    src_ptrs[i] = src.mems[0] + offset;
+    mcpy_contents[i].src = src_ptrs + i;
+    mcpy_contents[i].src_ctx = ctx->nodes[0].cu_ctx;
+    mcpy_contents[i].dest = dests.mems + i;
+    mcpy_contents[i].dest_ctx = ctx->nodes[i].cu_ctx;
+    mcpy_contents[i].bytes = rem < bytes ? rem : bytes;
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_MEMCPY_P_TO_P, mcpy_contents,
+                          sizeof(struct cuda_node_memcpy_content));
+  free(mcpy_contents);
+  free(src_ptrs);
+}
+
+void cuda_send_node_launch(struct cuda_context *ctx, CUfunction *fs,
+                           size_t grid_x, size_t grid_y, size_t grid_z,
+                           size_t block_x, size_t block_y, size_t block_z,
+                           size_t shared_bytes, void ***param_arrs) {
+  struct cuda_node_launch_content *launch_contents =
+    malloc(sizeof(struct cuda_node_launch_content) * ctx->cfg.num_nodes);
+
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    launch_contents[i].kernel = fs[i];
+    launch_contents[i].grid_x = grid_x;
+    launch_contents[i].grid_y = grid_y;
+    launch_contents[i].grid_z = grid_z;
+    launch_contents[i].block_x = block_x;
+    launch_contents[i].block_y = block_y;
+    launch_contents[i].block_z = block_z;
+    launch_contents[i].shared_bytes = shared_bytes;
+    launch_contents[i].params = param_arrs[i];
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_LAUNCH, launch_contents,
+                          sizeof(struct cuda_node_launch_content));
+  free(launch_contents);
+}
+
+void cuda_send_node_exit(struct cuda_context *ctx) {
+  cuda_send_node_base_message(ctx, NODE_MSG_EXIT);
+}
+
+void cuda_send_node_sync(struct cuda_context *ctx) {
+  cuda_send_node_base_message(ctx, NODE_MSG_SYNC);
+}
+
+void cuda_handle_node_static(struct cuda_node_context *nctx) {
+  struct cuda_node_static_content *content =
+    (struct cuda_node_static_content *)nctx->current_message.content;
+  
+  CUDA_SUCCEED(cuMemAlloc(content->mem,
+                          (content->num_elems > 0 ? content->num_elems : 1) * content->elem_size));
+  if (content->num_elems > 0)
+    CUDA_SUCCEED(cuMemcpyHtoD(*content->mem, content->src,
+                              content->num_elems * content->elem_size));
+}
+
+void cuda_handle_node_alloc(struct cuda_context *ctx, struct cuda_node_context *nctx) {
+  struct cuda_node_alloc_content *content =
+    (struct cuda_node_alloc_content *)nctx->current_message.content;
+  CUDA_SUCCEED(cuda_alloc(ctx, content->bytes, content->tag, content->mem));
+}
+
+void cuda_handle_node_free(struct cuda_context *ctx, struct cuda_node_context *nctx) {
+  struct cuda_node_free_content *content =
+    (struct cuda_node_free_content *)nctx->current_message.content;
+  CUDA_SUCCEED(cuda_free(ctx, content->mem, content->tag));
+}
+
+void cuda_handle_node_memcpy_dtod(struct cuda_node_context *nctx) {
+  struct cuda_node_memcpy_content *content =
+    (struct cuda_node_memcpy_content *)nctx->current_message.content;
+  CUDA_SUCCEED(cuMemcpyDtoD(*(CUdeviceptr*)content->dest, *(CUdeviceptr*)content->src,
+                            content->bytes));
+}
+
+void cuda_handle_node_memcpy_htod(struct cuda_node_context *nctx) {
+  struct cuda_node_memcpy_content *content =
+    (struct cuda_node_memcpy_content *)nctx->current_message.content;
+  CUDA_SUCCEED(cuMemcpyHtoD(*(CUdeviceptr*)content->dest, content->src, content->bytes));
+}
+
+void cuda_handle_node_memcpy_dtoh(struct cuda_node_context *nctx) {
+  struct cuda_node_memcpy_content *content =
+    (struct cuda_node_memcpy_content *)nctx->current_message.content;
+  CUDA_SUCCEED(cuMemcpyDtoH(content->dest,  *(CUdeviceptr*)content->src,
+                            content->bytes));
+}
+
+void cuda_handle_node_memcpy_peer(struct cuda_node_context *nctx) {
+  struct cuda_node_memcpy_content *content =
+    (struct cuda_node_memcpy_content *)nctx->current_message.content;
+  CUDA_SUCCEED(cuMemcpyPeer(*(CUdeviceptr*)content->dest, content->dest_ctx,
+                            *(CUdeviceptr*)content->src, content->src_ctx,
+                            content->bytes));
+}
+
+void cuda_handle_node_launch(struct cuda_node_context *nctx) {
+  struct cuda_node_launch_content *content =
+    (struct cuda_node_launch_content *)nctx->current_message.content;
+  CUDA_SUCCEED(cuLaunchKernel(content->kernel, content->grid_x, content->grid_y,
+                              content->grid_z, content->block_x, content->block_y,
+                              content->block_z, content->shared_bytes, NULL,
+                              content->params, NULL));
 }
 

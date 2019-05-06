@@ -94,8 +94,8 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp target (Husk hspace src_mem interm_mem interm_size red body after) =
-  onHusk target hspace src_mem interm_mem interm_size red body after
+onHostOp target (Husk hspace src_mem _ num_nodes body) =
+  onHusk target hspace src_mem num_nodes body
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
@@ -181,16 +181,11 @@ onKernel target kernel = do
 onHusk :: KernelTarget
           -> HuskSpace ExplicitMemory
           -> [VName]
-          -> [VName] -> [MemSize]
-          -> ImpKernels.Code 
-          -> ImpKernels.Code
+          -> VName
           -> ImpKernels.Code
           -> OnKernelM OpenCL
-onHusk target hspace src_mem interm_mem interm_size red body after = do
-  red' <- traverse (onHostOp target) red
-  body' <- traverse (onHostOp target) body
-  after' <- traverse (onHostOp target) after
-  return $ DistributeHusk hspace src_mem interm_mem interm_size red' body' after'
+onHusk target hspace src_mem num_nodes body =
+  DistributeHusk hspace src_mem num_nodes <$> traverse (onHostOp target) body
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
@@ -422,6 +417,7 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsAllocate = cannotAllocate
                      , GenericC.opsDeallocate = cannotDeallocate
                      , GenericC.opsCopy = copyInKernel
+                     , GenericC.opsPartition = cannotPartition
                      , GenericC.opsStaticArray = noStaticArrays
                      , GenericC.opsFatMemory = False
                      }
@@ -497,6 +493,10 @@ inKernelOperations = GenericC.Operations
           val' <- GenericC.compileExp val
           GenericC.stm [C.cstm|$id:old = atomic_xchg((volatile __global int *)&$id:arr[$exp:ind'], $exp:val');|]
 
+        cannotPartition :: GenericC.Partition KernelOp UsedFunctions
+        cannotPartition _ _ _ _ _ =
+          fail "Cannot partition memory in kernel"
+
         cannotAllocate :: GenericC.Allocate KernelOp UsedFunctions
         cannotAllocate _ =
           fail "Cannot allocate memory in kernel"
@@ -539,6 +539,7 @@ typesInCode (Allocate _ (Count e) _) = typesInExp e
 typesInCode Free{} = mempty
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInCode Partition{} = mempty
 typesInCode (Write _ (Count e1) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e

@@ -39,6 +39,7 @@ compileProg prog = do
                      , GC.opsAllocate = allocateOpenCLBuffer
                      , GC.opsDeallocate = deallocateOpenCLBuffer
                      , GC.opsCopy = copyOpenCLMemory
+                     , GC.opsPartition = partitionOpenCLMemory
                      , GC.opsStaticArray = staticOpenCLArray
                      , GC.opsMemoryType = openclMemoryType
                      , GC.opsFatMemory = True
@@ -189,11 +190,11 @@ readOpenCLScalar _ _ _ space _ =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
-allocateOpenCLBuffer mem size tag "device" =
+allocateOpenCLBuffer mem _ size tag "device" =
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, $exp:size, $exp:tag, &$exp:mem));|]
-allocateOpenCLBuffer _ _ _ "local" =
+allocateOpenCLBuffer _ _ _ _ "local" =
   return () -- Hack - these memory blocks do not actually exist.
-allocateOpenCLBuffer _ _ _ space =
+allocateOpenCLBuffer _ _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
@@ -249,6 +250,9 @@ copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes 
   GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
 copyOpenCLMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
+
+partitionOpenCLMemory :: GC.Partition OpenCL ()
+partitionOpenCLMemory dest _ src _ _ = GC.stm [C.cstm|$exp:dest = $exp:src;|]
 
 openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]

@@ -351,11 +351,12 @@ instance Engine.Simplifiable KernelSpace where
     <*> Engine.simplify structure
 
 instance Engine.Simplifiable (HuskSpace lore) where
-  simplify (HuskSpace src src_elems parts parts_elems parts_elem_offset parts_mem node_res) = do
+  simplify (HuskSpace src src_elems parts parts_elems parts_mem node_res node_id node_id_mem) = do
     src' <- Engine.simplify src
     parts_mem' <- Engine.simplify parts_mem
     node_res' <- Engine.simplify node_res
-    return $ HuskSpace src' src_elems parts parts_elems parts_elem_offset parts_mem' node_res'
+    node_id_mem' <- Engine.simplify node_id_mem
+    return $ HuskSpace src' src_elems parts parts_elems parts_mem' node_res' node_id node_id_mem'
 
 instance Engine.Simplifiable SpaceStructure where
   simplify (FlatThreadSpace dims) =
@@ -403,8 +404,7 @@ instance BinderOps (Wise InKernel) where
 
 kernelRules :: RuleBook (Wise Kernels)
 kernelRules = standardRules <>
-              ruleBook [RuleOp removeInvariantKernelResults,
-                        RuleOp fuseHuskIota]
+              ruleBook [RuleOp removeInvariantKernelResults]
                        [RuleOp distributeKernelResults,
                         RuleBasicOp removeUnnecessaryCopy]
 
@@ -441,17 +441,22 @@ fuseHuskIota vtable pat _ (Husk hspace red_op nes ts body)
       let (partm', src') = unzip zsrc
           (parts', part_mem') = unzip partm'
           elems = hspacePartitionElems hspace
-          offset = hspacePartitionElemOffset hspace
+          node_id = hspaceNodeId hspace
 
       body' <- insertStmsM $ localScope (scopeOfHuskSpace hspace) $ certifying iota_cs $ do
         -- Convert index to appropriate type.
-        offset' <- asIntS iota_t $ Var offset
-        offset'' <- letSubExp "offset_by_stride" $
-          BasicOp $ BinOp (Mul iota_t) offset' iota_stride
+        node_id' <- letSubExp "offset" $
+          BasicOp $ Index (paramName node_id) [DimFix $ Constant $ IntValue $ Int32Value 0]
+        node_id'' <- asIntS iota_t node_id'
+        elems' <- asIntS iota_t $ Var elems
+        offset <- letSubExp "offset" $
+          BasicOp $ BinOp (Mul iota_t) node_id'' elems'
+        offset' <- letSubExp "offset_by_stride" $
+          BasicOp $ BinOp (Mul iota_t) offset iota_stride
         start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add iota_t) offset'' iota_start
+            BasicOp $ BinOp (Add iota_t) offset' iota_start
         letBindNames_ [paramName iota_part] $
-          BasicOp $ Iota (Var elems) start iota_stride iota_t
+          BasicOp $ Iota elems' start iota_stride iota_t
         return body
       let hspace' = hspace { hspaceSource = src'
                            , hspacePartitions = parts'

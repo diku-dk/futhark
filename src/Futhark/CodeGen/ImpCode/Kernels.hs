@@ -52,7 +52,7 @@ newtype KernelConst = SizeConst Name
 type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel Kernel
-            | Husk (HuskSpace ExplicitMemory) [VName] [VName] [Imp.MemSize] Code Code Code
+            | Husk (HuskSpace ExplicitMemory) [VName] [VName] VName Code
             | GetSize VName Name SizeClass
             | CmpSizeLe VName Name SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
@@ -132,20 +132,18 @@ instance Pretty HostOp where
     ppr dest <+> text "<-" <+>
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
-  ppr (Husk hspace _ _ _ red body after) =
+  ppr (Husk hspace _ _ _ body) =
     text "husk" </>
     align (ppr hspace) <+>
-    nestedBlock "{" "}" (ppr body) <+>
-    nestedBlock "{" "}" (ppr red) <+>
-    nestedBlock "{" "}" (ppr after)
+    nestedBlock "{" "}" (ppr body)
     -- TODO: ^ Make this more readable
   ppr (CallKernel c) =
     ppr c
 
 instance FreeIn HostOp where
   freeIn (CallKernel c) = freeIn c
-  freeIn (Husk hspace src_mem _ _ red body after) =
-    mconcat [freeIn red, freeIn body, freeIn after, S.fromList src_mem]
+  freeIn (Husk hspace src_mem _ _ body) =
+    mconcat [freeIn body, S.fromList src_mem]
             `S.difference` boundByHuskSpace hspace
   freeIn (CmpSizeLe dest _ _ x) =
     freeIn dest <> freeIn x
@@ -161,10 +159,10 @@ instance Substitute HostOp where
     GetSizeMax (substituteNames m dest) size_class
   substituteNames m (CmpSizeLe dest name size_class x) =
     CmpSizeLe (substituteNames m dest) name size_class (substituteNames m x)
-  substituteNames m (Husk hspace src_mem interm_mem interm_size red body after) =
+  substituteNames m (Husk hspace src_mem keep_host num_nodes body) =
     Husk (substituteNames m hspace) (substituteNames m src_mem)
-         (substituteNames m interm_mem) interm_size (substituteNames m red)
-         (substituteNames m body) (substituteNames m after)
+         (substituteNames m keep_host) (substituteNames m num_nodes)
+         (substituteNames m body)
   substituteNames m (CallKernel c) =
     CallKernel (substituteNames m c)
 

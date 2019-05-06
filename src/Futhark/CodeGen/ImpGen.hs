@@ -73,8 +73,6 @@ module Futhark.CodeGen.ImpGen
   , dScope
   , dScopes
   , dArray
-  , dReplicateMemFromArray
-  , dReplicateArray
   , dPrim, dPrim_, dPrimV
 
   , sFor, sWhile
@@ -82,7 +80,7 @@ module Futhark.CodeGen.ImpGen
   , sIf, sWhen, sUnless
   , sOp
   , sDeclareNamedMem, sDeclareMem, sAllocNamed, sAlloc, sAlloc_
-  , sArray, sAllocArray, sStaticArray
+  , sArray, sAllocArray, sAllocNamedArray, sStaticArray
   , sWrite, sUpdate
   , (<--)
   )
@@ -858,25 +856,6 @@ dArray name bt shape membind = do
   entry <- memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
   addVar name entry
 
-dReplicateMemFromArray :: Space -> VName -> VName -> ImpM lore op ()
-dReplicateMemFromArray space repl_mem origin_arr = do
-  mem_size <- getArrayMemSize origin_arr
-  addVar repl_mem $ MemVar Nothing $ MemEntry mem_size space
-  where getArrayMemSize arr = do
-          arr_loc <- entryArrayLocation <$> lookupArray arr
-          arr_mem <- lookupMemory $ memLocationName arr_loc
-          return $ entryMemSize arr_mem
-
-dReplicateArray :: Space -> VName -> VName -> VName -> ImpM lore op ()
-dReplicateArray space repl_arr repl_mem origin_arr = do
-  dReplicateMemFromArray space repl_mem origin_arr
-  origin_ent <- lookupArray origin_arr
-  addVar repl_arr $ ArrayVar Nothing $ origin_ent {
-      entryArrayLocation = (entryArrayLocation origin_ent) {
-          memLocationName = repl_mem
-        }
-    }
-
 everythingVolatile :: ImpM lore op a -> ImpM lore op a
 everythingVolatile = local $ \env -> env { envVolatility = Imp.Volatile }
 
@@ -1275,7 +1254,7 @@ sDeclareNamedMem name size space = do
 sDeclareMem :: String -> Count Bytes -> Space -> ImpM lore op (VName, Imp.MemSize)
 sDeclareMem name size space = do
   name' <- newVName name
-  sDeclareNamedMem name' size space >>= return . (name',)
+  (name',) <$> sDeclareNamedMem name' size space
 
 sAlloc_ :: VName -> Imp.MemSize -> Space -> ImpM lore op ()
 sAlloc_ name' size' space = do
@@ -1302,11 +1281,21 @@ sArray name bt shape membind = do
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
 sAllocArray name pt shape space = do
+  name' <- newVName name
+  mname <- newVName $ name ++ "_mem"
+  void $ sAllocNamedArray name' mname pt shape space
+  return name'
+
+-- | Uses linear/iota index function.
+sAllocNamedArray :: VName -> VName -> PrimType -> ShapeBase SubExp
+                    -> Space -> ImpM lore op (Count Bytes)
+sAllocNamedArray name mname pt shape space = do
   let arr_bytes = Imp.bytes $ Imp.LeafExp (Imp.SizeOf pt) int32 *
                   product (map (compileSubExpOfType int32) (shapeDims shape))
-  mem <- sAlloc (name ++ "_mem") arr_bytes space
-  sArray name pt shape $
-    ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
+  sAllocNamed mname arr_bytes space
+  dArray name pt shape $
+    ArrayIn mname $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
+  return arr_bytes
 
 -- | Uses linear/iota index function.
 sStaticArray :: String -> Space -> PrimType -> Imp.ArrayContents -> ImpM lore op VName

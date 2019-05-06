@@ -175,6 +175,9 @@ data Code a = Skip
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
+            | Partition VName (Count Bytes) VName (Count Bytes) Space
+              -- ^ Destination, partition size, source, source size, space.
+              -- Number of partitions depending on scope.
             | Write VName (Count Bytes) PrimType Space Volatility Exp
             | SetScalar VName Exp
             | SetMem VName VName Space
@@ -351,6 +354,12 @@ instance Pretty op => Pretty (Code op) where
             ppr size)
     where ppMemLoc base offset =
             ppr base <+> text "+" <+> ppr offset
+  ppr (Partition dest partsize src srcsize space) =
+    text "partition" <>
+    parens (ppr dest <> comma </>
+            ppr partsize <> comma </>
+            ppr src <> ppr srcsize <> comma </>
+            ppr space)
   ppr (If cond tbranch fbranch) =
     text "if" <+> ppr cond <+> text "then {" </>
     indent 2 (ppr tbranch) </>
@@ -434,6 +443,8 @@ instance Traversable Code where
     pure $ Free name space
   traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
     pure $ Copy dest destoffset destspace src srcoffset srcspace size
+  traverse _ (Partition dest partsize src srcsize space) =
+    pure $ Partition dest partsize src srcsize space
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (SetScalar name val) =
@@ -481,6 +492,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn name
   freeIn (Copy dest x _ src y _ n) =
     freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
+  freeIn (Partition dest partsize src srcsize _) =
+    freeIn dest <> freeIn partsize <> freeIn src <> freeIn srcsize
   freeIn (SetMem x y _) =
     freeIn x <> freeIn y
   freeIn (Write v i _ _ _ e) =
@@ -533,6 +546,8 @@ instance Substitute a => Substitute (Code a) where
     Free (substituteNames m name) space
   substituteNames m (Copy dest destoffset destspace src srcoffset srcspace size) =
     Copy (substituteNames m dest) destoffset destspace (substituteNames m src) srcoffset srcspace size
+  substituteNames m (Partition dest partsize src srcsize space) =
+    Partition (substituteNames m dest) partsize (substituteNames m src) srcsize space
   substituteNames m (SetMem dest from space) =
     SetMem (substituteNames m dest) (substituteNames m from) space
   substituteNames m (Write name i bt space vol val) =

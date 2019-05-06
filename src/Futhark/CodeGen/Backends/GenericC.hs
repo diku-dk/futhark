@@ -23,12 +23,14 @@ module Futhark.CodeGen.Backends.GenericC
   , Allocate
   , Deallocate
   , Copy
+  , Partition
   , StaticArray
-  , localNodeCount
 
   -- * Monadic compiler interface
   , CompilerM
   , CompilerState (compUserState)
+  , localNodeCount
+  , getNodeCount
   , getUserState
   , putUserState
   , modifyUserState
@@ -158,7 +160,7 @@ type ReadScalar op s =
 -- | Allocate a memory block of the given size and with the given tag
 -- in the given memory space, saving a reference in the given variable
 -- name.
-type Allocate op s = C.Exp -> C.Exp -> C.Exp -> SpaceId
+type Allocate op s = C.Exp -> C.Exp -> C.Exp -> C.Exp -> SpaceId
                      -> CompilerM op s ()
 
 -- | De-allocate the given memory block with the given tag, which is
@@ -174,12 +176,16 @@ type Copy op s = C.Exp -> C.Exp -> Space ->
                  C.Exp ->
                  CompilerM op s ()
 
+-- | Partition memory block.
+type Partition op s = C.Exp -> C.Exp -> C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
+
 data Operations op s =
   Operations { opsWriteScalar :: WriteScalar op s
              , opsReadScalar :: ReadScalar op s
              , opsAllocate :: Allocate op s
              , opsDeallocate :: Deallocate op s
              , opsCopy :: Copy op s
+             , opsPartition :: Partition op s
              , opsStaticArray :: StaticArray op s
 
              , opsMemoryType :: MemoryType op s
@@ -199,6 +205,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsAllocate  = defAllocate
                                , opsDeallocate  = defDeallocate
                                , opsCopy = defCopy
+                               , opsPartition = defPartition
                                , opsStaticArray = defStaticArray
                                , opsMemoryType = defMemoryType
                                , opsCompiler = defCompiler
@@ -216,6 +223,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           copyMemoryDefaultSpace destmem destoffset srcmem srcoffset size
         defCopy _ _ _ _ _ _ _ =
           fail "Cannot copy to or from non-default memory space"
+        defPartition _ _ _ =
+          fail "Cannot partition in non-default memory space"
         defStaticArray _ _ _ _ =
           fail "Cannot create static array in non-default memory space"
         defMemoryType _ =
@@ -260,6 +269,9 @@ envDeallocate = opsDeallocate . envOperations
 
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
+
+envPartition :: CompilerEnv op s -> Partition op s
+envPartition = opsPartition . envOperations
 
 envStaticArray :: CompilerEnv op s -> StaticArray op s
 envStaticArray = opsStaticArray . envOperations
@@ -333,6 +345,9 @@ runCompilerM :: Functions op -> Operations op s -> VNameSource -> s
 runCompilerM prog ops src userstate (CompilerM m) =
   let (x, s, _) = runRWS m (newCompilerEnv prog ops) (newCompilerState src userstate)
   in (x, s)
+
+getNodeCount :: CompilerM op s (Maybe C.Exp)
+getNodeCount = asks envNodeCount
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
@@ -538,8 +553,9 @@ defineMemorySpace space = do
         stm [C.cstm|block->mem = (char*) malloc(size);|]
       Space sid ->
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
-        pure [C.cexp|size|] <*> pure [C.cexp|desc|] <*> pure sid
-  let allocdef = [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
+        pure [C.cexp|node_count|] <*> pure [C.cexp|size|] <*>
+        pure [C.cexp|desc|] <*> pure sid
+  let allocdef = [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, size_t node_count, typename int64_t size, const char *desc) {
   if (size < 0) {
     panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
@@ -632,9 +648,10 @@ allocMem :: (C.ToExp a, C.ToExp b) =>
 allocMem name size space on_failure = do
   refcount <- asks envFatMemory
   let name_s = pretty $ C.toExp name noLoc
+  n <- fromMaybe [C.cexp|1|] <$> getNodeCount
   if refcount
-    then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
-                                                 $string:name_s)) {
+    then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:n,
+                                                 $exp:size, $string:name_s)) {
                        $stm:on_failure
                      }|]
     else alloc name
@@ -643,7 +660,8 @@ allocMem name size space on_failure = do
             stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
           Space sid ->
             join $ asks envAllocate <*> rawMem name <*>
-            pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*> pure sid
+              pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*>
+              (fromMaybe [C.cexp|1|] <$> getNodeCount) <*> pure sid
 
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
@@ -1804,6 +1822,17 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
     <$> rawMem dest <*> compileExp destoffset <*> pure destspace
     <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
+
+compileCode (Partition dest _ src _ DefaultSpace) =
+  setMem dest src DefaultSpace
+
+compileCode (Partition dest (Count partsize) src (Count srcsize) (Space sid)) =
+  join $ asks envPartition
+    <*> rawMem dest
+    <*> compileExp partsize
+    <*> rawMem src
+    <*> compileExp srcsize
+    <*> pure sid
 
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
