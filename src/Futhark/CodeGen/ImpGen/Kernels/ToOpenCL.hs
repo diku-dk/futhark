@@ -553,7 +553,7 @@ typesInCode (If e c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _ _) = typesInExp e
 typesInCode (Comment _ c) = typesInCode c
-typesInCode (DebugPrint _ _ e) = typesInExp e
+typesInCode (DebugPrint _ v) = maybe mempty (typesInExp . snd) v
 typesInCode Op{} = mempty
 
 typesInExp :: Exp -> S.Set PrimType

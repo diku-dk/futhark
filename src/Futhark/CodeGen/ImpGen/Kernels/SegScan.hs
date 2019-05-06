@@ -249,7 +249,8 @@ compileSegScan :: Pattern ExplicitMemory
 compileSegScan pat space scan_op nes kbody = do
   (elems_per_group, crossesSegment) <- scanStage1 pat space scan_op nes kbody
 
-  emit $ Imp.DebugPrint "elems_per_group" int32 elems_per_group
+  emit $ Imp.DebugPrint "\n# SegScan" Nothing
+  emit $ Imp.DebugPrint "elems_per_group" $ Just (int32, elems_per_group)
 
   scan_op' <- renameLambda scan_op
   scan_op'' <- renameLambda scan_op

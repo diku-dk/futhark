@@ -1706,10 +1706,15 @@ compileCode (Comment s code) = do
               { $items:items }
              |]
 
-compileCode (DebugPrint s _ e) = do
+compileCode (DebugPrint s (Just (_, e))) = do
   e' <- compileExp e
   stm [C.cstm|if (ctx->debugging) {
           fprintf(stderr, "%s: %d\n", $exp:s, (int)$exp:e');
+       }|]
+
+compileCode (DebugPrint s Nothing) =
+  stm [C.cstm|if (ctx->debugging) {
+          fprintf(stderr, "%s\n", $exp:s);
        }|]
 
 compileCode c

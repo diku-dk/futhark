@@ -191,8 +191,8 @@ prepareIntermediateArraysGlobal num_threads = fmap snd . mapAccumLM onOp Nothing
         num_threads `quotRoundingUp`
         BinOpExp (SMax Int32) 1 (toExp' int32 (genReduceWidth op))
 
-      emit $ Imp.DebugPrint "Number of subhistograms" int32 $
-        Imp.var num_subhistos int32
+      emit $ Imp.DebugPrint "Number of subhistograms" $
+        Just (int32, Imp.vi32 num_subhistos)
 
       -- Initialise sub-histograms.
       --
@@ -371,13 +371,13 @@ prepareIntermediateArraysLocal space constants num_subhistos_per_group =
 
       return (l', (glob_subhistos, init_local_subhistos))
 
-genRedKernelLocal :: Imp.Exp -> VName
+genRedKernelLocal :: VName
                   -> [PatElem ExplicitMemory]
                   -> KernelSpace
                   -> [SegGenRedSlug]
                   -> KernelBody InKernel
                   -> CallKernelGen ()
-genRedKernelLocal coop_lvl num_subhistos_per_group_var map_pes space slugs kbody = do
+genRedKernelLocal num_subhistos_per_group_var map_pes space slugs kbody = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
   let (space_is, space_sizes) = unzip $ spaceDimensions space
       segment_dims = init space_sizes
@@ -395,9 +395,8 @@ genRedKernelLocal coop_lvl num_subhistos_per_group_var map_pes space slugs kbody
 
   let num_subhistos_per_group = Imp.var num_subhistos_per_group_var int32
   forM_ [ ("Number of threads", num_threads)
-        , ("Cooperation level", coop_lvl)
         , ("Number of subhistograms per group", num_subhistos_per_group) ] $
-    \(v, e) -> emit $ Imp.DebugPrint v int32 e
+    \(v, e) -> emit $ Imp.DebugPrint v $ Just (int32, e)
 
   sKernel constants "seggenred_local" $ allThreads constants $ do
     init_constants
@@ -609,16 +608,17 @@ compileSegGenRed (Pattern _ pes) space ops kbody = do
   sUnless (h .==. 0) $ do
     lh <- dPrimV "lh" $ (g * t) `quotRoundingUp` h
 
-    emit $ Imp.DebugPrint "Cooperation level" int32 coop
-    emit $ Imp.DebugPrint "Memory per set of subhistograms" int32 h
-    emit $ Imp.DebugPrint "Desired group size" int32 g
+    emit $ Imp.DebugPrint "\n# SegGenRed" Nothing
+    emit $ Imp.DebugPrint "Cooperation level" $ Just (int32, coop)
+    emit $ Imp.DebugPrint "Memory per set of subhistograms" $ Just (int32, h)
+    emit $ Imp.DebugPrint "Desired group size" $ Just (int32, g)
 
-    forM_ slugs $
-      emit . Imp.DebugPrint "Number of subhistograms" int32 .
-      (`Imp.var` int32) . slugNumSubhistos
+    forM_ slugs $ \slug ->
+      emit $ Imp.DebugPrint "Number of subhistograms" $
+      Just (int32, Imp.vi32 $ slugNumSubhistos slug)
 
     sIf (h .<=. Imp.var lmax int32 .&&. coop .<=. g)
-      (genRedKernelLocal coop lh map_pes space slugs kbody)
+      (genRedKernelLocal lh map_pes space slugs kbody)
       (genRedKernelGlobal map_pes space slugs kbody)
 
     let pes_per_op = chunks (map (length . genReduceDest) ops) all_red_pes

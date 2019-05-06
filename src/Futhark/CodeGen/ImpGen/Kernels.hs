@@ -85,7 +85,7 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
                                          , " in kernel '", kernelName desc, "'"
                                          , " did not have primType value." ]
 
-    toExp v >>= emit . Imp.DebugPrint s (elemType ty)
+    emit $ Imp.DebugPrint s $ Just (elemType ty, toExp' (elemType ty) v)
 
   sKernel constants (kernelName desc) $ do
     init_constants
