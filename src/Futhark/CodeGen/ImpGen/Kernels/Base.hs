@@ -1064,14 +1064,18 @@ sKernel constants name m = do
           subImpM_ (inKernelOperations constants) m
   uses <- computeKernelUses body mempty
 
+  emit $ Imp.DebugPrint ("\n# Kernel " ++ name) int32 $
+    ValueExp $ IntValue $ Int32Value $ fromIntegral tag
+
   emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
     { Imp.kernelBody = body
     , Imp.kernelUses = uses
     , Imp.kernelNumGroups = [kernelNumGroups constants]
     , Imp.kernelGroupSize = [kernelGroupSize constants]
     , Imp.kernelName =
-        nameFromString $ name ++ "_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+        nameFromString $ name ++ "_" ++ show tag
     }
+  where tag = baseTag $ kernelGlobalThreadIdVar constants
 
 -- | Perform a Replicate with a kernel.
 sReplicate :: VName -> Shape -> SubExp
