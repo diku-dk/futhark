@@ -117,12 +117,11 @@ computeHistoUsage space op = do
 
           multiHistoCase = do
             let num_elems = foldl' (*) (Imp.var num_subhistos int32) $
-                            map (toExp' int32) $
-                            arrayDims dest_t
+                            map (toExp' int32) $ arrayDims dest_t
 
             let subhistos_mem_size =
                   Imp.bytes $
-                  Imp.innerExp (Imp.elements num_elems `Imp.withElemType` int32)
+                  Imp.innerExp (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
 
             sAlloc_ subhistos_mem subhistos_mem_size $ Space "device"
             sReplicate subhistos (Shape (map snd segment_dims ++
