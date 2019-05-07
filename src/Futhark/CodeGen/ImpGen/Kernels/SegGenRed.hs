@@ -622,7 +622,7 @@ compileSegGenRed (Pattern _ pes) space ops kbody = do
     emit $ Imp.DebugPrint "Memory per set of subhistograms" $ Just (int32, h)
     emit $ Imp.DebugPrint "Desired group size" $ Just (int32, g)
 
-    sIf (Imp.innerExp (localMemLockUsage space slugs) * h .<=. Imp.vi32 lmax
+    sIf (Imp.innerExp (localMemLockUsage space slugs) + h * Imp.vi32 lh .<=. Imp.vi32 lmax
          .&&. coop .<=. g)
       (genRedKernelLocal lh map_pes space slugs kbody)
       (genRedKernelGlobal map_pes space slugs kbody)
