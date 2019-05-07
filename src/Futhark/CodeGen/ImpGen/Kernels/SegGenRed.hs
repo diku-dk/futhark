@@ -609,7 +609,7 @@ compileSegGenRed (Pattern _ pes) space ops kbody = do
 
   (op_hs, slugs) <- unzip <$> mapM (computeHistoUsage space) ops
   h <- fmap (`Imp.var` int32) $
-       dPrimV "h" $ Imp.innerExp $ sum op_hs + localMemLockUsage space slugs
+       dPrimV "h" $ Imp.innerExp $ sum op_hs
   coop <- fmap (`Imp.var` int32) $
           dPrimV "coop" $ h `quotRoundingUp` t
 
@@ -622,7 +622,8 @@ compileSegGenRed (Pattern _ pes) space ops kbody = do
     emit $ Imp.DebugPrint "Memory per set of subhistograms" $ Just (int32, h)
     emit $ Imp.DebugPrint "Desired group size" $ Just (int32, g)
 
-    sIf (h .<=. Imp.var lmax int32 .&&. coop .<=. g)
+    sIf (Imp.innerExp (localMemLockUsage space slugs) * h .<=. Imp.vi32 lmax
+         .&&. coop .<=. g)
       (genRedKernelLocal lh map_pes space slugs kbody)
       (genRedKernelGlobal map_pes space slugs kbody)
 
