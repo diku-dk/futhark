@@ -81,6 +81,7 @@ data SegGenRedSlug = SegGenRedSlug
                      , slugNumSubhistos :: VName
                      , slugSubhistos :: [SubhistosInfo]
                      }
+
 -- | Figure out how much memory is needed per histogram, and compute
 -- some other auxiliary information.
 computeHistoUsage :: KernelSpace
@@ -148,13 +149,13 @@ localMemLockUsage space slugs =
   then typeSize $ localMemLockArray space
   else 0
 
-prepareAtomicUpdateGlobal :: Maybe Locking -> [VName] -> Lambda InKernel
+prepareAtomicUpdateGlobal :: Maybe Locking -> [VName] -> SegGenRedSlug
                           -> CallKernelGen (Maybe Locking,
                                             [Imp.Exp] -> ImpM InKernel Imp.KernelOp ())
-prepareAtomicUpdateGlobal l dests lam =
+prepareAtomicUpdateGlobal l dests slug =
   -- We need a separate lock array if the operators are not all of a
   -- particularly simple form that permits pure atomic operations.
-  case (l, atomicUpdateLocking lam) of
+  case (l, atomicUpdateLocking $ genReduceOp $ slugOp slug) of
     (_, Left f) -> return (l, f (Space "global") dests)
     (Just l', Right f) -> return (l, f l' (Space "global") dests)
     (Nothing, Right f) -> do
@@ -166,10 +167,14 @@ prepareAtomicUpdateGlobal l dests lam =
       -- A fun solution would also be to use a simple hashing
       -- algorithm to ensure good distribution of locks.
       let num_locks = 10000
+          dims = map (toExp' int32) $
+                 shapeDims (genReduceShape (slugOp slug)) ++
+                 [ Var (slugNumSubhistos slug)
+                 , genReduceWidth (slugOp slug)]
       locks <-
         sStaticArray "genred_locks" (Space "device") int32 $
         Imp.ArrayZeros num_locks
-      let l' = Locking locks 0 1 0 ((`rem` fromIntegral num_locks) . sum)
+      let l' = Locking locks 0 1 0 ((`rem` fromIntegral num_locks) . flattenIndex dims)
       return (Just l', f l' (Space "global") dests)
 
 prepareIntermediateArraysGlobal :: Imp.Exp -> [SegGenRedSlug]
@@ -179,7 +184,7 @@ prepareIntermediateArraysGlobal :: Imp.Exp -> [SegGenRedSlug]
                                      [Imp.Exp] -> ImpM InKernel Imp.KernelOp ())]
 prepareIntermediateArraysGlobal num_threads = fmap snd . mapAccumLM onOp Nothing
   where
-    onOp l (SegGenRedSlug op num_subhistos subhisto_info) = do
+    onOp l slug@(SegGenRedSlug op num_subhistos subhisto_info) = do
       -- Determining the degree of cooperation (heuristic):
       -- coop_lvl   := size of histogram (Cooperation level)
       -- num_histos := (threads / coop_lvl) (Number of histograms)
@@ -216,7 +221,7 @@ prepareIntermediateArraysGlobal num_threads = fmap snd . mapAccumLM onOp Nothing
 
         return $ subhistosArray info
 
-      (l', do_op) <- prepareAtomicUpdateGlobal l dests $ genReduceOp op
+      (l', do_op) <- prepareAtomicUpdateGlobal l dests slug
 
       return (l', (num_subhistos, dests, do_op))
 
@@ -334,7 +339,12 @@ prepareIntermediateArraysLocal space constants num_subhistos_per_group =
           (Nothing, Right f) -> do
             locks <- newVName "locks"
             num_locks <- toExp $ spaceGroupSize space
-            let l' = Locking locks 0 1 0 ((`rem` num_locks) . sum)
+
+            let dims = map (toExp' int32) $
+                       Var num_subhistos_per_group :
+                       shapeDims (genReduceShape op) ++
+                       [genReduceWidth op]
+                l' = Locking locks 0 1 0 ((`rem` num_locks) . flattenIndex dims)
                 locks_t = localMemLockArray space
 
                 mk_op = do
