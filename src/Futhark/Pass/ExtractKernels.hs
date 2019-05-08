@@ -301,7 +301,15 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
       types <- asksScope scopeForSOACs
       transformStms path =<< (stmsToList . snd <$> runBinderT (certifying cs do_iswim) types)
 
-  | Just (scan_lam, nes, map_lam) <- isScanomapSOAC form = do
+  -- We are only willing to generate code for scanomaps that do not
+  -- involve array accumulators, and do not have parallelism in their
+  -- map function.  Such cases will fall through to the
+  -- screma-splitting case, and produce an ordinary map and scan.
+  -- Hopefully, the scan then triggers the ISWIM case above (otherwise
+  -- we will still crash in code generation).
+  | Just (scan_lam, nes, map_lam) <- isScanomapSOAC form,
+    all primType $ lambdaReturnType scan_lam,
+    not $ lambdaContainsParallelism map_lam = do
       scan_lam_sequential <- Kernelise.transformLambda scan_lam
       map_lam_sequential <- Kernelise.transformLambda map_lam
       segScan res_pat w w scan_lam_sequential map_lam_sequential nes arrs [] []
@@ -418,7 +426,7 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
           | otherwise                               = comm
 
 transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs))) = do
-  -- This with-loop is too complicated for us to immediately do
+  -- This screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
   transformStms path . map (certify cs) . stmsToList . snd =<<
