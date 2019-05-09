@@ -528,14 +528,10 @@ defineMemorySpace space = do
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
   }
   int ret = $id:(fatMemUnRef space)(ctx, block, desc);
-  $items:alloc
-  block->references = (int*) malloc(sizeof(int));
-  *(block->references) = 1;
-  block->size = size;
-  block->desc = desc;
+
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
-    fprintf(stderr, "Allocated %lld bytes for %s in %s (now allocated: %lld bytes)",
+    fprintf(stderr, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
             (long long) size,
             desc, $string:spacedesc,
             (long long) ctx->$id:usagename);
@@ -548,6 +544,12 @@ defineMemorySpace space = do
   } else if (ctx->detail_memory) {
     fprintf(stderr, ".\n");
   }
+
+  $items:alloc
+  block->references = (int*) malloc(sizeof(int));
+  *(block->references) = 1;
+  block->size = size;
+  block->desc = desc;
   return ret;
   }|]
 
