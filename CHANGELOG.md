@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The type checker warns on size annotations for function parameters
     and return types that will not be visible from the outside,
-    because they prefer to names nested inside tuples or records.  For
+    because they refer to names nested inside tuples or records.  For
     example, the function
 
         let f (n: i32, m: i32): [n][m]i32 = ...
