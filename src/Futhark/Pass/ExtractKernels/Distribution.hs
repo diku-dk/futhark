@@ -243,9 +243,11 @@ constructKernel :: (MonadFreshNames m, LocalScope Kernels m) =>
                    KernelNest -> KernelBody InKernel
                 -> m (Stms Kernels, SubExp, Stm Kernels)
 constructKernel kernel_nest inner_body = do
-  (w_bnds, w, ispace, inps, rts) <- flatKernel kernel_nest
+  (w_bnds, w, ispace, inps) <- flatKernel kernel_nest
   let used_inps = filter inputIsUsed inps
       cs = loopNestingCertificates first_nest
+      pat = loopNestingPattern first_nest
+      rts = map (stripArray (length ispace)) $ patternTypes pat
 
   (ksize_bnds, k) <- inScopeOf w_bnds $
     mapKernel w (FlatThreadSpace ispace) used_inps rts inner_body
@@ -253,7 +255,7 @@ constructKernel kernel_nest inner_body = do
   let kbnds = w_bnds <> ksize_bnds
   return (kbnds,
           w,
-          Let (loopNestingPattern first_nest) (StmAux cs ()) $ Op $ HostOp k)
+          Let pat (StmAux cs ()) $ Op $ HostOp k)
   where
     first_nest = fst kernel_nest
     inputIsUsed input = kernelInputName input `S.member`
@@ -268,26 +270,22 @@ constructKernel kernel_nest inner_body = do
 --
 --  (2) The index space.
 --
---  (3) The kernel inputs - not that some of these may be unused.
---
---  (4) The per-thread return type.
+--  (3) The kernel inputs - note that some of these may be unused.
 flatKernel :: MonadFreshNames m =>
               KernelNest
            -> m (Stms Kernels,
                  SubExp,
                  [(VName, SubExp)],
-                 [KernelInput],
-                 [Type])
-flatKernel (MapNesting pat _ nesting_w params_and_arrs, []) = do
+                 [KernelInput])
+flatKernel (MapNesting _ _ nesting_w params_and_arrs, []) = do
   i <- newVName "gtid"
   let inps = [ KernelInput pname ptype arr [Var i] |
                (Param pname ptype, arr) <- params_and_arrs ]
-  return (mempty, nesting_w, [(i,nesting_w)], inps,
-          map rowType $ patternTypes pat)
+  return (mempty, nesting_w, [(i,nesting_w)], inps)
 
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   i <- newVName "gtid"
-  (w_bnds, w, ispace, inps, returns) <- flatKernel (nest, nests)
+  (w_bnds, w, ispace, inps) <- flatKernel (nest, nests)
 
   w' <- newVName "nesting_size"
   let w_bnd = mkLet [] [Ident w' $ Prim int32] $
@@ -304,7 +302,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
             inp
 
   return (w_bnds <> oneStm w_bnd, Var w', (i, nesting_w) : ispace,
-          extra_inps i <> inps', returns)
+          extra_inps i <> inps')
   where extra_inps i =
           [ KernelInput pname ptype arr [Var i] |
             (Param pname ptype, arr) <- params_and_arrs ]

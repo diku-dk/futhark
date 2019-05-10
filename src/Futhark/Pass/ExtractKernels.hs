@@ -1234,7 +1234,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   -- good enough for flatKernel to work.
   let nest' = pushInnerKernelNesting (scatter_pat, bodyResult $ lambdaBody lam)
               (MapNesting scatter_pat cs scatter_w $ zip (lambdaParams lam) ivs) nest
-  (nest_bnds, w, ispace, kernel_inps, _rets) <- flatKernel nest'
+  (nest_bnds, w, ispace, kernel_inps) <- flatKernel nest'
 
   let (as_ws, as_ns, as) = unzip3 dests
 
@@ -1283,7 +1283,7 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
   -- We replicate some of the checking done by 'isSegmentedOp', but
   -- things are different because a GenReduce is not a reduction or
   -- scan.
-  (nest_stms, _, ispace, inputs, _rets) <- flatKernel nest
+  (nest_stms, _, ispace, inputs) <- flatKernel nest
   let orig_pat = Pattern [] $ rearrangeShape perm $
                  patternValueElements $ loopNestingPattern $ fst nest
 
@@ -1383,7 +1383,7 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
 
   let bound_by_nest = boundInKernelNest nest
 
-  (pre_bnds, nesting_size, ispace, kernel_inps, _rets) <- flatKernel nest
+  (pre_bnds, nesting_size, ispace, kernel_inps) <- flatKernel nest
 
   unless (S.null $ free_in_op `S.intersection` bound_by_nest) $
     fail "Non-fold lambda uses nest-bound parameters."
