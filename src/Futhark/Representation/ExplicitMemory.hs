@@ -937,9 +937,9 @@ expReturns (BasicOp (Update v _ _)) =
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
 
-expReturns (DoLoop ctx val _ _) =
-  zipWithM typeWithAttr
-  (loopExtType (map (paramIdent . fst) ctx) (map (paramIdent . fst) val)) $ map fst val
+expReturns e@(DoLoop ctx val _ _) = do
+  t <- expExtType e
+  zipWithM typeWithAttr t $ map fst val
     where typeWithAttr t p =
             case (t, paramAttr p) of
               (Array bt shape u, MemArray _ _ _ (ArrayIn mem ixfun))

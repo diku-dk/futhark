@@ -268,11 +268,10 @@ mkPatternAliases pat e =
                     Mem _    -> names
                     _        -> mempty
 
-mkContextAliases :: (Attributes lore, Aliased lore) =>
-                    PatternT attr -> Exp lore
-                 -> [Names]
+mkContextAliases :: Aliased lore =>
+                    PatternT attr -> Exp lore -> [Names]
 mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
-  let ctx = loopResultContext (map fst ctxmerge) (map fst valmerge)
+  let ctx = map fst ctxmerge
       init_als = zip mergenames $ map (subExpAliases . snd) $ ctxmerge ++ valmerge
       expand als = als <> S.unions (mapMaybe (`lookup` init_als) (S.toList als))
       merge_als = zip mergenames $
