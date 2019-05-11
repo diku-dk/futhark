@@ -40,6 +40,7 @@ compileProg prog = do
                      , GC.opsDeallocate = deallocateOpenCLBuffer
                      , GC.opsCopy = copyOpenCLMemory
                      , GC.opsPartition = partitionOpenCLMemory
+                     , GC.opsCollect = collectOpenCLMemory
                      , GC.opsStaticArray = staticOpenCLArray
                      , GC.opsMemoryType = openclMemoryType
                      , GC.opsFatMemory = True
@@ -252,7 +253,10 @@ copyOpenCLMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 partitionOpenCLMemory :: GC.Partition OpenCL ()
-partitionOpenCLMemory dest _ src _ _ = GC.stm [C.cstm|$exp:dest = $exp:src;|]
+partitionOpenCLMemory _ _ _ _ _ = fail "Partition not implemented in the OpenCL backend."
+
+collectOpenCLMemory :: GC.Collect OpenCL ()
+collectOpenCLMemory _ _ _ _ _ = fail "Collect not implemented in the OpenCL backend."
 
 openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]

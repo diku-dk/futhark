@@ -133,6 +133,7 @@ data FunctionT a = Function { functionEntry :: Bool
                             , functionbBody :: Code a
                             , functionResult :: [ExternalValue]
                             , functionArgs :: [ExternalValue]
+                            , functionNodeCountArg :: Maybe VName
                             }
                  deriving (Show)
 
@@ -176,8 +177,11 @@ data Code a = Skip
               -- space, source, offset in source, offset space, number
               -- of bytes.
             | Partition VName (Count Bytes) VName (Count Bytes) Space
-              -- ^ Destination, partition size, source, source size, space.
-              -- Number of partitions depending on scope.
+            -- ^ Destination, partition size, source, source size, space.
+            -- Number of partitions depending on scope.
+            | Collect VName (Count Bytes) VName (Count Bytes) Space
+            -- ^ Destination, destination size, source, partition size, space.
+            -- Number of partitions depending on scope.
             | Write VName (Count Bytes) PrimType Space Volatility Exp
             | SetScalar VName Exp
             | SetMem VName VName Space
@@ -268,7 +272,7 @@ instance Pretty op => Pretty (Functions op) where
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
 instance Pretty op => Pretty (FunctionT op) where
-  ppr (Function _ outs ins body results args) =
+  ppr (Function _ outs ins body results args _) =
     text "Inputs:" </> block ins </>
     text "Outputs:" </> block outs </>
     text "Arguments:" </> block args </>
@@ -360,6 +364,12 @@ instance Pretty op => Pretty (Code op) where
             ppr partsize <> comma </>
             ppr src <> ppr srcsize <> comma </>
             ppr space)
+  ppr (Collect dest destsize src partsize space) =
+    text "collect" <>
+    parens (ppr dest <> ppr destsize <> comma </>
+            ppr src <> comma </>
+            ppr partsize <> comma </>
+            ppr space)
   ppr (If cond tbranch fbranch) =
     text "if" <+> ppr cond <+> text "then {" </>
     indent 2 (ppr tbranch) </>
@@ -409,8 +419,8 @@ instance Foldable FunctionT where
   foldMap = foldMapDefault
 
 instance Traversable FunctionT where
-  traverse f (Function entry outs ins body results args) =
-    Function entry outs ins <$> traverse f body <*> pure results <*> pure args
+  traverse f (Function entry outs ins body results args nc_arg) =
+    Function entry outs ins <$> traverse f body <*> pure results <*> pure args <*> pure nc_arg
 
 instance Functor Code where
   fmap = fmapDefault
@@ -445,6 +455,8 @@ instance Traversable Code where
     pure $ Copy dest destoffset destspace src srcoffset srcspace size
   traverse _ (Partition dest partsize src srcsize space) =
     pure $ Partition dest partsize src srcsize space
+  traverse _ (Collect dest destsize src partsize space) =
+    pure $ Collect dest destsize src partsize space
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (SetScalar name val) =
@@ -494,6 +506,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
   freeIn (Partition dest partsize src srcsize _) =
     freeIn dest <> freeIn partsize <> freeIn src <> freeIn srcsize
+  freeIn (Collect dest destsize src partsize _) =
+    freeIn dest <> freeIn destsize <> freeIn src <> freeIn partsize
   freeIn (SetMem x y _) =
     freeIn x <> freeIn y
   freeIn (Write v i _ _ _ e) =
@@ -548,6 +562,8 @@ instance Substitute a => Substitute (Code a) where
     Copy (substituteNames m dest) destoffset destspace (substituteNames m src) srcoffset srcspace size
   substituteNames m (Partition dest partsize src srcsize space) =
     Partition (substituteNames m dest) partsize (substituteNames m src) srcsize space
+  substituteNames m (Collect dest destsize src partsize space) =
+    Collect (substituteNames m dest) destsize (substituteNames m src) partsize space
   substituteNames m (SetMem dest from space) =
     SetMem (substituteNames m dest) (substituteNames m from) space
   substituteNames m (Write name i bt space vol val) =

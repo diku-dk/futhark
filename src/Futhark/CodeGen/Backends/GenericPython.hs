@@ -182,7 +182,7 @@ newCompilerEnv (Imp.Functions funs) ops =
               , envFtable = ftable <> builtinFtable
               }
   where ftable = M.fromList $ map funReturn funs
-        funReturn (name, Imp.Function _ outparams _ _ _ _) = (name, paramsTypes outparams)
+        funReturn (name, Imp.Function _ outparams _ _ _ _ _) = (name, paramsTypes outparams)
         builtinFtable = M.map (map Imp.Scalar . snd) builtInFunctions
 
 data CompilerState s = CompilerState {
@@ -373,7 +373,7 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
           ]
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunDef
-compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
+compileFunc (fname, Imp.Function _ outputs inputs body _ _ _) = do
   body' <- collect $ compileCode body
   let inputs' = map (compileName . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
@@ -552,7 +552,7 @@ printValue = fmap concat . mapM (uncurry printValue')
 prepareEntry :: (Name, Imp.Function op) -> CompilerM op s
                 (String, [String], [PyStmt], [PyStmt], [PyStmt], [PyStmt],
                  [(Imp.ExternalValue, PyExp)], [PyStmt])
-prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
+prepareEntry (fname, Imp.Function _ outputs inputs _ results args _) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
 
@@ -621,7 +621,7 @@ entryTypes func = (map desc $ Imp.functionArgs func,
 
 callEntryFun :: [PyStmt] -> (Name, Imp.Function op)
              -> CompilerM op s (PyFunDef, String, PyExp)
-callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
+callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args _) = do
   (_, _, prepareIn, _, body_bin, _, res, prepare_run) <- prepareEntry entry
 
   let str_input = map readInput decl_args

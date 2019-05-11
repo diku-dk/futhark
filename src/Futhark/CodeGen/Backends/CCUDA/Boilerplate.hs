@@ -239,7 +239,6 @@ generateContextFuns cfg kernel_names sizes = do
                          $sdecls:fields
                          $sdecls:kernel_fields
                          $sdecls:node_fields
-                         struct memblock_device device_node_ids;
                          struct cuda_context cuda;
                          struct sizes sizes;
                        };|])
@@ -266,9 +265,6 @@ generateContextFuns cfg kernel_names sizes = do
       cuda_node_setup(nctx, params->ptx);
       
       $stms:(map loadKernelByName kernel_names)
-
-      CUDA_SUCCEED(cuMemAlloc(ctx->device_node_ids.mem.mems + node_id, sizeof(int32_t)));
-      CUDA_SUCCEED(cuMemcpyHtoD(ctx->device_node_ids.mem.mems[node_id], &node_id, sizeof(int32_t)));
 
       cuda_thread_sync(&ctx->cuda.node_sync_point);
 
@@ -307,7 +303,6 @@ generateContextFuns cfg kernel_names sizes = do
             CUDA_SUCCEED(cuCtxSynchronize());
             break;
           case NODE_MSG_EXIT:
-            CUDA_SUCCEED(cuMemFree(ctx->device_node_ids.mem.mems[node_id]));
             cuda_node_cleanup(nctx);
             running = false;
             break;
@@ -335,11 +330,6 @@ generateContextFuns cfg kernel_names sizes = do
                           cuda_setup(&ctx->cuda);
 
                           $stms:kernel_fields_malloc
-
-                          ctx->device_node_ids.size = 0;
-                          ctx->device_node_ids.references = NULL;
-                          ctx->device_node_ids.mem.count = ctx->cuda.cfg.num_nodes;
-                          ctx->device_node_ids.mem.mems = malloc(ctx->cuda.cfg.num_nodes * sizeof(CUdeviceptr));
 
                           char *ptx = cuda_get_ptx(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
 
@@ -372,7 +362,6 @@ generateContextFuns cfg kernel_names sizes = do
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
                                  $stms:kernel_fields_free
-                                 free(ctx->device_node_ids.mem.mems);
                                  free(ctx);
                                }|])
 

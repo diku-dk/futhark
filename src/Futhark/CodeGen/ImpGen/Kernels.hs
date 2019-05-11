@@ -60,40 +60,57 @@ opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler dest (Inner (HostOp kernel)) =
   kernelCompiler dest kernel
-opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses))) = do
-  let HuskSpace src _ parts _ parts_mem node_res _ node_id_mem = hspace
-      red_op_params = lambdaParams red_op
-      (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
+opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts _ (Body _ bnds ses))) = do
   i <- newVName "i"
-  src_mem_names <- map (ImpGen.memLocationName . ImpGen.entryArrayLocation) <$> mapM ImpGen.lookupArray src
-  src_mem_bytes <- map (Imp.memSizeToExp . ImpGen.entryMemSize) <$> mapM ImpGen.lookupMemory src_mem_names
+  interm_red <- replicateM (length node_red_res) $ newVName "interm_red"
+  interm_red_mem <- replicateM (length node_red_res) $ newVName "interm_red_mem"
+  src_mem_names <- getArrayMemLocs src
+  src_mem_bytes <- getMemSizes src_mem_names
   ImpGen.dScope Nothing $ scopeOfHuskSpace hspace
   ImpGen.dLParams red_op_params
   num_nodes <- ImpGen.dPrim "num_nodes" int32
-  void $ ImpGen.sDeclareNamedMem node_id_mem (bytes $ Imp.LeafExp (Imp.SizeOf int32) int32) DefaultSpace
-  interm <- replicateM (length ts) $ newVName "interm"
-  interm_mem <- replicateM (length ts) $ newVName "interm_mem"
+  src_elems_e <- ImpGen.compileSubExp src_elems
   nes_e <- mapM ImpGen.compileSubExp nes
   zipWithM_ (<--) (map paramName red_acc_params) nes_e
-  body_code <- ImpGen.collect $ do
-    mapM_ declAndPart $ zip4 parts parts_mem src_mem_names src_mem_bytes
+  body_code <- ImpGen.collect $ ImpGen.localNodeCount (Imp.var num_nodes int32) $ do
+    mapM_ allocAndPart $ zip4 parts parts_mem src_mem_names src_mem_bytes
     ImpGen.compileStms (freeIn ses) (stmsToList bnds) $ do
-      mapM_ (\(t, n, m) -> allocInterm n m (t `arrayOfRow` Var num_nodes)) $ zip3 ts interm interm_mem
-      zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) interm $ map Var node_res
+      mapM_ (\(n, m, t) -> allocInterm n m (t `arrayOfRow` Var num_nodes)) $ zip3 interm_red interm_red_mem red_ts
+      zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) interm_red $ map Var node_red_res
       sFor i Int32 (Imp.var num_nodes int32) $ do
         zipWithM_ (\x y -> ImpGen.copyDWIM x [] y [Imp.var i int32])
-                  (map paramName red_next_params) $ map Var interm
+                  (map paramName red_next_params) $ map Var interm_red
         ImpGen.compileBody' red_acc_params $ lambdaBody red_op
-      zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) (map patElemName pes) $
+      zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) (map patElemName red_pes) $
                   map (Var . paramName) red_acc_params
-  sOp $ Imp.Husk hspace src_mem_names (interm ++ interm_mem) num_nodes body_code
-  where declAndPart (Param name (MemArray t s _ _), part_mem, src_mem, src_bytes) = do
+      map_pes_mem <- getArrayMemLocs $ map patElemName map_pes
+      map_pes_mem_sizes <- getMemSizes map_pes_mem
+      node_res_map_mem <- getArrayMemLocs node_map_res
+      node_res_map_mem_sizes <- getMemSizes node_res_map_mem
+      mapM_ collect $ zip4 map_pes_mem map_pes_mem_sizes node_res_map_mem node_res_map_mem_sizes
+  sOp $ Imp.Husk (interm_red ++ interm_red_mem) src_elems_e parts_elems num_nodes body_code
+  where HuskSpace src src_elems parts parts_elems parts_mem = hspace
+        red_op_params = lambdaParams red_op
+        (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
+        (node_red_res, node_map_res) = splitAt (length nes) $ getVarNames ses
+        red_ts = take (length nes) ts
+        (red_pes, map_pes) = splitAt (length nes) pes
+        getVarNames [] = []
+        getVarNames (Var n : vs) = n : getVarNames vs
+        getVarNames (_ : vs) = getVarNames vs
+        allocAndPart (Param name (MemArray t s _ _), part_mem, src_mem, src_bytes) = do
           part_bytes <- ImpGen.sAllocNamedArray name part_mem t s DefaultSpace
           ImpGen.emit $ Imp.Partition part_mem part_bytes src_mem src_bytes DefaultSpace
-        declAndPart _ = fail "Partition is not an array."
+        allocAndPart _ = fail "Partition is not an array."
         allocInterm name mem (Array et size _) =
           void $ ImpGen.sAllocNamedArray name mem et size DefaultSpace
         allocInterm _ _ _ = fail "Intermediate is not an array."
+        getArrayMemLocs arr = 
+          map (ImpGen.memLocationName . ImpGen.entryArrayLocation) <$> mapM ImpGen.lookupArray arr
+        getMemSizes mem = 
+          map (Imp.memSizeToExp . ImpGen.entryMemSize) <$> mapM ImpGen.lookupMemory mem
+        collect (dest_mem, dest_bytes, src_mem, part_bytes) =
+          ImpGen.emit $ Imp.Collect dest_mem dest_bytes src_mem part_bytes DefaultSpace
 opCompiler pat e =
   compilerBugS $ "ImpGen.opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
@@ -175,9 +192,11 @@ callKernelCopy bt
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
           src_elems, dest_elems) <- isMapTransposeKernel bt destloc srcloc = do
+      num_nodes <- asks ImpGen.envNodeCount
 
-      fname <- mapTransposeForType bt
-      ImpGen.emit $ Imp.Call [] fname
+      fname <- mapTransposeForType bt num_nodes
+      ImpGen.emit $ Imp.Call [] fname $
+        maybe [] (\e -> [Imp.ExpArg e]) num_nodes ++
         [Imp.MemArg destmem, Imp.ExpArg destoffset,
          Imp.MemArg srcmem, Imp.ExpArg srcoffset,
          Imp.ExpArg num_arrays, Imp.ExpArg size_x, Imp.ExpArg size_y,
@@ -202,26 +221,30 @@ callKernelCopy bt
 
   | otherwise = sCopy bt destloc srcloc n
 
-mapTransposeForType :: PrimType -> ImpGen.ImpM ExplicitMemory Imp.HostOp Name
-mapTransposeForType bt = do
+mapTransposeForType :: PrimType -> Maybe Imp.Exp -> ImpGen.ImpM ExplicitMemory Imp.HostOp Name
+mapTransposeForType bt num_nodes = do
   -- XXX: The leading underscore is to avoid clashes with a
   -- programmer-defined function of the same name (this is a bad
   -- solution...).
-  let fname = nameFromString $ "_" <> mapTransposeName bt
+  let fname = nameFromString $ "_" <> mapTransposeName bt num_nodes
+
+  num_nodes_param_name <- newVName "num_nodes"
+  let num_nodes_param = fmap pure (const num_nodes_param_name) num_nodes
 
   exists <- ImpGen.hasFunction fname
-  unless exists $ ImpGen.emitFunction fname $ mapTransposeFunction bt
+  unless exists $ ImpGen.emitFunction fname $ mapTransposeFunction bt num_nodes_param
 
   return fname
 
-mapTransposeName :: PrimType -> String
-mapTransposeName bt = "map_transpose_" ++ pretty bt
+mapTransposeName :: PrimType -> Maybe a -> String
+mapTransposeName bt num_nodes = "map_transpose_" ++ pretty bt ++ maybe "" (const "_nodes") num_nodes
 
-mapTransposeFunction :: PrimType -> Imp.Function
-mapTransposeFunction bt =
-  Imp.Function False [] params transpose_code [] []
+mapTransposeFunction :: PrimType -> Maybe VName -> Imp.Function
+mapTransposeFunction bt num_nodes_param =
+  Imp.Function False [] params transpose_code [] [] num_nodes_param
 
-  where params = [memparam destmem, intparam destoffset,
+  where params = maybe [] (\n -> [intparam n]) num_nodes_param ++
+                 [memparam destmem, intparam destoffset,
                   memparam srcmem, intparam srcoffset,
                   intparam num_arrays, intparam x, intparam y,
                   intparam in_elems, intparam out_elems]
@@ -315,7 +338,7 @@ mapTransposeFunction bt =
 
         callTransposeKernel =
           Imp.Op . Imp.CallKernel .
-          mapTransposeKernel (mapTransposeName bt) block_dim_int
+          mapTransposeKernel (mapTransposeName bt num_nodes_param) block_dim_int
           (destmem, v32 destoffset, srcmem, v32 srcoffset,
             v32 x, v32 y, v32 in_elems, v32 out_elems,
             v32 mulx, v32 muly, v32 num_arrays,

@@ -133,12 +133,11 @@ simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
 
-simplifyKernelOp _ _ (Husk hspace red_op nes ts body) = do
+simplifyKernelOp _ _ (Husk hspace red_op nes ts node_res body) = do
+  ts' <- Engine.simplify ts
   hspace' <- Engine.simplify $ convertHuskSpace hspace
   let scope_vtable = ST.fromScope $ scopeOfHuskSpace hspace'
       bound_here = boundByHuskSpace hspace'
-  nes' <- mapM Engine.simplify nes
-  ts' <- mapM Engine.simplify ts
   par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
   ((body_stms', body_res'), body_hoisted) <-
     Engine.localVtable (<>scope_vtable) $
@@ -153,7 +152,9 @@ simplifyKernelOp _ _ (Husk hspace red_op nes ts body) = do
     Engine.localVtable (<>scope_vtable) $
     Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
   red_op_hoisted' <- mapM processHoistedStm red_op_hoisted
-  return (Husk hspace' red_op' nes' ts' body', red_op_hoisted' <> body_hoisted')
+  nes' <- Engine.simplify nes
+  node_res' <- Engine.simplify node_res
+  return (Husk hspace' red_op' nes' ts' node_res' body', red_op_hoisted' <> body_hoisted')
 
 simplifyKernelOp _ _ (GetSize key size_class) =
   return (GetSize key size_class, mempty)
@@ -351,12 +352,10 @@ instance Engine.Simplifiable KernelSpace where
     <*> Engine.simplify structure
 
 instance Engine.Simplifiable (HuskSpace lore) where
-  simplify (HuskSpace src src_elems parts parts_elems parts_mem node_res node_id node_id_mem) = do
+  simplify (HuskSpace src src_elems parts parts_elems parts_mem) = do
     src' <- Engine.simplify src
     parts_mem' <- Engine.simplify parts_mem
-    node_res' <- Engine.simplify node_res
-    node_id_mem' <- Engine.simplify node_id_mem
-    return $ HuskSpace src' src_elems parts parts_elems parts_mem' node_res' node_id node_id_mem'
+    return $ HuskSpace src' src_elems parts parts_elems parts_mem'
 
 instance Engine.Simplifiable SpaceStructure where
   simplify (FlatThreadSpace dims) =
@@ -432,39 +431,6 @@ fuseStreamIota vtable pat _ (GroupStream w max_chunk lam accs arrs)
                      }
       letBind_ pat $ Op $ GroupStream w max_chunk lam' accs arrs'
 fuseStreamIota _ _ _ _ = cannotSimplify
-
-fuseHuskIota :: TopDownRuleOp (Wise Kernels)
-fuseHuskIota vtable pat _ (Husk hspace red_op nes ts body)
-  | ([(iota_cs, (iota_part, _), iota_start, iota_stride, iota_t)], zsrc) <- partitionEithers $
-        zipWith (isIota vtable) partm (hspaceSource hspace) = do
-
-      let (partm', src') = unzip zsrc
-          (parts', part_mem') = unzip partm'
-          elems = hspacePartitionElems hspace
-          node_id = hspaceNodeId hspace
-
-      body' <- insertStmsM $ localScope (scopeOfHuskSpace hspace) $ certifying iota_cs $ do
-        -- Convert index to appropriate type.
-        node_id' <- letSubExp "offset" $
-          BasicOp $ Index (paramName node_id) [DimFix $ Constant $ IntValue $ Int32Value 0]
-        node_id'' <- asIntS iota_t node_id'
-        elems' <- asIntS iota_t $ Var elems
-        offset <- letSubExp "offset" $
-          BasicOp $ BinOp (Mul iota_t) node_id'' elems'
-        offset' <- letSubExp "offset_by_stride" $
-          BasicOp $ BinOp (Mul iota_t) offset iota_stride
-        start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add iota_t) offset' iota_start
-        letBindNames_ [paramName iota_part] $
-          BasicOp $ Iota elems' start iota_stride iota_t
-        return body
-      let hspace' = hspace { hspaceSource = src'
-                           , hspacePartitions = parts'
-                           , hspacePartitionsMemory = part_mem'
-                           }
-      letBind_ pat $ Op $ Husk hspace' red_op nes ts body'
-  where partm = zip (hspacePartitions hspace) (hspacePartitionsMemory hspace)
-fuseHuskIota _ _ _ _ = cannotSimplify
 
 isIota :: ST.SymbolTable lore -> a -> VName
        -> Either (Certificates, a, SubExp, SubExp, IntType) (a, VName)

@@ -11,7 +11,6 @@ import Data.List
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
-import Futhark.CodeGen.ImpGen (compileSubExpOfType)
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.MonadFreshNames
@@ -40,6 +39,7 @@ compileProg prog = do
                  , GC.opsDeallocate  = deallocateCUDABuffer
                  , GC.opsCopy        = copyCUDAMemory
                  , GC.opsPartition   = partitionCUDAMemory
+                 , GC.opsCollect     = collectCUDAMemory
                  , GC.opsStaticArray = staticCUDAArray
                  , GC.opsMemoryType  = cudaMemoryType
                  , GC.opsCompiler    = callKernel
@@ -192,10 +192,17 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
                            ++ "' from '" ++ show srcSpace ++ "'."
 
 partitionCUDAMemory :: GC.Partition OpenCL ()
-partitionCUDAMemory dstmem partsize srcmem dstsize "device" =
+partitionCUDAMemory dstmem partsize srcmem srcsize "device" =
   GC.stm [C.cstm|cuda_send_node_memcpy_partition(&ctx->cuda, $exp:dstmem, $exp:srcmem,
-                                                 $exp:dstsize, $exp:partsize);|]
+                                                 $exp:srcsize, $exp:partsize);|]
 partitionCUDAMemory _ _ _ _ space =
+  fail $ "CUDA backend cannot partition memory in '" ++ space ++ "' memory space"
+
+collectCUDAMemory :: GC.Collect OpenCL ()
+collectCUDAMemory dstmem dstsize srcmem partsize "device" =
+  GC.stm [C.cstm|cuda_send_node_memcpy_collect(&ctx->cuda, $exp:dstmem, $exp:dstsize,
+                                                 $exp:srcmem, $exp:partsize);|]
+collectCUDAMemory _ _ _ _ space =
   fail $ "CUDA backend cannot partition memory in '" ++ space ++ "' memory space"
 
 staticCUDAArray :: GC.StaticArray OpenCL ()
@@ -245,13 +252,11 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
-callKernel (DistributeHusk hspace _ num_nodes body) = do
-  let HuskSpace _ src_elems _ parts_elems _ _ _ node_id_mem = hspace
-  src_elems_e <- GC.compileExp $ compileSubExpOfType int32 src_elems
+callKernel (DistributeHusk src_elems_e parts_elems num_nodes body) = do
+  src_elems <- GC.compileExp src_elems_e
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
-  GC.stm [C.cstm|$id:parts_elems = ($exp:src_elems_e + $id:num_nodes - 1) / $id:num_nodes;|]
-  GC.stm [C.cstm|$id:node_id_mem = ctx->device_node_ids;|]
-  GC.localNodeCount [C.cexp|$id:num_nodes|] $ GC.compileCode body
+  GC.stm [C.cstm|$id:parts_elems = ($exp:src_elems + $id:num_nodes - 1) / $id:num_nodes;|]
+  GC.localNodeCount (Just [C.cexp|$id:num_nodes|]) $ GC.compileCode body
 callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   ind_args_arr <- newVName "ind_kernel_args"

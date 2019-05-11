@@ -24,6 +24,7 @@ module Futhark.CodeGen.Backends.GenericC
   , Deallocate
   , Copy
   , Partition
+  , Collect
   , StaticArray
 
   -- * Monadic compiler interface
@@ -45,6 +46,7 @@ module Futhark.CodeGen.Backends.GenericC
   , compilePrimExp
   , compilePrimValue
   , compileExpToName
+  , compileExpToVName
   , dimSizeToExp
   , rawMem
   , item
@@ -176,8 +178,11 @@ type Copy op s = C.Exp -> C.Exp -> Space ->
                  C.Exp ->
                  CompilerM op s ()
 
--- | Partition memory block.
+-- | Partition memory to the nodes
 type Partition op s = C.Exp -> C.Exp -> C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
+
+-- | Collect memory from nodes
+type Collect op s = C.Exp -> C.Exp -> C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
 
 data Operations op s =
   Operations { opsWriteScalar :: WriteScalar op s
@@ -186,6 +191,7 @@ data Operations op s =
              , opsDeallocate :: Deallocate op s
              , opsCopy :: Copy op s
              , opsPartition :: Partition op s
+             , opsCollect :: Collect op s
              , opsStaticArray :: StaticArray op s
 
              , opsMemoryType :: MemoryType op s
@@ -206,6 +212,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsDeallocate  = defDeallocate
                                , opsCopy = defCopy
                                , opsPartition = defPartition
+                               , opsCollect = defCollect
                                , opsStaticArray = defStaticArray
                                , opsMemoryType = defMemoryType
                                , opsCompiler = defCompiler
@@ -223,8 +230,10 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           copyMemoryDefaultSpace destmem destoffset srcmem srcoffset size
         defCopy _ _ _ _ _ _ _ =
           fail "Cannot copy to or from non-default memory space"
-        defPartition _ _ _ =
-          fail "Cannot partition in non-default memory space"
+        defPartition _ _ _ _ =
+          fail "Cannot partition by default operations"
+        defCollect _ _ _ _ =
+          fail "Cannot collect by default operations"
         defStaticArray _ _ _ _ =
           fail "Cannot create static array in non-default memory space"
         defMemoryType _ =
@@ -273,6 +282,9 @@ envCopy = opsCopy . envOperations
 envPartition :: CompilerEnv op s -> Partition op s
 envPartition = opsPartition . envOperations
 
+envCollect :: CompilerEnv op s -> Collect op s
+envCollect = opsCollect . envOperations
+
 envStaticArray :: CompilerEnv op s -> StaticArray op s
 envStaticArray = opsStaticArray . envOperations
 
@@ -292,8 +304,8 @@ newCompilerEnv (Functions funs) ops =
         builtinFtable =
           M.map (map Scalar . snd) builtInFunctions
           
-localNodeCount :: C.Exp -> CompilerM op s a -> CompilerM op s a
-localNodeCount nc = local $ \env -> env { envNodeCount = Just nc }
+localNodeCount :: Maybe C.Exp -> CompilerM op s a -> CompilerM op s a
+localNodeCount nc = local $ \env -> env { envNodeCount = nc }
 
 tupleDefinitions, arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
 tupleDefinitions = map (snd . snd) . compTypeStructs
@@ -998,7 +1010,7 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
 
 onEntryPoint :: Name -> Function op
              -> CompilerM op s (C.Definition, C.Definition, C.Initializer)
-onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
+onEntryPoint fname function@(Function _ outputs inputs _ results args _) = do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -1179,7 +1191,7 @@ printResult vs = fmap concat $ forM vs $ \(v,e) -> do
 cliEntryPoint :: Name
               -> FunctionT a
               -> CompilerM op s (C.Definition, C.Initializer)
-cliEntryPoint fname (Function _ _ _ _ results args) = do
+cliEntryPoint fname (Function _ _ _ _ results args _) = do
   ((pack_input, free_input, free_parsed, input_args), input_items) <-
     collect' $ unzip4 <$> readInputs args
 
@@ -1536,10 +1548,10 @@ $edecls:entry_point_decls
         tuning_h = $(embedStringFile "rts/c/tuning.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun (fname, Function _ outputs inputs body _ _) = do
+compileFun (fname, Function _ outputs inputs body _ _ nc_arg) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
-  body' <- blockScope $ compileFunBody out_ptrs outputs body
+  body' <- localNodeCount node_count $ blockScope $ compileFunBody out_ptrs outputs body
   ctx_ty <- contextType
   return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
                                                    $params:outparams, $params:inparams);|],
@@ -1548,7 +1560,8 @@ compileFun (fname, Function _ outputs inputs body _ _) = do
              $items:body'
              return 0;
 }|])
-  where compileInput (ScalarParam name bt) = do
+  where node_count = fmap (\nc -> [C.cexp|$id:nc|]) nc_arg
+        compileInput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
           return [C.cparam|$ty:ctp $id:name|]
         compileInput (MemParam name space) = do
@@ -1626,6 +1639,13 @@ compileExpToName desc t e = do
   e' <- compileExp e
   decl [C.cdecl|$ty:(primTypeToCType t) $id:desc' = $e';|]
   return desc'
+
+compileExpToVName :: VName -> PrimType -> Exp -> CompilerM op s ()
+compileExpToVName desc t (LeafExp (ScalarVar v) _) =
+  decl [C.cdecl|$ty:(primTypeToCType t) $id:desc = $id:v;|]
+compileExpToVName desc t e = do
+  e' <- compileExp e
+  decl [C.cdecl|$ty:(primTypeToCType t) $id:desc = $e';|]
 
 compileExp :: Exp -> CompilerM op s C.Exp
 
@@ -1826,8 +1846,19 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
 compileCode (Partition dest _ src _ DefaultSpace) =
   setMem dest src DefaultSpace
 
-compileCode (Partition dest (Count partsize) src (Count srcsize) (Space sid)) =
+compileCode (Partition dest (Count destsize) src (Count partsize) (Space sid)) =
   join $ asks envPartition
+    <*> rawMem dest
+    <*> compileExp destsize
+    <*> rawMem src
+    <*> compileExp partsize
+    <*> pure sid
+
+compileCode (Collect dest _ src _ DefaultSpace) =
+  setMem dest src DefaultSpace
+
+compileCode (Collect dest (Count partsize) src (Count srcsize) (Space sid)) =
+  join $ asks envCollect
     <*> rawMem dest
     <*> compileExp partsize
     <*> rawMem src

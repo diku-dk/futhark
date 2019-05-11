@@ -552,20 +552,20 @@ handleHostOp (HostOp (SegGenRed space ops ts body)) = do
     return op { genReduceOp = lam }
   return $ Inner $ HostOp $ SegGenRed space ops' ts body'
 
-handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
+handleHostOp (Husk hspace (Lambda lp lb lr) nes ts node_res body) = do
   let hspace' = huskSpaceMemInfo hspace
-      lp' = zipWith huskParamMemInfo lp $ concat $ replicate 2 $ hspaceNodeResults hspace
+      red_res = take (length nes) node_res 
+      lp' = zipWith huskParamMemInfo lp $ concat $ replicate 2 red_res
   (body', red_op') <- localScope (scopeOfHuskSpace hspace') $ do
-    b <- allocInBodyNoDirect body
+    b <- allocInHuskBody body
     r <- allocInLambda lp' lb lr
     return (b, r)
-  return $ Inner $ Husk hspace' red_op' nes ts body'
+  return $ Inner $ Husk hspace' red_op' nes ts node_res body'
 
 huskSpaceMemInfo :: HuskSpace Kernels -> HuskSpace ExplicitMemory
-huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_mem node_res node_id node_id_mem) =
-  HuskSpace src src_elems parts' parts_elems parts_mem node_res node_id' node_id_mem
+huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_mem) =
+  HuskSpace src src_elems parts' parts_elems parts_mem
   where parts' = zipWith huskParamMemInfo parts parts_mem
-        node_id' = huskParamMemInfo node_id node_id_mem
 
 huskParamMemInfo :: LParam Kernels -> VName -> LParam ExplicitMemory
 huskParamMemInfo (Param name (Prim pt)) _ = Param name $ MemPrim pt
@@ -649,13 +649,23 @@ allocInFunBody space_oks (Body _ bnds res) =
     return $ Body () (bnds'<>allocs) res''
   where num_vals = length space_oks
         space_oks' = replicate (length res - num_vals) Nothing ++ space_oks
-        ensureDirect _ se@Constant{} = return se
-        ensureDirect space_ok (Var v) = do
-          bt <- primType <$> lookupType v
-          if bt
-            then return $ Var v
-            else do (_, _, v') <- ensureDirectArray space_ok v
-                    return v'
+
+allocInHuskBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                   Body fromlore -> AllocM fromlore tolore (Body tolore)
+allocInHuskBody (Body _ bnds res) =
+  allocInStms bnds $ \bnds' -> do
+    (res', allocs) <- collectStms $ mapM (ensureDirect Nothing) res
+    return $ Body () (bnds'<>allocs) res'
+
+ensureDirect :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                Maybe Space -> SubExp -> AllocM fromlore tolore SubExp
+ensureDirect _ se@Constant{} = return se
+ensureDirect space_ok (Var v) = do
+  bt <- primType <$> lookupType v
+  if bt
+    then return $ Var v
+    else do (_, _, v') <- ensureDirectArray space_ok v
+            return v'
 
 allocInStms :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                Stms fromlore -> (Stms tolore -> AllocM fromlore tolore a)

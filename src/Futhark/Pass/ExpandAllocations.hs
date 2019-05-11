@@ -146,9 +146,9 @@ transformExp (Op (Inner (HostOp (SegGenRed kspace ops ts kbody)))) = do
                  offsetMemoryInLambda $ genReduceOp op
           return op { genReduceOp = lam }
 
-transformExp (Op (Inner (Husk hspace red_op nes ts body))) = do
+transformExp (Op (Inner (Husk hspace red_op nes ts node_res body))) = do
   body' <- localScope (scopeOfHuskSpace hspace) $ transformBody body
-  return (mempty, Op $ Inner $ Husk hspace red_op nes ts body')
+  return (mempty, Op $ Inner $ Husk hspace red_op nes ts node_res body')
 
 transformExp e =
   return (mempty, e)

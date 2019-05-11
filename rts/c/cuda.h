@@ -814,6 +814,23 @@ void cuda_send_node_memcpy_htod(struct cuda_context *ctx, void *src,
   free(dest_ptrs);
 }
 
+void cuda_send_node_memcpy_replicate(struct cuda_context *ctx, struct cuda_mem_ptrs dests,
+                                     struct cuda_mem_ptrs src, size_t src_size) {
+  struct cuda_node_memcpy_content *mcpy_contents =
+    malloc(sizeof(struct cuda_node_memcpy_content) * ctx->cfg.num_nodes);
+  
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    mcpy_contents[i].src = src.mems;
+    mcpy_contents[i].src_ctx = ctx->nodes[0].cu_ctx;
+    mcpy_contents[i].dest = dests.mems + i;
+    mcpy_contents[i].dest_ctx = ctx->nodes[i].cu_ctx;
+    mcpy_contents[i].bytes = src_size;
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_MEMCPY_P_TO_P, mcpy_contents,
+                          sizeof(struct cuda_node_memcpy_content));
+  free(mcpy_contents);
+}
+
 void cuda_send_node_memcpy_partition(struct cuda_context *ctx, struct cuda_mem_ptrs dests,
                                      struct cuda_mem_ptrs src, size_t src_size, size_t bytes) {
   struct cuda_node_memcpy_content *mcpy_contents =
@@ -834,6 +851,28 @@ void cuda_send_node_memcpy_partition(struct cuda_context *ctx, struct cuda_mem_p
                           sizeof(struct cuda_node_memcpy_content));
   free(mcpy_contents);
   free(src_ptrs);
+}
+
+void cuda_send_node_memcpy_collect(struct cuda_context *ctx, struct cuda_mem_ptrs dest,
+                                   size_t dest_size, struct cuda_mem_ptrs srcs, size_t bytes) {
+  struct cuda_node_memcpy_content *mcpy_contents =
+    malloc(sizeof(struct cuda_node_memcpy_content) * ctx->cfg.num_nodes);
+  CUdeviceptr *dest_ptrs = malloc(ctx->cfg.num_nodes * sizeof(CUdeviceptr));
+  
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    size_t offset = bytes * i;
+    size_t rem = dest_size - offset;
+    dest_ptrs[i] = dest.mems[0] + offset;
+    mcpy_contents[i].src = srcs.mems + i;
+    mcpy_contents[i].src_ctx = ctx->nodes[i].cu_ctx;
+    mcpy_contents[i].dest = dest_ptrs + i;
+    mcpy_contents[i].dest_ctx = ctx->nodes[0].cu_ctx;
+    mcpy_contents[i].bytes = rem < bytes ? rem : bytes;
+  }
+  cuda_send_node_messages(ctx, NODE_MSG_MEMCPY_P_TO_P, mcpy_contents,
+                          sizeof(struct cuda_node_memcpy_content));
+  free(mcpy_contents);
+  free(dest_ptrs);
 }
 
 void cuda_send_node_launch(struct cuda_context *ctx, CUfunction *fs,

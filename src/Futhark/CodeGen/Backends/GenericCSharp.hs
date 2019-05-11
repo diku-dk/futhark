@@ -223,7 +223,7 @@ newCompilerEnv (Imp.Functions funs) ops =
               , envFtable = ftable <> builtinFtable
               }
   where ftable = M.fromList $ map funReturn funs
-        funReturn (name, Imp.Function _ outparams _ _ _ _) = (name, paramsTypes outparams)
+        funReturn (name, Imp.Function _ outparams _ _ _ _ _) = (name, paramsTypes outparams)
         builtinFtable = M.map (map Imp.Scalar . snd) builtInFunctions
 
 data CompilerState s = CompilerState {
@@ -524,7 +524,7 @@ compileProg module_name constructor imports defines ops userstate boilerplate pr
 
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s CSFunDef
-compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
+compileFunc (fname, Imp.Function _ outputs inputs body _ _ _) = do
   body' <- blockScope $ compileCode body
   let inputs' = map compileTypedInput inputs
   let outputs' = map compileOutput outputs
@@ -869,7 +869,7 @@ printValue = fmap concat . mapM (uncurry printValue')
 prepareEntry :: (Name, Imp.Function op) -> CompilerM op s
                 (String, [(CSType, String)], CSType, [CSStmt], [CSStmt], [CSStmt], [CSStmt],
                  [(Imp.ExternalValue, CSExp)], [CSStmt])
-prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
+prepareEntry (fname, Imp.Function _ outputs inputs _ results args _) = do
   let (output_types, output_paramNames) = unzip $ map compileTypedInput outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
 
@@ -944,7 +944,7 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
 
 compileEntryFun :: [CSStmt] -> (Name, Imp.Function op)
                 -> CompilerM op s CSFunDef
-compileEntryFun pre_timing entry@(_,Imp.Function _ outputs _ _ results args) = do
+compileEntryFun pre_timing entry@(_,Imp.Function _ outputs _ _ results args _) = do
   let params = map (getType &&& extValueDescName) args
   let outputType = tupleOrSingleEntryT $ map getType results
 
@@ -977,7 +977,7 @@ compileEntryFun pre_timing entry@(_,Imp.Function _ outputs _ _ results args) = d
 
 callEntryFun :: [CSStmt] -> (Name, Imp.Function op)
              -> CompilerM op s (CSFunDef, String, CSExp)
-callEntryFun pre_timing entry@(fname, Imp.Function _ outputs _ _ _ decl_args) =
+callEntryFun pre_timing entry@(fname, Imp.Function _ outputs _ _ _ decl_args _) =
   if any isOpaque decl_args then
     return (Def fname' VoidT [] [exitException], nameToString fname, Var fname')
   else do

@@ -30,8 +30,6 @@ import Data.List
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.Kernels.Sizes
-import Futhark.Representation.Kernels.Kernel (HuskSpace(..), boundByHuskSpace)
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
@@ -52,7 +50,7 @@ newtype KernelConst = SizeConst Name
 type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel Kernel
-            | Husk (HuskSpace ExplicitMemory) [VName] [VName] VName Code
+            | Husk [VName] Imp.Exp VName VName Code
             | GetSize VName Name SizeClass
             | CmpSizeLe VName Name SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
@@ -132,9 +130,8 @@ instance Pretty HostOp where
     ppr dest <+> text "<-" <+>
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
-  ppr (Husk hspace _ _ _ body) =
+  ppr (Husk _ _ _ _ body) =
     text "husk" </>
-    align (ppr hspace) <+>
     nestedBlock "{" "}" (ppr body)
     -- TODO: ^ Make this more readable
   ppr (CallKernel c) =
@@ -142,9 +139,8 @@ instance Pretty HostOp where
 
 instance FreeIn HostOp where
   freeIn (CallKernel c) = freeIn c
-  freeIn (Husk hspace src_mem _ _ body) =
-    mconcat [freeIn body, S.fromList src_mem]
-            `S.difference` boundByHuskSpace hspace
+  freeIn (Husk _ _ parts_elems num_nodes body) =
+    freeIn body `S.difference` S.fromList [parts_elems, num_nodes]
   freeIn (CmpSizeLe dest _ _ x) =
     freeIn dest <> freeIn x
   freeIn (GetSizeMax dest _) =
@@ -159,9 +155,9 @@ instance Substitute HostOp where
     GetSizeMax (substituteNames m dest) size_class
   substituteNames m (CmpSizeLe dest name size_class x) =
     CmpSizeLe (substituteNames m dest) name size_class (substituteNames m x)
-  substituteNames m (Husk hspace src_mem keep_host num_nodes body) =
-    Husk (substituteNames m hspace) (substituteNames m src_mem)
-         (substituteNames m keep_host) (substituteNames m num_nodes)
+  substituteNames m (Husk keep_host src_elems parts_elems num_nodes body) =
+    Husk (substituteNames m keep_host) (substituteNames m src_elems)
+         (substituteNames m parts_elems) (substituteNames m num_nodes)
          (substituteNames m body)
   substituteNames m (CallKernel c) =
     CallKernel (substituteNames m c)

@@ -27,8 +27,6 @@ import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
-import Futhark.Representation.Kernels.Kernel (HuskSpace(..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty)
@@ -94,8 +92,8 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp target (Husk hspace src_mem _ num_nodes body) =
-  onHusk target hspace src_mem num_nodes body
+onHostOp target (Husk _ src_elems part_elems num_nodes body) =
+  onHusk target src_elems part_elems num_nodes body
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
@@ -179,13 +177,11 @@ onKernel target kernel = do
 
 
 onHusk :: KernelTarget
-          -> HuskSpace ExplicitMemory
-          -> [VName]
-          -> VName
+          -> Exp -> VName -> VName
           -> ImpKernels.Code
           -> OnKernelM OpenCL
-onHusk target hspace src_mem num_nodes body =
-  DistributeHusk hspace src_mem num_nodes <$> traverse (onHostOp target) body
+onHusk target src_elems parts_elems num_nodes body =
+  DistributeHusk src_elems parts_elems num_nodes <$> traverse (onHostOp target) body
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
@@ -417,7 +413,8 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsAllocate = cannotAllocate
                      , GenericC.opsDeallocate = cannotDeallocate
                      , GenericC.opsCopy = copyInKernel
-                     , GenericC.opsPartition = cannotPartition
+                     , GenericC.opsPartition = partitionInKernel
+                     , GenericC.opsCollect = collectInKernel
                      , GenericC.opsStaticArray = noStaticArrays
                      , GenericC.opsFatMemory = False
                      }
@@ -493,10 +490,6 @@ inKernelOperations = GenericC.Operations
           val' <- GenericC.compileExp val
           GenericC.stm [C.cstm|$id:old = atomic_xchg((volatile __global int *)&$id:arr[$exp:ind'], $exp:val');|]
 
-        cannotPartition :: GenericC.Partition KernelOp UsedFunctions
-        cannotPartition _ _ _ _ _ =
-          fail "Cannot partition memory in kernel"
-
         cannotAllocate :: GenericC.Allocate KernelOp UsedFunctions
         cannotAllocate _ =
           fail "Cannot allocate memory in kernel"
@@ -508,6 +501,14 @@ inKernelOperations = GenericC.Operations
         copyInKernel :: GenericC.Copy KernelOp UsedFunctions
         copyInKernel _ _ _ _ _ _ _ =
           fail "Cannot bulk copy in kernel."
+
+        partitionInKernel :: GenericC.Partition KernelOp UsedFunctions
+        partitionInKernel _ _ _ _ _ =
+          fail "Cannot partition memory in kernel."
+
+        collectInKernel :: GenericC.Collect KernelOp UsedFunctions
+        collectInKernel _ _ _ _ _ =
+          fail "Cannot collect memory in kernel."
 
         noStaticArrays :: GenericC.StaticArray KernelOp UsedFunctions
         noStaticArrays _ _ _ _ =
@@ -539,7 +540,10 @@ typesInCode (Allocate _ (Count e) _) = typesInExp e
 typesInCode Free{} = mempty
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
-typesInCode Partition{} = mempty
+typesInCode (Partition _ (Count e1) _ (Count e2) _) =
+  typesInExp e1 <> typesInExp e2
+typesInCode (Collect _ (Count e1) _ (Count e2) _) =
+  typesInExp e1 <> typesInExp e2
 typesInCode (Write _ (Count e1) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e

@@ -21,13 +21,13 @@ setDefaultSpace space (Functions fundecs) =
             | (fname, func) <- fundecs ]
 
 setFunctionSpace :: Space -> Function HostOp -> SetDefaultSpaceM (Function HostOp)
-setFunctionSpace space (Function entry outputs inputs body results args) = do
+setFunctionSpace space (Function entry outputs inputs body results args nc_arg) = do
   outputs' <- mapM (setParamSpace space) outputs
   inputs' <- mapM (setParamSpace space) inputs
   body' <- setBodySpace space body 
   results' <- mapM (setExtValueSpace space) results
   args' <- mapM (setExtValueSpace space) args
-  return $ Function entry outputs' inputs' body' results' args'
+  return $ Function entry outputs' inputs' body' results' args' nc_arg
 
 setParamSpace :: Space -> Param -> SetDefaultSpaceM Param
 setParamSpace space (MemParam name old_space) =
@@ -69,6 +69,12 @@ setBodySpace space (Partition dest part_size src src_size old_space) =
   <*> pure src
   <*> setCountSpace space src_size
   <*> setSpace dest space old_space
+setBodySpace space (Collect dest dest_size src part_size old_space) =
+  Collect dest
+  <$> setCountSpace space dest_size
+  <*> pure src
+  <*> setCountSpace space part_size
+  <*> setSpace dest space old_space
 setBodySpace space (Write dest dest_offset bt dest_space vol e) = do
   dest_offset' <- setCountSpace space dest_offset
   dest_space' <- setSpace dest space dest_space
@@ -106,9 +112,9 @@ setBodySpace space (Op op) =
   Op <$> setHostOpDefaultSpace space op
 
 setHostOpDefaultSpace :: Space -> HostOp -> SetDefaultSpaceM HostOp
-setHostOpDefaultSpace space (Husk hspace src_mem keep_host num_nodes body) =
+setHostOpDefaultSpace space (Husk keep_host src_elems parts_elems num_nodes body) =
   localExclude (S.fromList keep_host) $
-    Husk hspace src_mem keep_host num_nodes <$> setBodySpace space body
+    Husk keep_host src_elems parts_elems num_nodes <$> setBodySpace space body
 setHostOpDefaultSpace _ op = return op
 
 setCountSpace :: Space -> Count a -> SetDefaultSpaceM (Count a)

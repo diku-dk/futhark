@@ -21,7 +21,7 @@ module Futhark.CodeGen.ImpGen
 
     -- * Monadic Compiler Interface
   , ImpM
-  , Env (envDefaultSpace, envFunction)
+  , Env (envDefaultSpace, envFunction, envNodeCount)
   , VTable
   , getVTable
   , localVTable
@@ -32,6 +32,7 @@ module Futhark.CodeGen.ImpGen
   , hasFunction
   , collect
   , comment
+  , localNodeCount
   , VarEntry (..)
   , ArrayEntry (..)
 
@@ -207,6 +208,7 @@ data Env lore op = Env {
     -- ^ Do not actually generate allocations for these memory spaces.
   , envFunction :: Name
     -- ^ Name of the function we are compiling.
+  , envNodeCount :: Maybe Imp.Exp
   }
 
 newEnv :: Operations lore op -> Imp.Space -> [Imp.Space] -> Name -> Env lore op
@@ -219,6 +221,7 @@ newEnv ops ds fake fname =
       , envVolatility = Imp.Nonvolatile
       , envFakeMemory = fake
       , envFunction = fname
+      , envNodeCount = Nothing
       }
 
 -- | The symbol table used during compilation.
@@ -487,7 +490,7 @@ compileFunDef :: ExplicitMemorish lore =>
               -> ImpM lore op ()
 compileFunDef (FunDef entry fname rettype params body) = do
   ((outparams, inparams, results, args), body') <- collect' compile
-  emitFunction fname $ Imp.Function (isJust entry) outparams inparams body' results args
+  emitFunction fname $ Imp.Function (isJust entry) outparams inparams body' results args Nothing
   where params_entry = maybe (replicate (length params) TypeDirect) fst entry
         ret_entry = maybe (replicate (length rettype) TypeDirect) snd entry
         compile = do
@@ -904,6 +907,9 @@ varIndex name = LeafExp (Imp.ScalarVar name) int32
 
 constIndex :: Int -> Imp.Exp
 constIndex = fromIntegral
+
+localNodeCount :: Imp.Exp -> ImpM lore op a -> ImpM lore op a
+localNodeCount e = local $ \env -> env { envNodeCount = Just e }
 
 addVar :: VName -> VarEntry lore -> ImpM lore op ()
 addVar name entry =
