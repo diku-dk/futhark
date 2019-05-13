@@ -92,7 +92,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
       internaliseBody body >>=
         ensureResultExtShape asserting msg loc (map I.fromDecl rettype')
 
-    let free_in_fun = freeInBody body' `S.difference` normal_param_names
+    let free_in_fun = freeIn body' `S.difference` normal_param_names
 
     used_free_params <- forM (S.toList free_in_fun) $ \v -> do
       v_t <- lookupType v

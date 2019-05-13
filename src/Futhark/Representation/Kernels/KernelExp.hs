@@ -183,20 +183,20 @@ instance Attributes lore => FreeIn (KernelExp lore) where
   freeIn (SplitSpace o w i elems_per_thread) =
     freeIn o <> freeIn [w, i, elems_per_thread]
   freeIn (Combine (CombineSpace scatter cspace) ts active body) =
-    freeIn scatter <> freeIn (map snd cspace) <> freeIn ts <> freeIn active <> freeInBody body
+    freeIn scatter <> freeIn (map snd cspace) <> freeIn ts <> freeIn active <> freeIn body
   freeIn (GroupReduce w lam input) =
-    freeIn w <> freeInLambda lam <> freeIn input
+    freeIn w <> freeIn lam <> freeIn input
   freeIn (GroupScan w lam input) =
-    freeIn w <> freeInLambda lam <> freeIn input
+    freeIn w <> freeIn lam <> freeIn input
   freeIn (GroupStream w maxchunk lam accs arrs) =
     freeIn w <> freeIn maxchunk <> freeIn lam <> freeIn accs <> freeIn arrs
   freeIn (GroupGenReduce w dests op bucket values locks) =
-    freeIn w <> freeIn dests <> freeInLambda op <> freeIn bucket <> freeIn values <> freeIn locks
+    freeIn w <> freeIn dests <> freeIn op <> freeIn bucket <> freeIn values <> freeIn locks
   freeIn (Barrier ses) = freeIn ses
 
 instance Attributes lore => FreeIn (GroupStreamLambda lore) where
   freeIn (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
-    freeInBody body `S.difference` bound_here
+    freeIn body `S.difference` bound_here
     where bound_here = S.fromList $
                        chunk_offset : chunk_size :
                        map paramName (acc_params ++ arr_params)

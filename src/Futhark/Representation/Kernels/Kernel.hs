@@ -278,8 +278,8 @@ instance (Attributes lore, FreeIn (LParamAttr lore)) =>
   freeIn e = execWriter $ mapKernelM free e
     where walk f x = tell (f x) >> return x
           free = KernelMapper { mapOnKernelSubExp = walk freeIn
-                              , mapOnKernelLambda = walk freeInLambda
-                              , mapOnKernelBody = walk freeInBody
+                              , mapOnKernelLambda = walk freeIn
+                              , mapOnKernelBody = walk freeIn
                               , mapOnKernelVName = walk freeIn
                               , mapOnKernelLParam = walk freeIn
                               , mapOnKernelKernelBody = walk freeIn
@@ -334,7 +334,7 @@ instance FreeIn KernelResult where
 instance Attributes lore => FreeIn (KernelBody lore) where
   freeIn (KernelBody attr stms res) =
     (freeIn attr <> free_in_stms <> free_in_res) `S.difference` bound_in_stms
-    where free_in_stms = fold $ fmap freeInStm stms
+    where free_in_stms = fold $ fmap freeIn stms
           free_in_res = freeIn res
           bound_in_stms = fold $ fmap boundByStm stms
 

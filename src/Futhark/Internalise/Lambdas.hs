@@ -102,7 +102,7 @@ bindMapShapes indexArg extra_args inner_shapes sizefun args outer_shape
       let sizefun_safe =
             all (I.safeExp . I.stmExp) $ I.bodyStms $ I.lambdaBody sizefun'
           sizefun_arg_invariant =
-            not $ any (`S.member` freeInBody (I.lambdaBody sizefun')) $
+            not $ any (`S.member` freeIn (I.lambdaBody sizefun')) $
             map I.paramName $ lambdaParams sizefun'
       if sizefun_safe && sizefun_arg_invariant
         then do ses <- bodyBind $ lambdaBody sizefun'

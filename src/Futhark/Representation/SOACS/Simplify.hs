@@ -196,7 +196,7 @@ liftIdentityMapping :: BottomUpRuleOp (Wise SOACS)
 liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
   | Just fun <- isMapSOAC form = do
   let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
-      free = freeInBody $ lambdaBody fun
+      free = freeIn $ lambdaBody fun
       rettype = lambdaReturnType fun
       ses = bodyResult $ lambdaBody fun
 
@@ -319,7 +319,7 @@ removeUnusedSOACInput _ pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
           map_lam' = map_lam { lambdaParams = used_params }
       letBind_ pat $ Op $ Screma w (ScremaForm scan reduce map_lam') used_arrs
   where params_and_arrs = zip (lambdaParams map_lam) arrs
-        used_in_body = freeInBody $ lambdaBody map_lam
+        used_in_body = freeIn $ lambdaBody map_lam
         usedInput (param, _) = paramName param `S.member` used_in_body
 removeUnusedSOACInput _ _ _ _ = cannotSimplify
 

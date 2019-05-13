@@ -461,4 +461,4 @@ varianceInStm variance bnd =
   foldl' add variance $ patternNames $ stmPattern bnd
   where add variance' v = M.insert v binding_variance variance'
         look variance' v = S.insert v $ M.findWithDefault mempty v variance'
-        binding_variance = mconcat $ map (look variance) $ S.toList (freeInStm bnd)
+        binding_variance = mconcat $ map (look variance) $ S.toList (freeIn bnd)

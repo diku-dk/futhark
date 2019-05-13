@@ -75,7 +75,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
                        (eSubExp intra_avail_par)
                   else foldBinOp' (SMax Int32) ws_min
 
-    let inputIsUsed input = kernelInputName input `S.member` freeInBody body
+    let inputIsUsed input = kernelInputName input `S.member` freeIn body
         used_inps = filter inputIsUsed inps
 
     addStms w_stms
