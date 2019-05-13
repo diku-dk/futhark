@@ -246,7 +246,7 @@ mkAliasedBody :: (Attributes lore, CanBeAliased (Op lore)) =>
 mkAliasedBody innerlore bnds res =
   Body (mkBodyAliases bnds res, innerlore) bnds res
 
-mkPatternAliases :: (Attributes lore, Aliased lore, Typed attr) =>
+mkPatternAliases :: (Aliased lore, Typed attr) =>
                     PatternT attr -> Exp lore
                  -> ([PatElemT (VarAliases, attr)],
                      [PatElemT (VarAliases, attr)])
