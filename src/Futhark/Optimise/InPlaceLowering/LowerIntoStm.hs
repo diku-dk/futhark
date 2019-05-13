@@ -145,7 +145,7 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
     (body_res, res_bnds) <- manipulateResult in_place_map idxsubsts'
     let body' = mkBody (newbnds<>res_bnds) body_res
     return (prebnds, postbnds, ctxpat, valpat, ctx, val', body')
-  where usedInBody = S.unions $ map expandAliases $ S.toList $ freeInBody body <> freeIn form
+  where usedInBody = S.unions $ map expandAliases $ S.toList $ freeIn body <> freeIn form
         expandAliases v = case M.lookup v scope of
                             Just (LetInfo attr) -> S.insert v $ aliasesOf attr
                             _ -> S.singleton v

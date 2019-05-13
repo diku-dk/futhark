@@ -106,7 +106,7 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm (_, []) (_, _, []) lam) inps) = 
             | otherwise =
               Nothing
           boundUsedInBody =
-            mapMaybe isBound $ S.toList $ freeInLambda lam
+            mapMaybe isBound $ S.toList $ freeIn lam
       newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
       let subst = M.fromList $
                   zip (map identName boundUsedInBody) (map identName newParams)

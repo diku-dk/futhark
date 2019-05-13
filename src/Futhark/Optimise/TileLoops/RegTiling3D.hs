@@ -327,7 +327,7 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
     --    depend only on variables defined in the invariant stms to the z parallel dimension.
     var_nms <- concatMap (patternNames . stmPattern) var_out_stms,
     null $ S.intersection (S.fromList var_nms) $
-                          S.unions (map freeInStm var_ind_stms),
+                          S.unions (map freeIn var_ind_stms),
     -- 7. We assume (check) for simplicity that all accumulator initializers
     --     of the outer stream are invariant to the z parallel dimension.
     loop_ini_vs <- subExpVars accs_o_p,
@@ -390,7 +390,7 @@ translateStreamsToLoop (reg_tile, mask,gidz,m_M,mm,local_tid, group_size) varian
                          (stmsFromList stms_body_i') $
                          map Var loop_ress
           myloop = DoLoop [] (zip loop_form_acc loop_inis_acc) form body_i'
-          free_in_body = freeInBody body_i'
+          free_in_body = freeIn body_i'
           elim_vars = S.fromList $ arrs_i_p ++ arrs_o_p ++
                                    map paramName arrs_i_f ++
                                    map paramName accs_o_f
@@ -721,7 +721,7 @@ defVarianceInStm variance bnd =
   foldl' add variance $ patternNames $ stmPattern bnd
   where add variance' v = M.insert v binding_variance variance'
         look variance' v = S.insert v $ M.findWithDefault mempty v variance'
-        binding_variance = mconcat $ map (look variance) $ S.toList (freeInStm bnd)
+        binding_variance = mconcat $ map (look variance) $ S.toList (freeIn bnd)
 
 sufficientGroups :: MonadBinder m =>
                     [(VName, SubExp, VName, SubExp)] -> SubExp

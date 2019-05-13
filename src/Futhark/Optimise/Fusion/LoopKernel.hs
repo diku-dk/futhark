@@ -208,7 +208,7 @@ removeUnusedParams l inps =
                          (([], []), (p,inp):_) -> ([p], [inp])
                          ((ps_, inps_), _)     -> (ps_, inps_)
         used p = paramName p `S.member` freeVars
-        freeVars = freeInBody $ lambdaBody l
+        freeVars = freeIn $ lambdaBody l
 
 -- | Check that the consumer uses at least one output of the producer
 -- unmodified.

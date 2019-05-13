@@ -234,7 +234,7 @@ mkWiseExpAttr :: (Attributes lore, CanBeWise (Op lore)) =>
 mkWiseExpAttr pat explore e =
   (ExpWisdom
     (Names' $ consumedInExp e)
-    (Names' $ freeIn pat <> freeIn explore <> freeInExp e),
+    (Names' $ freeIn pat <> freeIn explore <> freeIn e),
    explore)
 
 instance (Bindable lore,

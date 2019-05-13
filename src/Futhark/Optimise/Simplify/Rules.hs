@@ -292,7 +292,7 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
           (x,x_stms) <- collectStms m
           case x of
             IndexResult cs arr' slice
-              | all (not . (i `S.member`) . freeInStm) x_stms,
+              | all (not . (i `S.member`) . freeIn) x_stms,
                 DimFix (Var j) : slice' <- slice,
                 j == i, not $ i `S.member` freeIn slice -> do
                   addStms x_stms

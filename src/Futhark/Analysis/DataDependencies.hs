@@ -40,7 +40,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
           in M.unions [branchdeps, deps, tdeps, fdeps]
 
         grow deps (Let pat _ e) =
-          let free = freeIn pat <> freeInExp e
+          let free = freeIn pat <> freeIn e
               freeDeps = S.unions $ map (depsOfVar deps) $ S.toList free
           in M.fromList [ (name, freeDeps) | name <- patternNames pat ] `M.union` deps
 

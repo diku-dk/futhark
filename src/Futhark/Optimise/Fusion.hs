@@ -497,7 +497,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                       -- check that consumer's lambda body does not use
                                       -- directly the produced arrays (e.g., see noFusion3.fut).
                                       Right conssoac -> return $ S.null $ S.intersection curker_outset $
-                                                                 freeInBody $ lambdaBody $ SOAC.lambda conssoac
+                                                                 freeIn $ lambdaBody $ SOAC.lambda conssoac
                                       Left _         -> return True
 
                 let interm_bnds_ok = cur_ok && consumer_ok && out_transf_ok && cons_no_out_transf &&
@@ -505,7 +505,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                        -- (i) check that the in-between bindings do
                                        --     not use the result of current kernel OR
                                        S.null ( S.intersection curker_outset $
-                                                      freeInExp (stmExp bnd) ) ||
+                                                      freeIn (stmExp bnd) ) ||
                                        --(ii) that the pattern-binding corresponds to
                                        --     the result of the consumer kernel; in the
                                        --     latter case it means it corresponds to a
@@ -715,8 +715,7 @@ fusionGatherExp _ (Op Futhark.Scatter{}) = errorIllegal "write"
 ---- Generic Traversal         ----
 -----------------------------------
 
-fusionGatherExp fres e =
-  addNamesToInfusible fres $ freeInExp e
+fusionGatherExp fres e = addNamesToInfusible fres $ freeIn e
 
 fusionGatherSubExp :: FusedRes -> SubExp -> FusionGM FusedRes
 fusionGatherSubExp fres (Var idd) = addVarToInfusible fres idd

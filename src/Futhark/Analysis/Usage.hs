@@ -13,7 +13,7 @@ usageInStm (Let pat lore e) =
   mconcat [usageInPat,
            usageInExpLore,
            usageInExp e,
-           UT.usages (freeInExp e)]
+           UT.usages (freeIn e)]
   where usageInPat =
           UT.usages (mconcat (map freeIn $ patternElements pat)
                      `S.difference`

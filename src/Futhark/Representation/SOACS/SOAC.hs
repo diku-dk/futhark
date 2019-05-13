@@ -295,7 +295,7 @@ instance Attributes lore => FreeIn (SOAC lore) where
   freeIn = execWriter . mapSOACM free
     where walk f x = tell (f x) >> return x
           free = SOACMapper { mapOnSOACSubExp = walk freeIn
-                            , mapOnSOACLambda = walk freeInLambda
+                            , mapOnSOACLambda = walk freeIn
                             , mapOnSOACVName = walk freeIn
                             }
 

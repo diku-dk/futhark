@@ -476,7 +476,7 @@ distributeKernelResults (vtable, used)
   addStm $ Let (Pattern [] kpes') attr $ Op $ HostOp $
     Kernel desc kspace kts' $ mkWiseKernelBody () (stmsFromList $ reverse kstms_rev) kres'
   where
-    free_in_kstms = fold $ fmap freeInStm kstms
+    free_in_kstms = fold $ fmap freeIn kstms
 
     distribute (kpes', kts', kres', kstms_rev) bnd
       | Let (Pattern [] [pe]) _ (BasicOp (Index arr slice)) <- bnd,
@@ -548,7 +548,7 @@ removeUnusedStreamInputs _ pat _ (GroupStream w maxchunk lam accs arrs)
       letBind_ pat $ Op $ GroupStream w maxchunk lam' accs arrs'
   where GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
 
-        isUsed = (`S.member` freeInBody body)
+        isUsed = (`S.member` freeIn body)
 removeUnusedStreamInputs _ _ _ _ = cannotSimplify
 
 inKernelRules :: RuleBook (Wise InKernel)
