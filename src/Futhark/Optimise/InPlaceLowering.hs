@@ -117,9 +117,10 @@ optimiseStms (bnd:bnds) m = do
     updates -> do
       let updateStms = map updateStm updates
       lower <- asks lowerUpdate
+      scope <- askScope
       -- Condition (5) and (7) are assumed to be checked by
       -- lowerUpdate.
-      case lower bnd' updates of
+      case lower scope bnd' updates of
         Just lowering -> do new_bnds <- lowering
                             new_bnds' <- optimiseStms new_bnds $
                                          tell bup { forwardThese = [] }
