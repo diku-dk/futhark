@@ -60,7 +60,7 @@ opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler dest (Inner (HostOp kernel)) =
   kernelCompiler dest kernel
-opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts _ (Body _ bnds ses))) = do
+opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses))) = do
   i <- newVName "i"
   interm_red <- replicateM (length node_red_res) $ newVName "interm_red"
   interm_red_mem <- replicateM (length node_red_res) $ newVName "interm_red_mem"
@@ -73,7 +73,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts _ (Body _ bnds ses)
   nes_e <- mapM ImpGen.compileSubExp nes
   zipWithM_ (<--) (map paramName red_acc_params) nes_e
   body_code <- ImpGen.collect $ ImpGen.localNodeCount (Imp.var num_nodes int32) $ do
-    mapM_ allocAndPart $ zip4 parts parts_mem src_mem_names src_mem_bytes
+    mapM_ allocAndPart $ zip5 parts parts_mem parts_sizes src_mem_names src_mem_bytes
     ImpGen.compileStms (freeIn ses) (stmsToList bnds) $ do
       mapM_ (\(n, m, t) -> allocInterm n m (t `arrayOfRow` Var num_nodes)) $ zip3 interm_red interm_red_mem red_ts
       zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) interm_red $ map Var node_red_res
@@ -89,7 +89,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts _ (Body _ bnds ses)
       node_res_map_mem_sizes <- getMemSizes node_res_map_mem
       mapM_ collect $ zip4 map_pes_mem map_pes_mem_sizes node_res_map_mem node_res_map_mem_sizes
   sOp $ Imp.Husk (interm_red ++ interm_red_mem) src_elems_e parts_elems num_nodes body_code
-  where HuskSpace src src_elems parts parts_elems parts_mem = hspace
+  where HuskSpace src src_elems parts parts_elems parts_mem parts_sizes = hspace
         red_op_params = lambdaParams red_op
         (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
         (node_red_res, node_map_res) = splitAt (length nes) $ getVarNames ses
@@ -98,12 +98,14 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts _ (Body _ bnds ses)
         getVarNames [] = []
         getVarNames (Var n : vs) = n : getVarNames vs
         getVarNames (_ : vs) = getVarNames vs
-        allocAndPart (Param name (MemArray t s _ _), part_mem, src_mem, src_bytes) = do
-          part_bytes <- ImpGen.sAllocNamedArray name part_mem t s DefaultSpace
-          ImpGen.emit $ Imp.Partition part_mem part_bytes src_mem src_bytes DefaultSpace
+        memSize pt s = Imp.LeafExp (Imp.SizeOf pt) int32 * product (map (ImpGen.compileSubExpOfType int32) (shapeDims s))
+        allocAndPart (Param _ (MemArray t s _ _), Param part_mem _, part_size, src_mem, src_bytes) = do
+          part_size <-- memSize t s
+          ImpGen.sAlloc_ part_mem (Imp.VarSize part_size) DefaultSpace
+          ImpGen.emit $ Imp.Partition part_mem (Imp.bytes $ Imp.var part_size int32) src_mem src_bytes DefaultSpace
         allocAndPart _ = fail "Partition is not an array."
         allocInterm name mem (Array et size _) =
-          void $ ImpGen.sAllocNamedArray name mem et size DefaultSpace
+          ImpGen.sAllocNamedArray name mem et size (Imp.bytes $ memSize et size) DefaultSpace
         allocInterm _ _ _ = fail "Intermediate is not an array."
         getArrayMemLocs arr = 
           map (ImpGen.memLocationName . ImpGen.entryArrayLocation) <$> mapM ImpGen.lookupArray arr
@@ -229,7 +231,7 @@ mapTransposeForType bt num_nodes = do
   let fname = nameFromString $ "_" <> mapTransposeName bt num_nodes
 
   num_nodes_param_name <- newVName "num_nodes"
-  let num_nodes_param = fmap pure (const num_nodes_param_name) num_nodes
+  let num_nodes_param = fmap (const num_nodes_param_name) num_nodes
 
   exists <- ImpGen.hasFunction fname
   unless exists $ ImpGen.emitFunction fname $ mapTransposeFunction bt num_nodes_param

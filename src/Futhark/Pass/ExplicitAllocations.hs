@@ -552,20 +552,25 @@ handleHostOp (HostOp (SegGenRed space ops ts body)) = do
     return op { genReduceOp = lam }
   return $ Inner $ HostOp $ SegGenRed space ops' ts body'
 
-handleHostOp (Husk hspace (Lambda lp lb lr) nes ts node_res body) = do
+handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
   let hspace' = huskSpaceMemInfo hspace
-      red_res = take (length nes) node_res 
-      lp' = zipWith huskParamMemInfo lp $ concat $ replicate 2 red_res
   (body', red_op') <- localScope (scopeOfHuskSpace hspace') $ do
     b <- allocInHuskBody body
+    let red_res = take (length nes) $ getVars $ bodyResult b
+        lp' = zipWith huskParamMemInfo lp $ concat $ replicate 2 red_res
     r <- allocInLambda lp' lb lr
     return (b, r)
-  return $ Inner $ Husk hspace' red_op' nes ts node_res body'
+  return $ Inner $ Husk hspace' red_op' nes ts body'
+  where getVars [] = []
+        getVars (Var n : vs) = n : getVars vs
+        getVars (_ : vs) = getVars vs
 
 huskSpaceMemInfo :: HuskSpace Kernels -> HuskSpace ExplicitMemory
-huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_mem) =
-  HuskSpace src src_elems parts' parts_elems parts_mem
-  where parts' = zipWith huskParamMemInfo parts parts_mem
+huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_mem parts_sizes) =
+  HuskSpace src src_elems parts' parts_elems parts_mem' parts_sizes
+  where parts_mem_names = map paramName parts_mem
+        parts' = zipWith huskParamMemInfo parts parts_mem_names
+        parts_mem' = zipWith huskParamMemInfo parts_mem parts_mem_names
 
 huskParamMemInfo :: LParam Kernels -> VName -> LParam ExplicitMemory
 huskParamMemInfo (Param name (Prim pt)) _ = Param name $ MemPrim pt

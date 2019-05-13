@@ -370,7 +370,7 @@ huskedNonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
           -> m (Stms Kernels)
 huskedNonSegRed pat w comm red_lam_seq red_lam_fot map_lam nes arrs = runBinder_ $ do
   red_lam_fot' <- renameLambda red_lam_fot
-  hspace@(HuskSpace _ _ parts parts_elems _) <- constructHuskSpace arrs w
+  hspace@(HuskSpace _ _ parts parts_elems _ _) <- constructHuskSpace arrs w
   let ret_ts = lambdaReturnType map_lam
       addDummyDim t = t `arrayOfRow` intConst Int32 1
       hscope = scopeOfHuskSpace hspace
@@ -382,10 +382,10 @@ huskedNonSegRed pat w comm red_lam_seq red_lam_fot map_lam nes arrs = runBinder_
       body_pat_ts = red_ts ++ map (`setOuterSize` Var parts_elems) map_ts
       body_pat = fmap addDummyDim $ Pattern pcs $ zipWith PatElem node_res body_pat_ts
   dummy <- newVName "dummy"
-  body_stms <- localScope hscope $ do
+  body_stms <- localScope hscope $
     segRed body_pat parts_elems_v parts_elems_v comm red_lam_seq map_lam nes parts_names
            [(dummy, intConst Int32 1)] []
-  letBind_ pat $ Op $ Husk hspace red_lam_fot' nes ret_ts node_res $ mkBody body_stms $ map Var node_res
+  letBind_ pat $ Op $ Husk hspace red_lam_fot' nes ret_ts $ mkBody body_stms $ map Var node_res
   
 blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                     Pattern Kernels

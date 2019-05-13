@@ -133,7 +133,7 @@ simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
 
-simplifyKernelOp _ _ (Husk hspace red_op nes ts node_res body) = do
+simplifyKernelOp _ _ (Husk hspace red_op nes ts body) = do
   ts' <- Engine.simplify ts
   hspace' <- Engine.simplify $ convertHuskSpace hspace
   let scope_vtable = ST.fromScope $ scopeOfHuskSpace hspace'
@@ -153,8 +153,7 @@ simplifyKernelOp _ _ (Husk hspace red_op nes ts node_res body) = do
     Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
   red_op_hoisted' <- mapM processHoistedStm red_op_hoisted
   nes' <- Engine.simplify nes
-  node_res' <- Engine.simplify node_res
-  return (Husk hspace' red_op' nes' ts' node_res' body', red_op_hoisted' <> body_hoisted')
+  return (Husk hspace' red_op' nes' ts' body', red_op_hoisted' <> body_hoisted')
 
 simplifyKernelOp _ _ (GetSize key size_class) =
   return (GetSize key size_class, mempty)
@@ -352,10 +351,9 @@ instance Engine.Simplifiable KernelSpace where
     <*> Engine.simplify structure
 
 instance Engine.Simplifiable (HuskSpace lore) where
-  simplify (HuskSpace src src_elems parts parts_elems parts_mem) = do
+  simplify (HuskSpace src src_elems parts parts_elems parts_mem parts_sizes) = do
     src' <- Engine.simplify src
-    parts_mem' <- Engine.simplify parts_mem
-    return $ HuskSpace src' src_elems parts parts_elems parts_mem'
+    return $ HuskSpace src' src_elems parts parts_elems parts_mem parts_sizes
 
 instance Engine.Simplifiable SpaceStructure where
   simplify (FlatThreadSpace dims) =

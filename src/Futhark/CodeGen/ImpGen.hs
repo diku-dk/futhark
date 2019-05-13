@@ -1287,21 +1287,20 @@ sArray name bt shape membind = do
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
 sAllocArray name pt shape space = do
+  let arr_bytes = Imp.bytes $ Imp.LeafExp (Imp.SizeOf pt) int32 *
+                  product (map (compileSubExpOfType int32) (shapeDims shape))
   name' <- newVName name
   mname <- newVName $ name ++ "_mem"
-  void $ sAllocNamedArray name' mname pt shape space
+  sAllocNamedArray name' mname pt shape arr_bytes space
   return name'
 
 -- | Uses linear/iota index function.
 sAllocNamedArray :: VName -> VName -> PrimType -> ShapeBase SubExp
-                    -> Space -> ImpM lore op (Count Bytes)
-sAllocNamedArray name mname pt shape space = do
-  let arr_bytes = Imp.bytes $ Imp.LeafExp (Imp.SizeOf pt) int32 *
-                  product (map (compileSubExpOfType int32) (shapeDims shape))
+                    -> Count Bytes -> Space -> ImpM lore op ()
+sAllocNamedArray name mname pt shape arr_bytes space = do
   sAllocNamed mname arr_bytes space
   dArray name pt shape $
     ArrayIn mname $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
-  return arr_bytes
 
 -- | Uses linear/iota index function.
 sStaticArray :: String -> Space -> PrimType -> Imp.ArrayContents -> ImpM lore op VName

@@ -825,7 +825,7 @@ data HostOp lore inner
     -- ^ The maximum size of some class.
   | CmpSizeLe Name SizeClass SubExp
     -- ^ Compare size (likely a threshold) with some Int32 value.
-  | Husk (HuskSpace lore) (Lambda lore) [SubExp] [Type] [VName] (Body lore)
+  | Husk (HuskSpace lore) (Lambda lore) [SubExp] [Type] (Body lore)
   | HostOp inner
     -- ^ The arbitrary operation.
   deriving (Eq, Ord, Show)
@@ -835,7 +835,8 @@ data HuskSpace lore = HuskSpace
                     , hspaceSourceElems :: SubExp
                     , hspacePartitions :: [LParam lore]
                     , hspacePartitionElems :: VName
-                    , hspacePartitionsMemory :: [VName]
+                    , hspacePartitionsMemory :: [LParam lore]
+                    , hspacePartitionSizes :: [VName]
                     }
 
 deriving instance Annotations lore => Eq (HuskSpace lore)
@@ -843,65 +844,68 @@ deriving instance Annotations lore => Ord (HuskSpace lore)
 deriving instance Annotations lore => Show (HuskSpace lore)
 
 scopeOfHuskSpace :: HuskSpace lore -> Scope lore
-scopeOfHuskSpace (HuskSpace _ _ parts parts_elems _) =
-  M.singleton parts_elems (IndexInfo Int32)
+scopeOfHuskSpace (HuskSpace _ _ parts parts_elems parts_mem parts_sizes) =
+  M.fromList (zip (parts_elems : parts_sizes) $ repeat $ IndexInfo Int32)
   <> scopeOfLParams parts
+  <> scopeOfLParams parts_mem
 
 boundByHuskSpace :: HuskSpace lore -> Names
-boundByHuskSpace (HuskSpace _ _ parts parts_elems parts_mem) =
-  S.fromList $ concat [[parts_elems], map paramName parts, parts_mem]
+boundByHuskSpace (HuskSpace _ _ parts parts_elems parts_mem parts_sizes) =
+  S.fromList $ concat [[parts_elems], parts_sizes, map paramName parts, map paramName parts_mem]
 
 constructHuskSpace :: (MonadFreshNames m, HasScope lore m, LParamAttr lore ~ Type)
                    => [VName] -> SubExp -> m (HuskSpace lore)
 constructHuskSpace src src_elems = do
-  parts_names <- replicateM (length src) (newVName "partition")
+  parts_names <- replicateM (length src) $ newVName "partition"
   parts_elems <- newVName "partition_elems"
-  parts_mem <- replicateM (length src) (newVName "partition_mem")
+  parts_mem_names <- replicateM (length src) $ newVName "partition_mem"
+  parts_sizes <- replicateM (length src) $ newVName "partition_size"
   src_ts <- mapM lookupType src
   let parts_ts = map (\t -> setOuterSize t $ Var parts_elems) src_ts
       parts = zipWith Param parts_names parts_ts
-  return $ HuskSpace src src_elems parts parts_elems parts_mem
+      parts_mem_ts = map (\s -> Mem (Var s) $ Space "device") parts_sizes
+      parts_mem = zipWith Param parts_mem_names parts_mem_ts
+  return $ HuskSpace src src_elems parts parts_elems parts_mem parts_sizes
 
 convertHuskSpace :: LParamAttr fromlore ~ LParamAttr tolore
                  => HuskSpace fromlore -> HuskSpace tolore
-convertHuskSpace (HuskSpace src src_elems parts parts_elems parts_mem) =
-  HuskSpace src src_elems parts parts_elems parts_mem
+convertHuskSpace (HuskSpace src src_elems parts parts_elems parts_mem parts_size) =
+  HuskSpace src src_elems parts parts_elems parts_mem parts_size
 
 instance (Attributes lore, Substitute inner) => Substitute (HostOp lore inner) where
   substituteNames substs (HostOp op) =
     HostOp $ substituteNames substs op
   substituteNames substs (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass $ substituteNames substs x
-  substituteNames substs (Husk hspace red_op nes ts node_res body) =
+  substituteNames substs (Husk hspace red_op nes ts body) =
     Husk (substituteNames substs hspace) (substituteNames substs red_op)
-         (substituteNames substs nes) ts (substituteNames substs node_res)
-         (substituteNames substs body)
+         (substituteNames substs nes) ts (substituteNames substs body)
   substituteNames _ x = x
 
 instance Substitute (LParamAttr lore) => Substitute (HuskSpace lore) where
-  substituteNames substs (HuskSpace src src_elems parts parts_elems parts_mem) =
+  substituteNames substs (HuskSpace src src_elems parts parts_elems parts_mem parts_sizes) =
     HuskSpace (substituteNames substs src) (substituteNames substs src_elems)
               (substituteNames substs parts) (substituteNames substs parts_elems)
-              (substituteNames substs parts_mem)
+              (substituteNames substs parts_mem) (substituteNames substs parts_sizes)
 
 instance (Attributes lore, Rename inner) => Rename (HostOp lore inner) where
   rename (HostOp op) = HostOp <$> rename op
-  rename (Husk hspace red_op nes ts node_res body) = do
+  rename (Husk hspace red_op nes ts body) = do
     hspace' <- rename hspace
     red_op' <- rename red_op
     nes' <- rename nes
-    node_res' <- rename node_res
     body' <- rename body
-    return $ Husk hspace' red_op' nes' ts node_res' body'
+    return $ Husk hspace' red_op' nes' ts body'
   rename (CmpSizeLe name sclass x) = CmpSizeLe name sclass <$> rename x
   rename x = pure x
 
 instance Renameable lore => Rename (HuskSpace lore) where
-  rename (HuskSpace src src_elems parts parts_elems parts_mem) = do
+  rename (HuskSpace src src_elems parts parts_elems parts_mem parts_sizes) = do
     parts' <- rename parts
     parts_elems' <- rename parts_elems
     parts_mem' <- rename parts_mem
-    return $ HuskSpace src src_elems parts' parts_elems' parts_mem'
+    parts_sizes' <- rename parts_sizes
+    return $ HuskSpace src src_elems parts' parts_elems' parts_mem' parts_sizes'
 
 instance (Attributes lore, IsOp inner) => IsOp (HostOp lore inner) where
   safeOp (HostOp op) = safeOp op
@@ -914,7 +918,7 @@ instance TypedOp inner => TypedOp (HostOp lore inner) where
   opType GetSizeMax{} = pure [Prim int32]
   opType CmpSizeLe{} = pure [Prim Bool]
   opType (HostOp op) = opType op
-  opType (Husk hspace _ nes ts _ _) =
+  opType (Husk hspace _ nes ts _) =
     pure $ staticShapes $ addHuskMapDim ts nes $ hspaceSourceElems hspace
 
 addHuskMapDim :: [Type] -> [SubExp] -> SubExp -> [Type]
@@ -924,7 +928,7 @@ addHuskMapDim ts nes num_elems =
 
 instance (Attributes lore, AliasedOp inner) => AliasedOp (HostOp lore inner) where
   opAliases (HostOp op) = opAliases op
-  opAliases (Husk _ _ _ ts _ _) = map (const mempty) ts
+  opAliases (Husk _ _ _ ts _) = map (const mempty) ts
   opAliases _ = [mempty]
 
   consumedInOp (HostOp op) = consumedInOp op
@@ -932,12 +936,12 @@ instance (Attributes lore, AliasedOp inner) => AliasedOp (HostOp lore inner) whe
 
 instance (Attributes lore, RangedOp inner) => RangedOp (HostOp lore inner) where
   opRanges (HostOp op) = opRanges op
-  opRanges (Husk _ _ _ ts _ _) = replicate (length ts) unknownRange
+  opRanges (Husk _ _ _ ts _) = replicate (length ts) unknownRange
   opRanges _ = [unknownRange]
 
 instance (Attributes lore, FreeIn inner) => FreeIn (HostOp lore inner) where
   freeIn (HostOp op) = freeIn op
-  freeIn (Husk hspace red_op _ _ _ body) =
+  freeIn (Husk hspace red_op _ _ body) =
     mconcat [ freeInLambda red_op
             , freeInBody body
             , S.fromList $ hspaceSource hspace
@@ -955,17 +959,17 @@ instance (Attributes lore,
   addOpAliases (GetSize name sclass) = GetSize name sclass
   addOpAliases (GetSizeMax sclass) = GetSizeMax sclass
   addOpAliases (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-  addOpAliases (Husk hspace red_op nes ts node_res body) =
+  addOpAliases (Husk hspace red_op nes ts body) =
     Husk (convertHuskSpace hspace) (Alias.analyseLambda red_op)
-         nes ts node_res (Alias.analyseBody body)
+         nes ts (Alias.analyseBody body)
 
   removeOpAliases (HostOp op) = HostOp $ removeOpAliases op
   removeOpAliases (GetSize name sclass) = GetSize name sclass
   removeOpAliases (GetSizeMax sclass) = GetSizeMax sclass
   removeOpAliases (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-  removeOpAliases (Husk hspace red_op nes ts node_res body) =
+  removeOpAliases (Husk hspace red_op nes ts body) =
     Husk (convertHuskSpace hspace) (removeLambdaAliases red_op)
-         nes ts node_res (removeBodyAliases body)
+         nes ts (removeBodyAliases body)
 
 instance (Attributes lore,
           CanBeRanged (Op lore),
@@ -976,19 +980,19 @@ instance (Attributes lore,
   addOpRanges (GetSize name sclass) = GetSize name sclass
   addOpRanges (GetSizeMax sclass) = GetSizeMax sclass
   addOpRanges (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-  addOpRanges (Husk hspace red_op nes ts node_res body) =
+  addOpRanges (Husk hspace red_op nes ts body) =
     let hspace' = convertHuskSpace hspace
         red_op' = Range.runRangeM $ Range.analyseLambda red_op
         body' = Range.runRangeM $ Range.analyseBody body
-    in Husk hspace' red_op' nes ts node_res body'
+    in Husk hspace' red_op' nes ts body'
 
   removeOpRanges (HostOp op) = HostOp $ removeOpRanges op
   removeOpRanges (GetSize name sclass) = GetSize name sclass
   removeOpRanges (GetSizeMax sclass) = GetSizeMax sclass
   removeOpRanges (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-  removeOpRanges (Husk hspace red_op nes ts node_res body) =
+  removeOpRanges (Husk hspace red_op nes ts body) =
     Husk (convertHuskSpace hspace) (removeLambdaRanges red_op)
-         nes ts node_res (removeBodyRanges body)
+         nes ts (removeBodyRanges body)
 
 instance (Attributes lore,
           CanBeWise (Op lore),
@@ -999,9 +1003,9 @@ instance (Attributes lore,
   removeOpWisdom (GetSize name sclass) = GetSize name sclass
   removeOpWisdom (GetSizeMax sclass) = GetSizeMax sclass
   removeOpWisdom (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-  removeOpWisdom (Husk hspace red_op nes ts node_res body) =
+  removeOpWisdom (Husk hspace red_op nes ts body) =
     Husk (convertHuskSpace hspace) (removeLambdaWisdom red_op)
-         nes ts node_res (removeBodyWisdom body)
+         nes ts (removeBodyWisdom body)
 
 instance ST.IndexOp op => ST.IndexOp (HostOp lore op) where
   indexOp vtable k (HostOp op) is = ST.indexOp vtable k op is
@@ -1018,30 +1022,30 @@ instance (PrettyLore lore, PP.Pretty inner) => PP.Pretty (HostOp lore inner) whe
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
 
-  ppr (Husk hspace red_op nes ts node_res body) =
+  ppr (Husk hspace red_op nes ts body) =
     text "husk" <> PP.parens (ppr red_op <> PP.comma </>
                               PP.braces (PP.commasep $ map ppr nes)) </>
     PP.align (ppr hspace) <+>
-    PP.align (text "node results -> " <+> PP.commasep (map ppr node_res)) <+>
     PP.align (ppTuple' ts) <+>
     PP.nestedBlock "{" "}" (ppr body)
 
   ppr (HostOp op) = ppr op
 
 instance Pretty (HuskSpace lore) where
-  ppr (HuskSpace src src_elems parts parts_elems parts_mem) =
+  ppr (HuskSpace src src_elems parts parts_elems parts_mem parts_sizes) =
     parens (commasep [text "source data:" <+> ppr src,
                       text "number of source elements:" <+> ppr src_elems,
                       text "partitions ->" <+> ppr (map paramName parts),
-                      text "partition memory ->" <+> ppr parts_mem,
-                      text "number of partition elements ->" <+> ppr parts_elems])
+                      text "partition memory ->" <+> ppr (map paramName parts_mem),
+                      text "number of partition elements ->" <+> ppr parts_elems,
+                      text "partition byte sizes ->" <+> ppr parts_sizes])
 
 instance (OpMetrics (Op lore), OpMetrics inner) => OpMetrics (HostOp lore inner) where
   opMetrics GetSize{} = seen "GetSize"
   opMetrics GetSizeMax{} = seen "GetSizeMax"
   opMetrics CmpSizeLe{} = seen "CmpSizeLe"
   opMetrics (HostOp op) = opMetrics op
-  opMetrics (Husk _ red_op _ _ _ body) = 
+  opMetrics (Husk _ red_op _ _ body) = 
     inside "Husk" $ lambdaMetrics red_op >> bodyMetrics body
 
 instance (Aliased lore, UsageInOp inner) => UsageInOp (HostOp lore inner) where
@@ -1049,9 +1053,9 @@ instance (Aliased lore, UsageInOp inner) => UsageInOp (HostOp lore inner) where
   usageInOp GetSizeMax{} = mempty
   usageInOp CmpSizeLe{} = mempty
   usageInOp (HostOp op) = usageInOp op
-  usageInOp (Husk hspace red_op _ _ node_res body) = 
+  usageInOp (Husk hspace red_op _ _ body) = 
     mconcat $ map UT.consumedUsage (S.toList $ consumedInBody body)
-            ++ [ usageInLambda red_op node_res
+            ++ [ usageInLambda red_op $ concatMap varInSubExp $ bodyResult body
                , UT.usages (S.fromList $ hspacePartitionElems hspace : varInSubExp (hspaceSourceElems hspace))
                , UT.usages (S.fromList $ hspaceSource hspace)]
     where varInSubExp (Var n) = [n]
@@ -1065,7 +1069,7 @@ typeCheckHostOp _ GetSize{} = return ()
 typeCheckHostOp _ GetSizeMax{} = return ()
 typeCheckHostOp _ (CmpSizeLe _ _ x) = TC.require [Prim int32] x
 typeCheckHostOp f (HostOp op) = f op
-typeCheckHostOp _ (Husk hspace red_op nes ts _ body) = do
+typeCheckHostOp _ (Husk hspace red_op nes ts body) = do
   mapM_ TC.checkType ts
   ne_ts <- mapM subExpType nes
   TC.binding (scopeOfHuskSpace hspace) $ do
