@@ -614,7 +614,7 @@ data ExpBase f vn =
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) (f PatternType) SrcLoc
             -- ^ Type ascription: @e : t@.
 
-            | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
+            | LetPat (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
 
             | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
               (ExpBase f vn) SrcLoc
@@ -643,7 +643,6 @@ data ExpBase f vn =
               -- ^ Array indexing as a section: @(.[i,j])@.
 
             | DoLoop
-              [TypeParamBase vn]
               (PatternBase f vn) -- Merge variable pattern
               (ExpBase f vn) -- Initial values of merge variables.
               (LoopFormBase f vn) -- Do or while loop.
@@ -703,7 +702,7 @@ instance Located (ExpBase f vn) where
   locOf (Ascript _ _ _ loc)            = locOf loc
   locOf (Negate _ pos)                 = locOf pos
   locOf (Apply _ _ _ _ pos)            = locOf pos
-  locOf (LetPat _ _ _ _ _ loc)         = locOf loc
+  locOf (LetPat _ _ _ _ loc)           = locOf loc
   locOf (LetFun _ _ _ loc)             = locOf loc
   locOf (LetWith _ _ _ _ _ _ loc)      = locOf loc
   locOf (Index _ _ _ loc)              = locOf loc
@@ -715,11 +714,11 @@ instance Located (ExpBase f vn) where
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
   locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (IndexSection _ _ loc)         = locOf loc
-  locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
+  locOf (DoLoop _ _ _ _ pos)           = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
   locOf (VConstr0 _ _ loc)             = locOf loc
-  locOf (Match _ _ _ loc)                = locOf loc
+  locOf (Match _ _ _ loc)              = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc

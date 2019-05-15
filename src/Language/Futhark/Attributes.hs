@@ -463,7 +463,7 @@ typeOf (Var _ (Info t) _) = t
 typeOf (Ascript _ _ (Info t) _) = t
 typeOf (Apply _ _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ _ _ _ (Info t) _) = t
+typeOf (LetPat _ _ _ (Info t) _) = t
 typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ _ (Info t) _) = t
 typeOf (Index _ _ (Info t) _) = t
@@ -471,7 +471,7 @@ typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
-typeOf (DoLoop _ pat _ _ _ _) = patternType pat
+typeOf (DoLoop pat _ _ _ _) = patternType pat
 typeOf (Lambda tparams params _ _ (Info (als, t)) _) =
   unscopeType bound_here $
   foldr (uncurry (Arrow ()) . patternParam) t params `setAliases` als
