@@ -431,20 +431,20 @@ internaliseExp desc e@E.Apply{} = do
            args' <- concat <$> mapM (internaliseExp "arg") args
            fst <$> funcall desc qfname args' loc
 
-internaliseExp desc (E.LetPat tparams pat e body _ loc) =
-  internalisePat desc tparams pat e body loc (internaliseExp desc)
+internaliseExp desc (E.LetPat pat e body _ loc) =
+  internalisePat desc pat e body loc (internaliseExp desc)
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
   internaliseValBind $ E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc
   internaliseExp desc letbody
 
-internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
+internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody loc) = do
   -- We pretend that we saw a let-binding first to ensure that the
   -- initial values for the merge parameters match their annotated
   -- sizes
   ses <- internaliseExp "loop_init" mergeexp
   t <- I.staticShapes <$> mapM I.subExpType ses
-  stmPattern tparams mergepat t $ \cm mergepat_names match -> do
+  stmPattern mergepat t $ \cm mergepat_names match -> do
     mapM_ (uncurry (internaliseDimConstant loc)) cm
     ses' <- match (srclocOf mergepat) ses
     forM_ (zip mergepat_names ses') $ \(v,se) ->
@@ -505,7 +505,7 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
 
       i <- newVName "i"
 
-      bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat ->
+      bindingParams [] [mergepat] $ \mergecm shapepat nested_mergepat ->
         bindingLambdaParams [] [x] (map rowType arr_ts) $ \x_cm x_params -> do
           mapM_ (uncurry (internaliseDimConstant loc)) x_cm
           mapM_ (uncurry (internaliseDimConstant loc)) mergecm
@@ -520,12 +520,12 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
               I.Prim (IntType it) -> return it
               _                   -> fail "internaliseExp DoLoop: invalid type"
 
-      bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
+      bindingParams [] [mergepat] $ \mergecm shapepat nested_mergepat -> do
         mapM_ (uncurry (internaliseDimConstant loc)) mergecm
         forLoop nested_mergepat shapepat mergeinit $ I.ForLoop i' it num_iterations' []
 
     handleForm mergeinit (E.While cond) =
-      bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
+      bindingParams [] [mergepat] $ \mergecm shapepat nested_mergepat -> do
         mergeinit_ts <- mapM subExpType mergeinit
         mapM_ (uncurry (internaliseDimConstant loc)) mergecm
         let mergepat' = concat nested_mergepat
@@ -584,7 +584,7 @@ internaliseExp desc (E.LetWith name src idxs ve body t loc) = do
   let pat = E.Id (E.identName name) (E.identType name) loc
       src_t = E.fromStruct <$> E.identType src
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
-  internaliseExp desc $ E.LetPat [] pat e body t loc
+  internaliseExp desc $ E.LetPat pat e body t loc
 
 internaliseExp desc (E.Update src slice ve loc) = do
   ves <- internaliseExp "lw_val" ve
@@ -649,7 +649,7 @@ internaliseExp desc (E.Match  e cs _ loc) =
       bFalse <- bFalseM
       letTupExp' desc =<< generateCaseIf desc e c bFalse
       where bFalseM = do
-              eLast' <- internalisePat desc [] pLast e eLast locLast internaliseBody
+              eLast' <- internalisePat desc pLast e eLast locLast internaliseBody
               foldM (\bf c' -> eBody $ return $ generateCaseIf desc e c' bf) eLast' (reverse $ init cs')
             CasePat pLast eLast locLast = last cs'
     [] -> fail $ "internaliseExp: match with no cases at: " ++ locStr loc
@@ -757,16 +757,16 @@ generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
 
 generateCaseIf :: String -> E.Exp -> Case -> I.Body -> InternaliseM I.Exp
 generateCaseIf desc e (CasePat p eCase loc) bFail = do
-  eCase' <- internalisePat desc [] p e eCase loc internaliseBody
+  eCase' <- internalisePat desc p e eCase loc internaliseBody
   eIf cond (return eCase') (return bFail)
   where cond = BasicOp . SubExp <$> internaliseExp1 "cond" (generateCond p e)
 
-internalisePat :: String -> [TypeParamBase VName] -> E.Pattern -> E.Exp
+internalisePat :: String -> E.Pattern -> E.Exp
                -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a) -> InternaliseM a
-internalisePat desc tparams p e body loc m = do
+internalisePat desc p e body loc m = do
   ses <- internaliseExp desc e
   t <- I.staticShapes <$> mapM I.subExpType ses
-  stmPattern tparams p t $ \cm pat_names match -> do
+  stmPattern p t $ \cm pat_names match -> do
     mapM_ (uncurry (internaliseDimConstant loc)) cm
     ses' <- match loc ses
     forM_ (zip pat_names ses') $ \(v,se) ->

@@ -592,7 +592,7 @@ eval env (Ascript e td _ loc) = do
     Left err -> bad loc env $ "Value `" <> pretty v <> "` cannot match shape of type `" <>
                 pretty (declaredType td) <> "` (`" <> pretty t <> "`): " ++ err
 
-eval env (LetPat _ p e body _ _) = do
+eval env (LetPat p e body _ _) = do
   v <- eval env e
   env' <- matchPattern env p v
   eval env' body
@@ -735,7 +735,7 @@ eval _ (ProjectSection ks _ _) = return $ ValueFun $ flip (foldM walk) ks
           | Just v' <- M.lookup f fs = return v'
         walk _ _ = fail "Value does not have expected field."
 
-eval env (DoLoop _ pat init_e form body _) = do
+eval env (DoLoop pat init_e form body _) = do
   init_v <- eval env init_e
   case form of For iv bound -> do
                  bound' <- asSigned <$> eval env bound

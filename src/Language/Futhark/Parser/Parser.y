@@ -325,9 +325,6 @@ TypeParams :: { [TypeParamBase Name] }
             : TypeParam TypeParams { $1 : $2 }
             |                      { [] }
 
-TypeParams1 :: { (TypeParamBase Name, [TypeParamBase Name]) }
-            : TypeParam TypeParams { ($1, $2) }
-
 UnOp :: { (QualName Name, SrcLoc) }
       : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }
       | unop  { let L loc (UNOP v) = $1 in (qualName v, loc) }
@@ -519,11 +516,11 @@ Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo (srcspan $1 $>) }
 
-     | loop TypeParams Pattern LoopForm do Exp %prec ifprec
-         {% fmap (\t -> DoLoop $2 $3 t $4 $6 (srcspan $1 $>)) (patternExp $3) }
+     | loop Pattern LoopForm do Exp %prec ifprec
+         {% fmap (\t -> DoLoop $2 t $3 $5 (srcspan $1 $>)) (patternExp $2) }
 
-     | loop TypeParams Pattern '=' Exp LoopForm do Exp %prec ifprec
-         { DoLoop $2 $3 $5 $6 $8 (srcspan $1 $>) }
+     | loop Pattern '=' Exp LoopForm do Exp %prec ifprec
+         { DoLoop $2 $4 $5 $7 (srcspan $1 $>) }
 
      | LetExp %prec letprec { $1 }
 
@@ -696,9 +693,7 @@ Fields1 :: { [FieldBase NoInfo Name] }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
-                      { LetPat [] $2 $4 $5 NoInfo (srcspan $1 $>) }
-     | let TypeParams1 Pattern '=' Exp LetBody
-                      { LetPat (fst $2 : snd $2) $3 $5 $6 NoInfo (srcspan $1 $>) }
+                      { LetPat $2 $4 $5 NoInfo (srcspan $1 $>) }
 
      | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
        { let L _ (ID name) = $2

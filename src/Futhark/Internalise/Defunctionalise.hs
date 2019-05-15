@@ -178,13 +178,12 @@ defuncExp (Ascript e0 tydecl t loc)
                                return (Ascript e0' tydecl t loc, sv)
   | otherwise = defuncExp e0
 
-defuncExp (LetPat tparams pat e1 e2 _ loc) = do
-  let env_dim = envFromShapeParams tparams
-  (e1', sv1) <- localEnv env_dim $ defuncExp e1
+defuncExp (LetPat pat e1 e2 _ loc) = do
+  (e1', sv1) <- defuncExp e1
   let env  = matchPatternSV pat sv1
       pat' = updatePattern pat sv1
-  (e2', sv2) <- localEnv (env <> env_dim) $ defuncExp e2
-  return (LetPat tparams pat' e1' e2' (Info $ typeOf e2') loc, sv2)
+  (e2', sv2) <- localEnv env $ defuncExp e2
+  return (LetPat pat' e1' e2' (Info $ typeOf e2') loc, sv2)
 
 defuncExp (LetFun vn (dims, pats, _, Info ret, e1) e2 loc) = do
   let env_dim = envFromShapeParams dims
@@ -192,7 +191,7 @@ defuncExp (LetFun vn (dims, pats, _, Info ret, e1) e2 loc) = do
   (e2', sv2) <- extendEnv vn sv1 $ defuncExp e2
   case pats' of
     []  -> let t1 = combineTypeShapes (fromStruct ret) $ typeOf e1'
-           in return (LetPat dims (Id vn (Info t1) noLoc) e1' e2' (Info $ typeOf e2') loc, sv2)
+           in return (LetPat (Id vn (Info t1) noLoc) e1' e2' (Info $ typeOf e2') loc, sv2)
     _:_ -> let t1 = combineTypeShapes ret $ anyDimShapeAnnotations $ toStruct $ typeOf e1'
            in return (LetFun vn (dims, pats', Nothing, Info t1, e1') e2' loc, sv2)
 
@@ -260,8 +259,7 @@ defuncExp OpSectionRight{} = error "defuncExp: unexpected operator section."
 defuncExp ProjectSection{} = error "defuncExp: unexpected projection section."
 defuncExp IndexSection{}   = error "defuncExp: unexpected projection section."
 
-defuncExp (DoLoop tparams pat e1 form e3 loc) = do
-  let env_dim = envFromShapeParams tparams
+defuncExp (DoLoop pat e1 form e3 loc) = do
   (e1', sv1) <- defuncExp e1
   let env1 = matchPatternSV pat sv1
   (form', env2) <- case form of
@@ -269,10 +267,10 @@ defuncExp (DoLoop tparams pat e1 form e3 loc) = do
                         return (For v e2', envFromIdent v)
     ForIn pat2 e2 -> do e2' <- defuncExp' e2
                         return (ForIn pat2 e2', envFromPattern pat2)
-    While e2      -> do e2' <- localEnv (env1 <> env_dim) $ defuncExp' e2
+    While e2      -> do e2' <- localEnv env1 $ defuncExp' e2
                         return (While e2', mempty)
-  (e3', sv) <- localEnv (env1 <> env2 <> env_dim) $ defuncExp e3
-  return (DoLoop tparams pat e1' form' e3' loc, sv)
+  (e3', sv) <- localEnv (env1 <> env2) $ defuncExp e3
+  return (DoLoop pat e1' form' e3' loc, sv)
   where envFromIdent (Ident vn (Info tp) _) =
           M.singleton vn $ Dynamic tp
 
@@ -742,8 +740,8 @@ freeVars expr = case expr of
                           foldMap freeVars incl
   Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
   Ascript e t _ _      -> freeVars e <> names (typeDimNames $ unInfo $ expandedType t)
-  LetPat _ pat e1 e2 _ _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
-                                            `without` patternVars pat)
+  LetPat pat e1 e2 _ _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
+                                          `without` patternVars pat)
 
   LetFun vn (_, pats, _, _, e1) e2 _ ->
     ((freeVars e1 <> names (foldMap patternDimNames pats))
@@ -762,9 +760,9 @@ freeVars expr = case expr of
   ProjectSection{}            -> mempty
   IndexSection idxs _ _       -> foldMap freeDimIndex idxs
 
-  DoLoop _ pat e1 form e3 _ -> let (e2fv, e2ident) = formVars form
-                               in freeVars e1 <> e2fv <>
-                               (freeVars e3 `without` (patternVars pat <> e2ident))
+  DoLoop pat e1 form e3 _ -> let (e2fv, e2ident) = formVars form
+                             in freeVars e1 <> e2fv <>
+                             (freeVars e3 `without` (patternVars pat <> e2ident))
     where formVars (For v e2) = (freeVars e2, ident v)
           formVars (ForIn p e2)   = (freeVars e2, patternVars p)
           formVars (While e2)     = (freeVars e2, mempty)

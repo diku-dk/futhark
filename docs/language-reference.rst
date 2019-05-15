@@ -407,11 +407,11 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..<" `exp`
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
-      : | "let" `type_param`* `pat` "=" `exp` "in" `exp`
+      : | "let" `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
-      : | "loop" `type_param`* `pat` [("=" `exp`)] `loopform` "do" `exp`
+      : | "loop" `pat` [("=" `exp`)] `loopform` "do" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "=" `exp`

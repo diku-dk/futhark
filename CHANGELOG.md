@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+  * Size *parameters* (not *annotations*) are no longer permitted
+    directly in `let` and `loop` bindings.  You are likely not
+    affected.  Nobody used this.
+
 ### Changed
 
   * The array creation functions exported by generated C code now take

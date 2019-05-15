@@ -230,9 +230,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec p (Apply f arg _ _ _) =
     parensIf (p >= 10) $ ppr f <+> pprPrec 10 arg
   pprPrec _ (Negate e _) = text "-" <> ppr e
-  pprPrec p (LetPat tparams pat e body _ _) =
+  pprPrec p (LetPat pat e body _ _) =
     parensIf (p /= -1) $ align $
-    text "let" <+> align (spread $ map ppr tparams ++ [ppr pat]) <+>
+    text "let" <+> align (ppr pat) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
      else equals <+> align (ppr e)) </>
@@ -290,8 +290,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     where p name = text "." <> ppr name
   pprPrec _ (IndexSection idxs _ _) =
     parens $ text "." <> brackets (commasep (map ppr idxs))
-  pprPrec _ (DoLoop tparams pat initexp form loopbody _) =
-    text "loop" <+> spread (map ppr tparams ++ [ppr pat]) <+>
+  pprPrec _ (DoLoop pat initexp form loopbody _) =
+    text "loop" <+> ppr pat <+>
     equals <+> ppr initexp <+> ppr form <+> text "do" </>
     indent 2 (ppr loopbody)
   pprPrec _ (VConstr0 n _ _) = text "#" <> ppr n

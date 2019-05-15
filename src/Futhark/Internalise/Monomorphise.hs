@@ -208,10 +208,10 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
 transformExp (Ascript e tp t loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure t <*> pure loc
 
-transformExp (LetPat tparams pat e1 e2 (Info t) loc) = do
+transformExp (LetPat pat e1 e2 (Info t) loc) = do
   (pat', rr) <- expandRecordPattern pat
   t' <- transformType t
-  LetPat tparams pat' <$> transformExp e1 <*>
+  LetPat pat' <$> transformExp e1 <*>
     withRecordReplacements rr (transformExp e2) <*>
     pure (Info t') <*> pure loc
 
@@ -228,7 +228,7 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
         return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
 
   | otherwise =
-      transformExp $ LetPat [] (Id fname (Info ft) loc) lam e (Info $ fromStruct ret) loc
+      transformExp $ LetPat (Id fname (Info ft) loc) lam e (Info $ fromStruct ret) loc
         where lam = Lambda tparams params body Nothing (Info (mempty, ret)) loc
               ft = foldFunType (map patternType params) $ fromStruct ret
 
@@ -273,14 +273,14 @@ transformExp (ProjectSection fields (Info t) loc) =
 transformExp (IndexSection idxs (Info t) loc) =
   desugarIndexSection idxs t loc
 
-transformExp (DoLoop tparams pat e1 form e3 loc) = do
+transformExp (DoLoop pat e1 form e3 loc) = do
   e1' <- transformExp e1
   form' <- case form of
     For ident e2  -> For ident <$> transformExp e2
     ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
     While e2      -> While <$> transformExp e2
   e3' <- transformExp e3
-  return $ DoLoop tparams pat e1' form' e3' loc
+  return $ DoLoop pat e1' form' e3' loc
 
 transformExp (BinOp (QualName qs fname) (Info t) (e1, d1) (e2, d2) tp loc) = do
   fname' <- transformFName fname (toStructural t)
