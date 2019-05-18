@@ -30,6 +30,8 @@ module Futhark.CodeGen.ImpCode
   , Exp
   , Volatility (..)
   , Arg (..)
+  , HuskFunction (..)
+  , hfunctionParams
   , var
   , index
   , ErrorMsg(..)
@@ -133,7 +135,7 @@ data FunctionT a = Function { functionEntry :: Bool
                             , functionbBody :: Code a
                             , functionResult :: [ExternalValue]
                             , functionArgs :: [ExternalValue]
-                            , functionNodeCountArg :: Maybe VName
+                            , functionNodeId :: Exp
                             }
                  deriving (Show)
 
@@ -148,6 +150,17 @@ data ArrayContents = ArrayValues [PrimValue]
                    | ArrayZeros Int
                      -- ^ This many zeroes.
                      deriving (Show)
+                     
+-- | A function containing the code of a husk body
+data HuskFunction = HuskFunction
+                  { hfunctionName :: VName,
+                    hfunctionParamStruct :: VName,
+                    hfunctionNodeId :: VName
+                  }
+                  deriving (Show)
+
+hfunctionParams :: HuskFunction -> [VName]
+hfunctionParams (HuskFunction _ _ node_id) = [node_id]
 
 data Code a = Skip
             | Code a :>>: Code a
@@ -176,11 +189,8 @@ data Code a = Skip
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Partition VName (Count Bytes) VName (Count Bytes) Space
+            | PeerCopy VName (Count Bytes) Exp Space VName (Count Bytes) Exp Space (Count Bytes)
             -- ^ Destination, partition size, source, source size, space.
-            -- Number of partitions depending on scope.
-            | Collect VName (Count Bytes) VName (Count Bytes) Space
-            -- ^ Destination, destination size, source, partition size, space.
             -- Number of partitions depending on scope.
             | Write VName (Count Bytes) PrimType Space Volatility Exp
             | SetScalar VName Exp
@@ -272,10 +282,11 @@ instance Pretty op => Pretty (Functions op) where
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
 instance Pretty op => Pretty (FunctionT op) where
-  ppr (Function _ outs ins body results args _) =
+  ppr (Function _ outs ins body results args node_id) =
     text "Inputs:" </> block ins </>
     text "Outputs:" </> block outs </>
     text "Arguments:" </> block args </>
+    text "Node ID:" </> ppr node_id </>
     text "Result:" </> block results </>
     text "Body:" </> indent 2 (ppr body)
     where block :: Pretty a => [a] -> Doc
@@ -358,18 +369,13 @@ instance Pretty op => Pretty (Code op) where
             ppr size)
     where ppMemLoc base offset =
             ppr base <+> text "+" <+> ppr offset
-  ppr (Partition dest partsize src srcsize space) =
-    text "partition" <>
-    parens (ppr dest <> comma </>
-            ppr partsize <> comma </>
-            ppr src <> ppr srcsize <> comma </>
-            ppr space)
-  ppr (Collect dest destsize src partsize space) =
-    text "collect" <>
-    parens (ppr dest <> ppr destsize <> comma </>
-            ppr src <> comma </>
-            ppr partsize <> comma </>
-            ppr space)
+  ppr (PeerCopy dest destoffset destpeer destspace src srcoffset srcpeer srcspace size) =
+    text "peer_memcpy" <>
+    parens (ppMemLoc dest destoffset destpeer <> ppr destspace <> comma </>
+            ppMemLoc src srcoffset srcpeer <> ppr srcspace <> comma </>
+            ppr size)
+    where ppMemLoc base offset peer =
+            ppr base <+> text "+" <+> ppr offset <+> text "@" <+> ppr peer
   ppr (If cond tbranch fbranch) =
     text "if" <+> ppr cond <+> text "then {" </>
     indent 2 (ppr tbranch) </>
@@ -419,8 +425,8 @@ instance Foldable FunctionT where
   foldMap = foldMapDefault
 
 instance Traversable FunctionT where
-  traverse f (Function entry outs ins body results args nc_arg) =
-    Function entry outs ins <$> traverse f body <*> pure results <*> pure args <*> pure nc_arg
+  traverse f (Function entry outs ins body results args node_id) =
+    Function entry outs ins <$> traverse f body <*> pure results <*> pure args <*> pure node_id
 
 instance Functor Code where
   fmap = fmapDefault
@@ -453,10 +459,8 @@ instance Traversable Code where
     pure $ Free name space
   traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
     pure $ Copy dest destoffset destspace src srcoffset srcspace size
-  traverse _ (Partition dest partsize src srcsize space) =
-    pure $ Partition dest partsize src srcsize space
-  traverse _ (Collect dest destsize src partsize space) =
-    pure $ Collect dest destsize src partsize space
+  traverse _ (PeerCopy dest destoffset destpeer destspace src srcoffset srcpeer srcspace size) =
+    pure $ PeerCopy dest destoffset destpeer destspace src srcoffset srcpeer srcspace size
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (SetScalar name val) =
@@ -504,10 +508,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn name
   freeIn (Copy dest x _ src y _ n) =
     freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
-  freeIn (Partition dest partsize src srcsize _) =
-    freeIn dest <> freeIn partsize <> freeIn src <> freeIn srcsize
-  freeIn (Collect dest destsize src partsize _) =
-    freeIn dest <> freeIn destsize <> freeIn src <> freeIn partsize
+  freeIn (PeerCopy dest x dpeer _ src y speer _ n) =
+    freeIn dest <> freeIn x <> freeIn dpeer <> freeIn src <> freeIn y <> freeIn speer <> freeIn n
   freeIn (SetMem x y _) =
     freeIn x <> freeIn y
   freeIn (Write v i _ _ _ e) =
@@ -560,10 +562,8 @@ instance Substitute a => Substitute (Code a) where
     Free (substituteNames m name) space
   substituteNames m (Copy dest destoffset destspace src srcoffset srcspace size) =
     Copy (substituteNames m dest) destoffset destspace (substituteNames m src) srcoffset srcspace size
-  substituteNames m (Partition dest partsize src srcsize space) =
-    Partition (substituteNames m dest) partsize (substituteNames m src) srcsize space
-  substituteNames m (Collect dest destsize src partsize space) =
-    Collect (substituteNames m dest) destsize (substituteNames m src) partsize space
+  substituteNames m (PeerCopy dest destoffset destpeer destspace src srcoffset srcpeer srcspace size) =
+    PeerCopy (substituteNames m dest) destoffset destpeer destspace (substituteNames m src) srcoffset srcpeer srcspace size
   substituteNames m (SetMem dest from space) =
     SetMem (substituteNames m dest) (substituteNames m from) space
   substituteNames m (Write name i bt space vol val) =

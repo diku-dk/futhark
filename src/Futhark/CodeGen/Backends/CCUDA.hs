@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TupleSections #-}
 module Futhark.CodeGen.Backends.CCUDA
   ( compileProg
   , GC.CParts(..)
@@ -12,22 +13,22 @@ import Data.List
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
 import Futhark.Error
-import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
+import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax, Param, paramName)
 import Futhark.MonadFreshNames
-import Futhark.CodeGen.ImpCode.OpenCL hiding (paramName)
+import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.GenericC.Options
 
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes)
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
 compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program cuda_code cuda_prelude kernel_names _ sizes prog') ->
+    Right (Program cuda_code cuda_prelude kernel_names husk_funcs _ sizes prog') ->
       let extra = generateBoilerplate cuda_code cuda_prelude
-                                      kernel_names sizes
+                                      kernel_names husk_funcs sizes
       in Right <$> GC.compileProg operations extra cuda_includes
                    [Space "device", Space "local", DefaultSpace] cliOptions prog'
   where
@@ -38,8 +39,7 @@ compileProg prog = do
                  , GC.opsAllocate    = allocateCUDABuffer
                  , GC.opsDeallocate  = deallocateCUDABuffer
                  , GC.opsCopy        = copyCUDAMemory
-                 , GC.opsPartition   = partitionCUDAMemory
-                 , GC.opsCollect     = collectCUDAMemory
+                 , GC.opsPeerCopy    = peerCopyCUDAMemory
                  , GC.opsStaticArray = staticCUDAArray
                  , GC.opsMemoryType  = cudaMemoryType
                  , GC.opsCompiler    = callKernel
@@ -112,7 +112,7 @@ writeCUDAScalar mem idx t "device" _ val = do
   val' <- newVName "write_tmp"
   GC.stm [C.cstm|{$ty:t $id:val' = $exp:val;
                   CUDA_SUCCEED(
-                    cuMemcpyHtoD($exp:mem.mems[0] + $exp:idx,
+                    cuMemcpyHtoD($exp:mem + $exp:idx,
                                  &$id:val',
                                  sizeof($ty:t)));
                  }|]
@@ -125,7 +125,7 @@ readCUDAScalar mem idx t "device" _ = do
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm [C.cstm|CUDA_SUCCEED(
                    cuMemcpyDtoH(&$id:val,
-                                $exp:mem.mems[0] + $exp:idx,
+                                $exp:mem + $exp:idx,
                                 sizeof($ty:t)));
                 |]
   return [C.cexp|$id:val|]
@@ -133,30 +133,21 @@ readCUDAScalar _ _ _ space _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
 
 allocateCUDABuffer :: GC.Allocate OpenCL ()
-allocateCUDABuffer mem n size tag "device" = do
-  GC.stm [C.cstm|$exp:mem.count = $exp:n;|]
-  GC.stm [C.cstm|$exp:mem.mems = malloc($exp:n * sizeof(CUdeviceptr));|]
+allocateCUDABuffer mem size tag "device" = do
+  node_id <- GC.getNodeId
   GC.stm [C.cstm|
-      if ($exp:n == 1) {
-        CUDA_SUCCEED(cuda_alloc(&ctx->cuda, $exp:size, $exp:tag, &$exp:mem.mems[0]));
-      } else {
-        cuda_send_node_alloc(&ctx->cuda, $exp:mem, $exp:tag, $exp:size);
-      }
+      CUDA_SUCCEED(cuda_alloc(&ctx->cuda.nodes[$exp:node_id], $exp:size, $exp:tag, &$exp:mem));
     |]
-allocateCUDABuffer _ _ _ _ "local" = return ()
-allocateCUDABuffer _ _ _ _ space =
+allocateCUDABuffer _ _ _ "local" = return ()
+allocateCUDABuffer _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateCUDABuffer :: GC.Deallocate OpenCL ()
 deallocateCUDABuffer mem tag "device" = do
+  node_id <- GC.getNodeId
   GC.stm [C.cstm|
-      if($exp:mem.count == 1) {
-        CUDA_SUCCEED(cuda_free(&ctx->cuda, $exp:mem.mems[0], $exp:tag));
-      } else {
-        cuda_send_node_free(&ctx->cuda, $exp:mem, $exp:tag);
-      }
+      CUDA_SUCCEED(cuda_free(&ctx->cuda.nodes[$exp:node_id], $exp:mem, $exp:tag));
     |]
-  GC.stm [C.cstm|free($exp:mem.mems);|]
 deallocateCUDABuffer _ _ "local" = return ()
 deallocateCUDABuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' memory space."
@@ -164,50 +155,34 @@ deallocateCUDABuffer _ _ space =
 copyCUDAMemory :: GC.Copy OpenCL ()
 copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
   fn <- memcpyFun dstSpace srcSpace
-  ncpy <- nodeMemcpy dstSpace srcSpace
-  GC.stm =<< maybe 
-    [C.cstm|CUDA_SUCCEED($id:fn($exp:(firstMem dstSpace dstmem) + $exp:dstidx,
-                                $exp:(firstMem srcSpace srcmem) + $exp:srcidx, $exp:nbytes));
-      |]
-    (const ncpy)
-    <$> GC.getNodeCount
+  GC.stm [C.cstm|CUDA_SUCCEED(
+                  $id:fn($exp:dstmem + $exp:dstidx,
+                         $exp:srcmem + $exp:srcidx,
+                         $exp:nbytes));
+                |]
   where
-    firstMem (Space "device") mem = [C.cexp|$exp:mem.mems[0]|]
-    firstMem _ mem = mem
     memcpyFun DefaultSpace (Space "device")     = return "cuMemcpyDtoH"
     memcpyFun (Space "device") DefaultSpace     = return "cuMemcpyHtoD"
-    memcpyFun (Space "device") (Space "device") = return "cuMemcpyDtoD"
+    memcpyFun (Space "device") (Space "device") = return "cuMemcpy"
     memcpyFun _ _ = fail $ "Cannot copy to '" ++ show dstSpace
                            ++ "' from '" ++ show srcSpace ++ "'."
-    nodeMemcpy DefaultSpace (Space "device")     =
-      return [C.cstm|cuda_send_node_memcpy_dtoh(&ctx->cuda, $exp:srcmem, $exp:srcidx,
-                            $exp:dstmem + $exp:dstidx, $exp:nbytes);|]
-    nodeMemcpy (Space "device") DefaultSpace     = 
-      return [C.cstm|cuda_send_node_memcpy_htod(&ctx->cuda, $exp:srcmem + $exp:srcidx,
-                            $exp:dstmem, $exp:dstidx, $exp:nbytes);|]
-    nodeMemcpy (Space "device") (Space "device") = 
-      return [C.cstm|cuda_send_node_memcpy_dtod(&ctx->cuda, $exp:srcmem, $exp:srcidx,
-                            $exp:dstmem, $exp:dstidx, $exp:nbytes);|]
-    nodeMemcpy _ _ = fail $ "Cannot copy to '" ++ show dstSpace
-                           ++ "' from '" ++ show srcSpace ++ "'."
 
-partitionCUDAMemory :: GC.Partition OpenCL ()
-partitionCUDAMemory dstmem partsize srcmem srcsize "device" =
-  GC.stm [C.cstm|cuda_send_node_memcpy_partition(&ctx->cuda, $exp:dstmem, $exp:srcmem,
-                                                 $exp:srcsize, $exp:partsize);|]
-partitionCUDAMemory _ _ _ _ space =
-  fail $ "CUDA backend cannot partition memory in '" ++ space ++ "' memory space"
-
-collectCUDAMemory :: GC.Collect OpenCL ()
-collectCUDAMemory dstmem dstsize srcmem partsize "device" =
-  GC.stm [C.cstm|cuda_send_node_memcpy_collect(&ctx->cuda, $exp:dstmem, $exp:dstsize,
-                                                 $exp:srcmem, $exp:partsize);|]
-collectCUDAMemory _ _ _ _ space =
-  fail $ "CUDA backend cannot partition memory in '" ++ space ++ "' memory space"
+peerCopyCUDAMemory :: GC.PeerCopy OpenCL ()
+peerCopyCUDAMemory dstmem dstidx dstpeer (Space "device") srcmem srcidx srcpeer (Space "device") nbytes =
+  GC.stm [C.cstm|CUDA_SUCCEED(
+                  cuMemcpyPeer($exp:dstmem + $exp:dstidx,
+                               ctx->cuda.nodes[$exp:dstpeer].cu_ctx,
+                               $exp:srcmem + $exp:srcidx,
+                               ctx->cuda.nodes[$exp:srcpeer].cu_ctx,
+                               $exp:nbytes));|]
+peerCopyCUDAMemory _ _ _ dstSpace _ _ _ srcSpace _ =
+  fail $ "CUDA backend cannot peer copy memory to '" ++ show dstSpace
+         ++ "' from '" ++ show srcSpace ++ "'."
 
 staticCUDAArray :: GC.StaticArray OpenCL ()
 staticCUDAArray name "device" t vs = do
   let ct = GC.primTypeToCType t
+  node_id <- GC.getNodeId
   name_realtype <- newVName $ baseString name ++ "_realtype"
   num_elems <- case vs of
     ArrayValues vs' -> do
@@ -219,20 +194,23 @@ staticCUDAArray name "device" t vs = do
       return n
   GC.nodeContextField $ pretty name
   -- During startup, copy the data to where we need it.
-  GC.atInit [C.cstm|{
-    ctx->$id:name.references = NULL;
-    ctx->$id:name.size = 0;
-    ctx->$id:name.mem.count = ctx->cuda.cfg.num_nodes;
-    ctx->$id:name.mem.mems = malloc(ctx->cuda.cfg.num_nodes * sizeof(CUdeviceptr));
-    cuda_send_node_static(&ctx->cuda, ctx->$id:name.mem, $id:name_realtype, $int:num_elems, sizeof($ty:ct));
-  }|]
-  GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
+  GC.atNodeInit (\init_node_id -> [C.cstm|{
+    ctx->node_ctx[$exp:init_node_id].$id:name.references = NULL;
+    ctx->node_ctx[$exp:init_node_id].$id:name.size = 0;
+    CUDA_SUCCEED(cuMemAlloc(&ctx->node_ctx[$exp:init_node_id].$id:name.mem,
+                            ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct)));
+    if ($int:num_elems > 0) {
+      CUDA_SUCCEED(cuMemcpyHtoD(ctx->node_ctx[$exp:init_node_id].$id:name.mem, $id:name_realtype,
+                                $int:num_elems*sizeof($ty:ct)));
+    }
+  }|])
+  GC.item [C.citem|struct memblock_device $id:name = ctx->node_ctx[$exp:node_id].$id:name;|]
 staticCUDAArray _ space _ _ =
   fail $ "CUDA backend cannot create static array in '" ++ space
           ++ "' memory space"
 
 cudaMemoryType :: GC.MemoryType OpenCL ()
-cudaMemoryType "device" = pure [C.cty|struct cuda_mem_ptrs|]
+cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
 cudaMemoryType "local" = pure [C.cty|unsigned char|] -- dummy type
 cudaMemoryType space =
   fail $ "CUDA backend does not support '" ++ space ++ "' memory space."
@@ -252,19 +230,20 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
-callKernel (DistributeHusk src_elems_e parts_elems num_nodes body) = do
-  src_elems <- GC.compileExp src_elems_e
+callKernel (DistributeHusk num_nodes bparams husk_func interm body red) = do
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
-  GC.stm [C.cstm|$id:parts_elems = ($exp:src_elems + $id:num_nodes - 1) / $id:num_nodes;|]
-  GC.localNodeCount (Just [C.cexp|$id:num_nodes|]) $ GC.compileCode body
+  GC.defineHuskFunction husk_func bparams body
+  params <- newVName "husk_params"
+  GC.compileCode interm
+  GC.decl [C.cdecl|struct $id:(hfunctionParamStruct husk_func) $id:params;|]
+  GC.stms [[C.cstm|$id:params.$id:(paramName bparam) = $id:(paramName bparam);|] | bparam <- bparams]
+  GC.stm [C.cstm|cuda_send_node_husk(&ctx->cuda, $int:(baseTag $ hfunctionName husk_func), &$id:params);|]
+  GC.compileCode red
 callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
-  ind_args_arr <- newVName "ind_kernel_args"
   time_start <- newVName "time_start"
   time_end <- newVName "time_end"
-  node_id <- newVName "node_id"
-  free_node_id <- newVName "free_node_id"
-  (args', shared_vars) <- unzip <$> mapM (mkArgs node_id) args
+  (args', shared_vars) <- unzip <$> mapM mkArgs args
   let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
       shared_offsets_sc = mkOffsets shared_sizes
       shared_args = zip shared_offsets shared_offsets_sc
@@ -278,25 +257,10 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
   let perm_args
         | length num_blocks == 3 = [ [C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|] ]
         | otherwise = []
-  let args'' = perm_args ++ args'
+  let args'' = perm_args ++ [ [C.cinit|&$id:a|] | a <- args' ]
       sizes_nonzero = expsNotZero [grid_x, grid_y, grid_z,
                       block_x, block_y, block_z]
-  node_count <- GC.getNodeCount
-  let actual_node_count = fromMaybe [C.cexp|1|] node_count
-      sync = maybe [C.cstm|CUDA_SUCCEED(cuCtxSynchronize());|]
-                   (const [C.cstm|cuda_send_node_sync(&ctx->cuda);|])
-                   node_count
-      launch = maybe [C.cstm|CUDA_SUCCEED(
-                              cuLaunchKernel(ctx->$id:name[0],
-                                            grid[0], grid[1], grid[2],
-                                            $exp:block_x, $exp:block_y, $exp:block_z,
-                                            $exp:shared_tot, NULL,
-                                            $id:args_arr[0], NULL));|]
-                     (const [C.cstm|cuda_send_node_launch(&ctx->cuda, ctx->$id:name, grid[0], grid[1],
-                                                          grid[2], $exp:block_x, $exp:block_y,
-                                                          $exp:block_z, $exp:shared_tot, $id:args_arr);|])
-                     node_count
-
+  node_id <- GC.getNodeId
   GC.stm [C.cstm|
     if ($exp:sizes_nonzero) {
       int perm[3] = { 0, 1, 2 };
@@ -316,35 +280,28 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
       grid[perm[1]] = $exp:grid_y;
       grid[perm[2]] = $exp:grid_z;
 
-      void ***$id:args_arr = malloc($exp:actual_node_count * sizeof(void*));
-      for (int $id:node_id = 0; $id:node_id < $exp:actual_node_count; ++$id:node_id) {
-        void *$id:ind_args_arr[] = { $inits:args'' };
-        $id:args_arr[$id:node_id] = malloc(sizeof($id:ind_args_arr));
-        memcpy($id:args_arr[$id:node_id], $id:ind_args_arr, sizeof($id:ind_args_arr));
-      }
-
+      void *$id:args_arr[] = { $inits:args'' };
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
-        fprintf(stderr, "Launching %s on node %d with grid size (", $string:name,
-                ctx->cuda.active_node);
+        fprintf(stderr, "Launching %s with grid size (", $string:name);
         $stms:(printSizes [grid_x, grid_y, grid_z])
         fprintf(stderr, ") and block size (");
         $stms:(printSizes [block_x, block_y, block_z])
         fprintf(stderr, ").\n");
         $id:time_start = get_wall_time();
       }
-      $stm:launch
+      CUDA_SUCCEED(
+        cuLaunchKernel(ctx->node_ctx[$exp:node_id].$id:name,
+                       grid[0], grid[1], grid[2],
+                       $exp:block_x, $exp:block_y, $exp:block_z,
+                       $exp:shared_tot, NULL,
+                       $id:args_arr, NULL));
       if (ctx->debugging) {
-        $stm:sync
+        CUDA_SUCCEED(cuCtxSynchronize());
         $id:time_end = get_wall_time();
         fprintf(stderr, "Kernel %s runtime: %ldus\n",
                 $string:name, $id:time_end - $id:time_start);
       }
-
-      for (int $id:free_node_id = 0; $id:free_node_id < $exp:actual_node_count; ++$id:free_node_id) {
-        free($id:args_arr[$id:free_node_id]);
-      }
-      free($id:args_arr);
     }|]
   where
     mkDims [] = ([C.cexp|0|] , [C.cexp|0|], [C.cexp|0|])
@@ -357,20 +314,19 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
     expNotZero e = [C.cexp|$exp:e != 0|]
     expAnd a b = [C.cexp|$exp:a && $exp:b|]
     expsNotZero = foldl expAnd [C.cexp|1|] . map expNotZero
-    mkArgs _ (ValueKArg e t) = do
-      arg <- GC.compileExpToName "kernel_arg" t e
-      return ([C.cinit|&$id:arg|], Nothing)
-    mkArgs n (MemKArg v) = do
+    mkArgs (ValueKArg e t) =
+      (,Nothing) <$> GC.compileExpToName "kernel_arg" t e
+    mkArgs (MemKArg v) = do
       v' <- GC.rawMem v
       arg <- newVName "kernel_arg"
-      GC.decl [C.cdecl|struct cuda_mem_ptrs $id:arg = $exp:v';|]
-      return ([C.cinit|&$id:arg.mems[$id:n]|], Nothing)
-    mkArgs _ (SharedMemoryKArg (Count c)) = do
+      GC.decl [C.cdecl|typename CUdeviceptr $id:arg = $exp:v';|]
+      return (arg, Nothing)
+    mkArgs (SharedMemoryKArg (Count c)) = do
       num_bytes <- GC.compileExp c
       size <- newVName "shared_size"
       offset <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
-      return ([C.cinit|&$id:offset|], Just (size, offset))
+      return (offset, Just (size, offset))
 
     printSizes =
       intercalate [[C.cstm|fprintf(stderr, ", ");|]] . map printSize

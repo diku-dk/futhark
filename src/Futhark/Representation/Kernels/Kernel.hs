@@ -835,6 +835,7 @@ data HuskSpace lore = HuskSpace
                     , hspaceSourceElems :: SubExp
                     , hspacePartitions :: [LParam lore]
                     , hspacePartitionElems :: VName
+                    , hspacePartitionOffset :: VName
                     , hspacePartitionsMemory :: [LParam lore]
                     , hspacePartitionSizes :: [VName]
                     }
@@ -844,20 +845,21 @@ deriving instance Annotations lore => Ord (HuskSpace lore)
 deriving instance Annotations lore => Show (HuskSpace lore)
 
 scopeOfHuskSpace :: HuskSpace lore -> Scope lore
-scopeOfHuskSpace (HuskSpace _ _ parts parts_elems parts_mem parts_sizes) =
-  M.fromList (zip (parts_elems : parts_sizes) $ repeat $ IndexInfo Int32)
+scopeOfHuskSpace (HuskSpace _ _ parts parts_elems parts_offset parts_mem parts_sizes) =
+  M.fromList (zip (parts_elems : parts_offset : parts_sizes) $ repeat $ IndexInfo Int32)
   <> scopeOfLParams parts
   <> scopeOfLParams parts_mem
 
 boundByHuskSpace :: HuskSpace lore -> Names
-boundByHuskSpace (HuskSpace _ _ parts parts_elems parts_mem parts_sizes) =
-  S.fromList $ concat [[parts_elems], parts_sizes, map paramName parts, map paramName parts_mem]
+boundByHuskSpace (HuskSpace _ _ parts parts_elems parts_offset parts_mem parts_sizes) =
+  S.fromList $ concat [[parts_elems, parts_offset], parts_sizes, map paramName parts, map paramName parts_mem]
 
 constructHuskSpace :: (MonadFreshNames m, HasScope lore m, LParamAttr lore ~ Type)
                    => [VName] -> SubExp -> m (HuskSpace lore)
 constructHuskSpace src src_elems = do
   parts_names <- replicateM (length src) $ newVName "partition"
   parts_elems <- newVName "partition_elems"
+  parts_offset <- newVName "partition_offset"
   parts_mem_names <- replicateM (length src) $ newVName "partition_mem"
   parts_sizes <- replicateM (length src) $ newVName "partition_size"
   src_ts <- mapM lookupType src
@@ -865,12 +867,12 @@ constructHuskSpace src src_elems = do
       parts = zipWith Param parts_names parts_ts
       parts_mem_ts = map (\s -> Mem (Var s) $ Space "device") parts_sizes
       parts_mem = zipWith Param parts_mem_names parts_mem_ts
-  return $ HuskSpace src src_elems parts parts_elems parts_mem parts_sizes
+  return $ HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes
 
 convertHuskSpace :: LParamAttr fromlore ~ LParamAttr tolore
                  => HuskSpace fromlore -> HuskSpace tolore
-convertHuskSpace (HuskSpace src src_elems parts parts_elems parts_mem parts_size) =
-  HuskSpace src src_elems parts parts_elems parts_mem parts_size
+convertHuskSpace (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_size) =
+  HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_size
 
 instance (Attributes lore, Substitute inner) => Substitute (HostOp lore inner) where
   substituteNames substs (HostOp op) =
@@ -883,10 +885,11 @@ instance (Attributes lore, Substitute inner) => Substitute (HostOp lore inner) w
   substituteNames _ x = x
 
 instance Substitute (LParamAttr lore) => Substitute (HuskSpace lore) where
-  substituteNames substs (HuskSpace src src_elems parts parts_elems parts_mem parts_sizes) =
+  substituteNames substs (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) =
     HuskSpace (substituteNames substs src) (substituteNames substs src_elems)
               (substituteNames substs parts) (substituteNames substs parts_elems)
-              (substituteNames substs parts_mem) (substituteNames substs parts_sizes)
+              (substituteNames substs parts_offset) (substituteNames substs parts_mem)
+              (substituteNames substs parts_sizes)
 
 instance (Attributes lore, Rename inner) => Rename (HostOp lore inner) where
   rename (HostOp op) = HostOp <$> rename op
@@ -900,12 +903,13 @@ instance (Attributes lore, Rename inner) => Rename (HostOp lore inner) where
   rename x = pure x
 
 instance Renameable lore => Rename (HuskSpace lore) where
-  rename (HuskSpace src src_elems parts parts_elems parts_mem parts_sizes) = do
+  rename (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) = do
     parts' <- rename parts
     parts_elems' <- rename parts_elems
+    parts_offset' <- rename parts_offset
     parts_mem' <- rename parts_mem
     parts_sizes' <- rename parts_sizes
-    return $ HuskSpace src src_elems parts' parts_elems' parts_mem' parts_sizes'
+    return $ HuskSpace src src_elems parts' parts_elems' parts_offset' parts_mem' parts_sizes'
 
 instance (Attributes lore, IsOp inner) => IsOp (HostOp lore inner) where
   safeOp (HostOp op) = safeOp op
@@ -1032,12 +1036,13 @@ instance (PrettyLore lore, PP.Pretty inner) => PP.Pretty (HostOp lore inner) whe
   ppr (HostOp op) = ppr op
 
 instance Pretty (HuskSpace lore) where
-  ppr (HuskSpace src src_elems parts parts_elems parts_mem parts_sizes) =
+  ppr (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) =
     parens (commasep [text "source data:" <+> ppr src,
                       text "number of source elements:" <+> ppr src_elems,
                       text "partitions ->" <+> ppr (map paramName parts),
                       text "partition memory ->" <+> ppr (map paramName parts_mem),
                       text "number of partition elements ->" <+> ppr parts_elems,
+                      text "offset of partitions ->" <+> ppr parts_offset,
                       text "partition byte sizes ->" <+> ppr parts_sizes])
 
 instance (OpMetrics (Op lore), OpMetrics inner) => OpMetrics (HostOp lore inner) where
@@ -1053,9 +1058,9 @@ instance (Aliased lore, UsageInOp inner) => UsageInOp (HostOp lore inner) where
   usageInOp GetSizeMax{} = mempty
   usageInOp CmpSizeLe{} = mempty
   usageInOp (HostOp op) = usageInOp op
-  usageInOp (Husk hspace red_op _ _ body) = 
+  usageInOp (Husk hspace red_op nes _ body) = 
     mconcat $ map UT.consumedUsage (S.toList $ consumedInBody body)
-            ++ [ usageInLambda red_op $ concatMap varInSubExp $ bodyResult body
+            ++ [ usageInLambda red_op $ concatMap varInSubExp $ take (length nes) $ bodyResult body
                , UT.usages (S.fromList $ hspacePartitionElems hspace : varInSubExp (hspaceSourceElems hspace))
                , UT.usages (S.fromList $ hspaceSource hspace)]
     where varInSubExp (Var n) = [n]

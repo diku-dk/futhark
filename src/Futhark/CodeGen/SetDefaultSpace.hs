@@ -21,13 +21,14 @@ setDefaultSpace space (Functions fundecs) =
             | (fname, func) <- fundecs ]
 
 setFunctionSpace :: Space -> Function HostOp -> SetDefaultSpaceM (Function HostOp)
-setFunctionSpace space (Function entry outputs inputs body results args nc_arg) = do
+setFunctionSpace space (Function entry outputs inputs body results args node_id) = do
   outputs' <- mapM (setParamSpace space) outputs
   inputs' <- mapM (setParamSpace space) inputs
   body' <- setBodySpace space body 
   results' <- mapM (setExtValueSpace space) results
   args' <- mapM (setExtValueSpace space) args
-  return $ Function entry outputs' inputs' body' results' args' nc_arg
+  node_id' <- setExpSpace space node_id
+  return $ Function entry outputs' inputs' body' results' args' node_id'
 
 setParamSpace :: Space -> Param -> SetDefaultSpaceM Param
 setParamSpace space (MemParam name old_space) =
@@ -63,18 +64,16 @@ setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n)
   src_space' <- setSpace src space src_space
   Copy dest dest_offset' dest_space' src src_offset' src_space' <$>
     setCountSpace space n
-setBodySpace space (Partition dest part_size src src_size old_space) =
-  Partition dest
-  <$> setCountSpace space part_size
-  <*> pure src
-  <*> setCountSpace space src_size
-  <*> setSpace dest space old_space
-setBodySpace space (Collect dest dest_size src part_size old_space) =
-  Collect dest
-  <$> setCountSpace space dest_size
-  <*> pure src
-  <*> setCountSpace space part_size
-  <*> setSpace dest space old_space
+setBodySpace space (PeerCopy dest dest_offset dest_peer dest_space
+                             src src_offset src_peer src_space n) = do
+  dest_offset' <- setCountSpace space dest_offset
+  src_offset' <- setCountSpace space src_offset
+  dest_peer' <- setExpSpace space dest_peer
+  src_peer' <- setExpSpace space src_peer
+  dest_space' <- setSpace dest space dest_space
+  src_space' <- setSpace src space src_space
+  PeerCopy dest dest_offset' dest_peer' dest_space' src src_offset'
+    src_peer' src_space' <$> setCountSpace space n
 setBodySpace space (Write dest dest_offset bt dest_space vol e) = do
   dest_offset' <- setCountSpace space dest_offset
   dest_space' <- setSpace dest space dest_space
@@ -112,9 +111,14 @@ setBodySpace space (Op op) =
   Op <$> setHostOpDefaultSpace space op
 
 setHostOpDefaultSpace :: Space -> HostOp -> SetDefaultSpaceM HostOp
-setHostOpDefaultSpace space (Husk keep_host src_elems parts_elems num_nodes body) =
+setHostOpDefaultSpace space (Husk keep_host num_nodes bparams husk_func interm body red) =
   localExclude (S.fromList keep_host) $
-    Husk keep_host src_elems parts_elems num_nodes <$> setBodySpace space body
+    Husk keep_host num_nodes
+      <$> mapM (setParamSpace space) bparams
+      <*> pure husk_func
+      <*> pure interm -- Keep intermediate allocations on host
+      <*> setBodySpace space body
+      <*> pure red -- Keep reduce on host
 setHostOpDefaultSpace _ op = return op
 
 setCountSpace :: Space -> Count a -> SetDefaultSpaceM (Count a)

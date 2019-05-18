@@ -27,7 +27,7 @@ compileProg module_name prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Imp.Program opencl_code opencl_prelude kernel_names types sizes prog') ->
+    Right (Imp.Program opencl_code opencl_prelude kernel_names _ types sizes prog') ->
       Right <$> CS.compileProg
                   module_name
                   CS.emptyConstructor

@@ -26,7 +26,7 @@ compileProg module_name prog = do
   --could probably be a better why do to this..
   case res of
     Left err -> return $ Left err
-    Right (Imp.Program opencl_code opencl_prelude kernel_names types sizes prog')  -> do
+    Right (Imp.Program opencl_code opencl_prelude kernel_names _ types sizes prog')  -> do
       --prepare the strings for assigning the kernels and set them as global
       let assign = unlines $ map (\x -> pretty $ Assign (Var ("self."++x++"_var")) (Var $ "program."++x)) kernel_names
 

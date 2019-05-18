@@ -555,19 +555,20 @@ handleHostOp (HostOp (SegGenRed space ops ts body)) = do
 handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
   let hspace' = huskSpaceMemInfo hspace
   (body', red_op') <- localScope (scopeOfHuskSpace hspace') $ do
-    b <- allocInHuskBody body
-    let red_res = take (length nes) $ getVars $ bodyResult b
-        lp' = zipWith huskParamMemInfo lp $ concat $ replicate 2 red_res
+    (Body bc bb br) <- allocInHuskBody body
+    (lp', a) <- collectStms $ mapM alloc lp
     r <- allocInLambda lp' lb lr
-    return (b, r)
+    return (Body bc (bb <> a) br, r)
   return $ Inner $ Husk hspace' red_op' nes ts body'
-  where getVars [] = []
-        getVars (Var n : vs) = n : getVars vs
-        getVars (_ : vs) = getVars vs
+  where alloc (Param name (Prim pt)) = return $ Param name $ MemPrim pt
+        alloc (Param name (Mem size space)) = return $ Param name $ MemMem size space
+        alloc (Param name t@(Array pt shape u)) = do
+          (_, mem) <- allocForArray t DefaultSpace
+          return $ Param name $ directIndexFunction pt shape u mem t
 
 huskSpaceMemInfo :: HuskSpace Kernels -> HuskSpace ExplicitMemory
-huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_mem parts_sizes) =
-  HuskSpace src src_elems parts' parts_elems parts_mem' parts_sizes
+huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) =
+  HuskSpace src src_elems parts' parts_elems parts_offset parts_mem' parts_sizes
   where parts_mem_names = map paramName parts_mem
         parts' = zipWith huskParamMemInfo parts parts_mem_names
         parts_mem' = zipWith huskParamMemInfo parts_mem parts_mem_names

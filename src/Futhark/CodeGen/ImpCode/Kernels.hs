@@ -50,7 +50,7 @@ newtype KernelConst = SizeConst Name
 type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel Kernel
-            | Husk [VName] Imp.Exp VName VName Code
+            | Husk [VName] VName [Imp.Param] Imp.HuskFunction Code Code Code
             | GetSize VName Name SizeClass
             | CmpSizeLe VName Name SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
@@ -130,17 +130,18 @@ instance Pretty HostOp where
     ppr dest <+> text "<-" <+>
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
-  ppr (Husk _ _ _ _ body) =
+  ppr (Husk _ _ _ _ _ body red) =
     text "husk" </>
-    nestedBlock "{" "}" (ppr body)
+    nestedBlock "{" "}" (ppr body) </>
+    nestedBlock "{" "}" (ppr red)
     -- TODO: ^ Make this more readable
   ppr (CallKernel c) =
     ppr c
 
 instance FreeIn HostOp where
   freeIn (CallKernel c) = freeIn c
-  freeIn (Husk _ _ parts_elems num_nodes body) =
-    freeIn body `S.difference` S.fromList [parts_elems, num_nodes]
+  freeIn (Husk _ num_nodes _ _ interm _ red) =
+    (freeIn interm <> freeIn red) `S.difference` S.singleton num_nodes
   freeIn (CmpSizeLe dest _ _ x) =
     freeIn dest <> freeIn x
   freeIn (GetSizeMax dest _) =
@@ -155,10 +156,15 @@ instance Substitute HostOp where
     GetSizeMax (substituteNames m dest) size_class
   substituteNames m (CmpSizeLe dest name size_class x) =
     CmpSizeLe (substituteNames m dest) name size_class (substituteNames m x)
-  substituteNames m (Husk keep_host src_elems parts_elems num_nodes body) =
-    Husk (substituteNames m keep_host) (substituteNames m src_elems)
-         (substituteNames m parts_elems) (substituteNames m num_nodes)
-         (substituteNames m body)
+  substituteNames m (Husk keep_host num_nodes bparams husk_func interm body red) =
+    Husk (substituteNames m keep_host) (substituteNames m num_nodes)
+         (map substituteForParam bparams) (substituteHuskFunc husk_func)
+         (substituteNames m interm) (substituteNames m body) (substituteNames m red)
+    where substituteForParam (ScalarParam n t) = ScalarParam (substituteNames m n) t
+          substituteForParam (MemParam n s) = MemParam (substituteNames m n) s
+          substituteHuskFunc (HuskFunction name param_struct node_id) =
+            HuskFunction (substituteNames m name) (substituteNames m param_struct)
+                         (substituteNames m node_id)
   substituteNames m (CallKernel c) =
     CallKernel (substituteNames m c)
 

@@ -26,7 +26,7 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program opencl_code opencl_prelude kernel_names types sizes prog') ->
+    Right (Program opencl_code opencl_prelude kernel_names _ types sizes prog') ->
       Right <$> GC.compileProg operations
                 (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes)
                 include_opencl_h [Space "device", Space "local", DefaultSpace]
@@ -39,8 +39,7 @@ compileProg prog = do
                      , GC.opsAllocate = allocateOpenCLBuffer
                      , GC.opsDeallocate = deallocateOpenCLBuffer
                      , GC.opsCopy = copyOpenCLMemory
-                     , GC.opsPartition = partitionOpenCLMemory
-                     , GC.opsCollect = collectOpenCLMemory
+                     , GC.opsPeerCopy = peerCopyOpenCLMemory
                      , GC.opsStaticArray = staticOpenCLArray
                      , GC.opsMemoryType = openclMemoryType
                      , GC.opsFatMemory = True
@@ -191,11 +190,11 @@ readOpenCLScalar _ _ _ space _ =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
-allocateOpenCLBuffer mem _ size tag "device" =
+allocateOpenCLBuffer mem size tag "device" =
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, $exp:size, $exp:tag, &$exp:mem));|]
-allocateOpenCLBuffer _ _ _ _ "local" =
+allocateOpenCLBuffer _ _ _ "local" =
   return () -- Hack - these memory blocks do not actually exist.
-allocateOpenCLBuffer _ _ _ _ space =
+allocateOpenCLBuffer _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
@@ -252,11 +251,8 @@ copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
-partitionOpenCLMemory :: GC.Partition OpenCL ()
-partitionOpenCLMemory _ _ _ _ _ = fail "Partition not implemented in the OpenCL backend."
-
-collectOpenCLMemory :: GC.Collect OpenCL ()
-collectOpenCLMemory _ _ _ _ _ = fail "Collect not implemented in the OpenCL backend."
+peerCopyOpenCLMemory :: GC.PeerCopy OpenCL ()
+peerCopyOpenCLMemory _ _ _ _ _ = fail "Peer copy not implemented in the OpenCL backend."
 
 openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]

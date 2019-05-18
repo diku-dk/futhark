@@ -23,21 +23,21 @@ module Futhark.CodeGen.Backends.GenericC
   , Allocate
   , Deallocate
   , Copy
-  , Partition
-  , Collect
+  , PeerCopy
   , StaticArray
 
   -- * Monadic compiler interface
   , CompilerM
   , CompilerState (compUserState)
-  , localNodeCount
-  , getNodeCount
   , getUserState
   , putUserState
   , modifyUserState
   , contextContents
   , nodeContextFields
   , contextFinalInits
+  , nodeInits
+  , localNodeId
+  , getNodeId
   , runCompilerM
   , blockScope
   , compileFun
@@ -54,6 +54,7 @@ module Futhark.CodeGen.Backends.GenericC
   , stms
   , decl
   , atInit
+  , atNodeInit
   , headerDecl
   , publicDef
   , publicDef_
@@ -65,6 +66,7 @@ module Futhark.CodeGen.Backends.GenericC
   , contextType
   , contextField
   , nodeContextField
+  , defineHuskFunction
 
   -- * Building Blocks
   , primTypeToCType
@@ -103,10 +105,12 @@ data CompilerState s = CompilerState {
   , compOpaqueStructs :: [(String, (C.Type, [C.Definition]))]
   , compEarlyDecls :: DL.DList C.Definition
   , compInit :: [C.Stm]
+  , compNodeInit :: [C.Exp -> C.Stm]
   , compNameSrc :: VNameSource
   , compUserState :: s
   , compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition)
   , compLibDecls :: DL.DList C.Definition
+  , compHuskDecls :: DL.DList C.Definition
   , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
   , compNodeCtxFields :: DL.DList String
   , compDebugItems :: DL.DList C.BlockItem
@@ -119,10 +123,12 @@ newCompilerState src s = CompilerState { compTypeStructs = []
                                        , compOpaqueStructs = []
                                        , compEarlyDecls = mempty
                                        , compInit = []
+                                       , compNodeInit = []
                                        , compNameSrc = src
                                        , compUserState = s
                                        , compHeaderDecls = mempty
                                        , compLibDecls = mempty
+                                       , compHuskDecls = mempty
                                        , compCtxFields = mempty
                                        , compNodeCtxFields = mempty
                                        , compDebugItems = mempty
@@ -162,7 +168,7 @@ type ReadScalar op s =
 -- | Allocate a memory block of the given size and with the given tag
 -- in the given memory space, saving a reference in the given variable
 -- name.
-type Allocate op s = C.Exp -> C.Exp -> C.Exp -> C.Exp -> SpaceId
+type Allocate op s = C.Exp -> C.Exp -> C.Exp -> SpaceId
                      -> CompilerM op s ()
 
 -- | De-allocate the given memory block with the given tag, which is
@@ -178,11 +184,11 @@ type Copy op s = C.Exp -> C.Exp -> Space ->
                  C.Exp ->
                  CompilerM op s ()
 
--- | Partition memory to the nodes
-type Partition op s = C.Exp -> C.Exp -> C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
-
--- | Collect memory from nodes
-type Collect op s = C.Exp -> C.Exp -> C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
+-- | Peer copy memory to the nodes
+type PeerCopy op s = C.Exp -> C.Exp -> C.Exp -> Space ->
+                     C.Exp -> C.Exp -> C.Exp -> Space ->
+                     C.Exp ->
+                     CompilerM op s ()
 
 data Operations op s =
   Operations { opsWriteScalar :: WriteScalar op s
@@ -190,8 +196,7 @@ data Operations op s =
              , opsAllocate :: Allocate op s
              , opsDeallocate :: Deallocate op s
              , opsCopy :: Copy op s
-             , opsPartition :: Partition op s
-             , opsCollect :: Collect op s
+             , opsPeerCopy :: PeerCopy op s
              , opsStaticArray :: StaticArray op s
 
              , opsMemoryType :: MemoryType op s
@@ -211,8 +216,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsAllocate  = defAllocate
                                , opsDeallocate  = defDeallocate
                                , opsCopy = defCopy
-                               , opsPartition = defPartition
-                               , opsCollect = defCollect
+                               , opsPeerCopy = defPeerCopy
                                , opsStaticArray = defStaticArray
                                , opsMemoryType = defMemoryType
                                , opsCompiler = defCompiler
@@ -230,10 +234,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           copyMemoryDefaultSpace destmem destoffset srcmem srcoffset size
         defCopy _ _ _ _ _ _ _ =
           fail "Cannot copy to or from non-default memory space"
-        defPartition _ _ _ _ =
-          fail "Cannot partition by default operations"
-        defCollect _ _ _ _ =
-          fail "Cannot collect by default operations"
+        defPeerCopy _ _ _ _ _ _ _ _ _ =
+          fail "Cannot peer copy by default operations"
         defStaticArray _ _ _ _ =
           fail "Cannot create static array in non-default memory space"
         defMemoryType _ =
@@ -244,7 +246,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
   , envFtable     :: M.Map Name [Type]
-  , envNodeCount :: Maybe C.Exp
+  , envNodeId     :: C.Exp
   }
 
 newtype CompilerAcc op s = CompilerAcc {
@@ -279,11 +281,8 @@ envDeallocate = opsDeallocate . envOperations
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
 
-envPartition :: CompilerEnv op s -> Partition op s
-envPartition = opsPartition . envOperations
-
-envCollect :: CompilerEnv op s -> Collect op s
-envCollect = opsCollect . envOperations
+envPeerCopy :: CompilerEnv op s -> PeerCopy op s
+envPeerCopy = opsPeerCopy . envOperations
 
 envStaticArray :: CompilerEnv op s -> StaticArray op s
 envStaticArray = opsStaticArray . envOperations
@@ -296,16 +295,13 @@ newCompilerEnv :: Functions op -> Operations op s
 newCompilerEnv (Functions funs) ops =
   CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
-              , envNodeCount = Nothing
+              , envNodeId = [C.cexp|0|]
               }
   where ftable = M.fromList $ map funReturn funs
         funReturn (name, fun) =
           (name, paramsTypes $ functionOutput fun)
         builtinFtable =
           M.map (map Scalar . snd) builtInFunctions
-          
-localNodeCount :: Maybe C.Exp -> CompilerM op s a -> CompilerM op s a
-localNodeCount nc = local $ \env -> env { envNodeCount = nc }
 
 tupleDefinitions, arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
 tupleDefinitions = map (snd . snd) . compTypeStructs
@@ -338,6 +334,17 @@ nodeContextFields = DL.toList <$> gets compNodeCtxFields
 contextFinalInits :: CompilerM op s [C.Stm]
 contextFinalInits = gets compInit
 
+nodeInits :: C.Exp -> CompilerM op s [C.Stm]
+nodeInits node_id = do
+  init_fs <- gets compNodeInit
+  return [init_f node_id | init_f <- init_fs]
+
+localNodeId :: C.Exp -> CompilerM op s a -> CompilerM op s a
+localNodeId node_id = local (\env -> env { envNodeId = node_id })
+
+getNodeId :: CompilerM op s C.Exp
+getNodeId = asks envNodeId
+
 newtype CompilerM op s a = CompilerM (RWS
                                       (CompilerEnv op s)
                                       (CompilerAcc op s)
@@ -358,9 +365,6 @@ runCompilerM prog ops src userstate (CompilerM m) =
   let (x, s, _) = runRWS m (newCompilerEnv prog ops) (newCompilerState src userstate)
   in (x, s)
 
-getNodeCount :: CompilerM op s (Maybe C.Exp)
-getNodeCount = asks envNodeCount
-
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
 
@@ -374,6 +378,10 @@ modifyUserState f = modify $ \compstate ->
 atInit :: C.Stm -> CompilerM op s ()
 atInit x = modify $ \s ->
   s { compInit = compInit s ++ [x] }
+
+atNodeInit :: (C.Exp -> C.Stm) -> CompilerM op s ()
+atNodeInit x = modify $ \s ->
+  s { compNodeInit = compNodeInit s ++ [x] }
 
 collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 collect m = snd <$> collect' m
@@ -439,6 +447,10 @@ headerDecl sec def = modify $ \s ->
 libDecl :: C.Definition -> CompilerM op s ()
 libDecl def = modify $ \s ->
   s { compLibDecls = compLibDecls s <> DL.singleton def }
+
+huskDecl :: C.Definition -> CompilerM op s ()
+huskDecl def = modify $ \s ->
+  s { compHuskDecls = compHuskDecls s <> DL.singleton def }
 
 earlyDecls :: [C.Definition] -> CompilerM op s ()
 earlyDecls def = modify $ \s ->
@@ -534,10 +546,12 @@ defineMemorySpace space = do
   -- zero.
   free <- case space of
     Space sid -> do free_mem <- asks envDeallocate
-                    collect $ free_mem [C.cexp|block->mem|] [C.cexp|block->desc|] sid
+                    collect $ localNodeId [C.cexp|node_id|] $
+                      free_mem [C.cexp|block->mem|] [C.cexp|block->desc|] sid
     DefaultSpace -> return [[C.citem|free(block->mem);|]]
   ctx_ty <- contextType
-  let unrefdef = [C.cedecl|static int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
+  let unrefdef = [C.cedecl|static int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, typename int32_t node_id,
+                                                               $ty:mty *block, const char *desc) {
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
@@ -559,20 +573,20 @@ defineMemorySpace space = do
 }|]
 
   -- When allocating a memory block we initialise the reference count to 1.
-  alloc <- collect $
+  alloc <- collect $ localNodeId [C.cexp|node_id|] $
     case space of
       DefaultSpace ->
         stm [C.cstm|block->mem = (char*) malloc(size);|]
       Space sid ->
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
-        pure [C.cexp|node_count|] <*> pure [C.cexp|size|] <*>
-        pure [C.cexp|desc|] <*> pure sid
-  let allocdef = [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, size_t node_count, typename int64_t size, const char *desc) {
+        pure [C.cexp|size|] <*> pure [C.cexp|desc|] <*> pure sid
+  let allocdef = [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, typename int32_t node_id, $ty:mty *block,
+                                                               typename int64_t size, const char *desc) {
   if (size < 0) {
     panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
   }
-  int ret = $id:(fatMemUnRef space)(ctx, block, desc);
+  int ret = $id:(fatMemUnRef space)(ctx, node_id, block, desc);
   $items:alloc
   block->references = (int*) malloc(sizeof(int));
   *(block->references) = 1;
@@ -598,8 +612,9 @@ defineMemorySpace space = do
 
   -- Memory setting - unreference the destination and increase the
   -- count of the source by one.
-  let setdef = [C.cedecl|static int $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
-  int ret = $id:(fatMemUnRef space)(ctx, lhs, lhs_desc);
+  let setdef = [C.cedecl|static int $id:(fatMemSet space) ($ty:ctx_ty *ctx, typename int32_t node_id, 
+                                                           $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
+  int ret = $id:(fatMemUnRef space)(ctx, node_id, lhs, lhs_desc);
   (*(rhs->references))++;
   *lhs = *rhs;
   return ret;
@@ -638,10 +653,11 @@ resetMem mem = do
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = do
   refcount <- asks envFatMemory
+  node_id <- getNodeId
   let src_s = pretty $ C.toExp src noLoc
   if refcount
-    then stm [C.cstm|if ($id:(fatMemSet space)(ctx, &$exp:dest, &$exp:src,
-                                               $string:src_s) != 0) {
+    then stm [C.cstm|if ($id:(fatMemSet space)(ctx, $exp:node_id, &$exp:dest,
+                                               &$exp:src, $string:src_s) != 0) {
                        return 1;
                      }|]
     else stm [C.cstm|$exp:dest = $exp:src;|]
@@ -649,9 +665,10 @@ setMem dest src space = do
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = do
   refcount <- asks envFatMemory
+  node_id <- getNodeId
   let mem_s = pretty $ C.toExp mem noLoc
   when refcount $
-    stm [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
+    stm [C.cstm|if ($id:(fatMemUnRef space)(ctx, $exp:node_id, &$exp:mem, $string:mem_s) != 0) {
                return 1;
              }|]
 
@@ -659,11 +676,10 @@ allocMem :: (C.ToExp a, C.ToExp b) =>
             a -> b -> Space -> C.Stm -> CompilerM op s ()
 allocMem name size space on_failure = do
   refcount <- asks envFatMemory
+  node_id <- getNodeId
   let name_s = pretty $ C.toExp name noLoc
-  n <- fromMaybe [C.cexp|1|] <$> getNodeCount
   if refcount
-    then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:n,
-                                                 $exp:size, $string:name_s)) {
+    then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, $exp:node_id, &$exp:name, $exp:size, $string:name_s)) {
                        $stm:on_failure
                      }|]
     else alloc name
@@ -672,8 +688,7 @@ allocMem name size space on_failure = do
             stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
           Space sid ->
             join $ asks envAllocate <*> rawMem name <*>
-              pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*>
-              (fromMaybe [C.cexp|1|] <$> getNodeCount) <*> pure sid
+              pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*> pure sid
 
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
@@ -1480,6 +1495,7 @@ int main(int argc, char** argv) {
 
   let early_decls = DL.toList $ compEarlyDecls endstate
   let lib_decls = DL.toList $ compLibDecls endstate
+  let husk_decls = DL.toList $ compHuskDecls endstate
   let libdefs = [C.cunit|
 $esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
 $esc:("#include <string.h>")
@@ -1499,6 +1515,8 @@ $edecls:(tupleDefinitions endstate)
 $edecls:prototypes
 
 $edecls:builtin
+
+$edecls:husk_decls
 
 $edecls:(map funcToDef definitions)
 
@@ -1548,10 +1566,11 @@ $edecls:entry_point_decls
         tuning_h = $(embedStringFile "rts/c/tuning.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun (fname, Function _ outputs inputs body _ _ nc_arg) = do
+compileFun (fname, Function _ outputs inputs body _ _ node_id) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
-  body' <- localNodeCount node_count $ blockScope $ compileFunBody out_ptrs outputs body
+  node_id' <- compileExp node_id
+  body' <- localNodeId node_id' $ blockScope $ compileFunBody out_ptrs outputs body
   ctx_ty <- contextType
   return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
                                                    $params:outparams, $params:inparams);|],
@@ -1560,8 +1579,7 @@ compileFun (fname, Function _ outputs inputs body _ _ nc_arg) = do
              $items:body'
              return 0;
 }|])
-  where node_count = fmap (\nc -> [C.cexp|$id:nc|]) nc_arg
-        compileInput (ScalarParam name bt) = do
+  where compileInput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
           return [C.cparam|$ty:ctp $id:name|]
         compileInput (MemParam name space) = do
@@ -1843,27 +1861,11 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
     <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
 
-compileCode (Partition dest _ src _ DefaultSpace) =
-  setMem dest src DefaultSpace
-
-compileCode (Partition dest (Count destsize) src (Count partsize) (Space sid)) =
-  join $ asks envPartition
-    <*> rawMem dest
-    <*> compileExp destsize
-    <*> rawMem src
-    <*> compileExp partsize
-    <*> pure sid
-
-compileCode (Collect dest _ src _ DefaultSpace) =
-  setMem dest src DefaultSpace
-
-compileCode (Collect dest (Count partsize) src (Count srcsize) (Space sid)) =
-  join $ asks envCollect
-    <*> rawMem dest
-    <*> compileExp partsize
-    <*> rawMem src
-    <*> compileExp srcsize
-    <*> pure sid
+compileCode (PeerCopy dest (Count destoffset) destpeer destspace src (Count srcoffset) srcpeer srcspace (Count size)) =
+  join $ asks envPeerCopy
+    <*> rawMem dest <*> compileExp destoffset <*> compileExp destpeer <*> pure destspace
+    <*> rawMem src <*> compileExp srcoffset <*> compileExp srcpeer <*> pure srcspace
+    <*> compileExp size
 
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
@@ -1991,3 +1993,35 @@ cproduct :: [C.Exp] -> C.Exp
 cproduct []     = [C.cexp|1|]
 cproduct (e:es) = foldl mult e es
   where mult x y = [C.cexp|$exp:x * $exp:y|]
+
+defineHuskFunction :: HuskFunction -> [Param] -> Code op -> CompilerM op s ()
+defineHuskFunction (HuskFunction name param_struct node_id) params body = do
+  husk_params_p <- newVName "husk_params_p"
+  husk_params <- newVName "husk_params"
+  struct_decls <- mapM toStructDecl params
+  body_decls <- mapM (toDeclInit husk_params) params 
+  body' <- localNodeId [C.cexp|$id:node_id|] $ blockScope $ compileCode body
+  libDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
+                                        typename int32_t $id:node_id,
+                                        void *$id:husk_params_p);|]
+  huskDecl [C.cedecl|struct $id:param_struct {
+      $sdecls:struct_decls
+    };|]
+  huskDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
+                                           typename int32_t $id:node_id,
+                                           void *$id:husk_params_p) {
+      struct $id:param_struct $id:husk_params =
+        *(struct $id:param_struct *)$id:husk_params_p;
+      $decls:body_decls
+      $items:body'
+    }|]
+  where toCType (ScalarParam _ t) = return [C.cty|$ty:(primTypeToCType t)|]
+        toCType (MemParam _ space) = do
+          t <- memToCType space
+          return [C.cty|$ty:t|]
+        toStructDecl p = do
+          t <- toCType p
+          return [C.csdecl|$ty:t $id:(paramName p);|]
+        toDeclInit hparam p = do
+          t <- toCType p
+          return [C.cdecl|$ty:t $id:(paramName p) = $id:hparam.$id:(paramName p);|]

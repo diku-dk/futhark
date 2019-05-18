@@ -370,7 +370,7 @@ huskedNonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
           -> m (Stms Kernels)
 huskedNonSegRed pat w comm red_lam_seq red_lam_fot map_lam nes arrs = runBinder_ $ do
   red_lam_fot' <- renameLambda red_lam_fot
-  hspace@(HuskSpace _ _ parts parts_elems _ _) <- constructHuskSpace arrs w
+  hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
   let ret_ts = lambdaReturnType map_lam
       addDummyDim t = t `arrayOfRow` intConst Int32 1
       hscope = scopeOfHuskSpace hspace

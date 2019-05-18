@@ -41,13 +41,13 @@ translateKernels :: KernelTarget
                  -> ImpKernels.Program
                  -> Either InternalError ImpOpenCL.Program
 translateKernels target (ImpKernels.Functions funs) = do
-  (prog', ToOpenCL extra_funs kernels requirements sizes) <-
+  (prog', ToOpenCL extra_funs kernels husk_funcs requirements sizes) <-
     runWriterT $ fmap Functions $ forM funs $ \(fname, fun) ->
     (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
   let kernel_names = M.keys kernels
       opencl_code = openClCode $ M.elems kernels
       opencl_prelude = pretty $ genPrelude target requirements
-  return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names
+  return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names husk_funcs
     (S.toList $ kernelUsedTypes requirements) sizes $
     ImpOpenCL.Functions (M.toList extra_funs) <> prog'
   where genPrelude TargetOpenCL = genOpenClPrelude
@@ -77,23 +77,25 @@ instance Monoid OpenClRequirements where
 
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
+                         , clHuskFunctions :: [ImpOpenCL.HuskFunction]
                          , clRequirements :: OpenClRequirements
                          , clSizes :: M.Map Name SizeClass
                          }
 
 instance Semigroup ToOpenCL where
-  ToOpenCL f1 k1 r1 sz1 <> ToOpenCL f2 k2 r2 sz2 =
-    ToOpenCL (f1<>f2) (k1<>k2) (r1<>r2) (sz1<>sz2)
+  ToOpenCL f1 k1 h1 r1 sz1 <> ToOpenCL f2 k2 h2 r2 sz2 =
+    ToOpenCL (f1<>f2) (k1<>k2) (h1<>h2) (r1<>r2) (sz1<>sz2)
 
 instance Monoid ToOpenCL where
-  mempty = ToOpenCL mempty mempty mempty mempty
+  mempty = ToOpenCL mempty mempty mempty mempty mempty
 
 type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp target (Husk _ src_elems part_elems num_nodes body) =
-  onHusk target src_elems part_elems num_nodes body
+onHostOp target (Husk _ num_nodes bparams husk_func interm body red) = do
+  tell mempty { clHuskFunctions = [husk_func] }
+  onHusk target num_nodes bparams husk_func interm body red
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
@@ -177,11 +179,18 @@ onKernel target kernel = do
 
 
 onHusk :: KernelTarget
-          -> Exp -> VName -> VName
+          -> VName
+          -> [Param]
+          -> HuskFunction
+          -> ImpKernels.Code
+          -> ImpKernels.Code
           -> ImpKernels.Code
           -> OnKernelM OpenCL
-onHusk target src_elems parts_elems num_nodes body =
-  DistributeHusk src_elems parts_elems num_nodes <$> traverse (onHostOp target) body
+onHusk target num_nodes bparams husk_func interm body red =
+  DistributeHusk num_nodes bparams husk_func
+    <$> traverse (onHostOp target) interm
+    <*> traverse (onHostOp target) body
+    <*> traverse (onHostOp target) red
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
@@ -413,8 +422,7 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsAllocate = cannotAllocate
                      , GenericC.opsDeallocate = cannotDeallocate
                      , GenericC.opsCopy = copyInKernel
-                     , GenericC.opsPartition = partitionInKernel
-                     , GenericC.opsCollect = collectInKernel
+                     , GenericC.opsPeerCopy = peerCopyInKernel
                      , GenericC.opsStaticArray = noStaticArrays
                      , GenericC.opsFatMemory = False
                      }
@@ -502,13 +510,9 @@ inKernelOperations = GenericC.Operations
         copyInKernel _ _ _ _ _ _ _ =
           fail "Cannot bulk copy in kernel."
 
-        partitionInKernel :: GenericC.Partition KernelOp UsedFunctions
-        partitionInKernel _ _ _ _ _ =
-          fail "Cannot partition memory in kernel."
-
-        collectInKernel :: GenericC.Collect KernelOp UsedFunctions
-        collectInKernel _ _ _ _ _ =
-          fail "Cannot collect memory in kernel."
+        peerCopyInKernel :: GenericC.PeerCopy KernelOp UsedFunctions
+        peerCopyInKernel _ _ _ _ _ =
+          fail "Cannot peer copy memory in kernel."
 
         noStaticArrays :: GenericC.StaticArray KernelOp UsedFunctions
         noStaticArrays _ _ _ _ =
@@ -540,10 +544,9 @@ typesInCode (Allocate _ (Count e) _) = typesInExp e
 typesInCode Free{} = mempty
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
-typesInCode (Partition _ (Count e1) _ (Count e2) _) =
-  typesInExp e1 <> typesInExp e2
-typesInCode (Collect _ (Count e1) _ (Count e2) _) =
-  typesInExp e1 <> typesInExp e2
+typesInCode (PeerCopy _ (Count e1) destpeer _ _ (Count e2) srcpeer _ (Count e3)) =
+  typesInExp e1 <> typesInExp destpeer <> typesInExp e2
+    <> typesInExp srcpeer <> typesInExp e3
 typesInCode (Write _ (Count e1) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e
