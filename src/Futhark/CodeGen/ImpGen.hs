@@ -136,7 +136,7 @@ data Operations lore op = Operations { opsExpCompiler :: ExpCompiler lore op
 
 -- | An operations set for which the expression compiler always
 -- returns 'CompileExp'.
-defaultOperations :: ExplicitMemorish lore =>
+defaultOperations :: (ExplicitMemorish lore, FreeIn op) =>
                      OpCompiler lore op -> Operations lore op
 defaultOperations opc = Operations { opsExpCompiler = defCompileExp
                                    , opsOpCompiler = opc
@@ -522,31 +522,32 @@ compileStms alive_after_stms all_stms m = do
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 
-defCompileStms :: ExplicitMemorish lore =>
+defCompileStms :: (ExplicitMemorish lore, FreeIn op) =>
                   Names -> Stms lore -> ImpM lore op () -> ImpM lore op ()
-defCompileStms alive_after_stms all_stms m = do
+defCompileStms alive_after_stms all_stms m =
   -- We keep track of any memory blocks produced by the statements,
   -- and after the last time that memory block is used, we insert a
   -- Free.  This is very conservative, but can cut down on lifetimes
   -- in some cases.
-  let all_stms' = stmsToList all_stms
-      lives = drop 1 $ reverse $ scanl (<>) alive_after_stms $ reverse $
-              map freeIn all_stms'
-  void $ compileStms' mempty $ zip all_stms' lives
-  where compileStms' allocs ((Let pat _ e, live_after):bs) = do
+  void $ compileStms' mempty $ stmsToList all_stms
+  where compileStms' allocs (Let pat _ e:bs) = do
           dVars (Just e) (patternElements pat)
 
-          compileExp pat e
-
+          e_code <- collect $ compileExp pat e
+          (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
           let dies_here v = not (v `S.member` live_after) &&
-                            v `S.member` (freeIn pat <> freeIn e)
+                            v `S.member` freeIn e_code
               to_free = S.filter (dies_here . fst) allocs
 
+          emit e_code
           mapM_ (emit . uncurry Imp.Free) to_free
+          emit bs_code
 
-          compileStms' (patternAllocs pat <> allocs) bs
-
-        compileStms' _ [] = m
+          return $ freeIn e_code <> live_after
+        compileStms' _ [] = do
+          code <- collect m
+          emit code
+          return $ freeIn code <> alive_after_stms
 
         patternAllocs = S.fromList . mapMaybe isMemPatElem . patternElements
         isMemPatElem pe = case patElemType pe of
