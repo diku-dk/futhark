@@ -200,12 +200,11 @@ doRegTiling3D (Let pat aux (Op (HostOp old_kernel)))
 
       -- replace the `ThreadsInSpace` kernel return to an `InPlace` return
       -- for the z-variant kernel results
-      let ker_res_ip_tp_tab = M.fromList $ zip ker_var_res $ zip ip_out_nms $
-                                           map patElemType ker_var_patels
+      let ker_res_ip_tp_tab = M.fromList $ zip ker_var_res ip_out_nms
           (kres', kertp') = unzip $
-            zipWith (\ r tp -> case M.lookup r ker_res_ip_tp_tab of
-                                 Nothing -> (ThreadsReturn ThreadsInSpace (Var r), tp)
-                                 Just (ip_nm, ip_tp) -> (KernelInPlaceReturn ip_nm, ip_tp)
+            zipWith (\r tp -> case M.lookup r ker_res_ip_tp_tab of
+                                Nothing -> (ThreadsReturn (Var r), tp)
+                                Just (dims, arr, ivs) -> (WriteReturn dims arr ivs, tp)
                     ) ker_res_nms kertp
 
       -- finally, put everything together
@@ -263,7 +262,7 @@ doRegTiling3D (Let pat aux (Op (HostOp old_kernel)))
             mkLet [] [Ident res_nm0 $ Prim int32] $
               BasicOp $ BinOp (Mul Int32) op1_se op2_se
 
-        retThreadInSpace (ThreadsReturn ThreadsInSpace (Var r)) = Just r
+        retThreadInSpace (ThreadsReturn (Var r)) = Just r
         retThreadInSpace _ = Nothing
 
 doRegTiling3D _ = return Nothing
@@ -468,14 +467,15 @@ mkCondStmt m_M m cond_nm =
 simpleStm :: Stm InKernel -> Bool
 simpleStm (Let _ _ e) = safeExp e
 
-mkScratchStm :: PatElem Kernels -> TileM (VName, Stm Kernels)
+mkScratchStm :: PatElem Kernels -> TileM (([SubExp], VName, [([SubExp], SubExp)]),
+                                          Stm Kernels)
 mkScratchStm ker_patel = do
   let (unique_arr_tp, res_arr_nm0) = (patElemType ker_patel, patElemName ker_patel)
       ptp = elemType unique_arr_tp
   scrtch_arr_nm <- newVName $ baseString res_arr_nm0 ++ "_0"
   let scratch_stm = mkLet [] [Ident scrtch_arr_nm unique_arr_tp] $
                           BasicOp $ Scratch ptp $ arrayDims unique_arr_tp
-  return (scrtch_arr_nm, scratch_stm)
+  return ((arrayDims unique_arr_tp, scrtch_arr_nm, []), scratch_stm)
 
 -- | Arguments are:
 --     1. @mm@ this is the length of z-parallel dimension divided by reg_tile
@@ -484,52 +484,50 @@ mkScratchStm ker_patel = do
 --     4. @keres_patels@: the kernel result names tupled with the corresponding
 --                        pattern elements of the kernel statement.
 --     5. @code2_var@: the z-variant statements of the code after the stream.
---     6. @ip_arr_nms@: the "current" new names for the in-place update arrays.
+--     6. @ip_writes@: the "current" argument to a 'WriteReturn'.
 --        @unroll_code@: the current unrolled code. Both form a `foldM` accumulator.
 --     7. @k@ the "current" clone number;
 --        @loop_res_nms@ the names of the loop result corresponding to the current clone.
 --   Result:
---     1. the new name for the current in-place update result,
+--     1. the argument for the current in-place update result,
 --     2. a new if-statement is added to the unrolled-code accumulator which actually
 --        perform the in-place update.
 cloneVarCode2 :: VName -> KernelSpace -> [VName]
               -> [(VName, PatElem InKernel)] -> [Stm InKernel]
-              -> ([VName], [Stm InKernel]) -> (Int32, [VName])
-              -> TileM ([VName], [Stm InKernel])
+              -> ([([SubExp], VName, [([SubExp], SubExp)])],
+                  [Stm InKernel])
+              -> (Int32, [VName])
+              -> TileM ([([SubExp], VName, [([SubExp], SubExp)])],
+                        [Stm InKernel])
 cloneVarCode2 mm space strm_res_nms keres_patels code2_var
-              (ip_arr_nms, unroll_code) (k, loop_res_nms) = do
+              (writes, unroll_code) (k, loop_res_nms) = do
   let (ker_nms, pat_els) = unzip keres_patels
-      arr_tps = map patElemType pat_els
       root_strs = map (baseString . patElemName) pat_els
-  ip_inn_nms <- mapM (\s -> newVName $ s ++ "_inn_" ++ pretty (k+1)) root_strs
   ip_out_nms <- mapM (\s -> newVName $ s ++ "_out_" ++ pretty (k+1)) root_strs
   m <- newVName "m"
   -- make in-place update statements
   let (gidx,_) : (gidy,_) : (gidz,m_M) : rev_outer_dims = reverse $ spaceDimensions space
       (outer_dims, _) = unzip $ reverse rev_outer_dims
-      ip_stmts = map (mkInPlaceStmt (outer_dims++[m,gidy,gidx])) $
-                     zip4 ip_arr_nms ip_inn_nms ker_nms arr_tps
+      strip_dims = length $ outer_dims++[m,gidy,gidx]
+      ts = map (stripArray strip_dims . patElemType) pat_els
   -- make if
   cond_nm <- newVName "m_cond"
   let i_se = Constant $ IntValue $ Int32Value k
       m_stm = mkLet [] [Ident m $ Prim int32] $
                     BasicOp $ BinOp (Add Int32) (Var mm) i_se
       c_stm = mkCondStmt m_M m cond_nm
-      else_body = Body () mempty (map Var ip_arr_nms)
       strm_loop_tab = M.fromList $ (gidz, m) : zip strm_res_nms loop_res_nms
-      then_stms = stmsFromList $ map (substituteNames strm_loop_tab) $
-                                     code2_var ++ ip_stmts
-  then_body <- renameBody $ Body () then_stms $ map Var ip_inn_nms
-  let if_stm = mkLet [] (zipWith Ident ip_out_nms arr_tps) $
+  then_body <- renameBody $ substituteNames strm_loop_tab $
+               Body () (stmsFromList code2_var) $ map Var ker_nms
+  let else_body = Body () mempty $ map blank ts
+      if_stm = mkLet [] (zipWith Ident ip_out_nms ts) $
                      If (Var cond_nm) then_body else_body  $
-                     IfAttr (staticShapes arr_tps) IfFallback
-  return (ip_out_nms, unroll_code ++ [m_stm, c_stm, if_stm])
-  where mkInPlaceStmt :: [VName] -> (VName, VName, VName, Type)
-                      -> Stm InKernel
-        mkInPlaceStmt inds (cur_nm, new_nm, ker_nm, arr_tp) =
-          let upd_slc = map (DimFix . Var) inds
-              ipupd_exp = BasicOp $ Update cur_nm upd_slc (Var ker_nm)
-          in  mkLet [] [Ident new_nm arr_tp] ipupd_exp
+                     IfAttr (staticShapes ts) IfFallback
+      addWritePair (dims, arr, current) ker_nm =
+        (dims, arr, current ++ [(map Var $ outer_dims++[m,gidy,gidx], Var ker_nm)])
+  return (zipWith addWritePair writes ip_out_nms, unroll_code ++ [m_stm, c_stm, if_stm])
+  where blank (Prim t) = Constant $ blankPrimValue t
+        blank t = error $ "cloneVarCode2: cannot tile non-prim type " ++ pretty t
 
 helper3Stms :: VName -> SubExp -> SubExp -> Slice SubExp
              -> VName -> Stm InKernel -> TileM [Stm InKernel]

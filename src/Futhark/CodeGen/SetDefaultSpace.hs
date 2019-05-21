@@ -33,8 +33,8 @@ setExtValueSpace space (TransparentValue v) =
   TransparentValue $ setValueSpace space v
 
 setValueSpace :: Space -> ValueDesc -> ValueDesc
-setValueSpace space (ArrayValue mem memsize _ bt ept shape) =
-  ArrayValue mem memsize space bt ept shape
+setValueSpace space (ArrayValue mem _ bt ept shape) =
+  ArrayValue mem space bt ept shape
 setValueSpace _ (ScalarValue bt ept v) =
   ScalarValue bt ept v
 

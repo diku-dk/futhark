@@ -90,8 +90,7 @@ prepareIntermediateArrays segment_dims num_threads = fmap snd . mapAccumLM onOp 
                         arrayDims dest_t
         let size = Imp.elements num_elems `Imp.withElemType` int32
 
-        (sub_mem, size') <-
-          ImpGen.sDeclareMem "subhistogram_mem" size $ Space "device"
+        sub_mem <- ImpGen.sDeclareMem "subhistogram_mem" $ Space "device"
 
         let num_segments = length segment_dims
             sub_shape = Shape (segment_dims++[Var num_histos]) <>
@@ -106,8 +105,9 @@ prepareIntermediateArrays segment_dims num_threads = fmap snd . mapAccumLM onOp 
               Space "device"
 
             multiHistoCase = do
-              ImpGen.sAlloc_ sub_mem size' $ Space "device"
-              sReplicate subhisto (Shape $ segment_dims ++ [Var num_histos, genReduceWidth op]) ne
+              ImpGen.sAlloc_ sub_mem size $ Space "device"
+              sReplicate subhisto (Shape (segment_dims ++ [Var num_histos, genReduceWidth op]) <>
+                                   genReduceShape op) ne
               subhisto_t <- lookupType subhisto
               let slice = fullSliceNum (map (ImpGen.compileSubExpOfType int32) $ arrayDims subhisto_t) $
                           map (unitSlice 0 . ImpGen.compileSubExpOfType int32) segment_dims ++
@@ -125,9 +125,9 @@ prepareIntermediateArrays segment_dims num_threads = fmap snd . mapAccumLM onOp 
 genRedKernel :: [PatElem ExplicitMemory]
              -> KernelSpace
              -> [GenReduceOp InKernel]
-             -> Body InKernel
+             -> KernelBody InKernel
              -> CallKernelGen [(VName, [VName])]
-genRedKernel map_pes space ops body = do
+genRedKernel map_pes space ops kbody = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
   let constants = base_constants { kernelThreadActive = true }
       (space_is, space_sizes) = unzip $ spaceDimensions space
@@ -178,13 +178,14 @@ genRedKernel map_pes space ops body = do
       -- arrays.
       let input_in_bounds = Imp.var j int32 .<. total_w_64
 
-      sWhen input_in_bounds $ ImpGen.compileStms mempty (stmsToList $ bodyStms body) $ do
-        let (red_res, map_res) = splitFromEnd (length map_pes) $ bodyResult body
+      sWhen input_in_bounds $ ImpGen.compileStms mempty (kernelBodyStms kbody) $ do
+        let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
 
         sComment "save map-out results" $
-          forM_ (zip map_pes map_res) $ \(pe, se) ->
+          forM_ (zip map_pes map_res) $ \(pe, res) ->
           ImpGen.copyDWIM (patElemName pe)
-          (map ((`Imp.var` int32) . fst) $ kernelDimensions constants) se []
+          (map ((`Imp.var` int32) . fst) $ kernelDimensions constants)
+          (kernelResultSubExp res) []
 
         let (buckets, vs) = splitAt (length ops) red_res
             perOp = chunks $ map (length . genReduceDest) ops
@@ -194,7 +195,7 @@ genRedKernel map_pes space ops body = do
           \(GenReduceOp dest_w _ _ shape lam,
             (_, _, do_op), bucket, vs', subhisto_ind) -> do
 
-            let bucket' = ImpGen.compileSubExpOfType int32 bucket
+            let bucket' = ImpGen.compileSubExpOfType int32 $ kernelResultSubExp bucket
                 dest_w' = ImpGen.compileSubExpOfType int32 dest_w
                 bucket_in_bounds = 0 .<=. bucket' .&&. bucket' .<. dest_w'
                 bucket_is = map (`Imp.var` int32) (init space_is) ++
@@ -204,8 +205,8 @@ genRedKernel map_pes space ops body = do
             sWhen bucket_in_bounds $ do
               ImpGen.dLParams $ lambdaParams lam
               vectorLoops [] (shapeDims shape) $ \is -> do
-                forM_ (zip vs_params vs') $ \(p, v) ->
-                  ImpGen.copyDWIM (paramName p) [] v is
+                forM_ (zip vs_params vs') $ \(p, res) ->
+                  ImpGen.copyDWIM (paramName p) [] (kernelResultSubExp res) is
                 do_op (bucket_is ++ is)
 
   let histogramInfo (num_histos, dests, _) = (num_histos, dests)
@@ -223,13 +224,13 @@ vectorLoops is (d:ds) f = do
 compileSegGenRed :: Pattern ExplicitMemory
                  -> KernelSpace
                  -> [GenReduceOp InKernel]
-                 -> Body InKernel
+                 -> KernelBody InKernel
                  -> CallKernelGen ()
-compileSegGenRed (Pattern _ pes) genred_space ops body = do
+compileSegGenRed (Pattern _ pes) genred_space ops kbody = do
   let num_red_res = length ops + sum (map (length . genReduceNeutral) ops)
       (all_red_pes, map_pes) = splitAt num_red_res pes
 
-  infos <- genRedKernel map_pes genred_space ops body
+  infos <- genRedKernel map_pes genred_space ops kbody
   let pes_per_op = chunks (map (length . genReduceDest) ops) all_red_pes
 
   forM_ (zip3 infos pes_per_op ops) $ \((num_histos, subhistos), red_pes, op) -> do
@@ -269,7 +270,7 @@ compileSegGenRed (Pattern _ pes) genred_space ops body = do
             }
 
       compileSegRed' (Pattern [] red_pes) segred_space
-        Commutative lam (genReduceNeutral op) $ \red_dests _ ->
+        Commutative lam (genReduceNeutral op) $ \_ red_dests ->
         forM_ (zip red_dests subhistos) $ \((d, is), subhisto) ->
           ImpGen.copyDWIM d is (Var subhisto) $ map (`Imp.var` int32) $
           map fst segment_dims ++ [subhistogram_id, bucket_id] ++ vector_ids

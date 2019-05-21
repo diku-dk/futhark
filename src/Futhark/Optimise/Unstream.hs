@@ -39,12 +39,18 @@ optimiseBody (Body () stms res) =
   Body () <$> (stmsFromList . concat <$> mapM optimiseStm (stmsToList stms)) <*> pure res
 
 optimiseStm :: Stm Kernels -> UnstreamM [Stm Kernels]
-optimiseStm (Let pat aux (Op (HostOp (Kernel desc space ts body)))) = do
+optimiseStm (Let pat aux (Op (HostOp op))) = do
   inv <- S.fromList . M.keys <$> askScope
-  stms' <- localScope (scopeOfKernelSpace space) $
-           runBinder_ $ optimiseInKernelStms inv $ kernelBodyStms body
-  return [Let pat aux $ Op $ HostOp $
-          Kernel desc space ts $ body { kernelBodyStms = stms' }]
+
+  let mapper = identityKernelMapper { mapOnKernelKernelBody = onKernelBody }
+      onKernelBody kbody = do
+        stms' <- localScope (scopeOfKernelSpace (kernelSpace op)) $
+                 runBinder_ $ optimiseInKernelStms inv $ kernelBodyStms kbody
+        return kbody { kernelBodyStms = stms' }
+
+  op' <- mapKernelM mapper op
+  return [Let pat aux $ Op $ HostOp op']
+
 optimiseStm (Let pat aux e) =
   pure <$> (Let pat aux <$> mapExpM optimise e)
   where optimise = identityMapper { mapOnBody = \scope -> localScope scope . optimiseBody }

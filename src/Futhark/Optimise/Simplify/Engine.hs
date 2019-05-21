@@ -388,7 +388,7 @@ provides = patternNames . stmPattern
 requires :: Attributes lore => Stm lore -> Names
 requires = freeInStm
 
-expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
+expandUsage :: (Attributes lore, Aliased lore) =>
                ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> UT.UsageTable
 expandUsage vtable utable bnd =
   UT.expand (`ST.lookupAliases` vtable) (usageInStm bnd <> usageThroughAliases) <>
@@ -721,7 +721,6 @@ simplifyExpBase = mapExpM hoist
                 -- Lambdas are handled explicitly because we need to
                 -- bind their parameters.
                 , mapOnVName = simplify
-                , mapOnCertificates = simplify
                 , mapOnRetType = simplify
                 , mapOnBranchType = simplify
                 , mapOnFParam =
@@ -810,8 +809,8 @@ instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) = do
     shape' <- simplify shape
     return $ Array et shape' u
-  simplify (Mem size space) =
-    Mem <$> simplify size <*> pure space
+  simplify (Mem space) =
+    pure $ Mem space
   simplify (Prim bt) =
     return $ Prim bt
 

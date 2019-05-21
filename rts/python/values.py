@@ -76,7 +76,8 @@ def parse_specific_string(f, s):
             read.append(c)
         return True
     except ValueError:
-        map(f.unget_char, read[::-1])
+        for c in read[::-1]:
+            f.unget_char(c)
         raise
 
 def optional(p, *args):
@@ -112,49 +113,46 @@ def parse_hex_int(f):
     s = b''
     c = f.get_char()
     while c != None:
-        if c in string.hexdigits:
+        if c in b'01234556789ABCDEFabcdef':
             s += c
             c = f.get_char()
-        elif c == '_':
+        elif c == b'_':
             c = f.get_char() # skip _
         else:
             f.unget_char(c)
             break
-    return str(int(s, 16))
-
+    return str(int(s, 16)).encode('utf8') # ugh
 
 def parse_int(f):
     s = b''
     c = f.get_char()
-    if c == b'0' and f.peek_char() in [b'x', b'X']:
+    if c == b'0' and f.peek_char() in b'xX':
         c = f.get_char() # skip X
-        s += parse_hex_int(f)
+        return parse_hex_int(f)
     else:
         while c != None:
             if c.isdigit():
                 s += c
                 c = f.get_char()
-            elif c == '_':
+            elif c == b'_':
                 c = f.get_char() # skip _
             else:
                 f.unget_char(c)
                 break
-    if len(s) == 0:
-        raise ValueError
-    return s
+        if len(s) == 0:
+            raise ValueError
+        return s
 
 def parse_int_signed(f):
     s = b''
     c = f.get_char()
 
     if c == b'-' and f.peek_char().isdigit():
-      s = c + parse_int(f)
+      return c + parse_int(f)
     else:
       if c != b'+':
           f.unget_char(c)
-      s = parse_int(f)
-
-    return s
+      return parse_int(f)
 
 def read_str_comma(f):
     skip_spaces(f)
@@ -568,7 +566,7 @@ representation of the Futhark type."""
             return read_scalar(reader, basetype)
         return (dims, basetype)
 
-def write_value(v, out=sys.stdout):
+def write_value_text(v, out=sys.stdout):
     if type(v) == np.uint8:
         out.write("%uu8" % v)
     elif type(v) == np.uint16:
@@ -624,6 +622,51 @@ def write_value(v, out=sys.stdout):
             out.write(']')
     else:
         raise Exception("Cannot print value of type {}: {}".format(type(v), v))
+
+type_strs = { np.dtype('int8'): b'  i8',
+              np.dtype('int16'): b' i16',
+              np.dtype('int32'): b' i32',
+              np.dtype('int64'): b' i64',
+              np.dtype('uint8'): b'  u8',
+              np.dtype('uint16'): b' u16',
+              np.dtype('uint32'): b' u32',
+              np.dtype('uint64'): b' u64',
+              np.dtype('float32'): b' f32',
+              np.dtype('float64'): b' f64',
+              np.dtype('bool'): b'bool'}
+
+def construct_binary_value(v):
+    t = v.dtype
+    shape = v.shape
+
+    elems = 1
+    for d in shape:
+        elems *= d
+
+    num_bytes = 1 + 1 + 1 + 4 + len(shape) * 8 + elems * t.itemsize
+    bytes = bytearray(num_bytes)
+    bytes[0] = np.int8(ord('b'))
+    bytes[1] = 2
+    bytes[2] = np.int8(len(shape))
+    bytes[3:7] = type_strs[t]
+
+    for i in range(len(shape)):
+        bytes[7+i*8:7+(i+1)*8] = np.int64(shape[i]).tostring()
+
+    bytes[7+len(shape)*8:] = np.ascontiguousarray(v).tostring()
+
+    return bytes
+
+def write_value_binary(v, out=sys.stdout):
+    if sys.version_info >= (3,0):
+        out = out.buffer
+    out.write(construct_binary_value(v))
+
+def write_value(v, out=sys.stdout, binary=False):
+    if binary:
+        return write_value_binary(v, out=out)
+    else:
+        return write_value_text(v, out=out)
 
 ################################################################################
 ### end of values.py

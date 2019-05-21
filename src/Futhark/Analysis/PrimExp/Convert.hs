@@ -8,6 +8,7 @@ module Futhark.Analysis.PrimExp.Convert
   , primExpFromSubExp
   , primExpFromSubExpM
   , replaceInPrimExp
+  , replaceInPrimExpM
   , substituteInPrimExp
 
     -- * Module reexport
@@ -15,6 +16,7 @@ module Futhark.Analysis.PrimExp.Convert
   ) where
 
 import qualified Control.Monad.Fail as Fail
+import           Control.Monad.Identity
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe
@@ -85,23 +87,30 @@ primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName
 primExpFromSubExp t (Var v)      = LeafExp v t
 primExpFromSubExp _ (Constant v) = ValueExp v
 
--- | Applying a transformation to the leaves in a 'PrimExp'.
-replaceInPrimExp :: (v -> PrimType -> PrimExp v) ->
-                    PrimExp v -> PrimExp v
-replaceInPrimExp f (LeafExp v pt) =
+-- | Applying a monadic transformation to the leaves in a 'PrimExp'.
+replaceInPrimExpM :: Monad m =>
+                     (a -> PrimType -> m (PrimExp b)) ->
+                     PrimExp a -> m (PrimExp b)
+replaceInPrimExpM f (LeafExp v pt) =
   f v pt
-replaceInPrimExp _ (ValueExp v) =
-  ValueExp v
-replaceInPrimExp f (BinOpExp bop pe1 pe2) =
-  constFoldPrimExp $ BinOpExp bop (replaceInPrimExp f pe1) (replaceInPrimExp f pe2)
-replaceInPrimExp f (CmpOpExp cop pe1 pe2) =
-  CmpOpExp cop (replaceInPrimExp f pe1) (replaceInPrimExp f pe2)
-replaceInPrimExp f (UnOpExp uop pe) =
-  UnOpExp uop $ replaceInPrimExp f pe
-replaceInPrimExp f (ConvOpExp cop pe) =
-  ConvOpExp cop $ replaceInPrimExp f pe
-replaceInPrimExp f (FunExp h args t) =
-  FunExp h (map (replaceInPrimExp f) args) t
+replaceInPrimExpM _ (ValueExp v) =
+  return $ ValueExp v
+replaceInPrimExpM f (BinOpExp bop pe1 pe2) =
+  constFoldPrimExp <$>
+  (BinOpExp bop <$> replaceInPrimExpM f pe1 <*> replaceInPrimExpM f pe2)
+replaceInPrimExpM f (CmpOpExp cop pe1 pe2) =
+  CmpOpExp cop <$> replaceInPrimExpM f pe1 <*> replaceInPrimExpM f pe2
+replaceInPrimExpM f (UnOpExp uop pe) =
+  UnOpExp uop <$> replaceInPrimExpM f pe
+replaceInPrimExpM f (ConvOpExp cop pe) =
+  ConvOpExp cop <$> replaceInPrimExpM f pe
+replaceInPrimExpM f (FunExp h args t) =
+  FunExp h <$> mapM (replaceInPrimExpM f) args <*> pure t
+
+replaceInPrimExp :: (a -> PrimType -> PrimExp b) ->
+                    PrimExp a -> PrimExp b
+replaceInPrimExp f e = runIdentity $ replaceInPrimExpM f' e
+  where f' x y = return $ f x y
 
 -- | Substituting names in a PrimExp with other PrimExps
 substituteInPrimExp :: Ord v => M.Map v (PrimExp v)

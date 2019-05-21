@@ -56,8 +56,6 @@ data HostOp = CallKernel Kernel
 -- | A generic kernel containing arbitrary kernel code.
 data Kernel = Kernel
               { kernelBody :: Imp.Code KernelOp
-              , kernelLocalMemory :: [LocalMemoryUse]
-              -- ^ The local memory used by this kernel.
 
               , kernelUses :: [KernelUse]
                 -- ^ The host variables referenced by the kernel.
@@ -71,7 +69,7 @@ data Kernel = Kernel
             deriving (Show)
 
 -- ^ In-kernel name and per-workgroup size in bytes.
-type LocalMemoryUse = (VName, Either MemSize KernelConstExp)
+type LocalMemoryUse = (VName, Either (Count Bytes) KernelConstExp)
 
 data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName
@@ -140,15 +138,8 @@ instance Pretty Kernel where
     text "kernel" <+> brace
     (text "groups" <+> brace (ppr $ kernelNumGroups kernel) </>
      text "group_size" <+> brace (ppr $ kernelGroupSize kernel) </>
-     text "local_memory" <+> brace (commasep $
-                                    map ppLocalMemory $
-                                    kernelLocalMemory kernel) </>
      text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
      text "body" <+> brace (ppr $ kernelBody kernel))
-    where ppLocalMemory (name, Left size) =
-            ppr name <+> parens (ppr size <+> text "bytes")
-          ppLocalMemory (name, Right size) =
-            ppr name <+> parens (ppr size <+> text "bytes (const)")
 
 data KernelOp = GetGroupId VName Int
               | GetLocalId VName Int
@@ -160,6 +151,8 @@ data KernelOp = GetGroupId VName Int
               | LocalBarrier
               | GlobalBarrier
               | MemFence
+              | PrivateAlloc VName (Count Bytes)
+              | LocalAlloc VName (Either (Count Bytes) KernelConstExp)
               deriving (Show)
 
 -- Atomic operations return the value stored before the update.
@@ -213,6 +206,12 @@ instance Pretty KernelOp where
     text "global_barrier()"
   ppr MemFence =
     text "mem_fence()"
+  ppr (PrivateAlloc name size) =
+    ppr name <+> equals <+> text "private_alloc" <> parens (ppr size)
+  ppr (LocalAlloc name size) =
+    ppr name <+> equals <+> text "local_alloc" <>
+    parens (either ppr constCase size)
+    where constCase e = text "(constant)" <+> ppr e
   ppr (Atomic (AtomicAdd old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_add" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])

@@ -189,17 +189,8 @@ intraGroupStm stm@(Let pat _ e) = do
 
       scanfun' <- Kernelise.transformLambda scanfun
 
-      -- A GroupScan lambda needs two more parameters.
-      my_index <- newVName "my_index"
-      offset <- newVName "offset"
-      let my_index_param = Param my_index (Prim int32)
-          offset_param = Param offset (Prim int32)
-          scanfun'' = scanfun' { lambdaParams = my_index_param :
-                                                offset_param :
-                                                lambdaParams scanfun'
-                               }
       letBind_ (Pattern [] scan_pes) $
-        Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
+        Op $ Out.GroupScan w scanfun' $ zip nes scan_input
       parallelMin [w]
 
     Op (Screma w form arrs)
@@ -210,17 +201,8 @@ intraGroupStm stm@(Let pat _ e) = do
 
       redfun' <- Kernelise.transformLambda redfun
 
-      -- A GroupReduce lambda needs two more parameters.
-      my_index <- newVName "my_index"
-      offset <- newVName "offset"
-      let my_index_param = Param my_index (Prim int32)
-          offset_param = Param offset (Prim int32)
-          redfun'' = redfun' { lambdaParams = my_index_param :
-                                              offset_param :
-                                              lambdaParams redfun'
-                               }
       letBind_ (Pattern [] red_pes) $
-        Op $ Out.GroupReduce w redfun'' $ zip nes red_input
+        Op $ Out.GroupReduce w redfun' $ zip nes red_input
       parallelMin [w]
 
     Op (Stream w (Sequential accs) lam arrs)
@@ -321,4 +303,4 @@ intraGroupParalleliseBody deps group_variant ltid body = do
   (min_ws, avail_ws, kstms) <- runIntraGroupM (Env ltid deps group_variant) $
                  mapM_ intraGroupStm $ bodyStms body
   return (min_ws, avail_ws,
-          KernelBody () kstms $ map (ThreadsReturn OneResultPerGroup) $ bodyResult body)
+          KernelBody () kstms $ map GroupsReturn $ bodyResult body)

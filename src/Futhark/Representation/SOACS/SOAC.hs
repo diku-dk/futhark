@@ -63,7 +63,6 @@ import Futhark.Optimise.Simplify.Lore
 import Futhark.Representation.Ranges (Ranges, removeLambdaRanges)
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.Aliases (Aliases, removeLambdaAliases)
-import Futhark.Analysis.Usage
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.TypeCheck as TC
@@ -402,8 +401,7 @@ instance Attributes lore => IsOp (SOAC lore) where
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ tp@(Prim _) = tp
-substNamesInType subs (Mem se space) =
-  Mem (substNamesInSubExp subs se) space
+substNamesInType _ (Mem space) = Mem space
 substNamesInType subs (Array btp shp u) =
   let shp' = Shape $ map (substNamesInSubExp subs) (shapeDims shp)
   in  Array btp shp' u
@@ -486,10 +484,6 @@ instance Annotations lore => ST.IndexOp (SOAC lore) where
                   return $ LeafExp v pt
               | otherwise = lift Nothing
   indexOp _ _ _ _ = Nothing
-
-instance Aliased lore => UsageInOp (SOAC lore) where
-  usageInOp (Screma _ (ScremaForm _ _ f) arrs) = usageInLambda f arrs
-  usageInOp _ = mempty
 
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
 typeCheckSOAC (CmpThreshold what _) = TC.require [Prim int32] what

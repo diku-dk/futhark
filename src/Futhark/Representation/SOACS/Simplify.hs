@@ -14,6 +14,7 @@ module Futhark.Representation.SOACS.Simplify
 where
 
 import Control.Monad
+import Control.Monad.State
 import Data.Foldable
 import Data.Either
 import Data.List
@@ -148,7 +149,8 @@ soacRules :: RuleBook (Wise SOACS)
 soacRules = standardRules <> ruleBook topDownRules bottomUpRules
 
 topDownRules :: [TopDownRule (Wise SOACS)]
-topDownRules = [RuleOp removeReplicateMapping,
+topDownRules = [RuleOp hoistCertificates,
+                RuleOp removeReplicateMapping,
                 RuleOp removeReplicateWrite,
                 RuleOp removeUnusedSOACInput,
                 RuleOp simplifyClosedFormReduce,
@@ -166,6 +168,29 @@ bottomUpRules = [RuleOp removeDeadMapping,
                  RuleOp removeDuplicateMapOutput,
                  RuleOp mapOpToOp
                 ]
+
+-- Any certificates attached to a trivial Stm in the body might as
+-- well be applied to the SOAC itself.
+hoistCertificates :: TopDownRuleOp (Wise SOACS)
+hoistCertificates vtable pat aux soac
+  | (soac', hoisted) <- runState (mapSOACM mapper soac) mempty,
+    hoisted /= mempty =
+      certifying (hoisted <> stmAuxCerts aux) $ letBind_ pat $ Op soac'
+  where mapper = identitySOACMapper { mapOnSOACLambda = onLambda }
+        onLambda lam = do
+          stms' <- mapM onStm $ bodyStms $ lambdaBody lam
+          return lam { lambdaBody =
+                       mkBody stms' $ bodyResult $ lambdaBody lam }
+        onStm (Let se_pat se_aux (BasicOp (SubExp se))) = do
+          let (invariant, variant) =
+                partition (`ST.elem` vtable) $
+                unCertificates $ stmAuxCerts se_aux
+              se_aux' = se_aux { stmAuxCerts = Certificates variant }
+          modify (Certificates invariant<>)
+          return $ Let se_pat se_aux' $ BasicOp $ SubExp se
+        onStm stm = return stm
+hoistCertificates _ _ _ _ =
+  cannotSimplify
 
 liftIdentityMapping :: BottomUpRuleOp (Wise SOACS)
 liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
@@ -482,6 +507,11 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
 fuseConcatScatter _ _ _ _ = cannotSimplify
 
 simplifyClosedFormReduce :: TopDownRuleOp (Wise SOACS)
+simplifyClosedFormReduce _ pat _ (Screma (Constant w) form _)
+  | Just (_, _, nes, _) <- isRedomapSOAC form,
+    zeroIsh w =
+      forM_ (zip (patternNames pat) nes) $ \(v, ne) ->
+      letBindNames_ [v] $ BasicOp $ SubExp ne
 simplifyClosedFormReduce vtable pat _ (Screma _ form arrs)
   | Just (_, red_fun, nes) <- isReduceSOAC form =
       foldClosedForm (`ST.lookupExp` vtable) pat red_fun nes arrs

@@ -30,7 +30,7 @@ compileProg prog = do
       let extra = generateBoilerplate cuda_code cuda_prelude
                                       kernel_names sizes
       in Right <$> GC.compileProg operations extra cuda_includes
-                   [Space "device", Space "local", DefaultSpace] cliOptions prog'
+                   [Space "device", DefaultSpace] cliOptions prog'
   where
     operations :: GC.Operations OpenCL ()
     operations = GC.Operations
@@ -129,14 +129,12 @@ readCUDAScalar _ _ _ space _ =
 allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
   GC.stm [C.cstm|CUDA_SUCCEED(cuda_alloc(&ctx->cuda, $exp:size, $exp:tag, &$exp:mem));|]
-allocateCUDABuffer _ _ _ "local" = return ()
 allocateCUDABuffer _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateCUDABuffer :: GC.Deallocate OpenCL ()
 deallocateCUDABuffer mem tag "device" =
   GC.stm [C.cstm|CUDA_SUCCEED(cuda_free(&ctx->cuda, $exp:mem, $exp:tag));|]
-deallocateCUDABuffer _ _ "local" = return ()
 deallocateCUDABuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
@@ -187,7 +185,6 @@ staticCUDAArray _ space _ _ =
 
 cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = return [C.cty|typename CUdeviceptr|]
-cudaMemoryType "local" = pure [C.cty|unsigned char|] -- dummy type
 cudaMemoryType space =
   fail $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
@@ -206,6 +203,7 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
+    cudaSizeClass SizeLocalMemory = "local_memory"
 callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   time_start <- newVName "time_start"

@@ -673,7 +673,7 @@ opaqueName s _
 opaqueName s vds = "opaque_" ++ hash (zipWith xor [0..] $ map ord (s ++ concatMap p vds))
   where p (ScalarValue pt signed _) =
           show (pt, signed)
-        p (ArrayValue _ _ space pt signed dims) =
+        p (ArrayValue _ space pt signed dims) =
           show (space, pt, signed, length dims)
 
         -- FIXME: a stupid hash algorithm; may have collisions.
@@ -704,7 +704,7 @@ arrayLibraryFunctions space pt signed shape = do
   shape_array <- publicName $ "shape_" ++ name
 
   let shape_names = [ "dim"++show i | i <- [0..rank-1] ]
-      shape_params = [ [C.cparam|int $id:k|] | k <- shape_names ]
+      shape_params = [ [C.cparam|typename int64_t $id:k|] | k <- shape_names ]
       arr_size = cproduct [ [C.cexp|$id:k|] | k <- shape_names ]
       arr_size_array = cproduct [ [C.cexp|arr->shape[$int:i]|] | i <- [0..rank-1] ]
   copy <- asks envCopy
@@ -808,7 +808,7 @@ opaqueLibraryFunctions desc vds = do
 
       freeComponent _ ScalarValue{} =
         return ()
-      freeComponent i (ArrayValue _ _ _ pt signed shape) = do
+      freeComponent i (ArrayValue _ _ pt signed shape) = do
         let rank = length shape
         free_array <- publicName $ "free_" ++ arrayName pt signed rank
         stm [C.cstm|if ((tmp = $id:free_array(ctx, obj->$id:(tupleField i))) != 0) {
@@ -834,7 +834,7 @@ opaqueLibraryFunctions desc vds = do
 valueDescToCType :: ValueDesc -> CompilerM op s C.Type
 valueDescToCType (ScalarValue pt signed _) =
   return $ signedPrimTypeToCType signed pt
-valueDescToCType (ArrayValue _ _ space pt signed shape) = do
+valueDescToCType (ArrayValue _ space pt signed shape) = do
   let pt' = signedPrimTypeToCType signed pt
       rank = length shape
   exists <- gets $ lookup (pt',rank) . compArrayStructs
@@ -898,14 +898,10 @@ prepareEntryInputs = zipWithM prepare [(0::Int)..]
           stm [C.cstm|$id:name = $exp:src;|]
           return pt'
 
-        prepareValue src vd@(ArrayValue mem mem_size _ _ _ shape) = do
+        prepareValue src vd@(ArrayValue mem _ _ _ shape) = do
           ty <- valueDescToCType vd
 
           stm [C.cstm|$exp:mem = $exp:src->mem;|]
-          case mem_size of
-            VarSize v -> stm [C.cstm|$id:v = $exp:src->mem.size;|]
-            ConstSize _ -> return ()
-
 
           let rank = length shape
               maybeCopyDim (VarSize d) i =
@@ -951,7 +947,7 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
         prepareValue dest (ScalarValue _ _ name) =
           stm [C.cstm|$exp:dest = $id:name;|]
 
-        prepareValue dest (ArrayValue mem _ _ _ _ shape) = do
+        prepareValue dest (ArrayValue mem _ _ _ shape) = do
           stm [C.cstm|$exp:dest->mem = $id:mem;|]
 
           let rank = length shape
@@ -1039,7 +1035,7 @@ printStm (OpaqueValue desc _) _ =
   return [C.cstm|printf("#<opaque %s>", $string:desc);|]
 printStm (TransparentValue (ScalarValue bt ept _)) e =
   return $ printPrimStm [C.cexp|stdout|] e bt ept
-printStm (TransparentValue (ArrayValue _ _ _ bt ept shape)) e = do
+printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e = do
   values_array <- publicName $ "values_" ++ name
   shape_array <- publicName $ "shape_" ++ name
   let num_elems = cproduct [ [C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0..rank-1] ]
@@ -1076,7 +1072,7 @@ readInput i (TransparentValue (ScalarValue t ept _)) = do
   item [C.citem|$ty:(primTypeToCType t) $id:dest;|]
   stm $ readPrimStm dest i t ept
   return ([C.cstm|;|], [C.cstm|;|], [C.cstm|;|], [C.cexp|$id:dest|])
-readInput i (TransparentValue vd@(ArrayValue _ _ _ t ept dims)) = do
+readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
   dest <- newVName "read_value"
   shape <- newVName "read_shape"
   arr <- newVName "read_arr"
@@ -1124,7 +1120,7 @@ prepareOutputs = mapM prepareResult
             TransparentValue ScalarValue{} -> do
               item [C.citem|$ty:ty $id:result;|]
               return ([C.cexp|$id:result|], [C.cstm|;|])
-            TransparentValue (ArrayValue _ _ _ t ept dims) -> do
+            TransparentValue (ArrayValue _ _ t ept dims) -> do
               let name = arrayName t ept $ length dims
               free_array <- publicName $ "free_" ++ name
               item [C.citem|$ty:ty *$id:result;|]

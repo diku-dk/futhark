@@ -268,7 +268,6 @@ instance Renameable lore => Rename (Exp lore) where
                       mapOnBody = const rename
                     , mapOnSubExp = rename
                     , mapOnVName = rename
-                    , mapOnCertificates = rename
                     , mapOnRetType = rename
                     , mapOnBranchType = rename
                     , mapOnFParam = rename
@@ -282,7 +281,7 @@ instance Rename shape =>
     size' <- rename size
     return $ Array et size' u
   rename (Prim et) = return $ Prim et
-  rename (Mem e space) = Mem <$> rename e <*> pure space
+  rename (Mem space) = pure $ Mem space
 
 instance Renameable lore => Rename (Lambda lore) where
   rename (Lambda params body ret) =
