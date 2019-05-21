@@ -19,13 +19,14 @@ import Prelude hiding (quot)
 import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
+import Futhark.Transform.Substitute
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
-import Futhark.CodeGen.ImpGen (sFor, sWhen, sOp, (<--))
+import Futhark.CodeGen.ImpGen (sFor, sWhen, sOp)
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
@@ -71,6 +72,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
   ImpGen.dLParams red_op_params
   num_nodes <- ImpGen.dPrim "num_nodes" int32
   src_elems_e <- ImpGen.compileSubExp src_elems
+  map_pes_mems <- getArrayMemLocs (map patElemName map_pes)
   zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) (map paramName red_acc_params) nes
   interm_code <- ImpGen.collect $
     mapM_ (\(n, m, t) -> allocInterm n m (t `arrayOfRow` Var num_nodes)) $ zip3 interm_red interm_red_mem red_ts
@@ -82,8 +84,11 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
     ImpGen.compileStms (freeIn ses) (stmsToList bnds) $ do
       zipWithM_ (\x y -> ImpGen.copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
       node_map_res_arrs <- mapM ImpGen.lookupArray node_map_res
-      map_pes_mems <- getArrayMemLocs (map patElemName map_pes)
       zipWithM_ (combineMapResult husk_func) node_map_res_arrs map_pes_mems
+    mapM_ ((\x -> ImpGen.emit $ Imp.Free x DefaultSpace) . paramName) parts_mem
+  non_param_mem <- filterM isMem $ S.toList $ freeIn body_code `S.difference` S.fromList (src_mem_names ++ map_pes_mems ++ interm_red_mem)
+  (repl_mem_names, repl_mem_code) <- ImpGen.collect' $ mapM (allocAndRepl husk_func) non_param_mem
+  let body_code' = repl_mem_code <> substituteNames (M.fromList $ zip non_param_mem repl_mem_names) body_code
   red_code <- ImpGen.collect $ do
       sFor i Int32 (Imp.var num_nodes int32) $ do
         zipWithM_ (\x y -> ImpGen.copyDWIM x [] y [Imp.var i int32])
@@ -92,15 +97,13 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
       zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) (map patElemName red_pes) $
                   map (Var . paramName) red_acc_params
   bparams <- catMaybes <$> mapM (\x -> getParam x <$> lookupType x)
-    (S.toList $ freeIn body_code `S.difference` S.fromList (Imp.hfunctionParams husk_func))
-  let exclude = concat [interm_red, interm_red_mem, red_arrs, red_mems]
-  sOp $ Imp.Husk exclude num_nodes bparams husk_func interm_code body_code red_code
+    (S.toList $ freeIn body_code' `S.difference` S.fromList (Imp.hfunctionParams husk_func))
+  sOp $ Imp.Husk (interm_red ++ interm_red_mem) num_nodes bparams husk_func interm_code body_code' red_code
   where HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes = hspace
         one_val = ValueExp $ IntValue $ Int32Value 1
         zero_val = ValueExp $ IntValue $ Int32Value 0
         red_op_params = lambdaParams red_op
         (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
-        (red_arrs, red_mems) = unzip $ mapMaybe arrayNameMem red_op_params
         (node_red_res, node_map_res) = splitAt (length nes) $ getVarNames ses
         red_ts = take (length nes) ts
         (red_pes, map_pes) = splitAt (length nes) pes
@@ -110,17 +113,28 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
         getParam name (Prim t) = Just $ Imp.ScalarParam name t
         getParam name (Mem _ space) = Just $ Imp.MemParam name space
         getParam _ Array{} = Nothing
-        arrayNameMem (Param name (MemArray _ _ _ (ArrayIn mem _))) = Just (name, mem)
-        arrayNameMem _ = Nothing
+        isMem name = do
+          v <- ImpGen.lookupVar name
+          case v of
+            ImpGen.MemVar{} -> return True
+            _ -> return False
         memSize pt s = Imp.LeafExp (Imp.SizeOf pt) int32 * product (map (ImpGen.compileSubExpOfType int32) (shapeDims s))
         allocAndPart hfunc (Param part (MemArray t s _ _), Param part_mem _, part_size, src_mem) = do
-          let offset_size = memSize t (Shape [Var parts_offset])
-          part_size <-- memSize t s
+          ImpGen.dPrimV_ part_size $ memSize t s
           let part_size_b = Imp.bytes $ Imp.var part_size int32
+              offset_bytes = Imp.bytes $ memSize t $ Shape $ map (replaceVar parts_elems parts_offset) $ shapeDims s
           ImpGen.sAllocNamedArray part part_mem t s part_size_b DefaultSpace
           ImpGen.emit $ Imp.PeerCopy part_mem (Imp.bytes zero_val) (Imp.var (Imp.hfunctionNodeId hfunc) int32)
-            DefaultSpace src_mem (Imp.bytes offset_size) zero_val DefaultSpace part_size_b
+            DefaultSpace src_mem offset_bytes zero_val DefaultSpace part_size_b
         allocAndPart _ _ = fail "Peer destination is not an array."
+        allocAndRepl hfunc mem = do
+          ImpGen.MemEntry mem_size mem_space <- ImpGen.lookupMemory mem
+          let mem_size_b = Imp.memSizeToExp mem_size
+              zero_b = Imp.bytes zero_val
+          repl_mem <- ImpGen.sAlloc "repl_mem" mem_size_b DefaultSpace
+          ImpGen.emit $ Imp.PeerCopy repl_mem zero_b (Imp.var (Imp.hfunctionNodeId hfunc) int32) DefaultSpace
+            mem zero_b zero_val mem_space mem_size_b
+          return repl_mem
         allocInterm name mem (Array et size _) =
           ImpGen.sAllocNamedArray name mem et size (Imp.bytes $ memSize et size) DefaultSpace
         allocInterm _ _ _ = fail "Intermediate is not an array."

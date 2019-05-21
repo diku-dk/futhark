@@ -116,9 +116,9 @@ setHostOpDefaultSpace space (Husk keep_host num_nodes bparams husk_func interm b
     Husk keep_host num_nodes
       <$> mapM (setParamSpace space) bparams
       <*> pure husk_func
-      <*> pure interm -- Keep intermediate allocations on host
+      <*> setBodySpace space interm
       <*> setBodySpace space body
-      <*> pure red -- Keep reduce on host
+      <*> setBodySpace space red
 setHostOpDefaultSpace _ op = return op
 
 setCountSpace :: Space -> Count a -> SetDefaultSpaceM (Count a)

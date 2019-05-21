@@ -31,6 +31,7 @@ module Futhark.CodeGen.ImpGen
   , emitFunction
   , hasFunction
   , collect
+  , collect'
   , comment
   , getNodeId
   , VarEntry (..)

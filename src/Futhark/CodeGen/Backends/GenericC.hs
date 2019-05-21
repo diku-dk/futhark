@@ -2014,6 +2014,7 @@ defineHuskFunction (HuskFunction name param_struct node_id) params body = do
         *(struct $id:param_struct *)$id:husk_params_p;
       $decls:body_decls
       $items:body'
+      return 0;
     }|]
   where toCType (ScalarParam _ t) = return [C.cty|$ty:(primTypeToCType t)|]
         toCType (MemParam _ space) = do

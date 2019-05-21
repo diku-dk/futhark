@@ -555,10 +555,10 @@ handleHostOp (HostOp (SegGenRed space ops ts body)) = do
 handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
   let hspace' = huskSpaceMemInfo hspace
   (body', red_op') <- localScope (scopeOfHuskSpace hspace') $ do
-    (Body bc bb br) <- allocInHuskBody body
-    (lp', a) <- collectStms $ mapM alloc lp
+    b <- allocInHuskBody body
+    lp' <- mapM alloc lp
     r <- allocInLambda lp' lb lr
-    return (Body bc (bb <> a) br, r)
+    return (b, r)
   return $ Inner $ Husk hspace' red_op' nes ts body'
   where alloc (Param name (Prim pt)) = return $ Param name $ MemPrim pt
         alloc (Param name (Mem size space)) = return $ Param name $ MemMem size space

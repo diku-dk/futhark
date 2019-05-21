@@ -365,7 +365,7 @@ generateContextFuns cfg kernel_names husk_funcs sizes = do
       [C.cstm|if (content->husk_id == $int:(baseTag f)) {
         int res = $id:f(ctx, node_id, content->params);
         if(res != 0)
-          panic(-1, "Husk with id %d failed with error &d.", content->husk_id, res);
+          panic(-1, "Husk with id %d on node %d failed with error %d.", content->husk_id, node_id, res);
       } else {
         $stm:(runHusk hs)
       }|]

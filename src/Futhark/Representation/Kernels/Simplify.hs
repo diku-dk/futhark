@@ -148,12 +148,11 @@ simplifyKernelOp _ _ (Husk hspace red_op nes ts body) = do
     Engine.simplifyBody (replicate (length ts) Observe) body
   body_hoisted' <- mapM processHoistedStm body_hoisted
   body' <- Engine.constructBody body_stms' body_res'
-  (red_op', red_op_hoisted) <-
+  red_op' <-
     Engine.localVtable (<>scope_vtable) $
-    Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
-  red_op_hoisted' <- mapM processHoistedStm red_op_hoisted
+    Engine.simplifyLambdaNoHoisting red_op $ replicate (length nes * 2) Nothing
   nes' <- Engine.simplify nes
-  return (Husk hspace' red_op' nes' ts' body', red_op_hoisted' <> body_hoisted')
+  return (Husk hspace' red_op' nes' ts' body', body_hoisted')
 
 simplifyKernelOp _ _ (GetSize key size_class) =
   return (GetSize key size_class, mempty)

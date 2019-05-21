@@ -95,13 +95,6 @@ enum cuda_node_message_type {
   NODE_MSG_EXIT
 };
 
-struct cuda_node_static_content {
-  CUdeviceptr *mem;
-  void *src;
-  size_t num_elems;
-  size_t elem_size;
-};
-
 struct cuda_node_husk_content {
   int32_t husk_id;
   void *params;

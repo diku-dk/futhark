@@ -209,6 +209,7 @@ extractKernels =
 -- source,
 data State = State { stateNameSource :: VNameSource
                    , stateThresholdCounter :: Int
+                   , stateInHusk :: Bool
                    }
 
 newtype DistribM a = DistribM (RWS (Scope Out.Kernels) Log State a)
@@ -221,11 +222,22 @@ instance MonadFreshNames DistribM where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
 
+inHusk :: DistribM a -> DistribM a
+inHusk m = do
+  old_in_husk <- gets stateInHusk
+  modify $ \s -> s { stateInHusk = True }
+  res <- m
+  modify $ \s -> s { stateInHusk = old_in_husk }
+  return res
+
+isInHusk :: DistribM Bool
+isInHusk = gets stateInHusk
+
 runDistribM :: (MonadLogger m, MonadFreshNames m) =>
                DistribM a -> m a
 runDistribM (DistribM m) = do
   (x, msgs) <- modifyNameSource $ \src ->
-    let (x, s, msgs) = runRWS m mempty (State src 0)
+    let (x, s, msgs) = runRWS m mempty (State src 0 False)
     in ((x, msgs), stateNameSource s)
   addLog msgs
   return x
@@ -293,8 +305,11 @@ transformStm path (Let pat aux (DoLoop ctx val form body)) =
                     ForLoop i it bound ps
 
 transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
-  | Just lam <- isMapSOAC form =
-      distributeMap path $ MapLoop pat cs w lam arrs
+  | Just lam <- isMapSOAC form = do
+      in_husk <- isInHusk
+      if in_husk
+        then distributeMap path (MapLoop pat cs w lam arrs)
+        else inHusk $ huskedDistributeMap path (MapLoop pat cs w lam arrs)
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just (scan_lam, nes) <- isScanSOAC form,
@@ -333,14 +348,19 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
 transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just (comm, red_lam, nes, map_lam) <- isRedomapSOAC form = do
 
-  let paralleliseOuter = runBinder_ $ do
-        red_lam_sequential <- Kernelise.transformLambda red_lam
-        red_lam_firstorder <- FOT.transformLambda red_lam
-        map_lam_sequential <- Kernelise.transformLambda map_lam
-        addStms =<<
-          (fmap (certify cs) <$>
-           huskedNonSegRed pat w comm' red_lam_sequential red_lam_firstorder
-                           map_lam_sequential nes arrs)
+  let paralleliseOuter = do
+        in_husk <- isInHusk
+        runBinder_ $ do
+          red_lam_sequential <- Kernelise.transformLambda red_lam
+          map_lam_sequential <- Kernelise.transformLambda map_lam
+          addStms =<<
+            (fmap (certify cs) <$>
+              if in_husk
+                then nonSegRed pat w comm' red_lam_sequential map_lam_sequential nes arrs
+                else do
+                  red_lam_firstorder <- FOT.transformLambda red_lam
+                  huskedNonSegRed pat w comm' red_lam_sequential red_lam_firstorder
+                                  map_lam_sequential nes arrs)
 
       outerParallelBody =
         renameBody =<<
@@ -480,6 +500,22 @@ mapLoopStm (MapLoop pat cs w lam arrs) = Let pat (StmAux cs ()) $ Op $ Screma w 
 sufficientParallelism :: String -> SubExp -> KernelPath
                       -> DistribM ((SubExp, Name), Out.Stms Out.Kernels)
 sufficientParallelism desc what path = cmpSizeLe desc (Out.SizeThreshold path) what
+
+huskedDistributeMap :: KernelPath -> MapLoop -> DistribM KernelsStms
+huskedDistributeMap path (MapLoop pat cs w lam arrs) = do
+  hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
+  let ret_ts = lambdaReturnType lam
+      hscope = scopeOfHuskSpace hspace
+      parts_names = map paramName parts
+      parts_elems_v = Var parts_elems
+  (Pattern pcs pes) <- renamePattern pat
+  node_res <- replicateM (length ret_ts) $ newVName "node_res"
+  let body_pat_ts = map ((`setOuterSize` Var parts_elems) . patElemAttr) pes
+      body_pat = Pattern pcs $ zipWith PatElem node_res body_pat_ts
+  body_stms <- localScope hscope $
+    distributeMap path (MapLoop body_pat cs parts_elems_v lam parts_names)
+  id_lam <- mkIdentityLambda []
+  runBinder_ $ letBind_ pat $ Op $ Husk hspace id_lam [] ret_ts $ mkBody body_stms $ map Var node_res
 
 distributeMap :: KernelPath -> MapLoop -> DistribM KernelsStms
 distributeMap path (MapLoop pat cs w lam arrs) = do
