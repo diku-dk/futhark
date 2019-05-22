@@ -26,6 +26,7 @@ module Futhark.Util
         directoryContents,
         roundFloat,
         roundDouble,
+        lgamma, lgammaf, tgamma, tgammaf,
         fromPOSIX,
         toPOSIX,
         trim,
@@ -174,6 +175,27 @@ roundFloat = c_nearbyintf
 -- | Round a double-precision floating point number correctly.
 roundDouble :: Double -> Double
 roundDouble = c_nearbyint
+
+foreign import ccall "lgamma" c_lgamma :: Double -> Double
+foreign import ccall "lgammaf" c_lgammaf :: Float -> Float
+foreign import ccall "tgamma" c_tgamma :: Double -> Double
+foreign import ccall "tgammaf" c_tgammaf :: Float -> Float
+
+-- | The system-level @lgamma()@ function.
+lgamma :: Double -> Double
+lgamma = c_lgamma
+
+-- | The system-level @lgammaf()@ function.
+lgammaf :: Float -> Float
+lgammaf = c_lgammaf
+
+-- | The system-level @tgamma()@ function.
+tgamma :: Double -> Double
+tgamma = c_tgamma
+
+-- | The system-level @tgammaf()@ function.
+tgammaf :: Float -> Float
+tgammaf = c_tgammaf
 
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
