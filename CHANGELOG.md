@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     local memory, and is now often a good bit faster when the target
     array is not too large.
 
+  * The `f32` and `f64` modules now contain `gamma` and `lgamma`
+    functions.  At present these do not work in the C# backend.
+
 ### Removed
 
   * Size *parameters* (not *annotations*) are no longer permitted

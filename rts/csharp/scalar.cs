@@ -282,6 +282,8 @@ private static double futhark_acos64(double x){return Math.Acos(x);}
 private static double futhark_asin64(double x){return Math.Asin(x);}
 private static double futhark_atan64(double x){return Math.Atan(x);}
 private static double futhark_atan2_64(double x, double y){return Math.Atan2(x, y);}
+private static double futhark_gamma64(double x){throw new NotImplementedException();}
+private static double futhark_lgamma64(double x){throw new NotImplementedException();}
 private static bool futhark_isnan64(double x){return double.IsNaN(x);}
 private static bool futhark_isinf64(double x){return double.IsInfinity(x);}
 private static long futhark_to_bits64(double x){return BitConverter.ToInt64(BitConverter.GetBytes(x),0);}
@@ -299,6 +301,8 @@ private static float futhark_acos32(float x){return (float) Math.Acos(x);}
 private static float futhark_asin32(float x){return (float) Math.Asin(x);}
 private static float futhark_atan32(float x){return (float) Math.Atan(x);}
 private static float futhark_atan2_32(float x, float y){return (float) Math.Atan2(x, y);}
+private static float futhark_gamma32(float x){throw new NotImplementedException();}
+private static float futhark_lgamma32(float x){throw new NotImplementedException();}
 private static bool futhark_isnan32(float x){return float.IsNaN(x);}
 private static bool futhark_isinf32(float x){return float.IsInfinity(x);}
 private static int futhark_to_bits32(float x){return BitConverter.ToInt32(BitConverter.GetBytes(x), 0);}
