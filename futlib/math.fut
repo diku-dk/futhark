@@ -122,6 +122,8 @@ module type real = {
   val acos: t -> t
   val atan: t -> t
   val atan2: t -> t -> t
+  val gamma: t -> t
+  val lgamma: t -> t
 
   -- | Natural logarithm.
   val log: t -> t
@@ -828,6 +830,8 @@ module f64: (float with t = f64 with int_t = u64) = {
   let asin (x: f64) = intrinsics.asin64 x
   let atan (x: f64) = intrinsics.atan64 x
   let atan2 (x: f64) (y: f64) = intrinsics.atan2_64 x y
+  let gamma = intrinsics.gamma64
+  let lgamma = intrinsics.lgamma64
 
   let ceil (x: f64) : f64 =
     let i = to_i64 x
@@ -937,6 +941,8 @@ module f32: (float with t = f32 with int_t = u32) = {
   let asin (x: f32) = intrinsics.asin32 x
   let atan (x: f32) = intrinsics.atan32 x
   let atan2 (x: f32) (y: f32) = intrinsics.atan2_32 x y
+  let gamma = intrinsics.gamma32
+  let lgamma = intrinsics.lgamma32
 
   let ceil (x: f32) : f32 =
     let i = to_i32 x

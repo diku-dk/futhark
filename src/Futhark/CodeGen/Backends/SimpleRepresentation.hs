@@ -317,6 +317,14 @@ cFloat32Funs = [C.cunit|
       return atan2(x,y);
     }
 
+    static inline float $id:(funName' "gamma32")(float x) {
+      return tgamma(x);
+    }
+
+    static inline float $id:(funName' "lgamma32")(float x) {
+      return lgamma(x);
+    }
+
     static inline float $id:(funName' "round32")(float x) {
       return rint(x);
     }
@@ -396,6 +404,14 @@ cFloat64Funs = [C.cunit|
 
     static inline double $id:(funName' "atan2_64")(double x, double y) {
       return atan2(x,y);
+    }
+
+    static inline double $id:(funName' "gamma64")(double x) {
+      return tgamma(x);
+    }
+
+    static inline double $id:(funName' "lgamma64")(double x) {
+      return lgamma(x);
     }
 
     static inline double $id:(funName' "round64")(double x) {
