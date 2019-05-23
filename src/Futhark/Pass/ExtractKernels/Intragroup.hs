@@ -154,13 +154,18 @@ intraGroupStm stm@(Let pat _ e) = do
       groupInvariant Constant{} = True
 
   case e of
-    DoLoop ctx val (ForLoop i it bound inps) loopbody
-      | groupInvariant bound ->
-          localScope (scopeOf form) $
+    -- Cosmin hack: previously, only for loops were supported,
+    --              and only if `groupInvariant bound` holds;
+    --              Let's see what can possibly go wrong if we
+    --              completely generalize this (?)
+    DoLoop ctx val form loopbody ->
+          localScope (scopeOf form') $
           localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
           loopbody' <- intraGroupBody loopbody
-          letBind_ pat $ DoLoop ctx val form loopbody'
-              where form = ForLoop i it bound inps
+          letBind_ pat $ DoLoop ctx val form' loopbody'
+              where form' = case form of
+                              ForLoop i it bound inps -> ForLoop i it bound inps
+                              WhileLoop cond          -> WhileLoop cond
 
     If cond tbody fbody ifattr
       | groupInvariant cond -> do

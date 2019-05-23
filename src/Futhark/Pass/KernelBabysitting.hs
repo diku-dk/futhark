@@ -53,6 +53,7 @@ type ExpMap = M.Map VName (Stm Kernels)
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case M.lookup name m of
+    Just (Let _ _ (BasicOp (Opaque (Var arr)))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just $ rearrangeInverse perm
     Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
