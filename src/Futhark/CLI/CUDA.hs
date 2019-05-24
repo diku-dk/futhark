@@ -30,7 +30,7 @@ main = compilerMain () []
              liftIO $ writeFile cpath impl
            ToExecutable -> do
              liftIO $ writeFile cpath $ CCUDA.asExecutable cprog
-             let args = [cpath, "-O3", "-std=c99", "-lm", "-o", outpath]
+             let args = [cpath, "-O", "-std=c99", "-lm", "-o", outpath]
                         ++ extra_options
              ret <- liftIO $ runProgramWithExitCode "gcc" args ""
              case ret of
