@@ -452,17 +452,21 @@ checkForDuplicateSpecs =
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
-checkTypeBind (TypeBind name ps td doc loc) =
-  checkTypeParams ps $ \ps' -> do
-    (td', l) <- bindingTypeParams ps' $ checkTypeDecl ps' td
+checkTypeBind (TypeBind name tps (TypeDecl t NoInfo) doc loc) =
+  checkTypeParams tps $ \tps' -> do
+    (td', l) <- bindingTypeParams tps' $ do
+      checkForDuplicateNamesInType t
+      (t', st, l) <- checkTypeExp t
+      checkShapeParamUses typeExpUses tps' [t']
+      return (TypeDecl t' $ Info st, l)
     bindSpaced [(Type, name)] $ do
       name' <- checkName Type name loc
       return (mempty { envTypeTable =
-                         M.singleton name' $ TypeAbbr l ps' $ unInfo $ expandedType td',
+                         M.singleton name' $ TypeAbbr l tps' $ unInfo $ expandedType td',
                        envNameMap =
                          M.singleton (Type, name) $ qualName name'
                      },
-              TypeBind name' ps' td' doc loc)
+              TypeBind name' tps' td' doc loc)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
