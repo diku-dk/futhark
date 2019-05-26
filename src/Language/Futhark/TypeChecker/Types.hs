@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker.Types
   , subuniqueOf
 
   , checkForDuplicateNames
+  , checkForDuplicateNamesInType
   , checkTypeParams
 
   , typeExpUses
