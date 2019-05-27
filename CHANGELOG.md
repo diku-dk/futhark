@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixes to reading values under Python 3.
 
+  * The type of a variable can now be deduced from its use as a size
+    annotation.
+
 ## [0.10.2]
 
 ### Added

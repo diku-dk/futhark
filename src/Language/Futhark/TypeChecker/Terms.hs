@@ -330,6 +330,11 @@ instance MonadTypeChecker TermTypeM where
               (map (maybe (toStruct argtype) Prim) pts,
                maybe (toStruct argtype) Prim rt)
 
+  checkNamedDim loc v = do
+    (v', t) <- lookupVar loc v
+    unify loc (toStructural t) (Prim $ Signed Int32)
+    return v'
+
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName [q] _) loc
   | nameToString q == "intrinsics" = do
