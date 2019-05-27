@@ -82,7 +82,7 @@ let main [num_bits]
   let sobvctsz  = num_dates*num_und
   let dir_vs    = dir_vs_nosz : [sobvctsz][num_bits]i32
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
-  let sobol_mat = stream_map (\[chunk] (ns: [chunk]i32): [][sobvctsz]f32 ->
+  let sobol_mat = stream_map (\chunk (ns: [chunk]i32): [][sobvctsz]f32 ->
                                 sobolChunk(dir_vs, unsafe ns[0], chunk, sobvctsz)
                            ) (iota(num_mc_it) ) in
   reduce  (+) (0.0) (map  (\(row: []f32): f32  -> reduce (+) (0.0) row) (sobol_mat ) )

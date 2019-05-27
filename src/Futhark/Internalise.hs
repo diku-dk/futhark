@@ -506,7 +506,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody loc) = do
       i <- newVName "i"
 
       bindingParams [] [mergepat] $ \mergecm shapepat nested_mergepat ->
-        bindingLambdaParams [] [x] (map rowType arr_ts) $ \x_cm x_params -> do
+        bindingLambdaParams [x] (map rowType arr_ts) $ \x_cm x_params -> do
           mapM_ (uncurry (internaliseDimConstant loc)) x_cm
           mapM_ (uncurry (internaliseDimConstant loc)) mergecm
           let loopvars = zip x_params arr'
@@ -1174,8 +1174,8 @@ internaliseLambda :: InternaliseLambda
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
 
-internaliseLambda (E.Lambda tparams params body _ (Info (_, rettype)) loc) rowtypes =
-  bindingLambdaParams tparams params rowtypes $ \pcm params' -> do
+internaliseLambda (E.Lambda params body _ (Info (_, rettype)) loc) rowtypes =
+  bindingLambdaParams params rowtypes $ \pcm params' -> do
     (rettype', rcm) <- internaliseReturnType rettype
     body' <- internaliseBody body
     mapM_ (uncurry (internaliseDimConstant loc)) $ pcm<>rcm

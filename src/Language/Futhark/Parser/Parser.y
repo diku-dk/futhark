@@ -577,8 +577,8 @@ Exp2 :: { UncheckedExp }
      | Exp2 with FieldAccesses_ '=' Exp2
        { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
 
-     | '\\' TypeParams FunParams1 maybeAscription(TypeExpTerm) '->' Exp
-       { Lambda $2 (fst $3 : snd $3) $6 $4 NoInfo (srcspan $1 $>) }
+     | '\\' FunParams1 maybeAscription(TypeExpTerm) '->' Exp
+       { Lambda (fst $2 : snd $2) $5 $3 NoInfo (srcspan $1 $>) }
 
      | Apply { $1 }
 

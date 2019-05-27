@@ -248,9 +248,9 @@ transformExp (Apply e1 e2 d tp loc) = do
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
 
-transformExp (Lambda tparams params e0 decl tp loc) = do
+transformExp (Lambda params e0 decl tp loc) = do
   e0' <- transformExp e0
-  return $ Lambda tparams params e0' decl tp loc
+  return $ Lambda params e0' decl tp loc
 
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
@@ -346,7 +346,7 @@ desugarBinOpSection qn e_left e_right t xtype ytype rettype loc = do
   (e2, p2) <- makeVarParam e_right $ fromStruct ytype
   let body = BinOp qn (Info t) (e1, Info xtype) (e2, Info ytype) (Info rettype) loc
       rettype' = toStruct rettype
-  return $ Lambda [] (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
+  return $ Lambda (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
 
   where makeVarParam (Just e) _ = return (e, [])
         makeVarParam Nothing argtype = do
@@ -358,7 +358,7 @@ desugarProjectSection :: [Name] -> PatternType -> SrcLoc -> MonoM Exp
 desugarProjectSection fields (Arrow _ _ t1 t2) loc = do
   p <- newVName "project_p"
   let body = foldl project (Var (qualName p) (Info t1) noLoc) fields
-  return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
+  return $ Lambda [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
   where project e field =
           case typeOf e of
             Record fs | Just t <- M.lookup field fs ->
@@ -371,7 +371,7 @@ desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Arrow _ _ t1 t2) loc = do
   p <- newVName "index_i"
   let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2) loc
-  return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
+  return $ Lambda [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
 desugarIndexSection  _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()

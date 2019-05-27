@@ -21,14 +21,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Removed
 
   * Size *parameters* (not *annotations*) are no longer permitted
-    directly in `let` and `loop` bindings.  You are likely not
-    affected.  Nobody used this.
+    directly in `let` and `loop` bindings, nor in lambdas.  You are
+    likely not affected (except for the `stream` constructs; see
+    below).  Few people used this.
 
 ### Changed
 
   * The array creation functions exported by generated C code now take
     `int64_t` arguments for the shape, rather than `int`.  This is in
     line with what the shape functions return.
+
+  * The types for `stream_map`, `stream_map_per`, `stream_red`, and
+    `stream_red_per` have been changed, such that the chunk function
+    now takes the chunk size as the first argument.
 
 ### Fixed
 

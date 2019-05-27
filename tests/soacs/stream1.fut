@@ -9,9 +9,8 @@ let vecadd [m] (xs: [m]i32) (ys: [m]i32): [m]i32 =
     let xs[i] = xs[i] + ys[i]
     in xs
 
-let process_chunk [chunk_sz][m] (chunk: [chunk_sz][m]i32): [m]i32 =
-  loop acc = replicate m 0 for i < chunk_sz do
-                   vecadd acc chunk[i]
+let process_chunk [m] chunk_sz (chunk: [chunk_sz][m]i32): [m]i32 =
+  loop acc = replicate m 0 for i < chunk_sz do vecadd acc chunk[i]
 
 let main [n][m] (xss: [n][m]i32): [m]i32 =
   stream_red_per vecadd process_chunk xss

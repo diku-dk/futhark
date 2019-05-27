@@ -158,19 +158,20 @@ let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a
 
 -- | `stream_red op f as` splits `as` into chunks, applies `f` to each
 -- of these in parallel, and uses `op` (which must be associative) to
--- combine the per-chunk results into a final result.  This SOAC is
--- useful when `f` can be given a particularly work-efficient
--- sequential implementation.  Operationally, we can imagine that `as`
--- is divided among as many threads as necessary to saturate the
--- machine, with each thread operating sequentially.
+-- combine the per-chunk results into a final result.  The `i32`
+-- passed to `f` is the size of the chunk.  This SOAC is useful when
+-- `f` can be given a particularly work-efficient sequential
+-- implementation.  Operationally, we can imagine that `as` is divided
+-- among as many threads as necessary to saturate the machine, with
+-- each thread operating sequentially.
 --
--- A chunk may be empty, `f []` must produce the neutral element for
+-- A chunk may be empty, and `f 0 []` must produce the neutral element for
 -- `op`.
 --
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let stream_red 'a 'b (op: b -> b -> b) (f: []a -> b) (as: []a): b =
+let stream_red 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b =
   intrinsics.stream_red (op, f, as)
 
 -- | As `stream_red`@term, but the chunks do not necessarily
@@ -180,7 +181,7 @@ let stream_red 'a 'b (op: b -> b -> b) (f: []a -> b) (as: []a): b =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let stream_red_per 'a 'b (op: b -> b -> b) (f: []a -> b) (as: []a): b =
+let stream_red_per 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b =
   intrinsics.stream_red_per (op, f, as)
 
 -- | Similar to `stream_red`@term, except that each chunk must produce
@@ -190,7 +191,7 @@ let stream_red_per 'a 'b (op: b -> b -> b) (f: []a -> b) (as: []a): b =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let stream_map 'a 'b (f: []a -> []b) (as: []a): *[]b =
+let stream_map 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
   intrinsics.stream_map (f, as)
 
 -- | Similar to `stream_map`@term, but the chunks do not necessarily
@@ -200,7 +201,7 @@ let stream_map 'a 'b (f: []a -> []b) (as: []a): *[]b =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let stream_map_per 'a 'b (f: []a -> []b) (as: []a): *[]b =
+let stream_map_per 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
   intrinsics.stream_map_per (f, as)
 
 -- | Return `true` if the given function returns `true` for all
