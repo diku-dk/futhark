@@ -247,16 +247,6 @@ checkTypeExp t@(TEEnum names loc) = do
     throwError $ TypeError loc "Enums must have 256 or fewer constructors."
   return (TEEnum names loc, Enum names,  Unlifted)
 
-checkNamedDim :: MonadTypeChecker m =>
-                 SrcLoc -> QualName Name -> m (QualName VName)
-checkNamedDim loc v = do
-  (v', t) <- lookupVar loc v
-  case t of
-    Prim (Signed Int32) -> return v'
-    _                   -> throwError $ TypeError loc $
-                           "Dimension declaration " ++ pretty v ++
-                           " should be of type `i32`."
-
 -- | Check for duplication of names inside a pattern group.  Produces
 -- a description of all names used in the pattern group.
 checkForDuplicateNames :: MonadTypeChecker m =>

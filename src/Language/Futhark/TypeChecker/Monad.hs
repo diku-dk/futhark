@@ -210,6 +210,15 @@ class MonadError TypeError m => MonadTypeChecker m where
   lookupImport :: SrcLoc -> FilePath -> m (FilePath, Env)
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatternType)
 
+  checkNamedDim :: SrcLoc -> QualName Name -> m (QualName VName)
+  checkNamedDim loc v = do
+    (v', t) <- lookupVar loc v
+    case t of
+      Prim (Signed Int32) -> return v'
+      _                   -> throwError $ TypeError loc $
+                             "Dimension declaration " ++ pretty v ++
+                             " should be of type `i32`."
+
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
 
