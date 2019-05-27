@@ -626,7 +626,7 @@ data ExpBase f vn =
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
 
-            | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
+            | Lambda [PatternBase f vn] (ExpBase f vn)
               (Maybe (TypeExp vn)) (f (Aliasing, StructType)) SrcLoc
 
             | OpSection (QualName vn) (f PatternType) SrcLoc
@@ -708,7 +708,7 @@ instance Located (ExpBase f vn) where
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
   locOf (RecordUpdate _ _ _ _ pos)     = locOf pos
-  locOf (Lambda _ _ _ _ _ loc)         = locOf loc
+  locOf (Lambda _ _ _ _ loc)           = locOf loc
   locOf (OpSection _ _ loc)            = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc

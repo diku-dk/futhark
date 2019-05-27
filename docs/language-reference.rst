@@ -410,7 +410,7 @@ literals and variables, but also more complicated forms.
       : | "let" `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
-      : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
+      : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` [("=" `exp`)] `loopform` "do" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
@@ -814,7 +814,9 @@ Function Expressions
 ..................
 
 Produces an anonymous function taking parameters ``x``, ``y``, and
-``z``, returns type ``t``, and whose body is ``e``.
+``z``, returns type ``t``, and whose body is ``e``.  Lambdas do not
+permit type parameters; use a named function if you want a polymorphic
+function.
 
 ``(binop)``
 ...........

@@ -472,11 +472,10 @@ typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (DoLoop pat _ _ _ _) = patternType pat
-typeOf (Lambda tparams params _ _ (Info (als, t)) _) =
+typeOf (Lambda params _ _ (Info (als, t)) _) =
   unscopeType bound_here $
   foldr (uncurry (Arrow ()) . patternParam) t params `setAliases` als
-  where bound_here = S.fromList (map typeParamName tparams) <>
-                     S.map identName (mconcat $ map patternIdents params)
+  where bound_here = S.map identName (mconcat $ map patternIdents params)
 typeOf (OpSection _ (Info t) _) =
   t
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
@@ -603,6 +602,8 @@ patternParam (PatternParens p _) =
   patternParam p
 patternParam (PatternAscription (Id v _ _) td _) =
   (Just v, unInfo $ expandedType td)
+patternParam (Id v (Info t) _) =
+  (Just v, toStruct t)
 patternParam p =
   (Nothing, patternStructType p)
 
@@ -735,17 +736,16 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                tupleRecord [uarr_a, Array () Unique (ArrayPrimElem (Signed Int32)) (rank 1)]),
 
               ("stream_map",
-               IntrinsicPolyFun [tp_a, tp_b] [arr_a `arr` arr_b, arr_a] uarr_b),
+               IntrinsicPolyFun [tp_a, tp_b] [Prim (Signed Int32) `arr` (arr_a `arr` arr_b), arr_a] uarr_b),
 
               ("stream_map_per",
-               IntrinsicPolyFun [tp_a, tp_b] [arr_a `arr` arr_b, arr_a] uarr_b),
+               IntrinsicPolyFun [tp_a, tp_b] [Prim (Signed Int32) `arr` (arr_a `arr` arr_b), arr_a] uarr_b),
 
               ("stream_red",
-               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b),
+               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), Prim (Signed Int32) `arr` (arr_a `arr` t_b), arr_a] t_b),
 
               ("stream_red_per",
-               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b),
-
+               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), Prim (Signed Int32) `arr` (arr_a `arr` t_b), arr_a] t_b),
 
               ("trace", IntrinsicPolyFun [tp_a] [t_a] t_a),
               ("break", IntrinsicPolyFun [tp_a] [t_a] t_a)]

@@ -118,8 +118,8 @@ instance ASTMappable (ExpBase Info VName) where
     Unsafe <$> mapOnExp tv e <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
     Assert <$> mapOnExp tv e1 <*> mapOnExp tv e2 <*> pure desc <*> pure loc
-  astMap tv (Lambda tparams params body ret t loc) =
-    Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
+  astMap tv (Lambda params body ret t loc) =
+    Lambda <$> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*>
     traverse (traverse $ mapOnStructType tv) t <*> pure loc
   astMap tv (OpSection name t loc) =

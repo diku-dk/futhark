@@ -53,15 +53,14 @@ bindingParams tparams params m = do
     I.localScope (I.scopeOfFParams $ shape_params++concat valueparams) $
     substitutingVars shape_subst $ m cm shape_params $ chunks num_param_ts (concat valueparams)
 
-bindingLambdaParams :: [E.TypeParam] -> [E.Pattern] -> [I.Type]
+bindingLambdaParams :: [E.Pattern] -> [I.Type]
                     -> (ConstParams -> [I.LParam] -> InternaliseM a)
                     -> InternaliseM a
-bindingLambdaParams tparams params ts m = do
+bindingLambdaParams params ts m = do
   (params_idents, params_types) <-
     unzip . concat <$> mapM flattenPattern params
-  let bound = boundInTypes tparams
-      param_names = M.fromList [ (E.identName x, y) | (x,y) <- params_idents ]
-  (params_ts, cm) <- internaliseParamTypes bound param_names params_types
+  let param_names = M.fromList [ (E.identName x, y) | (x,y) <- params_idents ]
+  (params_ts, cm) <- internaliseParamTypes mempty param_names params_types
 
   let ascript_substs = lambdaShapeSubstitutions (concat params_ts) ts
 
