@@ -352,7 +352,8 @@ instance Engine.Simplifiable KernelSpace where
 instance Engine.Simplifiable (HuskSpace lore) where
   simplify (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) = do
     src' <- Engine.simplify src
-    return $ HuskSpace src' src_elems parts parts_elems parts_offset parts_mem parts_sizes
+    src_elems' <- Engine.simplify src_elems
+    return $ HuskSpace src' src_elems' parts parts_elems parts_offset parts_mem parts_sizes
 
 instance Engine.Simplifiable SpaceStructure where
   simplify (FlatThreadSpace dims) =

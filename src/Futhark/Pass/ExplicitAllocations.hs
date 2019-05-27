@@ -553,7 +553,8 @@ handleHostOp (HostOp (SegGenRed space ops ts body)) = do
   return $ Inner $ HostOp $ SegGenRed space ops' ts body'
 
 handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
-  let hspace' = huskSpaceMemInfo hspace
+  src' <- mapM ensureDirectSource (hspaceSource hspace)
+  let hspace' = (huskSpaceMemInfo hspace) { hspaceSource = src' }
   (body', red_op') <- localScope (scopeOfHuskSpace hspace') $ do
     b <- allocInHuskBody body
     lp' <- mapM alloc lp
@@ -565,6 +566,11 @@ handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
         alloc (Param name t@(Array pt shape u)) = do
           (_, mem) <- allocForArray t DefaultSpace
           return $ Param name $ directIndexFunction pt shape u mem t
+        ensureDirectSource s = do
+          (_, _, s') <- ensureDirectArray Nothing s
+          getVar s'
+        getVar (Var v) = return v
+        getVar _ = fail "Not a variable."
 
 huskSpaceMemInfo :: HuskSpace Kernels -> HuskSpace ExplicitMemory
 huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) =

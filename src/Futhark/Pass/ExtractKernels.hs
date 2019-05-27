@@ -514,8 +514,7 @@ huskedDistributeMap path (MapLoop pat cs w lam arrs) = do
       body_pat = Pattern pcs $ zipWith PatElem node_res body_pat_ts
   body_stms <- localScope hscope $
     distributeMap path (MapLoop body_pat cs parts_elems_v lam parts_names)
-  id_lam <- mkIdentityLambda []
-  runBinder_ $ letBind_ pat $ Op $ Husk hspace id_lam [] ret_ts $ mkBody body_stms $ map Var node_res
+  runBinder_ $ letBind_ pat $ Op $ Husk hspace nilFn [] ret_ts $ mkBody body_stms $ map Var node_res
 
 distributeMap :: KernelPath -> MapLoop -> DistribM KernelsStms
 distributeMap path (MapLoop pat cs w lam arrs) = do
