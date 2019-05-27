@@ -227,10 +227,10 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
         return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
 
-  | otherwise =
-      transformExp $ LetPat (Id fname (Info ft) loc) lam e (Info $ fromStruct ret) loc
-        where lam = Lambda tparams params body Nothing (Info (mempty, ret)) loc
-              ft = foldFunType (map patternType params) $ fromStruct ret
+  | otherwise = do
+      body' <- transformExp body
+      LetFun fname (tparams, params, retdecl, Info ret, body') <$>
+        transformExp e <*> pure loc
 
 transformExp (If e1 e2 e3 tp loc) = do
   e1' <- transformExp e1
