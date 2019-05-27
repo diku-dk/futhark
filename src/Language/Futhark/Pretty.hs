@@ -196,6 +196,10 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
   ppr (DimSlice i Nothing Nothing) =
     maybe mempty ppr i <> text ":"
 
+letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc
+letBody body@LetPat{} = ppr body
+letBody body          = text "in" <+> align (ppr body)
+
 instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   ppr = pprPrec (-1)
   pprPrec _ (Var name _ _) = ppr name
@@ -236,8 +240,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     (if linebreak
      then equals </> indent 2 (ppr e)
      else equals <+> align (ppr e)) </>
-    (case body of LetPat{} -> ppr body
-                  _        -> text "in" <+> align (ppr body))
+    letBody body
     where linebreak = case e of
                         DoLoop{}    -> True
                         LetPat{}    -> True
@@ -247,21 +250,21 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
                         _           -> hasArrayLit e
   pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
     text "let" <+> pprName fname <+> spread (map ppr tparams ++ map ppr params) <>
-    retdecl' <+> equals </> indent 2 (ppr e) <+> text "in" </>
-    ppr body
+    retdecl' <+> equals </> indent 2 (ppr e) </>
+    letBody body
     where retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
                        Just rettype' -> text ":" <+> rettype'
                        Nothing       -> mempty
   pprPrec _ (LetWith dest src idxs ve body _ _)
     | dest == src =
       text "let" <+> ppr dest <> list (map ppr idxs) <+>
-      equals <+> align (ppr ve) <+>
-      text "in" </> ppr body
+      equals <+> align (ppr ve) </>
+      letBody body
     | otherwise =
       text "let" <+> ppr dest <+> equals <+> ppr src <+>
       text "with" <+> brackets (commasep (map ppr idxs)) <+>
-      text "<-" <+> align (ppr ve) <+>
-      text "in" </> ppr body
+      text "<-" <+> align (ppr ve) </>
+      letBody body
   pprPrec _ (Update src idxs ve _) =
     ppr src <+> text "with" <+>
     brackets (commasep (map ppr idxs)) <+>
