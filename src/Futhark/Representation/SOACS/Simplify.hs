@@ -14,7 +14,9 @@ module Futhark.Representation.SOACS.Simplify
 where
 
 import Control.Monad
+import Control.Monad.Identity
 import Control.Monad.State
+import Control.Monad.Writer
 import Data.Foldable
 import Data.Either
 import Data.List
@@ -155,7 +157,8 @@ topDownRules = [RuleOp hoistCertificates,
                 RuleOp removeUnusedSOACInput,
                 RuleOp simplifyClosedFormReduce,
                 RuleOp simplifyKnownIterationSOAC,
-                RuleOp fuseConcatScatter
+                RuleOp fuseConcatScatter,
+                RuleOp simplifyMapIota
                ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -548,3 +551,83 @@ simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
               bindResult pe se =
                 letBindNames_ [patElemName pe] $ BasicOp $ SubExp se
 simplifyKnownIterationSOAC _ _ _ _ = cannotSimplify
+
+data ArrayIndexing = ArrayIndexing { arrayIndexingArr :: VName
+                                   , arrayIndexingSlice :: Slice SubExp
+                                   }
+  deriving (Eq, Ord, Show)
+
+arrayIndexings :: AST.Body (Wise SOACS) -> S.Set ArrayIndexing
+arrayIndexings = S.unions . fmap (onExp . stmExp) . bodyStms
+  where onExp (BasicOp (Index arr slice)) = S.singleton $ ArrayIndexing arr slice
+        onExp e = execWriter $ walkExpM walker e
+        onOp = execWriter . mapSOACM identitySOACMapper { mapOnSOACLambda = onLambda }
+        onLambda lam = do tell $ arrayIndexings $ lambdaBody lam
+                          return lam
+        walker = identityWalker { walkOnBody = tell . arrayIndexings
+                                , walkOnOp = tell . onOp }
+
+replaceArrayIndexings :: M.Map ArrayIndexing ArrayIndexing
+                      -> AST.Body (Wise SOACS) -> AST.Body (Wise SOACS)
+replaceArrayIndexings substs (Body _ stms res) =
+  mkBody (fmap onStm stms) res
+  where onStm (Let pat _ e) =
+          mkLet (patternContextIdents pat) (patternValueIdents pat) $ onExp e
+        onExp (BasicOp (Index arr slice))
+          | Just (ArrayIndexing arr' slice') <-
+              M.lookup (ArrayIndexing arr slice) substs =
+              BasicOp $ Index arr' slice'
+        onExp e = mapExp mapper e
+        mapper = identityMapper { mapOnBody = const $ return . replaceArrayIndexings substs
+                                , mapOnOp = return . onOp }
+        onOp = runIdentity . mapSOACM identitySOACMapper { mapOnSOACLambda = return . onLambda }
+        onLambda lam = lam { lambdaBody = replaceArrayIndexings substs $ lambdaBody lam }
+
+-- Turn
+--
+--    map (\i -> ... xs[i] ...) (iota n)
+--
+-- into
+--
+--    map (\i x -> ... x ...) (iota n) xs
+--
+-- This is not because we want to encourage the map-iota pattern, but
+-- it may be present in generated code.  This is an unfortunately
+-- expensive simplification rule, since it requires multiple passes
+-- over the entire lambda body.  It only handles the very simplest
+-- case - if you find yourself planning to extend it to handle more
+-- complex situations (rotate or whatnot), consider turning it into a
+-- separate compiler pass instead.
+simplifyMapIota :: TopDownRuleOp (Wise SOACS)
+simplifyMapIota  vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
+  | Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
+    indexings <- filter (indexesWith (paramName p)) $ S.toList $
+                 arrayIndexings $ lambdaBody map_lam,
+    not $ null indexings = do
+      -- For each indexing with iota, add the corresponding array to
+      -- the Screma, and construct a new lambda parameter.
+      (more_arrs, more_params, replacements) <-
+        unzip3 <$> mapM mapOverArr indexings
+      let substs = M.fromList $ zip indexings replacements
+          map_lam' = map_lam { lambdaParams = lambdaParams map_lam <> more_params
+                             , lambdaBody = replaceArrayIndexings substs $
+                                            lambdaBody map_lam
+                             }
+      letBind_ pat $ Op $ Screma w (ScremaForm scan reduce map_lam') (arrs <> more_arrs)
+  where isIota (_, arr) = case ST.lookupBasicOp arr vtable of
+                            Just (Iota _ (Constant o) (Constant s) _, _) ->
+                              zeroIsh o && oneIsh s
+                            _ -> False
+
+        indexesWith v (ArrayIndexing arr (DimFix (Var i) : _))
+          | Just t <- ST.lookupType arr vtable =
+              arraySize 0 t == w && i == v
+        indexesWith _ _ = False
+
+        mapOverArr (ArrayIndexing arr slice) = do
+          arr_elem <- newVName $ baseString arr ++ "_elem"
+          arr_t <- lookupType arr
+          return (arr,
+                  Param arr_elem (rowType arr_t),
+                  ArrayIndexing arr_elem (drop 1 slice))
+simplifyMapIota  _ _ _ _ = cannotSimplify
