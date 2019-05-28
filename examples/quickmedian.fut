@@ -11,6 +11,7 @@
 -- Oh, and it cannot handle empty inputs.
 --
 -- ==
+-- tags { no_csharp }
 -- input { [1] }
 -- output { 1 }
 -- input { [4, -8, 2, 2, 0, 0, 5, 9, -6, 2] }
