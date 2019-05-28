@@ -26,7 +26,6 @@ module Futhark.Representation.AST.Traversals
   -- * Mapping
     Mapper(..)
   , identityMapper
-  , mapBody
   , mapExpM
   , mapExp
   , mapOnType
@@ -37,8 +36,6 @@ module Futhark.Representation.AST.Traversals
   , Walker(..)
   , identityWalker
   , walkExpM
-  , walkExp
-  -- * Simple wrappers
   )
   where
 
@@ -78,10 +75,6 @@ identityMapper = Mapper {
                  , mapOnLParam = return
                  , mapOnOp = return
                  }
-
--- | Map across the bindings of a 'Body'.
-mapBody :: (Stm lore -> Stm lore) -> Body lore -> Body lore
-mapBody f (Body attr stms res) = Body attr (fmap f stms) res
 
 -- | Map a monadic action across the immediate children of an
 -- expression.  Importantly, the 'mapOnExp' action is not invoked for
@@ -235,7 +228,3 @@ walkMapper f = Mapper {
 walkExpM :: Monad m => Walker lore m -> Exp lore -> m ()
 walkExpM f = void . mapExpM m
   where m = walkMapper f
-
--- | As 'walkExp', but runs in the 'Identity' monad..
-walkExp :: Walker lore Identity -> Exp lore -> ()
-walkExp f = runIdentity . walkExpM f
