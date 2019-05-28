@@ -558,7 +558,7 @@ data ArrayIndexing = ArrayIndexing { arrayIndexingArr :: VName
   deriving (Eq, Ord, Show)
 
 arrayIndexings :: AST.Body (Wise SOACS) -> S.Set ArrayIndexing
-arrayIndexings = S.unions . fmap (onExp . stmExp) . bodyStms
+arrayIndexings = mconcat . map (onExp . stmExp) . stmsToList . bodyStms
   where onExp (BasicOp (Index arr slice)) = S.singleton $ ArrayIndexing arr slice
         onExp e = execWriter $ walkExpM walker e
         onOp = execWriter . mapSOACM identitySOACMapper { mapOnSOACLambda = onLambda }
