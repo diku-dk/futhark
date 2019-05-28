@@ -13,7 +13,6 @@ module Futhark.Analysis.HORepresentation.MapNest
   )
 where
 
-import Control.Monad
 import Data.List
 import Data.Maybe
 import qualified Data.Map.Strict as M
@@ -91,12 +90,11 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm (_, []) (_, _, []) lam) inps) = 
         unzip <$>
         fixInputs w (zip (map paramName $ lambdaParams lam) inps)
         (zip (params mn) inps')
-      let n' = Nesting {
-            nestingParamNames   = ps
-            , nestingResult     = patternNames pat
-            , nestingReturnType = typeOf mn
-            , nestingWidth      = inner_w
-            }
+      let n' = Nesting { nestingParamNames = ps
+                       , nestingResult     = patternNames pat
+                       , nestingReturnType = typeOf mn
+                       , nestingWidth      = inner_w
+                       }
       return $ Just $ MapNest w body' (n':ns') inps''
     -- No nested MapNest it seems.
     _ -> do
@@ -110,7 +108,7 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm (_, []) (_, _, []) lam) inps) = 
       newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
       let subst = M.fromList $
                   zip (map identName boundUsedInBody) (map identName newParams)
-          inps' = map (substituteNames subst) inps ++
+          inps' = inps ++
                   map (SOAC.addTransform (SOAC.Replicate mempty $ Shape [w]) . SOAC.identInput)
                   boundUsedInBody
           lam' =
@@ -144,35 +142,16 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw:ns) inps) = do
 fixInputs :: MonadFreshNames m =>
              SubExp -> [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]
           -> m [(VName, SOAC.Input)]
-fixInputs w ourInps childInps =
-  reverse . snd <$> foldM inspect (ourInps, []) childInps
+fixInputs w ourInps = mapM inspect
   where
     isParam x (y, _) = x == y
 
-    findParam :: [(VName, SOAC.Input)]
-              -> VName
-              -> Maybe ((VName, SOAC.Input), [(VName, SOAC.Input)])
-    findParam remPs v
-      | ([ourP], remPs') <- partition (isParam v) remPs = Just (ourP, remPs')
-      | otherwise                                       = Nothing
-
-    inspect :: MonadFreshNames m =>
-               ([(VName, SOAC.Input)], [(VName, SOAC.Input)])
-            -> (VName, SOAC.Input)
-            -> m ([(VName, SOAC.Input)], [(VName, SOAC.Input)])
-    inspect (remPs, newInps) (_, SOAC.Input ts v _)
-      | Just ((p,pInp), remPs') <- findParam remPs v =
+    inspect (_, SOAC.Input ts v _)
+      | Just (p,pInp) <- find (isParam v) ourInps = do
           let pInp' = SOAC.transformRows ts pInp
-          in return (remPs',
-                     (p, pInp') : newInps)
-
-      | Just ((p,pInp), _) <- findParam newInps v = do
-          -- The input corresponds to a variable that has already
-          -- been used.
           p' <- newNameFromString $ baseString p
-          return (remPs, (p', pInp) : newInps)
+          return (p', pInp')
 
-    inspect (remPs, newInps) (param, SOAC.Input ts a t) = do
+    inspect (param, SOAC.Input ts a t) = do
       param' <- newNameFromString (baseString param ++ "_rep")
-      return (remPs, (param',
-                      SOAC.Input (ts SOAC.|> SOAC.Replicate mempty (Shape [w])) a t) : newInps)
+      return (param', SOAC.Input (ts SOAC.|> SOAC.Replicate mempty (Shape [w])) a t)
