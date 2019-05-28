@@ -11,7 +11,7 @@
 --   [0.0,1.0,2.0]
 -- }
 -- structure {
---      /Screma 2
+--      /Screma 1
 -- }
 --
 let mul2(x: []f64) (i: i32): f64 = x[i]*2.0
