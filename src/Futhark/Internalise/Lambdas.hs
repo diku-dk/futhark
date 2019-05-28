@@ -11,7 +11,6 @@ module Futhark.Internalise.Lambdas
 
 import Control.Monad
 import Data.Loc
-import qualified Data.Map as M
 import qualified Data.Set as S
 
 import Language.Futhark as E
@@ -21,7 +20,6 @@ import Futhark.MonadFreshNames
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
 import Futhark.Representation.SOACS.Simplify (simplifyLambda)
-import Futhark.Transform.Substitute
 
 -- | A function for internalising lambdas.
 type InternaliseLambda =
@@ -62,7 +60,9 @@ internaliseStreamMapLambda internaliseLambda lam args = do
     argtypes <- mapM I.subExpType args
     (orig_chunk_param : params, orig_body, rettype) <-
       internaliseLambda lam $ I.Prim int32 : map outer argtypes
-    let body = substituteNames (M.singleton (paramName orig_chunk_param) chunk_size) orig_body
+    body <- runBodyBinder $ do
+      letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
+      return orig_body
     (rettype', inner_shapes) <- instantiateShapes' rettype
     let outer_shape = arraysSize 0 argtypes
     shapefun <- makeShapeFun (chunk_param:params) body rettype' inner_shapes
@@ -152,11 +152,13 @@ internaliseStreamLambda internaliseLambda lam rowts = do
   chunk_size <- newVName "chunk_size"
   let chunk_param = I.Param chunk_size $ I.Prim int32
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
-  (orig_chunk_param : params, orig_body, _) <-
-    localScope (scopeOfLParams [chunk_param]) $
-    internaliseLambda lam $ I.Prim int32 : chunktypes
-  let body = substituteNames (M.singleton (paramName orig_chunk_param) chunk_size) orig_body
-  return (chunk_param:params, body)
+  localScope (scopeOfLParams [chunk_param]) $ do
+    (orig_chunk_param : params, orig_body, _) <-
+      internaliseLambda lam $ I.Prim int32 : chunktypes
+    body <- runBodyBinder $ do
+      letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
+      return orig_body
+    return (chunk_param:params, body)
 
 -- Given @k@ lambdas, this will return a lambda that returns an
 -- (k+2)-element tuple of integers.  The first element is the
