@@ -31,7 +31,6 @@ module Language.Futhark.Attributes
   , patternStructType
   , patternPatternType
   , patternParam
-  , patternNoShapeAnnotations
   , patternOrderZero
   , patternDimNames
 
@@ -606,25 +605,6 @@ patternParam (Id v (Info t) _) =
   (Just v, toStruct t)
 patternParam p =
   (Nothing, patternStructType p)
-
--- | Remove all shape annotations from a pattern, leaving them unnamed
--- instead.
-patternNoShapeAnnotations :: PatternBase Info VName -> PatternBase Info VName
-patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t)) loc) =
-  PatternAscription (patternNoShapeAnnotations p)
-  (TypeDecl te $ Info $ anyDimShapeAnnotations t) loc
-patternNoShapeAnnotations (PatternParens p loc) =
-  PatternParens (patternNoShapeAnnotations p) loc
-patternNoShapeAnnotations (Id v (Info t) loc) =
-  Id v (Info $ anyDimShapeAnnotations t) loc
-patternNoShapeAnnotations (TuplePattern ps loc) =
-  TuplePattern (map patternNoShapeAnnotations ps) loc
-patternNoShapeAnnotations (RecordPattern ps loc) =
-  RecordPattern (map (fmap patternNoShapeAnnotations) ps) loc
-patternNoShapeAnnotations (Wildcard (Info t) loc) =
-  Wildcard (Info (anyDimShapeAnnotations t)) loc
-patternNoShapeAnnotations (PatternLit e (Info t) loc) =
-  PatternLit e (Info (anyDimShapeAnnotations t)) loc
 
 -- | Names of primitive types to types.  This is only valid if no
 -- shadowing is going on, but useful for tools.
