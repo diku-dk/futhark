@@ -12,6 +12,7 @@ module Futhark.Internalise (internaliseProg) where
 
 import Control.Monad.State
 import Control.Monad.Reader
+import Data.Bitraversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List
@@ -122,12 +123,40 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
     -- them from somewhere else.
     zeroExts ts = generaliseExtTypes ts ts
 
+allDimsFreshInType :: MonadFreshNames m => E.PatternType -> m E.PatternType
+allDimsFreshInType = bitraverse onDim pure
+  where onDim (E.NamedDim v) =
+          E.NamedDim . E.qualName <$> newVName (baseString $ E.qualLeaf v)
+        onDim d = pure d
+
+-- | Replace all named dimensions with a fresh name, and remove all
+-- constant dimensions.  The point is to remove the constraints, but
+-- keep the names around.  We use this for constructing the entry
+-- point parameters.
+allDimsFreshInPat :: MonadFreshNames m => E.Pattern -> m E.Pattern
+allDimsFreshInPat (PatternAscription p _ _) =
+  allDimsFreshInPat p
+allDimsFreshInPat (PatternParens p _) =
+  allDimsFreshInPat p
+allDimsFreshInPat (Id v (Info t) loc) =
+  Id v <$> (Info <$> allDimsFreshInType t) <*> pure loc
+allDimsFreshInPat (TuplePattern ps loc) =
+  TuplePattern <$> mapM allDimsFreshInPat ps <*> pure loc
+allDimsFreshInPat (RecordPattern ps loc) =
+  RecordPattern <$> mapM (traverse allDimsFreshInPat) ps <*> pure loc
+allDimsFreshInPat (Wildcard (Info t) loc) =
+  Wildcard <$> (Info <$> allDimsFreshInType t) <*> pure loc
+allDimsFreshInPat (PatternLit e (Info t) loc) =
+  PatternLit e <$> (Info <$> allDimsFreshInType t) <*> pure loc
+
 generateEntryPoint :: E.ValBind -> InternaliseM ()
-generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) =
-  -- We remove all shape annotations, so there should be no constant
+generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) = do
+  -- We replace all shape annotations, so there should be no constant
   -- parameters here.
-  bindingParams [] (map E.patternNoShapeAnnotations params) $
-  \_ shapeparams params' -> do
+  params_fresh <- mapM allDimsFreshInPat params
+  let tparams = map (`E.TypeParamDim` noLoc) $ S.toList $
+                mconcat $ map E.patternDimNames params_fresh
+  bindingParams tparams params_fresh $ \_ shapeparams params' -> do
     (entry_rettype, _) <- internaliseEntryReturnType $ anyDimShapeAnnotations rettype
     let entry' = entryPoint (zip params params') (retdecl, rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
