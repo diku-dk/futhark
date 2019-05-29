@@ -444,6 +444,7 @@ internaliseExp desc e@E.Apply{} = do
   (qfname, args, _) <- findFuncall e
   let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
       loc = srclocOf e
+      arg_desc = nameToString fname ++ "_arg"
 
   -- Some functions are magical (overloaded) and we handle that here.
   -- Note that polymorphic functions (which are not magical) are not
@@ -453,11 +454,11 @@ internaliseExp desc e@E.Apply{} = do
            internalise desc
        | Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
            let tag ses = [ (se, I.Observe) | se <- ses ]
-           args' <- mapM (internaliseExp "arg") args
+           args' <- mapM (internaliseExp arg_desc) args
            let args'' = concatMap tag args'
            letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
        | otherwise -> do
-           args' <- concat <$> mapM (internaliseExp "arg") args
+           args' <- concat <$> mapM (internaliseExp arg_desc) args
            fst <$> funcall desc qfname args' loc
 
 internaliseExp desc (E.LetPat pat e body _ loc) =
@@ -793,7 +794,7 @@ generateCaseIf desc e (CasePat p eCase loc) bFail = do
 internalisePat :: String -> E.Pattern -> E.Exp
                -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a) -> InternaliseM a
 internalisePat desc p e body loc m = do
-  ses <- internaliseExp desc e
+  ses <- internaliseExp desc' e
   t <- I.staticShapes <$> mapM I.subExpType ses
   stmPattern p t $ \cm pat_names match -> do
     mapM_ (uncurry (internaliseDimConstant loc)) cm
@@ -801,6 +802,9 @@ internalisePat desc p e body loc m = do
     forM_ (zip pat_names ses') $ \(v,se) ->
       letBindNames_ [v] $ I.BasicOp $ I.SubExp se
     m body
+  where desc' = case S.toList $ E.patternIdents p of
+                  [v] -> baseString $ E.identName v
+                  _ -> desc
 
 internaliseSlice :: SrcLoc
                  -> [SubExp]

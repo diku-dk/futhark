@@ -374,7 +374,7 @@ binLambda bop arg_t ret_t = do
   x   <- newVName "x"
   y   <- newVName "y"
   body <- insertStmsM $ do
-    res <- letSubExp "res" $ BasicOp $ bop (Var x) (Var y)
+    res <- letSubExp "binlam_res" $ BasicOp $ bop (Var x) (Var y)
     return $ resultBody [res]
   return Lambda {
              lambdaParams     = [Param x (Prim arg_t),
