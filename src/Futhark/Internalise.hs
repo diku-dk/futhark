@@ -127,7 +127,7 @@ allDimsFreshInType :: MonadFreshNames m => E.PatternType -> m E.PatternType
 allDimsFreshInType = bitraverse onDim pure
   where onDim (E.NamedDim v) =
           E.NamedDim . E.qualName <$> newVName (baseString $ E.qualLeaf v)
-        onDim d = pure d
+        onDim _ = pure AnyDim
 
 -- | Replace all named dimensions with a fresh name, and remove all
 -- constant dimensions.  The point is to remove the constraints, but
