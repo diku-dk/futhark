@@ -10,6 +10,8 @@ module Futhark.Representation.SOACS.Simplify
        , simplifyStms
 
        , simpleSOACS
+
+       , soacRules
        )
 where
 
@@ -554,13 +556,15 @@ simplifyKnownIterationSOAC _ _ _ _ = cannotSimplify
 
 data ArrayIndexing = ArrayIndexing { arrayIndexingArr :: VName
                                    , arrayIndexingSlice :: Slice SubExp
+                                   , arrayIndexingCerts :: Certificates
                                    }
   deriving (Eq, Ord, Show)
 
 arrayIndexings :: AST.Body (Wise SOACS) -> S.Set ArrayIndexing
-arrayIndexings = mconcat . map (onExp . stmExp) . stmsToList . bodyStms
-  where onExp (BasicOp (Index arr slice)) = S.singleton $ ArrayIndexing arr slice
-        onExp e = execWriter $ walkExpM walker e
+arrayIndexings = mconcat . map onStm . stmsToList . bodyStms
+  where onStm (Let _ aux (BasicOp (Index arr slice))) =
+          S.singleton $ ArrayIndexing arr slice $ stmAuxCerts aux
+        onStm stm = execWriter $ walkExpM walker $ stmExp stm
         onOp = execWriter . mapSOACM identitySOACMapper { mapOnSOACLambda = onLambda }
         onLambda lam = do tell $ arrayIndexings $ lambdaBody lam
                           return lam
@@ -571,13 +575,14 @@ replaceArrayIndexings :: M.Map ArrayIndexing ArrayIndexing
                       -> AST.Body (Wise SOACS) -> AST.Body (Wise SOACS)
 replaceArrayIndexings substs (Body _ stms res) =
   mkBody (fmap onStm stms) res
-  where onStm (Let pat _ e) =
-          mkLet (patternContextIdents pat) (patternValueIdents pat) $ onExp e
-        onExp (BasicOp (Index arr slice))
-          | Just (ArrayIndexing arr' slice') <-
-              M.lookup (ArrayIndexing arr slice) substs =
-              BasicOp $ Index arr' slice'
-        onExp e = mapExp mapper e
+  where onStm (Let pat aux e) =
+          let (cs', e') = onExp (stmAuxCerts aux) e
+          in certify cs' $ mkLet (patternContextIdents pat) (patternValueIdents pat) e'
+        onExp cs (BasicOp (Index arr slice))
+          | Just (ArrayIndexing arr' slice' cs') <-
+              M.lookup (ArrayIndexing arr slice cs) substs =
+              (cs', BasicOp $ Index arr' slice')
+        onExp cs e = (cs, mapExp mapper e)
         mapper = identityMapper { mapOnBody = const $ return . replaceArrayIndexings substs
                                 , mapOnOp = return . onOp }
         onOp = runIdentity . mapSOACM identitySOACMapper { mapOnSOACLambda = return . onLambda }
@@ -619,15 +624,21 @@ simplifyMapIota  vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
                               zeroIsh o && oneIsh s
                             _ -> False
 
-        indexesWith v (ArrayIndexing arr (DimFix (Var i) : _))
-          | Just t <- ST.lookupType arr vtable =
-              arraySize 0 t == w && i == v
+        indexesWith v (ArrayIndexing arr (DimFix (Var i) : _) cs)
+          | arr `ST.elem` vtable,
+            all (`ST.elem` vtable) $ unCertificates cs =
+              i == v
         indexesWith _ _ = False
 
-        mapOverArr (ArrayIndexing arr slice) = do
+        mapOverArr (ArrayIndexing arr slice cs) = do
           arr_elem <- newVName $ baseString arr ++ "_elem"
           arr_t <- lookupType arr
-          return (arr,
+          arr' <- if arraySize 0 arr_t == w
+                  then return arr
+                  else certifying cs $ letExp (baseString arr ++ "_prefix") $
+                       BasicOp $ Index arr $
+                       fullSlice arr_t [DimSlice (intConst Int32 0) w (intConst Int32 1)]
+          return (arr',
                   Param arr_elem (rowType arr_t),
-                  ArrayIndexing arr_elem (drop 1 slice))
+                  ArrayIndexing arr_elem (drop 1 slice) cs)
 simplifyMapIota  _ _ _ _ = cannotSimplify
