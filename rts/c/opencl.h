@@ -809,6 +809,9 @@ int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, c
   int error = opencl_alloc_actual(ctx, min_size, mem_out);
 
   while (error == CL_MEM_OBJECT_ALLOCATION_FAILURE) {
+    if (ctx->cfg.debugging) {
+      fprintf(stderr, "Out of OpenCL memory: releasing entry from the free list...\n");
+    }
     cl_mem mem;
     if (free_list_first(&ctx->free_list, &mem) == 0) {
       error = clReleaseMemObject(mem);
