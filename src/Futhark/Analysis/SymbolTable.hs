@@ -566,7 +566,7 @@ insertFParam :: Attributes lore =>
                 AST.FParam lore
              -> SymbolTable lore
              -> SymbolTable lore
-insertFParam fparam = insertEntry name entry
+insertFParam fparam = flip (foldr (`isAtLeast` 0)) sizes . insertEntry name entry
   where name = AST.paramName fparam
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
                                    , fparamAttr = AST.paramAttr fparam
@@ -574,12 +574,13 @@ insertFParam fparam = insertEntry name entry
                                    , fparamStmDepth = 0
                                    , fparamConsumed = False
                                    }
+        sizes = subExpVars $ arrayDims $ AST.paramType fparam
 
 insertFParams :: Attributes lore =>
                  [AST.FParam lore]
               -> SymbolTable lore
               -> SymbolTable lore
-insertFParams fparams symtable = foldr insertFParam symtable fparams
+insertFParams fparams symtable = foldl' (flip insertFParam) symtable fparams
 
 insertLParamWithRange :: Attributes lore =>
                          LParam lore -> ScalExpRange -> IndexArray -> SymbolTable lore
