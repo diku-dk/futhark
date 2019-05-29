@@ -284,6 +284,8 @@ binOpScalExp bop = fmap snd . find ((==bop) . fst) $
                    , (Mul t, STimes)
                    , (AST.SDiv t, SDiv)
                    , (AST.Pow t, SPow)
+                   , (AST.SMax t, \x y -> MaxMin False [x,y])
+                   , (AST.SMin t, \x y -> MaxMin True [x,y])
                    ]
 
 instance FreeIn ScalExp where
