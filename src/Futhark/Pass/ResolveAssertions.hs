@@ -23,7 +23,6 @@ import Futhark.Pass
 import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.SOACS.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify as Simplify
-import Futhark.Optimise.Simplify.Rules
 
 import Prelude
 
@@ -33,7 +32,7 @@ resolveAssertions = Pass
   "resolve assertions"
   "Try to statically resolve bounds checks and similar." $
   Simplify.simplifyProg Simplify.simpleSOACS rulebook Simplify.noExtraHoistBlockers
-  where rulebook = standardRules <> ruleBook [ RuleBasicOp simplifyScalExp ] []
+  where rulebook = Simplify.soacRules <> ruleBook [ RuleBasicOp simplifyScalExp ] []
 
 simplifyScalExp :: BinderOps lore => TopDownRuleBasicOp lore
 simplifyScalExp vtable pat _ e = do
