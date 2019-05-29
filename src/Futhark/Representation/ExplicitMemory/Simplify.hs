@@ -3,7 +3,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE LambdaCase #-}
 module Futhark.Representation.ExplicitMemory.Simplify
        ( simplifyExplicitMemory
        , simplifyStms
@@ -12,7 +11,6 @@ where
 
 import Control.Monad
 import qualified Data.Set as S
-import Data.Maybe
 import Data.List
 
 import qualified Futhark.Representation.AST.Syntax as AST
@@ -62,16 +60,13 @@ isResultAlloc _ _ = False
 
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent array and memory-block sizes.
-getShapeNames :: ExplicitMemorish lore =>
+getShapeNames :: (ExplicitMemorish lore, Op lore ~ MemOp op) =>
                  Stm (Wise lore) -> S.Set VName
-getShapeNames bnd =
-  let tps = map patElemType $ patternElements $ stmPattern bnd
-      ats = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
-      nms = mapMaybe (\case
-                         MemArray _ _ _ (ArrayIn nm _) -> Just nm
-                         _ -> Nothing
-                     ) ats
-  in  S.fromList $ nms ++ subExpVars (concatMap arrayDims tps)
+getShapeNames stm =
+  let ts = map patElemType $ patternElements $ stmPattern stm
+  in freeIn (concatMap arrayDims ts) <>
+     case stmExp stm of Op (Alloc size _) -> freeIn size
+                        _                 -> mempty
 
 isAlloc0 :: Op lore ~ MemOp op => AST.Stm lore -> Bool
 isAlloc0 (Let _ _ (Op Alloc{})) = True
