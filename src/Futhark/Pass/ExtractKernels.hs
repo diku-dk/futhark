@@ -827,7 +827,10 @@ distributeInnerMap maploop@(MapLoop pat cs w lam arrs) acc
       -- decide whether to just sequentialise, or exploit inner
       -- parallelism.
       let map_nesting = MapNesting pat cs w $ zip (lambdaParams lam) arrs
-          lam_res' = rearrangeShape perm lam_res
+          -- Normally the permutation is for the output pattern, but
+          -- we can't really change that, so we change the result
+          -- order instead.
+          lam_res' = rearrangeShape (rearrangeInverse perm) lam_res
           nest' = pushInnerKernelNesting (pat, lam_res') map_nesting nest
           extra_scope = targetsScope $ kernelTargets acc'
 
