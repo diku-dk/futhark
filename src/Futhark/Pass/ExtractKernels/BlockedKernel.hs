@@ -19,6 +19,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        where
 
 import Control.Monad
+import Control.Monad.Writer
 import Data.Maybe
 import Data.List
 
@@ -70,8 +71,8 @@ prepareRedOrScan :: (MonadBinder m, Lore m ~ Kernels) =>
 prepareRedOrScan total_num_elements w map_lam arrs ispace inps = do
   (_, KernelSize num_groups group_size _ _ num_threads) <- blockedKernelSize =<< asIntS Int64 total_num_elements
   gtid <- newVName "gtid"
-  kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace $
-            ispace ++ [(gtid, w)]
+  kspace <- newKernelSpace (num_groups, group_size, num_threads, num_groups) $
+            FlatThreadSpace $ ispace ++ [(gtid, w)]
   body <- fmap (uncurry (flip (KernelBody ()))) $ runBinder $
           localScope (scopeOfKernelSpace kspace) $ do
     mapM_ (addStm <=< readKernelInput) inps
@@ -167,8 +168,8 @@ prepareStream size ispace w comm fold_lam nes arrs = do
   elems_per_thread_32 <- asIntS Int32 elems_per_thread
 
   gtid <- newVName "gtid"
-  kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace $
-            ispace ++ [(gtid, num_threads)]
+  kspace <- newKernelSpace (num_groups, group_size, num_threads, num_groups) $
+            FlatThreadSpace $ ispace ++ [(gtid, num_threads)]
   kbody <- fmap (uncurry (flip (KernelBody ()))) $ runBinder $
            localScope (scopeOfKernelSpace kspace) $ do
     (chunk_red_pes, chunk_map_pes) <-
@@ -243,7 +244,7 @@ segGenRed pat arr_w ispace inps ops lam arrs = runBinder_ $ do
     blockedKernelSize total_w
 
   gtid <- newVName "gtid"
-  kspace <- newKernelSpace (num_groups, group_size, num_threads) $
+  kspace <- newKernelSpace (num_groups, group_size, num_threads, num_groups) $
             FlatThreadSpace $ ispace ++ [(gtid, arr_w)]
 
   kbody <- fmap (uncurry (flip $ KernelBody ())) $ runBinder $
@@ -365,40 +366,54 @@ blockedKernelSize w = do
   return (max_num_groups,
           KernelSize num_groups' group_size per_thread_elements w num_threads')
 
+createsArrays :: KernelBody InKernel -> Bool
+createsArrays = getAny . execWriter . mapM_ onStm . kernelBodyStms
+  where onStm stm = do
+          when (any (not . primType) $ patternTypes $ stmPattern stm) $ tell $ Any True
+          walkExpM walker $ stmExp stm
+        walker = identityWalker { walkOnBody = mapM_ onStm . bodyStms }
+
 mapKernelSkeleton :: (HasScope Kernels m, MonadFreshNames m) =>
-                     SubExp -> SpaceStructure -> [KernelInput]
+                     SubExp -> SpaceStructure -> [KernelInput] -> Bool
                   -> m (KernelSpace,
                         Stms Kernels,
                         Stms InKernel)
-mapKernelSkeleton w ispace inputs = do
-  ((group_size, num_threads, num_groups), ksize_bnds) <-
-    runBinder $ numThreadsAndGroups w
+mapKernelSkeleton w ispace inputs creates_arrays = do
+  ((group_size, num_threads, num_groups, virt_groups), ksize_bnds) <- runBinder $
+    -- If the kernel creates arrays internally (meaning it will
+    -- require memory expansion), we want to truncate the amount of
+    -- threads.  Otherwise, have at it!  This is a bit of a hack - in
+    -- principle, we should make this decision later, when we have a
+    -- clearer idea of what is happening inside the kernel.
+    if not creates_arrays then do
+      group_size <- getSize "group_size" SizeGroup
+      num_groups <- letSubExp "num_groups" =<< eDivRoundingUp Int32
+                    (eSubExp w) (eSubExp group_size)
+      num_threads <- letSubExp "num_threads" $
+        BasicOp $ BinOp (Mul Int32) num_groups group_size
+      return (group_size, num_threads, num_groups, num_groups)
+
+      else do
+      (_, ksize) <- blockedKernelSize =<< asIntS Int64 w
+      virt_groups <- letSubExp "virt_groups" =<< eDivRoundingUp Int32
+                     (eSubExp w) (eSubExp (kernelWorkgroupSize ksize))
+      return (kernelWorkgroupSize ksize, kernelNumThreads ksize,
+              kernelWorkgroups ksize, virt_groups)
 
   read_input_bnds <- stmsFromList <$> mapM readKernelInput inputs
 
-  let ksize = (num_groups, group_size, num_threads)
+  let ksize = (num_groups, group_size, num_threads, virt_groups)
 
   space <- newKernelSpace ksize ispace
   return (space, ksize_bnds, read_input_bnds)
-
--- Given the desired minium number of threads, compute the group size,
--- number of groups and total number of threads.
-numThreadsAndGroups :: (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
-                       SubExp -> m (SubExp, SubExp, SubExp)
-numThreadsAndGroups w = do
-  group_size <- getSize "group_size" SizeGroup
-  num_groups <- letSubExp "num_groups" =<< eDivRoundingUp Int32
-    (eSubExp w) (eSubExp group_size)
-  num_threads <- letSubExp "num_threads" $
-    BasicOp $ BinOp (Mul Int32) num_groups group_size
-  return (group_size, num_threads, num_groups)
 
 mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
              SubExp -> SpaceStructure -> [KernelInput]
           -> [Type] -> KernelBody InKernel
           -> m (Stms Kernels, Kernel InKernel)
-mapKernel w ispace inputs rts (KernelBody () kstms krets) = do
-  (space, ksize_bnds, read_input_bnds) <- mapKernelSkeleton w ispace inputs
+mapKernel w ispace inputs rts kbody@(KernelBody () kstms krets) = do
+  (space, ksize_bnds, read_input_bnds) <- mapKernelSkeleton w ispace inputs $
+                                          createsArrays kbody
 
   let kbody' = KernelBody () (read_input_bnds <> kstms) krets
   return (ksize_bnds, Kernel (KernelDebugHints "map" []) space rts kbody')
@@ -420,8 +435,8 @@ readKernelInput inp = do
     fullSlice arr_t $ map DimFix $ kernelInputIndices inp
 
 newKernelSpace :: MonadFreshNames m =>
-                  (SubExp,SubExp,SubExp) -> SpaceStructure -> m KernelSpace
-newKernelSpace (num_groups, group_size, num_threads) ispace =
+                  (SubExp,SubExp,SubExp,SubExp) -> SpaceStructure -> m KernelSpace
+newKernelSpace (num_groups, group_size, num_threads, virt_groups) ispace =
   KernelSpace
   <$> newVName "global_tid"
   <*> newVName "local_tid"
@@ -429,4 +444,5 @@ newKernelSpace (num_groups, group_size, num_threads) ispace =
   <*> pure num_threads
   <*> pure num_groups
   <*> pure group_size
+  <*> pure virt_groups
   <*> pure ispace
