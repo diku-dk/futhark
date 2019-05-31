@@ -434,11 +434,12 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
   | Just (comm, redlam, nes, maplam) <- isRedomapSOAC form,
     not $ all (`UT.used` used) $ patternNames pat, -- Quick/cheap check
 
+    let (red_pes, map_pes) = splitAt (length nes) $ patternElements pat,
     let redlam_deps = dataDependencies $ lambdaBody redlam,
     let redlam_res = bodyResult $ lambdaBody redlam,
     let redlam_params = lambdaParams redlam,
     let used_after = map snd $ filter ((`UT.used` used) . patElemName . fst) $
-                     zip (patternElements pat) redlam_params,
+                     zip red_pes redlam_params,
     let necessary = findNecessaryForReturned (`elem` used_after)
                     (zip redlam_params $ redlam_res <> redlam_res) redlam_deps,
     let alive_mask = map ((`S.member` necessary) . paramName) redlam_params,
@@ -447,14 +448,14 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
 
   let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
       dead_fix = zipWith fixDeadToNeutral alive_mask nes
-      (used_pes, _, used_nes) =
+      (used_red_pes, _, used_nes) =
         unzip3 $ filter (\(_,x,_) -> paramName x `S.member` necessary) $
-        zip3 (patternElements pat) redlam_params nes
+        zip3 red_pes redlam_params nes
 
-  let maplam' = removeLambdaResults alive_mask maplam
-  redlam' <- removeLambdaResults alive_mask <$> fixLambdaParams redlam (dead_fix++dead_fix)
+  let maplam' = removeLambdaResults (take (length nes) alive_mask) maplam
+  redlam' <- removeLambdaResults (take (length nes) alive_mask) <$> fixLambdaParams redlam (dead_fix++dead_fix)
 
-  certifying cs $ letBind_ (Pattern [] used_pes) $
+  certifying cs $ letBind_ (Pattern [] $ used_red_pes ++ map_pes) $
     Op $ Screma w (redomapSOAC comm redlam' used_nes maplam') arrs
 
 removeDeadReduction _ _ _ _ = cannotSimplify
