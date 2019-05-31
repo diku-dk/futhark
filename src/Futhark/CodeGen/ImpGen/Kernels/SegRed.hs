@@ -62,23 +62,6 @@ import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 
--- | For many kernels, we may not have enough physical groups to cover
--- the logical iteration space.  Some groups thus have to perform
--- double duty; we put an outer loop to accomplish this.  The
--- advantage over just launching a bazillion threads is that the cost
--- of memory expansion should be proportional to the number of
--- *physical* threads (hardware parallelism), not the amount of
--- application parallelism.
-virtualiseGroups :: KernelConstants
-                 -> Imp.Exp
-                 -> (Imp.Exp -> ImpM lore op ())
-                 -> ImpM lore op ()
-virtualiseGroups constants required_groups m = do
-  let group_id = kernelGroupId constants
-      iterations = (required_groups - group_id) `quotRoundingUp` kernelNumGroups constants
-  i <- newVName "i"
-  sFor i Int32 iterations $ m $ group_id + Imp.var i int32 * kernelNumGroups constants
-
 type DoSegBody = (KernelConstants -> [(VName, [Imp.Exp])] -> InKernelGen ())
 
 -- | Compile 'SegRed' instance to host-level code with calls to
@@ -222,7 +205,8 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
     -- duty; we put an outer loop to accomplish this.
-    virtualiseGroups constants required_groups $ \group_id' -> do
+    virtualiseGroups constants required_groups $ \group_id_var' -> do
+      let group_id' = Imp.vi32 group_id_var'
       -- Compute the 'n' input indices.  The outer 'n-1' correspond to
       -- the segment ID, and are computed from the group id.  The inner
       -- is computed from the local thread id, and may be out-of-bounds.

@@ -83,7 +83,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
     num_threads <- letSubExp "num_threads" $
                    BasicOp $ BinOp (Mul Int32) num_groups group_size
 
-    let ksize = (num_groups, group_size, num_threads)
+    let ksize = (num_groups, group_size, num_threads, num_groups)
 
     kspace <- newKernelSpace ksize $ FlatThreadSpace $ ispace ++ [(ltid,group_size)]
 

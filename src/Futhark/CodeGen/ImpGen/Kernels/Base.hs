@@ -24,6 +24,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , sIota
   , sCopy
   , compileKernelResult
+  , virtualiseGroups
 
   , atomicUpdate
   , atomicUpdateLocking
@@ -1058,10 +1059,32 @@ simpleKernelConstants kernel_size desc = do
 
           set_constants)
 
+-- | For many kernels, we may not have enough physical groups to cover
+-- the logical iteration space.  Some groups thus have to perform
+-- double duty; we put an outer loop to accomplish this.  The
+-- advantage over just launching a bazillion threads is that the cost
+-- of memory expansion should be proportional to the number of
+-- *physical* threads (hardware parallelism), not the amount of
+-- application parallelism.
+virtualiseGroups :: KernelConstants
+                 -> Imp.Exp
+                 -> (VName -> InKernelGen ())
+                 -> InKernelGen ()
+virtualiseGroups constants required_groups m
+  | kernelNumGroups constants == required_groups =
+      m $ kernelGroupIdVar constants
+  | otherwise = do
+  phys_group_id <- dPrim "phys_group_id" int32
+  sOp $ Imp.GetGroupId phys_group_id 0
+  let iterations = (required_groups - Imp.vi32 phys_group_id) `quotRoundingUp`
+                   kernelNumGroups constants
+  i <- newVName "i"
+  sFor i Int32 iterations $
+    m =<< dPrimV "virt_group_id" (Imp.vi32 phys_group_id + Imp.vi32 i * kernelNumGroups constants)
+
 sKernel :: KernelConstants -> String -> ImpM InKernel Imp.KernelOp a -> CallKernelGen ()
 sKernel constants name m = do
-  body <- makeAllMemoryGlobal $
-          subImpM_ (inKernelOperations constants) m
+  body <- makeAllMemoryGlobal $ subImpM_ (inKernelOperations constants) m
   uses <- computeKernelUses body mempty
 
   emit $ Imp.Op $ Imp.CallKernel Imp.Kernel

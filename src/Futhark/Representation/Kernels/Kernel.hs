@@ -120,6 +120,9 @@ data KernelSpace = KernelSpace { spaceGlobalId :: VName
                                , spaceNumThreads :: SubExp
                                , spaceNumGroups :: SubExp
                                , spaceGroupSize :: SubExp -- flat group size
+                               , spaceNumVirtGroups :: SubExp
+                                 -- How many groups should we pretend
+                                 -- exist?
                                , spaceStructure :: SpaceStructure
                                -- TODO: document what this spaceStructure is
                                -- used for
@@ -250,11 +253,12 @@ mapKernelM tv (Kernel desc space ts kernel_body) =
 
 mapOnKernelSpace :: Monad f =>
                     KernelMapper flore tlore f -> KernelSpace -> f KernelSpace
-mapOnKernelSpace tv (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+mapOnKernelSpace tv (KernelSpace gtid ltid gid num_threads num_groups group_size virt_groups structure) =
   KernelSpace gtid ltid gid -- all in binding position
   <$> mapOnKernelSubExp tv num_threads
   <*> mapOnKernelSubExp tv num_groups
   <*> mapOnKernelSubExp tv group_size
+  <*> mapOnKernelSubExp tv virt_groups
   <*> mapOnKernelStructure structure
   where mapOnKernelStructure (FlatThreadSpace dims) =
           FlatThreadSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
@@ -363,13 +367,14 @@ instance Substitute KernelResult where
     (substituteNames subst v)
 
 instance Substitute KernelSpace where
-  substituteNames subst (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+  substituteNames subst (KernelSpace gtid ltid gid num_threads num_groups group_size virt_groups structure) =
     KernelSpace (substituteNames subst gtid)
     (substituteNames subst ltid)
     (substituteNames subst gid)
     (substituteNames subst num_threads)
     (substituteNames subst num_groups)
     (substituteNames subst group_size)
+    (substituteNames subst virt_groups)
     (substituteNames subst structure)
 
 instance Substitute SpaceStructure where
@@ -404,7 +409,7 @@ instance Rename KernelResult where
   rename = substituteRename
 
 scopeOfKernelSpace :: KernelSpace -> Scope lore
-scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
+scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ _ structure) =
   M.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat $ IndexInfo Int32
   where structure' = case structure of
                        FlatThreadSpace dims -> map fst dims
@@ -695,8 +700,8 @@ checkScanRed space scan_op nes ts kbody = do
     checkKernelBody ts kbody
 
 checkSpace :: TC.Checkable lore => KernelSpace -> TC.TypeM lore ()
-checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
-  mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size]
+checkSpace (KernelSpace _ _ _ num_threads num_groups group_size virt_groups structure) = do
+  mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size,virt_groups]
   case structure of
     FlatThreadSpace dims ->
       mapM_ (TC.require [Prim int32] . snd) dims
@@ -758,9 +763,10 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             ppr op
 
 instance Pretty KernelSpace where
-  ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size structure) =
+  ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size virt_groups structure) =
     parens (commasep [text "num groups:" <+> ppr num_groups,
                       text "group size:" <+> ppr group_size,
+                      text "virt_num_groups:" <+> ppr virt_groups,
                       text "num threads:" <+> ppr num_threads,
                       text "global TID ->" <+> ppr f_gtid,
                       text "local TID ->" <+> ppr f_ltid,
