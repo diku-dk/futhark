@@ -108,10 +108,10 @@ transformKernelBody expmap space kbody = do
               kbody)
     mempty
   where num_threads = spaceNumThreads space
-        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ (FlatThreadSpace strct)) =
+        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ _ (FlatThreadSpace strct)) =
             let (gids, _) = unzip strct
             in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids
-        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ (NestedThreadSpace strct)) =
+        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ _ (NestedThreadSpace strct)) =
             let (gids, _, lids, _) = unzip4 strct
             in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids ++ lids
 

@@ -75,7 +75,7 @@ kernelCompiler :: Pattern ExplicitMemory -> Kernel InKernel
                -> CallKernelGen ()
 
 kernelCompiler pat (Kernel desc space _ kernel_body) = do
-  (constants, init_constants) <- kernelInitialisation space
+  (constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
 
   forM_ (kernelHints desc) $ \(s,v) -> do
     ty <- case v of
@@ -87,12 +87,18 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
 
     emit $ Imp.DebugPrint s $ Just (elemType ty, toExp' (elemType ty) v)
 
+  let virt_groups = toExp' int32 (spaceNumVirtGroups space)
   sKernel constants (kernelName desc) $ do
     init_constants
-    compileKernelStms constants (kernelBodyStms kernel_body) $
-      zipWithM_ (compileKernelResult constants) (patternElements pat) $
-      kernelBodyResult kernel_body
-
+    virtualiseGroups constants virt_groups $ \group_id -> do
+      let flat_id =
+            if kernelGroupIdVar constants /= group_id
+            then Imp.vi32 group_id * kernelGroupSize constants + kernelLocalThreadId constants
+            else kernelGlobalThreadId constants
+      setSpaceIndices flat_id space
+      compileKernelStms constants (kernelBodyStms kernel_body) $
+        zipWithM_ (compileKernelResult constants) (patternElements pat) $
+        kernelBodyResult kernel_body
 
 kernelCompiler pat (SegMap space _ body) =
   compileSegMap pat space body

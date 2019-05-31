@@ -347,11 +347,12 @@ simplifyGroupStreamLambda lam w max_chunk arrs = do
   return (GroupStreamLambda block_size block_offset acc_params' arr_params' body', hoisted)
 
 instance Engine.Simplifiable KernelSpace where
-  simplify (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+  simplify (KernelSpace gtid ltid gid num_threads num_groups group_size virt_groups structure) =
     KernelSpace gtid ltid gid
     <$> Engine.simplify num_threads
     <*> Engine.simplify num_groups
     <*> Engine.simplify group_size
+    <*> Engine.simplify virt_groups
     <*> Engine.simplify structure
 
 instance Engine.Simplifiable SpaceStructure where
