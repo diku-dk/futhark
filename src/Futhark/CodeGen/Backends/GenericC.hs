@@ -761,7 +761,7 @@ arrayLibraryFunctions space pt signed shape = do
   return [C.cunit|
           $ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params) {
             $ty:array_type* bad = NULL;
-            $ty:array_type *arr = malloc(sizeof($ty:array_type));
+            $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
             if (arr == NULL) {
               return bad;
             }
@@ -772,7 +772,7 @@ arrayLibraryFunctions space pt signed shape = do
           $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset,
                                             $params:shape_params) {
             $ty:array_type* bad = NULL;
-            $ty:array_type *arr = malloc(sizeof($ty:array_type));
+            $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
             if (arr == NULL) {
               return bad;
             }
@@ -922,7 +922,7 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
 
           case vd of
             ArrayValue{} -> do
-              stm [C.cstm|assert((*$id:pname = malloc(sizeof($ty:ty))) != NULL);|]
+              stm [C.cstm|assert((*$id:pname = ($ty:ty*) malloc(sizeof($ty:ty))) != NULL);|]
               prepareValue [C.cexp|*$id:pname|] vd
               return [C.cparam|$ty:ty **$id:pname|]
             ScalarValue{} -> do
@@ -934,14 +934,14 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
           ty <- opaqueToCType desc vds
           vd_ts <- mapM valueDescToCType vds
 
-          stm [C.cstm|assert((*$id:pname = malloc(sizeof($ty:ty))) != NULL);|]
+          stm [C.cstm|assert((*$id:pname = ($ty:ty*) malloc(sizeof($ty:ty))) != NULL);|]
 
 
           forM_ (zip3 [0..] vd_ts vds) $ \(i,ct,vd) -> do
             let field = [C.cexp|(*$id:pname)->$id:(tupleField i)|]
             case vd of
               ScalarValue{} -> return ()
-              _ -> stm [C.cstm|assert(($exp:field = malloc(sizeof($ty:ct))) != NULL);|]
+              _ -> stm [C.cstm|assert(($exp:field = ($ty:ct*) malloc(sizeof($ty:ct))) != NULL);|]
             prepareValue field vd
 
           return [C.cparam|$ty:ty **$id:pname|]

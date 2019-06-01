@@ -4,7 +4,7 @@ static char* load_tuning_file(const char *fname,
                               void *cfg,
                               int (*set_size)(void*, const char*, size_t)) {
   const int max_line_len = 1024;
-  char* line = malloc(max_line_len);
+  char* line = (char*) malloc(max_line_len);
 
   FILE *f = fopen(fname, "r");
 

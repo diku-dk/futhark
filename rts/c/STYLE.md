@@ -19,3 +19,5 @@ Coding Style for Futhark C Runtime Component
 * Start all files with the comment `// Start of foo.h.` and end with
   `// End of foo.h.`.  This makes the concatenated code easier to
   navigate.
+
+* Ensure, as far as possible, that the code is also valid C++.

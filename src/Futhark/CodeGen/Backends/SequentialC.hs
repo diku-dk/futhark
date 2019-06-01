@@ -38,7 +38,7 @@ compileProg =
           GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
             ([C.cedecl|struct $id:cfg* $id:s();|],
              [C.cedecl|struct $id:cfg* $id:s() {
-                                 struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
+                                 struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
                                  if (cfg == NULL) {
                                    return NULL;
                                  }
@@ -80,7 +80,7 @@ compileProg =
           GC.publicDef_ "context_new" GC.InitDecl $ \s ->
             ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
              [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-                                  struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
+                                  struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                                   if (ctx == NULL) {
                                     return NULL;
                                   }
