@@ -118,7 +118,7 @@ static void post_opencl_setup(struct opencl_context*, struct opencl_device_optio
 
 static char *strclone(const char *str) {
   size_t size = strlen(str) + 1;
-  char *copy = malloc(size);
+  char *copy = (char*) malloc(size);
   if (copy == NULL) {
     return NULL;
   }
@@ -255,7 +255,7 @@ static char* opencl_platform_info(cl_platform_id platform,
 
   OPENCL_SUCCEED_FATAL(clGetPlatformInfo(platform, param, 0, NULL, &req_bytes));
 
-  info = malloc(req_bytes);
+  info = (char*) malloc(req_bytes);
 
   OPENCL_SUCCEED_FATAL(clGetPlatformInfo(platform, param, req_bytes, info, NULL));
 
@@ -269,7 +269,7 @@ static char* opencl_device_info(cl_device_id device,
 
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device, param, 0, NULL, &req_bytes));
 
-  info = malloc(req_bytes);
+  info = (char*) malloc(req_bytes);
 
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device, param, req_bytes, info, NULL));
 
@@ -462,7 +462,7 @@ static cl_build_status build_opencl_program(cl_program program, cl_device_id dev
     size_t ret_val_size;
     OPENCL_SUCCEED_FATAL(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &ret_val_size));
 
-    build_log = malloc(ret_val_size+1);
+    build_log = (char*) malloc(ret_val_size+1);
     OPENCL_SUCCEED_FATAL(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, ret_val_size, build_log, NULL));
 
     // The spec technically does not say whether the build log is zero-terminated, so let's be careful.
@@ -614,7 +614,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
       src_size += strlen(*src);
     }
 
-    fut_opencl_src = malloc(src_size + 1);
+    fut_opencl_src = (char*) malloc(src_size + 1);
 
     size_t n, i;
     for (i = 0, n = 0; srcs && srcs[i]; i++) {
@@ -650,7 +650,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
       compile_opts_size += strlen(extra_build_opts[i] + 1);
     }
 
-    char *compile_opts = malloc(compile_opts_size);
+    char *compile_opts = (char*) malloc(compile_opts_size);
 
     int w = snprintf(compile_opts, compile_opts_size,
                      "-DLOCKSTEP_WIDTH=%d ",
@@ -693,7 +693,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     size_t binary_size;
     OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARY_SIZES,
                                           sizeof(size_t), &binary_size, NULL));
-    unsigned char *binary = malloc(binary_size);
+    unsigned char *binary = (unsigned char*) malloc(binary_size);
     unsigned char *binaries[1] = { binary };
     OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARIES,
                                           sizeof(unsigned char*), binaries, NULL));

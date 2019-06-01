@@ -69,13 +69,13 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {
-                         struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
+                         struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
                          if (cfg == NULL) {
                            return NULL;
                          }
 
                          cfg->num_build_opts = 0;
-                         cfg->build_opts = malloc(sizeof(const char*));
+                         cfg->build_opts = (const char*) malloc(sizeof(const char*));
                          cfg->build_opts[0] = NULL;
                          $stms:size_value_inits
                          opencl_config_init(&cfg->opencl, $int:num_sizes,
@@ -264,7 +264,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-                          struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
+                          struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
                           }
@@ -281,7 +281,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "context_new_with_command_queue" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue);|],
      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue) {
-                          struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
+                          struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
                           }

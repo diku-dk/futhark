@@ -194,7 +194,7 @@ static char *concat_fragments(const char *src_fragments[])
     src_len += strlen(*p);
   }
 
-  char *src = malloc(src_len + 1);
+  char *src = (char*) malloc(src_len + 1);
   size_t n = 0;
   for (p = src_fragments; *p; p++) {
     strcpy(src + n, *p);
@@ -263,7 +263,7 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
   }
 
   size_t n_opts, i = 0, i_dyn, n_opts_alloc = 20 + num_extra_opts + ctx->cfg.num_sizes;
-  const char **opts = malloc(n_opts_alloc * sizeof(const char *));
+  const char **opts = (const char**) malloc(n_opts_alloc * sizeof(const char *));
   if (!arch_set) {
     opts[i++] = "-arch";
     opts[i++] = cuda_nvrtc_get_arch(ctx->dev);
@@ -303,7 +303,7 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
   if (res != NVRTC_SUCCESS) {
     size_t log_size;
     if (nvrtcGetProgramLogSize(prog, &log_size) == NVRTC_SUCCESS) {
-      char *log = malloc(log_size);
+      char *log = (char*) malloc(log_size);
       if (nvrtcGetProgramLog(prog, log) == NVRTC_SUCCESS) {
         fprintf(stderr,"Compilation log:\n%s\n", log);
       }
@@ -318,7 +318,7 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
   char *ptx;
   size_t ptx_size;
   NVRTC_SUCCEED(nvrtcGetPTXSize(prog, &ptx_size));
-  ptx = malloc(ptx_size);
+  ptx = (char*) malloc(ptx_size);
   NVRTC_SUCCEED(nvrtcGetPTX(prog, ptx));
 
   NVRTC_SUCCEED(nvrtcDestroyProgram(&prog));
@@ -406,7 +406,7 @@ static void load_string_from_file(const char *file, char **obuf, size_t *olen)
   len = ftell(f);
   assert(fseek(f, 0, SEEK_SET) == 0);
 
-  buf = malloc(len + 1);
+  buf = (char*) malloc(len + 1);
   assert(fread(buf, 1, len, f) == len);
   buf[len] = 0;
   *obuf = buf;
