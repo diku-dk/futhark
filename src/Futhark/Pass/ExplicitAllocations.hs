@@ -223,9 +223,9 @@ arraySizeInBytesExp t =
 arraySizeInBytesExpM :: Allocator lore m => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t = do
   dims <- mapM dimAllocationSize (arrayDims t)
-  let dim_prod_i32 = product $ map (primExpFromSubExp int32) dims
+  let dim_prod_i32 = product $ map (toInt64 . primExpFromSubExp int32) dims
   let elm_size_i64 = ValueExp $ IntValue $ Int64Value $ primByteSize $ elemType t
-  return $ product [ toInt64 dim_prod_i32, elm_size_i64 ]
+  return $ product [ dim_prod_i32, elm_size_i64 ]
   where toInt64 = ConvOpExp $ SExt Int32 Int64
 
 arraySizeInBytes :: Allocator lore m => Type -> m SubExp
