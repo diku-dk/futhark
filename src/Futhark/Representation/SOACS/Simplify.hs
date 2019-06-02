@@ -509,6 +509,10 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
             y_ws<- mapM sizeOf ys
             guard $ all (x_w==) y_ws
             return (x_w, x:ys, cs)
+          Just (BasicOp (Reshape reshape arr), cs) -> do
+            guard $ isJust $ shapeCoercion reshape
+            (a, b, cs') <- isConcat arr
+            return (a, b, cs <> cs')
           _ -> Nothing
 
 fuseConcatScatter _ _ _ _ = cannotSimplify
