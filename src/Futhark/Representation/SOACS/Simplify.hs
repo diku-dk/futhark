@@ -700,8 +700,10 @@ moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arr
 
         -- It's not just about whether the array is a parameter;
         -- everything else must be map-invariant.
-        arrayIsMapParam ArrayIndexing{} =
-          False -- This can be costly if the indexing is not top-level.
+        arrayIsMapParam (ArrayIndexing cs arr slice) =
+          arr `elem` map_param_names &&
+          all (`ST.elem` vtable) (S.toList $ freeIn cs <> freeIn slice) &&
+          not (null slice) && not (null $ sliceDims slice)
         arrayIsMapParam (ArrayRearrange cs arr perm) =
           arr `elem` map_param_names &&
           all (`ST.elem` vtable) (S.toList $ freeIn cs) &&
