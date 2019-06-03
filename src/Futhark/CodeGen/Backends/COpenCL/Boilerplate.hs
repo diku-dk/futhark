@@ -75,7 +75,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          }
 
                          cfg->num_build_opts = 0;
-                         cfg->build_opts = (const char*) malloc(sizeof(const char*));
+                         cfg->build_opts = (const char**) malloc(sizeof(const char*));
                          cfg->build_opts[0] = NULL;
                          $stms:size_value_inits
                          opencl_config_init(&cfg->opencl, $int:num_sizes,
@@ -96,7 +96,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt) {
                          cfg->build_opts[cfg->num_build_opts] = opt;
                          cfg->num_build_opts++;
-                         cfg->build_opts = realloc(cfg->build_opts, (cfg->num_build_opts+1) * sizeof(const char*));
+                         cfg->build_opts = (const char**) realloc(cfg->build_opts, (cfg->num_build_opts+1) * sizeof(const char*));
                          cfg->build_opts[cfg->num_build_opts] = NULL;
                        }|])
 
