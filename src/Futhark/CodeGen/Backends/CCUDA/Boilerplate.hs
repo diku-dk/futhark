@@ -92,7 +92,7 @@ generateConfigFuns sizes = do
                          }
 
                          cfg->num_nvrtc_opts = 0;
-                         cfg->nvrtc_opts = (const char*) malloc(sizeof(const char*));
+                         cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
                          $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
@@ -113,7 +113,7 @@ generateConfigFuns sizes = do
      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt) {
                          cfg->nvrtc_opts[cfg->num_nvrtc_opts] = opt;
                          cfg->num_nvrtc_opts++;
-                         cfg->nvrtc_opts = realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts+1) * sizeof(const char*));
+                         cfg->nvrtc_opts = (const char**) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts+1) * sizeof(const char*));
                          cfg->nvrtc_opts[cfg->num_nvrtc_opts] = NULL;
                        }|])
 
