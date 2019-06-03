@@ -166,7 +166,7 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
       comm red_op nes red_arrs body
 
     let red_acc_params = take (length nes) $ lambdaParams red_op
-    reductionStageTwo constants segred_pat 0 [0] 0
+    reductionStageTwo constants segred_pat (kernelGroupId constants) 0 [0] 0
       (kernelNumGroups constants) group_result_params red_acc_params red_op_renamed nes
       1 counter sync_arr group_res_arrs red_arrs
 
@@ -266,32 +266,26 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
   let (groups_per_segment, elems_per_thread) =
         groupsPerSegmentAndElementsPerThread segment_size num_segments
         (kernelNumGroups base_constants) (kernelGroupSize base_constants)
-  num_groups <- dPrimV "num_groups" $
+  virt_num_groups <- dPrimV "virt_num_groups" $
     groups_per_segment * num_segments
-
-  num_threads <- dPrimV "num_threads" $
-    Imp.var num_groups int32 * kernelGroupSize base_constants
 
   threads_per_segment <- dPrimV "thread_per_segment" $
     groups_per_segment * kernelGroupSize base_constants
 
-  let constants = base_constants
-                  { kernelThreadActive = true
-                  , kernelNumGroups = Imp.var num_groups int32
-                  , kernelNumThreads = Imp.var num_threads int32
-                  }
+  let constants = base_constants { kernelThreadActive = true }
 
   emit $ Imp.DebugPrint "\n# SegRed-large" Nothing
   emit $ Imp.DebugPrint "num_segments" $ Just (int32, num_segments)
   emit $ Imp.DebugPrint "segment_size" $ Just (int32, segment_size)
-  emit $ Imp.DebugPrint "num_groups" $ Just (int32, Imp.var num_groups int32)
+  emit $ Imp.DebugPrint "virt_num_groups" $ Just (int32, Imp.vi32 virt_num_groups)
+  emit $ Imp.DebugPrint "num_groups" $ Just (int32, kernelNumGroups constants)
   emit $ Imp.DebugPrint "group_size" $ Just (int32, kernelGroupSize constants)
   emit $ Imp.DebugPrint "elems_per_thread" $ Just (int32, Imp.innerExp elems_per_thread)
   emit $ Imp.DebugPrint "groups_per_segment" $ Just (int32, groups_per_segment)
 
   group_res_arrs <- forM (lambdaReturnType red_op) $ \t -> do
     let pt = elemType t
-        shape = Shape [Var num_groups] <> arrayShape t
+        shape = Shape [Var virt_num_groups] <> arrayShape t
     sAllocArray "group_res_arr" pt shape $ Space "device"
 
   -- In principle we should have a counter for every segment.  Since
@@ -316,39 +310,44 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
     red_arrs <- intermediateArrays space red_op nes
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
-    let segment_gtids = init gtids
-        group_id = kernelGroupId constants
-        group_size = kernelGroupSize constants
-        flat_segment_id = group_id `quot` groups_per_segment
-        local_tid = kernelLocalThreadId constants
+    -- We probably do not have enough actual workgroups to cover the
+    -- entire iteration space.  Some groups thus have to perform double
+    -- duty; we put an outer loop to accomplish this.
+    virtualiseGroups constants (Imp.vi32 virt_num_groups) $ \group_id_var -> do
 
-        global_tid = kernelGlobalThreadId constants
-                     `rem` (group_size * groups_per_segment)
-        w = last dims
-        first_group_for_segment = flat_segment_id * groups_per_segment
+      let segment_gtids = init gtids
+          group_id = Imp.vi32 group_id_var
+          group_size = kernelGroupSize constants
+          flat_segment_id = group_id `quot` groups_per_segment
+          local_tid = kernelLocalThreadId constants
 
-    zipWithM_ (<--) segment_gtids $ unflattenIndex (init dims') flat_segment_id
-    num_elements <- Imp.elements <$> toExp w
+          global_tid = (group_id * group_size + local_tid)
+                       `rem` (group_size * groups_per_segment)
+          w = last dims
+          first_group_for_segment = flat_segment_id * groups_per_segment
 
-    (group_result_params, red_op_renamed) <-
-      reductionStageOne constants num_elements
-      global_tid elems_per_thread threads_per_segment
-      comm red_op nes red_arrs body
+      zipWithM_ (<--) segment_gtids $ unflattenIndex (init dims') flat_segment_id
+      num_elements <- Imp.elements <$> toExp w
 
-    let multiple_groups_per_segment =
-          reductionStageTwo constants segred_pat
-          flat_segment_id (map (`Imp.var` int32) segment_gtids)
-          first_group_for_segment groups_per_segment
-          group_result_params red_acc_params red_op_renamed
-          nes (fromIntegral num_counters) counter sync_arr group_res_arrs red_arrs
+      (group_result_params, red_op_renamed) <-
+        reductionStageOne constants num_elements
+        global_tid elems_per_thread threads_per_segment
+        comm red_op nes red_arrs body
 
-        one_group_per_segment =
-          comment "first thread in group saves final result to memory" $
-          sWhen (local_tid .==. 0) $
-            forM_ (take (length nes) $ zip (patternNames segred_pat) group_result_params) $ \(v, p) ->
-            copyDWIM v (map (`Imp.var` int32) segment_gtids) (Var $ paramName p) []
+      let multiple_groups_per_segment =
+            reductionStageTwo constants segred_pat
+            group_id flat_segment_id (map (`Imp.var` int32) segment_gtids)
+            first_group_for_segment groups_per_segment
+            group_result_params red_acc_params red_op_renamed
+            nes (fromIntegral num_counters) counter sync_arr group_res_arrs red_arrs
 
-    sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
+          one_group_per_segment =
+            comment "first thread in group saves final result to memory" $
+            sWhen (local_tid .==. 0) $
+              forM_ (take (length nes) $ zip (patternNames segred_pat) group_result_params) $ \(v, p) ->
+              copyDWIM v (map (`Imp.var` int32) segment_gtids) (Var $ paramName p) []
+
+      sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
 
 -- Careful to avoid division by zero here.
 groupsPerSegmentAndElementsPerThread :: Imp.Exp -> Imp.Exp -> Imp.Exp -> Imp.Exp
@@ -457,6 +456,7 @@ reductionStageOne constants num_elements global_tid elems_per_thread threads_per
 reductionStageTwo :: KernelConstants
                   -> Pattern ExplicitMemory
                   -> Imp.Exp
+                  -> Imp.Exp
                   -> [Imp.Exp]
                   -> Imp.Exp
                   -> PrimExp Imp.ExpLeaf
@@ -471,12 +471,11 @@ reductionStageTwo :: KernelConstants
                   -> [VName]
                   -> InKernelGen ()
 reductionStageTwo constants segred_pat
-                  flat_segment_id segment_gtids first_group_for_segment groups_per_segment
+                  group_id flat_segment_id segment_gtids first_group_for_segment groups_per_segment
                   group_result_params red_acc_params
                   red_op_renamed nes
                   num_counters counter sync_arr group_res_arrs red_arrs = do
   let local_tid = kernelLocalThreadId constants
-      group_id = kernelGroupId constants
       group_size = kernelGroupSize constants
   old_counter <- dPrim "old_counter" int32
   (counter_mem, _, counter_offset) <- fullyIndexArray counter [flat_segment_id `rem` num_counters]
