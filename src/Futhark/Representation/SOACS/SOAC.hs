@@ -72,8 +72,8 @@ import Futhark.Construct
 import Futhark.Util (maybeNth, chunks, splitAt3)
 
 data SOAC lore =
-    Stream SubExp (StreamForm lore) (LambdaT lore) [VName]
-  | Scatter SubExp (LambdaT lore) [VName] [(SubExp, Int, VName)]
+    Stream SubExp (StreamForm lore) (Lambda lore) [VName]
+  | Scatter SubExp (Lambda lore) [VName] [(SubExp, Int, VName)]
     -- Scatter <cs> <length> <lambda> <original index and value arrays>
     --
     -- <input/output arrays along with their sizes and number of
@@ -89,11 +89,11 @@ data SOAC lore =
     --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
     --
     -- This must be consistent along all Scatter-related optimisations.
-  | GenReduce SubExp [GenReduceOp lore] (LambdaT lore) [VName]
+  | GenReduce SubExp [GenReduceOp lore] (Lambda lore) [VName]
     -- GenReduce <length> <dest-arrays-and-ops> <bucket fun> <input arrays>
     --
     -- The first SubExp is the length of the input arrays. The first
-    -- list describes the operations to perform.  The 'LambdaT' is the
+    -- list describes the operations to perform.  The 'Lambda' is the
     -- bucket function.  Finally comes the input images.
   | Screma SubExp (ScremaForm lore) [VName]
     -- ^ A combination of scan, reduction, and map.  The first
@@ -107,12 +107,12 @@ data SOAC lore =
 data GenReduceOp lore = GenReduceOp { genReduceWidth :: SubExp
                                     , genReduceDest :: [VName]
                                     , genReduceNeutral :: [SubExp]
-                                    , genReduceOp :: LambdaT lore
+                                    , genReduceOp :: Lambda lore
                                     }
                       deriving (Eq, Ord, Show)
 
 data StreamForm lore  =
-    Parallel StreamOrd Commutativity (LambdaT lore) [SubExp]
+    Parallel StreamOrd Commutativity (Lambda lore) [SubExp]
   | Sequential [SubExp]
   deriving (Eq, Ord, Show)
 
@@ -121,11 +121,11 @@ data StreamForm lore  =
 data ScremaForm lore = ScremaForm
                          (Scan lore)
                          (Reduce lore)
-                         (LambdaT lore)
+                         (Lambda lore)
   deriving (Eq, Ord, Show)
 
-type Scan lore = (LambdaT lore, [SubExp])
-type Reduce lore = (Commutativity, LambdaT lore, [SubExp])
+type Scan lore = (Lambda lore, [SubExp])
+type Reduce lore = (Commutativity, Lambda lore, [SubExp])
 
 scremaType :: SubExp -> ScremaForm lore -> [Type]
 scremaType w (ScremaForm (scan_lam, _scan_nes) (_, red_lam, _red_nes) map_lam) =
@@ -181,10 +181,10 @@ composeLambda scan_fun red_fun map_fun = do
         (red_x_params, red_y_params) = splitAt m $ lambdaParams red_fun
 
 -- | A lambda with no parameters that returns no values.
-nilFn :: Bindable lore => LambdaT lore
+nilFn :: Bindable lore => Lambda lore
 nilFn = Lambda mempty (mkBody mempty mempty) mempty
 
-isNilFn :: LambdaT lore -> Bool
+isNilFn :: Lambda lore -> Bool
 isNilFn (Lambda ps body ts) =
   null ps && null ts &&
   null (bodyStms body) && null (bodyResult body)
@@ -362,7 +362,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
     S.fromList $ concatMap genReduceDest ops
   consumedInOp CmpThreshold{} = mempty
 
-mapGenReduceOp :: (LambdaT flore -> LambdaT tlore)
+mapGenReduceOp :: (Lambda flore -> Lambda tlore)
                -> GenReduceOp flore -> GenReduceOp tlore
 mapGenReduceOp f (GenReduceOp w dests nes lam) =
   GenReduceOp w dests nes $ f lam
