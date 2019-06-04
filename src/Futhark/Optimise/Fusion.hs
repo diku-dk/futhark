@@ -2,7 +2,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE ViewPatterns #-}
 -- | Perform horizontal and vertical fusion of SOACs.
 module Futhark.Optimise.Fusion ( fuseSOACs )
   where
@@ -556,14 +555,17 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
 ------------------------------------------------------------------------
 
 fusionGatherBody :: FusedRes -> Body -> FusionGM FusedRes
+fusionGatherBody fres (Body _ stms res) =
+  fusionGatherStms fres (stmsToList stms) res
+
+fusionGatherStms :: FusedRes -> [Stm] -> Result -> FusionGM FusedRes
 
 -- Some forms of do-loops can profitably be considered streamSeqs.  We
 -- are careful to ensure that the generated nested loop cannot itself
 -- be considered a stream, to avoid infinite recursion.
-fusionGatherBody fres (Body blore (stmsToList ->
-                                    Let (Pattern [] pes) bndtp
-                                    (DoLoop [] merge (ForLoop i it w loop_vars) body)
-                                    :bnds) res) | not $ null loop_vars = do
+fusionGatherStms fres (Let (Pattern [] pes) bndtp
+                       (DoLoop [] merge (ForLoop i it w loop_vars) body) : bnds) res
+  | not $ null loop_vars = do
   let (merge_params,merge_init) = unzip merge
       (loop_params,loop_arrs) = unzip loop_vars
   chunk_size <- newVName "chunk_size"
@@ -606,10 +608,10 @@ fusionGatherBody fres (Body blore (stmsToList ->
   discard <- newVName "discard"
   let discard_pe = PatElem discard $ Prim int32
 
-  fusionGatherBody fres $ Body blore
-    (oneStm (Let (Pattern [] (pes<>[discard_pe])) bndtp (Op stream))<>stmsFromList bnds) res
+  fusionGatherStms fres
+    (Let (Pattern [] (pes<>[discard_pe])) bndtp (Op stream) : bnds) res
 
-fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
+fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
     Right soac@(SOAC.Scatter _len lam _ivs _as) -> do
@@ -669,7 +671,7 @@ fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
           consumed' <- varsAliases consumed
           greedyFuse rem_bnds used_lam blres (pat, cs, soac, consumed')
 
-fusionGatherBody fres (Body _ _ res) =
+fusionGatherStms fres [] res =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
