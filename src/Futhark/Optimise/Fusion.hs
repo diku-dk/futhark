@@ -646,27 +646,26 @@ fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
 
     _ | [pe] <- patternValueElements pat,
         Just (src,trns) <- SOAC.transformFromExp (stmCerts bnd) e ->
-          bindingTransform pe src trns $ fusionGatherBody fres body
+          bindingTransform pe src trns $ fusionGatherStms fres bnds res
       | otherwise -> do
           let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
-          bres <- gatherStmPattern pat e $ fusionGatherBody fres body
+          bres <- gatherStmPattern pat e $ fusionGatherStms fres bnds res
           bres' <- checkForUpdates bres e
           foldM fusionGatherExp bres' (e:pat_vars)
 
-  where body = mkBody (stmsFromList bnds) res
-        cs = stmCerts bnd
+  where cs = stmCerts bnd
         rem_bnds = bnd : bnds
         consumed = consumedInExp $ Alias.analyseExp e
 
         reduceLike soac lambdas nes = do
           (used_lam, lres)  <- foldM fusionGatherLam (S.empty, fres) lambdas
-          bres  <- bindingFamily pat $ fusionGatherBody lres body
+          bres  <- bindingFamily pat $ fusionGatherStms lres bnds res
           bres' <- foldM fusionGatherSubExp bres nes
           consumed' <- varsAliases consumed
           greedyFuse rem_bnds used_lam bres' (pat, cs, soac, consumed')
 
         mapLike fres' soac lambda = do
-          bres  <- bindingFamily pat $ fusionGatherBody fres' body
+          bres  <- bindingFamily pat $ fusionGatherStms fres' bnds res
           (used_lam, blres) <- fusionGatherLam (S.empty, bres) lambda
           consumed' <- varsAliases consumed
           greedyFuse rem_bnds used_lam blres (pat, cs, soac, consumed')
