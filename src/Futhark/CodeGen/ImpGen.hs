@@ -80,6 +80,7 @@ module Futhark.CodeGen.ImpGen
   , sDeclareMem, sAlloc, sAlloc_
   , sArray, sAllocArray, sStaticArray
   , sWrite, sUpdate
+  , sLoopNest
   , (<--)
   )
   where
@@ -1276,6 +1277,16 @@ sUpdate arr slice v = do
   MemLocation mem shape ixfun <- entryArrayLocation <$> lookupArray arr
   let memdest = sliceArray (MemLocation mem shape ixfun) slice
   copyDWIMDest (ArrayDestination $ Just memdest) [] v []
+
+sLoopNest :: Shape
+          -> ([Imp.Exp] -> ImpM lore op ())
+          -> ImpM lore op ()
+sLoopNest = sLoopNest' [] . shapeDims
+  where sLoopNest' is [] f = f $ reverse is
+        sLoopNest' is (d:ds) f = do
+          i <- newVName "nest_i"
+          d' <- toExp d
+          sFor i Int32 d' $ sLoopNest' (Imp.var i int32:is) ds f
 
 -- | ASsignment.
 (<--) :: VName -> Imp.Exp -> ImpM lore op ()

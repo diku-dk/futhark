@@ -60,15 +60,6 @@ import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 import Futhark.Util (chunks, mapAccumLM, splitFromEnd, takeLast)
 import Futhark.Construct (fullSliceNum)
 
-vectorLoops :: [Imp.Exp] -> [SubExp]
-            -> ([Imp.Exp] -> ImpM lore op ())
-            -> ImpM lore op ()
-vectorLoops is [] f = f $ reverse is
-vectorLoops is (d:ds) f = do
-  i <- newVName "vect_i"
-  d' <- toExp d
-  sFor i Int32 d' $ vectorLoops (Imp.var i int32:is) ds f
-
 i32Toi64 :: PrimExp v -> PrimExp v
 i32Toi64 = ConvOpExp (SExt Int32 Int64)
 
@@ -305,7 +296,7 @@ genRedKernelGlobal map_pes space slugs kbody = do
 
             sWhen bucket_in_bounds $ do
               dLParams $ lambdaParams lam
-              vectorLoops [] (shapeDims shape) $ \is -> do
+              sLoopNest shape $ \is -> do
                 forM_ (zip vs_params vs') $ \(p, res) ->
                   copyDWIM (paramName p) [] (kernelResultSubExp res) is
                 do_op (bucket_is ++ is)
@@ -470,7 +461,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes space slugs kbody = do
           local_is = local_subhisto_i : bucket_is
       sIf (global_subhisto_i .==. 0)
         (copyDWIM dest_local local_is (Var dest_global) global_is)
-        (vectorLoops [] (shapeDims $ genReduceShape op) $ \is ->
+        (sLoopNest (genReduceShape op) $ \is ->
             copyDWIM dest_local (local_is++is) ne [])
 
     sOp Imp.LocalBarrier
@@ -521,7 +512,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes space slugs kbody = do
             sComment "perform atomic updates" $
               sWhen bucket_in_bounds $ do
               dLParams $ lambdaParams lam
-              vectorLoops [] (shapeDims shape) $ \is -> do
+              sLoopNest shape $ \is -> do
                 forM_ (zip vs_params vs') $ \(p, v) ->
                   copyDWIM (paramName p) [] v is
                 do_op (bucket_is ++ is)
