@@ -48,7 +48,7 @@ import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
-import Futhark.CodeGen.ImpCode.Kernels (bytes)
+import Futhark.CodeGen.ImpCode.Kernels (elements)
 import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralExp)
 import Futhark.Util (splitAt3, maybeNth, takeLast)
@@ -738,12 +738,11 @@ writeParamToLocalMemory :: Typed (MemBound u) =>
 writeParamToLocalMemory i (mem, _) param
   | Prim t <- paramType param =
       emit $
-      Imp.Write mem (bytes i') bt (Space "local") Imp.Volatile $
+      Imp.Write mem (elements i) bt (Space "local") Imp.Volatile $
       Imp.var (paramName param) t
   | otherwise =
       return ()
-  where i' = i * Imp.LeafExp (Imp.SizeOf bt) int32
-        bt = elemType $ paramType param
+  where bt = elemType $ paramType param
 
 readParamFromLocalMemory :: Typed (MemBound u) =>
                             Imp.Exp -> Param (MemBound u) -> (VName, t)
@@ -751,10 +750,9 @@ readParamFromLocalMemory :: Typed (MemBound u) =>
 readParamFromLocalMemory i param (l_mem, _)
   | Prim _ <- paramType param =
       paramName param <--
-      Imp.index l_mem (bytes i') bt (Space "local") Imp.Volatile
+      Imp.index l_mem (elements i) bt (Space "local") Imp.Volatile
   | otherwise = return ()
-  where i' = i * Imp.LeafExp (Imp.SizeOf bt) int32
-        bt = elemType $ paramType param
+  where bt = elemType $ paramType param
 
 groupReduce :: ExplicitMemorish lore =>
                KernelConstants
@@ -1125,8 +1123,7 @@ sIota arr n x s et = do
     set_constants
     let gtid = kernelGlobalThreadId constants
     sWhen (kernelThreadActive constants) $ do
-      (destmem, destspace, destidx) <-
-        fullyIndexArray' destloc [gtid] (IntType et)
+      (destmem, destspace, destidx) <- fullyIndexArray' destloc [gtid]
 
       emit $
         Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
@@ -1156,8 +1153,8 @@ sCopy bt
         dest_is = unflattenIndex shape_se gtid
         src_is = dest_is
 
-    (_, destspace, destidx) <- fullyIndexArray' destloc dest_is bt
-    (_, srcspace, srcidx) <- fullyIndexArray' srcloc src_is bt
+    (_, destspace, destidx) <- fullyIndexArray' destloc dest_is
+    (_, srcspace, srcidx) <- fullyIndexArray' srcloc src_is
 
     sWhen (gtid .<. kernel_size) $ emit $
       Imp.Write destmem destidx bt destspace Imp.Nonvolatile $

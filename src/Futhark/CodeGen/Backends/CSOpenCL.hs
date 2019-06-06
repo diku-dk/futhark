@@ -255,7 +255,8 @@ writeOpenCLScalar mem i bt "device" val = do
     , AssignTyped (PointerT VoidT) (Var ptr) (Just $ Addr $ Var scalar)
     , Exp $ CS.simpleCall "CL10.EnqueueWriteBuffer"
         [ Var "Ctx.OpenCL.Queue", memblockFromMem mem, Bool True
-        ,CS.toIntPtr i,CS.toIntPtr $ CS.sizeOf bt',CS.toIntPtr $ Var ptr
+        , CS.toIntPtr $ BinOp "*" i (CS.sizeOf bt')
+        , CS.toIntPtr $ CS.sizeOf bt',CS.toIntPtr $ Var ptr
     , Integer 0, Null, Null]
     ]
 
@@ -272,7 +273,8 @@ readOpenCLScalar mem i bt "device" = do
     [ CS.assignScalarPointer (Var val) (Var ptr)
     , Exp $ CS.simpleCall "CL10.EnqueueReadBuffer"
       [ Var "Ctx.OpenCL.Queue", memblockFromMem mem , Bool True
-      , CS.toIntPtr i, CS.toIntPtr $ CS.sizeOf bt', CS.toIntPtr $ Var ptr
+      , CS.toIntPtr $ BinOp "*" i (CS.sizeOf bt')
+      , CS.toIntPtr $ CS.sizeOf bt', CS.toIntPtr $ Var ptr
       , Integer 0, Null, Null]
     ]
   return $ Var val
