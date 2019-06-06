@@ -450,28 +450,23 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                        ++ "kernel name not found in kernels field!")
                           Just ker -> return ker
 
-  -- for each kernel get the index in the bindings where the kernel is located
-  -- and sort based on the index so that partial fusion may succeed.
+  -- For each kernel get the index in the bindings where the kernel is
+  -- located and sort based on the index so that partial fusion may
+  -- succeed.  We use the last position where one of the kernel
+  -- outputs occur.
   let bnd_nms = map (patternNames . stmPattern) rem_bnds
   kernminds <- forM to_fuse_knms $ \ker_nm -> do
     ker <- lookupKernel ker_nm
-    let out_nm  = case fsoac ker of
-                    SOAC.Stream _ frm _ _
-                      | x:_ <- drop (length $ getStreamAccums frm) $ outNames ker ->
-                        x
-                    SOAC.Screma _ (ScremaForm (_, scan_nes) (_, _, red_nes) _) _
-                      | x:_ <- drop (length scan_nes + length red_nes) $ outNames ker ->
-                        x
-                    _ -> head $ outNames ker
-    case L.findIndex (elem out_nm) bnd_nms of
-      Nothing -> return Nothing
-      Just i  -> return $ Just (ker,ker_nm,i)
+    case mapMaybe (\out_nm -> L.findIndex (elem out_nm) bnd_nms) (outNames ker) of
+      [] -> return Nothing
+      is -> return $ Just (ker,ker_nm,maximum is)
 
   scope <- askScope
   let kernminds' = L.sortBy (\(_,_,i1) (_,_,i2)->compare i1 i2) $ catMaybes kernminds
       soac_kernel = newKernel cs soac consumed out_nms scope
+
   -- now try to fuse kernels one by one (in a fold); @ok_ind@ is the index of the
-  -- kernel until which fusion succeded, and @fused_ker@ is the resulted kernel.
+  -- kernel until which fusion succeded, and @fused_ker@ is the resulting kernel.
   (_,ok_ind,_,fused_ker,_) <-
       foldM (\(cur_ok,n,prev_ind,cur_ker,ufus_nms) (ker, _ker_nm, bnd_ind) -> do
                 -- check that we still try fusion and that the intermediate
