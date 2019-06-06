@@ -248,25 +248,24 @@ lmadShapeBase = map ldShape . lmadDims
 -- | Compute the flat memory index for a complete set `inds` of array indices
 -- and a certain element size `elem_size`.
 index :: (IntegralExp num, Eq num) =>
-          IxFun num -> Indices num -> num -> num
+          IxFun num -> Indices num -> num
 index = indexFromLMADs . ixfunLMADs
   where indexFromLMADs :: (IntegralExp num, Eq num) =>
-                          NonEmpty (LMAD num) -> Indices num -> num -> num
-        indexFromLMADs (lmad :| []) inds elm_size = indexLMAD lmad inds elm_size
-        indexFromLMADs (lmad1 :| lmad2 : lmads) inds elm_size =
-          let i_flat   = indexLMAD lmad1 inds 1
+                          NonEmpty (LMAD num) -> Indices num -> num
+        indexFromLMADs (lmad :| []) inds = indexLMAD lmad inds
+        indexFromLMADs (lmad1 :| lmad2 : lmads) inds =
+          let i_flat   = indexLMAD lmad1 inds
               new_inds = unflattenIndex (permuteFwd (lmadPermutation lmad2) $ lmadShapeBase lmad2) i_flat
-          in indexFromLMADs (lmad2 :| lmads) new_inds elm_size
+          in indexFromLMADs (lmad2 :| lmads) new_inds
 
         -- | Compute the flat index of an LMAD.
         indexLMAD :: (IntegralExp num, Eq num) =>
-                     LMAD num -> Indices num -> num -> num
-        indexLMAD lmad@(LMAD off dims) inds elm_size =
+                     LMAD num -> Indices num -> num
+        indexLMAD lmad@(LMAD off dims) inds =
           let prod = sum $ zipWith flatOneDim
                              (map (\(LMADDim s r n _ _) -> (s, r, n)) dims)
                              (permuteInv (lmadPermutation lmad) inds)
-              ind = off + prod
-          in if elm_size == 1 then ind else ind * elm_size
+          in off + prod
 
 -- | iota.
 iota :: IntegralExp num => Shape num -> IxFun num

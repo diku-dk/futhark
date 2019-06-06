@@ -118,42 +118,42 @@ rank = length . shape
 
 
 index :: (IntegralExp num, Eq num) =>
-         IxFun num -> Indices num -> num -> num
-index (Direct dims) is element_size =
-  sum (zipWith (*) is slicesizes) * element_size
+         IxFun num -> Indices num -> num
+index (Direct dims) is =
+  sum $ zipWith (*) is slicesizes
   where slicesizes = drop 1 $ sliceSizes dims
-index (Permute fun perm) is_new element_size =
-  index fun is_old element_size
+index (Permute fun perm) is_new =
+  index fun is_old
   where is_old = rearrangeShape (rearrangeInverse perm) is_new
-index (Rotate fun offsets) is element_size =
-  index fun (zipWith mod (zipWith (+) is offsets) dims) element_size
+index (Rotate fun offsets) is =
+  index fun $ zipWith mod (zipWith (+) is offsets) dims
   where dims = shape fun
-index (Index fun js) is element_size =
-  index fun (adjust js is) element_size
+index (Index fun js) is =
+  index fun (adjust js is)
   where adjust (DimFix j:js') is' = j : adjust js' is'
         adjust (DimSlice j _ s:js') (i:is') = j + i * s : adjust js' is'
         adjust _ _ = []
-index (Reshape fun newshape) is element_size =
+index (Reshape fun newshape) is =
   let new_indices = reshapeIndex (shape fun) (newDims newshape) is
-  in index fun new_indices element_size
-index (Repeat fun outer_shapes _) is element_size =
+  in index fun new_indices
+index (Repeat fun outer_shapes _) is =
   -- Discard those indices that are just repeats.  It is intentional
   -- that we cut off those indices that correspond to the innermost
   -- repeated dimensions.
-  index fun is' element_size
+  index fun is'
   where flags dims = replicate (length dims) True ++ [False]
         is' = map snd $ filter (not . fst) $ zip (concatMap flags outer_shapes) is
-index (OffsetIndex fun i) is element_size =
+index (OffsetIndex fun i) is =
   case shape fun of
     d : ds ->
-      index (Index fun (DimSlice i (d-i) 1 : map (unitSlice 0) ds)) is element_size
+      index (Index fun (DimSlice i (d-i) 1 : map (unitSlice 0) ds)) is
     [] -> error "index: OffsetIndex: underlying index function has rank zero"
-index (StrideIndex fun s) is element_size =
+index (StrideIndex fun s) is =
   case shape fun of
     d : ds ->
-      index (Index fun (DimSlice 0 d s : map (unitSlice 0) ds)) is element_size
+      index (Index fun (DimSlice 0 d s : map (unitSlice 0) ds)) is
     [] -> error "index: StrideIndex: underlying index function has rank zero"
-index (Rebase new_base fun) is element_size =
+index (Rebase new_base fun) is =
   let fun' = case fun of
                Direct old_shape ->
                  if old_shape == shape new_base
@@ -175,4 +175,4 @@ index (Rebase new_base fun) is element_size =
                  offsetIndex (rebase new_base ixfun) s
                r@Rebase{} ->
                  r
-  in index fun' is element_size
+  in index fun' is

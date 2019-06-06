@@ -101,7 +101,7 @@ import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
   (Count (..),
    Bytes, Elements,
-   bytes, withElemType)
+   bytes, elements, withElemType)
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
@@ -943,17 +943,17 @@ destinationFromPattern pat = fmap (Destination (baseTag <$> maybeHead (patternNa
               return $ ScalarDestination name
 
 fullyIndexArray :: VName -> [Imp.Exp]
-                -> ImpM lore op (VName, Imp.Space, Count Bytes)
+                -> ImpM lore op (VName, Imp.Space, Count Elements)
 fullyIndexArray name indices = do
   arr <- lookupArray name
-  fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
+  fullyIndexArray' (entryArrayLocation arr) indices
 
-fullyIndexArray' :: MemLocation -> [Imp.Exp] -> PrimType
-                 -> ImpM lore op (VName, Imp.Space, Count Bytes)
-fullyIndexArray' (MemLocation mem _ ixfun) indices bt = do
+fullyIndexArray' :: MemLocation -> [Imp.Exp]
+                 -> ImpM lore op (VName, Imp.Space, Count Elements)
+fullyIndexArray' (MemLocation mem _ ixfun) indices = do
   space <- entryMemSpace <$> lookupMemory mem
   return (mem, space,
-          bytes $ IxFun.index ixfun indices $ primByteSize bt)
+          elements $ IxFun.index ixfun indices)
 
 sliceArray :: MemLocation
            -> Slice Imp.Exp
@@ -1018,16 +1018,15 @@ copyElementWise :: CopyCompiler lore op
 copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     let ivars = map Imp.vi32 is
-        destidx = IxFun.index destIxFun ivars bt_size
-        srcidx = IxFun.index srcIxFun ivars bt_size
+        destidx = IxFun.index destIxFun ivars
+        srcidx = IxFun.index srcIxFun ivars
         bounds = map innerExp $ n : drop 1 (map Imp.dimSizeToExp srcshape)
     srcspace <- entryMemSpace <$> lookupMemory srcmem
     destspace <- entryMemSpace <$> lookupMemory destmem
     vol <- asks envVolatility
     emit $ foldl (.) id (zipWith (`Imp.For` Int32) is bounds) $
-      Imp.Write destmem (bytes destidx) bt destspace vol $
-      Imp.index srcmem (bytes srcidx) bt srcspace vol
-  where bt_size = primByteSize bt
+      Imp.Write destmem (elements destidx) bt destspace vol $
+      Imp.index srcmem (elements srcidx) bt srcspace vol
 
 -- | Copy from here to there; both destination and source may be
 -- indexeded.
@@ -1041,9 +1040,9 @@ copyArrayDWIM bt
 
   | length srcis == length srcshape, length destis == length destshape = do
   (targetmem, destspace, targetoffset) <-
-    fullyIndexArray' destlocation destis bt
+    fullyIndexArray' destlocation destis
   (srcmem, srcspace, srcoffset) <-
-    fullyIndexArray' srclocation srcis bt
+    fullyIndexArray' srclocation srcis
   vol <- asks envVolatility
   return $ Imp.Write targetmem targetoffset bt destspace vol $
     Imp.index srcmem srcoffset bt srcspace vol
@@ -1086,7 +1085,7 @@ copyDWIMDest pat dest_is (Constant v) [] =
     unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
   ArrayDestination (Just dest_loc) -> do
     (dest_mem, dest_space, dest_i) <-
-      fullyIndexArray' dest_loc dest_is bt
+      fullyIndexArray' dest_loc dest_is
     vol <- asks envVolatility
     emit $ Imp.Write dest_mem dest_i bt dest_space vol $ Imp.ValueExp v
   ArrayDestination Nothing ->
@@ -1122,7 +1121,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
     (ScalarDestination name, ArrayVar _ arr) -> do
       let bt = entryArrayElemType arr
       (mem, space, i) <-
-        fullyIndexArray' (entryArrayLocation arr) src_is bt
+        fullyIndexArray' (entryArrayLocation arr) src_is
       vol <- asks envVolatility
       emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
 
@@ -1132,8 +1131,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       emit =<< copyArrayDWIM bt dest_loc dest_is src_loc src_is
 
     (ArrayDestination (Just dest_loc), ScalarVar _ (ScalarEntry bt)) -> do
-      (dest_mem, dest_space, dest_i) <-
-        fullyIndexArray' dest_loc dest_is bt
+      (dest_mem, dest_space, dest_i) <- fullyIndexArray' dest_loc dest_is
       vol <- asks envVolatility
       emit $ Imp.Write dest_mem dest_i bt dest_space vol (Imp.var src bt)
 

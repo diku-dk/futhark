@@ -446,64 +446,54 @@ inKernelOperations = GenericC.Operations
           GenericC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
         kernelOps (Atomic space aop) = atomicOps space aop
 
-        atomicOps s (AtomicAdd old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_add($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
+        atomicCast s t = do
+          let volatile = [C.ctyquals|volatile|]
+          quals <- case s of DefaultSpace -> pointerQuals "global"
+                             Space sid    -> pointerQuals sid
+          return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
-        atomicOps s (AtomicSMax old arr ind val) = do
+        doAtomic s old arr ind val op ty = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_max($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
+          cast <- atomicCast s ty
+          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
 
-        atomicOps s (AtomicSMin old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_min($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
+        atomicOps s (AtomicAdd old arr ind val) =
+          doAtomic s old arr ind val "atomic_add" [C.cty|int|]
 
-        atomicOps s (AtomicUMax old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_max($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicSMax old arr ind val) =
+          doAtomic s old arr ind val "atomic_max" [C.cty|int|]
 
-        atomicOps s (AtomicUMin old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_min($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicSMin old arr ind val) =
+          doAtomic s old arr ind val "atomic_min" [C.cty|int|]
 
-        atomicOps s (AtomicAnd old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_and($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicUMax old arr ind val) =
+          doAtomic s old arr ind val "atomic_max" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicOr old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_or($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicUMin old arr ind val) =
+          doAtomic s old arr ind val "atomic_min" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicXor old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_xor($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicAnd old arr ind val) =
+          doAtomic s old arr ind val "atomic_and" [C.cty|unsigned int|]
+
+        atomicOps s (AtomicOr old arr ind val) =
+          doAtomic s old arr ind val "atomic_or" [C.cty|unsigned int|]
+
+        atomicOps s (AtomicXor old arr ind val) =
+          doAtomic s old arr ind val "atomic_xor" [C.cty|unsigned int|]
 
         atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           cmp' <- GenericC.compileExp cmp
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:cmp', $exp:val');|]
+          cast <- atomicCast s [C.cty|int|]
+          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
 
         atomicOps s (AtomicXchg old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_xchg($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
-
-        atomicCast s bt = "(" ++ unwords [ "volatile"
-                                         , "__" ++ case s of
-                                                     DefaultSpace -> "global"
-                                                     Space sid -> sid
-                                         , bt
-                                         , "*"
-                                         ] ++ ")"
+          cast <- atomicCast s [C.cty|int|]
+          GenericC.stm [C.cstm|$id:old = atomic_xchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
 
         cannotAllocate :: GenericC.Allocate KernelOp KernelRequirements
         cannotAllocate _ =

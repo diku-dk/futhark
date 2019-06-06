@@ -175,7 +175,7 @@ data Code a = Skip
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Write VName (Count Bytes) PrimType Space Volatility Exp
+            | Write VName (Count Elements) PrimType Space Volatility Exp
             | SetScalar VName Exp
             | SetMem VName VName Space
               -- ^ Must be in same space.
@@ -210,7 +210,7 @@ instance Monoid (Code a) where
 
 data ExpLeaf = ScalarVar VName
              | SizeOf PrimType
-             | Index VName (Count Bytes) PrimType Space Volatility
+             | Index VName (Count Elements) PrimType Space Volatility
            deriving (Eq, Show)
 
 type Exp = PrimExp ExpLeaf
@@ -259,7 +259,7 @@ var = LeafExp . ScalarVar
 vi32 :: VName -> Exp
 vi32 = flip var $ IntType Int32
 
-index :: VName -> Count Bytes -> PrimType -> Space -> Volatility -> Exp
+index :: VName -> Count Elements -> PrimType -> Space -> Volatility -> Exp
 index arr i t s vol = LeafExp (Index arr i t s vol) t
 
 -- Prettyprinting definitions.

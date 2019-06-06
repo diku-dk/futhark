@@ -179,7 +179,7 @@ writeOpenCLScalar mem i bt "device" val = do
               [Arg val, ArgKeyword "dtype" $ Var $ Py.compilePrimType bt]
   Py.stm $ Exp $ Call (Var "cl.enqueue_copy")
     [Arg $ Var "self.queue", Arg mem', Arg nparr,
-     ArgKeyword "device_offset" $ asLong i,
+     ArgKeyword "device_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
      ArgKeyword "is_blocking" $ Var "synchronous"]
 
 writeOpenCLScalar _ _ _ space _ =
@@ -196,7 +196,7 @@ readOpenCLScalar mem i bt "device" = do
   Py.stm $ Assign val' nparr
   Py.stm $ Exp $ Call (Var "cl.enqueue_copy")
     [Arg $ Var "self.queue", Arg val', Arg mem',
-     ArgKeyword "device_offset" $ asLong i,
+     ArgKeyword "device_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
      ArgKeyword "is_blocking" $ Bool True]
   return $ Index val' $ IdxExp $ Integer 0
 

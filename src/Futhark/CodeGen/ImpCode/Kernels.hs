@@ -85,7 +85,7 @@ getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
         sameKernel _ _ = False
 
 -- | Get an atomic operator corresponding to a binary operator.
-atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Bytes -> Exp -> AtomicOp)
+atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Elements -> Exp -> AtomicOp)
 atomicBinOp = flip lookup [ (Add Int32, AtomicAdd)
                           , (SMax Int32, AtomicSMax)
                           , (SMin Int32, AtomicSMin)
@@ -158,16 +158,16 @@ data KernelOp = GetGroupId VName Int
 
 -- Atomic operations return the value stored before the update.
 -- This value is stored in the first VName.
-data AtomicOp = AtomicAdd VName VName (Count Bytes) Exp
-              | AtomicSMax VName VName (Count Bytes) Exp
-              | AtomicSMin VName VName (Count Bytes) Exp
-              | AtomicUMax VName VName (Count Bytes) Exp
-              | AtomicUMin VName VName (Count Bytes) Exp
-              | AtomicAnd VName VName (Count Bytes) Exp
-              | AtomicOr VName VName (Count Bytes) Exp
-              | AtomicXor VName VName (Count Bytes) Exp
-              | AtomicCmpXchg VName VName (Count Bytes) Exp Exp
-              | AtomicXchg VName VName (Count Bytes) Exp
+data AtomicOp = AtomicAdd VName VName (Count Elements) Exp
+              | AtomicSMax VName VName (Count Elements) Exp
+              | AtomicSMin VName VName (Count Elements) Exp
+              | AtomicUMax VName VName (Count Elements) Exp
+              | AtomicUMin VName VName (Count Elements) Exp
+              | AtomicAnd VName VName (Count Elements) Exp
+              | AtomicOr VName VName (Count Elements) Exp
+              | AtomicXor VName VName (Count Elements) Exp
+              | AtomicCmpXchg VName VName (Count Elements) Exp Exp
+              | AtomicXchg VName VName (Count Elements) Exp
               deriving (Show)
 
 instance FreeIn AtomicOp where

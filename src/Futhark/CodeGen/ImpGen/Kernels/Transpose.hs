@@ -80,8 +80,8 @@ mapTranspose block_dim args t kind =
       , dec index_out $ v32 x_index * height + v32 y_index
 
       , If (v32 get_global_id_0 .<. input_size)
-        (Write odata (bytes $ (v32 odata_offset + v32 index_out) * tsize) t (Space "global") Nonvolatile $
-         index idata (bytes $ (v32 idata_offset + v32 index_in) * tsize) t (Space "global") Nonvolatile)
+        (Write odata (elements $ v32 odata_offset + v32 index_out) t (Space "global") Nonvolatile $
+         index idata (elements $ v32 idata_offset + v32 index_in) t (Space "global") Nonvolatile)
         mempty
       ]
 
@@ -113,10 +113,10 @@ mapTranspose block_dim args t kind =
         in mconcat [ dec index_in $ (v32 y_index + i) * width + v32 x_index
                    , when (v32 y_index + i .<. height .&&.
                            v32 index_in .<. input_size) $
-                     Write block (bytes $ ((v32 get_local_id_1 + i) * (tile_dim+1)
-                                           + v32 get_local_id_0) * tsize)
+                     Write block (elements $ (v32 get_local_id_1 + i) * (tile_dim+1)
+                                             + v32 get_local_id_0)
                      t (Space "local") Nonvolatile $
-                     index idata (bytes $ (v32 idata_offset + v32 index_in) * tsize)
+                     index idata (elements $ v32 idata_offset + v32 index_in)
                      t (Space "global") Nonvolatile]
       , Op LocalBarrier
       , SetScalar x_index $ v32 get_group_id_1 * tile_dim + v32 get_local_id_0
@@ -127,17 +127,16 @@ mapTranspose block_dim args t kind =
         in mconcat [ dec index_out $ (v32 y_index + i) * height + v32 x_index
                    , when (v32 y_index + i .<. width .&&.
                            v32 index_out .<. output_size) $
-                     Write odata (bytes $ (v32 odata_offset + v32 index_out) * tsize)
+                     Write odata (elements $ v32 odata_offset + v32 index_out)
                      t (Space "global") Nonvolatile $
-                     index block (bytes $ (v32 get_local_id_0 * (tile_dim+1)
-                                           +v32 get_local_id_1+i)*tsize)
+                     index block (elements $ v32 get_local_id_0 * (tile_dim+1)
+                                             + v32 get_local_id_1+i)
                      t (Space "local") Nonvolatile
                    ]
       ]
 
   where dec v e = DeclareScalar v int32 <> SetScalar v e
         v32 = flip var int32
-        tsize = LeafExp (SizeOf t) int32
         tile_dim = 2 * block_dim
 
         when a b = If a b mempty
@@ -198,19 +197,18 @@ mapTranspose block_dim args t kind =
           , dec y_index y_in_index
           , dec index_in $ v32 y_index * width + v32 x_index
           , when (v32 x_index .<. width .&&. v32 y_index .<. height .&&. v32 index_in .<. input_size) $
-            Write block (bytes $ (v32 get_local_id_1 * (block_dim+1) + v32 get_local_id_0) * tsize)
+            Write block (elements $ v32 get_local_id_1 * (block_dim+1) + v32 get_local_id_0)
             t (Space "local") Nonvolatile $
-            index idata (bytes $ (v32 idata_offset + v32 index_in) * tsize)
+            index idata (elements $ v32 idata_offset + v32 index_in)
             t (Space "global") Nonvolatile
           , Op LocalBarrier
           , SetScalar x_index x_out_index
           , SetScalar y_index y_out_index
           , dec index_out $ v32 y_index * height + v32 x_index
           , when (v32 x_index .<. height .&&. v32 y_index .<. width .&&. v32 index_out .<. output_size) $
-            Write odata (bytes $ (v32 odata_offset + v32 index_out) * tsize)
+            Write odata (elements $ v32 odata_offset + v32 index_out)
             t (Space "global") Nonvolatile $
-            index block (bytes $ (v32 get_local_id_0 * (block_dim+1)
-                                   +v32 get_local_id_1)*tsize)
+            index block (elements $ v32 get_local_id_0 * (block_dim+1) + v32 get_local_id_1)
             t (Space "local") Nonvolatile
           ]
 

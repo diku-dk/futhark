@@ -167,7 +167,7 @@ writeOpenCLScalar mem i t "device" _ val = do
   GC.stm [C.cstm|{$item:decl
                   OPENCL_SUCCEED_OR_RETURN(
                     clEnqueueWriteBuffer(ctx->opencl.queue, $exp:mem, $exp:blocking,
-                                         $exp:i, sizeof($ty:t),
+                                         $exp:i * sizeof($ty:t), sizeof($ty:t),
                                          &$id:val',
                                          0, NULL, NULL));
                 }|]
@@ -180,7 +180,7 @@ readOpenCLScalar mem i t "device" _ = do
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(
                    clEnqueueReadBuffer(ctx->opencl.queue, $exp:mem, CL_TRUE,
-                                       $exp:i, sizeof($ty:t),
+                                       $exp:i * sizeof($ty:t), sizeof($ty:t),
                                        &$id:val,
                                        0, NULL, NULL));
               |]
