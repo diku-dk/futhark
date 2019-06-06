@@ -611,7 +611,8 @@ simplifyIndexing vtable seType idd inds consuming =
 
       | Just inds' <- sliceIndices inds,
         Just (e, cs) <- ST.index idd inds' vtable,
-        worthInlining e ->
+        worthInlining e,
+        all (`ST.elem` vtable) (unCertificates cs) ->
         Just $ SubExpResult cs <$> (letSubExp "index_primexp" =<< toExp e)
 
     Nothing -> Nothing
