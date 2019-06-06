@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_opencl }
+
 type vector = (f64,f64)
 
 let add(v1: vector)(v2: vector): vector =
