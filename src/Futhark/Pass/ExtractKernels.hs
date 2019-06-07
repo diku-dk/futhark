@@ -185,7 +185,6 @@ import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
-import Futhark.Pass.ExtractKernels.Segmented
 import Futhark.Pass.ExtractKernels.Interchange
 import Futhark.Pass.ExtractKernels.Intragroup
 import Futhark.Util
@@ -317,24 +316,18 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
       types <- asksScope scopeForSOACs
       transformStms path =<< (stmsToList . snd <$> runBinderT (certifying cs do_iswim) types)
 
-  | Just (scan_lam, scan_nes) <- isScanSOAC form,
-    ScremaForm _ _ map_lam <- form =
-      doScan (scan_lam, scan_nes) (mempty, nilFn, mempty) map_lam
-
-  | ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam <- form,
-    not $ null scan_nes, all primType $ lambdaReturnType scan_lam,
-    not $ lambdaContainsParallelism map_lam =
-      doScan (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam
-
-  where doScan (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam = do
-          scan_lam_sequential <- Kernelise.transformLambda scan_lam
-          red_lam_sequential <- Kernelise.transformLambda red_lam
-          map_lam_sequential <- Kernelise.transformLambda map_lam
-          runBinder_ $ certifying cs $
-            blockedScan res_pat w
-            (scan_lam_sequential, scan_nes)
-            (comm, red_lam_sequential, red_nes)
-            map_lam_sequential (intConst Int32 16) [] [] arrs
+  -- We are only willing to generate code for scanomaps that do not
+  -- involve array accumulators, and do not have parallelism in their
+  -- map function.  Such cases will fall through to the
+  -- screma-splitting case, and produce an ordinary map and scan.
+  -- Hopefully, the scan then triggers the ISWIM case above (otherwise
+  -- we will still crash in code generation).
+  | Just (scan_lam, nes, map_lam) <- isScanomapSOAC form,
+    all primType $ lambdaReturnType scan_lam,
+    not $ lambdaContainsParallelism map_lam = do
+      scan_lam_sequential <- Kernelise.transformLambda scan_lam
+      map_lam_sequential <- Kernelise.transformLambda map_lam
+      segScan res_pat w w scan_lam_sequential map_lam_sequential nes arrs [] []
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just (comm, red_fun, nes) <- isReduceSOAC form,
@@ -420,23 +413,23 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
           let (red_pat_elems, concat_pat_elems) =
                 splitAt (length nes) $ patternValueElements pat
               red_pat = Pattern [] red_pat_elems
-              concat_pat = Pattern [] concat_pat_elems
 
-          (map_bnd, map_misc_bnds) <- blockedMap concat_pat w InOrder fold_fun_sequential nes arrs
-          let num_threads = arraysSize 0 $ patternTypes $ stmPattern map_bnd
+          ((num_threads, red_results), stms) <-
+            streamMap (map (baseString . patElemName) red_pat_elems) concat_pat_elems w
+            Noncommutative fold_fun_sequential nes arrs
 
           reduce_soac <- reduceSOAC comm' red_fun nes
 
-          ((map_misc_bnds<>oneStm map_bnd)<>) <$>
-            inScopeOf (map_misc_bnds<>oneStm map_bnd)
+          (stms<>) <$>
+            inScopeOf stms
             (transformStm path' $ Let red_pat aux $
-             Op (Screma num_threads reduce_soac $ patternNames $ stmPattern map_bnd))
+             Op (Screma num_threads reduce_soac red_results))
 
       | otherwise = do
           red_fun_sequential <- Kernelise.transformLambda red_fun
           fold_fun_sequential <- Kernelise.transformLambda fold_fun
           fmap (certify cs) <$>
-            blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential [] nes arrs
+            streamRed pat w comm' red_fun_sequential fold_fun_sequential nes arrs
 
     outerParallelBody path' =
       renameBody =<<
@@ -455,7 +448,7 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
           | otherwise                               = comm
 
 transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs))) = do
-  -- This with-loop is too complicated for us to immediately do
+  -- This screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
   transformStms path . map (certify cs) . stmsToList . snd =<<
@@ -871,7 +864,10 @@ distributeInnerMap maploop@(MapLoop pat cs w lam arrs) acc
       -- decide whether to just sequentialise, or exploit inner
       -- parallelism.
       let map_nesting = MapNesting pat cs w $ zip (lambdaParams lam) arrs
-          lam_res' = rearrangeShape perm lam_res
+          -- Normally the permutation is for the output pattern, but
+          -- we can't really change that, so we change the result
+          -- order instead.
+          lam_res' = rearrangeShape (rearrangeInverse perm) lam_res
           nest' = pushInnerKernelNesting (pat, lam_res') map_nesting nest
           extra_scope = targetsScope $ kernelTargets acc'
 
@@ -890,7 +886,7 @@ distributeInnerMap maploop@(MapLoop pat cs w lam arrs) acc
           localScope (scopeOfLParams (lambdaParams lam)) $ runBinder_ $
           Kernelise.transformStms lam_bnds
         let kbody = KernelBody () sequentialised_map_body $
-                    map (ThreadsReturn ThreadsInSpace) lam_res'
+                    map ThreadsReturn lam_res'
         constructKernel nest' kbody
 
       let outer_pat = loopNestingPattern $ fst nest
@@ -914,7 +910,7 @@ leavingNesting (MapLoop _ cs w lam arrs) acc =
      if null $ kernelStms acc'
        then return acc'
        else do let kbody = Body () (kernelStms acc') res
-                   used_in_body = freeInBody kbody
+                   used_in_body = freeIn kbody
                    (used_params, used_arrs) =
                      unzip $
                      filter ((`S.member` used_in_body) . paramName . fst) $
@@ -1173,8 +1169,8 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d x xs w))) acc =
       addStmToKernel stm acc
 
   where segmentedConcat nest =
-          isSegmentedOp nest [0] w [] mempty mempty [] (x:xs) $
-          \pat _ _ _ _ _ _ (x':xs') _ ->
+          isSegmentedOp nest [0] w mempty mempty [] (x:xs) $
+          \pat _ _ _ _ (x':xs') _ ->
             let d' = d + length (snd nest) + 1
             in addStm $ Let pat aux $ BasicOp $ Concat d' x' xs' w
 
@@ -1191,7 +1187,7 @@ distributeSingleUnaryStm acc bnd f =
       | res == map Var (patternNames $ stmPattern bnd),
         (outer, inners) <- nest,
         [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
-        boundInKernelNest nest `S.intersection` freeInStm bnd
+        boundInKernelNest nest `S.intersection` freeIn bnd
         == S.singleton (paramName arr_p) -> do
           addKernels kernels
           let outerpat = loopNestingPattern $ fst nest
@@ -1278,7 +1274,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   -- good enough for flatKernel to work.
   let nest' = pushInnerKernelNesting (scatter_pat, bodyResult $ lambdaBody lam)
               (MapNesting scatter_pat cs scatter_w $ zip (lambdaParams lam) ivs) nest
-  (nest_bnds, w, ispace, kernel_inps, _rets) <- flatKernel nest'
+  (nest_bnds, w, ispace, kernel_inps) <- flatKernel nest'
 
   let (as_ws, as_ns, as) = unzip3 dests
 
@@ -1327,7 +1323,7 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
   -- We replicate some of the checking done by 'isSegmentedOp', but
   -- things are different because a GenReduce is not a reduction or
   -- scan.
-  (nest_stms, _, ispace, inputs, _rets) <- flatKernel nest
+  (nest_stms, _, ispace, inputs) <- flatKernel nest
   let orig_pat = Pattern [] $ rearrangeShape perm $
                  patternValueElements $ loopNestingPattern $ fst nest
 
@@ -1350,17 +1346,27 @@ genReduceKernel :: Pattern -> [(VName, SubExp)] -> [KernelInput]
                 -> Certificates -> SubExp -> [SOAC.GenReduceOp SOACS]
                 -> InKernelLambda -> [VName]
                 -> DistribM KernelsStms
-genReduceKernel orig_pat ispace inputs cs genred_w ops lam arrs = do
-  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) -> do
-    let (shape, op') = isVectorMap op
-    Out.GenReduceOp num_bins dests nes shape <$> Kernelise.transformLambda op'
+genReduceKernel orig_pat ispace inputs cs genred_w ops lam arrs = runBinder_ $ do
+  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) ->
+    -- FIXME? We are assuming that the accumulator is a replicate, and
+    -- we fish out its value in a gross way.
+    case mapM subExpVar nes of
+      Just ne_vs' -> do
+        let (shape, op') = isVectorMap op
+        nes' <- forM ne_vs' $ \ne_v -> do
+          ne_v_t <- lookupType ne_v
+          letSubExp "genred_ne" $
+            BasicOp $ Index ne_v $ fullSlice ne_v_t $
+            replicate (shapeRank shape) $ DimFix $ intConst Int32 0
+        Out.GenReduceOp num_bins dests nes' shape <$> Kernelise.transformLambda op'
+      Nothing ->
+        Out.GenReduceOp num_bins dests nes mempty <$> Kernelise.transformLambda op
 
   let isDest = flip elem $ concatMap Out.genReduceDest ops'
       inputs' = filter (not . isDest . kernelInputArray) inputs
 
-  k_stms <- blockedGenReduce orig_pat genred_w ispace inputs' ops' lam arrs
-
-  return $ certify cs <$> k_stms
+  certifying cs $
+    addStms =<< segGenRed orig_pat genred_w ispace inputs' ops' lam arrs
 
 isVectorMap :: Lambda -> (Shape, Lambda)
 isVectorMap lam
@@ -1380,17 +1386,9 @@ segmentedScanomapKernel :: KernelNest
                         -> [SubExp] -> [VName]
                         -> KernelM (Maybe KernelsStms)
 segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs =
-  isSegmentedOp nest perm segment_size
-  (lambdaReturnType map_lam) (freeInLambda lam) (freeInLambda map_lam) nes arrs $
-  \pat flat_pat _num_segments total_num_elements ispace inps nes' _ arrs' -> do
-    regularSegmentedScan segment_size flat_pat total_num_elements
-      lam map_lam ispace inps nes' arrs'
-
-    forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
-      \(dst_pat_elem, flat) -> do
-        let ident = patElemIdent dst_pat_elem
-            dims = arrayDims $ identType ident
-        addStm $ mkLet [] [ident] $ BasicOp $ Reshape (map DimNew dims) flat
+  isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
+  \pat total_num_elements ispace inps nes' _ _ ->
+    addStms =<< segScan pat total_num_elements segment_size lam map_lam nes' arrs ispace inps
 
 regularSegmentedRedomapKernel :: KernelNest
                               -> [Int]
@@ -1398,27 +1396,23 @@ regularSegmentedRedomapKernel :: KernelNest
                               -> InKernelLambda -> InKernelLambda -> [SubExp] -> [VName]
                               -> KernelM (Maybe KernelsStms)
 regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
-  isSegmentedOp nest perm segment_size
-    (lambdaReturnType map_lam) (freeInLambda lam) (freeInLambda map_lam) nes arrs $
-    \pat _flat_pat _num_segments total_num_elements ispace inps nes' _ _ ->
+  isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
+    \pat total_num_elements ispace inps nes' _ _ ->
       addStms =<< segRed pat total_num_elements segment_size comm lam map_lam nes' arrs ispace inps
 
 isSegmentedOp :: KernelNest
               -> [Int]
               -> SubExp
-              -> [Type]
               -> Names -> Names
               -> [SubExp] -> [VName]
               -> (Pattern
-                  -> Pattern
-                  -> SubExp
                   -> SubExp
                   -> [(VName, SubExp)]
                   -> [KernelInput]
                   -> [SubExp] -> [VName]  -> [VName]
                   -> Binder Out.Kernels ())
               -> KernelM (Maybe KernelsStms)
-isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
+isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
   -- We must verify that array inputs to the operation are inputs to
   -- the outermost loop nesting or free in the loop nest.  Nothing
   -- free in the op may be bound by the nest.  Furthermore, the
@@ -1429,7 +1423,7 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
 
   let bound_by_nest = boundInKernelNest nest
 
-  (pre_bnds, nesting_size, ispace, kernel_inps, _rets) <- flatKernel nest
+  (pre_bnds, nesting_size, ispace, kernel_inps) <- flatKernel nest
 
   unless (S.null $ free_in_op `S.intersection` bound_by_nest) $
     fail "Non-fold lambda uses nest-bound parameters."
@@ -1483,13 +1477,8 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
 
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
-        flatPatElem pat_elem t = do
-          let t' = arrayOfRow t total_num_elements
-          name <- newVName $ baseString (patElemName pat_elem) ++ "_flat"
-          return $ PatElem name t'
-    flat_pat <- Pattern [] <$> zipWithM flatPatElem (patternValueElements pat) ret
 
-    m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' nested_arrs arrs'
+    m pat total_num_elements ispace kernel_inps nes' nested_arrs arrs'
 
   where replicateMissing ispace inp = do
           t <- lookupType $ kernelInputArray inp

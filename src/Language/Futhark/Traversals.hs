@@ -86,21 +86,20 @@ instance ASTMappable (ExpBase Info VName) where
     Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*>
     pure d <*> (Info <$> mapOnPatternType tv t) <*>
     pure loc
-  astMap tv (LetPat tparams pat e body loc) =
-    LetPat <$> mapM (astMap tv) tparams <*>
-    astMap tv pat <*> mapOnExp tv e <*>
-    mapOnExp tv body <*> pure loc
+  astMap tv (LetPat pat e body t loc) =
+    LetPat <$> astMap tv pat <*> mapOnExp tv e <*>
+    mapOnExp tv body <*> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (LetFun name (fparams, params, ret, t, e) body loc) =
     LetFun <$> mapOnName tv name <*>
     ((,,,,) <$> mapM (astMap tv) fparams <*> mapM (astMap tv) params <*>
      traverse (astMap tv) ret <*> traverse (mapOnStructType tv) t <*>
      mapOnExp tv e) <*>
     mapOnExp tv body <*> pure loc
-  astMap tv (LetWith dest src idxexps vexp body loc) =
+  astMap tv (LetWith dest src idxexps vexp body t loc) =
     pure LetWith <*>
          astMap tv dest <*> astMap tv src <*>
          mapM (astMap tv) idxexps <*> mapOnExp tv vexp <*>
-         mapOnExp tv body <*> pure loc
+         mapOnExp tv body <*> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Update src slice v loc) =
     Update <$> mapOnExp tv src <*> mapM (astMap tv) slice <*>
     mapOnExp tv v <*> pure loc
@@ -119,8 +118,8 @@ instance ASTMappable (ExpBase Info VName) where
     Unsafe <$> mapOnExp tv e <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
     Assert <$> mapOnExp tv e1 <*> mapOnExp tv e2 <*> pure desc <*> pure loc
-  astMap tv (Lambda tparams params body ret t loc) =
-    Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
+  astMap tv (Lambda params body ret t loc) =
+    Lambda <$> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*>
     traverse (traverse $ mapOnStructType tv) t <*> pure loc
   astMap tv (OpSection name t loc) =
@@ -143,8 +142,8 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (IndexSection idxs t loc) =
     IndexSection <$> mapM (astMap tv) idxs <*>
     traverse (mapOnPatternType tv) t <*> pure loc
-  astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =
-    DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
+  astMap tv (DoLoop mergepat mergeexp form loopbody loc) =
+    DoLoop <$> astMap tv mergepat <*>
     mapOnExp tv mergeexp <*> astMap tv form <*>
     mapOnExp tv loopbody <*> pure loc
   astMap tv (VConstr0 name t loc) =

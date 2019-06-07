@@ -33,6 +33,7 @@ module Futhark.CodeGen.ImpCode
   , HuskFunction (..)
   , hfunctionParams
   , var
+  , vi32
   , index
   , ErrorMsg(..)
   , ErrorMsgPart(..)
@@ -74,7 +75,6 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
 import Futhark.Analysis.PrimExp
-import Futhark.Transform.Substitute
 import Futhark.Util.Pretty hiding (space)
 
 data Size = ConstSize Int64
@@ -108,7 +108,7 @@ data Signedness = TypeUnsigned
                 deriving (Eq, Show)
 
 -- | A description of an externally meaningful value.
-data ValueDesc = ArrayValue VName MemSize Space PrimType Signedness [DimSize]
+data ValueDesc = ArrayValue VName Space PrimType Signedness [DimSize]
                -- ^ An array with memory block, memory block size,
                -- memory space, element type, signedness of element
                -- type (if applicable), and shape.
@@ -203,12 +203,13 @@ data Code a = Skip
               -- ^ Has the same semantics as the contained code, but
               -- the comment should show up in generated code for ease
               -- of inspection.
-            | DebugPrint String PrimType Exp
+            | DebugPrint String (Maybe (PrimType, Exp))
               -- ^ Print the given value (of the given type) to the
               -- screen, somehow annotated with the given string as a
-              -- description.  This has no semantic meaning, but is
-              -- used entirely for debugging.  Code generators are
-              -- free to ignore this statement.
+              -- description.  If no type/value pair, just print the
+              -- string.  This has no semantic meaning, but is used
+              -- entirely for debugging.  Code generators are free to
+              -- ignore this statement.
             | Op a
             deriving (Show)
 
@@ -271,6 +272,10 @@ sizeToExp (ConstSize x) = ValueExp $ IntValue $ Int32Value $ fromIntegral x
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
 
+-- | Turn a 'VName' into a 'int32' 'Imp.ScalarVar'.
+vi32 :: VName -> Exp
+vi32 = flip var $ IntType Int32
+
 index :: VName -> Count Bytes -> PrimType -> Space -> Volatility -> Exp
 index arr i t s vol = LeafExp (Index arr i t s vol) t
 
@@ -305,8 +310,8 @@ instance Pretty ValueDesc where
     ppr t <+> ppr name <> ept'
     where ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
-  ppr (ArrayValue mem memsize space et ept shape) =
-    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> parens (ppr memsize) <> space' <+> ept'
+  ppr (ArrayValue mem space et ept shape) =
+    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> space' <+> ept'
     where f e s = brackets $ s <> comma <> ppr e
           ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
@@ -387,8 +392,10 @@ instance Pretty op => Pretty (Code op) where
     ppr fname <> parens (commasep $ map ppr args)
   ppr (Comment s code) =
     text "--" <+> text s </> ppr code
-  ppr (DebugPrint desc pt e) =
+  ppr (DebugPrint desc (Just (pt, e))) =
     text "debug" <+> parens (commasep [text (show desc), ppr pt, ppr e])
+  ppr (DebugPrint desc Nothing) =
+    text "debug" <+> parens (text (show desc))
 
 instance Pretty Arg where
   ppr (MemArg m) = ppr m
@@ -473,8 +480,8 @@ instance Traversable Code where
     pure $ Call dests fname args
   traverse f (Comment s code) =
     Comment s <$> traverse f code
-  traverse _ (DebugPrint s t e) =
-    pure $ DebugPrint s t e
+  traverse _ (DebugPrint s v) =
+    pure $ DebugPrint s v
 
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = S.singleton name
@@ -526,8 +533,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn op
   freeIn (Comment _ code) =
     freeIn code
-  freeIn (DebugPrint _ _ e) =
-    freeIn e
+  freeIn (DebugPrint _ v) =
+    maybe mempty (freeIn . snd) v
 
 instance FreeIn ExpLeaf where
   freeIn (Index v e _ _ _) = freeIn v <> freeIn e
@@ -541,51 +548,3 @@ instance FreeIn Arg where
 instance FreeIn Size where
   freeIn (VarSize name) = S.singleton name
   freeIn (ConstSize _) = mempty
-
-instance Substitute a => Substitute (Code a) where
-  substituteNames _ Skip = Skip
-  substituteNames m (x :>>: y) =
-    substituteNames m x :>>: substituteNames m y
-  substituteNames m (For i it limit body) =
-    For (substituteNames m i) it (substituteNames m limit) (substituteNames m body)
-  substituteNames m (While cond body) =
-    While (substituteNames m cond) (substituteNames m body)
-  substituteNames m (DeclareMem name space) =
-    DeclareMem (substituteNames m name) space
-  substituteNames m (DeclareScalar name t) =
-    DeclareScalar (substituteNames m name) t
-  substituteNames m (DeclareArray name space t vs) =
-    DeclareArray (substituteNames m name) space t vs
-  substituteNames m (Allocate name size s) =
-    Allocate (substituteNames m name) size s
-  substituteNames m (Free name space) =
-    Free (substituteNames m name) space
-  substituteNames m (Copy dest destoffset destspace src srcoffset srcspace size) =
-    Copy (substituteNames m dest) destoffset destspace (substituteNames m src) srcoffset srcspace size
-  substituteNames m (PeerCopy dest destoffset destpeer destspace src srcoffset srcpeer srcspace size) =
-    PeerCopy (substituteNames m dest) destoffset destpeer destspace (substituteNames m src) srcoffset srcpeer srcspace size
-  substituteNames m (SetMem dest from space) =
-    SetMem (substituteNames m dest) (substituteNames m from) space
-  substituteNames m (Write name i bt space vol val) =
-    Write (substituteNames m name) i bt space vol (substituteNames m val)
-  substituteNames m (SetScalar x y) =
-    SetScalar (substituteNames m x) (substituteNames m y)
-  substituteNames m (Call dests fname args) =
-    Call (substituteNames m dests) fname args
-  substituteNames m (If cond t f) =
-    If (substituteNames m cond) (substituteNames m t) (substituteNames m f)
-  substituteNames m (Assert e msg loc) =
-    Assert (substituteNames m e) msg loc
-  substituteNames m (Op op) =
-    Op $ substituteNames m op
-  substituteNames m (Comment cmt code) =
-    Comment cmt $ substituteNames m code
-  substituteNames m (DebugPrint s t e) =
-    DebugPrint s t $ substituteNames m e
-    
-instance Substitute ExpLeaf where
-  substituteNames m (ScalarVar name) =
-    ScalarVar $ substituteNames m name
-  substituteNames m (Index name bt t space vol) =
-    Index (substituteNames m name) bt t space vol
-  substituteNames _ e = e

@@ -83,6 +83,15 @@ simplifyKernelOp mk_ops env (HostOp (Kernel desc space ts kbody)) = do
         scope_vtable = ST.fromScope scope
         bound_here = S.fromList $ M.keys scope
 
+simplifyKernelOp mk_ops env (HostOp (SegMap space ts body)) = do
+  space' <- Engine.simplify space
+  ts' <- mapM Engine.simplify ts
+
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env body
+
+  return (HostOp $ SegMap space' ts' body',
+          body_hoisted)
+
 simplifyKernelOp mk_ops env (HostOp (SegRed space comm red_op nes ts body)) = do
   space' <- Engine.simplify space
   nes' <- mapM Engine.simplify nes
@@ -95,10 +104,31 @@ simplifyKernelOp mk_ops env (HostOp (SegRed space comm red_op nes ts body)) = do
     Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
   red_op_hoisted' <- mapM processHoistedStm red_op_hoisted
 
-  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env body
 
   return (HostOp $ SegRed space' comm red_op' nes' ts' body',
           red_op_hoisted' <> body_hoisted)
+
+  where scope_vtable = ST.fromScope scope
+        scope = scopeOfKernelSpace space
+
+simplifyKernelOp mk_ops env (HostOp (SegScan space scan_op nes ts body)) = do
+  outer_vtable <- Engine.askVtable
+  space' <- Engine.simplify space
+
+  (scan_op', scan_op_hoisted) <-
+    Engine.subSimpleM (mk_ops space) env outer_vtable $
+    Engine.localVtable (<>scope_vtable) $
+    Engine.simplifyLambda scan_op $ replicate (length nes * 2) Nothing
+  scan_op_hoisted' <- mapM processHoistedStm scan_op_hoisted
+
+  nes' <- mapM Engine.simplify nes
+  ts' <- mapM Engine.simplify ts
+
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env body
+
+  return (HostOp $ SegScan space' scan_op' nes' ts' body',
+          scan_op_hoisted' <> body_hoisted)
 
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
@@ -125,7 +155,7 @@ simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
 
   red_op_hoisted' <- mapM processHoistedStm $ mconcat ops_hoisted
 
-  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env ts body
+  (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env body
 
   return (HostOp $ SegGenRed space' ops' ts' body',
           red_op_hoisted' <> body_hoisted)
@@ -169,9 +199,9 @@ hoistFromBody :: (Engine.SimplifiableLore lore,
                   RetType lore ~ RetType outerlore,
                   BranchType lore ~ BranchType outerlore) =>
                  KernelSpace -> Simplify.SimpleOps lore -> Engine.Env lore
-              -> [Type] -> Body lore
-              -> Engine.SimpleM outerlore (Body (Wise lore), Stms (Wise outerlore))
-hoistFromBody kspace ops env ts body = do
+              -> KernelBody lore
+              -> Engine.SimpleM outerlore (KernelBody (Wise lore), Stms (Wise outerlore))
+hoistFromBody kspace ops env kbody = do
   outer_vtable <- Engine.askVtable
 
   ((body_stms, body_res), body_hoisted) <-
@@ -182,11 +212,11 @@ hoistFromBody kspace ops env ts body = do
                         `Engine.orIf` Engine.isOp
                         `Engine.orIf` par_blocker
                         `Engine.orIf` Engine.isConsumed) $
-        Engine.simplifyBody (replicate (length ts) Observe) body
+        simplifyKernelBodyM kbody
 
   body_hoisted' <- mapM processHoistedStm body_hoisted
 
-  return (mkWiseBody () body_stms body_res,
+  return (mkWiseKernelBody () body_stms body_res,
           body_hoisted')
 
   where scope_vtable = ST.fromScope scope
@@ -212,11 +242,7 @@ mkWiseKernelBody :: (Attributes lore, CanBeWise (Op lore)) =>
 mkWiseKernelBody attr bnds res =
   let Body attr' _ _ = mkWiseBody attr bnds res_vs
   in KernelBody attr' bnds res
-  where res_vs = map resValue res
-        resValue (ThreadsReturn _ se) = se
-        resValue (WriteReturn _ arr _) = Var arr
-        resValue (ConcatReturns _ _ _ _ v) = Var v
-        resValue (KernelInPlaceReturn v) = Var v
+  where res_vs = map kernelResultSubExp res
 
 inKernelEnv :: Engine.Env InKernel
 inKernelEnv = Engine.emptyEnv inKernelRules Simplify.noExtraHoistBlockers
@@ -342,11 +368,12 @@ simplifyGroupStreamLambda lam w max_chunk arrs = do
   return (GroupStreamLambda block_size block_offset acc_params' arr_params' body', hoisted)
 
 instance Engine.Simplifiable KernelSpace where
-  simplify (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+  simplify (KernelSpace gtid ltid gid num_threads num_groups group_size virt_groups structure) =
     KernelSpace gtid ltid gid
     <$> Engine.simplify num_threads
     <*> Engine.simplify num_groups
     <*> Engine.simplify group_size
+    <*> Engine.simplify virt_groups
     <*> Engine.simplify structure
 
 instance Engine.Simplifiable (HuskSpace lore) where
@@ -368,8 +395,10 @@ instance Engine.Simplifiable SpaceStructure where
     where (gtids, gdims, ltids, ldims) = unzip4 dims
 
 instance Engine.Simplifiable KernelResult where
-  simplify (ThreadsReturn threads what) =
-    ThreadsReturn <$> Engine.simplify threads <*> Engine.simplify what
+  simplify (GroupsReturn what) =
+    GroupsReturn <$> Engine.simplify what
+  simplify (ThreadsReturn what) =
+    ThreadsReturn <$> Engine.simplify what
   simplify (WriteReturn ws a res) =
     WriteReturn <$> Engine.simplify ws <*> Engine.simplify a <*> Engine.simplify res
   simplify (ConcatReturns o w pte moffset what) =
@@ -379,15 +408,6 @@ instance Engine.Simplifiable KernelResult where
     <*> Engine.simplify pte
     <*> Engine.simplify moffset
     <*> Engine.simplify what
-  simplify (KernelInPlaceReturn what) =
-    KernelInPlaceReturn <$> Engine.simplify what
-
-instance Engine.Simplifiable WhichThreads where
-  simplify AllThreads = pure AllThreads
-  simplify OneResultPerGroup = pure OneResultPerGroup
-  simplify ThreadsInSpace = pure ThreadsInSpace
-  simplify (ThreadsPerGroup limit) =
-    ThreadsPerGroup <$> mapM Engine.simplify limit
 
 instance BinderOps (Wise Kernels) where
   mkExpAttrB = bindableMkExpAttrB
@@ -482,22 +502,14 @@ removeInvariantKernelResults vtable (Pattern [] kpes) attr
   where isInvariant Constant{} = True
         isInvariant (Var v) = isJust $ ST.lookup v vtable
 
-        num_threads = spaceNumThreads space
         space_dims = map snd $ spaceDimensions space
 
-        checkForInvarianceResult (_, pe, ThreadsReturn threads se)
-          | isInvariant se =
-              case threads of
-                AllThreads -> do
-                  letBindNames_ [patElemName pe] $ BasicOp $
-                    Replicate (Shape [num_threads]) se
-                  return False
-                ThreadsInSpace -> do
-                  let rep a d = BasicOp . Replicate (Shape [d]) <$> letSubExp "rep" a
-                  letBindNames_ [patElemName pe] =<<
-                    foldM rep (BasicOp (SubExp se)) (reverse space_dims)
-                  return False
-                _ -> return True
+        checkForInvarianceResult (_, pe, ThreadsReturn se)
+          | isInvariant se = do
+              let rep a d = BasicOp . Replicate (Shape [d]) <$> letSubExp "rep" a
+              letBindNames_ [patElemName pe] =<<
+                foldM rep (BasicOp (SubExp se)) (reverse space_dims)
+              return False
         checkForInvarianceResult _ =
           return True
 removeInvariantKernelResults _ _ _ _ = cannotSimplify
@@ -519,7 +531,7 @@ distributeKernelResults (vtable, used)
   addStm $ Let (Pattern [] kpes') attr $ Op $ HostOp $
     Kernel desc kspace kts' $ mkWiseKernelBody () (stmsFromList $ reverse kstms_rev) kres'
   where
-    free_in_kstms = fold $ fmap freeInStm kstms
+    free_in_kstms = fold $ fmap freeIn kstms
 
     distribute (kpes', kts', kres', kstms_rev) bnd
       | Let (Pattern [] [pe]) _ (BasicOp (Index arr slice)) <- bnd,
@@ -555,7 +567,7 @@ distributeKernelResults (vtable, used)
           | (kpes'', kts'', kres'') <- unzip3 kpes_and_kres ->
               Just (kpe, kpes'', kts'', kres'')
         _ -> Nothing
-      where matches (_, _, kre) = kre == ThreadsReturn ThreadsInSpace (Var $ patElemName pe)
+      where matches (_, _, kre) = kre == ThreadsReturn (Var $ patElemName pe)
 distributeKernelResults _ _ _ _ = cannotSimplify
 
 simplifyKnownIterationStream :: TopDownRuleOp (Wise InKernel)
@@ -591,7 +603,7 @@ removeUnusedStreamInputs _ pat _ (GroupStream w maxchunk lam accs arrs)
       letBind_ pat $ Op $ GroupStream w maxchunk lam' accs arrs'
   where GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
 
-        isUsed = (`S.member` freeInBody body)
+        isUsed = (`S.member` freeIn body)
 removeUnusedStreamInputs _ _ _ _ = cannotSimplify
 
 inKernelRules :: RuleBook (Wise InKernel)

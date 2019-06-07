@@ -76,7 +76,6 @@ module Futhark.Representation.ExplicitMemory
        , sliceInfo
        , lookupMemInfo
        , subExpMemInfo
-       , lookupMemSize
        , lookupArraySummary
        , fullyLinear
        , ixFunMatchesInnerShape
@@ -124,7 +123,6 @@ import Futhark.Optimise.Simplify.Lore
 import Futhark.Representation.Aliases
   (Aliases, removeScopeAliases, removeExpAliases, removePatternAliases)
 import Futhark.Representation.AST.Attributes.Ranges
-import Futhark.Analysis.Usage
 import qualified Futhark.Analysis.SymbolTable as ST
 
 -- | A lore containing explicit memory information.
@@ -157,7 +155,7 @@ instance FreeIn inner => FreeIn (MemOp inner) where
   freeIn (Inner k) = freeIn k
 
 instance TypedOp inner => TypedOp (MemOp inner) where
-  opType (Alloc size space) = pure [Mem size space]
+  opType (Alloc _ space) = pure [Mem space]
   opType (Inner k) = opType k
 
 instance AliasedOp inner => AliasedOp (MemOp inner) where
@@ -212,10 +210,6 @@ instance IsOp inner => IsOp (MemOp inner) where
   cheapOp (Inner k) = cheapOp k
   cheapOp Alloc{} = True
 
-instance UsageInOp inner => UsageInOp (MemOp inner) where
-  usageInOp Alloc {} = mempty
-  usageInOp (Inner k) = usageInOp k
-
 instance CanBeWise inner => CanBeWise (MemOp inner) where
   type OpWithWisdom (MemOp inner) = MemOp (OpWithWisdom inner)
   removeOpWisdom (Alloc size space) = Alloc size space
@@ -252,7 +246,7 @@ type ExtIxFun = IxFun.IxFun (PrimExp (Ext VName))
 -- over uniqueness, dimension, and auxiliary array information.
 data MemInfo d u ret = MemPrim PrimType
                      -- ^ A primitive value.
-                     | MemMem d Space
+                     | MemMem Space
                      -- ^ A memory block.
                      | MemArray PrimType (ShapeBase d) u ret
                      -- ^ The array is stored in the named memory block,
@@ -267,19 +261,17 @@ type MemBound u = MemInfo SubExp u MemBind
 
 instance FixExt ret => DeclExtTyped (MemInfo ExtSize Uniqueness ret) where
   declExtTypeOf (MemPrim pt) = Prim pt
-  declExtTypeOf (MemMem (Free size) space) = Mem size space
-  declExtTypeOf (MemMem Ext{} space) = Mem (intConst Int32 0) space -- XXX
+  declExtTypeOf (MemMem space) = Mem space
   declExtTypeOf (MemArray pt shape u _) = Array pt shape u
 
 instance FixExt ret => ExtTyped (MemInfo ExtSize NoUniqueness ret) where
   extTypeOf (MemPrim pt) = Prim pt
-  extTypeOf (MemMem (Free size) space) = Mem size space
-  extTypeOf (MemMem Ext{} space) = Mem (intConst Int32 0) space -- XXX
+  extTypeOf (MemMem space) = Mem space
   extTypeOf (MemArray pt shape u _) = Array pt shape u
 
 instance FixExt ret => FixExt (MemInfo ExtSize u ret) where
   fixExt _ _ (MemPrim pt) = MemPrim pt
-  fixExt i se (MemMem size space) = MemMem (fixExt i se size) space
+  fixExt _ _ (MemMem space) = MemMem space
   fixExt i se (MemArray pt shape u ret) =
     MemArray pt (fixExt i se shape) u (fixExt i se ret)
 
@@ -288,26 +280,26 @@ instance Typed (MemInfo SubExp Uniqueness ret) where
 
 instance Typed (MemInfo SubExp NoUniqueness ret) where
   typeOf (MemPrim pt) = Prim pt
-  typeOf (MemMem size space) = Mem size space
+  typeOf (MemMem space) = Mem space
   typeOf (MemArray bt shape u _) = Array bt shape u
 
 instance DeclTyped (MemInfo SubExp Uniqueness ret) where
   declTypeOf (MemPrim bt) = Prim bt
-  declTypeOf (MemMem size space) = Mem size space
+  declTypeOf (MemMem space) = Mem space
   declTypeOf (MemArray bt shape u _) = Array bt shape u
 
 instance (FreeIn d, FreeIn ret) => FreeIn (MemInfo d u ret) where
   freeIn (MemArray _ shape _ ret) = freeIn shape <> freeIn ret
-  freeIn (MemMem size _) = freeIn size
-  freeIn (MemPrim _) = mempty
+  freeIn MemMem{} = mempty
+  freeIn MemPrim{} = mempty
 
 instance (Substitute d, Substitute ret) => Substitute (MemInfo d u ret) where
   substituteNames subst (MemArray bt shape u ret) =
     MemArray bt
     (substituteNames subst shape) u
     (substituteNames subst ret)
-  substituteNames substs (MemMem size space) =
-    MemMem (substituteNames substs size) space
+  substituteNames _ (MemMem space) =
+    MemMem space
   substituteNames _ (MemPrim bt) =
     MemPrim bt
 
@@ -331,18 +323,18 @@ instance (Engine.Simplifiable d, Engine.Simplifiable ret) =>
          Engine.Simplifiable (MemInfo d u ret) where
   simplify (MemPrim bt) =
     return $ MemPrim bt
-  simplify (MemMem size space) =
-    MemMem <$> Engine.simplify size <*> pure space
+  simplify (MemMem space) =
+    pure $ MemMem space
   simplify (MemArray bt shape u ret) =
     MemArray bt <$> Engine.simplify shape <*> pure u <*> Engine.simplify ret
 
 instance (PP.Pretty (TypeBase (ShapeBase d) u),
           PP.Pretty d, PP.Pretty u, PP.Pretty ret) => PP.Pretty (MemInfo d u ret) where
   ppr (MemPrim bt) = PP.ppr bt
-  ppr (MemMem s DefaultSpace) =
-    PP.text "mem" <> PP.parens (PP.ppr s)
-  ppr (MemMem s (Space sp)) =
-    PP.text "mem" <> PP.parens (PP.ppr s) <> PP.text "@" <> PP.text sp
+  ppr (MemMem DefaultSpace) =
+    PP.text "mem"
+  ppr (MemMem (Space sp)) =
+    PP.text "mem" <> PP.text "@" <> PP.text sp
   ppr (MemArray bt shape u ret) =
     PP.ppr (Array bt shape u) <> PP.text "@" <> PP.ppr ret
 
@@ -386,9 +378,9 @@ instance FreeIn MemBind where
 data MemReturn = ReturnsInBlock VName ExtIxFun
                  -- ^ The array is located in a memory block that is
                  -- already in scope.
-               | ReturnsNewBlock Space Int ExtSize ExtIxFun
-                 -- ^ The operation returns a new (existential) block,
-                 -- with an existential or known size.
+               | ReturnsNewBlock Space Int ExtIxFun
+                 -- ^ The operation returns a new (existential) memory
+                 -- block.
                deriving (Show)
 
 instance Eq MemReturn where
@@ -403,15 +395,15 @@ instance Rename MemReturn where
 instance Substitute MemReturn where
   substituteNames substs (ReturnsInBlock ident ixfun) =
     ReturnsInBlock (substituteNames substs ident) (substituteNames substs ixfun)
-  substituteNames substs (ReturnsNewBlock space i size ixfun) =
-    ReturnsNewBlock space i (substituteNames substs size) (substituteNames substs ixfun)
+  substituteNames substs (ReturnsNewBlock space i ixfun) =
+    ReturnsNewBlock space i (substituteNames substs ixfun)
 
 instance FixExt MemReturn where
-  fixExt i (Var v) (ReturnsNewBlock _ j _ ixfun)
+  fixExt i (Var v) (ReturnsNewBlock _ j ixfun)
     | j == i = ReturnsInBlock v $ fixExtIxFun i
                (primExpFromSubExp int32 (Var v)) ixfun
-  fixExt i se (ReturnsNewBlock space j size ixfun) =
-    ReturnsNewBlock space j' (fixExt i se size)
+  fixExt i se (ReturnsNewBlock space j ixfun) =
+    ReturnsNewBlock space j'
     (fixExtIxFun i (primExpFromSubExp int32 se) ixfun)
     where j' | i < j     = j-1
              | otherwise = j
@@ -435,9 +427,8 @@ existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
 instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
     PP.parens $ PP.text (pretty v) <> PP.text "->" <> PP.ppr ixfun
-  ppr (ReturnsNewBlock space i size ixfun) =
-    PP.text ("?" ++ show i) <> space' <> PP.parens (PP.ppr size)
-    <> PP.text "->" <> PP.ppr ixfun
+  ppr (ReturnsNewBlock space i ixfun) =
+    PP.text ("?" ++ show i) <> space' <> PP.text "->" <> PP.ppr ixfun
     where space' = case space of DefaultSpace -> mempty
                                  Space s -> PP.text $ "@" ++ s
 
@@ -446,8 +437,8 @@ instance FreeIn MemReturn where
   freeIn _                        = mempty
 
 instance Engine.Simplifiable MemReturn where
-  simplify (ReturnsNewBlock space i size ixfun) =
-    ReturnsNewBlock space i <$> Engine.simplify size <*> simplifyExtIxFun ixfun
+  simplify (ReturnsNewBlock space i ixfun) =
+    ReturnsNewBlock space i <$> simplifyExtIxFun ixfun
   simplify (ReturnsInBlock v ixfun) =
     ReturnsInBlock <$> Engine.simplify v <*> simplifyExtIxFun ixfun
 
@@ -486,16 +477,16 @@ maybeReturns (MemArray bt shape u ret) =
   MemArray bt shape u $ Just ret
 maybeReturns (MemPrim bt) =
   MemPrim bt
-maybeReturns (MemMem size space) =
-  MemMem size space
+maybeReturns (MemMem space) =
+  MemMem space
 
 noUniquenessReturns :: MemInfo d u r -> MemInfo d NoUniqueness r
 noUniquenessReturns (MemArray bt shape _ r) =
   MemArray bt shape NoUniqueness r
 noUniquenessReturns (MemPrim bt) =
   MemPrim bt
-noUniquenessReturns (MemMem size space) =
-  MemMem size space
+noUniquenessReturns (MemMem space) =
+  MemMem space
 
 funReturnsToExpReturns :: FunReturns -> ExpReturns
 funReturnsToExpReturns = noUniquenessReturns . maybeReturns
@@ -619,8 +610,8 @@ matchReturnType rettype res ts = do
 
       checkReturn (MemPrim x) (MemPrim y)
         | x == y = return ()
-      checkReturn (MemMem x _) (MemMem y _) =
-        checkDim x y
+      checkReturn (MemMem x) (MemMem y)
+        | x == y = return ()
       checkReturn (MemArray x_pt x_shape _ x_ret)
                   (MemArray y_pt y_shape _ y_ret)
         | x_pt == y_pt, shapeRank x_shape == shapeRank y_shape = do
@@ -648,7 +639,7 @@ matchReturnType rettype res ts = do
                     "\nixfun of body result: ", pretty y_ixfun',
                     "\nixfun of return type: ", pretty x_ixfun',
                     "\nand context elements: ", pretty ctx_res]
-      checkMemReturn (ReturnsNewBlock x_space x_ext x_mem_size x_ixfun)
+      checkMemReturn (ReturnsNewBlock x_space x_ext x_ixfun)
                      (ArrayIn y_mem y_ixfun) = do
         (x_mem, x_mem_type)  <- fetchCtx x_ext
         let x_ixfun' = substConstsInExtIndFun x_ixfun
@@ -659,14 +650,13 @@ matchReturnType rettype res ts = do
             "\nixfun of return type: ", pretty x_ixfun',
             "\nand context elements: ", pretty ctx_res]
         case x_mem_type of
-          MemMem y_mem_size y_space -> do
+          MemMem y_space -> do
             unless (x_mem == Var y_mem) $
               throwError $ unwords ["Expected memory", pretty x_ext, "=>", pretty x_mem,
                                     "but got", pretty y_mem]
             unless (x_space == y_space) $
               throwError $ unwords ["Expected memory", pretty y_mem, "in space", pretty x_space,
                                     "but actually in space", pretty y_space]
-            checkDim x_mem_size y_mem_size
           t ->
             throwError $ unwords ["Expected memory", pretty x_ext, "=>", pretty x_mem,
                                   "but but has type", pretty t]
@@ -705,8 +695,8 @@ matchPatternToExp pat e = do
                             "\ncannot match pattern type:\n  " ++ prettyTuple val_ts ++
                             "\nwith context elements: " ++ pretty ctx_ids
   where matches _ _ (MemPrim x) (MemPrim y) = x == y
-        matches _ _ (MemMem x_size x_space) (MemMem y_size y_space) =
-          x_size == y_size && x_space == y_space
+        matches _ _ (MemMem x_space) (MemMem y_space) =
+          x_space == y_space
         matches ctxids ctxexts (MemArray x_pt x_shape _ x_ret) (MemArray y_pt y_shape _ y_ret) =
           x_pt == y_pt && x_shape == y_shape &&
           case (x_ret, y_ret) of
@@ -715,16 +705,15 @@ matchPatternToExp pat e = do
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
               in  x_mem == y_mem && x_ixfun' == y_ixfun'
             (ReturnsInBlock _ x_ixfun,
-             Just (ReturnsNewBlock _ _ _ y_ixfun)) ->
+             Just (ReturnsNewBlock _ _ y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
               in  x_ixfun' == y_ixfun'
-            (ReturnsNewBlock x_space x_i x_size x_ixfun,
-             Just (ReturnsNewBlock y_space y_i y_size y_ixfun)) ->
+            (ReturnsNewBlock x_space x_i x_ixfun,
+             Just (ReturnsNewBlock y_space y_i y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun  ctxids x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_space == y_space && x_i == y_i &&
-                  x_size == y_size && x_ixfun' == y_ixfun'
+              in  x_space == y_space && x_i == y_i && x_ixfun' == y_ixfun'
             (_, Nothing) -> True
             _ -> False
         matches _ _ _ _ = False
@@ -767,19 +756,11 @@ lookupArraySummary name = do
     _ ->
       fail $ "Variable " ++ pretty name ++ " does not look like an array."
 
-lookupMemSize :: (HasScope lore m, Monad m) =>
-                 VName -> m SubExp
-lookupMemSize v = do
-  t <- lookupType v
-  case t of Mem size _ -> return size
-            _ -> fail $ "lookupMemSize: " ++ pretty v ++ " is not a memory block."
-
 checkMemInfo :: TC.Checkable lore =>
                  VName -> MemInfo SubExp u MemBind
              -> TC.TypeM lore ()
 checkMemInfo _ (MemPrim _) = return ()
-checkMemInfo _ (MemMem size _) =
-  TC.require [Prim int64] size
+checkMemInfo _ (MemMem _) = return ()
 checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
   t <- lookupType v
   case t of
@@ -823,12 +804,12 @@ bodyReturnsFromPattern pat =
          (patElemName pe,
           case patElemAttr pe of
             MemPrim pt -> MemPrim pt
-            MemMem size space -> MemMem (ext size) space
+            MemMem space -> MemMem space
             MemArray pt shape u (ArrayIn mem ixfun) ->
               MemArray pt (Shape $ map ext $ shapeDims shape) u $
               case find ((==mem) . patElemName . snd) $ zip [0..] ctx  of
-                Just (i, PatElem _ (MemMem size space)) ->
-                  ReturnsNewBlock space i (ext size) $
+                Just (i, PatElem _ (MemMem space)) ->
+                  ReturnsNewBlock space i $
                   existentialiseIxFun (map patElemName ctx) ixfun
                 _ -> ReturnsInBlock mem $ existentialiseIxFun [] ixfun
          )
@@ -863,13 +844,13 @@ extReturns ts =
     evalState (mapM addAttr ts) 0
     where addAttr (Prim bt) =
             return $ MemPrim bt
-          addAttr (Mem size space) =
-            return $ MemMem (Free size) space
+          addAttr (Mem space) =
+            return $ MemMem space
           addAttr t@(Array bt shape u)
             | existential t = do
-              i <- get <* modify (+2)
+              i <- get <* modify (+1)
               return $ MemArray bt shape u $ Just $
-                ReturnsNewBlock DefaultSpace (i+1) (Ext i) $
+                ReturnsNewBlock DefaultSpace i $
                 IxFun.iota $ map convert $ shapeDims shape
             | otherwise =
               return $ MemArray bt shape u Nothing
@@ -897,8 +878,8 @@ varReturns v = do
     MemArray et shape _ (ArrayIn mem ixfun) ->
       return $ MemArray et (fmap Free shape) NoUniqueness $
                Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun
-    MemMem size space ->
-      return $ MemMem (Free size) space
+    MemMem space ->
+      return $ MemMem space
 
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
@@ -948,7 +929,7 @@ expReturns (BasicOp (Index v slice)) = do
       return [MemArray et (fmap Free shape) u $
               Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun]
     MemPrim pt -> return [MemPrim pt]
-    MemMem d space -> return [MemMem (Free d) space]
+    MemMem space -> return [MemMem space]
 
 expReturns (BasicOp (Update v _ _)) =
   pure <$> varReturns v
@@ -956,18 +937,15 @@ expReturns (BasicOp (Update v _ _)) =
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
 
-expReturns (DoLoop ctx val _ _) =
-  zipWithM typeWithAttr
-  (loopExtType (map (paramIdent . fst) ctx) (map (paramIdent . fst) val)) $ map fst val
+expReturns e@(DoLoop ctx val _ _) = do
+  t <- expExtType e
+  zipWithM typeWithAttr t $ map fst val
     where typeWithAttr t p =
             case (t, paramAttr p) of
               (Array bt shape u, MemArray _ _ _ (ArrayIn mem ixfun))
                 | Just (i, mem_p) <- isMergeVar mem,
-                  Mem mem_size space <- paramType mem_p ->
-                    let ext_size
-                          | Just (j, _) <- isMergeVar =<< subExpVar mem_size = Ext j
-                          | otherwise                                        = Free mem_size
-                    in return $ MemArray bt shape u $ Just $ ReturnsNewBlock space i ext_size ixfun'
+                  Mem space <- paramType mem_p ->
+                    return $ MemArray bt shape u $ Just $ ReturnsNewBlock space i ixfun'
                 | otherwise ->
                   return (MemArray bt shape u $
                           Just $ ReturnsInBlock mem ixfun')
@@ -1008,14 +986,11 @@ class TypedOp (Op lore) => OpReturns lore where
   opReturns op = extReturns <$> opType op
 
 instance OpReturns ExplicitMemory where
-  opReturns (Alloc size space) =
-    return [MemMem (Free size) space]
+  opReturns (Alloc _ space) =
+    return [MemMem space]
   opReturns (Inner (HostOp k@(Kernel _ _ _ body))) =
     zipWithM correct (kernelBodyResult body) =<< (extReturns <$> opType k)
     where correct (WriteReturn _ arr _) _ = varReturns arr
-          correct (KernelInPlaceReturn arr) _ =
-            extendedScope (varReturns arr)
-            (castScope $ scopeOf $ kernelBodyStms body)
           correct _ ret = return ret
   opReturns (Inner (HostOp (SegGenRed _ ops _ _))) =
     concat <$> mapM (mapM varReturns . genReduceDest) ops
@@ -1023,8 +998,8 @@ instance OpReturns ExplicitMemory where
     extReturns <$> opType k
 
 instance OpReturns InKernel where
-  opReturns (Alloc size space) =
-    return [MemMem (Free size) space]
+  opReturns (Alloc _ space) =
+    return [MemMem space]
 
   opReturns (Inner (GroupStream _ _ lam _ _)) =
     forM (groupStreamAccParams lam) $ \param ->
@@ -1034,8 +1009,8 @@ instance OpReturns InKernel where
         MemArray et shape _ (ArrayIn mem ixfun) ->
           return $ MemArray et (Shape $ map Free $ shapeDims shape) NoUniqueness $
           Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun
-        MemMem size space ->
-          return $ MemMem (Free size) space
+        MemMem space ->
+          return $ MemMem space
 
   opReturns (Inner (GroupScan _ _ input)) =
     mapM varReturns arrs
@@ -1078,10 +1053,8 @@ applyFunReturns rets params args
 
         correctDims (MemPrim t) =
           MemPrim t
-        correctDims (MemMem (Free se) space) =
-          MemMem (Free $ substSubExp se) space
-        correctDims (MemMem (Ext d) space) =
-          MemMem (Ext d) space
+        correctDims (MemMem space) =
+          MemMem space
         correctDims (MemArray et shape u memsummary) =
           MemArray et (correctShape shape) u $
           correctSummary memsummary
@@ -1090,8 +1063,8 @@ applyFunReturns rets params args
         correctDim (Ext i)   = Ext i
         correctDim (Free se) = Free $ substSubExp se
 
-        correctSummary (ReturnsNewBlock space i size ixfun) =
-          ReturnsNewBlock space i size ixfun
+        correctSummary (ReturnsNewBlock space i ixfun) =
+          ReturnsNewBlock space i ixfun
         correctSummary (ReturnsInBlock mem ixfun) =
           -- FIXME: we should also do a replacement in ixfun here.
           ReturnsInBlock mem' ixfun

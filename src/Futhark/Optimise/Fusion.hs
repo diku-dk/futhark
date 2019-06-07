@@ -2,7 +2,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE ViewPatterns #-}
 -- | Perform horizontal and vertical fusion of SOACs.
 module Futhark.Optimise.Fusion ( fuseSOACs )
   where
@@ -451,28 +450,23 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                        ++ "kernel name not found in kernels field!")
                           Just ker -> return ker
 
-  -- for each kernel get the index in the bindings where the kernel is located
-  -- and sort based on the index so that partial fusion may succeed.
+  -- For each kernel get the index in the bindings where the kernel is
+  -- located and sort based on the index so that partial fusion may
+  -- succeed.  We use the last position where one of the kernel
+  -- outputs occur.
   let bnd_nms = map (patternNames . stmPattern) rem_bnds
   kernminds <- forM to_fuse_knms $ \ker_nm -> do
     ker <- lookupKernel ker_nm
-    let out_nm  = case fsoac ker of
-                    SOAC.Stream _ frm _ _
-                      | x:_ <- drop (length $ getStreamAccums frm) $ outNames ker ->
-                        x
-                    SOAC.Screma _ (ScremaForm (_, scan_nes) (_, _, red_nes) _) _
-                      | x:_ <- drop (length scan_nes + length red_nes) $ outNames ker ->
-                        x
-                    _ -> head $ outNames ker
-    case L.findIndex (elem out_nm) bnd_nms of
-      Nothing -> return Nothing
-      Just i  -> return $ Just (ker,ker_nm,i)
+    case mapMaybe (\out_nm -> L.findIndex (elem out_nm) bnd_nms) (outNames ker) of
+      [] -> return Nothing
+      is -> return $ Just (ker,ker_nm,maximum is)
 
   scope <- askScope
   let kernminds' = L.sortBy (\(_,_,i1) (_,_,i2)->compare i1 i2) $ catMaybes kernminds
       soac_kernel = newKernel cs soac consumed out_nms scope
+
   -- now try to fuse kernels one by one (in a fold); @ok_ind@ is the index of the
-  -- kernel until which fusion succeded, and @fused_ker@ is the resulted kernel.
+  -- kernel until which fusion succeded, and @fused_ker@ is the resulting kernel.
   (_,ok_ind,_,fused_ker,_) <-
       foldM (\(cur_ok,n,prev_ind,cur_ker,ufus_nms) (ker, _ker_nm, bnd_ind) -> do
                 -- check that we still try fusion and that the intermediate
@@ -497,7 +491,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                       -- check that consumer's lambda body does not use
                                       -- directly the produced arrays (e.g., see noFusion3.fut).
                                       Right conssoac -> return $ S.null $ S.intersection curker_outset $
-                                                                 freeInBody $ lambdaBody $ SOAC.lambda conssoac
+                                                                 freeIn $ lambdaBody $ SOAC.lambda conssoac
                                       Left _         -> return True
 
                 let interm_bnds_ok = cur_ok && consumer_ok && out_transf_ok && cons_no_out_transf &&
@@ -505,7 +499,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                        -- (i) check that the in-between bindings do
                                        --     not use the result of current kernel OR
                                        S.null ( S.intersection curker_outset $
-                                                      freeInExp (stmExp bnd) ) ||
+                                                      freeIn (stmExp bnd) ) ||
                                        --(ii) that the pattern-binding corresponds to
                                        --     the result of the consumer kernel; in the
                                        --     latter case it means it corresponds to a
@@ -556,14 +550,17 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
 ------------------------------------------------------------------------
 
 fusionGatherBody :: FusedRes -> Body -> FusionGM FusedRes
+fusionGatherBody fres (Body _ stms res) =
+  fusionGatherStms fres (stmsToList stms) res
+
+fusionGatherStms :: FusedRes -> [Stm] -> Result -> FusionGM FusedRes
 
 -- Some forms of do-loops can profitably be considered streamSeqs.  We
 -- are careful to ensure that the generated nested loop cannot itself
 -- be considered a stream, to avoid infinite recursion.
-fusionGatherBody fres (Body blore (stmsToList ->
-                                    Let (Pattern [] pes) bndtp
-                                    (DoLoop [] merge (ForLoop i it w loop_vars) body)
-                                    :bnds) res) | not $ null loop_vars = do
+fusionGatherStms fres (Let (Pattern [] pes) bndtp
+                       (DoLoop [] merge (ForLoop i it w loop_vars) body) : bnds) res
+  | not $ null loop_vars = do
   let (merge_params,merge_init) = unzip merge
       (loop_params,loop_arrs) = unzip loop_vars
   chunk_size <- newVName "chunk_size"
@@ -606,10 +603,10 @@ fusionGatherBody fres (Body blore (stmsToList ->
   discard <- newVName "discard"
   let discard_pe = PatElem discard $ Prim int32
 
-  fusionGatherBody fres $ Body blore
-    (oneStm (Let (Pattern [] (pes<>[discard_pe])) bndtp (Op stream))<>stmsFromList bnds) res
+  fusionGatherStms fres
+    (Let (Pattern [] (pes<>[discard_pe])) bndtp (Op stream) : bnds) res
 
-fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
+fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
     Right soac@(SOAC.Scatter _len lam _ivs _as) -> do
@@ -644,32 +641,31 @@ fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
 
     _ | [pe] <- patternValueElements pat,
         Just (src,trns) <- SOAC.transformFromExp (stmCerts bnd) e ->
-          bindingTransform pe src trns $ fusionGatherBody fres body
+          bindingTransform pe src trns $ fusionGatherStms fres bnds res
       | otherwise -> do
           let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
-          bres <- gatherStmPattern pat e $ fusionGatherBody fres body
+          bres <- gatherStmPattern pat e $ fusionGatherStms fres bnds res
           bres' <- checkForUpdates bres e
           foldM fusionGatherExp bres' (e:pat_vars)
 
-  where body = mkBody (stmsFromList bnds) res
-        cs = stmCerts bnd
+  where cs = stmCerts bnd
         rem_bnds = bnd : bnds
         consumed = consumedInExp $ Alias.analyseExp e
 
         reduceLike soac lambdas nes = do
           (used_lam, lres)  <- foldM fusionGatherLam (S.empty, fres) lambdas
-          bres  <- bindingFamily pat $ fusionGatherBody lres body
+          bres  <- bindingFamily pat $ fusionGatherStms lres bnds res
           bres' <- foldM fusionGatherSubExp bres nes
           consumed' <- varsAliases consumed
           greedyFuse rem_bnds used_lam bres' (pat, cs, soac, consumed')
 
         mapLike fres' soac lambda = do
-          bres  <- bindingFamily pat $ fusionGatherBody fres' body
+          bres  <- bindingFamily pat $ fusionGatherStms fres' bnds res
           (used_lam, blres) <- fusionGatherLam (S.empty, bres) lambda
           consumed' <- varsAliases consumed
           greedyFuse rem_bnds used_lam blres (pat, cs, soac, consumed')
 
-fusionGatherBody fres (Body _ _ res) =
+fusionGatherStms fres [] res =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
@@ -715,8 +711,7 @@ fusionGatherExp _ (Op Futhark.Scatter{}) = errorIllegal "write"
 ---- Generic Traversal         ----
 -----------------------------------
 
-fusionGatherExp fres e =
-  addNamesToInfusible fres $ freeInExp e
+fusionGatherExp fres e = addNamesToInfusible fres $ freeIn e
 
 fusionGatherSubExp :: FusedRes -> SubExp -> FusionGM FusedRes
 fusionGatherSubExp fres (Var idd) = addVarToInfusible fres idd

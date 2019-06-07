@@ -1,3 +1,5 @@
+// Start of values.h.
+
 //// Text I/O
 
 typedef int (*writer)(FILE*, void*);
@@ -831,3 +833,5 @@ static int write_scalar(FILE *out, int write_binary, const struct primtype_info_
     return type->write_str(out, src);
   }
 }
+
+// End of values.h.

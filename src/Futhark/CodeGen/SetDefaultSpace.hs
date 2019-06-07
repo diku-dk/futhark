@@ -43,8 +43,8 @@ setExtValueSpace space (TransparentValue v) =
   TransparentValue <$> setValueSpace space v
 
 setValueSpace :: Space -> ValueDesc -> SetDefaultSpaceM ValueDesc
-setValueSpace space (ArrayValue mem memsize _ bt ept shape) =
-  return $ ArrayValue mem memsize space bt ept shape
+setValueSpace space (ArrayValue mem _ bt ept shape) =
+  return $ ArrayValue mem space bt ept shape
 setValueSpace _ (ScalarValue bt ept v) =
   return $ ScalarValue bt ept v
 
@@ -105,16 +105,17 @@ setBodySpace space (Call dests fname args) =
 setBodySpace space (Assert e msg loc) = do
   e' <- setExpSpace space e
   return $ Assert e' msg loc
-setBodySpace space (DebugPrint s t e) =
-  DebugPrint s t <$> setExpSpace space e
+setBodySpace space (DebugPrint s v) = do
+  DebugPrint s <$> mapM (mapM (setExpSpace space)) v
 setBodySpace space (Op op) =
   Op <$> setHostOpDefaultSpace space op
 
 setHostOpDefaultSpace :: Space -> HostOp -> SetDefaultSpaceM HostOp
-setHostOpDefaultSpace space (Husk keep_host num_nodes bparams husk_func interm body red) =
+setHostOpDefaultSpace space (Husk keep_host num_nodes bparams repl_mem husk_func interm body red) =
   localExclude (S.fromList keep_host) $
     Husk keep_host num_nodes
       <$> mapM (setParamSpace space) bparams
+      <*> pure repl_mem
       <*> pure husk_func
       <*> setBodySpace space interm
       <*> setBodySpace space body

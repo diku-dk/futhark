@@ -123,7 +123,7 @@ type EntryOutput op s = VName -> Imp.SpaceId ->
                         CompilerM op s CSExp
 
 -- | Unpack the array being passed to an entry point.
-type EntryInput op s = VName -> Imp.MemSize -> Imp.SpaceId ->
+type EntryInput op s = VName -> Imp.SpaceId ->
                        PrimType -> Imp.Signedness ->
                        [Imp.DimSize] ->
                        CSExp ->
@@ -646,12 +646,12 @@ entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) =
   return $ cast $ Var $ compileName name
   where cast = compileTypecastExt bt ept
 
-entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ Imp.DefaultSpace bt ept dims)) = do
+entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem Imp.DefaultSpace bt ept dims)) = do
   let src = Var $ compileName mem
   let createTuple = "createTuple_" ++ compilePrimTypeExt bt ept
   return $ simpleCall createTuple [src, CreateArray (Primitive $ CSInt Int64T) $ Right $ map compileDim dims]
 
-entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ (Imp.Space sid) bt ept dims)) = do
+entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims)) = do
   unRefMem mem (Imp.Space sid)
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
@@ -666,21 +666,16 @@ entryPointInput (_, Imp.TransparentValue (Imp.ScalarValue bt _ name), e) = do
       cast = compileTypecast bt
   stm $ Assign vname' (cast e)
 
-entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace bt _ dims), e) = do
+entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem Imp.DefaultSpace bt _ dims), e) = do
   zipWithM_ (unpackDim e) dims [0..]
   let arrayData = Field e "Item1"
   let dest = Var $ compileName mem
       unwrap_call = simpleCall "unwrapArray" [arrayData, sizeOf $ compilePrimTypeToAST bt]
-  case memsize of
-    Imp.VarSize sizevar ->
-      stm $ Assign (Var $ compileName sizevar) $ Field e "Item2.Length"
-    Imp.ConstSize _ ->
-      return ()
   stm $ Assign dest unwrap_call
 
-entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem memsize (Imp.Space sid) bt ept dims), e) = do
+entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
   unpack_input <- asks envEntryInput
-  unpack <- collect $ unpack_input mem memsize sid bt ept dims e
+  unpack <- collect $ unpack_input mem sid bt ept dims e
   stms unpack
 
 extValueDescName :: Imp.ExternalValue -> String
@@ -706,7 +701,7 @@ valueDescName = compileName . valueDescVName
 
 valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
-valueDescVName (Imp.ArrayValue vname _ _ _ _ _) = vname
+valueDescVName (Imp.ArrayValue vname _ _ _ _) = vname
 
 consoleWrite :: String -> [CSExp] -> CSExp
 consoleWrite str exps = simpleCall "Console.Write" $ String str:exps
@@ -780,7 +775,7 @@ readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
 -- TODO: If the type identifier of 'Float32' is changed, currently the error
 -- messages for reading binary input will not use this new name. This is also a
 -- problem for the C runtime system.
-readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
+readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ bt ept dims)) =
   let rank' = Var $ show $ length dims
       type_enum = String $ readTypeEnum bt ept
       bt' =  compilePrimTypeExt bt ept
@@ -802,11 +797,11 @@ formatString fmt contents =
 printStm :: Imp.ValueDesc -> CSExp -> CSExp -> CompilerM op s CSStmt
 printStm Imp.ScalarValue{} _ e =
   return $ printPrimStm e
-printStm (Imp.ArrayValue _ _ _ _ _ []) ind e = do
+printStm (Imp.ArrayValue _ _ _ _ []) ind e = do
   let e' = Index e (IdxExp (PostUnOp "++" ind))
   return $ printPrimStm e'
 
-printStm (Imp.ArrayValue mem memsize space bt ept (outer:shape)) ind e = do
+printStm (Imp.ArrayValue mem space bt ept (outer:shape)) ind e = do
   ptr <- newVName "shapePtr"
   first <- newVName "printFirst"
   let size = callMethod (CreateArray (Primitive $ CSInt Int32T) $ Right $ map compileDim $ outer:shape)
@@ -816,7 +811,7 @@ printStm (Imp.ArrayValue mem memsize space bt ept (outer:shape)) ind e = do
                              ]
       emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
 
-  printelem <- printStm (Imp.ArrayValue mem memsize space bt ept shape) ind e
+  printelem <- printStm (Imp.ArrayValue mem space bt ept shape) ind e
   return $
     If (BinOp "==" size (Integer 0))
       [puts emptystr]
@@ -926,9 +921,9 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args _) = do
         initCopy (varName, Imp.MemParam _ space) = declMem' varName space
         initCopy _ = Pass
 
-        valueDescFun (Imp.ArrayValue mem _ Imp.DefaultSpace _ _ _) =
+        valueDescFun (Imp.ArrayValue mem Imp.DefaultSpace _ _ _) =
             stm $ Assign (Var $ compileName mem ++ "_nbytes") (Var $ compileName mem ++ ".Length")
-        valueDescFun (Imp.ArrayValue mem _ (Imp.Space _) bt _ dims) =
+        valueDescFun (Imp.ArrayValue mem (Imp.Space _) bt _ dims) =
             stm $ Assign (Var $ compileName mem ++ "_nbytes") $ foldr (BinOp "*" . compileDim) (sizeOf $ compilePrimTypeToAST bt) dims
         valueDescFun _ = stm Pass
 
@@ -970,7 +965,7 @@ compileEntryFun pre_timing entry@(_,Imp.Function _ outputs _ _ results args _) =
         getType' :: Imp.ValueDesc -> CSType
         getType' (Imp.ScalarValue primtype signedness _) =
           compilePrimTypeToASText primtype signedness
-        getType' (Imp.ArrayValue _ _ _ primtype signedness _) =
+        getType' (Imp.ArrayValue _ _ primtype signedness _) =
           let t = compilePrimTypeToASText primtype signedness
           in Composite $ SystemTupleT [Composite $ ArrayT t, Composite $ ArrayT $ Primitive $ CSInt Int64T]
 

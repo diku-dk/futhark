@@ -10,10 +10,15 @@ module Futhark.Representation.SOACS.Simplify
        , simplifyStms
 
        , simpleSOACS
+
+       , soacRules
        )
 where
 
 import Control.Monad
+import Control.Monad.Identity
+import Control.Monad.State
+import Control.Monad.Writer
 import Data.Foldable
 import Data.Either
 import Data.List
@@ -148,12 +153,15 @@ soacRules :: RuleBook (Wise SOACS)
 soacRules = standardRules <> ruleBook topDownRules bottomUpRules
 
 topDownRules :: [TopDownRule (Wise SOACS)]
-topDownRules = [RuleOp removeReplicateMapping,
+topDownRules = [RuleOp hoistCertificates,
+                RuleOp removeReplicateMapping,
                 RuleOp removeReplicateWrite,
                 RuleOp removeUnusedSOACInput,
                 RuleOp simplifyClosedFormReduce,
                 RuleOp simplifyKnownIterationSOAC,
-                RuleOp fuseConcatScatter
+                RuleOp fuseConcatScatter,
+                RuleOp simplifyMapIota,
+                RuleOp moveTransformToInput
                ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -167,11 +175,34 @@ bottomUpRules = [RuleOp removeDeadMapping,
                  RuleOp mapOpToOp
                 ]
 
+-- Any certificates attached to a trivial Stm in the body might as
+-- well be applied to the SOAC itself.
+hoistCertificates :: TopDownRuleOp (Wise SOACS)
+hoistCertificates vtable pat aux soac
+  | (soac', hoisted) <- runState (mapSOACM mapper soac) mempty,
+    hoisted /= mempty =
+      certifying (hoisted <> stmAuxCerts aux) $ letBind_ pat $ Op soac'
+  where mapper = identitySOACMapper { mapOnSOACLambda = onLambda }
+        onLambda lam = do
+          stms' <- mapM onStm $ bodyStms $ lambdaBody lam
+          return lam { lambdaBody =
+                       mkBody stms' $ bodyResult $ lambdaBody lam }
+        onStm (Let se_pat se_aux (BasicOp (SubExp se))) = do
+          let (invariant, variant) =
+                partition (`ST.elem` vtable) $
+                unCertificates $ stmAuxCerts se_aux
+              se_aux' = se_aux { stmAuxCerts = Certificates variant }
+          modify (Certificates invariant<>)
+          return $ Let se_pat se_aux' $ BasicOp $ SubExp se
+        onStm stm = return stm
+hoistCertificates _ _ _ _ =
+  cannotSimplify
+
 liftIdentityMapping :: BottomUpRuleOp (Wise SOACS)
 liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
   | Just fun <- isMapSOAC form = do
   let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
-      free = freeInBody $ lambdaBody fun
+      free = freeIn $ lambdaBody fun
       rettype = lambdaReturnType fun
       ses = bodyResult $ lambdaBody fun
 
@@ -294,7 +325,7 @@ removeUnusedSOACInput _ pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
           map_lam' = map_lam { lambdaParams = used_params }
       letBind_ pat $ Op $ Screma w (ScremaForm scan reduce map_lam') used_arrs
   where params_and_arrs = zip (lambdaParams map_lam) arrs
-        used_in_body = freeInBody $ lambdaBody map_lam
+        used_in_body = freeIn $ lambdaBody map_lam
         usedInput (param, _) = paramName param `S.member` used_in_body
 removeUnusedSOACInput _ _ _ _ = cannotSimplify
 
@@ -403,11 +434,12 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
   | Just (comm, redlam, nes, maplam) <- isRedomapSOAC form,
     not $ all (`UT.used` used) $ patternNames pat, -- Quick/cheap check
 
+    let (red_pes, map_pes) = splitAt (length nes) $ patternElements pat,
     let redlam_deps = dataDependencies $ lambdaBody redlam,
     let redlam_res = bodyResult $ lambdaBody redlam,
     let redlam_params = lambdaParams redlam,
     let used_after = map snd $ filter ((`UT.used` used) . patElemName . fst) $
-                     zip (patternElements pat) redlam_params,
+                     zip red_pes redlam_params,
     let necessary = findNecessaryForReturned (`elem` used_after)
                     (zip redlam_params $ redlam_res <> redlam_res) redlam_deps,
     let alive_mask = map ((`S.member` necessary) . paramName) redlam_params,
@@ -416,14 +448,14 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
 
   let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
       dead_fix = zipWith fixDeadToNeutral alive_mask nes
-      (used_pes, _, used_nes) =
+      (used_red_pes, _, used_nes) =
         unzip3 $ filter (\(_,x,_) -> paramName x `S.member` necessary) $
-        zip3 (patternElements pat) redlam_params nes
+        zip3 red_pes redlam_params nes
 
-  let maplam' = removeLambdaResults alive_mask maplam
-  redlam' <- removeLambdaResults alive_mask <$> fixLambdaParams redlam (dead_fix++dead_fix)
+  let maplam' = removeLambdaResults (take (length nes) alive_mask) maplam
+  redlam' <- removeLambdaResults (take (length nes) alive_mask) <$> fixLambdaParams redlam (dead_fix++dead_fix)
 
-  certifying cs $ letBind_ (Pattern [] used_pes) $
+  certifying cs $ letBind_ (Pattern [] $ used_red_pes ++ map_pes) $
     Op $ Screma w (redomapSOAC comm redlam' used_nes maplam') arrs
 
 removeDeadReduction _ _ _ _ = cannotSimplify
@@ -477,11 +509,20 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
             y_ws<- mapM sizeOf ys
             guard $ all (x_w==) y_ws
             return (x_w, x:ys, cs)
+          Just (BasicOp (Reshape reshape arr), cs) -> do
+            guard $ isJust $ shapeCoercion reshape
+            (a, b, cs') <- isConcat arr
+            return (a, b, cs <> cs')
           _ -> Nothing
 
 fuseConcatScatter _ _ _ _ = cannotSimplify
 
 simplifyClosedFormReduce :: TopDownRuleOp (Wise SOACS)
+simplifyClosedFormReduce _ pat _ (Screma (Constant w) form _)
+  | Just (_, _, nes, _) <- isRedomapSOAC form,
+    zeroIsh w =
+      forM_ (zip (patternNames pat) nes) $ \(v, ne) ->
+      letBindNames_ [v] $ BasicOp $ SubExp ne
 simplifyClosedFormReduce vtable pat _ (Screma _ form arrs)
   | Just (_, red_fun, nes) <- isReduceSOAC form =
       foldClosedForm (`ST.lookupExp` vtable) pat red_fun nes arrs
@@ -518,3 +559,178 @@ simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
               bindResult pe se =
                 letBindNames_ [patElemName pe] $ BasicOp $ SubExp se
 simplifyKnownIterationSOAC _ _ _ _ = cannotSimplify
+
+data ArrayOp = ArrayIndexing Certificates VName (Slice SubExp)
+             | ArrayRearrange Certificates VName [Int]
+             | ArrayVar Certificates VName -- ^ Never constructed.
+  deriving (Eq, Ord, Show)
+
+arrayOpArr :: ArrayOp -> VName
+arrayOpArr (ArrayIndexing _ arr _) = arr
+arrayOpArr (ArrayRearrange _ arr _) = arr
+arrayOpArr (ArrayVar _ arr) = arr
+
+arrayOpCerts :: ArrayOp -> Certificates
+arrayOpCerts (ArrayIndexing cs _ _) = cs
+arrayOpCerts (ArrayRearrange cs _ _) = cs
+arrayOpCerts (ArrayVar cs _) = cs
+
+isArrayOp :: Certificates -> AST.Exp (Wise SOACS) -> Maybe ArrayOp
+isArrayOp cs (BasicOp (Index arr slice)) =
+  Just $ ArrayIndexing cs arr slice
+isArrayOp cs (BasicOp (Rearrange perm arr)) =
+  Just $ ArrayRearrange cs arr perm
+isArrayOp _ _ =
+  Nothing
+
+fromArrayOp :: ArrayOp -> (Certificates, AST.Exp (Wise SOACS))
+fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
+fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
+fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
+
+arrayOps :: AST.Body (Wise SOACS) -> S.Set ArrayOp
+arrayOps = mconcat . map onStm . stmsToList . bodyStms
+  where onStm (Let _ aux e) =
+          case isArrayOp (stmAuxCerts aux) e of
+            Just op -> S.singleton op
+            Nothing -> execWriter $ walkExpM walker e
+        onOp = execWriter . mapSOACM identitySOACMapper { mapOnSOACLambda = onLambda }
+        onLambda lam = do tell $ arrayOps $ lambdaBody lam
+                          return lam
+        walker = identityWalker { walkOnBody = tell . arrayOps
+                                , walkOnOp = tell . onOp }
+
+replaceArrayOps :: M.Map ArrayOp ArrayOp
+                -> AST.Body (Wise SOACS) -> AST.Body (Wise SOACS)
+replaceArrayOps substs (Body _ stms res) =
+  mkBody (fmap onStm stms) res
+  where onStm (Let pat aux e) =
+          let (cs', e') = onExp (stmAuxCerts aux) e
+          in certify cs' $ mkLet (patternContextIdents pat) (patternValueIdents pat) e'
+        onExp cs e
+          | Just op <- isArrayOp cs e,
+            Just op' <- M.lookup op substs =
+              fromArrayOp op'
+        onExp cs e = (cs, mapExp mapper e)
+        mapper = identityMapper { mapOnBody = const $ return . replaceArrayOps substs
+                                , mapOnOp = return . onOp }
+        onOp = runIdentity . mapSOACM identitySOACMapper { mapOnSOACLambda = return . onLambda }
+        onLambda lam = lam { lambdaBody = replaceArrayOps substs $ lambdaBody lam }
+
+-- Turn
+--
+--    map (\i -> ... xs[i] ...) (iota n)
+--
+-- into
+--
+--    map (\i x -> ... x ...) (iota n) xs
+--
+-- This is not because we want to encourage the map-iota pattern, but
+-- it may be present in generated code.  This is an unfortunately
+-- expensive simplification rule, since it requires multiple passes
+-- over the entire lambda body.  It only handles the very simplest
+-- case - if you find yourself planning to extend it to handle more
+-- complex situations (rotate or whatnot), consider turning it into a
+-- separate compiler pass instead.
+simplifyMapIota :: TopDownRuleOp (Wise SOACS)
+simplifyMapIota vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
+  | Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
+    indexings <- filter (indexesWith (paramName p)) $ S.toList $
+                 arrayOps $ lambdaBody map_lam,
+    not $ null indexings = do
+      -- For each indexing with iota, add the corresponding array to
+      -- the Screma, and construct a new lambda parameter.
+      (more_arrs, more_params, replacements) <-
+        unzip3 . catMaybes <$> mapM mapOverArr indexings
+      let substs = M.fromList $ zip indexings replacements
+          map_lam' = map_lam { lambdaParams = lambdaParams map_lam <> more_params
+                             , lambdaBody = replaceArrayOps substs $
+                                            lambdaBody map_lam
+                             }
+      letBind_ pat $ Op $ Screma w (ScremaForm scan reduce map_lam') (arrs <> more_arrs)
+  where isIota (_, arr) = case ST.lookupBasicOp arr vtable of
+                            Just (Iota _ (Constant o) (Constant s) _, _) ->
+                              zeroIsh o && oneIsh s
+                            _ -> False
+
+        indexesWith v (ArrayIndexing cs arr (DimFix (Var i) : _))
+          | arr `ST.elem` vtable,
+            all (`ST.elem` vtable) $ unCertificates cs =
+              i == v
+        indexesWith _ _ = False
+
+        mapOverArr (ArrayIndexing cs arr slice) = do
+          arr_elem <- newVName $ baseString arr ++ "_elem"
+          arr_t <- lookupType arr
+          arr' <- if arraySize 0 arr_t == w
+                  then return arr
+                  else certifying cs $ letExp (baseString arr ++ "_prefix") $
+                       BasicOp $ Index arr $
+                       fullSlice arr_t [DimSlice (intConst Int32 0) w (intConst Int32 1)]
+          return $ Just (arr',
+                         Param arr_elem (rowType arr_t),
+                         ArrayIndexing cs arr_elem (drop 1 slice))
+
+        mapOverArr _ = return Nothing
+
+simplifyMapIota  _ _ _ _ = cannotSimplify
+
+-- If a Screma's map function contains a transformation
+-- (e.g. transpose) on a parameter, create a new parameter
+-- corresponding to that transformation performed on the rows of the
+-- full array.
+moveTransformToInput :: TopDownRuleOp (Wise SOACS)
+moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
+  | ops <- filter arrayIsMapParam $ S.toList $ arrayOps $ lambdaBody map_lam,
+    not $ null ops = do
+      (more_arrs, more_params, replacements) <-
+        unzip3 . catMaybes <$> mapM mapOverArr ops
+
+      when (null more_arrs) cannotSimplify
+
+      let substs = M.fromList $ zip ops replacements
+          map_lam' = map_lam { lambdaParams = lambdaParams map_lam <> more_params
+                             , lambdaBody = replaceArrayOps substs $
+                                            lambdaBody map_lam
+                             }
+
+      letBind_ pat $ Op $ Screma w (ScremaForm scan reduce map_lam') (arrs <> more_arrs)
+
+  where map_param_names = map paramName (lambdaParams map_lam)
+
+        -- It's not just about whether the array is a parameter;
+        -- everything else must be map-invariant.
+        arrayIsMapParam (ArrayIndexing cs arr slice) =
+          arr `elem` map_param_names &&
+          all (`ST.elem` vtable) (S.toList $ freeIn cs <> freeIn slice) &&
+          not (null slice) && not (null $ sliceDims slice)
+        arrayIsMapParam (ArrayRearrange cs arr perm) =
+          arr `elem` map_param_names &&
+          all (`ST.elem` vtable) (S.toList $ freeIn cs) &&
+          not (null perm)
+        arrayIsMapParam ArrayVar{} =
+          False
+
+        mapOverArr op
+         | Just (_, arr) <- find ((==arrayOpArr op) . fst) (zip map_param_names arrs) = do
+             arr_t <- lookupType arr
+             let whole_dim = DimSlice (intConst Int32 0) (arraySize 0 arr_t) (intConst Int32 1)
+             arr_transformed <- certifying (arrayOpCerts op) $
+                                letExp (baseString arr ++ "_transformed") $
+                                case op of
+                                  ArrayIndexing _ _ slice ->
+                                    BasicOp $ Index arr $ whole_dim : slice
+                                  ArrayRearrange _ _ perm ->
+                                    BasicOp $ Rearrange (0 : map (+1) perm) arr
+                                  ArrayVar{} ->
+                                    BasicOp $ SubExp $ Var arr
+             arr_transformed_t <- lookupType arr_transformed
+             arr_transformed_row <- newVName $ baseString arr ++ "_transformed_row"
+             return $ Just (arr_transformed,
+                            Param arr_transformed_row (rowType arr_transformed_t),
+                            ArrayVar mempty arr_transformed_row)
+
+        mapOverArr _ = return Nothing
+
+moveTransformToInput _ _ _ _ =
+  cannotSimplify

@@ -1,6 +1,7 @@
-# Scalar functions.
+# Start of scalar.py.
 
 import numpy as np
+import math
 import struct
 
 def signed(x):
@@ -295,6 +296,12 @@ def futhark_atan64(x):
 def futhark_atan2_64(x, y):
   return np.arctan2(x, y)
 
+def futhark_gamma64(x):
+  return np.float64(math.gamma(x))
+
+def futhark_lgamma64(x):
+  return np.float64(math.lgamma(x))
+
 def futhark_round64(x):
   return np.round(x)
 
@@ -348,6 +355,12 @@ def futhark_atan32(x):
 def futhark_atan2_32(x, y):
   return np.arctan2(x, y)
 
+def futhark_gamma32(x):
+  return np.float32(math.gamma(x))
+
+def futhark_lgamma32(x):
+  return np.float32(math.lgamma(x))
+
 def futhark_round32(x):
   return np.round(x)
 
@@ -364,3 +377,5 @@ def futhark_to_bits32(x):
 def futhark_from_bits32(x):
   s = struct.pack('>l', x)
   return np.float32(struct.unpack('>f', s)[0])
+
+# End of scalar.py.

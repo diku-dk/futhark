@@ -3,14 +3,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
 module Futhark.CodeGen.ImpGen.Kernels
-  ( compileProg
+  ( Futhark.CodeGen.ImpGen.Kernels.compileProg
   )
   where
 
 import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Maybe
-import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List
 
@@ -19,45 +18,46 @@ import Prelude hiding (quot)
 import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
-import Futhark.Transform.Substitute
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
-import qualified Futhark.CodeGen.ImpGen as ImpGen
+import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
+import Futhark.CodeGen.ImpGen.Kernels.SegMap
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
+import Futhark.CodeGen.ImpGen.Kernels.SegScan
 import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
-import Futhark.CodeGen.ImpGen (sFor, sWhen, sOp)
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
-import Futhark.Util.IntegralExp (quotRoundingUp, quot, IntegralExp)
+import Futhark.Util.IntegralExp (quot, IntegralExp)
 
-callKernelOperations :: ImpGen.Operations ExplicitMemory Imp.HostOp
+callKernelOperations :: Operations ExplicitMemory Imp.HostOp
 callKernelOperations =
-  ImpGen.Operations { ImpGen.opsExpCompiler = expCompiler
-                    , ImpGen.opsCopyCompiler = callKernelCopy
-                    , ImpGen.opsOpCompiler = opCompiler
-                    , ImpGen.opsStmsCompiler = ImpGen.defCompileStms
+  Operations { opsExpCompiler = expCompiler
+                    , opsCopyCompiler = callKernelCopy
+                    , opsOpCompiler = opCompiler
+                    , opsStmsCompiler = defCompileStms
+                    , opsAllocCompilers = mempty
                     }
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Imp.Program)
 compileProg prog =
   fmap (setDefaultSpace (Imp.Space "device")) <$>
-  ImpGen.compileProg callKernelOperations (Imp.Space "device") [Imp.Space "local"] prog
+  Futhark.CodeGen.ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
 
 opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
            -> CallKernelGen ()
 opCompiler dest (Alloc e space) =
-  ImpGen.compileAlloc dest e space
+  compileAlloc dest e space
 opCompiler (Pattern _ [pe]) (Inner (GetSize key size_class)) = do
-  fname <- asks ImpGen.envFunction
+  fname <- asks envFunction
   sOp $ Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
     sizeClassWithEntryPoint fname size_class
 opCompiler (Pattern _ [pe]) (Inner (CmpSizeLe key size_class x)) = do
-  fname <- asks ImpGen.envFunction
+  fname <- asks envFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
   sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
-    =<< ImpGen.compileSubExp x
+    =<< toExp x
 opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler dest (Inner (HostOp kernel)) =
@@ -68,37 +68,35 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
   interm_red <- replicateM (length node_red_res) $ newVName "interm_red"
   interm_red_mem <- replicateM (length node_red_res) $ newVName "interm_red_mem"
   src_mem_names <- getArrayMemLocs src
-  ImpGen.dScope Nothing $ scopeOfHuskSpace hspace
-  ImpGen.dLParams red_op_params
-  num_nodes <- ImpGen.dPrim "num_nodes" int32
-  src_elems_e <- ImpGen.compileSubExp src_elems
+  dScope Nothing $ scopeOfHuskSpace hspace
+  dLParams red_op_params
+  num_nodes <- dPrim "num_nodes" int32
+  src_elems_e <- toExp src_elems
   map_pes_mems <- getArrayMemLocs (map patElemName map_pes)
-  zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) (map paramName red_acc_params) nes
-  interm_code <- ImpGen.collect $
+  zipWithM_ (\x y -> copyDWIM x [] y []) (map paramName red_acc_params) nes
+  interm_code <- collect $
     mapM_ (\(n, m, t) -> allocInterm n m (t `arrayOfRow` Var num_nodes)) $ zip3 interm_red interm_red_mem red_ts
-  body_code <- ImpGen.compileHuskFun husk_func $ do
-    max_part_elems <- ImpGen.dPrimV "max_parts_elems" $ one_val + BinOpExp (SDiv Int32) (src_elems_e - one_val) (Imp.var num_nodes int32)
-    ImpGen.dPrimV_ parts_offset $ Imp.var node_id int32 * Imp.var max_part_elems int32
-    ImpGen.dPrimV_ parts_elems $ BinOpExp (SMin Int32) (Imp.var max_part_elems int32) (src_elems_e - Imp.var parts_offset int32)
+  body_code <- compileHuskFun husk_func $ do
+    max_part_elems <- dPrimV "max_parts_elems" $ one_val + BinOpExp (SDiv Int32) (src_elems_e - one_val) (Imp.var num_nodes int32)
+    dPrimV_ parts_offset $ Imp.var node_id int32 * Imp.var max_part_elems int32
+    dPrimV_ parts_elems $ BinOpExp (SMin Int32) (Imp.var max_part_elems int32) (src_elems_e - Imp.var parts_offset int32)
     mapM_ (allocAndPart husk_func) $ zip4 parts parts_mem parts_sizes src_mem_names
-    ImpGen.compileStms (freeIn ses) (stmsToList bnds) $ do
-      zipWithM_ (\x y -> ImpGen.copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
-      node_map_res_arrs <- mapM ImpGen.lookupArray node_map_res
+    compileStms (freeIn ses) bnds $ do
+      zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y [zero_val]) interm_red $ map Var node_red_res
+      node_map_res_arrs <- mapM lookupArray node_map_res
       zipWithM_ (combineMapResult husk_func) node_map_res_arrs map_pes_mems
-    mapM_ ((\x -> ImpGen.emit $ Imp.Free x DefaultSpace) . paramName) parts_mem
+    mapM_ ((\x -> emit $ Imp.Free x DefaultSpace) . paramName) parts_mem
   non_param_mem <- filterM isMem $ S.toList $ freeIn body_code `S.difference` S.fromList (src_mem_names ++ map_pes_mems ++ interm_red_mem)
-  (repl_mem_names, repl_mem_code) <- ImpGen.collect' $ mapM (allocAndRepl husk_func) non_param_mem
-  let body_code' = repl_mem_code <> substituteNames (M.fromList $ zip non_param_mem repl_mem_names) body_code
-  red_code <- ImpGen.collect $ do
+  red_code <- collect $ do
       sFor i Int32 (Imp.var num_nodes int32) $ do
-        zipWithM_ (\x y -> ImpGen.copyDWIM x [] y [Imp.var i int32])
+        zipWithM_ (\x y -> copyDWIM x [] y [Imp.var i int32])
                   (map paramName red_next_params) $ map Var interm_red
-        ImpGen.compileBody' red_acc_params $ lambdaBody red_op
-      zipWithM_ (\x y -> ImpGen.copyDWIM x [] y []) (map patElemName red_pes) $
+        compileBody' red_acc_params $ lambdaBody red_op
+      zipWithM_ (\x y -> copyDWIM x [] y []) (map patElemName red_pes) $
                   map (Var . paramName) red_acc_params
   bparams <- catMaybes <$> mapM (\x -> getParam x <$> lookupType x)
-    (S.toList $ freeIn body_code' `S.difference` S.fromList (Imp.hfunctionParams husk_func))
-  sOp $ Imp.Husk (interm_red ++ interm_red_mem) num_nodes bparams husk_func interm_code body_code' red_code
+    (S.toList $ freeIn body_code `S.difference` S.fromList (Imp.hfunctionParams husk_func))
+  sOp $ Imp.Husk (interm_red ++ interm_red_mem) num_nodes bparams non_param_mem husk_func interm_code body_code red_code
   where HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes = hspace
         one_val = ValueExp $ IntValue $ Int32Value 1
         zero_val = ValueExp $ IntValue $ Int32Value 0
@@ -111,45 +109,37 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
         getVarNames (Var n : vs) = n : getVarNames vs
         getVarNames (_ : vs) = getVarNames vs
         getParam name (Prim t) = Just $ Imp.ScalarParam name t
-        getParam name (Mem _ space) = Just $ Imp.MemParam name space
+        getParam name (Mem space) = Just $ Imp.MemParam name space
         getParam _ Array{} = Nothing
         isMem name = do
-          v <- ImpGen.lookupVar name
+          v <- lookupVar name
           case v of
-            ImpGen.MemVar{} -> return True
+            MemVar{} -> return True
             _ -> return False
-        memSize pt s = Imp.LeafExp (Imp.SizeOf pt) int32 * product (map (ImpGen.compileSubExpOfType int32) (shapeDims s))
+        memSize pt s = Imp.LeafExp (Imp.SizeOf pt) int32 * product (map (toExp' int32) (shapeDims s))
         allocAndPart hfunc (Param part (MemArray t s _ _), Param part_mem _, part_size, src_mem) = do
-          ImpGen.dPrimV_ part_size $ memSize t s
+          dPrimV_ part_size $ memSize t s
           let part_size_b = Imp.bytes $ Imp.var part_size int32
               offset_bytes = Imp.bytes $ memSize t $ Shape $ map (replaceVar parts_elems parts_offset) $ shapeDims s
-          ImpGen.sAllocNamedArray part part_mem t s part_size_b DefaultSpace
-          ImpGen.emit $ Imp.PeerCopy part_mem (Imp.bytes zero_val) (Imp.var (Imp.hfunctionNodeId hfunc) int32)
+          sAllocNamedArray part part_mem t s part_size_b DefaultSpace
+          emit $ Imp.PeerCopy part_mem (Imp.bytes zero_val) (Imp.var (Imp.hfunctionNodeId hfunc) int32)
             DefaultSpace src_mem offset_bytes zero_val DefaultSpace part_size_b
         allocAndPart _ _ = fail "Peer destination is not an array."
-        allocAndRepl hfunc mem = do
-          ImpGen.MemEntry mem_size mem_space <- ImpGen.lookupMemory mem
-          let mem_size_b = Imp.memSizeToExp mem_size
-              zero_b = Imp.bytes zero_val
-          repl_mem <- ImpGen.sAlloc "repl_mem" mem_size_b DefaultSpace
-          ImpGen.emit $ Imp.PeerCopy repl_mem zero_b (Imp.var (Imp.hfunctionNodeId hfunc) int32) DefaultSpace
-            mem zero_b zero_val mem_space mem_size_b
-          return repl_mem
         allocInterm name mem (Array et size _) =
-          ImpGen.sAllocNamedArray name mem et size (Imp.bytes $ memSize et size) DefaultSpace
+          sAllocNamedArray name mem et size (Imp.bytes $ memSize et size) DefaultSpace
         allocInterm _ _ _ = fail "Intermediate is not an array."
-        getArrayMemLocs arr = map (ImpGen.memLocationName . ImpGen.entryArrayLocation) <$> mapM ImpGen.lookupArray arr
+        getArrayMemLocs arr = map (memLocationName . entryArrayLocation) <$> mapM lookupArray arr
         replaceVar n1 r (Var n2) = if n1 == n2 then Var r else Var n2
         replaceVar _ _ e = e
-        combineMapResult hfunc res_arr@(ImpGen.ArrayEntry res_mem_loc t) pe_mem =
-          let res_arr_dims = map ImpGen.dimSizeToSubExp $ ImpGen.entryArrayShape res_arr
+        combineMapResult hfunc res_arr@(ArrayEntry res_mem_loc t) pe_mem =
+          let res_arr_dims = map dimSizeToSubExp $ entryArrayShape res_arr
               res_bytes = Imp.bytes $ memSize t $ Shape res_arr_dims
               offset_bytes = Imp.bytes $ memSize t $ Shape $ map (replaceVar parts_elems parts_offset) res_arr_dims
-              res_mem = ImpGen.memLocationName res_mem_loc
-          in ImpGen.emit $ Imp.PeerCopy pe_mem offset_bytes zero_val DefaultSpace res_mem (Imp.bytes zero_val)
+              res_mem = memLocationName res_mem_loc
+          in emit $ Imp.PeerCopy pe_mem offset_bytes zero_val DefaultSpace res_mem (Imp.bytes zero_val)
               (Imp.var (Imp.hfunctionNodeId hfunc) int32) DefaultSpace res_bytes
 opCompiler pat e =
-  compilerBugS $ "ImpGen.opCompiler: Invalid pattern\n  " ++
+  compilerBugS $ "opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
 
 newHuskFunction :: CallKernelGen Imp.HuskFunction
@@ -169,18 +159,7 @@ kernelCompiler :: Pattern ExplicitMemory -> Kernel InKernel
                -> CallKernelGen ()
 
 kernelCompiler pat (Kernel desc space _ kernel_body) = do
-  (constants, init_constants) <- kernelInitialisation space
-
-  kernel_body' <-
-    makeAllMemoryGlobal $ ImpGen.subImpM_ (inKernelOperations constants) $ do
-    init_constants
-    compileKernelBody pat constants kernel_body
-
-  let bound_in_kernel =
-        M.keys $
-        scopeOfKernelSpace space <>
-        scopeOf (kernelBodyStms kernel_body)
-  (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
+  (constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
 
   forM_ (kernelHints desc) $ \(s,v) -> do
     ty <- case v of
@@ -190,31 +169,40 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
                                          , " in kernel '", kernelName desc, "'"
                                          , " did not have primType value." ]
 
-    ImpGen.compileSubExp v >>= ImpGen.emit . Imp.DebugPrint s (elemType ty)
+    emit $ Imp.DebugPrint s $ Just (elemType ty, toExp' (elemType ty) v)
 
-  sOp $ Imp.CallKernel Imp.Kernel
-            { Imp.kernelBody = kernel_body'
-            , Imp.kernelLocalMemory = local_memory
-            , Imp.kernelUses = uses
-            , Imp.kernelNumGroups = [ImpGen.compileSubExpOfType int32 $ spaceNumGroups space]
-            , Imp.kernelGroupSize = [ImpGen.compileSubExpOfType int32 $ spaceGroupSize space]
-            , Imp.kernelName = nameFromString $ kernelName desc ++ "_" ++
-                               show (baseTag $ kernelGlobalThreadIdVar constants)
-            }
+  let virt_groups = toExp' int32 (spaceNumVirtGroups space)
+  sKernel constants (kernelName desc) $ do
+    init_constants
+    virtualiseGroups constants virt_groups $ \group_id -> do
+      let flat_id =
+            if kernelGroupIdVar constants /= group_id
+            then Imp.vi32 group_id * kernelGroupSize constants + kernelLocalThreadId constants
+            else kernelGlobalThreadId constants
+      setSpaceIndices flat_id space
+      compileKernelStms constants (kernelBodyStms kernel_body) $
+        zipWithM_ (compileKernelResult constants) (patternElements pat) $
+        kernelBodyResult kernel_body
+
+kernelCompiler pat (SegMap space _ body) =
+  compileSegMap pat space body
 
 kernelCompiler pat (SegRed space comm red_op nes _ body) =
   compileSegRed pat space comm red_op nes body
 
+kernelCompiler pat (SegScan space red_op nes _ kbody) =
+  compileSegScan pat space red_op nes kbody
+
 kernelCompiler pat (SegGenRed space ops _ body) =
   compileSegGenRed pat space ops body
 
-expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
+expCompiler :: ExpCompiler ExplicitMemory Imp.HostOp
 
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
-  n' <- ImpGen.compileSubExp n
-  x' <- ImpGen.compileSubExp x
-  s' <- ImpGen.compileSubExp s
+  n' <- toExp n
+  x' <- toExp x
+  s' <- toExp s
 
   sIota (patElemName pe) n' x' s' et
 
@@ -226,20 +214,20 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
   return ()
 
 expCompiler dest e =
-  ImpGen.defCompileExp dest e
+  defCompileExp dest e
 
-callKernelCopy :: ImpGen.CopyCompiler ExplicitMemory Imp.HostOp
+callKernelCopy :: CopyCompiler ExplicitMemory Imp.HostOp
 callKernelCopy bt
-  destloc@(ImpGen.MemLocation destmem destshape destIxFun)
-  srcloc@(ImpGen.MemLocation srcmem srcshape srcIxFun)
+  destloc@(MemLocation destmem destshape destIxFun)
+  srcloc@(MemLocation srcmem srcshape srcIxFun)
   n
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
           src_elems, dest_elems) <- isMapTransposeKernel bt destloc srcloc = do
 
-      node_id <- ImpGen.getNodeId
+      node_id <- getNodeId
       fname <- mapTransposeForType bt
-      ImpGen.emit $ Imp.Call [] fname
+      emit $ Imp.Call [] fname
         [Imp.ExpArg node_id, Imp.MemArg destmem, Imp.ExpArg destoffset,
          Imp.MemArg srcmem, Imp.ExpArg srcoffset,
          Imp.ExpArg num_arrays, Imp.ExpArg size_x, Imp.ExpArg size_y,
@@ -254,25 +242,25 @@ callKernelCopy bt
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
       IxFun.linearWithOffset srcIxFun bt_size = do
-        let row_size = product $ map ImpGen.dimSizeToExp $ drop 1 srcshape
-        srcspace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory srcmem
-        destspace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory destmem
-        ImpGen.emit $ Imp.Copy
+        let row_size = product $ map dimSizeToExp $ drop 1 srcshape
+        srcspace <- entryMemSpace <$> lookupMemory srcmem
+        destspace <- entryMemSpace <$> lookupMemory destmem
+        emit $ Imp.Copy
           destmem (bytes destoffset) destspace
           srcmem (bytes srcoffset) srcspace $
           (n * row_size) `Imp.withElemType` bt
 
   | otherwise = sCopy bt destloc srcloc n
 
-mapTransposeForType :: PrimType -> ImpGen.ImpM ExplicitMemory Imp.HostOp Name
+mapTransposeForType :: PrimType -> ImpM ExplicitMemory Imp.HostOp Name
 mapTransposeForType bt = do
   -- XXX: The leading underscore is to avoid clashes with a
   -- programmer-defined function of the same name (this is a bad
   -- solution...).
   let fname = nameFromString $ "_" <> mapTransposeName bt
 
-  exists <- ImpGen.hasFunction fname
-  unless exists $ ImpGen.emitFunction fname $ mapTransposeFunction bt
+  exists <- hasFunction fname
+  unless exists $ emitFunction fname $ mapTransposeFunction bt
 
   return fname
 
@@ -384,13 +372,13 @@ mapTransposeFunction bt =
             v32 mulx, v32 muly, v32 num_arrays,
             block) bt
 
-isMapTransposeKernel :: PrimType -> ImpGen.MemLocation -> ImpGen.MemLocation
+isMapTransposeKernel :: PrimType -> MemLocation -> MemLocation
                      -> Maybe (Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp)
 isMapTransposeKernel bt
-  (ImpGen.MemLocation _ _ destIxFun)
-  (ImpGen.MemLocation _ _ srcIxFun)
+  (MemLocation _ _ destIxFun)
+  (MemLocation _ _ srcIxFun)
   | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     (perm, destshape) <- unzip perm_and_destshape,
     srcshape' <- IxFun.shape srcIxFun,
@@ -418,100 +406,3 @@ isMapTransposeKernel bt
           let (mapped, notmapped) = splitAt r1 shape
               (pretrans, posttrans) = f $ splitAt r2 notmapped
           in (product mapped, product pretrans, product posttrans)
-
-compileKernelBody :: Pattern InKernel
-                  -> KernelConstants
-                  -> KernelBody InKernel
-                  -> InKernelGen ()
-compileKernelBody pat constants kbody =
-  compileKernelStms constants (stmsToList $ kernelBodyStms kbody) $
-  zipWithM_ (compileKernelResult constants) (patternElements pat) $
-  kernelBodyResult kbody
-
-compileKernelResult :: KernelConstants -> PatElem InKernel -> KernelResult
-                    -> InKernelGen ()
-
-compileKernelResult constants pe (ThreadsReturn OneResultPerGroup what) = do
-  i <- newVName "i"
-
-  in_local_memory <- arrayInLocalMemory what
-  let me = kernelLocalThreadId constants
-
-  if not in_local_memory then do
-    who' <- ImpGen.compileSubExp $ intConst Int32 0
-    sWhen (me .==. who') $
-      ImpGen.copyDWIM (patElemName pe) [kernelGroupId constants] what []
-    else do
-      -- If the result of the group is an array in local memory, we
-      -- store it by collective copying among all the threads of the
-      -- group.  TODO: also do this if the array is in global memory
-      -- (but this is a bit more tricky, synchronisation-wise).
-      --
-      -- We do the reads/writes multidimensionally, but the loop is
-      -- single-dimensional.
-      ws <- mapM ImpGen.compileSubExp . arrayDims =<< subExpType what
-      -- Compute how many elements this thread is responsible for.
-      -- Formula: (w - ltid) / group_size (rounded up).
-      let w = product ws
-          ltid = kernelLocalThreadId constants
-          group_size = kernelGroupSize constants
-          to_write = (w - ltid) `quotRoundingUp` group_size
-          is = unflattenIndex ws $ ImpGen.varIndex i * group_size + ltid
-
-      sFor i Int32 to_write $
-        ImpGen.copyDWIM (patElemName pe) (kernelGroupId constants : is) what is
-
-compileKernelResult constants pe (ThreadsReturn AllThreads what) =
-  ImpGen.copyDWIM (patElemName pe) [kernelGlobalThreadId constants] what []
-
-compileKernelResult constants pe (ThreadsReturn (ThreadsPerGroup limit) what) =
-  sWhen (isActive limit) $
-  ImpGen.copyDWIM (patElemName pe) [kernelGroupId constants] what []
-
-compileKernelResult constants pe (ThreadsReturn ThreadsInSpace what) = do
-  let is = map (ImpGen.varIndex . fst) $ kernelDimensions constants
-  sWhen (kernelThreadActive constants) $ ImpGen.copyDWIM (patElemName pe) is what []
-
-compileKernelResult constants pe (ConcatReturns SplitContiguous _ per_thread_elems moffset what) = do
-  dest_loc <- ImpGen.entryArrayLocation <$> ImpGen.lookupArray (patElemName pe)
-  let dest_loc_offset = ImpGen.offsetArray dest_loc offset
-      dest' = ImpGen.arrayDestination dest_loc_offset
-  ImpGen.copyDWIMDest dest' [] (Var what) []
-  where offset = case moffset of
-                   Nothing -> ImpGen.compileSubExpOfType int32 per_thread_elems *
-                              kernelGlobalThreadId constants
-                   Just se -> ImpGen.compileSubExpOfType int32 se
-
-compileKernelResult constants pe (ConcatReturns (SplitStrided stride) _ _ moffset what) = do
-  dest_loc <- ImpGen.entryArrayLocation <$> ImpGen.lookupArray (patElemName pe)
-  let dest_loc' = ImpGen.strideArray
-                  (ImpGen.offsetArray dest_loc offset) $
-                  ImpGen.compileSubExpOfType int32 stride
-      dest' = ImpGen.arrayDestination dest_loc'
-  ImpGen.copyDWIMDest dest' [] (Var what) []
-  where offset = case moffset of
-                   Nothing -> kernelGlobalThreadId constants
-                   Just se -> ImpGen.compileSubExpOfType int32 se
-
-compileKernelResult constants pe (WriteReturn rws _arr dests) = do
-  rws' <- mapM ImpGen.compileSubExp rws
-  forM_ dests $ \(is, e) -> do
-    is' <- mapM ImpGen.compileSubExp is
-    let condInBounds i rw = 0 .<=. i .&&. i .<. rw
-        write = foldl (.&&.) (kernelThreadActive constants) $
-                zipWith condInBounds is' rws'
-    sWhen write $ ImpGen.copyDWIM (patElemName pe) (map (ImpGen.compileSubExpOfType int32) is) e []
-
-compileKernelResult _ _ KernelInPlaceReturn{} =
-  -- Already in its place... said it was a hack.
-  return ()
-
-arrayInLocalMemory :: SubExp -> InKernelGen Bool
-arrayInLocalMemory (Var name) = do
-  res <- ImpGen.lookupVar name
-  case res of
-    ImpGen.ArrayVar _ entry ->
-      (Space "local"==) . ImpGen.entryMemSpace <$>
-      ImpGen.lookupMemory (ImpGen.memLocationName (ImpGen.entryArrayLocation entry))
-    _ -> return False
-arrayInLocalMemory Constant{} = return False

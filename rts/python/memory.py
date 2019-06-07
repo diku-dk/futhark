@@ -1,4 +1,4 @@
-# Helper functions dealing with memory blocks.
+# Start of memory.py.
 
 import ctypes as ct
 
@@ -36,3 +36,5 @@ class opaque(object):
 
   def __repr__(self):
     return "<opaque Futhark value of type {}>".format(self.desc)
+
+# End of memory.py.

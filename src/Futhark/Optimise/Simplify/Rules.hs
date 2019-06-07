@@ -37,7 +37,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Construct
-import Futhark.Transform.Substitute
 import Futhark.Util
 
 topDownRules :: (BinderOps lore, Aliased lore) => [TopDownRule lore]
@@ -177,7 +176,7 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
         res = bodyResult loopbody
 
         implpat = zip (patternContextElements pat) $
-                  map paramName $ loopResultContext (map fst ctx) (map fst val)
+                  map (paramName . fst) ctx
         explpat = zip (patternValueElements pat) $
                   map (paramName . fst) val
 
@@ -293,7 +292,7 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
           (x,x_stms) <- collectStms m
           case x of
             IndexResult cs arr' slice
-              | all (not . (i `S.member`) . freeInStm) x_stms,
+              | all (not . (i `S.member`) . freeIn) x_stms,
                 DimFix (Var j) : slice' <- slice,
                 j == i, not $ i `S.member` freeIn slice -> do
                   addStms x_stms
@@ -334,17 +333,11 @@ simplifKnownIterationLoop _ pat _ (ctx, val, ForLoop i it (Constant iters) loop_
     letBindNames_ [paramName p] $ BasicOp $ Index arr $
     DimFix (intConst Int32 0) : fullSlice (paramType p) []
 
-  (loop_body_ctx, loop_body_val) <- splitAt (length ctx) <$> (mapM asVar =<< bodyBind body)
-  let subst = M.fromList $ zip (map (paramName . fst) ctx) loop_body_ctx
-      ctx_params = substituteNames subst $ map fst ctx
-      val_params = substituteNames subst $ map fst val
-      res_context = loopResultContext ctx_params val_params
-  forM_ (zip (patternContextElements pat) res_context) $ \(pat_elem, p) ->
-    letBind_ (Pattern [] [pat_elem]) $ BasicOp $ SubExp $ Var $ paramName p
-  forM_ (zip (patternValueElements pat) loop_body_val) $ \(pat_elem, v) ->
-    letBind_ (Pattern [] [pat_elem]) $ BasicOp $ SubExp $ Var v
-  where asVar (Var v)      = return v
-        asVar (Constant v) = letExp "named" $ BasicOp $ SubExp $ Constant v
+  -- Some of the sizes in the types here might be temporarily wrong
+  -- until copy propagation fixes it up.
+  res <- bodyBind body
+  forM_ (zip (patternNames pat) res) $ \(v, se) ->
+    letBindNames_ [v] $ BasicOp $ SubExp se
 simplifKnownIterationLoop _ _ _ _ =
   cannotSimplify
 
@@ -618,7 +611,8 @@ simplifyIndexing vtable seType idd inds consuming =
 
       | Just inds' <- sliceIndices inds,
         Just (e, cs) <- ST.index idd inds' vtable,
-        worthInlining e ->
+        worthInlining e,
+        all (`ST.elem` vtable) (unCertificates cs) ->
         Just $ SubExpResult cs <$> (letSubExp "index_primexp" =<< toExp e)
 
     Nothing -> Nothing

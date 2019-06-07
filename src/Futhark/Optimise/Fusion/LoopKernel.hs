@@ -59,7 +59,8 @@ transformOutput ts names = descend ts
 
 applyTransform :: SOAC.ArrayTransform -> Ident -> (BasicOp, Certificates)
 applyTransform (SOAC.Rearrange cs perm) v =
-  (Rearrange perm $ identName v, cs)
+  (Rearrange perm' $ identName v, cs)
+  where perm' = perm ++ drop (length perm) [0..arrayRank (identType v)-1]
 applyTransform (SOAC.Reshape cs shape) v =
   (Reshape shape $ identName v, cs)
 applyTransform (SOAC.ReshapeOuter cs shape) v =
@@ -208,7 +209,7 @@ removeUnusedParams l inps =
                          (([], []), (p,inp):_) -> ([p], [inp])
                          ((ps_, inps_), _)     -> (ps_, inps_)
         used p = paramName p `S.member` freeVars
-        freeVars = freeInBody $ lambdaBody l
+        freeVars = freeIn $ lambdaBody l
 
 -- | Check that the consumer uses at least one output of the producer
 -- unmodified.

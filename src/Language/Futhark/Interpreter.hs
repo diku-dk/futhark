@@ -539,6 +539,40 @@ evalType env t@(TypeVar () _ tn args) =
         matchPtoA _ _ = mempty
 evalType _ (Enum cs) = Enum cs
 
+evalFunction :: Env -> [TypeParam] -> [Pattern] -> Exp
+             -> (Aliasing, StructType) -> SrcLoc -> EvalM Value
+
+-- We treat zero-parameter lambdas as simply an expression to
+-- evaluate immediately.  Note that this is *not* the same as a lambda
+-- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
+-- can never occur in a well-formed Futhark program, but they are
+-- convenient in the interpreter.
+evalFunction env tparams [] body (_, t) loc = do
+  -- All remaining size parameters that have not yet been assigned a
+  -- value (because they were inner dimensions of empty arrays) are
+  -- now assigned a zero.
+  let unbound_dims = bindToZero $ map typeParamName $ filter isDimParam tparams
+  v <- eval (env <> unbound_dims) body
+  case (t, v) of
+    (Arrow _ _ _ rt, ValueFun f) ->
+      return $ ValueFun $ \arg -> do r <- f arg
+                                     match (evalType env rt) r
+    _ -> match t v
+  where match vt v =
+          case matchValueToType env vt v of
+            Right _ -> return v
+            Left err ->
+              bad loc env $ "Value `" <> pretty v <>
+              "` cannot match type `" <> pretty vt <> "`: " ++ err
+
+        isDimParam TypeParamDim{} = True
+        isDimParam _ = False
+
+evalFunction env tparams (p:ps) body (als, ret) loc =
+  return $ ValueFun $ \v -> do
+    env' <- matchPattern env p v
+    evalFunction env' tparams ps body (als, ret) loc
+
 eval :: Env -> Exp -> EvalM Value
 
 eval _ (Literal v _) = return $ ValuePrim v
@@ -592,13 +626,13 @@ eval env (Ascript e td _ loc) = do
     Left err -> bad loc env $ "Value `" <> pretty v <> "` cannot match shape of type `" <>
                 pretty (declaredType td) <> "` (`" <> pretty t <> "`): " ++ err
 
-eval env (LetPat _ p e body _) = do
+eval env (LetPat p e body _ _) = do
   v <- eval env e
   env' <- matchPattern env p v
   eval env' body
 
 eval env (LetFun f (tparams, pats, _, Info ret, fbody) body loc) = do
-  v <- eval env $ Lambda tparams pats fbody Nothing (Info (mempty, ret)) loc
+  v <- evalFunction env tparams pats fbody (mempty, ret) loc
   let ftype = T.BoundV [] $ foldr (uncurry (Arrow ()) . patternParam) ret pats
   eval (valEnv (M.singleton f (Just ftype, v)) <> env) body
 
@@ -677,7 +711,7 @@ eval env (RecordUpdate src all_fs v _ _) =
               ValueRecord $ M.insert f (update f_v fs v') src'
         update _ _ _ = error "eval RecordUpdate: invalid value."
 
-eval env (LetWith dest src is v body loc) = do
+eval env (LetWith dest src is v body _ loc) = do
   dest' <- maybe oob return =<<
     updateArray <$> mapM (evalDimIndex env) is <*>
     evalTermVar env (qualName $ identName src) <*> eval env v
@@ -690,31 +724,8 @@ eval env (LetWith dest src is v body loc) = do
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
-eval env (Lambda tparams [] body _ (Info (_, t)) loc) = do
-  -- All remaining size parameters that have not yet been assigned a
-  -- value (because they were inner dimensions of empty arrays) are
-  -- now assigned a zero.
-  let unbound_dims = bindToZero $ map typeParamName $ filter isDimParam tparams
-  v <- eval (env <> unbound_dims) body
-  case (t, v) of
-    (Arrow _ _ _ rt, ValueFun f) ->
-      return $ ValueFun $ \arg -> do r <- f arg
-                                     match (evalType env rt) r
-    _ -> match t v
-  where match vt v =
-          case matchValueToType env vt v of
-            Right _ -> return v
-            Left err ->
-              bad loc env $ "Value `" <> pretty v <>
-              "` cannot match type `" <> pretty vt <> "`: " ++ err
-
-        isDimParam TypeParamDim{} = True
-        isDimParam _ = False
-
-eval env (Lambda tparams (p:ps) body mrd (Info (als, ret)) loc) =
-  return $ ValueFun $ \v -> do
-    env' <- matchPattern env p v
-    eval env' $ Lambda tparams ps body mrd (Info (als, ret)) loc
+eval env (Lambda ps body _ (Info (als, ret)) loc) =
+  evalFunction env [] ps body (als, ret) loc
 
 eval env (OpSection qv _  _) = evalTermVar env qv
 
@@ -735,7 +746,7 @@ eval _ (ProjectSection ks _ _) = return $ ValueFun $ flip (foldM walk) ks
           | Just v' <- M.lookup f fs = return v'
         walk _ _ = fail "Value does not have expected field."
 
-eval env (DoLoop _ pat init_e form body _) = do
+eval env (DoLoop pat init_e form body _) = do
   init_v <- eval env init_e
   case form of For iv bound -> do
                  bound' <- asSigned <$> eval env bound
@@ -869,8 +880,8 @@ evalDec :: Env -> Dec -> EvalM Env
 
 evalDec env (ValDec (ValBind _ v _ (Info t) tps ps def _ loc)) = do
   let t' = evalType env t
-      ftype = T.BoundV tps $ foldr (uncurry (Arrow ()) . patternParam) t' ps
-  val <- eval env $ Lambda tps ps def Nothing (Info (mempty, t')) loc
+      ftype = T.BoundV [] $ foldr (uncurry (Arrow ()) . patternParam) t' ps
+  val <- evalFunction env tps ps def (mempty, t') loc
   return $ valEnv (M.singleton v (Just ftype, val)) <> env
 
 evalDec env (OpenDec me _) = do
@@ -1093,10 +1104,10 @@ initialCtx =
       toArray . reverse . fst =<< foldM next ([], ne) (fromArray xs)
 
     def s | "stream_map" `isPrefixOf` s =
-              Just $ fun2t $ apply noLoc mempty
+              Just $ fun2t stream
 
     def s | "stream_red" `isPrefixOf` s =
-              Just $ fun3t $ \_ f xs -> apply noLoc mempty f xs
+              Just $ fun3t $ \_ f arg -> stream f arg
 
     def "scatter" = Just $ fun3t $ \arr is vs ->
       case arr of
@@ -1186,6 +1197,12 @@ initialCtx =
     tdef s = do
       t <- nameFromString s `M.lookup` namesToPrimTypes
       return $ T.TypeAbbr Unlifted [] $ Prim t
+
+    stream f arg@(ValueArray xs) =
+      let n = ValuePrim $ SignedValue $ Int32Value $ arrayLength xs
+      in apply2 noLoc mempty f n arg
+    stream _ arg = error $ "Cannot stream: " ++ pretty arg
+
 
 interpretExp :: Ctx -> Exp -> F ExtOp Value
 interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e

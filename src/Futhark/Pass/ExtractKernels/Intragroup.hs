@@ -39,7 +39,7 @@ intraGroupParallelise :: (MonadFreshNames m, LocalScope Out.Kernels m) =>
                       -> m (Maybe ((SubExp, SubExp), SubExp,
                                    Out.Stms Out.Kernels, Out.Stms Out.Kernels))
 intraGroupParallelise knest lam = runMaybeT $ do
-  (w_stms, w, ispace, inps, rts) <- lift $ flatKernel knest
+  (w_stms, w, ispace, inps) <- lift $ flatKernel knest
   let num_groups = w
       body = lambdaBody lam
 
@@ -75,7 +75,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
                        (eSubExp intra_avail_par)
                   else foldBinOp' (SMax Int32) ws_min
 
-    let inputIsUsed input = kernelInputName input `S.member` freeInBody body
+    let inputIsUsed input = kernelInputName input `S.member` freeIn body
         used_inps = filter inputIsUsed inps
 
     addStms w_stms
@@ -83,7 +83,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
     num_threads <- letSubExp "num_threads" $
                    BasicOp $ BinOp (Mul Int32) num_groups group_size
 
-    let ksize = (num_groups, group_size, num_threads)
+    let ksize = (num_groups, group_size, num_threads, num_groups)
 
     kspace <- newKernelSpace ksize $ FlatThreadSpace $ ispace ++ [(ltid,group_size)]
 
@@ -103,7 +103,8 @@ intraGroupParallelise knest lam = runMaybeT $ do
         return $ PatElem name t'
   flat_pat <- lift $ Pattern [] <$> mapM flatPatElem (patternValueElements nested_pat)
 
-  let kstm = Let flat_pat (StmAux cs ()) $ Op $ HostOp $
+  let rts = map rowType $ patternTypes flat_pat
+      kstm = Let flat_pat (StmAux cs ()) $ Op $ HostOp $
              Kernel (KernelDebugHints "map_intra_group" []) kspace rts kbody'
       reshapeStm nested_pe flat_pe =
         Let (Pattern [] [nested_pe]) (StmAux cs ()) $
@@ -153,13 +154,18 @@ intraGroupStm stm@(Let pat _ e) = do
       groupInvariant Constant{} = True
 
   case e of
-    DoLoop ctx val (ForLoop i it bound inps) loopbody
-      | groupInvariant bound ->
-          localScope (scopeOf form) $
+    -- Cosmin hack: previously, only for loops were supported,
+    --              and only if `groupInvariant bound` holds;
+    --              Let's see what can possibly go wrong if we
+    --              completely generalize this (?)
+    DoLoop ctx val form loopbody ->
+          localScope (scopeOf form') $
           localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
           loopbody' <- intraGroupBody loopbody
-          letBind_ pat $ DoLoop ctx val form loopbody'
-              where form = ForLoop i it bound inps
+          letBind_ pat $ DoLoop ctx val form' loopbody'
+              where form' = case form of
+                              ForLoop i it bound inps -> ForLoop i it bound inps
+                              WhileLoop cond          -> WhileLoop cond
 
     If cond tbody fbody ifattr
       | groupInvariant cond -> do
@@ -189,17 +195,8 @@ intraGroupStm stm@(Let pat _ e) = do
 
       scanfun' <- Kernelise.transformLambda scanfun
 
-      -- A GroupScan lambda needs two more parameters.
-      my_index <- newVName "my_index"
-      offset <- newVName "offset"
-      let my_index_param = Param my_index (Prim int32)
-          offset_param = Param offset (Prim int32)
-          scanfun'' = scanfun' { lambdaParams = my_index_param :
-                                                offset_param :
-                                                lambdaParams scanfun'
-                               }
       letBind_ (Pattern [] scan_pes) $
-        Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
+        Op $ Out.GroupScan w scanfun' $ zip nes scan_input
       parallelMin [w]
 
     Op (Screma w form arrs)
@@ -210,17 +207,8 @@ intraGroupStm stm@(Let pat _ e) = do
 
       redfun' <- Kernelise.transformLambda redfun
 
-      -- A GroupReduce lambda needs two more parameters.
-      my_index <- newVName "my_index"
-      offset <- newVName "offset"
-      let my_index_param = Param my_index (Prim int32)
-          offset_param = Param offset (Prim int32)
-          redfun'' = redfun' { lambdaParams = my_index_param :
-                                              offset_param :
-                                              lambdaParams redfun'
-                               }
       letBind_ (Pattern [] red_pes) $
-        Op $ Out.GroupReduce w redfun'' $ zip nes red_input
+        Op $ Out.GroupReduce w redfun' $ zip nes red_input
       parallelMin [w]
 
     Op (Stream w (Sequential accs) lam arrs)
@@ -321,4 +309,4 @@ intraGroupParalleliseBody deps group_variant ltid body = do
   (min_ws, avail_ws, kstms) <- runIntraGroupM (Env ltid deps group_variant) $
                  mapM_ intraGroupStm $ bodyStms body
   return (min_ws, avail_ws,
-          KernelBody () kstms $ map (ThreadsReturn OneResultPerGroup) $ bodyResult body)
+          KernelBody () kstms $ map GroupsReturn $ bodyResult body)

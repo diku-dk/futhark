@@ -10,10 +10,6 @@ module Futhark.Representation.AST.Attributes.Names
          , Names
          -- * Specialised Functions
          , freeInStmsAndRes
-         , freeInBody
-         , freeInExp
-         , freeInStm
-         , freeInLambda
          -- * Bound Names
          , boundInBody
          , boundByStm
@@ -43,9 +39,8 @@ freeWalker :: (FreeAttr (ExpAttr lore),
               Walker lore (Writer Names)
 freeWalker = identityWalker {
                walkOnSubExp = tell . freeIn
-             , walkOnBody = tell . freeInBody
+             , walkOnBody = tell . freeIn
              , walkOnVName = tell . S.singleton
-             , walkOnCertificates = tell . freeIn
              , walkOnOp = tell . freeIn
              }
 
@@ -60,67 +55,8 @@ freeInStmsAndRes :: (FreeIn (Op lore),
                      FreeAttr (ExpAttr lore)) =>
                     Stms lore -> Result -> Names
 freeInStmsAndRes stms res =
-  (freeIn res `mappend` fold (fmap freeInStm stms))
+  (freeIn res `mappend` fold (fmap freeIn stms))
   `S.difference` boundByStms stms
-
--- | Return the set of variable names that are free in the given body.
-freeInBody :: (FreeAttr (ExpAttr lore),
-               FreeAttr (BodyAttr lore),
-               FreeIn (FParamAttr lore),
-               FreeIn (LParamAttr lore),
-               FreeIn (LetAttr lore),
-               FreeIn (Op lore)) =>
-              Body lore -> Names
-freeInBody (Body attr stms res) =
-  precomputed attr $ freeIn attr <> freeInStmsAndRes stms res
-
--- | Return the set of variable names that are free in the given
--- expression.
-freeInExp :: (FreeAttr (ExpAttr lore),
-              FreeAttr (BodyAttr lore),
-              FreeIn (FParamAttr lore),
-              FreeIn (LParamAttr lore),
-              FreeIn (LetAttr lore),
-              FreeIn (Op lore)) =>
-             Exp lore -> Names
-freeInExp (DoLoop ctxmerge valmerge form loopbody) =
-  let (ctxparams, ctxinits) = unzip ctxmerge
-      (valparams, valinits) = unzip valmerge
-      bound_here = S.fromList $ M.keys $
-                   scopeOf form <>
-                   scopeOfFParams (ctxparams ++ valparams)
-  in (freeIn (ctxinits ++ valinits) <> freeIn form <>
-      freeIn (ctxparams ++ valparams) <> freeInBody loopbody)
-     `S.difference` bound_here
-freeInExp e = execWriter $ walkExpM freeWalker e
-
--- | Return the set of variable names that are free in the given
--- binding.
-freeInStm :: (FreeAttr (ExpAttr lore),
-              FreeAttr (BodyAttr lore),
-              FreeIn (FParamAttr lore),
-              FreeIn (LParamAttr lore),
-              FreeIn (LetAttr lore),
-              FreeIn (Op lore)) =>
-             Stm lore -> Names
-freeInStm (Let pat (StmAux cs attr) e) =
-  freeIn cs <> precomputed attr (freeIn attr <> freeInExp e <> freeIn pat)
-
--- | Return the set of variable names that are free in the given
--- lambda, including shape annotations in the parameters.
-freeInLambda :: (FreeAttr (ExpAttr lore),
-                 FreeAttr (BodyAttr lore),
-                 FreeIn (FParamAttr lore),
-                 FreeIn (LParamAttr lore),
-                 FreeIn (LetAttr lore),
-                 FreeIn (Op lore)) =>
-                Lambda lore -> Names
-freeInLambda (Lambda params body rettype) =
-  S.filter (`notElem` paramnames) $ inRet <> inParams <> inBody
-  where inRet = mconcat $ map freeIn rettype
-        inParams = mconcat $ map freeIn params
-        inBody = freeInBody body
-        paramnames = map paramName params
 
 -- | A class indicating that we can obtain free variable information
 -- from values of this type.
@@ -141,6 +77,54 @@ instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
 
 instance FreeIn a => FreeIn [a] where
   freeIn = fold . fmap freeIn
+
+instance (FreeAttr (ExpAttr lore),
+          FreeAttr (BodyAttr lore),
+          FreeIn (FParamAttr lore),
+          FreeIn (LParamAttr lore),
+          FreeIn (LetAttr lore),
+          FreeIn (Op lore)) => FreeIn (Lambda lore) where
+  freeIn (Lambda params body rettype) =
+    S.filter (`notElem` paramnames) $ inRet <> inParams <> inBody
+    where inRet = mconcat $ map freeIn rettype
+          inParams = mconcat $ map freeIn params
+          inBody = freeIn body
+          paramnames = map paramName params
+
+instance (FreeAttr (ExpAttr lore),
+          FreeAttr (BodyAttr lore),
+          FreeIn (FParamAttr lore),
+          FreeIn (LParamAttr lore),
+          FreeIn (LetAttr lore),
+          FreeIn (Op lore)) => FreeIn (Body lore) where
+  freeIn (Body attr stms res) =
+    precomputed attr $ freeIn attr <> freeInStmsAndRes stms res
+
+instance (FreeAttr (ExpAttr lore),
+          FreeAttr (BodyAttr lore),
+          FreeIn (FParamAttr lore),
+          FreeIn (LParamAttr lore),
+          FreeIn (LetAttr lore),
+          FreeIn (Op lore)) => FreeIn (Exp lore) where
+  freeIn (DoLoop ctxmerge valmerge form loopbody) =
+    let (ctxparams, ctxinits) = unzip ctxmerge
+        (valparams, valinits) = unzip valmerge
+        bound_here = S.fromList $ M.keys $
+                     scopeOf form <>
+                     scopeOfFParams (ctxparams ++ valparams)
+    in (freeIn (ctxinits ++ valinits) <> freeIn form <>
+        freeIn (ctxparams ++ valparams) <> freeIn loopbody)
+       `S.difference` bound_here
+  freeIn e = execWriter $ walkExpM freeWalker e
+
+instance (FreeAttr (ExpAttr lore),
+          FreeAttr (BodyAttr lore),
+          FreeIn (FParamAttr lore),
+          FreeIn (LParamAttr lore),
+          FreeIn (LetAttr lore),
+          FreeIn (Op lore)) => FreeIn (Stm lore) where
+  freeIn (Let pat (StmAux cs attr) e) =
+    freeIn cs <> precomputed attr (freeIn attr <> freeIn e <> freeIn pat)
 
 instance FreeIn (Stm lore) => FreeIn (Stms lore) where
   freeIn = fold . fmap freeIn
@@ -173,7 +157,7 @@ instance FreeIn d => FreeIn (Ext d) where
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn (Array _ shape _) = freeIn shape
-  freeIn (Mem size _)      = freeIn size
+  freeIn (Mem _)           = mempty
   freeIn (Prim _)          = mempty
 
 instance FreeIn attr => FreeIn (ParamT attr) where

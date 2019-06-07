@@ -330,6 +330,11 @@ instance MonadTypeChecker TermTypeM where
               (map (maybe (toStruct argtype) Prim) pts,
                maybe (toStruct argtype) Prim rt)
 
+  checkNamedDim loc v = do
+    (v', t) <- lookupVar loc v
+    unify loc (toStructural t) (Prim $ Signed Int32)
+    return v'
+
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName [q] _) loc
   | nameToString q == "intrinsics" = do
@@ -566,7 +571,7 @@ checkPattern' (PatternLit e NoInfo loc) NoneInferred = do
   return $ PatternLit e' (Info t') loc
 
 bindPatternNames :: PatternBase NoInfo Name -> TermTypeM a -> TermTypeM a
-bindPatternNames = bindSpaced . map asTerm . S.toList . patIdentSet
+bindPatternNames = bindSpaced . map asTerm . S.toList . patternIdents
   where asTerm v = (Term, identName v)
 
 checkPattern :: UncheckedPattern -> InferredType -> (Pattern -> TermTypeM a)
@@ -665,7 +670,7 @@ bindingPatternGroup tps orig_ps m = do
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
     let descend ps' (p:ps) =
           checkPattern p NoneInferred $ \p' ->
-            binding (S.toList $ patIdentSet p') $ descend (p':ps') ps
+            binding (S.toList $ patternIdents p') $ descend (p':ps') ps
         descend ps' [] = do
           -- Perform an observation of every type parameter.  This
           -- prevents unused-name warnings for otherwise unused
@@ -678,19 +683,16 @@ bindingPatternGroup tps orig_ps m = do
 
     descend [] orig_ps
 
-bindingPattern :: [UncheckedTypeParam]
-               -> PatternBase NoInfo Name -> InferredType
-               -> ([TypeParam] -> Pattern -> TermTypeM a) -> TermTypeM a
-bindingPattern tps p t m = do
+bindingPattern :: PatternBase NoInfo Name -> InferredType
+               -> (Pattern -> TermTypeM a) -> TermTypeM a
+bindingPattern p t m = do
   checkForDuplicateNames [p]
-  checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
-    checkPattern p t $ \p' -> binding (S.toList $ patIdentSet p') $ do
-      -- Perform an observation of every declared dimension.  This
-      -- prevents unused-name warnings for otherwise unused dimensions.
-      mapM_ observe $ patternDims p'
-      checkShapeParamUses patternUses tps' [p']
+  checkPattern p t $ \p' -> binding (S.toList $ patternIdents p') $ do
+    -- Perform an observation of every declared dimension.  This
+    -- prevents unused-name warnings for otherwise unused dimensions.
+    mapM_ observe $ patternDims p'
 
-      m tps' p'
+    m p'
 
 -- | Return the shapes used in a given pattern in postive and negative
 -- position, respectively.
@@ -703,14 +705,6 @@ patternUses (TuplePattern ps _) = foldMap patternUses ps
 patternUses (RecordPattern fs _) = foldMap (patternUses . snd) fs
 patternUses (PatternAscription p (TypeDecl declte _) _) =
   patternUses p <> typeExpUses declte
-
-noTypeParamsPermitted :: [UncheckedTypeParam] -> TermTypeM ()
-noTypeParamsPermitted ps =
-  case mapMaybe typeParamLoc ps of
-    loc:_ -> typeError loc "Type parameters are not permitted here."
-    []    -> return ()
-  where typeParamLoc (TypeParamDim _ _) = Nothing
-        typeParamLoc tparam             = Just $ srclocOf tparam
 
 patternDims :: Pattern -> [Ident]
 patternDims (PatternParens p _) = patternDims p
@@ -745,7 +739,7 @@ lexicalClosure params closure = do
                     _ -> False
   return $ S.map AliasBound $ S.filter isLocal $
     allOccuring closure S.\\
-    S.map identName (mconcat (map patIdentSet params))
+    S.map identName (mconcat (map patternIdents params))
 
 checkExp :: UncheckedExp -> TermTypeM Exp
 
@@ -930,8 +924,7 @@ checkExp (Apply e1 e2 NoInfo NoInfo loc) = do
   (t1, rt) <- checkApply loc t arg
   return $ Apply e1' e2' (Info $ diet t1) (Info rt) loc
 
-checkExp (LetPat tparams pat e body loc) = do
-  noTypeParamsPermitted tparams
+checkExp (LetPat pat e body NoInfo loc) =
   sequentially (checkExp e) $ \e' e_occs -> do
     -- Not technically an ascription, but we want the pattern to have
     -- exactly the type of 'e'.
@@ -941,9 +934,10 @@ checkExp (LetPat tparams pat e body loc) = do
         let msg = "of value computed with consumption at " ++ locStr (location c)
         in zeroOrderType loc msg t
       _ -> return ()
-    bindingPattern tparams pat (Ascribed $ anyDimShapeAnnotations t) $ \tparams' pat' -> do
+    bindingPattern pat (Ascribed $ anyDimShapeAnnotations t) $ \pat' -> do
       body' <- checkExp body
-      return $ LetPat tparams' pat' e' body' loc
+      body_t <- unscopeType (S.map identName $ patternIdents pat') <$> expType body'
+      return $ LetPat pat' e' body' (Info body_t) loc
 
 checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
@@ -960,7 +954,7 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
 
     return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
 
-checkExp (LetWith dest src idxes ve body loc) = do
+checkExp (LetWith dest src idxes ve body NoInfo loc) = do
   (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
   let elemt = stripArray (length $ filter isFix idxes) t
   sequentially (checkIdent src) $ \src' _ -> do
@@ -987,7 +981,8 @@ checkExp (LetWith dest src idxes ve body loc) = do
 
       bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
         body' <- consuming src' $ checkExp body
-        return $ LetWith dest' src' idxes' ve' body' loc
+        body_t <- unscopeType (S.singleton $ identName dest') <$> expType body'
+        return $ LetWith dest' src' idxes' ve' body' (Info body_t) loc
   where isFix DimFix{} = True
         isFix _        = False
 
@@ -1040,22 +1035,26 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   e2' <- checkExp e2
   return $ Assert e1' e2' (Info (pretty e1)) loc
 
-checkExp (Lambda tparams params body maybe_retdecl NoInfo loc) =
+checkExp (Lambda params body rettype_te NoInfo loc) =
   removeSeminullOccurences $
-  bindingPatternGroup tparams params $ \tparams' params' -> do
-    maybe_retdecl' <- traverse checkTypeDecl maybe_retdecl
-    (body', closure) <- tapOccurences $ noUnique $
-                        checkFunBody body (unInfo . expandedType <$> maybe_retdecl') loc
+  bindingPatternGroup [] params $ \_ params' -> do
+    rettype_checked <- traverse checkTypeExp rettype_te
+    let declared_rettype =
+          case rettype_checked of Just (_, st, _) -> Just st
+                                  Nothing -> Nothing
+    (body', closure) <-
+      tapOccurences $ noUnique $ checkFunBody body declared_rettype loc
     body_t <- expType body'
-    let (maybe_retdecl'', rettype) =
-          case maybe_retdecl' of
-            Just retdecl'@(TypeDecl _ (Info st)) -> (Just retdecl', st)
+    let (rettype', rettype_st) =
+          case rettype_checked of
+            Just (te, st, _) -> (Just te, st)
             Nothing -> (Nothing, inferReturnUniqueness params' body_t)
 
     checkGlobalAliases params' body_t loc
 
     closure' <- lexicalClosure params' closure
-    return $ Lambda tparams' params' body' maybe_retdecl'' (Info (closure', rettype)) loc
+
+    return $ Lambda params' body' rettype' (Info (closure', rettype_st)) loc
 
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
@@ -1098,10 +1097,8 @@ checkExp (IndexSection idxes NoInfo loc) = do
   where isFix DimFix{} = True
         isFix _        = False
 
-checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
+checkExp (DoLoop mergepat mergeexp form loopbody loc) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
-
-  noTypeParamsPermitted tparams
 
   zeroOrderType (srclocOf mergeexp) "used as loop variable" (typeOf mergeexp')
 
@@ -1116,17 +1113,16 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
   --
   -- Play a little with occurences to ensure it does not look like
   -- none of the merge variables are being used.
-  ((tparams', mergepat', form', loopbody'), bodyflow) <-
+  ((mergepat', form', loopbody'), bodyflow) <-
     case form of
       For i uboundexp -> do
         uboundexp' <- require anySignedType =<< checkExp uboundexp
         bound_t <- expType uboundexp'
         bindingIdent i bound_t $ \i' ->
-          noUnique $ bindingPattern tparams mergepat merge_t $
-          \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
+          noUnique $ bindingPattern mergepat merge_t $
+          \mergepat' -> onlySelfAliasing $ tapOccurences $ do
             loopbody' <- checkExp loopbody
-            return (tparams',
-                    mergepat',
+            return (mergepat',
                     For i' uboundexp',
                     loopbody')
 
@@ -1136,12 +1132,11 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         t <- expType e'
         case t of
           _ | Just t' <- peelArray 1 t ->
-                bindingPattern [] xpat (Ascribed t') $ \_ xpat' ->
-                noUnique $ bindingPattern tparams mergepat merge_t $
-                \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
+                bindingPattern xpat (Ascribed t') $ \xpat' ->
+                noUnique $ bindingPattern mergepat merge_t $
+                \mergepat' -> onlySelfAliasing $ tapOccurences $ do
                   loopbody' <- checkExp loopbody
-                  return (tparams',
-                          mergepat',
+                  return (mergepat',
                           ForIn xpat' e',
                           loopbody')
             | otherwise ->
@@ -1149,12 +1144,11 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
                 "Iteratee of a for-in loop must be an array, but expression has type " ++ pretty t
 
       While cond ->
-        noUnique $ bindingPattern tparams mergepat merge_t $ \tparams' mergepat' ->
+        noUnique $ bindingPattern mergepat merge_t $ \mergepat' ->
         onlySelfAliasing $ tapOccurences $
         sequentially (unifies (Prim Bool) =<< checkExp cond) $ \cond' _ -> do
           loopbody' <- checkExp loopbody
-          return (tparams',
-                  mergepat',
+          return (mergepat',
                   While cond',
                   loopbody')
 
@@ -1173,11 +1167,11 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       consumeMerge _ _ =
         return ()
   consumeMerge mergepat'' =<< expType mergeexp'
-  return $ DoLoop tparams' mergepat'' mergeexp' form' loopbody' loc
+  return $ DoLoop mergepat'' mergeexp' form' loopbody' loc
 
   where
     convergePattern pat body_cons body_t body_loc = do
-      let consumed_merge = S.map identName (patIdentSet pat) `S.intersection`
+      let consumed_merge = S.map identName (patternIdents pat) `S.intersection`
                            body_cons
           uniquePat (Wildcard (Info t) wloc) =
             Wildcard (Info $ t `setUniqueness` Nonunique) wloc
@@ -1282,7 +1276,7 @@ checkCases mt c (c2:cs) = do
 checkCase :: PatternType -> CaseBase NoInfo Name
           -> TermTypeM (CaseBase Info VName, PatternType)
 checkCase mt (CasePat p caseExp loc) =
-  bindingPattern [] p (Ascribed mt) $ \_ p' -> do
+  bindingPattern p (Ascribed mt) $ \p' -> do
     caseExp' <- checkExp caseExp
     caseType <- expType caseExp'
     return (CasePat p' caseExp' loc, caseType)
@@ -1682,7 +1676,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
           forM_ params' $ \p ->
           let consumedNonunique p' =
                 not (unique $ unInfo $ identType p') && (identName p' `S.member` names)
-          in case find consumedNonunique $ S.toList $ patIdentSet p of
+          in case find consumedNonunique $ S.toList $ patternIdents p of
                Just p' ->
                  returnAliased fname (baseName $ identName p') loc
                Nothing ->
@@ -1701,7 +1695,7 @@ warnOnDubiousShapeAnnotations loc params rettype =
   mconcat $ map typeDimNames $
   rettype : map patternStructType params
   where param_names = S.fromList $ mapMaybe (fst . patternParam) params
-        all_pattern_names = S.map identName $ mconcat $ map patIdentSet params
+        all_pattern_names = S.map identName $ mconcat $ map patternIdents params
         patternNameButNotParamName v = v `S.member` all_pattern_names && not (v `S.member` param_names)
         onDubiousNames dubious
           | S.null dubious = return ()
@@ -1719,7 +1713,7 @@ checkGlobalAliases params body_t loc = do
                     _ -> False
   let als = filter (not . isLocal) $ S.toList $
             boundArrayAliases body_t `S.difference`
-            S.map identName (mconcat (map patIdentSet params))
+            S.map identName (mconcat (map patternIdents params))
   case als of
     v:_ | not $ null params ->
       typeError loc $
@@ -1756,7 +1750,7 @@ uniqueParamNames :: [Pattern] -> Names
 uniqueParamNames =
   S.fromList . map identName
   . filter (unique . unInfo . identType)
-  . S.toList . mconcat . map patIdentSet
+  . S.toList . mconcat . map patternIdents
 
 boundArrayAliases :: PatternType -> S.Set VName
 boundArrayAliases (Array als _ _ _) = boundAliases als

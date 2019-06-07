@@ -377,7 +377,7 @@ blockUnhoistedDeps = snd . mapAccumL block S.empty
   where block blocked (Left need) =
           (blocked <> S.fromList (provides need), Left need)
         block blocked (Right need)
-          | blocked `intersects` requires need =
+          | blocked `intersects` freeIn need =
             (blocked <> S.fromList (provides need), Left need)
           | otherwise =
             (blocked, Right need)
@@ -385,10 +385,7 @@ blockUnhoistedDeps = snd . mapAccumL block S.empty
 provides :: Stm lore -> [VName]
 provides = patternNames . stmPattern
 
-requires :: Attributes lore => Stm lore -> Names
-requires = freeInStm
-
-expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
+expandUsage :: (Attributes lore, Aliased lore) =>
                ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> UT.UsageTable
 expandUsage vtable utable bnd =
   UT.expand (`ST.lookupAliases` vtable) (usageInStm bnd <> usageThroughAliases) <>
@@ -450,7 +447,7 @@ insertAllStms :: SimplifiableLore lore =>
 insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
 
 hasFree :: Attributes lore => Names -> BlockPred lore
-hasFree ks _ need = ks `intersects` requires need
+hasFree ks _ need = ks `intersects` freeIn need
 
 isNotSafe :: Attributes lore => BlockPred lore
 isNotSafe _ = not . safeExp . stmExp
@@ -485,7 +482,7 @@ stmIs f _ = f
 
 loopInvariantStm :: Attributes lore => ST.SymbolTable lore -> Stm lore -> Bool
 loopInvariantStm vtable =
-  all (`S.member` ST.availableAtClosestLoop vtable) . freeInStm
+  all (`S.member` ST.availableAtClosestLoop vtable) . freeIn
 
 hoistCommon :: SimplifiableLore lore =>
                SubExp -> IfSort
@@ -538,7 +535,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
           in  sel_nms
         transClosSizes all_bnds scal_nms hoist_bnds =
           let new_bnds = filter (hasPatName scal_nms) all_bnds
-              new_nms  = mconcat $ map (freeInExp . stmExp) new_bnds
+              new_nms  = mconcat $ map (freeIn . stmExp) new_bnds
           in  if null new_bnds
               then hoist_bnds
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
@@ -721,7 +718,6 @@ simplifyExpBase = mapExpM hoist
                 -- Lambdas are handled explicitly because we need to
                 -- bind their parameters.
                 , mapOnVName = simplify
-                , mapOnCertificates = simplify
                 , mapOnRetType = simplify
                 , mapOnBranchType = simplify
                 , mapOnFParam =
@@ -810,8 +806,8 @@ instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) = do
     shape' <- simplify shape
     return $ Array et shape' u
-  simplify (Mem size space) =
-    Mem <$> simplify size <*> pure space
+  simplify (Mem space) =
+    pure $ Mem space
   simplify (Prim bt) =
     return $ Prim bt
 

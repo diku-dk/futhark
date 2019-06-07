@@ -208,10 +208,12 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
 transformExp (Ascript e tp t loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure t <*> pure loc
 
-transformExp (LetPat tparams pat e1 e2 loc) = do
+transformExp (LetPat pat e1 e2 (Info t) loc) = do
   (pat', rr) <- expandRecordPattern pat
-  LetPat tparams pat' <$> transformExp e1 <*>
-    withRecordReplacements rr (transformExp e2) <*> pure loc
+  t' <- transformType t
+  LetPat pat' <$> transformExp e1 <*>
+    withRecordReplacements rr (transformExp e2) <*>
+    pure (Info t') <*> pure loc
 
 transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
   | any isTypeParam tparams = do
@@ -225,10 +227,10 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
         return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
 
-  | otherwise =
-      transformExp $ LetPat [] (Id fname (Info ft) loc) lam e loc
-        where lam = Lambda tparams params body Nothing (Info (mempty, ret)) loc
-              ft = foldFunType (map patternType params) $ fromStruct ret
+  | otherwise = do
+      body' <- transformExp body
+      LetFun fname (tparams, params, retdecl, Info ret, body') <$>
+        transformExp e <*> pure loc
 
 transformExp (If e1 e2 e3 tp loc) = do
   e1' <- transformExp e1
@@ -246,9 +248,9 @@ transformExp (Apply e1 e2 d tp loc) = do
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
 
-transformExp (Lambda tparams params e0 decl tp loc) = do
+transformExp (Lambda params e0 decl tp loc) = do
   e0' <- transformExp e0
-  return $ Lambda tparams params e0' decl tp loc
+  return $ Lambda params e0' decl tp loc
 
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
@@ -271,14 +273,14 @@ transformExp (ProjectSection fields (Info t) loc) =
 transformExp (IndexSection idxs (Info t) loc) =
   desugarIndexSection idxs t loc
 
-transformExp (DoLoop tparams pat e1 form e3 loc) = do
+transformExp (DoLoop pat e1 form e3 loc) = do
   e1' <- transformExp e1
   form' <- case form of
     For ident e2  -> For ident <$> transformExp e2
     ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
     While e2      -> While <$> transformExp e2
   e3' <- transformExp e3
-  return $ DoLoop tparams pat e1' form' e3' loc
+  return $ DoLoop pat e1' form' e3' loc
 
 transformExp (BinOp (QualName qs fname) (Info t) (e1, d1) (e2, d2) tp loc) = do
   fname' <- transformFName fname (toStructural t)
@@ -297,11 +299,12 @@ transformExp (Project n e tp loc) = do
       e' <- transformExp e
       return $ Project n e' tp loc
 
-transformExp (LetWith id1 id2 idxs e1 body loc) = do
+transformExp (LetWith id1 id2 idxs e1 body (Info t) loc) = do
   idxs' <- mapM transformDimIndex idxs
   e1' <- transformExp e1
   body' <- transformExp body
-  return $ LetWith id1 id2 idxs' e1' body' loc
+  t' <- transformType t
+  return $ LetWith id1 id2 idxs' e1' body' (Info t') loc
 
 transformExp (Index e0 idxs info loc) =
   Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure info <*> pure loc
@@ -343,7 +346,7 @@ desugarBinOpSection qn e_left e_right t xtype ytype rettype loc = do
   (e2, p2) <- makeVarParam e_right $ fromStruct ytype
   let body = BinOp qn (Info t) (e1, Info xtype) (e2, Info ytype) (Info rettype) loc
       rettype' = toStruct rettype
-  return $ Lambda [] (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
+  return $ Lambda (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
 
   where makeVarParam (Just e) _ = return (e, [])
         makeVarParam Nothing argtype = do
@@ -355,7 +358,7 @@ desugarProjectSection :: [Name] -> PatternType -> SrcLoc -> MonoM Exp
 desugarProjectSection fields (Arrow _ _ t1 t2) loc = do
   p <- newVName "project_p"
   let body = foldl project (Var (qualName p) (Info t1) noLoc) fields
-  return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
+  return $ Lambda [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
   where project e field =
           case typeOf e of
             Record fs | Just t <- M.lookup field fs ->
@@ -368,7 +371,7 @@ desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Arrow _ _ t1 t2) loc = do
   p <- newVName "index_i"
   let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2) loc
-  return $ Lambda [] [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
+  return $ Lambda [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
 desugarIndexSection  _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()

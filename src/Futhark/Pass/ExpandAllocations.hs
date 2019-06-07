@@ -26,7 +26,7 @@ import qualified Futhark.Representation.ExplicitMemory.Simplify as ExplicitMemor
 import qualified Futhark.Representation.Kernels as Kernels
 import Futhark.Representation.Kernels.Simplify as Kernels
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
-import Futhark.Pass.ExtractKernels.BlockedKernel (blockedReduction)
+import Futhark.Pass.ExtractKernels.BlockedKernel (nonSegRed)
 import Futhark.Pass.ExplicitAllocations (explicitAllocationsInStms)
 import Futhark.Util.IntegralExp
 import Futhark.Util (mapAccumLM)
@@ -93,33 +93,26 @@ transformExp (Op (Inner (HostOp (Kernel desc kspace ts kbody)))) = do
           S.fromList $ M.keys $ scopeOfKernelSpace kspace <>
           scopeOf (kernelBodyStms kbody)
 
+transformExp (Op (Inner (HostOp (SegMap kspace ts kbody)))) = do
+  (alloc_stms, (_, kbody')) <- transformScanRed kspace no_op kbody
+  return (alloc_stms,
+          Op $ Inner $ HostOp $ SegMap kspace ts kbody')
+  where no_op = Lambda { lambdaParams = mempty
+                       , lambdaBody = Body mempty mempty mempty
+                       , lambdaReturnType = mempty }
+
 transformExp (Op (Inner (HostOp (SegRed kspace comm red_op nes ts kbody)))) = do
-  let (kbody', kbody_allocs) = extractBodyAllocations kbody
-      (red_op', red_op_allocs) = extractLambdaAllocations red_op
-      variantAlloc (Var v) = v `S.member` bound_in_kernel
-      variantAlloc _ = False
-      allocs = kbody_allocs <> red_op_allocs
-      (variant_allocs, invariant_allocs) = M.partition (variantAlloc . fst) allocs
+  (alloc_stms, (red_op', kbody')) <- transformScanRed kspace red_op kbody
+  return (alloc_stms,
+          Op $ Inner $ HostOp $ SegRed kspace comm red_op' nes ts kbody')
 
-  (alloc_stms, alloc_offsets) <-
-    memoryRequirements kspace (bodyStms kbody) variant_allocs invariant_allocs
-
-  scope <- askScope
-  let scope' = scopeOfKernelSpace kspace <> M.map nameInfoConv scope
-  either compilerLimitationS pure $ runOffsetM scope' alloc_offsets $ do
-    kbody'' <- offsetMemoryInBody kbody'
-    red_op'' <- localScope (scopeOf red_op') $ offsetMemoryInLambda red_op'
-
-    return (alloc_stms,
-            Op $ Inner $ HostOp $ SegRed kspace comm red_op'' nes ts kbody'')
-
-  where bound_in_kernel =
-          S.fromList $ map fst (spaceDimensions kspace) ++
-          M.keys (scopeOfKernelSpace kspace <>
-                  scopeOf (bodyStms kbody))
+transformExp (Op (Inner (HostOp (SegScan kspace scan_op nes ts kbody)))) = do
+  (alloc_stms, (scan_op', kbody')) <- transformScanRed kspace scan_op kbody
+  return (alloc_stms,
+          Op $ Inner $ HostOp $ SegScan kspace scan_op' nes ts kbody')
 
 transformExp (Op (Inner (HostOp (SegGenRed kspace ops ts kbody)))) = do
-  let (kbody', kbody_allocs) = extractBodyAllocations kbody
+  let (kbody', kbody_allocs) = extractKernelBodyAllocations kbody
       (ops', ops_allocs) = unzip $ map extractGenRedOpAllocations ops
       variantAlloc (Var v) = v `S.member` bound_in_kernel
       variantAlloc _ = False
@@ -135,7 +128,7 @@ transformExp (Op (Inner (HostOp (SegGenRed kspace ops ts kbody)))) = do
   where bound_in_kernel =
           S.fromList $ map fst (spaceDimensions kspace) ++
           M.keys (scopeOfKernelSpace kspace <>
-                  scopeOf (bodyStms kbody))
+                  scopeOf (kernelBodyStms kbody))
 
         extractGenRedOpAllocations op =
           let (lam, allocs) = extractLambdaAllocations $ genReduceOp op
@@ -153,20 +146,41 @@ transformExp (Op (Inner (Husk hspace red_op nes ts body))) = do
 transformExp e =
   return (mempty, e)
 
+transformScanRed :: KernelSpace
+                 -> Lambda InKernel
+                 -> KernelBody InKernel
+                 -> ExpandM (Stms ExplicitMemory, (Lambda InKernel, KernelBody InKernel))
+transformScanRed kspace op kbody = do
+  let (kbody', kbody_allocs) = extractKernelBodyAllocations kbody
+      (op', op_allocs) = extractLambdaAllocations op
+      variantAlloc (Var v) = v `S.member` bound_in_kernel
+      variantAlloc _ = False
+      allocs = kbody_allocs <> op_allocs
+      (variant_allocs, invariant_allocs) = M.partition (variantAlloc . fst) allocs
+
+  allocsForBody variant_allocs invariant_allocs kspace kbody' $ \alloc_stms kbody'' -> do
+    op'' <- localScope (scopeOf op') $ offsetMemoryInLambda op'
+    return (alloc_stms, (op'', kbody''))
+
+  where bound_in_kernel =
+          S.fromList $ map fst (spaceDimensions kspace) ++
+          M.keys (scopeOfKernelSpace kspace <>
+                  scopeOf (kernelBodyStms kbody))
+
 allocsForBody :: M.Map VName (SubExp, Space)
               -> M.Map VName (SubExp, Space)
               -> KernelSpace
-              -> Body InKernel
-              -> (Stms ExplicitMemory -> Body InKernel -> OffsetM b)
+              -> KernelBody InKernel
+              -> (Stms ExplicitMemory -> KernelBody InKernel -> OffsetM b)
               -> ExpandM b
 allocsForBody variant_allocs invariant_allocs kspace kbody' m = do
   (alloc_stms, alloc_offsets) <-
-    memoryRequirements kspace (bodyStms kbody') variant_allocs invariant_allocs
+    memoryRequirements kspace (kernelBodyStms kbody') variant_allocs invariant_allocs
 
   scope <- askScope
   let scope' = scopeOfKernelSpace kspace <> M.map nameInfoConv scope
   either compilerLimitationS pure $ runOffsetM scope' alloc_offsets $ do
-    kbody'' <- offsetMemoryInBody kbody'
+    kbody'' <- offsetMemoryInKernelBody kbody'
     m alloc_stms kbody''
 
 memoryRequirements :: KernelSpace
@@ -211,8 +225,7 @@ extractLambdaAllocations :: Lambda InKernel
                          -> (Lambda InKernel,
                              M.Map VName (SubExp, Space))
 extractLambdaAllocations lam = (lam { lambdaBody = body' }, allocs)
-  where (body', allocs) = extractGenericBodyAllocations bodyStms
-                          (\stms body -> body { bodyStms = stms }) $ lambdaBody lam
+  where (body', allocs) = extractBodyAllocations $ lambdaBody lam
 
 extractGenericBodyAllocations :: (body -> Stms InKernel)
                               -> (Stms InKernel -> body -> body)
@@ -231,7 +244,8 @@ extractThreadAllocations :: Stms InKernel
 extractThreadAllocations bnds =
   let (allocs, bnds') = mapAccumL isAlloc M.empty $ stmsToList bnds
   in (stmsFromList $ catMaybes bnds', allocs)
-  where isAlloc allocs (Let (Pattern [] [patElem]) _ (Op (Alloc size space))) =
+  where isAlloc allocs (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
+          | space `notElem` [Space "private", Space "local"] =
           (M.insert (patElemName patElem) (size, space) allocs,
            Nothing)
 
@@ -250,18 +264,10 @@ expandedInvariantAllocations (num_threads64, num_groups, group_size)
   (alloc_bnds, rebases) <- unzip <$> mapM expand (M.toList invariant_allocs)
 
   return (mconcat alloc_bnds, mconcat rebases)
-  where expand (mem, (per_thread_size, Space "local")) = do
-          let allocpat = Pattern [] [PatElem mem $
-                                     MemMem per_thread_size $ Space "local"]
-          return (oneStm $ Let allocpat (defAux ()) $
-                   Op $ Alloc per_thread_size $ Space "local",
-                  mempty)
-
-        expand (mem, (per_thread_size, space)) = do
+  where expand (mem, (per_thread_size, space)) = do
           total_size <- newVName "total_size"
           let sizepat = Pattern [] [PatElem total_size $ MemPrim int64]
-              allocpat = Pattern [] [PatElem mem $
-                                     MemMem (Var total_size) space]
+              allocpat = Pattern [] [PatElem mem $ MemMem space]
           return (stmsFromList
                   [Let sizepat (defAux ()) $
                     BasicOp $ BinOp (Mul Int64) num_threads64 per_thread_size,
@@ -310,8 +316,7 @@ expandedVariantAllocations kspace kstms variant_allocs = do
 
   return (slice_stms' <> stmsFromList alloc_bnds, mconcat rebases)
   where expand (mem, (offset, total_size, space)) = do
-          let allocpat = Pattern [] [PatElem mem $
-                                     MemMem total_size space]
+          let allocpat = Pattern [] [PatElem mem $ MemMem space]
           return (Let allocpat (defAux ()) $ Op $ Alloc total_size space,
                   M.singleton mem $ newBase offset)
 
@@ -406,7 +411,7 @@ offsetMemoryInPattern (Pattern ctx vals) = do
           new_attr <- offsetMemoryInMemBound $ patElemAttr patElem
           return patElem { patElemAttr = new_attr }
         inspectCtx patElem
-          | Mem _ space <- patElemType patElem,
+          | Mem space <- patElemType patElem,
             space /= Space "local" =
               throwError $ unwords ["Cannot deal with existential memory block",
                                     pretty (patElemName patElem),
@@ -549,7 +554,6 @@ unAllocInKernelStms = unAllocStms False
                       , mapOnOp = unAllocOp
                       , mapOnSubExp = Right
                       , mapOnVName = Right
-                      , mapOnCertificates = Right
                       }
 
 unAttr :: MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)
@@ -587,30 +591,41 @@ sliceKernelSizes sizes kspace kstms = do
       letSubExp "z" $ BasicOp $ BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
     return $ Lambda (xs ++ ys) (mkBody stms zs) i64s
 
+  flat_gtid_lparam <- Param <$> newVName "flat_gtid" <*> pure (Prim (IntType Int32))
+
   (size_lam', _) <- flip runBinderT inkernels_scope $ do
     params <- replicateM num_sizes $ newParam "x" (Prim int64)
     (zs, stms) <- localScope (scopeOfLParams params <>
-                              scopeOfKernelSpace kspace) $ collectStms $ do
+                              scopeOfLParams [flat_gtid_lparam]) $ collectStms $ do
+
+      -- Even though this SegRed is one-dimensional, we need to
+      -- provide indexes corresponding to the original potentially
+      -- multi-dimensional construct.
+      let (kspace_gtids, kspace_dims) = unzip $ spaceDimensions kspace
+          new_inds = unflattenIndex
+                     (map (primExpFromSubExp int32) kspace_dims)
+                     (primExpFromSubExp int32 $ Var $ paramName flat_gtid_lparam)
+      zipWithM_ letBindNames_ (map pure kspace_gtids) =<< mapM toExp new_inds
+
       mapM_ addStm kstms'
       return sizes
+
     localScope (scopeOfKernelSpace kspace) $
       Kernels.simplifyLambda kspace -- XXX, is this the right KernelSpace?
-      (Lambda mempty (Body () stms zs) i64s) []
+      (Lambda [flat_gtid_lparam] (Body () stms zs) i64s) []
 
   ((maxes_per_thread, size_sums), slice_stms) <- flip runBinderT kernels_scope $ do
-    space_size <- letSubExp "space_size" =<<
-                  foldBinOp (Mul Int32) (intConst Int32 1)
-                  (map snd $ spaceDimensions kspace)
     num_threads_64 <- letSubExp "num_threads" $
                       BasicOp $ ConvOp (SExt Int32 Int64) $ spaceNumThreads kspace
 
     pat <- basicPattern [] <$> replicateM num_sizes
            (newIdent "max_per_thread" $ Prim int64)
 
+    thread_space_iota <- letExp "thread_space_iota" $ BasicOp $
+                         Iota (spaceNumThreads kspace) (intConst Int32 0) (intConst Int32 1) Int32
     addStms =<<
-      blockedReduction pat space_size Commutative
-      max_lam size_lam' (spaceDimensions kspace)
-      (replicate num_sizes $ intConst Int64 0) []
+      nonSegRed pat (spaceNumThreads kspace) Commutative max_lam size_lam'
+      (replicate num_sizes $ intConst Int64 0) [thread_space_iota]
 
     size_sums <- forM (patternNames pat) $ \threads_max ->
       letExp "size_sum" $

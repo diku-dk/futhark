@@ -85,22 +85,22 @@ instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Prim et) = ppr et
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
-  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
-  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
+  ppr (Mem DefaultSpace) = text "mem"
+  ppr (Mem (Space sp)) = text "mem" <> text "@" <> text sp
 
 instance Pretty u => Pretty (TypeBase ExtShape u) where
   ppr (Prim et) = ppr et
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
-  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
-  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
+  ppr (Mem DefaultSpace) = text "mem"
+  ppr (Mem (Space sp)) = text "mem" <> text "@" <> text sp
 
 instance Pretty u => Pretty (TypeBase Rank u) where
   ppr (Prim et) = ppr et
   ppr (Array et (Rank n) u) =
     ppr u <> mconcat (replicate n $ brackets mempty) <> ppr et
-  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
-  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
+  ppr (Mem DefaultSpace) = text "mem"
+  ppr (Mem (Space sp)) = text "mem" <> text "@" <> text sp
 
 instance Pretty Ident where
   ppr ident = ppr (identType ident) <+> ppr (identName ident)

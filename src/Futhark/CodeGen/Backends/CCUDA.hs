@@ -30,7 +30,7 @@ compileProg prog = do
       let extra = generateBoilerplate cuda_code cuda_prelude
                                       kernel_names husk_funcs sizes
       in Right <$> GC.compileProg operations extra cuda_includes
-                   [Space "device", Space "local", DefaultSpace] cliOptions prog'
+                   [Space "device", DefaultSpace] cliOptions prog'
   where
     operations :: GC.Operations OpenCL ()
     operations = GC.Operations
@@ -138,7 +138,6 @@ allocateCUDABuffer mem size tag "device" = do
   GC.stm [C.cstm|
       CUDA_SUCCEED(cuda_alloc(&ctx->cuda.nodes[$exp:node_id], $exp:size, $exp:tag, &$exp:mem));
     |]
-allocateCUDABuffer _ _ _ "local" = return ()
 allocateCUDABuffer _ _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' memory space."
 
@@ -148,7 +147,6 @@ deallocateCUDABuffer mem tag "device" = do
   GC.stm [C.cstm|
       CUDA_SUCCEED(cuda_free(&ctx->cuda.nodes[$exp:node_id], $exp:mem, $exp:tag));
     |]
-deallocateCUDABuffer _ _ "local" = return ()
 deallocateCUDABuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
@@ -210,8 +208,7 @@ staticCUDAArray _ space _ _ =
           ++ "' memory space"
 
 cudaMemoryType :: GC.MemoryType OpenCL ()
-cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
-cudaMemoryType "local" = pure [C.cty|unsigned char|] -- dummy type
+cudaMemoryType "device" = return [C.cty|typename CUdeviceptr|]
 cudaMemoryType space =
   fail $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
@@ -230,9 +227,10 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
-callKernel (DistributeHusk num_nodes bparams husk_func interm body red) = do
+    cudaSizeClass SizeLocalMemory = "shared_memory"
+callKernel (DistributeHusk num_nodes bparams repl_mem husk_func interm body red) = do
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
-  GC.defineHuskFunction husk_func bparams body
+  GC.defineHuskFunction husk_func bparams repl_mem body
   params <- newVName "husk_params"
   GC.compileCode interm
   GC.decl [C.cdecl|struct $id:(hfunctionParamStruct husk_func) $id:params;|]

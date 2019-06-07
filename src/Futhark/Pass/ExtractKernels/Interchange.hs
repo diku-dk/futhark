@@ -71,7 +71,7 @@ interchangeLoop
     return $
       SeqLoop [0..patternSize pat-1] pat' merge_expanded form $
       mkBody (pre_copy_bnds<>oneStm map_bnd) res
-  where free_in_body = freeInBody body
+  where free_in_body = freeIn body
 
         copyOrRemoveParam (param, arr)
           | not (paramName param `S.member` free_in_body) =

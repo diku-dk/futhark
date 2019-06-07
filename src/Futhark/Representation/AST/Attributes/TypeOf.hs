@@ -24,8 +24,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , primOpType
        , mapType
        , subExpShapeContext
-       , loopResultContext
-       , loopExtType
 
        -- * Return type
        , module Futhark.Representation.AST.RetType
@@ -46,7 +44,6 @@ import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Constants
-import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.Scope
 
@@ -165,15 +162,6 @@ subExpShapeContext :: HasScope t m =>
                       [TypeBase ExtShape u] -> [SubExp] -> m [SubExp]
 subExpShapeContext rettype ses =
   extractShapeContext rettype <$> traverse (fmap arrayDims . subExpType) ses
-
--- | A loop returns not only its value merge parameters, but may also
--- have an existential context.  Thus, @loopResult ctxmergeparams
--- valmergeparams@ returns those paramters in @ctxmergeparams@ that
--- constitute the returned context.
-loopResultContext :: FreeIn attr => [Param attr] -> [Param attr] -> [Param attr]
-loopResultContext ctx val = filter usedInValue ctx
-  where usedInValue = (`S.member` used) . paramName
-        used = freeIn val <> freeIn ctx
 
 -- | Given the context and value merge parameters of a Futhark @loop@,
 -- produce the return type.

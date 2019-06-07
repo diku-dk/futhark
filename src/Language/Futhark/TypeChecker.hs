@@ -389,8 +389,11 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
 
   -- Apply type abbreviations from a_mty to body_mty.
   let a_abbrs = mtyTypeAbbrs a_mty
-  let type_subst = M.mapMaybe (fmap TypeSub . (`M.lookup` a_abbrs)) p_subst
-  let body_mty' = substituteTypesInMTy type_subst body_mty
+      isSub v = case M.lookup v a_abbrs of
+                  Just abbr -> Just $ TypeSub abbr
+                  _  -> Just $ DimSub $ NamedDim $ qualName v
+      type_subst = M.mapMaybe isSub p_subst
+      body_mty' = substituteTypesInMTy type_subst body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'
   return (body_mty'', p_subst, body_subst)
 
@@ -449,17 +452,21 @@ checkForDuplicateSpecs =
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
-checkTypeBind (TypeBind name ps td doc loc) =
-  checkTypeParams ps $ \ps' -> do
-    (td', l) <- bindingTypeParams ps' $ checkTypeDecl ps' td
+checkTypeBind (TypeBind name tps (TypeDecl t NoInfo) doc loc) =
+  checkTypeParams tps $ \tps' -> do
+    (td', l) <- bindingTypeParams tps' $ do
+      checkForDuplicateNamesInType t
+      (t', st, l) <- checkTypeExp t
+      checkShapeParamUses typeExpUses tps' [t']
+      return (TypeDecl t' $ Info st, l)
     bindSpaced [(Type, name)] $ do
       name' <- checkName Type name loc
       return (mempty { envTypeTable =
-                         M.singleton name' $ TypeAbbr l ps' $ unInfo $ expandedType td',
+                         M.singleton name' $ TypeAbbr l tps' $ unInfo $ expandedType td',
                        envNameMap =
                          M.singleton (Type, name) $ qualName name'
                      },
-              TypeBind name' ps' td' doc loc)
+              TypeBind name' tps' td' doc loc)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
@@ -808,6 +815,10 @@ substituteTypesInEnv substs env =
   where subT name _
           | Just (TypeSub (TypeAbbr l ps t)) <- M.lookup name substs = TypeAbbr l ps t
         subT _ (TypeAbbr l ps t) = TypeAbbr l ps $ substituteTypes substs t
+
+substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
+substituteTypesInBoundV substs (BoundV tps t) =
+  BoundV tps (substituteTypes substs t)
 
 allNamesInMTy :: MTy -> S.Set VName
 allNamesInMTy (MTy abs mod) =

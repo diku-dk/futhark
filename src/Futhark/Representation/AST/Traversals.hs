@@ -26,7 +26,6 @@ module Futhark.Representation.AST.Traversals
   -- * Mapping
     Mapper(..)
   , identityMapper
-  , mapBody
   , mapExpM
   , mapExp
   , mapOnType
@@ -37,8 +36,6 @@ module Futhark.Representation.AST.Traversals
   , Walker(..)
   , identityWalker
   , walkExpM
-  , walkExp
-  -- * Simple wrappers
   )
   where
 
@@ -59,7 +56,6 @@ data Mapper flore tlore m = Mapper {
     -- ^ Most bodies are enclosed in a scope, which is passed along
     -- for convenience.
   , mapOnVName :: VName -> m VName
-  , mapOnCertificates :: Certificates -> m Certificates
   , mapOnRetType :: RetType flore -> m (RetType tlore)
   , mapOnBranchType :: BranchType flore -> m (BranchType tlore)
   , mapOnFParam :: FParam flore -> m (FParam tlore)
@@ -73,17 +69,12 @@ identityMapper = Mapper {
                    mapOnSubExp = return
                  , mapOnBody = const return
                  , mapOnVName = return
-                 , mapOnCertificates = return
                  , mapOnRetType = return
                  , mapOnBranchType = return
                  , mapOnFParam = return
                  , mapOnLParam = return
                  , mapOnOp = return
                  }
-
--- | Map across the bindings of a 'Body'.
-mapBody :: (Stm lore -> Stm lore) -> Body lore -> Body lore
-mapBody f (Body attr stms res) = Body attr (fmap f stms) res
 
 -- | Map a monadic action across the immediate children of an
 -- expression.  Importantly, the 'mapOnExp' action is not invoked for
@@ -171,7 +162,7 @@ mapOnExtType tv (Array bt (Shape shape) u) =
   where mapOnExtSize (Ext x)   = return $ Ext x
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
 mapOnExtType _ (Prim bt) = return $ Prim bt
-mapOnExtType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
+mapOnExtType _ (Mem space) = pure $ Mem space
 
 mapOnLoopForm :: Monad m =>
                  Mapper flore tlore m -> LoopForm flore -> m (LoopForm tlore)
@@ -189,7 +180,7 @@ mapExp m = runIdentity . mapExpM m
 mapOnType :: Monad m =>
              (SubExp -> m SubExp) -> Type -> m Type
 mapOnType _ (Prim bt) = return $ Prim bt
-mapOnType f (Mem size space) = Mem <$> f size <*> pure space
+mapOnType _ (Mem space) = pure $ Mem space
 mapOnType f (Array bt shape u) =
   Array bt <$> (Shape <$> mapM f (shapeDims shape)) <*> pure u
 
@@ -200,7 +191,6 @@ data Walker lore m = Walker {
     walkOnSubExp :: SubExp -> m ()
   , walkOnBody :: Body lore -> m ()
   , walkOnVName :: VName -> m ()
-  , walkOnCertificates :: Certificates -> m ()
   , walkOnRetType :: RetType lore -> m ()
   , walkOnBranchType :: BranchType lore -> m ()
   , walkOnFParam :: FParam lore -> m ()
@@ -214,7 +204,6 @@ identityWalker = Walker {
                    walkOnSubExp = const $ return ()
                  , walkOnBody = const $ return ()
                  , walkOnVName = const $ return ()
-                 , walkOnCertificates = const $ return ()
                  , walkOnRetType = const $ return ()
                  , walkOnBranchType = const $ return ()
                  , walkOnFParam = const $ return ()
@@ -227,7 +216,6 @@ walkMapper f = Mapper {
                  mapOnSubExp = wrap walkOnSubExp
                , mapOnBody = const $ wrap walkOnBody
                , mapOnVName = wrap walkOnVName
-               , mapOnCertificates = wrap walkOnCertificates
                , mapOnRetType = wrap walkOnRetType
                , mapOnBranchType = wrap walkOnBranchType
                , mapOnFParam = wrap walkOnFParam
@@ -240,7 +228,3 @@ walkMapper f = Mapper {
 walkExpM :: Monad m => Walker lore m -> Exp lore -> m ()
 walkExpM f = void . mapExpM m
   where m = walkMapper f
-
--- | As 'walkExp', but runs in the 'Identity' monad..
-walkExp :: Walker lore Identity -> Exp lore -> ()
-walkExp f = runIdentity . walkExpM f

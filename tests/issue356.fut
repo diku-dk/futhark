@@ -169,8 +169,6 @@ module sobol_dir : {
 }
 
 
-module array = import "/futlib/array"
-
 module type sobol_dir = {
   val a: []u32
   val s: []i32
@@ -280,7 +278,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
                        val f : [D]f64 -> t }) : { val run : i32 -> X.t } =
   {
     let run (N:i32) : X.t =
-      stream_red_per X.op (\ [sz] (ns:[sz]i32) : X.t ->
+      stream_red_per X.op (\sz (ns:[sz]i32) : X.t ->
                              if sz > 0 then reduce X.op X.ne (map X.f (chunk ns[0] sz))
                              else X.ne)
       (iota N)
@@ -313,4 +311,4 @@ let main (n: i32) =
   let offs = 2323234545
   let a = S2.chunki offs n
   let b = map S2.independent (map (+offs) (iota n))
-  in (means (array.transpose (normss a)), means (array.transpose (normss b)))
+  in (means (transpose (normss a)), means (transpose (normss b)))

@@ -17,10 +17,16 @@ import           Futhark.MonadFreshNames
 import           Language.Futhark
 import           Futhark.Representation.AST.Pretty ()
 
+-- | An expression or an extended 'Lambda' (with size parameters,
+-- which AST lambdas do not support).
+data ExtExp = ExtLambda [TypeParam] [Pattern] Exp (Aliasing, StructType) SrcLoc
+            | ExtExp Exp
+  deriving (Show)
+
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
 data StaticVal = Dynamic PatternType
-               | LambdaSV [VName] Pattern StructType Exp Env
+               | LambdaSV [VName] Pattern StructType ExtExp Env
                  -- ^ The 'VName's are shape parameters that are bound
                  -- by the 'Pattern'.
                | RecordSV [(Name, StaticVal)]
@@ -101,6 +107,46 @@ lookupVar loc x = do
       | otherwise -> error $ "Variable " ++ pretty x ++ " at "
                           ++ locStr loc ++ " is out of scope."
 
+defuncFun :: [TypeParam] -> [Pattern] -> Exp -> (Aliasing, StructType) -> SrcLoc
+          -> DefM (Exp, StaticVal)
+defuncFun tparams pats e0 (closure, ret) loc = do
+  when (any isTypeParam tparams) $
+    error $ "Received a lambda with type parameters at " ++ locStr loc
+         ++ ", but the defunctionalizer expects a monomorphic input program."
+  -- Extract the first parameter of the lambda and "push" the
+  -- remaining ones (if there are any) into the body of the lambda.
+  let (dims, pat, ret', e0') = case pats of
+        [] -> error "Received a lambda with no parameters."
+        [pat'] -> (map typeParamName tparams, pat', ret, ExtExp e0)
+        (pat' : pats') ->
+          -- Split shape parameters into those that are determined by
+          -- the first pattern, and those that are determined by later
+          -- patterns.
+          let bound_by_pat = (`S.member` patternDimNames pat') . typeParamName
+              (pat_dims, rest_dims) = partition bound_by_pat tparams
+          in (map typeParamName pat_dims, pat',
+              foldFunType (map (toStruct . patternPatternType) pats') ret,
+              ExtLambda rest_dims pats' e0 (closure, ret) loc)
+
+  -- Construct a record literal that closes over the environment of
+  -- the lambda.  Closed-over 'DynamicFun's are converted to their
+  -- closure representation.
+  env <- restrictEnvTo $
+         freeVars (Lambda pats e0 Nothing (Info (closure, ret)) loc) `without`
+         mconcat (map (oneName . typeParamName) tparams)
+  let (fields, env') = unzip $ map closureFromDynamicFun $ M.toList env
+  return (RecordLit fields loc, LambdaSV dims pat ret' e0' $ M.fromList env')
+
+  where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
+          let name = nameFromString $ pretty vn
+          in (RecordFieldExplicit name clsr_env noLoc, (vn, sv))
+
+        closureFromDynamicFun (vn, sv) =
+          let name = nameFromString $ pretty vn
+              tp' = typeFromSV sv
+          in (RecordFieldExplicit name
+               (Var (qualName vn) (Info tp') noLoc) noLoc, (vn, sv))
+
 -- | Defunctionalization of an expression. Returns the residual expression and
 -- the associated static value in the defunctionalization monad.
 defuncExp :: Exp -> DefM (Exp, StaticVal)
@@ -169,7 +215,7 @@ defuncExp e@(Var qn _ loc) = do
     -- can get rid of them.
     IntrinsicSV -> do
       (pats, body, tp) <- etaExpand e
-      defuncExp $ Lambda [] pats body Nothing (Info (mempty, tp)) noLoc
+      defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) noLoc
     _ -> let tp = typeFromSV sv
          in return (Var qn (Info tp) loc, sv)
 
@@ -178,23 +224,20 @@ defuncExp (Ascript e0 tydecl t loc)
                                return (Ascript e0' tydecl t loc, sv)
   | otherwise = defuncExp e0
 
-defuncExp (LetPat tparams pat e1 e2 loc) = do
-  let env_dim = envFromShapeParams tparams
-  (e1', sv1) <- localEnv env_dim $ defuncExp e1
+defuncExp (LetPat pat e1 e2 _ loc) = do
+  (e1', sv1) <- defuncExp e1
   let env  = matchPatternSV pat sv1
       pat' = updatePattern pat sv1
-  (e2', sv2) <- localEnv (env <> env_dim) $ defuncExp e2
-  return (LetPat tparams pat' e1' e2' loc, sv2)
+  (e2', sv2) <- localEnv env $ defuncExp e2
+  return (LetPat pat' e1' e2' (Info $ typeOf e2') loc, sv2)
 
-defuncExp (LetFun vn (dims, pats, _, rettype@(Info ret), e1) e2 loc) = do
-  let env_dim = envFromShapeParams dims
-  (pats', e1', sv1) <- localEnv env_dim $ defuncLet dims pats e1 rettype
-  (e2', sv2) <- extendEnv vn sv1 $ defuncExp e2
-  case pats' of
-    []  -> let t1 = combineTypeShapes (fromStruct ret) $ typeOf e1'
-           in return (LetPat dims (Id vn (Info t1) noLoc) e1' e2' loc, sv2)
-    _:_ -> let t1 = combineTypeShapes ret $ toStruct $ typeOf e1'
-           in return (LetFun vn (dims, pats', Nothing, Info t1, e1') e2' loc, sv2)
+-- Local functions are handled by rewriting them to lambdas, so that
+-- the same machinery can be re-used.
+defuncExp (LetFun vn (dims, pats, _, Info ret, e1) e2 loc) = do
+  (e1', sv1) <- defuncFun dims pats e1 (mempty, ret) loc
+  (e2', sv2) <- localEnv (M.singleton vn sv1) $ defuncExp e2
+  return (LetPat (Id vn (Info (typeOf e1')) loc) e1' e2' (Info $ typeOf e2') loc,
+          sv2)
 
 defuncExp (If e1 e2 e3 tp loc) = do
   (e1', _ ) <- defuncExp e1
@@ -216,41 +259,8 @@ defuncExp (Negate e0 loc) = do
   (e0', sv) <- defuncExp e0
   return (Negate e0' loc, sv)
 
-defuncExp e@(Lambda tparams pats e0 decl (Info (closure, ret)) loc) = do
-  when (any isTypeParam tparams) $
-    error $ "Received a lambda with type parameters at " ++ locStr loc
-         ++ ", but the defunctionalizer expects a monomorphic input program."
-  -- Extract the first parameter of the lambda and "push" the
-  -- remaining ones (if there are any) into the body of the lambda.
-  let (dims, pat, ret', e0') = case pats of
-        [] -> error "Received a lambda with no parameters."
-        [pat'] -> (map typeParamName tparams, pat', ret, e0)
-        (pat' : pats') ->
-          -- Split shape parameters into those that are determined by
-          -- the first pattern, and those that are determined by later
-          -- patterns.
-          let bound_by_pat = (`S.member` patternDimNames pat') . typeParamName
-              (pat_dims, rest_dims) = partition bound_by_pat tparams
-          in (map typeParamName pat_dims, pat',
-              foldFunType (map (toStruct . patternPatternType) pats') ret,
-              Lambda rest_dims pats' e0 decl (Info (closure, ret)) loc)
-
-  -- Construct a record literal that closes over the environment of
-  -- the lambda.  Closed-over 'DynamicFun's are converted to their
-  -- closure representation.
-  env <- restrictEnvTo (freeVars e)
-  let (fields, env') = unzip $ map closureFromDynamicFun $ M.toList env
-  return (RecordLit fields loc, LambdaSV dims pat ret' e0' $ M.fromList env')
-
-  where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
-          let name = nameFromString $ pretty vn
-          in (RecordFieldExplicit name clsr_env noLoc, (vn, sv))
-
-        closureFromDynamicFun (vn, sv) =
-          let name = nameFromString $ pretty vn
-              tp' = typeFromSV sv
-          in (RecordFieldExplicit name
-               (Var (qualName vn) (Info tp') noLoc) noLoc, (vn, sv))
+defuncExp (Lambda pats e0 _ (Info (closure, ret)) loc) =
+  defuncFun [] pats e0 (closure, ret) loc
 
 -- Operator sections are expected to be converted to lambda-expressions
 -- by the monomorphizer, so they should no longer occur at this point.
@@ -260,8 +270,7 @@ defuncExp OpSectionRight{} = error "defuncExp: unexpected operator section."
 defuncExp ProjectSection{} = error "defuncExp: unexpected projection section."
 defuncExp IndexSection{}   = error "defuncExp: unexpected projection section."
 
-defuncExp (DoLoop tparams pat e1 form e3 loc) = do
-  let env_dim = envFromShapeParams tparams
+defuncExp (DoLoop pat e1 form e3 loc) = do
   (e1', sv1) <- defuncExp e1
   let env1 = matchPatternSV pat sv1
   (form', env2) <- case form of
@@ -269,10 +278,10 @@ defuncExp (DoLoop tparams pat e1 form e3 loc) = do
                         return (For v e2', envFromIdent v)
     ForIn pat2 e2 -> do e2' <- defuncExp' e2
                         return (ForIn pat2 e2', envFromPattern pat2)
-    While e2      -> do e2' <- localEnv (env1 <> env_dim) $ defuncExp' e2
+    While e2      -> do e2' <- localEnv env1 $ defuncExp' e2
                         return (While e2', mempty)
-  (e3', sv) <- localEnv (env1 <> env2 <> env_dim) $ defuncExp e3
-  return (DoLoop tparams pat e1' form' e3' loc, sv)
+  (e3', sv) <- localEnv (env1 <> env2) $ defuncExp e3
+  return (DoLoop pat e1' form' e3' loc, sv)
   where envFromIdent (Ident vn (Info tp) _) =
           M.singleton vn $ Dynamic tp
 
@@ -291,12 +300,12 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
     Dynamic _ -> return (Project vn e0' tp loc, Dynamic tp')
     _ -> error $ "Projection of an expression with static value " ++ show sv0
 
-defuncExp (LetWith id1 id2 idxs e1 body loc) = do
+defuncExp (LetWith id1 id2 idxs e1 body t loc) = do
   e1' <- defuncExp' e1
   sv1 <- lookupVar (identSrcLoc id2) $ identName id2
   idxs' <- mapM defuncDimIndex idxs
   (body', sv) <- extendEnv (identName id1) sv1 $ defuncExp body
-  return (LetWith id1 id2 idxs' e1' body' loc, sv)
+  return (LetWith id1 id2 idxs' e1' body' t loc, sv)
 
 defuncExp expr@(Index e0 idxs info loc) = do
   e0' <- defuncExp' e0
@@ -351,6 +360,11 @@ defuncExp (Match e cs t loc) = do
 defuncExp' :: Exp -> DefM Exp
 defuncExp' = fmap fst . defuncExp
 
+defuncExtExp :: ExtExp -> DefM (Exp, StaticVal)
+defuncExtExp (ExtExp e) = defuncExp e
+defuncExtExp (ExtLambda tparams pats e0 (closure, ret) loc) =
+  defuncFun tparams pats e0 (closure, ret) loc
+
 defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
 defuncCase sv (CasePat p e loc) = do
   let p'  = updatePattern p sv
@@ -369,18 +383,17 @@ defuncSoacExp e@ProjectSection{} = return e
 defuncSoacExp (Parens e loc) =
   Parens <$> defuncSoacExp e <*> pure loc
 
-defuncSoacExp (Lambda tparams params e0 decl tp loc) = do
-  let env_dim = envFromShapeParams tparams
-      env = foldMap envFromPattern params
-  e0' <- localEnv (env <> env_dim) $ defuncSoacExp e0
-  return $ Lambda tparams params e0' decl tp loc
+defuncSoacExp (Lambda params e0 decl tp loc) = do
+  let env = foldMap envFromPattern params
+  e0' <- localEnv env $ defuncSoacExp e0
+  return $ Lambda params e0' decl tp loc
 
 defuncSoacExp e
   | Arrow{} <- typeOf e = do
       (pats, body, tp) <- etaExpand e
       let env = foldMap envFromPattern pats
       body' <- localEnv env $ defuncExp' body
-      return $ Lambda [] pats body' Nothing (Info (mempty, tp)) noLoc
+      return $ Lambda pats body' Nothing (Info (mempty, tp)) noLoc
   | otherwise = defuncExp' e
 
 etaExpand :: Exp -> DefM ([Pattern], Exp, StructType)
@@ -417,10 +430,10 @@ defuncLet dims ps@(pat:pats) body (Info rettype)
           bound_by_pat = (`S.member` patternDimNames pat) . typeParamName
           (_pat_dims, rest_dims) = partition bound_by_pat dims
       (pats', body', sv) <- localEnv env $ defuncLet rest_dims pats body (Info rettype)
-      closure <- defuncExp $ Lambda dims ps body Nothing (Info (mempty, rettype)) noLoc
+      closure <- defuncFun dims ps body (mempty, rettype) noLoc
       return (pat : pats', body', DynamicFun closure sv)
   | otherwise = do
-      (e, sv) <- defuncExp $ Lambda dims ps body Nothing (Info (mempty, rettype)) noLoc
+      (e, sv) <- defuncFun dims ps body (mempty, rettype) noLoc
       return ([], e, sv)
 defuncLet _ [] body (Info rettype) = do
   (body', sv) <- defuncExp body
@@ -445,7 +458,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
     LambdaSV dims pat e0_t e0 closure_env -> do
       let env' = matchPatternSV pat sv2
           env_dim = envFromDimNames dims
-      (e0', sv) <- localNewEnv (env' <> closure_env <> env_dim) $ defuncExp e0
+      (e0', sv) <- localNewEnv (env' <> closure_env <> env_dim) $ defuncExtExp e0
 
       let closure_pat = buildEnvPattern closure_env
           pat' = updatePattern pat sv2
@@ -604,7 +617,7 @@ buildRetType env pats = comb
   where bound = foldMap oneName (M.keys env) <> foldMap patternVars pats
         boundAsUnique v =
           maybe False (unique . unInfo . identType) $
-          find ((==v) . identName) $ S.toList $ foldMap patIdentSet pats
+          find ((==v) . identName) $ S.toList $ foldMap patternIdents pats
         problematic v = (v `member` bound) && not (boundAsUnique v)
         comb (Record fs_annot) (Record fs_got) =
           Record $ M.intersectionWith comb fs_annot fs_got
@@ -742,7 +755,7 @@ freeVars expr = case expr of
                           foldMap freeVars incl
   Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
   Ascript e t _ _      -> freeVars e <> names (typeDimNames $ unInfo $ expandedType t)
-  LetPat _ pat e1 e2 _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
+  LetPat pat e1 e2 _ _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
                                           `without` patternVars pat)
 
   LetFun vn (_, pats, _, _, e1) e2 _ ->
@@ -753,18 +766,17 @@ freeVars expr = case expr of
   If e1 e2 e3 _ _           -> freeVars e1 <> freeVars e2 <> freeVars e3
   Apply e1 e2 _ _ _         -> freeVars e1 <> freeVars e2
   Negate e _                -> freeVars e
-  Lambda tps pats e0 _ _ _  -> (names (foldMap patternDimNames pats) <> freeVars e0)
-                               `without` (foldMap patternVars pats <>
-                                          mconcat (map (oneName . typeParamName) tps))
+  Lambda pats e0 _ _ _      -> (names (foldMap patternDimNames pats) <> freeVars e0)
+                               `without` foldMap patternVars pats
   OpSection{}                 -> mempty
   OpSectionLeft _  _ e _ _ _  -> freeVars e
   OpSectionRight _ _ e _ _ _  -> freeVars e
   ProjectSection{}            -> mempty
   IndexSection idxs _ _       -> foldMap freeDimIndex idxs
 
-  DoLoop _ pat e1 form e3 _ -> let (e2fv, e2ident) = formVars form
-                               in freeVars e1 <> e2fv <>
-                               (freeVars e3 `without` (patternVars pat <> e2ident))
+  DoLoop pat e1 form e3 _ -> let (e2fv, e2ident) = formVars form
+                             in freeVars e1 <> e2fv <>
+                             (freeVars e3 `without` (patternVars pat <> e2ident))
     where formVars (For v e2) = (freeVars e2, ident v)
           formVars (ForIn p e2)   = (freeVars e2, patternVars p)
           formVars (While e2)     = (freeVars e2, mempty)
@@ -773,7 +785,7 @@ freeVars expr = case expr of
                                     freeVars e1 <> freeVars e2
   Project _ e _ _                -> freeVars e
 
-  LetWith id1 id2 idxs e1 e2 _ ->
+  LetWith id1 id2 idxs e1 e2 _ _ ->
     ident id2 <> foldMap freeDimIndex idxs <> freeVars e1 <>
     (freeVars e2 `without` ident id1)
 
@@ -795,7 +807,7 @@ freeDimIndex (DimSlice me1 me2 me3) =
 
 -- | Extract all the variable names bound in a pattern.
 patternVars :: Pattern -> NameSet
-patternVars = mconcat . map ident . S.toList . patIdentSet
+patternVars = mconcat . map ident . S.toList . patternIdents
 
 -- | Defunctionalize a top-level value binding. Returns the
 -- transformed result as well as an environment that binds the name of

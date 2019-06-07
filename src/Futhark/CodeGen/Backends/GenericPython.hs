@@ -100,7 +100,7 @@ type EntryOutput op s = VName -> Imp.SpaceId ->
                         CompilerM op s PyExp
 
 -- | Unpack the array being passed to an entry point.
-type EntryInput op s = VName -> Imp.MemSize -> Imp.SpaceId ->
+type EntryInput op s = VName -> Imp.SpaceId ->
                        PrimType -> Imp.Signedness ->
                        [Imp.DimSize] ->
                        PyExp ->
@@ -272,11 +272,10 @@ standardOptions = [
          , optionAction =
            [ Assign (Var "entry_point") $ Var "optarg" ]
          },
-  -- The -b option is just a dummy for now.
   Option { optionLongName = "binary-output"
          , optionShortName = Just 'b'
          , optionArgument = NoArgument
-         , optionAction = [Pass]
+         , optionAction = [Assign (Var "binary_output") $ Bool True]
          },
   Option { optionLongName = "tuning"
          , optionShortName = Nothing
@@ -353,6 +352,7 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
           Assign (Var "do_warmup_run") (Bool False) :
           Assign (Var "num_runs") (Integer 1) :
           Assign (Var "entry_point") (String "main") :
+          Assign (Var "binary_output") (Bool False) :
           generateOptionParser (standardOptions ++ options)
 
         selectEntryPoint entry_point_names entry_points =
@@ -415,10 +415,10 @@ entryPointOutput (Imp.OpaqueValue desc vs) =
 entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) =
   return $ simpleCall tf [Var $ compileName name]
   where tf = compilePrimToExtNp bt ept
-entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ Imp.DefaultSpace bt ept dims)) = do
+entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem Imp.DefaultSpace bt ept dims)) = do
   let cast = Cast (Var $ compileName mem) (compilePrimTypeExt bt ept)
   return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
-entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ (Imp.Space sid) bt ept dims)) = do
+entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims)) = do
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
 
@@ -455,7 +455,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ScalarValue bt s name), e) = do
     [Catch (Tuple [Var "TypeError", Var "AssertionError"])
      [badInput i e $ prettySigned (s==Imp.TypeUnsigned) bt]]
 
-entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace t s dims), e) = do
+entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem Imp.DefaultSpace t s dims), e) = do
   let type_is_wrong =
         UnOp "not" $
         BinOp "and"
@@ -470,18 +470,11 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.Default
   let dest = Var $ compileName mem
       unwrap_call = simpleCall "unwrapArray" [e]
 
-  case memsize of
-    Imp.VarSize sizevar ->
-      stm $ Assign (Var $ compileName sizevar) $
-      simpleCall "np.int32" [Field e "nbytes"]
-    Imp.ConstSize _ ->
-      return ()
-
   stm $ Assign dest unwrap_call
 
-entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize (Imp.Space sid) bt ept dims), e) = do
+entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
   unpack_input <- asks envEntryInput
-  unpack <- collect $ unpack_input mem memsize sid bt ept dims e
+  unpack <- collect $ unpack_input mem sid bt ept dims e
   stm $ Try unpack
     [Catch (Tuple [Var "TypeError", Var "AssertionError"])
      [badInput i e $ concat (replicate (length dims) "[]") ++
@@ -501,7 +494,7 @@ valueDescName = compileName . valueDescVName
 
 valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
-valueDescVName (Imp.ArrayValue vname _ _ _ _ _) = vname
+valueDescVName (Imp.ArrayValue vname _ _ _ _) = vname
 
 -- Key into the FUTHARK_PRIMTYPES dict.
 readTypeEnum :: PrimType -> Imp.Signedness -> String
@@ -527,7 +520,7 @@ readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
   let type_name = readTypeEnum bt ept
   in Assign (Var $ extValueDescName decl) $ simpleCall "read_value" [String type_name]
 
-readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
+readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ bt ept dims)) =
   let type_name = readTypeEnum bt ept
   in Assign (Var $ extValueDescName decl) $ simpleCall "read_value"
      [String $ concat (replicate (length dims) "[]") ++ type_name]
@@ -542,11 +535,13 @@ printValue = fmap concat . mapM (uncurry printValue')
   where printValue' (Imp.OpaqueValue desc _) _ =
           return [Exp $ simpleCall "sys.stdout.write"
                   [String $ "#<opaque " ++ desc ++ ">"]]
-        printValue' (Imp.TransparentValue (Imp.ArrayValue mem memsize (Space _) bt ept shape)) e =
-          printValue' (Imp.TransparentValue (Imp.ArrayValue mem memsize DefaultSpace bt ept shape)) $
+        printValue' (Imp.TransparentValue (Imp.ArrayValue mem (Space _) bt ept shape)) e =
+          printValue' (Imp.TransparentValue (Imp.ArrayValue mem DefaultSpace bt ept shape)) $
           simpleCall (pretty e ++ ".get") []
         printValue' (Imp.TransparentValue _) e =
-          return [Exp $ simpleCall "write_value" [e],
+          return [Exp $ Call (Var "write_value")
+                   [Arg e,
+                    ArgKeyword "binary" (Var "binary_output")],
                   Exp $ simpleCall "sys.stdout.write" [String "\n"]]
 
 prepareEntry :: (Name, Imp.Function op) -> CompilerM op s
@@ -616,7 +611,7 @@ entryTypes func = (map desc $ Imp.functionArgs func,
                    map desc $ Imp.functionResult func)
   where desc (Imp.OpaqueValue d _) = d
         desc (Imp.TransparentValue (Imp.ScalarValue pt s _)) = readTypeEnum pt s
-        desc (Imp.TransparentValue (Imp.ArrayValue _ _ _ pt s dims)) =
+        desc (Imp.TransparentValue (Imp.ArrayValue _ _ pt s dims)) =
           concat (replicate (length dims) "[]") ++ readTypeEnum pt s
 
 callEntryFun :: [PyStmt] -> (Name, Imp.Function op)
@@ -751,7 +746,7 @@ compilePrimToExtNp bt ept =
     (IntType Int64, _) -> "np.int64"
     (FloatType Float32, _) -> "np.float32"
     (FloatType Float64, _) -> "np.float64"
-    (Imp.Bool, _) -> "np.bool"
+    (Imp.Bool, _) -> "np.bool_"
     (Cert, _) -> "np.byte"
 
 compilePrimValue :: Imp.PrimValue -> PyExp

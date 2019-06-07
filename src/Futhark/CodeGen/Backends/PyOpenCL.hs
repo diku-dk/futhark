@@ -303,7 +303,7 @@ packArrayOutput _ sid _ _ _ =
   fail $ "Cannot return array from " ++ sid ++ " space."
 
 unpackArrayInput :: Py.EntryInput Imp.OpenCL ()
-unpackArrayInput mem memsize "device" t s dims e = do
+unpackArrayInput mem "device" t s dims e = do
   let type_is_ok =
         BinOp "and"
         (BinOp "in" (Py.simpleCall "type" [e]) (List [Var "np.ndarray", Var "cl.array.Array"]))
@@ -312,14 +312,7 @@ unpackArrayInput mem memsize "device" t s dims e = do
 
   zipWithM_ (Py.unpackDim e) dims [0..]
 
-  case memsize of
-    Imp.VarSize sizevar ->
-      Py.stm $ Assign (Var $ Py.compileName sizevar) $
-      Py.simpleCall "np.int64" [Field e "nbytes"]
-    Imp.ConstSize _ ->
-      return ()
-
-  let memsize' = Py.compileDim memsize
+  let memsize' = Py.simpleCall "np.int64" [Field e "nbytes"]
       pyOpenCLArrayCase =
         [Assign mem_dest $ Field e "data"]
   numpyArrayCase <- Py.collect $ do
@@ -335,7 +328,7 @@ unpackArrayInput mem memsize "device" t s dims e = do
     pyOpenCLArrayCase
     numpyArrayCase
   where mem_dest = Var $ Py.compileName mem
-unpackArrayInput _ _ sid _ _ _ _ =
+unpackArrayInput _ sid _ _ _ _ =
   fail $ "Cannot accept array from " ++ sid ++ " space."
 
 ifNotZeroSize :: PyExp -> PyStmt -> PyStmt

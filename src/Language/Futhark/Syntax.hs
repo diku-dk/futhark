@@ -190,7 +190,7 @@ instance IsPrimValue Double where
 instance IsPrimValue Bool where
   primValue = BoolValue
 
-class (Eq dim, Ord dim) => ArrayDim dim where
+class Eq dim => ArrayDim dim where
   -- | @unifyDims x y@ combines @x@ and @y@ to contain their maximum
   -- common information, and fails if they conflict.
   unifyDims :: dim -> dim -> Maybe dim
@@ -207,7 +207,9 @@ data DimDecl vn = NamedDim (QualName vn)
                   -- ^ The size is a constant.
                 | AnyDim
                   -- ^ No dimension declaration.
-                deriving (Eq, Ord, Show)
+                deriving Show
+deriving instance Eq (DimDecl Name)
+deriving instance Eq (DimDecl VName)
 
 instance Functor DimDecl where
   fmap = fmapDefault
@@ -220,7 +222,7 @@ instance Traversable DimDecl where
   traverse _ (ConstDim x) = pure $ ConstDim x
   traverse _ AnyDim = pure AnyDim
 
-instance (Eq vn, Ord vn) => ArrayDim (DimDecl vn) where
+instance ArrayDim (DimDecl VName) where
   unifyDims AnyDim y = Just y
   unifyDims x AnyDim = Just x
   unifyDims (NamedDim x) (NamedDim y) | x == y = Just $ NamedDim x
@@ -408,7 +410,9 @@ data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
                 | TEArrow (Maybe vn) (TypeExp vn) (TypeExp vn) SrcLoc
                 | TEEnum [Name] SrcLoc
-                 deriving (Eq, Show)
+                 deriving (Show)
+deriving instance Eq (TypeExp Name)
+deriving instance Eq (TypeExp VName)
 
 instance Located (TypeExp vn) where
   locOf (TEArray _ _ loc)   = locOf loc
@@ -422,7 +426,9 @@ instance Located (TypeExp vn) where
 
 data TypeArgExp vn = TypeArgExpDim (DimDecl vn) SrcLoc
                    | TypeArgExpType (TypeExp vn)
-                deriving (Eq, Show)
+                deriving (Show)
+deriving instance Eq (TypeArgExp Name)
+deriving instance Eq (TypeArgExp VName)
 
 instance Located (TypeArgExp vn) where
   locOf (TypeArgExpDim _ loc) = locOf loc
@@ -544,7 +550,19 @@ deriving instance Showable f vn => Show (DimIndexBase f vn)
 data QualName vn = QualName { qualQuals :: ![vn]
                             , qualLeaf  :: !vn
                             }
-  deriving (Eq, Ord, Show)
+  deriving (Show)
+
+instance Eq (QualName Name) where
+  QualName qs1 v1 == QualName qs2 v2 = qs1 == qs2 && v1 == v2
+
+instance Eq (QualName VName) where
+  QualName _ v1 == QualName _ v2 = v1 == v2
+
+instance Ord (QualName Name) where
+  QualName qs1 v1 `compare` QualName qs2 v2 = compare (qs1, v1) (qs2, v2)
+
+instance Ord (QualName VName) where
+  QualName _ v1 `compare` QualName _ v2 = compare v1 v2
 
 instance Functor QualName where
   fmap = fmapDefault
@@ -596,7 +614,7 @@ data ExpBase f vn =
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) (f PatternType) SrcLoc
             -- ^ Type ascription: @e : t@.
 
-            | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            | LetPat (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
 
             | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
               (ExpBase f vn) SrcLoc
@@ -608,8 +626,8 @@ data ExpBase f vn =
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
 
-            | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
-              (Maybe (TypeDeclBase f vn)) (f (Aliasing, StructType)) SrcLoc
+            | Lambda [PatternBase f vn] (ExpBase f vn)
+              (Maybe (TypeExp vn)) (f (Aliasing, StructType)) SrcLoc
 
             | OpSection (QualName vn) (f PatternType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.
@@ -625,7 +643,6 @@ data ExpBase f vn =
               -- ^ Array indexing as a section: @(.[i,j])@.
 
             | DoLoop
-              [TypeParamBase vn]
               (PatternBase f vn) -- Merge variable pattern
               (ExpBase f vn) -- Initial values of merge variables.
               (LoopFormBase f vn) -- Do or while loop.
@@ -641,7 +658,7 @@ data ExpBase f vn =
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
                       [DimIndexBase f vn] (ExpBase f vn)
-                      (ExpBase f vn) SrcLoc
+                      (ExpBase f vn) (f PatternType) SrcLoc
 
             | Index (ExpBase f vn) [DimIndexBase f vn] (f PatternType) SrcLoc
 
@@ -685,23 +702,23 @@ instance Located (ExpBase f vn) where
   locOf (Ascript _ _ _ loc)            = locOf loc
   locOf (Negate _ pos)                 = locOf pos
   locOf (Apply _ _ _ _ pos)            = locOf pos
-  locOf (LetPat _ _ _ _ pos)           = locOf pos
+  locOf (LetPat _ _ _ _ loc)           = locOf loc
   locOf (LetFun _ _ _ loc)             = locOf loc
-  locOf (LetWith _ _ _ _ _ pos)        = locOf pos
+  locOf (LetWith _ _ _ _ _ _ loc)      = locOf loc
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
   locOf (RecordUpdate _ _ _ _ pos)     = locOf pos
-  locOf (Lambda _ _ _ _ _ loc)         = locOf loc
+  locOf (Lambda _ _ _ _ loc)           = locOf loc
   locOf (OpSection _ _ loc)            = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
   locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (IndexSection _ _ loc)         = locOf loc
-  locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
+  locOf (DoLoop _ _ _ _ pos)           = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
   locOf (VConstr0 _ _ loc)             = locOf loc
-  locOf (Match _ _ _ loc)                = locOf loc
+  locOf (Match _ _ _ loc)              = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc

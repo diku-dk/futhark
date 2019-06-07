@@ -109,6 +109,7 @@ def initialise_opencl_object(self,
     self.max_tile_size = max_tile_size
     self.max_threshold = 0
     self.max_num_groups = 0
+    self.max_local_memory = int(self.device.local_mem_size)
     self.free_list = {}
 
     if 'default_group_size' in sizes:

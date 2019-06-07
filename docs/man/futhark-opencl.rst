@@ -55,4 +55,4 @@ OPTIONS
 SEE ALSO
 ========
 
-futhark-test(1), futhark-cuda(1), futhark-c(1)
+:ref:`futhark-test(1)`, :ref:`futhark-cuda(1)`, :ref:`futhark-c(1)`

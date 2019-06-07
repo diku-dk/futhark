@@ -10,6 +10,7 @@
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
        , kernelType
+       , kernelSpace
        , KernelDebugHints(..)
        , GenReduceOp(..)
        , KernelBody(..)
@@ -17,7 +18,6 @@ module Futhark.Representation.Kernels.Kernel
        , spaceDimensions
        , SpaceStructure(..)
        , scopeOfKernelSpace
-       , WhichThreads(..)
        , KernelResult(..)
        , kernelResultSubExp
        , KernelPath
@@ -55,7 +55,6 @@ import Data.List
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Util.Pretty as PP
@@ -72,7 +71,6 @@ import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeBodyAliases, removeStmAliases)
 import Futhark.Representation.Kernels.KernelExp (SplitOrdering(..))
 import Futhark.Representation.Kernels.Sizes
-import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import Futhark.Tools (partitionChunkedKernelLambdaParameters)
@@ -107,11 +105,20 @@ data GenReduceOp lore =
 
 data Kernel lore
   = Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
-  | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (Body lore)
+  | SegMap KernelSpace [Type] (KernelBody lore)
+  | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (KernelBody lore)
     -- ^ The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
-  | SegGenRed KernelSpace [GenReduceOp lore] [Type] (Body lore)
+  | SegScan KernelSpace (Lambda lore) [SubExp] [Type] (KernelBody lore)
+  | SegGenRed KernelSpace [GenReduceOp lore] [Type] (KernelBody lore)
     deriving (Eq, Show, Ord)
+
+kernelSpace :: Kernel lore -> KernelSpace
+kernelSpace (Kernel _ kspace _ _) = kspace
+kernelSpace (SegMap kspace _ _) = kspace
+kernelSpace (SegRed kspace _ _ _ _ _) = kspace
+kernelSpace (SegScan kspace _ _ _ _) = kspace
+kernelSpace (SegGenRed kspace _ _ _) = kspace
 
 data KernelSpace = KernelSpace { spaceGlobalId :: VName
                                , spaceLocalId :: VName
@@ -119,6 +126,9 @@ data KernelSpace = KernelSpace { spaceGlobalId :: VName
                                , spaceNumThreads :: SubExp
                                , spaceNumGroups :: SubExp
                                , spaceGroupSize :: SubExp -- flat group size
+                               , spaceNumVirtGroups :: SubExp
+                                 -- How many groups should we pretend
+                                 -- exist?
                                , spaceStructure :: SpaceStructure
                                -- TODO: document what this spaceStructure is
                                -- used for
@@ -157,7 +167,11 @@ deriving instance Annotations lore => Ord (KernelBody lore)
 deriving instance Annotations lore => Show (KernelBody lore)
 deriving instance Annotations lore => Eq (KernelBody lore)
 
-data KernelResult = ThreadsReturn WhichThreads SubExp
+data KernelResult = ThreadsReturn SubExp
+                    -- ^ Each thread in the kernel space (which must
+                    -- be non-empty) returns this.
+                  | GroupsReturn SubExp
+                    -- ^ Each group returns this.
                   | WriteReturn
                     [SubExp] -- Size of array.  Must match number of dims.
                     VName -- Which array
@@ -169,20 +183,13 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                     SubExp -- Per-thread (max) chunk size.
                     (Maybe SubExp) -- Optional precalculated offset.
                     VName -- Chunk by this thread.
-                  | KernelInPlaceReturn VName -- HACK!
                   deriving (Eq, Show, Ord)
 
 kernelResultSubExp :: KernelResult -> SubExp
-kernelResultSubExp (ThreadsReturn _ se) = se
+kernelResultSubExp (ThreadsReturn se) = se
+kernelResultSubExp (GroupsReturn se) = se
 kernelResultSubExp (WriteReturn _ arr _) = Var arr
 kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
-kernelResultSubExp (KernelInPlaceReturn v) = Var v
-
-data WhichThreads = AllThreads
-                  | OneResultPerGroup
-                  | ThreadsPerGroup [(VName,SubExp)] -- All threads before this one.
-                  | ThreadsInSpace
-                  deriving (Eq, Show, Ord)
 
 -- | Like 'Mapper', but just for 'Kernel's.
 data KernelMapper flore tlore m = KernelMapper {
@@ -209,20 +216,32 @@ identityKernelMapper = KernelMapper { mapOnKernelSubExp = return
 -- and is done left-to-right.
 mapKernelM :: (Applicative m, Monad m) =>
               KernelMapper flore tlore m -> Kernel flore -> m (Kernel tlore)
-mapKernelM tv (SegRed space comm red_op nes ts lam) =
+mapKernelM tv (SegMap space ts body) =
+  SegMap
+  <$> mapOnKernelSpace tv space
+  <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
+  <*> mapOnKernelKernelBody tv body
+mapKernelM tv (SegRed space comm red_op nes ts body) =
   SegRed
   <$> mapOnKernelSpace tv space
   <*> pure comm
   <*> mapOnKernelLambda tv red_op
   <*> mapM (mapOnKernelSubExp tv) nes
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
-  <*> mapOnKernelBody tv lam
+  <*> mapOnKernelKernelBody tv body
+mapKernelM tv (SegScan space scan_op nes ts body) =
+  SegScan
+  <$> mapOnKernelSpace tv space
+  <*> mapOnKernelLambda tv scan_op
+  <*> mapM (mapOnKernelSubExp tv) nes
+  <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
+  <*> mapOnKernelKernelBody tv body
 mapKernelM tv (SegGenRed space ops ts body) =
   SegGenRed
   <$> mapOnKernelSpace tv space
   <*> mapM onGenRedOp ops
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
-  <*> mapOnKernelBody tv body
+  <*> mapOnKernelKernelBody tv body
   where onGenRedOp (GenReduceOp w arrs nes shape op) =
           GenReduceOp <$> mapOnKernelSubExp tv w
           <*> mapM (mapOnKernelVName tv) arrs
@@ -240,11 +259,12 @@ mapKernelM tv (Kernel desc space ts kernel_body) =
 
 mapOnKernelSpace :: Monad f =>
                     KernelMapper flore tlore f -> KernelSpace -> f KernelSpace
-mapOnKernelSpace tv (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+mapOnKernelSpace tv (KernelSpace gtid ltid gid num_threads num_groups group_size virt_groups structure) =
   KernelSpace gtid ltid gid -- all in binding position
   <$> mapOnKernelSubExp tv num_threads
   <*> mapOnKernelSubExp tv num_groups
   <*> mapOnKernelSubExp tv group_size
+  <*> mapOnKernelSubExp tv virt_groups
   <*> mapOnKernelStructure structure
   where mapOnKernelStructure (FlatThreadSpace dims) =
           FlatThreadSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
@@ -261,15 +281,15 @@ mapOnKernelType :: Monad m =>
 mapOnKernelType _tv (Prim pt) = pure $ Prim pt
 mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
-mapOnKernelType _tv (Mem se s) = pure $ Mem se s
+mapOnKernelType _tv (Mem s) = pure $ Mem s
 
 instance (Attributes lore, FreeIn (LParamAttr lore)) =>
          FreeIn (Kernel lore) where
   freeIn e = execWriter $ mapKernelM free e
     where walk f x = tell (f x) >> return x
           free = KernelMapper { mapOnKernelSubExp = walk freeIn
-                              , mapOnKernelLambda = walk freeInLambda
-                              , mapOnKernelBody = walk freeInBody
+                              , mapOnKernelLambda = walk freeIn
+                              , mapOnKernelBody = walk freeIn
                               , mapOnKernelVName = walk freeIn
                               , mapOnKernelLParam = walk freeIn
                               , mapOnKernelKernelBody = walk freeIn
@@ -315,22 +335,16 @@ walkKernelM f = void . mapKernelM m
   where m = walkKernelMapper f
 
 instance FreeIn KernelResult where
-  freeIn (ThreadsReturn which what) = freeIn which <> freeIn what
+  freeIn (GroupsReturn what) = freeIn what
+  freeIn (ThreadsReturn what) = freeIn what
   freeIn (WriteReturn rws arr res) = freeIn rws <> freeIn arr <> freeIn res
   freeIn (ConcatReturns o w per_thread_elems moffset v) =
     freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn moffset <> freeIn v
-  freeIn (KernelInPlaceReturn what) = freeIn what
-
-instance FreeIn WhichThreads where
-  freeIn AllThreads = mempty
-  freeIn OneResultPerGroup = mempty
-  freeIn (ThreadsPerGroup limit) = freeIn limit
-  freeIn ThreadsInSpace = mempty
 
 instance Attributes lore => FreeIn (KernelBody lore) where
   freeIn (KernelBody attr stms res) =
     (freeIn attr <> free_in_stms <> free_in_res) `S.difference` bound_in_stms
-    where free_in_stms = fold $ fmap freeInStm stms
+    where free_in_stms = fold $ fmap freeIn stms
           free_in_res = freeIn res
           bound_in_stms = fold $ fmap boundByStm stms
 
@@ -342,8 +356,10 @@ instance Attributes lore => Substitute (KernelBody lore) where
     (substituteNames subst res)
 
 instance Substitute KernelResult where
-  substituteNames subst (ThreadsReturn who se) =
-    ThreadsReturn (substituteNames subst who) (substituteNames subst se)
+  substituteNames subst (GroupsReturn se) =
+    GroupsReturn $ substituteNames subst se
+  substituteNames subst (ThreadsReturn se) =
+    ThreadsReturn $ substituteNames subst se
   substituteNames subst (WriteReturn rws arr res) =
     WriteReturn
     (substituteNames subst rws) (substituteNames subst arr)
@@ -355,24 +371,16 @@ instance Substitute KernelResult where
     (substituteNames subst per_thread_elems)
     (substituteNames subst moffset)
     (substituteNames subst v)
-  substituteNames subst (KernelInPlaceReturn what) =
-    KernelInPlaceReturn (substituteNames subst what)
-
-instance Substitute WhichThreads where
-  substituteNames _ AllThreads = AllThreads
-  substituteNames _ OneResultPerGroup = OneResultPerGroup
-  substituteNames _ ThreadsInSpace = ThreadsInSpace
-  substituteNames subst (ThreadsPerGroup limit) =
-    ThreadsPerGroup $ substituteNames subst limit
 
 instance Substitute KernelSpace where
-  substituteNames subst (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+  substituteNames subst (KernelSpace gtid ltid gid num_threads num_groups group_size virt_groups structure) =
     KernelSpace (substituteNames subst gtid)
     (substituteNames subst ltid)
     (substituteNames subst gid)
     (substituteNames subst num_threads)
     (substituteNames subst num_groups)
     (substituteNames subst group_size)
+    (substituteNames subst virt_groups)
     (substituteNames subst structure)
 
 instance Substitute SpaceStructure where
@@ -406,11 +414,8 @@ instance Attributes lore => Rename (KernelBody lore) where
 instance Rename KernelResult where
   rename = substituteRename
 
-instance Rename WhichThreads where
-  rename = substituteRename
-
 scopeOfKernelSpace :: KernelSpace -> Scope lore
-scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
+scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ _ structure) =
   M.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat $ IndexInfo Int32
   where structure' = case structure of
                        FlatThreadSpace dims -> map fst dims
@@ -422,33 +427,34 @@ instance Attributes lore => Rename (Kernel lore) where
   rename = mapKernelM renamer
     where renamer = KernelMapper rename rename rename rename rename rename
 
+
+kernelResultShape :: KernelSpace -> Type -> KernelResult -> Type
+kernelResultShape _ t (WriteReturn rws _ _) =
+  t `arrayOfShape` Shape rws
+kernelResultShape space t (GroupsReturn _) =
+  t `arrayOfRow` spaceNumGroups space
+kernelResultShape space t (ThreadsReturn _) =
+  foldr (flip arrayOfRow . snd) t $ spaceDimensions space
+kernelResultShape _ t (ConcatReturns _ w _ _ _) =
+  t `arrayOfRow` w
+
 kernelType :: Kernel lore -> [Type]
 kernelType (Kernel _ space ts body) =
-  zipWith resultShape ts $ kernelBodyResult body
-  where dims = map snd $ spaceDimensions space
-        num_groups = spaceNumGroups space
-        num_threads = spaceNumThreads space
-        resultShape t (WriteReturn rws _ _) =
-          t `arrayOfShape` Shape rws
-        resultShape t (ThreadsReturn AllThreads _) =
-          t `arrayOfRow` num_threads
-        resultShape t (ThreadsReturn OneResultPerGroup _) =
-          t `arrayOfRow` num_groups
-        resultShape t (ThreadsReturn (ThreadsPerGroup limit) _) =
-          t `arrayOfShape` Shape (map snd limit) `arrayOfRow` num_groups
-        resultShape t (ThreadsReturn ThreadsInSpace _) =
-          foldr (flip arrayOfRow) t dims
-        resultShape t (ConcatReturns _ w _ _ _) =
-          t `arrayOfRow` w
-        resultShape t KernelInPlaceReturn{} =
-          t
+  zipWith (kernelResultShape space) ts $ kernelBodyResult body
 
-kernelType (SegRed space _ _ nes ts _) =
+kernelType (SegMap space ts body) =
+  zipWith (kernelResultShape space) ts $ kernelBodyResult body
+
+kernelType (SegRed space _ _ nes ts body) =
   map (`arrayOfShape` Shape outer_dims) red_ts ++
-  map (`arrayOfShape` Shape dims) map_ts
-  where (red_ts, map_ts) = splitAt (length nes) ts
-        dims = map snd $ spaceDimensions space
-        outer_dims = init dims
+  zipWith (kernelResultShape space) map_ts
+  (drop (length red_ts) $ kernelBodyResult body)
+  where outer_dims = init $ map snd $ spaceDimensions space
+        (red_ts, map_ts) = splitAt (length nes) ts
+
+kernelType (SegScan space _ _ ts _) =
+  map (`arrayOfShape` Shape dims) ts
+  where dims = map snd $ spaceDimensions space
 
 kernelType (SegGenRed space ops _ _) = do
   op <- ops
@@ -474,10 +480,15 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
     mconcat (map consumedByReturn (kernelBodyResult kbody))
     where consumedByReturn (WriteReturn _ a _) = S.singleton a
           consumedByReturn _                   = mempty
-  consumedInOp (SegGenRed _ ops _ body) =
+  consumedInOp (SegGenRed _ ops _ kbody) =
     S.fromList (concatMap genReduceDest ops) <>
-    consumedInBody body
-  consumedInOp _ = mempty
+    consumedInKernelBody kbody
+  consumedInOp (SegMap _ _ kbody) =
+    consumedInKernelBody kbody
+  consumedInOp (SegRed _ _ _ _ _ kbody) =
+    consumedInKernelBody kbody
+  consumedInOp (SegScan _ _ _ _ kbody) =
+    consumedInKernelBody kbody
 
 aliasAnalyseKernelBody :: (Attributes lore,
                            CanBeAliased (Op lore)) =>
@@ -485,15 +496,7 @@ aliasAnalyseKernelBody :: (Attributes lore,
                        -> KernelBody (Aliases lore)
 aliasAnalyseKernelBody (KernelBody attr stms res) =
   let Body attr' stms' _ = Alias.analyseBody $ Body attr stms []
-  in KernelBody attr' stms' $ map aliasAnalyseKernelResult res
-  where aliasAnalyseKernelResult (ThreadsReturn which what) =
-          ThreadsReturn which what
-        aliasAnalyseKernelResult (WriteReturn rws arr res') =
-          WriteReturn rws arr res'
-        aliasAnalyseKernelResult (ConcatReturns o w per_thread_elems moffset v) =
-          ConcatReturns o w per_thread_elems moffset v
-        aliasAnalyseKernelResult (KernelInPlaceReturn what) =
-          KernelInPlaceReturn what
+  in KernelBody attr' stms' res
 
 instance (Attributes lore,
           Attributes (Aliases lore),
@@ -536,17 +539,7 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) w
           addKernelBodyRanges (KernelBody attr stms res) =
             Range.analyseStms stms $ \stms' -> do
             let attr' = (mkBodyRanges stms $ map kernelResultSubExp res, attr)
-            res' <- mapM addKernelResultRanges res
-            return $ KernelBody attr' stms' res'
-
-          addKernelResultRanges (ThreadsReturn which what) =
-            return $ ThreadsReturn which what
-          addKernelResultRanges (WriteReturn rws arr res) =
-            return $ WriteReturn rws arr res
-          addKernelResultRanges (ConcatReturns o w per_thread_elems moffset v) =
-            return $ ConcatReturns o w per_thread_elems moffset v
-          addKernelResultRanges (KernelInPlaceReturn what) =
-            return $ KernelInPlaceReturn what
+            return $ KernelBody attr' stms' res
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
   type OpWithWisdom (Kernel lore) = Kernel (Wise lore)
@@ -565,19 +558,11 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
 
 instance Attributes lore => ST.IndexOp (Kernel lore) where
   indexOp vtable k (Kernel _ space _ kbody) is = do
-    ThreadsReturn which se <- maybeNth k $ kernelBodyResult kbody
-
-    prim_table <- case (which, is) of
-      (AllThreads, [i]) ->
-        Just $ M.singleton (spaceGlobalId space) (i,mempty)
-      (ThreadsInSpace, _)
-        | (gtids, _) <- unzip $ spaceDimensions space,
-          length gtids == length is ->
-            Just $ M.fromList $ zip gtids $ zip is $ repeat mempty
-      _ ->
-        Nothing
-
-    let prim_table' = foldl expandPrimExpTable prim_table $ kernelBodyStms kbody
+    ThreadsReturn se <- maybeNth k $ kernelBodyResult kbody
+    let (gtids, _) = unzip $ spaceDimensions space
+    guard $ length gtids == length is
+    let prim_table = M.fromList $ zip gtids $ zip is $ repeat mempty
+        prim_table' = foldl expandPrimExpTable prim_table $ kernelBodyStms kbody
     case se of
       Var v -> M.lookup v prim_table'
       _ -> Nothing
@@ -597,15 +582,6 @@ instance Attributes lore => ST.IndexOp (Kernel lore) where
 
   indexOp _ _ _ _ = Nothing
 
-instance Aliased lore => UsageInOp (Kernel lore) where
-  usageInOp (Kernel _ _ _ kbody) =
-    mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
-  usageInOp (SegRed _ _ _ _ _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
-  usageInOp (SegGenRed _ ops _ body) =
-    mconcat $ map UT.consumedUsage $ S.toList (consumedInBody body) <>
-    concatMap genReduceDest ops
-
 consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
 consumedInKernelBody (KernelBody attr stms _) =
@@ -622,22 +598,23 @@ typeCheckReduceLambda ts ne_ts red_op = do
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
-typeCheckKernel (SegRed space _ red_op nes ts body) = do
+typeCheckKernel (SegMap space ts kbody) = do
   checkSpace space
   mapM_ TC.checkType ts
+  TC.binding (scopeOfKernelSpace space) $ checkKernelBody ts kbody
 
-  ne_ts <- mapM subExpType nes
+typeCheckKernel (SegRed space _ red_op nes ts body) =
+  checkScanRed space red_op nes ts body
 
-  TC.binding (scopeOfKernelSpace space) $ do
-    typeCheckReduceLambda ts ne_ts red_op
-    TC.checkLambdaBody ts body
+typeCheckKernel (SegScan space scan_op nes ts body) =
+  checkScanRed space scan_op nes ts body
 
 typeCheckKernel (SegGenRed space ops ts body) = do
   checkSpace space
   mapM_ TC.checkType ts
 
   TC.binding (scopeOfKernelSpace space) $ do
-    forM_ ops $ \(GenReduceOp dest_w dests nes shape op) -> do
+    nes_ts <- forM ops $ \(GenReduceOp dest_w dests nes shape op) -> do
       TC.require [Prim int32] dest_w
       nes' <- mapM TC.checkArg nes
       mapM_ (TC.require [Prim int32]) $ shapeDims shape
@@ -646,23 +623,24 @@ typeCheckKernel (SegGenRed space ops ts body) = do
       let stripVecDims = stripArray $ shapeRank shape
       TC.checkLambda op $ map (TC.noArgAliases .first stripVecDims) $ nes' ++ nes'
       let nes_t = map TC.argType nes'
-      unless (nes_t == map (`arrayOfShape` shape) (lambdaReturnType op)) $
+      unless (nes_t == lambdaReturnType op) $
         TC.bad $ TC.TypeError $ "SegGenRed operator has return type " ++
         prettyTuple (lambdaReturnType op) ++ " but neutral element has type " ++
         prettyTuple nes_t
 
       -- Arrays must have proper type.
-      let dest_shape = Shape $ segment_dims <> [dest_w]
+      let dest_shape = Shape (segment_dims <> [dest_w]) <> shape
       forM_ (zip nes_t dests) $ \(t, dest) -> do
         TC.requireI [t `arrayOfShape` dest_shape] dest
         TC.consume =<< TC.lookupAliases dest
 
-    TC.checkLambdaBody ts body
+      return $ map (`arrayOfShape` shape) nes_t
+
+    checkKernelBody ts body
 
     -- Return type of bucket function must be an index for each
     -- operation followed by the values to write.
-    nes_ts <- concat <$> mapM (mapM subExpType . genReduceNeutral) ops
-    let bucket_ret_t = replicate (length ops) (Prim int32) ++ nes_ts
+    let bucket_ret_t = replicate (length ops) (Prim int32) ++ concat nes_ts
     unless (bucket_ret_t == ts) $
       TC.bad $ TC.TypeError $ "SegGenRed body has return type " ++
       prettyTuple ts ++ " but should have type " ++
@@ -677,16 +655,20 @@ typeCheckKernel (Kernel _ space kts kbody) = do
 
   TC.binding (scopeOfKernelSpace space) $
     checkKernelBody kts kbody
-  where checkKernelBody ts (KernelBody (_, attr) stms res) = do
-          TC.checkBodyLore attr
-          TC.checkStms stms $ do
-            unless (length ts == length res) $
-              TC.bad $ TC.TypeError $ "Kernel return type is " ++ prettyTuple ts ++
-              ", but body returns " ++ show (length res) ++ " values."
-            zipWithM_ checkKernelResult res ts
 
-        checkKernelResult (ThreadsReturn which what) t = do
-          checkWhich which
+checkKernelBody :: TC.Checkable lore =>
+                   [Type] -> KernelBody (Aliases lore) -> TC.TypeM lore ()
+checkKernelBody ts (KernelBody (_, attr) stms kres) = do
+  TC.checkBodyLore attr
+  TC.checkStms stms $ do
+    unless (length ts == length kres) $
+      TC.bad $ TC.TypeError $ "Kernel return type is " ++ prettyTuple ts ++
+      ", but body returns " ++ show (length kres) ++ " values."
+    zipWithM_ checkKernelResult kres ts
+
+  where checkKernelResult (GroupsReturn what) t =
+          TC.require [t] what
+        checkKernelResult (ThreadsReturn what) t =
           TC.require [t] what
         checkKernelResult (WriteReturn rws arr res) t = do
           mapM_ (TC.require [Prim int32]) rws
@@ -709,19 +691,32 @@ typeCheckKernel (Kernel _ space kts kbody) = do
           vt <- lookupType v
           unless (vt == t `arrayOfRow` arraySize 0 vt) $
             TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
-        checkKernelResult (KernelInPlaceReturn what) t =
-          TC.requireI [t] what
 
-        checkWhich AllThreads = return ()
-        checkWhich OneResultPerGroup = return ()
-        checkWhich ThreadsInSpace = return ()
-        checkWhich (ThreadsPerGroup limit) = do
-          mapM_ (TC.requireI [Prim int32] . fst) limit
-          mapM_ (TC.require [Prim int32] . snd) limit
+checkScanRed :: TC.Checkable lore =>
+                KernelSpace
+             -> Lambda (Aliases lore)
+             -> [SubExp]
+             -> [Type]
+             -> KernelBody (Aliases lore)
+             -> TC.TypeM lore ()
+checkScanRed space scan_op nes ts kbody = do
+  checkSpace space
+  mapM_ TC.checkType ts
+
+  ne_ts <- mapM subExpType nes
+
+  let asArg t = (t, mempty)
+  TC.binding (scopeOfKernelSpace space) $ do
+    TC.checkLambda scan_op $ map asArg $ ne_ts ++ ne_ts
+    unless (lambdaReturnType scan_op == ne_ts &&
+            take (length nes) ts == ne_ts) $
+      TC.bad $ TC.TypeError "wrong type for reduction or neutral elements."
+
+    checkKernelBody ts kbody
 
 checkSpace :: TC.Checkable lore => KernelSpace -> TC.TypeM lore ()
-checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
-  mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size]
+checkSpace (KernelSpace _ _ _ num_threads num_groups group_size virt_groups structure) = do
+  mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size,virt_groups]
   case structure of
     FlatThreadSpace dims ->
       mapM_ (TC.require [Prim int32] . snd) dims
@@ -732,19 +727,29 @@ checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
-    where kernelBodyMetrics :: KernelBody lore -> MetricsM ()
-          kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
+  opMetrics (SegMap _ _ body) =
+    inside "SegMap" $ kernelBodyMetrics body
   opMetrics (SegRed _ _ red_op _ _ body) =
-    inside "SegRed" $ lambdaMetrics red_op >> bodyMetrics body
+    inside "SegRed" $ lambdaMetrics red_op >> kernelBodyMetrics body
+  opMetrics (SegScan _ scan_op _ _ body) =
+    inside "SegScan" $ lambdaMetrics scan_op >> kernelBodyMetrics body
   opMetrics (SegGenRed _ ops _ body) =
     inside "SegGenRed" $ do mapM_ (lambdaMetrics . genReduceOp) ops
-                            bodyMetrics body
+                            kernelBodyMetrics body
+
+kernelBodyMetrics :: OpMetrics (Op lore) => KernelBody lore -> MetricsM ()
+kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr (Kernel desc space ts body) =
     text "kernel" <+> text (kernelName desc) <>
     PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
+
+  ppr (SegMap space ts body) =
+    text "segmap" <>
+    PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
+    PP.nestedBlock "{" "}" (ppr body)
 
   ppr (SegRed space comm red_op nes ts body) =
     text name <> PP.parens (ppr red_op <> PP.comma </>
@@ -753,6 +758,12 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
     PP.nestedBlock "{" "}" (ppr body)
     where name = case comm of Commutative    -> "segred_comm"
                               Noncommutative -> "segred"
+
+  ppr (SegScan space scan_op nes ts body) =
+    text "segscan" <> PP.parens (ppr scan_op <> PP.comma </>
+                                 PP.braces (PP.commasep $ map ppr nes)) </>
+    PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
+    PP.nestedBlock "{" "}" (ppr body)
 
   ppr (SegGenRed space ops ts body) =
     text "seggenred" <>
@@ -767,9 +778,10 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             ppr op
 
 instance Pretty KernelSpace where
-  ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size structure) =
+  ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size virt_groups structure) =
     parens (commasep [text "num groups:" <+> ppr num_groups,
                       text "group size:" <+> ppr group_size,
+                      text "virt_num_groups:" <+> ppr virt_groups,
                       text "num threads:" <+> ppr num_threads,
                       text "global TID ->" <+> ppr f_gtid,
                       text "local TID ->" <+> ppr f_ltid,
@@ -791,14 +803,10 @@ instance PrettyLore lore => Pretty (KernelBody lore) where
     text "return" <+> PP.braces (PP.commasep $ map ppr res)
 
 instance Pretty KernelResult where
-  ppr (ThreadsReturn AllThreads what) =
-    ppr what
-  ppr (ThreadsReturn OneResultPerGroup what) =
-    text "group" <+> "returns" <+> ppr what
-  ppr (ThreadsReturn (ThreadsPerGroup limit) what) =
-    text "thread <" <+> ppr limit <+> text "returns" <+> ppr what
-  ppr (ThreadsReturn ThreadsInSpace what) =
-    text "thread in space returns" <+> ppr what
+  ppr (GroupsReturn what) =
+    text "group returns" <+> ppr what
+  ppr (ThreadsReturn what) =
+    text "thread returns" <+> ppr what
   ppr (WriteReturn rws arr res) =
     ppr arr <+> text "with" <+> PP.apply (map ppRes res)
     where ppRes (is, e) =
@@ -812,8 +820,6 @@ instance Pretty KernelResult where
                            SplitStrided stride -> text "Strided" <> parens (ppr stride)
           offset_text = case offset of Nothing -> ""
                                        Just se -> "," <+> "offset=" <> ppr se
-  ppr (KernelInPlaceReturn what) =
-    text "kernel returns" <+> ppr what
 
 --- Host operations
 
@@ -865,7 +871,7 @@ constructHuskSpace src src_elems = do
   src_ts <- mapM lookupType src
   let parts_ts = map (\t -> setOuterSize t $ Var parts_elems) src_ts
       parts = zipWith Param parts_names parts_ts
-      parts_mem_ts = map (\s -> Mem (Var s) $ Space "device") parts_sizes
+      parts_mem_ts = replicate (length parts_mem_names) $ Mem $ Space "device"
       parts_mem = zipWith Param parts_mem_names parts_mem_ts
   return $ HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes
 
@@ -946,8 +952,8 @@ instance (Attributes lore, RangedOp inner) => RangedOp (HostOp lore inner) where
 instance (Attributes lore, FreeIn inner) => FreeIn (HostOp lore inner) where
   freeIn (HostOp op) = freeIn op
   freeIn (Husk hspace red_op _ _ body) =
-    mconcat [ freeInLambda red_op
-            , freeInBody body
+    mconcat [ freeIn red_op
+            , freeIn body
             , S.fromList $ hspaceSource hspace
             , freeIn $ hspaceSourceElems hspace]
     `S.difference` boundByHuskSpace hspace
@@ -1024,7 +1030,7 @@ instance (PrettyLore lore, PP.Pretty inner) => PP.Pretty (HostOp lore inner) whe
 
   ppr (CmpSizeLe name size_class x) =
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
-    text "<" <+> ppr x
+    text "<=" <+> ppr x
 
   ppr (Husk hspace red_op nes ts body) =
     text "husk" <> PP.parens (ppr red_op <> PP.comma </>
@@ -1052,19 +1058,6 @@ instance (OpMetrics (Op lore), OpMetrics inner) => OpMetrics (HostOp lore inner)
   opMetrics (HostOp op) = opMetrics op
   opMetrics (Husk _ red_op _ _ body) = 
     inside "Husk" $ lambdaMetrics red_op >> bodyMetrics body
-
-instance (Aliased lore, UsageInOp inner) => UsageInOp (HostOp lore inner) where
-  usageInOp GetSize{} = mempty
-  usageInOp GetSizeMax{} = mempty
-  usageInOp CmpSizeLe{} = mempty
-  usageInOp (HostOp op) = usageInOp op
-  usageInOp (Husk hspace red_op nes _ body) = 
-    mconcat $ map UT.consumedUsage (S.toList $ consumedInBody body)
-            ++ [ usageInLambda red_op $ concatMap varInSubExp $ take (length nes) $ bodyResult body
-               , UT.usages (S.fromList $ hspacePartitionElems hspace : varInSubExp (hspaceSourceElems hspace))
-               , UT.usages (S.fromList $ hspaceSource hspace)]
-    where varInSubExp (Var n) = [n]
-          varInSubExp _ = []
 
 typeCheckHostOp :: TC.Checkable lore =>
                    (inner -> TC.TypeM lore ())

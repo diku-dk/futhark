@@ -1,4 +1,4 @@
-/* Simple CUDA runtime framework */
+// Start of cuda.h.
 
 #define CUDA_SUCCEED(x) cuda_api_succeed(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED(x) nvrtc_api_succeed(x, #x, __FILE__, __LINE__)
@@ -125,6 +125,7 @@ struct cuda_context {
   size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
+  size_t max_shared_memory;
 
   size_t lockstep_width;
 
@@ -259,7 +260,7 @@ static char *concat_fragments(const char *src_fragments[])
     src_len += strlen(*p);
   }
 
-  char *src = malloc(src_len + 1);
+  char *src = (char*) malloc(src_len + 1);
   size_t n = 0;
   for (p = src_fragments; *p; p++) {
     strcpy(src + n, *p);
@@ -328,8 +329,7 @@ static char *cuda_compile_ptx(struct cuda_context *ctx, const char *src, const c
   }
 
   size_t n_opts, i = 0, i_dyn, n_opts_alloc = 20 + num_extra_opts + ctx->cfg.num_sizes;
-  const char **opts = malloc(n_opts_alloc * sizeof(const char *));
-  
+  const char **opts = (const char**) malloc(n_opts_alloc * sizeof(const char *));
   if (!arch_set) {
     opts[i++] = "-arch";
     opts[i++] = cuda_nvrtc_get_arch(ctx->nodes[0].dev);
@@ -370,7 +370,7 @@ static char *cuda_compile_ptx(struct cuda_context *ctx, const char *src, const c
   if (res != NVRTC_SUCCESS) {
     size_t log_size;
     if (nvrtcGetProgramLogSize(prog, &log_size) == NVRTC_SUCCESS) {
-      char *log = malloc(log_size);
+      char *log = (char*) malloc(log_size);
       if (nvrtcGetProgramLog(prog, log) == NVRTC_SUCCESS) {
         fprintf(stderr,"Compilation log:\n%s\n", log);
       }
@@ -385,7 +385,7 @@ static char *cuda_compile_ptx(struct cuda_context *ctx, const char *src, const c
   char *ptx;
   size_t ptx_size;
   NVRTC_SUCCEED(nvrtcGetPTXSize(prog, &ptx_size));
-  ptx = malloc(ptx_size);
+  ptx = (char*) malloc(ptx_size);
   NVRTC_SUCCEED(nvrtcGetPTX(prog, ptx));
 
   NVRTC_SUCCEED(nvrtcDestroyProgram(&prog));
@@ -473,7 +473,7 @@ static void load_string_from_file(const char *file, char **obuf, size_t *olen)
   len = ftell(f);
   assert(fseek(f, 0, SEEK_SET) == 0);
 
-  buf = malloc(len + 1);
+  buf = (char*) malloc(len + 1);
   assert(fread(buf, 1, len, f) == len);
   buf[len] = 0;
   *obuf = buf;
@@ -549,6 +549,7 @@ void cuda_setup(struct cuda_context *ctx)
   cuda_devices_select(ctx);
 
   // All devices are identical, so use the properties from the first.
+  ctx->max_shared_memory = device_query(ctx->nodes[0].dev, MAX_SHARED_MEMORY_PER_BLOCK);
   ctx->max_block_size = device_query(ctx->nodes[0].dev, MAX_THREADS_PER_BLOCK);
   ctx->max_grid_size = device_query(ctx->nodes[0].dev, MAX_GRID_DIM_X);
   ctx->max_tile_size = sqrt(ctx->max_block_size);
@@ -681,3 +682,4 @@ void cuda_send_node_sync(struct cuda_context *ctx) {
   cuda_send_node_base_message(ctx, NODE_MSG_SYNC);
 }
 
+// End of cuda.h.

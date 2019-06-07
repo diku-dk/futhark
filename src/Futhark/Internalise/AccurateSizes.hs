@@ -52,7 +52,7 @@ argShapes shapes valts valargts =
             Just s | x:xs <- S.toList s ->
                        if Var name `elem` outer_dims
                        then return x
-                       else letSubExp "size" =<< foldBinOp (SMax Int32) x xs
+                       else letSubExp (baseString name) =<< foldBinOp (SMax Int32) x xs
             _ -> return $ intConst Int32 0
 
 ensureResultShape :: MonadBinder m =>

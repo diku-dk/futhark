@@ -12,8 +12,6 @@
 -- compiled input { 1000000 } output { 3.141696f32 }
 -- compiled input { 10000000 } output { 3.141595f32 }
 
-import "/futlib/math"
-
 let dirvcts(): [2][30]i32 =
     [
             [

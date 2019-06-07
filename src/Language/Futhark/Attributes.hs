@@ -26,12 +26,11 @@ module Language.Futhark.Attributes
   , typeOf
 
   -- * Queries on patterns and params
-  , patIdentSet
+  , patternIdents
   , patternType
   , patternStructType
   , patternPatternType
   , patternParam
-  , patternNoShapeAnnotations
   , patternOrderZero
   , patternDimNames
 
@@ -70,6 +69,7 @@ module Language.Futhark.Attributes
   , sortFields
   , isTypeParam
   , combineTypeShapes
+  , unscopeType
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -462,22 +462,19 @@ typeOf (Var _ (Info t) _) = t
 typeOf (Ascript _ _ (Info t) _) = t
 typeOf (Apply _ _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ pat _ body _) =
-  unscopeType (S.map identName $ patIdentSet pat) $ typeOf body
+typeOf (LetPat _ _ _ (Info t) _) = t
 typeOf (LetFun _ _ body _) = typeOf body
-typeOf (LetWith dest _ _ _ body _) =
-  unscopeType (S.singleton $ identName dest) $ typeOf body
+typeOf (LetWith _ _ _ _ _ (Info t) _) = t
 typeOf (Index _ _ (Info t) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
-typeOf (DoLoop _ pat _ _ _ _) = patternType pat
-typeOf (Lambda tparams params _ _ (Info (als, t)) _) =
+typeOf (DoLoop pat _ _ _ _) = patternType pat
+typeOf (Lambda params _ _ (Info (als, t)) _) =
   unscopeType bound_here $
   foldr (uncurry (Arrow ()) . patternParam) t params `setAliases` als
-  where bound_here = S.fromList (map typeParamName tparams) <>
-                     S.map identName (mconcat $ map patIdentSet params)
+  where bound_here = S.map identName (mconcat $ map patternIdents params)
 typeOf (OpSection _ (Info t) _) =
   t
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
@@ -564,14 +561,14 @@ patternOrderZero pat = case pat of
   PatternLit _ (Info t) _ -> orderZero t
 
 -- | The set of identifiers bound in a pattern.
-patIdentSet :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
-patIdentSet (Id v t loc)              = S.singleton $ Ident v t loc
-patIdentSet (PatternParens p _)       = patIdentSet p
-patIdentSet (TuplePattern pats _)     = mconcat $ map patIdentSet pats
-patIdentSet (RecordPattern fs _)      = mconcat $ map (patIdentSet . snd) fs
-patIdentSet Wildcard{}                = mempty
-patIdentSet (PatternAscription p _ _) = patIdentSet p
-patIdentSet PatternLit{}              = mempty
+patternIdents :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
+patternIdents (Id v t loc)              = S.singleton $ Ident v t loc
+patternIdents (PatternParens p _)       = patternIdents p
+patternIdents (TuplePattern pats _)     = mconcat $ map patternIdents pats
+patternIdents (RecordPattern fs _)      = mconcat $ map (patternIdents . snd) fs
+patternIdents Wildcard{}                = mempty
+patternIdents (PatternAscription p _ _) = patternIdents p
+patternIdents PatternLit{}              = mempty
 
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> PatternType
@@ -604,27 +601,10 @@ patternParam (PatternParens p _) =
   patternParam p
 patternParam (PatternAscription (Id v _ _) td _) =
   (Just v, unInfo $ expandedType td)
+patternParam (Id v (Info t) _) =
+  (Just v, toStruct t)
 patternParam p =
   (Nothing, patternStructType p)
-
--- | Remove all shape annotations from a pattern, leaving them unnamed
--- instead.
-patternNoShapeAnnotations :: PatternBase Info VName -> PatternBase Info VName
-patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t)) loc) =
-  PatternAscription (patternNoShapeAnnotations p)
-  (TypeDecl te $ Info $ anyDimShapeAnnotations t) loc
-patternNoShapeAnnotations (PatternParens p loc) =
-  PatternParens (patternNoShapeAnnotations p) loc
-patternNoShapeAnnotations (Id v (Info t) loc) =
-  Id v (Info $ anyDimShapeAnnotations t) loc
-patternNoShapeAnnotations (TuplePattern ps loc) =
-  TuplePattern (map patternNoShapeAnnotations ps) loc
-patternNoShapeAnnotations (RecordPattern ps loc) =
-  RecordPattern (map (fmap patternNoShapeAnnotations) ps) loc
-patternNoShapeAnnotations (Wildcard (Info t) loc) =
-  Wildcard (Info (anyDimShapeAnnotations t)) loc
-patternNoShapeAnnotations (PatternLit e (Info t) loc) =
-  PatternLit e (Info (anyDimShapeAnnotations t)) loc
 
 -- | Names of primitive types to types.  This is only valid if no
 -- shadowing is going on, but useful for tools.
@@ -736,17 +716,16 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                tupleRecord [uarr_a, Array () Unique (ArrayPrimElem (Signed Int32)) (rank 1)]),
 
               ("stream_map",
-               IntrinsicPolyFun [tp_a, tp_b] [arr_a `arr` arr_b, arr_a] uarr_b),
+               IntrinsicPolyFun [tp_a, tp_b] [Prim (Signed Int32) `arr` (arr_a `arr` arr_b), arr_a] uarr_b),
 
               ("stream_map_per",
-               IntrinsicPolyFun [tp_a, tp_b] [arr_a `arr` arr_b, arr_a] uarr_b),
+               IntrinsicPolyFun [tp_a, tp_b] [Prim (Signed Int32) `arr` (arr_a `arr` arr_b), arr_a] uarr_b),
 
               ("stream_red",
-               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b),
+               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), Prim (Signed Int32) `arr` (arr_a `arr` t_b), arr_a] t_b),
 
               ("stream_red_per",
-               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b),
-
+               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), Prim (Signed Int32) `arr` (arr_a `arr` t_b), arr_a] t_b),
 
               ("trace", IntrinsicPolyFun [tp_a] [t_a] t_a),
               ("break", IntrinsicPolyFun [tp_a] [t_a] t_a)]

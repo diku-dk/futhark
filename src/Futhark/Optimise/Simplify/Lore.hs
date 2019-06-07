@@ -42,7 +42,6 @@ import Futhark.Binder
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
-import Futhark.Analysis.Usage (UsageInOp)
 
 data Wise lore
 
@@ -235,7 +234,7 @@ mkWiseExpAttr :: (Attributes lore, CanBeWise (Op lore)) =>
 mkWiseExpAttr pat explore e =
   (ExpWisdom
     (Names' $ consumedInExp e)
-    (Names' $ freeIn pat <> freeIn explore <> freeInExp e),
+    (Names' $ freeIn pat <> freeIn explore <> freeIn e),
    explore)
 
 instance (Bindable lore,
@@ -258,8 +257,7 @@ instance (Bindable lore,
 
 class (AliasedOp (OpWithWisdom op),
        RangedOp (OpWithWisdom op),
-       IsOp (OpWithWisdom op),
-       UsageInOp (OpWithWisdom op)) => CanBeWise op where
+       IsOp (OpWithWisdom op)) => CanBeWise op where
   type OpWithWisdom op :: *
   removeOpWisdom :: OpWithWisdom op -> op
 

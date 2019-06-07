@@ -587,14 +587,10 @@ defineMemorySpace space = do
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
   }
   int ret = $id:(fatMemUnRef space)(ctx, node_id, block, desc);
-  $items:alloc
-  block->references = (int*) malloc(sizeof(int));
-  *(block->references) = 1;
-  block->size = size;
-  block->desc = desc;
+
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
-    fprintf(stderr, "Allocated %lld bytes for %s in %s (now allocated: %lld bytes)",
+    fprintf(stderr, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
             (long long) size,
             desc, $string:spacedesc,
             (long long) ctx->$id:usagename);
@@ -607,6 +603,12 @@ defineMemorySpace space = do
   } else if (ctx->detail_memory) {
     fprintf(stderr, ".\n");
   }
+
+  $items:alloc
+  block->references = (int*) malloc(sizeof(int));
+  *(block->references) = 1;
+  block->size = size;
+  block->desc = desc;
   return ret;
   }|]
 
@@ -735,7 +737,7 @@ opaqueName s _
 opaqueName s vds = "opaque_" ++ hash (zipWith xor [0..] $ map ord (s ++ concatMap p vds))
   where p (ScalarValue pt signed _) =
           show (pt, signed)
-        p (ArrayValue _ _ space pt signed dims) =
+        p (ArrayValue _ space pt signed dims) =
           show (space, pt, signed, length dims)
 
         -- FIXME: a stupid hash algorithm; may have collisions.
@@ -766,7 +768,7 @@ arrayLibraryFunctions space pt signed shape = do
   shape_array <- publicName $ "shape_" ++ name
 
   let shape_names = [ "dim"++show i | i <- [0..rank-1] ]
-      shape_params = [ [C.cparam|int $id:k|] | k <- shape_names ]
+      shape_params = [ [C.cparam|typename int64_t $id:k|] | k <- shape_names ]
       arr_size = cproduct [ [C.cexp|$id:k|] | k <- shape_names ]
       arr_size_array = cproduct [ [C.cexp|arr->shape[$int:i]|] | i <- [0..rank-1] ]
   copy <- asks envCopy
@@ -821,7 +823,7 @@ arrayLibraryFunctions space pt signed shape = do
   return [C.cunit|
           $ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params) {
             $ty:array_type* bad = NULL;
-            $ty:array_type *arr = malloc(sizeof($ty:array_type));
+            $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
             if (arr == NULL) {
               return bad;
             }
@@ -832,7 +834,7 @@ arrayLibraryFunctions space pt signed shape = do
           $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset,
                                             $params:shape_params) {
             $ty:array_type* bad = NULL;
-            $ty:array_type *arr = malloc(sizeof($ty:array_type));
+            $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
             if (arr == NULL) {
               return bad;
             }
@@ -870,7 +872,7 @@ opaqueLibraryFunctions desc vds = do
 
       freeComponent _ ScalarValue{} =
         return ()
-      freeComponent i (ArrayValue _ _ _ pt signed shape) = do
+      freeComponent i (ArrayValue _ _ pt signed shape) = do
         let rank = length shape
         free_array <- publicName $ "free_" ++ arrayName pt signed rank
         stm [C.cstm|if ((tmp = $id:free_array(ctx, obj->$id:(tupleField i))) != 0) {
@@ -896,7 +898,7 @@ opaqueLibraryFunctions desc vds = do
 valueDescToCType :: ValueDesc -> CompilerM op s C.Type
 valueDescToCType (ScalarValue pt signed _) =
   return $ signedPrimTypeToCType signed pt
-valueDescToCType (ArrayValue _ _ space pt signed shape) = do
+valueDescToCType (ArrayValue _ space pt signed shape) = do
   let pt' = signedPrimTypeToCType signed pt
       rank = length shape
   exists <- gets $ lookup (pt',rank) . compArrayStructs
@@ -960,14 +962,10 @@ prepareEntryInputs = zipWithM prepare [(0::Int)..]
           stm [C.cstm|$id:name = $exp:src;|]
           return pt'
 
-        prepareValue src vd@(ArrayValue mem mem_size _ _ _ shape) = do
+        prepareValue src vd@(ArrayValue mem _ _ _ shape) = do
           ty <- valueDescToCType vd
 
           stm [C.cstm|$exp:mem = $exp:src->mem;|]
-          case mem_size of
-            VarSize v -> stm [C.cstm|$id:v = $exp:src->mem.size;|]
-            ConstSize _ -> return ()
-
 
           let rank = length shape
               maybeCopyDim (VarSize d) i =
@@ -986,7 +984,7 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
 
           case vd of
             ArrayValue{} -> do
-              stm [C.cstm|assert((*$id:pname = malloc(sizeof($ty:ty))) != NULL);|]
+              stm [C.cstm|assert((*$id:pname = ($ty:ty*) malloc(sizeof($ty:ty))) != NULL);|]
               prepareValue [C.cexp|*$id:pname|] vd
               return [C.cparam|$ty:ty **$id:pname|]
             ScalarValue{} -> do
@@ -998,14 +996,14 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
           ty <- opaqueToCType desc vds
           vd_ts <- mapM valueDescToCType vds
 
-          stm [C.cstm|assert((*$id:pname = malloc(sizeof($ty:ty))) != NULL);|]
+          stm [C.cstm|assert((*$id:pname = ($ty:ty*) malloc(sizeof($ty:ty))) != NULL);|]
 
 
           forM_ (zip3 [0..] vd_ts vds) $ \(i,ct,vd) -> do
             let field = [C.cexp|(*$id:pname)->$id:(tupleField i)|]
             case vd of
               ScalarValue{} -> return ()
-              _ -> stm [C.cstm|assert(($exp:field = malloc(sizeof($ty:ct))) != NULL);|]
+              _ -> stm [C.cstm|assert(($exp:field = ($ty:ct*) malloc(sizeof($ty:ct))) != NULL);|]
             prepareValue field vd
 
           return [C.cparam|$ty:ty **$id:pname|]
@@ -1013,7 +1011,7 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
         prepareValue dest (ScalarValue _ _ name) =
           stm [C.cstm|$exp:dest = $id:name;|]
 
-        prepareValue dest (ArrayValue mem _ _ _ _ shape) = do
+        prepareValue dest (ArrayValue mem _ _ _ shape) = do
           stm [C.cstm|$exp:dest->mem = $id:mem;|]
 
           let rank = length shape
@@ -1101,7 +1099,7 @@ printStm (OpaqueValue desc _) _ =
   return [C.cstm|printf("#<opaque %s>", $string:desc);|]
 printStm (TransparentValue (ScalarValue bt ept _)) e =
   return $ printPrimStm [C.cexp|stdout|] e bt ept
-printStm (TransparentValue (ArrayValue _ _ _ bt ept shape)) e = do
+printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e = do
   values_array <- publicName $ "values_" ++ name
   shape_array <- publicName $ "shape_" ++ name
   let num_elems = cproduct [ [C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0..rank-1] ]
@@ -1138,7 +1136,7 @@ readInput i (TransparentValue (ScalarValue t ept _)) = do
   item [C.citem|$ty:(primTypeToCType t) $id:dest;|]
   stm $ readPrimStm dest i t ept
   return ([C.cstm|;|], [C.cstm|;|], [C.cstm|;|], [C.cexp|$id:dest|])
-readInput i (TransparentValue vd@(ArrayValue _ _ _ t ept dims)) = do
+readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
   dest <- newVName "read_value"
   shape <- newVName "read_shape"
   arr <- newVName "read_arr"
@@ -1186,7 +1184,7 @@ prepareOutputs = mapM prepareResult
             TransparentValue ScalarValue{} -> do
               item [C.citem|$ty:ty $id:result;|]
               return ([C.cexp|$id:result|], [C.cstm|;|])
-            TransparentValue (ArrayValue _ _ _ t ept dims) -> do
+            TransparentValue (ArrayValue _ _ t ept dims) -> do
               let name = arrayName t ept $ length dims
               free_array <- publicName $ "free_" ++ name
               item [C.citem|$ty:ty *$id:result;|]
@@ -1369,6 +1367,7 @@ compileProg ops extra header_extra spaces options prog@(Functions funs) = do
       option_parser = generateOptionParser "parse_options" $ benchmarkOptions++options
 
   let headerdefs = [C.cunit|
+$esc:("#pragma once\n")
 $esc:("/*\n * Headers\n*/\n")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
@@ -1528,7 +1527,8 @@ $edecls:entry_point_decls
   |]
 
   return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
-  where compileProg' = do
+    where
+      compileProg' = do
           (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
 
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
@@ -1542,28 +1542,29 @@ $edecls:entry_point_decls
           ctx_ty <- contextType
           headerDecl MiscDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx);|]
           libDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx) {
-  if (ctx->detail_memory) {
-    $items:memreport
-  }
-  if (ctx->debugging) {
-    $items:debugreport
-  }
-}|]
+                      if (ctx->detail_memory) {
+                        $items:memreport
+                      }
+                      if (ctx->debugging) {
+                        $items:debugreport
+                      }
+                    }|]
 
           return (prototypes, definitions, entry_points)
-        funcToDef func = C.FuncDef func loc
-          where loc = case func of
-                        C.OldFunc _ _ _ _ _ _ l -> l
-                        C.Func _ _ _ _ _ l      -> l
 
-        builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
-                  cFloat32Funs ++ cFloat64Funs
+      funcToDef func = C.FuncDef func loc
+        where loc = case func of
+                       C.OldFunc _ _ _ _ _ _ l -> l
+                       C.Func _ _ _ _ _ l      -> l
 
-        panic_h = $(embedStringFile "rts/c/panic.h")
-        values_h = $(embedStringFile "rts/c/values.h")
-        timing_h = $(embedStringFile "rts/c/timing.h")
-        lock_h = $(embedStringFile "rts/c/lock.h")
-        tuning_h = $(embedStringFile "rts/c/tuning.h")
+      builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
+                cFloat32Funs ++ cFloat64Funs
+
+      panic_h  = $(embedStringFile "rts/c/panic.h")
+      values_h = $(embedStringFile "rts/c/values.h")
+      timing_h = $(embedStringFile "rts/c/timing.h")
+      lock_h   = $(embedStringFile "rts/c/lock.h")
+      tuning_h = $(embedStringFile "rts/c/tuning.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _ node_id) = do
@@ -1780,10 +1781,15 @@ compileCode (Comment s code) = do
               { $items:items }
              |]
 
-compileCode (DebugPrint s _ e) = do
+compileCode (DebugPrint s (Just (_, e))) = do
   e' <- compileExp e
   stm [C.cstm|if (ctx->debugging) {
           fprintf(stderr, "%s: %d\n", $exp:s, (int)$exp:e');
+       }|]
+
+compileCode (DebugPrint s Nothing) =
+  stm [C.cstm|if (ctx->debugging) {
+          fprintf(stderr, "%s\n", $exp:s);
        }|]
 
 compileCode c
@@ -1994,12 +2000,13 @@ cproduct []     = [C.cexp|1|]
 cproduct (e:es) = foldl mult e es
   where mult x y = [C.cexp|$exp:x * $exp:y|]
 
-defineHuskFunction :: HuskFunction -> [Param] -> Code op -> CompilerM op s ()
-defineHuskFunction (HuskFunction name param_struct node_id) params body = do
+defineHuskFunction :: HuskFunction -> [Param] -> [VName] -> Code op -> CompilerM op s ()
+defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body = do
   husk_params_p <- newVName "husk_params_p"
   husk_params <- newVName "husk_params"
   struct_decls <- mapM toStructDecl params
-  body_decls <- mapM (toDeclInit husk_params) params 
+  body_decls <- mapM (toDeclInit husk_params) params
+  repl <- concat <$> mapM (replMem husk_params) repl_mem
   body' <- localNodeId [C.cexp|$id:node_id|] $ blockScope $ compileCode body
   libDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
                                         typename int32_t $id:node_id,
@@ -2013,6 +2020,7 @@ defineHuskFunction (HuskFunction name param_struct node_id) params body = do
       struct $id:param_struct $id:husk_params =
         *(struct $id:param_struct *)$id:husk_params_p;
       $decls:body_decls
+      $items:repl
       $items:body'
       return 0;
     }|]
@@ -2024,5 +2032,18 @@ defineHuskFunction (HuskFunction name param_struct node_id) params body = do
           t <- toCType p
           return [C.csdecl|$ty:t $id:(paramName p);|]
         toDeclInit hparam p = do
+          let pn = paramName p
           t <- toCType p
-          return [C.cdecl|$ty:t $id:(paramName p) = $id:hparam.$id:(paramName p);|]
+          return $ if elem pn repl_mem
+            then [C.cdecl|$ty:t $id:pn;|]
+            else [C.cdecl|$ty:t $id:pn = $id:hparam.$id:pn;|]
+        replMem hparam mem = do
+          blockScope $ do
+            alloc <- asks envAllocate
+            peer_copy <- asks envPeerCopy
+            alloc [C.cexp|$id:mem.mem|] [C.cexp|$id:hparam.$id:mem.size|]
+                  [C.cexp|$string:(pretty mem)|] "device"
+            peer_copy
+              [C.cexp|$id:mem.mem|] [C.cexp|0|] [C.cexp|$id:node_id|] (Space "device")
+              [C.cexp|$id:hparam.$id:mem.mem|] [C.cexp|0|] [C.cexp|0|] (Space "device")
+              [C.cexp|$id:hparam.$id:mem.size|]

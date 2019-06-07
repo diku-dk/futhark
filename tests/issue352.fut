@@ -263,7 +263,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
                        val f : [D]f64 -> t }) : { val run : i32 -> X.t } =
   {
     let run (N:i32) : X.t =
-      stream_red_per X.op (\ [sz] (ns:[sz]i32) : X.t ->
+      stream_red_per X.op (\sz (ns:[sz]i32) : X.t ->
                            if sz > 0
                            then reduce X.op X.ne (map X.f (unsafe chunk ns[0] sz))
                            else X.ne)

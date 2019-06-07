@@ -48,7 +48,7 @@ translateKernels target (ImpKernels.Functions funs) = do
       opencl_code = openClCode $ M.elems kernels
       opencl_prelude = pretty $ genPrelude target requirements
   return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names husk_funcs
-    (S.toList $ kernelUsedTypes requirements) sizes $
+    (S.toList $ openclUsedTypes requirements) sizes $
     ImpOpenCL.Functions (M.toList extra_funs) <> prog'
   where genPrelude TargetOpenCL = genOpenClPrelude
         genPrelude TargetCUDA = genCUDAPrelude
@@ -63,10 +63,18 @@ pointerQuals "read_only"  = return [C.ctyquals|__read_only|]
 pointerQuals "kernel"     = return [C.ctyquals|__kernel|]
 pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
-type UsedFunctions = [(String,C.Func)] -- The ordering is important!
+newtype KernelRequirements =
+  KernelRequirements { kernelLocalMemory :: [LocalMemoryUse] }
+
+instance Semigroup KernelRequirements where
+  KernelRequirements lm1 <> KernelRequirements lm2 =
+    KernelRequirements (lm1<>lm2)
+
+instance Monoid KernelRequirements where
+  mempty = KernelRequirements mempty
 
 newtype OpenClRequirements =
-  OpenClRequirements { kernelUsedTypes :: S.Set PrimType }
+  OpenClRequirements { openclUsedTypes :: S.Set PrimType }
 
 instance Semigroup OpenClRequirements where
   OpenClRequirements ts1 <> OpenClRequirements ts2 =
@@ -93,9 +101,9 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp target (Husk _ num_nodes bparams husk_func interm body red) = do
+onHostOp target (Husk _ num_nodes bparams repl_mem husk_func interm body red) = do
   tell mempty { clHuskFunctions = [husk_func] }
-  onHusk target num_nodes bparams husk_func interm body red
+  onHusk target num_nodes bparams repl_mem husk_func interm body red
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
@@ -108,16 +116,17 @@ onHostOp _ (ImpKernels.GetSizeMax v size_class) =
 
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
 onKernel target kernel = do
-  let (kernel_body, _) =
-        GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
+  let (kernel_body, requirements) =
+        GenericC.runCompilerM mempty inKernelOperations blankNameSource mempty $
         GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel
 
       use_params = mapMaybe useAsParam $ kernelUses kernel
 
-      (local_memory_params, local_memory_init) =
-        unzip $
+      (local_memory_args, local_memory_params, local_memory_init) =
+        unzip3 $
         flip evalState (blankNameSource :: VNameSource) $
-        mapM (prepareLocalMemory target) $ kernelLocalMemory kernel
+        mapM (prepareLocalMemory target) $ kernelLocalMemory $
+        GenericC.compUserState requirements
 
       -- CUDA has very strict restrictions on the number of blocks
       -- permitted along the 'y' and 'z' dimensions of the grid
@@ -155,39 +164,42 @@ onKernel target kernel = do
               , clRequirements = OpenClRequirements (typesInKernel kernel)
               }
 
-  return $ LaunchKernel name (kernelArgs kernel) num_groups group_size
+  return $ LaunchKernel name (catMaybes local_memory_args ++ kernelArgs kernel) num_groups group_size
   where name = nameToString $ kernelName kernel
         num_groups = kernelNumGroups kernel
         group_size = kernelGroupSize kernel
 
-        prepareLocalMemory TargetOpenCL (mem, Left _) = do
+        prepareLocalMemory TargetOpenCL (mem, Left size) = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
-          return (Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
+          return (Just $ SharedMemoryKArg size,
+                  Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
                   [C.citem|__local volatile char* restrict $id:mem = $id:mem_aligned;|])
         prepareLocalMemory TargetOpenCL (mem, Right size) = do
           let size' = compilePrimExp size
-          return (Nothing,
+          return (Nothing, Nothing,
                   [C.citem|ALIGNED_LOCAL_MEMORY($id:mem, $exp:size');|])
-        prepareLocalMemory TargetCUDA (mem, Left _) = do
+        prepareLocalMemory TargetCUDA (mem, Left size) = do
           param <- newVName $ baseString mem ++ "_offset"
-          return (Just [C.cparam|uint $id:param|],
+          return (Just $ SharedMemoryKArg size,
+                  Just [C.cparam|uint $id:param|],
                   [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|])
         prepareLocalMemory TargetCUDA (mem, Right size) = do
           let size' = compilePrimExp size
-          return (Nothing,
+          return (Nothing, Nothing,
                   [CUDAC.citem|__shared__ volatile char $id:mem[$exp:size'];|])
 
 
 onHusk :: KernelTarget
           -> VName
           -> [Param]
+          -> [VName]
           -> HuskFunction
           -> ImpKernels.Code
           -> ImpKernels.Code
           -> ImpKernels.Code
           -> OnKernelM OpenCL
-onHusk target num_nodes bparams husk_func interm body red =
-  DistributeHusk num_nodes bparams husk_func
+onHusk target num_nodes bparams repl_mem husk_func interm body red =
+  DistributeHusk num_nodes bparams repl_mem husk_func
     <$> traverse (onHostOp target) interm
     <*> traverse (onHostOp target) body
     <*> traverse (onHostOp target) red
@@ -404,16 +416,14 @@ compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
           return [C.cexp|$id:(zEncodeString (pretty key))|]
 
 kernelArgs :: Kernel -> [KernelArg]
-kernelArgs kernel =
-  mapMaybe (fmap (SharedMemoryKArg . memSizeToExp) . localMemorySize)
-  (kernelLocalMemory kernel) ++
-  mapMaybe useToArg (kernelUses kernel)
-  where localMemorySize (_, Left size) = Just size
-        localMemorySize (_, Right{}) = Nothing
+kernelArgs = mapMaybe useToArg . kernelUses
+  where useToArg (MemoryUse mem)  = Just $ MemKArg mem
+        useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
+        useToArg ConstUse{}       = Nothing
 
 --- Generating C
 
-inKernelOperations :: GenericC.Operations KernelOp UsedFunctions
+inKernelOperations :: GenericC.Operations KernelOp KernelRequirements
 inKernelOperations = GenericC.Operations
                      { GenericC.opsCompiler = kernelOps
                      , GenericC.opsMemoryType = kernelMemoryType
@@ -426,7 +436,7 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsStaticArray = noStaticArrays
                      , GenericC.opsFatMemory = False
                      }
-  where kernelOps :: GenericC.OpCompiler KernelOp UsedFunctions
+  where kernelOps :: GenericC.OpCompiler KernelOp KernelRequirements
         kernelOps (GetGroupId v i) =
           GenericC.stm [C.cstm|$id:v = get_group_id($int:i);|]
         kernelOps (GetLocalId v i) =
@@ -443,78 +453,97 @@ inKernelOperations = GenericC.Operations
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
         kernelOps GlobalBarrier =
           GenericC.stm [C.cstm|barrier(CLK_GLOBAL_MEM_FENCE);|]
-        kernelOps MemFence =
+        kernelOps MemFenceLocal =
+          GenericC.stm [C.cstm|mem_fence_local();|]
+        kernelOps MemFenceGlobal =
           GenericC.stm [C.cstm|mem_fence_global();|]
-        kernelOps (Atomic aop) = atomicOps aop
+        kernelOps (PrivateAlloc name size) = do
+          size' <- GenericC.compileExp $ innerExp size
+          name' <- newVName $ pretty name ++ "_backing"
+          GenericC.item [C.citem|__private char $id:name'[$exp:size'];|]
+          GenericC.stm [C.cstm|$id:name = $id:name';|]
+        kernelOps (LocalAlloc name size) = do
+          name' <- newVName $ pretty name ++ "_backing"
+          GenericC.modifyUserState (<>KernelRequirements [(name', size)])
+          GenericC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
+        kernelOps (Atomic space aop) = atomicOps space aop
 
-        atomicOps (AtomicAdd old arr ind val) = do
+        atomicOps s (AtomicAdd old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_add((volatile __global int *)&$id:arr[$exp:ind'], $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_add($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
 
-        atomicOps (AtomicSMax old arr ind val) = do
+        atomicOps s (AtomicSMax old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_max((volatile __global int *)&$id:arr[$exp:ind'], $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_max($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
 
-        atomicOps (AtomicSMin old arr ind val) = do
+        atomicOps s (AtomicSMin old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_min((volatile __global int *)&$id:arr[$exp:ind'], $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_min($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
 
-        atomicOps (AtomicUMax old arr ind val) = do
+        atomicOps s (AtomicUMax old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_max((volatile __global unsigned int *)&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_max($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
 
-        atomicOps (AtomicUMin old arr ind val) = do
+        atomicOps s (AtomicUMin old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_min((volatile __global unsigned int *)&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_min($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
 
-        atomicOps (AtomicAnd old arr ind val) = do
+        atomicOps s (AtomicAnd old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_and((volatile __global unsigned int *)&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_and($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
 
-        atomicOps (AtomicOr old arr ind val) = do
+        atomicOps s (AtomicOr old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_or((volatile __global unsigned int *)&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_or($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
 
-        atomicOps (AtomicXor old arr ind val) = do
+        atomicOps s (AtomicXor old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_xor((volatile __global unsigned int *)&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_xor($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
 
-        atomicOps (AtomicCmpXchg old arr ind cmp val) = do
+        atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           cmp' <- GenericC.compileExp cmp
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg((volatile __global int *)&$id:arr[$exp:ind'], $exp:cmp', $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:cmp', $exp:val');|]
 
-        atomicOps (AtomicXchg old arr ind val) = do
+        atomicOps s (AtomicXchg old arr ind val) = do
           ind' <- GenericC.compileExp $ innerExp ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_xchg((volatile __global int *)&$id:arr[$exp:ind'], $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomic_xchg($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
 
-        cannotAllocate :: GenericC.Allocate KernelOp UsedFunctions
+        atomicCast s bt = "(" ++ unwords [ "volatile"
+                                         , "__" ++ case s of
+                                                     DefaultSpace -> "global"
+                                                     Space sid -> sid
+                                         , bt
+                                         , "*"
+                                         ] ++ ")"
+
+        cannotAllocate :: GenericC.Allocate KernelOp KernelRequirements
         cannotAllocate _ =
           fail "Cannot allocate memory in kernel"
 
-        cannotDeallocate :: GenericC.Deallocate KernelOp UsedFunctions
+        cannotDeallocate :: GenericC.Deallocate KernelOp KernelRequirements
         cannotDeallocate _ _ =
           fail "Cannot deallocate memory in kernel"
 
-        copyInKernel :: GenericC.Copy KernelOp UsedFunctions
+        copyInKernel :: GenericC.Copy KernelOp KernelRequirements
         copyInKernel _ _ _ _ _ _ _ =
           fail "Cannot bulk copy in kernel."
 
-        peerCopyInKernel :: GenericC.PeerCopy KernelOp UsedFunctions
+        peerCopyInKernel :: GenericC.PeerCopy KernelOp KernelRequirements
         peerCopyInKernel _ _ _ _ _ =
           fail "Cannot peer copy memory in kernel."
 
-        noStaticArrays :: GenericC.StaticArray KernelOp UsedFunctions
+        noStaticArrays :: GenericC.StaticArray KernelOp KernelRequirements
         noStaticArrays _ _ _ _ =
           fail "Cannot create static array in kernel."
 
@@ -523,11 +552,6 @@ inKernelOperations = GenericC.Operations
           return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
 --- Checking requirements
-
-useToArg :: KernelUse -> Maybe KernelArg
-useToArg (MemoryUse mem)  = Just $ MemKArg mem
-useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
-useToArg ConstUse{}       = Nothing
 
 typesInKernel :: Kernel -> S.Set PrimType
 typesInKernel kernel = typesInCode $ kernelBody kernel
@@ -558,7 +582,7 @@ typesInCode (If e c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _ _) = typesInExp e
 typesInCode (Comment _ c) = typesInCode c
-typesInCode (DebugPrint _ _ e) = typesInExp e
+typesInCode (DebugPrint _ v) = maybe mempty (typesInExp . snd) v
 typesInCode Op{} = mempty
 
 typesInExp :: Exp -> S.Set PrimType

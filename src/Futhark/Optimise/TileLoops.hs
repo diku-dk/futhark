@@ -151,6 +151,7 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
 
           let kspace' = kspace { spaceStructure = NestedThreadSpace gspace'
                                , spaceGroupSize = tiled_group_size
+                               , spaceNumVirtGroups = num_groups
                                , spaceNumThreads = num_threads
                                , spaceNumGroups = num_groups
                                }
@@ -246,6 +247,7 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
 
           let kspace' = kspace { spaceGroupSize = Var inner_ldim
                                , spaceNumGroups = num_groups
+                               , spaceNumVirtGroups = num_groups
                                , spaceNumThreads = num_threads
                                , spaceStructure = structure
                                }
@@ -374,7 +376,7 @@ varianceInStm variance bnd =
   foldl' add variance $ patternNames $ stmPattern bnd
   where add variance' v = M.insert v binding_variance variance'
         look variance' v = S.insert v $ M.findWithDefault mempty v variance'
-        binding_variance = mconcat $ map (look variance) $ S.toList (freeInStm bnd)
+        binding_variance = mconcat $ map (look variance) $ S.toList (freeIn bnd)
 
 sufficientGroups :: MonadBinder m =>
                     [(VName, SubExp, VName, SubExp)] -> SubExp
