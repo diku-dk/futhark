@@ -180,9 +180,10 @@ onKernel target kernel = do
                   Just [C.cparam|uint $id:param|],
                   [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|])
         prepareLocalMemory TargetCUDA (mem, Right size) = do
+          -- We declare the shared memory array as int64_t to force alignment.
           let size' = compilePrimExp size
           return (Nothing, Nothing,
-                  [CUDAC.citem|__shared__ volatile char $id:mem[$exp:size'];|])
+                  [CUDAC.citem|__shared__ volatile typename int64_t $id:mem[$exp:size'];|])
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
