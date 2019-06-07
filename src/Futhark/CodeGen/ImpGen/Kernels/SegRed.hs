@@ -53,6 +53,7 @@ import Data.List
 
 import Prelude hiding (quot, rem)
 
+import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
@@ -62,6 +63,11 @@ import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Util (chunks)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
+
+-- | The maximum number of operators we support in a single SegRed.
+-- This limit arises out of the static allocation of counters.
+maxNumOps :: Int32
+maxNumOps = 10
 
 type DoSegBody = (KernelConstants -> ([(SubExp, [Imp.Exp])] -> InKernelGen ()) -> InKernelGen ())
 
@@ -90,6 +96,9 @@ compileSegRed' :: Pattern ExplicitMemory
                -> DoSegBody
                -> CallKernelGen ()
 compileSegRed' pat space reds body
+  | genericLength reds > maxNumOps =
+      compilerLimitationS $
+      "compileSegRed': at most " ++ show maxNumOps ++ " reduction operators are supported."
   | [(_, Constant (IntValue (Int32Value 1))), _] <- spaceDimensions space =
       nonsegmentedReduction pat space reds body
   | otherwise = do
@@ -152,7 +161,7 @@ nonsegmentedReduction segred_pat space reds body = do
 
   counter <-
     sStaticArray "counter" (Space "device") int32 $
-    Imp.ArrayValues $ replicate 1 $ IntValue $ Int32Value 0
+    Imp.ArrayValues $ replicate (fromIntegral maxNumOps) $ IntValue $ Int32Value 0
 
   -- The group-result arrays have an extra dimension (of size
   -- groupsize) because they are also used for keeping vectorised
@@ -186,14 +195,15 @@ nonsegmentedReduction segred_pat space reds body = do
 
     let segred_pes = chunks (map (length . segRedNeutral) reds) $
                      patternElements segred_pat
-    forM_ (zip6 reds reds_arrs reds_group_res_arrs segred_pes
-           slugs reds_op_renamed) $
+    forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes
+           slugs reds_op_renamed [0..]) $
       \(SegRedOp _ red_op nes _,
-        red_arrs, group_res_arrs, pes, slug, red_op_renamed) -> do
+        red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
       let red_acc_params = take (length nes) $ lambdaParams red_op
       reductionStageTwo constants pes (kernelGroupId constants) 0 [0] 0
         (kernelNumGroups constants) slug red_acc_params red_op_renamed nes
-        1 counter sync_arr group_res_arrs red_arrs
+        1 counter (ValueExp $ IntValue $ Int32Value i)
+        sync_arr group_res_arrs red_arrs
 
 smallSegmentsReduction :: Pattern ExplicitMemory
                        -> KernelSpace
@@ -327,7 +337,7 @@ largeSegmentsReduction segred_pat space reds body = do
   -- anywhere?  There are other places in the compiler that will fail
   -- if the group count exceeds the maximum group size, which is at
   -- most 1024 anyway.
-  let num_counters = 1024
+  let num_counters = fromIntegral maxNumOps * 1024
   counter <-
     sStaticArray "counter" (Space "device") int32 $
     Imp.ArrayZeros num_counters
@@ -368,16 +378,17 @@ largeSegmentsReduction segred_pat space reds body = do
                        patternElements segred_pat
 
           multiple_groups_per_segment =
-            forM_ (zip6 reds reds_arrs reds_group_res_arrs segred_pes
-                   slugs reds_op_renamed) $
+            forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes
+                   slugs reds_op_renamed [0..]) $
             \(SegRedOp _ red_op nes _, red_arrs, group_res_arrs, pes,
-              slug, red_op_renamed) -> do
+              slug, red_op_renamed, i) -> do
               let red_acc_params = take (length nes) $ lambdaParams red_op
               reductionStageTwo constants pes
                 group_id flat_segment_id (map (`Imp.var` int32) segment_gtids)
                 first_group_for_segment groups_per_segment
-                slug red_acc_params red_op_renamed
-                nes (fromIntegral num_counters) counter sync_arr group_res_arrs red_arrs
+                slug red_acc_params red_op_renamed nes
+                (fromIntegral num_counters) counter (ValueExp $ IntValue $ Int32Value i)
+                sync_arr group_res_arrs red_arrs
 
           one_group_per_segment =
             comment "first thread in group saves final result to memory" $
@@ -581,23 +592,19 @@ reductionStageTwo :: KernelConstants
                   -> Imp.Exp
                   -> SegRedOpSlug
                   -> [LParam InKernel]
-                  -> Lambda InKernel
-                  -> [SubExp]
-                  -> Imp.Exp
-                  -> VName
-                  -> VName
-                  -> [VName]
-                  -> [VName]
+                  -> Lambda InKernel -> [SubExp]
+                  -> Imp.Exp -> VName -> Imp.Exp -> VName -> [VName] -> [VName]
                   -> InKernelGen ()
 reductionStageTwo constants segred_pes
                   group_id flat_segment_id segment_gtids first_group_for_segment groups_per_segment
                   slug red_acc_params
                   red_op_renamed nes
-                  num_counters counter sync_arr group_res_arrs red_arrs = do
+                  num_counters counter counter_i sync_arr group_res_arrs red_arrs = do
   let local_tid = kernelLocalThreadId constants
       group_size = kernelGroupSize constants
   old_counter <- dPrim "old_counter" int32
-  (counter_mem, _, counter_offset) <- fullyIndexArray counter [flat_segment_id `rem` num_counters]
+  (counter_mem, _, counter_offset) <- fullyIndexArray counter [counter_i * num_counters +
+                                                               flat_segment_id `rem` num_counters]
   comment "first thread in group saves group result to global memory" $
     sWhen (local_tid .==. 0) $ do
     forM_ (take (length nes) $ zip group_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
