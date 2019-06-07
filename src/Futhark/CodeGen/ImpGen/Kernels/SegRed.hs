@@ -128,13 +128,12 @@ intermediateArrays space (SegRedOp _ red_op nes _) = do
 -- because they are also used for keeping vectorised accumulators for
 -- first-stage reduction, if necessary.  When actually storing group
 -- results, the first index is set to 0.
-groupResultArrays :: KernelSpace -> [SegRedOp InKernel] -> CallKernelGen [[VName]]
-groupResultArrays space reds =
+groupResultArrays :: SubExp -> SubExp -> [SegRedOp InKernel] -> CallKernelGen [[VName]]
+groupResultArrays virt_num_groups group_size reds =
   forM reds $ \(SegRedOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
     let pt = elemType t
-        full_shape = Shape [spaceGroupSize space, spaceNumGroups space] <>
-                     shape <> arrayShape t
+        full_shape = Shape [group_size, virt_num_groups] <> shape <> arrayShape t
         -- Move the groupsize dimension last to ensure coalesced
         -- memory access.
         perm = [1..shapeRank full_shape-1] ++ [0]
@@ -159,7 +158,7 @@ nonsegmentedReduction segred_pat space reds body = do
   -- groupsize) because they are also used for keeping vectorised
   -- accumulators for first-stage reduction, if necessary.  When
   -- actually storing group results, the first index is set to 0.
-  reds_group_res_arrs <- groupResultArrays space reds
+  reds_group_res_arrs <- groupResultArrays (spaceNumGroups space) (spaceGroupSize space) reds
 
   num_threads <- dPrimV "num_threads" $ kernelNumThreads constants
 
@@ -316,7 +315,7 @@ largeSegmentsReduction segred_pat space reds body = do
   emit $ Imp.DebugPrint "elems_per_thread" $ Just (int32, Imp.innerExp elems_per_thread)
   emit $ Imp.DebugPrint "groups_per_segment" $ Just (int32, groups_per_segment)
 
-  reds_group_res_arrs <- groupResultArrays space reds
+  reds_group_res_arrs <- groupResultArrays (Var virt_num_groups) (spaceGroupSize space) reds
 
   -- In principle we should have a counter for every segment.  Since
   -- the number of segments is a dynamic quantity, we would have to
