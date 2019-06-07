@@ -151,7 +151,7 @@ static char* slurp_file(const char *filename, size_t *size) {
   return s;
 }
 
-static const char* opencl_error_string(unsigned int err)
+static const char* opencl_error_string(cl_int err)
 {
     switch (err) {
         case CL_SUCCESS:                            return "Success!";
