@@ -94,69 +94,49 @@ transformExp (Op (Inner (HostOp (Kernel desc kspace ts kbody)))) = do
           scopeOf (kernelBodyStms kbody)
 
 transformExp (Op (Inner (HostOp (SegMap kspace ts kbody)))) = do
-  (alloc_stms, (_, kbody')) <- transformScanRed kspace no_op kbody
+  (alloc_stms, (_, kbody')) <- transformScanRed kspace [] kbody
   return (alloc_stms,
           Op $ Inner $ HostOp $ SegMap kspace ts kbody')
-  where no_op = Lambda { lambdaParams = mempty
-                       , lambdaBody = Body mempty mempty mempty
-                       , lambdaReturnType = mempty }
 
-transformExp (Op (Inner (HostOp (SegRed kspace comm red_op nes ts kbody)))) = do
-  (alloc_stms, (red_op', kbody')) <- transformScanRed kspace red_op kbody
+transformExp (Op (Inner (HostOp (SegRed kspace reds ts kbody)))) = do
+  (alloc_stms, (lams, kbody')) <-
+    transformScanRed kspace (map segRedLambda reds) kbody
+  let reds' = zipWith (\red lam -> red { segRedLambda = lam }) reds lams
   return (alloc_stms,
-          Op $ Inner $ HostOp $ SegRed kspace comm red_op' nes ts kbody')
+          Op $ Inner $ HostOp $ SegRed kspace reds' ts kbody')
 
 transformExp (Op (Inner (HostOp (SegScan kspace scan_op nes ts kbody)))) = do
-  (alloc_stms, (scan_op', kbody')) <- transformScanRed kspace scan_op kbody
+  (alloc_stms, (scan_op', kbody')) <-
+    transformScanRed kspace [scan_op] kbody
   return (alloc_stms,
-          Op $ Inner $ HostOp $ SegScan kspace scan_op' nes ts kbody')
+          Op $ Inner $ HostOp $ SegScan kspace (head scan_op') nes ts kbody')
 
 transformExp (Op (Inner (HostOp (SegGenRed kspace ops ts kbody)))) = do
+  (alloc_stms, (lams, kbody')) <-
+    transformScanRed kspace (map genReduceOp ops) kbody
+  let ops' = zipWith (\red lam -> red { genReduceOp = lam }) ops lams
+  return (alloc_stms,
+          Op $ Inner $ HostOp $ SegGenRed kspace ops' ts kbody')
+
+transformExp e =
+  return (mempty, e)
+
+transformScanRed :: KernelSpace
+                 -> [Lambda InKernel]
+                 -> KernelBody InKernel
+                 -> ExpandM (Stms ExplicitMemory, ([Lambda InKernel], KernelBody InKernel))
+transformScanRed kspace ops kbody = do
   let (kbody', kbody_allocs) = extractKernelBodyAllocations kbody
-      (ops', ops_allocs) = unzip $ map extractGenRedOpAllocations ops
+      (ops', ops_allocs) = unzip $ map extractLambdaAllocations ops
       variantAlloc (Var v) = v `S.member` bound_in_kernel
       variantAlloc _ = False
       allocs = kbody_allocs <> mconcat ops_allocs
       (variant_allocs, invariant_allocs) = M.partition (variantAlloc . fst) allocs
 
   allocsForBody variant_allocs invariant_allocs kspace kbody' $ \alloc_stms kbody'' -> do
-    ops'' <- mapM offsetMemoryInGenRedOp ops'
-
-    return (alloc_stms,
-            Op $ Inner $ HostOp $ SegGenRed kspace ops'' ts kbody'')
-
-  where bound_in_kernel =
-          S.fromList $ map fst (spaceDimensions kspace) ++
-          M.keys (scopeOfKernelSpace kspace <>
-                  scopeOf (kernelBodyStms kbody))
-
-        extractGenRedOpAllocations op =
-          let (lam, allocs) = extractLambdaAllocations $ genReduceOp op
-          in (op { genReduceOp = lam }, allocs)
-
-        offsetMemoryInGenRedOp op = do
-          lam <- localScope (scopeOf (genReduceOp op)) $
-                 offsetMemoryInLambda $ genReduceOp op
-          return op { genReduceOp = lam }
-
-transformExp e =
-  return (mempty, e)
-
-transformScanRed :: KernelSpace
-                 -> Lambda InKernel
-                 -> KernelBody InKernel
-                 -> ExpandM (Stms ExplicitMemory, (Lambda InKernel, KernelBody InKernel))
-transformScanRed kspace op kbody = do
-  let (kbody', kbody_allocs) = extractKernelBodyAllocations kbody
-      (op', op_allocs) = extractLambdaAllocations op
-      variantAlloc (Var v) = v `S.member` bound_in_kernel
-      variantAlloc _ = False
-      allocs = kbody_allocs <> op_allocs
-      (variant_allocs, invariant_allocs) = M.partition (variantAlloc . fst) allocs
-
-  allocsForBody variant_allocs invariant_allocs kspace kbody' $ \alloc_stms kbody'' -> do
-    op'' <- localScope (scopeOf op') $ offsetMemoryInLambda op'
-    return (alloc_stms, (op'', kbody''))
+    ops'' <- forM ops' $ \op' ->
+      localScope (scopeOf op') $ offsetMemoryInLambda op'
+    return (alloc_stms, (ops'', kbody''))
 
   where bound_in_kernel =
           S.fromList $ map fst (spaceDimensions kspace) ++
@@ -619,9 +599,10 @@ sliceKernelSizes sizes kspace kstms = do
 
     thread_space_iota <- letExp "thread_space_iota" $ BasicOp $
                          Iota (spaceNumThreads kspace) (intConst Int32 0) (intConst Int32 1) Int32
+    let red_op = SegRedOp Commutative max_lam
+                 (replicate num_sizes $ intConst Int64 0) mempty
     addStms =<<
-      nonSegRed pat (spaceNumThreads kspace) Commutative max_lam size_lam'
-      (replicate num_sizes $ intConst Int64 0) [thread_space_iota]
+      nonSegRed pat (spaceNumThreads kspace) [red_op] size_lam' [thread_space_iota]
 
     size_sums <- forM (patternNames pat) $ \threads_max ->
       letExp "size_sum" $

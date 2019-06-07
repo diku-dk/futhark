@@ -78,7 +78,7 @@ module Futhark.CodeGen.ImpGen
   , sIf, sWhen, sUnless
   , sOp
   , sDeclareMem, sAlloc, sAlloc_
-  , sArray, sAllocArray, sStaticArray
+  , sArray, sAllocArray, sAllocArrayPerm, sStaticArray
   , sWrite, sUpdate
   , sLoopNest
   , (<--)
@@ -1246,12 +1246,19 @@ sArray name bt shape membind = do
   dArray name' bt shape membind
   return name'
 
+-- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
+sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM lore op VName
+sAllocArrayPerm name pt shape space perm = do
+  let permuted_dims = rearrangeShape perm $ shapeDims shape
+  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
+  let iota_ixfun = IxFun.iota $ map (primExpFromSubExp int32) permuted_dims
+  sArray name pt shape $
+    ArrayIn mem $ IxFun.permute iota_ixfun $ rearrangeInverse perm
+
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
-sAllocArray name pt shape space = do
-  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
-  sArray name pt shape $
-    ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
+sAllocArray name pt shape space =
+  sAllocArrayPerm name pt shape space [0..shapeRank shape-1]
 
 -- | Uses linear/iota index function.
 sStaticArray :: String -> Space -> PrimType -> Imp.ArrayContents -> ImpM lore op VName

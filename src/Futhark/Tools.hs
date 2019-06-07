@@ -62,7 +62,7 @@ redomapToMapAndReduce (Pattern [] patelems)
   let map_bnd = mkLet [] map_pat $ Op $ Screma w (mapSOAC map_lam) arrs
       (nes, red_arrs) = unzip red_args
   red_bnd <- Let red_pat (defAux ()) . Op <$>
-             (Screma w <$> reduceSOAC comm redlam nes <*> pure red_arrs)
+             (Screma w <$> reduceSOAC [Reduce comm redlam nes] <*> pure red_arrs)
   return (map_bnd, red_bnd)
 redomapToMapAndReduce _ _ =
   error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
@@ -112,18 +112,17 @@ dissectScrema :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
                     Bindable (Lore m)) =>
                    Pattern (Lore m) -> SubExp -> ScremaForm (Lore m) -> [VName]
                 -> m ()
-dissectScrema pat w (ScremaForm (scan_lam, scan_nes)
-                                    (comm, red_lam, red_nes)
-                                    map_lam) arrs = do
-  let (scan_res, red_res, map_res) = splitAt3 (length scan_nes) (length red_nes) $
-                                     patternNames pat
+dissectScrema pat w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs = do
+  let num_reds = redResults reds
+      (scan_res, red_res, map_res) =
+        splitAt3 (length scan_nes) num_reds $ patternNames pat
   -- First we perform the Map, then we perform the Reduce, and finally
   -- the Scan.
   to_scan <- replicateM (length scan_nes) $ newVName "to_scan"
-  to_red <- replicateM (length red_nes) $ newVName "to_red"
+  to_red <- replicateM num_reds $ newVName "to_red"
   letBindNames_ (to_scan <> to_red <> map_res) $ Op $ Screma w (mapSOAC map_lam) arrs
 
-  reduce <- reduceSOAC comm red_lam red_nes
+  reduce <- reduceSOAC reds
   letBindNames_ red_res $ Op $ Screma w reduce to_red
 
   scan <- scanSOAC scan_lam scan_nes

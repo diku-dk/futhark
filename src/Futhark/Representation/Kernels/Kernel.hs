@@ -13,6 +13,8 @@ module Futhark.Representation.Kernels.Kernel
        , kernelSpace
        , KernelDebugHints(..)
        , GenReduceOp(..)
+       , SegRedOp(..)
+       , segRedResults
        , KernelBody(..)
        , KernelSpace(..)
        , spaceDimensions
@@ -97,10 +99,27 @@ data GenReduceOp lore =
               }
   deriving (Eq, Ord, Show)
 
+data SegRedOp lore =
+  SegRedOp { segRedComm :: Commutativity
+           , segRedLambda :: Lambda lore
+           , segRedNeutral :: [SubExp]
+           , segRedShape :: Shape
+             -- ^ In case this operator is semantically a vectorised
+             -- operator (corresponding to a perfect map nest in the
+             -- SOACS representation), these are the logical
+             -- "dimensions".  This is used to generate more efficient
+             -- code.
+           }
+  deriving (Eq, Ord, Show)
+
+-- | How many reduction results are produced by these 'SegRedOp's?
+segRedResults :: [SegRedOp lore] -> Int
+segRedResults = sum . map (length . segRedNeutral)
+
 data Kernel lore
   = Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
   | SegMap KernelSpace [Type] (KernelBody lore)
-  | SegRed KernelSpace Commutativity (Lambda lore) [SubExp] [Type] (KernelBody lore)
+  | SegRed KernelSpace [SegRedOp lore] [Type] (KernelBody lore)
     -- ^ The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
   | SegScan KernelSpace (Lambda lore) [SubExp] [Type] (KernelBody lore)
@@ -110,7 +129,7 @@ data Kernel lore
 kernelSpace :: Kernel lore -> KernelSpace
 kernelSpace (Kernel _ kspace _ _) = kspace
 kernelSpace (SegMap kspace _ _) = kspace
-kernelSpace (SegRed kspace _ _ _ _ _) = kspace
+kernelSpace (SegRed kspace _ _ _) = kspace
 kernelSpace (SegScan kspace _ _ _ _) = kspace
 kernelSpace (SegGenRed kspace _ _ _) = kspace
 
@@ -215,14 +234,17 @@ mapKernelM tv (SegMap space ts body) =
   <$> mapOnKernelSpace tv space
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
   <*> mapOnKernelKernelBody tv body
-mapKernelM tv (SegRed space comm red_op nes ts body) =
+mapKernelM tv (SegRed space reds ts body) =
   SegRed
   <$> mapOnKernelSpace tv space
-  <*> pure comm
-  <*> mapOnKernelLambda tv red_op
-  <*> mapM (mapOnKernelSubExp tv) nes
+  <*> mapM onSegOp reds
   <*> mapM (mapOnType $ mapOnKernelSubExp tv) ts
   <*> mapOnKernelKernelBody tv body
+  where onSegOp (SegRedOp comm red_op nes shape) =
+          SegRedOp comm
+          <$> mapOnKernelLambda tv red_op
+          <*> mapM (mapOnKernelSubExp tv) nes
+          <*> (Shape <$> mapM (mapOnKernelSubExp tv) (shapeDims shape))
 mapKernelM tv (SegScan space scan_op nes ts body) =
   SegScan
   <$> mapOnKernelSpace tv space
@@ -439,12 +461,16 @@ kernelType (Kernel _ space ts body) =
 kernelType (SegMap space ts body) =
   zipWith (kernelResultShape space) ts $ kernelBodyResult body
 
-kernelType (SegRed space _ _ nes ts body) =
-  map (`arrayOfShape` Shape outer_dims) red_ts ++
+kernelType (SegRed space reds ts body) =
+  red_ts ++
   zipWith (kernelResultShape space) map_ts
   (drop (length red_ts) $ kernelBodyResult body)
-  where outer_dims = init $ map snd $ spaceDimensions space
-        (red_ts, map_ts) = splitAt (length nes) ts
+  where map_ts = drop (length red_ts) ts
+        segment_dims = init $ map snd $ spaceDimensions space
+        red_ts = do
+          op <- reds
+          let shape = Shape segment_dims <> segRedShape op
+          map (`arrayOfShape` shape) (lambdaReturnType $ segRedLambda op)
 
 kernelType (SegScan space _ _ ts _) =
   map (`arrayOfShape` Shape dims) ts
@@ -479,7 +505,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
     consumedInKernelBody kbody
   consumedInOp (SegMap _ _ kbody) =
     consumedInKernelBody kbody
-  consumedInOp (SegRed _ _ _ _ _ kbody) =
+  consumedInOp (SegRed _ _ _ kbody) =
     consumedInKernelBody kbody
   consumedInOp (SegScan _ _ _ _ kbody) =
     consumedInKernelBody kbody
@@ -588,11 +614,15 @@ typeCheckKernel (SegMap space ts kbody) = do
   mapM_ TC.checkType ts
   TC.binding (scopeOfKernelSpace space) $ checkKernelBody ts kbody
 
-typeCheckKernel (SegRed space _ red_op nes ts body) =
-  checkScanRed space red_op nes ts body
+typeCheckKernel (SegRed space reds ts body) =
+  checkScanRed space reds' ts body
+  where reds' = zip3
+                (map segRedLambda reds)
+                (map segRedNeutral reds)
+                (map segRedShape reds)
 
 typeCheckKernel (SegScan space scan_op nes ts body) =
-  checkScanRed space scan_op nes ts body
+  checkScanRed space [(scan_op, nes, mempty)] ts body
 
 typeCheckKernel (SegGenRed space ops ts body) = do
   checkSpace space
@@ -606,7 +636,7 @@ typeCheckKernel (SegGenRed space ops ts body) = do
 
       -- Operator type must match the type of neutral elements.
       let stripVecDims = stripArray $ shapeRank shape
-      TC.checkLambda op $ map (TC.noArgAliases .first stripVecDims) $ nes' ++ nes'
+      TC.checkLambda op $ map (TC.noArgAliases . first stripVecDims) $ nes' ++ nes'
       let nes_t = map TC.argType nes'
       unless (nes_t == lambdaReturnType op) $
         TC.bad $ TC.TypeError $ "SegGenRed operator has return type " ++
@@ -679,23 +709,36 @@ checkKernelBody ts (KernelBody (_, attr) stms kres) = do
 
 checkScanRed :: TC.Checkable lore =>
                 KernelSpace
-             -> Lambda (Aliases lore)
-             -> [SubExp]
+             -> [(Lambda (Aliases lore), [SubExp], Shape)]
              -> [Type]
              -> KernelBody (Aliases lore)
              -> TC.TypeM lore ()
-checkScanRed space scan_op nes ts kbody = do
+checkScanRed space ops ts kbody = do
   checkSpace space
   mapM_ TC.checkType ts
 
-  ne_ts <- mapM subExpType nes
-
-  let asArg t = (t, mempty)
   TC.binding (scopeOfKernelSpace space) $ do
-    TC.checkLambda scan_op $ map asArg $ ne_ts ++ ne_ts
-    unless (lambdaReturnType scan_op == ne_ts &&
-            take (length nes) ts == ne_ts) $
-      TC.bad $ TC.TypeError "wrong type for reduction or neutral elements."
+    ne_ts <- forM ops $ \(lam, nes, shape) -> do
+      mapM_ (TC.require [Prim int32]) $ shapeDims shape
+      nes' <- mapM TC.checkArg nes
+
+      -- Operator type must match the type of neutral elements.
+      let stripVecDims = stripArray $ shapeRank shape
+      TC.checkLambda lam $ map (TC.noArgAliases . first stripVecDims) $ nes' ++ nes'
+      let nes_t = map TC.argType nes'
+
+      unless (lambdaReturnType lam == nes_t) $
+        TC.bad $ TC.TypeError "wrong type for operator or neutral elements."
+
+      return $ map (`arrayOfShape` shape) nes_t
+
+    let expecting = concat ne_ts
+        got = take (length expecting) ts
+    unless (expecting == got) $
+      TC.bad $ TC.TypeError $
+      "Wrong return for body (does not match neutral elements; expected " ++
+      pretty expecting ++ "; found " ++
+      pretty got ++ ")"
 
     checkKernelBody ts kbody
 
@@ -714,8 +757,9 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "Kernel" $ kernelBodyMetrics kbody
   opMetrics (SegMap _ _ body) =
     inside "SegMap" $ kernelBodyMetrics body
-  opMetrics (SegRed _ _ red_op _ _ body) =
-    inside "SegRed" $ lambdaMetrics red_op >> kernelBodyMetrics body
+  opMetrics (SegRed _ reds _ body) =
+    inside "SegRed" $ do mapM_ (lambdaMetrics . segRedLambda) reds
+                         kernelBodyMetrics body
   opMetrics (SegScan _ scan_op _ _ body) =
     inside "SegScan" $ lambdaMetrics scan_op >> kernelBodyMetrics body
   opMetrics (SegGenRed _ ops _ body) =
@@ -736,13 +780,18 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
     PP.nestedBlock "{" "}" (ppr body)
 
-  ppr (SegRed space comm red_op nes ts body) =
-    text name <> PP.parens (ppr red_op <> PP.comma </>
-                             PP.braces (PP.commasep $ map ppr nes)) </>
+  ppr (SegRed space reds ts body) =
+    text "segred" <>
+    PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp reds)) </>
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
     PP.nestedBlock "{" "}" (ppr body)
-    where name = case comm of Commutative    -> "segred_comm"
-                              Noncommutative -> "segred"
+    where ppOp (SegRedOp comm lam nes shape) =
+            PP.braces (PP.commasep $ map ppr nes) <> PP.comma </>
+            ppr shape <> PP.comma </>
+            comm' <> ppr lam
+            where comm' = case comm of Commutative -> text "commutative "
+                                       Noncommutative -> mempty
+
 
   ppr (SegScan space scan_op nes ts body) =
     text "segscan" <> PP.parens (ppr scan_op <> PP.comma </>

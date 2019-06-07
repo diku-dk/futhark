@@ -656,10 +656,10 @@ compileSegGenRed (Pattern _ pes) space ops kbody = do
                     , spaceGlobalId = gtid
                     }
 
-        compileSegRed' (Pattern [] red_pes) segred_space
-          Commutative (genReduceOp op) (genReduceNeutral op) $ \_ red_dests ->
-          forM_ (zip red_dests subhistos) $ \((d, is), subhisto) ->
-            copyDWIM d is (Var subhisto) $ map (`Imp.var` int32) $
-            map fst segment_dims ++ [subhistogram_id, bucket_id] ++ vector_ids
+        let segred_op = SegRedOp Commutative (genReduceOp op) (genReduceNeutral op) mempty
+        compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \_ red_cont ->
+          red_cont $ flip map subhistos $ \subhisto ->
+            (Var subhisto, map (`Imp.var` int32) $
+              map fst segment_dims ++ [subhistogram_id, bucket_id] ++ vector_ids)
 
   where segment_dims = init $ spaceDimensions space

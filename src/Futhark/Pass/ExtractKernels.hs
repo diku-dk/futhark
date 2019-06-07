@@ -254,7 +254,7 @@ transformStms path (bnd:bnds) =
 
 sequentialisedUnbalancedStm :: Stm -> DistribM (Maybe (Stms SOACS))
 sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ form _)))
-  | Just (_, _, _, lam2) <- isRedomapSOAC form,
+  | Just (_, lam2) <- isRedomapSOAC form,
     unbalancedLambda lam2, lambdaContainsParallelism lam2 = do
       types <- asksScope scopeForSOACs
       Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
@@ -315,7 +315,7 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
       segScan res_pat w w scan_lam_sequential map_lam_sequential nes arrs [] []
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
-  | Just (comm, red_fun, nes) <- isReduceSOAC form,
+  | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm' | commutativeLambda red_fun = Commutative
               | otherwise                 = comm,
     Just do_irwim <- irwim res_pat w comm' red_fun $ zip nes arrs = do
@@ -324,14 +324,15 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
       transformStms path $ stmsToList bnds
 
 transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
-  | Just (comm, red_lam, nes, map_lam) <- isRedomapSOAC form = do
+  | Just (reds, map_lam) <- isRedomapSOAC form = do
 
   let paralleliseOuter = runBinder_ $ do
-        red_lam_sequential <- Kernelise.transformLambda red_lam
+        red_ops <- forM reds $ \(Reduce comm red_lam nes) -> do
+          (red_lam', nes', shape) <- determineReduceOp red_lam nes
+          return $ SegRedOp comm red_lam' nes' shape
         map_lam_sequential <- Kernelise.transformLambda map_lam
         addStms =<<
-          (fmap (certify cs) <$>
-           nonSegRed pat w comm' red_lam_sequential map_lam_sequential nes arrs)
+          (fmap (certify cs) <$> nonSegRed pat w red_ops map_lam_sequential arrs)
 
       outerParallelBody =
         renameBody =<<
@@ -340,13 +341,13 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
       paralleliseInner path' = do
         (mapbnd, redbnd) <- redomapToMapAndReduce pat (w, comm', red_lam, map_lam, nes, arrs)
         transformStms path' [certify cs mapbnd, certify cs redbnd]
+          where comm' | commutativeLambda red_lam = Commutative
+                      | otherwise = comm
+                (Reduce comm red_lam nes) = singleReduce reds
 
       innerParallelBody path' =
         renameBody =<<
         (mkBody <$> paralleliseInner path' <*> pure (map Var (patternNames pat)))
-
-      comm' | commutativeLambda red_lam = Commutative
-            | otherwise = comm
 
   if not $ lambdaContainsParallelism map_lam
     then paralleliseOuter
@@ -396,7 +397,7 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
             streamMap (map (baseString . patElemName) red_pat_elems) concat_pat_elems w
             Noncommutative fold_fun_sequential nes arrs
 
-          reduce_soac <- reduceSOAC comm' red_fun nes
+          reduce_soac <- reduceSOAC [Reduce comm' red_fun nes]
 
           (stms<>) <$>
             inScopeOf stms
@@ -958,7 +959,7 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
         addStmToKernel stm acc
 
 maybeDistributeStm (Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
-  | Just (comm, lam, nes) <- isReduceSOAC form,
+  | Just [Reduce comm lam nes] <- isReduceSOAC form,
     Just m <- irwim pat w comm lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       (_, bnds) <- runBinderT (certifying cs m) types
@@ -1020,7 +1021,8 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
 maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
-  | Just (comm, lam, nes, map_lam) <- isRedomapSOAC form,
+  | Just (reds, map_lam) <- isRedomapSOAC form,
+    Reduce comm lam nes <- singleReduce reds,
     isIdentityLambda map_lam || incrementalFlattening =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
@@ -1310,26 +1312,34 @@ genReduceKernel :: Pattern -> [(VName, SubExp)] -> [KernelInput]
                 -> InKernelLambda -> [VName]
                 -> DistribM KernelsStms
 genReduceKernel orig_pat ispace inputs cs genred_w ops lam arrs = runBinder_ $ do
-  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) ->
-    -- FIXME? We are assuming that the accumulator is a replicate, and
-    -- we fish out its value in a gross way.
-    case mapM subExpVar nes of
-      Just ne_vs' -> do
-        let (shape, op') = isVectorMap op
-        nes' <- forM ne_vs' $ \ne_v -> do
-          ne_v_t <- lookupType ne_v
-          letSubExp "genred_ne" $
-            BasicOp $ Index ne_v $ fullSlice ne_v_t $
-            replicate (shapeRank shape) $ DimFix $ intConst Int32 0
-        Out.GenReduceOp num_bins dests nes' shape <$> Kernelise.transformLambda op'
-      Nothing ->
-        Out.GenReduceOp num_bins dests nes mempty <$> Kernelise.transformLambda op
+  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) -> do
+    (op', nes', shape) <- determineReduceOp op nes
+    return $ Out.GenReduceOp num_bins dests nes' shape op'
 
   let isDest = flip elem $ concatMap Out.genReduceDest ops'
       inputs' = filter (not . isDest . kernelInputArray) inputs
 
   certifying cs $
     addStms =<< segGenRed orig_pat genred_w ispace inputs' ops' lam arrs
+
+determineReduceOp :: (MonadBinder m, Lore m ~ Out.Kernels) =>
+                     Lambda -> [SubExp] -> m (Out.Lambda Out.InKernel, [SubExp], Shape)
+determineReduceOp lam nes =
+  -- FIXME? We are assuming that the accumulator is a replicate, and
+  -- we fish out its value in a gross way.
+  case mapM subExpVar nes of
+    Just ne_vs' -> do
+      let (shape, lam') = isVectorMap lam
+      nes' <- forM ne_vs' $ \ne_v -> do
+        ne_v_t <- lookupType ne_v
+        letSubExp "genred_ne" $
+          BasicOp $ Index ne_v $ fullSlice ne_v_t $
+          replicate (shapeRank shape) $ DimFix $ intConst Int32 0
+      lam'' <- Kernelise.transformLambda lam'
+      return (lam'', nes', shape)
+    Nothing -> do
+      lam' <- Kernelise.transformLambda lam
+      return (lam', nes, mempty)
 
 isVectorMap :: Lambda -> (Shape, Lambda)
 isVectorMap lam
@@ -1360,8 +1370,9 @@ regularSegmentedRedomapKernel :: KernelNest
                               -> KernelM (Maybe KernelsStms)
 regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
   isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
-    \pat total_num_elements ispace inps nes' _ _ ->
-      addStms =<< segRed pat total_num_elements segment_size comm lam map_lam nes' arrs ispace inps
+    \pat total_num_elements ispace inps nes' _ _ -> do
+      let red_op = SegRedOp comm lam nes' mempty
+      addStms =<< segRed pat total_num_elements segment_size [red_op] map_lam arrs ispace inps
 
 isSegmentedOp :: KernelNest
               -> [Int]

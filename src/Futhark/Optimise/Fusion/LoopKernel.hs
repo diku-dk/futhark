@@ -266,10 +266,13 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
   case (soac_c, soac_p) of
     _ | SOAC.width soac_p /= SOAC.width soac_c -> fail "SOAC widths must match."
 
-    (SOAC.Screma _ (ScremaForm (scan_lam_c, scan_nes_c) (comm_c, red_lam_c, red_nes_c) _) _,
-     SOAC.Screma _ (ScremaForm (scan_lam_p, scan_nes_p) (comm_p, red_lam_p, red_nes_p) _) _)
-      | mapFusionOK (drop (length $ scan_nes_p++red_nes_p) outVars) ker || horizFuse -> do
-      let (res_lam', new_inp) = fuseRedomap unfus_set outVars
+    (SOAC.Screma _ (ScremaForm (scan_lam_c, scan_nes_c) reds_c _) _,
+     SOAC.Screma _ (ScremaForm (scan_lam_p, scan_nes_p) reds_p _) _)
+      | mapFusionOK (drop (length scan_nes_p+Futhark.redResults reds_p) outVars) ker
+        || horizFuse -> do
+      let red_nes_p = concatMap redNeutral reds_p
+          red_nes_c = concatMap redNeutral reds_c
+          (res_lam', new_inp) = fuseRedomap unfus_set outVars
                                             lam_p scan_nes_p red_nes_p inp_p_arr
                                             outPairs
                                             lam_c scan_nes_c red_nes_c inp_c_arr
@@ -279,14 +282,11 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
             splitAt3 (length scan_nes_c) (length red_nes_c) $ outNames ker
           unfus_arrs  = returned_outvars \\ (soac_p_scanout++soac_p_redout)
           scan_lam'   = mergeReduceOps scan_lam_p scan_lam_c
-          red_lam'    = mergeReduceOps red_lam_p red_lam_c
       success (soac_p_scanout ++ soac_c_scanout ++
                soac_p_redout ++ soac_c_redout ++
                soac_c_mapout ++ unfus_arrs) $
-        SOAC.Screma w (ScremaForm (scan_lam', scan_nes_p++scan_nes_c)
-                                      (comm_p<>comm_c, red_lam', red_nes_p++red_nes_c)
-                                      res_lam')
-                        new_inp
+        SOAC.Screma w (ScremaForm (scan_lam', scan_nes_p++scan_nes_c) (reds_p ++ reds_c) res_lam')
+        new_inp
 
     ------------------
     -- Scatter fusion --
@@ -556,18 +556,14 @@ iswim _ (SOAC.Screma w form arrs) ots
 
       let map_body = mkBody (oneStm $
                               Let (setPatternOuterDimTo w map_pat) (defAux ()) $
-                              Op $ Futhark.Screma w (ScremaForm (scan_fun', nes')
-                                                                    (mempty, nilFn, mempty)
-                                                                    id_map_lam) arrs') $
+                              Op $ Futhark.Screma w (ScremaForm (scan_fun', nes') [] id_map_lam) arrs') $
                             map Var $ patternNames map_pat
           map_fun' = Lambda map_params map_body map_rettype
           perm = case lambdaReturnType map_fun of
                    []  -> []
                    t:_ -> 1 : 0 : [2..arrayRank t]
 
-      return (SOAC.Screma map_w
-               (ScremaForm (nilFn, mempty) (mempty, nilFn, mempty) map_fun')
-               map_arrs',
+      return (SOAC.Screma map_w (ScremaForm (nilFn, mempty) [] map_fun') map_arrs',
               ots SOAC.|> SOAC.Rearrange map_cs perm)
 
 iswim _ _ _ =

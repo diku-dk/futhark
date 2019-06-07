@@ -1316,7 +1316,7 @@ isOverloadedFunction qname args loc = do
 
                       -- Check that all were equal.
                       and_lam <- binOpLambda I.LogAnd I.Bool
-                      reduce <- I.reduceSOAC Commutative and_lam [constant True]
+                      reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
                       all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems reduce [cmps]
                       return $ resultBody [all_equal]
 
@@ -1427,13 +1427,13 @@ isOverloadedFunction qname args loc = do
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where reduce w red_lam nes arrs =
               I.Screma w <$>
-              I.reduceSOAC Noncommutative red_lam nes <*> pure arrs
+              I.reduceSOAC [Reduce Noncommutative red_lam nes] <*> pure arrs
 
     handle [TupLit [lam, ne, arr] _] "reduce_comm" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where reduce w red_lam nes arrs =
               I.Screma w <$>
-              I.reduceSOAC Commutative red_lam nes <*> pure arrs
+              I.reduceSOAC [Reduce Commutative red_lam nes] <*> pure arrs
 
     handle [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
       internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)

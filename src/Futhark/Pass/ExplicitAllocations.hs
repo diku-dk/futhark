@@ -536,11 +536,13 @@ handleHostOp (HostOp (SegMap space ts body)) = do
            localScope (scopeOfKernelSpace space) $ allocInKernelBody body
   return $ Inner $ HostOp $ SegMap space ts body'
 
-handleHostOp (HostOp (SegRed space comm red_op nes ts body)) = do
+handleHostOp (HostOp (SegRed space reds ts body)) = do
   body' <- subInKernel space $
            localScope (scopeOfKernelSpace space) $ allocInKernelBody body
-  red_op' <- allocInSegRedLambda space red_op
-  return $ Inner $ HostOp $ SegRed space comm red_op' nes ts body'
+  reds' <- forM reds $ \(SegRedOp comm lam nes shape) -> do
+    lam' <- allocInSegRedLambda space lam
+    return $ SegRedOp comm lam' nes shape
+  return $ Inner $ HostOp $ SegRed space reds' ts body'
 
 handleHostOp (HostOp (SegScan space scan_op nes ts body)) = do
   body' <- subInKernel space $
@@ -1030,9 +1032,10 @@ kernelExpHints (Op (Inner (HostOp (Kernel _ space ts kbody)))) =
 kernelExpHints (Op (Inner (HostOp (SegMap space ts body)))) =
   zipWithM (mapResultHint space) ts $ kernelBodyResult body
 
-kernelExpHints (Op (Inner (HostOp (SegRed space _ _ nes ts body)))) =
-  (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint space) (drop (length nes) ts) map_res
-  where (red_res, map_res) = splitAt (length nes) $ kernelBodyResult body
+kernelExpHints (Op (Inner (HostOp (SegRed space reds ts body)))) =
+  (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint space) (drop num_reds ts) map_res
+  where num_reds = segRedResults reds
+        (red_res, map_res) = splitAt num_reds $ kernelBodyResult body
 
 kernelExpHints e =
   return $ replicate (expExtTypeSize e) NoHint
