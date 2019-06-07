@@ -183,7 +183,7 @@ onKernel target kernel = do
           -- We declare the shared memory array as int64_t to force alignment.
           let size' = compilePrimExp size
           return (Nothing, Nothing,
-                  [CUDAC.citem|__shared__ volatile typename int64_t $id:mem[$exp:size'];|])
+                  [CUDAC.citem|__shared__ volatile typename int64_t $id:mem[(($exp:size' + 7) & ~7)/8];|])
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
