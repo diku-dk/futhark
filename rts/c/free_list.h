@@ -19,7 +19,7 @@ struct free_list {
 void free_list_init(struct free_list *l) {
   l->capacity = 30; // Picked arbitrarily.
   l->used = 0;
-  l->entries = malloc(sizeof(struct free_list_entry) * l->capacity);
+  l->entries = (struct free_list_entry*) malloc(sizeof(struct free_list_entry) * l->capacity);
   for (int i = 0; i < l->capacity; i++) {
     l->entries[i].valid = 0;
   }
