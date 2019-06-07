@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `f32` and `f64` modules now contain `gamma` and `lgamma`
     functions.  At present these do not work in the C# backend.
 
+  * Some instances of `reduce` with vectorised operators (e.g. `map2
+    (+)`) are orders of magnitude faster than before.
+
+  * Memory usage is now lower on some programs (specifically the ones
+    that have large `map`s with internal intermediate arrays).
+
 ### Removed
 
   * Size *parameters* (not *annotations*) are no longer permitted
