@@ -329,7 +329,9 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
   let paralleliseOuter = runBinder_ $ do
         red_ops <- forM reds $ \(Reduce comm red_lam nes) -> do
           (red_lam', nes', shape) <- determineReduceOp red_lam nes
-          return $ SegRedOp comm red_lam' nes' shape
+          let comm' | commutativeLambda red_lam = Commutative
+                    | otherwise = comm
+          return $ SegRedOp comm' red_lam' nes' shape
         map_lam_sequential <- Kernelise.transformLambda map_lam
         addStms =<<
           (fmap (certify cs) <$> nonSegRed pat w red_ops map_lam_sequential arrs)

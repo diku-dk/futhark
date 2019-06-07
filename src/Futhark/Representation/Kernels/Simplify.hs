@@ -34,6 +34,7 @@ import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Rephrase (castStm)
+import Futhark.Util (chunks)
 
 simpleKernels :: Simplify.SimpleOps Kernels
 simpleKernels = Simplify.bindableSimpleOps (simplifyKernelOp simpleInKernel inKernelEnv)
@@ -397,9 +398,10 @@ instance BinderOps (Wise InKernel) where
 
 kernelRules :: RuleBook (Wise Kernels)
 kernelRules = standardRules <>
-              ruleBook [RuleOp removeInvariantKernelResults]
-                       [RuleOp distributeKernelResults,
-                        RuleBasicOp removeUnnecessaryCopy]
+              ruleBook [ RuleOp removeInvariantKernelResults
+                       , RuleOp mergeSegRedOps]
+                       [ RuleOp distributeKernelResults
+                       , RuleBasicOp removeUnnecessaryCopy]
 
 fuseStreamIota :: TopDownRuleOp (Wise InKernel)
 fuseStreamIota vtable pat _ (GroupStream w max_chunk lam accs arrs)
@@ -518,6 +520,54 @@ distributeKernelResults (vtable, used)
         _ -> Nothing
       where matches (_, _, kre) = kre == ThreadsReturn (Var $ patElemName pe)
 distributeKernelResults _ _ _ _ = cannotSimplify
+
+-- If a SegRed contains two reduction operations that have the same
+-- vector shape, merge them together.  This saves on communication
+-- overhead, but can in principle lead to more local memory usage.
+mergeSegRedOps :: TopDownRuleOp (Wise Kernels)
+mergeSegRedOps _ (Pattern [] pes) _ (HostOp (SegRed space ops ts kbody))
+  | length ops > 1,
+    op_groupings <- groupBy sameShape $ zip ops $ chunks (map (length . segRedNeutral) ops) $
+                    zip3 red_pes red_ts red_res,
+    any ((>1) . length) op_groupings = do
+      let (ops', aux) = unzip $ mapMaybe combineOps op_groupings
+          (red_pes', red_ts', red_res') = unzip3 $ concat aux
+          pes' = red_pes' ++ map_pes
+          ts' = red_ts' ++ map_ts
+          kbody' = kbody { kernelBodyResult = red_res' ++ map_res }
+      letBind_ (Pattern [] pes') $ Op $ HostOp $ SegRed space ops' ts' kbody'
+  where (red_pes, map_pes) = splitAt (segRedResults ops) pes
+        (red_ts, map_ts) = splitAt (segRedResults ops) ts
+        (red_res, map_res) = splitAt (segRedResults ops) $ kernelBodyResult kbody
+
+        sameShape (op1, _) (op2, _) = segRedShape op1 == segRedShape op2
+
+        combineOps :: [(SegRedOp (Wise InKernel), [a])]
+                   -> Maybe (SegRedOp (Wise InKernel), [a])
+        combineOps [] = Nothing
+        combineOps (x:xs) = Just $ foldl' combine x xs
+
+        combine (op1, op1_aux) (op2, op2_aux) =
+          let lam1 = segRedLambda op1
+              lam2 = segRedLambda op2
+              (op1_xparams, op1_yparams) =
+                splitAt (length (segRedNeutral op1)) $ lambdaParams lam1
+              (op2_xparams, op2_yparams) =
+                splitAt (length (segRedNeutral op2)) $ lambdaParams lam2
+              lam = Lambda { lambdaParams = op1_xparams ++ op2_xparams ++
+                                            op1_yparams ++ op2_yparams
+                           , lambdaReturnType = lambdaReturnType lam1 ++ lambdaReturnType lam2
+                           , lambdaBody =
+                               mkBody (bodyStms (lambdaBody lam1) <> bodyStms (lambdaBody lam2)) $
+                               bodyResult (lambdaBody lam1) <> bodyResult (lambdaBody lam2)
+                           }
+          in (SegRedOp { segRedComm = segRedComm op1 <> segRedComm op2
+                       , segRedLambda = lam
+                       , segRedNeutral = segRedNeutral op1 ++ segRedNeutral op2
+                       , segRedShape = segRedShape op1 -- Same as shape of op2 due to the grouping.
+                       },
+               op1_aux ++ op2_aux)
+mergeSegRedOps _ _ _ _ = cannotSimplify
 
 simplifyKnownIterationStream :: TopDownRuleOp (Wise InKernel)
 -- Remove GroupStreams over single-element arrays.  Not much to stream
