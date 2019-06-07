@@ -88,16 +88,16 @@ segRed :: (MonadFreshNames m, HasScope Kernels m) =>
           Pattern Kernels
        -> SubExp
        -> SubExp -- segment size
-       -> Commutativity
-       -> Lambda InKernel -> Lambda InKernel
-       -> [SubExp] -> [VName]
+       -> [SegRedOp InKernel]
+       -> Lambda InKernel
+       -> [VName]
        -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this reduction
        -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
        -> m (Stms Kernels)
-segRed pat total_num_elements w comm reduce_lam map_lam nes arrs ispace inps = runBinder_ $ do
+segRed pat total_num_elements w ops map_lam arrs ispace inps = runBinder_ $ do
   (kspace, kbody) <- prepareRedOrScan total_num_elements w map_lam arrs ispace inps
   letBind_ pat $ Op $ HostOp $
-    SegRed kspace comm reduce_lam nes (lambdaReturnType map_lam) kbody
+    SegRed kspace ops (lambdaReturnType map_lam) kbody
 
 segScan :: (MonadFreshNames m, HasScope Kernels m) =>
            Pattern Kernels
@@ -137,15 +137,13 @@ dummyDim pat = do
 nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels
           -> SubExp
-          -> Commutativity
+          -> [SegRedOp InKernel]
           -> Lambda InKernel
-          -> Lambda InKernel
-          -> [SubExp]
           -> [VName]
           -> m (Stms Kernels)
-nonSegRed pat w comm red_lam map_lam nes arrs = runBinder_ $ do
+nonSegRed pat w ops map_lam arrs = runBinder_ $ do
   (pat', ispace, read_dummy) <- dummyDim pat
-  addStms =<< segRed pat' w w comm red_lam map_lam nes arrs ispace []
+  addStms =<< segRed pat' w w ops map_lam arrs ispace []
   read_dummy
 
 prepareStream :: (MonadBinder m, Lore m ~ Kernels) =>
@@ -203,7 +201,8 @@ streamRed pat w comm red_lam fold_lam nes arrs = runBinder_ $ do
 
   (kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 
-  letBind_ pat' $ Op $ HostOp $ SegRed kspace comm red_lam nes ts kbody
+  letBind_ pat' $ Op $ HostOp $ SegRed kspace
+    [SegRedOp comm red_lam nes mempty] ts kbody
 
   read_dummy
 

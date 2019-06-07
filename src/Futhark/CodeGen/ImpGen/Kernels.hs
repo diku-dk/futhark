@@ -103,8 +103,8 @@ kernelCompiler pat (Kernel desc space _ kernel_body) = do
 kernelCompiler pat (SegMap space _ body) =
   compileSegMap pat space body
 
-kernelCompiler pat (SegRed space comm red_op nes _ body) =
-  compileSegRed pat space comm red_op nes body
+kernelCompiler pat (SegRed space reds _ body) =
+  compileSegRed pat space reds body
 
 kernelCompiler pat (SegScan space red_op nes _ kbody) =
   compileSegScan pat space red_op nes kbody

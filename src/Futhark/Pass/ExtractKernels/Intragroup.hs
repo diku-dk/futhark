@@ -200,15 +200,16 @@ intraGroupStm stm@(Let pat _ e) = do
       parallelMin [w]
 
     Op (Screma w form arrs)
-      | Just (_, redfun, nes, foldfun) <- isRedomapSOAC form -> do
+      | Just (reds, map_lam) <- isRedomapSOAC form,
+        Reduce _ red_lam nes <- singleReduce reds -> do
       let (red_pes, map_pes) =
             splitAt (length nes) $ patternElements pat
-      red_input <- procInput ltid (Pattern [] map_pes) w foldfun nes arrs
+      red_input <- procInput ltid (Pattern [] map_pes) w map_lam nes arrs
 
-      redfun' <- Kernelise.transformLambda redfun
+      red_lam' <- Kernelise.transformLambda red_lam
 
       letBind_ (Pattern [] red_pes) $
-        Op $ Out.GroupReduce w redfun' $ zip nes red_input
+        Op $ Out.GroupReduce w red_lam' $ zip nes red_input
       parallelMin [w]
 
     Op (Stream w (Sequential accs) lam arrs)

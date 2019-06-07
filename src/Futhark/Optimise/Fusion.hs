@@ -437,8 +437,8 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
       infusible_nms  = S.fromList $ filter (`S.member` infusible res) out_nms
       out_arr_nms    = case soac of
                         -- the accumulator result cannot be fused!
-                        SOAC.Screma _ (ScremaForm (_, scan_nes) (_, _, red_nes) _) _ ->
-                          drop (length scan_nes + length red_nes) out_nms
+                        SOAC.Screma _ (ScremaForm (_, scan_nes) reds _) _ ->
+                          drop (length scan_nes + redResults reds) out_nms
                         SOAC.Stream _ frm _ _ -> drop (length $ getStreamAccums frm) out_nms
                         _ -> out_nms
       to_fuse_knms1  = S.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
@@ -623,10 +623,9 @@ fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
       fres' <- addNamesToInfusible fres $ S.fromList $ patternNames pat
       mapLike fres' soac lam
 
-    Right soac@(SOAC.Screma _ (ScremaForm (scan_lam, scan_nes)
-                                              (_, reduce_lam, reduce_nes)
-                                              map_lam) _) ->
-      reduceLike soac [scan_lam, reduce_lam, map_lam] $ scan_nes <> reduce_nes
+    Right soac@(SOAC.Screma _ (ScremaForm (scan_lam, scan_nes) reds map_lam) _) ->
+      reduceLike soac (map redLambda reds ++ [scan_lam, map_lam]) $
+      scan_nes <> concatMap redNeutral reds
 
     Right soac@(SOAC.Stream _ form lam _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
@@ -823,14 +822,13 @@ insertKerSOAC names ker = do
 finaliseSOAC :: SOAC.SOAC SOACS -> FusionGM (SOAC.SOAC SOACS)
 finaliseSOAC new_soac =
   case new_soac of
-    SOAC.Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs -> do
+    SOAC.Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs -> do
       scan_lam' <- simplifyAndFuseInLambda scan_lam
-      red_lam' <- simplifyAndFuseInLambda red_lam
+      reds' <- forM reds $ \(Reduce comm red_lam red_nes) -> do
+        red_lam' <- simplifyAndFuseInLambda red_lam
+        return $ Reduce comm red_lam' red_nes
       map_lam' <- simplifyAndFuseInLambda map_lam
-      return $ SOAC.Screma w (ScremaForm (scan_lam', scan_nes)
-                                             (comm, red_lam', red_nes)
-                                             map_lam')
-                               arrs
+      return $ SOAC.Screma w (ScremaForm (scan_lam', scan_nes) reds' map_lam') arrs
     SOAC.Scatter w lam inps dests -> do
       lam' <- simplifyAndFuseInLambda lam
       return $ SOAC.Scatter w lam' inps dests
@@ -854,10 +852,7 @@ copyNewlyConsumed :: Names
                   -> Binder SOACS (Futhark.SOAC SOACS)
 copyNewlyConsumed was_consumed soac =
   case soac of
-    Futhark.Screma w (Futhark.ScremaForm
-                         (scan_lam, scan_nes)
-                         (comm, reduce_lam, reduce_nes)
-                         map_lam) arrs -> do
+    Futhark.Screma w (Futhark.ScremaForm (scan_lam, scan_nes) reds map_lam) arrs -> do
       -- Copy any arrays that are consumed now, but were not in the
       -- constituents.
       arrs' <- mapM copyConsumedArr arrs
@@ -865,11 +860,12 @@ copyNewlyConsumed was_consumed soac =
       -- lambda, and we have to substitute the name of the copy for
       -- the original.
       map_lam' <- copyFreeInLambda map_lam
+      let reds' = map (\red -> red { redLambda =
+                                       Aliases.removeLambdaAliases
+                                       (redLambda red)})
+                  reds
       return $ Futhark.Screma w
-        (Futhark.ScremaForm
-         (Aliases.removeLambdaAliases scan_lam, scan_nes)
-         (comm, Aliases.removeLambdaAliases reduce_lam, reduce_nes)
-         map_lam') arrs'
+        (Futhark.ScremaForm (Aliases.removeLambdaAliases scan_lam, scan_nes) reds' map_lam') arrs'
 
     _ -> return $ removeOpAliases soac
   where consumed = consumedInOp soac

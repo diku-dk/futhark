@@ -60,56 +60,55 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import Futhark.Util (chunks)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 
-type DoSegBody = (KernelConstants -> [(VName, [Imp.Exp])] -> InKernelGen ())
+type DoSegBody = (KernelConstants -> ([(SubExp, [Imp.Exp])] -> InKernelGen ()) -> InKernelGen ())
 
 -- | Compile 'SegRed' instance to host-level code with calls to
 -- various kernels.
 compileSegRed :: Pattern ExplicitMemory
               -> KernelSpace
-              -> Commutativity -> Lambda InKernel -> [SubExp]
+              -> [SegRedOp InKernel]
               -> KernelBody InKernel
               -> CallKernelGen ()
-compileSegRed pat space comm red_op nes body =
-  compileSegRed' pat space comm red_op nes $ \constants red_dests ->
+compileSegRed pat space reds body =
+  compileSegRed' pat space reds $ \constants red_cont ->
   compileKernelStms constants (kernelBodyStms body) $ do
-  let (red_res, map_res) = splitAt (length nes) $ kernelBodyResult body
-
-  sComment "save results to be reduced" $
-    forM_ (zip red_dests red_res) $ \((d,is), res) ->
-    copyDWIM d is (kernelResultSubExp res) []
+  let (red_res, map_res) = splitAt (segRedResults reds) $ kernelBodyResult body
 
   sComment "save map-out results" $ do
-    let map_arrs = drop (length nes) $ patternElements pat
+    let map_arrs = drop (segRedResults reds) $ patternElements pat
     zipWithM_ (compileKernelResult constants) map_arrs map_res
+
+  red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' :: Pattern ExplicitMemory
                -> KernelSpace
-               -> Commutativity -> Lambda InKernel -> [SubExp]
+               -> [SegRedOp InKernel]
                -> DoSegBody
                -> CallKernelGen ()
-compileSegRed' pat space comm red_op nes body
+compileSegRed' pat space reds body
   | [(_, Constant (IntValue (Int32Value 1))), _] <- spaceDimensions space =
-      nonsegmentedReduction pat space comm red_op nes body
+      nonsegmentedReduction pat space reds body
   | otherwise = do
       segment_size <-
         toExp $ last $ map snd $ spaceDimensions space
       group_size <- toExp $ spaceGroupSize space
       let use_small_segments = segment_size * 2 .<. group_size
       sIf use_small_segments
-        (smallSegmentsReduction pat space red_op nes body)
-        (largeSegmentsReduction pat space comm red_op nes body)
+        (smallSegmentsReduction pat space reds body)
+        (largeSegmentsReduction pat space reds body)
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed
 -- arguments go in local memory (so we need to do the allocation of
 -- those arrays inside the kernel), while array-typed arguments go in
 -- global memory.  Allocations for the former have already been
 -- performed.  This policy is baked into how the allocations are done
--- in ExplicitAllocator.
-intermediateArrays :: KernelSpace -> Lambda InKernel -> [SubExp] -> InKernelGen [VName]
-intermediateArrays space red_op nes = do
+-- in ExplicitAllocations.
+intermediateArrays :: KernelSpace -> SegRedOp InKernel -> InKernelGen [VName]
+intermediateArrays space (SegRedOp _ red_op nes _) = do
   let red_op_params = lambdaParams red_op
       (red_acc_params, _) = splitAt (length nes) red_op_params
   forM red_acc_params $ \p ->
@@ -123,12 +122,30 @@ intermediateArrays space red_op nes = do
             shape = Shape [spaceGroupSize space]
         sAllocArray "red_arr" pt shape $ Space "local"
 
+-- | Arrays for storing group results.
+--
+-- The group-result arrays have an extra dimension (of size groupsize)
+-- because they are also used for keeping vectorised accumulators for
+-- first-stage reduction, if necessary.  When actually storing group
+-- results, the first index is set to 0.
+groupResultArrays :: KernelSpace -> [SegRedOp InKernel] -> CallKernelGen [[VName]]
+groupResultArrays space reds =
+  forM reds $ \(SegRedOp _ lam _ shape) ->
+    forM (lambdaReturnType lam) $ \t -> do
+    let pt = elemType t
+        full_shape = Shape [spaceGroupSize space, spaceNumGroups space] <>
+                     shape <> arrayShape t
+        -- Move the groupsize dimension last to ensure coalesced
+        -- memory access.
+        perm = [1..shapeRank full_shape-1] ++ [0]
+    sAllocArrayPerm "group_res_arr" pt full_shape (Space "device") perm
+
 nonsegmentedReduction :: Pattern ExplicitMemory
                       -> KernelSpace
-                      -> Commutativity -> Lambda InKernel -> [SubExp]
+                      -> [SegRedOp InKernel]
                       -> DoSegBody
                       -> CallKernelGen ()
-nonsegmentedReduction segred_pat space comm red_op nes body = do
+nonsegmentedReduction segred_pat space reds body = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
   let constants = base_constants { kernelThreadActive = true }
       global_tid = kernelGlobalThreadId constants
@@ -138,18 +155,19 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
     sStaticArray "counter" (Space "device") int32 $
     Imp.ArrayValues $ replicate 1 $ IntValue $ Int32Value 0
 
-  group_res_arrs <- forM (lambdaReturnType red_op) $ \t -> do
-    let pt = elemType t
-        shape = Shape [spaceNumGroups space] <> arrayShape t
-    sAllocArray "group_res_arr" pt shape $ Space "device"
+  -- The group-result arrays have an extra dimension (of size
+  -- groupsize) because they are also used for keeping vectorised
+  -- accumulators for first-stage reduction, if necessary.  When
+  -- actually storing group results, the first index is set to 0.
+  reds_group_res_arrs <- groupResultArrays space reds
 
   num_threads <- dPrimV "num_threads" $ kernelNumThreads constants
 
   sKernel constants "segred_nonseg" $ allThreads constants $ do
     init_constants
 
-    red_arrs <- intermediateArrays space red_op nes
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
+    reds_arrs <- mapM (intermediateArrays space) reds
 
     -- Since this is the nonsegmented case, all outer segment IDs must
     -- necessarily be 0.
@@ -160,22 +178,30 @@ nonsegmentedReduction segred_pat space comm red_op nes body = do
     num_elements <- Imp.elements <$> toExp w
     let elems_per_thread = num_elements `quotRoundingUp` Imp.elements (kernelNumThreads constants)
 
-    (group_result_params, red_op_renamed) <-
+    slugs <- mapM (segRedOpSlug (kernelLocalThreadId constants) (kernelGroupId constants)) $
+             zip3 reds reds_arrs reds_group_res_arrs
+    reds_op_renamed <-
       reductionStageOne constants num_elements
       global_tid elems_per_thread num_threads
-      comm red_op nes red_arrs body
+      slugs body
 
-    let red_acc_params = take (length nes) $ lambdaParams red_op
-    reductionStageTwo constants segred_pat (kernelGroupId constants) 0 [0] 0
-      (kernelNumGroups constants) group_result_params red_acc_params red_op_renamed nes
-      1 counter sync_arr group_res_arrs red_arrs
+    let segred_pes = chunks (map (length . segRedNeutral) reds) $
+                     patternElements segred_pat
+    forM_ (zip6 reds reds_arrs reds_group_res_arrs segred_pes
+           slugs reds_op_renamed) $
+      \(SegRedOp _ red_op nes _,
+        red_arrs, group_res_arrs, pes, slug, red_op_renamed) -> do
+      let red_acc_params = take (length nes) $ lambdaParams red_op
+      reductionStageTwo constants pes (kernelGroupId constants) 0 [0] 0
+        (kernelNumGroups constants) slug red_acc_params red_op_renamed nes
+        1 counter sync_arr group_res_arrs red_arrs
 
 smallSegmentsReduction :: Pattern ExplicitMemory
                        -> KernelSpace
-                       -> Lambda InKernel -> [SubExp]
+                       -> [SegRedOp InKernel]
                        -> DoSegBody
                        -> CallKernelGen ()
-smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
+smallSegmentsReduction (Pattern _ segred_pes) space reds body = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
   let constants = base_constants { kernelThreadActive = true }
 
@@ -200,7 +226,7 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
   sKernel constants "segred_small" $ allThreads constants $ do
     init_constants
 
-    red_arrs <- intermediateArrays space red_op nes
+    reds_arrs <- mapM (intermediateArrays space) reds
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
@@ -217,22 +243,29 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
       zipWithM_ (<--) (init gtids) $ unflattenIndex (init dims') segment_index
       last gtids <-- index_within_segment
 
-      let toLocalMemory ses =
-            forM_ (zip red_arrs ses) $ \(arr, se) ->
-            copyDWIM arr [ltid] se []
+      let out_of_bounds =
+            forM_ (zip reds reds_arrs) $ \(SegRedOp _ _ nes _, red_arrs) ->
+            forM_ (zip red_arrs nes) $ \(arr, ne) ->
+            copyDWIM arr [ltid] ne []
 
-          in_bounds = body constants $ zip red_arrs $ repeat [ltid]
+          in_bounds =
+            body constants $ \red_res ->
+            sComment "save results to be reduced" $ do
+            let red_dests = zip (concat reds_arrs) $ repeat [ltid]
+            forM_ (zip red_dests red_res) $ \((d,d_is), (res, res_is)) ->
+              copyDWIM d d_is res res_is
 
       sComment "apply map function if in bounds" $
         sIf (segment_size .>. 0 .&&.
              isActive (init $ zip gtids dims) .&&.
-             ltid .<. segment_size * segments_per_group) in_bounds (toLocalMemory nes)
+             ltid .<. segment_size * segments_per_group) in_bounds out_of_bounds
 
       sOp Imp.LocalBarrier
 
       let crossesSegment from to = (to-from) .>. (to `rem` segment_size)
       sWhen (segment_size .>. 0) $
         sComment "perform segmented scan to imitate reduction" $
+        forM_ (zip reds reds_arrs) $ \(SegRedOp _ red_op _ _, red_arrs) ->
         groupScan constants (Just crossesSegment) (segment_size*segments_per_group) red_op red_arrs
 
       sOp Imp.LocalBarrier
@@ -240,7 +273,7 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
       sComment "save final values of segments" $
         sWhen (group_id' * segments_per_group + ltid .<. num_segments .&&.
                ltid .<. segments_per_group) $
-        forM_ (zip segred_pes red_arrs) $ \(pe, arr) -> do
+        forM_ (zip segred_pes (concat reds_arrs)) $ \(pe, arr) -> do
         -- Figure out which segment result this thread should write...
         let flat_segment_index = group_id' * segments_per_group + ltid
             gtids' = unflattenIndex (init dims') flat_segment_index
@@ -253,10 +286,10 @@ smallSegmentsReduction (Pattern _ segred_pes) space red_op nes body = do
 
 largeSegmentsReduction :: Pattern ExplicitMemory
                        -> KernelSpace
-                       -> Commutativity -> Lambda InKernel -> [SubExp]
+                       -> [SegRedOp InKernel]
                        -> DoSegBody
                        -> CallKernelGen ()
-largeSegmentsReduction segred_pat space comm red_op nes body = do
+largeSegmentsReduction segred_pat space reds body = do
   (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
   let (gtids, dims) = unzip $ spaceDimensions space
   dims' <- mapM toExp dims
@@ -283,10 +316,7 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
   emit $ Imp.DebugPrint "elems_per_thread" $ Just (int32, Imp.innerExp elems_per_thread)
   emit $ Imp.DebugPrint "groups_per_segment" $ Just (int32, groups_per_segment)
 
-  group_res_arrs <- forM (lambdaReturnType red_op) $ \t -> do
-    let pt = elemType t
-        shape = Shape [Var virt_num_groups] <> arrayShape t
-    sAllocArray "group_res_arr" pt shape $ Space "device"
+  reds_group_res_arrs <- groupResultArrays space reds
 
   -- In principle we should have a counter for every segment.  Since
   -- the number of segments is a dynamic quantity, we would have to
@@ -306,8 +336,7 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
   sKernel constants "segred_large" $ allThreads constants $ do
     init_constants
 
-    let red_acc_params = take (length nes) $ lambdaParams red_op
-    red_arrs <- intermediateArrays space red_op nes
+    reds_arrs <- mapM (intermediateArrays space) reds
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- We probably do not have enough actual workgroups to cover the
@@ -329,23 +358,34 @@ largeSegmentsReduction segred_pat space comm red_op nes body = do
       zipWithM_ (<--) segment_gtids $ unflattenIndex (init dims') flat_segment_id
       num_elements <- Imp.elements <$> toExp w
 
-      (group_result_params, red_op_renamed) <-
+      slugs <- mapM (segRedOpSlug local_tid group_id) $
+               zip3 reds reds_arrs reds_group_res_arrs
+      reds_op_renamed <-
         reductionStageOne constants num_elements
         global_tid elems_per_thread threads_per_segment
-        comm red_op nes red_arrs body
+        slugs body
 
-      let multiple_groups_per_segment =
-            reductionStageTwo constants segred_pat
-            group_id flat_segment_id (map (`Imp.var` int32) segment_gtids)
-            first_group_for_segment groups_per_segment
-            group_result_params red_acc_params red_op_renamed
-            nes (fromIntegral num_counters) counter sync_arr group_res_arrs red_arrs
+      let segred_pes = chunks (map (length . segRedNeutral) reds) $
+                       patternElements segred_pat
+
+          multiple_groups_per_segment =
+            forM_ (zip6 reds reds_arrs reds_group_res_arrs segred_pes
+                   slugs reds_op_renamed) $
+            \(SegRedOp _ red_op nes _, red_arrs, group_res_arrs, pes,
+              slug, red_op_renamed) -> do
+              let red_acc_params = take (length nes) $ lambdaParams red_op
+              reductionStageTwo constants pes
+                group_id flat_segment_id (map (`Imp.var` int32) segment_gtids)
+                first_group_for_segment groups_per_segment
+                slug red_acc_params red_op_renamed
+                nes (fromIntegral num_counters) counter sync_arr group_res_arrs red_arrs
 
           one_group_per_segment =
             comment "first thread in group saves final result to memory" $
+            forM_ (zip slugs segred_pes) $ \(slug, pes) ->
             sWhen (local_tid .==. 0) $
-              forM_ (take (length nes) $ zip (patternNames segred_pat) group_result_params) $ \(v, p) ->
-              copyDWIM v (map (`Imp.var` int32) segment_gtids) (Var $ paramName p) []
+              forM_ (zip pes (slugAccs slug)) $ \(v, (acc, acc_is)) ->
+              copyDWIM (patElemName v) (map (`Imp.var` int32) segment_gtids) (Var acc) acc_is
 
       sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
 
@@ -359,55 +399,107 @@ groupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint g
         segment_size `quotRoundingUp` (group_size * groups_per_segment)
   in (groups_per_segment, Imp.elements elements_per_thread)
 
-reductionStageOne :: KernelConstants
-                  -> Imp.Count Imp.Elements
-                  -> Imp.Exp
-                  -> Imp.Count Imp.Elements
-                  -> VName
-                  -> Commutativity
-                  -> LambdaT InKernel
-                  -> [SubExp]
-                  -> [VName]
-                  -> DoSegBody
-                  -> InKernelGen ([LParam InKernel], Lambda InKernel)
-reductionStageOne constants num_elements global_tid elems_per_thread threads_per_segment comm red_op nes red_arrs body = do
+-- | A SegRedOp with auxiliary information.
+data SegRedOpSlug =
+  SegRedOpSlug
+  { slugOp :: SegRedOp InKernel
+  , slugArrs :: [VName]
+    -- ^ The arrays used for computing the intra-group reduction
+    -- (either local or global memory).
+  , slugAccs :: [(VName, [Imp.Exp])]
+    -- ^ Places to store accumulator in stage 1 reduction.
+  }
 
-  let red_op_params = lambdaParams red_op
-      (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
-      (gtids, _dims) = unzip $ kernelDimensions constants
+slugBody :: SegRedOpSlug -> Body InKernel
+slugBody = lambdaBody . segRedLambda . slugOp
+
+slugParams :: SegRedOpSlug -> [LParam InKernel]
+slugParams = lambdaParams . segRedLambda . slugOp
+
+slugNeutral :: SegRedOpSlug -> [SubExp]
+slugNeutral = segRedNeutral . slugOp
+
+slugShape :: SegRedOpSlug -> Shape
+slugShape = segRedShape . slugOp
+
+slugsComm :: [SegRedOpSlug] -> Commutativity
+slugsComm = mconcat . map (segRedComm . slugOp)
+
+accParams, nextParams :: SegRedOpSlug -> [LParam InKernel]
+accParams slug = take (length (slugNeutral slug)) $ slugParams slug
+nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
+
+segRedOpSlug :: Imp.Exp -> Imp.Exp -> (SegRedOp InKernel, [VName], [VName]) -> InKernelGen SegRedOpSlug
+segRedOpSlug local_tid group_id (op, group_res_arrs, param_arrs) =
+  SegRedOpSlug op group_res_arrs <$>
+  zipWithM mkAcc (lambdaParams (segRedLambda op)) param_arrs
+  where mkAcc p param_arr
+          | Prim t <- paramType p,
+            shapeRank (segRedShape op) == 0 = do
+              acc <- dPrim (baseString (paramName p) <> "_acc") t
+              return (acc, [])
+          | otherwise =
+              return (param_arr, [local_tid, group_id])
+
+reductionStageZero :: KernelConstants
+                   -> Imp.Count Imp.Elements
+                   -> Imp.Exp
+                   -> Imp.Count Imp.Elements
+                   -> VName
+                   -> [SegRedOpSlug]
+                   -> DoSegBody
+                   -> InKernelGen ([Lambda InKernel], InKernelGen ())
+reductionStageZero constants num_elements global_tid elems_per_thread threads_per_segment slugs body = do
+
+  let (gtids, _dims) = unzip $ kernelDimensions constants
       gtid = last gtids
       local_tid = kernelLocalThreadId constants
 
   -- Figure out how many elements this thread should process.
   chunk_size <- dPrim "chunk_size" int32
-  let ordering = case comm of Commutative -> SplitStrided $ Var threads_per_segment
-                              Noncommutative -> SplitContiguous
+  let ordering = case slugsComm slugs of
+                   Commutative -> SplitStrided $ Var threads_per_segment
+                   Noncommutative -> SplitContiguous
   computeThreadChunkSize ordering global_tid elems_per_thread num_elements chunk_size
 
-  dScope Nothing $ scopeOfLParams $ lambdaParams red_op
+  dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
-  forM_ (zip red_acc_params nes) $ \(p, ne) ->
-    copyDWIM (paramName p) [] ne []
+  sComment "neutral-initialise the accumulators" $
+    forM_ slugs $ \slug ->
+    forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
+    sLoopNest (slugShape slug) $ \vec_is ->
+    copyDWIM acc (acc_is++vec_is) ne []
 
-  red_op_renamed <- renameLambda red_op
+  slugs_op_renamed <- mapM (renameLambda . segRedLambda . slugOp) slugs
 
-  let doTheReduction = do
-        comment "to reduce current chunk, first store our result to memory" $
-          forM_ (zip red_arrs red_acc_params) $ \(arr, p) ->
-          when (primType $ paramType p) $
-          copyDWIM arr [local_tid] (Var $ paramName p) []
+  let doTheReduction =
+        forM_ (zip slugs_op_renamed slugs) $ \(slug_op_renamed, slug) ->
+        sLoopNest (slugShape slug) $ \vec_is -> do
+          comment "to reduce current chunk, first store our result in memory" $ do
+            forM_ (zip (slugParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+              copyDWIM (paramName p) [] (Var acc) (acc_is++vec_is)
 
-        sOp Imp.LocalBarrier
+            forM_ (zip (slugArrs slug) (slugParams slug)) $ \(arr, p) ->
+              when (primType $ paramType p) $
+              copyDWIM arr [local_tid] (Var $ paramName p) []
 
-        groupReduce constants (kernelGroupSize constants) red_op_renamed red_arrs
+          sOp Imp.LocalBarrier
 
-        sOp Imp.LocalBarrier
+          groupReduce constants (kernelGroupSize constants) slug_op_renamed (slugArrs slug)
+
+          sOp Imp.LocalBarrier
+
+          sComment "first thread saves the result in accumulator" $
+            sWhen (local_tid .==. 0) $
+            forM_ (zip (slugAccs slug) (lambdaParams slug_op_renamed)) $ \((acc, acc_is), p) ->
+            copyDWIM acc (acc_is++vec_is) (Var $ paramName p) []
 
   i <- newVName "i"
   -- If this is a non-commutative reduction, each thread must run the
   -- loop the same number of iterations, because we will be performing
   -- a group-wide reduction in there.
-  let (bound, check_bounds) =
+  let comm = slugsComm slugs
+      (bound, check_bounds) =
         case comm of
           Commutative -> (Imp.var chunk_size int32, id)
           Noncommutative -> (Imp.innerExp elems_per_thread,
@@ -425,42 +517,70 @@ reductionStageOne constants num_elements global_tid elems_per_thread threads_per
              (index_in_segment * Imp.innerExp elems_per_thread + Imp.var i int32) *
              kernelGroupSize constants
 
-    let red_dests = zip (map paramName red_next_params) $ repeat []
+    check_bounds $ sComment "apply map function" $
+      body constants $ \all_red_res -> do
 
-    check_bounds $ sComment "apply map function" $ do
-      body constants red_dests
+      let slugs_res = chunks (map (length . slugNeutral) slugs) all_red_res
 
-      sComment "apply reduction operator" $
-        compileBody' red_acc_params $ lambdaBody red_op
+      forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
+        sLoopNest (slugShape slug) $ \vec_is -> do
+        sComment "load accumulator" $
+          forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+          copyDWIM (paramName p) [] (Var acc) (acc_is ++ vec_is)
+        sComment "load new values" $
+          forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
+          copyDWIM (paramName p) [] res (res_is ++ vec_is)
+        sComment "apply reduction operator" $
+          compileStms mempty (bodyStms $ slugBody slug) $
+          sComment "store in accumulator" $
+          forM_ (zip
+                  (slugAccs slug)
+                  (bodyResult $ slugBody slug)) $ \((acc, acc_is), se) ->
+          copyDWIM acc (acc_is ++ vec_is) se []
 
     case comm of
       Noncommutative -> do
         doTheReduction
-        sComment "first thread takes carry-out; others neutral element" $ do
-          let carry_out =
-                forM_ (zip red_acc_params $ lambdaParams red_op_renamed) $ \(p_to, p_from) ->
-                copyDWIM (paramName p_to) [] (Var $ paramName p_from) []
-              reset_to_neutral =
-                forM_ (zip red_acc_params nes) $ \(p, ne) ->
-                copyDWIM (paramName p) [] ne []
-          sIf (local_tid .==. 0) carry_out reset_to_neutral
+        sComment "first thread keeps accumulator; others reset to neutral element" $ do
+          let reset_to_neutral =
+                forM_ slugs $ \slug ->
+                forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
+                sLoopNest (slugShape slug) $ \vec_is ->
+                copyDWIM acc (acc_is++vec_is) ne []
+          sUnless (local_tid .==. 0) reset_to_neutral
       _ -> return ()
 
-  group_result_params <-
-    case comm of Noncommutative -> return red_acc_params
-                 _              -> do doTheReduction
-                                      return $ lambdaParams red_op_renamed
+  return (slugs_op_renamed, doTheReduction)
 
-  return (group_result_params, red_op_renamed)
+reductionStageOne :: KernelConstants
+                  -> Imp.Count Imp.Elements
+                  -> Imp.Exp
+                  -> Imp.Count Imp.Elements
+                  -> VName
+                  -> [SegRedOpSlug]
+                  -> DoSegBody
+                  -> InKernelGen [Lambda InKernel]
+reductionStageOne constants num_elements global_tid elems_per_thread threads_per_segment slugs body = do
+  (slugs_op_renamed, doTheReduction) <-
+    reductionStageZero constants num_elements global_tid elems_per_thread threads_per_segment slugs body
+
+  case slugsComm slugs of
+    Noncommutative ->
+      forM_ slugs $ \slug ->
+      forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+      copyDWIM (paramName p) [] (Var acc) acc_is
+    _ -> doTheReduction
+
+  return slugs_op_renamed
 
 reductionStageTwo :: KernelConstants
-                  -> Pattern ExplicitMemory
+                  -> [PatElem ExplicitMemory]
                   -> Imp.Exp
                   -> Imp.Exp
                   -> [Imp.Exp]
                   -> Imp.Exp
-                  -> PrimExp Imp.ExpLeaf
-                  -> [LParam InKernel]
+                  -> Imp.Exp
+                  -> SegRedOpSlug
                   -> [LParam InKernel]
                   -> Lambda InKernel
                   -> [SubExp]
@@ -470,9 +590,9 @@ reductionStageTwo :: KernelConstants
                   -> [VName]
                   -> [VName]
                   -> InKernelGen ()
-reductionStageTwo constants segred_pat
+reductionStageTwo constants segred_pes
                   group_id flat_segment_id segment_gtids first_group_for_segment groups_per_segment
-                  group_result_params red_acc_params
+                  slug red_acc_params
                   red_op_renamed nes
                   num_counters counter sync_arr group_res_arrs red_arrs = do
   let local_tid = kernelLocalThreadId constants
@@ -481,8 +601,8 @@ reductionStageTwo constants segred_pat
   (counter_mem, _, counter_offset) <- fullyIndexArray counter [flat_segment_id `rem` num_counters]
   comment "first thread in group saves group result to global memory" $
     sWhen (local_tid .==. 0) $ do
-    forM_ (take (length nes) $ zip group_res_arrs group_result_params) $ \(v, p) ->
-      copyDWIM v [group_id] (Var $ paramName p) []
+    forM_ (take (length nes) $ zip group_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
+      copyDWIM v [0, group_id] (Var acc) acc_is
     sOp Imp.MemFenceGlobal
     -- Increment the counter, thus stating that our result is
     -- available.
@@ -505,26 +625,26 @@ reductionStageTwo constants segred_pat
     sWhen (local_tid .==. 0) $
       sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd old_counter counter_mem counter_offset $
       negate groups_per_segment
-    comment "read in the per-group-results" $
-      forM_ (zip4 red_acc_params red_arrs nes group_res_arrs) $
-      \(p, arr, ne, group_res_arr) -> do
-        let load_group_result =
-              copyDWIM (paramName p) []
-              (Var group_res_arr) [first_group_for_segment + local_tid]
-            load_neutral_element =
-              copyDWIM (paramName p) [] ne []
-        sIf (local_tid .<. groups_per_segment)
-          load_group_result load_neutral_element
-        when (primType $ paramType p) $
-          copyDWIM arr [local_tid] (Var $ paramName p) []
+    sLoopNest (slugShape slug) $ \vec_is -> do
+      comment "read in the per-group-results" $
+        forM_ (zip4 red_acc_params red_arrs nes group_res_arrs) $
+        \(p, arr, ne, group_res_arr) -> do
+          let load_group_result =
+                copyDWIM (paramName p) []
+                (Var group_res_arr) ([0, first_group_for_segment + local_tid] ++ vec_is)
+              load_neutral_element =
+                copyDWIM (paramName p) [] ne []
+          sIf (local_tid .<. groups_per_segment)
+            load_group_result load_neutral_element
+          when (primType $ paramType p) $
+            copyDWIM arr [local_tid] (Var $ paramName p) []
 
-    sOp Imp.LocalBarrier
+      sOp Imp.LocalBarrier
 
-    sComment "reduce the per-group results" $ do
-      groupReduce constants group_size red_op_renamed red_arrs
+      sComment "reduce the per-group results" $ do
+        groupReduce constants group_size red_op_renamed red_arrs
 
-      sComment "and back to memory with the final result" $
-        sWhen (local_tid .==. 0) $
-        forM_ (take (length nes) $ zip (patternNames segred_pat) $
-               lambdaParams red_op_renamed) $ \(v, p) ->
-        copyDWIM v segment_gtids (Var $ paramName p) []
+        sComment "and back to memory with the final result" $
+          sWhen (local_tid .==. 0) $
+          forM_ (zip segred_pes $ lambdaParams red_op_renamed) $ \(pe, p) ->
+          copyDWIM (patElemName pe) (segment_gtids++vec_is) (Var $ paramName p) []

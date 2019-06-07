@@ -10,7 +10,9 @@ module Futhark.Representation.SOACS.SOAC
        , ScremaForm(..)
        , GenReduceOp(..)
        , Scan
-       , Reduce
+       , Reduce(..)
+       , redResults
+       , singleReduce
 
          -- * Utility
        , getStreamOrder
@@ -120,18 +122,40 @@ data StreamForm lore  =
 -- except the input arrays).
 data ScremaForm lore = ScremaForm
                          (Scan lore)
-                         (Reduce lore)
+                         [Reduce lore]
                          (Lambda lore)
   deriving (Eq, Ord, Show)
 
 type Scan lore = (Lambda lore, [SubExp])
-type Reduce lore = (Commutativity, Lambda lore, [SubExp])
+data Reduce lore = Reduce { redComm :: Commutativity
+                          , redLambda :: Lambda lore
+                          , redNeutral :: [SubExp]
+                          }
+                   deriving (Eq, Ord, Show)
+
+-- | How many reduction results are produced by these 'Reduce's?
+redResults :: [Reduce lore] -> Int
+redResults = sum . map (length . redNeutral)
+
+-- | Combine multiple reduction operators to a single operator.
+singleReduce :: Bindable lore => [Reduce lore] -> Reduce lore
+singleReduce reds =
+  let red_nes = concatMap redNeutral reds
+      red_lam =
+        let xParams red = take (length (redNeutral red)) (lambdaParams (redLambda red))
+            yParams red = drop (length (redNeutral red)) (lambdaParams (redLambda red))
+        in Lambda { lambdaParams = concatMap xParams reds ++ concatMap yParams reds
+                  , lambdaReturnType = concatMap (lambdaReturnType . redLambda) reds
+                  , lambdaBody = mkBody (mconcat (map (bodyStms . lambdaBody . redLambda) reds))
+                                 (concatMap (bodyResult . lambdaBody . redLambda) reds)
+                  }
+  in Reduce (mconcat (map redComm reds)) red_lam red_nes
 
 scremaType :: SubExp -> ScremaForm lore -> [Type]
-scremaType w (ScremaForm (scan_lam, _scan_nes) (_, red_lam, _red_nes) map_lam) =
+scremaType w (ScremaForm (scan_lam, _scan_nes) reds map_lam) =
   map (`arrayOfRow` w) scan_tps ++ red_tps ++ map (`arrayOfRow` w) map_tps
   where scan_tps = lambdaReturnType scan_lam
-        red_tps  = lambdaReturnType red_lam
+        red_tps  = concatMap (lambdaReturnType . redLambda) reds
         map_tps  = drop (length scan_tps + length red_tps) $ lambdaReturnType map_lam
 
 -- | Construct a lambda that takes parameters of the given types and
@@ -189,28 +213,28 @@ isNilFn (Lambda ps body ts) =
   null ps && null ts &&
   null (bodyStms body) && null (bodyResult body)
 
-scanomapSOAC :: Bindable lore =>
-                Lambda lore -> [SubExp] -> Lambda lore -> ScremaForm lore
-scanomapSOAC lam nes = ScremaForm (lam, nes) (mempty, nilFn, mempty)
+scanomapSOAC :: Lambda lore -> [SubExp] -> Lambda lore -> ScremaForm lore
+scanomapSOAC lam nes = ScremaForm (lam, nes) []
 
 redomapSOAC :: Bindable lore =>
-               Commutativity -> Lambda lore -> [SubExp] -> Lambda lore -> ScremaForm lore
-redomapSOAC comm lam nes = ScremaForm (nilFn, mempty) (comm, lam, nes)
+               [Reduce lore] -> Lambda lore -> ScremaForm lore
+redomapSOAC = ScremaForm (nilFn, mempty)
 
 scanSOAC :: (Bindable lore, MonadFreshNames m) =>
             Lambda lore -> [SubExp] -> m (ScremaForm lore)
 scanSOAC lam nes = scanomapSOAC lam nes <$> mkIdentityLambda (lambdaReturnType lam)
 
 reduceSOAC :: (Bindable lore, MonadFreshNames m) =>
-              Commutativity -> Lambda lore -> [SubExp] -> m (ScremaForm lore)
-reduceSOAC comm lam nes = redomapSOAC comm lam nes <$> mkIdentityLambda (lambdaReturnType lam)
+              [Reduce lore] -> m (ScremaForm lore)
+reduceSOAC reds = redomapSOAC reds <$> mkIdentityLambda ts
+  where ts = concatMap (lambdaReturnType . redLambda) reds
 
 mapSOAC :: Bindable lore => Lambda lore -> ScremaForm lore
-mapSOAC = ScremaForm (nilFn, mempty) (mempty, nilFn, mempty)
+mapSOAC = ScremaForm (nilFn, mempty) []
 
 isScanomapSOAC :: ScremaForm lore -> Maybe (Lambda lore, [SubExp], Lambda lore)
-isScanomapSOAC (ScremaForm (scan_lam, scan_nes) (_, _, red_nes) map_lam) = do
-  guard $ null red_nes
+isScanomapSOAC (ScremaForm (scan_lam, scan_nes) reds map_lam) = do
+  guard $ null reds
   guard $ not $ null scan_nes
   return (scan_lam, scan_nes, map_lam)
 
@@ -219,21 +243,21 @@ isScanSOAC form = do (scan_lam, scan_nes, map_lam) <- isScanomapSOAC form
                      guard $ isIdentityLambda map_lam
                      return (scan_lam, scan_nes)
 
-isRedomapSOAC :: ScremaForm lore -> Maybe (Commutativity, Lambda lore, [SubExp], Lambda lore)
-isRedomapSOAC (ScremaForm (_, scan_nes) (comm, red_lam, red_nes) map_lam) = do
+isRedomapSOAC :: ScremaForm lore -> Maybe ([Reduce lore], Lambda lore)
+isRedomapSOAC (ScremaForm (_, scan_nes) reds map_lam) = do
   guard $ null scan_nes
-  guard $ not $ null red_nes
-  return (comm, red_lam, red_nes, map_lam)
+  guard $ not $ null reds
+  return (reds, map_lam)
 
-isReduceSOAC :: ScremaForm lore -> Maybe (Commutativity, Lambda lore, [SubExp])
-isReduceSOAC form = do (comm, red_lam, red_nes, map_lam) <- isRedomapSOAC form
+isReduceSOAC :: ScremaForm lore -> Maybe [Reduce lore]
+isReduceSOAC form = do (reds, map_lam) <- isRedomapSOAC form
                        guard $ isIdentityLambda map_lam
-                       return (comm, red_lam, red_nes)
+                       return reds
 
 isMapSOAC :: ScremaForm lore -> Maybe (Lambda lore)
-isMapSOAC (ScremaForm (_, scan_nes) (_, _, red_nes) map_lam) = do
+isMapSOAC (ScremaForm (_, scan_nes) reds map_lam) = do
   guard $ null scan_nes
-  guard $ null red_nes
+  guard $ null reds
   return map_lam
 
 -- | Like 'Mapper', but just for 'SOAC's.
@@ -282,11 +306,13 @@ mapSOACM tv (GenReduce len ops bucket_fun imgs) =
               <*> mapOnSOACLambda tv op) ops
   <*> mapOnSOACLambda tv bucket_fun
   <*> mapM (mapOnSOACVName tv) imgs
-mapSOACM tv (Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs) =
+mapSOACM tv (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) =
   Screma <$> mapOnSOACSubExp tv w <*>
   (ScremaForm <$>
    ((,) <$> mapOnSOACLambda tv scan_lam <*> mapM (mapOnSOACSubExp tv) scan_nes) <*>
-   ((,,) comm <$> mapOnSOACLambda tv red_lam <*> mapM (mapOnSOACSubExp tv) red_nes) <*>
+   forM reds (\(Reduce comm red_lam red_nes) ->
+                Reduce comm <$> mapOnSOACLambda tv red_lam <*>
+               mapM (mapOnSOACSubExp tv) red_nes) <*>
    mapOnSOACLambda tv map_lam)
   <*> mapM (mapOnSOACVName tv) arrs
 mapSOACM tv (CmpThreshold what s) = CmpThreshold <$> mapOnSOACSubExp tv what <*> pure s
@@ -383,12 +409,13 @@ instance (Attributes lore,
   addOpAliases (GenReduce len ops bucket_fun imgs) =
     GenReduce len (map (mapGenReduceOp Alias.analyseLambda) ops)
     (Alias.analyseLambda bucket_fun) imgs
-  addOpAliases (Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs) =
+  addOpAliases (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) =
     Screma w (ScremaForm
                 (Alias.analyseLambda scan_lam, scan_nes)
-                (comm, Alias.analyseLambda red_lam, red_nes)
+                (map onRed reds)
                 (Alias.analyseLambda map_lam))
                arrs
+    where onRed red = red { redLambda = Alias.analyseLambda $ redLambda red }
   addOpAliases (CmpThreshold what s) = CmpThreshold what s
 
   removeOpAliases = runIdentity . mapSOACM remove
@@ -434,12 +461,14 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
   addOpRanges (GenReduce len ops bucket_fun imgs) =
     GenReduce len (map (mapGenReduceOp $ Range.runRangeM . Range.analyseLambda) ops)
     (Range.runRangeM $ Range.analyseLambda bucket_fun) imgs
-  addOpRanges (Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs) =
+  addOpRanges (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) =
     Screma w (ScremaForm
                 (Range.runRangeM $ Range.analyseLambda scan_lam, scan_nes)
-                (comm, Range.runRangeM $ Range.analyseLambda red_lam, red_nes)
+                (map onRed reds)
                 (Range.runRangeM $ Range.analyseLambda map_lam))
                arrs
+    where onRed red = red { redLambda = Range.runRangeM $ Range.analyseLambda $
+                                        redLambda red }
   addOpRanges (CmpThreshold what s) = CmpThreshold what s
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
@@ -456,8 +485,8 @@ instance Annotations lore => ST.IndexOp (SOAC lore) where
     case se of
       Var v -> M.lookup v arr_indexes'
       _ -> Nothing
-      where lambdaAndSubExp (Screma _ (ScremaForm (_, scan_nes) (_, _, red_nes) map_lam) arrs) =
-              nthMapOut (length scan_nes + length red_nes) map_lam arrs
+      where lambdaAndSubExp (Screma _ (ScremaForm (_, scan_nes) reds map_lam) arrs) =
+              nthMapOut (length scan_nes + redResults reds) map_lam arrs
             lambdaAndSubExp _ =
               Nothing
 
@@ -605,16 +634,24 @@ typeCheckSOAC (GenReduce len ops bucket_fun imgs) = do
     prettyTuple (lambdaReturnType bucket_fun) ++ " but should have type " ++
     prettyTuple bucket_ret_t
 
-typeCheckSOAC (Screma w (ScremaForm (scan_lam, scan_nes) (_, red_lam, red_nes) map_lam) arrs) = do
+typeCheckSOAC (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) = do
   TC.require [Prim int32] w
   arrs' <- TC.checkSOACArrayArgs w arrs
   scan_nes' <- mapM TC.checkArg scan_nes
-  red_nes' <- mapM TC.checkArg red_nes
   TC.checkLambda map_lam $ map TC.noArgAliases arrs'
   TC.checkLambda scan_lam $ map TC.noArgAliases $ scan_nes' ++ scan_nes'
-  TC.checkLambda red_lam $ map TC.noArgAliases $ red_nes' ++ red_nes'
+
+  red_nes' <- fmap concat $ forM reds $ \(Reduce _ red_lam red_nes) -> do
+    red_nes' <- mapM TC.checkArg red_nes
+    let red_t = map TC.argType red_nes'
+    TC.checkLambda red_lam $ map TC.noArgAliases $ red_nes' ++ red_nes'
+    unless (red_t == lambdaReturnType red_lam) $
+      TC.bad $ TC.TypeError $ "Reduce function returns type " ++
+      prettyTuple (lambdaReturnType red_lam) ++ " but neutral element has type " ++
+      prettyTuple red_t
+    return red_nes'
+
   let scan_t = map TC.argType scan_nes'
-      red_t = map TC.argType red_nes'
       map_lam_ts = lambdaReturnType map_lam
 
   unless (scan_t == lambdaReturnType scan_lam) $
@@ -622,12 +659,7 @@ typeCheckSOAC (Screma w (ScremaForm (scan_lam, scan_nes) (_, red_lam, red_nes) m
     prettyTuple (lambdaReturnType scan_lam) ++ " but neutral element has type " ++
     prettyTuple scan_t
 
-  unless (red_t == lambdaReturnType red_lam) $
-    TC.bad $ TC.TypeError $ "Reduce function returns type " ++
-    prettyTuple (lambdaReturnType red_lam) ++ " but neutral element has type " ++
-    prettyTuple red_t
-
-  unless (take (length scan_nes + length red_nes) map_lam_ts ==
+  unless (take (length scan_nes + length red_nes') map_lam_ts ==
           map TC.argType (scan_nes'++ red_nes')) $
     TC.bad $ TC.TypeError $ "Map function return type " ++ prettyTuple map_lam_ts ++
     " wrong for given scan and reduction functions."
@@ -648,9 +680,10 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Scatter" $ lambdaMetrics lam
   opMetrics (GenReduce _len ops bucket_fun _imgs) =
     inside "GenReduce" $ mapM_ (lambdaMetrics . genReduceOp) ops >> lambdaMetrics bucket_fun
-  opMetrics (Screma _ (ScremaForm (scan_lam, _) (_, red_lam, _) map_lam) _) =
-    inside "Screma" $
-    lambdaMetrics scan_lam >> lambdaMetrics red_lam >> lambdaMetrics map_lam
+  opMetrics (Screma _ (ScremaForm (scan_lam, _) reds map_lam) _) =
+    inside "Screma" $ do lambdaMetrics scan_lam
+                         mapM_ (lambdaMetrics . redLambda) reds
+                         lambdaMetrics map_lam
   opMetrics CmpThreshold{} = seen "CmpThreshold"
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
@@ -671,42 +704,50 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
     ppSOAC "scatter" len [lam] (Just (map Var ivs)) (map (\(_,n,a) -> (n,a)) as)
   ppr (GenReduce len ops bucket_fun imgs) =
     ppGenReduce len ops bucket_fun imgs
-  ppr (Screma w (ScremaForm (scan_lam, scan_nes) (_, red_lam, red_nes) map_lam) arrs)
-    | isNilFn scan_lam, null scan_nes,
-      isNilFn red_lam, null red_nes =
-        text "map" <> parens (ppr w <> comma </>
-                              ppr map_lam <> comma </>
-                              commasep (map ppr arrs))
+  ppr (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs)
+    | isNilFn scan_lam, null scan_nes, null reds =
+        text "map" <>
+        parens (ppr w <> comma </>
+                ppr map_lam <> comma </>
+                commasep (map ppr arrs))
 
     | isNilFn scan_lam, null scan_nes =
-        text "redomap" <> parens (ppr w <> comma </>
-                                  ppr red_lam <> comma </>
-                                  commasep (map ppr red_nes) <> comma </>
-                                  ppr map_lam <> comma </>
-                                  commasep (map ppr arrs))
+        text "redomap" <>
+        parens (ppr w <> comma </>
+                PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma </>
+                ppr map_lam <> comma </>
+                commasep (map ppr arrs))
 
-    | isNilFn red_lam, null red_nes =
-        text "scanomap" <> parens (ppr w <> comma </>
-                                   ppr scan_lam <> comma </>
-                                   commasep (map ppr scan_nes) <> comma </>
-                                   ppr map_lam <> comma </>
-                                   commasep (map ppr arrs))
+    | null reds =
+        text "scanomap" <>
+        parens (ppr w <> comma </>
+                ppr scan_lam <> comma </>
+                commasep (map ppr scan_nes) <> comma </>
+                ppr map_lam <> comma </>
+                commasep (map ppr arrs))
 
   ppr (Screma w form arrs) = ppScrema w form arrs
   ppr (CmpThreshold what s) = text "cmpThreshold(" <> ppr what <> comma PP.<+> text (show s) <> text ")"
 
 ppScrema :: (PrettyLore lore, Pretty inp) =>
               SubExp -> ScremaForm lore -> [inp] -> Doc
-ppScrema w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs =
-  text s <> parens (ppr w <> comma </>
-                      ppr scan_lam <> comma </>
-                      PP.braces (commasep $ map ppr scan_nes) </>
-                      ppr red_lam <> comma </>
-                      PP.braces (commasep $ map ppr red_nes) </>
-                      ppr map_lam <> comma </>
-                      commasep (map ppr arrs))
-    where s = case comm of Noncommutative -> "screma"
-                           Commutative -> "scremaComm"
+ppScrema w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs =
+  text "screma" <>
+  parens (ppr w <> comma </>
+          ppr scan_lam <> comma </>
+          PP.braces (commasep $ map ppr scan_nes) </>
+          PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma </>
+          ppr map_lam <> comma </>
+          commasep (map ppr arrs))
+
+ppComm :: Commutativity -> Doc
+ppComm Noncommutative = mempty
+ppComm Commutative = text "commutative "
+
+instance PrettyLore lore => Pretty (Reduce lore) where
+  ppr (Reduce comm red_lam red_nes) =
+    ppComm comm <> ppr red_lam <> comma </>
+    PP.braces (commasep $ map ppr red_nes)
 
 ppGenReduce :: (PrettyLore lore, Pretty inp) =>
                SubExp -> [GenReduceOp lore] -> Lambda lore -> [inp] -> Doc

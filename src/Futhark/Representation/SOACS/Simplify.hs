@@ -108,19 +108,19 @@ simplifySOAC (GenReduce w ops bfun imgs) = do
   (bfun', bfun_hoisted) <- Engine.simplifyLambda bfun $ map Just imgs
   return (GenReduce w' ops' bfun' imgs', mconcat hoisted <> bfun_hoisted)
 
-simplifySOAC (Screma w (ScremaForm (scan_lam, scan_nes) (comm, red_lam, red_nes) map_lam) arrs) = do
+simplifySOAC (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) = do
   (scan_lam', scan_lam_hoisted) <-
     Engine.simplifyLambda scan_lam $ replicate (length scan_nes) Nothing
-  (red_lam', red_lam_hoisted) <-
-    Engine.simplifyLambda red_lam $ replicate (length red_nes) Nothing
+  (reds', reds_hoisted) <- fmap unzip $ forM reds $ \(Reduce comm lam nes) -> do
+    (lam', hoisted) <- Engine.simplifyLambda lam $ replicate (length nes) Nothing
+    nes' <- Engine.simplify nes
+    return (Reduce comm lam' nes', hoisted)
   (map_lam', map_lam_hoisted) <- Engine.simplifyLambda map_lam $ map Just arrs
   (,) <$> (Screma <$> Engine.simplify w <*>
-           (ScremaForm <$>
-             ((,) scan_lam' <$> Engine.simplify scan_nes) <*>
-             ((,,) comm red_lam' <$> Engine.simplify red_nes) <*>
-             pure map_lam') <*>
+           (ScremaForm <$> ((,) scan_lam' <$> Engine.simplify scan_nes) <*>
+             pure reds' <*> pure map_lam') <*>
             Engine.simplify arrs) <*>
-    pure (scan_lam_hoisted <> red_lam_hoisted <> map_lam_hoisted)
+    pure (scan_lam_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 
 instance BinderOps (Wise SOACS) where
   mkExpAttrB = bindableMkExpAttrB
@@ -431,7 +431,7 @@ isMapWithOp pat e
 -- actually used for computing one of the live ones.
 removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
 removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
-  | Just (comm, redlam, nes, maplam) <- isRedomapSOAC form,
+  | Just ([Reduce comm redlam nes], maplam) <- isRedomapSOAC form,
     not $ all (`UT.used` used) $ patternNames pat, -- Quick/cheap check
 
     let (red_pes, map_pes) = splitAt (length nes) $ patternElements pat,
@@ -456,7 +456,7 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
   redlam' <- removeLambdaResults (take (length nes) alive_mask) <$> fixLambdaParams redlam (dead_fix++dead_fix)
 
   certifying cs $ letBind_ (Pattern [] $ used_red_pes ++ map_pes) $
-    Op $ Screma w (redomapSOAC comm redlam' used_nes maplam') arrs
+    Op $ Screma w (redomapSOAC [Reduce comm redlam' used_nes] maplam') arrs
 
 removeDeadReduction _ _ _ _ = cannotSimplify
 
@@ -519,22 +519,19 @@ fuseConcatScatter _ _ _ _ = cannotSimplify
 
 simplifyClosedFormReduce :: TopDownRuleOp (Wise SOACS)
 simplifyClosedFormReduce _ pat _ (Screma (Constant w) form _)
-  | Just (_, _, nes, _) <- isRedomapSOAC form,
+  | Just nes <- concatMap redNeutral . fst <$> isRedomapSOAC form,
     zeroIsh w =
       forM_ (zip (patternNames pat) nes) $ \(v, ne) ->
       letBindNames_ [v] $ BasicOp $ SubExp ne
 simplifyClosedFormReduce vtable pat _ (Screma _ form arrs)
-  | Just (_, red_fun, nes) <- isReduceSOAC form =
+  | Just [Reduce _ red_fun nes] <- isReduceSOAC form =
       foldClosedForm (`ST.lookupExp` vtable) pat red_fun nes arrs
 simplifyClosedFormReduce _ _ _ _ = cannotSimplify
 
 -- For now we just remove singleton SOACs.
-simplifyKnownIterationSOAC :: (BinderOps lore, Op lore ~ SOAC lore) =>
-                              TopDownRuleOp lore
+simplifyKnownIterationSOAC :: TopDownRuleOp (Wise SOACS)
 simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
-                                    (ScremaForm (scan_lam, scan_nes)
-                                                  (_, red_lam, red_nes)
-                                                  map_lam)
+                                    (ScremaForm (scan_lam, scan_nes) reds map_lam)
                                     arrs)
   | oneIsh k = do
       zipWithM_ bindMapParam (lambdaParams map_lam) arrs
@@ -547,7 +544,8 @@ simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
       zipWithM_ bindResult red_pes red_res
       zipWithM_ bindArrayResult map_pes map_res
 
-        where (scan_pes, red_pes, map_pes) = splitAt3 (length scan_nes) (length red_nes) $
+        where (Reduce _ red_lam red_nes) = singleReduce reds
+              (scan_pes, red_pes, map_pes) = splitAt3 (length scan_nes) (length red_nes) $
                                              patternElements pat
               bindMapParam p a = do
                 a_t <- lookupType a

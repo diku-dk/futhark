@@ -35,7 +35,8 @@ transformStm :: Transformer m => Stm -> m ()
 
 transformStm (Let pat aux (Op (Screma w form arrs)))
   -- No map-out part
-  | Just (_, red_lam, nes, map_lam) <- isRedomapSOAC form,
+  | Just (reds, map_lam) <- isRedomapSOAC form,
+    Reduce _ red_lam nes <- singleReduce reds,
     patternSize pat == length nes = do
 
   fold_lam <- composeLambda nilFn red_lam map_lam

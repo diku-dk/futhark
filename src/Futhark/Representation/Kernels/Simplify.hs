@@ -92,21 +92,24 @@ simplifyKernelOp mk_ops env (HostOp (SegMap space ts body)) = do
   return (HostOp $ SegMap space' ts' body',
           body_hoisted)
 
-simplifyKernelOp mk_ops env (HostOp (SegRed space comm red_op nes ts body)) = do
-  space' <- Engine.simplify space
-  nes' <- mapM Engine.simplify nes
+simplifyKernelOp mk_ops env (HostOp (SegRed space reds ts body)) = do
   ts' <- mapM Engine.simplify ts
+  space' <- Engine.simplify space
   outer_vtable <- Engine.askVtable
 
-  (red_op', red_op_hoisted) <-
-    Engine.subSimpleM (mk_ops space) env outer_vtable $
-    Engine.localVtable (<>scope_vtable) $
-    Engine.simplifyLambda red_op $ replicate (length nes * 2) Nothing
-  red_op_hoisted' <- mapM processHoistedStm red_op_hoisted
+  (reds', reds_hoisted) <- fmap unzip $ forM reds $ \(SegRedOp comm lam nes shape) -> do
+    (lam', hoisted) <- Engine.subSimpleM (mk_ops space) env outer_vtable $
+                       Engine.localVtable (<>scope_vtable) $
+                       Engine.simplifyLambda lam $
+                       replicate (length nes * 2) Nothing
+    shape' <- Engine.simplify shape
+    nes' <- mapM Engine.simplify nes
+    return (SegRedOp comm lam' nes' shape', hoisted)
+  red_op_hoisted' <- mapM processHoistedStm $ mconcat reds_hoisted
 
   (body', body_hoisted) <- hoistFromBody space' (mk_ops space') env body
 
-  return (HostOp $ SegRed space' comm red_op' nes' ts' body',
+  return (HostOp $ SegRed space' reds' ts' body',
           red_op_hoisted' <> body_hoisted)
 
   where scope_vtable = ST.fromScope scope
