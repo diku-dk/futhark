@@ -1,4 +1,4 @@
-module Futhark.CodeGen.OpenCL.Kernels
+module Futhark.CodeGen.OpenCL.Heuristics
        ( SizeHeuristic (..)
        , DeviceType (..)
        , WhichSize (..)
