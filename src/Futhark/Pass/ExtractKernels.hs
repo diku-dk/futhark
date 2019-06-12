@@ -307,8 +307,8 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just lam <- isMapSOAC form = do
       in_husk <- isInHusk
       if in_husk
-        then distributeMap path (MapLoop pat cs w lam arrs)
-        else inHusk $ huskedDistributeMap path (MapLoop pat cs w lam arrs)
+        then distributeMap path $ MapLoop pat cs w lam arrs
+        else inHusk $ huskedDistributeMap path $ MapLoop pat cs w lam arrs
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just (scan_lam, nes) <- isScanSOAC form,
@@ -346,14 +346,13 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
         runBinder_ $ do
           red_lam_sequential <- Kernelise.transformLambda red_lam
           map_lam_sequential <- Kernelise.transformLambda map_lam
+          red_lam_firstorder <- FOT.transformLambda red_lam
           addStms =<<
             (fmap (certify cs) <$>
               if in_husk
                 then nonSegRed pat w comm' red_lam_sequential map_lam_sequential nes arrs
-                else do
-                  red_lam_firstorder <- FOT.transformLambda red_lam
-                  huskedNonSegRed pat w comm' red_lam_sequential red_lam_firstorder
-                                  map_lam_sequential nes arrs)
+                else huskedNonSegRed pat w comm' red_lam_sequential red_lam_firstorder
+                                              map_lam_sequential nes arrs)
 
       outerParallelBody =
         renameBody =<<
@@ -426,10 +425,15 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
              Op (Screma num_threads reduce_soac red_results))
 
       | otherwise = do
+          in_husk <- isInHusk
           red_fun_sequential <- Kernelise.transformLambda red_fun
+          red_fun_firstorder <- FOT.transformLambda red_fun
           fold_fun_sequential <- Kernelise.transformLambda fold_fun
           fmap (certify cs) <$>
-            streamRed pat w comm' red_fun_sequential fold_fun_sequential nes arrs
+            if in_husk
+              then streamRed pat w comm' red_fun_sequential fold_fun_sequential nes arrs
+              else inHusk $ huskedStreamRed pat w comm' red_fun_sequential red_fun_firstorder
+                                            fold_fun_sequential nes arrs
 
     outerParallelBody path' =
       renameBody =<<

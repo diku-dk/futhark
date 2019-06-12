@@ -8,6 +8,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , segGenRed
 
        , streamRed
+       , huskedStreamRed
        , streamMap
 
        , mapKernel
@@ -135,6 +136,31 @@ dummyDim pat = do
              letBindNames_ [to] $ BasicOp $ Index from $
                fullSlice from_t [DimFix $ intConst Int32 0])
 
+huskedRed :: (MonadFreshNames m, HasScope Kernels m) =>
+              Pattern Kernels
+          -> SubExp
+          -> [Type]
+          -> Lambda Kernels
+          -> [SubExp]
+          -> [VName]
+          -> (Pattern Kernels -> SubExp -> [VName] -> [(VName, SubExp)] -> Binder Kernels (Stms Kernels))
+          -> m (Stms Kernels)
+huskedRed pat w ret_ts red_lam_fot nes arrs red = runBinder_ $ do
+  red_lam_fot' <- renameLambda red_lam_fot
+  hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
+  let addDummyDim t = t `arrayOfRow` intConst Int32 1
+      hscope = scopeOfHuskSpace hspace
+      parts_names = map paramName parts
+      parts_elems_v = Var parts_elems
+  (Pattern pcs pes) <- renamePattern pat
+  node_res <- replicateM (length ret_ts) $ newVName "node_res"
+  let (red_ts, map_ts) = splitAt (length nes) $ map patElemAttr pes
+      body_pat_ts = red_ts ++ map (`setOuterSize` Var parts_elems) map_ts
+      body_pat = fmap addDummyDim $ Pattern pcs $ zipWith PatElem node_res body_pat_ts
+  dummy <- newVName "dummy"
+  body_stms <- localScope hscope $ red body_pat parts_elems_v parts_names [(dummy, intConst Int32 1)]
+  letBind_ pat $ Op $ Husk hspace red_lam_fot' nes ret_ts $ mkBody body_stms $ map Var node_res
+
 huskedNonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels
           -> SubExp
@@ -145,24 +171,9 @@ huskedNonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
           -> [SubExp]
           -> [VName]
           -> m (Stms Kernels)
-huskedNonSegRed pat w comm red_lam_seq red_lam_fot map_lam nes arrs = runBinder_ $ do
-  red_lam_fot' <- renameLambda red_lam_fot
-  hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
-  let ret_ts = lambdaReturnType map_lam
-      addDummyDim t = t `arrayOfRow` intConst Int32 1
-      hscope = scopeOfHuskSpace hspace
-      parts_names = map paramName parts
-      parts_elems_v = Var parts_elems
-  (Pattern pcs pes) <- renamePattern pat
-  node_res <- replicateM (length ret_ts) $ newVName "node_res"
-  let (red_ts, map_ts) = splitAt (length nes) $ map patElemAttr pes
-      body_pat_ts = red_ts ++ map (`setOuterSize` Var parts_elems) map_ts
-      body_pat = fmap addDummyDim $ Pattern pcs $ zipWith PatElem node_res body_pat_ts
-  dummy <- newVName "dummy"
-  body_stms <- localScope hscope $
-    segRed body_pat parts_elems_v parts_elems_v comm red_lam_seq map_lam nes parts_names
-           [(dummy, intConst Int32 1)] []
-  letBind_ pat $ Op $ Husk hspace red_lam_fot' nes ret_ts $ mkBody body_stms $ map Var node_res
+huskedNonSegRed pat w comm red_lam_seq red_lam_fot map_lam nes arrs =
+  huskedRed pat w (lambdaReturnType map_lam) red_lam_fot nes arrs $
+    \pat' w' arrs' ispace -> segRed pat' w' w' comm red_lam_seq map_lam nes arrs' ispace []
 
 nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels
@@ -213,6 +224,20 @@ prepareStream size ispace w comm fold_lam nes arrs = do
       ts = redout_ts ++ map rowType mapout_ts
 
   return (kspace, ts, kbody)
+
+huskedStreamRed :: (MonadFreshNames m, HasScope Kernels m) =>
+                  Pattern Kernels
+                -> SubExp
+                -> Commutativity
+                -> Lambda InKernel -> Lambda Kernels -> Lambda InKernel
+                -> [SubExp] -> [VName]
+                -> m (Stms Kernels)
+huskedStreamRed pat w comm red_lam_seq red_lam_fot fold_lam nes arrs =
+  huskedRed pat w (lambdaReturnType fold_lam) red_lam_fot nes arrs $
+    \pat' w' arrs' ispace -> runBinder_ $ do
+      (_, size) <- blockedKernelSize =<< asIntS Int64 w'
+      (kspace, ts, kbody) <- prepareStream size ispace w' comm fold_lam nes arrs'
+      letBind_ pat' $ Op $ HostOp $ SegRed kspace comm red_lam_seq nes ts kbody
 
 streamRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels

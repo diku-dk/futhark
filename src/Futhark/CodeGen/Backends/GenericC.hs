@@ -2007,6 +2007,7 @@ defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body
   struct_decls <- mapM toStructDecl params
   body_decls <- mapM (toDeclInit husk_params) params
   repl <- concat <$> mapM (replMem husk_params) repl_mem
+  free_repl <- concat <$> mapM freeRepl repl_mem
   body' <- localNodeId [C.cexp|$id:node_id|] $ blockScope $ compileCode body
   libDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
                                         typename int32_t $id:node_id,
@@ -2022,6 +2023,7 @@ defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body
       $decls:body_decls
       $items:repl
       $items:body'
+      $items:free_repl
       return 0;
     }|]
   where toCType (ScalarParam _ t) = return [C.cty|$ty:(primTypeToCType t)|]
@@ -2038,12 +2040,15 @@ defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body
             then [C.cdecl|$ty:t $id:pn;|]
             else [C.cdecl|$ty:t $id:pn = $id:hparam.$id:pn;|]
         replMem hparam mem = do
+          alloc <- asks envAllocate
+          peer_copy <- asks envPeerCopy
           blockScope $ do
-            alloc <- asks envAllocate
-            peer_copy <- asks envPeerCopy
             alloc [C.cexp|$id:mem.mem|] [C.cexp|$id:hparam.$id:mem.size|]
                   [C.cexp|$string:(pretty mem)|] "device"
             peer_copy
               [C.cexp|$id:mem.mem|] [C.cexp|0|] [C.cexp|$id:node_id|] (Space "device")
               [C.cexp|$id:hparam.$id:mem.mem|] [C.cexp|0|] [C.cexp|0|] (Space "device")
               [C.cexp|$id:hparam.$id:mem.size|]
+        freeRepl mem = do
+          dealloc <- asks envDeallocate
+          blockScope $ dealloc [C.cexp|$id:mem.mem|] [C.cexp|$string:(pretty mem)|] "device"
