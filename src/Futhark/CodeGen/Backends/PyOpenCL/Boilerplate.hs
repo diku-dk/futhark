@@ -12,7 +12,7 @@ import qualified Data.Text as T
 import NeatInterpolation (text)
 
 import Futhark.CodeGen.ImpCode.OpenCL (PrimType(..), SizeClass(..))
-import Futhark.CodeGen.OpenCL.Kernels
+import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.Util.Pretty (pretty, prettyText)
 

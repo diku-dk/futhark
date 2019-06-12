@@ -14,7 +14,7 @@ import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.Backends.GenericC as GC
-import Futhark.CodeGen.OpenCL.Kernels
+import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util (chunk, zEncodeString)
 
 generateBoilerplate :: String -> String -> [String] -> [PrimType]
