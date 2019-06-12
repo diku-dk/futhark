@@ -238,7 +238,8 @@ typedef ushort uint16_t;
 typedef uint uint32_t;
 typedef ulong uint64_t;
 
-$esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attribute__ ((align))")
+// We declare the shared memory array as int64_t to force alignment.
+$esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local int64_t m[((size + 7) & ~7)/8]")
 
 // NVIDIAs OpenCL does not create device-wide memory fences (see #734), so we
 // use inline assembly if we detect we are on an NVIDIA GPU.
