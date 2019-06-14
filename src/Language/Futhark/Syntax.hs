@@ -772,8 +772,14 @@ instance Located DocComment where
   locOf (DocComment _ loc) = locOf loc
 
 -- | Function Declarations
-data ValBindBase f vn = ValBind { valBindEntryPoint :: Bool
-                                -- ^ True if this function is an entry point.
+data ValBindBase f vn = ValBind { valBindEntryPoint :: Maybe (f StructType)
+                                -- ^ True if this function is an entry
+                                -- point.  If so, it also contains the
+                                -- externally visible type.  Note that
+                                -- this may not strictly be well-typed
+                                -- after some desugaring operations,
+                                -- as it may refer to abstract types
+                                -- that are no longer in scope.
                                 , valBindName       :: vn
                                 , valBindRetDecl    :: Maybe (TypeExp vn)
                                 , valBindRetType    :: f StructType

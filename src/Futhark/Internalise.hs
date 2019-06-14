@@ -115,7 +115,8 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
             applyRetType rettype' all_params)
 
   bindFunction fname info
-  when entry $ generateEntryPoint fb
+  case entry of Just (Info entry') -> generateEntryPoint entry' fb
+                Nothing -> return ()
 
   where
     -- | Recompute existential sizes to start from zero.
@@ -149,8 +150,8 @@ allDimsFreshInPat (Wildcard (Info t) loc) =
 allDimsFreshInPat (PatternLit e (Info t) loc) =
   PatternLit e <$> (Info <$> allDimsFreshInType t) <*> pure loc
 
-generateEntryPoint :: E.ValBind -> InternaliseM ()
-generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) = do
+generateEntryPoint :: E.StructType -> E.ValBind -> InternaliseM ()
+generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) = do
   -- We replace all shape annotations, so there should be no constant
   -- parameters here.
   params_fresh <- mapM allDimsFreshInPat params
@@ -158,7 +159,8 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) 
                 mconcat $ map E.patternDimNames params_fresh
   bindingParams tparams params_fresh $ \_ shapeparams params' -> do
     (entry_rettype, _) <- internaliseEntryReturnType $ anyDimShapeAnnotations rettype
-    let entry' = entryPoint (zip params params') (retdecl, rettype, entry_rettype)
+    let (e_paramts, e_rettype) = E.unfoldFunType ftype
+        entry' = entryPoint (zip3 params e_paramts params') (retdecl, e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     entry_body <- insertStmsM $ do
@@ -172,7 +174,7 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) 
       (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
 
-entryPoint :: [(E.Pattern,[I.FParam])]
+entryPoint :: [(E.Pattern, E.StructType, [I.FParam])]
            -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
            -> EntryPoint
 entryPoint params (retdecl, eret, crets) =
@@ -180,9 +182,9 @@ entryPoint params (retdecl, eret, crets) =
    case isTupleRecord eret of
      Just ts -> concatMap entryPointType $ zip3 retdecls ts crets
      _       -> entryPointType (retdecl, eret, concat crets))
-  where preParam (p_pat, ps) = (paramOuterType p_pat,
-                                E.patternStructType p_pat,
-                                staticShapes $ map I.paramDeclType ps)
+  where preParam (p_pat, e_t, ps) = (paramOuterType p_pat,
+                                     e_t,
+                                     staticShapes $ map I.paramDeclType ps)
         paramOuterType (E.PatternAscription _ tdecl _) = Just $ declaredType tdecl
         paramOuterType (E.PatternParens p _) = paramOuterType p
         paramOuterType _ = Nothing
@@ -465,7 +467,7 @@ internaliseExp desc (E.LetPat pat e body _ loc) =
   internalisePat desc pat e body loc (internaliseExp desc)
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
-  internaliseValBind $ E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc
+  internaliseValBind $ E.ValBind Nothing ofname retdecl (Info rettype) tparams params body Nothing loc
   internaliseExp desc letbody
 
 internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody loc) = do

@@ -587,7 +587,7 @@ liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
   where dims' = map (flip TypeParamDim noLoc) dims
         rettype_st = anyDimShapeAnnotations $ toStruct rettype
         dec = ValBind
-          { valBindEntryPoint = False
+          { valBindEntryPoint = Nothing
           , valBindName       = fname
           , valBindRetDecl    = Nothing
           , valBindRetType    = Info rettype_st
@@ -816,13 +816,13 @@ patternVars = mconcat . map ident . S.toList . patternIdents
 defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind True name _ (Info rettype) tparams params body _ loc)
+defuncValBind (ValBind entry@Just{} name _ (Info rettype) tparams params body _ loc)
   | (rettype_ps, rettype') <- unfoldFunType rettype,
     not $ null rettype_ps = do
       (body_pats, body', _) <- etaExpand body
       -- FIXME: we should also handle non-constant size annotations
       -- here.
-      defuncValBind $ ValBind True name Nothing
+      defuncValBind $ ValBind entry name Nothing
         (Info $ onlyConstantDims rettype')
         tparams (params <> body_pats) body' Nothing loc
   where onlyConstantDims = bimap onDim id

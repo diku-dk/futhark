@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Entry points whose types are opaque due to module ascription, yet
+    whose representation is simple (scalars or arrays of scalars) were
+    mistakely made non-opaque when compiled with ``--library``.  This
+    has been fixed.
+
 ## [0.11.1]
 
 ### Added

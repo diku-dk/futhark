@@ -371,8 +371,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
     text fun <+> pprName name <+>
     spread (map ppr tparams ++ map ppr args) <> retdecl' <> text " =" </>
     indent 2 (ppr body)
-    where fun | entry     = "entry"
-              | otherwise = "let"
+    where fun | isJust entry = "entry"
+              | otherwise    = "let"
           retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
                        Just rettype' -> text ":" <+> rettype'
                        Nothing       -> mempty
