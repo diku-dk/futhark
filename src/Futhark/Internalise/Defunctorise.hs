@@ -304,7 +304,9 @@ transformImports ((name,imp):imps) = do
 
     maybeHideEntryPoint (ValDec vdec) =
       ValDec vdec { valBindEntryPoint =
-                      valBindEntryPoint vdec && permit_entry_points }
+                      if permit_entry_points
+                      then valBindEntryPoint vdec
+                      else Nothing  }
     maybeHideEntryPoint d = d
 
 transformProg :: MonadFreshNames m => Imports -> m [Dec]

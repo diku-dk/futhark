@@ -35,6 +35,7 @@ import           Data.Bitraversable
 import           Data.Bifunctor
 import           Data.Loc
 import qualified Data.Map.Strict as M
+import           Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import           Data.Foldable
@@ -451,7 +452,7 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
                                   }
 
         toValBinding t_shape_params name' params'' rettype' body'' =
-          ValBind { valBindEntryPoint = False
+          ValBind { valBindEntryPoint = Nothing
                   , valBindName       = name'
                   , valBindRetDecl    = retdecl
                   , valBindRetType    = Info rettype'
@@ -545,13 +546,13 @@ removeTypeVariablesInType t = do
 
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
-  valbind' <- toPolyBinding <$> removeTypeVariables (valBindEntryPoint valbind) valbind
-  when (valBindEntryPoint valbind) $ do
+  valbind' <- toPolyBinding <$> removeTypeVariables (isJust (valBindEntryPoint valbind)) valbind
+  when (isJust $ valBindEntryPoint valbind) $ do
     t <- removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
          (map patternStructType (valBindParams valbind)) $
          unInfo $ valBindRetType valbind
     (name, valbind'') <- monomorphizeBinding True valbind' t
-    tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = True})
+    tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = valBindEntryPoint valbind})
     addLifted (valBindName valbind) t name
   return mempty { envPolyBindings = M.singleton (valBindName valbind) valbind' }
 
