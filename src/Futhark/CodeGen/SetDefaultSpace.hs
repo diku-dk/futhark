@@ -105,7 +105,7 @@ setBodySpace space (Call dests fname args) =
 setBodySpace space (Assert e msg loc) = do
   e' <- setExpSpace space e
   return $ Assert e' msg loc
-setBodySpace space (DebugPrint s v) = do
+setBodySpace space (DebugPrint s v) =
   DebugPrint s <$> mapM (mapM (setExpSpace space)) v
 setBodySpace space (Op op) =
   Op <$> setHostOpDefaultSpace space op

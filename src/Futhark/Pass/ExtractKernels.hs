@@ -501,7 +501,7 @@ sufficientParallelism desc what path = cmpSizeLe desc (Out.SizeThreshold path) w
 huskedDistributeMap :: KernelPath -> MapLoop -> DistribM KernelsStms
 huskedDistributeMap path (MapLoop pat cs w lam arrs) = do
   hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
-  let ret_ts = lambdaReturnType lam
+  let ret_ts = map (`arrayOfShape` Shape [w]) $ lambdaReturnType lam
       hscope = scopeOfHuskSpace hspace
       parts_names = map paramName parts
       parts_elems_v = Var parts_elems

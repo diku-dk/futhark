@@ -82,7 +82,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
     dPrimV_ parts_elems $ BinOpExp (SMin Int32) (Imp.var max_part_elems int32) (src_elems_e - Imp.var parts_offset int32)
     mapM_ (allocAndPart husk_func) $ zip4 parts parts_mem parts_sizes src_mem_names
     compileStms (freeIn ses) bnds $ do
-      zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y [zero_val]) interm_red $ map Var node_red_res
+      zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
       node_map_res_arrs <- mapM lookupArray node_map_res
       zipWithM_ (combineMapResult husk_func) node_map_res_arrs map_pes_mems
     mapM_ ((\x -> emit $ Imp.Free x DefaultSpace) . paramName) parts_mem

@@ -351,7 +351,7 @@ generateContextFuns cfg kernel_names husk_funcs sizes = do
   GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         CUDA_SUCCEED(cuCtxSynchronize());
+                         cuda_send_node_sync(&ctx->cuda);
                          return 0;
                        }|])
 

@@ -2006,9 +2006,10 @@ defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body
   husk_params <- newVName "husk_params"
   struct_decls <- mapM toStructDecl params
   body_decls <- mapM (toDeclInit husk_params) params
-  repl <- concat <$> mapM (replMem husk_params) repl_mem
-  free_repl <- concat <$> mapM freeRepl repl_mem
-  body' <- localNodeId [C.cexp|$id:node_id|] $ blockScope $ compileCode body
+  body' <- localNodeId [C.cexp|$id:node_id|] $ blockScope $ do
+    mapM_ (replMem husk_params) repl_mem
+    compileCode body
+    mapM_ freeRepl repl_mem
   libDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
                                         typename int32_t $id:node_id,
                                         void *$id:husk_params_p);|]
@@ -2021,9 +2022,7 @@ defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body
       struct $id:param_struct $id:husk_params =
         *(struct $id:param_struct *)$id:husk_params_p;
       $decls:body_decls
-      $items:repl
       $items:body'
-      $items:free_repl
       return 0;
     }|]
   where toCType (ScalarParam _ t) = return [C.cty|$ty:(primTypeToCType t)|]
@@ -2042,13 +2041,12 @@ defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body
         replMem hparam mem = do
           alloc <- asks envAllocate
           peer_copy <- asks envPeerCopy
-          blockScope $ do
-            alloc [C.cexp|$id:mem.mem|] [C.cexp|$id:hparam.$id:mem.size|]
-                  [C.cexp|$string:(pretty mem)|] "device"
-            peer_copy
-              [C.cexp|$id:mem.mem|] [C.cexp|0|] [C.cexp|$id:node_id|] (Space "device")
-              [C.cexp|$id:hparam.$id:mem.mem|] [C.cexp|0|] [C.cexp|0|] (Space "device")
-              [C.cexp|$id:hparam.$id:mem.size|]
+          alloc [C.cexp|$id:mem.mem|] [C.cexp|$id:hparam.$id:mem.size|]
+                [C.cexp|$string:(pretty mem)|] "device"
+          peer_copy
+            [C.cexp|$id:mem.mem|] [C.cexp|0|] [C.cexp|$id:node_id|] (Space "device")
+            [C.cexp|$id:hparam.$id:mem.mem|] [C.cexp|0|] [C.cexp|0|] (Space "device")
+            [C.cexp|$id:hparam.$id:mem.size|]
         freeRepl mem = do
           dealloc <- asks envDeallocate
-          blockScope $ dealloc [C.cexp|$id:mem.mem|] [C.cexp|$string:(pretty mem)|] "device"
+          dealloc [C.cexp|$id:mem.mem|] [C.cexp|$string:(pretty mem)|] "device"

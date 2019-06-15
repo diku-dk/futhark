@@ -928,13 +928,7 @@ instance TypedOp inner => TypedOp (HostOp lore inner) where
   opType GetSizeMax{} = pure [Prim int32]
   opType CmpSizeLe{} = pure [Prim Bool]
   opType (HostOp op) = opType op
-  opType (Husk hspace _ nes ts _) =
-    pure $ staticShapes $ addHuskMapDim ts nes $ hspaceSourceElems hspace
-
-addHuskMapDim :: [Type] -> [SubExp] -> SubExp -> [Type]
-addHuskMapDim ts nes num_elems =
-  let (red_ts, map_ts) = splitAt (length nes) ts
-  in red_ts ++ map (`arrayOfShape` Shape [num_elems]) map_ts
+  opType (Husk _ _ _ ts _) = pure $ staticShapes ts
 
 instance (Attributes lore, AliasedOp inner) => AliasedOp (HostOp lore inner) where
   opAliases (HostOp op) = opAliases op
