@@ -50,6 +50,7 @@ import Control.Monad.Writer hiding (mapM_)
 import Control.Monad.Identity hiding (mapM_)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
+import Data.Maybe
 import Data.Foldable
 import Data.List
 
@@ -930,12 +931,19 @@ instance TypedOp inner => TypedOp (HostOp lore inner) where
   opType (HostOp op) = opType op
   opType (Husk _ _ _ ts _) = pure $ staticShapes ts
 
-instance (Attributes lore, AliasedOp inner) => AliasedOp (HostOp lore inner) where
+instance (Attributes lore, Aliased lore, AliasedOp inner) => AliasedOp (HostOp lore inner) where
   opAliases (HostOp op) = opAliases op
-  opAliases (Husk _ _ _ ts _) = map (const mempty) ts
+  opAliases (Husk _ red _ _ body) =
+    bodyAliases (lambdaBody red) <> bodyAliases body
   opAliases _ = [mempty]
 
   consumedInOp (HostOp op) = consumedInOp op
+  consumedInOp (Husk hspace red nes _ body) =
+    S.fromList (concat [ maybeToList $ subExpVar $ hspaceSourceElems hspace
+                       , mapMaybe subExpVar nes
+                       , hspaceSource hspace])
+    <> consumedByLambda red
+    <> consumedInBody body
   consumedInOp _ = mempty
 
 instance (Attributes lore, RangedOp inner) => RangedOp (HostOp lore inner) where
@@ -945,8 +953,9 @@ instance (Attributes lore, RangedOp inner) => RangedOp (HostOp lore inner) where
 
 instance (Attributes lore, FreeIn inner) => FreeIn (HostOp lore inner) where
   freeIn (HostOp op) = freeIn op
-  freeIn (Husk hspace red_op _ _ body) =
+  freeIn (Husk hspace red_op nes _ body) =
     mconcat [ freeIn red_op
+            , freeIn nes
             , freeIn body
             , S.fromList $ hspaceSource hspace
             , freeIn $ hspaceSourceElems hspace]

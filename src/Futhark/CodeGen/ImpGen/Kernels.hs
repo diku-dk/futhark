@@ -102,12 +102,9 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
         zero_val = ValueExp $ IntValue $ Int32Value 0
         red_op_params = lambdaParams red_op
         (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
-        (node_red_res, node_map_res) = splitAt (length nes) $ getVarNames ses
+        (node_red_res, node_map_res) = splitAt (length nes) $ mapMaybe subExpVar ses
         red_ts = take (length nes) ts
         (red_pes, map_pes) = splitAt (length nes) pes
-        getVarNames [] = []
-        getVarNames (Var n : vs) = n : getVarNames vs
-        getVarNames (_ : vs) = getVarNames vs
         getParam name (Prim t) = Just $ Imp.ScalarParam name t
         getParam name (Mem space) = Just $ Imp.MemParam name space
         getParam _ Array{} = Nothing

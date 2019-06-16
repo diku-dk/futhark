@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TupleSections #-}
 module Futhark.Pass.ExtractKernels.BlockedKernel
        ( segRed
        , nonSegRed
@@ -137,7 +136,7 @@ dummyDim pat = do
              letBindNames_ [to] $ BasicOp $ Index from $
                fullSlice from_t [DimFix $ intConst Int32 0])
 
-huskedRed :: (MonadFreshNames m, HasScope Kernels m) =>
+huskedOp :: (MonadFreshNames m, HasScope Kernels m) =>
               Pattern Kernels
           -> SubExp
           -> [Type]
@@ -146,7 +145,7 @@ huskedRed :: (MonadFreshNames m, HasScope Kernels m) =>
           -> [VName]
           -> (Pattern Kernels -> SubExp -> [VName] -> Binder Kernels (Stms Kernels))
           -> m (Stms Kernels)
-huskedRed pat w ret_ts red_lam_fot nes arrs red = runBinder_ $ do
+huskedOp pat w ret_ts red_lam_fot nes arrs red = runBinder_ $ do
   red_lam_fot' <- renameLambda red_lam_fot
   hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
   let hscope = scopeOfHuskSpace hspace
@@ -173,7 +172,7 @@ huskedNonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
 huskedNonSegRed pat w comm red_lam_seq red_lam_fot map_lam nes arrs =
   let (red_ts, map_ts) = splitAt (length nes) $ lambdaReturnType map_lam
       ret_ts = red_ts ++ map (`arrayOfShape` Shape [w]) map_ts
-  in huskedRed pat w ret_ts red_lam_fot nes arrs $
+  in huskedOp pat w ret_ts red_lam_fot nes arrs $
       \pat' w' arrs' -> nonSegRed pat' w' comm red_lam_seq map_lam nes arrs'
 
 nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
@@ -236,7 +235,7 @@ huskedStreamRed :: (MonadFreshNames m, HasScope Kernels m) =>
 huskedStreamRed pat w comm red_lam_seq red_lam_fot fold_lam nes arrs =
   let (red_ts, map_ts) = splitAt (length nes) $ lambdaReturnType fold_lam
       ret_ts = red_ts ++ map (`setOuterSize` w) map_ts
-  in huskedRed pat w ret_ts red_lam_fot nes arrs $
+  in huskedOp pat w ret_ts red_lam_fot nes arrs $
       \pat' w' arrs' -> streamRed pat' w' comm red_lam_seq fold_lam nes arrs'
 
 streamRed :: (MonadFreshNames m, HasScope Kernels m) =>

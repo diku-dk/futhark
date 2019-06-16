@@ -308,7 +308,7 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
       in_husk <- isInHusk
       if in_husk
         then distributeMap path $ MapLoop pat cs w lam arrs
-        else inHusk $ huskedDistributeMap path $ MapLoop pat cs w lam arrs
+        else huskedDistributeMap path $ MapLoop pat cs w lam arrs
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just (scan_lam, nes) <- isScanSOAC form,
@@ -343,7 +343,7 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
 
   let paralleliseOuter = do
         in_husk <- isInHusk
-        runBinder_ $ do
+        inHusk $ runBinder_ $ do
           red_lam_sequential <- Kernelise.transformLambda red_lam
           map_lam_sequential <- Kernelise.transformLambda map_lam
           red_lam_firstorder <- FOT.transformLambda red_lam
@@ -405,24 +405,13 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
   where
     paralleliseOuter path'
       | any (not . primType) $ lambdaReturnType red_fun = do
-          -- Split into a chunked map and a reduction, with the latter
-          -- further transformed.
+          in_husk <- isInHusk
+          red_fun_firstorder <- FOT.transformLambda red_fun
           fold_fun_sequential <- Kernelise.transformLambda fold_fun
-
-          let (red_pat_elems, concat_pat_elems) =
-                splitAt (length nes) $ patternValueElements pat
-              red_pat = Pattern [] red_pat_elems
-
-          ((num_threads, red_results), stms) <-
-            streamMap (map (baseString . patElemName) red_pat_elems) concat_pat_elems w
-            Noncommutative fold_fun_sequential nes arrs
-
-          reduce_soac <- reduceSOAC comm' red_fun nes
-
-          (stms<>) <$>
-            inScopeOf stms
-            (transformStm path' $ Let red_pat aux $
-             Op (Screma num_threads reduce_soac red_results))
+          if in_husk
+            then streamMapWithReduce path' aux pat w comm' fold_fun_sequential red_fun nes arrs
+            else huskedStreamMapWithReduce path' aux pat w comm' fold_fun_sequential red_fun
+                                           red_fun_firstorder nes arrs
 
       | otherwise = do
           in_husk <- isInHusk
@@ -499,7 +488,7 @@ sufficientParallelism :: String -> SubExp -> KernelPath
 sufficientParallelism desc what path = cmpSizeLe desc (Out.SizeThreshold path) what
 
 huskedDistributeMap :: KernelPath -> MapLoop -> DistribM KernelsStms
-huskedDistributeMap path (MapLoop pat cs w lam arrs) = do
+huskedDistributeMap path (MapLoop pat cs w lam arrs) = inHusk $ do
   hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
   let ret_ts = map (`arrayOfShape` Shape [w]) $ lambdaReturnType lam
       hscope = scopeOfHuskSpace hspace
@@ -621,6 +610,45 @@ distributeMap' distribM loopnest path mk_seq_stms mk_par_stms pat nest_w lam = d
 
       ((outer_suff_stms<>intra_suff_stms)<>) <$>
         kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
+
+huskedStreamMapWithReduce :: KernelPath -> StmAux () -> PatternT Type -> SubExp -> Commutativity
+                          -> InKernelLambda -> Out.Lambda SOACS -> Out.Lambda Out.Kernels
+                          -> [SubExp] -> [VName]
+                          -> DistribM KernelsStms
+huskedStreamMapWithReduce path aux pat w comm fold_lam red_lam red_lam_fot nes arrs = inHusk $ do
+  hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
+  let (red_ts, map_ts) = splitAt (length nes) $ lambdaReturnType fold_lam
+      ret_ts = red_ts ++ map (`setOuterSize` w) map_ts
+      hscope = scopeOfHuskSpace hspace
+      parts_names = map paramName parts
+      parts_elems_v = Var parts_elems
+  (Pattern pcs pes) <- renamePattern pat
+  node_res <- replicateM (length ret_ts) $ newVName "node_res"
+  let (red_pes_ts, map_pes_ts) = splitAt (length nes) $ map patElemAttr pes
+      body_pat_ts = red_pes_ts ++ map (`setOuterSize` Var parts_elems) map_pes_ts
+      body_pat = Pattern pcs $ zipWith PatElem node_res body_pat_ts
+  body_stms <- localScope hscope $
+    streamMapWithReduce path aux body_pat parts_elems_v comm fold_lam red_lam nes parts_names
+  runBinder_ $ letBind_ pat $ Op $ Husk hspace red_lam_fot nes ret_ts $ mkBody body_stms $ map Var node_res
+
+streamMapWithReduce :: KernelPath -> StmAux () -> PatternT Type -> SubExp
+                    -> Commutativity -> InKernelLambda -> Out.Lambda SOACS -> [SubExp] -> [VName]
+                    -> DistribM KernelsStms
+streamMapWithReduce path aux pat w comm fold_lam red_lam nes arrs = do
+  -- Split into a chunked map and a reduction, with the latter
+  -- further transformed.
+  let (red_pat_elems, concat_pat_elems) = splitAt (length nes) $ patternValueElements pat
+      red_pat = Pattern [] red_pat_elems
+
+  ((num_threads, red_results), stms) <-
+    streamMap (map (baseString . patElemName) red_pat_elems) concat_pat_elems w
+    Noncommutative fold_lam nes arrs
+
+  reduce_soac <- reduceSOAC comm red_lam nes
+
+  (stms<>) <$> inScopeOf stms
+    (transformStm path $ Let red_pat aux $
+      Op (Screma num_threads reduce_soac red_results))
 
 data KernelEnv = KernelEnv { kernelNest :: Nestings
                            , kernelScope :: Scope Out.Kernels
