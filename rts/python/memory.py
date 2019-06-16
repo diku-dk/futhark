@@ -19,8 +19,13 @@ def normaliseArray(x):
 def unwrapArray(x):
   return normaliseArray(x).ctypes.data_as(ct.POINTER(ct.c_byte))
 
-def createArray(x, dim):
-  return np.ctypeslib.as_array(x, shape=dim)
+def createArray(x, shape):
+  # HACK: np.ctypeslib.as_array may fail if the shape contains zeroes,
+  # for some reason.
+  if any(map(lambda x: x == 0, shape)):
+      return np.ndarray(shape, dtype=x._type_)
+  else:
+      return np.ctypeslib.as_array(x, shape=shape)
 
 def indexArray(x, offset, bt, nptype):
   return nptype(addressOffset(x, offset*ct.sizeof(bt), bt)[0])
