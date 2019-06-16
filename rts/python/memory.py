@@ -23,10 +23,10 @@ def createArray(x, dim):
   return np.ctypeslib.as_array(x, shape=dim)
 
 def indexArray(x, offset, bt, nptype):
-  return nptype(addressOffset(x, offset, bt)[0])
+  return nptype(addressOffset(x, offset*ct.sizeof(bt), bt)[0])
 
 def writeScalarArray(x, offset, v):
-  ct.memmove(ct.addressof(x.contents)+int(offset), ct.addressof(v), ct.sizeof(v))
+  ct.memmove(ct.addressof(x.contents)+int(offset)*ct.sizeof(v), ct.addressof(v), ct.sizeof(v))
 
 # An opaque Futhark value.
 class opaque(object):
