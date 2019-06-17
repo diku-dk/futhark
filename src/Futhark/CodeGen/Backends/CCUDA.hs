@@ -229,13 +229,21 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeTile = "tile_size"
     cudaSizeClass SizeLocalMemory = "shared_memory"
 callKernel (DistributeHusk num_nodes bparams repl_mem husk_func interm body red) = do
+  let husk_id = baseTag $ hfunctionName husk_func
+  err <- newVName "husk_err"
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
   GC.defineHuskFunction husk_func bparams repl_mem body
   params <- newVName "husk_params"
   GC.compileCode interm
   GC.decl [C.cdecl|struct $id:(hfunctionParamStruct husk_func) $id:params;|]
   GC.stms [[C.cstm|$id:params.$id:(paramName bparam) = $id:(paramName bparam);|] | bparam <- bparams]
-  GC.stm [C.cstm|cuda_send_node_husk(&ctx->cuda, $int:(baseTag $ hfunctionName husk_func), &$id:params);|]
+  GC.stm [C.cstm|cuda_send_node_husk(&ctx->cuda, $int:husk_id, &$id:params);|]
+  GC.decl [C.cdecl|int $id:err = cuda_node_first_error(&ctx->cuda);|]
+  free_all_mem <- GC.unRefAllMem
+  GC.stm [C.cstm|if($id:err != 0) {
+      $items:free_all_mem
+      panic($id:err, "Husk %d failed with error %d.", $int:husk_id, $id:err);
+    }|]
   GC.compileCode red
 callKernel (LaunchKernel name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"

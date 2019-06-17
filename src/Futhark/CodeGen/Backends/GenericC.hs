@@ -49,6 +49,7 @@ module Futhark.CodeGen.Backends.GenericC
   , compileExpToVName
   , dimSizeToExp
   , rawMem
+  , unRefAllMem
   , item
   , stm
   , stms
@@ -341,6 +342,15 @@ nodeInits node_id = do
 
 localNodeId :: C.Exp -> CompilerM op s a -> CompilerM op s a
 localNodeId node_id = local (\env -> env { envNodeId = node_id })
+
+localNodeBlock :: C.Exp -> CompilerM op s () -> CompilerM op s [C.BlockItem]
+localNodeBlock node_id m = do
+  -- Expected to enter a new node, so restart declared memory env
+  old_allocs <- gets compDeclaredMem
+  modify (\s -> s { compDeclaredMem = mempty })
+  a <- localNodeId node_id $ blockScope m
+  modify (\s -> s { compDeclaredMem = old_allocs })
+  return a
 
 getNodeId :: CompilerM op s C.Exp
 getNodeId = asks envNodeId
@@ -673,6 +683,9 @@ unRefMem mem space = do
     stm [C.cstm|if ($id:(fatMemUnRef space)(ctx, $exp:node_id, &$exp:mem, $string:mem_s) != 0) {
                return 1;
              }|]
+
+unRefAllMem :: CompilerM op s [C.BlockItem]
+unRefAllMem = collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
 
 allocMem :: (C.ToExp a, C.ToExp b) =>
             a -> b -> Space -> C.Stm -> CompilerM op s ()
@@ -1571,7 +1584,7 @@ compileFun (fname, Function _ outputs inputs body _ _ node_id) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
   node_id' <- compileExp node_id
-  body' <- localNodeId node_id' $ blockScope $ compileFunBody out_ptrs outputs body
+  body' <- localNodeBlock node_id' $ compileFunBody out_ptrs outputs body
   ctx_ty <- contextType
   return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
                                                    $params:outparams, $params:inparams);|],
@@ -1803,7 +1816,7 @@ compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
 compileCode (Assert e (ErrorMsg parts) (loc, locs)) = do
   e' <- compileExp e
-  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  free_all_mem <- unRefAllMem
   let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
       onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
@@ -2006,7 +2019,7 @@ defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body
   husk_params <- newVName "husk_params"
   struct_decls <- mapM toStructDecl params
   body_decls <- mapM (toDeclInit husk_params) params
-  body' <- localNodeId [C.cexp|$id:node_id|] $ blockScope $ do
+  body' <- localNodeBlock [C.cexp|$id:node_id|] $ do
     mapM_ (replMem husk_params) repl_mem
     compileCode body
     mapM_ freeRepl repl_mem
@@ -2035,7 +2048,7 @@ defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body
         toDeclInit hparam p = do
           let pn = paramName p
           t <- toCType p
-          return $ if elem pn repl_mem
+          return $ if pn `elem` repl_mem
             then [C.cdecl|$ty:t $id:pn;|]
             else [C.cdecl|$ty:t $id:pn = $id:hparam.$id:pn;|]
         replMem hparam mem = do

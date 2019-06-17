@@ -115,6 +115,8 @@ struct cuda_node_context {
   pthread_t thread;
   struct cuda_node_message current_message;
   sem_t message_signal;
+  
+  int result;
 };
 
 struct cuda_context {
@@ -672,6 +674,13 @@ void cuda_send_node_husk(struct cuda_context *ctx, int32_t husk_id, void* params
   }
   cuda_thread_sync(&ctx->node_sync_point);
   free(husk_contents);
+}
+
+int cuda_node_first_error(struct cuda_context *ctx) {
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i)
+    if (ctx->nodes[i].result != 0)
+      return ctx->nodes[i].result;
+  return 0;
 }
 
 void cuda_send_node_exit(struct cuda_context *ctx) {
