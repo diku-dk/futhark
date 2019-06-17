@@ -63,6 +63,7 @@ optimiseFunDef fundec = modifyNameSource $ \src ->
   in (fundec { funDefBody = body' }, src')
   where env = Env mempty optimiseKernelOp doNotTouchLoop
 
+        optimiseKernelOp :: Op ExplicitMemory -> DoubleBufferM ExplicitMemory (Op ExplicitMemory)
         optimiseKernelOp (Inner (HostOp k)) = do
           scope <- castScope <$> askScope
           modifyNameSource $
@@ -74,6 +75,9 @@ optimiseFunDef fundec = modifyNameSource $ \src ->
                   , mapOnKernelKernelBody = optimiseKernelBody
                   , mapOnKernelLambda = optimiseLambda
                   }
+        optimiseKernelOp (Inner (Husk hspace red_op nes ts body)) = do
+          body' <- localScope (scopeOfHuskSpace hspace) $ optimiseBody body
+          return $ Inner $ Husk hspace red_op nes ts body'
         optimiseKernelOp op = return op
 
         optimiseInKernelOp (Inner (GroupStream w maxchunk lam accs arrs)) = do
