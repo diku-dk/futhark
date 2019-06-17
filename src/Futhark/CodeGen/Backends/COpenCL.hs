@@ -248,7 +248,9 @@ copyOpenCLMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 peerCopyOpenCLMemory :: GC.PeerCopy OpenCL ()
-peerCopyOpenCLMemory _ _ _ _ _ = fail "Peer copy not implemented in the OpenCL backend."
+peerCopyOpenCLMemory dstmem dstidx _ dstSpace srcmem srcidx _ =
+  -- Currently only allows a single node, so peer copy is just a copy
+  copyOpenCLMemory dstmem dstidx dstSpace srcmem srcidx
 
 openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]
@@ -306,6 +308,13 @@ callKernel (GetSizeMax v size_class) =
   in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
 callKernel (HostCode c) =
   GC.compileCode c
+
+callKernel (DistributeHusk num_nodes _ _ (HuskFunction _ _ node_id) interm body red) = do
+  GC.decl [C.cdecl|int $id:node_id = 0;|]
+  GC.stm [C.cstm|$id:num_nodes = 1;|]
+  GC.compileCode interm
+  GC.compileCode body
+  GC.compileCode red
 
 callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args

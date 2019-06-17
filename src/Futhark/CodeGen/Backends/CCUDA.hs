@@ -231,9 +231,9 @@ callKernel (GetSizeMax v size_class) =
 callKernel (DistributeHusk num_nodes bparams repl_mem husk_func interm body red) = do
   let husk_id = baseTag $ hfunctionName husk_func
   err <- newVName "husk_err"
+  params <- newVName "husk_params"
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
   GC.defineHuskFunction husk_func bparams repl_mem body
-  params <- newVName "husk_params"
   GC.compileCode interm
   GC.decl [C.cdecl|struct $id:(hfunctionParamStruct husk_func) $id:params;|]
   GC.stms [[C.cstm|$id:params.$id:(paramName bparam) = $id:(paramName bparam);|] | bparam <- bparams]

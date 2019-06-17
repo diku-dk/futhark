@@ -68,7 +68,6 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
   interm_red <- replicateM (length node_red_res) $ newVName "interm_red"
   interm_red_mem <- replicateM (length node_red_res) $ newVName "interm_red_mem"
   src_mem_names <- getArrayMemLocs src
-  dScope Nothing $ scopeOfHuskSpace hspace
   dLParams red_op_params
   num_nodes <- dPrim "num_nodes" int32
   src_elems_e <- toExp src_elems
