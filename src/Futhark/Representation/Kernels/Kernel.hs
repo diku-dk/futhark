@@ -858,8 +858,7 @@ scopeOfHuskSpace (HuskSpace _ _ parts parts_elems parts_offset parts_mem parts_s
   <> scopeOfLParams parts_mem
 
 boundByHuskSpace :: HuskSpace lore -> Names
-boundByHuskSpace (HuskSpace _ _ parts parts_elems parts_offset parts_mem parts_sizes) =
-  S.fromList $ concat [[parts_elems, parts_offset], parts_sizes, map paramName parts, map paramName parts_mem]
+boundByHuskSpace = S.fromList . M.keys . scopeOfHuskSpace
 
 constructHuskSpace :: (MonadFreshNames m, HasScope lore m, LParamAttr lore ~ Type)
                    => [VName] -> SubExp -> m (HuskSpace lore)
@@ -897,6 +896,10 @@ instance Substitute (LParamAttr lore) => Substitute (HuskSpace lore) where
               (substituteNames substs parts) (substituteNames substs parts_elems)
               (substituteNames substs parts_offset) (substituteNames substs parts_mem)
               (substituteNames substs parts_sizes)
+
+instance FreeIn (HuskSpace lore) where
+  freeIn (HuskSpace src src_elems _ _ _ _ _) =
+    freeIn src <> freeIn src_elems
 
 instance (Attributes lore, Rename inner) => Rename (HostOp lore inner) where
   rename (HostOp op) = HostOp <$> rename op
@@ -957,8 +960,7 @@ instance (Attributes lore, FreeIn inner) => FreeIn (HostOp lore inner) where
     mconcat [ freeIn red_op
             , freeIn nes
             , freeIn body
-            , S.fromList $ hspaceSource hspace
-            , freeIn $ hspaceSourceElems hspace]
+            , freeIn hspace ]
     `S.difference` boundByHuskSpace hspace
   freeIn (CmpSizeLe _ _ x) = freeIn x
   freeIn _ = mempty
