@@ -40,7 +40,6 @@ module Futhark.Representation.Kernels.Kernel
        , scopeOfHuskSpace
        , boundByHuskSpace
        , constructHuskSpace
-       , convertHuskSpace
        , typeCheckHostOp
        )
        where

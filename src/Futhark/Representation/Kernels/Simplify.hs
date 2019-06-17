@@ -165,7 +165,7 @@ simplifyKernelOp mk_ops env (HostOp (SegGenRed space ops ts body)) = do
 
 simplifyKernelOp _ _ (Husk hspace red_op nes ts body) = do
   ts' <- Engine.simplify ts
-  hspace' <- Engine.simplify $ convertHuskSpace hspace
+  hspace' <- simplifyHuskSpace hspace
   let scope_vtable = ST.fromScope $ scopeOfHuskSpace hspace'
       bound_here = boundByHuskSpace hspace'
   par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
@@ -376,11 +376,13 @@ instance Engine.Simplifiable KernelSpace where
     <*> Engine.simplify virt_groups
     <*> Engine.simplify structure
 
-instance Engine.Simplifiable (HuskSpace lore) where
-  simplify (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) = do
-    src' <- Engine.simplify src
-    src_elems' <- Engine.simplify src_elems
-    return $ HuskSpace src' src_elems' parts parts_elems parts_offset parts_mem parts_sizes
+simplifyHuskSpace :: Engine.SimplifiableLore lore =>
+                     HuskSpace lore -> Engine.SimpleM lore (HuskSpace (Wise lore))
+simplifyHuskSpace (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) =
+  HuskSpace <$> Engine.simplify src <*> Engine.simplify src_elems <*>
+  mapM onParam parts <*> pure parts_elems <*> pure parts_offset <*>
+  mapM onParam parts_mem <*> pure parts_sizes
+  where onParam = Engine.simplifyParam Engine.simplify
 
 instance Engine.Simplifiable SpaceStructure where
   simplify (FlatThreadSpace dims) =
