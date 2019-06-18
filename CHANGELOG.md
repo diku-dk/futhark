@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     mistakely made non-opaque when compiled with ``--library``.  This
     has been fixed.
 
+  * The CUDA backend now supports default sizes in `.tuning` files.
+
 ## [0.11.1]
 
 ### Added
