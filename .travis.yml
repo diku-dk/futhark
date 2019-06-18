@@ -1,8 +1,8 @@
 language: minimal
-sudo: false
 dist: trusty
 git:
   submodules: false
+  depth: 5
 cache:
   directories:
   - "$HOME/.stack"
