@@ -37,7 +37,7 @@ jobs:
   - stage: compiler
     env: BUILD=stack STACK_YAML=stack.yaml
     script: &2
-    - stack --no-terminal test -j 1
+    - stack --no-terminal test -j 3
   - stage: compiler
     env: BUILD=stack STACK_YAML=stack-lts-12.11.yaml
     script: *2
