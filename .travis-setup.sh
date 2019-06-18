@@ -14,7 +14,7 @@ fetch_stack_osx() {
 }
 
 fetch_stack_linux() {
-  curl -sL https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack';
+  curl -sL https://github.com/commercialhaskell/stack/releases/download/v1.9.3/stack-1.9.3-linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack';
 }
 
 case "$BUILD" in
