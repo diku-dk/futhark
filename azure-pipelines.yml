@@ -4,11 +4,7 @@
 # options, see:
 #
 # https://docs.haskellstack.org/en/stable/azure_ci/
-#
-# Copy these contents into the root directory of your Github project in a file
-# named azure-pipelines.yml
 
-# Choose a agent virtual image
 pool:
   vmImage: ubuntu-16.04
 
@@ -24,5 +20,9 @@ steps:
 - script: |
     export PATH=$HOME/.local/bin:$PATH
     # Build the package, its tests, and its docs and run the tests
-    stack test --haddock --no-haddock-deps
-  displayName: Test Package
+    stack test --no-terminal --haddock --no-haddock-deps
+  displayName: Run unit tests
+- script: |
+    export PATH=$HOME/.local/bin:$PATH
+    futhark test --no-terminal tests examples
+  displayName: Run integration tests
