@@ -35,9 +35,10 @@ seqLoopStm (SeqLoop _ pat merge form body) =
   Let pat (defAux ()) $ DoLoop [] merge form body
 
 interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
-                   SeqLoop -> LoopNesting
+                   (VName -> Maybe VName) -> SeqLoop -> LoopNesting
                 -> m SeqLoop
 interchangeLoop
+  isMapParameter
   (SeqLoop perm loop_pat merge form body)
   (MapNesting pat cs w params_and_arrs) = do
     merge_expanded <-
@@ -80,8 +81,7 @@ interchangeLoop
             return $ Just (param, arr)
 
         expandedInit _ (Var v)
-          | Just (_, arr) <-
-              find ((==v).paramName.fst) params_and_arrs =
+          | Just arr <- isMapParameter v =
               return $ Var arr
         expandedInit param_name se =
           letSubExp (param_name <> "_expanded_init") $
@@ -124,8 +124,11 @@ interchangeLoops :: (MonadFreshNames m, HasScope SOACS m) =>
                  -> m (Stms SOACS)
 interchangeLoops nest loop = do
   (loop', bnds) <-
-    runBinder $ foldM interchangeLoop loop $ reverse $ kernelNestLoops nest
+    runBinder $ foldM (interchangeLoop isMapParameter) loop $ reverse $ kernelNestLoops nest
   return $ bnds <> oneStm (seqLoopStm loop')
+  where isMapParameter v =
+          fmap snd $ find ((==v) . paramName . fst) $
+          concatMap loopNestingParamsAndArrs $ kernelNestLoops nest
 
 data Branch = Branch [Int] Pattern SubExp Body Body (IfAttr (BranchType SOACS))
 
