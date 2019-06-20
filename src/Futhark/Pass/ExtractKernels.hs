@@ -917,7 +917,7 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
   | null (patternContextElements pat), bodyContainsParallelism body =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | S.null $ freeIn form `S.intersection` boundInKernelNest nest,
+      | S.null $ (freeIn form <> freeIn val) `S.intersection` boundInKernelNest nest,
         Just (perm, pat_unused) <- permutationAndMissing pat res ->
           -- We need to pretend pat_unused was used anyway, by adding
           -- it to the kernel nest.
