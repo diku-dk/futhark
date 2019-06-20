@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The CUDA backend now supports default sizes in `.tuning` files.
 
+  * Loop interchange across multiple dimensions was broken in some cases (#767).
+
 ## [0.11.1]
 
 ### Added
