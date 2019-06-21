@@ -790,7 +790,9 @@ static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, u
   fputc((char)BINARY_FORMAT_VERSION, out);
   fwrite(&rank, sizeof(int8_t), 1, out);
   fputs(elem_type->binname, out);
-  fwrite(shape, sizeof(int64_t), rank, out);
+  if (rank > 0) {
+    fwrite(shape, sizeof(int64_t), rank, out);
+  }
 
   if (IS_BIG_ENDIAN) {
     for (int64_t i = 0; i < num_elems; i++) {
