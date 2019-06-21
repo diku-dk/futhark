@@ -5,3 +5,6 @@ packages:
 flags: {}
 
 extra-package-dbs: []
+
+nix:
+    packages: [zlib.dev, zlib.out, pkgconfig, haskell.compiler.ghc865]
