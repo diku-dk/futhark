@@ -142,7 +142,6 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|{
-                          char *fname = optarg;
                           char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
                                                                     futhark_context_config_set_size);
                           if (ret != NULL) {
