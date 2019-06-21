@@ -237,7 +237,6 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           [(0::Int)..] $ M.keys sizes
 
   GC.libDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
-                     typename cl_int error;
                      ctx->opencl.cfg = cfg->opencl;
                      ctx->detail_memory = cfg->opencl.debugging;
                      ctx->debugging = cfg->opencl.debugging;
