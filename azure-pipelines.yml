@@ -24,5 +24,6 @@ steps:
   displayName: Run unit tests
 - script: |
     export PATH=$HOME/.local/bin:$PATH
+    stack install
     futhark test --no-terminal tests examples
   displayName: Run integration tests
