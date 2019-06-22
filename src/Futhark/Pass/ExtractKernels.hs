@@ -489,16 +489,15 @@ sufficientParallelism desc what path = cmpSizeLe desc (Out.SizeThreshold path) w
 
 huskedDistributeMap :: KernelPath -> MapLoop -> DistribM KernelsStms
 huskedDistributeMap path (MapLoop pat cs w lam arrs) = inHusk $ do
-  hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
+  hspace@(HuskSpace _ _ parts parts_elems _ _) <- constructHuskSpace arrs w
   let ret_ts = map (`arrayOfShape` Shape [w]) $ lambdaReturnType lam
-      hscope = scopeOfHuskSpace hspace
       parts_names = map paramName parts
       parts_elems_v = Var parts_elems
   (Pattern pcs pes) <- renamePattern pat
   node_res <- replicateM (length ret_ts) $ newVName "node_res"
   let body_pat_ts = map ((`setOuterSize` Var parts_elems) . patElemAttr) pes
       body_pat = Pattern pcs $ zipWith PatElem node_res body_pat_ts
-  body_stms <- localScope hscope $
+  body_stms <- localScope (scopeOfHuskSpace hspace) $
     distributeMap path (MapLoop body_pat cs parts_elems_v lam parts_names)
   runBinder_ $ letBind_ pat $ Op $ Husk hspace nilFn [] ret_ts $ mkBody body_stms $ map Var node_res
 
@@ -616,10 +615,9 @@ huskedStreamMapWithReduce :: KernelPath -> StmAux () -> PatternT Type -> SubExp 
                           -> [SubExp] -> [VName]
                           -> DistribM KernelsStms
 huskedStreamMapWithReduce path aux pat w comm fold_lam red_lam red_lam_fot nes arrs = inHusk $ do
-  hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
+  hspace@(HuskSpace _ _ parts parts_elems _ _) <- constructHuskSpace arrs w
   let (red_ts, map_ts) = splitAt (length nes) $ lambdaReturnType fold_lam
       ret_ts = red_ts ++ map (`setOuterSize` w) map_ts
-      hscope = scopeOfHuskSpace hspace
       parts_names = map paramName parts
       parts_elems_v = Var parts_elems
   (Pattern pcs pes) <- renamePattern pat
@@ -627,7 +625,7 @@ huskedStreamMapWithReduce path aux pat w comm fold_lam red_lam red_lam_fot nes a
   let (red_pes_ts, map_pes_ts) = splitAt (length nes) $ map patElemAttr pes
       body_pat_ts = red_pes_ts ++ map (`setOuterSize` Var parts_elems) map_pes_ts
       body_pat = Pattern pcs $ zipWith PatElem node_res body_pat_ts
-  body_stms <- localScope hscope $
+  body_stms <- localScope (scopeOfHuskSpace hspace) $
     streamMapWithReduce path aux body_pat parts_elems_v comm fold_lam red_lam nes parts_names
   runBinder_ $ letBind_ pat $ Op $ Husk hspace red_lam_fot nes ret_ts $ mkBody body_stms $ map Var node_res
 

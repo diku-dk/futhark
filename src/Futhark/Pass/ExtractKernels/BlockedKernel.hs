@@ -147,7 +147,7 @@ huskedOp :: (MonadFreshNames m, HasScope Kernels m) =>
           -> m (Stms Kernels)
 huskedOp pat w ret_ts red_lam_fot nes arrs red = runBinder_ $ do
   red_lam_fot' <- renameLambda red_lam_fot
-  hspace@(HuskSpace _ _ parts parts_elems _ _ _) <- constructHuskSpace arrs w
+  hspace@(HuskSpace _ _ parts parts_elems _ _) <- constructHuskSpace arrs w
   let hscope = scopeOfHuskSpace hspace
       parts_names = map paramName parts
       parts_elems_v = Var parts_elems

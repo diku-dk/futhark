@@ -577,8 +577,8 @@ handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
         getVar _ = fail "Not a variable."
 
 huskSpaceMemInfo :: HuskSpace Kernels -> HuskSpace ExplicitMemory
-huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) =
-  HuskSpace src src_elems parts' parts_elems parts_offset parts_mem' parts_sizes
+huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_offset parts_mem) =
+  HuskSpace src src_elems parts' parts_elems parts_offset parts_mem'
   where parts_mem_names = map paramName parts_mem
         parts' = zipWith huskParamMemInfo parts parts_mem_names
         parts_mem' = zipWith huskParamMemInfo parts_mem parts_mem_names

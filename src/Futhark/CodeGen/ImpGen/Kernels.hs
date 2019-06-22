@@ -79,7 +79,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
     max_part_elems <- dPrimV "max_parts_elems" $ one_val + BinOpExp (SDiv Int32) (src_elems_e - one_val) (Imp.var num_nodes int32)
     dPrimV_ parts_offset $ Imp.var node_id int32 * Imp.var max_part_elems int32
     dPrimV_ parts_elems $ BinOpExp (SMin Int32) (Imp.var max_part_elems int32) (src_elems_e - Imp.var parts_offset int32)
-    mapM_ (allocAndPart husk_func) $ zip4 parts parts_mem parts_sizes src_mem_names
+    mapM_ (allocAndPart husk_func) $ zip3 parts parts_mem src_mem_names
     compileStms (freeIn ses) bnds $ do
       zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
       node_map_res_arrs <- mapM lookupArray node_map_res
@@ -96,7 +96,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
   bparams <- catMaybes <$> mapM (\x -> getParam x <$> lookupType x)
     (S.toList $ freeIn body_code `S.difference` S.fromList (Imp.hfunctionParams husk_func))
   sOp $ Imp.Husk (interm_red ++ interm_red_mem) num_nodes bparams non_param_mem husk_func interm_code body_code red_code
-  where HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes = hspace
+  where HuskSpace src src_elems parts parts_elems parts_offset parts_mem = hspace
         one_val = ValueExp $ IntValue $ Int32Value 1
         zero_val = ValueExp $ IntValue $ Int32Value 0
         red_op_params = lambdaParams red_op
@@ -113,8 +113,8 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
             MemVar{} -> return True
             _ -> return False
         memSize pt s = Imp.LeafExp (Imp.SizeOf pt) int32 * product (map (toExp' int32) (shapeDims s))
-        allocAndPart hfunc (Param part (MemArray t s _ _), Param part_mem _, part_size, src_mem) = do
-          dPrimV_ part_size $ memSize t s
+        allocAndPart hfunc (Param part (MemArray t s _ _), Param part_mem _, src_mem) = do
+          part_size <- dPrimV "partition_size" $ memSize t s
           let part_size_b = Imp.bytes $ Imp.var part_size int32
               offset_bytes = Imp.bytes $ memSize t $ Shape $ map (replaceVar parts_elems parts_offset) $ shapeDims s
           sAllocNamedArray part part_mem t s part_size_b DefaultSpace

@@ -378,10 +378,10 @@ instance Engine.Simplifiable KernelSpace where
 
 simplifyHuskSpace :: Engine.SimplifiableLore lore =>
                      HuskSpace lore -> Engine.SimpleM lore (HuskSpace (Wise lore))
-simplifyHuskSpace (HuskSpace src src_elems parts parts_elems parts_offset parts_mem parts_sizes) =
+simplifyHuskSpace (HuskSpace src src_elems parts parts_elems parts_offset parts_mem) =
   HuskSpace <$> Engine.simplify src <*> Engine.simplify src_elems <*>
   mapM onParam parts <*> pure parts_elems <*> pure parts_offset <*>
-  mapM onParam parts_mem <*> pure parts_sizes
+  mapM onParam parts_mem
   where onParam = Engine.simplifyParam Engine.simplify
 
 instance Engine.Simplifiable SpaceStructure where
