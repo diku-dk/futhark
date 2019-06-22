@@ -18,6 +18,8 @@ documentation](https://futhark-lang.org/docs).
 
 [Installation instructions here.](http://futhark.readthedocs.io/en/latest/installation.html)
 
+[![Packaging status](https://repology.org/badge/vertical-allrepos/futhark.svg)](https://repology.org/project/futhark/versions)
+
 Usage
 =====
 
