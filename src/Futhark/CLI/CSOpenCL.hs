@@ -34,7 +34,7 @@ main = compilerMain () []
             ToLibrary -> return ()
             ToExecutable -> do
               ret <- liftIO $ runProgramWithExitCode "csc"
-                ["-out:" ++ outpath, "-lib:"++mono_libs, "-r:Cloo.clSharp.dll,Mono.Options.dll", cspath, "/unsafe"] ""
+                ["-out:" ++ outpath, "-lib:"++mono_libs, "-r:Cloo.clSharp.dll,Mono.Options.dll", cspath, "/unsafe"] mempty
               case ret of
                 Left err ->
                   externalErrorS $ "Failed to run csc: " ++ show err
