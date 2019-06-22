@@ -14,12 +14,15 @@ steps:
     curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
   displayName: Install Stack
 - script: |
+    export PATH=$HOME/.local/bin:$PATH
     stack --no-terminal --install-ghc test --only-dependencies
   displayName: Build Dependencies
 - script: |
+    export PATH=$HOME/.local/bin:$PATH
     # Build the package, its tests, and its docs and run the tests
     stack test --no-terminal --haddock --no-haddock-deps
   displayName: Run unit tests
 - script: |
-    stack exec -- futhark test --no-terminal tests examples
+    export PATH=$HOME/.local/bin:$PATH
+    futhark test --no-terminal tests examples
   displayName: Run integration tests
