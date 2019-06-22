@@ -85,7 +85,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
       node_map_res_arrs <- mapM lookupArray node_map_res
       zipWithM_ (combineMapResult husk_func) node_map_res_arrs map_pes_mems
     mapM_ ((\x -> emit $ Imp.Free x DefaultSpace) . paramName) parts_mem
-  non_param_mem <- filterM isMem $ S.toList $ freeIn body_code `S.difference` S.fromList (src_mem_names ++ map_pes_mems ++ interm_red_mem)
+  non_param_mem <- filterM isMem $ S.toList $ freeIn body_code `S.difference` S.fromList (map_pes_mems ++ interm_red_mem)
   red_code <- collect $ do
       sFor i Int32 (Imp.var num_nodes int32) $ do
         zipWithM_ (\x y -> copyDWIM x [] y [Imp.var i int32])
