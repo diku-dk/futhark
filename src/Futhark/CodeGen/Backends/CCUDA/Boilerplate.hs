@@ -361,7 +361,7 @@ generateContextFuns cfg kernel_names husk_funcs sizes = do
                          return ctx->error;
                        }|])
   where
-    runHusk (HuskFunction f _ _ : hs) =
+    runHusk (HuskFunction f _ _ _ _ _ : hs) =
       [C.cstm|if (content->husk_id == $int:(baseTag f)) {
         nctx->result = $id:f(ctx, node_id, content->params);
       } else {

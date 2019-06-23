@@ -212,6 +212,60 @@ cudaMemoryType "device" = return [C.cty|typename CUdeviceptr|]
 cudaMemoryType space =
   fail $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
+defineHuskFunction :: HuskFunction -> [Param] -> [VName] -> Code -> GC.CompilerM OpenCL () ()
+defineHuskFunction (HuskFunction name param_struct parts_offset parts_elems node_id src_elems)
+                   params repl_mem body = do
+  husk_params_p <- newVName "husk_params_p"
+  husk_params <- newVName "husk_params"
+  max_parts_elems <- newVName "max_parts_elems"
+  struct_decls <- mapM toStructDecl params
+  body_decls <- mapM (toDeclInit husk_params) params
+  body' <- GC.localNodeBlock [C.cexp|$id:node_id|] $ do
+    mapM_ (replMem husk_params) repl_mem
+    src_elems' <- GC.compileExp src_elems
+    GC.decl [C.cdecl|typename int32_t $id:max_parts_elems = 1 + sdiv32($exp:src_elems' - 1, ctx->cuda.cfg.num_nodes);|]
+    GC.decl [C.cdecl|typename int32_t $id:parts_offset = $id:node_id * $id:max_parts_elems;|]
+    GC.decl [C.cdecl|typename int32_t $id:parts_elems = smin32($id:max_parts_elems, $exp:src_elems' - $id:parts_offset);|]
+    GC.compileCode body
+    mapM_ freeRepl repl_mem
+  GC.libDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
+                                           typename int32_t $id:node_id,
+                                           void *$id:husk_params_p);|]
+  GC.huskDecl [C.cedecl|struct $id:param_struct {
+      $sdecls:struct_decls
+    };|]
+  GC.huskDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
+                                            typename int32_t $id:node_id,
+                                            void *$id:husk_params_p) {
+      struct $id:param_struct $id:husk_params =
+        *(struct $id:param_struct *)$id:husk_params_p;
+      $decls:body_decls
+      $items:body'
+      return 0;
+    }|]
+  where toCType (ScalarParam _ t) = return [C.cty|$ty:(GC.primTypeToCType t)|]
+        toCType (MemParam _ space) = do
+          t <- GC.memToCType space
+          return [C.cty|$ty:t|]
+        toStructDecl p = do
+          t <- toCType p
+          return [C.csdecl|$ty:t $id:(paramName p);|]
+        toDeclInit hparam p = do
+          let pn = paramName p
+          t <- toCType p
+          return $ if pn `elem` repl_mem
+            then [C.cdecl|$ty:t $id:pn;|]
+            else [C.cdecl|$ty:t $id:pn = $id:hparam.$id:pn;|]
+        replMem hparam mem = do
+          allocateCUDABuffer [C.cexp|$id:mem.mem|] [C.cexp|$id:hparam.$id:mem.size|]
+            [C.cexp|$string:(pretty mem)|] "device"
+          peerCopyCUDAMemory
+            [C.cexp|$id:mem.mem|] [C.cexp|0|] [C.cexp|$id:node_id|] (Space "device")
+            [C.cexp|$id:hparam.$id:mem.mem|] [C.cexp|0|] [C.cexp|0|] (Space "device")
+            [C.cexp|$id:hparam.$id:mem.size|]
+        freeRepl mem =
+          deallocateCUDABuffer [C.cexp|$id:mem.mem|] [C.cexp|$string:(pretty mem)|] "device"
+
 callKernel :: GC.OpCompiler OpenCL ()
 callKernel (HostCode c) = GC.compileCode c
 callKernel (GetSize v key) =
@@ -233,7 +287,7 @@ callKernel (DistributeHusk num_nodes bparams repl_mem husk_func interm body red)
   err <- newVName "husk_err"
   params <- newVName "husk_params"
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
-  GC.defineHuskFunction husk_func bparams repl_mem body
+  defineHuskFunction husk_func bparams repl_mem body
   GC.compileCode interm
   GC.decl [C.cdecl|struct $id:(hfunctionParamStruct husk_func) $id:params;|]
   GC.stms [[C.cstm|$id:params.$id:(paramName bparam) = $id:(paramName bparam);|] | bparam <- bparams]

@@ -37,6 +37,7 @@ module Futhark.CodeGen.Backends.GenericC
   , contextFinalInits
   , nodeInits
   , localNodeId
+  , localNodeBlock
   , getNodeId
   , runCompilerM
   , blockScope
@@ -48,6 +49,7 @@ module Futhark.CodeGen.Backends.GenericC
   , compileExpToName
   , compileExpToVName
   , dimSizeToExp
+  , memToCType
   , rawMem
   , unRefAllMem
   , item
@@ -62,12 +64,12 @@ module Futhark.CodeGen.Backends.GenericC
   , debugReport
   , HeaderSection(..)
   , libDecl
+  , huskDecl
   , earlyDecls
   , publicName
   , contextType
   , contextField
   , nodeContextField
-  , defineHuskFunction
 
   -- * Building Blocks
   , primTypeToCType
@@ -2012,54 +2014,3 @@ cproduct :: [C.Exp] -> C.Exp
 cproduct []     = [C.cexp|1|]
 cproduct (e:es) = foldl mult e es
   where mult x y = [C.cexp|$exp:x * $exp:y|]
-
-defineHuskFunction :: HuskFunction -> [Param] -> [VName] -> Code op -> CompilerM op s ()
-defineHuskFunction (HuskFunction name param_struct node_id) params repl_mem body = do
-  husk_params_p <- newVName "husk_params_p"
-  husk_params <- newVName "husk_params"
-  struct_decls <- mapM toStructDecl params
-  body_decls <- mapM (toDeclInit husk_params) params
-  body' <- localNodeBlock [C.cexp|$id:node_id|] $ do
-    mapM_ (replMem husk_params) repl_mem
-    compileCode body
-    mapM_ freeRepl repl_mem
-  libDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
-                                        typename int32_t $id:node_id,
-                                        void *$id:husk_params_p);|]
-  huskDecl [C.cedecl|struct $id:param_struct {
-      $sdecls:struct_decls
-    };|]
-  huskDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
-                                           typename int32_t $id:node_id,
-                                           void *$id:husk_params_p) {
-      struct $id:param_struct $id:husk_params =
-        *(struct $id:param_struct *)$id:husk_params_p;
-      $decls:body_decls
-      $items:body'
-      return 0;
-    }|]
-  where toCType (ScalarParam _ t) = return [C.cty|$ty:(primTypeToCType t)|]
-        toCType (MemParam _ space) = do
-          t <- memToCType space
-          return [C.cty|$ty:t|]
-        toStructDecl p = do
-          t <- toCType p
-          return [C.csdecl|$ty:t $id:(paramName p);|]
-        toDeclInit hparam p = do
-          let pn = paramName p
-          t <- toCType p
-          return $ if pn `elem` repl_mem
-            then [C.cdecl|$ty:t $id:pn;|]
-            else [C.cdecl|$ty:t $id:pn = $id:hparam.$id:pn;|]
-        replMem hparam mem = do
-          alloc <- asks envAllocate
-          peer_copy <- asks envPeerCopy
-          alloc [C.cexp|$id:mem.mem|] [C.cexp|$id:hparam.$id:mem.size|]
-                [C.cexp|$string:(pretty mem)|] "device"
-          peer_copy
-            [C.cexp|$id:mem.mem|] [C.cexp|0|] [C.cexp|$id:node_id|] (Space "device")
-            [C.cexp|$id:hparam.$id:mem.mem|] [C.cexp|0|] [C.cexp|0|] (Space "device")
-            [C.cexp|$id:hparam.$id:mem.size|]
-        freeRepl mem = do
-          dealloc <- asks envDeallocate
-          dealloc [C.cexp|$id:mem.mem|] [C.cexp|$string:(pretty mem)|] "device"

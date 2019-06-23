@@ -63,7 +63,6 @@ opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
 opCompiler dest (Inner (HostOp kernel)) =
   kernelCompiler dest kernel
 opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses))) = do
-  husk_func@(Imp.HuskFunction _ _ node_id) <- newHuskFunction
   i <- newVName "i"
   interm_red <- replicateM (length node_red_res) $ newVName "interm_red"
   interm_red_mem <- replicateM (length node_red_res) $ newVName "interm_red_mem"
@@ -75,10 +74,8 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
   zipWithM_ (\x y -> copyDWIM x [] y []) (map paramName red_acc_params) nes
   interm_code <- collect $
     mapM_ (\(n, m, t) -> allocInterm n m (t `arrayOfRow` Var num_nodes)) $ zip3 interm_red interm_red_mem red_ts
+  husk_func@(Imp.HuskFunction _ _ _ _ node_id _) <- newHuskFunction parts_offset parts_elems src_elems_e
   body_code <- compileHuskFun husk_func $ do
-    max_part_elems <- dPrimV "max_parts_elems" $ one_val + BinOpExp (SDiv Int32) (src_elems_e - one_val) (Imp.var num_nodes int32)
-    dPrimV_ parts_offset $ Imp.var node_id int32 * Imp.var max_part_elems int32
-    dPrimV_ parts_elems $ BinOpExp (SMin Int32) (Imp.var max_part_elems int32) (src_elems_e - Imp.var parts_offset int32)
     mapM_ (allocAndPart husk_func) $ zip3 parts parts_mem src_mem_names
     compileStms (freeIn ses) bnds $ do
       zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
@@ -94,10 +91,9 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
       zipWithM_ (\x y -> copyDWIM x [] y []) (map patElemName red_pes) $
                   map (Var . paramName) red_acc_params
   bparams <- catMaybes <$> mapM (\x -> getParam x <$> lookupType x)
-    (S.toList $ freeIn body_code `S.difference` S.fromList (Imp.hfunctionParams husk_func))
+    (S.toList $ (freeIn body_code <> freeIn src_elems) `S.difference` S.fromList (Imp.hfunctionParams husk_func))
   sOp $ Imp.Husk (interm_red ++ interm_red_mem) num_nodes bparams non_param_mem husk_func interm_code body_code red_code
   where HuskSpace src src_elems parts parts_elems parts_offset parts_mem = hspace
-        one_val = ValueExp $ IntValue $ Int32Value 1
         zero_val = ValueExp $ IntValue $ Int32Value 0
         red_op_params = lambdaParams red_op
         (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
@@ -138,12 +134,15 @@ opCompiler pat e =
   compilerBugS $ "opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
 
-newHuskFunction :: CallKernelGen Imp.HuskFunction
-newHuskFunction =
+newHuskFunction :: VName -> VName -> Imp.Exp -> CallKernelGen Imp.HuskFunction
+newHuskFunction parts_offset parts_elems src_elems =
   Imp.HuskFunction
   <$> newVName "husk"
   <*> newVName "husk_context"
+  <*> pure parts_offset
+  <*> pure parts_elems
   <*> newVName "node_id"
+  <*> pure src_elems
 
 sizeClassWithEntryPoint :: Name -> Imp.SizeClass -> Imp.SizeClass
 sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =

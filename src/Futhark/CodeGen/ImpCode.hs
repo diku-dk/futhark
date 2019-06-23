@@ -155,12 +155,15 @@ data ArrayContents = ArrayValues [PrimValue]
 data HuskFunction = HuskFunction
                   { hfunctionName :: VName,
                     hfunctionParamStruct :: VName,
-                    hfunctionNodeId :: VName
+                    hfunctionPartsOffset :: VName,
+                    hfunctionPartsElems :: VName,
+                    hfunctionNodeId :: VName,
+                    hfunctionSourceElems :: Exp
                   }
                   deriving (Show)
 
 hfunctionParams :: HuskFunction -> [VName]
-hfunctionParams (HuskFunction _ _ node_id) = [node_id]
+hfunctionParams (HuskFunction _ _ parts_offset parts_elems node_id _) = [parts_offset, parts_elems, node_id]
 
 data Code a = Skip
             | Code a :>>: Code a
