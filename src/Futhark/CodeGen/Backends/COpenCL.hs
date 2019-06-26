@@ -39,7 +39,6 @@ compileProg prog = do
                      , GC.opsAllocate = allocateOpenCLBuffer
                      , GC.opsDeallocate = deallocateOpenCLBuffer
                      , GC.opsCopy = copyOpenCLMemory
-                     , GC.opsPeerCopy = peerCopyOpenCLMemory
                      , GC.opsStaticArray = staticOpenCLArray
                      , GC.opsMemoryType = openclMemoryType
                      , GC.opsFatMemory = True
@@ -247,11 +246,6 @@ copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
-peerCopyOpenCLMemory :: GC.PeerCopy OpenCL ()
-peerCopyOpenCLMemory dstmem dstidx _ dstSpace srcmem srcidx _ =
-  -- Currently only allows a single node, so peer copy is just a copy
-  copyOpenCLMemory dstmem dstidx dstSpace srcmem srcidx
-
 openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]
 openclMemoryType space =
@@ -309,16 +303,25 @@ callKernel (GetSizeMax v size_class) =
 callKernel (HostCode c) =
   GC.compileCode c
 
-callKernel (DistributeHusk num_nodes _ _ (HuskFunction _ _ parts_offset parts_elems node_id src_elems)
+callKernel (DistributeHusk num_nodes _ _ (HuskFunction _ _ parts map_res parts_offset parts_elems node_id src_elems)
                            interm body red) = do
   GC.decl [C.cdecl|int $id:node_id = 0;|]
   GC.stm [C.cstm|$id:num_nodes = 1;|]
   GC.compileCode interm
   GC.decl [C.cdecl|typename int32_t $id:parts_offset = 0;|]
+  mapM_ node_decl parts
+  mapM_ node_copy parts
   src_elems' <- GC.compileExp src_elems
   GC.decl [C.cdecl|typename int32_t $id:parts_elems = $exp:src_elems';|]
+  mapM_ src_decl map_res
   GC.compileCode body
+  mapM_ unref parts
+  mapM_ node_copy map_res
   GC.compileCode red
+  where node_decl (NodeCopyInfo part _ _ _) = GC.declMem part (Space "device")
+        src_decl (NodeCopyInfo _ _ _ src) = GC.declMem src (Space "device")
+        node_copy (NodeCopyInfo part _ _ src) = GC.setMem part src (Space "device")
+        unref (NodeCopyInfo part _ _ _) = GC.unRefMem part (Space "device")
 
 callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args

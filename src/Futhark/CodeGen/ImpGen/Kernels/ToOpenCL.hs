@@ -101,9 +101,9 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp target (Husk _ num_nodes bparams repl_mem husk_func interm body red) = do
+onHostOp target (Husk _ num_nodes repl_mem bparams husk_func interm body red) = do
   tell mempty { clHuskFunctions = [husk_func] }
-  onHusk target num_nodes bparams repl_mem husk_func interm body red
+  onHusk target num_nodes repl_mem bparams husk_func interm body red
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
@@ -191,15 +191,15 @@ onKernel target kernel = do
 
 onHusk :: KernelTarget
           -> VName
-          -> [Param]
           -> [VName]
+          -> [Param]
           -> HuskFunction
           -> ImpKernels.Code
           -> ImpKernels.Code
           -> ImpKernels.Code
           -> OnKernelM OpenCL
-onHusk target num_nodes bparams repl_mem husk_func interm body red =
-  DistributeHusk num_nodes bparams repl_mem husk_func
+onHusk target num_nodes repl_mem bparams husk_func interm body red =
+  DistributeHusk num_nodes repl_mem bparams husk_func
     <$> traverse (onHostOp target) interm
     <*> traverse (onHostOp target) body
     <*> traverse (onHostOp target) red
@@ -432,7 +432,6 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsAllocate = cannotAllocate
                      , GenericC.opsDeallocate = cannotDeallocate
                      , GenericC.opsCopy = copyInKernel
-                     , GenericC.opsPeerCopy = peerCopyInKernel
                      , GenericC.opsStaticArray = noStaticArrays
                      , GenericC.opsFatMemory = False
                      }
@@ -539,10 +538,6 @@ inKernelOperations = GenericC.Operations
         copyInKernel _ _ _ _ _ _ _ =
           fail "Cannot bulk copy in kernel."
 
-        peerCopyInKernel :: GenericC.PeerCopy KernelOp KernelRequirements
-        peerCopyInKernel _ _ _ _ _ =
-          fail "Cannot peer copy memory in kernel."
-
         noStaticArrays :: GenericC.StaticArray KernelOp KernelRequirements
         noStaticArrays _ _ _ _ =
           fail "Cannot create static array in kernel."
@@ -568,9 +563,6 @@ typesInCode (Allocate _ (Count e) _) = typesInExp e
 typesInCode Free{} = mempty
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
-typesInCode (PeerCopy _ (Count e1) destpeer _ _ (Count e2) srcpeer _ (Count e3)) =
-  typesInExp e1 <> typesInExp destpeer <> typesInExp e2
-    <> typesInExp srcpeer <> typesInExp e3
 typesInCode (Write _ (Count e1) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e

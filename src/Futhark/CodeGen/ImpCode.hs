@@ -31,6 +31,7 @@ module Futhark.CodeGen.ImpCode
   , Volatility (..)
   , Arg (..)
   , HuskFunction (..)
+  , NodeCopyInfo(..)
   , hfunctionParams
   , var
   , vi32
@@ -155,6 +156,8 @@ data ArrayContents = ArrayValues [PrimValue]
 data HuskFunction = HuskFunction
                   { hfunctionName :: VName,
                     hfunctionParamStruct :: VName,
+                    hfunctionParts :: [NodeCopyInfo],
+                    hfunctionMapRes :: [NodeCopyInfo],
                     hfunctionPartsOffset :: VName,
                     hfunctionPartsElems :: VName,
                     hfunctionNodeId :: VName,
@@ -162,8 +165,19 @@ data HuskFunction = HuskFunction
                   }
                   deriving (Show)
 
+data NodeCopyInfo = NodeCopyInfo
+                      { nodeCopyMem :: VName,
+                        nodeCopySize :: Count Bytes,
+                        nodeCopyOffset :: Count Bytes,
+                        nodeCopySrc :: VName
+                      }
+                      deriving (Show)
+
 hfunctionParams :: HuskFunction -> [VName]
-hfunctionParams (HuskFunction _ _ parts_offset parts_elems node_id _) = [parts_offset, parts_elems, node_id]
+hfunctionParams (HuskFunction _ _ parts map_res parts_offset parts_elems node_id _) =
+  concat [[parts_offset, parts_elems, node_id],
+          map nodeCopyMem parts,
+          map nodeCopySrc map_res]
 
 data Code a = Skip
             | Code a :>>: Code a
@@ -192,9 +206,6 @@ data Code a = Skip
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | PeerCopy VName (Count Bytes) Exp Space VName (Count Bytes) Exp Space (Count Bytes)
-            -- ^ Destination, partition size, source, source size, space.
-            -- Number of partitions depending on scope.
             | Write VName (Count Bytes) PrimType Space Volatility Exp
             | SetScalar VName Exp
             | SetMem VName VName Space
@@ -377,13 +388,6 @@ instance Pretty op => Pretty (Code op) where
             ppr size)
     where ppMemLoc base offset =
             ppr base <+> text "+" <+> ppr offset
-  ppr (PeerCopy dest destoffset destpeer destspace src srcoffset srcpeer srcspace size) =
-    text "peer_memcpy" <>
-    parens (ppMemLoc dest destoffset destpeer <> ppr destspace <> comma </>
-            ppMemLoc src srcoffset srcpeer <> ppr srcspace <> comma </>
-            ppr size)
-    where ppMemLoc base offset peer =
-            ppr base <+> text "+" <+> ppr offset <+> text "@" <+> ppr peer
   ppr (If cond tbranch fbranch) =
     text "if" <+> ppr cond <+> text "then {" </>
     indent 2 (ppr tbranch) </>
@@ -469,8 +473,6 @@ instance Traversable Code where
     pure $ Free name space
   traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
     pure $ Copy dest destoffset destspace src srcoffset srcspace size
-  traverse _ (PeerCopy dest destoffset destpeer destspace src srcoffset srcpeer srcspace size) =
-    pure $ PeerCopy dest destoffset destpeer destspace src srcoffset srcpeer srcspace size
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (SetScalar name val) =
@@ -518,8 +520,6 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn name
   freeIn (Copy dest x _ src y _ n) =
     freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
-  freeIn (PeerCopy dest x dpeer _ src y speer _ n) =
-    freeIn dest <> freeIn x <> freeIn dpeer <> freeIn src <> freeIn y <> freeIn speer <> freeIn n
   freeIn (SetMem x y _) =
     freeIn x <> freeIn y
   freeIn (Write v i _ _ _ e) =

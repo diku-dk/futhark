@@ -1044,11 +1044,11 @@ instance (PrettyLore lore, PP.Pretty inner) => PP.Pretty (HostOp lore inner) whe
 instance Pretty (HuskSpace lore) where
   ppr (HuskSpace src src_elems parts parts_elems parts_offset parts_mem) =
     parens (commasep [text "source data:" <+> ppr src,
-                      text "number of source elements:" <+> ppr src_elems,
+                      text "num source elements:" <+> ppr src_elems,
                       text "partitions ->" <+> ppr (map paramName parts),
                       text "partition memory ->" <+> ppr (map paramName parts_mem),
-                      text "number of partition elements ->" <+> ppr parts_elems,
-                      text "offset of partitions ->" <+> ppr parts_offset])
+                      text "num partition elements ->" <+> ppr parts_elems,
+                      text "partition offset ->" <+> ppr parts_offset])
 
 instance (OpMetrics (Op lore), OpMetrics inner) => OpMetrics (HostOp lore inner) where
   opMetrics GetSize{} = seen "GetSize"

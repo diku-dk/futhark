@@ -64,16 +64,6 @@ setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n)
   src_space' <- setSpace src space src_space
   Copy dest dest_offset' dest_space' src src_offset' src_space' <$>
     setCountSpace space n
-setBodySpace space (PeerCopy dest dest_offset dest_peer dest_space
-                             src src_offset src_peer src_space n) = do
-  dest_offset' <- setCountSpace space dest_offset
-  src_offset' <- setCountSpace space src_offset
-  dest_peer' <- setExpSpace space dest_peer
-  src_peer' <- setExpSpace space src_peer
-  dest_space' <- setSpace dest space dest_space
-  src_space' <- setSpace src space src_space
-  PeerCopy dest dest_offset' dest_peer' dest_space' src src_offset'
-    src_peer' src_space' <$> setCountSpace space n
 setBodySpace space (Write dest dest_offset bt dest_space vol e) = do
   dest_offset' <- setCountSpace space dest_offset
   dest_space' <- setSpace dest space dest_space
@@ -111,11 +101,10 @@ setBodySpace space (Op op) =
   Op <$> setHostOpDefaultSpace space op
 
 setHostOpDefaultSpace :: Space -> HostOp -> SetDefaultSpaceM HostOp
-setHostOpDefaultSpace space (Husk keep_host num_nodes bparams repl_mem husk_func interm body red) =
+setHostOpDefaultSpace space (Husk keep_host num_nodes repl_mem bparams husk_func interm body red) =
   localExclude (S.fromList keep_host) $
-    Husk keep_host num_nodes
+    Husk keep_host num_nodes repl_mem
       <$> mapM (setParamSpace space) bparams
-      <*> pure repl_mem
       <*> pure husk_func
       <*> setBodySpace space interm
       <*> setBodySpace space body

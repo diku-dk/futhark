@@ -23,7 +23,6 @@ module Futhark.CodeGen.Backends.GenericC
   , Allocate
   , Deallocate
   , Copy
-  , PeerCopy
   , StaticArray
 
   -- * Monadic compiler interface
@@ -51,6 +50,11 @@ module Futhark.CodeGen.Backends.GenericC
   , dimSizeToExp
   , memToCType
   , rawMem
+  , declMem
+  , resetMem
+  , setMem
+  , allocMem
+  , unRefMem
   , unRefAllMem
   , item
   , stm
@@ -187,19 +191,12 @@ type Copy op s = C.Exp -> C.Exp -> Space ->
                  C.Exp ->
                  CompilerM op s ()
 
--- | Peer copy memory to the nodes
-type PeerCopy op s = C.Exp -> C.Exp -> C.Exp -> Space ->
-                     C.Exp -> C.Exp -> C.Exp -> Space ->
-                     C.Exp ->
-                     CompilerM op s ()
-
 data Operations op s =
   Operations { opsWriteScalar :: WriteScalar op s
              , opsReadScalar :: ReadScalar op s
              , opsAllocate :: Allocate op s
              , opsDeallocate :: Deallocate op s
              , opsCopy :: Copy op s
-             , opsPeerCopy :: PeerCopy op s
              , opsStaticArray :: StaticArray op s
 
              , opsMemoryType :: MemoryType op s
@@ -219,7 +216,6 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsAllocate  = defAllocate
                                , opsDeallocate  = defDeallocate
                                , opsCopy = defCopy
-                               , opsPeerCopy = defPeerCopy
                                , opsStaticArray = defStaticArray
                                , opsMemoryType = defMemoryType
                                , opsCompiler = defCompiler
@@ -237,8 +233,6 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           copyMemoryDefaultSpace destmem destoffset srcmem srcoffset size
         defCopy _ _ _ _ _ _ _ =
           fail "Cannot copy to or from non-default memory space"
-        defPeerCopy _ _ _ _ _ _ _ _ _ =
-          fail "Cannot peer copy by default operations"
         defStaticArray _ _ _ _ =
           fail "Cannot create static array in non-default memory space"
         defMemoryType _ =
@@ -283,9 +277,6 @@ envDeallocate = opsDeallocate . envOperations
 
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
-
-envPeerCopy :: CompilerEnv op s -> PeerCopy op s
-envPeerCopy = opsPeerCopy . envOperations
 
 envStaticArray :: CompilerEnv op s -> StaticArray op s
 envStaticArray = opsStaticArray . envOperations
@@ -1880,12 +1871,6 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
   join $ copy
     <$> rawMem dest <*> compileExp destoffset <*> pure destspace
     <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
-    <*> compileExp size
-
-compileCode (PeerCopy dest (Count destoffset) destpeer destspace src (Count srcoffset) srcpeer srcspace (Count size)) =
-  join $ asks envPeerCopy
-    <*> rawMem dest <*> compileExp destoffset <*> compileExp destpeer <*> pure destspace
-    <*> rawMem src <*> compileExp srcoffset <*> compileExp srcpeer <*> pure srcspace
     <*> compileExp size
 
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do

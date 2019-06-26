@@ -66,23 +66,23 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
   i <- newVName "i"
   interm_red <- replicateM (length node_red_res) $ newVName "interm_red"
   interm_red_mem <- replicateM (length node_red_res) $ newVName "interm_red_mem"
+  interm_map_mem <- replicateM (length node_map_res) $ newVName "interm_map_mem"
   src_mem_names <- getArrayMemLocs src
   dLParams red_op_params
   num_nodes <- dPrim "num_nodes" int32
   src_elems_e <- toExp src_elems
   map_pes_mems <- getArrayMemLocs (map patElemName map_pes)
+  part_copies <- mapM partInfo $ zip3 parts parts_mem_names src_mem_names
   zipWithM_ (\x y -> copyDWIM x [] y []) (map paramName red_acc_params) nes
   interm_code <- collect $
     mapM_ (\(n, m, t) -> allocInterm n m (t `arrayOfRow` Var num_nodes)) $ zip3 interm_red interm_red_mem red_ts
-  husk_func@(Imp.HuskFunction _ _ _ _ node_id _) <- newHuskFunction parts_offset parts_elems src_elems_e
-  body_code <- compileHuskFun husk_func $ do
-    mapM_ (allocAndPart husk_func) $ zip3 parts parts_mem src_mem_names
-    compileStms (freeIn ses) bnds $ do
-      zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
-      node_map_res_arrs <- mapM lookupArray node_map_res
-      zipWithM_ (combineMapResult husk_func) node_map_res_arrs map_pes_mems
-    mapM_ ((\x -> emit $ Imp.Free x DefaultSpace) . paramName) parts_mem
-  non_param_mem <- filterM isMem $ S.toList $ freeIn body_code `S.difference` S.fromList (map_pes_mems ++ interm_red_mem)
+  (husk_func, body_code) <- compileHuskFun parts interm_map_mem part_copies parts_offset parts_elems src_elems_e
+    (\node_id -> do
+      compileStms (freeIn ses) bnds $ do
+        zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
+        map_res <- map (memLocationName . entryArrayLocation) <$> mapM lookupArray node_map_res
+        zipWithM_ (\x y -> emit $ Imp.SetMem x y (Space "device")) interm_map_mem map_res
+      zipWith3 mapResInfo map_pes_mems interm_map_mem <$> mapM lookupArray node_map_res)
   red_code <- collect $ do
       sFor i Int32 (Imp.var num_nodes int32) $ do
         zipWithM_ (\x y -> copyDWIM x [] y [Imp.var i int32])
@@ -90,11 +90,17 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
         compileBody' red_acc_params $ lambdaBody red_op
       zipWithM_ (\x y -> copyDWIM x [] y []) (map patElemName red_pes) $
                   map (Var . paramName) red_acc_params
+  repl_mem <- filterM isMem $ S.toList $ freeIn body_code `S.difference`
+    S.fromList (concat [map_pes_mems, interm_red_mem, interm_map_mem, parts_mem_names])
   bparams <- catMaybes <$> mapM (\x -> getParam x <$> lookupType x)
-    (S.toList $ (freeIn body_code <> freeIn src_elems) `S.difference` S.fromList (Imp.hfunctionParams husk_func))
-  sOp $ Imp.Husk (interm_red ++ interm_red_mem) num_nodes bparams non_param_mem husk_func interm_code body_code red_code
+    (S.toList $ mconcat [freeIn body_code,
+                         freeIn src_elems,
+                         freeIn parts,
+                         S.fromList $ src_mem_names ++ map_pes_mems]
+      `S.difference` S.fromList (Imp.hfunctionParams husk_func))
+  sOp $ Imp.Husk (interm_red ++ interm_red_mem) num_nodes repl_mem bparams husk_func interm_code body_code red_code
   where HuskSpace src src_elems parts parts_elems parts_offset parts_mem = hspace
-        zero_val = ValueExp $ IntValue $ Int32Value 0
+        parts_mem_names = map paramName parts_mem
         red_op_params = lambdaParams red_op
         (red_acc_params, red_next_params) = splitAt (length nes) red_op_params
         (node_red_res, node_map_res) = splitAt (length nes) $ mapMaybe subExpVar ses
@@ -109,40 +115,25 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
             MemVar{} -> return True
             _ -> return False
         memSize pt s = Imp.LeafExp (Imp.SizeOf pt) int32 * product (map (toExp' int32) (shapeDims s))
-        allocAndPart hfunc (Param part (MemArray t s _ _), Param part_mem _, src_mem) = do
-          part_size <- dPrimV "partition_size" $ memSize t s
-          let part_size_b = Imp.bytes $ Imp.var part_size int32
+        partInfo (Param _ (MemArray t s _ _), part_mem, src_mem) =
+          let part_size_bytes = Imp.bytes $ memSize t s
               offset_bytes = Imp.bytes $ memSize t $ Shape $ map (replaceVar parts_elems parts_offset) $ shapeDims s
-          sAllocNamedArray part part_mem t s part_size_b DefaultSpace
-          emit $ Imp.PeerCopy part_mem (Imp.bytes zero_val) (Imp.var (Imp.hfunctionNodeId hfunc) int32)
-            DefaultSpace src_mem offset_bytes zero_val DefaultSpace part_size_b
-        allocAndPart _ _ = fail "Peer destination is not an array."
+          in return $ Imp.NodeCopyInfo part_mem part_size_bytes offset_bytes src_mem 
+        partInfo _ = fail "Partition destination is not an array."
         allocInterm name mem (Array et size _) =
           sAllocNamedArray name mem et size (Imp.bytes $ memSize et size) DefaultSpace
         allocInterm _ _ _ = fail "Intermediate is not an array."
         getArrayMemLocs arr = map (memLocationName . entryArrayLocation) <$> mapM lookupArray arr
         replaceVar n1 r (Var n2) = if n1 == n2 then Var r else Var n2
         replaceVar _ _ e = e
-        combineMapResult hfunc res_arr@(ArrayEntry res_mem_loc t) pe_mem =
+        mapResInfo pe_mem map_interm_mem res_arr@(ArrayEntry _ t) =
           let res_arr_dims = map dimSizeToSubExp $ entryArrayShape res_arr
-              res_bytes = Imp.bytes $ memSize t $ Shape res_arr_dims
+              res_size_bytes = Imp.bytes $ memSize t $ Shape res_arr_dims
               offset_bytes = Imp.bytes $ memSize t $ Shape $ map (replaceVar parts_elems parts_offset) res_arr_dims
-              res_mem = memLocationName res_mem_loc
-          in emit $ Imp.PeerCopy pe_mem offset_bytes zero_val DefaultSpace res_mem (Imp.bytes zero_val)
-              (Imp.var (Imp.hfunctionNodeId hfunc) int32) DefaultSpace res_bytes
+          in Imp.NodeCopyInfo pe_mem res_size_bytes offset_bytes map_interm_mem
 opCompiler pat e =
   compilerBugS $ "opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
-
-newHuskFunction :: VName -> VName -> Imp.Exp -> CallKernelGen Imp.HuskFunction
-newHuskFunction parts_offset parts_elems src_elems =
-  Imp.HuskFunction
-  <$> newVName "husk"
-  <*> newVName "husk_context"
-  <*> pure parts_offset
-  <*> pure parts_elems
-  <*> newVName "node_id"
-  <*> pure src_elems
 
 sizeClassWithEntryPoint :: Name -> Imp.SizeClass -> Imp.SizeClass
 sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
