@@ -114,8 +114,12 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionArgument = RequiredArgument
                       , optionAction = [Escape "FutharkConfigSetSize(ref Cfg, optarg);"]
                       }
+             , Option { optionLongName = "tuning"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [Escape "FutharkConfigLoadTuning(ref Cfg, optarg);"]
+                      }
              ]
-
 
 callKernel :: CS.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) =
