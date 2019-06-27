@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Loop interchange across multiple dimensions was broken in some cases (#767).
 
+  * The sequential C# backend now generates code that compiles (#772).
+
 ## [0.11.1]
 
 ### Added
