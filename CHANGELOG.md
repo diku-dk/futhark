@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The sequential C# backend now generates code that compiles (#772).
 
+  * The sequential Python backend now generates code that runs (#765).
+
 ## [0.11.1]
 
 ### Added
