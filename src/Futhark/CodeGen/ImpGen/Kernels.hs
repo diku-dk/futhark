@@ -80,8 +80,8 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
     (\node_id -> do
       compileStms (freeIn ses) bnds $ do
         zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
-        map_res <- map (memLocationName . entryArrayLocation) <$> mapM lookupArray node_map_res
-        zipWithM_ (\x y -> emit $ Imp.SetMem x y (Space "device")) interm_map_mem map_res
+        zipWithM_ (\x y -> emit $ Imp.SetMem x y (Space "device")) interm_map_mem =<<
+          getArrayMemLocs node_map_res
       zipWith3 mapResInfo map_pes_mems interm_map_mem <$> mapM lookupArray node_map_res)
   red_code <- collect $ do
       sFor i Int32 (Imp.var num_nodes int32) $ do

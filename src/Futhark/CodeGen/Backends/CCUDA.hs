@@ -246,20 +246,31 @@ defineHuskFunction (HuskFunction name param_struct parts map_res parts_offset pa
           return $ if pn `elem` repl_mem
             then [C.cdecl|$ty:t $id:pn;|]
             else [C.cdecl|$ty:t $id:pn = $id:hparam.$id:pn;|]
+        main_node_select main other = do
+          main' <- GC.blockScope main
+          other' <- GC.blockScope other
+          GC.stm [C.cstm|
+            if ($id:node_id == 0) {
+              $items:main'
+            } else {
+              $items:other'
+            }|]
         replMem hparam mem = do
           GC.resetMem [C.cexp|$id:mem|]
-          GC.allocMem [C.cexp|$id:mem|] [C.cexp|$id:hparam.$id:mem.size|] (Space "device") [C.cstm|return 1;|]
-          GC.stm [C.cstm|CUDA_SUCCEED(
-                  cuMemcpyPeer($id:mem.mem, ctx->cuda.nodes[$id:node_id].cu_ctx, $id:hparam.$id:mem.mem,
-                               ctx->cuda.nodes[0].cu_ctx, $id:hparam.$id:mem.size));|]
+          main_node_select (GC.setMem [C.cexp|$id:mem|] [C.cexp|$id:hparam.$id:mem|] (Space "device")) $ do 
+            GC.allocMem [C.cexp|$id:mem|] [C.cexp|$id:hparam.$id:mem.size|] (Space "device") [C.cstm|return 1;|]
+            GC.stm [C.cstm|CUDA_SUCCEED(
+                    cuMemcpyPeer($id:mem.mem, ctx->cuda.nodes[$id:node_id].cu_ctx, $id:hparam.$id:mem.mem,
+                                ctx->cuda.nodes[0].cu_ctx, $id:hparam.$id:mem.size));|]
         partMem (NodeCopyInfo mem (Count size) (Count offset) src) = do
           size' <- GC.compileExpToName "part_bsize" int32 size
           offset' <- GC.compileExpToName "part_boffset" int32 offset
           GC.declMem mem (Space "device")
-          GC.allocMem [C.cexp|$id:mem|] [C.cexp|$id:size'|] (Space "device") [C.cstm|return 1;|]
-          GC.stm [C.cstm|CUDA_SUCCEED(
-                  cuMemcpyPeer($id:mem.mem, ctx->cuda.nodes[$id:node_id].cu_ctx, $id:src.mem + $id:offset',
-                               ctx->cuda.nodes[0].cu_ctx, $id:size'));|]
+          main_node_select (GC.setMem [C.cexp|$id:mem|] [C.cexp|$id:src|] (Space "device")) $ do 
+            GC.allocMem [C.cexp|$id:mem|] [C.cexp|$id:size'|] (Space "device") [C.cstm|return 1;|]
+            GC.stm [C.cstm|CUDA_SUCCEED(
+                    cuMemcpyPeer($id:mem.mem, ctx->cuda.nodes[$id:node_id].cu_ctx, $id:src.mem + $id:offset',
+                                ctx->cuda.nodes[0].cu_ctx, $id:size'));|]
         declMapRes (NodeCopyInfo _ _ _ src) = GC.declMem src (Space "device")
         combineMapRes (NodeCopyInfo mem (Count size) (Count offset) src) = do
           size' <- GC.compileExpToName "map_res_bsize" int32 size
