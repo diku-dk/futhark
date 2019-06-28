@@ -135,7 +135,12 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
   --
   -- We also check that the merge parameters we work with have
   -- loop-invariant shapes.
+
+  forM_ (zip val $ bodyAliases body) $ \((p, _), als) ->
+    guard $ not $ paramName p `S.member` als
+
   mk_in_place_map <- summariseLoop updates usedInBody resmap val
+
   Just $ do
     in_place_map <- mk_in_place_map
     (val',prebnds,postbnds) <- mkMerges in_place_map
