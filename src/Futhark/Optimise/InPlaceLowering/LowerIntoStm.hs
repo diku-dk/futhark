@@ -136,6 +136,7 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
   -- We also check that the merge parameters we work with have
   -- loop-invariant shapes.
 
+  -- Safety condition (8).
   forM_ (zip val $ bodyAliases body) $ \((p, _), als) ->
     guard $ not $ paramName p `S.member` als
 
