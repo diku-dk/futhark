@@ -19,6 +19,7 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import System.Console.ANSI
 import System.Process.ByteString (readProcessWithExitCode)
+import System.Environment
 import System.Exit
 import System.FilePath
 import System.Console.GetOpt
@@ -98,14 +99,15 @@ optimisedProgramMetrics programs pipeline program =
                    GpuPipeline ->
                      check "--gpu"
   where check opt = do
+          futhark <- io $ maybe getExecutablePath return $ configFuthark programs
           (code, output, err) <-
-            io $ readProcessWithExitCode (configFuthark programs) ["dev", opt, "--metrics", program] ""
+            io $ readProcessWithExitCode futhark ["dev", opt, "--metrics", program] ""
           let output' = T.decodeUtf8 output
           case code of
             ExitSuccess
               | [(m, [])] <- reads $ T.unpack output' -> return m
               | otherwise -> throwError $ "Could not read metrics output:\n" <> output'
-            ExitFailure 127 -> throwError $ progNotFound $ T.pack $ configFuthark programs
+            ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
             ExitFailure _ -> throwError $ T.decodeUtf8 err
 
 testMetrics :: ProgConfig -> FilePath -> StructureTest -> TestM ()
@@ -134,7 +136,8 @@ testWarnings warnings futerr = accErrors_ $ map testWarning warnings
           | otherwise = return ()
 
 runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase mode program testcase progs) =
+runTestCase (TestCase mode program testcase progs) = do
+  futhark <- io $ maybe getExecutablePath return $ configFuthark progs
   case testAction testcase of
 
     CompileTimeFailure expected_error ->
@@ -180,7 +183,6 @@ runTestCase (TestCase mode program testcase progs) =
       unless (mode == Compile || mode == Compiled) $
         context "Interpreting" $
           accErrors_ $ map (runInterpretedEntry futhark program) ios
-  where futhark = configFuthark progs
 
 runInterpretedEntry :: String -> FilePath -> InputOutputs -> TestM()
 runInterpretedEntry futhark program (InputOutputs entry run_cases) =
@@ -476,7 +478,7 @@ defaultConfig = TestConfig { configTestMode = Everything
                            , configPrograms =
                              ProgConfig
                              { configBackend = "c"
-                             , configFuthark = "futhark"
+                             , configFuthark = Nothing
                              , configRunner = ""
                              , configExtraOptions = []
                              , configExtraCompilerOptions = []
@@ -487,7 +489,7 @@ defaultConfig = TestConfig { configTestMode = Everything
 
 data ProgConfig = ProgConfig
                   { configBackend :: String
-                  , configFuthark :: FilePath
+                  , configFuthark :: Maybe FilePath
                   , configRunner :: FilePath
                   , configExtraCompilerOptions :: [String]
                   , configTuning :: Maybe String
@@ -505,7 +507,7 @@ setBackend backend config =
 
 setFuthark :: FilePath -> ProgConfig -> ProgConfig
 setFuthark futhark config =
-  config { configFuthark = futhark }
+  config { configFuthark = Just futhark }
 
 setRunner :: FilePath -> ProgConfig -> ProgConfig
 setRunner runner config =
@@ -548,7 +550,7 @@ commandLineOptions = [
     "Backend used for compilation (defaults to 'c')."
   , Option [] ["futhark"]
     (ReqArg (Right . changeProgConfig . setFuthark) "PROGRAM")
-    "Program to run for subcommands (defaults to 'futhark')."
+    "Program to run for subcommands (defaults to same binary as 'futhark test')."
   , Option [] ["runner"]
     (ReqArg (Right . changeProgConfig . setRunner) "PROGRAM")
     "The program used to run the Futhark-generated programs (defaults to nothing)."
