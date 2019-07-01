@@ -26,6 +26,12 @@ extra-source-files:
 
   - futlib/*.fut
 
+  - docs/Makefile
+  - docs/conf.py
+  - docs/index.rst
+  - docs/man/*.rst
+  - package.yaml
+
 library:
   dependencies:
     - base >= 4 && < 5
