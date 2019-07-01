@@ -19,6 +19,7 @@ import qualified Data.Text.Encoding as T
 import System.Console.GetOpt
 import System.FilePath
 import System.Directory
+import System.Environment
 import System.IO
 import System.IO.Temp
 import System.Timeout
@@ -35,7 +36,7 @@ import Futhark.Util.Options
 
 data BenchOptions = BenchOptions
                    { optBackend :: String
-                   , optFuthark :: String
+                   , optFuthark :: Maybe String
                    , optRunner :: String
                    , optRuns :: Int
                    , optExtraOptions :: [String]
@@ -49,7 +50,7 @@ data BenchOptions = BenchOptions
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "c" "futhark" "" 10 [] Nothing (-1) False
+initialBenchOptions = BenchOptions "c" Nothing "" 10 [] Nothing (-1) False
                       ["nobench", "disable"] [] Nothing (Just "tuning")
 
 -- | The name we use for compiled programs.
@@ -133,6 +134,8 @@ compileBenchmark opts (program, spec) =
         else do
         putStr $ "Compiling " ++ program ++ "...\n"
 
+        futhark <- maybe getExecutablePath return $ optFuthark opts
+
         ref_res <- runExceptT $ ensureReferenceOutput futhark "c" program cases
         case ref_res of
           Left err -> do
@@ -154,7 +157,6 @@ compileBenchmark opts (program, spec) =
     _ ->
       return $ Left Skipped
   where hasRuns (InputOutputs _ runs) = not $ null runs
-        futhark = optFuthark opts
 
 runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO [BenchResult]
 runBenchmark opts (program, cases) = mapM forInputOutputs $ filter relevant cases
@@ -327,9 +329,9 @@ commandLineOptions = [
      "PROGRAM")
     "The compiler used (defaults to 'futhark-c')."
   , Option [] ["futhark"]
-    (ReqArg (\prog -> Right $ \config -> config { optFuthark = prog })
+    (ReqArg (\prog -> Right $ \config -> config { optFuthark = Just prog })
      "PROGRAM")
-    "The binary used for operations (defaults to 'futhark')."
+    "The binary used for operations (defaults to same binary as 'futhark bench')."
   , Option [] ["runner"]
     (ReqArg (\prog -> Right $ \config -> config { optRunner = prog }) "PROGRAM")
     "The program used to run the Futhark-generated programs (defaults to nothing)."

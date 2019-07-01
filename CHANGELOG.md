@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * The `--futhark` option for `futhark bench` and `futhark test` now
+    defaults to the binary being used for the subcommands themselves.
+
 ### Fixed
 
 ## [0.11.2]

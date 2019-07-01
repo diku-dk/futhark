@@ -137,7 +137,8 @@ OPTIONS
 
 --futhark=program
 
-  The program used to perform operations.  Defaults to ``futhark``.
+  The program used to perform operations (eg. compilation).  Defaults
+  to the binary running ``futhark test`` itself.
 
 --no-terminal
   Print each result on a line by itself, without line buffering.
