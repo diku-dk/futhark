@@ -5,25 +5,55 @@
 #
 # https://docs.haskellstack.org/en/stable/azure_ci/
 
-pool:
-  vmImage: ubuntu-16.04
+jobs:
+- job: build
+  pool:
+    vmImage: ubuntu-16.04
 
-steps:
-- script: |
-    mkdir -p ~/.local/bin
-    curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
-  displayName: Install Stack
-- script: |
-    export PATH=$HOME/.local/bin:$PATH
-    stack --no-terminal --install-ghc test --only-dependencies
-  displayName: Build Dependencies
-- script: |
-    export PATH=$HOME/.local/bin:$PATH
-    # Build the package, its tests, and its docs and run the tests
-    stack test --no-terminal --haddock --no-haddock-deps
-  displayName: Run unit tests
-- script: |
-    export PATH=$HOME/.local/bin:$PATH
-    stack install
-    futhark test --no-terminal tests examples
-  displayName: Run integration tests
+  timeoutInMinutes: 120
+
+  steps:
+
+  - script: |
+      sudo apt update
+      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev
+    displayName: Install OS-level dependencies
+
+  - script: |
+      mkdir -p ~/.local/bin
+      curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
+    displayName: Install Stack
+
+  - script: |
+      export PATH=$HOME/.local/bin:$PATH
+      stack --no-terminal --install-ghc test --only-dependencies
+    displayName: Build Haskell dependencies
+
+  - script: |
+      export PATH=$HOME/.local/bin:$PATH
+      stack install --no-terminal
+    displayName: Build and install Futhark compiler
+
+  - script: |
+      export PATH=$HOME/.local/bin:$PATH
+      # Build the package, its tests, and its docs and run the tests
+      stack test --no-terminal --haddock --no-haddock-deps
+    displayName: Run unit tests
+
+  - script: |
+      export PATH=$HOME/.local/bin:$PATH
+      stack install
+      futhark test --no-terminal tests examples
+    displayName: Compile and run tests
+
+  - script: |
+      export PATH=$HOME/.local/bin:$PATH
+      stack install
+      futhark test -C --no-terminal --backend=opencl tests examples --exclude=no_opencl
+    displayName: Compile with backend=opencl
+
+  - script: |
+      export PATH=$HOME/.local/bin:$PATH
+      stack install
+      futhark test -C --no-terminal --backend=cuda tests examples --exclude=no_opencl
+    displayName: Compile with backend=cuda
