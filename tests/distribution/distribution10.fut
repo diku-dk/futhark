@@ -4,7 +4,7 @@
 -- group-level stream.
 --
 -- ==
--- structure distributed { Kernel 2 Kernel/DoLoop 1 }
+-- structure distributed { SegMap 2 SegMap/DoLoop 1 }
 
 let indexOfMax8 ((x,i): (u8,i32)) ((y,j): (u8,i32)): (u8,i32) =
   if x < y then (y,j) else (x,i)

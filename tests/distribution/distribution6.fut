@@ -1,5 +1,5 @@
 -- ==
--- structure distributed { Kernel 1 }
+-- structure distributed { SegMap 1 }
 --
 
 let main(outer_loop_count: i32, a: []i32): [][]i32 =
