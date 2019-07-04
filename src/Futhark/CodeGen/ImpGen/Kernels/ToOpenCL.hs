@@ -28,6 +28,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.MonadFreshNames
+import Futhark.Representation.ExplicitMemory (allScalarMemory)
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty)
 
@@ -408,8 +409,8 @@ inKernelOperations :: GenericC.Operations KernelOp KernelRequirements
 inKernelOperations = GenericC.Operations
                      { GenericC.opsCompiler = kernelOps
                      , GenericC.opsMemoryType = kernelMemoryType
-                     , GenericC.opsWriteScalar = GenericC.writeScalarPointerWithQuals pointerQuals
-                     , GenericC.opsReadScalar = GenericC.readScalarPointerWithQuals pointerQuals
+                     , GenericC.opsWriteScalar = kernelWriteScalar
+                     , GenericC.opsReadScalar = kernelReadScalar
                      , GenericC.opsAllocate = cannotAllocate
                      , GenericC.opsDeallocate = cannotDeallocate
                      , GenericC.opsCopy = copyInKernel
@@ -438,7 +439,7 @@ inKernelOperations = GenericC.Operations
         kernelOps MemFenceGlobal =
           GenericC.stm [C.cstm|mem_fence_global();|]
         kernelOps (PrivateAlloc name size) = do
-          size' <- GenericC.compileExp $ innerExp size
+          size' <- GenericC.compileExp $ unCount size
           name' <- newVName $ pretty name ++ "_backing"
           GenericC.item [C.citem|__private char $id:name'[$exp:size'];|]
           GenericC.stm [C.cstm|$id:name = $id:name';|]
@@ -455,7 +456,7 @@ inKernelOperations = GenericC.Operations
           return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
         doAtomic s old arr ind val op ty = do
-          ind' <- GenericC.compileExp $ innerExp ind
+          ind' <- GenericC.compileExp $ unCount ind
           val' <- GenericC.compileExp val
           cast <- atomicCast s ty
           GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
@@ -485,14 +486,14 @@ inKernelOperations = GenericC.Operations
           doAtomic s old arr ind val "atomic_xor" [C.cty|unsigned int|]
 
         atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
+          ind' <- GenericC.compileExp $ unCount ind
           cmp' <- GenericC.compileExp cmp
           val' <- GenericC.compileExp val
           cast <- atomicCast s [C.cty|int|]
           GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
 
         atomicOps s (AtomicXchg old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
+          ind' <- GenericC.compileExp $ unCount ind
           val' <- GenericC.compileExp val
           cast <- atomicCast s [C.cty|int|]
           GenericC.stm [C.cstm|$id:old = atomic_xchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
@@ -513,9 +514,29 @@ inKernelOperations = GenericC.Operations
         noStaticArrays _ _ _ _ =
           fail "Cannot create static array in kernel."
 
+        kernelMemoryType space
+          | Just t <- M.lookup space allScalarMemory =
+              return $ GenericC.primTypeToCType t
+
         kernelMemoryType space = do
           quals <- pointerQuals space
           return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
+
+        kernelWriteScalar dest _ _ space _ v
+          | space `M.member` allScalarMemory =
+              GenericC.stm [C.cstm|$exp:dest = $exp:v;|]
+
+        kernelWriteScalar dest i elemtype space vol v =
+          GenericC.writeScalarPointerWithQuals pointerQuals
+          dest i elemtype space vol v
+
+        kernelReadScalar dest _ _ space _
+          | space `M.member` allScalarMemory =
+              return dest
+
+        kernelReadScalar dest i elemtype space vol =
+          GenericC.readScalarPointerWithQuals pointerQuals
+          dest i elemtype space vol
 
 --- Checking requirements
 

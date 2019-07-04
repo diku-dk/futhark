@@ -6,7 +6,7 @@
 --
 -- ==
 --
--- structure distributed { Kernel 1 DoLoop 2 }
+-- structure distributed { SegMap 1 DoLoop 2 }
 
 let take(n: i32, a: []f64): []f64 = let (first, rest) = unsafe split (n) a in first
 

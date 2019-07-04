@@ -40,7 +40,7 @@ setValueSpace _ (ScalarValue bt ept v) =
 
 setBodySpace :: Space -> Code op -> Code op
 setBodySpace space (Allocate v e old_space) =
-  Allocate v (setCountSpace space e) $ setSpace space old_space
+  Allocate v (fmap (setExpSpace space) e) $ setSpace space old_space
 setBodySpace space (Free v old_space) =
   Free v $ setSpace space old_space
 setBodySpace space (DeclareMem name old_space) =
@@ -49,13 +49,13 @@ setBodySpace space (DeclareArray name _ t vs) =
   DeclareArray name space t vs
 setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
   Copy
-  dest (setCountSpace space dest_offset) dest_space'
-  src (setCountSpace space src_offset) src_space' $
-  setCountSpace space n
+  dest (fmap (setExpSpace space) dest_offset) dest_space'
+  src (fmap (setExpSpace space) src_offset) src_space' $
+  fmap (setExpSpace space) n
   where dest_space' = setSpace space dest_space
         src_space' = setSpace space src_space
 setBodySpace space (Write dest dest_offset bt dest_space vol e) =
-  Write dest (setCountSpace space dest_offset) bt (setSpace space dest_space)
+  Write dest (fmap (setExpSpace space) dest_offset) bt (setSpace space dest_space)
   vol (setExpSpace space e)
 setBodySpace space (c1 :>>: c2) =
   setBodySpace space c1 :>>: setBodySpace space c2
@@ -85,10 +85,6 @@ setBodySpace space (DebugPrint s v) =
   DebugPrint s $ fmap (fmap (setExpSpace space)) v
 setBodySpace _ (Op op) =
   Op op
-
-setCountSpace :: Space -> Count a -> Count a
-setCountSpace space (Count e) =
-  Count $ setExpSpace space e
 
 setExpSpace :: Space -> Exp -> Exp
 setExpSpace space = fmap setLeafSpace

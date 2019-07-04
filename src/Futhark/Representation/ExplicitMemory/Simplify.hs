@@ -18,8 +18,7 @@ import Futhark.Representation.AST.Syntax
   hiding (Prog, BasicOp, Exp, Body, Stm,
           Pattern, PatElem, Lambda, FunDef, FParam, LParam, RetType)
 import Futhark.Representation.ExplicitMemory
-import Futhark.Representation.Kernels.Simplify
-  (simplifyKernelOp, simplifyKernelExp)
+import Futhark.Representation.Kernels.Simplify (simplifyKernelOp)
 import Futhark.Pass.ExplicitAllocations
   (simplifiable, arraySizeInBytesExp)
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -34,29 +33,25 @@ import Futhark.Optimise.Simplify.Lore
 import Futhark.Util
 
 simpleExplicitMemory :: Simplify.SimpleOps ExplicitMemory
-simpleExplicitMemory = simplifiable (simplifyKernelOp simpleInKernel inKernelEnv)
-
-simpleInKernel :: KernelSpace -> Simplify.SimpleOps InKernel
-simpleInKernel = simplifiable . simplifyKernelExp
+simpleExplicitMemory = simplifiable $ simplifyKernelOp $ const $ return ((), mempty)
 
 simplifyExplicitMemory :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
 simplifyExplicitMemory =
   Simplify.simplifyProg simpleExplicitMemory callKernelRules
-  blockers { Engine.blockHoistBranch = isAlloc }
+  blockers { Engine.blockHoistBranch = blockAllocs }
+  where blockAllocs vtable _ (Let _ _ (Op Alloc{})) =
+          not $ ST.simplifyMemory vtable
+        blockAllocs _ _ _ = False
 
 simplifyStms :: (HasScope ExplicitMemory m, MonadFreshNames m) =>
                 Stms ExplicitMemory -> m (Stms ExplicitMemory)
 simplifyStms =
   Simplify.simplifyStms simpleExplicitMemory callKernelRules blockers
 
-isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
-isAlloc _ (Let _ _ (Op Alloc{})) = True
-isAlloc _ _                      = False
-
 isResultAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
-isResultAlloc usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc{})) =
+isResultAlloc _ usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc{})) =
   UT.isInResult (patElemName bindee) usage
-isResultAlloc _ _ = False
+isResultAlloc _ _ _ = False
 
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent array and memory-block sizes.
@@ -68,39 +63,31 @@ getShapeNames stm =
      case stmExp stm of Op (Alloc size _) -> freeIn size
                         _                 -> mempty
 
-isAlloc0 :: Op lore ~ MemOp op => AST.Stm lore -> Bool
-isAlloc0 (Let _ _ (Op Alloc{})) = True
-isAlloc0 _                      = False
+isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
+isAlloc _ _ (Let _ _ (Op Alloc{})) = True
+isAlloc _ _ _                      = False
 
-inKernelEnv :: Engine.Env InKernel
-inKernelEnv = Engine.emptyEnv inKernelRules blockers
-
-blockers ::  (ExplicitMemorish lore, Op lore ~ MemOp op) =>
-             Simplify.HoistBlockers lore
+blockers :: Simplify.HoistBlockers ExplicitMemory
 blockers = Engine.noExtraHoistBlockers {
     Engine.blockHoistPar    = isAlloc
   , Engine.blockHoistSeq    = isResultAlloc
   , Engine.getArraySizes    = getShapeNames
-  , Engine.isAllocation     = isAlloc0
+  , Engine.isAllocation     = isAlloc mempty mempty
   }
 
 callKernelRules :: RuleBook (Wise ExplicitMemory)
 callKernelRules = standardRules <>
                   ruleBook [RuleBasicOp copyCopyToCopy,
-                            RuleBasicOp removeIdentityCopy] []
-
-inKernelRules :: RuleBook (Wise InKernel)
-inKernelRules = standardRules <>
-                ruleBook [RuleBasicOp copyCopyToCopy,
-                          RuleBasicOp removeIdentityCopy,
-                          RuleIf unExistentialiseMemory] []
+                            RuleBasicOp removeIdentityCopy,
+                            RuleIf unExistentialiseMemory] []
 
 -- | If a branch is returning some existential memory, but the size of
 -- the array is not existential, then we can create a block of the
 -- proper size and always return there.
-unExistentialiseMemory :: TopDownRuleIf (Wise InKernel)
-unExistentialiseMemory _ pat _ (cond, tbranch, fbranch, ifattr)
-  | fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
+unExistentialiseMemory :: TopDownRuleIf (Wise ExplicitMemory)
+unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
+  | ST.simplifyMemory vtable,
+    fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
     not $ null fixable = do
 
       -- Create non-existential memory blocks big enough to hold the

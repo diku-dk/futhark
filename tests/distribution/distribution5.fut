@@ -13,7 +13,7 @@
 -- ==
 --
 -- structure distributed {
---   Kernel 2 SegRed 1
+--   SegMap 2 SegRed 1
 -- }
 
 let main [n][an][bn] (a: [n][an][]i32, b: [n][bn]i32): ([][]i32,[][]i32) =

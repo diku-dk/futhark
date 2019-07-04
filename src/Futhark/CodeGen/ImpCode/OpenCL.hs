@@ -54,7 +54,7 @@ data KernelArg = ValueKArg Exp PrimType
                  -- ^ Pass the value of this scalar expression as argument.
                | MemKArg VName
                  -- ^ Pass this pointer as argument.
-               | SharedMemoryKArg (Count Bytes)
+               | SharedMemoryKArg (Count Bytes Exp)
                  -- ^ Create this much local memory per workgroup.
                deriving (Show)
 

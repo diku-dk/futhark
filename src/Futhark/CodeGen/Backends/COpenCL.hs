@@ -320,7 +320,7 @@ callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
           |]
 
         setKernelArg i (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp $ innerExp num_bytes
+          num_bytes' <- GC.compileExp $ unCount num_bytes
           GC.stm [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, $exp:num_bytes', NULL));
             |]

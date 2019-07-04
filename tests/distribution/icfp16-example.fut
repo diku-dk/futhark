@@ -21,8 +21,8 @@
 --    [662i32, 1090i32, 1728i32]]
 -- }
 -- structure distributed {
---   DoLoop/Kernel 1
---   Kernel 2
+--   DoLoop/SegMap 1
+--   SegMap 2
 --   SegRed 1
 -- }
 

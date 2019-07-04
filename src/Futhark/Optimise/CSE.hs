@@ -42,7 +42,6 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (removeFunDefAliases, Aliases, consumedInStms)
 import qualified Futhark.Representation.Kernels.Kernel as Kernel
-import qualified Futhark.Representation.Kernels.KernelExp as KernelExp
 import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Transform.Substitute
@@ -177,43 +176,22 @@ subCSE m = do
   CSEState _ cse_arrays <- ask
   return $ runReader m $ newCSEState cse_arrays
 
-instance CSEInOp op => CSEInOp (Kernel.HostOp lore op) where
-  cseInOp (Kernel.HostOp op) = Kernel.HostOp <$> cseInOp op
+instance (Attributes lore, Aliased lore,
+          CSEInOp (Op lore), CSEInOp op) => CSEInOp (Kernel.HostOp lore op) where
+  cseInOp (Kernel.SegOp op) = Kernel.SegOp <$> cseInOp op
+  cseInOp (Kernel.OtherOp op) = Kernel.OtherOp <$> cseInOp op
   cseInOp x = return x
 
-instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) => CSEInOp (Kernel.Kernel lore) where
+instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) => CSEInOp (Kernel.SegOp lore) where
   cseInOp = subCSE .
-            Kernel.mapKernelM
-            (Kernel.KernelMapper return cseInLambda
-             (\b -> cseInBody (map (const Observe) $ bodyResult b) b)
-             return return cseInKernelBody)
+            Kernel.mapSegOpM
+            (Kernel.SegOpMapper return cseInLambda cseInKernelBody return)
 
 cseInKernelBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                    Kernel.KernelBody lore -> CSEM lore (Kernel.KernelBody lore)
 cseInKernelBody (Kernel.KernelBody bodyattr bnds res) = do
   Body _ bnds' _ <- cseInBody (map (const Observe) res) $ Body bodyattr bnds []
   return $ Kernel.KernelBody bodyattr bnds' res
-
-instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) => CSEInOp (KernelExp.KernelExp lore) where
-  cseInOp (KernelExp.Combine cspace ts active body) =
-    subCSE $ KernelExp.Combine cspace ts active <$>
-    cseInBody (map (const Observe) ts) body
-  cseInOp (KernelExp.GroupReduce w lam input) =
-    subCSE $ KernelExp.GroupReduce w <$>
-    cseInLambda lam <*> pure input
-  cseInOp (KernelExp.GroupStream w max_chunk lam nes arrs) =
-    subCSE $ KernelExp.GroupStream w max_chunk <$>
-    cseInGroupStreamLambda lam <*> pure nes <*> pure arrs
-  cseInOp op = return op
-
-cseInGroupStreamLambda :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
-                          KernelExp.GroupStreamLambda lore
-                       -> CSEM lore (KernelExp.GroupStreamLambda lore)
-cseInGroupStreamLambda lam = do
-  body' <- cseInBody (map (const Observe) $ KernelExp.groupStreamAccParams lam) $
-           KernelExp.groupStreamLambdaBody lam
-  return lam { KernelExp.groupStreamLambdaBody = body' }
-
 
 instance CSEInOp op => CSEInOp (ExplicitMemory.MemOp op) where
   cseInOp o@ExplicitMemory.Alloc{} = return o

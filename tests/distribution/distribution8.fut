@@ -13,7 +13,7 @@
 --     scan
 --
 -- ==
--- structure distributed { DoLoop/Kernel 1 DoLoop 2 }
+-- structure distributed { DoLoop/SegMap 1 DoLoop 2 }
 
 
 let combineVs(n_row: []f64, vol_row: []f64, dr_row: []f64): []f64 =

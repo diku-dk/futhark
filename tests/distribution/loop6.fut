@@ -1,6 +1,6 @@
 -- Interchange of a loop where some parts are dead after the loop.
 -- ==
--- structure distributed { /Kernel 0 /DoLoop 1 /DoLoop/Kernel 1 }
+-- structure distributed { /SegMap 0 /DoLoop 1 /DoLoop/SegMap 1 }
 
 let main [m] [n] (xss: *[m][n]i32) =
   map (\xs ->
