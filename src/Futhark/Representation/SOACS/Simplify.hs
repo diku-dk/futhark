@@ -10,6 +10,7 @@ module Futhark.Representation.SOACS.Simplify
        , simplifyStms
 
        , simpleSOACS
+       , simplifySOAC
 
        , soacRules
        )
@@ -70,7 +71,8 @@ simplifyStms :: (HasScope SOACS m, MonadFreshNames m) =>
 simplifyStms =
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers
 
-simplifySOAC :: Simplify.SimplifyOp SOACS
+simplifySOAC :: Simplify.SimplifiableLore lore =>
+                Simplify.SimplifyOp lore (SOAC lore)
 simplifySOAC (CmpThreshold what s) = do
   what' <- Engine.simplify what
   return (CmpThreshold what' s, mempty)

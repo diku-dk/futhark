@@ -57,10 +57,7 @@ nonlinearInMemory name m =
     Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just $ rearrangeInverse perm
     Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
-    Just (Let pat _ (Op (HostOp (Kernel _ _ ts _)))) ->
-      nonlinear =<< find ((==name) . patElemName . fst)
-      (zip (patternElements pat) ts)
-    Just (Let pat _ (Op (HostOp (SegMap _ ts _)))) ->
+    Just (Let pat _ (Op (SegOp (SegMap _ _ ts _)))) ->
       nonlinear =<< find ((==name) . patElemName . fst)
       (zip (patternElements pat) ts)
     _ -> Nothing
@@ -71,16 +68,15 @@ nonlinearInMemory name m =
           | otherwise = Nothing
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
-
-transformStm expmap (Let pat aux (Op (HostOp op))) = do
-  let mapper = identityKernelMapper { mapOnKernelKernelBody =
-                                        transformKernelBody expmap (kernelSpace op)
-                                    }
-  op' <- mapKernelM mapper op
-  let stm' = Let pat aux $ Op $ HostOp op'
+transformStm expmap (Let pat aux (Op (SegOp op))) = do
+  let mapper = identitySegOpMapper
+               { mapOnSegOpBody =
+                   transformKernelBody expmap (segLevel op) (segSpace op)
+               }
+  op' <- mapSegOpM mapper op
+  let stm' = Let pat aux $ Op $ SegOp op'
   addStm stm'
   return $ M.fromList [ (name, stm') | name <- patternNames pat ] <> expmap
-
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
   let bnd' = Let pat aux e'
@@ -91,45 +87,41 @@ transform :: ExpMap -> Mapper Kernels Kernels BabysitM
 transform expmap =
   identityMapper { mapOnBody = \scope -> localScope scope . transformBody expmap }
 
-transformKernelBody :: ExpMap -> KernelSpace -> KernelBody InKernel
-                    -> BabysitM (KernelBody InKernel)
-transformKernelBody expmap space kbody = do
+transformKernelBody :: ExpMap -> SegLevel -> SegSpace -> KernelBody Kernels
+                    -> BabysitM (KernelBody Kernels)
+transformKernelBody expmap lvl space kbody = do
   -- Go spelunking for accesses to arrays that are defined outside the
   -- kernel body and where the indices are kernel thread indices.
   scope <- askScope
-  let thread_gids = map fst $ spaceDimensions space
-      thread_local = S.fromList $ spaceGlobalId space : spaceLocalId space : thread_gids
+  let thread_gids = map fst $ unSegSpace space
+      thread_local = S.fromList $ segFlat space : thread_gids
       free_ker_vars = freeIn kbody `S.difference` getKerVariantIds space
+  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32)
+                 (unCount $ segNumGroups lvl) (unCount $ segGroupSize lvl)
   evalStateT (traverseKernelBodyArrayIndexes
               free_ker_vars
               thread_local
-              (castScope scope <> scopeOfKernelSpace space)
-              (ensureCoalescedAccess expmap (spaceDimensions space) num_threads)
+              (scope <> scopeOfSegSpace space)
+              (ensureCoalescedAccess expmap (unSegSpace space) num_threads)
               kbody)
     mempty
-  where num_threads = spaceNumThreads space
-        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ _ (FlatThreadSpace strct)) =
-            let (gids, _) = unzip strct
-            in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids
-        getKerVariantIds (KernelSpace glb_id loc_id grp_id _ _ _ _ (NestedThreadSpace strct)) =
-            let (gids, _, lids, _) = unzip4 strct
-            in  S.fromList $ [glb_id, loc_id, grp_id] ++ gids ++ lids
+  where getKerVariantIds = S.fromList . M.keys . scopeOfSegSpace
 
 type ArrayIndexTransform m =
   Names ->
   (VName -> Bool) ->           -- thread local?
   (VName -> SubExp -> Bool)->  -- variant to a certain gid (given as first param)?
   (SubExp -> Maybe SubExp) ->  -- split substitution?
-  Scope InKernel ->            -- type environment
+  Scope Kernels ->            -- type environment
   VName -> Slice SubExp -> m (Maybe (VName, Slice SubExp))
 
 traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                   Names
                                -> Names
-                               -> Scope InKernel
+                               -> Scope Kernels
                                -> ArrayIndexTransform f
-                               -> KernelBody InKernel
-                               -> f (KernelBody InKernel)
+                               -> KernelBody Kernels
+                               -> f (KernelBody Kernels)
 traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (KernelBody () kstms kres) =
   KernelBody () . stmsFromList <$>
   mapM (onStm (varianceInStms mempty kstms,
@@ -140,11 +132,6 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
           (\body' -> lam { lambdaBody = body' }) <$>
           onBody (variance, szsubst, scope') (lambdaBody lam)
           where scope' = scope <> scopeOfLParams (lambdaParams lam)
-
-        onStreamLambda (variance, szsubst, scope) lam =
-          (\body' -> lam { groupStreamLambdaBody = body' }) <$>
-          onBody (variance, szsubst, scope') (groupStreamLambdaBody lam)
-          where scope' = scope <> scopeOf lam
 
         onBody (variance, szsubst, scope) (Body battr stms bres) = do
           stms' <- stmsFromList <$> mapM (onStm (variance', szsubst', scope')) (stmsToList stms)
@@ -178,15 +165,12 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
         onStm (variance, szsubst, scope) (Let pat attr e) =
           Let pat attr <$> mapExpM (mapper (variance, szsubst, scope)) e
 
-        mapper ctx = identityMapper { mapOnBody = const (onBody ctx)
-                                    , mapOnOp = onOp ctx
-                                    }
+        onOp ctx (OtherOp soac) =
+          OtherOp <$> mapSOACM identitySOACMapper{ mapOnSOACLambda = onLambda ctx } soac
+        onOp _ op = return op
 
-        onOp ctx (GroupReduce w lam input) =
-          GroupReduce w <$> onLambda ctx lam <*> pure input
-        onOp ctx (GroupStream w maxchunk lam accs arrs) =
-           GroupStream w maxchunk <$> onStreamLambda ctx lam <*> pure accs <*> pure arrs
-        onOp _ stm = pure stm
+        mapper ctx = identityMapper { mapOnBody = const (onBody ctx)
+                                    , mapOnOp = onOp ctx }
 
         mkSizeSubsts = fold . fmap mkStmSizeSubst
           where mkStmSizeSubst (Let (Pattern [] [pe]) _ (Op (SplitSpace _ _ _ elems_per_i))) =
@@ -454,10 +438,10 @@ paddedScanReduceInput w stride = do
 
 type VarianceTable = M.Map VName Names
 
-varianceInStms :: VarianceTable -> Stms InKernel -> VarianceTable
+varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
 varianceInStms t = foldl varianceInStm t . stmsToList
 
-varianceInStm :: VarianceTable -> Stm InKernel -> VarianceTable
+varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
 varianceInStm variance bnd =
   foldl' add variance $ patternNames $ stmPattern bnd
   where add variance' v = M.insert v binding_variance variance'

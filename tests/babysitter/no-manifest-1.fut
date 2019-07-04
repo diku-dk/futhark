@@ -9,7 +9,7 @@ let gauss_jordan [nm] (n:i32) (m:i32) (A: *[nm]f32): [nm]f32 =
       -- do more work then the simple access: you will transpose an
       -- entire row to then read one element from it. This should not
       -- fire coalescing!
-      let v1 = A[i]
+      let v1 = unsafe A[i]
       let A' = map (\ind -> let (k, j) = (ind / m, ind % m)
                             in if v1 == 0.0 then unsafe A[k*m+j] else
                             let x = unsafe (A[j] / v1) in

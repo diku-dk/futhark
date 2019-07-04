@@ -161,25 +161,15 @@ optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = const optimiseBody
                                   }
 onKernelOp :: OnOp Kernels
-onKernelOp (HostOp op) = do
-  old_scope <- askScope
-  modifyNameSource $ runForwardingM lowerUpdateInKernel onKernelExp $
-    bindingScope (castScope old_scope <> scopeOfKernelSpace (kernelSpace op)) $ do
-      let mapper = identityKernelMapper { mapOnKernelKernelBody = onKernelBody }
-          onKernelBody kbody = do
-            stms <- deepen $ optimiseStms (stmsToList (kernelBodyStms kbody)) $
-                    mapM_ seenVar $ freeIn $ kernelBodyResult kbody
-            return kbody { kernelBodyStms = stmsFromList stms }
-      HostOp <$> mapKernelM mapper op
+onKernelOp (SegOp op) =
+  bindingScope (scopeOfSegSpace (segSpace op)) $ do
+    let mapper = identitySegOpMapper { mapOnSegOpBody = onKernelBody }
+        onKernelBody kbody = do
+          stms <- deepen $ optimiseStms (stmsToList (kernelBodyStms kbody)) $
+                  mapM_ seenVar $ freeIn $ kernelBodyResult kbody
+          return kbody { kernelBodyStms = stmsFromList stms }
+    SegOp <$> mapSegOpM mapper op
 onKernelOp op = return op
-
-onKernelExp :: OnOp InKernel
-onKernelExp (GroupStream w maxchunk lam accs arrs) = do
-  lam_body <- bindingScope (scopeOf lam) $
-              optimiseBody $ groupStreamLambdaBody lam
-  let lam' = lam { groupStreamLambdaBody = lam_body }
-  return $ GroupStream w maxchunk lam' accs arrs
-onKernelExp op = return op
 
 data Entry lore = Entry { entryNumber :: Int
                         , entryAliases :: Names
