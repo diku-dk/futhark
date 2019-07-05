@@ -1,7 +1,6 @@
--- Missing pattern warning 2.
+-- Missing pattern error 2.
 -- ==
--- input { }
--- output { 5 }
+-- error: Unmatched cases
 
 type foobar = #foo (i32, (i32, i32), i32) | #bar
 type moo    = #moo i32 foobar i32

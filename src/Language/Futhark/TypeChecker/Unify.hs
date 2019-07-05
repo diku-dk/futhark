@@ -277,22 +277,25 @@ equalityType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
 equalityType loc t = do
   unless (orderZero t) $
     typeError loc $
-    "Type \"" ++ pretty t ++ "\" does not support equality."
+    "Type \"" ++ pretty t ++ "\" does not support equality (is higher-order)."
   mapM_ mustBeEquality $ typeVars t
   where mustBeEquality vn = do
           constraints <- getConstraints
           case M.lookup vn constraints of
             Just (Constraint (TypeVar _ _ (TypeName [] vn') []) _) ->
               mustBeEquality vn'
-            Just (Constraint vn_t _)
+            Just (Constraint vn_t loc)
               | not $ orderZero vn_t ->
-                  typeError loc $ "Type \"" ++ pretty t ++
-                  "\" does not support equality."
+                  typeError loc $
+                  unlines ["Type \"" ++ pretty t ++ "\" does not support equality.",
+                           "Constrained to be higher-order at " ++ locStr loc]
               | otherwise -> return ()
             Just (NoConstraint _ _) ->
               modifyConstraints $ M.insert vn (Equality loc)
             Just (Overloaded _ _) ->
               return () -- All primtypes support equality.
+            Just (HasConstrs cs _) ->
+              mapM_ (equalityType loc) $ concat $ M.elems cs
             _ ->
               typeError loc $ "Type " ++ pretty (prettyName vn) ++
               " does not support equality."

@@ -1,5 +1,6 @@
--- Missing pattern warning.
+-- Missing pattern error.
 -- ==
+-- error: Unmatched cases.*\(#foo \(#moo _ #none \)\)
 
 type some 't    = #none | #some t
 type mooboo '^t = #moo t (some i32) | #boo
