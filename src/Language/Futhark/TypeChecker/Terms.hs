@@ -35,7 +35,7 @@ import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import Language.Futhark.TypeChecker.Unify
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
-import Futhark.Util.Pretty hiding (space, bool)
+import Futhark.Util.Pretty hiding (space, bool, group)
 
 --- Uniqueness
 
@@ -1376,8 +1376,9 @@ checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
                        }
 
 unmatched :: (Unmatched Pattern -> Unmatched Pattern) -> [Pattern] -> [Unmatched Pattern]
-unmatched hole (p:ps)
-  | sameStructure labeledCols = do
+unmatched hole orig_ps
+  | p:_ <- orig_ps,
+    sameStructure labeledCols = do
     (i, cols) <- labeledCols
     let hole' = if isConstr p then hole else hole . wildPattern p i
     case sequence cols of
@@ -1385,17 +1386,22 @@ unmatched hole (p:ps)
       Just cs
         | all isPatternLit cs  -> map hole' $ localUnmatched cs
         | otherwise            -> unmatched hole' cs
+  | otherwise = []
 
-  where labeledCols = zip [1..] $ transpose $ map unpackPat (p:ps)
+  where labeledCols = zip [1..] $ transpose $ map unpackPat orig_ps
 
         localUnmatched :: [Pattern] -> [Unmatched Pattern]
         localUnmatched [] = []
         localUnmatched ps'@(p':_) =
           case patternType p'  of
             SumT cs'' ->
+              -- We now know that we are matching a sum type, and thus
+              -- that all patterns ps' are constructors (checked by
+              -- 'all isPatternLit' before this function is called).
               let constrs   = M.keys cs''
                   matched   = nub $ mapMaybe constr ps'
-                  unmatched' = map (UnmatchedConstr . buildConstr (SumT cs'')) $ constrs \\ matched
+                  unmatched' = map (UnmatchedConstr . buildConstr cs'') $
+                               constrs \\ matched
              in case unmatched' of
                 [] ->
                   let constrGroups   = groupBy sameConstr (sortBy compareConstr ps')
@@ -1409,8 +1415,10 @@ unmatched hole (p:ps)
                       wilder i pc s = (`PatternParens` noLoc) <$> wildPattern pc i s
                   in concatMap findUnmatched transposed
                 _ -> unmatched'
-            Prim t
-              | not (any idOrWild ps') ->
+            Prim t | not (any idOrWild ps') ->
+              -- We now know that we are matching a sum type, and thus
+              -- that all patterns ps' are literals (checked by 'all
+              -- isPatternLit' before this function is called).
                 case t of
                   Bool ->
                     let matched = nub $ mapMaybe (pExp >=> bool) $ filter isPatternLit ps'
@@ -1458,8 +1466,9 @@ unmatched hole (p:ps)
         bool (Literal (BoolValue b) _ ) = Just b
         bool _ = Nothing
 
-        buildConstr t@(SumT m) c =
-          let cs     = m M.! c
+        buildConstr m c =
+          let t      = SumT m
+              cs     = m M.! c
               wildCS = map (\ct -> Wildcard (Info ct) noLoc) cs
           in if null wildCS
                then PatternConstr c (Info t) [] noLoc
@@ -1470,8 +1479,6 @@ unmatched hole (p:ps)
           -- The VName tag here will never be used since the value
           -- exists exclusively for printing warnings.
           Id (VName (nameFromString n) (-1)) t noLoc
-
-unmatched _ _ = []
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
