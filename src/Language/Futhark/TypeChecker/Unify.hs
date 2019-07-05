@@ -320,6 +320,8 @@ zeroOrderType loc desc t = do
               locStr ploc ++ " may be a function."
             _ -> return ()
 
+-- In @mustHaveConstr loc c t fs@, the type @t@ must have a
+-- constructor named @c@ that takes arguments of types @ts@.
 mustHaveConstr :: MonadUnify m =>
                   SrcLoc -> Name -> TypeBase dim as -> [TypeBase () ()] -> m ()
 mustHaveConstr loc c t fs = do

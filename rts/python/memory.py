@@ -1,4 +1,4 @@
-# Helper functions dealing with memory blocks.
+# Start of memory.py.
 
 import ctypes as ct
 
@@ -19,14 +19,19 @@ def normaliseArray(x):
 def unwrapArray(x):
   return normaliseArray(x).ctypes.data_as(ct.POINTER(ct.c_byte))
 
-def createArray(x, dim):
-  return np.ctypeslib.as_array(x, shape=dim)
+def createArray(x, shape):
+  # HACK: np.ctypeslib.as_array may fail if the shape contains zeroes,
+  # for some reason.
+  if any(map(lambda x: x == 0, shape)):
+      return np.ndarray(shape, dtype=x._type_)
+  else:
+      return np.ctypeslib.as_array(x, shape=shape)
 
 def indexArray(x, offset, bt, nptype):
-  return nptype(addressOffset(x, offset, bt)[0])
+  return nptype(addressOffset(x, offset*ct.sizeof(bt), bt)[0])
 
 def writeScalarArray(x, offset, v):
-  ct.memmove(ct.addressof(x.contents)+int(offset), ct.addressof(v), ct.sizeof(v))
+  ct.memmove(ct.addressof(x.contents)+int(offset)*ct.sizeof(v), ct.addressof(v), ct.sizeof(v))
 
 # An opaque Futhark value.
 class opaque(object):
@@ -36,3 +41,5 @@ class opaque(object):
 
   def __repr__(self):
     return "<opaque Futhark value of type {}>".format(self.desc)
+
+# End of memory.py.

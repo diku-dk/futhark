@@ -37,7 +37,7 @@ main = compilerMain () []
            ToExecutable -> do
              liftIO $ writeFile cpath $ COpenCL.asExecutable cprog
              ret <- liftIO $ runProgramWithExitCode "gcc"
-                    ([cpath, "-O3", "-std=c99", "-lm", "-o", outpath] ++ extra_options) ""
+                    ([cpath, "-O", "-std=c99", "-lm", "-o", outpath] ++ extra_options) mempty
              case ret of
                Left err ->
                  externalErrorS $ "Failed to run gcc: " ++ show err

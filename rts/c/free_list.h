@@ -1,4 +1,4 @@
-/* Free list management */
+// Start of free_list.h.
 
 /* An entry in the free list.  May be invalid, to avoid having to
    deallocate entries as soon as they are removed.  There is also a
@@ -19,7 +19,7 @@ struct free_list {
 void free_list_init(struct free_list *l) {
   l->capacity = 30; // Picked arbitrarily.
   l->used = 0;
-  l->entries = malloc(sizeof(struct free_list_entry) * l->capacity);
+  l->entries = (struct free_list_entry*) malloc(sizeof(struct free_list_entry) * l->capacity);
   for (int i = 0; i < l->capacity; i++) {
     l->entries[i].valid = 0;
   }
@@ -108,3 +108,4 @@ int free_list_first(struct free_list *l, fl_mem_t *mem_out) {
   return 1;
 }
 
+// End of free_list.h.

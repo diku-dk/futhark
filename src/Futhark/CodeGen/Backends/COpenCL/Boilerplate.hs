@@ -14,7 +14,7 @@ import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.Backends.GenericC as GC
-import Futhark.CodeGen.OpenCL.Kernels
+import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util (chunk, zEncodeString)
 
 generateBoilerplate :: String -> String -> [String] -> [PrimType]
@@ -69,13 +69,13 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {
-                         struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
+                         struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
                          if (cfg == NULL) {
                            return NULL;
                          }
 
                          cfg->num_build_opts = 0;
-                         cfg->build_opts = malloc(sizeof(const char*));
+                         cfg->build_opts = (const char**) malloc(sizeof(const char*));
                          cfg->build_opts[0] = NULL;
                          $stms:size_value_inits
                          opencl_config_init(&cfg->opencl, $int:num_sizes,
@@ -96,7 +96,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt) {
                          cfg->build_opts[cfg->num_build_opts] = opt;
                          cfg->num_build_opts++;
-                         cfg->build_opts = realloc(cfg->build_opts, (cfg->num_build_opts+1) * sizeof(const char*));
+                         cfg->build_opts = (const char**) realloc(cfg->build_opts, (cfg->num_build_opts+1) * sizeof(const char*));
                          cfg->build_opts[cfg->num_build_opts] = NULL;
                        }|])
 
@@ -237,7 +237,6 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           [(0::Int)..] $ M.keys sizes
 
   GC.libDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
-                     typename cl_int error;
                      ctx->opencl.cfg = cfg->opencl;
                      ctx->detail_memory = cfg->opencl.debugging;
                      ctx->debugging = cfg->opencl.debugging;
@@ -264,7 +263,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-                          struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
+                          struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
                           }
@@ -281,7 +280,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   GC.publicDef_ "context_new_with_command_queue" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue);|],
      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue) {
-                          struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
+                          struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
                           }

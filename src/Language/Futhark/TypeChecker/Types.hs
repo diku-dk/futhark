@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker.Types
   , subuniqueOf
 
   , checkForDuplicateNames
+  , checkForDuplicateNamesInType
   , checkTypeParams
 
   , typeExpUses
@@ -256,16 +257,6 @@ checkTypeExp t@(TESum cs loc) = do
       ts_s = (fmap . fmap) (\(_, y, _) -> y) cs_ts_ls
       ls   = (concatMap . fmap) (\(_, _, z) -> z) cs_ts_ls
   return (TESum (M.toList cs') loc, SumT ts_s, foldl' max Unlifted ls)
-
-checkNamedDim :: MonadTypeChecker m =>
-                 SrcLoc -> QualName Name -> m (QualName VName)
-checkNamedDim loc v = do
-  (v', t) <- lookupVar loc v
-  case t of
-    Prim (Signed Int32) -> return v'
-    _                   -> throwError $ TypeError loc $
-                           "Dimension declaration " ++ pretty v ++
-                           " should be of type `i32`."
 
 -- | Check for duplication of names inside a pattern group.  Produces
 -- a description of all names used in the pattern group.

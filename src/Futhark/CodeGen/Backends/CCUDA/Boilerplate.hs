@@ -86,13 +86,13 @@ generateConfigFuns sizes = do
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {
-                         struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
+                         struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
                          if (cfg == NULL) {
                            return NULL;
                          }
 
                          cfg->num_nvrtc_opts = 0;
-                         cfg->nvrtc_opts = malloc(sizeof(const char*));
+                         cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
                          $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
@@ -113,7 +113,7 @@ generateConfigFuns sizes = do
      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt) {
                          cfg->nvrtc_opts[cfg->num_nvrtc_opts] = opt;
                          cfg->num_nvrtc_opts++;
-                         cfg->nvrtc_opts = realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts+1) * sizeof(const char*));
+                         cfg->nvrtc_opts = (const char**) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts+1) * sizeof(const char*));
                          cfg->nvrtc_opts[cfg->num_nvrtc_opts] = NULL;
                        }|])
 
@@ -195,6 +195,26 @@ generateConfigFuns sizes = do
                              return 0;
                            }
                          }
+
+                         if (strcmp(size_name, "default_block_size") == 0) {
+                           cfg->cu_cfg.default_block_size = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_grid_size") == 0) {
+                           cfg->cu_cfg.default_grid_size = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_threshold") == 0) {
+                           cfg->cu_cfg.default_threshold = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_tile_size") == 0) {
+                           cfg->cu_cfg.default_tile_size = size_value;
+                           return 0;
+                         }
                          return 1;
                        }|])
   return cfg
@@ -227,7 +247,7 @@ generateContextFuns cfg kernel_names sizes = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-                          struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
+                          struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
                           }

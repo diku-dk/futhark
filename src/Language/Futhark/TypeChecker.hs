@@ -452,40 +452,49 @@ checkForDuplicateSpecs =
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
-checkTypeBind (TypeBind name ps td doc loc) =
-  checkTypeParams ps $ \ps' -> do
-    (td', l) <- bindingTypeParams ps' $ checkTypeDecl ps' td
+checkTypeBind (TypeBind name tps (TypeDecl t NoInfo) doc loc) =
+  checkTypeParams tps $ \tps' -> do
+    (td', l) <- bindingTypeParams tps' $ do
+      checkForDuplicateNamesInType t
+      (t', st, l) <- checkTypeExp t
+      checkShapeParamUses typeExpUses tps' [t']
+      return (TypeDecl t' $ Info st, l)
     bindSpaced [(Type, name)] $ do
       name' <- checkName Type name loc
       return (mempty { envTypeTable =
-                         M.singleton name' $ TypeAbbr l ps' $ unInfo $ expandedType td',
+                         M.singleton name' $ TypeAbbr l tps' $ unInfo $ expandedType td',
                        envNameMap =
                          M.singleton (Type, name) $ qualName name'
                      },
-              TypeBind name' ps' td' doc loc)
+              TypeBind name' tps' td' doc loc)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
   (fname', tparams', params', maybe_tdecl', rettype, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
-  when (entry && any isTypeParam tparams') $
-    throwError $ TypeError loc "Entry point functions may not be polymorphic."
-
   let (rettype_params, rettype') = unfoldFunType rettype
-  when (entry && (any (not . patternOrderZero) params' ||
-                  any (not . orderZero) rettype_params ||
-                  not (orderZero rettype'))) $
-    throwError $ TypeError loc "Entry point functions may not be higher-order."
+      entry' = Info (foldFunType (map patternStructType params') rettype) <$ entry
 
-  case (entry, filter nastyParameter params') of
-    (True, p : _) -> warn loc $ "Entry point parameter\n\n  " <>
-                     pretty p <> "\n\nwill have an opaque type, so the entry point will likely not be callable."
+  case entry' of
+    Just _
+      | any isTypeParam tparams' ->
+          throwError $ TypeError loc "Entry point functions may not be polymorphic."
+
+      | any (not . patternOrderZero) params'
+        || any (not . orderZero) rettype_params
+        || not (orderZero rettype') ->
+          throwError $ TypeError loc "Entry point functions may not be higher-order."
+
+      | p : _ <- filter nastyParameter params' ->
+          warn loc $ "Entry point parameter\n\n  " <>
+          pretty p <> "\n\nwill have an opaque type, so the entry point will likely not be callable."
+
+      | nastyReturnType maybe_tdecl' rettype ->
+          warn loc $ "Entry point return type\n\n  " <>
+          pretty rettype <> "\n\nwill have an opaque type, so the result will likely not be usable."
+
     _ -> return ()
-
-  when (entry && nastyReturnType maybe_tdecl' rettype) $
-    warn loc $ "Entry point return type\n\n  " <>
-    pretty rettype <> "\n\nwill have an opaque type, so the result will likely not be usable."
 
   return (mempty { envVtable =
                      M.singleton fname' $
@@ -493,7 +502,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                  , envNameMap =
                      M.singleton (Term, fname) $ qualName fname'
                  },
-           ValBind entry fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
+           ValBind entry' fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
 
 nastyType :: Monoid als => TypeBase dim als -> Bool
 nastyType Prim{} = False

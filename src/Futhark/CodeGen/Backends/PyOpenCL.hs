@@ -179,7 +179,7 @@ writeOpenCLScalar mem i bt "device" val = do
               [Arg val, ArgKeyword "dtype" $ Var $ Py.compilePrimType bt]
   Py.stm $ Exp $ Call (Var "cl.enqueue_copy")
     [Arg $ Var "self.queue", Arg mem', Arg nparr,
-     ArgKeyword "device_offset" $ asLong i,
+     ArgKeyword "device_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
      ArgKeyword "is_blocking" $ Var "synchronous"]
 
 writeOpenCLScalar _ _ _ space _ =
@@ -196,7 +196,7 @@ readOpenCLScalar mem i bt "device" = do
   Py.stm $ Assign val' nparr
   Py.stm $ Exp $ Call (Var "cl.enqueue_copy")
     [Arg $ Var "self.queue", Arg val', Arg mem',
-     ArgKeyword "device_offset" $ asLong i,
+     ArgKeyword "device_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
      ArgKeyword "is_blocking" $ Bool True]
   return $ Index val' $ IdxExp $ Integer 0
 
@@ -303,7 +303,7 @@ packArrayOutput _ sid _ _ _ =
   fail $ "Cannot return array from " ++ sid ++ " space."
 
 unpackArrayInput :: Py.EntryInput Imp.OpenCL ()
-unpackArrayInput mem memsize "device" t s dims e = do
+unpackArrayInput mem "device" t s dims e = do
   let type_is_ok =
         BinOp "and"
         (BinOp "in" (Py.simpleCall "type" [e]) (List [Var "np.ndarray", Var "cl.array.Array"]))
@@ -312,14 +312,7 @@ unpackArrayInput mem memsize "device" t s dims e = do
 
   zipWithM_ (Py.unpackDim e) dims [0..]
 
-  case memsize of
-    Imp.VarSize sizevar ->
-      Py.stm $ Assign (Var $ Py.compileName sizevar) $
-      Py.simpleCall "np.int64" [Field e "nbytes"]
-    Imp.ConstSize _ ->
-      return ()
-
-  let memsize' = Py.compileDim memsize
+  let memsize' = Py.simpleCall "np.int64" [Field e "nbytes"]
       pyOpenCLArrayCase =
         [Assign mem_dest $ Field e "data"]
   numpyArrayCase <- Py.collect $ do
@@ -335,7 +328,7 @@ unpackArrayInput mem memsize "device" t s dims e = do
     pyOpenCLArrayCase
     numpyArrayCase
   where mem_dest = Var $ Py.compileName mem
-unpackArrayInput _ _ sid _ _ _ _ =
+unpackArrayInput _ sid _ _ _ _ =
   fail $ "Cannot accept array from " ++ sid ++ " space."
 
 ifNotZeroSize :: PyExp -> PyStmt -> PyStmt

@@ -58,4 +58,4 @@ OPTIONS
 SEE ALSO
 ========
 
-futhark-opencl(1)
+:ref:`futhark-opencl(1)`

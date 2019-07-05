@@ -1,3 +1,5 @@
+// Start of values.h.
+
 //// Text I/O
 
 typedef int (*writer)(FILE*, void*);
@@ -788,7 +790,9 @@ static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, u
   fputc((char)BINARY_FORMAT_VERSION, out);
   fwrite(&rank, sizeof(int8_t), 1, out);
   fputs(elem_type->binname, out);
-  fwrite(shape, sizeof(int64_t), rank, out);
+  if (shape != NULL) {
+    fwrite(shape, sizeof(int64_t), rank, out);
+  }
 
   if (IS_BIG_ENDIAN) {
     for (int64_t i = 0; i < num_elems; i++) {
@@ -831,3 +835,5 @@ static int write_scalar(FILE *out, int write_binary, const struct primtype_info_
     return type->write_str(out, src);
   }
 }
+
+// End of values.h.

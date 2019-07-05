@@ -66,15 +66,14 @@ analyseExp :: (Attributes lore, CanBeRanged (Op lore)) =>
 analyseExp = mapExpM analyse
   where analyse =
           Mapper { mapOnSubExp = return
-                    , mapOnCertificates = return
-                    , mapOnVName = return
-                    , mapOnBody = const analyseBody
-                    , mapOnRetType = return
-                    , mapOnBranchType = return
-                    , mapOnFParam = return
-                    , mapOnLParam = return
-                    , mapOnOp = return . addOpRanges
-                    }
+                 , mapOnVName = return
+                 , mapOnBody = const analyseBody
+                 , mapOnRetType = return
+                 , mapOnBranchType = return
+                 , mapOnFParam = return
+                 , mapOnLParam = return
+                 , mapOnOp = return . addOpRanges
+                 }
 
 analyseLambda :: (Attributes lore, CanBeRanged (Op lore)) =>
                  Lambda lore

@@ -111,7 +111,7 @@
 -- -0.000443f32, 0.000283f32, -0.000084f32, 0.000129f32, 0.000419f32,
 -- -0.000178f32, -0.001124f32, -0.001211f32, 0.000297f32, 0.000291f32,
 -- 0.001163f32, 0.001455f32]]}
--- structure distributed { Kernel 2 SegRed 1 }
+-- structure distributed { SegRed 1 SegMap 2 }
 
 
 let main (nfeatures: i32) (npoints: i32) (nclusters: i32): [nclusters][nfeatures]f32 =
@@ -122,7 +122,7 @@ let main (nfeatures: i32) (npoints: i32) (nclusters: i32): [nclusters][nfeatures
                      map (*100f32) (map f32.sin (map r32 (map (^i) (iota(nfeatures)))))
                   ) (iota(npoints)) in
   stream_red (\acc elem -> map2 (\x y -> map2 (+) x y) acc elem)
-             (\[chunk] (inp: [chunk]([nfeatures]f32,i32)) ->
+             (\chunk (inp: [chunk]([nfeatures]f32,i32)) ->
                  loop acc = replicate nclusters (replicate nfeatures 0.0f32) for i < chunk do
                    let (point, c) = inp[i] in
                    unsafe let acc[c] = map2 (+) (acc[c]) (map (/r32(features_in_cluster[c])) point) in

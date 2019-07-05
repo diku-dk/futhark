@@ -50,4 +50,4 @@ OPTIONS
 SEE ALSO
 ========
 
-futhark-repl(1), futhark-test(1)
+:ref:`futhark-repl(1)`, :ref:`futhark-test(1)`

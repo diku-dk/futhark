@@ -1,5 +1,6 @@
 -- Some tests to try out very large/sparse histograms.
 -- ==
+-- tags { no_python }
 -- compiled input { 10000000 1000 }     output { 499500i32 }
 -- compiled input { 100000000 10000 }   output { 49995000i32 }
 -- compiled input { 100000000 1000000 } output { 1783293664i32 }

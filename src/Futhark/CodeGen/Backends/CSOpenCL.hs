@@ -114,8 +114,12 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionArgument = RequiredArgument
                       , optionAction = [Escape "FutharkConfigSetSize(ref Cfg, optarg);"]
                       }
+             , Option { optionLongName = "tuning"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [Escape "FutharkConfigLoadTuning(ref Cfg, optarg);"]
+                      }
              ]
-
 
 callKernel :: CS.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) =
@@ -129,6 +133,7 @@ callKernel (Imp.GetSizeMax v size_class) =
                      Imp.SizeNumGroups -> "MaxNumGroups"
                      Imp.SizeTile -> "MaxTileSize"
                      Imp.SizeThreshold{} -> "MaxThreshold"
+                     Imp.SizeLocalMemory -> "MaxLocalMemory"
 
 callKernel (Imp.HostCode c) = CS.compileCode c
 
@@ -254,7 +259,8 @@ writeOpenCLScalar mem i bt "device" val = do
     , AssignTyped (PointerT VoidT) (Var ptr) (Just $ Addr $ Var scalar)
     , Exp $ CS.simpleCall "CL10.EnqueueWriteBuffer"
         [ Var "Ctx.OpenCL.Queue", memblockFromMem mem, Bool True
-        ,CS.toIntPtr i,CS.toIntPtr $ CS.sizeOf bt',CS.toIntPtr $ Var ptr
+        , CS.toIntPtr $ BinOp "*" i (CS.sizeOf bt')
+        , CS.toIntPtr $ CS.sizeOf bt',CS.toIntPtr $ Var ptr
     , Integer 0, Null, Null]
     ]
 
@@ -271,7 +277,8 @@ readOpenCLScalar mem i bt "device" = do
     [ CS.assignScalarPointer (Var val) (Var ptr)
     , Exp $ CS.simpleCall "CL10.EnqueueReadBuffer"
       [ Var "Ctx.OpenCL.Queue", memblockFromMem mem , Bool True
-      , CS.toIntPtr i, CS.toIntPtr $ CS.sizeOf bt', CS.toIntPtr $ Var ptr
+      , CS.toIntPtr $ BinOp "*" i (CS.sizeOf bt')
+      , CS.toIntPtr $ CS.sizeOf bt', CS.toIntPtr $ Var ptr
       , Integer 0, Null, Null]
     ]
   return $ Var val
@@ -388,32 +395,26 @@ packArrayOutput _ sid _ _ _ =
   fail $ "Cannot return array from " ++ sid ++ " space."
 
 unpackArrayInput :: CS.EntryInput Imp.OpenCL ()
-unpackArrayInput mem memsize "device" t _ dims e = do
+unpackArrayInput mem "device" t _ dims e = do
   let size = foldr (BinOp "*") (Integer 1) dims'
   let t' = CS.compilePrimTypeToAST t
   let nbytes = BinOp "*" (CS.sizeOf t') size
   zipWithM_ (CS.unpackDim e) dims [0..]
   ptr <- pretty <$> newVName "ptr"
 
-  CS.stm $ compileMemsize memsize nbytes
-
-  let memsize' = CS.compileDim memsize
-
   CS.stm $ CS.getDefaultDecl (Imp.MemParam mem (Imp.Space "device"))
-  allocateOpenCLBuffer mem memsize' "device"
+  allocateOpenCLBuffer mem nbytes "device"
   CS.stm $ Unsafe [Fixed (Var ptr) (Addr $ Index (Field e "Item1") $ IdxExp $ Integer 0)
-      [ ifNotZeroSize memsize' $
+      [ ifNotZeroSize nbytes $
         Exp $ CS.simpleCall "CL10.EnqueueWriteBuffer"
         [ Var "Ctx.OpenCL.Queue", memblockFromMem mem, Bool True
-        , CS.toIntPtr (Integer 0), CS.toIntPtr memsize', CS.toIntPtr (Var ptr)
+        , CS.toIntPtr (Integer 0), CS.toIntPtr nbytes, CS.toIntPtr (Var ptr)
         , Integer 0, Null, Null]
       ]]
 
   where dims' = map CS.compileDim dims
-        compileMemsize (Imp.VarSize v) nbytes = Assign (Var $ CS.compileName v) nbytes
-        compileMemsize _ _                    = Pass
 
-unpackArrayInput _ _ sid _ _ _ _ =
+unpackArrayInput _ sid _ _ _ _ =
   fail $ "Cannot accept array from " ++ sid ++ " space."
 
 futharkSyncContext :: CSStmt

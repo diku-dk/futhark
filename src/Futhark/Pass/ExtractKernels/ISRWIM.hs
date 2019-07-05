@@ -54,7 +54,7 @@ iswim res_pat w scan_fun scan_input
                   patternValueIdents res_pat
 
       addStm $ Let res_pat' (StmAux map_cs ()) $ Op $ Screma map_w
-        (ScremaForm (nilFn, mempty) (mempty, nilFn, mempty) map_fun') map_arrs'
+        (ScremaForm (nilFn, mempty) [] map_fun') map_arrs'
 
       forM_ (zip (patternValueIdents res_pat)
                  (patternValueIdents res_pat')) $ \(to, from) -> do
@@ -100,7 +100,7 @@ irwim res_pat w comm red_fun red_input
       map_body <-
         case irwim red_pat w comm red_fun' red_input' of
           Nothing -> do
-            reduce_soac <- reduceSOAC comm red_fun' $ map fst red_input'
+            reduce_soac <- reduceSOAC [Reduce comm red_fun' $ map fst red_input']
             return $ mkBody (oneStm $ Let red_pat (defAux ()) $
                               Op $ Screma w reduce_soac $ map snd red_input') $
               map Var $ patternNames map_pat

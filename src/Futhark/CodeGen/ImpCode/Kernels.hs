@@ -56,8 +56,6 @@ data HostOp = CallKernel Kernel
 -- | A generic kernel containing arbitrary kernel code.
 data Kernel = Kernel
               { kernelBody :: Imp.Code KernelOp
-              , kernelLocalMemory :: [LocalMemoryUse]
-              -- ^ The local memory used by this kernel.
 
               , kernelUses :: [KernelUse]
                 -- ^ The host variables referenced by the kernel.
@@ -71,7 +69,7 @@ data Kernel = Kernel
             deriving (Show)
 
 -- ^ In-kernel name and per-workgroup size in bytes.
-type LocalMemoryUse = (VName, Either MemSize KernelConstExp)
+type LocalMemoryUse = (VName, Either (Count Bytes Exp) KernelConstExp)
 
 data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName
@@ -87,7 +85,7 @@ getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
         sameKernel _ _ = False
 
 -- | Get an atomic operator corresponding to a binary operator.
-atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Bytes -> Exp -> AtomicOp)
+atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Elements Imp.Exp -> Exp -> AtomicOp)
 atomicBinOp = flip lookup [ (Add Int32, AtomicAdd)
                           , (SMax Int32, AtomicSMax)
                           , (SMin Int32, AtomicSMin)
@@ -140,15 +138,8 @@ instance Pretty Kernel where
     text "kernel" <+> brace
     (text "groups" <+> brace (ppr $ kernelNumGroups kernel) </>
      text "group_size" <+> brace (ppr $ kernelGroupSize kernel) </>
-     text "local_memory" <+> brace (commasep $
-                                    map ppLocalMemory $
-                                    kernelLocalMemory kernel) </>
      text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
      text "body" <+> brace (ppr $ kernelBody kernel))
-    where ppLocalMemory (name, Left size) =
-            ppr name <+> parens (ppr size <+> text "bytes")
-          ppLocalMemory (name, Right size) =
-            ppr name <+> parens (ppr size <+> text "bytes (const)")
 
 data KernelOp = GetGroupId VName Int
               | GetLocalId VName Int
@@ -156,24 +147,27 @@ data KernelOp = GetGroupId VName Int
               | GetGlobalSize VName Int
               | GetGlobalId VName Int
               | GetLockstepWidth VName
-              | Atomic AtomicOp
+              | Atomic Space AtomicOp
               | LocalBarrier
               | GlobalBarrier
-              | MemFence
+              | MemFenceLocal
+              | MemFenceGlobal
+              | PrivateAlloc VName (Count Bytes Imp.Exp)
+              | LocalAlloc VName (Either (Count Bytes Imp.Exp) KernelConstExp)
               deriving (Show)
 
 -- Atomic operations return the value stored before the update.
 -- This value is stored in the first VName.
-data AtomicOp = AtomicAdd VName VName (Count Bytes) Exp
-              | AtomicSMax VName VName (Count Bytes) Exp
-              | AtomicSMin VName VName (Count Bytes) Exp
-              | AtomicUMax VName VName (Count Bytes) Exp
-              | AtomicUMin VName VName (Count Bytes) Exp
-              | AtomicAnd VName VName (Count Bytes) Exp
-              | AtomicOr VName VName (Count Bytes) Exp
-              | AtomicXor VName VName (Count Bytes) Exp
-              | AtomicCmpXchg VName VName (Count Bytes) Exp Exp
-              | AtomicXchg VName VName (Count Bytes) Exp
+data AtomicOp = AtomicAdd VName VName (Count Elements Imp.Exp) Exp
+              | AtomicSMax VName VName (Count Elements Imp.Exp) Exp
+              | AtomicSMin VName VName (Count Elements Imp.Exp) Exp
+              | AtomicUMax VName VName (Count Elements Imp.Exp) Exp
+              | AtomicUMin VName VName (Count Elements Imp.Exp) Exp
+              | AtomicAnd VName VName (Count Elements Imp.Exp) Exp
+              | AtomicOr VName VName (Count Elements Imp.Exp) Exp
+              | AtomicXor VName VName (Count Elements Imp.Exp) Exp
+              | AtomicCmpXchg VName VName (Count Elements Imp.Exp) Exp Exp
+              | AtomicXchg VName VName (Count Elements Imp.Exp) Exp
               deriving (Show)
 
 instance FreeIn AtomicOp where
@@ -211,41 +205,49 @@ instance Pretty KernelOp where
     text "local_barrier()"
   ppr GlobalBarrier =
     text "global_barrier()"
-  ppr MemFence =
-    text "mem_fence()"
-  ppr (Atomic (AtomicAdd old arr ind x)) =
+  ppr MemFenceLocal =
+    text "mem_fence_local()"
+  ppr MemFenceGlobal =
+    text "mem_fence_global()"
+  ppr (PrivateAlloc name size) =
+    ppr name <+> equals <+> text "private_alloc" <> parens (ppr size)
+  ppr (LocalAlloc name size) =
+    ppr name <+> equals <+> text "local_alloc" <>
+    parens (either ppr constCase size)
+    where constCase e = text "(constant)" <+> ppr e
+  ppr (Atomic _ (AtomicAdd old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_add" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
-  ppr (Atomic (AtomicSMax old arr ind x)) =
+  ppr (Atomic _ (AtomicSMax old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_smax" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
-  ppr (Atomic (AtomicSMin old arr ind x)) =
+  ppr (Atomic _ (AtomicSMin old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_smin" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
-  ppr (Atomic (AtomicUMax old arr ind x)) =
+  ppr (Atomic _ (AtomicUMax old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_umax" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
-  ppr (Atomic (AtomicUMin old arr ind x)) =
+  ppr (Atomic _ (AtomicUMin old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_umin" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
-  ppr (Atomic (AtomicAnd old arr ind x)) =
+  ppr (Atomic _ (AtomicAnd old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_and" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
-  ppr (Atomic (AtomicOr old arr ind x)) =
+  ppr (Atomic _ (AtomicOr old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_or" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
-  ppr (Atomic (AtomicXor old arr ind x)) =
+  ppr (Atomic _ (AtomicXor old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_xor" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
-  ppr (Atomic (AtomicCmpXchg old arr ind x y)) =
+  ppr (Atomic _ (AtomicCmpXchg old arr ind x y)) =
     ppr old <+> text "<-" <+> text "atomic_cmp_xchg" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x, ppr y])
-  ppr (Atomic (AtomicXchg old arr ind x)) =
+  ppr (Atomic _ (AtomicXchg old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_xchg" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
 
 instance FreeIn KernelOp where
-  freeIn (Atomic op) = freeIn op
+  freeIn (Atomic _ op) = freeIn op
   freeIn _ = mempty
 
 brace :: Doc -> Doc

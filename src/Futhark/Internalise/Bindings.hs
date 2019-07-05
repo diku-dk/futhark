@@ -53,15 +53,14 @@ bindingParams tparams params m = do
     I.localScope (I.scopeOfFParams $ shape_params++concat valueparams) $
     substitutingVars shape_subst $ m cm shape_params $ chunks num_param_ts (concat valueparams)
 
-bindingLambdaParams :: [E.TypeParam] -> [E.Pattern] -> [I.Type]
+bindingLambdaParams :: [E.Pattern] -> [I.Type]
                     -> (ConstParams -> [I.LParam] -> InternaliseM a)
                     -> InternaliseM a
-bindingLambdaParams tparams params ts m = do
+bindingLambdaParams params ts m = do
   (params_idents, params_types) <-
     unzip . concat <$> mapM flattenPattern params
-  let bound = boundInTypes tparams
-      param_names = M.fromList [ (E.identName x, y) | (x,y) <- params_idents ]
-  (params_ts, cm) <- internaliseParamTypes bound param_names params_types
+  let param_names = M.fromList [ (E.identName x, y) | (x,y) <- params_idents ]
+  (params_ts, cm) <- internaliseParamTypes mempty param_names params_types
 
   let ascript_substs = lambdaShapeSubstitutions (concat params_ts) ts
 
@@ -144,24 +143,23 @@ flattenPattern = flattenPattern'
 
 type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
 
-stmPattern :: [E.TypeParam] -> E.Pattern -> [I.ExtType]
+stmPattern :: E.Pattern -> [I.ExtType]
            -> (ConstParams -> [VName] -> MatchPattern -> InternaliseM a)
            -> InternaliseM a
-stmPattern tparams pat ts m = do
+stmPattern pat ts m = do
   (pat', pat_types) <- unzip <$> flattenPattern pat
   (ts',_) <- instantiateShapes' ts
-  (pat_types', cm) <- internaliseParamTypes (boundInTypes tparams) mempty pat_types
+  (pat_types', cm) <- internaliseParamTypes mempty mempty pat_types
   let pat_types'' = map I.fromDecl $ concat pat_types'
-      tparam_names = S.fromList $ map E.typeParamName tparams
   let addShapeStms l =
-        m cm (map I.paramName $ concat l) (matchPattern tparam_names pat_types'')
+        m cm (map I.paramName $ concat l) (matchPattern pat_types'')
   bindingFlatPattern pat' ts' addShapeStms
 
-matchPattern :: S.Set VName -> [I.ExtType] -> MatchPattern
-matchPattern tparam_names exts loc ses =
+matchPattern :: [I.ExtType] -> MatchPattern
+matchPattern exts loc ses =
   forM (zip exts ses) $ \(et, se) -> do
   se_t <- I.subExpType se
-  et' <- unExistentialise tparam_names et se_t
+  et' <- unExistentialise mempty et se_t
   ensureExtShape asserting (I.ErrorMsg [I.ErrorString "value cannot match pattern"])
     loc et' "correct_shape" se
 

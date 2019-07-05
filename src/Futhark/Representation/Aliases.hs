@@ -246,7 +246,7 @@ mkAliasedBody :: (Attributes lore, CanBeAliased (Op lore)) =>
 mkAliasedBody innerlore bnds res =
   Body (mkBodyAliases bnds res, innerlore) bnds res
 
-mkPatternAliases :: (Attributes lore, Aliased lore, Typed attr) =>
+mkPatternAliases :: (Aliased lore, Typed attr) =>
                     PatternT attr -> Exp lore
                  -> ([PatElemT (VarAliases, attr)],
                      [PatElemT (VarAliases, attr)])
@@ -265,14 +265,13 @@ mkPatternAliases pat e =
           where names' =
                   case patElemType bindee of
                     Array {} -> names
-                    Mem _ _  -> names
+                    Mem _    -> names
                     _        -> mempty
 
-mkContextAliases :: (Attributes lore, Aliased lore) =>
-                    PatternT attr -> Exp lore
-                 -> [Names]
+mkContextAliases :: Aliased lore =>
+                    PatternT attr -> Exp lore -> [Names]
 mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
-  let ctx = loopResultContext (map fst ctxmerge) (map fst valmerge)
+  let ctx = map fst ctxmerge
       init_als = zip mergenames $ map (subExpAliases . snd) $ ctxmerge ++ valmerge
       expand als = als <> S.unions (mapMaybe (`lookup` init_als) (S.toList als))
       merge_als = zip mergenames $

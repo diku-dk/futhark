@@ -10,7 +10,7 @@ import qualified Data.Map as M
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Index, If)
 import Futhark.CodeGen.Backends.GenericCSharp as CS
 import Futhark.CodeGen.Backends.GenericCSharp.AST as AST
-import Futhark.CodeGen.OpenCL.Kernels
+import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util (zEncodeString)
 
 intT, longT, stringT, intArrayT, stringArrayT :: CSType

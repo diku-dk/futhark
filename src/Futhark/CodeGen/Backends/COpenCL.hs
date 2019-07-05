@@ -29,7 +29,7 @@ compileProg prog = do
     Right (Program opencl_code opencl_prelude kernel_names types sizes prog') ->
       Right <$> GC.compileProg operations
                 (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes)
-                include_opencl_h [Space "device", Space "local", DefaultSpace]
+                include_opencl_h [Space "device", DefaultSpace]
                 cliOptions prog'
   where operations :: GC.Operations OpenCL ()
         operations = GC.Operations
@@ -142,7 +142,6 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|{
-                          char *fname = optarg;
                           char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
                                                                     futhark_context_config_set_size);
                           if (ret != NULL) {
@@ -167,7 +166,7 @@ writeOpenCLScalar mem i t "device" _ val = do
   GC.stm [C.cstm|{$item:decl
                   OPENCL_SUCCEED_OR_RETURN(
                     clEnqueueWriteBuffer(ctx->opencl.queue, $exp:mem, $exp:blocking,
-                                         $exp:i, sizeof($ty:t),
+                                         $exp:i * sizeof($ty:t), sizeof($ty:t),
                                          &$id:val',
                                          0, NULL, NULL));
                 }|]
@@ -180,7 +179,7 @@ readOpenCLScalar mem i t "device" _ = do
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(
                    clEnqueueReadBuffer(ctx->opencl.queue, $exp:mem, CL_TRUE,
-                                       $exp:i, sizeof($ty:t),
+                                       $exp:i * sizeof($ty:t), sizeof($ty:t),
                                        &$id:val,
                                        0, NULL, NULL));
               |]
@@ -191,16 +190,12 @@ readOpenCLScalar _ _ _ space _ =
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
 allocateOpenCLBuffer mem size tag "device" =
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, $exp:size, $exp:tag, &$exp:mem));|]
-allocateOpenCLBuffer _ _ _ "local" =
-  return () -- Hack - these memory blocks do not actually exist.
 allocateOpenCLBuffer _ _ _ space =
-  fail $ "Cannot allocate in '" ++ space ++ "' space"
+  fail $ "Cannot allocate in '" ++ space ++ "' space."
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
 deallocateOpenCLBuffer mem tag "device" =
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_free(&ctx->opencl, $exp:mem, $exp:tag));|]
-deallocateOpenCLBuffer _ _ "local" =
-  return () -- Hack - these memory blocks do not actually exist.
 deallocateOpenCLBuffer _ _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' space"
 
@@ -252,7 +247,6 @@ copyOpenCLMemory _ _ destspace _ _ srcspace _ =
 
 openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]
-openclMemoryType "local" = pure [C.cty|unsigned char|] -- dummy type
 openclMemoryType space =
   fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
 
@@ -326,7 +320,7 @@ callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
           |]
 
         setKernelArg i (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp $ innerExp num_bytes
+          num_bytes' <- GC.compileExp $ unCount num_bytes
           GC.stm [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, $exp:num_bytes', NULL));
             |]

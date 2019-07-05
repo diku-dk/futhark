@@ -3,7 +3,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Analysis.SymbolTable
-  ( SymbolTable (bindings, loopDepth, availableAtClosestLoop)
+  ( SymbolTable (bindings, loopDepth, availableAtClosestLoop, simplifyMemory)
   , empty
   , fromScope
   , toScope
@@ -51,6 +51,8 @@ module Futhark.Analysis.SymbolTable
     -- * Misc
   , enclosingLoopVars
   , rangesRep
+  , hideIf
+  , hideCertified
   )
   where
 
@@ -84,6 +86,10 @@ data SymbolTable lore = SymbolTable {
   , availableAtClosestLoop :: Names
     -- ^ Which names are available just before the most enclosing
     -- loop?
+  , simplifyMemory :: Bool
+    -- ^ We are in a situation where we should
+    -- simplify/hoist/un-existentialise memory as much as possible -
+    -- typically, inside a kernel.
   }
 
 instance Semigroup (SymbolTable lore) where
@@ -92,13 +98,14 @@ instance Semigroup (SymbolTable lore) where
                 , bindings = bindings table1 <> bindings table2
                 , availableAtClosestLoop = availableAtClosestLoop table1 <>
                                            availableAtClosestLoop table2
+                , simplifyMemory = simplifyMemory table1 || simplifyMemory table2
                 }
 
 instance Monoid (SymbolTable lore) where
   mempty = empty
 
 empty :: SymbolTable lore
-empty = SymbolTable 0 M.empty mempty
+empty = SymbolTable 0 M.empty mempty False
 
 fromScope :: Attributes lore => Scope lore -> SymbolTable lore
 fromScope = M.foldlWithKey' insertFreeVar' empty
@@ -144,8 +151,8 @@ genCastSymbolTable :: (LoopVarEntry fromlore -> Entry tolore)
                    -> (FreeVarEntry fromlore -> Entry tolore)
                    -> SymbolTable fromlore
                    -> SymbolTable tolore
-genCastSymbolTable loopVar letBound fParam lParam freeVar (SymbolTable depth entries loopfree) =
-  SymbolTable depth (M.map onEntry entries) loopfree
+genCastSymbolTable loopVar letBound fParam lParam freeVar vtable =
+  vtable { bindings = M.map onEntry $ bindings vtable }
   where onEntry (LoopVar entry) = loopVar entry
         onEntry (LetBound entry) = letBound entry
         onEntry (FParam entry) = fParam entry
@@ -566,7 +573,7 @@ insertFParam :: Attributes lore =>
                 AST.FParam lore
              -> SymbolTable lore
              -> SymbolTable lore
-insertFParam fparam = insertEntry name entry
+insertFParam fparam = flip (foldr (`isAtLeast` 0)) sizes . insertEntry name entry
   where name = AST.paramName fparam
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
                                    , fparamAttr = AST.paramAttr fparam
@@ -574,12 +581,13 @@ insertFParam fparam = insertEntry name entry
                                    , fparamStmDepth = 0
                                    , fparamConsumed = False
                                    }
+        sizes = subExpVars $ arrayDims $ AST.paramType fparam
 
 insertFParams :: Attributes lore =>
                  [AST.FParam lore]
               -> SymbolTable lore
               -> SymbolTable lore
-insertFParams fparams symtable = foldr insertFParam symtable fparams
+insertFParams fparams symtable = foldl' (flip insertFParam) symtable fparams
 
 insertLParamWithRange :: Attributes lore =>
                          LParam lore -> ScalExpRange -> IndexArray -> SymbolTable lore
@@ -793,3 +801,21 @@ alreadyTheBound new_bound b1 (Just cur_bound)
 isAtLeast :: VName -> Int -> SymbolTable lore -> SymbolTable lore
 isAtLeast name x =
   setLowerBound name $ fromIntegral x
+
+-- | Hide definitions of those entries that satisfy some predicate.
+hideIf :: (Entry lore -> Bool) -> SymbolTable lore -> SymbolTable lore
+hideIf hide vtable = vtable { bindings = M.map maybeHide $ bindings vtable }
+  where maybeHide entry
+          | hide entry = FreeVar FreeVarEntry { freeVarAttr = entryInfo entry
+                                              , freeVarStmDepth = bindingDepth entry
+                                              , freeVarRange = valueRange entry
+                                              , freeVarIndex = \_ _ -> Nothing
+                                              , freeVarConsumed = consumed entry
+                                              }
+          | otherwise = entry
+
+-- | Hide these definitions, if they are protected by certificates in
+-- the set of names.
+hideCertified :: Names -> SymbolTable lore -> SymbolTable lore
+hideCertified to_hide = hideIf $ maybe False hide . entryStm
+  where hide = any (`S.member` to_hide) . unCertificates . stmCerts

@@ -12,6 +12,7 @@ module Futhark.Internalise (internaliseProg) where
 
 import Control.Monad.State
 import Control.Monad.Reader
+import Data.Bitraversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List
@@ -93,7 +94,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
       internaliseBody body >>=
         ensureResultExtShape asserting msg loc (map I.fromDecl rettype')
 
-    let free_in_fun = freeInBody body' `S.difference` normal_param_names
+    let free_in_fun = freeIn body' `S.difference` normal_param_names
 
     used_free_params <- forM (S.toList free_in_fun) $ \v -> do
       v_t <- lookupType v
@@ -115,7 +116,8 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
             applyRetType rettype' all_params)
 
   bindFunction fname info
-  when entry $ generateEntryPoint fb
+  case entry of Just (Info entry') -> generateEntryPoint entry' fb
+                Nothing -> return ()
 
   where
     -- | Recompute existential sizes to start from zero.
@@ -123,14 +125,46 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
     -- them from somewhere else.
     zeroExts ts = generaliseExtTypes ts ts
 
-generateEntryPoint :: E.ValBind -> InternaliseM ()
-generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) =
-  -- We remove all shape annotations, so there should be no constant
+allDimsFreshInType :: MonadFreshNames m => E.PatternType -> m E.PatternType
+allDimsFreshInType = bitraverse onDim pure
+  where onDim (E.NamedDim v) =
+          E.NamedDim . E.qualName <$> newVName (baseString $ E.qualLeaf v)
+        onDim _ = pure AnyDim
+
+-- | Replace all named dimensions with a fresh name, and remove all
+-- constant dimensions.  The point is to remove the constraints, but
+-- keep the names around.  We use this for constructing the entry
+-- point parameters.
+allDimsFreshInPat :: MonadFreshNames m => E.Pattern -> m E.Pattern
+allDimsFreshInPat (PatternAscription p _ _) =
+  allDimsFreshInPat p
+allDimsFreshInPat (PatternParens p _) =
+  allDimsFreshInPat p
+allDimsFreshInPat (Id v (Info t) loc) =
+  Id v <$> (Info <$> allDimsFreshInType t) <*> pure loc
+allDimsFreshInPat (TuplePattern ps loc) =
+  TuplePattern <$> mapM allDimsFreshInPat ps <*> pure loc
+allDimsFreshInPat (RecordPattern ps loc) =
+  RecordPattern <$> mapM (traverse allDimsFreshInPat) ps <*> pure loc
+allDimsFreshInPat (Wildcard (Info t) loc) =
+  Wildcard <$> (Info <$> allDimsFreshInType t) <*> pure loc
+allDimsFreshInPat (PatternLit e (Info t) loc) =
+  PatternLit e <$> (Info <$> allDimsFreshInType t) <*> pure loc
+allDimsFreshInPat (PatternConstr c (Info t) pats loc) =
+  PatternConstr c <$> (Info <$> allDimsFreshInType t) <*>
+  mapM allDimsFreshInPat pats <*> pure loc
+
+generateEntryPoint :: E.StructType -> E.ValBind -> InternaliseM ()
+generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) = do
+  -- We replace all shape annotations, so there should be no constant
   -- parameters here.
-  bindingParams [] (map E.patternNoShapeAnnotations params) $
-  \_ shapeparams params' -> do
+  params_fresh <- mapM allDimsFreshInPat params
+  let tparams = map (`E.TypeParamDim` noLoc) $ S.toList $
+                mconcat $ map E.patternDimNames params_fresh
+  bindingParams tparams params_fresh $ \_ shapeparams params' -> do
     (entry_rettype, _) <- internaliseEntryReturnType $ anyDimShapeAnnotations rettype
-    let entry' = entryPoint (zip params params') (retdecl, rettype, entry_rettype)
+    let (e_paramts, e_rettype) = E.unfoldFunType ftype
+        entry' = entryPoint (zip3 params e_paramts params') (retdecl, e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     entry_body <- insertStmsM $ do
@@ -144,7 +178,7 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) 
       (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
 
-entryPoint :: [(E.Pattern,[I.FParam])]
+entryPoint :: [(E.Pattern, E.StructType, [I.FParam])]
            -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
            -> EntryPoint
 entryPoint params (retdecl, eret, crets) = do
@@ -152,9 +186,9 @@ entryPoint params (retdecl, eret, crets) = do
    case isTupleRecord eret of
      Just ts -> concatMap entryPointType $ zip3 retdecls ts crets
      _       -> entryPointType (retdecl, eret, concat crets))
-  where preParam (p_pat, ps) = (paramOuterType p_pat,
-                                E.patternStructType p_pat,
-                                staticShapes $ map I.paramDeclType ps)
+  where preParam (p_pat, e_t, ps) = (paramOuterType p_pat,
+                                     e_t,
+                                     staticShapes $ map I.paramDeclType ps)
         paramOuterType (E.PatternAscription _ tdecl _) = Just $ declaredType tdecl
         paramOuterType (E.PatternParens p _) = paramOuterType p
         paramOuterType _ = Nothing
@@ -415,6 +449,7 @@ internaliseExp desc e@E.Apply{} = do
   (qfname, args, _) <- findFuncall e
   let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
       loc = srclocOf e
+      arg_desc = nameToString fname ++ "_arg"
 
   -- Some functions are magical (overloaded) and we handle that here.
   -- Note that polymorphic functions (which are not magical) are not
@@ -424,27 +459,27 @@ internaliseExp desc e@E.Apply{} = do
            internalise desc
        | Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
            let tag ses = [ (se, I.Observe) | se <- ses ]
-           args' <- mapM (internaliseExp "arg") args
+           args' <- mapM (internaliseExp arg_desc) args
            let args'' = concatMap tag args'
            letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
        | otherwise -> do
-           args' <- concat <$> mapM (internaliseExp "arg") args
+           args' <- concat <$> mapM (internaliseExp arg_desc) args
            fst <$> funcall desc qfname args' loc
 
-internaliseExp desc (E.LetPat tparams pat e body _ loc) =
-  internalisePat desc tparams pat e body loc (internaliseExp desc)
+internaliseExp desc (E.LetPat pat e body _ loc) =
+  internalisePat desc pat e body loc (internaliseExp desc)
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
-  internaliseValBind $ E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc
+  internaliseValBind $ E.ValBind Nothing ofname retdecl (Info rettype) tparams params body Nothing loc
   internaliseExp desc letbody
 
-internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
+internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody loc) = do
   -- We pretend that we saw a let-binding first to ensure that the
   -- initial values for the merge parameters match their annotated
   -- sizes
   ses <- internaliseExp "loop_init" mergeexp
   t <- I.staticShapes <$> mapM I.subExpType ses
-  stmPattern tparams mergepat t $ \cm mergepat_names match -> do
+  stmPattern mergepat t $ \cm mergepat_names match -> do
     mapM_ (uncurry (internaliseDimConstant loc)) cm
     ses' <- match (srclocOf mergepat) ses
     forM_ (zip mergepat_names ses') $ \(v,se) ->
@@ -505,8 +540,8 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
 
       i <- newVName "i"
 
-      bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat ->
-        bindingLambdaParams [] [x] (map rowType arr_ts) $ \x_cm x_params -> do
+      bindingParams [] [mergepat] $ \mergecm shapepat nested_mergepat ->
+        bindingLambdaParams [x] (map rowType arr_ts) $ \x_cm x_params -> do
           mapM_ (uncurry (internaliseDimConstant loc)) x_cm
           mapM_ (uncurry (internaliseDimConstant loc)) mergecm
           let loopvars = zip x_params arr'
@@ -520,12 +555,12 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
               I.Prim (IntType it) -> return it
               _                   -> fail "internaliseExp DoLoop: invalid type"
 
-      bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
+      bindingParams [] [mergepat] $ \mergecm shapepat nested_mergepat -> do
         mapM_ (uncurry (internaliseDimConstant loc)) mergecm
         forLoop nested_mergepat shapepat mergeinit $ I.ForLoop i' it num_iterations' []
 
     handleForm mergeinit (E.While cond) =
-      bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
+      bindingParams [] [mergepat] $ \mergecm shapepat nested_mergepat -> do
         mergeinit_ts <- mapM subExpType mergeinit
         mapM_ (uncurry (internaliseDimConstant loc)) mergecm
         let mergepat' = concat nested_mergepat
@@ -584,7 +619,7 @@ internaliseExp desc (E.LetWith name src idxs ve body t loc) = do
   let pat = E.Id (E.identName name) (E.identType name) loc
       src_t = E.fromStruct <$> E.identType src
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
-  internaliseExp desc $ E.LetPat [] pat e body t loc
+  internaliseExp desc $ E.LetPat pat e body t loc
 
 internaliseExp desc (E.Update src slice ve loc) = do
   ves <- internaliseExp "lw_val" ve
@@ -637,12 +672,12 @@ internaliseExp _ e@E.Constr{} =
 
 internaliseExp desc (E.Match  e cs _ loc) = do
   case cs of
-    [CasePat pCase eCase locCase] -> internalisePat desc [] pCase e eCase locCase (internaliseExp desc)
+    [CasePat pCase eCase locCase] -> internalisePat desc pCase e eCase locCase (internaliseExp desc)
     (c:cs') -> do
       bFalse <- bFalseM
       letTupExp' desc =<< generateCaseIf desc e c bFalse
       where bFalseM = do
-              eLast' <- internalisePat desc [] pLast e eLast locLast internaliseBody
+              eLast' <- internalisePat desc pLast e eLast locLast internaliseBody
               foldM (\bf c' -> eBody $ return $ generateCaseIf desc e c' bf) eLast' (reverse $ init cs')
             CasePat pLast eLast locLast = last cs'
     [] -> fail $ "internaliseExp: match with no cases at: " ++ locStr loc
@@ -751,21 +786,24 @@ generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
 
 generateCaseIf :: String -> E.Exp -> Case -> I.Body -> InternaliseM I.Exp
 generateCaseIf desc e (CasePat p eCase loc) bFail = do
-  eCase' <- internalisePat desc [] p e eCase loc internaliseBody
+  eCase' <- internalisePat desc p e eCase loc internaliseBody
   eIf cond (return eCase') (return bFail)
   where cond = BasicOp . SubExp <$> internaliseExp1 "cond" (generateCond p e)
 
-internalisePat :: String -> [TypeParamBase VName] -> E.Pattern -> E.Exp
+internalisePat :: String -> E.Pattern -> E.Exp
                -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a) -> InternaliseM a
-internalisePat desc tparams p e body loc m = do
-  ses <- internaliseExp desc e
+internalisePat desc p e body loc m = do
+  ses <- internaliseExp desc' e
   t <- I.staticShapes <$> mapM I.subExpType ses
-  stmPattern tparams p t $ \cm pat_names match -> do
+  stmPattern p t $ \cm pat_names match -> do
     mapM_ (uncurry (internaliseDimConstant loc)) cm
     ses' <- match loc ses
     forM_ (zip pat_names ses') $ \(v,se) ->
       letBindNames_ [v] $ I.BasicOp $ I.SubExp se
     m body
+  where desc' = case S.toList $ E.patternIdents p of
+                  [v] -> baseString $ E.identName v
+                  _ -> desc
 
 internaliseSlice :: SrcLoc
                  -> [SubExp]
@@ -1168,8 +1206,8 @@ internaliseLambda :: InternaliseLambda
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
 
-internaliseLambda (E.Lambda tparams params body _ (Info (_, rettype)) loc) rowtypes =
-  bindingLambdaParams tparams params rowtypes $ \pcm params' -> do
+internaliseLambda (E.Lambda params body _ (Info (_, rettype)) loc) rowtypes =
+  bindingLambdaParams params rowtypes $ \pcm params' -> do
     (rettype', rcm) <- internaliseReturnType rettype
     body' <- internaliseBody body
     mapM_ (uncurry (internaliseDimConstant loc)) $ pcm<>rcm
@@ -1277,7 +1315,7 @@ isOverloadedFunction qname args loc = do
 
                       -- Check that all were equal.
                       and_lam <- binOpLambda I.LogAnd I.Bool
-                      reduce <- I.reduceSOAC Commutative and_lam [constant True]
+                      reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
                       all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems reduce [cmps]
                       return $ resultBody [all_equal]
 
@@ -1388,13 +1426,13 @@ isOverloadedFunction qname args loc = do
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where reduce w red_lam nes arrs =
               I.Screma w <$>
-              I.reduceSOAC Noncommutative red_lam nes <*> pure arrs
+              I.reduceSOAC [Reduce Noncommutative red_lam nes] <*> pure arrs
 
     handle [TupLit [lam, ne, arr] _] "reduce_comm" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where reduce w red_lam nes arrs =
               I.Screma w <$>
-              I.reduceSOAC Commutative red_lam nes <*> pure arrs
+              I.reduceSOAC [Reduce Commutative red_lam nes] <*> pure arrs
 
     handle [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
       internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)

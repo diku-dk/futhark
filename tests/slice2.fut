@@ -29,14 +29,15 @@
 -- [[-0.15087804f32, -0.3175784f32],
 --  [-0.35215855f32, -0.17525783f32]]]
 -- }
--- structure distributed { Kernel 1 }
+-- structure distributed { SegMap 1 }
 
 let main [m][b] (mat: [m][m][b][b]f32): [m][b][b]f32 =
   let mat_rows = map (\(mat_row: [m][b][b]f32): [b][b]f32  ->
                        mat_row[0]) mat
   in map  (\(blk: [b][b]f32): [b][b]f32  ->
             map (\(row0: [b]f32): [b]f32  ->
-                  loop row=copy row0 for j < b do
+                   loop row=copy row0 for j < b do
+                    unsafe
                     let row[j] = (row[j] - 1.0f32) / 2.0f32
                     in  row) blk) (
           mat_rows)

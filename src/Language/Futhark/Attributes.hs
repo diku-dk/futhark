@@ -31,7 +31,6 @@ module Language.Futhark.Attributes
   , patternStructType
   , patternPatternType
   , patternParam
-  , patternNoShapeAnnotations
   , patternOrderZero
   , patternDimNames
 
@@ -492,7 +491,7 @@ typeOf (Var _ (Info t) _) = t
 typeOf (Ascript _ _ (Info t) _) = t
 typeOf (Apply _ _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ _ _ _ (Info t) _) = t
+typeOf (LetPat _ _ _ (Info t) _) = t
 typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ _ (Info t) _) = t
 typeOf (Index _ _ (Info t) _) = t
@@ -500,12 +499,11 @@ typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
-typeOf (DoLoop _ pat _ _ _ _) = patternType pat
-typeOf (Lambda tparams params _ _ (Info (als, t)) _) =
+typeOf (DoLoop pat _ _ _ _) = patternType pat
+typeOf (Lambda params _ _ (Info (als, t)) _) =
   unscopeType bound_here $
   foldr (uncurry (Arrow ()) . patternParam) t params `setAliases` als
-  where bound_here = S.fromList (map typeParamName tparams) <>
-                     S.map identName (mconcat $ map patternIdents params)
+  where bound_here = S.map identName (mconcat $ map patternIdents params)
 typeOf (OpSection _ (Info t) _) =
   t
 typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
@@ -642,29 +640,10 @@ patternParam (PatternParens p _) =
   patternParam p
 patternParam (PatternAscription (Id v _ _) td _) =
   (Just v, unInfo $ expandedType td)
+patternParam (Id v (Info t) _) =
+  (Just v, toStruct t)
 patternParam p =
   (Nothing, patternStructType p)
-
--- | Remove all shape annotations from a pattern, leaving them unnamed
--- instead.
-patternNoShapeAnnotations :: PatternBase Info VName -> PatternBase Info VName
-patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t)) loc) =
-  PatternAscription (patternNoShapeAnnotations p)
-  (TypeDecl te $ Info $ anyDimShapeAnnotations t) loc
-patternNoShapeAnnotations (PatternParens p loc) =
-  PatternParens (patternNoShapeAnnotations p) loc
-patternNoShapeAnnotations (Id v (Info t) loc) =
-  Id v (Info $ anyDimShapeAnnotations t) loc
-patternNoShapeAnnotations (TuplePattern ps loc) =
-  TuplePattern (map patternNoShapeAnnotations ps) loc
-patternNoShapeAnnotations (RecordPattern ps loc) =
-  RecordPattern (map (fmap patternNoShapeAnnotations) ps) loc
-patternNoShapeAnnotations (Wildcard (Info t) loc) =
-  Wildcard (Info (anyDimShapeAnnotations t)) loc
-patternNoShapeAnnotations (PatternLit e (Info t) loc) =
-  PatternLit e (Info (anyDimShapeAnnotations t)) loc
-patternNoShapeAnnotations (PatternConstr n (Info t) ps loc) =
-  PatternConstr n (Info (anyDimShapeAnnotations t)) ps loc
 
 -- | Names of primitive types to types.  This is only valid if no
 -- shadowing is going on, but useful for tools.
@@ -776,17 +755,16 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                tupleRecord [uarr_a, Array () Unique (ArrayPrimElem (Signed Int32)) (rank 1)]),
 
               ("stream_map",
-               IntrinsicPolyFun [tp_a, tp_b] [arr_a `arr` arr_b, arr_a] uarr_b),
+               IntrinsicPolyFun [tp_a, tp_b] [Prim (Signed Int32) `arr` (arr_a `arr` arr_b), arr_a] uarr_b),
 
               ("stream_map_per",
-               IntrinsicPolyFun [tp_a, tp_b] [arr_a `arr` arr_b, arr_a] uarr_b),
+               IntrinsicPolyFun [tp_a, tp_b] [Prim (Signed Int32) `arr` (arr_a `arr` arr_b), arr_a] uarr_b),
 
               ("stream_red",
-               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b),
+               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), Prim (Signed Int32) `arr` (arr_a `arr` t_b), arr_a] t_b),
 
               ("stream_red_per",
-               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), arr_a `arr` t_b, arr_a] t_b),
-
+               IntrinsicPolyFun [tp_a, tp_b] [t_b `arr` (t_b `arr` t_b), Prim (Signed Int32) `arr` (arr_a `arr` t_b), arr_a] t_b),
 
               ("trace", IntrinsicPolyFun [tp_a] [t_a] t_a),
               ("break", IntrinsicPolyFun [tp_a] [t_a] t_a)]

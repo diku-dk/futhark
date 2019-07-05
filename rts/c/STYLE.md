@@ -15,3 +15,9 @@ Coding Style for Futhark C Runtime Component
   normal C header files, but are instead copied into the generated
   program in a specific order.  An argument could be made that perhaps
   they ought be `.c` files instead.
+
+* Start all files with the comment `// Start of foo.h.` and end with
+  `// End of foo.h.`.  This makes the concatenated code easier to
+  navigate.
+
+* Ensure, as far as possible, that the code is also valid C++.

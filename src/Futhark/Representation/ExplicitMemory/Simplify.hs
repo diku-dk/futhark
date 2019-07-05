@@ -3,7 +3,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE LambdaCase #-}
 module Futhark.Representation.ExplicitMemory.Simplify
        ( simplifyExplicitMemory
        , simplifyStms
@@ -12,7 +11,6 @@ where
 
 import Control.Monad
 import qualified Data.Set as S
-import Data.Maybe
 import Data.List
 
 import qualified Futhark.Representation.AST.Syntax as AST
@@ -20,8 +18,7 @@ import Futhark.Representation.AST.Syntax
   hiding (Prog, BasicOp, Exp, Body, Stm,
           Pattern, PatElem, Lambda, FunDef, FParam, LParam, RetType)
 import Futhark.Representation.ExplicitMemory
-import Futhark.Representation.Kernels.Simplify
-  (simplifyKernelOp, simplifyKernelExp)
+import Futhark.Representation.Kernels.Simplify (simplifyKernelOp)
 import Futhark.Pass.ExplicitAllocations
   (simplifiable, arraySizeInBytesExp)
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -36,87 +33,71 @@ import Futhark.Optimise.Simplify.Lore
 import Futhark.Util
 
 simpleExplicitMemory :: Simplify.SimpleOps ExplicitMemory
-simpleExplicitMemory = simplifiable (simplifyKernelOp simpleInKernel inKernelEnv)
-
-simpleInKernel :: KernelSpace -> Simplify.SimpleOps InKernel
-simpleInKernel = simplifiable . simplifyKernelExp
+simpleExplicitMemory = simplifiable $ simplifyKernelOp $ const $ return ((), mempty)
 
 simplifyExplicitMemory :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
 simplifyExplicitMemory =
   Simplify.simplifyProg simpleExplicitMemory callKernelRules
-  blockers { Engine.blockHoistBranch = isAlloc }
+  blockers { Engine.blockHoistBranch = blockAllocs }
+  where blockAllocs vtable _ (Let _ _ (Op Alloc{})) =
+          not $ ST.simplifyMemory vtable
+        blockAllocs _ _ _ = False
 
 simplifyStms :: (HasScope ExplicitMemory m, MonadFreshNames m) =>
                 Stms ExplicitMemory -> m (Stms ExplicitMemory)
 simplifyStms =
   Simplify.simplifyStms simpleExplicitMemory callKernelRules blockers
 
-isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
-isAlloc _ (Let _ _ (Op Alloc{})) = True
-isAlloc _ _                      = False
-
 isResultAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
-isResultAlloc usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc{})) =
+isResultAlloc _ usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc{})) =
   UT.isInResult (patElemName bindee) usage
-isResultAlloc _ _ = False
+isResultAlloc _ _ _ = False
 
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent array and memory-block sizes.
-getShapeNames :: ExplicitMemorish lore =>
+getShapeNames :: (ExplicitMemorish lore, Op lore ~ MemOp op) =>
                  Stm (Wise lore) -> S.Set VName
-getShapeNames bnd =
-  let tps = map patElemType $ patternElements $ stmPattern bnd
-      ats = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
-      nms = mapMaybe (\case
-                         MemMem (Var nm) _ -> Just nm
-                         MemArray _ _ _ (ArrayIn nm _) -> Just nm
-                         _ -> Nothing
-                     ) ats
-  in  S.fromList $ nms ++ subExpVars (concatMap arrayDims tps)
+getShapeNames stm =
+  let ts = map patElemType $ patternElements $ stmPattern stm
+  in freeIn (concatMap arrayDims ts) <>
+     case stmExp stm of Op (Alloc size _) -> freeIn size
+                        _                 -> mempty
 
-isAlloc0 :: Op lore ~ MemOp op => AST.Stm lore -> Bool
-isAlloc0 (Let _ _ (Op Alloc{})) = True
-isAlloc0 _                      = False
+isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
+isAlloc _ _ (Let _ _ (Op Alloc{})) = True
+isAlloc _ _ _                      = False
 
-inKernelEnv :: Engine.Env InKernel
-inKernelEnv = Engine.emptyEnv inKernelRules blockers
-
-blockers ::  (ExplicitMemorish lore, Op lore ~ MemOp op) =>
-             Simplify.HoistBlockers lore
+blockers :: Simplify.HoistBlockers ExplicitMemory
 blockers = Engine.noExtraHoistBlockers {
     Engine.blockHoistPar    = isAlloc
   , Engine.blockHoistSeq    = isResultAlloc
   , Engine.getArraySizes    = getShapeNames
-  , Engine.isAllocation     = isAlloc0
+  , Engine.isAllocation     = isAlloc mempty mempty
   }
 
 callKernelRules :: RuleBook (Wise ExplicitMemory)
 callKernelRules = standardRules <>
                   ruleBook [RuleBasicOp copyCopyToCopy,
-                            RuleBasicOp removeIdentityCopy] []
-
-inKernelRules :: RuleBook (Wise InKernel)
-inKernelRules = standardRules <>
-                ruleBook [RuleBasicOp copyCopyToCopy,
-                          RuleBasicOp removeIdentityCopy,
-                          RuleIf unExistentialiseMemory] []
+                            RuleBasicOp removeIdentityCopy,
+                            RuleIf unExistentialiseMemory] []
 
 -- | If a branch is returning some existential memory, but the size of
--- the array is existential, then we can create a block of the proper
--- size and always return there.
-unExistentialiseMemory :: TopDownRuleIf (Wise InKernel)
-unExistentialiseMemory _ pat _ (cond, tbranch, fbranch, ifattr)
-  | fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
+-- the array is not existential, then we can create a block of the
+-- proper size and always return there.
+unExistentialiseMemory :: TopDownRuleIf (Wise ExplicitMemory)
+unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
+  | ST.simplifyMemory vtable,
+    fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
     not $ null fixable = do
 
       -- Create non-existential memory blocks big enough to hold the
       -- arrays.
-      (arr_to_mem, oldmem_to_mem, oldsize_to_size) <-
-        fmap unzip3 $ forM fixable $ \(arr_pe, oldmem, oldsize, space) -> do
+      (arr_to_mem, oldmem_to_mem) <-
+        fmap unzip $ forM fixable $ \(arr_pe, oldmem, space) -> do
           size <- letSubExp "size" =<<
                   toExp (arraySizeInBytesExp $ patElemType arr_pe)
           mem <- letExp "mem" $ Op $ Alloc size space
-          return ((patElemName arr_pe, mem), (oldmem, mem), (oldsize, size))
+          return ((patElemName arr_pe, mem), (oldmem, mem))
 
       -- Update the branches to contain Copy expressions putting the
       -- arrays where they are expected.
@@ -134,8 +115,6 @@ unExistentialiseMemory _ pat _ (cond, tbranch, fbranch, ifattr)
                 return $ Var v_copy
             | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
                 return $ Var mem
-            | Just size <- lookup (Var (patElemName pat_elem)) oldsize_to_size =
-                return size
           updateResult _ se =
             return se
       tbranch' <- updateBody tbranch
@@ -150,7 +129,7 @@ unExistentialiseMemory _ pat _ (cond, tbranch, fbranch, ifattr)
 
         hasConcretisableMemory fixable pat_elem
           | (_, MemArray _ shape _ (ArrayIn mem _)) <- patElemAttr pat_elem,
-            Just (j, Mem old_size space) <-
+            Just (j, Mem space) <-
               fmap patElemType <$> find ((mem==) . patElemName . snd)
                                         (zip [(0::Int)..] $ patternElements pat),
             Just tse <- maybeNth j $ bodyResult tbranch,
@@ -158,7 +137,7 @@ unExistentialiseMemory _ pat _ (cond, tbranch, fbranch, ifattr)
             mem `onlyUsedIn` patElemName pat_elem,
             all knownSize (shapeDims shape),
             fse /= tse =
-              (pat_elem, mem, old_size, space) : fixable
+              (pat_elem, mem, space) : fixable
           | otherwise =
               fixable
 unExistentialiseMemory _ _ _ _ = cannotSimplify
@@ -174,11 +153,11 @@ copyCopyToCopy vtable pat@(Pattern [] [pat_elem]) _ (Copy v1)
     Just (_, MemArray _ _ _ (ArrayIn srcmem src_ixfun)) <-
       ST.entryLetBoundAttr =<< ST.lookup v1 vtable,
 
-    Just (Mem _ src_space) <- ST.lookupType srcmem vtable,
+    Just (Mem src_space) <- ST.lookupType srcmem vtable,
 
     (_, MemArray _ _ _ (ArrayIn destmem dest_ixfun)) <- patElemAttr pat_elem,
 
-    Just (Mem _ dest_space) <- ST.lookupType destmem vtable,
+    Just (Mem dest_space) <- ST.lookupType destmem vtable,
 
     src_space == dest_space, dest_ixfun == src_ixfun =
 

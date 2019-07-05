@@ -614,7 +614,7 @@ data ExpBase f vn =
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) (f PatternType) SrcLoc
             -- ^ Type ascription: @e : t@.
 
-            | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
+            | LetPat (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
 
             | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
               (ExpBase f vn) SrcLoc
@@ -626,7 +626,7 @@ data ExpBase f vn =
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
 
-            | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
+            | Lambda [PatternBase f vn] (ExpBase f vn)
               (Maybe (TypeExp vn)) (f (Aliasing, StructType)) SrcLoc
 
             | OpSection (QualName vn) (f PatternType) SrcLoc
@@ -643,7 +643,6 @@ data ExpBase f vn =
               -- ^ Array indexing as a section: @(.[i,j])@.
 
             | DoLoop
-              [TypeParamBase vn]
               (PatternBase f vn) -- Merge variable pattern
               (ExpBase f vn) -- Initial values of merge variables.
               (LoopFormBase f vn) -- Do or while loop.
@@ -703,19 +702,19 @@ instance Located (ExpBase f vn) where
   locOf (Ascript _ _ _ loc)            = locOf loc
   locOf (Negate _ pos)                 = locOf pos
   locOf (Apply _ _ _ _ pos)            = locOf pos
-  locOf (LetPat _ _ _ _ _ loc)         = locOf loc
+  locOf (LetPat _ _ _ _ loc)           = locOf loc
   locOf (LetFun _ _ _ loc)             = locOf loc
   locOf (LetWith _ _ _ _ _ _ loc)      = locOf loc
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos
   locOf (RecordUpdate _ _ _ _ pos)     = locOf pos
-  locOf (Lambda _ _ _ _ _ loc)         = locOf loc
+  locOf (Lambda _ _ _ _ loc)           = locOf loc
   locOf (OpSection _ _ loc)            = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc)  = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
   locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (IndexSection _ _ loc)         = locOf loc
-  locOf (DoLoop _ _ _ _ _ pos)         = locOf pos
+  locOf (DoLoop _ _ _ _ pos)           = locOf pos
   locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
   locOf (Constr _ _ _ loc)             = locOf loc
@@ -765,7 +764,7 @@ instance Located (PatternBase f vn) where
   locOf (Wildcard _ loc)            = locOf loc
   locOf (PatternAscription _ _ loc) = locOf loc
   locOf (PatternLit _ _ loc)        = locOf loc
-  locOf (PatternConstr _ _ _ loc)     = locOf loc
+  locOf (PatternConstr _ _ _ loc)   = locOf loc
 
 -- | Documentation strings, including source location.
 data DocComment = DocComment String SrcLoc
@@ -775,8 +774,14 @@ instance Located DocComment where
   locOf (DocComment _ loc) = locOf loc
 
 -- | Function Declarations
-data ValBindBase f vn = ValBind { valBindEntryPoint :: Bool
-                                -- ^ True if this function is an entry point.
+data ValBindBase f vn = ValBind { valBindEntryPoint :: Maybe (f StructType)
+                                -- ^ True if this function is an entry
+                                -- point.  If so, it also contains the
+                                -- externally visible type.  Note that
+                                -- this may not strictly be well-typed
+                                -- after some desugaring operations,
+                                -- as it may refer to abstract types
+                                -- that are no longer in scope.
                                 , valBindName       :: vn
                                 , valBindRetDecl    :: Maybe (TypeExp vn)
                                 , valBindRetType    :: f StructType

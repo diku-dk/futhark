@@ -58,15 +58,20 @@ internaliseStreamMapLambda internaliseLambda lam args = do
       outer = (`setOuterSize` I.Var chunk_size)
   localScope (scopeOfLParams [chunk_param]) $ do
     argtypes <- mapM I.subExpType args
-    (params, body, rettype) <- internaliseLambda lam $ map outer argtypes
+    (orig_chunk_param : params, orig_body, rettype) <-
+      internaliseLambda lam $ I.Prim int32 : map outer argtypes
+    body <- runBodyBinder $ do
+      letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
+      return orig_body
     (rettype', inner_shapes) <- instantiateShapes' rettype
     let outer_shape = arraysSize 0 argtypes
     shapefun <- makeShapeFun (chunk_param:params) body rettype' inner_shapes
     bindMapShapes (slice0 chunk_size) [zero] inner_shapes shapefun args outer_shape
-    body' <- localScope (scopeOfLParams params) $
-             ensureResultShape asserting
-             (ErrorMsg [ErrorString "not all iterations produce same shape"])
-             (srclocOf lam) (map outer rettype') body
+    body' <- localScope (scopeOfLParams params) $ insertStmsM $ do
+      letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
+      ensureResultShape asserting
+        (ErrorMsg [ErrorString "not all iterations produce same shape"])
+        (srclocOf lam) (map outer rettype') body
     return $ I.Lambda (chunk_param:params) body' (map outer rettype')
   where slice0 chunk_size arg = do
           arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
@@ -102,7 +107,7 @@ bindMapShapes indexArg extra_args inner_shapes sizefun args outer_shape
       let sizefun_safe =
             all (I.safeExp . I.stmExp) $ I.bodyStms $ I.lambdaBody sizefun'
           sizefun_arg_invariant =
-            not $ any (`S.member` freeInBody (I.lambdaBody sizefun')) $
+            not $ any (`S.member` freeIn (I.lambdaBody sizefun')) $
             map I.paramName $ lambdaParams sizefun'
       if sizefun_safe && sizefun_arg_invariant
         then do ses <- bodyBind $ lambdaBody sizefun'
@@ -147,9 +152,13 @@ internaliseStreamLambda internaliseLambda lam rowts = do
   chunk_size <- newVName "chunk_size"
   let chunk_param = I.Param chunk_size $ I.Prim int32
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
-  (params, body, _) <- localScope (scopeOfLParams [chunk_param]) $
-                       internaliseLambda lam chunktypes
-  return (chunk_param:params, body)
+  localScope (scopeOfLParams [chunk_param]) $ do
+    (orig_chunk_param : params, orig_body, _) <-
+      internaliseLambda lam $ I.Prim int32 : chunktypes
+    body <- runBodyBinder $ do
+      letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
+      return orig_body
+    return (chunk_param:params, body)
 
 -- Given @k@ lambdas, this will return a lambda that returns an
 -- (k+2)-element tuple of integers.  The first element is the

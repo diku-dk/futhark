@@ -6,6 +6,7 @@ module Futhark.Pass.ExtractKernels.Intragroup
   (intraGroupParallelise)
 where
 
+import Control.Monad.Identity
 import Control.Monad.RWS
 import Control.Monad.Trans.Maybe
 import qualified Data.Map.Strict as M
@@ -18,9 +19,9 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Analysis.DataDependencies
-import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.BlockedKernel
+import Futhark.Util (chunks)
 
 -- | Convert the statements inside a map nest to kernel statements,
 -- attempting to parallelise any remaining (top-level) parallel
@@ -39,15 +40,18 @@ intraGroupParallelise :: (MonadFreshNames m, LocalScope Out.Kernels m) =>
                       -> m (Maybe ((SubExp, SubExp), SubExp,
                                    Out.Stms Out.Kernels, Out.Stms Out.Kernels))
 intraGroupParallelise knest lam = runMaybeT $ do
-  (w_stms, w, ispace, inps, rts) <- lift $ flatKernel knest
+  (w_stms, w, ispace, inps) <- lift $ flatKernel knest
   let num_groups = w
       body = lambdaBody lam
+
+  group_size <- newVName "computed_group_size"
+  let intra_lvl = SegThread (Count w) (Count $ Var group_size) SegNoVirt
 
   ltid <- newVName "ltid"
   let group_variant = S.fromList [ltid]
   (wss_min, wss_avail, kbody) <-
     lift $ localScope (scopeOfLParams $ lambdaParams lam) $
-    intraGroupParalleliseBody (dataDependencies body) group_variant ltid body
+    intraGroupParalleliseBody intra_lvl (dataDependencies body) group_variant body
 
   known_outside <- lift $ M.keys <$> askScope
   unless (all (`elem` known_outside) $ freeIn $ wss_min ++ wss_avail) $
@@ -68,65 +72,42 @@ intraGroupParallelise knest lam = runMaybeT $ do
     -- The group size is either the maximum of the minimum parallelism
     -- exploited, or the desired parallelism (bounded by the max group
     -- size) in case there is no minimum.
-    group_size <- letSubExp "computed_group_size" =<<
-                  if null ws_min
-                  then eBinOp (SMin Int32)
-                       (eSubExp =<< letSubExp "max_group_size" (Op $ Out.GetSizeMax Out.SizeGroup))
-                       (eSubExp intra_avail_par)
-                  else foldBinOp' (SMax Int32) ws_min
+    letBindNames_ [group_size] =<<
+      if null ws_min
+      then eBinOp (SMin Int32)
+           (eSubExp =<< letSubExp "max_group_size" (Op $ Out.GetSizeMax Out.SizeGroup))
+           (eSubExp intra_avail_par)
+      else foldBinOp' (SMax Int32) ws_min
 
-    let inputIsUsed input = kernelInputName input `S.member` freeInBody body
+    let inputIsUsed input = kernelInputName input `S.member` freeIn body
         used_inps = filter inputIsUsed inps
 
     addStms w_stms
+    read_input_stms <- runBinder_ $ mapM readKernelInput used_inps
+    space <- mkSegSpace ispace
+    return (intra_avail_par, space, read_input_stms)
 
-    num_threads <- letSubExp "num_threads" $
-                   BasicOp $ BinOp (Mul Int32) num_groups group_size
+  let kbody' = kbody { kernelBodyStms = read_input_stms <> kernelBodyStms kbody }
 
-    let ksize = (num_groups, group_size, num_threads)
-
-    kspace <- newKernelSpace ksize $ FlatThreadSpace $ ispace ++ [(ltid,group_size)]
-
-    read_input_stms <- mapM readKernelInput used_inps
-
-    return (intra_avail_par, kspace, read_input_stms)
-
-  let kbody' = kbody { kernelBodyStms = stmsFromList read_input_stms <> kernelBodyStms kbody }
-
-  -- The kernel itself is producing a "flat" result of shape
-  -- [num_groups].  We must explicitly reshape it to match the shapes
-  -- of our enclosing map-nests.
   let nested_pat = loopNestingPattern first_nest
-      flatPatElem pat_elem = do
-        let t' = arrayOfRow (length ispace `stripArray` patElemType pat_elem) num_groups
-        name <- newVName $ baseString (patElemName pat_elem) ++ "_flat"
-        return $ PatElem name t'
-  flat_pat <- lift $ Pattern [] <$> mapM flatPatElem (patternValueElements nested_pat)
-
-  let kstm = Let flat_pat (StmAux cs ()) $ Op $ HostOp $
-             Kernel (KernelDebugHints "map_intra_group" []) kspace rts kbody'
-      reshapeStm nested_pe flat_pe =
-        Let (Pattern [] [nested_pe]) (StmAux cs ()) $
-        BasicOp $ Reshape (map DimNew $ arrayDims $ patElemType nested_pe) $
-        patElemName flat_pe
-      reshape_stms = zipWith reshapeStm (patternElements nested_pat)
-                                        (patternElements flat_pat)
+      rts = map (length ispace `stripArray`) $ patternTypes nested_pat
+      lvl = SegGroup (Count num_groups) (Count $ Var group_size) SegNoVirt
+      kstm = Let nested_pat (StmAux cs ()) $ Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
-  return ((intra_min_par, intra_avail_par), spaceGroupSize kspace,
-           prelude_stms, oneStm kstm <> stmsFromList reshape_stms)
+  return ((intra_min_par, intra_avail_par), Var group_size,
+           prelude_stms, oneStm kstm)
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 
-data Env = Env { _localTID :: VName
-               , _dataDeps :: Dependencies
+data Env = Env { _dataDeps :: Dependencies
                , _groupVariant :: Names
                }
 
-type IntraGroupM = BinderT Out.InKernel (RWS Env (S.Set [SubExp], S.Set [SubExp]) VNameSource)
+type IntraGroupM = BinderT Out.Kernels (RWS Env (S.Set [SubExp], S.Set [SubExp]) VNameSource)
 
 runIntraGroupM :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                  Env -> IntraGroupM () -> m ([[SubExp]], [[SubExp]], Out.Stms Out.InKernel)
+                  Env -> IntraGroupM () -> m ([[SubExp]], [[SubExp]], Out.Stms Out.Kernels)
 runIntraGroupM env m = do
   scope <- castScope <$> askScope
   modifyNameSource $ \src ->
@@ -136,91 +117,60 @@ runIntraGroupM env m = do
 parallelMin :: [SubExp] -> IntraGroupM ()
 parallelMin ws = tell (S.singleton ws, S.singleton ws)
 
-parallelAvail :: [SubExp] -> IntraGroupM ()
-parallelAvail ws = tell (mempty, S.singleton ws)
-
-intraGroupBody :: Body -> IntraGroupM (Out.Body Out.InKernel)
-intraGroupBody body = do
-  stms <- collectStms_ $ mapM_ intraGroupStm $ bodyStms body
+intraGroupBody :: SegLevel -> Body -> IntraGroupM (Out.Body Out.Kernels)
+intraGroupBody lvl body = do
+  stms <- collectStms_ $ mapM_ (intraGroupStm lvl) $ bodyStms body
   return $ mkBody stms $ bodyResult body
 
-intraGroupStm :: Stm -> IntraGroupM ()
-intraGroupStm stm@(Let pat _ e) = do
-  Env ltid deps group_variant <- ask
+intraGroupStm :: SegLevel -> Stm -> IntraGroupM ()
+intraGroupStm lvl stm@(Let pat aux e) = do
+  Env deps group_variant <- ask
   let groupInvariant (Var v) =
         S.null . S.intersection group_variant .
         flip (M.findWithDefault mempty) deps $ v
       groupInvariant Constant{} = True
+      lvl' = SegThread (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
 
   case e of
-    DoLoop ctx val (ForLoop i it bound inps) loopbody
-      | groupInvariant bound ->
-          localScope (scopeOf form) $
-          localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
-          loopbody' <- intraGroupBody loopbody
-          letBind_ pat $ DoLoop ctx val form loopbody'
-              where form = ForLoop i it bound inps
+    DoLoop ctx val form loopbody ->
+      localScope (scopeOf form') $
+      localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
+      loopbody' <- intraGroupBody lvl loopbody
+      certifying (stmAuxCerts aux) $
+        letBind_ pat $ DoLoop ctx val form' loopbody'
+          where form' = case form of
+                          ForLoop i it bound inps -> ForLoop i it bound inps
+                          WhileLoop cond          -> WhileLoop cond
 
     If cond tbody fbody ifattr
       | groupInvariant cond -> do
-          tbody' <- intraGroupBody tbody
-          fbody' <- intraGroupBody fbody
-          letBind_ pat $ If cond tbody' fbody' ifattr
+          tbody' <- intraGroupBody lvl tbody
+          fbody' <- intraGroupBody lvl fbody
+          certifying (stmAuxCerts aux) $
+            letBind_ pat $ If cond tbody' fbody' ifattr
 
-    Op (Screma w form arrs) | Just fun <- isMapSOAC form -> do
-      body_stms <- collectStms_ $ do
-        forM_ (zip (lambdaParams fun) arrs) $ \(p, arr) -> do
-          arr_t <- lookupType arr
-          letBindNames [paramName p] $ BasicOp $ Index arr $
-            fullSlice arr_t [DimFix $ Var ltid]
-        Kernelise.transformStms $ bodyStms $ lambdaBody fun
-      let comb_body = mkBody body_stms $ bodyResult $ lambdaBody fun
-      ctid <- newVName "ctid"
-      letBind_ pat $ Op $
-        Out.Combine (Out.combineSpace [(ctid, w)]) (lambdaReturnType fun) [] comb_body
-      mapM_ (parallelMin . arrayDims) $ patternTypes pat
+    Op (Screma w form arrs)
+      | Just lam <- isMapSOAC form -> do
+      let lam' = soacsLambdaToKernels lam
+      certifying (stmAuxCerts aux) $
+        addStms =<< segMap lvl' pat w lam' arrs [] []
       parallelMin [w]
 
     Op (Screma w form arrs)
-      | Just (scanfun, nes, foldfun) <- isScanomapSOAC form -> do
-      let (scan_pes, map_pes) =
-            splitAt (length nes) $ patternElements pat
-      scan_input <- procInput ltid (Pattern [] map_pes) w foldfun nes arrs
-
-      scanfun' <- Kernelise.transformLambda scanfun
-
-      -- A GroupScan lambda needs two more parameters.
-      my_index <- newVName "my_index"
-      offset <- newVName "offset"
-      let my_index_param = Param my_index (Prim int32)
-          offset_param = Param offset (Prim int32)
-          scanfun'' = scanfun' { lambdaParams = my_index_param :
-                                                offset_param :
-                                                lambdaParams scanfun'
-                               }
-      letBind_ (Pattern [] scan_pes) $
-        Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
+      | Just (scanfun, nes, mapfun) <- isScanomapSOAC form -> do
+      let scanfun' = soacsLambdaToKernels scanfun
+          mapfun' = soacsLambdaToKernels mapfun
+      certifying (stmAuxCerts aux) $
+        addStms =<< segScan lvl' pat w scanfun' mapfun' nes arrs [] []
       parallelMin [w]
 
     Op (Screma w form arrs)
-      | Just (_, redfun, nes, foldfun) <- isRedomapSOAC form -> do
-      let (red_pes, map_pes) =
-            splitAt (length nes) $ patternElements pat
-      red_input <- procInput ltid (Pattern [] map_pes) w foldfun nes arrs
-
-      redfun' <- Kernelise.transformLambda redfun
-
-      -- A GroupReduce lambda needs two more parameters.
-      my_index <- newVName "my_index"
-      offset <- newVName "offset"
-      let my_index_param = Param my_index (Prim int32)
-          offset_param = Param offset (Prim int32)
-          redfun'' = redfun' { lambdaParams = my_index_param :
-                                              offset_param :
-                                              lambdaParams redfun'
-                               }
-      letBind_ (Pattern [] red_pes) $
-        Op $ Out.GroupReduce w redfun'' $ zip nes red_input
+      | Just (reds, map_lam) <- isRedomapSOAC form,
+        Reduce comm red_lam nes <- singleReduce reds -> do
+      let red_lam' = soacsLambdaToKernels red_lam
+          map_lam' = soacsLambdaToKernels map_lam
+      certifying (stmAuxCerts aux) $
+        addStms =<< segRed lvl' pat w [SegRedOp comm red_lam' nes mempty] map_lam' arrs [] []
       parallelMin [w]
 
     Op (Stream w (Sequential accs) lam arrs)
@@ -231,94 +181,43 @@ intraGroupStm stm@(Let pat _ e) = do
       let replace (Var v) | v == paramName chunk_size_param = w
           replace se = se
           replaceSets (x, y) = (S.map (map replace) x, S.map (map replace) y)
-      censor replaceSets $ mapM_ intraGroupStm stream_bnds
+      censor replaceSets $ mapM_ (intraGroupStm lvl) stream_bnds
 
     Op (Scatter w lam ivs dests) -> do
+      write_i <- newVName "write_i"
+      space <- mkSegSpace [(write_i, w)]
+
+      let lam' = soacsLambdaToKernels lam
+          (dests_ws, dests_ns, dests_vs) = unzip3 dests
+          (i_res, v_res) = splitAt (sum dests_ns) $ bodyResult $ lambdaBody lam'
+          krets = do (a_w, a, is_vs) <- zip3 dests_ws dests_vs $ chunks dests_ns $ zip i_res v_res
+                     return $ WriteReturns [a_w] a [ ([i],v) | (i,v) <- is_vs ]
+          inputs = do (p, p_a) <- zip (lambdaParams lam') ivs
+                      return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
+
+      kstms <- runBinder_ $ localScope (scopeOfSegSpace space) $ do
+        mapM_ readKernelInput inputs
+        addStms $ bodyStms $ lambdaBody lam'
+
+      certifying (stmAuxCerts aux) $ do
+        let ts = map rowType $ patternTypes pat
+            body = KernelBody () kstms krets
+        letBind_ pat $ Op $ SegOp $ SegMap lvl' space ts body
+
       parallelMin [w]
-      ctid <- newVName "ctid"
-      let cspace = Out.CombineSpace dests [(ctid, w)]
-      body_stms <- collectStms_ $ do
-        forM_ (zip (lambdaParams lam) ivs) $ \(p, arr) -> do
-          arr_t <- lookupType arr
-          letBindNames [paramName p] $ BasicOp $ Index arr $
-            fullSlice arr_t [DimFix $ Var ltid] -- ltid on purpose to enable hoisting.
-        Kernelise.transformStms $ bodyStms $ lambdaBody lam
-      let body = mkBody body_stms $ bodyResult $ lambdaBody lam
-      letBind_ pat $ Op $ Out.Combine cspace (lambdaReturnType lam) mempty body
-
-    BasicOp (Update dest slice (Var v)) -> do
-      let ws = sliceDims slice
-          activeForDim w i = BasicOp $ CmpOp (CmpSlt Int32) i w
-      parallelMin ws
-      dest' <- letExp "update_inp" $ Op $ Out.Barrier [Var dest]
-      let new_inds = unflattenIndex (map (primExpFromSubExp int32) ws)
-                                    (primExpFromSubExp int32 $ Var ltid)
-      new_inds' <- mapM (letSubExp "i" <=< toExp) new_inds
-      active <- letSubExp "active" =<<
-                foldBinOp LogAnd (constant True) =<<
-                mapM (letSubExp "active") (zipWith activeForDim ws new_inds')
-      (active_res, active_stms) <- collectStms $ do
-        slice' <-
-          mapM (letSubExp "j" <=< toExp) $
-          fixSlice (map (fmap $ primExpFromSubExp int32) slice) new_inds
-        letInPlace "update_res" dest' (map DimFix slice') $
-          BasicOp $ Index v $ map DimFix new_inds'
-      sync <- letSubExp "update_res" =<< eIf (eSubExp active)
-        (pure $ mkBody active_stms [Var active_res])
-        (pure $ mkBody mempty [Var dest'])
-      letBind_ pat $ Op $ Out.Barrier [sync]
-
-    BasicOp (Copy arr) -> do
-      arr_t <- lookupType arr
-      let w = arraySize 0 arr_t
-      ctid <- newVName "copy_ctid"
-      letBind_ pat . Op . Out.Combine (Out.combineSpace [(ctid, w)]) [rowType arr_t] [] <=<
-        localScope (M.singleton ctid $ IndexInfo Int32) $
-        insertStmsM $ resultBodyM . pure <=< letSubExp "v" $
-        BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var ctid]
-
-    BasicOp (Replicate (Shape outer_ws) se)
-      | [inner_ws] <- map (drop (length outer_ws) . arrayDims) $ patternTypes pat -> do
-      let ws = outer_ws ++ inner_ws
-      new_inds' <- replicateM (length ws) $ newVName "new_local_index"
-      let inner_inds' = drop (length outer_ws) new_inds'
-          space = Out.combineSpace $ zip new_inds' ws
-          index = case se of Var v -> BasicOp $ Index v $
-                                      map (DimFix . Var) inner_inds'
-                             Constant{} -> BasicOp $ SubExp se
-      body <- runBodyBinder $ eBody [pure index]
-      letBind_ pat $ Op $
-        Out.Combine space (map (Prim . elemType) $ patternTypes pat) [] body
-      mapM_ (parallelAvail . arrayDims) $ patternTypes pat
 
     _ ->
-      Kernelise.transformStm stm
+      addStm $ soacsStmToKernels stm
 
-  where procInput :: VName
-                  -> Out.Pattern Out.InKernel
-                  -> SubExp -> Lambda -> [SubExp] -> [VName]
-                  -> IntraGroupM [VName]
-        procInput ltid map_pat w map_fun nes arrs = do
-          fold_stms <- collectStms_ $ do
-            forM_ (zip (lambdaParams map_fun) arrs) $ \(p, arr) -> do
-              arr_t <- lookupType arr
-              letBindNames_ [paramName p] $ BasicOp $ Index arr $
-                fullSlice arr_t [DimFix $ Var ltid]
-
-            Kernelise.transformStms $ bodyStms $ lambdaBody map_fun
-          let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody map_fun
-
-          op_inps <- replicateM (length nes) (newVName "op_input")
-          ctid <- newVName "ctid"
-          letBindNames_ (op_inps ++ patternNames map_pat) $ Op $
-            Out.Combine (Out.combineSpace [(ctid, w)]) (lambdaReturnType map_fun) [] fold_body
-          return op_inps
+intraGroupStms :: SegLevel -> Stms SOACS -> IntraGroupM ()
+intraGroupStms lvl = mapM_ (intraGroupStm lvl)
 
 intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                             Dependencies -> Names -> VName -> Body
-                          -> m ([[SubExp]], [[SubExp]], Out.KernelBody Out.InKernel)
-intraGroupParalleliseBody deps group_variant ltid body = do
-  (min_ws, avail_ws, kstms) <- runIntraGroupM (Env ltid deps group_variant) $
-                 mapM_ intraGroupStm $ bodyStms body
+                             SegLevel -> Dependencies -> Names -> Body
+                          -> m ([[SubExp]], [[SubExp]], Out.KernelBody Out.Kernels)
+intraGroupParalleliseBody lvl deps group_variant body = do
+  (min_ws, avail_ws, kstms) <-
+    runIntraGroupM (Env deps group_variant) $
+    intraGroupStms lvl $ bodyStms body
   return (min_ws, avail_ws,
-          KernelBody () kstms $ map (ThreadsReturn OneResultPerGroup) $ bodyResult body)
+          KernelBody () kstms $ map Returns $ bodyResult body)

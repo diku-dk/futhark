@@ -1,7 +1,10 @@
-resolver: lts-13.14
+resolver: lts-13.25
 packages:
 - .
 
 flags: {}
 
 extra-package-dbs: []
+
+nix:
+    packages: [zlib.dev, zlib.out, pkgconfig, haskell.compiler.ghc865]
