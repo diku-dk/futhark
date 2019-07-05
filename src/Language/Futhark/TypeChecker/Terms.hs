@@ -1401,14 +1401,14 @@ unmatched hole (p:ps)
                   let constrGroups   = groupBy sameConstr (sortBy compareConstr ps')
                       removedConstrs = map stripConstrs constrGroups
                       transposed     = (fmap . fmap) transpose removedConstrs
-                      findUnmatched (p, trans) = do
+                      findUnmatched (pc, trans) = do
                         col <- trans
                         case col of
                           []           -> []
-                          ((i, _):_) -> unmatched (wilder i p) (map snd col)
-                      wilder i p s = (`PatternParens` noLoc) <$> wildPattern p i s
+                          ((i, _):_) -> unmatched (wilder i pc) (map snd col)
+                      wilder i pc s = (`PatternParens` noLoc) <$> wildPattern pc i s
                   in concatMap findUnmatched transposed
-                ps -> ps
+                _ -> unmatched'
             Prim t
               | not (any idOrWild ps') ->
                 case t of
@@ -1424,7 +1424,7 @@ unmatched hole (p:ps)
         isConstr _ = False
 
         stripConstrs :: [Pattern] -> (Pattern, [[(Int, Pattern)]])
-        stripConstrs (p@PatternConstr{} : cs') = (p, stripConstr p : map stripConstr cs')
+        stripConstrs (pc@PatternConstr{} : cs') = (pc, stripConstr pc : map stripConstr cs')
 
         stripConstr :: Pattern -> [(Int, Pattern)]
         stripConstr (PatternConstr _ _  ps' _) = zip [1..] ps'
@@ -1460,7 +1460,7 @@ unmatched hole (p:ps)
 
         buildConstr t@(SumT m) c =
           let cs     = m M.! c
-              wildCS = map (\t -> Wildcard (Info t) noLoc) cs
+              wildCS = map (\ct -> Wildcard (Info ct) noLoc) cs
           in if null wildCS
                then PatternConstr c (Info t) [] noLoc
                else PatternParens (PatternConstr c (Info t) wildCS noLoc) noLoc
