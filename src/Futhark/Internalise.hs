@@ -48,8 +48,7 @@ internaliseProg always_safe prog = do
   prog_decs' <- Monomorphise.transformProg prog_decs
   prog_decs'' <- Defunctionalise.transformProg prog_decs'
   prog' <- fmap (fmap I.Prog) $ runInternaliseM always_safe $ internaliseValBinds prog_decs''
-  prog'' <- traverse I.renameProg prog'
-  return prog''
+  traverse I.renameProg prog'
 
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
@@ -181,7 +180,7 @@ generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info rettype) _ params _ _
 entryPoint :: [(E.Pattern, E.StructType, [I.FParam])]
            -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
            -> EntryPoint
-entryPoint params (retdecl, eret, crets) = do
+entryPoint params (retdecl, eret, crets) =
   (concatMap (entryPointType . preParam) params,
    case isTupleRecord eret of
      Just ts -> concatMap entryPointType $ zip3 retdecls ts crets
@@ -455,7 +454,7 @@ internaliseExp desc e@E.Apply{} = do
   -- Note that polymorphic functions (which are not magical) are not
   -- handled here.
   case () of
-    () | Just internalise <- isOverloadedFunction qfname args loc -> do
+    () | Just internalise <- isOverloadedFunction qfname args loc ->
            internalise desc
        | Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
            let tag ses = [ (se, I.Observe) | se <- ses ]
@@ -670,7 +669,7 @@ internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
 internaliseExp _ e@E.Constr{} =
   fail $ "internaliseExp: unexpected constructor at " ++ locStr (srclocOf e)
 
-internaliseExp desc (E.Match  e cs _ loc) = do
+internaliseExp desc (E.Match  e cs _ loc) =
   case cs of
     [CasePat pCase eCase locCase] -> internalisePat desc pCase e eCase locCase (internaliseExp desc)
     (c:cs') -> do
@@ -782,7 +781,7 @@ generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
         generateCond' (E.PatternLit ePat (Info t) _) =
           [(Just (eqExp ePat), t)]
         generateCond' E.PatternConstr{} =
-          fail $ "generateCond: unexpected pattern constructor."
+          fail "generateCond: unexpected pattern constructor."
 
 generateCaseIf :: String -> E.Exp -> Case -> I.Body -> InternaliseM I.Exp
 generateCaseIf desc e (CasePat p eCase loc) bFail = do
@@ -1746,7 +1745,7 @@ typeExpForError cm (E.TEApply t arg _) = do
                       TypeArgExpDim d _   -> pure <$> dimDeclForError cm d
   return $ t' ++ [" "] ++ arg'
 typeExpForError cm (E.TESum cs _) = do
-  cs' <- mapM onClause $ map snd cs
+  cs' <- mapM (onClause . snd) cs
   return $ intercalate [" | "] cs'
   where onClause c = do
           c' <- mapM (typeExpForError cm) c

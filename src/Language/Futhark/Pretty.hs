@@ -146,7 +146,7 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
     parensIf (p > 0) $ pprPrec 1 t1 <+> text "->" <+> ppr t2
   pprPrec _ (SumT cs) =
     cat $ punctuate (text " | ") $ map ppConstr $ M.toList cs
-    where ppConstr (name, fs) = sep $ (text "#" <> ppr name) : (map ppr fs)
+    where ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map ppr fs
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]

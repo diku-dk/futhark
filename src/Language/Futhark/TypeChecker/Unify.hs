@@ -141,18 +141,16 @@ unify loc orig_t1 orig_t2 = do
 
         (Array{}, Array{})
           | Just t1'' <- peelArray 1 t1',
-            Just t2'' <- peelArray 1 t2' -> do
+            Just t2'' <- peelArray 1 t2' ->
               subunify t1'' t2''
 
         (SumT cs,
          SumT arg_cs)
           | M.keys cs == M.keys arg_cs ->
               forM_ (M.toList $ M.intersectionWith (,) cs arg_cs) $ \(_, (f1, f2)) ->
-              if (length f1 == length f2)
-              then
-                zipWithM_ subunify f1 f2 -- TODO: improve
-              else
-                failure
+              if length f1 == length f2
+              then zipWithM_ subunify f1 f2 -- TODO: improve
+              else failure
         (_, _) -> failure
 
       where unifyTypeArg TypeArgDim{} TypeArgDim{} = return ()
@@ -191,7 +189,7 @@ linkVarToType loc vn tp = do
                     case tp' of
                       TypeVar _ _ (TypeName [] v) []
                         | not $ isRigid v constraints -> linkVarToTypes loc v ts
-                      _ -> do
+                      _ ->
                         typeError loc $ "Cannot unify `" ++ prettyName vn ++ "' with type `" ++
                           pretty tp ++ "' (`" ++ prettyName vn ++
                           "` must be one of " ++ intercalate ", " (map pretty ts) ++
@@ -222,9 +220,9 @@ linkVarToType loc vn tp = do
                         mapM_ (uncurry (zipWithM_ (unify loc))) $ M.elems $
                           M.intersectionWith (,) required_cs ts
                   TypeVar _ _ (TypeName [] v) []
-                    | not $ isRigid v constraints -> do
+                    | not $ isRigid v constraints ->
                         modifyConstraints $ M.insertWith combineConstrs v $
-                                   HasConstrs required_cs old_loc
+                        HasConstrs required_cs old_loc
                         where combineConstrs (HasConstrs cs1 loc1) (HasConstrs cs2 _) =
                                 HasConstrs (M.union cs1 cs2) loc1
                               combineConstrs hasCs _ = hasCs

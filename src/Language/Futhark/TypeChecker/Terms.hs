@@ -572,19 +572,19 @@ checkPattern' (PatternLit e NoInfo loc) NoneInferred = do
 
 checkPattern' (PatternConstr n NoInfo ps loc) (Ascribed (SumT cs))
   | Just ts <- M.lookup n cs = do
-      ps' <- mapM (uncurry checkPattern') $ zip ps $ map Ascribed ts
+      ps' <- zipWithM checkPattern' ps $ map Ascribed ts
       return $ PatternConstr n (Info (SumT cs)) ps' loc
 
 checkPattern' (PatternConstr n NoInfo ps loc) (Ascribed t) = do
   t' <- newTypeVar loc "t"
-  ps' <- mapM ((flip checkPattern') NoneInferred) ps
+  ps' <- mapM (`checkPattern'` NoneInferred) ps
   mustHaveConstr loc n t' (toStructural . patternType <$> ps')
   unify loc t' (toStructural t)
   t'' <- normaliseType t
   return $ PatternConstr n (Info t'') ps' loc
 
 checkPattern' (PatternConstr n NoInfo ps loc) NoneInferred = do
-  ps' <- mapM ((flip checkPattern') NoneInferred) ps
+  ps' <- mapM (`checkPattern'` NoneInferred) ps
   t <- newTypeVar loc "t"
   mustHaveConstr loc n t (toStructural . patternType <$> ps')
   return $ PatternConstr n (Info t) ps' loc
@@ -1275,7 +1275,7 @@ checkExp (Constr name es NoInfo loc) = do
 checkExp (Match _ [] NoInfo loc) =
   typeError loc "Match expressions must have at least one case."
 
-checkExp (Match e (c:cs) NoInfo loc) = do
+checkExp (Match e (c:cs) NoInfo loc) =
   sequentially (checkExp e) $ \e' _ -> do
     mt <- expType e'
     (cs', t) <- checkCases mt c cs
@@ -1406,7 +1406,7 @@ unmatched hole (p:ps)
                         case col of
                           []           -> []
                           ((i, _):_) -> unmatched (wilder i p) (map snd col)
-                      wilder i p = \s -> (\p' -> PatternParens p' noLoc) <$> wildPattern p i s
+                      wilder i p s = (`PatternParens` noLoc) <$> wildPattern p i s
                   in concatMap findUnmatched transposed
                 ps -> ps
             Prim t
@@ -1460,7 +1460,7 @@ unmatched hole (p:ps)
 
         buildConstr t@(SumT m) c =
           let cs     = m M.! c
-              wildCS = map (\t -> Wildcard (Info t) (noLoc)) cs
+              wildCS = map (\t -> Wildcard (Info t) noLoc) cs
           in if null wildCS
                then PatternConstr c (Info t) [] noLoc
                else PatternParens (PatternConstr c (Info t) wildCS noLoc) noLoc

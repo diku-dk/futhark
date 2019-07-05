@@ -453,7 +453,7 @@ expandRecordPattern (PatternAscription pat td loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternAscription pat' td loc, rr)
 expandRecordPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
-expandRecordPattern (PatternConstr name (Info t@(SumT cs)) ps loc) = do
+expandRecordPattern (PatternConstr name (Info t@(SumT cs)) ps loc) =
   case constrIndex name t of
     Nothing -> error "Malformed Constr value."
     Just n  -> do
@@ -464,8 +464,10 @@ expandRecordPattern (PatternConstr name (Info t@(SumT cs)) ps loc) = do
             index =  PatternLit (Literal (UnsignedValue (intValue Int8 n)) noLoc) (Info (Prim (Unsigned Int8))) noLoc
             clauses = mapM clause $ sortConstrs cs
             clause (name', ts)
-                 | name == name' = TuplePattern <$> (fmap . fmap) fst (mapM (expandRecordPattern) ps) <*> pure loc
-                 | otherwise     = return $ TuplePattern (map (flip Wildcard noLoc) (map Info ts)) noLoc
+                 | name == name' = TuplePattern
+                                   <$> (fmap . fmap) fst (mapM expandRecordPattern ps)
+                                   <*> pure loc
+                 | otherwise     = return $ TuplePattern (map ((`Wildcard` noLoc) . Info) ts) noLoc
 expandRecordPattern PatternConstr{} = error "expandRecordPattern: invalid pattern constructor type."
 
 -- | Monomorphize a polymorphic function at the types given in the instance

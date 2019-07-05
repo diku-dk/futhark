@@ -445,7 +445,7 @@ SumClauses :: { ([(Name, [UncheckedTypeExp])], SrcLoc) }
                                         in ([(n, ts)], loc) }
 
 SumClause :: { (Name, [UncheckedTypeExp], SrcLoc) }
-	          : SumClause TypeExpAtom { let (n, ts, loc) = $1
+           : SumClause TypeExpAtom { let (n, ts, loc) = $1
                                      in (n, ts ++ [$2], srcspan loc $>)}
             | VConstr0 { (fst $1, [], snd $1) }
 

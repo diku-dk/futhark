@@ -322,7 +322,7 @@ typeToArrayElem (TypeVar _ _ bt targs) =
 typeToArrayElem (Record ts') =
   ArrayRecordElem <$> traverse typeToRecordArrayElem ts'
 typeToArrayElem (Array _ _ et _) =
-  Just $ et
+  Just et
 typeToArrayElem Arrow{} = Nothing
 typeToArrayElem (SumT cs) =
   ArraySumElem <$>
@@ -514,7 +514,7 @@ typeOf (ProjectSection _ (Info t) _) = t
 typeOf (IndexSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _)  = t
 typeOf (Match _ cs (Info t) _) =
-  unscopeType (foldMap unscopeSet cs) $ t
+  unscopeType (foldMap unscopeSet cs) t
   where unscopeSet (CasePat p _ _) = S.map identName $ patternIdents p
 
 foldFunType :: Monoid as => [TypeBase dim as] -> TypeBase dim as -> TypeBase dim as
