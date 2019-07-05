@@ -1375,6 +1375,23 @@ checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
                        , mapOnPatternType = pure
                        }
 
+-- | A data type for constructor patterns.  This is used to make the
+-- code for detecting unmatched constructors cleaner, by separating
+-- the constructor-pattern cases from other cases.
+data ConstrPat = ConstrPat { constrName :: Name
+                           , constrType :: PatternType
+                           , constrPayload :: [Pattern]
+                           , constrSrcLoc :: SrcLoc
+                           }
+
+-- Be aware of these fishy equality instances!
+
+instance Eq ConstrPat where
+  ConstrPat c1 _ _ _ == ConstrPat c2 _ _ _ = c1 == c2
+
+instance Ord ConstrPat where
+  ConstrPat c1 _ _ _ `compare` ConstrPat c2 _ _ _ = c1 `compare` c2
+
 unmatched :: (Unmatched Pattern -> Unmatched Pattern) -> [Pattern] -> [Unmatched Pattern]
 unmatched hole orig_ps
   | p:_ <- orig_ps,
@@ -1399,13 +1416,13 @@ unmatched hole orig_ps
               -- that all patterns ps' are constructors (checked by
               -- 'all isPatternLit' before this function is called).
               let constrs   = M.keys cs''
-                  matched   = nub $ mapMaybe constr ps'
+                  matched   = mapMaybe constr ps'
                   unmatched' = map (UnmatchedConstr . buildConstr cs'') $
-                               constrs \\ matched
+                               constrs \\ map constrName matched
              in case unmatched' of
                 [] ->
-                  let constrGroups   = groupBy sameConstr (sortBy compareConstr ps')
-                      removedConstrs = map stripConstrs constrGroups
+                  let constrGroups   = group (sort matched)
+                      removedConstrs = mapMaybe stripConstrs constrGroups
                       transposed     = (fmap . fmap) transpose removedConstrs
                       findUnmatched (pc, trans) = do
                         col <- trans
@@ -1431,14 +1448,13 @@ unmatched hole orig_ps
         isConstr PatternConstr{} = True
         isConstr _ = False
 
-        stripConstrs :: [Pattern] -> (Pattern, [[(Int, Pattern)]])
-        stripConstrs (pc@PatternConstr{} : cs') = (pc, stripConstr pc : map stripConstr cs')
 
-        stripConstr :: Pattern -> [(Int, Pattern)]
-        stripConstr (PatternConstr _ _  ps' _) = zip [1..] ps'
+        stripConstrs :: [ConstrPat] -> Maybe (Pattern, [[(Int, Pattern)]])
+        stripConstrs (pc@ConstrPat{} : cs') = Just (unConstr pc, stripConstr pc : map stripConstr cs')
+        stripConstrs [] = Nothing
 
-        (PatternConstr n1 _ _ _) `sameConstr` (PatternConstr n2 _ _ _)    = n1 == n2
-        (PatternConstr n1 _ _ _) `compareConstr` (PatternConstr n2 _ _ _) = n1 `compare` n2
+        stripConstr :: ConstrPat -> [(Int, Pattern)]
+        stripConstr (ConstrPat _ _  ps' _) = zip [1..] ps'
 
         sameStructure [] = True
         sameStructure (x:xs) = all (\y -> length y == length x' ) xs'
@@ -1447,9 +1463,12 @@ unmatched hole orig_ps
         pExp (PatternLit e' _ _) = Just e'
         pExp _ = Nothing
 
-        constr (PatternConstr c _ _ _) = Just c
+        constr (PatternConstr c (Info t) ps loc) = Just $ ConstrPat c t ps loc
         constr (PatternAscription p' _ _)  = constr p'
         constr _ = Nothing
+
+        unConstr p =
+          PatternConstr (constrName p) (Info $ constrType p) (constrPayload p) (constrSrcLoc p)
 
         isPatternLit PatternLit{} = True
         isPatternLit (PatternAscription p' _ _) = isPatternLit p'
