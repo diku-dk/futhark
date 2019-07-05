@@ -228,7 +228,7 @@ traverseArrayElemType f g (ArrayRecordElem fs) =
   ArrayRecordElem <$> traverse (traverseRecordArrayElemType f g) fs
 traverseArrayElemType f g (ArraySumElem cs) =
   ArraySumElem <$> (traverse . traverse) (traverseRecordArrayElemType f g) cs
-  
+
 traverseRecordArrayElemType :: Applicative f =>
                                (TypeName -> f TypeName) -> (dim1 -> f dim2)
                             -> RecordArrayElemTypeBase dim1 -> f (RecordArrayElemTypeBase dim2)
