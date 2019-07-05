@@ -16,7 +16,7 @@ jobs:
 
   - script: |
       sudo apt update
-      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev
+      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev python-numpy
     displayName: Install OS-level dependencies
 
   - script: |
@@ -57,3 +57,9 @@ jobs:
       stack install
       futhark test -C --no-terminal --backend=cuda tests examples --exclude=no_opencl
     displayName: Compile with backend=cuda
+
+  - script: |
+      export PATH=$HOME/.local/bin:$PATH
+      stack install
+      futhark test -c --no-terminal --backend=python tests examples --exclude=no_python
+    displayName: Compile and run with backend=python
