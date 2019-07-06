@@ -46,7 +46,7 @@ data Constraint = NoConstraint (Maybe Liftedness) SrcLoc
                 | Overloaded [PrimType] SrcLoc
                 | HasFields (M.Map Name (TypeBase () ())) SrcLoc
                 | Equality SrcLoc
-                | HasConstrs [Name] SrcLoc
+                | HasConstrs (M.Map Name [TypeBase () ()]) SrcLoc
                 deriving Show
 
 instance Located Constraint where
@@ -104,6 +104,7 @@ unify loc orig_t1 orig_t2 = do
             typeError loc $ "Couldn't match expected type `" ++
             pretty t1' ++ "' with actual type `" ++ pretty t2' ++ "'."
 
+      traceM' $ unlines ["t1':" ++ show t1', "t2':" ++ show t2', "constraints:" ++ show constraints]
       case (t1', t2') of
         _ | t1' == t2' -> return ()
 
@@ -143,6 +144,13 @@ unify loc orig_t1 orig_t2 = do
             Just t2'' <- peelArray 1 t2' ->
               subunify t1'' t2''
 
+        (SumT cs,
+         SumT arg_cs)
+          | M.keys cs == M.keys arg_cs ->
+              forM_ (M.toList $ M.intersectionWith (,) cs arg_cs) $ \(_, (f1, f2)) ->
+              if length f1 == length f2
+              then zipWithM_ subunify f1 f2 -- TODO: improve
+              else failure
         (_, _) -> failure
 
       where unifyTypeArg TypeArgDim{} TypeArgDim{} = return ()
@@ -160,7 +168,8 @@ applySubstInConstraint _ _ (NoConstraint l loc) = NoConstraint l loc
 applySubstInConstraint _ _ (Overloaded ts loc) = Overloaded ts loc
 applySubstInConstraint _ _ (Equality loc) = Equality loc
 applySubstInConstraint _ _ (ParamType l loc) = ParamType l loc
-applySubstInConstraint _ _ (HasConstrs ns loc) = HasConstrs ns loc
+applySubstInConstraint vn subst (HasConstrs cs loc) =
+  HasConstrs (M.map (map (applySubst (flip M.lookup $ M.singleton vn subst))) cs) loc
 
 linkVarToType :: MonadUnify m => SrcLoc -> VName -> TypeBase () () -> m ()
 linkVarToType loc vn tp = do
@@ -182,9 +191,9 @@ linkVarToType loc vn tp = do
                         | not $ isRigid v constraints -> linkVarToTypes loc v ts
                       _ ->
                         typeError loc $ "Cannot unify `" ++ prettyName vn ++ "' with type `" ++
-                        pretty tp ++ "' (`" ++ prettyName vn ++
-                        "` must be one of " ++ intercalate ", " (map pretty ts) ++
-                        " due to use at " ++ locStr old_loc ++ ")."
+                          pretty tp ++ "' (`" ++ prettyName vn ++
+                          "` must be one of " ++ intercalate ", " (map pretty ts) ++
+                          " due to use at " ++ locStr old_loc ++ ")."
               Just (HasFields required_fields old_loc) ->
                 case tp of
                   Record tp_fields
@@ -204,21 +213,20 @@ linkVarToType loc vn tp = do
                        pretty tp ++ "' (must be a record with fields {" ++
                        required_fields' ++
                        "} due to use at " ++ locStr old_loc ++ ")."
-              Just (HasConstrs cs old_loc) ->
+              Just (HasConstrs required_cs old_loc) ->
                 case tp of
-                  Enum t_cs
-                    | intersect cs t_cs == cs -> return ()
-                    | otherwise -> typeError loc $
-                       "Cannot unify `" ++ prettyName vn ++ "' with type `"
-                       ++ pretty tp ++ "'"
+                  SumT ts
+                    | all (`M.member` ts) $ M.keys required_cs ->
+                        mapM_ (uncurry (zipWithM_ (unify loc))) $ M.elems $
+                          M.intersectionWith (,) required_cs ts
                   TypeVar _ _ (TypeName [] v) []
                     | not $ isRigid v constraints ->
-                        let addConstrs (HasConstrs cs' loc') (HasConstrs cs'' _) =
-                              HasConstrs (cs' `union` cs'') loc'
-                            addConstrs c _ = c
-                        in modifyConstraints $ M.insertWith addConstrs v $
-                           HasConstrs cs old_loc
-                  _ -> typeError loc "Cannot unify."
+                        modifyConstraints $ M.insertWith combineConstrs v $
+                        HasConstrs required_cs old_loc
+                        where combineConstrs (HasConstrs cs1 loc1) (HasConstrs cs2 _) =
+                                HasConstrs (M.union cs1 cs2) loc1
+                              combineConstrs hasCs _ = hasCs
+                  _ -> typeError loc "Can't unify." -- TODO : Improve
               _ -> return ()
   where tp' = removeUniqueness tp
 
@@ -227,6 +235,8 @@ removeUniqueness (Record ets) =
   Record $ fmap removeUniqueness ets
 removeUniqueness (Arrow als p t1 t2) =
   Arrow als p (removeUniqueness t1) (removeUniqueness t2)
+removeUniqueness (SumT cs) =
+  SumT $ (fmap . fmap) removeUniqueness cs
 removeUniqueness t = t `setUniqueness` Nonunique
 
 mustBeOneOf :: MonadUnify m => [PrimType] -> SrcLoc -> TypeBase () () -> m ()
@@ -265,24 +275,25 @@ equalityType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
 equalityType loc t = do
   unless (orderZero t) $
     typeError loc $
-    "Type \"" ++ pretty t ++ "\" does not support equality."
+    "Type \"" ++ pretty t ++ "\" does not support equality (is higher-order)."
   mapM_ mustBeEquality $ typeVars t
   where mustBeEquality vn = do
           constraints <- getConstraints
           case M.lookup vn constraints of
             Just (Constraint (TypeVar _ _ (TypeName [] vn') []) _) ->
               mustBeEquality vn'
-            Just (Constraint vn_t _)
+            Just (Constraint vn_t cloc)
               | not $ orderZero vn_t ->
-                  typeError loc $ "Type \"" ++ pretty t ++
-                  "\" does not support equality."
+                  typeError loc $
+                  unlines ["Type \"" ++ pretty t ++ "\" does not support equality.",
+                           "Constrained to be higher-order at " ++ locStr cloc]
               | otherwise -> return ()
             Just (NoConstraint _ _) ->
               modifyConstraints $ M.insert vn (Equality loc)
             Just (Overloaded _ _) ->
               return () -- All primtypes support equality.
-            Just HasConstrs{} ->
-              return ()
+            Just (HasConstrs cs _) ->
+              mapM_ (equalityType loc) $ concat $ M.elems cs
             _ ->
               typeError loc $ "Type " ++ pretty (prettyName vn) ++
               " does not support equality."
@@ -310,24 +321,32 @@ zeroOrderType loc desc t = do
               locStr ploc ++ " may be a function."
             _ -> return ()
 
+-- In @mustHaveConstr loc c t fs@, the type @t@ must have a
+-- constructor named @c@ that takes arguments of types @ts@.
 mustHaveConstr :: MonadUnify m =>
-                  SrcLoc -> Name -> TypeBase dim as -> m ()
-mustHaveConstr loc c t = do
+                  SrcLoc -> Name -> TypeBase dim as -> [TypeBase () ()] -> m ()
+mustHaveConstr loc c t fs = do
+  let struct_f = toStructural <$> fs
   constraints <- getConstraints
   case t of
     TypeVar _ _ (TypeName _ tn) []
       | Just NoConstraint{} <- M.lookup tn constraints ->
-          modifyConstraints $ M.insert tn $ HasConstrs [c] loc
+          modifyConstraints $ M.insert tn $ HasConstrs (M.singleton c struct_f) loc
       | Just (HasConstrs cs _) <- M.lookup tn constraints ->
-          if c `elem` cs
-          then return ()
-          else modifyConstraints $ M.insert tn $ HasConstrs (c:cs) loc
-    Enum cs
-      | c `elem` cs -> return ()
-      | otherwise   -> throwError $ TypeError loc $
-                       "Type " ++ pretty (toStructural t) ++
-                       " does not have a " ++ pretty c ++ " constructor."
-    _ -> do unify loc (toStructural t) $ Enum [c]
+        case M.lookup c cs of
+          Nothing  -> modifyConstraints $ M.insert tn $ HasConstrs (M.insert c fs cs) loc
+          Just fs'
+            | length fs == length fs' -> zipWithM_ (unify loc) fs fs'
+            | otherwise -> throwError $ TypeError loc "Differing constructor arity" -- TODO: Improve
+
+    SumT cs ->
+      case M.lookup c cs of
+        Nothing -> throwError $ TypeError loc "Constuctor not present in type." -- TODO: Improve
+        Just fs'
+            | length fs == length fs' -> zipWithM_ (unify loc) fs (toStructural <$> fs')
+            | otherwise -> throwError $ TypeError loc "Differing constructor arity" -- TODO: Improve
+
+    _ -> do unify loc (toStructural t) $ SumT $ M.singleton c fs
             return ()
 
 mustHaveField :: (MonadUnify m, Monoid as) =>
