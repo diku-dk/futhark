@@ -737,6 +737,9 @@ Case :: { CaseBase NoInfo Name }
 CPattern :: { PatternBase NoInfo Name }
           : CInnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
           | CInnerPattern                 { $1 }
+          | Constr ConstrFields           { let (n, loc) = $1;
+                                                loc' = srcspan loc $>
+                                            in PatternConstr n NoInfo $2 loc'}
 
 CPatterns1 :: { [PatternBase NoInfo Name] }
            : CPattern               { [$1] }
@@ -752,7 +755,8 @@ CInnerPattern :: { PatternBase NoInfo Name }
                | '(' CPattern ',' CPatterns1 ')'    { TuplePattern ($2:$4) (srcspan $1 $>) }
                | '{' CFieldPatterns '}'             { RecordPattern $2 (srcspan $1 $>) }
                | CaseLiteral                        { PatternLit (fst $1) NoInfo (snd $1) }
-               | ConstrPattern                      { $1 }
+               | Constr                             { let (n, loc) = $1
+                                                      in PatternConstr n NoInfo [] loc }
 
 ConstrPattern :: { PatternBase NoInfo Name}
                : '(' Constr ConstrFields ')' { let (n, loc) = $2;
@@ -762,8 +766,8 @@ ConstrPattern :: { PatternBase NoInfo Name}
                           in PatternConstr n NoInfo [] loc }
 
 ConstrFields :: { [PatternBase NoInfo Name] }
-              : CPattern                { [$1] }
-              | ConstrFields CPattern   { $1 ++ [$2] }
+              : CInnerPattern                { [$1] }
+              | ConstrFields CInnerPattern   { $1 ++ [$2] }
 
 CFieldPattern :: { (Name, PatternBase NoInfo Name) }
                : FieldId '=' CPattern

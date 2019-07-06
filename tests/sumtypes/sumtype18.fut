@@ -8,6 +8,6 @@ type foobar     = #foo (mooboo (i32 -> i32)) | #bar (i32 -> i32)
 
 let main : i32 =
   match (#foo (#moo (+1) #none)) : foobar
-  case (#bar f)    -> 0
-  case (#foo #boo) -> 2
-  case (#foo (#moo f (#some 5))) -> 2
+  case #bar f    -> 0
+  case #foo #boo -> 2
+  case #foo (#moo f (#some 5)) -> 2
