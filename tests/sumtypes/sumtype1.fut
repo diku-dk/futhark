@@ -1,6 +1,6 @@
 -- Matches on nested tuples within sumtypes.
 -- ==
--- input { } 
+-- input { }
 -- output { 4 }
 
 type foobar = #foo ((i32, (i32, i32)), i32) | #bar i32

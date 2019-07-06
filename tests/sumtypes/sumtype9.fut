@@ -1,6 +1,6 @@
 -- Sumtype matches on wildcards.
 -- ==
--- input { } 
+-- input { }
 -- output { 2 }
 
 type foobar = #foo i32 | #bar i16

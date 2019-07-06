@@ -1,6 +1,6 @@
 -- Fail if lacking a type annotation.
 -- ==
--- error:
+-- error: Type is ambiguous
 
 let main : i32 =
   match (#bar 12)

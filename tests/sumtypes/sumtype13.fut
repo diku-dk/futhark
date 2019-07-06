@@ -11,7 +11,7 @@ let swap_inplace (ns : []i32) : *[]mooboo =
       x with [i] = match x[i]
                    case (#moo x) -> #boo (-x)
                    case (#boo x) -> #moo (2 * x)
-                    
+
 let f (x : mooboo) : i32 =
   match x
     case (#moo x) -> x

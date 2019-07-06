@@ -5,7 +5,7 @@
 
 type foobar = #foo i32 | #bar i32
 
-let f (x : foobar) : i32 = 
+let f (x : foobar) : i32 =
   match x
   case (#foo y) -> y
   case (#bar y) -> -y

@@ -1,6 +1,6 @@
 -- Inexhaustive sumtype pattern match.
 -- ==
--- error: 
+-- error: Unmatched cases
 
 type foobar = #foo i32 | #bar i32
 
