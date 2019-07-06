@@ -282,11 +282,11 @@ equalityType loc t = do
           case M.lookup vn constraints of
             Just (Constraint (TypeVar _ _ (TypeName [] vn') []) _) ->
               mustBeEquality vn'
-            Just (Constraint vn_t loc)
+            Just (Constraint vn_t cloc)
               | not $ orderZero vn_t ->
                   typeError loc $
                   unlines ["Type \"" ++ pretty t ++ "\" does not support equality.",
-                           "Constrained to be higher-order at " ++ locStr loc]
+                           "Constrained to be higher-order at " ++ locStr cloc]
               | otherwise -> return ()
             Just (NoConstraint _ _) ->
               modifyConstraints $ M.insert vn (Equality loc)
