@@ -102,9 +102,9 @@ integer.  Un-adorned numerals have their type inferred based on use.
 This only works for built-in numeric types.
 
 All types can be combined in tuples as usual, as well as in
-*structurally typed records*, as in Standard ML.  There are not yet
-any sum types.  Abstract types are possible via the module system; see
-:ref:`module-system`.
+*structurally typed records*, as in Standard ML.  Non-recursive sum
+types are supported, and are also structurally typed.  Abstract types
+are possible via the module system; see :ref:`module-system`.
 
 If a variable ``foo`` is a record of type ``{a: i32, b: bool}``, then
 we access field ``a`` with dot notation: ``foo.a``.  Tuples are a
