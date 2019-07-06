@@ -1446,6 +1446,7 @@ unmatched hole orig_ps
             _ -> []
 
         isConstr PatternConstr{} = True
+        isConstr (PatternParens p _) = isConstr p
         isConstr _ = False
 
 
@@ -1464,6 +1465,7 @@ unmatched hole orig_ps
         pExp _ = Nothing
 
         constr (PatternConstr c (Info t) ps loc) = Just $ ConstrPat c t ps loc
+        constr (PatternParens p _) = constr p
         constr (PatternAscription p' _ _)  = constr p'
         constr _ = Nothing
 
