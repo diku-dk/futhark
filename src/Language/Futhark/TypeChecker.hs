@@ -562,8 +562,10 @@ checkOneDec (ImportDec name NoInfo loc) = do
     warn loc $ name ++ " is already implicitly imported."
   return (mempty, env, ImportDec name (Info name') loc)
 
-checkOneDec (ValDec vb) = do
+checkOneDec v@(ValDec vb) = do
+  traceM' $ unlines ["checkOneDec", "v: " ++ show v]
   (env, vb') <- checkValBind vb
+  traceM' $ unlines ["checkOneDec", "vb': " ++ show vb']
   return (mempty, env, ValDec vb')
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
@@ -906,8 +908,8 @@ newNamesForMTy orig_mty = do
           Prim t
         substituteInType (Record ts) =
           Record $ fmap substituteInType ts
-        substituteInType (Enum cs) =
-          Enum cs
+        substituteInType (SumT ts) =
+          SumT $ (fmap . fmap) substituteInType ts
         substituteInType (Array () u (ArrayPrimElem t) shape) =
           Array () u (ArrayPrimElem t) (substituteInShape shape)
         substituteInType (Array () u (ArrayPolyElem (TypeName qs v) targs) shape) =
@@ -920,8 +922,11 @@ newNamesForMTy orig_mty = do
           in case arrayOf (Record ts') (substituteInShape shape) u of
             Just t' -> t'
             _ -> error "substituteInType: Cannot create array after substitution."
-        substituteInType (Array () u (ArrayEnumElem cs) shape) =
-          Array () u (ArrayEnumElem cs) (substituteInShape shape)
+        substituteInType (Array () u (ArraySumElem cs) shape) =
+          let cs' = (fmap .fmap) (substituteInType . recordArrayElemToType) cs
+          in case arrayOf (SumT cs') (substituteInShape shape) u of
+            Just t' -> t'
+            _ -> error "substituteInType: Cannot create array after substitution."
         substituteInType (Arrow als v t1 t2) =
           Arrow als v (substituteInType t1) (substituteInType t2)
 

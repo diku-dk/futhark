@@ -345,7 +345,7 @@ defuncExp (Assert e1 e2 desc loc) = do
   (e2', sv) <- defuncExp e2
   return (Assert e1' e2' desc loc, sv)
 
-defuncExp e@VConstr0{} = return (e, Dynamic $ typeOf e)
+defuncExp Constr{} = error "defuncExp: unexpected constructor."
 
 defuncExp (Match e cs t loc) = do
   (e', sv) <- defuncExp e
@@ -366,9 +366,11 @@ defuncExtExp (ExtLambda tparams pats e0 (closure, ret) loc) =
   defuncFun tparams pats e0 (closure, ret) loc
 
 defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
-defuncCase sv (CasePat p e loc) = do
+defuncCase sv p_@(CasePat p e loc) = do
+  traceM' $ unlines ["defuncCase", "p_: " ++ show p_, "sv:" ++ show sv]
   let p'  = updatePattern p sv
       env = matchPatternSV p sv
+  traceM' $ unlines ["p': " ++ show p']
   (e', sv') <- localEnv env $ defuncExp e
   return (CasePat p' e' loc, sv')
 
@@ -567,6 +569,7 @@ envFromPattern pat = case pat of
   Wildcard _ _            -> mempty
   PatternAscription p _ _ -> envFromPattern p
   PatternLit{}            -> mempty
+  PatternConstr{}         -> error "encFromPattern: unexpected pattern constructor."
 
 -- | Create an environment that binds the shape parameters.
 envFromShapeParams :: [TypeParamBase VName] -> Env
@@ -670,6 +673,7 @@ matchPatternSV (Id vn (Info t) _) sv =
 matchPatternSV (Wildcard _ _) _ = mempty
 matchPatternSV (PatternAscription pat _ _) sv = matchPatternSV pat sv
 matchPatternSV PatternLit{} _ = mempty
+matchPatternSV PatternConstr{} _ = error "matchPatternSV: unexpected pattern constructor."
 matchPatternSV pat (Dynamic t) = matchPatternSV pat $ svFromType t
 matchPatternSV pat sv = error $ "Tried to match pattern " ++ pretty pat
                              ++ " with static value " ++ show sv ++ "."
@@ -701,6 +705,7 @@ updatePattern (PatternAscription pat tydecl loc) sv
       PatternAscription (updatePattern pat sv) tydecl loc
   | otherwise = updatePattern pat sv
 updatePattern p@PatternLit{} _ = p
+updatePattern PatternConstr{} _ = error "updatePattern: unexpected pattern constructor."
 updatePattern pat (Dynamic t) = updatePattern pat (svFromType t)
 updatePattern pat sv =
   error $ "Tried to update pattern " ++ pretty pat
@@ -795,7 +800,7 @@ freeVars expr = case expr of
 
   Unsafe e _          -> freeVars e
   Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
-  VConstr0{}          -> mempty
+  Constr{}            -> error "freeVars: unexpected constructor."
   Match e cs _ _      -> freeVars e <> foldMap caseFV cs
     where caseFV (CasePat p eCase _) = (names (patternDimNames p) <> freeVars eCase)
                                        `without` patternVars p

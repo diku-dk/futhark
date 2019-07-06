@@ -4,5 +4,5 @@
 
 let f : bool =
   match #foo
-    case #foo -> true
-    case #bar -> true
+  case #foo -> true
+  case #bar -> true

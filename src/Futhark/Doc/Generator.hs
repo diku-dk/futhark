@@ -380,9 +380,6 @@ synopsisValBindBind (name, BoundV tps t) = do
     keyword "val " <> vnameHtml name <>
     mconcat (map (" "<>) tps') <> ": " <> t'
 
-prettyEnum :: [Name] -> Html
-prettyEnum cs = pipes $ map (("#"<>) . renderName) cs
-
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
   Prim et -> return $ primTypeHtml et
@@ -410,7 +407,9 @@ typeHtml t = case t of
         parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
       Nothing ->
         t1' <> " -> " <> t2'
-  Enum cs -> return $ prettyEnum cs
+  SumT cs -> pipes <$> mapM ppClause (sortConstrs cs)
+    where ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM typeHtml ts
+          ppConstr name = "#" <> toHtml (nameToString name)
 
 prettyElem :: ArrayElemTypeBase (DimDecl VName) -> DocM Html
 prettyElem (ArrayPrimElem et) = return $ primTypeHtml et
@@ -425,7 +424,9 @@ prettyElem (ArrayRecordElem fs)
   where ppField (name, tp) = do
           tp' <- prettyRecordElem tp
           return $ toHtml (nameToString name) <> ": " <> tp'
-prettyElem (ArrayEnumElem cs) = return $ braces $ prettyEnum cs
+prettyElem (ArraySumElem cs) = pipes <$> mapM ppClause (sortConstrs cs)
+    where ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM prettyRecordElem ts
+          ppConstr name = "#" <> toHtml (nameToString name)
 
 prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) -> DocM Html
 prettyRecordElem (RecordArrayElem et) = prettyElem et
@@ -537,7 +538,9 @@ typeExpHtml e = case e of
         parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
       Nothing ->
         t1' <> " -> " <> t2'
-  TEEnum cs _ -> return $ prettyEnum cs
+  TESum cs _ -> pipes <$> mapM ppClause cs
+    where ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM typeExpHtml ts
+          ppConstr name = "#" <> toHtml (nameToString name)
 
 qualNameHtml :: QualName VName -> DocM Html
 qualNameHtml (QualName names vname@(VName name tag)) =
