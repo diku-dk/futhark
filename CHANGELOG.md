@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     performance impact should be neutral on aggregate, but there may
     be changes for some programs (please report if so).
 
+  * Futhark now supports structurally typed sum types and pattern
+    matching!  This work was done by Robert Schenck.  There remain
+    some problems with arrays of sum types that themselves contain
+    arrays.
+
 ### Removed
 
 ### Changed
