@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 -- | This monomorphization module converts a well-typed, polymorphic,
-                           -- module-free Futhark program into an equivalent monomorphic program.
+-- module-free Futhark program into an equivalent monomorphic program.
 --
 -- This pass also does a few other simplifications to make the job of
 -- subsequent passes easier.  Specifically, it does the following:
