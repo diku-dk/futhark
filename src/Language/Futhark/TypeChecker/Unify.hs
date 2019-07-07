@@ -226,7 +226,7 @@ linkVarToType loc vn tp = do
                         where combineConstrs (HasConstrs cs1 loc1) (HasConstrs cs2 _) =
                                 HasConstrs (M.union cs1 cs2) loc1
                               combineConstrs hasCs _ = hasCs
-                  _ -> typeError loc "Can't unify." -- TODO : Improve
+                  _ -> typeError loc "Cannot unify a sum type with a non-sum type"
               _ -> return ()
   where tp' = removeUniqueness tp
 
@@ -337,14 +337,17 @@ mustHaveConstr loc c t fs = do
           Nothing  -> modifyConstraints $ M.insert tn $ HasConstrs (M.insert c fs cs) loc
           Just fs'
             | length fs == length fs' -> zipWithM_ (unify loc) fs fs'
-            | otherwise -> throwError $ TypeError loc "Differing constructor arity" -- TODO: Improve
+            | otherwise -> throwError $ TypeError loc $ "Different arity for constructor "
+                           ++ quote (pretty c) ++ "."
 
     SumT cs ->
       case M.lookup c cs of
-        Nothing -> throwError $ TypeError loc "Constuctor not present in type." -- TODO: Improve
+        Nothing -> throwError $
+                   TypeError loc $ "Constuctor " ++ quote (pretty c) ++ " not present in type."
         Just fs'
             | length fs == length fs' -> zipWithM_ (unify loc) fs (toStructural <$> fs')
-            | otherwise -> throwError $ TypeError loc "Differing constructor arity" -- TODO: Improve
+            | otherwise -> throwError $ TypeError loc $ "Different arity for constructor " ++
+                           quote (pretty c) ++ "."
 
     _ -> do unify loc (toStructural t) $ SumT $ M.singleton c fs
             return ()
