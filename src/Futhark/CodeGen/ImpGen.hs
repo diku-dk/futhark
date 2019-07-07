@@ -498,22 +498,40 @@ compileFunDef (FunDef entry fname rettype params body) = do
 
           return (outparams, inparams, results, args)
 
-compileHuskFun :: ExplicitMemorish lore
+compileHuskFun :: (ExplicitMemorish lore, FreeIn op)
                => [LParam lore] -> [VName] -> [Imp.NodeCopyInfo] -> VName -> VName -> Imp.Exp ->
-                  (VName -> ImpM lore op [Imp.NodeCopyInfo]) ->
-                  ImpM lore op (Imp.HuskFunction, Imp.Code op)
-compileHuskFun parts map_res parts_copies parts_offset parts_elems src_elems content = collect' $ do
-  node_id <- newVName "node_id"
-  mapM_ addHuskInt [parts_offset, parts_elems, node_id]
-  mapM_ addHuskPartMems parts_copies
-  dLParams parts
-  mapM_ addControlledMem map_res
-  map_res_copies <- localNodeId (Imp.var node_id int32) $ content node_id
+                  [VName] -> (VName -> ImpM lore op [Imp.NodeCopyInfo]) ->
+                  ImpM lore op (Imp.HuskFunction op)
+compileHuskFun parts map_res parts_copies parts_offset parts_elems src_elems no_repl content = do
   husk <- newVName "husk"
-  return (Imp.HuskFunction husk parts_copies map_res_copies parts_offset parts_elems node_id src_elems)
-  where addHuskInt n = addVar n $ ScalarVar Nothing $ ScalarEntry int32
+  node_id <- newVName "node_id"
+  (map_res_copies, body_code) <- collect' $ do
+    mapM_ addHuskInt [parts_offset, parts_elems, node_id]
+    mapM_ addHuskPartMems parts_copies
+    dLParams parts
+    mapM_ addControlledMem map_res
+    localNodeId (Imp.var node_id int32) $ content node_id
+  let map_res_mem = map Imp.nodeCopyMem map_res_copies
+      map_res_src = map Imp.nodeCopySrc map_res_copies
+  repl_mem <- filterM isMem $ S.toList $ freeIn body_code `S.difference`
+    S.fromList (concat [no_repl, map_res, map_res_mem, parts_mem])
+  bparams <- catMaybes <$> mapM (\x -> getParam x <$> lookupType x)
+    (S.toList $ mconcat [freeIn body_code, freeIn src_elems, freeIn parts, S.fromList $ parts_src ++ map_res_mem]
+      `S.difference` S.fromList (concat [[parts_offset, parts_elems, node_id], parts_mem, map_res_src]))
+  return $ Imp.HuskFunction husk parts_copies repl_mem map_res_copies bparams parts_offset parts_elems node_id src_elems body_code
+  where parts_mem = map Imp.nodeCopyMem parts_copies
+        parts_src = map Imp.nodeCopySrc parts_copies
+        addHuskInt n = addVar n $ ScalarVar Nothing $ ScalarEntry int32
         addControlledMem mem = addVar mem $ MemVar Nothing $ MemEntry $ Space "device"
         addHuskPartMems = addControlledMem . Imp.nodeCopyMem
+        isMem name = do
+          v <- lookupVar name
+          case v of
+            MemVar{} -> return True
+            _ -> return False
+        getParam name (Prim t) = Just $ Imp.ScalarParam name t
+        getParam name (Mem space) = Just $ Imp.MemParam name space
+        getParam _ Array{} = Nothing
 
 compileBody :: (ExplicitMemorish lore) => Pattern lore -> Body lore -> ImpM lore op ()
 compileBody pat (Body _ bnds ses) = do

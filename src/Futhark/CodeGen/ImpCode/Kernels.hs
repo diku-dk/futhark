@@ -49,7 +49,7 @@ newtype KernelConst = SizeConst Name
 type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel Kernel
-            | Husk [VName] VName [VName] [Imp.Param] Imp.HuskFunction Code Code Code
+            | Husk [VName] VName (Imp.HuskFunction HostOp) Code Code
             | GetSize VName Name SizeClass
             | CmpSizeLe VName Name SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
@@ -119,18 +119,17 @@ instance Pretty HostOp where
     ppr dest <+> text "<-" <+>
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
-  ppr (Husk _ _ _ _ _ _ body red) =
-    text "husk" </>
-    nestedBlock "{" "}" (ppr body) </>
-    nestedBlock "{" "}" (ppr red)
+  ppr Husk {} =
+    text "husk"
     -- TODO: ^ Make this more readable
   ppr (CallKernel c) =
     ppr c
 
 instance FreeIn HostOp where
   freeIn (CallKernel c) = freeIn c
-  freeIn (Husk _ num_nodes _ bparams _ interm _ red) =
-    mconcat [freeIn interm, freeIn red, S.fromList $ map paramName bparams]
+  freeIn (Husk _ num_nodes husk_func interm red) =
+    mconcat [freeIn interm, freeIn red,
+             S.fromList $ map paramName $ hfunctionParams husk_func]
       `S.difference` S.singleton num_nodes
   freeIn (CmpSizeLe dest _ _ x) =
     freeIn dest <> freeIn x

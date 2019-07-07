@@ -33,7 +33,7 @@ data Program = Program { openClProgram :: String
                        , openClPrelude :: String
                          -- ^ Must be prepended to the program.
                        , openClKernelNames :: [KernelName]
-                       , openClHuskFunctions :: [Imp.HuskFunction]
+                       , openClHuskFunctions :: [VName]
                        , openClUsedTypes :: [PrimType]
                          -- ^ So we can detect whether the device is capable.
                        , openClSizes :: M.Map Name SizeClass
@@ -61,7 +61,7 @@ data KernelArg = ValueKArg Exp PrimType
 
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
-            | DistributeHusk VName [VName] [Imp.Param] HuskFunction Code Code Code
+            | DistributeHusk VName (HuskFunction OpenCL) Code Code
             | HostCode Code
             | GetSize VName Name
             | CmpSizeLe VName Name Exp

@@ -303,8 +303,9 @@ callKernel (GetSizeMax v size_class) =
 callKernel (HostCode c) =
   GC.compileCode c
 
-callKernel (DistributeHusk num_nodes _ _ (HuskFunction _ parts map_res parts_offset parts_elems node_id src_elems)
-                           interm body red) = do
+callKernel (DistributeHusk num_nodes
+                           (HuskFunction _ parts _ map_res _ parts_offset parts_elems node_id src_elems body)
+                           interm red) = do
   GC.decl [C.cdecl|int $id:node_id = 0;|]
   GC.stm [C.cstm|$id:num_nodes = 1;|]
   GC.compileCode interm

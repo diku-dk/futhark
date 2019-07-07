@@ -101,15 +101,19 @@ setBodySpace space (Op op) =
   Op <$> setHostOpDefaultSpace space op
 
 setHostOpDefaultSpace :: Space -> HostOp -> SetDefaultSpaceM HostOp
-setHostOpDefaultSpace space (Husk keep_host num_nodes repl_mem bparams husk_func interm body red) =
+setHostOpDefaultSpace space (Husk keep_host num_nodes husk_func interm red) =
   localExclude (S.fromList keep_host) $
-    Husk keep_host num_nodes repl_mem
-      <$> mapM (setParamSpace space) bparams
-      <*> pure husk_func
+    Husk keep_host num_nodes
+      <$> setHuskFunctionSpace space husk_func
       <*> setBodySpace space interm
-      <*> setBodySpace space body
       <*> setBodySpace space red
 setHostOpDefaultSpace _ op = return op
+
+setHuskFunctionSpace :: Space -> HuskFunction HostOp -> SetDefaultSpaceM (HuskFunction HostOp)
+setHuskFunctionSpace space husk_func = do
+  params' <- mapM (setParamSpace space) $ hfunctionParams husk_func
+  body' <- setBodySpace space $ hfunctionBody husk_func
+  return $ husk_func { hfunctionBody = body', hfunctionParams = params' }
 
 setCountSpace :: Space -> Count a -> SetDefaultSpaceM (Count a)
 setCountSpace space (Count e) =

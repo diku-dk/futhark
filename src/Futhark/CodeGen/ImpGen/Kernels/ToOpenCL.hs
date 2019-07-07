@@ -85,7 +85,7 @@ instance Monoid OpenClRequirements where
 
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
-                         , clHuskFunctions :: [ImpOpenCL.HuskFunction]
+                         , clHuskFunctions :: [VName]
                          , clRequirements :: OpenClRequirements
                          , clSizes :: M.Map Name SizeClass
                          }
@@ -101,9 +101,9 @@ type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp target (Husk _ num_nodes repl_mem bparams husk_func interm body red) = do
-  tell mempty { clHuskFunctions = [husk_func] }
-  onHusk target num_nodes repl_mem bparams husk_func interm body red
+onHostOp target (Husk _ num_nodes husk_func interm red) = do
+  tell mempty { clHuskFunctions = [hfunctionName husk_func] }
+  onHusk target num_nodes husk_func interm red
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
@@ -191,18 +191,20 @@ onKernel target kernel = do
 
 onHusk :: KernelTarget
           -> VName
-          -> [VName]
-          -> [Param]
-          -> HuskFunction
-          -> ImpKernels.Code
+          -> HuskFunction HostOp
           -> ImpKernels.Code
           -> ImpKernels.Code
           -> OnKernelM OpenCL
-onHusk target num_nodes repl_mem bparams husk_func interm body red =
-  DistributeHusk num_nodes repl_mem bparams husk_func
-    <$> traverse (onHostOp target) interm
-    <*> traverse (onHostOp target) body
+onHusk target num_nodes husk_func interm red =
+  DistributeHusk num_nodes
+    <$> onHuskFunction target husk_func
+    <*> traverse (onHostOp target) interm
     <*> traverse (onHostOp target) red
+
+onHuskFunction :: KernelTarget -> HuskFunction HostOp -> OnKernelM (HuskFunction OpenCL)
+onHuskFunction target husk_func = do
+  husk_func_body' <- traverse (onHostOp target) (hfunctionBody husk_func)
+  return $ husk_func { hfunctionBody = husk_func_body' }
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =

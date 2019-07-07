@@ -10,7 +10,6 @@ module Futhark.CodeGen.ImpGen.Kernels
 import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Maybe
-import qualified Data.Set as S
 import Data.List
 
 import Prelude hiding (quot)
@@ -76,7 +75,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
   zipWithM_ (\x y -> copyDWIM x [] y []) (map paramName red_acc_params) nes
   interm_code <- collect $
     mapM_ (\(n, m, t) -> allocInterm n m (t `arrayOfRow` Var num_nodes)) $ zip3 interm_red interm_red_mem red_ts
-  (husk_func, body_code) <- compileHuskFun parts interm_map_mem part_copies parts_offset parts_elems src_elems_e
+  husk_func <- compileHuskFun parts interm_map_mem part_copies parts_offset parts_elems src_elems_e interm_red_mem
     (\node_id -> do
       compileStms (freeIn ses) bnds $ do
         zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
@@ -90,15 +89,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
         compileBody' red_acc_params $ lambdaBody red_op
       zipWithM_ (\x y -> copyDWIM x [] y []) (map patElemName red_pes) $
                   map (Var . paramName) red_acc_params
-  repl_mem <- filterM isMem $ S.toList $ freeIn body_code `S.difference`
-    S.fromList (concat [map_pes_mems, interm_red_mem, interm_map_mem, parts_mem_names])
-  bparams <- catMaybes <$> mapM (\x -> getParam x <$> lookupType x)
-    (S.toList $ mconcat [freeIn body_code,
-                         freeIn src_elems,
-                         freeIn parts,
-                         S.fromList $ src_mem_names ++ map_pes_mems]
-      `S.difference` S.fromList (Imp.hfunctionParams husk_func))
-  sOp $ Imp.Husk (interm_red ++ interm_red_mem) num_nodes repl_mem bparams husk_func interm_code body_code red_code
+  sOp $ Imp.Husk (interm_red ++ interm_red_mem) num_nodes husk_func interm_code red_code
   where HuskSpace src src_elems parts parts_elems parts_offset parts_mem = hspace
         parts_mem_names = map paramName parts_mem
         red_op_params = lambdaParams red_op
@@ -106,14 +97,6 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
         (node_red_res, node_map_res) = splitAt (length nes) $ mapMaybe subExpVar ses
         red_ts = take (length nes) ts
         (red_pes, map_pes) = splitAt (length nes) pes
-        getParam name (Prim t) = Just $ Imp.ScalarParam name t
-        getParam name (Mem space) = Just $ Imp.MemParam name space
-        getParam _ Array{} = Nothing
-        isMem name = do
-          v <- lookupVar name
-          case v of
-            MemVar{} -> return True
-            _ -> return False
         memSize pt s = Imp.LeafExp (Imp.SizeOf pt) int32 * product (map (toExp' int32) (shapeDims s))
         partInfo (Param _ (MemArray t s _ _), part_mem, src_mem) =
           let part_size_bytes = Imp.bytes $ memSize t s

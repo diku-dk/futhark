@@ -199,9 +199,8 @@ cudaMemoryType "device" = return [C.cty|typename CUdeviceptr|]
 cudaMemoryType space =
   fail $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
-defineHuskFunction :: HuskFunction -> [VName] -> [Param] -> Code -> GC.CompilerM OpenCL () VName
-defineHuskFunction (HuskFunction name parts map_res parts_offset parts_elems node_id src_elems)
-                   repl_mem params body = do
+defineHuskFunction :: HuskFunction OpenCL -> GC.CompilerM OpenCL () VName
+defineHuskFunction (HuskFunction name parts repl_mem map_res params parts_offset parts_elems node_id src_elems body) = do
   husk_params_struct <- newVName "husk_context"
   husk_params_p <- newVName "husk_params_p"
   husk_params <- newVName "husk_params"
@@ -298,15 +297,15 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
     cudaSizeClass SizeLocalMemory = "shared_memory"
-callKernel (DistributeHusk num_nodes repl_mem bparams husk_func interm body red) = do
+callKernel (DistributeHusk num_nodes husk_func interm red) = do
   let husk_id = baseTag $ hfunctionName husk_func
   err <- newVName "husk_err"
   params <- newVName "husk_params"
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
-  param_struct <- defineHuskFunction husk_func repl_mem bparams body
+  param_struct <- defineHuskFunction husk_func
   GC.compileCode interm
   GC.decl [C.cdecl|struct $id:param_struct $id:params;|]
-  GC.stms [[C.cstm|$id:params.$id:(paramName bparam) = $id:(paramName bparam);|] | bparam <- bparams]
+  GC.stms [[C.cstm|$id:params.$id:(paramName bparam) = $id:(paramName bparam);|] | bparam <- hfunctionParams husk_func]
   GC.stm [C.cstm|cuda_send_node_husk(&ctx->cuda, $int:husk_id, &$id:params);|]
   GC.decl [C.cdecl|int $id:err = cuda_node_first_error(&ctx->cuda);|]
   free_all_mem <- GC.unRefAllMem

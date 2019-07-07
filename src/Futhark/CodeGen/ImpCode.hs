@@ -32,7 +32,6 @@ module Futhark.CodeGen.ImpCode
   , Arg (..)
   , HuskFunction (..)
   , NodeCopyInfo(..)
-  , hfunctionParams
   , var
   , vi32
   , index
@@ -153,16 +152,19 @@ data ArrayContents = ArrayValues [PrimValue]
                      deriving (Show)
                      
 -- | A function containing the code of a husk body
-data HuskFunction = HuskFunction
-                  { hfunctionName :: VName,
-                    hfunctionParts :: [NodeCopyInfo],
-                    hfunctionMapRes :: [NodeCopyInfo],
-                    hfunctionPartsOffset :: VName,
-                    hfunctionPartsElems :: VName,
-                    hfunctionNodeId :: VName,
-                    hfunctionSourceElems :: Exp
-                  }
-                  deriving (Show)
+data HuskFunction op = HuskFunction
+                    { hfunctionName :: VName,
+                      hfunctionParts :: [NodeCopyInfo],
+                      hfunctionRepl :: [VName],
+                      hfunctionMapRes :: [NodeCopyInfo],
+                      hfunctionParams :: [Param],
+                      hfunctionPartsOffset :: VName,
+                      hfunctionPartsElems :: VName,
+                      hfunctionNodeId :: VName,
+                      hfunctionSourceElems :: Exp,
+                      hfunctionBody :: Code op
+                    }
+                    deriving (Show)
 
 data NodeCopyInfo = NodeCopyInfo
                       { nodeCopyMem :: VName,
@@ -171,12 +173,6 @@ data NodeCopyInfo = NodeCopyInfo
                         nodeCopySrc :: VName
                       }
                       deriving (Show)
-
-hfunctionParams :: HuskFunction -> [VName]
-hfunctionParams (HuskFunction _ parts map_res parts_offset parts_elems node_id _) =
-  concat [[parts_offset, parts_elems, node_id],
-          map nodeCopyMem parts,
-          map nodeCopySrc map_res]
 
 data Code a = Skip
             | Code a :>>: Code a

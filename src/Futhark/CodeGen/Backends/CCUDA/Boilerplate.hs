@@ -17,11 +17,10 @@ import Data.FileEmbed (embedStringFile)
 
 
 
-generateBoilerplate :: String -> String -> [String]
-                    -> [HuskFunction]
+generateBoilerplate :: String -> String -> [String] -> [VName]
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenCL () ()
-generateBoilerplate cuda_program cuda_prelude kernel_names husk_funcs sizes = do
+generateBoilerplate cuda_program cuda_prelude kernel_names husk_func_names sizes = do
   GC.earlyDecls [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
@@ -35,7 +34,7 @@ generateBoilerplate cuda_program cuda_prelude kernel_names husk_funcs sizes = do
 
   generateSizeFuns sizes
   cfg <- generateConfigFuns sizes
-  generateContextFuns cfg kernel_names husk_funcs sizes
+  generateContextFuns cfg kernel_names husk_func_names sizes
   where
     cuda_h = $(embedStringFile "rts/c/cuda.h")
     free_list_h = $(embedStringFile "rts/c/free_list.h")
@@ -208,11 +207,10 @@ generateConfigFuns sizes = do
                        }|])
   return cfg
 
-generateContextFuns :: String -> [String]
-                    -> [HuskFunction]
+generateContextFuns :: String -> [String] -> [VName]
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenCL () ()
-generateContextFuns cfg kernel_names husk_funcs sizes = do
+generateContextFuns cfg kernel_names husk_func_names sizes = do
   final_inits <- GC.contextFinalInits
   node_inits <- GC.nodeInits [C.cexp|node_id|]
   (fields, init_fields) <- GC.contextContents
@@ -279,7 +277,7 @@ generateContextFuns cfg kernel_names husk_funcs sizes = do
         switch (nctx->current_message.type) {
           case NODE_MSG_HUSK: {
             struct cuda_node_husk_content *content = (struct cuda_node_husk_content*)nctx->current_message.content;
-            $stm:(runHusk husk_funcs)
+            $stm:(runHusk husk_func_names)
             break;
           }
           case NODE_MSG_SYNC:
@@ -361,11 +359,11 @@ generateContextFuns cfg kernel_names husk_funcs sizes = do
                          return ctx->error;
                        }|])
   where
-    runHusk (HuskFunction f _ _ _ _ _ _ : hs) =
+    runHusk (f : fs) =
       [C.cstm|if (content->husk_id == $int:(baseTag f)) {
         nctx->result = $id:f(ctx, node_id, content->params);
       } else {
-        $stm:(runHusk hs)
+        $stm:(runHusk fs)
       }|]
     runHusk [] = [C.cstm|panic(-1, "Husk with id %d does not exist.", content->husk_id);|]
     loadKernelByName name =
