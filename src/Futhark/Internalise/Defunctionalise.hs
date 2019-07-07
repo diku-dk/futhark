@@ -536,6 +536,8 @@ defuncApply depth e@(Var qn (Info t) loc) = do
 
       _ -> return (Var qn (Info (typeFromSV sv)) loc, sv)
 
+defuncApply depth (Parens e _) = defuncApply depth e
+
 defuncApply _ expr = defuncExp expr
 
 -- | Check if a 'StaticVal' and a given application depth corresponds
