@@ -510,8 +510,7 @@ compileHuskFun parts map_res parts_copies parts_offset parts_elems src_elems con
   mapM_ addControlledMem map_res
   map_res_copies <- localNodeId (Imp.var node_id int32) $ content node_id
   husk <- newVName "husk"
-  husk_context <- newVName "husk_context"
-  return (Imp.HuskFunction husk husk_context parts_copies map_res_copies parts_offset parts_elems node_id src_elems)
+  return (Imp.HuskFunction husk parts_copies map_res_copies parts_offset parts_elems node_id src_elems)
   where addHuskInt n = addVar n $ ScalarVar Nothing $ ScalarEntry int32
         addControlledMem mem = addVar mem $ MemVar Nothing $ MemEntry $ Space "device"
         addHuskPartMems = addControlledMem . Imp.nodeCopyMem

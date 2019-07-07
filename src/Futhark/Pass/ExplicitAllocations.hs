@@ -570,9 +570,7 @@ handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
         alloc (Param name t@(Array pt shape u)) = do
           mem <- allocForArray t DefaultSpace
           return $ Param name $ directIndexFunction pt shape u mem t
-        ensureDirectSource s = do
-          (_, s') <- ensureDirectArray Nothing s
-          getVar s'
+        ensureDirectSource s = (getVar . snd) =<< ensureDirectArray Nothing s
         getVar (Var v) = return v
         getVar _ = fail "Not a variable."
 

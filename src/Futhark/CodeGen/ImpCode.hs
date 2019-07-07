@@ -155,7 +155,6 @@ data ArrayContents = ArrayValues [PrimValue]
 -- | A function containing the code of a husk body
 data HuskFunction = HuskFunction
                   { hfunctionName :: VName,
-                    hfunctionParamStruct :: VName,
                     hfunctionParts :: [NodeCopyInfo],
                     hfunctionMapRes :: [NodeCopyInfo],
                     hfunctionPartsOffset :: VName,
@@ -174,7 +173,7 @@ data NodeCopyInfo = NodeCopyInfo
                       deriving (Show)
 
 hfunctionParams :: HuskFunction -> [VName]
-hfunctionParams (HuskFunction _ _ parts map_res parts_offset parts_elems node_id _) =
+hfunctionParams (HuskFunction _ parts map_res parts_offset parts_elems node_id _) =
   concat [[parts_offset, parts_elems, node_id],
           map nodeCopyMem parts,
           map nodeCopySrc map_res]

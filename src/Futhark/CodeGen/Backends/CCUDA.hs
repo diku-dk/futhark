@@ -199,9 +199,10 @@ cudaMemoryType "device" = return [C.cty|typename CUdeviceptr|]
 cudaMemoryType space =
   fail $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
-defineHuskFunction :: HuskFunction -> [VName] -> [Param] -> Code -> GC.CompilerM OpenCL () ()
-defineHuskFunction (HuskFunction name param_struct parts map_res parts_offset parts_elems node_id src_elems)
+defineHuskFunction :: HuskFunction -> [VName] -> [Param] -> Code -> GC.CompilerM OpenCL () VName
+defineHuskFunction (HuskFunction name parts map_res parts_offset parts_elems node_id src_elems)
                    repl_mem params body = do
+  husk_params_struct <- newVName "husk_context"
   husk_params_p <- newVName "husk_params_p"
   husk_params <- newVName "husk_params"
   max_parts_elems <- newVName "max_parts_elems"
@@ -221,17 +222,18 @@ defineHuskFunction (HuskFunction name param_struct parts map_res parts_offset pa
   GC.libDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
                                            typename int32_t $id:node_id,
                                            void *$id:husk_params_p);|]
-  GC.huskDecl [C.cedecl|struct $id:param_struct {
+  GC.huskDecl [C.cedecl|struct $id:husk_params_struct {
       $sdecls:struct_decls
     };|]
   GC.huskDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
                                             typename int32_t $id:node_id,
                                             void *$id:husk_params_p) {
-      struct $id:param_struct $id:husk_params = *(struct $id:param_struct *)$id:husk_params_p;
+      struct $id:husk_params_struct $id:husk_params = *(struct $id:husk_params_struct *)$id:husk_params_p;
       $decls:body_decls
       $items:body'
       return 0;
     }|]
+  return husk_params_struct
   where part_mem = map nodeCopyMem parts
         toCType (ScalarParam _ t) = return [C.cty|$ty:(GC.primTypeToCType t)|]
         toCType (MemParam _ space) = do
@@ -301,9 +303,9 @@ callKernel (DistributeHusk num_nodes repl_mem bparams husk_func interm body red)
   err <- newVName "husk_err"
   params <- newVName "husk_params"
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
-  defineHuskFunction husk_func repl_mem bparams body
+  param_struct <- defineHuskFunction husk_func repl_mem bparams body
   GC.compileCode interm
-  GC.decl [C.cdecl|struct $id:(hfunctionParamStruct husk_func) $id:params;|]
+  GC.decl [C.cdecl|struct $id:param_struct $id:params;|]
   GC.stms [[C.cstm|$id:params.$id:(paramName bparam) = $id:(paramName bparam);|] | bparam <- bparams]
   GC.stm [C.cstm|cuda_send_node_husk(&ctx->cuda, $int:husk_id, &$id:params);|]
   GC.decl [C.cdecl|int $id:err = cuda_node_first_error(&ctx->cuda);|]
