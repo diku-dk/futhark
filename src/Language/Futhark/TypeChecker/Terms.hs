@@ -1849,7 +1849,8 @@ boundArrayAliases Prim{} = mempty
 boundArrayAliases (Record fs) = foldMap boundArrayAliases fs
 boundArrayAliases (TypeVar als _ _ _) = boundAliases als
 boundArrayAliases Arrow{} = mempty
-boundArrayAliases SumT{} = mempty -- TODO: fix
+boundArrayAliases (SumT fs) =
+  mconcat $ concatMap (map boundArrayAliases) $ M.elems fs
 
 -- | The set of in-scope variables that are being aliased.
 boundAliases :: Aliasing -> S.Set VName
