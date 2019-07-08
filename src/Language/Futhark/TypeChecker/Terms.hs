@@ -1660,8 +1660,6 @@ checkFunDef f = fmap fst $ runTermTypeM $ do
   maybe_retdecl' <- traverse updateExpTypes maybe_retdecl
   rettype' <- normaliseType rettype
 
-  constraints <- getConstraints
-  traceM' $ unlines ["checkFunDef", "f: " ++ show f, "body':" ++ show body', "constraints:" ++ show constraints]
   -- Check if pattern matches are exhaustive and yield
   -- errors if not.
   checkUnmatched body'
