@@ -1,6 +1,6 @@
 -- A lambda whose free variable has been consumed.
 -- ==
--- error: consumable
+-- error: `QUUX` previously consumed
 
 let main(y: i32, QUUX: *[]i32) =
   let f = \x -> x + QUUX[0]
