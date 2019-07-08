@@ -414,7 +414,8 @@ newArrayType loc desc r = do
 useAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
 useAfterConsume name rloc wloc =
   throwError $ TypeError rloc $
-  "Variable " ++ pretty name ++ " previously consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
+  "Variable " ++ quote (pretty name) ++ " previously consumed at " ++
+  locStr wloc ++ ".  (Possibly through aliasing)"
 
 consumeAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
 consumeAfterConsume name loc1 loc2 =
@@ -609,11 +610,11 @@ binding bnds = check . local (`bindVars` bnds)
         bindVar scope (Ident name (Info tp) _) =
           let inedges = boundAliases $ aliases tp
               update (BoundV l tparams in_t)
-              -- If 'name' is record-typed, don't alias the components
-              -- to 'name', because records have no identity beyond
-              -- their components.
-                | Record _ <- tp = BoundV l tparams in_t
-                | otherwise = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
+                -- If 'name' is record or sum-typed, don't alias the
+                -- components to 'name', because these no identity
+                -- beyond their components.
+                | Array{} <- tp = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
+                | otherwise = BoundV l tparams in_t
               update b = b
 
               tp' = tp `addAliases` S.insert (AliasBound name)
@@ -1270,7 +1271,9 @@ checkExp (Constr name es NoInfo loc) = do
   es' <- mapM checkExp es
   ets <- mapM expType es'
   mustHaveConstr loc name t (toStructural <$> ets)
-  return $ Constr name es' (Info t) loc
+  -- A sum value aliases *anything* that went into its construction.
+  let als = mconcat (map aliases ets)
+  return $ Constr name es' (Info $ t `addAliases` (<>als)) loc
 
 checkExp (Match _ [] NoInfo loc) =
   typeError loc "Match expressions must have at least one case."

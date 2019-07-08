@@ -179,6 +179,7 @@ modifyShapeAnnotations f = bimap f id
 uniqueness :: TypeBase shape as -> Uniqueness
 uniqueness (Array _ u _ _) = u
 uniqueness (TypeVar _ u _ _) = u
+uniqueness (SumT ts) = mconcat $ map (mconcat . map uniqueness) $ M.elems ts
 uniqueness _ = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
@@ -408,8 +409,8 @@ combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1)
       RecordArrayArrayElem (combineElemTypeInfo et1 et2) new_shape
 combineRecordArrayTypeInfo _ new_tp = new_tp
 
--- | Set the uniqueness attribute of a type.  If the type is a tuple,
--- the uniqueness of its components will be modified.
+-- | Set the uniqueness attribute of a type.  If the type is a record
+-- or sum type, the uniqueness of its components will be modified.
 setUniqueness :: TypeBase dim as -> Uniqueness -> TypeBase dim as
 setUniqueness (Array als _ et shape) u =
   Array als u et shape
@@ -417,6 +418,8 @@ setUniqueness (TypeVar als _ t targs) u =
   TypeVar als u t targs
 setUniqueness (Record ets) u =
   Record $ fmap (`setUniqueness` u) ets
+setUniqueness (SumT ets) u =
+  SumT $ fmap (map (`setUniqueness` u)) ets
 setUniqueness t _ = t
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
