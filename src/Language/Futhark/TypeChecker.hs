@@ -562,10 +562,8 @@ checkOneDec (ImportDec name NoInfo loc) = do
     warn loc $ name ++ " is already implicitly imported."
   return (mempty, env, ImportDec name (Info name') loc)
 
-checkOneDec v@(ValDec vb) = do
-  traceM' $ unlines ["checkOneDec", "v: " ++ show v]
+checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb
-  traceM' $ unlines ["checkOneDec", "vb': " ++ show vb']
   return (mempty, env, ValDec vb')
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])

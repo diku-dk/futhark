@@ -366,11 +366,9 @@ defuncExtExp (ExtLambda tparams pats e0 (closure, ret) loc) =
   defuncFun tparams pats e0 (closure, ret) loc
 
 defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
-defuncCase sv p_@(CasePat p e loc) = do
-  traceM' $ unlines ["defuncCase", "p_: " ++ show p_, "sv:" ++ show sv]
+defuncCase sv (CasePat p e loc) = do
   let p'  = updatePattern p sv
       env = matchPatternSV p sv
-  traceM' $ unlines ["p': " ++ show p']
   (e', sv') <- localEnv env $ defuncExp e
   return (CasePat p' e' loc, sv')
 

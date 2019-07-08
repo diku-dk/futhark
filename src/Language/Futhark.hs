@@ -10,18 +10,12 @@ module Language.Futhark
   , TypeBind, TypeDecl
   , StructTypeArg, ArrayElemType
   , TypeParam, Case
-  , traceM'
   )
   where
 
 import Language.Futhark.Syntax
 import Language.Futhark.Attributes
 import Language.Futhark.Pretty
-
---import Debug.Trace
-
-traceM' :: Applicative f => String -> f ()
-traceM' = const $ pure ()
 
 -- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName
