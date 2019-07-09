@@ -1035,7 +1035,7 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   a <- expType src'
   r <- foldM (flip $ mustHaveField loc) a fields
   unify loc (toStructural r) . toStructural =<< expType ve'
-  return $ RecordUpdate src' fields ve' (Info $ fromStruct a) loc
+  return $ RecordUpdate src' fields ve' (Info a) loc
 
 checkExp (Index e idxes NoInfo loc) = do
   (t, _) <- newArrayType (srclocOf e) "e" $ length idxes
