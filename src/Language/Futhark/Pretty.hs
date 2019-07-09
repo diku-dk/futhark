@@ -267,16 +267,16 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     | otherwise =
       text "let" <+> ppr dest <+> equals <+> ppr src <+>
       text "with" <+> brackets (commasep (map ppr idxs)) <+>
-      text "<-" <+> align (ppr ve) </>
+      text "=" <+> align (ppr ve) </>
       letBody body
   pprPrec _ (Update src idxs ve _) =
     ppr src <+> text "with" <+>
     brackets (commasep (map ppr idxs)) <+>
-    text "<-" <+> align (ppr ve)
+    text "=" <+> align (ppr ve)
   pprPrec _ (RecordUpdate src fs ve _ _) =
     ppr src <+> text "with" <+>
     mconcat (intersperse (text ".") (map ppr fs)) <+>
-    text "<-" <+> align (ppr ve)
+    text "=" <+> align (ppr ve)
   pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec (-1) e
