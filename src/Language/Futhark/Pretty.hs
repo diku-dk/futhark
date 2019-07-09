@@ -249,6 +249,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
                         LetPat{}    -> True
                         LetWith{}   -> True
                         If{}        -> True
+                        Match{}     -> True
                         ArrayLit{}  -> False
                         _           -> hasArrayLit e
   pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
@@ -300,14 +301,14 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     equals <+> ppr initexp <+> ppr form <+> text "do" </>
     indent 2 (ppr loopbody)
   pprPrec _ (Constr n cs _ _) = text "#" <> ppr n <+> sep (map ppr cs)
-  pprPrec _ (Match e cs _ _) = text "match" <+> ppr e </> ppr cs
+  pprPrec _ (Match e cs _ _) = text "match" <+> ppr e </> (stack . map ppr) cs
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e
   ppr (RecordFieldImplicit name _ _) = pprName name
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (CaseBase f vn) where
-  ppr (CasePat p e _) = ppr p <+> text "->" <+> ppr e
+  ppr (CasePat p e _) = text "case" <+> ppr p <+> text "->" <+> ppr e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
   ppr (For i ubound) =
