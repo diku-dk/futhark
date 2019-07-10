@@ -22,9 +22,10 @@ average runtime printed on standard output.  Refer to
 program will be ignored if it contains no data sets - it will not even
 be compiled.
 
-If compilation or running fails, an error message will be printed and
-benchmarking will continue (and ``--json`` will write the file), but a
-non-zero exit code will be returned at the end.
+If compilation of a program fails, then ``futhark bench`` will abort
+immediately.  If execution of a test set fails, an error message will
+be printed and benchmarking will continue (and ``--json`` will write
+the file), but a non-zero exit code will be returned at the end.
 
 OPTIONS
 =======
