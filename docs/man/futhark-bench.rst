@@ -70,12 +70,12 @@ OPTIONS
 
 --runner=program
 
-  If this is set to the non-empty string, compiled programs are not
-  run directly, but instead the indicated program is run, with the
-  path to the compiled Futhark program passed as the first
-  command-line argument.  This is useful for compilation targets that
-  cannot be executed directly (as with :ref:`futhark-csharp(1)`), or when you
-  wish to run the program on a remote machine.
+  If set to a non-empty string, compiled programs are not run
+  directly, but instead the indicated *program* is run with its first
+  argument being the path to the compiled Futhark program.  This is
+  useful for compilation targets that cannot be executed directly (as
+  with :ref:`futhark-csharp(1)`), or when you wish to run the program
+  on a remote machine.
 
 --runs=count
 
