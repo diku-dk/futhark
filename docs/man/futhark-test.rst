@@ -206,7 +206,7 @@ tested::
 
   entry sub1 (x: i32): i32 = add x (-1)
 
-The following program containts an entry point that is tested with
+The following program contains an entry point that is tested with
 randomly generated data::
 
   -- ==
