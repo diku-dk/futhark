@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 -- | Functions for inspecting and constructing various types.
 module Futhark.Representation.AST.Attributes.Types
        (

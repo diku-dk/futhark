@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TupleSections #-}
 -- | Imperative intermediate language used as a stepping stone in code generation.
 --

@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, ScopedTypeVariables #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE TupleSections #-}
 -- | The type checker checks whether the program is type-consistent.
 module Futhark.TypeCheck
   ( -- * Interface
@@ -565,7 +566,7 @@ checkFun' (fname, rettype, params, body) consumable check = do
             bad $ UniqueReturnAliased fname
           | otherwise = return $ seen `S.union` tag Nonunique names
 
-        tag u = S.map $ \name -> (u, name)
+        tag u = S.map (u,)
 
         returnAliasing expected got =
           reverse $

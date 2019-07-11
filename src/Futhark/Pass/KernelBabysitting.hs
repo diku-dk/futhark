@@ -217,7 +217,7 @@ ensureCoalescedAccess expmap thread_space num_threads free_ker_vars isThreadLoca
         not $ null thread_gids,
         inner_gid <- last thread_gids,
         length slice >= length perm,
-        slice' <- map (\i -> slice !! i) perm,
+        slice' <- map (slice !!) perm,
         DimFix inner_ind <- last slice',
         not $ null thread_gids,
         isGidVariant inner_gid inner_ind ->

@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, LambdaCase #-}
+{-# LANGUAGE FlexibleInstances, LambdaCase #-}
 module Futhark.Analysis.AlgSimplify
   ( ScalExp
   , Error
@@ -62,7 +62,7 @@ runAlgSimplifier s x r = runReaderT (evalStateT x 0) env
 
 step :: AlgSimplifyM ()
 step = do modify (1+)
-          exceeded <- pure (>) <*> get <*> asks maxSteps
+          exceeded <- gets (>) <*> asks maxSteps
           when exceeded stepsExceeded
 
 stepsExceeded :: AlgSimplifyM a
