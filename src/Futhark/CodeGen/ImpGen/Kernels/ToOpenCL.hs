@@ -263,7 +263,7 @@ static inline void mem_fence_local() {
 
 
 cudaAtomicOps :: [C.Definition]
-cudaAtomicOps = (return mkOp <*> opNames <*> types) ++ extraOps
+cudaAtomicOps = (mkOp <$> opNames <*> types) ++ extraOps
   where
     mkOp (clName, cuName) t =
       [C.cedecl|static inline $ty:t $id:clName(volatile $ty:t *p, $ty:t val) {

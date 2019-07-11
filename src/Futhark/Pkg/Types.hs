@@ -200,7 +200,7 @@ addRequiredToManifest :: Required -> PkgManifest -> (PkgManifest, Maybe Required
 addRequiredToManifest new_r pm =
   let (old, requires') = mapAccumL add Nothing $ commented $ manifestRequire pm
   in (if isJust old
-      then pm { manifestRequire = const requires' <$> manifestRequire pm }
+      then pm { manifestRequire = requires' <$ manifestRequire pm }
       else pm { manifestRequire = (++[Right new_r]) <$> manifestRequire pm },
       old)
   where add acc (Left c) = (acc, Left c)

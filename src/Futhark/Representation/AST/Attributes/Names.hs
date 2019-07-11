@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts, UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts, UndecidableInstances #-}
 -- | Facilities for determining which names are used in some syntactic
 -- construct.  The most important interface is the 'FreeIn' class and
 -- its instances, but for reasons related to the Haskell type system,

@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances, DeriveFunctor #-}
+{-# Language TupleSections #-}
 -- | Facilities for type-checking Futhark terms.  Checking a term
 -- requires a little more context to track uniqueness and such.
 --
@@ -1774,7 +1775,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
                Nothing ->
                  return ()
 
-        tag u = S.map $ \name -> (u, name)
+        tag u = S.map (u,)
 
         returnAliasing (Record ets1) (Record ets2) =
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2

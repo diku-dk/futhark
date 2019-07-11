@@ -85,7 +85,7 @@ mapExpM :: (Applicative m, Monad m) =>
 mapExpM tv (BasicOp (SubExp se)) =
   BasicOp <$> (SubExp <$> mapOnSubExp tv se)
 mapExpM tv (BasicOp (ArrayLit els rowt)) =
-  BasicOp <$> (pure ArrayLit <*> mapM (mapOnSubExp tv) els <*>
+  BasicOp <$> (ArrayLit <$> mapM (mapOnSubExp tv) els <*>
               mapOnType (mapOnSubExp tv) rowt)
 mapExpM tv (BasicOp (BinOp bop x y)) =
   BasicOp <$> (BinOp bop <$> mapOnSubExp tv x <*> mapOnSubExp tv y)
@@ -109,7 +109,7 @@ mapExpM tv (BasicOp (Update arr slice se)) =
   BasicOp <$> (Update <$> mapOnVName tv arr <*>
                mapM (traverse (mapOnSubExp tv)) slice <*> mapOnSubExp tv se)
 mapExpM tv (BasicOp (Iota n x s et)) =
-  BasicOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s <*> pure et)
+  BasicOp <$> (Iota <$> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s <*> pure et)
 mapExpM tv (BasicOp (Replicate shape vexp)) =
   BasicOp <$> (Replicate <$> mapOnShape tv shape <*> mapOnSubExp tv vexp)
 mapExpM tv (BasicOp (Repeat shapes innershape v)) =
@@ -130,7 +130,7 @@ mapExpM tv (BasicOp (Concat i x ys size)) =
               mapOnVName tv x <*> mapM (mapOnVName tv) ys <*>
               mapOnSubExp tv size)
 mapExpM tv (BasicOp (Copy e)) =
-  BasicOp <$> (pure Copy <*> mapOnVName tv e)
+  BasicOp <$> (Copy <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Manifest perm e)) =
   BasicOp <$> (Manifest perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Assert e msg loc)) =

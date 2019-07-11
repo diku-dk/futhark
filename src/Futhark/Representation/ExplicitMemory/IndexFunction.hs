@@ -334,7 +334,7 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
                                               else if n /= -1 then n + 1
                                                    else n
                                 ) 0 inds
-                  in  if d == -1 then [] else [p - d]
+                  in [p - d | d /= -1]
 
         harmlessRotation' :: (Eq num, IntegralExp num) =>
                              LMADDim num -> DimIndex num -> Bool

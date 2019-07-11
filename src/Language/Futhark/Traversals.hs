@@ -96,10 +96,10 @@ instance ASTMappable (ExpBase Info VName) where
      mapOnExp tv e) <*>
     mapOnExp tv body <*> pure loc
   astMap tv (LetWith dest src idxexps vexp body t loc) =
-    pure LetWith <*>
-         astMap tv dest <*> astMap tv src <*>
-         mapM (astMap tv) idxexps <*> mapOnExp tv vexp <*>
-         mapOnExp tv body <*> traverse (mapOnPatternType tv) t <*> pure loc
+    LetWith <$>
+    astMap tv dest <*> astMap tv src <*>
+    mapM (astMap tv) idxexps <*> mapOnExp tv vexp <*>
+    mapOnExp tv body <*> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Update src slice v loc) =
     Update <$> mapOnExp tv src <*> mapM (astMap tv) slice <*>
     mapOnExp tv v <*> pure loc
@@ -109,11 +109,11 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Project field e t loc) =
     Project field <$> mapOnExp tv e <*> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Index arr idxexps t loc) =
-    pure Index <*>
-         astMap tv arr <*>
-         mapM (astMap tv) idxexps <*>
-         traverse (mapOnPatternType tv) t <*>
-         pure loc
+    Index <$>
+    astMap tv arr <*>
+    mapM (astMap tv) idxexps <*>
+    traverse (mapOnPatternType tv) t <*>
+    pure loc
   astMap tv (Unsafe e loc) =
     Unsafe <$> mapOnExp tv e <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
