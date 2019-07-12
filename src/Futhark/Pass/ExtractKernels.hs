@@ -558,9 +558,8 @@ worthSequentialising lam = interesting $ lambdaBody lam
         interesting' _ = False
 
 
-onTopLevelStms :: Stms SOACS -> DistNestT DistribM KernelsStms
-onTopLevelStms stms = do
-  path <- asks distPath
+onTopLevelStms :: KernelPath -> Stms SOACS -> DistNestT DistribM KernelsStms
+onTopLevelStms path stms = do
   scope <- askScope
   lift $ localScope scope $ transformStms path $ stmsToList stms
 
@@ -573,9 +572,8 @@ onMap path (MapLoop pat cs w lam arrs) = do
                   , distScope = scopeOfPattern pat <>
                                 scopeForKernels (scopeOf lam) <>
                                 types
-                  , distPath = path'
-                  , distOnInnerMap = onInnerMap
-                  , distOnTopLevelStms = onTopLevelStms
+                  , distOnInnerMap = onInnerMap path'
+                  , distOnTopLevelStms = onTopLevelStms path'
                   }
       exploitInnerParallelism path' = do
         (acc', postkernels) <- runDistNestT (env path') $
@@ -673,8 +671,8 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
       ((outer_suff_stms<>intra_suff_stms)<>) <$>
         kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
 
-onInnerMap :: MapLoop -> DistAcc -> DistNestT DistribM DistAcc
-onInnerMap maploop@(MapLoop pat cs w lam arrs) acc
+onInnerMap :: KernelPath -> MapLoop -> DistAcc -> DistNestT DistribM DistAcc
+onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
       addStmToKernel (mapLoopStm maploop) acc
   | not incrementalFlattening =
@@ -695,16 +693,19 @@ onInnerMap maploop@(MapLoop pat cs w lam arrs) acc
       dist_env <- ask
       let extra_scope = targetsScope $ distTargets acc'
       scope <- (extra_scope<>) <$> askScope
-      path <- asks distPath
 
       stms <- lift $ localScope scope $ do
         let maploop' = MapLoop pat cs w lam arrs
 
-            exploitInnerParallelism path' =
+            exploitInnerParallelism path' = do
+              let dist_env' =
+                    dist_env { distOnTopLevelStms = onTopLevelStms path'
+                             , distOnInnerMap = onInnerMap path'
+                             }
               fmap (postKernelsStms . snd) $
-              runDistNestT dist_env { distPath = path' } $
-              inNesting nest $ localScope extra_scope $ void $
-              distributeMap maploop' acc { distStms = mempty }
+                runDistNestT dist_env' $
+                inNesting nest $ localScope extra_scope $ void $
+                distributeMap maploop' acc { distStms = mempty }
 
         -- Normally the permutation is for the output pattern, but
         -- we can't really change that, so we change the result
