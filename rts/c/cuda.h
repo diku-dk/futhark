@@ -95,12 +95,13 @@ enum cuda_node_message_type {
   NODE_MSG_EXIT
 };
 
+/*
 typedef int32_t (*husk_function_t) (void*, int32_t, void*);
 
 struct cuda_node_husk_content {
   husk_function_t husk_func;
   void *params;
-};
+}; */
 
 struct cuda_node_message {
   enum cuda_node_message_type type;
@@ -562,7 +563,8 @@ void cuda_setup(struct cuda_context *ctx)
 
   cuda_size_setup(ctx);
 
-  pthread_barrier_init(&ctx->node_sync_point, NULL, ctx->cfg.num_nodes + 1);
+  if(pthread_barrier_init(&ctx->node_sync_point, NULL, ctx->cfg.num_nodes + 1) != 0)
+    panic(-1, "Node synchronization point initialization failed.");
 }
 
 CUresult cuda_free_all(struct cuda_node_context *ctx);
@@ -656,28 +658,6 @@ void cuda_thread_sync(pthread_barrier_t *barrier) {
     panic(-1, "Thread barrier synchronization error.");
 }
 
-void cuda_send_node_base_message(struct cuda_context *ctx, enum cuda_node_message_type msg_type) {
-  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
-    ctx->nodes[i].current_message.type = msg_type;
-    sem_post(&ctx->nodes[i].message_signal);
-  }
-  cuda_thread_sync(&ctx->node_sync_point);
-}
-
-void cuda_send_node_husk(struct cuda_context *ctx, husk_function_t husk_func, void* params) {
-  struct cuda_node_husk_content *husk_contents =
-    malloc(sizeof(struct cuda_node_husk_content) * ctx->cfg.num_nodes);
-  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
-    husk_contents[i].husk_func = husk_func;
-    husk_contents[i].params = params;
-    ctx->nodes[i].current_message.type = NODE_MSG_HUSK;
-    ctx->nodes[i].current_message.content = husk_contents + i;
-    sem_post(&ctx->nodes[i].message_signal);
-  }
-  cuda_thread_sync(&ctx->node_sync_point);
-  free(husk_contents);
-}
-
 int cuda_node_first_error(struct cuda_context *ctx) {
   for (int i = 0; i < ctx->cfg.num_nodes; ++i)
     if (ctx->nodes[i].result != 0)
@@ -685,12 +665,31 @@ int cuda_node_first_error(struct cuda_context *ctx) {
   return 0;
 }
 
+/*
+void cuda_send_node_base_message(struct cuda_context *ctx, enum cuda_node_message_type msg_type,
+                                 void *msg_content) {
+  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
+    ctx->nodes[i].current_message.type = msg_type;
+    ctx->nodes[i].current_message.content = msg_content;
+    sem_post(&ctx->nodes[i].message_signal);
+  }
+  cuda_thread_sync(&ctx->node_sync_point);
+}
+
+void cuda_send_node_husk(struct cuda_context *ctx, husk_function_t husk_func, void* params) {
+  struct cuda_node_husk_content husk_content;
+  husk_content.husk_func = husk_func;
+  husk_content.params = params;
+  cuda_send_node_base_message(ctx, NODE_MSG_HUSK, &husk_content);
+}
+
 void cuda_send_node_exit(struct cuda_context *ctx) {
-  cuda_send_node_base_message(ctx, NODE_MSG_EXIT);
+  cuda_send_node_base_message(ctx, NODE_MSG_EXIT, NULL);
 }
 
 void cuda_send_node_sync(struct cuda_context *ctx) {
-  cuda_send_node_base_message(ctx, NODE_MSG_SYNC);
+  cuda_send_node_base_message(ctx, NODE_MSG_SYNC, NULL);
 }
+*/
 
 // End of cuda.h.

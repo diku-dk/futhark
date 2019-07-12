@@ -27,6 +27,7 @@ generateBoilerplate cuda_program cuda_prelude kernel_names sizes = do
       $esc:("#include <pthread.h>")
       $esc:("#include <semaphore.h>")
       $esc:("typedef CUdeviceptr fl_mem_t;")
+      $esc:("typedef int32_t (*husk_function_t) (void*, int32_t, void*);")
       $esc:free_list_h
       $esc:cuda_h
       const char *cuda_program[] = {$inits:fragments, NULL};
@@ -207,6 +208,7 @@ generateConfigFuns sizes = do
                        }|])
   return cfg
 
+
 generateContextFuns :: String -> [String]
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenCL () ()
@@ -244,57 +246,85 @@ generateContextFuns cfg kernel_names sizes = do
   let set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
                           [(0::Int)..] $ M.keys sizes
 
-  node_launch_params <- GC.publicDef "node_launch_params" GC.InitDecl $ \s ->
-    ([C.cedecl|struct $id:s;|],
-     [C.cedecl|struct $id:s {
-                         typename int32_t node_id;
-                         struct $id:ctx *ctx;
-                         char *ptx;
-                       };|])
+  GC.libDecl [C.cedecl|struct husk_message_content {
+        typename husk_function_t husk_func;
+        void *params;
+      };|]
 
-  run_node <- GC.publicDef "run_node_thread" GC.InitDecl $ \s ->
-    ([C.cedecl|void *$id:s(void *p);|],
-     [C.cedecl|void *$id:s(void *p) {
-      struct $id:node_launch_params *params = (struct $id:node_launch_params*)p;
+  GC.libDecl [C.cedecl|void send_node_base_message(struct $id:ctx *ctx, enum cuda_node_message_type msg_type,
+                                                   void *msg_content) {
+        for (int i = 0; i < ctx->cuda.cfg.num_nodes; ++i) {
+          ctx->cuda.nodes[i].current_message.type = msg_type;
+          ctx->cuda.nodes[i].current_message.content = msg_content;
+          sem_post(&ctx->cuda.nodes[i].message_signal);
+        }
+        cuda_thread_sync(&ctx->cuda.node_sync_point);
+      }|]
+
+  GC.libDecl [C.cedecl|void send_node_husk(struct $id:ctx *ctx, typename husk_function_t husk_func, void* params) {
+        struct husk_message_content husk_content;
+        husk_content.husk_func = husk_func;
+        husk_content.params = params;
+        send_node_base_message(ctx, NODE_MSG_HUSK, &husk_content);
+      }|]
+
+  node_exit <- GC.libDecl [C.cedecl|void send_node_exit(struct $id:ctx *ctx) {
+        send_node_base_message(ctx, NODE_MSG_EXIT, NULL);
+      }|]
+
+  GC.libDecl [C.cedecl|void send_node_sync(struct $id:ctx *ctx) {
+        send_node_base_message(ctx, NODE_MSG_SYNC, NULL);
+      }|]
+
+  GC.libDecl [C.cedecl|struct node_launch_params {
+      typename int32_t node_id;
+      struct $id:ctx *ctx;
+      char *ptx;
+    };|]
+
+  GC.libDecl [C.cedecl|void *node_init(struct futhark_context *ctx, typename int32_t node_id, char *ptx) {
+      struct cuda_node_context *nctx = &ctx->cuda.nodes[node_id];
+      cuda_node_setup(nctx, ptx);
+      $stms:(map loadKernelByName kernel_names)
+      $stms:node_inits
+     }|]
+
+  GC.libDecl [C.cedecl|void *handle_node_message(struct futhark_context *ctx, typename int32_t node_id, bool *running) {
+      struct cuda_node_context *nctx = &ctx->cuda.nodes[node_id];
+      switch (nctx->current_message.type) {
+        case NODE_MSG_HUSK: {
+          struct husk_message_content *content = (struct husk_message_content*)nctx->current_message.content;
+          nctx->result = content->husk_func(ctx, node_id, content->params);
+          break;
+        }
+        case NODE_MSG_SYNC:
+          CUDA_SUCCEED(cuCtxSynchronize());
+          break;
+        case NODE_MSG_EXIT:
+          cuda_node_cleanup(nctx);
+          *running = false;
+          break;
+        default:
+          panic(-1, "Unrecognized message received by node %d.", node_id);
+      }
+     }|]
+
+  GC.libDecl [C.cedecl|void *run_node_thread(void *p) {
+      struct node_launch_params *params = (struct node_launch_params*)p;
       typename int32_t node_id = params->node_id;
       struct $id:ctx *ctx = params->ctx;
       struct cuda_node_context *nctx = &ctx->cuda.nodes[node_id];
 
-      cuda_node_setup(nctx, params->ptx);
-      
-      $stms:(map loadKernelByName kernel_names)
-
-      $stms:node_inits
-
+      node_init(ctx, node_id, params->ptx);
       cuda_thread_sync(&ctx->cuda.node_sync_point);
-
-      free(p);
 
       bool running = true;
       while (running) {
         sem_wait(&nctx->message_signal);
-    
-        switch (nctx->current_message.type) {
-          case NODE_MSG_HUSK: {
-            struct cuda_node_husk_content *content = (struct cuda_node_husk_content*)nctx->current_message.content;
-            nctx->result = content->husk_func(ctx, node_id, content->params);
-            
-            break;
-          }
-          case NODE_MSG_SYNC:
-            CUDA_SUCCEED(cuCtxSynchronize());
-            break;
-          case NODE_MSG_EXIT:
-            cuda_node_cleanup(nctx);
-            running = false;
-            break;
-          default:
-            panic(-1, "Unrecognized message received by node %d.", node_id);
-        }
-    
+        handle_node_message(ctx, node_id, &running);
         cuda_thread_sync(&ctx->cuda.node_sync_point);
       }
-     }|])
+     }|]
 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
@@ -315,18 +345,18 @@ generateContextFuns cfg kernel_names sizes = do
 
                           char *ptx = cuda_get_ptx(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
 
+                          struct node_launch_params *node_params =
+                            malloc(sizeof(struct node_launch_params) * ctx->cuda.cfg.num_nodes);
                           for (int i = 0; i < ctx->cuda.cfg.num_nodes; ++i) {
-                            struct $id:node_launch_params *node_params = malloc(sizeof(struct $id:node_launch_params));
-                            node_params->ctx = ctx;
-                            node_params->node_id = i;
-                            node_params->ptx = ptx;
-
-                            if (pthread_create(&ctx->cuda.nodes[i].thread, NULL, $id:run_node, node_params))
+                            node_params[i].ctx = ctx;
+                            node_params[i].node_id = i;
+                            node_params[i].ptx = ptx;
+                      
+                            if (pthread_create(&ctx->cuda.nodes[i].thread, NULL, run_node_thread, node_params + i))
                               panic(-1, "Error creating thread.");
                           }
-
                           cuda_thread_sync(&ctx->cuda.node_sync_point);
-                          
+                          free(node_params);
                           free(ptx);
 
                           cuCtxSetCurrent(ctx->cuda.nodes[0].cu_ctx);
@@ -340,7 +370,7 @@ generateContextFuns cfg kernel_names sizes = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                                 cuda_send_node_exit(&ctx->cuda);
+                                 send_node_exit(ctx);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
                                  free(ctx->node_ctx);
@@ -350,7 +380,7 @@ generateContextFuns cfg kernel_names sizes = do
   GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         cuda_send_node_sync(&ctx->cuda);
+                         send_node_sync(ctx);
                          return 0;
                        }|])
 

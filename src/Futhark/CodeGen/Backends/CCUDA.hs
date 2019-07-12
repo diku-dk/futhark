@@ -307,7 +307,7 @@ callKernel (DistributeHusk num_nodes husk_func interm red) = do
   GC.compileCode interm
   GC.decl [C.cdecl|struct $id:param_struct $id:params;|]
   GC.stms [[C.cstm|$id:params.$id:(paramName bparam) = $id:(paramName bparam);|] | bparam <- hfunctionParams husk_func]
-  GC.stm [C.cstm|cuda_send_node_husk(&ctx->cuda, &$id:husk_name, &$id:params);|]
+  GC.stm [C.cstm|send_node_husk(ctx, &$id:husk_name, &$id:params);|]
   GC.decl [C.cdecl|int $id:err = cuda_node_first_error(&ctx->cuda);|]
   free_all_mem <- GC.unRefAllMem
   GC.stm [C.cstm|if($id:err != 0) {
