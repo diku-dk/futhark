@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | Extract limited nested parallelism for execution inside
 -- individual kernel workgroups.
@@ -12,6 +13,8 @@ import Control.Monad.Trans.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
+import Prelude hiding (log)
+
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.Kernels as Out
@@ -19,9 +22,11 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Analysis.DataDependencies
+import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Util (chunks)
+import Futhark.Util.Log
 
 -- | Convert the statements inside a map nest to kernel statements,
 -- attempting to parallelise any remaining (top-level) parallel
@@ -37,19 +42,23 @@ import Futhark.Util (chunks)
 -- exploitable parallelism".
 intraGroupParallelise :: (MonadFreshNames m, LocalScope Out.Kernels m) =>
                          KernelNest -> Lambda
-                      -> m (Maybe ((SubExp, SubExp), SubExp,
+                      -> m (Maybe ((SubExp, SubExp), SubExp, Log,
                                    Out.Stms Out.Kernels, Out.Stms Out.Kernels))
 intraGroupParallelise knest lam = runMaybeT $ do
-  (w_stms, w, ispace, inps) <- lift $ flatKernel knest
-  let num_groups = w
-      body = lambdaBody lam
+  (ispace, inps) <- lift $ flatKernel knest
+
+  (num_groups, w_stms) <- lift $ runBinder $
+    letSubExp "intra_num_groups" =<<
+    foldBinOp (Mul Int32) (intConst Int32 1) (map snd ispace)
+
+  let body = lambdaBody lam
 
   group_size <- newVName "computed_group_size"
-  let intra_lvl = SegThread (Count w) (Count $ Var group_size) SegNoVirt
+  let intra_lvl = SegThread (Count num_groups) (Count $ Var group_size) SegNoVirt
 
   ltid <- newVName "ltid"
   let group_variant = S.fromList [ltid]
-  (wss_min, wss_avail, kbody) <-
+  (wss_min, wss_avail, log, kbody) <-
     lift $ localScope (scopeOfLParams $ lambdaParams lam) $
     intraGroupParalleliseBody intra_lvl (dataDependencies body) group_variant body
 
@@ -95,7 +104,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
       kstm = Let nested_pat (StmAux cs ()) $ Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
-  return ((intra_min_par, intra_avail_par), Var group_size,
+  return ((intra_min_par, intra_avail_par), Var group_size, log,
            prelude_stms, oneStm kstm)
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
@@ -104,18 +113,36 @@ data Env = Env { _dataDeps :: Dependencies
                , _groupVariant :: Names
                }
 
-type IntraGroupM = BinderT Out.Kernels (RWS Env (S.Set [SubExp], S.Set [SubExp]) VNameSource)
+data Acc = Acc { accMinPar :: S.Set [SubExp]
+               , accAvailPar :: S.Set [SubExp]
+               , accLog :: Log
+               }
+
+instance Semigroup Acc where
+  Acc min_x avail_x log_x <> Acc min_y avail_y log_y =
+    Acc (min_x <> min_y) (avail_x <> avail_y) (log_x <> log_y)
+
+instance Monoid Acc where
+  mempty = Acc mempty mempty mempty
+
+type IntraGroupM =
+  BinderT Out.Kernels (RWS Env Acc VNameSource)
+
+instance MonadLogger IntraGroupM where
+  addLog log = tell mempty { accLog = log }
 
 runIntraGroupM :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                  Env -> IntraGroupM () -> m ([[SubExp]], [[SubExp]], Out.Stms Out.Kernels)
+                  Env -> IntraGroupM () -> m (Acc, Out.Stms Out.Kernels)
 runIntraGroupM env m = do
   scope <- castScope <$> askScope
   modifyNameSource $ \src ->
-    let (((), kstms), src', (ws_min, ws_avail)) = runRWS (runBinderT m scope) env src
-    in ((S.toList ws_min, S.toList ws_avail, kstms), src')
+    let (((), kstms), src', acc) = runRWS (runBinderT m scope) env src
+    in ((acc, kstms), src')
 
 parallelMin :: [SubExp] -> IntraGroupM ()
-parallelMin ws = tell (S.singleton ws, S.singleton ws)
+parallelMin ws = tell mempty { accMinPar = S.singleton ws
+                             , accAvailPar = S.singleton ws
+                             }
 
 intraGroupBody :: SegLevel -> Body -> IntraGroupM (Out.Body Out.Kernels)
 intraGroupBody lvl body = do
@@ -125,6 +152,7 @@ intraGroupBody lvl body = do
 intraGroupStm :: SegLevel -> Stm -> IntraGroupM ()
 intraGroupStm lvl stm@(Let pat aux e) = do
   Env deps group_variant <- ask
+  scope <- askScope
   let groupInvariant (Var v) =
         S.null . S.intersection group_variant .
         flip (M.findWithDefault mempty) deps $ v
@@ -151,10 +179,26 @@ intraGroupStm lvl stm@(Let pat aux e) = do
 
     Op (Screma w form arrs)
       | Just lam <- isMapSOAC form -> do
-      let lam' = soacsLambdaToKernels lam
-      certifying (stmAuxCerts aux) $
-        addStms =<< segMap lvl' pat w lam' arrs [] []
-      parallelMin [w]
+      let loopnest = MapNesting pat (stmAuxCerts aux) w $ zip (lambdaParams lam) arrs
+          env = DistEnv { distNest =
+                            singleNesting $ Nesting mempty loopnest
+                        , distScope =
+                            scopeOfPattern pat <>
+                            scopeForKernels (scopeOf lam) <> scope
+                        , distOnInnerMap =
+                            distributeMap
+                        , distOnTopLevelStms =
+                            lift . collectStms_ . intraGroupStms lvl
+                        , distSegLevel = \minw _ _ -> do
+                            lift $ parallelMin minw
+                            return lvl
+                        }
+          acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
+                        , distStms = mempty
+                        }
+
+      addStms =<<
+        runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
 
     Op (Screma w form arrs)
       | Just (scanfun, nes, mapfun) <- isScanomapSOAC form -> do
@@ -180,7 +224,8 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
       let replace (Var v) | v == paramName chunk_size_param = w
           replace se = se
-          replaceSets (x, y) = (S.map (map replace) x, S.map (map replace) y)
+          replaceSets (Acc x y log) =
+            Acc (S.map (map replace) x) (S.map (map replace) y) log
       censor replaceSets $ mapM_ (intraGroupStm lvl) stream_bnds
 
     Op (Scatter w lam ivs dests) -> do
@@ -214,10 +259,10 @@ intraGroupStms lvl = mapM_ (intraGroupStm lvl)
 
 intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                              SegLevel -> Dependencies -> Names -> Body
-                          -> m ([[SubExp]], [[SubExp]], Out.KernelBody Out.Kernels)
+                          -> m ([[SubExp]], [[SubExp]], Log, Out.KernelBody Out.Kernels)
 intraGroupParalleliseBody lvl deps group_variant body = do
-  (min_ws, avail_ws, kstms) <-
+  (Acc min_ws avail_ws log, kstms) <-
     runIntraGroupM (Env deps group_variant) $
     intraGroupStms lvl $ bodyStms body
-  return (min_ws, avail_ws,
+  return (S.toList min_ws, S.toList avail_ws, log,
           KernelBody () kstms $ map Returns $ bodyResult body)

@@ -165,6 +165,8 @@ import Control.Monad.Reader
 import qualified Data.Set as S
 import Data.Maybe
 
+import Prelude hiding (log)
+
 import Futhark.Representation.SOACS
 import Futhark.Representation.SOACS.Simplify (simplifyStms)
 import qualified Futhark.Representation.Kernels as Out
@@ -280,14 +282,16 @@ sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ form _)))
 sequentialisedUnbalancedStm _ =
   return Nothing
 
-cmpSizeLe :: String -> Out.SizeClass -> SubExp
+cmpSizeLe :: String -> Out.SizeClass -> [SubExp]
           -> DistribM ((SubExp, Name), Out.Stms Out.Kernels)
 cmpSizeLe desc size_class to_what = do
   x <- gets stateThresholdCounter
   modify $ \s -> s { stateThresholdCounter = x + 1}
   let size_key = nameFromString $ desc ++ "_" ++ show x
   runBinder $ do
-    cmp_res <- letSubExp desc $ Op $ CmpSizeLe size_key size_class to_what
+    to_what' <- letSubExp "comparatee" =<<
+                foldBinOp (Mul Int32) (intConst Int32 1) to_what
+    cmp_res <- letSubExp desc $ Op $ CmpSizeLe size_key size_class to_what'
     return (cmp_res, size_key)
 
 kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
@@ -312,7 +316,7 @@ kernelAlternatives pat default_body ((cond,alt):alts) = runBinder_ $ do
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 
 transformStm path (Let pat aux (Op (CmpThreshold what s))) = do
-  ((r, _), stms) <- cmpSizeLe s (Out.SizeThreshold path) what
+  ((r, _), stms) <- cmpSizeLe s (Out.SizeThreshold path) [what]
   runBinder_ $ do
     addStms stms
     addStm $ Let pat aux $ BasicOp $ SubExp r
@@ -354,7 +358,7 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
     not $ lambdaContainsParallelism map_lam = runBinder_ $ do
       let scan_lam' = soacsLambdaToKernels scan_lam
           map_lam' = soacsLambdaToKernels map_lam
-      lvl <- segThreadCapped w "segscan"
+      lvl <- segThreadCapped [w] "segscan" NoRecommendation
       addStms =<< segScan lvl res_pat w scan_lam' map_lam' nes arrs [] []
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
@@ -376,7 +380,7 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
                     | otherwise = comm
           return $ SegRedOp comm' red_lam' nes' shape
         let map_lam_sequential = soacsLambdaToKernels map_lam
-        lvl <- segThreadCapped w "segred"
+        lvl <- segThreadCapped [w] "segred" NoRecommendation
         addStms =<<
           (fmap (certify cs) <$>
            nonSegRed lvl pat w red_ops map_lam_sequential arrs)
@@ -400,7 +404,7 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
     then paralleliseOuter
     else if incrementalFlattening then do
     ((outer_suff, outer_suff_key), suff_stms) <-
-      sufficientParallelism "suff_outer_redomap" w path
+      sufficientParallelism "suff_outer_redomap" [w] path
 
     outer_stms <- outerParallelBody
     inner_stms <- innerParallelBody ((outer_suff_key, False):path)
@@ -420,7 +424,7 @@ transformStm path (Let pat (StmAux cs _) (Op (Stream w (Parallel _ _ _ []) map_f
 transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs)))
   | incrementalFlattening = do
       ((outer_suff, outer_suff_key), suff_stms) <-
-        sufficientParallelism "suff_outer_stream" w path
+        sufficientParallelism "suff_outer_stream" [w] path
 
       outer_stms <- outerParallelBody ((outer_suff_key, True) : path)
       inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
@@ -500,7 +504,7 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
       inputs = do (p, p_a) <- zip (lambdaParams lam') ivs
                   return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
   (kernel, stms) <-
-    mapKernel w [(write_i,w)] inputs (map rowType $ patternTypes pat) body
+    mapKernel segThreadCapped [(write_i,w)] inputs (map rowType $ patternTypes pat) body
   certifying cs $ do
     addStms stms
     letBind_ pat $ Op $ SegOp kernel
@@ -512,9 +516,9 @@ transformStm _ (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs)
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
 
-sufficientParallelism :: String -> SubExp -> KernelPath
+sufficientParallelism :: String -> [SubExp] -> KernelPath
                       -> DistribM ((SubExp, Name), Out.Stms Out.Kernels)
-sufficientParallelism desc what path = cmpSizeLe desc (Out.SizeThreshold path) what
+sufficientParallelism desc ws path = cmpSizeLe desc (Out.SizeThreshold path) ws
 
 -- | Returns the sizes of nested parallelism.
 nestedParallelism :: Body -> [SubExp]
@@ -574,6 +578,7 @@ onMap path (MapLoop pat cs w lam arrs) = do
                                 types
                   , distOnInnerMap = onInnerMap path'
                   , distOnTopLevelStms = onTopLevelStms path'
+                  , distSegLevel = segThreadCapped
                   }
       exploitInnerParallelism path' =
         runDistNestT (env path') $
@@ -588,7 +593,7 @@ onMap path (MapLoop pat cs w lam arrs) = do
           runDistNestT (env path') $ distribute $
             addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
 
-    onMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat w lam
+    onMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat lam
     where acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                         , distStms = mempty
                         }
@@ -597,15 +602,15 @@ onMap' :: KernelNest -> KernelPath
        -> (KernelPath -> DistribM (Out.Stms Out.Kernels))
        -> (KernelPath -> DistribM (Out.Stms Out.Kernels))
        -> Pattern
-       -> SubExp
        -> Lambda
        -> DistribM (Out.Stms Out.Kernels)
-onMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
-  let res = map Var $ patternNames pat
+onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
+  let nest_ws = kernelNestWidths loopnest
+      res = map Var $ patternNames pat
 
   types <- askScope
   ((outer_suff, outer_suff_key), outer_suff_stms) <-
-    sufficientParallelism "suff_outer_par" nest_w path
+    sufficientParallelism "suff_outer_par" nest_ws path
 
   intra <- if worthIntraGroup lam then
              flip runReaderT types $ intraGroupParallelise loopnest lam
@@ -621,12 +626,13 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
 
       (outer_suff_stms<>) <$> kernelAlternatives pat par_body seq_alts
 
-    Just ((_intra_min_par, intra_avail_par), group_size, intra_prelude, intra_stms) -> do
+    Just ((_intra_min_par, intra_avail_par), group_size, log, intra_prelude, intra_stms) -> do
+      addLog log
       -- We must check that all intra-group parallelism fits in a group.
       ((intra_ok, intra_suff_key), intra_suff_stms) <- do
 
         ((intra_suff, suff_key), check_suff_stms) <-
-          sufficientParallelism "suff_intra_par" intra_avail_par $
+          sufficientParallelism "suff_intra_par" [intra_avail_par] $
           (outer_suff_key, False) : path
 
         runBinder $ do
@@ -704,16 +710,16 @@ onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
         -- sequentialising.  This is only OK as long as further
         -- versioning does not take place down that branch (it currently
         -- does not).
-        ((nestw, sequentialised_kernel), nestw_bnds) <- localScope extra_scope $ do
+        (sequentialised_kernel, nestw_bnds) <- localScope extra_scope $ do
           sequentialised_lam <- FOT.transformLambda lam'
-          constructKernel nest' $ lambdaBody sequentialised_lam
+          constructKernel segThreadCapped nest' $ lambdaBody sequentialised_lam
 
         let outer_pat = loopNestingPattern $ fst nest
         (nestw_bnds<>) <$>
           onMap' nest' path
           (const $ return $ oneStm sequentialised_kernel)
           exploitInnerParallelism
-          outer_pat nestw lam'
+          outer_pat lam'
 
       addKernel stms
       return acc'
