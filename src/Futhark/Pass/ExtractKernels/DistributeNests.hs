@@ -33,7 +33,6 @@ module Futhark.Pass.ExtractKernels.DistributeNests
   , permutationAndMissing
   , addKernels
   , addKernel
-  , localPath
   , inNesting
   )
 where
@@ -149,9 +148,6 @@ runDistNestT env (DistNestT m) = do
   (x, res) <- runWriterT $ runReaderT m env
   addLog $ accLog res
   return (x, accPostKernels res)
-
-localPath :: Monad m => KernelPath -> DistNestT m a -> DistNestT m a
-localPath path = local $ \env -> env { distPath = path }
 
 addKernels :: Monad m => PostKernels -> DistNestT m ()
 addKernels ks = tell $ mempty { accPostKernels = ks }

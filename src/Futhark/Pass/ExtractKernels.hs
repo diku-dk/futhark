@@ -702,8 +702,8 @@ onInnerMap maploop@(MapLoop pat cs w lam arrs) acc
 
             exploitInnerParallelism path' =
               fmap (postKernelsStms . snd) $
-              runDistNestT dist_env $ inNesting nest $
-              localPath path' $ localScope extra_scope $ void $
+              runDistNestT dist_env { distPath = path' } $
+              inNesting nest $ localScope extra_scope $ void $
               distributeMap maploop' acc { distStms = mempty }
 
         -- Normally the permutation is for the output pattern, but
