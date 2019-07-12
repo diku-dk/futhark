@@ -73,8 +73,6 @@ type KernelsStms = Out.Stms Out.Kernels
 data DistEnv m =
   DistEnv { distNest :: Nestings
           , distScope :: Scope Out.Kernels
-          , distPath :: KernelPath
-
           , distOnTopLevelStms :: Stms SOACS -> DistNestT m (Stms Out.Kernels)
           , distOnInnerMap :: MapLoop -> DistAcc -> DistNestT m DistAcc
           }
