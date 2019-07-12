@@ -124,7 +124,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
             Just actual_occurences
               | expected_occurences /= actual_occurences ->
                 throwError $ name <> " should have occurred " <> T.pack (show expected_occurences) <>
-              " times, but occured " <> T.pack (show actual_occurences) <> " times."
+              " times, but occurred " <> T.pack (show actual_occurences) <> " times."
             _ -> return ()
 
 testWarnings :: [WarningTest] -> SBS.ByteString -> TestM ()
