@@ -1,6 +1,7 @@
 -- Intragroup Game of Life!
 -- ==
 -- random input { 100 [100][16][16]bool } auto output
+-- random input { 1000 [100][16][16]bool } auto output
 
 let bint: bool -> i32 = i32.bool
 
