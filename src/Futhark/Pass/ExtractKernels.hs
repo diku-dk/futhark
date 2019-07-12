@@ -575,15 +575,9 @@ onMap path (MapLoop pat cs w lam arrs) = do
                   , distOnInnerMap = onInnerMap path'
                   , distOnTopLevelStms = onTopLevelStms path'
                   }
-      exploitInnerParallelism path' = do
-        (acc', postkernels) <- runDistNestT (env path') $
-          distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
-
-        -- There may be a few final targets remaining - these correspond to
-        -- arrays that are identity mapped, and must have statements
-        -- inserted here.
-        return $ postKernelsStms postkernels <>
-          identityStms (outerTarget $ distTargets acc')
+      exploitInnerParallelism path' =
+        runDistNestT (env path') $
+        distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
 
   if not incrementalFlattening then exploitInnerParallelism path
     else do
@@ -591,25 +585,13 @@ onMap path (MapLoop pat cs w lam arrs) = do
     let exploitOuterParallelism path' = do
           soactypes <- asksScope scopeForSOACs
           (seq_lam, _) <- runBinderT (FOT.transformLambda lam) soactypes
-          (acc', postkernels) <- runDistNestT (env path') $ distribute $
+          runDistNestT (env path') $ distribute $
             addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
-          -- As above, we deal with identity mappings.
-          return $ postKernelsStms postkernels <>
-            identityStms (outerTarget $ distTargets acc')
 
     onMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat w lam
     where acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                         , distStms = mempty
                         }
-
-          params_to_arrs = zip (map paramName $ lambdaParams lam) arrs
-          identityStms (rem_pat, res) =
-            stmsFromList $ zipWith identityStm (patternValueElements rem_pat) res
-          identityStm pe (Var v)
-            | Just arr <- lookup v params_to_arrs =
-                Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Copy arr
-          identityStm pe se =
-            Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Replicate (Shape [w]) se
 
 onMap' :: KernelNest -> KernelPath
        -> (KernelPath -> DistribM (Out.Stms Out.Kernels))
@@ -686,6 +668,10 @@ onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
       _ -> distributeMap maploop acc
 
   where
+    discardTargets acc' =
+      -- FIXME: work around bogus targets.
+      acc' { distTargets = singleTarget (mempty, mempty) }
+
     multiVersion perm nest acc' = do
       -- The kernel can be distributed by itself, so now we can
       -- decide whether to just sequentialise, or exploit inner
@@ -702,10 +688,9 @@ onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
                     dist_env { distOnTopLevelStms = onTopLevelStms path'
                              , distOnInnerMap = onInnerMap path'
                              }
-              fmap (postKernelsStms . snd) $
-                runDistNestT dist_env' $
-                inNesting nest $ localScope extra_scope $ void $
-                distributeMap maploop' acc { distStms = mempty }
+              runDistNestT dist_env' $
+                inNesting nest $ localScope extra_scope $
+                discardTargets <$> distributeMap maploop' acc { distStms = mempty }
 
         -- Normally the permutation is for the output pattern, but
         -- we can't really change that, so we change the result
