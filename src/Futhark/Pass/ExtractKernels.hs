@@ -599,7 +599,7 @@ onMap path (MapLoop pat cs w lam arrs) = do
           return $ postKernelsStms postkernels <>
             identityStms (outerTarget $ distTargets acc')
 
-    onMap' id (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat w lam
+    onMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat w lam
     where acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                         , distStms = mempty
                         }
@@ -613,21 +613,19 @@ onMap path (MapLoop pat cs w lam arrs) = do
           identityStm pe se =
             Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Replicate (Shape [w]) se
 
-onMap' :: (HasScope Out.Kernels m, MonadFreshNames m) =>
-          (forall a. DistribM a -> m a)
-       -> KernelNest -> KernelPath
-       -> (KernelPath -> m (Out.Stms Out.Kernels))
-       -> (KernelPath -> m (Out.Stms Out.Kernels))
-       -> PatternT Type
+onMap' :: KernelNest -> KernelPath
+       -> (KernelPath -> DistribM (Out.Stms Out.Kernels))
+       -> (KernelPath -> DistribM (Out.Stms Out.Kernels))
+       -> Pattern
        -> SubExp
-       -> LambdaT SOACS
-       -> m (Out.Stms Out.Kernels)
-onMap' distribM loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
+       -> Lambda
+       -> DistribM (Out.Stms Out.Kernels)
+onMap' loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
   let res = map Var $ patternNames pat
 
   types <- askScope
   ((outer_suff, outer_suff_key), outer_suff_stms) <-
-    distribM $ sufficientParallelism "suff_outer_par" nest_w path
+    sufficientParallelism "suff_outer_par" nest_w path
 
   intra <- if worthIntraGroup lam then
              flip runReaderT types $ intraGroupParallelise loopnest lam
@@ -648,7 +646,7 @@ onMap' distribM loopnest path mk_seq_stms mk_par_stms pat nest_w lam = do
       ((intra_ok, intra_suff_key), intra_suff_stms) <- do
 
         ((intra_suff, suff_key), check_suff_stms) <-
-          distribM $ sufficientParallelism "suff_intra_par" intra_avail_par $
+          sufficientParallelism "suff_intra_par" intra_avail_par $
           (outer_suff_key, False) : path
 
         runBinder $ do
@@ -694,37 +692,42 @@ onInnerMap maploop@(MapLoop pat cs w lam arrs) acc
       -- The kernel can be distributed by itself, so now we can
       -- decide whether to just sequentialise, or exploit inner
       -- parallelism.
+      dist_env <- ask
       let extra_scope = targetsScope $ distTargets acc'
-          maploop' = MapLoop pat cs w lam arrs
-
-          exploitInnerParallelism path' =
-            inNesting nest $
-            fmap postKernelsStms $ collectKernels_ $ localPath path' $
-            localScope extra_scope $ void $
-            distributeMap maploop' acc { distStms = mempty }
-
-      -- Normally the permutation is for the output pattern, but
-      -- we can't really change that, so we change the result
-      -- order instead.
-      let lam_res' = rearrangeShape perm $ bodyResult $ lambdaBody lam
-          lam' = lam { lambdaBody = (lambdaBody lam) { bodyResult = lam_res' } }
-          map_nesting = MapNesting pat cs w $ zip (lambdaParams lam) arrs
-          nest' = pushInnerKernelNesting (pat, lam_res') map_nesting nest
-
-      -- XXX: we do not construct a new KernelPath when
-      -- sequentialising.  This is only OK as long as further
-      -- versioning does not take place down that branch (it currently
-      -- does not).
-      ((nestw, sequentialised_kernel), nestw_bnds) <- localScope extra_scope $ do
-        sequentialised_lam <- FOT.transformLambda lam'
-        constructKernel nest' $ lambdaBody sequentialised_lam
-
-      let outer_pat = loopNestingPattern $ fst nest
+      scope <- (extra_scope<>) <$> askScope
       path <- asks distPath
-      addKernel =<< (nestw_bnds<>) <$>
-        localScope extra_scope (onMap' lift nest' path
-                                (const $ return $ oneStm sequentialised_kernel)
-                                exploitInnerParallelism
-                                outer_pat nestw lam')
 
+      stms <- lift $ localScope scope $ do
+        let maploop' = MapLoop pat cs w lam arrs
+
+            exploitInnerParallelism path' =
+              fmap (postKernelsStms . snd) $
+              runDistNestT dist_env $ inNesting nest $
+              localPath path' $ localScope extra_scope $ void $
+              distributeMap maploop' acc { distStms = mempty }
+
+        -- Normally the permutation is for the output pattern, but
+        -- we can't really change that, so we change the result
+        -- order instead.
+        let lam_res' = rearrangeShape perm $ bodyResult $ lambdaBody lam
+            lam' = lam { lambdaBody = (lambdaBody lam) { bodyResult = lam_res' } }
+            map_nesting = MapNesting pat cs w $ zip (lambdaParams lam) arrs
+            nest' = pushInnerKernelNesting (pat, lam_res') map_nesting nest
+
+        -- XXX: we do not construct a new KernelPath when
+        -- sequentialising.  This is only OK as long as further
+        -- versioning does not take place down that branch (it currently
+        -- does not).
+        ((nestw, sequentialised_kernel), nestw_bnds) <- localScope extra_scope $ do
+          sequentialised_lam <- FOT.transformLambda lam'
+          constructKernel nest' $ lambdaBody sequentialised_lam
+
+        let outer_pat = loopNestingPattern $ fst nest
+        (nestw_bnds<>) <$>
+          onMap' nest' path
+          (const $ return $ oneStm sequentialised_kernel)
+          exploitInnerParallelism
+          outer_pat nestw lam'
+
+      addKernel stms
       return acc'

@@ -33,7 +33,6 @@ module Futhark.Pass.ExtractKernels.DistributeNests
   , permutationAndMissing
   , addKernels
   , addKernel
-  , collectKernels_
   , localPath
   , inNesting
   )
@@ -150,15 +149,6 @@ runDistNestT env (DistNestT m) = do
   (x, res) <- runWriterT $ runReaderT m env
   addLog $ accLog res
   return (x, accPostKernels res)
-
-collectKernels :: Monad m => DistNestT m a -> DistNestT m (a, PostKernels)
-collectKernels m = pass $ do
-  (x, res) <- listen m
-  return ((x, accPostKernels res),
-          const res { accPostKernels = mempty })
-
-collectKernels_ :: Monad m => DistNestT m () -> DistNestT m PostKernels
-collectKernels_ = fmap snd . collectKernels
 
 localPath :: Monad m => KernelPath -> DistNestT m a -> DistNestT m a
 localPath path = local $ \env -> env { distPath = path }
