@@ -59,7 +59,7 @@ import Futhark.Transform.Rename
 import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
-import Futhark.Pass.ExtractKernels.BlockedKernel
+import Futhark.Pass.ExtractKernels.BlockedKernel hiding (segThread, segThreadCapped)
 import Futhark.Pass.ExtractKernels.Interchange
 import Futhark.Util
 import Futhark.Util.Log
@@ -76,6 +76,7 @@ data DistEnv m =
           , distScope :: Scope Out.Kernels
           , distOnTopLevelStms :: Stms SOACS -> DistNestT m (Stms Out.Kernels)
           , distOnInnerMap :: MapLoop -> DistAcc -> DistNestT m DistAcc
+          , distSegLevel :: MkSegLevel m
           }
 
 data DistAcc =
@@ -560,23 +561,34 @@ distribute :: MonadFreshNames m => DistAcc -> DistNestT m DistAcc
 distribute acc =
   fromMaybe acc <$> distributeIfPossible acc
 
+mkSegLevel :: MonadFreshNames m => DistNestT m (MkSegLevel (DistNestT m))
+mkSegLevel = do
+  mk_lvl <- asks distSegLevel
+  return $ \w desc r -> do
+    scope <- askScope
+    (lvl, stms) <- lift $ lift $ runBinderT (mk_lvl w desc r) scope
+    addStms stms
+    return lvl
+
 distributeIfPossible :: MonadFreshNames m => DistAcc -> DistNestT m (Maybe DistAcc)
 distributeIfPossible acc = do
   nest <- asks distNest
-  tryDistribute nest (distTargets acc) (distStms acc) >>= \case
+  mk_lvl <- mkSegLevel
+  tryDistribute mk_lvl nest (distTargets acc) (distStms acc) >>= \case
     Nothing -> return Nothing
     Just (targets, kernel) -> do
       addKernel kernel
       return $ Just DistAcc { distTargets = targets
-                              , distStms = mempty
-                              }
+                            , distStms = mempty
+                            }
 
 distributeSingleStm :: MonadFreshNames m =>
                        DistAcc -> Stm
                     -> DistNestT m (Maybe (PostKernels, Result, KernelNest, DistAcc))
 distributeSingleStm acc bnd = do
   nest <- asks distNest
-  tryDistribute nest (distTargets acc) (distStms acc) >>= \case
+  mk_lvl <- mkSegLevel
+  tryDistribute mk_lvl nest (distTargets acc) (distStms acc) >>= \case
     Nothing -> return Nothing
     Just (targets, distributed_bnds) ->
       tryDistributeStm nest targets bnd >>= \case
@@ -608,7 +620,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   -- good enough for flatKernel to work.
   let nest' = pushInnerKernelNesting (scatter_pat, bodyResult $ lambdaBody lam)
               (MapNesting scatter_pat cs scatter_w $ zip (lambdaParams lam) ivs) nest
-  (nest_bnds, w, ispace, kernel_inps) <- flatKernel nest'
+  (ispace, kernel_inps) <- flatKernel nest'
 
   let (as_ws, as_ns, as) = unzip3 dests
 
@@ -617,17 +629,18 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   -- ill-typed.  Find them.
   as_inps <- mapM (findInput kernel_inps) as
 
+  mk_lvl <- mkSegLevel
+
+  let rts = concatMap (take 1) $ chunks as_ns $
+            drop (sum as_ns) $ lambdaReturnType lam
+      (is,vs) = splitAt (sum as_ns) $ bodyResult $ lambdaBody lam
+      k_body = KernelBody () (bodyStms $ lambdaBody lam) $
+               map (inPlaceReturn ispace) $
+               zip3 as_ws as_inps $ chunks as_ns $ zip is vs
+
+  (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps rts k_body
+
   runBinder_ $ do
-    addStms nest_bnds
-
-    let rts = concatMap (take 1) $ chunks as_ns $
-              drop (sum as_ns) $ lambdaReturnType lam
-        (is,vs) = splitAt (sum as_ns) $ bodyResult $ lambdaBody lam
-        k_body = KernelBody () (bodyStms $ lambdaBody lam) $
-                 map (inPlaceReturn ispace) $
-                 zip3 as_ws as_inps $ chunks as_ns $ zip is vs
-
-    (k, k_bnds) <- mapKernel w ispace kernel_inps rts k_body
     addStms k_bnds
 
     let pat = Pattern [] $ rearrangeShape perm $
@@ -656,7 +669,7 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
   -- We replicate some of the checking done by 'isSegmentedOp', but
   -- things are different because a GenReduce is not a reduction or
   -- scan.
-  (nest_stms, _, ispace, inputs) <- flatKernel nest
+  (ispace, inputs) <- flatKernel nest
   let orig_pat = Pattern [] $ rearrangeShape perm $
                  patternValueElements $ loopNestingPattern $ fst nest
 
@@ -668,9 +681,8 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
     <$> mapM (fmap kernelInputArray . findInput inputs) dests
     <*> pure nes
     <*> pure op
-  runBinder_ $ addStms . (nest_stms<>) =<<
-    inScopeOf nest_stms
-    (genReduceKernel orig_pat ispace inputs cs genred_w ops' lam arrs)
+  runBinder_ $ addStms =<<
+    genReduceKernel orig_pat ispace inputs cs genred_w ops' lam arrs
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = fail "Ill-typed nested GenReduce encountered."
@@ -728,12 +740,11 @@ segmentedScanomapKernel :: MonadFreshNames m =>
                         -> Out.Lambda Out.Kernels -> Out.Lambda Out.Kernels
                         -> [SubExp] -> [VName]
                         -> DistNestT m (Maybe KernelsStms)
-segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs =
+segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
+  mk_lvl <- asks distSegLevel
   isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
-  \pat ispace inps nes' _ _ -> do
-    work_size <- letSubExp "segscan_work" =<<
-                 foldBinOp (Mul Int32) segment_size (map snd ispace)
-    lvl <- segThreadCapped work_size "segscan"
+    \pat ispace inps nes' _ _ -> do
+    lvl <- mk_lvl (segment_size : map snd ispace) "segscan" NoRecommendation
     addStms =<< traverse renameStm =<<
       segScan lvl pat segment_size lam map_lam nes' arrs ispace inps
 
@@ -744,15 +755,14 @@ regularSegmentedRedomapKernel :: MonadFreshNames m =>
                               -> Out.Lambda Out.Kernels -> Out.Lambda Out.Kernels
                               -> [SubExp] -> [VName]
                               -> DistNestT m (Maybe KernelsStms)
-regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
+regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs = do
+  mk_lvl <- asks distSegLevel
   isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
-  \pat ispace inps nes' _ _ -> do
-    let red_op = SegRedOp comm lam nes' mempty
-    work_size <- letSubExp "segred_work" =<<
-                 foldBinOp (Mul Int32) segment_size (map snd ispace)
-    lvl <- segThreadCapped work_size "segred"
-    addStms =<< traverse renameStm =<<
-      segRed lvl pat segment_size [red_op] map_lam arrs ispace inps
+    \pat ispace inps nes' _ _ -> do
+      let red_op = SegRedOp comm lam nes' mempty
+      lvl <- mk_lvl (segment_size : map snd ispace) "segred" NoRecommendation
+      addStms =<< traverse renameStm =<<
+        segRed lvl pat segment_size [red_op] map_lam arrs ispace inps
 
 isSegmentedOp :: MonadFreshNames m =>
                  KernelNest
@@ -764,7 +774,7 @@ isSegmentedOp :: MonadFreshNames m =>
                   -> [(VName, SubExp)]
                   -> [KernelInput]
                   -> [SubExp] -> [VName]  -> [VName]
-                  -> Binder Out.Kernels ())
+                  -> BinderT Out.Kernels m ())
               -> DistNestT m (Maybe KernelsStms)
 isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
   -- We must verify that array inputs to the operation are inputs to
@@ -777,7 +787,7 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
 
   let bound_by_nest = boundInKernelNest nest
 
-  (pre_bnds, nesting_size, ispace, kernel_inps) <- flatKernel nest
+  (ispace, kernel_inps) <- flatKernel nest
 
   unless (S.null $ free_in_op `S.intersection` bound_by_nest) $
     fail "Non-fold lambda uses nest-bound parameters."
@@ -801,21 +811,21 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
                       -- it.
                       return $
                       letExp (baseString arr ++ "_repd")
-                      (BasicOp $ Replicate (Shape [nesting_size]) $ Var arr)
+                      (BasicOp $ Replicate (Shape $ map snd ispace) $ Var arr)
           _ ->
             fail "Input not free or outermost."
 
   nes' <- mapM prepareNe nes
 
   mk_arrs <- mapM prepareArr arrs
+  scope <- lift askScope
 
-  lift $ runBinder_ $ do
-    addStms pre_bnds
-
+  lift $ lift $ flip runBinderT_ scope $ do
     -- We must make sure all inputs are of size
     -- segment_size*nesting_size.
     total_num_elements <-
-      letSubExp "total_num_elements" $ BasicOp $ BinOp (Mul Int32) segment_size nesting_size
+      letSubExp "total_num_elements" =<<
+      foldBinOp (Mul Int32) segment_size (map snd ispace)
 
     let flatten arr = do
           arr_shape <- arrayShape <$> lookupType arr

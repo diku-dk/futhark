@@ -1,7 +1,9 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.BlockedKernel
-       ( segRed
+       ( MkSegLevel
+       , ThreadRecommendation(..)
+       , segRed
        , nonSegRed
        , segScan
        , segGenRed
@@ -75,19 +77,31 @@ segThread desc =
     <*> (Count <$> getSize (desc ++ "_group_size") SizeGroup)
     <*> pure SegVirt
 
+data ThreadRecommendation = ManyThreads | NoRecommendation
+
+type MkSegLevel m =
+  [SubExp] -> String -> ThreadRecommendation -> BinderT Kernels m SegLevel
+
 -- | Like 'segThread', but cap the thread count to the input size.
 -- This is more efficient for small kernels, e.g. summing a small
 -- array.
-segThreadCapped :: (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
-                   SubExp -> String -> m SegLevel
-segThreadCapped w desc = do
+segThreadCapped :: MonadFreshNames m => MkSegLevel m
+segThreadCapped ws desc r = do
+  w <- letSubExp "nest_size" =<< foldBinOp (Mul Int32) (intConst Int32 1) ws
   group_size <- getSize (desc ++ "_group_size") SizeGroup
-  group_size_64 <- asIntS Int64 group_size
-  max_num_groups_64 <- asIntS Int64 =<< getSize (desc ++ "_max_num_groups") SizeNumGroups
-  w_64 <- asIntS Int64 w
-  (num_groups_64, _) <- numberOfGroups w_64 group_size_64 max_num_groups_64
-  num_groups <- asIntS Int32 num_groups_64
-  return $ SegThread (Count num_groups) (Count group_size) SegNoVirt
+
+  case r of
+    ManyThreads -> do
+      usable_groups <- letSubExp "segmap_usable_groups" =<<
+                       eDivRoundingUp Int32 (eSubExp w) (eSubExp group_size)
+      return $ SegThread (Count usable_groups) (Count group_size) SegNoVirt
+    NoRecommendation -> do
+      group_size_64 <- asIntS Int64 group_size
+      max_num_groups_64 <- asIntS Int64 =<< getSize (desc ++ "_max_num_groups") SizeNumGroups
+      w_64 <- asIntS Int64 w
+      (num_groups_64, _) <- numberOfGroups w_64 group_size_64 max_num_groups_64
+      num_groups <- asIntS Int32 num_groups_64
+      return $ SegThread (Count num_groups) (Count group_size) SegNoVirt
 
 mkSegSpace :: MonadFreshNames m => [(VName, SubExp)] -> m SegSpace
 mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims
@@ -265,7 +279,7 @@ streamRed pat w comm red_lam fold_lam nes arrs = runBinder_ $ do
 
   (_, kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 
-  lvl <- segThreadCapped w "stream_red"
+  lvl <- segThreadCapped [w] "stream_red" NoRecommendation
   letBind_ pat' $ Op $ SegOp $ SegRed lvl kspace
     [SegRedOp comm red_lam nes mempty] ts kbody
 
@@ -287,7 +301,7 @@ streamMap out_desc mapout_pes w comm fold_lam nes arrs = runBinder $ do
     PatElem <$> newVName desc <*> pure (t `arrayOfRow` threads)
 
   let pat = Pattern [] $ redout_pes ++ mapout_pes
-  lvl <- segThreadCapped w "stream_map"
+  lvl <- segThreadCapped [w] "stream_map" NoRecommendation
   letBind_ pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
 
   return (threads, map patElemName redout_pes)
@@ -316,9 +330,7 @@ segGenRed pat arr_w ispace inps ops lam arrs = runBinder_ $ do
   -- It is important not to launch unnecessarily many threads for
   -- histograms, because it may mean we unnecessarily need to reduce
   -- subhistograms as well.
-  work_size <- letSubExp "seggenred_work" =<<
-               foldBinOp (Mul Int32) arr_w (map snd ispace)
-  lvl <- segThreadCapped work_size "seggenred"
+  lvl <- segThreadCapped (arr_w : map snd ispace) "seggenred" NoRecommendation
 
   letBind_ pat $ Op $ SegOp $ SegGenRed lvl space ops (lambdaReturnType lam) kbody
 
@@ -424,30 +436,23 @@ mapKernelSkeleton ispace inputs = do
   return (space, read_input_bnds)
 
 mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
-             SubExp -> [(VName, SubExp)] -> [KernelInput]
+             MkSegLevel m
+          -> [(VName, SubExp)] -> [KernelInput]
           -> [Type] -> KernelBody Kernels
           -> m (SegOp Kernels, Stms Kernels)
-mapKernel w ispace inputs rts (KernelBody () kstms krets) = runBinder $ do
+mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBinderT' $ do
   (space, read_input_stms) <- mapKernelSkeleton ispace inputs
 
   let kbody' = KernelBody () (read_input_stms <> kstms) krets
 
-  group_size <- getSize "segmap_group_size" SizeGroup
+  -- If the kernel creates arrays (meaning it will require memory
+  -- expansion), we want to truncate the amount of threads.
+  -- Otherwise, have at it!  This is a bit of a hack - in principle,
+  -- we should make this decision later, when we have a clearer idea
+  -- of what is happening inside the kernel.
+  let r = if all primType rts then ManyThreads else NoRecommendation
 
-  usable_groups <- letSubExp "segmap_usable_groups" =<<
-                   eDivRoundingUp Int32 (eSubExp w) (eSubExp group_size)
-  lvl <-
-    -- If the kernel creates arrays (meaning it will require memory
-    -- expansion), we want to truncate the amount of threads.
-    -- Otherwise, have at it!  This is a bit of a hack - in principle,
-    -- we should make this decision later, when we have a clearer idea
-    -- of what is happening inside the kernel.
-    if all primType rts
-    then return $ SegThread (Count usable_groups) (Count group_size) SegNoVirt
-    else do max_num_groups <- getSize "segmap_num_groups" SizeNumGroups
-            num_groups <- letSubExp "num_groups" $
-                          BasicOp $ BinOp (SMin Int32) max_num_groups usable_groups
-            return $ SegThread (Count num_groups) (Count group_size) SegVirt
+  lvl <- mk_lvl (map snd ispace) "segmap" r
 
   return $ SegMap lvl space rts kbody'
 
