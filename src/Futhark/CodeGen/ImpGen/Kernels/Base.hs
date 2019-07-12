@@ -129,13 +129,35 @@ compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
 compileThreadExp dest e =
   defCompileExp dest e
 
-compileGroupExp :: ExpCompiler ExplicitMemory Imp.KernelOp
-compileGroupExp _ (BasicOp (Assert _ _ (loc, locs))) = noAssert $ loc:locs
+groupCopy :: KernelConstants -> VName -> [Imp.Exp] -> SubExp -> [Imp.Exp] -> InKernelGen ()
+groupCopy constants to to_is from from_is = do
+  -- We do the reads/writes multidimensionally, but the loop is
+  -- single-dimensional.
+  ds <- mapM toExp . arrayDims =<< subExpType from
+  i <- newVName "i"
+
+  -- Compute how many elements this thread is responsible for.
+  -- Formula: (w - ltid) / group_size (rounded up).
+  let w = product ds
+      ltid = kernelLocalThreadId constants
+      to_write = (w - ltid) `quotRoundingUp` kernelGroupSize constants
+      is = unflattenIndex ds $
+           Imp.vi32 i * kernelGroupSize constants + ltid
+
+  sFor i Int32 to_write $
+    copyDWIM to (to_is++ is) from (from_is ++ is)
+
+compileGroupExp :: KernelConstants -> ExpCompiler ExplicitMemory Imp.KernelOp
+compileGroupExp _ _ (BasicOp (Assert _ _ (loc, locs))) = noAssert $ loc:locs
 -- The static arrays stuff does not work inside kernels.
-compileGroupExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
+compileGroupExp _ (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
   copyDWIM (patElemName dest) [fromIntegral (i::Int32)] e []
-compileGroupExp dest e =
+compileGroupExp constants (Pattern _ [dest]) (BasicOp (Copy arr)) = do
+  groupCopy constants (patElemName dest) [] (Var arr) []
+  sOp Imp.LocalBarrier
+
+compileGroupExp _ dest e =
   defCompileExp dest e
 
 sanityCheckLevel :: SegLevel -> InKernelGen ()
@@ -965,7 +987,7 @@ threadOperations constants =
 groupOperations constants =
   (defaultOperations $ compileGroupOp constants)
   { opsCopyCompiler = copyInGroup
-  , opsExpCompiler = compileGroupExp
+  , opsExpCompiler = compileGroupExp constants
   , opsStmsCompiler = \_ -> defCompileStms mempty
   , opsAllocCompilers =
       M.fromList [ (Space "local", allocLocal)
@@ -1080,33 +1102,18 @@ compileGroupResult space constants pe (TileReturns dims what) = do
     copyDWIM (patElemName pe) (map Imp.vi32 is_for_thread) (Var what) local_is
 
 compileGroupResult space constants pe (Returns what) = do
-  i <- newVName "i"
-
   in_local_memory <- arrayInLocalMemory what
   let gids = map (Imp.vi32 . fst) $ unSegSpace space
 
   if not in_local_memory then
     sWhen (kernelLocalThreadId constants .==. 0) $
     copyDWIM (patElemName pe) gids what []
-    else do
+    else
       -- If the result of the group is an array in local memory, we
       -- store it by collective copying among all the threads of the
       -- group.  TODO: also do this if the array is in global memory
       -- (but this is a bit more tricky, synchronisation-wise).
-      --
-      -- We do the reads/writes multidimensionally, but the loop is
-      -- single-dimensional.
-      ds <- map (toExp' int32) . arrayDims <$> subExpType what
-      -- Compute how many elements this thread is responsible for.
-      -- Formula: (w - ltid) / group_size (rounded up).
-      let w = product ds
-          ltid = kernelLocalThreadId constants
-          to_write = (w - ltid) `quotRoundingUp` kernelGroupSize constants
-          is = unflattenIndex ds $
-               Imp.vi32 i * kernelGroupSize constants + ltid
-
-      sFor i Int32 to_write $
-        copyDWIM (patElemName pe) (gids ++ is) what is
+      groupCopy constants (patElemName pe) gids what []
 
 compileGroupResult _ _ _ WriteReturns{} =
   compilerLimitationS "compileGroupResult: WriteReturns not handled yet."

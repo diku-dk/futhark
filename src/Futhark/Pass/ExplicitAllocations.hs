@@ -391,7 +391,8 @@ allocInMergeParams variant merge m = do
                  loopInvariantShape mergeparam
                 then return (mergeparam { paramAttr = MemArray bt shape Unique $ ArrayIn mem ixfun },
                              lift . ensureArrayIn (paramType mergeparam) mem ixfun)
-                else doDefault mergeparam space
+                else do def_space <- asks allocSpace
+                        doDefault mergeparam def_space
 
         allocInMergeParam (mergeparam, _) = doDefault mergeparam =<< lift askDefaultSpace
 
