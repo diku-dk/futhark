@@ -17,10 +17,10 @@ import Data.FileEmbed (embedStringFile)
 
 
 
-generateBoilerplate :: String -> String -> [String] -> [VName]
+generateBoilerplate :: String -> String -> [String]
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenCL () ()
-generateBoilerplate cuda_program cuda_prelude kernel_names husk_func_names sizes = do
+generateBoilerplate cuda_program cuda_prelude kernel_names sizes = do
   GC.earlyDecls [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
@@ -34,7 +34,7 @@ generateBoilerplate cuda_program cuda_prelude kernel_names husk_func_names sizes
 
   generateSizeFuns sizes
   cfg <- generateConfigFuns sizes
-  generateContextFuns cfg kernel_names husk_func_names sizes
+  generateContextFuns cfg kernel_names sizes
   where
     cuda_h = $(embedStringFile "rts/c/cuda.h")
     free_list_h = $(embedStringFile "rts/c/free_list.h")
@@ -207,10 +207,10 @@ generateConfigFuns sizes = do
                        }|])
   return cfg
 
-generateContextFuns :: String -> [String] -> [VName]
+generateContextFuns :: String -> [String]
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenCL () ()
-generateContextFuns cfg kernel_names husk_func_names sizes = do
+generateContextFuns cfg kernel_names sizes = do
   final_inits <- GC.contextFinalInits
   node_inits <- GC.nodeInits [C.cexp|node_id|]
   (fields, init_fields) <- GC.contextContents
@@ -277,7 +277,8 @@ generateContextFuns cfg kernel_names husk_func_names sizes = do
         switch (nctx->current_message.type) {
           case NODE_MSG_HUSK: {
             struct cuda_node_husk_content *content = (struct cuda_node_husk_content*)nctx->current_message.content;
-            $stm:(runHusk husk_func_names)
+            nctx->result = content->husk_func(ctx, node_id, content->params);
+            
             break;
           }
           case NODE_MSG_SYNC:
@@ -320,7 +321,7 @@ generateContextFuns cfg kernel_names husk_func_names sizes = do
                             node_params->node_id = i;
                             node_params->ptx = ptx;
 
-                            if(pthread_create(&ctx->cuda.nodes[i].thread, NULL, $id:run_node, node_params))
+                            if (pthread_create(&ctx->cuda.nodes[i].thread, NULL, $id:run_node, node_params))
                               panic(-1, "Error creating thread.");
                           }
 
@@ -359,13 +360,6 @@ generateContextFuns cfg kernel_names husk_func_names sizes = do
                          return ctx->error;
                        }|])
   where
-    runHusk (f : fs) =
-      [C.cstm|if (content->husk_id == $int:(baseTag f)) {
-        nctx->result = $id:f(ctx, node_id, content->params);
-      } else {
-        $stm:(runHusk fs)
-      }|]
-    runHusk [] = [C.cstm|panic(-1, "Husk with id %d does not exist.", content->husk_id);|]
     loadKernelByName name =
       [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(
                 &ctx->node_ctx[node_id].$id:name,

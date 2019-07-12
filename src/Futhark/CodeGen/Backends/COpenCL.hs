@@ -26,7 +26,7 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program opencl_code opencl_prelude kernel_names _ types sizes prog') ->
+    Right (Program opencl_code opencl_prelude kernel_names types sizes prog') ->
       Right <$> GC.compileProg operations
                 (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes)
                 include_opencl_h [Space "device", DefaultSpace]

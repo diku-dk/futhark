@@ -33,7 +33,6 @@ data Program = Program { openClProgram :: String
                        , openClPrelude :: String
                          -- ^ Must be prepended to the program.
                        , openClKernelNames :: [KernelName]
-                       , openClHuskFunctions :: [VName]
                        , openClUsedTypes :: [PrimType]
                          -- ^ So we can detect whether the device is capable.
                        , openClSizes :: M.Map Name SizeClass

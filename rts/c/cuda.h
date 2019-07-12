@@ -95,8 +95,10 @@ enum cuda_node_message_type {
   NODE_MSG_EXIT
 };
 
+typedef int32_t (*husk_function_t) (void*, int32_t, void*);
+
 struct cuda_node_husk_content {
-  int32_t husk_id;
+  husk_function_t husk_func;
   void *params;
 };
 
@@ -662,11 +664,11 @@ void cuda_send_node_base_message(struct cuda_context *ctx, enum cuda_node_messag
   cuda_thread_sync(&ctx->node_sync_point);
 }
 
-void cuda_send_node_husk(struct cuda_context *ctx, int32_t husk_id, void* params) {
+void cuda_send_node_husk(struct cuda_context *ctx, husk_function_t husk_func, void* params) {
   struct cuda_node_husk_content *husk_contents =
     malloc(sizeof(struct cuda_node_husk_content) * ctx->cfg.num_nodes);
   for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
-    husk_contents[i].husk_id = husk_id;
+    husk_contents[i].husk_func = husk_func;
     husk_contents[i].params = params;
     ctx->nodes[i].current_message.type = NODE_MSG_HUSK;
     ctx->nodes[i].current_message.content = husk_contents + i;

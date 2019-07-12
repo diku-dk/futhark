@@ -41,13 +41,13 @@ translateKernels :: KernelTarget
                  -> ImpKernels.Program
                  -> Either InternalError ImpOpenCL.Program
 translateKernels target (ImpKernels.Functions funs) = do
-  (prog', ToOpenCL extra_funs kernels husk_funcs requirements sizes) <-
+  (prog', ToOpenCL extra_funs kernels requirements sizes) <-
     runWriterT $ fmap Functions $ forM funs $ \(fname, fun) ->
     (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
   let kernel_names = M.keys kernels
       opencl_code = openClCode $ M.elems kernels
       opencl_prelude = pretty $ genPrelude target requirements
-  return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names husk_funcs
+  return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names
     (S.toList $ openclUsedTypes requirements) sizes $
     ImpOpenCL.Functions (M.toList extra_funs) <> prog'
   where genPrelude TargetOpenCL = genOpenClPrelude
@@ -85,24 +85,22 @@ instance Monoid OpenClRequirements where
 
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
-                         , clHuskFunctions :: [VName]
                          , clRequirements :: OpenClRequirements
                          , clSizes :: M.Map Name SizeClass
                          }
 
 instance Semigroup ToOpenCL where
-  ToOpenCL f1 k1 h1 r1 sz1 <> ToOpenCL f2 k2 h2 r2 sz2 =
-    ToOpenCL (f1<>f2) (k1<>k2) (h1<>h2) (r1<>r2) (sz1<>sz2)
+  ToOpenCL f1 k1 r1 sz1 <> ToOpenCL f2 k2 r2 sz2 =
+    ToOpenCL (f1<>f2) (k1<>k2) (r1<>r2) (sz1<>sz2)
 
 instance Monoid ToOpenCL where
-  mempty = ToOpenCL mempty mempty mempty mempty mempty
+  mempty = ToOpenCL mempty mempty mempty mempty
 
 type OnKernelM = ReaderT Name (WriterT ToOpenCL (Either InternalError))
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp target (Husk _ num_nodes husk_func interm red) = do
-  tell mempty { clHuskFunctions = [hfunctionName husk_func] }
+onHostOp target (Husk _ num_nodes husk_func interm red) =
   onHusk target num_nodes husk_func interm red
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }

@@ -26,9 +26,9 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program cuda_code cuda_prelude kernel_names husk_funcs _ sizes prog') ->
+    Right (Program cuda_code cuda_prelude kernel_names _ sizes prog') ->
       let extra = generateBoilerplate cuda_code cuda_prelude
-                                      kernel_names husk_funcs sizes
+                                      kernel_names sizes
       in Right <$> GC.compileProg operations extra cuda_includes
                    [Space "device", DefaultSpace] cliOptions prog'
   where
@@ -218,15 +218,16 @@ defineHuskFunction (HuskFunction name parts repl_mem map_res params parts_offset
     GC.compileCode body
     mapM_ combineMapRes map_res
     mapM_ free $ part_mem ++ repl_mem
-  GC.libDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
+  GC.libDecl [C.cedecl|static int $id:name(void *vctx,
                                            typename int32_t $id:node_id,
                                            void *$id:husk_params_p);|]
   GC.huskDecl [C.cedecl|struct $id:husk_params_struct {
       $sdecls:struct_decls
     };|]
-  GC.huskDecl [C.cedecl|static int $id:name(struct futhark_context *ctx,
+  GC.huskDecl [C.cedecl|static int $id:name(void *vctx,
                                             typename int32_t $id:node_id,
                                             void *$id:husk_params_p) {
+      struct futhark_context *ctx = (struct futhark_context *)vctx;
       struct $id:husk_params_struct $id:husk_params = *(struct $id:husk_params_struct *)$id:husk_params_p;
       $decls:body_decls
       $items:body'
@@ -298,7 +299,7 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeTile = "tile_size"
     cudaSizeClass SizeLocalMemory = "shared_memory"
 callKernel (DistributeHusk num_nodes husk_func interm red) = do
-  let husk_id = baseTag $ hfunctionName husk_func
+  let husk_name = hfunctionName husk_func
   err <- newVName "husk_err"
   params <- newVName "husk_params"
   GC.stm [C.cstm|$id:num_nodes = ctx->cuda.cfg.num_nodes;|]
@@ -306,12 +307,12 @@ callKernel (DistributeHusk num_nodes husk_func interm red) = do
   GC.compileCode interm
   GC.decl [C.cdecl|struct $id:param_struct $id:params;|]
   GC.stms [[C.cstm|$id:params.$id:(paramName bparam) = $id:(paramName bparam);|] | bparam <- hfunctionParams husk_func]
-  GC.stm [C.cstm|cuda_send_node_husk(&ctx->cuda, $int:husk_id, &$id:params);|]
+  GC.stm [C.cstm|cuda_send_node_husk(&ctx->cuda, &$id:husk_name, &$id:params);|]
   GC.decl [C.cdecl|int $id:err = cuda_node_first_error(&ctx->cuda);|]
   free_all_mem <- GC.unRefAllMem
   GC.stm [C.cstm|if($id:err != 0) {
       $items:free_all_mem
-      panic($id:err, "Husk %d failed with error %d.", $int:husk_id, $id:err);
+      panic($id:err, "%s failed with error %d.", $string:(pretty husk_name), $id:err);
     }|]
   GC.compileCode red
 callKernel (LaunchKernel name args num_blocks block_size) = do
