@@ -37,6 +37,7 @@ module Futhark.Pass.ExtractKernels.DistributeNests
   )
 where
 
+import Control.Arrow (first)
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
@@ -141,11 +142,31 @@ instance Monad m => LocalScope Out.Kernels (DistNestT m) where
 instance Monad m => MonadLogger (DistNestT m) where
   addLog msgs = tell mempty { accLog = msgs }
 
-runDistNestT :: MonadLogger m => DistEnv m -> DistNestT m a -> m (a, PostKernels)
+runDistNestT :: MonadLogger m =>
+                DistEnv m -> DistNestT m DistAcc -> m (Out.Stms Out.Kernels)
 runDistNestT env (DistNestT m) = do
-  (x, res) <- runWriterT $ runReaderT m env
+  (acc, res) <- runWriterT $ runReaderT m env
   addLog $ accLog res
-  return (x, accPostKernels res)
+  -- There may be a few final targets remaining - these correspond to
+  -- arrays that are identity mapped, and must have statements
+  -- inserted here.
+  return $
+    postKernelsStms (accPostKernels res) <>
+    identityStms (outerTarget $ distTargets acc)
+  where outermost = nestingLoop $
+                    case distNest env of (nest, []) -> nest
+                                         (_, nest : _) -> nest
+        params_to_arrs = map (first paramName) $
+                         loopNestingParamsAndArrs outermost
+
+        identityStms (rem_pat, res) =
+          stmsFromList $ zipWith identityStm (patternValueElements rem_pat) res
+        identityStm pe (Var v)
+          | Just arr <- lookup v params_to_arrs =
+              Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Copy arr
+        identityStm pe se =
+          Let (Pattern [] [pe]) (defAux ()) $ BasicOp $
+          Replicate (Shape [loopNestingWidth outermost]) se
 
 addKernels :: Monad m => PostKernels -> DistNestT m ()
 addKernels ks = tell $ mempty { accPostKernels = ks }
