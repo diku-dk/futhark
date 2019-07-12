@@ -358,7 +358,7 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
     not $ lambdaContainsParallelism map_lam = runBinder_ $ do
       let scan_lam' = soacsLambdaToKernels scan_lam
           map_lam' = soacsLambdaToKernels map_lam
-      lvl <- segThreadCapped [w] "segscan" NoRecommendation
+      lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
       addStms =<< segScan lvl res_pat w scan_lam' map_lam' nes arrs [] []
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
@@ -380,7 +380,7 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
                     | otherwise = comm
           return $ SegRedOp comm' red_lam' nes' shape
         let map_lam_sequential = soacsLambdaToKernels map_lam
-        lvl <- segThreadCapped [w] "segred" NoRecommendation
+        lvl <- segThreadCapped [w] "segred" $ NoRecommendation SegNoVirt
         addStms =<<
           (fmap (certify cs) <$>
            nonSegRed lvl pat w red_ops map_lam_sequential arrs)

@@ -744,7 +744,7 @@ segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
   isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
     \pat ispace inps nes' _ _ -> do
-    lvl <- mk_lvl (segment_size : map snd ispace) "segscan" NoRecommendation
+    lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
     addStms =<< traverse renameStm =<<
       segScan lvl pat segment_size lam map_lam nes' arrs ispace inps
 
@@ -760,7 +760,7 @@ regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
   isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
     \pat ispace inps nes' _ _ -> do
       let red_op = SegRedOp comm lam nes' mempty
-      lvl <- mk_lvl (segment_size : map snd ispace) "segred" NoRecommendation
+      lvl <- mk_lvl (segment_size : map snd ispace) "segred" $ NoRecommendation SegNoVirt
       addStms =<< traverse renameStm =<<
         segRed lvl pat segment_size [red_op] map_lam arrs ispace inps
 
