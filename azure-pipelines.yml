@@ -43,7 +43,7 @@ jobs:
   - script: |
       export PATH=$HOME/.local/bin:$PATH
       stack install
-      futhark test --no-terminal tests examples
+      futhark test --no-terminal --no-tuning tests examples
     displayName: Compile and run tests
 
   - script: |
@@ -61,5 +61,5 @@ jobs:
   - script: |
       export PATH=$HOME/.local/bin:$PATH
       stack install
-      futhark test -c --no-terminal --backend=python tests examples --exclude=no_python
+      futhark test -c --no-terminal --no-tuning --backend=python tests examples --exclude=no_python
     displayName: Compile and run with backend=python

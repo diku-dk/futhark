@@ -50,7 +50,7 @@ jobs:
     env: BUILD=stack STACK_YAML=stack.yaml
     script:
     - stack install
-    - futhark test --no-terminal tests examples
+    - futhark test --no-terminal tests examples --no-tuning
     - "(cd pkgtests; ./test.sh)"
   - stage: deploy
     env: BUILD=stack STACK_YAML=stack.yaml
