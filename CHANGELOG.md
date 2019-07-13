@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark bench` and `futhark test` now interpret `--exclude` in
     the same way.
 
+  * The Python and C# backends can now properly read binary boolean
+    input.
+
 ## [0.11.2]
 
 ### Fixed
