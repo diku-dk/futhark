@@ -53,15 +53,10 @@ module Futhark.Optimise.Simplify.Engine
        , simplifyLambdaNoHoisting
        , simplifyParam
        , bindLParams
-       , bindChunkLParams
-       , bindLoopVar
-       , enterLoop
        , simplifyBody
        , SimplifiedBody
 
        , blockIf
-       , constructBody
-       , protectIf
 
        , module Futhark.Optimise.Simplify.Lore
        ) where
@@ -220,12 +215,6 @@ bindArrayLParams :: SimplifiableLore lore =>
 bindArrayLParams params =
   localVtable $ \vtable ->
     foldr (uncurry ST.insertArrayLParam) vtable params
-
-bindChunkLParams :: SimplifiableLore lore =>
-                    VName -> [(LParam (Wise lore),VName)] -> SimpleM lore a -> SimpleM lore a
-bindChunkLParams offset params =
-  localVtable $ \vtable ->
-    foldr (uncurry $ ST.insertChunkLParam offset) vtable params
 
 bindLoopVar :: SimplifiableLore lore =>
                VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
