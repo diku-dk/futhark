@@ -566,6 +566,9 @@ commandLineOptions = [
   , Option [] ["pass-compiler-option"]
     (ReqArg (Right . changeProgConfig . addCompilerOption) "OPT")
     "Pass this option to the compiler (or typechecker if in -t mode)."
+  , Option [] ["no-tuning"]
+    (NoArg $ Right $ changeProgConfig $ \config -> config { configTuning = Nothing })
+    "Do not load tuning files."
   ]
 
 main :: String -> [String] -> IO ()
