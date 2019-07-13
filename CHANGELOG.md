@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * `futhark test` now understands `--no-tuning` as it was always
+    supposed to.
+
 ## [0.11.2]
 
 ### Fixed
