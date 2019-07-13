@@ -542,7 +542,7 @@ def read_array(f, expected_type, rank):
     # work on things that are insufficiently file-like, like a network
     # stream.
     bytes = f.get_chars(elem_count * FUTHARK_PRIMTYPES[expected_type]['size'])
-    arr = np.fromstring(bytes, dtype='<'+bin_fmt)
+    arr = np.fromstring(bytes, dtype=FUTHARK_PRIMTYPES[bin_type_enum]['numpy_type'])
     arr.shape = shape
 
     return arr
