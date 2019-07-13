@@ -22,6 +22,7 @@ module Futhark.Representation.Kernels.Kernel
        , SegVirt(..)
        , segLevel
        , segSpace
+       , setSegSpace
        , typeCheckSegOp
        , SegSpace(..)
        , scopeOfSegSpace
@@ -39,6 +40,9 @@ module Futhark.Representation.Kernels.Kernel
        , HostOp(..)
        , typeCheckHostOp
 
+       -- * Utility
+       , runKernelBodyBinder
+
        -- * Reexports
        , module Futhark.Representation.Kernels.Sizes
        )
@@ -52,6 +56,7 @@ import qualified Data.Map.Strict as M
 import Data.Foldable
 import Data.List
 
+import Futhark.Construct
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.ScalExp as SE
@@ -379,10 +384,16 @@ segLevel (SegScan lvl _ _ _ _ _) = lvl
 segLevel (SegGenRed lvl _ _ _ _) = lvl
 
 segSpace :: SegOp lore -> SegSpace
-segSpace (SegMap _ lvl _ _) = lvl
-segSpace (SegRed _ lvl _ _ _) = lvl
-segSpace (SegScan _ lvl _ _ _ _) = lvl
-segSpace (SegGenRed _ lvl _ _ _) = lvl
+segSpace (SegMap _ space _ _) = space
+segSpace (SegRed _ space _ _ _) = space
+segSpace (SegScan _ space _ _ _ _) = space
+segSpace (SegGenRed _ space _ _ _) = space
+
+setSegSpace :: SegSpace -> SegOp lore -> SegOp lore
+setSegSpace space (SegMap lvl _ ts body) = SegMap lvl space ts body
+setSegSpace space (SegRed lvl _ ops ts body) = SegRed lvl space ops ts body
+setSegSpace space (SegScan lvl _ lam nes ts body) = SegScan lvl space lam nes ts body
+setSegSpace space (SegGenRed lvl _ ops ts body) = SegGenRed lvl space ops ts body
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
 segResultShape _ t (WriteReturns rws _ _) =
@@ -1031,3 +1042,10 @@ typeCheckHostOp checker lvl _ (SegOp op) =
   TC.checkOpWith (checker $ segLevel op) $
   typeCheckSegOp lvl op
 typeCheckHostOp _ _ f (OtherOp op) = f op
+
+runKernelBodyBinder :: (Bindable lore, MonadFreshNames m,
+                        HasScope somelore m, SameScope somelore lore) =>
+                       Binder lore (Body lore) -> m (KernelBody lore)
+runKernelBodyBinder m = do
+  Body attr stms res <- runBodyBinder m
+  return $ KernelBody attr stms $ map Returns res

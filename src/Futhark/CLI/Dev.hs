@@ -41,6 +41,7 @@ import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
+import Futhark.Optimise.UncoupleThreadIndices
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExpandAllocations
@@ -298,6 +299,7 @@ commandLineOptions =
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []
   , kernelsPassOption unstream []
+  , kernelsPassOption uncoupleThreadIndices []
   , typedPassOption soacsProg Kernels extractKernels []
 
   , typedPassOption kernelsProg ExplicitMemory explicitAllocations "a"

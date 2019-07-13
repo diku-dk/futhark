@@ -19,6 +19,7 @@ import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Unstream
+import Futhark.Optimise.UncoupleThreadIndices
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExtractKernels
@@ -71,6 +72,7 @@ kernelsPipeline =
          , simplifyKernels
          , tileLoops
          , unstream
+         , uncoupleThreadIndices
          , simplifyKernels
          , performCSE True
          , simplifyKernels
