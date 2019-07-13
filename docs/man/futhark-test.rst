@@ -127,7 +127,9 @@ OPTIONS
   Compile the programs, but do not run them.
 
 --exclude=tag
-  Ignore benchmarks with the specified tag.
+
+  Do not run test cases that contain the given tag.  Cases marked with
+  "disable" are ignored by default.
 
 -i
   Only interpret - do not run any compilers.

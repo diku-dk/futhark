@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark test` now understands `--no-tuning` as it was always
     supposed to.
 
+  * `futhark bench` and `futhark test` now interpret `--exclude` in
+    the same way.
+
 ## [0.11.2]
 
 ### Fixed
