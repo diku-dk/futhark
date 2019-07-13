@@ -1,6 +1,6 @@
 -- Intragroup relaxation.
 -- ==
--- random input { 100 [100][256]f32 } auto output
+-- compiled no_python random input { 100 [100][256]f32 } auto output
 
 let relax (xs: []f32) =
   map2 (+) xs (map2 (+) (rotate (-1) xs) (rotate 1 xs))
