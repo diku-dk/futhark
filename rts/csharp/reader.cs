@@ -762,7 +762,8 @@ private (T[], int[]) ReadBinArray<T>(int rank, string typeName, Func<T> ReadStrS
         shape[i] = (int) bin_shape;
     }
 
-    var elem_size = Marshal.SizeOf(typeof(T));
+    // For whatever reason, Marshal.SizeOf<bool> is 4, so special-case that here.
+    var elem_size = typeof(T) == typeof(bool) ? 1 : Marshal.SizeOf<T>();
     var num_bytes = elem_count * elem_size;
     var tmp = new byte[num_bytes];
     var data = new T[elem_count];
@@ -774,6 +775,10 @@ private (T[], int[]) ReadBinArray<T>(int rank, string typeName, Func<T> ReadStrS
         var bytes_read = b.Read(tmp, have_read, to_read);
         to_read -= bytes_read;
         have_read += bytes_read;
+        if (bytes_read == 0) {
+            Console.WriteLine("binary-input: EOF after {0} bytes (expected {1})", have_read, num_bytes);
+            Environment.Exit(1);
+        }
     }
 
     if (!BitConverter.IsLittleEndian && elem_size != 1)
