@@ -319,6 +319,19 @@ excludedTest :: TestConfig -> TestCase -> Bool
 excludedTest config =
   any (`elem` configExclude config) . testTags . testCaseTest
 
+-- | Exclude those test cases that have tags we do not wish to run.
+excludeCases :: TestConfig -> TestCase -> TestCase
+excludeCases config tcase =
+  tcase { testCaseTest = onTest $ testCaseTest tcase }
+  where onTest (ProgramTest desc tags action) =
+          ProgramTest desc tags $ onAction action
+        onAction (RunCases ios stest wtest) =
+          RunCases (map onIOs ios) stest wtest
+        onAction action = action
+        onIOs (InputOutputs entry runs) =
+          InputOutputs entry $ filter (not . any excluded . runTags) runs
+        excluded = (`elem` configExclude config) . T.pack
+
 statusTable :: TestStatus -> String
 statusTable ts = buildTable rows 1
   where rows =
@@ -385,7 +398,7 @@ runTests config paths = do
   replicateM_ concurrency $ forkIO $ runTest testmvar reportmvar
 
   let (excluded, included) = partition (excludedTest config) all_tests
-  _ <- forkIO $ mapM_ (putMVar testmvar) included
+  _ <- forkIO $ mapM_ (putMVar testmvar . excludeCases config) included
   isTTY <- (&& not (configLineOutput config)) <$> hIsTerminalDevice stdout
 
   let report | isTTY = reportTable
