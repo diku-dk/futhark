@@ -170,7 +170,7 @@ onKernel target kernel = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
           return (Just $ SharedMemoryKArg size,
                   Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
-                  [C.citem|__local volatile char* restrict $id:mem = $id:mem_aligned;|])
+                  [C.citem|__local volatile char* restrict $id:mem = (__local volatile char*)$id:mem_aligned;|])
         prepareLocalMemory TargetOpenCL (mem, Right size) = do
           let size' = compilePrimExp size
           return (Nothing, Nothing,
