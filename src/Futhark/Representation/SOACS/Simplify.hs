@@ -7,6 +7,7 @@
 module Futhark.Representation.SOACS.Simplify
        ( simplifySOACS
        , simplifyLambda
+       , simplifyFun
        , simplifyStms
 
        , simpleSOACS
@@ -60,6 +61,10 @@ getShapeNames bnd =
   let tps1 = map patElemType $ patternElements $ stmPattern bnd
       tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
   in  S.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
+
+simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
+simplifyFun =
+  Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
                   Lambda -> [Maybe VName] -> m Lambda

@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     some problems with arrays of sum types that themselves contain
     arrays.
 
+  * Significant reduction in compile time for some large programs.
+
 ### Removed
 
 ### Changed
