@@ -258,6 +258,8 @@ generateContextFuns cfg kernel_names sizes = do
           ctx->cuda.nodes[i].current_message.content = msg_content;
           sem_post(&ctx->cuda.nodes[i].message_signal);
         }
+        bool r;
+        handle_node_message(ctx, 0, &r);
         cuda_thread_sync(&ctx->cuda.node_sync_point);
       }|]
 
@@ -268,7 +270,7 @@ generateContextFuns cfg kernel_names sizes = do
         send_node_base_message(ctx, NODE_MSG_HUSK, &husk_content);
       }|]
 
-  node_exit <- GC.libDecl [C.cedecl|void send_node_exit(struct $id:ctx *ctx) {
+  GC.libDecl [C.cedecl|void send_node_exit(struct $id:ctx *ctx) {
         send_node_base_message(ctx, NODE_MSG_EXIT, NULL);
       }|]
 
@@ -282,14 +284,14 @@ generateContextFuns cfg kernel_names sizes = do
       char *ptx;
     };|]
 
-  GC.libDecl [C.cedecl|void *node_init(struct futhark_context *ctx, typename int32_t node_id, char *ptx) {
+  GC.libDecl [C.cedecl|void node_init(struct futhark_context *ctx, typename int32_t node_id, char *ptx) {
       struct cuda_node_context *nctx = &ctx->cuda.nodes[node_id];
       cuda_node_setup(nctx, ptx);
       $stms:(map loadKernelByName kernel_names)
       $stms:node_inits
      }|]
 
-  GC.libDecl [C.cedecl|void *handle_node_message(struct futhark_context *ctx, typename int32_t node_id, bool *running) {
+  GC.libDecl [C.cedecl|void handle_node_message(struct futhark_context *ctx, typename int32_t node_id, bool *running) {
       struct cuda_node_context *nctx = &ctx->cuda.nodes[node_id];
       switch (nctx->current_message.type) {
         case NODE_MSG_HUSK: {
@@ -346,15 +348,16 @@ generateContextFuns cfg kernel_names sizes = do
                           char *ptx = cuda_get_ptx(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
 
                           struct node_launch_params *node_params =
-                            malloc(sizeof(struct node_launch_params) * ctx->cuda.cfg.num_nodes);
-                          for (int i = 0; i < ctx->cuda.cfg.num_nodes; ++i) {
+                            malloc(sizeof(struct node_launch_params) * ctx->cuda.cfg.num_nodes - 1);
+                          for (int i = 0; i < ctx->cuda.cfg.num_nodes - 1; ++i) {
                             node_params[i].ctx = ctx;
-                            node_params[i].node_id = i;
+                            node_params[i].node_id = i + 1;
                             node_params[i].ptx = ptx;
                       
-                            if (pthread_create(&ctx->cuda.nodes[i].thread, NULL, run_node_thread, node_params + i))
+                            if (pthread_create(&ctx->cuda.nodes[i+1].thread, NULL, run_node_thread, node_params + i))
                               panic(-1, "Error creating thread.");
                           }
+                          node_init(ctx, 0, ptx);
                           cuda_thread_sync(&ctx->cuda.node_sync_point);
                           free(node_params);
                           free(ptx);

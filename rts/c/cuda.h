@@ -563,7 +563,7 @@ void cuda_setup(struct cuda_context *ctx)
 
   cuda_size_setup(ctx);
 
-  if(pthread_barrier_init(&ctx->node_sync_point, NULL, ctx->cfg.num_nodes + 1) != 0)
+  if(pthread_barrier_init(&ctx->node_sync_point, NULL, ctx->cfg.num_nodes) != 0)
     panic(-1, "Node synchronization point initialization failed.");
 }
 
