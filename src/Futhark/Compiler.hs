@@ -119,7 +119,7 @@ runPipelineOnProgram config pipeline file = do
                          , pipelineValidate = True
                          }
 
-typeCheckInternalProgram :: I.Prog -> FutharkM ()
+typeCheckInternalProgram :: I.Prog I.SOACS -> FutharkM ()
 typeCheckInternalProgram prog =
   case I.checkProg prog of
     Left err -> internalErrorS ("After internalisation:\n" ++ show err) (Just prog)

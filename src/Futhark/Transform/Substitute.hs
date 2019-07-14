@@ -80,7 +80,7 @@ instance Substitute attr => Substitute (StmAux attr) where
   substituteNames substs (StmAux cs attr) =
     StmAux (substituteNames substs cs) (substituteNames substs attr)
 
-instance Substitute attr => Substitute (ParamT attr) where
+instance Substitute attr => Substitute (Param attr) where
   substituteNames substs (Param name attr) =
     Param
     (substituteNames substs name)

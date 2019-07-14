@@ -69,7 +69,7 @@ import qualified Data.Map.Strict as M
 import Prelude hiding (elem, lookup)
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Representation.AST hiding (FParam, ParamT (..), lookupType)
+import Futhark.Representation.AST hiding (FParam, lookupType)
 import qualified Futhark.Representation.AST as AST
 import Futhark.Analysis.ScalExp
 

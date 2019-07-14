@@ -206,7 +206,7 @@ instance Rename SubExp where
   rename (Var v)      = Var <$> rename v
   rename (Constant v) = return $ Constant v
 
-instance Rename attr => Rename (ParamT attr) where
+instance Rename attr => Rename (Param attr) where
   rename (Param name attr) = Param <$> rename name <*> rename attr
 
 instance Rename attr => Rename (PatternT attr) where

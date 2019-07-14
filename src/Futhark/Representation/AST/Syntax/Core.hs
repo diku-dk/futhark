@@ -38,8 +38,7 @@ module Futhark.Representation.AST.Syntax.Core
          , Ident (..)
          , Certificates(..)
          , SubExp(..)
-         , ParamT (..)
-         , Param
+         , Param (..)
          , DimIndex (..)
          , Slice
          , dimFix
@@ -227,25 +226,22 @@ data SubExp = Constant PrimValue
             | Var      VName
             deriving (Show, Eq, Ord)
 
--- | A function parameter.
-data ParamT attr = Param
-                   { paramName :: VName
-                     -- ^ Name of the parameter.
-                   , paramAttr :: attr
-                     -- ^ Function parameter attribute.
-                   }
-                   deriving (Ord, Show, Eq)
+-- | A function or lambda parameter.
+data Param attr = Param
+                  { paramName :: VName
+                    -- ^ Name of the parameter.
+                  , paramAttr :: attr
+                    -- ^ Function parameter attribute.
+                  }
+                  deriving (Ord, Show, Eq)
 
--- | A type alias for namespace control.
-type Param = ParamT
-
-instance Foldable ParamT where
+instance Foldable Param where
   foldMap = foldMapDefault
 
-instance Functor ParamT where
+instance Functor Param where
   fmap = fmapDefault
 
-instance Traversable ParamT where
+instance Traversable Param where
   traverse f (Param name attr) = Param name <$> f attr
 
 -- | How to index a single dimension of an array.

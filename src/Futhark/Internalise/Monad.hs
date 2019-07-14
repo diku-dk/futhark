@@ -73,7 +73,7 @@ data InternaliseState = InternaliseState {
   , stateFunTable :: FunTable
   }
 
-newtype InternaliseResult = InternaliseResult [FunDef]
+newtype InternaliseResult = InternaliseResult [FunDef SOACS]
   deriving (Semigroup, Monoid)
 
 newtype InternaliseM  a = InternaliseM (BinderT SOACS
@@ -110,7 +110,7 @@ instance MonadBinder InternaliseM where
 
 runInternaliseM :: MonadFreshNames m =>
                    Bool -> InternaliseM ()
-                -> m (Either String [FunDef])
+                -> m (Either String [FunDef SOACS])
 runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src -> do
   let onError e             = (Left e, src)
@@ -132,7 +132,7 @@ substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
 substitutingVars substs = local $ \env -> env { envSubsts = substs <> envSubsts env }
 
 -- | Add a function definition to the program being constructed.
-addFunction :: FunDef -> InternaliseM ()
+addFunction :: FunDef SOACS -> InternaliseM ()
 addFunction = InternaliseM . lift . tell . InternaliseResult . pure
 
 lookupFunction' :: VName -> InternaliseM (Maybe FunInfo)

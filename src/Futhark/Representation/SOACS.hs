@@ -5,14 +5,12 @@ module Futhark.Representation.SOACS
        ( -- * The Lore definition
          SOACS
          -- * Syntax types
-       , Prog
        , Body
        , Stm
        , Pattern
        , BasicOp
        , Exp
        , Lambda
-       , FunDef
        , FParam
        , LParam
        , RetType
@@ -27,17 +25,14 @@ module Futhark.Representation.SOACS
        , AST.BodyT(Body)
        , AST.PatternT(Pattern)
        , AST.PatElemT(PatElem)
-       , AST.ProgT(Prog)
        , AST.ExpT(BasicOp)
-       , AST.FunDefT(FunDef)
-       , AST.ParamT(Param)
        )
 where
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, BasicOp, Exp, Body, Stm,
-          Pattern, Lambda, FunDef, FParam, LParam, RetType, PatElem)
+  hiding (BasicOp, Exp, Body, Stm,
+          Pattern, Lambda, FParam, LParam, RetType, PatElem)
 import Futhark.Representation.SOACS.SOAC
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
@@ -59,14 +54,12 @@ instance Annotations SOACS where
 instance Attributes SOACS where
   expTypesFromPattern = return . expExtTypesFromPattern
 
-type Prog = AST.Prog SOACS
 type BasicOp = AST.BasicOp SOACS
 type Exp = AST.Exp SOACS
 type Body = AST.Body SOACS
 type Stm = AST.Stm SOACS
 type Pattern = AST.Pattern SOACS
 type Lambda = AST.Lambda SOACS
-type FunDef = AST.FunDefT SOACS
 type FParam = AST.FParam SOACS
 type LParam = AST.LParam SOACS
 type RetType = AST.RetType SOACS

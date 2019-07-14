@@ -220,7 +220,7 @@ runDistribM (DistribM m) = do
   return x
 
 transformFunDef :: (MonadFreshNames m, MonadLogger m) =>
-                   FunDef -> m (Out.FunDef Out.Kernels)
+                   FunDef SOACS -> m (Out.FunDef Out.Kernels)
 transformFunDef (FunDef entry name rettype params body) = runDistribM $ do
   body' <- localScope (scopeOfFParams params) $
            transformBody mempty body

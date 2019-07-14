@@ -32,7 +32,7 @@ import Futhark.Util (chunks, splitAt3)
 transformFunDef :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                     LetAttr SOACS ~ LetAttr tolore,
                     CanBeAliased (Op tolore)) =>
-                   FunDef -> m (AST.FunDef tolore)
+                   FunDef SOACS -> m (AST.FunDef tolore)
 transformFunDef (FunDef entry fname rettype params body) = do
   (body',_) <- modifyNameSource $ runState $ runBinderT m mempty
   return $ FunDef entry fname rettype params body'

@@ -42,7 +42,7 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
 internaliseProg :: MonadFreshNames m =>
-                   Bool -> Imports -> m (Either String I.Prog)
+                   Bool -> Imports -> m (Either String (I.Prog SOACS))
 internaliseProg always_safe prog = do
   prog_decs <- Defunctorise.transformProg prog
   prog_decs' <- Monomorphise.transformProg prog_decs
