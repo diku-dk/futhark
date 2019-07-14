@@ -21,9 +21,9 @@ import Futhark.Analysis.CallGraph
 import Futhark.Binder
 import Futhark.Pass
 
-aggInlining :: MonadFreshNames m => CallGraph -> [FunDef] -> m [FunDef]
+aggInlining :: MonadFreshNames m => CallGraph -> [FunDef SOACS] -> m [FunDef SOACS]
 aggInlining cg = fmap (filter keep) . recurse
-  where noInterestingCalls :: S.Set Name -> FunDef -> Bool
+  where noInterestingCalls :: S.Set Name -> FunDef SOACS -> Bool
         noInterestingCalls interesting fundec =
           case M.lookup (funDefName fundec) cg of
             Just calls | not $ any (`elem` interesting') calls -> True
@@ -62,12 +62,12 @@ aggInlining cg = fmap (filter keep) . recurse
 -- not call any other functions. Further extensions that transform a
 -- tail-recursive function to a do or while loop, should do the transformation
 -- first and then do the inlining.
-doInlineInCaller :: FunDef ->  [FunDef] -> FunDef
+doInlineInCaller :: FunDef SOACS ->  [FunDef SOACS] -> FunDef SOACS
 doInlineInCaller (FunDef entry name rtp args body) inlcallees =
   let body' = inlineInBody inlcallees body
   in FunDef entry name rtp args body'
 
-inlineInBody :: [FunDef] -> Body -> Body
+inlineInBody :: [FunDef SOACS] -> Body -> Body
 inlineInBody inlcallees (Body attr stms res) = Body attr stms' res
   where stms' = stmsFromList (concatMap inline $ stmsToList stms)
 
@@ -92,21 +92,21 @@ inlineInBody inlcallees (Body attr stms res) = Body attr stms' res
 notNoLoc :: SrcLoc -> Bool
 notNoLoc = (/=NoLoc) . locOf
 
-inliner :: Monad m => [FunDef] -> Mapper SOACS SOACS m
+inliner :: Monad m => [FunDef SOACS] -> Mapper SOACS SOACS m
 inliner funs = identityMapper { mapOnBody = const $ return . inlineInBody funs
                               , mapOnOp = return . inlineInSOAC funs
                               }
 
-inlineInSOAC :: [FunDef] -> SOAC SOACS -> SOAC SOACS
+inlineInSOAC :: [FunDef SOACS] -> SOAC SOACS -> SOAC SOACS
 inlineInSOAC inlcallees = runIdentity . mapSOACM identitySOACMapper
                           { mapOnSOACLambda = return . inlineInLambda inlcallees
                           }
 
-inlineInStm :: [FunDef] -> Stm -> Stm
+inlineInStm :: [FunDef SOACS] -> Stm -> Stm
 inlineInStm inlcallees (Let pat aux e) =
   Let pat aux $ mapExp (inliner inlcallees) e
 
-inlineInLambda :: [FunDef] -> Lambda -> Lambda
+inlineInLambda :: [FunDef SOACS] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda params body ret) =
   Lambda params (inlineInBody inlcallees body) ret
 

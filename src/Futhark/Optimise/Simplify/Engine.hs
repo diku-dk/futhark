@@ -767,7 +767,7 @@ simplifyPattern pat =
   mapM inspect (patternValueElements pat)
   where inspect (PatElem name lore) = PatElem name <$> simplify lore
 
-simplifyParam :: (attr -> SimpleM lore attr) -> ParamT attr -> SimpleM lore (ParamT attr)
+simplifyParam :: (attr -> SimpleM lore attr) -> Param attr -> SimpleM lore (Param attr)
 simplifyParam simplifyAttribute (Param name attr) =
   Param name <$> simplifyAttribute attr
 

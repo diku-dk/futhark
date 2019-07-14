@@ -160,7 +160,7 @@ instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn (Mem _)           = mempty
   freeIn (Prim _)          = mempty
 
-instance FreeIn attr => FreeIn (ParamT attr) where
+instance FreeIn attr => FreeIn (Param attr) where
   freeIn (Param _ attr) = freeIn attr
 
 instance FreeIn attr => FreeIn (PatElemT attr) where

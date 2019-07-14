@@ -96,8 +96,7 @@ type RangeM = Reader RangeEnv
 runRangeM :: RangeM a -> a
 runRangeM = flip runReader emptyRangeEnv
 
-bindFunParams :: Typed attr =>
-                 [ParamT attr] -> RangeM a -> RangeM a
+bindFunParams :: Typed attr => [Param attr] -> RangeM a -> RangeM a
 bindFunParams []             m =
   m
 bindFunParams (param:params) m = do
@@ -108,8 +107,7 @@ bindFunParams (param:params) m = do
   where bindFunParam = M.insert (paramName param) unknownRange
         dims = arrayDims $ paramType param
 
-bindPattern :: Typed attr =>
-               PatternT (Range, attr) -> RangeM a -> RangeM a
+bindPattern :: Typed attr => PatternT (Range, attr) -> RangeM a -> RangeM a
 bindPattern pat m = do
   ranges <- rangesRep
   local bindPatElems $

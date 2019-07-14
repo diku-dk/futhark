@@ -179,7 +179,7 @@ fuseSOACs =
        , passFunction = simplifySOACS <=< renameProg <=< intraproceduralTransformation fuseFun
        }
 
-fuseFun :: FunDef -> PassM FunDef
+fuseFun :: FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun fun = do
   let env  = FusionGEnv { soacs = M.empty
                         , varsInScope = M.empty
@@ -191,12 +191,12 @@ fuseFun fun = do
   then return fun
   else liftEitherM $ runFusionGatherM (fuseInFun k fun) env
 
-fusionGatherFun :: FunDef -> FusionGM FusedRes
+fusionGatherFun :: FunDef SOACS -> FusionGM FusedRes
 fusionGatherFun fundec =
   bindingParams (funDefParams fundec) $
   fusionGatherBody mempty $ funDefBody fundec
 
-fuseInFun :: FusedRes -> FunDef -> FusionGM FunDef
+fuseInFun :: FusedRes -> FunDef SOACS -> FusionGM (FunDef SOACS)
 fuseInFun res fundec = do
   body' <- bindingParams (funDefParams fundec) $
            bindRes res $

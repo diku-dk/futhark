@@ -33,15 +33,15 @@ import Futhark.Representation.AST.Attributes.Types
   (existentialiseExtTypes, staticShapes, Typed(..), DeclTyped(..))
 
 -- | The 'Type' of a parameter.
-paramType :: Typed attr => ParamT attr -> Type
+paramType :: Typed attr => Param attr -> Type
 paramType = typeOf
 
 -- | The 'DeclType' of a parameter.
-paramDeclType :: DeclTyped attr => ParamT attr -> DeclType
+paramDeclType :: DeclTyped attr => Param attr -> DeclType
 paramDeclType = declTypeOf
 
 -- | An 'Ident' corresponding to a parameter.
-paramIdent :: Typed attr => ParamT attr -> Ident
+paramIdent :: Typed attr => Param attr -> Ident
 paramIdent param = Ident (paramName param) (typeOf param)
 
 -- | An 'Ident' corresponding to a pattern element.

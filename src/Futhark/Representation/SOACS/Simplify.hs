@@ -49,7 +49,7 @@ import Futhark.Util
 simpleSOACS :: Simplify.SimpleOps SOACS
 simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
 
-simplifySOACS :: Prog -> PassM Prog
+simplifySOACS :: Prog SOACS -> PassM (Prog SOACS)
 simplifySOACS = Simplify.simplifyProg simpleSOACS soacRules blockers
   where blockers = Engine.noExtraHoistBlockers { Engine.getArraySizes = getShapeNames }
 
@@ -62,7 +62,7 @@ getShapeNames bnd =
       tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
   in  S.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
 
-simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
+simplifyFun :: MonadFreshNames m => FunDef SOACS -> m (FunDef SOACS)
 simplifyFun =
   Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
 
@@ -420,7 +420,7 @@ mapOpToOp _ _ _ _ = cannotSimplify
 isMapWithOp :: PatternT attr
             -> SOAC (Wise SOACS)
             -> Maybe (PatElemT attr, Certificates, SubExp,
-                      AST.Exp (Wise SOACS), [ParamT Type], [VName])
+                      AST.Exp (Wise SOACS), [Param Type], [VName])
 isMapWithOp pat e
   | Pattern [] [map_pe] <- pat,
     Screma w form arrs <- e,

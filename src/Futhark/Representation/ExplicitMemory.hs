@@ -794,7 +794,7 @@ bodyReturnsFromPattern pat =
 instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (PatElemT (MemInfo SubExp u r)) where
   ppAnnot = bindeeAnnot patElemName patElemAttr
 
-instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (ParamT (MemInfo SubExp u r)) where
+instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (Param (MemInfo SubExp u r)) where
   ppAnnot = bindeeAnnot paramName paramAttr
 
 instance PrettyLore ExplicitMemory where
