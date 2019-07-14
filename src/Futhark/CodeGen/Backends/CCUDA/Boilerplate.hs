@@ -362,7 +362,6 @@ generateContextFuns cfg kernel_names sizes = do
                           free(node_params);
                           free(ptx);
 
-                          cuCtxSetCurrent(ctx->cuda.nodes[0].cu_ctx);
                           cuda_enable_peer_access(&ctx->cuda);
 
                           $stms:final_inits

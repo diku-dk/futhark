@@ -424,7 +424,8 @@ instance BinderOps (Wise InKernel) where
 kernelRules :: RuleBook (Wise Kernels)
 kernelRules = standardRules <>
               ruleBook [RuleOp removeInvariantKernelResults,
-                        RuleOp fuseHuskIota]
+                        RuleOp fuseHuskIota,
+                        RuleOp removeUnusedHuskInputs]
                        [RuleOp distributeKernelResults,
                         RuleBasicOp removeUnnecessaryCopy]
 
@@ -461,6 +462,10 @@ fuseHuskIota vtable pat _ (Husk hspace red_op nes ts body)
           (parts', part_mem') = unzip partm'
           elems = hspacePartitionElems hspace
           offset = hspacePartitionOffset hspace
+          hspace' = hspace { hspaceSource = src'
+                           , hspacePartitions = parts'
+                           , hspacePartitionsMemory = part_mem'
+                           }
       body' <- insertStmsM $ localScope (scopeOfHuskSpace hspace) $ certifying iota_cs $ do
         -- Convert index to appropriate type.
         offset' <- asIntS iota_t $ Var offset
@@ -471,10 +476,6 @@ fuseHuskIota vtable pat _ (Husk hspace red_op nes ts body)
         letBindNames_ [paramName iota_part] $
           BasicOp $ Iota (Var elems) start iota_stride iota_t
         return body
-      let hspace' = hspace { hspaceSource = src'
-                           , hspacePartitions = parts'
-                           , hspacePartitionsMemory = part_mem'
-                           }
       letBind_ pat $ Op $ Husk hspace' red_op nes ts body'
   where partm = zip (hspacePartitions hspace) (hspacePartitionsMemory hspace)
 fuseHuskIota _ _ _ _ = cannotSimplify
@@ -486,6 +487,21 @@ isIota vtable chunk arr
       Left (cs, chunk, x, s, it)
   | otherwise =
       Right (chunk, arr)
+
+removeUnusedHuskInputs :: TopDownRuleOp (Wise Kernels)
+removeUnusedHuskInputs _ pat _ (Husk hspace red_op nes ts body)
+  | (used,unused) <- partition isUsedPart $ zip3 parts parts_mem src,
+    not $ null unused = do
+      let (parts', parts_mem', src') = unzip3 used
+          hspace' = hspace {
+            hspaceSource = src',
+            hspacePartitions = parts',
+            hspacePartitionsMemory = parts_mem'
+          }
+      letBind_ pat $ Op $ Husk hspace' red_op nes ts body
+  where HuskSpace src _ parts _ _ parts_mem = hspace
+        isUsedPart (p,_,_) = paramName p `S.member` freeIn body
+removeUnusedHuskInputs _ _ _ _ = cannotSimplify
 
 -- If a kernel produces something invariant to the kernel, turn it
 -- into a replicate.
