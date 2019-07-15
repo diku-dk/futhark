@@ -23,6 +23,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
 
 import Futhark.Representation.Kernels
+import Futhark.Transform.Substitute
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Optimise.Simplify.Lore
@@ -425,7 +426,8 @@ kernelRules :: RuleBook (Wise Kernels)
 kernelRules = standardRules <>
               ruleBook [RuleOp removeInvariantKernelResults,
                         RuleOp fuseHuskIota,
-                        RuleOp removeUnusedHuskInputs]
+                        RuleOp removeUnusedHuskInputs,
+                        RuleOp mergeRedundantPartitions]
                        [RuleOp distributeKernelResults,
                         RuleBasicOp removeUnnecessaryCopy]
 
@@ -502,6 +504,24 @@ removeUnusedHuskInputs _ pat _ (Husk hspace red_op nes ts body)
   where HuskSpace src _ parts _ _ parts_mem = hspace
         isUsedPart (p,_,_) = paramName p `S.member` freeIn body
 removeUnusedHuskInputs _ _ _ _ = cannotSimplify
+
+mergeRedundantPartitions :: TopDownRuleOp (Wise Kernels)
+mergeRedundantPartitions _ pat _ (Husk hspace red_op nes ts body)
+  | groups <- groupBy isSame $ zip3 src parts parts_mem,
+    any (\g -> length g > 1) groups =
+      let substs = M.fromList $ concatMap (\(x:xs) -> map (`zipPartNames` x) xs) groups
+          body' = substituteNames substs body
+          (src', parts', parts_mem') = unzip3 $ map head groups
+          hspace' = hspace {
+            hspaceSource = src',
+            hspacePartitions = parts',
+            hspacePartitionsMemory = parts_mem'
+          }
+      in letBind_ pat $ Op $ Husk hspace' red_op nes ts body'
+  where HuskSpace src _ parts _ _ parts_mem = hspace
+        isSame (s1,_,_) (s2,_,_) = s1 == s2
+        zipPartNames (_,p1,_) (_,p2,_) = (paramName p1, paramName p2)
+mergeRedundantPartitions _ _ _ _ = cannotSimplify
 
 -- If a kernel produces something invariant to the kernel, turn it
 -- into a replicate.
