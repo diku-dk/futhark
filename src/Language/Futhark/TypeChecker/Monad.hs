@@ -346,7 +346,7 @@ qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper
 
         reachable [] name env =
           isJust $ find matches $ M.elems (envTypeTable env)
-          where matches (TypeAbbr _ [] (TypeVar _ _ (TypeName x_qs name') [])) =
+          where matches (TypeAbbr _ _ (TypeVar _ _ (TypeName x_qs name') _)) =
                   null x_qs && name == name'
                 matches _ = False
 
