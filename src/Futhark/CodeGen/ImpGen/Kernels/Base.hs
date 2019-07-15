@@ -594,13 +594,6 @@ makeAllMemoryGlobal =
               MemVar Nothing entry { entryMemSpace = Imp.Space "global" }
         globalMemory entry =
           entry
-{-
-allThreads :: KernelConstants -> InKernelGen () -> InKernelGen ()
-allThreads constants = emit <=< subImpM_ (inKernelOperations constants')
-  where constants' =
-          constants { kernelThreadActive = Imp.ValueExp (BoolValue True) }
--}
-
 
 writeParamToLocalMemory :: Typed (MemBound u) =>
                            Imp.Exp -> (VName, t) -> Param (MemBound u)
