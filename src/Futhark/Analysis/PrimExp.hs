@@ -103,6 +103,16 @@ constFoldPrimExp (BinOpExp UDiv{} x y)
 constFoldPrimExp (BinOpExp bop (ValueExp x) (ValueExp y))
   | Just z <- doBinOp bop x y =
       ValueExp z
+constFoldPrimExp (BinOpExp LogAnd x y)
+  | oneIshExp x = y
+  | oneIshExp y = x
+  | zeroIshExp x = x
+  | zeroIshExp y = y
+constFoldPrimExp (BinOpExp LogOr x y)
+  | oneIshExp x = x
+  | oneIshExp y = y
+  | zeroIshExp x = y
+  | zeroIshExp y = x
 constFoldPrimExp e = e
 
 -- The Num instance performs a little bit of magic: whenever an
@@ -161,32 +171,38 @@ instance Pretty v => IntegralExp (PrimExp v) where
 
 -- | Lifted logical conjunction.
 (.&&.) :: PrimExp v -> PrimExp v -> PrimExp v
-x .&&. y = BinOpExp LogAnd x y
+x .&&. y = constFoldPrimExp $ BinOpExp LogAnd x y
 
 -- | Lifted logical conjunction.
 (.||.) :: PrimExp v -> PrimExp v -> PrimExp v
-x .||. y = BinOpExp LogOr x y
+x .||. y = constFoldPrimExp $ BinOpExp LogOr x y
 
 -- | Lifted relational operators; assuming signed numbers in case of
 -- integers.
 (.<.), (.>.), (.<=.), (.>=.), (.==.) :: PrimExp v -> PrimExp v -> PrimExp v
-x .<. y = CmpOpExp cmp x y where cmp = case primExpType x of
+x .<. y = constFoldPrimExp $
+          CmpOpExp cmp x y where cmp = case primExpType x of
                                          IntType t -> CmpSlt $ t `min` primExpIntType y
                                          FloatType t -> FCmpLt t
                                          _ -> CmpLlt
-x .<=. y = CmpOpExp cmp x y where cmp = case primExpType x of
+x .<=. y = constFoldPrimExp $
+           CmpOpExp cmp x y where cmp = case primExpType x of
                                           IntType t -> CmpSle $ t `min` primExpIntType y
                                           FloatType t -> FCmpLe t
                                           _ -> CmpLle
-x .==. y = CmpOpExp (CmpEq $ primExpType x `min` primExpType y) x y
+x .==. y = constFoldPrimExp $
+           CmpOpExp (CmpEq $ primExpType x `min` primExpType y) x y
 x .>. y = y .<. x
 x .>=. y = y .<=. x
 
 -- | Lifted bitwise operators.
 (.&.), (.|.), (.^.) :: PrimExp v -> PrimExp v -> PrimExp v
-x .&. y = BinOpExp (And $ primExpIntType x `min` primExpIntType y) x y
-x .|. y = BinOpExp (Or $ primExpIntType x `min` primExpIntType y) x y
-x .^. y = BinOpExp (Xor $ primExpIntType x `min` primExpIntType y) x y
+x .&. y = constFoldPrimExp $
+          BinOpExp (And $ primExpIntType x `min` primExpIntType y) x y
+x .|. y = constFoldPrimExp $
+          BinOpExp (Or $ primExpIntType x `min` primExpIntType y) x y
+x .^. y = constFoldPrimExp $
+          BinOpExp (Xor $ primExpIntType x `min` primExpIntType y) x y
 
 infix 4 .==., .<., .>., .<=., .>=.
 infixr 3 .&&.
