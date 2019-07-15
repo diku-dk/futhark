@@ -64,9 +64,6 @@ data KernelConstants = KernelConstants
                        , kernelNumThreads :: Imp.Exp
                        , kernelWaveSize :: Imp.Exp
                        , kernelThreadActive :: Imp.Exp
-                       , kernelStreamed :: [(VName, Imp.DimSize)]
-                       -- ^ Chunk sizes and their maximum size.  Hint
-                       -- for unrolling.
                        }
 
 keyWithEntryPoint :: Name -> Name -> Name
@@ -555,7 +552,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
         global_tid local_tid group_id
         num_groups group_size (group_size*num_groups)
         (Imp.var wave_size int32)
-        true mempty
+        true
 
   let set_constants = do
         dPrim_ global_tid int32
@@ -888,7 +885,7 @@ simpleKernelConstants kernel_size desc = do
           (Imp.var thread_gtid int32) (Imp.var thread_ltid int32) (Imp.var group_id int32)
           thread_gtid thread_ltid group_id
           num_groups group_size (group_size*num_groups) 0
-          (Imp.var thread_gtid int32 .<. kernel_size) mempty,
+          (Imp.var thread_gtid int32 .<. kernel_size),
 
           set_constants)
 
