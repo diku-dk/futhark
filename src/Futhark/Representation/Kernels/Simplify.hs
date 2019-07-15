@@ -58,17 +58,13 @@ simplifyKernelOp f (OtherOp op) = do
   return (OtherOp op', stms)
 
 simplifyKernelOp _ (SegOp (SegMap lvl space ts kbody)) = do
-  space' <- Engine.simplify space
-  ts' <- mapM Engine.simplify ts
-
+  (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
-
-  return (SegOp $ SegMap lvl space' ts' kbody',
+  return (SegOp $ SegMap lvl' space' ts' kbody',
           body_hoisted)
 
 simplifyKernelOp _ (SegOp (SegRed lvl space reds ts kbody)) = do
-  space' <- Engine.simplify space
-
+  (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (reds', reds_hoisted) <- fmap unzip $ forM reds $ \(SegRedOp comm lam nes shape) -> do
     (lam', hoisted) <-
       Engine.localVtable (<>scope_vtable) $
@@ -77,25 +73,23 @@ simplifyKernelOp _ (SegOp (SegRed lvl space reds ts kbody)) = do
     nes' <- mapM Engine.simplify nes
     return (SegRedOp comm lam' nes' shape', hoisted)
 
-  ts' <- Engine.simplify ts
-
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
-  return (SegOp $ SegRed lvl space' reds' ts' kbody',
+  return (SegOp $ SegRed lvl' space' reds' ts' kbody',
           mconcat reds_hoisted <> body_hoisted)
   where scope = scopeOfSegSpace space
         scope_vtable = ST.fromScope scope
 
 simplifyKernelOp _ (SegOp (SegScan lvl space scan_op nes ts kbody)) = do
+  lvl' <- Engine.simplify lvl
   (space', scan_op', nes', ts', kbody', hoisted) <-
     simplifyRedOrScan space scan_op nes ts kbody
 
-  return (SegOp $ SegScan lvl space' scan_op' nes' ts' kbody',
+  return (SegOp $ SegScan lvl' space' scan_op' nes' ts' kbody',
           hoisted)
 
 simplifyKernelOp _ (SegOp (SegGenRed lvl space ops ts kbody)) = do
-  space' <- Engine.simplify space
-  ts' <- mapM Engine.simplify ts
+  (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
 
   (ops', ops_hoisted) <- fmap unzip $ forM ops $
     \(GenReduceOp w arrs nes dims lam) -> do
@@ -112,7 +106,7 @@ simplifyKernelOp _ (SegOp (SegGenRed lvl space ops ts kbody)) = do
 
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
-  return (SegOp $ SegGenRed lvl space' ops' ts' kbody',
+  return (SegOp $ SegGenRed lvl' space' ops' ts' kbody',
           mconcat ops_hoisted <> body_hoisted)
 
   where scope = scopeOfSegSpace space
@@ -191,6 +185,17 @@ instance Engine.Simplifiable SplitOrdering where
     return SplitContiguous
   simplify (SplitStrided stride) =
     SplitStrided <$> Engine.simplify stride
+
+instance Engine.Simplifiable SegLevel where
+  simplify (SegThread num_groups group_size virt) =
+    SegThread <$> traverse Engine.simplify num_groups <*>
+    traverse Engine.simplify group_size <*> pure virt
+  simplify (SegGroup num_groups group_size virt) =
+    SegGroup <$> traverse Engine.simplify num_groups <*>
+    traverse Engine.simplify group_size <*> pure virt
+  simplify (SegThreadScalar num_groups group_size virt) =
+    SegThreadScalar <$> traverse Engine.simplify num_groups <*>
+    traverse Engine.simplify group_size <*> pure virt
 
 instance Engine.Simplifiable SegSpace where
   simplify (SegSpace phys dims) =
