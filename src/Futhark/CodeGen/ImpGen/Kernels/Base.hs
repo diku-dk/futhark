@@ -126,22 +126,37 @@ compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
 compileThreadExp dest e =
   defCompileExp dest e
 
-groupCopy :: KernelConstants -> VName -> [Imp.Exp] -> SubExp -> [Imp.Exp] -> InKernelGen ()
-groupCopy constants to to_is from from_is = do
-  -- We do the reads/writes multidimensionally, but the loop is
-  -- single-dimensional.
-  ds <- mapM toExp . arrayDims =<< subExpType from
+-- | Assign iterations of a for-loop to threads in the workgroup.  The
+-- passed-in function is invoked with the (symbolic) iteration.  For
+-- multidimensional loops, use 'groupCoverSpace'.
+groupLoop :: KernelConstants -> Imp.Exp
+          -> (Imp.Exp -> InKernelGen ()) -> InKernelGen ()
+groupLoop constants n f = do
   i <- newVName "i"
 
   -- Compute how many elements this thread is responsible for.
-  -- Formula: (w - ltid) / group_size (rounded up).
-  let w = product ds
-      ltid = kernelLocalThreadId constants
-      to_write = (w - ltid) `quotRoundingUp` kernelGroupSize constants
-      is = unflattenIndex ds $
-           Imp.vi32 i * kernelGroupSize constants + ltid
+  -- Formula: (n - ltid) / group_size (rounded up).
+  let ltid = kernelLocalThreadId constants
+      elems_for_this = (n - ltid) `quotRoundingUp` kernelGroupSize constants
 
-  sFor i Int32 to_write $
+  sFor i Int32 elems_for_this $ f $ Imp.vi32 i
+
+-- | Iterate collectively though a multidimensional space, such that
+-- all threads in the group participate.  The passed-in function is
+-- invoked with a (symbolic) point in the index space.
+groupCoverSpace :: KernelConstants -> [Imp.Exp]
+                -> ([Imp.Exp] -> InKernelGen ()) -> InKernelGen ()
+groupCoverSpace constants ds f =
+  groupLoop constants (product ds) $ \i -> do
+    let is = unflattenIndex ds $
+             i * kernelGroupSize constants +
+             kernelLocalThreadId constants
+    f is
+
+groupCopy :: KernelConstants -> VName -> [Imp.Exp] -> SubExp -> [Imp.Exp] -> InKernelGen ()
+groupCopy constants to to_is from from_is = do
+  ds <- mapM toExp . arrayDims =<< subExpType from
+  groupCoverSpace constants ds $ \is ->
     copyDWIM to (to_is++ is) from (from_is ++ is)
 
 compileGroupExp :: KernelConstants -> ExpCompiler ExplicitMemory Imp.KernelOp
@@ -153,6 +168,20 @@ compileGroupExp _ (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Copy arr)) = do
   groupCopy constants (patElemName dest) [] (Var arr) []
   sOp Imp.LocalBarrier
+compileGroupExp constants (Pattern _ [dest]) (BasicOp (Manifest _ arr)) = do
+  groupCopy constants (patElemName dest) [] (Var arr) []
+  sOp Imp.LocalBarrier
+compileGroupExp constants (Pattern _ [dest]) (BasicOp (Replicate _ se)) = do
+  ds <- mapM toExp . arrayDims $ patElemType dest
+  groupCoverSpace constants ds $ \is ->
+    copyDWIM (patElemName dest) is se (drop 1 is)
+compileGroupExp constants (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
+  n' <- toExp n
+  e' <- toExp e
+  s' <- toExp s
+  groupLoop constants n' $ \i' -> do
+    x <- dPrimV "x" $ e' + i' * s'
+    copyDWIM (patElemName dest) [i'] (Var x) []
 
 compileGroupExp _ dest e =
   defCompileExp dest e
