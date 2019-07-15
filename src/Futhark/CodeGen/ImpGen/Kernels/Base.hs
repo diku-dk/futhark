@@ -975,7 +975,8 @@ sKernelSimple :: String -> Imp.Exp
               -> CallKernelGen ()
 sKernelSimple name kernel_size f = do
   (constants, init_constants) <- simpleKernelConstants kernel_size name
-  let name' = nameFromString $ name ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+  let name' = nameFromString $ name ++ "_" ++
+              show (baseTag $ kernelGlobalThreadIdVar constants)
   sKernel (threadOperations constants) constants name' $ do
     init_constants
     f constants
