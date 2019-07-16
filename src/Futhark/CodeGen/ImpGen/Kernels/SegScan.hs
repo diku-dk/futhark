@@ -19,9 +19,9 @@ import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 
-makeLocalArrays :: SubExp -> SubExp -> [SubExp] -> Lambda InKernel
+makeLocalArrays :: Count GroupSize SubExp -> SubExp -> [SubExp] -> Lambda ExplicitMemory
                 -> InKernelGen [VName]
-makeLocalArrays group_size num_threads nes scan_op = do
+makeLocalArrays (Count group_size) num_threads nes scan_op = do
   let (scan_x_params, _scan_y_params) =
         splitAt (length nes) $ lambdaParams scan_op
   forM scan_x_params $ \p ->
@@ -39,18 +39,21 @@ type CrossesSegment = Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
 
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 :: Pattern ExplicitMemory
-           -> KernelSpace
-           -> Lambda InKernel -> [SubExp]
-           -> KernelBody InKernel
+           -> Count NumGroups SubExp -> Count GroupSize SubExp -> SegSpace
+           -> Lambda ExplicitMemory -> [SubExp]
+           -> KernelBody ExplicitMemory
            -> CallKernelGen (Imp.Exp, CrossesSegment)
-scanStage1 (Pattern _ pes) space scan_op nes kbody = do
-  (base_constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
-  let (gtids, dims) = unzip $ spaceDimensions space
+scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
+  num_groups' <- traverse toExp num_groups
+  group_size' <- traverse toExp group_size
+  num_threads <- dPrimV "num_threads" $
+                 unCount num_groups' * unCount group_size'
+
+  let (gtids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
-  let constants = base_constants { kernelThreadActive = true }
-      num_elements = product dims'
-      elems_per_thread = num_elements `quotRoundingUp` kernelNumThreads constants
-      elems_per_group = kernelGroupSize constants * elems_per_thread
+  let num_elements = product dims'
+      elems_per_thread = num_elements `quotRoundingUp` Imp.vi32 num_threads
+      elems_per_group = unCount group_size' * elems_per_thread
 
   -- Squirrel away a copy of the operator with unique names that we
   -- can pass to groupScan.
@@ -62,12 +65,9 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
             (to-from) .>. (to `rem` segment_size)
           _ -> Nothing
 
-  sKernel constants "scan_stage1" $ allThreads constants $ do
-    init_constants
-
+  sKernelThread "scan_stage1" num_groups' group_size' (segFlat space) $ \constants -> do
     local_arrs <-
-      makeLocalArrays (spaceGroupSize space) (spaceNumThreads space)
-      nes scan_op
+      makeLocalArrays group_size (Var num_threads) nes scan_op
 
     -- The variables from scan_op will be used for the carry and such
     -- in the big chunking loop.
@@ -86,7 +86,7 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
       flat_idx <- dPrimV "flat_idx" $
                   Imp.var chunk_offset int32 + kernelLocalThreadId constants
       -- Construct segment indices.
-      zipWithM_ (<--) gtids $ unflattenIndex dims' $ Imp.var flat_idx int32
+      zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ Imp.var flat_idx int32
 
       let in_bounds =
             foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
@@ -148,26 +148,23 @@ scanStage1 (Pattern _ pes) space scan_op nes kbody = do
   return (elems_per_group, crossesSegment)
 
 scanStage2 :: Pattern ExplicitMemory
-           -> Imp.Exp -> CrossesSegment -> KernelSpace
-           -> Lambda InKernel -> [SubExp]
+           -> Imp.Exp -> Count NumGroups SubExp -> CrossesSegment -> SegSpace
+           -> Lambda ExplicitMemory -> [SubExp]
            -> CallKernelGen ()
-scanStage2 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
-  -- A single group, with one thread for each group in stage 1.
-  group_size <- toExp $ spaceNumGroups space
-  (constants, init_constants) <-
-    kernelInitialisationSimple 1 group_size Nothing
+scanStage2 (Pattern _ pes) elems_per_group num_groups crossesSegment space scan_op nes = do
+  -- Our group size is the number of groups for the stage 1 kernel.
+  let group_size = Count $ unCount num_groups
+  group_size' <- traverse toExp group_size
 
-  let (gtids, dims) = unzip $ spaceDimensions space
+  let (gtids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
   let crossesSegment' = do
         f <- crossesSegment
         Just $ \from to ->
           f ((from + 1) * elems_per_group - 1) ((to + 1) * elems_per_group - 1)
 
-  sKernel constants "scan_stage2" $ do
-    init_constants
-
-    local_arrs <- makeLocalArrays (spaceNumGroups space) (spaceNumGroups space)
+  sKernelThread  "scan_stage2" 1 group_size' (segFlat space) $ \constants -> do
+    local_arrs <- makeLocalArrays group_size (unCount group_size)
                   nes scan_op
 
     flat_idx <- dPrimV "flat_idx" $
@@ -195,15 +192,14 @@ scanStage2 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
       (Var arr) [kernelLocalThreadId constants]
 
 scanStage3 :: Pattern ExplicitMemory
-           -> Imp.Exp -> CrossesSegment -> KernelSpace
-           -> Lambda InKernel -> [SubExp]
+           -> Imp.Exp -> CrossesSegment -> SegSpace
+           -> Lambda ExplicitMemory -> [SubExp]
            -> CallKernelGen ()
 scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
-  let (gtids, dims) = unzip $ spaceDimensions space
+  let (gtids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
-  (constants, init_constants) <- simpleKernelConstants (product dims') "scan"
-  sKernel constants "scan_stage3" $ do
-    init_constants
+  sKernelSimple "scan_stage3" (product dims') $ \constants -> do
+    dPrimV_ (segFlat space) $ kernelGlobalThreadId constants
     -- Compute our logical index.
     zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ kernelGlobalThreadId constants
     -- Figure out which group this element was originally in.
@@ -242,17 +238,18 @@ scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
 compileSegScan :: Pattern ExplicitMemory
-               -> KernelSpace
-               -> Lambda InKernel -> [SubExp]
-               -> KernelBody InKernel
+               -> SegLevel -> SegSpace
+               -> Lambda ExplicitMemory -> [SubExp]
+               -> KernelBody ExplicitMemory
                -> CallKernelGen ()
-compileSegScan pat space scan_op nes kbody = do
-  (elems_per_group, crossesSegment) <- scanStage1 pat space scan_op nes kbody
+compileSegScan pat lvl space scan_op nes kbody = do
+  (elems_per_group, crossesSegment) <-
+    scanStage1 pat (segNumGroups lvl) (segGroupSize lvl) space scan_op nes kbody
 
   emit $ Imp.DebugPrint "\n# SegScan" Nothing
   emit $ Imp.DebugPrint "elems_per_group" $ Just (int32, elems_per_group)
 
   scan_op' <- renameLambda scan_op
   scan_op'' <- renameLambda scan_op
-  scanStage2 pat elems_per_group crossesSegment space scan_op' nes
+  scanStage2 pat elems_per_group (segNumGroups lvl) crossesSegment space scan_op' nes
   scanStage3 pat elems_per_group crossesSegment space scan_op'' nes

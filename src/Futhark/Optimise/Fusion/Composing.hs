@@ -180,7 +180,7 @@ fuseRedomap unfus_nms outVars p_lam p_scan_nes p_red_nes p_inparr outPairs
                                     (drop p_num_nes outPairs) c_lam c_inparr
       (res_lam_scan_ts, res_lam_red_ts, res_lam_map_ts) =
         splitAt3 (length c_scan_nes) (length c_red_nes) $ lambdaReturnType res_lam
-      (_,extra_map_ts) = unzip $ filter (\(nm,_)->elem nm unfus_arrs) $
+      (_,extra_map_ts) = unzip $ filter (\(nm,_)-> nm `elem` unfus_arrs) $
                          zip (drop p_num_nes outVars) $ drop p_num_nes $
                          lambdaReturnType p_lam
 

@@ -3,7 +3,7 @@
 --
 -- ==
 -- structure distributed {
---   Kernel 2
+--   SegMap 2
 --   DoLoop 3
 -- }
 

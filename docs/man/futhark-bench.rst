@@ -22,9 +22,10 @@ average runtime printed on standard output.  Refer to
 program will be ignored if it contains no data sets - it will not even
 be compiled.
 
-If compilation or running fails, an error message will be printed and
-benchmarking will continue (and ``--json`` will write the file), but a
-non-zero exit code will be returned at the end.
+If compilation of a program fails, then ``futhark bench`` will abort
+immediately.  If execution of a test set fails, an error message will
+be printed and benchmarking will continue (and ``--json`` will write
+the file), but a non-zero exit code will be returned at the end.
 
 OPTIONS
 =======
@@ -45,7 +46,8 @@ OPTIONS
 
 --futhark=program
 
-  The binary used to perform operations.  Defaults to ``futhark``.
+  The program used to perform operations (eg. compilation).  Defaults
+  to the binary running ``futhark bench`` itself.
 
 --ignore-files=REGEX
 
@@ -68,12 +70,12 @@ OPTIONS
 
 --runner=program
 
-  If this is set to the non-empty string, compiled programs are not
-  run directly, but instead the indicated program is run, with the
-  path to the compiled Futhark program passed as the first
-  command-line argument.  This is useful for compilation targets that
-  cannot be executed directly (as with :ref:`futhark-csharp(1)`), or when you
-  wish to run the program on a remote machine.
+  If set to a non-empty string, compiled programs are not run
+  directly, but instead the indicated *program* is run with its first
+  argument being the path to the compiled Futhark program.  This is
+  useful for compilation targets that cannot be executed directly (as
+  with :ref:`futhark-csharp(1)`), or when you wish to run the program
+  on a remote machine.
 
 --runs=count
 

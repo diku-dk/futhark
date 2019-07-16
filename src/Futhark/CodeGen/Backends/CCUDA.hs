@@ -111,7 +111,7 @@ writeCUDAScalar mem idx t "device" _ val = do
   val' <- newVName "write_tmp"
   GC.stm [C.cstm|{$ty:t $id:val' = $exp:val;
                   CUDA_SUCCEED(
-                    cuMemcpyHtoD($exp:mem + $exp:idx,
+                    cuMemcpyHtoD($exp:mem + $exp:idx * sizeof($ty:t),
                                  &$id:val',
                                  sizeof($ty:t)));
                  }|]
@@ -124,7 +124,7 @@ readCUDAScalar mem idx t "device" _ = do
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm [C.cstm|CUDA_SUCCEED(
                    cuMemcpyDtoH(&$id:val,
-                                $exp:mem + $exp:idx,
+                                $exp:mem + $exp:idx * sizeof($ty:t),
                                 sizeof($ty:t)));
                 |]
   return [C.cexp|$id:val|]

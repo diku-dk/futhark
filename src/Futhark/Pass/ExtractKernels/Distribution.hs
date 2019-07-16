@@ -58,7 +58,8 @@ import Futhark.Tools
 import Futhark.Util
 import Futhark.Transform.Rename
 import Futhark.Util.Log
-import Futhark.Pass.ExtractKernels.BlockedKernel (mapKernel, KernelInput(..))
+import Futhark.Pass.ExtractKernels.BlockedKernel
+  (mapKernel, KernelInput(..), readKernelInput, MkSegLevel)
 
 type Target = (Pattern Kernels, Result)
 
@@ -240,56 +241,47 @@ kernelNestWidths :: KernelNest -> [SubExp]
 kernelNestWidths = map loopNestingWidth . kernelNestLoops
 
 constructKernel :: (MonadFreshNames m, LocalScope Kernels m) =>
-                   KernelNest -> KernelBody InKernel
-                -> m (Stms Kernels, SubExp, Stm Kernels)
-constructKernel kernel_nest inner_body = do
-  (w_bnds, w, ispace, inps) <- flatKernel kernel_nest
-  let used_inps = filter inputIsUsed inps
-      cs = loopNestingCertificates first_nest
+                   MkSegLevel m -> KernelNest -> Body Kernels
+                -> m (Stm Kernels, Stms Kernels)
+constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
+  (ispace, inps) <- flatKernel kernel_nest
+  let cs = loopNestingCertificates first_nest
+      ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexInfo Int32
       pat = loopNestingPattern first_nest
       rts = map (stripArray (length ispace)) $ patternTypes pat
 
-  (ksize_bnds, k) <- inScopeOf w_bnds $
-    mapKernel w (FlatThreadSpace ispace) used_inps rts inner_body
+  inner_body' <- fmap (uncurry (flip (KernelBody ()))) $ runBinder $
+                 localScope ispace_scope $ do
+    mapM_ readKernelInput $ filter inputIsUsed inps
+    map Returns <$> bodyBind inner_body
 
-  let kbnds = w_bnds <> ksize_bnds
-  return (kbnds,
-          w,
-          Let pat (StmAux cs ()) $ Op $ HostOp k)
+  (segop, aux_stms) <- lift $ mapKernel mk_lvl ispace [] rts inner_body'
+
+  addStms aux_stms
+
+  return $ Let pat (StmAux cs ()) $ Op $ SegOp segop
   where
     first_nest = fst kernel_nest
-    inputIsUsed input = kernelInputName input `S.member`
-                        freeIn inner_body
+    inputIsUsed input = kernelInputName input `S.member` freeIn inner_body
 
 -- | Flatten a kernel nesting to:
 --
---  (0) Ancillary prologue bindings.
+--  (1) The index space.
 --
---  (1) The total number of threads, equal to the product of all
---  nesting widths, and equal to the product of the index space.
---
---  (2) The index space.
---
---  (3) The kernel inputs - note that some of these may be unused.
+--  (2) The kernel inputs - note that some of these may be unused.
 flatKernel :: MonadFreshNames m =>
               KernelNest
-           -> m (Stms Kernels,
-                 SubExp,
-                 [(VName, SubExp)],
+           -> m ([(VName, SubExp)],
                  [KernelInput])
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, []) = do
   i <- newVName "gtid"
   let inps = [ KernelInput pname ptype arr [Var i] |
                (Param pname ptype, arr) <- params_and_arrs ]
-  return (mempty, nesting_w, [(i,nesting_w)], inps)
+  return ([(i,nesting_w)], inps)
 
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   i <- newVName "gtid"
-  (w_bnds, w, ispace, inps) <- flatKernel (nest, nests)
-
-  w' <- newVName "nesting_size"
-  let w_bnd = mkLet [] [Ident w' $ Prim int32] $
-              BasicOp $ BinOp (Mul Int32) w nesting_w
+  (ispace, inps) <- flatKernel (nest, nests)
 
   let inps' = map fixupInput inps
       isParam inp =
@@ -301,8 +293,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
         | otherwise =
             inp
 
-  return (w_bnds <> oneStm w_bnd, Var w', (i, nesting_w) : ispace,
-          extra_inps i <> inps')
+  return ((i, nesting_w) : ispace, extra_inps i <> inps')
   where extra_inps i =
           [ KernelInput pname ptype arr [Var i] |
             (Param pname ptype, arr) <- params_and_arrs ]
@@ -503,17 +494,18 @@ removeIdentityMappingFromNesting bound_in_nesting pat res =
   in (pat', res', identity_map, expand_target)
 
 tryDistribute :: (MonadFreshNames m, LocalScope Kernels m, MonadLogger m) =>
-                 Nestings -> Targets -> Stms InKernel
+                 MkSegLevel m -> Nestings -> Targets -> Stms Kernels
               -> m (Maybe (Targets, Stms Kernels))
-tryDistribute _ targets stms | null stms =
+tryDistribute _ _ targets stms | null stms =
   -- No point in distributing an empty kernel.
   return $ Just (targets, mempty)
-tryDistribute nest targets stms =
+tryDistribute mk_lvl nest targets stms =
   createKernelNest nest dist_body >>=
   \case
     Just (targets', distributed) -> do
-      (w_bnds, _, kernel_bnd) <- localScope (targetsScope targets') $
-        constructKernel distributed inner_body
+      (kernel_bnd, w_bnds) <-
+        localScope (targetsScope targets') $
+        constructKernel mk_lvl distributed $ mkBody stms inner_body_res
       distributed' <- renameStm kernel_bnd
       logMsg $ "distributing\n" ++
         unlines (map pretty $ stmsToList stms) ++
@@ -525,7 +517,6 @@ tryDistribute nest targets stms =
     Nothing ->
       return Nothing
   where (dist_body, inner_body_res) = distributionBodyFromStms targets stms
-        inner_body = KernelBody () stms $ map ThreadsReturn inner_body_res
 
 tryDistributeStm :: (MonadFreshNames m, HasScope t m, Attributes lore) =>
                     Nestings -> Targets -> Stm lore

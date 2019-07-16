@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, ScopedTypeVariables #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE TupleSections #-}
 -- | The type checker checks whether the program is type-consistent.
 module Futhark.TypeCheck
   ( -- * Interface
@@ -18,7 +19,7 @@ module Futhark.TypeCheck
   , lookupAliases
   , Occurences
   , collectOccurences
-  , subCheck
+  , checkOpWith
 
     -- * Checkers
   , require
@@ -235,6 +236,7 @@ instance Monoid Consumption where
 data Env lore =
   Env { envVtable :: M.Map VName (VarBinding lore)
       , envFtable :: M.Map Name (FunBinding lore)
+      , envCheckOp :: OpWithAliases (Op lore) -> TypeM lore ()
       , envContext :: [String]
       }
 
@@ -311,6 +313,10 @@ collectOccurences m = pass $ do
   (x, c) <- listen m
   o <- checkConsumption c
   return ((x, o), const mempty)
+
+checkOpWith :: (OpWithAliases (Op lore) -> TypeM lore ())
+            -> TypeM lore a -> TypeM lore a
+checkOpWith checker = local $ \env -> env { envCheckOp = checker }
 
 checkConsumption :: Consumption -> TypeM lore Occurences
 checkConsumption (ConsumptionError e) = bad $ TypeError e
@@ -456,6 +462,7 @@ checkProg prog = do
   let typeenv = Env { envVtable = M.empty
                     , envFtable = mempty
                     , envContext = []
+                    , envCheckOp = checkOp
                     }
   let onFunction ftable fun =
         fmap fst $ runTypeM typeenv $
@@ -559,33 +566,12 @@ checkFun' (fname, rettype, params, body) consumable check = do
             bad $ UniqueReturnAliased fname
           | otherwise = return $ seen `S.union` tag Nonunique names
 
-        tag u = S.map $ \name -> (u, name)
+        tag u = S.map (u,)
 
         returnAliasing expected got =
           reverse $
           zip (reverse (map uniqueness expected) ++ repeat Nonunique) $
           reverse got
-
-subCheck :: forall lore newlore a.
-            (Checkable newlore,
-             RetType lore ~ RetType newlore,
-             LetAttr lore ~ LetAttr newlore,
-             FParamAttr lore ~ FParamAttr newlore,
-             LParamAttr lore ~ LParamAttr newlore) =>
-            TypeM newlore a ->
-            TypeM lore a
-subCheck m = do
-  typeenv <- asks newEnv
-  case runTypeM typeenv m of
-    Left err -> bad $ TypeError $ show err
-    Right (x, cons) -> tell cons >> return x
-    where newEnv :: Env lore -> Env newlore
-          newEnv (Env vtable ftable ctx) =
-            Env (M.map coerceVar vtable) ftable ctx
-          coerceVar (LetInfo x) = LetInfo x
-          coerceVar (FParamInfo x) = FParamInfo x
-          coerceVar (LParamInfo x) = LParamInfo x
-          coerceVar (IndexInfo it) = IndexInfo it
 
 checkSubExp :: Checkable lore => SubExp -> TypeM lore Type
 checkSubExp (Constant val) =
@@ -855,7 +841,8 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
               bad $ ReturnTypeError (nameFromString "<loop body>")
               (staticShapes rettype') (staticShapes bodyt)
 
-checkExp (Op op) = checkOp op
+checkExp (Op op) = do checker <- asks envCheckOp
+                      checker op
 
 checkSOACArrayArgs :: Checkable lore =>
                       SubExp -> [VName] -> TypeM lore [Arg]
@@ -1061,6 +1048,7 @@ requirePrimExp t e = context ("in PrimExp " ++ pretty e) $ do
 
 class Attributes lore => CheckableOp lore where
   checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
+  -- ^ Used at top level; can be locally changed with 'checkOpWith'.
 
 -- | The class of lores that can be type-checked.
 class (Attributes lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable lore where

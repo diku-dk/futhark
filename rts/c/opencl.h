@@ -151,7 +151,7 @@ static char* slurp_file(const char *filename, size_t *size) {
   return s;
 }
 
-static const char* opencl_error_string(unsigned int err)
+static const char* opencl_error_string(cl_int err)
 {
     switch (err) {
         case CL_SUCCESS:                            return "Success!";
@@ -766,7 +766,6 @@ int opencl_alloc_actual(struct opencl_context *ctx, size_t size, cl_mem *mem_out
 }
 
 int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, cl_mem *mem_out) {
-  assert(min_size >= 0);
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
   }

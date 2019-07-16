@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts, UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts, UndecidableInstances #-}
 -- | Facilities for determining which names are used in some syntactic
 -- construct.  The most important interface is the 'FreeIn' class and
 -- its instances, but for reasons related to the Haskell type system,
@@ -160,7 +160,7 @@ instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn (Mem _)           = mempty
   freeIn (Prim _)          = mempty
 
-instance FreeIn attr => FreeIn (ParamT attr) where
+instance FreeIn attr => FreeIn (Param attr) where
   freeIn (Param _ attr) = freeIn attr
 
 instance FreeIn attr => FreeIn (PatElemT attr) where

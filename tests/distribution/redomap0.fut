@@ -13,7 +13,7 @@
 --   loop
 -- ==
 --
--- structure distributed { Kernel 1 }
+-- structure distributed { SegMap 1 }
 
 let main(a: [][]i32): []i32 =
   map (\(a_r: []i32): i32  ->

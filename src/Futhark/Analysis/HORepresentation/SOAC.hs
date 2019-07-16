@@ -597,7 +597,8 @@ soacToStream soac = do
       return (Stream w (Sequential nes) strmlam inps,
               map paramIdent inpacc_ids)
 
-      | Just (comm, lamin, nes, _) <- Futhark.isRedomapSOAC form -> do
+      | Just (reds, _) <- Futhark.isRedomapSOAC form,
+        Futhark.Reduce comm lamin nes <- Futhark.singleReduce reds -> do
       -- Redomap(+,lam,nes,a) => is translated in strem's body to:
       -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
       -- 2. let acc'                   = acc + acc0_ids          in
@@ -613,7 +614,8 @@ soacToStream soac = do
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-      let insoac = Futhark.Screma chvar (Futhark.redomapSOAC comm lamin nes foldlam) $
+      let insoac = Futhark.Screma chvar
+                   (Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam) $
                    map paramName strm_inpids
           insbnd = mkLet [] (acc0_ids++strm_resids) $ Op insoac
       -- 2. let acc'     = acc + acc0_ids    in

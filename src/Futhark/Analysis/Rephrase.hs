@@ -62,7 +62,7 @@ rephrasePatElem :: Monad m => (from -> m to) -> PatElemT from -> m (PatElemT to)
 rephrasePatElem rephraser (PatElem ident from) =
   PatElem ident <$> rephraser from
 
-rephraseParam :: Monad m => (from -> m to) -> ParamT from -> m (ParamT to)
+rephraseParam :: Monad m => (from -> m to) -> Param from -> m (Param to)
 rephraseParam rephraser (Param name from) =
   Param name <$> rephraser from
 

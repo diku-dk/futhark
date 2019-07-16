@@ -5,7 +5,8 @@
 module Futhark.Binder
   ( -- * A concrete @MonadBinder@ monad.
     BinderT
-  , runBinderT
+  , runBinderT, runBinderT_
+  , runBinderT', runBinderT'_
   , BinderOps (..)
   , bindableMkExpAttrB
   , bindableMkBodyB
@@ -106,6 +107,21 @@ runBinderT :: MonadFreshNames m =>
 runBinderT (BinderT m) scope = do
   (x, (stms, _)) <- runStateT m (mempty, scope)
   return (x, stms)
+
+runBinderT_ :: MonadFreshNames m =>
+                BinderT lore m a -> Scope lore -> m (Stms lore)
+runBinderT_ m = fmap snd . runBinderT m
+
+runBinderT' :: (MonadFreshNames m, HasScope somelore m, SameScope somelore lore) =>
+               BinderT lore m a
+            -> m (a, Stms lore)
+runBinderT' m = do
+  scope <- askScope
+  runBinderT m $ castScope scope
+
+runBinderT'_ :: (MonadFreshNames m, HasScope somelore m, SameScope somelore lore) =>
+                BinderT lore m a -> m (Stms lore)
+runBinderT'_ = fmap snd . runBinderT'
 
 runBinder :: (MonadFreshNames m,
               HasScope somelore m, SameScope somelore lore) =>

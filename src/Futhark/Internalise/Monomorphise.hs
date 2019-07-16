@@ -33,13 +33,16 @@ import           Control.Monad.State
 import           Control.Monad.Writer
 import           Data.Bitraversable
 import           Data.Bifunctor
+import           Data.List as L
 import           Data.Loc
 import qualified Data.Map.Strict as M
+import           Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import           Data.Foldable
 
 import           Futhark.MonadFreshNames
+import           Futhark.Representation.Primitive (intValue, floatValue)
 import           Language.Futhark
 import           Language.Futhark.Traversals
 import           Language.Futhark.Semantic (TypeBinding(..))
@@ -67,6 +70,7 @@ type RecordReplacement = M.Map Name (VName, PatternType)
 data Env = Env { envPolyBindings :: M.Map VName PolyBinding
                , envTypeBindings :: M.Map VName TypeBinding
                , envRecordReplacements :: RecordReplacements
+  --             , envSumReplacements :: M.Map CompType Exp
                }
 
 instance Semigroup Env where
@@ -323,9 +327,44 @@ transformExp (Unsafe e1 loc) =
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 
-transformExp e@VConstr0{} = return e
+transformExp (Constr name es (Info t@(SumT cs)) loc) =
+  case constrIndex name t of
+    Nothing -> error "transFormExp: malformed constructor value."
+    Just n  -> TupLit <$> ((index :) <$> clauses) <*> pure noLoc
+      where index =  Literal (UnsignedValue (intValue Int8 n)) noLoc
+            clauses = mapM clause $ sortConstrs cs
+            clause (name', ts)
+              | name == name' = TupLit <$> mapM transformExp es <*> pure loc
+              | otherwise     = return $ TupLit (map defaultValue ts) noLoc
+
+transformExp Constr{} = error "transformExp: invalid constructor type."
+
 transformExp (Match e cs t loc) =
   Match <$> transformExp e <*> mapM transformCase cs <*> traverse transformType t <*> pure loc
+
+constrIndex :: Name -> TypeBase dim as -> Maybe Int
+constrIndex name (SumT cs) = fst <$> L.find (\(_, (name', _)) -> name == name') cs'
+  where cs' = zip [0..] $ sortConstrs cs
+constrIndex _ _ = error "constrIndex: invalid type."
+
+defaultValue :: PatternType -> Exp
+defaultValue (Prim Bool) = Literal (BoolValue False) noLoc
+defaultValue (Prim (Unsigned s)) = Literal (UnsignedValue (intValue s (0 :: Int))) noLoc
+defaultValue (Prim (Signed s)) = Literal (SignedValue (intValue s (0 :: Int))) noLoc
+defaultValue (Prim (FloatType s)) = Literal (FloatValue (floatValue s (0 :: Int))) noLoc
+defaultValue (SumT cs) = TupLit (defaultIndex : defaultClauses) noLoc
+  where defaultIndex   =  Literal (UnsignedValue (intValue Int8 (0 :: Int))) noLoc
+        defaultClauses = map defaultClause $ sortConstrs cs
+        defaultClause (_, ts) = TupLit (map defaultValue ts) noLoc
+defaultValue t@Array{} = ArrayLit [] (Info t) noLoc -- TODO: Does the shape need to be preserved?
+defaultValue (Record fs) = RecordLit (map f fs') noLoc
+  where fs' = sortFields fs
+        f (name, t) = RecordFieldExplicit name (defaultValue t) noLoc
+defaultValue TypeVar{} = error "Shouldn't happen."
+defaultValue t@(Arrow as _ t1 t2)   = Lambda [pat] e Nothing t' noLoc
+  where pat = Id (VName (nameFromString "x") 5000) (Info t1) noLoc
+        e   = defaultValue t2
+        t'  = Info (as, toStruct t)
 
 transformCase :: Case -> MonoM Case
 transformCase (CasePat p e loc) = do
@@ -414,6 +453,22 @@ expandRecordPattern (PatternAscription pat td loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternAscription pat' td loc, rr)
 expandRecordPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
+expandRecordPattern (PatternConstr name (Info t@(SumT cs)) ps loc) =
+  case constrIndex name t of
+    Nothing -> error "Malformed Constr value."
+    Just n  -> do
+      pat <- patM
+      (_, rrs) <- unzip <$> mapM expandRecordPattern ps
+      return (pat, mconcat rrs)
+      where patM = TuplePattern <$> ((index :) <$> clauses) <*> pure noLoc
+            index =  PatternLit (Literal (UnsignedValue (intValue Int8 n)) noLoc) (Info (Prim (Unsigned Int8))) noLoc
+            clauses = mapM clause $ sortConstrs cs
+            clause (name', ts)
+                 | name == name' = TuplePattern
+                                   <$> (fmap . fmap) fst (mapM expandRecordPattern ps)
+                                   <*> pure loc
+                 | otherwise     = return $ TuplePattern (map ((`Wildcard` noLoc) . Info) ts) noLoc
+expandRecordPattern PatternConstr{} = error "expandRecordPattern: invalid pattern constructor type."
 
 -- | Monomorphize a polymorphic function at the types given in the instance
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
@@ -437,10 +492,19 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
 
   body' <- updateExpTypes (`M.lookup` M.map (fmap toStructural) substs') body
   body'' <- withRecordReplacements (mconcat rrs) $ transformExp body'
+  body''' <- astMap noMoreSumTypes body''
+  params''' <- astMap noMoreSumTypes params''
   name' <- if null tparams then return name else newName name
-  return (name', toValBinding t_shape_params name' params'' rettype' body'')
+  return (name', toValBinding t_shape_params name' params''' rettype' body''')
 
   where shape_params = filter (not . isTypeParam) tparams
+
+        noMoreSumTypes = ASTMapper { mapOnExp         = astMap noMoreSumTypes
+                                   , mapOnName        = pure
+                                   , mapOnQualName    = pure
+                                   , mapOnStructType  = pure . removeSumTypes
+                                   , mapOnPatternType = pure . removeSumTypes
+                                   }
 
         updateExpTypes substs = astMap $ mapper substs
         mapper substs = ASTMapper { mapOnExp         = astMap $ mapper substs
@@ -451,7 +515,7 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
                                   }
 
         toValBinding t_shape_params name' params'' rettype' body'' =
-          ValBind { valBindEntryPoint = False
+          ValBind { valBindEntryPoint = Nothing
                   , valBindName       = name'
                   , valBindRetDecl    = retdecl
                   , valBindRetType    = Info rettype'
@@ -479,7 +543,6 @@ typeSubstsM loc orig_t1 orig_t2 =
           zipWithM_ (sub pos)
           (map snd $ sortFields fields1) (map snd $ sortFields fields2)
         sub _ Prim{} Prim{} = return ()
-        sub _ Enum{} Enum{} = return ()
         sub pos t1@Array{} t2@Array{}
           | Just t1' <- peelArray (arrayRank t1) t1,
             Just t2' <- peelArray (arrayRank t1) t2 =
@@ -487,6 +550,11 @@ typeSubstsM loc orig_t1 orig_t2 =
         sub _ (Arrow _ _ t1a t1b) (Arrow _ _ t2a t2b) = do
           sub False t1a t2a
           sub False t1b t2b
+        sub pos (SumT cs1) (SumT cs2) =
+          zipWithM_ typeSubstClause (sortConstrs cs1) (sortConstrs cs2)
+          where typeSubstClause (_, ts1) (_, ts2) = zipWithM (sub pos) ts1 ts2
+        sub pos t1@SumT{} t2 = sub pos (removeSumTypes t1) t2
+        sub pos t1 t2@SumT{} = sub pos t1 (removeSumTypes t2)
 
         sub _ t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", pretty t1, pretty t2]
 
@@ -514,6 +582,7 @@ substPattern entry f pat = case pat of
   PatternAscription p td loc | entry     -> PatternAscription (substPattern False f p) td loc
                              | otherwise -> substPattern False f p
   PatternLit e (Info tp) loc  -> PatternLit e (Info $ f tp) loc
+  PatternConstr n (Info tp) ps loc -> PatternConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
 toPolyBinding (ValBind _ name retdecl (Info rettype) tparams params body _ loc) =
@@ -543,15 +612,30 @@ removeTypeVariablesInType t = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   return $ removeShapeAnnotations $ substituteTypes subs $ vacuousShapeAnnotations t
 
+removeSumTypes :: Monoid as => TypeBase dim as -> TypeBase dim as
+removeSumTypes (SumT cs) =
+  tupleRecord $ Prim (Unsigned Int8) : map (tupleRecord . snd) (sortConstrs cs)
+removeSumTypes (Arrow as v t1 t2) = Arrow as v (removeSumTypes t1) (removeSumTypes t2)
+removeSumTypes (Record fs) = Record $ M.map removeSumTypes fs
+removeSumTypes (Array as u ts shape) =
+  case  (typeToArrayElem . removeSumTypes . arrayElemToType') ts of
+    Nothing  -> error "Shouldn't happen."
+    Just ts' -> Array as u ts' shape
+  where arrayElemToType' :: ArrayElemTypeBase dim -> TypeBase dim ()
+        arrayElemToType' = arrayElemToType -- Needed to make ghc happy :)
+--removeSumTypes t@(TypeVar as u n args) = error $ show $ toStructural t  "No type variables should remain."
+--removeSumTypes t@Prim{} = t
+removeSumTypes t = t
+
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
-  valbind' <- toPolyBinding <$> removeTypeVariables (valBindEntryPoint valbind) valbind
-  when (valBindEntryPoint valbind) $ do
-    t <- removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
+  valbind' <- toPolyBinding <$> removeTypeVariables (isJust (valBindEntryPoint valbind)) valbind
+  when (isJust $ valBindEntryPoint valbind) $ do
+    t <- fmap removeSumTypes $ removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
          (map patternStructType (valBindParams valbind)) $
          unInfo $ valBindRetType valbind
     (name, valbind'') <- monomorphizeBinding True valbind' t
-    tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = True})
+    tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = valBindEntryPoint valbind})
     addLifted (valBindName valbind) t name
   return mempty { envPolyBindings = M.singleton (valBindName valbind) valbind' }
 

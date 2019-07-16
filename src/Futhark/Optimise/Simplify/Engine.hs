@@ -53,15 +53,10 @@ module Futhark.Optimise.Simplify.Engine
        , simplifyLambdaNoHoisting
        , simplifyParam
        , bindLParams
-       , bindChunkLParams
-       , bindLoopVar
-       , enterLoop
        , simplifyBody
        , SimplifiedBody
 
        , blockIf
-       , constructBody
-       , protectIf
 
        , module Futhark.Optimise.Simplify.Lore
        ) where
@@ -120,13 +115,13 @@ data SimpleOps lore =
             , mkLetNamesS :: ST.SymbolTable (Wise lore)
                           -> [VName] -> Exp (Wise lore)
                           -> SimpleM lore (Stm (Wise lore), Stms (Wise lore))
-            , simplifyOpS :: SimplifyOp lore
+            , simplifyOpS :: SimplifyOp lore (Op lore)
             }
 
-type SimplifyOp lore = Op lore -> SimpleM lore (OpWithWisdom (Op lore), Stms (Wise lore))
+type SimplifyOp lore op = op -> SimpleM lore (OpWithWisdom op, Stms (Wise lore))
 
 bindableSimpleOps :: (SimplifiableLore lore, Bindable lore) =>
-                     SimplifyOp lore -> SimpleOps lore
+                     SimplifyOp lore (Op lore) -> SimpleOps lore
 bindableSimpleOps = SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS'
   where mkExpAttrS' _ pat e = return $ mkExpAttr pat e
         mkBodyS' _ bnds res = return $ mkBody bnds res
@@ -166,24 +161,15 @@ runSimpleM (SimpleM m) simpl env src =
   let (x, (src', b), _) = runRWS m (simpl, env) (src, False)
   in ((x, b), src')
 
-subSimpleM :: (SameScope outerlore lore,
-               ExpAttr outerlore ~ ExpAttr lore,
-               BodyAttr outerlore ~ BodyAttr lore,
-               RetType outerlore ~ RetType lore,
-               BranchType outerlore ~ BranchType lore) =>
-              SimpleOps lore
-           -> Env lore
-           -> ST.SymbolTable (Wise outerlore)
+subSimpleM :: RuleBook (Wise lore)
+           -> HoistBlockers lore
            -> SimpleM lore a
-           -> SimpleM outerlore a
-subSimpleM simpl env outer_vtable m = do
-  let inner_vtable = ST.castSymbolTable outer_vtable
-  src <- getNameSource
-  let SimpleM m' = localVtable (<>inner_vtable) m
-      (x, (src', b), _) = runRWS m' (simpl, env) (src, False)
-  putNameSource src'
-  when b changed
-  return x
+           -> SimpleM lore a
+subSimpleM rules blockers =
+  local $ \(ops, env) -> (ops,
+                          env { envRules = rules
+                              , envHoistBlockers = blockers
+                              })
 
 askEngineEnv :: SimpleM lore (Env lore)
 askEngineEnv = snd <$> ask
@@ -229,12 +215,6 @@ bindArrayLParams :: SimplifiableLore lore =>
 bindArrayLParams params =
   localVtable $ \vtable ->
     foldr (uncurry ST.insertArrayLParam) vtable params
-
-bindChunkLParams :: SimplifiableLore lore =>
-                    VName -> [(LParam (Wise lore),VName)] -> SimpleM lore a -> SimpleM lore a
-bindChunkLParams offset params =
-  localVtable $ \vtable ->
-    foldr (uncurry $ ST.insertChunkLParam offset) vtable params
 
 bindLoopVar :: SimplifiableLore lore =>
                VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
@@ -328,7 +308,7 @@ emptyOfType ctx_names (Array pt shape _) = do
 -- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
 -- further optimisation..
 notWorthHoisting :: Attributes lore => BlockPred lore
-notWorthHoisting _ (Let pat _ e) =
+notWorthHoisting _ _ (Let pat _ e) =
   not (safeExp e) && any (>0) (map arrayRank $ patternTypes pat)
 
 hoistStms :: SimplifiableLore lore =>
@@ -360,7 +340,7 @@ hoistStms rules block vtable uses orig_stms = do
                    bottomUpSimplifyStm rules (vtable', uses') stm
             case res of
               Nothing -- Nothing to optimise - see if hoistable.
-                | block uses' stm ->
+                | block vtable' uses' stm ->
                   return (expandUsage vtable' uses' stm `UT.without` provides stm,
                           Left stm : stms)
                 | otherwise ->
@@ -401,26 +381,26 @@ expandUsage vtable utable bnd =
 intersects :: Ord a => S.Set a -> S.Set a -> Bool
 intersects a b = not $ S.null $ a `S.intersection` b
 
-type BlockPred lore = UT.UsageTable -> Stm lore -> Bool
+type BlockPred lore = ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> Bool
 
 neverBlocks :: BlockPred lore
-neverBlocks _ _ = False
+neverBlocks _ _ _ = False
 
 isFalse :: Bool -> BlockPred lore
-isFalse b _ _ = not b
+isFalse b _ _ _ = not b
 
 orIf :: BlockPred lore -> BlockPred lore -> BlockPred lore
-orIf p1 p2 body need = p1 body need || p2 body need
+orIf p1 p2 body vtable need = p1 body vtable need || p2 body vtable need
 
 andAlso :: BlockPred lore -> BlockPred lore -> BlockPred lore
-andAlso p1 p2 body need = p1 body need && p2 body need
+andAlso p1 p2 body vtable need = p1 body vtable need && p2 body vtable need
 
 isConsumed :: BlockPred lore
-isConsumed utable = any (`UT.isConsumed` utable) . patternNames . stmPattern
+isConsumed _ utable = any (`UT.isConsumed` utable) . patternNames . stmPattern
 
 isOp :: BlockPred lore
-isOp _ (Let _ _ Op{}) = True
-isOp _ _ = False
+isOp _ _ (Let _ _ Op{}) = True
+isOp _ _ _ = False
 
 constructBody :: SimplifiableLore lore => Stms (Wise lore) -> Result
               -> SimpleM lore (Body (Wise lore))
@@ -447,18 +427,18 @@ insertAllStms :: SimplifiableLore lore =>
 insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
 
 hasFree :: Attributes lore => Names -> BlockPred lore
-hasFree ks _ need = ks `intersects` freeIn need
+hasFree ks _ _ need = ks `intersects` freeIn need
 
 isNotSafe :: Attributes lore => BlockPred lore
-isNotSafe _ = not . safeExp . stmExp
+isNotSafe _ _ = not . safeExp . stmExp
 
 isInPlaceBound :: BlockPred m
-isInPlaceBound _ = isUpdate . stmExp
+isInPlaceBound _ _ = isUpdate . stmExp
   where isUpdate (BasicOp Update{}) = True
         isUpdate _ = False
 
 isNotCheap :: Attributes lore => BlockPred lore
-isNotCheap _ = not . cheapStm
+isNotCheap _ _ = not . cheapStm
 
 cheapStm :: Attributes lore => Stm lore -> Bool
 cheapStm = cheapExp . stmExp
@@ -478,7 +458,7 @@ cheapExp _                        = True -- Used to be False, but
                                          -- let's try it out.
 
 stmIs :: (Stm lore -> Bool) -> BlockPred lore
-stmIs f _ = f
+stmIs f _ _ = f
 
 loopInvariantStm :: Attributes lore => ST.SymbolTable lore -> Stm lore -> Bool
 loopInvariantStm vtable =
@@ -505,17 +485,24 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       -- are if-hoistable.
       cond_loop_invariant =
         all (`S.member` ST.availableAtClosestLoop vtable) $ freeIn cond
+
       desirableToHoist stm =
           is_alloc_fun stm ||
           (ST.loopDepth vtable > 0 &&
            cond_loop_invariant &&
            ifsort /= IfFallback &&
            loopInvariantStm vtable stm)
+
       hoistbl_nms = filterBnds desirableToHoist getArrSz_fun $
                     stmsToList $ stms1<>stms2
+
+      isNotHoistableBnd _ _ _ (Let _ _ (BasicOp ArrayLit{})) = False
+      isNotHoistableBnd nms _ _ stm = not (hasPatName nms stm)
+
       block = branch_blocker `orIf`
               ((isNotSafe `orIf` isNotCheap) `andAlso` stmIs (not . desirableToHoist))
               `orIf` isInPlaceBound `orIf` isNotHoistableBnd hoistbl_nms
+
   rules <- asksEngineEnv envRules
   (body1_bnds', safe1) <- protectIfHoisted cond True $
                           hoistStms rules block vtable usages1 stms1
@@ -541,8 +528,6 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
         hasPatName nms bnd = intersects nms $ S.fromList $
                              patternNames $ stmPattern bnd
-        isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit{})) = False
-        isNotHoistableBnd nms _ stm = not (hasPatName nms stm)
 
 -- | Simplify a single 'Body'.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
@@ -782,7 +767,7 @@ simplifyPattern pat =
   mapM inspect (patternValueElements pat)
   where inspect (PatElem name lore) = PatElem name <$> simplify lore
 
-simplifyParam :: (attr -> SimpleM lore attr) -> ParamT attr -> SimpleM lore (ParamT attr)
+simplifyParam :: (attr -> SimpleM lore attr) -> Param attr -> SimpleM lore (Param attr)
 simplifyParam simplifyAttribute (Param name attr) =
   Param name <$> simplifyAttribute attr
 

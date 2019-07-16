@@ -1,11 +1,14 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.BlockedKernel
-       ( segRed
+       ( MkSegLevel
+       , ThreadRecommendation(..)
+       , segRed
        , nonSegRed
        , huskedNonSegRed
        , segScan
        , segGenRed
+       , segMap
 
        , streamRed
        , huskedStreamRed
@@ -15,20 +18,30 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , KernelInput(..)
        , readKernelInput
 
-       , newKernelSpace
+       , soacsLambdaToKernels
+       , soacsStmToKernels
+       , scopeForKernels
+       , scopeForSOACs
+
        , getSize
+       , segThread
+       , segThreadCapped
+       , mkSegSpace
        )
        where
 
 import Control.Monad
 import Control.Monad.Writer
-import Data.Maybe
+import Control.Monad.Identity
 import Data.List
 
 import Prelude hiding (quot)
 
 import Futhark.Analysis.PrimExp
+import Futhark.Analysis.Rephrase
 import Futhark.Representation.AST
+import Futhark.Representation.SOACS (SOACS)
+import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import Futhark.Representation.Kernels
        hiding (Prog, Body, Stm, Pattern, PatElem,
                BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
@@ -42,11 +55,64 @@ getSize desc size_class = do
   size_key <- nameFromString . pretty <$> newVName desc
   letSubExp desc $ Op $ GetSize size_key size_class
 
+numberOfGroups :: MonadBinder m => SubExp -> SubExp -> SubExp -> m (SubExp, SubExp)
+numberOfGroups w group_size max_num_groups = do
+  -- If 'w' is small, we launch fewer groups than we normally would.
+  -- We don't want any idle groups.
+  w_div_group_size <- letSubExp "w_div_group_size" =<<
+    eDivRoundingUp Int64 (eSubExp w) (eSubExp group_size)
+  -- We also don't want zero groups.
+  num_groups_maybe_zero <- letSubExp "num_groups_maybe_zero" $ BasicOp $ BinOp (SMin Int64)
+                           w_div_group_size max_num_groups
+  num_groups <- letSubExp "num_groups" $
+                BasicOp $ BinOp (SMax Int64) (intConst Int64 1)
+                num_groups_maybe_zero
+  num_threads <-
+    letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int64) num_groups group_size
+  return (num_groups, num_threads)
+
+segThread :: (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
+             String -> m SegLevel
+segThread desc =
+  SegThread
+    <$> (Count <$> getSize (desc ++ "_num_groups") SizeNumGroups)
+    <*> (Count <$> getSize (desc ++ "_group_size") SizeGroup)
+    <*> pure SegVirt
+
+data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
+
+type MkSegLevel m =
+  [SubExp] -> String -> ThreadRecommendation -> BinderT Kernels m SegLevel
+
+-- | Like 'segThread', but cap the thread count to the input size.
+-- This is more efficient for small kernels, e.g. summing a small
+-- array.
+segThreadCapped :: MonadFreshNames m => MkSegLevel m
+segThreadCapped ws desc r = do
+  w <- letSubExp "nest_size" =<< foldBinOp (Mul Int32) (intConst Int32 1) ws
+  group_size <- getSize (desc ++ "_group_size") SizeGroup
+
+  case r of
+    ManyThreads -> do
+      usable_groups <- letSubExp "segmap_usable_groups" =<<
+                       eDivRoundingUp Int32 (eSubExp w) (eSubExp group_size)
+      return $ SegThread (Count usable_groups) (Count group_size) SegNoVirt
+    NoRecommendation v -> do
+      group_size_64 <- asIntS Int64 group_size
+      max_num_groups_64 <- asIntS Int64 =<< getSize (desc ++ "_max_num_groups") SizeNumGroups
+      w_64 <- asIntS Int64 w
+      (num_groups_64, _) <- numberOfGroups w_64 group_size_64 max_num_groups_64
+      num_groups <- asIntS Int32 num_groups_64
+      return $ SegThread (Count num_groups) (Count group_size) v
+
+mkSegSpace :: MonadFreshNames m => [(VName, SubExp)] -> m SegSpace
+mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims
+
 -- | Given a chunked fold lambda that takes its initial accumulator
 -- value as parameters, bind those parameters to the neutral element
 -- instead.
 kerneliseLambda :: MonadFreshNames m =>
-                   [SubExp] -> Lambda InKernel -> m (Lambda InKernel)
+                   [SubExp] -> Lambda Kernels -> m (Lambda Kernels)
 kerneliseLambda nes lam = do
   thread_index <- newVName "thread_index"
   let thread_index_param = Param thread_index $ Prim int32
@@ -66,54 +132,66 @@ kerneliseLambda nes lam = do
              }
 
 prepareRedOrScan :: (MonadBinder m, Lore m ~ Kernels) =>
-                    SubExp -> SubExp
-                 -> LambdaT InKernel
+                    SubExp
+                 -> Lambda Kernels
                  -> [VName] -> [(VName, SubExp)] -> [KernelInput]
-                 -> m (KernelSpace, KernelBody InKernel)
-prepareRedOrScan total_num_elements w map_lam arrs ispace inps = do
-  (_, KernelSize num_groups group_size _ _ num_threads) <- blockedKernelSize =<< asIntS Int64 total_num_elements
+                 -> m (SegSpace, KernelBody Kernels)
+prepareRedOrScan w map_lam arrs ispace inps = do
   gtid <- newVName "gtid"
-  kspace <- newKernelSpace (num_groups, group_size, num_threads, num_groups) $
-            FlatThreadSpace $ ispace ++ [(gtid, w)]
-  body <- fmap (uncurry (flip (KernelBody ()))) $ runBinder $
-          localScope (scopeOfKernelSpace kspace) $ do
-    mapM_ (addStm <=< readKernelInput) inps
+  space <- mkSegSpace $ ispace ++ [(gtid, w)]
+  kbody <- fmap (uncurry (flip (KernelBody ()))) $ runBinder $
+           localScope (scopeOfSegSpace space) $ do
+    mapM_ readKernelInput inps
     forM_ (zip (lambdaParams map_lam) arrs) $ \(p, arr) -> do
       arr_t <- lookupType arr
       letBindNames_ [paramName p] $
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
-    map ThreadsReturn <$> bodyBind (lambdaBody map_lam)
+    map Returns <$> bodyBind (lambdaBody map_lam)
 
-  return (kspace, body)
+  return (space, kbody)
 
 segRed :: (MonadFreshNames m, HasScope Kernels m) =>
-          Pattern Kernels
-       -> SubExp
+          SegLevel
+       -> Pattern Kernels
        -> SubExp -- segment size
-       -> Commutativity
-       -> Lambda InKernel -> Lambda InKernel
-       -> [SubExp] -> [VName]
+       -> [SegRedOp Kernels]
+       -> Lambda Kernels
+       -> [VName]
        -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this reduction
        -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
        -> m (Stms Kernels)
-segRed pat total_num_elements w comm reduce_lam map_lam nes arrs ispace inps = runBinder_ $ do
-  (kspace, kbody) <- prepareRedOrScan total_num_elements w map_lam arrs ispace inps
-  letBind_ pat $ Op $ HostOp $
-    SegRed kspace comm reduce_lam nes (lambdaReturnType map_lam) kbody
+segRed lvl pat w ops map_lam arrs ispace inps = runBinder_ $ do
+  (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
+  letBind_ pat $ Op $ SegOp $
+    SegRed lvl kspace ops (lambdaReturnType map_lam) kbody
 
 segScan :: (MonadFreshNames m, HasScope Kernels m) =>
-           Pattern Kernels
-        -> SubExp
+           SegLevel
+        -> Pattern Kernels
         -> SubExp -- segment size
-        -> Lambda InKernel -> Lambda InKernel
+        -> Lambda Kernels -> Lambda Kernels
         -> [SubExp] -> [VName]
         -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this scan
         -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
         -> m (Stms Kernels)
-segScan pat total_num_elements w scan_lam map_lam nes arrs ispace inps = runBinder_ $ do
-  (kspace, kbody) <- prepareRedOrScan total_num_elements w map_lam arrs ispace inps
-  letBind_ pat $ Op $ HostOp $
-    SegScan kspace scan_lam nes (lambdaReturnType map_lam) kbody
+segScan lvl pat w scan_lam map_lam nes arrs ispace inps = runBinder_ $ do
+  (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
+  letBind_ pat $ Op $ SegOp $
+    SegScan lvl kspace scan_lam nes (lambdaReturnType map_lam) kbody
+
+segMap :: (MonadFreshNames m, HasScope Kernels m) =>
+          SegLevel
+       -> Pattern Kernels
+       -> SubExp -- segment size
+       -> Lambda Kernels
+       -> [VName]
+       -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this map
+       -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
+       -> m (Stms Kernels)
+segMap lvl pat w map_lam arrs ispace inps = runBinder_ $ do
+  (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
+  letBind_ pat $ Op $ SegOp $
+    SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim :: (MonadFreshNames m, MonadBinder m) =>
             Pattern Kernels
@@ -160,33 +238,34 @@ huskedOp pat w ret_ts red_lam_fot nes arrs red = runBinder_ $ do
   letBind_ pat $ Op $ Husk hspace red_lam_fot' nes ret_ts $ mkBody body_stms $ map Var node_res
 
 huskedNonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
-             Pattern Kernels
-          -> SubExp
-          -> Commutativity
-          -> Lambda InKernel
-          -> Lambda Kernels
-          -> Lambda InKernel
-          -> [SubExp]
-          -> [VName]
-          -> m (Stms Kernels)
+                   Pattern Kernels
+                -> SubExp
+                -> Commutativity
+                -> Lambda Kernels
+                -> Lambda Kernels
+                -> Lambda Kernels
+                -> [SubExp]
+                -> [VName]
+                -> m (Stms Kernels)
 huskedNonSegRed pat w comm red_lam_seq red_lam_fot map_lam nes arrs =
   let (red_ts, map_ts) = splitAt (length nes) $ lambdaReturnType map_lam
       ret_ts = red_ts ++ map (`arrayOfShape` Shape [w]) map_ts
   in huskedOp pat w ret_ts red_lam_fot nes arrs $
-      \pat' w' arrs' -> nonSegRed pat' w' comm red_lam_seq map_lam nes arrs'
+      \pat' w' arrs' -> do
+        lvl <- segThreadCapped [w] "segred" $ NoRecommendation SegNoVirt
+        nonSegRed lvl pat' w' [SegRedOp comm red_lam_seq nes mempty] map_lam arrs'
 
 nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
-             Pattern Kernels
+             SegLevel
+          -> Pattern Kernels
           -> SubExp
-          -> Commutativity
-          -> Lambda InKernel
-          -> Lambda InKernel
-          -> [SubExp]
+          -> [SegRedOp Kernels]
+          -> Lambda Kernels
           -> [VName]
           -> m (Stms Kernels)
-nonSegRed pat w comm red_lam map_lam nes arrs = runBinder_ $ do
+nonSegRed lvl pat w ops map_lam arrs = runBinder_ $ do
   (pat', ispace, read_dummy) <- dummyDim pat
-  addStms =<< segRed pat' w w comm red_lam map_lam nes arrs ispace []
+  addStms =<< segRed lvl pat' w ops map_lam arrs ispace []
   read_dummy
 
 prepareStream :: (MonadBinder m, Lore m ~ Kernels) =>
@@ -194,12 +273,12 @@ prepareStream :: (MonadBinder m, Lore m ~ Kernels) =>
               -> [(VName, SubExp)]
               -> SubExp
               -> Commutativity
-              -> Lambda InKernel
+              -> Lambda Kernels
               -> [SubExp]
               -> [VName]
-              -> m (KernelSpace, [Type], KernelBody InKernel)
+              -> m (SubExp, SegSpace, [Type], KernelBody Kernels)
 prepareStream size ispace w comm fold_lam nes arrs = do
-  let (KernelSize num_groups group_size elems_per_thread _ num_threads) = size
+  let (KernelSize _ _ elems_per_thread _ num_threads) = size
   let (ordering, split_ordering) =
         case comm of Commutative -> (Disorder, SplitStrided num_threads)
                      Noncommutative -> (InOrder, SplitContiguous)
@@ -209,27 +288,26 @@ prepareStream size ispace w comm fold_lam nes arrs = do
   elems_per_thread_32 <- asIntS Int32 elems_per_thread
 
   gtid <- newVName "gtid"
-  kspace <- newKernelSpace (num_groups, group_size, num_threads, num_groups) $
-            FlatThreadSpace $ ispace ++ [(gtid, num_threads)]
+  space <- mkSegSpace $ ispace ++ [(gtid, num_threads)]
   kbody <- fmap (uncurry (flip (KernelBody ()))) $ runBinder $
-           localScope (scopeOfKernelSpace kspace) $ do
+           localScope (scopeOfSegSpace space) $ do
     (chunk_red_pes, chunk_map_pes) <-
       blockedPerThread gtid w size ordering fold_lam' (length nes) arrs
     let concatReturns pe =
-          ConcatReturns split_ordering w elems_per_thread_32 Nothing $ patElemName pe
-    return (map (ThreadsReturn . Var . patElemName) chunk_red_pes ++
+          ConcatReturns split_ordering w elems_per_thread_32 $ patElemName pe
+    return (map (Returns . Var . patElemName) chunk_red_pes ++
             map concatReturns chunk_map_pes)
 
   let (redout_ts, mapout_ts) = splitAt (length nes) $ lambdaReturnType fold_lam
       ts = redout_ts ++ map rowType mapout_ts
 
-  return (kspace, ts, kbody)
+  return (num_threads, space, ts, kbody)
 
 huskedStreamRed :: (MonadFreshNames m, HasScope Kernels m) =>
                   Pattern Kernels
                 -> SubExp
                 -> Commutativity
-                -> Lambda InKernel -> Lambda Kernels -> Lambda InKernel
+                -> Lambda Kernels -> Lambda Kernels -> Lambda Kernels
                 -> [SubExp] -> [VName]
                 -> m (Stms Kernels)
 huskedStreamRed pat w comm red_lam_seq red_lam_fot fold_lam nes arrs =
@@ -242,7 +320,7 @@ streamRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels
           -> SubExp
           -> Commutativity
-          -> Lambda InKernel -> Lambda InKernel
+          -> Lambda Kernels -> Lambda Kernels
           -> [SubExp] -> [VName]
           -> m (Stms Kernels)
 streamRed pat w comm red_lam fold_lam nes arrs = runBinder_ $ do
@@ -255,67 +333,67 @@ streamRed pat w comm red_lam fold_lam nes arrs = runBinder_ $ do
   (redout_pat, ispace, read_dummy) <- dummyDim $ Pattern [] redout_pes
   let pat' = Pattern [] $ patternElements redout_pat ++ mapout_pes
 
-  (kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
+  (_, kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 
-  letBind_ pat' $ Op $ HostOp $ SegRed kspace comm red_lam nes ts kbody
+  lvl <- segThreadCapped [w] "stream_red" $ NoRecommendation SegNoVirt
+  letBind_ pat' $ Op $ SegOp $ SegRed lvl kspace
+    [SegRedOp comm red_lam nes mempty] ts kbody
 
   read_dummy
 
 -- Similar to streamRed, but without the last reduction.
 streamMap :: (MonadFreshNames m, HasScope Kernels m) =>
               [String] -> [PatElem Kernels] -> SubExp
-           -> Commutativity -> Lambda InKernel -> [SubExp] -> [VName]
+           -> Commutativity -> Lambda Kernels -> [SubExp] -> [VName]
            -> m ((SubExp, [VName]), Stms Kernels)
 streamMap out_desc mapout_pes w comm fold_lam nes arrs = runBinder $ do
   (_, size) <- blockedKernelSize =<< asIntS Int64 w
 
-  (kspace, ts, kbody) <- prepareStream size [] w comm fold_lam nes arrs
+  (threads, kspace, ts, kbody) <- prepareStream size [] w comm fold_lam nes arrs
 
   let redout_ts = take (length nes) ts
 
   redout_pes <- forM (zip out_desc redout_ts) $ \(desc, t) ->
-    PatElem <$> newVName desc <*> pure (t `arrayOfRow` spaceNumThreads kspace)
+    PatElem <$> newVName desc <*> pure (t `arrayOfRow` threads)
 
   let pat = Pattern [] $ redout_pes ++ mapout_pes
-  letBind_ pat $ Op $ HostOp $ SegMap kspace ts kbody
+  lvl <- segThreadCapped [w] "stream_map" $ NoRecommendation SegNoVirt
+  letBind_ pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
 
-  return (spaceNumThreads kspace, map patElemName redout_pes)
+  return (threads, map patElemName redout_pes)
 
 segGenRed :: (MonadFreshNames m, HasScope Kernels m) =>
              Pattern Kernels
           -> SubExp
           -> [(VName,SubExp)] -- ^ Segment indexes and sizes.
           -> [KernelInput]
-          -> [GenReduceOp InKernel]
-          -> Lambda InKernel -> [VName]
+          -> [GenReduceOp Kernels]
+          -> Lambda Kernels -> [VName]
           -> m (Stms Kernels)
 segGenRed pat arr_w ispace inps ops lam arrs = runBinder_ $ do
-  let (_, segment_sizes) = unzip ispace
-  arr_w_64 <- letSubExp "arr_w_64" =<< eConvOp (SExt Int32 Int64) (toExp arr_w)
-  segment_sizes_64 <- mapM (letSubExp "segment_size_64" <=< eConvOp (SExt Int32 Int64) . toExp) segment_sizes
-  total_w <- letSubExp "genreduce_elems" =<< foldBinOp (Mul Int64) arr_w_64 segment_sizes_64
-  (_, KernelSize num_groups group_size _ _ num_threads) <-
-    blockedKernelSize total_w
-
   gtid <- newVName "gtid"
-  kspace <- newKernelSpace (num_groups, group_size, num_threads, num_groups) $
-            FlatThreadSpace $ ispace ++ [(gtid, arr_w)]
+  space <- mkSegSpace $ ispace ++ [(gtid, arr_w)]
 
   kbody <- fmap (uncurry (flip $ KernelBody ())) $ runBinder $
-          localScope (scopeOfKernelSpace kspace) $ do
-    mapM_ (addStm <=< readKernelInput) inps
+           localScope (scopeOfSegSpace space) $ do
+    mapM_ readKernelInput inps
     forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) -> do
       arr_t <- lookupType arr
       letBindNames_ [paramName p] $
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
-    map ThreadsReturn <$> bodyBind (lambdaBody lam)
+    map Returns <$> bodyBind (lambdaBody lam)
 
-  letBind_ pat $ Op $ HostOp $ SegGenRed kspace ops (lambdaReturnType lam) kbody
+  -- It is important not to launch unnecessarily many threads for
+  -- histograms, because it may mean we unnecessarily need to reduce
+  -- subhistograms as well.
+  lvl <- segThreadCapped (arr_w : map snd ispace) "seggenred" $ NoRecommendation SegNoVirt
 
-blockedPerThread :: (MonadBinder m, Lore m ~ InKernel) =>
-                    VName -> SubExp -> KernelSize -> StreamOrd -> Lambda InKernel
+  letBind_ pat $ Op $ SegOp $ SegGenRed lvl space ops (lambdaReturnType lam) kbody
+
+blockedPerThread :: (MonadBinder m, Lore m ~ Kernels) =>
+                    VName -> SubExp -> KernelSize -> StreamOrd -> Lambda Kernels
                  -> Int -> [VName]
-                 -> m ([PatElem InKernel], [PatElem InKernel])
+                 -> m ([PatElem Kernels], [PatElem Kernels])
 blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
   let (_, chunk_size, [], arr_params) =
         partitionChunkedKernelFoldParameters 0 $ lambdaParams lam
@@ -351,7 +429,7 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
 
   return (chunk_red_pes, chunk_map_pes)
 
-splitArrays :: (MonadBinder m, Lore m ~ InKernel) =>
+splitArrays :: (MonadBinder m, Lore m ~ Kernels) =>
                VName -> [VName]
             -> SplitOrdering -> SubExp -> SubExp -> SubExp -> [VName]
             -> m ()
@@ -385,22 +463,6 @@ data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              }
                 deriving (Eq, Ord, Show)
 
-numberOfGroups :: MonadBinder m => SubExp -> SubExp -> SubExp -> m (SubExp, SubExp)
-numberOfGroups w group_size max_num_groups = do
-  -- If 'w' is small, we launch fewer groups than we normally would.
-  -- We don't want any idle groups.
-  w_div_group_size <- letSubExp "w_div_group_size" =<<
-    eDivRoundingUp Int64 (eSubExp w) (eSubExp group_size)
-  -- We also don't want zero groups.
-  num_groups_maybe_zero <- letSubExp "num_groups_maybe_zero" $ BasicOp $ BinOp (SMin Int64)
-                           w_div_group_size max_num_groups
-  num_groups <- letSubExp "num_groups" $
-                BasicOp $ BinOp (SMax Int64) (intConst Int64 1)
-                num_groups_maybe_zero
-  num_threads <-
-    letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int64) num_groups group_size
-  return (num_groups, num_threads)
-
 blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
                      SubExp -> m (SubExp, KernelSize)
 blockedKernelSize w = do
@@ -420,57 +482,35 @@ blockedKernelSize w = do
   return (max_num_groups,
           KernelSize num_groups' group_size per_thread_elements w num_threads')
 
-createsArrays :: KernelBody InKernel -> Bool
-createsArrays = getAny . execWriter . mapM_ onStm . kernelBodyStms
-  where onStm stm = do
-          when (any (not . primType) $ patternTypes $ stmPattern stm) $ tell $ Any True
-          walkExpM walker $ stmExp stm
-        walker = identityWalker { walkOnBody = mapM_ onStm . bodyStms }
-
 mapKernelSkeleton :: (HasScope Kernels m, MonadFreshNames m) =>
-                     SubExp -> SpaceStructure -> [KernelInput] -> Bool
-                  -> m (KernelSpace,
-                        Stms Kernels,
-                        Stms InKernel)
-mapKernelSkeleton w ispace inputs creates_arrays = do
-  ((group_size, num_threads, num_groups, virt_groups), ksize_bnds) <- runBinder $
-    -- If the kernel creates arrays internally (meaning it will
-    -- require memory expansion), we want to truncate the amount of
-    -- threads.  Otherwise, have at it!  This is a bit of a hack - in
-    -- principle, we should make this decision later, when we have a
-    -- clearer idea of what is happening inside the kernel.
-    if not creates_arrays then do
-      group_size <- getSize "group_size" SizeGroup
-      num_groups <- letSubExp "num_groups" =<< eDivRoundingUp Int32
-                    (eSubExp w) (eSubExp group_size)
-      num_threads <- letSubExp "num_threads" $
-        BasicOp $ BinOp (Mul Int32) num_groups group_size
-      return (group_size, num_threads, num_groups, num_groups)
+                     [(VName, SubExp)] -> [KernelInput]
+                  -> m (SegSpace, Stms Kernels)
+mapKernelSkeleton ispace inputs = do
+  read_input_bnds <- runBinder_ $ mapM readKernelInput inputs
 
-      else do
-      (_, ksize) <- blockedKernelSize =<< asIntS Int64 w
-      virt_groups <- letSubExp "virt_groups" =<< eDivRoundingUp Int32
-                     (eSubExp w) (eSubExp (kernelWorkgroupSize ksize))
-      return (kernelWorkgroupSize ksize, kernelNumThreads ksize,
-              kernelWorkgroups ksize, virt_groups)
-
-  read_input_bnds <- stmsFromList <$> mapM readKernelInput inputs
-
-  let ksize = (num_groups, group_size, num_threads, virt_groups)
-
-  space <- newKernelSpace ksize ispace
-  return (space, ksize_bnds, read_input_bnds)
+  space <- mkSegSpace ispace
+  return (space, read_input_bnds)
 
 mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
-             SubExp -> SpaceStructure -> [KernelInput]
-          -> [Type] -> KernelBody InKernel
-          -> m (Stms Kernels, Kernel InKernel)
-mapKernel w ispace inputs rts kbody@(KernelBody () kstms krets) = do
-  (space, ksize_bnds, read_input_bnds) <- mapKernelSkeleton w ispace inputs $
-                                          createsArrays kbody
+             MkSegLevel m
+          -> [(VName, SubExp)] -> [KernelInput]
+          -> [Type] -> KernelBody Kernels
+          -> m (SegOp Kernels, Stms Kernels)
+mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBinderT' $ do
+  (space, read_input_stms) <- mapKernelSkeleton ispace inputs
 
-  let kbody' = KernelBody () (read_input_bnds <> kstms) krets
-  return (ksize_bnds, Kernel (KernelDebugHints "map" []) space rts kbody')
+  let kbody' = KernelBody () (read_input_stms <> kstms) krets
+
+  -- If the kernel creates arrays (meaning it will require memory
+  -- expansion), we want to truncate the amount of threads.
+  -- Otherwise, have at it!  This is a bit of a hack - in principle,
+  -- we should make this decision later, when we have a clearer idea
+  -- of what is happening inside the kernel.
+  let r = if all primType rts then ManyThreads else NoRecommendation SegVirt
+
+  lvl <- mk_lvl (map snd ispace) "segmap" r
+
+  return $ SegMap lvl space rts kbody'
 
 data KernelInput = KernelInput { kernelInputName :: VName
                                , kernelInputType :: Type
@@ -479,24 +519,46 @@ data KernelInput = KernelInput { kernelInputName :: VName
                                }
                  deriving (Show)
 
-readKernelInput :: (HasScope scope m, Monad m) =>
-                   KernelInput -> m (Stm InKernel)
+readKernelInput :: (MonadBinder m, Lore m ~ Kernels) =>
+                   KernelInput -> m ()
 readKernelInput inp = do
   let pe = PatElem (kernelInputName inp) $ kernelInputType inp
   arr_t <- lookupType $ kernelInputArray inp
-  return $ Let (Pattern [] [pe]) (defAux ()) $
+  letBind_ (Pattern [] [pe]) $
     BasicOp $ Index (kernelInputArray inp) $
     fullSlice arr_t $ map DimFix $ kernelInputIndices inp
 
-newKernelSpace :: MonadFreshNames m =>
-                  (SubExp,SubExp,SubExp,SubExp) -> SpaceStructure -> m KernelSpace
-newKernelSpace (num_groups, group_size, num_threads, virt_groups) ispace =
-  KernelSpace
-  <$> newVName "global_tid"
-  <*> newVName "local_tid"
-  <*> newVName "group_id"
-  <*> pure num_threads
-  <*> pure num_groups
-  <*> pure group_size
-  <*> pure virt_groups
-  <*> pure ispace
+injectSOACS :: (Monad m,
+                SameScope from to,
+                ExpAttr from ~ ExpAttr to,
+                BodyAttr from ~ BodyAttr to,
+                RetType from ~ RetType to,
+                BranchType from ~ BranchType to,
+                Op from ~ SOAC from) =>
+               (SOAC to -> Op to) -> Rephraser m from to
+injectSOACS f = Rephraser { rephraseExpLore = return
+                          , rephraseBodyLore = return
+                          , rephraseLetBoundLore = return
+                          , rephraseFParamLore = return
+                          , rephraseLParamLore = return
+                          , rephraseOp = fmap f . onSOAC
+                          , rephraseRetType = return
+                          , rephraseBranchType = return
+                          }
+  where onSOAC = SOAC.mapSOACM mapper
+        mapper = SOAC.SOACMapper { SOAC.mapOnSOACSubExp = return
+                                 , SOAC.mapOnSOACVName = return
+                                 , SOAC.mapOnSOACLambda = rephraseLambda $ injectSOACS f
+                                 }
+
+soacsStmToKernels :: Stm SOACS -> Stm Kernels
+soacsStmToKernels = runIdentity . rephraseStm (injectSOACS OtherOp)
+
+soacsLambdaToKernels :: Lambda SOACS -> Lambda Kernels
+soacsLambdaToKernels = runIdentity . rephraseLambda (injectSOACS OtherOp)
+
+scopeForSOACs :: Scope Kernels -> Scope SOACS
+scopeForSOACs = castScope
+
+scopeForKernels :: Scope SOACS -> Scope Kernels
+scopeForKernels = castScope

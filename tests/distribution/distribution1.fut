@@ -12,7 +12,7 @@
 --     scan
 --
 -- ==
--- structure distributed { Kernel 1 }
+-- structure distributed { SegMap 1 }
 
 let combineVs(n_row: []f64, vol_row: []f64, dr_row: []f64): []f64 =
     map2 (+) dr_row (map2 (*) n_row vol_row)

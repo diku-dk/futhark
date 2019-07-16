@@ -1,4 +1,5 @@
 -- Mapping matrix multiplication, written in a functional style.
+-- This is primarily a test of tiling.
 -- ==
 -- input {
 --   [[ [1,2], [3,4] ],
@@ -12,6 +13,10 @@
 --     [[67i32, 78i32],
 --      [91i32, 106i32]]]
 -- }
+-- compiled random input { [1][16][16]i32 [1][16][16]i32 } auto output
+-- compiled random input { [2][16][32]i32 [2][32][16]i32 } auto output
+-- compiled random input { [3][32][16]i32 [3][16][32]i32 } auto output
+-- compiled random input { [4][128][17]i32 [4][17][128]i32 } auto output
 -- structure { /Screma 1 /Screma/Screma 1 /Screma/Screma/Screma 1 /Screma/Screma/Screma/Screma 1 }
 
 let matmult [n][m][p] (x: [n][m]i32) (y: [m][p]i32): [n][p]i32 =

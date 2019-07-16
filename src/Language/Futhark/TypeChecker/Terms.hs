@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances, DeriveFunctor #-}
+{-# Language TupleSections #-}
 -- | Facilities for type-checking Futhark terms.  Checking a term
 -- requires a little more context to track uniqueness and such.
 --
@@ -35,7 +36,7 @@ import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import Language.Futhark.TypeChecker.Unify
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
-import Futhark.Util.Pretty hiding (space, bool)
+import Futhark.Util.Pretty hiding (space, bool, group)
 
 --- Uniqueness
 
@@ -414,7 +415,8 @@ newArrayType loc desc r = do
 useAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
 useAfterConsume name rloc wloc =
   throwError $ TypeError rloc $
-  "Variable " ++ pretty name ++ " previously consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
+  "Variable " ++ quote (pretty name) ++ " previously consumed at " ++
+  locStr wloc ++ ".  (Possibly through aliasing)"
 
 consumeAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
 consumeAfterConsume name loc1 loc2 =
@@ -570,6 +572,25 @@ checkPattern' (PatternLit e NoInfo loc) NoneInferred = do
   t' <- expType e'
   return $ PatternLit e' (Info t') loc
 
+checkPattern' (PatternConstr n NoInfo ps loc) (Ascribed (SumT cs))
+  | Just ts <- M.lookup n cs = do
+      ps' <- zipWithM checkPattern' ps $ map Ascribed ts
+      return $ PatternConstr n (Info (SumT cs)) ps' loc
+
+checkPattern' (PatternConstr n NoInfo ps loc) (Ascribed t) = do
+  t' <- newTypeVar loc "t"
+  ps' <- mapM (`checkPattern'` NoneInferred) ps
+  mustHaveConstr loc n t' (toStructural . patternType <$> ps')
+  unify loc t' (toStructural t)
+  t'' <- normaliseType t
+  return $ PatternConstr n (Info t'') ps' loc
+
+checkPattern' (PatternConstr n NoInfo ps loc) NoneInferred = do
+  ps' <- mapM (`checkPattern'` NoneInferred) ps
+  t <- newTypeVar loc "t"
+  mustHaveConstr loc n t (toStructural . patternType <$> ps')
+  return $ PatternConstr n (Info t) ps' loc
+
 bindPatternNames :: PatternBase NoInfo Name -> TermTypeM a -> TermTypeM a
 bindPatternNames = bindSpaced . map asTerm . S.toList . patternIdents
   where asTerm v = (Term, identName v)
@@ -590,11 +611,11 @@ binding bnds = check . local (`bindVars` bnds)
         bindVar scope (Ident name (Info tp) _) =
           let inedges = boundAliases $ aliases tp
               update (BoundV l tparams in_t)
-              -- If 'name' is record-typed, don't alias the components
-              -- to 'name', because records have no identity beyond
-              -- their components.
-                | Record _ <- tp = BoundV l tparams in_t
-                | otherwise = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
+                -- If 'name' is record or sum-typed, don't alias the
+                -- components to 'name', because these no identity
+                -- beyond their components.
+                | Array{} <- tp = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
+                | otherwise = BoundV l tparams in_t
               update b = b
 
               tp' = tp `addAliases` S.insert (AliasBound name)
@@ -705,6 +726,7 @@ patternUses (TuplePattern ps _) = foldMap patternUses ps
 patternUses (RecordPattern fs _) = foldMap (patternUses . snd) fs
 patternUses (PatternAscription p (TypeDecl declte _) _) =
   patternUses p <> typeExpUses declte
+patternUses (PatternConstr _ _ ps _) = foldMap patternUses ps
 
 patternDims :: Pattern -> [Ident]
 patternDims (PatternParens p _) = patternDims p
@@ -1014,7 +1036,7 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   a <- expType src'
   r <- foldM (flip $ mustHaveField loc) a fields
   unify loc (toStructural r) . toStructural =<< expType ve'
-  return $ RecordUpdate src' fields ve' (Info $ fromStruct a) loc
+  return $ RecordUpdate src' fields ve' (Info a) loc
 
 checkExp (Index e idxes NoInfo loc) = do
   (t, _) <- newArrayType (srclocOf e) "e" $ length idxes
@@ -1192,6 +1214,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody loc) =
           uniquePat (PatternAscription p t ploc) =
             PatternAscription p t ploc
           uniquePat p@PatternLit{} = p
+          uniquePat (PatternConstr n t ps ploc) =
+            PatternConstr n t (map uniquePat ps) ploc
 
           -- Make the pattern unique where needed.
           pat' = uniquePat pat
@@ -1243,10 +1267,14 @@ checkExp (DoLoop mergepat mergeexp form loopbody loc) =
         then return pat'
         else convergePattern pat' body_cons' body_t' body_loc
 
-checkExp (VConstr0 name NoInfo loc) = do
+checkExp (Constr name es NoInfo loc) = do
   t <- newTypeVar loc "t"
-  mustHaveConstr loc name t
-  return $ VConstr0 name (Info t) loc
+  es' <- mapM checkExp es
+  ets <- mapM expType es'
+  mustHaveConstr loc name t (toStructural <$> ets)
+  -- A sum value aliases *anything* that went into its construction.
+  let als = mconcat (map aliases ets)
+  return $ Constr name es' (Info $ t `addAliases` (<>als)) loc
 
 checkExp (Match _ [] NoInfo loc) =
   typeError loc "Match expressions must have at least one case."
@@ -1285,7 +1313,7 @@ checkCase mt (CasePat p caseExp loc) =
 -- unmatched pattern warnings by the type checker.
 data Unmatched p = UnmatchedNum p [ExpBase Info VName]
                  | UnmatchedBool p
-                 | UnmatchedEnum p
+                 | UnmatchedConstr p
                  | Unmatched p
                  deriving (Functor, Show)
 
@@ -1293,7 +1321,7 @@ instance Pretty (Unmatched (PatternBase Info VName)) where
   ppr um = case um of
       (UnmatchedNum p nums) -> ppr' p <+> text "where p is not one of" <+> ppr nums
       (UnmatchedBool p)     -> ppr' p
-      (UnmatchedEnum p)     -> ppr' p
+      (UnmatchedConstr p)     -> ppr' p
       (Unmatched p)         -> ppr' p
     where
       ppr' (PatternAscription p t _) = ppr p <> text ":" <+> ppr t
@@ -1304,6 +1332,7 @@ instance Pretty (Unmatched (PatternBase Info VName)) where
         where ppField (name, t)      = text (nameToString name) <> equals <> ppr' t
       ppr' Wildcard{}                = text "_"
       ppr' (PatternLit e _ _)        = ppr e
+      ppr' (PatternConstr n _ ps _)   = text "#" <> ppr n <+> sep (map ppr' ps)
 
 unpackPat :: Pattern -> [Maybe Pattern]
 unpackPat Wildcard{} = [Nothing]
@@ -1313,19 +1342,24 @@ unpackPat (TuplePattern ps _) = Just <$> ps
 unpackPat (RecordPattern fs _) = Just . snd <$> sortFields (M.fromList fs)
 unpackPat (PatternAscription p _ _) = unpackPat p
 unpackPat p@PatternLit{} = [Just p]
+unpackPat p@PatternConstr{} = [Just p]
 
 wildPattern :: Pattern -> Int -> Unmatched Pattern -> Unmatched Pattern
-wildPattern (TuplePattern ps loc) pos um = f <$> um
-  where f p = TuplePattern (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
+wildPattern (TuplePattern ps loc) pos um = wildTuple <$> um
+  where wildTuple p = TuplePattern (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
         ps' = map wildOut ps
         wildOut p = Wildcard (Info (patternPatternType p)) (srclocOf p)
 wildPattern (RecordPattern fs loc) pos um = wildRecord <$> um
-    where wildRecord p =
-            RecordPattern (take (pos - 1) fs' ++ [(fst (fs!!(pos - 1)), p)] ++ drop pos fs') loc
-          fs' = map wildOut fs
-          wildOut (f,p) = (f, Wildcard (Info (patternPatternType p)) (srclocOf p))
+  where wildRecord p =
+          RecordPattern (take (pos - 1) fs' ++ [(fst (fs!!(pos - 1)), p)] ++ drop pos fs') loc
+        fs' = map wildOut fs
+        wildOut (f,p) = (f, Wildcard (Info (patternPatternType p)) (srclocOf p))
 wildPattern (PatternAscription p _ _) pos um = wildPattern p pos um
 wildPattern (PatternParens p _) pos um = wildPattern p pos um
+wildPattern (PatternConstr n t ps loc) pos um = wildConstr <$> um
+  where wildConstr p = PatternConstr n t (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
+        ps' = map wildOut ps
+        wildOut p = Wildcard (Info (patternPatternType p)) (srclocOf p)
 wildPattern _ _ um = um
 
 checkUnmatched :: (MonadBreadCrumbs m, MonadTypeChecker m) => Exp -> m ()
@@ -1345,28 +1379,67 @@ checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
                        , mapOnPatternType = pure
                        }
 
+-- | A data type for constructor patterns.  This is used to make the
+-- code for detecting unmatched constructors cleaner, by separating
+-- the constructor-pattern cases from other cases.
+data ConstrPat = ConstrPat { constrName :: Name
+                           , constrType :: PatternType
+                           , constrPayload :: [Pattern]
+                           , constrSrcLoc :: SrcLoc
+                           }
+
+-- Be aware of these fishy equality instances!
+
+instance Eq ConstrPat where
+  ConstrPat c1 _ _ _ == ConstrPat c2 _ _ _ = c1 == c2
+
+instance Ord ConstrPat where
+  ConstrPat c1 _ _ _ `compare` ConstrPat c2 _ _ _ = c1 `compare` c2
+
 unmatched :: (Unmatched Pattern -> Unmatched Pattern) -> [Pattern] -> [Unmatched Pattern]
-unmatched hole (p:ps)
-  | sameStructure labeledCols = do
+unmatched hole orig_ps
+  | p:_ <- orig_ps,
+    sameStructure labeledCols = do
     (i, cols) <- labeledCols
-    let hole' p' = hole $ wildPattern p i p'
+    let hole' = if isConstr p then hole else hole . wildPattern p i
     case sequence cols of
-      Nothing      -> []
+      Nothing -> []
       Just cs
         | all isPatternLit cs  -> map hole' $ localUnmatched cs
         | otherwise            -> unmatched hole' cs
+  | otherwise = []
 
-  where labeledCols = zip [1..] $ transpose $ map unpackPat (p:ps)
+  where labeledCols = zip [1..] $ transpose $ map unpackPat orig_ps
 
         localUnmatched :: [Pattern] -> [Unmatched Pattern]
         localUnmatched [] = []
         localUnmatched ps'@(p':_) =
           case patternType p'  of
-            Enum cs'' ->
-              let matched = nub $ mapMaybe (pExp >=> constr) ps'
-              in map (UnmatchedEnum . buildEnum (Enum cs'')) $ cs'' \\ matched
-            Prim t
-              | not (any idOrWild ps') ->
+            SumT cs'' ->
+              -- We now know that we are matching a sum type, and thus
+              -- that all patterns ps' are constructors (checked by
+              -- 'all isPatternLit' before this function is called).
+              let constrs   = M.keys cs''
+                  matched   = mapMaybe constr ps'
+                  unmatched' = map (UnmatchedConstr . buildConstr cs'') $
+                               constrs \\ map constrName matched
+             in case unmatched' of
+                [] ->
+                  let constrGroups   = group (sort matched)
+                      removedConstrs = mapMaybe stripConstrs constrGroups
+                      transposed     = (fmap . fmap) transpose removedConstrs
+                      findUnmatched (pc, trans) = do
+                        col <- trans
+                        case col of
+                          []           -> []
+                          ((i, _):_) -> unmatched (wilder i pc) (map snd col)
+                      wilder i pc s = (`PatternParens` noLoc) <$> wildPattern pc i s
+                  in concatMap findUnmatched transposed
+                _ -> unmatched'
+            Prim t | not (any idOrWild ps') ->
+              -- We now know that we are matching a sum type, and thus
+              -- that all patterns ps' are literals (checked by 'all
+              -- isPatternLit' before this function is called).
                 case t of
                   Bool ->
                     let matched = nub $ mapMaybe (pExp >=> bool) $ filter isPatternLit ps'
@@ -1376,6 +1449,18 @@ unmatched hole (p:ps)
                     in [UnmatchedNum (buildId (Info (Prim t)) "p") matched]
             _ -> []
 
+        isConstr PatternConstr{} = True
+        isConstr (PatternParens p _) = isConstr p
+        isConstr _ = False
+
+
+        stripConstrs :: [ConstrPat] -> Maybe (Pattern, [[(Int, Pattern)]])
+        stripConstrs (pc@ConstrPat{} : cs') = Just (unConstr pc, stripConstr pc : map stripConstr cs')
+        stripConstrs [] = Nothing
+
+        stripConstr :: ConstrPat -> [(Int, Pattern)]
+        stripConstr (ConstrPat _ _  ps' _) = zip [1..] ps'
+
         sameStructure [] = True
         sameStructure (x:xs) = all (\y -> length y == length x' ) xs'
           where (x':xs') = map snd (x:xs)
@@ -1383,13 +1468,18 @@ unmatched hole (p:ps)
         pExp (PatternLit e' _ _) = Just e'
         pExp _ = Nothing
 
-        constr (VConstr0 c _ _) = Just c
-        constr (Ascript e' _ _ _)  = constr e'
+        constr (PatternConstr c (Info t) ps loc) = Just $ ConstrPat c t ps loc
+        constr (PatternParens p _) = constr p
+        constr (PatternAscription p' _ _)  = constr p'
         constr _ = Nothing
+
+        unConstr p =
+          PatternConstr (constrName p) (Info $ constrType p) (constrPayload p) (constrSrcLoc p)
 
         isPatternLit PatternLit{} = True
         isPatternLit (PatternAscription p' _ _) = isPatternLit p'
         isPatternLit (PatternParens p' _)  = isPatternLit p'
+        isPatternLit PatternConstr{} = True
         isPatternLit _ = False
 
         idOrWild Id{} = True
@@ -1401,16 +1491,19 @@ unmatched hole (p:ps)
         bool (Literal (BoolValue b) _ ) = Just b
         bool _ = Nothing
 
-        buildEnum t c =
-          PatternLit (VConstr0 c (Info t) noLoc) (Info t) noLoc
+        buildConstr m c =
+          let t      = SumT m
+              cs     = m M.! c
+              wildCS = map (\ct -> Wildcard (Info ct) noLoc) cs
+          in if null wildCS
+               then PatternConstr c (Info t) [] noLoc
+               else PatternParens (PatternConstr c (Info t) wildCS noLoc) noLoc
         buildBool t b =
           PatternLit (Literal (BoolValue b) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
         buildId t n =
           -- The VName tag here will never be used since the value
           -- exists exclusively for printing warnings.
           Id (VName (nameFromString n) (-1)) t noLoc
-
-unmatched _ _ = []
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
@@ -1503,7 +1596,8 @@ returnType (TypeVar als Nonunique t targs) d arg =
 returnType (Arrow _ v t1 t2) d arg =
   Arrow als v (t1 `setAliases` mempty) (t2 `setAliases` als)
   where als = aliases $ maskAliases arg d
-returnType (Enum cs) _ _ = Enum cs
+returnType (SumT cs) d arg =
+  SumT $ (fmap . fmap) (\et -> returnType et d arg) cs
 
 -- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
@@ -1607,9 +1701,8 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
                 field (l, t) = pretty l ++ ": " ++ pretty t
 
         fixOverloaded (_, HasConstrs cs loc) =
-          typeError loc $ unlines [ "Type is ambiguous (must be an enum with constructors: " ++ cs' ++ ")."
+          typeError loc $ unlines [ "Type is ambiguous (must be a sum type with constructors: " ++ pretty (SumT cs) ++ ")."
                                     ,"Add a type annotation to disambiguate the type."]
-          where cs' = intercalate " | " $ map (\c -> '#' : pretty c) cs
 
         fixOverloaded _ = return ()
 
@@ -1682,7 +1775,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
                Nothing ->
                  return ()
 
-        tag u = S.map $ \name -> (u, name)
+        tag u = S.map (u,)
 
         returnAliasing (Record ets1) (Record ets2) =
           concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
@@ -1755,10 +1848,11 @@ uniqueParamNames =
 boundArrayAliases :: PatternType -> S.Set VName
 boundArrayAliases (Array als _ _ _) = boundAliases als
 boundArrayAliases Prim{} = mempty
-boundArrayAliases Enum{} = mempty
 boundArrayAliases (Record fs) = foldMap boundArrayAliases fs
 boundArrayAliases (TypeVar als _ _ _) = boundAliases als
 boundArrayAliases Arrow{} = mempty
+boundArrayAliases (SumT fs) =
+  mconcat $ concatMap (map boundArrayAliases) $ M.elems fs
 
 -- | The set of in-scope variables that are being aliased.
 boundAliases :: Aliasing -> S.Set VName

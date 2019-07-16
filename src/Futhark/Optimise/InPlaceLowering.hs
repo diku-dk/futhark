@@ -10,11 +10,12 @@
 -- minimising memory copies.  As an example, consider this program:
 --
 -- @
---   loop (r = r0) = for i < n do
---     let a = r[i] in
---     let r[i] = a * i in
---     r
---     in
+--   let r =
+--     loop (r1 = r0) = for i < n do
+--       let a = r1[i] in
+--       let r1[i] = a * i in
+--       r1
+--       in
 --   ...
 --   let x = y with [k] <- r in
 --   ...
@@ -48,7 +49,7 @@
 --    (4) If @x@ is consumed at a point after the loop, @r@ must not
 --    be used after that point.
 --
---    (5) The size of @r@ is invariant inside the loop.
+--    (5) The size of @r1@ is invariant inside the loop.
 --
 --    (6) The value @r@ must come from something that we can actually
 --    optimise (e.g. not a function parameter).
@@ -56,8 +57,11 @@
 --    (7) @y@ (or its aliases) may not be used inside the body of the
 --    loop.
 --
--- FIXME: the implementation is not finished yet.  Specifically, the
--- above conditions are not really checked.
+--    (8) The result of the loop may not alias the merge parameter
+--    @r1@.
+--
+-- FIXME: the implementation is not finished yet.  Specifically, not
+-- all of the above conditions are checked.
 module Futhark.Optimise.InPlaceLowering
        (
          inPlaceLowering
@@ -157,25 +161,15 @@ optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = const optimiseBody
                                   }
 onKernelOp :: OnOp Kernels
-onKernelOp (HostOp op) = do
-  old_scope <- askScope
-  modifyNameSource $ runForwardingM lowerUpdateInKernel onKernelExp $
-    bindingScope (castScope old_scope <> scopeOfKernelSpace (kernelSpace op)) $ do
-      let mapper = identityKernelMapper { mapOnKernelKernelBody = onKernelBody }
-          onKernelBody kbody = do
-            stms <- deepen $ optimiseStms (stmsToList (kernelBodyStms kbody)) $
-                    mapM_ seenVar $ freeIn $ kernelBodyResult kbody
-            return kbody { kernelBodyStms = stmsFromList stms }
-      HostOp <$> mapKernelM mapper op
+onKernelOp (SegOp op) =
+  bindingScope (scopeOfSegSpace (segSpace op)) $ do
+    let mapper = identitySegOpMapper { mapOnSegOpBody = onKernelBody }
+        onKernelBody kbody = do
+          stms <- deepen $ optimiseStms (stmsToList (kernelBodyStms kbody)) $
+                  mapM_ seenVar $ freeIn $ kernelBodyResult kbody
+          return kbody { kernelBodyStms = stmsFromList stms }
+    SegOp <$> mapSegOpM mapper op
 onKernelOp op = return op
-
-onKernelExp :: OnOp InKernel
-onKernelExp (GroupStream w maxchunk lam accs arrs) = do
-  lam_body <- bindingScope (scopeOf lam) $
-              optimiseBody $ groupStreamLambdaBody lam
-  let lam' = lam { groupStreamLambdaBody = lam_body }
-  return $ GroupStream w maxchunk lam' accs arrs
-onKernelExp op = return op
 
 data Entry lore = Entry { entryNumber :: Int
                         , entryAliases :: Names

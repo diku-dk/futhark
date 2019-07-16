@@ -376,7 +376,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               prog <- runPipelineOnProgram (futharkConfig config) id file
               runPolyPasses config prog
 
-runPolyPasses :: Config -> SOACS.Prog -> FutharkM ()
+runPolyPasses :: Config -> Prog SOACS -> FutharkM ()
 runPolyPasses config prog = do
     prog' <- foldM (runPolyPass pipeline_config) (SOACS prog) (getFutharkPipeline config)
     case (prog', futharkAction config) of

@@ -28,6 +28,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.MonadFreshNames
+import Futhark.Representation.ExplicitMemory (allScalarMemory)
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty)
 
@@ -171,7 +172,7 @@ onKernel target kernel = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
           return (Just $ SharedMemoryKArg size,
                   Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
-                  [C.citem|__local volatile char* restrict $id:mem = $id:mem_aligned;|])
+                  [C.citem|__local volatile char* restrict $id:mem = (__local volatile char*)$id:mem_aligned;|])
         prepareLocalMemory TargetOpenCL (mem, Right size) = do
           let size' = compilePrimExp size
           return (Nothing, Nothing,
@@ -182,9 +183,10 @@ onKernel target kernel = do
                   Just [C.cparam|uint $id:param|],
                   [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|])
         prepareLocalMemory TargetCUDA (mem, Right size) = do
+          -- We declare the shared memory array as int64_t to force alignment.
           let size' = compilePrimExp size
           return (Nothing, Nothing,
-                  [CUDAC.citem|__shared__ volatile char $id:mem[$exp:size'];|])
+                  [CUDAC.citem|__shared__ volatile typename int64_t $id:mem[(($exp:size' + 7) & ~7)/8];|])
 
 
 onHusk :: KernelTarget
@@ -257,7 +259,8 @@ typedef ushort uint16_t;
 typedef uint uint32_t;
 typedef ulong uint64_t;
 
-$esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attribute__ ((align))")
+// We declare the shared memory array as int64_t to force alignment.
+$esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local int64_t m[((size + 7) & ~7)/8]")
 
 // NVIDIAs OpenCL does not create device-wide memory fences (see #734), so we
 // use inline assembly if we detect we are on an NVIDIA GPU.
@@ -280,7 +283,7 @@ static inline void mem_fence_local() {
 
 
 cudaAtomicOps :: [C.Definition]
-cudaAtomicOps = (return mkOp <*> opNames <*> types) ++ extraOps
+cudaAtomicOps = (mkOp <$> opNames <*> types) ++ extraOps
   where
     mkOp (clName, cuName) t =
       [C.cedecl|static inline $ty:t $id:clName(volatile $ty:t *p, $ty:t val) {
@@ -427,8 +430,8 @@ inKernelOperations :: GenericC.Operations KernelOp KernelRequirements
 inKernelOperations = GenericC.Operations
                      { GenericC.opsCompiler = kernelOps
                      , GenericC.opsMemoryType = kernelMemoryType
-                     , GenericC.opsWriteScalar = GenericC.writeScalarPointerWithQuals pointerQuals
-                     , GenericC.opsReadScalar = GenericC.readScalarPointerWithQuals pointerQuals
+                     , GenericC.opsWriteScalar = kernelWriteScalar
+                     , GenericC.opsReadScalar = kernelReadScalar
                      , GenericC.opsAllocate = cannotAllocate
                      , GenericC.opsDeallocate = cannotDeallocate
                      , GenericC.opsCopy = copyInKernel
@@ -457,7 +460,7 @@ inKernelOperations = GenericC.Operations
         kernelOps MemFenceGlobal =
           GenericC.stm [C.cstm|mem_fence_global();|]
         kernelOps (PrivateAlloc name size) = do
-          size' <- GenericC.compileExp $ innerExp size
+          size' <- GenericC.compileExp $ unCount size
           name' <- newVName $ pretty name ++ "_backing"
           GenericC.item [C.citem|__private char $id:name'[$exp:size'];|]
           GenericC.stm [C.cstm|$id:name = $id:name';|]
@@ -467,64 +470,54 @@ inKernelOperations = GenericC.Operations
           GenericC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
         kernelOps (Atomic space aop) = atomicOps space aop
 
-        atomicOps s (AtomicAdd old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_add($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
+        atomicCast s t = do
+          let volatile = [C.ctyquals|volatile|]
+          quals <- case s of DefaultSpace -> pointerQuals "global"
+                             Space sid    -> pointerQuals sid
+          return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
-        atomicOps s (AtomicSMax old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
+        doAtomic s old arr ind val op ty = do
+          ind' <- GenericC.compileExp $ unCount ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_max($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
+          cast <- atomicCast s ty
+          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
 
-        atomicOps s (AtomicSMin old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_min($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
+        atomicOps s (AtomicAdd old arr ind val) =
+          doAtomic s old arr ind val "atomic_add" [C.cty|int|]
 
-        atomicOps s (AtomicUMax old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_max($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicSMax old arr ind val) =
+          doAtomic s old arr ind val "atomic_max" [C.cty|int|]
 
-        atomicOps s (AtomicUMin old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_min($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicSMin old arr ind val) =
+          doAtomic s old arr ind val "atomic_min" [C.cty|int|]
 
-        atomicOps s (AtomicAnd old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_and($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicUMax old arr ind val) =
+          doAtomic s old arr ind val "atomic_max" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicOr old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_or($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicUMin old arr ind val) =
+          doAtomic s old arr ind val "atomic_min" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicXor old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
-          val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_xor($esc:(atomicCast s "unsigned int")&$id:arr[$exp:ind'], (unsigned int)$exp:val');|]
+        atomicOps s (AtomicAnd old arr ind val) =
+          doAtomic s old arr ind val "atomic_and" [C.cty|unsigned int|]
+
+        atomicOps s (AtomicOr old arr ind val) =
+          doAtomic s old arr ind val "atomic_or" [C.cty|unsigned int|]
+
+        atomicOps s (AtomicXor old arr ind val) =
+          doAtomic s old arr ind val "atomic_xor" [C.cty|unsigned int|]
 
         atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
+          ind' <- GenericC.compileExp $ unCount ind
           cmp' <- GenericC.compileExp cmp
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:cmp', $exp:val');|]
+          cast <- atomicCast s [C.cty|int|]
+          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
 
         atomicOps s (AtomicXchg old arr ind val) = do
-          ind' <- GenericC.compileExp $ innerExp ind
+          ind' <- GenericC.compileExp $ unCount ind
           val' <- GenericC.compileExp val
-          GenericC.stm [C.cstm|$id:old = atomic_xchg($esc:(atomicCast s "int")&$id:arr[$exp:ind'], $exp:val');|]
-
-        atomicCast s bt = "(" ++ unwords [ "volatile"
-                                         , "__" ++ case s of
-                                                     DefaultSpace -> "global"
-                                                     Space sid -> sid
-                                         , bt
-                                         , "*"
-                                         ] ++ ")"
+          cast <- atomicCast s [C.cty|int|]
+          GenericC.stm [C.cstm|$id:old = atomic_xchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
 
         cannotAllocate :: GenericC.Allocate KernelOp KernelRequirements
         cannotAllocate _ =
@@ -542,9 +535,29 @@ inKernelOperations = GenericC.Operations
         noStaticArrays _ _ _ _ =
           fail "Cannot create static array in kernel."
 
+        kernelMemoryType space
+          | Just t <- M.lookup space allScalarMemory =
+              return $ GenericC.primTypeToCType t
+
         kernelMemoryType space = do
           quals <- pointerQuals space
           return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
+
+        kernelWriteScalar dest _ _ space _ v
+          | space `M.member` allScalarMemory =
+              GenericC.stm [C.cstm|$exp:dest = $exp:v;|]
+
+        kernelWriteScalar dest i elemtype space vol v =
+          GenericC.writeScalarPointerWithQuals pointerQuals
+          dest i elemtype space vol v
+
+        kernelReadScalar dest _ _ space _
+          | space `M.member` allScalarMemory =
+              return dest
+
+        kernelReadScalar dest i elemtype space vol =
+          GenericC.readScalarPointerWithQuals pointerQuals
+          dest i elemtype space vol
 
 --- Checking requirements
 

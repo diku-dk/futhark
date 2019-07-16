@@ -42,7 +42,7 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
 internaliseProg :: MonadFreshNames m =>
-                   Bool -> Imports -> m (Either String I.Prog)
+                   Bool -> Imports -> m (Either String (I.Prog SOACS))
 internaliseProg always_safe prog = do
   prog_decs <- Defunctorise.transformProg prog
   prog_decs' <- Monomorphise.transformProg prog_decs
@@ -115,7 +115,8 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
             applyRetType rettype' all_params)
 
   bindFunction fname info
-  when entry $ generateEntryPoint fb
+  case entry of Just (Info entry') -> generateEntryPoint entry' fb
+                Nothing -> return ()
 
   where
     -- | Recompute existential sizes to start from zero.
@@ -148,9 +149,12 @@ allDimsFreshInPat (Wildcard (Info t) loc) =
   Wildcard <$> (Info <$> allDimsFreshInType t) <*> pure loc
 allDimsFreshInPat (PatternLit e (Info t) loc) =
   PatternLit e <$> (Info <$> allDimsFreshInType t) <*> pure loc
+allDimsFreshInPat (PatternConstr c (Info t) pats loc) =
+  PatternConstr c <$> (Info <$> allDimsFreshInType t) <*>
+  mapM allDimsFreshInPat pats <*> pure loc
 
-generateEntryPoint :: E.ValBind -> InternaliseM ()
-generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) = do
+generateEntryPoint :: E.StructType -> E.ValBind -> InternaliseM ()
+generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) = do
   -- We replace all shape annotations, so there should be no constant
   -- parameters here.
   params_fresh <- mapM allDimsFreshInPat params
@@ -158,7 +162,8 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) 
                 mconcat $ map E.patternDimNames params_fresh
   bindingParams tparams params_fresh $ \_ shapeparams params' -> do
     (entry_rettype, _) <- internaliseEntryReturnType $ anyDimShapeAnnotations rettype
-    let entry' = entryPoint (zip params params') (retdecl, rettype, entry_rettype)
+    let (e_paramts, e_rettype) = E.unfoldFunType ftype
+        entry' = entryPoint (zip3 params e_paramts params') (retdecl, e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     entry_body <- insertStmsM $ do
@@ -172,7 +177,7 @@ generateEntryPoint (E.ValBind _ ofname retdecl (Info rettype) _ params _ _ loc) 
       (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
 
-entryPoint :: [(E.Pattern,[I.FParam])]
+entryPoint :: [(E.Pattern, E.StructType, [I.FParam])]
            -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
            -> EntryPoint
 entryPoint params (retdecl, eret, crets) =
@@ -180,9 +185,9 @@ entryPoint params (retdecl, eret, crets) =
    case isTupleRecord eret of
      Just ts -> concatMap entryPointType $ zip3 retdecls ts crets
      _       -> entryPointType (retdecl, eret, concat crets))
-  where preParam (p_pat, ps) = (paramOuterType p_pat,
-                                E.patternStructType p_pat,
-                                staticShapes $ map I.paramDeclType ps)
+  where preParam (p_pat, e_t, ps) = (paramOuterType p_pat,
+                                     e_t,
+                                     staticShapes $ map I.paramDeclType ps)
         paramOuterType (E.PatternAscription _ tdecl _) = Just $ declaredType tdecl
         paramOuterType (E.PatternParens p _) = paramOuterType p
         paramOuterType _ = Nothing
@@ -272,8 +277,7 @@ internaliseExp desc (E.Index e idxs _ loc) = do
                    return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
   certifying cs $ letSubExps desc =<< mapM index vs
 
-internaliseExp desc (E.TupLit es _) =
-  concat <$> mapM (internaliseExp desc) es
+internaliseExp desc (E.TupLit es _) = concat <$> mapM (internaliseExp desc) es
 
 internaliseExp desc (E.RecordLit orig_fields _) =
   concatMap snd . sortFields . M.unions . reverse <$> mapM internaliseField orig_fields
@@ -465,7 +469,7 @@ internaliseExp desc (E.LetPat pat e body _ loc) =
   internalisePat desc pat e body loc (internaliseExp desc)
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
-  internaliseValBind $ E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc
+  internaliseValBind $ E.ValBind Nothing ofname retdecl (Info rettype) tparams params body Nothing loc
   internaliseExp desc letbody
 
 internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody loc) = do
@@ -662,19 +666,12 @@ internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
           letBindNames_ [v'] $ I.BasicOp $ I.SubExp v
           return $ I.Var v'
 
-internaliseExp _ (E.VConstr0 c (Info t) loc) =
-  case t of
-    Enum cs ->
-      case elemIndex c $ sort cs of
-        Just i -> return [I.Constant $ I.IntValue $ intValue I.Int8 i]
-        _      -> fail $ "internaliseExp: invalid constructor: #" ++ nameToString c ++
-                         "\nfor enum at " ++ locStr loc ++ ": " ++ pretty t
-    _ -> fail $ "internaliseExp: nonsensical type for enum at "
-                ++ locStr loc ++ ": " ++ pretty t
+internaliseExp _ e@E.Constr{} =
+  fail $ "internaliseExp: unexpected constructor at " ++ locStr (srclocOf e)
 
 internaliseExp desc (E.Match  e cs _ loc) =
   case cs of
-    [CasePat _ eCase _] -> internaliseExp desc eCase
+    [CasePat pCase eCase locCase] -> internalisePat desc pCase e eCase locCase (internaliseExp desc)
     (c:cs') -> do
       bFalse <- bFalseM
       letTupExp' desc =<< generateCaseIf desc e c bFalse
@@ -783,7 +780,8 @@ generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
         generateCond' (E.PatternAscription p' _ _) = generateCond' p'
         generateCond' (E.PatternLit ePat (Info t) _) =
           [(Just (eqExp ePat), t)]
-
+        generateCond' E.PatternConstr{} =
+          fail "generateCond: unexpected pattern constructor."
 
 generateCaseIf :: String -> E.Exp -> Case -> I.Body -> InternaliseM I.Exp
 generateCaseIf desc e (CasePat p eCase loc) bFail = do
@@ -1316,7 +1314,7 @@ isOverloadedFunction qname args loc = do
 
                       -- Check that all were equal.
                       and_lam <- binOpLambda I.LogAnd I.Bool
-                      reduce <- I.reduceSOAC Commutative and_lam [constant True]
+                      reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
                       all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems reduce [cmps]
                       return $ resultBody [all_equal]
 
@@ -1427,13 +1425,13 @@ isOverloadedFunction qname args loc = do
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where reduce w red_lam nes arrs =
               I.Screma w <$>
-              I.reduceSOAC Noncommutative red_lam nes <*> pure arrs
+              I.reduceSOAC [Reduce Noncommutative red_lam nes] <*> pure arrs
 
     handle [TupLit [lam, ne, arr] _] "reduce_comm" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where reduce w red_lam nes arrs =
               I.Screma w <$>
-              I.reduceSOAC Commutative red_lam nes <*> pure arrs
+              I.reduceSOAC [Reduce Commutative red_lam nes] <*> pure arrs
 
     handle [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
       internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)
@@ -1746,8 +1744,12 @@ typeExpForError cm (E.TEApply t arg _) = do
   arg' <- case arg of TypeArgExpType argt -> typeExpForError cm argt
                       TypeArgExpDim d _   -> pure <$> dimDeclForError cm d
   return $ t' ++ [" "] ++ arg'
-typeExpForError _ e@E.TEEnum{} =
-  return [ErrorString $ pretty e]
+typeExpForError cm (E.TESum cs _) = do
+  cs' <- mapM (onClause . snd) cs
+  return $ intercalate [" | "] cs'
+  where onClause c = do
+          c' <- mapM (typeExpForError cm) c
+          return $ intercalate [" "] c'
 
 dimDeclForError :: ConstParams -> E.DimDecl VName -> InternaliseM (ErrorMsgPart SubExp)
 dimDeclForError cm (NamedDim d) = do

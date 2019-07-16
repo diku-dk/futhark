@@ -27,16 +27,19 @@ Identifiers and Keywords
    binop: `opstartchar` `opchar`*
    qualbinop: `binop` | `quals` `binop` | "`" `qualid` "`"
    fieldid: `decimal` | `id`
-   opstartchar = "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
+   opstartchar: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
    opchar: `opstartchar` | "."
+   constructor: "#" `id`
 
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
-a module, we use a qualified name (`qualid`).  The fields of a record
-are named with `fieldid`.  Note that a `fieldid` can be a decimal
-number.  Futhark has three distinct name spaces: terms, module types,
-and types.  Modules (including parametric modules) and values both
-share the term namespace.
+a module, we use a qualified name (`qualid`).  The constructor names
+of a sum type (:ref:`compounds`) are identifiers prefixed with ``#``,
+with no space afterwards.  The fields of a record are named with
+`fieldid`.  Note that a `fieldid` can be a decimal number.  Futhark
+has three distinct name spaces: terms, module types, and types.
+Modules (including parametric modules) and values both share the term
+namespace.
 
 .. _primitives:
 
@@ -91,6 +94,7 @@ instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
    hexdigit: `decdigit` | "a"..."f" | "A"..."F"
    bindigit: "0" | "1"
 
+.. _compounds:
 
 Compound Types and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -107,11 +111,17 @@ although they are not very useful-these are written ``()`` and are of
 type ``()``.
 
 .. productionlist::
-   type: `qualid` | `array_type` | `tuple_type`
-       : | `record_type` | `function_type` | `type` `type_arg` | "*" `type`
+   type: `qualid`
+       : | `array_type`
+       : | `tuple_type`
+       : | `record_type`
+       : | `sum_type`
+       : | `function_type`
+       : | `type` `type_arg` | "*" `type`
    array_type: "[" [`dim`] "]" `type`
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
+   sum_type: `constructor` `type`* ("|" `constructor` `type`*)*
    function_type: `param_type` "->" `type`
    param_type: `type` | "(" `id` ":" `type` ")"
    type_arg: "[" [`dim`] "]" | `type`
@@ -139,6 +149,11 @@ we can understand it in language terms by the inability to write a
 type with consistent dimension sizes for an irregular array value.  In
 a Futhark program, all array values, including intermediate (unnamed)
 arrays, must be typeable.
+
+Sum types are anonymous in Futhark, and are written as the
+constructors separated by vertical bars.  Each constructor consists of
+a ``#``-prefixed *name*, followed by zero or more types, called its
+*payload*.
 
 Records are mappings from field names to values, with the field names
 known statically.  A tuple behaves in all respects like a record with
@@ -402,6 +417,7 @@ literals and variables, but also more complicated forms.
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
+      : | `constructor` `exp`*
       : | `exp` ":" `type`
       : | `exp` [ ".." `exp` ] "..." `exp`
       : | `exp` [ ".." `exp` ] "..<" `exp`
@@ -416,15 +432,18 @@ literals and variables, but also more complicated forms.
       : | "assert" `atom` `atom`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "=" `exp`
       : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
+      : | "match" `exp` ("case" `pat` "->" `exp`)+
    field:   `fieldid` "=" `exp`
         : | `id`
    pat:   `id`
+      : | `literal`
       : |  "_"
       : | "(" ")"
       : | "(" `pat` ")"
       : | "(" `pat` ("," `pat`)+ ")"
       : | "{" "}"
       : | "{" `fieldid` ["=" `pat`] ["," `fieldid` ["=" `pat`]] "}"
+      : | `constructor` `pat`*
       : | `pat` ":" `type`
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
@@ -432,7 +451,6 @@ literals and variables, but also more complicated forms.
    index:   `exp` [":" [`exp`]] [":" [`exp`]]
         : | [`exp`] ":" `exp` [":" [`exp`]]
         : | [`exp`] [":" `exp`] ":" [`exp`]
-   nat_int : `decdigit`+
 
 Some of the built-in expression forms have parallel semantics, but it
 is not guaranteed that the the parallel constructs in Futhark are
@@ -493,6 +511,22 @@ in natural text.
   right              ``->``
   left               juxtaposition
   =================  =============
+
+.. _patterns:
+
+Patterns
+~~~~~~~~
+
+We say that a pattern is *irrefutable* if it can never fail to match a
+value of the appropriate type.  Concretely, this means that it does
+not require any specific sum type constructor (unless the type in
+question has only a single constructor), or any specific numeric or
+boolean literal.  Patterns used in function parameters and ``let``
+bindings must be irrefutable.  Patterns used in ``case`` need not be
+irrefutable.
+
+A pattern ``_`` matches any value.  A pattern consisting of a literal
+value (e.g. a numeric constant) matches exactly that value.
 
 Semantics of Simple Expressions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -683,6 +717,14 @@ Short-circuiting logical disjunction; both operands must be of type
 
 Apply the function ``f`` to the argument ``x``.
 
+``#c x y z``
+............
+
+Apply the sum type constructor ``#x`` to the payload ``x``, ``y``, and
+``z``.  A constructor application is always assumed to be saturated,
+i.e. its entire payload provided.  This means that constructors may
+not be partially applied.
+
 ``e : t``
 .........
 
@@ -752,9 +794,10 @@ Binding Expressions
 ``let pat = e in body``
 .......................
 
-Evaluate ``e`` and bind the result to the pattern ``pat`` while
-evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
-``let`` expression. See also `Shape Declarations`_.
+Evaluate ``e`` and bind the result to the irrefutable pattern ``pat``
+(see :ref:`patterns`) while evaluating ``body``.  The ``in`` keyword
+is optional if ``body`` is a ``let`` expression. See also `Shape
+Declarations`_.
 
 ``let a[i] = v in body``
 ........................................
@@ -806,6 +849,17 @@ Equivalent to ``loop (pat = initial) for x in [0..1..<n] do loopbody``.
 3. Return the final value of ``pat``.
 
 See also `Shape Declarations`_.
+
+``match x case p1 -> e1 case p2 -> e2``
+.......................................
+
+Match the value produced by ``x`` to each of the patterns in turn,
+picking the first one that succeeds.  The result of the corresponding
+expression is the value of the entire ``match`` expression.  All the
+expressions associated with a ``case`` must have the same type (but
+not necessarily match the type of ``x``).  It is a type error if there
+is not a ``case`` for every possible value of ``x`` - inexhaustive
+pattern matching is not allowed.
 
 Function Expressions
 ~~~~~~~~~~~~~~~~~~~~

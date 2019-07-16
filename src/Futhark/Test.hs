@@ -451,7 +451,7 @@ testPrograms dir = filter isFut <$> directoryContents dir
 -- parameter is used for error messages.
 valuesFromByteString :: String -> BS.ByteString -> Either String [Value]
 valuesFromByteString srcname =
-  maybe (Left $ "Cannot parse values from " ++ srcname) Right . readValues
+  maybe (Left $ "Cannot parse values from '" ++ srcname ++ "'") Right . readValues
 
 -- | Get the actual core Futhark values corresponding to a 'Values'
 -- specification.  The 'FilePath' is the directory which file paths
@@ -461,9 +461,12 @@ getValues _ (Values vs) =
   return vs
 getValues dir v = do
   s <- getValuesBS dir v
-  case valuesFromByteString "file" s of
+  case valuesFromByteString file s of
     Left e   -> fail $ show e
     Right vs -> return vs
+  where file = case v of Values{} -> "<values>"
+                         InFile f -> f
+                         GenValues{} -> "<randomly generated>"
 
 -- | Extract a pretty representation of some 'Values'.  In the IO
 -- monad because this might involve reading from a file.  There is no

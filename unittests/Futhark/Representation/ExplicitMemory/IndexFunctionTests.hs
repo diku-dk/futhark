@@ -50,8 +50,8 @@ compareIxFuns ixfunLMAD ixfunAlg =
   let lmadShape = IxFunLMAD.shape ixfunLMAD
       algShape = IxFunAlg.shape ixfunAlg
       points = allPoints lmadShape
-      resLMAD = map (\is -> IxFunLMAD.index ixfunLMAD is 4) points
-      resAlg = map (\is -> IxFunAlg.index ixfunAlg is 4) points
+      resLMAD = map (IxFunLMAD.index ixfunLMAD) points
+      resAlg = map (IxFunAlg.index ixfunAlg) points
       errorMessage = "lmad ixfun:  " ++ PR.pretty ixfunLMAD ++ "\n" ++
                      "alg ixfun:   " ++ PR.pretty ixfunAlg ++ "\n" ++
                      "lmad shape:  " ++ show lmadShape ++ "\n" ++

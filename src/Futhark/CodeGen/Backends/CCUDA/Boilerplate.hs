@@ -204,6 +204,26 @@ generateConfigFuns sizes = do
                              return 0;
                            }
                          }
+
+                         if (strcmp(size_name, "default_block_size") == 0) {
+                           cfg->cu_cfg.default_block_size = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_grid_size") == 0) {
+                           cfg->cu_cfg.default_grid_size = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_threshold") == 0) {
+                           cfg->cu_cfg.default_threshold = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_tile_size") == 0) {
+                           cfg->cu_cfg.default_tile_size = size_value;
+                           return 0;
+                         }
                          return 1;
                        }|])
   return cfg

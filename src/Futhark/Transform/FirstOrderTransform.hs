@@ -14,31 +14,25 @@ module Futhark.Transform.FirstOrderTransform
   , transformLambda
   , transformSOAC
   , transformBody
-
-  -- * Utility
-  , doLoopMapAccumL
-  , doLoopMapAccumL'
   )
   where
 
 import Control.Monad.Except
 import Control.Monad.State
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.List (zip4)
 
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Representation.Aliases (Aliases, removeLambdaAliases)
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Util (chunks, splitAt3)
 
 transformFunDef :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                     LetAttr SOACS ~ LetAttr tolore,
                     CanBeAliased (Op tolore)) =>
-                   FunDef -> m (AST.FunDef tolore)
+                   FunDef SOACS -> m (AST.FunDef tolore)
 transformFunDef (FunDef entry fname rettype params body) = do
   (body',_) <- modifyNameSource $ runState $ runBinderT m mempty
   return $ FunDef entry fname rettype params body'
@@ -49,11 +43,10 @@ transformFunDef (FunDef entry fname rettype params body) = do
 type Transformer m = (MonadBinder m,
                       Bindable (Lore m), BinderOps (Lore m),
                       LocalScope (Lore m) m,
-                      LetAttr SOACS ~ LetAttr (Lore m),
                       LParamAttr SOACS ~ LParamAttr (Lore m),
                       CanBeAliased (Op (Lore m)))
 
-transformBody :: Transformer m =>
+transformBody :: (Transformer m, LetAttr (Lore m) ~ LetAttr SOACS) =>
                  Body -> m (AST.Body (Lore m))
 transformBody (Body () bnds res) = insertStmsM $ do
   mapM_ transformStmRecursively bnds
@@ -61,8 +54,8 @@ transformBody (Body () bnds res) = insertStmsM $ do
 
 -- | First transform any nested 'Body' or 'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
-transformStmRecursively :: Transformer m =>
-                               Stm -> m ()
+transformStmRecursively :: (Transformer m, LetAttr (Lore m) ~ LetAttr SOACS) =>
+                           Stm -> m ()
 
 transformStmRecursively (Let pat aux (Op soac)) =
   certifying (stmAuxCerts aux) $
@@ -91,10 +84,10 @@ transformSOAC :: Transformer m =>
 transformSOAC pat CmpThreshold{} =
   letBind_ pat $ BasicOp $ SubExp $ constant False -- close enough
 
-transformSOAC pat (Screma w form@(ScremaForm (scan_lam, scan_nes)
-                                                 (_, red_lam, red_nes)
-                                                 map_lam) arrs) = do
-  let (scan_arr_ts, _red_ts, map_arr_ts) =
+transformSOAC pat (Screma w form@(ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) = do
+  -- Start by combining all the reduction parts into a single operator
+  let (Reduce _ red_lam red_nes) = singleReduce reds
+      (scan_arr_ts, _red_ts, map_arr_ts) =
         splitAt3 (length scan_nes) (length red_nes) $ scremaType w form
   scan_arrs <- resultArray scan_arr_ts
   map_arrs <- resultArray map_arr_ts
@@ -159,8 +152,9 @@ transformSOAC pat (Screma w form@(ScremaForm (scan_lam, scan_nes)
 
   -- We need to discard the final scan accumulators, as they are not
   -- bound in the original pattern.
-  pat' <- discardPattern (map paramType scanacc_params) pat
-  letBind_ pat' $ DoLoop [] merge loopform loop_body
+  names <- (++patternNames pat)
+           <$> replicateM (length scanacc_params) (newVName "discard")
+  letBindNames_ names $ DoLoop [] merge loopform loop_body
 
 transformSOAC pat (Stream w form lam arrs) =
   sequentialStreamWholeArray pat w nes lam arrs
@@ -258,7 +252,7 @@ transformLambda :: (MonadFreshNames m,
                     Bindable lore, BinderOps lore,
                     LocalScope somelore m,
                     SameScope somelore lore,
-                    LetAttr SOACS ~ LetAttr lore,
+                    LetAttr lore ~ LetAttr SOACS,
                     CanBeAliased (Op lore)) =>
                    Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda params body rettype) = do
@@ -266,36 +260,6 @@ transformLambda (Lambda params body rettype) = do
            localScope (scopeOfLParams params) $
            transformBody body
   return $ Lambda params body' rettype
-
-newFold :: Transformer m =>
-           String -> [(SubExp,Type)] -> [VName]
-        -> m ([Ident], [SubExp], [Ident])
-newFold what accexps_and_types arrexps = do
-  initacc <- mapM copyIfArray acc_exps
-  acc <- mapM (newIdent "acc") acc_types
-  arrts <- mapM lookupType arrexps
-  inarrs <- mapM (newIdent $ what ++ "_inarr") arrts
-  return (acc, initacc, inarrs)
-  where (acc_exps, acc_types) = unzip accexps_and_types
-
-copyIfArray :: Transformer m =>
-               SubExp -> m SubExp
-copyIfArray (Constant v) = return $ Constant v
-copyIfArray (Var v) = Var <$> copyIfArrayName v
-
-copyIfArrayName :: Transformer m =>
-                   VName -> m VName
-copyIfArrayName v = do
-  t <- lookupType v
-  case t of
-   Array {} -> letExp (baseString v ++ "_first_order_copy") $ BasicOp $ Copy v
-   _        -> return v
-
-index :: (HasScope lore m, Monad m) =>
-         [VName] -> SubExp -> m [AST.Exp lore]
-index arrs i = forM arrs $ \arr -> do
-  arr_t <- lookupType arr
-  return $ BasicOp $ Index arr $ fullSlice arr_t [DimFix i]
 
 resultArray :: Transformer m => [Type] -> m [VName]
 resultArray = mapM oneArray
@@ -331,64 +295,3 @@ loopMerge vars = loopMerge' $ zip vars $ repeat Unique
 loopMerge' :: [(Ident,Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
 loopMerge' vars vals = [ (Param pname $ toDecl ptype u, val)
                        | ((Ident pname ptype, u),val) <- zip vars vals ]
-
-discardPattern :: (MonadFreshNames m, LetAttr (Lore m) ~ LetAttr SOACS) =>
-                  [Type] -> AST.Pattern (Lore m) -> m (AST.Pattern (Lore m))
-discardPattern discard pat = do
-  discard_pat <- basicPattern [] <$> mapM (newIdent "discard") discard
-  return $ discard_pat <> pat
-
--- | Turn a Haskell-style mapAccumL into a sequential do-loop.  This
--- is the guts of transforming a 'Redomap'.
-doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m,
-                    Bindable (Lore m), BinderOps (Lore m),
-                    LetAttr (Lore m) ~ Type,
-                    CanBeAliased (Op (Lore m))) =>
-                   SubExp
-                -> AST.Lambda (Aliases (Lore m))
-                -> [SubExp]
-                -> [VName]
-                -> [VName]
-                -> m (AST.Exp (Lore m))
-doLoopMapAccumL width innerfun accexps arrexps mapout_arrs = do
-  (merge, i, loopbody) <-
-    doLoopMapAccumL' width innerfun accexps arrexps mapout_arrs
-  return $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
-
-doLoopMapAccumL' :: (LocalScope (Lore m) m, MonadBinder m,
-                     Bindable (Lore m), BinderOps (Lore m),
-                    LetAttr (Lore m) ~ Type,
-                    CanBeAliased (Op (Lore m))) =>
-                   SubExp
-                -> AST.Lambda (Aliases (Lore m))
-                -> [SubExp]
-                -> [VName]
-                -> [VName]
-                -> m ([(AST.FParam (Lore m), SubExp)], VName, AST.Body (Lore m))
-doLoopMapAccumL' width innerfun accexps arrexps mapout_arrs = do
-  i <- newVName "i"
-  -- for the MAP    part
-  let acc_num     = length accexps
-  let res_tps     = lambdaReturnType innerfun
-  let map_arr_tps = drop acc_num res_tps
-  let res_ts = [ arrayOf t (Shape [width]) NoUniqueness
-               | t <- map_arr_tps ]
-  let accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
-  outarrs <- mapM (newIdent "mapaccum_outarr") res_ts
-  -- for the REDUCE part
-  (acc, initacc, inarrs) <- newFold "mapaccum" (zip accexps accts) arrexps
-  let consumed = consumedInBody $ lambdaBody innerfun
-      withUniqueness p | identName p `S.member` consumed = (p, Unique)
-                       | p `elem` outarrs = (p, Unique)
-                       | otherwise = (p, Nonunique)
-      merge = loopMerge' (map withUniqueness $ inarrs++acc++outarrs)
-              (map Var arrexps++initacc++map Var mapout_arrs)
-  loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
-    accxis<- bindLambda (removeLambdaAliases innerfun) .
-             (map (BasicOp . SubExp . Var . identName) acc ++) =<<
-              index (map identName inarrs) (Var i)
-    let (acc', xis) = splitAt acc_num accxis
-    dests <- letwith (map identName outarrs) (pexp (Var i)) $
-             map (BasicOp . SubExp) xis
-    return $ resultBody (map (Var . identName) inarrs ++ acc' ++ map Var dests)
-  return (merge, i, loopbody)
