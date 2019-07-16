@@ -277,7 +277,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
           case already of
             Just prev_loc ->
               lift $ throwError $ TypeError loc $
-              "Name " ++ pretty v ++ " also bound at " ++ locStr prev_loc
+              "Name " ++ quote (pretty v) ++ " also bound at " ++ locStr prev_loc
             Nothing ->
               modify $ M.insert v loc
 
@@ -341,7 +341,8 @@ checkTypeParams ps m =
           case seen of
             Just prev ->
               throwError $ TypeError loc $
-              "Type parameter " ++ pretty v ++ " previously defined at " ++ locStr prev
+              "Type parameter " ++ quote (pretty v) ++
+              " previously defined at " ++ locStr prev ++ "."
             Nothing -> do
               modify $ M.insert (ns,v) loc
               lift $ checkName ns v loc
