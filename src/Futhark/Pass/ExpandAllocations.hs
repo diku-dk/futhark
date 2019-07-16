@@ -494,6 +494,7 @@ unAllocKernelsStms = unAllocStms False
 
     unAllocOp Alloc{} = Left "unAllocOp: unhandled Alloc"
     unAllocOp (Inner OtherOp{}) = Left "unAllocOp: unhandled OtherOp"
+    unAllocOp (Inner Husk{}) = Left "unAllocOp: unhandled Husk"
     unAllocOp (Inner (SplitSpace o w i elems_per_thread)) =
       return $ SplitSpace o w i elems_per_thread
     unAllocOp (Inner (GetSize name sclass)) =
