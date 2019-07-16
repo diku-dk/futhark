@@ -48,6 +48,12 @@ optimiseStm (Let pat _ (Op (OtherOp soac))) = do
   stms <- runBinder_ $ FOT.transformSOAC pat soac
   fmap concat $ localScope (scopeOf stms) $ mapM optimiseStm $ stmsToList stms
 
+optimiseStm (Let pat aux (Op (Husk space lam nes ts body))) =
+  localScope (scopeOfHuskSpace space) $
+  pure <$> (Let pat aux . Op <$>
+            (Husk space <$> optimiseLambda lam <*>
+             pure nes <*> pure ts <*> optimiseBody body))
+
 optimiseStm (Let pat aux (Op (SegOp op))) =
   localScope (scopeOfSegSpace $ segSpace op) $
   pure <$> (Let pat aux . Op . SegOp <$> mapSegOpM optimise op)
