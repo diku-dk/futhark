@@ -507,7 +507,7 @@ removeUnusedHuskInputs _ _ _ _ = cannotSimplify
 
 mergeRedundantPartitions :: TopDownRuleOp (Wise Kernels)
 mergeRedundantPartitions _ pat _ (Husk hspace red_op nes ts body)
-  | groups <- groupBy isSame $ zip3 src parts parts_mem,
+  | groups <- groupBy (cmpSrc (==)) $ sortBy (cmpSrc compare) $ zip3 src parts parts_mem,
     any (\g -> length g > 1) groups =
       let substs = M.fromList $ concatMap (\(x:xs) -> map (`zipPartNames` x) xs) groups
           body' = substituteNames substs body
@@ -519,7 +519,7 @@ mergeRedundantPartitions _ pat _ (Husk hspace red_op nes ts body)
           }
       in letBind_ pat $ Op $ Husk hspace' red_op nes ts body'
   where HuskSpace src _ parts _ _ parts_mem = hspace
-        isSame (s1,_,_) (s2,_,_) = s1 == s2
+        cmpSrc op (s1,_,_) (s2,_,_) = s1 `op` s2
         zipPartNames (_,p1,_) (_,p2,_) = (paramName p1, paramName p2)
 mergeRedundantPartitions _ _ _ _ = cannotSimplify
 
