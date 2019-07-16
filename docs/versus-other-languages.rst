@@ -101,6 +101,14 @@ with its desired type, such as ``1i8`` for an eight-bit signed
 integer.  Un-adorned numerals have their type inferred based on use.
 This only works for built-in numeric types.
 
+Arrays are a built-in type.  The type of an array containing elements
+of type ``t`` is written ``[]t`` (not ``[t]`` as in Haskell), and we
+may optionally annotate it with a size as ``[n]t`` (see `Shape
+Declarations`).  Array values are written as ``[1,2,3]``.  Array
+indexing is written ``a[i]`` with *no* space allowed between the array
+name and the brace.  Indexing of multi-dimensional arrays is written
+``a[i,j]``.  Arrays are 0-indexed.
+
 All types can be combined in tuples as usual, as well as in
 *structurally typed records*, as in Standard ML.  Non-recursive sum
 types are supported, and are also structurally typed.  Abstract types
@@ -112,13 +120,15 @@ special case of records, where all the fields have a 1-indexed numeric
 label.  For example, ``(i32, bool)`` is the same as ``{1: i32, 2:
 bool}``, and can be indexed as ``foo.1``.
 
-Arrays are a built-in type.  The type of an array containing elements
-of type ``t`` is written ``[]t`` (not ``[t]`` as in Haskell), and we
-may optionally annotate it with a size as ``[n]t`` (see `Shape
-Declarations`).  Array values are written as ``[1,2,3]``.  Array
-indexing is written ``a[i]`` with *no* space allowed between the array
-name and the brace.  Indexing of multi-dimensional arrays is written
-``a[i,j]``.  Arrays are 0-indexed.
+Sum types are defined as constructors separated by a vertical bar
+(``|``).  Constructor names always start with a ``#``.  For example,
+``#red | #blue i32`` is a sum type with the constructors ``#red`` and
+``#blue``, where the latter has an ``i32`` as payload.  The terms
+``#red`` and ``#blue 2`` produce values of this type.  Constructor
+applications must always be fully saturated.  Due to the structural
+typing, type annotations are usually necessary to resolve ambiguities.
+For example, the term ``#blue 2`` can produce a value of *any type*
+that has an appropriate constructor.
 
 Function types are supported with the usual ``a -> b``, and functions can be
 passed as arguments to other functions.  However, there are some
@@ -135,12 +145,13 @@ Function types interact with type parameters in a subtle way::
 
   let id 't (x: t) = x
 
-This declaration defines a function ``id`` that has a type parameter ``t``.
-Here, ``t`` is an *unlifted* type parameter, which is guaranteed never to
-be a function type, and so in the body of the function we could choose to put parameter values of type ``t``
-in an array.  However, it means that this identity
-function cannot be called on a functional value.  Instead, we probably
-want a *lifted* type parameter::
+This declaration defines a function ``id`` that has a type parameter
+``t``.  Here, ``t`` is an *unlifted* type parameter, which is
+guaranteed never to be a function type, and so in the body of the
+function we could choose to put parameter values of type ``t`` in an
+array.  However, it means that this identity function cannot be called
+on a functional value.  Instead, we probably want a *lifted* type
+parameter::
 
   let id '^t (x: t) = x
 
@@ -164,6 +175,15 @@ Type parameters are supported as well::
 
 As with everything else, they are structurally typed, so the types
 ``pair i32 bool`` and ``(i32, bool)`` are entirely interchangeable.
+Most unusually, this is also the case for sum types.  The following
+two types are entirely interchangeable::
+
+  type maybe 'a = #just a | #nothing
+
+  type option 'a = #nothing | #just a
+
+Only for abstract types, where the definition has been hidden via the
+module system, do type names have any significance.
 
 Size parameters can also be passed::
 
