@@ -321,7 +321,7 @@ zeroOrderType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
 zeroOrderType usage desc t = do
   unless (orderZero t) $
     typeError usage $ "Type " ++ desc ++
-    " must not be functional, but is " ++ pretty t ++ "."
+    " must not be functional, but is " ++ quote (pretty t) ++ "."
   mapM_ mustBeZeroOrder . S.toList . typeVars $ t
   where mustBeZeroOrder vn = do
           constraints <- getConstraints
@@ -330,12 +330,12 @@ zeroOrderType usage desc t = do
               | not $ orderZero t ->
                 typeError usage $ "Type " ++ desc ++
                 " must be non-function, but inferred to be " ++
-                pretty vn_t ++ " due to " ++ show old_usage ++ "."
+                quote (pretty vn_t) ++ " due to " ++ show old_usage ++ "."
             Just (NoConstraint _ _) ->
               modifyConstraints $ M.insert vn (NoConstraint (Just Unlifted) usage)
             Just (ParamType Lifted ploc) ->
               typeError usage $ "Type " ++ desc ++
-              " must be non-function, but type parameter " ++ prettyName vn ++ " at " ++
+              " must be non-function, but type parameter " ++ quote (prettyName vn) ++ " at " ++
               locStr ploc ++ " may be a function."
             _ -> return ()
 
@@ -392,8 +392,8 @@ mustHaveField usage l t = do
           return t'
       | otherwise ->
           typeError usage $
-          "Attempt to access field '" ++ pretty l ++ "' of value of type " ++
-          pretty (toStructural t) ++ "."
+          "Attempt to access field " ++ quote (pretty l) ++ "` of value of type " ++
+          quote (pretty (toStructural t)) ++ "."
     _ -> do unify usage (toStructural t) $ Record $ M.singleton l l_type'
             return l_type
 
