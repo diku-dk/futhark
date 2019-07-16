@@ -223,7 +223,7 @@ huskedOp :: (MonadFreshNames m, HasScope Kernels m) =>
           -> [VName]
           -> (Pattern Kernels -> SubExp -> [VName] -> Binder Kernels (Stms Kernels))
           -> m (Stms Kernels)
-huskedOp pat w ret_ts red_lam_fot nes arrs red = runBinder_ $ do
+huskedOp pat w ret_ts red_lam_fot nes arrs red = do
   red_lam_fot' <- renameLambda red_lam_fot
   hspace@(HuskSpace _ _ parts parts_elems _ _) <- constructHuskSpace arrs w
   let hscope = scopeOfHuskSpace hspace
@@ -234,8 +234,8 @@ huskedOp pat w ret_ts red_lam_fot nes arrs red = runBinder_ $ do
   let (red_ts, map_ts) = splitAt (length nes) $ map patElemAttr pes
       body_pat_ts = red_ts ++ map (`setOuterSize` Var parts_elems) map_ts
       body_pat = Pattern pcs $ zipWith PatElem node_res body_pat_ts
-  body_stms <- localScope hscope $ red body_pat parts_elems_v parts_names
-  letBind_ pat $ Op $ Husk hspace red_lam_fot' nes ret_ts $ mkBody body_stms $ map Var node_res
+  (body_stms, init_stms) <- runBinder $ localScope hscope $ red body_pat parts_elems_v parts_names
+  runBinder_ $ letBind_ pat $ Op $ Husk hspace red_lam_fot' nes ret_ts $ mkBody (init_stms <> body_stms) $ map Var node_res
 
 huskedNonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
                    Pattern Kernels
@@ -252,7 +252,7 @@ huskedNonSegRed pat w comm red_lam_seq red_lam_fot map_lam nes arrs =
       ret_ts = red_ts ++ map (`arrayOfShape` Shape [w]) map_ts
   in huskedOp pat w ret_ts red_lam_fot nes arrs $
       \pat' w' arrs' -> do
-        lvl <- segThreadCapped [w] "segred" $ NoRecommendation SegNoVirt
+        lvl <- segThreadCapped [w'] "segred" $ NoRecommendation SegNoVirt
         nonSegRed lvl pat' w' [SegRedOp comm red_lam_seq nes mempty] map_lam arrs'
 
 nonSegRed :: (MonadFreshNames m, HasScope Kernels m) =>
