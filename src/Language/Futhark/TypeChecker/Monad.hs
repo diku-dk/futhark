@@ -111,13 +111,14 @@ unknownVariableError :: MonadTypeChecker m =>
                         Namespace -> QualName Name -> SrcLoc -> m a
 unknownVariableError space name loc =
   throwError $ TypeError loc $
-  "Unknown " ++ ppSpace space ++ " " ++ pretty name
+  "Unknown " ++ ppSpace space ++ " " ++ quote (pretty name)
 
 underscoreUse :: MonadTypeChecker m =>
                  SrcLoc -> QualName Name -> m a
 underscoreUse loc name =
   throwError $ TypeError loc $
-  "Use of " ++ pretty name ++ ": variables prefixed with underscore must not be accessed."
+  "Use of " ++ quote (pretty name) ++
+  ": variables prefixed with underscore may not be accessed."
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -185,16 +186,16 @@ class Monad m => MonadBreadCrumbs m where
   getBreadCrumbs :: m [BreadCrumb]
   getBreadCrumbs = return []
 
-typeError :: (MonadError TypeError m, MonadBreadCrumbs m) =>
-             SrcLoc -> String -> m a
+typeError :: (Located loc, MonadError TypeError m, MonadBreadCrumbs m) =>
+             loc -> String -> m a
 typeError loc s = do
   bc <- getBreadCrumbs
   let bc' | null bc = ""
           | otherwise = "\n" ++ unlines (map show bc)
-  throwError $ TypeError loc $ s ++ bc'
+  throwError $ TypeError (srclocOf loc) $ s ++ bc'
 
 class MonadError TypeError m => MonadTypeChecker m where
-  warn :: SrcLoc -> String -> m ()
+  warn :: Located loc => loc -> String -> m ()
 
   newName :: VName -> m VName
   newID :: Name -> m VName
@@ -229,7 +230,7 @@ bindSpaced names body = do
   bindNameMap mapping body
 
 instance MonadTypeChecker TypeM where
-  warn loc problem = tell $ singleWarning loc problem
+  warn loc problem = tell $ singleWarning (srclocOf loc) problem
 
   newName s = do src <- get
                  let (s', src') = Futhark.FreshNames.newName src s
