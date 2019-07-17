@@ -695,6 +695,7 @@ huskedStreamMapWithReduce :: KernelPath -> StmAux () -> Out.Pattern SOACS -> Sub
                           -> [SubExp] -> [VName]
                           -> DistribM KernelsStms
 huskedStreamMapWithReduce path aux pat w comm fold_lam red_lam red_lam_fot nes arrs = inHusk $ do
+  red_lam_fot' <- renameLambda red_lam_fot
   hspace@(HuskSpace _ _ parts parts_elems _ _) <- constructHuskSpace arrs w
   let (red_ts, map_ts) = splitAt (length nes) $ lambdaReturnType fold_lam
       ret_ts = red_ts ++ map (`setOuterSize` w) map_ts
@@ -707,7 +708,7 @@ huskedStreamMapWithReduce path aux pat w comm fold_lam red_lam red_lam_fot nes a
       body_pat = Pattern pcs $ zipWith PatElem node_res body_pat_ts
   body_stms <- localScope (scopeOfHuskSpace hspace) $
     streamMapWithReduce path aux body_pat parts_elems_v comm fold_lam red_lam nes parts_names
-  runBinder_ $ letBind_ pat $ Op $ Husk hspace red_lam_fot nes ret_ts $ mkBody body_stms $ map Var node_res
+  runBinder_ $ letBind_ pat $ Op $ Husk hspace red_lam_fot' nes ret_ts $ mkBody body_stms $ map Var node_res
 
 streamMapWithReduce :: KernelPath -> StmAux () -> Out.Pattern SOACS -> SubExp
                     -> Commutativity -> Out.Lambda Out.Kernels -> Out.Lambda SOACS -> [SubExp] -> [VName]
