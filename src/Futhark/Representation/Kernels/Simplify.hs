@@ -258,7 +258,8 @@ kernelRules = standardRules <>
                        , RuleOp redomapIotaToLoop
                        , RuleOp fuseHuskIota
                        , RuleOp removeUnusedHuskInputs
-                       , RuleOp mergeRedundantPartitions]
+                       , RuleOp mergeRedundantPartitions
+                       , RuleOp internalizeFullyCopiedPartitions]
                        [ RuleOp distributeKernelResults
                        , RuleBasicOp removeUnnecessaryCopy]
 
@@ -328,6 +329,25 @@ mergeRedundantPartitions _ pat _ (Husk hspace red_op nes ts body)
         cmpSrc op (s1,_,_) (s2,_,_) = s1 `op` s2
         zipPartNames (_,p1,_) (_,p2,_) = (paramName p1, paramName p2)
 mergeRedundantPartitions _ _ _ _ = cannotSimplify
+
+internalizeFullyCopiedPartitions :: TopDownRuleOp (Wise Kernels)
+internalizeFullyCopiedPartitions _ pat _ (Husk hspace red_op nes ts body)
+  | (src_used,src_unused) <- partition isUsedSrc $ zip3 src parts parts_mem,
+    not $ null src_used = do
+      let (src', parts', parts_mem') = unzip3 src_unused
+          hspace' = hspace {
+            hspaceSource = src',
+            hspacePartitions = parts',
+            hspacePartitionsMemory = parts_mem'
+          }
+      slices <- stmsFromList <$> mapM sliceSrcStm src_used
+      letBind_ pat $ Op $ Husk hspace' red_op nes ts $ insertStms slices body
+  where HuskSpace src _ parts parts_elems parts_offset parts_mem = hspace
+        isUsedSrc (s,_,_) = s `S.member` freeIn body
+        sliceSrcStm (s,p,_) = do
+          slice <- eSliceArray 0 s (toExp parts_offset) (toExp parts_elems)
+          mkLetNamesM [paramName p] slice
+internalizeFullyCopiedPartitions _ _ _ _ = cannotSimplify
 
 -- If a kernel produces something invariant to the kernel, turn it
 -- into a replicate.
