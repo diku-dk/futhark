@@ -1,8 +1,8 @@
 language: minimal
-sudo: false
 dist: trusty
 git:
   submodules: false
+  depth: 5
 cache:
   directories:
   - "$HOME/.stack"
@@ -37,7 +37,7 @@ jobs:
   - stage: compiler
     env: BUILD=stack STACK_YAML=stack.yaml
     script: &2
-    - travis_wait 30 stack --no-terminal test -j 1
+    - stack --no-terminal test -j 3
   - stage: compiler
     env: BUILD=stack STACK_YAML=stack-lts-12.11.yaml
     script: *2
@@ -50,7 +50,7 @@ jobs:
     env: BUILD=stack STACK_YAML=stack.yaml
     script:
     - stack install
-    - futhark test --no-terminal tests examples
+    - futhark test --no-terminal tests examples --no-tuning
     - "(cd pkgtests; ./test.sh)"
   - stage: deploy
     env: BUILD=stack STACK_YAML=stack.yaml

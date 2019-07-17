@@ -142,7 +142,6 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument "FILE"
                       , optionAction = [C.cstm|{
-                          char *fname = optarg;
                           char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
                                                                     futhark_context_config_set_size);
                           if (ret != NULL) {
@@ -167,7 +166,7 @@ writeOpenCLScalar mem i t "device" _ val = do
   GC.stm [C.cstm|{$item:decl
                   OPENCL_SUCCEED_OR_RETURN(
                     clEnqueueWriteBuffer(ctx->opencl.queue, $exp:mem, $exp:blocking,
-                                         $exp:i, sizeof($ty:t),
+                                         $exp:i * sizeof($ty:t), sizeof($ty:t),
                                          &$id:val',
                                          0, NULL, NULL));
                 }|]
@@ -180,7 +179,7 @@ readOpenCLScalar mem i t "device" _ = do
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(
                    clEnqueueReadBuffer(ctx->opencl.queue, $exp:mem, CL_TRUE,
-                                       $exp:i, sizeof($ty:t),
+                                       $exp:i * sizeof($ty:t), sizeof($ty:t),
                                        &$id:val,
                                        0, NULL, NULL));
               |]
@@ -342,7 +341,7 @@ callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
           |]
 
         setKernelArg i (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp $ innerExp num_bytes
+          num_bytes' <- GC.compileExp $ unCount num_bytes
           GC.stm [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, $exp:num_bytes', NULL));
             |]

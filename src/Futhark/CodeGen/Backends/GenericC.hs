@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, FlexibleInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
@@ -162,13 +162,13 @@ type PointerQuals op s = String -> CompilerM op s [C.TypeQual]
 -- | The type of a memory block in the given memory space.
 type MemoryType op s = SpaceId -> CompilerM op s C.Type
 
--- | Write a scalar to the given memory block with the given index and
--- in the given memory space.
+-- | Write a scalar to the given memory block with the given element
+-- index and in the given memory space.
 type WriteScalar op s =
   C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> C.Exp -> CompilerM op s ()
 
--- | Read a scalar from the given memory block with the given index and
--- in the given memory space.
+-- | Read a scalar from the given memory block with the given element
+-- index and in the given memory space.
 type ReadScalar op s =
   C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> CompilerM op s C.Exp
 
@@ -1638,7 +1638,7 @@ dimSizeToExp (VarSize v)   = [C.cexp|$exp:v|]
 
 derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
-  [C.cexp|*(($ty:res_t)&($exp:ptr[$exp:i]))|]
+  [C.cexp|(($ty:res_t)$exp:ptr)[$exp:i]|]
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do

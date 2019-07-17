@@ -48,15 +48,13 @@ module Futhark.Representation.AST.Syntax
   , Lambda
 
   -- * Definitions
-  , ParamT (..)
+  , Param (..)
   , FParam
   , LParam
-  , FunDefT (..)
-  , FunDef
+  , FunDef (..)
   , EntryPoint
   , EntryPointType(..)
-  , ProgT(..)
-  , Prog
+  , Prog(..)
 
   -- * Utils
   , oneStm
@@ -337,23 +335,23 @@ deriving instance Annotations lore => Ord (LambdaT lore)
 -- | Type alias for namespacing reasons.
 type Lambda = LambdaT
 
-type FParam lore = ParamT (FParamAttr lore)
+type FParam lore = Param (FParamAttr lore)
 
-type LParam lore = ParamT (LParamAttr lore)
+type LParam lore = Param (LParamAttr lore)
 
 -- | Function Declarations
-data FunDefT lore = FunDef { funDefEntryPoint :: Maybe EntryPoint
-                             -- ^ Contains a value if this function is
-                             -- an entry point.
-                           , funDefName :: Name
-                           , funDefRetType :: [RetType lore]
-                           , funDefParams :: [FParam lore]
-                           , funDefBody :: BodyT lore
-                           }
+data FunDef lore = FunDef { funDefEntryPoint :: Maybe EntryPoint
+                            -- ^ Contains a value if this function is
+                            -- an entry point.
+                          , funDefName :: Name
+                          , funDefRetType :: [RetType lore]
+                          , funDefParams :: [FParam lore]
+                          , funDefBody :: BodyT lore
+                          }
 
-deriving instance Annotations lore => Eq (FunDefT lore)
-deriving instance Annotations lore => Show (FunDefT lore)
-deriving instance Annotations lore => Ord (FunDefT lore)
+deriving instance Annotations lore => Eq (FunDef lore)
+deriving instance Annotations lore => Show (FunDef lore)
+deriving instance Annotations lore => Ord (FunDef lore)
 
 -- | Information about the parameters and return value of an entry
 -- point.  The first element is for parameters, the second for return
@@ -373,12 +371,6 @@ data EntryPointType = TypeUnsigned
                       -- ^ Maps directly.
                     deriving (Eq, Show, Ord)
 
--- | Type alias for namespace reasons.
-type FunDef = FunDefT
-
 -- | An entire Futhark program.
-newtype ProgT lore = Prog { progFunctions :: [FunDef lore] }
-                     deriving (Eq, Ord, Show)
-
--- | Type alias for namespace reasons.
-type Prog = ProgT
+newtype Prog lore = Prog { progFunctions :: [FunDef lore] }
+                    deriving (Eq, Ord, Show)

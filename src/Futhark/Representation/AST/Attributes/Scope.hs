@@ -4,7 +4,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE StandaloneDeriving #-}
 -- | This module defines the concept of a type environment as a
@@ -169,12 +168,12 @@ scopeOfPatElem :: LetAttr lore ~ attr => PatElemT attr -> Scope lore
 scopeOfPatElem (PatElem name attr) = M.singleton name $ LetInfo attr
 
 scopeOfLParams :: LParamAttr lore ~ attr =>
-                  [ParamT attr] -> Scope lore
+                  [Param attr] -> Scope lore
 scopeOfLParams = M.fromList . map f
   where f param = (paramName param, LParamInfo $ paramAttr param)
 
 scopeOfFParams :: FParamAttr lore ~ attr =>
-                  [ParamT attr] -> Scope lore
+                  [Param attr] -> Scope lore
 scopeOfFParams = M.fromList . map f
   where f param = (paramName param, FParamInfo $ paramAttr param)
 

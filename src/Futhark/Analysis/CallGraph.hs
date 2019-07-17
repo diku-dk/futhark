@@ -14,9 +14,9 @@ import Data.List
 
 import Futhark.Representation.SOACS
 
-type FunctionTable = M.Map Name FunDef
+type FunctionTable = M.Map Name (FunDef SOACS)
 
-buildFunctionTable :: Prog -> FunctionTable
+buildFunctionTable :: Prog SOACS -> FunctionTable
 buildFunctionTable = foldl expand M.empty . progFunctions
   where expand ftab f = M.insert (funDefName f) f ftab
 
@@ -27,7 +27,7 @@ type CallGraph = M.Map Name (S.Set Name)
 
 -- | @buildCallGraph prog@ build the program's Call Graph. The representation
 -- is a hashtable that maps function names to a list of callee names.
-buildCallGraph :: Prog -> CallGraph
+buildCallGraph :: Prog SOACS -> CallGraph
 buildCallGraph prog = foldl' (buildCGfun ftable) M.empty entry_points
   where entry_points = map funDefName $ filter (isJust . funDefEntryPoint) $ progFunctions prog
         ftable = buildFunctionTable prog

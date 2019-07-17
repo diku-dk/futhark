@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase, FlexibleInstances, MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TupleSections #-}
@@ -82,7 +82,7 @@ module Futhark.CodeGen.ImpGen
   , sIf, sWhen, sUnless
   , sOp
   , sDeclareNamedMem, sDeclareMem, sAllocNamed, sAlloc, sAlloc_
-  , sArray, sAllocArray, sAllocNamedArray, sStaticArray
+  , sArray, sAllocArray, sAllocArrayPerm, sAllocNamedArray, sStaticArray
   , sWrite, sUpdate
   , sLoopNest
   , (<--)
@@ -105,7 +105,7 @@ import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
   (Count (..),
    Bytes, Elements,
-   bytes, withElemType)
+   bytes, elements, withElemType)
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
@@ -126,11 +126,11 @@ type ExpCompiler lore op = Pattern lore -> Exp lore -> ImpM lore op ()
 type CopyCompiler lore op = PrimType
                            -> MemLocation
                            -> MemLocation
-                           -> Count Elements -- ^ Number of row elements of the source.
+                           -> Count Elements Imp.Exp -- ^ Number of row elements of the source.
                            -> ImpM lore op ()
 
 -- | An alternate way of compiling an allocation.
-type AllocCompiler lore op = VName -> Count Bytes -> ImpM lore op ()
+type AllocCompiler lore op = VName -> Count Bytes Imp.Exp -> ImpM lore op ()
 
 data Operations lore op = Operations { opsExpCompiler :: ExpCompiler lore op
                                      , opsOpCompiler :: OpCompiler lore op
@@ -271,11 +271,11 @@ runImpM :: ImpM lore op a
         -> Either InternalError (a, State lore op, Imp.Code op)
 runImpM (ImpM m) ops space fname = runRWST m $ newEnv ops space fname
 
-subImpM_ :: Operations lore' op' -> ImpM lore' op' a
+subImpM_ :: Operations lore op' -> ImpM lore op' a
          -> ImpM lore op (Imp.Code op')
 subImpM_ ops m = snd <$> subImpM ops m
 
-subImpM :: Operations lore' op' -> ImpM lore' op' a
+subImpM :: Operations lore op' -> ImpM lore op' a
         -> ImpM lore op (a, Imp.Code op')
 subImpM ops (ImpM m) = do
   env <- ask
@@ -286,15 +286,12 @@ subImpM ops (ImpM m) = do
                      , envOpCompiler = opsOpCompiler ops
                      , envAllocCompilers = opsAllocCompilers ops
                      }
-                 s { stateVTable = M.map scrubExps $ stateVTable s
+                 s { stateVTable = stateVTable s
                    , stateFunctions = mempty } of
     Left err -> throwError err
     Right (x, s', code) -> do
       putNameSource $ stateNameSource s'
       return (x, code)
-  where scrubExps (ArrayVar _ entry) = ArrayVar Nothing entry
-        scrubExps (MemVar _ entry) = MemVar Nothing entry
-        scrubExps (ScalarVar _ entry) = ScalarVar Nothing entry
 
 -- | Execute a code generation action, returning the code that was
 -- emitted.
@@ -749,7 +746,7 @@ defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
       let srcloc = entryArrayLocation yentry
           rows = case drop i $ entryArrayShape yentry of
                   []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
-                  r:_ -> innerExp $ Imp.dimSizeToExp r
+                  r:_ -> unCount $ Imp.dimSizeToExp r
       copy (elemType $ patElemType pe) destloc srcloc $ arrayOuterSize yentry
       emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
@@ -991,17 +988,17 @@ destinationFromPattern pat = fmap (Destination (baseTag <$> maybeHead (patternNa
               return $ ScalarDestination name
 
 fullyIndexArray :: VName -> [Imp.Exp]
-                -> ImpM lore op (VName, Imp.Space, Count Bytes)
+                -> ImpM lore op (VName, Imp.Space, Count Elements Imp.Exp)
 fullyIndexArray name indices = do
   arr <- lookupArray name
-  fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
+  fullyIndexArray' (entryArrayLocation arr) indices
 
-fullyIndexArray' :: MemLocation -> [Imp.Exp] -> PrimType
-                 -> ImpM lore op (VName, Imp.Space, Count Bytes)
-fullyIndexArray' (MemLocation mem _ ixfun) indices bt = do
+fullyIndexArray' :: MemLocation -> [Imp.Exp]
+                 -> ImpM lore op (VName, Imp.Space, Count Elements Imp.Exp)
+fullyIndexArray' (MemLocation mem _ ixfun) indices = do
   space <- entryMemSpace <$> lookupMemory mem
   return (mem, space,
-          bytes $ IxFun.index ixfun indices $ primByteSize bt)
+          elements $ IxFun.index ixfun indices)
 
 sliceArray :: MemLocation
            -> Slice Imp.Exp
@@ -1024,10 +1021,10 @@ strideArray :: MemLocation
 strideArray (MemLocation mem shape ixfun) stride =
   MemLocation mem shape $ IxFun.strideIndex ixfun stride
 
-arrayOuterSize :: ArrayEntry -> Count Elements
+arrayOuterSize :: ArrayEntry -> Count Elements Imp.Exp
 arrayOuterSize = arrayDimSize 0
 
-arrayDimSize :: Int -> ArrayEntry -> Count Elements
+arrayDimSize :: Int -> ArrayEntry -> Count Elements Imp.Exp
 arrayDimSize i =
   product . map Imp.dimSizeToExp . take 1 . drop i . entryArrayShape
 
@@ -1066,16 +1063,15 @@ copyElementWise :: CopyCompiler lore op
 copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     let ivars = map Imp.vi32 is
-        destidx = IxFun.index destIxFun ivars bt_size
-        srcidx = IxFun.index srcIxFun ivars bt_size
-        bounds = map innerExp $ n : drop 1 (map Imp.dimSizeToExp srcshape)
+        destidx = IxFun.index destIxFun ivars
+        srcidx = IxFun.index srcIxFun ivars
+        bounds = map unCount $ n : drop 1 (map Imp.dimSizeToExp srcshape)
     srcspace <- entryMemSpace <$> lookupMemory srcmem
     destspace <- entryMemSpace <$> lookupMemory destmem
     vol <- asks envVolatility
     emit $ foldl (.) id (zipWith (`Imp.For` Int32) is bounds) $
-      Imp.Write destmem (bytes destidx) bt destspace vol $
-      Imp.index srcmem (bytes srcidx) bt srcspace vol
-  where bt_size = primByteSize bt
+      Imp.Write destmem (elements destidx) bt destspace vol $
+      Imp.index srcmem (elements srcidx) bt srcspace vol
 
 -- | Copy from here to there; both destination and source may be
 -- indexeded.
@@ -1089,9 +1085,9 @@ copyArrayDWIM bt
 
   | length srcis == length srcshape, length destis == length destshape = do
   (targetmem, destspace, targetoffset) <-
-    fullyIndexArray' destlocation destis bt
+    fullyIndexArray' destlocation destis
   (srcmem, srcspace, srcoffset) <-
-    fullyIndexArray' srclocation srcis bt
+    fullyIndexArray' srclocation srcis
   vol <- asks envVolatility
   return $ Imp.Write targetmem targetoffset bt destspace vol $
     Imp.index srcmem srcoffset bt srcspace vol
@@ -1134,7 +1130,7 @@ copyDWIMDest pat dest_is (Constant v) [] =
     unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
   ArrayDestination (Just dest_loc) -> do
     (dest_mem, dest_space, dest_i) <-
-      fullyIndexArray' dest_loc dest_is bt
+      fullyIndexArray' dest_loc dest_is
     vol <- asks envVolatility
     emit $ Imp.Write dest_mem dest_i bt dest_space vol $ Imp.ValueExp v
   ArrayDestination Nothing ->
@@ -1170,7 +1166,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
     (ScalarDestination name, ArrayVar _ arr) -> do
       let bt = entryArrayElemType arr
       (mem, space, i) <-
-        fullyIndexArray' (entryArrayLocation arr) src_is bt
+        fullyIndexArray' (entryArrayLocation arr) src_is
       vol <- asks envVolatility
       emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
 
@@ -1180,8 +1176,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       emit =<< copyArrayDWIM bt dest_loc dest_is src_loc src_is
 
     (ArrayDestination (Just dest_loc), ScalarVar _ (ScalarEntry bt)) -> do
-      (dest_mem, dest_space, dest_i) <-
-        fullyIndexArray' dest_loc dest_is bt
+      (dest_mem, dest_space, dest_i) <- fullyIndexArray' dest_loc dest_is
       vol <- asks envVolatility
       emit $ Imp.Write dest_mem dest_i bt dest_space vol (Imp.var src bt)
 
@@ -1233,7 +1228,7 @@ dimSizeToExp = toExp' int32 . primExpFromSubExp int32 . dimSizeToSubExp
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format.
-typeSize :: Type -> Count Bytes
+typeSize :: Type -> Count Bytes Imp.Exp
 typeSize t = Imp.bytes $ Imp.LeafExp (Imp.SizeOf $ elemType t) int32 *
              product (map (toExp' int32) (arrayDims t))
 
@@ -1281,20 +1276,20 @@ sDeclareMem name space = do
   sDeclareNamedMem name' space
   return name'
 
-sAlloc_ :: VName -> Count Bytes -> Space -> ImpM lore op ()
+sAlloc_ :: VName -> Count Bytes Imp.Exp -> Space -> ImpM lore op ()
 sAlloc_ name' size' space = do
   allocator <- asks $ M.lookup space . envAllocCompilers
   case allocator of
     Nothing -> emit $ Imp.Allocate name' size' space
     Just allocator' -> allocator' name' size'
 
-sAlloc :: String -> Count Bytes -> Space -> ImpM lore op VName
+sAlloc :: String -> Count Bytes Imp.Exp -> Space -> ImpM lore op VName
 sAlloc name size space = do
   name' <- sDeclareMem name space
   sAlloc_ name' size space
   return name'
 
-sAllocNamed :: VName -> Count Bytes -> Space -> ImpM lore op ()
+sAllocNamed :: VName -> Count Bytes Imp.Exp -> Space -> ImpM lore op ()
 sAllocNamed name size space = do
   sDeclareNamedMem name space
   sAlloc_ name size space
@@ -1305,6 +1300,7 @@ sArray name bt shape membind = do
   dArray name' bt shape membind
   return name'
 
+
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
 sAllocArray name pt shape space = do
@@ -1314,13 +1310,21 @@ sAllocArray name pt shape space = do
   sAllocNamedArray name' mname pt shape arr_bytes space
   return name'
 
--- | Uses linear/iota index function.
 sAllocNamedArray :: VName -> VName -> PrimType -> ShapeBase SubExp
-                    -> Count Bytes -> Space -> ImpM lore op ()
+                 -> Count Bytes Imp.Exp -> Space -> ImpM lore op ()
 sAllocNamedArray name mname pt shape arr_bytes space = do
   sAllocNamed mname arr_bytes space
   dArray name pt shape $
     ArrayIn mname $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
+
+-- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
+sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM lore op VName
+sAllocArrayPerm name pt shape space perm = do
+  let permuted_dims = rearrangeShape perm $ shapeDims shape
+  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
+  let iota_ixfun = IxFun.iota $ map (primExpFromSubExp int32) permuted_dims
+  sArray name pt shape $
+    ArrayIn mem $ IxFun.permute iota_ixfun $ rearrangeInverse perm
 
 -- | Uses linear/iota index function.
 sStaticArray :: String -> Space -> PrimType -> Imp.ArrayContents -> ImpM lore op VName

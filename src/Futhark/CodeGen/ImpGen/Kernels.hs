@@ -33,11 +33,11 @@ import Futhark.Util.IntegralExp (quot, IntegralExp)
 callKernelOperations :: Operations ExplicitMemory Imp.HostOp
 callKernelOperations =
   Operations { opsExpCompiler = expCompiler
-                    , opsCopyCompiler = callKernelCopy
-                    , opsOpCompiler = opCompiler
-                    , opsStmsCompiler = defCompileStms
-                    , opsAllocCompilers = mempty
-                    }
+             , opsCopyCompiler = callKernelCopy
+             , opsOpCompiler = opCompiler
+             , opsStmsCompiler = defCompileStms
+             , opsAllocCompilers = mempty
+             }
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Imp.Program)
 compileProg prog =
@@ -59,8 +59,6 @@ opCompiler (Pattern _ [pe]) (Inner (CmpSizeLe key size_class x)) = do
     =<< toExp x
 opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
-opCompiler dest (Inner (HostOp kernel)) =
-  kernelCompiler dest kernel
 opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses))) = do
   i <- newVName "i"
   interm_red <- replicateM (length node_red_res) $ newVName "interm_red"
@@ -114,6 +112,8 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
               res_size_bytes = Imp.bytes $ memSize t $ Shape res_arr_dims
               offset_bytes = Imp.bytes $ memSize t $ Shape $ map (replaceVar parts_elems parts_offset) res_arr_dims
           in Imp.NodeCopyInfo pe_mem res_size_bytes offset_bytes map_interm_mem
+opCompiler dest (Inner (SegOp op)) =
+  segOpCompiler dest op
 opCompiler pat e =
   compilerBugS $ "opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
@@ -124,46 +124,17 @@ sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
   where f (name, x) = (keyWithEntryPoint fname name, x)
 sizeClassWithEntryPoint _ size_class = size_class
 
-kernelCompiler :: Pattern ExplicitMemory -> Kernel InKernel
-               -> CallKernelGen ()
-
-kernelCompiler pat (Kernel desc space _ kernel_body) = do
-  (constants, init_constants) <- kernelInitialisationSetSpace space $ return ()
-
-  forM_ (kernelHints desc) $ \(s,v) -> do
-    ty <- case v of
-      Constant pv -> return $ Prim $ primValueType pv
-      Var vn -> lookupType vn
-    unless (primType ty) $ fail $ concat [ "debugKernelHint '", s, "'"
-                                         , " in kernel '", kernelName desc, "'"
-                                         , " did not have primType value." ]
-
-    emit $ Imp.DebugPrint s $ Just (elemType ty, toExp' (elemType ty) v)
-
-  let virt_groups = toExp' int32 (spaceNumVirtGroups space)
-  sKernel constants (kernelName desc) $ do
-    init_constants
-    virtualiseGroups constants virt_groups $ \group_id -> do
-      let flat_id =
-            if kernelGroupIdVar constants /= group_id
-            then Imp.vi32 group_id * kernelGroupSize constants + kernelLocalThreadId constants
-            else kernelGlobalThreadId constants
-      setSpaceIndices flat_id space
-      compileKernelStms constants (kernelBodyStms kernel_body) $
-        zipWithM_ (compileKernelResult constants) (patternElements pat) $
-        kernelBodyResult kernel_body
-
-kernelCompiler pat (SegMap space _ body) =
-  compileSegMap pat space body
-
-kernelCompiler pat (SegRed space comm red_op nes _ body) =
-  compileSegRed pat space comm red_op nes body
-
-kernelCompiler pat (SegScan space red_op nes _ kbody) =
-  compileSegScan pat space red_op nes kbody
-
-kernelCompiler pat (SegGenRed space ops _ body) =
-  compileSegGenRed pat space ops body
+segOpCompiler :: Pattern ExplicitMemory -> SegOp ExplicitMemory -> CallKernelGen ()
+segOpCompiler pat (SegMap lvl space _ kbody) =
+  compileSegMap pat lvl space kbody
+segOpCompiler pat (SegRed lvl@SegThread{} space reds _ kbody) =
+  compileSegRed pat lvl space reds kbody
+segOpCompiler pat (SegScan lvl@SegThread{} space scan_op nes _ kbody) =
+  compileSegScan pat lvl space scan_op nes kbody
+segOpCompiler pat (SegGenRed (SegThread num_groups group_size _) space ops _ kbody) =
+  compileSegGenRed pat num_groups group_size space ops kbody
+segOpCompiler pat segop =
+  compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
 
 expCompiler :: ExpCompiler ExplicitMemory Imp.HostOp
 

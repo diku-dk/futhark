@@ -127,7 +127,9 @@ OPTIONS
   Compile the programs, but do not run them.
 
 --exclude=tag
-  Ignore benchmarks with the specified tag.
+
+  Do not run test cases that contain the given tag.  Cases marked with
+  "disable" are ignored by default.
 
 -i
   Only interpret - do not run any compilers.
@@ -137,7 +139,8 @@ OPTIONS
 
 --futhark=program
 
-  The program used to perform operations.  Defaults to ``futhark``.
+  The program used to perform operations (eg. compilation).  Defaults
+  to the binary running ``futhark test`` itself.
 
 --no-terminal
   Print each result on a line by itself, without line buffering.
@@ -155,12 +158,12 @@ OPTIONS
 
 --runner=program
 
-  If this is set to the non-empty string, compiled programs are not
-  run directly, but instead the indicated program is run, with the
-  path to the compiled Futhark program passed as the first
-  command-line argument.  This is useful for compilation targets that
-  cannot be executed directly (like ``futhark cs``), or when you wish
-  to run the program on a remote machine.
+  If set to a non-empty string, compiled programs are not run
+  directly, but instead the indicated *program* is run with its first
+  argument being the path to the compiled Futhark program.  This is
+  useful for compilation targets that cannot be executed directly (as
+  with :ref:`futhark-csharp(1)`), or when you wish to run the program
+  on a remote machine.
 
 --tuning=EXTENSION
 
@@ -205,7 +208,7 @@ tested::
 
   entry sub1 (x: i32): i32 = add x (-1)
 
-The following program containts an entry point that is tested with
+The following program contains an entry point that is tested with
 randomly generated data::
 
   -- ==

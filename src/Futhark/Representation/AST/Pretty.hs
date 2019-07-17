@@ -31,7 +31,7 @@ class PrettyAnnot a where
 instance PrettyAnnot (PatElemT (TypeBase shape u)) where
   ppAnnot = const Nothing
 
-instance PrettyAnnot (ParamT (TypeBase shape u)) where
+instance PrettyAnnot (Param (TypeBase shape u)) where
   ppAnnot = const Nothing
 
 instance PrettyAnnot () where
@@ -41,8 +41,8 @@ instance PrettyAnnot () where
 class (Annotations lore,
        Pretty (RetType lore),
        Pretty (BranchType lore),
-       Pretty (ParamT (FParamAttr lore)),
-       Pretty (ParamT (LParamAttr lore)),
+       Pretty (Param (FParamAttr lore)),
+       Pretty (Param (LParamAttr lore)),
        Pretty (PatElemT (LetAttr lore)),
        PrettyAnnot (PatElem lore),
        PrettyAnnot (FParam lore),
@@ -137,15 +137,15 @@ instance Pretty (PatElemT b) => Pretty (PatElemT (a,b)) where
 instance Pretty (PatElemT Type) where
   ppr (PatElem name t) = ppr t <+> ppr name
 
-instance Pretty (ParamT b) => Pretty (ParamT (a,b)) where
+instance Pretty (Param b) => Pretty (Param (a,b)) where
   ppr = ppr . fmap snd
 
-instance Pretty (ParamT DeclType) where
+instance Pretty (Param DeclType) where
   ppr (Param name t) =
     ppr t <+>
     ppr name
 
-instance Pretty (ParamT Type) where
+instance Pretty (Param Type) where
   ppr (Param name t) =
     ppr t <+>
     ppr name

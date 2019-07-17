@@ -1,4 +1,4 @@
-module Futhark.CodeGen.OpenCL.Kernels
+module Futhark.CodeGen.OpenCL.Heuristics
        ( SizeHeuristic (..)
        , DeviceType (..)
        , WhichSize (..)
@@ -42,7 +42,7 @@ data SizeHeuristic =
 sizeHeuristicsTable :: [SizeHeuristic]
 sizeHeuristicsTable =
   [ SizeHeuristic "NVIDIA CUDA" DeviceGPU LockstepWidth $ HeuristicConst 32
-  , SizeHeuristic "AMD Accelerated Parallel Processing" DeviceGPU LockstepWidth $ HeuristicConst 64
+  , SizeHeuristic "AMD Accelerated Parallel Processing" DeviceGPU LockstepWidth $ HeuristicConst 32
   , SizeHeuristic "" DeviceGPU LockstepWidth $ HeuristicConst 1
   , SizeHeuristic "" DeviceGPU NumGroups $ HeuristicConst 256
   , SizeHeuristic "" DeviceGPU GroupSize $ HeuristicConst 256

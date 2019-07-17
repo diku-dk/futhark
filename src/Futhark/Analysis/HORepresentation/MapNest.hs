@@ -73,7 +73,7 @@ fromSOAC' :: (Bindable lore, MonadFreshNames m,
           -> SOAC lore
           -> m (Maybe (MapNest lore))
 
-fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm (_, []) (_, _, []) lam) inps) = do
+fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm (_, []) [] lam) inps) = do
   maybenest <- case (stmsToList $ bodyStms $ lambdaBody lam,
                      bodyResult $ lambdaBody lam) of
     ([Let pat _ e], res) | res == map Var (patternNames pat) ->

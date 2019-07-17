@@ -123,8 +123,9 @@ instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim) where
     | otherwise =
         braces (commasep $ map ppField $ M.toList fs)
     where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
-  ppr (ArrayEnumElem cs) =
-    cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
+  ppr (ArraySumElem cs) =
+    cat $ punctuate (text " | ") $ map ppConstr $ M.toList cs
+    where ppConstr (name, fs) = text "#" <> ppr name <+> sep (map ppr fs)
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr = pprPrec 0
@@ -143,8 +144,9 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
     parens (pprName v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
   pprPrec p (Arrow _ Nothing t1 t2) =
     parensIf (p > 0) $ pprPrec 1 t1 <+> text "->" <+> ppr t2
-  pprPrec _ (Enum cs) =
-    cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
+  pprPrec _ (SumT cs) =
+    cat $ punctuate (text " | ") $ map ppConstr $ M.toList cs
+    where ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map ppr fs
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
@@ -161,8 +163,9 @@ instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
   ppr (TEArrow (Just v) t1 t2 _) = parens v' <+> text "->" <+> ppr t2
     where v' = pprName v <> colon <+> ppr t1
   ppr (TEArrow Nothing t1 t2 _) = ppr t1 <+> text "->" <+> ppr t2
-  ppr (TEEnum cs _) =
-    cat $ punctuate (text " | ") $ map ((text "#" <>) . ppr) cs
+  ppr (TESum cs _) =
+    cat $ punctuate (text " | ") $ map ppConstr cs
+    where ppConstr (name, fs) = text "#" <> ppr name <+> sep (map ppr fs)
 
 instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = ppr $ ShapeDecl [d]
@@ -246,6 +249,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
                         LetPat{}    -> True
                         LetWith{}   -> True
                         If{}        -> True
+                        Match{}     -> True
                         ArrayLit{}  -> False
                         _           -> hasArrayLit e
   pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
@@ -263,16 +267,16 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     | otherwise =
       text "let" <+> ppr dest <+> equals <+> ppr src <+>
       text "with" <+> brackets (commasep (map ppr idxs)) <+>
-      text "<-" <+> align (ppr ve) </>
+      text "=" <+> align (ppr ve) </>
       letBody body
   pprPrec _ (Update src idxs ve _) =
     ppr src <+> text "with" <+>
     brackets (commasep (map ppr idxs)) <+>
-    text "<-" <+> align (ppr ve)
+    text "=" <+> align (ppr ve)
   pprPrec _ (RecordUpdate src fs ve _ _) =
     ppr src <+> text "with" <+>
     mconcat (intersperse (text ".") (map ppr fs)) <+>
-    text "<-" <+> align (ppr ve)
+    text "=" <+> align (ppr ve)
   pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec (-1) e
@@ -296,15 +300,15 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "loop" <+> ppr pat <+>
     equals <+> ppr initexp <+> ppr form <+> text "do" </>
     indent 2 (ppr loopbody)
-  pprPrec _ (VConstr0 n _ _) = text "#" <> ppr n
-  pprPrec _ (Match e cs _ _) = text "match" <+> ppr e </> ppr cs
+  pprPrec _ (Constr n cs _ _) = text "#" <> ppr n <+> sep (map ppr cs)
+  pprPrec _ (Match e cs _ _) = text "match" <+> ppr e </> (stack . map ppr) cs
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e
   ppr (RecordFieldImplicit name _ _) = pprName name
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (CaseBase f vn) where
-  ppr (CasePat p e _) = ppr p <+> text "->" <+> ppr e
+  ppr (CasePat p e _) = text "case" <+> ppr p <+> text "->" <+> ppr e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
   ppr (For i ubound) =
@@ -327,6 +331,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
                                     Just t' -> parens $ text "_" <> colon <+> ppr t'
                                     Nothing -> text "_"
   ppr (PatternLit e _ _)        = ppr e
+  ppr (PatternConstr n _ ps _)  = text "#" <> ppr n <+> sep (map ppr ps)
 
 ppAscription :: Pretty t => Maybe t -> Doc
 ppAscription Nothing  = mempty
@@ -371,8 +376,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
     text fun <+> pprName name <+>
     spread (map ppr tparams ++ map ppr args) <> retdecl' <> text " =" </>
     indent 2 (ppr body)
-    where fun | entry     = "entry"
-              | otherwise = "let"
+    where fun | isJust entry = "entry"
+              | otherwise    = "let"
           retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
                        Just rettype' -> text ":" <+> rettype'
                        Nothing       -> mempty

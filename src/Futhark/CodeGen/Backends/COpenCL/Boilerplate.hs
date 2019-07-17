@@ -14,7 +14,7 @@ import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.Backends.GenericC as GC
-import Futhark.CodeGen.OpenCL.Kernels
+import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util (chunk, zEncodeString)
 
 generateBoilerplate :: String -> String -> [String] -> [PrimType]
@@ -237,7 +237,6 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                           [(0::Int)..] $ M.keys sizes
 
   GC.libDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
-                     typename cl_int error;
                      ctx->opencl.cfg = cfg->opencl;
                      ctx->detail_memory = cfg->opencl.debugging;
                      ctx->debugging = cfg->opencl.debugging;

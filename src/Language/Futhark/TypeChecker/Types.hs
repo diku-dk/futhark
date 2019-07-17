@@ -63,8 +63,11 @@ unifyTypesU uf (Record ts1) (Record ts2)
       (M.intersectionWith (,) ts1 ts2)
 unifyTypesU uf (Arrow as1 mn1 t1 t1') (Arrow as2 _ t2 t2') =
   Arrow (as1 <> as2) mn1 <$> unifyTypesU (flip uf) t1 t2 <*> unifyTypesU uf t1' t2'
-unifyTypesU _ e1@Enum{} e2@Enum{}
-  | e1 == e2 = Just e1
+unifyTypesU uf (SumT cs1) (SumT cs2)
+  | length cs1 == length cs2,
+    sort (M.keys cs1) == sort (M.keys cs2) =
+      SumT <$> traverse (uncurry (zipWithM (unifyTypesU uf)))
+      (M.intersectionWith (,) cs1 cs2)
 unifyTypesU _ _ _ = Nothing
 
 unifyTypeArgs :: (ArrayDim dim) =>
@@ -92,9 +95,10 @@ unifyArrayElemTypes uf (ArrayRecordElem et1) (ArrayRecordElem et2)
   | sort (M.keys et1) == sort (M.keys et2) =
     ArrayRecordElem <$>
     traverse (uncurry $ unifyRecordArrayElemTypes uf) (M.intersectionWith (,) et1 et2)
-unifyArrayElemTypes _ (ArrayEnumElem cs1) (ArrayEnumElem cs2)
-  | cs1 == cs2 =
-     Just $ ArrayEnumElem cs1
+unifyArrayElemTypes uf (ArraySumElem cs1) (ArraySumElem cs2)
+  | sort (M.keys cs1) == sort (M.keys cs2) =
+    ArraySumElem <$>
+    traverse (uncurry (zipWithM (unifyRecordArrayElemTypes uf))) (M.intersectionWith (,) cs1 cs2)
 unifyArrayElemTypes _ _ _ =
   Nothing
 
@@ -182,7 +186,7 @@ checkTypeExp (TEUnique t loc) = do
         mayContainArray (Record fs) = any mayContainArray fs
         mayContainArray TypeVar{} = True
         mayContainArray Arrow{} = False
-        mayContainArray Enum{} = False
+        mayContainArray (SumT cs) = (any . any) mayContainArray cs
 checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', st1, _) <- checkTypeExp t1
   bindSpaced [(Term, v)] $ do
@@ -240,12 +244,19 @@ checkTypeExp ote@TEApply{} = do
           throwError $ TypeError tloc $ "Type argument " ++ pretty a ++
           " not valid for a type parameter " ++ pretty p
 
-checkTypeExp t@(TEEnum names loc) = do
-  unless (sort names == sort (nub names)) $
+checkTypeExp t@(TESum cs loc) = do
+  let constructors = map fst cs
+  unless (sort constructors == sort (nub constructors)) $
     throwError $ TypeError loc $ "Duplicate constructors in " ++ pretty t
-  unless (length names <= 256) $
-    throwError $ TypeError loc "Enums must have 256 or fewer constructors."
-  return (TEEnum names loc, Enum names,  Unlifted)
+
+  unless (length constructors <= 256) $
+    throwError $ TypeError loc "Sum types must have 256 or fewer constructors."
+
+  cs_ts_ls <- (traverse . traverse) checkTypeExp $ M.fromList cs
+  let cs'  = (fmap . fmap) (\(x,_,_) -> x) cs_ts_ls
+      ts_s = (fmap . fmap) (\(_, y, _) -> y) cs_ts_ls
+      ls   = (concatMap . fmap) (\(_, _, z) -> z) cs_ts_ls
+  return (TESum (M.toList cs') loc, SumT ts_s, foldl' max Unlifted ls)
 
 -- | Check for duplication of names inside a pattern group.  Produces
 -- a description of all names used in the pattern group.
@@ -259,13 +270,14 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
         check (RecordPattern fs _) = mapM_ (check . snd) fs
         check (PatternAscription p _ _) = check p
         check PatternLit{} = return ()
+        check (PatternConstr _ _ ps _) = mapM_ check ps
 
         seen v loc = do
           already <- gets $ M.lookup v
           case already of
             Just prev_loc ->
               lift $ throwError $ TypeError loc $
-              "Name " ++ pretty v ++ " also bound at " ++ locStr prev_loc
+              "Name " ++ quote (pretty v) ++ " also bound at " ++ locStr prev_loc
             Nothing ->
               modify $ M.insert v loc
 
@@ -286,7 +298,7 @@ checkForDuplicateNamesInType = checkForDuplicateNames . pats
         pats (TEApply t1 (TypeArgExpType t2) _) = pats t1 ++ pats t2
         pats (TEApply t1 TypeArgExpDim{} _) = pats t1
         pats TEVar{} = []
-        pats TEEnum{} = []
+        pats (TESum cs _) = concatMap (concatMap pats . snd) cs
 
 -- | Ensure that every shape parameter is used in positive position at
 -- least once before being used in negative position.
@@ -329,7 +341,8 @@ checkTypeParams ps m =
           case seen of
             Just prev ->
               throwError $ TypeError loc $
-              "Type parameter " ++ pretty v ++ " previously defined at " ++ locStr prev
+              "Type parameter " ++ quote (pretty v) ++
+              " previously defined at " ++ locStr prev ++ "."
             Nothing -> do
               modify $ M.insert (ns,v) loc
               lift $ checkName ns v loc
@@ -353,7 +366,7 @@ typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
 typeExpUses (TEArrow _ t1 t2 _) =
   let (pos, neg) = typeExpUses t1 <> typeExpUses t2
   in (mempty, pos <> neg)
-typeExpUses TEEnum{} = mempty
+typeExpUses (TESum cs _) = foldMap (mconcat . fmap typeExpUses . snd) cs
 
 dimDeclUses :: DimDecl VName -> ([VName], [VName])
 dimDeclUses (NamedDim v) = ([qualLeaf v], [])
@@ -381,7 +394,8 @@ substituteTypes substs ot = case ot of
     Record $ fmap (substituteTypes substs) ts
   Arrow als v t1 t2 ->
     Arrow als v (substituteTypes substs t1) (substituteTypes substs t2)
-  Enum cs -> Enum cs
+  SumT cs ->
+    SumT $ (fmap . fmap) (substituteTypes substs) cs
   where nope = error "substituteTypes: Cannot create array after substitution."
 
         substituteTypesInArrayElem (ArrayPrimElem t) =
@@ -395,8 +409,9 @@ substituteTypes substs ot = case ot of
         substituteTypesInArrayElem (ArrayRecordElem ts) =
           Record ts'
           where ts' = fmap (substituteTypes substs . recordArrayElemToType) ts
-        substituteTypesInArrayElem (ArrayEnumElem cs) =
-          Enum cs
+        substituteTypesInArrayElem (ArraySumElem cs) =
+          SumT cs'
+          where cs' = (fmap . fmap) (substituteTypes substs . recordArrayElemToType) cs
 
         substituteInTypeArg (TypeArgDim d loc) =
           TypeArgDim (substituteInDim d) loc
@@ -474,7 +489,7 @@ substTypesAny lookupSubst ot = case ot of
   Record ts ->  Record $ fmap (substTypesAny lookupSubst) ts
   Arrow als v t1 t2 ->
     Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
-  Enum names -> Enum names
+  SumT ts -> SumT $ (fmap . fmap) (substTypesAny lookupSubst) ts
 
   where nope = error "substTypesAny: Cannot create array after substitution."
 
@@ -488,7 +503,9 @@ substTypesAny lookupSubst ot = case ot of
             _ -> TypeVar mempty Nonunique v $ map subsTypeArg targs
         subsArrayElem (ArrayRecordElem ts) =
           Record $ substTypesAny lookupSubst . recordArrayElemToType <$> ts
-        subsArrayElem (ArrayEnumElem cs) = Enum cs
+        subsArrayElem (ArraySumElem cs) =
+          let cs' = (fmap . fmap) recordArrayElemToType cs
+          in SumT $ (fmap . fmap) (substTypesAny lookupSubst) cs'
 
         subsTypeArg (TypeArgType t loc) =
           TypeArgType (substTypesAny lookupSubst' t) loc

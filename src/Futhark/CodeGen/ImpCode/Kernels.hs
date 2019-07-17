@@ -71,7 +71,7 @@ data Kernel = Kernel
             deriving (Show)
 
 -- ^ In-kernel name and per-workgroup size in bytes.
-type LocalMemoryUse = (VName, Either (Count Bytes) KernelConstExp)
+type LocalMemoryUse = (VName, Either (Count Bytes Exp) KernelConstExp)
 
 data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName
@@ -87,7 +87,7 @@ getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
         sameKernel _ _ = False
 
 -- | Get an atomic operator corresponding to a binary operator.
-atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Bytes -> Exp -> AtomicOp)
+atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Elements Imp.Exp -> Exp -> AtomicOp)
 atomicBinOp = flip lookup [ (Add Int32, AtomicAdd)
                           , (SMax Int32, AtomicSMax)
                           , (SMin Int32, AtomicSMin)
@@ -161,22 +161,22 @@ data KernelOp = GetGroupId VName Int
               | GlobalBarrier
               | MemFenceLocal
               | MemFenceGlobal
-              | PrivateAlloc VName (Count Bytes)
-              | LocalAlloc VName (Either (Count Bytes) KernelConstExp)
+              | PrivateAlloc VName (Count Bytes Imp.Exp)
+              | LocalAlloc VName (Either (Count Bytes Imp.Exp) KernelConstExp)
               deriving (Show)
 
 -- Atomic operations return the value stored before the update.
 -- This value is stored in the first VName.
-data AtomicOp = AtomicAdd VName VName (Count Bytes) Exp
-              | AtomicSMax VName VName (Count Bytes) Exp
-              | AtomicSMin VName VName (Count Bytes) Exp
-              | AtomicUMax VName VName (Count Bytes) Exp
-              | AtomicUMin VName VName (Count Bytes) Exp
-              | AtomicAnd VName VName (Count Bytes) Exp
-              | AtomicOr VName VName (Count Bytes) Exp
-              | AtomicXor VName VName (Count Bytes) Exp
-              | AtomicCmpXchg VName VName (Count Bytes) Exp Exp
-              | AtomicXchg VName VName (Count Bytes) Exp
+data AtomicOp = AtomicAdd VName VName (Count Elements Imp.Exp) Exp
+              | AtomicSMax VName VName (Count Elements Imp.Exp) Exp
+              | AtomicSMin VName VName (Count Elements Imp.Exp) Exp
+              | AtomicUMax VName VName (Count Elements Imp.Exp) Exp
+              | AtomicUMin VName VName (Count Elements Imp.Exp) Exp
+              | AtomicAnd VName VName (Count Elements Imp.Exp) Exp
+              | AtomicOr VName VName (Count Elements Imp.Exp) Exp
+              | AtomicXor VName VName (Count Elements Imp.Exp) Exp
+              | AtomicCmpXchg VName VName (Count Elements Imp.Exp) Exp Exp
+              | AtomicXchg VName VName (Count Elements Imp.Exp) Exp
               deriving (Show)
 
 instance FreeIn AtomicOp where

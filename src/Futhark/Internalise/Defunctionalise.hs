@@ -345,7 +345,7 @@ defuncExp (Assert e1 e2 desc loc) = do
   (e2', sv) <- defuncExp e2
   return (Assert e1' e2' desc loc, sv)
 
-defuncExp e@VConstr0{} = return (e, Dynamic $ typeOf e)
+defuncExp Constr{} = error "defuncExp: unexpected constructor."
 
 defuncExp (Match e cs t loc) = do
   (e', sv) <- defuncExp e
@@ -534,6 +534,8 @@ defuncApply depth e@(Var qn (Info t) loc) = do
 
       _ -> return (Var qn (Info (typeFromSV sv)) loc, sv)
 
+defuncApply depth (Parens e _) = defuncApply depth e
+
 defuncApply _ expr = defuncExp expr
 
 -- | Check if a 'StaticVal' and a given application depth corresponds
@@ -567,6 +569,7 @@ envFromPattern pat = case pat of
   Wildcard _ _            -> mempty
   PatternAscription p _ _ -> envFromPattern p
   PatternLit{}            -> mempty
+  PatternConstr{}         -> error "encFromPattern: unexpected pattern constructor."
 
 -- | Create an environment that binds the shape parameters.
 envFromShapeParams :: [TypeParamBase VName] -> Env
@@ -587,7 +590,7 @@ liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
   where dims' = map (flip TypeParamDim noLoc) dims
         rettype_st = anyDimShapeAnnotations $ toStruct rettype
         dec = ValBind
-          { valBindEntryPoint = False
+          { valBindEntryPoint = Nothing
           , valBindName       = fname
           , valBindRetDecl    = Nothing
           , valBindRetType    = Info rettype_st
@@ -670,6 +673,7 @@ matchPatternSV (Id vn (Info t) _) sv =
 matchPatternSV (Wildcard _ _) _ = mempty
 matchPatternSV (PatternAscription pat _ _) sv = matchPatternSV pat sv
 matchPatternSV PatternLit{} _ = mempty
+matchPatternSV PatternConstr{} _ = error "matchPatternSV: unexpected pattern constructor."
 matchPatternSV pat (Dynamic t) = matchPatternSV pat $ svFromType t
 matchPatternSV pat sv = error $ "Tried to match pattern " ++ pretty pat
                              ++ " with static value " ++ show sv ++ "."
@@ -701,6 +705,7 @@ updatePattern (PatternAscription pat tydecl loc) sv
       PatternAscription (updatePattern pat sv) tydecl loc
   | otherwise = updatePattern pat sv
 updatePattern p@PatternLit{} _ = p
+updatePattern PatternConstr{} _ = error "updatePattern: unexpected pattern constructor."
 updatePattern pat (Dynamic t) = updatePattern pat (svFromType t)
 updatePattern pat sv =
   error $ "Tried to update pattern " ++ pretty pat
@@ -795,7 +800,7 @@ freeVars expr = case expr of
 
   Unsafe e _          -> freeVars e
   Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
-  VConstr0{}          -> mempty
+  Constr{}            -> error "freeVars: unexpected constructor."
   Match e cs _ _      -> freeVars e <> foldMap caseFV cs
     where caseFV (CasePat p eCase _) = (names (patternDimNames p) <> freeVars eCase)
                                        `without` patternVars p
@@ -816,13 +821,13 @@ patternVars = mconcat . map ident . S.toList . patternIdents
 defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind True name _ (Info rettype) tparams params body _ loc)
+defuncValBind (ValBind entry@Just{} name _ (Info rettype) tparams params body _ loc)
   | (rettype_ps, rettype') <- unfoldFunType rettype,
     not $ null rettype_ps = do
       (body_pats, body', _) <- etaExpand body
       -- FIXME: we should also handle non-constant size annotations
       -- here.
-      defuncValBind $ ValBind True name Nothing
+      defuncValBind $ ValBind entry name Nothing
         (Info $ onlyConstantDims rettype')
         tparams (params <> body_pats) body' Nothing loc
   where onlyConstantDims = bimap onDim id

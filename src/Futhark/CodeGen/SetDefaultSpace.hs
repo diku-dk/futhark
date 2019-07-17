@@ -50,7 +50,7 @@ setValueSpace _ (ScalarValue bt ept v) =
 
 setBodySpace :: Space -> Code HostOp -> SetDefaultSpaceM (Code HostOp)
 setBodySpace space (Allocate v e old_space) =
-  Allocate v <$> setCountSpace space e <*> setSpace v space old_space
+  Allocate v <$> (setCountSpace space e) <*> setSpace v space old_space
 setBodySpace space (Free v old_space) =
   Free v <$> setSpace v space old_space
 setBodySpace space (DeclareMem name old_space) =
@@ -115,7 +115,7 @@ setHuskFunctionSpace space husk_func = do
   body' <- setBodySpace space $ hfunctionBody husk_func
   return $ husk_func { hfunctionBody = body', hfunctionParams = params' }
 
-setCountSpace :: Space -> Count a -> SetDefaultSpaceM (Count a)
+setCountSpace :: Space -> Count a Exp -> SetDefaultSpaceM (Count a Exp)
 setCountSpace space (Count e) =
   Count <$> setExpSpace space e
 

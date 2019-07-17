@@ -1,7 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | Imperative intermediate language used as a stepping stone in code generation.
 --
 -- This is a generic representation parametrised on an extensible
@@ -40,7 +38,6 @@ module Futhark.CodeGen.ImpCode
   , ArrayContents(..)
 
     -- * Typed enumerations
-  , Count (..)
   , Bytes
   , Elements
   , elements
@@ -58,6 +55,7 @@ module Futhark.CodeGen.ImpCode
   , module Language.Futhark.Core
   , module Futhark.Representation.Primitive
   , module Futhark.Analysis.PrimExp
+  , module Futhark.Representation.Kernels.Sizes
   )
   where
 
@@ -73,9 +71,9 @@ import Futhark.Representation.AST.Syntax
   (Space(..), SpaceId, ErrorMsg(..), ErrorMsgPart(..))
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
-import Futhark.Util.IntegralExp
 import Futhark.Analysis.PrimExp
 import Futhark.Util.Pretty hiding (space)
+import Futhark.Representation.Kernels.Sizes (Count(..))
 
 data Size = ConstSize Int64
           | VarSize VName
@@ -167,10 +165,10 @@ data HuskFunction op = HuskFunction
                     deriving (Show)
 
 data NodeCopyInfo = NodeCopyInfo
-                      { nodeCopyMem :: VName,
-                        nodeCopySize :: Count Bytes,
-                        nodeCopyOffset :: Count Bytes,
-                        nodeCopySrc :: VName
+                      { nodeCopyMem :: VName
+                      , nodeCopySize :: Count Bytes Exp
+                      , nodeCopyOffset :: Count Bytes Exp
+                      , nodeCopySrc :: VName
                       }
                       deriving (Show)
 
@@ -186,7 +184,7 @@ data Code a = Skip
               -- This is mostly used for constant arrays, but also for
               -- some bookkeeping data, like the synchronisation
               -- counts used to implement reduction.
-            | Allocate VName (Count Bytes) Space
+            | Allocate VName (Count Bytes Exp) Space
               -- ^ Memory space must match the corresponding
               -- 'DeclareMem'.
             | Free VName Space
@@ -197,11 +195,11 @@ data Code a = Skip
               -- is the last reference.  There is no guarantee that
               -- all memory blocks will be freed with this statement.
               -- Backends are free to ignore it entirely.
-            | Copy VName (Count Bytes) Space VName (Count Bytes) Space (Count Bytes)
+            | Copy VName (Count Bytes Exp) Space VName (Count Bytes Exp) Space (Count Bytes Exp)
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Write VName (Count Bytes) PrimType Space Volatility Exp
+            | Write VName (Count Elements Exp) PrimType Space Volatility Exp
             | SetScalar VName Exp
             | SetMem VName VName Space
               -- ^ Must be in same space.
@@ -236,7 +234,7 @@ instance Monoid (Code a) where
 
 data ExpLeaf = ScalarVar VName
              | SizeOf PrimType
-             | Index VName (Count Bytes) PrimType Space Volatility
+             | Index VName (Count Elements Exp) PrimType Space Volatility
            deriving (Eq, Show)
 
 type Exp = PrimExp ExpLeaf
@@ -246,32 +244,27 @@ data Arg = ExpArg Exp
          | MemArg VName
          deriving (Show)
 
--- | A wrapper around 'Imp.Exp' that maintains a unit as a phantom
--- type.
-newtype Count u = Count { innerExp :: Exp }
-                deriving (Eq, Show, Num, IntegralExp, FreeIn, Pretty)
-
 -- | Phantom type for a count of elements.
 data Elements
 
 -- | Phantom type for a count of bytes.
 data Bytes
 
-elements :: Exp -> Count Elements
+elements :: Exp -> Count Elements Exp
 elements = Count
 
-bytes :: Exp -> Count Bytes
+bytes :: Exp -> Count Bytes Exp
 bytes = Count
 
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
-withElemType :: Count Elements -> PrimType -> Count Bytes
+withElemType :: Count Elements Exp -> PrimType -> Count Bytes Exp
 withElemType (Count e) t = bytes $ e * LeafExp (SizeOf t) (IntType Int32)
 
-dimSizeToExp :: DimSize -> Count Elements
+dimSizeToExp :: DimSize -> Count Elements Exp
 dimSizeToExp = elements . sizeToExp
 
-memSizeToExp :: MemSize -> Count Bytes
+memSizeToExp :: MemSize -> Count Bytes Exp
 memSizeToExp = bytes . sizeToExp
 
 sizeToExp :: Size -> Exp
@@ -285,7 +278,7 @@ var = LeafExp . ScalarVar
 vi32 :: VName -> Exp
 vi32 = flip var $ IntType Int32
 
-index :: VName -> Count Bytes -> PrimType -> Space -> Volatility -> Exp
+index :: VName -> Count Elements Exp -> PrimType -> Space -> Volatility -> Exp
 index arr i t s vol = LeafExp (Index arr i t s vol) t
 
 -- Prettyprinting definitions.

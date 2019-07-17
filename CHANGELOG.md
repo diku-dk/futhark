@@ -5,7 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.11.0]
+## [0.12.0]
+
+### Added
+
+  * The internal representation of parallel constructs have been
+    overhauled and many optimisations rewritten.  The overall
+    performance impact should be neutral on aggregate, but there may
+    be changes for some programs (please report if so).
+
+  * Futhark now supports structurally typed sum types and pattern
+    matching!  This work was done by Robert Schenck.  There remain
+    some problems with arrays of sum types that themselves contain
+    arrays.
+
+  * Significant reduction in compile time for some large programs.
+
+### Removed
+
+### Changed
+
+  * The `--futhark` option for `futhark bench` and `futhark test` now
+    defaults to the binary being used for the subcommands themselves.
+
+### Fixed
+
+  * `futhark test` now understands `--no-tuning` as it was always
+    supposed to.
+
+  * `futhark bench` and `futhark test` now interpret `--exclude` in
+    the same way.
+
+  * The Python and C# backends can now properly read binary boolean
+    input.
+
+## [0.11.2]
+
+### Fixed
+
+  * Entry points whose types are opaque due to module ascription, yet
+    whose representation is simple (scalars or arrays of scalars) were
+    mistakely made non-opaque when compiled with ``--library``.  This
+    has been fixed.
+
+  * The CUDA backend now supports default sizes in `.tuning` files.
+
+  * Loop interchange across multiple dimensions was broken in some cases (#767).
+
+  * The sequential C# backend now generates code that compiles (#772).
+
+  * The sequential Python backend now generates code that runs (#765).
+
+## [0.11.1]
 
 ### Added
 
@@ -17,6 +68,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The `f32` and `f64` modules now contain `gamma` and `lgamma`
     functions.  At present these do not work in the C# backend.
+
+  * Some instances of `reduce` with vectorised operators (e.g. `map2
+    (+)`) are orders of magnitude faster than before.
+
+  * Memory usage is now lower on some programs (specifically the ones
+    that have large `map`s with internal intermediate arrays).
 
 ### Removed
 

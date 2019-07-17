@@ -19,6 +19,7 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import System.Console.ANSI
 import System.Process.ByteString (readProcessWithExitCode)
+import System.Environment
 import System.Exit
 import System.FilePath
 import System.Console.GetOpt
@@ -98,14 +99,15 @@ optimisedProgramMetrics programs pipeline program =
                    GpuPipeline ->
                      check "--gpu"
   where check opt = do
+          futhark <- io $ maybe getExecutablePath return $ configFuthark programs
           (code, output, err) <-
-            io $ readProcessWithExitCode (configFuthark programs) ["dev", opt, "--metrics", program] ""
+            io $ readProcessWithExitCode futhark ["dev", opt, "--metrics", program] ""
           let output' = T.decodeUtf8 output
           case code of
             ExitSuccess
               | [(m, [])] <- reads $ T.unpack output' -> return m
               | otherwise -> throwError $ "Could not read metrics output:\n" <> output'
-            ExitFailure 127 -> throwError $ progNotFound $ T.pack $ configFuthark programs
+            ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
             ExitFailure _ -> throwError $ T.decodeUtf8 err
 
 testMetrics :: ProgConfig -> FilePath -> StructureTest -> TestM ()
@@ -122,7 +124,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
             Just actual_occurences
               | expected_occurences /= actual_occurences ->
                 throwError $ name <> " should have occurred " <> T.pack (show expected_occurences) <>
-              " times, but occured " <> T.pack (show actual_occurences) <> " times."
+              " times, but occurred " <> T.pack (show actual_occurences) <> " times."
             _ -> return ()
 
 testWarnings :: [WarningTest] -> SBS.ByteString -> TestM ()
@@ -134,7 +136,8 @@ testWarnings warnings futerr = accErrors_ $ map testWarning warnings
           | otherwise = return ()
 
 runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase mode program testcase progs) =
+runTestCase (TestCase mode program testcase progs) = do
+  futhark <- io $ maybe getExecutablePath return $ configFuthark progs
   case testAction testcase of
 
     CompileTimeFailure expected_error ->
@@ -180,7 +183,6 @@ runTestCase (TestCase mode program testcase progs) =
       unless (mode == Compile || mode == Compiled) $
         context "Interpreting" $
           accErrors_ $ map (runInterpretedEntry futhark program) ios
-  where futhark = configFuthark progs
 
 runInterpretedEntry :: String -> FilePath -> InputOutputs -> TestM()
 runInterpretedEntry futhark program (InputOutputs entry run_cases) =
@@ -317,6 +319,19 @@ excludedTest :: TestConfig -> TestCase -> Bool
 excludedTest config =
   any (`elem` configExclude config) . testTags . testCaseTest
 
+-- | Exclude those test cases that have tags we do not wish to run.
+excludeCases :: TestConfig -> TestCase -> TestCase
+excludeCases config tcase =
+  tcase { testCaseTest = onTest $ testCaseTest tcase }
+  where onTest (ProgramTest desc tags action) =
+          ProgramTest desc tags $ onAction action
+        onAction (RunCases ios stest wtest) =
+          RunCases (map onIOs ios) stest wtest
+        onAction action = action
+        onIOs (InputOutputs entry runs) =
+          InputOutputs entry $ filter (not . any excluded . runTags) runs
+        excluded = (`elem` configExclude config) . T.pack
+
 statusTable :: TestStatus -> String
 statusTable ts = buildTable rows 1
   where rows =
@@ -383,7 +398,7 @@ runTests config paths = do
   replicateM_ concurrency $ forkIO $ runTest testmvar reportmvar
 
   let (excluded, included) = partition (excludedTest config) all_tests
-  _ <- forkIO $ mapM_ (putMVar testmvar) included
+  _ <- forkIO $ mapM_ (putMVar testmvar . excludeCases config) included
   isTTY <- (&& not (configLineOutput config)) <$> hIsTerminalDevice stdout
 
   let report | isTTY = reportTable
@@ -476,7 +491,7 @@ defaultConfig = TestConfig { configTestMode = Everything
                            , configPrograms =
                              ProgConfig
                              { configBackend = "c"
-                             , configFuthark = "futhark"
+                             , configFuthark = Nothing
                              , configRunner = ""
                              , configExtraOptions = []
                              , configExtraCompilerOptions = []
@@ -487,7 +502,7 @@ defaultConfig = TestConfig { configTestMode = Everything
 
 data ProgConfig = ProgConfig
                   { configBackend :: String
-                  , configFuthark :: FilePath
+                  , configFuthark :: Maybe FilePath
                   , configRunner :: FilePath
                   , configExtraCompilerOptions :: [String]
                   , configTuning :: Maybe String
@@ -505,7 +520,7 @@ setBackend backend config =
 
 setFuthark :: FilePath -> ProgConfig -> ProgConfig
 setFuthark futhark config =
-  config { configFuthark = futhark }
+  config { configFuthark = Just futhark }
 
 setRunner :: FilePath -> ProgConfig -> ProgConfig
 setRunner runner config =
@@ -548,7 +563,7 @@ commandLineOptions = [
     "Backend used for compilation (defaults to 'c')."
   , Option [] ["futhark"]
     (ReqArg (Right . changeProgConfig . setFuthark) "PROGRAM")
-    "Program to run for subcommands (defaults to 'futhark')."
+    "Program to run for subcommands (defaults to same binary as 'futhark test')."
   , Option [] ["runner"]
     (ReqArg (Right . changeProgConfig . setRunner) "PROGRAM")
     "The program used to run the Futhark-generated programs (defaults to nothing)."
@@ -564,6 +579,9 @@ commandLineOptions = [
   , Option [] ["pass-compiler-option"]
     (ReqArg (Right . changeProgConfig . addCompilerOption) "OPT")
     "Pass this option to the compiler (or typechecker if in -t mode)."
+  , Option [] ["no-tuning"]
+    (NoArg $ Right $ changeProgConfig $ \config -> config { configTuning = Nothing })
+    "Do not load tuning files."
   ]
 
 main :: String -> [String] -> IO ()

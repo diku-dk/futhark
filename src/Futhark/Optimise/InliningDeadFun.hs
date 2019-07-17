@@ -15,29 +15,37 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import Futhark.Representation.SOACS
+import Futhark.Representation.SOACS.Simplify (simplifyFun)
 import Futhark.Transform.Rename
 import Futhark.Analysis.CallGraph
 import Futhark.Binder
 import Futhark.Pass
 
-aggInlining :: CallGraph -> [FunDef] -> [FunDef]
-aggInlining cg = filter keep . recurse
-  where noInterestingCalls :: S.Set Name -> FunDef -> Bool
+aggInlining :: MonadFreshNames m => CallGraph -> [FunDef SOACS] -> m [FunDef SOACS]
+aggInlining cg = fmap (filter keep) . recurse
+  where noInterestingCalls :: S.Set Name -> FunDef SOACS -> Bool
         noInterestingCalls interesting fundec =
           case M.lookup (funDefName fundec) cg of
             Just calls | not $ any (`elem` interesting') calls -> True
             _                                                  -> False
             where interesting' = funDefName fundec `S.insert` interesting
 
-        recurse funs =
+        -- We apply simplification after every round of inlining,
+        -- because it is more efficient to shrink the program as soon
+        -- as possible, rather than wait until it has balooned after
+        -- full inlining.
+        recurse funs = do
           let interesting = S.fromList $ map funDefName funs
               (to_be_inlined, to_inline_in) =
                 partition (noInterestingCalls interesting) funs
               inlined_but_entry_points =
                 filter (isJust . funDefEntryPoint) to_be_inlined
-          in if null to_be_inlined then funs
-             else inlined_but_entry_points ++
-                  recurse (map (`doInlineInCaller` to_be_inlined) to_inline_in)
+          if null to_be_inlined
+            then return funs
+            else do let onFun = simplifyFun <=< renameFun .
+                                (`doInlineInCaller` to_be_inlined)
+                    to_inline_in' <- recurse =<< mapM onFun to_inline_in
+                    return $ inlined_but_entry_points ++ to_inline_in'
 
         keep fundec = isJust (funDefEntryPoint fundec) || callsRecursive fundec
 
@@ -54,12 +62,12 @@ aggInlining cg = filter keep . recurse
 -- not call any other functions. Further extensions that transform a
 -- tail-recursive function to a do or while loop, should do the transformation
 -- first and then do the inlining.
-doInlineInCaller :: FunDef ->  [FunDef] -> FunDef
+doInlineInCaller :: FunDef SOACS ->  [FunDef SOACS] -> FunDef SOACS
 doInlineInCaller (FunDef entry name rtp args body) inlcallees =
   let body' = inlineInBody inlcallees body
   in FunDef entry name rtp args body'
 
-inlineInBody :: [FunDef] -> Body -> Body
+inlineInBody :: [FunDef SOACS] -> Body -> Body
 inlineInBody inlcallees (Body attr stms res) = Body attr stms' res
   where stms' = stmsFromList (concatMap inline $ stmsToList stms)
 
@@ -84,21 +92,21 @@ inlineInBody inlcallees (Body attr stms res) = Body attr stms' res
 notNoLoc :: SrcLoc -> Bool
 notNoLoc = (/=NoLoc) . locOf
 
-inliner :: Monad m => [FunDef] -> Mapper SOACS SOACS m
+inliner :: Monad m => [FunDef SOACS] -> Mapper SOACS SOACS m
 inliner funs = identityMapper { mapOnBody = const $ return . inlineInBody funs
                               , mapOnOp = return . inlineInSOAC funs
                               }
 
-inlineInSOAC :: [FunDef] -> SOAC SOACS -> SOAC SOACS
+inlineInSOAC :: [FunDef SOACS] -> SOAC SOACS -> SOAC SOACS
 inlineInSOAC inlcallees = runIdentity . mapSOACM identitySOACMapper
                           { mapOnSOACLambda = return . inlineInLambda inlcallees
                           }
 
-inlineInStm :: [FunDef] -> Stm -> Stm
+inlineInStm :: [FunDef SOACS] -> Stm -> Stm
 inlineInStm inlcallees (Let pat aux e) =
   Let pat aux $ mapExp (inliner inlcallees) e
 
-inlineInLambda :: [FunDef] -> Lambda -> Lambda
+inlineInLambda :: [FunDef SOACS] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda params body ret) =
   Lambda params (inlineInBody inlcallees body) ret
 
@@ -131,7 +139,7 @@ inlineAndRemoveDeadFunctions =
        }
   where pass prog = do
           let cg = buildCallGraph prog
-          renameProg . Prog . aggInlining cg . progFunctions =<< renameProg prog
+          Prog <$> aggInlining cg (progFunctions prog)
 
 -- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.

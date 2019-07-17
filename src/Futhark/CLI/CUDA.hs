@@ -40,7 +40,7 @@ main = compilerMain () []
              liftIO $ writeFile cpath $ CCUDA.asExecutable cprog
              let args = [cpath, "-O", "-std=c99", "-lm", "-o", outpath]
                         ++ extra_options
-             ret <- liftIO $ runProgramWithExitCode "gcc" args ""
+             ret <- liftIO $ runProgramWithExitCode "gcc" args mempty
              case ret of
                Left err ->
                  externalErrorS $ "Failed to run gcc: " ++ show err

@@ -39,6 +39,10 @@ import Numeric
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
+import qualified Data.ByteString as BS
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Data.Text.Encoding.Error as T
 import Data.Char
 import Data.List
 import Data.Either
@@ -46,7 +50,7 @@ import Data.Maybe
 import System.Environment
 import System.IO.Unsafe
 import qualified System.Directory.Tree as Dir
-import System.Process
+import System.Process.ByteString
 import System.Exit
 import qualified System.FilePath.Posix as Posix
 import qualified System.FilePath as Native
@@ -148,12 +152,15 @@ isEnvVarSet name default_val = fromMaybe default_val $ do
 
 -- | Like 'readProcessWithExitCode', but also wraps exceptions when
 -- the indicated binary cannot be launched, or some other exception is
--- thrown.
-runProgramWithExitCode :: FilePath -> [String] -> String
+-- thrown.  Also does shenanigans to handle improperly encoded outputs.
+runProgramWithExitCode :: FilePath -> [String] -> BS.ByteString
                        -> IO (Either IOException (ExitCode, String, String))
 runProgramWithExitCode exe args inp =
-  (Right <$> readProcessWithExitCode exe args inp)
+  (Right . postprocess <$> readProcessWithExitCode exe args inp)
   `catch` \e -> return (Left e)
+  where decode = T.unpack . T.decodeUtf8With T.lenientDecode
+        postprocess (err, stdout, stderr) =
+          (err, decode stdout, decode stderr)
 
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]

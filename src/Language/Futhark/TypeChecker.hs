@@ -473,23 +473,28 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
   (fname', tparams', params', maybe_tdecl', rettype, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
-  when (entry && any isTypeParam tparams') $
-    throwError $ TypeError loc "Entry point functions may not be polymorphic."
-
   let (rettype_params, rettype') = unfoldFunType rettype
-  when (entry && (any (not . patternOrderZero) params' ||
-                  any (not . orderZero) rettype_params ||
-                  not (orderZero rettype'))) $
-    throwError $ TypeError loc "Entry point functions may not be higher-order."
+      entry' = Info (foldFunType (map patternStructType params') rettype) <$ entry
 
-  case (entry, filter nastyParameter params') of
-    (True, p : _) -> warn loc $ "Entry point parameter\n\n  " <>
-                     pretty p <> "\n\nwill have an opaque type, so the entry point will likely not be callable."
+  case entry' of
+    Just _
+      | any isTypeParam tparams' ->
+          throwError $ TypeError loc "Entry point functions may not be polymorphic."
+
+      | any (not . patternOrderZero) params'
+        || any (not . orderZero) rettype_params
+        || not (orderZero rettype') ->
+          throwError $ TypeError loc "Entry point functions may not be higher-order."
+
+      | p : _ <- filter nastyParameter params' ->
+          warn loc $ "Entry point parameter\n\n  " <>
+          pretty p <> "\n\nwill have an opaque type, so the entry point will likely not be callable."
+
+      | nastyReturnType maybe_tdecl' rettype ->
+          warn loc $ "Entry point return type\n\n  " <>
+          pretty rettype <> "\n\nwill have an opaque type, so the result will likely not be usable."
+
     _ -> return ()
-
-  when (entry && nastyReturnType maybe_tdecl' rettype) $
-    warn loc $ "Entry point return type\n\n  " <>
-    pretty rettype <> "\n\nwill have an opaque type, so the result will likely not be usable."
 
   return (mempty { envVtable =
                      M.singleton fname' $
@@ -497,7 +502,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                  , envNameMap =
                      M.singleton (Term, fname) $ qualName fname'
                  },
-           ValBind entry fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
+           ValBind entry' fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
 
 nastyType :: Monoid als => TypeBase dim als -> Bool
 nastyType Prim{} = False
@@ -901,8 +906,8 @@ newNamesForMTy orig_mty = do
           Prim t
         substituteInType (Record ts) =
           Record $ fmap substituteInType ts
-        substituteInType (Enum cs) =
-          Enum cs
+        substituteInType (SumT ts) =
+          SumT $ (fmap . fmap) substituteInType ts
         substituteInType (Array () u (ArrayPrimElem t) shape) =
           Array () u (ArrayPrimElem t) (substituteInShape shape)
         substituteInType (Array () u (ArrayPolyElem (TypeName qs v) targs) shape) =
@@ -915,8 +920,11 @@ newNamesForMTy orig_mty = do
           in case arrayOf (Record ts') (substituteInShape shape) u of
             Just t' -> t'
             _ -> error "substituteInType: Cannot create array after substitution."
-        substituteInType (Array () u (ArrayEnumElem cs) shape) =
-          Array () u (ArrayEnumElem cs) (substituteInShape shape)
+        substituteInType (Array () u (ArraySumElem cs) shape) =
+          let cs' = (fmap .fmap) (substituteInType . recordArrayElemToType) cs
+          in case arrayOf (SumT cs') (substituteInShape shape) u of
+            Just t' -> t'
+            _ -> error "substituteInType: Cannot create array after substitution."
         substituteInType (Arrow als v t1 t2) =
           Arrow als v (substituteInType t1) (substituteInType t2)
 
