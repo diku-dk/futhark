@@ -457,16 +457,14 @@ expandRecordPattern (PatternConstr name (Info t@(SumT cs)) ps loc) =
   case constrIndex name t of
     Nothing -> error "Malformed Constr value."
     Just n  -> do
-      pat <- patM
-      (_, rrs) <- unzip <$> mapM expandRecordPattern ps
+      (ps', rrs) <- unzip <$> mapM expandRecordPattern ps
+      pat <- patM ps'
       return (pat, mconcat rrs)
-      where patM = TuplePattern <$> ((index :) <$> clauses) <*> pure noLoc
+      where patM ps' = TuplePattern <$> ((index :) <$> clauses ps') <*> pure noLoc
             index =  PatternLit (Literal (UnsignedValue (intValue Int8 n)) noLoc) (Info (Prim (Unsigned Int8))) noLoc
-            clauses = mapM clause $ sortConstrs cs
-            clause (name', ts)
-                 | name == name' = TuplePattern
-                                   <$> (fmap . fmap) fst (mapM expandRecordPattern ps)
-                                   <*> pure loc
+            clauses ps' = mapM (clause ps') $ sortConstrs cs
+            clause ps' (name', ts)
+                 | name == name' = pure $ TuplePattern ps' loc
                  | otherwise     = return $ TuplePattern (map ((`Wildcard` noLoc) . Info) ts) noLoc
 expandRecordPattern PatternConstr{} = error "expandRecordPattern: invalid pattern constructor type."
 
