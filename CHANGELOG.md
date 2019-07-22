@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Significant reduction in compile time for some large programs.
 
+  * Manually specified type parameters need no longer be exhaustive.
+
 ### Removed
 
 ### Changed

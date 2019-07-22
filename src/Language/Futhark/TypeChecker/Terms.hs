@@ -1940,34 +1940,25 @@ checkFunBody body maybe_rettype _loc = do
 
 -- | Find at all type variables in the given type that are covered by
 -- the constraints, and produce type parameters that close over them.
--- Produce an error if the given list of type parameters is non-empty,
--- yet does not cover all type variables in the type.
+--
+-- The passed-in list of type parameters is always prepended to the
+-- produced list of type parameters.
 closeOverTypes :: Constraints -> [TypeParam] -> StructType -> TermTypeM [TypeParam]
 closeOverTypes substs tparams t =
-  case tparams of
-    [] -> fmap catMaybes $ mapM closeOver $ M.toList substs'
-    _ -> do mapM_ checkClosedOver $ M.toList substs'
-            return tparams
-  where substs' = M.filterWithKey (\k _ -> k `S.member` visible) substs
+  fmap ((tparams++) . catMaybes) $ mapM closeOver $ M.toList to_close_over
+  where to_close_over = M.filterWithKey (\k _ -> k `S.member` visible) substs
         visible = typeVars t
 
-        checkClosedOver (k, v)
-          | not (canBeClosedOver v) ||
-            k `elem` map typeParamName tparams = return ()
-          | otherwise =
-              typeError (srclocOf v) $
-              unlines ["Type variable " ++ quote (prettyName k) ++
-                        " not closed over by type parameters " ++
-                        intercalate ", " (map pretty tparams) ++ ".",
-                        "This is usually because a parameter needs a type annotation."]
-
-        canBeClosedOver NoConstraint{} = True
-        canBeClosedOver _ = False
-
+        -- Avoid duplicate type parameters.
+        closeOver (k, _)
+          | k `elem` map typeParamName tparams =
+              return Nothing
         closeOver (k, NoConstraint (Just Unlifted) usage) =
           return $ Just $ TypeParamType Unlifted k $ srclocOf usage
         closeOver (k, NoConstraint _ usage) =
           return $ Just $ TypeParamType Lifted k $ srclocOf usage
+        closeOver (k, ParamType l loc) =
+          return $ Just $ TypeParamType l k loc
         closeOver (_, _) =
           return Nothing
 

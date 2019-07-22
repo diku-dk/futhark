@@ -223,6 +223,14 @@ way as for `Type Abbreviations`_::
 
   let reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
+Type parameters for a function do not need to cover the types of all
+parameters.  The type checker will add more if necessary.  For
+example, the following is well typed::
+
+  let pair 'a (x: a) y = (x, y)
+
+A new type variable will be invented for the parameter ``y``.
+
 Shape and type parameters are not passed explicitly when calling
 function, but are automatically derived.  If an array value *v* is
 passed for a type parameter *t*, all other arguments passed of type
