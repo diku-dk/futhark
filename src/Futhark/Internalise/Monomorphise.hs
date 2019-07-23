@@ -70,7 +70,6 @@ type RecordReplacement = M.Map Name (VName, PatternType)
 data Env = Env { envPolyBindings :: M.Map VName PolyBinding
                , envTypeBindings :: M.Map VName TypeBinding
                , envRecordReplacements :: RecordReplacements
-  --             , envSumReplacements :: M.Map CompType Exp
                }
 
 instance Semigroup Env where
@@ -479,7 +478,7 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
                toStructural rettype
   (substs, t_shape_params) <- typeSubstsM loc bind_t t'
   let substs' = M.map Subst substs
-      rettype' = substTypesAny (`M.lookup` substs') rettype
+      rettype' = removeSumTypes $ substTypesAny (`M.lookup` substs') rettype
       substPatternType =
         substTypesAny (fmap (fmap fromStruct) . (`M.lookup` substs'))
       params' = map (substPattern entry substPatternType) params
@@ -621,8 +620,6 @@ removeSumTypes (Array as u ts shape) =
     Just ts' -> Array as u ts' shape
   where arrayElemToType' :: ArrayElemTypeBase dim -> TypeBase dim ()
         arrayElemToType' = arrayElemToType -- Needed to make ghc happy :)
---removeSumTypes t@(TypeVar as u n args) = error $ show $ toStructural t  "No type variables should remain."
---removeSumTypes t@Prim{} = t
 removeSumTypes t = t
 
 transformValBind :: ValBind -> MonoM Env
