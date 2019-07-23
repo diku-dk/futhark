@@ -153,7 +153,13 @@ arrays, must be typeable.
 Sum types are anonymous in Futhark, and are written as the
 constructors separated by vertical bars.  Each constructor consists of
 a ``#``-prefixed *name*, followed by zero or more types, called its
-*payload*.
+*payload*.  **Note:** The current implementation of sum types is
+fairly inefficient, in that all possible constructors of a sum-typed
+value will be resident in memory.  Avoid using sum types where
+multiple constructors have large payloads.  Further, there is an
+implementation weakness where arrays of sum types with an array
+payload may result in incorrect size inference and run-time errors.
+Try to avoid these for now.
 
 Records are mappings from field names to values, with the field names
 known statically.  A tuple behaves in all respects like a record with
