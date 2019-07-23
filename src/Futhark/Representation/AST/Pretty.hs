@@ -158,13 +158,15 @@ instance PrettyLore lore => Pretty (Stm lore) where
       (True, Nothing) -> equals </> e'
       (_, Just ann) -> equals </> (ann </> e')
       (False, Nothing) -> equals <+/> e'
-    where e' = ppr cs <> ppr e
+    where e' | linebreak = ppr cs </> ppr e
+             | otherwise = ppr cs <> ppr e
           linebreak = case e of
                         DoLoop{}           -> True
                         Op{}               -> True
                         If{}               -> True
                         BasicOp ArrayLit{} -> False
-                        _                  -> False
+                        BasicOp Assert{}   -> True
+                        _                  -> cs /= mempty
 
 instance Pretty (BasicOp lore) where
   ppr (SubExp se) = ppr se
@@ -253,8 +255,8 @@ instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda [] _ []) = text "nilFn"
   ppr (Lambda params body rettype) =
     annot (mapMaybe ppAnnot params) $
-    text "fn" <+> ppTuple' rettype <+>
-    parens (commasep (map ppr params)) <+>
+    text "fn" <+> ppTuple' rettype <+/>
+    parens (commasep (map ppr params)) <>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (FunDef lore) where
