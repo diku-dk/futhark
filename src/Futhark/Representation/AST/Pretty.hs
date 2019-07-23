@@ -256,7 +256,7 @@ instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda params body rettype) =
     annot (mapMaybe ppAnnot params) $
     text "fn" <+> ppTuple' rettype <+/>
-    parens (commasep (map ppr params)) <>
+    parens (commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (FunDef lore) where
