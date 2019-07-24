@@ -20,6 +20,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Control.Monad.Fail as Fail
 import Data.Maybe
+import Data.List
 
 import Futhark.Representation.Kernels
 import Futhark.Optimise.Simplify.Lore
@@ -516,10 +517,9 @@ handleHostOp (GetSizeMax size_class) =
 handleHostOp (CmpSizeLe key size_class x) =
   return $ Inner $ CmpSizeLe key size_class x
 handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
-  src' <- mapM ensureDirectSource (hspaceSource hspace)
-  let hspace' = (huskSpaceMemInfo hspace) { hspaceSource = src' }
-  (body', red_op') <- localScope (scopeOfHuskSpace hspace') $ do
-    b <- allocInHuskBody body
+  (hspace', slices) <- handleHuskSpace hspace
+  (body', red_op') <- localScope (scopeOfHuskSpace hspace' <> scopeOf slices) $ do
+    b <- allocInHuskBody body slices
     lp' <- mapM alloc lp
     r <- allocInLambda lp' lb lr
     return (b, r)
@@ -529,13 +529,22 @@ handleHostOp (Husk hspace (Lambda lp lb lr) nes ts body) = do
         alloc (Param name t@(Array pt shape u)) = do
           mem <- allocForArray t DefaultSpace
           return $ Param name $ directIndexFunction pt shape u mem t
-        ensureDirectSource s = (getVar . snd) =<< ensureDirectArray Nothing s
-        getVar (Var v) = return v
-        getVar _ = fail "Not a variable."
 handleHostOp (OtherOp op) =
   fail $ "Cannot allocate memory in SOAC: " ++ pretty op
 handleHostOp (SegOp op) =
   Inner . SegOp <$> handleSegOp op
+
+handleHuskSpace :: HuskSpace Kernels -> AllocM Kernels ExplicitMemory (HuskSpace ExplicitMemory, Stms ExplicitMemory)
+handleHuskSpace (HuskSpace src src_elems parts parts_elems parts_offset parts_mem) = do
+  (_, src_ixfuns) <- unzip <$> mapM lookupArraySummary src
+  let (direct,indirect) = partition isDirect $ zip4 src_ixfuns src parts parts_mem
+      (_, src', parts', parts_mem') = unzip4 direct
+      hspace' = huskSpaceMemInfo $ HuskSpace src' src_elems parts' parts_elems parts_offset parts_mem'
+  slices <- stmsFromList <$> mapM sliceSrcStm indirect
+  return (hspace', slices)
+  where isDirect (ixfun, _, _, _) = IxFun.isDirect ixfun
+        sliceSrcStm (_,s,p,_) = 
+          mkLetNamesM [paramName p] =<< eSliceArray 0 s (toExp parts_offset) (toExp parts_elems)
 
 huskSpaceMemInfo :: HuskSpace Kernels -> HuskSpace ExplicitMemory
 huskSpaceMemInfo (HuskSpace src src_elems parts parts_elems parts_offset parts_mem) =
@@ -592,11 +601,11 @@ allocInFunBody space_oks (Body _ bnds res) =
         space_oks' = replicate (length res - num_vals) Nothing ++ space_oks
 
 allocInHuskBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-                   Body fromlore -> AllocM fromlore tolore (Body tolore)
-allocInHuskBody (Body _ bnds res) =
+                   Body fromlore -> Stms tolore -> AllocM fromlore tolore (Body tolore)
+allocInHuskBody (Body _ bnds res) slices =
   allocInStms bnds $ \bnds' -> do
     (res', allocs) <- collectStms $ mapM (ensureDirect Nothing) res
-    return $ Body () (bnds'<>allocs) res'
+    return $ Body () (slices<>bnds'<>allocs) res'
 
 ensureDirect :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                 Maybe Space -> SubExp -> AllocM fromlore tolore SubExp
