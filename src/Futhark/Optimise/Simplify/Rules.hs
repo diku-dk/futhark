@@ -518,6 +518,9 @@ simplifyBinOp defOf _ (BinOp (SMax it) e1 e2)
 
 simplifyBinOp _ _ _ = Nothing
 
+simplifyBinOp' :: BasicOp lore -> BasicOp lore
+simplifyBinOp' bo = maybe bo fst $ simplifyBinOp (const Nothing) (const Nothing) bo
+
 constRes :: PrimValue -> Maybe (BasicOp lore, Certificates)
 constRes = Just . (,mempty) . SubExp . Constant
 
@@ -763,12 +766,12 @@ sliceSlice :: MonadBinder m =>
               [DimIndex SubExp] -> [DimIndex SubExp] -> m [DimIndex SubExp]
 sliceSlice (DimFix j:js') is' = (DimFix j:) <$> sliceSlice js' is'
 sliceSlice (DimSlice j _ s:js') (DimFix i:is') = do
-  i_t_s <- letSubExp "j_t_s" $ BasicOp $ BinOp (Mul Int32) i s
-  j_p_i_t_s <- letSubExp "j_p_i_t_s" $ BasicOp $ BinOp (Add Int32) j i_t_s
+  i_t_s <- letSubExp "j_t_s" $ BasicOp $ simplifyBinOp' $ BinOp (Mul Int32) i s
+  j_p_i_t_s <- letSubExp "j_p_i_t_s" $ BasicOp $ simplifyBinOp' $ BinOp (Add Int32) j i_t_s
   (DimFix j_p_i_t_s:) <$> sliceSlice js' is'
 sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') = do
-  s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ BinOp (Mul Int32) s0 i
-  j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ BinOp (Add Int32) j s0_t_i
+  s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ simplifyBinOp' $ BinOp (Mul Int32) s0 i
+  j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ simplifyBinOp' $ BinOp (Add Int32) j s0_t_i
   (DimSlice j_p_s0_t_i n s1:) <$> sliceSlice js' is'
 sliceSlice _ _ = return []
 
