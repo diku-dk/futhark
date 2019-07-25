@@ -21,7 +21,6 @@ import qualified Futhark.Representation.Kernels as Out
 import Futhark.Representation.Kernels.Kernel
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Analysis.DataDependencies
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -56,11 +55,9 @@ intraGroupParallelise knest lam = runMaybeT $ do
   group_size <- newVName "computed_group_size"
   let intra_lvl = SegThread (Count num_groups) (Count $ Var group_size) SegNoVirt
 
-  ltid <- newVName "ltid"
-  let group_variant = S.fromList [ltid]
   (wss_min, wss_avail, log, kbody) <-
     lift $ localScope (scopeOfLParams $ lambdaParams lam) $
-    intraGroupParalleliseBody intra_lvl (dataDependencies body) group_variant body
+    intraGroupParalleliseBody intra_lvl body
 
   known_outside <- lift $ M.keys <$> askScope
   unless (all (`elem` known_outside) $ freeIn $ wss_min ++ wss_avail) $
@@ -109,10 +106,6 @@ intraGroupParallelise knest lam = runMaybeT $ do
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 
-data Env = Env { _dataDeps :: Dependencies
-               , _groupVariant :: Names
-               }
-
 data Acc = Acc { accMinPar :: S.Set [SubExp]
                , accAvailPar :: S.Set [SubExp]
                , accLog :: Log
@@ -126,17 +119,17 @@ instance Monoid Acc where
   mempty = Acc mempty mempty mempty
 
 type IntraGroupM =
-  BinderT Out.Kernels (RWS Env Acc VNameSource)
+  BinderT Out.Kernels (RWS () Acc VNameSource)
 
 instance MonadLogger IntraGroupM where
   addLog log = tell mempty { accLog = log }
 
 runIntraGroupM :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                  Env -> IntraGroupM () -> m (Acc, Out.Stms Out.Kernels)
-runIntraGroupM env m = do
+                  IntraGroupM () -> m (Acc, Out.Stms Out.Kernels)
+runIntraGroupM m = do
   scope <- castScope <$> askScope
   modifyNameSource $ \src ->
-    let (((), kstms), src', acc) = runRWS (runBinderT m scope) env src
+    let (((), kstms), src', acc) = runRWS (runBinderT m scope) () src
     in ((acc, kstms), src')
 
 parallelMin :: [SubExp] -> IntraGroupM ()
@@ -151,13 +144,8 @@ intraGroupBody lvl body = do
 
 intraGroupStm :: SegLevel -> Stm -> IntraGroupM ()
 intraGroupStm lvl stm@(Let pat aux e) = do
-  Env deps group_variant <- ask
   scope <- askScope
-  let groupInvariant (Var v) =
-        S.null . S.intersection group_variant .
-        flip (M.findWithDefault mempty) deps $ v
-      groupInvariant Constant{} = True
-      lvl' = SegThread (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
+  let lvl' = SegThread (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
 
   case e of
     DoLoop ctx val form loopbody ->
@@ -170,12 +158,11 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                           ForLoop i it bound inps -> ForLoop i it bound inps
                           WhileLoop cond          -> WhileLoop cond
 
-    If cond tbody fbody ifattr
-      | groupInvariant cond -> do
-          tbody' <- intraGroupBody lvl tbody
-          fbody' <- intraGroupBody lvl fbody
-          certifying (stmAuxCerts aux) $
-            letBind_ pat $ If cond tbody' fbody' ifattr
+    If cond tbody fbody ifattr -> do
+      tbody' <- intraGroupBody lvl tbody
+      fbody' <- intraGroupBody lvl fbody
+      certifying (stmAuxCerts aux) $
+        letBind_ pat $ If cond tbody' fbody' ifattr
 
     Op (Screma w form arrs)
       | Just lam <- isMapSOAC form -> do
@@ -258,11 +245,10 @@ intraGroupStms :: SegLevel -> Stms SOACS -> IntraGroupM ()
 intraGroupStms lvl = mapM_ (intraGroupStm lvl)
 
 intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                             SegLevel -> Dependencies -> Names -> Body
+                             SegLevel -> Body
                           -> m ([[SubExp]], [[SubExp]], Log, Out.KernelBody Out.Kernels)
-intraGroupParalleliseBody lvl deps group_variant body = do
+intraGroupParalleliseBody lvl body = do
   (Acc min_ws avail_ws log, kstms) <-
-    runIntraGroupM (Env deps group_variant) $
-    intraGroupStms lvl $ bodyStms body
+    runIntraGroupM $ intraGroupStms lvl $ bodyStms body
   return (S.toList min_ws, S.toList avail_ws, log,
           KernelBody () kstms $ map Returns $ bodyResult body)
