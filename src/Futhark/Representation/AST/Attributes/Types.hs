@@ -47,9 +47,7 @@ module Futhark.Representation.AST.Attributes.Types
 
        , extractShapeContext
        , shapeContext
-       , shapeContextSize
        , hasStaticShape
-       , hasStaticShapes
        , generaliseExtTypes
        , existentialiseExtTypes
        , shapeMapping
@@ -367,10 +365,6 @@ shapeContext = S.fromList
   where ext (Ext x)  = Just x
         ext (Free _) = Nothing
 
--- | The size of the set that would be returned by 'shapeContext'.
-shapeContextSize :: [ExtType] -> Int
-shapeContextSize = S.size . shapeContext
-
 -- | If all dimensions of the given 'RetType' are statically known,
 -- return the corresponding list of 'Type'.
 hasStaticShape :: ExtType -> Maybe Type
@@ -380,9 +374,6 @@ hasStaticShape (Array bt (Shape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
   where isFree (Free s) = Just s
         isFree (Ext _)  = Nothing
-
-hasStaticShapes :: [ExtType] -> Maybe [Type]
-hasStaticShapes = mapM hasStaticShape
 
 -- | Given two lists of 'ExtType's of the same length, return a list
 -- of 'ExtType's that is a subtype (as per 'isSubtypeOf') of the two
