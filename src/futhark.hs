@@ -96,9 +96,6 @@ main = reportingIOErrors $ do
   args <- getArgs
   prog <- getProgName
   case args of
-    -- The -t case here is for temporary compatibility with
-    -- futhark-mode.  It will go away eventually.
-    "-t":args' -> Misc.mainCheck prog args'
     cmd:args'
       | Just (m, _) <- lookup cmd commands -> m (unwords [prog, cmd]) args'
     _ -> mainWithOptions () [] msg (const . const Nothing) prog args
