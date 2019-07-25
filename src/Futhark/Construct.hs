@@ -54,9 +54,6 @@ module Futhark.Construct
   -- * Result types
   , instantiateShapes
   , instantiateShapes'
-  , instantiateShapesFromIdentList
-  , instantiateExtTypes
-  , instantiateIdents
   , removeExistentials
 
   -- * Convenience
@@ -481,41 +478,6 @@ instantiateShapes' ts =
   where instantiate _ = do v <- lift $ newIdent "size" $ Prim int32
                            tell [v]
                            return $ Var $ identName v
-
-instantiateShapesFromIdentList :: [Ident] -> [ExtType] -> [Type]
-instantiateShapesFromIdentList idents ts =
-  evalState (instantiateShapes instantiate ts) idents
-  where instantiate _ = do
-          idents' <- get
-          case idents' of
-            [] -> fail "instantiateShapesFromIdentList: insufficiently sized context"
-            ident:idents'' -> do put idents''
-                                 return $ Var $ identName ident
-
-instantiateExtTypes :: [VName] -> [ExtType] -> [Ident]
-instantiateExtTypes names rt =
-  let (shapenames,valnames) = splitAt (shapeContextSize rt) names
-      shapes = [ Ident name (Prim int32) | name <- shapenames ]
-      valts  = instantiateShapesFromIdentList shapes rt
-      vals   = [ Ident name t | (name,t) <- zip valnames valts ]
-  in shapes ++ vals
-
-instantiateIdents :: [VName] -> [ExtType]
-                  -> Maybe ([Ident], [Ident])
-instantiateIdents names ts
-  | let n = shapeContextSize ts,
-    n + length ts == length names = do
-    let (context, vals) = splitAt n names
-        nextShape _ = do
-          (context', remaining) <- get
-          case remaining of []   -> lift Nothing
-                            x:xs -> do let ident = Ident x (Prim int32)
-                                       put (context'++[ident], xs)
-                                       return $ Var x
-    (ts', (context', _)) <-
-      runStateT (instantiateShapes nextShape ts) ([],context)
-    return (context', zipWith Ident vals ts')
-  | otherwise = Nothing
 
 removeExistentials :: ExtType -> Type -> Type
 removeExistentials t1 t2 =
