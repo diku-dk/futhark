@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `--futhark` option for `futhark bench` and `futhark test` now
     defaults to the binary being used for the subcommands themselves.
 
+  * The legacy `futhark -t` option (which did the same as `futhark
+    check`) has been removed.
+
 ### Fixed
 
   * `futhark test` now understands `--no-tuning` as it was always
