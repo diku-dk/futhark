@@ -61,9 +61,7 @@ module Language.Futhark.Attributes
   , removeShapeAnnotations
   , vacuousShapeAnnotations
   , anyDimShapeAnnotations
-  , recordArrayElemToType
   , arrayElemToType
-  , typeToArrayElem
   , tupleRecord
   , isTupleRecord
   , areTupleFields
@@ -142,14 +140,9 @@ nestedDims t =
         arrayNestedDims (ArrayPolyElem _ targs) =
           concatMap typeArgDims targs
         arrayNestedDims (ArrayRecordElem ts) =
-          fold (fmap recordArrayElemNestedDims ts)
+          fold (fmap nestedDims ts)
         arrayNestedDims (ArraySumElem cs) =
-          fold (fmap (concatMap recordArrayElemNestedDims) cs)
-
-        recordArrayElemNestedDims (RecordArrayArrayElem a ds) =
-          arrayNestedDims a <> shapeDims ds
-        recordArrayElemNestedDims (RecordArrayElem et) =
-          arrayNestedDims et
+          fold (fmap (concatMap nestedDims) cs)
 
         typeArgDims (TypeArgDim d _) = [d]
         typeArgDims (TypeArgType at _) = nestedDims at
@@ -229,22 +222,12 @@ peelArray n (Array _ _ (ArrayPrimElem et) shape)
 peelArray n (Array als u (ArrayPolyElem et targs) shape)
   | shapeRank shape == n =
     Just $ TypeVar als u et targs
-peelArray n (Array als u (ArrayRecordElem ts) shape)
+peelArray n (Array als _ (ArrayRecordElem ts) shape)
   | shapeRank shape == n =
-    Just $ Record $ fmap asType ts
-  where asType (RecordArrayElem (ArrayPrimElem bt)) = Prim bt
-        asType (RecordArrayElem (ArrayPolyElem bt targs)) = TypeVar als u bt targs
-        asType (RecordArrayElem (ArrayRecordElem ts')) = Record $ fmap asType ts'
-        asType (RecordArrayElem (ArraySumElem cs)) = SumT $ (fmap . fmap) asType cs
-        asType (RecordArrayArrayElem et e_shape) = Array als u et e_shape
-peelArray n (Array als u (ArraySumElem cs) shape) -- TODO : fix
+    Just $ Record $ fmap (`addAliases` const als) ts
+peelArray n (Array als _ (ArraySumElem cs) shape) -- TODO : fix
   | shapeRank shape == n =
-    Just $ SumT $ (fmap . fmap) asType cs
-  where asType (RecordArrayElem (ArrayPrimElem bt)) = Prim bt
-        asType (RecordArrayElem (ArrayPolyElem bt targs)) = TypeVar als u bt targs
-        asType (RecordArrayElem (ArrayRecordElem ts)) = Record $ fmap asType ts
-        asType (RecordArrayElem (ArraySumElem cs')) = SumT $ (fmap . fmap) asType cs'
-        asType (RecordArrayArrayElem et e_shape) = Array als u et e_shape
+    Just $ SumT $ (fmap . fmap) (`addAliases` const als) cs
 peelArray n (Array als u et shape) = do
   shape' <- stripDims n shape
   return $ Array als u et shape'
@@ -276,58 +259,20 @@ arrayOfWithAliases (Prim et) as shape u =
   Just $ Array as u (ArrayPrimElem et) shape
 arrayOfWithAliases (TypeVar _ _ x targs) as shape u =
   Just $ Array as u (ArrayPolyElem x targs) shape
-arrayOfWithAliases (Record ts) as shape u = do
-  ts' <- traverse typeToRecordArrayElem ts
-  return $ Array as u (ArrayRecordElem ts') shape
+arrayOfWithAliases (Record ts) as shape u =
+  Just $ Array as u (ArrayRecordElem $ fmap toStruct ts) shape
 arrayOfWithAliases Arrow{} _ _ _ = Nothing
-arrayOfWithAliases (SumT cs) as shape u = do
-  cs' <- (traverse . traverse) typeToRecordArrayElem cs -- TODO: update name
-  return $ Array as u (ArraySumElem cs') shape
-
-typeToRecordArrayElem :: Monoid as =>
-                         TypeBase dim as -> Maybe (RecordArrayElemTypeBase dim)
-typeToRecordArrayElem (Prim bt) =
-  Just $ RecordArrayElem $ ArrayPrimElem bt
-typeToRecordArrayElem (TypeVar _ _ bt targs) =
-  Just $ RecordArrayElem $ ArrayPolyElem bt targs
-typeToRecordArrayElem (Record ts') =
-  RecordArrayElem . ArrayRecordElem <$>
-  traverse typeToRecordArrayElem ts'
-typeToRecordArrayElem (Array _ _ et shape) =
-  Just $ RecordArrayArrayElem et shape
-typeToRecordArrayElem Arrow{} = Nothing
-typeToRecordArrayElem (SumT cs) =
-  RecordArrayElem . ArraySumElem <$>
-  (traverse . traverse) typeToRecordArrayElem cs
-
-recordArrayElemToType :: Monoid as =>
-                         RecordArrayElemTypeBase dim
-                      -> TypeBase dim as
-recordArrayElemToType (RecordArrayElem et)            = arrayElemToType et
-recordArrayElemToType (RecordArrayArrayElem et shape) = Array mempty Nonunique et shape
+arrayOfWithAliases (SumT cs) as shape u =
+  Just $ Array as u (ArraySumElem $ fmap (map toStruct) cs) shape
 
 arrayElemToType :: Monoid as => ArrayElemTypeBase dim -> TypeBase dim as
 arrayElemToType (ArrayPolyElem bt targs) =
   TypeVar mempty Nonunique bt targs
 arrayElemToType (ArrayRecordElem ts) =
-  Record $ fmap recordArrayElemToType ts
+  Record $ fmap (`setAliases` mempty) ts
 arrayElemToType (ArrayPrimElem bt) = Prim bt
 arrayElemToType (ArraySumElem cs) =
-  SumT $ (fmap . fmap) recordArrayElemToType cs
-
-typeToArrayElem :: Monoid as => TypeBase dim as -> Maybe (ArrayElemTypeBase dim)
-typeToArrayElem (Prim bt) =
-  Just $ ArrayPrimElem bt
-typeToArrayElem (TypeVar _ _ bt targs) =
-  Just $ ArrayPolyElem bt targs
-typeToArrayElem (Record ts') =
-  ArrayRecordElem <$> traverse typeToRecordArrayElem ts'
-typeToArrayElem (Array _ _ et _) =
-  Just et
-typeToArrayElem Arrow{} = Nothing
-typeToArrayElem (SumT cs) =
-  ArraySumElem <$>
-  (traverse . traverse) typeToRecordArrayElem cs
+  SumT $ (fmap . fmap) (`setAliases` mempty) cs
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
@@ -393,21 +338,9 @@ combineElemTypeInfo :: ArrayDim dim =>
                        ArrayElemTypeBase dim
                     -> ArrayElemTypeBase dim -> ArrayElemTypeBase dim
 combineElemTypeInfo (ArrayRecordElem et1) (ArrayRecordElem et2) =
-  ArrayRecordElem $ M.map (uncurry combineRecordArrayTypeInfo)
+  ArrayRecordElem $ M.map (uncurry combineTypeShapes)
                           (M.intersectionWith (,) et1 et2)
 combineElemTypeInfo _ new_tp = new_tp
-
-combineRecordArrayTypeInfo :: ArrayDim dim =>
-                              RecordArrayElemTypeBase dim
-                           -> RecordArrayElemTypeBase dim
-                           -> RecordArrayElemTypeBase dim
-combineRecordArrayTypeInfo (RecordArrayElem et1) (RecordArrayElem et2) =
-  RecordArrayElem $ combineElemTypeInfo et1 et2
-combineRecordArrayTypeInfo (RecordArrayArrayElem et1 shape1)
-                           (RecordArrayArrayElem et2 shape2)
-  | Just new_shape <- unifyShapes shape1 shape2 =
-      RecordArrayArrayElem (combineElemTypeInfo et1 et2) new_shape
-combineRecordArrayTypeInfo _ new_tp = new_tp
 
 -- | Set the uniqueness attribute of a type.  If the type is a record
 -- or sum type, the uniqueness of its components will be modified.
@@ -543,14 +476,9 @@ typeVars t =
     Array _ _ (ArrayPolyElem tn targs) _ ->
       mconcat $ typeVarFree tn : map typeArgFree targs
     Array _ _ (ArrayRecordElem fields) _ ->
-      foldMap (typeVars . f) fields
-      -- This local function is to avoid an ambiguous type.
-      where f :: RecordArrayElemTypeBase dim -> TypeBase dim ()
-            f = recordArrayElemToType
+      foldMap typeVars fields
     Array _ _ (ArraySumElem cs) _  ->
-      foldMap (foldMap (typeVars . f)) cs
-      where f :: RecordArrayElemTypeBase dim -> TypeBase dim ()
-            f = recordArrayElemToType
+      foldMap (foldMap typeVars) cs
     SumT cs -> mconcat $ (foldMap . fmap) typeVars cs
   where typeVarFree = S.singleton . typeLeaf
         typeArgFree (TypeArgType ta _) = typeVars ta
@@ -788,9 +716,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         tp_b = TypeParamType Unlifted tv_b noLoc
 
         arr_a_b = Array () Nonunique
-                  (ArrayRecordElem (M.fromList $ zip tupleFieldNames
-                                     [RecordArrayElem $ ArrayPolyElem tv_a' [],
-                                      RecordArrayElem $ ArrayPolyElem tv_b' []]))
+                  (ArrayRecordElem (M.fromList $ zip tupleFieldNames [t_a, t_b]))
                   (rank 1)
         t_arr_a_arr_b = Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
 

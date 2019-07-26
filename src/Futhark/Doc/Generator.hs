@@ -418,20 +418,15 @@ prettyElem (ArrayPolyElem et targs) = do
   return $ prettyTypeName et <> joinBy " " targs'
 prettyElem (ArrayRecordElem fs)
   | Just ts <- areTupleFields fs =
-      parens . commas <$> mapM prettyRecordElem ts
+      parens . commas <$> mapM typeHtml ts
   | otherwise =
       braces . commas <$> mapM ppField (M.toList fs)
   where ppField (name, tp) = do
-          tp' <- prettyRecordElem tp
+          tp' <- typeHtml tp
           return $ toHtml (nameToString name) <> ": " <> tp'
 prettyElem (ArraySumElem cs) = pipes <$> mapM ppClause (sortConstrs cs)
-    where ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM prettyRecordElem ts
+    where ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM typeHtml ts
           ppConstr name = "#" <> toHtml (nameToString name)
-
-prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) -> DocM Html
-prettyRecordElem (RecordArrayElem et) = prettyElem et
-prettyRecordElem (RecordArrayArrayElem et shape) =
-  typeHtml $ Array () Nonunique et shape
 
 prettyShapeDecl :: ShapeDecl (DimDecl VName) -> DocM Html
 prettyShapeDecl (ShapeDecl ds) =

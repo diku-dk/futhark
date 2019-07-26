@@ -614,12 +614,12 @@ removeSumTypes (SumT cs) =
   tupleRecord $ Prim (Unsigned Int8) : map (tupleRecord . snd) (sortConstrs cs)
 removeSumTypes (Arrow as v t1 t2) = Arrow as v (removeSumTypes t1) (removeSumTypes t2)
 removeSumTypes (Record fs) = Record $ M.map removeSumTypes fs
-removeSumTypes (Array as u ts shape) =
-  case  (typeToArrayElem . removeSumTypes . arrayElemToType') ts of
-    Nothing  -> error "Shouldn't happen."
-    Just ts' -> Array as u ts' shape
+removeSumTypes (Array as u t shape) =
+  maybe nope (`setAliases` as) $
+  arrayOf (removeSumTypes $ arrayElemToType' t) shape u
   where arrayElemToType' :: ArrayElemTypeBase dim -> TypeBase dim ()
         arrayElemToType' = arrayElemToType -- Needed to make ghc happy :)
+        nope = error "removeSumTypes: could not create array after substitution."
 removeSumTypes t = t
 
 transformValBind :: ValBind -> MonoM Env

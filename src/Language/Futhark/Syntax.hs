@@ -29,7 +29,6 @@ module Language.Futhark.Syntax
   , TypeArg(..)
   , TypeExp(..)
   , TypeArgExp(..)
-  , RecordArrayElemTypeBase(..)
   , ArrayElemTypeBase(..)
   , PatternType
   , StructType
@@ -115,7 +114,6 @@ class (Show vn,
        Show (f StructType),
        Show (f (Aliasing, StructType)),
        Show (f (M.Map VName VName)),
-       Show (f [RecordArrayElemTypeBase ()]),
        Show (f Uniqueness)) => Showable f vn where
 
 -- | No information functor.  Usually used for placeholder type- or
@@ -286,28 +284,14 @@ typeNameFromQualName (QualName qs x) = TypeName qs x
 qualNameFromTypeName :: TypeName -> QualName VName
 qualNameFromTypeName (TypeName qs x) = QualName qs x
 
--- | Types that can be elements of tuple-arrays.
-data RecordArrayElemTypeBase dim =
-    RecordArrayElem (ArrayElemTypeBase dim)
-  | RecordArrayArrayElem (ArrayElemTypeBase dim) (ShapeDecl dim)
-  deriving (Eq, Show)
-
-instance Traversable RecordArrayElemTypeBase where
-  traverse f (RecordArrayElem t) = RecordArrayElem <$> traverse f t
-  traverse f (RecordArrayArrayElem a shape) =
-    RecordArrayArrayElem <$> traverse f a <*> traverse f shape
-
-instance Functor RecordArrayElemTypeBase where
-  fmap = fmapDefault
-
-instance Foldable RecordArrayElemTypeBase where
-  foldMap = foldMapDefault
-
+-- | Types that can be elements of arrays.  This representation does
+-- allow arrays of records of functions, which is nonsensical, but it
+-- convolutes the code too much if we try to statically rule it out.
 data ArrayElemTypeBase dim =
     ArrayPrimElem PrimType
   | ArrayPolyElem TypeName [TypeArg dim]
-  | ArrayRecordElem (M.Map Name (RecordArrayElemTypeBase dim))
-  | ArraySumElem (M.Map Name [RecordArrayElemTypeBase dim]) -- TODO:  Is this right?
+  | ArrayRecordElem (M.Map Name (TypeBase dim ()))
+  | ArraySumElem (M.Map Name [TypeBase dim ()])
   deriving (Eq, Show)
 
 instance Traversable ArrayElemTypeBase where
@@ -316,9 +300,9 @@ instance Traversable ArrayElemTypeBase where
   traverse f (ArrayPolyElem t args) =
     ArrayPolyElem t <$> traverse (traverse f) args
   traverse f (ArrayRecordElem fs) =
-    ArrayRecordElem <$> traverse (traverse f) fs
+    ArrayRecordElem <$> traverse (bitraverse f pure) fs
   traverse f (ArraySumElem cs) =
-    ArraySumElem <$> (traverse . traverse) (traverse f) cs
+    ArraySumElem <$> (traverse . traverse) (bitraverse f pure) cs
 
 instance Functor ArrayElemTypeBase where
   fmap = fmapDefault

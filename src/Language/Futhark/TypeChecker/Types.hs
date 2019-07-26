@@ -94,24 +94,12 @@ unifyArrayElemTypes _ (ArrayPolyElem bt1 targs1) (ArrayPolyElem bt2 targs2)
 unifyArrayElemTypes uf (ArrayRecordElem et1) (ArrayRecordElem et2)
   | sort (M.keys et1) == sort (M.keys et2) =
     ArrayRecordElem <$>
-    traverse (uncurry $ unifyRecordArrayElemTypes uf) (M.intersectionWith (,) et1 et2)
+    traverse (uncurry $ unifyTypesU uf) (M.intersectionWith (,) et1 et2)
 unifyArrayElemTypes uf (ArraySumElem cs1) (ArraySumElem cs2)
   | sort (M.keys cs1) == sort (M.keys cs2) =
     ArraySumElem <$>
-    traverse (uncurry (zipWithM (unifyRecordArrayElemTypes uf))) (M.intersectionWith (,) cs1 cs2)
+    traverse (uncurry (zipWithM (unifyTypesU uf))) (M.intersectionWith (,) cs1 cs2)
 unifyArrayElemTypes _ _ _ =
-  Nothing
-
-unifyRecordArrayElemTypes :: (ArrayDim dim) =>
-                             (Uniqueness -> Uniqueness -> Maybe Uniqueness)
-                          -> RecordArrayElemTypeBase dim
-                          -> RecordArrayElemTypeBase dim
-                          -> Maybe (RecordArrayElemTypeBase dim)
-unifyRecordArrayElemTypes uf (RecordArrayElem et1) (RecordArrayElem et2) =
-  RecordArrayElem <$> unifyArrayElemTypes uf et1 et2
-unifyRecordArrayElemTypes uf (RecordArrayArrayElem et1 shape1) (RecordArrayArrayElem et2 shape2) =
-  RecordArrayArrayElem <$> unifyArrayElemTypes uf et1 et2 <*> unifyShapes shape1 shape2
-unifyRecordArrayElemTypes _ _ _ =
   Nothing
 
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
@@ -381,8 +369,9 @@ type TypeSubs = M.Map VName TypeSub
 substituteTypes :: Monoid als => TypeSubs -> TypeBase (DimDecl VName) als -> TypeBase (DimDecl VName) als
 substituteTypes substs ot = case ot of
   Array als u at shape ->
-    maybe nope (`addAliases` (<>als)) $
-    arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
+    maybe nope (`addAliases`(<>als)) $
+    arrayOf (substituteTypesInArrayElem at `setAliases` mempty)
+    (substituteInShape shape) u
   Prim t -> Prim t
   TypeVar als u v targs
     | Just (TypeSub (TypeAbbr _ ps t)) <-
@@ -407,11 +396,9 @@ substituteTypes substs ot = case ot of
           | otherwise =
               TypeVar mempty Nonunique v (map substituteInTypeArg targs)
         substituteTypesInArrayElem (ArrayRecordElem ts) =
-          Record ts'
-          where ts' = fmap (substituteTypes substs . recordArrayElemToType) ts
+          Record $ fmap (substituteTypes substs) ts
         substituteTypesInArrayElem (ArraySumElem cs) =
-          SumT cs'
-          where cs' = (fmap . fmap) (substituteTypes substs . recordArrayElemToType) cs
+          SumT $ (fmap . fmap) (substituteTypes substs) cs
 
         substituteInTypeArg (TypeArgDim d loc) =
           TypeArgDim (substituteInDim d) loc
@@ -502,10 +489,9 @@ substTypesAny lookupSubst ot = case ot of
             -- gives the aliasing.
             _ -> TypeVar mempty Nonunique v $ map subsTypeArg targs
         subsArrayElem (ArrayRecordElem ts) =
-          Record $ substTypesAny lookupSubst . recordArrayElemToType <$> ts
+          Record $ fmap (substTypesAny lookupSubst . flip setAliases mempty) ts
         subsArrayElem (ArraySumElem cs) =
-          let cs' = (fmap . fmap) recordArrayElemToType cs
-          in SumT $ (fmap . fmap) (substTypesAny lookupSubst) cs'
+          SumT $ (fmap . fmap) (substTypesAny lookupSubst . flip setAliases mempty) cs
 
         subsTypeArg (TypeArgType t loc) =
           TypeArgType (substTypesAny lookupSubst' t) loc

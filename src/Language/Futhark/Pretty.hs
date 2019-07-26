@@ -108,11 +108,6 @@ instance IsName vn => Pretty (ShapeDecl (DimDecl vn)) where
 instance Pretty (ShapeDecl ()) where
   ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
 
-instance Pretty (ShapeDecl dim) => Pretty (RecordArrayElemTypeBase dim) where
-  ppr (RecordArrayElem et) = ppr et
-  ppr (RecordArrayArrayElem et shape) =
-    ppr shape <> ppr et
-
 instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim) where
   ppr (ArrayPrimElem pt) = ppr pt
   ppr (ArrayPolyElem v args) =
