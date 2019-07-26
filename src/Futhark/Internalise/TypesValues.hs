@@ -125,15 +125,10 @@ internaliseTypeM orig_t =
         internaliseElemType (E.ArrayPrimElem bt) =
           return [I.Prim $ internalisePrimType bt]
         internaliseElemType (E.ArrayRecordElem elemts) =
-          concat <$> mapM (internaliseRecordElem . snd) (E.sortFields elemts)
+          concat <$> mapM (internaliseTypeM . snd) (E.sortFields elemts)
         internaliseElemType (E.ArraySumElem cs) =
           ((I.Prim $ I.IntType I.Int8):) . concat . concat
-                   <$> mapM (mapM internaliseRecordElem . snd) (E.sortConstrs cs)
-
-        internaliseRecordElem (E.RecordArrayElem et) =
-          internaliseElemType et
-        internaliseRecordElem (E.RecordArrayArrayElem et shape) =
-          internaliseTypeM $ E.Array mempty Nonunique et shape
+          <$> mapM (mapM internaliseTypeM . snd) (E.sortConstrs cs)
 
         internaliseShape = mapM internaliseDim . E.shapeDims
 

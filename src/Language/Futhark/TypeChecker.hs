@@ -916,15 +916,11 @@ newNamesForMTy orig_mty = do
                       (map substituteInTypeArg targs))
                      (substituteInShape shape)
         substituteInType (Array () u (ArrayRecordElem ts) shape) =
-          let ts' = fmap (substituteInType . recordArrayElemToType) ts
-          in case arrayOf (Record ts') (substituteInShape shape) u of
-            Just t' -> t'
-            _ -> error "substituteInType: Cannot create array after substitution."
+          Array () u (ArrayRecordElem ts') (substituteInShape shape)
+          where ts' = fmap substituteInType ts
         substituteInType (Array () u (ArraySumElem cs) shape) =
-          let cs' = (fmap .fmap) (substituteInType . recordArrayElemToType) cs
-          in case arrayOf (SumT cs') (substituteInShape shape) u of
-            Just t' -> t'
-            _ -> error "substituteInType: Cannot create array after substitution."
+          Array () u (ArraySumElem cs') (substituteInShape shape)
+          where cs' = (fmap . fmap) substituteInType cs
         substituteInType (Arrow als v t1 t2) =
           Arrow als v (substituteInType t1) (substituteInType t2)
 

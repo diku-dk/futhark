@@ -457,28 +457,14 @@ unifyExpTypes e1 e2 = do
 unifyTypeAliases :: PatternType -> PatternType -> PatternType
 unifyTypeAliases t1 t2 =
   case (t1, t2) of
-    (Array als1 u1 et1 shape1, Array als2 u2 et2 _) ->
-      Array (als1<>als2) (min u1 u2) (unifyArrayElems et1 et2) shape1
+    (Array als1 u1 et1 shape1, Array als2 u2 _ _) ->
+      Array (als1<>als2) (min u1 u2) et1 shape1
     (Record f1, Record f2) ->
       Record $ M.intersectionWith unifyTypeAliases f1 f2
     (TypeVar als1 u v targs1, TypeVar als2 _ _ targs2) ->
       TypeVar (als1 <> als2) u v $ zipWith unifyTypeArg targs1 targs2
     _ -> t1
-  where unifyArrayElems (ArrayPrimElem pt1) (ArrayPrimElem _) =
-          ArrayPrimElem pt1
-        unifyArrayElems (ArrayPolyElem v targs1) (ArrayPolyElem _ _targs2) =
-          ArrayPolyElem v targs1
-        unifyArrayElems (ArrayRecordElem fields1) (ArrayRecordElem fields2) =
-          ArrayRecordElem $ M.intersectionWith unifyRecordArray fields1 fields2
-        unifyArrayElems x _ = x
-
-        unifyRecordArray (RecordArrayElem at1) (RecordArrayElem at2) =
-          RecordArrayElem $ unifyArrayElems at1 at2
-        unifyRecordArray (RecordArrayArrayElem at1 shape1) (RecordArrayArrayElem at2 _) =
-          RecordArrayArrayElem (unifyArrayElems at1 at2) shape1
-        unifyRecordArray x _ = x
-
-        unifyTypeArg (TypeArgType t1' loc) (TypeArgType _ _) =
+  where unifyTypeArg (TypeArgType t1' loc) (TypeArgType _ _) =
           TypeArgType t1' loc
         unifyTypeArg a _ = a
 

@@ -225,17 +225,9 @@ traverseArrayElemType _ _ (ArrayPrimElem t) =
 traverseArrayElemType f g (ArrayPolyElem t args) =
   ArrayPolyElem <$> f t <*> traverse (traverseTypeArg f g) args
 traverseArrayElemType f g (ArrayRecordElem fs) =
-  ArrayRecordElem <$> traverse (traverseRecordArrayElemType f g) fs
+  ArrayRecordElem <$> traverse (traverseType f g pure) fs
 traverseArrayElemType f g (ArraySumElem cs) =
-  ArraySumElem <$> (traverse . traverse) (traverseRecordArrayElemType f g) cs
-
-traverseRecordArrayElemType :: Applicative f =>
-                               (TypeName -> f TypeName) -> (dim1 -> f dim2)
-                            -> RecordArrayElemTypeBase dim1 -> f (RecordArrayElemTypeBase dim2)
-traverseRecordArrayElemType f g (RecordArrayElem et) =
-  RecordArrayElem <$> traverseArrayElemType f g et
-traverseRecordArrayElemType f g (RecordArrayArrayElem et shape) =
-  RecordArrayArrayElem <$> traverseArrayElemType f g et <*> traverse g shape
+  ArraySumElem <$> (traverse . traverse) (traverseType f g pure) cs
 
 traverseTypeArg :: Applicative f =>
                    (TypeName -> f TypeName) -> (dim1 -> f dim2)
