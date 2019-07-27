@@ -758,13 +758,6 @@ CInnerPattern :: { PatternBase NoInfo Name }
                | Constr                             { let (n, loc) = $1
                                                       in PatternConstr n NoInfo [] loc }
 
-ConstrPattern :: { PatternBase NoInfo Name}
-               : '(' Constr ConstrFields ')' { let (n, loc) = $2;
-                                               loc' = srcspan loc $>
-                                               in PatternConstr n NoInfo $3 loc'}
-               | Constr { let (n, loc) = $1
-                          in PatternConstr n NoInfo [] loc }
-
 ConstrFields :: { [PatternBase NoInfo Name] }
               : CInnerPattern                { [$1] }
               | ConstrFields CInnerPattern   { $1 ++ [$2] }
