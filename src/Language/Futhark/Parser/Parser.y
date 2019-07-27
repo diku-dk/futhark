@@ -164,7 +164,7 @@ import Language.Futhark.Parser.Lexer
 %left bottom
 %left ifprec letprec unsafe caseprec typeprec enumprec sumprec
 %left ',' case id constructor '(' '{'
-%left ':'
+%right ':'
 %right '...' '..<' '..>' '..'
 %left '`'
 %right '->'
@@ -587,7 +587,7 @@ Exp2 :: { UncheckedExp }
      | Exp2 with FieldAccesses_ '=' Exp2
        { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
 
-     | '\\' FunParams1 maybeAscription(TypeExpTerm) '->' Exp
+     | '\\' FunParams1 maybeAscription(TypeExpTerm) '->' Exp %prec letprec
        { Lambda (fst $2 : snd $2) $5 $3 NoInfo (srcspan $1 $>) }
 
      | Apply_ { $1 }
