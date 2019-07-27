@@ -108,29 +108,23 @@ internaliseTypeM :: E.StructType
                  -> InternaliseTypeM [I.TypeBase ExtShape Uniqueness]
 internaliseTypeM orig_t =
   case orig_t of
-    E.Prim bt -> return [I.Prim $ internalisePrimType bt]
-    E.TypeVar{} ->
-      fail "internaliseTypeM: cannot handle type variable."
-    E.Record ets -> concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
     E.Array _ u et shape -> do
       dims <- internaliseShape shape
-      ets <- internaliseElemType et
+      ets <- internaliseTypeM $ E.Scalar et
       return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets ]
-    E.Arrow{} -> fail $ "internaliseTypeM: cannot handle function type: " ++ pretty orig_t
-    E.SumT cs -> ((I.Prim $ I.IntType I.Int8):) . concat . concat
-                   <$> mapM (mapM internaliseTypeM . snd) (E.sortConstrs cs)
+    E.Scalar (E.Prim bt) ->
+      return [I.Prim $ internalisePrimType bt]
+    E.Scalar (E.Record ets) ->
+      concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
+    E.Scalar E.TypeVar{} ->
+      fail "internaliseTypeM: cannot handle type variable."
+    E.Scalar E.Arrow{} ->
+      fail $ "internaliseTypeM: cannot handle function type: " ++ pretty orig_t
+    E.Scalar (E.Sum cs) ->
+      ((I.Prim $ I.IntType I.Int8):) . concat . concat
+      <$> mapM (mapM internaliseTypeM . snd) (E.sortConstrs cs)
 
-  where internaliseElemType E.ArrayPolyElem{} =
-          fail "internaliseElemType: cannot handle type variable."
-        internaliseElemType (E.ArrayPrimElem bt) =
-          return [I.Prim $ internalisePrimType bt]
-        internaliseElemType (E.ArrayRecordElem elemts) =
-          concat <$> mapM (internaliseTypeM . snd) (E.sortFields elemts)
-        internaliseElemType (E.ArraySumElem cs) =
-          ((I.Prim $ I.IntType I.Int8):) . concat . concat
-          <$> mapM (mapM internaliseTypeM . snd) (E.sortConstrs cs)
-
-        internaliseShape = mapM internaliseDim . E.shapeDims
+  where internaliseShape = mapM internaliseDim . E.shapeDims
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?

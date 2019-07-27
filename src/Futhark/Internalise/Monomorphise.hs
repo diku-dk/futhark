@@ -28,9 +28,9 @@ module Futhark.Internalise.Monomorphise
   , runMonoM
   ) where
 
-import           Control.Monad.RWS
+import           Control.Monad.RWS hiding (Sum)
 import           Control.Monad.State
-import           Control.Monad.Writer
+import           Control.Monad.Writer hiding (Sum)
 import           Data.Bitraversable
 import           Data.Bifunctor
 import           Data.List as L
@@ -326,8 +326,8 @@ transformExp (Unsafe e1 loc) =
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 
-transformExp (Constr name es (Info t@(SumT cs)) loc) =
-  case constrIndex name t of
+transformExp (Constr name es (Info (Scalar (Sum cs))) loc) =
+  case constrIndex name cs of
     Nothing -> error "transFormExp: malformed constructor value."
     Just n  -> TupLit <$> ((index :) <$> clauses) <*> pure noLoc
       where index =  Literal (UnsignedValue (intValue Int8 n)) noLoc
@@ -341,26 +341,26 @@ transformExp Constr{} = error "transformExp: invalid constructor type."
 transformExp (Match e cs t loc) =
   Match <$> transformExp e <*> mapM transformCase cs <*> traverse transformType t <*> pure loc
 
-constrIndex :: Name -> TypeBase dim as -> Maybe Int
-constrIndex name (SumT cs) = fst <$> L.find (\(_, (name', _)) -> name == name') cs'
+constrIndex :: Name -> M.Map Name [TypeBase dim as] -> Maybe Int
+constrIndex name cs =
+  fst <$> L.find (\(_, (name', _)) -> name == name') cs'
   where cs' = zip [0..] $ sortConstrs cs
-constrIndex _ _ = error "constrIndex: invalid type."
 
 defaultValue :: PatternType -> Exp
-defaultValue (Prim Bool) = Literal (BoolValue False) noLoc
-defaultValue (Prim (Unsigned s)) = Literal (UnsignedValue (intValue s (0 :: Int))) noLoc
-defaultValue (Prim (Signed s)) = Literal (SignedValue (intValue s (0 :: Int))) noLoc
-defaultValue (Prim (FloatType s)) = Literal (FloatValue (floatValue s (0 :: Int))) noLoc
-defaultValue (SumT cs) = TupLit (defaultIndex : defaultClauses) noLoc
+defaultValue (Scalar (Prim Bool)) = Literal (BoolValue False) noLoc
+defaultValue (Scalar (Prim (Unsigned s))) = Literal (UnsignedValue (intValue s (0 :: Int))) noLoc
+defaultValue (Scalar (Prim (Signed s))) = Literal (SignedValue (intValue s (0 :: Int))) noLoc
+defaultValue (Scalar (Prim (FloatType s))) = Literal (FloatValue (floatValue s (0 :: Int))) noLoc
+defaultValue (Scalar (Sum cs)) = TupLit (defaultIndex : defaultClauses) noLoc
   where defaultIndex   =  Literal (UnsignedValue (intValue Int8 (0 :: Int))) noLoc
         defaultClauses = map defaultClause $ sortConstrs cs
         defaultClause (_, ts) = TupLit (map defaultValue ts) noLoc
 defaultValue t@Array{} = ArrayLit [] (Info t) noLoc -- TODO: Does the shape need to be preserved?
-defaultValue (Record fs) = RecordLit (map f fs') noLoc
+defaultValue (Scalar (Record fs)) = RecordLit (map f fs') noLoc
   where fs' = sortFields fs
         f (name, t) = RecordFieldExplicit name (defaultValue t) noLoc
-defaultValue TypeVar{} = error "Shouldn't happen."
-defaultValue t@(Arrow as _ t1 t2)   = Lambda [pat] e Nothing t' noLoc
+defaultValue (Scalar TypeVar{}) = error "Shouldn't happen."
+defaultValue t@(Scalar (Arrow as _ t1 t2)) = Lambda [pat] e Nothing t' noLoc
   where pat = Id (VName (nameFromString "x") 5000) (Info t1) noLoc
         e   = defaultValue t2
         t'  = Info (as, toStruct t)
@@ -393,20 +393,21 @@ desugarBinOpSection qn e_left e_right t xtype ytype rettype loc = do
                   [Id x (Info $ fromStruct argtype) noLoc])
 
 desugarProjectSection :: [Name] -> PatternType -> SrcLoc -> MonoM Exp
-desugarProjectSection fields (Arrow _ _ t1 t2) loc = do
+desugarProjectSection fields (Scalar (Arrow _ _ t1 t2)) loc = do
   p <- newVName "project_p"
   let body = foldl project (Var (qualName p) (Info t1) noLoc) fields
   return $ Lambda [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
   where project e field =
           case typeOf e of
-            Record fs | Just t <- M.lookup field fs ->
-                          Project field e (Info t) noLoc
+            Scalar (Record fs)
+              | Just t <- M.lookup field fs ->
+                  Project field e (Info t) noLoc
             t -> error $ "desugarOpSection: type " ++ pretty t ++
                  " does not have field " ++ pretty field
 desugarProjectSection  _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
 
 desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
-desugarIndexSection idxs (Arrow _ _ t1 t2) loc = do
+desugarIndexSection idxs (Scalar (Arrow _ _ t1 t2)) loc = do
   p <- newVName "index_i"
   let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2) loc
   return $ Lambda [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
@@ -414,7 +415,7 @@ desugarIndexSection  _ t _ = error $ "desugarIndexSection: not a function type: 
 
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()
 noticeDims = mapM_ notice . nestedDims
-  where notice (NamedDim v) = void $ transformFName (qualLeaf v) $ Prim $ Signed Int32
+  where notice (NamedDim v) = void $ transformFName (qualLeaf v) $ Scalar $ Prim $ Signed Int32
         notice _            = return ()
 
 -- | Convert a collection of 'ValBind's to a nested sequence of let-bound,
@@ -426,7 +427,7 @@ unfoldLetFuns (ValBind _ fname _ rettype dim_params params body _ loc : rest) e 
   where e' = unfoldLetFuns rest e
 
 expandRecordPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
-expandRecordPattern (Id v (Info (Record fs)) loc) = do
+expandRecordPattern (Id v (Info (Scalar (Record fs))) loc) = do
   let fs' = M.toList fs
   (fs_ks, fs_ts) <- fmap unzip $ forM fs' $ \(f, ft) ->
     (,) <$> newVName (nameToString f) <*> transformType ft
@@ -452,15 +453,16 @@ expandRecordPattern (PatternAscription pat td loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternAscription pat' td loc, rr)
 expandRecordPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
-expandRecordPattern (PatternConstr name (Info t@(SumT cs)) ps loc) =
-  case constrIndex name t of
+expandRecordPattern (PatternConstr name (Info (Scalar (Sum cs))) ps loc) =
+  case constrIndex name cs of
     Nothing -> error "Malformed Constr value."
     Just n  -> do
       (ps', rrs) <- unzip <$> mapM expandRecordPattern ps
       pat <- patM ps'
       return (pat, mconcat rrs)
       where patM ps' = TuplePattern <$> ((index :) <$> clauses ps') <*> pure noLoc
-            index =  PatternLit (Literal (UnsignedValue (intValue Int8 n)) noLoc) (Info (Prim (Unsigned Int8))) noLoc
+            index = PatternLit (Literal (UnsignedValue (intValue Int8 n)) noLoc)
+                               (Info (Scalar $ Prim $ Unsigned Int8)) noLoc
             clauses ps' = mapM (clause ps') $ sortConstrs cs
             clause ps' (name', ts)
                  | name == name' = pure $ TuplePattern ps' loc
@@ -535,23 +537,23 @@ typeSubstsM loc orig_t1 orig_t2 =
              sub False t1_rt t2_rt
   in runWriterT $ execStateT m mempty
 
-  where sub pos (TypeVar _ _ v _) t = addSubst pos v t
-        sub pos (Record fields1) (Record fields2) =
-          zipWithM_ (sub pos)
-          (map snd $ sortFields fields1) (map snd $ sortFields fields2)
-        sub _ Prim{} Prim{} = return ()
-        sub pos t1@Array{} t2@Array{}
+  where sub pos t1@Array{} t2@Array{}
           | Just t1' <- peelArray (arrayRank t1) t1,
             Just t2' <- peelArray (arrayRank t1) t2 =
               sub pos t1' t2'
-        sub _ (Arrow _ _ t1a t1b) (Arrow _ _ t2a t2b) = do
+        sub pos (Scalar (TypeVar _ _ v _)) t = addSubst pos v t
+        sub pos (Scalar (Record fields1)) (Scalar (Record fields2)) =
+          zipWithM_ (sub pos)
+          (map snd $ sortFields fields1) (map snd $ sortFields fields2)
+        sub _ (Scalar Prim{}) (Scalar Prim{}) = return ()
+        sub _ (Scalar (Arrow _ _ t1a t1b)) (Scalar (Arrow _ _ t2a t2b)) = do
           sub False t1a t2a
           sub False t1b t2b
-        sub pos (SumT cs1) (SumT cs2) =
+        sub pos (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
           zipWithM_ typeSubstClause (sortConstrs cs1) (sortConstrs cs2)
           where typeSubstClause (_, ts1) (_, ts2) = zipWithM (sub pos) ts1 ts2
-        sub pos t1@SumT{} t2 = sub pos (removeSumTypes t1) t2
-        sub pos t1 t2@SumT{} = sub pos t1 (removeSumTypes t2)
+        sub pos t1@(Scalar Sum{}) t2 = sub pos (removeSumTypes t1) t2
+        sub pos t1 t2@(Scalar Sum{}) = sub pos t1 (removeSumTypes t2)
 
         sub _ t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", pretty t1, pretty t2]
 
@@ -610,16 +612,14 @@ removeTypeVariablesInType t = do
   return $ removeShapeAnnotations $ substituteTypes subs $ vacuousShapeAnnotations t
 
 removeSumTypes :: Monoid as => TypeBase dim as -> TypeBase dim as
-removeSumTypes (SumT cs) =
-  tupleRecord $ Prim (Unsigned Int8) : map (tupleRecord . snd) (sortConstrs cs)
-removeSumTypes (Arrow as v t1 t2) = Arrow as v (removeSumTypes t1) (removeSumTypes t2)
-removeSumTypes (Record fs) = Record $ M.map removeSumTypes fs
+removeSumTypes (Scalar (Sum cs)) =
+  tupleRecord $ Scalar (Prim $ Unsigned Int8) : map (tupleRecord . snd) (sortConstrs cs)
+removeSumTypes (Scalar (Arrow as v t1 t2)) =
+  Scalar $ Arrow as v (removeSumTypes t1) (removeSumTypes t2)
+removeSumTypes (Scalar (Record fs)) =
+  Scalar $ Record $ M.map removeSumTypes fs
 removeSumTypes (Array as u t shape) =
-  maybe nope (`setAliases` as) $
-  arrayOf (removeSumTypes $ arrayElemToType' t) shape u
-  where arrayElemToType' :: ArrayElemTypeBase dim -> TypeBase dim ()
-        arrayElemToType' = arrayElemToType -- Needed to make ghc happy :)
-        nope = error "removeSumTypes: could not create array after substitution."
+  arrayOf (removeSumTypes $ Scalar t) shape u `setAliases` as
 removeSumTypes t = t
 
 transformValBind :: ValBind -> MonoM Env

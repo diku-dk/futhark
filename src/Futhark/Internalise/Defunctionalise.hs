@@ -125,7 +125,7 @@ defuncFun tparams pats e0 (closure, ret) loc = do
           let bound_by_pat = (`S.member` patternDimNames pat') . typeParamName
               (pat_dims, rest_dims) = partition bound_by_pat tparams
           in (map typeParamName pat_dims, pat',
-              foldFunType (map (toStruct . patternPatternType) pats') ret,
+              foldFunType (map (toStruct . patternType) pats') ret,
               ExtLambda rest_dims pats' e0 (closure, ret) loc)
 
   -- Construct a record literal that closes over the environment of
@@ -288,7 +288,7 @@ defuncExp (DoLoop pat e1 form e3 loc) = do
 -- We handle BinOps by turning them into ordinary function applications.
 defuncExp (BinOp qn (Info t) (e1, Info pt1) (e2, Info pt2) (Info ret) loc) =
   defuncExp $ Apply (Apply (Var qn (Info t) loc)
-                     e1 (Info (diet pt1)) (Info (Arrow mempty Nothing (fromStruct pt2) ret)) loc)
+                     e1 (Info (diet pt1)) (Info (Scalar $ Arrow mempty Nothing (fromStruct pt2) ret)) loc)
                     e2 (Info (diet pt2)) (Info ret) loc
 
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
@@ -332,7 +332,7 @@ defuncExp (RecordUpdate e1 fs e2 _ loc) = do
             Just sv -> RecordSV $
                        (f, staticField sv sv2 fs') : filter ((/=f) . fst) svs
             Nothing -> error "Invalid record projection."
-        staticField (Dynamic t@Record{}) sv2 fs'@(_:_) =
+        staticField (Dynamic t@(Scalar Record{})) sv2 fs'@(_:_) =
           staticField (svFromType t) sv2 fs'
         staticField _ sv2 _ = sv2
 
@@ -389,7 +389,7 @@ defuncSoacExp (Lambda params e0 decl tp loc) = do
   return $ Lambda params e0' decl tp loc
 
 defuncSoacExp e
-  | Arrow{} <- typeOf e = do
+  | Scalar Arrow{} <- typeOf e = do
       (pats, body, tp) <- etaExpand e
       let env = foldMap envFromPattern pats
       body' <- localEnv env $ defuncExp' body
@@ -409,7 +409,7 @@ etaExpand e = do
            e $ zip3 vars ps (drop 1 $ tails ps)
   return (pats, e', toStruct ret)
 
-  where getType (Arrow _ _ t1 t2) =
+  where getType (Scalar (Arrow _ _ t1 t2)) =
           let (ps, r) = getType t2 in (t1 : ps, r)
         getType t = ([], t)
 
@@ -440,7 +440,7 @@ defuncLet _ [] body (Info rettype) = do
   return ([], body', imposeType sv rettype )
   where imposeType Dynamic{} t =
           Dynamic $ fromStruct t
-        imposeType (RecordSV fs1) (Record fs2) =
+        imposeType (RecordSV fs1) (Scalar (Record fs2)) =
           RecordSV $ M.toList $ M.intersectionWith imposeType (M.fromList fs1) fs2
         imposeType sv _ = sv
 
@@ -488,9 +488,9 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
       let t1 = toStruct $ typeOf e1'
           t2 = toStruct $ typeOf e2'
           fname' = qualName fname
-      return (Parens (Apply (Apply (Var fname' (Info (Arrow mempty Nothing (fromStruct t1) $
-                                                      Arrow mempty Nothing (fromStruct t2) rettype)) loc)
-                             e1' (Info Observe) (Info $ Arrow mempty Nothing (fromStruct t2) rettype) loc)
+      return (Parens (Apply (Apply (Var fname' (Info (Scalar $ Arrow mempty Nothing (fromStruct t1) $
+                                                      Scalar $ Arrow mempty Nothing (fromStruct t2) rettype)) loc)
+                             e1' (Info Observe) (Info $ Scalar $ Arrow mempty Nothing (fromStruct t2) rettype) loc)
                       e2' d (Info rettype) loc) noLoc, sv)
 
     -- If e1 is a dynamic function, we just leave the application in place,
@@ -581,7 +581,7 @@ envFromShapeParams = envFromDimNames . map dim
           " at " ++ locStr (srclocOf tparam) ++ "."
 
 envFromDimNames :: [VName] -> Env
-envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Prim $ Signed Int32)
+envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Scalar $ Prim $ Signed Int32)
 
 -- | Create a new top-level value declaration with the given function name,
 -- return type, list of parameters, and body expression.
@@ -622,27 +622,27 @@ buildRetType env pats = comb
           maybe False (unique . unInfo . identType) $
           find ((==v) . identName) $ S.toList $ foldMap patternIdents pats
         problematic v = (v `member` bound) && not (boundAsUnique v)
-        comb (Record fs_annot) (Record fs_got) =
-          Record $ M.intersectionWith comb fs_annot fs_got
-        comb Arrow{} t = descend t
+        comb (Scalar (Record fs_annot)) (Scalar (Record fs_got)) =
+          Scalar $ Record $ M.intersectionWith comb fs_annot fs_got
+        comb (Scalar Arrow{}) t = descend t
         comb got et = descend $ fromStruct got `setUniqueness` uniqueness et `setAliases` aliases et
 
         descend t@Array{}
           | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
-        descend (Record t) = Record $ fmap descend t
+        descend (Scalar (Record t)) = Scalar $ Record $ fmap descend t
         descend t = t
 
 -- | Compute the corresponding type for a given static value.
 typeFromSV :: StaticVal -> PatternType
 typeFromSV (Dynamic tp)           = anyDimShapeAnnotations tp
 typeFromSV (LambdaSV _ _ _ _ env) = typeFromEnv env
-typeFromSV (RecordSV ls)          = Record $ M.fromList $ map (fmap typeFromSV) ls
+typeFromSV (RecordSV ls)          = Scalar $ Record $ M.fromList $ map (fmap typeFromSV) ls
 typeFromSV (DynamicFun (_, sv) _) = typeFromSV sv
 typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
                                          ++ "static value of an intrinsic."
 
 typeFromEnv :: Env -> PatternType
-typeFromEnv = Record . M.fromList .
+typeFromEnv = Scalar . Record . M.fromList .
               map (bimap (nameFromString . pretty) typeFromSV) . M.toList
 
 -- | Construct the type for a fully-applied dynamic function from its
@@ -714,8 +714,8 @@ updatePattern pat sv =
 -- | Convert a record (or tuple) type to a record static value. This is used for
 -- "unwrapping" tuples and records that are nested in 'Dynamic' static values.
 svFromType :: PatternType -> StaticVal
-svFromType (Record fs) = RecordSV . M.toList $ M.map svFromType fs
-svFromType t           = Dynamic t
+svFromType (Scalar (Record fs)) = RecordSV . M.toList $ M.map svFromType fs
+svFromType t                    = Dynamic t
 
 -- A set of names where we also track uniqueness.
 newtype NameSet = NameSet (M.Map VName Uniqueness)

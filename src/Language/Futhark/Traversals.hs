@@ -205,29 +205,22 @@ type TypeTraverser f t dim1 als1 dim2 als2 =
   (TypeName -> f TypeName) -> (dim1 -> f dim2) -> (als1 -> f als2) ->
   t dim1 als1 -> f (t dim2 als2)
 
+traverseScalarType :: Applicative f =>
+                      TypeTraverser f ScalarTypeBase dim1 als1 dims als2
+traverseScalarType _ _ _ (Prim t) = pure $ Prim t
+traverseScalarType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
+traverseScalarType f g h (TypeVar als u t args) =
+  TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
+traverseScalarType f g h (Arrow als v t1 t2) =
+  Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
+traverseScalarType f g h (Sum cs) = Sum <$> (traverse . traverse) (traverseType f g h) cs
+
 traverseType :: Applicative f =>
                 TypeTraverser f TypeBase dim1 als1 dims als2
-traverseType _ _ _ (Prim t) = pure $ Prim t
 traverseType f g h (Array als u et shape) =
-  Array <$> h als <*> pure u <*> traverseArrayElemType f g et <*> traverse g shape
-traverseType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
-traverseType f g h (TypeVar als u t args) =
-  TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
-traverseType f g h (Arrow als v t1 t2) =
-  Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
-traverseType f g h (SumT cs) = SumT <$> (traverse . traverse) (traverseType f g h) cs
-
-traverseArrayElemType :: Applicative f =>
-                         (TypeName -> f TypeName) -> (dim1 -> f dim2)
-                      -> ArrayElemTypeBase dim1 -> f (ArrayElemTypeBase dim2)
-traverseArrayElemType _ _ (ArrayPrimElem t) =
-  pure $ ArrayPrimElem t
-traverseArrayElemType f g (ArrayPolyElem t args) =
-  ArrayPolyElem <$> f t <*> traverse (traverseTypeArg f g) args
-traverseArrayElemType f g (ArrayRecordElem fs) =
-  ArrayRecordElem <$> traverse (traverseType f g pure) fs
-traverseArrayElemType f g (ArraySumElem cs) =
-  ArraySumElem <$> (traverse . traverse) (traverseType f g pure) cs
+  Array <$> h als <*> pure u <*> traverseScalarType f g pure et <*> traverse g shape
+traverseType f g h (Scalar t) =
+  Scalar <$> traverseScalarType f g h t
 
 traverseTypeArg :: Applicative f =>
                    (TypeName -> f TypeName) -> (dim1 -> f dim2)

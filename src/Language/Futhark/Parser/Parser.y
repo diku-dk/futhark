@@ -900,7 +900,7 @@ FloatValue :: { Value }
 
 StringValue :: { Value }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in
-                           ArrayValue (arrayFromList $ map (PrimValue . UnsignedValue . Int8Value . fromIntegral) $ encode s) $ Prim $ Signed Int32 }
+                           ArrayValue (arrayFromList $ map (PrimValue . UnsignedValue . Int8Value . fromIntegral) $ encode s) $ Scalar $ Prim $ Signed Int32 }
 
 BoolValue :: { Value }
 BoolValue : true           { PrimValue $ BoolValue True }
@@ -943,7 +943,7 @@ ArrayValue :  '[' Value ']'
                   Right v -> return $ ArrayValue (arrayFromList $ $2:$4) $ valueType v
              }
            | id '(' PrimType ')'
-             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) (Prim $3)) }
+             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) (Scalar (Prim $3))) }
            | id '(' RowType ')'
              {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) $3) }
 
@@ -952,8 +952,8 @@ ArrayValue :  '[' Value ']'
              {% emptyArrayError $1 }
 
 RowType :: { TypeBase () () }
-RowType : '[' ']' RowType   { fromJust $ arrayOf $3 (rank 1) Nonunique }
-        | '[' ']' PrimType  { fromJust $ arrayOf (Prim $3) (rank 1) Nonunique }
+RowType : '[' ']' RowType   { arrayOf $3 (rank 1) Nonunique }
+        | '[' ']' PrimType  { arrayOf (Scalar (Prim $3)) (rank 1) Nonunique }
 
 Values :: { [Value] }
 Values : Value ',' Values { $1 : $3 }

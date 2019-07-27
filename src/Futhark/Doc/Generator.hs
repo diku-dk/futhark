@@ -4,7 +4,7 @@ module Futhark.Doc.Generator (renderFiles) where
 import Control.Arrow ((***))
 import Control.Monad
 import Control.Monad.Reader
-import Control.Monad.Writer
+import Control.Monad.Writer hiding (Sum)
 import Data.List (sort, sortOn, intersperse, inits, tails, isPrefixOf, find, groupBy, partition)
 import Data.Char (isSpace, isAlpha, toUpper)
 import Data.Loc
@@ -382,8 +382,12 @@ synopsisValBindBind (name, BoundV tps t) = do
 
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
-  Prim et -> return $ primTypeHtml et
-  Record fs
+  Array _ u et shape -> do
+    shape' <- prettyShapeDecl shape
+    et' <- typeHtml $ Scalar et
+    return $ prettyU u <> shape' <> et'
+  Scalar (Prim et) -> return $ primTypeHtml et
+  Scalar (Record fs)
     | Just ts <- areTupleFields fs ->
         parens . commas <$> mapM typeHtml ts
     | otherwise ->
@@ -391,15 +395,11 @@ typeHtml t = case t of
     where ppField (name, tp) = do
             tp' <- typeHtml tp
             return $ toHtml (nameToString name) <> ": " <> tp'
-  TypeVar _ u et targs -> do
+  Scalar (TypeVar _ u et targs) -> do
     targs' <- mapM typeArgHtml targs
     et' <- typeNameHtml et
     return $ prettyU u <> et' <> joinBy " " targs'
-  Array _ u et shape -> do
-    shape' <- prettyShapeDecl shape
-    et' <- prettyElem et
-    return $ prettyU u <> shape' <> et'
-  Arrow _ pname t1 t2 -> do
+  Scalar (Arrow _ pname t1 t2) -> do
     t1' <- typeHtml t1
     t2' <- typeHtml t2
     return $ case pname of
@@ -407,24 +407,7 @@ typeHtml t = case t of
         parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
       Nothing ->
         t1' <> " -> " <> t2'
-  SumT cs -> pipes <$> mapM ppClause (sortConstrs cs)
-    where ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM typeHtml ts
-          ppConstr name = "#" <> toHtml (nameToString name)
-
-prettyElem :: ArrayElemTypeBase (DimDecl VName) -> DocM Html
-prettyElem (ArrayPrimElem et) = return $ primTypeHtml et
-prettyElem (ArrayPolyElem et targs) = do
-  targs' <- mapM typeArgHtml targs
-  return $ prettyTypeName et <> joinBy " " targs'
-prettyElem (ArrayRecordElem fs)
-  | Just ts <- areTupleFields fs =
-      parens . commas <$> mapM typeHtml ts
-  | otherwise =
-      braces . commas <$> mapM ppField (M.toList fs)
-  where ppField (name, tp) = do
-          tp' <- typeHtml tp
-          return $ toHtml (nameToString name) <> ": " <> tp'
-prettyElem (ArraySumElem cs) = pipes <$> mapM ppClause (sortConstrs cs)
+  Scalar (Sum cs) -> pipes <$> mapM ppClause (sortConstrs cs)
     where ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM typeHtml ts
           ppConstr name = "#" <> toHtml (nameToString name)
 

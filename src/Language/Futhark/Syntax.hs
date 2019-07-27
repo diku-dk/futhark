@@ -29,7 +29,7 @@ module Language.Futhark.Syntax
   , TypeArg(..)
   , TypeExp(..)
   , TypeArgExp(..)
-  , ArrayElemTypeBase(..)
+  , ScalarTypeBase(..)
   , PatternType
   , StructType
   , Diet(..)
@@ -90,7 +90,7 @@ import           Data.Bitraversable
 import           Data.Foldable
 import           Data.Loc
 import qualified Data.Map.Strict                  as M
-import           Data.Monoid
+import           Data.Monoid                      hiding (Sum)
 import           Data.Ord
 import qualified Data.Set                         as S
 import           Data.Traversable
@@ -287,62 +287,59 @@ qualNameFromTypeName (TypeName qs x) = QualName qs x
 -- | Types that can be elements of arrays.  This representation does
 -- allow arrays of records of functions, which is nonsensical, but it
 -- convolutes the code too much if we try to statically rule it out.
-data ArrayElemTypeBase dim =
-    ArrayPrimElem PrimType
-  | ArrayPolyElem TypeName [TypeArg dim]
-  | ArrayRecordElem (M.Map Name (TypeBase dim ()))
-  | ArraySumElem (M.Map Name [TypeBase dim ()])
-  deriving (Eq, Show)
+data ScalarTypeBase dim as
+  = Prim PrimType
+  | TypeVar as Uniqueness TypeName [TypeArg dim]
+  | Record (M.Map Name (TypeBase dim as))
+  | Sum (M.Map Name [TypeBase dim as])
+  | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
+    -- ^ The aliasing corresponds to the lexical
+    -- closure of the function.
+  deriving (Show)
 
-instance Traversable ArrayElemTypeBase where
-  traverse _ (ArrayPrimElem t) =
-    pure $ ArrayPrimElem t
-  traverse f (ArrayPolyElem t args) =
-    ArrayPolyElem t <$> traverse (traverse f) args
-  traverse f (ArrayRecordElem fs) =
-    ArrayRecordElem <$> traverse (bitraverse f pure) fs
-  traverse f (ArraySumElem cs) =
-    ArraySumElem <$> (traverse . traverse) (bitraverse f pure) cs
-
-instance Functor ArrayElemTypeBase where
-  fmap = fmapDefault
-
-instance Foldable ArrayElemTypeBase where
-  foldMap = foldMapDefault
-
--- | An expanded Futhark type is either an array, a prim type, a
--- tuple, or a type variable.  When comparing types for equality with
--- '==', aliases are ignored, but dimensions much match.  Function
--- parameter names are ignored.
-data TypeBase dim as = Prim PrimType
-                     | SumT (M.Map Name [TypeBase dim as])
-                     | Array as Uniqueness (ArrayElemTypeBase dim) (ShapeDecl dim)
-                     | Record (M.Map Name (TypeBase dim as))
-                     | TypeVar as Uniqueness TypeName [TypeArg dim]
-                     | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
-                     -- ^ The aliasing corresponds to the lexical
-                     -- closure of the function.
-                     deriving (Show)
-
-instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
+instance (Eq dim, Eq as) => Eq (ScalarTypeBase dim as) where
   Prim x1 == Prim y1 = x1 == y1
-  Array x1 y1 z1 v1 == Array x2 y2 z2 v2 = x1 == x2 && y1 == y2 && z1 == z2 && v1 == v2
   Record x1 == Record x2 = x1 == x2
   TypeVar _ u1 x1 y1 == TypeVar _ u2 x2 y2 = u1 == u2 && x1 == x2 && y1 == y2
   Arrow _ _ x1 y1 == Arrow _ _ x2 y2 = x1 == x2 && y1 == y2
-  SumT cs1 == SumT cs2 = cs1 == cs2
+  Sum cs1 == Sum cs2 = cs1 == cs2
   _ == _ = False
 
-instance Bitraversable TypeBase where
+instance Bitraversable ScalarTypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
-  bitraverse f g (Array a u t shape) =
-    Array <$> g a <*> pure u <*> traverse f t <*> traverse f shape
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar als u t args) =
     TypeVar <$> g als <*> pure u <*> pure t <*> traverse (traverse f) args
   bitraverse f g (Arrow als v t1 t2) =
     Arrow <$> g als <*> pure v <*> bitraverse f g t1 <*> bitraverse f g t2
-  bitraverse f g (SumT cs) = SumT <$> (traverse . traverse) (bitraverse f g) cs
+  bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
+
+instance Bifunctor ScalarTypeBase where
+  bimap = bimapDefault
+
+instance Bifoldable ScalarTypeBase where
+  bifoldMap = bifoldMapDefault
+
+-- | An expanded Futhark type is either an array, or something that
+-- can be an element of an array.  When comparing types for equality
+-- with '==', aliases are ignored, but dimensions much match.
+-- Function parameter names are ignored.  This representation permits
+-- some malformed types (arrays of functions), but importantly rules
+-- out arrays-of-arrays.
+data TypeBase dim as
+  = Scalar (ScalarTypeBase dim as)
+  | Array as Uniqueness (ScalarTypeBase dim ()) (ShapeDecl dim)
+  deriving (Show)
+
+instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
+  Scalar x1 == Scalar y1 = x1 == y1
+  Array x1 y1 z1 v1 == Array x2 y2 z2 v2 = x1 == x2 && y1 == y2 && z1 == z2 && v1 == v2
+  _ == _ = False
+
+instance Bitraversable TypeBase where
+  bitraverse f g (Scalar t) = Scalar <$> bitraverse f g t
+  bitraverse f g (Array a u t shape) =
+    Array <$> g a <*> pure u <*> bitraverse f pure t <*> traverse f shape
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
