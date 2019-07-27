@@ -20,7 +20,7 @@ import           Data.Functor
 import qualified Data.Map.Strict       as M
 import           Data.List
 import           Data.Maybe
-import           Data.Monoid
+import           Data.Monoid           hiding (Sum)
 import           Data.Ord
 import           Data.Word
 
@@ -108,26 +108,11 @@ instance IsName vn => Pretty (ShapeDecl (DimDecl vn)) where
 instance Pretty (ShapeDecl ()) where
   ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
 
-instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim) where
-  ppr (ArrayPrimElem pt) = ppr pt
-  ppr (ArrayPolyElem v args) =
-    ppr (qualNameFromTypeName v) <+> spread (map ppr args)
-  ppr (ArrayRecordElem fs)
-    | Just ts <- areTupleFields fs =
-        parens (commasep $ map ppr ts)
-    | otherwise =
-        braces (commasep $ map ppField $ M.toList fs)
-    where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
-  ppr (ArraySumElem cs) =
-    cat $ punctuate (text " | ") $ map ppConstr $ M.toList cs
-    where ppConstr (name, fs) = text "#" <> ppr name <+> sep (map ppr fs)
-
-instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
+instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
   ppr = pprPrec 0
   pprPrec _ (Prim et) = ppr et
   pprPrec _ (TypeVar _ u et targs) =
     ppr u <> ppr (qualNameFromTypeName et) <+> spread (map ppr targs)
-  pprPrec _ (Array _ u at shape) = ppr u <> ppr shape <> ppr at
   pprPrec _ (Record fs)
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
@@ -139,9 +124,13 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
     parens (pprName v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
   pprPrec p (Arrow _ Nothing t1 t2) =
     parensIf (p > 0) $ pprPrec 1 t1 <+> text "->" <+> ppr t2
-  pprPrec _ (SumT cs) =
+  pprPrec _ (Sum cs) =
     cat $ punctuate (text " | ") $ map ppConstr $ M.toList cs
     where ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map ppr fs
+
+instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
+  ppr (Array _ u at shape) = ppr u <> ppr shape <> ppr at
+  ppr (Scalar t) = ppr t
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]

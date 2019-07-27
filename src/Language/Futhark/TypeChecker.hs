@@ -16,7 +16,7 @@ module Language.Futhark.TypeChecker
   where
 
 import Control.Monad.Except
-import Control.Monad.Writer
+import Control.Monad.Writer hiding (Sum)
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -115,7 +115,7 @@ initialEnv = intrinsicsModule
         intrinsicsModule = Env mempty initialTypeTable mempty mempty intrinsicsNameMap
 
         addIntrinsicT (name, IntrinsicType t) =
-          Just (name, TypeAbbr Unlifted [] $ Prim t)
+          Just (name, TypeAbbr Unlifted [] $ Scalar $ Prim t)
         addIntrinsicT _ =
           Nothing
 
@@ -163,10 +163,11 @@ bindingTypeParams tparams = localEnv env
 
         typeParamEnv (TypeParamDim v _) =
           mempty { envVtable =
-                     M.singleton v $ BoundV [] (Prim (Signed Int32)) }
+                     M.singleton v $ BoundV [] (Scalar $ Prim $ Signed Int32) }
         typeParamEnv (TypeParamType l v _) =
           mempty { envTypeTable =
-                     M.singleton v $ TypeAbbr l [] $ TypeVar () Nonunique (typeName v) [] }
+                     M.singleton v $ TypeAbbr l [] $
+                     Scalar $ TypeVar () Nonunique (typeName v) [] }
 
 -- In this function, after the recursion, we add the Env of the
 -- current Spec *after* the one that is returned from the recursive
@@ -213,7 +214,8 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
                    M.singleton (Type, name) $ qualName name'
                , envTypeTable =
                    M.singleton name' $ TypeAbbr l ps' $
-                   TypeVar () Nonunique (typeName name') $ map typeParamToArg ps'
+                   Scalar $ TypeVar () Nonunique (typeName name') $
+                   map typeParamToArg ps'
                }
     (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     return (M.insert (qualName name') l abstypes,
@@ -496,21 +498,22 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
 
     _ -> return ()
 
+  let arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
   return (mempty { envVtable =
                      M.singleton fname' $
-                     BoundV tparams' $ foldr (uncurry (Arrow ()) . patternParam) rettype params'
+                     BoundV tparams' $ foldr (arrow . patternParam) rettype params'
                  , envNameMap =
                      M.singleton (Term, fname) $ qualName fname'
                  },
            ValBind entry' fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
 
 nastyType :: Monoid als => TypeBase dim als -> Bool
-nastyType Prim{} = False
+nastyType (Scalar Prim{}) = False
 nastyType t@Array{} = nastyType $ stripArray 1 t
 nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
-nastyReturnType _ (Arrow _ _ t1 t2) =
+nastyReturnType _ (Scalar (Arrow _ _ t1 t2)) =
   nastyType t1 || nastyReturnType Nothing t2
 nastyReturnType (Just te) _
   | niceTypeExp te = False
@@ -694,10 +697,10 @@ matchMTys = matchMTys' mempty
                 pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
               matchTypeParam (TypeParamType Unlifted x _) (TypeParamType Unlifted y _) =
                 pure $ M.singleton x $ TypeSub $ TypeAbbr Unlifted [] $
-                TypeVar () Nonunique (typeName y) []
+                Scalar $ TypeVar () Nonunique (typeName y) []
               matchTypeParam (TypeParamType _ x _) (TypeParamType Lifted y _) =
                 pure $ M.singleton x $ TypeSub $ TypeAbbr Lifted [] $
-                TypeVar () Nonunique (typeName y) []
+                Scalar $ TypeVar () Nonunique (typeName y) []
               matchTypeParam _ _ =
                 nomatch
 
@@ -773,7 +776,7 @@ matchMTys = matchMTys' mempty
     ppTypeAbbr abs name (ps, t) =
       "type " ++ unwords (pretty name : map pretty ps) ++ t'
       where t' = case t of
-                   TypeVar () _ tn args
+                   Scalar (TypeVar () _ tn args)
                      | typeLeaf tn `elem` abs,
                        map typeParamToArg ps == args -> ""
                    _ -> " = " ++ pretty t
@@ -800,7 +803,7 @@ typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
   TypeArgDim (NamedDim $ qualName v) ploc
 typeParamToArg (TypeParamType _ v ploc) =
-  TypeArgType (TypeVar () Nonunique (typeName v) []) ploc
+  TypeArgType (Scalar (TypeVar () Nonunique (typeName v) [])) ploc
 
 substituteTypesInMod :: TypeSubs -> Mod -> Mod
 substituteTypesInMod substs (ModEnv e) =
@@ -900,29 +903,18 @@ newNamesForMTy orig_mty = do
           TypeParamType l (substitute p) loc
 
         substituteInType :: StructType -> StructType
-        substituteInType (TypeVar () u (TypeName qs v) targs) =
-          TypeVar () u (TypeName (map substitute qs) $ substitute v) $ map substituteInTypeArg targs
-        substituteInType (Prim t) =
-          Prim t
-        substituteInType (Record ts) =
-          Record $ fmap substituteInType ts
-        substituteInType (SumT ts) =
-          SumT $ (fmap . fmap) substituteInType ts
-        substituteInType (Array () u (ArrayPrimElem t) shape) =
-          Array () u (ArrayPrimElem t) (substituteInShape shape)
-        substituteInType (Array () u (ArrayPolyElem (TypeName qs v) targs) shape) =
-          Array () u (ArrayPolyElem
-                      (TypeName (map substitute qs) $ substitute v)
-                      (map substituteInTypeArg targs))
-                     (substituteInShape shape)
-        substituteInType (Array () u (ArrayRecordElem ts) shape) =
-          Array () u (ArrayRecordElem ts') (substituteInShape shape)
-          where ts' = fmap substituteInType ts
-        substituteInType (Array () u (ArraySumElem cs) shape) =
-          Array () u (ArraySumElem cs') (substituteInShape shape)
-          where cs' = (fmap . fmap) substituteInType cs
-        substituteInType (Arrow als v t1 t2) =
-          Arrow als v (substituteInType t1) (substituteInType t2)
+        substituteInType (Scalar (TypeVar () u (TypeName qs v) targs)) =
+          Scalar $ TypeVar () u (TypeName (map substitute qs) $ substitute v) $ map substituteInTypeArg targs
+        substituteInType (Scalar (Prim t)) =
+          Scalar $ Prim t
+        substituteInType (Scalar (Record ts)) =
+          Scalar $ Record $ fmap substituteInType ts
+        substituteInType (Scalar (Sum ts)) =
+          Scalar $ Sum $ (fmap . fmap) substituteInType ts
+        substituteInType (Array () u t shape) =
+          arrayOf (substituteInType $ Scalar t) (substituteInShape shape) u
+        substituteInType (Scalar (Arrow als v t1 t2)) =
+          Scalar $ Arrow als v (substituteInType t1) (substituteInType t2)
 
         substituteInShape (ShapeDecl ds) =
           ShapeDecl $ map substituteInDim ds
@@ -957,7 +949,7 @@ envTypeAbbrs env =
 refineEnv :: SrcLoc -> TySet -> Env -> QualName Name -> [TypeParam] -> StructType
           -> TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr l cur_ps (TypeVar () _ (TypeName qs v) _)) <-
+  | Just (tname', TypeAbbr l cur_ps (Scalar (TypeVar () _ (TypeName qs v) _))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
       if paramsMatch cur_ps ps then

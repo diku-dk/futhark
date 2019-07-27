@@ -11,7 +11,6 @@ module Language.Futhark.TypeChecker.Monad
   , checkQualNameWithEnv
   , bindSpaced
   , qualifyTypeVars
-  , getType
 
   , TypeError(..)
   , unexpectedType
@@ -215,10 +214,9 @@ class MonadError TypeError m => MonadTypeChecker m where
   checkNamedDim loc v = do
     (v', t) <- lookupVar loc v
     case t of
-      Prim (Signed Int32) -> return v'
-      _                   -> throwError $ TypeError loc $
-                             "Dimension declaration " ++ pretty v ++
-                             " should be of type `i32`."
+      Scalar (Prim (Signed Int32)) -> return v'
+      _ -> throwError $ TypeError loc $
+           "Dimension declaration " ++ pretty v ++ " should be of type `i32`."
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
@@ -296,7 +294,7 @@ instance MonadTypeChecker TypeM where
 getType :: TypeBase dim as
         -> Either ([(Maybe VName, TypeBase dim as)], TypeBase dim as)
                   (TypeBase dim as)
-getType (Arrow _ v t1 t2) =
+getType (Scalar (Arrow _ v t1 t2)) =
   case getType t2 of
     Left (ps, r) -> Left ((v, t1) : ps, r)
     Right _ -> Left ([(v, t1)], t2)
@@ -347,7 +345,7 @@ qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper
 
         reachable [] name env =
           isJust $ find matches $ M.elems (envTypeTable env)
-          where matches (TypeAbbr _ _ (TypeVar _ _ (TypeName x_qs name') _)) =
+          where matches (TypeAbbr _ _ (Scalar (TypeVar _ _ (TypeName x_qs name') _))) =
                   null x_qs && name == name'
                 matches _ = False
 

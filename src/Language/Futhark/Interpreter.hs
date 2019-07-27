@@ -27,7 +27,7 @@ import Data.Bifunctor (bimap)
 import Data.List hiding (break)
 import Data.Maybe
 import qualified Data.Map as M
-import Data.Monoid
+import Data.Monoid hiding (Sum)
 import Data.Loc
 
 import Language.Futhark hiding (Value)
@@ -339,7 +339,7 @@ matchValueToType :: Env
                  -> Value
                  -> Either String Env
 
-matchValueToType env t@(TypeVar _ _ tn []) val
+matchValueToType env t@(Scalar (TypeVar _ _ tn [])) val
   | Just shape <- M.lookup (typeLeaf tn) $ envShapes env,
     shape /= valueShape val =
       Left $ "Value passed for type parameter `" <> prettyName (typeLeaf tn) <>
@@ -359,7 +359,7 @@ matchValueToType env t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr) =
       | otherwise ->
           continue $
           valEnv (M.singleton (qualLeaf v)
-                   (Just $ T.BoundV [] $ Prim $ Signed Int32,
+                   (Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int32,
                     ValuePrim $ SignedValue $ Int32Value arr_n))
           <> env
     AnyDim -> continue env
@@ -390,7 +390,7 @@ matchValueToType env t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr) =
         zeroDim AnyDim = True
         zeroDim (ConstDim x) = x == 0
 
-matchValueToType env (Record fs) (ValueRecord arr) =
+matchValueToType env (Scalar (Record fs)) (ValueRecord arr) =
   foldM (\env' (t, v) -> matchValueToType env' t v) env $
   M.intersectionWith (,) fs arr
 
@@ -398,7 +398,7 @@ matchValueToType env _ _ = return env
 
 bindToZero :: [VName] -> Env
 bindToZero = valEnv . M.fromList . map f
-  where f v = (v, (Just $ T.BoundV [] $ Prim $ Signed Int32,
+  where f v = (v, (Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int32,
                    ValuePrim $ SignedValue $ Int32Value 0))
 
 data Indexing = IndexingFix Int32
@@ -506,22 +506,21 @@ evalTermVar env qv =
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
 evalType :: Env -> StructType -> StructType
-evalType _ (Prim pt) = Prim pt
-evalType env (Record fs) = Record $ fmap (evalType env) fs
-evalType env (Arrow () p t1 t2) =
-  Arrow () p (evalType env t1) (evalType env t2)
+evalType _ (Scalar (Prim pt)) = Scalar $ Prim pt
+evalType env (Scalar (Record fs)) = Scalar $ Record $ fmap (evalType env) fs
+evalType env (Scalar (Arrow () p t1 t2)) =
+  Scalar $ Arrow () p (evalType env t1) (evalType env t2)
 evalType env t@(Array _ u _ shape) =
   let et = stripArray (shapeRank shape) t
       et' = evalType env et
       shape' = fmap evalDim shape
-  in fromMaybe (error "Cannot construct array after substitution") $
-     arrayOf et' shape' u
+  in arrayOf et' shape' u
   where evalDim (NamedDim qn)
           | Just (TermValue _ (ValuePrim (SignedValue (Int32Value x)))) <-
               lookupVar qn env =
               ConstDim $ fromIntegral x
         evalDim d = d
-evalType env t@(TypeVar () _ tn args) =
+evalType env t@(Scalar (TypeVar () _ tn args)) =
   case lookupType (qualNameFromTypeName tn) env of
     Just (T.TypeAbbr _ ps t') ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
@@ -539,7 +538,7 @@ evalType env t@(TypeVar () _ tn args) =
           let t'' = evalType env t'
           in (mempty, M.singleton p $ T.TypeAbbr l [] t'')
         matchPtoA _ _ = mempty
-evalType env (SumT cs) = SumT $ (fmap . fmap) (evalType env) cs
+evalType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (evalType env) cs
 
 evalFunction :: Env -> [TypeParam] -> [Pattern] -> Exp
              -> (Aliasing, StructType) -> SrcLoc -> EvalM Value
@@ -556,7 +555,7 @@ evalFunction env tparams [] body (_, t) loc = do
   let unbound_dims = bindToZero $ map typeParamName $ filter isDimParam tparams
   v <- eval (env <> unbound_dims) body
   case (t, v) of
-    (Arrow _ _ _ rt, ValueFun f) ->
+    (Scalar (Arrow _ _ _ rt), ValueFun f) ->
       return $ ValueFun $ \arg -> do r <- f arg
                                      match (evalType env rt) r
     _ -> match t v
@@ -612,9 +611,9 @@ eval env (Range start maybe_second end (Info t) _) = do
 
   where toInt =
           case stripArray 1 t of
-            Prim (Signed t') ->
+            Scalar (Prim (Signed t')) ->
               ValuePrim . SignedValue . intValue t'
-            Prim (Unsigned t') ->
+            Scalar (Prim (Unsigned t')) ->
               ValuePrim . UnsignedValue . intValue t'
             _ -> error $ "Nonsensical range type: " ++ show t
 
@@ -635,22 +634,23 @@ eval env (LetPat p e body _ _) = do
 
 eval env (LetFun f (tparams, pats, _, Info ret, fbody) body loc) = do
   v <- evalFunction env tparams pats fbody (mempty, ret) loc
-  let ftype = T.BoundV [] $ foldr (uncurry (Arrow ()) . patternParam) ret pats
+  let arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
+      ftype = T.BoundV [] $ foldr (arrow . patternParam) ret pats
   eval (valEnv (M.singleton f (Just ftype, v)) <> env) body
 
 eval _ (IntLit v (Info t) _) =
   case t of
-    Prim (Signed it) ->
+    Scalar (Prim (Signed it)) ->
       return $ ValuePrim $ SignedValue $ intValue it v
-    Prim (Unsigned it) ->
+    Scalar (Prim (Unsigned it)) ->
       return $ ValuePrim $ UnsignedValue $ intValue it v
-    Prim (FloatType ft) ->
+    Scalar (Prim (FloatType ft)) ->
       return $ ValuePrim $ FloatValue $ floatValue ft v
     _ -> error $ "eval: nonsensical type for integer literal: " ++ pretty t
 
 eval _ (FloatLit v (Info t) _) =
   case t of
-    Prim (FloatType ft) ->
+    Scalar (Prim (FloatType ft)) ->
       return $ ValuePrim $ FloatValue $ floatValue ft v
     _ -> error $ "eval: nonsensical type for float literal: " ++ pretty t
 
@@ -768,7 +768,7 @@ eval env (DoLoop pat init_e form body _) = do
           | otherwise = do
               env' <- withLoopParams v
               forLoop iv bound (inc i) =<<
-                eval (valEnv (M.singleton iv (Just $ T.BoundV [] $ Prim $ Signed Int32,
+                eval (valEnv (M.singleton iv (Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int32,
                                               ValuePrim (SignedValue i))) <> env') body
 
         whileLoop cond v = do
@@ -884,7 +884,8 @@ evalDec :: Env -> Dec -> EvalM Env
 
 evalDec env (ValDec (ValBind _ v _ (Info t) tps ps def _ loc)) = do
   let t' = evalType env t
-      ftype = T.BoundV [] $ foldr (uncurry (Arrow ()) . patternParam) t' ps
+      arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
+      ftype = T.BoundV [] $ foldr (arrow . patternParam) t' ps
   val <- evalFunction env tps ps def (mempty, t') loc
   return $ valEnv (M.singleton v (Just ftype, val)) <> env
 
@@ -1200,7 +1201,7 @@ initialCtx =
 
     tdef s = do
       t <- nameFromString s `M.lookup` namesToPrimTypes
-      return $ T.TypeAbbr Unlifted [] $ Prim t
+      return $ T.TypeAbbr Unlifted [] $ Scalar $ Prim t
 
     stream f arg@(ValueArray xs) =
       let n = ValuePrim $ SignedValue $ Int32Value $ arrayLength xs

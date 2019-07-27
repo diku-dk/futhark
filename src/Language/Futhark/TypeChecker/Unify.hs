@@ -126,34 +126,34 @@ unify usage orig_t1 orig_t2 = do
       case (t1', t2') of
         _ | t1' == t2' -> return ()
 
-        (Record fs,
-         Record arg_fs)
+        (Scalar (Record fs),
+         Scalar (Record arg_fs))
           | M.keys fs == M.keys arg_fs ->
               forM_ (M.toList $ M.intersectionWith (,) fs arg_fs) $ \(k, (k_t1, k_t2)) ->
               breadCrumb (MatchingFields k) $ subunify k_t1 k_t2
 
-        (TypeVar _ _ (TypeName _ tn) targs,
-         TypeVar _ _ (TypeName _ arg_tn) arg_targs)
+        (Scalar (TypeVar _ _ (TypeName _ tn) targs),
+         Scalar (TypeVar _ _ (TypeName _ arg_tn) arg_targs))
           | tn == arg_tn, length targs == length arg_targs ->
               zipWithM_ unifyTypeArg targs arg_targs
 
-        (TypeVar _ _ (TypeName [] v1) [],
-         TypeVar _ _ (TypeName [] v2) []) ->
+        (Scalar (TypeVar _ _ (TypeName [] v1) []),
+         Scalar (TypeVar _ _ (TypeName [] v2) [])) ->
           case (isRigid' v1, isRigid' v2) of
             (True, True) -> failure
             (True, False) -> linkVarToType usage v2 t1'
             (False, True) -> linkVarToType usage v1 t2'
             (False, False) -> linkVarToType usage v1 t2'
 
-        (TypeVar _ _ (TypeName [] v1) [], _)
+        (Scalar (TypeVar _ _ (TypeName [] v1) []), _)
           | not $ isRigid' v1 ->
               linkVarToType usage v1 t2'
-        (_, TypeVar _ _ (TypeName [] v2) [])
+        (_, Scalar (TypeVar _ _ (TypeName [] v2) []))
           | not $ isRigid' v2 ->
               linkVarToType usage v2 t1'
 
-        (Arrow _ _ a1 b1,
-         Arrow _ _ a2 b2) -> do
+        (Scalar (Arrow _ _ a1 b1),
+         Scalar (Arrow _ _ a2 b2)) -> do
           subunify a1 a2
           subunify b1 b2
 
@@ -162,8 +162,8 @@ unify usage orig_t1 orig_t2 = do
             Just t2'' <- peelArray 1 t2' ->
               subunify t1'' t2''
 
-        (SumT cs,
-         SumT arg_cs)
+        (Scalar (Sum cs),
+         Scalar (Sum arg_cs))
           | M.keys cs == M.keys arg_cs ->
               forM_ (M.toList $ M.intersectionWith (,) cs arg_cs) $ \(_, (f1, f2)) ->
               if length f1 == length f2
@@ -203,9 +203,9 @@ linkVarToType usage vn tp = do
               Just (Equality _) ->
                 equalityType usage tp'
               Just (Overloaded ts old_usage)
-                | tp `notElem` map Prim ts ->
+                | tp `notElem` map (Scalar . Prim) ts ->
                     case tp' of
-                      TypeVar _ _ (TypeName [] v) []
+                      Scalar (TypeVar _ _ (TypeName [] v) [])
                         | not $ isRigid v constraints -> linkVarToTypes usage v ts
                       _ ->
                         typeError usage $ "Cannot unify `" ++ prettyName vn ++ "' with type `" ++
@@ -214,11 +214,11 @@ linkVarToType usage vn tp = do
                           " due to " ++ show old_usage ++ ")."
               Just (HasFields required_fields old_usage) ->
                 case tp of
-                  Record tp_fields
+                  Scalar (Record tp_fields)
                     | all (`M.member` tp_fields) $ M.keys required_fields ->
                         mapM_ (uncurry $ unify usage) $ M.elems $
                         M.intersectionWith (,) required_fields tp_fields
-                  TypeVar _ _ (TypeName [] v) []
+                  Scalar (TypeVar _ _ (TypeName [] v) [])
                     | not $ isRigid v constraints ->
                         modifyConstraints $ M.insert v $
                         HasFields required_fields old_usage
@@ -233,11 +233,11 @@ linkVarToType usage vn tp = do
                        "} due to " ++ show old_usage ++ ")."
               Just (HasConstrs required_cs old_usage) ->
                 case tp of
-                  SumT ts
+                  Scalar (Sum ts)
                     | all (`M.member` ts) $ M.keys required_cs ->
                         mapM_ (uncurry (zipWithM_ (unify usage))) $ M.elems $
                           M.intersectionWith (,) required_cs ts
-                  TypeVar _ _ (TypeName [] v) []
+                  Scalar (TypeVar _ _ (TypeName [] v) [])
                     | not $ isRigid v constraints ->
                         modifyConstraints $ M.insertWith combineConstrs v $
                         HasConstrs required_cs old_usage
@@ -249,26 +249,26 @@ linkVarToType usage vn tp = do
   where tp' = removeUniqueness tp
 
 removeUniqueness :: TypeBase dim as -> TypeBase dim as
-removeUniqueness (Record ets) =
-  Record $ fmap removeUniqueness ets
-removeUniqueness (Arrow als p t1 t2) =
-  Arrow als p (removeUniqueness t1) (removeUniqueness t2)
-removeUniqueness (SumT cs) =
-  SumT $ (fmap . fmap) removeUniqueness cs
+removeUniqueness (Scalar (Record ets)) =
+  Scalar $ Record $ fmap removeUniqueness ets
+removeUniqueness (Scalar (Arrow als p t1 t2)) =
+  Scalar $ Arrow als p (removeUniqueness t1) (removeUniqueness t2)
+removeUniqueness (Scalar (Sum cs)) =
+  Scalar $ Sum $ (fmap . fmap) removeUniqueness cs
 removeUniqueness t = t `setUniqueness` Nonunique
 
 mustBeOneOf :: MonadUnify m => [PrimType] -> Usage -> TypeBase () () -> m ()
-mustBeOneOf [req_t] loc t = unify loc (Prim req_t) t
+mustBeOneOf [req_t] loc t = unify loc (Scalar (Prim req_t)) t
 mustBeOneOf ts loc t = do
   constraints <- getConstraints
   let t' = applySubst (`lookupSubst` constraints) t
       isRigid' v = isRigid v constraints
 
   case t' of
-    TypeVar _ _ (TypeName [] v) []
+    Scalar (TypeVar _ _ (TypeName [] v) [])
       | not $ isRigid' v -> linkVarToTypes loc v ts
 
-    Prim pt | pt `elem` ts -> return ()
+    Scalar (Prim pt) | pt `elem` ts -> return ()
 
     _ -> failure
 
@@ -298,7 +298,7 @@ equalityType usage t = do
   where mustBeEquality vn = do
           constraints <- getConstraints
           case M.lookup vn constraints of
-            Just (Constraint (TypeVar _ _ (TypeName [] vn') []) _) ->
+            Just (Constraint (Scalar (TypeVar _ _ (TypeName [] vn') [])) _) ->
               mustBeEquality vn'
             Just (Constraint vn_t cusage)
               | not $ orderZero vn_t ->
@@ -347,7 +347,7 @@ mustHaveConstr usage c t fs = do
   let struct_f = toStructural <$> fs
   constraints <- getConstraints
   case t of
-    TypeVar _ _ (TypeName _ tn) []
+    Scalar (TypeVar _ _ (TypeName _ tn) [])
       | Just NoConstraint{} <- M.lookup tn constraints ->
           modifyConstraints $ M.insert tn $ HasConstrs (M.singleton c struct_f) usage
       | Just (HasConstrs cs _) <- M.lookup tn constraints ->
@@ -358,7 +358,7 @@ mustHaveConstr usage c t fs = do
             | otherwise -> typeError usage $ "Different arity for constructor "
                            ++ quote (pretty c) ++ "."
 
-    SumT cs ->
+    Scalar (Sum cs) ->
       case M.lookup c cs of
         Nothing -> typeError usage $ "Constuctor " ++ quote (pretty c) ++ " not present in type."
         Just fs'
@@ -366,7 +366,7 @@ mustHaveConstr usage c t fs = do
             | otherwise -> typeError usage $ "Different arity for constructor " ++
                            quote (pretty c) ++ "."
 
-    _ -> do unify usage (toStructural t) $ SumT $ M.singleton c fs
+    _ -> do unify usage (toStructural t) $ Scalar $ Sum $ M.singleton c fs
             return ()
 
 mustHaveField :: (MonadUnify m, Monoid as) =>
@@ -376,7 +376,7 @@ mustHaveField usage l t = do
   l_type <- newTypeVar (srclocOf usage) "t"
   let l_type' = toStructural l_type
   case t of
-    TypeVar _ _ (TypeName _ tn) []
+    Scalar (TypeVar _ _ (TypeName _ tn) [])
       | Just NoConstraint{} <- M.lookup tn constraints -> do
           modifyConstraints $ M.insert tn $ HasFields (M.singleton l l_type') usage
           return l_type
@@ -386,7 +386,7 @@ mustHaveField usage l t = do
             Nothing -> modifyConstraints $ M.insert tn $
                        HasFields (M.insert l l_type' fields) usage
           return l_type
-    Record fields
+    Scalar (Record fields)
       | Just t' <- M.lookup l fields -> do
           unify usage l_type' (toStructural t')
           return t'
@@ -394,7 +394,7 @@ mustHaveField usage l t = do
           typeError usage $
           "Attempt to access field " ++ quote (pretty l) ++ "` of value of type " ++
           quote (pretty (toStructural t)) ++ "."
-    _ -> do unify usage (toStructural t) $ Record $ M.singleton l l_type'
+    _ -> do unify usage (toStructural t) $ Scalar $ Record $ M.singleton l l_type'
             return l_type
 
 -- Simple MonadUnify implementation.
@@ -416,7 +416,7 @@ instance MonadUnify UnifyM where
             return i
     let v = VName (mkTypeVarName desc i) 0
     modifyConstraints $ M.insert v $ NoConstraint Nothing $ Usage Nothing loc
-    return $ TypeVar mempty Nonunique (typeName v) []
+    return $ Scalar $ TypeVar mempty Nonunique (typeName v) []
 
 -- | Construct a the name of a new type variable given a base
 -- description and a tag number (note that this is distinct from

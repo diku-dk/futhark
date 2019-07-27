@@ -41,34 +41,40 @@ import Language.Futhark.TypeChecker.Monad
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
 -- that combines the aliasing of @t1@ and @t2@ is returned.
 -- Uniqueness is unified with @uf@.
-unifyTypesU :: (Monoid als, Eq als, ArrayDim dim) =>
-              (Uniqueness -> Uniqueness -> Maybe Uniqueness)
-           -> TypeBase dim als -> TypeBase dim als -> Maybe (TypeBase dim als)
-unifyTypesU _ (Prim t1) (Prim t2)
+unifyTypesU :: (Monoid als, ArrayDim dim) =>
+               (Uniqueness -> Uniqueness -> Maybe Uniqueness)
+            -> TypeBase dim als -> TypeBase dim als -> Maybe (TypeBase dim als)
+unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 shape2) =
+  Array (als1 <> als2) <$> uf u1 u2
+  <*> unifyScalarTypes uf et1 et2 <*> unifyShapes shape1 shape2
+unifyTypesU uf (Scalar t1) (Scalar t2) = Scalar <$> unifyScalarTypes uf t1 t2
+unifyTypesU _ _ _ = Nothing
+
+unifyScalarTypes :: (Monoid als, ArrayDim dim) =>
+                    (Uniqueness -> Uniqueness -> Maybe Uniqueness)
+                 -> ScalarTypeBase dim als -> ScalarTypeBase dim als -> Maybe (ScalarTypeBase dim als)
+unifyScalarTypes _ (Prim t1) (Prim t2)
   | t1 == t2  = Just $ Prim t1
   | otherwise = Nothing
-unifyTypesU uf (TypeVar als1 u1 t1 targs1) (TypeVar als2 u2 t2 targs2)
+unifyScalarTypes uf (TypeVar als1 u1 t1 targs1) (TypeVar als2 u2 t2 targs2)
   | t1 == t2 = do
       u3 <- uf u1 u2
       targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
       Just $ TypeVar (als1 <> als2) u3 t1 targs3
   | otherwise = Nothing
-unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 shape2) =
-  Array (als1 <> als2) <$> uf u1 u2
-  <*> unifyArrayElemTypes uf et1 et2 <*> unifyShapes shape1 shape2
-unifyTypesU uf (Record ts1) (Record ts2)
+unifyScalarTypes uf (Record ts1) (Record ts2)
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
       Record <$> traverse (uncurry (unifyTypesU uf))
       (M.intersectionWith (,) ts1 ts2)
-unifyTypesU uf (Arrow as1 mn1 t1 t1') (Arrow as2 _ t2 t2') =
+unifyScalarTypes uf (Arrow as1 mn1 t1 t1') (Arrow as2 _ t2 t2') =
   Arrow (as1 <> as2) mn1 <$> unifyTypesU (flip uf) t1 t2 <*> unifyTypesU uf t1' t2'
-unifyTypesU uf (SumT cs1) (SumT cs2)
+unifyScalarTypes uf (Sum cs1) (Sum cs2)
   | length cs1 == length cs2,
     sort (M.keys cs1) == sort (M.keys cs2) =
-      SumT <$> traverse (uncurry (zipWithM (unifyTypesU uf)))
+      Sum <$> traverse (uncurry (zipWithM (unifyTypesU uf)))
       (M.intersectionWith (,) cs1 cs2)
-unifyTypesU _ _ _ = Nothing
+unifyScalarTypes _ _ _ = Nothing
 
 unifyTypeArgs :: (ArrayDim dim) =>
                  (Uniqueness -> Uniqueness -> Maybe Uniqueness)
@@ -78,28 +84,6 @@ unifyTypeArgs _ (TypeArgDim d1 loc) (TypeArgDim d2 _) =
 unifyTypeArgs uf (TypeArgType t1 loc) (TypeArgType t2 _) =
   TypeArgType <$> unifyTypesU uf t1 t2 <*> pure loc
 unifyTypeArgs _ _ _ =
-  Nothing
-
-unifyArrayElemTypes :: (ArrayDim dim) =>
-                       (Uniqueness -> Uniqueness -> Maybe Uniqueness)
-                    -> ArrayElemTypeBase dim
-                    -> ArrayElemTypeBase dim
-                    -> Maybe (ArrayElemTypeBase dim)
-unifyArrayElemTypes _ (ArrayPrimElem bt1) (ArrayPrimElem bt2)
-  | bt1 == bt2 =
-      Just $ ArrayPrimElem bt1
-unifyArrayElemTypes _ (ArrayPolyElem bt1 targs1) (ArrayPolyElem bt2 targs2)
-  | bt1 == bt2, targs1 == targs2 =
-      Just $ ArrayPolyElem bt1 targs1
-unifyArrayElemTypes uf (ArrayRecordElem et1) (ArrayRecordElem et2)
-  | sort (M.keys et1) == sort (M.keys et2) =
-    ArrayRecordElem <$>
-    traverse (uncurry $ unifyTypesU uf) (M.intersectionWith (,) et1 et2)
-unifyArrayElemTypes uf (ArraySumElem cs1) (ArraySumElem cs2)
-  | sort (M.keys cs1) == sort (M.keys cs2) =
-    ArraySumElem <$>
-    traverse (uncurry (zipWithM (unifyTypesU uf))) (M.intersectionWith (,) cs1 cs2)
-unifyArrayElemTypes _ _ _ =
   Nothing
 
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
@@ -150,12 +134,14 @@ checkTypeExp t@(TERecord fs loc) = do
   let fs' = fmap (\(x,_,_) -> x) fs_ts_ls
       ts_s = fmap (\(_,y,_) -> y) fs_ts_ls
       ls = fmap (\(_,_,z) -> z) fs_ts_ls
-  return (TERecord (M.toList fs') loc, Record ts_s, foldl' max Unlifted ls)
+  return (TERecord (M.toList fs') loc,
+          Scalar $ Record ts_s,
+          foldl' max Unlifted ls)
 checkTypeExp (TEArray t d loc) = do
   (t', st, l) <- checkTypeExp t
   d' <- checkDimDecl d
   case (l, arrayOf st (ShapeDecl [d']) Nonunique) of
-    (Unlifted, Just st') -> return (TEArray t' d' loc, st', Unlifted)
+    (Unlifted, st') -> return (TEArray t' d' loc, st', Unlifted)
     _ -> throwError $ TypeError loc $
          "Cannot create array with elements of type `" ++ pretty st ++ "` (might be functional)."
   where checkDimDecl AnyDim =
@@ -169,12 +155,12 @@ checkTypeExp (TEUnique t loc) = do
   unless (mayContainArray st) $
     warn loc $ "Declaring `" <> pretty st <> "` as unique has no effect."
   return (TEUnique t' loc, st `setUniqueness` Unique, l)
-  where mayContainArray Prim{} = False
+  where mayContainArray (Scalar Prim{}) = False
         mayContainArray Array{} = True
-        mayContainArray (Record fs) = any mayContainArray fs
-        mayContainArray TypeVar{} = True
-        mayContainArray Arrow{} = False
-        mayContainArray (SumT cs) = (any . any) mayContainArray cs
+        mayContainArray (Scalar (Record fs)) = any mayContainArray fs
+        mayContainArray (Scalar TypeVar{}) = True
+        mayContainArray (Scalar Arrow{}) = False
+        mayContainArray (Scalar (Sum cs)) = (any . any) mayContainArray cs
 checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', st1, _) <- checkTypeExp t1
   bindSpaced [(Term, v)] $ do
@@ -183,13 +169,13 @@ checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
     localEnv env $ do
       (t2', st2, _) <- checkTypeExp t2
       return (TEArrow (Just v') t1' t2' loc,
-              Arrow mempty (Just v') st1 st2,
+              Scalar $ Arrow mempty (Just v') st1 st2,
               Lifted)
 checkTypeExp (TEArrow Nothing t1 t2 loc) = do
   (t1', st1, _) <- checkTypeExp t1
   (t2', st2, _) <- checkTypeExp t2
   return (TEArrow Nothing t1' t2' loc,
-          Arrow mempty Nothing st1 st2,
+          Scalar $ Arrow mempty Nothing st1 st2,
           Lifted)
 checkTypeExp ote@TEApply{} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
@@ -244,7 +230,9 @@ checkTypeExp t@(TESum cs loc) = do
   let cs'  = (fmap . fmap) (\(x,_,_) -> x) cs_ts_ls
       ts_s = (fmap . fmap) (\(_, y, _) -> y) cs_ts_ls
       ls   = (concatMap . fmap) (\(_, _, z) -> z) cs_ts_ls
-  return (TESum (M.toList cs') loc, SumT ts_s, foldl' max Unlifted ls)
+  return (TESum (M.toList cs') loc,
+          Scalar $ Sum ts_s,
+          foldl' max Unlifted ls)
 
 -- | Check for duplication of names inside a pattern group.  Produces
 -- a description of all names used in the pattern group.
@@ -369,38 +357,22 @@ type TypeSubs = M.Map VName TypeSub
 substituteTypes :: Monoid als => TypeSubs -> TypeBase (DimDecl VName) als -> TypeBase (DimDecl VName) als
 substituteTypes substs ot = case ot of
   Array als u at shape ->
-    maybe nope (`addAliases`(<>als)) $
-    arrayOf (substituteTypesInArrayElem at `setAliases` mempty)
-    (substituteInShape shape) u
-  Prim t -> Prim t
-  TypeVar als u v targs
+    arrayOf (substituteTypes substs (Scalar at) `setAliases` mempty)
+    (substituteInShape shape) u `addAliases` (<>als)
+  Scalar (Prim t) -> Scalar $ Prim t
+  Scalar (TypeVar als u v targs)
     | Just (TypeSub (TypeAbbr _ ps t)) <-
         M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
         applyType ps (t `setAliases` mempty) (map substituteInTypeArg targs)
         `setUniqueness` u `addAliases` (<>als)
-    | otherwise -> TypeVar als u v $ map substituteInTypeArg targs
-  Record ts ->
-    Record $ fmap (substituteTypes substs) ts
-  Arrow als v t1 t2 ->
-    Arrow als v (substituteTypes substs t1) (substituteTypes substs t2)
-  SumT cs ->
-    SumT $ (fmap . fmap) (substituteTypes substs) cs
-  where nope = error "substituteTypes: Cannot create array after substitution."
-
-        substituteTypesInArrayElem (ArrayPrimElem t) =
-          Prim t
-        substituteTypesInArrayElem (ArrayPolyElem v targs)
-          | Just (TypeSub (TypeAbbr _ ps t)) <-
-              M.lookup (qualLeaf (qualNameFromTypeName v)) substs =
-              applyType ps (t `setAliases` mempty) (map substituteInTypeArg targs)
-          | otherwise =
-              TypeVar mempty Nonunique v (map substituteInTypeArg targs)
-        substituteTypesInArrayElem (ArrayRecordElem ts) =
-          Record $ fmap (substituteTypes substs) ts
-        substituteTypesInArrayElem (ArraySumElem cs) =
-          SumT $ (fmap . fmap) (substituteTypes substs) cs
-
-        substituteInTypeArg (TypeArgDim d loc) =
+    | otherwise -> Scalar $ TypeVar als u v $ map substituteInTypeArg targs
+  Scalar (Record ts) ->
+    Scalar $ Record $ fmap (substituteTypes substs) ts
+  Scalar (Arrow als v t1 t2) ->
+    Scalar $ Arrow als v (substituteTypes substs t1) (substituteTypes substs t2)
+  Scalar (Sum cs) ->
+    Scalar $ Sum $ (fmap . fmap) (substituteTypes substs) cs
+  where substituteInTypeArg (TypeArgDim d loc) =
           TypeArgDim (substituteInDim d) loc
         substituteInTypeArg (TypeArgType t loc) =
           TypeArgType (substituteTypes substs t) loc
@@ -462,38 +434,24 @@ substTypesAny :: (ArrayDim dim, Monoid as) =>
                  (VName -> Maybe (Subst (TypeBase dim as)))
               -> TypeBase dim as -> TypeBase dim as
 substTypesAny lookupSubst ot = case ot of
-  Prim t -> Prim t
   Array als u et shape ->
-    maybe nope (`addAliases` (<>als)) $
-    arrayOf (subsArrayElem et) shape u
+    arrayOf (substTypesAny lookupSubst' (Scalar et)) shape u `setAliases` als
+  Scalar (Prim t) -> Scalar $ Prim t
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
-  TypeVar als u v targs ->
+  Scalar (TypeVar als u v targs) ->
     case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
       Just (Subst t) -> t `setUniqueness` u `addAliases` (<>als)
-      Just PrimSubst -> TypeVar mempty u v $ map subsTypeArg targs
-      Nothing -> TypeVar als u v $ map subsTypeArg targs
-  Record ts ->  Record $ fmap (substTypesAny lookupSubst) ts
-  Arrow als v t1 t2 ->
-    Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
-  SumT ts -> SumT $ (fmap . fmap) (substTypesAny lookupSubst) ts
+      Just PrimSubst -> Scalar $ TypeVar mempty u v $ map subsTypeArg targs
+      Nothing -> Scalar $ TypeVar als u v $ map subsTypeArg targs
+  Scalar (Record ts) -> Scalar $ Record $ fmap (substTypesAny lookupSubst) ts
+  Scalar (Arrow als v t1 t2) ->
+    Scalar $ Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
+  Scalar (Sum ts) ->
+    Scalar $ Sum $ (fmap . fmap) (substTypesAny lookupSubst) ts
 
-  where nope = error "substTypesAny: Cannot create array after substitution."
-
-        subsArrayElem (ArrayPrimElem t) = Prim t
-        subsArrayElem (ArrayPolyElem v targs) =
-          case lookupSubst $ qualLeaf $ qualNameFromTypeName v of
-            Just (Subst t) -> t
-            -- It is intentional that we do not handle PrimSubst
-            -- specially here, as we are inside an array, and that
-            -- gives the aliasing.
-            _ -> TypeVar mempty Nonunique v $ map subsTypeArg targs
-        subsArrayElem (ArrayRecordElem ts) =
-          Record $ fmap (substTypesAny lookupSubst . flip setAliases mempty) ts
-        subsArrayElem (ArraySumElem cs) =
-          SumT $ (fmap . fmap) (substTypesAny lookupSubst . flip setAliases mempty) cs
-
-        subsTypeArg (TypeArgType t loc) =
+  where subsTypeArg (TypeArgType t loc) =
           TypeArgType (substTypesAny lookupSubst' t) loc
-          where lookupSubst' = fmap (fmap $ bimap id (const ())) . lookupSubst
         subsTypeArg t = t
+
+        lookupSubst' = fmap (fmap $ bimap id (const ())) . lookupSubst

@@ -199,13 +199,13 @@ entryPoint params (retdecl, eret, crets) =
                            E.StructType,
                            [I.TypeBase ExtShape Uniqueness])
                        -> [EntryPointType]
-        entryPointType (_, E.Prim E.Unsigned{}, _) =
+        entryPointType (_, E.Scalar (E.Prim E.Unsigned{}), _) =
           [I.TypeUnsigned]
-        entryPointType (_, E.Array _ _ (ArrayPrimElem Unsigned{}) _, _) =
+        entryPointType (_, E.Array _ _ (E.Prim E.Unsigned{}) _, _) =
           [I.TypeUnsigned]
-        entryPointType (_, E.Prim{}, _) =
+        entryPointType (_, E.Scalar E.Prim{}, _) =
           [I.TypeDirect]
-        entryPointType (_, E.Array _ _ ArrayPrimElem{} _, _) =
+        entryPointType (_, E.Array _ _ E.Prim{} _, _) =
           [I.TypeDirect]
         entryPointType (te, t, ts) =
           [I.TypeOpaque desc $ length ts]
@@ -233,10 +233,10 @@ entryPoint params (retdecl, eret, crets) =
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) loc) =
   case tp of
-    E.Prim{} -> return name
-    _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
-                       ++ pretty name ++ " of type " ++ pretty tp ++
-                       " at " ++ locStr loc ++ "."
+    E.Scalar E.Prim{} -> return name
+    _ -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
+         ++ pretty name ++ " of type " ++ pretty tp ++
+         " at " ++ locStr loc ++ "."
 
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertStmsM $ resultBody <$> internaliseExp "res" e
@@ -342,8 +342,8 @@ internaliseExp desc (E.Range start maybe_second end _ _) = do
 
   (it, le_op, lt_op) <-
     case E.typeOf start of
-      E.Prim (E.Signed it) -> return (it, CmpSle it, CmpSlt it)
-      E.Prim (E.Unsigned it) -> return (it, CmpUle it, CmpUlt it)
+      E.Scalar (E.Prim (E.Signed it)) -> return (it, CmpSle it, CmpSlt it)
+      E.Scalar (E.Prim (E.Unsigned it)) -> return (it, CmpUle it, CmpUlt it)
       start_t -> fail $ "Start value in range has type " ++ pretty start_t
 
   let one = intConst it 1
@@ -641,7 +641,7 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
   src' <- internaliseExp desc src
   ve' <- internaliseExp desc ve
   replace (E.typeOf src `setAliases` ()) fields ve' src'
-  where replace (E.Record m) (f:fs) ve' src'
+  where replace (E.Scalar (E.Record m)) (f:fs) ve' src'
           | Just t <- M.lookup f m = do
           i <- fmap sum $ mapM (internalisedTypeSize . snd) $
                takeWhile ((/=f) . fst) $ sortFields m
@@ -688,17 +688,17 @@ internaliseExp _ (E.Literal v _) =
 
 internaliseExp _ (E.IntLit v (Info t) _) =
   case t of
-    E.Prim (E.Signed it) ->
+    E.Scalar (E.Prim (E.Signed it)) ->
       return [I.Constant $ I.IntValue $ intValue it v]
-    E.Prim (E.Unsigned it) ->
+    E.Scalar (E.Prim (E.Unsigned it)) ->
       return [I.Constant $ I.IntValue $ intValue it v]
-    E.Prim (E.FloatType ft) ->
+    E.Scalar (E.Prim (E.FloatType ft)) ->
       return [I.Constant $ I.FloatValue $ floatValue ft v]
     _ -> fail $ "internaliseExp: nonsensical type for integer literal: " ++ pretty t
 
 internaliseExp _ (E.FloatLit v (Info t) _) =
   case t of
-    E.Prim (E.FloatType ft) ->
+    E.Scalar (E.Prim (E.FloatType ft)) ->
       return [I.Constant $ I.FloatValue $ floatValue ft v]
     _ -> fail $ "internaliseExp: nonsensical type for float literal: " ++ pretty t
 
@@ -723,8 +723,9 @@ internaliseExp desc (E.Project k e (Info rt) _) = do
   n <- internalisedTypeSize $ rt `setAliases` ()
   i' <- fmap sum $ mapM internalisedTypeSize $
         case E.typeOf e `setAliases` () of
-               Record fs -> map snd $ takeWhile ((/=k) . fst) $ sortFields fs
-               t         -> [t]
+               E.Scalar (Record fs) ->
+                 map snd $ takeWhile ((/=k) . fst) $ sortFields fs
+               t -> [t]
   take n . drop i' <$> internaliseExp desc e
 
 internaliseExp _ e@E.Lambda{} =
@@ -746,14 +747,14 @@ internaliseExp _ e@E.IndexSection{} =
   fail $ "internaliseExp: Unexpected index section at " ++ locStr (srclocOf e)
 
 andExp :: E.Exp -> E.Exp -> E.Exp
-andExp l r = E.If l r (E.Literal (E.BoolValue False) noLoc) (Info (E.Prim E.Bool)) noLoc
+andExp l r = E.If l r (E.Literal (E.BoolValue False) noLoc) (Info (E.Scalar $ E.Prim E.Bool)) noLoc
 
 eqExp :: E.Exp -> E.Exp -> E.Exp
 eqExp l r = E.BinOp eq (Info ft)
-            (l, sType l) (r, sType r) (Info (E.Prim E.Bool)) noLoc
+            (l, sType l) (r, sType r) (Info (E.Scalar $ E.Prim E.Bool)) noLoc
   where sType e = Info $ toStruct $ E.typeOf e
-        arrow   = Arrow S.empty Nothing
-        ft      = E.typeOf l `arrow` E.typeOf r `arrow` E.Prim E.Bool
+        arrow x = Scalar . Arrow S.empty Nothing x
+        ft      = E.typeOf l `arrow` E.typeOf r `arrow` E.Scalar (E.Prim E.Bool)
         eq      = qualName $ VName "==" (-1)
 
 generateCond :: E.Pattern -> E.Exp -> E.Exp
@@ -767,7 +768,7 @@ generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
           where holes = map (\(n, p') -> (generateCond' p', n)) fs
                 field ([],_) = Nothing
                 field ((_, t):_, f) = Just (f, t)
-                t' = Record $ M.fromList $ mapMaybe field holes
+                t' = Scalar $ Record $ M.fromList $ mapMaybe field holes
                 projectHole _ (Nothing, _) = (Nothing, t')
                 projectHole f (Just condHole, t) =
                   (Just (\e' -> condHole $ Project f e' (Info t) noLoc), t')
@@ -1044,9 +1045,9 @@ internaliseDimExp :: String -> E.Exp -> InternaliseM (I.SubExp, IntType)
 internaliseDimExp s e = do
   e' <- internaliseExp1 s e
   case E.typeOf e of
-    E.Prim (Signed it)   -> (,it) <$> asIntS Int32 e'
-    E.Prim (Unsigned it) -> (,it) <$> asIntZ Int32 e'
-    _                    -> fail "internaliseDimExp: bad type"
+    E.Scalar (E.Prim (Signed it))   -> (,it) <$> asIntS Int32 e'
+    E.Scalar (E.Prim (Unsigned it)) -> (,it) <$> asIntZ Int32 e'
+    _                               -> fail "internaliseDimExp: bad type"
 
 internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
@@ -1267,10 +1268,10 @@ isOverloadedFunction qname args loc = do
     -- Short-circuiting operators are magical.
     handle [x,y] "&&" = Just $ \desc ->
       internaliseExp desc $
-      E.If x y (E.Literal (E.BoolValue False) noLoc) (Info (E.Prim E.Bool)) noLoc
+      E.If x y (E.Literal (E.BoolValue False) noLoc) (Info $ E.Scalar $ E.Prim E.Bool) noLoc
     handle [x,y] "||" = Just $ \desc ->
         internaliseExp desc $
-        E.If x (E.Literal (E.BoolValue True) noLoc) y (Info (E.Prim E.Bool)) noLoc
+        E.If x (E.Literal (E.BoolValue True) noLoc) y (Info $ E.Scalar $ E.Prim E.Bool) noLoc
 
     -- Handle equality and inequality specially, to treat the case of
     -- arrays.
@@ -1328,7 +1329,7 @@ isOverloadedFunction qname args loc = do
         x' <- internaliseExp1 "x" x
         y' <- internaliseExp1 "y" y
         case (E.typeOf x, E.typeOf y) of
-          (E.Prim t1, E.Prim t2) ->
+          (E.Scalar (E.Prim t1), E.Scalar (E.Prim t2)) ->
             internaliseBinOp desc bop x' y' t1 t2
           _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
@@ -1418,7 +1419,7 @@ isOverloadedFunction qname args loc = do
         lam' <- internalisePartitionLambda internaliseLambda k' lam $ map I.Var arrs
         uncurry (++) <$> partitionWithSOACS k' lam' arrs
         where isInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
-              isInt32 (IntLit k' (Info (E.Prim (Signed Int32))) _) = Just $ fromInteger k'
+              isInt32 (IntLit k' (Info (E.Scalar (E.Prim (Signed Int32)))) _) = Just $ fromInteger k'
               isInt32 _ = Nothing
 
     handle [TupLit [lam, ne, arr] _] "reduce" = Just $ \desc ->
@@ -1462,50 +1463,50 @@ isOverloadedFunction qname args loc = do
     toSigned int_to e desc = do
       e' <- internaliseExp1 "trunc_arg" e
       case E.typeOf e of
-        E.Prim E.Bool ->
+        E.Scalar (E.Prim E.Bool) ->
           letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
                                     (resultBody [intConst int_to 0]) $
                                     ifCommon [I.Prim $ I.IntType int_to]
-        E.Prim (E.Signed int_from) ->
+        E.Scalar (E.Prim (E.Signed int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
-        E.Prim (E.Unsigned int_from) ->
+        E.Scalar (E.Prim (E.Unsigned int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
-        E.Prim (E.FloatType float_from) ->
+        E.Scalar (E.Prim (E.FloatType float_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
         _ -> fail "Futhark.Internalise.handle: non-numeric type in ToSigned"
 
     toUnsigned int_to e desc = do
       e' <- internaliseExp1 "trunc_arg" e
       case E.typeOf e of
-        E.Prim E.Bool ->
+        E.Scalar (E.Prim E.Bool) ->
           letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
                                     (resultBody [intConst int_to 0]) $
                                     ifCommon [I.Prim $ I.IntType int_to]
-        E.Prim (E.Signed int_from) ->
+        E.Scalar (E.Prim (E.Signed int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
-        E.Prim (E.Unsigned int_from) ->
+        E.Scalar (E.Prim (E.Unsigned int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
-        E.Prim (E.FloatType float_from) ->
+        E.Scalar (E.Prim (E.FloatType float_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
         _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
 
     signumF e desc = do
       e' <- internaliseExp1 "signum_arg" e
       case E.typeOf e of
-        E.Prim (E.Signed t) ->
+        E.Scalar (E.Prim (E.Signed t)) ->
           letTupExp' desc $ I.BasicOp $ I.UnOp (I.SSignum t) e'
-        E.Prim (E.Unsigned t) ->
+        E.Scalar (E.Prim (E.Unsigned t)) ->
           letTupExp' desc $ I.BasicOp $ I.UnOp (I.USignum t) e'
         _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Signum"
 
     absF e desc = do
       e' <- internaliseExp1 "abs_arg" e
       case E.typeOf e of
-        E.Prim (E.Signed t) ->
+        E.Scalar (E.Prim (E.Signed t)) ->
           letTupExp' desc $ I.BasicOp $ I.UnOp (I.Abs t) e'
-        E.Prim (E.Unsigned _) ->
+        E.Scalar (E.Prim (E.Unsigned _)) ->
           return [e']
-        E.Prim (E.FloatType t) ->
+        E.Scalar (E.Prim (E.FloatType t)) ->
           letTupExp' desc $ I.BasicOp $ I.UnOp (I.FAbs t) e'
         _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
 
