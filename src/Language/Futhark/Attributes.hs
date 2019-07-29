@@ -227,7 +227,7 @@ arrayOf :: Monoid as =>
         -> ShapeDecl dim
         -> Uniqueness
         -> TypeBase dim as
-arrayOf t = arrayOfWithAliases t mempty
+arrayOf t = arrayOfWithAliases (t `setUniqueness` Nonunique) mempty
 
 arrayOfWithAliases :: Monoid as =>
                       TypeBase dim as
