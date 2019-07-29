@@ -567,17 +567,20 @@ simplifyKnownIterationSOAC _ _ _ _ = cannotSimplify
 
 data ArrayOp = ArrayIndexing Certificates VName (Slice SubExp)
              | ArrayRearrange Certificates VName [Int]
+             | ArrayRotate Certificates VName [SubExp]
              | ArrayVar Certificates VName -- ^ Never constructed.
   deriving (Eq, Ord, Show)
 
 arrayOpArr :: ArrayOp -> VName
 arrayOpArr (ArrayIndexing _ arr _) = arr
 arrayOpArr (ArrayRearrange _ arr _) = arr
+arrayOpArr (ArrayRotate _ arr _) = arr
 arrayOpArr (ArrayVar _ arr) = arr
 
 arrayOpCerts :: ArrayOp -> Certificates
 arrayOpCerts (ArrayIndexing cs _ _) = cs
 arrayOpCerts (ArrayRearrange cs _ _) = cs
+arrayOpCerts (ArrayRotate cs _ _) = cs
 arrayOpCerts (ArrayVar cs _) = cs
 
 isArrayOp :: Certificates -> AST.Exp (Wise SOACS) -> Maybe ArrayOp
@@ -585,12 +588,15 @@ isArrayOp cs (BasicOp (Index arr slice)) =
   Just $ ArrayIndexing cs arr slice
 isArrayOp cs (BasicOp (Rearrange perm arr)) =
   Just $ ArrayRearrange cs arr perm
+isArrayOp cs (BasicOp (Rotate rots arr)) =
+  Just $ ArrayRotate cs arr rots
 isArrayOp _ _ =
   Nothing
 
 fromArrayOp :: ArrayOp -> (Certificates, AST.Exp (Wise SOACS))
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
+fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
 arrayOps :: AST.Body (Wise SOACS) -> S.Set ArrayOp
@@ -713,6 +719,9 @@ moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arr
           arr `elem` map_param_names &&
           all (`ST.elem` vtable) (S.toList $ freeIn cs) &&
           not (null perm)
+        arrayIsMapParam (ArrayRotate cs arr rots) =
+          arr `elem` map_param_names &&
+          all (`ST.elem` vtable) (S.toList $ freeIn cs <> freeIn rots)
         arrayIsMapParam ArrayVar{} =
           False
 
@@ -727,6 +736,8 @@ moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arr
                                     BasicOp $ Index arr $ whole_dim : slice
                                   ArrayRearrange _ _ perm ->
                                     BasicOp $ Rearrange (0 : map (+1) perm) arr
+                                  ArrayRotate _ _ rots ->
+                                    BasicOp $ Rotate (intConst Int32 0 : rots) arr
                                   ArrayVar{} ->
                                     BasicOp $ SubExp $ Var arr
              arr_transformed_t <- lookupType arr_transformed

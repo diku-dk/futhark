@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Manually specified type parameters need no longer be exhaustive.
 
+  * Mapped `rotate` is now simplified better.  This can be
+    particularly helpful for stencils with wraparound.
+
 ### Removed
 
 ### Changed
