@@ -29,6 +29,7 @@ module Language.Futhark.Syntax
   , TypeArg(..)
   , TypeExp(..)
   , TypeArgExp(..)
+  , PName(..)
   , ScalarTypeBase(..)
   , PatternType
   , StructType
@@ -284,6 +285,17 @@ typeNameFromQualName (QualName qs x) = TypeName qs x
 qualNameFromTypeName :: TypeName -> QualName VName
 qualNameFromTypeName (TypeName qs x) = QualName qs x
 
+-- | The name (if any) of a function parameter.  The 'Eq' and 'Ord'
+-- instances always compare values of this type equal.
+data PName = Named VName | Unnamed
+           deriving (Show)
+
+instance Eq PName where
+  _ == _ = True
+
+instance Ord PName where
+  _ <= _ = True
+
 -- | Types that can be elements of arrays.  This representation does
 -- allow arrays of records of functions, which is nonsensical, but it
 -- convolutes the code too much if we try to statically rule it out.
@@ -292,18 +304,10 @@ data ScalarTypeBase dim as
   | TypeVar as Uniqueness TypeName [TypeArg dim]
   | Record (M.Map Name (TypeBase dim as))
   | Sum (M.Map Name [TypeBase dim as])
-  | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
+  | Arrow as PName (TypeBase dim as) (TypeBase dim as)
     -- ^ The aliasing corresponds to the lexical
     -- closure of the function.
-  deriving (Show)
-
-instance (Eq dim, Eq as) => Eq (ScalarTypeBase dim as) where
-  Prim x1 == Prim y1 = x1 == y1
-  Record x1 == Record x2 = x1 == x2
-  TypeVar _ u1 x1 y1 == TypeVar _ u2 x2 y2 = u1 == u2 && x1 == x2 && y1 == y2
-  Arrow _ _ x1 y1 == Arrow _ _ x2 y2 = x1 == x2 && y1 == y2
-  Sum cs1 == Sum cs2 = cs1 == cs2
-  _ == _ = False
+  deriving (Eq, Ord, Show)
 
 instance Bitraversable ScalarTypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
@@ -321,20 +325,14 @@ instance Bifoldable ScalarTypeBase where
   bifoldMap = bifoldMapDefault
 
 -- | An expanded Futhark type is either an array, or something that
--- can be an element of an array.  When comparing types for equality
--- with '==', aliases are ignored, but dimensions much match.
--- Function parameter names are ignored.  This representation permits
+-- can be an element of an array.  When comparing types for equality,
+-- function parameter names are ignored.  This representation permits
 -- some malformed types (arrays of functions), but importantly rules
 -- out arrays-of-arrays.
 data TypeBase dim as
   = Scalar (ScalarTypeBase dim as)
   | Array as Uniqueness (ScalarTypeBase dim ()) (ShapeDecl dim)
-  deriving (Show)
-
-instance (Eq dim, Eq as) => Eq (TypeBase dim as) where
-  Scalar x1 == Scalar y1 = x1 == y1
-  Array x1 y1 z1 v1 == Array x2 y2 z2 v2 = x1 == x2 && y1 == y2 && z1 == z2 && v1 == v2
-  _ == _ = False
+  deriving (Eq, Ord, Show)
 
 instance Bitraversable TypeBase where
   bitraverse f g (Scalar t) = Scalar <$> bitraverse f g t
@@ -349,7 +347,7 @@ instance Bifoldable TypeBase where
 
 data TypeArg dim = TypeArgDim dim SrcLoc
                  | TypeArgType (TypeBase dim ()) SrcLoc
-             deriving (Eq, Show)
+             deriving (Eq, Ord, Show)
 
 instance Traversable TypeArg where
   traverse f (TypeArgDim v loc) = TypeArgDim <$> f v <*> pure loc

@@ -288,7 +288,7 @@ defuncExp (DoLoop pat e1 form e3 loc) = do
 -- We handle BinOps by turning them into ordinary function applications.
 defuncExp (BinOp qn (Info t) (e1, Info pt1) (e2, Info pt2) (Info ret) loc) =
   defuncExp $ Apply (Apply (Var qn (Info t) loc)
-                     e1 (Info (diet pt1)) (Info (Scalar $ Arrow mempty Nothing (fromStruct pt2) ret)) loc)
+                     e1 (Info (diet pt1)) (Info (Scalar $ Arrow mempty Unnamed (fromStruct pt2) ret)) loc)
                     e2 (Info (diet pt2)) (Info ret) loc
 
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
@@ -488,9 +488,9 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
       let t1 = toStruct $ typeOf e1'
           t2 = toStruct $ typeOf e2'
           fname' = qualName fname
-      return (Parens (Apply (Apply (Var fname' (Info (Scalar $ Arrow mempty Nothing (fromStruct t1) $
-                                                      Scalar $ Arrow mempty Nothing (fromStruct t2) rettype)) loc)
-                             e1' (Info Observe) (Info $ Scalar $ Arrow mempty Nothing (fromStruct t2) rettype) loc)
+      return (Parens (Apply (Apply (Var fname' (Info (Scalar $ Arrow mempty Unnamed (fromStruct t1) $
+                                                      Scalar $ Arrow mempty Unnamed (fromStruct t2) rettype)) loc)
+                             e1' (Info Observe) (Info $ Scalar $ Arrow mempty Unnamed (fromStruct t2) rettype) loc)
                       e2' d (Info rettype) loc) noLoc, sv)
 
     -- If e1 is a dynamic function, we just leave the application in place,

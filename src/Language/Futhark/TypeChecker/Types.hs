@@ -169,13 +169,13 @@ checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
     localEnv env $ do
       (t2', st2, _) <- checkTypeExp t2
       return (TEArrow (Just v') t1' t2' loc,
-              Scalar $ Arrow mempty (Just v') st1 st2,
+              Scalar $ Arrow mempty (Named v') st1 st2,
               Lifted)
 checkTypeExp (TEArrow Nothing t1 t2 loc) = do
   (t1', st1, _) <- checkTypeExp t1
   (t2', st2, _) <- checkTypeExp t2
   return (TEArrow Nothing t1' t2' loc,
-          Scalar $ Arrow mempty Nothing st1 st2,
+          Scalar $ Arrow mempty Unnamed st1 st2,
           Lifted)
 checkTypeExp ote@TEApply{} = do
   (tname, tname_loc, targs) <- rootAndArgs ote

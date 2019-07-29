@@ -403,9 +403,9 @@ typeHtml t = case t of
     t1' <- typeHtml t1
     t2' <- typeHtml t2
     return $ case pname of
-      Just v ->
+      Named v ->
         parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
-      Nothing ->
+      Unnamed ->
         t1' <> " -> " <> t2'
   Scalar (Sum cs) -> pipes <$> mapM ppClause (sortConstrs cs)
     where ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM typeHtml ts
@@ -555,8 +555,8 @@ patternHtml pat = do
   let (pat_param, t) = patternParam pat
   t' <- typeHtml t
   return $ case pat_param of
-             Just v  -> parens (vnameHtml v <> ": " <> t')
-             Nothing -> t'
+             Named v -> parens (vnameHtml v <> ": " <> t')
+             Unnamed -> t'
 
 relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =

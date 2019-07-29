@@ -240,7 +240,7 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap mempty
   where initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
 
         funF ts t = foldr (arrow . Scalar . Prim) (Scalar $ Prim t) ts
-        arrow x y = Scalar $ Arrow mempty Nothing x y
+        arrow x y = Scalar $ Arrow mempty Unnamed x y
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
           Just (name, BoundV Global [] $ funF ts t)
@@ -249,7 +249,7 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap mempty
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
           Just (name, BoundV Global tvs $
                       fromStruct $ vacuousShapeAnnotations $
-                      Scalar $ Arrow mempty Nothing pts' rt)
+                      Scalar $ Arrow mempty Unnamed pts' rt)
           where pts' = case pts of [pt] -> pt
                                    _    -> tupleRecord pts
         addIntrinsicF (name, IntrinsicEquality) =
@@ -311,20 +311,20 @@ instance MonadTypeChecker TermTypeM where
 
       Just OpaqueF -> do
         argtype <- newTypeVar loc "t"
-        return $ Scalar $ Arrow mempty Nothing argtype argtype
+        return $ Scalar $ Arrow mempty Unnamed argtype argtype
 
       Just EqualityF -> do
         argtype <- newTypeVar loc "t"
         equalityType usage argtype
         return $
-          Scalar $ Arrow mempty Nothing argtype $
-          Scalar $ Arrow mempty Nothing argtype $ Scalar $ Prim Bool
+          Scalar $ Arrow mempty Unnamed argtype $
+          Scalar $ Arrow mempty Unnamed argtype $ Scalar $ Prim Bool
 
       Just (OverloadedF ts pts rt) -> do
         argtype <- newTypeVar loc "t"
         mustBeOneOf ts usage argtype
         let (pts', rt') = instOverloaded argtype pts rt
-            arrow xt yt = Scalar $ Arrow mempty Nothing xt yt
+            arrow xt yt = Scalar $ Arrow mempty Unnamed xt yt
         return $ fromStruct $ vacuousShapeAnnotations $ foldr arrow rt' pts'
 
     observe $ Ident name (Info t) loc
@@ -1108,14 +1108,14 @@ checkExp (ProjectSection fields NoInfo loc) = do
   a <- newTypeVar loc "a"
   let usage = mkUsage loc "projection at"
   b <- foldM (flip $ mustHaveField usage) a fields
-  return $ ProjectSection fields (Info $ Scalar $ Arrow mempty Nothing a b) loc
+  return $ ProjectSection fields (Info $ Scalar $ Arrow mempty Unnamed a b) loc
 
 checkExp (IndexSection idxes NoInfo loc) = do
   (t, _) <- newArrayType loc "e" (length idxes)
   idxes' <- mapM checkDimIndex idxes
   let t' = stripArray (length $ filter isFix idxes) t
   return $ IndexSection idxes' (Info $ vacuousShapeAnnotations $ fromStruct $
-                                Scalar $ Arrow mempty Nothing t t') loc
+                                Scalar $ Arrow mempty Unnamed t t') loc
   where isFix DimFix{} = True
         isFix _        = False
 
@@ -1567,7 +1567,7 @@ checkApply loc (Scalar (Arrow as _ tp1 tp2)) (argtype, dflow, argloc) = do
 checkApply loc tfun@(Scalar TypeVar{}) arg = do
   tv <- newTypeVar loc "b"
   unify (mkUsage loc "use as function") (toStructural tfun) $
-    Scalar $ Arrow mempty Nothing (toStructural (argType arg)) tv
+    Scalar $ Arrow mempty Unnamed (toStructural (argType arg)) tv
   constraints <- getConstraints
   checkApply loc (applySubst (`lookupSubst` constraints) tfun) arg
 
@@ -1794,7 +1794,9 @@ warnOnDubiousShapeAnnotations loc params rettype =
   onDubiousNames $ S.filter patternNameButNotParamName $
   mconcat $ map typeDimNames $
   rettype : map patternStructType params
-  where param_names = S.fromList $ mapMaybe (fst . patternParam) params
+  where named (Named v) = Just v
+        named Unnamed = Nothing
+        param_names = S.fromList $ mapMaybe (named . fst . patternParam) params
         all_pattern_names = S.map identName $ mconcat $ map patternIdents params
         patternNameButNotParamName v = v `S.member` all_pattern_names && not (v `S.member` param_names)
         onDubiousNames dubious

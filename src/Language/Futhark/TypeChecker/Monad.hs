@@ -292,7 +292,7 @@ instance MonadTypeChecker TypeM where
 -- | Extract from a type either a function type comprising a list of
 -- parameter types and a return type, or a first-order type.
 getType :: TypeBase dim as
-        -> Either ([(Maybe VName, TypeBase dim as)], TypeBase dim as)
+        -> Either ([(PName, TypeBase dim as)], TypeBase dim as)
                   (TypeBase dim as)
 getType (Scalar (Arrow _ v t1 t2)) =
   case getType t2 of

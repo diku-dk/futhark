@@ -753,7 +753,7 @@ eqExp :: E.Exp -> E.Exp -> E.Exp
 eqExp l r = E.BinOp eq (Info ft)
             (l, sType l) (r, sType r) (Info (E.Scalar $ E.Prim E.Bool)) noLoc
   where sType e = Info $ toStruct $ E.typeOf e
-        arrow x = Scalar . Arrow S.empty Nothing x
+        arrow x = Scalar . Arrow S.empty Unnamed x
         ft      = E.typeOf l `arrow` E.typeOf r `arrow` E.Scalar (E.Prim E.Bool)
         eq      = qualName $ VName "==" (-1)
 
