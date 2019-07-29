@@ -141,8 +141,8 @@ nestedDims t =
   where typeArgDims (TypeArgDim d _) = [d]
         typeArgDims (TypeArgType at _) = nestedDims at
 
-        notV Nothing  = const True
-        notV (Just v) = (/=NamedDim (qualName v))
+        notV Unnamed  = const True
+        notV (Named v) = (/=NamedDim (qualName v))
 
 -- | Change the shape of a type to be just the 'Rank'.
 removeShapeAnnotations :: TypeBase (DimDecl vn) as -> TypeBase () as
@@ -416,7 +416,7 @@ typeOf (Match _ cs (Info t) _) =
 
 foldFunType :: Monoid as => [TypeBase dim as] -> TypeBase dim as -> TypeBase dim as
 foldFunType ps ret = foldr arrow ret ps
-  where arrow t1 t2 = Scalar $ Arrow mempty Nothing t1 t2
+  where arrow t1 t2 = Scalar $ Arrow mempty Unnamed t1 t2
 
 -- | Extract the parameter types and return type from a type.
 -- If the type is not an arrow type, the list of parameter types is empty.
@@ -512,15 +512,15 @@ patternStructType = toStruct . patternType
 
 -- | When viewed as a function parameter, does this pattern correspond
 -- to a named parameter of some type?
-patternParam :: PatternBase Info VName -> (Maybe VName, StructType)
+patternParam :: PatternBase Info VName -> (PName, StructType)
 patternParam (PatternParens p _) =
   patternParam p
 patternParam (PatternAscription (Id v _ _) td _) =
-  (Just v, unInfo $ expandedType td)
+  (Named v, unInfo $ expandedType td)
 patternParam (Id v (Info t) _) =
-  (Just v, toStruct t)
+  (Named v, toStruct t)
 patternParam p =
-  (Nothing, patternStructType p)
+  (Unnamed, patternStructType p)
 
 -- | Names of primitive types to types.  This is only valid if no
 -- shadowing is going on, but useful for tools.
@@ -679,7 +679,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                   (rank 1)
         t_arr_a_arr_b = Scalar $ Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
 
-        arr x y = Scalar $ Arrow mempty Nothing x y
+        arr x y = Scalar $ Arrow mempty Unnamed x y
 
         namify i (k,v) = (VName (nameFromString k) i, v)
 
