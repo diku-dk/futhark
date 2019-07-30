@@ -81,38 +81,28 @@ mapNames :: (VName -> VName) -> Names -> Names
 mapNames f vs = namesFromList $ map f $ namesToList vs
 
 -- | A computation to build a free variable set.
---
--- Inspired by https://www.haskell.org/ghc/blog/20190728-free-variable-traversals.html
-newtype FV = FV { runFV :: Names -- Bound variable set.
-                        -> Names -- The accumulator.
-                        -> Names -- The result.
-                }
+newtype FV = FV { unFV :: Names }
+-- Right now the variable set is just stored explicitly, without the
+-- fancy functional representation that GHC uses.  Turns out it's
+-- faster this way.
 
 instance Monoid FV where
-  -- The empty FV just passes the accumulator along unperturbed.
-  mempty = FV $ \_ acc -> acc
+  mempty = FV mempty
 
 instance Semigroup FV where
-  -- Unioning two FVs passes the accumulator produced by one to the other.
-  fv1 <> fv2 = FV $ \boundVars acc ->
-    runFV fv1 boundVars (runFV fv2 boundVars acc)
+  FV fv1 <> FV fv2 = FV $ fv1 <> fv2
 
 -- | Consider a variable to be bound in the given 'FV' computation.
 fvBind :: Names -> FV -> FV
-fvBind vs fv = FV $ \bound acc ->
-  runFV fv (vs <> bound) acc
+fvBind vs (FV fv) = FV $ fv `namesSubtract` vs
 
 -- | Take note of a variable reference.
 fvName :: VName -> FV
-fvName v = FV $ \bound acc ->
-  if v `nameIn` bound
-  then acc              -- Variable is known to be bound, ignore.
-  else oneName v <> acc -- Variable is free, insert into accumulator.
+fvName v = FV $ oneName v
 
 -- | Take note of a set of variable references.
 fvNames :: Names -> FV
-fvNames names = FV $ \bound acc ->
-  (names `namesSubtract` bound) <> acc
+fvNames = FV
 
 freeWalker :: (FreeAttr (ExpAttr lore),
                FreeAttr (BodyAttr lore),
@@ -149,7 +139,7 @@ class FreeIn a where
 
 -- | The free variables of some syntactic construct.
 freeIn :: FreeIn a => a -> Names
-freeIn x = runFV (freeIn' x) mempty mempty
+freeIn = unFV . freeIn'
 
 instance FreeIn FV where
   freeIn' = id
