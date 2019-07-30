@@ -4,25 +4,37 @@
 -- its instances, but for reasons related to the Haskell type system,
 -- some constructs have specialised functions.
 module Futhark.Representation.AST.Attributes.Names
-       (
-         -- * Class
-           FreeIn (..)
-         , Names
-         -- * Specialised Functions
-         , freeInStmsAndRes
-         -- * Bound Names
-         , boundInBody
-         , boundByStm
-         , boundByStms
-         , boundByLambda
-
-         , FreeAttr(..)
+       ( -- * Free names
+         Names
+       , nameIn
+       , oneName
+       , namesFromList
+       , namesToList
+       , namesIntersection
+       , namesSubtract
+       , mapNames
+       -- * Class
+       , FreeIn (..)
+       , freeIn
+       -- * Specialised Functions
+       , freeInStmsAndRes
+       -- * Bound Names
+       , boundInBody
+       , boundByStm
+       , boundByStms
+       , boundByLambda
+       -- * Efficient computation
+       , FreeAttr(..)
+       , FV
+       , fvBind
+       , fvName
+       , fvNames
        )
        where
 
-import Control.Monad.Writer
+import Control.Monad.State.Strict
+import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Foldable
 
 import Futhark.Representation.AST.Syntax
@@ -30,18 +42,90 @@ import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Scope
 
+-- | A set of names.
+newtype Names = Names { unNames :: IM.IntMap VName }
+              deriving (Eq, Show)
+
+instance Semigroup Names where
+  vs1 <> vs2 = Names $ unNames vs1 <> unNames vs2
+
+instance Monoid Names where
+  mempty = Names mempty
+
+-- | Does the set of names contain this name?
+nameIn :: VName -> Names -> Bool
+nameIn v (Names vs) = baseTag v `IM.member` vs
+
+-- | Construct a name set from a list.  Slow.
+namesFromList :: [VName] -> Names
+namesFromList vs = Names $ IM.fromList $ zip (map baseTag vs) vs
+
+-- | Turn a name set into a list of names.  Slow.
+namesToList :: Names -> [VName]
+namesToList = IM.elems . unNames
+
+-- | Construct a name set from a single name.
+oneName :: VName -> Names
+oneName v = Names $ IM.singleton (baseTag v) v
+
+-- | The intersection of two name sets.
+namesIntersection :: Names -> Names -> Names
+namesIntersection (Names vs1) (Names vs2) = Names $ IM.intersection vs1 vs2
+
+-- | Subtract the latter name set from the former.
+namesSubtract :: Names -> Names -> Names
+namesSubtract (Names vs1) (Names vs2) = Names $ IM.difference vs1 vs2
+
+-- | Map over the names in a set.
+mapNames :: (VName -> VName) -> Names -> Names
+mapNames f vs = namesFromList $ map f $ namesToList vs
+
+-- | A computation to build a free variable set.
+--
+-- Inspired by https://www.haskell.org/ghc/blog/20190728-free-variable-traversals.html
+newtype FV = FV { runFV :: Names -- Bound variable set.
+                        -> Names -- The accumulator.
+                        -> Names -- The result.
+                }
+
+instance Monoid FV where
+  -- The empty FV just passes the accumulator along unperturbed.
+  mempty = FV $ \_ acc -> acc
+
+instance Semigroup FV where
+  -- Unioning two FVs passes the accumulator produced by one to the other.
+  fv1 <> fv2 = FV $ \boundVars acc ->
+    runFV fv1 boundVars (runFV fv2 boundVars acc)
+
+-- | Consider a variable to be bound in the given 'FV' computation.
+fvBind :: Names -> FV -> FV
+fvBind vs fv = FV $ \bound acc ->
+  runFV fv (vs <> bound) acc
+
+-- | Take note of a variable reference.
+fvName :: VName -> FV
+fvName v = FV $ \bound acc ->
+  if v `nameIn` bound
+  then acc              -- Variable is known to be bound, ignore.
+  else oneName v <> acc -- Variable is free, insert into accumulator.
+
+-- | Take note of a set of variable references.
+fvNames :: Names -> FV
+fvNames names = FV $ \bound acc ->
+  (names `namesSubtract` bound) <> acc
+
 freeWalker :: (FreeAttr (ExpAttr lore),
                FreeAttr (BodyAttr lore),
                FreeIn (FParamAttr lore),
                FreeIn (LParamAttr lore),
                FreeIn (LetAttr lore),
                FreeIn (Op lore)) =>
-              Walker lore (Writer Names)
+              Walker lore (State FV)
 freeWalker = identityWalker {
-               walkOnSubExp = tell . freeIn
-             , walkOnBody = tell . freeIn
-             , walkOnVName = tell . S.singleton
-             , walkOnOp = tell . freeIn
+               walkOnSubExp = modify . (<>) . freeIn'
+             , walkOnBody = modify . (<>) . freeIn'
+             , walkOnVName = modify . (<>) . fvName
+             , walkOnOp = modify . (<>) . freeIn'
              }
 
 -- | Return the set of variable names that are free in the given
@@ -53,30 +137,37 @@ freeInStmsAndRes :: (FreeIn (Op lore),
                      FreeIn (FParamAttr lore),
                      FreeAttr (BodyAttr lore),
                      FreeAttr (ExpAttr lore)) =>
-                    Stms lore -> Result -> Names
+                    Stms lore -> Result -> FV
 freeInStmsAndRes stms res =
-  (freeIn res `mappend` fold (fmap freeIn stms))
-  `S.difference` boundByStms stms
+  fvBind (boundByStms stms) $ fold (fmap freeIn' stms) <> freeIn' res
 
 -- | A class indicating that we can obtain free variable information
 -- from values of this type.
 class FreeIn a where
-  freeIn :: a -> Names
+  freeIn' :: a -> FV
+  freeIn' = fvNames . freeIn
+
+-- | The free variables of some syntactic construct.
+freeIn :: FreeIn a => a -> Names
+freeIn x = runFV (freeIn' x) mempty mempty
+
+instance FreeIn FV where
+  freeIn' = id
 
 instance FreeIn () where
-  freeIn () = mempty
+  freeIn' () = mempty
 
 instance FreeIn Int where
-  freeIn = const mempty
+  freeIn' = const mempty
 
 instance (FreeIn a, FreeIn b) => FreeIn (a,b) where
-  freeIn (a,b) = freeIn a <> freeIn b
+  freeIn' (a,b) = freeIn' a <> freeIn' b
 
 instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
-  freeIn (a,b,c) = freeIn a <> freeIn b <> freeIn c
+  freeIn' (a,b,c) = freeIn' a <> freeIn' b <> freeIn' c
 
 instance FreeIn a => FreeIn [a] where
-  freeIn = fold . fmap freeIn
+  freeIn' = fold . fmap freeIn'
 
 instance (FreeAttr (ExpAttr lore),
           FreeAttr (BodyAttr lore),
@@ -84,12 +175,9 @@ instance (FreeAttr (ExpAttr lore),
           FreeIn (LParamAttr lore),
           FreeIn (LetAttr lore),
           FreeIn (Op lore)) => FreeIn (Lambda lore) where
-  freeIn (Lambda params body rettype) =
-    S.filter (`notElem` paramnames) $ inRet <> inParams <> inBody
-    where inRet = mconcat $ map freeIn rettype
-          inParams = mconcat $ map freeIn params
-          inBody = freeIn body
-          paramnames = map paramName params
+  freeIn' (Lambda params body rettype) =
+    fvBind (namesFromList $ map paramName params) $
+    freeIn' rettype <> freeIn' params <> freeIn' body
 
 instance (FreeAttr (ExpAttr lore),
           FreeAttr (BodyAttr lore),
@@ -97,8 +185,8 @@ instance (FreeAttr (ExpAttr lore),
           FreeIn (LParamAttr lore),
           FreeIn (LetAttr lore),
           FreeIn (Op lore)) => FreeIn (Body lore) where
-  freeIn (Body attr stms res) =
-    precomputed attr $ freeIn attr <> freeInStmsAndRes stms res
+  freeIn' (Body attr stms res) =
+    precomputed attr $ freeIn' attr <> freeInStmsAndRes stms res
 
 instance (FreeAttr (ExpAttr lore),
           FreeAttr (BodyAttr lore),
@@ -106,16 +194,16 @@ instance (FreeAttr (ExpAttr lore),
           FreeIn (LParamAttr lore),
           FreeIn (LetAttr lore),
           FreeIn (Op lore)) => FreeIn (Exp lore) where
-  freeIn (DoLoop ctxmerge valmerge form loopbody) =
+  freeIn' (DoLoop ctxmerge valmerge form loopbody) =
     let (ctxparams, ctxinits) = unzip ctxmerge
         (valparams, valinits) = unzip valmerge
-        bound_here = S.fromList $ M.keys $
+        bound_here = namesFromList $ M.keys $
                      scopeOf form <>
                      scopeOfFParams (ctxparams ++ valparams)
-    in (freeIn (ctxinits ++ valinits) <> freeIn form <>
-        freeIn (ctxparams ++ valparams) <> freeIn loopbody)
-       `S.difference` bound_here
-  freeIn e = execWriter $ walkExpM freeWalker e
+    in fvBind bound_here $
+       freeIn' (ctxinits ++ valinits) <> freeIn' form <>
+       freeIn' (ctxparams ++ valparams) <> freeIn' loopbody
+  freeIn' e = execState (walkExpM freeWalker e) mempty
 
 instance (FreeAttr (ExpAttr lore),
           FreeAttr (BodyAttr lore),
@@ -123,78 +211,78 @@ instance (FreeAttr (ExpAttr lore),
           FreeIn (LParamAttr lore),
           FreeIn (LetAttr lore),
           FreeIn (Op lore)) => FreeIn (Stm lore) where
-  freeIn (Let pat (StmAux cs attr) e) =
-    freeIn cs <> precomputed attr (freeIn attr <> freeIn e <> freeIn pat)
+  freeIn' (Let pat (StmAux cs attr) e) =
+    freeIn' cs <> precomputed attr (freeIn' attr <> freeIn' e <> freeIn' pat)
 
 instance FreeIn (Stm lore) => FreeIn (Stms lore) where
-  freeIn = fold . fmap freeIn
+  freeIn' = fold . fmap freeIn'
 
 instance FreeIn Names where
-  freeIn = id
+  freeIn' = fvNames
 
 instance FreeIn Bool where
-  freeIn _ = mempty
+  freeIn' _ = mempty
 
 instance FreeIn a => FreeIn (Maybe a) where
-  freeIn = maybe mempty freeIn
+  freeIn' = maybe mempty freeIn'
 
 instance FreeIn VName where
-  freeIn = S.singleton
+  freeIn' = fvName
 
 instance FreeIn Ident where
-  freeIn = freeIn . identType
+  freeIn' = freeIn' . identType
 
 instance FreeIn SubExp where
-  freeIn (Var v) = freeIn v
-  freeIn Constant{} = mempty
+  freeIn' (Var v) = freeIn' v
+  freeIn' Constant{} = mempty
 
 instance FreeIn d => FreeIn (ShapeBase d) where
-  freeIn = mconcat . map freeIn . shapeDims
+  freeIn' = freeIn' . shapeDims
 
 instance FreeIn d => FreeIn (Ext d) where
-  freeIn (Free x) = freeIn x
-  freeIn (Ext _)  = mempty
+  freeIn' (Free x) = freeIn' x
+  freeIn' (Ext _)  = mempty
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
-  freeIn (Array _ shape _) = freeIn shape
-  freeIn (Mem _)           = mempty
-  freeIn (Prim _)          = mempty
+  freeIn' (Array _ shape _) = freeIn' shape
+  freeIn' (Mem _)           = mempty
+  freeIn' (Prim _)          = mempty
 
 instance FreeIn attr => FreeIn (Param attr) where
-  freeIn (Param _ attr) = freeIn attr
+  freeIn' (Param _ attr) = freeIn' attr
 
 instance FreeIn attr => FreeIn (PatElemT attr) where
-  freeIn (PatElem _ attr) = freeIn attr
+  freeIn' (PatElem _ attr) = freeIn' attr
 
 instance FreeIn (LParamAttr lore) => FreeIn (LoopForm lore) where
-  freeIn (ForLoop _ _ bound loop_vars) = freeIn bound <> freeIn loop_vars
-  freeIn (WhileLoop cond) = freeIn cond
+  freeIn' (ForLoop _ _ bound loop_vars) = freeIn' bound <> freeIn' loop_vars
+  freeIn' (WhileLoop cond) = freeIn' cond
 
 instance FreeIn d => FreeIn (DimChange d) where
-  freeIn = Data.Foldable.foldMap freeIn
+  freeIn' = Data.Foldable.foldMap freeIn'
 
 instance FreeIn d => FreeIn (DimIndex d) where
-  freeIn = Data.Foldable.foldMap freeIn
+  freeIn' = Data.Foldable.foldMap freeIn'
 
 instance FreeIn attr => FreeIn (PatternT attr) where
-  freeIn (Pattern context values) =
-    mconcat (map freeIn $ context ++ values) `S.difference` bound_here
-    where bound_here = S.fromList $ map patElemName $ context ++ values
+  freeIn' (Pattern context values) =
+    fvBind bound_here $ freeIn' $ context ++ values
+    where bound_here = namesFromList $ map patElemName $ context ++ values
 
 instance FreeIn Certificates where
-  freeIn (Certificates cs) = freeIn cs
+  freeIn' (Certificates cs) = freeIn' cs
 
 instance FreeIn attr => FreeIn (StmAux attr) where
-  freeIn (StmAux cs attr) = freeIn cs <> freeIn attr
+  freeIn' (StmAux cs attr) = freeIn' cs <> freeIn' attr
 
 instance FreeIn a => FreeIn (IfAttr a) where
-  freeIn (IfAttr r _) = freeIn r
+  freeIn' (IfAttr r _) = freeIn' r
 
 -- | Either return precomputed free names stored in the attribute, or
 -- the freshly computed names.  Relies on lazy evaluation to avoid the
 -- work.
 class FreeIn attr => FreeAttr attr where
-  precomputed :: attr -> Names -> Names
+  precomputed :: attr -> FV -> FV
   precomputed _ = id
 
 instance FreeAttr () where
@@ -216,7 +304,7 @@ boundInBody = boundByStms . bodyStms
 
 -- | The names bound by a binding.
 boundByStm :: Stm lore -> Names
-boundByStm = S.fromList . patternNames . stmPattern
+boundByStm = namesFromList . patternNames . stmPattern
 
 -- | The names bound by the bindings.
 boundByStms :: Stms lore -> Names

@@ -12,7 +12,6 @@ import Data.List (find)
 import Data.Maybe (mapMaybe)
 import Data.Either
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
@@ -133,7 +132,7 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
 
   -- Safety condition (8).
   forM_ (zip val $ bodyAliases body) $ \((p, _), als) ->
-    guard $ not $ paramName p `S.member` als
+    guard $ not $ paramName p `nameIn` als
 
   mk_in_place_map <- summariseLoop updates usedInBody resmap val
 
@@ -146,10 +145,10 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
     (body_res, res_bnds) <- manipulateResult in_place_map idxsubsts'
     let body' = mkBody (newbnds<>res_bnds) body_res
     return (prebnds, postbnds, ctxpat, valpat, ctx, val', body')
-  where usedInBody = S.unions $ map expandAliases $ S.toList $ freeIn body <> freeIn form
+  where usedInBody = mconcat $ map expandAliases $ namesToList $ freeIn body <> freeIn form
         expandAliases v = case M.lookup v scope of
-                            Just (LetInfo attr) -> S.insert v $ aliasesOf attr
-                            _ -> S.singleton v
+                            Just (LetInfo attr) -> oneName v <> aliasesOf attr
+                            _ -> oneName v
         resmap = zip (bodyResult body) $ patternValueIdents pat
 
         mkMerges :: (MonadFreshNames m, Bindable lore) =>
@@ -198,7 +197,7 @@ summariseLoop updates usedInBody resmap merge =
   sequence <$> zipWithM summariseLoopResult resmap merge
   where summariseLoopResult (se, v) (fparam, mergeinit)
           | Just update <- find (updateHasValue $ identName v) updates =
-            if updateSource update `S.member` usedInBody
+            if updateSource update `nameIn` usedInBody
             then Nothing
             else if hasLoopInvariantShape fparam then Just $ do
               lowered_array <- newVName "lowered_array"

@@ -36,11 +36,11 @@ module Futhark.Transform.Rename
 import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Maybe
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
+import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames(..), modifyNameSource)
@@ -292,7 +292,7 @@ instance Renameable lore => Rename (Lambda lore) where
       return $ Lambda params' body' ret'
 
 instance Rename Names where
-  rename = fmap S.fromList . mapM rename . S.toList
+  rename = fmap namesFromList . mapM rename . namesToList
 
 instance Rename Rank where
   rename = return

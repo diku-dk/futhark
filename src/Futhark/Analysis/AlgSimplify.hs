@@ -345,7 +345,7 @@ gaussAllLTH0 static_only el_syms sofp = do
             case f of
                 MaxMin ismin ts -> do
                         let id_set = mconcat $ map freeIn ts
-                        if S.member ii id_set
+                        if ii `nameIn` id_set
                         then return (Just (MaxMin ismin ts), fs)
                         else do (mm, fs') <- findMinMaxFact ii (NProd fs tp)
                                 return (mm, f:fs')
@@ -456,7 +456,7 @@ pickSymToElim :: RangesRep -> S.Set VName -> ScalExp -> Maybe VName
 pickSymToElim rangesrep elsyms0 e_scal =
 --    ranges <- asks ranges
 --    e_scal <- fromNumSofP e0
-    let ids0= S.toList $ freeIn e_scal
+    let ids0= namesToList $ freeIn e_scal
         ids1= filter (\s -> not (S.member s elsyms0)) ids0
         ids2= filter (\s -> case M.lookup s rangesrep of
                                 Nothing -> False
@@ -516,7 +516,7 @@ linearForm idd (NSum terms tp) = do
                                                             [] -> Val $ IntValue $ Int32Value 1
                                                             f:fs' -> foldl STimes f fs'
                                             let b_ids = freeIn fs_scal
-                                            return $ acc && not (idd `S.member` b_ids)
+                                            return $ acc && not (idd `nameIn` b_ids)
                            _          -> badAlgSimplifyM "linearForm: ILLEGAL222!!!!"
                     ) True b_terms
 

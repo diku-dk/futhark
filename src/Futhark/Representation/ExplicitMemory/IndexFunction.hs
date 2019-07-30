@@ -135,11 +135,10 @@ instance Substitute num => Rename (IxFun num) where
 
 
 instance FreeIn num => FreeIn (LMAD num) where
-  freeIn = foldMap freeIn
+  freeIn' = foldMap freeIn'
 
 instance FreeIn num => FreeIn (IxFun num) where
-  freeIn = foldMap freeIn
-
+  freeIn' = foldMap freeIn'
 
 instance Functor LMAD where
   fmap f = runIdentity . traverse (return . f)

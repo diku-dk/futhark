@@ -60,7 +60,7 @@ getShapeNames :: (LetAttr lore ~ (VarWisdom, Type)) =>
 getShapeNames bnd =
   let tps1 = map patElemType $ patternElements $ stmPattern bnd
       tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
-  in  S.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
+  in  namesFromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
 
 simplifyFun :: MonadFreshNames m => FunDef SOACS -> m (FunDef SOACS)
 simplifyFun =
@@ -213,7 +213,7 @@ liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
       rettype = lambdaReturnType fun
       ses = bodyResult $ lambdaBody fun
 
-      freeOrConst (Var v)    = v `S.member` free
+      freeOrConst (Var v)    = v `nameIn` free
       freeOrConst Constant{} = True
 
       checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
@@ -314,7 +314,7 @@ removeReplicateInput vtable fun arrs
         isReplicateAndNotConsumed p v
           | Just (BasicOp (Replicate (Shape (_:ds)) e), v_cs) <-
               ST.lookupExp v vtable,
-            not $ paramName p `S.member` consumedByLambda fun =
+            not $ paramName p `nameIn` consumedByLambda fun =
               Right ([paramName p],
                      v_cs,
                      case ds of
@@ -333,7 +333,7 @@ removeUnusedSOACInput _ pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
       letBind_ pat $ Op $ Screma w (ScremaForm scan reduce map_lam') used_arrs
   where params_and_arrs = zip (lambdaParams map_lam) arrs
         used_in_body = freeIn $ lambdaBody map_lam
-        usedInput (param, _) = paramName param `S.member` used_in_body
+        usedInput (param, _) = paramName param `nameIn` used_in_body
 removeUnusedSOACInput _ _ _ _ = cannotSimplify
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
@@ -449,14 +449,14 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
                      zip red_pes redlam_params,
     let necessary = findNecessaryForReturned (`elem` used_after)
                     (zip redlam_params $ redlam_res <> redlam_res) redlam_deps,
-    let alive_mask = map ((`S.member` necessary) . paramName) redlam_params,
+    let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
 
     not $ all (==True) alive_mask = do
 
   let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
       dead_fix = zipWith fixDeadToNeutral alive_mask nes
       (used_red_pes, _, used_nes) =
-        unzip3 $ filter (\(_,x,_) -> paramName x `S.member` necessary) $
+        unzip3 $ filter (\(_,x,_) -> paramName x `nameIn` necessary) $
         zip3 red_pes redlam_params nes
 
   let maplam' = removeLambdaResults (take (length nes) alive_mask) maplam
@@ -604,12 +604,12 @@ arrayOps = mconcat . map onStm . stmsToList . bodyStms
   where onStm (Let _ aux e) =
           case isArrayOp (stmAuxCerts aux) e of
             Just op -> S.singleton op
-            Nothing -> execWriter $ walkExpM walker e
+            Nothing -> execState (walkExpM walker e) mempty
         onOp = execWriter . mapSOACM identitySOACMapper { mapOnSOACLambda = onLambda }
         onLambda lam = do tell $ arrayOps $ lambdaBody lam
                           return lam
-        walker = identityWalker { walkOnBody = tell . arrayOps
-                                , walkOnOp = tell . onOp }
+        walker = identityWalker { walkOnBody = modify . (<>) . arrayOps
+                                , walkOnOp = modify . (<>) . onOp }
 
 replaceArrayOps :: M.Map ArrayOp ArrayOp
                 -> AST.Body (Wise SOACS) -> AST.Body (Wise SOACS)
@@ -713,15 +713,15 @@ moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arr
         -- everything else must be map-invariant.
         arrayIsMapParam (ArrayIndexing cs arr slice) =
           arr `elem` map_param_names &&
-          all (`ST.elem` vtable) (S.toList $ freeIn cs <> freeIn slice) &&
+          all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn slice) &&
           not (null slice) && not (null $ sliceDims slice)
         arrayIsMapParam (ArrayRearrange cs arr perm) =
           arr `elem` map_param_names &&
-          all (`ST.elem` vtable) (S.toList $ freeIn cs) &&
+          all (`ST.elem` vtable) (namesToList $ freeIn cs) &&
           not (null perm)
         arrayIsMapParam (ArrayRotate cs arr rots) =
           arr `elem` map_param_names &&
-          all (`ST.elem` vtable) (S.toList $ freeIn cs <> freeIn rots)
+          all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn rots)
         arrayIsMapParam ArrayVar{} =
           False
 

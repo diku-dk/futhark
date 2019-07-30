@@ -10,7 +10,6 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -107,11 +106,11 @@ transformScanRed :: SegLevel -> SegSpace
                  -> KernelBody ExplicitMemory
                  -> ExpandM (Stms ExplicitMemory, ([Lambda ExplicitMemory], KernelBody ExplicitMemory))
 transformScanRed lvl space ops kbody = do
-  bound_outside <- asks $ S.fromList . M.keys
+  bound_outside <- asks $ namesFromList . M.keys
   let (kbody', kbody_allocs) =
         extractKernelBodyAllocations (bound_outside<>bound_in_kernel) kbody
       (ops', ops_allocs) = unzip $ map (extractLambdaAllocations bound_outside) ops
-      variantAlloc (Var v) = v `S.member` bound_in_kernel
+      variantAlloc (Var v) = v `nameIn` bound_in_kernel
       variantAlloc _ = False
       allocs = kbody_allocs <> mconcat ops_allocs
       (variant_allocs, invariant_allocs) = M.partition (variantAlloc . fst) allocs
@@ -121,7 +120,7 @@ transformScanRed lvl space ops kbody = do
       localScope (scopeOf op') $ offsetMemoryInLambda op'
     return (alloc_stms, (ops'', kbody''))
 
-  where bound_in_kernel = S.fromList $ M.keys $ scopeOfSegSpace space <>
+  where bound_in_kernel = namesFromList $ M.keys $ scopeOfSegSpace space <>
                           scopeOf (kernelBodyStms kbody)
 
 allocsForBody :: M.Map VName (SubExp, Space)
@@ -210,7 +209,7 @@ extractStmAllocations bound_outside (Let (Pattern [] [patElem]) _ (Op (Alloc siz
       tell $ M.singleton (patElemName patElem) (size, space)
       return Nothing
 
-        where visibleOutside (Var v) = v `S.member` bound_outside
+        where visibleOutside (Var v) = v `nameIn` bound_outside
               visibleOutside Constant{} = True
 
 extractStmAllocations bound_outside stm = do

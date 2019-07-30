@@ -45,9 +45,9 @@ module Futhark.Representation.Kernels.Kernel
        where
 
 import Control.Arrow (first)
+import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Control.Monad.Identity hiding (mapM_)
-import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.Foldable
 import Data.List
@@ -81,8 +81,8 @@ data SplitOrdering = SplitContiguous
                    deriving (Eq, Ord, Show)
 
 instance FreeIn SplitOrdering where
-  freeIn SplitContiguous = mempty
-  freeIn (SplitStrided stride) = freeIn stride
+  freeIn' SplitContiguous = mempty
+  freeIn' (SplitStrided stride) = freeIn' stride
 
 instance Substitute SplitOrdering where
   substituteNames _ SplitContiguous =
@@ -164,19 +164,17 @@ kernelResultSubExp (ConcatReturns _ _ _ v) = Var v
 kernelResultSubExp (TileReturns _ v) = Var v
 
 instance FreeIn KernelResult where
-  freeIn (Returns what) = freeIn what
-  freeIn (WriteReturns rws arr res) = freeIn rws <> freeIn arr <> freeIn res
-  freeIn (ConcatReturns o w per_thread_elems v) =
-    freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn v
-  freeIn (TileReturns dims v) =
-    freeIn dims <> freeIn v
+  freeIn' (Returns what) = freeIn' what
+  freeIn' (WriteReturns rws arr res) = freeIn' rws <> freeIn' arr <> freeIn' res
+  freeIn' (ConcatReturns o w per_thread_elems v) =
+    freeIn' o <> freeIn' w <> freeIn' per_thread_elems <> freeIn' v
+  freeIn' (TileReturns dims v) =
+    freeIn' dims <> freeIn' v
 
 instance Attributes lore => FreeIn (KernelBody lore) where
-  freeIn (KernelBody attr stms res) =
-    (freeIn attr <> free_in_stms <> free_in_res) `S.difference` bound_in_stms
-    where free_in_stms = fold $ fmap freeIn stms
-          free_in_res = freeIn res
-          bound_in_stms = fold $ fmap boundByStm stms
+  freeIn' (KernelBody attr stms res) =
+    fvBind bound_in_stms $ freeIn' attr <> freeIn' stms <> freeIn' res
+    where bound_in_stms = fold $ fmap boundByStm stms
 
 instance Attributes lore => Substitute (KernelBody lore) where
   substituteNames subst (KernelBody attr stms res) =
@@ -245,8 +243,8 @@ consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
 consumedInKernelBody (KernelBody attr stms res) =
   consumedInBody (Body attr stms []) <> mconcat (map consumedByReturn res)
-  where consumedByReturn (WriteReturns _ a _) = S.singleton a
-        consumedByReturn _                   = mempty
+  where consumedByReturn (WriteReturns _ a _) = oneName a
+        consumedByReturn _                    = mempty
 
 checkKernelBody :: TC.Checkable lore =>
                    [Type] -> KernelBody (Aliases lore) -> TC.TypeM lore ()
@@ -433,7 +431,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SegOp lore) where
   consumedInOp (SegScan _ _ _ _ _ kbody) =
     consumedInKernelBody kbody
   consumedInOp (SegGenRed _ _ ops _ kbody) =
-    S.fromList (concatMap genReduceDest ops) <> consumedInKernelBody kbody
+    namesFromList (concatMap genReduceDest ops) <> consumedInKernelBody kbody
 
 checkSegLevel :: Maybe SegLevel -> SegLevel -> TC.TypeM lore ()
 checkSegLevel Nothing SegThreadScalar{} =
@@ -680,12 +678,12 @@ instance Attributes lore => Rename (SegOp lore) where
 
 instance (Attributes lore, FreeIn (LParamAttr lore)) =>
          FreeIn (SegOp lore) where
-  freeIn e = execWriter $ mapSegOpM free e
-    where walk f x = tell (f x) >> return x
-          free = SegOpMapper { mapOnSegOpSubExp = walk freeIn
-                             , mapOnSegOpLambda = walk freeIn
-                             , mapOnSegOpBody = walk freeIn
-                             , mapOnSegOpVName = walk freeIn
+  freeIn' e = flip execState mempty $ mapSegOpM free e
+    where walk f x = modify (<>f x) >> return x
+          free = SegOpMapper { mapOnSegOpSubExp = walk freeIn'
+                             , mapOnSegOpLambda = walk freeIn'
+                             , mapOnSegOpBody = walk freeIn'
+                             , mapOnSegOpVName = walk freeIn'
                              }
 
 instance OpMetrics (Op lore) => OpMetrics (SegOp lore) where
@@ -923,12 +921,12 @@ instance (Attributes lore, RangedOp op) => RangedOp (HostOp lore op) where
   opRanges _ = [unknownRange]
 
 instance (Attributes lore, FreeIn op) => FreeIn (HostOp lore op) where
-  freeIn (SplitSpace o w i elems_per_thread) =
-    freeIn o <> freeIn [w, i, elems_per_thread]
-  freeIn (SegOp op) = freeIn op
-  freeIn (OtherOp op) = freeIn op
-  freeIn (CmpSizeLe _ _ x) = freeIn x
-  freeIn _ = mempty
+  freeIn' (SplitSpace o w i elems_per_thread) =
+    freeIn' o <> freeIn' [w, i, elems_per_thread]
+  freeIn' (SegOp op) = freeIn' op
+  freeIn' (OtherOp op) = freeIn' op
+  freeIn' (CmpSizeLe _ _ x) = freeIn' x
+  freeIn' _ = mempty
 
 instance (CanBeAliased (Op lore), CanBeAliased op, Attributes lore) => CanBeAliased (HostOp lore op) where
   type OpWithAliases (HostOp lore op) = HostOp (Aliases lore) (OpWithAliases op)

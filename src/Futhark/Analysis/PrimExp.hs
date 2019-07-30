@@ -80,7 +80,7 @@ instance Traversable PrimExp where
     FunExp h <$> traverse (traverse f) args <*> pure t
 
 instance FreeIn v => FreeIn (PrimExp v) where
-  freeIn = foldMap freeIn
+  freeIn' = foldMap freeIn'
 
 -- | Perform quick and dirty constant folding on the top level of a
 -- PrimExp.  This is necessary because we want to consider

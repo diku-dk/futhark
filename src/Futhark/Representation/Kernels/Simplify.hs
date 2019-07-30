@@ -18,7 +18,6 @@ import Data.Foldable
 import Data.List
 import Data.Maybe
 import qualified Data.Map.Strict as M
-import qualified Data.Set      as S
 
 import Futhark.Representation.Kernels
 import qualified Futhark.Optimise.Simplify.Engine as Engine
@@ -162,8 +161,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
                     `Engine.orIf` par_blocker
                     `Engine.orIf` Engine.isConsumed) $
     Engine.simplifyStms stms $ do
-    res' <- Engine.localVtable (ST.hideCertified $
-                                S.fromList $ M.keys $ scopeOf stms) $
+    res' <- Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
             mapM Engine.simplify res
     return ((res', UT.usages $ freeIn res'), mempty)
 
@@ -171,7 +169,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
           hoisted)
 
   where scope_vtable = ST.fromScope $ scopeOfSegSpace space
-        bound_here = S.fromList $ M.keys $ scopeOfSegSpace space
+        bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
 mkWiseKernelBody :: (Attributes lore, CanBeWise (Op lore)) =>
                     BodyAttr lore -> Stms (Wise lore) -> [KernelResult] -> KernelBody (Wise lore)
@@ -283,7 +281,7 @@ distributeKernelResults (vtable, used)
         space_slice <- map (DimFix . Var . fst) $ unSegSpace space,
         space_slice `isPrefixOf` slice,
         remaining_slice <- drop (length space_slice) slice,
-        all (isJust . flip ST.lookup vtable) $ S.toList $
+        all (isJust . flip ST.lookup vtable) $ namesToList $
           freeIn arr <> freeIn remaining_slice,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
           let outer_slice = map (\d -> DimSlice
@@ -299,7 +297,7 @@ distributeKernelResults (vtable, used)
                     letBind_ (Pattern [] [kpe]) $ BasicOp $ Copy precopy
             else index kpe
           return (kpes'', kts'', kres'',
-                  if patElemName pe `S.member` free_in_kstms
+                  if patElemName pe `nameIn` free_in_kstms
                   then bnd : kstms_rev
                   else kstms_rev)
 

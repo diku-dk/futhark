@@ -47,9 +47,6 @@ module Futhark.Representation.AST.Syntax.Core
          , unitSlice
          , fixSlice
          , PatElemT (..)
-
-         -- * Miscellaneous
-         , Names
          ) where
 
 import Control.Monad.State

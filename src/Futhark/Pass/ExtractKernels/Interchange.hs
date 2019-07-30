@@ -15,7 +15,6 @@ module Futhark.Pass.ExtractKernels.Interchange
        ) where
 
 import Control.Monad.RWS.Strict
-import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -75,7 +74,7 @@ interchangeLoop
   where free_in_body = freeIn body
 
         copyOrRemoveParam (param, arr)
-          | not (paramName param `S.member` free_in_body) =
+          | not (paramName param `nameIn` free_in_body) =
             return Nothing
           | otherwise =
             return $ Just (param, arr)

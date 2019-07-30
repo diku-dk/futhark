@@ -19,7 +19,6 @@ module Futhark.Optimise.Fusion.Composing
 
 import Data.List
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Maybe
 
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
@@ -106,7 +105,7 @@ fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
                             Nothing -> Nothing --should not be reached!
         outinsrev = M.fromList $ mapMaybe getVarParPair $ M.toList outins
         unfusible outname
-          | outname `S.member` unfus_nms =
+          | outname `nameIn` unfus_nms =
             outname `M.lookup` M.union outinsrev (M.fromList out1)
         unfusible _ = Nothing
         unfus_vars= mapMaybe (unfusible . fst) out1
@@ -162,7 +161,7 @@ fuseRedomap unfus_nms outVars p_lam p_scan_nes p_red_nes p_inparr outPairs
   --   (i) we remove the accumulator formal paramter and corresponding
   --       (body) result from from redomap's fold-lambda body
   let p_num_nes   = length p_scan_nes + length p_red_nes
-      unfus_arrs  = filter (`S.member` unfus_nms) outVars
+      unfus_arrs  = filter (`nameIn` unfus_nms) outVars
       p_lam_body   = lambdaBody p_lam
       (p_lam_scan_ts, p_lam_red_ts, p_lam_map_ts) =
         splitAt3 (length p_scan_nes) (length p_red_nes) $ lambdaReturnType p_lam
@@ -176,7 +175,7 @@ fuseRedomap unfus_nms outVars p_lam p_scan_nes p_red_nes p_inparr outPairs
   --       @outPairs@, then ``map o redomap'' fuse the two lambdas
   --       (in the usual way), and construct the extra return types
   --       for the arrays that fall through.
-      (res_lam, new_inp) = fuseMaps (S.fromList unfus_arrs) p_lam_hacked p_inparr
+      (res_lam, new_inp) = fuseMaps (namesFromList unfus_arrs) p_lam_hacked p_inparr
                                     (drop p_num_nes outPairs) c_lam c_inparr
       (res_lam_scan_ts, res_lam_red_ts, res_lam_map_ts) =
         splitAt3 (length c_scan_nes) (length c_red_nes) $ lambdaReturnType res_lam

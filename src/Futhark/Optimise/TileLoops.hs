@@ -8,7 +8,6 @@ module Futhark.Optimise.TileLoops
 
 import Control.Monad.State
 import Control.Monad.Reader
-import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import qualified Data.Map.Strict as M
 import Data.List
@@ -87,9 +86,9 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- 1D tiling of redomap.
       | (gtid, kdim) : top_space_rev <- reverse $ unSegSpace initial_space,
         Just (w, arrs, form) <- tileable stm_to_tile,
-        all (not . S.member gtid .
+        all (not . nameIn gtid .
              flip (M.findWithDefault mempty) variance) arrs,
-        not $ gtid `S.member` branch_variant,
+        not $ gtid `nameIn` branch_variant,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) =
 
@@ -121,8 +120,8 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
 
           let branch_variant' =
                 branch_variant <>
-                S.unions (map (flip (M.findWithDefault mempty) variance)
-                          (S.toList (freeIn bound)))
+                mconcat (map (flip (M.findWithDefault mempty) variance)
+                         (namesToList (freeIn bound)))
               merge_params = map fst merge
 
           maybe_tiled <-
@@ -155,9 +154,9 @@ preludeToPostlude variance prelude stm_to_tile postlude =
         used_in_stm_variant =
           (used_in_tiled<>) $ mconcat $
           map (flip (M.findWithDefault mempty) variance) $
-          S.toList used_in_tiled
+          namesToList used_in_tiled
 
-        used stm = any (`S.member` used_in_stm_variant) $
+        used stm = any (`nameIn` used_in_stm_variant) $
                    patternNames $ stmPattern stm
 
         (prelude_used, prelude_not_used) =
@@ -186,7 +185,7 @@ partitionPrelude variance prestms tiled_kdims =
     invariantTo names stm =
       case patternNames (stmPattern stm) of
         [] -> True -- Does not matter.
-        v:_ -> not $ any (`S.member` names) $
+        v:_ -> not $ any (`nameIn` names) $ namesToList $
                M.findWithDefault mempty v variance
     (invariant_prestms, variant_prestms) =
       Seq.partition (invariantTo tiled_kdims) prestms
@@ -198,10 +197,10 @@ partitionPrelude variance prestms tiled_kdims =
     mustBeInlinedExp _ = False
     mustBeInlined = mustBeInlinedExp . stmExp
 
-    must_be_inlined = S.fromList $ concatMap (patternNames . stmPattern) $
+    must_be_inlined = namesFromList $ concatMap (patternNames . stmPattern) $
                       stmsToList $ Seq.filter mustBeInlined variant_prestms
     recompute stm =
-      any (`S.member` must_be_inlined) (patternNames (stmPattern stm)) ||
+      any (`nameIn` must_be_inlined) (patternNames (stmPattern stm)) ||
       not (invariantTo must_be_inlined stm)
     (recomputed_variant_prestms, precomputed_variant_prestms) =
       Seq.partition recompute variant_prestms
@@ -212,7 +211,7 @@ injectPrelude :: SegSpace -> VarianceTable
               -> (Stms Kernels, Tiling, TiledBody)
 injectPrelude initial_space variance prestms used (host_stms, tiling, tiledBody) =
   (host_stms, tiling, tiledBody')
-  where tiled_kdims = S.fromList $ map fst $
+  where tiled_kdims = namesFromList $ map fst $
                       filter (`notElem` unSegSpace (tilingSpace tiling)) $
                       unSegSpace initial_space
 
@@ -224,7 +223,7 @@ injectPrelude initial_space variance prestms used (host_stms, tiling, tiledBody)
 
           addStms invariant_prestms
 
-          let live_set = S.toList $ liveSet precomputed_variant_prestms used
+          let live_set = namesToList $ liveSet precomputed_variant_prestms used
           prelude_arrs <- inScopeOf precomputed_variant_prestms $
                           doPrelude tiling precomputed_variant_prestms live_set
 
@@ -256,7 +255,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
       tiledBody' privstms = inScopeOf host_stms $ do
         addStms invariant_prestms
 
-        let live_set = S.toList $ liveSet precomputed_variant_prestms used_in_body
+        let live_set = namesToList $ liveSet precomputed_variant_prestms used_in_body
         prelude_arrs <- inScopeOf precomputed_variant_prestms $
                         doPrelude tiling precomputed_variant_prestms live_set
 
@@ -295,7 +294,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
 
   return (host_stms, tiling, tiledBody')
 
-  where tiled_kdims = S.fromList $ map fst $
+  where tiled_kdims = namesFromList $ map fst $
                       filter (`notElem` unSegSpace (tilingSpace tiling)) $
                       unSegSpace initial_space
 
@@ -313,7 +312,7 @@ doPrelude tiling prestms prestms_live =
 
 liveSet :: FreeIn a => Stms Kernels -> a -> Names
 liveSet stms after =
-  S.fromList (concatMap (patternNames . stmPattern) stms) `S.intersection`
+  namesFromList (concatMap (patternNames . stmPattern) stms) `namesIntersection`
   freeIn after
 
 tileable :: Stm Kernels
@@ -693,10 +692,10 @@ invariantToOneOfTwoInnerDims :: Names -> M.Map VName Names -> [VName] -> VName
 invariantToOneOfTwoInnerDims branch_variant variance dims arr = do
   j : i : _ <- Just $ reverse dims
   let variant_to = M.findWithDefault mempty arr variance
-      branch_invariant = not $ S.member j branch_variant || S.member i branch_variant
-  if branch_invariant && i `S.member` variant_to && not (j `S.member` variant_to) then
+      branch_invariant = not $ nameIn j branch_variant || nameIn i branch_variant
+  if branch_invariant && i `nameIn` variant_to && not (j `nameIn` variant_to) then
     Just [0,1]
-  else if branch_invariant && j `S.member` variant_to && not (i `S.member` variant_to) then
+  else if branch_invariant && j `nameIn` variant_to && not (i `nameIn` variant_to) then
     Just [1,0]
   else
     Nothing
@@ -912,5 +911,5 @@ varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
 varianceInStm variance bnd =
   foldl' add variance $ patternNames $ stmPattern bnd
   where add variance' v = M.insert v binding_variance variance'
-        look variance' v = S.insert v $ M.findWithDefault mempty v variance'
-        binding_variance = mconcat $ map (look variance) $ S.toList (freeIn bnd)
+        look variance' v = oneName v <> M.findWithDefault mempty v variance'
+        binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)

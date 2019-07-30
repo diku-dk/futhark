@@ -16,11 +16,9 @@ where
 import Data.List
 import Data.Maybe
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
-
 import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.Transform.Substitute
 import Futhark.Representation.AST hiding (typeOf)
@@ -104,7 +102,7 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm (_, []) [] lam) inps) = do
             | otherwise =
               Nothing
           boundUsedInBody =
-            mapMaybe isBound $ S.toList $ freeIn lam
+            mapMaybe isBound $ namesToList $ freeIn lam
       newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
       let subst = M.fromList $
                   zip (map identName boundUsedInBody) (map identName newParams)

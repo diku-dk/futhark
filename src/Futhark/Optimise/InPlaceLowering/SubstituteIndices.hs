@@ -13,7 +13,6 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
 
 import Control.Monad
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST
@@ -92,7 +91,7 @@ substituteIndicesInExp substs e = do
                                          []) substs'
               consumingSubst substs' _ =
                 return substs'
-          in foldM consumingSubst substs . S.toList . consumedInExp
+          in foldM consumingSubst substs . namesToList . consumedInExp
 
 substituteIndicesInSubExp :: MonadBinder m =>
                              IndexSubstitutions (LetAttr (Lore m))

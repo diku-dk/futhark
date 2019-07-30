@@ -208,7 +208,7 @@ removeUnusedParams l inps =
         (ps', inps') = case (unzip $ filter (used . fst) pInps, pInps) of
                          (([], []), (p,inp):_) -> ([p], [inp])
                          ((ps_, inps_), _)     -> (ps_, inps_)
-        used p = paramName p `S.member` freeVars
+        used p = paramName p `nameIn` freeVars
         freeVars = freeIn $ lambdaBody l
 
 -- | Check that the consumer uses at least one output of the producer
@@ -230,13 +230,13 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
   -- into soac_c.
   let soac_c    = fsoac ker
       inp_p_arr = SOAC.inputs soac_p
-      horizFuse= not (S.null unfus_set) &&
+      horizFuse= unfus_set /= mempty &&
                  SOAC.width soac_p == SOAC.width soac_c
       inp_c_arr = SOAC.inputs soac_c
       lam_p     = SOAC.lambda soac_p
       lam_c     = SOAC.lambda soac_c
       w        = SOAC.width soac_p
-      returned_outvars = filter (`S.member` unfus_set) outVars
+      returned_outvars = filter (`nameIn` unfus_set) outVars
       success res_outnms res_soac = do
         let fusedVars_new = fusedVars ker++outVars
         -- Avoid name duplication, because the producer lambda is not
@@ -255,7 +255,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
 
   let mapLikeFusionCheck =
         let (res_lam, new_inp) = fuseMaps unfus_set lam_p inp_p_arr outPairs lam_c inp_c_arr
-            (extra_nms,extra_rtps) = unzip $ filter ((`S.member` unfus_set) . fst) $
+            (extra_nms,extra_rtps) = unzip $ filter ((`nameIn` unfus_set) . fst) $
               zip outVars $ map (stripArray 1) $ SOAC.typeOf soac_p
             res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
         in (extra_nms, res_lam', new_inp)
@@ -302,7 +302,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       | isJust $ isMapSOAC form,
         -- 1. all arrays produced by the map are ONLY used (consumed)
         --    by the scatter, i.e., not used elsewhere.
-        not (any (`S.member` unfus_set) outVars),
+        not (any (`nameIn` unfus_set) outVars),
         -- 2. all arrays produced by the map are input to the scatter.
         mapWriteFusionOK outVars ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
@@ -319,7 +319,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       | isJust $ isMapSOAC form,
         -- 1. all arrays produced by the map are ONLY used (consumed)
         --    by the genreduce, i.e., not used elsewhere.
-        not (any (`S.member` unfus_set) outVars),
+        not (any (`nameIn` unfus_set) outVars),
         -- 2. all arrays produced by the map are input to the scatter.
         mapWriteFusionOK outVars ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
@@ -481,7 +481,7 @@ fuseStreamHelper out_kernms unfus_set outVars outPairs
                                                 inp2_arr
               res_lam'' = res_lam' { lambdaParams = chunk1 : lambdaParams res_lam' }
               unfus_accs  = take (length nes1) outVars
-              unfus_arrs  = filter (`S.member` unfus_set) outVars
+              unfus_arrs  = filter (`nameIn` unfus_set) outVars
           res_form <- mergeForms form2 form1
           return (unfus_accs ++ out_kernms ++ unfus_arrs,
                   SOAC.Stream w2 res_form res_lam'' new_inp )

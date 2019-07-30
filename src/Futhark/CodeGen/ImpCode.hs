@@ -61,7 +61,6 @@ import Data.Monoid ((<>))
 import Data.List
 import Data.Loc
 import Data.Traversable
-import qualified Data.Set as S
 
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
@@ -450,65 +449,65 @@ instance Traversable Code where
     pure $ DebugPrint s v
 
 declaredIn :: Code a -> Names
-declaredIn (DeclareMem name _) = S.singleton name
-declaredIn (DeclareScalar name _) = S.singleton name
-declaredIn (DeclareArray name _ _ _) = S.singleton name
+declaredIn (DeclareMem name _) = oneName name
+declaredIn (DeclareScalar name _) = oneName name
+declaredIn (DeclareArray name _ _ _) = oneName name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
-declaredIn (For i _ _ body) = S.singleton i <> declaredIn body
+declaredIn (For i _ _ body) = oneName i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
 declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
 
 instance FreeIn a => FreeIn (Code a) where
-  freeIn (x :>>: y) =
-    freeIn x <> freeIn y `S.difference` declaredIn x
-  freeIn Skip =
+  freeIn' (x :>>: y) =
+    fvBind (declaredIn x) $ freeIn' x <> freeIn' y
+  freeIn' Skip =
     mempty
-  freeIn (For i _ bound body) =
-    i `S.delete` (freeIn bound <> freeIn body)
-  freeIn (While cond body) =
-    freeIn cond <> freeIn body
-  freeIn DeclareMem{} =
+  freeIn' (For i _ bound body) =
+    fvBind (oneName i) $ freeIn' bound <> freeIn' body
+  freeIn' (While cond body) =
+    freeIn' cond <> freeIn' body
+  freeIn' DeclareMem{} =
     mempty
-  freeIn DeclareScalar{} =
+  freeIn' DeclareScalar{} =
     mempty
-  freeIn DeclareArray{} =
+  freeIn' DeclareArray{} =
     mempty
-  freeIn (Allocate name size _) =
-    freeIn name <> freeIn size
-  freeIn (Free name _) =
-    freeIn name
-  freeIn (Copy dest x _ src y _ n) =
-    freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
-  freeIn (SetMem x y _) =
-    freeIn x <> freeIn y
-  freeIn (Write v i _ _ _ e) =
-    freeIn v <> freeIn i <> freeIn e
-  freeIn (SetScalar x y) =
-    freeIn x <> freeIn y
-  freeIn (Call dests _ args) =
-    freeIn dests <> freeIn args
-  freeIn (If cond t f) =
-    freeIn cond <> freeIn t <> freeIn f
-  freeIn (Assert e _ _) =
-    freeIn e
-  freeIn (Op op) =
-    freeIn op
-  freeIn (Comment _ code) =
-    freeIn code
-  freeIn (DebugPrint _ v) =
-    maybe mempty (freeIn . snd) v
+  freeIn' (Allocate name size _) =
+    freeIn' name <> freeIn' size
+  freeIn' (Free name _) =
+    freeIn' name
+  freeIn' (Copy dest x _ src y _ n) =
+    freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
+  freeIn' (SetMem x y _) =
+    freeIn' x <> freeIn' y
+  freeIn' (Write v i _ _ _ e) =
+    freeIn' v <> freeIn' i <> freeIn' e
+  freeIn' (SetScalar x y) =
+    freeIn' x <> freeIn' y
+  freeIn' (Call dests _ args) =
+    freeIn' dests <> freeIn' args
+  freeIn' (If cond t f) =
+    freeIn' cond <> freeIn' t <> freeIn' f
+  freeIn' (Assert e _ _) =
+    freeIn' e
+  freeIn' (Op op) =
+    freeIn' op
+  freeIn' (Comment _ code) =
+    freeIn' code
+  freeIn' (DebugPrint _ v) =
+    maybe mempty (freeIn' . snd) v
 
 instance FreeIn ExpLeaf where
-  freeIn (Index v e _ _ _) = freeIn v <> freeIn e
-  freeIn (ScalarVar v) = freeIn v
-  freeIn (SizeOf _) = mempty
+  freeIn' (Index v e _ _ _) = freeIn' v <> freeIn' e
+  freeIn' (ScalarVar v) = freeIn' v
+  freeIn' (SizeOf _) = mempty
 
 instance FreeIn Arg where
-  freeIn (MemArg m) = freeIn m
-  freeIn (ExpArg e) = freeIn e
+  freeIn' (MemArg m) = freeIn' m
+  freeIn' (ExpArg e) = freeIn' e
 
 instance FreeIn Size where
-  freeIn (VarSize name) = S.singleton name
-  freeIn (ConstSize _) = mempty
+  freeIn' (VarSize name) = fvName name
+  freeIn' (ConstSize _) = mempty

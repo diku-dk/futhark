@@ -84,7 +84,7 @@ bindVar env (Ident name t, aliases) =
           Array {} -> IsArray name (LetInfo t) aliases' $ SOAC.identInput $ Ident name t
           _        -> IsNotArray name $ LetInfo t
         expand = maybe mempty varEntryAliases . flip M.lookup (varsInScope env)
-        aliases' = aliases <> mconcat (map expand $ S.toList aliases)
+        aliases' = aliases <> mconcat (map expand $ namesToList aliases)
 
 bindVars :: FusionGEnv -> [(Ident, Names)] -> FusionGEnv
 bindVars = foldl bindVar
@@ -114,16 +114,16 @@ bindingFamilyVar faml env (Ident nm t) =
       }
 
 varAliases :: VName -> FusionGM Names
-varAliases v = asks $ S.insert v . maybe mempty varEntryAliases .
+varAliases v = asks $ (oneName v<>) . maybe mempty varEntryAliases .
                       M.lookup v . varsInScope
 
 varsAliases :: Names -> FusionGM Names
-varsAliases = fmap mconcat . mapM varAliases . S.toList
+varsAliases = fmap mconcat . mapM varAliases . namesToList
 
 checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
 checkForUpdates res (BasicOp (Update src is _)) = do
   res' <- foldM addVarToInfusible res $
-          src : S.toList (mconcat $ map freeIn is)
+          src : namesToList (mconcat $ map freeIn is)
   aliases <- varAliases src
   let inspectKer k = k { inplace = aliases <> inplace k }
   return res' { kernels = M.map inspectKer $ kernels res' }
@@ -146,11 +146,11 @@ bindingTransform pe srcname trns = local $ \env ->
     Just (IsArray src' _ aliases input) ->
       env { varsInScope =
               M.insert vname
-              (IsArray src' (LetInfo attr) (srcname `S.insert` aliases) $
+              (IsArray src' (LetInfo attr) (oneName srcname <> aliases) $
                trns `SOAC.addTransform` input) $
               varsInScope env
           }
-    _ -> bindVar env (patElemIdent pe, S.singleton vname)
+    _ -> bindVar env (patElemIdent pe, oneName vname)
   where vname = patElemName pe
         attr = patElemAttr pe
 
@@ -247,12 +247,12 @@ instance Semigroup FusedRes where
     FusedRes (rsucc     res1       ||      rsucc     res2)
              (outArr    res1    `M.union`  outArr    res2)
              (M.unionWith S.union (inpArr res1) (inpArr res2) )
-             (infusible res1    `S.union`  infusible res2)
+             (infusible res1    <>  infusible res2)
              (kernels   res1    `M.union`  kernels   res2)
 
 instance Monoid FusedRes where
   mempty = FusedRes { rsucc     = False,   outArr = M.empty, inpArr  = M.empty,
-                      infusible = S.empty, kernels = M.empty }
+                      infusible = mempty, kernels = M.empty }
 
 isInpArrInResModKers :: FusedRes -> S.Set KernName -> VName -> Bool
 isInpArrInResModKers ress kers nm =
@@ -332,7 +332,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, cs, orig_soac, consumed) = do
   (inp_nms, other_nms) <- soacInputs soac
   -- Assumption: the free vars in lambda are already in @infusible res@.
   let out_nms     = patternNames out_idds
-      isInfusible = (`S.member` infusible res)
+      isInfusible = (`nameIn` infusible res)
       is_screma  = case orig_soac of
                        SOAC.Screma _ form _ ->
                          (isJust (isRedomapSOAC form) || isJust (isScanomapSOAC form)) &&
@@ -353,8 +353,8 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, cs, orig_soac, consumed) = do
   --
   -- (ii) check whether fusing @soac@ will violate any in-place update
   --      restriction, e.g., would move an input array past its in-place update.
-  let all_used_names = S.toList $ S.unions [lam_used_nms, S.fromList inp_nms, S.fromList other_nms]
-      has_inplace ker = any (`S.member` inplace ker) all_used_names
+  let all_used_names = namesToList $ mconcat [lam_used_nms, namesFromList inp_nms, namesFromList other_nms]
+      has_inplace ker = any (`nameIn` inplace ker) all_used_names
       ok_inplace = not $ any has_inplace old_kers
   --
   -- (iii)  there are some kernels that use some of `out_idds' as inputs
@@ -366,11 +366,11 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, cs, orig_soac, consumed) = do
   -- (ii) will also become part of the infusible set the inparr vars
   --         that also appear as inparr of another kernel,
   --         BUT which said kernel is not the one we are fusing with (now)!
-  let mod_kerS  = if fusible_ker then S.fromList oldker_nms else S.empty
+  let mod_kerS  = if fusible_ker then S.fromList oldker_nms else mempty
   let used_inps = filter (isInpArrInResModKers res mod_kerS) inp_nms
-  let ufs       = S.unions [infusible res, S.fromList used_inps,
-                             S.fromList other_nms `S.difference`
-                             S.fromList (map SOAC.inputArray $ SOAC.inputs soac)]
+  let ufs       = mconcat [infusible res, namesFromList used_inps,
+                           namesFromList other_nms `namesSubtract`
+                           namesFromList (map SOAC.inputArray $ SOAC.inputs soac)]
   let comb      = M.unionWith S.union
 
   if not fusible_ker then
@@ -422,7 +422,7 @@ prodconsGreedyFuse res (out_idds, cs, soac, consumed) = do
   -- try producer-consumer fusion
   (ok_kers_compat, fused_kers) <- do
       kers <- forM to_fuse_kers $
-                attemptFusion S.empty (patternNames out_idds) soac consumed
+              attemptFusion mempty (patternNames out_idds) soac consumed
       case sequence kers of
         Nothing    -> return (False, [])
         Just kers' -> return (True, map certifyKer kers')
@@ -434,7 +434,7 @@ horizontGreedyFuse :: [Stm] -> FusedRes -> (Pattern, Certificates, SOAC, Names)
 horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
   (inp_nms, _) <- soacInputs soac
   let out_nms        = patternNames out_idds
-      infusible_nms  = S.fromList $ filter (`S.member` infusible res) out_nms
+      infusible_nms  = namesFromList $ filter (`nameIn` infusible res) out_nms
       out_arr_nms    = case soac of
                         -- the accumulator result cannot be fused!
                         SOAC.Screma _ (ScremaForm (_, scan_nes) reds _) _ ->
@@ -472,15 +472,15 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                 -- check that we still try fusion and that the intermediate
                 -- bindings do not use the results of cur_ker
                 let curker_outnms  = outNames cur_ker
-                    curker_outset  = S.fromList curker_outnms
-                    new_ufus_nms   = S.fromList $ outNames ker ++ S.toList ufus_nms
+                    curker_outset  = namesFromList curker_outnms
+                    new_ufus_nms   = namesFromList $ outNames ker ++ namesToList ufus_nms
                     -- disable horizontal fusion in the case when an output array of
                     -- producer SOAC is a non-trivially transformed input of the consumer
                     out_transf_ok  = let ker_inp = SOAC.inputs $ fsoac ker
-                                         unfuse1 = S.fromList (map SOAC.inputArray ker_inp) `S.difference`
-                                                   S.fromList (mapMaybe SOAC.isVarInput ker_inp)
-                                         unfuse2 = S.intersection curker_outset ufus_nms
-                                     in  S.null $ S.intersection unfuse1 unfuse2
+                                         unfuse1 = namesFromList (map SOAC.inputArray ker_inp) `namesSubtract`
+                                                   namesFromList (mapMaybe SOAC.isVarInput ker_inp)
+                                         unfuse2 = namesIntersection curker_outset ufus_nms
+                                     in  mempty == namesIntersection unfuse1 unfuse2
                     -- Disable horizontal fusion if consumer has any
                     -- output transforms.
                     cons_no_out_transf = SOAC.nullTransforms $ outputTransform ker
@@ -490,16 +490,17 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                     case maybesoac of
                                       -- check that consumer's lambda body does not use
                                       -- directly the produced arrays (e.g., see noFusion3.fut).
-                                      Right conssoac -> return $ S.null $ S.intersection curker_outset $
-                                                                 freeIn $ lambdaBody $ SOAC.lambda conssoac
+                                      Right conssoac -> return $ mempty ==
+                                                        (curker_outset
+                                                         `namesIntersection`
+                                                         freeIn (lambdaBody $ SOAC.lambda conssoac))
                                       Left _         -> return True
 
                 let interm_bnds_ok = cur_ok && consumer_ok && out_transf_ok && cons_no_out_transf &&
                       foldl (\ok bnd-> ok && -- hardwired to False after first fail
                                        -- (i) check that the in-between bindings do
                                        --     not use the result of current kernel OR
-                                       S.null ( S.intersection curker_outset $
-                                                      freeIn (stmExp bnd) ) ||
+                                       mempty == namesIntersection curker_outset (freeIn (stmExp bnd)) ||
                                        --(ii) that the pattern-binding corresponds to
                                        --     the result of the consumer kernel; in the
                                        --     latter case it means it corresponds to a
@@ -508,11 +509,11 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                         not ( null $ curker_outnms `L.intersect`
                                               patternNames (stmPattern bnd))
                             ) True (drop (prev_ind+1) $ take bnd_ind rem_bnds)
-                if not interm_bnds_ok then return (False,n,bnd_ind,cur_ker,S.empty)
+                if not interm_bnds_ok then return (False,n,bnd_ind,cur_ker,mempty)
                 else do new_ker <- attemptFusion ufus_nms (outNames cur_ker)
                                    (fsoac cur_ker) (fusedConsumed cur_ker) ker
                         case new_ker of
-                          Nothing -> return (False, n,bnd_ind,cur_ker,S.empty)
+                          Nothing -> return (False, n,bnd_ind,cur_ker,mempty)
                           Just krn-> return (True,n+1,bnd_ind,krn,new_ufus_nms)
             ) (True,0,0,soac_kernel,infusible_nms) kernminds'
 
@@ -613,14 +614,14 @@ fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
       -- We put the variables produced by Scatter into the infusible
       -- set to force horizontal fusion.  It is not possible to
       -- producer/consumer-fuse Scatter anyway.
-      fres' <- addNamesToInfusible fres $ S.fromList $ patternNames pat
+      fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
       mapLike fres' soac lam
 
     Right soac@(SOAC.GenReduce _ _ lam _) -> do
       -- We put the variables produced by GenReduce into the infusible
       -- set to force horizontal fusion.  It is not possible to
       -- producer/consumer-fuse GenReduce anyway.
-      fres' <- addNamesToInfusible fres $ S.fromList $ patternNames pat
+      fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
       mapLike fres' soac lam
 
     Right soac@(SOAC.Screma _ (ScremaForm (scan_lam, scan_nes) reds map_lam) _) ->
@@ -652,7 +653,7 @@ fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
         consumed = consumedInExp $ Alias.analyseExp e
 
         reduceLike soac lambdas nes = do
-          (used_lam, lres)  <- foldM fusionGatherLam (S.empty, fres) lambdas
+          (used_lam, lres)  <- foldM fusionGatherLam (mempty, fres) lambdas
           bres  <- bindingFamily pat $ fusionGatherStms lres bnds res
           bres' <- foldM fusionGatherSubExp bres nes
           consumed' <- varsAliases consumed
@@ -660,7 +661,7 @@ fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
 
         mapLike fres' soac lambda = do
           bres  <- bindingFamily pat $ fusionGatherStms fres' bnds res
-          (used_lam, blres) <- fusionGatherLam (S.empty, bres) lambda
+          (used_lam, blres) <- fusionGatherLam (mempty, bres) lambda
           consumed' <- varsAliases consumed
           greedyFuse rem_bnds used_lam blres (pat, cs, soac, consumed')
 
@@ -687,7 +688,7 @@ fusionGatherExp fres (DoLoop ctx val form loop_body) = do
   -- make the inpArr infusible, so that they
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ M.toList $ inpArr new_res
-  let new_res' = new_res { infusible = foldl (flip S.insert) (infusible new_res) inp_arrs }
+  let new_res' = new_res { infusible = infusible new_res <> mconcat (map oneName inp_arrs) }
   -- merge new_res with fres'
   return $ new_res' <> fres'
 
@@ -717,7 +718,7 @@ fusionGatherSubExp fres (Var idd) = addVarToInfusible fres idd
 fusionGatherSubExp fres _         = return fres
 
 addNamesToInfusible :: FusedRes -> Names -> FusionGM FusedRes
-addNamesToInfusible fres = foldM addVarToInfusible fres . S.toList
+addNamesToInfusible fres = foldM addVarToInfusible fres . namesToList
 
 addVarToInfusible :: FusedRes -> VName -> FusionGM FusedRes
 addVarToInfusible fres name = do
@@ -725,23 +726,23 @@ addVarToInfusible fres name = do
   let name' = case trns of
         Nothing         -> name
         Just (SOAC.Input _ orig _) -> orig
-  return fres { infusible = S.insert name' $ infusible fres }
+  return fres { infusible = oneName name' <> infusible fres }
 
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by
 -- adding inp_arrs to the infusible set.
-fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (S.Set VName, FusedRes)
+fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (Names, FusedRes)
 fusionGatherLam (u_set,fres) (Lambda idds body _) = do
     new_res <- bindingParams idds $ fusionGatherBody mempty body
     -- make the inpArr infusible, so that they
     -- cannot be fused from outside the lambda:
-    let inp_arrs = S.fromList $ M.keys $ inpArr new_res
-    let unfus = infusible new_res `S.union` inp_arrs
+    let inp_arrs = namesFromList $ M.keys $ inpArr new_res
+    let unfus = infusible new_res <> inp_arrs
     bnds <- M.keys <$> asks varsInScope
-    let unfus'  = unfus `S.intersection` S.fromList bnds
+    let unfus'  = unfus `namesIntersection` namesFromList bnds
     -- merge fres with new_res'
     let new_res' = new_res { infusible = unfus' }
     -- merge new_res with fres'
-    return (u_set `S.union` unfus', new_res' <> fres)
+    return (u_set <> unfus', new_res' <> fres)
 
 -------------------------------------------------------------
 -------------------------------------------------------------
@@ -843,7 +844,7 @@ simplifyAndFuseInLambda :: Lambda -> FusionGM Lambda
 simplifyAndFuseInLambda lam = do
   let args = replicate (length $ lambdaParams lam) Nothing
   lam' <- simplifyLambda lam args
-  (_, nfres) <- fusionGatherLam (S.empty, mkFreshFusionRes) lam'
+  (_, nfres) <- fusionGatherLam (mempty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   bindRes nfres' $ fuseInLambda lam'
 
@@ -869,18 +870,18 @@ copyNewlyConsumed was_consumed soac =
 
     _ -> return $ removeOpAliases soac
   where consumed = consumedInOp soac
-        newly_consumed = consumed `S.difference` was_consumed
+        newly_consumed = consumed `namesSubtract` was_consumed
 
         copyConsumedArr a
-          | a `S.member` newly_consumed =
+          | a `nameIn` newly_consumed =
             letExp (baseString a <> "_copy") $ BasicOp $ Copy a
           | otherwise = return a
 
         copyFreeInLambda lam = do
-          let free_consumed = consumedByLambda lam `S.difference`
-                S.fromList (map paramName $ lambdaParams lam)
+          let free_consumed = consumedByLambda lam `namesSubtract`
+                namesFromList (map paramName $ lambdaParams lam)
           (bnds, subst) <-
-            foldM copyFree (mempty, mempty) $ S.toList free_consumed
+            foldM copyFree (mempty, mempty) $ namesToList free_consumed
           let lam' = Aliases.removeLambdaAliases lam
           return $ if null bnds
                    then lam'
@@ -905,13 +906,13 @@ copyNewlyConsumed was_consumed soac =
 mkFreshFusionRes :: FusedRes
 mkFreshFusionRes =
     FusedRes { rsucc     = False,   outArr = M.empty, inpArr  = M.empty,
-               infusible = S.empty, kernels = M.empty }
+               infusible = mempty, kernels = M.empty }
 
 mergeFusionRes :: FusedRes -> FusedRes -> FusionGM FusedRes
 mergeFusionRes res1 res2 = do
-    let ufus_mres = infusible res1 `S.union` infusible res2
-    inp_both     <- expandSoacInpArr $ M.keys $ inpArr res1 `M.intersection` inpArr res2
-    let m_unfus   = foldl (flip S.insert) ufus_mres inp_both
+    let ufus_mres = infusible res1 <> infusible res2
+    inp_both <- expandSoacInpArr $ M.keys $ inpArr res1 `M.intersection` inpArr res2
+    let m_unfus = ufus_mres <> mconcat (map oneName inp_both)
     return $ FusedRes  (rsucc     res1       ||      rsucc     res2)
                        (outArr    res1    `M.union`  outArr    res2)
                        (M.unionWith S.union (inpArr res1) (inpArr res2) )

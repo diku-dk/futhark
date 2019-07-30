@@ -59,7 +59,7 @@ instance Substitute VarWisdom where
     VarWisdom (substituteNames substs als) (substituteNames substs range)
 
 instance FreeIn VarWisdom where
-  freeIn (VarWisdom als range) = freeIn als <> freeIn range
+  freeIn' (VarWisdom als range) = freeIn' als <> freeIn' range
 
 -- | Wisdom about an expression.
 data ExpWisdom = ExpWisdom { _expWisdomConsumed :: ConsumedInExp
@@ -68,10 +68,10 @@ data ExpWisdom = ExpWisdom { _expWisdomConsumed :: ConsumedInExp
                  deriving (Eq, Ord, Show)
 
 instance FreeIn ExpWisdom where
-  freeIn = mempty
+  freeIn' = mempty
 
 instance FreeAttr ExpWisdom where
-  precomputed = const . unNames . expWisdomFree
+  precomputed = const . fvNames . unNames . expWisdomFree
 
 instance Substitute ExpWisdom where
   substituteNames substs (ExpWisdom cons free) =
@@ -102,11 +102,11 @@ instance Substitute BodyWisdom where
     (substituteNames substs free)
 
 instance FreeIn BodyWisdom where
-  freeIn (BodyWisdom als cons rs free) =
-    freeIn als <> freeIn cons <> freeIn rs <> freeIn free
+  freeIn' (BodyWisdom als cons rs free) =
+    freeIn' als <> freeIn' cons <> freeIn' rs <> freeIn' free
 
 instance FreeAttr BodyWisdom where
-  precomputed = const . unNames . bodyWisdomFree
+  precomputed = const . fvNames . unNames . bodyWisdomFree
 
 instance (Annotations lore,
           CanBeWise (Op lore)) => Annotations (Wise lore) where
@@ -215,7 +215,7 @@ addWisdomToPattern pat e =
 mkWiseBody :: (Attributes lore, CanBeWise (Op lore)) =>
               BodyAttr lore -> Stms (Wise lore) -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
-  Body (BodyWisdom aliases consumed ranges (Names' $ freeInStmsAndRes bnds res),
+  Body (BodyWisdom aliases consumed ranges (Names' $ freeIn $ freeInStmsAndRes bnds res),
         innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
         ranges = Ranges.mkBodyRanges bnds res

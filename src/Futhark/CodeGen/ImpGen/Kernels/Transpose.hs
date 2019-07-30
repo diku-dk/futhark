@@ -6,13 +6,11 @@ module Futhark.CodeGen.ImpGen.Kernels.Transpose
   )
   where
 
-import qualified Data.Set as S
-
 import Prelude hiding (quot, rem)
 
 import Futhark.CodeGen.ImpCode.Kernels
 import Futhark.Representation.AST.Attributes.Types
-import Futhark.Representation.AST.Attributes.Names (freeIn)
+import Futhark.Representation.AST.Attributes.Names (freeIn, namesToList)
 import Futhark.Util.IntegralExp (IntegralExp, quot, rem, quotRoundingUp)
 
 -- | Which form of transposition to generate code for.
@@ -256,7 +254,7 @@ mapTransposeKernel desc block_dim_int args t kind =
                  , [actual_dim, actual_dim `quot` elemsPerThread, 1])
 
         uses = map (`ScalarUse` int32)
-               (S.toList $ mconcat $ map freeIn
+               (namesToList $ mconcat $ map freeIn
                 [basic_odata_offset, basic_idata_offset, num_arrays,
                  width, height, input_size, output_size, mulx, muly]) ++
                map MemoryUse [odata, idata]

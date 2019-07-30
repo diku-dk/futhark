@@ -27,7 +27,6 @@ import Data.Bits
 import qualified Data.Foldable as Foldable
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Prelude hiding (lookup)
 
@@ -72,7 +71,8 @@ used = lookupPred $ const True
 -- | Expand the usage table based on aliasing information.
 expand :: (VName -> Names) -> UsageTable -> UsageTable
 expand look (UsageTable m) = UsageTable $ foldl' grow m $ M.toList m
-  where grow m' (k, v) = foldl' (grow'' $ v `withoutU` presentU) m' $ look k
+  where grow m' (k, v) = foldl' (grow'' $ v `withoutU` presentU) m' $
+                         namesToList $ look k
         grow'' v m'' k = M.insertWith (<>) k v m''
 
 keys :: UsageTable -> [VName]
@@ -94,10 +94,10 @@ isUsedDirectly = is presentU
 
 allConsumed :: UsageTable -> Names
 allConsumed (UsageTable m) =
-  S.fromList . map fst . filter (matches consumedU . snd) $ M.toList m
+  namesFromList . map fst . filter (matches consumedU . snd) $ M.toList m
 
 usages :: Names -> UsageTable
-usages names = UsageTable $ M.fromList [ (name, presentU) | name <- S.toList names ]
+usages names = UsageTable $ M.fromList [ (name, presentU) | name <- namesToList names ]
 
 usage :: VName -> Usages -> UsageTable
 usage name uses = UsageTable $ M.singleton name uses

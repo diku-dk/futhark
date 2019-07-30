@@ -13,7 +13,6 @@ module Futhark.Analysis.ScalExp
 where
 
 import Data.List
-import qualified Data.Set as S
 import Data.Maybe
 import Data.Monoid ((<>))
 
@@ -289,22 +288,22 @@ binOpScalExp bop = fmap snd . find ((==bop) . fst) $
                    ]
 
 instance FreeIn ScalExp where
-  freeIn (Val   _) = mempty
-  freeIn (Id i _)  = S.singleton i
-  freeIn (SNeg  e) = freeIn e
-  freeIn (SNot  e) = freeIn e
-  freeIn (SAbs  e) = freeIn e
-  freeIn (SSignum e) = freeIn e
-  freeIn (SPlus x y)   = freeIn x <> freeIn y
-  freeIn (SMinus x y)  = freeIn x <> freeIn y
-  freeIn (SPow x y)    = freeIn x <> freeIn y
-  freeIn (STimes x y)  = freeIn x <> freeIn y
-  freeIn (SDiv x y) = freeIn x <> freeIn y
-  freeIn (SMod x y) = freeIn x <> freeIn y
-  freeIn (SQuot x y) = freeIn x <> freeIn y
-  freeIn (SRem x y) = freeIn x <> freeIn y
-  freeIn (SLogOr x y)  = freeIn x <> freeIn y
-  freeIn (SLogAnd x y) = freeIn x <> freeIn y
-  freeIn (RelExp LTH0 e) = freeIn e
-  freeIn (RelExp LEQ0 e) = freeIn e
-  freeIn (MaxMin _  es) = mconcat $ map freeIn es
+  freeIn' (Val   _) = mempty
+  freeIn' (Id i _) = fvName i
+  freeIn' (SNeg  e) = freeIn' e
+  freeIn' (SNot  e) = freeIn' e
+  freeIn' (SAbs  e) = freeIn' e
+  freeIn' (SSignum e) = freeIn' e
+  freeIn' (SPlus x y) = freeIn' x <> freeIn' y
+  freeIn' (SMinus x y) = freeIn' x <> freeIn' y
+  freeIn' (SPow x y) = freeIn' x <> freeIn' y
+  freeIn' (STimes x y) = freeIn' x <> freeIn' y
+  freeIn' (SDiv x y) = freeIn' x <> freeIn' y
+  freeIn' (SMod x y) = freeIn' x <> freeIn' y
+  freeIn' (SQuot x y) = freeIn' x <> freeIn' y
+  freeIn' (SRem x y) = freeIn' x <> freeIn' y
+  freeIn' (SLogOr x y)  = freeIn' x <> freeIn' y
+  freeIn' (SLogAnd x y) = freeIn' x <> freeIn' y
+  freeIn' (RelExp LTH0 e) = freeIn' e
+  freeIn' (RelExp LEQ0 e) = freeIn' e
+  freeIn' (MaxMin _  es) = freeIn' es

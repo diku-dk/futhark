@@ -162,7 +162,6 @@ module Futhark.Pass.ExtractKernels (extractKernels) where
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
-import qualified Data.Set as S
 import Data.Maybe
 
 import Prelude hiding (log)
@@ -245,10 +244,10 @@ transformStms path (bnd:bnds) =
 unbalancedLambda :: Lambda -> Bool
 unbalancedLambda lam =
   unbalancedBody
-  (S.fromList $ map paramName $ lambdaParams lam) $
+  (namesFromList $ map paramName $ lambdaParams lam) $
   lambdaBody lam
 
-  where subExpBound (Var i) bound = i `S.member` bound
+  where subExpBound (Var i) bound = i `nameIn` bound
         subExpBound (Constant _) _ = False
 
         unbalancedBody bound body =

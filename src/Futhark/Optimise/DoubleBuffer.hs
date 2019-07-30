@@ -29,7 +29,6 @@ import           Control.Monad.State
 import           Control.Monad.Writer
 import           Control.Monad.Reader
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import           Data.Maybe
 import           Data.List
 
@@ -159,7 +158,7 @@ doubleBufferMergeParams :: MonadFreshNames m =>
                         -> m [DoubleBuffer]
 doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
   evalStateT (mapM buffer val_params) M.empty
-  where loopVariant v = v `S.member` bound_in_loop ||
+  where loopVariant v = v `nameIn` bound_in_loop ||
                         v `elem` map (paramName . fst) ctx_and_res
 
         loopInvariantSize (Constant v) =

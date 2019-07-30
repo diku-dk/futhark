@@ -69,7 +69,6 @@ module Futhark.Optimise.InPlaceLowering
 
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Futhark.Analysis.Alias
 import Futhark.Representation.Aliases
@@ -166,7 +165,7 @@ onKernelOp (SegOp op) =
     let mapper = identitySegOpMapper { mapOnSegOpBody = onKernelBody }
         onKernelBody kbody = do
           stms <- deepen $ optimiseStms (stmsToList (kernelBodyStms kbody)) $
-                  mapM_ seenVar $ freeIn $ kernelBodyResult kbody
+                  mapM_ seenVar $ namesToList $ freeIn $ kernelBodyResult kbody
           return kbody { kernelBodyStms = stmsFromList stms }
     SegOp <$> mapSegOpM mapper op
 onKernelOp op = return op
@@ -304,7 +303,7 @@ seenVar name = do
   aliases <- asks $
              maybe mempty entryAliases .
              M.lookup name . topDownTable
-  tell $ mempty { bottomUpSeen = S.insert name aliases }
+  tell $ mempty { bottomUpSeen = oneName name <> aliases }
 
 tapBottomUp :: ForwardingM lore a -> ForwardingM lore (a, BottomUp lore)
 tapBottomUp m = do (x,bup) <- listen m
@@ -318,7 +317,7 @@ maybeForward v dest_nm dest_attr cs src i = do
   -- Checks condition (2)
   available <- [i,Var src] `areAvailableBefore` v
   -- ...subcondition, the certificates must also.
-  certs_available <- map Var (S.toList $ freeIn cs) `areAvailableBefore` v
+  certs_available <- map Var (namesToList $ freeIn cs) `areAvailableBefore` v
   -- Check condition (3)
   samebody <- isInCurrentBody v
   -- Check condition (6)

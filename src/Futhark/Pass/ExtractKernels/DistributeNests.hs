@@ -43,7 +43,6 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.Writer.Strict
 import Control.Monad.Trans.Maybe
-import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -183,7 +182,7 @@ withStm stm = local $ \env ->
           letBindInInnerNesting provided $
           distNest env
       }
-  where provided = S.fromList $ patternNames $ stmPattern stm
+  where provided = namesFromList $ patternNames $ stmPattern stm
 
 mapNesting :: Monad m =>
               Pattern -> Certificates -> SubExp -> Lambda -> [VName]
@@ -235,7 +234,7 @@ leavingNesting (MapLoop _ cs w lam arrs) acc =
                    used_in_body = freeIn body
                    (used_params, used_arrs) =
                      unzip $
-                     filter ((`S.member` used_in_body) . paramName . fst) $
+                     filter ((`nameIn` used_in_body) . paramName . fst) $
                      zip (lambdaParams lam) arrs
                    lam' = Lambda { lambdaParams = used_params
                                  , lambdaBody = body
@@ -288,7 +287,7 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
   | null (patternContextElements pat), bodyContainsParallelism body =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | S.null $ freeIn form `S.intersection` boundInKernelNest nest,
+      | mempty == freeIn form `namesIntersection` boundInKernelNest nest,
         Just (perm, pat_unused) <- permutationAndMissing pat res ->
           -- We need to pretend pat_unused was used anyway, by adding
           -- it to the kernel nest.
@@ -310,8 +309,9 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
     any (not . primType) (ifReturns ret) =
     distributeSingleStm acc stm >>= \case
       Just (kernels, res, nest, acc')
-        | S.null $ (freeIn cond <> freeIn ret) `S.intersection`
-          boundInKernelNest nest,
+        | (freeIn cond <> freeIn ret)
+          `namesIntersection` boundInKernelNest nest
+          == mempty,
           Just (perm, pat_unused) <- permutationAndMissing pat res ->
             -- We need to pretend pat_unused was used anyway, by adding
             -- it to the kernel nest.
@@ -520,8 +520,8 @@ distributeSingleUnaryStm acc bnd f =
       | res == map Var (patternNames $ stmPattern bnd),
         (outer, inners) <- nest,
         [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
-        boundInKernelNest nest `S.intersection` freeIn bnd
-        == S.singleton (paramName arr_p) -> do
+        boundInKernelNest nest `namesIntersection` freeIn bnd
+        == oneName (paramName arr_p) -> do
           addKernels kernels
           let outerpat = loopNestingPattern $ fst nest
           localScope (typeEnvFromDistAcc acc') $ do
@@ -789,12 +789,12 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
 
   (ispace, kernel_inps) <- flatKernel nest
 
-  unless (S.null $ free_in_op `S.intersection` bound_by_nest) $
+  unless (free_in_op `namesIntersection` bound_by_nest == mempty) $
     fail "Non-fold lambda uses nest-bound parameters."
 
   let indices = map fst ispace
 
-      prepareNe (Var v) | v `S.member` bound_by_nest =
+      prepareNe (Var v) | v `nameIn` bound_by_nest =
                           fail "Neutral element bound in nest"
       prepareNe ne = return ne
 
@@ -803,9 +803,9 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
           Just inp
             | kernelInputIndices inp == map Var indices ->
                 return $ return $ kernelInputArray inp
-            | not (kernelInputArray inp `S.member` bound_by_nest) ->
+            | not (kernelInputArray inp `nameIn` bound_by_nest) ->
                 return $ replicateMissing ispace inp
-          Nothing | not (arr `S.member` bound_by_nest) ->
+          Nothing | not (arr `nameIn` bound_by_nest) ->
                       -- This input is something that is free inside
                       -- the loop nesting. We will have to replicate
                       -- it.
@@ -862,7 +862,7 @@ permutationAndMissing :: Pattern -> [SubExp] -> Maybe ([Int], [PatElem])
 permutationAndMissing pat res = do
   let pes = patternValueElements pat
       (_used,unused) =
-        partition ((`S.member` freeIn res) . patElemName) pes
+        partition ((`nameIn` freeIn res) . patElemName) pes
       res_expanded = res ++ map (Var . patElemName) unused
   perm <- map (Var . patElemName) pes `isPermutationOf` res_expanded
   return (perm, unused)

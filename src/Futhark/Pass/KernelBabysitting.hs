@@ -10,7 +10,6 @@ module Futhark.Pass.KernelBabysitting
 import Control.Arrow (first)
 import Control.Monad.State.Strict
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Foldable
 import Data.List
 import Data.Maybe
@@ -94,8 +93,8 @@ transformKernelBody expmap lvl space kbody = do
   -- kernel body and where the indices are kernel thread indices.
   scope <- askScope
   let thread_gids = map fst $ unSegSpace space
-      thread_local = S.fromList $ segFlat space : thread_gids
-      free_ker_vars = freeIn kbody `S.difference` getKerVariantIds space
+      thread_local = namesFromList $ segFlat space : thread_gids
+      free_ker_vars = freeIn kbody `namesSubtract` getKerVariantIds space
   num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32)
                  (unCount $ segNumGroups lvl) (unCount $ segGroupSize lvl)
   evalStateT (traverseKernelBodyArrayIndexes
@@ -105,7 +104,7 @@ transformKernelBody expmap lvl space kbody = do
               (ensureCoalescedAccess expmap (unSegSpace space) num_threads)
               kbody)
     mempty
-  where getKerVariantIds = S.fromList . M.keys . scopeOfSegSpace
+  where getKerVariantIds = namesFromList . M.keys . scopeOfSegSpace
 
 type ArrayIndexTransform m =
   Names ->
@@ -148,13 +147,13 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
                   BasicOp $ Index arr' is'
 
                 isGidVariant gid (Var v) =
-                  gid == v || S.member gid (M.findWithDefault (S.singleton v) v variance)
+                  gid == v || nameIn gid (M.findWithDefault (oneName v) v variance)
                 isGidVariant _ _ = False
 
                 isThreadLocal v =
-                  not $ S.null $
-                  thread_variant `S.intersection`
-                  M.findWithDefault (S.singleton v) v variance
+                  thread_variant `namesIntersection`
+                  M.findWithDefault (oneName v) v variance
+                  /= mempty
 
                 sizeSubst (Constant v) = Just $ Constant v
                 sizeSubst (Var v)
@@ -236,7 +235,7 @@ ensureCoalescedAccess expmap thread_space num_threads free_ker_vars isThreadLoca
         not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
         is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
         not (null thread_gids || null is),
-        not ( S.member (last thread_gids) (S.union (freeIn is) (freeIn rem_slice)) ) ->
+        not (last thread_gids `nameIn` (freeIn is <> freeIn rem_slice)) ->
           return Nothing
 
       -- We are not fully indexing the array, and the indices are not
@@ -247,7 +246,7 @@ ensureCoalescedAccess expmap thread_space num_threads free_ker_vars isThreadLoca
         not $ null rem_slice,
         not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
         is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
-        any isThreadLocal (S.toList $ freeIn is) -> do
+        any isThreadLocal (namesToList $ freeIn is) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
@@ -317,7 +316,7 @@ coalescedIndexes free_ker_vars isGidVariant tgids is
   --    (because access is likely to be already coalesced)
   | any isCt is =
         Nothing
-  | any (`S.member` free_ker_vars) (mapMaybe mbVarId is) =
+  | any (`nameIn` free_ker_vars) (mapMaybe mbVarId is) =
         Nothing
   | not (null tgids),
     not (null is),
@@ -445,5 +444,5 @@ varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
 varianceInStm variance bnd =
   foldl' add variance $ patternNames $ stmPattern bnd
   where add variance' v = M.insert v binding_variance variance'
-        look variance' v = S.insert v $ M.findWithDefault mempty v variance'
-        binding_variance = mconcat $ map (look variance) $ S.toList (freeIn bnd)
+        look variance' v = oneName v <> M.findWithDefault mempty v variance'
+        binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)
