@@ -33,7 +33,6 @@ module Futhark.Optimise.CSE
        where
 
 import Control.Monad.Reader
-import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 
 import Futhark.Analysis.Alias
@@ -103,8 +102,8 @@ cseInStms consumed (bnd:bnds) m =
                                 , mapOnOp = cseInOp
                                 }
 
-        patElemDiet pe | patElemName pe `S.member` consumed = Consume
-                       | otherwise                          = Observe
+        patElemDiet pe | patElemName pe `nameIn` consumed = Consume
+                       | otherwise                        = Observe
 
 cseInStm :: Attributes lore =>
             Names -> Stm lore
@@ -133,7 +132,7 @@ cseInStm consumed (Let pat (StmAux cs eattr) e) m = do
   where bad cse_arrays pe
           | Mem{} <- patElemType pe = True
           | Array{} <- patElemType pe, not cse_arrays = True
-          | patElemName pe `S.member` consumed = True
+          | patElemName pe `nameIn` consumed = True
           | otherwise = False
 
 type ExpressionSubstitutions lore = M.Map

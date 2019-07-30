@@ -121,17 +121,18 @@ instance Pretty HostOp where
     ppr c
 
 instance FreeIn HostOp where
-  freeIn (CallKernel c) = freeIn c
-  freeIn (CmpSizeLe dest _ _ x) =
-    freeIn dest <> freeIn x
-  freeIn (GetSizeMax dest _) =
-    freeIn dest
-  freeIn (GetSize dest _ _) =
-    freeIn dest
+  freeIn' (CallKernel c) =
+    freeIn' c
+  freeIn' (CmpSizeLe dest _ _ x) =
+    freeIn' dest <> freeIn' x
+  freeIn' (GetSizeMax dest _) =
+    freeIn' dest
+  freeIn' (GetSize dest _ _) =
+    freeIn' dest
 
 instance FreeIn Kernel where
-  freeIn kernel = freeIn (kernelBody kernel) <>
-                  freeIn [kernelNumGroups kernel, kernelGroupSize kernel]
+  freeIn' kernel = freeIn' (kernelBody kernel) <>
+                   freeIn' [kernelNumGroups kernel, kernelGroupSize kernel]
 
 instance Pretty Kernel where
   ppr kernel =
@@ -171,16 +172,16 @@ data AtomicOp = AtomicAdd VName VName (Count Elements Imp.Exp) Exp
               deriving (Show)
 
 instance FreeIn AtomicOp where
-  freeIn (AtomicAdd _ arr i x) = freeIn arr <> freeIn i <> freeIn x
-  freeIn (AtomicSMax _ arr i x) = freeIn arr <> freeIn i <> freeIn x
-  freeIn (AtomicSMin _ arr i x) = freeIn arr <> freeIn i <> freeIn x
-  freeIn (AtomicUMax _ arr i x) = freeIn arr <> freeIn i <> freeIn x
-  freeIn (AtomicUMin _ arr i x) = freeIn arr <> freeIn i <> freeIn x
-  freeIn (AtomicAnd _ arr i x) = freeIn arr <> freeIn i <> freeIn x
-  freeIn (AtomicOr _ arr i x) = freeIn arr <> freeIn i <> freeIn x
-  freeIn (AtomicXor _ arr i x) = freeIn arr <> freeIn i <> freeIn x
-  freeIn (AtomicCmpXchg _ arr i x y) = freeIn arr <> freeIn i <> freeIn x <> freeIn y
-  freeIn (AtomicXchg _ arr i x) = freeIn arr <> freeIn i <> freeIn x
+  freeIn' (AtomicAdd _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicSMax _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicSMin _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicUMax _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicUMin _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicAnd _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicOr _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicXor _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicCmpXchg _ arr i x y) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' y
+  freeIn' (AtomicXchg _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 instance Pretty KernelOp where
   ppr (GetGroupId dest i) =
@@ -247,8 +248,8 @@ instance Pretty KernelOp where
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
 
 instance FreeIn KernelOp where
-  freeIn (Atomic _ op) = freeIn op
-  freeIn _ = mempty
+  freeIn' (Atomic _ op) = freeIn' op
+  freeIn' _ = mempty
 
 brace :: Doc -> Doc
 brace body = text " {" </> indent 2 body </> text "}"

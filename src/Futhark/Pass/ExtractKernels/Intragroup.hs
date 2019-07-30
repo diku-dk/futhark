@@ -60,7 +60,8 @@ intraGroupParallelise knest lam = runMaybeT $ do
     intraGroupParalleliseBody intra_lvl body
 
   known_outside <- lift $ M.keys <$> askScope
-  unless (all (`elem` known_outside) $ freeIn $ wss_min ++ wss_avail) $
+  unless (all (`elem` known_outside) $ namesToList $ freeIn $
+          wss_min ++ wss_avail) $
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
@@ -85,7 +86,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
            (eSubExp intra_avail_par)
       else foldBinOp' (SMax Int32) ws_min
 
-    let inputIsUsed input = kernelInputName input `S.member` freeIn body
+    let inputIsUsed input = kernelInputName input `nameIn` freeIn body
         used_inps = filter inputIsUsed inps
 
     addStms w_stms

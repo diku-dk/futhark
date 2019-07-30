@@ -150,8 +150,8 @@ data MemOp inner = Alloc SubExp Space
             deriving (Eq, Ord, Show)
 
 instance FreeIn inner => FreeIn (MemOp inner) where
-  freeIn (Alloc size _) = freeIn size
-  freeIn (Inner k) = freeIn k
+  freeIn' (Alloc size _) = freeIn' size
+  freeIn' (Inner k) = freeIn' k
 
 instance TypedOp inner => TypedOp (MemOp inner) where
   opType (Alloc _ space) = pure [Mem space]
@@ -280,9 +280,9 @@ instance DeclTyped (MemInfo SubExp Uniqueness ret) where
   declTypeOf (MemArray bt shape u _) = Array bt shape u
 
 instance (FreeIn d, FreeIn ret) => FreeIn (MemInfo d u ret) where
-  freeIn (MemArray _ shape _ ret) = freeIn shape <> freeIn ret
-  freeIn MemMem{} = mempty
-  freeIn MemPrim{} = mempty
+  freeIn' (MemArray _ shape _ ret) = freeIn' shape <> freeIn' ret
+  freeIn' MemMem{} = mempty
+  freeIn' MemPrim{} = mempty
 
 instance (Substitute d, Substitute ret) => Substitute (MemInfo d u ret) where
   substituteNames subst (MemArray bt shape u ret) =
@@ -362,7 +362,7 @@ instance PP.Pretty MemBind where
     PP.text "@" <> PP.ppr mem <> PP.text "->" <> PP.ppr ixfun
 
 instance FreeIn MemBind where
-  freeIn (ArrayIn mem ixfun) = freeIn mem <> freeIn ixfun
+  freeIn' (ArrayIn mem ixfun) = freeIn' mem <> freeIn' ixfun
 
 -- | A description of the memory properties of an array being returned
 -- by an operation.
@@ -424,8 +424,8 @@ instance PP.Pretty MemReturn where
                                  Space s -> PP.text $ "@" ++ s
 
 instance FreeIn MemReturn where
-  freeIn (ReturnsInBlock v ixfun) = freeIn v <> freeIn ixfun
-  freeIn _                        = mempty
+  freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
+  freeIn' _                        = mempty
 
 instance Engine.Simplifiable MemReturn where
   simplify (ReturnsNewBlock space i ixfun) =

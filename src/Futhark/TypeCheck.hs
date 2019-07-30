@@ -173,39 +173,39 @@ data Occurence = Occurence { observed :: Names
              deriving (Eq, Show)
 
 observation :: Names -> Occurence
-observation = flip Occurence S.empty
+observation = flip Occurence mempty
 
 consumption :: Names -> Occurence
-consumption = Occurence S.empty
+consumption = Occurence mempty
 
 nullOccurence :: Occurence -> Bool
-nullOccurence occ = S.null (observed occ) && S.null (consumed occ)
+nullOccurence occ = observed occ == mempty && consumed occ == mempty
 
 type Occurences = [Occurence]
 
 allConsumed :: Occurences -> Names
-allConsumed = S.unions . map consumed
+allConsumed = mconcat . map consumed
 
 seqOccurences :: Occurences -> Occurences -> Occurences
 seqOccurences occurs1 occurs2 =
   filter (not . nullOccurence) (map filt occurs1) ++ occurs2
   where filt occ =
-          occ { observed = observed occ `S.difference` postcons }
+          occ { observed = observed occ `namesSubtract` postcons }
         postcons = allConsumed occurs2
 
 altOccurences :: Occurences -> Occurences -> Occurences
 altOccurences occurs1 occurs2 =
   filter (not . nullOccurence) (map filt occurs1) ++ occurs2
   where filt occ =
-          occ { consumed = consumed occ `S.difference` postcons
-              , observed = observed occ `S.difference` postcons }
+          occ { consumed = consumed occ `namesSubtract` postcons
+              , observed = observed occ `namesSubtract` postcons }
         postcons = allConsumed occurs2
 
 unOccur :: Names -> Occurences -> Occurences
 unOccur to_be_removed = filter (not . nullOccurence) . map unOccur'
   where unOccur' occ =
-          occ { observed = observed occ `S.difference` to_be_removed
-              , consumed = consumed occ `S.difference` to_be_removed
+          occ { observed = observed occ `namesSubtract` to_be_removed
+              , consumed = consumed occ `namesSubtract` to_be_removed
               }
 
 -- | The 'Consumption' data structure is used to keep track of which
@@ -218,7 +218,7 @@ instance Semigroup Consumption where
   ConsumptionError e <> _ = ConsumptionError e
   _ <> ConsumptionError e = ConsumptionError e
   Consumption o1 <> Consumption o2
-    | v:_ <- S.toList $ consumed_in_o1 `S.intersection` used_in_o2 =
+    | v:_ <- namesToList $ consumed_in_o1 `namesIntersection` used_in_o2 =
         ConsumptionError $ "Variable " <> pretty v <> " referenced after being consumed."
     | otherwise =
         Consumption $ o1 `seqOccurences` o2
@@ -284,10 +284,10 @@ message s x = prettyDoc 80 $
 -- | Mark a name as bound.  If the name has been bound previously in
 -- the program, report a type error.
 bound :: VName -> TypeM lore ()
-bound name = do already_seen <- gets $ S.member name
+bound name = do already_seen <- gets $ nameIn name
                 when already_seen $
                   bad $ TypeError $ "Name " ++ pretty name ++ " bound twice"
-                modify $ S.insert name
+                modify (<>oneName name)
 
 occur :: Occurences -> TypeM lore ()
 occur = tell . Consumption . filter (not . nullOccurence)
@@ -299,14 +299,14 @@ observe :: Checkable lore =>
 observe name = do
   attr <- lookupVar name
   unless (primType $ typeOf attr) $
-    occur [observation $ S.insert name $ aliases attr]
+    occur [observation $ oneName name <> aliases attr]
 
 -- | Proclaim that we have written to the given variables.
 consume :: Checkable lore => Names -> TypeM lore ()
 consume als = do
   scope <- askScope
   let isArray = maybe False ((>0) . arrayRank . typeOf) . (`M.lookup` scope)
-  occur [consumption $ S.filter isArray als]
+  occur [consumption $ namesFromList $ filter isArray $ namesToList als]
 
 collectOccurences :: TypeM lore a -> TypeM lore (a, Occurences)
 collectOccurences m = pass $ do
@@ -341,7 +341,7 @@ consumeOnlyParams consumable m = do
   tell . Consumption =<< mapM inspect os
   return x
   where inspect o = do
-          new_consumed <- mconcat <$> mapM wasConsumed (S.toList $ consumed o)
+          new_consumed <- mconcat <$> mapM wasConsumed (namesToList $ consumed o)
           return o { consumed = new_consumed }
         wasConsumed v
           | Just als <- lookup v consumable = return als
@@ -355,8 +355,8 @@ consumeOnlyParams consumable m = do
 -- | Given the immediate aliases, compute the full transitive alias
 -- set (including the immediate aliases).
 expandAliases :: Names -> Env lore -> Names
-expandAliases names env = names `S.union` aliasesOfAliases
-  where aliasesOfAliases =  mconcat . map look . S.toList $ names
+expandAliases names env = names <> aliasesOfAliases
+  where aliasesOfAliases =  mconcat . map look . namesToList $ names
         look k = case M.lookup k $ envVtable env of
           Just (LetInfo (als, _)) -> unNames als
           _                       -> mempty
@@ -368,7 +368,6 @@ binding :: Checkable lore =>
 binding bnds = check . local (`bindVars` bnds)
   where bindVars = M.foldlWithKey' bindVar
         boundnames = M.keys bnds
-        boundnameset = S.fromList boundnames
 
         bindVar env name (LetInfo (Names' als, attr)) =
           let als' | primType (typeOf attr) = mempty
@@ -384,7 +383,7 @@ binding bnds = check . local (`bindVars` bnds)
         check m = do
           mapM_ bound $ M.keys bnds
           (a, os) <- collectOccurences m
-          tell $ Consumption $ unOccur boundnameset os
+          tell $ Consumption $ unOccur (namesFromList boundnames) os
           return a
 
 lookupVar :: VName -> TypeM lore (NameInfo (Aliases lore))
@@ -399,7 +398,7 @@ lookupAliases name = do
   info <- lookupVar name
   return $ if primType $ typeOf info
            then mempty
-           else S.insert name $ aliases info
+           else oneName name <> aliases info
 
 aliases :: NameInfo (Aliases lore) -> Names
 aliases (LetInfo (als, _)) = unNames als
@@ -538,8 +537,10 @@ checkFun' (fname, rettype, params, body) consumable check = do
       check
       scope <- askScope
       let isArray = maybe False ((>0) . arrayRank . typeOf) . (`M.lookup` scope)
-      context ("When checking the body aliases: " ++ pretty (bodyAliases body)) $
-        checkReturnAlias $ map (S.filter isArray) $ bodyAliases body
+      context ("When checking the body aliases: " ++
+               pretty (map namesToList $ bodyAliases body)) $
+        checkReturnAlias $ map (namesFromList . filter isArray . namesToList) $
+        bodyAliases body
   where param_names = map fst params
 
         checkNoDuplicateParams = foldM_ expand [] param_names
@@ -553,20 +554,20 @@ checkFun' (fname, rettype, params, body) consumable check = do
         -- | Check that unique return values do not alias a
         -- non-consumed parameter.
         checkReturnAlias =
-          foldM_ checkReturnAlias' S.empty . returnAliasing rettype
+          foldM_ checkReturnAlias' mempty . returnAliasing rettype
 
         checkReturnAlias' seen (Unique, names)
-          | any (`S.member` S.map snd seen) $ S.toList names =
+          | any (`S.member` S.map fst seen) $ namesToList names =
             bad $ UniqueReturnAliased fname
           | otherwise = do
             consume names
-            return $ seen `S.union` tag Unique names
+            return $ seen <> tag Unique names
         checkReturnAlias' seen (Nonunique, names)
-          | any (`S.member` seen) $ S.toList $ tag Unique names =
+          | any (`S.member` seen) $ tag Unique names =
             bad $ UniqueReturnAliased fname
-          | otherwise = return $ seen `S.union` tag Nonunique names
+          | otherwise = return $ seen <> tag Nonunique names
 
-        tag u = S.map (u,)
+        tag u = S.fromList . map (,u) . namesToList
 
         returnAliasing expected got =
           reverse $
@@ -680,7 +681,7 @@ checkBasicOp (Update src idxes se) = do
     bad $ SlicingError (arrayRank src_t) (length idxes)
 
   se_aliases <- subExpAliasesM se
-  when (src `S.member` se_aliases) $
+  when (src `nameIn` se_aliases) $
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes

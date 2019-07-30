@@ -66,7 +66,6 @@ import Control.Monad.RWS.Strict
 import Data.Either
 import Data.List
 import Data.Maybe
-import qualified Data.Set as S
 
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
@@ -91,7 +90,7 @@ data HoistBlockers lore = HoistBlockers
                           }
 
 noExtraHoistBlockers :: HoistBlockers lore
-noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks neverBlocks (const S.empty) (const False)
+noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks neverBlocks (const mempty) (const False)
 
 data Env lore = Env { envRules         :: RuleBook (Wise lore)
                     , envHoistBlockers :: HoistBlockers lore
@@ -353,12 +352,12 @@ hoistStms rules block vtable uses orig_stms = do
 blockUnhoistedDeps :: Attributes lore =>
                       [Either (Stm lore) (Stm lore)]
                    -> [Either (Stm lore) (Stm lore)]
-blockUnhoistedDeps = snd . mapAccumL block S.empty
+blockUnhoistedDeps = snd . mapAccumL block mempty
   where block blocked (Left need) =
-          (blocked <> S.fromList (provides need), Left need)
+          (blocked <> namesFromList (provides need), Left need)
         block blocked (Right need)
           | blocked `intersects` freeIn need =
-            (blocked <> S.fromList (provides need), Left need)
+            (blocked <> namesFromList (provides need), Left need)
           | otherwise =
             (blocked, Right need)
 
@@ -376,10 +375,10 @@ expandUsage vtable utable bnd =
           zip (patternNames pat) (patternAliases pat)
         usageThroughBindeeAliases (name, aliases) = do
           uses <- UT.lookup name utable
-          return $ mconcat $ map (`UT.usage` uses) $ S.toList aliases
+          return $ mconcat $ map (`UT.usage` uses) $ namesToList aliases
 
-intersects :: Ord a => S.Set a -> S.Set a -> Bool
-intersects a b = not $ S.null $ a `S.intersection` b
+intersects :: Names -> Names -> Bool
+intersects a b = a `namesIntersection` b /= mempty
 
 type BlockPred lore = ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> Bool
 
@@ -462,7 +461,7 @@ stmIs f _ _ = f
 
 loopInvariantStm :: Attributes lore => ST.SymbolTable lore -> Stm lore -> Bool
 loopInvariantStm vtable =
-  all (`S.member` ST.availableAtClosestLoop vtable) . freeIn
+  all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
 
 hoistCommon :: SimplifiableLore lore =>
                SubExp -> IfSort
@@ -484,7 +483,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       -- shape computations, and expensive loop-invariant operations
       -- are if-hoistable.
       cond_loop_invariant =
-        all (`S.member` ST.availableAtClosestLoop vtable) $ freeIn cond
+        all (`nameIn` ST.availableAtClosestLoop vtable) $ namesToList $ freeIn cond
 
       desirableToHoist stm =
           is_alloc_fun stm ||
@@ -516,7 +515,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
           let sz_nms     = mconcat $ map getArrSz_fn all_bnds
               sz_needs   = transClosSizes all_bnds sz_nms []
               alloc_bnds = filter interesting all_bnds
-              sel_nms    = S.fromList $
+              sel_nms    = namesFromList $
                            concatMap (patternNames . stmPattern)
                                      (sz_needs ++ alloc_bnds)
           in  sel_nms
@@ -526,7 +525,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
           in  if null new_bnds
               then hoist_bnds
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
-        hasPatName nms bnd = intersects nms $ S.fromList $
+        hasPatName nms bnd = intersects nms $ namesFromList $
                              patternNames $ stmPattern bnd
 
 -- | Simplify a single 'Body'.  The @[Diet]@ only covers the value
@@ -650,7 +649,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       loop_arrs' <- mapM simplify loop_arrs
       let form' = ForLoop loopvar it boundexp' (zip loop_params' loop_arrs')
       return (form',
-              S.fromList (loopvar : map paramName loop_params') <> fparamnames,
+              namesFromList (loopvar : map paramName loop_params') <> fparamnames,
               bindLoopVar loopvar it boundexp' .
               protectLoopHoisted ctx' val' form' .
               bindArrayLParams (zip loop_params' (map Just loop_arrs')))
@@ -671,9 +670,9 @@ simplifyExp (DoLoop ctx val form loopbody) = do
   loopbody' <- constructBody loopstms loopres
   return (DoLoop ctx' val' form' loopbody', hoisted)
   where fparamnames =
-          S.fromList (map (paramName . fst) $ ctx++val)
+          namesFromList (map (paramName . fst) $ ctx++val)
         consumeMerge =
-          localVtable $ flip (foldl' (flip ST.consume)) consumed_by_merge
+          localVtable $ flip (foldl' (flip ST.consume)) $ namesToList consumed_by_merge
         consumed_by_merge =
           freeIn $ map snd $ filter (unique . paramDeclType . fst) val
 
@@ -829,7 +828,7 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) arrs = do
   params' <- mapM (simplifyParam simplify) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
-      paramnames = S.fromList $ boundByLambda lam
+      paramnames = namesFromList $ boundByLambda lam
   ((lamstms, lamres), hoisted) <-
     enterLoop $
     bindLParams nonarrayparams $
@@ -843,7 +842,7 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) arrs = do
 consumeResult :: [(Diet, SubExp)] -> UT.UsageTable
 consumeResult = mconcat . map inspect
   where inspect (Consume, se) =
-          mconcat $ map UT.consumedUsage $ S.toList $ subExpAliases se
+          mconcat $ map UT.consumedUsage $ namesToList $ subExpAliases se
         inspect _ = mempty
 
 instance Simplifiable Certificates where

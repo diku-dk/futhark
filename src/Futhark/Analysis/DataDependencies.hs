@@ -8,7 +8,6 @@ module Futhark.Analysis.DataDependencies
   where
 
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Futhark.Representation.AST
 
@@ -31,8 +30,8 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
               cdeps = depsOf deps c
               comb (pe, tres, fres) =
                 (patElemName pe,
-                 S.unions $ [freeIn pe, cdeps, depsOf tdeps tres, depsOf fdeps fres] ++
-                 map (depsOfVar deps) (S.toList $ freeIn pe))
+                 mconcat $ [freeIn pe, cdeps, depsOf tdeps tres, depsOf fdeps fres] ++
+                 map (depsOfVar deps) (namesToList $ freeIn pe))
               branchdeps =
                 M.fromList $ map comb $ zip3 (patternElements pat)
                 (bodyResult tb)
@@ -41,15 +40,15 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
 
         grow deps (Let pat _ e) =
           let free = freeIn pat <> freeIn e
-              freeDeps = S.unions $ map (depsOfVar deps) $ S.toList free
+              freeDeps = mconcat $ map (depsOfVar deps) $ namesToList free
           in M.fromList [ (name, freeDeps) | name <- patternNames pat ] `M.union` deps
 
 depsOf :: Dependencies -> SubExp -> Names
-depsOf _ (Constant _) = S.empty
+depsOf _ (Constant _) = mempty
 depsOf deps (Var v)   = depsOfVar deps v
 
 depsOfVar :: Dependencies -> VName -> Names
-depsOfVar deps name = S.insert name $ M.findWithDefault S.empty name deps
+depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
 
 findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
                          -> M.Map VName Names
@@ -61,10 +60,10 @@ findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =
           | otherwise                   = iterateNecessary necessary
           where necessary = mconcat $ map dependencies returnedResultSubExps
                 usedAfterLoopOrNecessary param =
-                  usedAfterLoop param || paramName param `S.member` prev_necessary
+                  usedAfterLoop param || paramName param `nameIn` prev_necessary
                 returnedResultSubExps =
                   map snd $ filter (usedAfterLoopOrNecessary . fst) merge_and_res
                 dependencies (Constant _) =
-                  S.empty
+                  mempty
                 dependencies (Var v)      =
-                  M.findWithDefault (S.singleton v) v allDependencies
+                  M.findWithDefault (oneName v) v allDependencies

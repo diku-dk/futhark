@@ -20,12 +20,12 @@ module Futhark.Representation.AST.Attributes.Aliases
 
 import Control.Arrow (first)
 import Data.Monoid ((<>))
-import qualified Data.Set as S
 
 import Futhark.Representation.AST.Attributes (IsOp)
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Types
+import Futhark.Representation.AST.Attributes.Names
 
 class (Annotations lore, AliasedOp (Op lore),
        AliasesOf (LetAttr lore)) => Aliased lore where
@@ -33,7 +33,7 @@ class (Annotations lore, AliasedOp (Op lore),
   consumedInBody :: Body lore -> Names
 
 vnameAliases :: VName -> Names
-vnameAliases = S.singleton
+vnameAliases = oneName
 
 subExpAliases :: SubExp -> Names
 subExpAliases Constant{} = mempty
@@ -77,9 +77,8 @@ primOpAliases Assert{} =
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =
-  map (S.filter notConsumed) $ zipWith mappend als1 als2
-  where notConsumed = not . (`S.member` cons)
-        cons = cons1 <> cons2
+  map (`namesSubtract` cons) $ zipWith mappend als1 als2
+  where cons = cons1 <> cons2
 
 funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
 funcallAliases args t =
@@ -94,10 +93,10 @@ expAliases (If _ tb fb attr) =
                       (bodyAliases fb, consumedInBody fb)
 expAliases (BasicOp op) = primOpAliases op
 expAliases (DoLoop ctxmerge valmerge _ loopbody) =
-  map (`S.difference` merge_names) val_aliases
+  map (`namesSubtract` merge_names) val_aliases
   where (_ctx_aliases, val_aliases) =
           splitAt (length ctxmerge) $ bodyAliases loopbody
-        merge_names = S.fromList $ map (paramName . fst) $ ctxmerge ++ valmerge
+        merge_names = namesFromList $ map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t _) =
   funcallAliases args $ retTypeValues t
 expAliases (Op op) = opAliases op
@@ -131,7 +130,7 @@ consumedInExp (If _ tb fb _) =
 consumedInExp (DoLoop _ merge _ _) =
   mconcat (map (subExpAliases . snd) $
            filter (unique . paramDeclType . fst) merge)
-consumedInExp (BasicOp (Update src _ _)) = S.singleton src
+consumedInExp (BasicOp (Update src _ _)) = oneName src
 consumedInExp (Op op) = consumedInOp op
 consumedInExp _ = mempty
 

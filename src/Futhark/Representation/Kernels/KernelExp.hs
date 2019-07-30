@@ -22,7 +22,6 @@ module Futhark.Representation.Kernels.KernelExp
 import Control.Monad
 import Data.Monoid ((<>))
 import Data.Maybe
-import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 
 import qualified Futhark.Analysis.Alias as Alias
@@ -176,28 +175,28 @@ instance Attributes lore => TypedOp (KernelExp lore) where
   opType (Barrier ses) = staticShapes <$> traverse subExpType ses
 
 instance FreeIn SplitOrdering where
-  freeIn SplitContiguous = mempty
-  freeIn (SplitStrided stride) = freeIn stride
+  freeIn' SplitContiguous = mempty
+  freeIn' (SplitStrided stride) = freeIn' stride
 
 instance Attributes lore => FreeIn (KernelExp lore) where
-  freeIn (SplitSpace o w i elems_per_thread) =
-    freeIn o <> freeIn [w, i, elems_per_thread]
-  freeIn (Combine (CombineSpace scatter cspace) ts active body) =
-    freeIn scatter <> freeIn (map snd cspace) <> freeIn ts <> freeIn active <> freeIn body
-  freeIn (GroupReduce w lam input) =
-    freeIn w <> freeIn lam <> freeIn input
-  freeIn (GroupScan w lam input) =
-    freeIn w <> freeIn lam <> freeIn input
-  freeIn (GroupStream w maxchunk lam accs arrs) =
-    freeIn w <> freeIn maxchunk <> freeIn lam <> freeIn accs <> freeIn arrs
-  freeIn (GroupGenReduce w dests op bucket values locks) =
-    freeIn w <> freeIn dests <> freeIn op <> freeIn bucket <> freeIn values <> freeIn locks
-  freeIn (Barrier ses) = freeIn ses
+  freeIn' (SplitSpace o w i elems_per_thread) =
+    freeIn' o <> freeIn' [w, i, elems_per_thread]
+  freeIn' (Combine (CombineSpace scatter cspace) ts active body) =
+    freeIn' scatter <> freeIn' (map snd cspace) <> freeIn' ts <> freeIn' active <> freeIn' body
+  freeIn' (GroupReduce w lam input) =
+    freeIn' w <> freeIn' lam <> freeIn' input
+  freeIn' (GroupScan w lam input) =
+    freeIn' w <> freeIn' lam <> freeIn' input
+  freeIn' (GroupStream w maxchunk lam accs arrs) =
+    freeIn' w <> freeIn' maxchunk <> freeIn' lam <> freeIn' accs <> freeIn' arrs
+  freeIn' (GroupGenReduce w dests op bucket values locks) =
+    freeIn' w <> freeIn' dests <> freeIn' op <> freeIn' bucket <> freeIn' values <> freeIn' locks
+  freeIn' (Barrier ses) = freeIn' ses
 
 instance Attributes lore => FreeIn (GroupStreamLambda lore) where
-  freeIn (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
-    freeIn body `S.difference` bound_here
-    where bound_here = S.fromList $
+  freeIn' (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
+    fvBind bound_here $ freeIn' body
+    where bound_here = namesFromList $
                        chunk_offset : chunk_size :
                        map paramName (acc_params ++ arr_params)
 
@@ -219,25 +218,25 @@ instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
   opAliases (GroupStream _ _ lam _ _) =
     map (const mempty) $ groupStreamAccParams lam
   opAliases (GroupGenReduce _ dests _ _ _ _) =
-    map S.singleton dests
+    map oneName dests
   opAliases (Barrier ses) = map subExpAliases ses
 
   consumedInOp (GroupReduce _ _ input) =
-    S.fromList $ map snd input
+    namesFromList $ map snd input
   consumedInOp (GroupScan _ _ input) =
-    S.fromList $ map snd input
+    namesFromList $ map snd input
   consumedInOp (GroupStream _ _ lam accs arrs) =
     -- GroupStream always consumes array-typed accumulators.  This
     -- guarantees that we can use their storage for the result of the
     -- lambda.
-    S.map consumedArray $
-    S.fromList (map paramName acc_params) <> consumedInBody body
+    namesFromList $ map consumedArray $
+    map paramName acc_params <> namesToList (consumedInBody body)
     where GroupStreamLambda _ _ acc_params arr_params body = lam
           consumedArray v = fromMaybe v $ subExpVar =<< lookup v params_to_arrs
           params_to_arrs = zip (map paramName $ acc_params ++ arr_params) $
                            accs ++ map Var arrs
   consumedInOp (GroupGenReduce _ dests _ _ _ _) =
-    S.fromList dests
+    namesFromList dests
 
   consumedInOp SplitSpace{} = mempty
   consumedInOp Barrier{} = mempty

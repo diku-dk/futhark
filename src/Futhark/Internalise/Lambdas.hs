@@ -11,7 +11,6 @@ module Futhark.Internalise.Lambdas
 
 import Control.Monad
 import Data.Loc
-import qualified Data.Set as S
 
 import Language.Futhark as E
 import Futhark.Representation.SOACS as I
@@ -107,7 +106,7 @@ bindMapShapes indexArg extra_args inner_shapes sizefun args outer_shape
       let sizefun_safe =
             all (I.safeExp . I.stmExp) $ I.bodyStms $ I.lambdaBody sizefun'
           sizefun_arg_invariant =
-            not $ any (`S.member` freeIn (I.lambdaBody sizefun')) $
+            not $ any (`nameIn` freeIn (I.lambdaBody sizefun')) $
             map I.paramName $ lambdaParams sizefun'
       if sizefun_safe && sizefun_arg_invariant
         then do ses <- bodyBind $ lambdaBody sizefun'

@@ -47,7 +47,6 @@ module Futhark.Pass.ExtractKernels.Distribution
 import Control.Monad.RWS.Strict
 import Control.Monad.Trans.Maybe
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Foldable
 import Data.Maybe
 import Data.List
@@ -98,7 +97,7 @@ pushInnerTarget (pat, res) (Targets inner_target targets) =
   where (pes', res') = unzip $ filter (used . fst) $ zip (patternElements pat) res
         pat' = Pattern [] pes'
         inner_used = freeIn $ snd inner_target
-        used pe = patElemName pe `S.member` inner_used
+        used pe = patElemName pe `nameIn` inner_used
 
 popInnerTarget :: Targets -> Maybe (Target, Targets)
 popInnerTarget (Targets t ts) =
@@ -132,11 +131,11 @@ loopNestingParams :: LoopNesting -> [LParam Kernels]
 loopNestingParams  = map fst . loopNestingParamsAndArrs
 
 instance FreeIn LoopNesting where
-  freeIn (MapNesting pat cs w params_and_arrs) =
-    freeIn pat <>
-    freeIn cs <>
-    freeIn w <>
-    freeIn params_and_arrs
+  freeIn' (MapNesting pat cs w params_and_arrs) =
+    freeIn' pat <>
+    freeIn' cs <>
+    freeIn' w <>
+    freeIn' params_and_arrs
 
 data Nesting = Nesting { nestingLetBound :: Names
                        , nestingLoop :: LoopNesting
@@ -167,7 +166,7 @@ pushInnerNesting nesting (inner_nesting, nestings) =
 -- | Both parameters and let-bound.
 boundInNesting :: Nesting -> Names
 boundInNesting nesting =
-  S.fromList (map paramName (loopNestingParams loop)) <>
+  namesFromList (map paramName (loopNestingParams loop)) <>
   nestingLetBound nesting
   where loop = nestingLoop nesting
 
@@ -214,12 +213,12 @@ fixNestingPatternOrder nest (_,res) inner_pat =
 -- uses of corresponding parameters from innermost nesting.
 removeArraysFromNest :: [VName] -> KernelNest -> KernelNest
 removeArraysFromNest orig_arrs (outer, inners) =
-  let (arrs, outer') = remove (S.fromList orig_arrs) outer
+  let (arrs, outer') = remove (namesFromList orig_arrs) outer
       (_, inners') = mapAccumL remove arrs inners
   in (outer', inners')
   where remove arrs nest =
-          let (discard, keep) = partition ((`S.member` arrs) . snd) $ loopNestingParamsAndArrs nest
-          in (S.fromList (map (paramName . fst) discard) <> arrs,
+          let (discard, keep) = partition ((`nameIn` arrs) . snd) $ loopNestingParamsAndArrs nest
+          in (namesFromList (map (paramName . fst) discard) <> arrs,
               nest { loopNestingParamsAndArrs = keep })
 
 newKernel :: LoopNesting -> KernelNest
@@ -232,7 +231,7 @@ boundInKernelNest :: KernelNest -> Names
 boundInKernelNest = mconcat . boundInKernelNests
 
 boundInKernelNests :: KernelNest -> [Names]
-boundInKernelNests = map (S.fromList .
+boundInKernelNests = map (namesFromList .
                           map (paramName . fst) .
                           loopNestingParamsAndArrs) .
                      kernelNestLoops
@@ -262,7 +261,7 @@ constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
   return $ Let pat (StmAux cs ()) $ Op $ SegOp segop
   where
     first_nest = fst kernel_nest
-    inputIsUsed input = kernelInputName input `S.member` freeIn inner_body
+    inputIsUsed input = kernelInputName input `nameIn` freeIn inner_body
 
 -- | Flatten a kernel nesting to:
 --
@@ -313,12 +312,12 @@ distributionInnerPattern = fst . innerTarget . distributionTarget
 distributionBodyFromStms :: Attributes lore =>
                             Targets -> Stms lore -> (DistributionBody, Result)
 distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
-  let bound_by_stms = S.fromList $ M.keys $ scopeOf stms
+  let bound_by_stms = namesFromList $ M.keys $ scopeOf stms
       (inner_pat', inner_res', inner_identity_map, inner_expand_target) =
         removeIdentityMappingGeneral bound_by_stms inner_pat inner_res
   in (DistributionBody
       { distributionTarget = Targets (inner_pat', inner_res') targets
-      , distributionFreeInBody = fold (fmap freeIn stms) `S.difference` bound_by_stms
+      , distributionFreeInBody = fold (fmap freeIn stms) `namesSubtract` bound_by_stms
       , distributionIdentityMap = inner_identity_map
       , distributionExpandTarget = inner_expand_target
       },
@@ -347,7 +346,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
         -- | Can something of this type be taken outside the nest?
         -- I.e. are none of its dimensions bound inside the nest.
         distributableType =
-          S.null . S.intersection bound_in_nest . freeIn . arrayDims
+          (==mempty) . namesIntersection bound_in_nest . freeIn . arrayDims
 
         distributeAtNesting :: (HasScope t m, MonadFreshNames m) =>
                                Nesting
@@ -367,14 +366,14 @@ createKernelNest (inner_nest, nests) distrib_body = do
           let nest'@(MapNesting _ cs w params_and_arrs) =
                 removeUnusedNestingParts free_in_kernel nest
               (params,arrs) = unzip params_and_arrs
-              param_names = S.fromList $ map paramName params
+              param_names = namesFromList $ map paramName params
               free_in_kernel' =
-                (freeIn nest' <> free_in_kernel) `S.difference` param_names
+                (freeIn nest' <> free_in_kernel) `namesSubtract` param_names
               required_from_nest =
-                free_in_kernel' `S.intersection` nest_let_bound
+                free_in_kernel' `namesIntersection` nest_let_bound
 
           required_from_nest_idents <-
-            forM (S.toList required_from_nest) $ \name -> do
+            forM (namesToList required_from_nest) $ \name -> do
               t <- lift $ lookupType name
               return $ Ident name t
 
@@ -404,14 +403,14 @@ createKernelNest (inner_nest, nests) distrib_body = do
                 (params++free_params,
                  arrs++map identName free_arrs)
               actual_param_names =
-                S.fromList $ map paramName actual_params
+                namesFromList $ map paramName actual_params
 
               nest'' =
                 removeUnusedNestingParts free_in_kernel $
                 MapNesting pat cs w $ zip actual_params actual_arrs
 
               free_in_kernel'' =
-                (freeIn nest'' <> free_in_kernel) `S.difference` actual_param_names
+                (freeIn nest'' <> free_in_kernel) `namesSubtract` actual_param_names
 
           unless (all (distributableType . paramType) $
                   loopNestingParams nest'') $
@@ -430,7 +429,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
           inner_nest
           (distributionInnerPattern distrib_body)
           (newKernel,
-           distributionFreeInBody distrib_body `S.intersection` bound_in_nest)
+           distributionFreeInBody distrib_body `namesIntersection` bound_in_nest)
           (distributionIdentityMap distrib_body)
           [] $
           singleTarget . distributionExpandTarget distrib_body
@@ -440,7 +439,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
           let (pat', res', identity_map, expand_target) =
                 removeIdentityMappingFromNesting
-                (S.fromList $ patternNames $ loopNestingPattern outer) pat res
+                (namesFromList $ patternNames $ loopNestingPattern outer) pat res
 
           distributeAtNesting
             nest
@@ -457,7 +456,7 @@ removeUnusedNestingParts used (MapNesting pat cs w params_and_arrs) =
   where (params,arrs) = unzip params_and_arrs
         (used_params, used_arrs) =
           unzip $
-          filter ((`S.member` used) . paramName . fst) $
+          filter ((`nameIn` used) . paramName . fst) $
           zip params arrs
 
 removeIdentityMappingGeneral :: Names -> Pattern Kernels -> Result
@@ -480,8 +479,8 @@ removeIdentityMappingGeneral bound pat res =
       identity_map,
       expandTarget)
   where isIdentity (patElem, Var v)
-          | not (v `S.member` bound) = Left (patElem, v)
-        isIdentity x                  = Right x
+          | not (v `nameIn` bound) = Left (patElem, v)
+        isIdentity x               = Right x
 
 removeIdentityMappingFromNesting :: Names -> Pattern Kernels -> Result
                                  -> (Pattern Kernels,

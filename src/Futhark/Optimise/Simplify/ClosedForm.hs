@@ -15,7 +15,6 @@ where
 import Control.Monad
 import Data.Maybe
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Futhark.Construct
 import Futhark.Representation.AST
@@ -110,9 +109,7 @@ checkResults pat size untouchable knownBnds params body accs = do
         (accparams, _) = splitAt (length accs) params
         res = bodyResult body
 
-        nonFree = boundInBody body <>
-                  S.fromList params <>
-                  untouchable
+        nonFree = boundInBody body <> namesFromList params <> untouchable
 
         checkResult (p, Var v) (accparam, acc)
           | Just (BasicOp (BinOp bop x y)) <- M.lookup v bndMap = do
@@ -145,7 +142,7 @@ checkResults pat size untouchable knownBnds params body accs = do
 
         asFreeSubExp :: SubExp -> Maybe SubExp
         asFreeSubExp (Var v)
-          | S.member v nonFree = M.lookup v knownBnds
+          | v `nameIn` nonFree = M.lookup v knownBnds
         asFreeSubExp se = Just se
 
         properIntSize Int32 = Just $ return size

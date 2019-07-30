@@ -47,10 +47,10 @@ module Futhark.Representation.SOACS.SOAC
        )
        where
 
+import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Control.Monad.Identity
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -318,11 +318,11 @@ mapSOACM tv (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) =
 mapSOACM tv (CmpThreshold what s) = CmpThreshold <$> mapOnSOACSubExp tv what <*> pure s
 
 instance Attributes lore => FreeIn (SOAC lore) where
-  freeIn = execWriter . mapSOACM free
-    where walk f x = tell (f x) >> return x
-          free = SOACMapper { mapOnSOACSubExp = walk freeIn
-                            , mapOnSOACLambda = walk freeIn
-                            , mapOnSOACVName = walk freeIn
+  freeIn' = flip execState mempty . mapSOACM free
+    where walk f x = modify (<>f x) >> return x
+          free = SOACMapper { mapOnSOACSubExp = walk freeIn'
+                            , mapOnSOACLambda = walk freeIn'
+                            , mapOnSOACVName = walk freeIn'
                             }
 
 instance Attributes lore => Substitute (SOAC lore) where
@@ -368,24 +368,24 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   -- Only map functions can consume anything.  The operands to scan
   -- and reduce functions are always considered "fresh".
   consumedInOp (Screma _ (ScremaForm _ _ map_lam) arrs) =
-    S.map consumedArray $ consumedByLambda map_lam
+    mapNames consumedArray $ consumedByLambda map_lam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName $ lambdaParams map_lam) arrs
   consumedInOp (Stream _ form lam arrs) =
-    S.fromList $ subExpVars $
+    namesFromList $ subExpVars $
     case form of Sequential accs ->
-                   map (consumedArray accs) $ S.toList $ consumedByLambda lam
+                   map (consumedArray accs) $ namesToList $ consumedByLambda lam
                  Parallel _ _ _ accs ->
-                   map (consumedArray accs) $ S.toList $ consumedByLambda lam
+                   map (consumedArray accs) $ namesToList $ consumedByLambda lam
     where consumedArray accs v = fromMaybe (Var v) $ lookup v $ paramsToInput accs
           -- Drop the chunk parameter, which cannot alias anything.
           paramsToInput accs = zip
                                (map paramName $ drop 1 $ lambdaParams lam)
                                (accs++map Var arrs)
   consumedInOp (Scatter _ _ _ as) =
-    S.fromList $ map (\(_, _, a) -> a) as
+    namesFromList $ map (\(_, _, a) -> a) as
   consumedInOp (GenReduce _ ops _ _) =
-    S.fromList $ concatMap genReduceDest ops
+    namesFromList $ concatMap genReduceDest ops
   consumedInOp CmpThreshold{} = mempty
 
 mapGenReduceOp :: (Lambda flore -> Lambda tlore)

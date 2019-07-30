@@ -42,6 +42,7 @@ module Futhark.Representation.AST.Traversals
 import Control.Monad
 import Control.Monad.Identity
 import qualified Data.Traversable
+import Data.Foldable (traverse_)
 import Data.Monoid ((<>))
 
 import Futhark.Representation.AST.Syntax
@@ -211,20 +212,80 @@ identityWalker = Walker {
                  , walkOnOp = const $ return ()
                  }
 
-walkMapper :: Monad m => Walker lore m -> Mapper lore lore m
-walkMapper f = Mapper {
-                 mapOnSubExp = wrap walkOnSubExp
-               , mapOnBody = const $ wrap walkOnBody
-               , mapOnVName = wrap walkOnVName
-               , mapOnRetType = wrap walkOnRetType
-               , mapOnBranchType = wrap walkOnBranchType
-               , mapOnFParam = wrap walkOnFParam
-               , mapOnLParam = wrap walkOnLParam
-               , mapOnOp = wrap walkOnOp
-               }
-  where wrap op k = op f k >> return k
+walkOnShape :: Monad m => Walker lore m -> Shape -> m ()
+walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
--- | As 'walkBodyM', but for expressions.
+walkOnType :: Monad m =>
+             (SubExp -> m ()) -> Type -> m ()
+walkOnType _ Prim{} = return ()
+walkOnType _ Mem{} = return ()
+walkOnType f (Array _ shape _) = mapM_ f $ shapeDims shape
+
+walkOnLoopForm :: Monad m => Walker lore m -> LoopForm lore -> m ()
+walkOnLoopForm tv (ForLoop i _ bound loop_vars) =
+  walkOnVName tv i >> walkOnSubExp tv bound >>
+  mapM_ (walkOnLParam tv) loop_lparams >> mapM_ (walkOnVName tv) loop_arrs
+  where (loop_lparams,loop_arrs) = unzip loop_vars
+walkOnLoopForm tv (WhileLoop cond) =
+  walkOnVName tv cond
+
+-- | As 'mapExpM', but do not construct a result AST.
 walkExpM :: Monad m => Walker lore m -> Exp lore -> m ()
-walkExpM f = void . mapExpM m
-  where m = walkMapper f
+walkExpM tv (BasicOp (SubExp se)) =
+  walkOnSubExp tv se
+walkExpM tv (BasicOp (ArrayLit els rowt)) =
+  mapM_ (walkOnSubExp tv) els >> walkOnType (walkOnSubExp tv) rowt
+walkExpM tv (BasicOp (BinOp _ x y)) =
+  walkOnSubExp tv x >> walkOnSubExp tv y
+walkExpM tv (BasicOp (CmpOp _ x y)) =
+  walkOnSubExp tv x >> walkOnSubExp tv y
+walkExpM tv (BasicOp (ConvOp _ x)) =
+  walkOnSubExp tv x
+walkExpM tv (BasicOp (UnOp _ x)) =
+  walkOnSubExp tv x
+walkExpM tv (If c texp fexp (IfAttr ts _)) =
+  walkOnSubExp tv c >> walkOnBody tv texp >>
+  walkOnBody tv fexp >> mapM_ (walkOnBranchType tv) ts
+walkExpM tv (Apply _ args ret _) =
+  mapM_ (walkOnSubExp tv . fst) args >> mapM_ (walkOnRetType tv) ret
+walkExpM tv (BasicOp (Index arr slice)) =
+  walkOnVName tv arr >> mapM_ (traverse_ (walkOnSubExp tv)) slice
+walkExpM tv (BasicOp (Update arr slice se)) =
+  walkOnVName tv arr >>
+  mapM_ (traverse_ (walkOnSubExp tv)) slice >>
+  walkOnSubExp tv se
+walkExpM tv (BasicOp (Iota n x s _)) =
+  walkOnSubExp tv n >> walkOnSubExp tv x >> walkOnSubExp tv s
+walkExpM tv (BasicOp (Replicate shape vexp)) =
+  walkOnShape tv shape >> walkOnSubExp tv vexp
+walkExpM tv (BasicOp (Repeat shapes innershape v)) =
+  mapM_ (walkOnShape tv) shapes >> walkOnShape tv innershape >> walkOnVName tv v
+walkExpM tv (BasicOp (Scratch _ shape)) =
+  mapM_ (walkOnSubExp tv) shape
+walkExpM tv (BasicOp (Reshape shape arrexp)) =
+  mapM_ (traverse_ (walkOnSubExp tv)) shape >> walkOnVName tv arrexp
+walkExpM tv (BasicOp (Rearrange _ e)) =
+  walkOnVName tv e
+walkExpM tv (BasicOp (Rotate es e)) =
+  mapM_ (walkOnSubExp tv) es >> walkOnVName tv e
+walkExpM tv (BasicOp (Concat _ x ys size)) =
+  walkOnVName tv x >> mapM_ (walkOnVName tv) ys >> walkOnSubExp tv size
+walkExpM tv (BasicOp (Copy e)) =
+  walkOnVName tv e
+walkExpM tv (BasicOp (Manifest _ e)) =
+  walkOnVName tv e
+walkExpM tv (BasicOp (Assert e msg _)) =
+  walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
+walkExpM tv (BasicOp (Opaque e)) =
+  walkOnSubExp tv e
+walkExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
+  mapM_ (walkOnFParam tv) ctxparams
+  mapM_ (walkOnFParam tv) valparams
+  walkOnLoopForm tv form
+  mapM_ (walkOnSubExp tv) ctxinits
+  mapM_ (walkOnSubExp tv) valinits
+  walkOnBody tv loopbody
+  where (ctxparams,ctxinits) = unzip ctxmerge
+        (valparams,valinits) = unzip valmerge
+walkExpM tv (Op op) =
+  walkOnOp tv op

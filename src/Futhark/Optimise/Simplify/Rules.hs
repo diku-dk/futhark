@@ -24,9 +24,7 @@ import Data.Either
 import Data.Foldable (all)
 import Data.List hiding (all)
 import Data.Maybe
-
 import qualified Data.Map.Strict as M
-import qualified Data.Set      as S
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -90,7 +88,7 @@ removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
 
       resIsNecessary ((v,_), _) =
         usedAfterLoop v ||
-        paramName v `S.member` necessaryForReturned ||
+        paramName v `nameIn` necessaryForReturned ||
         referencedInPat v ||
         referencedInForm v
 
@@ -109,7 +107,7 @@ removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
       free_in_keeps = freeIn keep_valpatelems
 
       stillUsedContext pat_elem =
-        patElemName pat_elem `S.member`
+        patElemName pat_elem `nameIn`
         (free_in_keeps <>
          freeIn (filter (/=pat_elem) $ patternContextElements pat))
 
@@ -133,10 +131,10 @@ removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
         used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
         usedAfterLoop = flip elem used_vals . paramName
         usedAfterLoopOrInForm p =
-          usedAfterLoop p || paramName p `S.member` freeIn form
+          usedAfterLoop p || paramName p `nameIn` freeIn form
         patAnnotNames = freeIn $ map fst $ ctx++val
-        referencedInPat = (`S.member` patAnnotNames) . paramName
-        referencedInForm = (`S.member` freeIn form) . paramName
+        referencedInPat = (`nameIn` patAnnotNames) . paramName
+        referencedInForm = (`nameIn` freeIn form) . paramName
 
         dummyStms = map dummyStm
         dummyStm ((p,e), _)
@@ -180,7 +178,7 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
         explpat = zip (patternValueElements pat) $
                   map (paramName . fst) val
 
-        namesOfMergeParams = S.fromList $ map (paramName . fst) $ ctx++val
+        namesOfMergeParams = namesFromList $ map (paramName . fst) $ ctx++val
 
         removeFromResult (mergeParam,mergeInit) explpat' =
           case partition ((==paramName mergeParam) . snd) explpat' of
@@ -196,7 +194,7 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
             arrayRank (paramDeclType mergeParam) == 1,
             isInvariant resExp,
             -- Also do not remove the condition in a while-loop.
-            not $ paramName mergeParam `S.member` freeIn form =
+            not $ paramName mergeParam `nameIn` freeIn form =
           let (bnd, explpat'') =
                 removeFromResult (mergeParam,mergeInit) explpat'
           in (maybe id (:) bnd $ (paramIdent mergeParam, mergeInit) : invariant,
@@ -211,7 +209,7 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
             isInvariant (Var v2)
               | paramName mergeParam == v2 =
                 allExistentialInvariant
-                (S.fromList $ map (identName . fst) invariant) mergeParam
+                (namesFromList $ map (identName . fst) invariant) mergeParam
             --  (1) or identical to the initial value of the parameter.
             isInvariant _ = mergeInit == resExp
 
@@ -219,11 +217,11 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
           (invariant, explpat', (mergeParam,mergeInit):merge', resExp:resExps)
 
         allExistentialInvariant namesOfInvariant mergeParam =
-          all (invariantOrNotMergeParam namesOfInvariant)
-          (paramName mergeParam `S.delete` freeIn mergeParam)
+          all (invariantOrNotMergeParam namesOfInvariant) $ namesToList $
+          freeIn mergeParam `namesSubtract` oneName (paramName mergeParam)
         invariantOrNotMergeParam namesOfInvariant name =
-          not (name `S.member` namesOfMergeParams) ||
-          name `S.member` namesOfInvariant
+          not (name `nameIn` namesOfMergeParams) ||
+          name `nameIn` namesOfInvariant
 
 -- | A function that, given a variable name, returns its definition.
 type VarLookup lore = VName -> Maybe (Exp lore, Certificates)
@@ -251,7 +249,7 @@ simpleRules = [ simplifyBinOp
 
 simplifyClosedFormLoop :: BinderOps lore => TopDownRuleDoLoop lore
 simplifyClosedFormLoop _ pat _ ([], val, ForLoop i _ bound [], body) =
-  loopClosedForm pat val (S.singleton i) bound body
+  loopClosedForm pat val (oneName i) bound body
 simplifyClosedFormLoop _ _ _ _ = cannotSimplify
 
 simplifyLoopVariables :: (BinderOps lore, Aliased lore) => TopDownRuleDoLoop lore
@@ -282,7 +280,7 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
         checkIfSimplifiable (p,arr) =
           simplifyIndexing vtable' seType arr
           (DimFix (Var i) : fullSlice (paramType p) []) $
-          paramName p `S.member` consumed_in_body
+          paramName p `nameIn` consumed_in_body
 
         -- We only want this simplification if the result does not refer
         -- to 'i' at all, or does not contain accesses.
@@ -292,9 +290,9 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
           (x,x_stms) <- collectStms m
           case x of
             IndexResult cs arr' slice
-              | all (not . (i `S.member`) . freeIn) x_stms,
+              | all (not . (i `nameIn`) . freeIn) x_stms,
                 DimFix (Var j) : slice' <- slice,
-                j == i, not $ i `S.member` freeIn slice -> do
+                j == i, not $ i `nameIn` freeIn slice -> do
                   addStms x_stms
                   w <- arraySize 0 <$> lookupType arr'
                   for_in_partial <-
@@ -899,15 +897,15 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = do
                If cond tb'' fb'' (IfAttr ret' ifsort)
      else cannotSimplify
   where num_ctx = length $ patternContextElements pat
-        bound_in_branches = S.fromList $ concatMap (patternNames . stmPattern) $
+        bound_in_branches = namesFromList $ concatMap (patternNames . stmPattern) $
                             bodyStms tb <> bodyStms fb
         mem_sizes = freeIn $ filter (isMem . patElemType) $ patternElements pat
         invariant Constant{} = True
-        invariant (Var v) = not $ v `S.member` bound_in_branches
+        invariant (Var v) = not $ v `nameIn` bound_in_branches
 
         isMem Mem{} = True
         isMem _ = False
-        sizeOfMem v = v `S.member` mem_sizes
+        sizeOfMem v = v `nameIn` mem_sizes
 
         branchInvariant (pe, t, (tse, fse))
           -- Do both branches return the same value?
@@ -1074,8 +1072,8 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
             If p tbranch fbranch _ <- stmExp bnd,
             Just (y, z) <-
               returns v (stmPattern bnd) tbranch fbranch,
-            S.null $ freeIn y `S.intersection` boundInBody tbranch,
-            S.null $ freeIn z `S.intersection` boundInBody fbranch = Just $ do
+            mempty == freeIn y `namesIntersection` boundInBody tbranch,
+            mempty == freeIn z `namesIntersection` boundInBody fbranch = Just $ do
                 eq_x_y <-
                   letSubExp "eq_x_y" $ BasicOp $ CmpOp (CmpEq t) x y
                 eq_x_z <-

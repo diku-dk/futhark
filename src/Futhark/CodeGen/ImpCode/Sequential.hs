@@ -31,4 +31,4 @@ instance Pretty Sequential where
   ppr _ = empty
 
 instance FreeIn Sequential where
-  freeIn _ = mempty
+  freeIn' _ = mempty

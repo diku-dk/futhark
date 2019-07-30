@@ -80,7 +80,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
         shapenames = map I.paramName shapeparams
         normal_params = map I.paramName constparams ++ shapenames ++
                         map I.paramName (concat params')
-        normal_param_names = S.fromList normal_params
+        normal_param_names = namesFromList normal_params
 
     fname' <- internaliseFunName fname params
 
@@ -93,9 +93,9 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
       internaliseBody body >>=
         ensureResultExtShape asserting msg loc (map I.fromDecl rettype')
 
-    let free_in_fun = freeIn body' `S.difference` normal_param_names
+    let free_in_fun = freeIn body' `namesSubtract` normal_param_names
 
-    used_free_params <- forM (S.toList free_in_fun) $ \v -> do
+    used_free_params <- forM (namesToList free_in_fun) $ \v -> do
       v_t <- lookupType v
       return $ Param v $ toDecl v_t Nonunique
 
@@ -1014,7 +1014,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
 
       let consumed = consumedByLambda $ Alias.analyseLambda lam0'
           copyIfConsumed p (I.Var v)
-            | I.paramName p `S.member` consumed =
+            | I.paramName p `nameIn` consumed =
                 letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
           copyIfConsumed _ x = return x
 

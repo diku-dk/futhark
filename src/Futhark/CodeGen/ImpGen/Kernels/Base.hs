@@ -33,7 +33,6 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Maybe
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.List
 import Data.Loc
 
@@ -475,14 +474,14 @@ computeKernelUses :: FreeIn a =>
                      a -> [VName]
                   -> CallKernelGen [Imp.KernelUse]
 computeKernelUses kernel_body bound_in_kernel = do
-  let actually_free = freeIn kernel_body `S.difference` S.fromList bound_in_kernel
+  let actually_free = freeIn kernel_body `namesSubtract` namesFromList bound_in_kernel
   -- Compute the variables that we need to pass to the kernel.
   nub <$> readsFromSet actually_free
 
 readsFromSet :: Names -> CallKernelGen [Imp.KernelUse]
 readsFromSet free =
   fmap catMaybes $
-  forM (S.toList free) $ \var -> do
+  forM (namesToList free) $ \var -> do
     t <- lookupType var
     vtable <- getVTable
     case t of

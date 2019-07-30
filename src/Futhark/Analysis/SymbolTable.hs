@@ -161,7 +161,7 @@ genCastSymbolTable loopVar letBound fParam lParam freeVar vtable =
 
 deepen :: SymbolTable lore -> SymbolTable lore
 deepen vtable = vtable { loopDepth = loopDepth vtable + 1,
-                         availableAtClosestLoop = S.fromList $ M.keys $ bindings vtable
+                         availableAtClosestLoop = namesFromList $ M.keys $ bindings vtable
                        }
 
 -- | Indexing a delayed array if possible.
@@ -547,7 +547,7 @@ insertStm :: (IndexOp (Op lore), Ranged lore, Aliases.Aliased lore) =>
           -> SymbolTable lore
           -> SymbolTable lore
 insertStm stm vtable =
-  flip (foldl' $ flip consume) stm_consumed $
+  flip (foldl' $ flip consume) (namesToList stm_consumed) $
   flip (foldl' addRevAliases) (patternElements $ stmPattern stm) $
   insertEntries (zip names $ map LetBound $ bindingEntries stm vtable) vtable
   where names = patternNames $ stmPattern stm
@@ -555,19 +555,19 @@ insertStm stm vtable =
         stm_consumed = expandAliases (Aliases.consumedInStm stm) vtable
         addRevAliases vtable' pe =
           vtable' { bindings = adjustSeveral update inedges $ bindings vtable' }
-          where inedges = expandAliases (Aliases.aliasesOf pe) vtable'
+          where inedges = namesToList $ expandAliases (Aliases.aliasesOf pe) vtable'
                 update (LetBound entry) =
                   LetBound entry
-                  { letBoundAliases = patElemName pe `S.insert` letBoundAliases entry }
+                  { letBoundAliases = oneName (patElemName pe) <> letBoundAliases entry }
                 update (FParam entry) =
                   FParam entry
-                  { fparamAliases = patElemName pe `S.insert` fparamAliases entry }
+                  { fparamAliases = oneName (patElemName pe) <> fparamAliases entry }
                 update e = e
 
 expandAliases :: Names -> SymbolTable lore -> Names
-expandAliases names vtable = names `S.union` aliasesOfAliases
+expandAliases names vtable = names <> aliasesOfAliases
   where aliasesOfAliases =
-          mconcat . map (`lookupAliases` vtable) . S.toList $ names
+          mconcat . map (`lookupAliases` vtable) . namesToList $ names
 
 insertFParam :: Attributes lore =>
                 AST.FParam lore
@@ -738,26 +738,28 @@ updateBounds' cond sym_tab =
         let candidates = freeIn e_scal
             sym0 = AS.pickSymToElim ranges elsyms0 e_scal
         case sym0 of
-            Just sy -> let trclsyms = foldl trClSymsInRange S.empty $ S.toList $
-                                        candidates `S.difference` S.singleton sy
-                       in  if   S.member sy trclsyms
+            Just sy -> let trclsyms = foldl trClSymsInRange mempty $ namesToList $
+                                      candidates `namesSubtract` oneName sy
+                       in  if   sy `nameIn` trclsyms
                            then pickRefinedSym (S.insert sy elsyms0) e_scal
                            else sym0
             Nothing -> sym0
+
       -- computes the transitive closure of the symbols appearing
       -- in the ranges of a symbol
-      trClSymsInRange :: S.Set VName -> VName -> S.Set VName
+      trClSymsInRange :: Names -> VName -> Names
       trClSymsInRange cur_syms sym =
-        if S.member sym cur_syms then cur_syms
+        if sym `nameIn` cur_syms then cur_syms
         else case M.lookup sym ranges of
-               Just (_,lb,ub) -> let sym_bds = concatMap (S.toList . freeIn) (catMaybes [lb, ub])
+               Just (_,lb,ub) -> let sym_bds = concatMap (namesToList . freeIn) (catMaybes [lb, ub])
                                  in  foldl trClSymsInRange
-                                           (S.insert sym cur_syms)
-                                           (S.toList $ S.fromList sym_bds)
-               Nothing        -> S.insert sym cur_syms
+                                           (oneName sym <> cur_syms)
+                                           sym_bds
+               Nothing        -> oneName sym <> cur_syms
 
 consume :: Attributes lore => VName -> SymbolTable lore -> SymbolTable lore
-consume consumee vtable = foldl' consume' vtable $ expandAliases (S.singleton consumee) vtable
+consume consumee vtable = foldl' consume' vtable $ namesToList $
+                          expandAliases (oneName consumee) vtable
   where consume' vtable' v | Just e <- lookup v vtable = insertEntry v (consume'' e) vtable'
                            | otherwise                 = vtable'
         consume'' (FreeVar e)  = FreeVar e { freeVarConsumed = True }
@@ -818,4 +820,4 @@ hideIf hide vtable = vtable { bindings = M.map maybeHide $ bindings vtable }
 -- the set of names.
 hideCertified :: Names -> SymbolTable lore -> SymbolTable lore
 hideCertified to_hide = hideIf $ maybe False hide . entryStm
-  where hide = any (`S.member` to_hide) . unCertificates . stmCerts
+  where hide = any (`nameIn` to_hide) . unCertificates . stmCerts

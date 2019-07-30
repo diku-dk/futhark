@@ -14,12 +14,12 @@ module Futhark.Transform.Substitute
 
 import Control.Monad.Identity
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Attributes.Scope
 import Futhark.Analysis.PrimExp
+import Futhark.Representation.AST.Attributes.Names
 
 -- | The substitutions to be made are given by a mapping from names to
 -- names.
@@ -135,7 +135,7 @@ instance Substitute d => Substitute (Ext d) where
   substituteNames _      (Ext x)  = Ext x
 
 instance Substitute Names where
-  substituteNames = S.map . substituteNames
+  substituteNames = mapNames . substituteNames
 
 instance Substitute shape => Substitute (TypeBase shape u) where
   substituteNames _ (Prim et) = Prim et
@@ -175,6 +175,9 @@ instance Substitutable lore => Substitute (NameInfo lore) where
     LParamInfo $ substituteNames subst attr
   substituteNames _ (IndexInfo it) =
     IndexInfo it
+
+instance Substitute FV where
+  substituteNames subst = fvNames . substituteNames subst . freeIn
 
 -- | Lores in which all annotations support name
 -- substitution.

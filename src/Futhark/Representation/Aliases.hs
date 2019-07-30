@@ -45,7 +45,6 @@ import Data.Foldable
 import Data.Maybe
 import Data.Monoid ((<>))
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
@@ -85,10 +84,10 @@ instance Substitute Names' where
   substituteNames substs (Names' names) = Names' $ substituteNames substs names
 
 instance FreeIn Names' where
-  freeIn = const mempty
+  freeIn' = const mempty
 
 instance PP.Pretty Names' where
-  ppr = PP.commasep . map PP.ppr . S.toList . unNames
+  ppr = PP.commasep . map PP.ppr . namesToList . unNames
 
 -- | The aliases of the let-bound variable.
 type VarAliases = Names'
@@ -162,7 +161,7 @@ instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) 
                    bodyAliases body
               _ -> Nothing
 
-          expAttr = case S.toList $ unNames consumed of
+          expAttr = case namesToList $ unNames consumed of
             []  -> Nothing
             als -> Just $ PP.oneLine $
                    PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
@@ -171,19 +170,17 @@ maybeComment :: [PP.Doc] -> Maybe PP.Doc
 maybeComment [] = Nothing
 maybeComment cs = Just $ PP.folddoc (PP.</>) cs
 
-aliasComment :: (PP.Pretty a, PP.Pretty b) =>
-                a -> S.Set b -> Maybe PP.Doc
+aliasComment :: PP.Pretty a => a -> Names -> Maybe PP.Doc
 aliasComment name als =
-  case S.toList als of
+  case namesToList als of
     [] -> Nothing
     als' -> Just $ PP.oneLine $
             PP.text "-- " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
-resultAliasComment :: (PP.Pretty a, PP.Pretty b) =>
-                a -> S.Set b -> Maybe PP.Doc
+resultAliasComment :: PP.Pretty a => a -> Names -> Maybe PP.Doc
 resultAliasComment name als =
-  case S.toList als of
+  case namesToList als of
     [] -> Nothing
     als' -> Just $ PP.oneLine $
             PP.text "-- Result of " <> PP.ppr name <> PP.text " aliases " <>
@@ -273,15 +270,15 @@ mkContextAliases :: Aliased lore =>
 mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
   let ctx = map fst ctxmerge
       init_als = zip mergenames $ map (subExpAliases . snd) $ ctxmerge ++ valmerge
-      expand als = als <> S.unions (mapMaybe (`lookup` init_als) (S.toList als))
+      expand als = als <> mconcat (mapMaybe (`lookup` init_als) (namesToList als))
       merge_als = zip mergenames $
-                  map ((`S.difference` mergenames_set) . expand) $
+                  map ((`namesSubtract` mergenames_set) . expand) $
                   bodyAliases body
   in if length ctx == length (patternContextElements pat)
      then map (fromMaybe mempty . flip lookup merge_als . paramName) ctx
      else map (const mempty) $ patternContextElements pat
   where mergenames = map (paramName . fst) $ ctxmerge ++ valmerge
-        mergenames_set = S.fromList mergenames
+        mergenames_set = namesFromList mergenames
 mkContextAliases pat (If _ tbranch fbranch _) =
   take (length $ patternContextNames pat) $
   zipWith (<>) (bodyAliases tbranch) (bodyAliases fbranch)
@@ -299,10 +296,9 @@ mkBodyAliases bnds res =
   -- bound in bnds.
   let (aliases, consumed) = mkStmsAliases bnds res
       boundNames =
-        fold $ fmap (S.fromList . patternNames . stmPattern) bnds
-      bound = (`S.member` boundNames)
-      aliases' = map (S.filter (not . bound)) aliases
-      consumed' = S.filter (not . bound) consumed
+        fold $ fmap (namesFromList . patternNames . stmPattern) bnds
+      aliases' = map (`namesSubtract` boundNames) aliases
+      consumed' = consumed `namesSubtract` boundNames
   in (map Names' aliases', Names' consumed')
 
 mkStmsAliases :: Aliased lore =>
@@ -315,7 +311,7 @@ mkStmsAliases bnds res = delve mempty $ stmsToList bnds
         delve (aliasmap, consumed) (bnd:bnds') =
           delve (trackAliases (aliasmap, consumed) bnd) bnds'
         aliasClosure aliasmap names =
-          names `S.union` mconcat (map look $ S.toList names)
+          names <> mconcat (map look $ namesToList names)
           where look k = M.findWithDefault mempty k aliasmap
 
 -- | Everything consumed in the given bindings and result (even transitively).
@@ -336,7 +332,7 @@ trackAliases (aliasmap, consumed) bnd =
       consumed' = consumed <> addAliasesOfAliases (consumedInStm bnd)
   in (aliasmap', consumed')
   where addAliasesOfAliases names = names <> aliasesOfAliases names
-        aliasesOfAliases =  mconcat . map look . S.toList
+        aliasesOfAliases =  mconcat . map look . namesToList
         look k = M.findWithDefault mempty k aliasmap
 
 mkAliasedLetStm :: (Attributes lore, CanBeAliased (Op lore)) =>
