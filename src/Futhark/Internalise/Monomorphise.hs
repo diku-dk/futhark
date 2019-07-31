@@ -25,7 +25,6 @@
 module Futhark.Internalise.Monomorphise
   ( transformProg
   , transformDecs
-  , runMonoM
   ) where
 
 import           Control.Monad.RWS hiding (Sum)

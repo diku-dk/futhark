@@ -1604,7 +1604,7 @@ returnType (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType et d arg) cs
 
 -- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
--- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
+-- the parts of @t@ that are denoted as consumed by the 'Diet' @d@.
 maskAliases :: Monoid as =>
                TypeBase shape as
             -> Diet

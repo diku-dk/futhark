@@ -44,6 +44,7 @@
 module Futhark.CodeGen.ImpGen.Kernels.SegRed
   ( compileSegRed
   , compileSegRed'
+  , DoSegBody
   )
   where
 

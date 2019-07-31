@@ -10,6 +10,7 @@ module Futhark.CodeGen.Backends.GenericCSharp.AST
   , CSUInt(..)
   , CSFloat(..)
   , CSIdx (..)
+  , ArgMemType(..)
   , CSArg (..)
   , CSStmt(..)
   , module Language.Futhark.Core

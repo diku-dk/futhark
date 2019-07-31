@@ -10,7 +10,7 @@ module Language.Futhark.Pretty
   , leadingOperator
   , IsName(..)
   , prettyName
-  , Annot
+  , Annot(..)
   )
 where
 
@@ -64,6 +64,7 @@ prettyName = prettyDoc 80 . pprName
 -- the prettyprinter to either print the original AST, or the computed
 -- attribute.
 class Annot f where
+  -- | Extract value, if any.
   unAnnot :: f a -> Maybe a
 
 instance Annot NoInfo where

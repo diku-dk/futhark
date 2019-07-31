@@ -223,9 +223,6 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
           not (name `nameIn` namesOfMergeParams) ||
           name `nameIn` namesOfInvariant
 
--- | A function that, given a variable name, returns its definition.
-type VarLookup lore = VName -> Maybe (Exp lore, Certificates)
-
 -- | A function that, given a subexpression, returns its type.
 type TypeLookup = SubExp -> Maybe Type
 
