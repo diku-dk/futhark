@@ -66,6 +66,7 @@ sequentialPipeline =
   passes [ simplifyKernels
          , inPlaceLowering
          ]
+
 sequentialCpuPipeline :: Pipeline SOACS ExplicitMemory
 sequentialCpuPipeline =
   sequentialPipeline >>>
