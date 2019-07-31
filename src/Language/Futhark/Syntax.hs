@@ -74,6 +74,7 @@ module Language.Futhark.Syntax
   , DecBase(..)
 
   -- * Miscellaneous
+  , Showable
   , NoInfo(..)
   , Info(..)
   , Alias(..)

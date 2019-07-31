@@ -39,6 +39,7 @@ module Futhark.CodeGen.Backends.GenericCSharp
 
   , CompilerEnv(..)
   , CompilerState(..)
+  , CompilerAcc
   , stm
   , stms
   , atInit

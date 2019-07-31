@@ -9,6 +9,7 @@
 module Futhark.Optimise.Simplify.ClosedForm
   ( foldClosedForm
   , loopClosedForm
+  , VarLookup
   )
 where
 

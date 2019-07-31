@@ -178,14 +178,14 @@ type Parser = Parsec Void T.Text
 lexeme :: Parser a -> Parser a
 lexeme p = p <* space
 
--- | Like 'lexeme', but does not consume trailing linebreaks.
+-- Like 'lexeme', but does not consume trailing linebreaks.
 lexeme' :: Parser a -> Parser a
 lexeme' p = p <* many (oneOf (" \t" :: String))
 
 lexstr :: T.Text -> Parser ()
 lexstr = void . try . lexeme . string
 
--- | Like 'lexstr', but does not consume trailing linebreaks.
+-- Like 'lexstr', but does not consume trailing linebreaks.
 lexstr' :: T.Text -> Parser ()
 lexstr' = void . try . lexeme' . string
 

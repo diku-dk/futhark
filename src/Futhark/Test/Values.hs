@@ -7,6 +7,7 @@
 -- for your test programs.
 module Futhark.Test.Values
        ( Value(..)
+       , Vector
 
        -- * Reading Values
        , readValues
@@ -48,6 +49,8 @@ import Futhark.Util.Pretty
 import Futhark.Util (maybeHead)
 
 type STVector s = UMVec.STVector s
+
+-- | An Unboxed vector.
 type Vector = UVec.Vector
 
 -- | An efficiently represented Futhark value.  Use 'pretty' to get a
