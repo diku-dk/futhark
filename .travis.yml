@@ -31,18 +31,12 @@ jobs:
     script: &1
     - stack build alex happy
     - stack --no-terminal test --only-dependencies -j 3
-  - stage: deps
-    env: BUILD=stack STACK_YAML=stack-lts-12.11.yaml
-    script: *1
   - stage: compiler
     env: BUILD=stack STACK_YAML=stack.yaml
     script: &2
     - stack --no-terminal test -j 3
-  - stage: compiler
-    env: BUILD=stack STACK_YAML=stack-lts-12.11.yaml
-    script: *2
   - stage: style
-    env: BUILD=stack STACK_YAML=stack-lts-12.11.yaml
+    env: BUILD=stack STACK_YAML=stack.yaml
     script:
     - stack install hlint --fast
     - tools/style-check.sh src
