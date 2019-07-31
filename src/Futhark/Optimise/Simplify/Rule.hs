@@ -87,16 +87,14 @@ instance (Attributes lore, BinderOps lore) => MonadBinder (RuleM lore) where
 -- list of new bindings.  Even if the action fail, there may still be
 -- a monadic effect - particularly, the name source may have been
 -- modified.
-simplify :: (MonadFreshNames m, HasScope lore m) =>
-            RuleM lore a
-         -> m (Maybe (a, Stms lore))
-simplify (RuleM m) = do
-  scope <- askScope
-  modifyNameSource $ \src ->
-    case runExcept $ runStateT (runBinderT m scope) src of
-      Left CannotSimplify -> (Nothing, src)
-      Left (OtherError err) -> error $ "simplify: " ++ err
-      Right (x, src') -> (Just x, src')
+simplify :: Scope lore -> VNameSource -> Rule lore
+         -> Maybe (Stms lore, VNameSource)
+simplify _ _ Skip = Nothing
+simplify scope src (Simplify (RuleM m)) =
+  case runExcept $ runStateT (runBinderT m scope) src of
+    Left CannotSimplify -> Nothing
+    Left (OtherError err) -> error $ "simplify: " ++ err
+    Right (((), x), src') -> Just (x, src')
 
 cannotSimplify :: RuleM lore a
 cannotSimplify = throwError CannotSimplify
@@ -219,7 +217,7 @@ ruleBook topdowns bottomups =
 -- binding @bnd@.  If simplification is possible, a replacement list
 -- of bindings is returned, that bind at least the same names as the
 -- original binding (and possibly more, for intermediate results).
-topDownSimplifyStm :: (MonadFreshNames m, HasScope lore m, BinderOps lore) =>
+topDownSimplifyStm :: (MonadFreshNames m, HasScope lore m) =>
                       RuleBook lore
                    -> ST.SymbolTable lore
                    -> Stm lore
@@ -231,7 +229,7 @@ topDownSimplifyStm = applyRules . bookTopDownRules
 -- bindings is returned, that bind at least the same names as the
 -- original binding (and possibly more, for intermediate results).
 -- The first argument is the set of names used after this binding.
-bottomUpSimplifyStm :: (MonadFreshNames m, HasScope lore m, BinderOps lore) =>
+bottomUpSimplifyStm :: (MonadFreshNames m, HasScope lore m) =>
                        RuleBook lore
                     -> (ST.SymbolTable lore, UT.UsageTable)
                     -> Stm lore
@@ -257,19 +255,19 @@ applyRule (RuleOp f) a (Let pat aux (Op op)) =
 applyRule _ _ _ =
   Skip
 
-applyRules :: (MonadFreshNames m, HasScope lore m, BinderOps lore) =>
+applyRules :: (MonadFreshNames m, HasScope lore m) =>
               Rules lore a -> a -> Stm lore
            -> m (Maybe (Stms lore))
-applyRules rules context stm = applyRules' (rulesForStm stm rules) context stm
+applyRules all_rules context stm = do
+  scope <- askScope
 
-applyRules' :: (MonadFreshNames m, HasScope lore m, BinderOps lore) =>
-               [SimplificationRule lore a] -> a -> Stm lore
-            -> m (Maybe (Stms lore))
-applyRules' []           _       _   = return Nothing
-applyRules' (rule:rules) context stm =
-  case applyRule rule context stm of
-    Simplify m -> do res <- simplify m
-                     case res of Just ((), stms) -> return $ Just stms
-                                 Nothing         -> next
-    Skip -> next
-  where next = applyRules' rules context stm
+  modifyNameSource $ \src ->
+    let applyRules' []  = Nothing
+        applyRules' (rule:rules) =
+          case simplify scope src (applyRule rule context stm) of
+            Just x -> Just x
+            Nothing -> applyRules' rules
+
+    in case applyRules' $ rulesForStm stm all_rules of
+         Just (stms, src') -> (Just stms, src')
+         Nothing           -> (Nothing, src)
