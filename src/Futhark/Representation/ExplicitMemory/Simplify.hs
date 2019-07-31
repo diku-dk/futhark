@@ -87,7 +87,7 @@ unExistentialiseMemory :: TopDownRuleIf (Wise ExplicitMemory)
 unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
   | ST.simplifyMemory vtable,
     fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
-    not $ null fixable = do
+    not $ null fixable = Simplify $ do
 
       -- Create non-existential memory blocks big enough to hold the
       -- arrays.
@@ -139,7 +139,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
               (pat_elem, mem, space) : fixable
           | otherwise =
               fixable
-unExistentialiseMemory _ _ _ _ = cannotSimplify
+unExistentialiseMemory _ _ _ _ = Skip
 
 -- | If we are copying something that is itself a copy, just copy the
 -- original one instead.
@@ -160,16 +160,16 @@ copyCopyToCopy vtable pat@(Pattern [] [pat_elem]) _ (Copy v1)
 
     src_space == dest_space, dest_ixfun == src_ixfun =
 
-      certifying v1_cs $ letBind_ pat $ BasicOp $ Copy v2
+      Simplify $ certifying v1_cs $ letBind_ pat $ BasicOp $ Copy v2
 
 copyCopyToCopy vtable pat _ (Copy v0)
   | Just (BasicOp (Rearrange perm v1), v0_cs) <- ST.lookupExp v0 vtable,
-    Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable = do
+    Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable = Simplify $ do
       v0' <- certifying (v0_cs<>v1_cs) $
              letExp "rearrange_v0" $ BasicOp $ Rearrange perm v2
       letBind_ pat $ BasicOp $ Copy v0'
 
-copyCopyToCopy _ _ _ _ = cannotSimplify
+copyCopyToCopy _ _ _ _ = Skip
 
 -- | If the destination of a copy is the same as the source, just
 -- remove it.
@@ -181,6 +181,6 @@ removeIdentityCopy vtable pat@(Pattern [] [pe]) _ (Copy v)
     Just (_, MemArray _ _ _ (ArrayIn src_mem src_ixfun)) <-
       ST.entryLetBoundAttr =<< ST.lookup v vtable,
     dest_mem == src_mem, dest_ixfun == src_ixfun =
-      letBind_ pat $ BasicOp $ SubExp $ Var v
+      Simplify $ letBind_ pat $ BasicOp $ SubExp $ Var v
 
-removeIdentityCopy _ _ _ _ = cannotSimplify
+removeIdentityCopy _ _ _ _ = Skip
