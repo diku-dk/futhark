@@ -53,7 +53,6 @@ import Control.Monad.State
 import Data.Maybe
 import Data.Monoid ((<>))
 import Data.String
-import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.Traversable
 
@@ -307,9 +306,6 @@ data PatElemT attr = PatElem { patElemName :: VName
 
 instance Functor PatElemT where
   fmap f (PatElem name attr) = PatElem name (f attr)
-
--- | A set of names.
-type Names = S.Set VName
 
 -- | An error message is a list of error parts, which are concatenated
 -- to form the final message.
