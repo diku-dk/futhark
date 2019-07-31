@@ -62,7 +62,8 @@ module Futhark.Optimise.Simplify.Engine
        ) where
 
 import Control.Monad.Writer
-import Control.Monad.RWS.Strict
+import Control.Monad.Reader
+import Control.Monad.State.Strict
 import Data.Either
 import Data.List
 import Data.Maybe
@@ -127,15 +128,14 @@ bindableSimpleOps = SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS'
         mkLetNamesS' _ name e = (,) <$> mkLetNames name e <*> pure mempty
 
 newtype SimpleM lore a =
-  SimpleM (RWS (SimpleOps lore, Env lore) Certificates (VNameSource, Bool) a)
+  SimpleM (ReaderT (SimpleOps lore, Env lore) (State (VNameSource, Bool, Certificates)) a)
   deriving (Applicative, Functor, Monad,
             MonadReader (SimpleOps lore, Env lore),
-            MonadState (VNameSource, Bool),
-            MonadWriter Certificates)
+            MonadState (VNameSource, Bool, Certificates))
 
 instance MonadFreshNames (SimpleM lore) where
-  putNameSource src = modify $ \(_, b) -> (src, b)
-  getNameSource = gets fst
+  putNameSource src = modify $ \(_, b, c) -> (src, b, c)
+  getNameSource = gets $ \(a, _, _) -> a
 
 instance SimplifiableLore lore => HasScope (Wise lore) (SimpleM lore) where
   askScope = ST.toScope <$> askVtable
@@ -157,7 +157,7 @@ runSimpleM :: SimpleM lore a
            -> VNameSource
            -> ((a, Bool), VNameSource)
 runSimpleM (SimpleM m) simpl env src =
-  let (x, (src', b), _) = runRWS m (simpl, env) (src, False)
+  let (x, (src', b, _)) = runState (runReaderT m (simpl, env)) (src, False, mempty)
   in ((x, b), src')
 
 subSimpleM :: RuleBook (Wise lore)
@@ -171,7 +171,7 @@ subSimpleM rules blockers =
                               })
 
 askEngineEnv :: SimpleM lore (Env lore)
-askEngineEnv = snd <$> ask
+askEngineEnv = asks snd
 
 asksEngineEnv :: (Env lore -> a) -> SimpleM lore a
 asksEngineEnv f = f <$> askEngineEnv
@@ -184,16 +184,18 @@ localVtable :: (ST.SymbolTable (Wise lore) -> ST.SymbolTable (Wise lore))
 localVtable f = local $ \(ops, env) -> (ops, env { envVtable = f $ envVtable env })
 
 collectCerts :: SimpleM lore a -> SimpleM lore (a, Certificates)
-collectCerts m = pass $ do (x, cs) <- listen m
-                           return ((x, cs), const mempty)
+collectCerts m = do x <- m
+                    (a, b, cs) <- get
+                    put (a, b, mempty)
+                    return (x, cs)
 
 -- | Mark that we have changed something and it would be a good idea
 -- to re-run the simplifier.
 changed :: SimpleM lore ()
-changed = modify $ \(src, _) -> (src, True)
+changed = modify $ \(src, _, cs) -> (src, True, cs)
 
 usedCerts :: Certificates -> SimpleM lore ()
-usedCerts = tell
+usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 
 enterLoop :: SimpleM lore a -> SimpleM lore a
 enterLoop = localVtable ST.deepen
