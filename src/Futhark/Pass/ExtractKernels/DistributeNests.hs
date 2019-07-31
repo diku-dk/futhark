@@ -287,7 +287,7 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
   | null (patternContextElements pat), bodyContainsParallelism body =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | mempty == freeIn form `namesIntersection` boundInKernelNest nest,
+      | not $ freeIn form `namesIntersect` boundInKernelNest nest,
         Just (perm, pat_unused) <- permutationAndMissing pat res ->
           -- We need to pretend pat_unused was used anyway, by adding
           -- it to the kernel nest.
@@ -309,9 +309,8 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
     any (not . primType) (ifReturns ret) =
     distributeSingleStm acc stm >>= \case
       Just (kernels, res, nest, acc')
-        | (freeIn cond <> freeIn ret)
-          `namesIntersection` boundInKernelNest nest
-          == mempty,
+        | not $
+          (freeIn cond <> freeIn ret) `namesIntersect` boundInKernelNest nest,
           Just (perm, pat_unused) <- permutationAndMissing pat res ->
             -- We need to pretend pat_unused was used anyway, by adding
             -- it to the kernel nest.
@@ -789,7 +788,7 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
 
   (ispace, kernel_inps) <- flatKernel nest
 
-  unless (free_in_op `namesIntersection` bound_by_nest == mempty) $
+  unless (not $ free_in_op `namesIntersect` bound_by_nest) $
     fail "Non-fold lambda uses nest-bound parameters."
 
   let indices = map fst ispace

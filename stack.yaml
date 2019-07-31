@@ -2,6 +2,9 @@ resolver: lts-13.25
 packages:
 - .
 
+extra-deps:
+ - containers-0.6.2.1
+
 flags: {}
 
 extra-package-dbs: []

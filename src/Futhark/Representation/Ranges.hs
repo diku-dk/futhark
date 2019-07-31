@@ -171,13 +171,10 @@ mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
           (removeUnknownBound lower,
            removeUnknownBound upper)
         removeUnknownBound (Just bound)
-          | freeIn bound `intersects` boundInBnds = Nothing
-          | otherwise                             = Just bound
+          | freeIn bound `namesIntersect` boundInBnds = Nothing
+          | otherwise                                 = Just bound
         removeUnknownBound Nothing =
           Nothing
-
-intersects :: Names -> Names -> Bool
-intersects a b = a `namesIntersection` b /= mempty
 
 mkRangedLetStm :: (Attributes lore, CanBeRanged (Op lore)) =>
                   Pattern lore

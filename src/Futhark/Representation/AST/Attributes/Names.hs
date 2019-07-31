@@ -11,6 +11,7 @@ module Futhark.Representation.AST.Attributes.Names
        , namesFromList
        , namesToList
        , namesIntersection
+       , namesIntersect
        , namesSubtract
        , mapNames
        -- * Class
@@ -71,6 +72,10 @@ oneName v = Names $ IM.singleton (baseTag v) v
 -- | The intersection of two name sets.
 namesIntersection :: Names -> Names -> Names
 namesIntersection (Names vs1) (Names vs2) = Names $ IM.intersection vs1 vs2
+
+-- | Do the two name sets intersect?
+namesIntersect :: Names -> Names -> Bool
+namesIntersect vs1 vs2 = not $ IM.disjoint (unNames vs1) (unNames vs2)
 
 -- | Subtract the latter name set from the former.
 namesSubtract :: Names -> Names -> Names

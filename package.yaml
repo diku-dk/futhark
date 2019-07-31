@@ -40,7 +40,7 @@ library:
     - data-binary-ieee754 >= 0.1
     - vector >= 0.12
     - vector-binary-instances >= 0.2.2.0
-    - containers >= 0.5
+    - containers >= 0.6.2.1
     - mtl >= 2.2.1
     - transformers >= 0.3
     - srcloc >= 0.4
