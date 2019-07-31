@@ -230,7 +230,7 @@ kernelRules = standardRules <>
 -- into a replicate.
 removeInvariantKernelResults :: TopDownRuleOp (Wise Kernels)
 removeInvariantKernelResults vtable (Pattern [] kpes) attr
-                             (SegOp (SegMap lvl space ts (KernelBody _ kstms kres))) = do
+                             (SegOp (SegMap lvl space ts (KernelBody _ kstms kres))) = Simplify $ do
 
   case lvl of
     SegThreadScalar{} -> cannotSimplify
@@ -255,13 +255,13 @@ removeInvariantKernelResults vtable (Pattern [] kpes) attr
               return False
         checkForInvarianceResult _ =
           return True
-removeInvariantKernelResults _ _ _ _ = cannotSimplify
+removeInvariantKernelResults _ _ _ _ = Skip
 
 -- Some kernel results can be moved outside the kernel, which can
 -- simplify further analysis.
 distributeKernelResults :: BottomUpRuleOp (Wise Kernels)
 distributeKernelResults (vtable, used)
-  (Pattern [] kpes) attr (SegOp (SegMap lvl space kts (KernelBody _ kstms kres))) = do
+  (Pattern [] kpes) attr (SegOp (SegMap lvl space kts (KernelBody _ kstms kres))) = Simplify $ do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.
@@ -311,7 +311,7 @@ distributeKernelResults (vtable, used)
               Just (kpe, kpes'', kts'', kres'')
         _ -> Nothing
       where matches (_, _, kre) = kre == Returns (Var $ patElemName pe)
-distributeKernelResults _ _ _ _ = cannotSimplify
+distributeKernelResults _ _ _ _ = Skip
 
 -- If a SegRed contains two reduction operations that have the same
 -- vector shape, merge them together.  This saves on communication
@@ -321,7 +321,7 @@ mergeSegRedOps _ (Pattern [] pes) _ (SegOp (SegRed lvl space ops ts kbody))
   | length ops > 1,
     op_groupings <- groupBy sameShape $ zip ops $ chunks (map (length . segRedNeutral) ops) $
                     zip3 red_pes red_ts red_res,
-    any ((>1) . length) op_groupings = do
+    any ((>1) . length) op_groupings = Simplify $ do
       let (ops', aux) = unzip $ mapMaybe combineOps op_groupings
           (red_pes', red_ts', red_res') = unzip3 $ concat aux
           pes' = red_pes' ++ map_pes
@@ -359,7 +359,7 @@ mergeSegRedOps _ (Pattern [] pes) _ (SegOp (SegRed lvl space ops ts kbody))
                        , segRedShape = segRedShape op1 -- Same as shape of op2 due to the grouping.
                        },
                op1_aux ++ op2_aux)
-mergeSegRedOps _ _ _ _ = cannotSimplify
+mergeSegRedOps _ _ _ _ = Skip
 
 -- We turn reductions over (solely) iotas into do-loops, because there
 -- is no useful structure here anyway.  This is mostly a hack to work
@@ -369,7 +369,6 @@ redomapIotaToLoop :: TopDownRuleOp (Wise Kernels)
 redomapIotaToLoop vtable pat aux (OtherOp soac@(Screma _ form [arr]))
   | Just _ <- isRedomapSOAC form,
     Just (Iota{}, _) <- ST.lookupBasicOp arr vtable =
-      certifying (stmAuxCerts aux) $
-      FOT.transformSOAC pat soac
+      Simplify $ certifying (stmAuxCerts aux) $ FOT.transformSOAC pat soac
 redomapIotaToLoop _ _ _ _ =
-  cannotSimplify
+  Skip

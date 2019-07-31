@@ -35,7 +35,7 @@ resolveAssertions = Pass
   where rulebook = Simplify.soacRules <> ruleBook [ RuleBasicOp simplifyScalExp ] []
 
 simplifyScalExp :: BinderOps lore => TopDownRuleBasicOp lore
-simplifyScalExp vtable pat _ e = do
+simplifyScalExp vtable pat _ e = Simplify $ do
   res <- SE.toScalExp (`ST.lookupScalExp` vtable) $ BasicOp e
   case res of
     -- If the sufficient condition is 'True', then it statically succeeds.

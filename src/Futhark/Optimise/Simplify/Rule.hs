@@ -18,6 +18,7 @@ module Futhark.Optimise.Simplify.Rule
        , liftMaybe
 
        -- * Rule definition
+       , Rule(..)
        , SimplificationRule(..)
        , RuleGeneric
        , RuleBasicOp
@@ -104,19 +105,23 @@ liftMaybe :: Maybe a -> RuleM lore a
 liftMaybe Nothing = cannotSimplify
 liftMaybe (Just x) = return x
 
-type RuleGeneric lore a = a -> Stm lore -> RuleM lore ()
+-- | An efficient way of encoding whether a simplification rule should even be attempted.
+data Rule lore = Simplify (RuleM lore ()) -- ^ Give it a shot.
+               | Skip -- ^ Don't bother.
+
+type RuleGeneric lore a = a -> Stm lore -> Rule lore
 type RuleBasicOp lore a = (a -> Pattern lore -> StmAux (ExpAttr lore) ->
-                           BasicOp lore -> RuleM lore ())
+                           BasicOp lore -> Rule lore)
 type RuleIf lore a = a -> Pattern lore -> StmAux (ExpAttr lore) ->
                      (SubExp, BodyT lore, BodyT lore,
                       IfAttr (BranchType lore)) ->
-                     RuleM lore ()
+                     Rule lore
 type RuleDoLoop lore a = a -> Pattern lore -> StmAux (ExpAttr lore) ->
                          ([(FParam lore, SubExp)], [(FParam lore, SubExp)],
                           LoopForm lore, BodyT lore) ->
-                         RuleM lore ()
+                         Rule lore
 type RuleOp lore a = a -> Pattern lore -> StmAux (ExpAttr lore) ->
-                     Op lore -> RuleM lore ()
+                     Op lore -> Rule lore
 
 -- | A simplification rule takes some argument and a statement, and
 -- tries to simplify the statement.
@@ -240,7 +245,7 @@ rulesForStm stm = case stmExp stm of BasicOp{} -> rulesBasicOp
                                      If{} -> rulesIf
                                      _ -> rulesAny
 
-applyRule :: SimplificationRule lore a -> a -> Stm lore -> RuleM lore ()
+applyRule :: SimplificationRule lore a -> a -> Stm lore -> Rule lore
 applyRule (RuleGeneric f) a stm = f a stm
 applyRule (RuleBasicOp f) a (Let pat aux (BasicOp e)) = f a pat aux e
 applyRule (RuleDoLoop f) a (Let pat aux (DoLoop ctx val form body)) =
@@ -250,7 +255,7 @@ applyRule (RuleIf f) a (Let pat aux (If cond tbody fbody ifsort)) =
 applyRule (RuleOp f) a (Let pat aux (Op op)) =
   f a pat aux op
 applyRule _ _ _ =
-  cannotSimplify
+  Skip
 
 applyRules :: (MonadFreshNames m, HasScope lore m, BinderOps lore) =>
               Rules lore a -> a -> Stm lore
@@ -261,7 +266,10 @@ applyRules' :: (MonadFreshNames m, HasScope lore m, BinderOps lore) =>
                [SimplificationRule lore a] -> a -> Stm lore
             -> m (Maybe (Stms lore))
 applyRules' []           _       _   = return Nothing
-applyRules' (rule:rules) context bnd = do
-  res <- simplify $ applyRule rule context bnd
-  case res of Just ((), bnds) -> return $ Just bnds
-              Nothing         -> applyRules' rules context bnd
+applyRules' (rule:rules) context stm =
+  case applyRule rule context stm of
+    Simplify m -> do res <- simplify m
+                     case res of Just ((), stms) -> return $ Just stms
+                                 Nothing         -> next
+    Skip -> next
+  where next = applyRules' rules context stm
