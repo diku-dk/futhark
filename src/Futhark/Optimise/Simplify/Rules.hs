@@ -1072,8 +1072,8 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
             If p tbranch fbranch _ <- stmExp bnd,
             Just (y, z) <-
               returns v (stmPattern bnd) tbranch fbranch,
-            mempty == freeIn y `namesIntersection` boundInBody tbranch,
-            mempty == freeIn z `namesIntersection` boundInBody fbranch = Just $ do
+            not $ boundInBody tbranch `namesIntersect` freeIn y,
+            not $ boundInBody fbranch `namesIntersect` freeIn z = Just $ do
                 eq_x_y <-
                   letSubExp "eq_x_y" $ BasicOp $ CmpOp (CmpEq t) x y
                 eq_x_z <-

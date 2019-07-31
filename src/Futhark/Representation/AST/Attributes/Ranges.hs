@@ -243,7 +243,7 @@ expRanges (DoLoop ctxmerge valmerge (ForLoop i Int32 iterations _) body) =
             Just bound' <- boundToScalExp bound,
             let se_diff =
                   AS.simplify (SE.SMinus (SE.Id (paramName param) $ IntType Int32) bound') M.empty,
-            (==mempty) $ namesIntersection bound_in_loop $ freeIn se_diff =
+            namesIntersect bound_in_loop $ freeIn se_diff =
               Just $ ScalarBound $ SE.SPlus (SE.subExpToScalExp mergeinit $ IntType Int32) $
               SE.STimes se_diff $ SE.MaxMin False
               [SE.subExpToScalExp iterations $ IntType Int32, 0]

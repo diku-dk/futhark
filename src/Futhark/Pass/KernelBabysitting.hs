@@ -151,9 +151,8 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
                 isGidVariant _ _ = False
 
                 isThreadLocal v =
-                  thread_variant `namesIntersection`
+                  thread_variant `namesIntersect`
                   M.findWithDefault (oneName v) v variance
-                  /= mempty
 
                 sizeSubst (Constant v) = Just $ Constant v
                 sizeSubst (Var v)

@@ -480,7 +480,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                          unfuse1 = namesFromList (map SOAC.inputArray ker_inp) `namesSubtract`
                                                    namesFromList (mapMaybe SOAC.isVarInput ker_inp)
                                          unfuse2 = namesIntersection curker_outset ufus_nms
-                                     in  mempty == namesIntersection unfuse1 unfuse2
+                                     in not $ unfuse1 `namesIntersect` unfuse2
                     -- Disable horizontal fusion if consumer has any
                     -- output transforms.
                     cons_no_out_transf = SOAC.nullTransforms $ outputTransform ker
@@ -490,17 +490,17 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                     case maybesoac of
                                       -- check that consumer's lambda body does not use
                                       -- directly the produced arrays (e.g., see noFusion3.fut).
-                                      Right conssoac -> return $ mempty ==
-                                                        (curker_outset
-                                                         `namesIntersection`
-                                                         freeIn (lambdaBody $ SOAC.lambda conssoac))
+                                      Right conssoac -> return $ not $
+                                                        curker_outset
+                                                        `namesIntersect`
+                                                        freeIn (lambdaBody $ SOAC.lambda conssoac)
                                       Left _         -> return True
 
                 let interm_bnds_ok = cur_ok && consumer_ok && out_transf_ok && cons_no_out_transf &&
                       foldl (\ok bnd-> ok && -- hardwired to False after first fail
                                        -- (i) check that the in-between bindings do
                                        --     not use the result of current kernel OR
-                                       mempty == namesIntersection curker_outset (freeIn (stmExp bnd)) ||
+                                       not (curker_outset `namesIntersect` freeIn (stmExp bnd)) ||
                                        --(ii) that the pattern-binding corresponds to
                                        --     the result of the consumer kernel; in the
                                        --     latter case it means it corresponds to a

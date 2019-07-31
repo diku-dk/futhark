@@ -5,6 +5,7 @@ packages:
 extra-deps:
 - base-orphans-0.6
 - cpphs-1.20.8
+- containers-0.6.2.1
 - language-c-quote-0.12
 - mainland-pretty-0.6.1
 - primitive-0.6.2.0

@@ -358,7 +358,7 @@ blockUnhoistedDeps = snd . mapAccumL block mempty
   where block blocked (Left need) =
           (blocked <> namesFromList (provides need), Left need)
         block blocked (Right need)
-          | blocked `intersects` freeIn need =
+          | blocked `namesIntersect` freeIn need =
             (blocked <> namesFromList (provides need), Left need)
           | otherwise =
             (blocked, Right need)
@@ -378,9 +378,6 @@ expandUsage vtable utable bnd =
         usageThroughBindeeAliases (name, aliases) = do
           uses <- UT.lookup name utable
           return $ mconcat $ map (`UT.usage` uses) $ namesToList aliases
-
-intersects :: Names -> Names -> Bool
-intersects a b = a `namesIntersection` b /= mempty
 
 type BlockPred lore = ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> Bool
 
@@ -428,7 +425,7 @@ insertAllStms :: SimplifiableLore lore =>
 insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
 
 hasFree :: Attributes lore => Names -> BlockPred lore
-hasFree ks _ _ need = ks `intersects` freeIn need
+hasFree ks _ _ need = ks `namesIntersect` freeIn need
 
 isNotSafe :: Attributes lore => BlockPred lore
 isNotSafe _ _ = not . safeExp . stmExp
@@ -527,8 +524,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
           in  if null new_bnds
               then hoist_bnds
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
-        hasPatName nms bnd = intersects nms $ namesFromList $
-                             patternNames $ stmPattern bnd
+        hasPatName nms bnd = any (`nameIn` nms) $ patternNames $ stmPattern bnd
 
 -- | Simplify a single 'Body'.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
