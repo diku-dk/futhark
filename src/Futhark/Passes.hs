@@ -36,7 +36,6 @@ standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
   passes [ simplifySOACS
          , inlineAndRemoveDeadFunctions
-         , simplifySOACS
          , performCSE True
          , simplifySOACS
            -- We run fusion twice
@@ -68,11 +67,8 @@ kernelsPipeline =
   onePass extractKernels >>>
   passes [ simplifyKernels
          , babysitKernels
-         , simplifyKernels
          , tileLoops
          , unstream
-         , simplifyKernels
-         , performCSE True
          , simplifyKernels
          ] >>>
   inPlaceLoweringMaybe
@@ -89,8 +85,7 @@ sequentialCpuPipeline :: Pipeline SOACS ExplicitMemory
 sequentialCpuPipeline =
   sequentialPipeline >>>
   onePass explicitAllocations >>>
-  passes [ simplifyExplicitMemory
-         , performCSE False
+  passes [ performCSE False
          , simplifyExplicitMemory
          , doubleBuffer
          , simplifyExplicitMemory
