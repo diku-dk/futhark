@@ -2,6 +2,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | This module provides facilities for transforming Futhark programs such
 -- that names are unique, via the 'renameProg' function.
 -- Additionally, the module also supports adding integral \"tags\" to
@@ -47,7 +48,7 @@ import Futhark.MonadFreshNames (MonadFreshNames(..), modifyNameSource)
 import Futhark.Transform.Substitute
 
 runRenamer :: RenameM a -> VNameSource -> (a, VNameSource)
-runRenamer m src = runReader (runStateT m src) env
+runRenamer (RenameM m) src = runReader (runStateT m src) env
   where env = RenameEnv M.empty newName
 
 -- | Rename variables such that each is unique.  The semantics of the
@@ -113,12 +114,14 @@ data RenameEnv = RenameEnv {
   }
 
 -- | The monad in which renaming is performed.
-type RenameM = StateT VNameSource (Reader RenameEnv)
+newtype RenameM a = RenameM (StateT VNameSource (Reader RenameEnv) a)
+  deriving (Functor, Applicative, Monad,
+            MonadFreshNames, MonadReader RenameEnv)
 
 -- | Produce a map of the substitutions that should be performed by
 -- the renamer.
 renamerSubstitutions :: RenameM Substitutions
-renamerSubstitutions = lift $ asks envNameMap
+renamerSubstitutions = asks envNameMap
 
 -- | Perform a renaming using the 'Substitute' instance.  This only
 -- works if the argument does not itself perform any name binding, but
@@ -131,8 +134,8 @@ substituteRename x = do
 -- | Return a fresh, unique name.  The @VName@ is prepended to the
 -- name.
 new :: VName -> RenameM VName
-new k = do (k', src') <- asks envNameFn <*> get <*> pure k
-           put src'
+new k = do (k', src') <- asks envNameFn <*> getNameSource <*> pure k
+           putNameSource src'
            return k'
 
 -- | Members of class 'Rename' can be uniquely renamed.

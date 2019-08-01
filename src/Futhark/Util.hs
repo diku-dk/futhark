@@ -31,6 +31,8 @@ module Futhark.Util
         toPOSIX,
         trim,
         pmapIO,
+        UserString,
+        EncodedString,
         zEncodeString
        )
        where
