@@ -41,7 +41,7 @@ emptyRoughBuildList = RoughBuildList mempty
 depRoots :: PkgRevDeps -> S.Set PkgPath
 depRoots (PkgRevDeps m) = S.fromList $ M.keys m
 
--- | Construct a 'BuildList' from a 'RoughBuildList'.  This involves
+-- Construct a 'BuildList' from a 'RoughBuildList'.  This involves
 -- pruning all packages that cannot be reached from the root.
 buildList :: S.Set PkgPath -> RoughBuildList -> BuildList
 buildList roots (RoughBuildList pkgs) =

@@ -2,7 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Language.Futhark.Interpreter
   ( Ctx(..)
-  , Env(..)
+  , Env
   , InterpreterError
   , initialCtx
   , interpretExp
