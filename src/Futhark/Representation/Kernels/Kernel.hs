@@ -903,13 +903,12 @@ instance TypedOp op => TypedOp (HostOp lore op) where
   opType (OtherOp op) = opType op
 
 instance (Aliased lore, AliasedOp op, Attributes lore) => AliasedOp (HostOp lore op) where
-  opAliases SplitSpace{} = [mempty]
   opAliases (SegOp op) = opAliases op
   opAliases (OtherOp op) = opAliases op
   opAliases _ = [mempty]
 
-  consumedInOp SplitSpace{} = mempty
   consumedInOp (SegOp op) = consumedInOp op
+  consumedInOp (OtherOp op) = consumedInOp op
   consumedInOp _ = mempty
 
 instance (Attributes lore, RangedOp op) => RangedOp (HostOp lore op) where
