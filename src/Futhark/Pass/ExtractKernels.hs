@@ -509,7 +509,7 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
     letBind_ pat $ Op $ SegOp kernel
 
 transformStm _ (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = do
-  bfun' <- FOT.transformLambda bucket_fun
+  let bfun' = soacsLambdaToKernels bucket_fun
   genReduceKernel orig_pat [] [] cs w ops bfun' imgs
 
 transformStm _ bnd =
@@ -587,10 +587,9 @@ onMap path (MapLoop pat cs w lam arrs) = do
     else do
 
     let exploitOuterParallelism path' = do
-          soactypes <- asksScope scopeForSOACs
-          (seq_lam, _) <- runBinderT (FOT.transformLambda lam) soactypes
+          let lam' = soacsLambdaToKernels lam
           runDistNestT (env path') $ distribute $
-            addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
+            addStmsToKernel (bodyStms $ lambdaBody lam') acc
 
     onMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat lam
     where acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
@@ -710,7 +709,7 @@ onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
         -- versioning does not take place down that branch (it currently
         -- does not).
         (sequentialised_kernel, nestw_bnds) <- localScope extra_scope $ do
-          sequentialised_lam <- FOT.transformLambda lam'
+          let sequentialised_lam = soacsLambdaToKernels lam'
           constructKernel segThreadCapped nest' $ lambdaBody sequentialised_lam
 
         let outer_pat = loopNestingPattern $ fst nest

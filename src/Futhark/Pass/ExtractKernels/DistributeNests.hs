@@ -53,7 +53,6 @@ import qualified Futhark.Representation.Kernels as Out
 import Futhark.Representation.Kernels.Kernel
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename
 import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
@@ -352,7 +351,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (GenReduce w ops lam as))) acc
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
         localScope (typeEnvFromDistAcc acc') $ do
-          lam' <- FOT.transformLambda lam
+          let lam' = soacsLambdaToKernels lam
           nest' <- expandKernelNest pat_unused nest
           addKernels kernels
           addKernel =<< segmentedGenReduceKernel nest' perm cs w ops lam' as
@@ -398,8 +397,8 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
           -- it to the kernel nest.
           localScope (typeEnvFromDistAcc acc') $ do
           nest' <- expandKernelNest pat_unused nest
-          lam' <- FOT.transformLambda lam
-          map_lam' <- FOT.transformLambda map_lam
+          let lam' = soacsLambdaToKernels lam
+              map_lam' = soacsLambdaToKernels map_lam
 
           let comm' | commutativeLambda lam = Commutative
                     | otherwise             = comm
