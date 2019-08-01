@@ -45,7 +45,7 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (elements)
 import Futhark.CodeGen.ImpGen
-import Futhark.Util.IntegralExp (quotRoundingUp, quot)
+import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 import Futhark.Util (chunks, maybeNth)
 
 type CallKernelGen = ImpM ExplicitMemory Imp.HostOp
@@ -201,16 +201,6 @@ compileGroupSpace constants lvl space = do
 
   dPrimV_ (segFlat space) $ kernelLocalThreadId constants
 
-prepareRedOrScan :: KernelConstants -> SegLevel -> SegSpace
-                 -> InKernelGen Imp.Exp
-prepareRedOrScan constants lvl space = do
-  compileGroupSpace constants lvl space
-
-  case unSegSpace space of
-    [(_, dim)] -> toExp dim
-    _ -> compilerLimitationS $
-         "Intra-group segmented operation: " ++ pretty space
-
 compileGroupOp :: KernelConstants -> OpCompiler ExplicitMemory Imp.KernelOp
 
 compileGroupOp constants pat (Alloc size space) =
@@ -230,8 +220,9 @@ compileGroupOp constants pat (Inner (SegOp (SegMap lvl space _ body))) = do
   sOp Imp.LocalBarrier
 
 compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
-  w <- prepareRedOrScan constants lvl space
-  let (ltids, _) = unzip $ unSegSpace space
+  compileGroupSpace constants lvl space
+  let (ltids, dims) = unzip $ unSegSpace space
+  dims' <- mapM toExp dims
 
   sWhen (isActive $ unSegSpace space) $
     compileStms mempty (kernelBodyStms body) $
@@ -242,10 +233,18 @@ compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))
 
   sOp Imp.LocalBarrier
 
-  groupScan constants Nothing w scan_op $ patternNames pat
+  let segment_size = last dims'
+      crossesSegment from to = (to-from) .>. (to `rem` segment_size)
+  groupScan constants (Just crossesSegment) (product dims') scan_op $ patternNames pat
 
 compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
-  w <- prepareRedOrScan constants lvl space
+  compileGroupSpace constants lvl space
+
+  w <- case unSegSpace space of
+         [(_, dim)] -> toExp dim
+         _ -> compilerLimitationS $
+              "Intra-group segmented SegRed: " ++ pretty space
+
   let (ltids, dims) = unzip $ unSegSpace space
       (red_pes, map_pes) = splitAt (segRedResults ops) $ patternElements pat
 

@@ -8,7 +8,8 @@
 --     scan
 --
 -- ==
---
+-- compiled random input { [10][16][16]i32 } auto output
+-- compiled random input { [10][8][32]i32 } auto output
 -- structure distributed { SegScan 2 }
 
 let main [n][m] (a: [][n][m]i32): [][][]i32 =
