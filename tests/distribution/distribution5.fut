@@ -11,7 +11,6 @@
 --     reduce (which becomes a segmented reduction)
 --
 -- ==
---
 -- structure distributed {
 --   SegMap 2 SegRed 1
 -- }
