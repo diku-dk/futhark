@@ -10,6 +10,7 @@ module Language.Futhark.TypeChecker.Types
   , checkForDuplicateNames
   , checkForDuplicateNamesInType
   , checkTypeParams
+  , typeParamToArg
 
   , typeExpUses
   , checkShapeParamUses
@@ -327,6 +328,13 @@ checkTypeParams ps m =
           TypeParamDim <$> checkParamName Term pv loc <*> pure loc
         checkTypeParam (TypeParamType l pv loc) =
           TypeParamType l <$> checkParamName Type pv loc <*> pure loc
+
+-- | Construct a type argument corresponding to a type parameter.
+typeParamToArg :: TypeParam -> StructTypeArg
+typeParamToArg (TypeParamDim v ploc) =
+  TypeArgDim (NamedDim $ qualName v) ploc
+typeParamToArg (TypeParamType _ v ploc) =
+  TypeArgType (Scalar (TypeVar () Nonunique (typeName v) [])) ploc
 
 -- | Return the shapes used in a given type expression in positive and negative
 -- position, respectively.
