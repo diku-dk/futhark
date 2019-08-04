@@ -509,6 +509,12 @@ checkPattern' p@(TuplePattern ps loc) (Ascribed t) = do
 checkPattern' (TuplePattern ps loc) NoneInferred =
   TuplePattern <$> mapM (`checkPattern'` NoneInferred) ps <*> pure loc
 
+checkPattern' (RecordPattern p_fs _) _
+  | Just (f, fp) <- find (("_" `isPrefixOf`) . nameToString . fst) p_fs =
+      typeError fp $ unlines [ "Underscore-prefixed fields are not allowed."
+                             , "Did you mean " ++
+                               quote (drop 1 (nameToString f) ++ "=_") ++ "?"]
+
 checkPattern' (RecordPattern p_fs loc) (Ascribed (Scalar (Record t_fs)))
   | sort (map fst p_fs) == sort (M.keys t_fs) =
     RecordPattern . M.toList <$> check <*> pure loc
