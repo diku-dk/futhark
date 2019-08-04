@@ -3,6 +3,8 @@
 # Turn a Futhark value of type [height][width]i32 encoded in the
 # binary data format on stdin into a PNG image to the provided file.
 # Absolutely no error checking is done.
+#
+# Requires purepng and Numpy.
 
 import sys
 import struct
