@@ -105,6 +105,20 @@ isRigid v constraints = case M.lookup v constraints of
                              Just ParamType{} -> True
                              _ -> False
 
+unifySharedConstructors :: MonadUnify m =>
+                           Usage
+                        -> M.Map Name [TypeBase () ()]
+                        -> M.Map Name [TypeBase () ()]
+                        -> m ()
+unifySharedConstructors usage cs1 cs2 =
+  forM_ (M.toList $ M.intersectionWith (,) cs1 cs2) $ \(c, (f1, f2)) ->
+  unifyConstructor c f1 f2
+  where unifyConstructor c f1 f2
+          | length f1 == length f2 =
+              zipWithM_ (unify usage) f1 f2
+          | otherwise = typeError usage $ "Cannot unify constructor " ++
+                        quote (prettyName c) ++ "."
+
 -- | Unifies two types.
 unify :: MonadUnify m => Usage -> TypeBase () () -> TypeBase () () -> m ()
 unify usage orig_t1 orig_t2 = do
@@ -165,10 +179,7 @@ unify usage orig_t1 orig_t2 = do
         (Scalar (Sum cs),
          Scalar (Sum arg_cs))
           | M.keys cs == M.keys arg_cs ->
-              forM_ (M.toList $ M.intersectionWith (,) cs arg_cs) $ \(_, (f1, f2)) ->
-              if length f1 == length f2
-              then zipWithM_ subunify f1 f2 -- TODO: improve
-              else failure
+              unifySharedConstructors usage cs arg_cs
         (_, _) -> failure
 
       where unifyTypeArg TypeArgDim{} TypeArgDim{} = return ()
@@ -198,10 +209,13 @@ linkVarToType usage vn tp = do
     else do modifyConstraints $ M.insert vn $ Constraint tp' usage
             modifyConstraints $ M.map $ applySubstInConstraint vn $ Subst tp'
             case M.lookup vn constraints of
+
               Just (NoConstraint (Just Unlifted) unlift_usage) ->
                 zeroOrderType usage (show unlift_usage) tp'
+
               Just (Equality _) ->
                 equalityType usage tp'
+
               Just (Overloaded ts old_usage)
                 | tp `notElem` map (Scalar . Prim) ts ->
                     case tp' of
@@ -212,6 +226,7 @@ linkVarToType usage vn tp = do
                           pretty tp ++ "' (`" ++ prettyName vn ++
                           "` must be one of " ++ intercalate ", " (map pretty ts) ++
                           " due to " ++ show old_usage ++ ")."
+
               Just (HasFields required_fields old_usage) ->
                 case tp of
                   Scalar (Record tp_fields)
@@ -231,22 +246,29 @@ linkVarToType usage vn tp = do
                        pretty tp ++ "' (must be a record with fields {" ++
                        required_fields' ++
                        "} due to " ++ show old_usage ++ ")."
+
               Just (HasConstrs required_cs old_usage) ->
                 case tp of
                   Scalar (Sum ts)
                     | all (`M.member` ts) $ M.keys required_cs ->
-                        mapM_ (uncurry (zipWithM_ (unify usage))) $ M.elems $
-                          M.intersectionWith (,) required_cs ts
+                        unifySharedConstructors usage required_cs ts
                   Scalar (TypeVar _ _ (TypeName [] v) [])
-                    | not $ isRigid v constraints ->
+                    | not $ isRigid v constraints -> do
+                        case M.lookup v constraints of
+                          Just (HasConstrs v_cs _) ->
+                            unifySharedConstructors usage required_cs v_cs
+                          _ -> return ()
                         modifyConstraints $ M.insertWith combineConstrs v $
-                        HasConstrs required_cs old_usage
+                          HasConstrs required_cs old_usage
                         where combineConstrs (HasConstrs cs1 usage1) (HasConstrs cs2 _) =
                                 HasConstrs (M.union cs1 cs2) usage1
                               combineConstrs hasCs _ = hasCs
-                  _ -> typeError usage "Cannot unify a sum type with a non-sum type"
+                  _ -> noSumType
+
               _ -> return ()
+
   where tp' = removeUniqueness tp
+        noSumType = typeError usage "Cannot unify a sum type with a non-sum type"
 
 removeUniqueness :: TypeBase dim as -> TypeBase dim as
 removeUniqueness (Scalar (Record ets)) =
@@ -339,7 +361,7 @@ zeroOrderType usage desc t = do
               locStr ploc ++ " may be a function."
             _ -> return ()
 
--- In @mustHaveConstr usage c t fs@, the type @t@ must have a
+-- | In @mustHaveConstr usage c t fs@, the type @t@ must have a
 -- constructor named @c@ that takes arguments of types @ts@.
 mustHaveConstr :: MonadUnify m =>
                   Usage -> Name -> TypeBase dim as -> [TypeBase () ()] -> m ()
