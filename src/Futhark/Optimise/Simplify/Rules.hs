@@ -818,15 +818,13 @@ simplifyConcat _ _ _  _ = Skip
 
 ruleIf :: BinderOps lore => TopDownRuleIf lore
 
-ruleIf _ pat _ (e1, tb, fb, IfAttr t ifsort)
+ruleIf _ pat _ (e1, tb, fb, IfAttr _ ifsort)
   | Just branch <- checkBranch,
     ifsort /= IfFallback || isCt1 e1 = Simplify $ do
   let ses = bodyResult branch
   addStms $ bodyStms branch
-  ctx <- subExpShapeContext (bodyTypeValues t) ses
-  let ses' = ctx ++ ses
   sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
-            | (p,se) <- zip (patternElements pat) ses']
+            | (p,se) <- zip (patternElements pat) ses]
 
   where checkBranch
           | isCt1 e1  = Just tb
