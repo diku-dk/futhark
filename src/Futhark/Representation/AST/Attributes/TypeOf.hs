@@ -23,7 +23,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , bodyExtType
        , primOpType
        , mapType
-       , subExpShapeContext
 
        -- * Return type
        , module Futhark.Representation.AST.RetType
@@ -155,13 +154,6 @@ bodyExtType (Body _ stms res) =
   where bndscope = scopeOf stms
         boundInLet (Let pat _ _) = S.fromList $ patternNames pat
         bound = S.toList $ fold $ fmap boundInLet stms
-
--- | Given the return type of a function and the subexpressions
--- returned by that function, return the size context.
-subExpShapeContext :: HasScope t m =>
-                      [TypeBase ExtShape u] -> [SubExp] -> m [SubExp]
-subExpShapeContext rettype ses =
-  extractShapeContext rettype <$> traverse (fmap arrayDims . subExpType) ses
 
 -- | Given the context and value merge parameters of a Futhark @loop@,
 -- produce the return type.
