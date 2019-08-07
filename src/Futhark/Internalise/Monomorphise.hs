@@ -147,18 +147,40 @@ transformFName fname t
           addLifted fname t fname'
           return fname'
 
+-- | Convert a sum type into the components of its expanded type, as
+-- well as a mapping from constructors to to their index, and a list
+-- of indices for where its fields are located in that tuple.
+sumType :: Eq dim =>
+           M.Map Name [TypeBase dim als]
+        -> ([TypeBase dim als], M.Map Name (Int, [Int]))
+sumType cs = let (ts, mapping) = foldl' onConstructor mempty $
+                                 zip (sortConstrs cs) [0..]
+             in (ts, mapping)
+  where onConstructor (ts, mapping) ((c, c_ts), i) =
+          let (new_ts, js) = mapAccumL f mempty c_ts
+          in (ts ++ new_ts, M.insert c (i, js) mapping)
+          where f new_ts t
+                  | Just j <- findIndex (sameModuloAliases t) ts =
+                      (new_ts, j)
+                  | otherwise =
+                      (new_ts ++ [t], length ts + length new_ts)
+
+        sameModuloAliases x y = toStruct x == toStruct y
+
 -- | This carries out record replacements in the alias information of a type.
-transformType :: TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
+transformType :: Eq dim => TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
 transformType t = do
+  let t' = removeSumTypes t
   rrs <- asks envRecordReplacements
   let replace (AliasBound v) | Just d <- M.lookup v rrs =
                                  S.fromList $ map (AliasBound . fst) $ M.elems d
       replace x = S.singleton x
   -- As an attempt at an optimisation, only transform the aliases if
   -- they refer to a variable we have record-replaced.
-  return $ if any ((`M.member` rrs) . aliasVar) $ aliases t
-           then bimap id (mconcat . map replace . S.toList) t
-           else t
+  return $ if any ((`M.member` rrs) . aliasVar) $ aliases t'
+           then bimap id (mconcat . map replace . S.toList) t'
+           else t'
+
 
 -- | Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
@@ -325,25 +347,29 @@ transformExp (Unsafe e1 loc) =
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 
-transformExp (Constr name es (Info (Scalar (Sum cs))) loc) =
-  case constrIndex name cs of
-    Nothing -> error "transFormExp: malformed constructor value."
-    Just n  -> TupLit <$> ((index :) <$> clauses) <*> pure noLoc
-      where index =  Literal (UnsignedValue (intValue Int8 n)) noLoc
-            clauses = mapM clause $ sortConstrs cs
-            clause (name', ts)
-              | name == name' = TupLit <$> mapM transformExp es <*> pure loc
-              | otherwise     = return $ TupLit (map defaultValue ts) noLoc
+transformExp (Constr name all_es (Info (Scalar (Sum cs))) _) =
+  case M.lookup name m of
+    Nothing -> error "transformExp: malformed constructor value."
+    Just (i, js) -> do
+      all_es' <- mapM transformExp all_es
+      return $ TupLit (index i : clauses js 0 all_ts all_es') noLoc
+
+  where (all_ts, m) = sumType cs
+
+        index i = Literal (UnsignedValue (intValue Int8 i)) noLoc
+
+        clauses js j (_:ts) (e:es)
+          | j `elem` js =
+              e : clauses js (j+1) ts es
+        clauses js j (t:ts) es =
+          defaultValue t : clauses js (j+1) ts es
+        clauses _ _ [] _ =
+          []
 
 transformExp Constr{} = error "transformExp: invalid constructor type."
 
 transformExp (Match e cs t loc) =
   Match <$> transformExp e <*> mapM transformCase cs <*> traverse transformType t <*> pure loc
-
-constrIndex :: Name -> M.Map Name [TypeBase dim as] -> Maybe Int
-constrIndex name cs =
-  fst <$> L.find (\(_, (name', _)) -> name == name') cs'
-  where cs' = zip [0..] $ sortConstrs cs
 
 defaultValue :: PatternType -> Exp
 defaultValue (Scalar (Prim Bool)) = Literal (BoolValue False) noLoc
@@ -452,20 +478,27 @@ expandRecordPattern (PatternAscription pat td loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternAscription pat' td loc, rr)
 expandRecordPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
-expandRecordPattern (PatternConstr name (Info (Scalar (Sum cs))) ps loc) =
-  case constrIndex name cs of
-    Nothing -> error "expandRecordPattern: constructor not present in type."
-    Just n  -> do
-      (ps', rrs) <- unzip <$> mapM expandRecordPattern ps
-      pat <- patM ps'
+expandRecordPattern (PatternConstr name (Info (Scalar (Sum cs))) all_ps _) =
+  case M.lookup name m of
+    Nothing -> error "expandRecordPattern: malformed constructor value."
+    Just (i, js) -> do
+      (all_ps', rrs) <- unzip <$> mapM expandRecordPattern all_ps
+      let pat = TuplePattern (index i : clauses js 0 all_ts all_ps') noLoc
       return (pat, mconcat rrs)
-      where patM ps' = TuplePattern <$> ((index :) <$> clauses ps') <*> pure noLoc
-            index = PatternLit (Literal (UnsignedValue (intValue Int8 n)) noLoc)
-                               (Info (Scalar $ Prim $ Unsigned Int8)) noLoc
-            clauses ps' = mapM (clause ps') $ sortConstrs cs
-            clause ps' (name', ts)
-              | name == name' = pure $ TuplePattern ps' loc
-              | otherwise     = return $ TuplePattern (map ((`Wildcard` noLoc) . Info) ts) noLoc
+
+  where (all_ts, m) = sumType cs
+
+        index i = PatternLit (Literal (UnsignedValue (intValue Int8 i)) noLoc)
+                  (Info (Scalar $ Prim $ Unsigned Int8)) noLoc
+
+        clauses js j (_:ts) (p:ps)
+          | j `elem` js =
+              p : clauses js (j+1) ts ps
+        clauses js j (t:ts) ps =
+          Wildcard (Info t) noLoc : clauses js (j+1) ts ps
+        clauses _ _ [] _ =
+          []
+
 expandRecordPattern PatternConstr{} = error "expandRecordPattern: invalid pattern constructor type."
 
 -- | Monomorphize a polymorphic function at the types given in the instance
@@ -610,9 +643,9 @@ removeTypeVariablesInType t = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   return $ removeShapeAnnotations $ substituteTypes subs $ vacuousShapeAnnotations t
 
-removeSumTypes :: Monoid as => TypeBase dim as -> TypeBase dim as
+removeSumTypes :: (Eq dim, Monoid as) => TypeBase dim as -> TypeBase dim as
 removeSumTypes (Scalar (Sum cs)) =
-  tupleRecord $ Scalar (Prim $ Unsigned Int8) : map (tupleRecord . snd) (sortConstrs cs)
+  tupleRecord $ Scalar (Prim $ Unsigned Int8) : fst (sumType cs)
 removeSumTypes (Scalar (Arrow as v t1 t2)) =
   Scalar $ Arrow as v (removeSumTypes t1) (removeSumTypes t2)
 removeSumTypes (Scalar (Record fs)) =
