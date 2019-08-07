@@ -348,18 +348,18 @@ transformExp (Constr name all_es (Info (Scalar (Sum cs))) _) =
     Nothing -> error "transformExp: malformed constructor value."
     Just (i, js) -> do
       all_es' <- mapM transformExp all_es
-      return $ TupLit (index i : clauses js 0 all_ts all_es') noLoc
+      return $ TupLit (index i : clauses 0 all_ts (zip js all_es')) noLoc
 
   where (all_ts, m) = sumType cs
 
         index i = Literal (UnsignedValue (intValue Int8 i)) noLoc
 
-        clauses js j (_:ts) (e:es)
-          | j `elem` js =
-              e : clauses js (j+1) ts es
-        clauses js j (t:ts) es =
-          defaultValue t : clauses js (j+1) ts es
-        clauses _ _ [] _ =
+        clauses j (t:ts) js_to_es
+          | Just e <- j `lookup` js_to_es =
+              e : clauses (j+1) ts js_to_es
+          | otherwise =
+              defaultValue t : clauses (j+1) ts js_to_es
+        clauses _ [] _ =
           []
 
 transformExp Constr{} = error "transformExp: invalid constructor type."
@@ -372,10 +372,9 @@ defaultValue (Scalar (Prim Bool)) = Literal (BoolValue False) noLoc
 defaultValue (Scalar (Prim (Unsigned s))) = Literal (UnsignedValue (intValue s (0 :: Int))) noLoc
 defaultValue (Scalar (Prim (Signed s))) = Literal (SignedValue (intValue s (0 :: Int))) noLoc
 defaultValue (Scalar (Prim (FloatType s))) = Literal (FloatValue (floatValue s (0 :: Int))) noLoc
-defaultValue (Scalar (Sum cs)) = TupLit (defaultIndex : defaultClauses) noLoc
-  where defaultIndex   =  Literal (UnsignedValue (intValue Int8 (0 :: Int))) noLoc
-        defaultClauses = map defaultClause $ sortConstrs cs
-        defaultClause (_, ts) = TupLit (map defaultValue ts) noLoc
+defaultValue (Scalar (Sum cs)) = TupLit (defaultIndex : map defaultValue all_ts) noLoc
+  where (all_ts, _) = sumType cs
+        defaultIndex =  Literal (UnsignedValue (intValue Int8 (0 :: Int))) noLoc
 defaultValue t@Array{} = ArrayLit [] (Info t) noLoc -- TODO: Does the shape need to be preserved?
 defaultValue (Scalar (Record fs)) = RecordLit (map f fs') noLoc
   where fs' = sortFields fs
@@ -479,7 +478,7 @@ expandRecordPattern (PatternConstr name (Info (Scalar (Sum cs))) all_ps _) =
     Nothing -> error "expandRecordPattern: malformed constructor value."
     Just (i, js) -> do
       (all_ps', rrs) <- unzip <$> mapM expandRecordPattern all_ps
-      let pat = TuplePattern (index i : clauses js 0 all_ts all_ps') noLoc
+      let pat = TuplePattern (index i : clauses 0 all_ts (zip js all_ps')) noLoc
       return (pat, mconcat rrs)
 
   where (all_ts, m) = sumType cs
@@ -487,12 +486,12 @@ expandRecordPattern (PatternConstr name (Info (Scalar (Sum cs))) all_ps _) =
         index i = PatternLit (Literal (UnsignedValue (intValue Int8 i)) noLoc)
                   (Info (Scalar $ Prim $ Unsigned Int8)) noLoc
 
-        clauses js j (_:ts) (p:ps)
-          | j `elem` js =
-              p : clauses js (j+1) ts ps
-        clauses js j (t:ts) ps =
-          Wildcard (Info t) noLoc : clauses js (j+1) ts ps
-        clauses _ _ [] _ =
+        clauses j (t:ts) js_to_ps
+          | Just p <- j `lookup` js_to_ps =
+              p : clauses (j+1) ts js_to_ps
+          | otherwise =
+              Wildcard (Info t) noLoc : clauses (j+1) ts js_to_ps
+        clauses _ [] _ =
           []
 
 expandRecordPattern PatternConstr{} = error "expandRecordPattern: invalid pattern constructor type."
