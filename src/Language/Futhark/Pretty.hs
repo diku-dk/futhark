@@ -293,7 +293,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldImplicit name _ _) = pprName name
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (CaseBase f vn) where
-  ppr (CasePat p e _) = text "case" <+> ppr p <+> text "->" <+> ppr e
+  ppr (CasePat p e _) = text "case" <+> ppr p <+> text "->" </> indent 2 (ppr e)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
   ppr (For i ubound) =
