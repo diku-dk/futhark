@@ -153,9 +153,7 @@ transformFName fname t
 sumType :: Eq dim =>
            M.Map Name [TypeBase dim als]
         -> ([TypeBase dim als], M.Map Name (Int, [Int]))
-sumType cs = let (ts, mapping) = foldl' onConstructor mempty $
-                                 zip (sortConstrs cs) [0..]
-             in (ts, mapping)
+sumType cs = foldl' onConstructor mempty $ zip (sortConstrs cs) [0..]
   where onConstructor (ts, mapping) ((c, c_ts), i) =
           let (new_ts, js) = mapAccumL f mempty c_ts
           in (ts ++ new_ts, M.insert c (i, js) mapping)
@@ -168,19 +166,17 @@ sumType cs = let (ts, mapping) = foldl' onConstructor mempty $
         sameModuloAliases x y = toStruct x == toStruct y
 
 -- | This carries out record replacements in the alias information of a type.
-transformType :: Eq dim => TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
+transformType :: TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
 transformType t = do
-  let t' = removeSumTypes t
   rrs <- asks envRecordReplacements
   let replace (AliasBound v) | Just d <- M.lookup v rrs =
                                  S.fromList $ map (AliasBound . fst) $ M.elems d
       replace x = S.singleton x
   -- As an attempt at an optimisation, only transform the aliases if
   -- they refer to a variable we have record-replaced.
-  return $ if any ((`M.member` rrs) . aliasVar) $ aliases t'
-           then bimap id (mconcat . map replace . S.toList) t'
-           else t'
-
+  return $ if any ((`M.member` rrs) . aliasVar) $ aliases t
+           then bimap id (mconcat . map replace . S.toList) t
+           else t
 
 -- | Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
@@ -645,7 +641,8 @@ removeTypeVariablesInType t = do
 
 removeSumTypes :: (Eq dim, Monoid as) => TypeBase dim as -> TypeBase dim as
 removeSumTypes (Scalar (Sum cs)) =
-  tupleRecord $ Scalar (Prim $ Unsigned Int8) : fst (sumType cs)
+  tupleRecord $ Scalar (Prim $ Unsigned Int8) :
+  fst (sumType $ M.map (map removeSumTypes) cs)
 removeSumTypes (Scalar (Arrow as v t1 t2)) =
   Scalar $ Arrow as v (removeSumTypes t1) (removeSumTypes t2)
 removeSumTypes (Scalar (Record fs)) =
