@@ -625,6 +625,7 @@ reductionStageTwo constants segred_pes
     sWrite sync_arr [0] $ Imp.var old_counter int32 .==. groups_per_segment - 1
 
   sOp Imp.LocalBarrier
+  sOp Imp.GlobalBarrier
 
   is_last_group <- dPrim "is_last_group" Bool
   copyDWIM is_last_group [] (Var sync_arr) [0]
