@@ -506,7 +506,7 @@ compileHuskFun parts map_res parts_copies parts_offset parts_elems src_elems no_
     mapM_ addHuskInt [parts_offset, parts_elems, node_id]
     mapM_ addHuskPartMems parts_copies
     dLParams parts
-    mapM_ addControlledMem map_res
+    zipWithM_ sDeclareNamedMem map_res $ repeat (Space "device")
     localNodeId (Imp.var node_id int32) $ content node_id
   let map_res_mem = map Imp.nodeCopyMem map_res_copies
       map_res_src = map Imp.nodeCopySrc map_res_copies
@@ -514,7 +514,7 @@ compileHuskFun parts map_res parts_copies parts_offset parts_elems src_elems no_
     S.fromList (concat [no_repl, map_res, map_res_mem, parts_mem])
   bparams <- catMaybes <$> mapM (\x -> getParam x <$> lookupType x)
     (S.toList $ mconcat [freeIn body_code, freeIn src_elems, freeIn parts, S.fromList $ parts_src ++ map_res_mem]
-      `S.difference` S.fromList (concat [[parts_offset, parts_elems, node_id], parts_mem, map_res_src]))
+      `S.difference` S.fromList (concat [[parts_offset, parts_elems, node_id], parts_mem, map_res, map_res_src]))
   return $ Imp.HuskFunction husk parts_copies repl_mem map_res_copies bparams parts_offset parts_elems node_id src_elems body_code
   where parts_mem = map Imp.nodeCopyMem parts_copies
         parts_src = map Imp.nodeCopySrc parts_copies

@@ -665,31 +665,4 @@ int cuda_node_first_error(struct cuda_context *ctx) {
   return 0;
 }
 
-/*
-void cuda_send_node_base_message(struct cuda_context *ctx, enum cuda_node_message_type msg_type,
-                                 void *msg_content) {
-  for (int i = 0; i < ctx->cfg.num_nodes; ++i) {
-    ctx->nodes[i].current_message.type = msg_type;
-    ctx->nodes[i].current_message.content = msg_content;
-    sem_post(&ctx->nodes[i].message_signal);
-  }
-  cuda_thread_sync(&ctx->node_sync_point);
-}
-
-void cuda_send_node_husk(struct cuda_context *ctx, husk_function_t husk_func, void* params) {
-  struct cuda_node_husk_content husk_content;
-  husk_content.husk_func = husk_func;
-  husk_content.params = params;
-  cuda_send_node_base_message(ctx, NODE_MSG_HUSK, &husk_content);
-}
-
-void cuda_send_node_exit(struct cuda_context *ctx) {
-  cuda_send_node_base_message(ctx, NODE_MSG_EXIT, NULL);
-}
-
-void cuda_send_node_sync(struct cuda_context *ctx) {
-  cuda_send_node_base_message(ctx, NODE_MSG_SYNC, NULL);
-}
-*/
-
 // End of cuda.h.

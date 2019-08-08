@@ -79,7 +79,7 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
         zipWithM_ (\x y -> copyDWIM x [Imp.var node_id int32] y []) interm_red $ map Var node_red_res
         zipWithM_ (\x y -> emit $ Imp.SetMem x y (Space "device")) interm_map_mem =<<
           getArrayMemLocs node_map_res
-      zipWith3 mapResInfo map_pes_mems interm_map_mem <$> mapM lookupArray node_map_res)
+      zipWithM mapResInfo map_pes_mems node_map_res)
   red_code <- collect $ do
       sFor i Int32 (Imp.var num_nodes int32) $ do
         zipWithM_ (\x y -> copyDWIM x [] y [Imp.var i int32])
@@ -107,11 +107,12 @@ opCompiler (Pattern _ pes) (Inner (Husk hspace red_op nes ts (Body _ bnds ses)))
         getArrayMemLocs arr = map (memLocationName . entryArrayLocation) <$> mapM lookupArray arr
         replaceVar n1 r (Var n2) = if n1 == n2 then Var r else Var n2
         replaceVar _ _ e = e
-        mapResInfo pe_mem map_interm_mem res_arr@(ArrayEntry _ t) =
-          let res_arr_dims = map dimSizeToSubExp $ entryArrayShape res_arr
+        mapResInfo pe_mem res_name = do
+          (ArrayEntry (MemLocation res_mem s _) t) <- lookupArray res_name
+          let res_arr_dims = map dimSizeToSubExp s
               res_size_bytes = Imp.bytes $ memSize t $ Shape res_arr_dims
               offset_bytes = Imp.bytes $ memSize t $ Shape $ map (replaceVar parts_elems parts_offset) res_arr_dims
-          in Imp.NodeCopyInfo pe_mem res_size_bytes offset_bytes map_interm_mem
+          return $ Imp.NodeCopyInfo pe_mem res_size_bytes offset_bytes res_mem
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler pat e =

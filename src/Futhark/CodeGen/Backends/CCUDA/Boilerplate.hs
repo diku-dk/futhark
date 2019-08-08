@@ -271,33 +271,6 @@ generateContextFuns cfg kernel_names sizes = do
         void *params;
       };|]
 
-  GC.libDecl [C.cedecl|void send_node_base_message(struct $id:ctx *ctx, enum cuda_node_message_type msg_type,
-                                                   void *msg_content) {
-        for (int i = 0; i < ctx->cuda.cfg.num_nodes; ++i) {
-          ctx->cuda.nodes[i].current_message.type = msg_type;
-          ctx->cuda.nodes[i].current_message.content = msg_content;
-          sem_post(&ctx->cuda.nodes[i].message_signal);
-        }
-        bool r;
-        handle_node_message(ctx, 0, &r);
-        cuda_thread_sync(&ctx->cuda.node_sync_point);
-      }|]
-
-  GC.libDecl [C.cedecl|void send_node_husk(struct $id:ctx *ctx, typename husk_function_t husk_func, void* params) {
-        struct husk_message_content husk_content;
-        husk_content.husk_func = husk_func;
-        husk_content.params = params;
-        send_node_base_message(ctx, NODE_MSG_HUSK, &husk_content);
-      }|]
-
-  GC.libDecl [C.cedecl|void send_node_exit(struct $id:ctx *ctx) {
-        send_node_base_message(ctx, NODE_MSG_EXIT, NULL);
-      }|]
-
-  GC.libDecl [C.cedecl|void send_node_sync(struct $id:ctx *ctx) {
-        send_node_base_message(ctx, NODE_MSG_SYNC, NULL);
-      }|]
-
   GC.libDecl [C.cedecl|struct node_launch_params {
       typename int32_t node_id;
       struct $id:ctx *ctx;
@@ -330,6 +303,33 @@ generateContextFuns cfg kernel_names sizes = do
           panic(-1, "Unrecognized message received by node %d.", node_id);
       }
      }|]
+
+  GC.libDecl [C.cedecl|void send_node_base_message(struct $id:ctx *ctx, enum cuda_node_message_type msg_type,
+                                                   void *msg_content) {
+        for (int i = 0; i < ctx->cuda.cfg.num_nodes; ++i) {
+          ctx->cuda.nodes[i].current_message.type = msg_type;
+          ctx->cuda.nodes[i].current_message.content = msg_content;
+          sem_post(&ctx->cuda.nodes[i].message_signal);
+        }
+        bool r;
+        handle_node_message(ctx, 0, &r);
+        cuda_thread_sync(&ctx->cuda.node_sync_point);
+      }|]
+
+  GC.libDecl [C.cedecl|void send_node_husk(struct $id:ctx *ctx, typename husk_function_t husk_func, void* params) {
+        struct husk_message_content husk_content;
+        husk_content.husk_func = husk_func;
+        husk_content.params = params;
+        send_node_base_message(ctx, NODE_MSG_HUSK, &husk_content);
+      }|]
+
+  GC.libDecl [C.cedecl|void send_node_exit(struct $id:ctx *ctx) {
+        send_node_base_message(ctx, NODE_MSG_EXIT, NULL);
+      }|]
+
+  GC.libDecl [C.cedecl|void send_node_sync(struct $id:ctx *ctx) {
+        send_node_base_message(ctx, NODE_MSG_SYNC, NULL);
+      }|]
 
   GC.libDecl [C.cedecl|void *run_node_thread(void *p) {
       struct node_launch_params *params = (struct node_launch_params*)p;
