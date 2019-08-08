@@ -10,6 +10,7 @@ module Futhark.CodeGen.Backends.CCUDA
 import qualified Language.C.Quote.OpenCL as C
 import Data.List
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
@@ -200,29 +201,39 @@ cudaMemoryType "device" = return [C.cty|typename CUdeviceptr|]
 cudaMemoryType space =
   fail $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
-setMainNodeMemRef :: VName -> M.Map VName (VName, VName) -> Code -> (Code, M.Map VName (VName, VName))
+setMainNodeMemRef :: VName -> M.Map VName (VName, VName) -> Code -> (Code, M.Map VName (VName, VName), S.Set VName)
 setMainNodeMemRef node_id m alloc@(Allocate mem _ _) | (Just (_, res_mem)) <- M.lookup mem m =
   let set_alloc = If (vi32 node_id .==. 0) (SetMem mem res_mem (Space "device")) alloc
       m' = M.delete mem m
-  in (set_alloc, m')
+  in (set_alloc, m', S.empty)
 setMainNodeMemRef _ m set_mem@(SetMem mem src _) | (Just entry) <- M.lookup mem m =
   let m' = M.delete mem m
       m'' = M.insert src entry m'
-  in (set_mem, m'')
+  in (set_mem, m'', S.empty)
 setMainNodeMemRef node_id m (e1 :>>: e2) =
-  let (e2', m') = setMainNodeMemRef node_id m e2
-      (e1', m'') = setMainNodeMemRef node_id m' e1
-  in (e1' :>>: e2', m'')
-setMainNodeMemRef node_id m (For i it bound e) =
-  let (e', m') = setMainNodeMemRef node_id m e
-  in (For i it bound e', m')
-setMainNodeMemRef node_id m (While cond e) =
-  let (e', m') = setMainNodeMemRef node_id m e
-  in (While cond e', m')
+  let (e2', m', b2) = setMainNodeMemRef node_id m e2
+      (e1', m'', b1) = setMainNodeMemRef node_id m' e1
+  in (e1' :>>: e2', m'', b1 <> b2)
 setMainNodeMemRef node_id m (Comment s e) =
-  let (e', m') = setMainNodeMemRef node_id m e
-  in (Comment s e', m')
-setMainNodeMemRef _ m e = (e, m)
+  let (e', m', b) = setMainNodeMemRef node_id m e
+  in (Comment s e', m', b)
+setMainNodeMemRef node_id m fors@(For _ _ _ e) =
+  let (_, m', b) = setMainNodeMemRef node_id m e
+      m_n = m `M.intersection` m'
+      b' = S.fromList $ map fst $ M.elems $ m `M.difference` m'
+  in (fors, m_n, b <> b')
+setMainNodeMemRef node_id m whiles@(While _ e) =
+  let (_, m', b) = setMainNodeMemRef node_id m e
+      m_n = m `M.intersection` m'
+      b' = S.fromList $ map fst $ M.elems $ m `M.difference` m'
+  in (whiles, m_n, b <> b')
+setMainNodeMemRef node_id m ifs@(If _ t f) =
+  let (_, m', b1) = setMainNodeMemRef node_id m t
+      (_', m'', b2) = setMainNodeMemRef node_id m' f
+      m_n = m `M.intersection` m''
+      b3 = S.fromList $ map fst $ M.elems $ m `M.difference` m''
+  in (ifs, m_n, b1 <> b2 <> b3)
+setMainNodeMemRef _ m e = (e, m, S.empty)
 
 defineHuskFunction :: HuskFunction OpenCL -> GC.CompilerM OpenCL () VName
 defineHuskFunction (HuskFunction name parts repl_mem map_res params parts_offset parts_elems node_id src_elems body) = do
@@ -262,8 +273,8 @@ defineHuskFunction (HuskFunction name parts repl_mem map_res params parts_offset
         map_res_src = map nodeCopySrc map_res
         map_res_mem = map nodeCopyMem map_res
         map_res_rel = M.fromList $ zip map_res_src $ zip map_res_src map_res_mem
-        (body', unset_map_res) = setMainNodeMemRef node_id map_res_rel body
-        unset_map_res_src = map fst $ M.elems unset_map_res
+        (body', unset_map_res, blocked_map_res) = setMainNodeMemRef node_id map_res_rel body
+        all_unused_map_res = blocked_map_res <> S.fromList (map fst $ M.elems unset_map_res)
         toCType (ScalarParam _ t) = return [C.cty|$ty:(GC.primTypeToCType t)|]
         toCType (MemParam _ space) = do
           t <- GC.memToCType space
@@ -309,7 +320,7 @@ defineHuskFunction (HuskFunction name parts repl_mem map_res params parts_offset
                   CUDA_SUCCEED(cuMemcpyPeerAsync($id:mem.mem + $exp:offset', ctx->cuda.nodes[0].cu_ctx, $id:src.mem,
                                                  ctx->cuda.nodes[$id:node_id].cu_ctx, $exp:size', 0));
                 |]
-          if src `elem` unset_map_res_src
+          if src `S.member` all_unused_map_res
             then GC.stm copy
             else GC.stm [C.cstm|if ($id:node_id != 0) { $stm:copy }|]
         free mem = GC.unRefMem [C.cexp|$id:mem|] (Space "device")
