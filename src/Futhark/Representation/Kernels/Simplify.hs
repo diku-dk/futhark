@@ -259,7 +259,8 @@ kernelRules = standardRules <>
                        , RuleOp fuseHuskIota
                        , RuleOp removeUnusedHuskInputs
                        , RuleOp mergeRedundantPartitions
-                       , RuleOp internalizeFullyCopiedPartitions]
+                       , RuleOp internalizeFullyCopiedPartitions
+                       , RuleOp removeIdentityHusk]
                        [ RuleOp distributeKernelResults
                        , RuleBasicOp removeUnnecessaryCopy]
 
@@ -348,6 +349,13 @@ internalizeFullyCopiedPartitions _ pat _ (Husk hspace red_op nes ts body)
           slice <- eSliceArray 0 s (toExp parts_offset) (toExp parts_elems)
           mkLetNamesM [paramName p] slice
 internalizeFullyCopiedPartitions _ _ _ _ = cannotSimplify
+
+removeIdentityHusk :: TopDownRuleOp (Wise Kernels)
+removeIdentityHusk _ (Pattern [] pes) _ (Husk hspace red_op _ _ body)
+  | bodyResult body == map (Var . paramName) (hspacePartitions hspace) && isNilFn red_op =
+    let pats = map (\pe -> Pattern [] [pe]) pes
+    in zipWithM_ letBind pats $ map (BasicOp . SubExp . Var) (hspaceSource hspace)
+removeIdentityHusk _ _ _ _ = cannotSimplify
 
 -- If a kernel produces something invariant to the kernel, turn it
 -- into a replicate.

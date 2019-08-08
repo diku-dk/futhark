@@ -26,6 +26,7 @@ module Futhark.Representation.SOACS.SOAC
        , isIdentityLambda
        , composeLambda
        , nilFn
+       , isNilFn
        , scanomapSOAC
        , redomapSOAC
        , scanSOAC
