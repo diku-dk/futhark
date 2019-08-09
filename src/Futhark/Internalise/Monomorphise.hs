@@ -31,12 +31,10 @@ import           Control.Monad.RWS hiding (Sum)
 import           Control.Monad.State
 import           Control.Monad.Writer hiding (Sum)
 import           Data.Bitraversable
-import           Data.Bifunctor
 import           Data.List as L
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe
-import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import           Data.Foldable
 
@@ -165,19 +163,6 @@ sumType cs = foldl' onConstructor mempty $ zip (sortConstrs cs) [0..]
 
         sameModuloAliases x y = toStruct x == toStruct y
 
--- | This carries out record replacements in the alias information of a type.
-transformType :: TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
-transformType t = do
-  rrs <- asks envRecordReplacements
-  let replace (AliasBound v) | Just d <- M.lookup v rrs =
-                                 S.fromList $ map (AliasBound . fst) $ M.elems d
-      replace x = S.singleton x
-  -- As an attempt at an optimisation, only transform the aliases if
-  -- they refer to a variable we have record-replaced.
-  return $ if any ((`M.member` rrs) . aliasVar) $ aliases t
-           then bimap id (mconcat . map replace . S.toList) t
-           else t
-
 -- | Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
 transformExp e@Literal{} = return e
@@ -197,10 +182,9 @@ transformExp (RecordLit fs loc) =
   RecordLit <$> mapM transformField fs <*> pure loc
   where transformField (RecordFieldExplicit name e loc') =
           RecordFieldExplicit name <$> transformExp e <*> pure loc'
-        transformField (RecordFieldImplicit v t _) = do
-          t' <- traverse transformType t
+        transformField (RecordFieldImplicit v t _) =
           transformField $ RecordFieldExplicit (baseName v)
-            (Var (qualName v) t' loc) loc
+          (Var (qualName v) t loc) loc
 
 transformExp (ArrayLit es tp loc) =
   ArrayLit <$> mapM transformExp es <*> pure tp <*> pure loc
@@ -216,24 +200,21 @@ transformExp (Var (QualName qs fname) (Info t) loc) = do
   case maybe_fs of
     Just fs -> do
       let toField (f, (f_v, f_t)) = do
-            f_t' <- transformType f_t
-            let f_v' = Var (qualName f_v) (Info f_t') loc
+            let f_v' = Var (qualName f_v) (Info f_t) loc
             return $ RecordFieldExplicit f f_v' loc
       RecordLit <$> mapM toField (M.toList fs) <*> pure loc
     Nothing -> do
       fname' <- transformFName fname (toStructural t)
-      t' <- transformType t
-      return $ Var (QualName qs fname') (Info t') loc
+      return $ Var (QualName qs fname') (Info t) loc
 
 transformExp (Ascript e tp t loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure t <*> pure loc
 
 transformExp (LetPat pat e1 e2 (Info t) loc) = do
   (pat', rr) <- expandRecordPattern pat
-  t' <- transformType t
   LetPat pat' <$> transformExp e1 <*>
     withRecordReplacements rr (transformExp e2) <*>
-    pure (Info t') <*> pure loc
+    pure (Info t) <*> pure loc
 
 transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
   | any isTypeParam tparams = do
@@ -256,14 +237,12 @@ transformExp (If e1 e2 e3 tp loc) = do
   e1' <- transformExp e1
   e2' <- transformExp e2
   e3' <- transformExp e3
-  tp' <- traverse transformType tp
-  return $ If e1' e2' e3' tp' loc
+  return $ If e1' e2' e3' tp loc
 
 transformExp (Apply e1 e2 d tp loc) = do
   e1' <- transformExp e1
   e2' <- transformExp e2
-  tp' <- traverse transformType tp
-  return $ Apply e1' e2' d tp' loc
+  return $ Apply e1' e2' d tp loc
 
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
@@ -323,8 +302,7 @@ transformExp (LetWith id1 id2 idxs e1 body (Info t) loc) = do
   idxs' <- mapM transformDimIndex idxs
   e1' <- transformExp e1
   body' <- transformExp body
-  t' <- transformType t
-  return $ LetWith id1 id2 idxs' e1' body' (Info t') loc
+  return $ LetWith id1 id2 idxs' e1' body' (Info t) loc
 
 transformExp (Index e0 idxs info loc) =
   Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure info <*> pure loc
@@ -365,7 +343,7 @@ transformExp (Constr name all_es (Info (Scalar (Sum cs))) _) =
 transformExp Constr{} = error "transformExp: invalid constructor type."
 
 transformExp (Match e cs t loc) =
-  Match <$> transformExp e <*> mapM transformCase cs <*> traverse transformType t <*> pure loc
+  Match <$> transformExp e <*> mapM transformCase cs <*> pure t <*> pure loc
 
 defaultValue :: PatternType -> Exp
 defaultValue (Scalar (Prim Bool)) = Literal (BoolValue False) noLoc
@@ -450,7 +428,7 @@ expandRecordPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
 expandRecordPattern (Id v (Info (Scalar (Record fs))) loc) = do
   let fs' = M.toList fs
   (fs_ks, fs_ts) <- fmap unzip $ forM fs' $ \(f, ft) ->
-    (,) <$> newVName (nameToString f) <*> transformType ft
+    (,) <$> newVName (nameToString f) <*> pure ft
   return (RecordPattern (zip (map fst fs')
                              (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
                         loc,
@@ -466,9 +444,8 @@ expandRecordPattern (RecordPattern fields loc) = do
 expandRecordPattern (PatternParens pat loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternParens pat' loc, rr)
-expandRecordPattern (Wildcard t loc) = do
-  t' <- traverse transformType t
-  return (Wildcard t' loc, mempty)
+expandRecordPattern (Wildcard t loc) =
+  return (Wildcard t loc, mempty)
 expandRecordPattern (PatternAscription pat td loc) = do
   (pat', rr) <- expandRecordPattern pat
   return (PatternAscription pat' td loc, rr)
