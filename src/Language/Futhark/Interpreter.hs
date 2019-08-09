@@ -27,6 +27,7 @@ import Data.Bifunctor (bimap)
 import Data.List hiding (break)
 import Data.Maybe
 import qualified Data.Map as M
+import qualified Data.List.NonEmpty as NE
 import Data.Monoid hiding (Sum)
 import Data.Loc
 
@@ -802,7 +803,7 @@ eval env (Constr c es _ _) = do
 
 eval env (Match e cs _ _) = do
   v <- eval env e
-  match v cs
+  match v $ NE.toList cs
   where match _ [] =
           fail "Pattern match failure."
         match v (c:cs') = do

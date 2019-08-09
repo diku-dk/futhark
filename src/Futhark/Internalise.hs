@@ -16,6 +16,7 @@ import Data.Bitraversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List
+import qualified Data.List.NonEmpty as NE
 import Data.Loc
 import Data.Char (chr)
 import Data.Maybe
@@ -669,17 +670,16 @@ internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
 internaliseExp _ e@E.Constr{} =
   fail $ "internaliseExp: unexpected constructor at " ++ locStr (srclocOf e)
 
-internaliseExp desc (E.Match  e cs _ loc) =
+internaliseExp desc (E.Match  e cs _ _) =
   case cs of
-    [CasePat pCase eCase locCase] -> internalisePat desc pCase e eCase locCase (internaliseExp desc)
-    (c:cs') -> do
+    CasePat pCase eCase locCase NE.:| [] -> internalisePat desc pCase e eCase locCase (internaliseExp desc)
+    c NE.:| cs' -> do
       bFalse <- bFalseM
       letTupExp' desc =<< generateCaseIf desc e c bFalse
       where bFalseM = do
               eLast' <- internalisePat desc pLast e eLast locLast internaliseBody
               foldM (\bf c' -> eBody $ return $ generateCaseIf desc e c' bf) eLast' (reverse $ init cs')
             CasePat pLast eLast locLast = last cs'
-    [] -> fail $ "internaliseExp: match with no cases at: " ++ locStr loc
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 

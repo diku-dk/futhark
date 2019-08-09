@@ -29,6 +29,7 @@ import Codec.Binary.UTF8.String (encode)
 import Data.Char (ord)
 import Data.Maybe (fromMaybe, fromJust)
 import Data.Loc hiding (L) -- Lexer has replacements.
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Monoid
 
@@ -723,12 +724,12 @@ LetBody :: { UncheckedExp }
     | LetExp %prec letprec { $1 }
 
 MatchExp :: { UncheckedExp }
-          : match Exp Cases  { let loc = srcspan $1 $>
+          : match Exp Cases  { let loc = srcspan $1 (NE.toList $>)
                                in Match $2 $> NoInfo loc  }
 
-Cases :: { [CaseBase NoInfo Name] }
-       : Case  %prec caseprec { [$1] }
-       | Case Cases           { $1 : $2 }
+Cases :: { NE.NonEmpty (CaseBase NoInfo Name) }
+       : Case  %prec caseprec { $1 NE.:| [] }
+       | Case Cases           { NE.cons $1 $2 }
 
 Case :: { CaseBase NoInfo Name }
       : case CPattern '->' Exp       { let loc = srcspan $1 $>
