@@ -260,6 +260,8 @@ kernelRules = standardRules <>
                        , RuleOp removeUnusedHuskInputs
                        , RuleOp mergeRedundantPartitions
                        , RuleOp internalizeFullyCopiedPartitions
+                       , RuleOp setInvariantHuskMapResults
+                       , RuleOp mergeRedundantHuskMapResults
                        , RuleOp removeIdentityHusk]
                        [ RuleOp distributeKernelResults
                        , RuleBasicOp removeUnnecessaryCopy]
@@ -356,6 +358,43 @@ removeIdentityHusk _ (Pattern [] pes) _ (Husk hspace red_op _ _ body)
     let pats = map (\pe -> Pattern [] [pe]) pes
     in zipWithM_ letBind pats $ map (BasicOp . SubExp . Var) (hspaceSource hspace)
 removeIdentityHusk _ _ _ _ = cannotSimplify
+
+setInvariantHuskMapResults :: TopDownRuleOp (Wise Kernels)
+setInvariantHuskMapResults _ (Pattern [] pes) _ (Husk hspace red_op nes ts body)
+  | (v_res, inv_res) <- partitionEithers $ map invariantMapRes map_res_rel,
+    not $ null inv_res = do
+    let (map_res', map_pes', map_ts') = unzip3 v_res
+        pat = Pattern [] $ red_pes ++ map_pes'
+        ts' = red_ts ++ map_ts'
+        body' = body { bodyResult = red_res ++ map_res' }
+    letBind_ pat $ Op $ Husk hspace red_op nes ts' body'
+    mapM_ (\(pe, s) -> letBind (Pattern [] [pe]) $ BasicOp $ SubExp $ Var s) inv_res
+  where src_parts = zip (hspaceSource hspace) (hspacePartitions hspace)
+        (red_res, map_res) = splitAt (length nes) $ bodyResult body
+        (red_pes, map_pes) = splitAt (length nes) pes
+        (red_ts, map_ts) = splitAt (length nes) ts
+        map_res_rel = map (findPart src_parts) $ zip3 map_res map_pes map_ts
+        findPart ps (res, pe, t) = (res, pe, t, find (\(_,p) -> res == Var (paramName p)) ps)
+        invariantMapRes (r,pe,t,mp) = maybe (Left (r,pe,t)) (\(s,_) -> Right (pe,s)) mp
+setInvariantHuskMapResults _ _ _ _ = cannotSimplify
+
+mergeRedundantHuskMapResults :: TopDownRuleOp (Wise Kernels)
+mergeRedundantHuskMapResults _ (Pattern [] pes) _ (Husk hspace red_op nes ts body)
+  | groups <- groupBy (cmpRes (==)) $ sortBy (cmpRes compare) $ zip3 map_res map_pes map_ts,
+    any (\g -> length g > 1) groups = do
+      let substs = concatMap (\(x:xs) -> map (`zipMergePatterns` x) xs) groups
+          (map_res', map_pes', map_ts') = unzip3 $ map head groups
+          pat = Pattern [] $ red_pes ++ map_pes'
+          ts' = red_ts ++ map_ts'
+          body' = body { bodyResult = red_res ++ map_res' }
+      letBind_ pat $ Op $ Husk hspace red_op nes ts' body'
+      mapM_ (\(pe, s) -> letBind (Pattern [] [pe]) s) substs
+  where (red_res, map_res) = splitAt (length nes) $ bodyResult body
+        (red_pes, map_pes) = splitAt (length nes) pes
+        (red_ts, map_ts) = splitAt (length nes) ts
+        cmpRes op (r1,_,_) (r2,_,_) = r1 `op` r2
+        zipMergePatterns (_,pe1,_) (_,pe2,_) = (pe1, BasicOp $ SubExp $ Var $ patElemName pe2)
+mergeRedundantHuskMapResults _ _ _ _ = cannotSimplify
 
 -- If a kernel produces something invariant to the kernel, turn it
 -- into a replicate.
