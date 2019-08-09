@@ -280,7 +280,7 @@ internaliseExp desc (E.Index e idxs _ loc) = do
 internaliseExp desc (E.TupLit es _) = concat <$> mapM (internaliseExp desc) es
 
 internaliseExp desc (E.RecordLit orig_fields _) =
-  concatMap snd . sortFields . M.unions . reverse <$> mapM internaliseField orig_fields
+  concatMap snd . sortFields . M.unions <$> mapM internaliseField orig_fields
   where internaliseField (E.RecordFieldExplicit name e _) =
           M.singleton name <$> internaliseExp desc e
         internaliseField (E.RecordFieldImplicit name t loc) =
