@@ -229,7 +229,7 @@ transformExp (Ascript e tp t loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure t <*> pure loc
 
 transformExp (LetPat pat e1 e2 (Info t) loc) = do
-  (pat', rr) <- expandRecordPattern pat
+  (pat', rr) <- transformPattern pat
   t' <- transformType t
   LetPat pat' <$> transformExp e1 <*>
     withRecordReplacements rr (transformExp e2) <*>
@@ -387,7 +387,7 @@ defaultValue t@(Scalar (Arrow as _ t1 t2)) = Lambda [pat] e Nothing t' noLoc
 
 transformCase :: Case -> MonoM Case
 transformCase (CasePat p e loc) = do
-  (p', rr) <- expandRecordPattern p
+  (p', rr) <- transformPattern p
   CasePat <$> pure p' <*> withRecordReplacements rr (transformExp e) <*> pure loc
 
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
@@ -446,8 +446,8 @@ unfoldLetFuns (ValBind _ fname _ rettype dim_params params body _ loc : rest) e 
   LetFun fname (dim_params, params, Nothing, rettype, body) e' loc
   where e' = unfoldLetFuns rest e
 
-expandRecordPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
-expandRecordPattern (Id v (Info (Scalar (Record fs))) loc) = do
+transformPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
+transformPattern (Id v (Info (Scalar (Record fs))) loc) = do
   let fs' = M.toList fs
   (fs_ks, fs_ts) <- fmap unzip $ forM fs' $ \(f, ft) ->
     (,) <$> newVName (nameToString f) <*> transformType ft
@@ -455,29 +455,29 @@ expandRecordPattern (Id v (Info (Scalar (Record fs))) loc) = do
                              (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
                         loc,
           M.singleton v $ M.fromList $ zip (map fst fs') $ zip fs_ks fs_ts)
-expandRecordPattern (Id v t loc) = return (Id v t loc, mempty)
-expandRecordPattern (TuplePattern pats loc) = do
-  (pats', rrs) <- unzip <$> mapM expandRecordPattern pats
+transformPattern (Id v t loc) = return (Id v t loc, mempty)
+transformPattern (TuplePattern pats loc) = do
+  (pats', rrs) <- unzip <$> mapM transformPattern pats
   return (TuplePattern pats' loc, mconcat rrs)
-expandRecordPattern (RecordPattern fields loc) = do
+transformPattern (RecordPattern fields loc) = do
   let (field_names, field_pats) = unzip fields
-  (field_pats', rrs) <- unzip <$> mapM expandRecordPattern field_pats
+  (field_pats', rrs) <- unzip <$> mapM transformPattern field_pats
   return (RecordPattern (zip field_names field_pats') loc, mconcat rrs)
-expandRecordPattern (PatternParens pat loc) = do
-  (pat', rr) <- expandRecordPattern pat
+transformPattern (PatternParens pat loc) = do
+  (pat', rr) <- transformPattern pat
   return (PatternParens pat' loc, rr)
-expandRecordPattern (Wildcard t loc) = do
-  t' <- traverse transformType t
-  return (Wildcard t' loc, mempty)
-expandRecordPattern (PatternAscription pat td loc) = do
-  (pat', rr) <- expandRecordPattern pat
+transformPattern (Wildcard (Info t) loc) = do
+  t' <- transformType t
+  return (wildcard t' loc, mempty)
+transformPattern (PatternAscription pat td loc) = do
+  (pat', rr) <- transformPattern pat
   return (PatternAscription pat' td loc, rr)
-expandRecordPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
-expandRecordPattern (PatternConstr name (Info (Scalar (Sum cs))) all_ps _) =
+transformPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
+transformPattern (PatternConstr name (Info (Scalar (Sum cs))) all_ps _) =
   case M.lookup name m of
-    Nothing -> error "expandRecordPattern: malformed constructor value."
+    Nothing -> error "transformPattern: malformed constructor value."
     Just (i, js) -> do
-      (all_ps', rrs) <- unzip <$> mapM expandRecordPattern all_ps
+      (all_ps', rrs) <- unzip <$> mapM transformPattern all_ps
       let pat = TuplePattern (index i : clauses 0 all_ts (zip js all_ps')) noLoc
       return (pat, mconcat rrs)
 
@@ -490,11 +490,17 @@ expandRecordPattern (PatternConstr name (Info (Scalar (Sum cs))) all_ps _) =
           | Just p <- j `lookup` js_to_ps =
               p : clauses (j+1) ts js_to_ps
           | otherwise =
-              Wildcard (Info t) noLoc : clauses (j+1) ts js_to_ps
+              wildcard t noLoc : clauses (j+1) ts js_to_ps
         clauses _ [] _ =
           []
 
-expandRecordPattern PatternConstr{} = error "expandRecordPattern: invalid pattern constructor type."
+transformPattern PatternConstr{} = error "transformPattern: invalid pattern constructor type."
+
+wildcard :: PatternType -> SrcLoc -> Pattern
+wildcard (Scalar (Record fs)) loc =
+  RecordPattern (zip (M.keys fs) $ map ((`Wildcard` loc) . Info) $ M.elems fs) loc
+wildcard t loc =
+  Wildcard (Info t) loc
 
 -- | Monomorphize a polymorphic function at the types given in the instance
 -- list. Monomorphizes the body of the function as well. Returns the fresh name
@@ -512,7 +518,7 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
         substTypesAny (fmap (fmap fromStruct) . (`M.lookup` substs'))
       params' = map (substPattern entry substPatternType) params
 
-  (params'', rrs) <- unzip <$> mapM expandRecordPattern params'
+  (params'', rrs) <- unzip <$> mapM transformPattern params'
 
   mapM_ noticeDims $ rettype : map patternStructType params''
 
