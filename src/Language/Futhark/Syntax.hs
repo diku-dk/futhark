@@ -96,6 +96,7 @@ import           Data.Monoid                      hiding (Sum)
 import           Data.Ord
 import qualified Data.Set                         as S
 import           Data.Traversable
+import qualified Data.List.NonEmpty               as NE
 import           Data.List
 import           Prelude
 
@@ -660,7 +661,7 @@ data ExpBase f vn =
             | Constr Name [ExpBase f vn] (f PatternType) SrcLoc
             -- ^ An n-ary value constructor.
 
-            | Match (ExpBase f vn) [CaseBase f vn] (f PatternType) SrcLoc
+            | Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) (f PatternType) SrcLoc
             -- ^ A match expression.
 
 deriving instance Showable f vn => Show (ExpBase f vn)

@@ -8,6 +8,7 @@ import           Control.Monad.RWS
 import           Data.Bifunctor hiding (first, second)
 import           Data.Foldable
 import           Data.List
+import qualified Data.List.NonEmpty as NE
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -350,10 +351,8 @@ defuncExp Constr{} = error "defuncExp: unexpected constructor."
 defuncExp (Match e cs t loc) = do
   (e', sv) <- defuncExp e
   csPairs  <- mapM (defuncCase sv) cs
-  let cs' = map fst csPairs
-      sv' = case csPairs of
-              []   -> error "Matches must always have at least one case."
-              c':_ -> snd c'
+  let cs' = fmap fst csPairs
+      sv' = snd $ NE.head csPairs
   return (Match e' cs' t loc, sv')
 
 -- | Same as 'defuncExp', except it ignores the static value.

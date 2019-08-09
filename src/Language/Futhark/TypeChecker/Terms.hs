@@ -21,6 +21,7 @@ import Control.Monad.RWS hiding (Sum)
 import qualified Control.Monad.Fail as Fail
 import Data.Char (isAlpha)
 import Data.List
+import qualified Data.List.NonEmpty as NE
 import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M
@@ -1285,30 +1286,28 @@ checkExp (Constr name es NoInfo loc) = do
   let als = mconcat (map aliases ets)
   return $ Constr name es' (Info $ t `addAliases` (<>als)) loc
 
-checkExp (Match _ [] NoInfo loc) =
-  typeError loc "Match expressions must have at least one case."
-
-checkExp (Match e (c:cs) NoInfo loc) =
+checkExp (Match e cs NoInfo loc) =
   sequentially (checkExp e) $ \e' _ -> do
     mt <- expType e'
-    (cs', t) <- checkCases mt c cs
+    (cs', t) <- checkCases mt cs
     zeroOrderType (mkUsage loc "being returned 'match'") "returned from pattern match" t
     return $ Match e' cs' (Info t) loc
 
 checkCases :: PatternType
-           -> CaseBase NoInfo Name
-           -> [CaseBase NoInfo Name]
-           -> TermTypeM ([CaseBase Info VName], PatternType)
-checkCases mt c [] = do
-  (c', t) <- checkCase mt c
-  return ([c'], t)
-checkCases mt c (c2:cs) = do
-  (((c', c_t), (cs', cs_t)), dflow) <-
-    tapOccurences $ checkCase mt c `alternative` checkCases mt c2 cs
-  unify (mkUsage (srclocOf c) "pattern match") (toStructural c_t) (toStructural cs_t)
-  let t = unifyTypeAliases c_t cs_t `addAliases`
-        (`S.difference` S.map AliasBound (allConsumed dflow))
-  return (c':cs', t)
+           -> NE.NonEmpty (CaseBase NoInfo Name)
+           -> TermTypeM (NE.NonEmpty (CaseBase Info VName), PatternType)
+checkCases mt rest_cs =
+  case NE.uncons rest_cs of
+    (c, Nothing) -> do
+      (c', t) <- checkCase mt c
+      return (c' NE.:| [], t)
+    (c, Just cs) -> do
+      (((c', c_t), (cs', cs_t)), dflow) <-
+        tapOccurences $ checkCase mt c `alternative` checkCases mt cs
+      unify (mkUsage (srclocOf c) "pattern match") (toStructural c_t) (toStructural cs_t)
+      let t = unifyTypeAliases c_t cs_t `addAliases`
+              (`S.difference` S.map AliasBound (allConsumed dflow))
+      return (NE.cons c' cs', t)
 
 checkCase :: PatternType -> CaseBase NoInfo Name
           -> TermTypeM (CaseBase Info VName, PatternType)
@@ -1374,8 +1373,8 @@ wildPattern _ _ um = um
 checkUnmatched :: (MonadBreadCrumbs m, MonadTypeChecker m) => Exp -> m ()
 checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
   where checkUnmatched' (Match _ cs _ loc) =
-          let ps = map (\(CasePat p _ _) -> p) cs
-          in case unmatched id ps of
+          let ps = fmap (\(CasePat p _ _) -> p) cs
+          in case unmatched id $ NE.toList ps of
               []  -> return ()
               ps' -> typeError loc $ "Unmatched cases in match expression: \n"
                                      ++ unlines (map (("  " ++) . pretty) ps')

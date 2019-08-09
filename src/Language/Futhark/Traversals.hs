@@ -25,6 +25,7 @@ module Language.Futhark.Traversals
   ) where
 
 import qualified Data.Set                as S
+import qualified Data.List.NonEmpty               as NE
 
 import           Language.Futhark.Syntax
 
@@ -277,6 +278,9 @@ instance ASTMappable a => ASTMappable (Info a) where
   astMap tv = traverse $ astMap tv
 
 instance ASTMappable a => ASTMappable [a] where
+  astMap tv = traverse $ astMap tv
+
+instance ASTMappable a => ASTMappable (NE.NonEmpty a) where
   astMap tv = traverse $ astMap tv
 
 instance (ASTMappable a, ASTMappable b) => ASTMappable (a,b) where
