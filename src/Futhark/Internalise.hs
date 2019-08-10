@@ -671,15 +671,16 @@ internaliseExp _ e@E.Constr{} =
   fail $ "internaliseExp: unexpected constructor at " ++ locStr (srclocOf e)
 
 internaliseExp desc (E.Match  e cs _ _) =
-  case cs of
-    CasePat pCase eCase locCase NE.:| [] -> internalisePat desc pCase e eCase locCase (internaliseExp desc)
-    c NE.:| cs' -> do
-      bFalse <- bFalseM
+  case NE.uncons cs of
+    (CasePat pCase eCase locCase, Nothing) ->
+      internalisePat desc pCase e eCase locCase (internaliseExp desc)
+    (c, Just cs') -> do
+      let CasePat pLast eLast locLast = NE.last cs'
+      bFalse <- do
+        eLast' <- internalisePat desc pLast e eLast locLast internaliseBody
+        foldM (\bf c' -> eBody $ return $ generateCaseIf desc e c' bf) eLast' $
+          reverse $ NE.init cs'
       letTupExp' desc =<< generateCaseIf desc e c bFalse
-      where bFalseM = do
-              eLast' <- internalisePat desc pLast e eLast locLast internaliseBody
-              foldM (\bf c' -> eBody $ return $ generateCaseIf desc e c' bf) eLast' (reverse $ init cs')
-            CasePat pLast eLast locLast = last cs'
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
