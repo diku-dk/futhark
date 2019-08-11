@@ -1706,10 +1706,10 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
                                      "Add a type annotation to disambiguate the type."]
 
         fixOverloaded (_, HasFields fs usage) =
-          typeError usage $ unlines ["Type is ambiguous (must be record with fields {" ++ fs' ++ "}).",
+          typeError usage $ unlines ["Type is ambiguous.  Must be record with fields:",
+                                     unlines $ map field $ M.toList fs,
                                      "Add a type annotation to disambiguate the type."]
-          where fs' = intercalate ", " $ map field $ M.toList fs
-                field (l, t) = pretty l ++ ": " ++ pretty t
+          where field (l, t) = pretty $ indent 2 $ ppr l <> colon <+> align (ppr t)
 
         fixOverloaded (_, HasConstrs cs usage) =
           typeError usage $ unlines [ "Type is ambiguous (must be a sum type with constructors: " ++
