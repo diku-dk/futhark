@@ -77,6 +77,11 @@ transformStm expmap (Let pat aux (Op (SegOp op))) = do
   let stm' = Let pat aux $ Op $ SegOp op'
   addStm stm'
   return $ M.fromList [ (name, stm') | name <- patternNames pat ] <> expmap
+transformStm expmap (Let pat aux (Op (Husk hspace red_op nes ts body))) = do
+  body' <- localScope (scopeOfHuskSpace hspace) $ transformBody expmap body
+  let stm' = Let pat aux $ Op $ Husk hspace red_op nes ts body'
+  addStm stm'
+  return $ M.fromList [ (name, stm') | name <- patternNames pat ] <> expmap
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
   let bnd' = Let pat aux e'
