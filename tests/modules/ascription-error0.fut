@@ -1,6 +1,6 @@
 -- Abstract types must be abstract.
 -- ==
--- error: Type mismatch
+-- error: Types do not match
 
 module type SIG = {
 type t
