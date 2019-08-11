@@ -133,9 +133,15 @@ unify usage orig_t1 orig_t2 = do
           t1' = applySubst (`lookupSubst` constraints) t1
           t2' = applySubst (`lookupSubst` constraints) t2
 
-          failure =
-            typeError (srclocOf usage) $ "Couldn't match expected type `" ++
-            pretty t1' ++ "' with actual type `" ++ pretty t2' ++ "'."
+          failure
+            -- This case is to avoid repeating the types that are also
+            -- shown in the breadcrumb.
+            | t1 == orig_t1, t2 == orig_t2 =
+                typeError (srclocOf usage) "Types do not match."
+            | otherwise =
+                typeError (srclocOf usage) $ "Couldn't match expected type\n" ++
+                indent (pretty t1') ++ "\nwith actual type\n" ++ indent (pretty t2')
+            where indent = intercalate "\n" . map ("  "++) . lines
 
       case (t1', t2') of
         _ | t1' == t2' -> return ()
