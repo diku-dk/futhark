@@ -119,16 +119,20 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
-        braces $ commasep $ map ppField $ M.toList fs
+        oneLine (braces $ commasep fs')
+        <|> braces (mconcat $ punctuate (text "," <> line) fs')
     where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
+          fs' = map ppField $ M.toList fs
   pprPrec p (Arrow _ (Named v) t1 t2) =
     parensIf (p > 0) $
     parens (pprName v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
   pprPrec p (Arrow _ Unnamed t1 t2) =
     parensIf (p > 0) $ pprPrec 1 t1 <+> text "->" <+> ppr t2
   pprPrec _ (Sum cs) =
-    align $ cat $ punctuate (text " |" <> softline) $ map ppConstr $ M.toList cs
+    oneLine (mconcat $ punctuate (text " | ") cs')
+    <|> align (mconcat $ punctuate (text " |" <> line) cs')
     where ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map ppr fs
+          cs' = map ppConstr $ M.toList cs
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr (Array _ u at shape) = ppr u <> ppr shape <> ppr at
