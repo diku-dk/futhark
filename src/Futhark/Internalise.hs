@@ -19,7 +19,6 @@ import Data.List
 import qualified Data.List.NonEmpty as NE
 import Data.Loc
 import Data.Char (chr)
-import Data.Maybe
 
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
@@ -667,20 +666,46 @@ internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
           letBindNames_ [v'] $ I.BasicOp $ I.SubExp v
           return $ I.Var v'
 
-internaliseExp _ e@E.Constr{} =
-  fail $ "internaliseExp: unexpected constructor at " ++ locStr (srclocOf e)
+internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) loc) = do
+  ((ts, constr_map), cm) <- internaliseSumType $ M.map (map E.toStruct) fs
+  mapM_ (uncurry (internaliseDimConstant loc)) cm
+  es' <- concat <$> mapM (internaliseExp "payload") es
 
-internaliseExp desc (E.Match  e cs _ _) =
+  let noExt _ = return $ intConst Int32 0
+  ts' <- instantiateShapes noExt $ map fromDecl ts
+
+  case M.lookup c constr_map of
+    Just (i, js) ->
+      (intConst Int8 (toInteger i):) <$> clauses 0 ts' (zip js es')
+    Nothing ->
+      fail "internaliseExp Constr: missing constructor"
+
+  where clauses j (t:ts) js_to_es
+          | Just e <- j `lookup` js_to_es =
+              (e:) <$> clauses (j+1) ts js_to_es
+          | otherwise = do
+              blank <- letSubExp "zero" =<< eBlank t
+              (blank:) <$> clauses (j+1) ts js_to_es
+        clauses _ [] _ =
+          return []
+
+internaliseExp _ (E.Constr _ _ (Info t) loc) =
+  fail $ "internaliseExp: constructor with type " ++ pretty t ++ " at " ++ locStr loc
+
+internaliseExp desc (E.Match e cs _ _) = do
+  ses <- internaliseExp (desc ++ "_scrutinee") e
   case NE.uncons cs of
-    (CasePat pCase eCase locCase, Nothing) ->
-      internalisePat desc pCase e eCase locCase (internaliseExp desc)
+    (CasePat pCase eCase locCase, Nothing) -> do
+      (_, pertinent) <- generateCond pCase ses
+      internalisePat' pCase pertinent eCase locCase (internaliseExp desc)
     (c, Just cs') -> do
       let CasePat pLast eLast locLast = NE.last cs'
       bFalse <- do
-        eLast' <- internalisePat desc pLast e eLast locLast internaliseBody
-        foldM (\bf c' -> eBody $ return $ generateCaseIf desc e c' bf) eLast' $
+        (_, pertinent) <- generateCond pLast ses
+        eLast' <- internalisePat' pLast pertinent eLast locLast internaliseBody
+        foldM (\bf c' -> eBody $ return $ generateCaseIf ses c' bf) eLast' $
           reverse $ NE.init cs'
-      letTupExp' desc =<< generateCaseIf desc e c bFalse
+      letTupExp' desc =<< generateCaseIf ses c bFalse
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
@@ -747,54 +772,85 @@ internaliseExp _ e@E.ProjectSection{} =
 internaliseExp _ e@E.IndexSection{} =
   fail $ "internaliseExp: Unexpected index section at " ++ locStr (srclocOf e)
 
-andExp :: E.Exp -> E.Exp -> E.Exp
-andExp l r = E.If l r (E.Literal (E.BoolValue False) noLoc) (Info (E.Scalar $ E.Prim E.Bool)) noLoc
+generateCond :: E.Pattern -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
+generateCond orig_p orig_ses = do
+  (cmps, pertinent, _) <- compares orig_p orig_ses
+  cmp <- letSubExp "matches" =<< foldBinOp I.LogAnd (constant True) cmps
+  return (cmp, pertinent)
+  where
+    -- Literals are always primitive values.
+    compares (E.PatternLit e _ _) (se:ses) = do
+      e' <- internaliseExp1 "constant" e
+      I.Prim t' <- subExpType se
+      cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
+      return ([cmp], [se], ses)
 
-eqExp :: E.Exp -> E.Exp -> E.Exp
-eqExp l r = E.BinOp eq (Info ft)
-            (l, sType l) (r, sType r) (Info (E.Scalar $ E.Prim E.Bool)) noLoc
-  where sType e = Info $ toStruct $ E.typeOf e
-        arrow x = Scalar . Arrow S.empty Unnamed x
-        ft      = E.typeOf l `arrow` E.typeOf r `arrow` E.Scalar (E.Prim E.Bool)
-        eq      = qualName $ VName "==" (-1)
+    compares (E.PatternConstr c (Info (E.Scalar (E.Sum fs))) pats _) (se:ses) = do
+      ((payload_ts, m), _) <- internaliseSumType $ M.map (map toStruct) fs
+      case M.lookup c m of
+        Just (i, payload_is) -> do
+          let i' = intConst Int8 $ toInteger i
+          let (payload_ses, ses') = splitAt (length payload_ts) ses
+          cmp <- letSubExp "match_constr" $ I.BasicOp $ I.CmpOp (I.CmpEq int8) i' se
+          (cmps, pertinent, _) <- comparesMany pats $ map (payload_ses!!) payload_is
+          return (cmp : cmps, pertinent, ses')
+        Nothing ->
+          fail "generateCond: missing constructor"
 
-generateCond :: E.Pattern -> E.Exp -> E.Exp
-generateCond p e = foldr andExp (E.Literal (E.BoolValue True) noLoc) conds
-  where conds = mapMaybe ((<*> pure e) . fst) $ generateCond' p
+    compares (E.PatternConstr _ (Info t) _ _) _ =
+      fail $ "generateCond: PatternConstr has nonsensical type: " ++ pretty t
 
-        generateCond' :: E.Pattern -> [(Maybe (E.Exp -> E.Exp), PatternType)]
-        generateCond' (E.TuplePattern ps loc) = generateCond' (E.RecordPattern fs loc)
-          where fs = zipWith (\i p' -> (nameFromString (show i), p')) ([1..] :: [Integer]) ps
-        generateCond' (E.RecordPattern fs _) = concatMap instCond holes
-          where holes = map (\(n, p') -> (generateCond' p', n)) fs
-                field ([],_) = Nothing
-                field ((_, t):_, f) = Just (f, t)
-                t' = Scalar $ Record $ M.fromList $ mapMaybe field holes
-                projectHole _ (Nothing, _) = (Nothing, t')
-                projectHole f (Just condHole, t) =
-                  (Just (\e' -> condHole $ Project f e' (Info t) noLoc), t')
-                instCond (condHoles, f) = map (projectHole f) condHoles
-        generateCond' (E.PatternParens p' _) = generateCond' p'
-        generateCond' (E.Id _ (Info t) _) =
-          [(Nothing, t)]
-        generateCond' (E.Wildcard (Info t) _)=
-          [(Nothing, t)]
-        generateCond' (E.PatternAscription p' _ _) = generateCond' p'
-        generateCond' (E.PatternLit ePat (Info t) _) =
-          [(Just (eqExp ePat), t)]
-        generateCond' E.PatternConstr{} =
-          fail "generateCond: unexpected pattern constructor."
+    compares (E.Id _ t loc) ses =
+      compares (E.Wildcard t loc) ses
 
-generateCaseIf :: String -> E.Exp -> Case -> I.Body -> InternaliseM I.Exp
-generateCaseIf desc e (CasePat p eCase loc) bFail = do
-  eCase' <- internalisePat desc p e eCase loc internaliseBody
-  eIf cond (return eCase') (return bFail)
-  where cond = BasicOp . SubExp <$> internaliseExp1 "cond" (generateCond p e)
+    compares (E.Wildcard (Info t) _) ses = do
+      n <- internalisedTypeSize $ E.toStruct t
+      let (id_ses, rest_ses) = splitAt n ses
+      return ([], id_ses, rest_ses)
+
+    compares (E.PatternParens pat _) ses =
+      compares pat ses
+
+    compares (E.TuplePattern pats _) ses =
+      comparesMany pats ses
+
+    compares (E.RecordPattern fs _) ses =
+      comparesMany (map snd $ E.sortFields $ M.fromList fs) ses
+
+    compares (E.PatternAscription pat _ _) ses =
+      compares pat ses
+
+    compares pat [] =
+      error $ "generateCond: No values left for pattern " ++ pretty pat
+
+    comparesMany [] ses = return ([], [], ses)
+    comparesMany (pat:pats) ses = do
+      (cmps1, pertinent1, ses') <- compares pat ses
+      (cmps2, pertinent2, ses'') <- comparesMany pats ses'
+      return (cmps1 <> cmps2,
+              pertinent1 <> pertinent2,
+              ses'')
+
+generateCaseIf :: [I.SubExp] -> Case -> I.Body -> InternaliseM I.Exp
+generateCaseIf ses (CasePat p eCase loc) bFail = do
+  (cond, pertinent) <- generateCond p ses
+  eCase' <- internalisePat' p pertinent eCase loc internaliseBody
+  eIf (eSubExp cond) (return eCase') (return bFail)
 
 internalisePat :: String -> E.Pattern -> E.Exp
-               -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a) -> InternaliseM a
+               -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a)
+               -> InternaliseM a
 internalisePat desc p e body loc m = do
   ses <- internaliseExp desc' e
+  internalisePat' p ses body loc m
+  where desc' = case S.toList $ E.patternIdents p of
+                  [v] -> baseString $ E.identName v
+                  _ -> desc
+
+internalisePat' :: E.Pattern -> [I.SubExp]
+                -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a)
+                -> InternaliseM a
+internalisePat' p ses body loc m = do
   t <- I.staticShapes <$> mapM I.subExpType ses
   stmPattern p t $ \cm pat_names match -> do
     mapM_ (uncurry (internaliseDimConstant loc)) cm
@@ -802,9 +858,6 @@ internalisePat desc p e body loc m = do
     forM_ (zip pat_names ses') $ \(v,se) ->
       letBindNames_ [v] $ I.BasicOp $ I.SubExp se
     m body
-  where desc' = case S.toList $ E.patternIdents p of
-                  [v] -> baseString $ E.identName v
-                  _ -> desc
 
 internaliseSlice :: SrcLoc
                  -> [SubExp]
