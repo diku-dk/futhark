@@ -11,6 +11,7 @@ module Futhark.Internalise.TypesValues
   , internaliseType
   , internalisePrimType
   , internalisedTypeSize
+  , internaliseSumType
 
   -- * Internalising values
   , internalisePrimValue
@@ -120,11 +121,40 @@ internaliseTypeM orig_t =
       fail "internaliseTypeM: cannot handle type variable."
     E.Scalar E.Arrow{} ->
       fail $ "internaliseTypeM: cannot handle function type: " ++ pretty orig_t
-    E.Scalar (E.Sum cs) ->
-      ((I.Prim $ I.IntType I.Int8):) . concat . concat
-      <$> mapM (mapM internaliseTypeM . snd) (E.sortConstrs cs)
+    E.Scalar (E.Sum cs) -> do
+      (ts, _) <- internaliseConstructors <$>
+                 traverse (fmap concat . mapM internaliseTypeM) cs
+      return $ I.Prim (I.IntType I.Int8) : ts
 
   where internaliseShape = mapM internaliseDim . E.shapeDims
+
+internaliseConstructors :: M.Map Name [I.TypeBase ExtShape Uniqueness]
+                        -> ([I.TypeBase ExtShape Uniqueness],
+                            M.Map Name (Int, [Int]))
+internaliseConstructors cs =
+  foldl' onConstructor mempty $ zip (E.sortConstrs cs) [0..]
+  where onConstructor (ts, mapping) ((c, c_ts), i) =
+          let (_, js, new_ts) =
+                foldl' f (zip ts [0..], mempty, mempty) c_ts
+          in (ts ++ new_ts, M.insert c (i, js) mapping)
+          where f (ts', js, new_ts) t
+                  | primType t,
+                    Just (_, j) <- find ((==t) . fst) ts' =
+                      (delete (t, j) ts',
+                       js ++ [j],
+                       new_ts)
+                  | otherwise =
+                      (ts',
+                       js ++ [length ts + length new_ts],
+                       new_ts ++ [t])
+
+internaliseSumType :: M.Map Name [E.StructType]
+                   -> InternaliseM (([I.TypeBase ExtShape Uniqueness],
+                                     M.Map Name (Int, [Int])),
+                                     ConstParams)
+internaliseSumType cs =
+  runInternaliseTypeM $ internaliseConstructors <$>
+  traverse (fmap concat . mapM internaliseTypeM) cs
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?

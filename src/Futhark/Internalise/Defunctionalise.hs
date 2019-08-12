@@ -4,7 +4,7 @@ module Futhark.Internalise.Defunctionalise
   ( transformProg ) where
 
 import           Control.Arrow (first, second)
-import           Control.Monad.RWS
+import           Control.Monad.RWS hiding (Sum)
 import           Data.Bifunctor hiding (first, second)
 import           Data.Foldable
 import           Data.List
@@ -31,6 +31,9 @@ data StaticVal = Dynamic PatternType
                  -- ^ The 'VName's are shape parameters that are bound
                  -- by the 'Pattern'.
                | RecordSV [(Name, StaticVal)]
+               | SumSV Name [StaticVal] [(Name, [PatternType])]
+                 -- ^ The constructor that is actually present, plus
+                 -- the others that are not.
                | DynamicFun (Exp, StaticVal) StaticVal
                | IntrinsicSV
   deriving (Show)
@@ -72,6 +75,8 @@ restrictEnvTo (NameSet m) = restrict <$> ask
           LambdaSV dims pat t e $ M.map (restrict' u) env
         restrict' u (RecordSV fields) =
           RecordSV $ map (fmap $ restrict' u) fields
+        restrict' u (SumSV c svs fields) =
+          SumSV c (map (restrict' u) svs) fields
         restrict' u (DynamicFun (e, sv1) sv2) =
           DynamicFun (e, restrict' u sv1) $ restrict' u sv2
         restrict' _ IntrinsicSV = IntrinsicSV
@@ -346,7 +351,29 @@ defuncExp (Assert e1 e2 desc loc) = do
   (e2', sv) <- defuncExp e2
   return (Assert e1' e2' desc loc, sv)
 
-defuncExp Constr{} = error "defuncExp: unexpected constructor."
+defuncExp (Constr name es (Info (Scalar (Sum all_fs))) loc) = do
+  (es', svs) <- unzip <$> mapM defuncExp es
+  let sv = SumSV name svs $ M.toList $
+           name `M.delete` M.map (map defuncType) all_fs
+  return (Constr name es' (Info (typeFromSV sv)) loc, sv)
+  where defuncType :: Monoid als =>
+                      TypeBase (DimDecl VName) als
+                   -> TypeBase (DimDecl VName) als
+        defuncType (Array as u t shape) = Array as u (defuncScalar t) shape
+        defuncType (Scalar t) = Scalar $ defuncScalar t
+
+        defuncScalar :: Monoid als =>
+                        ScalarTypeBase (DimDecl VName) als
+                     -> ScalarTypeBase (DimDecl VName) als
+        defuncScalar (Record fs) = Record $ M.map defuncType fs
+        defuncScalar Arrow{} = Record mempty
+        defuncScalar (Sum fs) = Sum $ M.map (map defuncType) fs
+        defuncScalar (Prim t) = Prim t
+        defuncScalar (TypeVar as u tn targs) = TypeVar as u tn targs
+
+defuncExp (Constr name _ (Info t) loc) =
+  error $ "Constructor " ++ pretty name ++ " given type " ++
+  pretty t ++ " at " ++ locStr loc
 
 defuncExp (Match e cs t loc) = do
   (e', sv) <- defuncExp e
@@ -568,7 +595,7 @@ envFromPattern pat = case pat of
   Wildcard _ _            -> mempty
   PatternAscription p _ _ -> envFromPattern p
   PatternLit{}            -> mempty
-  PatternConstr{}         -> error "encFromPattern: unexpected pattern constructor."
+  PatternConstr _ _ ps _  -> foldMap envFromPattern ps
 
 -- | Create an environment that binds the shape parameters.
 envFromShapeParams :: [TypeParamBase VName] -> Env
@@ -637,6 +664,8 @@ typeFromSV (Dynamic tp)           = anyDimShapeAnnotations tp
 typeFromSV (LambdaSV _ _ _ _ env) = typeFromEnv env
 typeFromSV (RecordSV ls)          = Scalar $ Record $ M.fromList $ map (fmap typeFromSV) ls
 typeFromSV (DynamicFun (_, sv) _) = typeFromSV sv
+typeFromSV (SumSV name svs fields) =
+  Scalar $ Sum $ M.insert name (map typeFromSV svs) $ M.fromList fields
 typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
                                          ++ "static value of an intrinsic."
 
@@ -672,7 +701,18 @@ matchPatternSV (Id vn (Info t) _) sv =
 matchPatternSV (Wildcard _ _) _ = mempty
 matchPatternSV (PatternAscription pat _ _) sv = matchPatternSV pat sv
 matchPatternSV PatternLit{} _ = mempty
-matchPatternSV PatternConstr{} _ = error "matchPatternSV: unexpected pattern constructor."
+matchPatternSV (PatternConstr c1 _ ps _) (SumSV c2 ls fs)
+  | c1 == c2 =
+      mconcat $ zipWith matchPatternSV ps ls
+  | Just ts <- lookup c1 fs =
+      mconcat $ zipWith matchPatternSV ps $ map svFromType ts
+  | otherwise =
+      error $ "matchPatternSV: missing constructor in type: " ++ pretty c1
+matchPatternSV (PatternConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
+  | Just ts <- M.lookup c1 fs =
+      mconcat $ zipWith matchPatternSV ps $ map svFromType ts
+  | otherwise =
+      error $ "matchPatternSV: missing constructor in type: " ++ pretty c1
 matchPatternSV pat (Dynamic t) = matchPatternSV pat $ svFromType t
 matchPatternSV pat sv = error $ "Tried to match pattern " ++ pretty pat
                              ++ " with static value " ++ show sv ++ "."
@@ -704,7 +744,13 @@ updatePattern (PatternAscription pat tydecl loc) sv
       PatternAscription (updatePattern pat sv) tydecl loc
   | otherwise = updatePattern pat sv
 updatePattern p@PatternLit{} _ = p
-updatePattern PatternConstr{} _ = error "updatePattern: unexpected pattern constructor."
+updatePattern pat@(PatternConstr c1 (Info t) ps loc) sv@(SumSV _ svs _)
+  | orderZero t = pat
+  | otherwise = PatternConstr c1 (Info t') ps' loc
+  where t' = typeFromSV sv `setUniqueness` Nonunique
+        ps' = zipWith updatePattern ps svs
+updatePattern (PatternConstr c1 _ ps loc) (Dynamic t) =
+  PatternConstr c1 (Info t) ps loc
 updatePattern pat (Dynamic t) = updatePattern pat (svFromType t)
 updatePattern pat sv =
   error $ "Tried to update pattern " ++ pretty pat
@@ -799,7 +845,7 @@ freeVars expr = case expr of
 
   Unsafe e _          -> freeVars e
   Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
-  Constr{}            -> error "freeVars: unexpected constructor."
+  Constr _ es _ _     -> foldMap freeVars es
   Match e cs _ _      -> freeVars e <> foldMap caseFV cs
     where caseFV (CasePat p eCase _) = (names (patternDimNames p) <> freeVars eCase)
                                        `without` patternVars p

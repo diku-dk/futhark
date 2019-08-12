@@ -139,7 +139,8 @@ flattenPattern = flattenPattern'
           flattenPattern' p
         flattenPattern' (E.PatternLit _ t loc) =
           flattenPattern' $ E.Wildcard t loc
-        flattenPattern' (E.PatternConstr _ _ ps _) = concat <$> mapM flattenPattern' ps
+        flattenPattern' (E.PatternConstr _ _ ps _) =
+          concat <$> mapM flattenPattern' ps
 
 type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
 

@@ -32,7 +32,6 @@ import           Control.Monad.State
 import           Control.Monad.Writer hiding (Sum)
 import           Data.Bitraversable
 import           Data.Bifunctor
-import           Data.List as L
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe
@@ -41,7 +40,6 @@ import qualified Data.Sequence as Seq
 import           Data.Foldable
 
 import           Futhark.MonadFreshNames
-import           Futhark.Representation.Primitive (intValue, floatValue)
 import           Language.Futhark
 import           Language.Futhark.Traversals
 import           Language.Futhark.Semantic (TypeBinding(..))
@@ -146,24 +144,6 @@ transformFName fname t
           tell $ Seq.singleton (fname, funbind')
           addLifted fname t fname'
           return fname'
-
--- | Convert a sum type into the components of its expanded type, as
--- well as a mapping from constructors to to their index, and a list
--- of indices for where its fields are located in that tuple.
-sumType :: Eq dim =>
-           M.Map Name [TypeBase dim als]
-        -> ([TypeBase dim als], M.Map Name (Int, [Int]))
-sumType cs = foldl' onConstructor mempty $ zip (sortConstrs cs) [0..]
-  where onConstructor (ts, mapping) ((c, c_ts), i) =
-          let (new_ts, js) = mapAccumL f mempty c_ts
-          in (ts ++ new_ts, M.insert c (i, js) mapping)
-          where f new_ts t
-                  | Just j <- findIndex (sameModuloAliases t) ts =
-                      (new_ts, j)
-                  | otherwise =
-                      (new_ts ++ [t], length ts + length new_ts)
-
-        sameModuloAliases x y = toStruct x == toStruct y
 
 -- | This carries out record replacements in the alias information of a type.
 transformType :: TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
@@ -343,47 +323,11 @@ transformExp (Unsafe e1 loc) =
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 
-transformExp (Constr name all_es (Info (Scalar (Sum cs))) _) =
-  case M.lookup name m of
-    Nothing -> error "transformExp: malformed constructor value."
-    Just (i, js) -> do
-      all_es' <- mapM transformExp all_es
-      return $ TupLit (index i : clauses 0 all_ts (zip js all_es')) noLoc
-
-  where (all_ts, m) = sumType cs
-
-        index i = Literal (UnsignedValue (intValue Int8 i)) noLoc
-
-        clauses j (t:ts) js_to_es
-          | Just e <- j `lookup` js_to_es =
-              e : clauses (j+1) ts js_to_es
-          | otherwise =
-              defaultValue t : clauses (j+1) ts js_to_es
-        clauses _ [] _ =
-          []
-
-transformExp Constr{} = error "transformExp: invalid constructor type."
+transformExp (Constr name all_es t loc) =
+  Constr name <$> mapM transformExp all_es <*> pure t <*> pure loc
 
 transformExp (Match e cs t loc) =
   Match <$> transformExp e <*> mapM transformCase cs <*> traverse transformType t <*> pure loc
-
-defaultValue :: PatternType -> Exp
-defaultValue (Scalar (Prim Bool)) = Literal (BoolValue False) noLoc
-defaultValue (Scalar (Prim (Unsigned s))) = Literal (UnsignedValue (intValue s (0 :: Int))) noLoc
-defaultValue (Scalar (Prim (Signed s))) = Literal (SignedValue (intValue s (0 :: Int))) noLoc
-defaultValue (Scalar (Prim (FloatType s))) = Literal (FloatValue (floatValue s (0 :: Int))) noLoc
-defaultValue (Scalar (Sum cs)) = TupLit (defaultIndex : map defaultValue all_ts) noLoc
-  where (all_ts, _) = sumType cs
-        defaultIndex =  Literal (UnsignedValue (intValue Int8 (0 :: Int))) noLoc
-defaultValue t@Array{} = ArrayLit [] (Info t) noLoc -- TODO: Does the shape need to be preserved?
-defaultValue (Scalar (Record fs)) = RecordLit (map f fs') noLoc
-  where fs' = sortFields fs
-        f (name, t) = RecordFieldExplicit name (defaultValue t) noLoc
-defaultValue (Scalar TypeVar{}) = error "Shouldn't happen."
-defaultValue t@(Scalar (Arrow as _ t1 t2)) = Lambda [pat] e Nothing t' noLoc
-  where pat = Id (VName (nameFromString "x") 5000) (Info t1) noLoc
-        e   = defaultValue t2
-        t'  = Info (as, toStruct t)
 
 transformCase :: Case -> MonoM Case
 transformCase (CasePat p e loc) = do
@@ -473,28 +417,9 @@ transformPattern (PatternAscription pat td loc) = do
   (pat', rr) <- transformPattern pat
   return (PatternAscription pat' td loc, rr)
 transformPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
-transformPattern (PatternConstr name (Info (Scalar (Sum cs))) all_ps _) =
-  case M.lookup name m of
-    Nothing -> error "transformPattern: malformed constructor value."
-    Just (i, js) -> do
-      (all_ps', rrs) <- unzip <$> mapM transformPattern all_ps
-      let pat = TuplePattern (index i : clauses 0 all_ts (zip js all_ps')) noLoc
-      return (pat, mconcat rrs)
-
-  where (all_ts, m) = sumType cs
-
-        index i = PatternLit (Literal (UnsignedValue (intValue Int8 i)) noLoc)
-                  (Info (Scalar $ Prim $ Unsigned Int8)) noLoc
-
-        clauses j (t:ts) js_to_ps
-          | Just p <- j `lookup` js_to_ps =
-              p : clauses (j+1) ts js_to_ps
-          | otherwise =
-              wildcard t noLoc : clauses (j+1) ts js_to_ps
-        clauses _ [] _ =
-          []
-
-transformPattern PatternConstr{} = error "transformPattern: invalid pattern constructor type."
+transformPattern (PatternConstr name t all_ps loc) = do
+  (all_ps', rrs) <- unzip <$> mapM transformPattern all_ps
+  return (PatternConstr name t all_ps' loc, mconcat rrs)
 
 wildcard :: PatternType -> SrcLoc -> Pattern
 wildcard (Scalar (Record fs)) loc =
@@ -513,7 +438,7 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
                toStructural rettype
   (substs, t_shape_params) <- typeSubstsM loc bind_t t'
   let substs' = M.map Subst substs
-      rettype' = removeSumTypes $ substTypesAny (`M.lookup` substs') rettype
+      rettype' = substTypesAny (`M.lookup` substs') rettype
       substPatternType =
         substTypesAny (fmap (fmap fromStruct) . (`M.lookup` substs'))
       params' = map (substPattern entry substPatternType) params
@@ -531,11 +456,11 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
 
   where shape_params = filter (not . isTypeParam) tparams
 
-        noMoreSumTypes = ASTMapper { mapOnExp         = astMap noMoreSumTypes
+        noMoreSumTypes = ASTMapper { mapOnExp         = pure
                                    , mapOnName        = pure
                                    , mapOnQualName    = pure
-                                   , mapOnStructType  = pure . removeSumTypes
-                                   , mapOnPatternType = pure . removeSumTypes
+                                   , mapOnStructType  = pure
+                                   , mapOnPatternType = pure
                                    }
 
         updateExpTypes substs = astMap $ mapper substs
@@ -585,8 +510,8 @@ typeSubstsM loc orig_t1 orig_t2 =
         sub pos (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
           zipWithM_ typeSubstClause (sortConstrs cs1) (sortConstrs cs2)
           where typeSubstClause (_, ts1) (_, ts2) = zipWithM (sub pos) ts1 ts2
-        sub pos t1@(Scalar Sum{}) t2 = sub pos (removeSumTypes t1) t2
-        sub pos t1 t2@(Scalar Sum{}) = sub pos t1 (removeSumTypes t2)
+        sub pos t1@(Scalar Sum{}) t2 = sub pos t1 t2
+        sub pos t1 t2@(Scalar Sum{}) = sub pos t1 t2
 
         sub _ t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", pretty t1, pretty t2]
 
@@ -644,23 +569,11 @@ removeTypeVariablesInType t = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   return $ removeShapeAnnotations $ substituteTypes subs $ vacuousShapeAnnotations t
 
-removeSumTypes :: (Eq dim, Monoid as) => TypeBase dim as -> TypeBase dim as
-removeSumTypes (Scalar (Sum cs)) =
-  tupleRecord $ Scalar (Prim $ Unsigned Int8) :
-  fst (sumType $ M.map (map removeSumTypes) cs)
-removeSumTypes (Scalar (Arrow as v t1 t2)) =
-  Scalar $ Arrow as v (removeSumTypes t1) (removeSumTypes t2)
-removeSumTypes (Scalar (Record fs)) =
-  Scalar $ Record $ M.map removeSumTypes fs
-removeSumTypes (Array as u t shape) =
-  arrayOf (removeSumTypes $ Scalar t) shape u `setAliases` as
-removeSumTypes t = t
-
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   valbind' <- toPolyBinding <$> removeTypeVariables (isJust (valBindEntryPoint valbind)) valbind
   when (isJust $ valBindEntryPoint valbind) $ do
-    t <- fmap removeSumTypes $ removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
+    t <- removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
          (map patternStructType (valBindParams valbind)) $
          unInfo $ valBindRetType valbind
     (name, valbind'') <- monomorphizeBinding True valbind' t
