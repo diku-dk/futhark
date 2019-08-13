@@ -849,8 +849,6 @@ module f64: (float with t = f64 with int_t = u64) = {
 
   let trunc (x: f64) : f64 = i64 (i64m.f64 x)
 
-  let even (x: f64) = i64m.f64 x % 2i64 i64m.== 0i64
-
   let round = intrinsics.round64
 
   let to_bits (x: f64): u64 = u64m.i64 (intrinsics.to_bits64 x)
@@ -959,8 +957,6 @@ module f32: (float with t = f32 with int_t = u32) = {
        else if ix > x then i32 (i i32m.- 1i32) else x
 
   let trunc (x: f32) : f32 = i32 (i32m.f32 x)
-
-  let even (x: f32) = i32m.f32 x % 2i32 i32m.== 0i32
 
   let round = intrinsics.round32
 
