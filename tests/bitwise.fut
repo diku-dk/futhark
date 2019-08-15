@@ -17,11 +17,11 @@
 --   -1732584194
 -- }
 
-let funF(x: i32, y: i32, z: i32): i32 = x & y | ~x & z
+let funF(x: i32, y: i32, z: i32): i32 = x & y | !x & z
 
 let rotateL (x: i32, i: i32): i32 =
   let post = x << i
-  let pre = (x >> i) & (~(0xFFFFFFFF << i)) in
+  let pre = (x >> i) & (!(0xFFFFFFFF << i)) in
   post | pre
 
 let frob(a: i32, b: i32, c: i32, d: i32): (i32, i32, i32, i32) =

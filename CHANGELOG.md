@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+  * The `~` prefix operator has been removed.  `!` has been extended
+    to perform bitwise negation when applied to integers.
+
 ### Changed
 
   * The `--futhark` option for `futhark bench` and `futhark test` now

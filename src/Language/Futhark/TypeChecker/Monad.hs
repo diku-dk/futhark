@@ -402,6 +402,6 @@ topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
           where type_names = S.fromList $ map (nameFromString . pretty) anyPrimType
                 binop_names = S.fromList $ map (nameFromString . pretty)
                               [minBound..(maxBound::BinOp)]
-                unop_names = S.fromList $ map nameFromString ["~", "!"]
+                unop_names = S.fromList $ map nameFromString ["!"]
                 fun_names = S.fromList $ map nameFromString ["shape"]
         atTopLevel _         = False
