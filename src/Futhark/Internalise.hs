@@ -1292,8 +1292,6 @@ isOverloadedFunction qname args loc = do
     handle [x] "unsign_i32" = Just $ toUnsigned I.Int32 x
     handle [x] "unsign_i64" = Just $ toUnsigned I.Int64 x
 
-    handle [x] "sgn" = Just $ signumF x
-    handle [x] "abs" = Just $ absF x
     handle [x] "!" = Just $ complementF x
 
     handle [x] "opaque" = Just $ \desc ->
@@ -1542,26 +1540,6 @@ isOverloadedFunction qname args loc = do
         E.Scalar (E.Prim (E.FloatType float_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
         _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
-
-    signumF e desc = do
-      e' <- internaliseExp1 "signum_arg" e
-      case E.typeOf e of
-        E.Scalar (E.Prim (E.Signed t)) ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp (I.SSignum t) e'
-        E.Scalar (E.Prim (E.Unsigned t)) ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp (I.USignum t) e'
-        _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Signum"
-
-    absF e desc = do
-      e' <- internaliseExp1 "abs_arg" e
-      case E.typeOf e of
-        E.Scalar (E.Prim (E.Signed t)) ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp (I.Abs t) e'
-        E.Scalar (E.Prim (E.Unsigned _)) ->
-          return [e']
-        E.Scalar (E.Prim (E.FloatType t)) ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp (I.FAbs t) e'
-        _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
 
     complementF e desc = do
       e' <- internaliseExp1 "complement_arg" e
