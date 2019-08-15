@@ -755,17 +755,13 @@ reason to put an explicit type ascription there.
 ``! x``
 .......
 
-Logical negation of ``x``, which must be of type ``bool``.
+Logical negation if ``x`` is of type ``bool``.  Bitwise negation if
+``x`` is of integral type.
 
 ``- x``
 .......
 
 Numerical negation of ``x``, which must be of numeric type.
-
-``~ x``
-.......
-
-Bitwise negation of ``x``, which must be of integral type.
 
 ``unsafe e``
 ............

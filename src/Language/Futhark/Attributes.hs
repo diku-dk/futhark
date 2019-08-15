@@ -549,12 +549,6 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
              map primFun (M.toList Primitive.primFuns) ++
 
-             [ ("~", IntrinsicOverloadedFun
-                     (map Signed [minBound..maxBound] ++
-                      map Unsigned [minBound..maxBound])
-                     [Nothing] Nothing)
-             , ("!", IntrinsicMonoFun [Bool] Bool)] ++
-
              [("opaque", IntrinsicOpaque)] ++
 
              map unOpFun Primitive.allUnOps ++
@@ -573,6 +567,13 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                                 map Unsigned [minBound..maxBound] ++
                                 map FloatType [minBound..maxBound] ++
                                 [Bool]) ++
+
+             -- This overrides the ! from Primitive.
+             [ ("!", IntrinsicOverloadedFun
+                     (map Signed [minBound..maxBound] ++
+                      map Unsigned [minBound..maxBound] ++
+                     [Bool])
+                     [Nothing] Nothing) ] ++
 
              -- The reason for the loop formulation is to ensure that we
              -- get a missing case warning if we forget a case.

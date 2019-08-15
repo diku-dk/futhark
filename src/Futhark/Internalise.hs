@@ -1294,8 +1294,7 @@ isOverloadedFunction qname args loc = do
 
     handle [x] "sgn" = Just $ signumF x
     handle [x] "abs" = Just $ absF x
-    handle [x] "!" = Just $ notF x
-    handle [x] "~" = Just $ complementF x
+    handle [x] "!" = Just $ complementF x
 
     handle [x] "opaque" = Just $ \desc ->
       mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
@@ -1564,17 +1563,15 @@ isOverloadedFunction qname args loc = do
           letTupExp' desc $ I.BasicOp $ I.UnOp (I.FAbs t) e'
         _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
 
-    notF e desc = do
-      e' <- internaliseExp1 "not_arg" e
-      letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
-
     complementF e desc = do
       e' <- internaliseExp1 "complement_arg" e
       et <- subExpType e'
       case et of I.Prim (I.IntType t) ->
                    letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
+                 I.Prim I.Bool ->
+                   letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
                  _ ->
-                   fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
+                   fail "Futhark.Internalise.internaliseExp: non-int/bool type in Complement"
 
     scatterF a si v desc = do
       si' <- letExp "write_si" . BasicOp . SubExp =<< internaliseExp1 "write_arg_i" si

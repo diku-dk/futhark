@@ -47,7 +47,7 @@ import Language.Futhark.Syntax (BinOp(..))
 @identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
 @qualidentifier = (@identifier ".")+ @identifier
 
-@unop = ("!"|"~")
+@unop = "!"
 @qualunop = (@identifier ".")+ @unop
 
 @opchar = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^"|".")
