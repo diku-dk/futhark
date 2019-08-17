@@ -42,6 +42,7 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Scope
+import Futhark.Util.Pretty
 
 -- | A set of names.
 newtype Names = Names { unNames :: IM.IntMap VName }
@@ -52,6 +53,9 @@ instance Semigroup Names where
 
 instance Monoid Names where
   mempty = Names mempty
+
+instance Pretty Names where
+  ppr = ppr . namesToList
 
 -- | Does the set of names contain this name?
 nameIn :: VName -> Names -> Bool
