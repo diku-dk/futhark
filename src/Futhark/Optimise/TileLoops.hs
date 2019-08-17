@@ -223,7 +223,8 @@ injectPrelude initial_space variance prestms used (host_stms, tiling, tiledBody)
 
           addStms invariant_prestms
 
-          let live_set = namesToList $ liveSet precomputed_variant_prestms used
+          let live_set = namesToList $ liveSet precomputed_variant_prestms $
+                         used <> freeIn recomputed_variant_prestms
           prelude_arrs <- inScopeOf precomputed_variant_prestms $
                           doPrelude tiling precomputed_variant_prestms live_set
 
