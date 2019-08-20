@@ -1099,6 +1099,12 @@ initialCtx =
                     _ -> error $ "Cannot unsign: " ++ pretty x
       where bool = Just . BoolValue
 
+    def s | "map_stream" `isPrefixOf` s =
+              Just $ fun2t stream
+
+    def s | "reduce_stream" `isPrefixOf` s =
+              Just $ fun3t $ \_ f arg -> stream f arg
+
     def "map" = Just $ fun2t $ \f xs ->
       toArray =<< mapM (apply noLoc mempty f) (fromArray xs)
 
@@ -1110,12 +1116,6 @@ initialCtx =
             x' <- apply2 noLoc mempty f acc x
             return (x':out, x')
       toArray . reverse . fst =<< foldM next ([], ne) (fromArray xs)
-
-    def s | "stream_map" `isPrefixOf` s =
-              Just $ fun2t stream
-
-    def s | "stream_red" `isPrefixOf` s =
-              Just $ fun3t $ \_ f arg -> stream f arg
 
     def "scatter" = Just $ fun3t $ \arr is vs ->
       case arr of

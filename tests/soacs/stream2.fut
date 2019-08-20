@@ -11,4 +11,4 @@ let main (n: i32) =
     if k == 0 then 0
     else let j = unsafe chunk[0]
          in loop x = 0 for i < k do x + i + j
-  in stream_red (+) sumup (iota n)
+  in reduce_stream (+) sumup (iota n)

@@ -10,5 +10,5 @@
 let main (n: i32) =
   let f k (chunk: [k]i32) =
     if k == 0 then [] else map (+chunk[0]+1) (iota k)
-  let xs = stream_map f (iota n)
+  let xs = map_stream f (iota n)
   in (xs[0], xs[n/2], xs[n-1])

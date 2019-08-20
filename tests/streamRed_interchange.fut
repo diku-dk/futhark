@@ -121,7 +121,7 @@ let main (nfeatures: i32) (npoints: i32) (nclusters: i32): [nclusters][nfeatures
   let points = map (\(i: i32): [nfeatures]f32  ->
                      map (*100f32) (map f32.sin (map r32 (map (^i) (iota(nfeatures)))))
                   ) (iota(npoints)) in
-  stream_red (\acc elem -> map2 (\x y -> map2 (+) x y) acc elem)
+  reduce_stream (\acc elem -> map2 (\x y -> map2 (+) x y) acc elem)
              (\chunk (inp: [chunk]([nfeatures]f32,i32)) ->
                  loop acc = replicate nclusters (replicate nfeatures 0.0f32) for i < chunk do
                    let (point, c) = inp[i] in

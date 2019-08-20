@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Lambdas now bind less tightly than type ascription.
 
+  * `stream_map` is now `map_stream` and `stream_red` is now
+    `reduce_stream`.
+
 ### Fixed
 
   * `futhark test` now understands `--no-tuning` as it was always
