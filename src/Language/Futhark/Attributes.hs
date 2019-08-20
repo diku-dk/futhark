@@ -635,24 +635,24 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                 Scalar t_a `arr` Scalar (Prim $ Signed Int32), arr_a] $
                tupleRecord [uarr_a, Array () Unique (Prim $ Signed Int32) (rank 1)]),
 
-              ("stream_map",
+              ("map_stream",
                IntrinsicPolyFun [tp_a, tp_b]
                 [Scalar (Prim $ Signed Int32) `arr` (arr_a `arr` arr_b), arr_a]
                 uarr_b),
 
-              ("stream_map_per",
+              ("map_stream_per",
                IntrinsicPolyFun [tp_a, tp_b]
                 [Scalar (Prim $ Signed Int32) `arr` (arr_a `arr` arr_b), arr_a]
                 uarr_b),
 
-              ("stream_red",
+              ("reduce_stream",
                IntrinsicPolyFun [tp_a, tp_b]
                 [Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
                  Scalar (Prim $ Signed Int32) `arr` (arr_a `arr` Scalar t_b),
                  arr_a] $
                 Scalar t_b),
 
-              ("stream_red_per",
+              ("reduce_stream_per",
                IntrinsicPolyFun [tp_a, tp_b]
                 [Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
                  Scalar (Prim $ Signed Int32) `arr` (arr_a `arr` Scalar t_b),

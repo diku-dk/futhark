@@ -156,7 +156,7 @@ let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a
   let (as', is) = intrinsics.partition (3, p', as)
   in (as'[0:is[0]], as'[is[0]:is[0]+is[1]], as'[is[0]+is[1]:n])
 
--- | `stream_red op f as` splits `as` into chunks, applies `f` to each
+-- | `reduce_stream op f as` splits `as` into chunks, applies `f` to each
 -- of these in parallel, and uses `op` (which must be associative) to
 -- combine the per-chunk results into a final result.  The `i32`
 -- passed to `f` is the size of the chunk.  This SOAC is useful when
@@ -171,38 +171,38 @@ let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let stream_red 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b =
-  intrinsics.stream_red (op, f, as)
+let reduce_stream 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b =
+  intrinsics.reduce_stream (op, f, as)
 
--- | As `stream_red`@term, but the chunks do not necessarily
+-- | As `reduce_stream`@term, but the chunks do not necessarily
 -- correspond to subsequences of the original array (they may be
 -- interleaved).
 --
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let stream_red_per 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b =
-  intrinsics.stream_red_per (op, f, as)
+let reduce_stream_per 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b =
+  intrinsics.reduce_stream_per (op, f, as)
 
--- | Similar to `stream_red`@term, except that each chunk must produce
+-- | Similar to `reduce_stream`@term, except that each chunk must produce
 -- an array *of the same size*.  The per-chunk results are
 -- concatenated.
 --
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let stream_map 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
-  intrinsics.stream_map (f, as)
+let map_stream 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
+  intrinsics.map_stream (f, as)
 
--- | Similar to `stream_map`@term, but the chunks do not necessarily
+-- | Similar to `map_stream`@term, but the chunks do not necessarily
 -- correspond to subsequences of the original array (they may be
 -- interleaved).
 --
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let stream_map_per 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
-  intrinsics.stream_map_per (f, as)
+let map_stream_per 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
+  intrinsics.map_stream_per (f, as)
 
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.

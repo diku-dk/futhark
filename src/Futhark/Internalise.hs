@@ -1490,16 +1490,16 @@ isOverloadedFunction qname args loc = do
       where reduce w scan_lam nes arrs =
               I.Screma w <$> I.scanSOAC scan_lam nes <*> pure arrs
 
-    handle [TupLit [op, f, arr] _] "stream_red" = Just $ \desc ->
+    handle [TupLit [op, f, arr] _] "reduce_stream" = Just $ \desc ->
       internaliseStreamRed desc InOrder Noncommutative op f arr
 
-    handle [TupLit [op, f, arr] _] "stream_red_per" = Just $ \desc ->
+    handle [TupLit [op, f, arr] _] "reduce_stream_per" = Just $ \desc ->
       internaliseStreamRed desc Disorder Commutative op f arr
 
-    handle [TupLit [f, arr] _] "stream_map" = Just $ \desc ->
+    handle [TupLit [f, arr] _] "map_stream" = Just $ \desc ->
       internaliseStreamMap desc InOrder f arr
 
-    handle [TupLit [f, arr] _] "stream_map_per" = Just $ \desc ->
+    handle [TupLit [f, arr] _] "map_stream_per" = Just $ \desc ->
       internaliseStreamMap desc Disorder f arr
 
     handle [TupLit [dest, op, ne, buckets, img] _] "gen_reduce" = Just $ \desc ->
