@@ -15,21 +15,34 @@ def read_image(f = sys.stdin.buffer):
     # Skip binary header.
     f.read(1 # 'b'
            + 1 # version
-           + 1 # rank
-           + 4 # type
-    )
+           )
+    rank = np.int8(struct.unpack('<B', f.read(1))[0])
+    f.read(4 # type
+           )
 
-    height = np.int64(struct.unpack('<Q', f.read(8))[0])
-    width = np.int64(struct.unpack('<Q', f.read(8))[0])
-    array = np.frombuffer(f.read(height*width*4), dtype=np.int32).reshape(height, width)
+    if rank == 2:
+        height = np.int64(struct.unpack('<Q', f.read(8))[0])
+        width = np.int64(struct.unpack('<Q', f.read(8))[0])
+        array = np.frombuffer(f.read(height*width*4), dtype=np.int32).reshape(height, width)
 
-    image=np.empty((height,width,3), dtype=np.int8)
-    image[:,:,0] = (array & 0xFF0000) >> 16
-    image[:,:,1] = (array & 0xFF00) >> 8
-    image[:,:,2] = (array & 0xFF)
+        image=np.empty((height,width,3), dtype=np.int8)
+        image[:,:,0] = (array & 0xFF0000) >> 16
+        image[:,:,1] = (array & 0xFF00) >> 8
+        image[:,:,2] = (array & 0xFF)
 
-    return (width, height, np.reshape(image, (height, width*3)))
+        return (width, height, np.reshape(image, (height, width*3)))
 
+    elif rank == 3:
+        height = np.int64(struct.unpack('<Q', f.read(8))[0])
+        width = np.int64(struct.unpack('<Q', f.read(8))[0])
+        depth = np.int64(struct.unpack('<Q', f.read(8))[0])
+        assert(depth == 3)
+        image = np.frombuffer(f.read(height*width*depth), dtype=np.uint8).reshape(height, width, depth)
+
+        return (width, height, np.reshape(image, (height, width*3)))
+
+    else:
+        raise Error('Invalid input format')
 
 if __name__ == '__main__':
     fname = sys.argv[1]
