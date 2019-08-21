@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-  * The internal representation of parallel constructs have been
+  * The internal representation of parallel constructs has been
     overhauled and many optimisations rewritten.  The overall
     performance impact should be neutral on aggregate, but there may
     be changes for some programs (please report if so).
