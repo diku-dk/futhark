@@ -39,12 +39,13 @@ fi
 
 inrepo stack build
 inrepo make -C docs man
-binpath=$(inrepo stack path --local-install-root)/bin
+bins=$(inrepo stack path --local-install-root)/bin/futhark*
 
 cp -r $skeletondir $tarballdir
 echo "$commit" > $tarballdir/commit-id
 
-cp -r $binpath $tarballdir
+mkdir -p $tarballdir/bin
+cp -r $bins $tarballdir/bin
 cp $repodir/LICENSE $tarballdir/LICENSE
 mkdir -p $tarballdir/share/man/man1/
 cp -r $repodir/docs/_build/man/*.1 $tarballdir/share/man/man1/
