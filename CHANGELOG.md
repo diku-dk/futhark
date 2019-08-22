@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fixes to aliasing of record updates.
+
 ## [0.12.1]
 
 ### Added

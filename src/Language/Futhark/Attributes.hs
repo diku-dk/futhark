@@ -69,6 +69,7 @@ module Language.Futhark.Attributes
   , isTypeParam
   , combineTypeShapes
   , unscopeType
+  , onRecordField
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -362,6 +363,14 @@ unscopeType bound_here t = modifyShapeAnnotations onDim $ t `addAliases` S.map u
         unbind a = a
         onDim (NamedDim qn) | qualLeaf qn `S.member` bound_here = AnyDim
         onDim d = d
+
+-- | Perform some operation on a given record field.
+onRecordField :: (TypeBase dim als -> TypeBase dim als)
+              -> [Name]
+              -> TypeBase dim als -> TypeBase dim als
+onRecordField f (k:ks) (Scalar (Record m)) =
+  Scalar $ Record $ M.adjust (onRecordField f ks) k m
+onRecordField f _ t = f t
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
