@@ -282,7 +282,7 @@ instance Pretty d => Pretty (DimIndex d) where
 
 ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
 ppPattern [] bs = braces $ commasep $ map ppr bs
-ppPattern as bs = braces $ commasep (map ppr as) <> semi <+> commasep (map ppr bs)
+ppPattern as bs = braces $ commasep (map ppr as) <> semi </> commasep (map ppr bs)
 
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets
