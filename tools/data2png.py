@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 #
-# Turn a Futhark value of type [height][width]i32 encoded in the
-# binary data format on stdin into a PNG image to the provided file.
-# Absolutely no error checking is done.
+# Turn a Futhark value encoded in the binary data format on stdin into
+# a PNG image to the provided file.  Very little error checking is
+# done.  The following input types are supported:
+#
+#  [height][width]i32
+#
+#  [height][width][3]i8
+#
 #
 # Requires purepng and Numpy.
 
@@ -13,14 +18,13 @@ import png
 
 def read_image(f = sys.stdin.buffer):
     # Skip binary header.
-    f.read(1 # 'b'
-           + 1 # version
-           )
+    assert f.read(1) == b'b', 'Invalid binary header'
+    assert f.read(1) == b'\2', 'Invalid binary format'
     rank = np.int8(struct.unpack('<B', f.read(1))[0])
-    f.read(4 # type
-           )
+    type = f.read(4)
 
     if rank == 2:
+        assert type in [b' i32', b' u32'], 'Invalid element type {}'.format(type)
         height = np.int64(struct.unpack('<Q', f.read(8))[0])
         width = np.int64(struct.unpack('<Q', f.read(8))[0])
         array = np.frombuffer(f.read(height*width*4), dtype=np.int32).reshape(height, width)
@@ -33,6 +37,7 @@ def read_image(f = sys.stdin.buffer):
         return (width, height, np.reshape(image, (height, width*3)))
 
     elif rank == 3:
+        assert type in [b'  i8', b'  u8'], 'Invalid element type {}'.format(type)
         height = np.int64(struct.unpack('<Q', f.read(8))[0])
         width = np.int64(struct.unpack('<Q', f.read(8))[0])
         depth = np.int64(struct.unpack('<Q', f.read(8))[0])
@@ -42,7 +47,7 @@ def read_image(f = sys.stdin.buffer):
         return (width, height, np.reshape(image, (height, width*3)))
 
     else:
-        raise Error('Invalid input format')
+        raise Error('Invalid input rank {}'.format(rank))
 
 if __name__ == '__main__':
     fname = sys.argv[1]
