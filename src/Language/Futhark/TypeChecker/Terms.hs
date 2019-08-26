@@ -418,6 +418,10 @@ newArrayType loc desc r = do
 
 --- Errors
 
+funName :: Maybe Name -> String
+funName Nothing = "anonymous function"
+funName (Just fname) = "function " ++ quote (pretty fname)
+
 useAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
 useAfterConsume name rloc wloc =
   throwError $ TypeError rloc $
@@ -434,17 +438,17 @@ badLetWithValue loc =
   throwError $ TypeError loc
   "New value for elements in let-with shares data with source array.  This is illegal, as it prevents in-place modification."
 
-returnAliased :: MonadTypeChecker m => Name -> Name -> SrcLoc -> m ()
+returnAliased :: MonadTypeChecker m => Maybe Name -> Name -> SrcLoc -> m ()
 returnAliased fname name loc =
   throwError $ TypeError loc $
-  "Unique return value of function " ++ quote (pretty fname) ++
+  "Unique return value of " ++ funName fname ++
   " is aliased to " ++ quote (pretty name) ++ ", which is not consumed."
 
-uniqueReturnAliased :: MonadTypeChecker m => Name -> SrcLoc -> m a
+uniqueReturnAliased :: MonadTypeChecker m => Maybe Name -> SrcLoc -> m a
 uniqueReturnAliased fname loc =
   throwError $ TypeError loc $
-  "A unique tuple element of return value of `" ++
-  quote (pretty fname) ++ "` is aliased to some other tuple component."
+  "A unique tuple element of return value of " ++
+  funName fname ++ " is aliased to some other tuple component."
 
 --- Basic checking
 
@@ -475,6 +479,9 @@ unifyTypeAliases t1 t2 =
 
 --- General binding.
 
+doNotShadow :: [String]
+doNotShadow = ["&&", "||"]
+
 data InferredType = NoneInferred
                   | Ascribed PatternType
 
@@ -484,6 +491,11 @@ checkPattern' :: UncheckedPattern -> InferredType
 
 checkPattern' (PatternParens p loc) t =
   PatternParens <$> checkPattern' p t <*> pure loc
+
+checkPattern' (Id name _ loc) _
+  | name' `elem` doNotShadow =
+      typeError loc $ "The " ++ name' ++ " operator may not be redefined."
+  where name' = nameToString name
 
 checkPattern' (Id name NoInfo loc) (Ascribed t) = do
   name' <- checkName Term name loc
@@ -966,20 +978,23 @@ checkExp (LetPat pat e body NoInfo loc) =
       return $ LetPat pat' e' body' (Info body_t) loc
 
 checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
-  sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
-    \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
+  sequentially (checkBinding (Just name, maybe_retdecl, tparams, params, e, loc)) $
+  \(tparams', params', maybe_retdecl', rettype, e') closure -> do
 
     closure' <- lexicalClosure params' closure
 
-    let arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
-        ftype = foldr (arrow . patternParam) rettype params'
-        entry = BoundV Local tparams' $ ftype `setAliases` closure'
-        bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope
-                            , scopeNameMap = M.insert (Term, name) (qualName name') $
-                                             scopeNameMap scope }
-    body' <- local bindF $ checkExp body
+    bindSpaced [(Term, name)] $ do
+      name' <- checkName Term name loc
 
-    return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
+      let arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
+          ftype = foldr (arrow . patternParam) rettype params'
+          entry = BoundV Local tparams' $ ftype `setAliases` closure'
+          bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope
+                              , scopeNameMap = M.insert (Term, name) (qualName name') $
+                                               scopeNameMap scope }
+      body' <- local bindF $ checkExp body
+
+      return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
 
 checkExp (LetWith dest src idxes ve body NoInfo loc) = do
   (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
@@ -1662,24 +1677,31 @@ checkFunDef :: (Name, Maybe UncheckedTypeExp,
                 [UncheckedTypeParam], [UncheckedPattern],
                 UncheckedExp, SrcLoc)
             -> TypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
-checkFunDef f = fmap fst $ runTermTypeM $ do
-  (fname, tparams, params, maybe_retdecl, rettype, body) <- checkFunDef' f
+checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
+  fmap fst $ runTermTypeM $ do
+  (tparams', params', maybe_retdecl', rettype', body') <-
+    checkBinding (Just fname, maybe_retdecl, tparams, params, body, loc)
 
   -- Since this is a top-level function, we also resolve overloaded
   -- types, using either defaults or complaining about ambiguities.
   fixOverloadedTypes
 
   -- Then replace all inferred types in the body and parameters.
-  body' <- updateExpTypes body
-  params' <- updateExpTypes params
-  maybe_retdecl' <- traverse updateExpTypes maybe_retdecl
-  rettype' <- normaliseType rettype
+  body'' <- updateExpTypes body'
+  params'' <- updateExpTypes params'
+  maybe_retdecl'' <- traverse updateExpTypes maybe_retdecl'
+  rettype'' <- normaliseType rettype'
 
   -- Check if pattern matches are exhaustive and yield
   -- errors if not.
-  checkUnmatched body'
+  checkUnmatched body''
 
-  return (fname, tparams, params', maybe_retdecl', rettype', body')
+  bindSpaced [(Term, fname)] $ do
+    fname' <- checkName Term fname loc
+    when (nameToString fname `elem` doNotShadow) $
+      typeError loc $ "The " ++ nameToString fname ++ " operator may not be redefined."
+
+    return (fname', tparams', params'', maybe_retdecl'', rettype'', body'')
 
 -- | This is "fixing" as in "setting them", not "correcting them".  We
 -- only make very conservative fixing.
@@ -1720,16 +1742,11 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
 
         fixOverloaded _ = return ()
 
-checkFunDef' :: (Name, Maybe UncheckedTypeExp,
+checkBinding :: (Maybe Name, Maybe UncheckedTypeExp,
                  [UncheckedTypeParam], [UncheckedPattern],
                  UncheckedExp, SrcLoc)
-             -> TermTypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
-checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
-  when (nameToString fname == "&&") $
-    typeError loc "The && operator may not be redefined."
-  when (nameToString fname == "||") $
-    typeError loc "The || operator may not be redefined."
-
+             -> TermTypeM ([TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
+checkBinding (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
   then_substs <- getConstraints
 
   bindingPatternGroup tparams params $ \tparams' params' -> do
@@ -1759,10 +1776,9 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
     let fun_t = foldFunType (map patternStructType params'') rettype
     tparams'' <- letGeneralise tparams' fun_t then_substs
 
-    bindSpaced [(Term, fname)] $ do
-      fname' <- checkName Term fname loc
-      checkGlobalAliases params'' body_t loc
-      return (fname', tparams'', params'', maybe_retdecl'', rettype, body')
+    checkGlobalAliases params'' body_t loc
+
+    return (tparams'', params'', maybe_retdecl'', rettype, body')
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
