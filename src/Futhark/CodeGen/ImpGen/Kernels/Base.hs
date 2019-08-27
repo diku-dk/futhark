@@ -263,6 +263,8 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   sOp Imp.LocalBarrier
 
   case dims' of
+    -- Nonsegmented case (or rather, a single segment) - this we can
+    -- handle directly with a group-level reduction.
     [dim'] -> do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         groupReduce constants dim' (segRedLambda op) tmps
@@ -273,6 +275,9 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
         copyDWIM (patElemName pe) [] (Var arr) [0]
 
     _ -> do
+      -- Segmented intra-group reductions are turned into (regular)
+      -- segmented scans.  It is possible that this can be done
+      -- better, but at least this approach is simple.
       let segment_size = last dims'
           crossesSegment from to = (to-from) .>. (to `rem` segment_size)
 
