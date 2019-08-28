@@ -42,11 +42,12 @@ import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (elements)
 import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
-import Futhark.Util (chunks, maybeNth)
+import Futhark.Util (chunks, maybeNth, mapAccumLM, takeLast)
 
 type CallKernelGen = ImpM ExplicitMemory Imp.HostOp
 type InKernelGen = ImpM ExplicitMemory Imp.KernelOp
@@ -201,6 +202,42 @@ compileGroupSpace constants lvl space = do
 
   dPrimV_ (segFlat space) $ kernelLocalThreadId constants
 
+-- Construct the necessary lock arrays for an intra-group histogram.
+prepareIntraGroupSegGenRed :: KernelConstants
+                           -> Count GroupSize SubExp
+                           -> [GenReduceOp ExplicitMemory]
+                           -> InKernelGen [[Imp.Exp] -> InKernelGen ()]
+prepareIntraGroupSegGenRed constants group_size =
+  fmap snd . mapAccumLM onOp Nothing
+  where
+    onOp l op = do
+
+      let local_subhistos = genReduceDest op
+
+      case (l, atomicUpdateLocking $ genReduceOp op) of
+        (_, Left f) -> return (l, f (Space "local") local_subhistos)
+        (Just l', Right f) -> return (l, f l' (Space "local") local_subhistos)
+        (Nothing, Right f) -> do
+          locks <- newVName "locks"
+          num_locks <- toExp $ unCount group_size
+
+          let dims = map (toExp' int32) $
+                     shapeDims (genReduceShape op) ++
+                     [genReduceWidth op]
+              l' = Locking locks 0 1 0 ((`rem` num_locks) . flattenIndex dims)
+              locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
+
+          locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
+          dArray locks int32 (arrayShape locks_t) $
+            ArrayIn locks_mem $ IxFun.iota $
+            map (primExpFromSubExp int32) $ arrayDims locks_t
+
+          sComment "All locks start out unlocked" $
+            groupCoverSpace constants [kernelGroupSize constants] $ \is ->
+            copyDWIM locks is (intConst Int32 0) []
+
+          return (Just l', f l' (Space "local") local_subhistos)
+
 compileGroupOp :: KernelConstants -> OpCompiler ExplicitMemory Imp.KernelOp
 
 compileGroupOp constants pat (Alloc size space) =
@@ -290,6 +327,47 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
         copyDWIM (patElemName pe) segment_is (Var arr) (segment_is ++ [last dims'-1])
 
+compileGroupOp constants pat (Inner (SegOp (SegGenRed lvl space ops _ kbody))) = do
+  compileGroupSpace constants lvl space
+  let ltids = map fst $ unSegSpace space
+
+  -- We don't need the red_pes, because it is guaranteed by our type
+  -- rules that they occupy the same memory as the destinations for
+  -- the ops.
+  let num_red_res = length ops + sum (map (length . genReduceNeutral) ops)
+      (_red_pes, map_pes) =
+        splitAt num_red_res $ patternElements pat
+
+  ops' <- prepareIntraGroupSegGenRed constants (segGroupSize lvl) ops
+
+  -- Ensure that all locks have been initialised.
+  sOp Imp.LocalBarrier
+
+  sWhen (isActive $ unSegSpace space) $
+    compileStms mempty (kernelBodyStms kbody) $ do
+    let (red_res, map_res) = splitAt num_red_res $ kernelBodyResult kbody
+        (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
+    zipWithM_ (compileThreadResult space constants) map_pes map_res
+
+    let vs_per_op = chunks (map (length . genReduceDest) ops) red_vs
+
+    forM_ (zip4 red_is vs_per_op ops' ops) $
+      \(bin, op_vs, do_op, GenReduceOp dest_w _ _ shape lam) -> do
+        let bin' = toExp' int32 bin
+            dest_w' = toExp' int32 dest_w
+            bin_in_bounds = 0 .<=. bin' .&&. bin' .<. dest_w'
+            bin_is = map (`Imp.var` int32) (init ltids) ++ [bin']
+            vs_params = takeLast (length op_vs) $ lambdaParams lam
+
+        sComment "perform atomic updates" $
+          sWhen bin_in_bounds $ do
+          dLParams $ lambdaParams lam
+          sLoopNest shape $ \is -> do
+            forM_ (zip vs_params op_vs) $ \(p, v) ->
+              copyDWIM (paramName p) [] v is
+            do_op (bin_is ++ is)
+
+  sOp Imp.LocalBarrier
 
 compileGroupOp _ pat _ =
   compilerBugS $ "compileGroupOp: cannot compile rhs of binding " ++ pretty pat
