@@ -175,6 +175,7 @@ compileGroupExp constants (Pattern _ [dest]) (BasicOp (Replicate ds se)) = do
   ds' <- mapM toExp $ shapeDims ds
   groupCoverSpace constants ds' $ \is ->
     copyDWIM (patElemName dest) is se (drop (shapeRank ds) is)
+  sOp Imp.LocalBarrier
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
   n' <- toExp n
   e' <- toExp e
@@ -182,6 +183,7 @@ compileGroupExp constants (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
   groupLoop constants n' $ \i' -> do
     x <- dPrimV "x" $ e' + i' * s'
     copyDWIM (patElemName dest) [i'] (Var x) []
+  sOp Imp.LocalBarrier
 
 compileGroupExp _ dest e =
   defCompileExp dest e
