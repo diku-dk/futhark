@@ -57,7 +57,7 @@ import Futhark.Transform.Rename
 import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
-import Futhark.Pass.ExtractKernels.BlockedKernel hiding (segThread, segThreadCapped)
+import Futhark.Pass.ExtractKernels.BlockedKernel hiding (segThread)
 import Futhark.Pass.ExtractKernels.Interchange
 import Futhark.Util
 import Futhark.Util.Log
@@ -381,7 +381,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
     _ ->
       addStmToKernel bnd acc
 
--- If the reduction can be distributed by itself, we will turn it into a
+-- if the reduction can be distributed by itself, we will turn it into a
 -- segmented reduce.
 --
 -- If the reduction cannot be distributed by itself, it will be
@@ -679,27 +679,36 @@ segmentedGenReduceKernel nest perm cs genred_w ops lam arrs = do
     <$> mapM (fmap kernelInputArray . findInput inputs) dests
     <*> pure nes
     <*> pure op
-  runBinder_ $ addStms =<<
-    genReduceKernel orig_pat ispace inputs cs genred_w ops' lam arrs
+
+  mk_lvl <- asks distSegLevel
+  scope <- askScope
+  lift $ flip runBinderT_ scope $ do
+    -- It is important not to launch unnecessarily many threads for
+    -- histograms, because it may mean we unnecessarily need to reduce
+    -- subhistograms as well.
+    lvl <- mk_lvl (genred_w : map snd ispace) "seggenred" $ NoRecommendation SegNoVirt
+    addStms =<<
+      genReduceKernel lvl orig_pat ispace inputs cs genred_w ops' lam arrs
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = fail "Ill-typed nested GenReduce encountered."
 
 genReduceKernel :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                   Pattern -> [(VName, SubExp)] -> [KernelInput]
+                   SegLevel -> Pattern -> [(VName, SubExp)] -> [KernelInput]
                 -> Certificates -> SubExp -> [SOAC.GenReduceOp SOACS]
                 -> Out.Lambda Out.Kernels -> [VName]
                 -> m KernelsStms
-genReduceKernel orig_pat ispace inputs cs genred_w ops lam arrs = runBinder_ $ do
-  ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) -> do
-    (op', nes', shape) <- determineReduceOp op nes
-    return $ Out.GenReduceOp num_bins dests nes' shape op'
+genReduceKernel lvl orig_pat ispace inputs cs genred_w ops lam arrs =
+  runBinder_ $ do
+    ops' <- forM ops $ \(SOAC.GenReduceOp num_bins dests nes op) -> do
+      (op', nes', shape) <- determineReduceOp op nes
+      return $ Out.GenReduceOp num_bins dests nes' shape op'
 
-  let isDest = flip elem $ concatMap Out.genReduceDest ops'
-      inputs' = filter (not . isDest . kernelInputArray) inputs
+    let isDest = flip elem $ concatMap Out.genReduceDest ops'
+        inputs' = filter (not . isDest . kernelInputArray) inputs
 
-  certifying cs $
-    addStms =<< segGenRed orig_pat genred_w ispace inputs' ops' lam arrs
+    certifying cs $
+      addStms =<< segGenRed lvl orig_pat genred_w ispace inputs' ops' lam arrs
 
 determineReduceOp :: (MonadBinder m, Lore m ~ Out.Kernels) =>
                      Lambda -> [SubExp] -> m (Out.Lambda Out.Kernels, [SubExp], Shape)

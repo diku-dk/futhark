@@ -18,7 +18,7 @@ import Prelude hiding (log)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.Kernels as Out
-import Futhark.Representation.Kernels.Kernel
+import Futhark.Representation.Kernels.Kernel hiding (GenReduceOp)
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass.ExtractKernels.DistributeNests
@@ -203,6 +203,17 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           map_lam' = soacsLambdaToKernels map_lam
       certifying (stmAuxCerts aux) $
         addStms =<< segRed lvl' pat w [SegRedOp comm red_lam' nes mempty] map_lam' arrs [] []
+      parallelMin [w]
+
+
+    Op (GenReduce w ops bucket_fun arrs) -> do
+      ops' <- forM ops $ \(GenReduceOp num_bins dests nes op) -> do
+        (op', nes', shape) <- determineReduceOp op nes
+        return $ Out.GenReduceOp num_bins dests nes' shape op'
+
+      let bucket_fun' = soacsLambdaToKernels bucket_fun
+      certifying (stmAuxCerts aux) $
+        addStms =<< segGenRed lvl' pat w [] [] ops' bucket_fun' arrs
       parallelMin [w]
 
     Op (Stream w (Sequential accs) lam arrs)

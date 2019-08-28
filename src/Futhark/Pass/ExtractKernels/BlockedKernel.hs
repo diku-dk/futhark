@@ -307,14 +307,15 @@ streamMap out_desc mapout_pes w comm fold_lam nes arrs = runBinder $ do
   return (threads, map patElemName redout_pes)
 
 segGenRed :: (MonadFreshNames m, HasScope Kernels m) =>
-             Pattern Kernels
+             SegLevel
+          -> Pattern Kernels
           -> SubExp
           -> [(VName,SubExp)] -- ^ Segment indexes and sizes.
           -> [KernelInput]
           -> [GenReduceOp Kernels]
           -> Lambda Kernels -> [VName]
           -> m (Stms Kernels)
-segGenRed pat arr_w ispace inps ops lam arrs = runBinder_ $ do
+segGenRed lvl pat arr_w ispace inps ops lam arrs = runBinder_ $ do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, arr_w)]
 
@@ -326,11 +327,6 @@ segGenRed pat arr_w ispace inps ops lam arrs = runBinder_ $ do
       letBindNames_ [paramName p] $
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
     map Returns <$> bodyBind (lambdaBody lam)
-
-  -- It is important not to launch unnecessarily many threads for
-  -- histograms, because it may mean we unnecessarily need to reduce
-  -- subhistograms as well.
-  lvl <- segThreadCapped (arr_w : map snd ispace) "seggenred" $ NoRecommendation SegNoVirt
 
   letBind_ pat $ Op $ SegOp $ SegGenRed lvl space ops (lambdaReturnType lam) kbody
 
