@@ -55,6 +55,7 @@ kernelsPipeline =
          , babysitKernels
          , tileLoops
          , unstream
+         , performCSE True
          , simplifyKernels
          , inPlaceLowering
          ]

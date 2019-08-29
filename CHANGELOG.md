@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixes to aliasing of record updates.
 
+  * Fixed unnecessary array duplicates after coalescing optimisations.
+
 ## [0.12.1]
 
 ### Added
