@@ -714,24 +714,6 @@ pullReshape (SOAC.Screma _ form inps) ots
   return (op' inputs', ots')
 pullReshape _ _ = fail "Cannot pull reshape"
 
--- We can make a Replicate output-transform part of a map SOAC simply
--- by adding another dimension to the SOAC.
-pullReplicate :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
-pullReplicate soac@(SOAC.Screma _ form _) ots
-  | Just _ <- isMapSOAC form,
-    SOAC.Replicate cs (Shape [n]) SOAC.:< ots' <- SOAC.viewf ots = do
-      let rettype = SOAC.typeOf soac
-      body <- runBodyBinder $ do
-        names <- certifying cs $
-                 letTupExp "pull_replicate" =<< SOAC.toExp soac
-        resultBodyM $ map Var names
-      let lam = Lambda { lambdaReturnType = rettype
-                       , lambdaBody = body
-                       , lambdaParams = []
-                       }
-      return (SOAC.Screma n (Futhark.mapSOAC lam) [], ots')
-pullReplicate _ _ = fail "Cannot pull replicate"
-
 -- Tie it all together in exposeInputs (for making inputs to a
 -- consumer available) and pullOutputTransforms (for moving
 -- output-transforms of a producer to its inputs instead).
@@ -769,7 +751,7 @@ exposeInputs inpIds ker =
         exposed inp = SOAC.inputArray inp `notElem` inpIds
 
 outputTransformPullers :: [SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)]
-outputTransformPullers = [pullRearrange, pullReshape, pullReplicate]
+outputTransformPullers = [pullRearrange, pullReshape]
 
 pullOutputTransforms :: SOAC -> SOAC.ArrayTransforms
                      -> TryFusion (SOAC, SOAC.ArrayTransforms)
