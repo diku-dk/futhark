@@ -175,7 +175,6 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
                   M.singleton (patElemName pe) elems_per_i
                 mkStmSizeSubst _ = mempty
 
--- Not a hashmap, as SubExp is not hashable.
 type Replacements = M.Map (VName, Slice SubExp) VName
 
 ensureCoalescedAccess :: MonadBinder m =>
