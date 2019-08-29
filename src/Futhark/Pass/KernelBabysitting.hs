@@ -210,7 +210,6 @@ ensureCoalescedAccess expmap thread_space num_threads free_ker_vars isThreadLoca
       -- If so, the access is already coalesced, nothing to do!
       -- (Cosmin's Heuristic.)
       | Just (Let _ _ (BasicOp (Rearrange perm _))) <- M.lookup arr expmap,
-        ---- Just (Just perm) <- nonlinearInMemory arr expmap,
         not $ null perm,
         not $ null thread_gids,
         inner_gid <- last thread_gids,
@@ -219,7 +218,6 @@ ensureCoalescedAccess expmap thread_space num_threads free_ker_vars isThreadLoca
         DimFix inner_ind <- last slice',
         not $ null thread_gids,
         isGidVariant inner_gid inner_ind ->
---        inner_ind == (Var $ inner_gid) ->
           return Nothing
 
       -- We are not fully indexing an array, but the remaining slice
