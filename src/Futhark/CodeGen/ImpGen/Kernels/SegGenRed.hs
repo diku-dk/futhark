@@ -168,23 +168,25 @@ prepareAtomicUpdateGlobal l dests slug =
       let l' = Locking locks 0 1 0 ((`rem` fromIntegral num_locks) . flattenIndex dims)
       return (Just l', f l' (Space "global") dests)
 
-prepareIntermediateArraysGlobal :: Imp.Exp -> [SegGenRedSlug]
+prepareIntermediateArraysGlobal :: Imp.Exp -> [SubExp] -> [SegGenRedSlug]
                                 -> CallKernelGen
                                    [(VName,
                                      [VName],
                                      [Imp.Exp] -> InKernelGen ())]
-prepareIntermediateArraysGlobal num_threads = fmap snd . mapAccumLM onOp Nothing
+prepareIntermediateArraysGlobal num_threads num_segments =
+  fmap snd . mapAccumLM onOp Nothing
   where
     onOp l slug@(SegGenRedSlug op num_subhistos subhisto_info) = do
       -- Determining the degree of cooperation (heuristic):
-      -- coop_lvl   := size of histogram (Cooperation level)
-      -- num_histos := (threads / coop_lvl) (Number of histograms)
+      -- coop_lvl   := size of histogram * product num_segments
+      -- num_histos := (threads / coop_lvl)
       -- threads    := min(physical_threads, segment_size)
       --
       -- Careful to avoid division by zero when genReduceWidth==0.
       num_subhistos <--
         num_threads `quotRoundingUp`
-        BinOpExp (SMax Int32) 1 (toExp' int32 (genReduceWidth op))
+        BinOpExp (SMax Int32) 1 (product $ map (toExp' int32) $
+                                 genReduceWidth op : num_segments)
 
       emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
         Just (int32, Imp.vi32 num_subhistos)
@@ -230,7 +232,7 @@ genRedKernelGlobal map_pes num_groups group_size space slugs kbody = do
       total_w_64 = product space_sizes_64
       num_threads = unCount num_groups' * unCount group_size'
 
-  histograms <- prepareIntermediateArraysGlobal num_threads slugs
+  histograms <- prepareIntermediateArraysGlobal num_threads (init space_sizes) slugs
 
   elems_per_thread_64 <- dPrimV "elems_per_thread_64" $
                          total_w_64 `quotRoundingUp`
