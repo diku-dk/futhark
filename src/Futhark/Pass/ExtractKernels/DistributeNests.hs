@@ -708,7 +708,8 @@ genReduceKernel lvl orig_pat ispace inputs cs genred_w ops lam arrs =
         inputs' = filter (not . isDest . kernelInputArray) inputs
 
     certifying cs $
-      addStms =<< segGenRed lvl orig_pat genred_w ispace inputs' ops' lam arrs
+      addStms =<< traverse renameStm =<<
+      segGenRed lvl orig_pat genred_w ispace inputs' ops' lam arrs
 
 determineReduceOp :: (MonadBinder m, Lore m ~ Out.Kernels) =>
                      Lambda -> [SubExp] -> m (Out.Lambda Out.Kernels, [SubExp], Shape)
