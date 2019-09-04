@@ -54,7 +54,8 @@ findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
                          -> M.Map VName Names
                          -> Names
 findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =
-  iterateNecessary mempty
+  iterateNecessary mempty <>
+  namesFromList (map paramName $ filter usedAfterLoop $ map fst merge_and_res)
   where iterateNecessary prev_necessary
           | necessary == prev_necessary = necessary
           | otherwise                   = iterateNecessary necessary
