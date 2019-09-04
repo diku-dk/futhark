@@ -19,7 +19,7 @@ import Data.Foldable
 import Data.List
 import Data.Maybe
 import qualified Data.Map.Strict as M
-import qualified Data.Set      as S
+import qualified Data.Set        as S
 
 import Futhark.Representation.Kernels
 import Futhark.Transform.Substitute
@@ -257,6 +257,7 @@ kernelRules = standardRules <>
                        , RuleOp mergeSegRedOps
                        , RuleOp redomapIotaToLoop
                        , RuleOp fuseHuskIota
+                       , RuleOp fuseHuskReplicate
                        , RuleOp removeUnusedHuskInputs
                        , RuleOp mergeRedundantPartitions
                        , RuleOp internalizeFullyCopiedPartitions
@@ -292,11 +293,39 @@ fuseHuskIota vtable pat _ (Husk hspace red_op nes ts body)
   where partm = zip (hspacePartitions hspace) (hspacePartitionsMemory hspace)
 fuseHuskIota _ _ _ _ = cannotSimplify
 
+fuseHuskReplicate :: TopDownRuleOp (Wise Kernels)
+fuseHuskReplicate vtable pat _ (Husk hspace red_op nes ts body)
+  | ([(repl_cs, (repl_part, _), repl_shape, repl_val)], zsrc) <- partitionEithers $
+        zipWith (isReplicate vtable) partm (hspaceSource hspace) = do
+      let (partm', src') = unzip zsrc
+          (parts', part_mem') = unzip partm'
+          elems = hspacePartitionElems hspace
+          hspace' = hspace { hspaceSource = src'
+                           , hspacePartitions = parts'
+                           , hspacePartitionsMemory = part_mem'
+                           }
+      body' <- insertStmsM $ localScope (scopeOfHuskSpace hspace) $ certifying repl_cs $ do
+        -- Replicate only by partition size.
+        letBindNames_ [paramName repl_part] $
+          BasicOp $ Replicate (repl_shape `setOuterDim` Var elems) repl_val
+        return body
+      letBind_ pat $ Op $ Husk hspace' red_op nes ts body'
+  where partm = zip (hspacePartitions hspace) (hspacePartitionsMemory hspace)
+fuseHuskReplicate _ _ _ _ = cannotSimplify
+
 isIota :: ST.SymbolTable lore -> a -> VName
        -> Either (Certificates, a, SubExp, SubExp, IntType) (a, VName)
 isIota vtable chunk arr
   | Just (BasicOp (Iota _ x s it), cs) <- ST.lookupExp arr vtable =
       Left (cs, chunk, x, s, it)
+  | otherwise =
+      Right (chunk, arr)
+
+isReplicate :: ST.SymbolTable lore -> a -> VName
+       -> Either (Certificates, a, Shape, SubExp) (a, VName)
+isReplicate vtable chunk arr
+  | Just (BasicOp (Replicate s x), cs) <- ST.lookupExp arr vtable =
+      Left (cs, chunk, s, x)
   | otherwise =
       Right (chunk, arr)
 
