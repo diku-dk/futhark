@@ -306,7 +306,8 @@ callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args
   num_workgroups' <- mapM GC.compileExp num_workgroups
   workgroup_size' <- mapM GC.compileExp workgroup_size
-  launchKernel name num_workgroups' workgroup_size'
+  local_bytes <- foldM localBytes [C.cexp|0|] args
+  launchKernel name num_workgroups' workgroup_size' local_bytes
   where setKernelArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName "kernel_arg" bt e
           GC.stm [C.cstm|
@@ -325,9 +326,14 @@ callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, $exp:num_bytes', NULL));
             |]
 
+        localBytes cur (SharedMemoryKArg num_bytes) = do
+          num_bytes' <- GC.compileExp $ unCount num_bytes
+          return [C.cexp|$exp:cur + $exp:num_bytes'|]
+        localBytes cur _ = return cur
+
 launchKernel :: C.ToExp a =>
-                String -> [a] -> [a] -> GC.CompilerM op s ()
-launchKernel kernel_name num_workgroups workgroup_dims = do
+                String -> [a] -> [a] -> a -> GC.CompilerM op s ()
+launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
   global_work_size <- newVName "global_work_size"
   time_start <- newVName "time_start"
   time_end <- newVName "time_end"
@@ -344,7 +350,7 @@ launchKernel kernel_name num_workgroups workgroup_dims = do
         $stms:(printKernelSize global_work_size)
         fprintf(stderr, "] and local work size [");
         $stms:(printKernelSize local_work_size)
-        fprintf(stderr, "].\n");
+        fprintf(stderr, "]; local memory parameters sum to %d bytes.\n", $exp:local_bytes);
         $id:time_start = get_wall_time();
       }
       OPENCL_SUCCEED_OR_RETURN(
