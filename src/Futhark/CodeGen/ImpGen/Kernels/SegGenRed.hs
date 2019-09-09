@@ -73,16 +73,26 @@ data SegGenRedSlug = SegGenRedSlug
                      , slugAtomicUpdate :: AtomicUpdate ExplicitMemory
                      }
 
--- | Figure out how much memory is needed per histogram, and compute
--- some other auxiliary information.
+histoSpaceUsage :: GenReduceOp ExplicitMemory
+                -> Imp.Count Imp.Bytes Imp.Exp
+histoSpaceUsage op =
+  sum $
+  map (typeSize .
+       (`arrayOfRow` genReduceWidth op) .
+       (`arrayOfShape` genReduceShape op)) $
+  lambdaReturnType $ genReduceOp op
+
+-- | Figure out how much memory is needed per histogram, both
+-- segmented and unsegmented,, and compute some other auxiliary
+-- information.
 computeHistoUsage :: SegSpace
                   -> GenReduceOp ExplicitMemory
-                  -> CallKernelGen (Imp.Count Imp.Bytes Imp.Exp, SegGenRedSlug)
+                  -> CallKernelGen (Imp.Count Imp.Bytes Imp.Exp,
+                                    Imp.Count Imp.Bytes Imp.Exp,
+                                    SegGenRedSlug)
 computeHistoUsage space op = do
   let segment_dims = init $ unSegSpace space
       num_segments = length segment_dims
-
-  op_h <- fmap (sum . map typeSize) $ mapM lookupType $ genReduceDest op
 
   -- Create names for the intermediate array memory blocks,
   -- memory block sizes, arrays, and number of subhistograms.
@@ -127,8 +137,13 @@ computeHistoUsage space op = do
 
       sIf (Imp.var num_subhistos int32 .==. 1) unitHistoCase multiHistoCase
 
-  return (op_h, SegGenRedSlug op num_subhistos subhisto_infos $
-                atomicUpdateLocking $ genReduceOp op)
+  let h = histoSpaceUsage op
+      segmented_h = h * product (map (Imp.bytes . toExp' int32) $ init $ segSpaceDims space)
+
+  return (h,
+          segmented_h,
+          SegGenRedSlug op num_subhistos subhisto_infos $
+          atomicUpdateLocking $ genReduceOp op)
 
 localMemLockArray :: Count GroupSize SubExp -> Type
 localMemLockArray (Count group_size) = Array int32 (Shape [group_size]) NoUniqueness
@@ -172,32 +187,66 @@ prepareAtomicUpdateGlobal l dests slug =
       let l' = Locking locks 0 1 0 ((`rem` fromIntegral num_locks) . flattenIndex dims)
       return (Just l', f l' (Space "global") dests)
 
-prepareIntermediateArraysGlobal :: Imp.Exp -> [SubExp] -> [SegGenRedSlug]
+infoPrints :: Imp.Exp -> VName -> Imp.Exp -> ImpM lore op ()
+infoPrints hist_H hist_M hist_C = do
+  emit $ Imp.DebugPrint "Histogram size (H)" $ Just hist_H
+  emit $ Imp.DebugPrint "Multiplication degree (M)" $ Just $ Imp.vi32 hist_M
+  emit $ Imp.DebugPrint "Cooperation level (C)" $ Just hist_C
+
+prepareIntermediateArraysGlobal :: Imp.Exp -> Imp.Exp -> [SegGenRedSlug]
                                 -> CallKernelGen
                                    [(VName,
                                      [VName],
                                      [Imp.Exp] -> InKernelGen ())]
-prepareIntermediateArraysGlobal num_threads num_segments =
+prepareIntermediateArraysGlobal hist_T hist_N =
   fmap snd . mapAccumLM onOp Nothing
   where
-    onOp l slug@(SegGenRedSlug op num_subhistos subhisto_info _do_op) = do
-      -- Determining the degree of cooperation (heuristic):
-      -- coop_lvl   := size of histogram * product num_segments
-      -- num_histos := (threads / coop_lvl)
-      -- threads    := min(physical_threads, segment_size)
-      --
-      -- Careful to avoid division by zero when genReduceWidth==0.
-      num_subhistos <--
-        num_threads `quotRoundingUp`
-        BinOpExp (SMax Int32) 1 (product $ map (toExp' int32) $
-                                 genReduceWidth op : num_segments)
+    onOp l slug@(SegGenRedSlug op num_subhistos subhisto_info do_op) = do
+      hist_H <- toExp $ genReduceWidth op
 
-      emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
-        Just $ Imp.vi32 num_subhistos
+      hist_u <- dPrimVE "hist_u" $
+                case do_op of
+                  AtomicPrim{} -> 1
+                  _            -> 2
+
+      -- Hardcode a single pass for now.
+      let hist_S = 1
+
+      hist_H_chk <- dPrimVE "hist_H_chk" $
+                    hist_H `quotRoundingUp` hist_S
+
+      hist_k_max <- dPrimVE "hist_k_max" $
+                    hist_N `quotRoundingUp` hist_T
+
+      hist_C <- dPrimVE "hist_C" $
+                Imp.BinOpExp (SMin Int32) hist_T $
+                (hist_u * hist_H_chk) `quotRoundingUp` hist_k_max
+
+      -- Minimal sequential chunking factor.
+      let q_small = 2
+      work_asymp_M_max <- dPrimVE "work_asymp_M_max" $
+                          hist_N `quot` (q_small * hist_H)
+
+      let glb_k_min = 2
+      coop_min <- dPrimVE "coop_min" $
+                  Imp.BinOpExp (SMin Int32) hist_T $ hist_H `quot` glb_k_min
+
+      hist_M_min <- dPrimVE "hist_M_min" $
+                    Imp.BinOpExp (SMax Int32) 1 $
+                    Imp.BinOpExp (SMin Int32) work_asymp_M_max $
+                    hist_T `quot` coop_min
+
+      -- Number of subhistograms per result histogram.
+      hist_M <- dPrimV "hist_M" $
+                Imp.BinOpExp (SMin Int32) hist_M_min $
+                Imp.BinOpExp (SMax Int32) 1 $ hist_T `quot` hist_C
+
+      -- num_subhistos is the variable we use to communicate back.
+      num_subhistos <-- Imp.vi32 hist_M
 
       -- Initialise sub-histograms.
       --
-      -- If num_subhistos is 1, then we just reuse the original
+      -- If hist_M is 1, then we just reuse the original
       -- destination.  The idea is to avoid a copy if we are writing a
       -- small number of values into a very large prior histogram.
       dests <- forM (zip (genReduceDest op) subhisto_info) $ \(dest, info) -> do
@@ -214,13 +263,13 @@ prepareIntermediateArraysGlobal num_threads num_segments =
 
             multiHistoCase = subhistosAlloc info
 
-        sIf (Imp.var num_subhistos int32 .==. 1) unitHistoCase multiHistoCase
+        sIf (Imp.var hist_M int32 .==. 1) unitHistoCase multiHistoCase
 
         return $ subhistosArray info
 
-      (l', do_op) <- prepareAtomicUpdateGlobal l dests slug
+      (l', do_op') <- prepareAtomicUpdateGlobal l dests slug
 
-      return (l', (num_subhistos, dests, do_op))
+      return (l', (hist_M, dests, do_op'))
 
 genRedKernelGlobal :: [PatElem ExplicitMemory]
                    -> Count NumGroups SubExp -> Count GroupSize SubExp
@@ -236,7 +285,11 @@ genRedKernelGlobal map_pes num_groups group_size space slugs kbody = do
       total_w_64 = product space_sizes_64
       num_threads = unCount num_groups' * unCount group_size'
 
-  histograms <- prepareIntermediateArraysGlobal num_threads (init space_sizes) slugs
+  emit $ Imp.DebugPrint "## Using global memory" Nothing
+
+  histograms <-
+    prepareIntermediateArraysGlobal num_threads
+    (toExp' int32 $ last space_sizes) slugs
 
   elems_per_thread_64 <- dPrimVE "elems_per_thread_64" $
                          total_w_64 `quotRoundingUp`
@@ -306,19 +359,23 @@ genRedKernelGlobal map_pes num_groups group_size space slugs kbody = do
                   copyDWIM (paramName p) [] (kernelResultSubExp res) is
                 do_op (bucket_is ++ is)
 
-prepareIntermediateArraysLocal :: Count NumGroups SubExp -> Count GroupSize SubExp
-                               -> VName -> [SegGenRedSlug]
+prepareIntermediateArraysLocal :: VName
+                               -> Count NumGroups SubExp -> Count GroupSize SubExp
+                               -> SegSpace -> [SegGenRedSlug]
                                -> CallKernelGen
                                   [([VName],
                                     KernelConstants ->
                                     InKernelGen ([VName],
                                                  [Imp.Exp] -> InKernelGen ()))]
-prepareIntermediateArraysLocal num_groups group_size num_subhistos_per_group =
+prepareIntermediateArraysLocal num_subhistos_per_group num_groups group_size space =
   fmap snd . mapAccumLM onOp Nothing
   where
     onOp l (SegGenRedSlug op num_subhistos subhisto_info do_op) = do
 
-      num_subhistos <-- toExp' int32 (unCount num_groups)
+      -- For the segmented case we produce a single histogram per group.
+      if length (unSegSpace space) > 1
+        then num_subhistos <-- 1
+        else num_subhistos <-- toExp' int32 (unCount num_groups)
 
       emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
         Just $ Imp.vi32 num_subhistos
@@ -361,13 +418,11 @@ prepareIntermediateArraysLocal num_groups group_size num_subhistos_per_group =
       -- represented as two-dimensional arrays.
       let init_local_subhistos constants = do
             local_subhistos <-
-              forM (genReduceDest op) $ \dest -> do
-                dest_t <- lookupType dest
-
+              forM (genReduceType op) $ \t -> do
                 let sub_local_shape =
-                      Shape [Var num_subhistos_per_group] <> arrayShape dest_t
+                      Shape [Var num_subhistos_per_group] <> arrayShape t
                 sAllocArray "subhistogram_local"
-                  (elemType dest_t) sub_local_shape (Space "local")
+                  (elemType t) sub_local_shape (Space "local")
 
             do_op' <- mk_op constants
 
@@ -380,33 +435,46 @@ prepareIntermediateArraysLocal num_groups group_size num_subhistos_per_group =
 
       return (l', (glob_subhistos, init_local_subhistos))
 
-genRedKernelLocal :: VName
+genRedKernelLocal :: VName -> Count NumGroups Imp.Exp
                   -> [PatElem ExplicitMemory]
                   -> Count NumGroups SubExp -> Count GroupSize SubExp
                   -> SegSpace
                   -> [SegGenRedSlug]
                   -> KernelBody ExplicitMemory
                   -> CallKernelGen ()
-genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size space slugs kbody = do
+genRedKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_groups group_size space slugs kbody = do
   num_groups' <- traverse toExp num_groups
   group_size' <- traverse toExp group_size
-  let num_threads = unCount num_groups' * unCount group_size'
-      (space_is, space_sizes) = unzip $ unSegSpace space
+  let (space_is, space_sizes) = unzip $ unSegSpace space
+      segment_is = init space_is
       segment_dims = init space_sizes
-      num_segments = length segment_dims
-      space_sizes_64 = map (i32Toi64 . toExp' int32) space_sizes
-      total_w_64 = product space_sizes_64
+      (i_in_segment, segment_size) = last $ unSegSpace space
       num_subhistos_per_group = Imp.var num_subhistos_per_group_var int32
+
+  segment_size' <- toExp segment_size
+  max_elems_per_group <- dPrimVE "max_elems_per_group" $
+                         segment_size' `quotRoundingUp` unCount groups_per_segment
 
   emit $ Imp.DebugPrint "Number of local subhistograms per group" $ Just num_subhistos_per_group
 
-  init_histograms <- prepareIntermediateArraysLocal num_groups group_size num_subhistos_per_group_var slugs
+  init_histograms <-
+    prepareIntermediateArraysLocal num_subhistos_per_group_var num_groups group_size space slugs
 
-  elems_per_thread_64 <- dPrimVE "elems_per_thread_64" $
-                         total_w_64 `quotRoundingUp`
-                         ConvOpExp (SExt Int32 Int64) num_threads
+  num_segments <- dPrimVE "num_segments" $
+                  product $ map (toExp' int32) segment_dims
 
-  sKernelThread "seggenred_local" num_groups' group_size' (segFlat space) $ \constants -> do
+  sKernelThread "seggenred_local" num_groups' group_size' (segFlat space) $ \constants ->
+    virtualiseGroups constants SegVirt (unCount groups_per_segment * num_segments) $ \group_id_var -> do
+
+    let group_id = Imp.vi32 group_id_var
+
+    flat_segment_id <- dPrimVE "flat_segment_id" $ group_id `quot` unCount groups_per_segment
+    gid_in_segment <- dPrimVE "gid_in_segment" $ group_id `rem` unCount groups_per_segment
+
+    -- Set segment indices.
+    zipWithM_ dPrimV_ segment_is $
+      unflattenIndex (map (toExp' int32) segment_dims) flat_segment_id
+
     histograms <- forM init_histograms $
                   \(glob_subhistos, init_local_subhistos) -> do
       (local_subhistos, do_op) <- init_local_subhistos constants
@@ -425,10 +493,8 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
         perOp = chunks $ map (length . genReduceDest . slugOp) slugs
 
     let onSlugs f = forM_ (zip slugs histograms) $ \(slug, (dests, _)) -> do
-          let histo_dims =
-                map (toExp' int32) $
-                segment_dims ++
-                genReduceWidth (slugOp slug) : shapeDims (genReduceShape (slugOp slug))
+          let histo_dims = map (toExp' int32) $ genReduceWidth (slugOp slug) :
+                           shapeDims (genReduceShape (slugOp slug))
           histo_size <- dPrimVE "histo_size" $ product histo_dims
           f slug dests histo_dims histo_size
 
@@ -436,31 +502,31 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
           onSlugs $ \slug dests histo_dims histo_size -> do
             let group_hists_size = num_subhistos_per_group * histo_size
             init_per_thread <- dPrimVE "init_per_thread" $
-                               group_hists_size `quotRoundingUp` kernelGroupSize constants
+                               group_hists_size `quotRoundingUp`
+                               kernelGroupSize constants
 
-            forM_ (zip dests (genReduceNeutral $ slugOp slug)) $ \((dest_global, dest_local), ne) ->
-              sFor "local_i" init_per_thread $ \i -> do
-                j <- dPrimVE "j" $
-                     i * kernelGroupSize constants + kernelLocalThreadId constants
-                j_offset <- dPrimVE "j_offset" $
-                            num_subhistos_per_group *
-                            histo_size *
-                            kernelGroupId constants + j
+            forM_ (zip dests (genReduceNeutral $ slugOp slug)) $
+              \((dest_global, dest_local), ne) ->
+                sFor "local_i" init_per_thread $ \i -> do
+                  j <- dPrimVE "j" $
+                       i * kernelGroupSize constants +
+                       kernelLocalThreadId constants
+                  j_offset <- dPrimVE "j_offset" $
+                              num_subhistos_per_group * histo_size * gid_in_segment + j
 
-                local_subhisto_i <- dPrimVE "local_subhisto_i" $ j `quot` histo_size
-                let bucket_is = unflattenIndex histo_dims $ j `rem` histo_size
-                global_subhisto_i <- dPrimVE "global_subhisto_i" $ j_offset `quot` histo_size
+                  local_subhisto_i <- dPrimVE "local_subhisto_i" $ j `quot` histo_size
+                  let bucket_is = unflattenIndex histo_dims $ j `rem` histo_size
+                  global_subhisto_i <- dPrimVE "global_subhisto_i" $ j_offset `quot` histo_size
 
-                sWhen (j .<. group_hists_size) $
-                  f dest_local dest_global (slugOp slug) ne
-                  local_subhisto_i global_subhisto_i
-                  bucket_is
+                  sWhen (j .<. group_hists_size) $
+                    f dest_local dest_global (slugOp slug) ne
+                    local_subhisto_i global_subhisto_i
+                    bucket_is
 
     sComment "initialize histograms in local memory" $
       onAllHistograms $ \dest_local dest_global op ne local_subhisto_i global_subhisto_i bucket_is ->
       sComment "First subhistogram is initialised from global memory; others with neutral element." $ do
-      let global_is = take num_segments bucket_is ++
-                      [0] ++ drop num_segments bucket_is
+      let global_is = map Imp.vi32 segment_is ++ [0] ++ bucket_is
           local_is = local_subhisto_i : bucket_is
       sIf (global_subhisto_i .==. 0)
         (copyDWIM dest_local local_is (Var dest_global) global_is)
@@ -469,31 +535,21 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
 
     sOp Imp.LocalBarrier
 
-    sFor "flat_idx" elems_per_thread_64 $ \flat_idx -> do
-      -- Compute the offset into the input and output.  To this a
-      -- thread can add its local ID to figure out which element it is
-      -- responsible for.  The calculation is done with 64-bit
-      -- integers to avoid overflow, but the final segment indexes are
-      -- 32 bit.
-      offset <- dPrimVE "offset" $
-                (i32Toi64 (kernelGroupId constants) *
-                 (elems_per_thread_64 *
-                  i32Toi64 (kernelGroupSize constants)))
-                + (flat_idx * i32Toi64 (kernelGroupSize constants))
+    -- Where does the input for this group start?
+    group_input_offset <- dPrimVE "group_input_offset" $
+                          max_elems_per_group * gid_in_segment
 
-      j <- dPrimVE "j" $ offset + i32Toi64 (kernelLocalThreadId constants)
+    elems_for_group <- dPrimVE "elems_for_group" $
+                       Imp.BinOpExp (SMin Int32) (segment_size' - group_input_offset)
+                       max_elems_per_group
 
-      -- Construct segment indices.
-      zipWithM_ dPrimV_ space_is $
-        map (ConvOpExp (SExt Int64 Int32)) $ unflattenIndex space_sizes_64 j
+    groupLoop constants elems_for_group $ \ie -> do
+      dPrimV_ i_in_segment $ ie + group_input_offset
 
-      -- We execute the bucket function once and update each histogram serially.
-      -- We apply the bucket function if j=offset+ltid is less than
-      -- num_elements.  This also involves writing to the mapout
-      -- arrays.
-      let input_in_bounds = j .<. total_w_64
+      -- We execute the bucket function once and update each histogram
+      -- serially.  This also involves writing to the mapout arrays.
 
-      sWhen input_in_bounds $ compileStms mempty (kernelBodyStms kbody) $ do
+      compileStms mempty (kernelBodyStms kbody) $ do
 
         sComment "save map-out results" $
           forM_ (zip map_pes map_res) $ \(pe, se) ->
@@ -507,8 +563,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
             let bucket' = toExp' int32 bucket
                 dest_w' = toExp' int32 dest_w
                 bucket_in_bounds = 0 .<=. bucket' .&&. bucket' .<. dest_w'
-                bucket_is = thread_local_subhisto_i :
-                            map Imp.vi32 (init space_is) ++ [bucket']
+                bucket_is = [thread_local_subhisto_i, bucket']
                 vs_params = takeLast (length vs') $ lambdaParams lam
 
             sComment "perform atomic updates" $
@@ -522,7 +577,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
     sOp Imp.LocalBarrier
     sOp Imp.GlobalBarrier
 
-    sComment "Compact the multiple local memory subhistograms to a single subhistogram result" $
+    sComment "Compact the multiple local memory subhistograms to result in global memory" $
       onSlugs $ \slug dests histo_dims histo_size -> do
       bins_per_thread <- dPrimVE "init_per_thread" $
                          histo_size `quotRoundingUp` kernelGroupSize constants
@@ -537,7 +592,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
           dLParams $ lambdaParams $ genReduceOp $ slugOp slug
           let (xparams, yparams) = splitAt (length local_dests) $
                                    lambdaParams $ genReduceOp $ slugOp slug
-              local_dests = map snd dests
+              (global_dests, local_dests) = unzip dests
 
           sComment "Read values from subhistogram 0." $
             forM_ (zip xparams local_dests) $ \(xp, subhisto) ->
@@ -553,30 +608,160 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
                 (Var subhisto) (subhisto_id + 1 : bucket_is)
               compileBody' xparams $ lambdaBody $ genReduceOp $ slugOp slug
 
-          sComment "Put values back in subhistogram 0." $
-            forM_ (zip xparams local_dests) $ \(xp, subhisto) ->
-              copyDWIM
-              subhisto (0:bucket_is)
-              (Var $ paramName xp) []
+          sComment "Put final bucket value in global memory." $ do
+            let global_is = map Imp.vi32 segment_is ++
+                            [group_id `rem` unCount groups_per_segment] ++
+                            bucket_is
+            forM_ (zip xparams global_dests) $ \(xp, global_dest) ->
+              copyDWIM global_dest global_is (Var $ paramName xp) []
 
-    sComment "Copy the first local histogram to global memory." $
-      onSlugs $ \_slug dests histo_dims histo_size -> do
-      write_per_thread <- dPrimVE "write_per_thread" $
-                          histo_size `quotRoundingUp` kernelGroupSize constants
+localMemoryCase :: [PatElem ExplicitMemory]
+                -> Count NumGroups SubExp -> Count GroupSize SubExp
+                -> SegSpace
+                -> Imp.Exp -> Imp.Exp -> Imp.Exp
+                -> [SegGenRedSlug]
+                -> KernelBody ExplicitMemory
+                -> CallKernelGen (Imp.Exp, ImpM ExplicitMemory Imp.HostOp ())
+localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N slugs kbody = do
+  num_groups' <- traverse toExp num_groups
+  group_size' <- traverse toExp group_size
 
-      forM_ dests $ \(dest_global, dest_local) ->
-        sFor "local_i" write_per_thread $ \i -> do
-          j <- dPrimVE "j" $
-               i * kernelGroupSize constants +
-               kernelLocalThreadId constants
+  -- Maximum group size (or actual, in this case).
+  let hist_B = unCount group_size'
+      space_sizes = segSpaceDims space
+      segment_dims = init space_sizes
+      segmented = not $ null segment_dims
 
-          sWhen (j .<. histo_size) $ do
-            let bucket_is = unflattenIndex histo_dims $ j `rem` histo_size
-                global_is = take num_segments bucket_is ++
-                            [kernelGroupId constants] ++
-                            drop num_segments bucket_is
-                local_is = 0 : bucket_is
-            copyDWIM dest_global global_is (Var dest_local) local_is
+  hist_L <- dPrim "hist_L" int32
+  sOp $ Imp.GetSizeMax hist_L Imp.SizeLocalMemory
+
+  let r64 = ConvOpExp (SIToFP Int32 Float64)
+      t64 = ConvOpExp (FPToSI Float64 Int32)
+      f64ceil x = t64 $ FunExp "round64" [x] $ FloatType Float64
+
+  -- M approximation.
+  hist_m' <- dPrimVE "hist_m_prime" $
+             r64 (Imp.BinOpExp (SMin Int32)
+                  (Imp.vi32 hist_L `quot` hist_el_size)
+                  (hist_N `quotRoundingUp` unCount num_groups'))
+             / r64 hist_H
+
+  hist_m <- dPrimVE "hist_m" $
+            Imp.BinOpExp (FMax Float64) (r64 1) hist_m'
+
+  -- FIXME: query the lockstep width at runtime.
+  hist_W <- dPrimVE "hist_W" 32
+
+  -- Assume unit race factor for now.
+  hist_RF <- dPrimVE "hist_RF" $ r64 1
+  hist_RFC <- dPrimVE "hist_RFC" $
+              Imp.BinOpExp (FMin Float64) hist_RF $
+              r64 hist_W * Imp.BinOpExp (FPow Float64) (hist_RF / r64 hist_W) (1.0 / 3.0)
+
+  hist_f' <- dPrimVE "hist_f_prime" $
+             (r64 hist_B * hist_RFC) /
+             (hist_m * hist_m * r64 hist_H)
+
+  let casOp AtomicCAS{} = True
+      casOp _ = False
+      lockOp AtomicLocking{} = True
+      lockOp _ = False
+
+      hwdCase =
+        dPrimVE "hist_M0" $
+        Imp.BinOpExp (SMax Int32) 1 $
+        Imp.BinOpExp (SMin Int32) (t64 hist_m') hist_B
+
+      casCase = do
+        hist_f_cas <- dPrimVE "hist_f_cas" $ Imp.BinOpExp (SMax Int32) 1 $ f64ceil hist_f'
+        dPrimVE "hist_M0" $
+          Imp.BinOpExp (SMax Int32) 1 $
+          Imp.BinOpExp (SMin Int32) (r64 $ hist_m * r64 hist_f_cas) hist_B
+
+      lockCase = do
+        hist_f_cas <- dPrimVE "hist_f_lock" $ Imp.BinOpExp (SMax Int32) 1 $ f64ceil hist_f'
+        dPrimVE "hist_M0" $
+          Imp.BinOpExp (SMax Int32) 1 $
+          Imp.BinOpExp (SMin Int32) (r64 $ hist_m' * r64 hist_f_cas) hist_B
+
+  -- M in the paper, but not adjusted for asymptotic efficiency.
+  hist_M0 <-
+    if any (lockOp . slugAtomicUpdate) slugs
+    then lockCase
+    else if any (casOp . slugAtomicUpdate) slugs
+    then casCase
+    else hwdCase
+
+  -- Minimal sequential chunking factor.
+  let q_small = 2
+
+  hist_Nout <- dPrimVE "hist_Nout" $
+               product $ map (toExp' int32) segment_dims
+
+  hist_Nin <- dPrimVE "hist_Nin" $ toExp' int32 $ last space_sizes
+
+  -- Maximum M for work efficiency.
+  work_asymp_M_max <-
+    if segmented then do
+
+      hist_T <- dPrimVE "hist_T" $ unCount num_groups' * unCount group_size'
+
+      hist_T_hist_min <- dPrimVE "hist_T_hist_min" $
+                         Imp.BinOpExp (SMin Int32) (hist_Nin * hist_Nout) hist_T
+                         `quotRoundingUp`
+                         hist_Nout
+
+      -- Number of groups, rounded up.
+      let r = hist_T_hist_min `quotRoundingUp` hist_B
+
+      dPrimVE "work_asymp_M_max" $ hist_Nin `quot` (r * hist_H)
+
+    else dPrimVE "work_asymp_M_max" $
+         (hist_Nout * hist_N) `quot`
+         ((q_small * unCount num_groups' * hist_H)
+          `quot` genericLength slugs)
+
+  -- Number of subhistograms per result histogram.
+  hist_M <- dPrimV "hist_M" $
+            Imp.BinOpExp (SMin Int32) hist_M0 work_asymp_M_max
+
+  -- hist_M may be zero (which we'll check for below), but we need it
+  -- for some divisions first, so crudely make a nonzero form.
+  let hist_M_nonzero = Imp.BinOpExp (SMax Int32) 1 $ Imp.vi32 hist_M
+
+  -- "Cooperation factor" - the number of threads cooperatively
+  -- working on the same (sub)histogram.
+  hist_C <- dPrimVE "hist_C" $
+            hist_B `quotRoundingUp` hist_M_nonzero
+
+  emit $ Imp.DebugPrint "local hist_M0" $ Just hist_M0
+  emit $ Imp.DebugPrint "local work asymp M max" $ Just work_asymp_M_max
+  emit $ Imp.DebugPrint "local C" $ Just hist_C
+  emit $ Imp.DebugPrint "local B" $ Just hist_B
+  emit $ Imp.DebugPrint "local M" $ Just $ Imp.vi32 hist_M
+
+  -- We only use local memory if the number of updates per histogram
+  -- at least matches the histogram size, as otherwise it is not
+  -- asymptotically efficient.  This mostly matters for the segmented
+  -- case.
+  let pick_local =
+        hist_Nin .>=. hist_H
+        .&&. (Imp.unCount (localMemLockUsage group_size slugs) +
+              hist_H * hist_el_size * Imp.vi32 hist_M
+              .<=. Imp.vi32 hist_L)
+        .&&. hist_C .<=. hist_B
+        .&&. Imp.vi32 hist_M .>. 0
+
+      groups_per_segment
+        | segmented = 1
+        | otherwise = num_groups'
+
+      run = do
+        emit $ Imp.DebugPrint "## Using local memory" Nothing
+        infoPrints hist_H hist_M hist_C
+        genRedKernelLocal hist_M groups_per_segment map_pes num_groups group_size space slugs kbody
+
+  return (pick_local, run)
 
 -- Most of this function is not the histogram part itself, but rather
 -- figuring out whether to use a local or global memory strategy, as
@@ -591,32 +776,44 @@ compileSegGenRed :: Pattern ExplicitMemory
 compileSegGenRed (Pattern _ pes) num_groups group_size space ops kbody = do
   group_size' <- traverse toExp group_size
 
+  dims <- mapM toExp $ segSpaceDims space
+
   let num_red_res = length ops + sum (map (length . genReduceNeutral) ops)
       (all_red_pes, map_pes) = splitAt num_red_res pes
+      segment_size = last dims
 
-  let t = 8 * 4
-      g = unCount group_size'
-  lmax <- dPrim "lmax" int32
-  sOp $ Imp.GetSizeMax lmax Imp.SizeLocalMemory
-
-  (op_hs, slugs) <- unzip <$> mapM (computeHistoUsage space) ops
+  (op_hs, op_seg_hs, slugs) <- unzip3 <$> mapM (computeHistoUsage space) ops
   h <- dPrimVE "h" $ Imp.unCount $ sum op_hs
-  coop <- dPrimVE "coop" $ h `quotRoundingUp` t
+  seg_h <- dPrimVE "seg_h" $ Imp.unCount $ sum op_seg_hs
+
+  -- Maximum group size (or actual, in this case).
+  let hist_B = unCount group_size'
+
+  -- Size of a histogram.
+  hist_H <- dPrimVE "hist_H" $ sum $ map (toExp' int32. genReduceWidth) ops
+
+  -- Size of a single histogram element.
+  hist_el_size <- dPrimVE "hist_el_size" $ h `quotRoundingUp` hist_H
+
+  -- Input elements contributing to each histogram.
+  hist_N <- dPrimVE "hist_N" segment_size
 
   -- Check for emptyness to avoid division-by-zero.
-  sUnless (h .==. 0) $ do
-    lh <- dPrimV "lh" $ (g * t) `quotRoundingUp` h
+  sUnless (seg_h .==. 0) $ do
 
     emit $ Imp.DebugPrint "\n# SegGenRed" Nothing
-    emit $ Imp.DebugPrint "Cooperation level" $ Just coop
-    emit $ Imp.DebugPrint "Memory per set of subhistograms" $ Just h
-    emit $ Imp.DebugPrint "Desired group size" $ Just g
+    emit $ Imp.DebugPrint "Memory per set of subhistograms per segment" $ Just h
+    emit $ Imp.DebugPrint "Memory per set of subhistograms times segments" $ Just seg_h
+    emit $ Imp.DebugPrint "Input elements per histogram (N)" $ Just hist_N
+    emit $ Imp.DebugPrint "Desired group size (B)" $ Just hist_B
+    emit $ Imp.DebugPrint "Histogram size (H)" $ Just hist_H
+    emit $ Imp.DebugPrint "Histogram element size (el_size)" $ Just hist_el_size
 
-    sIf (Imp.unCount (localMemLockUsage group_size slugs) + h * Imp.vi32 lh
-         .<=. Imp.vi32 lmax
-         .&&. coop .<=. g)
-      (genRedKernelLocal lh map_pes num_groups group_size space slugs kbody)
-      (genRedKernelGlobal map_pes num_groups group_size space slugs kbody)
+    (use_local_memory, run_in_local_memory) <-
+      localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N slugs kbody
+
+    sIf use_local_memory run_in_local_memory $
+      genRedKernelGlobal map_pes num_groups group_size space slugs kbody
 
     let pes_per_op = chunks (map (length . genReduceDest) ops) all_red_pes
 
