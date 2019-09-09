@@ -9,6 +9,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.Representation.Kernels.Kernel
        ( GenReduceOp(..)
+       , genReduceType
        , SegRedOp(..)
        , segRedResults
        , KernelBody(..)
@@ -109,9 +110,17 @@ data GenReduceOp lore =
                 -- nest in the SOACS representation), these are the
                 -- logical "dimensions".  This is used to generate
                 -- more efficient code.
-              , genReduceOp :: LambdaT lore
+              , genReduceOp :: Lambda lore
               }
   deriving (Eq, Ord, Show)
+
+-- | The type of a histogram produced by a 'GenReduceOp'.  This can be
+-- different from the type of the 'GenReduceDest's in case we are
+-- dealing with a segmented histogram.
+genReduceType :: GenReduceOp lore -> [Type]
+genReduceType op = map ((`arrayOfRow` genReduceWidth op) .
+                        (`arrayOfShape` genReduceShape op)) $
+                   lambdaReturnType $ genReduceOp op
 
 data SegRedOp lore =
   SegRedOp { segRedComm :: Commutativity
