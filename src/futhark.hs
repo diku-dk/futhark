@@ -30,6 +30,7 @@ import qualified Futhark.CLI.Dataset as Dataset
 import qualified Futhark.CLI.Datacmp as Datacmp
 import qualified Futhark.CLI.Pkg as Pkg
 import qualified Futhark.CLI.Doc as Doc
+import qualified Futhark.CLI.LSP as LSP
 import qualified Futhark.CLI.REPL as REPL
 import qualified Futhark.CLI.Run as Run
 import qualified Futhark.CLI.Misc as Misc
@@ -64,6 +65,8 @@ commands = sortOn fst
 
            , ("check", (Misc.mainCheck, "Type check a program."))
            , ("imports", (Misc.mainImports, "Print all non-library imported Futhark files to standard out and exit."))
+
+           , ("lsp", (LSP.main, "Run LSP server."))
            ]
 
 msg :: String

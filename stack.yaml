@@ -1,4 +1,4 @@
-resolver: lts-13.25
+resolver: lts-14.4
 packages:
 - .
 

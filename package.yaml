@@ -79,6 +79,13 @@ library:
     - haskeline
     - utf8-string >= 1
     - terminal-size >= 0.3
+    - haskell-lsp
+    - rope-utf16-splay >= 0.3
+    - hslogger >= 1.2
+    - unordered-containers >= 0.2
+    - data-default >= 0.7
+    - stm >= 2.5
+    - lens >= 4.17
 
   build-tools:
     - alex
