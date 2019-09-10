@@ -350,7 +350,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
         $stms:(printKernelSize global_work_size)
         fprintf(stderr, "] and local work size [");
         $stms:(printKernelSize local_work_size)
-        fprintf(stderr, "]; local memory parameters sum to %d bytes.\n", $exp:local_bytes);
+        fprintf(stderr, "]; local memory parameters sum to %d bytes.\n", (int)$exp:local_bytes);
         $id:time_start = get_wall_time();
       }
       OPENCL_SUCCEED_OR_RETURN(
