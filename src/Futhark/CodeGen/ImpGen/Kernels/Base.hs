@@ -25,7 +25,8 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , atomicUpdate
   , atomicUpdateLocking
   , Locking(..)
-  , AtomicUpdate
+  , AtomicUpdate(..)
+  , DoAtomicUpdate
   )
   where
 
@@ -217,9 +218,10 @@ prepareIntraGroupSegGenRed constants group_size =
       let local_subhistos = genReduceDest op
 
       case (l, atomicUpdateLocking $ genReduceOp op) of
-        (_, Left f) -> return (l, f (Space "local") local_subhistos)
-        (Just l', Right f) -> return (l, f l' (Space "local") local_subhistos)
-        (Nothing, Right f) -> do
+        (_, AtomicPrim f) -> return (l, f (Space "local") local_subhistos)
+        (_, AtomicCAS f) -> return (l, f (Space "local") local_subhistos)
+        (Just l', AtomicLocking f) -> return (l, f l' (Space "local") local_subhistos)
+        (Nothing, AtomicLocking f) -> do
           locks <- newVName "locks"
           num_locks <- toExp $ unCount group_size
 
@@ -400,26 +402,37 @@ data Locking =
 
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
-type AtomicUpdate lore =
+type DoAtomicUpdate lore =
   Space -> [VName] -> [Imp.Exp] -> ImpM lore Imp.KernelOp ()
+
+-- | The mechanism that will be used for performing the atomic update.
+-- Approximates how efficient it will be.  Ordered from most to least
+-- efficient.
+data AtomicUpdate lore
+  = AtomicPrim (DoAtomicUpdate lore)
+    -- ^ Supported directly by primitive.
+  | AtomicCAS (DoAtomicUpdate lore)
+    -- ^ Can be done by efficient swaps.
+  | AtomicLocking (Locking -> DoAtomicUpdate lore)
+    -- ^ Requires explicit locking.
 
 atomicUpdate :: ExplicitMemorish lore =>
                 Space -> [VName] -> [Imp.Exp] -> Lambda lore -> Locking
              -> ImpM lore Imp.KernelOp ()
 atomicUpdate space arrs bucket lam locking =
   case atomicUpdateLocking lam of
-    Left f -> f space arrs bucket
-    Right f -> f locking space arrs bucket
+    AtomicPrim f -> f space arrs bucket
+    AtomicCAS f -> f space arrs bucket
+    AtomicLocking f -> f locking space arrs bucket
 
 -- | 'atomicUpdate', but where it is explicitly visible whether a
 -- locking strategy is necessary.
 atomicUpdateLocking :: ExplicitMemorish lore =>
-                       Lambda lore
-                    -> Either (AtomicUpdate lore) (Locking -> AtomicUpdate lore)
+                       Lambda lore -> AtomicUpdate lore
 
 atomicUpdateLocking lam
   | Just ops_and_ts <- splitOp lam,
-    all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts = Left $ \space arrs bucket ->
+    all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts = AtomicPrim $ \space arrs bucket ->
   -- If the operator is a vectorised binary operator on 32-bit values,
   -- we can use a particularly efficient implementation. If the
   -- operator has an atomic implementation we use that, otherwise it
@@ -447,12 +460,12 @@ atomicUpdateLocking lam
 atomicUpdateLocking op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
-    primBitSize t == 32 = Left $ \space [arr] bucket -> do
+    primBitSize t == 32 = AtomicCAS $ \space [arr] bucket -> do
       old <- dPrim "old" t
       atomicUpdateCAS space t arr old bucket (paramName xp) $
         compileBody' [xp] $ lambdaBody op
 
-atomicUpdateLocking op = Right $ \locking space arrs bucket -> do
+atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimV "continue" true
 
