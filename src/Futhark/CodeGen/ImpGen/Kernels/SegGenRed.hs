@@ -42,7 +42,6 @@ module Futhark.CodeGen.ImpGen.Kernels.SegGenRed
   where
 
 import Control.Monad.Except
-import Data.Either
 import Data.Maybe
 import Data.List
 
@@ -71,6 +70,7 @@ data SegGenRedSlug = SegGenRedSlug
                      { slugOp :: GenReduceOp ExplicitMemory
                      , slugNumSubhistos :: VName
                      , slugSubhistos :: [SubhistosInfo]
+                     , slugAtomicUpdate :: AtomicUpdate ExplicitMemory
                      }
 
 -- | Figure out how much memory is needed per histogram, and compute
@@ -127,7 +127,8 @@ computeHistoUsage space op = do
 
       sIf (Imp.var num_subhistos int32 .==. 1) unitHistoCase multiHistoCase
 
-  return (op_h, SegGenRedSlug op num_subhistos subhisto_infos)
+  return (op_h, SegGenRedSlug op num_subhistos subhisto_infos $
+                atomicUpdateLocking $ genReduceOp op)
 
 localMemLockArray :: Count GroupSize SubExp -> Type
 localMemLockArray (Count group_size) = Array int32 (Shape [group_size]) NoUniqueness
@@ -136,9 +137,11 @@ localMemLockArray (Count group_size) = Array int32 (Shape [group_size]) NoUnique
 -- memory implementation?
 localMemLockUsage :: Count GroupSize SubExp -> [SegGenRedSlug] -> Imp.Count Imp.Bytes Imp.Exp
 localMemLockUsage group_size slugs =
-  if any (isRight . atomicUpdateLocking . genReduceOp . slugOp) slugs
+  if any (isLocking . slugAtomicUpdate) slugs
   then typeSize $ localMemLockArray group_size
   else 0
+  where isLocking AtomicLocking{} = True
+        isLocking _ = False
 
 prepareAtomicUpdateGlobal :: Maybe Locking -> [VName] -> SegGenRedSlug
                           -> CallKernelGen (Maybe Locking,
@@ -146,10 +149,11 @@ prepareAtomicUpdateGlobal :: Maybe Locking -> [VName] -> SegGenRedSlug
 prepareAtomicUpdateGlobal l dests slug =
   -- We need a separate lock array if the operators are not all of a
   -- particularly simple form that permits pure atomic operations.
-  case (l, atomicUpdateLocking $ genReduceOp $ slugOp slug) of
-    (_, Left f) -> return (l, f (Space "global") dests)
-    (Just l', Right f) -> return (l, f l' (Space "global") dests)
-    (Nothing, Right f) -> do
+  case (l, slugAtomicUpdate slug) of
+    (_, AtomicPrim f) -> return (l, f (Space "global") dests)
+    (_, AtomicCAS f) -> return (l, f (Space "global") dests)
+    (Just l', AtomicLocking f) -> return (l, f l' (Space "global") dests)
+    (Nothing, AtomicLocking f) -> do
       -- The number of locks used here is too low, but since we are
       -- currently forced to inline a huge list, I'm keeping it down
       -- for now.  Some quick experiments suggested that it has little
@@ -176,7 +180,7 @@ prepareIntermediateArraysGlobal :: Imp.Exp -> [SubExp] -> [SegGenRedSlug]
 prepareIntermediateArraysGlobal num_threads num_segments =
   fmap snd . mapAccumLM onOp Nothing
   where
-    onOp l slug@(SegGenRedSlug op num_subhistos subhisto_info) = do
+    onOp l slug@(SegGenRedSlug op num_subhistos subhisto_info _do_op) = do
       -- Determining the degree of cooperation (heuristic):
       -- coop_lvl   := size of histogram * product num_segments
       -- num_histos := (threads / coop_lvl)
@@ -313,7 +317,7 @@ prepareIntermediateArraysLocal :: Count NumGroups SubExp -> Count GroupSize SubE
 prepareIntermediateArraysLocal num_groups group_size num_subhistos_per_group =
   fmap snd . mapAccumLM onOp Nothing
   where
-    onOp l (SegGenRedSlug op num_subhistos subhisto_info) = do
+    onOp l (SegGenRedSlug op num_subhistos subhisto_info do_op) = do
 
       num_subhistos <-- toExp' int32 (unCount num_groups)
 
@@ -326,10 +330,11 @@ prepareIntermediateArraysLocal num_groups group_size num_subhistos_per_group =
       -- Also, we want only one locks array, no matter how many
       -- operators need locking.
       (l', mk_op) <-
-        case (l, atomicUpdateLocking $ genReduceOp op) of
-          (_, Left f) -> return (l, const $ return f)
-          (Just l', Right f) -> return (l, const $ return $ f l')
-          (Nothing, Right f) -> do
+        case (l, do_op) of
+          (_, AtomicPrim f) -> return (l, const $ return f)
+          (_, AtomicCAS f) -> return (l, const $ return f)
+          (Just l', AtomicLocking f) -> return (l, const $ return $ f l')
+          (Nothing, AtomicLocking f) -> do
             locks <- newVName "locks"
             num_locks <- toExp $ unCount group_size
 
@@ -365,9 +370,9 @@ prepareIntermediateArraysLocal num_groups group_size num_subhistos_per_group =
                 sAllocArray "subhistogram_local"
                   (elemType dest_t) sub_local_shape (Space "local")
 
-            do_op <- mk_op constants
+            do_op' <- mk_op constants
 
-            return (local_subhistos, do_op (Space "local") local_subhistos)
+            return (local_subhistos, do_op' (Space "local") local_subhistos)
 
       -- Initialise global-memory sub-histograms.
       glob_subhistos <- forM subhisto_info $ \info -> do
