@@ -79,6 +79,7 @@ library:
     - haskeline
     - utf8-string >= 1
     - terminal-size >= 0.3
+    - unordered-containers >= 0.2.7
 
   build-tools:
     - alex
