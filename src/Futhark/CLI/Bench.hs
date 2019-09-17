@@ -3,13 +3,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 -- | Simple tool for benchmarking Futhark programs.  Use the @--json@
 -- flag for machine-readable output.
-module Futhark.CLI.Bench (main) where
+module Futhark.CLI.Bench ( main ) where
 
 import Control.Monad
 import Control.Monad.Except
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
-import qualified Data.Map as M
 import Data.Either
 import Data.Maybe
 import Data.List
@@ -25,11 +24,10 @@ import System.IO.Temp
 import System.Timeout
 import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
-import qualified Data.Aeson as JSON
-import qualified Data.Aeson.Encoding.Internal as JSON
 import Text.Printf
 import Text.Regex.TDFA
 
+import Futhark.Bench
 import Futhark.Test
 import Futhark.Util (pmapIO)
 import Futhark.Util.Options
@@ -56,33 +54,6 @@ initialBenchOptions = BenchOptions "c" Nothing "" 10 [] Nothing (-1) False
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
 binaryName = dropExtension
-
-newtype RunResult = RunResult { runMicroseconds :: Int }
-data DataResult = DataResult String (Either T.Text ([RunResult], T.Text))
-data BenchResult = BenchResult FilePath [DataResult]
-
--- Intermediate types to help write the JSON instances.
-newtype DataResults = DataResults [DataResult]
-
-instance JSON.ToJSON DataResults where
-  toJSON (DataResults rs) =
-    JSON.object $ map dataResultJSON rs
-  toEncoding (DataResults rs) =
-    JSON.pairs $ mconcat $ map (uncurry (JSON..=) . dataResultJSON) rs
-
-dataResultJSON :: DataResult -> (T.Text, JSON.Value)
-dataResultJSON (DataResult desc (Left err)) =
-  (T.pack desc, JSON.toJSON $ show err)
-dataResultJSON (DataResult desc (Right (runtimes, progerr))) =
-  (T.pack desc, JSON.object
-                [("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
-                 ("stderr", JSON.toJSON progerr)])
-
-encodeBenchResults :: [BenchResult] -> LBS.ByteString
-encodeBenchResults rs =
-  JSON.encodingToLazyByteString $ JSON.pairs $ mconcat $ do
-  BenchResult prog r <- rs
-  return $ T.pack prog JSON..= M.singleton ("datasets" :: T.Text) (DataResults r)
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do

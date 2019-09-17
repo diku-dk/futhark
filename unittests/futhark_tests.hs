@@ -1,6 +1,7 @@
 module Main (main) where
 
 import qualified Language.Futhark.SyntaxTests
+import qualified Futhark.BenchTests
 import qualified Futhark.Representation.AST.Syntax.CoreTests
 import qualified Futhark.Representation.AST.AttributesTests
 import qualified Futhark.Representation.ExplicitMemory.IndexFunctionTests
@@ -15,6 +16,7 @@ allTests :: TestTree
 allTests =
   testGroup ""
   [ Language.Futhark.SyntaxTests.tests
+  , Futhark.BenchTests.tests
   , Futhark.Representation.AST.AttributesTests.tests
   , Futhark.Optimise.AlgSimplifyTests.tests
   , Futhark.Representation.AST.Syntax.CoreTests.tests
