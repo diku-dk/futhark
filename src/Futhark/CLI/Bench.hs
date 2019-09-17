@@ -349,7 +349,7 @@ commandLineOptions = [
   , Option [] ["tuning"]
     (ReqArg (\s -> Right $ \config -> config { optTuning = Just s })
     "EXTENSION")
-    "Look for tuning files with this extension (defaults: .tuning)."
+    "Look for tuning files with this extension (defaults to .tuning)."
   , Option [] ["no-tuning"]
     (NoArg $ Right $ \config -> config { optTuning = Nothing })
     "Do not load tuning files."
