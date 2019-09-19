@@ -18,6 +18,7 @@ module Futhark.Test
        , runProgram
        , ensureReferenceOutput
        , determineTuning
+       , binaryName
        , Mismatch
 
        , ProgramTest (..)
@@ -573,6 +574,11 @@ getExpectedResult prog entry tr =
     RunTimeFailure err ->
       return $ RunTimeFailure err
 
+
+-- | The name we use for compiled programs.
+binaryName :: FilePath -> FilePath
+binaryName = dropExtension
+
 compileProgram :: (MonadIO m, MonadError [T.Text] m) =>
                   [String] -> FilePath -> String -> FilePath
                -> m (SBS.ByteString, SBS.ByteString)
@@ -583,7 +589,7 @@ compileProgram extra_options futhark backend program = do
     ExitFailure _   -> throwError [T.decodeUtf8 stderr]
     ExitSuccess     -> return ()
   return (stdout, stderr)
-  where binOutputf = dropExtension program
+  where binOutputf = binaryName program
         options = [program, "-o", binOutputf] ++ extra_options
         progNotFound s = s <> ": command not found"
 
@@ -592,7 +598,7 @@ runProgram :: MonadIO m =>
            -> String -> T.Text -> Values
            -> m (ExitCode, SBS.ByteString, SBS.ByteString)
 runProgram runner extra_options prog entry input = do
-  let progbin = dropExtension prog
+  let progbin = binaryName prog
       dir = takeDirectory prog
       binpath = "." </> progbin
       entry_options = ["-e", T.unpack entry]
