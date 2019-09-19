@@ -49,10 +49,20 @@ translateKernels target (ImpKernels.Functions funs) = do
       opencl_code = openClCode $ M.elems kernels
       opencl_prelude = pretty $ genPrelude target requirements
   return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names
-    (S.toList $ openclUsedTypes requirements) sizes $
+    (S.toList $ openclUsedTypes requirements) (cleanSizes sizes) $
     ImpOpenCL.Functions (M.toList extra_funs) <> prog'
   where genPrelude TargetOpenCL = genOpenClPrelude
         genPrelude TargetCUDA = genCUDAPrelude
+
+-- | Due to simplifications after kernel extraction, some threshold
+-- parameters may contain KernelPaths that reference threshold
+-- parameters that no longer exist.  We remove these here.
+cleanSizes :: M.Map Name SizeClass -> M.Map Name SizeClass
+cleanSizes m = M.map clean m
+  where known = M.keys m
+        clean (SizeThreshold path) =
+          SizeThreshold $ filter ((`elem` known) . fst) path
+        clean s = s
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
