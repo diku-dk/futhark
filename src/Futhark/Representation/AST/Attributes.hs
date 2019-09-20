@@ -106,6 +106,7 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp Scratch{} = True
         safeBasicOp Concat{} = True
         safeBasicOp Reshape{} = True
+        safeBasicOp Rearrange{} = True
         safeBasicOp Manifest{} = True
         safeBasicOp Iota{} = True
         safeBasicOp Replicate{} = True
