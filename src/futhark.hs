@@ -33,6 +33,7 @@ import qualified Futhark.CLI.Doc as Doc
 import qualified Futhark.CLI.REPL as REPL
 import qualified Futhark.CLI.Run as Run
 import qualified Futhark.CLI.Misc as Misc
+import qualified Futhark.CLI.Autotune as Autotune
 
 type Command = String -> [String] -> IO ()
 
@@ -64,6 +65,7 @@ commands = sortOn fst
 
            , ("check", (Misc.mainCheck, "Type check a program."))
            , ("imports", (Misc.mainImports, "Print all non-library imported Futhark files to standard out and exit."))
+           , ("autotune", (Autotune.main, "Autotune threshold parameters."))
            ]
 
 msg :: String

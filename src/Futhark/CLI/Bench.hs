@@ -13,16 +13,10 @@ import Data.Either
 import Data.Maybe
 import Data.List
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Text.Encoding as T
 import System.Console.GetOpt
-import System.FilePath
 import System.Directory
 import System.Environment
 import System.IO
-import System.IO.Temp
-import System.Timeout
-import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import Text.Printf
 import Text.Regex.TDFA
@@ -50,10 +44,6 @@ data BenchOptions = BenchOptions
 initialBenchOptions :: BenchOptions
 initialBenchOptions = BenchOptions "c" Nothing "" 10 [] Nothing (-1) False
                       ["nobench", "disable"] [] Nothing (Just "tuning")
-
--- | The name we use for compiled programs.
-binaryName :: FilePath -> FilePath
-binaryName = dropExtension
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -85,8 +75,14 @@ anyFailed = any failedBenchResult
 anyFailedToCompile :: [SkipReason] -> Bool
 anyFailedToCompile = not . all (==Skipped)
 
-data SkipReason = Skipped | FailedToCompile | ReferenceFailed
+data SkipReason = Skipped | FailedToCompile
   deriving (Eq)
+
+compileOptions :: BenchOptions -> IO CompileOptions
+compileOptions opts = do
+  futhark <- maybe getExecutablePath return $ optFuthark opts
+  return $ CompileOptions { compFuthark = futhark
+                          , compBackend = optBackend opts }
 
 compileBenchmark :: BenchOptions -> (FilePath, ProgramTest)
                  -> IO (Either SkipReason (FilePath, [InputOutputs]))
@@ -103,28 +99,21 @@ compileBenchmark opts (program, spec) =
           else do putStrLn $ binaryName program ++ " does not exist, but --skip-compilation passed."
                   return $ Left FailedToCompile
         else do
+
         putStr $ "Compiling " ++ program ++ "...\n"
 
-        futhark <- maybe getExecutablePath return $ optFuthark opts
+        compile_opts <- compileOptions opts
 
-        ref_res <- runExceptT $ ensureReferenceOutput futhark "c" program cases
-        case ref_res of
-          Left err -> do
-            putStrLn "Reference output generation failed:\n"
-            print err
-            return $ Left ReferenceFailed
+        res <- prepareBenchmarkProgram compile_opts program cases
 
-          Right () -> do
-            (futcode, _, futerr) <- liftIO $ readProcessWithExitCode futhark
-                                    [optBackend opts, program, "-o", binaryName program] ""
+        case res of
+          Left (err, errstr) -> do
+            putStrLn err
+            maybe (return ()) SBS.putStrLn errstr
+            return $ Left FailedToCompile
+          Right () ->
+            return $ Right (program, cases)
 
-            case futcode of
-              ExitSuccess     -> return $ Right (program, cases)
-              ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound futhark
-                                    return $ Left FailedToCompile
-              ExitFailure _   -> do putStrLn "Failed:\n"
-                                    SBS.putStrLn futerr
-                                    return $ Left FailedToCompile
     _ ->
       return $ Left Skipped
   where hasRuns (InputOutputs _ runs) = not $ null runs
@@ -157,16 +146,12 @@ reportResult results = do
   putStrLn $ printf "%10.2f" avg ++ "μs (avg. of " ++ show (length runtimes) ++
     " runs; RSD: " ++ printf "%.2f" rel_dev ++ ")"
 
-progNotFound :: String -> String
-progNotFound s = s ++ ": command not found"
-
-type BenchM = ExceptT T.Text IO
-
-runBenchM :: BenchM a -> IO (Either T.Text a)
-runBenchM = runExceptT
-
-io :: IO a -> BenchM a
-io = liftIO
+runOptions :: BenchOptions -> RunOptions
+runOptions opts = RunOptions { runRunner = optRunner opts
+                             , runRuns = optRuns opts
+                             , runExtraOptions = optExtraOptions opts
+                             , runTimeout = optTimeout opts
+                             }
 
 runBenchmarkCase :: BenchOptions -> FilePath -> T.Text -> Int -> TestRun
                  -> IO (Maybe DataResult)
@@ -175,112 +160,22 @@ runBenchmarkCase _ _ _ _ (TestRun _ _ RunTimeFailure{} _ _) =
 runBenchmarkCase opts _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
       return Nothing
-runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) =
-  -- We store the runtime in a temporary file.
-  withSystemTempFile "futhark-bench" $ \tmpfile h -> do
-  hClose h -- We will be writing and reading this ourselves.
-  input <- getValuesBS dir input_spec
-  let getValuesAndBS (SuccessValues vs) = do
-        vs' <- getValues dir vs
-        bs <- getValuesBS dir vs
-        return (LBS.toStrict bs, vs')
-      getValuesAndBS SuccessGenerateValues =
-        getValuesAndBS $ SuccessValues $ InFile $
-        testRunReferenceOutput program entry tr
-  maybe_expected <- maybe (return Nothing) (fmap Just . getValuesAndBS) expected_spec
-  let options = optExtraOptions opts ++ ["-e", T.unpack entry,
-                                         "-t", tmpfile,
-                                         "-r", show $ optRuns opts,
-                                         "-b"]
-
+runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
   putStr $ "dataset " ++ dataset_desc ++ ": " ++
     replicate (pad_to - length dataset_desc) ' '
   hFlush stdout
 
-  -- Explicitly prefixing the current directory is necessary for
-  -- readProcessWithExitCode to find the binary when binOutputf has
-  -- no program component.
-  let (to_run, to_run_args)
-        | null $ optRunner opts = ("." </> binaryName program, options)
-        | otherwise = (optRunner opts, binaryName program : options)
-
-  run_res <-
-    timeout (optTimeout opts * 1000000) $
-    readProcessWithExitCode to_run to_run_args $
-    LBS.toStrict input
-
-  fmap (Just . DataResult dataset_desc) $ runBenchM $ case run_res of
-    Just (progCode, output, progerr) -> do
-      case maybe_expected of
-        Nothing ->
-          didNotFail program progCode $ T.decodeUtf8 progerr
-        Just expected ->
-          compareResult program expected =<<
-          runResult program progCode output progerr
-      runtime_result <- io $ T.readFile tmpfile
-      runtimes <- case mapM readRuntime $ T.lines runtime_result of
-        Just runtimes -> return $ map RunResult runtimes
-        Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
-
-      io $ reportResult runtimes
-      return (runtimes, T.decodeUtf8 progerr)
-    Nothing ->
-      itWentWrong $ T.pack $ "Execution exceeded " ++ show (optTimeout opts) ++ " seconds."
-
-  where dir = takeDirectory program
-
-
-readRuntime :: T.Text -> Maybe Int
-readRuntime s = case reads $ T.unpack s of
-  [(runtime, _)] -> Just runtime
-  _              -> Nothing
-
-didNotFail :: FilePath -> ExitCode -> T.Text -> BenchM ()
-didNotFail _ ExitSuccess _ =
-  return ()
-didNotFail program (ExitFailure code) stderr_s =
-  itWentWrong $ T.pack $ program ++ " failed with error code " ++ show code ++
-  " and output:\n" ++ T.unpack stderr_s
-
-itWentWrong :: (MonadError T.Text m, MonadIO m) =>
-               T.Text -> m a
-itWentWrong t = do
-  liftIO $ putStrLn $ T.unpack t
-  throwError t
-
-runResult :: (MonadError T.Text m, MonadIO m) =>
-             FilePath
-          -> ExitCode
-          -> SBS.ByteString
-          -> SBS.ByteString
-          -> m (SBS.ByteString, [Value])
-runResult program ExitSuccess stdout_s _ =
-  case valuesFromByteString "stdout" $ LBS.fromStrict stdout_s of
-    Left e   -> do
-      let actualf = program `replaceExtension` "actual"
-      liftIO $ SBS.writeFile actualf stdout_s
-      itWentWrong $ T.pack $ show e <> "\n(See " <> actualf <> ")"
-    Right vs -> return (stdout_s, vs)
-runResult program (ExitFailure code) _ stderr_s =
-  itWentWrong $ T.pack $ program ++ " failed with error code " ++ show code ++
-  " and output:\n" ++ T.unpack (T.decodeUtf8 stderr_s)
-
-compareResult :: (MonadError T.Text m, MonadIO m) =>
-                 FilePath -> (SBS.ByteString, [Value]) -> (SBS.ByteString, [Value])
-              -> m ()
-compareResult program (expected_bs, expected_vs) (actual_bs, actual_vs) =
-  case compareValues1 actual_vs expected_vs of
-    Just mismatch -> do
-      let actualf = program `replaceExtension` "actual"
-          expectedf = program `replaceExtension` "expected"
-      liftIO $ SBS.writeFile actualf actual_bs
-      liftIO $ SBS.writeFile expectedf expected_bs
-      itWentWrong $ T.pack actualf <> " and " <> T.pack expectedf <>
-        " do not match:\n" <> T.pack (show mismatch)
-    Nothing ->
-      return ()
+  res <- benchmarkDataset (runOptions opts) program entry input_spec expected_spec
+         (testRunReferenceOutput program entry tr)
+  case res of
+    Left err -> do
+      liftIO $ putStrLn $ T.unpack err
+      return $ Just $ DataResult dataset_desc $ Left err
+    Right (runtimes, errout) -> do
+      reportResult runtimes
+      return $ Just $ DataResult dataset_desc $ Right (runtimes, errout)
 
 commandLineOptions :: [FunOptDescr BenchOptions]
 commandLineOptions = [

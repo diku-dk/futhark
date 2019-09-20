@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * New tool: `futhark autotune`, for tuning the threshold parameters
+    used by incremental flattening.  Based on work by Svend Lund
+    Breddam, Simon Rotendahl, and Carl Mathias Graae Larsen.
+
 ### Removed
 
 ### Changed
