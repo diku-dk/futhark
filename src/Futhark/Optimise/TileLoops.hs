@@ -61,8 +61,8 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
           (res', stms') <-
             runBinder $ mapM (tilingTileReturns tiling) =<< tiledBody mempty
           return (host_stms, (tilingLevel tiling,
-                               tilingSpace tiling,
-                               KernelBody () stms' res'))
+                              tilingSpace tiling,
+                              KernelBody () stms' res'))
         Nothing ->
           return (mempty, (lvl, initial_kspace, kbody))
   | otherwise =
@@ -90,9 +90,10 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
              flip (M.findWithDefault mempty) variance) arrs,
         not $ gtid `nameIn` branch_variant,
         (prestms', poststms') <-
-          preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) =
+          preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
+        used <- freeIn stm_to_tile <> freeIn stms_res =
 
-          Just . injectPrelude initial_space variance prestms' (freeIn stm_to_tile) <$>
+          Just . injectPrelude initial_space variance prestms' used <$>
           tileGeneric (tiling1d $ reverse top_space_rev)
           initial_lvl res_ts (stmPattern stm_to_tile)
           gtid kdim
@@ -105,9 +106,10 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
         gtid_y : gtid_x : top_gtids_rev <- reverse gtids,
         kdim_y : kdim_x : top_kdims_rev <- reverse kdims,
         (prestms', poststms') <-
-          preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) =
+          preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
+        used <- freeIn stm_to_tile <> freeIn stms_res =
 
-          Just . injectPrelude initial_space variance prestms' (freeIn stm_to_tile) <$>
+          Just . injectPrelude initial_space variance prestms' used <$>
           tileGeneric (tiling2d $ reverse $ zip top_gtids_rev top_kdims_rev)
           initial_lvl res_ts (stmPattern stm_to_tile)
           (gtid_x, gtid_y) (kdim_x, kdim_y)
@@ -116,7 +118,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- Tiling inside for-loop.
       | DoLoop [] merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
         (prestms', poststms') <-
-          preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms)= do
+          preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
 
           let branch_variant' =
                 branch_variant <>
