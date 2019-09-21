@@ -64,7 +64,7 @@ commands = sortOn fst
            , ("pkg", (Pkg.main, "Manage local packages."))
 
            , ("check", (Misc.mainCheck, "Type check a program."))
-           , ("imports", (Misc.mainImports, "Print all non-library imported Futhark files to standard out and exit."))
+           , ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files."))
            , ("autotune", (Autotune.main, "Autotune threshold parameters."))
            ]
 
