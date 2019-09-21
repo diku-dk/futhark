@@ -232,7 +232,7 @@ prepareBenchmarkProgram opts program cases = do
   ref_res <- runExceptT $ ensureReferenceOutput futhark "c" program cases
   case ref_res of
     Left err ->
-      return $ Left ("Reference output generation failed:\n" ++
+      return $ Left ("Reference output generation for " ++ program ++ " failed:\n" ++
                      unlines (map T.unpack err),
                      Nothing)
 
@@ -243,4 +243,4 @@ prepareBenchmarkProgram opts program cases = do
       case futcode of
         ExitSuccess     -> return $ Right ()
         ExitFailure 127 -> return $ Left (progNotFound futhark, Nothing)
-        ExitFailure _   -> return $ Left ("Failed:\n", Just futerr)
+        ExitFailure _   -> return $ Left ("Compilation of " ++ program ++ " failed:\n", Just futerr)
