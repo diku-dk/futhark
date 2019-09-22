@@ -48,16 +48,16 @@ opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
            -> CallKernelGen ()
 opCompiler dest (Alloc e space) =
   compileAlloc dest e space
-opCompiler (Pattern _ [pe]) (Inner (GetSize key size_class)) = do
+opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSize key size_class))) = do
   fname <- asks envFunction
   sOp $ Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
     sizeClassWithEntryPoint fname size_class
-opCompiler (Pattern _ [pe]) (Inner (CmpSizeLe key size_class x)) = do
+opCompiler (Pattern _ [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
   fname <- asks envFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
   sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
     =<< toExp x
-opCompiler (Pattern _ [pe]) (Inner (GetSizeMax size_class)) =
+opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op

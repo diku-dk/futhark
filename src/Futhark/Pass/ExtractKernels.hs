@@ -290,7 +290,7 @@ cmpSizeLe desc size_class to_what = do
   runBinder $ do
     to_what' <- letSubExp "comparatee" =<<
                 foldBinOp (Mul Int32) (intConst Int32 1) to_what
-    cmp_res <- letSubExp desc $ Op $ CmpSizeLe size_key size_class to_what'
+    cmp_res <- letSubExp desc $ Op $ SizeOp $ CmpSizeLe size_key size_class to_what'
     return (cmp_res, size_key)
 
 kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
@@ -645,7 +645,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
           addStms intra_prelude
 
           max_group_size <-
-            letSubExp "max_group_size" $ Op $ Out.GetSizeMax Out.SizeGroup
+            letSubExp "max_group_size" $ Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup
           fits <- letSubExp "fits" $ BasicOp $
                   CmpOp (CmpSle Int32) group_size max_group_size
 

@@ -51,7 +51,7 @@ getSize :: (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
            String -> SizeClass -> m SubExp
 getSize desc size_class = do
   size_key <- nameFromString . pretty <$> newVName desc
-  letSubExp desc $ Op $ GetSize size_key size_class
+  letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
 
 numberOfGroups :: MonadBinder m => SubExp -> SubExp -> SubExp -> m (SubExp, SubExp)
 numberOfGroups w group_size max_num_groups = do
@@ -374,7 +374,7 @@ splitArrays :: (MonadBinder m, Lore m ~ Kernels) =>
             -> SplitOrdering -> SubExp -> SubExp -> SubExp -> [VName]
             -> m ()
 splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
-  letBindNames_ [chunk_size] $ Op $ SplitSpace ordering w i elems_per_i
+  letBindNames_ [chunk_size] $ Op $ SizeOp $ SplitSpace ordering w i elems_per_i
   case ordering of
     SplitContiguous     -> do
       offset <- letSubExp "slice_offset" $ BasicOp $ BinOp (Mul Int32) i elems_per_i

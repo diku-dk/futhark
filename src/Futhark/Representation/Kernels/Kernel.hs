@@ -35,6 +35,9 @@ module Futhark.Representation.Kernels.Kernel
        , identitySegOpWalker
        , walkSegOpM
 
+       -- * Size operations
+       , SizeOp(..)
+
        -- * Host operations
        , HostOp(..)
        , typeCheckHostOp
@@ -824,8 +827,8 @@ instance Attributes lore => IsOp (SegOp lore) where
 
 --- Host operations
 
--- | A host-level operation; parameterised by what else it can do.
-data HostOp lore op
+-- | A simple size-level query or computation.
+data SizeOp
   = SplitSpace SplitOrdering SubExp SubExp SubExp
     -- ^ @SplitSpace o w i elems_per_thread@.
     --
@@ -853,17 +856,10 @@ data HostOp lore op
   | GetSizeMax SizeClass
     -- ^ The maximum size of some class.
   | CmpSizeLe Name SizeClass SubExp
-    -- ^ Compare size (likely a threshold) with some Int32 value.
-  | SegOp (SegOp lore)
-    -- ^ A segmented operation.
-  | OtherOp op
+    -- ^ Compare size (likely a threshold) with some integer value.
   deriving (Eq, Ord, Show)
 
-instance (Attributes lore, Substitute op) => Substitute (HostOp lore op) where
-  substituteNames substs (SegOp op) =
-    SegOp $ substituteNames substs op
-  substituteNames substs (OtherOp op) =
-    OtherOp $ substituteNames substs op
+instance Substitute SizeOp where
   substituteNames subst (SplitSpace o w i elems_per_thread) =
     SplitSpace
     (substituteNames subst o)
@@ -871,117 +867,47 @@ instance (Attributes lore, Substitute op) => Substitute (HostOp lore op) where
     (substituteNames subst i)
     (substituteNames subst elems_per_thread)
   substituteNames substs (CmpSizeLe name sclass x) =
-    CmpSizeLe name sclass $ substituteNames substs x
-  substituteNames _ x = x
+    CmpSizeLe name sclass (substituteNames substs x)
+  substituteNames _ op = op
 
-instance (Attributes lore, Rename op) => Rename (HostOp lore op) where
+instance Rename SizeOp where
   rename (SplitSpace o w i elems_per_thread) =
     SplitSpace
     <$> rename o
     <*> rename w
     <*> rename i
     <*> rename elems_per_thread
-  rename (SegOp op) = SegOp <$> rename op
-  rename (OtherOp op) = OtherOp <$> rename op
-  rename (CmpSizeLe name sclass x) = CmpSizeLe name sclass <$> rename x
+  rename (CmpSizeLe name sclass x) =
+    CmpSizeLe name sclass <$> rename x
   rename x = pure x
 
-instance (Attributes lore, IsOp op) => IsOp (HostOp lore op) where
-  safeOp (SegOp op) = safeOp op
-  safeOp (OtherOp op) = safeOp op
+instance IsOp SizeOp where
   safeOp _ = True
-  cheapOp (SegOp op) = cheapOp op
-  cheapOp (OtherOp op) = cheapOp op
   cheapOp _ = True
 
-instance TypedOp op => TypedOp (HostOp lore op) where
+instance TypedOp SizeOp where
   opType SplitSpace{} = pure [Prim int32]
-  opType GetSize{} = pure [Prim int32]
-  opType GetSizeMax{} = pure [Prim int32]
+  opType (GetSize _ _) = pure [Prim int32]
+  opType (GetSizeMax _) = pure [Prim int32]
   opType CmpSizeLe{} = pure [Prim Bool]
-  opType (SegOp op) = opType op
-  opType (OtherOp op) = opType op
 
-instance (Aliased lore, AliasedOp op, Attributes lore) => AliasedOp (HostOp lore op) where
-  opAliases (SegOp op) = opAliases op
-  opAliases (OtherOp op) = opAliases op
+instance AliasedOp SizeOp where
   opAliases _ = [mempty]
-
-  consumedInOp (SegOp op) = consumedInOp op
-  consumedInOp (OtherOp op) = consumedInOp op
   consumedInOp _ = mempty
 
-instance (Attributes lore, RangedOp op) => RangedOp (HostOp lore op) where
+instance RangedOp SizeOp where
   opRanges (SplitSpace _ _ _ elems_per_thread) =
     [(Just (ScalarBound 0),
       Just (ScalarBound (SE.subExpToScalExp elems_per_thread int32)))]
-  opRanges (SegOp op) = opRanges op
-  opRanges (OtherOp op) = opRanges op
   opRanges _ = [unknownRange]
 
-instance (Attributes lore, FreeIn op) => FreeIn (HostOp lore op) where
+instance FreeIn SizeOp where
   freeIn' (SplitSpace o w i elems_per_thread) =
     freeIn' o <> freeIn' [w, i, elems_per_thread]
-  freeIn' (SegOp op) = freeIn' op
-  freeIn' (OtherOp op) = freeIn' op
   freeIn' (CmpSizeLe _ _ x) = freeIn' x
   freeIn' _ = mempty
 
-instance (CanBeAliased (Op lore), CanBeAliased op, Attributes lore) => CanBeAliased (HostOp lore op) where
-  type OpWithAliases (HostOp lore op) = HostOp (Aliases lore) (OpWithAliases op)
-
-  addOpAliases (SplitSpace o w i elems_per_thread) =
-    SplitSpace o w i elems_per_thread
-  addOpAliases (SegOp op) = SegOp $ addOpAliases op
-  addOpAliases (OtherOp op) = OtherOp $ addOpAliases op
-  addOpAliases (GetSize name sclass) = GetSize name sclass
-  addOpAliases (GetSizeMax sclass) = GetSizeMax sclass
-  addOpAliases (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-
-  removeOpAliases (SplitSpace o w i elems_per_thread) =
-    SplitSpace o w i elems_per_thread
-  removeOpAliases (SegOp op) = SegOp $ removeOpAliases op
-  removeOpAliases (OtherOp op) = OtherOp $ removeOpAliases op
-  removeOpAliases (GetSize name sclass) = GetSize name sclass
-  removeOpAliases (GetSizeMax sclass) = GetSizeMax sclass
-  removeOpAliases (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-
-instance (CanBeRanged (Op lore), CanBeRanged op, Attributes lore) => CanBeRanged (HostOp lore op) where
-  type OpWithRanges (HostOp lore op) = HostOp (Ranges lore) (OpWithRanges op)
-
-  addOpRanges (SplitSpace o w i elems_per_thread) =
-    SplitSpace o w i elems_per_thread
-  addOpRanges (SegOp op) = SegOp $ addOpRanges op
-  addOpRanges (OtherOp op) = OtherOp $ addOpRanges op
-  addOpRanges (GetSize name sclass) = GetSize name sclass
-  addOpRanges (GetSizeMax sclass) = GetSizeMax sclass
-  addOpRanges (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-
-  removeOpRanges (SplitSpace o w i elems_per_thread) =
-    SplitSpace o w i elems_per_thread
-  removeOpRanges (SegOp op) = SegOp $ removeOpRanges op
-  removeOpRanges (OtherOp op) = OtherOp $ removeOpRanges op
-  removeOpRanges (GetSize name sclass) = GetSize name sclass
-  removeOpRanges (GetSizeMax sclass) = GetSizeMax sclass
-  removeOpRanges (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-
-instance (CanBeWise (Op lore), CanBeWise op, Attributes lore) => CanBeWise (HostOp lore op) where
-  type OpWithWisdom (HostOp lore op) = HostOp (Wise lore) (OpWithWisdom op)
-
-  removeOpWisdom (SplitSpace o w i elems_per_thread) =
-    SplitSpace o w i elems_per_thread
-  removeOpWisdom (SegOp op) = SegOp $ removeOpWisdom op
-  removeOpWisdom (GetSize name sclass) = GetSize name sclass
-  removeOpWisdom (GetSizeMax sclass) = GetSizeMax sclass
-  removeOpWisdom (CmpSizeLe name sclass x) = CmpSizeLe name sclass x
-  removeOpWisdom (OtherOp op) = OtherOp $ removeOpWisdom op
-
-instance (Attributes lore, ST.IndexOp op) => ST.IndexOp (HostOp lore op) where
-  indexOp vtable k (SegOp op) is = ST.indexOp vtable k op is
-  indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
-  indexOp _ _ _ _ = Nothing
-
-instance (PrettyLore lore, PP.Pretty op) => PP.Pretty (HostOp lore op) where
+instance PP.Pretty SizeOp where
   ppr (SplitSpace o w i elems_per_thread) =
     text "splitSpace" <> suff <>
     parens (commasep [ppr w, ppr i, ppr elems_per_thread])
@@ -992,23 +918,125 @@ instance (PrettyLore lore, PP.Pretty op) => PP.Pretty (HostOp lore op) where
     text "get_size" <> parens (commasep [ppr name, ppr size_class])
 
   ppr (GetSizeMax size_class) =
-    text "get_size_max" <> parens (ppr size_class)
+    text "get_size_max" <> parens (commasep [ppr size_class])
 
   ppr (CmpSizeLe name size_class x) =
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<=" <+> ppr x
 
-  ppr (SegOp op) = ppr op
-
-  ppr (OtherOp op) = ppr op
-
-instance (OpMetrics (Op lore), OpMetrics op) => OpMetrics (HostOp lore op) where
+instance OpMetrics SizeOp where
   opMetrics SplitSpace{} = seen "SplitSpace"
   opMetrics GetSize{} = seen "GetSize"
   opMetrics GetSizeMax{} = seen "GetSizeMax"
   opMetrics CmpSizeLe{} = seen "CmpSizeLe"
+
+typeCheckSizeOp :: TC.Checkable lore => SizeOp -> TC.TypeM lore ()
+typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
+  case o of
+    SplitContiguous     -> return ()
+    SplitStrided stride -> TC.require [Prim int32] stride
+  mapM_ (TC.require [Prim int32]) [w, i, elems_per_thread]
+typeCheckSizeOp GetSize{} = return ()
+typeCheckSizeOp GetSizeMax{} = return ()
+typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int32] x
+
+-- | A host-level operation; parameterised by what else it can do.
+data HostOp lore op
+  = SegOp (SegOp lore)
+    -- ^ A segmented operation.
+  | SizeOp SizeOp
+  | OtherOp op
+  deriving (Eq, Ord, Show)
+
+instance (Attributes lore, Substitute op) => Substitute (HostOp lore op) where
+  substituteNames substs (SegOp op) =
+    SegOp $ substituteNames substs op
+  substituteNames substs (OtherOp op) =
+    OtherOp $ substituteNames substs op
+  substituteNames substs (SizeOp op) =
+    SizeOp $ substituteNames substs op
+
+instance (Attributes lore, Rename op) => Rename (HostOp lore op) where
+  rename (SegOp op) = SegOp <$> rename op
+  rename (OtherOp op) = OtherOp <$> rename op
+  rename (SizeOp op) = SizeOp <$> rename op
+
+instance (Attributes lore, IsOp op) => IsOp (HostOp lore op) where
+  safeOp (SegOp op) = safeOp op
+  safeOp (OtherOp op) = safeOp op
+  safeOp (SizeOp op) = safeOp op
+
+  cheapOp (SegOp op) = cheapOp op
+  cheapOp (OtherOp op) = cheapOp op
+  cheapOp (SizeOp op) = cheapOp op
+
+instance TypedOp op => TypedOp (HostOp lore op) where
+  opType (SegOp op) = opType op
+  opType (OtherOp op) = opType op
+  opType (SizeOp op) = opType op
+
+instance (Aliased lore, AliasedOp op, Attributes lore) => AliasedOp (HostOp lore op) where
+  opAliases (SegOp op) = opAliases op
+  opAliases (OtherOp op) = opAliases op
+  opAliases (SizeOp op) = opAliases op
+
+  consumedInOp (SegOp op) = consumedInOp op
+  consumedInOp (OtherOp op) = consumedInOp op
+  consumedInOp (SizeOp op) = consumedInOp op
+
+instance (Attributes lore, RangedOp op) => RangedOp (HostOp lore op) where
+  opRanges (SegOp op) = opRanges op
+  opRanges (OtherOp op) = opRanges op
+  opRanges (SizeOp op) = opRanges op
+
+instance (Attributes lore, FreeIn op) => FreeIn (HostOp lore op) where
+  freeIn' (SegOp op) = freeIn' op
+  freeIn' (OtherOp op) = freeIn' op
+  freeIn' (SizeOp op) = freeIn' op
+
+instance (CanBeAliased (Op lore), CanBeAliased op, Attributes lore) => CanBeAliased (HostOp lore op) where
+  type OpWithAliases (HostOp lore op) = HostOp (Aliases lore) (OpWithAliases op)
+
+  addOpAliases (SegOp op) = SegOp $ addOpAliases op
+  addOpAliases (OtherOp op) = OtherOp $ addOpAliases op
+  addOpAliases (SizeOp op) = SizeOp op
+
+  removeOpAliases (SegOp op) = SegOp $ removeOpAliases op
+  removeOpAliases (OtherOp op) = OtherOp $ removeOpAliases op
+  removeOpAliases (SizeOp op) = SizeOp op
+
+instance (CanBeRanged (Op lore), CanBeRanged op, Attributes lore) => CanBeRanged (HostOp lore op) where
+  type OpWithRanges (HostOp lore op) = HostOp (Ranges lore) (OpWithRanges op)
+
+  addOpRanges (SegOp op) = SegOp $ addOpRanges op
+  addOpRanges (OtherOp op) = OtherOp $ addOpRanges op
+  addOpRanges (SizeOp op) = SizeOp op
+
+  removeOpRanges (SegOp op) = SegOp $ removeOpRanges op
+  removeOpRanges (OtherOp op) = OtherOp $ removeOpRanges op
+  removeOpRanges (SizeOp op) = SizeOp op
+
+instance (CanBeWise (Op lore), CanBeWise op, Attributes lore) => CanBeWise (HostOp lore op) where
+  type OpWithWisdom (HostOp lore op) = HostOp (Wise lore) (OpWithWisdom op)
+
+  removeOpWisdom (SegOp op) = SegOp $ removeOpWisdom op
+  removeOpWisdom (OtherOp op) = OtherOp $ removeOpWisdom op
+  removeOpWisdom (SizeOp op) = SizeOp op
+
+instance (Attributes lore, ST.IndexOp op) => ST.IndexOp (HostOp lore op) where
+  indexOp vtable k (SegOp op) is = ST.indexOp vtable k op is
+  indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
+  indexOp _ _ _ _ = Nothing
+
+instance (PrettyLore lore, PP.Pretty op) => PP.Pretty (HostOp lore op) where
+  ppr (SegOp op) = ppr op
+  ppr (OtherOp op) = ppr op
+  ppr (SizeOp op) = ppr op
+
+instance (OpMetrics (Op lore), OpMetrics op) => OpMetrics (HostOp lore op) where
   opMetrics (SegOp op) = opMetrics op
   opMetrics (OtherOp op) = opMetrics op
+  opMetrics (SizeOp op) = opMetrics op
 
 typeCheckHostOp :: TC.Checkable lore =>
                    (SegLevel -> OpWithAliases (Op lore) -> TC.TypeM lore ())
@@ -1016,15 +1044,8 @@ typeCheckHostOp :: TC.Checkable lore =>
                 -> (op -> TC.TypeM lore ())
                 -> HostOp (Aliases lore) op
                 -> TC.TypeM lore ()
-typeCheckHostOp _ _ _ (SplitSpace o w i elems_per_thread) = do
-  case o of
-    SplitContiguous     -> return ()
-    SplitStrided stride -> TC.require [Prim int32] stride
-  mapM_ (TC.require [Prim int32]) [w, i, elems_per_thread]
-typeCheckHostOp _ _ _ GetSize{} = return ()
-typeCheckHostOp _ _ _ GetSizeMax{} = return ()
-typeCheckHostOp _ _ _ (CmpSizeLe _ _ x) = TC.require [Prim int32] x
 typeCheckHostOp checker lvl _ (SegOp op) =
   TC.checkOpWith (checker $ segLevel op) $
   typeCheckSegOp lvl op
 typeCheckHostOp _ _ f (OtherOp op) = f op
+typeCheckHostOp _ _ _ (SizeOp op) = typeCheckSizeOp op
