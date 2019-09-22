@@ -28,7 +28,7 @@ import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
-import Futhark.Util.IntegralExp (quot, IntegralExp)
+import Futhark.Util.IntegralExp (quot, quotRoundingUp, IntegralExp)
 
 callKernelOperations :: Operations ExplicitMemory Imp.HostOp
 callKernelOperations =
@@ -46,21 +46,44 @@ compileProg prog =
 
 opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
            -> CallKernelGen ()
+
 opCompiler dest (Alloc e space) =
   compileAlloc dest e space
+
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSize key size_class))) = do
   fname <- asks envFunction
   sOp $ Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
     sizeClassWithEntryPoint fname size_class
+
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
   fname <- asks envFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
   sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
     =<< toExp x
+
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
+
+opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w max_num_groups_key group_size))) = do
+  fname <- asks envFunction
+  max_num_groups <- dPrim "max_num_groups" int32
+  sOp $ Imp.GetSize max_num_groups (keyWithEntryPoint fname max_num_groups_key) $
+    sizeClassWithEntryPoint fname SizeNumGroups
+
+  -- If 'w' is small, we launch fewer groups than we normally would.
+  -- We don't want any idle groups.
+  let num_groups_maybe_zero = BinOpExp (SMin Int64)
+                              (i32Toi64 (toExp' int32 w) `quotRoundingUp`
+                               i32Toi64 (toExp' int32 group_size)) $
+                              Imp.var max_num_groups int64
+  -- We also don't want zero groups.
+  let num_groups = BinOpExp (SMax Int64) 1 num_groups_maybe_zero
+  patElemName pe <-- num_groups
+  where i32Toi64 = ConvOpExp (SExt Int32 Int64)
+
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
+
 opCompiler pat e =
   compilerBugS $ "opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e

@@ -123,6 +123,9 @@ simplifyKernelOp _ (SizeOp (GetSizeMax size_class)) =
 simplifyKernelOp _ (SizeOp (CmpSizeLe key size_class x)) = do
   x' <- Engine.simplify x
   return (SizeOp $ CmpSizeLe key size_class x', mempty)
+simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
+  w' <- Engine.simplify w
+  return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
 
 simplifyRedOrScan :: (Engine.SimplifiableLore lore, BodyAttr lore ~ ()) =>
                      SegSpace
