@@ -13,7 +13,6 @@ module Futhark.CodeGen.ImpCode.Kernels
   , KernelOp (..)
   , AtomicOp (..)
   , Kernel (..)
-  , LocalMemoryUse
   , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
   , module Futhark.Representation.Kernels.Sizes
@@ -67,9 +66,6 @@ data Kernel = Kernel
                -- alphanumeric and without spaces.
               }
             deriving (Show)
-
--- ^ In-kernel name and per-workgroup size in bytes.
-type LocalMemoryUse = (VName, Either (Count Bytes Exp) KernelConstExp)
 
 data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName
@@ -154,7 +150,7 @@ data KernelOp = GetGroupId VName Int
               | MemFenceLocal
               | MemFenceGlobal
               | PrivateAlloc VName (Count Bytes Imp.Exp)
-              | LocalAlloc VName (Either (Count Bytes Imp.Exp) KernelConstExp)
+              | LocalAlloc VName (Count Bytes Imp.Exp)
               deriving (Show)
 
 -- Atomic operations return the value stored before the update.
@@ -213,9 +209,7 @@ instance Pretty KernelOp where
   ppr (PrivateAlloc name size) =
     ppr name <+> equals <+> text "private_alloc" <> parens (ppr size)
   ppr (LocalAlloc name size) =
-    ppr name <+> equals <+> text "local_alloc" <>
-    parens (either ppr constCase size)
-    where constCase e = text "(constant)" <+> ppr e
+    ppr name <+> equals <+> text "local_alloc" <> parens (ppr size)
   ppr (Atomic _ (AtomicAdd old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_add" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])

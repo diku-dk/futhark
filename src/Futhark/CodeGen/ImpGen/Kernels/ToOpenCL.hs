@@ -74,6 +74,9 @@ pointerQuals "read_only"  = return [C.ctyquals|__read_only|]
 pointerQuals "kernel"     = return [C.ctyquals|__kernel|]
 pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
+-- In-kernel name and per-workgroup size in bytes.
+type LocalMemoryUse = (VName, Count Bytes Exp)
+
 newtype KernelRequirements =
   KernelRequirements { kernelLocalMemory :: [LocalMemoryUse] }
 
@@ -176,25 +179,16 @@ onKernel target kernel = do
         num_groups = kernelNumGroups kernel
         group_size = kernelGroupSize kernel
 
-        prepareLocalMemory TargetOpenCL (mem, Left size) = do
+        prepareLocalMemory TargetOpenCL (mem, size) = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
           return (Just $ SharedMemoryKArg size,
                   Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
                   [C.citem|__local volatile char* restrict $id:mem = (__local volatile char*)$id:mem_aligned;|])
-        prepareLocalMemory TargetOpenCL (mem, Right size) = do
-          let size' = compilePrimExp size
-          return (Nothing, Nothing,
-                  [C.citem|ALIGNED_LOCAL_MEMORY($id:mem, $exp:size');|])
-        prepareLocalMemory TargetCUDA (mem, Left size) = do
+        prepareLocalMemory TargetCUDA (mem, size) = do
           param <- newVName $ baseString mem ++ "_offset"
           return (Just $ SharedMemoryKArg size,
                   Just [C.cparam|uint $id:param|],
                   [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|])
-        prepareLocalMemory TargetCUDA (mem, Right size) = do
-          -- We declare the shared memory array as int64_t to force alignment.
-          let size' = compilePrimExp size
-          return (Nothing, Nothing,
-                  [CUDAC.citem|__shared__ volatile typename int64_t $id:mem[(($exp:size' + 7) & ~7)/8];|])
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
@@ -248,9 +242,6 @@ typedef uchar uint8_t;
 typedef ushort uint16_t;
 typedef uint uint32_t;
 typedef ulong uint64_t;
-
-// We declare the shared memory array as int64_t to force alignment.
-$esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local int64_t m[((size + 7) & ~7)/8]")
 
 // NVIDIAs OpenCL does not create device-wide memory fences (see #734), so we
 // use inline assembly if we detect we are on an NVIDIA GPU.
