@@ -75,7 +75,7 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w max_num_groups_key g
   let num_groups_maybe_zero = BinOpExp (SMin Int64)
                               (i32Toi64 (toExp' int32 w) `quotRoundingUp`
                                i32Toi64 (toExp' int32 group_size)) $
-                              Imp.var max_num_groups int64
+                              i32Toi64 $ Imp.vi32 max_num_groups
   -- We also don't want zero groups.
   let num_groups = BinOpExp (SMax Int64) 1 num_groups_maybe_zero
   patElemName pe <-- num_groups
