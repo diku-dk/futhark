@@ -857,6 +857,10 @@ data SizeOp
     -- ^ The maximum size of some class.
   | CmpSizeLe Name SizeClass SubExp
     -- ^ Compare size (likely a threshold) with some integer value.
+  | CalcNumGroups SubExp Name SubExp
+    -- ^ @CalcNumGroups w max_num_groups group_size@ calculates the
+    -- number of GPU workgroups to use for an input of the given size.
+    -- The @Name@ is a size name.
   deriving (Eq, Ord, Show)
 
 instance Substitute SizeOp where
@@ -868,6 +872,11 @@ instance Substitute SizeOp where
     (substituteNames subst elems_per_thread)
   substituteNames substs (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass (substituteNames substs x)
+  substituteNames substs (CalcNumGroups w max_num_groups group_size) =
+    CalcNumGroups
+    (substituteNames substs w)
+    max_num_groups
+    (substituteNames substs group_size)
   substituteNames _ op = op
 
 instance Rename SizeOp where
@@ -879,6 +888,8 @@ instance Rename SizeOp where
     <*> rename elems_per_thread
   rename (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass <$> rename x
+  rename (CalcNumGroups w max_num_groups group_size) =
+    CalcNumGroups <$> rename w <*> pure max_num_groups <*> rename group_size
   rename x = pure x
 
 instance IsOp SizeOp where
@@ -890,6 +901,7 @@ instance TypedOp SizeOp where
   opType (GetSize _ _) = pure [Prim int32]
   opType (GetSizeMax _) = pure [Prim int32]
   opType CmpSizeLe{} = pure [Prim Bool]
+  opType CalcNumGroups{} = pure [Prim int32]
 
 instance AliasedOp SizeOp where
   opAliases _ = [mempty]
@@ -905,6 +917,7 @@ instance FreeIn SizeOp where
   freeIn' (SplitSpace o w i elems_per_thread) =
     freeIn' o <> freeIn' [w, i, elems_per_thread]
   freeIn' (CmpSizeLe _ _ x) = freeIn' x
+  freeIn' (CalcNumGroups w _ group_size) = freeIn' w <> freeIn' group_size
   freeIn' _ = mempty
 
 instance PP.Pretty SizeOp where
@@ -924,11 +937,15 @@ instance PP.Pretty SizeOp where
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<=" <+> ppr x
 
+  ppr (CalcNumGroups w max_num_groups group_size) =
+    text "calc_num_groups" <> parens (commasep [ppr w, ppr max_num_groups, ppr group_size])
+
 instance OpMetrics SizeOp where
   opMetrics SplitSpace{} = seen "SplitSpace"
   opMetrics GetSize{} = seen "GetSize"
   opMetrics GetSizeMax{} = seen "GetSizeMax"
   opMetrics CmpSizeLe{} = seen "CmpSizeLe"
+  opMetrics CalcNumGroups{} = seen "CalcNumGroups"
 
 typeCheckSizeOp :: TC.Checkable lore => SizeOp -> TC.TypeM lore ()
 typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
@@ -939,6 +956,8 @@ typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
 typeCheckSizeOp GetSize{} = return ()
 typeCheckSizeOp GetSizeMax{} = return ()
 typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int32] x
+typeCheckSizeOp (CalcNumGroups w _ group_size) = do TC.require [Prim int32] w
+                                                    TC.require [Prim int32] group_size
 
 -- | A host-level operation; parameterised by what else it can do.
 data HostOp lore op
