@@ -245,7 +245,7 @@ compileGroupOp :: KernelConstants -> OpCompiler ExplicitMemory Imp.KernelOp
 compileGroupOp constants pat (Alloc size space) =
   kernelAlloc constants pat size space
 
-compileGroupOp _ pat (Inner (SplitSpace o w i elems_per_thread)) =
+compileGroupOp _ pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
   splitSpace pat o w i elems_per_thread
 
 compileGroupOp constants pat (Inner (SegOp (SegMap lvl space _ body))) = do
@@ -377,7 +377,7 @@ compileGroupOp _ pat _ =
 compileThreadOp :: KernelConstants -> OpCompiler ExplicitMemory Imp.KernelOp
 compileThreadOp constants pat (Alloc size space) =
   kernelAlloc constants pat size space
-compileThreadOp _ pat (Inner (SplitSpace o w i elems_per_thread)) =
+compileThreadOp _ pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
   splitSpace pat o w i elems_per_thread
 compileThreadOp _ pat _ =
   compilerBugS $ "compileThreadOp: cannot compile rhs of binding " ++ pretty pat
@@ -613,7 +613,7 @@ isConstExp vtable size = do
       onLeaf Imp.Index{} _ = Nothing
       lookupConstExp name =
         constExp =<< hasExp =<< M.lookup name vtable
-      constExp (Op (Inner (GetSize key _))) =
+      constExp (Op (Inner (SizeOp (GetSize key _)))) =
         Just $ LeafExp (Imp.SizeConst $ keyWithEntryPoint fname key) int32
       constExp e = primExpFromExp lookupConstExp e
   return $ replaceInPrimExpM onLeaf size

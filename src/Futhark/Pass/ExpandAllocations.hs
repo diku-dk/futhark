@@ -489,14 +489,8 @@ unAllocKernelsStms = unAllocStms False
 
     unAllocOp Alloc{} = Left "unAllocOp: unhandled Alloc"
     unAllocOp (Inner OtherOp{}) = Left "unAllocOp: unhandled OtherOp"
-    unAllocOp (Inner (SplitSpace o w i elems_per_thread)) =
-      return $ SplitSpace o w i elems_per_thread
-    unAllocOp (Inner (GetSize name sclass)) =
-      return $ GetSize name sclass
-    unAllocOp (Inner (GetSizeMax sclass)) =
-      return $ GetSizeMax sclass
-    unAllocOp (Inner (CmpSizeLe name sclass x)) =
-      return $ CmpSizeLe name sclass x
+    unAllocOp (Inner (SizeOp op)) =
+      return $ SizeOp op
     unAllocOp (Inner (SegOp op)) = SegOp <$> mapSegOpM mapper op
       where mapper = identitySegOpMapper { mapOnSegOpLambda = unAllocLambda
                                          , mapOnSegOpBody = unAllocKernelBody

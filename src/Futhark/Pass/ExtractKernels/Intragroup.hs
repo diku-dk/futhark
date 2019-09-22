@@ -82,7 +82,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
     letBindNames_ [group_size] =<<
       if null ws_min
       then eBinOp (SMin Int32)
-           (eSubExp =<< letSubExp "max_group_size" (Op $ Out.GetSizeMax Out.SizeGroup))
+           (eSubExp =<< letSubExp "max_group_size" (Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup))
            (eSubExp intra_avail_par)
       else foldBinOp' (SMax Int32) ws_min
 

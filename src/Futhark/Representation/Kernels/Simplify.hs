@@ -111,17 +111,18 @@ simplifyKernelOp _ (SegOp (SegGenRed lvl space ops ts kbody)) = do
   where scope = scopeOfSegSpace space
         scope_vtable = ST.fromScope scope
 
-simplifyKernelOp _ (SplitSpace o w i elems_per_thread) =
-  (,) <$> (SplitSpace <$> Engine.simplify o <*> Engine.simplify w
-           <*> Engine.simplify i <*> Engine.simplify elems_per_thread)
+simplifyKernelOp _ (SizeOp (SplitSpace o w i elems_per_thread)) =
+  (,) <$> (SizeOp <$>
+           (SplitSpace <$> Engine.simplify o <*> Engine.simplify w
+            <*> Engine.simplify i <*> Engine.simplify elems_per_thread))
       <*> pure mempty
-simplifyKernelOp _ (GetSize key size_class) =
-  return (GetSize key size_class, mempty)
-simplifyKernelOp _ (GetSizeMax size_class) =
-  return (GetSizeMax size_class, mempty)
-simplifyKernelOp _ (CmpSizeLe key size_class x) = do
+simplifyKernelOp _ (SizeOp (GetSize key size_class)) =
+  return (SizeOp $ GetSize key size_class, mempty)
+simplifyKernelOp _ (SizeOp (GetSizeMax size_class)) =
+  return (SizeOp $ GetSizeMax size_class, mempty)
+simplifyKernelOp _ (SizeOp (CmpSizeLe key size_class x)) = do
   x' <- Engine.simplify x
-  return (CmpSizeLe key size_class x', mempty)
+  return (SizeOp $ CmpSizeLe key size_class x', mempty)
 
 simplifyRedOrScan :: (Engine.SimplifiableLore lore, BodyAttr lore ~ ()) =>
                      SegSpace

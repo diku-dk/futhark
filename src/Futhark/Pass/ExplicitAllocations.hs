@@ -507,17 +507,10 @@ allocInFun (FunDef entry fname rettype params fbody) =
 
 handleHostOp :: HostOp Kernels (SOAC Kernels)
              -> AllocM Kernels ExplicitMemory (MemOp (HostOp ExplicitMemory ()))
-handleHostOp (SplitSpace o w i elems_per_thread) =
-  return $ Inner $ SplitSpace o w i elems_per_thread
-handleHostOp (GetSize key size_class) =
-  return $ Inner $ GetSize key size_class
-handleHostOp (GetSizeMax size_class) =
-  return $ Inner $ GetSizeMax size_class
-handleHostOp (CmpSizeLe key size_class x) =
-  return $ Inner $ CmpSizeLe key size_class x
+handleHostOp (SizeOp op) =
+  return $ Inner $ SizeOp op
 handleHostOp (OtherOp op) =
   fail $ "Cannot allocate memory in SOAC: " ++ pretty op
-
 handleHostOp (SegOp op) =
   Inner . SegOp <$> handleSegOp op
 
@@ -764,7 +757,7 @@ class SizeSubst op where
   opSizeSubst :: PatternT attr -> op -> ChunkMap
 
 instance SizeSubst (HostOp lore op) where
-  opSizeSubst (Pattern _ [size]) (SplitSpace _ _ _ elems_per_thread) =
+  opSizeSubst (Pattern _ [size]) (SizeOp (SplitSpace _ _ _ elems_per_thread)) =
     M.singleton (patElemName size) elems_per_thread
   opSizeSubst _ _ = mempty
 
