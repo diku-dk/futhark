@@ -282,6 +282,10 @@ protectIf _ taken (Let pat (StmAux cs _)
   certifying cs $
     letBind_ pat $ If cond' taken_body untaken_body $
     IfAttr if_ts IfFallback
+protectIf _ taken (Let pat (StmAux cs _) (BasicOp (Assert cond msg loc))) = do
+  not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
+  cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
+  certifying cs $ letBind_ pat $ BasicOp $ Assert cond' msg loc
 protectIf f taken (Let pat (StmAux cs _) e)
   | f e = do
       taken_body <- eBody [pure e]
