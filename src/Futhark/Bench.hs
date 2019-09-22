@@ -146,7 +146,7 @@ runResult program ExitSuccess stdout_s _ =
       throwError $ T.pack $ show e <> "\n(See " <> actualf <> ")"
     Right vs -> return (stdout_s, vs)
 runResult program (ExitFailure code) _ stderr_s =
-  throwError $ T.pack $ program ++ " failed with error code " ++ show code ++
+  throwError $ T.pack $ binaryName program ++ " failed with error code " ++ show code ++
   " and output:\n" ++ T.unpack (T.decodeUtf8 stderr_s)
 
 -- | How to run a benchmark.
