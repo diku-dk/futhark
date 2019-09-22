@@ -81,10 +81,8 @@ noAssert locs =
 
 
 allocLocal, allocPrivate :: AllocCompiler ExplicitMemory Imp.KernelOp
-allocLocal mem size = do
-  vtable <- getVTable
-  size' <- localMemSize vtable size
-  sOp $ Imp.LocalAlloc mem size'
+allocLocal mem size =
+  sOp $ Imp.LocalAlloc mem size
 allocPrivate mem size =
   sOp $ Imp.PrivateAlloc mem size
 
@@ -606,12 +604,6 @@ readsFromSet free =
           Nothing | bt == Cert -> return Nothing
                   | otherwise  -> return $ Just $ Imp.ScalarUse var bt
 
-localMemSize :: VTable ExplicitMemory -> Imp.Count Imp.Bytes Imp.Exp
-             -> ImpM lore op (Either (Imp.Count Imp.Bytes Imp.Exp) Imp.KernelConstExp)
-localMemSize vtable e = isConstExp vtable (Imp.unCount e) >>= \case
-  Just e' | isStaticExp e' -> return $ Right e'
-  _ -> return $ Left e
-
 isConstExp :: VTable ExplicitMemory -> Imp.Exp
            -> ImpM lore op (Maybe Imp.KernelConstExp)
 isConstExp vtable size = do
@@ -628,20 +620,6 @@ isConstExp vtable size = do
   where hasExp (ArrayVar e _) = e
         hasExp (ScalarVar e _) = e
         hasExp (MemVar e _) = e
-
--- | Only some constant expressions qualify as *static* expressions,
--- which we can use for static memory allocation.  This is a bit of a
--- hack, as it is primarly motivated by what you can put as the size
--- when declaring an array in C.
-isStaticExp :: Imp.KernelConstExp -> Bool
-isStaticExp LeafExp{} = True
-isStaticExp ValueExp{} = True
-isStaticExp (ConvOpExp ZExt{} x) = isStaticExp x
-isStaticExp (ConvOpExp SExt{} x) = isStaticExp x
-isStaticExp (BinOpExp Add{} x y) = isStaticExp x && isStaticExp y
-isStaticExp (BinOpExp Sub{} x y) = isStaticExp x && isStaticExp y
-isStaticExp (BinOpExp Mul{} x y) = isStaticExp x && isStaticExp y
-isStaticExp _ = False
 
 computeThreadChunkSize :: SplitOrdering
                        -> Imp.Exp
