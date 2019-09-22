@@ -28,11 +28,11 @@ data AutotuneOptions = AutotuneOptions
                     , optRuns :: Int
                     , optTuning :: Maybe String
                     , optExtraOptions :: [String]
-                    , optVerbose :: Bool
+                    , optVerbose :: Int
                     }
 
 initialAutotuneOptions :: AutotuneOptions
-initialAutotuneOptions = AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] False
+initialAutotuneOptions = AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -124,9 +124,13 @@ prepare opts prog = do
                  fromIntegral (sum (map runMicroseconds runres)) /
                  fromIntegral (optRuns opts))
 
+              ropts = runOptions path timeout opts'
+
+          when (optVerbose opts > 1) $
+            putStrLn $ "Running with options: " ++ unwords (runExtraOptions ropts)
 
           either (Left . T.unpack) (Right . averageRuntime) <$>
-            benchmarkDataset (runOptions path timeout opts') prog "main"
+            benchmarkDataset ropts prog "main"
             (runInput trun) expected
             (testRunReferenceOutput prog "main" trun)
 
@@ -214,36 +218,42 @@ tuneThreshold opts datasets already_tuned (v, v_path) = do
         -- If the sampling run fails, we treat it as zero information.
         -- One of our ancestor thresholds will have be set such that
         -- this path is never taken.
-        when (optVerbose opts) $ putStrLn $ "Sampling run failed:\n" ++ err
+        when (optVerbose opts > 0) $ putStrLn $ "Sampling run failed:\n" ++ err
         return (thresholdMin, thresholdMax)
-      Right (cmps, _) -> do
-        e_par <- maybe missing return $ lookup v cmps
+      Right (cmps, _) ->
+        case lookup v cmps of
+          Nothing -> do
+            -- A missing comparison is not necessarily a bug - it may
+            -- simply mean that this comparison is inside a loop or
+            -- branch that is never reached for this dataset.  In such
+            -- cases, the optimal range is universal.
+            when (optVerbose opts > 0) $ putStrLn "Irrelevant for dataset.\n"
+            return (thresholdMin, thresholdMax)
+          Just e_par -> do
+            t_run <- run path_t RunBenchmark
+            f_run <- run path_f RunBenchmark
 
-        t_run <- run path_t RunBenchmark
-        f_run <- run path_f RunBenchmark
+            let prefer_t = (thresholdMin, e_par)
+                prefer_f = (e_par+1, thresholdMax)
 
-        let prefer_t = (thresholdMin, e_par)
-            prefer_f = (e_par+1, thresholdMax)
-
-        case (t_run, f_run) of
-          (Left err, _) -> do
-            when (optVerbose opts) $ putStrLn $ "True comparison run failed:\n" ++ err
-            return prefer_f
-          (_, Left err) -> do
-            when (optVerbose opts) $ putStrLn $ "False comparison run failed:\n" ++ err
-            return prefer_t
-          (Right (_, runtime_t), Right (_, runtime_f)) ->
-            if runtime_t < runtime_f
-            then do when (optVerbose opts) $ putStrLn "True branch is fastest."
-                    return prefer_t
-            else do when (optVerbose opts) $ putStrLn "False branch is fastest."
-                    return prefer_f
+            case (t_run, f_run) of
+              (Left err, _) -> do
+                when (optVerbose opts > 0) $ putStrLn $ "True comparison run failed:\n" ++ err
+                return prefer_f
+              (_, Left err) -> do
+                when (optVerbose opts > 0) $ putStrLn $ "False comparison run failed:\n" ++ err
+                return prefer_t
+              (Right (_, runtime_t), Right (_, runtime_f)) ->
+                if runtime_t < runtime_f
+                then do when (optVerbose opts > 0) $ putStrLn "True branch is fastest."
+                        return prefer_t
+                else do when (optVerbose opts > 0) $ putStrLn "False branch is fastest."
+                        return prefer_f
 
   let (_lower, upper) = intersectRanges ranges
   return $ (v,upper) : already_tuned
 
-  where missing = fail $ "Missing comparison: " ++ v
-        path = already_tuned ++ v_path
+  where path = already_tuned ++ v_path
         path_t = (v, thresholdMin) : path
         path_f = (v, thresholdMax) : path
 
@@ -251,10 +261,11 @@ tuneThreshold opts datasets already_tuned (v, v_path) = do
 
 tune :: AutotuneOptions -> FilePath -> IO Path
 tune opts prog = do
+  putStrLn $ "Compiling " ++ prog ++ "..."
   datasets <- prepare opts prog
 
   forest <- thresholdForest prog
-  when (optVerbose opts) $
+  when (optVerbose opts > 0) $
     putStrLn $ ("Threshold forest:\n"++) $ drawForest $ map (fmap show) forest
 
   foldM (tuneThreshold opts datasets) [] $ tuningPaths forest
@@ -300,8 +311,8 @@ commandLineOptions = [
     "EXTENSION")
     "Write tuning files with this extension (default: .tuning)."
   , Option "v" ["verbose"]
-    (NoArg $ Right $ \config -> config { optVerbose = True })
-    "Print more information about what is happening."
+    (NoArg $ Right $ \config -> config { optVerbose = optVerbose config + 1 })
+    "Enable logging.  Pass multiple times for more."
    ]
 
 main :: String -> [String] -> IO ()
