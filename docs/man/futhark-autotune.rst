@@ -52,7 +52,8 @@ OPTIONS
 
 -v, --verbose
 
-  Printt verbose information about what the tuner is doing.
+  Print verbose information about what the tuner is doing.  Pass
+  multiple times to increase the amount of information printed.
 
 --tuning=EXTENSION
 
