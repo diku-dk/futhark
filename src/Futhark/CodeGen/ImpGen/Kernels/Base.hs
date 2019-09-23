@@ -19,6 +19,8 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , compileThreadResult
   , compileGroupResult
   , virtualiseGroups
+  , groupLoop
+  , groupCoverSpace
 
   , getSize
 
@@ -138,7 +140,9 @@ groupLoop constants n f = do
   let ltid = kernelLocalThreadId constants
       elems_for_this = (n - ltid) `quotRoundingUp` kernelGroupSize constants
 
-  sFor i Int32 elems_for_this $ f $ Imp.vi32 i
+  sFor i Int32 elems_for_this $ f $
+    Imp.vi32 i * kernelGroupSize constants +
+    kernelLocalThreadId constants
 
 -- | Iterate collectively though a multidimensional space, such that
 -- all threads in the group participate.  The passed-in function is
@@ -146,11 +150,7 @@ groupLoop constants n f = do
 groupCoverSpace :: KernelConstants -> [Imp.Exp]
                 -> ([Imp.Exp] -> InKernelGen ()) -> InKernelGen ()
 groupCoverSpace constants ds f =
-  groupLoop constants (product ds) $ \i -> do
-    let is = unflattenIndex ds $
-             i * kernelGroupSize constants +
-             kernelLocalThreadId constants
-    f is
+  groupLoop constants (product ds) $ f . unflattenIndex ds
 
 groupCopy :: KernelConstants -> VName -> [Imp.Exp] -> SubExp -> [Imp.Exp] -> InKernelGen ()
 groupCopy constants to to_is from from_is = do
