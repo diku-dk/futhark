@@ -72,14 +72,13 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w max_num_groups_key g
 
   -- If 'w' is small, we launch fewer groups than we normally would.
   -- We don't want any idle groups.
-  let num_groups_maybe_zero = BinOpExp (SMin Int64)
-                              (i32Toi64 (toExp' int32 w) `quotRoundingUp`
-                               i32Toi64 (toExp' int32 group_size)) $
-                              i32Toi64 $ Imp.vi32 max_num_groups
+  let num_groups_maybe_zero = BinOpExp (SMin Int32)
+                              (toExp' int32 w `quotRoundingUp`
+                               toExp' int32 group_size) $
+                              Imp.vi32 max_num_groups
   -- We also don't want zero groups.
-  let num_groups = BinOpExp (SMax Int64) 1 num_groups_maybe_zero
+  let num_groups = BinOpExp (SMax Int32) 1 num_groups_maybe_zero
   patElemName pe <-- num_groups
-  where i32Toi64 = ConvOpExp (SExt Int32 Int64)
 
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
