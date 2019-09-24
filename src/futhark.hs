@@ -59,6 +59,7 @@ commands = sortOn fst
 
            , ("dataset", (Dataset.main, "Generate random test data."))
            , ("datacmp", (Datacmp.main, "Compare Futhark data files for equality."))
+           , ("dataget", (Misc.mainDataget, "Extract test data."))
 
            , ("doc", (Doc.main, "Generate documentation for Futhark code."))
            , ("pkg", (Pkg.main, "Manage local packages."))

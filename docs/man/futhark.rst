@@ -39,6 +39,13 @@ used by all other executable and tools (such as
 is in contrast to :ref:`futhark-test(1)`, which only reports the first
 one.
 
+futhark dataget PROGRAM DATASET
+-------------------------------
+
+Find the test dataset whose description contains ``DATASET``
+(e.g. ``#1``) and print it in binary representation to standard
+output.
+
 futhark dev options... PROGRAM
 ------------------------------
 

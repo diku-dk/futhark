@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     used by incremental flattening.  Based on work by Svend Lund
     Breddam, Simon Rotendahl, and Carl Mathias Graae Larsen.
 
+  * New tool: `futhark dataget`, for extracting test input data.  Most
+    will probably never use this.
+
 ### Removed
 
 ### Changed

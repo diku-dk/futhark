@@ -3,17 +3,21 @@
 module Futhark.CLI.Misc
   ( mainCheck
   , mainImports
+  , mainDataget
   )
 where
 
-import Data.List (isPrefixOf)
+import qualified Data.ByteString.Lazy as BS
+import Data.List (isPrefixOf, isInfixOf)
 import Control.Monad.State
+import System.FilePath
 import System.IO
 import System.Exit
 
 import Futhark.Compiler
 import Futhark.Util.Options
 import Futhark.Pipeline
+import Futhark.Test
 
 runFutharkM' :: FutharkM () -> IO ()
 runFutharkM' m = do
@@ -42,3 +46,29 @@ mainImports = mainWithOptions () [] "program" $ \args () ->
           liftIO $ putStr $ unlines $ map (++ ".fut")
             $ filter (\f -> not ("futlib/" `isPrefixOf` f))
             $ map fst prog_imports
+
+mainDataget :: String -> [String] -> IO ()
+mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
+  case args of
+    [file, dataset] -> Just $ dataget file dataset
+    _ -> Nothing
+  where dataget prog dataset = do
+          let dir = takeDirectory prog
+
+          runs <- testSpecRuns <$> testSpecFromFile prog
+
+          case filter ((dataset `isInfixOf`) . runDescription) runs of
+            [x] -> BS.putStr =<< getValuesBS dir (runInput x)
+
+            [] -> do hPutStr stderr $ "No dataset '" ++ dataset ++ "'.\n"
+                     hPutStr stderr "Available datasets:\n"
+                     mapM_ (hPutStrLn stderr . ("  "++) . runDescription) runs
+                     exitFailure
+
+            runs' -> do hPutStr stderr $ "Dataset '" ++ dataset ++ "' ambiguous:\n"
+                        mapM_ (hPutStrLn stderr . ("  "++) . runDescription) runs'
+                        exitFailure
+
+        testSpecRuns = testActionRuns . testAction
+        testActionRuns CompileTimeFailure{} = []
+        testActionRuns (RunCases ios _ _) = concatMap iosTestRuns ios
