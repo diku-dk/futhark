@@ -147,11 +147,15 @@ generated Futhark executable.
 Setting up Futhark on Windows
 -----------------------------
 
-While the Futhark compiler itself is easily installed on Windows via
-``stack`` (see above), it takes a little more work to make the OpenCL
-and PyOpenCL backends functional.  This guide was last updated on the
-5th of May 2016, and is for computers using 64-bit Windows along with
-`CUDA 7.5`_ and Python 2.7 (`Anaconda`_ preferred).
+The Futhark compiler itself is easily installed on Windows via
+``stack`` (see above).  If you are using the default Windows console,
+you may need to run ``chcp 65001`` to make Unicode characters show up
+correctly.
+
+It takes a little more work to make the OpenCL and PyOpenCL backends
+functional.  This guide was last updated on the 5th of May 2016, and
+is for computers using 64-bit Windows along with `CUDA 7.5`_ and
+Python 2.7 (`Anaconda`_ preferred).
 
 Also `Git for Windows`_ is required for its Linux command line tools.
 If you have not marked the option to add them to path, there are
