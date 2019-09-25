@@ -596,7 +596,7 @@ defCompileExp pat (DoLoop ctx val form body) = do
                 return ()
 
       dLParams $ map fst loopvars
-      sFor i it (toExp' (IntType it) bound) $
+      sFor' i it (toExp' (IntType it) bound) $
         mapM_ setLoopParam loopvars >> doBody
     WhileLoop cond ->
       sWhile (Imp.var cond Bool) doBody
@@ -663,17 +663,14 @@ defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
 defCompileBasicOp _ Scratch{} =
   return ()
 
-defCompileBasicOp (Pattern [] [pe]) (Iota n e s et) = do
-  i <- newVName "i"
-  x <- newVName "x"
+defCompileBasicOp (Pattern [] [pe]) (Iota n e s it) = do
   n' <- toExp n
   e' <- toExp e
   s' <- toExp s
-  let i' = ConvOpExp (SExt Int32 et) $ Imp.var i $ IntType Int32
-  dPrim_ x $ IntType et
-  sFor i Int32 n' $ do
-    x <-- e' + i' * s'
-    copyDWIM (patElemName pe) [Imp.vi32 i] (Var x) []
+  sFor "i" Int32 n' $ \i -> do
+    let i' = ConvOpExp (SExt Int32 it) i
+    x <- dPrimV "x" $ e' + i' * s'
+    copyDWIM (patElemName pe) [i] (Var x) []
 
 defCompileBasicOp (Pattern _ [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
@@ -1190,11 +1187,18 @@ typeSize t = Imp.bytes $ Imp.LeafExp (Imp.SizeOf $ elemType t) int32 *
 
 --- Building blocks for constructing code.
 
-sFor :: VName -> IntType -> Imp.Exp -> ImpM lore op () -> ImpM lore op ()
-sFor i it bound body = do
+sFor' :: VName -> IntType -> Imp.Exp -> ImpM lore op () -> ImpM lore op ()
+sFor' i it bound body = do
   addLoopVar i it
   body' <- collect body
   emit $ Imp.For i it bound body'
+
+sFor :: String -> IntType -> Imp.Exp -> (Imp.Exp -> ImpM lore op ()) -> ImpM lore op ()
+sFor i it bound body = do
+  i' <- newVName i
+  addLoopVar i' it
+  body' <- collect $ body $ Imp.var i' $ IntType it
+  emit $ Imp.For i' it bound body'
 
 sWhile :: Imp.Exp -> ImpM lore op () -> ImpM lore op ()
 sWhile cond body = do
@@ -1290,9 +1294,8 @@ sLoopNest :: Shape
 sLoopNest = sLoopNest' [] . shapeDims
   where sLoopNest' is [] f = f $ reverse is
         sLoopNest' is (d:ds) f = do
-          i <- newVName "nest_i"
           d' <- toExp d
-          sFor i Int32 d' $ sLoopNest' (Imp.var i int32:is) ds f
+          sFor "nest_i" Int32 d' $ \i -> sLoopNest' (i:is) ds f
 
 -- | ASsignment.
 (<--) :: VName -> Imp.Exp -> ImpM lore op ()

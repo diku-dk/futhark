@@ -55,7 +55,6 @@ import Data.List
 import Prelude hiding (quot, rem)
 
 import Futhark.Error
-import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
@@ -510,7 +509,6 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
             forM_ (zip (slugAccs slug) (lambdaParams slug_op_renamed)) $ \((acc, acc_is), p) ->
             copyDWIM acc (acc_is++vec_is) (Var $ paramName p) []
 
-  i <- newVName "i"
   -- If this is a non-commutative reduction, each thread must run the
   -- loop the same number of iterations, because we will be performing
   -- a group-wide reduction in there.
@@ -521,16 +519,16 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
           Noncommutative -> (Imp.unCount elems_per_thread,
                              sWhen (Imp.var gtid int32 .<. Imp.unCount num_elements))
 
-  sFor i Int32 bound $ do
+  sFor "i" Int32 bound $ \i -> do
     gtid <--
       case comm of
         Commutative ->
           global_tid +
-          Imp.var threads_per_segment int32 * Imp.var i int32
+          Imp.var threads_per_segment int32 * i
         Noncommutative ->
           let index_in_segment = global_tid `quot` kernelGroupSize constants
           in local_tid +
-             (index_in_segment * Imp.unCount elems_per_thread + Imp.var i int32) *
+             (index_in_segment * Imp.unCount elems_per_thread + i) *
              kernelGroupSize constants
 
     check_bounds $ sComment "apply map function" $
