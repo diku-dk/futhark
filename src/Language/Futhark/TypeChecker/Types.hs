@@ -166,8 +166,7 @@ checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', st1, _) <- checkTypeExp t1
   bindSpaced [(Term, v)] $ do
     v' <- checkName Term v loc
-    let env = mempty { envVtable = M.singleton v' $ BoundV [] st1 }
-    localEnv env $ do
+    bindVal v' (BoundV [] st1) $ do
       (t2', st2, _) <- checkTypeExp t2
       return (TEArrow (Just v') t1' t2' loc,
               Scalar $ Arrow mempty (Named v') st1 st2,

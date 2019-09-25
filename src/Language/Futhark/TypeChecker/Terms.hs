@@ -269,12 +269,16 @@ instance MonadTypeChecker TermTypeM where
   bindNameMap m = local $ \scope ->
     scope { scopeNameMap = m <> scopeNameMap scope }
 
+  bindVal v (TypeM.BoundV tps t) = local $ \scope ->
+    scope { scopeVtable = M.insert v vb $ scopeVtable scope }
+    where vb = BoundV Local tps $ fromStruct t
+
   localEnv env (TermTypeM m) = do
     cur_state <- get
     cur_scope <- ask
     let cur_scope' =
           cur_scope { scopeNameMap = scopeNameMap cur_scope `M.difference` envNameMap env }
-    (x,new_state,occs) <- liftTypeM $ localTmpEnv env $
+    (x,new_state,occs) <- liftTypeM $ localEnv env $
                           runRWST m cur_scope' cur_state
     tell occs
     put new_state
