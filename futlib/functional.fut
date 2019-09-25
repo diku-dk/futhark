@@ -3,7 +3,9 @@
 -- | Left-to-right application.  Particularly useful for describing
 -- computation pipelines:
 --
---     x |> f |> g |> h
+-- ```
+-- x |> f |> g |> h
+-- ```
 let (|>) '^a '^b (x: a) (f: a -> b): b = f x
 
 -- | Right to left application.
@@ -18,7 +20,9 @@ let (<-<) '^a '^b '^c (g: b -> c) (f: a -> b) (x: a): c = g (f x)
 
 -- | Flip the arguments passed to a function.
 --
---     f x y == flip f y x
+-- ```
+-- f x y == flip f y x
+-- ```
 let flip '^a '^b '^c (f: a -> b -> c) (b: b) (a: a): c =
   f a b
 
