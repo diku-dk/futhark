@@ -77,7 +77,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
     forM_ (zip scan_x_params nes) $ \(p, ne) ->
       copyDWIM (paramName p) [] ne []
 
-    sFor "j" Int32 elems_per_thread $ \j -> do
+    sFor "j" elems_per_thread $ \j -> do
       chunk_offset <- dPrimV "chunk_offset" $
                       kernelGroupSize constants * j +
                       kernelGroupId constants * elems_per_group

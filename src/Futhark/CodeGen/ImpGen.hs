@@ -667,7 +667,7 @@ defCompileBasicOp (Pattern [] [pe]) (Iota n e s it) = do
   n' <- toExp n
   e' <- toExp e
   s' <- toExp s
-  sFor "i" Int32 n' $ \i -> do
+  sFor "i" n' $ \i -> do
     let i' = ConvOpExp (SExt Int32 it) i
     x <- dPrimV "x" $ e' + i' * s'
     copyDWIM (patElemName pe) [i] (Var x) []
@@ -1193,9 +1193,12 @@ sFor' i it bound body = do
   body' <- collect body
   emit $ Imp.For i it bound body'
 
-sFor :: String -> IntType -> Imp.Exp -> (Imp.Exp -> ImpM lore op ()) -> ImpM lore op ()
-sFor i it bound body = do
+sFor :: String -> Imp.Exp -> (Imp.Exp -> ImpM lore op ()) -> ImpM lore op ()
+sFor i bound body = do
   i' <- newVName i
+  it <- case primExpType bound of
+          IntType it -> return it
+          t -> compilerBugS $ "sFor: bound " ++ pretty bound ++ " is of type " ++ pretty t
   addLoopVar i' it
   body' <- collect $ body $ Imp.var i' $ IntType it
   emit $ Imp.For i' it bound body'
@@ -1295,7 +1298,7 @@ sLoopNest = sLoopNest' [] . shapeDims
   where sLoopNest' is [] f = f $ reverse is
         sLoopNest' is (d:ds) f = do
           d' <- toExp d
-          sFor "nest_i" Int32 d' $ \i -> sLoopNest' (i:is) ds f
+          sFor "nest_i" d' $ \i -> sLoopNest' (i:is) ds f
 
 -- | ASsignment.
 (<--) :: VName -> Imp.Exp -> ImpM lore op ()
