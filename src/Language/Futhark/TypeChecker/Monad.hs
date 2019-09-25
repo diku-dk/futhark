@@ -7,7 +7,6 @@ module Language.Futhark.TypeChecker.Monad
   , askEnv
   , askRootEnv
   , askImportName
-  , localTmpEnv
   , checkQualNameWithEnv
   , bindSpaced
   , qualifyTypeVars
@@ -159,10 +158,6 @@ askRootEnv = asks contextRootEnv
 askImportName :: TypeM ImportName
 askImportName = asks contextImportName
 
-localTmpEnv :: Env -> TypeM a -> TypeM a
-localTmpEnv env = local $ \ctx ->
-  ctx { contextEnv = env <> contextEnv ctx }
-
 -- | A piece of information that describes what process the type
 -- checker currently performing.  This is used to give better error
 -- messages.
@@ -201,6 +196,7 @@ class MonadError TypeError m => MonadTypeChecker m where
 
   bindNameMap :: NameMap -> m a -> m a
   localEnv :: Env -> m a -> m a
+  bindVal :: VName -> BoundV -> m a -> m a
 
   checkQualName :: Namespace -> QualName Name -> SrcLoc -> m (QualName VName)
 
@@ -244,6 +240,8 @@ instance MonadTypeChecker TypeM where
   localEnv env = local $ \ctx ->
     let env' = env <> contextEnv ctx
     in ctx { contextEnv = env', contextRootEnv = env' }
+
+  bindVal v t = localEnv $ mempty { envVtable = M.singleton v t }
 
   checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
 
