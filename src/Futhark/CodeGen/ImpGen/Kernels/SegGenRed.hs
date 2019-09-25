@@ -249,7 +249,7 @@ genRedKernelGlobal map_pes num_groups group_size space slugs kbody = do
       kernelGlobalThreadId constants `quot`
       (kernelNumThreads constants `quotRoundingUp` Imp.var num_histograms int32)
 
-    sFor "flat_idx" Int64 elems_per_thread_64 $ \flat_idx -> do
+    sFor "flat_idx" elems_per_thread_64 $ \flat_idx -> do
       -- Compute the offset into the input and output.  To this a
       -- thread can add its local ID to figure out which element it is
       -- responsible for.  The calculation is done with 64-bit
@@ -439,7 +439,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
                                group_hists_size `quotRoundingUp` kernelGroupSize constants
 
             forM_ (zip dests (genReduceNeutral $ slugOp slug)) $ \((dest_global, dest_local), ne) ->
-              sFor "local_i" Int32 init_per_thread $ \i -> do
+              sFor "local_i" init_per_thread $ \i -> do
                 j <- dPrimVE "j" $
                      i * kernelGroupSize constants + kernelLocalThreadId constants
                 j_offset <- dPrimVE "j_offset" $
@@ -469,7 +469,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
 
     sOp Imp.LocalBarrier
 
-    sFor "flat_idx" Int64 elems_per_thread_64 $ \flat_idx -> do
+    sFor "flat_idx" elems_per_thread_64 $ \flat_idx -> do
       -- Compute the offset into the input and output.  To this a
       -- thread can add its local ID to figure out which element it is
       -- responsible for.  The calculation is done with 64-bit
@@ -527,7 +527,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
       bins_per_thread <- dPrimVE "init_per_thread" $
                          histo_size `quotRoundingUp` kernelGroupSize constants
 
-      sFor "local_i" Int32 bins_per_thread $ \i -> do
+      sFor "local_i" bins_per_thread $ \i -> do
         j <- dPrimVE "j" $
              i * kernelGroupSize constants + kernelLocalThreadId constants
         sWhen (j .<. histo_size) $ do
@@ -546,7 +546,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
             (Var subhisto) (0:bucket_is)
 
           sComment "Accumulate based on values in other subhistograms." $
-            sFor "subhisto_id" Int32 (num_subhistos_per_group - 1) $ \subhisto_id -> do
+            sFor "subhisto_id" (num_subhistos_per_group - 1) $ \subhisto_id -> do
               forM_ (zip yparams local_dests) $ \(yp, subhisto) ->
                 copyDWIM
                 (paramName yp) []
@@ -565,7 +565,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
                           histo_size `quotRoundingUp` kernelGroupSize constants
 
       forM_ dests $ \(dest_global, dest_local) ->
-        sFor "local_i" Int32 write_per_thread $ \i -> do
+        sFor "local_i" write_per_thread $ \i -> do
           j <- dPrimVE "j" $
                i * kernelGroupSize constants +
                kernelLocalThreadId constants

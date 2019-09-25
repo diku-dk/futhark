@@ -519,7 +519,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
           Noncommutative -> (Imp.unCount elems_per_thread,
                              sWhen (Imp.var gtid int32 .<. Imp.unCount num_elements))
 
-  sFor "i" Int32 bound $ \i -> do
+  sFor "i" bound $ \i -> do
     gtid <--
       case comm of
         Commutative ->

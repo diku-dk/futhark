@@ -138,7 +138,7 @@ groupLoop constants n f = do
   let ltid = kernelLocalThreadId constants
       elems_for_this = (n - ltid) `quotRoundingUp` kernelGroupSize constants
 
-  sFor "i" Int32 elems_for_this $ \i -> f $
+  sFor "i" elems_for_this $ \i -> f $
     i * kernelGroupSize constants +
     kernelLocalThreadId constants
 
@@ -1025,7 +1025,7 @@ virtualiseGroups constants SegVirt required_groups m = do
   let iterations = (required_groups - Imp.vi32 phys_group_id) `quotRoundingUp`
                    kernelNumGroups constants
 
-  sFor "i" Int32 iterations $ \i ->
+  sFor "i" iterations $ \i ->
     m =<< dPrimV "virt_group_id" (Imp.vi32 phys_group_id + i * kernelNumGroups constants)
 
 sKernelThread, sKernelGroup :: String
@@ -1190,7 +1190,7 @@ compileGroupResult _ constants pe (TileReturns [(w,per_group_elems)] what) = do
     then sWhen (offset + ltid .<. toExp' int32 w) $
          copyDWIMDest dest' [ltid] (Var what) [ltid]
     else
-    sFor "i" Int32 (n `quotRoundingUp` kernelGroupSize constants) $ \i -> do
+    sFor "i" (n `quotRoundingUp` kernelGroupSize constants) $ \i -> do
       j <- fmap Imp.vi32 $ dPrimV "j" $
            kernelGroupSize constants * i + ltid
       sWhen (j .<. n) $ copyDWIMDest dest' [j] (Var what) [j]
