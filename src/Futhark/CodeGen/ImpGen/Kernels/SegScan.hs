@@ -10,7 +10,6 @@ import Data.List
 
 import Prelude hiding (quot, rem)
 
-import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
@@ -78,10 +77,9 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
     forM_ (zip scan_x_params nes) $ \(p, ne) ->
       copyDWIM (paramName p) [] ne []
 
-    j <- newVName "j"
-    sFor j Int32 elems_per_thread $ do
+    sFor "j" Int32 elems_per_thread $ \j -> do
       chunk_offset <- dPrimV "chunk_offset" $
-                      kernelGroupSize constants * Imp.var j int32 +
+                      kernelGroupSize constants * j +
                       kernelGroupId constants * elems_per_group
       flat_idx <- dPrimV "flat_idx" $
                   Imp.var chunk_offset int32 + kernelLocalThreadId constants

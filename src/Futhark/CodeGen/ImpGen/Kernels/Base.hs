@@ -133,15 +133,13 @@ compileThreadExp dest e =
 groupLoop :: KernelConstants -> Imp.Exp
           -> (Imp.Exp -> InKernelGen ()) -> InKernelGen ()
 groupLoop constants n f = do
-  i <- newVName "i"
-
   -- Compute how many elements this thread is responsible for.
   -- Formula: (n - ltid) / group_size (rounded up).
   let ltid = kernelLocalThreadId constants
       elems_for_this = (n - ltid) `quotRoundingUp` kernelGroupSize constants
 
-  sFor i Int32 elems_for_this $ f $
-    Imp.vi32 i * kernelGroupSize constants +
+  sFor "i" Int32 elems_for_this $ \i -> f $
+    i * kernelGroupSize constants +
     kernelLocalThreadId constants
 
 -- | Iterate collectively though a multidimensional space, such that
@@ -1026,9 +1024,9 @@ virtualiseGroups constants SegVirt required_groups m = do
   sOp $ Imp.GetGroupId phys_group_id 0
   let iterations = (required_groups - Imp.vi32 phys_group_id) `quotRoundingUp`
                    kernelNumGroups constants
-  i <- newVName "i"
-  sFor i Int32 iterations $
-    m =<< dPrimV "virt_group_id" (Imp.vi32 phys_group_id + Imp.vi32 i * kernelNumGroups constants)
+
+  sFor "i" Int32 iterations $ \i ->
+    m =<< dPrimV "virt_group_id" (Imp.vi32 phys_group_id + i * kernelNumGroups constants)
 
 sKernelThread, sKernelGroup :: String
                             -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
@@ -1191,11 +1189,10 @@ compileGroupResult _ constants pe (TileReturns [(w,per_group_elems)] what) = do
   if toExp' int32 per_group_elems == kernelGroupSize constants
     then sWhen (offset + ltid .<. toExp' int32 w) $
          copyDWIMDest dest' [ltid] (Var what) [ltid]
-    else do
-    i <- newVName "i"
-    sFor i Int32 (n `quotRoundingUp` kernelGroupSize constants) $ do
+    else
+    sFor "i" Int32 (n `quotRoundingUp` kernelGroupSize constants) $ \i -> do
       j <- fmap Imp.vi32 $ dPrimV "j" $
-           kernelGroupSize constants * Imp.vi32 i + ltid
+           kernelGroupSize constants * i + ltid
       sWhen (j .<. n) $ copyDWIMDest dest' [j] (Var what) [j]
   where ltid = kernelLocalThreadId constants
         offset = toExp' int32 per_group_elems * kernelGroupId constants
