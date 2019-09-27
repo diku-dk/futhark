@@ -298,9 +298,6 @@ instance MonadTypeChecker TermTypeM where
       Nothing -> unknownVariableError Term qn loc
       Just m  -> return (qn', m)
 
-  lookupMTy loc name = liftTypeM $ TypeM.lookupMTy loc name
-  lookupImport loc name = liftTypeM $ TypeM.lookupImport loc name
-
   lookupVar loc qn = do
     outer_env <- liftTypeM askRootEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
