@@ -153,20 +153,23 @@ data ValBinding = BoundV Locality [TypeParam] PatternType
 -- scope.
 data TermScope = TermScope { scopeVtable  :: M.Map VName ValBinding
                            , scopeTypeTable :: M.Map VName TypeBinding
+                           , scopeModTable :: M.Map VName Mod
                            , scopeNameMap :: NameMap
                            , scopeBreadCrumbs :: [BreadCrumb]
                              -- ^ Most recent first.
                            } deriving (Show)
 
 instance Semigroup TermScope where
-  TermScope vt1 tt1 nt1 bc1 <> TermScope vt2 tt2 nt2 bc2 =
-    TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (nt2 `M.union` nt1) (bc1 <> bc2)
-
-instance Monoid TermScope where
-  mempty = TermScope mempty mempty mempty mempty
+  TermScope vt1 tt1 mt1 nt1 bc1 <> TermScope vt2 tt2 mt2 nt2 bc2 =
+    TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (mt1 `M.union` mt2) (nt2 `M.union` nt1) (bc1 <> bc2)
 
 envToTermScope :: Env -> TermScope
-envToTermScope env = TermScope vtable (envTypeTable env) (envNameMap env) mempty
+envToTermScope env = TermScope { scopeVtable = vtable
+                               , scopeTypeTable = envTypeTable env
+                               , scopeNameMap = envNameMap env
+                               , scopeModTable = envModTable env
+                               , scopeBreadCrumbs = mempty
+                               }
   where vtable = M.mapWithKey valBinding $ envVtable env
         valBinding k (TypeM.BoundV tps v) =
           BoundV Global tps $ v `setAliases`
@@ -237,7 +240,12 @@ incCounter = do (x, i) <- get
                 return i
 
 initialTermScope :: TermScope
-initialTermScope = TermScope initialVtable mempty topLevelNameMap mempty
+initialTermScope = TermScope { scopeVtable = initialVtable
+                             , scopeTypeTable = mempty
+                             , scopeNameMap = topLevelNameMap
+                             , scopeModTable = mempty
+                             , scopeBreadCrumbs = mempty
+                             }
   where initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
 
         funF ts t = foldr (arrow . Scalar . Prim) (Scalar $ Prim t) ts
@@ -273,16 +281,8 @@ instance MonadTypeChecker TermTypeM where
     scope { scopeVtable = M.insert v vb $ scopeVtable scope }
     where vb = BoundV Local tps $ fromStruct t
 
-  localEnv env (TermTypeM m) = do
-    cur_state <- get
-    cur_scope <- ask
-    let cur_scope' =
-          cur_scope { scopeNameMap = scopeNameMap cur_scope `M.difference` envNameMap env }
-    (x,new_state,occs) <- liftTypeM $ localTmpEnv env $
-                          runRWST m cur_scope' cur_state
-    tell occs
-    put new_state
-    return x
+  localEnv env = local $ \scope ->
+    scope <> envToTermScope env
 
   lookupType loc qn = do
     outer_env <- liftTypeM askRootEnv
@@ -292,7 +292,12 @@ instance MonadTypeChecker TermTypeM where
       Just (TypeAbbr l ps def) ->
         return (qn', ps, qualifyTypeVars outer_env (map typeParamName ps) qs def, l)
 
-  lookupMod loc name = liftTypeM $ TypeM.lookupMod loc name
+  lookupMod loc qn = do
+    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
+    case M.lookup name $ scopeModTable scope of
+      Nothing -> unknownVariableError Term qn loc
+      Just m  -> return (qn', m)
+
   lookupMTy loc name = liftTypeM $ TypeM.lookupMTy loc name
   lookupImport loc name = liftTypeM $ TypeM.lookupImport loc name
 
@@ -346,20 +351,29 @@ instance MonadTypeChecker TermTypeM where
     return v'
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
-checkQualNameWithEnv space qn@(QualName [q] _) loc
-  | nameToString q == "intrinsics" = do
-      -- Check if we are referring to the magical intrinsics
-      -- module.
-      (_, QualName _ q') <- liftTypeM $ TypeM.checkQualNameWithEnv Term (qualName q) loc
-      if baseTag q' <= maxIntrinsicTag
-        then checkIntrinsic space qn loc
-        else checkReallyQualName space qn loc
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
   scope <- ask
-  case quals of
-    [] | Just name' <- M.lookup (space, name) $ scopeNameMap scope ->
-           return (scope, name')
-    _ -> checkReallyQualName space qn loc
+  descend scope quals
+  where descend scope []
+          | Just name' <- M.lookup (space, name) $ scopeNameMap scope =
+              return (scope, name')
+          | otherwise =
+              unknownVariableError space qn loc
+
+        descend scope (q:qs)
+          | Just (QualName _ q') <- M.lookup (Term, q) $ scopeNameMap scope,
+            Just res <- M.lookup q' $ scopeModTable scope =
+              case res of
+                -- Check if we are referring to the magical intrinsics
+                -- module.
+                _ | baseTag q' <= maxIntrinsicTag ->
+                      checkIntrinsic space qn loc
+                ModEnv q_scope -> do
+                  (scope', QualName qs' name') <- descend (envToTermScope q_scope) qs
+                  return (scope', QualName (q':qs') name')
+                ModFun{} -> unappliedFunctor loc
+          | otherwise =
+              unknownVariableError space qn loc
 
 checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkIntrinsic space qn@(QualName _ name) loc
@@ -371,11 +385,6 @@ checkIntrinsic space qn@(QualName _ name) loc
       return (scope, v)
   | otherwise =
       unknownVariableError space qn loc
-
-checkReallyQualName :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
-checkReallyQualName space qn loc = do
-  (env, name') <- liftTypeM $ TypeM.checkQualNameWithEnv space qn loc
-  return (envToTermScope env, name')
 
 -- | Wrap 'Types.checkTypeDecl' to also perform an observation of
 -- every size in the type.
