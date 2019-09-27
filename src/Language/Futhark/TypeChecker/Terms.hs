@@ -278,7 +278,7 @@ instance MonadTypeChecker TermTypeM where
     cur_scope <- ask
     let cur_scope' =
           cur_scope { scopeNameMap = scopeNameMap cur_scope `M.difference` envNameMap env }
-    (x,new_state,occs) <- liftTypeM $ localEnv env $
+    (x,new_state,occs) <- liftTypeM $ localTmpEnv env $
                           runRWST m cur_scope' cur_state
     tell occs
     put new_state
