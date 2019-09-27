@@ -5,7 +5,6 @@ module Language.Futhark.TypeChecker.Monad
   ( TypeM
   , runTypeM
   , askEnv
-  , askRootEnv
   , askImportName
   , checkQualNameWithEnv
   , bindSpaced
@@ -128,7 +127,6 @@ instance Show TypeError where
 type ImportTable = M.Map String Env
 
 data Context = Context { contextEnv :: Env
-                       , contextRootEnv :: Env
                        , contextImportTable :: ImportTable
                        , contextImportName :: ImportName
                        }
@@ -150,12 +148,11 @@ runTypeM :: Env -> ImportTable -> ImportName -> VNameSource
          -> TypeM a
          -> Either TypeError (a, Warnings, VNameSource)
 runTypeM env imports fpath src (TypeM m) = do
-  (x, src', ws) <- runExcept $ runRWST m (Context env env imports fpath) src
+  (x, src', ws) <- runExcept $ runRWST m (Context env imports fpath) src
   return (x, ws, src')
 
-askEnv, askRootEnv :: TypeM Env
+askEnv :: TypeM Env
 askEnv = asks contextEnv
-askRootEnv = asks contextRootEnv
 
 -- | The name of the current file/import.
 askImportName :: TypeM ImportName
@@ -181,7 +178,7 @@ lookupImport loc file = do
 localEnv :: Env -> TypeM a -> TypeM a
 localEnv env = local $ \ctx ->
   let env' = env <> contextEnv ctx
-  in ctx { contextEnv = env', contextRootEnv = env' }
+  in ctx { contextEnv = env' }
 
 -- | A piece of information that describes what process the type
 -- checker currently performing.  This is used to give better error
@@ -266,7 +263,7 @@ instance MonadTypeChecker TypeM where
   checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
 
   lookupType loc qn = do
-    outer_env <- askRootEnv
+    outer_env <- askEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
       Nothing -> undefinedType loc qn
@@ -279,7 +276,7 @@ instance MonadTypeChecker TypeM where
       Just m  -> return (qn', m)
 
   lookupVar loc qn = do
-    outer_env <- askRootEnv
+    outer_env <- askEnv
     (env, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envVtable env of
       Nothing -> unknownVariableError Term qn loc
