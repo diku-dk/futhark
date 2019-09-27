@@ -281,9 +281,6 @@ instance MonadTypeChecker TermTypeM where
     scope { scopeVtable = M.insert v vb $ scopeVtable scope }
     where vb = BoundV Local tps $ fromStruct t
 
-  localEnv env = local $ \scope ->
-    scope <> envToTermScope env
-
   lookupType loc qn = do
     outer_env <- liftTypeM askRootEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
@@ -922,7 +919,7 @@ checkExp (Parens e loc) =
 checkExp (QualParens modname e loc) = do
   (modname',mod) <- lookupMod loc modname
   case mod of
-    ModEnv env -> localEnv (qualifyEnv modname' env) $ do
+    ModEnv env -> local (<> envToTermScope (qualifyEnv modname' env)) $ do
       e' <- checkExp e
       return $ QualParens modname' e' loc
     ModFun{} ->
