@@ -12,6 +12,7 @@ module Language.Futhark.TypeChecker.Monad
   , qualifyTypeVars
   , lookupMTy
   , lookupImport
+  , localEnv
 
   , TypeError(..)
   , unexpectedType
@@ -177,6 +178,11 @@ lookupImport loc file = do
                            "Known: " ++ intercalate ", " (M.keys imports)]
     Just scope -> return (canonical_import, scope)
 
+localEnv :: Env -> TypeM a -> TypeM a
+localEnv env = local $ \ctx ->
+  let env' = env <> contextEnv ctx
+  in ctx { contextEnv = env', contextRootEnv = env' }
+
 -- | A piece of information that describes what process the type
 -- checker currently performing.  This is used to give better error
 -- messages.
@@ -214,7 +220,6 @@ class MonadError TypeError m => MonadTypeChecker m where
   newID :: Name -> m VName
 
   bindNameMap :: NameMap -> m a -> m a
-  localEnv :: Env -> m a -> m a
   bindVal :: VName -> BoundV -> m a -> m a
 
   checkQualName :: Namespace -> QualName Name -> SrcLoc -> m (QualName VName)
@@ -253,10 +258,6 @@ instance MonadTypeChecker TypeM where
   bindNameMap m = local $ \ctx ->
     let env = contextEnv ctx
     in ctx { contextEnv = env { envNameMap = m <> envNameMap env } }
-
-  localEnv env = local $ \ctx ->
-    let env' = env <> contextEnv ctx
-    in ctx { contextEnv = env', contextRootEnv = env' }
 
   bindVal v t = local $ \ctx ->
     ctx { contextEnv = (contextEnv ctx)
