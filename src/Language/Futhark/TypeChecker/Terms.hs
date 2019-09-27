@@ -292,7 +292,7 @@ instance MonadTypeChecker TermTypeM where
     where vb = BoundV Local tps $ fromStruct t
 
   lookupType loc qn = do
-    outer_env <- liftTypeM askRootEnv
+    outer_env <- liftTypeM askEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ scopeTypeTable scope of
       Nothing -> undefinedType loc qn
@@ -306,7 +306,7 @@ instance MonadTypeChecker TermTypeM where
       Just m  -> return (qn', m)
 
   lookupVar loc qn = do
-    outer_env <- liftTypeM askRootEnv
+    outer_env <- liftTypeM askEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     let usage = mkUsage loc $ "use of " ++ quote (pretty qn)
 
