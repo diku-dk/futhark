@@ -655,7 +655,7 @@ eval _ (FloatLit v (Info t) _) =
       return $ ValuePrim $ FloatValue $ floatValue ft v
     _ -> error $ "eval: nonsensical type for float literal: " ++ pretty t
 
-eval env (BinOp op op_t (x, _) (y, _) _ loc)
+eval env (BinOp (op, _) op_t (x, _) (y, _) _ loc)
   | baseString (qualLeaf op) == "&&" = do
       x' <- asBool <$> eval env x
       if x'

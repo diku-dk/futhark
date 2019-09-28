@@ -734,14 +734,14 @@ internaliseExp desc (E.If ce te fe _ _) =
 
 -- Builtin operators are handled specially because they are
 -- overloaded.
-internaliseExp desc (E.BinOp op _ (xe,_) (ye,_) _ loc)
+internaliseExp desc (E.BinOp (op, _) _ (xe,_) (ye,_) _ loc)
   | Just internalise <- isOverloadedFunction op [xe, ye] loc =
       internalise desc
 
 -- User-defined operators are just the same as a function call.
-internaliseExp desc (E.BinOp op (Info t) (xarg, Info xt) (yarg, Info yt) _ loc) =
+internaliseExp desc (E.BinOp (op, oploc) (Info t) (xarg, Info xt) (yarg, Info yt) _ loc) =
   internaliseExp desc $
-  E.Apply (E.Apply (E.Var op (Info t) loc) xarg (Info $ E.diet xt)
+  E.Apply (E.Apply (E.Var op (Info t) oploc) xarg (Info $ E.diet xt)
            (Info $ foldFunType [E.fromStruct yt] t) loc)
           yarg (Info $ E.diet yt) (Info t) loc
 
