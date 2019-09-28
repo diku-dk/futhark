@@ -219,7 +219,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
       DownToExclusive end' -> text "..>" <> ppr end'
       ToInclusive     end' -> text "..." <> ppr end'
       UpToExclusive   end' -> text "..<" <> ppr end'
-  pprPrec p (BinOp bop _ (x,_) (y,_) _ _) = prettyBinOp p bop x y
+  pprPrec p (BinOp (bop, _) _ (x,_) (y,_) _ _) = prettyBinOp p bop x y
   pprPrec _ (Project k e _ _) = ppr e <> text "." <> ppr k
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>

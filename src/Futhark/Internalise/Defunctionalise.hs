@@ -292,8 +292,8 @@ defuncExp (DoLoop pat e1 form e3 loc) = do
           M.singleton vn $ Dynamic tp
 
 -- We handle BinOps by turning them into ordinary function applications.
-defuncExp (BinOp qn (Info t) (e1, Info pt1) (e2, Info pt2) (Info ret) loc) =
-  defuncExp $ Apply (Apply (Var qn (Info t) loc)
+defuncExp (BinOp (qn, qnloc) (Info t) (e1, Info pt1) (e2, Info pt2) (Info ret) loc) =
+  defuncExp $ Apply (Apply (Var qn (Info t) qnloc)
                      e1 (Info (diet pt1)) (Info (Scalar $ Arrow mempty Unnamed (fromStruct pt2) ret)) loc)
                     e2 (Info (diet pt2)) (Info ret) loc
 
@@ -831,8 +831,8 @@ freeVars expr = case expr of
           formVars (ForIn p e2)   = (freeVars e2, patternVars p)
           formVars (While e2)     = (freeVars e2, mempty)
 
-  BinOp qn _ (e1, _) (e2, _) _ _ -> oneName (qualLeaf qn) <>
-                                    freeVars e1 <> freeVars e2
+  BinOp (qn, _) _ (e1, _) (e2, _) _ _ -> oneName (qualLeaf qn) <>
+                                         freeVars e1 <> freeVars e2
   Project _ e _ _                -> freeVars e
 
   LetWith id1 id2 idxs e1 e2 _ _ ->

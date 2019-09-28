@@ -73,8 +73,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Ascript e tdecl t loc) =
     Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*>
     traverse (mapOnPatternType tv) t <*> pure loc
-  astMap tv (BinOp fname t (x,xt) (y,yt) (Info rt) loc) =
-    BinOp <$> mapOnQualName tv fname <*> traverse (mapOnPatternType tv) t <*>
+  astMap tv (BinOp (fname, fname_loc) t (x,xt) (y,yt) (Info rt) loc) =
+    BinOp <$> ((,) <$> mapOnQualName tv fname <*> pure fname_loc) <*>
+    traverse (mapOnPatternType tv) t <*>
     ((,) <$> mapOnExp tv x <*> traverse (mapOnStructType tv) xt) <*>
     ((,) <$> mapOnExp tv y <*> traverse (mapOnStructType tv) yt) <*>
     (Info <$> mapOnPatternType tv rt) <*> pure loc

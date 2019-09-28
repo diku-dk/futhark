@@ -569,7 +569,7 @@ Exp2 :: { UncheckedExp }
      | Exp2 '<|...' Exp2   { binOp $1 $2 $3 }
 
      | Exp2 '<' Exp2              { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
-     | Exp2 '`' QualName '`' Exp2 { BinOp (fst $3) NoInfo ($1, NoInfo) ($5, NoInfo) NoInfo (srcspan $1 $>) }
+     | Exp2 '`' QualName '`' Exp2 { BinOp $3 NoInfo ($1, NoInfo) ($5, NoInfo) NoInfo (srcspan $1 $>) }
 
      | Exp2 '...' Exp2           { Range $1 Nothing (ToInclusive $3) NoInfo (srcspan $1 $>) }
      | Exp2 '..<' Exp2           { Range $1 Nothing (UpToExclusive $3) NoInfo (srcspan $1 $>) }
@@ -1050,8 +1050,8 @@ eof pos = L (SrcLoc $ Loc pos pos) EOF
 
 binOpName (L _ (SYMBOL _ qs op)) = QualName qs op
 
-binOp x (L _ (SYMBOL _ qs op)) y =
-  BinOp (QualName qs op) NoInfo (x, NoInfo) (y, NoInfo) NoInfo $
+binOp x (L loc (SYMBOL _ qs op)) y =
+  BinOp (QualName qs op, loc) NoInfo (x, NoInfo) (y, NoInfo) NoInfo $
   srcspan x y
 
 getTokens :: ParserMonad ([L Token], Pos)
