@@ -515,10 +515,10 @@ checkPattern' (Id name _ loc) _
   where name' = nameToString name
 
 checkPattern' (Id name NoInfo loc) (Ascribed t) = do
-  name' <- checkName Term name loc
+  name' <- newID name
   return $ Id name' (Info t) loc
 checkPattern' (Id name NoInfo loc) NoneInferred = do
-  name' <- checkName Term name loc
+  name' <- newID name
   t <- newTypeVar loc "t"
   return $ Id name' (Info t) loc
 
@@ -620,16 +620,16 @@ checkPattern' (PatternConstr n NoInfo ps loc) NoneInferred = do
   return $ PatternConstr n (Info t) ps' loc
   where usage = mkUsage loc "matching against constructor"
 
-bindPatternNames :: PatternBase NoInfo Name -> TermTypeM a -> TermTypeM a
-bindPatternNames = bindSpaced . map asTerm . S.toList . patternIdents
-  where asTerm v = (Term, identName v)
+patternNameMap :: Pattern -> NameMap
+patternNameMap = M.fromList . map asTerm . S.toList . patternIdents
+  where asTerm v = ((Term, baseName $ identName v), qualName $ identName v)
 
 checkPattern :: UncheckedPattern -> InferredType -> (Pattern -> TermTypeM a)
              -> TermTypeM a
 checkPattern p t m = do
   checkForDuplicateNames [p]
-  bindPatternNames p $
-    m =<< checkPattern' p t
+  p' <- checkPattern' p t
+  bindNameMap (patternNameMap p') $ m p'
 
 binding :: [Ident] -> TermTypeM a -> TermTypeM a
 binding bnds = check . localScope (`bindVars` bnds)
