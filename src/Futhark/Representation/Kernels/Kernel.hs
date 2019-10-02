@@ -860,7 +860,8 @@ data SizeOp
   | CalcNumGroups SubExp Name SubExp
     -- ^ @CalcNumGroups w max_num_groups group_size@ calculates the
     -- number of GPU workgroups to use for an input of the given size.
-    -- The @Name@ is a size name.
+    -- The @Name@ is a size name.  Note that @w@ is an i64 to avoid
+    -- overflow issues.
   deriving (Eq, Ord, Show)
 
 instance Substitute SizeOp where
@@ -956,7 +957,7 @@ typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
 typeCheckSizeOp GetSize{} = return ()
 typeCheckSizeOp GetSizeMax{} = return ()
 typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int32] x
-typeCheckSizeOp (CalcNumGroups w _ group_size) = do TC.require [Prim int32] w
+typeCheckSizeOp (CalcNumGroups w _ group_size) = do TC.require [Prim int64] w
                                                     TC.require [Prim int32] group_size
 
 -- | A host-level operation; parameterised by what else it can do.

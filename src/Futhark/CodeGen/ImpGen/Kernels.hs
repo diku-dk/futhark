@@ -64,7 +64,7 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 
-opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w max_num_groups_key group_size))) = do
+opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
   fname <- asks envFunction
   max_num_groups <- dPrim "max_num_groups" int32
   sOp $ Imp.GetSize max_num_groups (keyWithEntryPoint fname max_num_groups_key) $
@@ -72,13 +72,19 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w max_num_groups_key g
 
   -- If 'w' is small, we launch fewer groups than we normally would.
   -- We don't want any idle groups.
-  let num_groups_maybe_zero = BinOpExp (SMin Int32)
-                              (toExp' int32 w `quotRoundingUp`
-                               toExp' int32 group_size) $
-                              Imp.vi32 max_num_groups
+  --
+  -- The calculations are done with 64-bit integers to avoid overflow
+  -- issues.
+  let num_groups_maybe_zero = BinOpExp (SMin Int64)
+                              (toExp' int64 w64 `quotRoundingUp`
+                               i64 (toExp' int32 group_size)) $
+                              i64 (Imp.vi32 max_num_groups)
   -- We also don't want zero groups.
-  let num_groups = BinOpExp (SMax Int32) 1 num_groups_maybe_zero
-  patElemName pe <-- num_groups
+  let num_groups = BinOpExp (SMax Int64) 1 num_groups_maybe_zero
+  patElemName pe <-- i32 num_groups
+
+  where i64 = ConvOpExp (SExt Int32 Int64)
+        i32 = ConvOpExp (SExt Int64 Int32)
 
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
