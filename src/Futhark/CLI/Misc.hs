@@ -8,7 +8,8 @@ module Futhark.CLI.Misc
 where
 
 import qualified Data.ByteString.Lazy as BS
-import Data.List (isPrefixOf, isInfixOf)
+import Data.List (isPrefixOf, isInfixOf, nubBy)
+import Data.Function (on)
 import Control.Monad.State
 import System.FilePath
 import System.IO
@@ -57,7 +58,8 @@ mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
 
           runs <- testSpecRuns <$> testSpecFromFile prog
 
-          case filter ((dataset `isInfixOf`) . runDescription) runs of
+          case nubBy ((==) `on` runDescription) $
+               filter ((dataset `isInfixOf`) . runDescription) runs of
             [x] -> BS.putStr =<< getValuesBS dir (runInput x)
 
             [] -> do hPutStr stderr $ "No dataset '" ++ dataset ++ "'.\n"
