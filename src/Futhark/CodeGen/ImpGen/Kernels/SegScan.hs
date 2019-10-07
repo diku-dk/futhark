@@ -245,7 +245,7 @@ compileSegScan pat lvl space scan_op nes kbody = do
     scanStage1 pat (segNumGroups lvl) (segGroupSize lvl) space scan_op nes kbody
 
   emit $ Imp.DebugPrint "\n# SegScan" Nothing
-  emit $ Imp.DebugPrint "elems_per_group" $ Just (int32, elems_per_group)
+  emit $ Imp.DebugPrint "elems_per_group" $ Just elems_per_group
 
   scan_op' <- renameLambda scan_op
   scan_op'' <- renameLambda scan_op

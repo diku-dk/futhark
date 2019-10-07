@@ -1708,11 +1708,16 @@ compileCode (Comment s code) = do
               { $items:items }
              |]
 
-compileCode (DebugPrint s (Just (_, e))) = do
+compileCode (DebugPrint s (Just e)) = do
   e' <- compileExp e
   stm [C.cstm|if (ctx->debugging) {
-          fprintf(stderr, "%s: %d\n", $exp:s, (int)$exp:e');
+          fprintf(stderr, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
        }|]
+  where (fmt, ety) = case primExpType e of
+                       IntType _ -> ("llu", [C.cty|long long int|])
+                       FloatType _ -> ("f", [C.cty|double|])
+                       _ -> ("d", [C.cty|int|])
+        fmtstr = "%s: %" ++ fmt ++ "%c"
 
 compileCode (DebugPrint s Nothing) =
   stm [C.cstm|if (ctx->debugging) {

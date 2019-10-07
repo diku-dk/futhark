@@ -193,7 +193,7 @@ prepareIntermediateArraysGlobal num_threads num_segments =
                                  genReduceWidth op : num_segments)
 
       emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
-        Just (int32, Imp.vi32 num_subhistos)
+        Just $ Imp.vi32 num_subhistos
 
       -- Initialise sub-histograms.
       --
@@ -321,7 +321,7 @@ prepareIntermediateArraysLocal num_groups group_size num_subhistos_per_group =
       num_subhistos <-- toExp' int32 (unCount num_groups)
 
       emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
-        Just (int32, Imp.vi32 num_subhistos)
+        Just $ Imp.vi32 num_subhistos
 
       -- Some trickery is afoot here because we need to construct a
       -- Locking structure in the CallKernelGen monad, but the actual
@@ -398,7 +398,7 @@ genRedKernelLocal num_subhistos_per_group_var map_pes num_groups group_size spac
       total_w_64 = product space_sizes_64
       num_subhistos_per_group = Imp.var num_subhistos_per_group_var int32
 
-  emit $ Imp.DebugPrint "Number of local subhistograms per group" $ Just (int32, num_subhistos_per_group)
+  emit $ Imp.DebugPrint "Number of local subhistograms per group" $ Just num_subhistos_per_group
 
   init_histograms <- prepareIntermediateArraysLocal num_groups group_size num_subhistos_per_group_var slugs
 
@@ -608,9 +608,9 @@ compileSegGenRed (Pattern _ pes) num_groups group_size space ops kbody = do
     lh <- dPrimV "lh" $ (g * t) `quotRoundingUp` h
 
     emit $ Imp.DebugPrint "\n# SegGenRed" Nothing
-    emit $ Imp.DebugPrint "Cooperation level" $ Just (int32, coop)
-    emit $ Imp.DebugPrint "Memory per set of subhistograms" $ Just (int32, h)
-    emit $ Imp.DebugPrint "Desired group size" $ Just (int32, g)
+    emit $ Imp.DebugPrint "Cooperation level" $ Just coop
+    emit $ Imp.DebugPrint "Memory per set of subhistograms" $ Just h
+    emit $ Imp.DebugPrint "Desired group size" $ Just g
 
     sIf (Imp.unCount (localMemLockUsage group_size slugs) + h * Imp.vi32 lh
          .<=. Imp.vi32 lmax
