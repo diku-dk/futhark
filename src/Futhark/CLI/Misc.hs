@@ -58,8 +58,11 @@ mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
 
           runs <- testSpecRuns <$> testSpecFromFile prog
 
+          let exact = filter ((dataset==) . runDescription) runs
+              infixes = filter ((dataset `isInfixOf`) . runDescription) runs
+
           case nubBy ((==) `on` runDescription) $
-               filter ((dataset `isInfixOf`) . runDescription) runs of
+               if null exact then infixes else exact of
             [x] -> BS.putStr =<< getValuesBS dir (runInput x)
 
             [] -> do hPutStr stderr $ "No dataset '" ++ dataset ++ "'.\n"
