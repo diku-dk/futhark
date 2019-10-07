@@ -55,7 +55,7 @@ commands = sortOn fst
            , ("csopencl", (CSOpenCL.main, "Compile to C# calling OpenCL."))
 
            , ("test", (Test.main, "Test Futhark programs."))
-           , ("bench", (Bench.main, "Test Futhark programs."))
+           , ("bench", (Bench.main, "Benchmark Futhark programs."))
 
            , ("dataset", (Dataset.main, "Generate random test data."))
            , ("datacmp", (Datacmp.main, "Compare Futhark data files for equality."))
