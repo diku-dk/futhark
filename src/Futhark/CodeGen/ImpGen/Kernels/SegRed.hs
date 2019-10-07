@@ -230,10 +230,10 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
       required_groups = num_segments `quotRoundingUp` segments_per_group
 
   emit $ Imp.DebugPrint "\n# SegRed-small" Nothing
-  emit $ Imp.DebugPrint "num_segments" $ Just (int32, num_segments)
-  emit $ Imp.DebugPrint "segment_size" $ Just (int32, segment_size)
-  emit $ Imp.DebugPrint "segments_per_group" $ Just (int32, segments_per_group)
-  emit $ Imp.DebugPrint "required_groups" $ Just (int32, required_groups)
+  emit $ Imp.DebugPrint "num_segments" $ Just num_segments
+  emit $ Imp.DebugPrint "segment_size" $ Just segment_size
+  emit $ Imp.DebugPrint "segments_per_group" $ Just segments_per_group
+  emit $ Imp.DebugPrint "required_groups" $ Just required_groups
 
   sKernelThread "segred_small" num_groups' group_size' (segFlat space) $ \constants -> do
 
@@ -322,13 +322,13 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
     groups_per_segment * unCount group_size'
 
   emit $ Imp.DebugPrint "\n# SegRed-large" Nothing
-  emit $ Imp.DebugPrint "num_segments" $ Just (int32, num_segments)
-  emit $ Imp.DebugPrint "segment_size" $ Just (int32, segment_size)
-  emit $ Imp.DebugPrint "virt_num_groups" $ Just (int32, Imp.vi32 virt_num_groups)
-  emit $ Imp.DebugPrint "num_groups" $ Just (int32, Imp.unCount num_groups')
-  emit $ Imp.DebugPrint "group_size" $ Just (int32, Imp.unCount group_size')
-  emit $ Imp.DebugPrint "elems_per_thread" $ Just (int32, Imp.unCount elems_per_thread)
-  emit $ Imp.DebugPrint "groups_per_segment" $ Just (int32, groups_per_segment)
+  emit $ Imp.DebugPrint "num_segments" $ Just num_segments
+  emit $ Imp.DebugPrint "segment_size" $ Just segment_size
+  emit $ Imp.DebugPrint "virt_num_groups" $ Just $ Imp.vi32 virt_num_groups
+  emit $ Imp.DebugPrint "num_groups" $ Just $ Imp.unCount num_groups'
+  emit $ Imp.DebugPrint "group_size" $ Just $ Imp.unCount group_size'
+  emit $ Imp.DebugPrint "elems_per_thread" $ Just $ Imp.unCount elems_per_thread
+  emit $ Imp.DebugPrint "groups_per_segment" $ Just groups_per_segment
 
   reds_group_res_arrs <- groupResultArrays (Count (Var virt_num_groups)) group_size reds
 
