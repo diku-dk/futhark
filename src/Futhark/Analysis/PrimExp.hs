@@ -147,6 +147,12 @@ instance Pretty v => Num (PrimExp v) where
 
   fromInteger = fromInt32 . fromInteger
 
+instance Pretty v => Fractional (PrimExp v) where
+  x / y | Just z <- msum [asFloatOp FDiv x y] = constFoldPrimExp z
+        | otherwise = numBad "/" (x,y)
+
+  fromRational = ValueExp . FloatValue . Float64Value . fromRational
+
 instance Pretty v => IntegralExp (PrimExp v) where
   x `div` y | Just z <- msum [asIntOp SDiv x y, asFloatOp FDiv x y] = constFoldPrimExp z
             | otherwise = numBad "div" (x,y)
