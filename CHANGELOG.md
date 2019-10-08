@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * New tool: `futhark dataget`, for extracting test input data.  Most
     will probably never use this.
 
+  * Programs compiled with the `cuda` backend now take options
+    `--default-group-size`, `--default-num-groups`, and
+    `--default-tile-size`.
+
 ### Removed
 
 ### Changed
