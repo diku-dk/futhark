@@ -88,6 +88,26 @@ cliOptions = [ Option { optionLongName = "dump-cuda"
                           exit(0);
                         }|]
                       }
+             , Option { optionLongName = "default-group-size"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "INT"
+                      , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "default-num-groups"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "INT"
+                      , optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "default-tile-size"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "INT"
+                      , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "default-threshold"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument "INT"
+                      , optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
+                      }
              , Option { optionLongName = "tuning"
                  , optionShortName = Nothing
                  , optionArgument = RequiredArgument "FILE"

@@ -159,17 +159,18 @@ generateConfigFuns sizes = do
                           cfg->cu_cfg.load_ptx_from = path;
                       }|])
 
-  GC.publicDef_ "context_config_set_default_block_size" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_config_set_default_group_size" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg, int size);|],
      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
                          cfg->cu_cfg.default_block_size = size;
                          cfg->cu_cfg.default_block_size_changed = 1;
                        }|])
 
-  GC.publicDef_ "context_config_set_default_grid_size" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_config_set_default_num_groups" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
      [C.cedecl|void $id:s(struct $id:cfg* cfg, int num) {
                          cfg->cu_cfg.default_grid_size = num;
+                         cfg->cu_cfg.default_grid_size_changed = 1;
                        }|])
 
   GC.publicDef_ "context_config_set_default_tile_size" GC.InitDecl $ \s ->
@@ -196,12 +197,12 @@ generateConfigFuns sizes = do
                            }
                          }
 
-                         if (strcmp(size_name, "default_block_size") == 0) {
+                         if (strcmp(size_name, "default_group_size") == 0) {
                            cfg->cu_cfg.default_block_size = size_value;
                            return 0;
                          }
 
-                         if (strcmp(size_name, "default_grid_size") == 0) {
+                         if (strcmp(size_name, "default_num_groups") == 0) {
                            cfg->cu_cfg.default_grid_size = size_value;
                            return 0;
                          }
