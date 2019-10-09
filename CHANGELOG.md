@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     `--default-group-size`, `--default-num-groups`, and
     `--default-tile-size`.
 
+  * Segmented `reduce_by_index` are now substantially fasted for small
+    histograms.
+
 ### Removed
 
 ### Changed
