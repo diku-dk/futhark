@@ -97,13 +97,13 @@ normaliseType :: (Substitutable a, MonadUnify m) => a -> m a
 normaliseType t = do constraints <- getConstraints
                      return $ applySubst (`lookupSubst` constraints) t
 
--- | Is the given type variable actually the name of an abstract type
--- or type parameter, which we cannot substitute?
+-- | Is the given type variable the name of an abstract type or type
+-- parameter, which we cannot substitute?
 isRigid :: VName -> Constraints -> Bool
 isRigid v constraints = case M.lookup v constraints of
-                             Nothing -> True
-                             Just ParamType{} -> True
-                             _ -> False
+                          Nothing -> True
+                          Just ParamType{} -> True
+                          _ -> False
 
 unifySharedConstructors :: MonadUnify m =>
                            Usage
@@ -228,7 +228,8 @@ linkVarToType usage vn tp = do
                 | tp `notElem` map (Scalar . Prim) ts ->
                     case tp' of
                       Scalar (TypeVar _ _ (TypeName [] v) [])
-                        | not $ isRigid v constraints -> linkVarToTypes usage v ts
+                        | not $ isRigid v constraints ->
+                            linkVarToTypes usage v ts
                       _ ->
                         typeError usage $ "Cannot unify " ++ quote (prettyName vn) ++
                         "' with type\n" ++ indent (pretty tp) ++ "\nas " ++
@@ -314,6 +315,16 @@ linkVarToTypes usage vn ts = do
               intercalate "," (map pretty ts) ++ " but also one of " ++
               intercalate "," (map pretty vn_ts) ++ " due to " ++ show vn_usage ++ "."
         ts' -> modifyConstraints $ M.insert vn $ Overloaded ts' usage
+
+    Just (HasConstrs _ vn_usage) ->
+      typeError usage $ "Type constrained to one of " ++
+      intercalate "," (map pretty ts) ++ ", but also inferred to be sum type due to " ++
+      show vn_usage ++ "."
+
+    Just (HasFields _ vn_usage) ->
+      typeError usage $ "Type constrained to one of " ++
+      intercalate "," (map pretty ts) ++ ", but also inferred to be record due to " ++
+      show vn_usage ++ "."
 
     _ -> modifyConstraints $ M.insert vn $ Overloaded ts usage
 
