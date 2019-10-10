@@ -90,13 +90,13 @@ transformExp (Op (Inner (SegOp (SegScan lvl space scan_op nes ts kbody)))) = do
   return (alloc_stms,
           Op $ Inner $ SegOp $ SegScan lvl space (head scan_op') nes ts kbody')
 
-transformExp (Op (Inner (SegOp (SegGenRed lvl space ops ts kbody)))) = do
+transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
   (alloc_stms, (lams', kbody')) <- transformScanRed lvl space lams kbody
   let ops' = zipWith onOp ops lams'
   return (alloc_stms,
-          Op $ Inner $ SegOp $ SegGenRed lvl space ops' ts kbody')
-  where lams = map genReduceOp ops
-        onOp op lam = op { genReduceOp = lam }
+          Op $ Inner $ SegOp $ SegHist lvl space ops' ts kbody')
+  where lams = map histOp ops
+        onOp op lam = op { histOp = lam }
 
 transformExp e =
   return (mempty, e)

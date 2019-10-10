@@ -8,8 +8,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.Representation.Kernels.Kernel
-       ( GenReduceOp(..)
-       , genReduceType
+       ( HistOp(..)
+       , histType
        , SegRedOp(..)
        , segRedResults
        , KernelBody(..)
@@ -100,27 +100,27 @@ instance Rename SplitOrdering where
   rename (SplitStrided stride) =
     SplitStrided <$> rename stride
 
-data GenReduceOp lore =
-  GenReduceOp { genReduceWidth :: SubExp
-              , genReduceDest :: [VName]
-              , genReduceNeutral :: [SubExp]
-              , genReduceShape :: Shape
-                -- ^ In case this operator is semantically a
-                -- vectorised operator (corresponding to a perfect map
-                -- nest in the SOACS representation), these are the
-                -- logical "dimensions".  This is used to generate
-                -- more efficient code.
-              , genReduceOp :: Lambda lore
-              }
+data HistOp lore =
+  HistOp { histWidth :: SubExp
+         , histDest :: [VName]
+         , histNeutral :: [SubExp]
+         , histShape :: Shape
+           -- ^ In case this operator is semantically a vectorised
+           -- operator (corresponding to a perfect map nest in the
+           -- SOACS representation), these are the logical
+           -- "dimensions".  This is used to generate more efficient
+           -- code.
+         , histOp :: Lambda lore
+         }
   deriving (Eq, Ord, Show)
 
--- | The type of a histogram produced by a 'GenReduceOp'.  This can be
--- different from the type of the 'GenReduceDest's in case we are
+-- | The type of a histogram produced by a 'HistOp'.  This can be
+-- different from the type of the 'HistDest's in case we are
 -- dealing with a segmented histogram.
-genReduceType :: GenReduceOp lore -> [Type]
-genReduceType op = map ((`arrayOfRow` genReduceWidth op) .
-                        (`arrayOfShape` genReduceShape op)) $
-                   lambdaReturnType $ genReduceOp op
+histType :: HistOp lore -> [Type]
+histType op = map ((`arrayOfRow` histWidth op) .
+                        (`arrayOfShape` histShape op)) $
+                   lambdaReturnType $ histOp op
 
 data SegRedOp lore =
   SegRedOp { segRedComm :: Commutativity
@@ -379,20 +379,20 @@ data SegOp lore = SegMap SegLevel SegSpace [Type] (KernelBody lore)
                   -- ^ The KernelSpace must always have at least two dimensions,
                   -- implying that the result of a SegRed is always an array.
                 | SegScan SegLevel SegSpace (Lambda lore) [SubExp] [Type] (KernelBody lore)
-                | SegGenRed SegLevel SegSpace [GenReduceOp lore] [Type] (KernelBody lore)
+                | SegHist SegLevel SegSpace [HistOp lore] [Type] (KernelBody lore)
                 deriving (Eq, Ord, Show)
 
 segLevel :: SegOp lore -> SegLevel
 segLevel (SegMap lvl _ _ _) = lvl
 segLevel (SegRed lvl _ _ _ _) = lvl
 segLevel (SegScan lvl _ _ _ _ _) = lvl
-segLevel (SegGenRed lvl _ _ _ _) = lvl
+segLevel (SegHist lvl _ _ _ _) = lvl
 
 segSpace :: SegOp lore -> SegSpace
 segSpace (SegMap _ lvl _ _) = lvl
 segSpace (SegRed _ lvl _ _ _) = lvl
 segSpace (SegScan _ lvl _ _ _ _) = lvl
-segSpace (SegGenRed _ lvl _ _ _) = lvl
+segSpace (SegHist _ lvl _ _ _) = lvl
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
 segResultShape _ t (WriteReturns rws _ _) =
@@ -423,10 +423,10 @@ segOpType (SegScan _ space _ nes ts kbody) =
   (drop (length scan_ts) $ kernelBodyResult kbody)
   where dims = segSpaceDims space
         (scan_ts, map_ts) = splitAt (length nes) ts
-segOpType (SegGenRed _ space ops _ _) = do
+segOpType (SegHist _ space ops _ _) = do
   op <- ops
-  let shape = Shape (segment_dims <> [genReduceWidth op]) <> genReduceShape op
-  map (`arrayOfShape` shape) (lambdaReturnType $ genReduceOp op)
+  let shape = Shape (segment_dims <> [histWidth op]) <> histShape op
+  map (`arrayOfShape` shape) (lambdaReturnType $ histOp op)
   where dims = segSpaceDims space
         segment_dims = init dims
 
@@ -442,8 +442,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SegOp lore) where
     consumedInKernelBody kbody
   consumedInOp (SegScan _ _ _ _ _ kbody) =
     consumedInKernelBody kbody
-  consumedInOp (SegGenRed _ _ ops _ kbody) =
-    namesFromList (concatMap genReduceDest ops) <> consumedInKernelBody kbody
+  consumedInOp (SegHist _ _ ops _ kbody) =
+    namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
 
 checkSegLevel :: Maybe SegLevel -> SegLevel -> TC.TypeM lore ()
 checkSegLevel Nothing SegThreadScalar{} =
@@ -481,11 +481,11 @@ typeCheckSegOp cur_lvl (SegRed lvl space reds ts body) =
 typeCheckSegOp cur_lvl (SegScan lvl space scan_op nes ts body) =
   checkScanRed cur_lvl lvl space [(scan_op, nes, mempty)] ts body
 
-typeCheckSegOp cur_lvl (SegGenRed lvl space ops ts kbody) = do
+typeCheckSegOp cur_lvl (SegHist lvl space ops ts kbody) = do
   checkSegBasics cur_lvl lvl space ts
 
   TC.binding (scopeOfSegSpace space) $ do
-    nes_ts <- forM ops $ \(GenReduceOp dest_w dests nes shape op) -> do
+    nes_ts <- forM ops $ \(HistOp dest_w dests nes shape op) -> do
       TC.require [Prim int32] dest_w
       nes' <- mapM TC.checkArg nes
       mapM_ (TC.require [Prim int32]) $ shapeDims shape
@@ -495,7 +495,7 @@ typeCheckSegOp cur_lvl (SegGenRed lvl space ops ts kbody) = do
       TC.checkLambda op $ map (TC.noArgAliases . first stripVecDims) $ nes' ++ nes'
       let nes_t = map TC.argType nes'
       unless (nes_t == lambdaReturnType op) $
-        TC.bad $ TC.TypeError $ "SegGenRed operator has return type " ++
+        TC.bad $ TC.TypeError $ "SegHist operator has return type " ++
         prettyTuple (lambdaReturnType op) ++ " but neutral element has type " ++
         prettyTuple nes_t
 
@@ -513,7 +513,7 @@ typeCheckSegOp cur_lvl (SegGenRed lvl space ops ts kbody) = do
     -- operation followed by the values to write.
     let bucket_ret_t = replicate (length ops) (Prim int32) ++ concat nes_ts
     unless (bucket_ret_t == ts) $
-      TC.bad $ TC.TypeError $ "SegGenRed body has return type " ++
+      TC.bad $ TC.TypeError $ "SegHist body has return type " ++
       prettyTuple ts ++ " but should have type " ++
       prettyTuple bucket_ret_t
 
@@ -603,15 +603,15 @@ mapSegOpM tv (SegScan lvl space scan_op nes ts body) =
   <*> mapM (mapOnSegOpSubExp tv) nes
   <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
   <*> mapOnSegOpBody tv body
-mapSegOpM tv (SegGenRed lvl space ops ts body) =
-  SegGenRed
+mapSegOpM tv (SegHist lvl space ops ts body) =
+  SegHist
   <$> mapOnSegLevel tv lvl
   <*> mapOnSegSpace tv space
-  <*> mapM onGenRedOp ops
+  <*> mapM onHistOp ops
   <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
   <*> mapOnSegOpBody tv body
-  where onGenRedOp (GenReduceOp w arrs nes shape op) =
-          GenReduceOp <$> mapOnSegOpSubExp tv w
+  where onHistOp (HistOp w arrs nes shape op) =
+          HistOp <$> mapOnSegOpSubExp tv w
           <*> mapM (mapOnSegOpVName tv) arrs
           <*> mapM (mapOnSegOpSubExp tv) nes
           <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
@@ -706,9 +706,9 @@ instance OpMetrics (Op lore) => OpMetrics (SegOp lore) where
                          kernelBodyMetrics body
   opMetrics (SegScan _ _ scan_op _ _ body) =
     inside "SegScan" $ lambdaMetrics scan_op >> kernelBodyMetrics body
-  opMetrics (SegGenRed _ _ ops _ body) =
-    inside "SegGenRed" $ do mapM_ (lambdaMetrics . genReduceOp) ops
-                            kernelBodyMetrics body
+  opMetrics (SegHist _ _ ops _ body) =
+    inside "SegHist" $ do mapM_ (lambdaMetrics . histOp) ops
+                          kernelBodyMetrics body
 
 instance Pretty SegSpace where
   ppr (SegSpace phys dims) = parens (commasep $ do (i,d) <- dims
@@ -757,13 +757,13 @@ instance PrettyLore lore => PP.Pretty (SegOp lore) where
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
     PP.nestedBlock "{" "}" (ppr body)
 
-  ppr (SegGenRed lvl space ops ts body) =
-    text "seggenred_" <> ppr lvl </>
+  ppr (SegHist lvl space ops ts body) =
+    text "seghist_" <> ppr lvl </>
     ppSegLevel lvl </>
     PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)) </>
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
     PP.nestedBlock "{" "}" (ppr body)
-    where ppOp (GenReduceOp w dests nes shape op) =
+    where ppOp (HistOp w dests nes shape op) =
             ppr w <> PP.comma </>
             PP.braces (PP.commasep $ map ppr dests) <> PP.comma </>
             PP.braces (PP.commasep $ map ppr nes) <> PP.comma </>

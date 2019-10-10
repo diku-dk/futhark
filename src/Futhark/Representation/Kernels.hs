@@ -21,7 +21,7 @@ import Futhark.Representation.Kernels.Sizes
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
-import Futhark.Representation.SOACS.SOAC hiding (GenReduceOp(..))
+import Futhark.Representation.SOACS.SOAC hiding (HistOp(..))
 import Futhark.Binder
 import Futhark.Construct
 import qualified Futhark.TypeCheck as TypeCheck

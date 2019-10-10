@@ -75,7 +75,7 @@ import qualified Data.Sequence as Seq
 
 import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.SOACS.SOAC
-  (StreamForm(..), ScremaForm(..), scremaType, getStreamAccums, GenReduceOp(..))
+  (StreamForm(..), ScremaForm(..), scremaType, getStreamAccums, HistOp(..))
 import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.Representation.AST
   hiding (Var, Iota, Rearrange, Reshape, Replicate, typeOf)
@@ -361,7 +361,7 @@ transposeInput k n inp =
 data SOAC lore = Stream SubExp (StreamForm lore) (Lambda lore) [Input]
                | Scatter SubExp (Lambda lore) [Input] [(SubExp, Int, VName)]
                | Screma SubExp (ScremaForm lore) [Input]
-               | GenReduce SubExp [GenReduceOp lore] (Lambda lore) [Input]
+               | Hist SubExp [HistOp lore] (Lambda lore) [Input]
             deriving (Eq, Show)
 
 instance PP.Pretty Input where
@@ -379,8 +379,8 @@ instance PP.Pretty Input where
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Screma w form arrs) = Futhark.ppScrema w form arrs
-  ppr (GenReduce len ops bucket_fun imgs) =
-    Futhark.ppGenReduce len ops bucket_fun imgs
+  ppr (Hist len ops bucket_fun imgs) =
+    Futhark.ppHist len ops bucket_fun imgs
   ppr soac = text $ show soac
 
 -- | Returns the inputs used in a SOAC.
@@ -388,7 +388,7 @@ inputs :: SOAC lore -> [Input]
 inputs (Stream   _ _ _     arrs) = arrs
 inputs (Scatter  _len _lam ivs _as) = ivs
 inputs (Screma _ _       arrs) = arrs
-inputs (GenReduce _ _ _ inps) = inps
+inputs (Hist _ _ _ inps) = inps
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC lore -> SOAC lore
@@ -398,8 +398,8 @@ setInputs arrs (Scatter w lam _ivs as) =
   Scatter (newWidth arrs w) lam arrs as
 setInputs arrs (Screma w form _) =
   Screma w form arrs
-setInputs inps (GenReduce w ops lam _) =
-  GenReduce w ops lam inps
+setInputs inps (Hist w ops lam _) =
+  Hist w ops lam inps
 
 newWidth :: [Input] -> SubExp -> SubExp
 newWidth [] w = w
@@ -410,7 +410,7 @@ lambda :: SOAC lore -> Lambda lore
 lambda (Stream  _ _ lam      _) = lam
 lambda (Scatter _len lam _ivs _as) = lam
 lambda (Screma _ (ScremaForm _ _ lam) _) = lam
-lambda (GenReduce _ _ lam _) = lam
+lambda (Hist _ _ lam _) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda lore -> SOAC lore -> SOAC lore
@@ -420,8 +420,8 @@ setLambda lam (Scatter len _lam ivs as) =
   Scatter len lam ivs as
 setLambda lam (Screma w (ScremaForm scan red _) arrs) =
   Screma w (ScremaForm scan red lam) arrs
-setLambda lam (GenReduce w ops _ inps) =
-  GenReduce w ops lam inps
+setLambda lam (Hist w ops _ inps) =
+  Hist w ops lam inps
 
 -- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
@@ -438,9 +438,9 @@ typeOf (Scatter _w lam _ivs dests) =
         (aws, _, _) = unzip3 dests
 typeOf (Screma w form _) =
   scremaType w form
-typeOf (GenReduce _ ops _ _) = do
+typeOf (Hist _ ops _ _) = do
   op <- ops
-  map (`arrayOfRow` genReduceWidth op) (lambdaReturnType $ genReduceOp op)
+  map (`arrayOfRow` histWidth op) (lambdaReturnType $ histOp op)
 
 -- | The "width" of a SOAC is the expected outer size of its array
 -- inputs _after_ input-transforms have been carried out.
@@ -448,7 +448,7 @@ width :: SOAC lore -> SubExp
 width (Stream w _ _ _) = w
 width (Scatter len _lam _ivs _as) = len
 width (Screma w _ _) = w
-width (GenReduce w _ _ _) = w
+width (Hist w _ _ _) = w
 
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
@@ -465,8 +465,8 @@ toSOAC (Scatter len lam ivs dests) = do
   return $ Futhark.Scatter len lam ivs' dests
 toSOAC (Screma w form arrs) =
   Futhark.Screma w form <$> inputsToSubExps arrs
-toSOAC (GenReduce w ops lam inps) =
-  Futhark.GenReduce w ops lam <$> inputsToSubExps inps
+toSOAC (Hist w ops lam inps) =
+  Futhark.Hist w ops lam <$> inputsToSubExps inps
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -492,8 +492,8 @@ fromExp (Op (Futhark.Scatter len lam ivs as)) = do
   return $ Right $ Scatter len lam ivs' as
 fromExp (Op (Futhark.Screma w form arrs)) =
   Right . Screma w form <$> traverse varInput arrs
-fromExp (Op (Futhark.GenReduce w ops lam arrs)) =
-  Right . GenReduce w ops lam <$> traverse varInput arrs
+fromExp (Op (Futhark.Hist w ops lam arrs)) =
+  Right . Hist w ops lam <$> traverse varInput arrs
 fromExp _ = pure $ Left NotSOAC
 
 -- | To-Stream translation of SOACs.

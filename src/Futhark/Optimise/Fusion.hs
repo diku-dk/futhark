@@ -617,10 +617,10 @@ fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
       fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
       mapLike fres' soac lam
 
-    Right soac@(SOAC.GenReduce _ _ lam _) -> do
-      -- We put the variables produced by GenReduce into the infusible
+    Right soac@(SOAC.Hist _ _ lam _) -> do
+      -- We put the variables produced by Hist into the infusible
       -- set to force horizontal fusion.  It is not possible to
-      -- producer/consumer-fuse GenReduce anyway.
+      -- producer/consumer-fuse Hist anyway.
       fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
       mapLike fres' soac lam
 
@@ -833,9 +833,9 @@ finaliseSOAC new_soac =
     SOAC.Scatter w lam inps dests -> do
       lam' <- simplifyAndFuseInLambda lam
       return $ SOAC.Scatter w lam' inps dests
-    SOAC.GenReduce w ops lam arrs -> do
+    SOAC.Hist w ops lam arrs -> do
       lam' <- simplifyAndFuseInLambda lam
-      return $ SOAC.GenReduce w ops lam' arrs
+      return $ SOAC.Hist w ops lam' arrs
     SOAC.Stream w form lam inps -> do
       lam' <- simplifyAndFuseInLambda lam
       return $ SOAC.Stream w form lam' inps
