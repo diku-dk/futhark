@@ -676,13 +676,13 @@ localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N s
         hist_f_cas <- dPrimVE "hist_f_cas" $ Imp.BinOpExp (SMax Int32) 1 $ f64ceil hist_f'
         dPrimVE "hist_M0" $
           Imp.BinOpExp (SMax Int32) 1 $
-          Imp.BinOpExp (SMin Int32) (r64 $ hist_m * r64 hist_f_cas) hist_B
+          Imp.BinOpExp (SMin Int32) (t64 $ hist_m * r64 hist_f_cas) hist_B
 
       lockCase = do
         hist_f_cas <- dPrimVE "hist_f_lock" $ Imp.BinOpExp (SMax Int32) 1 $ f64ceil hist_f'
         dPrimVE "hist_M0" $
           Imp.BinOpExp (SMax Int32) 1 $
-          Imp.BinOpExp (SMin Int32) (r64 $ hist_m' * r64 hist_f_cas) hist_B
+          Imp.BinOpExp (SMin Int32) (t64 $ hist_m' * r64 hist_f_cas) hist_B
 
   -- M in the paper, but not adjusted for asymptotic efficiency.
   hist_M0 <-
