@@ -26,7 +26,7 @@ def read_image(f):
     if rank == 2 and type == b'  u8':
         height = np.int64(struct.unpack('<Q', f.read(8))[0])
         width = np.int64(struct.unpack('<Q', f.read(8))[0])
-        array = np.frombuffer(f.read(height*width), dtype=np.int8).reshape(height, width)
+        array = np.frombuffer(f.read(height*width), dtype=np.uint8).reshape(height, width)
 
         return (width, height, array)
 
@@ -34,12 +34,12 @@ def read_image(f):
         height = np.int64(struct.unpack('<Q', f.read(8))[0])
         width = np.int64(struct.unpack('<Q', f.read(8))[0])
 
-        image=np.empty((height,width,3), dtype=np.int8)
+        image=np.empty((height,width,3), dtype=np.uint8)
         if type == b' f32':
             array = np.frombuffer(f.read(height*width*4), dtype=np.float32).reshape(height, width)
-            image[:,:,0] = image[:,:,1] = image[:,:,2] = np.int8(np.float32(array)*256)
+            image[:,:,0] = image[:,:,1] = image[:,:,2] = np.uint8(np.float32(array)*256)
         else:
-            array = np.frombuffer(f.read(height*width*4), dtype=np.int32).reshape(height, width)
+            array = np.frombuffer(f.read(height*width*4), dtype=np.uint32).reshape(height, width)
             image[:,:,0] = (array & 0xFF0000) >> 16
             image[:,:,1] = (array & 0xFF00) >> 8
             image[:,:,2] = (array & 0xFF)
