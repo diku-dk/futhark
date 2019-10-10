@@ -145,18 +145,17 @@ computeHistoUsage space op = do
           SegGenRedSlug op num_subhistos subhisto_infos $
           atomicUpdateLocking $ genReduceOp op)
 
-localMemLockArray :: Count GroupSize SubExp -> Type
-localMemLockArray (Count group_size) = Array int32 (Shape [group_size]) NoUniqueness
+localMemNumLocks :: [SegGenRedSlug] -> Imp.Count Imp.Elements Imp.Exp
+localMemNumLocks =
+  Imp.elements . sum . map (toExp' int32 . genReduceWidth . slugOp) .
+  filter (isLocking . slugAtomicUpdate)
+  where isLocking AtomicLocking{} = True
+        isLocking _ = False
 
 -- | How many bytes will be spent on lock arrays if we use a local
 -- memory implementation?
-localMemLockUsage :: Count GroupSize SubExp -> [SegGenRedSlug] -> Imp.Count Imp.Bytes Imp.Exp
-localMemLockUsage group_size slugs =
-  if any (isLocking . slugAtomicUpdate) slugs
-  then typeSize $ localMemLockArray group_size
-  else 0
-  where isLocking AtomicLocking{} = True
-        isLocking _ = False
+localMemLockUsage :: [SegGenRedSlug] -> Imp.Count Imp.Bytes Imp.Exp
+localMemLockUsage = (`Imp.withElemType` int32) . localMemNumLocks
 
 prepareAtomicUpdateGlobal :: Maybe Locking -> [VName] -> SegGenRedSlug
                           -> CallKernelGen (Maybe Locking,
@@ -360,17 +359,17 @@ genRedKernelGlobal map_pes num_groups group_size space slugs kbody = do
                 do_op (bucket_is ++ is)
 
 prepareIntermediateArraysLocal :: VName
-                               -> Count NumGroups SubExp -> Count GroupSize SubExp
+                               -> Count NumGroups SubExp
                                -> SegSpace -> [SegGenRedSlug]
                                -> CallKernelGen
                                   [([VName],
                                     KernelConstants ->
                                     InKernelGen ([VName],
                                                  [Imp.Exp] -> InKernelGen ()))]
-prepareIntermediateArraysLocal num_subhistos_per_group num_groups group_size space =
-  fmap snd . mapAccumLM onOp Nothing
+prepareIntermediateArraysLocal num_subhistos_per_group num_groups space =
+  mapM onOp
   where
-    onOp l (SegGenRedSlug op num_subhistos subhisto_info do_op) = do
+    onOp (SegGenRedSlug op num_subhistos subhisto_info do_op) = do
 
       -- For the segmented case we produce a single histogram per group.
       if length (unSegSpace space) > 1
@@ -380,39 +379,30 @@ prepareIntermediateArraysLocal num_subhistos_per_group num_groups group_size spa
       emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
         Just $ Imp.vi32 num_subhistos
 
-      -- Some trickery is afoot here because we need to construct a
-      -- Locking structure in the CallKernelGen monad, but the actual
-      -- initialisation of the locks array must happen on the device.
-      -- Also, we want only one locks array, no matter how many
-      -- operators need locking.
-      (l', mk_op) <-
-        case (l, do_op) of
-          (_, AtomicPrim f) -> return (l, const $ return f)
-          (_, AtomicCAS f) -> return (l, const $ return f)
-          (Just l', AtomicLocking f) -> return (l, const $ return $ f l')
-          (Nothing, AtomicLocking f) -> do
-            locks <- newVName "locks"
-            num_locks <- toExp $ unCount group_size
+      -- Some trickery is afoot here because we need to construct the
+      -- number of locks on the host, but the actual initialisation of
+      -- the locks array must happen on the device.
+      mk_op <-
+        case do_op of
+          AtomicPrim f -> return $ const $ return f
+          AtomicCAS f -> return $ const $ return f
+          AtomicLocking f -> do
+
+            num_locks <- dPrimV "num_locks" =<< toExp (genReduceWidth op)
 
             let dims = map (toExp' int32) $
                        Var num_subhistos_per_group :
                        shapeDims (genReduceShape op) ++
                        [genReduceWidth op]
-                l' = Locking locks 0 1 0 ((`rem` num_locks) . flattenIndex dims)
-                locks_t = localMemLockArray group_size
 
-                mk_op constants = do
-                  locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
-                  dArray locks int32 (arrayShape locks_t) $
-                    ArrayIn locks_mem $ IxFun.iota $
-                    map (primExpFromSubExp int32) $ arrayDims locks_t
+            return $ \constants -> do
+              locks <- sAllocArray "locks" int32 (Shape [Var num_locks]) (Space "local")
 
-                  sComment "All locks start out unlocked" $
-                    copyDWIM locks [kernelLocalThreadId constants] (intConst Int32 0) []
+              sComment "All locks start out unlocked" $
+                groupLoop constants (Imp.vi32 num_locks) $ \i ->
+                copyDWIM locks [i] (intConst Int32 0) []
 
-                  return $ f l'
-
-            return (Just l', mk_op)
+              return $ f $ Locking locks 0 1 0 ((`rem` Imp.vi32 num_locks) . flattenIndex dims)
 
       -- Initialise local-memory sub-histograms.  These are
       -- represented as two-dimensional arrays.
@@ -433,7 +423,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group num_groups group_size spa
         subhistosAlloc info
         return $ subhistosArray info
 
-      return (l', (glob_subhistos, init_local_subhistos))
+      return (glob_subhistos, init_local_subhistos)
 
 genRedKernelLocal :: VName -> Count NumGroups Imp.Exp
                   -> [PatElem ExplicitMemory]
@@ -458,7 +448,7 @@ genRedKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_gro
   emit $ Imp.DebugPrint "Number of local subhistograms per group" $ Just num_subhistos_per_group
 
   init_histograms <-
-    prepareIntermediateArraysLocal num_subhistos_per_group_var num_groups group_size space slugs
+    prepareIntermediateArraysLocal num_subhistos_per_group_var num_groups space slugs
 
   num_segments <- dPrimVE "num_segments" $
                   product $ map (toExp' int32) segment_dims
@@ -746,7 +736,7 @@ localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N s
   -- case.
   let pick_local =
         hist_Nin .>=. hist_H
-        .&&. (Imp.unCount (localMemLockUsage group_size slugs) +
+        .&&. (Imp.unCount (localMemLockUsage slugs) +
               hist_H * hist_el_size * Imp.vi32 hist_M
               .<=. Imp.vi32 hist_L)
         .&&. hist_C .<=. hist_B
