@@ -103,17 +103,17 @@ simplifySOAC (Scatter len lam ivs as) = do
   as' <- mapM Engine.simplify as
   return (Scatter len' lam' ivs' as', hoisted)
 
-simplifySOAC (GenReduce w ops bfun imgs) = do
+simplifySOAC (Hist w ops bfun imgs) = do
   w' <- Engine.simplify w
-  (ops', hoisted) <- fmap unzip $ forM ops $ \(GenReduceOp dests_w dests nes op) -> do
+  (ops', hoisted) <- fmap unzip $ forM ops $ \(HistOp dests_w dests nes op) -> do
     dests_w' <- Engine.simplify dests_w
     dests' <- Engine.simplify dests
     nes' <- mapM Engine.simplify nes
     (op', hoisted) <- Engine.simplifyLambda op $ replicate (length $ lambdaParams op) Nothing
-    return (GenReduceOp dests_w' dests' nes' op', hoisted)
+    return (HistOp dests_w' dests' nes' op', hoisted)
   imgs'  <- mapM Engine.simplify imgs
   (bfun', bfun_hoisted) <- Engine.simplifyLambda bfun $ map Just imgs
-  return (GenReduce w' ops' bfun' imgs', mconcat hoisted <> bfun_hoisted)
+  return (Hist w' ops' bfun' imgs', mconcat hoisted <> bfun_hoisted)
 
 simplifySOAC (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) = do
   (scan_lam', scan_lam_hoisted) <-

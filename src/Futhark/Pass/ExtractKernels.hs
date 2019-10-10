@@ -508,15 +508,15 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
     addStms stms
     letBind_ pat $ Op $ SegOp kernel
 
-transformStm _ (Let orig_pat (StmAux cs _) (Op (GenReduce w ops bucket_fun imgs))) = do
+transformStm _ (Let orig_pat (StmAux cs _) (Op (Hist w ops bucket_fun imgs))) = do
   let bfun' = soacsLambdaToKernels bucket_fun
 
   -- It is important not to launch unnecessarily many threads for
   -- histograms, because it may mean we unnecessarily need to reduce
   -- subhistograms as well.
   runBinder_ $ do
-    lvl <- segThreadCapped [w] "seggenred" $ NoRecommendation SegNoVirt
-    addStms =<< genReduceKernel lvl orig_pat [] [] cs w ops bfun' imgs
+    lvl <- segThreadCapped [w] "seghist" $ NoRecommendation SegNoVirt
+    addStms =<< histKernel lvl orig_pat [] [] cs w ops bfun' imgs
 
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
@@ -530,7 +530,7 @@ nestedParallelism :: Body -> [SubExp]
 nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
   where parallelism (Op (Scatter w _ _ _)) = [w]
         parallelism (Op (Screma w _ _)) = [w]
-        parallelism (Op (GenReduce w _ _ _)) = [w]
+        parallelism (Op (Hist w _ _ _)) = [w]
         parallelism (Op (Stream w Sequential{} lam _))
           | chunk_size_param : _ <- lambdaParams lam =
               let update (Var v) | v == paramName chunk_size_param = w

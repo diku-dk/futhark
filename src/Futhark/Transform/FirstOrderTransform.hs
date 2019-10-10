@@ -190,13 +190,13 @@ transformSOAC pat (Scatter len lam ivs as) = do
     return $ resultBody (map Var ress)
   letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 
-transformSOAC pat (GenReduce len ops bucket_fun imgs) = do
+transformSOAC pat (Hist len ops bucket_fun imgs) = do
   iter <- newVName "iter"
 
   -- Bind arguments to parameters for the merge-variables.
-  hists_ts  <- mapM lookupType $ concatMap genReduceDest ops
+  hists_ts  <- mapM lookupType $ concatMap histDest ops
   hists_out <- mapM (newIdent "dests") hists_ts
-  let merge = loopMerge hists_out $ concatMap (map Var . genReduceDest) ops
+  let merge = loopMerge hists_out $ concatMap (map Var . histDest) ops
 
   -- Bind lambda-bodies for operators.
   loopBody <- runBodyBinder $
@@ -212,8 +212,8 @@ transformSOAC pat (GenReduce len ops bucket_fun imgs) = do
     -- Split out values from bucket function.
     let lens = length ops
         inds = take lens imgs''
-        vals = chunks (map (length . lambdaReturnType . genReduceOp) ops) $ drop lens imgs''
-        hists_out' = chunks (map (length . lambdaReturnType . genReduceOp) ops) $
+        vals = chunks (map (length . lambdaReturnType . histOp) ops) $ drop lens imgs''
+        hists_out' = chunks (map (length . lambdaReturnType . histOp) ops) $
                      map identName hists_out
 
     hists_out'' <- forM (zip4 hists_out' ops inds vals) $ \(hist, op, idx, val) -> do
@@ -231,7 +231,7 @@ transformSOAC pat (GenReduce len ops bucket_fun imgs) = do
           letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
 
         -- Apply operator.
-        h_val' <- bindLambda (genReduceOp op) $
+        h_val' <- bindLambda (histOp op) $
                   map (BasicOp . SubExp) $ h_val ++ val
 
         -- Write values back to histograms.

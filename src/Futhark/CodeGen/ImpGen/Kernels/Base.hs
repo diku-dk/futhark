@@ -202,18 +202,18 @@ compileGroupSpace constants lvl space = do
   dPrimV_ (segFlat space) $ kernelLocalThreadId constants
 
 -- Construct the necessary lock arrays for an intra-group histogram.
-prepareIntraGroupSegGenRed :: KernelConstants
+prepareIntraGroupSegHist :: KernelConstants
                            -> Count GroupSize SubExp
-                           -> [GenReduceOp ExplicitMemory]
+                           -> [HistOp ExplicitMemory]
                            -> InKernelGen [[Imp.Exp] -> InKernelGen ()]
-prepareIntraGroupSegGenRed constants group_size =
+prepareIntraGroupSegHist constants group_size =
   fmap snd . mapAccumLM onOp Nothing
   where
     onOp l op = do
 
-      let local_subhistos = genReduceDest op
+      let local_subhistos = histDest op
 
-      case (l, atomicUpdateLocking $ genReduceOp op) of
+      case (l, atomicUpdateLocking $ histOp op) of
         (_, AtomicPrim f) -> return (l, f (Space "local") local_subhistos)
         (_, AtomicCAS f) -> return (l, f (Space "local") local_subhistos)
         (Just l', AtomicLocking f) -> return (l, f l' (Space "local") local_subhistos)
@@ -222,8 +222,8 @@ prepareIntraGroupSegGenRed constants group_size =
           num_locks <- toExp $ unCount group_size
 
           let dims = map (toExp' int32) $
-                     shapeDims (genReduceShape op) ++
-                     [genReduceWidth op]
+                     shapeDims (histShape op) ++
+                     [histWidth op]
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
               locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 
@@ -327,18 +327,18 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
         copyDWIM (patElemName pe) segment_is (Var arr) (segment_is ++ [last dims'-1])
 
-compileGroupOp constants pat (Inner (SegOp (SegGenRed lvl space ops _ kbody))) = do
+compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   compileGroupSpace constants lvl space
   let ltids = map fst $ unSegSpace space
 
   -- We don't need the red_pes, because it is guaranteed by our type
   -- rules that they occupy the same memory as the destinations for
   -- the ops.
-  let num_red_res = length ops + sum (map (length . genReduceNeutral) ops)
+  let num_red_res = length ops + sum (map (length . histNeutral) ops)
       (_red_pes, map_pes) =
         splitAt num_red_res $ patternElements pat
 
-  ops' <- prepareIntraGroupSegGenRed constants (segGroupSize lvl) ops
+  ops' <- prepareIntraGroupSegHist constants (segGroupSize lvl) ops
 
   -- Ensure that all locks have been initialised.
   sOp Imp.LocalBarrier
@@ -349,10 +349,10 @@ compileGroupOp constants pat (Inner (SegOp (SegGenRed lvl space ops _ kbody))) =
         (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
     zipWithM_ (compileThreadResult space constants) map_pes map_res
 
-    let vs_per_op = chunks (map (length . genReduceDest) ops) red_vs
+    let vs_per_op = chunks (map (length . histDest) ops) red_vs
 
     forM_ (zip4 red_is vs_per_op ops' ops) $
-      \(bin, op_vs, do_op, GenReduceOp dest_w _ _ shape lam) -> do
+      \(bin, op_vs, do_op, HistOp dest_w _ _ shape lam) -> do
         let bin' = toExp' int32 bin
             dest_w' = toExp' int32 dest_w
             bin_in_bounds = 0 .<=. bin' .&&. bin' .<. dest_w'
@@ -501,7 +501,7 @@ atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
   let op_body = sComment "execute operation" $
                 compileBody' acc_params $ lambdaBody op
 
-      do_gen_reduce =
+      do_hist =
         everythingVolatile $
         sComment "update global result" $
         zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
@@ -517,7 +517,7 @@ atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
       dLParams acc_params
       bind_acc_params
       op_body
-      do_gen_reduce
+      do_hist
       fence
       release_lock
       break_loop

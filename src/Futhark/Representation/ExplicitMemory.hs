@@ -969,8 +969,8 @@ segOpReturns k@(SegRed _ _ _ _ kbody) =
   kernelBodyReturns kbody =<< (extReturns <$> opType k)
 segOpReturns k@(SegScan _ _ _ _ _ kbody) =
   kernelBodyReturns kbody =<< (extReturns <$> opType k)
-segOpReturns (SegGenRed _ _ ops _ _) =
-  concat <$> mapM (mapM varReturns . genReduceDest) ops
+segOpReturns (SegHist _ _ ops _ _) =
+  concat <$> mapM (mapM varReturns . histDest) ops
 
 kernelBodyReturns :: (HasScope ExplicitMemory m, Monad m) =>
                      KernelBody ExplicitMemory -> [ExpReturns] -> m [ExpReturns]

@@ -6,7 +6,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , segRed
        , nonSegRed
        , segScan
-       , segGenRed
+       , segHist
        , segMap
 
        , streamRed
@@ -300,16 +300,16 @@ streamMap out_desc mapout_pes w comm fold_lam nes arrs = runBinder $ do
 
   return (threads, map patElemName redout_pes)
 
-segGenRed :: (MonadFreshNames m, HasScope Kernels m) =>
+segHist :: (MonadFreshNames m, HasScope Kernels m) =>
              SegLevel
           -> Pattern Kernels
           -> SubExp
           -> [(VName,SubExp)] -- ^ Segment indexes and sizes.
           -> [KernelInput]
-          -> [GenReduceOp Kernels]
+          -> [HistOp Kernels]
           -> Lambda Kernels -> [VName]
           -> m (Stms Kernels)
-segGenRed lvl pat arr_w ispace inps ops lam arrs = runBinder_ $ do
+segHist lvl pat arr_w ispace inps ops lam arrs = runBinder_ $ do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, arr_w)]
 
@@ -322,7 +322,7 @@ segGenRed lvl pat arr_w ispace inps ops lam arrs = runBinder_ $ do
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
     map Returns <$> bodyBind (lambdaBody lam)
 
-  letBind_ pat $ Op $ SegOp $ SegGenRed lvl space ops (lambdaReturnType lam) kbody
+  letBind_ pat $ Op $ SegOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
 
 blockedPerThread :: (MonadBinder m, Lore m ~ Kernels) =>
                     VName -> SubExp -> KernelSize -> StreamOrd -> Lambda Kernels

@@ -1128,13 +1128,13 @@ initialCtx =
               if i >= 0 && i < arrayLength arr'
               then arr' // [(i, v)] else arr'
 
-    def "gen_reduce" = Just $ fun5t $ \arr fun _ is vs ->
+    def "hist" = Just $ fun5t $ \arr fun _ is vs ->
       case arr of
         ValueArray arr' ->
           ValueArray <$> foldM (update fun) arr'
           (zip (map asInt $ fromArray is) (fromArray vs))
         _ ->
-          error $ "gen_reduce expects array, but got: " ++ pretty arr
+          error $ "hist expects array, but got: " ++ pretty arr
       where update fun arr' (i, v) =
               if i >= 0 && i < arrayLength arr'
               then do

@@ -292,7 +292,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     -- Scatter fusion --
     ------------------
 
-    -- Map-write fusion.
+    -- Map-Scatter fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
     -- checking that the Scatter is not writing to any array used in
@@ -309,26 +309,26 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
           success (outNames ker ++ extra_nms) $
             SOAC.Scatter w res_lam' new_inp dests
 
-    -- Map-genreduce fusion.
+    -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
-    -- checking that the GenReduce is not writing to any array used in
+    -- checking that the Hist is not writing to any array used in
     -- the Map.
-    (SOAC.GenReduce _ ops _ _,
+    (SOAC.Hist _ ops _ _,
      SOAC.Screma _ form _)
       | isJust $ isMapSOAC form,
         -- 1. all arrays produced by the map are ONLY used (consumed)
-        --    by the genreduce, i.e., not used elsewhere.
+        --    by the hist, i.e., not used elsewhere.
         not (any (`nameIn` unfus_set) outVars),
         -- 2. all arrays produced by the map are input to the scatter.
         mapWriteFusionOK outVars ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
           success (outNames ker ++ extra_nms) $
-            SOAC.GenReduce w ops res_lam' new_inp
+            SOAC.Hist w ops res_lam' new_inp
 
-    -- Genreduce-Genreduce fusion
-    (SOAC.GenReduce _ ops_c _ _,
-     SOAC.GenReduce _ ops_p _ _)
+    -- Hist-Hist fusion
+    (SOAC.Hist _ ops_c _ _,
+     SOAC.Hist _ ops_p _ _)
       | horizFuse -> do
           let p_num_buckets = length ops_p
               c_num_buckets = length ops_c
@@ -349,7 +349,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
                                             drop p_num_buckets (lambdaReturnType lam_p)
                        }
           success (outNames ker ++ returned_outvars) $
-            SOAC.GenReduce w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
+            SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
 
     -- Scatter-write fusion.
     (SOAC.Scatter _len2 _lam_c ivs2 as2,

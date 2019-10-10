@@ -24,7 +24,7 @@ import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegMap
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegScan
-import Futhark.CodeGen.ImpGen.Kernels.SegGenRed
+import Futhark.CodeGen.ImpGen.Kernels.SegHist
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
@@ -106,8 +106,8 @@ segOpCompiler pat (SegRed lvl@SegThread{} space reds _ kbody) =
   compileSegRed pat lvl space reds kbody
 segOpCompiler pat (SegScan lvl@SegThread{} space scan_op nes _ kbody) =
   compileSegScan pat lvl space scan_op nes kbody
-segOpCompiler pat (SegGenRed (SegThread num_groups group_size _) space ops _ kbody) =
-  compileSegGenRed pat num_groups group_size space ops kbody
+segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody) =
+  compileSegHist pat num_groups group_size space ops kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
 
