@@ -224,7 +224,7 @@ prepareIntraGroupSegGenRed constants group_size =
           let dims = map (toExp' int32) $
                      shapeDims (genReduceShape op) ++
                      [genReduceWidth op]
-              l' = Locking locks 0 1 0 ((`rem` num_locks) . flattenIndex dims)
+              l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
               locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
@@ -390,7 +390,7 @@ data Locking =
             -- ^ What to write when we lock it.
           , lockingToUnlock :: Imp.Exp
             -- ^ What to write when we unlock it.
-          , lockingMapping :: [Imp.Exp] -> Imp.Exp
+          , lockingMapping :: [Imp.Exp] -> [Imp.Exp]
             -- ^ A transformation from the logical lock index to the
             -- physical position in the array.  This can also be used
             -- to make the lock array smaller.
@@ -467,7 +467,7 @@ atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
 
   -- Correctly index into locks.
   (locks', _locks_space, locks_offset) <-
-    fullyIndexArray (lockingArray locking) [lockingMapping locking bucket]
+    fullyIndexArray (lockingArray locking) $ lockingMapping locking bucket
 
   -- Critical section
   let try_acquire_lock =

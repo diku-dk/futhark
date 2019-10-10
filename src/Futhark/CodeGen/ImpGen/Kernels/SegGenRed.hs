@@ -145,18 +145,6 @@ computeHistoUsage space op = do
           SegGenRedSlug op num_subhistos subhisto_infos $
           atomicUpdateLocking $ genReduceOp op)
 
-localMemNumLocks :: [SegGenRedSlug] -> Imp.Count Imp.Elements Imp.Exp
-localMemNumLocks =
-  Imp.elements . sum . map (toExp' int32 . genReduceWidth . slugOp) .
-  filter (isLocking . slugAtomicUpdate)
-  where isLocking AtomicLocking{} = True
-        isLocking _ = False
-
--- | How many bytes will be spent on lock arrays if we use a local
--- memory implementation?
-localMemLockUsage :: [SegGenRedSlug] -> Imp.Count Imp.Bytes Imp.Exp
-localMemLockUsage = (`Imp.withElemType` int32) . localMemNumLocks
-
 prepareAtomicUpdateGlobal :: Maybe Locking -> [VName] -> SegGenRedSlug
                           -> CallKernelGen (Maybe Locking,
                                             [Imp.Exp] -> InKernelGen ())
@@ -183,7 +171,7 @@ prepareAtomicUpdateGlobal l dests slug =
       locks <-
         sStaticArray "genred_locks" (Space "device") int32 $
         Imp.ArrayZeros num_locks
-      let l' = Locking locks 0 1 0 ((`rem` fromIntegral num_locks) . flattenIndex dims)
+      let l' = Locking locks 0 1 0 (pure . (`rem` fromIntegral num_locks) . flattenIndex dims)
       return (Just l', f l' (Space "global") dests)
 
 infoPrints :: Imp.Exp -> VName -> Imp.Exp -> ImpM lore op ()
@@ -379,30 +367,27 @@ prepareIntermediateArraysLocal num_subhistos_per_group num_groups space =
       emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
         Just $ Imp.vi32 num_subhistos
 
-      -- Some trickery is afoot here because we need to construct the
-      -- number of locks on the host, but the actual initialisation of
-      -- the locks array must happen on the device.
       mk_op <-
         case do_op of
           AtomicPrim f -> return $ const $ return f
           AtomicCAS f -> return $ const $ return f
           AtomicLocking f -> do
 
-            num_locks <- dPrimV "num_locks" =<< toExp (genReduceWidth op)
+            let lock_shape =
+                  Shape $ Var num_subhistos_per_group :
+                  shapeDims (genReduceShape op) ++
+                  [genReduceWidth op]
 
-            let dims = map (toExp' int32) $
-                       Var num_subhistos_per_group :
-                       shapeDims (genReduceShape op) ++
-                       [genReduceWidth op]
+            dims <- mapM toExp $ shapeDims lock_shape
 
             return $ \constants -> do
-              locks <- sAllocArray "locks" int32 (Shape [Var num_locks]) (Space "local")
+              locks <- sAllocArray "locks" int32 lock_shape $ Space "local"
 
               sComment "All locks start out unlocked" $
-                groupLoop constants (Imp.vi32 num_locks) $ \i ->
-                copyDWIM locks [i] (intConst Int32 0) []
+                groupCoverSpace constants dims $ \is ->
+                copyDWIM locks is (intConst Int32 0) []
 
-              return $ f $ Locking locks 0 1 0 ((`rem` Imp.vi32 num_locks) . flattenIndex dims)
+              return $ f $ Locking locks 0 1 0 id
 
       -- Initialise local-memory sub-histograms.  These are
       -- represented as two-dimensional arrays.
@@ -729,6 +714,8 @@ localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N s
   emit $ Imp.DebugPrint "local C" $ Just hist_C
   emit $ Imp.DebugPrint "local B" $ Just hist_B
   emit $ Imp.DebugPrint "local M" $ Just $ Imp.vi32 hist_M
+  emit $ Imp.DebugPrint "local memory needed" $
+    Just $ hist_H * hist_el_size * Imp.vi32 hist_M
 
   -- We only use local memory if the number of updates per histogram
   -- at least matches the histogram size, as otherwise it is not
@@ -736,8 +723,7 @@ localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N s
   -- case.
   let pick_local =
         hist_Nin .>=. hist_H
-        .&&. (Imp.unCount (localMemLockUsage slugs) +
-              hist_H * hist_el_size * Imp.vi32 hist_M
+        .&&. (hist_H * hist_el_size * Imp.vi32 hist_M
               .<=. Imp.vi32 hist_L)
         .&&. hist_C .<=. hist_B
         .&&. Imp.vi32 hist_M .>. 0
@@ -780,10 +766,16 @@ compileSegGenRed (Pattern _ pes) num_groups group_size space ops kbody = do
   let hist_B = unCount group_size'
 
   -- Size of a histogram.
-  hist_H <- dPrimVE "hist_H" $ sum $ map (toExp' int32. genReduceWidth) ops
+  hist_H <- dPrimVE "hist_H" $ sum $ map (toExp' int32 . genReduceWidth) ops
 
-  -- Size of a single histogram element.
-  hist_el_size <- dPrimVE "hist_el_size" $ h `quotRoundingUp` hist_H
+  -- Size of a single histogram element.  Actually the weighted
+  -- average of histogram elements in cases where we have more than
+  -- one histogram operation, plus any locks.
+  let lockSize slug = case slugAtomicUpdate slug of
+                        AtomicLocking{} -> Just $ primByteSize int32
+                        _               -> Nothing
+  hist_el_size <- dPrimVE "hist_el_size" $ foldl' (+) (h `quotRoundingUp` hist_H) $
+                  mapMaybe lockSize slugs
 
   -- Input elements contributing to each histogram.
   hist_N <- dPrimVE "hist_N" segment_size
