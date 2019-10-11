@@ -352,7 +352,7 @@ compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = d
     let vs_per_op = chunks (map (length . histDest) ops) red_vs
 
     forM_ (zip4 red_is vs_per_op ops' ops) $
-      \(bin, op_vs, do_op, HistOp dest_w _ _ shape lam) -> do
+      \(bin, op_vs, do_op, HistOp dest_w _ _ _ shape lam) -> do
         let bin' = toExp' int32 bin
             dest_w' = toExp' int32 dest_w
             bin_in_bounds = 0 .<=. bin' .&&. bin' .<. dest_w'

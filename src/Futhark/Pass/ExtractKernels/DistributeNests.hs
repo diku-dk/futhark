@@ -674,8 +674,8 @@ segmentedHistKernel nest perm cs hist_w ops lam arrs = do
   -- The input/output arrays _must_ correspond to some kernel input,
   -- or else the original nested Hist would have been ill-typed.
   -- Find them.
-  ops' <- forM ops $ \(SOAC.HistOp num_bins dests nes op) ->
-    SOAC.HistOp num_bins
+  ops' <- forM ops $ \(SOAC.HistOp num_bins rf dests nes op) ->
+    SOAC.HistOp num_bins rf
     <$> mapM (fmap kernelInputArray . findInput inputs) dests
     <*> pure nes
     <*> pure op
@@ -700,9 +700,9 @@ histKernel :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                 -> m KernelsStms
 histKernel lvl orig_pat ispace inputs cs hist_w ops lam arrs =
   runBinder_ $ do
-    ops' <- forM ops $ \(SOAC.HistOp num_bins dests nes op) -> do
+    ops' <- forM ops $ \(SOAC.HistOp num_bins rf dests nes op) -> do
       (op', nes', shape) <- determineReduceOp op nes
-      return $ Out.HistOp num_bins dests nes' shape op'
+      return $ Out.HistOp num_bins rf dests nes' shape op'
 
     let isDest = flip elem $ concatMap Out.histDest ops'
         inputs' = filter (not . isDest . kernelInputArray) inputs

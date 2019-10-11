@@ -973,9 +973,10 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   letTupExp' desc . I.Op =<< f w lam' nes' arrs
 
 internaliseHist :: String
-                     -> E.Exp -> E.Exp -> E.Exp -> E.Exp -> E.Exp -> SrcLoc
-                     -> InternaliseM [SubExp]
-internaliseHist desc hist op ne buckets img loc = do
+                -> E.Exp -> E.Exp -> E.Exp -> E.Exp -> E.Exp -> E.Exp -> SrcLoc
+                -> InternaliseM [SubExp]
+internaliseHist desc rf hist op ne buckets img loc = do
+  rf' <- internaliseExp1 "hist_rf" rf
   ne' <- internaliseExp "hist_ne" ne
   hist' <- internaliseExpToVars "hist_hist" hist
   buckets' <- letExp "hist_buckets" . BasicOp . SubExp =<<
@@ -1020,7 +1021,7 @@ internaliseHist desc hist op ne buckets img loc = do
     I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
 
   letTupExp' desc $ I.Op $
-    I.Hist w_img [HistOp w_hist hist' ne_shp op'] (I.Lambda params body' rettype) $ buckets'' : img'
+    I.Hist w_img [HistOp w_hist rf' hist' ne_shp op'] (I.Lambda params body' rettype) $ buckets'' : img'
 
 internaliseStreamMap :: String -> StreamOrd -> E.Exp -> E.Exp
                      -> InternaliseM [SubExp]
@@ -1502,8 +1503,8 @@ isOverloadedFunction qname args loc = do
     handle [TupLit [f, arr] _] "map_stream_per" = Just $ \desc ->
       internaliseStreamMap desc Disorder f arr
 
-    handle [TupLit [dest, op, ne, buckets, img] _] "hist" = Just $ \desc ->
-      internaliseHist desc dest op ne buckets img loc
+    handle [TupLit [rf, dest, op, ne, buckets, img] _] "hist" = Just $ \desc ->
+      internaliseHist desc rf dest op ne buckets img loc
 
     handle [x] "unzip" = Just $ flip internaliseExp x
     handle [x] "trace" = Just $ flip internaliseExp x

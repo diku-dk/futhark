@@ -329,7 +329,7 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
 
         sComment "perform atomic updates" $
           forM_ (zip5 (map slugOp slugs) histograms buckets (perOp vs) subhisto_inds) $
-          \(HistOp dest_w _ _ shape lam,
+          \(HistOp dest_w _ _ _ shape lam,
             (_, _, do_op), bucket, vs', subhisto_ind) -> do
 
             let bucket' = toExp' int32 $ kernelResultSubExp bucket
@@ -532,7 +532,7 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
           (map Imp.vi32 space_is) se []
 
         forM_ (zip4 (map slugOp slugs) histograms buckets (perOp vs)) $
-          \(HistOp dest_w _ _ shape lam,
+          \(HistOp dest_w _ _ _ shape lam,
             (_, do_op), bucket, vs') -> do
 
             let bucket' = toExp' int32 bucket
@@ -593,11 +593,11 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
 localMemoryCase :: [PatElem ExplicitMemory]
                 -> Count NumGroups SubExp -> Count GroupSize SubExp
                 -> SegSpace
-                -> Imp.Exp -> Imp.Exp -> Imp.Exp
+                -> Imp.Exp -> Imp.Exp -> Imp.Exp -> Imp.Exp
                 -> [SegHistSlug]
                 -> KernelBody ExplicitMemory
                 -> CallKernelGen (Imp.Exp, ImpM ExplicitMemory Imp.HostOp ())
-localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N slugs kbody = do
+localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N hist_RF slugs kbody = do
   num_groups' <- traverse toExp num_groups
   group_size' <- traverse toExp group_size
 
@@ -627,11 +627,9 @@ localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N s
   -- FIXME: query the lockstep width at runtime.
   hist_W <- dPrimVE "hist_W" 32
 
-  -- Assume unit race factor for now.
-  hist_RF <- dPrimVE "hist_RF" $ r64 1
   hist_RFC <- dPrimVE "hist_RFC" $
-              Imp.BinOpExp (FMin Float64) hist_RF $
-              r64 hist_W * Imp.BinOpExp (FPow Float64) (hist_RF / r64 hist_W) (1.0 / 3.0)
+              Imp.BinOpExp (FMin Float64) (r64 hist_RF) $
+              r64 hist_W * Imp.BinOpExp (FPow Float64) (r64 hist_RF / r64 hist_W) (1.0 / 3.0)
 
   hist_f' <- dPrimVE "hist_f_prime" $
              (r64 hist_B * hist_RFC) /
@@ -780,6 +778,12 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
   -- Input elements contributing to each histogram.
   hist_N <- dPrimVE "hist_N" segment_size
 
+  -- Compute RF as the average RF over all the histograms.
+  hist_RF <- dPrimVE "hist_RF" $
+             sum (map (toExp' int32. histRaceFactor . slugOp) slugs)
+             `quot`
+             genericLength slugs
+
   -- Check for emptyness to avoid division-by-zero.
   sUnless (seg_h .==. 0) $ do
 
@@ -790,9 +794,10 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
     emit $ Imp.DebugPrint "Desired group size (B)" $ Just hist_B
     emit $ Imp.DebugPrint "Histogram size (H)" $ Just hist_H
     emit $ Imp.DebugPrint "Histogram element size (el_size)" $ Just hist_el_size
+    emit $ Imp.DebugPrint "Race factor (RF)" $ Just hist_RF
 
     (use_local_memory, run_in_local_memory) <-
-      localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N slugs kbody
+      localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N hist_RF slugs kbody
 
     sIf use_local_memory run_in_local_memory $
       histKernelGlobal map_pes num_groups group_size space slugs kbody

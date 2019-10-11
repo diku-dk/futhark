@@ -91,8 +91,9 @@ simplifyKernelOp _ (SegOp (SegHist lvl space ops ts kbody)) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
 
   (ops', ops_hoisted) <- fmap unzip $ forM ops $
-    \(HistOp w arrs nes dims lam) -> do
+    \(HistOp w rf arrs nes dims lam) -> do
       w' <- Engine.simplify w
+      rf' <- Engine.simplify rf
       arrs' <- Engine.simplify arrs
       nes' <- Engine.simplify nes
       dims' <- Engine.simplify dims
@@ -100,7 +101,7 @@ simplifyKernelOp _ (SegOp (SegHist lvl space ops ts kbody)) = do
         Engine.localVtable (<>scope_vtable) $
         Engine.simplifyLambda lam $
         replicate (length nes * 2) Nothing
-      return (HistOp w' arrs' nes' dims' lam',
+      return (HistOp w' rf' arrs' nes' dims' lam',
               op_hoisted)
 
   (kbody', body_hoisted) <- simplifyKernelBody space kbody

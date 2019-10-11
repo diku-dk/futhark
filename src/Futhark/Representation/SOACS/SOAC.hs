@@ -57,7 +57,7 @@ import Data.List
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Util.Pretty as PP
-import Futhark.Util.Pretty (ppr, Doc, Pretty, parens, comma, (</>), commasep, text)
+import Futhark.Util.Pretty (ppr, Doc, Pretty, parens, comma, (</>), (<+>), commasep, text)
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -107,6 +107,9 @@ data SOAC lore =
     deriving (Eq, Ord, Show)
 
 data HistOp lore = HistOp { histWidth :: SubExp
+                          , histRaceFactor :: SubExp
+                          -- ^ Race factor @RF@ means that only @1/RF@
+                          -- bins are used.
                           , histDest :: [VName]
                           , histNeutral :: [SubExp]
                           , histOp :: Lambda lore
@@ -299,8 +302,9 @@ mapSOACM tv (Scatter len lam ivs as) =
 mapSOACM tv (Hist len ops bucket_fun imgs) =
   Hist
   <$> mapOnSOACSubExp tv len
-  <*> mapM (\(HistOp e arrs nes op) ->
+  <*> mapM (\(HistOp e rf arrs nes op) ->
               HistOp <$> mapOnSOACSubExp tv e
+              <*> mapOnSOACSubExp tv rf
               <*> mapM (mapOnSOACVName tv) arrs
               <*> mapM (mapOnSOACSubExp tv) nes
               <*> mapOnSOACLambda tv op) ops
@@ -389,9 +393,9 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   consumedInOp CmpThreshold{} = mempty
 
 mapHistOp :: (Lambda flore -> Lambda tlore)
-               -> HistOp flore -> HistOp tlore
-mapHistOp f (HistOp w dests nes lam) =
-  HistOp w dests nes $ f lam
+          -> HistOp flore -> HistOp tlore
+mapHistOp f (HistOp w rf dests nes lam) =
+  HistOp w rf dests nes $ f lam
 
 instance (Attributes lore,
           Attributes (Aliases lore),
@@ -604,9 +608,10 @@ typeCheckSOAC (Hist len ops bucket_fun imgs) = do
   TC.require [Prim int32] len
 
   -- Check the operators.
-  forM_ ops $ \(HistOp dest_w dests nes op) -> do
+  forM_ ops $ \(HistOp dest_w rf dests nes op) -> do
     nes' <- mapM TC.checkArg nes
     TC.require [Prim int32] dest_w
+    TC.require [Prim int32] rf
 
     -- Operator type must match the type of neutral elements.
     TC.checkLambda op $ map TC.noArgAliases $ nes' ++ nes'
@@ -750,15 +755,15 @@ instance PrettyLore lore => Pretty (Reduce lore) where
     PP.braces (commasep $ map ppr red_nes)
 
 ppHist :: (PrettyLore lore, Pretty inp) =>
-               SubExp -> [HistOp lore] -> Lambda lore -> [inp] -> Doc
+          SubExp -> [HistOp lore] -> Lambda lore -> [inp] -> Doc
 ppHist len ops bucket_fun imgs =
   text "hist" <>
   parens (ppr len <> comma </>
           PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppOp ops) <> comma </>
           ppr bucket_fun <> comma </>
           commasep (map ppr imgs))
-  where ppOp (HistOp w dests nes op) =
-          ppr w <> comma <> PP.braces (commasep $ map ppr dests) <> comma </>
+  where ppOp (HistOp w rf dests nes op) =
+          ppr w <> comma <+> ppr rf <> comma <+> PP.braces (commasep $ map ppr dests) <> comma </>
           PP.braces (commasep $ map ppr nes) <> comma </> ppr op
 
 ppSOAC :: (Pretty fn, Pretty v) =>
