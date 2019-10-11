@@ -102,6 +102,7 @@ instance Rename SplitOrdering where
 
 data HistOp lore =
   HistOp { histWidth :: SubExp
+         , histRaceFactor :: SubExp
          , histDest :: [VName]
          , histNeutral :: [SubExp]
          , histShape :: Shape
@@ -485,8 +486,9 @@ typeCheckSegOp cur_lvl (SegHist lvl space ops ts kbody) = do
   checkSegBasics cur_lvl lvl space ts
 
   TC.binding (scopeOfSegSpace space) $ do
-    nes_ts <- forM ops $ \(HistOp dest_w dests nes shape op) -> do
+    nes_ts <- forM ops $ \(HistOp dest_w rf dests nes shape op) -> do
       TC.require [Prim int32] dest_w
+      TC.require [Prim int32] rf
       nes' <- mapM TC.checkArg nes
       mapM_ (TC.require [Prim int32]) $ shapeDims shape
 
@@ -610,8 +612,9 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
   <*> mapM onHistOp ops
   <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
   <*> mapOnSegOpBody tv body
-  where onHistOp (HistOp w arrs nes shape op) =
+  where onHistOp (HistOp w rf arrs nes shape op) =
           HistOp <$> mapOnSegOpSubExp tv w
+          <*> mapOnSegOpSubExp tv rf
           <*> mapM (mapOnSegOpVName tv) arrs
           <*> mapM (mapOnSegOpSubExp tv) nes
           <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
@@ -763,8 +766,8 @@ instance PrettyLore lore => PP.Pretty (SegOp lore) where
     PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)) </>
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
     PP.nestedBlock "{" "}" (ppr body)
-    where ppOp (HistOp w dests nes shape op) =
-            ppr w <> PP.comma </>
+    where ppOp (HistOp w rf dests nes shape op) =
+            ppr w <> PP.comma <+> ppr rf <> PP.comma </>
             PP.braces (PP.commasep $ map ppr dests) <> PP.comma </>
             PP.braces (PP.commasep $ map ppr nes) <> PP.comma </>
             ppr shape <> PP.comma </>

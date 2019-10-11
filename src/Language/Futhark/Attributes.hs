@@ -618,7 +618,8 @@ intrinsics = M.fromList $ zipWith namify [10..] $
               ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
 
               ("hist", IntrinsicPolyFun [tp_a]
-                       [uarr_a,
+                       [Scalar $ Prim $ Signed Int32,
+                        uarr_a,
                         Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
                         Scalar t_a,
                         Array () Nonunique (Prim $ Signed Int32) (rank 1),

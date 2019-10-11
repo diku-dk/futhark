@@ -207,9 +207,9 @@ intraGroupStm lvl stm@(Let pat aux e) = do
 
 
     Op (Hist w ops bucket_fun arrs) -> do
-      ops' <- forM ops $ \(HistOp num_bins dests nes op) -> do
+      ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do
         (op', nes', shape) <- determineReduceOp op nes
-        return $ Out.HistOp num_bins dests nes' shape op'
+        return $ Out.HistOp num_bins rf dests nes' shape op'
 
       let bucket_fun' = soacsLambdaToKernels bucket_fun
       certifying (stmAuxCerts aux) $
