@@ -23,7 +23,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import qualified Control.Monad.Fail as Fail
 import Data.Array
-import Data.Bifunctor (bimap)
+import Data.Bifunctor (first)
 import Data.List hiding (break)
 import Data.Maybe
 import qualified Data.Map as M
@@ -527,8 +527,8 @@ evalType env t@(Scalar (TypeVar () _ tn args)) =
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
           onDim (NamedDim v) = fromMaybe (NamedDim v) $ M.lookup (qualLeaf v) substs
           onDim d = d
-      in if null ps then bimap onDim id t'
-         else evalType (Env mempty types mempty <> env) $ bimap onDim id t'
+      in if null ps then first onDim t'
+         else evalType (Env mempty types mempty <> env) $ first onDim t'
     Nothing -> t
 
   where matchPtoA (TypeParamDim p _) (TypeArgDim (NamedDim qv) _) =
@@ -833,7 +833,7 @@ substituteInModule substs = onModule
       ModuleFun $ \m -> onModule <$> f (substituteInModule rev_substs m)
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermModule m) = TermModule $ onModule m
-    onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ bimap onDim id t
+    onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
     onDim (NamedDim v) = NamedDim $ replaceQ v
     onDim (ConstDim x) = ConstDim x
     onDim AnyDim = AnyDim
