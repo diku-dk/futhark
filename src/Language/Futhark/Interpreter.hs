@@ -995,10 +995,10 @@ initialCtx =
       case fromTuple v of Just [x,y,z] -> f x y z
                           _ -> error $ "Expected triple; got: " ++ pretty v
 
-    fun5t f =
+    fun6t f =
       TermValue Nothing $ ValueFun $ \v ->
-      case fromTuple v of Just [x,y,z,a,b] -> f x y z a b
-                          _ -> error $ "Expected quintuple; got: " ++ pretty v
+      case fromTuple v of Just [x,y,z,a,b,c] -> f x y z a b c
+                          _ -> error $ "Expected sextuple; got: " ++ pretty v
 
     bopDef fs = fun2 $ \x y ->
       case (x, y) of
@@ -1128,7 +1128,7 @@ initialCtx =
               if i >= 0 && i < arrayLength arr'
               then arr' // [(i, v)] else arr'
 
-    def "hist" = Just $ fun5t $ \arr fun _ is vs ->
+    def "hist" = Just $ fun6t $ \_ arr fun _ is vs ->
       case arr of
         ValueArray arr' ->
           ValueArray <$> foldM (update fun) arr'
