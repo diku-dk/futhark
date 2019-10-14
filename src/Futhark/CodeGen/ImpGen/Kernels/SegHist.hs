@@ -196,14 +196,44 @@ prepareIntermediateArraysGlobal hist_T hist_N =
                   AtomicPrim{} -> 1
                   _            -> 2
 
+      hist_RF <- toExp $ histRaceFactor op
+
+      let hist_k_RF = 0.75
+          hist_L2 = 16384
+          hist_L2_ln_sz = 64
+          hist_F_L2 = 0.4
+
+      let r64 = ConvOpExp (SIToFP Int32 Float64)
+          t64 = ConvOpExp (FPToSI Float64 Int32)
+
+      let hist_el_size =
+            case do_op of
+              AtomicLocking{} ->
+                unCount
+                (sum $ map (typeSize . (`arrayOfShape` histShape op)) $
+                 Prim int32 : lambdaReturnType (histOp op))
+                `quot` genericLength (lambdaReturnType (histOp op))
+              _ ->
+                unCount $ sum $
+                map (typeSize . (`arrayOfShape` histShape op)) $
+                lambdaReturnType (histOp op)
+
+      hist_RACE_exp <- dPrimVE "hist_RACE_exp" $
+        Imp.BinOpExp (FMax Float64) 1 $
+        (hist_k_RF * r64 hist_RF) /
+        Imp.BinOpExp (FMin Float64) 1 (r64 hist_L2_ln_sz  / r64 hist_el_size)
+
       -- Hardcode a single pass for now.
       let hist_S = 1
 
       hist_H_chk <- dPrimVE "hist_H_chk" $
                     hist_H `quotRoundingUp` hist_S
 
+
       hist_k_max <- dPrimVE "hist_k_max" $
-                    hist_N `quotRoundingUp` hist_T
+        Imp.BinOpExp (SMin Int32)
+        (t64 (hist_F_L2 * hist_L2 * hist_RACE_exp)) hist_N
+        `quotRoundingUp` hist_T
 
       hist_C <- dPrimVE "hist_C" $
                 Imp.BinOpExp (SMin Int32) hist_T $
@@ -259,11 +289,11 @@ prepareIntermediateArraysGlobal hist_T hist_N =
       return (l', (hist_M, dests, do_op'))
 
 histKernelGlobal :: [PatElem ExplicitMemory]
-                   -> Count NumGroups SubExp -> Count GroupSize SubExp
-                   -> SegSpace
-                   -> [SegHistSlug]
-                   -> KernelBody ExplicitMemory
-                   -> CallKernelGen ()
+                 -> Count NumGroups SubExp -> Count GroupSize SubExp
+                 -> SegSpace
+                 -> [SegHistSlug]
+                 -> KernelBody ExplicitMemory
+                 -> CallKernelGen ()
 histKernelGlobal map_pes num_groups group_size space slugs kbody = do
   num_groups' <- traverse toExp num_groups
   group_size' <- traverse toExp group_size
