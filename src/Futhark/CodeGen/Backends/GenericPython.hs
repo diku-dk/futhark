@@ -804,6 +804,7 @@ compileExp (Imp.BinOpExp op x y) = do
     FSub{} -> simple "-"
     FMul{} -> simple "*"
     FDiv{} -> simple "/"
+    FMod{} -> simple "%"
     Xor{} -> simple "^"
     And{} -> simple "&"
     Or{} -> simple "|"

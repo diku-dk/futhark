@@ -351,6 +351,9 @@ cFloat32Funs = [C.cunit|
     }
 
 $esc:("#ifdef __OPENCL_VERSION__")
+    static inline float fmod32(float x, float y) {
+      return fmod(x, y);
+    }
     static inline float $id:(funName' "round32")(float x) {
       return rint(x);
     }
@@ -364,6 +367,9 @@ $esc:("#ifdef __OPENCL_VERSION__")
       return mix(v0, v1, t);
     }
 $esc:("#else")
+    static inline float fmod32(float x, float y) {
+      return fmodf(x, y);
+    }
     static inline float $id:(funName' "round32")(float x) {
       return rintf(x);
     }
@@ -473,6 +479,10 @@ cFloat64Funs = [C.cunit|
       } p;
       p.f = x;
       return p.t;
+    }
+
+    static inline float fmod64(float x, float y) {
+      return fmod(x, y);
     }
 
 $esc:("#ifdef __OPENCL_VERSION__")

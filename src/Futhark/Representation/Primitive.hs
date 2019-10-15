@@ -81,6 +81,7 @@ module Futhark.Representation.Primitive
 import           Control.Applicative
 import           Data.Binary.IEEE754 (floatToWord, wordToFloat, doubleToWord, wordToDouble)
 import           Data.Bits
+import           Data.Fixed (mod') -- Weird location.
 import           Data.Int            (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
 import           Data.Word
@@ -292,6 +293,7 @@ data BinOp = Add IntType -- ^ Integer addition.
              -- negativity infinity.  Note: this is different
              -- from LLVM.
            | FDiv FloatType -- ^ Floating-point division.
+           | FMod FloatType -- ^ Floating-point modulus.
 
            | UMod IntType
              -- ^ Unsigned integer modulus; the countepart to 'UDiv'.
@@ -403,6 +405,7 @@ allBinOps = concat [ map Add allIntTypes
                    , map UDiv allIntTypes
                    , map SDiv allIntTypes
                    , map FDiv allFloatTypes
+                   , map FMod allFloatTypes
                    , map UMod allIntTypes
                    , map SMod allIntTypes
                    , map SQuot allIntTypes
@@ -487,6 +490,7 @@ doBinOp FMul{}   = doFloatBinOp (*) (*)
 doBinOp UDiv{}   = doRiskyIntBinOp doUDiv
 doBinOp SDiv{}   = doRiskyIntBinOp doSDiv
 doBinOp FDiv{}   = doFloatBinOp (/) (/)
+doBinOp FMod{}   = doFloatBinOp mod' mod'
 doBinOp UMod{}   = doRiskyIntBinOp doUMod
 doBinOp SMod{}   = doRiskyIntBinOp doSMod
 doBinOp SQuot{}  = doRiskyIntBinOp doSQuot
@@ -784,6 +788,7 @@ binOpType (FAdd t)  = FloatType t
 binOpType (FSub t)  = FloatType t
 binOpType (FMul t)  = FloatType t
 binOpType (FDiv t)  = FloatType t
+binOpType (FMod t)  = FloatType t
 
 -- | The operand types of a comparison operator.
 cmpOpType :: CmpOp -> PrimType
@@ -1030,6 +1035,7 @@ instance Pretty BinOp where
   ppr (SQuot t) = taggedI "squot" t
   ppr (SRem t)  = taggedI "srem" t
   ppr (FDiv t)  = taggedF "fdiv" t
+  ppr (FMod t)  = taggedF "fmod" t
   ppr (SMin t)  = taggedI "smin" t
   ppr (UMin t)  = taggedI "umin" t
   ppr (FMin t)  = taggedF "fmin" t

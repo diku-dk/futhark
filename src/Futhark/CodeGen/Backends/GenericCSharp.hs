@@ -1179,6 +1179,7 @@ compileExp (Imp.BinOpExp op x y) = do
     FSub{} -> simple "-"
     FMul{} -> simple "*"
     FDiv{} -> simple "/"
+    FMod{} -> simple "%"
     LogAnd{} -> simple "&&"
     LogOr{} -> simple "||"
     _ -> return $ simpleCall (pretty op) [x', y']
