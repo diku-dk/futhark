@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed a nasty out-of-bounds error in handling of irregular allocations.
 
+  * The `floor`/`ceil` functions in `f32`/`f64` now handle infinities
+    correctly (and are also faster).
+
 ## [0.12.1]
 
 ### Added

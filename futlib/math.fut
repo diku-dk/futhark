@@ -837,20 +837,8 @@ module f64: (float with t = f64 with int_t = u64) = {
   let lgamma = intrinsics.lgamma64
   let lerp = intrinsics.lerp64
 
-  let ceil (x: f64) : f64 =
-    let i = to_i64 x
-    let ix = i64 i
-    in if x >= 0.0 then
-         if ix < x then i64 (i i64m.+ 1i64) else x
-       else if ix > x then ix else x
-
-  let floor (x: f64) : f64 =
-    let i = to_i64 x
-    let ix = i64 i
-    in if x >= 0.0 then
-         if ix < x then ix else x
-       else if ix > x then i64 (i i64m.- 1i64) else x
-
+  let ceil = intrinsics.ceil64
+  let floor = intrinsics.floor64
   let trunc (x: f64) : f64 = i64 (i64m.f64 x)
 
   let round = intrinsics.round64
@@ -947,20 +935,8 @@ module f32: (float with t = f32 with int_t = u32) = {
   let lgamma = intrinsics.lgamma32
   let lerp = intrinsics.lerp32
 
-  let ceil (x: f32) : f32 =
-    let i = to_i32 x
-    let ix = i32 i
-    in if x >= 0f32 then
-         if ix < x then i32 (i i32m.+ 1i32) else x
-       else if ix > x then ix else x
-
-  let floor (x: f32) : f32 =
-    let i = to_i32 x
-    let ix = i32 i
-    in if x >= 0f32 then
-         if ix < x then ix else x
-       else if ix > x then i32 (i i32m.- 1i32) else x
-
+  let ceil = intrinsics.ceil32
+  let floor = intrinsics.floor32
   let trunc (x: f32) : f32 = i32 (i32m.f32 x)
 
   let round = intrinsics.round32
