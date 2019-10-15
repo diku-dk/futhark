@@ -802,7 +802,6 @@ instance BinderOps (Engine.Wise ExplicitMemory) where
   mkLetNamesB = mkLetNamesB''
 
 simplifiable :: (Engine.SimplifiableLore lore,
-                 BinderOps lore,
                  ExpAttr lore ~ (),
                  BodyAttr lore ~ (),
                  Op lore ~ MemOp inner,
