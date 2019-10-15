@@ -204,7 +204,7 @@ instance OpMetrics inner => OpMetrics (MemOp inner) where
   opMetrics (Inner k) = opMetrics k
 
 instance IsOp inner => IsOp (MemOp inner) where
-  safeOp Alloc{} = True
+  safeOp Alloc{} = False
   safeOp (Inner k) = safeOp k
   cheapOp (Inner k) = cheapOp k
   cheapOp Alloc{} = True
