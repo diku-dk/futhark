@@ -310,15 +310,19 @@ coalescedIndexes free_ker_vars isGidVariant tgids is
   --    (because it would transpose a bigger array then needed -- big overhead).
   -- 2. the innermost index is variant to the innermost-thread gid
   --    (because access is likely to be already coalesced)
+  -- 3. the indexes are a prefix of the thread indexes, because that
+  -- means multiple threads will be accessing the same element.
   | any isCt is =
-        Nothing
-  | any (`nameIn` free_ker_vars) (mapMaybe mbVarId is) =
-        Nothing
+      Nothing
+  | any (`nameIn` free_ker_vars) (subExpVars is) =
+      Nothing
+  | is `isPrefixOf` tgids =
+      Nothing
   | not (null tgids),
     not (null is),
     Var innergid <- last tgids,
     num_is > 0 && isGidVariant innergid (last is) =
-        Just is
+      Just is
   -- 3. Otherwise try fix coalescing
   | otherwise =
       Just $ reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
@@ -346,9 +350,6 @@ coalescedIndexes free_ker_vars isGidVariant tgids is
         isCt :: SubExp -> Bool
         isCt (Constant _) = True
         isCt (Var      _) = False
-
-        mbVarId (Constant _) = Nothing
-        mbVarId (Var v) = Just v
 
 coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =
