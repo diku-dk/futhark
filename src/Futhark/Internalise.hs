@@ -1158,6 +1158,8 @@ internaliseBinOp desc E.Mod x y (E.Signed t) _ =
   simpleBinOp desc (I.SMod t) x y
 internaliseBinOp desc E.Mod x y (E.Unsigned t) _ =
   simpleBinOp desc (I.UMod t) x y
+internaliseBinOp desc E.Mod x y (E.FloatType t) _ =
+  simpleBinOp desc (I.FMod t) x y
 internaliseBinOp desc E.Quot x y (E.Signed t) _ =
   simpleBinOp desc (I.SQuot t) x y
 internaliseBinOp desc E.Quot x y (E.Unsigned t) _ =

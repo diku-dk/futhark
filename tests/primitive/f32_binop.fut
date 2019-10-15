@@ -48,11 +48,20 @@
 --
 -- input { 4 0.0f32 1.0f32 }
 -- output { 0.0f32 }
+-- input { 4 0.0f32 -1.0f32 }
+-- output { -0.0f32 }
 -- input { 4 1.0f32 -1.0f32 }
--- output { 1.0f32 }
+-- output { -0.0f32 }
 -- input { 4 2.0f32 1.5f32 }
+-- output { 0.5f32 }
+--
+-- input { 5 0.0f32 1.0f32 }
+-- output { 0.0f32 }
+-- input { 5 1.0f32 -1.0f32 }
+-- output { 1.0f32 }
+-- input { 5 2.0f32 1.5f32 }
 -- output { 2.8284271247461903f32 }
--- input { 4 2.0f32 0f32 }
+-- input { 5 2.0f32 0f32 }
 -- output { 1f32 }
 
 let main (f: i32) (x: f32) (y: f32): f32 =
@@ -60,4 +69,5 @@ let main (f: i32) (x: f32) (y: f32): f32 =
   else if f == 1 then x - y
   else if f == 2 then x * y
   else if f == 3 then x / y
-  else           x ** y
+  else if f == 4 then x % y
+  else                x ** y

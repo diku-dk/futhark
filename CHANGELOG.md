@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `floor`/`ceil` functions in `f32`/`f64` now handle infinities
     correctly (and are also faster).
 
+  * Using `%` on floats now computes fmod instead of crashing the compiler.
+
 ## [0.12.1]
 
 ### Added

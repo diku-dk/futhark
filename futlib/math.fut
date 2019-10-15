@@ -34,6 +34,7 @@ module type numeric = {
   val -: t -> t -> t
   val *: t -> t -> t
   val /: t -> t -> t
+  val %: t -> t -> t
   val **: t -> t -> t
 
   val to_i64: t -> i64
@@ -76,7 +77,6 @@ module type numeric = {
 module type integral = {
   include numeric
 
-  val %: t -> t -> t
   val //: t -> t -> t
   val %%: t -> t -> t
 
@@ -782,6 +782,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   let (x: f64) - (y: f64) = intrinsics.fsub64 x y
   let (x: f64) * (y: f64) = intrinsics.fmul64 x y
   let (x: f64) / (y: f64) = intrinsics.fdiv64 x y
+  let (x: f64) % (y: f64) = intrinsics.fmod64 x y
   let (x: f64) ** (y: f64) = intrinsics.fpow64 x y
 
   let u8  (x: u8)  = intrinsics.uitofp_i8_f64  (i8.u8 x)
@@ -880,6 +881,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let (x: f32) - (y: f32) = intrinsics.fsub32 x y
   let (x: f32) * (y: f32) = intrinsics.fmul32 x y
   let (x: f32) / (y: f32) = intrinsics.fdiv32 x y
+  let (x: f32) % (y: f32) = intrinsics.fmod32 x y
   let (x: f32) ** (y: f32) = intrinsics.fpow32 x y
 
   let u8  (x: u8)  = intrinsics.uitofp_i8_f32  (i8.u8 x)
