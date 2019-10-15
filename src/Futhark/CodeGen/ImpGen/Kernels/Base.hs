@@ -20,6 +20,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , compileGroupResult
   , virtualiseGroups
   , groupLoop
+  , kernelLoop
   , groupCoverSpace
 
   , getSize
@@ -127,20 +128,27 @@ compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
 compileThreadExp dest e =
   defCompileExp dest e
 
+
+-- | Assign iterations of a for-loop to all threads in the kernel.  The
+-- passed-in function is invoked with the (symbolic) iteration.  For
+-- multidimensional loops, use 'groupCoverSpace'.
+kernelLoop :: Imp.Exp -> Imp.Exp -> Imp.Exp
+           -> (Imp.Exp -> InKernelGen ()) -> InKernelGen ()
+kernelLoop tid num_threads n f = do
+  -- Compute how many elements this thread is responsible for.
+  -- Formula: (n - tid) / num_threads (rounded up).
+  let elems_for_this = (n - tid) `quotRoundingUp` num_threads
+
+  sFor "i" elems_for_this $ \i -> f $
+    i * num_threads + tid
+
 -- | Assign iterations of a for-loop to threads in the workgroup.  The
 -- passed-in function is invoked with the (symbolic) iteration.  For
 -- multidimensional loops, use 'groupCoverSpace'.
 groupLoop :: KernelConstants -> Imp.Exp
           -> (Imp.Exp -> InKernelGen ()) -> InKernelGen ()
-groupLoop constants n f = do
-  -- Compute how many elements this thread is responsible for.
-  -- Formula: (n - ltid) / group_size (rounded up).
-  let ltid = kernelLocalThreadId constants
-      elems_for_this = (n - ltid) `quotRoundingUp` kernelGroupSize constants
-
-  sFor "i" elems_for_this $ \i -> f $
-    i * kernelGroupSize constants +
-    kernelLocalThreadId constants
+groupLoop constants =
+  kernelLoop (kernelLocalThreadId constants) (kernelGroupSize constants)
 
 -- | Iterate collectively though a multidimensional space, such that
 -- all threads in the group participate.  The passed-in function is

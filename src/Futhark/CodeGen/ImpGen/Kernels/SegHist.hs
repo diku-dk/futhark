@@ -457,8 +457,6 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
       num_subhistos_per_group = Imp.var num_subhistos_per_group_var int32
 
   segment_size' <- toExp segment_size
-  max_elems_per_group <- dPrimVE "max_elems_per_group" $
-                         segment_size' `quotRoundingUp` unCount groups_per_segment
 
   emit $ Imp.DebugPrint "Number of local subhistograms per group" $ Just num_subhistos_per_group
 
@@ -475,6 +473,12 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
 
     flat_segment_id <- dPrimVE "flat_segment_id" $ group_id `quot` unCount groups_per_segment
     gid_in_segment <- dPrimVE "gid_in_segment" $ group_id `rem` unCount groups_per_segment
+    -- This pgtid is kind of a "virtualised physical" gtid - not the
+    -- same thing as the gtid used for the SegHist itself.
+    pgtid_in_segment <- dPrimVE "pgtid_in_segment" $
+      gid_in_segment * kernelGroupSize constants + kernelLocalThreadId constants
+    threads_per_segment <- dPrimVE "threads_per_segment" $
+      unCount groups_per_segment * kernelGroupSize constants
 
     -- Set segment indices.
     zipWithM_ dPrimV_ segment_is $
@@ -540,16 +544,8 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
 
     sOp Imp.LocalBarrier
 
-    -- Where does the input for this group start?
-    group_input_offset <- dPrimVE "group_input_offset" $
-                          max_elems_per_group * gid_in_segment
-
-    elems_for_group <- dPrimVE "elems_for_group" $
-                       Imp.BinOpExp (SMin Int32) (segment_size' - group_input_offset)
-                       max_elems_per_group
-
-    groupLoop constants elems_for_group $ \ie -> do
-      dPrimV_ i_in_segment $ ie + group_input_offset
+    kernelLoop pgtid_in_segment threads_per_segment segment_size' $ \ie -> do
+      dPrimV_ i_in_segment ie
 
       -- We execute the bucket function once and update each histogram
       -- serially.  This also involves writing to the mapout arrays.
