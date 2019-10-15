@@ -324,10 +324,6 @@ cFloat32Funs = [C.cunit|
       return lgamma(x);
     }
 
-    static inline float $id:(funName' "round32")(float x) {
-      return rint(x);
-    }
-
     static inline char $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
@@ -355,10 +351,28 @@ cFloat32Funs = [C.cunit|
     }
 
 $esc:("#ifdef __OPENCL_VERSION__")
+    static inline float $id:(funName' "round32")(float x) {
+      return rint(x);
+    }
+    static inline float $id:(funName' "floor32")(float x) {
+      return floor(x);
+    }
+    static inline float $id:(funName' "ceil32")(float x) {
+      return ceil(x);
+    }
     static inline float $id:(funName' "lerp32")(float v0, float v1, float t) {
       return mix(v0, v1, t);
     }
 $esc:("#else")
+    static inline float $id:(funName' "round32")(float x) {
+      return rintf(x);
+    }
+    static inline float $id:(funName' "floor32")(float x) {
+      return floorf(x);
+    }
+    static inline float $id:(funName' "ceil32")(float x) {
+      return ceilf(x);
+    }
     static inline float $id:(funName' "lerp32")(float v0, float v1, float t) {
       return v0 + (v1-v0)*t;
     }
@@ -425,6 +439,14 @@ cFloat64Funs = [C.cunit|
 
     static inline double $id:(funName' "round64")(double x) {
       return rint(x);
+    }
+
+    static inline double $id:(funName' "ceil64")(double x) {
+      return ceil(x);
+    }
+
+    static inline double $id:(funName' "floor64")(double x) {
+      return floor(x);
     }
 
     static inline char $id:(funName' "isnan64")(double x) {

@@ -305,6 +305,12 @@ def futhark_lgamma64(x):
 def futhark_round64(x):
   return np.round(x)
 
+def futhark_ceil64(x):
+  return np.ceil(x)
+
+def futhark_floor64(x):
+  return np.floor(x)
+
 def futhark_isnan64(x):
   return np.isnan(x)
 
@@ -363,6 +369,12 @@ def futhark_lgamma32(x):
 
 def futhark_round32(x):
   return np.round(x)
+
+def futhark_ceil32(x):
+  return np.ceil(x)
+
+def futhark_floor32(x):
+  return np.floor(x)
 
 def futhark_isnan32(x):
   return np.isnan(x)

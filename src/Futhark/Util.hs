@@ -24,8 +24,8 @@ module Futhark.Util
         isEnvVarSet,
         runProgramWithExitCode,
         directoryContents,
-        roundFloat,
-        roundDouble,
+        roundFloat, ceilFloat, floorFloat,
+        roundDouble, ceilDouble, floorDouble,
         lgamma, lgammaf, tgamma, tgammaf,
         fromPOSIX,
         toPOSIX,
@@ -176,14 +176,34 @@ directoryContents dir = do
 
 foreign import ccall "nearbyint" c_nearbyint :: Double -> Double
 foreign import ccall "nearbyintf" c_nearbyintf :: Float -> Float
+foreign import ccall "ceil" c_ceil :: Double -> Double
+foreign import ccall "ceilf" c_ceilf :: Float -> Float
+foreign import ccall "floor" c_floor :: Double -> Double
+foreign import ccall "floorf" c_floorf :: Float -> Float
 
 -- | Round a single-precision floating point number correctly.
 roundFloat :: Float -> Float
 roundFloat = c_nearbyintf
 
+-- | Round a single-precision floating point number upwards correctly.
+ceilFloat :: Float -> Float
+ceilFloat = c_ceilf
+
+-- | Round a single-precision floating point number downwards correctly.
+floorFloat :: Float -> Float
+floorFloat = c_floorf
+
 -- | Round a double-precision floating point number correctly.
 roundDouble :: Double -> Double
 roundDouble = c_nearbyint
+
+-- | Round a double-precision floating point number upwards correctly.
+ceilDouble :: Double -> Double
+ceilDouble = c_ceil
+
+-- | Round a double-precision floating point number downwards correctly.
+floorDouble :: Double -> Double
+floorDouble = c_floor
 
 foreign import ccall "lgamma" c_lgamma :: Double -> Double
 foreign import ccall "lgammaf" c_lgammaf :: Float -> Float
