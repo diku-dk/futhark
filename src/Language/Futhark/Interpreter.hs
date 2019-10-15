@@ -986,6 +986,8 @@ initialCtx =
       TermValue Nothing $ ValueFun $ \x -> f x
     fun2 f =
       TermValue Nothing $ ValueFun $ \x -> return $ ValueFun $ \y -> f x y
+    fun3 f =
+      TermValue Nothing $ ValueFun $ \x -> return $ ValueFun $ \y -> return $ ValueFun $ \z -> f x y z
     fun2t f =
       TermValue Nothing $ ValueFun $ \v ->
       case fromTuple v of Just [x,y] -> f x y
@@ -999,6 +1001,20 @@ initialCtx =
       TermValue Nothing $ ValueFun $ \v ->
       case fromTuple v of Just [x,y,z,a,b,c] -> f x y z a b c
                           _ -> error $ "Expected sextuple; got: " ++ pretty v
+
+    terDef fs = fun3 $ \x y z ->
+      case (x, y, z) of
+        (ValuePrim x', ValuePrim y', ValuePrim z')
+          | Just r <- msum $ map (`terDef'` (x', y', z')) fs ->
+              return $ ValuePrim r
+        _ ->
+          bad noLoc mempty $ "Cannot apply operator to arguments `" <>
+          pretty x <> "` and `" <> pretty y <> "` and `" <> pretty z <> "`."
+      where terDef' (valf, retf, op) (x, y, z) = do
+              x' <- valf x
+              y' <- valf y
+              z' <- valf z
+              retf =<< op x' y' z'
 
     bopDef fs = fun2 $ \x y ->
       case (x, y) of
@@ -1085,7 +1101,8 @@ initialCtx =
       | Just (pts, _, f) <- M.lookup s P.primFuns =
           case length pts of
             1 -> Just $ unopDef [(getV, Just . putV, f . pure)]
-            _ -> Just $ bopDef [(getV, Just . putV, \x y -> f [x,y])]
+            2 -> Just $ bopDef [(getV, Just . putV, \x y -> f [x,y])]
+            _ -> Just $ terDef [(getV, Just . putV, \x y z -> f [x,y,z])]
 
       | "sign_" `isPrefixOf` s =
           Just $ fun1 $ \x ->

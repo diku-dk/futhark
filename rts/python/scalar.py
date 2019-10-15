@@ -378,4 +378,10 @@ def futhark_from_bits32(x):
   s = struct.pack('>l', x)
   return np.float32(struct.unpack('>f', s)[0])
 
+def futhark_lerp32(v0, v1, t):
+  return v0 + (v1-v0)*t
+
+def futhark_lerp64(v0, v1, t):
+  return v0 + (v1-v0)*t
+
 # End of scalar.py.

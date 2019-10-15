@@ -124,6 +124,9 @@ module type real = {
   val atan2: t -> t -> t
   val gamma: t -> t
   val lgamma: t -> t
+  -- | Linear interpolation.  The third argument must be in the range
+  -- `[0,1]` or the results are unspecified.
+  val lerp: t -> t -> t -> t
 
   -- | Natural logarithm.
   val log: t -> t
@@ -832,6 +835,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   let atan2 (x: f64) (y: f64) = intrinsics.atan2_64 x y
   let gamma = intrinsics.gamma64
   let lgamma = intrinsics.lgamma64
+  let lerp = intrinsics.lerp64
 
   let ceil (x: f64) : f64 =
     let i = to_i64 x
@@ -941,6 +945,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let atan2 (x: f32) (y: f32) = intrinsics.atan2_32 x y
   let gamma = intrinsics.gamma32
   let lgamma = intrinsics.lgamma32
+  let lerp = intrinsics.lerp32
 
   let ceil (x: f32) : f32 =
     let i = to_i32 x

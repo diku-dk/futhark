@@ -16,7 +16,6 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , cFloat32Ops, cFloat32Funs
   , cFloat64Ops, cFloat64Funs
   , cFloatConvOps
-
   )
   where
 
@@ -354,6 +353,16 @@ cFloat32Funs = [C.cunit|
       p.f = x;
       return p.t;
     }
+
+$esc:("#ifdef __OPENCL_VERSION__")
+    static inline float $id:(funName' "lerp32")(float v0, float v1, float t) {
+      return mix(v0, v1, t);
+    }
+$esc:("#else")
+    static inline float $id:(funName' "lerp32")(float v0, float v1, float t) {
+      return v0 + (v1-v0)*t;
+    }
+$esc:("#endif")
 |]
 
 cFloat64Funs :: [C.Definition]
@@ -443,4 +452,14 @@ cFloat64Funs = [C.cunit|
       p.f = x;
       return p.t;
     }
+
+$esc:("#ifdef __OPENCL_VERSION__")
+    static inline double $id:(funName' "lerp64")(double v0, double v1, double t) {
+      return mix(v0, v1, t);
+    }
+$esc:("#else")
+    static inline double $id:(funName' "lerp64")(double v0, double v1, double t) {
+      return v0 + (v1-v0)*t;
+    }
+$esc:("#endif")
 |]

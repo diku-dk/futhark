@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Segmented `reduce_by_index` are now substantially fasted for small
     histograms.
 
+  * New functions: `f32.lerp` and `f64.lerp`, for linear interpolation.
+
 ### Removed
 
 ### Changed
