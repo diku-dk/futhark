@@ -896,6 +896,25 @@ primFuns = M.fromList
         [IntValue (Int64Value x)] ->
           Just $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x
         _ -> Nothing))
+
+  , ("lerp32",
+     ([FloatType Float32, FloatType Float32, FloatType Float32], FloatType Float32,
+      \case
+        [FloatValue (Float32Value v0),
+         FloatValue (Float32Value v1),
+         FloatValue (Float32Value t)] ->
+          Just $ FloatValue $ Float32Value $
+          v0 + (v1-v0)*max 0 (min 1 t)
+        _ -> Nothing))
+  , ("lerp64",
+     ([FloatType Float64, FloatType Float64, FloatType Float64], FloatType Float64,
+      \case
+        [FloatValue (Float64Value v0),
+         FloatValue (Float64Value v1),
+         FloatValue (Float64Value t)] ->
+          Just $ FloatValue $ Float64Value $
+          v0 + (v1-v0)*max 0 (min 1 t)
+        _ -> Nothing))
   ]
   where f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
         f64 s f = (s, ([FloatType Float64], FloatType Float64, f64PrimFun f))

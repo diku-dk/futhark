@@ -311,6 +311,9 @@ private static float futhark_from_bits32(int x){return BitConverter.ToSingle(Bit
 private static float futhark_round32(float x){return (float) Math.Round(x);}
 private static double futhark_round64(double x){return Math.Round(x);}
 
+private static float futhark_lerp32(float v0, float v1, float t){return v0 + (v1-v0)*t;}
+private static double futhark_lerp64(double v0, double v1, double t){return v0 + (v1-v0)*t;}
+
 private static bool llt (bool x, bool y){return (!x && y);}
 private static bool lle (bool x, bool y){return (!x || y);}
 
