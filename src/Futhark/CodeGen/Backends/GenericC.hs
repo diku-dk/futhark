@@ -792,10 +792,12 @@ arrayLibraryFunctions space pt signed shape = do
           }
 
           $ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
+            (void)ctx;
             return $exp:arr_raw_mem;
           }
 
           typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
+            (void)ctx;
             return arr->shape;
           }
           |]
