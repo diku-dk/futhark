@@ -105,6 +105,8 @@ emptyEnv rules blockers =
       , envVtable = mempty
       }
 
+type Protect m = SubExp -> Pattern (Lore m) -> Op (Lore m) -> Maybe (m ())
+
 data SimpleOps lore =
   SimpleOps { mkExpAttrS :: ST.SymbolTable (Wise lore)
                          -> Pattern (Wise lore) -> Exp (Wise lore)
@@ -115,6 +117,10 @@ data SimpleOps lore =
             , mkLetNamesS :: ST.SymbolTable (Wise lore)
                           -> [VName] -> Exp (Wise lore)
                           -> SimpleM lore (Stm (Wise lore), Stms (Wise lore))
+            , protectHoistedOpS :: Protect (Binder (Wise lore))
+              -- ^ Make a hoisted Op safe.  The SubExp is a boolean
+              -- that is true when the value of the statement will
+              -- actually be used.
             , simplifyOpS :: SimplifyOp lore (Op lore)
             }
 
@@ -122,10 +128,11 @@ type SimplifyOp lore op = op -> SimpleM lore (OpWithWisdom op, Stms (Wise lore))
 
 bindableSimpleOps :: (SimplifiableLore lore, Bindable lore) =>
                      SimplifyOp lore (Op lore) -> SimpleOps lore
-bindableSimpleOps = SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS'
+bindableSimpleOps = SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS' protectHoistedOpS'
   where mkExpAttrS' _ pat e = return $ mkExpAttr pat e
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ name e = (,) <$> mkLetNames name e <*> pure mempty
+        protectHoistedOpS' _ _ _ = Nothing
 
 newtype SimpleM lore a =
   SimpleM (ReaderT (SimpleOps lore, Env lore) (State (VNameSource, Bool, Certificates)) a)
@@ -238,11 +245,12 @@ protectIfHoisted :: SimplifiableLore lore =>
                  -> SimpleM lore (a, Stms (Wise lore))
 protectIfHoisted cond side m = do
   (x, stms) <- m
+  ops <- asks $ protectHoistedOpS . fst
   runBinder $ do
     if any (not . safeExp . stmExp) stms
       then do cond' <- if side then return cond
                        else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
-              mapM_ (protectIf unsafeOrCostly cond') stms
+              mapM_ (protectIf ops unsafeOrCostly cond') stms
       else addStms stms
     return x
   where unsafeOrCostly e = not (safeExp e) || not (cheapExp e)
@@ -258,10 +266,11 @@ protectLoopHoisted :: SimplifiableLore lore =>
                    -> SimpleM lore (a, Stms (Wise lore))
 protectLoopHoisted ctx val form m = do
   (x, stms) <- m
+  ops <- asks $ protectHoistedOpS . fst
   runBinder $ do
     if any (not . safeExp . stmExp) stms
       then do is_nonempty <- checkIfNonEmpty
-              mapM_ (protectIf (not . safeExp) is_nonempty) stms
+              mapM_ (protectIf ops (not . safeExp) is_nonempty) stms
       else addStms stms
     return x
   where checkIfNonEmpty =
@@ -275,18 +284,24 @@ protectLoopHoisted ctx val form m = do
               letSubExp "loop_nonempty" $
               BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
 
-protectIf :: MonadBinder m => (Exp (Lore m) -> Bool) -> SubExp -> Stm (Lore m) -> m ()
-protectIf _ taken (Let pat (StmAux cs _)
-                   (If cond taken_body untaken_body (IfAttr if_ts IfFallback))) = do
+protectIf :: MonadBinder m =>
+             Protect m
+          -> (Exp (Lore m) -> Bool)
+          -> SubExp -> Stm (Lore m) -> m ()
+protectIf _ _ taken (Let pat (StmAux cs _)
+                     (If cond taken_body untaken_body (IfAttr if_ts IfFallback))) = do
   cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
   certifying cs $
     letBind_ pat $ If cond' taken_body untaken_body $
     IfAttr if_ts IfFallback
-protectIf _ taken (Let pat (StmAux cs _) (BasicOp (Assert cond msg loc))) = do
+protectIf _ _ taken (Let pat (StmAux cs _) (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
   certifying cs $ letBind_ pat $ BasicOp $ Assert cond' msg loc
-protectIf f taken (Let pat (StmAux cs _) e)
+protectIf protect _ taken (Let pat (StmAux cs _) (Op op))
+  | Just m <- protect taken pat op =
+      certifying cs m
+protectIf _ f taken (Let pat (StmAux cs _) e)
   | f e = do
       taken_body <- eBody [pure e]
       untaken_body <- eBody $ map (emptyOfType $ patternContextNames pat)
@@ -295,7 +310,7 @@ protectIf f taken (Let pat (StmAux cs _) e)
       certifying cs $
         letBind_ pat $ If taken taken_body untaken_body $
         IfAttr if_ts IfFallback
-protectIf _ _ stm =
+protectIf _ _ _ stm =
   addStm stm
 
 emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))

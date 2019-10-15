@@ -802,6 +802,7 @@ instance BinderOps (Engine.Wise ExplicitMemory) where
   mkLetNamesB = mkLetNamesB''
 
 simplifiable :: (Engine.SimplifiableLore lore,
+                 BinderOps lore,
                  ExpAttr lore ~ (),
                  BodyAttr lore ~ (),
                  Op lore ~ MemOp inner,
@@ -809,7 +810,7 @@ simplifiable :: (Engine.SimplifiableLore lore,
                 (inner -> Engine.SimpleM lore (Engine.OpWithWisdom inner, Stms (Engine.Wise lore)))
              -> SimpleOps lore
 simplifiable simplifyInnerOp =
-  SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS' simplifyOp
+  SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS' protectOp simplifyOp
   where mkExpAttrS' _ pat e =
           return $ Engine.mkWiseExpAttr pat () e
 
@@ -820,6 +821,14 @@ simplifiable simplifyInnerOp =
                           removeExpWisdom e
           return (mkWiseLetStm pat' (defAux ()) e, stms)
           where env = removeScopeWisdom $ ST.toScope vtable
+
+        protectOp taken pat (Alloc size space) = Just $ do
+          tbody <- resultBodyM [size]
+          fbody <- resultBodyM [intConst Int64 0]
+          size' <- letSubExp "hoisted_alloc_size" $
+                   If taken tbody fbody $ IfAttr [MemPrim int64] IfFallback
+          letBind_ pat $ Op $ Alloc size' space
+        protectOp _ _ _ = Nothing
 
         simplifyOp (Alloc size space) =
           (,) <$> (Alloc <$> Engine.simplify size <*> pure space) <*> pure mempty
