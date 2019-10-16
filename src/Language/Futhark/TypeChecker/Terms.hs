@@ -258,11 +258,14 @@ initialTermScope = TermScope { scopeVtable = initialVtable
                              }
   where initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
 
-        funF ts t = foldr (arrow . Scalar . Prim) (Scalar $ Prim t) ts
+        prim = Scalar . Prim
         arrow x y = Scalar $ Arrow mempty Unnamed x y
 
-        addIntrinsicF (name, IntrinsicMonoFun ts t) =
-          Just (name, BoundV Global [] $ funF ts t)
+        addIntrinsicF (name, IntrinsicMonoFun pts t) =
+          Just (name, BoundV Global [] $ arrow pts' $ prim t)
+          where pts' = case pts of [pt] -> prim pt
+                                   _    -> tupleRecord $ map prim pts
+
         addIntrinsicF (name, IntrinsicOverloadedFun ts pts rts) =
           Just (name, OverloadedF ts pts rts)
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =

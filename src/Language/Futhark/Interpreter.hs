@@ -986,8 +986,6 @@ initialCtx =
       TermValue Nothing $ ValueFun $ \x -> f x
     fun2 f =
       TermValue Nothing $ ValueFun $ \x -> return $ ValueFun $ \y -> f x y
-    fun3 f =
-      TermValue Nothing $ ValueFun $ \x -> return $ ValueFun $ \y -> return $ ValueFun $ \z -> f x y z
     fun2t f =
       TermValue Nothing $ ValueFun $ \v ->
       case fromTuple v of Just [x,y] -> f x y
@@ -1001,20 +999,6 @@ initialCtx =
       TermValue Nothing $ ValueFun $ \v ->
       case fromTuple v of Just [x,y,z,a,b,c] -> f x y z a b c
                           _ -> error $ "Expected sextuple; got: " ++ pretty v
-
-    terDef fs = fun3 $ \x y z ->
-      case (x, y, z) of
-        (ValuePrim x', ValuePrim y', ValuePrim z')
-          | Just r <- msum $ map (`terDef'` (x', y', z')) fs ->
-              return $ ValuePrim r
-        _ ->
-          bad noLoc mempty $ "Cannot apply operator to arguments `" <>
-          pretty x <> "` and `" <> pretty y <> "` and `" <> pretty z <> "`."
-      where terDef' (valf, retf, op) (x, y, z) = do
-              x' <- valf x
-              y' <- valf y
-              z' <- valf z
-              retf =<< op x' y' z'
 
     bopDef fs = fun2 $ \x y ->
       case (x, y) of
@@ -1040,6 +1024,17 @@ initialCtx =
       where unopDef' (valf, retf, op) x = do
               x' <- valf x
               retf =<< op x'
+
+    tbopDef f = fun1 $ \v ->
+      case fromTuple v of
+        Just [ValuePrim x, ValuePrim y]
+          | Just x' <- getV x,
+            Just y' <- getV y,
+            Just z <- f x' y' ->
+              return $ ValuePrim $ putV z
+        _ ->
+          bad noLoc mempty $ "Cannot apply operator to argument `" <>
+          pretty v <> "."
 
     def "!" = Just $ unopDef [ (getS, putS, P.doUnOp $ P.Complement Int8)
                              , (getS, putS, P.doUnOp $ P.Complement Int16)
@@ -1090,19 +1085,25 @@ initialCtx =
 
     def s
       | Just bop <- find ((s==) . pretty) P.allBinOps =
-          Just $ bopDef [(getV, Just . putV, P.doBinOp bop)]
+          Just $ tbopDef $ P.doBinOp bop
+      | Just unop <- find ((s==) . pretty) P.allCmpOps =
+          Just $ tbopDef $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
       | Just cop <- find ((s==) . pretty) P.allConvOps =
           Just $ unopDef [(getV, Just . putV, P.doConvOp cop)]
       | Just unop <- find ((s==) . pretty) P.allUnOps =
           Just $ unopDef [(getV, Just . putV, P.doUnOp unop)]
-      | Just unop <- find ((s==) . pretty) P.allCmpOps =
-          Just $ bopDef [(getV, bool, P.doCmpOp unop)]
 
       | Just (pts, _, f) <- M.lookup s P.primFuns =
           case length pts of
             1 -> Just $ unopDef [(getV, Just . putV, f . pure)]
-            2 -> Just $ bopDef [(getV, Just . putV, \x y -> f [x,y])]
-            _ -> Just $ terDef [(getV, Just . putV, \x y z -> f [x,y,z])]
+            _ -> Just $ fun1 $ \x -> do
+              let getV' (ValuePrim v) = getV v
+                  getV' _ = Nothing
+              case f =<< mapM getV' =<< fromTuple x of
+                Just res ->
+                  return $ ValuePrim $ putV res
+                _ ->
+                  error $ "Cannot apply " ++ pretty s ++ " to " ++ pretty x
 
       | "sign_" `isPrefixOf` s =
           Just $ fun1 $ \x ->
@@ -1114,7 +1115,6 @@ initialCtx =
           case x of (ValuePrim (SignedValue x')) ->
                       return $ ValuePrim $ UnsignedValue x'
                     _ -> error $ "Cannot unsign: " ++ pretty x
-      where bool = Just . BoolValue
 
     def s | "map_stream" `isPrefixOf` s =
               Just $ fun2t stream

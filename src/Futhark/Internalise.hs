@@ -1305,7 +1305,7 @@ isOverloadedFunction qname args loc = do
           x' <- internaliseExp1 "x" x
           fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp unop x'
 
-    handle [x,y] s
+    handle [TupLit [x,y] _] s
       | Just bop <- find ((==s) . pretty) allBinOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           y' <- internaliseExp1 "y" y
