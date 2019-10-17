@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Futhark.Analysis.ScalExpTests
   ( tests

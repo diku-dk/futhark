@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Language.Futhark.CoreTests ()
 where
