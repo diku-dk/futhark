@@ -17,7 +17,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Alg
   )
 where
 
-import Data.Monoid ((<>))
 import Data.List hiding (repeat)
 
 import Prelude hiding (repeat, mod)
