@@ -14,7 +14,6 @@ import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.GenericPython.Definitions
-import Futhark.Util.Pretty(pretty)
 import Futhark.MonadFreshNames
 
 

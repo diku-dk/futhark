@@ -32,7 +32,6 @@ import Data.Bifunctor
 import Data.List
 import Data.Loc
 import Data.Maybe
-import Data.Monoid ((<>))
 import qualified Data.Map.Strict as M
 
 import Language.Futhark
@@ -461,4 +460,4 @@ substTypesAny lookupSubst ot = case ot of
           TypeArgType (substTypesAny lookupSubst' t) loc
         subsTypeArg t = t
 
-        lookupSubst' = fmap (fmap $ bimap id (const ())) . lookupSubst
+        lookupSubst' = fmap (fmap $ second (const ())) . lookupSubst

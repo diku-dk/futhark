@@ -48,7 +48,7 @@ import qualified Data.Map as M
 import System.FilePath
 import qualified System.FilePath.Posix as Posix
 
-import Data.Versions (SemVer(..), VUnit(..), prettySemVer)
+import Data.Versions (semver, SemVer(..), VUnit(..), prettySemVer)
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
 

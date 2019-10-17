@@ -21,8 +21,7 @@ where
 
 import Control.Monad
 import Data.Either
-import Data.Foldable (all)
-import Data.List hiding (all)
+import Data.List
 import Data.Maybe
 import qualified Data.Map.Strict as M
 

@@ -57,7 +57,6 @@ module Futhark.CodeGen.ImpCode
   )
   where
 
-import Data.Monoid ((<>))
 import Data.List
 import Data.Loc
 import Data.Traversable

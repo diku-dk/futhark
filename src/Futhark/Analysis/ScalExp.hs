@@ -14,7 +14,6 @@ where
 
 import Data.List
 import Data.Maybe
-import Data.Monoid ((<>))
 
 import Futhark.Representation.Primitive hiding (SQuot, SRem, SDiv, SMod, SSignum)
 import Futhark.Representation.AST hiding (SQuot, SRem, SDiv, SMod, SSignum)

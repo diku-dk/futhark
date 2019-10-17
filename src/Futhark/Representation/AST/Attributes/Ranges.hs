@@ -22,7 +22,7 @@ module Futhark.Representation.AST.Attributes.Ranges
        )
        where
 
-import Data.Monoid ((<>))
+import qualified Data.Kind
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST.Attributes
@@ -260,7 +260,7 @@ instance RangedOp () where
 
 class RangedOp (OpWithRanges op) =>
       CanBeRanged op where
-  type OpWithRanges op :: *
+  type OpWithRanges op :: Data.Kind.Type
   removeOpRanges :: OpWithRanges op -> op
   addOpRanges :: op -> OpWithRanges op
 

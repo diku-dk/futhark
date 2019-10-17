@@ -100,7 +100,6 @@ import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Foldable (traverse_)
 import Data.List
-import Data.Monoid ((<>))
 
 import Futhark.Analysis.Metrics
 import Futhark.Representation.AST.Syntax

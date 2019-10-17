@@ -16,7 +16,6 @@ import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
-import Futhark.Util.Pretty(pretty)
 import Futhark.Util (zEncodeString)
 import Futhark.MonadFreshNames hiding (newVName')
 
