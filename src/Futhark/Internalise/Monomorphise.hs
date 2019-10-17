@@ -155,7 +155,7 @@ transformType t = do
   -- As an attempt at an optimisation, only transform the aliases if
   -- they refer to a variable we have record-replaced.
   return $ if any ((`M.member` rrs) . aliasVar) $ aliases t
-           then bimap id (mconcat . map replace . S.toList) t
+           then second (mconcat . map replace . S.toList) t
            else t
 
 -- | Monomorphization of expressions.

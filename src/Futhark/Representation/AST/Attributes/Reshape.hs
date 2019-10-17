@@ -176,6 +176,4 @@ flattenIndex dims is =
 -- @dims@, and the last element will be 1.
 sliceSizes :: IntegralExp num =>
               [num] -> [num]
-sliceSizes [] = [1]
-sliceSizes (n:ns) =
-  product (n : ns) : sliceSizes ns
+sliceSizes ns = foldr (\n -> (product (n:ns):)) [1] ns
