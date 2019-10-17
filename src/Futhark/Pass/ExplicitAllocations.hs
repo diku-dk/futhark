@@ -244,7 +244,7 @@ patternWithAllocations names e = do
   (Let pat _ _, extrabnds) <- allocsForStm sizes vals e
   case extrabnds of
     [] -> return pat
-    _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
+    _  -> error $ "Cannot make allocations for pattern of " ++ pretty e
 
 allocsForPattern :: Allocator lore m =>
                     [Ident] -> [Ident] -> [ExpReturns] -> [ExpHint]
@@ -293,7 +293,7 @@ allocsForPattern sizeidents validents rts hints = do
 
 instantiateIxFun :: Monad m => ExtIxFun -> m IxFun
 instantiateIxFun = traverse $ traverse inst
-  where inst Ext{} = fail "instantiateIxFun: not yet"
+  where inst Ext{} = error "instantiateIxFun: not yet"
         inst (Free x) = return x
 
 summaryForBindage :: Allocator lore m =>
@@ -485,7 +485,7 @@ explicitAllocationsInStms stms = do
 memoryInRetType :: [RetType Kernels] -> [RetType ExplicitMemory]
 memoryInRetType ts = evalState (mapM addAttr ts) $ startOfFreeIDRange ts
   where addAttr (Prim t) = return $ MemPrim t
-        addAttr Mem{} = fail "memoryInRetType: too much memory"
+        addAttr Mem{} = error "memoryInRetType: too much memory"
         addAttr (Array bt shape u) = do
           i <- get <* modify (+1)
           return $ MemArray bt shape u $ ReturnsNewBlock DefaultSpace i $
@@ -632,11 +632,11 @@ allocInExp (If cond tbranch fbranch (IfAttr rets ifsort)) = do
   return $ If cond tbranch'' fbranch'' $ IfAttr rets'' ifsort
 allocInExp e = mapExpM alloc e
   where alloc =
-          identityMapper { mapOnBody = fail "Unhandled Body in ExplicitAllocations"
-                         , mapOnRetType = fail "Unhandled RetType in ExplicitAllocations"
-                         , mapOnBranchType = fail "Unhandled BranchType in ExplicitAllocations"
-                         , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
-                         , mapOnLParam = fail "Unhandled LParam in ExplicitAllocations"
+          identityMapper { mapOnBody = error "Unhandled Body in ExplicitAllocations"
+                         , mapOnRetType = error "Unhandled RetType in ExplicitAllocations"
+                         , mapOnBranchType = error "Unhandled BranchType in ExplicitAllocations"
+                         , mapOnFParam = error "Unhandled FParam in ExplicitAllocations"
+                         , mapOnLParam = error "Unhandled LParam in ExplicitAllocations"
                          , mapOnOp = \op -> do handle <- asks allocInOp
                                                handle op
                          }

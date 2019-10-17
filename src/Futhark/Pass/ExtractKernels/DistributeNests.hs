@@ -224,7 +224,7 @@ leavingNesting :: Monad m => MapLoop -> DistAcc -> DistNestT m DistAcc
 leavingNesting (MapLoop _ cs w lam arrs) acc =
   case popInnerTarget $ distTargets acc of
    Nothing ->
-     fail "The kernel targets list is unexpectedly small"
+     error "The kernel targets list is unexpectedly small"
    Just ((pat,res), newtargets) -> do
      let acc' = acc { distTargets = newtargets }
      if null $ distStms acc'
@@ -647,7 +647,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
     certifying cs $ letBind_ pat $ Op $ SegOp k
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
-        bad = fail "Ill-typed nested scatter encountered."
+        bad = error "Ill-typed nested scatter encountered."
 
         inPlaceReturn ispace (aw, inp, is_vs) =
           WriteReturns (init ws++[aw]) (kernelInputArray inp)
@@ -691,7 +691,7 @@ segmentedHistKernel nest perm cs hist_w ops lam arrs = do
       histKernel lvl orig_pat ispace inputs cs hist_w ops' lam arrs
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
-        bad = fail "Ill-typed nested Hist encountered."
+        bad = error "Ill-typed nested Hist encountered."
 
 histKernel :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                    SegLevel -> Pattern -> [(VName, SubExp)] -> [KernelInput]
@@ -798,12 +798,12 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
   (ispace, kernel_inps) <- flatKernel nest
 
   unless (not $ free_in_op `namesIntersect` bound_by_nest) $
-    fail "Non-fold lambda uses nest-bound parameters."
+    error "Non-fold lambda uses nest-bound parameters."
 
   let indices = map fst ispace
 
       prepareNe (Var v) | v `nameIn` bound_by_nest =
-                          fail "Neutral element bound in nest"
+                          error "Neutral element bound in nest"
       prepareNe ne = return ne
 
       prepareArr arr =
@@ -821,7 +821,7 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
                       letExp (baseString arr ++ "_repd")
                       (BasicOp $ Replicate (Shape $ map snd ispace) $ Var arr)
           _ ->
-            fail "Input not free or outermost."
+            error "Input not free or outermost."
 
   nes' <- mapM prepareNe nes
 

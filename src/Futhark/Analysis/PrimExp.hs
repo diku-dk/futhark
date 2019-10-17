@@ -254,7 +254,7 @@ numBad s x =
 
 -- | Evaluate a 'PrimExp' in the given monad.  Invokes 'fail' on type
 -- errors.
-evalPrimExp :: (Pretty v, Monad m) => (v -> m PrimValue) -> PrimExp v -> m PrimValue
+evalPrimExp :: (Pretty v, MonadFail m) => (v -> m PrimValue) -> PrimExp v -> m PrimValue
 evalPrimExp f (LeafExp v _) = f v
 evalPrimExp _ (ValueExp v) = return v
 evalPrimExp f (BinOpExp op x y) = do
@@ -276,7 +276,7 @@ evalPrimExp f (FunExp h args _) = do
   maybe (evalBad h args) return $ do (_, _, fun) <- M.lookup h primFuns
                                      fun args'
 
-evalBad :: (Pretty a, Pretty b, Monad m) => a -> b -> m c
+evalBad :: (Pretty a, Pretty b, MonadFail m) => a -> b -> m c
 evalBad op arg = fail $ "evalPrimExp: Type error when applying " ++
                  pretty op ++ " to " ++ pretty arg
 

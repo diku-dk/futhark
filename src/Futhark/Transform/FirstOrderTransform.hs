@@ -70,7 +70,7 @@ transformStmRecursively (Let pat aux e) =
                                    , mapOnBranchType = return
                                    , mapOnFParam = return
                                    , mapOnLParam = return
-                                   , mapOnOp = fail "Unhandled Op in first order transform"
+                                   , mapOnOp = error "Unhandled Op in first order transform"
                                    }
 
 -- | Transform a single 'SOAC' into a do-loop.  The body of the lambda

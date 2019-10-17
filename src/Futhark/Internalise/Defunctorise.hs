@@ -113,7 +113,7 @@ bindingAbs abs = local $ \env ->
 
 lookupImport :: String -> TransformM Scope
 lookupImport name = maybe bad return =<< asks (M.lookup name . envImports)
-  where bad = fail $ "Unknown import: " ++ name
+  where bad = error $ "Unknown import: " ++ name
 
 lookupMod' :: QualName VName -> Scope -> Either String Mod
 lookupMod' mname scope =
@@ -122,7 +122,7 @@ lookupMod' mname scope =
   where bad mname' = "Unknown module: " ++ pretty mname ++ " (" ++ pretty mname' ++ ")"
 
 lookupMod :: QualName VName -> TransformM Mod
-lookupMod mname = either fail return . lookupMod' mname =<< askScope
+lookupMod mname = either error return . lookupMod' mname =<< askScope
 
 runTransformM :: VNameSource -> TransformM a -> (a, VNameSource, DL.DList Dec)
 runTransformM src (TransformM m) = runRWS m env src
@@ -167,7 +167,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
   arg_mod <- evalModExp arg
   case f_mod of
     ModMod _ ->
-      fail $ "Cannot apply non-parametric module at " ++ locStr loc
+      error $ "Cannot apply non-parametric module at " ++ locStr loc
     ModFun f_abs f_closure f_p f_body ->
       bindingAbs (f_abs <> S.fromList (unInfo (modParamAbs f_p))) $
       extendAbsTypes b_substs $ extendScope f_closure $ generating $ do
@@ -215,7 +215,7 @@ transformNames x = do
           case e of
             QualParens mn e' _ ->
               case lookupMod' mn scope of
-                Left err -> fail err
+                Left err -> error err
                 Right mod ->
                   astMap (substituter $ modScope mod<>scope) e'
             _ -> astMap (substituter scope) e

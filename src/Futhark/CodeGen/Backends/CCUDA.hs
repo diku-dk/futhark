@@ -131,7 +131,7 @@ writeCUDAScalar mem idx t "device" _ val = do
                                  sizeof($ty:t)));
                  }|]
 writeCUDAScalar _ _ _ space _ _ =
-  fail $ "Cannot write to '" ++ space ++ "' memory space."
+  error $ "Cannot write to '" ++ space ++ "' memory space."
 
 readCUDAScalar :: GC.ReadScalar OpenCL ()
 readCUDAScalar mem idx t "device" _ = do
@@ -144,19 +144,19 @@ readCUDAScalar mem idx t "device" _ = do
                 |]
   return [C.cexp|$id:val|]
 readCUDAScalar _ _ _ space _ =
-  fail $ "Cannot write to '" ++ space ++ "' memory space."
+  error $ "Cannot write to '" ++ space ++ "' memory space."
 
 allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
   GC.stm [C.cstm|CUDA_SUCCEED(cuda_alloc(&ctx->cuda, $exp:size, $exp:tag, &$exp:mem));|]
 allocateCUDABuffer _ _ _ space =
-  fail $ "Cannot allocate in '" ++ space ++ "' memory space."
+  error $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateCUDABuffer :: GC.Deallocate OpenCL ()
 deallocateCUDABuffer mem tag "device" =
   GC.stm [C.cstm|CUDA_SUCCEED(cuda_free(&ctx->cuda, $exp:mem, $exp:tag));|]
 deallocateCUDABuffer _ _ space =
-  fail $ "Cannot deallocate in '" ++ space ++ "' memory space."
+  error $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
 copyCUDAMemory :: GC.Copy OpenCL ()
 copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
@@ -170,7 +170,7 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
     memcpyFun DefaultSpace (Space "device")     = return "cuMemcpyDtoH"
     memcpyFun (Space "device") DefaultSpace     = return "cuMemcpyHtoD"
     memcpyFun (Space "device") (Space "device") = return "cuMemcpy"
-    memcpyFun _ _ = fail $ "Cannot copy to '" ++ show dstSpace
+    memcpyFun _ _ = error $ "Cannot copy to '" ++ show dstSpace
                            ++ "' from '" ++ show srcSpace ++ "'."
 
 staticCUDAArray :: GC.StaticArray OpenCL ()
@@ -200,13 +200,13 @@ staticCUDAArray name "device" t vs = do
   }|]
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
 staticCUDAArray _ space _ _ =
-  fail $ "CUDA backend cannot create static array in '" ++ space
+  error $ "CUDA backend cannot create static array in '" ++ space
           ++ "' memory space"
 
 cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = return [C.cty|typename CUdeviceptr|]
 cudaMemoryType space =
-  fail $ "CUDA backend does not support '" ++ space ++ "' memory space."
+  error $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
 callKernel :: GC.OpCompiler OpenCL ()
 callKernel (HostCode c) = GC.compileCode c

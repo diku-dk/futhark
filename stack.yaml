@@ -1,15 +1,16 @@
-resolver: lts-14.4
+resolver: nightly-2019-10-15
 packages:
 - .
 
 extra-deps:
- - containers-0.6.2.1
- - binary-0.8.7.0@sha256:ae3e6cca723ac55c54bbb3fa771bcf18142bc727afd57818e66d6ee6c8044f12,7705
- - text-1.2.4.0@sha256:8c24450feb8e3bbb7ea3e17af24ef57e85db077c4bf53e5bcc345b283d1b1d5b,10081
+ - exception-mtl-0.4.0.1
+ - exception-transformers-0.4.0.8
+ - language-c-quote-0.12.2.1
+ - mainland-pretty-0.7.0.1
 
 flags: {}
 
 extra-package-dbs: []
 
 nix:
-    packages: [zlib.dev, zlib.out, pkgconfig, haskell.compiler.ghc865]
+    packages: [zlib.dev, zlib.out, pkgconfig, haskell.compiler.ghc881]

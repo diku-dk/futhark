@@ -271,7 +271,7 @@ bindingNumber :: VName -> ForwardingM lore Int
 bindingNumber name = do
   res <- asks $ fmap entryNumber . M.lookup name . topDownTable
   case res of Just n  -> return n
-              Nothing -> fail $ "bindingNumber: variable " ++
+              Nothing -> error $ "bindingNumber: variable " ++
                          pretty name ++ " not found."
 
 deepen :: ForwardingM lore a -> ForwardingM lore a
@@ -288,14 +288,14 @@ isInCurrentBody name = do
   current <- asks topDownDepth
   res <- asks $ fmap entryDepth . M.lookup name . topDownTable
   case res of Just d  -> return $ d == current
-              Nothing -> fail $ "isInCurrentBody: variable " ++
+              Nothing -> error $ "isInCurrentBody: variable " ++
                          pretty name ++ " not found."
 
 isOptimisable :: VName -> ForwardingM lore Bool
 isOptimisable name = do
   res <- asks $ fmap entryOptimisable . M.lookup name . topDownTable
   case res of Just b  -> return b
-              Nothing -> fail $ "isOptimisable: variable " ++
+              Nothing -> error $ "isOptimisable: variable " ++
                          pretty name ++ " not found."
 
 seenVar :: VName -> ForwardingM lore ()

@@ -150,7 +150,7 @@ instance SimplifiableLore lore => HasScope (Wise lore) (SimpleM lore) where
     vtable <- askVtable
     case ST.lookupType name vtable of
       Just t -> return t
-      Nothing -> fail $
+      Nothing -> error $
                  "SimpleM.lookupType: cannot find variable " ++
                  pretty name ++ " in symbol table."
 
@@ -714,7 +714,8 @@ simplifyExpBase = mapExpM hoist
   where hoist = Mapper {
                 -- Bodies are handled explicitly because we need to
                 -- provide their result diet.
-                  mapOnBody = fail "Unhandled body in simplification engine."
+                  mapOnBody =
+                  error "Unhandled body in simplification engine."
                 , mapOnSubExp = simplify
                 -- Lambdas are handled explicitly because we need to
                 -- bind their parameters.
@@ -722,11 +723,11 @@ simplifyExpBase = mapExpM hoist
                 , mapOnRetType = simplify
                 , mapOnBranchType = simplify
                 , mapOnFParam =
-                  fail "Unhandled FParam in simplification engine."
+                  error "Unhandled FParam in simplification engine."
                 , mapOnLParam =
-                  fail "Unhandled LParam in simplification engine."
+                  error "Unhandled LParam in simplification engine."
                 , mapOnOp =
-                  fail "Unhandled Op in simplification engine."
+                  error "Unhandled Op in simplification engine."
                 }
 
 type SimplifiableLore lore = (Attributes lore,

@@ -171,7 +171,7 @@ writeOpenCLScalar mem i t "device" _ val = do
                                          0, NULL, NULL));
                 }|]
 writeOpenCLScalar _ _ _ space _ _ =
-  fail $ "Cannot write to '" ++ space ++ "' memory space."
+  error $ "Cannot write to '" ++ space ++ "' memory space."
 
 readOpenCLScalar :: GC.ReadScalar OpenCL ()
 readOpenCLScalar mem i t "device" _ = do
@@ -185,19 +185,19 @@ readOpenCLScalar mem i t "device" _ = do
               |]
   return [C.cexp|$id:val|]
 readOpenCLScalar _ _ _ space _ =
-  fail $ "Cannot read from '" ++ space ++ "' memory space."
+  error $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
 allocateOpenCLBuffer mem size tag "device" =
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, $exp:size, $exp:tag, &$exp:mem));|]
 allocateOpenCLBuffer _ _ _ space =
-  fail $ "Cannot allocate in '" ++ space ++ "' space."
+  error $ "Cannot allocate in '" ++ space ++ "' space."
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
 deallocateOpenCLBuffer mem tag "device" =
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_free(&ctx->opencl, $exp:mem, $exp:tag));|]
 deallocateOpenCLBuffer _ _ space =
-  fail $ "Cannot deallocate in '" ++ space ++ "' space"
+  error $ "Cannot deallocate in '" ++ space ++ "' space"
 
 
 copyOpenCLMemory :: GC.Copy OpenCL ()
@@ -248,7 +248,7 @@ copyOpenCLMemory _ _ destspace _ _ srcspace _ =
 openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]
 openclMemoryType space =
-  fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
+  error $ "OpenCL backend does not support '" ++ space ++ "' memory space."
 
 staticOpenCLArray :: GC.StaticArray OpenCL ()
 staticOpenCLArray name "device" t vs = do
@@ -285,7 +285,7 @@ staticOpenCLArray name "device" t vs = do
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
 
 staticOpenCLArray _ space _ _ =
-  fail $ "OpenCL backend cannot create static array in memory space '" ++ space ++ "'"
+  error $ "OpenCL backend cannot create static array in memory space '" ++ space ++ "'"
 
 callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
