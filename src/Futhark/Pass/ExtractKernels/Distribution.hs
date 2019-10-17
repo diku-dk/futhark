@@ -335,7 +335,7 @@ createKernelNest :: (MonadFreshNames m, HasScope t m) =>
 createKernelNest (inner_nest, nests) distrib_body = do
   let Targets target targets = distributionTarget distrib_body
   unless (length nests == length targets) $
-    fail $ "Nests and targets do not match!\n" ++
+    error $ "Nests and targets do not match!\n" ++
     "nests: " ++ ppNestings (inner_nest, nests) ++
     "\ntargets:" ++ ppTargets (Targets target targets)
   runMaybeT $ fmap prepare $ recurse $ zip nests targets

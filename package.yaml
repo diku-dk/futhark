@@ -34,7 +34,7 @@ extra-source-files:
 
 library:
   dependencies:
-    - base >= 4 && < 5
+    - base >= 4.13 && < 5
     - array >= 0.4
     - binary >= 0.8.3
     - data-binary-ieee754 >= 0.1

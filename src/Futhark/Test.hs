@@ -463,7 +463,7 @@ getValues _ (Values vs) =
 getValues dir v = do
   s <- getValuesBS dir v
   case valuesFromByteString file s of
-    Left e   -> fail $ show e
+    Left e   -> error $ show e
     Right vs -> return vs
   where file = case v of Values{} -> "<values>"
                          InFile f -> f

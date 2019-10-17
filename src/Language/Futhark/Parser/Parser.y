@@ -332,11 +332,11 @@ UnOp :: { (QualName Name, SrcLoc) }
 
 -- Note that this production does not include Minus, but does include
 -- operator sections.
-BinOp :: { QualName Name }
+BinOp :: { (QualName Name, SrcLoc) }
       : '+...'     { binOpName $1 }
       | '-...'     { binOpName $1 }
       | '*...'     { binOpName $1 }
-      | '*'        { qualName (nameFromString "*") }
+      | '*'        { (qualName (nameFromString "*"), $1) }
       | '/...'     { binOpName $1 }
       | '%...'     { binOpName $1 }
       | '//...'    { binOpName $1 }
@@ -351,25 +351,27 @@ BinOp :: { QualName Name }
       | '||...'    { binOpName $1 }
       | '**...'    { binOpName $1 }
       | '^...'     { binOpName $1 }
-      | '^'        { qualName (nameFromString "^") }
+      | '^'        { (qualName (nameFromString "^"), $1) }
       | '&...'     { binOpName $1 }
       | '|...'     { binOpName $1 }
-      | '|'        { qualName (nameFromString "|") }
+      | '|'        { (qualName (nameFromString "|"), $1) }
       | '>>...'    { binOpName $1 }
       | '<<...'    { binOpName $1 }
       | '<|...'    { binOpName $1 }
       | '|>...'    { binOpName $1 }
-      | '<'        { qualName (nameFromString "<") }
-      | '`' QualName '`' { fst $2 }
+      | '<'        { (qualName (nameFromString "<"), $1) }
+      | '`' QualName '`' { $2 }
 
 BindingUnOp :: { Name }
-      : UnOp {% let (QualName qs name, _) = $1 in do
-                   unless (null qs) $ fail "Cannot use a qualified name in binding position."
+      : UnOp {% let (QualName qs name, loc) = $1 in do
+                   unless (null qs) $ parseErrorAt loc $
+                     Just "Cannot use a qualified name in binding position."
                    return name }
 
 BindingBinOp :: { Name }
-      : BinOp {% let QualName qs name = $1 in do
-                   unless (null qs) $ fail "Cannot use a qualified name in binding position."
+      : BinOp {% let (QualName qs name, loc) = $1 in do
+                   unless (null qs) $ parseErrorAt loc $
+                     Just "Cannot use a qualified name in binding position."
                    return name }
       | '-'   { nameFromString "-" }
 
@@ -643,11 +645,11 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
         { OpSectionLeft (qualName (nameFromString "-"))
            NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
      | '(' BinOp Exp2 ')'
-       { OpSectionRight $2 NoInfo $3 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
+       { OpSectionRight (fst $2) NoInfo $3 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
      | '(' Exp2 BinOp ')'
-       { OpSectionLeft $3 NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
+       { OpSectionLeft (fst $3) NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
      | '(' BinOp ')'
-       { OpSection $2 NoInfo (srcspan $1 $>) }
+       { OpSection (fst $2) NoInfo (srcspan $1 $>) }
 
      | '(' FieldAccess FieldAccesses ')'
        { ProjectSection (map fst ($2:$3)) NoInfo (srcspan $1 $>) }
@@ -881,7 +883,7 @@ CatValues : Value CatValues { $1 : $2 }
           |                 { [] }
 
 PrimType :: { PrimType }
-         : id {% let L _ (ID s) = $1 in primTypeFromName s }
+         : id {% let L loc (ID s) = $1 in primTypeFromName loc s }
 
 IntValue :: { Value }
          : SignedLit { PrimValue (SignedValue (fst $1)) }
@@ -1048,7 +1050,7 @@ patternExp (RecordPattern fs loc) = RecordLit <$> mapM field fs <*> pure loc
 eof :: Pos -> L Token
 eof pos = L (SrcLoc $ Loc pos pos) EOF
 
-binOpName (L _ (SYMBOL _ qs op)) = QualName qs op
+binOpName (L loc (SYMBOL _ qs op)) = (QualName qs op, loc)
 
 binOp x (L loc (SYMBOL _ qs op)) y =
   BinOp (QualName qs op, loc) NoInfo (x, NoInfo) (y, NoInfo) NoInfo $
@@ -1060,9 +1062,9 @@ getTokens = lift $ lift get
 putTokens :: ([L Token], Pos) -> ParserMonad ()
 putTokens = lift . lift . put
 
-primTypeFromName :: Name -> ParserMonad PrimType
-primTypeFromName s = maybe boom return $ M.lookup s namesToPrimTypes
-  where boom = fail $ "No type named " ++ nameToString s
+primTypeFromName :: SrcLoc -> Name -> ParserMonad PrimType
+primTypeFromName loc s = maybe boom return $ M.lookup s namesToPrimTypes
+  where boom = parseErrorAt loc $ Just $ "No type named " ++ nameToString s
 
 getFilename :: ParserMonad FilePath
 getFilename = lift $ gets parserFile

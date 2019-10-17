@@ -156,21 +156,21 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsSyncRun = defSyncRun
                                }
   where defWriteScalar _ _ _ _ _ =
-          fail "Cannot write to non-default memory space because I am dumb"
+          error "Cannot write to non-default memory space because I am dumb"
         defReadScalar _ _ _ _ =
-          fail "Cannot read from non-default memory space"
+          error "Cannot read from non-default memory space"
         defAllocate _ _ _ =
-          fail "Cannot allocate in non-default memory space"
+          error "Cannot allocate in non-default memory space"
         defCopy _ _ _ _ _ _ _ _ =
-          fail "Cannot copy to or from non-default memory space"
+          error "Cannot copy to or from non-default memory space"
         defStaticArray _ _ _ _ =
-          fail "Cannot create static array in non-default memory space"
+          error "Cannot create static array in non-default memory space"
         defCompiler _ =
-          fail "The default compiler cannot compile extended operations"
+          error "The default compiler cannot compile extended operations"
         defEntryOutput _ _ _ _ =
-          fail "Cannot return array not in default memory space"
+          error "Cannot return array not in default memory space"
         defEntryInput _ _ _ _ =
-          fail "Cannot accept array not in default memory space"
+          error "Cannot accept array not in default memory space"
         defSyncRun =
           Pass
 
@@ -1375,7 +1375,7 @@ unRefMem mem (Space "device") =
                                                  , (String . compileName) mem]
 unRefMem _ DefaultSpace = stm Pass
 unRefMem _ (Space "local") = stm Pass
-unRefMem _ (Space _) = fail "The default compiler cannot compile unRefMem for other spaces"
+unRefMem _ (Space _) = error "The default compiler cannot compile unRefMem for other spaces"
 
 
 -- | Public names must have a consistent prefix.

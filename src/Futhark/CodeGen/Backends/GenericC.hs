@@ -200,23 +200,23 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsFatMemory = True
                                }
   where defWriteScalar _ _ _ _ _ =
-          fail "Cannot write to non-default memory space because I am dumb"
+          error "Cannot write to non-default memory space because I am dumb"
         defReadScalar _ _ _ _ =
-          fail "Cannot read from non-default memory space"
+          error "Cannot read from non-default memory space"
         defAllocate _ _ _ =
-          fail "Cannot allocate in non-default memory space"
+          error "Cannot allocate in non-default memory space"
         defDeallocate _ _ =
-          fail "Cannot deallocate in non-default memory space"
+          error "Cannot deallocate in non-default memory space"
         defCopy destmem destoffset DefaultSpace srcmem srcoffset DefaultSpace size =
           copyMemoryDefaultSpace destmem destoffset srcmem srcoffset size
         defCopy _ _ _ _ _ _ _ =
-          fail "Cannot copy to or from non-default memory space"
+          error "Cannot copy to or from non-default memory space"
         defStaticArray _ _ _ _ =
-          fail "Cannot create static array in non-default memory space"
+          error "Cannot create static array in non-default memory space"
         defMemoryType _ =
-          fail "Has no type for non-default memory space"
+          error "Has no type for non-default memory space"
         defCompiler _ =
-          fail "The default compiler cannot compile extended operations"
+          error "The default compiler cannot compile extended operations"
 
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s

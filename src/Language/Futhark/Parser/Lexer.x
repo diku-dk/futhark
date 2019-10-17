@@ -155,11 +155,11 @@ keyword s =
 indexing :: T.Text -> Alex Name
 indexing s = case keyword s of
   ID v -> return v
-  _    -> fail $ "Cannot index keyword '" ++ T.unpack s ++ "'."
+  _    -> alexError $ "Cannot index keyword '" ++ T.unpack s ++ "'."
 
 mkQualId :: T.Text -> Alex ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
-  []   -> fail "mkQualId: no components"
+  []   -> error "mkQualId: no components"
   k:qs -> return (map nameFromText (reverse qs), nameFromText k)
 
 -- | Suffix a zero if the last character is dot.
@@ -169,7 +169,7 @@ suffZero s = if T.last s == '.' then s <> "0" else s
 tryRead :: Read a => String -> T.Text -> Alex a
 tryRead desc s = case reads s' of
   [(x, "")] -> return x
-  _         -> fail $ "Invalid " ++ desc ++ " literal: `" ++ T.unpack s ++ "'."
+  _         -> error $ "Invalid " ++ desc ++ " literal: `" ++ T.unpack s ++ "'."
   where s' = T.unpack s
 
 readIntegral :: Integral a => T.Text -> a
@@ -269,7 +269,7 @@ readHexRealLit :: RealFloat a => String -> T.Text -> Alex a
 readHexRealLit desc s =
   case fromHexRealLit s of
     Just (n) -> return n
-    Nothing -> fail $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
+    Nothing -> error $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
 
 alexGetPosn :: Alex (Int, Int, Int)
 alexGetPosn = Alex $ \s ->
