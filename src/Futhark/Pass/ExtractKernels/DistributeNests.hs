@@ -798,12 +798,12 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
   (ispace, kernel_inps) <- flatKernel nest
 
   unless (not $ free_in_op `namesIntersect` bound_by_nest) $
-    error "Non-fold lambda uses nest-bound parameters."
+    fail "Non-fold lambda uses nest-bound parameters."
 
   let indices = map fst ispace
 
       prepareNe (Var v) | v `nameIn` bound_by_nest =
-                          error "Neutral element bound in nest"
+                            fail "Neutral element bound in nest"
       prepareNe ne = return ne
 
       prepareArr arr =
@@ -821,7 +821,7 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
                       letExp (baseString arr ++ "_repd")
                       (BasicOp $ Replicate (Shape $ map snd ispace) $ Var arr)
           _ ->
-            error "Input not free or outermost."
+            fail "Input not free or outermost."
 
   nes' <- mapM prepareNe nes
 
