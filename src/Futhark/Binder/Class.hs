@@ -22,6 +22,7 @@ where
 
 import Control.Monad.Writer
 import qualified Control.Monad.Fail as Fail
+import qualified Data.Kind
 
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
@@ -59,7 +60,7 @@ class (Attributes (Lore m),
        LocalScope (Lore m) m,
        Fail.MonadFail m) =>
       MonadBinder m where
-  type Lore m :: *
+  type Lore m :: Data.Kind.Type
   mkExpAttrM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
   mkBodyM :: Stms (Lore m) -> Result -> m (Body (Lore m))
   mkLetNamesM :: [VName] -> Exp (Lore m) -> m (Stm (Lore m))

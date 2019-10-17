@@ -84,7 +84,6 @@ import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
-import Futhark.Util.Pretty(pretty)
 import Futhark.Util (zEncodeString)
 import Futhark.Representation.AST.Attributes (builtInFunctions)
 import Text.Printf (printf)
@@ -457,8 +456,8 @@ compileProg module_name constructor imports defines ops userstate boilerplate pr
                 (filter (Imp.functionEntry . snd) funs)
 
               debug_ending <- gets compDebugItems
-              return [Namespace name ((ClassDef $
-                       PublicClass name $
+              return [Namespace name (ClassDef
+                       (PublicClass name $
                          member_decls' ++
                          constructor' : defines' ++
                          opencl_boilerplate ++
@@ -1277,7 +1276,7 @@ compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc,locs)) = do
   let onPart (i, Imp.ErrorString s) = return (printFormatArg i, String s)
       onPart (i, Imp.ErrorInt32 x) = (printFormatArg i,) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart (zip ([1..] :: [Integer]) parts)
-  stm $ Assert e' $ (String $ "Error at {0}:\n" <> concat formatstrs) : (String stacktrace : formatargs)
+  stm $ Assert e' $ String ("Error at {0}:\n" <> concat formatstrs) : (String stacktrace : formatargs)
   where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
         printFormatArg = printf "{%d}"
 

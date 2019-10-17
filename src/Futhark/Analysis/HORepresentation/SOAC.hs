@@ -70,7 +70,6 @@ module Futhark.Analysis.HORepresentation.SOAC
 
 import Data.Foldable as Foldable
 import Data.Maybe
-import Data.Monoid ((<>))
 import qualified Data.Sequence as Seq
 
 import qualified Futhark.Representation.AST as Futhark

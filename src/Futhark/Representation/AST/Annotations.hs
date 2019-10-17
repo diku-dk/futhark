@@ -5,6 +5,8 @@ module Futhark.Representation.AST.Annotations
        )
        where
 
+import qualified Data.Kind
+
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.Types
@@ -17,29 +19,29 @@ class (Show (LetAttr l), Show (ExpAttr l), Show (BodyAttr l), Show (FParamAttr l
        DeclTyped (FParamAttr l))
       => Annotations l where
   -- | Annotation for every let-pattern element.
-  type LetAttr l :: *
+  type LetAttr l :: Data.Kind.Type
   type LetAttr l = Type
   -- | Annotation for every expression.
-  type ExpAttr l :: *
+  type ExpAttr l :: Data.Kind.Type
   type ExpAttr l = ()
   -- | Annotation for every body.
-  type BodyAttr l :: *
+  type BodyAttr l :: Data.Kind.Type
   type BodyAttr l = ()
   -- | Annotation for every (non-lambda) function parameter.
-  type FParamAttr l :: *
+  type FParamAttr l :: Data.Kind.Type
   type FParamAttr l = DeclType
   -- | Annotation for every lambda function parameter.
-  type LParamAttr l :: *
+  type LParamAttr l :: Data.Kind.Type
   type LParamAttr l = Type
 
   -- | The return type annotation of function calls.
-  type RetType l :: *
+  type RetType l :: Data.Kind.Type
   type RetType l = DeclExtType
 
   -- | The return type annotation of branches.
-  type BranchType l :: *
+  type BranchType l :: Data.Kind.Type
   type BranchType l = ExtType
 
   -- | Extensible operation.
-  type Op l :: *
+  type Op l :: Data.Kind.Type
   type Op l = ()

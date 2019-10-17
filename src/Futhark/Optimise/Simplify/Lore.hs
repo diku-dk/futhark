@@ -29,6 +29,7 @@ module Futhark.Optimise.Simplify.Lore
 
 import Control.Monad.Identity
 import Control.Monad.Reader
+import qualified Data.Kind
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST
@@ -258,7 +259,7 @@ instance (Bindable lore,
 class (AliasedOp (OpWithWisdom op),
        RangedOp (OpWithWisdom op),
        IsOp (OpWithWisdom op)) => CanBeWise op where
-  type OpWithWisdom op :: *
+  type OpWithWisdom op :: Data.Kind.Type
   removeOpWisdom :: OpWithWisdom op -> op
 
 instance CanBeWise () where

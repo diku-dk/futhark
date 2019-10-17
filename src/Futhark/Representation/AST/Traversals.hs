@@ -43,7 +43,6 @@ import Control.Monad
 import Control.Monad.Identity
 import qualified Data.Traversable
 import Data.Foldable (traverse_)
-import Data.Monoid ((<>))
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Scope

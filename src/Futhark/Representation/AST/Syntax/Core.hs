@@ -51,7 +51,6 @@ module Futhark.Representation.AST.Syntax.Core
 
 import Control.Monad.State
 import Data.Maybe
-import Data.Monoid ((<>))
 import Data.String
 import qualified Data.Map.Strict as M
 import Data.Traversable

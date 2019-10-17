@@ -23,7 +23,7 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
 
 import Futhark.CodeGen.ImpCode
-import Futhark.Util.Pretty (pretty, prettyOneLine)
+import Futhark.Util.Pretty (prettyOneLine)
 import Futhark.Util (zEncodeString)
 
 -- | The C type corresponding to a signed integer type.

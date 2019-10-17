@@ -47,7 +47,6 @@ import qualified Data.Map.Strict as M
 import Data.Char
 import Data.Functor
 import Data.Maybe
-import Data.Foldable (foldl')
 import Data.List
 import qualified Data.Text as T
 import qualified Data.Text.IO as T

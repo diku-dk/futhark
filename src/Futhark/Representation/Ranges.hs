@@ -34,7 +34,6 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.Reader
-import Data.Monoid ((<>))
 import Data.Foldable
 
 import Futhark.Representation.AST.Syntax

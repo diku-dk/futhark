@@ -99,8 +99,7 @@ import Data.List
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
-  (Count (..),
-   Bytes, Elements,
+  (Bytes, Elements,
    bytes, elements, withElemType)
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.SOACS (SOACS)
