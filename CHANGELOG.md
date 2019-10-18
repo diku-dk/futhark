@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.13.0]
+## [0.12.2]
 
 ### Added
 
@@ -24,10 +24,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     histograms.
 
   * New functions: `f32.lerp` and `f64.lerp`, for linear interpolation.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
