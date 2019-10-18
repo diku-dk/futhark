@@ -114,7 +114,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
   ppr = pprPrec 0
   pprPrec _ (Prim et) = ppr et
   pprPrec _ (TypeVar _ u et targs) =
-    ppr u <> ppr (qualNameFromTypeName et) <+> spread (map ppr targs)
+    ppr u <> ppr (qualNameFromTypeName et) <+> spread (map (pprPrec 1) targs)
   pprPrec _ (Record fs)
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
@@ -128,19 +128,22 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
     parens (pprName v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
   pprPrec p (Arrow _ Unnamed t1 t2) =
     parensIf (p > 0) $ pprPrec 1 t1 <+> text "->" <+> ppr t2
-  pprPrec _ (Sum cs) =
+  pprPrec p (Sum cs) =
+    parensIf (p > 0) $
     oneLine (mconcat $ punctuate (text " | ") cs')
     <|> align (mconcat $ punctuate (text " |" <> line) cs')
-    where ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map ppr fs
+    where ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map (pprPrec 1) fs
           cs' = map ppConstr $ M.toList cs
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
-  ppr (Array _ u at shape) = ppr u <> ppr shape <> ppr at
-  ppr (Scalar t) = ppr t
+  ppr = pprPrec 0
+  pprPrec _ (Array _ u at shape) = ppr u <> ppr shape <> ppr at
+  pprPrec p (Scalar t) = pprPrec p t
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
-  ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
-  ppr (TypeArgType t _) = ppr t
+  ppr = pprPrec 0
+  pprPrec _ (TypeArgDim d _) = ppr $ ShapeDecl [d]
+  pprPrec p (TypeArgType t _) = pprPrec p t
 
 instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
