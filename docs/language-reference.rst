@@ -99,32 +99,36 @@ instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
 Compound Types and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-All primitive values can be combined in tuples and arrays.  A tuple
-value or type is written as a sequence of comma-separated values or
-types enclosed in parentheses.  For example, ``(0, 1)`` is a tuple
-value of type ``(i32,i32)``.  The elements of a tuple need not have
-the same type -- the value ``(false, 1, 2.0)`` is of type ``(bool,
-i32, f64)``.  A tuple element can also be another tuple, as in
-``((1,2),(3,4))``, which is of type ``((i32,i32),(i32,i32))``.  A
-tuple cannot have just one element, but empty tuples are permitted,
-although they are not very useful-these are written ``()`` and are of
-type ``()``.
-
 .. productionlist::
-   type: `qualid`
+   type:   `qualid`
        : | `array_type`
        : | `tuple_type`
        : | `record_type`
        : | `sum_type`
        : | `function_type`
-       : | `type` `type_arg` | "*" `type`
-   array_type: "[" [`dim`] "]" `type`
+       : | `type_application`
+
+Compound types can be constructed based on the primitive types.  The
+Futhark type system is entirely structural, and type abbreviations are
+merely shorthands.  The only exception is abstract types whose
+definition has been hidden via the module system (see `Module
+System`_).
+
+.. productionlist::
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
-   record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
-   sum_type: `constructor` `type`* ("|" `constructor` `type`*)*
-   function_type: `param_type` "->" `type`
-   param_type: `type` | "(" `id` ":" `type` ")"
-   type_arg: "[" [`dim`] "]" | `type`
+
+A tuple value or type is written as a sequence of comma-separated
+values or types enclosed in parentheses.  For example, ``(0, 1)`` is a
+tuple value of type ``(i32,i32)``.  The elements of a tuple need not
+have the same type -- the value ``(false, 1, 2.0)`` is of type
+``(bool, i32, f64)``.  A tuple element can also be another tuple, as
+in ``((1,2),(3,4))``, which is of type ``((i32,i32),(i32,i32))``.  A
+tuple cannot have just one element, but empty tuples are permitted,
+although they are not very useful.  Empty tuples are written ``()``
+and are of type ``()``.
+
+.. productionlist::
+   array_type: "[" [`dim`] "]" `type`
    dim: `qualid` | `decimal`
 
 An array value is written as a sequence of zero or more
@@ -150,6 +154,9 @@ type with consistent dimension sizes for an irregular array value.  In
 a Futhark program, all array values, including intermediate (unnamed)
 arrays, must be typeable.
 
+.. productionlist::
+   sum_type: `constructor` `type`* ("|" `constructor` `type`*)*
+
 Sum types are anonymous in Futhark, and are written as the
 constructors separated by vertical bars.  Each constructor consists of
 a ``#``-prefixed *name*, followed by zero or more types, called its
@@ -161,15 +168,26 @@ implementation weakness where arrays of sum types with an array
 payload may result in incorrect size inference and run-time errors.
 Try to avoid these for now.
 
+.. productionlist::
+   record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
+
 Records are mappings from field names to values, with the field names
 known statically.  A tuple behaves in all respects like a record with
 numeric field names, and vice versa.  It is an error for a record type
 to name the same field twice.
 
+.. productionlist::
+   type_application: `type` `type_arg` | "*" `type`
+   type_arg: "[" [`dim`] "]" | `type`
+
 A parametric type abbreviation can be applied by juxtaposing its name
 and its arguments.  The application must provide as many arguments as
 the type abbreviation has parameters - partial application is
 presently not allowed.  See `Type Abbreviations`_ for further details.
+
+.. productionlist::
+   function_type: `param_type` "->" `type`
+   param_type: `type` | "(" `id` ":" `type` ")"
 
 Functions are classified via function types, but they are not fully
 first class.  See `Higher-order functions`_ for the details.
@@ -915,13 +933,13 @@ other value.  However, to ensure that the compiler is able to compile
 the higher-order functions efficiently via *defunctionalisation*,
 certain type-driven restrictions exist on how functions can be used.
 These also apply to any record or tuple containing a function (a
-*functional type*):.
+*functional type*):
 
 * Arrays of functions are not permitted.
 
-* A function cannot be returned from an `if` expression.
+* A function cannot be returned from an ``if`` expression.
 
-* A loop parameter cannot be a function.
+* A ``loop`` parameter cannot be a function.
 
 Further, *type parameters* are divided into *non-lifted* (bound with
 an apostrophe, e.g. ``'t``), and *lifted* (``'^t``).  Only lifted type
@@ -939,8 +957,10 @@ Type Inference
 Futhark supports Hindley-Milner-style type inference, so in many cases
 explicit type annotations can be left off.  Record field projection
 cannot in isolation be fully inferred, and may need type annotations
-where their inputs are bound.  Further, unique types (see `In-place
-updates`_) must be explicitly annotated.
+where their inputs are bound.  The same goes when constructing sum
+types, as Futhark cannot assume that a given constructor only belongs
+to a single type.  Further, unique types (see `In-place updates`_)
+must be explicitly annotated.
 
 .. _in-place-updates:
 
@@ -1040,11 +1060,11 @@ but module types are their own name space.
 
 Named modules are declared as::
 
-  module name = module expression
+  module name = ...
 
 A named module type is defined as::
 
-  module type name = module type expression
+  module type name = ...
 
 Where a module expression can be the name of another module, an
 application of a parametric module, or a sequence of declarations
@@ -1074,7 +1094,7 @@ argument to ``open`` may be a full module expression.
 
 Named module types are defined as::
 
-  module type ModuleTypeName = module type expression
+  module type ModuleTypeName = ...
 
 A module type expression can be the name of another module type, or a
 sequence of *specifications*, or *specs*, enclosed in curly braces.  A
@@ -1215,10 +1235,10 @@ Referring to Other Files
 
 You can refer to external files in a Futhark file like this::
 
-  import "module"
+  import "file"
 
 The above will include all non-``local`` top-level definitions from
-``module.fut`` is and make them available in the current file (but
+``file.fut`` is and make them available in the current file (but
 will not export them).  The ``.fut`` extension is implied.
 
 You can also include files from subdirectories::
@@ -1226,14 +1246,13 @@ You can also include files from subdirectories::
   import "path/to/a/file"
 
 The above will include the file ``path/to/a/file.fut`` relative to the
-including file.  When importing a nonlocal file (such as the basis
-library), the path must begin with a forward slash.
+including file.
 
 Qualified imports are also possible, where a module is created for the
 file::
 
-  module M = import "module"
+  module M = import "file"
 
-In fact, a plain ``import "module"`` is equivalent to::
+In fact, a plain ``import "file"`` is equivalent to::
 
-  local open import "module"
+  local open import "file"
