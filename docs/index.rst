@@ -41,6 +41,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    :maxdepth: 1
 
    man/futhark.rst
+   man/futhark-autotune.rst
    man/futhark-bench.rst
    man/futhark-c.rst
    man/futhark-csharp.rst
