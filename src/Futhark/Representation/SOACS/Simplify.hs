@@ -710,6 +710,10 @@ moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arr
 
   where map_param_names = map paramName (lambdaParams map_lam)
         topLevelPattern = (`elem` fmap stmPattern (bodyStms (lambdaBody map_lam)))
+        onlyUsedOnce arr =
+          case filter ((arr `nameIn`) . freeIn) $ stmsToList $ bodyStms $ lambdaBody map_lam of
+            _ : _ : _ -> False
+            _ -> True
 
         -- It's not just about whether the array is a parameter;
         -- everything else must be map-invariant.
@@ -717,7 +721,7 @@ moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arr
           arr `elem` map_param_names &&
           all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn slice) &&
           not (null slice) &&
-          (not (null $ sliceDims slice) || topLevelPattern pat')
+          (not (null $ sliceDims slice) || (topLevelPattern pat' && onlyUsedOnce arr))
         arrayIsMapParam (_, ArrayRearrange cs arr perm) =
           arr `elem` map_param_names &&
           all (`ST.elem` vtable) (namesToList $ freeIn cs) &&
