@@ -113,7 +113,8 @@ instance Pretty (ShapeDecl ()) where
 instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
   ppr = pprPrec 0
   pprPrec _ (Prim et) = ppr et
-  pprPrec _ (TypeVar _ u et targs) =
+  pprPrec p (TypeVar _ u et targs) =
+    parensIf (not (null targs) && p > 0) $
     ppr u <> ppr (qualNameFromTypeName et) <+> spread (map (pprPrec 1) targs)
   pprPrec _ (Record fs)
     | Just ts <- areTupleFields fs =
@@ -137,7 +138,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr = pprPrec 0
-  pprPrec _ (Array _ u at shape) = ppr u <> ppr shape <> ppr at
+  pprPrec _ (Array _ u at shape) = ppr u <> ppr shape <> pprPrec 1 at
   pprPrec p (Scalar t) = pprPrec p t
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
