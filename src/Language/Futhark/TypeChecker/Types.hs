@@ -181,8 +181,8 @@ checkTypeExp ote@TEApply{} = do
   (tname', ps, t, l) <- lookupType tloc tname
   if length ps /= length targs
   then throwError $ TypeError tloc $
-       "Type constructor " ++ pretty tname ++ " requires " ++ show (length ps) ++
-       " arguments, but application at " ++ locStr tloc ++ " provides " ++ show (length targs)
+       "Type constructor " ++ quote (pretty tname) ++ " requires " ++ show (length ps) ++
+       " arguments, but provided " ++ show (length targs) ++ "."
   else do
     (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
     return (foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
