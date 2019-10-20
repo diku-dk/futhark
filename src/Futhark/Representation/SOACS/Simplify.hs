@@ -600,11 +600,11 @@ fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
 fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
-arrayOps :: AST.Body (Wise SOACS) -> S.Set ArrayOp
+arrayOps :: AST.Body (Wise SOACS) -> S.Set (AST.Pattern (Wise SOACS), ArrayOp)
 arrayOps = mconcat . map onStm . stmsToList . bodyStms
-  where onStm (Let _ aux e) =
+  where onStm (Let pat aux e) =
           case isArrayOp (stmAuxCerts aux) e of
-            Just op -> S.singleton op
+            Just op -> S.singleton (pat, op)
             Nothing -> execState (walkExpM walker e) mempty
         onOp = execWriter . mapSOACM identitySOACMapper { mapOnSOACLambda = onLambda }
         onLambda lam = do tell $ arrayOps $ lambdaBody lam
@@ -647,7 +647,7 @@ replaceArrayOps substs (Body _ stms res) =
 simplifyMapIota :: TopDownRuleOp (Wise SOACS)
 simplifyMapIota vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
   | Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
-    indexings <- filter (indexesWith (paramName p)) $ S.toList $
+    indexings <- filter (indexesWith (paramName p)) $ map snd $ S.toList $
                  arrayOps $ lambdaBody map_lam,
     not $ null indexings = Simplify $ do
       -- For each indexing with iota, add the corresponding array to
@@ -693,7 +693,7 @@ simplifyMapIota  _ _ _ _ = Skip
 -- full array.
 moveTransformToInput :: TopDownRuleOp (Wise SOACS)
 moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
-  | ops <- filter arrayIsMapParam $ S.toList $ arrayOps $ lambdaBody map_lam,
+  | ops <- map snd $ filter arrayIsMapParam $ S.toList $ arrayOps $ lambdaBody map_lam,
     not $ null ops = Simplify $ do
       (more_arrs, more_params, replacements) <-
         unzip3 . catMaybes <$> mapM mapOverArr ops
@@ -709,21 +709,23 @@ moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arr
       letBind_ pat $ Op $ Screma w (ScremaForm scan reduce map_lam') (arrs <> more_arrs)
 
   where map_param_names = map paramName (lambdaParams map_lam)
+        topLevelPattern = (`elem` fmap stmPattern (bodyStms (lambdaBody map_lam)))
 
         -- It's not just about whether the array is a parameter;
         -- everything else must be map-invariant.
-        arrayIsMapParam (ArrayIndexing cs arr slice) =
+        arrayIsMapParam (pat', ArrayIndexing cs arr slice) =
           arr `elem` map_param_names &&
           all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn slice) &&
-          not (null slice) && not (null $ sliceDims slice)
-        arrayIsMapParam (ArrayRearrange cs arr perm) =
+          not (null slice) &&
+          (not (null $ sliceDims slice) || topLevelPattern pat')
+        arrayIsMapParam (_, ArrayRearrange cs arr perm) =
           arr `elem` map_param_names &&
           all (`ST.elem` vtable) (namesToList $ freeIn cs) &&
           not (null perm)
-        arrayIsMapParam (ArrayRotate cs arr rots) =
+        arrayIsMapParam (_, ArrayRotate cs arr rots) =
           arr `elem` map_param_names &&
           all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn rots)
-        arrayIsMapParam ArrayVar{} =
+        arrayIsMapParam (_, ArrayVar{}) =
           False
 
         mapOverArr op
