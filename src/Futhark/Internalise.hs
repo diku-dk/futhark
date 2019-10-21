@@ -86,10 +86,10 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
 
     body' <- localScope constscope $ do
       msg <- case retdecl of
-               Just dt -> ErrorMsg .
+               Just dt -> errorMsg .
                           ("Function return value does not match shape of type ":) <$>
                           typeExpForError rcm dt
-               Nothing -> return $ ErrorMsg ["Function return value does not match shape of declared return type."]
+               Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
       internaliseBody body >>=
         ensureResultExtShape asserting msg loc (map I.fromDecl rettype')
 
@@ -433,7 +433,7 @@ internaliseExp desc (E.Ascript e (TypeDecl dt (Info et)) _ loc) = do
     let parts = ["Value of (core language) shape ("] ++
                 intersperse ", " (map ErrorInt32 dims) ++
                 [") cannot match shape of type `"] ++ dt' ++ ["`."]
-    ensureExtShape asserting (ErrorMsg parts) loc (I.fromDecl t') desc e'
+    ensureExtShape asserting (errorMsg parts) loc (I.fromDecl t') desc e'
 
 internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
@@ -658,7 +658,7 @@ internaliseExp desc (E.Unsafe e _) =
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
   c <- assertingOne $ letExp "assert_c" $
-       I.BasicOp $ I.Assert e1' (ErrorMsg [ErrorString check]) (loc, mempty)
+       I.BasicOp $ I.Assert e1' (errorMsg [ErrorString check]) (loc, mempty)
   -- Make sure there are some bindings to certify.
   certifying c $ mapM rebind =<< internaliseExp desc e2
   where rebind v = do
@@ -867,7 +867,7 @@ internaliseSlice loc dims idxs = do
  (idxs', oks, parts) <- unzip3 <$> zipWithM internaliseDimIndex dims idxs
  c <- assertingOne $ do
    ok <- letSubExp "index_ok" =<< foldBinOp I.LogAnd (constant True) oks
-   let msg = ErrorMsg $ ["Index ["] ++ intercalate [", "] parts ++
+   let msg = errorMsg $ ["Index ["] ++ intercalate [", "] parts ++
              ["] out of bounds for array of shape ["] ++
              intersperse "][" (map ErrorInt32 $ take (length idxs) dims) ++ ["]."]
    letExp "index_certs" $ I.BasicOp $ I.Assert ok msg (loc, mempty)
@@ -1796,3 +1796,12 @@ dimDeclForError cm (NamedDim d) = do
 dimDeclForError _ (ConstDim d) =
   return $ ErrorString $ pretty d
 dimDeclForError _ AnyDim = return ""
+
+-- A smart constructor that compacts neighbouring literals for easier
+-- reading in the IR.
+errorMsg :: [ErrorMsgPart a] -> ErrorMsg a
+errorMsg = ErrorMsg . compact
+  where compact [] = []
+        compact (ErrorString x : ErrorString y : parts) =
+          compact (ErrorString (x++y) : parts)
+        compact (x:y) = x : compact y
