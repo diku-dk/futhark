@@ -802,12 +802,12 @@ simplifyConcat (vtable, _) pat (StmAux cs _) (Concat 0 x xs _)
   | Just (vs, vcs) <- unzip <$> mapM isArrayLit (x:xs) = Simplify $ do
       rt <- rowType <$> lookupType x
       certifying (cs <> mconcat vcs) $
-        letBind_ pat $ BasicOp $ ArrayLit vs rt
+        letBind_ pat $ BasicOp $ ArrayLit (concat vs) rt
       where isArrayLit v
               | Just (Replicate shape se, vcs) <- ST.lookupBasicOp v vtable,
-                unitShape shape = Just (se, vcs)
-              | Just (ArrayLit [se] _, vcs) <- ST.lookupBasicOp v vtable =
-                  Just (se, vcs)
+                unitShape shape = Just ([se], vcs)
+              | Just (ArrayLit ses _, vcs) <- ST.lookupBasicOp v vtable =
+                  Just (ses, vcs)
               | otherwise =
                   Nothing
 
