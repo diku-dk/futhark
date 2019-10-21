@@ -390,9 +390,8 @@ ppSpace Signature = "module type"
 
 intrinsicsNameMap :: NameMap
 intrinsicsNameMap = M.fromList $ map mapping $ M.toList intrinsics
-  where mapping (v, IntrinsicType{}) = ((Type, baseName v), QualName [mod] v)
-        mapping (v, _)               = ((Term, baseName v), QualName [mod] v)
-        mod = VName (nameFromString "intrinsics") 0
+  where mapping (v, IntrinsicType{}) = ((Type, baseName v), QualName [] v)
+        mapping (v, _)               = ((Term, baseName v), QualName [] v)
 
 topLevelNameMap :: NameMap
 topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
