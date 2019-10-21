@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Various small fixes to type errors.
+
 ## [0.12.2]
 
 ### Added
