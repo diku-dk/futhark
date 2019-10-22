@@ -138,8 +138,6 @@ callKernel (Imp.CmpSizeLe v key x) = do
 callKernel (Imp.GetSizeMax v size_class) =
   Py.stm $ Assign (Var (Py.compileName v)) $
   Var $ "self.max_" ++ pretty size_class
-callKernel (Imp.HostCode c) =
-  Py.compileCode c
 
 callKernel (Imp.LaunchKernel name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM (fmap asLong . Py.compileExp) num_workgroups
