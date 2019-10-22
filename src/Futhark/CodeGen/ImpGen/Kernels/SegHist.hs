@@ -126,9 +126,7 @@ computeHistoUsage space op = do
                   Imp.unCount (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
 
             sAlloc_ subhistos_mem subhistos_mem_size $ Space "device"
-            sReplicate subhistos (Shape (map snd segment_dims ++
-                                         [Var num_subhistos, histWidth op]) <>
-                                  histShape op) ne
+            sReplicate subhistos ne
             subhistos_t <- lookupType subhistos
             let slice = fullSliceNum (map (toExp' int32) $ arrayDims subhistos_t) $
                         map (unitSlice 0 . toExp' int32 . snd) segment_dims ++
