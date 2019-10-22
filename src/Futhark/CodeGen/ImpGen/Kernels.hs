@@ -121,8 +121,8 @@ expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
 
   sIota (patElemName pe) n' x' s' et
 
-expCompiler (Pattern _ [pe]) (BasicOp (Replicate shape se)) =
-  sReplicate (patElemName pe) shape se
+expCompiler (Pattern _ [pe]) (BasicOp (Replicate _ se)) =
+  sReplicate (patElemName pe) se
 
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =

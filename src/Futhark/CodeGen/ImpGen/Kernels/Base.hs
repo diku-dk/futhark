@@ -51,7 +51,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (elements)
 import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
-import Futhark.Util (chunks, maybeNth, mapAccumLM, takeLast)
+import Futhark.Util (chunks, maybeNth, mapAccumLM, takeLast, dropLast)
 
 type CallKernelGen = ImpM ExplicitMemory Imp.HostOp
 type InKernelGen = ImpM ExplicitMemory Imp.KernelOp
@@ -1110,9 +1110,10 @@ groupOperations constants =
   }
 
 -- | Perform a Replicate with a kernel.
-sReplicateKernel :: VName -> Shape -> SubExp -> CallKernelGen ()
-sReplicateKernel arr (Shape ds) se = do
+sReplicateKernel :: VName -> SubExp -> CallKernelGen ()
+sReplicateKernel arr se = do
   t <- subExpType se
+  ds <- dropLast (arrayRank t) . arrayDims <$> lookupType arr
 
   dims <- mapM toExp $ ds ++ arrayDims t
   (constants, set_constants) <-
@@ -1140,7 +1141,7 @@ replicateFunction bt = do
   function [] params $ do
     arr <- sArray "arr" bt shape $ ArrayIn mem $ IxFun.iota $
            map (primExpFromSubExp int32) $ shapeDims shape
-    sReplicateKernel arr shape $ Var val
+    sReplicateKernel arr $ Var val
 
 replicateName :: PrimType -> String
 replicateName bt = "replicate_" ++ pretty bt
@@ -1172,16 +1173,15 @@ replicateIsFill arr v = do
     _ -> return Nothing
 
 -- | Perform a Replicate with a kernel.
-sReplicate :: VName -> Shape -> SubExp
-           -> CallKernelGen ()
-sReplicate arr shape se = do
+sReplicate :: VName -> SubExp -> CallKernelGen ()
+sReplicate arr se = do
   -- If the replicate is of a particularly common and simple form
   -- (morally a memset()/fill), then we use a common function.
   is_fill <- replicateIsFill arr se
 
   case is_fill of
     Just m -> m
-    Nothing -> sReplicateKernel arr shape se
+    Nothing -> sReplicateKernel arr se
 
 -- | Perform an Iota with a kernel.
 sIota :: VName -> Imp.Exp -> Imp.Exp -> Imp.Exp -> IntType
