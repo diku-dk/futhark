@@ -145,7 +145,7 @@ mapTranspose block_dim args t kind =
 
         -- Be extremely careful when editing this list to ensure that
         -- the names match up.  Also, be careful that the tags on
-        -- these names do not conflicts with the tags of the
+        -- these names do not conflict with the tags of the
         -- surrounding code.  We accomplish the latter by using very
         -- low tags (normal variables start at least in the low
         -- hundreds).

@@ -166,7 +166,7 @@ callKernelCopy bt
 
   | otherwise = sCopy bt destloc srcloc n
 
-mapTransposeForType :: PrimType -> ImpM ExplicitMemory Imp.HostOp Name
+mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do
   -- XXX: The leading underscore is to avoid clashes with a
   -- programmer-defined function of the same name (this is a bad
