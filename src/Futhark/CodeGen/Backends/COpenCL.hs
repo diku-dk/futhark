@@ -299,8 +299,6 @@ callKernel (CmpSizeLe v key x) = do
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
   in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
-callKernel (HostCode c) =
-  GC.compileCode c
 
 callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args

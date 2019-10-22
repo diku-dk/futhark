@@ -209,7 +209,6 @@ cudaMemoryType space =
   error $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
 callKernel :: GC.OpCompiler OpenCL ()
-callKernel (HostCode c) = GC.compileCode c
 callKernel (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
 callKernel (CmpSizeLe v key x) = do
