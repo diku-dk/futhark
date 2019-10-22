@@ -168,7 +168,7 @@ callKernelCopy bt
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do
-  -- XXX: The leading underscore is to avoid clashes with a
+  -- FIXME: The leading underscore is to avoid clashes with a
   -- programmer-defined function of the same name (this is a bad
   -- solution...).
   let fname = nameFromString $ "_" <> mapTransposeName bt

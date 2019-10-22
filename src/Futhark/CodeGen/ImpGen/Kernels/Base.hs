@@ -1110,9 +1110,8 @@ groupOperations constants =
   }
 
 -- | Perform a Replicate with a kernel.
-sReplicate :: VName -> Shape -> SubExp
-           -> CallKernelGen ()
-sReplicate arr (Shape ds) se = do
+sReplicateKernel :: VName -> Shape -> SubExp -> CallKernelGen ()
+sReplicateKernel arr (Shape ds) se = do
   t <- subExpType se
 
   dims <- mapM toExp $ ds ++ arrayDims t
@@ -1127,6 +1126,62 @@ sReplicate arr (Shape ds) se = do
     set_constants
     sWhen (kernelThreadActive constants) $
       copyDWIM arr is' se $ drop (length ds) is'
+
+replicateFunction :: PrimType -> CallKernelGen Imp.Function
+replicateFunction bt = do
+  mem <- newVName "mem"
+  num_elems <- newVName "num_elems"
+  val <- newVName "val"
+
+  let params = [Imp.MemParam mem (Space "device"),
+                Imp.ScalarParam num_elems int32,
+                Imp.ScalarParam val bt]
+      shape = Shape [Var num_elems]
+  function [] params $ do
+    arr <- sArray "arr" bt shape $ ArrayIn mem $ IxFun.iota $
+           map (primExpFromSubExp int32) $ shapeDims shape
+    sReplicateKernel arr shape $ Var val
+
+replicateName :: PrimType -> String
+replicateName bt = "replicate_" ++ pretty bt
+
+replicateForType :: PrimType -> CallKernelGen Name
+replicateForType bt = do
+  -- FIXME: The leading underscore is to avoid clashes with a
+  -- programmer-defined function of the same name (this is a bad
+  -- solution...).
+  let fname = nameFromString $ "_" <> replicateName bt
+
+  exists <- hasFunction fname
+  unless exists $ emitFunction fname =<< replicateFunction bt
+
+  return fname
+
+replicateIsFill :: VName -> SubExp -> CallKernelGen (Maybe (CallKernelGen ()))
+replicateIsFill arr v = do
+  ArrayEntry (MemLocation arr_mem arr_shape arr_ixfun) _ <- lookupArray arr
+  v_t <- subExpType v
+  case v_t of
+    Prim v_t'
+      | IxFun.isLinear arr_ixfun -> return $ Just $ do
+          fname <- replicateForType v_t'
+          emit $ Imp.Call [] fname
+            [Imp.MemArg arr_mem,
+             Imp.ExpArg $ unCount $ product $ map dimSizeToExp arr_shape,
+             Imp.ExpArg $ toExp' v_t' v]
+    _ -> return Nothing
+
+-- | Perform a Replicate with a kernel.
+sReplicate :: VName -> Shape -> SubExp
+           -> CallKernelGen ()
+sReplicate arr shape se = do
+  -- If the replicate is of a particularly common and simple form
+  -- (morally a memset()/fill), then we use a common function.
+  is_fill <- replicateIsFill arr se
+
+  case is_fill of
+    Just m -> m
+    Nothing -> sReplicateKernel arr shape se
 
 -- | Perform an Iota with a kernel.
 sIota :: VName -> Imp.Exp -> Imp.Exp -> Imp.Exp -> IntType

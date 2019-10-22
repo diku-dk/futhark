@@ -126,7 +126,7 @@ data ExternalValue = OpaqueValue String [ValueDesc]
 data FunctionT a = Function { functionEntry :: Bool
                             , functionOutput :: [Param]
                             , functionInput :: [Param]
-                            , functionbBody :: Code a
+                            , functionBody :: Code a
                             , functionResult :: [ExternalValue]
                             , functionArgs :: [ExternalValue]
                             }
