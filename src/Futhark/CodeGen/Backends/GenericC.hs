@@ -1282,7 +1282,7 @@ data CParts = CParts { cHeader :: String
 
 -- | Produce header and implementation files.
 asLibrary :: CParts -> (String, String)
-asLibrary parts = (cHeader parts, cUtils parts <> cLib parts)
+asLibrary parts = ("#pragma once\n\n" <> cHeader parts, cUtils parts <> cLib parts)
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
@@ -1307,7 +1307,6 @@ compileProg ops extra header_extra spaces options prog@(Functions funs) = do
       option_parser = generateOptionParser "parse_options" $ benchmarkOptions++options
 
   let headerdefs = [C.cunit|
-$esc:("#pragma once\n")
 $esc:("/*\n * Headers\n*/\n")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
