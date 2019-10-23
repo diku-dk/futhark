@@ -23,6 +23,7 @@ static const int bad = 1;
 
 struct opencl_config {
   int debugging;
+  int profiling;
   int logging;
   int preferred_device_num;
   const char *preferred_platform;
@@ -84,6 +85,13 @@ void opencl_config_init(struct opencl_config *cfg,
   cfg->size_classes = size_classes;
 }
 
+// A record of something that happened.
+struct profiling_record {
+  cl_event *event;
+  int *runs;
+  int64_t *runtime;
+};
+
 struct opencl_context {
   cl_device_id device;
   cl_context ctx;
@@ -100,6 +108,10 @@ struct opencl_context {
   size_t max_local_memory;
 
   size_t lockstep_width;
+
+  struct profiling_record *profiling_records;
+  int profiling_records_capacity;
+  int profiling_records_used;
 };
 
 struct opencl_device_option {
@@ -734,10 +746,76 @@ static cl_program setup_opencl(struct opencl_context *ctx,
   OPENCL_SUCCEED_FATAL(clCreateContext_error);
 
   cl_int clCreateCommandQueue_error;
-  cl_command_queue queue = clCreateCommandQueue(ctx->ctx, device_option.device, 0, &clCreateCommandQueue_error);
+  cl_command_queue queue =
+    clCreateCommandQueue(ctx->ctx,
+                         device_option.device,
+                         ctx->cfg.profiling ? CL_QUEUE_PROFILING_ENABLE : 0,
+                         &clCreateCommandQueue_error);
   OPENCL_SUCCEED_FATAL(clCreateCommandQueue_error);
 
   return setup_opencl_with_command_queue(ctx, queue, srcs, required_types, extra_build_opts);
+}
+
+// Count up the runtime all the profiling_records that occured during execution.
+// Also clears the buffer of profiling_records.
+static cl_int opencl_tally_profiling_records(struct opencl_context *ctx) {
+  cl_int err;
+  for (int i = 0; i < ctx->profiling_records_used; i++) {
+    struct profiling_record record = ctx->profiling_records[i];
+    cl_event *event = record.event;
+
+    cl_ulong start_t, end_t;
+
+    if ((err = clGetEventProfilingInfo(*record.event,
+                                       CL_PROFILING_COMMAND_START,
+                                       sizeof(start_t),
+                                       &start_t,
+                                       NULL)) != CL_SUCCESS) {
+      return err;
+    }
+
+    if ((err = clGetEventProfilingInfo(*record.event,
+                                       CL_PROFILING_COMMAND_END,
+                                       sizeof(end_t),
+                                       &end_t,
+                                       NULL)) != CL_SUCCESS) {
+      return err;
+    }
+
+    // OpenCL provides nanosecond resolution, but we want
+    // microseconds.
+    *record.runs += 1;
+    *record.runtime += (end_t - start_t)/1000;
+
+    if ((err = clReleaseEvent(*event)) != CL_SUCCESS) {
+      return err;
+    }
+  }
+
+  ctx->profiling_records_used = 0;
+
+  return CL_SUCCESS;
+}
+
+// If profiling, produce an event associated with a profiling record.
+static cl_event* opencl_get_event(struct opencl_context *ctx, int *runs, int64_t *runtime) {
+  if (ctx->cfg.profiling) {
+    if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
+      ctx->profiling_records_capacity *= 2;
+      ctx->profiling_records =
+        realloc(ctx->profiling_records,
+                ctx->profiling_records_capacity *
+                sizeof(struct profiling_record));
+    }
+    cl_event *event = malloc(sizeof(cl_event));
+    ctx->profiling_records[ctx->profiling_records_used].event = event;
+    ctx->profiling_records[ctx->profiling_records_used].runs = runs;
+    ctx->profiling_records[ctx->profiling_records_used].runtime = runtime;
+    ctx->profiling_records_used++;
+    return event;
+  } else {
+    return NULL;
+  }
 }
 
 // Allocate memory from driver. The problem is that OpenCL may perform

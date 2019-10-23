@@ -148,6 +148,11 @@ cliOptions = [ Option { optionLongName = "platform"
                             panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                           }}|]
                       }
+            , Option { optionLongName = "profile"
+                     , optionShortName = Just 'P'
+                     , optionArgument = NoArgument
+                     , optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+                     }
              ]
 
 -- We detect the special case of writing a constant and turn it into a
@@ -354,13 +359,14 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueNDRangeKernel(ctx->opencl.queue, ctx->$id:kernel_name, $int:kernel_rank, NULL,
                                $id:global_work_size, $id:local_work_size,
-                               0, NULL, NULL));
+                               0, NULL,
+                               opencl_get_event(&ctx->opencl,
+                                                &ctx->$id:(kernelRuns kernel_name),
+                                                &ctx->$id:(kernelRuntime kernel_name))));
       if (ctx->debugging) {
         OPENCL_SUCCEED_FATAL(clFinish(ctx->opencl.queue));
         $id:time_end = get_wall_time();
         long int $id:time_diff = $id:time_end - $id:time_start;
-        ctx->$id:(kernelRuntime kernel_name) += $id:time_diff;
-        ctx->$id:(kernelRuns kernel_name)++;
         fprintf(stderr, "kernel %s runtime: %ldus\n",
                 $string:kernel_name, $id:time_diff);
       }

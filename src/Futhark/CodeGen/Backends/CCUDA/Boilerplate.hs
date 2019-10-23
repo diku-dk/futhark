@@ -234,6 +234,7 @@ generateContextFuns cfg kernel_names sizes = do
      [C.cedecl|struct $id:s {
                          int detail_memory;
                          int debugging;
+                         int profiling;
                          typename lock_t lock;
                          char *error;
                          $sdecls:fields
@@ -252,7 +253,7 @@ generateContextFuns cfg kernel_names sizes = do
                           if (ctx == NULL) {
                             return NULL;
                           }
-                          ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
+                          ctx->profiling = ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
 
                           ctx->cuda.cfg = cfg->cu_cfg;
                           create_lock(&ctx->lock);

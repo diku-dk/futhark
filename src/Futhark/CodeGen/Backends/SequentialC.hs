@@ -72,6 +72,7 @@ compileProg =
              [C.cedecl|struct $id:s {
                           int detail_memory;
                           int debugging;
+                          int profiling;
                           typename lock_t lock;
                           char *error;
                           $sdecls:fields
