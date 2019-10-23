@@ -136,6 +136,13 @@ OpenCL-specific Options
 The following options are supported by executables generated with the
 OpenCL backends (``opencl``, ``pyopencl``, and ``csopencl``):
 
+  ``-P``
+
+    Measure the time taken by various OpenCL operations (such as
+    kernels) and print a summary at the end.  Unfortunately, it is
+    currently nontrivial (and manual) to relate these operations back
+    to source Futhark code.
+
   ``-p PLATFORM``
 
     Pick the first OpenCL platform whose name contains the given

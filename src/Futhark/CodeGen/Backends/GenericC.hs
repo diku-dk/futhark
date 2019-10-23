@@ -51,7 +51,7 @@ module Futhark.CodeGen.Backends.GenericC
   , headerDecl
   , publicDef
   , publicDef_
-  , debugReport
+  , profileReport
   , HeaderSection(..)
   , libDecl
   , earlyDecls
@@ -101,7 +101,7 @@ data CompilerState s = CompilerState {
   , compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition)
   , compLibDecls :: DL.DList C.Definition
   , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
-  , compDebugItems :: DL.DList C.BlockItem
+  , compProfileItems :: DL.DList C.BlockItem
   , compDeclaredMem :: [(VName,Space)]
   }
 
@@ -116,7 +116,7 @@ newCompilerState src s = CompilerState { compTypeStructs = []
                                        , compHeaderDecls = mempty
                                        , compLibDecls = mempty
                                        , compCtxFields = mempty
-                                       , compDebugItems = mempty
+                                       , compProfileItems = mempty
                                        , compDeclaredMem = mempty
                                        }
 
@@ -408,9 +408,9 @@ contextField :: String -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
   s { compCtxFields = compCtxFields s <> DL.singleton (name,ty,initial) }
 
-debugReport :: C.BlockItem -> CompilerM op s ()
-debugReport x = modify $ \s ->
-  s { compDebugItems = compDebugItems s <> DL.singleton x }
+profileReport :: C.BlockItem -> CompilerM op s ()
+profileReport x = modify $ \s ->
+  s { compProfileItems = compProfileItems s <> DL.singleton x }
 
 stm :: C.Stm -> CompilerM op s ()
 stm (C.Block items _) = mapM_ item items
@@ -1473,16 +1473,16 @@ $edecls:entry_point_decls
           entry_points <- mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
           extra
           mapM_ libDecl $ concat memfuns
-          debugreport <- gets $ DL.toList . compDebugItems
+          profilereport <- gets $ DL.toList . compProfileItems
 
           ctx_ty <- contextType
           headerDecl MiscDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx);|]
           libDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx) {
-                      if (ctx->detail_memory) {
+                      if (ctx->detail_memory || ctx->profiling) {
                         $items:memreport
                       }
-                      if (ctx->debugging) {
-                        $items:debugreport
+                      if (ctx->profiling) {
+                        $items:profilereport
                       }
                     }|]
 
