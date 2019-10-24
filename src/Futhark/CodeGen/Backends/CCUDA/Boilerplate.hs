@@ -290,8 +290,8 @@ generateContextFuns cfg kernel_names sizes = do
 
 
   GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx) {
+    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  (void)ctx;
                }|])
 
