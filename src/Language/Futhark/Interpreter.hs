@@ -115,7 +115,7 @@ instance Pretty Value where
 
   ppr (ValueRecord m) = prettyRecord m
   ppr ValueFun{} = text "#<fun>"
-  ppr (ValueSum n vs) = text "#" <> ppr n <+> sep (map ppr vs)
+  ppr (ValueSum n vs) = text "#" <> sep (ppr n : map ppr vs)
 
 -- | Create an array value; failing if that would result in an
 -- irregular array.
