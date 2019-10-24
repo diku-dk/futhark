@@ -762,7 +762,6 @@ static cl_int opencl_tally_profiling_records(struct opencl_context *ctx) {
   cl_int err;
   for (int i = 0; i < ctx->profiling_records_used; i++) {
     struct profiling_record record = ctx->profiling_records[i];
-    cl_event *event = record.event;
 
     cl_ulong start_t, end_t;
 
@@ -787,10 +786,10 @@ static cl_int opencl_tally_profiling_records(struct opencl_context *ctx) {
     *record.runs += 1;
     *record.runtime += (end_t - start_t)/1000;
 
-    if ((err = clReleaseEvent(*event)) != CL_SUCCESS) {
+    if ((err = clReleaseEvent(*record.event)) != CL_SUCCESS) {
       return err;
     }
-    free(event);
+    free(record.event);
   }
 
   ctx->profiling_records_used = 0;
