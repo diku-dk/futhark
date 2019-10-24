@@ -790,6 +790,7 @@ static cl_int opencl_tally_profiling_records(struct opencl_context *ctx) {
     if ((err = clReleaseEvent(*event)) != CL_SUCCESS) {
       return err;
     }
+    free(event);
   }
 
   ctx->profiling_records_used = 0;
