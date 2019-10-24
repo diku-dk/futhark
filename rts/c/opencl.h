@@ -799,7 +799,6 @@ static cl_int opencl_tally_profiling_records(struct opencl_context *ctx) {
 
 // If profiling, produce an event associated with a profiling record.
 static cl_event* opencl_get_event(struct opencl_context *ctx, int *runs, int64_t *runtime) {
-  if (ctx->cfg.profiling) {
     if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
       ctx->profiling_records_capacity *= 2;
       ctx->profiling_records =
@@ -813,9 +812,6 @@ static cl_event* opencl_get_event(struct opencl_context *ctx, int *runs, int64_t
     ctx->profiling_records[ctx->profiling_records_used].runtime = runtime;
     ctx->profiling_records_used++;
     return event;
-  } else {
-    return NULL;
-  }
 }
 
 // Allocate memory from driver. The problem is that OpenCL may perform

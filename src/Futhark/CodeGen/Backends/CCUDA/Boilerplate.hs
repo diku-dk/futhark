@@ -287,6 +287,20 @@ generateContextFuns cfg kernel_names sizes = do
      [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
                          return ctx->error;
                        }|])
+
+
+  GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
+    ([C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx) {
+                 (void)ctx;
+               }|])
+
+  GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                 (void)ctx;
+               }|])
+
   where
     loadKernelByName name =
       [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(&ctx->$id:name,

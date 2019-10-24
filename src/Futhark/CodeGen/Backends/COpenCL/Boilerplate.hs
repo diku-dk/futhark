@@ -17,14 +17,14 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util (chunk, zEncodeString)
 
-generateBoilerplate :: String -> String -> [String] -> [PrimType]
+generateBoilerplate :: String -> String -> [String] -> [String] -> [PrimType]
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenCL () ()
-generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
+generateBoilerplate opencl_code opencl_prelude profiling_centres kernel_names types sizes = do
   final_inits <- GC.contextFinalInits
 
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
-        openClDecls kernel_names opencl_code opencl_prelude
+        openClDecls profiling_centres kernel_names opencl_code opencl_prelude
 
   GC.earlyDecls top_decls
 
@@ -228,6 +228,7 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          int detail_memory;
                          int debugging;
                          int profiling;
+                         int profiling_paused;
                          int logging;
                          typename lock_t lock;
                          char *error;
@@ -245,9 +246,10 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
 
   GC.libDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
                      ctx->opencl.cfg = cfg->opencl;
-                     ctx->detail_memory = cfg->opencl.debugging || cfg->opencl.profiling;
+                     ctx->detail_memory = cfg->opencl.debugging;
                      ctx->debugging = cfg->opencl.debugging;
                      ctx->profiling = cfg->opencl.profiling;
+                     ctx->profiling_paused;
                      ctx->logging = cfg->opencl.logging;
                      ctx->error = NULL;
                      ctx->opencl.profiling_records_capacity = 200;
@@ -331,6 +333,18 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          return error;
                        }|])
 
+  GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                 ctx->profiling_paused = 1;
+               }|])
+
+  GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                 ctx->profiling_paused = 0;
+               }|])
+
   GC.publicDef_ "context_clear_caches" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
@@ -345,11 +359,11 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                }|])
 
   GC.profileReport [C.citem|OPENCL_SUCCEED_FATAL(opencl_tally_profiling_records(&ctx->opencl));|]
-  mapM_ GC.profileReport $ openClReport kernel_names
+  mapM_ GC.profileReport $ openClReport profiling_centres
 
-openClDecls :: [String] -> String -> String
+openClDecls :: [String] -> [String] -> String -> String
             -> ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
-openClDecls kernel_names opencl_program opencl_prelude =
+openClDecls profiling_centres kernel_names opencl_program opencl_prelude =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where opencl_program_fragments =
           -- Some C compilers limit the size of literal strings, so
@@ -360,12 +374,13 @@ openClDecls kernel_names opencl_program opencl_prelude =
         ctx_fields =
           [ [C.csdecl|int total_runs;|],
             [C.csdecl|long int total_runtime;|] ] ++
+          [ [C.csdecl|typename cl_kernel $id:name;|]
+          | name <- kernel_names ] ++
           concat
-          [ [ [C.csdecl|typename cl_kernel $id:name;|]
-            , [C.csdecl|typename int64_t $id:(kernelRuntime name);|]
+          [ [ [C.csdecl|typename int64_t $id:(kernelRuntime name);|]
             , [C.csdecl|int $id:(kernelRuns name);|]
             ]
-          | name <- kernel_names ]
+          | name <- profiling_centres ]
 
         ctx_inits =
           [ [C.cstm|ctx->total_runs = 0;|],
@@ -374,7 +389,7 @@ openClDecls kernel_names opencl_program opencl_prelude =
           [ [ [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]
             , [C.cstm|ctx->$id:(kernelRuns name) = 0;|]
             ]
-          | name <- kernel_names ]
+          | name <- profiling_centres ]
 
         openCL_load = [
           [C.cedecl|
