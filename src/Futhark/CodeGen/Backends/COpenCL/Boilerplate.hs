@@ -437,7 +437,7 @@ openClReport names = report_kernels ++ [report_total]
         format_string name =
           let padding = replicate (longest_name - length name) ' '
           in unwords [name ++ padding,
-                      "executed %6d times, with average runtime: %6ldus\tand total runtime: %6ldus\n"]
+                      "ran %5d times; avg: %8ldus; total: %8ldus\n"]
         reportKernel name =
           let runs = kernelRuns name
               total_runtime = kernelRuntime name
@@ -452,7 +452,7 @@ openClReport names = report_kernels ++ [report_total]
               [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
         report_total = [C.citem|
-                          if (ctx->debugging) {
+                          if (ctx->profiling) {
                             fprintf(stderr, "%d operations with cumulative runtime: %6ldus\n",
                                     ctx->total_runs, ctx->total_runtime);
                           }
