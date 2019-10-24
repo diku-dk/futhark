@@ -1160,11 +1160,18 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
       cli_entry_point_function_name = "futrts_cli_entry_" ++ entry_point_name
   entry_point_function_name <- publicName $ "entry_" ++ entry_point_name
 
+  pause_profiling <- publicName "context_pause_profiling"
+  unpause_profiling <- publicName "context_unpause_profiling"
+
   let run_it = [C.citems|
                   int r;
                   /* Run the program once. */
                   $stms:pack_input
                   assert($id:sync_ctx(ctx) == 0);
+                  // Only profile last run.
+                  if (profile_run) {
+                    $id:unpause_profiling(ctx);
+                  }
                   t_start = get_wall_time();
                   r = $id:entry_point_function_name(ctx,
                                                     $args:(map addrOf output_vals),
@@ -1173,6 +1180,9 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                     panic(1, "%s", $id:error_ctx(ctx));
                   }
                   assert($id:sync_ctx(ctx) == 0);
+                  if (profile_run) {
+                    $id:pause_profiling(ctx);
+                  }
                   t_end = get_wall_time();
                   long int elapsed_usec = t_end - t_start;
                   if (time_runs && runtime_file != NULL) {
@@ -1183,7 +1193,10 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
   return ([C.cedecl|static void $id:cli_entry_point_function_name($ty:ctx_ty *ctx) {
     typename int64_t t_start, t_end;
-    int time_runs;
+    int time_runs = 0, profile_run = 0;
+
+    // We do not want to profile all the initialisation.
+    $id:pause_profiling(ctx);
 
     /* Declare and read input. */
     set_binary_mode(stdin);
@@ -1192,13 +1205,14 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
     /* Warmup run */
     if (perform_warmup) {
-      time_runs = 0;
       $items:run_it
       $stms:free_outputs
     }
     time_runs = 1;
     /* Proper run. */
     for (int run = 0; run < num_runs; run++) {
+      // Only profile last run.
+      profile_run = run == num_runs -1;
       $items:run_it
       if (run < num_runs-1) {
         $stms:free_outputs
