@@ -249,7 +249,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernel_names ty
                      ctx->detail_memory = cfg->opencl.debugging;
                      ctx->debugging = cfg->opencl.debugging;
                      ctx->profiling = cfg->opencl.profiling;
-                     ctx->profiling_paused;
+                     ctx->profiling_paused = 0;
                      ctx->logging = cfg->opencl.logging;
                      ctx->error = NULL;
                      ctx->opencl.profiling_records_capacity = 200;
