@@ -1,8 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 -- | Simple C runtime representation.
 module Futhark.CodeGen.Backends.SimpleRepresentation
-  ( sameRepresentation
-  , tupleField
+  ( tupleField
   , tupleFieldExp
   , funName
   , defaultMemBlockType
@@ -59,20 +58,6 @@ signedPrimTypeToCType :: Signedness -> PrimType -> C.Type
 signedPrimTypeToCType TypeUnsigned (IntType t) = uintTypeToCType t
 signedPrimTypeToCType TypeDirect (IntType t) = intTypeToCType t
 signedPrimTypeToCType _ t = primTypeToCType t
-
--- | True if both types map to the same runtime representation.  This
--- is the case if they are identical modulo uniqueness.
-sameRepresentation :: [Type] -> [Type] -> Bool
-sameRepresentation ets1 ets2
-  | length ets1 == length ets2 =
-    and $ zipWith sameRepresentation' ets1 ets2
-  | otherwise = False
-
-sameRepresentation' :: Type -> Type -> Bool
-sameRepresentation' (Scalar t1) (Scalar t2) =
-  t1 == t2
-sameRepresentation' (Mem _ space1) (Mem _ space2) = space1 == space2
-sameRepresentation' _ _ = False
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
 tupleField :: Int -> String
