@@ -824,7 +824,18 @@ static int read_scalar(const struct primtype_info_t *expected_type, void *dest) 
     return expected_type->read_str(buf, dest);
   } else {
     read_bin_ensure_scalar(expected_type);
-    return expected_type->read_bin(dest);
+    size_t elem_size = expected_type->size;
+    int num_elems_read = fread(dest, elem_size, 1, stdin);
+    if (IS_BIG_ENDIAN) {
+      unsigned char* elem = dest;
+      for (unsigned int j=0; j<elem_size/2; j++) {
+        unsigned char head = elem[j];
+        int tail_index = elem_size-1-j;
+        elem[j] = elem[tail_index];
+        elem[tail_index] = head;
+      }
+    }
+    return num_elems_read == 1 ? 0 : 1;
   }
 }
 
