@@ -4,8 +4,7 @@
 #define NVRTC_SUCCEED(x) nvrtc_api_succeed(x, #x, __FILE__, __LINE__)
 
 static inline void cuda_api_succeed(CUresult res, const char *call,
-    const char *file, int line)
-{
+    const char *file, int line) {
   if (res != CUDA_SUCCESS) {
     const char *err_str;
     cuGetErrorString(res, &err_str);
@@ -16,8 +15,7 @@ static inline void cuda_api_succeed(CUresult res, const char *call,
 }
 
 static inline void nvrtc_api_succeed(nvrtcResult res, const char *call,
-    const char *file, int line)
-{
+                                     const char *file, int line) {
   if (res != NVRTC_SUCCESS) {
     const char *err_str = nvrtcGetErrorString(res);
     panic(-1, "%s:%d: NVRTC call\n  %s\nfailed with error code %d (%s)\n",
@@ -52,13 +50,12 @@ struct cuda_config {
   const char **size_classes;
 };
 
-void cuda_config_init(struct cuda_config *cfg,
-                      int num_sizes,
-                      const char *size_names[],
-                      const char *size_vars[],
-                      size_t *size_values,
-                      const char *size_classes[])
-{
+static void cuda_config_init(struct cuda_config *cfg,
+                             int num_sizes,
+                             const char *size_names[],
+                             const char *size_vars[],
+                             size_t *size_values,
+                             const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
   cfg->preferred_device = "";
@@ -105,8 +102,7 @@ struct cuda_context {
 
 #define CU_DEV_ATTR(x) (CU_DEVICE_ATTRIBUTE_##x)
 #define device_query(dev,attrib) _device_query(dev, CU_DEV_ATTR(attrib))
-static int _device_query(CUdevice dev, CUdevice_attribute attrib)
-{
+static int _device_query(CUdevice dev, CUdevice_attribute attrib) {
   int val;
   CUDA_SUCCEED(cuDeviceGetAttribute(&val, attrib, dev));
   return val;
@@ -114,20 +110,17 @@ static int _device_query(CUdevice dev, CUdevice_attribute attrib)
 
 #define CU_FUN_ATTR(x) (CU_FUNC_ATTRIBUTE_##x)
 #define function_query(fn,attrib) _function_query(dev, CU_FUN_ATTR(attrib))
-static int _function_query(CUfunction dev, CUfunction_attribute attrib)
-{
+static int _function_query(CUfunction dev, CUfunction_attribute attrib) {
   int val;
   CUDA_SUCCEED(cuFuncGetAttribute(&val, attrib, dev));
   return val;
 }
 
-void set_preferred_device(struct cuda_config *cfg, const char *s)
-{
+static void set_preferred_device(struct cuda_config *cfg, const char *s) {
   cfg->preferred_device = s;
 }
 
-static int cuda_device_setup(struct cuda_context *ctx)
-{
+static int cuda_device_setup(struct cuda_context *ctx) {
   char name[256];
   int count, chosen = -1, best_cc = -1;
   int cc_major_best, cc_minor_best;
@@ -185,8 +178,7 @@ static int cuda_device_setup(struct cuda_context *ctx)
   return 0;
 }
 
-static char *concat_fragments(const char *src_fragments[])
-{
+static char *concat_fragments(const char *src_fragments[]) {
   size_t src_len = 0;
   const char **p;
 
@@ -204,8 +196,7 @@ static char *concat_fragments(const char *src_fragments[])
   return src;
 }
 
-static const char *cuda_nvrtc_get_arch(CUdevice dev)
-{
+static const char *cuda_nvrtc_get_arch(CUdevice dev) {
   struct {
     int major;
     int minor;
@@ -244,8 +235,7 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev)
 }
 
 static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
-                              const char *extra_opts[])
-{
+                              const char *extra_opts[]) {
   nvrtcProgram prog;
   NVRTC_SUCCEED(nvrtcCreateProgram(&prog, src, "futhark-cuda", 0, NULL, NULL));
   int arch_set = 0, num_extra_opts;
@@ -387,16 +377,14 @@ static void cuda_size_setup(struct cuda_context *ctx)
   }
 }
 
-static void dump_string_to_file(const char *file, const char *buf)
-{
+static void dump_string_to_file(const char *file, const char *buf) {
   FILE *f = fopen(file, "w");
   assert(f != NULL);
   assert(fputs(buf, f) != EOF);
   assert(fclose(f) == 0);
 }
 
-static void load_string_from_file(const char *file, char **obuf, size_t *olen)
-{
+static void load_string_from_file(const char *file, char **obuf, size_t *olen) {
   char *buf;
   size_t len;
   FILE *f = fopen(file, "r");
@@ -419,8 +407,7 @@ static void load_string_from_file(const char *file, char **obuf, size_t *olen)
 
 static void cuda_module_setup(struct cuda_context *ctx,
                               const char *src_fragments[],
-                              const char *extra_opts[])
-{
+                              const char *extra_opts[]) {
   char *ptx = NULL, *src = NULL;
 
   if (ctx->cfg.load_ptx_from == NULL && ctx->cfg.load_program_from == NULL) {
@@ -457,8 +444,7 @@ static void cuda_module_setup(struct cuda_context *ctx,
   }
 }
 
-void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const char *extra_opts[])
-{
+static void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const char *extra_opts[]) {
   CUDA_SUCCEED(cuInit(0));
 
   if (cuda_device_setup(ctx) != 0) {
@@ -479,18 +465,16 @@ void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const cha
   cuda_module_setup(ctx, src_fragments, extra_opts);
 }
 
-CUresult cuda_free_all(struct cuda_context *ctx);
+static CUresult cuda_free_all(struct cuda_context *ctx);
 
-void cuda_cleanup(struct cuda_context *ctx)
-{
+static void cuda_cleanup(struct cuda_context *ctx) {
   CUDA_SUCCEED(cuda_free_all(ctx));
   CUDA_SUCCEED(cuModuleUnload(ctx->module));
   CUDA_SUCCEED(cuCtxDestroy(ctx->cu_ctx));
 }
 
-CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
-    const char *tag, CUdeviceptr *mem_out)
-{
+static CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
+                           const char *tag, CUdeviceptr *mem_out) {
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
   }
@@ -524,9 +508,8 @@ CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
   return res;
 }
 
-CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
-    const char *tag)
-{
+static CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
+                          const char *tag) {
   size_t size;
   CUdeviceptr existing_mem;
 
@@ -546,7 +529,7 @@ CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
   return res;
 }
 
-CUresult cuda_free_all(struct cuda_context *ctx) {
+static CUresult cuda_free_all(struct cuda_context *ctx) {
   CUdeviceptr mem;
   free_list_pack(&ctx->free_list);
   while (free_list_first(&ctx->free_list, &mem) == 0) {

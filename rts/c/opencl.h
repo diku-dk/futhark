@@ -50,12 +50,12 @@ struct opencl_config {
   const char **size_classes;
 };
 
-void opencl_config_init(struct opencl_config *cfg,
-                        int num_sizes,
-                        const char *size_names[],
-                        const char *size_vars[],
-                        size_t *size_values,
-                        const char *size_classes[]) {
+static void opencl_config_init(struct opencl_config *cfg,
+                               int num_sizes,
+                               const char *size_names[],
+                               const char *size_vars[],
+                               size_t *size_values,
+                               const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
   cfg->preferred_device_num = 0;
@@ -238,12 +238,12 @@ static char* opencl_succeed_nonfatal(unsigned int ret,
   }
 }
 
-void set_preferred_platform(struct opencl_config *cfg, const char *s) {
+static void set_preferred_platform(struct opencl_config *cfg, const char *s) {
   cfg->preferred_platform = s;
   cfg->ignore_blacklist = 1;
 }
 
-void set_preferred_device(struct opencl_config *cfg, const char *s) {
+static void set_preferred_device(struct opencl_config *cfg, const char *s) {
   int x = 0;
   if (*s == '#') {
     s++;
@@ -820,7 +820,7 @@ static cl_event* opencl_get_event(struct opencl_context *ctx, int *runs, int64_t
 // perform a write to see if the allocation succeeded.  This is slow,
 // but the assumption is that this operation will be rare (most things
 // will go through the free list).
-int opencl_alloc_actual(struct opencl_context *ctx, size_t size, cl_mem *mem_out) {
+static int opencl_alloc_actual(struct opencl_context *ctx, size_t size, cl_mem *mem_out) {
   int error;
   *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, size, NULL, &error);
 
@@ -839,7 +839,7 @@ int opencl_alloc_actual(struct opencl_context *ctx, size_t size, cl_mem *mem_out
   return error;
 }
 
-int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, cl_mem *mem_out) {
+static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, cl_mem *mem_out) {
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
   }
@@ -900,7 +900,7 @@ int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, c
   return error;
 }
 
-int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) {
+static int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) {
   size_t size;
   cl_mem existing_mem;
 
@@ -921,7 +921,7 @@ int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) {
   return error;
 }
 
-int opencl_free_all(struct opencl_context *ctx) {
+static int opencl_free_all(struct opencl_context *ctx) {
   cl_mem mem;
   free_list_pack(&ctx->free_list);
   while (free_list_first(&ctx->free_list, &mem) == 0) {
