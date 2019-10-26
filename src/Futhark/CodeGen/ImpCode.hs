@@ -78,7 +78,7 @@ data Size = ConstSize Int64
 type MemSize = Size
 type DimSize = Size
 
-data Type = Scalar PrimType | Mem MemSize Space
+data Type = Scalar PrimType | Mem Space
 
 data Param = MemParam VName Space
            | ScalarParam VName PrimType

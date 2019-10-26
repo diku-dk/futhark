@@ -656,7 +656,7 @@ paramsTypes :: [Param] -> [Type]
 paramsTypes = map paramType
   -- Let's hope we don't need the size for anything, because we are
   -- just making something up.
-  where paramType (MemParam _ space) = Mem (ConstSize 0) space
+  where paramType (MemParam _ space) = Mem space
         paramType (ScalarParam _ t) = Scalar t
 
 --- Entry points.
