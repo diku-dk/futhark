@@ -40,11 +40,11 @@ jobs:
       stack test --no-terminal --haddock --no-haddock-deps
     displayName: Run unit tests
 
-  - script: |
-      export PATH=$HOME/.local/bin:$PATH
-      stack install
-      futhark test --no-terminal --no-tuning tests examples
-    displayName: Compile and run tests
+  # - script: |
+  #     export PATH=$HOME/.local/bin:$PATH
+  #     stack install
+  #     futhark test --no-terminal --no-tuning tests examples
+  #   displayName: Compile and run tests
 
   - script: |
       export PATH=$HOME/.local/bin:$PATH
