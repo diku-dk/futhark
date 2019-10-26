@@ -413,7 +413,7 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
           $esc:("typedef cl_mem fl_mem_t;")
           $esc:free_list_h
           $esc:openCL_h
-          const char *opencl_program[] = {$inits:program_fragments};|]
+          static const char *opencl_program[] = {$inits:program_fragments};|]
 
 loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{

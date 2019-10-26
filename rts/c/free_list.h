@@ -16,7 +16,7 @@ struct free_list {
   int used;                               // Number of valid entries.
 };
 
-void free_list_init(struct free_list *l) {
+static void free_list_init(struct free_list *l) {
   l->capacity = 30; // Picked arbitrarily.
   l->used = 0;
   l->entries = (struct free_list_entry*) malloc(sizeof(struct free_list_entry) * l->capacity);
@@ -26,7 +26,7 @@ void free_list_init(struct free_list *l) {
 }
 
 /* Remove invalid entries from the free list. */
-void free_list_pack(struct free_list *l) {
+static void free_list_pack(struct free_list *l) {
   int p = 0;
   for (int i = 0; i < l->capacity; i++) {
     if (l->entries[i].valid) {
@@ -39,12 +39,12 @@ void free_list_pack(struct free_list *l) {
   l->capacity = l->used;
 }
 
-void free_list_destroy(struct free_list *l) {
+static void free_list_destroy(struct free_list *l) {
   assert(l->used == 0);
   free(l->entries);
 }
 
-int free_list_find_invalid(struct free_list *l) {
+static int free_list_find_invalid(struct free_list *l) {
   int i;
   for (i = 0; i < l->capacity; i++) {
     if (!l->entries[i].valid) {
@@ -54,7 +54,7 @@ int free_list_find_invalid(struct free_list *l) {
   return i;
 }
 
-void free_list_insert(struct free_list *l, size_t size, fl_mem_t mem, const char *tag) {
+static void free_list_insert(struct free_list *l, size_t size, fl_mem_t mem, const char *tag) {
   int i = free_list_find_invalid(l);
 
   if (i == l->capacity) {
@@ -78,7 +78,7 @@ void free_list_insert(struct free_list *l, size_t size, fl_mem_t mem, const char
 
 /* Find and remove a memory block of at least the desired size and
    tag.  Returns 0 on success.  */
-int free_list_find(struct free_list *l, const char *tag, size_t *size_out, fl_mem_t *mem_out) {
+static int free_list_find(struct free_list *l, const char *tag, size_t *size_out, fl_mem_t *mem_out) {
   int i;
   for (i = 0; i < l->capacity; i++) {
     if (l->entries[i].valid && l->entries[i].tag == tag) {
@@ -95,7 +95,7 @@ int free_list_find(struct free_list *l, const char *tag, size_t *size_out, fl_me
 
 /* Remove the first block in the free list.  Returns 0 if a block was
    removed, and nonzero if the free list was already empty. */
-int free_list_first(struct free_list *l, fl_mem_t *mem_out) {
+static int free_list_first(struct free_list *l, fl_mem_t *mem_out) {
   for (int i = 0; i < l->capacity; i++) {
     if (l->entries[i].valid) {
       l->entries[i].valid = 0;
