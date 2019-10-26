@@ -325,7 +325,7 @@ paramsTypes :: [Imp.Param] -> [Imp.Type]
 paramsTypes = map paramType
 
 paramType :: Imp.Param -> Imp.Type
-paramType (Imp.MemParam _ space) = Imp.Mem (Imp.ConstSize 0) space
+paramType (Imp.MemParam _ space) = Imp.Mem space
 paramType (Imp.ScalarParam _ t) = Imp.Scalar t
 
 compileOutput :: Imp.Param -> (CSExp, CSType)
@@ -584,7 +584,7 @@ compileName = zEncodeString . pretty
 
 compileType :: Imp.Type -> CSType
 compileType (Imp.Scalar p) = compilePrimTypeToAST p
-compileType (Imp.Mem _ space) = rawMemCSType space
+compileType (Imp.Mem space) = rawMemCSType space
 
 compilePrimTypeToAST :: PrimType -> CSType
 compilePrimTypeToAST (IntType Int8) = Primitive $ CSInt Int8T

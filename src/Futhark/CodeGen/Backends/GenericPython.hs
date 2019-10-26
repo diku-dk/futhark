@@ -230,7 +230,7 @@ futharkFun s = "futhark_" ++ zEncodeString s
 
 paramsTypes :: [Imp.Param] -> [Imp.Type]
 paramsTypes = map paramType
-  where paramType (Imp.MemParam _ space) = Imp.Mem (Imp.ConstSize 0) space
+  where paramType (Imp.MemParam _ space) = Imp.Mem space
         paramType (Imp.ScalarParam _ t) = Imp.Scalar t
 
 compileOutput :: [Imp.Param] -> [PyExp]
