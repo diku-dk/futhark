@@ -1083,7 +1083,7 @@ readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
   ty <- valueDescToCType vd
   item [C.citem|$ty:ty *$id:dest;|]
 
-  let t' = primTypeToCType t
+  let t' = signedPrimTypeToCType ept t
       rank = length dims
       name = arrayName t ept rank
       dims_exps = [ [C.cexp|$id:shape[$int:j]|] | j <- [0..rank-1] ]
