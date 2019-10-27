@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Character literals can now be any integer type.
+
 ### Removed
 
 ### Changed
