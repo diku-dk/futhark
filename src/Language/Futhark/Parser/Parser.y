@@ -611,6 +611,8 @@ ApplyList :: { [UncheckedExp] }
 Atom :: { UncheckedExp }
 Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | Constr         { Constr (fst $1) [] NoInfo (snd $1) }
+     | charlit        { let L loc (CHARLIT x) = $1
+                        in IntLit (toInteger (ord x)) NoInfo loc }
      | intlit         { let L loc (INTLIT x) = $1 in IntLit x NoInfo loc }
      | floatlit       { let L loc (FLOATLIT x) = $1 in FloatLit x NoInfo loc }
      | stringlit      { let L loc (STRINGLIT s) = $1 in
@@ -674,9 +676,6 @@ PrimLit :: { (PrimValue, SrcLoc) }
 
         | f32lit { let L loc (F32LIT num) = $1 in (FloatValue $ Float32Value num, loc) }
         | f64lit { let L loc (F64LIT num) = $1 in (FloatValue $ Float64Value num, loc) }
-
-        | charlit { let L loc (CHARLIT char) = $1
-                    in (SignedValue $ Int32Value $ fromIntegral $ ord char, loc) }
 
 Exps1 :: { (UncheckedExp, [UncheckedExp]) }
        : Exps1_ { case reverse (snd $1 : fst $1) of
@@ -783,6 +782,8 @@ CFieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
 
 CaseLiteral :: { (UncheckedExp, SrcLoc) }
              : PrimLit        { (Literal (fst $1) (snd $1), snd $1) }
+             | charlit        { let L loc (CHARLIT x) = $1
+                                in (IntLit (toInteger (ord x)) NoInfo loc, loc) }
              | intlit         { let L loc (INTLIT x) = $1 in (IntLit x NoInfo loc, loc) }
              | floatlit       { let L loc (FLOATLIT x) = $1 in (FloatLit x NoInfo loc, loc) }
              | stringlit      { let L loc (STRINGLIT s) = $1 in
