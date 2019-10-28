@@ -12,6 +12,8 @@ compiler is quite stable, and suitable for practical programming.
 
 For more information, see [the website](http://futhark-lang.org).
 
+There also exists a book, [Parallel Programming in Futhark](https://futhark-book.readthedocs.io/en/latest/), that serves as an extensive introduction and guide.
+
 Also see the [compiler and language
 documentation](http://futhark.readthedocs.io) and the [basis library
 documentation](https://futhark-lang.org/docs).
