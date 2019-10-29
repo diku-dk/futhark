@@ -845,6 +845,16 @@ primFuns = M.fromList
   , f32 "gamma32" tgammaf, f64 "gamma64" tgamma
   , f32 "lgamma32" lgammaf, f64 "lgamma64" lgamma
 
+  , i8 "clz8" $ IntValue . Int32Value . fromIntegral . countLeadingZeros
+  , i16 "clz16" $ IntValue . Int32Value . fromIntegral . countLeadingZeros
+  , i32 "clz32" $ IntValue . Int32Value . fromIntegral . countLeadingZeros
+  , i64 "clz64" $ IntValue . Int32Value . fromIntegral . countLeadingZeros
+
+  , i8 "popc8" $ IntValue . Int32Value . fromIntegral . popCount
+  , i16 "popc16" $ IntValue . Int32Value . fromIntegral . popCount
+  , i32 "popc32" $ IntValue . Int32Value . fromIntegral . popCount
+  , i64 "popc64" $ IntValue . Int32Value . fromIntegral . popCount
+
   , ("atan2_32",
      ([FloatType Float32, FloatType Float32], FloatType Float32,
       \case
@@ -925,8 +935,28 @@ primFuns = M.fromList
           v0 + (v1-v0)*max 0 (min 1 t)
         _ -> Nothing))
   ]
-  where f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
+  where i8 s f = (s, ([IntType Int8], IntType Int32, i8PrimFun f))
+        i16 s f = (s, ([IntType Int16], IntType Int32, i16PrimFun f))
+        i32 s f = (s, ([IntType Int32], IntType Int32, i32PrimFun f))
+        i64 s f = (s, ([IntType Int64], IntType Int32, i64PrimFun f))
+        f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
         f64 s f = (s, ([FloatType Float64], FloatType Float64, f64PrimFun f))
+
+        i8PrimFun f [IntValue (Int8Value x)] =
+          Just $ f x
+        i8PrimFun _ _ = Nothing
+
+        i16PrimFun f [IntValue (Int16Value x)] =
+          Just $ f x
+        i16PrimFun _ _ = Nothing
+
+        i32PrimFun f [IntValue (Int32Value x)] =
+          Just $ f x
+        i32PrimFun _ _ = Nothing
+
+        i64PrimFun f [IntValue (Int64Value x)] =
+          Just $ f x
+        i64PrimFun _ _ = Nothing
 
         f32PrimFun f [FloatValue (Float32Value x)] =
           Just $ FloatValue $ Float32Value $ f x

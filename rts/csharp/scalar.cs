@@ -318,6 +318,82 @@ private static double futhark_floor64(double x){return Math.Floor(x);}
 private static float futhark_lerp32(float v0, float v1, float t){return v0 + (v1-v0)*t;}
 private static double futhark_lerp64(double v0, double v1, double t){return v0 + (v1-v0)*t;}
 
+int futhark_popc8 (sbyte x) {
+  int c = 0;
+  for (; x != 0; ++c) {
+      x &= (sbyte)(x - 1);
+  }
+  return c;
+ }
+
+int futhark_popc16 (short x) {
+  int c = 0;
+  for (; x != 0; ++c) {
+      x &= (short)(x - 1);
+  }
+  return c;
+}
+
+int futhark_popc32 (int x) {
+  int c = 0;
+  for (; x != 0; ++c) {
+      x &= x - 1;
+  }
+  return c;
+}
+
+int futhark_popc64 (long x) {
+  int c = 0;
+  for (; x != 0; ++c) {
+      x &= x - 1;
+  }
+  return c;
+}
+
+int futhark_clzz8 (sbyte x) {
+    int n = 0;
+    int bits = sizeof(sbyte) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+}
+
+int futhark_clzz16 (short x) {
+    int n = 0;
+    int bits = sizeof(short) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+}
+
+int futhark_clzz32 (int x) {
+    int n = 0;
+    int bits = sizeof(int) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+}
+
+int futhark_clzz64 (long x) {
+    int n = 0;
+    int bits = sizeof(long) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+}
+
 private static bool llt (bool x, bool y){return (!x && y);}
 private static bool lle (bool x, bool y){return (!x || y);}
 

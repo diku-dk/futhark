@@ -92,6 +92,13 @@ module type integral = {
   val num_bits: i32
   val get_bit: i32 -> t -> i32
   val set_bit: i32 -> t -> i32 -> t
+
+  -- | Count number of one bits.
+  val popc: t -> i32
+
+  -- | Count number of zero bits preceding the most significant set
+  -- bit.
+  val clz: t -> i32
 }
 
 -- | An extension of `size`@mtype that further includes facilities for
@@ -253,6 +260,8 @@ module i8: (size with t = i8) = {
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+  let popc = intrinsics.popc8
+  let clz = intrinsics.clz8
 
   let iota (n: i8) = 0i8..1i8..<n
   let replicate 'v (n: i8) (x: v) = map (const x) (iota n)
@@ -323,6 +332,8 @@ module i16: (size with t = i16) = {
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+  let popc = intrinsics.popc16
+  let clz = intrinsics.clz16
 
   let iota (n: i16) = 0i16..1i16..<n
   let replicate 'v (n: i16) (x: v) = map (const x) (iota n)
@@ -396,6 +407,8 @@ module i32: (size with t = i32) = {
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+  let popc = intrinsics.popc32
+  let clz = intrinsics.clz32
 
   let iota (n: i32) = 0..1..<n
   let replicate 'v (n: i32) (x: v) = map (const x) (iota n)
@@ -469,6 +482,8 @@ module i64: (size with t = i64) = {
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | intrinsics.zext_i32_i64 (b intrinsics.<< bit))
+  let popc = intrinsics.popc64
+  let clz = intrinsics.clz64
 
   let iota (n: i64) = 0i64..1i64..<n
   let replicate 'v (n: i64) (x: v) = map (const x) (iota n)
@@ -542,6 +557,8 @@ module u8: (size with t = u8) = {
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+  let popc x = intrinsics.popc8 (sign x)
+  let clz x = intrinsics.clz8 (sign x)
 
   let iota (n: u8) = 0u8..1u8..<n
   let replicate 'v (n: u8) (x: v) = map (const x) (iota n)
@@ -615,6 +632,8 @@ module u16: (size with t = u16) = {
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+  let popc x = intrinsics.popc16 (sign x)
+  let clz x = intrinsics.clz16 (sign x)
 
   let iota (n: u16) = 0u16..1u16..<n
   let replicate 'v (n: u16) (x: v) = map (const x) (iota n)
@@ -688,6 +707,8 @@ module u32: (size with t = u32) = {
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+  let popc x = intrinsics.popc32 (sign x)
+  let clz x = intrinsics.clz32 (sign x)
 
   let iota (n: u32) = 0u32..1u32..<n
   let replicate 'v (n: u32) (x: v) = map (const x) (iota n)
@@ -761,6 +782,8 @@ module u64: (size with t = u64) = {
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+  let popc x = intrinsics.popc64 (sign x)
+  let clz x = intrinsics.clz64 (sign x)
 
   let iota (n: u64) = 0u64..1u64..<n
   let replicate 'v (n: u64) (x: v) = map (const x) (iota n)
