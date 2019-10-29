@@ -218,10 +218,10 @@ $esc:("#ifdef __OPENCL_VERSION__")
    }
 $esc:("#elif __CUDA_ARCH__")
    typename int32_t $id:(funName' "popc8") (typename int8_t x) {
-      return __popc(x);
+      return __popc(zext_i8_i32(x));
    }
    typename int32_t $id:(funName' "popc16") (typename int16_t x) {
-      return __popc(x);
+      return __popc(zext_i16_i32(x));
    }
    typename int32_t $id:(funName' "popc32") (typename int32_t x) {
       return __popc(x);
@@ -275,10 +275,10 @@ $esc:("#ifdef __OPENCL_VERSION__")
    }
 $esc:("#elif __CUDA_ARCH__")
    typename int32_t $id:(funName' "clz8") (typename int8_t x) {
-      return __clz((unsigned int)x)-24;
+      return __clz(zext_i8_i32(x))-24;
    }
    typename int32_t $id:(funName' "clz16") (typename int16_t x) {
-      return __clz((unsigned int)x)-16;
+      return __clz(zext_i16_i32(x))-16;
    }
    typename int32_t $id:(funName' "clz32") (typename int32_t x) {
       return __clz(x);
