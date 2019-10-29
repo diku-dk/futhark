@@ -58,6 +58,7 @@ static void opencl_config_init(struct opencl_config *cfg,
                                const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
+  cfg->profiling = 0;
   cfg->preferred_device_num = 0;
   cfg->preferred_platform = "";
   cfg->preferred_device = "";
