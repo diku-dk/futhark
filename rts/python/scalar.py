@@ -197,6 +197,26 @@ sext_i8_i32 = sext_i16_i32 = sext_i32_i32 = sext_i64_i32 = sext_T_i32
 sext_i8_i64 = sext_i16_i64 = sext_i32_i64 = sext_i64_i64 = sext_T_i64
 itob_i8_bool = itob_i16_bool = itob_i32_bool = itob_i64_bool = itob_T_bool
 
+def clz_T(x):
+  n = np.int32(0)
+  bits = x.itemsize * 8
+  for i in range(bits):
+    if x < 0:
+      break
+    n += 1
+    x <<= np.int8(1)
+  return n
+
+def popc_T(x):
+  c = np.int32(0)
+  while x != 0:
+    x &= x - np.int8(1)
+    c += np.int8(1)
+  return c
+
+futhark_popc8 = futhark_popc16 = futhark_popc32 = futhark_popc64 = popc_T
+futhark_clzz8 = futhark_clzz16 = futhark_clzz32 = futhark_clzz64 = clz_T
+
 def ssignum(x):
   return np.sign(x)
 

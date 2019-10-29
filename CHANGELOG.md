@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Character literals can now be any integer type.
 
+  * The integer modules now have `popc` and `clz` functions.
+
 ### Removed
 
 ### Changed

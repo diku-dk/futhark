@@ -83,6 +83,7 @@ defaultMemBlockType = [C.cty|char*|]
 
 cIntOps :: [C.Definition]
 cIntOps = concatMap (`map` [minBound..maxBound]) ops
+          ++ cIntPrimFuns
   where ops = [mkAdd, mkSub, mkMul,
                mkUDiv, mkUMod,
                mkSDiv, mkSMod,
@@ -198,6 +199,136 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         uintCmpOp s e t =
           [C.cedecl|static inline char $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = uintTypeToCType t
+
+cIntPrimFuns :: [C.Definition]
+cIntPrimFuns =
+  [C.cunit|
+$esc:("#ifdef __OPENCL_VERSION__")
+   typename int32_t $id:(funName' "popc8") (typename int8_t x) {
+      return popcount(x);
+   }
+   typename int32_t $id:(funName' "popc16") (typename int16_t x) {
+      return popcount(x);
+   }
+   typename int32_t $id:(funName' "popc32") (typename int32_t x) {
+      return popcount(x);
+   }
+   typename int32_t $id:(funName' "popc64") (typename int64_t x) {
+      return popcount(x);
+   }
+$esc:("#elif __CUDA_ARCH__")
+   typename int32_t $id:(funName' "popc8") (typename int8_t x) {
+      return __popc(x);
+   }
+   typename int32_t $id:(funName' "popc16") (typename int16_t x) {
+      return __popc(x);
+   }
+   typename int32_t $id:(funName' "popc32") (typename int32_t x) {
+      return __popc(x);
+   }
+   typename int32_t $id:(funName' "popc64") (typename int64_t x) {
+      return __popcll(x);
+   }
+$esc:("#else")
+   typename int32_t $id:(funName' "popc8") (typename int8_t x) {
+     int c = 0;
+     for (; x; ++c) {
+       x &= x - 1;
+     }
+     return c;
+    }
+   typename int32_t $id:(funName' "popc16") (typename int16_t x) {
+     int c = 0;
+     for (; x; ++c) {
+       x &= x - 1;
+     }
+     return c;
+   }
+   typename int32_t $id:(funName' "popc32") (typename int32_t x) {
+     int c = 0;
+     for (; x; ++c) {
+       x &= x - 1;
+     }
+     return c;
+   }
+   typename int32_t $id:(funName' "popc64") (typename int64_t x) {
+     int c = 0;
+     for (; x; ++c) {
+       x &= x - 1;
+     }
+     return c;
+   }
+$esc:("#endif")
+
+$esc:("#ifdef __OPENCL_VERSION__")
+   typename int32_t $id:(funName' "clz8") (typename int8_t x) {
+      return clz(x);
+   }
+   typename int32_t $id:(funName' "clz16") (typename int16_t x) {
+      return clz(x);
+   }
+   typename int32_t $id:(funName' "clz32") (typename int32_t x) {
+      return clz(x);
+   }
+   typename int32_t $id:(funName' "clz64") (typename int64_t x) {
+      return clz(x);
+   }
+$esc:("#elif __CUDA_ARCH__")
+   typename int32_t $id:(funName' "clz8") (typename int8_t x) {
+      return __clz(x);
+   }
+   typename int32_t $id:(funName' "clz16") (typename int16_t x) {
+      return __clz(x);
+   }
+   typename int32_t $id:(funName' "clz32") (typename int32_t x) {
+      return __clz(x);
+   }
+   typename int32_t $id:(funName' "clz64") (typename int64_t x) {
+      return __clzll(x);
+   }
+$esc:("#else")
+   typename int32_t $id:(funName' "clz8") (typename int8_t x) {
+    int n = 0;
+    int bits = sizeof(x) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+   }
+   typename int32_t $id:(funName' "clz16") (typename int16_t x) {
+    int n = 0;
+    int bits = sizeof(x) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+   }
+   typename int32_t $id:(funName' "clz32") (typename int32_t x) {
+    int n = 0;
+    int bits = sizeof(x) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+   }
+   typename int32_t $id:(funName' "clz64") (typename int64_t x) {
+    int n = 0;
+    int bits = sizeof(x) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+   }
+$esc:("#endif")
+                |]
 
 cFloat32Ops :: [C.Definition]
 cFloat64Ops :: [C.Definition]
