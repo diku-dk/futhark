@@ -180,9 +180,7 @@ infoPrints hist_H hist_M hist_C = do
 
 prepareIntermediateArraysGlobal :: Imp.Exp -> Imp.Exp -> [SegHistSlug]
                                 -> CallKernelGen
-                                   [(VName,
-                                     [VName],
-                                     [Imp.Exp] -> InKernelGen ())]
+                                   [(VName, [Imp.Exp] -> InKernelGen ())]
 prepareIntermediateArraysGlobal hist_T hist_N =
   fmap snd . mapAccumLM onOp Nothing
   where
@@ -284,7 +282,7 @@ prepareIntermediateArraysGlobal hist_T hist_N =
 
       (l', do_op') <- prepareAtomicUpdateGlobal l dests slug
 
-      return (l', (hist_M, dests, do_op'))
+      return (l', (hist_M, do_op'))
 
 histKernelGlobal :: [PatElem ExplicitMemory]
                  -> Count NumGroups SubExp -> Count GroupSize SubExp
@@ -312,7 +310,7 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
 
   sKernelThread "seghist_global" num_groups' group_size' (segFlat space) $ \constants -> do
     -- Compute subhistogram index for each thread, per histogram.
-    subhisto_inds <- forM histograms $ \(num_histograms, _, _) ->
+    subhisto_inds <- forM histograms $ \(num_histograms, _) ->
       dPrimVE "subhisto_ind" $
       kernelGlobalThreadId constants `quot`
       (kernelNumThreads constants `quotRoundingUp` Imp.var num_histograms int32)
@@ -358,7 +356,7 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
         sComment "perform atomic updates" $
           forM_ (zip5 (map slugOp slugs) histograms buckets (perOp vs) subhisto_inds) $
           \(HistOp dest_w _ _ _ shape lam,
-            (_, _, do_op), bucket, vs', subhisto_ind) -> do
+            (_, do_op), bucket, vs', subhisto_ind) -> do
 
             let bucket' = toExp' int32 $ kernelResultSubExp bucket
                 dest_w' = toExp' int32 dest_w
@@ -766,11 +764,11 @@ localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N h
 -- well as collapsing the subhistograms produced (which are always in
 -- global memory, but their number may vary).
 compileSegHist :: Pattern ExplicitMemory
-                 -> Count NumGroups SubExp -> Count GroupSize SubExp
-                 -> SegSpace
-                 -> [HistOp ExplicitMemory]
-                 -> KernelBody ExplicitMemory
-                 -> CallKernelGen ()
+               -> Count NumGroups SubExp -> Count GroupSize SubExp
+               -> SegSpace
+               -> [HistOp ExplicitMemory]
+               -> KernelBody ExplicitMemory
+               -> CallKernelGen ()
 compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
   group_size' <- traverse toExp group_size
 
