@@ -180,7 +180,7 @@ infoPrints hist_H hist_M hist_C = do
 
 prepareIntermediateArraysGlobal :: Imp.Exp -> Imp.Exp -> [SegHistSlug]
                                 -> CallKernelGen
-                                   [(VName, [Imp.Exp] -> InKernelGen ())]
+                                   [[Imp.Exp] -> InKernelGen ()]
 prepareIntermediateArraysGlobal hist_T hist_N =
   fmap snd . mapAccumLM onOp Nothing
   where
@@ -282,7 +282,7 @@ prepareIntermediateArraysGlobal hist_T hist_N =
 
       (l', do_op') <- prepareAtomicUpdateGlobal l dests slug
 
-      return (l', (hist_M, do_op'))
+      return (l', do_op')
 
 histKernelGlobal :: [PatElem ExplicitMemory]
                  -> Count NumGroups SubExp -> Count GroupSize SubExp
@@ -344,7 +344,7 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
         sComment "perform atomic updates" $
           forM_ (zip5 (map slugOp slugs) histograms buckets (perOp vs) subhisto_inds) $
           \(HistOp dest_w _ _ _ shape lam,
-            (_, do_op), bucket, vs', subhisto_ind) -> do
+            do_op, bucket, vs', subhisto_ind) -> do
 
             let bucket' = toExp' int32 $ kernelResultSubExp bucket
                 dest_w' = toExp' int32 dest_w
