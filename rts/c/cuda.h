@@ -96,6 +96,7 @@ struct cuda_context {
   size_t max_tile_size;
   size_t max_threshold;
   size_t max_shared_memory;
+  size_t max_bespoke;
 
   size_t lockstep_width;
 };
@@ -372,7 +373,8 @@ static void cuda_size_setup(struct cuda_context *ctx)
       max_value = ctx->max_threshold;
       default_value = ctx->cfg.default_threshold;
     } else {
-      panic(1, "Unknown size class for size '%s': %s\n", size_name, size_class);
+      // Bespoke sizes have no limit or default.
+      max_value = 0;
     }
 
     if (*size_value == 0) {
@@ -467,6 +469,7 @@ static void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], co
   ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
   ctx->max_tile_size = sqrt(ctx->max_block_size);
   ctx->max_threshold = 0;
+  ctx->max_bespoke = 0;
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
 
   cuda_size_setup(ctx);

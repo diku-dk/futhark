@@ -65,7 +65,10 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernel_names ty
                               const char **build_opts;
                             };|])
 
-  let size_value_inits = map (\i -> [C.cstm|cfg->sizes[$int:i] = 0;|]) [0..M.size sizes-1]
+  let size_value_inits = zipWith sizeInit [0..M.size sizes-1] (M.elems sizes)
+      sizeInit i size = [C.cstm|cfg->sizes[$int:i] = $int:val;|]
+         where val = case size of SizeBespoke _ x -> x
+                                  _               -> 0
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {
