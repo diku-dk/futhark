@@ -304,42 +304,30 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
     prepareIntermediateArraysGlobal num_threads
     (toExp' int32 $ last space_sizes) slugs
 
-  elems_per_thread_64 <- dPrimVE "elems_per_thread_64" $
-                         total_w_64 `quotRoundingUp`
-                         ConvOpExp (SExt Int32 Int64) num_threads
-
   sKernelThread "seghist_global" num_groups' group_size' (segFlat space) $ \constants -> do
     -- Compute subhistogram index for each thread, per histogram.
-    subhisto_inds <- forM histograms $ \(num_histograms, _) ->
+    subhisto_inds <- forM slugs $ \slug ->
       dPrimVE "subhisto_ind" $
       kernelGlobalThreadId constants `quot`
-      (kernelNumThreads constants `quotRoundingUp` Imp.var num_histograms int32)
+      (kernelNumThreads constants `quotRoundingUp` Imp.vi32 (slugNumSubhistos slug))
 
-    sFor "flat_idx" elems_per_thread_64 $ \flat_idx -> do
-      -- Compute the offset into the input and output.  To this a
-      -- thread can add its local ID to figure out which element it is
-      -- responsible for.  The calculation is done with 64-bit
-      -- integers to avoid overflow, but the final segment indexes are
-      -- 32 bit.
-      offset <- dPrimVE "offset" $
-                (i32Toi64 (kernelGroupId constants) *
-                 (elems_per_thread_64 *
-                  i32Toi64 (kernelGroupSize constants)))
-                + (flat_idx * i32Toi64 (kernelGroupSize constants))
-
-      j <- dPrimVE "j" $ offset + i32Toi64 (kernelLocalThreadId constants)
+    -- Loop over flat offsets into the input and output.  The
+    -- calculation is done with 64-bit integers to avoid overflow,
+    -- but the final unflattened segment indexes are 32 bit.
+    let gtid = i32Toi64 $ kernelGlobalThreadId constants
+    kernelLoop gtid (i32Toi64 num_threads) total_w_64 $ \offset -> do
 
       -- Construct segment indices.
       let setIndex v e = do dPrim_ v int32
                             v <-- e
       zipWithM_ setIndex space_is $
-        map (ConvOpExp (SExt Int64 Int32)) $ unflattenIndex space_sizes_64 j
+        map (ConvOpExp (SExt Int64 Int32)) $ unflattenIndex space_sizes_64 offset
 
       -- We execute the bucket function once and update each histogram serially.
       -- We apply the bucket function if j=offset+ltid is less than
       -- num_elements.  This also involves writing to the mapout
       -- arrays.
-      let input_in_bounds = j .<. total_w_64
+      let input_in_bounds = offset .<. total_w_64
 
       sWhen input_in_bounds $ compileStms mempty (kernelBodyStms kbody) $ do
         let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
