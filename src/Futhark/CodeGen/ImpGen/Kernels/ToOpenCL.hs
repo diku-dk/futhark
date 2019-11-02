@@ -65,7 +65,7 @@ cleanSizes m = M.map clean m
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
-pointerQuals "local"      = return [C.ctyquals|__local|]
+pointerQuals "local"      = return [C.ctyquals|__local volatile|]
 pointerQuals "private"    = return [C.ctyquals|__private|]
 pointerQuals "constant"   = return [C.ctyquals|__constant|]
 pointerQuals "write_only" = return [C.ctyquals|__write_only|]
