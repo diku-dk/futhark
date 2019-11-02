@@ -7,6 +7,7 @@ module Futhark.Representation.Kernels.Sizes
   )
   where
 
+import Data.Int (Int32)
 import Data.Traversable
 
 import Futhark.Util.Pretty
@@ -27,6 +28,8 @@ data SizeClass = SizeThreshold KernelPath
                | SizeLocalMemory
                -- ^ Likely not useful on its own, but querying the
                -- maximum can be handy.
+               | SizeBespoke Name Int32
+               -- ^ A bespoke size with a default.
                deriving (Eq, Ord, Show)
 
 instance Pretty SizeClass where
@@ -37,6 +40,7 @@ instance Pretty SizeClass where
   ppr SizeNumGroups = text "num_groups"
   ppr SizeTile = text "tile_size"
   ppr SizeLocalMemory = text "local_memory"
+  ppr (SizeBespoke k _) = ppr k
 
 -- | A wrapper supporting a phantom type for indicating what we are counting.
 newtype Count u e = Count { unCount :: e }

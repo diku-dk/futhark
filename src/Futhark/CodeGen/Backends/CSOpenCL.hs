@@ -133,6 +133,7 @@ callKernel (Imp.GetSizeMax v size_class) =
                      Imp.SizeTile -> "MaxTileSize"
                      Imp.SizeThreshold{} -> "MaxThreshold"
                      Imp.SizeLocalMemory -> "MaxLocalMemory"
+                     Imp.SizeBespoke{} -> "MaxBespoke"
 
 callKernel (Imp.LaunchKernel name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM CS.compileExp num_workgroups

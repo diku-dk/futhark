@@ -593,7 +593,8 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
       max_value = 0; // No limit.
       default_value = ctx->cfg.default_threshold;
     } else {
-      panic(1, "Unknown size class for size '%s': %s\n", size_name, size_class);
+      // Bespoke sizes have no limit or default.
+      max_value = 0;
     }
     if (*size_value == 0) {
       *size_value = default_value;

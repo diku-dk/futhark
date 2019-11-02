@@ -13,6 +13,8 @@ module Futhark.Representation.Kernels.Kernel
        , SegRedOp(..)
        , segRedResults
        , KernelBody(..)
+       , aliasAnalyseKernelBody
+       , consumedInKernelBody
        , KernelResult(..)
        , kernelResultSubExp
        , SplitOrdering(..)
