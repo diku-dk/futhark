@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * All internal functions used in generated C code are now properly
     declared `static`.
 
+  * Fixed bugs when handling dimensions and aliases in type ascriptions.
+
 ## [0.12.2]
 
 ### Added
