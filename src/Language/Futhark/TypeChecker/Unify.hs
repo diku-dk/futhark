@@ -127,7 +127,7 @@ unify :: MonadUnify m => Usage -> TypeBase () () -> TypeBase () () -> m ()
 unify usage orig_t1 orig_t2 = do
   orig_t1' <- normaliseType orig_t1
   orig_t2' <- normaliseType orig_t2
-  breadCrumb (MatchingTypes orig_t1' orig_t2') $ subunify orig_t1 orig_t2
+  breadCrumb (MatchingTypes orig_t1' orig_t2') $ subunify orig_t1' orig_t2'
   where
     subunify t1 t2 = do
       constraints <- getConstraints
