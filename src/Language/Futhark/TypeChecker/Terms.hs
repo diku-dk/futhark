@@ -894,7 +894,8 @@ checkExp (Ascript e decl NoInfo loc) = do
     typeError loc $ "Type " ++ quote (pretty t') ++ " is not a subtype of " ++
     quote (pretty decl_t') ++ "."
 
-  return $ Ascript e' decl' (Info (combineTypeShapes t $ fromStruct decl_t)) loc
+  let t'' = unifyTypeAliases t $ combineTypeShapes t $ fromStruct decl_t
+  return $ Ascript e' decl' (Info t'') loc
 
 checkExp (BinOp (op, oploc) NoInfo (e1,_) (e2,_) NoInfo loc) = do
   (op', ftype) <- lookupVar oploc op
