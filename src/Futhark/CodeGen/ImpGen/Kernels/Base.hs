@@ -548,7 +548,11 @@ atomicUpdateCAS space t arr old bucket x do_op = do
   -- } while(assumed != old);
   assumed <- dPrim "assumed" t
   run_loop <- dPrimV "run_loop" 1
-  copyDWIM old [] (Var arr) bucket
+
+  -- XXX: CUDA may generate really bad code if this is not a volatile
+  -- read.  Unclear why.  The later reads are volatile, so maybe
+  -- that's it.
+  everythingVolatile $ copyDWIM old [] (Var arr) bucket
 
   (arr', _a_space, bucket_offset) <- fullyIndexArray arr bucket
 
