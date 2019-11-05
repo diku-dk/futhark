@@ -23,9 +23,14 @@ import Futhark.Binder
 import Futhark.Pass
 
 aggInlining :: MonadFreshNames m => CallGraph -> [FunDef SOACS] -> m [FunDef SOACS]
-aggInlining cg = fmap (filter keep) . recurse 0
-  where noInterestingCalls :: (Name -> Bool) -> FunDef SOACS -> Bool
-        noInterestingCalls interesting fundec =
+aggInlining cg = fmap (filter keep) .
+                 recurse 0 .
+                 filter isFunInCallGraph
+  where isFunInCallGraph fundec =
+          isJust $ M.lookup (funDefName fundec) cg
+
+        noCallsTo :: (Name -> Bool) -> FunDef SOACS -> Bool
+        noCallsTo interesting fundec =
           case M.lookup (funDefName fundec) cg of
             Just calls | not $ any interesting calls -> True
             _                                        -> False
@@ -43,11 +48,11 @@ aggInlining cg = fmap (filter keep) . recurse 0
         -- as possible, rather than wait until it has balooned after
         -- full inlining.
         recurse i funs = do
-          let interesting = S.fromList $ map funDefName funs
+          let remaining = S.fromList $ map funDefName funs
               (to_be_inlined, maybe_inline_in) =
-                partition (noInterestingCalls (`S.member` interesting)) funs
+                partition (noCallsTo (`S.member` remaining)) funs
               (not_to_inline_in, to_inline_in) =
-                partition (noInterestingCalls
+                partition (noCallsTo
                            (`elem` map funDefName to_be_inlined))
                 maybe_inline_in
               inlined_but_entry_points =
