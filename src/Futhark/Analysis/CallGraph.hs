@@ -21,20 +21,19 @@ buildFunctionTable = foldl expand M.empty . progFunctions
   where expand ftab f = M.insert (funDefName f) f ftab
 
 -- | The call graph is just a mapping from a function name, i.e., the
--- caller, to a list of the names of functions called by the function.
--- The order of this list is not significant.
+-- caller, to a set of the names of functions called *directly* (not
+-- transitively!) by the function.
 type CallGraph = M.Map Name (S.Set Name)
 
--- | @buildCallGraph prog@ build the program's Call Graph. The representation
--- is a hashtable that maps function names to a list of callee names.
+-- | @buildCallGraph prog@ build the program's call graph.
 buildCallGraph :: Prog SOACS -> CallGraph
 buildCallGraph prog = foldl' (buildCGfun ftable) M.empty entry_points
-  where entry_points = map funDefName $ filter (isJust . funDefEntryPoint) $ progFunctions prog
+  where entry_points = map funDefName $ filter (isJust . funDefEntryPoint) $
+                       progFunctions prog
         ftable = buildFunctionTable prog
 
--- | @buildCallGraph ftable cg fname@ updates Call Graph @cg@ with the
--- contributions of function @fname@, and recursively, with the
--- contributions of the callees of @fname@.
+-- | @buildCallGraph ftable cg fname@ updates @cg@ with the
+-- contributions of function @fname@.
 buildCGfun :: FunctionTable -> CallGraph -> Name -> CallGraph
 buildCGfun ftable cg fname  =
   -- Check if function is a non-builtin that we have not already
