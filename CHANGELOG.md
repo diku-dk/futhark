@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The integer modules now have `popc` and `clz` functions.
 
+  * Tweaked inlining so that larger programs may now compile faster
+    (observed about 20%).
+
 ### Removed
 
 ### Changed
