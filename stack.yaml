@@ -1,12 +1,6 @@
-resolver: nightly-2019-10-15
+resolver: nightly-2019-11-08
 packages:
 - .
-
-extra-deps:
- - exception-mtl-0.4.0.1
- - exception-transformers-0.4.0.8
- - language-c-quote-0.12.2.1
- - mainland-pretty-0.7.0.1
 
 flags: {}
 
