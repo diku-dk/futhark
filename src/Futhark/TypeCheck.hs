@@ -913,9 +913,23 @@ checkStm stm@(Let pat (StmAux (Certificates cs) (_,attr)) e) m = do
   context "When checking expression annotation" $ checkExpLore attr
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPattern pat e
-  binding (scopeOf stm) $ do
+  binding (maybeWithoutAliases $ scopeOf stm) $ do
     mapM_ checkPatElem (patternElements $ removePatternAliases pat)
     m
+  where
+    -- FIXME: this is wrong.  However, the core language type system
+    -- is not strong enough to fully capture the aliases we want (see
+    -- issue #803).  Since we eventually inline everything anyway, and
+    -- our intra-procedural alias analysis is much simpler and
+    -- correct, I could not justify spending time on improving the
+    -- inter-procedural alias analysis.  If we ever stop inlining
+    -- everything, probably we need to go back and refine this.
+    maybeWithoutAliases =
+      case stmExp stm of
+        Apply{} -> M.map withoutAliases
+        _ -> id
+    withoutAliases (LetInfo (_, lattr)) = LetInfo (mempty, lattr)
+    withoutAliases info = info
 
 matchExtPattern :: Checkable lore =>
                    Pattern (Aliases lore) -> [ExtType] -> TypeM lore ()
