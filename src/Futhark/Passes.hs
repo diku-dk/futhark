@@ -15,6 +15,7 @@ import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
+import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Unstream
@@ -57,6 +58,7 @@ kernelsPipeline =
          , unstream
          , performCSE True
          , simplifyKernels
+         , sink
          , inPlaceLowering
          ]
 
@@ -65,6 +67,7 @@ sequentialPipeline =
   standardPipeline >>>
   onePass firstOrderTransform >>>
   passes [ simplifyKernels
+         , sink
          , inPlaceLowering
          ]
 

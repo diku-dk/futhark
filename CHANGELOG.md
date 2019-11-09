@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Tweaked inlining so that larger programs may now compile faster
     (observed about 20%).
 
+  * Pattern-matching on large sum typed-values taken from arrays may
+    be a bit faster.
+
 ### Removed
 
 ### Changed

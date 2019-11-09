@@ -3,6 +3,7 @@ module Futhark.Analysis.Range
        ( rangeAnalysis
        , runRangeM
        , RangeM
+       , analyseFun
        , analyseExp
        , analyseLambda
        , analyseBody
