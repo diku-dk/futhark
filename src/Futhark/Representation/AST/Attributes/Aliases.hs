@@ -80,10 +80,6 @@ ifAliases (als1,cons1) (als2,cons2) =
   map (`namesSubtract` cons) $ zipWith mappend als1 als2
   where cons = cons1 <> cons2
 
-funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
-funcallAliases args t =
-  returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
-
 expAliases :: (Aliased lore) => Exp lore -> [Names]
 expAliases (If _ tb fb attr) =
   drop (length all_aliases - length ts) all_aliases
@@ -97,25 +93,16 @@ expAliases (DoLoop ctxmerge valmerge _ loopbody) =
   where (_ctx_aliases, val_aliases) =
           splitAt (length ctxmerge) $ bodyAliases loopbody
         merge_names = namesFromList $ map (paramName . fst) $ ctxmerge ++ valmerge
-expAliases (Apply _ args t _) =
-  funcallAliases args $ retTypeValues t
+expAliases (Apply _ _ t _) =
+  -- FIXME: this is wrong.  However, the core language type system is
+  -- not strong enough to fully capture the aliases we want (see issue
+  -- #803).  Since we eventually inline everything anyway, and our
+  -- intra-procedural alias analysis is much simpler and correct, I
+  -- could not justify spending time on improving the inter-procedural
+  -- alias analysis.  If we ever stop inlining everything, probably we
+  -- need to go back and refine this.
+  replicate (length t) mempty
 expAliases (Op op) = opAliases op
-
-returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]
-returnAliases rts args = map returnType' rts
-  where returnType' (Array _ _ Nonunique) =
-          mconcat $ map (uncurry maskAliases) args
-        returnType' (Array _ _ Unique) =
-          mempty
-        returnType' (Prim _) =
-          mempty
-        returnType' Mem{} =
-          error "returnAliases Mem"
-
-maskAliases :: Names -> Diet -> Names
-maskAliases _   Consume = mempty
-maskAliases _   ObservePrim = mempty
-maskAliases als Observe = als
 
 consumedInStm :: Aliased lore => Stm lore -> Names
 consumedInStm = consumedInExp . stmExp
