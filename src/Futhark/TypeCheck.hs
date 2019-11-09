@@ -63,7 +63,6 @@ import Data.Maybe
 import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
 import Futhark.Representation.Aliases
-import Futhark.Analysis.Alias
 import Futhark.Util
 import Futhark.Util.Pretty (Pretty, prettyDoc, indent, ppr, text, (<+>), align)
 
@@ -456,7 +455,7 @@ checkArrIdent v = do
 -- yielding either a type error or a program with complete type
 -- information.
 checkProg :: Checkable lore =>
-             Prog lore -> Either (TypeError lore) ()
+             Prog (Aliases lore) -> Either (TypeError lore) ()
 checkProg prog = do
   let typeenv = Env { envVtable = M.empty
                     , envFtable = mempty
@@ -468,11 +467,10 @@ checkProg prog = do
         local (\env -> env { envFtable = ftable }) $
         checkFun fun
   (ftable, _) <- runTypeM typeenv buildFtable
-  sequence_ $ parMap rpar (onFunction ftable) $ progFunctions prog'
+  sequence_ $ parMap rpar (onFunction ftable) $ progFunctions prog
   where
-    prog' = aliasAnalysis prog
-    buildFtable = do table <- initialFtable prog'
-                     foldM expand table $ progFunctions prog'
+    buildFtable = do table <- initialFtable prog
+                     foldM expand table $ progFunctions prog
     expand ftable (FunDef _ name ret params _)
       | M.member name ftable =
           bad $ DupDefinitionError name
