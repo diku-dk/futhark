@@ -13,6 +13,18 @@ read :ref:`windows-installation`.  If you are using macOS, read
 Futhark is also available via `Nix <https://nixos.org/nix/>`_.  If you
 are using Nix, simply install the ``futhark`` derivation from Nixpkgs.
 
+Dependencies
+------------
+
+On non-Windows, you will need to have the ``gmp`` and ``tinfo``
+libraries installed.  These are pretty common, so you may already have
+them.  On Debian-like systems (e.g. Ubuntu), use::
+
+  sudo apt install libtinfo-dev libgmp-dev
+
+If you install Futhark via a package manager (e.g. Homebrew, Nix, or
+AUR), you shouldn't need to worry about this.
+
 Compiling from source
 ---------------------
 
