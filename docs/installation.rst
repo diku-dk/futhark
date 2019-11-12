@@ -125,6 +125,23 @@ above.
 
 .. _macos-installation:
 
+Using OpenCL or CUDA
+~~~~~~~~~~~~~~~~~~~~
+
+If you wish to use ``futhark opencl`` or ``futhark cuda``, you must
+have the OpenCL or CUDA libraries installed, respectively.  Consult
+your favourite search engine for instructions on how to do this on
+your distribution.  It is usually not terribly difficult if you
+already have working GPU drivers.
+
+For OpenCL, note that there is a distinction between the general
+OpenCL host library (``OpenCL.so``) that Futhark links against, and
+the *Installable Client Driver* (ICD) that OpenCL uses to actually
+talk to the hardware.  You will need both.  Working display drivers
+for the GPU does not imply that an ICD has been installed - they are
+usually in a separate package.  Consult your favourite search engine
+for details.
+
 Installing Futhark on macOS
 ---------------------------
 
