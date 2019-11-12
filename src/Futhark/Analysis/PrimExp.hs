@@ -5,6 +5,7 @@ module Futhark.Analysis.PrimExp
   ( PrimExp (..)
   , evalPrimExp
   , primExpType
+  , primExpSizeAtLeast
   , coerceIntPrimExp
   , true
   , false
@@ -14,7 +15,7 @@ module Futhark.Analysis.PrimExp
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
   ) where
 
-import           Data.Foldable
+import           Control.Monad
 import           Data.Traversable
 import qualified Data.Map as M
 
@@ -81,6 +82,23 @@ instance Traversable PrimExp where
 
 instance FreeIn v => FreeIn (PrimExp v) where
   freeIn' = foldMap freeIn'
+
+-- | True if the 'PrimExp' has at least this many nodes.  This can be
+-- much more efficient than comparing with 'length' for large
+-- 'PrimExp's, as this function is lazy.
+primExpSizeAtLeast :: Int -> PrimExp v -> Bool
+primExpSizeAtLeast k = maybe True (k>=) . descend 0
+  where descend i _
+          | k >= i = Nothing
+        descend i LeafExp{} = Just (i+1)
+        descend i ValueExp{} = Just (i+1)
+        descend i (BinOpExp _ x y) = do x' <- descend (i+1) x
+                                        descend x' y
+        descend i (CmpOpExp _ x y) = do x' <- descend (i+1) x
+                                        descend x' y
+        descend i (ConvOpExp _ x) = descend (i+1) x
+        descend i (UnOpExp _ x) = descend (i+1) x
+        descend i (FunExp _ args _) = foldM descend (i+1) args
 
 -- | Perform quick and dirty constant folding on the top level of a
 -- PrimExp.  This is necessary because we want to consider
