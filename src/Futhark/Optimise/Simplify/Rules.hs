@@ -743,15 +743,16 @@ simplifyIndexing vtable seType idd inds consuming =
           -- worth inlining over keeping it in an array and reading it
           -- from memory.
           worthInlining e
-            | length e > 10 = False -- totally ad-hoc.
-          worthInlining (BinOpExp Pow{} _ _) = False
-          worthInlining (BinOpExp FPow{} _ _) = False
-          worthInlining (BinOpExp _ x y) = worthInlining x && worthInlining y
-          worthInlining (CmpOpExp _ x y) = worthInlining x && worthInlining y
-          worthInlining (ConvOpExp _ x) = worthInlining x
-          worthInlining (UnOpExp _ x) = worthInlining x
-          worthInlining FunExp{} = False
-          worthInlining _ = True
+            | primExpSizeAtLeast 10 e = False -- totally ad-hoc.
+            | otherwise = worthInlining' e
+          worthInlining' (BinOpExp Pow{} _ _) = False
+          worthInlining' (BinOpExp FPow{} _ _) = False
+          worthInlining' (BinOpExp _ x y) = worthInlining' x && worthInlining' y
+          worthInlining' (CmpOpExp _ x y) = worthInlining' x && worthInlining' y
+          worthInlining' (ConvOpExp _ x) = worthInlining' x
+          worthInlining' (UnOpExp _ x) = worthInlining' x
+          worthInlining' FunExp{} = False
+          worthInlining' _ = True
 
 sliceSlice :: MonadBinder m =>
               [DimIndex SubExp] -> [DimIndex SubExp] -> m [DimIndex SubExp]
