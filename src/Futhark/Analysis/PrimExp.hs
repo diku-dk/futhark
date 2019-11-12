@@ -87,9 +87,9 @@ instance FreeIn v => FreeIn (PrimExp v) where
 -- much more efficient than comparing with 'length' for large
 -- 'PrimExp's, as this function is lazy.
 primExpSizeAtLeast :: Int -> PrimExp v -> Bool
-primExpSizeAtLeast k = maybe True (k>=) . descend 0
+primExpSizeAtLeast k = maybe True (>=k) . descend 0
   where descend i _
-          | k >= i = Nothing
+          | i >= k = Nothing
         descend i LeafExp{} = Just (i+1)
         descend i ValueExp{} = Just (i+1)
         descend i (BinOpExp _ x y) = do x' <- descend (i+1) x
