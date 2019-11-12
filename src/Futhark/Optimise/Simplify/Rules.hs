@@ -743,7 +743,7 @@ simplifyIndexing vtable seType idd inds consuming =
           -- worth inlining over keeping it in an array and reading it
           -- from memory.
           worthInlining e
-            | primExpSizeAtLeast 10 e = False -- totally ad-hoc.
+            | primExpSizeAtLeast 20 e = False -- totally ad-hoc.
             | otherwise = worthInlining' e
           worthInlining' (BinOpExp Pow{} _ _) = False
           worthInlining' (BinOpExp FPow{} _ _) = False
