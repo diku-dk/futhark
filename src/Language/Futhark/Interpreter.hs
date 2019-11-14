@@ -238,7 +238,7 @@ instance Show InterpreterError where
 bad :: SrcLoc -> Env -> String -> EvalM a
 bad loc env s = stacking loc env $ do
   ss <- map locStr <$> stacktrace
-  liftF $ ExtOpError $ InterpreterError $ "Error at " ++ intercalate " -> " ss ++ ": " ++ s
+  liftF $ ExtOpError $ InterpreterError $ "Error at\n   " ++ intercalate "\n-> " ss ++ "\n" ++ s
 
 trace :: Value -> EvalM ()
 trace v = do
