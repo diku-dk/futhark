@@ -6,4 +6,4 @@
 let m = 2
 type m_ints = [m]i32
 
-let main(n: i32) = iota n : m_ints
+let main(n: i32) = iota n :> m_ints

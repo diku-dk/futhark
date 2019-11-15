@@ -1,6 +1,6 @@
 -- Record updates should respect uniqueness and aliases.
 -- ==
--- error: \*\[\]i32
+-- error: `s`
 
 type^ state = { size: i32, world: []i32 }
 

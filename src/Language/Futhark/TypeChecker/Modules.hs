@@ -21,7 +21,7 @@ import Prelude hiding (abs, mod)
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad
-import Language.Futhark.TypeChecker.Unify (doUnification)
+import Language.Futhark.TypeChecker.Unify (Rigidity(..), doUnification)
 import Language.Futhark.TypeChecker.Types
 import Futhark.Util.Pretty
 
@@ -222,7 +222,11 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
     case findTypeDef (fmap baseName name) mod of
       Just (name', TypeAbbr mod_l ps t)
         | mod_l > name_l ->
-            mismatchedLiftedness name_l (map qualLeaf $ M.keys mod_abs)
+            mismatchedLiftedness name_l
+            (map qualLeaf $ M.keys mod_abs) (qualLeaf name) (mod_l, ps, t)
+        | name_l < SizeLifted,
+          emptyDims t ->
+            anonymousSizes (map qualLeaf $ M.keys mod_abs)
             (qualLeaf name) (mod_l, ps, t)
         | Just (abs_name, _) <- M.lookup (fmap baseName name) abs_mapping ->
             return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
@@ -238,6 +242,17 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
           where what = case name_l of Unlifted -> "a non-lifted type"
                                       SizeLifted -> "a size-lifted type"
                                       Lifted -> "a lifted type"
+
+        anonymousSizes abs name mod_t =
+          Left $ TypeError loc $
+          unlines ["Module defines",
+                   sindent $ ppTypeAbbr abs name mod_t,
+                   "which contains anonymous sizes, but module type requires non-lifted type."]
+
+        emptyDims :: StructType -> Bool
+        emptyDims = isNothing . traverseDims onDim
+          where onDim PosImmediate AnyDim = Nothing
+                onDim _ d = Just d
 
 resolveMTyNames :: MTy -> MTy
                 -> M.Map VName (QualName VName)
@@ -449,11 +464,14 @@ matchMTys orig_mty orig_mty_sig =
 
     matchValBinding :: SrcLoc -> BoundV -> BoundV -> Maybe (Maybe String)
     matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
-      case doUnification loc tps (removeShapeAnnotations orig_spec_t) (removeShapeAnnotations orig_t) of
+      case doUnification loc tps
+           Nonrigid (toStruct orig_spec_t)
+           Rigid (toStruct orig_t) of
         Left (TypeError _ err) -> Just $ Just err
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
-        Right t | t `subtypeOf` removeShapeAnnotations orig_spec_t -> Nothing
+        Right t | removeShapeAnnotations t `subtypeOf`
+                  removeShapeAnnotations orig_spec_t -> Nothing
                 | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =

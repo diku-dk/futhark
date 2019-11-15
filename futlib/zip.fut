@@ -9,15 +9,15 @@
 -- depended upon by soacs.fut.  So we just define a quick-and-dirty
 -- internal one here that uses the intrinsic version.
 local let internal_map 'a [n] 'x (f: a -> x) (as: [n]a): [n]x =
-  intrinsics.map (f, as)
+  intrinsics.map (f, as) :> [n]x
 
 -- | Construct an array of pairs from two arrays.
 let zip [n] 'a 'b (as: [n]a) (bs: [n]b): [n](a,b) =
-  intrinsics.zip (as, bs)
+  intrinsics.zip (as, bs) :> [n](a,b)
 
 -- | Construct an array of pairs from two arrays.
 let zip2 [n] 'a 'b (as: [n]a) (bs: [n]b): [n](a,b) =
-  zip as bs
+  zip as bs :> [n](a,b)
 
 -- | As `zip2`@term, but with one more array.
 let zip3 [n] 'a 'b 'c (as: [n]a) (bs: [n]b) (cs: [n]c): [n](a,b,c) =
@@ -33,7 +33,7 @@ let zip5 [n] 'a 'b 'c 'd 'e (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]
 
 -- | Turn an array of pairs into two arrays.
 let unzip [n] 'a 'b (xs: [n](a,b)): ([n]a, [n]b) =
-  intrinsics.unzip xs
+  intrinsics.unzip xs :> ([n]a, [n]b)
 
 -- | Turn an array of pairs into two arrays.
 let unzip2 [n] 'a 'b (xs: [n](a,b)): ([n]a, [n]b) =

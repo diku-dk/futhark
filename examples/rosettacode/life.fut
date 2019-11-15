@@ -39,10 +39,10 @@ let bint: bool -> i32 = i32.bool
 let intb : i32 -> bool = bool.i32
 
 let to_bool_board(board: [][]i32): [][]bool =
-  map (\(r: []i32): []bool  -> map intb r) board
+  map (\r  -> map intb r) board
 
 let to_int_board(board: [][]bool): [][]i32 =
-  map (\(r: []bool): []i32  -> map bint r) board
+  map (\r  -> map bint r) board
 
 let all_neighbours [n][m] (world: [n][m]bool): [n][m]i32 =
     let ns  = map (rotate (-1)) world
@@ -63,7 +63,7 @@ let all_neighbours [n][m] (world: [n][m]bool): [n][m]i32 =
 
 let iteration [n][m] (board: [n][m]bool): [n][m]bool =
   let lives = all_neighbours(board) in
-  map2 (\(lives_r: []i32) (board_r: []bool): []bool  ->
+  map2 (\(lives_r: []i32) (board_r: []bool)  ->
             map2 (\(neighbors: i32) (alive: bool): bool  ->
                       if neighbors < 2
                       then false

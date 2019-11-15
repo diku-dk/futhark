@@ -29,6 +29,7 @@ import Codec.Binary.UTF8.String (encode)
 import Data.Char (ord)
 import Data.Maybe (fromMaybe, fromJust)
 import Data.Loc hiding (L) -- Lexer has replacements.
+import Data.List (genericLength)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Monoid
@@ -527,19 +528,19 @@ QualName :: { (QualName Name, SrcLoc) }
 -- permit inside array indices operations (there is an ambiguity with
 -- array slices).
 Exp :: { UncheckedExp }
-     : Exp ':' TypeExpDecl { Ascript $1 $3 NoInfo (srcspan $1 $>) }
-     | Exp ':>' TypeExpDecl { Ascript $1 $3 NoInfo (srcspan $1 $>) }
+     : Exp ':' TypeExpDecl { Ascript $1 $3 (srcspan $1 $>) }
+     | Exp ':>' TypeExpDecl { Coerce $1 $3 (NoInfo,NoInfo) (srcspan $1 $>) }
      | Exp2 %prec ':'      { $1 }
 
 Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
-                      { If $2 $4 $6 NoInfo (srcspan $1 $>) }
+                      { If $2 $4 $6 (NoInfo,NoInfo) (srcspan $1 $>) }
 
      | loop Pattern LoopForm do Exp %prec ifprec
-         {% fmap (\t -> DoLoop $2 t $3 $5 (srcspan $1 $>)) (patternExp $2) }
+         {% fmap (\t -> DoLoop [] $2 t $3 $5 NoInfo (srcspan $1 $>)) (patternExp $2) }
 
      | loop Pattern '=' Exp LoopForm do Exp %prec ifprec
-         { DoLoop $2 $4 $5 $7 (srcspan $1 $>) }
+         { DoLoop [] $2 $4 $5 $7 NoInfo (srcspan $1 $>) }
 
      | LetExp %prec letprec { $1 }
 
@@ -577,14 +578,14 @@ Exp2 :: { UncheckedExp }
      | Exp2 '<|...' Exp2   { binOp $1 $2 $3 }
 
      | Exp2 '<' Exp2              { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
-     | Exp2 '`' QualName '`' Exp2 { BinOp $3 NoInfo ($1, NoInfo) ($5, NoInfo) NoInfo (srcspan $1 $>) }
+     | Exp2 '`' QualName '`' Exp2 { BinOp $3 NoInfo ($1, NoInfo) ($5, NoInfo) NoInfo NoInfo (srcspan $1 $>) }
 
-     | Exp2 '...' Exp2           { Range $1 Nothing (ToInclusive $3) NoInfo (srcspan $1 $>) }
-     | Exp2 '..<' Exp2           { Range $1 Nothing (UpToExclusive $3) NoInfo (srcspan $1 $>) }
-     | Exp2 '..>' Exp2           { Range $1 Nothing (DownToExclusive $3) NoInfo (srcspan $1 $>) }
-     | Exp2 '..' Exp2 '...' Exp2 { Range $1 (Just $3) (ToInclusive $5) NoInfo (srcspan $1 $>) }
-     | Exp2 '..' Exp2 '..<' Exp2 { Range $1 (Just $3) (UpToExclusive $5) NoInfo (srcspan $1 $>) }
-     | Exp2 '..' Exp2 '..>' Exp2 { Range $1 (Just $3) (DownToExclusive $5) NoInfo (srcspan $1 $>) }
+     | Exp2 '...' Exp2           { Range $1 Nothing (ToInclusive $3) (NoInfo,NoInfo) (srcspan $1 $>) }
+     | Exp2 '..<' Exp2           { Range $1 Nothing (UpToExclusive $3) (NoInfo,NoInfo) (srcspan $1 $>) }
+     | Exp2 '..>' Exp2           { Range $1 Nothing (DownToExclusive $3) (NoInfo,NoInfo) (srcspan $1 $>) }
+     | Exp2 '..' Exp2 '...' Exp2 { Range $1 (Just $3) (ToInclusive $5) (NoInfo,NoInfo) (srcspan $1 $>) }
+     | Exp2 '..' Exp2 '..<' Exp2 { Range $1 (Just $3) (UpToExclusive $5) (NoInfo,NoInfo) (srcspan $1 $>) }
+     | Exp2 '..' Exp2 '..>' Exp2 { Range $1 (Just $3) (DownToExclusive $5) (NoInfo,NoInfo) (srcspan $1 $>) }
      | Exp2 '..' Atom            {% twoDotsRange $2 }
      | Atom '..' Exp2            {% twoDotsRange $2 }
      | '-' Exp2
@@ -604,7 +605,7 @@ Exp2 :: { UncheckedExp }
 Apply_ :: { UncheckedExp }
        : ApplyList { case $1 of
                        ((Constr n [] _ loc1):_) -> Constr n (tail $1) NoInfo (srcspan loc1 (last $1))
-                       _                -> foldl1 (\f x -> Apply f x NoInfo NoInfo (srcspan f x)) $1 }
+                       _                -> foldl1 (\f x -> Apply f x NoInfo (NoInfo, NoInfo) (srcspan f x)) $1 }
 
 ApplyList :: { [UncheckedExp] }
           : ApplyList Atom %prec juxtprec
@@ -627,7 +628,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 (srcspan $1 $3))
                $4 }
-     | '(' Exp ')[' DimIndices ']'    { Index (Parens $2 $1) $4 NoInfo (srcspan $1 $>) }
+     | '(' Exp ')[' DimIndices ']'    { Index (Parens $2 $1) $4 (NoInfo, NoInfo) (srcspan $1 $>) }
      | '(' Exp ',' Exps1 ')'          { TupLit ($2 : fst $4 : snd $4) (srcspan $1 $>) }
      | '('      ')'                   { TupLit [] (srcspan $1 $>) }
      | '[' Exps1 ']'                  { ArrayLit (fst $2:snd $2) NoInfo (srcspan $1 $>) }
@@ -636,7 +637,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | QualVarSlice FieldAccesses
        { let ((v, vloc),slice,loc) = $1
          in foldl (\x (y, _) -> Project y x NoInfo (srcspan x (srclocOf x)))
-                  (Index (Var v NoInfo vloc) slice NoInfo (srcspan vloc loc))
+                  (Index (Var v NoInfo vloc) slice (NoInfo, NoInfo) (srcspan vloc loc))
                   $2 }
      | QualName
        { Var (fst $1) NoInfo (snd $1) }
@@ -651,12 +652,12 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' '-' ')'
         { OpSection (qualName (nameFromString "-")) NoInfo (srcspan $1 $>) }
      | '(' Exp2 '-' ')'
-        { OpSectionLeft (qualName (nameFromString "-"))
-           NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
+       { OpSectionLeft (qualName (nameFromString "-"))
+         NoInfo $2 (NoInfo, NoInfo) (NoInfo, NoInfo) (srcspan $1 $>) }
      | '(' BinOp Exp2 ')'
        { OpSectionRight (fst $2) NoInfo $3 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
      | '(' Exp2 BinOp ')'
-       { OpSectionLeft (fst $3) NoInfo $2 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
+       { OpSectionLeft (fst $3) NoInfo $2 (NoInfo, NoInfo) (NoInfo, NoInfo) (srcspan $1 $>) }
      | '(' BinOp ')'
        { OpSection (fst $2) NoInfo (srcspan $1 $>) }
 
@@ -717,7 +718,7 @@ Fields1 :: { [FieldBase NoInfo Name] }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
-                      { LetPat $2 $4 $5 NoInfo (srcspan $1 $>) }
+                      { LetPat $2 $4 $5 (NoInfo, NoInfo) (srcspan $1 $>) }
 
      | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
        { let L _ (ID name) = $2
@@ -733,7 +734,7 @@ LetBody :: { UncheckedExp }
 
 MatchExp :: { UncheckedExp }
           : match Exp Cases  { let loc = srcspan $1 (NE.toList $>)
-                               in Match $2 $> NoInfo loc  }
+                               in Match $2 $> (NoInfo, NoInfo) loc  }
 
 Cases :: { NE.NonEmpty (CaseBase NoInfo Name) }
        : Case  %prec caseprec { $1 NE.:| [] }
@@ -1071,7 +1072,7 @@ eof pos = L (SrcLoc $ Loc pos pos) EOF
 binOpName (L loc (SYMBOL _ qs op)) = (QualName qs op, loc)
 
 binOp x (L loc (SYMBOL _ qs op)) y =
-  BinOp (QualName qs op, loc) NoInfo (x, NoInfo) (y, NoInfo) NoInfo $
+  BinOp (QualName qs op, loc) NoInfo (x, NoInfo) (y, NoInfo) NoInfo NoInfo $
   srcspan x y
 
 getTokens :: ParserMonad ([L Token], Pos)

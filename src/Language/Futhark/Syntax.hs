@@ -111,12 +111,16 @@ import           Language.Futhark.Core
 -- | Convenience class for deriving 'Show' instances for the AST.
 class (Show vn,
        Show (f VName),
-       Show (f Diet),
+       Show (f (Diet, Maybe VName)),
        Show (f String),
        Show (f [VName]),
+       Show (f ([VName], [VName])),
        Show (f PatternType),
+       Show (f (PatternType, [VName])),
+       Show (f (StructType, [VName])),
        Show (f Int),
        Show (f StructType),
+       Show (f (StructType, Maybe VName)),
        Show (f (Aliasing, StructType)),
        Show (f (M.Map VName VName)),
        Show (f Uniqueness)) => Showable f vn where
@@ -227,6 +231,8 @@ instance Traversable DimDecl where
   traverse _ (ConstDim x) = pure $ ConstDim x
   traverse _ AnyDim = pure AnyDim
 
+-- Note that the notion of unifyDims here is intentionally not what we
+-- use when we do real type unification in the type checker.
 instance ArrayDim (DimDecl VName) where
   unifyDims AnyDim y = Just y
   unifyDims x AnyDim = Just x
@@ -621,21 +627,36 @@ data ExpBase f vn =
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the row type of the rows of the array.
 
-            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) (f PatternType) SrcLoc
+            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn))
+              (f PatternType, f [VName]) SrcLoc
 
             | Var (QualName vn) (f PatternType) SrcLoc
 
-            | Ascript (ExpBase f vn) (TypeDeclBase f vn) (f PatternType) SrcLoc
+            | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
             -- ^ Type ascription: @e : t@.
 
-            | LetPat (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
+            | Coerce (ExpBase f vn) (TypeDeclBase f vn) (f PatternType, f [VName]) SrcLoc
+            -- ^ Size coercion: @e :> t@.
 
-            | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
+            | LetPat (PatternBase f vn) (ExpBase f vn) (ExpBase f vn)
+              (f PatternType, f [VName]) SrcLoc
+
+            | LetFun vn ([TypeParamBase vn],
+                         [PatternBase f vn],
+                         Maybe (TypeExp vn),
+                         f StructType,
+                         ExpBase f vn)
               (ExpBase f vn) SrcLoc
 
-            | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType) SrcLoc
+            | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType, f [VName]) SrcLoc
 
-            | Apply (ExpBase f vn) (ExpBase f vn) (f Diet) (f PatternType) SrcLoc
+            | Apply (ExpBase f vn) (ExpBase f vn)
+              (f (Diet, Maybe VName)) (f PatternType, f [VName]) SrcLoc
+              -- ^ The @Maybe VName@ is a possible existential size
+              -- that is instantiated by this argument..
+              --
+              -- The @[VName]@ are the existential sizes that come
+              -- into being at this call site.
 
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
@@ -645,11 +666,11 @@ data ExpBase f vn =
 
             | OpSection (QualName vn) (f PatternType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.
-            | OpSectionLeft (QualName vn) (f PatternType)
-              (ExpBase f vn) (f StructType, f StructType) (f PatternType) SrcLoc
+            | OpSectionLeft (QualName vn) (f PatternType) (ExpBase f vn)
+              (f (StructType, Maybe VName), f StructType) (f PatternType, f [VName]) SrcLoc
               -- ^ @2+@; first type is operand, second is result.
-            | OpSectionRight (QualName vn) (f PatternType)
-              (ExpBase f vn) (f StructType, f StructType) (f PatternType) SrcLoc
+            | OpSectionRight (QualName vn) (f PatternType) (ExpBase f vn)
+              (f StructType, f (StructType, Maybe VName)) (f PatternType) SrcLoc
               -- ^ @+2@; first type is operand, second is result.
             | ProjectSection [Name] (f PatternType) SrcLoc
               -- ^ Field projection as a section: @(.x.y.z)@.
@@ -657,15 +678,18 @@ data ExpBase f vn =
               -- ^ Array indexing as a section: @(.[i,j])@.
 
             | DoLoop
-              (PatternBase f vn) -- Merge variable pattern
+              [VName] -- Size parameters.
+              (PatternBase f vn) -- Merge variable pattern.
               (ExpBase f vn) -- Initial values of merge variables.
               (LoopFormBase f vn) -- Do or while loop.
               (ExpBase f vn) -- Loop body.
+              (f (PatternType, [VName])) -- Return type.
               SrcLoc
 
             | BinOp (QualName vn, SrcLoc) (f PatternType)
-              (ExpBase f vn, f StructType) (ExpBase f vn, f StructType)
-              (f PatternType) SrcLoc
+              (ExpBase f vn, f (StructType, Maybe VName))
+              (ExpBase f vn, f (StructType, Maybe VName))
+              (f PatternType) (f [VName]) SrcLoc
 
             | Project Name (ExpBase f vn) (f PatternType) SrcLoc
 
@@ -674,7 +698,7 @@ data ExpBase f vn =
                       [DimIndexBase f vn] (ExpBase f vn)
                       (ExpBase f vn) (f PatternType) SrcLoc
 
-            | Index (ExpBase f vn) [DimIndexBase f vn] (f PatternType) SrcLoc
+            | Index (ExpBase f vn) [DimIndexBase f vn] (f PatternType, f [VName]) SrcLoc
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
@@ -694,7 +718,8 @@ data ExpBase f vn =
             | Constr Name [ExpBase f vn] (f PatternType) SrcLoc
             -- ^ An n-ary value constructor.
 
-            | Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) (f PatternType) SrcLoc
+            | Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn))
+              (f PatternType, f [VName]) SrcLoc
             -- ^ A match expression.
 deriving instance Showable f vn => Show (ExpBase f vn)
 deriving instance Eq (ExpBase NoInfo VName)
@@ -712,12 +737,13 @@ instance Located (ExpBase f vn) where
   locOf (ArrayLit _ _ pos)             = locOf pos
   locOf (StringLit _ loc)              = locOf loc
   locOf (Range _ _ _ _ pos)            = locOf pos
-  locOf (BinOp _ _ _ _ _ pos)          = locOf pos
+  locOf (BinOp _ _ _ _ _ _ loc)        = locOf loc
   locOf (If _ _ _ _ pos)               = locOf pos
   locOf (Var _ _ loc)                  = locOf loc
-  locOf (Ascript _ _ _ loc)            = locOf loc
+  locOf (Ascript _ _ loc)              = locOf loc
+  locOf (Coerce _ _ _ loc)             = locOf loc
   locOf (Negate _ pos)                 = locOf pos
-  locOf (Apply _ _ _ _ pos)            = locOf pos
+  locOf (Apply _ _ _ _ loc)            = locOf loc
   locOf (LetPat _ _ _ _ loc)           = locOf loc
   locOf (LetFun _ _ _ loc)             = locOf loc
   locOf (LetWith _ _ _ _ _ _ loc)      = locOf loc
@@ -730,7 +756,7 @@ instance Located (ExpBase f vn) where
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
   locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (IndexSection _ _ loc)         = locOf loc
-  locOf (DoLoop _ _ _ _ pos)           = locOf pos
+  locOf (DoLoop _ _ _ _ _ _ loc)       = locOf loc
   locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
   locOf (Constr _ _ _ loc)             = locOf loc
@@ -806,7 +832,7 @@ data ValBindBase f vn = ValBind { valBindEntryPoint :: Maybe (f StructType)
                                 -- that are no longer in scope.
                                 , valBindName       :: vn
                                 , valBindRetDecl    :: Maybe (TypeExp vn)
-                                , valBindRetType    :: f StructType
+                                , valBindRetType    :: f (StructType, [VName])
                                 , valBindTypeParams :: [TypeParamBase vn]
                                 , valBindParams     :: [PatternBase f vn]
                                 , valBindBody       :: ExpBase f vn

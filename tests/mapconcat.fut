@@ -7,5 +7,6 @@
 -- output { [[1,2,3,2,1,0],[4,5,6,5,4,3],[7,8,9,8,7,6]] }
 -- structure { Map 0 Concat 1 }
 
-let main (xss: [][]i32) (yss: [][]i32) (zss: [][]i32) =
-  map3 (\xs ys zs -> xs ++ ys ++ zs) xss yss zss
+let main [a][b][c] (xss: [][a]i32) (yss: [][b]i32) (zss: [][c]i32) =
+  let n = a + b + c in
+  map3 (\xs ys zs -> xs ++ ys ++ zs :> [n]i32) xss yss zss

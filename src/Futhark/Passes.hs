@@ -35,6 +35,7 @@ standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
   passes [ simplifySOACS
          , inlineAndRemoveDeadFunctions
+         , simplifySOACS
          , performCSE True
          , simplifySOACS
            -- We run fusion twice

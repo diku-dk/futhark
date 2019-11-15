@@ -31,16 +31,17 @@ let binom(expiry: i32): f32 =
   let qUR = q/stepR
   let qDR = (1.0-q)/stepR
 
-  let uPow = map (u**) (map r32 (iota(n+1)))
-  let dPow = map (d**) (map r32 (map (n-) (iota(n+1))))
+  let np1 = n+1
+  let uPow = map (u**) (map r32 (iota np1))
+  let dPow = map (d**) (map r32 (map (n-) (iota np1)))
   let st = map (r32(s0())*) (map2 (*) uPow dPow)
   let finalPut = map (f32.max(0.0)) (map (r32(strike())-) st) in
   let put = loop put = finalPut for i in reverse (map (1+) (iota n)) do
-    let (uPow_start, _) = split (i) uPow
-    let (_, dPow_end) = split (n+1-i) dPow
+    let uPow_start = take i uPow
+    let dPow_end = drop (n+1-i) dPow :> [i]f32
     let st = map (r32(s0())*) (map2 (*) uPow_start dPow_end)
-    let (_, put_tail) = split (1) put
-    let (put_init, _) = split (length put-1) put in
+    let put_tail = tail put :> [i]f32
+    let put_init = init put :> [i]f32 in
     map (\(x,y) -> f32.max x y)
     (zip
      (map (r32(strike())-) st)

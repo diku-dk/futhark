@@ -68,14 +68,14 @@ internaliseEntryReturnType :: E.TypeBase (E.DimDecl VName) ()
                            -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                             ConstParams)
 internaliseEntryReturnType t = do
-  let ts = case E.isTupleRecord t of Just tts -> tts
-                                     _        -> [t]
+  let ts = case E.isTupleRecord t of Just tts | not $ null tts -> tts
+                                     _ -> [t]
   runInternaliseTypeM $ mapM internaliseTypeM ts
 
-internaliseType :: E.TypeBase () ()
+internaliseType :: E.TypeBase (E.DimDecl VName) ()
                 -> InternaliseM [I.TypeBase I.ExtShape Uniqueness]
 internaliseType =
-  fmap fst . runInternaliseTypeM . internaliseTypeM . E.vacuousShapeAnnotations
+  fmap fst . runInternaliseTypeM . internaliseTypeM
 
 newId :: InternaliseTypeM Int
 newId = do (i,cm) <- get
@@ -99,14 +99,13 @@ internaliseDim d =
 
             (Nothing, Nothing, Just [v]) -> return $ I.Free v
 
-            (_, Just (fname, _, _), _) -> do
+            (_, Just (fname, _, _, _), _) -> do
               (i,cm) <- get
               case find ((==fname) . fst) cm of
                 Just (_, known) -> return $ I.Free $ I.Var known
                 Nothing -> do new <- liftInternaliseM $ newVName $ baseString name
                               put (i, (fname,new):cm)
                               return $ I.Free $ I.Var new
-
             _ -> return $ I.Free $ I.Var name
 
 internaliseTypeM :: E.StructType
@@ -119,8 +118,12 @@ internaliseTypeM orig_t =
       return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets ]
     E.Scalar (E.Prim bt) ->
       return [I.Prim $ internalisePrimType bt]
-    E.Scalar (E.Record ets) ->
-      concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
+    E.Scalar (E.Record ets)
+      -- XXX: we map empty records to bools, because otherwise
+      -- arrays of unit will lose their sizes.
+      | null ets -> return [I.Prim I.Bool]
+      | otherwise ->
+          concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
     E.Scalar E.TypeVar{} ->
       error "internaliseTypeM: cannot handle type variable."
     E.Scalar E.Arrow{} ->
@@ -142,8 +145,7 @@ internaliseConstructors cs =
                 foldl' f (zip ts [0..], mempty, mempty) c_ts
           in (ts ++ new_ts, M.insert c (i, js) mapping)
           where f (ts', js, new_ts) t
-                  | primType t,
-                    Just (_, j) <- find ((==t) . fst) ts' =
+                  | Just (_, j) <- find ((==t) . fst) ts' =
                       (delete (t, j) ts',
                        js ++ [j],
                        new_ts)
@@ -162,8 +164,8 @@ internaliseSumType cs =
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
-internalisedTypeSize :: E.TypeBase dim () -> InternaliseM Int
-internalisedTypeSize = fmap length . internaliseType . E.toStructural
+internalisedTypeSize :: E.TypeBase (E.DimDecl VName) () -> InternaliseM Int
+internalisedTypeSize = fmap length . internaliseType
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType

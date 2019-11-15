@@ -11,7 +11,7 @@ module type MT = {
 
 module M0: MT = {
   type intvec = [3]i32
-  let singleton (x: i32) = [x]
+  let singleton (x: i32) = [x,x,x]
   let first (x: intvec) = x[0]
 }
 

@@ -81,7 +81,7 @@ import qualified Futhark.FreshNames
 -- instance for this type produces a human-readable description.
 data TypeError = TypeError SrcLoc String
 
-unexpectedType :: MonadTypeChecker m => SrcLoc -> TypeBase () () -> [TypeBase () ()] -> m a
+unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =
   throwError $ TypeError loc $
   "Type of expression at " ++ locStr loc ++
@@ -182,8 +182,9 @@ localEnv env = local $ \ctx ->
 -- | A piece of information that describes what process the type
 -- checker currently performing.  This is used to give better error
 -- messages.
-data BreadCrumb = MatchingTypes (TypeBase () ()) (TypeBase () ())
+data BreadCrumb = MatchingTypes StructType StructType
                 | MatchingFields Name
+                | Matching String
 
 instance Show BreadCrumb where
   show (MatchingTypes t1 t2) =
@@ -192,6 +193,8 @@ instance Show BreadCrumb where
     where indent = intercalate "\n" . map ("  "++) . lines
   show (MatchingFields field) =
     "When matching types of record field " ++ quote (pretty field) ++ "."
+  show (Matching s) =
+    s
 
 -- | Tracking breadcrumbs to give a kind of "stack trace" in errors.
 class Monad m => MonadBreadCrumbs m where

@@ -75,6 +75,7 @@ module Language.Futhark.Attributes
   , sortFields
   , sortConstrs
   , isTypeParam
+  , isSizeParam
   , combineTypeShapes
   , unscopeType
   , onRecordField
@@ -336,6 +337,9 @@ isTypeParam :: TypeParamBase vn -> Bool
 isTypeParam TypeParamType{}       = True
 isTypeParam TypeParamDim{}        = False
 
+isSizeParam :: TypeParamBase vn -> Bool
+isSizeParam = not . isTypeParam
+
 -- | Combine the shape information of types as much as possible. The first
 -- argument is the orignal type and the second is the type of the transformed
 -- expression. This is necessary since the original type may contain additional
@@ -448,51 +452,44 @@ typeOf (RecordLit fs _) =
           M.singleton (baseName name) $ t
           `addAliases` S.insert (AliasBound name)
 typeOf (ArrayLit _ (Info t) _) = t
-typeOf (StringLit _ _) =
-  Array mempty Unique (Prim (Unsigned Int8)) (ShapeDecl [AnyDim])
-typeOf (Range _ _ _ (Info t) _) = t
-typeOf (BinOp _ _ _ _ (Info t) _) = t
+typeOf (StringLit vs _) =
+  Array mempty Unique (Prim (Unsigned Int8))
+  (ShapeDecl [ConstDim $ genericLength vs])
+typeOf (Range _ _ _ (Info t, _) _) = t
+typeOf (BinOp _ _ _ _ (Info t) _ _) = t
 typeOf (Project _ _ (Info t) _) = t
-typeOf (If _ _ _ (Info t) _) = t
+typeOf (If _ _ _ (Info t, _) _) = t
 typeOf (Var _ (Info t) _) = t
-typeOf (Ascript _ _ (Info t) _) = t
-typeOf (Apply _ _ _ (Info t) _) = t
+typeOf (Ascript e _ _) = typeOf e
+typeOf (Coerce _ _ (Info t, _) _) = t
+typeOf (Apply _ _ _ (Info t, _) _) = t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ _ _ (Info t) _) = t
+typeOf (LetPat _ _ _ (Info t, _) _) = t
 typeOf (LetFun name _ body _) = unscopeType (S.singleton name) $ typeOf body
 typeOf (LetWith _ _ _ _ _ (Info t) _) = t
-typeOf (Index _ _ (Info t) _) = t
+typeOf (Index _ _ (Info t, _) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
-typeOf (DoLoop pat _ form _ _) =
-  -- We set all of the uniqueness to be unique.  This is intentional,
-  -- and matches what happens for function calls.  Those arrays that
-  -- really *cannot* be consumed will alias something unconsumable,
-  -- and will be caught that way.
-  second (`S.difference` S.map AliasBound bound_here) $
-  patternType pat `setUniqueness` Unique
-  where bound_here = S.map identName (patternIdents pat) <> form_bound
-        form_bound =
-          case form of
-            For v _ -> S.singleton $ identName v
-            ForIn forpat _ -> S.map identName (patternIdents forpat)
-            While{} -> mempty
+typeOf (DoLoop _ _ _ _ _ (Info (t, _)) _) = t
 typeOf (Lambda params _ _ (Info (als, t)) _) =
   unscopeType bound_here $ foldr (arrow . patternParam) t params `setAliases` als
-  where bound_here = S.map identName (mconcat $ map patternIdents params)
+  where bound_here = S.map identName (mconcat $ map patternIdents params) `S.difference`
+                     S.fromList (mapMaybe (named . patternParam) params)
         arrow (px, tx) y = Scalar $ Arrow () px tx y
+        named (Named x, _) = Just x
+        named (Unnamed, _) = Nothing
 typeOf (OpSection _ (Info t) _) =
   t
-typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret) _)  =
+typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret, _) _)  =
   foldFunType [fromStruct pt2] ret
 typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
   foldFunType [fromStruct pt1] ret
 typeOf (ProjectSection _ (Info t) _) = t
 typeOf (IndexSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _)  = t
-typeOf (Match _ cs (Info t) _) =
+typeOf (Match _ cs (Info t, _) _) =
   unscopeType (foldMap unscopeSet cs) t
   where unscopeSet (CasePat p _ _) = S.map identName $ patternIdents p
 
