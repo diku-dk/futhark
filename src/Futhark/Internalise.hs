@@ -303,7 +303,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       forM flat_arrs $ \flat_arr -> do
         flat_arr_t <- lookupType flat_arr
         let new_shape' = reshapeOuter (map (DimNew . constant) new_shape)
-                         1 $ arrayShape flat_arr_t
+                         1 $ I.arrayShape flat_arr_t
         letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
 
   | otherwise = do
@@ -1011,7 +1011,7 @@ internaliseHist desc rf hist op ne buckets img loc = do
 
   -- Generate an assertion and reshapes to ensure that buckets' and
   -- img' are the same size.
-  b_shape <- arrayShape <$> lookupType buckets'
+  b_shape <- I.arrayShape <$> lookupType buckets'
   let b_w = shapeSize 0 b_shape
   cmp <- letSubExp "bucket_cmp" $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) b_w w_img
   c <- assertingOne $
@@ -1412,7 +1412,7 @@ isOverloadedFunction qname args loc = do
       certifying dim_ok $ forM arrs $ \arr' -> do
         arr_t <- lookupType arr'
         letSubExp desc $ I.BasicOp $
-          I.Reshape (reshapeOuter [DimNew n', DimNew m'] 1 $ arrayShape arr_t) arr'
+          I.Reshape (reshapeOuter [DimNew n', DimNew m'] 1 $ I.arrayShape arr_t) arr'
 
     handle [arr] "flatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
@@ -1422,7 +1422,7 @@ isOverloadedFunction qname args loc = do
             m = arraySize 1 arr_t
         k <- letSubExp "flat_dim" $ I.BasicOp $ I.BinOp (Mul Int32) n m
         letSubExp desc $ I.BasicOp $
-          I.Reshape (reshapeOuter [DimNew k] 2 $ arrayShape arr_t) arr'
+          I.Reshape (reshapeOuter [DimNew k] 2 $ I.arrayShape arr_t) arr'
 
     handle [TupLit [x, y] _] "concat" = Just $ \desc -> do
       xs <- internaliseExpToVars "concat_x" x
