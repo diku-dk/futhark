@@ -10,5 +10,5 @@ let main: [][]i32 =
   let a = map (+1) (iota(n))
   let b = unflatten 3 3 a
   let c = transpose b in
-  map  (\(row: []i32): []i32  ->
+  map  (\(row: []i32) ->
          map  (*2) row) c

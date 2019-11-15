@@ -34,10 +34,10 @@ let xorInds [num_bits] (n: i32) (dir_vs: [num_bits]i32): i32 =
                         ) (zip (dir_vs) (iota(num_bits)) ) in
     reduce (^) 0 (reldv_vals )
 
-let sobolIndI (dir_vs:  [][]i32, n: i32 ): []i32 =
+let sobolIndI [len][num_bits] (dir_vs: [len][num_bits]i32, n: i32 ): [len]i32 =
     map (xorInds(n)) (dir_vs )
 
-let sobolIndR [num_bits] (dir_vs:  [][num_bits]i32, n: i32 ): []f32 =
+let sobolIndR [k][num_bits] (dir_vs: [k][num_bits]i32, n: i32 ): []f32 =
     let divisor = 2.0 ** r32(num_bits)
     let arri    = sobolIndI( dir_vs, n )     in
         map (\x -> r32(x) / divisor) arri
@@ -59,7 +59,7 @@ let recM [len][num_bits] (sob_dirs:  [len][num_bits]i32, i: i32 ): [len]i32 =
   let bit= index_of_least_significant_0(num_bits,i) in
   map (\(row: []i32): i32 -> unsafe row[bit]) (sob_dirs )
 
-let sobolChunk [len][num_bits] (dir_vs: [len][num_bits]i32, n: i32, chunk: i32, sobvctsz: i32): [chunk][sobvctsz]f32 =
+let sobolChunk [len][num_bits] (dir_vs: [len][num_bits]i32) (n: i32) (chunk: i32) (sobvctsz: i32): [chunk][len]f32 =
   let sob_fact= 1.0 / r32(1 << num_bits)
   let sob_beg = sobolIndI(dir_vs, n+1)
   let contrbs = map (\(k: i32): [len]i32  ->
@@ -67,21 +67,19 @@ let sobolChunk [len][num_bits] (dir_vs: [len][num_bits]i32, n: i32, chunk: i32, 
                         if(k==0) then sobolIndI(dir_vs, n+1)
                         else recM(dir_vs, k+n)
                    ) (iota(chunk) )
-  let vct_ints= scan (\(x: []i32) (y: []i32): []i32  ->
-                        map2 (^) x y
-                    ) (replicate len 0) contrbs in
-  map (\(xs: []i32): [len]f32  ->
+  let vct_ints= scan (\x y -> map2 (^) x y) (replicate len 0) contrbs in
+  map (\xs: [len]f32  ->
              map  (\(x: i32): f32  ->
                      r32(x) * sob_fact
                  ) xs
-         ) (vct_ints)
+         ) vct_ints
 
-let main [num_bits]
+let main [k][num_bits]
          (num_dates:  i32) (num_und: i32) (num_mc_it: i32)
-         (dir_vs_nosz: [][num_bits]i32): f32 =
+         (dir_vs_nosz: [k][num_bits]i32): f32 =
   let sobvctsz  = num_dates*num_und
-  let dir_vs    = dir_vs_nosz : [sobvctsz][num_bits]i32
-  let sobol_mat = map_stream (\chunk (ns: [chunk]i32): [][sobvctsz]f32 ->
-                                sobolChunk(dir_vs, unsafe ns[0], chunk, sobvctsz))
-                             (iota(num_mc_it) )
-  in reduce  (+) (0.0) (map  (\(row: []f32): f32  -> reduce (+) (0.0) row) (sobol_mat ) )
+  let dir_vs    = dir_vs_nosz :> [sobvctsz][num_bits]i32
+  let sobol_mat = map_stream (\chunk (ns: [chunk]i32): [chunk][sobvctsz]f32 ->
+                                sobolChunk dir_vs (unsafe ns[0]) chunk sobvctsz
+                           ) (iota(num_mc_it) ) in
+  reduce  (+) (0.0) (map  (\(row: []f32): f32  -> reduce (+) (0.0) row) (sobol_mat ) )

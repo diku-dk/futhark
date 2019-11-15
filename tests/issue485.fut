@@ -6,6 +6,6 @@
 
 let main (n: i32) (m: i32) =
   let xs = iota n
-  let ys = xs : [m]i32 -- now ys aliases xs
-  let vs = map (\i -> unsafe xs[(i+2)%n]) (iota m) -- read from xss
+  let ys = xs : *[n]i32 -- now ys aliases xs
+  let vs = map (\i -> unsafe xs[(i+2)%n]) (iota n) -- read from xss
   in scatter ys (iota n) vs -- consume xs

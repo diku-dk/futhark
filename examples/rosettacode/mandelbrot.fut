@@ -37,8 +37,7 @@ let divergence(depth: i32, c0: complex): i32 =
      (addComplex(c0, multComplex(c, c)),
       i + 1)).1
 
-let mandelbrot(screenX: i32, screenY: i32, depth: i32, view: (f32,f32,f32,f32)): [screenX][screenY]i32 =
-  let (xmin, ymin, xmax, ymax) = view
+let main (screenX: i32) (screenY: i32) (depth: i32) (xmin: f32) (ymin: f32) (xmax: f32) (ymax: f32): [screenX][screenY]i32 =
   let sizex = xmax - xmin
   let sizey = ymax - ymin
   in map (\(x: i32): [screenY]i32  ->
@@ -48,6 +47,3 @@ let mandelbrot(screenX: i32, screenY: i32, depth: i32, view: (f32,f32,f32,f32)):
                   in divergence(depth, c0))
                 (iota screenY))
          (iota screenX)
-
-let main (screenX: i32) (screenY: i32) (depth: i32) (xmin: f32) (ymin: f32) (xmax: f32) (ymax: f32): [screenX][screenY]i32 =
-  mandelbrot(screenX, screenY, depth, (xmin, ymin, xmax, ymax))

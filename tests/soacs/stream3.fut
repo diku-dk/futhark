@@ -9,6 +9,7 @@
 -- Just a fancy way of incrementing iota.
 let main (n: i32) =
   let f k (chunk: [k]i32) =
-    if k == 0 then [] else map (+chunk[0]+1) (iota k)
+    let x = if k == 0 then 0 else unsafe chunk[0]
+    in map (+x+1) (iota k)
   let xs = map_stream f (iota n)
   in (xs[0], xs[n/2], xs[n-1])

@@ -24,6 +24,7 @@ module Language.Futhark.TypeChecker.Types
   )
 where
 
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.Except
 import Control.Monad.State
@@ -35,6 +36,7 @@ import qualified Data.Map.Strict as M
 
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad
+import Language.Futhark.Traversals
 
 -- | @unifyTypes uf t1 t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
@@ -349,7 +351,7 @@ typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
   TypeArgDim (NamedDim $ qualName v) ploc
 typeParamToArg (TypeParamType _ v ploc) =
-  TypeArgType (Scalar (TypeVar () Nonunique (typeName v) [])) ploc
+  TypeArgType (Scalar $ TypeVar () Nonunique (typeName v) []) ploc
 
 -- | Return the shapes used in a given type expression in positive and negative
 -- position, respectively.
@@ -428,45 +430,59 @@ applyType ps t args =
 -- substitution (but which is certainly an overloaded primitive
 -- type!).  The latter is used to remove aliases from types that are
 -- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst t | PrimSubst
+data Subst t = Subst t | PrimSubst | SizeSubst (DimDecl VName)
+  deriving (Show)
 
 instance Functor Subst where
   fmap f (Subst t) = Subst $ f t
   fmap _ PrimSubst = PrimSubst
+  fmap _ (SizeSubst v) = SizeSubst v
 
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
 class Substitutable a where
-  applySubst :: (VName -> Maybe (Subst (TypeBase () ()))) -> a -> a
-
-instance Substitutable (TypeBase () ()) where
-  applySubst = substTypesAny
-
-instance Substitutable (TypeBase () Aliasing) where
-  applySubst = substTypesAny . (fmap (fmap fromStruct).)
+  applySubst :: (VName -> Maybe (Subst StructType)) -> a -> a
 
 instance Substitutable (TypeBase (DimDecl VName) ()) where
-  applySubst = substTypesAny . (fmap (fmap vacuousShapeAnnotations).)
+  applySubst = substTypesAny
 
 instance Substitutable (TypeBase (DimDecl VName) Aliasing) where
-  applySubst = substTypesAny . (fmap (fmap (vacuousShapeAnnotations . fromStruct)).)
+  applySubst = substTypesAny . (fmap (fmap fromStruct).)
+
+instance Substitutable (DimDecl VName) where
+  applySubst f (NamedDim (QualName _ v))
+    | Just (SizeSubst d) <- f v = d
+  applySubst _ d = d
+
+instance Substitutable d => Substitutable (ShapeDecl d) where
+  applySubst f = fmap $ applySubst f
+
+instance Substitutable Pattern where
+  applySubst f = runIdentity . astMap mapper
+    where mapper = ASTMapper { mapOnExp = return
+                             , mapOnName = return
+                             , mapOnQualName = return
+                             , mapOnStructType = return . applySubst f
+                             , mapOnPatternType = return . applySubst f
+                             }
 
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
-substTypesAny :: (ArrayDim dim, Monoid as) =>
-                 (VName -> Maybe (Subst (TypeBase dim as)))
-              -> TypeBase dim as -> TypeBase dim as
+substTypesAny :: Monoid as =>
+                 (VName -> Maybe (Subst (TypeBase (DimDecl VName) as)))
+              -> TypeBase (DimDecl VName) as -> TypeBase (DimDecl VName) as
 substTypesAny lookupSubst ot = case ot of
   Array als u et shape ->
-    arrayOf (substTypesAny lookupSubst' (Scalar et)) shape u `setAliases` als
+    arrayOf (substTypesAny lookupSubst' (Scalar et))
+    (applySubst lookupSubst' shape) u `setAliases` als
   Scalar (Prim t) -> Scalar $ Prim t
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
   Scalar (TypeVar als u v targs) ->
     case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
-      Just (Subst t) -> t `setUniqueness` u `addAliases` (<>als)
+      Just (Subst t) -> substTypesAny lookupSubst $ t `setUniqueness` u `addAliases` (<>als)
       Just PrimSubst -> Scalar $ TypeVar mempty u v $ map subsTypeArg targs
-      Nothing -> Scalar $ TypeVar als u v $ map subsTypeArg targs
+      _ -> Scalar $ TypeVar als u v $ map subsTypeArg targs
   Scalar (Record ts) -> Scalar $ Record $ fmap (substTypesAny lookupSubst) ts
   Scalar (Arrow als v t1 t2) ->
     Scalar $ Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
@@ -475,6 +491,7 @@ substTypesAny lookupSubst ot = case ot of
 
   where subsTypeArg (TypeArgType t loc) =
           TypeArgType (substTypesAny lookupSubst' t) loc
-        subsTypeArg t = t
+        subsTypeArg (TypeArgDim v loc) =
+          TypeArgDim (applySubst lookupSubst' v) loc
 
         lookupSubst' = fmap (fmap $ second (const ())) . lookupSubst

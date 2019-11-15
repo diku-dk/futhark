@@ -299,7 +299,7 @@ runInterpreter m = runF m (return . Right) intOp
 
       let top = NE.head callstack
           ctx = I.stackFrameCtx top
-          tenv = I.typeEnv $ I.ctxEnv ctx
+          tenv = I.typeCheckerEnv $ I.ctxEnv ctx
           breaking = Breaking callstack 0
 
       -- Are we supposed to skip this breakpoint?  Also, We do not
@@ -387,7 +387,7 @@ frameCommand which = do
       | frame:_ <- NE.drop i stack -> do
           let breaking = Breaking stack i
               ctx = I.stackFrameCtx frame
-              tenv = I.typeEnv $ I.ctxEnv ctx
+              tenv = I.typeCheckerEnv $ I.ctxEnv ctx
           modify $ \s -> s { futharkiEnv = (tenv, ctx)
                            , futharkiBreaking = Just breaking
                            }

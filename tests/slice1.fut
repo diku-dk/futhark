@@ -6,7 +6,7 @@
 -- input { [[1,2,3],[4,5,6]] 0 3 }
 -- output { [[1,2,3],[4,5,6]] }
 -- input { [[1,2,3],[4,5,6]] 1 1 }
--- output { empty([0][0]i32) }
+-- output { empty([2][0]i32) }
 -- input { [[1,2,3],[4,5,6]] 1 0 }
 -- error: Index \[0:2, 1:0\] out of bounds for array of shape \[2\]\[3\].
 

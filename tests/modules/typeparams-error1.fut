@@ -8,8 +8,8 @@ module type MT = {
 }
 
 module M1: MT = {
-  type vector 'a = []a
-  type i32matrix = [][]f32
+  type vector 'a = [2]a
+  type i32matrix = [][2]f32
 }
 
 let main() = 2

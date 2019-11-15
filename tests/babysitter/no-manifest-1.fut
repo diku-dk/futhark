@@ -17,7 +17,7 @@ let gauss_jordan [nm] (n:i32) (m:i32) (A: *[nm]f32): [nm]f32 =
                                 then unsafe ( A[(k+1)*m+j] - A[(k+1)*m+i] * x )
                                 else x      -- irow case
                    ) (iota nm)
-      in  scatter A (iota (n*m)) A'
+      in  scatter A (iota nm) A'
 
 let mat_inv [n] (A: [n][n]f32): [n][n]f32 =
     let m = 2*n
@@ -34,7 +34,7 @@ let mat_inv [n] (A: [n][n]f32): [n][n]f32 =
     let Ap' = unflatten n m (gauss_jordan n m Ap)
 
     -- Drop the identity matrix at the front.
-    in Ap'[0:n,n:n * 2]
+    in Ap'[0:n,n:n * 2] :> [n][n]f32
 
 let main [m][n] (X : [m][n][n]f32) : [m][n][n]f32 =
   map mat_inv X

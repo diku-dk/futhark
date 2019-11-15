@@ -242,8 +242,8 @@ of the function::
 
 Hindley-Milner-style type inference is supported.  A parameter may be
 given a type with the notation ``(name: type)``.  Functions may not be
-recursive.  Optionally, the programmer may put *shape declarations* in
-the return type and parameter types; see `Shape Declarations`_.  A
+recursive.  The programmer may put *size declarations* in
+the return type and parameter types; see `Size Types`_.  A
 function can be *polymorphic* by using type parameters, in the same
 way as for `Type Abbreviations`_::
 
@@ -339,41 +339,10 @@ A named value/constant can be declared as follows::
 
 The definition can be an arbitrary expression, including function
 calls and other values, although they must be in scope before the
-value is defined.
-
-Shape Declarations
-~~~~~~~~~~~~~~~~~~
-
-Whenever a pattern occurs (in ``let``, ``loop``, and function
-parameters), as well as in return types, *shape declarations* may be
-used to express invariants about the shapes of arrays
-that are accepted or produced by the function.  For example::
-
-  let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
-    map (+) a b
-
-We use a *shape parameter*, ``[n]``, to explicitly quantify the names
-of shapes.  The ``[n]`` parameter need not be explicitly passed when
-calling ``f``.  Rather, its value is implicitly deduced from the
-arguments passed for the value parameters.  Any size parameter must be
-used in a value parameter.  This is an error::
-
-  let f [n] (x: i32) = n
-
-A shape declaration can also be an integer constant (with no suffix).
-The dimension names bound can be used as ordinary variables within the
-scope of the parameters.  If a function is called with arguments, or
-returns a value, that does not fulfill the shape constraints, the
-program will fail with a runtime error.  Likewise, if a pattern with
-shape declarations is attempted bound to a value that does not fulfill
-the invariants, the program will fail with a runtime error.  For
-example, this will fail::
-
-  let x: [3]i32 = iota 2
-
-While this will succeed and bind ``n`` to ``2``::
-
-  let [n] x: [n]i32 = iota 2
+value is defined.  A constant value may not have a unique type (see
+`In-place updates`_).  If the return type contains any anonymous sizes
+(see `Size types`_), new existential sizes will be constructed for
+them.
 
 Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
@@ -841,8 +810,7 @@ Binding Expressions
 
 Evaluate ``e`` and bind the result to the irrefutable pattern ``pat``
 (see :ref:`patterns`) while evaluating ``body``.  The ``in`` keyword
-is optional if ``body`` is a ``let`` expression. See also `Shape
-Declarations`_.
+is optional if ``body`` is a ``let`` expression.
 
 ``let a[i] = v in body``
 ........................................
@@ -858,8 +826,7 @@ Syntactic sugar for ``let a = a with [i] = v in a``.
 Bind ``f`` to a function with the given parameters and definition
 (``e``) and evaluate ``body``.  The function will be treated as
 aliasing any free variables in ``e``.  The function is not in scope of
-itself, and hence cannot be recursive.  See also `Shape
-Declarations`_.
+itself, and hence cannot be recursive.
 
 ``loop pat = initial for x in a do loopbody``
 .............................................
@@ -876,8 +843,6 @@ the pattern are taken from equivalently named variables in the
 environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 = ...``.
 
-See also `Shape Declarations`_.
-
 ``loop pat = initial for x < n do loopbody``
 ............................................
 
@@ -892,8 +857,6 @@ Equivalent to ``loop (pat = initial) for x in [0..1..<n] do loopbody``.
    evaluating ``loopbody``, and repeat the step.
 
 3. Return the final value of ``pat``.
-
-See also `Shape Declarations`_.
 
 ``match x case p1 -> e1 case p2 -> e2``
 .......................................
@@ -979,6 +942,140 @@ where their inputs are bound.  The same goes when constructing sum
 types, as Futhark cannot assume that a given constructor only belongs
 to a single type.  Further, unique types (see `In-place updates`_)
 must be explicitly annotated.
+
+.. _size-types:
+
+Size Types
+----------
+
+Futhark supports a simple system of size-dependent types that
+statically verifies that the sizes of arrays passed to a function are
+compatible.  The focus is on simplicity, not completeness.
+
+Whenever a pattern occurs (in ``let``, ``loop``, and function
+parameters), as well as in return types, *size declarations* may be
+used to express invariants about the shapes of arrays that are
+accepted or produced by the function.  For example::
+
+  let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
+    map (+) a b
+
+We use a *size parameter*, ``[n]``, to explicitly quantify the names
+of shapes.  The ``[n]`` parameter is not explicitly passed when
+calling ``f``.  Rather, its value is implicitly deduced from the
+arguments passed for the value parameters.  An array can contain
+*anonymous dimensions*, e.g. ``[]i32``, for which the type checker
+will invent new size parameters, which ensures that all sizes have a
+(symbolic) size.
+
+A size declaration can also be an integer constant (with no suffix).
+Size parameters can be used as ordinary variables within the scope of
+the parameters.  The type checker verifies that the program obeys any
+constraints imposed by size declarations.
+
+*Size-dependent types* are supported, as the names of parameters can
+be used in the return type of a function::
+
+  let replicate 't (n: i32) (x: t): [n]t = ...
+
+An application ``replicate 10 0`` will have type ``[10]i32``.
+
+Since sizes must be constants or variables, there are many cases where
+the type checker cannot assign a precise size to the result of some
+operation.  For example, the type of ``concat`` should conceptually be::
+
+  val concat [n] [m] 't : [n]t -> [m]t -> [n+m]t
+
+But this is not precently allowed.  Instead, the return type contains
+an anonymous size::
+
+  val concat [n] [m] 't : [n]t -> [m]t -> []t
+
+When an application ``concat xs ys`` is found, the result will be of
+type ``[k]t``, where ``k`` is a fresh *existential* size that is
+considered different from every other size in the program.
+
+Generally, existential sizes are constructed whenever the true size
+cannot be expressed.  Either because it is too complicated
+(e.g. ``replicate (x+y) 0``), or because the variable it refers to
+goes out of scope::
+
+  let c = a + b
+  in replicate c 0
+
+Similarly, existential sizes are constructed for ``if`` expressions
+where the branches do not return values of the same size, and for
+``loop`` expressions where the size of the loop parameters is not
+invariant.
+
+Type ascription can be used to perform a runtime-checked coercion of
+one size to another.  Since size declarations can refer only to
+variables and constants, this is necessary when writing more
+complicated size functions::
+
+  let concat_to 'a (m: i32) (a: []a) (b: []a) : [m]a =
+    a ++ b : [m]a
+
+Only expression-level type annotations give rise to run-time checks.
+Despite their similar syntax, parameter and return type annotations
+must be valid at compile-time, or type checking will fail.
+
+Restrictions due to constructivity
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Conceptually, size parameters are assigned their value by reading the
+sizes of concrete values passed along as parameters.  This means that
+any size parameter must be used as the size of some non-functional
+parameter, as functions do not on their own have sizes.  This is an
+error::
+
+  let f [n] (x: i32) = n
+
+Similarly, this is also an error, because ``n`` is not used as the
+size of an array value::
+
+  let f [n] (g: [n]i32 -> [n]i32) = ...
+
+Array literals
+..............
+
+When constructing an *empty* array, the compiler must still be able to
+determine the element size of the array at run-time.  Concretely, if
+the element type is polymorphic, a function parameter of that
+polymorphic type (or an array, record, or sum containing it) must
+exist.  This is illegal::
+
+  let empty 'a (x: i32) = (x, [] : [0]a)
+
+This restriction does not exist for *non-empty* array literals,
+because in those cases the actual provided elements have a size.
+
+Sum types
+.........
+
+When constructing a value of a sum type, the compiler must still be
+able to determine the size of the constructors that are *not* used.
+This is illegal::
+
+  type sum = #foo ([]i32) | #bar ([]i32)
+
+  let main (xs: *[]i32) =
+    let v : sum = #foo xs
+    in xs
+
+Abstract types
+..............
+
+When matching a module with a module type (see :ref:`module-system`),
+a non-lifted abstract type (i.e. one that is declared with ``type``
+rather than ``type^``) may not be implemented by a type abbreviation
+that contains any anonymous sizes.  This is to ensure that if we have
+the following::
+
+  module m : { type t } = ...
+
+Then we can construct an array of values of type ``m.t`` without
+worrying about constructing an irregular array.
 
 .. _in-place-updates:
 
