@@ -60,7 +60,9 @@ type FunInfo = (Name, ConstParams, Closure,
 
 type FunTable = M.Map VName FunInfo
 
-type ConstInfo = (Name, ConstParams, [(SubExp,Type)] -> Maybe [DeclExtType])
+type ConstInfo = (Name, ConstParams,
+                  [(SubExp,Type)] -> Maybe [DeclExtType],
+                  [SubExp] -> InternaliseM ())
 
 type ConstTable = M.Map VName ConstInfo
 

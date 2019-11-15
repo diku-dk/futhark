@@ -452,7 +452,7 @@ checkTypeBind (TypeBind name tps (TypeDecl t NoInfo) doc loc) =
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
-  (fname', tparams', params', maybe_tdecl', rettype, body') <-
+  (fname', tparams', params', maybe_tdecl', rettype, retext, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let (rettype_params, rettype') = unfoldFunType rettype
@@ -485,7 +485,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                  , envNameMap =
                      M.singleton (Term, fname) $ qualName fname'
                  },
-           ValBind entry' fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
+           ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc loc)
 
 nastyType :: Monoid als => TypeBase dim als -> Bool
 nastyType (Scalar Prim{}) = False

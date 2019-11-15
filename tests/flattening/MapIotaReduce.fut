@@ -7,6 +7,7 @@
 -- }
 let main (xs: []i32): []i32 =
   map (\(x: i32): i32  ->
+         unsafe
          let tmp = 0..<x in
          reduce (+) 0 tmp
      ) xs

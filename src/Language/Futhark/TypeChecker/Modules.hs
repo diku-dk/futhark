@@ -5,7 +5,7 @@ module Language.Futhark.TypeChecker.Modules
   , refineEnv
   , applyFunctor
   ) where
-
+import Debug.Trace
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
 import Data.List
@@ -21,10 +21,9 @@ import Prelude hiding (abs, mod)
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad
-import Language.Futhark.TypeChecker.Unify (doUnification)
+import Language.Futhark.TypeChecker.Unify (Rigidity(..), doUnification)
 import Language.Futhark.TypeChecker.Types
 import Futhark.Util.Pretty (Pretty)
-
 
 substituteTypesInMod :: TypeSubs -> Mod -> Mod
 substituteTypesInMod substs (ModEnv e) =
@@ -49,15 +48,7 @@ substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
 substituteTypesInBoundV substs (BoundV tps t) =
   BoundV tps (substituteTypes substs t)
 
-allNamesInMTy :: MTy -> S.Set VName
-allNamesInMTy (MTy abs mod) =
-  S.fromList (map qualLeaf $ M.keys abs) <> allNamesInMod mod
-
-allNamesInMod :: Mod -> S.Set VName
-allNamesInMod (ModEnv env) = allNamesInEnv env
-allNamesInMod ModFun{} = mempty
-
--- All names defined anywhere in the env.
+-- | All names defined anywhere in the 'Env'.
 allNamesInEnv :: Env -> S.Set VName
 allNamesInEnv (Env vtable ttable stable modtable _names) =
   S.fromList (M.keys vtable ++ M.keys ttable ++
@@ -66,6 +57,14 @@ allNamesInEnv (Env vtable ttable stable modtable _names) =
            map allNamesInMod (M.elems modtable) ++
            map allNamesInType (M.elems ttable))
   where allNamesInType (TypeAbbr _ ps _) = S.fromList $ map typeParamName ps
+
+allNamesInMod :: Mod -> S.Set VName
+allNamesInMod (ModEnv env) = allNamesInEnv env
+allNamesInMod ModFun{} = mempty
+
+allNamesInMTy :: MTy -> S.Set VName
+allNamesInMTy (MTy abs mod) =
+  S.fromList (map qualLeaf $ M.keys abs) <> allNamesInMod mod
 
 newNamesForMTy :: MTy -> TypeM (MTy, M.Map VName VName)
 newNamesForMTy orig_mty = do
@@ -125,7 +124,8 @@ newNamesForMTy orig_mty = do
 
         substituteInType :: StructType -> StructType
         substituteInType (Scalar (TypeVar () u (TypeName qs v) targs)) =
-          Scalar $ TypeVar () u (TypeName (map substitute qs) $ substitute v) $ map substituteInTypeArg targs
+          Scalar $ TypeVar () u (TypeName (map substitute qs) $ substitute v) $
+          map substituteInTypeArg targs
         substituteInType (Scalar (Prim t)) =
           Scalar $ Prim t
         substituteInType (Scalar (Record ts)) =
@@ -195,7 +195,6 @@ paramsMatch ps1 ps2 = length ps1 == length ps2 && all match (zip ps1 ps2)
         match (TypeParamDim _ _, TypeParamDim _ _) = True
         match _ = False
 
-
 findBinding :: (Env -> M.Map VName v)
             -> Namespace -> Name
             -> Env
@@ -236,6 +235,40 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
           unlines ["Module defines",
                    indent $ ppTypeAbbr abs name mod_t,
                    "but module type requires this type to be non-functional."]
+
+resolveMTyNames :: MTy -> MTy
+                -> M.Map VName (QualName VName)
+resolveMTyNames = resolveMTyNames'
+  where resolveMTyNames' (MTy _mod_abs mod) (MTy _sig_abs sig) =
+          resolveModNames mod sig
+
+        resolveModNames (ModEnv mod_env) (ModEnv sig_env) =
+          resolveEnvNames mod_env sig_env
+        resolveModNames (ModFun mod_fun) (ModFun sig_fun) =
+          resolveModNames (funSigMod mod_fun) (funSigMod sig_fun) <>
+          resolveMTyNames' (funSigMty mod_fun) (funSigMty sig_fun)
+        resolveModNames _ _ =
+          mempty
+
+        resolveEnvNames mod_env sig_env =
+          let mod_substs = resolve Term mod_env $ envModTable sig_env
+              onMod (modname, mod_env_mod) =
+                case M.lookup modname mod_substs of
+                  Just (QualName _ modname')
+                    | Just sig_env_mod <-
+                        M.lookup modname' $ envModTable mod_env ->
+                      resolveModNames mod_env_mod sig_env_mod
+                  _ -> mempty
+          in mconcat [ resolve Term mod_env $ envVtable sig_env
+                     , resolve Type mod_env $ envVtable sig_env
+                     , resolve Signature mod_env $ envVtable sig_env
+                     , mod_substs
+                     , mconcat $ map onMod $ M.toList $ envModTable sig_env
+                     ]
+
+        resolve namespace mod_env = M.mapMaybeWithKey resolve'
+          where resolve' name _ =
+                  M.lookup (namespace, baseName name) $ envNameMap mod_env
 
 missingType :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingType loc name =
@@ -278,14 +311,16 @@ ppTypeAbbr abs name (ps, t) =
                    map typeParamToArg ps == args -> ""
                _ -> " = " ++ pretty t
 
-
 -- Return new renamed/abstracted env, as well as a mapping from
 -- names in the signature to names in the new env.  This is used for
 -- functor application.  The first env is the module env, and the
 -- second the env it must match.
 matchMTys :: MTy -> MTy -> SrcLoc
           -> Either TypeError (M.Map VName VName)
-matchMTys = matchMTys' mempty
+matchMTys orig_mty orig_mty_sig =
+  matchMTys' (M.map (DimSub . NamedDim) $
+              resolveMTyNames orig_mty orig_mty_sig)
+  orig_mty orig_mty_sig
   where
     matchMTys' :: TypeSubs -> MTy -> MTy -> SrcLoc
                -> Either TypeError (M.Map VName VName)
@@ -311,9 +346,9 @@ matchMTys = matchMTys' mempty
     matchMods :: TypeSubs -> Mod -> Mod -> SrcLoc
               -> Either TypeError (M.Map VName VName)
     matchMods _ ModEnv{} ModFun{} loc =
-      Left $ TypeError loc "Cannot match non-parametric module with paramatric module type."
+      Left $ TypeError loc "Cannot match non-parametric module with parametric module type."
     matchMods _ ModFun{} ModEnv{} loc =
-      Left $ TypeError loc "Cannot match parametric module with non-paramatric module type."
+      Left $ TypeError loc "Cannot match parametric module with non-parametric module type."
 
     matchMods abs_subst_to_type (ModEnv mod) (ModEnv sig) loc =
       matchEnvs abs_subst_to_type mod sig loc
@@ -398,29 +433,33 @@ matchMTys = matchMTys' mempty
              -> VName -> BoundV
              -> VName -> BoundV
              -> Either TypeError (VName, VName)
-    matchVal loc spec_name spec_t name t
-      | matchFunBinding loc spec_t t = return (spec_name, name)
-    matchVal loc spec_name spec_v _ v =
-      Left $ TypeError loc $ unlines $
-      ["Module type specifies"] ++
-      map ("  "++) (lines $ ppValBind spec_name spec_v) ++
-      ["but module provides"] ++
-      map ("  "++) (lines $ppValBind spec_name v)
+    matchVal loc spec_name spec_v name v =
+      case matchValBinding loc spec_v v of
+        Nothing -> return (spec_name, name)
+        Just problem ->
+          Left $ TypeError loc $ unlines $
+          ["Module type specifies"] ++
+          map ("  "++) (lines $ ppValBind spec_name spec_v) ++
+          ["but module provides"] ++
+          map ("  "++) (lines $ ppValBind spec_name v) ++
+          maybe [] lines problem
 
-    matchFunBinding :: SrcLoc -> BoundV -> BoundV -> Bool
-    matchFunBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
-      -- Would be nice if we could propagate the actual error here.
+    matchValBinding :: SrcLoc -> BoundV -> BoundV -> Maybe (Maybe String)
+    matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
       case doUnification loc tps
-           (toStructural orig_spec_t) (toStructural orig_t) of
-        Left _ -> False
-        Right t -> t `subtypeOf` toStructural orig_spec_t
+           Nonrigid (toStruct orig_spec_t)
+           Rigid (toStruct orig_t) of
+        Left (TypeError _ err) -> Just $ Just err
+        -- Even if they unify, we still have to verify the uniqueness
+        -- properties.
+        Right t | anyDimShapeAnnotations t `subtypeOf`
+                  anyDimShapeAnnotations orig_spec_t -> Nothing
+                | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =
       unwords $ ["val", prettyName v] ++ map pretty tps ++ [":", pretty t]
 
-applyFunctor :: SrcLoc
-             -> FunSig
-             -> MTy
+applyFunctor :: SrcLoc -> FunSig -> MTy
              -> TypeM (MTy,
                        M.Map VName VName,
                        M.Map VName VName)

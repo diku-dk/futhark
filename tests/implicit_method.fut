@@ -44,7 +44,7 @@
 -- }
 
 
-let tridagSeq [n] (a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
+let tridagSeq [n][m] (a:  [n]f32,b: *[m]f32,c: [m]f32,y: *[m]f32 ): *[m]f32 =
     let (y,b) = loop ((y, b))
       for i < n-1 do
         let i    = i + 1
@@ -63,7 +63,7 @@ let implicitMethod [n][m] (myD:  [m][3]f32,  myDD: [m][3]f32,
                            myMu: [n][m]f32, myVar: [n][m]f32,
                            u: [n][m]f32)
                           (dtInv: f32): *[n][m]f32 =
-  map (\(tup:  ([]f32,[]f32,[]f32) ): *[]f32   ->
+  map (\(tup:  ([]f32,[]f32,[]f32) )   ->
          let (mu_row,var_row,u_row) = tup
          let (a,b,c) = unzip3 (map (\(tup: (f32,f32,[]f32,[]f32)): (f32,f32,f32)  ->
                                    let (mu, var, d, dd) = tup in

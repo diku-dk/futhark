@@ -99,14 +99,13 @@ internaliseDim d =
 
             (Nothing, Nothing, Just [v]) -> return $ I.Free v
 
-            (_, Just (fname, _, _), _) -> do
+            (_, Just (fname, _, _, _), _) -> do
               (i,cm) <- get
               case find ((==fname) . fst) cm of
                 Just (_, known) -> return $ I.Free $ I.Var known
                 Nothing -> do new <- liftInternaliseM $ newVName $ baseString name
                               put (i, (fname,new):cm)
                               return $ I.Free $ I.Var new
-
             _ -> return $ I.Free $ I.Var name
 
 internaliseTypeM :: E.StructType
@@ -142,8 +141,7 @@ internaliseConstructors cs =
                 foldl' f (zip ts [0..], mempty, mempty) c_ts
           in (ts ++ new_ts, M.insert c (i, js) mapping)
           where f (ts', js, new_ts) t
-                  | primType t,
-                    Just (_, j) <- find ((==t) . fst) ts' =
+                  | Just (_, j) <- find ((==t) . fst) ts' =
                       (delete (t, j) ts',
                        js ++ [j],
                        new_ts)
