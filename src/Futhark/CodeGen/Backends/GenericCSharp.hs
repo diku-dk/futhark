@@ -74,7 +74,6 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import Control.Arrow((&&&))
 import Data.Maybe
-import Data.List
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.Primitive hiding (Bool)
@@ -1277,7 +1276,7 @@ compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc,locs)) = do
       onPart (i, Imp.ErrorInt32 x) = (printFormatArg i,) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart (zip ([1..] :: [Integer]) parts)
   stm $ Assert e' $ String ("Error at {0}:\n" <> concat formatstrs) : (String stacktrace : formatargs)
-  where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
+  where stacktrace = prettyStacktrace $ reverse $ map locStr $ loc:locs
         printFormatArg = printf "{%d}"
 
 compileCode (Imp.Call dests fname args) = do
