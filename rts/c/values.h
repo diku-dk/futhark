@@ -191,12 +191,20 @@ static int read_str_empty_array(char *buf, int bufsize,
     return 1;
   }
 
+  shape[0] = 0;
+
   if (!next_token_is(buf, bufsize, "(")) {
     return 1;
   }
 
-  for (int i = 0; i < dims-1; i++) {
+  for (int i = 1; i < dims; i++) {
     if (!next_token_is(buf, bufsize, "[")) {
+      return 1;
+    }
+
+    next_token(buf, bufsize);
+
+    if (sscanf(buf, "%d", &shape[i]) != 1) {
       return 1;
     }
 
@@ -212,10 +220,6 @@ static int read_str_empty_array(char *buf, int bufsize,
 
   if (!next_token_is(buf, bufsize, ")")) {
     return 1;
-  }
-
-  for (int i = 0; i < dims; i++) {
-    shape[i] = 0;
   }
 
   return 0;
@@ -656,7 +660,7 @@ static int write_str_array(FILE *out, const struct primtype_info_t *elem_type, u
     if (len*slice_size == 0) {
       printf("empty(");
       for (int64_t i = 1; i < rank; i++) {
-        printf("[]");
+        printf("[%d]", shape[i]);
       }
       printf("%s", elem_type->type_name);
       printf(")");

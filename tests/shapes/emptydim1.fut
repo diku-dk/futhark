@@ -1,6 +1,6 @@
 -- ==
--- input { empty([]i32) [[1]] } error: .
--- input { [[1]] empty([]i32) } output { [[1]] empty([]i32) }
+-- input { empty([0]i32) [[1]] } error: .
+-- input { [[1]] empty([1]i32) } output { [[1]] empty([1]i32) }
 -- input { [[1]] [[1,2]] } error: .
 -- input { [[1]] [[2]] } output { [[1]] [[2]] }
 

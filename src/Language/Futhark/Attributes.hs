@@ -345,7 +345,7 @@ primValueType (UnsignedValue v) = Unsigned $ intValueType v
 primValueType (FloatValue v)    = FloatType $ floatValueType v
 primValueType BoolValue{}       = Bool
 
-valueType :: Value -> TypeBase () ()
+valueType :: Value -> ValueType
 valueType (PrimValue bv) = Scalar $ Prim $ primValueType bv
 valueType (ArrayValue _ t) = t
 

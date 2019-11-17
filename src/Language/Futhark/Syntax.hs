@@ -33,6 +33,7 @@ module Language.Futhark.Syntax
   , ScalarTypeBase(..)
   , PatternType
   , StructType
+  , ValueType
   , Diet(..)
   , TypeDeclBase (..)
 
@@ -383,6 +384,9 @@ type PatternType = TypeBase (DimDecl VName) Aliasing
 -- information, used for declarations.
 type StructType = TypeBase (DimDecl VName) ()
 
+-- | A value type contains full, manifest size information.
+type ValueType = TypeBase Int32 ()
+
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
 data TypeExp vn = TEVar (QualName vn) SrcLoc
@@ -449,7 +453,7 @@ data Diet = RecordDiet (M.Map Name Diet) -- ^ Consumes these fields in the recor
 -- | Simple Futhark values.  Values are fully evaluated and their type
 -- is always unambiguous.
 data Value = PrimValue !PrimValue
-           | ArrayValue !(Array Int Value) (TypeBase () ())
+           | ArrayValue !(Array Int Value) ValueType
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the full type.
              deriving (Eq, Show)

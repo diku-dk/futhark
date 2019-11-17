@@ -140,7 +140,7 @@ instance PP.Pretty Value where
   ppr v | product (valueShape v) == 0 =
             text "empty" <>
             parens (dims <> ppr (valueElemType v))
-    where dims = mconcat $ replicate (length (valueShape v)-1) $ text "[]"
+    where dims = mconcat $ map (brackets . ppr) $ drop 1 $ valueShape v
   ppr (Int8Value shape vs) = pprArray (UVec.toList shape) vs
   ppr (Int16Value shape vs) = pprArray (UVec.toList shape) vs
   ppr (Int32Value shape vs) = pprArray (UVec.toList shape) vs
@@ -388,31 +388,33 @@ readPrimType t = do
   return (pt, dropSpaces b)
   where (a,b) = BS.span constituent t
 
-readEmptyArrayOfRank :: Int -> BS.ByteString -> Maybe (Value, BS.ByteString)
-readEmptyArrayOfRank r t
+readEmptyArrayOfShape :: [Int] -> BS.ByteString -> Maybe (Value, BS.ByteString)
+readEmptyArrayOfShape shape t
   | Just t' <- symbol '[' t,
-    Just t'' <- symbol ']' t' = readEmptyArrayOfRank (r+1) t''
+    Just (d, t'') <- readIntegral (const Nothing) t',
+    Just t''' <- symbol ']' t'' = readEmptyArrayOfShape (shape++[d]) t'''
+
   | otherwise = do
       (pt, t') <- readPrimType t
       v <- case pt of
-             "i8" -> Just $ Int8Value (UVec.replicate r 0) UVec.empty
-             "i16" -> Just $ Int16Value (UVec.replicate r 0) UVec.empty
-             "i32" -> Just $ Int32Value (UVec.replicate r 0) UVec.empty
-             "i64" -> Just $ Int64Value (UVec.replicate r 0) UVec.empty
-             "u8" -> Just $ Word8Value (UVec.replicate r 0) UVec.empty
-             "u16" -> Just $ Word16Value (UVec.replicate r 0) UVec.empty
-             "u32" -> Just $ Word32Value (UVec.replicate r 0) UVec.empty
-             "u64" -> Just $ Word64Value (UVec.replicate r 0) UVec.empty
-             "f32" -> Just $ Float32Value (UVec.replicate r 0) UVec.empty
-             "f64" -> Just $ Float64Value (UVec.replicate r 0) UVec.empty
-             "bool" -> Just $ BoolValue (UVec.replicate r 0) UVec.empty
+             "i8" -> Just $ Int8Value (UVec.fromList shape) UVec.empty
+             "i16" -> Just $ Int16Value (UVec.fromList shape) UVec.empty
+             "i32" -> Just $ Int32Value (UVec.fromList shape) UVec.empty
+             "i64" -> Just $ Int64Value (UVec.fromList shape) UVec.empty
+             "u8" -> Just $ Word8Value (UVec.fromList shape) UVec.empty
+             "u16" -> Just $ Word16Value (UVec.fromList shape) UVec.empty
+             "u32" -> Just $ Word32Value (UVec.fromList shape) UVec.empty
+             "u64" -> Just $ Word64Value (UVec.fromList shape) UVec.empty
+             "f32" -> Just $ Float32Value (UVec.fromList shape) UVec.empty
+             "f64" -> Just $ Float64Value (UVec.fromList shape) UVec.empty
+             "bool" -> Just $ BoolValue (UVec.fromList shape) UVec.empty
              _  -> Nothing
       return (v, t')
 
 readEmptyArray :: BS.ByteString -> Maybe (Value, BS.ByteString)
 readEmptyArray t = do
   t' <- symbol '(' =<< lexeme "empty" t
-  (v, t'') <- readEmptyArrayOfRank 1 t'
+  (v, t'') <- readEmptyArrayOfShape [0] t'
   t''' <- symbol ')' t''
   return (v, t''')
 
@@ -494,7 +496,8 @@ compareValues1 got expected = maybeHead $ compareValues got expected
 
 compareValue :: Int -> Value -> Value -> [Mismatch]
 compareValue i got_v expected_v
-  | valueShape got_v == valueShape expected_v =
+  | product (valueShape got_v) == 0 && product (valueShape expected_v) == 0
+    || valueShape got_v == valueShape expected_v =
     case (got_v, expected_v) of
       (Int8Value _ got_vs, Int8Value _ expected_vs) ->
         compareNum 1 got_vs expected_vs

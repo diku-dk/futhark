@@ -17,7 +17,8 @@ import Data.Vector.Generic (freeze)
 import System.Console.GetOpt
 import System.Random
 
-import Language.Futhark.Syntax hiding (Value, PrimValue(..), IntValue(..), FloatValue(..))
+import Language.Futhark.Syntax hiding
+  (Value, ValueType, PrimValue(..), IntValue(..), FloatValue(..))
 import Language.Futhark.Attributes (UncheckedTypeExp, namesToPrimTypes)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()

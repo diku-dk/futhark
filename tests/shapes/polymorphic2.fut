@@ -1,5 +1,5 @@
 -- ==
--- input { 2 } output { 2 empty([]i32) }
+-- input { 2 } output { 2 empty([0]i32) }
 
 let empty (x: i32) = (x, [])
 

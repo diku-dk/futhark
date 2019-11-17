@@ -10,7 +10,7 @@
 --          false
 -- }
 -- input { 0 0 }
--- output { empty([]i32) true }
+-- output { empty([0]i32) true }
 
 let main(n: i32) (m: i32): ([][]i32, bool) =
   let ass = map  (\(l: i32): [m]i32  ->

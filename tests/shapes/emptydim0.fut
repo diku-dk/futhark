@@ -1,7 +1,7 @@
 -- ==
--- input { empty([]i32) [[1]] } output { empty([]i32) [[1]] }
--- input { [[1]] empty([]i32) } output { [[1]] empty([]i32) }
--- input { [[1]] [[1,2]] } error: .
--- input { [[1,2]] [[1]] } error: .
+-- input { empty([1]i32) [[1]] } output { empty([1]i32) [[1]] }
+-- input { [[1]] empty([1]i32) } output { [[1]] empty([1]i32) }
+-- compiled input { [[1]] [[1,2]] } error: .
+-- compiled input { [[1,2]] [[1]] } error: .
 
 let main [n] (xs: [][n]i32) (ys: [][n]i32) = (xs, ys)
