@@ -449,7 +449,7 @@ data Diet = RecordDiet (M.Map Name Diet) -- ^ Consumes these fields in the recor
 -- | Simple Futhark values.  Values are fully evaluated and their type
 -- is always unambiguous.
 data Value = PrimValue !PrimValue
-           | ArrayValue !(Array Int Value) ValueType
+           | ArrayValue !(Array Int Value) (TypeBase () ())
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the full type.
              deriving (Eq, Show)
