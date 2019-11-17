@@ -564,13 +564,16 @@ private (T[], int[]) ReadStrArrayEmpty<T>(int rank, string typeName, Func<T> Rea
 {
     ParseSpecificString("empty");
     ParseSpecificChar('(');
-    for (int i = 0; i < rank-1; i++) {
-        ParseSpecificString("[]");
+    int[] shape = new int[rank];
+    for (int i = 1; i < rank; i++) {
+        ParseSpecificString("[");
+        shape[i] = ParseInt();
+        ParseSpecificString("]");
     }
     ParseSpecificString(typeName);
     ParseSpecificChar(')');
 
-    return (new T[1], new int[rank]);
+    return (new T[1], shape);
 }
 
 private (T[], int[]) ReadStrArray<T>(int rank, string typeName, Func<T> ReadStrScalar)

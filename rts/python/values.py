@@ -300,7 +300,9 @@ def read_str_empty_array(f, type_name, rank):
     parse_specific_string(f, 'empty')
     parse_specific_char(f, b'(')
     for i in range(rank):
-        parse_specific_string(f, '[]')
+        parse_specific_string(f, '[')
+        parse_int(f)
+        parse_specific_string(f, ']')
     parse_specific_string(f, type_name)
     parse_specific_char(f, b')')
 
@@ -613,7 +615,8 @@ def write_value_text(v, out=sys.stdout):
     elif type(v) == np.ndarray:
         if np.product(v.shape) == 0:
             tname = numpy_type_to_type_name(v.dtype)
-            out.write('empty({}{})'.format(''.join(['[]' for _ in v.shape[1:]]), tname))
+            out.write('empty({}{})'.format(''.join(['[{}]'.format(d)
+                                                    for d in v.shape[1:]]), tname))
         else:
             first = True
             out.write('[')

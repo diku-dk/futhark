@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * The `empty(t)` notation now requires dimension sizes when `t` is
+    an array (e.g. `empty([]i32)` is no longer allowed, you need
+    for example `empty([0]i32)`).
+
 ### Fixed
 
   * Fixed exponential-time behaviour for certain kernels with large

@@ -940,17 +940,20 @@ ArrayValue :  '[' Value ']'
                   Right v -> return $ ArrayValue (arrayFromList $ $2:$4) $ valueType v
              }
            | id '(' PrimType ')'
-             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) (Scalar (Prim $3))) }
+             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) (arrayOf (Scalar (Prim $3)) (ShapeDecl [0]) Nonunique)) }
            | id '(' RowType ')'
-             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) $3) }
+             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) (arrayOf $3 (ShapeDecl [0]) Nonunique)) }
 
            -- Errors
            | '[' ']'
              {% emptyArrayError $1 }
 
-RowType :: { TypeBase () () }
-RowType : '[' ']' RowType   { arrayOf $3 (rank 1) Nonunique }
-        | '[' ']' PrimType  { arrayOf (Scalar (Prim $3)) (rank 1) Nonunique }
+Dim :: { Int32 }
+Dim : intlit { let L _ (INTLIT num) = $1 in fromInteger num }
+
+RowType :: { ValueType }
+RowType : '[' Dim ']' RowType  { arrayOf $4 (ShapeDecl [$2]) Nonunique }
+        | '[' Dim ']' PrimType { arrayOf (Scalar (Prim $4)) (ShapeDecl [$2]) Nonunique }
 
 Values :: { [Value] }
 Values : Value ',' Values { $1 : $3 }

@@ -132,11 +132,11 @@ entry test_intersperse (x: i32) (xs: []i32) = intersperse x xs
 
 -- ==
 -- entry: test_intercalate
--- input { empty(i32) empty([]i32) } output { empty(i32) }
+-- input { empty(i32) empty([0]i32) } output { empty(i32) }
 -- input { [1,0] [[1,2],[3,4]] } output { [1,2,1,0,3,4] }
 -- input { [1,0] [[1,2],[3,4],[5,6]] } output { [1,2,1,0,3,4,1,0,5,6] }
 
-entry test_intercalate [m] (x: [m]i32) (xs: [][m]i32) = intercalate x xs
+entry test_intercalate [m][n] (x: [m]i32) (xs: [n][m]i32) = intercalate x xs
 
 -- ==
 -- entry: test_foldl

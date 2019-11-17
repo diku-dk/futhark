@@ -5,6 +5,7 @@ module Futhark.CLI.Run (main) where
 
 import Control.Monad.Free.Church
 import Control.Exception
+import Data.Bifunctor (first)
 import Data.Array
 import Data.List
 import Data.Loc
@@ -81,8 +82,9 @@ interpret config fp = do
 putValue :: I.Value -> TypeBase () () -> IO ()
 putValue v t
   | I.isEmptyArray v =
-      putStrLn $ "empty(" ++ pretty (stripArray 1 t) ++ ")"
+      putStrLn $ "empty(" ++ pretty (stripArray 1 t') ++ ")"
   | otherwise = putStrLn $ pretty v
+  where t' = first (const 0) t :: ValueType
 
 convertValue :: Value -> Maybe I.Value
 convertValue (PrimValue p) = Just $ I.ValuePrim p
