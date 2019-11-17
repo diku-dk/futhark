@@ -51,7 +51,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 import Data.Maybe
-import Data.List
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.Primitive hiding (Bool)
@@ -911,9 +910,9 @@ compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc,locs)) = do
       onPart (Imp.ErrorInt32 x) = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   stm $ Assert e' (BinOp "%"
-                   (String $ "Error at " ++ stacktrace ++ ": " ++ concat formatstrs)
+                   (String $ "Error at\n" ++ stacktrace ++ "\n: " ++ concat formatstrs)
                    (Tuple formatargs))
-  where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
+  where stacktrace = prettyStacktrace $ reverse $ map locStr $ loc:locs
 
 compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileArg args

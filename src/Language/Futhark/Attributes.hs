@@ -21,6 +21,7 @@ module Language.Futhark.Attributes
   , progModuleTypes
   , identifierReference
   , identifierReferences
+  , prettyStacktrace
 
   -- * Queries on expressions
   , typeOf
