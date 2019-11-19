@@ -120,7 +120,7 @@ checkTypeExp (TEVar name loc) = do
   case ps of
     [] -> return (TEVar name' loc, t, l)
     _  -> throwError $ TypeError loc $
-          "Type constructor " ++ pretty name ++ " used without any arguments."
+          "Type constructor " ++ quote (pretty name) ++ " used without any arguments."
 checkTypeExp (TETuple ts loc) = do
   (ts', ts_s, ls) <- unzip3 <$> mapM checkTypeExp ts
   return (TETuple ts' loc, tupleRecord ts_s, foldl' max Unlifted ls)
@@ -143,7 +143,7 @@ checkTypeExp (TEArray t d loc) = do
   case (l, arrayOf st (ShapeDecl [d']) Nonunique) of
     (Unlifted, st') -> return (TEArray t' d' loc, st', Unlifted)
     _ -> throwError $ TypeError loc $
-         "Cannot create array with elements of type `" ++ pretty st ++ "` (might be functional)."
+         "Cannot create array with elements of type " ++ quote (pretty st) ++ " (might be functional)."
   where checkDimDecl AnyDim =
           return AnyDim
         checkDimDecl (ConstDim k) =
@@ -153,7 +153,7 @@ checkTypeExp (TEArray t d loc) = do
 checkTypeExp (TEUnique t loc) = do
   (t', st, l) <- checkTypeExp t
   unless (mayContainArray st) $
-    warn loc $ "Declaring `" <> pretty st <> "` as unique has no effect."
+    warn loc $ "Declaring " <> quote (pretty st) <> " as unique has no effect."
   return (TEUnique t' loc, st `setUniqueness` Unique, l)
   where mayContainArray (Scalar Prim{}) = False
         mayContainArray Array{} = True
@@ -290,15 +290,15 @@ checkShapeParamUses getUses tps ps = do
               pos_uses' = pos <> pos_uses
           forM_ neg $ \pv ->
             unless ((pv `notElem` tp_names) || (pv `elem` pos_uses')) $
-            throwError $ TypeError (srclocOf p) $ "Shape parameter `" ++
-            pretty (baseName pv) ++ "` must first be given in " ++
+            throwError $ TypeError (srclocOf p) $ "Shape parameter " ++
+            quote (prettyName pv) ++ " must first be given in " ++
             "a positive position (non-functional parameter)."
           return pos_uses'
         checkUsed uses (TypeParamDim pv loc)
           | pv `elem` uses = return ()
           | otherwise =
-              throwError $ TypeError loc $ "Size parameter `" ++
-              pretty (baseName pv) ++ "` unused."
+              throwError $ TypeError loc $ "Size parameter " ++
+              quote (prettyName pv) ++ " unused."
         checkUsed _ _ = return ()
 
 checkTypeParams :: MonadTypeChecker m =>

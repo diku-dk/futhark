@@ -23,6 +23,8 @@ module Language.Futhark.Core
   , baseName
   , baseString
   , pretty
+  , quote
+
   -- * Special identifiers
   , defaultEntryPoint
 
@@ -150,3 +152,9 @@ instance Eq VName where
 
 instance Ord VName where
   VName _ x `compare` VName _ y = x `compare` y
+
+-- | Enclose a string in the prefered quotes used in error messages.
+-- These are picked to not collide with characters permitted in
+-- identifiers.
+quote :: String -> String
+quote s = "`" ++ s ++ "`"

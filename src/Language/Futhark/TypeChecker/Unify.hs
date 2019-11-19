@@ -432,7 +432,7 @@ mustHaveField usage l t = do
           return t'
       | otherwise ->
           typeError usage $
-          "Attempt to access field " ++ quote (pretty l) ++ "` of value of type " ++
+          "Attempt to access field " ++ quote (pretty l) ++ " of value of type " ++
           quote (pretty (toStructural t)) ++ "."
     _ -> do unify usage (toStructural t) $ Scalar $ Record $ M.singleton l l_type'
             return l_type
