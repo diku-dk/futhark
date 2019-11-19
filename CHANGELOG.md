@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed exponential-time behaviour for certain kernels with large
     arithmetic expressions (#805).
 
+  * `futhark test` and friends no longer crash when reporting some
+    errors (#808).
+
 ## [0.12.3]
 
 ### Added

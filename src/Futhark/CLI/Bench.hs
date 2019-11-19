@@ -51,7 +51,8 @@ runBenchmarks opts paths = do
   -- Otherwise, CI tools and the like may believe we are hung and kill
   -- us.
   hSetBuffering stdout LineBuffering
-  benchmarks <- filter (not . ignored . fst) <$> testSpecsFromPaths paths
+
+  benchmarks <- filter (not . ignored . fst) <$> testSpecsFromPathsOrDie paths
   (skipped_benchmarks, compiled_benchmarks) <-
     partitionEithers <$> pmapIO (compileBenchmark opts) benchmarks
 

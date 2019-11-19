@@ -56,7 +56,7 @@ mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
   where dataget prog dataset = do
           let dir = takeDirectory prog
 
-          runs <- testSpecRuns <$> testSpecFromFile prog
+          runs <- testSpecRuns <$> testSpecFromFileOrDie prog
 
           let exact = filter ((dataset==) . runDescription) runs
               infixes = filter ((dataset `isInfixOf`) . runDescription) runs
