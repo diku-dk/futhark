@@ -12,7 +12,6 @@ module Language.Futhark.Interpreter
   , ExtOp(..)
   , typeEnv
   , Value (ValuePrim, ValueArray, ValueRecord)
-  , mkArray
   , fromTuple
   , isEmptyArray
   ) where
@@ -32,6 +31,7 @@ import Data.Monoid hiding (Sum)
 import Data.Loc
 
 import Language.Futhark hiding (Value)
+import qualified Language.Futhark as F
 import Futhark.Representation.Primitive (intValue, floatValue)
 import qualified Futhark.Representation.Primitive as P
 import qualified Language.Futhark.Semantic as T
@@ -1244,7 +1244,15 @@ interpretImport ctx (fp, prog) = do
 
 -- | Execute the named function on the given arguments; will fail
 -- horribly if these are ill-typed.
-interpretFunction :: Ctx -> VName -> [Value] -> F ExtOp Value
-interpretFunction ctx fname vs = runEvalM (ctxImports ctx) $ do
-  f <- evalTermVar (ctxEnv ctx) $ qualName fname
-  foldM (apply noLoc mempty) f vs
+interpretFunction :: Ctx -> VName -> [F.Value] -> Either String (F ExtOp Value)
+interpretFunction ctx fname vs = do
+  vs' <- case mapM convertValue vs of
+           Just vs' -> Right vs'
+           Nothing -> Left "Invalid input: irregular array."
+
+  Right $ runEvalM (ctxImports ctx) $ do
+    f <- evalTermVar (ctxEnv ctx) (qualName fname)
+    foldM (apply noLoc mempty) f vs'
+
+  where convertValue (F.PrimValue p) = Just $ ValuePrim p
+        convertValue (F.ArrayValue arr _) = mkArray =<< mapM convertValue (elems arr)
