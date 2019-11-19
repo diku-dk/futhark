@@ -567,7 +567,7 @@ private (T[], int[]) ReadStrArrayEmpty<T>(int rank, string typeName, Func<T> Rea
     int[] shape = new int[rank];
     for (int i = 1; i < rank; i++) {
         ParseSpecificString("[");
-        shape[i] = ReadStrInt("");
+        shape[i] = Convert.ToInt32(ParseIntSigned());
         ParseSpecificString("]");
     }
     ParseSpecificString(typeName);
