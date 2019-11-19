@@ -73,7 +73,7 @@ type DatasetName = String
 
 prepare :: AutotuneOptions -> FilePath -> IO [(DatasetName, RunDataset)]
 prepare opts prog = do
-  spec <- testSpecFromFile prog
+  spec <- testSpecFromFileOrDie prog
   copts <- compileOptions opts
 
   truns <-
