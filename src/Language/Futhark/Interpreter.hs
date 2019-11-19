@@ -343,8 +343,8 @@ matchValueToType :: Env
 matchValueToType env t@(Scalar (TypeVar _ _ tn [])) val
   | Just shape <- M.lookup (typeLeaf tn) $ envShapes env,
     shape /= valueShape val =
-      Left $ "Value passed for type parameter `" <> prettyName (typeLeaf tn) <>
-      "` does not match shape " <> pretty shape <>
+      Left $ "Value passed for type parameter " <> quote (prettyName (typeLeaf tn)) <>
+      " does not match shape " <> pretty shape <>
       " of previously observed value."
   | Nothing <- M.lookup (typeLeaf tn) $ envShapes env =
       matchValueToType (tnenv <> env) t val
@@ -356,7 +356,7 @@ matchValueToType env t@(Array _ _ _ (ShapeDecl ds@(d:_))) val@(ValueArray arr) =
       | Just x <- look v ->
           if x == arr_n
           then continue env
-          else emptyOrWrong $ "`" <> pretty v <> "` (" <> pretty x <> ")"
+          else emptyOrWrong $ quote (pretty v) <> " (" <> pretty x <> ")"
       | otherwise ->
           continue $
           valEnv (M.singleton (qualLeaf v)
@@ -502,7 +502,7 @@ evalTermVar :: Env -> QualName VName -> EvalM Value
 evalTermVar env qv =
   case lookupVar qv env of
     Just (TermValue _ v) -> return v
-    _ -> error $ "`" <> pretty qv <> "` is not bound to a value."
+    _ -> error $ quote (pretty qv) <> " is not bound to a value."
 
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
@@ -564,8 +564,8 @@ evalFunction env tparams [] body (_, t) loc = do
           case matchValueToType env vt v of
             Right _ -> return v
             Left err ->
-              bad loc env $ "Value `" <> pretty v <>
-              "` cannot match type `" <> pretty vt <> "`: " ++ err
+              bad loc env $ "Value " <> quote (pretty v) <>
+              " cannot match type " <> quote (pretty vt) <> ": " ++ err
 
         isDimParam TypeParamDim{} = True
         isDimParam _ = False
@@ -625,8 +625,8 @@ eval env (Ascript e td _ loc) = do
   let t = evalType env $ unInfo $ expandedType td
   case matchValueToType env t v of
     Right _ -> return v
-    Left err -> bad loc env $ "Value `" <> pretty v <> "` cannot match shape of type `" <>
-                pretty (declaredType td) <> "` (`" <> pretty t <> "`): " ++ err
+    Left err -> bad loc env $ "Value " <> quote (pretty v) <> " cannot match shape of type " <>
+                quote (pretty (declaredType td)) <> " (" <> quote (pretty t) <> "): " ++ err
 
 eval env (LetPat p e body _ _) = do
   v <- eval env e
@@ -845,7 +845,7 @@ evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
   case lookupVar qv env of
     Just (TermModule m) -> return m
-    _ -> error $ "`" <> pretty qv <> "` is not bound to a module."
+    _ -> error $ quote (pretty qv) <> " is not bound to a module."
 
 evalModExp :: Env -> ModExp -> EvalM Module
 
@@ -1006,8 +1006,8 @@ initialCtx =
           | Just z <- msum $ map (`bopDef'` (x', y')) fs ->
               return $ ValuePrim z
         _ ->
-          bad noLoc mempty $ "Cannot apply operator to arguments `" <>
-          pretty x <> "` and `" <> pretty y <> "`."
+          bad noLoc mempty $ "Cannot apply operator to arguments " <>
+          quote (pretty x) <> " and " <> quote (pretty y) <> "."
       where bopDef' (valf, retf, op) (x, y) = do
               x' <- valf x
               y' <- valf y
@@ -1019,8 +1019,8 @@ initialCtx =
           | Just r <- msum $ map (`unopDef'` x') fs ->
               return $ ValuePrim r
         _ ->
-          bad noLoc mempty $ "Cannot apply function to argument `" <>
-          pretty x <> "`."
+          bad noLoc mempty $ "Cannot apply function to argument " <>
+          quote (pretty x) <> "."
       where unopDef' (valf, retf, op) x = do
               x' <- valf x
               retf =<< op x'
@@ -1033,8 +1033,8 @@ initialCtx =
             Just z <- f x' y' ->
               return $ ValuePrim $ putV z
         _ ->
-          bad noLoc mempty $ "Cannot apply operator to argument `" <>
-          pretty v <> "."
+          bad noLoc mempty $ "Cannot apply operator to argument " <>
+          quote (pretty v) <> "."
 
     def "!" = Just $ unopDef [ (getS, putS, P.doUnOp $ P.Complement Int8)
                              , (getS, putS, P.doUnOp $ P.Complement Int16)
