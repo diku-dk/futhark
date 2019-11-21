@@ -59,7 +59,7 @@ instance Show Usage where
 instance Located Usage where
   locOf (Usage _ loc) = locOf loc
 
-data Constraint = NoConstraint (Maybe Liftedness) Usage
+data Constraint = NoConstraint Liftedness Usage
                 | ParamType Liftedness SrcLoc
                 | Constraint (TypeBase () ()) Usage
                 | Overloaded [PrimType] Usage
@@ -218,7 +218,7 @@ linkVarToType usage vn tp = do
             modifyConstraints $ M.map $ applySubstInConstraint vn $ Subst tp'
             case M.lookup vn constraints of
 
-              Just (NoConstraint (Just Unlifted) unlift_usage) ->
+              Just (NoConstraint Unlifted unlift_usage) ->
                 zeroOrderType usage (show unlift_usage) tp'
 
               Just (Equality _) ->
@@ -372,7 +372,7 @@ zeroOrderType usage desc t = do
                 " must be non-function, but inferred to be " ++
                 quote (pretty vn_t) ++ " due to " ++ show old_usage ++ "."
             Just (NoConstraint _ _) ->
-              modifyConstraints $ M.insert vn (NoConstraint (Just Unlifted) usage)
+              modifyConstraints $ M.insert vn (NoConstraint Unlifted usage)
             Just (ParamType Lifted ploc) ->
               typeError usage $ "Type " ++ desc ++
               " must be non-function, but type parameter " ++ quote (prettyName vn) ++ " at " ++
@@ -455,7 +455,7 @@ instance MonadUnify UnifyM where
             put (x, i+1)
             return i
     let v = VName (mkTypeVarName desc i) 0
-    modifyConstraints $ M.insert v $ NoConstraint Nothing $ Usage Nothing loc
+    modifyConstraints $ M.insert v $ NoConstraint Lifted $ Usage Nothing loc
     return $ Scalar $ TypeVar mempty Nonunique (typeName v) []
 
 -- | Construct a the name of a new type variable given a base
@@ -483,4 +483,4 @@ runUnifyM :: [TypeParam] -> UnifyM a -> Either TypeError a
 runUnifyM tparams (UnifyM m) = runExcept $ evalStateT m (constraints, 0)
   where constraints = M.fromList $ mapMaybe f tparams
         f TypeParamDim{} = Nothing
-        f (TypeParamType l p loc) = Just (p, NoConstraint (Just l) $ Usage Nothing loc)
+        f (TypeParamType l p loc) = Just (p, NoConstraint l $ Usage Nothing loc)
