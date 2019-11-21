@@ -798,17 +798,18 @@ printStm (Imp.ArrayValue _ _ _ _ []) ind e = do
 printStm (Imp.ArrayValue mem space bt ept (outer:shape)) ind e = do
   ptr <- newVName "shapePtr"
   first <- newVName "printFirst"
-  let size = callMethod (CreateArray (Primitive $ CSInt Int32T) $ Right $ map compileDim $ outer:shape)
+  let dims = map compileDim $ outer:shape
+      size = callMethod (CreateArray (Primitive $ CSInt Int32T) $ Right dims)
                  "Aggregate" [ Integer 1
                              , Lambda (Tuple [Var "acc", Var "val"])
                                       [Exp $ BinOp "*" (Var "acc") (Var "val")]
                              ]
-      emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
+      emptystr = "empty(" ++ ppArrayType bt [length shape-1, length shape-2..0] ++ ")"
 
   printelem <- printStm (Imp.ArrayValue mem space bt ept shape) ind e
   return $
     If (BinOp "==" size (Integer 0))
-      [puts emptystr]
+      [Exp $ simpleCall "Console.Write" [formatString emptystr $ drop 1 dims]]
     [ Assign (Var $ pretty first) $ Var "true"
     , puts "["
     , For (pretty ptr) (compileDim outer)
@@ -819,9 +820,8 @@ printStm (Imp.ArrayValue mem space bt ept (outer:shape)) ind e = do
     , puts "]"
     ]
 
-    where ppArrayType :: PrimType -> Int -> String
-          ppArrayType t 0 = prettyPrimType ept t
-          ppArrayType t n = "[]" ++ ppArrayType t (n-1)
+    where ppArrayType t [] = prettyPrimType ept t
+          ppArrayType t (i:is) = "[{" ++ show i ++ "}]" ++ ppArrayType t is
 
           prettyPrimType Imp.TypeUnsigned (IntType Int8) = "u8"
           prettyPrimType Imp.TypeUnsigned (IntType Int16) = "u16"
