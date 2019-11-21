@@ -223,7 +223,7 @@ instance MonadUnify TermTypeM where
   newTypeVar loc desc = do
     i <- incCounter
     v <- newID $ mkTypeVarName desc i
-    modifyConstraints $ M.insert v $ NoConstraint Nothing $ mkUsage' loc
+    modifyConstraints $ M.insert v $ NoConstraint Lifted $ mkUsage' loc
     return $ Scalar $ TypeVar mempty Nonunique (typeName v) []
 
 instance MonadBreadCrumbs TermTypeM where
@@ -423,7 +423,7 @@ instantiateTypeParam :: Monoid as => SrcLoc -> TypeParam -> TermTypeM (VName, Su
 instantiateTypeParam loc tparam = do
   i <- incCounter
   v <- newID $ mkTypeVarName (takeWhile isAlpha (baseString (typeParamName tparam))) i
-  modifyConstraints $ M.insert v $ NoConstraint (Just l) $ mkUsage' loc
+  modifyConstraints $ M.insert v $ NoConstraint l $ mkUsage' loc
   return (v, Subst $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
   where l = case tparam of TypeParamType x _ _ -> x
                            _                   -> Lifted
@@ -431,7 +431,7 @@ instantiateTypeParam loc tparam = do
 newArrayType :: SrcLoc -> String -> Int -> TermTypeM (TypeBase () (), TypeBase () ())
 newArrayType loc desc r = do
   v <- newID $ nameFromString desc
-  modifyConstraints $ M.insert v $ NoConstraint Nothing $ mkUsage' loc
+  modifyConstraints $ M.insert v $ NoConstraint Unlifted $ mkUsage' loc
   let rowt = TypeVar () Nonunique (typeName v) []
   return (Array () Nonunique rowt (ShapeDecl $ replicate r ()),
           Scalar rowt)
@@ -1994,7 +1994,7 @@ closeOverTypes substs tparams t =
         closeOver (k, _)
           | k `elem` map typeParamName tparams =
               return Nothing
-        closeOver (k, NoConstraint (Just Unlifted) usage) =
+        closeOver (k, NoConstraint Unlifted usage) =
           return $ Just $ TypeParamType Unlifted k $ srclocOf usage
         closeOver (k, NoConstraint _ usage) =
           return $ Just $ TypeParamType Lifted k $ srclocOf usage
