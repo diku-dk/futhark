@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     an array (e.g. `empty([]i32)` is no longer allowed, you need
     for example `empty([0]i32)`).
 
+  * All input files are now assumed to be in UTF-8.
+
 ### Fixed
 
   * Fixed exponential-time behaviour for certain kernels with large
