@@ -8,6 +8,7 @@ import Control.Monad
 import Data.List
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import GHC.IO.Encoding (setLocaleEncoding)
 import System.IO
 import System.Exit
 import System.Environment
@@ -96,6 +97,7 @@ main :: IO ()
 main = reportingIOErrors $ do
   hSetEncoding stdout utf8
   hSetEncoding stderr utf8
+  setLocaleEncoding utf8
   args <- getArgs
   prog <- getProgName
   case args of
