@@ -388,16 +388,24 @@ readInputOutputs line name t =
 commentPrefix :: T.Text
 commentPrefix = T.pack "--"
 
+couldNotRead :: IOError -> IO (Either String a)
+couldNotRead = return . Left . show
+
 -- | Read the test specification from the given Futhark program.
 testSpecFromFile :: FilePath -> IO (Either String ProgramTest)
 testSpecFromFile path = do
-  blocks <- testBlocks <$> T.readFile path
-  let (first_spec_line, first_spec, rest_specs) =
-        case blocks of []       -> (0, mempty, [])
-                       (n,s):ss -> (n, s, ss)
-  case readTestSpec (1+first_spec_line) path first_spec of
-    Left err -> return $ Left $ errorBundlePretty err
-    Right v  -> Right <$> foldM moreCases v rest_specs
+  blocks_or_err <-
+    (Right . testBlocks <$> T.readFile path)
+    `catch` couldNotRead
+  case blocks_or_err of
+    Left err -> return $ Left err
+    Right blocks -> do
+      let (first_spec_line, first_spec, rest_specs) =
+            case blocks of []       -> (0, mempty, [])
+                           (n,s):ss -> (n, s, ss)
+      case readTestSpec (1+first_spec_line) path first_spec of
+        Left err -> return $ Left $ errorBundlePretty err
+        Right v  -> Right <$> foldM moreCases v rest_specs
 
   where moreCases test (lineno, cases) =
           case readInputOutputs lineno path cases of
@@ -441,9 +449,12 @@ commentBlocks = commentBlocks' . zip [0..] . T.lines
 -- or directory containing @.fut@ files and further directories.
 testSpecsFromPath :: FilePath -> IO (Either String [(FilePath, ProgramTest)])
 testSpecsFromPath path = do
-  programs <- testPrograms path
-  specs_or_errs <- mapM testSpecFromFile programs
-  return $ zip programs <$> sequence specs_or_errs
+  programs_or_err <- (Right <$> testPrograms path) `catch` couldNotRead
+  case programs_or_err of
+    Left err -> return $ Left err
+    Right programs -> do
+      specs_or_errs <- mapM testSpecFromFile programs
+      return $ zip programs <$> sequence specs_or_errs
 
 -- | Read test specifications from the given paths, which can be a
 -- files or directories containing @.fut@ files and further
