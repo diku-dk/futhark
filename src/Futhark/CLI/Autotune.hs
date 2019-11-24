@@ -32,7 +32,8 @@ data AutotuneOptions = AutotuneOptions
                     }
 
 initialAutotuneOptions :: AutotuneOptions
-initialAutotuneOptions = AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0
+initialAutotuneOptions =
+  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -53,7 +54,8 @@ type Path = [(String, Int)]
 
 regexGroups :: Regex -> String -> Maybe [String]
 regexGroups regex s = do
-  (_, _, _, groups) <- matchM regex s :: Maybe (String, String, String, [String])
+  (_, _, _, groups) <-
+    matchM regex s :: Maybe (String, String, String, [String])
   Just groups
 
 comparisons :: String -> [(String,Int)]
@@ -79,7 +81,8 @@ prepare opts prog = do
   truns <-
     case testAction spec of
       RunCases ios _ _
-        | Just runs <- iosTestRuns <$> find ((=="main") . iosEntryPoint) ios -> do
+        | Just runs <-
+            iosTestRuns <$> find ((=="main") . iosEntryPoint) ios -> do
             res <- prepareBenchmarkProgram copts prog ios
             case res of
               Left (err, errstr) -> do
@@ -112,7 +115,8 @@ prepare opts prog = do
                   exitFailure
                 Right _ -> do
                   let t = timeout $ aft - bef
-                  putStrLn $ "Calculated timeout for " ++ dataset ++ " : " ++ show t ++ "s"
+                  putStrLn $ "Calculated timeout for " ++ dataset ++
+                    " : " ++ show t ++ "s"
                   return (dataset, do_run t)
 
   where run trun expected timeout path purpose = do
@@ -127,7 +131,8 @@ prepare opts prog = do
               ropts = runOptions path timeout opts'
 
           when (optVerbose opts > 1) $
-            putStrLn $ "Running with options: " ++ unwords (runExtraOptions ropts)
+            putStrLn $ "Running with options: " ++
+            unwords (runExtraOptions ropts)
 
           either (Left . T.unpack) (Right . averageRuntime) <$>
             benchmarkDataset ropts prog "main"
@@ -165,9 +170,11 @@ tuningPaths = concatMap (treePaths [])
 
 thresholdForest :: FilePath -> IO ThresholdForest
 thresholdForest prog = do
-  thresholds <- getThresholds <$> readProcess ("." </> dropExtension prog) ["--print-sizes"] ""
+  thresholds <- getThresholds <$>
+    readProcess ("." </> dropExtension prog) ["--print-sizes"] ""
   let root (v, _) = ((v, False), [])
-  return $ unfoldForest (unfold thresholds) $ map root $ filter (null . snd) thresholds
+  return $ unfoldForest (unfold thresholds) $
+    map root $ filter (null . snd) thresholds
   where getThresholds = mapMaybe findThreshold . lines
         regex = makeRegex ("(.*)\\ \\(threshold\\ \\((.*)\\)\\)" :: String)
 
@@ -238,16 +245,20 @@ tuneThreshold opts datasets already_tuned (v, v_path) = do
 
             case (t_run, f_run) of
               (Left err, _) -> do
-                when (optVerbose opts > 0) $ putStrLn $ "True comparison run failed:\n" ++ err
+                when (optVerbose opts > 0) $
+                  putStrLn $ "True comparison run failed:\n" ++ err
                 return prefer_f
               (_, Left err) -> do
-                when (optVerbose opts > 0) $ putStrLn $ "False comparison run failed:\n" ++ err
+                when (optVerbose opts > 0) $
+                  putStrLn $ "False comparison run failed:\n" ++ err
                 return prefer_t
               (Right (_, runtime_t), Right (_, runtime_f)) ->
                 if runtime_t < runtime_f
-                then do when (optVerbose opts > 0) $ putStrLn "True branch is fastest."
+                then do when (optVerbose opts > 0) $
+                          putStrLn "True branch is fastest."
                         return prefer_t
-                else do when (optVerbose opts > 0) $ putStrLn "False branch is fastest."
+                else do when (optVerbose opts > 0) $
+                          putStrLn "False branch is fastest."
                         return prefer_f
 
   let (_lower, upper) = intersectRanges ranges
