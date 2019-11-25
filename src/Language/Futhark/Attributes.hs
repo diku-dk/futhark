@@ -406,7 +406,12 @@ typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
-typeOf (DoLoop pat _ _ _ _) = patternType pat
+typeOf (DoLoop pat _ _ _ _) =
+  -- We set all of the uniqueness to be unique.  This is intentional,
+  -- and matches what happens for function calls.  Those arrays that
+  -- really *cannot* be consumed will alias something unconsumable,
+  -- and will be caught that way.
+  patternType pat `setUniqueness` Unique
 typeOf (Lambda params _ _ (Info (als, t)) _) =
   unscopeType bound_here $ foldr (arrow . patternParam) t params `setAliases` als
   where bound_here = S.map identName (mconcat $ map patternIdents params)
