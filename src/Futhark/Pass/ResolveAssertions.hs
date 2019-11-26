@@ -40,7 +40,7 @@ simplifyScalExp vtable pat _ e = Simplify $ do
   case res of
     -- If the sufficient condition is 'True', then it statically succeeds.
     Just se
-      | SE.scalExpType se == Bool,
+      | interesting e,
         isNothing $ valOrVar se,
         SE.scalExpSize se < size_bound,
         Just se' <- valOrVar $ AS.simplify se ranges ->
@@ -52,3 +52,12 @@ simplifyScalExp vtable pat _ e = Simplify $ do
         valOrVar (SE.Val v)  = Just $ Constant v
         valOrVar (SE.Id v _) = Just $ Var v
         valOrVar _           = Nothing
+
+        interesting CmpOp{} = True
+        interesting (BinOp LogAnd _ _) = True
+        interesting (BinOp LogOr _ _) = True
+        interesting (BinOp _ x y) = isConst x || isConst y
+        interesting _ = False
+
+        isConst Constant{} = True
+        isConst Var{} = False
