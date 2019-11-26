@@ -204,7 +204,7 @@ static int read_str_empty_array(char *buf, int bufsize,
 
     next_token(buf, bufsize);
 
-    if (sscanf(buf, "%d", &shape[i]) != 1) {
+    if (sscanf(buf, "%"SCNi64, &shape[i]) != 1) {
       return 1;
     }
 
@@ -660,7 +660,7 @@ static int write_str_array(FILE *out, const struct primtype_info_t *elem_type, u
     if (len*slice_size == 0) {
       printf("empty(");
       for (int64_t i = 1; i < rank; i++) {
-        printf("[%d]", shape[i]);
+        printf("[%"PRIi64"]", shape[i]);
       }
       printf("%s", elem_type->type_name);
       printf(")");
