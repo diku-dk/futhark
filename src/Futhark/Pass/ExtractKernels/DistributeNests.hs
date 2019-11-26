@@ -632,9 +632,18 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   let rts = concatMap (take 1) $ chunks as_ns $
             drop (sum as_ns) $ lambdaReturnType lam
       (is,vs) = splitAt (sum as_ns) $ bodyResult $ lambdaBody lam
-      k_body = KernelBody () (bodyStms $ lambdaBody lam) $
+
+  -- Maybe add certificates to the indices.
+  (is', k_body_stms) <- runBinder $ do
+    addStms $ bodyStms $ lambdaBody lam
+    forM is $ \i ->
+      if cs == mempty
+      then return i
+      else certifying cs $ letSubExp "scatter_i" $ BasicOp $ SubExp i
+
+  let k_body = KernelBody () k_body_stms $
                map (inPlaceReturn ispace) $
-               zip3 as_ws as_inps $ chunks as_ns $ zip is vs
+               zip3 as_ws as_inps $ chunks as_ns $ zip is' vs
 
   (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps rts k_body
 
@@ -644,7 +653,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    certifying cs $ letBind_ pat $ Op $ SegOp k
+    letBind_ pat $ Op $ SegOp k
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = error "Ill-typed nested scatter encountered."
