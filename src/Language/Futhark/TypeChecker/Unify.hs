@@ -350,6 +350,8 @@ equalityType usage t = do
               modifyConstraints $ M.insert vn (Equality usage)
             Just (Overloaded _ _) ->
               return () -- All primtypes support equality.
+            Just Equality{} ->
+              return ()
             Just (HasConstrs cs _) ->
               mapM_ (equalityType usage) $ concat $ M.elems cs
             _ ->
