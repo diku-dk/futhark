@@ -939,10 +939,8 @@ ArrayValue :  '[' Value ']'
                   Left e -> throwError e
                   Right v -> return $ ArrayValue (arrayFromList $ $2:$4) $ valueType v
              }
-           | id '(' PrimType ')'
-             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) (arrayOf (Scalar (Prim $3)) (ShapeDecl [0]) Nonunique)) }
            | id '(' RowType ')'
-             {% ($1 `mustBe` "empty") >> return (ArrayValue (listArray (0,-1) []) (arrayOf $3 (ShapeDecl [0]) Nonunique)) }
+             {% ($1 `mustBe` "empty") >> mustBeEmpty (srcspan $2 $4) $3 >> return (ArrayValue (listArray (0,-1) []) $3) }
 
            -- Errors
            | '[' ']'
@@ -987,6 +985,12 @@ mustBe (L loc (ID got)) expected
 mustBe (L loc _) expected =
   parseErrorAt loc $ Just $
   "Only the keyword '" ++ expected ++ "' may appear here."
+
+mustBeEmpty :: SrcLoc -> ValueType -> ParserMonad ()
+mustBeEmpty loc (Array _ _ _ (ShapeDecl dims))
+  | any (==0) dims = return ()
+mustBeEmpty loc t =
+  parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."
 
 data ParserEnv = ParserEnv {
                  parserFile :: FilePath

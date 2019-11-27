@@ -6,10 +6,10 @@
 -- input { [1,2,3,4,5] 0 5 }
 -- output { [1,2,3,4,5] }
 -- input { [1,2,3,4,5] 1 1 }
--- output { empty(i32) }
+-- output { empty([0]i32) }
 -- input { [1,2,3,4,5] 1 0 }
 -- error: Index \[1:0\] out of bounds for array of shape \[5\]
--- input { empty(i32) 0 1 }
+-- input { empty([0]i32) 0 1 }
 -- error: Index \[0:1\] out of bounds for array of shape \[0\]
 
 let main (as: []i32) (i: i32) (j: i32): []i32 =

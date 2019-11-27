@@ -34,11 +34,11 @@
 -- }
 --
 -- input {
---   empty(i32)
---   empty(i32)
+--   empty([0]i32)
+--   empty([0]i32)
 -- }
 -- output {
---   empty(i32)
+--   empty([0]i32)
 -- }
 
 let main [m][n] (hist : *[n]i32) (image : [m]i32) : [n]i32 =

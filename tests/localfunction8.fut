@@ -1,7 +1,7 @@
 -- It is OK for a local function to alias a local array.
 -- ==
 -- input { true } output { [1,2,3] }
--- input { false } output { empty(i32) }
+-- input { false } output { empty([0]i32) }
 
 let main b =
   let global: []i32 = [1,2,3]

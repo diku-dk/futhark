@@ -81,9 +81,9 @@ interpret config fp = do
 putValue :: I.Value -> TypeBase () () -> IO ()
 putValue v t
   | I.isEmptyArray v =
-      putStrLn $ "empty(" ++ pretty (stripArray 1 t') ++ ")"
+      putStrLn $ "empty(" ++ pretty t' ++ ")"
   | otherwise = putStrLn $ pretty v
-  where t' = first (const 0) t :: ValueType
+  where t' = first (const 0) t `setUniqueness` Nonunique :: ValueType
 
 data InterpreterConfig =
   InterpreterConfig { interpreterEntryPoint :: Name
