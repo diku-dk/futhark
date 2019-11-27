@@ -1,6 +1,6 @@
 -- One size-parameterised type refers to another.
 -- ==
--- input { empty(i32) empty(i32) } output { empty(i32) empty(i32) }
+-- input { empty([0]i32) empty([0]i32) } output { empty([0]i32) empty([0]i32) }
 -- input { [1,2,3] [1,2,3] } output { [1,2,3] [1,2,3] }
 -- input { [1,2,3] [1,2,3,4] } output { [1,2,3] [1,2,3] }
 

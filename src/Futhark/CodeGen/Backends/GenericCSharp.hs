@@ -804,12 +804,12 @@ printStm (Imp.ArrayValue mem space bt ept (outer:shape)) ind e = do
                              , Lambda (Tuple [Var "acc", Var "val"])
                                       [Exp $ BinOp "*" (Var "acc") (Var "val")]
                              ]
-      emptystr = "empty(" ++ ppArrayType bt [length shape-1, length shape-2..0] ++ ")"
+      emptystr = "empty(" ++ ppArrayType bt [length dims-1, length dims-2..0] ++ ")"
 
   printelem <- printStm (Imp.ArrayValue mem space bt ept shape) ind e
   return $
     If (BinOp "==" size (Integer 0))
-      [Exp $ simpleCall "Console.Write" [formatString emptystr $ drop 1 dims]]
+      [Exp $ simpleCall "Console.Write" [formatString emptystr dims]]
     [ Assign (Var $ pretty first) $ Var "true"
     , puts "["
     , For (pretty ptr) (compileDim outer)

@@ -191,13 +191,11 @@ static int read_str_empty_array(char *buf, int bufsize,
     return 1;
   }
 
-  shape[0] = 0;
-
   if (!next_token_is(buf, bufsize, "(")) {
     return 1;
   }
 
-  for (int i = 1; i < dims; i++) {
+  for (int i = 0; i < dims; i++) {
     if (!next_token_is(buf, bufsize, "[")) {
       return 1;
     }
@@ -222,7 +220,15 @@ static int read_str_empty_array(char *buf, int bufsize,
     return 1;
   }
 
-  return 0;
+  // Check whether the array really is empty.
+  for (int i = 0; i < dims; i++) {
+    if (shape[i] == 0) {
+      return 0;
+    }
+  }
+
+  // Not an empty array!
+  return 1;
 }
 
 static int read_str_array(int64_t elem_size, str_reader elem_reader,
@@ -659,7 +665,7 @@ static int write_str_array(FILE *out, const struct primtype_info_t *elem_type, u
 
     if (len*slice_size == 0) {
       printf("empty(");
-      for (int64_t i = 1; i < rank; i++) {
+      for (int64_t i = 0; i < rank; i++) {
         printf("[%"PRIi64"]", shape[i]);
       }
       printf("%s", elem_type->type_name);

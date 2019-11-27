@@ -1,6 +1,6 @@
 -- ==
--- input { empty([1]i32) [[1]] } output { empty([1]i32) [[1]] }
--- input { [[1]] empty([1]i32) } output { [[1]] empty([1]i32) }
+-- input { empty([0][1]i32) [[1]] } output { empty([0][1]i32) [[1]] }
+-- input { [[1]] empty([0][1]i32) } output { [[1]] empty([0][1]i32) }
 -- compiled input { [[1]] [[1,2]] } error: .
 -- compiled input { [[1,2]] [[1]] } error: .
 

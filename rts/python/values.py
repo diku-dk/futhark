@@ -299,10 +299,13 @@ def read_str_bool(f):
 def read_str_empty_array(f, type_name, rank):
     parse_specific_string(f, 'empty')
     parse_specific_char(f, b'(')
+    smallest = 1
     for i in range(rank):
         parse_specific_string(f, '[')
-        parse_int(f)
+        smallest = min(smallest, int(parse_int(f)))
         parse_specific_string(f, ']')
+    if smallest != 0:
+        raise ValueError
     parse_specific_string(f, type_name)
     parse_specific_char(f, b')')
 
@@ -327,7 +330,7 @@ def read_str_array_helper(f, elem_reader, type_name, rank):
         row_reader = elem_reader
     else:
         row_reader = nested_row_reader
-    return read_str_array_elems(f, row_reader, type_name, rank-1)
+    return read_str_array_elems(f, row_reader, type_name, rank)
 
 def expected_array_dims(l, rank):
   if rank > 1:
@@ -616,7 +619,7 @@ def write_value_text(v, out=sys.stdout):
         if np.product(v.shape) == 0:
             tname = numpy_type_to_type_name(v.dtype)
             out.write('empty({}{})'.format(''.join(['[{}]'.format(d)
-                                                    for d in v.shape[1:]]), tname))
+                                                    for d in v.shape]), tname))
         else:
             first = True
             out.write('[')

@@ -140,7 +140,7 @@ instance PP.Pretty Value where
   ppr v | product (valueShape v) == 0 =
             text "empty" <>
             parens (dims <> ppr (valueElemType v))
-    where dims = mconcat $ map (brackets . ppr) $ drop 1 $ valueShape v
+    where dims = mconcat $ map (brackets . ppr) $ valueShape v
   ppr (Int8Value shape vs) = pprArray (UVec.toList shape) vs
   ppr (Int16Value shape vs) = pprArray (UVec.toList shape) vs
   ppr (Int32Value shape vs) = pprArray (UVec.toList shape) vs
@@ -396,6 +396,7 @@ readEmptyArrayOfShape shape t
 
   | otherwise = do
       (pt, t') <- readPrimType t
+      guard $ elem 0 shape
       v <- case pt of
              "i8" -> Just $ Int8Value (UVec.fromList shape) UVec.empty
              "i16" -> Just $ Int16Value (UVec.fromList shape) UVec.empty
@@ -414,7 +415,7 @@ readEmptyArrayOfShape shape t
 readEmptyArray :: BS.ByteString -> Maybe (Value, BS.ByteString)
 readEmptyArray t = do
   t' <- symbol '(' =<< lexeme "empty" t
-  (v, t'') <- readEmptyArrayOfShape [0] t'
+  (v, t'') <- readEmptyArrayOfShape [] t'
   t''' <- symbol ')' t''
   return (v, t''')
 

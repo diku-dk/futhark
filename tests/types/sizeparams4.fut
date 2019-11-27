@@ -1,6 +1,6 @@
 -- Shadowing of size parameters.
 -- ==
--- input { 0 } output { empty(i32) }
+-- input { 0 } output { empty([0]i32) }
 -- input { 3 } output { [0,1,2] }
 
 let n = 2

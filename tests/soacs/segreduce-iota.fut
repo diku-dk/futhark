@@ -1,8 +1,8 @@
 -- ==
 -- random input { 2 10 } output { [0,10] }
 -- random input { 2 1000 } output { [0,1000] }
--- random input { 0 2 } output { empty(i32) }
--- random input { 0 1000 } output { empty(i32) }
+-- random input { 0 2 } output { empty([0]i32) }
+-- random input { 0 1000 } output { empty([0]i32) }
 -- random input { 1000 2 } auto output
 -- random input { 1000 0 } auto output
 
