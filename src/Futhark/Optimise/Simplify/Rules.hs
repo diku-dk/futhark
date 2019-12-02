@@ -625,8 +625,10 @@ simplifyIndexing vtable seType idd inds consuming =
           Just $ do
             i_offset' <- asIntS to_it i_offset
             i_stride' <- asIntS to_it i_stride
-            i_offset'' <- letSubExp "iota_offset" $
-                          BasicOp $ BinOp (Add Int32) x i_offset'
+            i_offset'' <- letSubExp "iota_offset" <=< toExp $
+                          primExpFromSubExp (IntType to_it) x +
+                          primExpFromSubExp (IntType to_it) s *
+                          primExpFromSubExp (IntType to_it) i_offset'
             i_stride'' <- letSubExp "iota_offset" $
                           BasicOp $ BinOp (Mul Int32) s i_stride'
             fmap (SubExpResult cs) $ letSubExp "slice_iota" $
