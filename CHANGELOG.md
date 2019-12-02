@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fixed a slice-iota simplification bug (#813).
+
 ## [0.13.1]
 
 ### Added
