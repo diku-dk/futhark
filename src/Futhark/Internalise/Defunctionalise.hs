@@ -531,8 +531,17 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret) loc) = do
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.
     IntrinsicSV
-      | depth == 0 -> return (e', Dynamic $ typeOf e)
-      | otherwise  -> return (e', IntrinsicSV)
+      | depth == 0 ->
+          -- If the intrinsic is fully applied, then we are done.
+          -- Otherwise we need to eta-expand it and recursively
+          -- defunctionalise. XXX: might it be better to simply
+          -- eta-expand immediately any time we encounter a
+          -- non-fully-applied intrinsic?
+          if null argtypes
+            then return (e', Dynamic $ typeOf e)
+            else do (pats, body, tp) <- etaExpand e'
+                    defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) noLoc
+      | otherwise -> return (e', IntrinsicSV)
 
     _ -> error $ "Application of an expression that is neither a static lambda "
               ++ "nor a dynamic function, but has static value: " ++ show sv1
