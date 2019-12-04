@@ -231,6 +231,13 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
   if (chosen == -1) {
     panic(-1, "Unsupported compute capability %d.%d\n", major, minor);
   }
+
+  if (x[chosen].major != major || x[chosen].minor != minor) {
+    fprintf(stderr,
+            "Warning: device compute capability is %d.%d, but newest supported by Futhark is %d.%d.\n",
+            major, minor, x[chosen].major, x[chosen].minor);
+  }
+
   return x[chosen].arch_str;
 }
 
