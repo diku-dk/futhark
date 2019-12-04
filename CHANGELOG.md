@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * (Finally) automatic support for compute model 7.5 in the CUDA backend.
+
 ### Removed
 
 ### Changed
