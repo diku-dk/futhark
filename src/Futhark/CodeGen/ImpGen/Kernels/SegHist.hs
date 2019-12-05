@@ -225,7 +225,12 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
     (hist_k_RF * hist_RF) /
     (hist_L2_ln_sz / r64 hist_el_size)
 
-  hist_S <- dPrimVE "hist_S" $
+  hist_S <- dPrim "hist_S" int32
+
+  -- For sparse histograms (H exceeds N) we only want a single chunk.
+  sIf (hist_N .<. hist_H)
+    (hist_S <-- 1) $
+    hist_S <--
     case passage of
       MayBeMultiPass ->
         (hist_M_min * hist_H * hist_el_size) `quotRoundingUp`
@@ -234,11 +239,11 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
         1
 
   emit $ Imp.DebugPrint "Race expansion factor (RACE^exp)" $ Just hist_RACE_exp
-  emit $ Imp.DebugPrint "Number of chunks (S)" $ Just hist_S
+  emit $ Imp.DebugPrint "Number of chunks (S)" $ Just $ Imp.vi32 hist_S
 
-  histograms <- snd <$> mapAccumLM (onOp (Imp.vi32 hist_L2) hist_M_min hist_S hist_RACE_exp) Nothing slugs
+  histograms <- snd <$> mapAccumLM (onOp (Imp.vi32 hist_L2) hist_M_min (Imp.vi32 hist_S) hist_RACE_exp) Nothing slugs
 
-  return (hist_S, histograms)
+  return (Imp.vi32 hist_S, histograms)
   where
     hist_k_ct_min = 2 -- Chosen experimentally
     hist_k_RF = 0.75 -- Chosen experimentally
