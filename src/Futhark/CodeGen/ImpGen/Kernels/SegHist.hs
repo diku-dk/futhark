@@ -676,24 +676,27 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
               copyDWIM global_dest global_is (Var $ paramName xp) []
 
 localMemoryCase :: [PatElem ExplicitMemory]
-                -> Count NumGroups SubExp -> Count GroupSize SubExp
+                -> Imp.Exp
                 -> SegSpace
                 -> Imp.Exp -> Imp.Exp -> Imp.Exp -> Imp.Exp
                 -> [SegHistSlug]
                 -> KernelBody ExplicitMemory
                 -> CallKernelGen (Imp.Exp, ImpM ExplicitMemory Imp.HostOp ())
-localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N hist_RF slugs kbody = do
-  num_groups' <- traverse toExp num_groups
-  group_size' <- traverse toExp group_size
-
-  -- Maximum group size (or actual, in this case).
-  let hist_B = unCount group_size'
-      space_sizes = segSpaceDims space
+localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kbody = do
+  let space_sizes = segSpaceDims space
       segment_dims = init space_sizes
       segmented = not $ null segment_dims
 
   hist_L <- dPrim "hist_L" int32
   sOp $ Imp.GetSizeMax hist_L Imp.SizeLocalMemory
+
+  max_group_size <- dPrim "max_group_size" int32
+  sOp $ Imp.GetSizeMax max_group_size Imp.SizeGroup
+  let group_size = Imp.Count $ Var max_group_size
+  num_groups <- fmap (Imp.Count . Var) $ dPrimV "num_groups" $
+                hist_T `quotRoundingUp` toExp' int32 (unCount group_size)
+  let num_groups' = toExp' int32 <$> num_groups
+      group_size' = toExp' int32 <$> group_size
 
   let r64 = ConvOpExp (SIToFP Int32 Float64)
       t64 = ConvOpExp (FPToSI Float64 Int32)
@@ -716,6 +719,7 @@ localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N h
               Imp.BinOpExp (FMin Float64) (r64 hist_RF) $
               r64 hist_W * Imp.BinOpExp (FPow Float64) (r64 hist_RF / r64 hist_W) (1.0 / 3.0)
 
+  let hist_B = unCount group_size'
   hist_f' <- dPrimVE "hist_f_prime" $
              (r64 hist_B * hist_RFC) /
              (hist_m * hist_m * r64 hist_H)
@@ -761,8 +765,6 @@ localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N h
   -- Maximum M for work efficiency.
   work_asymp_M_max <-
     if segmented then do
-
-      hist_T <- dPrimVE "hist_T" $ unCount num_groups' * unCount group_size'
 
       hist_T_hist_min <- dPrimVE "hist_T_hist_min" $
                          Imp.BinOpExp (SMin Int32) (hist_Nin * hist_Nout) hist_T
@@ -820,7 +822,8 @@ localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N h
         emit $ Imp.DebugPrint "Histogram size (H)" $ Just hist_H
         emit $ Imp.DebugPrint "Multiplication degree (M)" $ Just $ Imp.vi32 hist_M
         emit $ Imp.DebugPrint "Cooperation level (C)" $ Just hist_C
-        histKernelLocal hist_M groups_per_segment map_pes num_groups group_size space slugs kbody
+        histKernelLocal hist_M groups_per_segment map_pes
+          num_groups group_size space slugs kbody
 
   return (pick_local, run)
 
@@ -875,9 +878,9 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
   -- Check for emptyness to avoid division-by-zero.
   sUnless (seg_h .==. 0) $ do
 
+    let hist_T = unCount num_groups' * unCount group_size'
     emit $ Imp.DebugPrint "\n# SegHist" Nothing
-    emit $ Imp.DebugPrint "Number of threads (T)" $
-      Just $ unCount num_groups' * unCount group_size'
+    emit $ Imp.DebugPrint "Number of threads (T)" $ Just hist_T
     emit $ Imp.DebugPrint "Memory per set of subhistograms per segment" $ Just h
     emit $ Imp.DebugPrint "Memory per set of subhistograms times segments" $ Just seg_h
     emit $ Imp.DebugPrint "Input elements per histogram (N)" $ Just hist_N
@@ -887,7 +890,7 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
     emit $ Imp.DebugPrint "Race factor (RF)" $ Just hist_RF
 
     (use_local_memory, run_in_local_memory) <-
-      localMemoryCase map_pes num_groups group_size space hist_H hist_el_size hist_N hist_RF slugs kbody
+      localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kbody
 
     sIf use_local_memory run_in_local_memory $
       histKernelGlobal map_pes num_groups group_size space slugs kbody
