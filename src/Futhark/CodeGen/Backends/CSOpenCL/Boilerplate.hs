@@ -71,9 +71,12 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
                          , (intArrayT, "Sizes")]
 
   let tmp_cfg = Var "tmp_cfg"
+      sizeInit (SizeBespoke _ x) = Integer $ toInteger x
+      sizeInit _ = Integer 0
+
   CS.stm $ CS.privateFunDef new_cfg (CustomT cfg) []
     [ Assign tmp_cfg $ CS.simpleInitClass cfg []
-    , Reassign (Field tmp_cfg "Sizes") (Collection "int[]" (replicate (M.size sizes) (Integer 0)))
+    , Reassign (Field tmp_cfg "Sizes") (Collection "int[]" (map sizeInit (M.elems sizes)))
     , Exp $ CS.simpleCall "OpenCLConfigInit" [ Out $ Field tmp_cfg "OpenCL", (Integer . toInteger) $ M.size sizes
                                              , Var "SizeNames", Var "SizeVars", Field tmp_cfg "Sizes", Var "SizeClasses" ]
     , Return tmp_cfg

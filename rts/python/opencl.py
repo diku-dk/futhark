@@ -175,7 +175,8 @@ def initialise_opencl_object(self,
             max_value = None
             default_value = default_threshold
         else:
-            raise Exception('Unknown size class for size \'{}\': {}'.format(k, v['class']))
+            # Bespoke sizes have no limit or default.
+            max_value = None
         if v['value'] == None:
             self.sizes[k] = default_value
         elif max_value != None and v['value'] > max_value:

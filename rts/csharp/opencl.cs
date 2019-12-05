@@ -831,7 +831,8 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
             max_value = 0; // No limit.
             default_value = ctx.OpenCL.Cfg.DefaultThreshold;
         } else {
-            panic(1, "Unknown size class for size '{0}': {1}\n", size_name, size_class);
+            // Bespoke sizes have no limit or default.
+            max_value = 0;
         }
         if (size_value == 0) {
             ctx.OpenCL.Cfg.SizeValues[i] = default_value;
