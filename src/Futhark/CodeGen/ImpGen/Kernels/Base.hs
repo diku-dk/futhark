@@ -1037,8 +1037,12 @@ virtualiseGroups constants SegVirt required_groups m = do
   let iterations = (required_groups - Imp.vi32 phys_group_id) `quotRoundingUp`
                    kernelNumGroups constants
 
-  sFor "i" iterations $ \i ->
+  sFor "i" iterations $ \i -> do
     m =<< dPrimV "virt_group_id" (Imp.vi32 phys_group_id + i * kernelNumGroups constants)
+    -- Make sure the virtual group is actually done before we let
+    -- another virtual group have its way with it.
+    sOp Imp.GlobalBarrier
+    sOp Imp.LocalBarrier
 
 sKernelThread, sKernelGroup :: String
                             -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
