@@ -161,7 +161,7 @@ prepareAtomicUpdateGlobal l dests slug =
       --
       -- A fun solution would also be to use a simple hashing
       -- algorithm to ensure good distribution of locks.
-      let num_locks = 10000
+      let num_locks = 100151
           dims = map (toExp' int32) $
                  shapeDims (histShape (slugOp slug)) ++
                  [ Var (slugNumSubhistos slug)
