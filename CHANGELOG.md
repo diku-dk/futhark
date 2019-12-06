@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * (Finally) automatic support for compute model 7.5 in the CUDA backend.
 
+  * Somewhat better performance for very large target arrays for
+    `reduce_by_index.`.
+
 ### Removed
 
 ### Changed
