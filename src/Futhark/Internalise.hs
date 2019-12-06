@@ -508,6 +508,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody loc) = do
         merge_ts = existentialiseExtTypes merge_names $
                    staticShapes $ map (I.paramType . fst) merge
     loopbody'' <- localScope (scopeOfFParams $ map fst merge) $
+                  inScopeOf form' $
                   ensureResultExtShapeNoCtx asserting
                   "shape of loop result does not match shapes in loop parameters"
                   loc merge_ts loopbody'
