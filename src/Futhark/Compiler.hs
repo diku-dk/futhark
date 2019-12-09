@@ -12,6 +12,7 @@ module Futhark.Compiler
        , module Futhark.Compiler.Program
        , readProgram
        , readLibrary
+       , readProgramOrDie
        )
 where
 
@@ -137,3 +138,13 @@ readProgram = readLibrary . pure
 readLibrary :: (MonadError CompilerError m, MonadIO m) =>
                [FilePath] -> m (Warnings, Imports, VNameSource)
 readLibrary = readLibraryWithBasis emptyBasis
+
+-- | Not verbose, and terminates process on error.
+readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
+readProgramOrDie file = liftIO $ do
+  res <- runFutharkM (readProgram file) NotVerbose
+  case res of
+    Left err -> do
+      dumpError newFutharkConfig err
+      exitWith $ ExitFailure 2
+    Right res' -> return res'
