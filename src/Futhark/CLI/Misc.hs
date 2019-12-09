@@ -17,36 +17,25 @@ import System.Exit
 
 import Futhark.Compiler
 import Futhark.Util.Options
-import Futhark.Pipeline
 import Futhark.Test
-
-runFutharkM' :: FutharkM () -> IO ()
-runFutharkM' m = do
-  res <- runFutharkM m NotVerbose
-  case res of
-    Left err -> do
-      dumpError newFutharkConfig err
-      exitWith $ ExitFailure 2
-    Right () -> return ()
 
 mainCheck :: String -> [String] -> IO ()
 mainCheck = mainWithOptions () [] "program" $ \args () ->
   case args of
-    [file] -> Just $ runFutharkM' $ check file
+    [file] -> Just $ do
+      (warnings, _, _) <- readProgramOrDie file
+      liftIO $ hPutStr stderr $ show warnings
     _ -> Nothing
-  where check file = do (warnings, _, _) <- readProgram file
-                        liftIO $ hPutStr stderr $ show warnings
 
 mainImports :: String -> [String] -> IO ()
 mainImports = mainWithOptions () [] "program" $ \args () ->
   case args of
-    [file] -> Just $ runFutharkM' $ findImports file
+    [file] -> Just $ do
+      (_, prog_imports, _) <- readProgramOrDie file
+      liftIO $ putStr $ unlines $ map (++ ".fut")
+        $ filter (\f -> not ("futlib/" `isPrefixOf` f))
+        $ map fst prog_imports
     _ -> Nothing
-  where findImports file = do
-          (_, prog_imports, _) <- readProgram file
-          liftIO $ putStr $ unlines $ map (++ ".fut")
-            $ filter (\f -> not ("futlib/" `isPrefixOf` f))
-            $ map fst prog_imports
 
 mainDataget :: String -> [String] -> IO ()
 mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
