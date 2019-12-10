@@ -58,6 +58,12 @@ futhark imports PROGRAM
 
 Print all non-builtin imported Futhark files to stdout, one per line.
 
+futhark query PROGRAM LINE COL
+------------------------------
+
+Print information about the variable at the given position in the
+program.
+
 SEE ALSO
 ========
 
