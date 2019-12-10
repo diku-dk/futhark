@@ -73,8 +73,28 @@ valBindBindings vbind =
           foldFunType (map patternStructType (valBindParams vbind)) $
           unInfo $ valBindRetType vbind
 
+modExpBindings :: ModExp -> M.Map VName BoundTo
+modExpBindings ModVar{} =
+  mempty
+modExpBindings (ModParens me _) =
+  modExpBindings me
+modExpBindings ModImport{} =
+  mempty
+modExpBindings (ModDecs decs _) =
+  mconcat $ map decBindings decs
+modExpBindings (ModApply e1 e2 _ _ _) =
+  modExpBindings e1 <> modExpBindings e2
+modExpBindings (ModAscript e _ _ _) =
+  modExpBindings e
+modExpBindings (ModLambda _ _ e _) =
+  modExpBindings e
+
+modBindBindings :: ModBind -> M.Map VName BoundTo
+modBindBindings = modExpBindings . modExp
+
 decBindings :: Dec -> M.Map VName BoundTo
 decBindings (ValDec vbind) = valBindBindings vbind
+decBindings (ModDec mbind) = modBindBindings mbind
 decBindings _ = mempty
 
 -- | All bindings of everything in the program.
@@ -139,14 +159,35 @@ atPosInExp e pos =
             Just atpos -> Left atpos
             Nothing -> Right e'
 
+atPosInModExp :: ModExp -> Pos -> Maybe RawAtPos
+atPosInModExp (ModVar qn loc) pos = do
+  guard $ loc `contains` pos
+  Just $ RawAtName qn loc
+atPosInModExp (ModParens me _) pos =
+  atPosInModExp me pos
+atPosInModExp ModImport{} _ =
+  Nothing
+atPosInModExp (ModDecs decs _) pos =
+  msum $ map (`atPosInDec` pos) decs
+atPosInModExp (ModApply e1 e2 _ _ _) pos =
+  atPosInModExp e1 pos `mplus` atPosInModExp e2 pos
+atPosInModExp (ModAscript e _ _ _) pos =
+  atPosInModExp e pos
+atPosInModExp (ModLambda _ _ e _) pos =
+  atPosInModExp e pos
+
 atPosInValBind :: ValBind -> Pos -> Maybe RawAtPos
 atPosInValBind = atPosInExp . valBindBody
+
+atPosInModBind :: ModBind -> Pos -> Maybe RawAtPos
+atPosInModBind = atPosInModExp . modExp
 
 atPosInDec :: Dec -> Pos -> Maybe RawAtPos
 atPosInDec dec pos = do
   guard $ dec `contains` pos
   case dec of
     ValDec vbind -> atPosInValBind vbind pos
+    ModDec mbind -> atPosInModBind mbind pos
     _ -> Nothing
 
 atPosInProg :: Prog -> Pos -> Maybe RawAtPos
