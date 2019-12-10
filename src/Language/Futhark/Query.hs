@@ -92,6 +92,23 @@ contains a pos =
     Loc start end -> pos >= start && pos <= end
     NoLoc -> False
 
+atPosInPattern :: Pattern -> Pos -> Maybe RawAtPos
+atPosInPattern (Id vn _ loc) pos = do
+  guard $ loc `contains` pos
+  Just $ RawAtName (qualName vn) loc
+atPosInPattern (TuplePattern pats _) pos =
+  msum $ map (`atPosInPattern` pos) pats
+atPosInPattern (RecordPattern fields _) pos =
+  msum $ map ((`atPosInPattern` pos) . snd) fields
+atPosInPattern (PatternParens pat _) pos =
+  atPosInPattern pat pos
+atPosInPattern (PatternAscription pat _ _) pos =
+  atPosInPattern pat pos
+atPosInPattern (PatternConstr _ _ pats _) pos =
+  msum $ map (`atPosInPattern` pos) pats
+atPosInPattern PatternLit{} _ = Nothing
+atPosInPattern Wildcard{} _ = Nothing
+
 atPosInExp :: Exp -> Pos -> Maybe RawAtPos
 atPosInExp (Var qn _ loc) pos = do
   guard $ loc `contains` pos
@@ -101,6 +118,9 @@ atPosInExp (Var qn _ loc) pos = do
 atPosInExp Literal{} _ = Nothing
 atPosInExp IntLit{} _ = Nothing
 atPosInExp FloatLit{} _ = Nothing
+
+atPosInExp (LetPat pat _ _ _ _) pos
+  | pat `contains` pos = atPosInPattern pat pos
 
 atPosInExp e pos =
   -- Use the Either monad for short-circuiting for efficiency reasons.
