@@ -20,11 +20,11 @@ main = mainWithOptions () [] "program line:col" $ \args () ->
         case atPos imports $ Pos file line' col' 0 of
           Nothing -> putStrLn "No information available."
           Just (AtName qn def loc) -> do
-            putStrLn $ pretty qn
-            putStrLn $ locStr loc
+            putStrLn $ "Name: " ++ pretty qn
+            putStrLn $ "Position: " ++ locStr loc
             case def of
               Nothing -> return ()
               Just (BoundTerm t defloc) -> do
                 putStrLn $ "Type: " ++ pretty t
-                putStrLn $ "Defined at: " ++ locStr (srclocOf defloc)
+                putStrLn $ "Definition: " ++ locStr (srclocOf defloc)
     _ -> Nothing
