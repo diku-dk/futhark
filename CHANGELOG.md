@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * New subcommand, `futhark query`, for looking up information about
+    the name at some position in a file.  Intended for editor
+    integration.
+
   * (Finally) automatic support for compute model 7.5 in the CUDA backend.
 
   * Somewhat better performance for very large target arrays for
