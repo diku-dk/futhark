@@ -222,7 +222,7 @@ Dec_ :: { UncheckedDec }
 ;
 
 SigExp :: { UncheckedSigExp }
-        : QualName            { let (v, loc) = $1 in SigVar v loc }
+        : QualName            { let (v, loc) = $1 in SigVar v NoInfo loc }
         | '{' Specs '}'  { SigSpecs $2 (srcspan $1 $>) }
         | SigExp with TypeRef { SigWith $1 $3 (srcspan $1 $>) }
         | '(' SigExp ')'      { SigParens $2 (srcspan $1 $>) }
@@ -267,7 +267,7 @@ ModExpAtom :: { UncheckedModExp }
             | '{' Decs '}' { ModDecs $2 (srcspan $1 $>) }
 
 SimpleSigExp :: { UncheckedSigExp }
-             : QualName            { let (v, loc) = $1 in SigVar v loc }
+             : QualName            { let (v, loc) = $1 in SigVar v NoInfo loc }
              | '(' SigExp ')'      { $2 }
 
 ModBind :: { ModBindBase NoInfo Name }

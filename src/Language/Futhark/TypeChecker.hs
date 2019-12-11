@@ -252,10 +252,10 @@ checkSigExp :: SigExpBase NoInfo Name -> TypeM (MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
   (mty, e') <- checkSigExp e
   return (mty, SigParens e' loc)
-checkSigExp (SigVar name loc) = do
+checkSigExp (SigVar name NoInfo loc) = do
   (name', mty) <- lookupMTy loc name
-  (mty', _) <- newNamesForMTy mty
-  return (mty', SigVar name' loc)
+  (mty', substs) <- newNamesForMTy mty
+  return (mty', SigVar name' (Info substs) loc)
 checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
   (abstypes, env, specs') <- checkSpecs specs

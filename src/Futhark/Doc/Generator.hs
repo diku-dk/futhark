@@ -428,7 +428,7 @@ modParamHtml (ModParam pname psig _ _ : mps) =
 
 synopsisSigExp :: SigExpBase Info VName -> DocM Html
 synopsisSigExp e = case e of
-  SigVar v _ -> qualNameHtml v
+  SigVar v _ _ -> qualNameHtml v
   SigParens e' _ -> parens <$> synopsisSigExp e'
   SigSpecs ss _ -> braces . (H.table ! A.class_ "specs") . mconcat <$> mapM synopsisSpec ss
   SigWith s (TypeRef v ps t _) _ -> do
