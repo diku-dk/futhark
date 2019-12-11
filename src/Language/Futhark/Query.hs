@@ -25,17 +25,26 @@ import Language.Futhark.Semantic
 import Language.Futhark.Traversals
 
 -- | What a name is bound to.
-data BoundTo = BoundTerm StructType Loc -- ^ Term-level variable.
+data BoundTo = BoundTerm StructType Loc
+             | BoundModule Loc
+             | BoundModuleType Loc
+             | BoundType Loc
+  deriving (Eq, Show)
+
+data Def = DefBound BoundTo | DefIndirect VName
   deriving (Eq, Show)
 
 -- | Where was a bound variable actually bound?  That is, what is the
 -- location of its definition?
 boundLoc :: BoundTo -> Loc
 boundLoc (BoundTerm _ loc) = loc
+boundLoc (BoundModule loc) = loc
+boundLoc (BoundModuleType loc) = loc
+boundLoc (BoundType loc) = loc
 
-patternBindings :: Pattern -> M.Map VName BoundTo
+patternBindings :: Pattern -> M.Map VName Def
 patternBindings (Id vn (Info t) loc) =
-  M.singleton vn $ BoundTerm (toStruct t) (locOf loc)
+  M.singleton vn $ DefBound $ BoundTerm (toStruct t) (locOf loc)
 patternBindings (TuplePattern pats _) =
   mconcat $ map patternBindings pats
 patternBindings (RecordPattern fields _) =
@@ -49,19 +58,19 @@ patternBindings (PatternAscription pat _ _) =
 patternBindings (PatternConstr _ _ pats _) =
   mconcat $ map patternBindings pats
 
-typeParamBindings :: TypeParamBase VName -> M.Map VName BoundTo
+typeParamBindings :: TypeParamBase VName -> M.Map VName Def
 typeParamBindings (TypeParamDim vn loc) =
-  M.singleton vn $ BoundTerm (Scalar $ Prim $ Signed Int32) (locOf loc)
+  M.singleton vn $ DefBound $ BoundTerm (Scalar $ Prim $ Signed Int32) (locOf loc)
 typeParamBindings TypeParamType{} =
   mempty
 
-expBindings :: Exp -> M.Map VName BoundTo
+expBindings :: Exp -> M.Map VName Def
 expBindings (LetPat pat e1 e2 _ _) =
   patternBindings pat <> expBindings e1 <> expBindings e2
 expBindings (Lambda params body _ _ _) =
   mconcat (map patternBindings params) <> expBindings body
 expBindings (LetFun name (tparams, params, _, Info ret,  e1) e2 loc) =
-  M.singleton name (BoundTerm name_t (locOf loc)) <>
+  M.singleton name (DefBound $ BoundTerm name_t (locOf loc)) <>
   mconcat (map typeParamBindings tparams) <>
   mconcat (map patternBindings params) <>
   expBindings e1 <> expBindings e2
@@ -78,9 +87,9 @@ expBindings e =
           modify (<>expBindings e')
           return e'
 
-valBindBindings :: ValBind -> M.Map VName BoundTo
+valBindBindings :: ValBind -> M.Map VName Def
 valBindBindings vbind =
-  M.insert (valBindName vbind) (BoundTerm vbind_t (locOf vbind)) $
+  M.insert (valBindName vbind) (DefBound $ BoundTerm vbind_t (locOf vbind)) $
   mconcat (map typeParamBindings (valBindTypeParams vbind)) <>
   mconcat (map patternBindings (valBindParams vbind)) <>
   expBindings (valBindBody vbind)
@@ -88,7 +97,11 @@ valBindBindings vbind =
           foldFunType (map patternStructType (valBindParams vbind)) $
           unInfo $ valBindRetType vbind
 
-modExpBindings :: ModExp -> M.Map VName BoundTo
+typeBindBindings :: TypeBind -> M.Map VName Def
+typeBindBindings tbind =
+  M.singleton (typeAlias tbind) $ DefBound $ BoundType $ locOf tbind
+
+modExpBindings :: ModExp -> M.Map VName Def
 modExpBindings ModVar{} =
   mempty
 modExpBindings (ModParens me _) =
@@ -97,27 +110,42 @@ modExpBindings ModImport{} =
   mempty
 modExpBindings (ModDecs decs _) =
   mconcat $ map decBindings decs
-modExpBindings (ModApply e1 e2 _ _ _) =
-  modExpBindings e1 <> modExpBindings e2
-modExpBindings (ModAscript e _ _ _) =
-  modExpBindings e
+modExpBindings (ModApply e1 e2 _ (Info substs) _) =
+  modExpBindings e1 <> modExpBindings e2 <> M.map DefIndirect substs
+modExpBindings (ModAscript e _ (Info substs) _) =
+  modExpBindings e <> M.map DefIndirect substs
 modExpBindings (ModLambda _ _ e _) =
   modExpBindings e
 
-modBindBindings :: ModBind -> M.Map VName BoundTo
-modBindBindings = modExpBindings . modExp
+modBindBindings :: ModBind -> M.Map VName Def
+modBindBindings mbind =
+  M.singleton (modName mbind) (DefBound $ BoundModule $ locOf mbind) <>
+  modExpBindings (modExp mbind) <>
+  case modSignature mbind of
+    Nothing -> mempty
+    Just (_, Info substs) ->
+      M.map DefIndirect substs
 
-decBindings :: Dec -> M.Map VName BoundTo
+sigBindBindings :: SigBind -> M.Map VName Def
+sigBindBindings sbind =
+  M.singleton (sigName sbind) (DefBound $ BoundModuleType $ locOf sbind)
+
+decBindings :: Dec -> M.Map VName Def
 decBindings (ValDec vbind) = valBindBindings vbind
+decBindings (TypeDec vbind) = typeBindBindings vbind
 decBindings (ModDec mbind) = modBindBindings mbind
+decBindings (SigDec mbind) = sigBindBindings mbind
 decBindings _ = mempty
 
 -- | All bindings of everything in the program.
-progBindings :: Prog -> M.Map VName BoundTo
+progBindings :: Prog -> M.Map VName Def
 progBindings = mconcat . map decBindings . progDecs
 
 allBindings :: Imports -> M.Map VName BoundTo
-allBindings = mconcat . map (progBindings . fileProg . snd)
+allBindings imports = M.mapMaybe forward defs
+  where defs = mconcat $ map (progBindings . fileProg . snd) imports
+        forward (DefBound x) = Just x
+        forward (DefIndirect v) = forward =<< M.lookup v defs
 
 data RawAtPos = RawAtName (QualName VName) SrcLoc
 
@@ -218,6 +246,25 @@ atPosInModExp (ModAscript e _ _ _) pos =
 atPosInModExp (ModLambda _ _ e _) pos =
   atPosInModExp e pos
 
+atPosInSpec :: Spec -> Pos -> Maybe RawAtPos
+atPosInSpec spec pos =
+  case spec of
+    ValSpec _ _ tdecl _ _ -> atPosInTypeExp (declaredType tdecl) pos
+    TypeAbbrSpec tbind -> atPosInTypeBind tbind pos
+    TypeSpec{} -> Nothing
+    ModSpec _ se _ _ -> atPosInSigExp se pos
+    IncludeSpec se _ -> atPosInSigExp se pos
+
+atPosInSigExp :: SigExp -> Pos -> Maybe RawAtPos
+atPosInSigExp se pos =
+  case se of
+    SigVar qn loc -> do guard $ loc `contains` pos
+                        Just $ RawAtName qn loc
+    SigParens e _ -> atPosInSigExp e pos
+    SigSpecs specs _ -> msum $ map (`atPosInSpec` pos) specs
+    SigWith e _ _ -> atPosInSigExp e pos
+    SigArrow _ e1 e2 _ -> atPosInSigExp e1 pos `mplus` atPosInSigExp e2 pos
+
 atPosInValBind :: ValBind -> Pos -> Maybe RawAtPos
 atPosInValBind vbind pos =
   msum (map (`atPosInPattern` pos) (valBindParams vbind)) `mplus`
@@ -228,7 +275,15 @@ atPosInTypeBind :: TypeBind -> Pos -> Maybe RawAtPos
 atPosInTypeBind = atPosInTypeExp . declaredType . typeExp
 
 atPosInModBind :: ModBind -> Pos -> Maybe RawAtPos
-atPosInModBind = atPosInModExp . modExp
+atPosInModBind (ModBind _ params sig e _ _) pos =
+  msum (map inParam params) `mplus`
+  atPosInModExp e pos `mplus`
+  case sig of Nothing -> Nothing
+              Just (se, _) -> atPosInSigExp se pos
+  where inParam (ModParam _ se _ _) = atPosInSigExp se pos
+
+atPosInSigBind :: SigBind -> Pos -> Maybe RawAtPos
+atPosInSigBind = atPosInSigExp . sigExp
 
 atPosInDec :: Dec -> Pos -> Maybe RawAtPos
 atPosInDec dec pos = do
@@ -237,6 +292,7 @@ atPosInDec dec pos = do
     ValDec vbind -> atPosInValBind vbind pos
     TypeDec tbind -> atPosInTypeBind tbind pos
     ModDec mbind -> atPosInModBind mbind pos
+    SigDec sbind -> atPosInSigBind sbind pos
     _ -> Nothing
 
 atPosInProg :: Prog -> Pos -> Maybe RawAtPos
