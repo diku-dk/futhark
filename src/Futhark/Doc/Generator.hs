@@ -495,7 +495,7 @@ typeExpHtml e = case e of
   TEUnique t _  -> ("*"<>) <$> typeExpHtml t
   TEArray at d _ -> do
     at' <- typeExpHtml at
-    d' <- dimDeclHtml d
+    d' <- dimExpHtml d
     return $ brackets d' <> at'
   TETuple ts _ -> parens . commas <$> mapM typeExpHtml ts
   TERecord fs _ -> braces . commas <$> mapM ppField fs
@@ -567,8 +567,13 @@ dimDeclHtml AnyDim = return mempty
 dimDeclHtml (NamedDim v) = qualNameHtml v
 dimDeclHtml (ConstDim n) = return $ toHtml (show n)
 
+dimExpHtml :: DimExp VName -> DocM Html
+dimExpHtml DimExpAny = return mempty
+dimExpHtml (DimExpNamed v _) = qualNameHtml v
+dimExpHtml (DimExpConst n _) = return $ toHtml (show n)
+
 typeArgExpHtml :: TypeArgExp VName -> DocM Html
-typeArgExpHtml (TypeArgExpDim d _) = dimDeclHtml d
+typeArgExpHtml (TypeArgExpDim d _) = dimExpHtml d
 typeArgExpHtml (TypeArgExpType d) = typeExpHtml d
 
 typeParamHtml :: TypeParam -> Html

@@ -103,6 +103,10 @@ instance IsName vn => Pretty (DimDecl vn) where
   ppr (NamedDim v) = ppr v
   ppr (ConstDim n) = ppr n
 
+instance IsName vn => Pretty (DimExp vn) where
+  ppr DimExpAny         = mempty
+  ppr (DimExpNamed v _) = ppr v
+  ppr (DimExpConst n _) = ppr n
 
 instance IsName vn => Pretty (ShapeDecl (DimDecl vn)) where
   ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
@@ -151,7 +155,7 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
 
 instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
-  ppr (TEArray at d _) = ppr (ShapeDecl [d]) <> ppr at
+  ppr (TEArray at d _) = brackets (ppr d) <> ppr at
   ppr (TETuple ts _) = parens $ commasep $ map ppr ts
   ppr (TERecord fs _) = braces $ commasep $ map ppField fs
     where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
@@ -165,8 +169,8 @@ instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
     where ppConstr (name, fs) = text "#" <> ppr name <+> sep (map ppr fs)
 
 instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
-  ppr (TypeArgExpDim d _) = ppr $ ShapeDecl [d]
-  ppr (TypeArgExpType d) = ppr d
+  ppr (TypeArgExpDim d _) = brackets $ ppr d
+  ppr (TypeArgExpType t) = ppr t
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeDeclBase f vn) where
   ppr x = pprAnnot (declaredType x) (expandedType x)

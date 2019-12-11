@@ -27,6 +27,7 @@ module Language.Futhark.Syntax
   , qualNameFromTypeName
   , TypeBase(..)
   , TypeArg(..)
+  , DimExp(..)
   , TypeExp(..)
   , TypeArgExp(..)
   , PName(..)
@@ -387,12 +388,26 @@ type StructType = TypeBase (DimDecl VName) ()
 -- | A value type contains full, manifest size information.
 type ValueType = TypeBase Int32 ()
 
+-- | A dimension declaration expression for use in a 'TypeExp'.
+data DimExp vn = DimExpNamed (QualName vn) SrcLoc
+                 -- ^ The size of the dimension is this name, which
+                 -- must be in scope.
+               | DimExpConst Int SrcLoc
+                  -- ^ The size is a constant.
+               | DimExpAny
+                  -- ^ No dimension declaration.
+                deriving Show
+deriving instance Eq (DimExp Name)
+deriving instance Eq (DimExp VName)
+deriving instance Ord (DimExp Name)
+deriving instance Ord (DimExp VName)
+
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
 data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TETuple [TypeExp vn] SrcLoc
                 | TERecord [(Name, TypeExp vn)] SrcLoc
-                | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
+                | TEArray (TypeExp vn) (DimExp vn) SrcLoc
                 | TEUnique (TypeExp vn) SrcLoc
                 | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
                 | TEArrow (Maybe vn) (TypeExp vn) (TypeExp vn) SrcLoc
@@ -413,7 +428,7 @@ instance Located (TypeExp vn) where
   locOf (TEArrow _ _ _ loc) = locOf loc
   locOf (TESum _ loc)      = locOf loc
 
-data TypeArgExp vn = TypeArgExpDim (DimDecl vn) SrcLoc
+data TypeArgExp vn = TypeArgExpDim (DimExp vn) SrcLoc
                    | TypeArgExpType (TypeExp vn)
                 deriving (Show)
 deriving instance Eq (TypeArgExp Name)

@@ -1759,7 +1759,7 @@ typeExpForError _ (E.TEVar qn _) =
   return [ErrorString $ pretty qn]
 typeExpForError cm (E.TEUnique te _) = ("*":) <$> typeExpForError cm te
 typeExpForError cm (E.TEArray te d _) = do
-  d' <- dimDeclForError cm d
+  d' <- dimExpForError cm d
   te' <- typeExpForError cm te
   return $ ["[", d', "]"] ++ te'
 typeExpForError cm (E.TETuple tes _) = do
@@ -1776,7 +1776,7 @@ typeExpForError cm (E.TEArrow _ t1 t2 _) = do
 typeExpForError cm (E.TEApply t arg _) = do
   t' <- typeExpForError cm t
   arg' <- case arg of TypeArgExpType argt -> typeExpForError cm argt
-                      TypeArgExpDim d _   -> pure <$> dimDeclForError cm d
+                      TypeArgExpDim d _   -> pure <$> dimExpForError cm d
   return $ t' ++ [" "] ++ arg'
 typeExpForError cm (E.TESum cs _) = do
   cs' <- mapM (onClause . snd) cs
@@ -1785,8 +1785,8 @@ typeExpForError cm (E.TESum cs _) = do
           c' <- mapM (typeExpForError cm) c
           return $ intercalate [" "] c'
 
-dimDeclForError :: ConstParams -> E.DimDecl VName -> InternaliseM (ErrorMsgPart SubExp)
-dimDeclForError cm (NamedDim d) = do
+dimExpForError :: ConstParams -> E.DimExp VName -> InternaliseM (ErrorMsgPart SubExp)
+dimExpForError cm (DimExpNamed d _) = do
   substs <- asks $ M.lookup (E.qualLeaf d) . envSubsts
   let fname = nameFromString $ pretty (E.qualLeaf d) ++ "f"
   d' <- case (substs, lookup fname cm) of
@@ -1794,9 +1794,9 @@ dimDeclForError cm (NamedDim d) = do
           (_, Just v)   -> return $ I.Var v
           _             -> return $ I.Var $ E.qualLeaf d
   return $ ErrorInt32 d'
-dimDeclForError _ (ConstDim d) =
+dimExpForError _ (DimExpConst d _) =
   return $ ErrorString $ pretty d
-dimDeclForError _ AnyDim = return ""
+dimExpForError _ DimExpAny = return ""
 
 -- A smart constructor that compacts neighbouring literals for easier
 -- reading in the IR.
