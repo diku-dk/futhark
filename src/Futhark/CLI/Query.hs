@@ -27,4 +27,10 @@ main = mainWithOptions () [] "program line:col" $ \args () ->
               Just (BoundTerm t defloc) -> do
                 putStrLn $ "Type: " ++ pretty t
                 putStrLn $ "Definition: " ++ locStr (srclocOf defloc)
+              Just (BoundType defloc) ->
+                putStrLn $ "Definition: " ++ locStr (srclocOf defloc)
+              Just (BoundModule defloc) ->
+                putStrLn $ "Definition: " ++ locStr (srclocOf defloc)
+              Just (BoundModuleType defloc) ->
+                putStrLn $ "Definition: " ++ locStr (srclocOf defloc)
     _ -> Nothing
