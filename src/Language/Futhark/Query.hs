@@ -49,9 +49,23 @@ patternBindings (PatternAscription pat _ _) =
 patternBindings (PatternConstr _ _ pats _) =
   mconcat $ map patternBindings pats
 
+typeParamBindings :: TypeParamBase VName -> M.Map VName BoundTo
+typeParamBindings (TypeParamDim vn loc) =
+  M.singleton vn $ BoundTerm (Scalar $ Prim $ Signed Int32) (locOf loc)
+typeParamBindings TypeParamType{} =
+  mempty
+
 expBindings :: Exp -> M.Map VName BoundTo
 expBindings (LetPat pat e1 e2 _ _) =
   patternBindings pat <> expBindings e1 <> expBindings e2
+expBindings (Lambda params body _ _ _) =
+  mconcat (map patternBindings params) <> expBindings body
+expBindings (LetFun name (tparams, params, _, Info ret,  e1) e2 loc) =
+  M.singleton name (BoundTerm name_t (locOf loc)) <>
+  mconcat (map typeParamBindings tparams) <>
+  mconcat (map patternBindings params) <>
+  expBindings e1 <> expBindings e2
+  where name_t = foldFunType (map patternStructType params) ret
 expBindings e =
   execState (astMap mapper e) mempty
   where mapper = ASTMapper { mapOnExp = onExp
@@ -67,6 +81,7 @@ expBindings e =
 valBindBindings :: ValBind -> M.Map VName BoundTo
 valBindBindings vbind =
   M.insert (valBindName vbind) (BoundTerm vbind_t (locOf vbind)) $
+  mconcat (map typeParamBindings (valBindTypeParams vbind)) <>
   mconcat (map patternBindings (valBindParams vbind)) <>
   expBindings (valBindBody vbind)
   where vbind_t =
@@ -112,6 +127,33 @@ contains a pos =
     Loc start end -> pos >= start && pos <= end
     NoLoc -> False
 
+atPosInTypeExp :: TypeExp VName -> Pos -> Maybe RawAtPos
+atPosInTypeExp te pos =
+  case te of
+    TEVar qn loc -> do
+      guard $ loc `contains` pos
+      Just $ RawAtName qn loc
+    TETuple es _ ->
+      msum $ map (`atPosInTypeExp` pos) es
+    TERecord fields _ ->
+      msum $ map ((`atPosInTypeExp` pos) . snd) fields
+    TEArray te' dim loc ->
+      atPosInTypeExp te' pos `mplus` inDim dim loc
+    TEUnique te' _ ->
+      atPosInTypeExp te' pos
+    TEApply e1 arg _ ->
+      atPosInTypeExp e1 pos `mplus` inArg arg
+    TEArrow _ e1 e2 _ ->
+      atPosInTypeExp e1 pos `mplus` atPosInTypeExp e2 pos
+    TESum cs _ ->
+      msum $ map (`atPosInTypeExp` pos) $ concatMap snd cs
+  where inArg (TypeArgExpDim dim loc) = inDim dim loc
+        inArg (TypeArgExpType e2) = atPosInTypeExp e2 pos
+        inDim (NamedDim qn) loc = do
+          guard $ loc `contains` pos
+          Just $ RawAtName qn loc
+        inDim _ _ = Nothing
+
 atPosInPattern :: Pattern -> Pos -> Maybe RawAtPos
 atPosInPattern (Id vn _ loc) pos = do
   guard $ loc `contains` pos
@@ -122,8 +164,8 @@ atPosInPattern (RecordPattern fields _) pos =
   msum $ map ((`atPosInPattern` pos) . snd) fields
 atPosInPattern (PatternParens pat _) pos =
   atPosInPattern pat pos
-atPosInPattern (PatternAscription pat _ _) pos =
-  atPosInPattern pat pos
+atPosInPattern (PatternAscription pat tdecl _) pos =
+  atPosInPattern pat pos `mplus` atPosInTypeExp (declaredType tdecl) pos
 atPosInPattern (PatternConstr _ _ pats _) pos =
   msum $ map (`atPosInPattern` pos) pats
 atPosInPattern PatternLit{} _ = Nothing
@@ -177,7 +219,13 @@ atPosInModExp (ModLambda _ _ e _) pos =
   atPosInModExp e pos
 
 atPosInValBind :: ValBind -> Pos -> Maybe RawAtPos
-atPosInValBind = atPosInExp . valBindBody
+atPosInValBind vbind pos =
+  msum (map (`atPosInPattern` pos) (valBindParams vbind)) `mplus`
+  atPosInExp (valBindBody vbind) pos `mplus`
+  join (atPosInTypeExp <$> valBindRetDecl vbind <*> pure pos)
+
+atPosInTypeBind :: TypeBind -> Pos -> Maybe RawAtPos
+atPosInTypeBind = atPosInTypeExp . declaredType . typeExp
 
 atPosInModBind :: ModBind -> Pos -> Maybe RawAtPos
 atPosInModBind = atPosInModExp . modExp
@@ -187,6 +235,7 @@ atPosInDec dec pos = do
   guard $ dec `contains` pos
   case dec of
     ValDec vbind -> atPosInValBind vbind pos
+    TypeDec tbind -> atPosInTypeBind tbind pos
     ModDec mbind -> atPosInModBind mbind pos
     _ -> Nothing
 
