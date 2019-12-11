@@ -147,7 +147,7 @@ toValueType (TEArray t d _) = do
   d' <- constantDim d
   ValueType ds t' <- toValueType t
   return $ ValueType (d':ds) t'
-  where constantDim (ConstDim k) = Right k
+  where constantDim (DimExpConst k _) = Right k
         constantDim _ = Left "Array has non-constant dimension declaration."
 toValueType (TEVar (QualName [] v) _)
   | Just t <- M.lookup v namesToPrimTypes = Right $ ValueType [] t

@@ -423,17 +423,17 @@ TypeExp :: { UncheckedTypeExp }
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
            { TEUnique $2 (srcspan $1 $>) }
-         | '[' DimDecl ']' TypeExpTerm %prec indexprec
-           { TEArray $4 (fst $2) (srcspan $1 $>) }
+         | '[' DimExp ']' TypeExpTerm %prec indexprec
+           { TEArray $4 $2 (srcspan $1 $>) }
          | '['  ']' TypeExpTerm %prec indexprec
-           { TEArray $3 AnyDim (srcspan $1 $>) }
+           { TEArray $3 DimExpAny (srcspan $1 $>) }
          | TypeExpApply %prec sumprec { $1 }
 
          -- Errors
-         | '[' DimDecl ']' %prec bottom
+         | '[' DimExp ']' %prec bottom
            {% parseErrorAt (srcspan $1 $>) $ Just $
                 unlines ["missing array row type.",
-                         "Did you mean []"  ++ pretty (fst $2) ++ "?"]
+                         "Did you mean []"  ++ pretty $2 ++ "?"]
            }
 
 SumType :: { UncheckedTypeExp }
@@ -455,12 +455,12 @@ SumClause :: { (Name, [UncheckedTypeExp], SrcLoc) }
 TypeExpApply :: { UncheckedTypeExp }
               : TypeExpApply TypeArg
                 { TEApply $1 $2 (srcspan $1 $>) }
-              | 'id[' DimDecl ']'
+              | 'id[' DimExp ']'
                 { let L loc (INDEXING v) = $1
-                  in TEApply (TEVar (qualName v) loc) (TypeArgExpDim (fst $2) loc) (srcspan $1 $>) }
-              | 'qid[' DimDecl ']'
+                  in TEApply (TEVar (qualName v) loc) (TypeArgExpDim $2 loc) (srcspan $1 $>) }
+              | 'qid[' DimExp ']'
                 { let L loc (QUALINDEXING qs v) = $1
-                  in TEApply (TEVar (QualName qs v) loc) (TypeArgExpDim (fst $2) loc) (srcspan $1 $>) }
+                  in TEApply (TEVar (QualName qs v) loc) (TypeArgExpDim $2 loc) (srcspan $1 $>) }
               | TypeExpAtom
                 { $1 }
 
@@ -477,8 +477,8 @@ Constr :: { (Name, SrcLoc) }
         : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, srclocOf $1) }
 
 TypeArg :: { TypeArgExp Name }
-         : '[' DimDecl ']' { TypeArgExpDim (fst $2) (srcspan $1 $>) }
-         | '[' ']'         { TypeArgExpDim AnyDim (srcspan $1 $>) }
+         : '[' DimExp ']' { TypeArgExpDim $2 (srcspan $1 $>) }
+         | '[' ']'         { TypeArgExpDim DimExpAny (srcspan $1 $>) }
          | TypeExpAtom     { TypeArgExpType $1 }
 
 FieldType :: { (Name, UncheckedTypeExp) }
@@ -492,12 +492,12 @@ TupleTypes :: { [UncheckedTypeExp] }
             : TypeExp                { [$1] }
             | TypeExp ',' TupleTypes { $1 : $3 }
 
-DimDecl :: { (DimDecl Name, SrcLoc) }
+DimExp :: { DimExp Name }
         : QualName
-          { (NamedDim (fst $1), snd $1) }
+          { DimExpNamed (fst $1) (snd $1) }
         | intlit
           { let L loc (INTLIT n) = $1
-            in (ConstDim (fromIntegral n), loc) }
+            in DimExpConst (fromIntegral n) loc }
 
 FunParam :: { PatternBase NoInfo Name }
 FunParam : InnerPattern { $1 }

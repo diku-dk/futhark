@@ -137,8 +137,8 @@ atPosInTypeExp te pos =
       msum $ map (`atPosInTypeExp` pos) es
     TERecord fields _ ->
       msum $ map ((`atPosInTypeExp` pos) . snd) fields
-    TEArray te' dim loc ->
-      atPosInTypeExp te' pos `mplus` inDim dim loc
+    TEArray te' dim _ ->
+      atPosInTypeExp te' pos `mplus` inDim dim
     TEUnique te' _ ->
       atPosInTypeExp te' pos
     TEApply e1 arg _ ->
@@ -147,12 +147,12 @@ atPosInTypeExp te pos =
       atPosInTypeExp e1 pos `mplus` atPosInTypeExp e2 pos
     TESum cs _ ->
       msum $ map (`atPosInTypeExp` pos) $ concatMap snd cs
-  where inArg (TypeArgExpDim dim loc) = inDim dim loc
+  where inArg (TypeArgExpDim dim _) = inDim dim
         inArg (TypeArgExpType e2) = atPosInTypeExp e2 pos
-        inDim (NamedDim qn) loc = do
+        inDim (DimExpNamed qn loc) = do
           guard $ loc `contains` pos
           Just $ RawAtName qn loc
-        inDim _ _ = Nothing
+        inDim _ = Nothing
 
 atPosInPattern :: Pattern -> Pos -> Maybe RawAtPos
 atPosInPattern (Id vn _ loc) pos = do

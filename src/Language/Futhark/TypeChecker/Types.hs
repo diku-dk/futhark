@@ -139,17 +139,18 @@ checkTypeExp t@(TERecord fs loc) = do
           foldl' max Unlifted ls)
 checkTypeExp (TEArray t d loc) = do
   (t', st, l) <- checkTypeExp t
-  d' <- checkDimDecl d
-  case (l, arrayOf st (ShapeDecl [d']) Nonunique) of
+  (d', d'') <- checkDimExp d
+  case (l, arrayOf st (ShapeDecl [d'']) Nonunique) of
     (Unlifted, st') -> return (TEArray t' d' loc, st', Unlifted)
     _ -> throwError $ TypeError loc $
          "Cannot create array with elements of type " ++ quote (pretty st) ++ " (might be functional)."
-  where checkDimDecl AnyDim =
-          return AnyDim
-        checkDimDecl (ConstDim k) =
-          return $ ConstDim k
-        checkDimDecl (NamedDim v) =
-          NamedDim <$> checkNamedDim loc v
+  where checkDimExp DimExpAny =
+          return (DimExpAny, AnyDim)
+        checkDimExp (DimExpConst k dloc) =
+          return (DimExpConst k dloc, ConstDim k)
+        checkDimExp (DimExpNamed v dloc) = do
+          v' <-  checkNamedDim loc v
+          return (DimExpNamed v' dloc, NamedDim v')
 checkTypeExp (TEUnique t loc) = do
   (t', st, l) <- checkTypeExp t
   unless (mayContainArray st) $
@@ -197,15 +198,15 @@ checkTypeExp ote@TEApply{} = do
         rootAndArgs te' = throwError $ TypeError (srclocOf te') $
                           "Type '" ++ pretty te' ++ "' is not a type constructor."
 
-        checkArgApply (TypeParamDim pv _) (TypeArgExpDim (NamedDim v) loc) = do
+        checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpNamed v dloc) loc) = do
           v' <- checkNamedDim loc v
-          return (TypeArgExpDim (NamedDim v') loc,
+          return (TypeArgExpDim (DimExpNamed v' dloc) loc,
                   M.singleton pv $ DimSub $ NamedDim v')
-        checkArgApply (TypeParamDim pv _) (TypeArgExpDim (ConstDim x) loc) =
-          return (TypeArgExpDim (ConstDim x) loc,
+        checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpConst x dloc) loc) =
+          return (TypeArgExpDim (DimExpConst x dloc) loc,
                   M.singleton pv $ DimSub $ ConstDim x)
-        checkArgApply (TypeParamDim pv _) (TypeArgExpDim AnyDim loc) =
-          return (TypeArgExpDim AnyDim loc,
+        checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) =
+          return (TypeArgExpDim DimExpAny loc,
                   M.singleton pv $ DimSub AnyDim)
 
         checkArgApply (TypeParamType l pv _) (TypeArgExpType te) = do
@@ -340,19 +341,19 @@ typeExpUses :: TypeExp VName -> ([VName], [VName])
 typeExpUses (TEVar _ _) = mempty
 typeExpUses (TETuple tes _) = foldMap typeExpUses tes
 typeExpUses (TERecord fs _) = foldMap (typeExpUses . snd) fs
-typeExpUses (TEArray te d _) = typeExpUses te <> dimDeclUses d
+typeExpUses (TEArray te d _) = typeExpUses te <> dimExpUses d
 typeExpUses (TEUnique te _) = typeExpUses te
 typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
-  where typeArgUses (TypeArgExpDim d _) = dimDeclUses d
+  where typeArgUses (TypeArgExpDim d _) = dimExpUses d
         typeArgUses (TypeArgExpType tae) = typeExpUses tae
 typeExpUses (TEArrow _ t1 t2 _) =
   let (pos, neg) = typeExpUses t1 <> typeExpUses t2
   in (mempty, pos <> neg)
 typeExpUses (TESum cs _) = foldMap (mconcat . fmap typeExpUses . snd) cs
 
-dimDeclUses :: DimDecl VName -> ([VName], [VName])
-dimDeclUses (NamedDim v) = ([qualLeaf v], [])
-dimDeclUses _ = mempty
+dimExpUses :: DimExp VName -> ([VName], [VName])
+dimExpUses (DimExpNamed v _) = ([qualLeaf v], [])
+dimExpUses _ = mempty
 
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
