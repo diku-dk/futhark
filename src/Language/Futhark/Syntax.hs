@@ -874,7 +874,7 @@ instance Located (SpecBase f vn) where
   locOf (ModSpec _ _ _ loc)    = locOf loc
   locOf (IncludeSpec _ loc)    = locOf loc
 
-data SigExpBase f vn = SigVar (QualName vn) SrcLoc
+data SigExpBase f vn = SigVar (QualName vn) (f (M.Map VName VName)) SrcLoc
                      | SigParens (SigExpBase f vn) SrcLoc
                      | SigSpecs [SpecBase f vn] SrcLoc
                      | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
@@ -889,7 +889,7 @@ instance Located (TypeRefBase f vn) where
   locOf (TypeRef _ _ _ loc) = locOf loc
 
 instance Located (SigExpBase f vn) where
-  locOf (SigVar _ loc)       = locOf loc
+  locOf (SigVar _ _ loc)     = locOf loc
   locOf (SigParens _ loc)    = locOf loc
   locOf (SigSpecs _ loc)     = locOf loc
   locOf (SigWith _ _ loc)    = locOf loc

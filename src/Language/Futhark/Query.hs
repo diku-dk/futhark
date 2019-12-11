@@ -101,6 +101,11 @@ typeBindBindings :: TypeBind -> M.Map VName Def
 typeBindBindings tbind =
   M.singleton (typeAlias tbind) $ DefBound $ BoundType $ locOf tbind
 
+modParamBindings :: ModParam -> M.Map VName Def
+modParamBindings (ModParam p se _ loc) =
+  M.singleton p (DefBound $ BoundModule $ locOf loc) <>
+  sigExpBindings se
+
 modExpBindings :: ModExp -> M.Map VName Def
 modExpBindings ModVar{} =
   mempty
@@ -114,21 +119,47 @@ modExpBindings (ModApply e1 e2 _ (Info substs) _) =
   modExpBindings e1 <> modExpBindings e2 <> M.map DefIndirect substs
 modExpBindings (ModAscript e _ (Info substs) _) =
   modExpBindings e <> M.map DefIndirect substs
-modExpBindings (ModLambda _ _ e _) =
-  modExpBindings e
+modExpBindings (ModLambda p _ e _) =
+  modParamBindings p <> modExpBindings e
 
 modBindBindings :: ModBind -> M.Map VName Def
 modBindBindings mbind =
   M.singleton (modName mbind) (DefBound $ BoundModule $ locOf mbind) <>
+  mconcat (map modParamBindings (modParams mbind)) <>
   modExpBindings (modExp mbind) <>
   case modSignature mbind of
     Nothing -> mempty
     Just (_, Info substs) ->
       M.map DefIndirect substs
 
+specBindings :: Spec -> M.Map VName Def
+specBindings spec =
+  case spec of
+    ValSpec v _ tdecl _ loc ->
+      M.singleton v $ DefBound $
+      BoundTerm (unInfo $ expandedType tdecl) (locOf loc)
+    TypeAbbrSpec tbind -> typeBindBindings tbind
+    TypeSpec _ v _ _ loc ->
+      M.singleton v $ DefBound $ BoundType $ locOf loc
+    ModSpec v se _ loc ->
+      M.singleton v (DefBound $ BoundModuleType $ locOf loc) <>
+      sigExpBindings se
+    IncludeSpec se _ -> sigExpBindings se
+
+sigExpBindings :: SigExp -> M.Map VName Def
+sigExpBindings se =
+  case se of
+    SigVar _ (Info substs) _ -> M.map DefIndirect substs
+    SigParens e _ -> sigExpBindings e
+    SigSpecs specs _ -> mconcat $ map specBindings specs
+    SigWith e _ _ -> sigExpBindings e
+    SigArrow _ e1 e2 _ -> sigExpBindings e1 <> sigExpBindings e2
+
 sigBindBindings :: SigBind -> M.Map VName Def
 sigBindBindings sbind =
-  M.singleton (sigName sbind) (DefBound $ BoundModuleType $ locOf sbind)
+  M.singleton (sigName sbind) (DefBound $ BoundModuleType $ locOf sbind) <>
+  sigExpBindings (sigExp sbind)
+
 
 decBindings :: Dec -> M.Map VName Def
 decBindings (ValDec vbind) = valBindBindings vbind
@@ -258,8 +289,8 @@ atPosInSpec spec pos =
 atPosInSigExp :: SigExp -> Pos -> Maybe RawAtPos
 atPosInSigExp se pos =
   case se of
-    SigVar qn loc -> do guard $ loc `contains` pos
-                        Just $ RawAtName qn loc
+    SigVar qn _ loc -> do guard $ loc `contains` pos
+                          Just $ RawAtName qn loc
     SigParens e _ -> atPosInSigExp e pos
     SigSpecs specs _ -> msum $ map (`atPosInSpec` pos) specs
     SigWith e _ _ -> atPosInSigExp e pos

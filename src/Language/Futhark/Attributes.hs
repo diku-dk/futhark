@@ -833,7 +833,7 @@ progModuleTypes = mconcat . map onDec . progDecs
 
         onModParam = onSigExp . modParamType
 
-        onSigExp (SigVar v _) = S.singleton $ qualLeaf v
+        onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
         onSigExp (SigParens e _) = onSigExp e
         onSigExp SigSpecs{} = mempty
         onSigExp (SigWith e _ _) = onSigExp e

@@ -396,7 +396,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
     text "include" <+> ppr e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SigExpBase f vn) where
-  ppr (SigVar v _) = ppr v
+  ppr (SigVar v _ _) = ppr v
   ppr (SigParens e _) = parens $ ppr e
   ppr (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ss)
   ppr (SigWith s (TypeRef v ps td _) _) =
