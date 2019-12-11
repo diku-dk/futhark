@@ -221,7 +221,14 @@ allocStms merge = runWriterT . zipWithM allocation merge
               bound = MemArray bt shape NoUniqueness $ ArrayIn mem v_ixfun
           tell [Let (Pattern [] [PatElem v_copy bound]) (defAux ()) $
                 BasicOp $ Copy v]
-          return (f, Var v_copy)
+          -- It is important that we treat this as a consumption, to
+          -- avoid the Copy from being hoisted out of any enclosing
+          -- loops.  Since we re-use (=overwrite) memory in the loop,
+          -- the copy is critical for initialisation.  See issue #816.
+          let uniqueMemInfo (MemArray pt pshape _ ret) =
+                MemArray pt pshape Unique ret
+              uniqueMemInfo info = info
+          return (uniqueMemInfo <$> f, Var v_copy)
         allocation (f, se) _ =
           return (f, se)
 
