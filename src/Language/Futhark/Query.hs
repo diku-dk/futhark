@@ -269,6 +269,9 @@ atPosInExp (LetWith a b _ _ _ _ _) pos
 atPosInExp (DoLoop merge _ _ _ _) pos
   | merge `contains` pos = atPosInPattern merge pos
 
+atPosInExp (Ascript _ tdecl _ _) pos
+  | tdecl `contains` pos = atPosInTypeExp (declaredType tdecl) pos
+
 atPosInExp e pos = do
   guard $ e `contains` pos
   -- Use the Either monad for short-circuiting for efficiency reasons.
