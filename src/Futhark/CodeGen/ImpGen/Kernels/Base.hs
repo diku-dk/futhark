@@ -134,13 +134,16 @@ compileThreadExp dest e =
 -- multidimensional loops, use 'groupCoverSpace'.
 kernelLoop :: Imp.Exp -> Imp.Exp -> Imp.Exp
            -> (Imp.Exp -> InKernelGen ()) -> InKernelGen ()
-kernelLoop tid num_threads n f = do
-  -- Compute how many elements this thread is responsible for.
-  -- Formula: (n - tid) / num_threads (rounded up).
-  let elems_for_this = (n - tid) `quotRoundingUp` num_threads
+kernelLoop tid num_threads n f =
+  if n == num_threads then
+    f tid
+  else do
+    -- Compute how many elements this thread is responsible for.
+    -- Formula: (n - tid) / num_threads (rounded up).
+    let elems_for_this = (n - tid) `quotRoundingUp` num_threads
 
-  sFor "i" elems_for_this $ \i -> f $
-    i * num_threads + tid
+    sFor "i" elems_for_this $ \i -> f $
+      i * num_threads + tid
 
 -- | Assign iterations of a for-loop to threads in the workgroup.  The
 -- passed-in function is invoked with the (symbolic) iteration.  For
