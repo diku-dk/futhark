@@ -605,7 +605,7 @@ data ExpBase f vn =
             | Parens (ExpBase f vn) SrcLoc
             -- ^ A parenthesized expression.
 
-            | QualParens (QualName vn) (ExpBase f vn) SrcLoc
+            | QualParens (QualName vn, SrcLoc) (ExpBase f vn) SrcLoc
 
             | TupLit    [ExpBase f vn] SrcLoc
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.

@@ -628,15 +628,16 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '['       ']'                  { ArrayLit [] NoInfo (srcspan $1 $>) }
 
      | QualVarSlice FieldAccesses
-       { let (v,slice,loc) = $1
-         in foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
-                  (Index (Var v NoInfo loc) slice NoInfo loc)
+       { let ((v, vloc),slice,loc) = $1
+         in foldl (\x (y, _) -> Project y x NoInfo (srcspan x (srclocOf x)))
+                  (Index (Var v NoInfo vloc) slice NoInfo (srcspan vloc loc))
                   $2 }
      | QualName
        { Var (fst $1) NoInfo (snd $1) }
      | '{' Fields '}' { RecordLit $2 (srcspan $1 $>) }
      | 'qid.(' Exp ')'
-       { let L loc (QUALPAREN qs name) = $1 in QualParens (QualName qs name) $2 loc }
+       { let L loc (QUALPAREN qs name) = $1 in
+         QualParens (QualName qs name, loc) $2 (srcspan $1 $>) }
 
      -- Operator sections.
      | '(' UnOp ')'
@@ -717,7 +718,7 @@ LetExp :: { UncheckedExp }
          in LetFun name ($3, fst $4 : snd $4, (fmap declaredType $5), NoInfo, $7) $8 (srcspan $1 $>) }
 
      | let VarSlice '=' Exp LetBody
-                      { let (v,slice,loc) = $2; ident = Ident v NoInfo loc
+                      { let ((v,_),slice,loc) = $2; ident = Ident v NoInfo loc
                         in LetWith ident ident slice $4 $5 NoInfo (srcspan $1 $>) }
 
 LetBody :: { UncheckedExp }
@@ -797,16 +798,17 @@ LoopForm : for VarId '<' Exp
          | while Exp
            { While $2 }
 
-VarSlice :: { (Name, [UncheckedDimIndex], SrcLoc) }
+VarSlice :: { ((Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
           : 'id[' DimIndices ']'
-              { let L _ (INDEXING v) = $1
-                in (v, $2, srcspan $1 $>) }
+              { let L vloc (INDEXING v) = $1
+                in ((v, vloc), $2, srcspan $1 $>) }
 
-QualVarSlice :: { (QualName Name, [UncheckedDimIndex], SrcLoc) }
+QualVarSlice :: { ((QualName Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
               : VarSlice
-                { let (x, y, z) = $1 in (qualName x, y, z) }
+                { let ((v, vloc), y, loc) = $1 in ((qualName v, vloc), y, loc) }
               | 'qid[' DimIndices ']'
-                { let L _ (QUALINDEXING qs v) = $1 in (QualName qs v, $2, srcspan $1 $>) }
+                { let L vloc (QUALINDEXING qs v) = $1
+                  in ((QualName qs v, vloc), $2, srcspan $1 $>) }
 
 DimIndex :: { UncheckedDimIndex }
          : Exp2                   { DimFix $1 }

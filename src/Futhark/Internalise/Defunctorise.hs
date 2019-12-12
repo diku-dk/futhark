@@ -213,7 +213,7 @@ transformNames x = do
         onExp scope e =
           -- One expression is tricky, because it interacts with scoping rules.
           case e of
-            QualParens mn e' _ ->
+            QualParens (mn, _) e' _ ->
               case lookupMod' mn scope of
                 Left err -> error err
                 Right mod ->

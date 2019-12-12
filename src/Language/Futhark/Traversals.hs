@@ -59,8 +59,9 @@ instance ASTMappable (ExpBase Info VName) where
     FloatLit val <$> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Parens e loc) =
     Parens <$> mapOnExp tv e <*> pure loc
-  astMap tv (QualParens name e loc) =
-    QualParens <$> mapOnQualName tv name <*> mapOnExp tv e <*> pure loc
+  astMap tv (QualParens (name, nameloc) e loc) =
+    QualParens <$> ((,) <$> mapOnQualName tv name <*> pure nameloc) <*>
+    mapOnExp tv e <*> pure loc
   astMap tv (TupLit els loc) =
     TupLit <$> mapM (mapOnExp tv) els <*> pure loc
   astMap tv (RecordLit fields loc) =
@@ -112,7 +113,7 @@ instance ASTMappable (ExpBase Info VName) where
     Project field <$> mapOnExp tv e <*> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (Index arr idxexps t loc) =
     Index <$>
-    astMap tv arr <*>
+    mapOnExp tv arr <*>
     mapM (astMap tv) idxexps <*>
     traverse (mapOnPatternType tv) t <*>
     pure loc
@@ -156,8 +157,8 @@ instance ASTMappable (ExpBase Info VName) where
 
 instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (For i bound) = For <$> astMap tv i <*> astMap tv bound
-  astMap tv (ForIn pat e) = ForIn <$> astMap tv pat <*> astMap tv e
-  astMap tv (While e)     = While <$> astMap tv e
+  astMap tv (ForIn pat e) = ForIn <$> astMap tv pat <*> mapOnExp tv e
+  astMap tv (While e)     = While <$> mapOnExp tv e
 
 instance ASTMappable (TypeExp VName) where
   astMap tv (TEVar qn loc) = TEVar <$> mapOnQualName tv qn <*> pure loc
