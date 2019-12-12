@@ -21,7 +21,7 @@ main = mainWithOptions () [] "program line:col" $ \args () ->
           Nothing -> putStrLn "No information available."
           Just (AtName qn def loc) -> do
             putStrLn $ "Name: " ++ pretty qn
-            putStrLn $ "Position: " ++ locStr loc
+            putStrLn $ "Position: " ++ locStr (srclocOf loc)
             case def of
               Nothing -> return ()
               Just (BoundTerm t defloc) -> do

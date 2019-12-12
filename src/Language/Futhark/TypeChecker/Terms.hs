@@ -930,12 +930,12 @@ checkExp (If e1 e2 e3 _ loc) =
 checkExp (Parens e loc) =
   Parens <$> checkExp e <*> pure loc
 
-checkExp (QualParens modname e loc) = do
+checkExp (QualParens (modname, modnameloc) e loc) = do
   (modname',mod) <- lookupMod loc modname
   case mod of
     ModEnv env -> local (`withEnv` qualifyEnv modname' env) $ do
       e' <- checkExp e
-      return $ QualParens modname' e' loc
+      return $ QualParens (modname', modnameloc) e' loc
     ModFun{} ->
       typeError loc $ "Module " ++ pretty modname ++ " is a parametric module."
   where qualifyEnv modname' env =

@@ -16,7 +16,7 @@ module Language.Futhark.Query
 import Control.Monad
 import Control.Monad.State
 import Data.List (find)
-import Data.Loc (SrcLoc, Pos(..), Located(..), Loc(..))
+import Data.Loc (Pos(..), Located(..), Loc(..))
 import qualified Data.Map as M
 import qualified System.FilePath.Posix as Posix
 
@@ -67,18 +67,8 @@ typeParamDefs TypeParamType{} =
   mempty
 
 expDefs :: Exp -> Defs
-expDefs (LetPat pat e1 e2 _ _) =
-  patternDefs pat <> expDefs e1 <> expDefs e2
-expDefs (Lambda params body _ _ _) =
-  mconcat (map patternDefs params) <> expDefs body
-expDefs (LetFun name (tparams, params, _, Info ret,  e1) e2 loc) =
-  M.singleton name (DefBound $ BoundTerm name_t (locOf loc)) <>
-  mconcat (map typeParamDefs tparams) <>
-  mconcat (map patternDefs params) <>
-  expDefs e1 <> expDefs e2
-  where name_t = foldFunType (map patternStructType params) ret
 expDefs e =
-  execState (astMap mapper e) mempty
+  execState (astMap mapper e) extra
   where mapper = ASTMapper { mapOnExp = onExp
                            , mapOnName = pure
                            , mapOnQualName = pure
@@ -88,6 +78,31 @@ expDefs e =
         onExp e' = do
           modify (<>expDefs e')
           return e'
+
+        identDefs (Ident v (Info vt) vloc) =
+          M.singleton v $ DefBound $ BoundTerm (toStruct vt) $ locOf vloc
+
+        extra =
+          case e of
+            LetPat pat _ _ _ _ ->
+              patternDefs pat
+            Lambda params _ _ _ _ ->
+              mconcat (map patternDefs params)
+            LetFun name (tparams, params, _, Info ret, _) _ loc ->
+              let name_t = foldFunType (map patternStructType params) ret
+              in M.singleton name (DefBound $ BoundTerm name_t (locOf loc)) <>
+                 mconcat (map typeParamDefs tparams) <>
+                 mconcat (map patternDefs params)
+            LetWith v _ _ _ _ _ _ ->
+              identDefs v
+            DoLoop merge _ form _ _ ->
+              patternDefs merge <>
+              case form of
+                For i _ -> identDefs i
+                ForIn pat _ -> patternDefs pat
+                While{} -> mempty
+            _ ->
+              mempty
 
 valBindDefs :: ValBind -> Defs
 valBindDefs vbind =
@@ -180,7 +195,7 @@ allBindings imports = M.mapMaybe forward defs
         forward (DefBound x) = Just x
         forward (DefIndirect v) = forward =<< M.lookup v defs
 
-data RawAtPos = RawAtName (QualName VName) SrcLoc
+data RawAtPos = RawAtName (QualName VName) Loc
 
 contains :: Located a => a -> Pos -> Bool
 contains a pos =
@@ -193,7 +208,7 @@ atPosInTypeExp te pos =
   case te of
     TEVar qn loc -> do
       guard $ loc `contains` pos
-      Just $ RawAtName qn loc
+      Just $ RawAtName qn $ locOf loc
     TETuple es _ ->
       msum $ map (`atPosInTypeExp` pos) es
     TERecord fields _ ->
@@ -212,13 +227,13 @@ atPosInTypeExp te pos =
         inArg (TypeArgExpType e2) = atPosInTypeExp e2 pos
         inDim (DimExpNamed qn loc) = do
           guard $ loc `contains` pos
-          Just $ RawAtName qn loc
+          Just $ RawAtName qn $ locOf loc
         inDim _ = Nothing
 
 atPosInPattern :: Pattern -> Pos -> Maybe RawAtPos
 atPosInPattern (Id vn _ loc) pos = do
   guard $ loc `contains` pos
-  Just $ RawAtName (qualName vn) loc
+  Just $ RawAtName (qualName vn) $ locOf loc
 atPosInPattern (TuplePattern pats _) pos =
   msum $ map (`atPosInPattern` pos) pats
 atPosInPattern (RecordPattern fields _) pos =
@@ -235,7 +250,9 @@ atPosInPattern Wildcard{} _ = Nothing
 atPosInExp :: Exp -> Pos -> Maybe RawAtPos
 atPosInExp (Var qn _ loc) pos = do
   guard $ loc `contains` pos
-  Just $ RawAtName qn loc
+  Just $ RawAtName qn $ locOf loc
+atPosInExp (QualParens (qn, loc) _ _) pos
+  | loc `contains` pos = Just $ RawAtName qn $ locOf loc
 
 -- All the value cases are TODO - we need another RawAtPos constructor.
 atPosInExp Literal{} _ = Nothing
@@ -245,7 +262,15 @@ atPosInExp FloatLit{} _ = Nothing
 atPosInExp (LetPat pat _ _ _ _) pos
   | pat `contains` pos = atPosInPattern pat pos
 
-atPosInExp e pos =
+atPosInExp (LetWith a b _ _ _ _ _) pos
+  | a `contains` pos = Just $ RawAtName (qualName $ identName a) (locOf a)
+  | b `contains` pos = Just $ RawAtName (qualName $ identName b) (locOf b)
+
+atPosInExp (DoLoop merge _ _ _ _) pos
+  | merge `contains` pos = atPosInPattern merge pos
+
+atPosInExp e pos = do
+  guard $ e `contains` pos
   -- Use the Either monad for short-circuiting for efficiency reasons.
   -- The first hit is going to be the only one.
   case astMap mapper e of
@@ -265,7 +290,7 @@ atPosInExp e pos =
 atPosInModExp :: ModExp -> Pos -> Maybe RawAtPos
 atPosInModExp (ModVar qn loc) pos = do
   guard $ loc `contains` pos
-  Just $ RawAtName qn loc
+  Just $ RawAtName qn $ locOf loc
 atPosInModExp (ModParens me _) pos =
   atPosInModExp me pos
 atPosInModExp ModImport{} _ =
@@ -292,7 +317,7 @@ atPosInSigExp :: SigExp -> Pos -> Maybe RawAtPos
 atPosInSigExp se pos =
   case se of
     SigVar qn _ loc -> do guard $ loc `contains` pos
-                          Just $ RawAtName qn loc
+                          Just $ RawAtName qn $ locOf loc
     SigParens e _ -> atPosInSigExp e pos
     SigSpecs specs _ -> msum $ map (`atPosInSpec` pos) specs
     SigWith e _ _ -> atPosInSigExp e pos
@@ -339,7 +364,7 @@ containingModule imports (Pos file _ _ _) =
                 fst $ Posix.splitExtension file
 
 -- | Information about what is at the given source location.
-data AtPos = AtName (QualName VName) (Maybe BoundTo) SrcLoc
+data AtPos = AtName (QualName VName) (Maybe BoundTo) Loc
   deriving (Eq, Show)
 
 -- | Information about what's at the given source position.  Returns
