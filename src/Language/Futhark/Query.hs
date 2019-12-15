@@ -63,8 +63,8 @@ patternDefs (PatternConstr _ _ pats _) =
 typeParamDefs :: TypeParamBase VName -> Defs
 typeParamDefs (TypeParamDim vn loc) =
   M.singleton vn $ DefBound $ BoundTerm (Scalar $ Prim $ Signed Int32) (locOf loc)
-typeParamDefs TypeParamType{} =
-  mempty
+typeParamDefs (TypeParamType _ vn loc) =
+  M.singleton vn $ DefBound $ BoundType $ locOf loc
 
 expDefs :: Exp -> Defs
 expDefs e =
@@ -152,9 +152,9 @@ modBindDefs mbind =
 specDefs :: Spec -> Defs
 specDefs spec =
   case spec of
-    ValSpec v _ tdecl _ loc ->
-      M.singleton v $ DefBound $
-      BoundTerm (unInfo $ expandedType tdecl) (locOf loc)
+    ValSpec v tparams tdecl _ loc ->
+      let vdef = DefBound $ BoundTerm (unInfo $ expandedType tdecl) (locOf loc)
+      in M.insert v vdef $ mconcat (map typeParamDefs tparams)
     TypeAbbrSpec tbind -> typeBindDefs tbind
     TypeSpec _ v _ _ loc ->
       M.singleton v $ DefBound $ BoundType $ locOf loc
@@ -177,13 +177,14 @@ sigBindDefs sbind =
   M.singleton (sigName sbind) (DefBound $ BoundModuleType $ locOf sbind) <>
   sigExpDefs (sigExp sbind)
 
-
 decDefs :: Dec -> Defs
 decDefs (ValDec vbind) = valBindDefs vbind
 decDefs (TypeDec vbind) = typeBindDefs vbind
 decDefs (ModDec mbind) = modBindDefs mbind
 decDefs (SigDec mbind) = sigBindDefs mbind
-decDefs _ = mempty
+decDefs (OpenDec me _) = modExpDefs me
+decDefs (LocalDec dec _) = decDefs dec
+decDefs ImportDec{} = mempty
 
 -- | All bindings of everything in the program.
 progDefs :: Prog -> Defs
@@ -354,7 +355,9 @@ atPosInDec dec pos = do
     TypeDec tbind -> atPosInTypeBind tbind pos
     ModDec mbind -> atPosInModBind mbind pos
     SigDec sbind -> atPosInSigBind sbind pos
-    _ -> Nothing
+    OpenDec e _ -> atPosInModExp e pos
+    LocalDec dec' _ -> atPosInDec dec' pos
+    ImportDec{} -> Nothing
 
 atPosInProg :: Prog -> Pos -> Maybe RawAtPos
 atPosInProg prog pos =
