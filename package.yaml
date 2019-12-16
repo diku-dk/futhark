@@ -1,5 +1,5 @@
 name: futhark
-version: "0.13.2"
+version: "0.14.0"
 synopsis: An optimising compiler for a functional, array-oriented language.
 description: |
   Futhark is a small programming language designed to be compiled to
