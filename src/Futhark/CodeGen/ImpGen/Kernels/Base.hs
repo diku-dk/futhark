@@ -474,7 +474,9 @@ atomicUpdateLocking op
 
 atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
   old <- dPrim "old" int32
-  continue <- dPrimV "continue" true
+  continue <- newVName "continue"
+  dPrimVol_ continue Bool
+  continue <-- true
 
   -- Correctly index into locks.
   (locks', _locks_space, locks_offset) <-

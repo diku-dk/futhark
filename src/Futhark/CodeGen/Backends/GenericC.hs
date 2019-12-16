@@ -1583,11 +1583,14 @@ derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
   [C.cexp|(($ty:res_t)$exp:ptr)[$exp:i]|]
 
+volQuals :: Volatility -> [C.TypeQual]
+volQuals Volatile = [C.ctyquals|volatile|]
+volQuals Nonvolatile = []
+
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
   quals <- quals_f space
-  let quals' = case vol of Volatile -> [C.ctyquals|volatile|] ++ quals
-                           Nonvolatile -> quals
+  let quals' = volQuals vol ++ quals
       deref = derefPointer dest i
               [C.cty|$tyquals:quals' $ty:elemtype*|]
   stm [C.cstm|$exp:deref = $exp:v;|]
@@ -1595,8 +1598,7 @@ writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
 readScalarPointerWithQuals :: PointerQuals op s -> ReadScalar op s
 readScalarPointerWithQuals quals_f dest i elemtype space vol = do
   quals <- quals_f space
-  let quals' = case vol of Volatile -> [C.ctyquals|volatile|] ++ quals
-                           Nonvolatile -> quals
+  let quals' = volQuals vol ++ quals
   return $ derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
 
 compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName
@@ -1618,9 +1620,7 @@ compileExp = compilePrimExp compileLeaf
           src' <- rawMem src
           derefPointer src'
             <$> compileExp iexp
-            <*> pure [C.cty|$tyquals:vol' $ty:(primTypeToCType restype)*|]
-            where vol' = case vol of Volatile -> [C.ctyquals|volatile|]
-                                     Nonvolatile -> []
+            <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType restype)*|]
 
         compileLeaf (Index src (Count iexp) restype (Space space) vol) =
           join $ asks envReadScalar
@@ -1740,10 +1740,10 @@ compileCode (DebugPrint s Nothing) =
        }|]
 
 compileCode c
-  | Just (name, t, e, c') <- declareAndSet c = do
+  | Just (name, vol, t, e, c') <- declareAndSet c = do
     let ct = primTypeToCType t
     e' <- compileExp e
-    item [C.citem|$ty:ct $id:name = $exp:e';|]
+    item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
     compileCode c'
 
 compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
@@ -1818,11 +1818,9 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <- derefPointer dest'
            <$> compileExp idx
-           <*> pure [C.cty|$tyquals:vol' $ty:(primTypeToCType elemtype)*|]
+           <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
-  where vol' = case vol of Volatile -> [C.ctyquals|volatile|]
-                           Nonvolatile -> []
 
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
@@ -1836,9 +1834,9 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
 compileCode (DeclareMem name space) =
   declMem name space
 
-compileCode (DeclareScalar name t) = do
+compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
-  decl [C.cdecl|$ty:ct $id:name;|]
+  decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
 
 compileCode (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
@@ -1921,11 +1919,11 @@ compileFunBody output_ptrs outputs code = do
         setRetVal' p (ScalarParam name _) =
           stm [C.cstm|*$exp:p = $id:name;|]
 
-declareAndSet :: Code op -> Maybe (VName, PrimType, Exp, Code op)
-declareAndSet (DeclareScalar name t :>>: (SetScalar dest e :>>: c))
-  | name == dest = Just (name, t, e, c)
-declareAndSet ((DeclareScalar name t :>>: SetScalar dest e) :>>: c)
-  | name == dest = Just (name, t, e, c)
+declareAndSet :: Code op -> Maybe (VName, Volatility, PrimType, Exp, Code op)
+declareAndSet (DeclareScalar name vol t :>>: (SetScalar dest e :>>: c))
+  | name == dest = Just (name, vol, t, e, c)
+declareAndSet ((DeclareScalar name vol t :>>: SetScalar dest e) :>>: c)
+  | name == dest = Just (name, vol, t, e, c)
 declareAndSet _ = Nothing
 
 assignmentOperator :: BinOp -> Maybe (VName -> C.Exp -> C.Exp)

@@ -244,9 +244,9 @@ mapTransposeFunction bt =
 
         transpose_code =
           Imp.If input_is_empty mempty $ mconcat
-          [ Imp.DeclareScalar muly (IntType Int32)
+          [ Imp.DeclareScalar muly Imp.Nonvolatile (IntType Int32)
           , Imp.SetScalar muly $ block_dim `quot` v32 x
-          , Imp.DeclareScalar mulx (IntType Int32)
+          , Imp.DeclareScalar mulx Imp.Nonvolatile (IntType Int32)
           , Imp.SetScalar mulx $ block_dim `quot` v32 y
           , Imp.If can_use_copy copy_code $
             Imp.If should_use_lowwidth (callTransposeKernel TransposeLowWidth) $

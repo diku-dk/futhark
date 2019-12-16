@@ -69,8 +69,8 @@ setBodySpace space (Comment s c) =
   Comment s $ setBodySpace space c
 setBodySpace _ Skip =
   Skip
-setBodySpace _ (DeclareScalar name bt) =
-  DeclareScalar name bt
+setBodySpace _ (DeclareScalar name vol bt) =
+  DeclareScalar name vol bt
 setBodySpace space (SetScalar name e) =
   SetScalar name $ setExpSpace space e
 setBodySpace space (SetMem to from old_space) =
