@@ -1242,9 +1242,9 @@ compileCode (Imp.SetScalar vname exp1) = do
 
 compileCode (Imp.DeclareMem v space) = declMem v space
 
-compileCode (Imp.DeclareScalar v Cert) =
+compileCode (Imp.DeclareScalar v _ Cert) =
   stm $ Assign (Var $ compileName v) $ Bool True
-compileCode (Imp.DeclareScalar v t) =
+compileCode (Imp.DeclareScalar v _ t) =
   stm $ AssignTyped t' (Var $ compileName v) Nothing
   where t' = compilePrimTypeToAST t
 

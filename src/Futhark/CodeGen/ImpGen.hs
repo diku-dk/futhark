@@ -71,7 +71,7 @@ module Futhark.CodeGen.ImpGen
   , dScope
   , dScopes
   , dArray
-  , dPrim, dPrim_, dPrimV_, dPrimV, dPrimVE
+  , dPrim, dPrimVol_, dPrim_, dPrimV_, dPrimV, dPrimVE
 
   , sFor, sWhile
   , sComment
@@ -506,7 +506,7 @@ compileLoopBody mergeparams (Body _ bnds ses) = do
     copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p,tmp,se) ->
       case typeOf p of
         Prim pt  -> do
-          emit $ Imp.DeclareScalar tmp pt
+          emit $ Imp.DeclareScalar tmp Imp.Nonvolatile pt
           emit $ Imp.SetScalar tmp $ toExp' pt se
           return $ emit $ Imp.SetScalar (paramName p) $ Imp.var tmp pt
         Mem space | Var v <- se -> do
@@ -768,9 +768,14 @@ dFParams = dScope Nothing . scopeOfFParams
 dLParams :: ExplicitMemorish lore => [LParam lore] -> ImpM lore op ()
 dLParams = dScope Nothing . scopeOfLParams
 
+dPrimVol_ :: VName -> PrimType -> ImpM lore op ()
+dPrimVol_ name t = do
+ emit $ Imp.DeclareScalar name Imp.Volatile t
+ addVar name $ ScalarVar Nothing $ ScalarEntry t
+
 dPrim_ :: VName -> PrimType -> ImpM lore op ()
 dPrim_ name t = do
- emit $ Imp.DeclareScalar name t
+ emit $ Imp.DeclareScalar name Imp.Nonvolatile t
  addVar name $ ScalarVar Nothing $ ScalarEntry t
 
 dPrim :: String -> PrimType -> ImpM lore op VName
@@ -813,7 +818,7 @@ dInfo e name info = do
     MemVar _ entry' ->
       emit $ Imp.DeclareMem name $ entryMemSpace entry'
     ScalarVar _ entry' ->
-      emit $ Imp.DeclareScalar name $ entryScalarType entry'
+      emit $ Imp.DeclareScalar name Imp.Nonvolatile $ entryScalarType entry'
     ArrayVar _ _ ->
       return ()
   addVar name entry

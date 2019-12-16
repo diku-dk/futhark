@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Work around (probable) AMD OpenCL compiler bug for
+    `reduce_by_index` operations with complex operators that require
+    locking.
+
 ## [0.13.2]
 
 ### Added

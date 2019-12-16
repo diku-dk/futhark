@@ -871,7 +871,7 @@ compileCode (Imp.SetScalar vname exp1) = do
   stm $ Assign name' exp1'
 
 compileCode Imp.DeclareMem{} = return ()
-compileCode (Imp.DeclareScalar v Cert) =
+compileCode (Imp.DeclareScalar v _ Cert) =
   stm $ Assign (Var $ compileName v) $ Var "True"
 compileCode Imp.DeclareScalar{} = return ()
 

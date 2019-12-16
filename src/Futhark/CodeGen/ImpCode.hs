@@ -149,7 +149,7 @@ data Code a = Skip
             | For VName IntType Exp (Code a)
             | While Exp (Code a)
             | DeclareMem VName Space
-            | DeclareScalar VName PrimType
+            | DeclareScalar VName Volatility PrimType
             | DeclareArray VName Space PrimType ArrayContents
               -- ^ Create an array containing the given values.  The
               -- lifetime of the array will be the entire application.
@@ -192,7 +192,9 @@ data Code a = Skip
             | Op a
             deriving (Show)
 
--- | The volatility of a memory access.
+-- | The volatility of a memory access or variable.  Feel free to
+-- ignore this for backends where it makes no sense (anything but C
+-- and similar low-level things)
 data Volatility = Volatile | Nonvolatile
                 deriving (Eq, Ord, Show)
 
@@ -320,8 +322,10 @@ instance Pretty op => Pretty (Code op) where
     text "}"
   ppr (DeclareMem name space) =
     text "var" <+> ppr name <> text ": mem" <> parens (ppr space)
-  ppr (DeclareScalar name t) =
-    text "var" <+> ppr name <> text ":" <+> ppr t
+  ppr (DeclareScalar name vol t) =
+    text "var" <+> ppr name <> text ":" <+> vol' <> ppr t
+    where vol' = case vol of Volatile -> text "volatile "
+                             Nonvolatile -> mempty
   ppr (DeclareArray name space t vs) =
     text "array" <+> ppr name <> text "@" <> ppr space <+> text ":" <+> ppr t <+>
     equals <+> ppr vs
@@ -422,8 +426,8 @@ instance Traversable Code where
     pure Skip
   traverse _ (DeclareMem name space) =
     pure $ DeclareMem name space
-  traverse _ (DeclareScalar name bt) =
-    pure $ DeclareScalar name bt
+  traverse _ (DeclareScalar name vol bt) =
+    pure $ DeclareScalar name vol bt
   traverse _ (DeclareArray name space t vs) =
     pure $ DeclareArray name space t vs
   traverse _ (Allocate name size s) =
@@ -449,7 +453,7 @@ instance Traversable Code where
 
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = oneName name
-declaredIn (DeclareScalar name _) = oneName name
+declaredIn (DeclareScalar name _ _) = oneName name
 declaredIn (DeclareArray name _ _ _) = oneName name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y

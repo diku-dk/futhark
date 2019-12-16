@@ -133,7 +133,7 @@ mapTranspose block_dim args t kind =
                    ]
       ]
 
-  where dec v e = DeclareScalar v int32 <> SetScalar v e
+  where dec v e = DeclareScalar v Nonvolatile int32 <> SetScalar v e
         v32 = flip var int32
         tile_dim = 2 * block_dim
 
@@ -164,17 +164,17 @@ mapTranspose block_dim args t kind =
           , "j"]
 
         get_ids =
-          mconcat [ DeclareScalar get_global_id_0 int32
+          mconcat [ DeclareScalar get_global_id_0 Nonvolatile int32
                   , Op $ GetGlobalId get_global_id_0 0
-                  , DeclareScalar get_local_id_0 int32
+                  , DeclareScalar get_local_id_0 Nonvolatile int32
                   , Op $ GetLocalId get_local_id_0 0
-                  , DeclareScalar get_local_id_1 int32
+                  , DeclareScalar get_local_id_1 Nonvolatile int32
                   , Op $ GetLocalId get_local_id_1 1
-                  , DeclareScalar get_group_id_0 int32
+                  , DeclareScalar get_group_id_0 Nonvolatile int32
                   , Op $ GetGroupId get_group_id_0 0
-                  , DeclareScalar get_group_id_1 int32
+                  , DeclareScalar get_group_id_1 Nonvolatile int32
                   , Op $ GetGroupId get_group_id_1 1
-                  , DeclareScalar get_group_id_2 int32
+                  , DeclareScalar get_group_id_2 Nonvolatile int32
                   , Op $ GetGroupId get_group_id_2 2
                   ]
 
