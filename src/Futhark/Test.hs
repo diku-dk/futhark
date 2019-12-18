@@ -405,16 +405,16 @@ testSpecFromFile path = do
                            (n,s):ss -> (n, s, ss)
       case readTestSpec (1+first_spec_line) path first_spec of
         Left err -> return $ Left $ errorBundlePretty err
-        Right v  -> Right <$> foldM moreCases v rest_specs
+        Right v  -> return $ foldM moreCases v rest_specs
 
   where moreCases test (lineno, cases) =
           case readInputOutputs lineno path cases of
-            Left err     -> error $ errorBundlePretty err
+            Left err     -> Left $ errorBundlePretty err
             Right cases' ->
               case testAction test of
                 RunCases old_cases structures warnings ->
-                  return test { testAction = RunCases (old_cases ++ cases') structures warnings }
-                _ -> fail "Secondary test block provided, but primary test block specifies compilation error."
+                  Right test { testAction = RunCases (old_cases ++ cases') structures warnings }
+                _ -> Left "Secondary test block provided, but primary test block specifies compilation error."
 
 -- | Like 'testSpecFromFile', but kills the process on error.
 testSpecFromFileOrDie :: FilePath -> IO ProgramTest
