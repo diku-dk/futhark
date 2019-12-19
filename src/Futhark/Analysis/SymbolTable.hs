@@ -35,6 +35,8 @@ module Futhark.Analysis.SymbolTable
   , consume
   , index
   , index'
+  , Indexed(..)
+  , indexedAddCerts
   , IndexOp(..)
     -- * Insertion
   , insertStm
@@ -56,7 +58,7 @@ module Futhark.Analysis.SymbolTable
   )
   where
 
-import Control.Arrow (second, (&&&))
+import Control.Arrow ((&&&))
 import Control.Monad
 import Control.Monad.Reader
 import Data.Ord
@@ -164,8 +166,24 @@ deepen vtable = vtable { loopDepth = loopDepth vtable + 1,
                          availableAtClosestLoop = namesFromList $ M.keys $ bindings vtable
                        }
 
+-- | The result of indexing a delayed array.
+data Indexed = Indexed Certificates (PrimExp VName)
+               -- ^ A PrimExp based on the indexes (that is, without
+               -- accessing any actual array).
+             | IndexedArray Certificates VName [PrimExp VName]
+               -- ^ The indexing corresponds to another (perhaps more
+               -- advantageous) array.
+
+indexedAddCerts :: Certificates -> Indexed -> Indexed
+indexedAddCerts cs1 (Indexed cs2 v) = Indexed (cs1<>cs2) v
+indexedAddCerts cs1 (IndexedArray cs2 arr v) = IndexedArray (cs1<>cs2) arr v
+
+instance FreeIn Indexed where
+  freeIn' (Indexed cs v) = freeIn' cs <> freeIn' v
+  freeIn' (IndexedArray cs arr v) = freeIn' cs <> freeIn' arr <> freeIn' v
+
 -- | Indexing a delayed array if possible.
-type IndexArray = [PrimExp VName] -> Maybe (PrimExp VName, Certificates)
+type IndexArray = [PrimExp VName] -> Maybe Indexed
 
 data Entry lore = LoopVar (LoopVarEntry lore)
                 | LetBound (LetBoundEntry lore)
@@ -364,7 +382,7 @@ available :: VName -> SymbolTable lore -> Bool
 available name = maybe False (not . consumed) . M.lookup name . bindings
 
 index :: Attributes lore => VName -> [SubExp] -> SymbolTable lore
-      -> Maybe (PrimExp VName, Certificates)
+      -> Maybe Indexed
 index name is table = do
   is' <- mapM asPrimExp is
   index' name is' table
@@ -373,7 +391,7 @@ index name is table = do
           return $ primExpFromSubExp t i
 
 index' :: VName -> [PrimExp VName] -> SymbolTable lore
-       -> Maybe (PrimExp VName, Certificates)
+       -> Maybe Indexed
 index' name is vtable = do
   entry <- lookup name vtable
   case entry of
@@ -407,7 +425,7 @@ rangesRep = M.filter knownRange . M.map toRep . bindings
 class IndexOp op where
   indexOp :: (Attributes lore, IndexOp (Op lore)) =>
              SymbolTable lore -> Int -> op
-          -> [PrimExp VName] -> Maybe (PrimExp VName, Certificates)
+          -> [PrimExp VName] -> Maybe Indexed
   indexOp _ _ _ _ = Nothing
 
 instance IndexOp () where
@@ -420,15 +438,15 @@ indexExp vtable (Op op) k is =
 
 indexExp _ (BasicOp (Iota _ x s to_it)) _ [i]
   | IntType from_it <- primExpType i =
-      Just ( ConvOpExp (SExt from_it to_it) i
-             * primExpFromSubExp (IntType to_it) s
-             + primExpFromSubExp (IntType to_it) x
-           , mempty)
+      Just $ Indexed mempty $
+       ConvOpExp (SExt from_it to_it) i
+       * primExpFromSubExp (IntType to_it) s
+       + primExpFromSubExp (IntType to_it) x
 
 indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,
     Just (Prim t) <- lookupSubExpType v table =
-      Just (primExpFromSubExp t v, mempty)
+      Just $ Indexed mempty $ primExpFromSubExp t v
 
 indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_:is) =
   index' v is table
@@ -477,7 +495,7 @@ defBndEntry vtable patElem range als bnd =
     , letBoundScalExp =
       runReader (toScalExp (`lookupScalExp` vtable) (stmExp bnd)) types
     , letBoundStmDepth = 0
-    , letBoundIndex = \k -> fmap (second (<>(stmAuxCerts $ stmAux bnd))) .
+    , letBoundIndex = \k -> fmap (indexedAddCerts (stmAuxCerts $ stmAux bnd)) .
                             indexExp vtable (stmExp bnd) k
     , letBoundConsumed = False
     }

@@ -138,7 +138,7 @@ prepareRedOrScan w map_lam arrs ispace inps = do
       arr_t <- lookupType arr
       letBindNames_ [paramName p] $
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
-    map Returns <$> bodyBind (lambdaBody map_lam)
+    map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody map_lam)
 
   return (space, kbody)
 
@@ -246,7 +246,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
       blockedPerThread gtid w size ordering fold_lam' (length nes) arrs
     let concatReturns pe =
           ConcatReturns split_ordering w elems_per_thread_32 $ patElemName pe
-    return (map (Returns . Var . patElemName) chunk_red_pes ++
+    return (map (Returns ResultMaySimplify . Var . patElemName) chunk_red_pes ++
             map concatReturns chunk_map_pes)
 
   let (redout_ts, mapout_ts) = splitAt (length nes) $ lambdaReturnType fold_lam
@@ -320,7 +320,7 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBinder_ $ do
       arr_t <- lookupType arr
       letBindNames_ [paramName p] $
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
-    map Returns <$> bodyBind (lambdaBody lam)
+    map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody lam)
 
   letBind_ pat $ Op $ SegOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
 

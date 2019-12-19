@@ -487,7 +487,7 @@ instance Annotations lore => ST.IndexOp (SOAC lore) where
     let arr_indexes = M.fromList $ catMaybes $ zipWith arrIndex arr_params arrs
         arr_indexes' = foldl expandPrimExpTable arr_indexes $ bodyStms $ lambdaBody lam
     case se of
-      Var v -> M.lookup v arr_indexes'
+      Var v -> uncurry (flip ST.Indexed) <$> M.lookup v arr_indexes'
       _ -> Nothing
       where lambdaAndSubExp (Screma _ (ScremaForm (_, scan_nes) reds map_lam) arrs) =
               nthMapOut (length scan_nes + redResults reds) map_lam arrs
@@ -499,7 +499,7 @@ instance Annotations lore => ST.IndexOp (SOAC lore) where
               return (lam, se, drop num_accs $ lambdaParams lam, arrs)
 
             arrIndex p arr = do
-              (pe,cs) <- ST.index' arr [i] vtable
+              ST.Indexed cs pe <- ST.index' arr [i] vtable
               return (paramName p, (pe,cs))
 
             expandPrimExpTable table stm

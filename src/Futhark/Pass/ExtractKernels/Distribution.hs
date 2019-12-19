@@ -252,7 +252,7 @@ constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
   inner_body' <- fmap (uncurry (flip (KernelBody ()))) $ runBinder $
                  localScope ispace_scope $ do
     mapM_ readKernelInput $ filter inputIsUsed inps
-    map Returns <$> bodyBind inner_body
+    map (Returns ResultMaySimplify) <$> bodyBind inner_body
 
   (segop, aux_stms) <- lift $ mapKernel mk_lvl ispace [] rts inner_body'
 

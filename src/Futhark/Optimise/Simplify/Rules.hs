@@ -604,10 +604,17 @@ simplifyIndexing vtable seType idd inds consuming =
           Just $ pure $ SubExpResult mempty $ Var idd
 
       | Just inds' <- sliceIndices inds,
-        Just (e, cs) <- ST.index idd inds' vtable,
+        Just (ST.Indexed cs e) <- ST.index idd inds' vtable,
         worthInlining e,
         all (`ST.elem` vtable) (unCertificates cs) ->
-        Just $ SubExpResult cs <$> (letSubExp "index_primexp" =<< toExp e)
+          Just $ SubExpResult cs <$> (letSubExp "index_primexp" =<< toExp e)
+
+      | Just inds' <- sliceIndices inds,
+        Just (ST.IndexedArray cs arr inds'') <- ST.index idd inds' vtable,
+        all worthInlining inds'',
+        all (`ST.elem` vtable) (unCertificates cs) ->
+          Just $ IndexResult cs arr . map DimFix <$>
+          mapM (letSubExp "index_primexp" <=< toExp) inds''
 
     Nothing -> Nothing
 

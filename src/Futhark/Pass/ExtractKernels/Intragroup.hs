@@ -263,4 +263,4 @@ intraGroupParalleliseBody lvl body = do
   (Acc min_ws avail_ws log, kstms) <-
     runIntraGroupM $ intraGroupStms lvl $ bodyStms body
   return (S.toList min_ws, S.toList avail_ws, log,
-          KernelBody () kstms $ map Returns $ bodyResult body)
+          KernelBody () kstms $ map (Returns ResultMaySimplify) $ bodyResult body)
