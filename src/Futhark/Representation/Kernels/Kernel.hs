@@ -15,6 +15,7 @@ module Futhark.Representation.Kernels.Kernel
        , KernelBody(..)
        , aliasAnalyseKernelBody
        , consumedInKernelBody
+       , ResultManifest(..)
        , KernelResult(..)
        , kernelResultSubExp
        , SplitOrdering(..)
@@ -151,7 +152,16 @@ deriving instance Annotations lore => Ord (KernelBody lore)
 deriving instance Annotations lore => Show (KernelBody lore)
 deriving instance Annotations lore => Eq (KernelBody lore)
 
-data KernelResult = Returns SubExp
+-- | Metadata about whether there is a subtle point to this
+-- 'KernelResult'.  This is used to protect things like tiling, which
+-- might otherwise be removed by the simplifier because they're
+-- semantically redundant.  This has no semantic effect and can be
+-- ignored at code generation.
+data ResultManifest = ResultNoSimplify -- ^ Don't simplify this one!
+                    | ResultMaySimplify -- ^ Go nuts.
+                  deriving (Eq, Show, Ord)
+
+data KernelResult = Returns ResultManifest SubExp
                     -- ^ Each "worker" in the kernel returns this.
                     -- Whether this is a result-per-thread or a
                     -- result-per-group depends on the 'SegLevel'.
@@ -173,13 +183,13 @@ data KernelResult = Returns SubExp
                   deriving (Eq, Show, Ord)
 
 kernelResultSubExp :: KernelResult -> SubExp
-kernelResultSubExp (Returns se) = se
+kernelResultSubExp (Returns _ se) = se
 kernelResultSubExp (WriteReturns _ arr _) = Var arr
 kernelResultSubExp (ConcatReturns _ _ _ v) = Var v
 kernelResultSubExp (TileReturns _ v) = Var v
 
 instance FreeIn KernelResult where
-  freeIn' (Returns what) = freeIn' what
+  freeIn' (Returns _ what) = freeIn' what
   freeIn' (WriteReturns rws arr res) = freeIn' rws <> freeIn' arr <> freeIn' res
   freeIn' (ConcatReturns o w per_thread_elems v) =
     freeIn' o <> freeIn' w <> freeIn' per_thread_elems <> freeIn' v
@@ -199,8 +209,8 @@ instance Attributes lore => Substitute (KernelBody lore) where
     (substituteNames subst res)
 
 instance Substitute KernelResult where
-  substituteNames subst (Returns se) =
-    Returns $ substituteNames subst se
+  substituteNames subst (Returns manifest se) =
+    Returns manifest (substituteNames subst se)
   substituteNames subst (WriteReturns rws arr res) =
     WriteReturns
     (substituteNames subst rws) (substituteNames subst arr)
@@ -271,7 +281,7 @@ checkKernelBody ts (KernelBody (_, attr) stms kres) = do
       ", but body returns " ++ show (length kres) ++ " values."
     zipWithM_ checkKernelResult kres ts
 
-  where checkKernelResult (Returns what) t =
+  where checkKernelResult (Returns _ what) t =
           TC.require [t] what
         checkKernelResult (WriteReturns rws arr res) t = do
           mapM_ (TC.require [Prim int32]) rws
@@ -310,8 +320,10 @@ instance PrettyLore lore => Pretty (KernelBody lore) where
     text "return" <+> PP.braces (PP.commasep $ map ppr res)
 
 instance Pretty KernelResult where
-  ppr (Returns what) =
-    text "thread returns" <+> ppr what
+  ppr (Returns ResultNoSimplify what) =
+    text "returns (manifest)" <+> ppr what
+  ppr (Returns ResultMaySimplify what) =
+    text "returns" <+> ppr what
   ppr (WriteReturns rws arr res) =
     ppr arr <+> text "with" <+> PP.apply (map ppRes res)
     where ppRes (is, e) =
@@ -400,7 +412,7 @@ segSpace (SegHist _ lvl _ _ _) = lvl
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
 segResultShape _ t (WriteReturns rws _ _) =
   t `arrayOfShape` Shape rws
-segResultShape space t (Returns _) =
+segResultShape space t (Returns _ _) =
   foldr (flip arrayOfRow) t $ segSpaceDims space
 segResultShape _ t (ConcatReturns _ w _ _) =
   t `arrayOfRow` w
@@ -812,27 +824,46 @@ instance (CanBeWise (Op lore), Attributes lore) => CanBeWise (SegOp lore) where
 
 instance Attributes lore => ST.IndexOp (SegOp lore) where
   indexOp vtable k (SegMap _ space _ kbody) is = do
-    Returns se <- maybeNth k $ kernelBodyResult kbody
-    let (gtids, _) = unzip $ unSegSpace space
-    guard $ length gtids == length is
-    let prim_table = M.fromList $ zip gtids $ zip is $ repeat mempty
-        prim_table' = foldl expandPrimExpTable prim_table $ kernelBodyStms kbody
+    Returns ResultMaySimplify se <- maybeNth k $ kernelBodyResult kbody
+    guard $ length gtids <= length is
+    let idx_table = M.fromList $ zip gtids $ map (ST.Indexed mempty) is
+        idx_table' = foldl expandIndexedTable idx_table $ kernelBodyStms kbody
     case se of
-      Var v -> M.lookup v prim_table'
+      Var v -> M.lookup v idx_table'
       _ -> Nothing
-    where expandPrimExpTable table stm
+
+    where (gtids, _) = unzip $ unSegSpace space
+          -- Indexes in excess of what is used to index through the
+          -- segment dimensions.
+          excess_is = drop (length gtids) is
+
+          expandIndexedTable table stm
             | [v] <- patternNames $ stmPattern stm,
               Just (pe,cs) <-
                   runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm =
-                M.insert v (pe, stmCerts stm <> cs) table
+                M.insert v (ST.Indexed (stmCerts stm <> cs) pe) table
+
+            | [v] <- patternNames $ stmPattern stm,
+              BasicOp (Index arr slice) <- stmExp stm,
+              length (sliceDims slice) == length excess_is,
+              arr `ST.elem` vtable,
+              Just (slice', cs) <- asPrimExpSlice table slice =
+                let idx = ST.IndexedArray (stmCerts stm <> cs)
+                          arr (fixSlice slice' excess_is)
+                in M.insert v idx table
+
             | otherwise =
                 table
 
+          asPrimExpSlice table =
+            runWriterT . mapM (traverse (primExpFromSubExpM (asPrimExp table)))
+
           asPrimExp table v
-            | Just (e,cs) <- M.lookup v table = tell cs >> return e
+            | Just (ST.Indexed cs e) <- M.lookup v table = tell cs >> return e
             | Just (Prim pt) <- ST.lookupType v vtable =
                 return $ LeafExp v pt
             | otherwise = lift Nothing
+
   indexOp _ _ _ _ = Nothing
 
 instance Attributes lore => IsOp (SegOp lore) where

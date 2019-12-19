@@ -205,8 +205,8 @@ instance Engine.Simplifiable SegSpace where
     SegSpace phys <$> mapM (traverse Engine.simplify) dims
 
 instance Engine.Simplifiable KernelResult where
-  simplify (Returns what) =
-    Returns <$> Engine.simplify what
+  simplify (Returns manifest what) =
+    Returns manifest <$> Engine.simplify what
   simplify (WriteReturns ws a res) =
     WriteReturns <$> Engine.simplify ws <*> Engine.simplify a <*> Engine.simplify res
   simplify (ConcatReturns o w pte what) =
@@ -253,7 +253,7 @@ removeInvariantKernelResults vtable (Pattern [] kpes) attr
   where isInvariant Constant{} = True
         isInvariant (Var v) = isJust $ ST.lookup v vtable
 
-        checkForInvarianceResult (_, pe, Returns se)
+        checkForInvarianceResult (_, pe, Returns _ se)
           | isInvariant se = do
               letBindNames_ [patElemName pe] $
                 BasicOp $ Replicate (Shape $ segSpaceDims space) se
@@ -315,7 +315,8 @@ distributeKernelResults (vtable, used)
           | (kpes'', kts'', kres'') <- unzip3 kpes_and_kres ->
               Just (kpe, kpes'', kts'', kres'')
         _ -> Nothing
-      where matches (_, _, kre) = kre == Returns (Var $ patElemName pe)
+      where matches (_, _, Returns _ (Var v)) = v == patElemName pe
+            matches _ = False
 distributeKernelResults _ _ _ _ = Skip
 
 -- If a SegRed contains two reduction operations that have the same

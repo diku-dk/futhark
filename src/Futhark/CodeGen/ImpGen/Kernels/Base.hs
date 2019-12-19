@@ -1283,7 +1283,7 @@ compileGroupResult space constants pe (TileReturns dims what) = do
   sWhen (isActive $ zip is_for_thread $ map fst dims) $
     copyDWIM (patElemName pe) (map Imp.vi32 is_for_thread) (Var what) local_is
 
-compileGroupResult space constants pe (Returns what) = do
+compileGroupResult space constants pe (Returns _ what) = do
   in_local_memory <- arrayInLocalMemory what
   let gids = map (Imp.vi32 . fst) $ unSegSpace space
 
@@ -1307,7 +1307,7 @@ compileThreadResult :: SegSpace
                     -> KernelConstants -> PatElem ExplicitMemory -> KernelResult
                     -> InKernelGen ()
 
-compileThreadResult space _ pe (Returns what) = do
+compileThreadResult space _ pe (Returns _ what) = do
   let is = map (Imp.vi32 . fst) $ unSegSpace space
   copyDWIM (patElemName pe) is what []
 

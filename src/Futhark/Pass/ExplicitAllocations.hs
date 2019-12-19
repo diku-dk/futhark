@@ -880,7 +880,7 @@ mapResultHint lvl space = hint
         coalesceReturnOfShape bs [Constant (IntValue (Int32Value d))] = bs * d > 4
         coalesceReturnOfShape _ _ = True
 
-        hint t (Returns _)
+        hint t Returns{}
           | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t = do
               let space_dims = segSpaceDims space
               t_dims <- mapM dimAllocationSize $ arrayDims t
