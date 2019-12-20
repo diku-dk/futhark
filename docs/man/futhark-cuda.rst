@@ -55,6 +55,20 @@ OPTIONS
 --Werror
   Treat warnings as errors.
 
+ENVIRONMENT
+===========
+
+If run without ``--library``, ``futhark cuda`` will invoke ``gcc(1)``
+to compile the generated C program into a binary.  This only works if
+``gcc`` can find the necessary CUDA libraries.  On most systems, CUDA
+is installed in ``/usr/local/cuda``, which is not part of the default
+``gcc`` search path.  You may need to set the following environment
+variables before running ``futhark cuda``::
+
+  LIBRARY_PATH=/usr/local/cuda/lib64
+  LD_LIBRARY_PATH=/usr/local/cuda/lib64/
+  CPATH=/usr/local/cuda/include
+
 SEE ALSO
 ========
 
