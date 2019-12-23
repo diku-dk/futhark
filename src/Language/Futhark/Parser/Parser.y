@@ -934,14 +934,16 @@ FloatLit :: { (FloatValue, SrcLoc) }
 
 ArrayValue :: { Value }
 ArrayValue :  '[' Value ']'
-             {% return $ ArrayValue (arrayFromList [$2]) $ toStruct $ valueType $2
+             {% return $ ArrayValue (arrayFromList [$2]) $
+                arrayOf (valueType $2) (ShapeDecl [1]) Unique
              }
            |  '[' Value ',' Values ']'
              {% case combArrayElements $2 $4 of
                   Left e -> throwError e
-                  Right v -> return $ ArrayValue (arrayFromList $ $2:$4) $ valueType v
+                  Right v -> return $ ArrayValue (arrayFromList $ $2:$4) $
+                             arrayOf (valueType v) (ShapeDecl [1+fromIntegral (length $4)]) Unique
              }
-           | id '(' RowType ')'
+           | id '(' ValueType ')'
              {% ($1 `mustBe` "empty") >> mustBeEmpty (srcspan $2 $4) $3 >> return (ArrayValue (listArray (0,-1) []) $3) }
 
            -- Errors
@@ -951,9 +953,9 @@ ArrayValue :  '[' Value ']'
 Dim :: { Int32 }
 Dim : intlit { let L _ (INTLIT num) = $1 in fromInteger num }
 
-RowType :: { ValueType }
-RowType : '[' Dim ']' RowType  { arrayOf $4 (ShapeDecl [$2]) Nonunique }
-        | '[' Dim ']' PrimType { arrayOf (Scalar (Prim $4)) (ShapeDecl [$2]) Nonunique }
+ValueType :: { ValueType }
+ValueType : '[' Dim ']' ValueType  { arrayOf $4 (ShapeDecl [$2]) Nonunique }
+          | '[' Dim ']' PrimType { arrayOf (Scalar (Prim $4)) (ShapeDecl [$2]) Nonunique }
 
 Values :: { [Value] }
 Values : Value ',' Values { $1 : $3 }
