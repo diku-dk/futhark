@@ -83,7 +83,7 @@ prepare opts prog = do
       RunCases ios _ _
         | Just runs <-
             iosTestRuns <$> find ((=="main") . iosEntryPoint) ios -> do
-            res <- prepareBenchmarkProgram copts prog ios
+            res <- prepareBenchmarkProgram Nothing copts prog ios
             case res of
               Left (err, errstr) -> do
                 putStrLn err

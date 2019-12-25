@@ -643,13 +643,13 @@ runProgram runner extra_options prog entry input = do
 -- compiling the program with the reference compiler and running it on
 -- the input) if necessary.
 ensureReferenceOutput :: (MonadIO m, MonadError [T.Text] m) =>
-                         FilePath -> String -> FilePath -> [InputOutputs]
+                         Maybe Int -> FilePath -> String -> FilePath -> [InputOutputs]
                       -> m ()
-ensureReferenceOutput futhark compiler prog ios = do
+ensureReferenceOutput concurrency futhark compiler prog ios = do
   missing <- filterM isReferenceMissing $ concatMap entryAndRuns ios
   unless (null missing) $ do
     void $ compileProgram [] futhark compiler prog
-    liftIO $ void $ flip pmapIO missing $ \(entry, tr) -> do
+    liftIO $ void $ flip (pmapIO concurrency) missing $ \(entry, tr) -> do
       (code, stdout, stderr) <- runProgram "" ["-b"] prog entry $ runInput tr
       case code of
         ExitFailure e ->

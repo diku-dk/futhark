@@ -39,11 +39,12 @@ data BenchOptions = BenchOptions
                    , optIgnoreFiles :: [Regex]
                    , optEntryPoint :: Maybe String
                    , optTuning :: Maybe String
+                   , optConcurrency :: Maybe Int
                    }
 
 initialBenchOptions :: BenchOptions
 initialBenchOptions = BenchOptions "c" Nothing "" 10 [] Nothing (-1) False
-                      ["nobench", "disable"] [] Nothing (Just "tuning")
+                      ["nobench", "disable"] [] Nothing (Just "tuning") Nothing
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -53,8 +54,12 @@ runBenchmarks opts paths = do
   hSetBuffering stdout LineBuffering
 
   benchmarks <- filter (not . ignored . fst) <$> testSpecsFromPathsOrDie paths
+  -- Try to avoid concurrency at both program and data set level.
+  let opts' = if length paths /= 1
+              then opts { optConcurrency = Just 1}
+              else opts
   (skipped_benchmarks, compiled_benchmarks) <-
-    partitionEithers <$> pmapIO (compileBenchmark opts) benchmarks
+    partitionEithers <$> pmapIO (optConcurrency opts) (compileBenchmark opts') benchmarks
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
 
@@ -105,7 +110,7 @@ compileBenchmark opts (program, spec) =
 
         compile_opts <- compileOptions opts
 
-        res <- prepareBenchmarkProgram compile_opts program cases
+        res <- prepareBenchmarkProgram (optConcurrency opts) compile_opts program cases
 
         case res of
           Left (err, errstr) -> do
@@ -249,6 +254,16 @@ commandLineOptions = [
   , Option [] ["no-tuning"]
     (NoArg $ Right $ \config -> config { optTuning = Nothing })
     "Do not load tuning files."
+  , Option [] ["concurrency"]
+    (ReqArg (\n ->
+               case reads n of
+                 [(n', "")]
+                   | n' > 0 ->
+                   Right $ \config -> config { optConcurrency = Just n' }
+                 _ ->
+                   Left $ error $ "'" ++ n ++ "' is not a positive integer.")
+    "NUM")
+    "Number of benchmarks to prepare (not run) concurrently."
   ]
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000

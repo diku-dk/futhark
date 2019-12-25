@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The optimiser is now somewhat better at removing unnecessary
     copies of array slices.
 
+  * `futhark bench` and `futhark test` now take a `--concurrency`
+    option for limiting how many threads are used for housekeeping
+    tasks.  Set this to a low value if you run out of memory.
+
 ### Removed
 
 ### Changed
