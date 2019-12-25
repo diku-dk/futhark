@@ -168,7 +168,9 @@ runTestCase (TestCase mode program testcase progs) = do
           extra_options = configExtraCompilerOptions progs
       unless (mode == Compile) $
         context "Generating reference outputs" $
-        ensureReferenceOutput futhark "c" program ios
+        -- We probably get the concurrency at the test program level,
+        -- so force just one data set at a time here.
+        ensureReferenceOutput (Just 1) futhark "c" program ios
       unless (mode == Interpreted) $
         context ("Compiling with --backend=" <> T.pack backend) $ do
           compileTestProgram extra_options futhark backend program warnings
@@ -395,7 +397,7 @@ runTests config paths = do
                testSpecsFromPathsOrDie paths
   testmvar <- newEmptyMVar
   reportmvar <- newEmptyMVar
-  concurrency <- getNumCapabilities
+  concurrency <- maybe getNumCapabilities pure $ configConcurrency config
   replicateM_ concurrency $ forkIO $ runTest testmvar reportmvar
 
   let (excluded, included) = partition (excludedTest config) all_tests
@@ -484,6 +486,7 @@ data TestConfig = TestConfig
                   , configPrograms :: ProgConfig
                   , configExclude :: [T.Text]
                   , configLineOutput :: Bool
+                  , configConcurrency :: Maybe Int
                   }
 
 defaultConfig :: TestConfig
@@ -499,6 +502,7 @@ defaultConfig = TestConfig { configTestMode = Everything
                              , configTuning = Just "tuning"
                              }
                            , configLineOutput = False
+                           , configConcurrency = Nothing
                            }
 
 data ProgConfig = ProgConfig
@@ -583,6 +587,16 @@ commandLineOptions = [
   , Option [] ["no-tuning"]
     (NoArg $ Right $ changeProgConfig $ \config -> config { configTuning = Nothing })
     "Do not load tuning files."
+  , Option [] ["concurrency"]
+    (ReqArg (\n ->
+               case reads n of
+                 [(n', "")]
+                   | n' > 0 ->
+                   Right $ \config -> config { configConcurrency = Just n' }
+                 _ ->
+                   Left $ error $ "'" ++ n ++ "' is not a positive integer.")
+    "NUM")
+    "Number of tests to run concurrently."
   ]
 
 main :: String -> [String] -> IO ()

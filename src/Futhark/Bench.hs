@@ -222,14 +222,15 @@ progNotFound s = s ++ ": command not found"
 
 -- | Compile and produce reference datasets.
 prepareBenchmarkProgram :: MonadIO m =>
-                           CompileOptions
+                           Maybe Int
+                        -> CompileOptions
                         -> FilePath
                         -> [InputOutputs]
                         -> m (Either (String, Maybe SBS.ByteString) ())
-prepareBenchmarkProgram opts program cases = do
+prepareBenchmarkProgram concurrency opts program cases = do
   let futhark = compFuthark opts
 
-  ref_res <- runExceptT $ ensureReferenceOutput futhark "c" program cases
+  ref_res <- runExceptT $ ensureReferenceOutput concurrency futhark "c" program cases
   case ref_res of
     Left err ->
       return $ Left ("Reference output generation for " ++ program ++ " failed:\n" ++

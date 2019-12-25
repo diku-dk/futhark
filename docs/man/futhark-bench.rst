@@ -35,6 +35,14 @@ OPTIONS
   The backend used when compiling Futhark programs (without leading
   ``futhark``, e.g. just ``opencl``).
 
+--concurrency=NUM
+
+  The number of benchmark programs to prepare concurrently.  Defaults
+  to the number of cores available.  *Prepare* means to compile the
+  benchmark, as well as generate any needed datasets.  In some cases,
+  this generation can take too much memory, in which case lowering
+  ``--concurrency`` may help.
+
 --entry-point=name
 
   Only run entry points with this name.

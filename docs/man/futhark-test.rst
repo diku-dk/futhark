@@ -126,6 +126,12 @@ OPTIONS
 -C
   Compile the programs, but do not run them.
 
+
+--concurrency=NUM
+
+  The number of tests to run concurrently.  Defaults to the number of
+  (hyper-)cores available.
+
 --exclude=tag
 
   Do not run test cases that contain the given tag.  Cases marked with

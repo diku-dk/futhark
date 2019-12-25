@@ -247,12 +247,12 @@ fork f x = do cell <- newEmptyMVar
                                  putMVar cell result
               return cell
 
-pmapIO :: (a -> IO b) -> [a] -> IO [b]
-pmapIO f elems = go elems []
+pmapIO :: Maybe Int -> (a -> IO b) -> [a] -> IO [b]
+pmapIO concurrency f elems = go elems []
   where
     go [] res = return res
     go xs res = do
-      numThreads <- getNumCapabilities
+      numThreads <- maybe getNumCapabilities pure concurrency
       let (e,es) = splitAt numThreads xs
       mvars  <- mapM (fork f) e
       result <- mapM takeMVar mvars
