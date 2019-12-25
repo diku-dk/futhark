@@ -445,7 +445,7 @@ internaliseExp desc (E.Negate e _) = do
              _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 
 internaliseExp desc e@E.Apply{} = do
-  (qfname, args, _) <- findFuncall e
+  (qfname, args) <- findFuncall e
   let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
       loc = srclocOf e
       arg_desc = nameToString fname ++ "_arg"
@@ -1248,14 +1248,12 @@ simpleCmpOp :: String
 simpleCmpOp desc op x y =
   letTupExp' desc $ I.BasicOp $ I.CmpOp op x y
 
-findFuncall :: E.Exp -> InternaliseM (E.QualName VName, [E.Exp], [E.StructType])
-findFuncall (E.Var fname (Info t) _) =
-  let (remaining, _) = unfoldFunType t
-  in return (fname, [], map E.toStruct remaining)
-findFuncall (E.Apply f arg _ (Info t) _) = do
-  let (remaining, _) = unfoldFunType t
-  (fname, args, _) <- findFuncall f
-  return (fname, args ++ [arg], map E.toStruct remaining)
+findFuncall :: E.Exp -> InternaliseM (E.QualName VName, [E.Exp])
+findFuncall (E.Var fname _ _) =
+  return (fname, [])
+findFuncall (E.Apply f arg _ _ _) = do
+  (fname, args) <- findFuncall f
+  return (fname, args ++ [arg])
 findFuncall e =
   fail $ "Invalid function expression in application: " ++ pretty e
 
