@@ -10,6 +10,7 @@ import           Data.Foldable
 import           Data.List
 import qualified Data.List.NonEmpty as NE
 import           Data.Loc
+import           Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
@@ -137,11 +138,21 @@ defuncFun tparams pats e0 (closure, ret) loc = do
   -- Construct a record literal that closes over the environment of
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
-  env <- restrictEnvTo $
-         freeVars (Lambda pats e0 Nothing (Info (closure, ret)) loc) `without`
-         mconcat (map (oneName . typeParamName) tparams)
+  let used = freeVars (Lambda pats e0 Nothing (Info (closure, ret)) loc)
+             `without` mconcat (map (oneName . typeParamName) tparams)
+  env <- restrictEnvTo used
+
   let (fields, env') = unzip $ map closureFromDynamicFun $ M.toList env
-  return (RecordLit fields loc, LambdaSV dims pat ret' e0' $ M.fromList env')
+      env'' = M.fromList env'
+      dimIfNotInClosure v = do
+        guard $ v `M.notMember` env''
+        guard $ v `notElem` dims
+        return v
+      closure_dims =
+        mapMaybe dimIfNotInClosure $ S.toList $ patternDimNames pat
+
+  return (RecordLit fields loc,
+          LambdaSV (dims++closure_dims) pat ret' e0' env'')
 
   where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
           let name = nameFromString $ pretty vn
@@ -449,21 +460,24 @@ defuncDimIndex (DimSlice me1 me2 me3) =
 -- | Defunctionalize a let-bound function, while preserving parameters
 -- that have order 0 types (i.e., non-functional).
 defuncLet :: [TypeParam] -> [Pattern] -> Exp -> Info StructType
-          -> DefM ([Pattern], Exp, StaticVal)
+          -> DefM ([TypeParam], [Pattern], Exp, StaticVal)
 defuncLet dims ps@(pat:pats) body (Info rettype)
   | patternOrderZero pat = do
-      let env = envFromPattern pat
-          bound_by_pat = (`S.member` patternDimNames pat) . typeParamName
-          (_pat_dims, rest_dims) = partition bound_by_pat dims
-      (pats', body', sv) <- localEnv env $ defuncLet rest_dims pats body (Info rettype)
+
+      let bound_by_pat = (`S.member` patternDimNames pat) . typeParamName
+          -- Take care to not include more size parameters than necessary.
+          (pat_dims, rest_dims) = partition bound_by_pat dims
+          env = envFromPattern pat <> envFromShapeParams pat_dims
+      (rest_dims', pats', body', sv) <- localEnv env $ defuncLet rest_dims pats body (Info rettype)
       closure <- defuncFun dims ps body (mempty, rettype) noLoc
-      return (pat : pats', body', DynamicFun closure sv)
+      return (pat_dims ++ rest_dims', pat : pats', body', DynamicFun closure sv)
   | otherwise = do
       (e, sv) <- defuncFun dims ps body (mempty, rettype) noLoc
-      return ([], e, sv)
+      return ([], [], e, sv)
+
 defuncLet _ [] body (Info rettype) = do
   (body', sv) <- defuncExp body
-  return ([], body', imposeType sv rettype )
+  return ([], [], body', imposeType sv rettype )
   where imposeType Dynamic{} t =
           Dynamic $ fromStruct t
         imposeType (RecordSV fs1) (Scalar (Record fs2)) =
@@ -659,8 +673,10 @@ buildRetType env pats = comb
         problematic v = (v `member` bound) && not (boundAsUnique v)
         comb (Scalar (Record fs_annot)) (Scalar (Record fs_got)) =
           Scalar $ Record $ M.intersectionWith comb fs_annot fs_got
-        comb (Scalar Arrow{}) t = descend t
-        comb got et = descend $ fromStruct got `setUniqueness` uniqueness et `setAliases` aliases et
+        comb (Scalar Arrow{}) t =
+          descend t
+        comb got et =
+          descend $ fromStruct got `setUniqueness` uniqueness et `setAliases` aliases et
 
         descend t@Array{}
           | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
@@ -889,12 +905,7 @@ defuncValBind (ValBind entry@Just{} name _ (Info rettype) tparams params body _ 
         onDim _            = AnyDim
 
 defuncValBind valbind@(ValBind _ name retdecl rettype tparams params body _ _) = do
-  let env = envFromShapeParams tparams
-  (params', body', sv) <- localEnv env $ defuncLet tparams params body rettype
-  -- Remove any shape parameters that no longer occur in the value parameters.
-  let dim_names = foldMap patternDimNames params'
-      tparams' = filter ((`S.member` dim_names) . typeParamName) tparams
-
+  (tparams', params', body', sv) <- defuncLet tparams params body rettype
   let rettype' = anyDimShapeAnnotations $ toStruct $ typeOf body'
   return ( valbind { valBindRetDecl    = retdecl
                    , valBindRetType    = Info $ combineTypeShapes
