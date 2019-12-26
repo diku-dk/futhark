@@ -40,10 +40,7 @@ module Futhark.TypeCheck
   , checkArg
   , checkSOACArrayArgs
   , checkLambda
-  , checkFun'
-  , checkLambdaParams
   , checkBody
-  , checkLambdaBody
   , consume
   , consumeOnlyParams
   , binding
@@ -492,8 +489,7 @@ checkFun (FunDef _ fname rettype params body) =
   context ("In function " ++ nameToString fname) $
     checkFun' (fname,
                retTypeValues rettype,
-               funParamsToNameInfos params,
-               body) consumable $ do
+               funParamsToNameInfos params) consumable $ do
       checkFunParams params
       checkRetType rettype
       context "When checking function body" $ checkFunBody rettype body
@@ -523,22 +519,20 @@ checkLambdaParams = mapM_ $ \param ->
 checkFun' :: Checkable lore =>
              (Name,
               [DeclExtType],
-              [(VName, NameInfo (Aliases lore))],
-              BodyT (Aliases lore))
+              [(VName, NameInfo (Aliases lore))])
           -> [(VName, Names)]
+          -> TypeM lore [Names]
           -> TypeM lore ()
-          -> TypeM lore ()
-checkFun' (fname, rettype, params, body) consumable check = do
+checkFun' (fname, rettype, params) consumable check = do
   checkNoDuplicateParams
   binding (M.fromList params) $
     consumeOnlyParams consumable $ do
-      check
+      body_aliases <- check
       scope <- askScope
       let isArray = maybe False ((>0) . arrayRank . typeOf) . (`M.lookup` scope)
       context ("When checking the body aliases: " ++
-               pretty (map namesToList $ bodyAliases body)) $
-        checkReturnAlias $ map (namesFromList . filter isArray . namesToList) $
-        bodyAliases body
+               pretty (map namesToList body_aliases)) $
+        checkReturnAlias $ map (namesFromList . filter isArray . namesToList) body_aliases
   where param_names = map fst params
 
         checkNoDuplicateParams = foldM_ expand [] param_names
@@ -598,19 +592,24 @@ checkResult = mapM_ checkSubExp
 checkFunBody :: Checkable lore =>
                 [RetType lore]
              -> Body (Aliases lore)
-             -> TypeM lore ()
+             -> TypeM lore [Names]
 checkFunBody rt (Body (_,lore) bnds res) = do
+  checkBodyLore lore
   checkStms bnds $ do
     context "When checking body result" $ checkResult res
     context "When matching declared return type to result of body" $
       matchReturnType rt res
-  checkBodyLore lore
+    map (`namesSubtract` bound_here) <$> mapM subExpAliasesM res
+  where bound_here = namesFromList $ M.keys $ scopeOf bnds
 
 checkLambdaBody :: Checkable lore =>
-                   [Type] -> Body (Aliases lore) -> TypeM lore ()
+                   [Type] -> Body (Aliases lore) -> TypeM lore [Names]
 checkLambdaBody ret (Body (_,lore) bnds res) = do
-  checkStms bnds $ checkLambdaResult ret res
   checkBodyLore lore
+  checkStms bnds $ do
+    checkLambdaResult ret res
+    map (`namesSubtract` bound_here) <$> mapM subExpAliasesM res
+  where bound_here = namesFromList $ M.keys $ scopeOf bnds
 
 checkLambdaResult :: Checkable lore =>
                      [Type] -> Result -> TypeM lore ()
@@ -628,10 +627,13 @@ checkLambdaResult ts es
         " but expected " ++ pretty t
 
 checkBody :: Checkable lore =>
-             Body (Aliases lore) -> TypeM lore ()
+             Body (Aliases lore) -> TypeM lore [Names]
 checkBody (Body (_,lore) bnds res) = do
-  checkStms bnds $ checkResult res
   checkBodyLore lore
+  checkStms bnds $ do
+    checkResult res
+    map (`namesSubtract` bound_here) <$> mapM subExpAliasesM res
+  where bound_here = namesFromList $ M.keys $ scopeOf bnds
 
 checkBasicOp :: Checkable lore =>
                BasicOp (Aliases lore) -> TypeM lore ()
@@ -821,10 +823,9 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
     context "Inside the loop body" $
       checkFun' (nameFromString "<loop body>",
                  staticShapes rettype,
-                 funParamsToNameInfos mergepat,
-                 loopbody) consumable $ do
+                 funParamsToNameInfos mergepat) consumable $ do
           checkFunParams mergepat
-          checkBody loopbody
+          loopbody_aliases <- checkBody loopbody
 
           let rettype_ext = existentialiseExtTypes (map paramName mergepat) $
                             staticShapes $ map fromDecl rettype
@@ -839,6 +840,8 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
               unless (bodyt `subtypesOf` rettype') $
               bad $ ReturnTypeError (nameFromString "<loop body>")
               (staticShapes rettype') (staticShapes bodyt)
+
+          return loopbody_aliases
 
 checkExp (Op op) = do checker <- asks envCheckOp
                       checker op
@@ -1026,8 +1029,7 @@ checkLambda (Lambda params body rettype) args = do
                staticShapes $ map (`toDecl` Nonunique) rettype,
                [ (paramName param,
                   LParamInfo $ paramAttr param)
-               | param <- params ],
-               body) consumable $ do
+               | param <- params ]) consumable $ do
       checkLambdaParams params
       mapM_ checkType rettype
       checkLambdaBody rettype body
