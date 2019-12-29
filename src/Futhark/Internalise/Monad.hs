@@ -7,15 +7,17 @@ module Futhark.Internalise.Monad
   , InternaliseEnv (..)
   , ConstParams
   , Closure
-  , FunInfo
+  , FunInfo, ConstInfo
 
   , substitutingVars
   , addFunction
 
   , lookupFunction
   , lookupFunction'
+  , lookupConst
 
   , bindFunction
+  , bindConstant
 
   , asserting
   , assertingOne
@@ -58,6 +60,10 @@ type FunInfo = (Name, ConstParams, Closure,
 
 type FunTable = M.Map VName FunInfo
 
+type ConstInfo = (Name, ConstParams, [(SubExp,Type)] -> Maybe [DeclExtType])
+
+type ConstTable = M.Map VName ConstInfo
+
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
 type VarSubstitutions = M.Map VName [SubExp]
@@ -71,6 +77,7 @@ data InternaliseEnv = InternaliseEnv {
 data InternaliseState = InternaliseState {
     stateNameSource :: VNameSource
   , stateFunTable :: FunTable
+  , stateConstTable :: ConstTable
   }
 
 newtype InternaliseResult = InternaliseResult [FunDef SOACS]
@@ -122,6 +129,7 @@ runInternaliseM safe (InternaliseM m) =
         newState src =
           InternaliseState { stateNameSource = src
                            , stateFunTable = mempty
+                           , stateConstTable = mempty
                            }
 
 substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
@@ -138,9 +146,16 @@ lookupFunction :: VName -> InternaliseM FunInfo
 lookupFunction fname = maybe bad return =<< lookupFunction' fname
   where bad = fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
+lookupConst :: VName -> InternaliseM (Maybe ConstInfo)
+lookupConst fname = gets $ M.lookup fname . stateConstTable
+
 bindFunction :: VName -> FunInfo -> InternaliseM ()
 bindFunction fname info =
   modify $ \s -> s { stateFunTable = M.insert fname info $ stateFunTable s }
+
+bindConstant :: VName -> ConstInfo -> InternaliseM ()
+bindConstant cname info =
+  modify $ \s -> s { stateConstTable = M.insert cname info $ stateConstTable s }
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
