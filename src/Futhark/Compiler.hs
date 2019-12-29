@@ -31,7 +31,6 @@ import Futhark.Representation.AST
 import qualified Futhark.Representation.SOACS as I
 import qualified Futhark.TypeCheck as I
 import Futhark.Compiler.Program
-import qualified Language.Futhark as E
 import Futhark.Util.Log
 
 data FutharkConfig = FutharkConfig
@@ -106,16 +105,11 @@ runPipelineOnProgram config pipeline file = do
   putNameSource namesrc
   when (pipelineVerbose pipeline_config) $
     logMsg ("Internalising program" :: String)
-  res <- internaliseProg (futharkSafe config) prog_imports
-  case res of
-    Left err ->
-      internalErrorS ("During internalisation: " <> pretty err) $ E.Prog Nothing $
-      concatMap (E.progDecs . fileProg . snd) prog_imports
-    Right int_prog -> do
-      when (pipelineVerbose pipeline_config) $
-        logMsg ("Type-checking internalised program" :: String)
-      typeCheckInternalProgram int_prog
-      runPasses pipeline pipeline_config int_prog
+  int_prog <- internaliseProg (futharkSafe config) prog_imports
+  when (pipelineVerbose pipeline_config) $
+    logMsg ("Type-checking internalised program" :: String)
+  typeCheckInternalProgram int_prog
+  runPasses pipeline pipeline_config int_prog
   where pipeline_config =
           PipelineConfig { pipelineVerbose = fst (futharkVerbose config) > NotVerbose
                          , pipelineValidate = True
