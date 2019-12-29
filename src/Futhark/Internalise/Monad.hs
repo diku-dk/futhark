@@ -77,17 +77,15 @@ newtype InternaliseResult = InternaliseResult [FunDef SOACS]
   deriving (Semigroup, Monoid)
 
 newtype InternaliseM  a = InternaliseM (BinderT SOACS
-                                        (RWST
+                                        (RWS
                                          InternaliseEnv
                                          InternaliseResult
-                                         InternaliseState
-                                         (Except String))
+                                         InternaliseState)
                                         a)
   deriving (Functor, Applicative, Monad,
             MonadReader InternaliseEnv,
             MonadState InternaliseState,
             MonadFreshNames,
-            MonadError String,
             HasScope SOACS,
             LocalScope SOACS)
 
@@ -96,7 +94,7 @@ instance (Monoid w, Monad m) => MonadFreshNames (RWST r w InternaliseState m) wh
   putNameSource src = modify $ \s -> s { stateNameSource = src }
 
 instance Fail.MonadFail InternaliseM where
-  fail = InternaliseM . throwError
+  fail = error . ("InternaliseM: "++)
 
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = SOACS
@@ -110,14 +108,12 @@ instance MonadBinder InternaliseM where
 
 runInternaliseM :: MonadFreshNames m =>
                    Bool -> InternaliseM ()
-                -> m (Either String [FunDef SOACS])
+                -> m [FunDef SOACS]
 runInternaliseM safe (InternaliseM m) =
-  modifyNameSource $ \src -> do
-  let onError e             = (Left e, src)
-      onSuccess (funs,src') = (Right funs, src')
-  either onError onSuccess $ runExcept $ do
-    (_, s, InternaliseResult funs) <- runRWST (runBinderT m mempty) newEnv (newState src)
-    return (funs, stateNameSource s)
+  modifyNameSource $ \src ->
+  let (_, s, InternaliseResult funs) =
+        runRWS (runBinderT m mempty) newEnv (newState src)
+  in (funs, stateNameSource s)
   where newEnv = InternaliseEnv {
                    envSubsts = mempty
                  , envDoBoundsChecks = True
@@ -172,8 +168,7 @@ newtype InternaliseTypeM a =
   InternaliseTypeM (ReaderT TypeEnv (StateT TypeState InternaliseM) a)
   deriving (Functor, Applicative, Monad,
             MonadReader TypeEnv,
-            MonadState TypeState,
-            MonadError String)
+            MonadState TypeState)
 
 liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
 liftInternaliseM = InternaliseTypeM . lift . lift
