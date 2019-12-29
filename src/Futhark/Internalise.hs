@@ -67,7 +67,7 @@ internaliseFunName ofname _  = do
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ loc) = do
-  info <- bindingParams tparams params $ \pcm shapeparams params' -> do
+  bindingParams tparams params $ \pcm shapeparams params' -> do
     (rettype_bad, rcm) <- internaliseReturnType rettype
     let rettype' = zeroExts rettype_bad
 
@@ -106,15 +106,18 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
 
     addFunction $ I.FunDef Nothing fname' rettype' all_params body'
 
-    return (fname',
-            pcm<>rcm,
-            map I.paramName free_params,
-            shapenames,
-            map declTypeOf $ concat params',
-            all_params,
-            applyRetType rettype' all_params)
+    if null params'
+      then bindConstant fname (fname',
+                               pcm<>rcm,
+                               applyRetType rettype' constparams)
+      else bindFunction fname (fname',
+                               pcm<>rcm,
+                               map I.paramName free_params,
+                               shapenames,
+                               map declTypeOf $ concat params',
+                               all_params,
+                               applyRetType rettype' all_params)
 
-  bindFunction fname info
   case entry of Just (Info entry') -> generateEntryPoint entry' fb
                 Nothing -> return ()
 
@@ -167,7 +170,14 @@ generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info rettype) _ params _ _
         args = map (I.Var . I.paramName) $ concat params'
 
     entry_body <- insertStmsM $ do
-      vals <- fst <$> funcall "entry_result" (E.qualName ofname) args loc
+      -- Special case the (rare) situation where the entry point is
+      -- not a function.
+      maybe_const <- internaliseIfConst loc ofname
+      vals <- case maybe_const of
+                Just ses ->
+                  return ses
+                Nothing ->
+                  fst <$> funcall "entry_result" (E.qualName ofname) args loc
       ctx <- extractShapeContext (concat entry_rettype) <$>
              mapM (fmap I.arrayDims . subExpType) vals
       resultBodyM (ctx ++ vals)
@@ -263,7 +273,7 @@ internaliseExp _ (E.Var (E.QualName _ name) (Info t) loc) = do
     Nothing     -> do
       -- If this identifier is the name of a constant, we have to turn it
       -- into a call to the corresponding function.
-      is_const <- lookupConstant loc name
+      is_const <- internaliseIfConst loc name
       case is_const of
         Just ses -> return ses
         Nothing -> (:[]) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
@@ -1606,17 +1616,17 @@ isOverloadedFunction qname args loc = do
 
 -- | Is the name a value constant?  If so, create the necessary
 -- function call and return the corresponding subexpressions.
-lookupConstant :: SrcLoc -> VName -> InternaliseM (Maybe [SubExp])
-lookupConstant loc name = do
-  is_const <- lookupFunction' name
+internaliseIfConst :: SrcLoc -> VName -> InternaliseM (Maybe [SubExp])
+internaliseIfConst loc name = do
+  is_const <- lookupConst name
   scope <- askScope
   case is_const of
-    Just (fname, constparams, _, _, _, _, mk_rettype)
+    Just (fname, constparams, mk_rettype)
       | name `M.notMember` scope -> do
       (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs loc constparams
       safety <- askSafety
       case mk_rettype $ zip constargs $ map I.fromDecl const_ts of
-        Nothing -> fail $ "lookupConstant: " ++
+        Nothing -> fail $ "internaliseIfConst: " ++
                    unwords (pretty name : zipWith (curry pretty) constargs const_ts) ++
                    " failed"
         Just rettype ->

@@ -92,17 +92,22 @@ internaliseDim d =
   where namedDim (E.QualName _ name) = do
           subst <- liftInternaliseM $ asks $ M.lookup name . envSubsts
           is_dim <- lookupDim name
-          case (is_dim, subst) of
-            (Just dim, _) -> return dim
-            (Nothing, Just [v]) -> return $ I.Free v
-            _ -> do -- Then it must be a constant.
-              let fname = nameFromString $ pretty name ++ "f"
+          is_const <- liftInternaliseM $ lookupConst name
+
+          case (is_dim, is_const, subst) of
+            (Just dim, _, _) -> return dim
+
+            (Nothing, Nothing, Just [v]) -> return $ I.Free v
+
+            (_, Just (fname, _, _), _) -> do
               (i,cm) <- get
               case find ((==fname) . fst) cm of
                 Just (_, known) -> return $ I.Free $ I.Var known
                 Nothing -> do new <- liftInternaliseM $ newVName $ baseString name
                               put (i, (fname,new):cm)
                               return $ I.Free $ I.Var new
+
+            _ -> return $ I.Free $ I.Var name
 
 internaliseTypeM :: E.StructType
                  -> InternaliseTypeM [I.TypeBase ExtShape Uniqueness]
