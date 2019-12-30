@@ -202,6 +202,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
 
 letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc
 letBody body@LetPat{} = ppr body
+letBody body@LetFun{} = ppr body
 letBody body          = text "in" <+> align (ppr body)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
