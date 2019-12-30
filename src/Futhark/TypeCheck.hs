@@ -506,9 +506,18 @@ funParamsToNameInfos = map nameTypeAndLore
 
 checkFunParams :: Checkable lore =>
                   [FParam lore] -> TypeM lore ()
-checkFunParams = mapM_ $ \param ->
-  context ("In function parameter " ++ pretty param) $
-    checkFParamLore (paramName param) (paramAttr param)
+checkFunParams params = foldM_ check mempty params
+  where param_bound = namesFromList $ map paramName params
+        check prev param =
+          context ("In function parameter " ++ pretty param) $ do
+            checkFParamLore (paramName param) (paramAttr param)
+            case namesToList $
+                 (freeIn param `namesIntersection` param_bound)
+                 `namesSubtract` prev of
+              [] -> return ()
+              v:_ ->
+                bad $ TypeError $ pretty v ++ " bound in a later parameter."
+            return $ oneName (paramName param) <> prev
 
 checkLambdaParams :: Checkable lore =>
                      [LParam lore] -> TypeM lore ()
