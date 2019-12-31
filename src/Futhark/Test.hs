@@ -647,19 +647,28 @@ ensureReferenceOutput :: (MonadIO m, MonadError [T.Text] m) =>
                       -> m ()
 ensureReferenceOutput concurrency futhark compiler prog ios = do
   missing <- filterM isReferenceMissing $ concatMap entryAndRuns ios
+
   unless (null missing) $ do
     void $ compileProgram [] futhark compiler prog
-    liftIO $ void $ flip (pmapIO concurrency) missing $ \(entry, tr) -> do
+
+    res <- liftIO $ flip (pmapIO concurrency) missing $ \(entry, tr) -> do
       (code, stdout, stderr) <- runProgram "" ["-b"] prog entry $ runInput tr
       case code of
         ExitFailure e ->
-          fail $ "Reference dataset generation failed with exit code " ++
-          show e ++ " and stderr:\n" ++
-          map (chr . fromIntegral) (SBS.unpack stderr)
+          return $ Left
+          [T.pack $ "Reference dataset generation failed with exit code " ++
+           show e ++ " and stderr:\n" ++
+           map (chr . fromIntegral) (SBS.unpack stderr)]
         ExitSuccess -> do
           let f = file (entry, tr)
           liftIO $ createDirectoryIfMissing True $ takeDirectory f
           SBS.writeFile f stdout
+          return $ Right ()
+
+    case sequence_ res of
+      Left err -> throwError err
+      Right () -> return ()
+
   where file (entry, tr) =
           takeDirectory prog </> testRunReferenceOutput prog entry tr
 
