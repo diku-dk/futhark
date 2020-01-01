@@ -10,4 +10,4 @@
 
 let main(a: []i32): []i32 =
   map (\(i: i32): i32  ->
-        reduce (+) 0 (map (+1) (0..<i))) a
+        reduce (+) 0 (map (+1) (unsafe (0..<i)))) a
