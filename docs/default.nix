@@ -1,5 +1,5 @@
 with import <nixpkgs> {};
 stdenv.mkDerivation {
     name = "futhark-docs";
-    buildInputs = [ pythonPackages.sphinx pythonPackages.sphinxcontrib-bibtex ];
+    buildInputs = [ python37 python37Packages.sphinx ];
 }
