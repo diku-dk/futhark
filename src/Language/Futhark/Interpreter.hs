@@ -1,4 +1,3 @@
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Language.Futhark.Interpreter
   ( Ctx(..)
@@ -596,19 +595,34 @@ eval env (RecordLit fields _) =
 
 eval env (ArrayLit vs _ _) = toArray =<< mapM (eval env) vs
 
-eval env (Range start maybe_second end (Info t) _) = do
+eval env (Range start maybe_second end (Info t) loc) = do
   start' <- asInteger <$> eval env start
   maybe_second' <- traverse (fmap asInteger . eval env) maybe_second
-  (end', dir) <- case end of
-    DownToExclusive e -> (,-1) . (+1) . asInteger <$> eval env e
-    ToInclusive e -> (,maybe 1 (signum . subtract start') maybe_second') .
-                     asInteger <$> eval env e
-    UpToExclusive e -> (,1) . subtract 1 . asInteger <$> eval env e
+  end' <- traverse (fmap asInteger . eval env) end
 
-  let second = fromMaybe (start' + dir) maybe_second'
-      step = second - start'
-  if step == 0 || dir /= signum step then toArray []
-    else toArray $ map toInt [start',second..end']
+  let (end_adj, step, ok) =
+        case (end', maybe_second') of
+          (DownToExclusive end'', Nothing) ->
+            (end'' + 1, -1, start' >= end'')
+          (DownToExclusive end'', Just second') ->
+            (end'' + 1, second' - start', start' >= end'' && second' < start')
+
+          (ToInclusive end'', Nothing) ->
+            (end'', 1, start' <= end'')
+          (ToInclusive end'', Just second')
+            | second' > start' ->
+                (end'', second' - start', start' <= end'')
+            | otherwise ->
+                (end'', second' - start', start' >= end'' && second' /= start')
+
+          (UpToExclusive x, Nothing) ->
+            (x-1, 1, start' <= x)
+          (UpToExclusive x, Just second') ->
+            (x-1, second' - start', start' <= x && second' > start')
+
+  if ok
+    then toArray $ map toInt [start',start'+step..end_adj]
+    else bad loc env $ badRange start' maybe_second' end'
 
   where toInt =
           case stripArray 1 t of
@@ -617,6 +631,17 @@ eval env (Range start maybe_second end (Info t) _) = do
             Scalar (Prim (Unsigned t')) ->
               ValuePrim . UnsignedValue . intValue t'
             _ -> error $ "Nonsensical range type: " ++ show t
+
+        badRange start' maybe_second' end' =
+          "Range " ++ pretty start' ++
+          (case maybe_second' of
+             Nothing -> ""
+             Just second' -> ".." ++ pretty second') ++
+          (case end' of
+             DownToExclusive x -> "..>" ++ pretty x
+             ToInclusive x -> "..." ++ pretty x
+             UpToExclusive x -> "..<"++ pretty x) ++
+          " is invalid."
 
 eval env (Var qv _ _) = evalTermVar env qv
 
