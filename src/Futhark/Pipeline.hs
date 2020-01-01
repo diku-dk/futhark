@@ -130,7 +130,7 @@ onePass pass = Pipeline perform
           let prog'' = Alias.aliasAnalysis prog'
           when (pipelineValidate cfg) $
             case checkProg prog'' of
-              Left err -> validationError pass prog' $ show err
+              Left err -> validationError pass prog'' $ show err
               Right () -> return ()
           return prog'
 
@@ -138,8 +138,8 @@ passes :: Checkable lore =>
           [Pass lore lore] -> Pipeline lore lore
 passes = foldl (>>>) id . map onePass
 
-validationError :: PrettyLore tolore =>
-                   Pass fromlore tolore -> Prog tolore -> String -> FutharkM a
+validationError :: PrettyLore lore =>
+                   Pass fromlore tolore -> Prog lore -> String -> FutharkM a
 validationError pass prog err =
   throwError $ InternalError msg (prettyText prog) CompilerBug
   where msg = "Type error after pass '" <> T.pack (passName pass) <> "':\n" <> T.pack err
