@@ -9,7 +9,7 @@
 -- output { [[220i32, 284i32]] }
 
 let divisors(n: i32): []i32 =
-  filter (\x -> n%x == 0) (1...n/2)
+  filter (\x -> n%x == 0) (1...n/2+1)
 
 let amicable((n: i32, nd: i32), (m: i32, md: i32)): bool =
   n < m && nd == m && md == n

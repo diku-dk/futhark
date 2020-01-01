@@ -343,12 +343,34 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         isArrayLiteral e =
           Just ([], [e])
 
-internaliseExp desc (E.Range start maybe_second end _ _) = do
+internaliseExp desc (E.Range start maybe_second end _ loc) = do
   start' <- internaliseExp1 "range_start" start
   end' <- internaliseExp1 "range_end" $ case end of
     DownToExclusive e -> e
     ToInclusive e -> e
     UpToExclusive e -> e
+  maybe_second' <-
+    traverse (internaliseExp1 "range_second") maybe_second
+
+  -- Construct an error message in case the range is invalid.
+  let conv = case E.typeOf start of
+               E.Scalar (E.Prim (E.Unsigned _)) -> asIntZ Int32
+               _ -> asIntS Int32
+  start'_i32 <- conv start'
+  end'_i32 <- conv end'
+  maybe_second'_i32 <- traverse conv maybe_second'
+  let errmsg =
+        errorMsg $
+        ["Range "] ++
+        [ErrorInt32 start'_i32] ++
+        (case maybe_second'_i32 of
+           Nothing -> []
+           Just second_i32 -> ["..", ErrorInt32 second_i32]) ++
+        (case end of
+           DownToExclusive{} -> ["..>"]
+           ToInclusive{} -> ["..."]
+           UpToExclusive{} -> ["..<"]) ++
+        [ErrorInt32 end'_i32, " is invalid."]
 
   (it, le_op, lt_op) <-
     case E.typeOf start of
@@ -362,9 +384,8 @@ internaliseExp desc (E.Range start maybe_second end _ _) = do
                                  ToInclusive{} -> one
                                  UpToExclusive{} -> one
 
-  (step, step_zero) <- case maybe_second of
-    Just second -> do
-      second' <- internaliseExp1 "range_second" second
+  (step, step_zero) <- case maybe_second' of
+    Just second' -> do
       subtracted_step <- letSubExp "subtracted_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
       step_zero <- letSubExp "step_zero" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) start' second'
       return (subtracted_step, step_zero)
@@ -421,17 +442,24 @@ internaliseExp desc (E.Range start maybe_second end _ _) = do
 
   step_invalid <- letSubExp "step_invalid" $
                   I.BasicOp $ I.BinOp I.LogOr step_wrong_dir step_zero
-  invalid <- letSubExp "range_invalid" $
-             I.BasicOp $ I.BinOp I.LogOr step_invalid bounds_invalid
+
+  cs <- assertingOne $ do
+    invalid <- letSubExp "range_invalid" $
+               I.BasicOp $ I.BinOp I.LogOr step_invalid bounds_invalid
+    valid <- letSubExp "valid" $ I.BasicOp $ I.UnOp I.Not invalid
+
+    letExp "range_valid_c" $
+      I.BasicOp $ I.Assert valid errmsg (loc, mempty)
 
   step_i32 <- asIntS Int32 step
   pos_step <- letSubExp "pos_step" $
               I.BasicOp $ I.BinOp (Mul Int32) step_i32 step_sign_i32
-  num_elems <- letSubExp "num_elems" =<<
-               eIf (eSubExp invalid)
-               (eBody [eSubExp $ intConst Int32 0])
-               (eBody [eDivRoundingUp Int32 (eSubExp distance) (eSubExp pos_step)])
-  pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
+  num_elems <- certifying cs $
+               letSubExp "num_elems" =<<
+               eDivRoundingUp Int32 (eSubExp distance) (eSubExp pos_step)
+
+  se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
+  return [se]
 
 internaliseExp desc (E.Ascript e (TypeDecl dt (Info et)) _ loc) = do
   es <- internaliseExp desc e
