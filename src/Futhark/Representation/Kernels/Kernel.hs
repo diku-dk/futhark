@@ -238,7 +238,7 @@ aliasAnalyseKernelBody :: (Attributes lore,
                           KernelBody lore
                        -> KernelBody (Aliases lore)
 aliasAnalyseKernelBody (KernelBody attr stms res) =
-  let Body attr' stms' _ = Alias.analyseBody $ Body attr stms []
+  let Body attr' stms' _ = Alias.analyseBody mempty $ Body attr stms []
   in KernelBody attr' stms' res
 
 removeKernelBodyAliases :: CanBeAliased (Op lore) =>

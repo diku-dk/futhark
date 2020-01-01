@@ -96,7 +96,7 @@ gatherStmPattern :: Pattern -> Exp -> FusionGM FusedRes -> FusionGM FusedRes
 gatherStmPattern pat e = binding $ zip idents aliases
   where idents = patternIdents pat
         aliases = replicate (length (patternContextNames pat)) mempty ++
-                  expAliases (Alias.analyseExp e)
+                  expAliases (Alias.analyseExp mempty e)
 
 bindingPat :: Pattern -> FusionGM a -> FusionGM a
 bindingPat = binding . (`zip` repeat mempty) . patternIdents
@@ -650,7 +650,7 @@ fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
 
   where cs = stmCerts bnd
         rem_bnds = bnd : bnds
-        consumed = consumedInExp $ Alias.analyseExp e
+        consumed = consumedInExp $ Alias.analyseExp mempty e
 
         reduceLike soac lambdas nes = do
           (used_lam, lres)  <- foldM fusionGatherLam (mempty, fres) lambdas
