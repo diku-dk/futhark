@@ -504,6 +504,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
                                                   const char *extra_build_opts[]) {
   int error;
 
+  free_list_init(&ctx->free_list);
   ctx->queue = queue;
 
   OPENCL_SUCCEED_FATAL(clGetCommandQueueInfo(ctx->queue, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx->ctx, NULL));
@@ -727,8 +728,6 @@ static cl_program setup_opencl(struct opencl_context *ctx,
                                const char *extra_build_opts[]) {
 
   ctx->lockstep_width = 0; // Real value set later.
-
-  free_list_init(&ctx->free_list);
 
   struct opencl_device_option device_option = get_preferred_device(&ctx->cfg);
 
