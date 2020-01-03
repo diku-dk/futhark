@@ -1,6 +1,9 @@
-resolver: nightly-2019-11-08
+resolver: nightly-2020-01-03
 packages:
 - .
+
+extra-deps:
+- megaparsec-8.0.0@sha256:362f85e243ecbcb550e1de6e5c74ba5a50c09edaa1208c99bc5b9fd242227fc6,3808
 
 flags: {}
 
