@@ -360,7 +360,7 @@ testSpec :: Parser ProgramTest
 testSpec =
   ProgramTest <$> parseDescription <*> parseTags <*> parseAction
 
-parserState :: Int -> FilePath -> s -> State s
+parserState :: Int -> FilePath -> s -> State s e
 parserState line name t =
   State { stateInput = t
         , stateOffset = 0
@@ -373,6 +373,7 @@ parserState line name t =
                               , sourceColumn = mkPos 3 }
           , pstateTabWidth = defaultTabWidth
           , pstateLinePrefix = "-- "}
+        , stateParseErrors = []
         }
 
 
