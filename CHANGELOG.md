@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Properly handle another ICE on parse errors in test stanzas (#819).
 
+  * `futhark_context_new_with_command_queue()` now actually works.  Oops.
+
 ## [0.13.2]
 
 ### Added
