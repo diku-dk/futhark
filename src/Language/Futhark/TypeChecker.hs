@@ -168,6 +168,11 @@ bindingTypeParams tparams = localEnv env
                      M.singleton v $ TypeAbbr l [] $
                      Scalar $ TypeVar () Nonunique (typeName v) [] }
 
+emptyDimParam :: StructType -> Bool
+emptyDimParam = isNothing . traverseParamDims onDim
+  where onDim AnyDim = Nothing
+        onDim d = Just d
+
 -- In this function, after the recursion, we add the Env of the
 -- current Spec *after* the one that is returned from the recursive
 -- call.  This implements the behaviour that specs later in a module
@@ -181,12 +186,16 @@ checkSpecs [] = return (mempty, mempty, [])
 checkSpecs (ValSpec name tparams vtype doc loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    (tparams', rettype') <-
+    (tparams', vtype') <-
       checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
         (vtype', _) <- checkTypeDecl tparams' vtype
         return (tparams', vtype')
 
-    let binding = BoundV tparams' $ unInfo $ expandedType rettype'
+    when (emptyDimParam $ unInfo $ expandedType vtype') $
+      throwError $ TypeError (srclocOf loc)
+      "All parameters must have non-anonymous sizes."
+
+    let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
           mempty { envVtable = M.singleton name' binding
                  , envNameMap = M.singleton (Term, name) $ qualName name'
@@ -194,7 +203,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     (abstypes, env, specs') <- localEnv valenv $ checkSpecs specs
     return (abstypes,
             env <> valenv,
-            ValSpec name' tparams' rettype' doc loc : specs')
+            ValSpec name' tparams' vtype' doc loc : specs')
 
 checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do

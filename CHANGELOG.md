@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Invalid ranges like `1..<0` now produce a run-time error instead
     of an empty array.
 
+  * Value specs must now explicitly quantify all sizes of function
+    parameters.  Instead of
+
+        val sum: []t -> t
+
+    you must write
+
+        val sum [n]: [n]t -> t
+
 ### Fixed
 
   * Work around (probable) AMD OpenCL compiler bug for

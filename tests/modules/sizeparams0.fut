@@ -6,7 +6,7 @@ module type MT = {
   type intvec[n]
 
   val singleton: i32 -> intvec [1]
-  val first: intvec [] -> i32
+  val first [n]: intvec [n] -> i32
 }
 
 module M0: MT = {

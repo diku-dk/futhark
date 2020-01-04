@@ -7,7 +7,7 @@ module type SIG = {
   type t = (i32, i32)
 
   val x: t
-  val f: []t -> t
+  val f [n]: [n]t -> t
 }
 
 module Struct: SIG = {
