@@ -388,10 +388,10 @@ valueType :: Value -> ValueType
 valueType (PrimValue bv) = Scalar $ Prim $ primValueType bv
 valueType (ArrayValue _ t) = t
 
--- | Construct a 'ShapeDecl' with the given number of zero-information
+-- | Construct a 'ShapeDecl' with the given number of 'AnyDim'
 -- dimensions.
-rank :: Int -> ShapeDecl ()
-rank n = ShapeDecl $ replicate n ()
+rank :: Int -> ShapeDecl (DimDecl VName)
+rank n = ShapeDecl $ replicate n AnyDim
 
 -- | The type is leaving a scope, so clean up any aliases that
 -- reference the bound variables, and turn any dimensions that name
@@ -598,7 +598,7 @@ namesToPrimTypes = M.fromList
 -- type, with 'Nothing' representing the overloaded parameter type.
 data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
                | IntrinsicOverloadedFun [PrimType] [Maybe PrimType] (Maybe PrimType)
-               | IntrinsicPolyFun [TypeParamBase VName] [TypeBase () ()] (TypeBase () ())
+               | IntrinsicPolyFun [TypeParamBase VName] [StructType] StructType
                | IntrinsicType PrimType
                | IntrinsicEquality -- Special cased.
                | IntrinsicOpaque
@@ -698,25 +698,25 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
               ("map_stream",
                IntrinsicPolyFun [tp_a, tp_b]
-                [Scalar (Prim $ Signed Int32) `arr` (arr_a `arr` arr_b), arr_a]
+                [Scalar (Prim $ Signed Int32) `karr` (arr_ka `arr` arr_kb), arr_a]
                 uarr_b),
 
               ("map_stream_per",
                IntrinsicPolyFun [tp_a, tp_b]
-                [Scalar (Prim $ Signed Int32) `arr` (arr_a `arr` arr_b), arr_a]
+                [Scalar (Prim $ Signed Int32) `karr` (arr_ka `arr` arr_kb), arr_a]
                 uarr_b),
 
               ("reduce_stream",
                IntrinsicPolyFun [tp_a, tp_b]
                 [Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
-                 Scalar (Prim $ Signed Int32) `arr` (arr_a `arr` Scalar t_b),
+                 Scalar (Prim $ Signed Int32) `karr` (arr_ka `arr` Scalar t_b),
                  arr_a] $
                 Scalar t_b),
 
               ("reduce_stream_per",
                IntrinsicPolyFun [tp_a, tp_b]
                 [Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
-                 Scalar (Prim $ Signed Int32) `arr` (arr_a `arr` Scalar t_b),
+                 Scalar (Prim $ Signed Int32) `karr` (arr_ka `arr` Scalar t_b),
                  arr_a] $
                 Scalar t_b),
 
@@ -742,6 +742,11 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         t_arr_a_arr_b = Scalar $ Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
 
         arr x y = Scalar $ Arrow mempty Unnamed x y
+
+        kv = VName (nameFromString "k") 2
+        arr_ka = Array () Nonunique t_a (ShapeDecl [NamedDim $ qualName kv])
+        arr_kb = Array () Nonunique t_b (ShapeDecl [NamedDim $ qualName kv])
+        karr x y = Scalar $ Arrow mempty (Named kv) x y
 
         namify i (k,v) = (VName (nameFromString k) i, v)
 
