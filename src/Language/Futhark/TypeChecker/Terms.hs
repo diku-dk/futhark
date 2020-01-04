@@ -270,7 +270,7 @@ initialTermScope = TermScope { scopeVtable = initialVtable
           Just (name, OverloadedF ts pts rts)
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
           Just (name, BoundV Global tvs $
-                      fromStruct $ vacuousShapeAnnotations $
+                      fromStruct $ anyDimShapeAnnotations $
                       Scalar $ Arrow mempty Unnamed pts' rt)
           where pts' = case pts of [pt] -> pt
                                    _    -> tupleRecord pts
@@ -874,10 +874,10 @@ checkExp (Range start maybe_step end NoInfo loc) = do
     ToInclusive e -> ToInclusive <$>
                      (unifies "use in range expression" start_t =<< checkExp e)
 
-  t <- arrayOfM loc start_t (rank 1) Unique
+  t <- arrayOfM loc (vacuousShapeAnnotations start_t) (rank 1) Unique
 
   return $ Range start' maybe_step' end'
-    (Info (vacuousShapeAnnotations t `setAliases` mempty)) loc
+    (Info (t `setAliases` mempty)) loc
 
 checkExp (Ascript e decl NoInfo loc) = do
   decl' <- checkTypeDecl decl
