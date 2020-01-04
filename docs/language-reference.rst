@@ -1123,6 +1123,20 @@ or convert them to anything else, making this a rather useless use of
 abstraction.  As a derived form, we can write ``module M: S = e`` to
 mean ``module M = e : S``.
 
+In a value spec, sizes in types on the left-hand side of a function
+arrow must not be anonymous.  For example, this is forbidden::
+
+  val sum: []t -> t
+
+Instead write::
+
+  val sum [n]: [n]t -> t
+
+But this is allowed, because the empty size is not to the left of a
+function arrow::
+
+  val evens [n]: [n]i32 -> []i32
+
 Parametric modules allow us to write definitions that abstract over
 modules.  For example::
 

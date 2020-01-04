@@ -3,7 +3,7 @@
 -- input { [1,2] [true,false] }
 -- output { [1,2,1,2] [true,false,true,false] [2,1] [false,true] }
 
-module pm (P: { val frob 'a: []a -> []a }) = {
+module pm (P: { val frob 'a [n]: [n]a -> []a }) = {
   let frob_two 'a 'b (xs: []a) (ys: []b) = (P.frob xs, P.frob ys)
 }
 

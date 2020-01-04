@@ -40,6 +40,7 @@ module Language.Futhark.Attributes
   , aliases
   , diet
   , arrayRank
+  , arrayShape
   , nestedDims
   , orderZero
   , unfoldFunType
@@ -61,9 +62,11 @@ module Language.Futhark.Attributes
   , removeShapeAnnotations
   , vacuousShapeAnnotations
   , anyDimShapeAnnotations
+  , traverseParamDims
   , tupleRecord
   , isTupleRecord
   , areTupleFields
+  , tupleFields
   , tupleFieldNames
   , sortFields
   , sortConstrs
@@ -104,6 +107,7 @@ import           Data.Maybe
 import           Data.Ord
 import           Data.Bifunctor
 import           Data.Bifoldable
+import           Data.Bitraversable (bitraverse)
 
 import           Prelude
 
@@ -163,6 +167,35 @@ modifyShapeAnnotations :: (oldshape -> newshape)
                        -> TypeBase oldshape as
                        -> TypeBase newshape as
 modifyShapeAnnotations = first
+
+-- | Perform a traversal (possibly including replacement) on sizes
+-- that are parameters in a function type, but also including the type
+-- immediately passed to the function.
+traverseParamDims :: Applicative f =>
+                     (dim -> f dim)
+                  -> TypeBase dim als
+                  -> f (TypeBase dim als)
+traverseParamDims = go True
+  where go :: Applicative f =>
+              Bool -> (dim -> f dim)
+           -> TypeBase dim als
+           -> f (TypeBase dim als)
+        go b f t@Array{} = bitraverse (onDim b f) pure t
+        go b f (Scalar (Record fields)) = Scalar . Record <$> traverse (go b f) fields
+        go b f (Scalar (TypeVar as u tn targs)) =
+          Scalar <$> (TypeVar as u tn <$> traverse (onTypeArg b f) targs)
+        go b f (Scalar (Sum cs)) = Scalar . Sum <$> traverse (traverse (go b f)) cs
+        go _ _ t@(Scalar Prim{}) = pure t
+        go _ f (Scalar (Arrow als p t1 t2)) =
+          Scalar <$> (Arrow als p <$> go True f t1 <*> go False f t2)
+
+        onTypeArg b f (TypeArgDim d loc) =
+          TypeArgDim <$> onDim b f d <*> pure loc
+        onTypeArg b f (TypeArgType t loc) =
+          TypeArgType <$> go b f t <*> pure loc
+
+        onDim True f d = f d
+        onDim _ _ d = pure d
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
@@ -262,12 +295,17 @@ isTupleRecord :: TypeBase dim as -> Maybe [TypeBase dim as]
 isTupleRecord (Scalar (Record fs)) = areTupleFields fs
 isTupleRecord _ = Nothing
 
+-- | Does this record map correspond to a tuple?
 areTupleFields :: M.Map Name a -> Maybe [a]
 areTupleFields fs =
   let fs' = sortFields fs
   in if and $ zipWith (==) (map fst fs') tupleFieldNames
      then Just $ map snd fs'
      else Nothing
+
+-- | Construct a record map corresponding to a tuple.
+tupleFields :: [a] -> M.Map Name a
+tupleFields as = M.fromList $ zip tupleFieldNames as
 
 -- | Increasing field names for a tuple (starts at 1).
 tupleFieldNames :: [Name]

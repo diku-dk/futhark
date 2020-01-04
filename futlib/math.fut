@@ -61,15 +61,15 @@ module type numeric = {
   val lowest: t
 
   -- | Returns zero on empty input.
-  val sum: []t -> t
+  val sum [n]: [n]t -> t
 
   -- | Returns one on empty input.
-  val product: []t -> t
+  val product [n]: [n]t -> t
 
   -- | Returns `lowest` on empty input.
-  val maximum: []t -> t
+  val maximum [n]: [n]t -> t
   -- | Returns `highest` on empty input.
-  val minimum: []t -> t
+  val minimum [n]: [n]t -> t
 }
 
 -- | An extension of `numeric`@mtype that provides facilities that are

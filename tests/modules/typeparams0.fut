@@ -4,7 +4,7 @@
 
 module type MT = {
   type t 'a
-  val pack: []i32 -> t i32
+  val pack [n]: [n]i32 -> t i32
   val unpack: t i32 -> []i32
 }
 

@@ -7,9 +7,9 @@
 
 module x = {
 module sobol_dir : {
-  val m : [][]u32
-  val a : []u32
-  val s : []i32
+  val m : [50][8]u32
+  val a : [50]u32
+  val s : [50]i32
 } = {
   let m : [50][8]u32 =
     [[1u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32],
@@ -170,9 +170,9 @@ module sobol_dir : {
 
 
 module type sobol_dir = {
-  val a: []u32
-  val s: []i32
-  val m: [][]u32
+  val a: [50]u32
+  val s: [50]i32
+  val m: [50][8]u32
 }
 
 module type sobol = {
