@@ -53,6 +53,8 @@ instance ASTMappable (ExpBase Info VName) where
     pure loc
   astMap _ (Literal val loc) =
     pure $ Literal val loc
+  astMap _ (StringLit vs loc) =
+    pure $ StringLit vs loc
   astMap tv (IntLit val t loc) =
     IntLit val <$> traverse (mapOnPatternType tv) t <*> pure loc
   astMap tv (FloatLit val t loc) =

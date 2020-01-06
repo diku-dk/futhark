@@ -163,6 +163,7 @@ transformExp :: Exp -> MonoM Exp
 transformExp e@Literal{} = return e
 transformExp e@IntLit{} = return e
 transformExp e@FloatLit{} = return e
+transformExp e@StringLit{} = return e
 
 transformExp (Parens e loc) =
   Parens <$> transformExp e <*> pure loc

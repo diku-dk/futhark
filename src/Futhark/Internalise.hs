@@ -266,6 +266,10 @@ internaliseExp desc (E.Parens e _) =
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 
+internaliseExp desc (E.StringLit vs _) =
+  fmap pure $ letSubExp desc $
+  I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
+
 internaliseExp _ (E.Var (E.QualName _ name) (Info t) loc) = do
   subst <- asks $ M.lookup name . envSubsts
   case subst of

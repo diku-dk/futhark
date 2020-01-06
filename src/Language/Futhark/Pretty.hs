@@ -15,6 +15,7 @@ module Language.Futhark.Pretty
 where
 
 import           Control.Monad
+import           Codec.Binary.UTF8.String (decode)
 import           Data.Array
 import           Data.Functor
 import qualified Data.Map.Strict       as M
@@ -225,6 +226,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
           fieldArray RecordFieldImplicit{} = False
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
+  pprPrec _ (StringLit s _) =
+    text $ show $ decode s
   pprPrec p (Range start maybe_step end _ _) =
     parensIf (p /= -1) $ ppr start <>
     maybe mempty ((text ".." <>) . ppr) maybe_step <>

@@ -616,7 +616,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | intlit         { let L loc (INTLIT x) = $1 in IntLit x NoInfo loc }
      | floatlit       { let L loc (FLOATLIT x) = $1 in FloatLit x NoInfo loc }
      | stringlit      { let L loc (STRINGLIT s) = $1 in
-                        ArrayLit (map (flip Literal loc . UnsignedValue . Int8Value . fromIntegral) $ encode s) NoInfo loc }
+                        StringLit (encode s) loc }
      | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 (srcspan $1 $3))
@@ -788,7 +788,7 @@ CaseLiteral :: { (UncheckedExp, SrcLoc) }
              | intlit         { let L loc (INTLIT x) = $1 in (IntLit x NoInfo loc, loc) }
              | floatlit       { let L loc (FLOATLIT x) = $1 in (FloatLit x NoInfo loc, loc) }
              | stringlit      { let L loc (STRINGLIT s) = $1 in
-                              (ArrayLit (map (flip Literal loc . UnsignedValue . Int8Value . fromIntegral) $ encode s) NoInfo loc, loc) }
+                              (StringLit (encode s) loc, loc) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp

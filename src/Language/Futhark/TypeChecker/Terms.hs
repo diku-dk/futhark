@@ -800,6 +800,9 @@ checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
   return $ Literal val loc
 
+checkExp (StringLit vs loc) =
+  return $ StringLit vs loc
+
 checkExp (IntLit val NoInfo loc) = do
   t <- newTypeVar loc "t"
   mustBeOneOf anyNumberType (mkUsage loc "integer literal") t

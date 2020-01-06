@@ -595,6 +595,9 @@ eval env (RecordLit fields _) =
 
 eval env (ArrayLit vs _ _) = toArray =<< mapM (eval env) vs
 
+eval _ (StringLit vs _) =
+  toArray $ map (ValuePrim . UnsignedValue . Int8Value . fromIntegral) vs
+
 eval env (Range start maybe_second end (Info t) loc) = do
   start' <- asInteger <$> eval env start
   maybe_second' <- traverse (fmap asInteger . eval env) maybe_second

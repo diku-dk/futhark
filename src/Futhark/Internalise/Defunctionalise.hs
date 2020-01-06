@@ -177,6 +177,9 @@ defuncExp e@IntLit{} =
 defuncExp e@FloatLit{} =
   return (e, Dynamic $ typeOf e)
 
+defuncExp e@StringLit{} =
+  return (e, Dynamic $ typeOf e)
+
 defuncExp (Parens e loc) = do
   (e', sv) <- defuncExp e
   return (Parens e' loc, sv)
@@ -817,6 +820,7 @@ freeVars expr = case expr of
   Literal{}            -> mempty
   IntLit{}             -> mempty
   FloatLit{}           -> mempty
+  StringLit{}          -> mempty
   Parens e _           -> freeVars e
   QualParens _ e _     -> freeVars e
   TupLit es _          -> foldMap freeVars es
