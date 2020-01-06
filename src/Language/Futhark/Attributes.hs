@@ -428,6 +428,8 @@ typeOf (RecordLit fs _) =
           M.singleton (baseName name) $ t
           `addAliases` S.insert (AliasBound name)
 typeOf (ArrayLit _ (Info t) _) = t
+typeOf (StringLit _ _) =
+  Array mempty Unique (Prim (Unsigned Int8)) (ShapeDecl [AnyDim])
 typeOf (Range _ _ _ (Info t) _) = t
 typeOf (BinOp _ _ _ _ (Info t) _) = t
 typeOf (Project _ _ (Info t) _) = t

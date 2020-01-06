@@ -602,6 +602,10 @@ data ExpBase f vn =
             | FloatLit Double (f PatternType) SrcLoc
             -- ^ A polymorphic decimal literal.
 
+            | StringLit [Word8] SrcLoc
+            -- ^ A string literal is just a fancy syntax for an array
+            -- of bytes.
+
             | Parens (ExpBase f vn) SrcLoc
             -- ^ A parenthesized expression.
 
@@ -706,6 +710,7 @@ instance Located (ExpBase f vn) where
   locOf (RecordLit _ pos)              = locOf pos
   locOf (Project _ _ _ pos)            = locOf pos
   locOf (ArrayLit _ _ pos)             = locOf pos
+  locOf (StringLit _ loc)              = locOf loc
   locOf (Range _ _ _ _ pos)            = locOf pos
   locOf (BinOp _ _ _ _ _ pos)          = locOf pos
   locOf (If _ _ _ _ pos)               = locOf pos
