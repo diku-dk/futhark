@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     option for limiting how many threads are used for housekeeping
     tasks.  Set this to a low value if you run out of memory.
 
+  * `random` test blocks are now allowed to contain integer literals
+    with type suffixes.
+
 ### Removed
 
 ### Changed
