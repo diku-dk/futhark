@@ -302,8 +302,8 @@ parseGenValue = choice [ GenValue <$> many dim <*> parsePrimType
         readint :: String -> Integer
         readint = read -- To avoid warnings.
 
-        int f t s = try $ f . intValue t  . readint <$> digits <*
-                    lexstr s <*
+        int f t s = try $ lexeme $ f . intValue t  . readint <$> digits <*
+                    string s <*
                     notFollowedBy (satisfy isAlphaNum)
         i8  = int SignedValue Int8 "i8"
         i16 = int SignedValue Int16 "i16"
