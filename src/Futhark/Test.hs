@@ -160,7 +160,7 @@ genValueType :: GenValue -> String
 genValueType (GenValue ds t) =
   concatMap (\d -> "[" ++ show d ++ "]") ds ++ pretty t
 genValueType (GenPrim v) =
-  pretty $ primValueType v
+  pretty v
 
 -- | How a test case is expected to terminate.
 data ExpectedResult values
@@ -292,7 +292,8 @@ parseRandomValues = GenValues <$> between (lexstr "{") (lexstr "}") (many parseG
 parseGenValue :: Parser GenValue
 parseGenValue = choice [ GenValue <$> many dim <*> parsePrimType
                        , lexeme $ GenPrim <$> choice [i8, i16, i32, i64,
-                                                      u8, u16, u32, u64]
+                                                      u8, u16, u32, u64,
+                                                      int SignedValue Int32 ""]
                        ]
   where digits = some (satisfy isDigit)
         dim = between (lexstr "[") (lexstr "]") $
@@ -302,7 +303,7 @@ parseGenValue = choice [ GenValue <$> many dim <*> parsePrimType
         readint = read -- To avoid warnings.
 
         int f t s = try $ f . intValue t  . readint <$> digits <*
-                    optional (lexstr s) <*
+                    lexstr s <*
                     notFollowedBy (satisfy isAlphaNum)
         i8  = int SignedValue Int8 "i8"
         i16 = int SignedValue Int16 "i16"
