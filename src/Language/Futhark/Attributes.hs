@@ -15,6 +15,7 @@ module Language.Futhark.Attributes
   , qualify
   , typeName
   , valueType
+  , primValueType
   , leadingOperator
   , progImports
   , decImports
@@ -47,6 +48,7 @@ module Language.Futhark.Attributes
   , foldFunType
   , typeVars
   , typeDimNames
+  , primByteSize
 
   -- * Operations on types
   , rank
@@ -384,9 +386,17 @@ primValueType (UnsignedValue v) = Unsigned $ intValueType v
 primValueType (FloatValue v)    = FloatType $ floatValueType v
 primValueType BoolValue{}       = Bool
 
+-- | The type of the value.
 valueType :: Value -> ValueType
 valueType (PrimValue bv) = Scalar $ Prim $ primValueType bv
 valueType (ArrayValue _ t) = t
+
+-- | The size of values of this type, in bytes.
+primByteSize :: Num a => PrimType -> a
+primByteSize (Signed it) = Primitive.intByteSize it
+primByteSize (Unsigned it) = Primitive.intByteSize it
+primByteSize (FloatType ft) = Primitive.floatByteSize ft
+primByteSize Bool = 1
 
 -- | Construct a 'ShapeDecl' with the given number of 'AnyDim'
 -- dimensions.

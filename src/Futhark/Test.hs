@@ -72,11 +72,13 @@ import System.IO.Temp
 import Prelude
 
 import Futhark.Analysis.Metrics
-import Futhark.Representation.Primitive (IntType(..), FloatType(..), intByteSize, floatByteSize)
+import Futhark.Representation.Primitive
+       (IntType(..), intValue, FloatType(..), intByteSize, floatByteSize)
 import Futhark.Test.Values
 import Futhark.Util (directoryContents, pmapIO)
 import Futhark.Util.Pretty (pretty, prettyText)
-import Language.Futhark.Syntax (PrimType(..), Int32)
+import Language.Futhark.Syntax (PrimType(..), PrimValue(..))
+import Language.Futhark.Attributes (primValueType, primByteSize)
 
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
@@ -148,8 +150,8 @@ data Values = Values [Value]
 data GenValue = GenValue [Int] PrimType
                 -- ^ Generate a value of the given rank and primitive
                 -- type.  Scalars are considered 0-ary arrays.
-              | GenInt Int32
-                -- ^ A fixed non-randomised integer.
+              | GenPrim PrimValue
+                -- ^ A fixed non-randomised primitive value.
               deriving (Show)
 
 -- | A prettyprinted representation of type of value produced by a
@@ -157,8 +159,8 @@ data GenValue = GenValue [Int] PrimType
 genValueType :: GenValue -> String
 genValueType (GenValue ds t) =
   concatMap (\d -> "[" ++ show d ++ "]") ds ++ pretty t
-genValueType (GenInt x) =
-  show x ++ "i32"
+genValueType (GenPrim v) =
+  pretty $ primValueType v
 
 -- | How a test case is expected to terminate.
 data ExpectedResult values
@@ -289,10 +291,27 @@ parseRandomValues = GenValues <$> between (lexstr "{") (lexstr "}") (many parseG
 
 parseGenValue :: Parser GenValue
 parseGenValue = choice [ GenValue <$> many dim <*> parsePrimType
-                       , lexeme $ GenInt . read <$> some (satisfy isDigit)
+                       , lexeme $ GenPrim <$> choice [i8, i16, i32, i64,
+                                                      u8, u16, u32, u64]
                        ]
-  where dim = between (lexstr "[") (lexstr "]") $
-              lexeme $ read <$> some (satisfy isDigit)
+  where digits = some (satisfy isDigit)
+        dim = between (lexstr "[") (lexstr "]") $
+              lexeme $ read <$> digits
+
+        readint :: String -> Integer
+        readint = read -- To avoid warnings.
+
+        int f t s = try $ f . intValue t  . readint <$> digits <*
+                    optional (lexstr s) <*
+                    notFollowedBy (satisfy isAlphaNum)
+        i8  = int SignedValue Int8 "i8"
+        i16 = int SignedValue Int16 "i16"
+        i32 = int SignedValue Int32 "i32"
+        i64 = int SignedValue Int64 "i64"
+        u8  = int UnsignedValue Int8 "u8"
+        u16 = int UnsignedValue Int16 "u16"
+        u32 = int UnsignedValue Int32 "u32"
+        u64 = int UnsignedValue Int64 "u64"
 
 parsePrimType :: Parser PrimType
 parsePrimType =
@@ -566,9 +585,12 @@ genFileName gen = genValueType gen ++ ".in"
 genFileSize :: GenValue -> Integer
 genFileSize = genSize
   where header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
+
         genSize (GenValue ds t) = header_size + toInteger (length ds) * 8 +
                                   product (map toInteger ds) * primSize t
-        genSize (GenInt _) = header_size + primSize (Signed Int32)
+        genSize (GenPrim v) =
+          header_size + primByteSize (primValueType v)
+
         primSize (Signed it) = intByteSize it
         primSize (Unsigned it) = intByteSize it
         primSize (FloatType ft) = floatByteSize ft
