@@ -647,7 +647,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
   (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps rts k_body
 
-  runBinder_ $ do
+  traverse renameStm <=< runBinder_ $ do
     addStms k_bnds
 
     let pat = Pattern [] $ rearrangeShape perm $
