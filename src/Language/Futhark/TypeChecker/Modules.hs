@@ -289,7 +289,7 @@ matchMTys = matchMTys' mempty
                -> Either TypeError (M.Map VName VName)
 
     matchMTys' _ (MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
-      Left $ TypeError loc "Cannot match parametric module with non-paramatric module type."
+      Left $ TypeError loc "Cannot match parametric module with non-parametric module type."
 
     matchMTys' _ (MTy _ ModEnv{}) (MTy _ ModFun{}) loc =
       Left $ TypeError loc "Cannot match non-parametric module with paramatric module type."
