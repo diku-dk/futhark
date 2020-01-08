@@ -294,7 +294,7 @@ This produces two files in the current directory: ``futlib.c`` and
 ``futlib.h``.  If we wish (and are on a Unix system), we can then
 compile ``futlib.c`` to a shared library like this::
 
-  $ gcc dotprod.c -o libdotprod.so -fPIC -shared
+  $ gcc futlib.c -o libfutlib.so -fPIC -shared
 
 However, details of how to link the generated code with other C code
 is highly system-dependent, and outside the scope of this manual.  In
@@ -302,7 +302,7 @@ most cases, it is easier to simply add the generated ``.c`` file to
 the C compiler command line used for compiling our whole program (here
 ``main.c``)::
 
-  $ gcc dotprod.c main.c -o main
+  $ gcc futlib.c main.c -o main
 
 The generated header file (here, ``futlib.h``) specifies the API, and
 is intended to be human-readable.  The basic usage revolves around
