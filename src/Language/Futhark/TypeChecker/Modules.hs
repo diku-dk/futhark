@@ -23,7 +23,7 @@ import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark.TypeChecker.Unify (doUnification)
 import Language.Futhark.TypeChecker.Types
-import Futhark.Util.Pretty (Pretty)
+import Futhark.Util.Pretty hiding (indent)
 
 
 substituteTypesInMod :: TypeSubs -> Mod -> Mod
@@ -224,7 +224,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
       Just (name', TypeAbbr mod_l ps t)
         | Unlifted <- name_l,
           not (orderZero t) || mod_l == Lifted ->
-            mismatchedLiftedness (map qualLeaf $ M.keys mod_abs) name (ps, t)
+            mismatchedLiftedness (map qualLeaf $ M.keys mod_abs) (qualLeaf name) (ps, t)
         | Just (abs_name, _) <- M.lookup (fmap baseName name) abs_mapping ->
             return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
         | otherwise ->
@@ -252,10 +252,9 @@ missingMod loc name =
   Left $ TypeError loc $
   "Module does not define a module named " ++ pretty name ++ "."
 
-mismatchedType :: Pretty a =>
-                  SrcLoc
+mismatchedType :: SrcLoc
                -> [VName]
-               -> a
+               -> VName
                -> ([TypeParam], StructType)
                -> ([TypeParam], StructType)
                -> Either TypeError b
@@ -269,15 +268,14 @@ mismatchedType loc abs name spec_t env_t =
 indent :: String -> String
 indent = intercalate "\n" . map ("  "++) . lines
 
-ppTypeAbbr :: Pretty a => [VName] -> a -> ([TypeParam], StructType) -> String
-ppTypeAbbr abs name (ps, t) =
-  "type " ++ unwords (pretty name : map pretty ps) ++ t'
-  where t' = case t of
-               Scalar (TypeVar () _ tn args)
-                 | typeLeaf tn `elem` abs,
-                   map typeParamToArg ps == args -> ""
-               _ -> " = " ++ pretty t
-
+ppTypeAbbr :: [VName] -> VName -> ([TypeParam], StructType) -> String
+ppTypeAbbr abs name (ps, Scalar (TypeVar () _ tn args))
+  | typeLeaf tn `elem` abs,
+    map typeParamToArg ps == args =
+      pretty $ text "type" <+> pprName name <+> spread (map ppr ps)
+ppTypeAbbr _ name (ps, t) =
+  pretty $ text "type" <+> pprName name <+> spread (map ppr ps) <+> equals <+/>
+  nest 2 (align (ppr t))
 
 -- Return new renamed/abstracted env, as well as a mapping from
 -- names in the signature to names in the new env.  This is used for
@@ -381,7 +379,7 @@ matchMTys = matchMTys' mempty
         then return (spec_name, name)
         else nomatch
         where nomatch = mismatchedType loc (M.keys abs_subst_to_type)
-                        (baseName spec_name) (spec_ps, spec_t) (ps, t)
+                        spec_name (spec_ps, spec_t) (ps, t)
 
               matchTypeParam (TypeParamDim x _) (TypeParamDim y _) =
                 pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
