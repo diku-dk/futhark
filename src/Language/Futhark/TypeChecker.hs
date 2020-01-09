@@ -169,9 +169,9 @@ bindingTypeParams tparams = localEnv env
                      Scalar $ TypeVar () Nonunique (typeName v) [] }
 
 emptyDimParam :: StructType -> Bool
-emptyDimParam = isNothing . traverseParamDims onDim
-  where onDim AnyDim = Nothing
-        onDim d = Just d
+emptyDimParam = isNothing . traverseDims onDim
+  where onDim pos AnyDim | pos `elem` [PosImmediate, PosParam] = Nothing
+        onDim _ d = Just d
 
 -- In this function, after the recursion, we add the Env of the
 -- current Spec *after* the one that is returned from the recursive
@@ -192,8 +192,9 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
         return (tparams', vtype')
 
     when (emptyDimParam $ unInfo $ expandedType vtype') $
-      throwError $ TypeError (srclocOf loc)
-      "All parameters must have non-anonymous sizes."
+      throwError $ TypeError loc $
+      "All function parameters must have non-anonymous sizes.\n" ++
+      "Fix this by adding size parameters to " ++ quote (prettyName name') ++ "."
 
     let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
@@ -448,6 +449,7 @@ checkTypeBind (TypeBind name tps (TypeDecl t NoInfo) doc loc) =
     (td', l) <- bindingTypeParams tps' $ do
       checkForDuplicateNamesInType t
       (t', st, l) <- checkTypeExp t
+
       checkShapeParamUses typeExpUses tps' [t']
       return (TypeDecl t' $ Info st, l)
     bindSpaced [(Type, name)] $ do
