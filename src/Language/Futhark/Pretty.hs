@@ -130,13 +130,13 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
     | otherwise =
         oneLine (braces $ commasep fs')
         <|> braces (mconcat $ punctuate (text "," <> line) fs')
-    where ppField (name, t) = text (nameToString name) <> colon <+> ppr t
+    where ppField (name, t) = text (nameToString name) <> colon <+> align (ppr t)
           fs' = map ppField $ M.toList fs
   pprPrec p (Arrow _ (Named v) t1 t2) =
     parensIf (p > 1) $
-    parens (pprName v <> colon <+> ppr t1) <+> text "->" <+> pprPrec 1 t2
+    parens (pprName v <> colon <+> ppr t1) <+/> text "->" <+> pprPrec 1 t2
   pprPrec p (Arrow _ Unnamed t1 t2) =
-    parensIf (p > 1) $ pprPrec 2 t1 <+> text "->" <+> pprPrec 1 t2
+    parensIf (p > 1) $ pprPrec 2 t1 <+/> text "->" <+> pprPrec 1 t2
   pprPrec p (Sum cs) =
     parensIf (p > 0) $
     oneLine (mconcat $ punctuate (text " | ") cs')
