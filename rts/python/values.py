@@ -299,17 +299,17 @@ def read_str_bool(f):
 def read_str_empty_array(f, type_name, rank):
     parse_specific_string(f, 'empty')
     parse_specific_char(f, b'(')
-    smallest = 1
+    dims = []
     for i in range(rank):
         parse_specific_string(f, '[')
-        smallest = min(smallest, int(parse_int(f)))
+        dims += [int(parse_int(f))]
         parse_specific_string(f, ']')
-    if smallest != 0:
+    if np.product(dims) != 0:
         raise ValueError
     parse_specific_string(f, type_name)
     parse_specific_char(f, b')')
 
-    return None
+    return tuple(dims)
 
 def read_str_array_elems(f, elem_reader, type_name, rank):
     skip_spaces(f)
@@ -352,9 +352,9 @@ def verify_array_dims(l, dims):
 
 def read_str_array(f, elem_reader, type_name, rank, bt):
     elems = read_str_array_helper(f, elem_reader, type_name, rank)
-    if elems == None:
+    if type(elems) == tuple:
         # Empty array
-        return np.empty([0]*rank, dtype=bt)
+        return np.empty(elems, dtype=bt)
     else:
         dims = expected_array_dims(elems, rank)
         verify_array_dims(elems, dims)
