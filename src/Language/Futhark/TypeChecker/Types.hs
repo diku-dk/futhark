@@ -264,17 +264,26 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
 -- it (normal name shadowing).
 checkForDuplicateNamesInType :: MonadTypeChecker m =>
                                 TypeExp Name -> m ()
-checkForDuplicateNamesInType = checkForDuplicateNames . pats
-  where pats (TEArrow (Just v) t1 t2 loc) = Id v NoInfo loc : pats t1 ++ pats t2
-        pats (TEArrow Nothing t1 t2 _) = pats t1 ++ pats t2
-        pats (TETuple ts _) = concatMap pats ts
-        pats (TERecord fs _) = concatMap (pats . snd) fs
-        pats (TEArray t _ _) = pats t
-        pats (TEUnique t _) = pats t
-        pats (TEApply t1 (TypeArgExpType t2) _) = pats t1 ++ pats t2
-        pats (TEApply t1 TypeArgExpDim{} _) = pats t1
-        pats TEVar{} = []
-        pats (TESum cs _) = concatMap (concatMap pats . snd) cs
+checkForDuplicateNamesInType = check mempty
+  where check seen (TEArrow (Just v) t1 t2 loc)
+          | Just prev_loc <- M.lookup v seen =
+              throwError $ TypeError loc $
+              "Name " ++ quote (pretty v) ++ " also bound at " ++ locStr prev_loc
+          | otherwise =
+              check seen' t1 >> check seen' t2
+              where seen' = M.insert v loc seen
+        check seen (TEArrow Nothing t1 t2 _) =
+          check seen t1 >> check seen t2
+        check seen (TETuple ts _) = mapM_ (check seen) ts
+        check seen (TERecord fs _) = mapM_ (check seen . snd) fs
+        check seen (TEUnique t _) = check seen t
+        check seen (TESum cs _) = mapM_ (mapM (check seen) . snd) cs
+        check seen (TEApply t1 (TypeArgExpType t2) _) =
+          check seen t1 >> check seen t2
+        check seen (TEApply t1 TypeArgExpDim{} _) =
+          check seen t1
+        check _ TEArray{} = return ()
+        check _ TEVar{} = return ()
 
 -- | Ensure that every shape parameter is used in positive position at
 -- least once before being used in negative position.
