@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | This module provides various simple ways to query and manipulate
 -- fundamental Futhark terms, such as types and values.  The intent is to
 -- keep "Futhark.Language.Syntax" simple, and put whatever embellishments
@@ -64,7 +65,8 @@ module Language.Futhark.Attributes
   , removeShapeAnnotations
   , vacuousShapeAnnotations
   , anyDimShapeAnnotations
-  , traverseParamDims
+  , traverseDims
+  , DimPos(..)
   , tupleRecord
   , isTupleRecord
   , areTupleFields
@@ -170,34 +172,39 @@ modifyShapeAnnotations :: (oldshape -> newshape)
                        -> TypeBase newshape as
 modifyShapeAnnotations = first
 
+-- | Where does this dimension occur?
+data DimPos
+  = PosImmediate
+    -- ^ Immediately in the argument to 'traverseDims'.
+  | PosParam
+    -- ^ In a function parameter type.
+  | PosReturn
+    -- ^ In a function return type.
+  deriving (Eq, Ord, Show)
+
 -- | Perform a traversal (possibly including replacement) on sizes
 -- that are parameters in a function type, but also including the type
 -- immediately passed to the function.
-traverseParamDims :: Applicative f =>
-                     (dim -> f dim)
-                  -> TypeBase dim als
-                  -> f (TypeBase dim als)
-traverseParamDims = go True
-  where go :: Applicative f =>
-              Bool -> (dim -> f dim)
-           -> TypeBase dim als
-           -> f (TypeBase dim als)
-        go b f t@Array{} = bitraverse (onDim b f) pure t
-        go b f (Scalar (Record fields)) = Scalar . Record <$> traverse (go b f) fields
-        go b f (Scalar (TypeVar as u tn targs)) =
-          Scalar <$> (TypeVar as u tn <$> traverse (onTypeArg b f) targs)
-        go b f (Scalar (Sum cs)) = Scalar . Sum <$> traverse (traverse (go b f)) cs
-        go _ _ t@(Scalar Prim{}) = pure t
-        go _ f (Scalar (Arrow als p t1 t2)) =
-          Scalar <$> (Arrow als p <$> go True f t1 <*> go False f t2)
+traverseDims :: forall f fdim tdim als.
+                     Applicative f =>
+                     (DimPos -> fdim -> f tdim)
+                  -> TypeBase fdim als
+                  -> f (TypeBase tdim als)
+traverseDims f = go PosImmediate
+  where go :: forall als'. DimPos -> TypeBase fdim als' -> f (TypeBase tdim als')
+        go b t@Array{} = bitraverse (f b) pure t
+        go b (Scalar (Record fields)) = Scalar . Record <$> traverse (go b) fields
+        go b (Scalar (TypeVar as u tn targs)) =
+          Scalar <$> (TypeVar as u tn <$> traverse (onTypeArg b) targs)
+        go b (Scalar (Sum cs)) = Scalar . Sum <$> traverse (traverse (go b)) cs
+        go _ (Scalar (Prim t)) = pure $ Scalar $ Prim t
+        go _ (Scalar (Arrow als p t1 t2)) =
+          Scalar <$> (Arrow als p <$> go PosParam t1 <*> go PosReturn t2)
 
-        onTypeArg b f (TypeArgDim d loc) =
-          TypeArgDim <$> onDim b f d <*> pure loc
-        onTypeArg b f (TypeArgType t loc) =
-          TypeArgType <$> go b f t <*> pure loc
-
-        onDim True f d = f d
-        onDim _ _ d = pure d
+        onTypeArg b (TypeArgDim d loc) =
+          TypeArgDim <$> f b d <*> pure loc
+        onTypeArg b (TypeArgType t loc) =
+          TypeArgType <$> go b t <*> pure loc
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
