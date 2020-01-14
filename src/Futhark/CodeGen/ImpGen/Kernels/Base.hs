@@ -338,6 +338,8 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
         copyDWIM (patElemName pe) segment_is (Var arr) (segment_is ++ [last dims'-1])
 
+      sOp Imp.LocalBarrier
+
 compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   compileGroupSpace constants lvl space
   let ltids = map fst $ unSegSpace space
