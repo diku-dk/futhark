@@ -112,6 +112,13 @@ OPTIONS
   ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
   exists.
 
+WHAT FUTHARK BENCH MEASURES
+===========================
+
+``futhark bench`` measures the time it takes to run the given Futhark
+program by passing the ``-t FILE`` option to the generated program. See
+the man page for the specific compiler to see exactly what is measured.
+
 EXAMPLES
 ========
 
