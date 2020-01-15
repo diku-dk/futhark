@@ -1044,12 +1044,14 @@ ruleBasicOp vtable pat _ (Update dest destis (Var v))
 -- array literals.
 ruleBasicOp vtable pat _ (Update dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
-    isFullSlice (arrayShape dest_t) is =
-      Simplify $ letBind_ pat $ BasicOp $
+    isFullSlice (arrayShape dest_t) is = Simplify $
       case se of
-        Var v | not $ null $ sliceDims is ->
-                  Reshape (map DimNew $ arrayDims dest_t) v
-        _ -> ArrayLit [se] $ rowType dest_t
+        Var v | not $ null $ sliceDims is -> do
+                  v_reshaped <- letExp (baseString v ++ "_reshaped") $
+                                BasicOp $ Reshape (map DimNew $ arrayDims dest_t) v
+                  letBind_ pat $ BasicOp $ Copy v_reshaped
+
+        _ -> letBind_ pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
 
 -- | Simplify a chain of in-place updates and copies.  This chain is
 -- often produced by in-place lowering.
