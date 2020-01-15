@@ -108,10 +108,8 @@ WHAT FUTHARK BENCH MEASURES
 ===========================
 
 ``futhark bench`` measures the time it takes to run the given Futhark
-program. It starts measuring after all kernels have been compiled and
-data has been copied to the device buffers but before setting any kernel
-arguments. It stops measuring after the kernels are done running and
-data has been read off the buffer but before releasing the buffers.
+program by passing the ``-t FILE`` option to the generated program. See
+the man page for the specific compiler to see exactly what is measured.
 
 EXAMPLES
 ========

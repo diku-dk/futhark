@@ -52,6 +52,20 @@ OPTIONS
 --Werror
   Treat warnings as errors.
 
+OPTIONS ON THE GENERATED EXECUTABLE
+===================================
+
+-t timingfile
+  Print the time taken to execute the program to the indicated file, an
+  integral number of microseconds. The time taken to perform setup or
+  teardown, including reading the input or writing the result, is not
+  included in the measurement. In particular, this means that timing
+  starts after all kernels have been compiled and data has been copied
+  to the device buffers but before setting any kernel arguments. Timing
+  stops after the kernels are done running, but before data has been
+  read from the buffers or the buffers have been released.
+
+
 SEE ALSO
 ========
 
