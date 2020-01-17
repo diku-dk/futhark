@@ -716,7 +716,7 @@ arrayLibraryFunctions space pt signed shape = do
 
   let prepare_new = do
         resetMem [C.cexp|arr->mem|]
-        allocMem [C.cexp|arr->mem|] [C.cexp|$exp:arr_size * sizeof($ty:pt')|] space
+        allocMem [C.cexp|arr->mem|] [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|] space
                  [C.cstm|return NULL;|]
         forM_ [0..rank-1] $ \i ->
           let dim_s = "dim"++show i
@@ -726,20 +726,20 @@ arrayLibraryFunctions space pt signed shape = do
     prepare_new
     copy arr_raw_mem [C.cexp|0|] space
          [C.cexp|data|] [C.cexp|0|] DefaultSpace
-         [C.cexp|$exp:arr_size * sizeof($ty:pt')|]
+         [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
 
   new_raw_body <- collect $ do
     prepare_new
     copy arr_raw_mem [C.cexp|0|] space
          [C.cexp|data|] [C.cexp|offset|] space
-         [C.cexp|$exp:arr_size * sizeof($ty:pt')|]
+         [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
 
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
   values_body <- collect $
     copy [C.cexp|data|] [C.cexp|0|] DefaultSpace
          arr_raw_mem [C.cexp|0|] space
-         [C.cexp|$exp:arr_size_array * sizeof($ty:pt')|]
+         [C.cexp|((size_t)$exp:arr_size_array) * sizeof($ty:pt')|]
 
   ctx_ty <- contextType
 
@@ -1628,7 +1628,7 @@ compileExp = compilePrimExp compileLeaf
           <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
 
         compileLeaf (SizeOf t) =
-          return [C.cexp|(int64_t)(sizeof($ty:t'))|]
+          return [C.cexp|(typename int32_t)sizeof($ty:t')|]
           where t' = primTypeToCType t
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.

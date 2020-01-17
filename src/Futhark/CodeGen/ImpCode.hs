@@ -231,7 +231,8 @@ bytes = Count
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
 withElemType :: Count Elements Exp -> PrimType -> Count Bytes Exp
-withElemType (Count e) t = bytes $ e * LeafExp (SizeOf t) (IntType Int64)
+withElemType (Count e) t =
+  bytes $ ConvOpExp (SExt Int32 Int64) e * LeafExp (SizeOf t) (IntType Int64)
 
 dimSizeToExp :: DimSize -> Count Elements Exp
 dimSizeToExp (VarSize v) =
