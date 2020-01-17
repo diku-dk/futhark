@@ -5,6 +5,7 @@ module Language.Futhark.TypeChecker.Unify
   , Usage
   , mkUsage
   , mkUsage'
+  , Level
   , Constraints
   , lookupSubst
   , MonadUnify(..)
@@ -37,12 +38,6 @@ import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Types
 import Futhark.Util.Pretty (Pretty)
 
--- | Mapping from fresh type variables, instantiated from the type
--- schemes of polymorphic functions, to (possibly) specific types as
--- determined on application and the location of that application, or
--- a partial constraint on their type.
-type Constraints = M.Map VName Constraint
-
 -- | A usage that caused a type constraint.
 data Usage = Usage (Maybe String) SrcLoc
 
@@ -58,6 +53,11 @@ instance Show Usage where
 
 instance Located Usage where
   locOf (Usage _ loc) = locOf loc
+
+-- | The level at which a type variable is bound.  Higher means
+-- deeper.  We can only unify a type variable at level 'i' with a type
+-- 't' if all type names that occur in 't' are at most at level 'i'.
+type Level = Int
 
 data Constraint = NoConstraint Liftedness Usage
                 | ParamType Liftedness SrcLoc
@@ -77,10 +77,16 @@ instance Located Constraint where
   locOf (Equality usage) = locOf usage
   locOf (HasConstrs _ usage) = locOf usage
 
+-- | Mapping from fresh type variables, instantiated from the type
+-- schemes of polymorphic functions, to (possibly) specific types as
+-- determined on application and the location of that application, or
+-- a partial constraint on their type.
+type Constraints = M.Map VName (Level, Constraint)
+
 lookupSubst :: VName -> Constraints -> Maybe (Subst (TypeBase () ()))
 lookupSubst v constraints = case M.lookup v constraints of
-                              Just (Constraint t _) -> Just $ Subst t
-                              Just Overloaded{} -> Just PrimSubst
+                              Just (_, Constraint t _) -> Just $ Subst t
+                              Just (_, Overloaded{}) -> Just PrimSubst
                               _ -> Nothing
 
 class (MonadBreadCrumbs m, MonadError TypeError m) => MonadUnify m where
@@ -93,17 +99,28 @@ class (MonadBreadCrumbs m, MonadError TypeError m) => MonadUnify m where
 
   newTypeVar :: Monoid als => SrcLoc -> String -> m (TypeBase dim als)
 
+  curLevel :: m Level
+
 normaliseType :: (Substitutable a, MonadUnify m) => a -> m a
 normaliseType t = do constraints <- getConstraints
                      return $ applySubst (`lookupSubst` constraints) t
 
+rigidConstraint :: Constraint -> Bool
+rigidConstraint ParamType{} = True
+rigidConstraint _ = False
+
 -- | Is the given type variable the name of an abstract type or type
 -- parameter, which we cannot substitute?
 isRigid :: VName -> Constraints -> Bool
-isRigid v constraints = case M.lookup v constraints of
-                          Nothing -> True
-                          Just ParamType{} -> True
-                          _ -> False
+isRigid v constraints =
+  maybe True (rigidConstraint . snd) $ M.lookup v constraints
+
+-- | If the given type variable is nonrigid, what is its level?
+isNonRigid :: VName -> Constraints -> Maybe Level
+isNonRigid v constraints = do
+  (lvl, c) <- M.lookup v constraints
+  guard $ not $ rigidConstraint c
+  return lvl
 
 unifySharedConstructors :: MonadUnify m =>
                            Usage
@@ -132,7 +149,7 @@ unify usage orig_t1 orig_t2 = do
     subunify t1 t2 = do
       constraints <- getConstraints
 
-      let isRigid' v = isRigid v constraints
+      let nonrigid v = isNonRigid v constraints
           t1' = applySubst (`lookupSubst` constraints) t1
           t2' = applySubst (`lookupSubst` constraints) t2
 
@@ -161,18 +178,20 @@ unify usage orig_t1 orig_t2 = do
 
         (Scalar (TypeVar _ _ (TypeName [] v1) []),
          Scalar (TypeVar _ _ (TypeName [] v2) [])) ->
-          case (isRigid' v1, isRigid' v2) of
-            (True, True) -> failure
-            (True, False) -> linkVarToType usage v2 t1'
-            (False, True) -> linkVarToType usage v1 t2'
-            (False, False) -> linkVarToType usage v1 t2'
+          case (nonrigid v1, nonrigid v2) of
+            (Nothing, Nothing) -> failure
+            (Just lvl1, Nothing) -> linkVarToType usage v1 lvl1 t2'
+            (Nothing, Just lvl2) -> linkVarToType usage v2 lvl2 t1'
+            (Just lvl1, Just lvl2)
+              | lvl1 <= lvl2 -> linkVarToType usage v1 lvl1 t2'
+              | otherwise    -> linkVarToType usage v2 lvl2 t1'
 
         (Scalar (TypeVar _ _ (TypeName [] v1) []), _)
-          | not $ isRigid' v1 ->
-              linkVarToType usage v1 t2'
+          | Just lvl <-  nonrigid v1 ->
+              linkVarToType usage v1 lvl t2'
         (_, Scalar (TypeVar _ _ (TypeName [] v2) []))
-          | not $ isRigid' v2 ->
-              linkVarToType usage v2 t1'
+          | Just lvl <- nonrigid v2 ->
+              linkVarToType usage v2 lvl t1'
 
         (Scalar (Arrow _ _ a1 b1),
          Scalar (Arrow _ _ a2 b2)) -> do
@@ -208,75 +227,99 @@ applySubstInConstraint _ _ (ParamType l loc) = ParamType l loc
 applySubstInConstraint vn subst (HasConstrs cs loc) =
   HasConstrs (M.map (map (applySubst (flip M.lookup $ M.singleton vn subst))) cs) loc
 
-linkVarToType :: MonadUnify m => Usage -> VName -> TypeBase () () -> m ()
-linkVarToType usage vn tp = do
+occursCheck :: MonadUnify m => Usage -> VName -> TypeBase () () -> m ()
+occursCheck usage vn tp =
+  when (vn `S.member` typeVars tp) $
+  typeError usage $ "Occurs check: cannot instantiate " ++
+  prettyName vn ++ " with " ++ pretty tp
+
+scopeCheck :: MonadUnify m => Usage -> VName -> Level -> TypeBase () () -> m ()
+scopeCheck usage vn max_lvl tp = do
   constraints <- getConstraints
-  if vn `S.member` typeVars tp
-    then typeError usage $ "Occurs check: cannot instantiate " ++
-         prettyName vn ++ " with " ++ pretty tp'
-    else do modifyConstraints $ M.insert vn $ Constraint tp' usage
-            modifyConstraints $ M.map $ applySubstInConstraint vn $ Subst tp'
-            case M.lookup vn constraints of
+  mapM_ (check constraints) $ typeVars tp
+  where check constraints v
+          | Just (lvl, c) <- M.lookup v constraints,
+            lvl > max_lvl =
+              if rigidConstraint c
+              then scopeViolation v
+              else modifyConstraints $ M.insert v (max_lvl, c)
+          | otherwise =
+              return ()
 
-              Just (NoConstraint Unlifted unlift_usage) ->
-                zeroOrderType usage (show unlift_usage) tp'
+        scopeViolation v =
+          typeError usage $ "Cannot unify type variable " ++ quote (prettyName v) ++
+          " with " ++ quote (prettyName vn) ++ " (scope violation).\n" ++
+          "This is because " ++ quote (prettyName vn) ++ " is rigidly bound in a deeper scope."
 
-              Just (Equality _) ->
-                equalityType usage tp'
+linkVarToType :: MonadUnify m => Usage -> VName -> Level -> TypeBase () () -> m ()
+linkVarToType usage vn lvl tp = do
+  occursCheck usage vn tp
+  scopeCheck usage vn lvl tp
 
-              Just (Overloaded ts old_usage)
-                | tp `notElem` map (Scalar . Prim) ts ->
-                    case tp' of
-                      Scalar (TypeVar _ _ (TypeName [] v) [])
-                        | not $ isRigid v constraints ->
-                            linkVarToTypes usage v ts
-                      _ ->
-                        typeError usage $ "Cannot unify " ++ quote (prettyName vn) ++
-                        "' with type\n" ++ indent (pretty tp) ++ "\nas " ++
-                        quote (prettyName vn) ++ " must be one of " ++
-                        intercalate ", " (map pretty ts) ++
-                        " due to " ++ show old_usage ++ ")."
+  constraints <- getConstraints
+  modifyConstraints $ M.insert vn (lvl, Constraint tp' usage)
+  modifyConstraints $ M.map $ fmap $ applySubstInConstraint vn $ Subst tp'
 
-              Just (HasFields required_fields old_usage) ->
-                case tp of
-                  Scalar (Record tp_fields)
-                    | all (`M.member` tp_fields) $ M.keys required_fields ->
-                        mapM_ (uncurry $ unify usage) $ M.elems $
-                        M.intersectionWith (,) required_fields tp_fields
-                  Scalar (TypeVar _ _ (TypeName [] v) [])
-                    | not $ isRigid v constraints ->
-                        modifyConstraints $ M.insert v $
-                        HasFields required_fields old_usage
-                  _ ->
-                    typeError usage $
-                    "Cannot unify " ++ quote (prettyName vn) ++ " with type\n" ++
-                    indent (pretty tp) ++ "\nas " ++ quote (prettyName vn) ++
-                    " must be a record with fields\n" ++
-                    pretty (Record required_fields) ++
-                    "\ndue to " ++ show old_usage ++ "."
+  case snd <$> M.lookup vn constraints of
 
-              Just (HasConstrs required_cs old_usage) ->
-                case tp of
-                  Scalar (Sum ts)
-                    | all (`M.member` ts) $ M.keys required_cs ->
-                        unifySharedConstructors usage required_cs ts
-                  Scalar (TypeVar _ _ (TypeName [] v) [])
-                    | not $ isRigid v constraints -> do
-                        case M.lookup v constraints of
-                          Just (HasConstrs v_cs _) ->
-                            unifySharedConstructors usage required_cs v_cs
-                          _ -> return ()
-                        modifyConstraints $ M.insertWith combineConstrs v $
-                          HasConstrs required_cs old_usage
-                        where combineConstrs (HasConstrs cs1 usage1) (HasConstrs cs2 _) =
-                                HasConstrs (M.union cs1 cs2) usage1
-                              combineConstrs hasCs _ = hasCs
-                  _ -> noSumType
+    Just (NoConstraint Unlifted unlift_usage) ->
+      zeroOrderType usage (show unlift_usage) tp'
 
-              _ -> return ()
+    Just (Equality _) ->
+      equalityType usage tp'
+
+    Just (Overloaded ts old_usage)
+      | tp `notElem` map (Scalar . Prim) ts ->
+          case tp' of
+            Scalar (TypeVar _ _ (TypeName [] v) [])
+              | not $ isRigid v constraints ->
+                  linkVarToTypes usage v ts
+            _ ->
+              typeError usage $ "Cannot unify " ++ quote (prettyName vn) ++
+              "' with type\n" ++ indent (pretty tp) ++ "\nas " ++
+              quote (prettyName vn) ++ " must be one of " ++
+              intercalate ", " (map pretty ts) ++
+              " due to " ++ show old_usage ++ ")."
+
+    Just (HasFields required_fields old_usage) ->
+      case tp of
+        Scalar (Record tp_fields)
+          | all (`M.member` tp_fields) $ M.keys required_fields ->
+              mapM_ (uncurry $ unify usage) $ M.elems $
+              M.intersectionWith (,) required_fields tp_fields
+        Scalar (TypeVar _ _ (TypeName [] v) [])
+          | not $ isRigid v constraints ->
+              modifyConstraints $ M.insert v
+              (lvl, HasFields required_fields old_usage)
+        _ ->
+          typeError usage $
+          "Cannot unify " ++ quote (prettyName vn) ++ " with type\n" ++
+          indent (pretty tp) ++ "\nas " ++ quote (prettyName vn) ++
+          " must be a record with fields\n" ++
+          pretty (Record required_fields) ++
+          "\ndue to " ++ show old_usage ++ "."
+
+    Just (HasConstrs required_cs old_usage) ->
+      case tp of
+        Scalar (Sum ts)
+          | all (`M.member` ts) $ M.keys required_cs ->
+              unifySharedConstructors usage required_cs ts
+        Scalar (TypeVar _ _ (TypeName [] v) [])
+          | not $ isRigid v constraints -> do
+              case M.lookup v constraints of
+                Just (_, HasConstrs v_cs _) ->
+                  unifySharedConstructors usage required_cs v_cs
+                _ -> return ()
+              modifyConstraints $ M.insertWith combineConstrs v
+                (lvl, HasConstrs required_cs old_usage)
+              where combineConstrs (_, HasConstrs cs1 usage1) (_, HasConstrs cs2 _) =
+                      (lvl, HasConstrs (M.union cs1 cs2) usage1)
+                    combineConstrs hasCs _ = hasCs
+        _ -> typeError usage "Cannot unify a sum type with a non-sum type"
+
+    _ -> return ()
 
   where tp' = removeUniqueness tp
-        noSumType = typeError usage "Cannot unify a sum type with a non-sum type"
 
 removeUniqueness :: TypeBase dim as -> TypeBase dim as
 removeUniqueness (Scalar (Record ets)) =
@@ -309,24 +352,26 @@ linkVarToTypes :: MonadUnify m => Usage -> VName -> [PrimType] -> m ()
 linkVarToTypes usage vn ts = do
   vn_constraint <- M.lookup vn <$> getConstraints
   case vn_constraint of
-    Just (Overloaded vn_ts vn_usage) ->
+    Just (lvl, Overloaded vn_ts vn_usage) ->
       case ts `intersect` vn_ts of
         [] -> typeError usage $ "Type constrained to one of " ++
               intercalate "," (map pretty ts) ++ " but also one of " ++
               intercalate "," (map pretty vn_ts) ++ " due to " ++ show vn_usage ++ "."
-        ts' -> modifyConstraints $ M.insert vn $ Overloaded ts' usage
+        ts' -> modifyConstraints $ M.insert vn (lvl, Overloaded ts' usage)
 
-    Just (HasConstrs _ vn_usage) ->
+    Just (_, HasConstrs _ vn_usage) ->
       typeError usage $ "Type constrained to one of " ++
       intercalate "," (map pretty ts) ++ ", but also inferred to be sum type due to " ++
       show vn_usage ++ "."
 
-    Just (HasFields _ vn_usage) ->
+    Just (_, HasFields _ vn_usage) ->
       typeError usage $ "Type constrained to one of " ++
       intercalate "," (map pretty ts) ++ ", but also inferred to be record due to " ++
       show vn_usage ++ "."
 
-    _ -> modifyConstraints $ M.insert vn $ Overloaded ts usage
+    Just (lvl, _) -> modifyConstraints $ M.insert vn (lvl, Overloaded ts usage)
+
+    Nothing -> typeError usage $ "Cannot constrain type to one of " ++ intercalate "," (map pretty ts)
 
 equalityType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
                 Usage -> TypeBase dim as -> m ()
@@ -338,21 +383,21 @@ equalityType usage t = do
   where mustBeEquality vn = do
           constraints <- getConstraints
           case M.lookup vn constraints of
-            Just (Constraint (Scalar (TypeVar _ _ (TypeName [] vn') [])) _) ->
+            Just (_, Constraint (Scalar (TypeVar _ _ (TypeName [] vn') [])) _) ->
               mustBeEquality vn'
-            Just (Constraint vn_t cusage)
+            Just (_, Constraint vn_t cusage)
               | not $ orderZero vn_t ->
                   typeError usage $
                   unlines ["Type \"" ++ pretty t ++ "\" does not support equality.",
                            "Constrained to be higher-order due to " ++ show cusage ++ "."]
               | otherwise -> return ()
-            Just (NoConstraint _ _) ->
-              modifyConstraints $ M.insert vn (Equality usage)
-            Just (Overloaded _ _) ->
+            Just (lvl, NoConstraint _ _) ->
+              modifyConstraints $ M.insert vn (lvl, Equality usage)
+            Just (_, Overloaded _ _) ->
               return () -- All primtypes support equality.
-            Just Equality{} ->
+            Just (_, Equality{}) ->
               return ()
-            Just (HasConstrs cs _) ->
+            Just (_, HasConstrs cs _) ->
               mapM_ (equalityType usage) $ concat $ M.elems cs
             _ ->
               typeError usage $ "Type " ++ pretty (prettyName vn) ++
@@ -368,14 +413,14 @@ zeroOrderType usage desc t = do
   where mustBeZeroOrder vn = do
           constraints <- getConstraints
           case M.lookup vn constraints of
-            Just (Constraint vn_t old_usage)
+            Just (_, Constraint vn_t old_usage)
               | not $ orderZero t ->
                 typeError usage $ "Type " ++ desc ++
                 " must be non-function, but inferred to be " ++
                 quote (pretty vn_t) ++ " due to " ++ show old_usage ++ "."
-            Just (NoConstraint _ _) ->
-              modifyConstraints $ M.insert vn (NoConstraint Unlifted usage)
-            Just (ParamType Lifted ploc) ->
+            Just (lvl, NoConstraint _ _) ->
+              modifyConstraints $ M.insert vn (lvl, NoConstraint Unlifted usage)
+            Just (_, ParamType Lifted ploc) ->
               typeError usage $ "Type " ++ desc ++
               " must be non-function, but type parameter " ++ quote (prettyName vn) ++ " at " ++
               locStr ploc ++ " may be a function."
@@ -390,15 +435,16 @@ mustHaveConstr usage c t fs = do
   constraints <- getConstraints
   case t of
     Scalar (TypeVar _ _ (TypeName _ tn) [])
-      | Just NoConstraint{} <- M.lookup tn constraints ->
-          modifyConstraints $ M.insert tn $ HasConstrs (M.singleton c struct_f) usage
-      | Just (HasConstrs cs _) <- M.lookup tn constraints ->
-        case M.lookup c cs of
-          Nothing  -> modifyConstraints $ M.insert tn $ HasConstrs (M.insert c fs cs) usage
-          Just fs'
-            | length fs == length fs' -> zipWithM_ (unify usage) fs fs'
-            | otherwise -> typeError usage $ "Different arity for constructor "
-                           ++ quote (pretty c) ++ "."
+      | Just (lvl, NoConstraint{}) <- M.lookup tn constraints -> do
+          mapM_ (scopeCheck usage tn lvl) struct_f
+          modifyConstraints $ M.insert tn (lvl, HasConstrs (M.singleton c struct_f) usage)
+      | Just (lvl, HasConstrs cs _) <- M.lookup tn constraints ->
+          case M.lookup c cs of
+            Nothing  -> modifyConstraints $ M.insert tn (lvl, HasConstrs (M.insert c fs cs) usage)
+            Just fs'
+              | length fs == length fs' -> zipWithM_ (unify usage) fs fs'
+              | otherwise -> typeError usage $ "Different arity for constructor "
+                             ++ quote (pretty c) ++ "."
 
     Scalar (Sum cs) ->
       case M.lookup c cs of
@@ -419,14 +465,15 @@ mustHaveField usage l t = do
   let l_type' = toStructural l_type
   case t of
     Scalar (TypeVar _ _ (TypeName _ tn) [])
-      | Just NoConstraint{} <- M.lookup tn constraints -> do
-          modifyConstraints $ M.insert tn $ HasFields (M.singleton l l_type') usage
+      | Just (lvl, NoConstraint{}) <- M.lookup tn constraints -> do
+          scopeCheck usage tn lvl l_type'
+          modifyConstraints $ M.insert tn (lvl, HasFields (M.singleton l l_type') usage)
           return l_type
-      | Just (HasFields fields _) <- M.lookup tn constraints -> do
+      | Just (lvl, HasFields fields _) <- M.lookup tn constraints -> do
           case M.lookup l fields of
             Just t' -> unify usage l_type' t'
-            Nothing -> modifyConstraints $ M.insert tn $
-                       HasFields (M.insert l l_type' fields) usage
+            Nothing -> modifyConstraints $ M.insert tn
+                       (lvl, HasFields (M.insert l l_type' fields) usage)
           return l_type
     Scalar (Record fields)
       | Just t' <- M.lookup l fields -> do
@@ -450,15 +497,17 @@ newtype UnifyM a = UnifyM (StateT UnifyMState (Except TypeError) a)
 
 instance MonadUnify UnifyM where
   getConstraints = gets fst
-  putConstraints x = modify $ \s -> (x, snd s)
+  putConstraints x = modify $ \(_, i) -> (x, i)
 
   newTypeVar loc desc = do
     i <- do (x, i) <- get
             put (x, i+1)
             return i
     let v = VName (mkTypeVarName desc i) 0
-    modifyConstraints $ M.insert v $ NoConstraint Lifted $ Usage Nothing loc
+    modifyConstraints $ M.insert v (0, NoConstraint Lifted $ Usage Nothing loc)
     return $ Scalar $ TypeVar mempty Nonunique (typeName v) []
+
+  curLevel = pure 0
 
 -- | Construct a the name of a new type variable given a base
 -- description and a tag number (note that this is distinct from
@@ -485,4 +534,4 @@ runUnifyM :: [TypeParam] -> UnifyM a -> Either TypeError a
 runUnifyM tparams (UnifyM m) = runExcept $ evalStateT m (constraints, 0)
   where constraints = M.fromList $ mapMaybe f tparams
         f TypeParamDim{} = Nothing
-        f (TypeParamType l p loc) = Just (p, NoConstraint l $ Usage Nothing loc)
+        f (TypeParamType l p loc) = Just (p, (0, NoConstraint l $ Usage Nothing loc))

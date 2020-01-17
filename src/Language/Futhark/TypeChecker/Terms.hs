@@ -154,6 +154,7 @@ data ValBinding = BoundV Locality [TypeParam] PatternType
 data TermEnv = TermEnv { termScope :: TermScope
                        , termBreadCrumbs :: [BreadCrumb]
                          -- ^ Most recent first.
+                       , termLevel :: Level
                        }
 
 data TermScope = TermScope { scopeVtable  :: M.Map VName ValBinding
@@ -182,12 +183,12 @@ withEnv tenv env = tenv { termScope = termScope tenv <> envToTermScope env }
 
 constraintTypeVars :: Constraints -> Names
 constraintTypeVars = mconcat . map f . M.elems
-  where f (Constraint t _) = typeVars t
+  where f (_, Constraint t _) = typeVars t
         f _ = mempty
 
 overloadedTypeVars :: Constraints -> Names
 overloadedTypeVars = mconcat . map f . M.elems
-  where f (HasFields fs _) = mconcat $ map typeVars $ M.elems fs
+  where f (_, HasFields fs _) = mconcat $ map typeVars $ M.elems fs
         f _ = mempty
 
 -- | Get the type of an expression, with all type variables
@@ -223,8 +224,10 @@ instance MonadUnify TermTypeM where
   newTypeVar loc desc = do
     i <- incCounter
     v <- newID $ mkTypeVarName desc i
-    modifyConstraints $ M.insert v $ NoConstraint Lifted $ mkUsage' loc
+    constrain v $ NoConstraint Lifted $ mkUsage' loc
     return $ Scalar $ TypeVar mempty Nonunique (typeName v) []
+
+  curLevel = asks termLevel
 
 instance MonadBreadCrumbs TermTypeM where
   breadCrumb bc = local $ \env ->
@@ -236,6 +239,7 @@ runTermTypeM (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
   let initial_tenv = TermEnv { termScope = initial_scope
                              , termBreadCrumbs = mempty
+                             , termLevel = 0
                              }
   evalRWST m initial_tenv (mempty, 0)
 
@@ -249,6 +253,14 @@ incCounter :: TermTypeM Int
 incCounter = do (x, i) <- get
                 put (x, i+1)
                 return i
+
+constrain :: VName -> Constraint -> TermTypeM ()
+constrain v c = do
+  lvl <- curLevel
+  modifyConstraints $ M.insert v (lvl, c)
+
+incLevel :: TermTypeM a -> TermTypeM a
+incLevel = local $ \env -> env { termLevel = termLevel env + 1 }
 
 initialTermScope :: TermScope
 initialTermScope = TermScope { scopeVtable = initialVtable
@@ -423,7 +435,7 @@ instantiateTypeParam :: Monoid as => SrcLoc -> TypeParam -> TermTypeM (VName, Su
 instantiateTypeParam loc tparam = do
   i <- incCounter
   v <- newID $ mkTypeVarName (takeWhile isAlpha (baseString (typeParamName tparam))) i
-  modifyConstraints $ M.insert v $ NoConstraint l $ mkUsage' loc
+  constrain v $ NoConstraint l $ mkUsage' loc
   return (v, Subst $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
   where l = case tparam of TypeParamType x _ _ -> x
                            _                   -> Lifted
@@ -431,7 +443,7 @@ instantiateTypeParam loc tparam = do
 newArrayType :: SrcLoc -> String -> Int -> TermTypeM (TypeBase () (), TypeBase () ())
 newArrayType loc desc r = do
   v <- newID $ nameFromString desc
-  modifyConstraints $ M.insert v $ NoConstraint Unlifted $ mkUsage' loc
+  constrain v $ NoConstraint Unlifted $ mkUsage' loc
   let rowt = TypeVar () Nonunique (typeName v) []
   return (Array () Nonunique rowt (ShapeDecl $ replicate r ()),
           Scalar rowt)
@@ -687,7 +699,8 @@ binding bnds = check . localScope (`bindVars` bnds)
 
 bindingTypes :: [(VName, (TypeBinding, Constraint))] -> TermTypeM a -> TermTypeM a
 bindingTypes types m = do
-  modifyConstraints (<>M.map snd (M.fromList types))
+  lvl <- curLevel
+  modifyConstraints (<>M.map ((lvl,) . snd) (M.fromList types))
   localScope extend m
   where extend scope = scope {
           scopeTypeTable = M.map fst (M.fromList types) <> scopeTypeTable scope
@@ -1759,7 +1772,7 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
 -- | This is "fixing" as in "setting them", not "correcting them".  We
 -- only make very conservative fixing.
 fixOverloadedTypes :: TermTypeM ()
-fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList
+fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList . M.map snd
   where fixOverloaded (v, Overloaded ots usage)
           | Signed Int32 `elem` ots = do
               unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
@@ -1799,7 +1812,7 @@ checkBinding :: (Maybe Name, Maybe UncheckedTypeExp,
                  [UncheckedTypeParam], [UncheckedPattern],
                  UncheckedExp, SrcLoc)
              -> TermTypeM ([TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
-checkBinding (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
+checkBinding (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ incLevel $ do
   then_substs <- getConstraints
 
   bindingPatternGroup tparams params $ \tparams' params' -> do
@@ -2018,7 +2031,7 @@ checkFunBody body maybe_rettype _loc = do
 -- produced list of type parameters.
 closeOverTypes :: Constraints -> [TypeParam] -> StructType -> TermTypeM [TypeParam]
 closeOverTypes substs tparams t =
-  fmap ((tparams++) . catMaybes) $ mapM closeOver $ M.toList to_close_over
+  fmap ((tparams++) . catMaybes) $ mapM closeOver $ M.toList $ M.map snd to_close_over
   where to_close_over = M.filterWithKey (\k _ -> k `S.member` visible) substs
         visible = typeVars t
 
