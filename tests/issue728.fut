@@ -17,8 +17,8 @@ let smvm ({row_off,col_idx,vals} : csr i32) (v:[]i32) =
 			 row_off[i],
 			 row_off[i+1]-row_off[i]))
                  (iota(length row_off - 1))
-  let sz r = r.3
-  let get r i = vals[r.2+i] * v[col_idx[r.2+i]]
+  let sz r = r.2
+  let get r i = vals[r.1+i] * v[col_idx[r.1+i]]
   in expand_reduce sz get (+) 0 rows
 
 let m_csr : csr i32 =

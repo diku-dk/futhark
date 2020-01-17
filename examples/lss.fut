@@ -30,7 +30,7 @@ let lss 't (pred1: t -> bool) (pred2: t -> t -> bool) (xs: []t) =
       let xmatch = if pred1 x then 1 else 0
       in (xmatch, xmatch, xmatch, 1, x, x)
 
-  in (reduce redOp (0,0,0,0,xs[0],xs[0]) (map mapOp xs)).1
+  in (reduce redOp (0,0,0,0,xs[0],xs[0]) (map mapOp xs)).0
 
 let main (xs: []i32): i32 =
   lss (\_ -> true) (\(x: i32) y -> x <= y) xs

@@ -53,7 +53,7 @@ let index_of_least_significant_0(num_bits: i32, n: i32): i32 =
      then if (n & 1) == 1
           then (true, k+1, n>>1)
           else (false,k,   n   )
-     else      (false,k,   n   )).2
+     else      (false,k,   n   )).1
 
 let recM [len][num_bits] (sob_dirs:  [len][num_bits]i32, i: i32 ): [len]i32 =
   let bit= index_of_least_significant_0(num_bits,i) in
