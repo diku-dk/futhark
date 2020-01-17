@@ -203,7 +203,7 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
 cIntPrimFuns :: [C.Definition]
 cIntPrimFuns =
   [C.cunit|
-$esc:("#ifdef __OPENCL_VERSION__")
+$esc:("#if defined(__OPENCL_VERSION__)")
    typename int32_t $id:(funName' "popc8") (typename int8_t x) {
       return popcount(x);
    }
@@ -216,7 +216,7 @@ $esc:("#ifdef __OPENCL_VERSION__")
    typename int32_t $id:(funName' "popc64") (typename int64_t x) {
       return popcount(x);
    }
-$esc:("#elif __CUDA_ARCH__")
+$esc:("#elif defined(__CUDA_ARCH__)")
    typename int32_t $id:(funName' "popc8") (typename int8_t x) {
       return __popc(zext_i8_i32(x));
    }
@@ -260,7 +260,7 @@ $esc:("#else")
    }
 $esc:("#endif")
 
-$esc:("#ifdef __OPENCL_VERSION__")
+$esc:("#if defined(__OPENCL_VERSION__)")
    typename int32_t $id:(funName' "clz8") (typename int8_t x) {
       return clz(x);
    }
@@ -273,7 +273,7 @@ $esc:("#ifdef __OPENCL_VERSION__")
    typename int32_t $id:(funName' "clz64") (typename int64_t x) {
       return clz(x);
    }
-$esc:("#elif __CUDA_ARCH__")
+$esc:("#elif defined(__CUDA_ARCH__)")
    typename int32_t $id:(funName' "clz8") (typename int8_t x) {
       return __clz(zext_i8_i32(x))-24;
    }
