@@ -62,7 +62,7 @@ compileProg =
              ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
               [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
                                  /* Does nothing for this backend. */
-                                 cfg = cfg; detail=detail;
+                                 (void)cfg; (void)detail;
                                }|])
 
           (fields, init_fields) <- GC.contextContents
@@ -103,7 +103,7 @@ compileProg =
           GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
             ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                                 ctx=ctx;
+                                 (void)ctx;
                                  return 0;
                                }|])
           GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
