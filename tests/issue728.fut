@@ -3,7 +3,7 @@ let expand_with_flags 'a 'b
                       (arr:[]a) : ([]b, []bool)  =
   ([], [])
 
-type csr 't = {row_off: []i32, col_idx: []i32, vals: []t}
+type^ csr 't = {row_off: []i32, col_idx: []i32, vals: []t}
 
 let expand_reduce 'a 'b [n]
                   (sz: a -> i32) (get: a -> i32 -> b)

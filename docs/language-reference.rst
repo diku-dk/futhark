@@ -379,7 +379,7 @@ Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   type_bind: "type" `id` `type_param`* "=" `type`
+   type_bind: "type" ["^"] `id` `type_param`* "=" `type`
    type_param: "[" `id` "]" | "'" `id` | "'^" `id`
 
 Type abbreviations function as shorthands for the purpose of
@@ -387,6 +387,9 @@ documentation or brevity.  After a type binding ``type t1 = t2``, the
 name ``t1`` can be used as a shorthand for the type ``t2``.  Type
 abbreviations do not create distinct types: the types ``t1`` and
 ``t2`` are entirely interchangeable.
+
+If the right-hand side of a type (potentially) contains a function or
+anonymous sizes, it must de declared "lifted" with ``type^``.
 
 A type abbreviation can have zero or more parameters.  A type
 parameter enclosed with square brackets is a *shape parameter*, and
@@ -1235,7 +1238,7 @@ Module Type Expressions
 .. productionlist::
    spec:   "val" `id` `type_param`* ":" `spec_type`
        : | "val" `binop` `type_param`* ":" `spec_type`
-       : | "type" `id` `type_param`* "=" `type`
+       : | "type" ["^"] `id` `type_param`* "=" `type`
        : | "type" ["^"] `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`

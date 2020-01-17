@@ -344,9 +344,9 @@ synopsisType tb = Just $ do
   fullRow <$> typeBindHtml name' tb
 
 typeBindHtml :: Html -> TypeBind -> DocM Html
-typeBindHtml name' (TypeBind _ tparams t _ _) = do
+typeBindHtml name' (TypeBind _ l tparams t _ _) = do
   t' <- noLink (map typeParamName tparams) $ typeDeclHtml t
-  return $ typeAbbrevHtml Unlifted name' tparams <> " = " <> t'
+  return $ typeAbbrevHtml l name' tparams <> " = " <> t'
 
 renderEnv :: Env -> DocM Html
 renderEnv (Env vtable ttable sigtable modtable _) = do

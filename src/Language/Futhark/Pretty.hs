@@ -369,8 +369,10 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ModExpBase f vn) where
                                          Just (sig, _) -> colon <+> ppr sig
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
-  ppr (TypeBind name params usertype _ _) =
-    text "type" <+> pprName name <+> spread (map ppr params) <+> equals <+> ppr usertype
+  ppr (TypeBind name l params usertype _ _) =
+    text typestr <+> pprName name <+> spread (map ppr params) <+> equals <+> ppr usertype
+    where typestr = case l of Lifted -> "type^"
+                              Unlifted -> "type"
 
 instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ pprName name

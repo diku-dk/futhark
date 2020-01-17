@@ -2,7 +2,7 @@
 -- ==
 -- error: Variable `v` previously
 
-type sum = #foo (*[]i32) | #bar (*[]i32)
+type^ sum = #foo (*[]i32) | #bar (*[]i32)
 
 let main (v: *sum) =
   let x = match v

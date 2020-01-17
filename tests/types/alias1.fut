@@ -1,5 +1,5 @@
 type t = i32
-type ts = []t
+type ts [n] = [n]t
 
-let main(xs: ts, x: t): ts =
+let main(xs: ts [], x: t): ts [] =
   map (+x) xs

@@ -585,11 +585,11 @@ transformValBind valbind = do
   return mempty { envPolyBindings = M.singleton (valBindName valbind) valbind' }
 
 transformTypeBind :: TypeBind -> MonoM Env
-transformTypeBind (TypeBind name tparams tydecl _ _) = do
+transformTypeBind (TypeBind name l tparams tydecl _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   noticeDims $ unInfo $ expandedType tydecl
   let tp = substituteTypes subs . unInfo $ expandedType tydecl
-      tbinding = TypeAbbr Lifted tparams tp -- The Lifted is arbitrary.
+      tbinding = TypeAbbr l tparams tp
   return mempty { envTypeBindings = M.singleton name tbinding }
 
 -- | Monomorphize a list of top-level declarations. A module-free input program
