@@ -181,11 +181,6 @@ envToTermScope env = TermScope { scopeVtable = vtable
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv { termScope = termScope tenv <> envToTermScope env }
 
-constraintTypeVars :: Constraints -> Names
-constraintTypeVars = mconcat . map f . M.elems
-  where f (_, Constraint t _) = typeVars t
-        f _ = mempty
-
 overloadedTypeVars :: Constraints -> Names
 overloadedTypeVars = mconcat . map f . M.elems
   where f (_, HasFields fs _) = mconcat $ map typeVars $ M.elems fs
@@ -1731,7 +1726,7 @@ checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e
   let t = toStruct $ typeOf e'
-  tparams <- letGeneralise [] t mempty
+  tparams <- letGeneralise [] t
   fixOverloadedTypes
   e'' <- updateExpTypes e'
   return (tparams, e'')
@@ -1812,10 +1807,8 @@ checkBinding :: (Maybe Name, Maybe UncheckedTypeExp,
                  [UncheckedTypeParam], [UncheckedPattern],
                  UncheckedExp, SrcLoc)
              -> TermTypeM ([TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
-checkBinding (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ incLevel $ do
-  then_substs <- getConstraints
-
-  bindingPatternGroup tparams params $ \tparams' params' -> do
+checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
+  noUnique $ incLevel $ bindingPatternGroup tparams params $ \tparams' params' -> do
     maybe_retdecl' <- traverse checkTypeExp maybe_retdecl
 
     body' <- checkFunBody body ((\(_,t,_)->t) <$> maybe_retdecl') (maybe loc srclocOf maybe_retdecl)
@@ -1840,7 +1833,7 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ inc
             return (Nothing, inferReturnUniqueness params'' body_t)
 
     let fun_t = foldFunType (map patternStructType params'') rettype
-    tparams'' <- letGeneralise tparams' fun_t then_substs
+    tparams'' <- letGeneralise tparams' fun_t
 
     checkGlobalAliases params'' body_t loc
 
@@ -1966,11 +1959,8 @@ nothingMustBeUnique loc = check
         check _ = return ()
         bad = typeError loc "A top-level constant cannot have a unique type."
 
-letGeneralise :: [TypeParam]
-              -> StructType
-              -> Constraints
-              -> TermTypeM [TypeParam]
-letGeneralise tparams t then_substs = do
+letGeneralise :: [TypeParam] -> StructType -> TermTypeM [TypeParam]
+letGeneralise tparams t = do
   now_substs <- getConstraints
   -- Candidates for let-generalisation are those type variables that
   --
@@ -1983,14 +1973,14 @@ letGeneralise tparams t then_substs = do
   -- are the element types of an incompletely resolved record type).
   -- This is a bit more restrictive than I'd like, and SML for
   -- example does not have this restriction.
-  let then_type_variables = S.fromList $ M.keys then_substs
-      then_type_constraints = constraintTypeVars $
-                              M.filterWithKey (\k _ -> k `S.member` then_type_variables) now_substs
-      keep_type_variables = then_type_variables <>
-                            then_type_constraints <>
-                            overloadedTypeVars now_substs
+  --
+  -- Criteria (1) and (2) is implemented by looking at the binding
+  -- level of the type variables.
+  let keep_type_vars = overloadedTypeVars now_substs
 
-  let new_substs = M.filterWithKey (\k _ -> not (k `S.member` keep_type_variables)) now_substs
+  cur_lvl <- curLevel
+  let candiate k (lvl, _) = (k `S.notMember` keep_type_vars) && lvl == cur_lvl
+      new_substs = M.filterWithKey candiate now_substs
   tparams' <- closeOverTypes new_substs tparams t
 
   -- We keep those type variables that were not closed over by
