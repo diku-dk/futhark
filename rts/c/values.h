@@ -89,7 +89,7 @@ static int read_str_elem(char *buf, struct array_reader *reader) {
   if (reader->n_elems_used == reader->n_elems_space) {
     reader->n_elems_space *= 2;
     reader->elems = (char*) realloc(reader->elems,
-                                    reader->n_elems_space * reader->elem_size);
+                                    (size_t)(reader->n_elems_space * reader->elem_size));
   }
 
   ret = reader->elem_reader(buf, reader->elems + reader->n_elems_used * reader->elem_size);
@@ -102,12 +102,12 @@ static int read_str_elem(char *buf, struct array_reader *reader) {
 }
 
 static int read_str_array_elems(char *buf, int bufsize,
-                                struct array_reader *reader, int dims) {
+                                struct array_reader *reader, int64_t dims) {
   int ret;
   int first = 1;
-  char *knows_dimsize = (char*) calloc(dims,sizeof(char));
+  char *knows_dimsize = (char*) calloc((size_t)dims, sizeof(char));
   int cur_dim = dims-1;
-  int64_t *elems_read_in_dim = (int64_t*) calloc(dims,sizeof(int64_t));
+  int64_t *elems_read_in_dim = (int64_t*) calloc((size_t)dims, sizeof(int64_t));
 
   while (1) {
     next_token(buf, bufsize);
@@ -202,7 +202,7 @@ static int read_str_empty_array(char *buf, int bufsize,
 
     next_token(buf, bufsize);
 
-    if (sscanf(buf, "%"SCNi64, &shape[i]) != 1) {
+    if (sscanf(buf, "%"SCNu64, &shape[i]) != 1) {
       return 1;
     }
 
@@ -257,7 +257,7 @@ static int read_str_array(int64_t elem_size, str_reader elem_reader,
   reader.n_elems_used = 0;
   reader.elem_size = elem_size;
   reader.n_elems_space = 16;
-  reader.elems = (char*) realloc(*data, elem_size*reader.n_elems_space);
+  reader.elems = (char*) realloc(*data, (size_t)(elem_size*reader.n_elems_space));
   reader.elem_reader = elem_reader;
 
   ret = read_str_array_elems(buf, sizeof(buf), &reader, dims);
@@ -285,7 +285,7 @@ static int read_str_i8(char *buf, void* dest) {
   remove_underscores(buf);
   int j, x;
   if (sscanf(buf, "%i%n", &x, &j) == 1) {
-    *(int8_t*)dest = x;
+    *(int8_t*)dest = (int8_t)x;
     return !(strcmp(buf+j, "") == 0 || strcmp(buf+j, "i8") == 0);
   } else {
     return 1;
@@ -301,7 +301,7 @@ static int read_str_u8(char *buf, void* dest) {
   remove_underscores(buf);
   int j, x;
   if (sscanf(buf, "%i%n", &x, &j) == 1) {
-    *(uint8_t*)dest = x;
+    *(uint8_t*)dest = (uint8_t)x;
     return !(strcmp(buf+j, "") == 0 || strcmp(buf+j, "u8") == 0);
   } else {
     return 1;
@@ -479,7 +479,7 @@ static int read_byte(void* dest) {
 struct primtype_info_t {
   const char binname[4]; // Used for parsing binary data.
   const char* type_name; // Same name as in Futhark.
-  const int size; // in bytes
+  const int64_t size; // in bytes
   const writer write_str; // Write in text format.
   const str_reader read_str; // Read in text format.
 };
@@ -606,9 +606,9 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
           dims, expected_type->type_name, dims, bin_primtype->type_name);
   }
 
-  uint64_t elem_count = 1;
+  int64_t elem_count = 1;
   for (int i=0; i<dims; i++) {
-    uint64_t bin_shape;
+    int64_t bin_shape;
     ret = fread(&bin_shape, sizeof(bin_shape), 1, stdin);
     if (ret != 1) {
       panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i);
@@ -617,18 +617,18 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
       flip_bytes(sizeof(bin_shape), (unsigned char*) &bin_shape);
     }
     elem_count *= bin_shape;
-    shape[i] = (int64_t) bin_shape;
+    shape[i] = bin_shape;
   }
 
-  size_t elem_size = expected_type->size;
-  void* tmp = realloc(*data, elem_count * elem_size);
+  int64_t elem_size = expected_type->size;
+  void* tmp = realloc(*data, (size_t)(elem_count * elem_size));
   if (tmp == NULL) {
     panic(1, "binary-input: Failed to allocate array of size %i.\n",
           elem_count * elem_size);
   }
   *data = tmp;
 
-  size_t num_elems_read = fread(*data, elem_size, elem_count, stdin);
+  int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, stdin);
   if (num_elems_read != elem_count) {
     panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
           elem_count, num_elems_read);
@@ -655,11 +655,11 @@ static int write_str_array(FILE *out, const struct primtype_info_t *elem_type, u
   if (rank==0) {
     elem_type->write_str(out, (void*)data);
   } else {
-    int64_t len = shape[0];
+    int64_t len = (int64_t)shape[0];
     int64_t slice_size = 1;
 
     int64_t elem_size = elem_type->size;
-    for (int64_t i = 1; i < rank; i++) {
+    for (int8_t i = 1; i < rank; i++) {
       slice_size *= shape[i];
     }
 
@@ -704,7 +704,7 @@ static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, u
   fwrite(&rank, sizeof(int8_t), 1, out);
   fputs(elem_type->binname, out);
   if (shape != NULL) {
-    fwrite(shape, sizeof(int64_t), rank, out);
+    fwrite(shape, sizeof(int64_t), (size_t)rank, out);
   }
 
   if (IS_BIG_ENDIAN) {
@@ -715,7 +715,7 @@ static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, u
       }
     }
   } else {
-    fwrite(data, elem_type->size, num_elems, out);
+    fwrite(data, (size_t)elem_type->size, (size_t)num_elems, out);
   }
 
   return 0;
@@ -737,8 +737,8 @@ static int read_scalar(const struct primtype_info_t *expected_type, void *dest) 
     return expected_type->read_str(buf, dest);
   } else {
     read_bin_ensure_scalar(expected_type);
-    size_t elem_size = expected_type->size;
-    int num_elems_read = fread(dest, elem_size, 1, stdin);
+    int64_t elem_size = expected_type->size;
+    int num_elems_read = fread(dest, (size_t)elem_size, 1, stdin);
     if (IS_BIG_ENDIAN) {
       flip_bytes(elem_size, (unsigned char*) dest);
     }
