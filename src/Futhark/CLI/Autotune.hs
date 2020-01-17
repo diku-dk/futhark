@@ -220,51 +220,58 @@ tuneThreshold opts datasets already_tuned (v, v_path) = do
   ranges <-
     forM datasets $ \(dataset_name, run, entry_point) ->
 
-    putStrLn $ unwords ["Tuning", v, "on entry point", T.unpack entry_point,
-                        "and dataset", dataset_name]
-
-    sample_run <- run path RunSample
-
-    case sample_run of
-      Left err -> do
-        -- If the sampling run fails, we treat it as zero information.
-        -- One of our ancestor thresholds will have be set such that
-        -- this path is never taken.
-        when (optVerbose opts > 0) $ putStrLn $ "Sampling run failed:\n" ++ err
+    if not $ isPrefixOf (T.unpack entry_point ++ ".") v then do
+        when (optVerbose opts > 0) $
+          putStrLn $ unwords [v, "is irrelevant for", T.unpack entry_point]
         return (thresholdMin, thresholdMax)
-      Right (cmps, _) ->
-        case lookup v cmps of
-          Nothing -> do
-            -- A missing comparison is not necessarily a bug - it may
-            -- simply mean that this comparison is inside a loop or
-            -- branch that is never reached for this dataset.  In such
-            -- cases, the optimal range is universal.
-            when (optVerbose opts > 0) $ putStrLn "Irrelevant for dataset.\n"
-            return (thresholdMin, thresholdMax)
-          Just e_par -> do
-            t_run <- run path_t RunBenchmark
-            f_run <- run path_f RunBenchmark
+    else do
 
-            let prefer_t = (thresholdMin, e_par)
-                prefer_f = (e_par+1, thresholdMax)
+      putStrLn $ unwords ["Tuning", v, "on entry point", T.unpack entry_point,
+                          "and dataset", dataset_name]
 
-            case (t_run, f_run) of
-              (Left err, _) -> do
-                when (optVerbose opts > 0) $
-                  putStrLn $ "True comparison run failed:\n" ++ err
-                return prefer_f
-              (_, Left err) -> do
-                when (optVerbose opts > 0) $
-                  putStrLn $ "False comparison run failed:\n" ++ err
-                return prefer_t
-              (Right (_, runtime_t), Right (_, runtime_f)) ->
-                if runtime_t < runtime_f
-                then do when (optVerbose opts > 0) $
-                          putStrLn "True branch is fastest."
-                        return prefer_t
-                else do when (optVerbose opts > 0) $
-                          putStrLn "False branch is fastest."
-                        return prefer_f
+      sample_run <- run path RunSample
+
+      case sample_run of
+        Left err -> do
+          -- If the sampling run fails, we treat it as zero information.
+          -- One of our ancestor thresholds will have be set such that
+          -- this path is never taken.
+          when (optVerbose opts > 0) $ putStrLn $
+            "Sampling run failed:\n" ++ err
+          return (thresholdMin, thresholdMax)
+        Right (cmps, _) ->
+          case lookup v cmps of
+            Nothing -> do
+              -- A missing comparison is not necessarily a bug - it may
+              -- simply mean that this comparison is inside a loop or
+              -- branch that is never reached for this dataset.  In such
+              -- cases, the optimal range is universal.
+              when (optVerbose opts > 0) $ putStrLn "Irrelevant for dataset.\n"
+              return (thresholdMin, thresholdMax)
+            Just e_par -> do
+              t_run <- run path_t RunBenchmark
+              f_run <- run path_f RunBenchmark
+
+              let prefer_t = (thresholdMin, e_par)
+                  prefer_f = (e_par+1, thresholdMax)
+
+              case (t_run, f_run) of
+                (Left err, _) -> do
+                  when (optVerbose opts > 0) $
+                    putStrLn $ "True comparison run failed:\n" ++ err
+                  return prefer_f
+                (_, Left err) -> do
+                  when (optVerbose opts > 0) $
+                    putStrLn $ "False comparison run failed:\n" ++ err
+                  return prefer_t
+                (Right (_, runtime_t), Right (_, runtime_f)) ->
+                  if runtime_t < runtime_f
+                  then do when (optVerbose opts > 0) $
+                            putStrLn "True branch is fastest."
+                          return prefer_t
+                  else do when (optVerbose opts > 0) $
+                            putStrLn "False branch is fastest."
+                          return prefer_f
 
   let (_lower, upper) = intersectRanges ranges
   return $ (v,upper) : already_tuned
