@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark_context_new_with_command_queue()` now actually works.  Oops.
 
+  * Different scopes are now properly addressed during type inference
+    (#838).  Realistically, there will still be some missing cases.
+
 ## [0.13.2]
 
 ### Added
