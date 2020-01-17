@@ -194,10 +194,10 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
           [C.cedecl|static inline $ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = intTypeToCType t
         intCmpOp s e t =
-          [C.cedecl|static inline char $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+          [C.cedecl|static inline typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = intTypeToCType t
         uintCmpOp s e t =
-          [C.cedecl|static inline char $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+          [C.cedecl|static inline typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = uintTypeToCType t
 
 cIntPrimFuns :: [C.Definition]
@@ -379,7 +379,7 @@ cFloatConvOps :: [C.Definition]
           [C.cedecl|static inline $ty:ct $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = floatTypeToCType t
         floatCmpOp s e t =
-          [C.cedecl|static inline char $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+          [C.cedecl|static inline typename bool $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = floatTypeToCType t
 
 cFloat32Funs :: [C.Definition]
@@ -440,11 +440,11 @@ cFloat32Funs = [C.cunit|
       return lgamma(x);
     }
 
-    static inline char $id:(funName' "isnan32")(float x) {
+    static inline typename bool $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
 
-    static inline char $id:(funName' "isinf32")(float x) {
+    static inline typename bool $id:(funName' "isinf32")(float x) {
       return isinf(x);
     }
 
@@ -571,11 +571,11 @@ cFloat64Funs = [C.cunit|
       return floor(x);
     }
 
-    static inline char $id:(funName' "isnan64")(double x) {
+    static inline typename bool $id:(funName' "isnan64")(double x) {
       return isnan(x);
     }
 
-    static inline char $id:(funName' "isinf64")(double x) {
+    static inline typename bool $id:(funName' "isinf64")(double x) {
       return isinf(x);
     }
 
