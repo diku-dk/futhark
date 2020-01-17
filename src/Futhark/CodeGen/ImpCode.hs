@@ -43,9 +43,7 @@ module Futhark.CodeGen.ImpCode
   , withElemType
 
     -- * Converting from sizes
-  , sizeToExp
   , dimSizeToExp
-  , memSizeToExp
 
     -- * Analysis
 
@@ -233,17 +231,13 @@ bytes = Count
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
 withElemType :: Count Elements Exp -> PrimType -> Count Bytes Exp
-withElemType (Count e) t = bytes $ e * LeafExp (SizeOf t) (IntType Int32)
+withElemType (Count e) t = bytes $ e * LeafExp (SizeOf t) (IntType Int64)
 
 dimSizeToExp :: DimSize -> Count Elements Exp
-dimSizeToExp = elements . sizeToExp
-
-memSizeToExp :: MemSize -> Count Bytes Exp
-memSizeToExp = bytes . sizeToExp
-
-sizeToExp :: Size -> Exp
-sizeToExp (VarSize v)   = LeafExp (ScalarVar v) (IntType Int32)
-sizeToExp (ConstSize x) = ValueExp $ IntValue $ Int32Value $ fromIntegral x
+dimSizeToExp (VarSize v) =
+  elements $ LeafExp (ScalarVar v) (IntType Int32)
+dimSizeToExp (ConstSize x) =
+  elements $ ValueExp $ IntValue $ Int32Value $ fromIntegral x
 
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
