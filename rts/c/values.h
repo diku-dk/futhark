@@ -38,7 +38,7 @@ static void next_token(char *buf, int bufsize) {
   int i = 0;
   while (i < bufsize) {
     int c = getchar();
-    buf[i] = c;
+    buf[i] = (char)c;
 
     if (c == EOF) {
       buf[i] = 0;
@@ -47,7 +47,7 @@ static void next_token(char *buf, int bufsize) {
       // Line comment, so skip to end of line and start over.
       for (; c != '\n' && c != EOF; c = getchar());
       goto start;
-    } else if (!constituent(c)) {
+    } else if (!constituent((char)c)) {
       if (i == 0) {
         // We permit single-character tokens that are not
         // constituents; this lets things like ']' and ',' be
