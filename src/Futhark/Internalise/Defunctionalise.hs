@@ -190,8 +190,7 @@ defuncExp (QualParens qn e loc) = do
 
 defuncExp (TupLit es loc) = do
   (es', svs) <- unzip <$> mapM defuncExp es
-  return (TupLit es' loc, RecordSV $ zip fields svs)
-  where fields = map (nameFromString . show) [(1 :: Int) ..]
+  return (TupLit es' loc, RecordSV $ zip tupleFieldNames svs)
 
 defuncExp (RecordLit fs loc) = do
   (fs', names_svs) <- unzip <$> mapM defuncField fs
