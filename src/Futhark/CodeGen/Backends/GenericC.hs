@@ -1628,7 +1628,7 @@ compileExp = compilePrimExp compileLeaf
           <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
 
         compileLeaf (SizeOf t) =
-          return [C.cexp|(sizeof($ty:t'))|]
+          return [C.cexp|(int64_t)(sizeof($ty:t'))|]
           where t' = primTypeToCType t
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
