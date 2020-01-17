@@ -2,7 +2,7 @@
 -- ==
 -- error: \*\[\]i32
 
-type state = { size: i32, world: []i32 }
+type^ state = { size: i32, world: []i32 }
 
 let init (size: i32): state = {size, world = replicate size 0}
 

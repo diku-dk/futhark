@@ -3,8 +3,8 @@
 -- input { }
 -- output { 7 }
 
-type mooboo = #moo (i32 -> i32) | #boo i32
-type foobar = #foo (mooboo -> i32 -> i32) | #bar
+type^ mooboo = #moo (i32 -> i32) | #boo i32
+type^ foobar = #foo (mooboo -> i32 -> i32) | #bar
 
 let main : i32 =
     let f (mb : mooboo) x = match mb

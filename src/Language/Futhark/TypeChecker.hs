@@ -143,7 +143,7 @@ checkForDuplicateDecs =
         f (ValDec (ValBind _ name _ _ _ _ _ _ loc)) =
           check Term name loc
 
-        f (TypeDec (TypeBind name _ _ _ loc)) =
+        f (TypeDec (TypeBind name _ _ _ _ loc)) =
           check Type name loc
 
         f (SigDec (SigBind name _ _ loc)) =
@@ -194,7 +194,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     when (emptyDimParam $ unInfo $ expandedType vtype') $
       throwError $ TypeError loc $
       "All function parameters must have non-anonymous sizes.\n" ++
-      "Fix this by adding size parameters to " ++ quote (prettyName name') ++ "."
+      "Hint: add size parameters to " ++ quote (prettyName name') ++ "."
 
     let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
@@ -430,7 +430,7 @@ checkForDuplicateSpecs =
         f (ValSpec name _ _ _ loc) =
           check Term name loc
 
-        f (TypeAbbrSpec (TypeBind name _ _ _ loc)) =
+        f (TypeAbbrSpec (TypeBind name _ _ _ _ loc)) =
           check Type name loc
 
         f (TypeSpec _ name _ _ loc) =
@@ -444,14 +444,29 @@ checkForDuplicateSpecs =
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
-checkTypeBind (TypeBind name tps (TypeDecl t NoInfo) doc loc) =
+checkTypeBind (TypeBind name l tps (TypeDecl t NoInfo) doc loc) =
   checkTypeParams tps $ \tps' -> do
-    (td', l) <- bindingTypeParams tps' $ do
+    (td', l') <- bindingTypeParams tps' $ do
       checkForDuplicateNamesInType t
-      (t', st, l) <- checkTypeExp t
+      (t', st, l') <- checkTypeExp t
 
       checkShapeParamUses typeExpUses tps' [t']
-      return (TypeDecl t' $ Info st, l)
+      return (TypeDecl t' $ Info st, l')
+
+    case (l, l') of
+      (Unlifted, _)
+        | emptyDimParam $ unInfo $ expandedType td' ->
+            warn loc $
+            "Non-lifted type abbreviations may not use anonymous sizes in their definition.\n" ++
+            "This will become an error in a future version of the compiler!\n" ++
+            "Hint: use 'type^' or add size parameters to " ++
+            quote (prettyName name) ++ "."
+      (Unlifted, Lifted) ->
+        throwError $ TypeError loc $
+        "Non-lifted type abbreviations may not contain functions.\n" ++
+        "Hint: consider using 'type^'."
+      _ -> return ()
+
     bindSpaced [(Type, name)] $ do
       name' <- checkName Type name loc
       return (mempty { envTypeTable =
@@ -459,7 +474,7 @@ checkTypeBind (TypeBind name tps (TypeDecl t NoInfo) doc loc) =
                        envNameMap =
                          M.singleton (Type, name) $ qualName name'
                      },
-              TypeBind name' tps' td' doc loc)
+               TypeBind name' l tps' td' doc loc)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
