@@ -297,7 +297,8 @@ compile ``futlib.c`` to a shared library like this::
   $ gcc futlib.c -o libfutlib.so -fPIC -shared
 
 However, details of how to link the generated code with other C code
-is highly system-dependent, and outside the scope of this manual.  In
+is highly system-dependent, and outside the scope of this manual (for
+example, on Windows you would use ``.dll`` instead of ``.so``).  In
 most cases, it is easier to simply add the generated ``.c`` file to
 the C compiler command line used for compiling our whole program (here
 ``main.c``)::
@@ -349,11 +350,18 @@ The API functions are thread safe.
 C with OpenCL
 ~~~~~~~~~~~~~
 
-When generating C code with ``futhark opencl`` (which is likely the
-common case), extra API functions are provided for directly accessing
-or providing the OpenCL objects used by Futhark.  Take care when using
-these functions.  In particular, a Futhark context can now be provided
-with the command queue to use::
+When generating C code with ``futhark opencl``, you will need to link
+against the OpenCL library when linking the final binary::
+
+  $ gcc futlib.c -o libfutlib.so -fPIC -shared -lOpenCL
+
+On some platforms (e.g. Windows), it may also be necessary to pass
+``-lOpenCL`` when generating the DLL.
+
+When using the OpenCL backend, extra API functions are provided for
+directly accessing or providing the OpenCL objects used by Futhark.
+Take care when using these functions.  In particular, a Futhark
+context can now be provided with the command queue to use::
 
   struct futhark_context *futhark_context_new_with_command_queue(struct futhark_context_config *cfg, cl_command_queue queue);
 
