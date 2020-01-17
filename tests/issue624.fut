@@ -2,12 +2,12 @@
 -- which removed a uniqueness attribute.
 
 module type m = {
-    type t
+    type^ t
     val r: *t -> *t
 }
 
 module m: m = {
-    type t = []f32
+    type^ t = []f32
     let r (t: *t): *t = t
 }
 

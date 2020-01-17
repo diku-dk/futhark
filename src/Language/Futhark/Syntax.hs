@@ -820,6 +820,7 @@ instance Located (ValBindBase f vn) where
 
 -- | Type Declarations
 data TypeBindBase f vn = TypeBind { typeAlias        :: vn
+                                  , typeLiftedness   :: Liftedness
                                   , typeParams       :: [TypeParamBase vn]
                                   , typeExp          :: TypeDeclBase f vn
                                   , typeDoc          :: Maybe DocComment

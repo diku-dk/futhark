@@ -144,7 +144,7 @@ checkTypeExp (TEArray t d loc) = do
   case (l, arrayOf st (ShapeDecl [d'']) Nonunique) of
     (Unlifted, st') -> return (TEArray t' d' loc, st', Unlifted)
     _ -> throwError $ TypeError loc $
-         "Cannot create array with elements of type " ++ quote (pretty st) ++ " (might be functional)."
+         "Cannot create array with elements of type " ++ quote (pretty t) ++ " (might be functional)."
   where checkDimExp DimExpAny =
           return (DimExpAny, AnyDim)
         checkDimExp (DimExpConst k dloc) =

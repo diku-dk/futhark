@@ -3,8 +3,8 @@
 -- error: Unmatched cases.*\(#foo \(#moo _ #none \)\)
 
 type some 't    = #none | #some t
-type mooboo '^t = #moo t (some i32) | #boo
-type foobar     = #foo (mooboo (i32 -> i32)) | #bar (i32 -> i32)
+type^ mooboo '^t = #moo t (some i32) | #boo
+type^ foobar     = #foo (mooboo (i32 -> i32)) | #bar (i32 -> i32)
 
 let main : i32 =
   match (#foo (#moo (+1) #none)) : foobar

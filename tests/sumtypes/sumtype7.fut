@@ -3,8 +3,8 @@
 -- input { }
 -- output { 26 }
 
-type foobar = #foo i32 | #bar i32
-type boomoo = #boo foobar i32 {field1: i32, field2: []i32} |  #moo i32 foobar
+type^ foobar = #foo i32 | #bar i32
+type^ boomoo = #boo foobar i32 {field1: i32, field2: []i32} |  #moo i32 foobar
 
 let main : i32 =
   match ((#boo (#bar 5) 10 {field1 = 1, field2 = [1,2,3,4]}) : boomoo)

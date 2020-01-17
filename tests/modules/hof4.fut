@@ -3,4 +3,4 @@
 -- ==
 -- error: functional
 
-module m = { type t '^a = a } : { type t 'a }
+module m = { type^ t '^a = a } : { type t 'a }

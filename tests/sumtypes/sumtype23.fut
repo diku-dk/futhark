@@ -1,7 +1,7 @@
 -- Sumtype consumption.
 -- ==
 
-type sum = #foo ([]i32) | #bar ([]i32)
+type^ sum = #foo ([]i32) | #bar ([]i32)
 
 let main (v: *sum) : *[]i32 =
   match v

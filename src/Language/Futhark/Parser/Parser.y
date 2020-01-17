@@ -408,10 +408,16 @@ TypeExpDecl :: { TypeDeclBase NoInfo Name }
 TypeAbbr :: { TypeBindBase NoInfo Name }
 TypeAbbr : type id TypeParams '=' TypeExpDecl
            { let L _ (ID name) = $2
-              in TypeBind name $3 $5 Nothing (srcspan $1 $>) }
+              in TypeBind name Unlifted $3 $5 Nothing (srcspan $1 $>) }
          | type 'id[' id ']' TypeParams '=' TypeExpDecl
            { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
-             in TypeBind name (TypeParamDim pname ploc:$5) $7 Nothing (srcspan $1 $>) }
+             in TypeBind name Unlifted (TypeParamDim pname ploc:$5) $7 Nothing (srcspan $1 $>) }
+         | type '^' id TypeParams '=' TypeExpDecl
+           { let L _ (ID name) = $3
+              in TypeBind name Lifted $4 $6 Nothing (srcspan $1 $>) }
+         | type '^' 'id[' id ']' TypeParams '=' TypeExpDecl
+           { let L loc (INDEXING name) = $3; L ploc (ID pname) = $4
+             in TypeBind name Lifted (TypeParamDim pname ploc:$6) $8 Nothing (srcspan $1 $>) }
 
 TypeExp :: { UncheckedTypeExp }
          : '(' id ':' TypeExp ')' '->' TypeExp

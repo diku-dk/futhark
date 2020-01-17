@@ -3,4 +3,4 @@
 -- ==
 -- error: non-functional
 
-module m = \(p: {type ^a}) -> ({ type t = p.a } : { type t })
+module m = \(p: {type ^a}) -> ({ type^ t = p.a } : { type t })

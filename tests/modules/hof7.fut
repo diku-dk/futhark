@@ -9,7 +9,7 @@ module type has_t = {
 }
 
 module m1: has_t = {
-  type t = i32 -> i32
+  type^ t = i32 -> i32
   let v = (+2)
   let ap f x = f x
 }

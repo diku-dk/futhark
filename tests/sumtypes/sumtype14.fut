@@ -10,7 +10,7 @@ module type foobar_mod = {
 }
 
 module sum_module : foobar_mod = {
-  type foobar = #foo i32 | #bar (i32 -> i32)
+  type^ foobar = #foo i32 | #bar (i32 -> i32)
   let f (fb : foobar) (x : i32) : i32 =
     match fb
       case (#foo y) -> x + y

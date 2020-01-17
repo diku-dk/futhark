@@ -51,6 +51,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     rather than from 1.  This fits a new general principle of always
     numbering from 0 in Futhark.
 
+  * Type abbreviations declared with `type` may no longer contain
+    functions or anonymous sizes in their definition.  Use `type^` for
+    these cases.  Just a warning for now, but will be an error in the
+    future.
+
 ### Fixed
 
   * Work around (probable) AMD OpenCL compiler bug for
