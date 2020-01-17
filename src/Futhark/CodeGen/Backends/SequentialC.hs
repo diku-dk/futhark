@@ -36,8 +36,8 @@ compileProg =
              [C.cedecl|struct $id:s { int debugging; };|])
 
           GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
-            ([C.cedecl|struct $id:cfg* $id:s();|],
-             [C.cedecl|struct $id:cfg* $id:s() {
+            ([C.cedecl|struct $id:cfg* $id:s(void);|],
+             [C.cedecl|struct $id:cfg* $id:s(void) {
                                  struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
                                  if (cfg == NULL) {
                                    return NULL;
