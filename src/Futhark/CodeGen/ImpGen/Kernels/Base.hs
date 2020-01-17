@@ -1229,9 +1229,9 @@ sCopy bt
   n = do
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
-  let shape = map Imp.sizeToExp srcshape
+  let shape = map dimSizeToExp srcshape
       shape_se = map (Imp.unCount . dimSizeToExp) srcshape
-      kernel_size = Imp.unCount n * product (drop 1 shape)
+      kernel_size = Imp.unCount $ n * product (drop 1 shape)
 
   (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
 
