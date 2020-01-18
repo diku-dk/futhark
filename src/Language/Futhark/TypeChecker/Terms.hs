@@ -1004,7 +1004,8 @@ checkExp (LetPat pat e body NoInfo loc) =
         let msg = "of value computed with consumption at " ++ locStr (location c)
         in zeroOrderType (mkUsage loc "consumption in right-hand side of 'let'-binding") msg t
       _ -> return ()
-    bindingPattern pat (Ascribed $ anyDimShapeAnnotations t) $ \pat' -> do
+
+    incLevel $ bindingPattern pat (Ascribed $ anyDimShapeAnnotations t) $ \pat' -> do
       body' <- checkExp body
       body_t <- unscopeType (S.map identName $ patternIdents pat') <$> expType body'
       return $ LetPat pat' e' body' (Info body_t) loc
@@ -1113,7 +1114,7 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   return $ Assert e1' e2' (Info (pretty e1)) loc
 
 checkExp (Lambda params body rettype_te NoInfo loc) =
-  removeSeminullOccurences $
+  removeSeminullOccurences $ incLevel $
   bindingPatternGroup [] params $ \_ params' -> do
     rettype_checked <- traverse checkTypeExp rettype_te
     let declared_rettype =
@@ -1979,7 +1980,7 @@ letGeneralise tparams t = do
   let keep_type_vars = overloadedTypeVars now_substs
 
   cur_lvl <- curLevel
-  let candiate k (lvl, _) = (k `S.notMember` keep_type_vars) && lvl == cur_lvl
+  let candiate k (lvl, _) = (k `S.notMember` keep_type_vars) && lvl >= cur_lvl
       new_substs = M.filterWithKey candiate now_substs
   tparams' <- closeOverTypes new_substs tparams t
 
