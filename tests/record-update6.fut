@@ -1,6 +1,6 @@
 -- Inference of record in lambda.
 -- ==
--- error: `n`
+-- error: Full type of
 
 type octnode = {body: i32}
 
