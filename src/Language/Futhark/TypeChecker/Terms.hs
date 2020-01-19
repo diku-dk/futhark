@@ -1098,8 +1098,8 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   case maybe_a' of
     Just a' -> return $ RecordUpdate src' fields ve' (Info a') loc
     Nothing -> typeError loc $ pretty $
-               text "Full type of " <>
-               indent 2 (ppr src) <>
+               text "Full type of" </>
+               indent 2 (ppr src) </>
                text " is not known at this point.  Add a size annotation to the original record to disambiguate."
 
 checkExp (Index e idxes NoInfo loc) = do
