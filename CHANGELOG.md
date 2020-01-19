@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Invalid ranges like `1..<0` now produce a run-time error instead
     of an empty array.
 
+  * Record updates (`r with f = e`) now require `r` to have a
+    completely known type up to `f`.  This is a restriction that will
+    hopefully be lifted in the future.
+
   * Value specs must now explicitly quantify all sizes of function
     parameters.  Instead of
 

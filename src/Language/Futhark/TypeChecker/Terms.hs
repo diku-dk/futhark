@@ -1083,6 +1083,9 @@ checkExp (Update src idxes ve loc) = do
   where isFix DimFix{} = True
         isFix _        = False
 
+-- Record updates are a bit hacky, because we do not have row typing
+-- (yet?).  For now, we only permit record updates where we know the
+-- full type up to the field we are updating.
 checkExp (RecordUpdate src fields ve NoInfo loc) = do
   src' <- checkExp src
   ve' <- checkExp ve
@@ -1091,8 +1094,13 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   r <- foldM (flip $ mustHaveField usage) a fields
   ve_t <- expType ve'
   unify usage (toStructural r) (toStructural ve_t)
-  a' <- onRecordField (`setAliases` aliases ve_t) fields <$> expType src'
-  return $ RecordUpdate src' fields ve' (Info a') loc
+  maybe_a' <- onRecordField (const ve_t) fields <$> expType src'
+  case maybe_a' of
+    Just a' -> return $ RecordUpdate src' fields ve' (Info a') loc
+    Nothing -> typeError loc $ pretty $
+               text "Full type of " <>
+               indent 2 (ppr src) <>
+               text " is not known at this point.  Add a size annotation to the original record to disambiguate."
 
 checkExp (Index e idxes NoInfo loc) = do
   (t, _) <- newArrayType (srclocOf e) "e" $ length idxes

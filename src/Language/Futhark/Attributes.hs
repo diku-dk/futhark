@@ -420,13 +420,16 @@ unscopeType bound_here t = modifyShapeAnnotations onDim $ t `addAliases` S.map u
         onDim (NamedDim qn) | qualLeaf qn `S.member` bound_here = AnyDim
         onDim d = d
 
--- | Perform some operation on a given record field.
+-- | Perform some operation on a given record field.  Returns
+-- 'Nothing' if that field does not exist.
 onRecordField :: (TypeBase dim als -> TypeBase dim als)
               -> [Name]
-              -> TypeBase dim als -> TypeBase dim als
-onRecordField f (k:ks) (Scalar (Record m)) =
-  Scalar $ Record $ M.adjust (onRecordField f ks) k m
-onRecordField f _ t = f t
+              -> TypeBase dim als -> Maybe (TypeBase dim als)
+onRecordField f [] t = Just $ f t
+onRecordField f (k:ks) (Scalar (Record m)) = do
+  t <- onRecordField f ks =<< M.lookup k m
+  Just $ Scalar $ Record $ M.insert k t m
+onRecordField _ _ _ = Nothing
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.

@@ -810,8 +810,11 @@ contain the result of evaluating ``e``.  Consumes ``a``.
 ``r with f = e``
 .................
 
-Return the record ``r``, but with field `f` changed to have value `e`.
-The type of the field must remain unchanged.
+Return the record ``r``, but with field ``f`` changed to have value
+``e``.  The type of the field must remain unchanged.  Type inference
+is limited: ``r`` must have a *completely known type* up to ``f``.
+This sometimes requires extra type annotations to make the type of
+``r`` known.
 
 ``if c then a else b``
 ......................
