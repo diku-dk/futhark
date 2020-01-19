@@ -144,7 +144,6 @@ data ValBinding = BoundV Locality [TypeParam] PatternType
                 -- closure.
                 | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
                 | EqualityF
-                | OpaqueF
                 | WasConsumed SrcLoc
                 deriving (Show)
 
@@ -283,8 +282,6 @@ initialTermScope = TermScope { scopeVtable = initialVtable
                                    _    -> tupleRecord pts
         addIntrinsicF (name, IntrinsicEquality) =
           Just (name, EqualityF)
-        addIntrinsicF (name, IntrinsicOpaque) =
-          Just (name, OpaqueF)
         addIntrinsicF _ = Nothing
 
 instance MonadTypeChecker TermTypeM where
@@ -332,10 +329,6 @@ instance MonadTypeChecker TermTypeM where
             (tnames, t') <- instantiateTypeScheme loc tparams t
             let qual = qualifyTypeVars outer_env tnames qs
             qual . anyDimShapeAnnotations <$> normaliseType t'
-
-      Just OpaqueF -> do
-        argtype <- newTypeVar loc "t"
-        return $ Scalar $ Arrow mempty Unnamed argtype argtype
 
       Just EqualityF -> do
         argtype <- newTypeVar loc "t"
@@ -2116,7 +2109,6 @@ noUnique = localScope (\scope -> scope { scopeVtable = M.map set $ scopeVtable s
   where set (BoundV l tparams t)    = BoundV l tparams $ t `setUniqueness` Nonunique
         set (OverloadedF ts pts rt) = OverloadedF ts pts rt
         set EqualityF               = EqualityF
-        set OpaqueF                 = OpaqueF
         set (WasConsumed loc)       = WasConsumed loc
 
 onlySelfAliasing :: TermTypeM a -> TermTypeM a
@@ -2125,7 +2117,6 @@ onlySelfAliasing = localScope (\scope -> scope { scopeVtable = M.mapWithKey set 
                                         t `addAliases` S.intersection (S.singleton (AliasBound k))
         set _ (OverloadedF ts pts rt) = OverloadedF ts pts rt
         set _ EqualityF               = EqualityF
-        set _ OpaqueF                 = OpaqueF
         set _ (WasConsumed loc)       = WasConsumed loc
 
 arrayOfM :: (Pretty (ShapeDecl dim), Monoid as) =>
