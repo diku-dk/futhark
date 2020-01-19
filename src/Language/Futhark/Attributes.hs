@@ -623,7 +623,6 @@ data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
                | IntrinsicPolyFun [TypeParamBase VName] [StructType] StructType
                | IntrinsicType PrimType
                | IntrinsicEquality -- Special cased.
-               | IntrinsicOpaque
 
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
@@ -631,7 +630,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
              map primFun (M.toList Primitive.primFuns) ++
 
-             [("opaque", IntrinsicOpaque)] ++
+             [("opaque", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)] ++
 
              map unOpFun Primitive.allUnOps ++
 
