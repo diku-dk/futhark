@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `random` test blocks are now allowed to contain integer literals
     with type suffixes.
 
+  * `:frame <n>` command for `futhark repl` for inspecting the stack.
+
 ### Removed
 
 ### Changed
