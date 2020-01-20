@@ -24,6 +24,7 @@ import System.Directory
 import System.FilePath
 import System.Console.GetOpt
 import System.IO
+import Text.Read (readMaybe)
 import qualified System.Console.Haskeline as Haskeline
 
 import Language.Futhark
@@ -378,6 +379,24 @@ unbreakCommand _ = do
     Just top' -> do modify $ \s -> s { futharkiSkipBreaks = locOf top' : futharkiSkipBreaks s }
                     throwError Stop
 
+frameCommand :: Command
+frameCommand which = do
+  maybe_stack <- fmap breakingStack <$> gets futharkiBreaking
+  case (maybe_stack, readMaybe $ T.unpack which) of
+    (Just stack, Just i)
+      | frame:_ <- NE.drop i stack -> do
+          let breaking = Breaking stack i
+              ctx = I.stackFrameCtx frame
+              tenv = I.typeEnv $ I.ctxEnv ctx
+          modify $ \s -> s { futharkiEnv = (tenv, ctx)
+                           , futharkiBreaking = Just breaking
+                           }
+          liftIO $ putStrLn $ prettyBreaking breaking
+    (Just _, _) ->
+      liftIO $ putStrLn $ "Invalid stack index: " ++ T.unpack which
+    (Nothing, _) ->
+      liftIO $ putStrLn "Not stopped at a breakpoint."
+
 pwdCommand :: Command
 pwdCommand _ = liftIO $ putStrLn =<< getCurrentDirectory
 
@@ -421,6 +440,11 @@ Show the type of a module expression, which must fit on a single line.
 |])),
             ("unbreak", (unbreakCommand, [text|
 Skip all future occurences of the current breakpoint.
+|])),
+            ("frame", (frameCommand, [text|
+While at a break point, jump to another stack frame, whose variables can then
+be inspected.  Resuming from the breakpoint will jump back to the innermost
+stack frame.
 |])),
             ("pwd", (pwdCommand, [text|
 Print the current working directory.
