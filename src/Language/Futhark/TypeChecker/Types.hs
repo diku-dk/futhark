@@ -120,7 +120,8 @@ checkTypeExp (TEVar name loc) = do
   case ps of
     [] -> return (TEVar name' loc, t, l)
     _  -> throwError $ TypeError loc $
-          "Type constructor " ++ quote (pretty name) ++ " used without any arguments."
+          "Type constructor " ++ quote (unwords (pretty name : map pretty ps)) ++
+          " used without any arguments."
 checkTypeExp (TETuple ts loc) = do
   (ts', ts_s, ls) <- unzip3 <$> mapM checkTypeExp ts
   return (TETuple ts' loc, tupleRecord ts_s, foldl' max Unlifted ls)
