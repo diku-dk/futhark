@@ -910,9 +910,9 @@ compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc,locs)) = do
       onPart (Imp.ErrorInt32 x) = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   stm $ Assert e' (BinOp "%"
-                   (String $ "Error at\n" ++ stacktrace ++ "\n: " ++ concat formatstrs)
+                   (String $ "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n" ++ stacktrace)
                    (Tuple formatargs))
-  where stacktrace = prettyStacktrace $ reverse $ map locStr $ loc:locs
+  where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
 compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileArg args

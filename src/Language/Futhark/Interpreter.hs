@@ -9,6 +9,7 @@ module Language.Futhark.Interpreter
   , interpretImport
   , interpretFunction
   , ExtOp(..)
+  , StackFrame(..)
   , typeEnv
   , Value (ValuePrim, ValueArray, ValueRecord)
   , fromTuple
@@ -40,18 +41,21 @@ import Futhark.Util (chunk, splitFromEnd, maybeHead)
 
 import Prelude hiding (mod, break)
 
-data ExtOp a = ExtOpTrace SrcLoc String a
-             | ExtOpBreak [SrcLoc] Ctx T.Env a
+data StackFrame = StackFrame { stackFrameLoc :: Loc
+                             , stackFrameCtx :: Ctx
+                             }
+
+instance Located StackFrame where
+  locOf = stackFrameLoc
+
+data ExtOp a = ExtOpTrace Loc String a
+             | ExtOpBreak (NE.NonEmpty StackFrame) a
              | ExtOpError InterpreterError
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
-  fmap f (ExtOpBreak w ctx env x) = ExtOpBreak w ctx env $ f x
+  fmap f (ExtOpBreak stack x) = ExtOpBreak stack $ f x
   fmap _ (ExtOpError err) = ExtOpError err
-
-data StackFrame = StackFrame { stackFrameSrcLoc :: SrcLoc
-                             , stackFrameEnv :: Env
-                             }
 
 type Stack = [StackFrame]
 
@@ -70,12 +74,15 @@ runEvalM imports (EvalM m) = runReaderT m (mempty, imports)
 
 stacking :: SrcLoc -> Env -> EvalM a -> EvalM a
 stacking loc env = local $ \(ss, imports) ->
-  if isNoLoc loc then (ss, imports) else (StackFrame loc env:ss, imports)
+  if isNoLoc loc
+  then (ss, imports)
+  else let s = StackFrame (locOf loc) (Ctx env imports)
+       in (s:ss, imports)
   where isNoLoc :: SrcLoc -> Bool
         isNoLoc = (==NoLoc) . locOf
 
-stacktrace :: EvalM [SrcLoc]
-stacktrace = asks $ map stackFrameSrcLoc . reverse . fst
+stacktrace :: EvalM [Loc]
+stacktrace = asks $ map stackFrameLoc . fst
 
 lookupImport :: FilePath -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
@@ -236,15 +243,15 @@ instance Show InterpreterError where
 
 bad :: SrcLoc -> Env -> String -> EvalM a
 bad loc env s = stacking loc env $ do
-  ss <- map locStr <$> stacktrace
-  liftF $ ExtOpError $ InterpreterError $ "Error at\n" ++ prettyStacktrace ss ++ s
+  ss <- map (locStr . srclocOf) <$> stacktrace
+  liftF $ ExtOpError $ InterpreterError $ "Error at\n" ++ prettyStacktrace 0 ss ++ s
 
 trace :: Value -> EvalM ()
 trace v = do
-  -- We take the second-to-last element of the stack, because any
+  -- We take the second-to-top element of the stack, because any
   -- actual call to 'implicits.trace' is going to be in the trace
   -- function in the prelude, which is not interesting.
-  top <- fromMaybe noLoc . maybeHead . drop 1 . reverse <$> stacktrace
+  top <- fromMaybe noLoc . maybeHead . drop 1 <$> stacktrace
   liftF $ ExtOpTrace top (pretty v) ()
 
 typeEnv :: Env -> T.Env
@@ -265,14 +272,9 @@ break = do
   -- wrapper function (intrinsics are never called directly).
   -- This is why we go a step up the stack.
   stack <- asks $ drop 1 . fst
-  case stack of
-    [] -> return ()
-    top:_ -> do
-      let env = stackFrameEnv top
-      imports <- asks snd
-      liftF $ ExtOpBreak
-        (map stackFrameSrcLoc $ reverse stack)
-        (Ctx env imports) (typeEnv env) ()
+  case NE.nonEmpty stack of
+    Nothing -> return ()
+    Just stack' -> liftF $ ExtOpBreak stack' ()
 
 fromArray :: Value -> [Value]
 fromArray (ValueArray as) = elems as

@@ -137,4 +137,4 @@ runInterpreter' m = runF m (return . Right) intOp
         intOp (I.ExtOpTrace w v c) = do
           liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
           c
-        intOp (I.ExtOpBreak _ _ _ c) = c
+        intOp (I.ExtOpBreak _ c) = c

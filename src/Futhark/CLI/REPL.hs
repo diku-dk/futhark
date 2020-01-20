@@ -16,6 +16,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
@@ -34,7 +35,7 @@ import Futhark.Version
 import Futhark.Compiler
 import Futhark.Pipeline
 import Futhark.Util.Options
-import Futhark.Util (toPOSIX, maybeHead)
+import Futhark.Util (toPOSIX)
 
 import qualified Language.Futhark.Interpreter as I
 
@@ -111,12 +112,20 @@ options = [ Option "e" ["entry-point"]
             "The entry point to execute."
           ]
 
+-- | Representation of breaking at a breakpoint, to allow for
+-- navigating through the stack frames and such.
+data Breaking = Breaking { breakingStack :: NE.NonEmpty I.StackFrame
+                         , breakingAt :: Int
+                           -- ^ Index of the current breakpoint (with
+                           -- 0 being the outermost).
+                         }
+
 data FutharkiState =
   FutharkiState { futharkiImports :: Imports
                 , futharkiNameSource :: VNameSource
                 , futharkiCount :: Int
                 , futharkiEnv :: (T.Env, I.Ctx)
-                , futharkiBreaking :: Maybe Loc
+                , futharkiBreaking :: Maybe Breaking
                   -- ^ Are we currently stopped at a breakpoint?
                 , futharkiSkipBreaks :: [Loc]
                 -- ^ Skip breakpoints at these locations.
@@ -272,24 +281,32 @@ onExp e = do
     where showErr :: Show a => Either a b -> Either String b
           showErr = either (Left . show) Right
 
+prettyBreaking :: Breaking -> String
+prettyBreaking b =
+  prettyStacktrace (breakingAt b) $ map locStr $ NE.toList $ breakingStack b
+
 runInterpreter :: F I.ExtOp a -> FutharkiM (Either I.InterpreterError a)
 runInterpreter m = runF m (return . Right) intOp
   where
     intOp (I.ExtOpError err) =
       return $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
+      liftIO $ putStrLn $ "Trace at " ++ locStr (srclocOf w) ++ ": " ++ v
       c
-    intOp (I.ExtOpBreak w ctx tenv c) = do
+    intOp (I.ExtOpBreak callstack c) = do
       s <- get
 
-      -- Are we supposed to skip this breakpoint?
-      let loc = maybe noLoc locOf $ maybeHead w
+      let top = NE.head callstack
+          ctx = I.stackFrameCtx top
+          tenv = I.typeEnv $ I.ctxEnv ctx
+          breaking = Breaking callstack 0
 
-      -- We do not want recursive breakpoints.  It could work fine
-      -- technically, but is probably too confusing to be useful.
-      unless (isJust (futharkiBreaking s) || loc `elem` futharkiSkipBreaks s) $ do
-        liftIO $ putStrLn $ "Breaking at " ++ intercalate " -> " (map locStr w) ++ "."
+      -- Are we supposed to skip this breakpoint?  Also, We do not
+      -- want recursive breakpoints.  It could work fine technically,
+      -- but is probably too confusing to be useful.
+      unless (isJust (futharkiBreaking s) || locOf top `elem` futharkiSkipBreaks s) $ do
+        liftIO $ putStrLn $ "Breakpoint at " ++ locStr top
+        liftIO $ putStrLn $ prettyBreaking breaking
         liftIO $ putStrLn "<Enter> to continue."
 
         -- Note the cleverness to preserve the Haskeline session (for
@@ -299,7 +316,8 @@ runInterpreter m = runF m (return . Right) intOp
           runStateT (runExceptT $ runFutharkiM $ forever readEvalPrint)
           s { futharkiEnv = (tenv, ctx)
             , futharkiCount = futharkiCount s + 1
-            , futharkiBreaking = Just loc }
+            , futharkiBreaking = Just breaking
+            }
 
         case stop of
           Left (Load file) -> throwError $ Load file
@@ -315,7 +333,7 @@ runInterpreter' m = runF m (return . Right) intOp
         intOp (I.ExtOpTrace w v c) = do
           liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
           c
-        intOp (I.ExtOpBreak _ _ _ c) = c
+        intOp (I.ExtOpBreak _ c) = c
 
 type Command = T.Text -> FutharkiM ()
 
@@ -354,11 +372,11 @@ mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
 
 unbreakCommand :: Command
 unbreakCommand _ = do
-  breaking <- gets futharkiBreaking
-  case breaking of
+  top <- fmap (NE.head . breakingStack) <$> gets futharkiBreaking
+  case top of
     Nothing -> liftIO $ putStrLn "Not currently stopped at a breakpoint."
-    Just loc -> do modify $ \s -> s { futharkiSkipBreaks = loc : futharkiSkipBreaks s }
-                   throwError Stop
+    Just top' -> do modify $ \s -> s { futharkiSkipBreaks = locOf top' : futharkiSkipBreaks s }
+                    throwError Stop
 
 pwdCommand :: Command
 pwdCommand _ = liftIO $ putStrLn =<< getCurrentDirectory

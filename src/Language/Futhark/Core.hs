@@ -112,23 +112,31 @@ nameFromText = Name
 --
 -- This function assumes that both start and end position is in the
 -- same file (it is not clear what the alternative would even mean).
-locStr :: SrcLoc -> String
-locStr (SrcLoc NoLoc) = "unknown location"
-locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _)))
-  -- Do not show line2 if it is identical to line1.
-  | line1 == line2 =
-      first_part ++ "-" ++ show col2
-  | otherwise =
-      first_part ++ "-" ++ show line2 ++ ":" ++ show col2
-  where first_part = file ++ ":" ++ show line1 ++ ":" ++ show col1
+locStr :: Located a => a -> String
+locStr a =
+  case locOf a of
+    NoLoc -> "unknown location"
+    Loc (Pos file line1 col1 _) (Pos _ line2 col2 _)
+    -- Do not show line2 if it is identical to line1.
+      | line1 == line2 ->
+          first_part ++ "-" ++ show col2
+      | otherwise ->
+          first_part ++ "-" ++ show line2 ++ ":" ++ show col2
+      where first_part = file ++ ":" ++ show line1 ++ ":" ++ show col1
 
--- | Given a list of strings representing entries in the stack trace,
--- produce a final newline-terminated string for showing to the user.
--- This string should also be preceded by a newline.
-prettyStacktrace :: [String] -> String
-prettyStacktrace = unlines . reverse . stacktrace' . reverse
-  where stacktrace' (x:xs) = (" `-> " ++ x) : map (" |-> "++) xs
-        stacktrace' [] = []
+-- | Given a list of strings representing entries in the stack trace
+-- and the index of the frame to highlight, produce a final
+-- newline-terminated string for showing to the user.  This string
+-- should also be preceded by a newline.  The most recent stack frame
+-- must come first in the list.
+prettyStacktrace :: Int -> [String] -> String
+prettyStacktrace cur = unlines . zipWith f [(0::Int)..]
+  where -- Formatting hack: assume no stack is deeper than 100
+        -- elements.  Since Futhark does not support recursion, going
+        -- beyond that would require a truly perverse program.
+        f i x = (if cur == i then "-> " else "   ") ++
+                '#' : show i ++
+                (if i > 9 then "" else " ") ++ " " ++ x
 
 -- | A name tagged with some integer.  Only the integer is used in
 -- comparisons, no matter the type of @vn@.
