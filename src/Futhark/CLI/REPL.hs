@@ -405,9 +405,8 @@ Load a Futhark source file.  Usage:
 
   > :load foo.fut
 
-If the loading succeeds, any subsequentialy entered expressions entered
-subsequently will have access to the definition (such as function definitions)
-in the source file.
+If the loading succeeds, any expressions entered subsequently can use the
+declarations in the source file.
 
 Only one source file can be loaded at a time.  Using the :load command a
 second time will replace the previously loaded file.  It will also replace
@@ -433,5 +432,5 @@ Change the current working directory.
 Print a list of commands and a description of their behaviour.
 |])),
             ("quit", (quitCommand, [text|
-Quit futharki.
+Exit REPL.
 |]))]
