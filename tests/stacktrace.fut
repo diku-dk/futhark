@@ -2,7 +2,7 @@
 -- non-recursive functions.
 -- ==
 -- input { [1] 1 }
--- error: stacktrace.fut:13.*stacktrace.fut:11.*stacktrace.fut:9.*stacktrace.fut:7
+-- error: stacktrace.fut:7.*stacktrace.fut:9.*stacktrace.fut:11.*stacktrace.fut:13
 
 let f (xs: []i32) (i: i32) = xs[i]
 

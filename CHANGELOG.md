@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     completely known type up to `f`.  This is a restriction that will
     hopefully be lifted in the future.
 
+  * The backtrace format has changed to be innermost-first, like
+    pretty much all other languages.
+
   * Value specs must now explicitly quantify all sizes of function
     parameters.  Instead of
 

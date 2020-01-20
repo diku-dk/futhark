@@ -1754,13 +1754,13 @@ compileCode (Assert e (ErrorMsg parts) (loc, locs)) = do
   let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
       onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
-  let formatstr = "Error at\n%s\n" <> concat formatstrs <> "\n"
+  let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
   stm [C.cstm|if (!$exp:e') {
-                   ctx->error = msgprintf($string:formatstr, $string:stacktrace, $args:formatargs);
+                   ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
                    $items:free_all_mem
                    return 1;
                  }|]
-  where stacktrace = prettyStacktrace $ reverse $ map locStr $ loc:locs
+  where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
