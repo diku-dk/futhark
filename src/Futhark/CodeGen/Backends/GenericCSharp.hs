@@ -85,7 +85,6 @@ import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
 import Futhark.Util (zEncodeString)
 import Futhark.Representation.AST.Attributes (builtInFunctions)
-import Text.Printf (printf)
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
