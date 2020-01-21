@@ -23,6 +23,10 @@ pipeline is used, and GCC is invoked with ``-O3``, ``-lm``, and
 ``-std=c99``. The resulting program will otherwise behave exactly as
 one compiled with ``futhark c``.
 
+``futhark opencl`` uses ``-lOpenCL`` to link (``-framework OpenCL`` on
+macOS).  If using ``--library``, you will need to do the same when
+linking the final binary.
+
 OPTIONS
 =======
 
