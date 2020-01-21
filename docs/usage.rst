@@ -254,8 +254,8 @@ While compiling a Futhark program to an executable is useful for
 testing, it is not suitable for production use.  Instead, a Futhark
 program should be compiled into a reusable library in some target
 language, enabling integration into a larger program.  Five of the
-Futhark compilers support this: ``futhark c``, ``futhark opencl``, ``futhark cuda``,
-``futhark py``, and ``futhark pyopencl``.
+Futhark compilers support this: ``futhark c``, ``futhark opencl``,
+``futhark cuda``, ``futhark py``, and ``futhark pyopencl``.
 
 General Concerns
 ^^^^^^^^^^^^^^^^
@@ -292,18 +292,32 @@ Or::
 
 This produces two files in the current directory: ``futlib.c`` and
 ``futlib.h``.  If we wish (and are on a Unix system), we can then
-compile ``futlib.c`` to a shared library like this::
+compile ``futlib.c`` to an object file like this::
 
-  $ gcc futlib.c -o libfutlib.so -fPIC -shared
+  $ gcc futlib.c -c
 
-However, details of how to link the generated code with other C code
-is highly system-dependent, and outside the scope of this manual (for
-example, on Windows you would use ``.dll`` instead of ``.so``).  In
-most cases, it is easier to simply add the generated ``.c`` file to
-the C compiler command line used for compiling our whole program (here
+This produces a file ``futlib.o`` that can then be linked with the
+main application.  Details of how to link the generated code with
+other C code is highly system-dependent, and outside the scope of this
+manual.  On Unix, we can simply add ``futlib.o`` to the final compiler
+or linker command line::
+
+  $ gcc main.c -o main futlib.o
+
+Depending on the Futhark backend you are using, you may need to add
+some linker flags.  For example, ``futhark opencl`` requires
+``-lOpenCL`` (``-framework OpenCL`` on macOS).  See the manual page
+for each compiler for details.
+
+It is also possible to simply add the generated ``.c`` file to the C
+compiler command line used for compiling our whole program (here
 ``main.c``)::
 
-  $ gcc futlib.c main.c -o main
+  $ gcc main.c -o main futlib.c
+
+The downside of this approach is that the generated ``.c`` file may
+contain code that causes the C compiler to warn (for example, unused
+support code that is not needed by the Futhark program).
 
 The generated header file (here, ``futlib.h``) specifies the API, and
 is intended to be human-readable.  The basic usage revolves around
@@ -353,10 +367,7 @@ C with OpenCL
 When generating C code with ``futhark opencl``, you will need to link
 against the OpenCL library when linking the final binary::
 
-  $ gcc futlib.c -o libfutlib.so -fPIC -shared -lOpenCL
-
-On some platforms (e.g. Windows), it may also be necessary to pass
-``-lOpenCL`` when generating the DLL.
+  $ gcc main.c -o main futlib.o -lOpenCL
 
 When using the OpenCL backend, extra API functions are provided for
 directly accessing or providing the OpenCL objects used by Futhark.
@@ -395,6 +406,8 @@ construct a Futhark array from a ``cl_mem``::
 This function *does* copy the provided memory into fresh internally
 allocated memory.  The array is assumed to be stored in row-major form
 ``offset`` bytes into the memory region.
+
+See also :ref:`futhark-opencl(1)`.
 
 Generating Python
 ^^^^^^^^^^^^^^^^^

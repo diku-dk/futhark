@@ -23,8 +23,9 @@ used, and GCC is invoked with ``-O3``, ``-lm``, and ``-std=c99``. The
 resulting program will otherwise behave exactly as one compiled with
 ``futhark c``.
 
-The generated programs use the NVRTC API for run-time compilation,
-which must consequently be available.
+``futhark cuda`` uses ``-lcuda -lnvrtc`` to link.  If using
+``--library``, you will need to do the same when linking the final
+binary.
 
 OPTIONS
 =======
