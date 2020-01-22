@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
         val sum [n]: [n]t -> t
 
+  * `futhark test` now once again numbers un-named data sets from 0
+    rather than from 1.  This fits a new general principle of always
+    numbering from 0 in Futhark.
+
 ### Fixed
 
   * Work around (probable) AMD OpenCL compiler bug for
