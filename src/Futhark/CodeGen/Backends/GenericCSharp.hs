@@ -1325,7 +1325,8 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count sr
   let dest' = Var (compileName dest)
   let src' = Var (compileName src)
   size' <- compileExp size
-  stm $ Exp $ simpleCall "Buffer.BlockCopy" [src', srcoffset', dest', destoffset', size']
+  stm $ Exp $ simpleCall "Buffer.BlockCopy" [src', srcoffset', dest', destoffset',
+                                             Cast (Primitive $ CSInt Int32T) size']
 
 compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
   copy <- asks envCopy
