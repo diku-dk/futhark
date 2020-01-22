@@ -175,8 +175,8 @@ Try to avoid these for now.
 
 Records are mappings from field names to values, with the field names
 known statically.  A tuple behaves in all respects like a record with
-numeric field names, and vice versa.  It is an error for a record type
-to name the same field twice.
+numeric field names starting from zero, and vice versa.  It is an
+error for a record type to name the same field twice.
 
 .. productionlist::
    type_application: `type` `type_arg` | "*" `type`
@@ -595,7 +595,7 @@ Evaluates to the result of ``e``.
 .....................
 
 Evaluates to a tuple containing ``N`` values.  Equivalent to the
-record literal ``{1=e1, 2=e2, ..., N=eN}``.
+record literal ``{0=e1, 1=e2, ..., N-1=eN}``.
 
 ``{f1, f2, ..., fN}``
 .....................

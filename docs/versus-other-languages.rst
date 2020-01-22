@@ -116,8 +116,8 @@ are possible via the module system; see :ref:`module-system`.
 
 If a variable ``foo`` is a record of type ``{a: i32, b: bool}``, then
 we access field ``a`` with dot notation: ``foo.a``.  Tuples are a
-special case of records, where all the fields have a 1-indexed numeric
-label.  For example, ``(i32, bool)`` is the same as ``{1: i32, 2:
+special case of records, where all the fields have a 0-indexed numeric
+label.  For example, ``(i32, bool)`` is the same as ``{0: i32, 1:
 bool}``, and can be indexed as ``foo.1``.
 
 Sum types are defined as constructors separated by a vertical bar

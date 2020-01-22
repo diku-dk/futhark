@@ -13,7 +13,7 @@ module M0 =
 module M1 =
   {
     type foo = f32
-    type bar = M0.bar -- type is defined from l.6
+    type bar = M0.bar -- type is defined from l.5
 
     module M0 =
       {

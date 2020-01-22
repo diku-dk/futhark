@@ -18,7 +18,7 @@ let sgmPrefSum [n] (flags: [n]i32) (data: [n]i32) : [n]i32 =
                     then (flag, y)
                     else (flag, x + y))
             (0, 0)
-            (zip flags data))).2
+            (zip flags data))).1
 
 let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
     let all_data = scatter (replicate q 0) all_perm all_data0

@@ -316,9 +316,9 @@ areTupleFields fs =
 tupleFields :: [a] -> M.Map Name a
 tupleFields as = M.fromList $ zip tupleFieldNames as
 
--- | Increasing field names for a tuple (starts at 1).
+-- | Increasing field names for a tuple (starts at 0).
 tupleFieldNames :: [Name]
-tupleFieldNames = map (nameFromString . show) [(1::Int)..]
+tupleFieldNames = map (nameFromString . show) [(0::Int)..]
 
 -- | Sort fields by their name; taking care to sort numeric fields by
 -- their numeric value.  This ensures that tuples and tuple-like
