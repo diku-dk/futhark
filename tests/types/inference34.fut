@@ -4,5 +4,5 @@
 -- input { 2 3 } output { 2 }
 
 let main (x: i32) (y: i32) =
-  let f v = v.1
+  let f v = v.0
   in f (x,y)

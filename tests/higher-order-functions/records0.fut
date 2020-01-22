@@ -13,4 +13,4 @@ let main (x : i32) (y : i32) (z : i32) =
           , f1 = add n
           , g  = \(z:i32) -> z+z+n
           }
-  in t.1 z + t.2 + r.f r.a x + r.f1 y + r.g z
+  in t.0 z + t.1 + r.f r.a x + r.f1 y + r.g z

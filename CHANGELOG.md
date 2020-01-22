@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * Tuples are now 0-indexed (#821, which also includes a conversion
+    script).
+
   * Invalid ranges like `1..<0` now produce a run-time error instead
     of an empty array.
 
