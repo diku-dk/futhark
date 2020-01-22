@@ -1273,7 +1273,7 @@ compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc,locs)) = do
   e' <- compileExp e
   let onPart (i, Imp.ErrorString s) = return (printFormatArg i, String s)
       onPart (i, Imp.ErrorInt32 x) = (printFormatArg i,) <$> compileExp x
-  (formatstrs, formatargs) <- unzip <$> mapM onPart (zip ([1..] :: [Integer]) parts)
+  (formatstrs, formatargs) <- unzip <$> mapM onPart (zip ([0..] :: [Integer]) parts)
   stm $ Assert e' $ String ("Error: " <> concat formatstrs <>
                             "\n\nBacktrace:\n" ++ "{" ++ show (length formatargs) ++ "}") :
     (formatargs ++ [String stacktrace])
