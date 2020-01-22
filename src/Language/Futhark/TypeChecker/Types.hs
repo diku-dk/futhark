@@ -8,7 +8,6 @@ module Language.Futhark.TypeChecker.Types
   , subuniqueOf
 
   , checkForDuplicateNames
-  , checkForDuplicateNamesInType
   , checkTypeParams
   , typeParamToArg
 
@@ -105,12 +104,9 @@ checkTypeDecl :: MonadTypeChecker m =>
 checkTypeDecl tps (TypeDecl t NoInfo) = do
   checkForDuplicateNamesInType t
   (t', st, l) <- checkTypeExp t
-  checkShapeParamUses typeExpUses tps $ unfoldTypeExp t'
+  let (pts, ret) = unfoldFunType st
+  checkShapeParamUses tps $ pts ++ [ret]
   return (TypeDecl t' $ Info st, l)
-
-unfoldTypeExp :: TypeExp VName -> [TypeExp VName]
-unfoldTypeExp (TEArrow _ t1 t2 _) = t1 : unfoldTypeExp t2
-unfoldTypeExp t = [t]
 
 checkTypeExp :: MonadTypeChecker m =>
                 TypeExp Name
@@ -288,29 +284,35 @@ checkForDuplicateNamesInType = check mempty
 
 -- | Ensure that every shape parameter is used in positive position at
 -- least once before being used in negative position.
-checkShapeParamUses :: (MonadTypeChecker m, Located a) =>
-                       (a -> ([VName], [VName])) -> [TypeParam] -> [a]
-                    -> m ()
-checkShapeParamUses getUses tps ps = do
-  pos_uses <- foldM checkShapePositions [] ps
-  mapM_ (checkUsed pos_uses) tps
-  where tp_names = map typeParamName tps
+checkShapeParamUses :: MonadTypeChecker m =>
+                       [TypeParam] -> [StructType] -> m ()
+checkShapeParamUses tps ts = do
+  uses <- foldM onType mempty ts
+  mapM_ (checkIfUsed uses) tps
+  where onDim pos (NamedDim d) =
+          modify $ M.insertWith min (qualLeaf d) pos
+        onDim _ _ = return ()
 
-        checkShapePositions pos_uses p = do
-          let (pos, neg) = getUses p
-              pos_uses' = pos <> pos_uses
-          forM_ neg $ \pv ->
-            unless ((pv `notElem` tp_names) || (pv `elem` pos_uses')) $
-            throwError $ TypeError (srclocOf p) $ "Shape parameter " ++
-            quote (prettyName pv) ++ " must first be given in " ++
-            "a positive position (non-functional parameter)."
-          return pos_uses'
-        checkUsed uses (TypeParamDim pv loc)
-          | pv `elem` uses = return ()
+        onType uses t = do
+          let uses' = execState (traverseDims onDim t) uses
+          mapM_ (checkUsage uses') tps
+          return uses'
+
+        checkUsage uses (TypeParamDim pv loc)
+          | Just pos <- M.lookup pv uses,
+            pos `elem` [PosParam, PosReturn] =
+              throwError $ TypeError loc $
+                "Shape parameter " ++ quote (prettyName pv) ++
+                " must first be used in" ++
+                " a positive position (non-functional parameter)."
+        checkUsage _ _ = return ()
+
+        checkIfUsed uses (TypeParamDim pv loc)
+          | M.member pv uses = return ()
           | otherwise =
               throwError $ TypeError loc $ "Size parameter " ++
               quote (prettyName pv) ++ " unused."
-        checkUsed _ _ = return ()
+        checkIfUsed _ _ = return ()
 
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]

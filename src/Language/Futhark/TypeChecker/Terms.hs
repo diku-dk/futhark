@@ -731,7 +731,7 @@ bindingPatternGroup tps orig_ps m = do
           -- dimensions.
           mapM_ observe $ mapMaybe typeParamIdent tps'
           let ps'' = reverse ps'
-          checkShapeParamUses patternUses tps' ps''
+          checkShapeParamUses tps' $ map patternStructType ps''
 
           m tps' ps''
 
@@ -747,19 +747,6 @@ bindingPattern p t m = do
     mapM_ observe $ patternDims p'
 
     m p'
-
--- | Return the shapes used in a given pattern in postive and negative
--- position, respectively.
-patternUses :: Pattern -> ([VName], [VName])
-patternUses Id{} = mempty
-patternUses Wildcard{} = mempty
-patternUses PatternLit{} = mempty
-patternUses (PatternParens p _) = patternUses p
-patternUses (TuplePattern ps _) = foldMap patternUses ps
-patternUses (RecordPattern fs _) = foldMap (patternUses . snd) fs
-patternUses (PatternAscription p (TypeDecl declte _) _) =
-  patternUses p <> typeExpUses declte
-patternUses (PatternConstr _ _ ps _) = foldMap patternUses ps
 
 patternDims :: Pattern -> [Ident]
 patternDims (PatternParens p _) = patternDims p
