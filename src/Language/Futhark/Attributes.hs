@@ -186,10 +186,10 @@ data DimPos
 -- that are parameters in a function type, but also including the type
 -- immediately passed to the function.
 traverseDims :: forall f fdim tdim als.
-                     Applicative f =>
-                     (DimPos -> fdim -> f tdim)
-                  -> TypeBase fdim als
-                  -> f (TypeBase tdim als)
+                Applicative f =>
+                (DimPos -> fdim -> f tdim)
+             -> TypeBase fdim als
+             -> f (TypeBase tdim als)
 traverseDims f = go PosImmediate
   where go :: forall als'. DimPos -> TypeBase fdim als' -> f (TypeBase tdim als')
         go b t@Array{} = bitraverse (f b) pure t

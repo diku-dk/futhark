@@ -444,14 +444,9 @@ checkForDuplicateSpecs =
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
-checkTypeBind (TypeBind name l tps (TypeDecl t NoInfo) doc loc) =
+checkTypeBind (TypeBind name l tps td doc loc) =
   checkTypeParams tps $ \tps' -> do
-    (td', l') <- bindingTypeParams tps' $ do
-      checkForDuplicateNamesInType t
-      (t', st, l') <- checkTypeExp t
-
-      checkShapeParamUses typeExpUses tps' [t']
-      return (TypeDecl t' $ Info st, l')
+    (td', l') <- bindingTypeParams tps' $ checkTypeDecl tps' td
 
     case (l, l') of
       (Unlifted, _)
