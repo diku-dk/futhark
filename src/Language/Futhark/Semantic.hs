@@ -157,6 +157,7 @@ instance Pretty Env where
             p l <+> pprName name <> mconcat (map ((text " "<>) . ppr) tps) <>
             text " =" <+> ppr tp
             where p Lifted = text "type^"
+                  p SizeLifted = text "type~"
                   p Unlifted = text "type"
           renderValBind (name, BoundV tps t) =
             text "val" <+> pprName name <> mconcat (map ((text " "<>) . ppr) tps) <>

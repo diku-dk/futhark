@@ -832,10 +832,17 @@ instance Located (TypeBindBase f vn) where
   locOf = locOf . typeBindLocation
 
 -- | The liftedness of a type parameter.  By the @Ord@ instance,
--- @Unlifted@ is less than @Lifted@.
-data Liftedness = Unlifted -- ^ May only be instantiated with a zero-order type.
-                | Lifted -- ^ May be instantiated to a functional type.
-                deriving (Eq, Ord, Show)
+-- @Unlifted < SizeLifted < Lifted@.
+data Liftedness
+  = Unlifted
+    -- ^ May only be instantiated with a zero-order type of (possibly
+    -- symbolically) known size.
+  | SizeLifted
+    -- ^ May only be instantiated with a zero-order type, but the size
+    -- can be varying.
+  | Lifted
+    -- ^ May be instantiated with a functional type.
+  deriving (Eq, Ord, Show)
 
 data TypeParamBase vn = TypeParamDim vn SrcLoc
                         -- ^ A type parameter that must be a size.

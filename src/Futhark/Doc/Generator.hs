@@ -475,7 +475,8 @@ synopsisSpec spec = case spec of
   TypeSpec l name ps _ _ ->
     return $ fullRow $ keyword l' <> vnameSynopsisDef name <> mconcat (map ((" "<>) . typeParamHtml) ps)
     where l' = case l of Unlifted -> "type "
-                         Lifted   -> "type^ "
+                         SizeLifted -> "type~ "
+                         Lifted -> "type^ "
   ValSpec name tparams rettype _ _ -> do
     let tparams' = map typeParamHtml tparams
     rettype' <- noLink (map typeParamName tparams) $
@@ -578,14 +579,12 @@ typeArgExpHtml (TypeArgExpType d) = typeExpHtml d
 
 typeParamHtml :: TypeParam -> Html
 typeParamHtml (TypeParamDim name _) = brackets $ vnameHtml name
-typeParamHtml (TypeParamType Unlifted name _) = "'" <> vnameHtml name
-typeParamHtml (TypeParamType Lifted name _) = "'^" <> vnameHtml name
+typeParamHtml (TypeParamType l name _) = fromString (pretty l) <> vnameHtml name
 
 typeAbbrevHtml :: Liftedness -> Html -> [TypeParam] -> Html
 typeAbbrevHtml l name params =
   what <> name <> mconcat (map ((" "<>) . typeParamHtml) params)
-  where what = case l of Lifted -> keyword "type " <> "^"
-                         Unlifted -> keyword "type "
+  where what = keyword $ "type" ++ pretty l ++ " "
 
 docHtml :: Maybe DocComment -> DocM Html
 docHtml (Just (DocComment doc loc)) =

@@ -368,16 +368,19 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ModExpBase f vn) where
     where maybe_sig' = case maybe_sig of Nothing       -> mempty
                                          Just (sig, _) -> colon <+> ppr sig
 
+instance Pretty Liftedness where
+  ppr Unlifted = text ""
+  ppr SizeLifted = text "~"
+  ppr Lifted = text "^"
+
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
   ppr (TypeBind name l params usertype _ _) =
-    text typestr <+> pprName name <+> spread (map ppr params) <+> equals <+> ppr usertype
-    where typestr = case l of Lifted -> "type^"
-                              Unlifted -> "type"
+    text "type" <> ppr l <+> pprName name <+>
+    spread (map ppr params) <+> equals <+> ppr usertype
 
 instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ pprName name
-  ppr (TypeParamType Unlifted name _) = text "'" <> pprName name
-  ppr (TypeParamType Lifted name _) = text "'^" <> pprName name
+  ppr (TypeParamType l name _) = text "'" <> ppr l <> pprName name
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
   ppr (ValBind entry name retdecl rettype tparams args body _ _) =
@@ -392,8 +395,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
-  ppr (TypeSpec Unlifted name ps _ _) = text "type" <+> pprName name <+> spread (map ppr ps)
-  ppr (TypeSpec Lifted name ps _ _) = text "type^" <+> pprName name <+> spread (map ppr ps)
+  ppr (TypeSpec l name ps _ _) =
+    text "type" <> ppr l <+> pprName name <+> spread (map ppr ps)
   ppr (ValSpec name tparams vtype _ _) =
     text "val" <+> pprName name <+> spread (map ppr tparams) <> colon <+> ppr vtype
   ppr (ModSpec name sig _ _) =

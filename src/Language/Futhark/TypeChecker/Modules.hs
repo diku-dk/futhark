@@ -221,20 +221,23 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
   fmap M.fromList $ forM (M.toList sig_abs) $ \(name, name_l) ->
     case findTypeDef (fmap baseName name) mod of
       Just (name', TypeAbbr mod_l ps t)
-        | Unlifted <- name_l,
-          not (orderZero t) || mod_l == Lifted ->
-            mismatchedLiftedness (map qualLeaf $ M.keys mod_abs) (qualLeaf name) (ps, t)
+        | mod_l > name_l ->
+            mismatchedLiftedness name_l (map qualLeaf $ M.keys mod_abs)
+            (qualLeaf name) (mod_l, ps, t)
         | Just (abs_name, _) <- M.lookup (fmap baseName name) abs_mapping ->
             return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
         | otherwise ->
             return (qualLeaf name, (name', TypeAbbr name_l ps t))
       _ ->
         missingType loc $ fmap baseName name
-  where mismatchedLiftedness abs name mod_t =
+  where mismatchedLiftedness name_l abs name mod_t =
           Left $ TypeError loc $
           unlines ["Module defines",
                    sindent $ ppTypeAbbr abs name mod_t,
-                   "but module type requires this type to be non-functional."]
+                   "but module type requires " ++ what ++ "."]
+          where what = case name_l of Unlifted -> "a non-lifted type"
+                                      SizeLifted -> "a size-lifted type"
+                                      Lifted -> "a lifted type"
 
 resolveMTyNames :: MTy -> MTy
                 -> M.Map VName (QualName VName)
@@ -288,8 +291,8 @@ missingMod loc name =
 mismatchedType :: SrcLoc
                -> [VName]
                -> VName
-               -> ([TypeParam], StructType)
-               -> ([TypeParam], StructType)
+               -> (Liftedness, [TypeParam], StructType)
+               -> (Liftedness, [TypeParam], StructType)
                -> Either TypeError b
 mismatchedType loc abs name spec_t env_t =
   Left $ TypeError loc $
@@ -301,13 +304,15 @@ mismatchedType loc abs name spec_t env_t =
 sindent :: String -> String
 sindent = intercalate "\n" . map ("  "++) . lines
 
-ppTypeAbbr :: [VName] -> VName -> ([TypeParam], StructType) -> String
-ppTypeAbbr abs name (ps, Scalar (TypeVar () _ tn args))
+ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructType) -> String
+ppTypeAbbr abs name (l, ps, Scalar (TypeVar () _ tn args))
   | typeLeaf tn `elem` abs,
     map typeParamToArg ps == args =
-      pretty $ text "type" <+> pprName name <+> spread (map ppr ps)
-ppTypeAbbr _ name (ps, t) =
-  pretty $ text "type" <+> pprName name <+> spread (map ppr ps) <+> equals <+/>
+      pretty $ text "type" <> ppr l <+> pprName name <+>
+      spread (map ppr ps)
+ppTypeAbbr _ name (l, ps, t) =
+  pretty $ text "type" <> ppr l <+> pprName name <+>
+  spread (map ppr ps) <+> equals <+/>
   nest 2 (align (ppr t))
 
 -- Return new renamed/abstracted env, as well as a mapping from
@@ -377,10 +382,10 @@ matchMTys orig_mty orig_mty_sig =
       -- Check that all type abbreviations are correctly defined.
       abbr_name_substs <- fmap M.fromList $
                           forM (filter (isVisible . fst) $ M.toList $
-                                envTypeTable sig) $ \(name, TypeAbbr _ spec_ps spec_t) ->
+                                envTypeTable sig) $ \(name, TypeAbbr spec_l spec_ps spec_t) ->
         case findBinding envTypeTable Type (baseName name) env of
-          Just (name', TypeAbbr _ ps t) ->
-            matchTypeAbbr loc abs_subst_to_type name spec_ps spec_t name' ps t
+          Just (name', TypeAbbr l ps t) ->
+            matchTypeAbbr loc abs_subst_to_type name spec_l spec_ps spec_t name' l ps t
           Nothing -> missingType loc $ baseName name
 
       -- Check that all values are defined correctly, substituting the
@@ -402,10 +407,10 @@ matchMTys orig_mty orig_mty_sig =
       return $ val_substs <> mod_substs <> abbr_name_substs
 
     matchTypeAbbr :: SrcLoc -> TypeSubs
-                  -> VName -> [TypeParam] -> StructType
-                  -> VName -> [TypeParam] -> StructType
+                  -> VName -> Liftedness -> [TypeParam] -> StructType
+                  -> VName -> Liftedness -> [TypeParam] -> StructType
                   -> Either TypeError (VName, VName)
-    matchTypeAbbr loc abs_subst_to_type spec_name spec_ps spec_t name ps t = do
+    matchTypeAbbr loc abs_subst_to_type spec_name spec_l spec_ps spec_t name l ps t = do
       -- We have to create substitutions for the type parameters, too.
       unless (length spec_ps == length ps) $ nomatch spec_t
       param_substs <- mconcat <$> zipWithM matchTypeParam spec_ps ps
@@ -414,7 +419,7 @@ matchMTys orig_mty orig_mty_sig =
         then return (spec_name, name)
         else nomatch spec_t'
         where nomatch spec_t' = mismatchedType loc (M.keys abs_subst_to_type)
-                                spec_name (spec_ps, spec_t') (ps, t)
+                                spec_name (spec_l, spec_ps, spec_t') (l, ps, t)
 
               matchTypeParam (TypeParamDim x _) (TypeParamDim y _) =
                 pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
