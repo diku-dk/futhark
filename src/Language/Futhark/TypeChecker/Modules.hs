@@ -374,6 +374,15 @@ matchMTys orig_mty orig_mty_sig =
       let visible = S.fromList $ map qualLeaf $ M.elems $ envNameMap sig
           isVisible name = name `S.member` visible
 
+      -- Check that all type abbreviations are correctly defined.
+      abbr_name_substs <- fmap M.fromList $
+                          forM (filter (isVisible . fst) $ M.toList $
+                                envTypeTable sig) $ \(name, TypeAbbr _ spec_ps spec_t) ->
+        case findBinding envTypeTable Type (baseName name) env of
+          Just (name', TypeAbbr _ ps t) ->
+            matchTypeAbbr loc abs_subst_to_type name spec_ps spec_t name' ps t
+          Nothing -> missingType loc $ baseName name
+
       -- Check that all values are defined correctly, substituting the
       -- abstract types first.
       val_substs <- fmap M.fromList $ forM (M.toList $ envVtable sig) $ \(name, spec_bv) -> do
@@ -381,15 +390,6 @@ matchMTys orig_mty orig_mty_sig =
         case findBinding envVtable Term (baseName name) env of
           Just (name', bv) -> matchVal loc name spec_bv' name' bv
           _ -> missingVal loc (baseName name)
-
-      -- Check that all type abbreviations are correctly defined.
-      abbr_name_substs <- fmap M.fromList $
-                          forM (filter (isVisible . fst) $ M.toList $
-                                envTypeTable sig) $ \(name, TypeAbbr _ spec_ps spec_t) ->
-        case findBinding envTypeTable Type (baseName name) env of
-          Just (name', TypeAbbr _ ps t) ->
-            matchTypeAbbr loc abs_subst_to_type val_substs name spec_ps spec_t name' ps t
-          Nothing -> missingType loc $ baseName name
 
       -- Check for correct modules.
       mod_substs <- fmap M.unions $ forM (M.toList $ envModTable sig) $ \(name, modspec) ->
@@ -401,21 +401,20 @@ matchMTys orig_mty orig_mty_sig =
 
       return $ val_substs <> mod_substs <> abbr_name_substs
 
-    matchTypeAbbr :: SrcLoc -> TypeSubs -> M.Map VName VName
+    matchTypeAbbr :: SrcLoc -> TypeSubs
                   -> VName -> [TypeParam] -> StructType
                   -> VName -> [TypeParam] -> StructType
                   -> Either TypeError (VName, VName)
-    matchTypeAbbr loc abs_subst_to_type val_substs spec_name spec_ps spec_t name ps t = do
+    matchTypeAbbr loc abs_subst_to_type spec_name spec_ps spec_t name ps t = do
       -- We have to create substitutions for the type parameters, too.
-      unless (length spec_ps == length ps) nomatch
+      unless (length spec_ps == length ps) $ nomatch spec_t
       param_substs <- mconcat <$> zipWithM matchTypeParam spec_ps ps
-      let val_substs' = M.map (DimSub . NamedDim . qualName) val_substs
-          spec_t' = substituteTypes (val_substs'<>param_substs<>abs_subst_to_type) spec_t
+      let spec_t' = substituteTypes (param_substs<>abs_subst_to_type) spec_t
       if spec_t' == t
         then return (spec_name, name)
-        else nomatch
-        where nomatch = mismatchedType loc (M.keys abs_subst_to_type)
-                        spec_name (spec_ps, spec_t) (ps, t)
+        else nomatch spec_t'
+        where nomatch spec_t' = mismatchedType loc (M.keys abs_subst_to_type)
+                                spec_name (spec_ps, spec_t') (ps, t)
 
               matchTypeParam (TypeParamDim x _) (TypeParamDim y _) =
                 pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
@@ -426,7 +425,7 @@ matchMTys orig_mty orig_mty_sig =
                 pure $ M.singleton x $ TypeSub $ TypeAbbr Lifted [] $
                 Scalar $ TypeVar () Nonunique (typeName y) []
               matchTypeParam _ _ =
-                nomatch
+                nomatch spec_t
 
     matchVal :: SrcLoc
              -> VName -> BoundV
