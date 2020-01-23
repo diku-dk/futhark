@@ -77,6 +77,7 @@ tokens :-
   "_"                      { tokenC UNDERSCORE }
   "->"                     { tokenC RIGHT_ARROW }
   ":"                      { tokenC COLON }
+  ":>"                     { tokenC COLON_GT }
   "\"                      { tokenC BACKSLASH }
   "'"                      { tokenC APOSTROPHE }
   "'^"                     { tokenC APOSTROPHE_THEN_HAT }
@@ -319,6 +320,7 @@ data Token = ID Name
            | CHARLIT Char
 
            | COLON
+           | COLON_GT
            | BACKSLASH
            | APOSTROPHE
            | APOSTROPHE_THEN_HAT

@@ -456,6 +456,7 @@ literals and variables, but also more complicated forms.
       : | `exp` `exp`
       : | `constructor` `exp`*
       : | `exp` ":" `type`
+      : | `exp` ":>" `type`
       : | `exp` [ ".." `exp` ] "..." `exp`
       : | `exp` [ ".." `exp` ] "..<" `exp`
       : | `exp` [ ".." `exp` ] "..>" `exp`
@@ -774,6 +775,12 @@ Due to ambiguities, this syntactic form cannot appear as an array
 index expression unless it is first enclosed in parentheses.  However,
 as an array index must always be of type ``i32``, there is never a
 reason to put an explicit type ascription there.
+
+``e :> t``
+..........
+
+Currently means the same as ``e : t``, but will have looser
+restrictions in the future.
 
 ``! x``
 .......

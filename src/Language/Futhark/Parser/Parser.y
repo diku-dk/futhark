@@ -145,6 +145,7 @@ import Language.Futhark.Parser.Lexer
       entry           { L $$ ENTRY }
       '->'            { L $$ RIGHT_ARROW }
       ':'             { L $$ COLON }
+      ':>'            { L $$ COLON_GT }
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
@@ -165,7 +166,7 @@ import Language.Futhark.Parser.Lexer
 %left bottom
 %left ifprec letprec unsafe caseprec typeprec enumprec sumprec
 %left ',' case id constructor '(' '{'
-%right ':'
+%right ':' ':>'
 %right '...' '..<' '..>' '..'
 %left '`'
 %right '->'
@@ -529,6 +530,7 @@ QualName :: { (QualName Name, SrcLoc) }
 -- array slices).
 Exp :: { UncheckedExp }
      : Exp ':' TypeExpDecl { Ascript $1 $3 NoInfo (srcspan $1 $>) }
+     | Exp ':>' TypeExpDecl { Ascript $1 $3 NoInfo (srcspan $1 $>) }
      | Exp2 %prec ':'      { $1 }
 
 Exp2 :: { UncheckedExp }

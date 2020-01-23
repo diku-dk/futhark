@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `:frame <n>` command for `futhark repl` for inspecting the stack.
 
+  * `e :> t` notation, which means the same as `e : t` for now, but
+    will have looser constraints in the future.
+
 ### Removed
 
 ### Changed
