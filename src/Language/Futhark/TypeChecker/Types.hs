@@ -139,8 +139,12 @@ checkTypeExp (TEArray t d loc) = do
   (d', d'') <- checkDimExp d
   case (l, arrayOf st (ShapeDecl [d'']) Nonunique) of
     (Unlifted, st') -> return (TEArray t' d' loc, st', Unlifted)
-    _ -> throwError $ TypeError loc $
-         "Cannot create array with elements of type " ++ quote (pretty t) ++ " (might be functional)."
+    (SizeLifted, _) ->
+      throwError $ TypeError loc $
+      "Cannot create array with elements of size-lifted type " ++ quote (pretty t) ++ " (might cause irregular array)."
+    (Lifted, _) ->
+      throwError $ TypeError loc $
+      "Cannot create array with elements of lifted type " ++ quote (pretty t) ++ " (might contain function)."
   where checkDimExp DimExpAny =
           return (DimExpAny, AnyDim)
         checkDimExp (DimExpConst k dloc) =

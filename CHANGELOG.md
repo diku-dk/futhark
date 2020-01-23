@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `e :> t` notation, which means the same as `e : t` for now, but
     will have looser constraints in the future.
 
+  * Size-lifted type abbreviations can be declared with `type~` and
+    size-lifted type parameters with `'~`.  These currently have no
+    significant difference from fully lifted types.
+
 ### Removed
 
 ### Changed

@@ -379,8 +379,8 @@ Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   type_bind: "type" ["^"] `id` `type_param`* "=" `type`
-   type_param: "[" `id` "]" | "'" `id` | "'^" `id`
+   type_bind: "type" ["^" | "~"] `id` `type_param`* "=" `type`
+   type_param: "[" `id` "]" | "'" `id` | "'~" `id` | "'^" `id`
 
 Type abbreviations function as shorthands for the purpose of
 documentation or brevity.  After a type binding ``type t1 = t2``, the
@@ -388,8 +388,12 @@ name ``t1`` can be used as a shorthand for the type ``t2``.  Type
 abbreviations do not create distinct types: the types ``t1`` and
 ``t2`` are entirely interchangeable.
 
-If the right-hand side of a type (potentially) contains a function or
-anonymous sizes, it must de declared "lifted" with ``type^``.
+If the right-hand side of a type contains anonymous sizes, it must be
+declared "size-lifted" with ``type~``.  If it (potentially) contains a
+function, it must de declared "fully lifted" with ``type^``.  A lifted
+type can also contain anonymous sizes.  Lifted types cannot be put in
+arrays.  Fully lifted types cannot be returned from conditional or
+loop expressions.
 
 A type abbreviation can have zero or more parameters.  A type
 parameter enclosed with square brackets is a *shape parameter*, and
@@ -416,11 +420,9 @@ prefixed with single quotes::
   type two_intvecs [n] = two_vecs [n] i32
   let x: two_vecs [2] i32 = (iota 2, replicate 2 0)
 
-A type parameter prefixed with ``'^`` is a *lifted type parameter*.
-These may be instantiated with types that may be functions.  On the
-other hand, values of such types are subject to the same restrictions
-as function types (cannot be put in an arrays, returned from ``if``,
-or used as a ``loop`` parameter; see `Higher-order functions`_).
+A *size-lifted type parameter* is prefixed with ``'~``, and a *fully
+lifted type parameter* with ``'^``.  These have the same rules and
+restrictions as lifted type abbreviations.
 
 Expressions
 -----------
@@ -957,11 +959,12 @@ These also apply to any record or tuple containing a function (a
 * A ``loop`` parameter cannot be a function.
 
 Further, *type parameters* are divided into *non-lifted* (bound with
-an apostrophe, e.g. ``'t``), and *lifted* (``'^t``).  Only lifted type
-parameters may be instantiated with a functional type.  Within a
-function, a lifted type parameter is treated as a functional type.
-All abstract types declared in modules (see `Module System`_) are
-considered non-lifted, and may not be functional.
+an apostrophe, e.g. ``'t``), *size-lifted* (``'~t``), and *fully
+lifted* (``'^t``).  Only fully lifted type parameters may be
+instantiated with a functional type.  Within a function, a lifted type
+parameter is treated as a functional type.  All abstract types
+declared in modules (see `Module System`_) are considered non-lifted,
+and may not be functional.
 
 See also `In-place updates`_ for details on how uniqueness types
 interact with higher-order functions.

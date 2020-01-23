@@ -449,17 +449,23 @@ checkTypeBind (TypeBind name l tps td doc loc) =
     (td', l') <- bindingTypeParams tps' $ checkTypeDecl tps' td
 
     case (l, l') of
+      (_, Lifted)
+        | l < Lifted ->
+          throwError $ TypeError loc $
+          "Non-lifted type abbreviations may not contain functions.\n" ++
+          "Hint: consider using 'type^'."
+      (_, SizeLifted)
+        | l < SizeLifted ->
+          throwError $ TypeError loc $
+          "Non-size-lifted type abbreviations may not contain size-lifted types.\n" ++
+          "Hint: consider using 'type~'."
       (Unlifted, _)
         | emptyDimParam $ unInfo $ expandedType td' ->
             warn loc $
             "Non-lifted type abbreviations may not use anonymous sizes in their definition.\n" ++
             "This will become an error in a future version of the compiler!\n" ++
-            "Hint: use 'type^' or add size parameters to " ++
+            "Hint: use 'type~' or add size parameters to " ++
             quote (prettyName name) ++ "."
-      (Unlifted, Lifted) ->
-        throwError $ TypeError loc $
-        "Non-lifted type abbreviations may not contain functions.\n" ++
-        "Hint: consider using 'type^'."
       _ -> return ()
 
     bindSpaced [(Type, name)] $ do

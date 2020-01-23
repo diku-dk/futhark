@@ -103,6 +103,7 @@ import Language.Futhark.Parser.Lexer
       '-'             { L $$ NEGATE }
       '<'             { L $$ LTH }
       '^'             { L $$ HAT }
+      '~'             { L $$ TILDE }
       '|'             { L $$ PIPE  }
 
       '+...'          { L _ (SYMBOL Plus _ _) }
@@ -141,6 +142,7 @@ import Language.Futhark.Parser.Lexer
       '\\'            { L $$ BACKSLASH }
       '\''            { L $$ APOSTROPHE }
       '\'^'           { L $$ APOSTROPHE_THEN_HAT }
+      '\'~'           { L $$ APOSTROPHE_THEN_TILDE }
       '`'             { L $$ BACKTICK }
       entry           { L $$ ENTRY }
       '->'            { L $$ RIGHT_ARROW }
@@ -284,6 +286,11 @@ ModParams :: { [ModParamBase NoInfo Name] }
            : ModParam ModParams { $1 : $2 }
            |                    { [] }
 
+Liftedness :: { Liftedness }
+            :     { Unlifted }
+            | '~' { SizeLifted }
+            | '^' { Lifted }
+
 Spec :: { SpecBase NoInfo Name }
       : val id TypeParams ':' TypeExpDecl
         { let L loc (ID name) = $2
@@ -294,18 +301,14 @@ Spec :: { SpecBase NoInfo Name }
         { ValSpec $2 $3 $5 Nothing (srcspan $1 $>) }
       | TypeAbbr
         { TypeAbbrSpec $1 }
-      | type id TypeParams
-        { let L _ (ID name) = $2
-          in TypeSpec Unlifted name $3 Nothing (srcspan $1 $>) }
-      | type 'id[' id ']' TypeParams
-        { let L _ (INDEXING name) = $2; L ploc (ID pname) = $3
-          in TypeSpec Unlifted name (TypeParamDim pname ploc : $5) Nothing (srcspan $1 $>) }
-      | type '^' id TypeParams
+
+      | type Liftedness id TypeParams
         { let L _ (ID name) = $3
-          in TypeSpec Lifted name $4 Nothing (srcspan $1 $>) }
-      | type '^' 'id[' id ']' TypeParams
+          in TypeSpec $2 name $4 Nothing (srcspan $1 $>) }
+      | type Liftedness 'id[' id ']' TypeParams
         { let L _ (INDEXING name) = $3; L ploc (ID pname) = $4
-          in TypeSpec Lifted name (TypeParamDim pname ploc : $6) Nothing (srcspan $1 $>) }
+          in TypeSpec $2 name (TypeParamDim pname ploc : $6) Nothing (srcspan $1 $>) }
+
       | module id ':' SigExp
         { let L _ (ID name) = $2
           in ModSpec name $4 Nothing (srcspan $1 $>) }
@@ -321,6 +324,7 @@ Specs :: { [SpecBase NoInfo Name] }
 TypeParam :: { TypeParamBase Name }
            : '[' id ']' { let L _ (ID name) = $2 in TypeParamDim name (srcspan $1 $>) }
            | '\'' id { let L _ (ID name) = $2 in TypeParamType Unlifted name (srcspan $1 $>) }
+           | '\'~' id { let L _ (ID name) = $2 in TypeParamType SizeLifted name (srcspan $1 $>) }
            | '\'^' id { let L _ (ID name) = $2 in TypeParamType Lifted name (srcspan $1 $>) }
 
 TypeParams :: { [TypeParamBase Name] }
@@ -407,18 +411,12 @@ TypeExpDecl :: { TypeDeclBase NoInfo Name }
              : TypeExp %prec bottom { TypeDecl $1 NoInfo }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
-TypeAbbr : type id TypeParams '=' TypeExpDecl
-           { let L _ (ID name) = $2
-              in TypeBind name Unlifted $3 $5 Nothing (srcspan $1 $>) }
-         | type 'id[' id ']' TypeParams '=' TypeExpDecl
-           { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
-             in TypeBind name Unlifted (TypeParamDim pname ploc:$5) $7 Nothing (srcspan $1 $>) }
-         | type '^' id TypeParams '=' TypeExpDecl
+TypeAbbr : type Liftedness id TypeParams '=' TypeExpDecl
            { let L _ (ID name) = $3
-              in TypeBind name Lifted $4 $6 Nothing (srcspan $1 $>) }
-         | type '^' 'id[' id ']' TypeParams '=' TypeExpDecl
+              in TypeBind name $2 $4 $6 Nothing (srcspan $1 $>) }
+         | type Liftedness 'id[' id ']' TypeParams '=' TypeExpDecl
            { let L loc (INDEXING name) = $3; L ploc (ID pname) = $4
-             in TypeBind name Lifted (TypeParamDim pname ploc:$6) $8 Nothing (srcspan $1 $>) }
+             in TypeBind name $2 (TypeParamDim pname ploc:$6) $8 Nothing (srcspan $1 $>) }
 
 TypeExp :: { UncheckedTypeExp }
          : '(' id ':' TypeExp ')' '->' TypeExp
