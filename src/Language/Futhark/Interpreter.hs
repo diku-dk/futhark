@@ -929,8 +929,8 @@ evalDec env (ImportDec name name' loc) =
 
 evalDec env (LocalDec d _) = evalDec env d
 evalDec env SigDec{} = return env
-evalDec env (TypeDec (TypeBind v _ ps t _ _)) = do
-  let abbr = T.TypeAbbr Lifted ps $
+evalDec env (TypeDec (TypeBind v l ps t _ _)) = do
+  let abbr = T.TypeAbbr l ps $
              evalType env $ unInfo $ expandedType t
   return env { envType = M.insert v abbr $ envType env }
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
