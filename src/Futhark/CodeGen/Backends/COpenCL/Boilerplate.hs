@@ -5,6 +5,8 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
 
   , kernelRuntime
   , kernelRuns
+
+  , commonOptions
   ) where
 
 import Data.FileEmbed
@@ -14,6 +16,7 @@ import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util (chunk, zEncodeString)
 
@@ -490,3 +493,67 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
                                                   sizeof($exp:which'),
                                                   &$exp:which',
                                                   NULL);|]
+
+-- Options that are common to multiple GPU-like backends.
+commonOptions :: [Option]
+commonOptions =
+   [ Option { optionLongName = "default-group-size"
+            , optionShortName = Nothing
+            , optionArgument = RequiredArgument "INT"
+            , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
+            }
+   , Option { optionLongName = "default-num-groups"
+            , optionShortName = Nothing
+            , optionArgument = RequiredArgument "INT"
+            , optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
+            }
+   , Option { optionLongName = "default-tile-size"
+            , optionShortName = Nothing
+            , optionArgument = RequiredArgument "INT"
+            , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
+            }
+   , Option { optionLongName = "default-threshold"
+            , optionShortName = Nothing
+            , optionArgument = RequiredArgument "INT"
+            , optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
+            }
+   , Option { optionLongName = "print-sizes"
+            , optionShortName = Nothing
+            , optionArgument = NoArgument
+            , optionAction = [C.cstm|{
+                int n = futhark_get_num_sizes();
+                for (int i = 0; i < n; i++) {
+                  printf("%s (%s)\n", futhark_get_size_name(i),
+                                      futhark_get_size_class(i));
+                }
+                exit(0);
+              }|]
+            }
+   , Option { optionLongName = "size"
+            , optionShortName = Nothing
+            , optionArgument = RequiredArgument "NAME=INT"
+            , optionAction = [C.cstm|{
+                char *name = optarg;
+                char *equals = strstr(optarg, "=");
+                char *value_str = equals != NULL ? equals+1 : optarg;
+                int value = atoi(value_str);
+                if (equals != NULL) {
+                  *equals = 0;
+                  if (futhark_context_config_set_size(cfg, name, value) != 0) {
+                    panic(1, "Unknown size: %s\n", name);
+                  }
+                } else {
+                  panic(1, "Invalid argument for size option: %s\n", optarg);
+                }}|]
+            }
+   , Option { optionLongName = "tuning"
+            , optionShortName = Nothing
+            , optionArgument = RequiredArgument "FILE"
+            , optionAction = [C.cstm|{
+                char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
+                                                          futhark_context_config_set_size);
+                if (ret != NULL) {
+                  panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                }}|]
+            }
+   ]
