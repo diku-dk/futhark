@@ -42,6 +42,7 @@ module Futhark.CodeGen.ImpGen.Kernels.SegHist
   where
 
 import Control.Monad.Except
+import Control.Monad.Reader
 import Data.Maybe
 import Data.List
 
@@ -214,8 +215,9 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
   -- tunable knob with a hopefully sane default.
   let hist_L2_def = 5632 * 1024
   hist_L2 <- dPrim "L2_size" int32
+  entry <- asks envFunction
   -- Equivalent to F_L2*L2 in paper.
-  sOp $ Imp.GetSize hist_L2 (nameFromString $ pretty hist_L2) $
+  sOp $ Imp.GetSize hist_L2 (entry <> "." <> nameFromString (pretty hist_L2)) $
     Imp.SizeBespoke (nameFromString "L2_for_histogram") hist_L2_def
 
   let hist_L2_ln_sz = 16*4 -- L2 cache line size approximation
