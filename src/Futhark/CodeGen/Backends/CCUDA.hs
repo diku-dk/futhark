@@ -16,6 +16,7 @@ import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.ImpCode.OpenCL
+import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.GenericC.Options
 
@@ -49,77 +50,36 @@ compileProg prog = do
                             ]
 
 cliOptions :: [Option]
-cliOptions = [ Option { optionLongName = "dump-cuda"
-                      , optionShortName = Nothing
-                      , optionArgument = RequiredArgument "FILE"
-                      , optionAction = [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
-                                                entry_point = NULL;}|]
-                      }
-             , Option { optionLongName = "load-cuda"
-                      , optionShortName = Nothing
-                      , optionArgument = RequiredArgument "FILE"
-                      , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
-                      }
-             , Option { optionLongName = "dump-ptx"
-                      , optionShortName = Nothing
-                      , optionArgument = RequiredArgument "FILE"
-                      , optionAction = [C.cstm|{futhark_context_config_dump_ptx_to(cfg, optarg);
-                                                entry_point = NULL;}|]
-                      }
-             , Option { optionLongName = "load-ptx"
-                      , optionShortName = Nothing
-                      , optionArgument = RequiredArgument "FILE"
-                      , optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
-                      }
-             , Option { optionLongName = "nvrtc-option"
-                      , optionShortName = Nothing
-                      , optionArgument = RequiredArgument "OPT"
-                      , optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
-                      }
-             , Option { optionLongName = "print-sizes"
-                      , optionShortName = Nothing
-                      , optionArgument = NoArgument
-                      , optionAction = [C.cstm|{
-                          int n = futhark_get_num_sizes();
-                          for (int i = 0; i < n; i++) {
-                            printf("%s (%s)\n", futhark_get_size_name(i),
-                                                futhark_get_size_class(i));
-                          }
-                          exit(0);
-                        }|]
-                      }
-             , Option { optionLongName = "default-group-size"
-                      , optionShortName = Nothing
-                      , optionArgument = RequiredArgument "INT"
-                      , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
-                      }
-             , Option { optionLongName = "default-num-groups"
-                      , optionShortName = Nothing
-                      , optionArgument = RequiredArgument "INT"
-                      , optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
-                      }
-             , Option { optionLongName = "default-tile-size"
-                      , optionShortName = Nothing
-                      , optionArgument = RequiredArgument "INT"
-                      , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
-                      }
-             , Option { optionLongName = "default-threshold"
-                      , optionShortName = Nothing
-                      , optionArgument = RequiredArgument "INT"
-                      , optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
-                      }
-             , Option { optionLongName = "tuning"
-                 , optionShortName = Nothing
-                 , optionArgument = RequiredArgument "FILE"
-                 , optionAction = [C.cstm|{
-                     char *fname = optarg;
-                     char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
-                                                               futhark_context_config_set_size);
-                     if (ret != NULL) {
-                       panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
-                     }}|]
-                 }
-             ]
+cliOptions =
+  commonOptions ++
+  [ Option { optionLongName = "dump-cuda"
+           , optionShortName = Nothing
+           , optionArgument = RequiredArgument "FILE"
+           , optionAction = [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
+                                     entry_point = NULL;}|]
+           }
+  , Option { optionLongName = "load-cuda"
+           , optionShortName = Nothing
+           , optionArgument = RequiredArgument "FILE"
+           , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
+           }
+  , Option { optionLongName = "dump-ptx"
+           , optionShortName = Nothing
+           , optionArgument = RequiredArgument "FILE"
+           , optionAction = [C.cstm|{futhark_context_config_dump_ptx_to(cfg, optarg);
+                                     entry_point = NULL;}|]
+           }
+  , Option { optionLongName = "load-ptx"
+           , optionShortName = Nothing
+           , optionArgument = RequiredArgument "FILE"
+           , optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
+           }
+  , Option { optionLongName = "nvrtc-option"
+           , optionShortName = Nothing
+           , optionArgument = RequiredArgument "OPT"
+           , optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
+           }
+  ]
 
 writeCUDAScalar :: GC.WriteScalar OpenCL ()
 writeCUDAScalar mem idx t "device" _ val = do
