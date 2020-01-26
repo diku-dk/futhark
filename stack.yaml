@@ -1,4 +1,4 @@
-resolver: nightly-2020-01-03
+resolver: nightly-2020-01-25
 packages:
 - .
 
@@ -10,4 +10,4 @@ flags: {}
 extra-package-dbs: []
 
 nix:
-    packages: [zlib.dev, zlib.out, pkgconfig, haskell.compiler.ghc881]
+    packages: [zlib.dev, zlib.out, pkgconfig, haskell.compiler.ghc882]
