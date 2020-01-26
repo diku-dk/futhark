@@ -41,7 +41,6 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.Reader
-import Data.Foldable
 import Data.Maybe
 import qualified Data.Map.Strict as M
 
@@ -295,7 +294,7 @@ mkBodyAliases bnds res =
   -- bound in bnds.
   let (aliases, consumed) = mkStmsAliases bnds res
       boundNames =
-        fold $ fmap (namesFromList . patternNames . stmPattern) bnds
+        foldMap (namesFromList . patternNames . stmPattern) bnds
       aliases' = map (`namesSubtract` boundNames) aliases
       consumed' = consumed `namesSubtract` boundNames
   in (map Names' aliases', Names' consumed')
