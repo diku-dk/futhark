@@ -806,7 +806,7 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
 
   (ispace, kernel_inps) <- flatKernel nest
 
-  unless (not $ free_in_op `namesIntersect` bound_by_nest) $
+  when (free_in_op `namesIntersect` bound_by_nest) $
     fail "Non-fold lambda uses nest-bound parameters."
 
   let indices = map fst ispace

@@ -1,8 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Futhark.Analysis.Usage ( usageInStm ) where
 
-import Data.Foldable
-
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.UsageTable as UT
@@ -30,7 +28,7 @@ usageInExp (DoLoop _ merge _ _) =
             namesToList $ subExpAliases se
           | (v,se) <- merge, unique $ paramDeclType v ]
 usageInExp (If _ tbranch fbranch _) =
-  fold $ map UT.consumedUsage $ namesToList $
+  foldMap UT.consumedUsage $ namesToList $
   consumedInBody tbranch <> consumedInBody fbranch
 usageInExp (BasicOp (Update src _ _)) =
   UT.consumedUsage src
