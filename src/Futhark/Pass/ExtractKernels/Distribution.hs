@@ -317,7 +317,7 @@ distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
         removeIdentityMappingGeneral bound_by_stms inner_pat inner_res
   in (DistributionBody
       { distributionTarget = Targets (inner_pat', inner_res') targets
-      , distributionFreeInBody = fold (fmap freeIn stms) `namesSubtract` bound_by_stms
+      , distributionFreeInBody = foldMap freeIn stms `namesSubtract` bound_by_stms
       , distributionIdentityMap = inner_identity_map
       , distributionExpandTarget = inner_expand_target
       },

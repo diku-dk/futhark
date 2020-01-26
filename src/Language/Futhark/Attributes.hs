@@ -138,11 +138,11 @@ nestedDims t =
   case t of Array _ _ a ds ->
               nub $ nestedDims (Scalar a) <> shapeDims ds
             Scalar (Record fs) ->
-              nub $ fold $ fmap nestedDims fs
+              nub $ foldMap nestedDims fs
             Scalar Prim{} ->
               mempty
             Scalar (Sum cs) ->
-              nub $ fold $ (fmap . concatMap) nestedDims cs
+              nub $ foldMap (concatMap nestedDims) cs
             Scalar (Arrow _ v t1 t2) ->
               filter (notV v) $ nestedDims t1 <> nestedDims t2
             Scalar (TypeVar _ _ _ targs) ->

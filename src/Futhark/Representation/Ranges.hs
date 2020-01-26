@@ -34,7 +34,6 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.Reader
-import Data.Foldable
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
@@ -166,7 +165,7 @@ mkPatternRanges pat e =
 mkBodyRanges :: Stms lore -> Result -> [Range]
 mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
   where boundInBnds =
-          fold $ fmap (namesFromList . patternNames . stmPattern) bnds
+          foldMap (namesFromList . patternNames . stmPattern) bnds
         removeUnknownBounds (lower,upper) =
           (removeUnknownBound lower,
            removeUnknownBound upper)

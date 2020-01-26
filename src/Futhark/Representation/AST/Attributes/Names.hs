@@ -138,7 +138,7 @@ freeInStmsAndRes :: (FreeIn (Op lore),
                      FreeAttr (ExpAttr lore)) =>
                     Stms lore -> Result -> FV
 freeInStmsAndRes stms res =
-  fvBind (boundByStms stms) $ fold (fmap freeIn' stms) <> freeIn' res
+  fvBind (boundByStms stms) $ foldMap freeIn' stms <> freeIn' res
 
 -- | A class indicating that we can obtain free variable information
 -- from values of this type.
@@ -307,7 +307,7 @@ boundByStm = namesFromList . patternNames . stmPattern
 
 -- | The names bound by the bindings.
 boundByStms :: Stms lore -> Names
-boundByStms = fold . fmap boundByStm
+boundByStms = foldMap boundByStm
 
 -- | The names of the lambda parameters plus the index parameter.
 boundByLambda :: Lambda lore -> [VName]

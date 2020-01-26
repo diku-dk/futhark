@@ -170,7 +170,7 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
         mapper ctx = identityMapper { mapOnBody = const (onBody ctx)
                                     , mapOnOp = onOp ctx }
 
-        mkSizeSubsts = fold . fmap mkStmSizeSubst
+        mkSizeSubsts = foldMap mkStmSizeSubst
           where mkStmSizeSubst (Let (Pattern [] [pe]) _ (Op (SizeOp (SplitSpace _ _ _ elems_per_i)))) =
                   M.singleton (patElemName pe) elems_per_i
                 mkStmSizeSubst _ = mempty

@@ -35,7 +35,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        where
 
 import Data.Maybe
-import Data.Foldable
 import qualified Data.Set as S
 
 import Futhark.Representation.AST.Syntax
@@ -153,7 +152,7 @@ bodyExtType (Body _ stms res) =
   extendedScope (traverse subExpType res) bndscope
   where bndscope = scopeOf stms
         boundInLet (Let pat _ _) = S.fromList $ patternNames pat
-        bound = S.toList $ fold $ fmap boundInLet stms
+        bound = S.toList $ foldMap boundInLet stms
 
 -- | Given the context and value merge parameters of a Futhark @loop@,
 -- produce the return type.
