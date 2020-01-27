@@ -44,12 +44,11 @@ import Futhark.Util.Pretty
 import Futhark.Analysis.PrimExp.Convert
 
 
--- | LMAD's representation consists of a permutation, a general offset, and, for
--- each dimension a stride, rotate factor, number of elements, permutation, and
--- monotonicity and unit-stride info for each dimension.  Note that the
--- permutation is not strictly necessary in that the permutation can be
--- performed directly on LMAD dimensions, but then it is difficult to extract
--- the permutation back from an LMAD.
+-- | LMAD's representation consists of a general offset and for each dimension a
+-- stride, rotate factor, number of elements (or shape), permutation, and
+-- monotonicity. Note that the permutation is not strictly necessary in that the
+-- permutation can be performed directly on LMAD dimensions, but then it is
+-- difficult to extract the permutation back from an LMAD.
 --
 -- LMAD algebra is closed under composition w.r.t. operators such as permute,
 -- repeat, index and slice.  However, other operations, such as reshape, cannot
@@ -62,9 +61,10 @@ import Futhark.Analysis.PrimExp.Convert
 -- However, we expect that the common case is when the index function is one
 -- LMAD -- we call this the 'nice' representation.
 --
--- Finally, the list of LMADs is tupled with the shape of the original array,
--- and with contiguous info, i.e., if we instantiate all the points of the
--- current index function, do we get a contiguous memory interval?
+-- Finally, the list of LMADs is kept in an @IxFun@ together with the shape of
+-- the original array, and a bit to indicate whether the index function is
+-- contiguous, i.e., if we instantiate all the points of the current index
+-- function, do we get a contiguous memory interval?
 --
 -- By definition, the LMAD denotes the set of points (simplified):
 --
