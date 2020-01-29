@@ -15,29 +15,47 @@ jobs:
   steps:
 
   - script: |
+      set -e
       sudo apt update
-      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev python-numpy
+      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev python-numpy hpack
     displayName: Install OS-level dependencies
 
   - script: |
-      mkdir -p ~/.local/bin
-      curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
-    displayName: Install Stack
+      set -e
+      mkdir -p ~/.ghcup/bin
+      curl https://gitlab.haskell.org/haskell/ghcup/raw/master/ghcup > ~/.ghcup/bin/ghcup
+      chmod +x ~/.ghcup/bin/ghcup
+      ~/.ghcup/bin/ghcup install 8.8.2
+      ~/.ghcup/bin/ghcup set 8.8.2
+      ~/.ghcup/bin/ghcup install-cabal
+    displayName: Install GHC and cabal
 
   - script: |
-      export PATH=$HOME/.local/bin:$PATH
-      stack --no-terminal --install-ghc test --only-dependencies
+      set -e
+      export PATH=$HOME/.ghcup/bin:$PATH
+      hpack
+      cabal update
+      cabal install --only-dependencies
     displayName: Build Haskell dependencies
 
   - script: |
-      export PATH=$HOME/.local/bin:$PATH
-      stack install --no-terminal
+      set -e
+      export PATH=$HOME/.ghcup/bin:$PATH
+      mkdir -p $HOME/.local/bin
+      cabal install --installdir=$HOME/.local/bin --install-method=copy
     displayName: Build and install Futhark compiler
 
+
   - script: |
-      export PATH=$HOME/.local/bin:$PATH
-      # Build the package, its tests, and its docs and run the tests
-      stack test --no-terminal --haddock --no-haddock-deps
+      set -e
+      export PATH=$HOME/.ghcup/bin:$PATH
+      cabal haddock
+    displayName: Build docs
+
+  - script: |
+      set -e
+      export PATH=$HOME/.ghcup/bin:$PATH
+      cabal test
     displayName: Run unit tests
 
   # - script: |
@@ -47,19 +65,19 @@ jobs:
   #   displayName: Compile and run tests
 
   - script: |
+      set -e
       export PATH=$HOME/.local/bin:$PATH
-      stack install
       futhark test -C --no-terminal --backend=opencl tests examples --exclude=no_opencl
     displayName: Compile with backend=opencl
 
   - script: |
+      set -e
       export PATH=$HOME/.local/bin:$PATH
-      stack install
       futhark test -C --no-terminal --backend=cuda tests examples --exclude=no_opencl
     displayName: Compile with backend=cuda
 
   - script: |
+      set -e
       export PATH=$HOME/.local/bin:$PATH
-      stack install
       futhark test -c --no-terminal --no-tuning --backend=python tests examples --exclude=no_python
     displayName: Compile and run with backend=python
