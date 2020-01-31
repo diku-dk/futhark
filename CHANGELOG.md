@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `reduce_by_index` may be somewhat faster for complex operators on
+    histograms that barely fit in local memory.
+
 ### Removed
 
 ### Changed
