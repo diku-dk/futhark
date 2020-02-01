@@ -278,6 +278,10 @@ instance MonadBreadCrumbs TermTypeM where
     env { termBreadCrumbs = bc : termBreadCrumbs env }
   getBreadCrumbs = asks termBreadCrumbs
 
+onlyBreadCrumb :: BreadCrumb -> TermTypeM a -> TermTypeM a
+onlyBreadCrumb bc = local $ \env ->
+  env { termBreadCrumbs = [bc] }
+
 runTermTypeM :: TermTypeM a -> TypeM (a, Occurences)
 runTermTypeM (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
@@ -2017,7 +2021,8 @@ instantiateDimsInReturnType tloc fname =
 
 checkApply :: SrcLoc -> Maybe (QualName VName) -> PatternType -> Arg
            -> TermTypeM (PatternType, PatternType, Maybe VName, [VName])
-checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) = do
+checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) =
+  onlyBreadCrumb (Applying fname argexp) $ do
   expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
   -- Perform substitutions of instantiated variables in the types.

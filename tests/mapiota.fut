@@ -1,6 +1,6 @@
 -- iota cannot be mapped.
 -- ==
 -- tags { no_opencl }
--- error: existentially sized type
+-- error: type containing anonymous sizes
 
 let main(ns: []i32) = map iota ns

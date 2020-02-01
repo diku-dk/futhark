@@ -25,6 +25,7 @@ module Language.Futhark.Core
   , baseString
   , pretty
   , quote
+  , shorten
 
   -- * Special identifiers
   , defaultEntryPoint
@@ -185,3 +186,10 @@ instance Ord VName where
 -- identifiers.
 quote :: String -> String
 quote s = "`" ++ s ++ "`"
+
+-- | Shorten a (single-line) string to at most some appropriate number
+-- of characters, with trailing ... if necessary.  Used for error
+-- messages.
+shorten :: String -> String
+shorten s | length s > 70 = take 70 s <> "..."
+          | otherwise = s
