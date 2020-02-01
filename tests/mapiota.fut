@@ -1,4 +1,4 @@
--- iota can be mapped.
+-- iota cannot be mapped.
 -- ==
 -- tags { no_opencl }
 -- error: existentially sized type
