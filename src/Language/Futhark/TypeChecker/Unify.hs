@@ -150,19 +150,15 @@ prettySource ctx loc (RigidRet (Just fname)) =
 
 prettySource ctx loc (RigidArg fname arg) =
   "is value of argument\n" <>
-  indent arg' <>
+  indent (shorten arg) <>
   "\npassed to " <> fname' <> " at " <> locStrRel ctx loc <> "."
   where fname' = maybe "function" (quote . pretty) fname
-        arg' | length arg > 70 = take 70 arg <> "..."
-             | otherwise = arg
 
 prettySource ctx loc (RigidSlice d slice) =
   "is size produced by slice\n" <>
-  indent slice' <>
+  indent (shorten slice) <>
   "\n" <> d_desc <> "at " <> locStrRel ctx loc <> "."
-  where slice' | length slice > 70 = take 70 slice <> "..."
-               | otherwise = slice
-        d_desc = case d of
+  where d_desc = case d of
                    Just d' -> "of dimension of size " <> quote (pretty d') <> " "
                    Nothing -> ""
 
@@ -174,10 +170,8 @@ prettySource ctx loc RigidRange =
 
 prettySource ctx loc (RigidBound bound) =
   "generated from expression\n" <>
-  indent bound'
+  indent (shorten bound)
   <> "\nused in range at " <> locStrRel ctx loc <> "."
-  where bound' | length bound > 70 = take 70 bound <> "..."
-               | otherwise = bound
 
 prettySource ctx loc (RigidOutOfScope boundloc v) =
   "is an unknown size arising from " <> quote (prettyName v) <>

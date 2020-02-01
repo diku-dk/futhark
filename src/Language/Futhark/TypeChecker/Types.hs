@@ -116,7 +116,7 @@ checkTypeExp (TEVar name loc) = do
   (name', ps, t, l) <- lookupType loc name
   case ps of
     [] -> return (TEVar name' loc, t, l)
-    _  -> simpleTypeError loc $
+    _  -> typeError loc mempty $
           "Type constructor " ++ quote (unwords (pretty name : map pretty ps)) ++
           " used without any arguments."
 checkTypeExp (TETuple ts loc) = do
@@ -126,7 +126,7 @@ checkTypeExp t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
   unless (sort field_names == sort (nub field_names)) $
-    simpleTypeError loc $ "Duplicate record fields in " ++ pretty t
+    typeError loc mempty $ "Duplicate record fields in " ++ pretty t
 
   fs_ts_ls <- traverse checkTypeExp $ M.fromList fs
   let fs' = fmap (\(x,_,_) -> x) fs_ts_ls
@@ -141,10 +141,10 @@ checkTypeExp (TEArray t d loc) = do
   case (l, arrayOf st (ShapeDecl [d'']) Nonunique) of
     (Unlifted, st') -> return (TEArray t' d' loc, st', Unlifted)
     (SizeLifted, _) ->
-      simpleTypeError loc $
+      typeError loc mempty $
       "Cannot create array with elements of size-lifted type " ++ quote (pretty t) ++ " (might cause irregular array)."
     (Lifted, _) ->
-      simpleTypeError loc $
+      typeError loc mempty $
       "Cannot create array with elements of lifted type " ++ quote (pretty t) ++ " (might contain function)."
   where checkDimExp DimExpAny =
           return (DimExpAny, AnyDim)
@@ -183,7 +183,7 @@ checkTypeExp ote@TEApply{} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
   (tname', ps, t, l) <- lookupType tloc tname
   if length ps /= length targs
-  then simpleTypeError tloc $
+  then typeError tloc mempty $
        "Type constructor " ++ quote (pretty tname) ++ " requires " ++ show (length ps) ++
        " arguments, but provided " ++ show (length targs) ++ "."
   else do
@@ -197,7 +197,7 @@ checkTypeExp ote@TEApply{} = do
         rootAndArgs (TEVar qn loc) = return (qn, loc, [])
         rootAndArgs (TEApply op arg _) = do (op', loc, args) <- rootAndArgs op
                                             return (op', loc, args++[arg])
-        rootAndArgs te' = simpleTypeError (srclocOf te') $
+        rootAndArgs te' = typeError (srclocOf te') mempty $
                           "Type '" ++ pretty te' ++ "' is not a type constructor."
 
         checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpNamed v dloc) loc) = do
@@ -217,16 +217,16 @@ checkTypeExp ote@TEApply{} = do
                   M.singleton pv $ TypeSub $ TypeAbbr l [] st)
 
         checkArgApply p a =
-          simpleTypeError tloc $ "Type argument " ++ pretty a ++
+          typeError tloc mempty $ "Type argument " ++ pretty a ++
           " not valid for a type parameter " ++ pretty p
 
 checkTypeExp t@(TESum cs loc) = do
   let constructors = map fst cs
   unless (sort constructors == sort (nub constructors)) $
-    simpleTypeError loc $ "Duplicate constructors in " ++ pretty t
+    typeError loc mempty $ "Duplicate constructors in " ++ pretty t
 
   unless (length constructors <= 256) $
-    simpleTypeError loc "Sum types must have 256 or fewer constructors."
+    typeError loc mempty "Sum types must have 256 or fewer constructors."
 
   cs_ts_ls <- (traverse . traverse) checkTypeExp $ M.fromList cs
   let cs'  = (fmap . fmap) (\(x,_,_) -> x) cs_ts_ls
@@ -254,7 +254,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
           already <- gets $ M.lookup v
           case already of
             Just prev_loc ->
-              lift $ simpleTypeError loc $
+              lift $ typeError loc mempty $
               "Name " ++ quote (pretty v) ++ " also bound at " ++ locStr prev_loc
             Nothing ->
               modify $ M.insert v loc
@@ -269,7 +269,7 @@ checkForDuplicateNamesInType :: MonadTypeChecker m =>
 checkForDuplicateNamesInType = check mempty
   where check seen (TEArrow (Just v) t1 t2 loc)
           | Just prev_loc <- M.lookup v seen =
-              simpleTypeError loc $
+              typeError loc mempty $
               "Name " ++ quote (pretty v) ++ " also bound at " ++ locStr prev_loc
           | otherwise =
               check seen' t1 >> check seen' t2
@@ -306,7 +306,7 @@ checkShapeParamUses tps ts = do
         checkUsage uses (TypeParamDim pv loc)
           | Just pos <- M.lookup pv uses,
             pos `elem` [PosParam, PosReturn] =
-              simpleTypeError loc $
+              typeError loc mempty $
                 "Shape parameter " ++ quote (prettyName pv) ++
                 " must first be used in" ++
                 " a positive position (non-functional parameter)."
@@ -315,7 +315,7 @@ checkShapeParamUses tps ts = do
         checkIfUsed uses (TypeParamDim pv loc)
           | M.member pv uses = return ()
           | otherwise =
-              simpleTypeError loc $ "Size parameter " ++
+              typeError loc mempty $ "Size parameter " ++
               quote (prettyName pv) ++ " unused."
         checkIfUsed _ _ = return ()
 
@@ -333,7 +333,7 @@ checkTypeParams ps m =
           seen <- gets $ M.lookup (ns,v)
           case seen of
             Just prev ->
-              simpleTypeError loc $
+              lift $ typeError loc mempty $
               "Type parameter " ++ quote (pretty v) ++
               " previously defined at " ++ locStr prev ++ "."
             Nothing -> do

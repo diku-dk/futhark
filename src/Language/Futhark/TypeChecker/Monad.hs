@@ -26,7 +26,6 @@ module Language.Futhark.TypeChecker.Monad
   , BreadCrumb(..)
   , MonadBreadCrumbs(..)
   , typeError
-  , simpleTypeError
 
   , MonadTypeChecker(..)
   , checkName
@@ -79,6 +78,7 @@ import Language.Futhark.Traversals
 import Language.Futhark.Warnings
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
+import Futhark.Util.Pretty (prettyOneLine)
 
 -- | A note with extra information regarding a type error.
 newtype Note = Note String
@@ -111,38 +111,38 @@ instance Show TypeError where
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =
-  simpleTypeError loc $
+  typeError loc mempty $
   "Type of expression at " ++ locStr loc ++
   "cannot have any type - possibly a bug in the type checker."
 unexpectedType loc t ts =
-  simpleTypeError loc $
+  typeError loc mempty $
   "Type of expression at " ++ locStr loc ++ " must be one of " ++
   intercalate ", " (map pretty ts) ++ ", but is " ++
   pretty t ++ "."
 
 undefinedType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
 undefinedType loc name =
-  simpleTypeError loc $ "Unknown type " ++ pretty name ++ "."
+  typeError loc mempty $ "Unknown type " ++ pretty name ++ "."
 
 functionIsNotValue :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
 functionIsNotValue loc name =
-  simpleTypeError loc$
+  typeError loc mempty$
   "Attempt to use function " ++ pretty name ++ " as value at " ++ locStr loc ++ "."
 
 unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
 unappliedFunctor loc =
-  simpleTypeError loc "Cannot have parametric module here."
+  typeError loc mempty "Cannot have parametric module here."
 
 unknownVariableError :: MonadTypeChecker m =>
                         Namespace -> QualName Name -> SrcLoc -> m a
 unknownVariableError space name loc =
-  simpleTypeError loc $
+  typeError loc mempty $
   "Unknown " ++ ppSpace space ++ " " ++ quote (pretty name)
 
 underscoreUse :: MonadTypeChecker m =>
                  SrcLoc -> QualName Name -> m a
 underscoreUse loc name =
-  simpleTypeError loc $ "Use of " ++ quote (pretty name) ++
+  typeError loc mempty $ "Use of " ++ quote (pretty name) ++
   ": variables prefixed with underscore may not be accessed."
 
 type ImportTable = M.Map String Env
@@ -154,7 +154,7 @@ data Context = Context { contextEnv :: Env
 
 -- | The type checker runs in this monad.
 newtype TypeM a = TypeM (RWST
-                         Context -- Reader
+                         Context            -- Reader
                          Warnings           -- Writer
                          VNameSource        -- State
                          (Except TypeError) -- Inner monad
@@ -207,6 +207,7 @@ localEnv env = local $ \ctx ->
 data BreadCrumb = MatchingTypes StructType StructType
                 | MatchingFields Name
                 | Matching String
+                | Applying (Maybe (QualName VName)) Exp
 
 instance Show BreadCrumb where
   show (MatchingTypes t1 t2) =
@@ -217,6 +218,12 @@ instance Show BreadCrumb where
     "When matching types of record field " ++ quote (pretty field) ++ "."
   show (Matching s) =
     s
+  show (Applying (Just fname) e) =
+    "When checking application of " <> quote (pretty fname) <> " to argument\n" <>
+    "  " <> shorten (prettyOneLine e)
+  show (Applying Nothing e) =
+    "When checking application of function to argument\n" <>
+    "  " <> shorten (prettyOneLine e)
 
 -- | Tracking breadcrumbs to give a kind of "stack trace" in errors.
 class Monad m => MonadBreadCrumbs m where
@@ -234,11 +241,8 @@ typeError loc notes s = do
           | otherwise = "\n" ++ intercalate "\n" (map show bc)
   throwError $ TypeError (srclocOf loc) notes (s ++ bc')
 
-simpleTypeError :: (Located loc, MonadError TypeError m) => loc -> String -> m a
-simpleTypeError loc s =
-  throwError $ TypeError (srclocOf loc) mempty s
-
-class MonadError TypeError m => MonadTypeChecker m where
+class (MonadError TypeError m, MonadBreadCrumbs m) =>
+      MonadTypeChecker m where
   warn :: Located loc => loc -> String -> m ()
 
   newName :: VName -> m VName
@@ -258,7 +262,7 @@ class MonadError TypeError m => MonadTypeChecker m where
     (v', t) <- lookupVar loc v
     case t of
       Scalar (Prim (Signed Int32)) -> return v'
-      _ -> simpleTypeError loc $
+      _ -> typeError loc mempty $
            "Dimension declaration " ++ pretty v ++ " should be of type `i32`."
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
@@ -269,6 +273,10 @@ bindSpaced names body = do
   names' <- mapM (newID . snd) names
   let mapping = M.fromList (zip names $ map qualName names')
   bindNameMap mapping body
+
+instance MonadBreadCrumbs TypeM where
+  breadCrumb _ m = m
+  getBreadCrumbs = pure mempty
 
 instance MonadTypeChecker TypeM where
   warn loc problem = tell $ singleWarning (srclocOf loc) problem
@@ -312,7 +320,7 @@ instance MonadTypeChecker TypeM where
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise ->
             case getType t of
-              Left{} -> simpleTypeError loc $
+              Left{} -> typeError loc mempty $
                         "Attempt to use function " ++ baseString name ++ " as value."
               Right t' -> return (qn', fromStruct $
                                        qualifyTypeVars outer_env mempty qs t')
