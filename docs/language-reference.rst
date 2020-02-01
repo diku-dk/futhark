@@ -598,6 +598,8 @@ Futhermore, there *may not* be a space between ``a`` and the opening
 bracket.  This disambiguates the array indexing ``a[i]``, from ``a
 [i]``, which is a function call with a literal array.
 
+.. _slices:
+
 ``a[i:j:s]``
 ............
 
@@ -637,8 +639,10 @@ This holds only if ``n`` is a variable or constant.
 Create an array containing the indicated elements.  Each element must
 have the same type and shape.
 
+.. _range:
+
 ``x..y...z``
-..............
+............
 
 Construct an integer array whose first element is ``x`` and which
 proceeds stride of ``y-x`` until reaching ``z`` (inclusive).  The
@@ -653,6 +657,8 @@ statically:
   * ``1..2...n`` has size ``n``
 
 This holds only if ``n`` is a variable or constant.
+
+.. _range_upto:
 
 ``x..y..<z``
 ............
@@ -992,7 +998,7 @@ of shapes.  The ``[n]`` parameter is not explicitly passed when
 calling ``f``.  Rather, its value is implicitly deduced from the
 arguments passed for the value parameters.  An array can contain
 *anonymous dimensions*, e.g. ``[]i32``, for which the type checker
-will invent new size parameters, which ensures that all sizes have a
+will invent fresh size parameters, which ensures that all sizes have a
 (symbolic) size.
 
 A size annotation can also be an integer constant (with no suffix).
@@ -1007,6 +1013,11 @@ be used in the return type of a function::
 
 An application ``replicate 10 0`` will have type ``[10]i32``.
 
+.. _unknown-sizes:
+
+Unknown sizes
+~~~~~~~~~~~~~
+
 Since sizes must be constants or variables, there are many cases where
 the type checker cannot assign a precise size to the result of some
 operation.  For example, the type of ``concat`` should conceptually be::
@@ -1019,19 +1030,102 @@ an anonymous size::
   val concat [n] [m] 't : [n]t -> [m]t -> []t
 
 When an application ``concat xs ys`` is found, the result will be of
-type ``[k]t``, where ``k`` is a fresh *unknown* size that is
-considered different from every other size in the program.
+type ``[k]t``, where ``k`` is a fresh *unknown* size variable that is
+considered distinct from every other size in the program.  It is often
+necessary to perform a size coercion (see `Size coercion`_) to
+convert an unknown size to a known size.
 
 Generally, unknown sizes are constructed whenever the true size cannot
-be expressed.  Either because it is too complicated (e.g. ``replicate
-(x+y) 0``), or because the variable it refers to goes out of scope::
+be expressed.  The following lists all possible sources of unknown
+sizes.
+
+Size going out of scope
+.......................
+
+An unknown size is created when the proper size of an array refers to
+a name that has gone out of scope::
 
   let c = a + b
   in replicate c 0
 
-Similarly, unknown sizes are constructed for ``if`` expressions where
-the branches do not return values of the same size, and for ``loop``
-expressions where the size of the loop parameters is not invariant.
+The type of ``replicate c 0`` is ``[c]i32``, but since ``c`` is
+locally bound, the type of the entire expression is ``[k]i32`` for
+some fresh ``k``.
+
+Compound expression passed as function argument
+...............................................
+
+Intuitively, the type of ``replicate (x+y) 0`` should be ``[x+y]i32``,
+but since sizes must be names or constants, this is not expressible.
+Therefore an unknown size variable is created and the size of the
+expression becomes ``[k]i32``.
+
+Compound expression used as range bound
+.......................................
+
+While a simple range expression such as ``0..<n`` can be assigned type
+``[n]i32``, a range expression ``0..<(n+1)`` will give produce an
+unknown size.
+
+Complex slicing
+...............
+
+Most complex array slicing, such as ``a[a:b]``, will have an unknown
+size.  Exceptions are listed in the :ref:`reference for slice
+expressions <slices>`.
+
+Complex ranges
+..............
+
+Most complex ranges, such as ``a..<b``, will have an known size.
+Exceptions exist for :ref:`general ranges <range>` and :ref:`"upto"
+ranges <range_upto>`.
+
+Anonymous size in function return type
+......................................
+
+Whenever the result of a function application would have an anonymous
+size, that size is replaced with a fresh unknown size variable.
+
+For example, ``filter`` has the following type::
+
+  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> []a
+
+Naively, an application ``filter f xs`` seems like it would have type
+``[]a``, but a fresh unknown size ``k`` will be created and the actual
+type will be ``[k]a``.
+
+Branches of ``if`` return arrays of different sizes
+...................................................
+
+When an ``if`` (or ``match``) expression has branches that returns
+array of different sizes, the differing sizes will be replaced with
+fresh unknown sizes.  For example::
+
+  if b then [[1,2], [3,4]]
+       else [[5,6]]
+
+This expression will have type ``[k][2]i32``, for some fresh ``k``.
+
+**Important:** The check whether the sizes differ is done when first
+encountering the ``if`` or ``match`` during type checking.  At this
+point, the type checker may not realise that the two sizes are
+actually equal, even though constraints later in the function force
+them to be.  This can always be resolved by adding type annotations.
+
+An array produced by a loop does not have a known size
+......................................................
+
+If the size of some loop parameter is not maintained across a loop
+iteration, the final result of the loop will contain unknown sizes.
+For example::
+
+  loop xs = [1] for i < n do xs ++ xs
+
+Similar to conditionals, the type checker may sometimes be too
+cautious in assuming that some size may change during the loop.
+Adding type annotations to the loop parameter can be used to resolve
+this.
 
 Size coercion
 ~~~~~~~~~~~~~
