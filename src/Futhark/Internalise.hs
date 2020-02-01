@@ -546,7 +546,7 @@ internaliseExp desc (E.LetPat pat e body (Info ret, Info retext) loc) = do
   bindExtSizes (E.toStruct ret) retext ses
   return ses
 
-internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
+internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody _ loc) = do
   internaliseValBind $ E.ValBind Nothing ofname retdecl (Info (rettype, [])) tparams params body Nothing loc
   internaliseExp desc letbody
 

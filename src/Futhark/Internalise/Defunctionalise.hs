@@ -274,7 +274,7 @@ defuncExp (LetPat pat e1 e2 (_, retext) loc) = do
 
 -- Local functions are handled by rewriting them to lambdas, so that
 -- the same machinery can be re-used.
-defuncExp (LetFun vn (dims, pats, _, Info ret, e1) e2 loc) = do
+defuncExp (LetFun vn (dims, pats, _, Info ret, e1) e2 _ loc) = do
   (e1', sv1) <- defuncFun dims pats e1 (mempty, ret) loc
   (e2', sv2) <- localEnv (M.singleton vn sv1) $ defuncExp e2
   return (LetPat (Id vn (Info (typeOf e1')) loc) e1' e2' (Info $ typeOf e2', Info []) loc,
@@ -894,7 +894,7 @@ freeVars expr = case expr of
   LetPat pat e1 e2 _ _ -> freeVars e1 <> ((names (patternDimNames pat) <> freeVars e2)
                                           `without` patternVars pat)
 
-  LetFun vn (_, pats, _, _, e1) e2 _ ->
+  LetFun vn (_, pats, _, _, e1) e2 _ _ ->
     ((freeVars e1 <> names (foldMap patternDimNames pats))
       `without` foldMap patternVars pats) <>
     (freeVars e2 `without` oneName vn)

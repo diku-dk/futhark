@@ -30,6 +30,7 @@ module Language.Futhark.Attributes
 
   -- * Queries on patterns and params
   , patternIdents
+  , patternMap
   , patternType
   , patternStructType
   , patternParam
@@ -465,7 +466,7 @@ typeOf (Coerce _ _ (Info t, _) _) = t
 typeOf (Apply _ _ _ (Info t, _) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ _ _ (Info t, _) _) = t
-typeOf (LetFun name _ body _) = unscopeType (S.singleton name) $ typeOf body
+typeOf (LetFun _ _ _ (Info t) _) = t
 typeOf (LetWith _ _ _ _ _ (Info t) _) = t
 typeOf (Index _ _ (Info t, _) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
@@ -573,6 +574,12 @@ patternIdents Wildcard{}                = mempty
 patternIdents (PatternAscription p _ _) = patternIdents p
 patternIdents PatternLit{}              = mempty
 patternIdents (PatternConstr _ _ ps _ ) = mconcat $ map patternIdents ps
+
+-- | A mapping from names bound in a map to their identifier.
+patternMap :: (Functor f) => PatternBase f VName -> M.Map VName (IdentBase f VName)
+patternMap pat =
+  M.fromList $ zip (map identName idents) idents
+  where idents = S.toList $ patternIdents pat
 
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> PatternType

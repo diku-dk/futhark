@@ -722,7 +722,8 @@ LetExp :: { UncheckedExp }
 
      | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
        { let L _ (ID name) = $2
-         in LetFun name ($3, fst $4 : snd $4, (fmap declaredType $5), NoInfo, $7) $8 (srcspan $1 $>) }
+         in LetFun name ($3, fst $4 : snd $4, (fmap declaredType $5), NoInfo, $7)
+            $8 NoInfo (srcspan $1 $>) }
 
      | let VarSlice '=' Exp LetBody
                       { let ((v,_),slice,loc) = $2; ident = Ident v NoInfo loc

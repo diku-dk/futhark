@@ -109,12 +109,12 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (LetPat pat e body (t, ext) loc) =
     LetPat <$> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*>
     ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext) <*> pure loc
-  astMap tv (LetFun name (fparams, params, ret, t, e) body loc) =
+  astMap tv (LetFun name (fparams, params, ret, t, e) body body_t loc) =
     LetFun <$> mapOnName tv name <*>
     ((,,,,) <$> mapM (astMap tv) fparams <*> mapM (astMap tv) params <*>
      traverse (astMap tv) ret <*> traverse (mapOnStructType tv) t <*>
      mapOnExp tv e) <*>
-    mapOnExp tv body <*> pure loc
+    mapOnExp tv body <*> traverse (mapOnPatternType tv) body_t <*> pure loc
   astMap tv (LetWith dest src idxexps vexp body t loc) =
     LetWith <$>
     astMap tv dest <*> astMap tv src <*>
@@ -383,8 +383,8 @@ bareExp (Apply f arg _ _ loc) =
   Apply (bareExp f) (bareExp arg) NoInfo (NoInfo, NoInfo) loc
 bareExp (LetPat pat e body _ loc) =
   LetPat (barePat pat) (bareExp e) (bareExp body) (NoInfo, NoInfo) loc
-bareExp (LetFun name (fparams, params, ret, _, e) body loc) =
-  LetFun name (fparams, map barePat params, ret, NoInfo, bareExp e) (bareExp body) loc
+bareExp (LetFun name (fparams, params, ret, _, e) body _ loc) =
+  LetFun name (fparams, map barePat params, ret, NoInfo, bareExp e) (bareExp body) NoInfo loc
 bareExp (LetWith (Ident dest _ destloc) (Ident src _ srcloc) idxexps vexp body _ loc) =
   LetWith (Ident dest NoInfo destloc) (Ident src NoInfo srcloc)
   (map bareDimIndex idxexps) (bareExp vexp)
