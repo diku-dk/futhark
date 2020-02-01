@@ -646,7 +646,7 @@ data ExpBase f vn =
                          Maybe (TypeExp vn),
                          f StructType,
                          ExpBase f vn)
-              (ExpBase f vn) SrcLoc
+              (ExpBase f vn) (f PatternType) SrcLoc
 
             | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType, f [VName]) SrcLoc
 
@@ -745,7 +745,7 @@ instance Located (ExpBase f vn) where
   locOf (Negate _ pos)                 = locOf pos
   locOf (Apply _ _ _ _ loc)            = locOf loc
   locOf (LetPat _ _ _ _ loc)           = locOf loc
-  locOf (LetFun _ _ _ loc)             = locOf loc
+  locOf (LetFun _ _ _ _ loc)           = locOf loc
   locOf (LetWith _ _ _ _ _ _ loc)      = locOf loc
   locOf (Index _ _ _ loc)              = locOf loc
   locOf (Update _ _ _ pos)             = locOf pos

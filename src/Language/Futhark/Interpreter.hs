@@ -792,7 +792,7 @@ eval env (LetPat p e body (Info ret, Info retext) _) = do
   env' <- matchPattern env p v
   returned env ret retext =<< eval env' body
 
-eval env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
+eval env (LetFun f (tparams, ps, _, Info ret, fbody) body _ _) = do
   binding <- evalFunctionBinding env tparams ps ret [] fbody
   eval (env { envTerm = M.insert f binding $ envTerm env }) body
 

@@ -127,7 +127,7 @@ checkProgM (Prog doc decs) = do
 dupDefinitionError :: MonadTypeChecker m =>
                       Namespace -> Name -> SrcLoc -> SrcLoc -> m a
 dupDefinitionError space name pos1 pos2 =
-  throwError $ TypeError pos1 $
+  simpleTypeError pos1 $
   "Duplicate definition of " ++ ppSpace space ++ " " ++
   nameToString name ++ ".  Previously defined at " ++ locStr pos2
 
@@ -192,7 +192,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
         return (tparams', vtype')
 
     when (emptyDimParam $ unInfo $ expandedType vtype') $
-      throwError $ TypeError loc $
+      simpleTypeError loc $
       "All function parameters must have non-anonymous sizes.\n" ++
       "Hint: add size parameters to " ++ quote (prettyName name') ++ "."
 
@@ -322,7 +322,7 @@ checkOneModExp (ModVar v loc) = do
   (v', env) <- lookupMod loc v
   when (baseName (qualLeaf v') == nameFromString "intrinsics" &&
         baseTag (qualLeaf v') <= maxIntrinsicTag) $
-    throwError $ TypeError loc "The 'intrinsics' module may not be used in module expressions."
+    simpleTypeError loc "The 'intrinsics' module may not be used in module expressions."
   return (MTy mempty env, ModVar v' loc)
 checkOneModExp (ModImport name NoInfo loc) = do
   (name', env) <- lookupImport loc name
@@ -336,7 +336,7 @@ checkOneModExp (ModApply f e NoInfo NoInfo loc) = do
       (mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
       return (mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
     _ ->
-      throwError $ TypeError loc "Cannot apply non-parametric module."
+      simpleTypeError loc "Cannot apply non-parametric module."
 checkOneModExp (ModAscript me se NoInfo loc) = do
   (me_mod, me') <- checkOneModExp me
   (se_mty, se') <- checkSigExp se
@@ -451,17 +451,17 @@ checkTypeBind (TypeBind name l tps td doc loc) =
     case (l, l') of
       (_, Lifted)
         | l < Lifted ->
-          throwError $ TypeError loc $
+          simpleTypeError loc $
           "Non-lifted type abbreviations may not contain functions.\n" ++
           "Hint: consider using 'type^'."
       (_, SizeLifted)
         | l < SizeLifted ->
-          throwError $ TypeError loc $
+          simpleTypeError loc $
           "Non-size-lifted type abbreviations may not contain size-lifted types.\n" ++
           "Hint: consider using 'type~'."
       (Unlifted, _)
         | emptyDimParam $ unInfo $ expandedType td' ->
-            throwError $ TypeError loc $
+            simpleTypeError loc $
             "Non-lifted type abbreviations may not use anonymous sizes in their definition.\n" ++
             "Hint: use 'type~' or add size parameters to " ++
             quote (prettyName name) ++ "."
@@ -487,12 +487,12 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
   case entry' of
     Just _
       | any isTypeParam tparams' ->
-          throwError $ TypeError loc "Entry point functions may not be polymorphic."
+          simpleTypeError loc "Entry point functions may not be polymorphic."
 
       | any (not . patternOrderZero) params'
         || any (not . orderZero) rettype_params
         || not (orderZero rettype') ->
-          throwError $ TypeError loc "Entry point functions may not be higher-order."
+          simpleTypeError loc "Entry point functions may not be higher-order."
 
       | p : _ <- filter nastyParameter params' ->
           warn loc $ "Entry point parameter\n\n  " <>

@@ -221,7 +221,7 @@ transformExp (LetPat pat e1 e2 (Info t, retext) loc) = do
     withRecordReplacements rr (transformExp e2) <*>
     pure (Info t', retext) <*> pure loc
 
-transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
+transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e e_t loc)
   | any isTypeParam tparams = do
       -- Retrieve the lifted monomorphic function bindings that are produced,
       -- filter those that are monomorphic versions of the current let-bound
@@ -236,7 +236,7 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc)
   | otherwise = do
       body' <- transformExp body
       LetFun fname (tparams, params, retdecl, Info ret, body') <$>
-        transformExp e <*> pure loc
+        transformExp e <*> traverse transformType e_t <*> pure loc
 
 transformExp (If e1 e2 e3 (tp, retext) loc) = do
   e1' <- transformExp e1
@@ -400,8 +400,9 @@ noticeDims = mapM_ notice . nestedDims
 unfoldLetFuns :: [ValBind] -> Exp -> Exp
 unfoldLetFuns [] e = e
 unfoldLetFuns (ValBind _ fname _ (Info (rettype, _)) dim_params params body _ loc : rest) e =
-  LetFun fname (dim_params, params, Nothing, Info rettype, body) e' loc
+  LetFun fname (dim_params, params, Nothing, Info rettype, body) e' (Info e_t) loc
   where e' = unfoldLetFuns rest e
+        e_t = typeOf e'
 
 transformPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
 transformPattern (Id v (Info (Scalar (Record fs))) loc) = do

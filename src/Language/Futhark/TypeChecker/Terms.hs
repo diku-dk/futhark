@@ -33,7 +33,7 @@ import qualified Data.Set as S
 
 import Prelude hiding (mod)
 
-import Language.Futhark
+import Language.Futhark hiding (unscopeType)
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
@@ -92,7 +92,7 @@ usageMap = foldl comb M.empty
           in S.foldl' (ins $ Consumed loc) m' $ fromMaybe mempty cons
         ins v m k = M.insertWith (++) k [v] m
 
-combineOccurences :: MonadTypeChecker m => VName -> Usage -> Usage -> m Usage
+combineOccurences :: VName -> Usage -> Usage -> TermTypeM Usage
 combineOccurences _ (Observed loc) (Observed _) = return $ Observed loc
 combineOccurences name (Consumed wloc) (Observed rloc) =
   useAfterConsume (baseName name) rloc wloc
@@ -101,7 +101,7 @@ combineOccurences name (Observed rloc) (Consumed wloc) =
 combineOccurences name (Consumed loc1) (Consumed loc2) =
   consumeAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
 
-checkOccurences :: MonadTypeChecker m => Occurences -> m ()
+checkOccurences :: Occurences -> TermTypeM ()
 checkOccurences = void . M.traverseWithKey comb . usageMap
   where comb _    []     = return ()
         comb name (u:us) = foldM_ (combineOccurences name) u us
@@ -202,10 +202,21 @@ expType = normPatternType . typeOf
 expTypeFully :: Exp -> TermTypeM PatternType
 expTypeFully = normTypeFully . typeOf
 
+-- Wrap a function name to give it a vacuous Eq instance for SizeSource.
+newtype FName = FName (Maybe (QualName VName))
+              deriving (Show)
+
+instance Eq FName where
+  _ == _ = True
+
+instance Ord FName where
+  compare _ _ = EQ
+
 -- | What was the source of some existential size?  This is used for
 -- using the same existential variable if the same source is
 -- encountered in multiple locations.
-data SizeSource = SourceExp (ExpBase NoInfo VName)
+data SizeSource = SourceArg FName (ExpBase NoInfo VName)
+                | SourceBound (ExpBase NoInfo VName)
                 | SourceSlice
                   (Maybe (DimDecl VName))
                   (Maybe (ExpBase NoInfo VName))
@@ -240,7 +251,7 @@ newtype TermTypeM a = TermTypeM (RWST
             MonadError TypeError)
 
 instance Fail.MonadFail TermTypeM where
-  fail = typeError (noLoc :: SrcLoc) . ("unknown failure (likely a bug): "++)
+  fail = typeError (noLoc :: SrcLoc) mempty . ("unknown failure (likely a bug): "++)
 
 instance MonadUnify TermTypeM where
   getConstraints = gets stateConstraints
@@ -258,7 +269,7 @@ instance MonadUnify TermTypeM where
     i <- incCounter
     dim <- newID $ mkTypeVarName name i
     case rigidity of
-      Rigid -> constrain dim $ UnknowableSize loc
+      Rigid rsrc -> constrain dim $ UnknowableSize loc rsrc
       Nonrigid -> constrain dim $ Size Nothing $ mkUsage' loc
     return dim
 
@@ -292,7 +303,14 @@ extSize loc e = do
   prev <- gets $ M.lookup e . stateDimTable
   case prev of
     Nothing -> do
-      d <- newDimVar loc Rigid "argdim"
+      let rsrc = case e of
+                   SourceArg (FName fname) e' ->
+                     RigidArg fname $ prettyOneLine e'
+                   SourceBound e' ->
+                     RigidBound $ prettyOneLine e'
+                   SourceSlice d i j s  ->
+                     RigidSlice d $ prettyOneLine $ DimSlice i j s
+      d <- newDimVar loc (Rigid rsrc) "argdim"
       modify $ \s -> s { stateDimTable = M.insert e d $ stateDimTable s }
       return (NamedDim $ qualName d,
               Just d)
@@ -379,7 +397,7 @@ instance MonadTypeChecker TermTypeM where
     let usage = mkUsage loc $ "use of " ++ quote (pretty qn)
 
     t <- case M.lookup name $ scopeVtable scope of
-      Nothing -> throwError $ TypeError loc $
+      Nothing -> typeError loc mempty $
                  "Unknown variable " ++ quote (pretty qn) ++ "."
 
       Just (WasConsumed wloc) -> useAfterConsume (baseName name) loc wloc
@@ -504,31 +522,31 @@ funName :: Maybe Name -> String
 funName Nothing = "anonymous function"
 funName (Just fname) = "function " ++ quote (pretty fname)
 
-useAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
+useAfterConsume :: Name -> SrcLoc -> SrcLoc -> TermTypeM a
 useAfterConsume name rloc wloc =
-  throwError $ TypeError rloc $
+  typeError rloc mempty $
   "Variable " ++ quote (pretty name) ++ " previously consumed at " ++
   locStr wloc ++ ".  (Possibly through aliasing)"
 
-consumeAfterConsume :: MonadTypeChecker m => Name -> SrcLoc -> SrcLoc -> m a
+consumeAfterConsume :: Name -> SrcLoc -> SrcLoc -> TermTypeM a
 consumeAfterConsume name loc1 loc2 =
-  throwError $ TypeError loc2 $
+  typeError loc2 mempty $
   "Variable " ++ pretty name ++ " previously consumed at " ++ locStr loc1 ++ "."
 
-badLetWithValue :: MonadTypeChecker m => SrcLoc -> m a
+badLetWithValue :: SrcLoc -> TermTypeM a
 badLetWithValue loc =
-  throwError $ TypeError loc
+  typeError loc mempty
   "New value for elements in let-with shares data with source array.  This is illegal, as it prevents in-place modification."
 
-returnAliased :: MonadTypeChecker m => Maybe Name -> Name -> SrcLoc -> m ()
+returnAliased :: Maybe Name -> Name -> SrcLoc -> TermTypeM ()
 returnAliased fname name loc =
-  throwError $ TypeError loc $
+  typeError loc mempty $
   "Unique return value of " ++ funName fname ++
   " is aliased to " ++ quote (pretty name) ++ ", which is not consumed."
 
-uniqueReturnAliased :: MonadTypeChecker m => Maybe Name -> SrcLoc -> m a
+uniqueReturnAliased :: Maybe Name -> SrcLoc -> TermTypeM a
 uniqueReturnAliased fname loc =
-  throwError $ TypeError loc $
+  typeError loc mempty $
   "A unique tuple element of return value of " ++
   funName fname ++ " is aliased to some other tuple component."
 
@@ -568,7 +586,7 @@ checkPattern' (PatternParens p loc) t =
 
 checkPattern' (Id name _ loc) _
   | name' `elem` doNotShadow =
-      typeError loc $ "The " ++ name' ++ " operator may not be redefined."
+      typeError loc mempty $ "The " ++ name' ++ " operator may not be redefined."
   where name' = nameToString name
 
 checkPattern' (Id name NoInfo loc) (Ascribed t) = do
@@ -598,9 +616,10 @@ checkPattern' (TuplePattern ps loc) NoneInferred =
 
 checkPattern' (RecordPattern p_fs _) _
   | Just (f, fp) <- find (("_" `isPrefixOf`) . nameToString . fst) p_fs =
-      typeError fp $ unlines [ "Underscore-prefixed fields are not allowed."
-                             , "Did you mean " ++
-                               quote (drop 1 (nameToString f) ++ "=_") ++ "?"]
+      typeError fp mempty $
+      unlines [ "Underscore-prefixed fields are not allowed."
+              , "Did you mean " ++
+                quote (drop 1 (nameToString f) ++ "=_") ++ "?"]
 
 checkPattern' (RecordPattern p_fs loc) (Ascribed (Scalar (Record t_fs)))
   | sort (map fst p_fs) == sort (M.keys t_fs) =
@@ -611,7 +630,7 @@ checkPattern' p@(RecordPattern fields loc) (Ascribed t) = do
   fields' <- traverse (const $ newTypeVar loc "t") $ M.fromList fields
 
   when (sort (M.keys fields') /= sort (map fst fields)) $
-    typeError loc $ "Duplicate fields in record pattern " ++ pretty p
+    typeError loc mempty $ "Duplicate fields in record pattern " ++ pretty p
 
   unify (mkUsage loc "matching a record pattern") (Scalar (Record fields')) $ toStruct t
   t' <- normTypeFully t
@@ -637,7 +656,8 @@ checkPattern' (PatternAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
           PatternAscription <$> checkPattern' p (Ascribed outer_t'') <*>
           pure (TypeDecl t' (Info st)) <*> pure loc
         Nothing ->
-          typeError loc $ "Cannot match type " ++ quote (pretty outer_t') ++ " with expected type " ++
+          typeError loc mempty $
+          "Cannot match type " ++ quote (pretty outer_t') ++ " with expected type " ++
           quote (pretty st'') ++ "."
 
     NoneInferred ->
@@ -839,11 +859,13 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
         -- non-existential sizes.  This is necessary to make programs
         -- type-check without too much ceremony; see
         -- e.g. tests/inplace5.fut.
-        refine_sizes = maybe False ((==Rigid) . snd) r
+        isRigid Rigid{} = True
+        isRigid _ = False
+        refine_sizes = maybe False (isRigid . snd) r
 
         sliceSize orig_d i j stride =
           case r of
-            Just (loc, Rigid) -> do
+            Just (loc, Rigid _) -> do
               (d, ext) <-
                 lift $ extSize loc $
                 SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
@@ -865,7 +887,7 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
         adjustDims (DimSlice i j stride : idxes') (_:dims)
           | refine_sizes,
             maybe True ((==Just 0) . isInt32) i,
-            Just j' <- maybeDimFromArg =<< j,
+            Just j' <- maybeDimFromExp =<< j,
             maybe True ((==Just 1) . isInt32) stride =
               (j':) <$> adjustDims idxes' dims
 
@@ -928,10 +950,53 @@ checkAscript loc decl e shapef = do
   t' <- normTypeFully t
   decl_t' <- normTypeFully $ unInfo $ expandedType decl'
   unless (t' `subtypeOf` anyDimShapeAnnotations decl_t') $
-    typeError loc $ "Type " ++ quote (pretty t') ++ " is not a subtype of " ++
+    typeError loc mempty $ "Type " ++ quote (pretty t') ++ " is not a subtype of " ++
     quote (pretty decl_t') ++ "."
 
   return (decl', e')
+
+unscopeType :: SrcLoc
+            -> M.Map VName Ident
+            -> PatternType
+            -> TermTypeM (PatternType, [VName])
+unscopeType tloc unscoped t = do
+  (t', m) <- runStateT (traverseDims onDim t) mempty
+  return (t' `addAliases` S.map unAlias, M.elems m)
+  where onDim p (NamedDim d)
+          | Just loc <- srclocOf <$> M.lookup (qualLeaf d) unscoped =
+              if p == PosImmediate || p == PosParam
+              then inst loc $ qualLeaf d
+              else return AnyDim
+        onDim _ d = return d
+
+        inst loc d = do
+          prev <- gets $ M.lookup d
+          case prev of
+            Just d' -> return $ NamedDim $ qualName d'
+            Nothing -> do
+              d' <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope loc d) "d"
+              modify $ M.insert d d'
+              return $ NamedDim $ qualName d'
+
+        unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
+        unAlias a = a
+
+-- 'checkApplyExp' is like 'checkExp', but tries to find the "root
+-- function", for better error messages.
+checkApplyExp :: UncheckedExp -> TermTypeM (Exp, Maybe (QualName VName))
+
+checkApplyExp (Apply e1 e2 _ _ loc) = do
+  (e1', fname) <- checkApplyExp e1
+  arg <- checkArg e2
+  t <- expType e1'
+  (t1, rt, argext, exts) <- checkApply loc fname t arg
+  return (Apply e1' (argExp arg) (Info (diet t1, argext)) (Info rt, Info exts) loc,
+          fname)
+
+checkApplyExp e = do
+  e' <- checkExp e
+  return (e', case e' of Var qn _ _ -> Just qn
+                         _ -> Nothing)
 
 checkExp :: UncheckedExp -> TermTypeM Exp
 
@@ -972,7 +1037,7 @@ checkExp (RecordLit fs loc) = do
           maybe_sloc <- gets $ M.lookup f
           case maybe_sloc of
             Just sloc ->
-              lift $ typeError rloc $ "Field '" ++ pretty f ++
+              lift $ typeError rloc mempty $ "Field '" ++ pretty f ++
               " previously defined at " ++ locStr sloc ++ "."
             Nothing -> return ()
 
@@ -1014,16 +1079,17 @@ checkExp (Range start maybe_step end _ loc) = do
     ToInclusive e -> ToInclusive <$> unifyRange e
 
   -- Special case some ranges to give them a known size.
+  let dimFromBound = dimFromExp (SourceBound . bareExp)
   (dim, retext) <-
     case (isInt32 start', isInt32 <$> maybe_step', end') of
       (Just 0, Just (Just 1), UpToExclusive end'') ->
-        dimFromArg end''
+        dimFromBound end''
       (Just 0, Nothing, UpToExclusive end'') ->
-        dimFromArg end''
+        dimFromBound end''
       (Just 1, Just (Just 2), ToInclusive end'') ->
-        dimFromArg end''
+        dimFromBound end''
       _ -> do
-        d <- newDimVar loc Rigid "range_dim"
+        d <- newDimVar loc (Rigid RigidRange) "range_dim"
         return (NamedDim $ qualName d, Just d)
 
   t <- arrayOfM loc start_t (ShapeDecl [dim]) Unique
@@ -1049,7 +1115,7 @@ checkExp (Coerce e decl _ loc) = do
   -- ascription as a whole.  We use matchDims to obtain the aliasing
   -- of 'e'.
   (decl_t_rigid, ext) <-
-    instantiateDimsInReturnType loc $ unInfo $ expandedType decl'
+    instantiateDimsInReturnType loc Nothing $ unInfo $ expandedType decl'
 
   t <- expTypeFully e'
 
@@ -1064,8 +1130,8 @@ checkExp (BinOp (op, oploc) NoInfo (e1,_) (e2,_) NoInfo NoInfo loc) = do
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (p1_t, rt, p1_ext, _) <- checkApply loc ftype e1_arg
-  (p2_t, rt', p2_ext, retext) <- checkApply loc rt e2_arg
+  (p1_t, rt, p1_ext, _) <- checkApply loc (Just op') ftype e1_arg
+  (p2_t, rt', p2_ext, retext) <- checkApply loc (Just op') rt e2_arg
 
   return $ BinOp (op', oploc) (Info ftype)
     (argExp e1_arg, Info (toStruct p1_t, p1_ext))
@@ -1106,7 +1172,7 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
       e' <- checkExp e
       return $ QualParens (modname', modnameloc) e' loc
     ModFun{} ->
-      typeError loc $ "Module " ++ pretty modname ++ " is a parametric module."
+      typeError loc mempty $ "Module " ++ pretty modname ++ " is a parametric module."
   where qualifyEnv modname' env =
           env { envNameMap = M.map (qualify' modname') $ envNameMap env }
         qualify' modname' (QualName qs name) =
@@ -1145,12 +1211,7 @@ checkExp (Negate arg loc) = do
   arg' <- require "numeric negation" anyNumberType =<< checkExp arg
   return $ Negate arg' loc
 
-checkExp (Apply e1 e2 _ _ loc) = do
-  e1' <- checkExp e1
-  arg <- checkArg e2
-  t <- expType e1'
-  (t1, rt, argext, exts) <- checkApply loc t arg
-  return $ Apply e1' (argExp arg) (Info (diet t1, argext)) (Info rt, Info exts) loc
+checkExp e@Apply{} = fst <$> checkApplyExp e
 
 checkExp (LetPat pat e body _ loc) =
   sequentially (checkExp e) $ \e' e_occs -> do
@@ -1166,13 +1227,11 @@ checkExp (LetPat pat e body _ loc) =
     incLevel $ bindingPattern pat (Ascribed t) $ \pat' -> do
       body' <- checkExp body
       (body_t, retext) <-
-        instantiateDimsInReturnType loc .
-        unscopeType (S.map identName $ patternIdents pat')
-        =<< expTypeFully body'
+        unscopeType loc (patternMap pat') =<< expTypeFully body'
 
       return $ LetPat pat' e' body' (Info body_t, Info retext) loc
 
-checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
+checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body NoInfo loc) =
   sequentially (checkBinding (Just name, maybe_retdecl, tparams, params, e, loc)) $
   \(tparams', params', maybe_retdecl', rettype, _, e') closure -> do
 
@@ -1184,12 +1243,22 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
       let arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
           ftype = foldr (arrow . patternParam) rettype params'
           entry = BoundV Local tparams' $ ftype `setAliases` closure'
-          bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope
-                              , scopeNameMap = M.insert (Term, name) (qualName name') $
-                                               scopeNameMap scope }
+          bindF scope = scope { scopeVtable =
+                                  M.insert name' entry $ scopeVtable scope
+                              , scopeNameMap =
+                                  M.insert (Term, name) (qualName name') $
+                                  scopeNameMap scope }
       body' <- localScope bindF $ checkExp body
 
-      return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
+      -- We fake an ident here, but it's OK as it can't be a size
+      -- anyway.
+      let fake_ident = Ident name' (Info $ fromStruct ftype) noLoc
+      (body_t, _) <-
+        unscopeType loc (M.singleton name' fake_ident) =<<
+        expTypeFully body'
+
+      return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e')
+        body' (Info body_t) loc
 
 checkExp (LetWith dest src idxes ve body NoInfo loc) =
   sequentially (checkIdent src) $ \src' _ -> do
@@ -1203,14 +1272,14 @@ checkExp (LetWith dest src idxes ve body NoInfo loc) =
   (elemt, _) <- sliceShape (Just (loc, Nonrigid)) idxes' =<< normTypeFully t
 
   unless (unique src_t) $
-    typeError loc $ "Source " ++ quote (pretty (identName src)) ++
+    typeError loc mempty $ "Source " ++ quote (pretty (identName src)) ++
     " has type " ++ pretty src_t ++ ", which is not unique."
   vtable <- asks $ scopeVtable . termScope
   forM_ (aliases src_t) $ \v ->
     case aliasVar v `M.lookup` vtable of
       Just (BoundV Local _ v_t)
         | not $ unique v_t ->
-            typeError loc $ "Source " ++ quote (pretty (identName src)) ++
+            typeError loc mempty $ "Source " ++ quote (pretty (identName src)) ++
             " aliases " ++ quote (prettyName (aliasVar v)) ++ ", which is not consumable."
       _ -> return ()
 
@@ -1221,7 +1290,9 @@ checkExp (LetWith dest src idxes ve body NoInfo loc) =
 
     bindingIdent dest (src_t `setAliases` S.empty) $ \dest' -> do
       body' <- consuming src' $ checkExp body
-      body_t <- unscopeType (S.singleton $ identName dest') <$> expTypeFully body'
+      (body_t, _) <-
+        unscopeType loc (M.singleton (identName dest') dest') =<<
+        expTypeFully body'
       return $ LetWith dest' src' idxes' ve' body' (Info body_t) loc
 
 checkExp (Update src idxes ve loc) = do
@@ -1234,7 +1305,7 @@ checkExp (Update src idxes ve loc) = do
 
     src_t <- expTypeFully src'
     unless (unique src_t) $
-      typeError loc $ "Source " ++ quote (pretty src) ++
+      typeError loc mempty $ "Source " ++ quote (pretty src) ++
       " has type " ++ pretty src_t ++ ", which is not unique"
 
     let src_als = aliases src_t
@@ -1259,7 +1330,7 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   maybe_a' <- onRecordField (const ve_t) fields <$> expTypeFully src'
   case maybe_a' of
     Just a' -> return $ RecordUpdate src' fields ve' (Info a') loc
-    Nothing -> typeError loc $ pretty $
+    Nothing -> typeError loc mempty $ pretty $
                text "Full type of" </>
                indent 2 (ppr src) </>
                text " is not known at this point.  Add a size annotation to the original record to disambiguate."
@@ -1268,7 +1339,10 @@ checkExp (Index e idxes _ loc) = do
   (t, _) <- newArrayType loc "e" $ length idxes
   e' <- unifies "being indexed at" t =<< checkExp e
   idxes' <- mapM checkDimIndex idxes
-  (t', retext) <- sliceShape (Just (loc, Rigid)) idxes' =<< expTypeFully e'
+  -- XXX, the RigidSlice here will be overridden in sliceShape with a proper value.
+  (t', retext) <-
+    sliceShape (Just (loc, Rigid (RigidSlice Nothing ""))) idxes' =<<
+    expTypeFully e'
   return $ Index e' idxes' (Info t', Info retext) loc
 
 checkExp (Unsafe e loc) =
@@ -1297,7 +1371,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) =
         Just (te, st, _) ->
           return (Just te, st)
         Nothing -> do
-          ret <- inferReturnSizes params'' $
+          ret <- inferReturnSizes params'' $ toStruct $
                  inferReturnUniqueness params'' body_t
           return (Nothing, ret)
 
@@ -1341,12 +1415,12 @@ checkExp (OpSection op _ loc) = do
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
-  (t1, rt, argext, retext) <- checkApply loc ftype e_arg
+  (t1, rt, argext, retext) <- checkApply loc (Just op') ftype e_arg
   case rt of
     Scalar (Arrow _ _ t2 rettype) ->
       return $ OpSectionLeft op' (Info ftype) (argExp e_arg)
       (Info (toStruct t1, argext), Info $ toStruct t2) (Info rettype, Info retext) loc
-    _ -> typeError loc $
+    _ -> typeError loc mempty $
          "Operator section with invalid operator of type " ++ pretty ftype
 
 checkExp (OpSectionRight op _ e _ NoInfo loc) = do
@@ -1355,10 +1429,10 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   case ftype of
     Scalar (Arrow as1 m1 t1 (Scalar (Arrow as2 m2 t2 ret))) -> do
       (t2', Scalar (Arrow _ _ t1' rettype), argext, _) <-
-        checkApply loc (Scalar $ Arrow as2 m2 t2 $ Scalar $ Arrow as1 m1 t1 ret) e_arg
+        checkApply loc (Just op') (Scalar $ Arrow as2 m2 t2 $ Scalar $ Arrow as1 m1 t1 ret) e_arg
       return $ OpSectionRight op' (Info ftype) (argExp e_arg)
         (Info $ toStruct t1', Info (toStruct t2', argext)) (Info rettype) loc
-    _ -> typeError loc $
+    _ -> typeError loc mempty $
          "Operator section with invalid operator of type " ++ pretty ftype
 
 checkExp (ProjectSection fields NoInfo loc) = do
@@ -1500,7 +1574,7 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
                           ForIn xpat' e',
                           loopbody')
             | otherwise ->
-                typeError (srclocOf e) $
+                typeError (srclocOf e) mempty $
                 "Iteratee of a for-in loop must be an array, but expression has type " ++ pretty t
 
       While cond ->
@@ -1541,7 +1615,7 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
   unify (mkUsage (srclocOf mergeexp') "matching initial loop values to pattern")
     merge_t' . toStruct =<< expTypeFully mergeexp'
 
-  (loopt, retext) <- instantiateDimsInReturnType loc loopt_anydims
+  (loopt, retext) <- instantiateDimsInType loc RigidLoop loopt_anydims
   -- We set all of the uniqueness to be unique.  This is intentional,
   -- and matches what happens for function calls.  Those arrays that
   -- really *cannot* be consumed will alias something unconsumable,
@@ -1605,20 +1679,20 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
             | unique pat_v_t,
               v:_ <- S.toList $
                      S.map aliasVar (aliases t) `S.intersection` bound_outside =
-                lift $ typeError loc $
+                lift $ typeError loc mempty $
                 "Loop return value corresponding to merge parameter " ++
                 quote (prettyName pat_v) ++ " aliases " ++ prettyName v ++ "."
 
             | otherwise = do
                 (cons,obs) <- get
                 unless (S.null $ aliases t `S.intersection` cons) $
-                  lift $ typeError loc $
+                  lift $ typeError loc mempty $
                   "Loop return value for merge parameter " ++
                   quote (prettyName pat_v) ++
                   " aliases other consumed merge parameter."
                 when (unique pat_v_t &&
                       not (S.null (aliases t `S.intersection` (cons<>obs)))) $
-                  lift $ typeError loc $
+                  lift $ typeError loc mempty $
                   "Loop return value for consuming merge parameter " ++
                   quote (prettyName pat_v) ++ " aliases previously returned value."
                 if unique pat_v_t
@@ -1757,8 +1831,9 @@ checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
           let ps = fmap (\(CasePat p _ _) -> p) cs
           in case unmatched id $ NE.toList ps of
               []  -> return ()
-              ps' -> typeError loc $ "Unmatched cases in match expression: \n"
-                                     ++ unlines (map (("  " ++) . pretty) ps')
+              ps' -> typeError loc mempty $
+                     "Unmatched cases in match expression: \n"
+                     ++ unlines (map (("  " ++) . pretty) ps')
         checkUnmatched' _ = return ()
         tv = ASTMapper { mapOnExp =
                            \e' -> checkUnmatched' e' >> return e'
@@ -1928,18 +2003,26 @@ checkArg arg = do
   arg_t <- expType arg'
   return (arg', arg_t, dflow, srclocOf arg')
 
-instantiateDimsInReturnType :: SrcLoc -> TypeBase (DimDecl VName) als
-                            -> TermTypeM (TypeBase (DimDecl VName) als, [VName])
-instantiateDimsInReturnType tloc = instantiateEmptyArrayDims tloc "ret" Rigid
+instantiateDimsInType :: SrcLoc -> RigidSource
+                      -> TypeBase (DimDecl VName) als
+                      -> TermTypeM (TypeBase (DimDecl VName) als, [VName])
+instantiateDimsInType tloc rsrc =
+  instantiateEmptyArrayDims tloc "d" $ Rigid rsrc
 
-checkApply :: SrcLoc -> PatternType -> Arg
+instantiateDimsInReturnType :: SrcLoc -> Maybe (QualName VName)
+                            -> TypeBase (DimDecl VName) als
+                            -> TermTypeM (TypeBase (DimDecl VName) als, [VName])
+instantiateDimsInReturnType tloc fname =
+  instantiateEmptyArrayDims tloc "ret" $ Rigid $ RigidRet fname
+
+checkApply :: SrcLoc -> Maybe (QualName VName) -> PatternType -> Arg
            -> TermTypeM (PatternType, PatternType, Maybe VName, [VName])
-checkApply loc (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) = do
+checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) = do
   expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
   -- Perform substitutions of instantiated variables in the types.
   tp1' <- normTypeFully tp1
-  (tp2', ext) <- instantiateDimsInReturnType loc =<< normTypeFully tp2
+  (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
   argtype' <- normTypeFully argtype
 
   occur [observation as loc]
@@ -1964,18 +2047,18 @@ checkApply loc (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc
   let tp2'' = applySubst parsubst $ returnType tp2' (diet tp1') argtype'
 
   return (tp1', tp2'', argext, ext)
-  where sizeSubst (Scalar (Prim (Signed Int32))) e = dimFromArg e
+  where sizeSubst (Scalar (Prim (Signed Int32))) e = dimFromArg fname e
         sizeSubst _ _ = return (AnyDim, Nothing)
 
-checkApply loc tfun@(Scalar TypeVar{}) arg = do
+checkApply loc fname tfun@(Scalar TypeVar{}) arg = do
   tv <- newTypeVar loc "b"
   unify (mkUsage loc "use as function") (toStruct tfun) $
     Scalar $ Arrow mempty Unnamed (toStruct (argType arg)) tv
   tfun' <- normPatternType tfun
-  checkApply loc tfun' arg
+  checkApply loc fname tfun' arg
 
-checkApply loc ftype arg =
-  typeError loc $
+checkApply loc _ ftype arg =
+  typeError loc mempty $
   "Attempt to apply an expression of type " ++ pretty ftype ++
   " to an argument of type " ++ pretty (argType arg) ++ "."
 
@@ -1985,20 +2068,23 @@ isInt32 (IntLit k' _ _) = Just $ fromInteger k'
 isInt32 (Negate x _) = negate <$> isInt32 x
 isInt32 _ = Nothing
 
-maybeDimFromArg :: Exp -> Maybe (DimDecl VName)
-maybeDimFromArg (Var v _ _) = Just $ NamedDim v
-maybeDimFromArg (Parens e _) = maybeDimFromArg e
-maybeDimFromArg (QualParens _ e _) = maybeDimFromArg e
-maybeDimFromArg e = ConstDim . fromIntegral <$> isInt32 e
+maybeDimFromExp :: Exp -> Maybe (DimDecl VName)
+maybeDimFromExp (Var v _ _) = Just $ NamedDim v
+maybeDimFromExp (Parens e _) = maybeDimFromExp e
+maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
+maybeDimFromExp e = ConstDim . fromIntegral <$> isInt32 e
 
-dimFromArg :: Exp -> TermTypeM (DimDecl VName, Maybe VName)
-dimFromArg (Parens e _) = dimFromArg e
-dimFromArg (QualParens _ e _) = dimFromArg e
-dimFromArg e
-  | Just d <- maybeDimFromArg e =
+dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
+dimFromExp rf (Parens e _) = dimFromExp rf e
+dimFromExp rf (QualParens _ e _) = dimFromExp rf e
+dimFromExp rf e
+  | Just d <- maybeDimFromExp e =
       return (d, Nothing)
   | otherwise =
-      extSize (srclocOf e) $ SourceExp $ bareExp e
+      extSize (srclocOf e) $ rf e
+
+dimFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
+dimFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
 
 -- | @returnType ret_type arg_diet arg_type@ gives result of applying
 -- an argument the given types to a function with the given return
@@ -2044,10 +2130,10 @@ consumeArg :: SrcLoc -> PatternType -> Diet -> TermTypeM [Occurence]
 consumeArg loc (Scalar (Record ets)) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
 consumeArg loc (Array _ Nonunique _ _) Consume =
-  typeError loc "Consuming parameter passed non-unique argument."
+  typeError loc mempty "Consuming parameter passed non-unique argument."
 consumeArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
   | not $ contravariantArg t1 d =
-      typeError loc "Non-consuming higher-order parameter passed consuming argument."
+      typeError loc mempty "Non-consuming higher-order parameter passed consuming argument."
   where contravariantArg (Array _ Unique _ _) Observe =
           False
         contravariantArg (Scalar (TypeVar _ Unique _ _)) Observe =
@@ -2123,13 +2209,13 @@ verifyConstructive tparams params body = do
           Nothing
 
         ambig loc ds t =
-          Left $
-          TypeError loc $ unlines [ "Inferred expression to have type:"
-                                  , sindent $ pretty t
-                                  , "Where the following sizes are ambiguous:"
-                                  , "  " ++ intercalate ", " (map prettyName ds)
-                                  , "Add type annotations to disambiguate."
-                                  ]
+          Left $ TypeError loc mempty $
+          unlines [ "Inferred expression to have type:"
+                  , sindent $ pretty t
+                  , "Where the following sizes are ambiguous:"
+                  , "  " ++ intercalate ", " (map prettyName ds)
+                  , "Add type annotations to disambiguate."
+                  ]
 
         sindent = intercalate "\n" . map ("  "++) . lines
 
@@ -2166,7 +2252,8 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
   bindSpaced [(Term, fname)] $ do
     fname' <- checkName Term fname loc
     when (nameToString fname `elem` doNotShadow) $
-      typeError loc $ "The " ++ nameToString fname ++ " operator may not be redefined."
+      typeError loc mempty $
+      "The " ++ nameToString fname ++ " operator may not be redefined."
 
     return (fname', tparams', params'', maybe_retdecl'', rettype'', retext, body'')
 
@@ -2184,28 +2271,32 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList . M.map s
                 Scalar $ Prim $ FloatType Float64
               warn usage "Defaulting ambiguous type to `f64`."
           | otherwise =
-              typeError usage $
+              typeError usage mempty $
               unlines ["Type is ambiguous (could be one of " ++ intercalate ", " (map pretty ots) ++ ").",
                        "Add a type annotation to disambiguate the type."]
 
         fixOverloaded (_, NoConstraint _ usage) =
-          typeError usage $ unlines ["Type of expression is ambiguous.",
-                                     "Add a type annotation to disambiguate the type."]
+          typeError usage mempty $
+          unlines ["Type of expression is ambiguous.",
+                    "Add a type annotation to disambiguate the type."]
 
         fixOverloaded (_, Equality usage) =
-          typeError usage $ unlines ["Type is ambiguous (must be equality type).",
-                                     "Add a type annotation to disambiguate the type."]
+          typeError usage mempty $
+          unlines ["Type is ambiguous (must be equality type).",
+                    "Add a type annotation to disambiguate the type."]
 
         fixOverloaded (_, HasFields fs usage) =
-          typeError usage $ unlines ["Type is ambiguous.  Must be record with fields:",
-                                     unlines $ map field $ M.toList fs,
-                                     "Add a type annotation to disambiguate the type."]
+          typeError usage mempty $
+          unlines ["Type is ambiguous.  Must be record with fields:",
+                    unlines $ map field $ M.toList fs,
+                    "Add a type annotation to disambiguate the type."]
           where field (l, t) = pretty $ indent 2 $ ppr l <> colon <+> align (ppr t)
 
         fixOverloaded (_, HasConstrs cs usage) =
-          typeError usage $ unlines [ "Type is ambiguous (must be a sum type with constructors: " ++
-                                      pretty (Sum cs) ++ ")."
-                                    , "Add a type annotation to disambiguate the type."]
+          typeError usage mempty $
+          unlines [ "Type is ambiguous (must be a sum type with constructors: " ++
+                    pretty (Sum cs) ++ ")."
+                  , "Add a type annotation to disambiguate the type."]
 
         fixOverloaded _ = return ()
 
@@ -2220,15 +2311,15 @@ hiddenParamNames params = hidden
 
 inferredReturnType :: SrcLoc -> [Pattern] -> PatternType -> TermTypeM StructType
 inferredReturnType loc params t =
-  -- The inferred type may refer to names that are bound by
-  -- the parameter patterns, but which will not be visible
-  -- in the type.  These we must turn into fresh type
-  -- variables, which will be existential in the return
-  -- type.
-  fmap fst $
-  instantiateEmptyArrayDims loc "inferret" Rigid $
-  toStruct $ unscopeType (hiddenParamNames params) $ fromStruct $
+  -- The inferred type may refer to names that are bound by the
+  -- parameter patterns, but which will not be visible in the type.
+  -- These we must turn into fresh type variables, which will be
+  -- existential in the return type.
+  fmap (toStruct . fst) $
+  unscopeType loc
+  (M.filterWithKey (const . (`S.member` hidden)) $ foldMap patternMap params) $
   inferReturnUniqueness params t
+  where hidden = hiddenParamNames params
 
 checkBinding :: (Maybe Name, Maybe UncheckedTypeExp,
                  [UncheckedTypeParam], [UncheckedPattern],
@@ -2334,14 +2425,14 @@ checkGlobalAliases params body_t loc = do
             S.map identName (mconcat (map patternIdents params))
   case als of
     v:_ | not $ null params ->
-      typeError loc $
+      typeError loc mempty $
       unlines [ "Function result aliases the free variable " <>
                 quote (prettyName v) <> "."
               , "Use " ++ quote "copy" ++ " to break the aliasing."]
     _ ->
       return ()
 
-inferReturnUniqueness :: [Pattern] -> PatternType -> StructType
+inferReturnUniqueness :: [Pattern] -> PatternType -> PatternType
 inferReturnUniqueness params t =
   let forbidden = aliasesMultipleTimes t
       uniques = uniqueParamNames params
@@ -2350,9 +2441,9 @@ inferReturnUniqueness params t =
       delve t'
         | all (`S.member` uniques) (boundArrayAliases t'),
           not $ any ((`S.member` forbidden) . aliasVar) (aliases t') =
-            toStruct t'
+            t'
         | otherwise =
-            toStruct $ t' `setUniqueness` Nonunique
+            t' `setUniqueness` Nonunique
   in delve t
 
 -- An alias inhibits uniqueness if it is used in disjoint values.
@@ -2390,7 +2481,7 @@ nothingMustBeUnique loc = check
         check (Scalar (TypeVar _ Unique _ _)) = bad
         check (Scalar (Record fs)) = mapM_ check fs
         check _ = return ()
-        bad = typeError loc "A top-level constant cannot have a unique type."
+        bad = typeError loc mempty "A top-level constant cannot have a unique type."
 
 -- | Verify certain restrictions on function parameters, and bail out
 -- on dubious constructions.
@@ -2404,12 +2495,13 @@ verifyFunctionParams params =
   where
     verifyParams forbidden (p:ps)
       | d:_ <- S.toList $ patternDimNames p `S.intersection` forbidden =
-          typeError p $ unlines [ "Parameter " ++ quote (pretty p) ++
-                                  " refers to size " ++ quote (prettyName d) ++ ","
-                                , "which will not be accessible to the caller, possibly because it is nested in a tuple or record."
-                                , ""
-                                , "Consider ascribing an explicit type that does not reference "
-                                  ++ quote (prettyName d) ++ "."]
+          typeError p mempty $
+          unlines [ "Parameter " ++ quote (pretty p) ++
+                    " refers to size " ++ quote (prettyName d) ++ ","
+                  , "which will not be accessible to the caller, possibly because it is nested in a tuple or record."
+                  , ""
+                  , "Consider ascribing an explicit type that does not reference "
+                    ++ quote (prettyName d) ++ "."]
       | otherwise = verifyParams forbidden' ps
       where forbidden' =
               case patternParam p of
@@ -2460,14 +2552,15 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           return $ Just $ Left $ TypeParamDim k $ srclocOf usage
         closeOver (k, ParamType l loc) =
           return $ Just $ Left $ TypeParamType l k loc
-        closeOver (k, UnknowableSize sloc)
+        closeOver (k, UnknowableSize sloc _)
           | k `S.member` param_sizes =
-              typeError defloc $
-              unlines [ "Unknowable size " ++ quote (prettyName k) ++
-                        " produced at " ++ locStr sloc
-                      , "imposes constraint on type of " ++ quote (prettyName defname) ++
-                        ", which is inferred as:"
-                      , unlines $ map (++"  ") $ lines $ pretty t ]
+              typeError defloc mempty $
+              intercalate "\n"
+              [ "Unknowable size " ++ quote (prettyName k) ++
+                " produced at " ++ locStrRel defloc sloc
+              , "imposes constraint on type of " ++ quote (prettyName defname) ++
+                ", which is inferred as:"
+              , intercalate "\n" $ map ("  "++) $ lines $ pretty t ]
           | k `S.member` produced_sizes =
               return $ Just $ Right k
         closeOver (_, _) =
@@ -2527,8 +2620,11 @@ checkFunBody params body maybe_rettype loc = do
       body_t <- expTypeFully body'
       -- We need to turn any sizes provided by "hidden" parameter
       -- names into existential sizes instead.
-      (body_t', _) <- instantiateEmptyArrayDims loc "hidden" Rigid $
-                      unscopeType (hiddenParamNames params) body_t
+      let hidden = hiddenParamNames params
+      (body_t', _) <- unscopeType loc
+                      (M.filterWithKey (const . (`S.member` hidden)) $
+                       foldMap patternMap params)
+                      body_t
 
       let usage = mkUsage (srclocOf body) "return type annotation"
       expect usage rettype_withdims $ toStruct body_t'
@@ -2538,7 +2634,8 @@ checkFunBody params body maybe_rettype loc = do
       rettype' <- normTypeFully rettype
       body_t'' <- normTypeFully rettype -- Substs may have changed.
       unless (body_t'' `subtypeOf` rettype') $
-        typeError (srclocOf body) $ "Body type " ++ quote (pretty body_t'') ++
+        typeError (srclocOf body) mempty $
+        "Body type " ++ quote (pretty body_t'') ++
         " is not a subtype of annotated type " ++
         quote (pretty rettype') ++ "."
 
@@ -2567,7 +2664,8 @@ consume loc als = do
                          | otherwise -> True
                        _ -> False
   case filter (not . consumable) $ map aliasVar $ S.toList als of
-    v:_ -> typeError loc $ "Attempt to consume variable " ++ quote (prettyName v)
+    v:_ -> typeError loc mempty $
+           "Attempt to consume variable " ++ quote (prettyName v)
            ++ ", which is not allowed."
     [] -> occur [consumption als loc]
 

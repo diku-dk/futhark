@@ -21,7 +21,8 @@ import Prelude hiding (abs, mod)
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad
-import Language.Futhark.TypeChecker.Unify (Rigidity(..), doUnification)
+import Language.Futhark.TypeChecker.Unify
+  (Rigidity(..), RigidSource(..), doUnification)
 import Language.Futhark.TypeChecker.Types
 import Futhark.Util.Pretty
 
@@ -181,10 +182,10 @@ refineEnv loc tset env tname ps t
                               TypeSub $ TypeAbbr l cur_ps t),
                               (v, TypeSub $ TypeAbbr l ps t)])
                 env)
-      else throwError $ TypeError loc $ "Cannot refine a type having " <>
+      else throwError $ TypeError loc mempty $ "Cannot refine a type having " <>
            tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
   | otherwise =
-      throwError $ TypeError loc $
+      throwError $ TypeError loc mempty $
       pretty tname ++ " is not an abstract type in the module type."
   where tpMsg [] = "no type parameters"
         tpMsg xs = "type parameters " <> unwords (map pretty xs)
@@ -235,7 +236,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
       _ ->
         missingType loc $ fmap baseName name
   where mismatchedLiftedness name_l abs name mod_t =
-          Left $ TypeError loc $
+          Left $ TypeError loc mempty $
           unlines ["Module defines",
                    sindent $ ppTypeAbbr abs name mod_t,
                    "but module type requires " ++ what ++ "."]
@@ -244,7 +245,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
                                       Lifted -> "a lifted type"
 
         anonymousSizes abs name mod_t =
-          Left $ TypeError loc $
+          Left $ TypeError loc mempty $
           unlines ["Module defines",
                    sindent $ ppTypeAbbr abs name mod_t,
                    "which contains anonymous sizes, but module type requires non-lifted type."]
@@ -290,17 +291,17 @@ resolveMTyNames = resolveMTyNames'
 
 missingType :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingType loc name =
-  Left $ TypeError loc $
+  Left $ TypeError loc mempty $
   "Module does not define a type named " ++ pretty name ++ "."
 
 missingVal :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingVal loc name =
-  Left $ TypeError loc $
+  Left $ TypeError loc mempty $
   "Module does not define a value named " ++ pretty name ++ "."
 
 missingMod :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingMod loc name =
-  Left $ TypeError loc $
+  Left $ TypeError loc mempty $
   "Module does not define a module named " ++ pretty name ++ "."
 
 mismatchedType :: SrcLoc
@@ -310,7 +311,7 @@ mismatchedType :: SrcLoc
                -> (Liftedness, [TypeParam], StructType)
                -> Either TypeError b
 mismatchedType loc abs name spec_t env_t =
-  Left $ TypeError loc $
+  Left $ TypeError loc mempty $
   unlines ["Module defines",
            sindent $ ppTypeAbbr abs name env_t,
            "but module type requires",
@@ -345,10 +346,12 @@ matchMTys orig_mty orig_mty_sig =
                -> Either TypeError (M.Map VName VName)
 
     matchMTys' _ (MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
-      Left $ TypeError loc "Cannot match parametric module with non-parametric module type."
+      Left $ TypeError loc mempty
+      "Cannot match parametric module with non-parametric module type."
 
     matchMTys' _ (MTy _ ModEnv{}) (MTy _ ModFun{}) loc =
-      Left $ TypeError loc "Cannot match non-parametric module with paramatric module type."
+      Left $ TypeError loc mempty
+      "Cannot match non-parametric module with paramatric module type."
 
     matchMTys' old_abs_subst_to_type (MTy mod_abs mod) (MTy sig_abs sig) loc = do
       -- Check that abstract types in 'sig' have an implementation in
@@ -365,9 +368,11 @@ matchMTys orig_mty orig_mty_sig =
     matchMods :: TypeSubs -> Mod -> Mod -> SrcLoc
               -> Either TypeError (M.Map VName VName)
     matchMods _ ModEnv{} ModFun{} loc =
-      Left $ TypeError loc "Cannot match non-parametric module with parametric module type."
+      Left $ TypeError loc mempty
+      "Cannot match non-parametric module with parametric module type."
     matchMods _ ModFun{} ModEnv{} loc =
-      Left $ TypeError loc "Cannot match parametric module with non-parametric module type."
+      Left $ TypeError loc mempty
+      "Cannot match parametric module with non-parametric module type."
 
     matchMods abs_subst_to_type (ModEnv mod) (ModEnv sig) loc =
       matchEnvs abs_subst_to_type mod sig loc
@@ -455,7 +460,7 @@ matchMTys orig_mty orig_mty_sig =
       case matchValBinding loc spec_v v of
         Nothing -> return (spec_name, name)
         Just problem ->
-          Left $ TypeError loc $ pretty $
+          Left $ TypeError loc mempty $ pretty $
           text "Module type specifies" </>
           indent 2 (ppValBind spec_name spec_v) </>
           text "but module provides" </>
@@ -466,8 +471,8 @@ matchMTys orig_mty orig_mty_sig =
     matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
       case doUnification loc tps
            Nonrigid (toStruct orig_spec_t)
-           Rigid (toStruct orig_t) of
-        Left (TypeError _ err) -> Just $ Just err
+           (Rigid RigidUnify) (toStruct orig_t) of
+        Left (TypeError _ _ err) -> Just $ Just err
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
         Right t | removeShapeAnnotations t `subtypeOf`

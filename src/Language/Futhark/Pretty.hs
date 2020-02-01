@@ -260,7 +260,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
                         Match{}     -> True
                         ArrayLit{}  -> False
                         _           -> hasArrayLit e
-  pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
+  pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _ _) =
     text "let" <+> pprName fname <+> spread (map ppr tparams ++ map ppr params) <>
     retdecl' <+> equals </> indent 2 (ppr e) </>
     letBody body

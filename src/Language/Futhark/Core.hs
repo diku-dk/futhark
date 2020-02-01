@@ -10,6 +10,7 @@ module Language.Futhark.Core
 
   -- * Location utilities
   , locStr
+  , locStrRel
   , prettyStacktrace
 
   -- * Name handling
@@ -123,6 +124,24 @@ locStr a =
       | otherwise ->
           first_part ++ "-" ++ show line2 ++ ":" ++ show col2
       where first_part = file ++ ":" ++ show line1 ++ ":" ++ show col1
+
+
+-- | Like 'locStr', but @locStrRel prev now@ prints the location @now@
+-- with the file name left out if the same as @prev@.  This is useful
+-- when printing messages that are all in the context of some
+-- initially printed location (e.g. the first mention contains the
+-- file name; the rest just line and column name).
+locStrRel :: (Located a, Located b) => a -> b -> String
+locStrRel a b =
+  case (locOf a, locOf b) of
+    (Loc (Pos a_file _ _ _) _, Loc (Pos b_file line1 col1 _) (Pos _ line2 col2 _))
+      | a_file == b_file,
+        line1 == line2 ->
+          first_part ++ "-" ++ show col2
+      | a_file == b_file ->
+          first_part ++ "-" ++ show line2 ++ ":" ++ show col2
+      where first_part = show line1 ++ ":" ++ show col1
+    _ -> locStr b
 
 -- | Given a list of strings representing entries in the stack trace
 -- and the index of the frame to highlight, produce a final
