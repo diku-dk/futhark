@@ -134,15 +134,16 @@ and are of type ``()``.
 An array value is written as a sequence of zero or more
 comma-separated values enclosed in square brackets: ``[1,2,3]``.  An
 array type is written as ``[d]t``, where ``t`` is the element type of
-the array, and ``d`` is an integer indicating the size.  We typically
-elide ``d``, in which case the size will be inferred.  As an example,
-an array of three integers could be written as ``[1,2,3]``, and has
-type ``[3]i32``.  An empty array is written as ``[]``, and its type is
+the array, and ``d`` is an integer or variable indicating the size.
+We can often elide ``d`` and write just ``[]`` (an *anonymous size*),
+in which case the size will be inferred.  As an example, an array of
+three integers could be written as ``[1,2,3]``, and has type
+``[3]i32``.  An empty array is written as ``[]``, and its type is
 inferred from its use.  When writing Futhark values for such uses as
 ``futhark test`` (but not when writing programs), empty arrays are
-written ``empty([0]t)`` for an empty array of type ``[0]t``.  All
-dimensions must be given a size, and at least one must be zero,
-e.g. ``empty([2][0]i32)``.
+written ``empty([0]t)`` for an empty array of type ``[0]t``.  When
+using ``empty``, all dimensions must be given a size, and at least one
+must be zero, e.g. ``empty([2][0]i32)``.
 
 Multi-dimensional arrays are supported in Futhark, but they must be
 *regular*, meaning that all inner arrays must have the same shape.
@@ -165,10 +166,7 @@ a ``#``-prefixed *name*, followed by zero or more types, called its
 *payload*.  **Note:** The current implementation of sum types is
 fairly inefficient, in that all possible constructors of a sum-typed
 value will be resident in memory.  Avoid using sum types where
-multiple constructors have large payloads.  Further, there is an
-implementation weakness where arrays of sum types with an array
-payload may result in incorrect size inference and run-time errors.
-Try to avoid these for now.
+multiple constructors have large payloads.
 
 .. productionlist::
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
@@ -242,10 +240,10 @@ of the function::
 
 Hindley-Milner-style type inference is supported.  A parameter may be
 given a type with the notation ``(name: type)``.  Functions may not be
-recursive.  The programmer may put *size declarations* in
-the return type and parameter types; see `Size Types`_.  A
-function can be *polymorphic* by using type parameters, in the same
-way as for `Type Abbreviations`_::
+recursive.  You may put *size annotations* in the return type and
+parameter types; see `Size Types`_.  A function can be *polymorphic*
+by using type parameters, in the same way as for `Type
+Abbreviations`_::
 
   let reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
@@ -507,7 +505,7 @@ in natural text.
   **Associativity**  **Operators**
   =================  =============
   left               ``,``
-  left               ``:``
+  left               ``:``, ``:>``
   left               ``||``
   left               ``&&``
   left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=``
@@ -619,6 +617,20 @@ and ``j`` become the length of the array.  If ``s`` is negative, ``i`` becomes
 the length of the array minus one, and ``j`` becomes minus one.  This means that
 ``a[::-1]`` is the reverse of the array ``a``.
 
+In the general case, the size of the array produced by a slice is
+unknown (see `Size types`_).  In a few cases, the size is known
+statically:
+
+  * ``a[0:n]`` has size ``n``
+
+  * ``a[:n]`` has size ``n``
+
+  * ``a[0:n:1]`` has size ``n``
+
+  * ``a[:n:1]`` has size ``n``
+
+This holds only if ``n`` is a variable or constant.
+
 ``[x, y, z]``
 .............
 
@@ -634,6 +646,14 @@ proceeds stride of ``y-x`` until reaching ``z`` (inclusive).  The
 run-time error occurs if ``z`` is lesser than ``x`` or ``y``, or if
 ``x`` and ``y`` are the same value.
 
+In the general case, the size of the array produced by a range is
+unknown (see `Size types`_).  In a few cases, the size is known
+statically:
+
+  * ``1..2...n`` has size ``n``
+
+This holds only if ``n`` is a variable or constant.
+
 ``x..y..<z``
 ............
 
@@ -642,6 +662,12 @@ proceeds upwards with a stride of ``y`` until reaching ``z``
 (exclusive).  The ``..y`` part can be elided in which case a stride of
 1 is used.  A run-time error occurs if ``z`` is lesser than ``x`` or
 ``y``, or if ``x`` and ``y`` are the same value.
+
+  * ``0..1..<n`` has size ``n``
+
+  * ``0..<n`` has size ``n``
+
+This holds only if ``n`` is a variable or constant.
 
 ``x..y..>z``
 ...............
@@ -750,8 +776,9 @@ reason to put an explicit type ascription there.
 ``e :> t``
 ..........
 
-Currently means the same as ``e : t``, but will have looser
-restrictions in the future.
+Coerce the size of ``e`` to ``t``.  The type of ``t`` must match the
+type of ``e``, except that the sizes may be statically different.  At
+run-time, it will be verified that the sizes are the same.
 
 ``! x``
 .......
@@ -953,7 +980,7 @@ statically verifies that the sizes of arrays passed to a function are
 compatible.  The focus is on simplicity, not completeness.
 
 Whenever a pattern occurs (in ``let``, ``loop``, and function
-parameters), as well as in return types, *size declarations* may be
+parameters), as well as in return types, *size annotations* may be
 used to express invariants about the shapes of arrays that are
 accepted or produced by the function.  For example::
 
@@ -968,10 +995,10 @@ arguments passed for the value parameters.  An array can contain
 will invent new size parameters, which ensures that all sizes have a
 (symbolic) size.
 
-A size declaration can also be an integer constant (with no suffix).
+A size annotation can also be an integer constant (with no suffix).
 Size parameters can be used as ordinary variables within the scope of
 the parameters.  The type checker verifies that the program obeys any
-constraints imposed by size declarations.
+constraints imposed by size annotations.
 
 *Size-dependent types* are supported, as the names of parameters can
 be used in the return type of a function::
@@ -992,29 +1019,30 @@ an anonymous size::
   val concat [n] [m] 't : [n]t -> [m]t -> []t
 
 When an application ``concat xs ys`` is found, the result will be of
-type ``[k]t``, where ``k`` is a fresh *existential* size that is
+type ``[k]t``, where ``k`` is a fresh *unknown* size that is
 considered different from every other size in the program.
 
-Generally, existential sizes are constructed whenever the true size
-cannot be expressed.  Either because it is too complicated
-(e.g. ``replicate (x+y) 0``), or because the variable it refers to
-goes out of scope::
+Generally, unknown sizes are constructed whenever the true size cannot
+be expressed.  Either because it is too complicated (e.g. ``replicate
+(x+y) 0``), or because the variable it refers to goes out of scope::
 
   let c = a + b
   in replicate c 0
 
-Similarly, existential sizes are constructed for ``if`` expressions
-where the branches do not return values of the same size, and for
-``loop`` expressions where the size of the loop parameters is not
-invariant.
+Similarly, unknown sizes are constructed for ``if`` expressions where
+the branches do not return values of the same size, and for ``loop``
+expressions where the size of the loop parameters is not invariant.
 
-Type ascription can be used to perform a runtime-checked coercion of
-one size to another.  Since size declarations can refer only to
-variables and constants, this is necessary when writing more
-complicated size functions::
+Size coercion
+~~~~~~~~~~~~~
+
+Size coercion, written with ``:>``, can be used to perform a
+runtime-checked coercion of one size to another.  Since size
+annotations can refer only to variables and constants, this is
+necessary when writing more complicated size functions::
 
   let concat_to 'a (m: i32) (a: []a) (b: []a) : [m]a =
-    a ++ b : [m]a
+    a ++ b :> [m]a
 
 Only expression-level type annotations give rise to run-time checks.
 Despite their similar syntax, parameter and return type annotations
