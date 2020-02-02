@@ -1997,9 +1997,10 @@ checkFunBody body maybe_rettype _loc = do
       rettype' <- normaliseType rettype
       body_t <- expType body'
       unless (body_t `subtypeOf` anyDimShapeAnnotations rettype') $
-        typeError (srclocOf body) $ "Body type " ++ quote (pretty body_t) ++
-        " is not a subtype of annotated type " ++
-        quote (pretty rettype') ++ "."
+        typeError (srclocOf body) $ pretty $
+        text "Body type" </> indent 2 (ppr body_t) </>
+        text "is not a subtype of annotated type" </>
+        indent 2 (ppr rettype')
 
     Nothing -> return ()
 
