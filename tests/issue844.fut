@@ -1,3 +1,6 @@
+-- ==
+-- error: non-unique
+
 module type mt = {
   type t
   val mk : i32 -> *t
