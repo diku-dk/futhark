@@ -773,9 +773,10 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) loc) = do
 internaliseExp _ (E.Constr _ _ (Info t) loc) =
   fail $ "internaliseExp: constructor with type " ++ pretty t ++ " at " ++ locStr loc
 
-internaliseExp desc (E.Match e cs _ _) = do
+internaliseExp desc (E.Match e cs (Info ret, Info retext) _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
-  case NE.uncons cs of
+  res <-
+    case NE.uncons cs of
     (CasePat pCase eCase locCase, Nothing) -> do
       (_, pertinent) <- generateCond pCase ses
       internalisePat' pCase pertinent eCase locCase (internaliseExp desc)
@@ -787,6 +788,8 @@ internaliseExp desc (E.Match e cs _ _) = do
         foldM (\bf c' -> eBody $ return $ generateCaseIf ses c' bf) eLast' $
           reverse $ NE.init cs'
       letTupExp' desc =<< generateCaseIf ses c bFalse
+  bindExtSizes (E.toStruct ret) retext res
+  return res
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
