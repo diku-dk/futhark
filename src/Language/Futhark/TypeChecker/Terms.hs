@@ -1758,10 +1758,10 @@ checkCases :: PatternType
 checkCases mt rest_cs =
   case NE.uncons rest_cs of
     (c, Nothing) -> do
-      (c', t) <- checkCase mt c
-      return (c' NE.:| [], t, [])
+      (c', t, retext) <- checkCase mt c
+      return (c' NE.:| [], t, retext)
     (c, Just cs) -> do
-      (((c', c_t), (cs', cs_t, _)), dflow) <-
+      (((c', c_t, _), (cs', cs_t, _)), dflow) <-
         tapOccurences $ checkCase mt c `alternative` checkCases mt cs
       (brancht, retext) <- unifyBranchTypes (srclocOf c) c_t cs_t
       let t = addAliases brancht
@@ -1769,12 +1769,12 @@ checkCases mt rest_cs =
       return (NE.cons c' cs', t, retext)
 
 checkCase :: PatternType -> CaseBase NoInfo Name
-          -> TermTypeM (CaseBase Info VName, PatternType)
-checkCase mt (CasePat p caseExp loc) =
+          -> TermTypeM (CaseBase Info VName, PatternType, [VName])
+checkCase mt (CasePat p e loc) =
   bindingPattern p (Ascribed mt) $ \p' -> do
-    caseExp' <- checkExp caseExp
-    caseType <- expTypeFully caseExp'
-    return (CasePat p' caseExp' loc, caseType)
+    e' <- checkExp e
+    (t, retext) <- unscopeType loc (patternMap p') =<< expTypeFully e'
+    return (CasePat p' e' loc, t, retext)
 
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.
