@@ -2560,14 +2560,14 @@ closeOverTypes defname defloc tparams paramts ret substs = do
         closeOver (k, ParamType l loc) =
           return $ Just $ Left $ TypeParamType l k loc
         closeOver (k, UnknowableSize sloc _)
-          | k `S.member` param_sizes =
-              typeError defloc mempty $
-              intercalate "\n"
-              [ "Unknowable size " ++ quote (prettyName k) ++
-                " produced at " ++ locStrRel defloc sloc
-              , "imposes constraint on type of " ++ quote (prettyName defname) ++
-                ", which is inferred as:"
-              , intercalate "\n" $ map ("  "++) $ lines $ pretty t ]
+          | k `S.member` param_sizes = do
+              notes <- dimNotes defloc $ NamedDim $ qualName k
+              typeError defloc notes $ pretty $
+                text "Unknowable size " <> text (quote (prettyName k)) <+>
+                text "produced at " <> text (locStrRel defloc sloc) <+>
+                text "imposes constraint on type of " <> text (quote (prettyName defname)) <>
+                text ", which is inferred as:" </>
+                indent 2 (ppr t)
           | k `S.member` produced_sizes =
               return $ Just $ Right k
         closeOver (_, _) =
