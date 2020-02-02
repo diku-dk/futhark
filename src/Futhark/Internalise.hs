@@ -69,7 +69,7 @@ internaliseFunName ofname _  = do
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, retext)) tparams params body _ loc) = do
   bindingParams tparams params $ \pcm shapeparams params' -> do
-    (rettype_bad, rcm) <- internaliseReturnType $ existentialiseRetExt rettype
+    (rettype_bad, rcm) <- internaliseReturnType =<< existentialisedRetExt
     let rettype' = zeroExts rettype_bad
 
     let mkConstParam name = Param name $ I.Prim int32
@@ -111,7 +111,8 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, retext)) tp
       then bindConstant fname (fname',
                                pcm<>rcm,
                                applyRetType rettype' constparams,
-                               bindExtSizes rettype retext)
+                               bindExtSizes rettype retext,
+                               namesFromList retext)
       else bindFunction fname (fname',
                                pcm<>rcm,
                                map I.paramName free_params,
@@ -129,10 +130,12 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, retext)) tp
     -- them from somewhere else.
     zeroExts ts = generaliseExtTypes ts ts
 
-    existentialiseRetExt = first onDim
-      where onDim (NamedDim v)
-              | qualLeaf v `elem` retext = AnyDim
-            onDim d = d
+    existentialisedRetExt  = do
+      sizes <- (namesFromList retext<>) <$> topLevelSizes
+      let onDim (NamedDim v)
+            | qualLeaf v `nameIn` sizes = AnyDim
+          onDim d = d
+      return $ first onDim rettype
 
 allDimsFreshInType :: MonadFreshNames m => E.PatternType -> m E.PatternType
 allDimsFreshInType = bitraverse onDim pure
@@ -1704,7 +1707,7 @@ internaliseIfConst loc name = do
   is_const <- lookupConst name
   scope <- askScope
   case is_const of
-    Just (fname, constparams, mk_rettype, bind_ext)
+    Just (fname, constparams, mk_rettype, bind_ext, _)
       | name `M.notMember` scope -> do
       (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs loc constparams
       safety <- askSafety
