@@ -1102,14 +1102,14 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   return $ Assert e1' e2' (Info (pretty e1)) loc
 
 checkExp (Lambda params body rettype_te NoInfo loc) =
-  removeSeminullOccurences $ incLevel $
+  removeSeminullOccurences $ noUnique $ incLevel $
   bindingPatternGroup [] params $ \_ params' -> do
     rettype_checked <- traverse checkTypeExp rettype_te
     let declared_rettype =
           case rettype_checked of Just (_, st, _) -> Just st
                                   Nothing -> Nothing
     (body', closure) <-
-      tapOccurences $ noUnique $ checkFunBody body declared_rettype loc
+      tapOccurences $ checkFunBody body declared_rettype loc
     body_t <- expType body'
     let (rettype', rettype_st) =
           case rettype_checked of
