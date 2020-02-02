@@ -13,6 +13,7 @@ module Language.Futhark.TypeChecker.Unify
   , RigidSource(..)
   , BreadCrumb(..)
   , typeError
+  , dimNotes
   , mkTypeVarName
 
   , zeroOrderType
