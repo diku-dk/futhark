@@ -1693,6 +1693,8 @@ consumeArg loc (Scalar (Record ets)) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
 consumeArg loc (Array _ Nonunique _ _) Consume =
   typeError loc "Consuming parameter passed non-unique argument."
+consumeArg loc (Scalar (TypeVar _ Nonunique _ _)) Consume =
+  typeError loc "Consuming parameter passed non-unique argument."
 consumeArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
   | not $ contravariantArg t1 d =
       typeError loc "Non-consuming higher-order parameter passed consuming argument."
