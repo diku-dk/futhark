@@ -1358,14 +1358,14 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   return $ Assert e1' e2' (Info (pretty e1)) loc
 
 checkExp (Lambda params body rettype_te NoInfo loc) =
-  removeSeminullOccurences $ incLevel $
+  removeSeminullOccurences $ noUnique $ incLevel $
   bindingParams [] params $ \_ params' -> do
     rettype_checked <- traverse checkTypeExp rettype_te
     let declared_rettype =
           case rettype_checked of Just (_, st, _) -> Just st
                                   Nothing -> Nothing
     (body', closure) <-
-      tapOccurences $ noUnique $ checkFunBody params' body declared_rettype loc
+      tapOccurences $ checkFunBody params' body declared_rettype loc
     body_t <- expTypeFully body'
 
     params'' <- mapM updateTypes params'
@@ -2136,6 +2136,8 @@ consumeArg loc (Scalar (Record ets)) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
 consumeArg loc (Array _ Nonunique _ _) Consume =
   typeError loc mempty "Consuming parameter passed non-unique argument."
+consumeArg loc (Scalar (TypeVar _ Nonunique _ _)) Consume =
+  typeError loc mempty "Consuming parameter passed non-unique argument."
 consumeArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
   | not $ contravariantArg t1 d =
       typeError loc mempty "Non-consuming higher-order parameter passed consuming argument."
@@ -2638,11 +2640,11 @@ checkFunBody params body maybe_rettype loc = do
       -- explicitly, because uniqueness is ignored by unification.
       rettype' <- normTypeFully rettype
       body_t'' <- normTypeFully rettype -- Substs may have changed.
-      unless (body_t'' `subtypeOf` rettype') $
-        typeError (srclocOf body) mempty $
-        "Body type " ++ quote (pretty body_t'') ++
-        " is not a subtype of annotated type " ++
-        quote (pretty rettype') ++ "."
+      unless (body_t'' `subtypeOf` anyDimShapeAnnotations rettype') $
+        typeError (srclocOf body) mempty $ pretty $
+        text "Body type" </> indent 2 (ppr body_t'') </>
+        text "is not a subtype of annotated type" </>
+        indent 2 (ppr rettype')
 
     Nothing -> return ()
 
