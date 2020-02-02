@@ -99,7 +99,7 @@ internaliseDim d =
 
             (Nothing, Nothing, Just [v]) -> return $ I.Free v
 
-            (_, Just (fname, _, _, _), _) -> do
+            (_, Just (fname, _, _, _, _), _) -> do
               (i,cm) <- get
               case find ((==fname) . fst) cm of
                 Just (_, known) -> return $ I.Free $ I.Var known
