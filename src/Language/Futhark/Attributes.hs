@@ -227,13 +227,14 @@ aliases = bifoldMap (const mempty) id
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
 diet :: TypeBase shape as -> Diet
-diet (Scalar (Record ets))      = RecordDiet $ fmap diet ets
-diet (Scalar (Prim _))          = Observe
-diet (Scalar TypeVar{})         = Observe
-diet (Scalar (Arrow _ _ t1 t2)) = FuncDiet (diet t1) (diet t2)
-diet (Array _ Unique _ _)       = Consume
-diet (Array _ Nonunique _ _)    = Observe
-diet (Scalar Sum{})             = Observe
+diet (Scalar (Record ets))              = RecordDiet $ fmap diet ets
+diet (Scalar (Prim _))                  = Observe
+diet (Scalar (Arrow _ _ t1 t2))         = FuncDiet (diet t1) (diet t2)
+diet (Array _ Unique _ _)               = Consume
+diet (Array _ Nonunique _ _)            = Observe
+diet (Scalar (TypeVar _ Unique _ _))    = Consume
+diet (Scalar (TypeVar _ Nonunique _ _)) = Observe
+diet (Scalar Sum{})                     = Observe
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
