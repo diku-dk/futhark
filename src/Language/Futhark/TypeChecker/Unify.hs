@@ -197,6 +197,11 @@ dimNotes ctx (NamedDim d) = do
     _ -> return mempty
 dimNotes _ _ = return mempty
 
+typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
+typeNotes ctx =
+  fmap mconcat . mapM (dimNotes ctx . NamedDim . qualName) .
+  S.toList . typeDimNames
+
 class (MonadBreadCrumbs m, MonadError TypeError m) => MonadUnify m where
   getConstraints :: m Constraints
   putConstraints :: Constraints -> m ()
@@ -463,10 +468,12 @@ scopeCheck usage vn max_lvl tp = do
           | otherwise =
               return ()
 
-        scopeViolation v =
-          typeError usage mempty $ "Cannot unify type variable " ++ quote (prettyName v) ++
-          " with " ++ quote (prettyName vn) ++ " (scope violation).\n" ++
-          "This is because " ++ quote (prettyName v) ++ " is rigidly bound in a deeper scope."
+        scopeViolation v = do
+          notes <- typeNotes usage tp
+          typeError usage notes $ "Cannot unify type\n" ++
+            indent (prettyOneLine tp) ++
+            "\nwith " ++ quote (prettyName vn) ++ " (scope violation).\n" ++
+            "This is because " ++ quote (prettyName v) ++ " is rigidly bound in a deeper scope."
 
 linkVarToType :: MonadUnify m => Usage -> VName -> Level -> StructType -> m ()
 linkVarToType usage vn lvl tp = do
@@ -554,12 +561,13 @@ linkVarToDim usage vn lvl dim = do
       | Just (dim_lvl, c) <- qualLeaf dim' `M.lookup` constraints,
         dim_lvl > lvl ->
           case c of
-            ParamSize{} ->
-              typeError usage mempty $
-              "Cannot unify size variable " ++ quote (pretty dim') ++
-              " with " ++ quote (prettyName vn) ++ " (scope violation).\n" ++
-              "This is because " ++ quote (pretty dim') ++
-              " is rigidly bound in a deeper scope."
+            ParamSize{} -> do
+              notes <- dimNotes usage dim
+              typeError usage notes $
+                "Cannot unify size variable " ++ quote (pretty dim') ++
+                " with " ++ quote (prettyName vn) ++ " (scope violation).\n" ++
+                "This is because " ++ quote (pretty dim') ++
+                " is rigidly bound in a deeper scope."
             _ -> modifyConstraints $ M.insert (qualLeaf dim') (lvl, c)
     _ -> return ()
 
