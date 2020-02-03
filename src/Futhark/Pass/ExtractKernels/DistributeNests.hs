@@ -466,6 +466,21 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots _))) acc =
     let rots' = map (const $ intConst Int32 0) (kernelNestWidths nest) ++ rots
     return $ oneStm $ Let outerpat aux $ BasicOp $ Rotate rots' arr
 
+maybeDistributeStm stm@(Let pat aux (BasicOp (Update arr slice (Var v)))) acc
+  | not $ null $ sliceDims slice =
+    distributeSingleStm acc stm >>= \case
+    Just (kernels, res, nest, acc')
+      | res == map Var (patternNames $ stmPattern stm),
+        Just (perm, pat_unused) <- permutationAndMissing pat res -> do
+          addKernels kernels
+          localScope (typeEnvFromDistAcc acc') $ do
+            nest' <- expandKernelNest pat_unused nest
+            addKernel =<<
+              segmentedUpdateKernel nest' perm (stmAuxCerts aux) arr slice v
+            return acc'
+
+    _ -> addStmToKernel stm acc
+
 -- XXX?  This rule is present to avoid the case where an in-place
 -- update is distributed as its own kernel, as this would mean thread
 -- then writes the entire array that it updated.  This is problematic
@@ -662,6 +677,50 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
           WriteReturns (init ws++[aw]) (kernelInputArray inp)
           [ (map Var (init gtids)++[i], v) | (i,v) <- is_vs ]
           where (gtids,ws) = unzip ispace
+
+segmentedUpdateKernel :: MonadFreshNames m =>
+                         KernelNest
+                      -> [Int]
+                      -> Certificates
+                      -> VName
+                      -> Slice SubExp
+                      -> VName
+                      -> DistNestT m KernelsStms
+segmentedUpdateKernel nest perm cs arr slice v = do
+  (base_ispace, kernel_inps) <- flatKernel nest
+  let slice_dims = sliceDims slice
+  slice_gtids <- replicateM (length slice_dims) (newVName "gtid_slice")
+
+  let ispace = base_ispace ++ zip slice_gtids slice_dims
+
+  ((res_t, res), kstms) <- runBinder $ do
+
+    -- Compute indexes into full array.
+    v' <- certifying cs $
+          letSubExp "v" $ BasicOp $ Index v $ map (DimFix . Var) slice_gtids
+    let pexp = primExpFromSubExp int32
+    slice_is <- traverse (letSubExp "index" <=< toExp) $
+                fixSlice (map (fmap pexp) slice) $ map (pexp . Var) slice_gtids
+
+    let write_is = map (Var . fst) base_ispace ++ slice_is
+        arr' = maybe (error "incorrectly typed Update") kernelInputArray $
+               find ((==arr) . kernelInputName) kernel_inps
+    arr_t <- lookupType arr'
+    v_t <- subExpType v'
+    return (v_t,
+            WriteReturns (arrayDims arr_t) arr' [(write_is, v')])
+
+  mk_lvl <- mkSegLevel
+  (k, prestms) <- mapKernel mk_lvl ispace kernel_inps [res_t] $
+                  KernelBody () kstms [res]
+
+  traverse renameStm <=< runBinder_ $ do
+    addStms prestms
+
+    let pat = Pattern [] $ rearrangeShape perm $
+              patternValueElements $ loopNestingPattern $ fst nest
+
+    letBind_ pat $ Op $ SegOp k
 
 segmentedHistKernel :: MonadFreshNames m =>
                             KernelNest

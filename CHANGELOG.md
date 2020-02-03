@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `reduce_by_index` may be somewhat faster for complex operators on
     histograms that barely fit in local memory.
 
+  * Improved handling of in-place updates of multidimensional arrays
+    nested in `map`.  These are now properly parallelised.
+
 ### Removed
 
 ### Changed
