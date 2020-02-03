@@ -14,6 +14,7 @@ module Language.Futhark.TypeChecker.Monad
   , localEnv
 
   , TypeError(..)
+  , prettyTypeError, prettyTypeErrorNoLoc
   , unexpectedType
   , undefinedType
   , unappliedFunctor
@@ -21,6 +22,7 @@ module Language.Futhark.TypeChecker.Monad
   , underscoreUse
   , functionIsNotValue
   , Notes
+  , prettyNotes
   , aNote
 
   , BreadCrumb(..)
@@ -108,6 +110,14 @@ data TypeError = TypeError SrcLoc Notes String
 instance Show TypeError where
   show (TypeError pos notes msg) =
     "Error at " ++ locStr pos ++ ":\n" ++ msg ++ prettyNotes notes
+
+prettyTypeErrorNoLoc :: TypeError -> String
+prettyTypeErrorNoLoc (TypeError _ notes msg) =
+  msg ++ prettyNotes notes
+
+prettyTypeError :: TypeError -> String
+prettyTypeError e@(TypeError loc _ _) =
+  "Error at " ++ locStr loc ++ ":\n" ++ prettyTypeErrorNoLoc e
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =
