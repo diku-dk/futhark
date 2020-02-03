@@ -316,13 +316,6 @@ distributeKernelResults (vtable, used)
                   then kstms' <> oneStm stm
                   else kstms')
 
-    distribute (kpes', kts', kres', kstms') stm
-      | Let (Pattern [] [pe]) _ (BasicOp (Update arr slice v)) <- stm,
-        Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe,
-        not $ patElemName pe `nameIn` free_in_kstms,
-        False =
-          error $ pretty stm
-
     distribute (kpes', kts', kres', kstms') stm =
       return (kpes', kts', kres', kstms' <> oneStm stm)
 
