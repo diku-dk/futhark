@@ -75,14 +75,6 @@ entry test_drop (i: i32) (x: []bool) = drop i x
 entry test_reverse (x: [][]i32) = reverse x
 
 -- ==
--- entry: test_update
--- input { [1,2,3] 0 4 } output { [4,2,3] }
--- input { [1,2,3] -1 4 } error: Error
--- input { [1,2,3] 3 4 } error: Error
-
-entry test_update (xs: *[]i32) (i: i32) (x: i32) = update xs i x
-
--- ==
 -- entry: test_or
 -- input { [true, true] }
 -- output { true }
@@ -109,34 +101,10 @@ entry test_or (xs: []bool) = or xs
 entry test_and (xs: []bool) = and xs
 
 -- ==
--- entry: test_pick
--- input { [true,false,true] [1,2,3] [4,5,6] }
--- output { [1,5,3] }
-
-entry test_pick (flags: []bool) (xs: []i32) (ys: []i32) = pick flags xs ys
-
--- ==
 -- entry: test_flatten
 -- input { [[1,2],[3,4]] } output { [1,2,3,4] }
 
 entry test_flatten (xs: [][]i32) = flatten xs
-
--- ==
--- entry: test_intersperse
--- input { 0 empty([0]i32) } output { empty([0]i32) }
--- input { 0 [1] } output { [1] }
--- input { 0 [1,2] } output { [1,0,2] }
--- input { 0 [1,2,3] } output { [1,0,2,0,3] }
-
-entry test_intersperse (x: i32) (xs: []i32) = intersperse x xs
-
--- ==
--- entry: test_intercalate
--- input { empty([0]i32) empty([0][0]i32) } output { empty([0][0]i32) }
--- input { [1,0] [[1,2],[3,4]] } output { [1,2,1,0,3,4] }
--- input { [1,0] [[1,2],[3,4],[5,6]] } output { [1,2,1,0,3,4,1,0,5,6] }
-
-entry test_intercalate [m][n] (x: [m]i32) (xs: [n][m]i32) = intercalate x xs
 
 -- ==
 -- entry: test_foldl
