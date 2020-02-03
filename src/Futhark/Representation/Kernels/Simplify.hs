@@ -283,13 +283,21 @@ distributeKernelResults (vtable, used)
   where
     free_in_kstms = foldMap freeIn kstms
 
-    distribute (kpes', kts', kres', kstms') stm
-      | Let (Pattern [] [pe]) _ (BasicOp (Index arr slice)) <- stm,
+    sliceWithGtidsFixed stm
+      | Let _ _ (BasicOp (Index arr slice)) <- stm,
         space_slice <- map (DimFix . Var . fst) $ unSegSpace space,
         space_slice `isPrefixOf` slice,
         remaining_slice <- drop (length space_slice) slice,
         all (isJust . flip ST.lookup vtable) $ namesToList $
-          freeIn arr <> freeIn remaining_slice,
+          freeIn arr <> freeIn remaining_slice =
+          Just (remaining_slice, arr)
+
+      | otherwise =
+          Nothing
+
+    distribute (kpes', kts', kres', kstms') stm
+      | Let (Pattern [] [pe]) _ _ <- stm,
+        Just (remaining_slice, arr) <- sliceWithGtidsFixed stm,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
           let outer_slice = map (\d -> DimSlice
                                        (constant (0::Int32))
@@ -307,6 +315,13 @@ distributeKernelResults (vtable, used)
                   if patElemName pe `nameIn` free_in_kstms
                   then kstms' <> oneStm stm
                   else kstms')
+
+    distribute (kpes', kts', kres', kstms') stm
+      | Let (Pattern [] [pe]) _ (BasicOp (Update arr slice v)) <- stm,
+        Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe,
+        not $ patElemName pe `nameIn` free_in_kstms,
+        False =
+          error $ pretty stm
 
     distribute (kpes', kts', kres', kstms') stm =
       return (kpes', kts', kres', kstms' <> oneStm stm)
