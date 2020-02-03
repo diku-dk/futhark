@@ -42,6 +42,7 @@ module Futhark.Construct
   , foldBinOp
   , binOpLambda
   , cmpOpLambda
+  , sliceDim
   , fullSlice
   , fullSliceNum
   , isFullSlice
@@ -373,6 +374,7 @@ binLambda bop arg_t ret_t = do
            , lambdaBody       = body
            }
 
+-- | Slice a full dimension of the given size.
 sliceDim :: SubExp -> DimIndex SubExp
 sliceDim d = DimSlice (constant (0::Int32)) d (constant (1::Int32))
 

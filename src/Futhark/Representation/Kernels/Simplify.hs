@@ -227,9 +227,11 @@ kernelRules :: RuleBook (Wise Kernels)
 kernelRules = standardRules <>
               ruleBook [ RuleOp removeInvariantKernelResults
                        , RuleOp mergeSegRedOps
-                       , RuleOp redomapIotaToLoop ]
+                       , RuleOp redomapIotaToLoop
+                       ]
                        [ RuleOp distributeKernelResults
-                       , RuleBasicOp removeUnnecessaryCopy]
+                       , RuleBasicOp removeUnnecessaryCopy
+                       ]
 
 -- If a kernel produces something invariant to the kernel, turn it
 -- into a replicate.
@@ -270,24 +272,32 @@ distributeKernelResults (vtable, used)
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.
-  (kpes', kts', kres', kstms_rev) <- localScope (scopeOfSegSpace space) $
-    foldM distribute (kpes, kts, kres, []) kstms
+  (kpes', kts', kres', kstms') <- localScope (scopeOfSegSpace space) $
+    foldM distribute (kpes, kts, kres, mempty) kstms
 
   when (kpes' == kpes)
     cannotSimplify
 
   addStm $ Let (Pattern [] kpes') attr $ Op $ SegOp $
-    SegMap lvl space kts' $ mkWiseKernelBody () (stmsFromList $ reverse kstms_rev) kres'
+    SegMap lvl space kts' $ mkWiseKernelBody () kstms' kres'
   where
     free_in_kstms = foldMap freeIn kstms
 
-    distribute (kpes', kts', kres', kstms_rev) bnd
-      | Let (Pattern [] [pe]) _ (BasicOp (Index arr slice)) <- bnd,
+    sliceWithGtidsFixed stm
+      | Let _ _ (BasicOp (Index arr slice)) <- stm,
         space_slice <- map (DimFix . Var . fst) $ unSegSpace space,
         space_slice `isPrefixOf` slice,
         remaining_slice <- drop (length space_slice) slice,
         all (isJust . flip ST.lookup vtable) $ namesToList $
-          freeIn arr <> freeIn remaining_slice,
+          freeIn arr <> freeIn remaining_slice =
+          Just (remaining_slice, arr)
+
+      | otherwise =
+          Nothing
+
+    distribute (kpes', kts', kres', kstms') stm
+      | Let (Pattern [] [pe]) _ _ <- stm,
+        Just (remaining_slice, arr) <- sliceWithGtidsFixed stm,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
           let outer_slice = map (\d -> DimSlice
                                        (constant (0::Int32))
@@ -303,11 +313,11 @@ distributeKernelResults (vtable, used)
             else index kpe
           return (kpes'', kts'', kres'',
                   if patElemName pe `nameIn` free_in_kstms
-                  then bnd : kstms_rev
-                  else kstms_rev)
+                  then kstms' <> oneStm stm
+                  else kstms')
 
-    distribute (kpes', kts', kres', kstms_rev) bnd =
-      return (kpes', kts', kres', bnd : kstms_rev)
+    distribute (kpes', kts', kres', kstms') stm =
+      return (kpes', kts', kres', kstms' <> oneStm stm)
 
     isResult kpes' kts' kres' pe =
       case partition matches $ zip3 kpes' kts' kres' of
