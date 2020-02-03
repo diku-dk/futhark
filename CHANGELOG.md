@@ -15,9 +15,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Improved handling of in-place updates of multidimensional arrays
     nested in `map`.  These are now properly parallelised.
 
+  * Added `concat_to` and `flatten_to` functions to prelude.
+
 ### Removed
 
 ### Changed
+
+  * Removed `update`, `split2`, `intersperse`, `intercalate`, `pick`,
+    `steps`, and `range` from the prelude.
 
 ### Fixed
 
