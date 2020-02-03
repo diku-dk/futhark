@@ -21,8 +21,7 @@ import Prelude hiding (abs, mod)
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad
-import Language.Futhark.TypeChecker.Unify
-  (Rigidity(..), RigidSource(..), doUnification)
+import Language.Futhark.TypeChecker.Unify (doUnification)
 import Language.Futhark.TypeChecker.Types
 import Futhark.Util.Pretty
 
@@ -469,10 +468,8 @@ matchMTys orig_mty orig_mty_sig =
 
     matchValBinding :: SrcLoc -> BoundV -> BoundV -> Maybe (Maybe String)
     matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
-      case doUnification loc tps
-           Nonrigid (toStruct orig_spec_t)
-           (Rigid RigidUnify) (toStruct orig_t) of
-        Left (TypeError _ _ err) -> Just $ Just err
+      case doUnification loc tps (toStruct orig_spec_t) (toStruct orig_t) of
+        Left err -> Just $ Just $ prettyTypeErrorNoLoc err
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
         Right t | removeShapeAnnotations t `subtypeOf`

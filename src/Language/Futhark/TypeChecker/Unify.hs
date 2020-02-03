@@ -36,8 +36,8 @@ module Language.Futhark.TypeChecker.Unify
 where
 
 import Control.Monad.Except
-import Control.Monad.State
 import Control.Monad.Writer hiding (Sum)
+import Control.Monad.RWS.Strict hiding (Sum)
 import Data.Bifoldable (biany)
 import Data.List
 import Data.Loc
@@ -180,7 +180,7 @@ prettySource ctx loc (RigidOutOfScope boundloc v) =
   "Originally bound at " <> locStrRel ctx boundloc <> "."
 
 prettySource _ _ RigidUnify =
-  "is an artificial size invented during unification of functions with anonymous return sizes"
+  "is an artificial size invented during unification of functions with anonymous sizes"
 
 prettySource ctx loc (RigidCond t1 t2) =
   "is unknown due to conditional expression at " <> locStrRel ctx loc <> ".\n" <>
@@ -800,8 +800,9 @@ unifyMostCommon usage t1 t2 = do
 
 type UnifyMState = (Constraints, Int)
 
-newtype UnifyM a = UnifyM (StateT UnifyMState (Except TypeError) a)
+newtype UnifyM a = UnifyM (RWST [BreadCrumb] () UnifyMState (Except TypeError) a)
   deriving (Monad, Functor, Applicative,
+            MonadReader [BreadCrumb],
             MonadState UnifyMState,
             MonadError TypeError)
 
@@ -839,9 +840,11 @@ mkTypeVarName desc i =
   where subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
 instance MonadBreadCrumbs UnifyM where
+  breadCrumb bc = local (bc:)
+  getBreadCrumbs = ask
 
 runUnifyM :: [TypeParam] -> UnifyM a -> Either TypeError a
-runUnifyM tparams (UnifyM m) = runExcept $ evalStateT m (constraints, 0)
+runUnifyM tparams (UnifyM m) = runExcept $ fst <$> evalRWST m [] (constraints, 0)
   where constraints = M.fromList $ map f tparams
         f (TypeParamDim p loc) = (p, (0, Size Nothing $ Usage Nothing loc))
         f (TypeParamType l p loc) = (p, (0, NoConstraint l $ Usage Nothing loc))
@@ -850,10 +853,11 @@ runUnifyM tparams (UnifyM m) = runExcept $ evalStateT m (constraints, 0)
 -- The type parameters are allowed to be instantiated; all other types
 -- are considered rigid.
 doUnification :: SrcLoc -> [TypeParam]
-              -> Rigidity -> StructType -> Rigidity -> StructType
+              -> StructType -> StructType
               -> Either TypeError StructType
-doUnification loc tparams r1 t1 r2 t2 = runUnifyM tparams $ do
-  (t1', _) <- instantiateEmptyArrayDims loc "n" r1 t1
-  (t2', _) <- instantiateEmptyArrayDims loc "m" r2 t2
+doUnification loc tparams t1 t2 = runUnifyM tparams $ do
+  let rsrc = RigidUnify
+  (t1', _) <- instantiateEmptyArrayDims loc "n" (Rigid rsrc) t1
+  (t2', _) <- instantiateEmptyArrayDims loc "m" (Rigid rsrc) t2
   expect (Usage Nothing loc) t1' t2'
   normTypeFully t2
