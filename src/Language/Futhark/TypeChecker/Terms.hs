@@ -139,6 +139,17 @@ altOccurences occurs1 occurs2 =
 
 --- Scope management
 
+data Checking = CheckingApply (Maybe (QualName VName)) Exp
+
+instance Pretty Checking where
+  ppr (CheckingApply Nothing e) =
+    text "Cannot apply function to argument" <+>
+    pquote (text (shorten $ prettyOneLine e)) <> text "."
+
+  ppr (CheckingApply (Just fname) e) =
+    text "Cannot apply " <> pquote (ppr fname) <> text " to argument" <+>
+    pquote (text (shorten $ prettyOneLine e)) <> text "."
+
 -- | Whether something is a global or a local variable.
 data Locality = Local | Global
               deriving (Show)
@@ -251,7 +262,7 @@ newtype TermTypeM a = TermTypeM (RWST
             MonadError TypeError)
 
 instance Fail.MonadFail TermTypeM where
-  fail = typeError (noLoc :: SrcLoc) mempty . ("unknown failure (likely a bug): "++)
+  fail = typeError (noLoc :: SrcLoc) mempty . ("unknown failure (likely a compiler bug): "++)
 
 instance MonadUnify TermTypeM where
   getConstraints = gets stateConstraints
@@ -278,9 +289,11 @@ instance MonadBreadCrumbs TermTypeM where
     env { termBreadCrumbs = bc : termBreadCrumbs env }
   getBreadCrumbs = asks termBreadCrumbs
 
-onlyBreadCrumb :: BreadCrumb -> TermTypeM a -> TermTypeM a
-onlyBreadCrumb bc = local $ \env ->
-  env { termBreadCrumbs = [bc] }
+onFailure :: Checking -> TermTypeM a -> TermTypeM a
+onFailure c m = m `catchError` (throwError . onError)
+  where onError (TypeError loc Nothing notes msg) =
+          TypeError loc (Just $ pretty c) notes msg
+        onError err = err
 
 runTermTypeM :: TermTypeM a -> TypeM (a, Occurences)
 runTermTypeM (TermTypeM m) = do
@@ -2022,7 +2035,7 @@ instantiateDimsInReturnType tloc fname =
 checkApply :: SrcLoc -> Maybe (QualName VName) -> PatternType -> Arg
            -> TermTypeM (PatternType, PatternType, Maybe VName, [VName])
 checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) =
-  onlyBreadCrumb (Applying fname argexp) $ do
+  onFailure (CheckingApply fname argexp) $ do
   expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
   -- Perform substitutions of instantiated variables in the types.
@@ -2216,7 +2229,7 @@ verifyConstructive tparams params body = do
           Nothing
 
         ambig loc ds t =
-          Left $ TypeError loc mempty $
+          Left $ TypeError loc Nothing mempty $
           unlines [ "Inferred expression to have type:"
                   , sindent $ pretty t
                   , "Where the following sizes are ambiguous:"
@@ -2563,9 +2576,9 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           | k `S.member` param_sizes = do
               notes <- dimNotes defloc $ NamedDim $ qualName k
               typeError defloc notes $ pretty $
-                text "Unknowable size " <> text (quote (prettyName k)) <+>
+                text "Unknowable size " <> pquote (pprName k) <+>
                 text "produced at " <> text (locStrRel defloc sloc) <+>
-                text "imposes constraint on type of " <> text (quote (prettyName defname)) <>
+                text "imposes constraint on type of " <> pquote (pprName defname) <>
                 text ", which is inferred as:" </>
                 indent 2 (ppr t)
           | k `S.member` produced_sizes =

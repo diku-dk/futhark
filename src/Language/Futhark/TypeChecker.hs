@@ -10,6 +10,7 @@ module Language.Futhark.TypeChecker
   , checkDec
   , checkModExp
   , TypeError
+  , prettyTypeError
   , Warnings
   , initialEnv
   )

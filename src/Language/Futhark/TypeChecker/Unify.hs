@@ -489,9 +489,8 @@ linkVarToType usage vn lvl tp = do
       zeroOrderType usage (show unlift_usage) tp'
 
       when (hasEmptyDims tp') $
-        typeError usage mempty $ "Type variable " ++ prettyName vn ++ " from\n" ++
-        indent (show unlift_usage) ++
-        "\ncannot be instantiated with type containing anonymous sizes:\n" ++
+        typeError usage mempty $ "Type variable " ++ prettyName vn ++
+        " cannot be instantiated with type containing anonymous sizes:\n" ++
         indent (pretty tp) ++
         "\nThis is usually because the size of arrays returned a higher-order function argument\n" ++
         "cannot be determined statically.  Add type annotation to clarify."

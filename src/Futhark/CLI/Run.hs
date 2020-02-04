@@ -105,25 +105,26 @@ newFutharkiState :: InterpreterConfig -> FilePath
                  -> IO (Either String (T.Env, I.Ctx))
 newFutharkiState cfg file = runExceptT $ do
   (ws, imports, src) <-
-    badOnLeft =<< liftIO (runExceptT (readProgram file)
-                          `Haskeline.catch` \(err::IOException) ->
-                             return (Left (ExternalError (T.pack $ show err))))
+    badOnLeft show =<<
+    liftIO (runExceptT (readProgram file)
+            `Haskeline.catch` \(err::IOException) ->
+               return (Left (ExternalError (T.pack $ show err))))
   when (interpreterPrintWarnings cfg) $
     liftIO $ hPrint stderr ws
 
   let imp = T.mkInitialImport "."
-  ienv1 <- foldM (\ctx -> badOnLeft <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
+  ienv1 <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
            map (fmap fileProg) imports
-  (tenv1, d1, src') <- badOnLeft $ T.checkDec imports src T.initialEnv imp $
+  (tenv1, d1, src') <- badOnLeft T.prettyTypeError $ T.checkDec imports src T.initialEnv imp $
                        mkOpen "/futlib/prelude"
-  (tenv2, d2, _) <- badOnLeft $ T.checkDec imports src' tenv1 imp $
+  (tenv2, d2, _) <- badOnLeft T.prettyTypeError $ T.checkDec imports src' tenv1 imp $
                     mkOpen $ toPOSIX $ dropExtension file
-  ienv2 <- badOnLeft =<< runInterpreter' (I.interpretDec ienv1 d1)
-  ienv3 <- badOnLeft =<< runInterpreter' (I.interpretDec ienv2 d2)
+  ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
+  ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
   return (tenv2, ienv3)
-  where badOnLeft :: Show err => Either err a -> ExceptT String IO a
-        badOnLeft (Right x) = return x
-        badOnLeft (Left err) = throwError $ show err
+  where badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
+        badOnLeft _ (Right x) = return x
+        badOnLeft p (Left err) = throwError $ p err
 
 mkOpen :: FilePath -> UncheckedDec
 mkOpen f = OpenDec (ModImport f NoInfo noLoc) noLoc

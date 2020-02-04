@@ -1,6 +1,6 @@
 -- The sizes of a lambda parameter can percolate out to a let-binding.
 -- ==
--- error: `n` and `m` do not match
+-- error: "n" and "m" do not match
 
 let f [n] (xs: [n]i32) = \(ys: [n]i32) -> (xs, ys)
 
