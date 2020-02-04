@@ -140,6 +140,11 @@ altOccurences occurs1 occurs2 =
 --- Scope management
 
 data Checking = CheckingApply (Maybe (QualName VName)) Exp
+              | CheckingReturn
+              | CheckingAscription
+              | CheckingLetGeneralise Name
+              | CheckingParams (Maybe Name)
+              | CheckingPattern UncheckedPattern InferredType
 
 instance Pretty Checking where
   ppr (CheckingApply Nothing e) =
@@ -147,8 +152,29 @@ instance Pretty Checking where
     pquote (text (shorten $ prettyOneLine e)) <> text "."
 
   ppr (CheckingApply (Just fname) e) =
-    text "Cannot apply " <> pquote (ppr fname) <> text " to argument" <+>
+    text "Cannot apply" <+> pquote (ppr fname) <+> text "to argument" <+>
     pquote (text (shorten $ prettyOneLine e)) <> text "."
+
+  ppr CheckingReturn =
+    text "Function body does not have indicated type."
+
+  ppr CheckingAscription =
+    text "Expression does not have ascribed type."
+
+  ppr (CheckingLetGeneralise fname) =
+    text "Cannot generalise type of" <+> pquote (ppr fname) <> text "."
+
+  ppr (CheckingParams fname) =
+    text "Invalid use of parameters in" <+> pquote fname' <> text "."
+    where fname' = maybe (text "anonymous function") ppr fname
+
+  ppr (CheckingPattern pat NoneInferred) =
+    text "Invalid pattern" <+> pquote (ppr pat) <> text "."
+
+  ppr (CheckingPattern pat (Ascribed t)) =
+    text "Pattern" <+> pquote (ppr pat) <+>
+    text "cannot match value of type" </>
+    indent 2 (ppr t)
 
 -- | Whether something is a global or a local variable.
 data Locality = Local | Global
@@ -535,10 +561,6 @@ newArrayType loc desc r = do
 
 --- Errors
 
-funName :: Maybe Name -> String
-funName Nothing = "anonymous function"
-funName (Just fname) = "function " ++ quote (pretty fname)
-
 useAfterConsume :: Name -> SrcLoc -> SrcLoc -> TermTypeM a
 useAfterConsume name rloc wloc =
   typeError rloc mempty $
@@ -555,17 +577,17 @@ badLetWithValue loc =
   typeError loc mempty
   "New value for elements in let-with shares data with source array.  This is illegal, as it prevents in-place modification."
 
-returnAliased :: Maybe Name -> Name -> SrcLoc -> TermTypeM ()
+returnAliased :: Name -> Name -> SrcLoc -> TermTypeM ()
 returnAliased fname name loc =
   typeError loc mempty $
-  "Unique return value of " ++ funName fname ++
+  "Unique return value of " ++ quote (prettyName fname) ++
   " is aliased to " ++ quote (pretty name) ++ ", which is not consumed."
 
-uniqueReturnAliased :: Maybe Name -> SrcLoc -> TermTypeM a
+uniqueReturnAliased :: Name -> SrcLoc -> TermTypeM a
 uniqueReturnAliased fname loc =
   typeError loc mempty $
   "A unique tuple element of return value of " ++
-  funName fname ++ " is aliased to some other tuple component."
+  quote (prettyName fname) ++ " is aliased to some other tuple component."
 
 --- Basic checking
 
@@ -722,7 +744,7 @@ checkPattern :: UncheckedPattern -> InferredType -> (Pattern -> TermTypeM a)
              -> TermTypeM a
 checkPattern p t m = do
   checkForDuplicateNames [p]
-  p' <- checkPattern' p t
+  p' <- onFailure (CheckingPattern p t) $ checkPattern' p t
   bindNameMap (patternNameMap p') $ m p'
 
 binding :: [Ident] -> TermTypeM a -> TermTypeM a
@@ -1114,11 +1136,11 @@ checkExp (Range start maybe_step end _ loc) = do
 
   return $ Range start' maybe_step' end' ret loc
 
-checkExp (Ascript e decl loc) = do
+checkExp (Ascript e decl loc) = onFailure CheckingAscription $ do
   (decl', e') <- checkAscript loc decl e id
   return $ Ascript e' decl' loc
 
-checkExp (Coerce e decl _ loc) = do
+checkExp (Coerce e decl _ loc) = onFailure CheckingAscription $ do
   -- We instantiate the declared types with all dimensions as nonrigid
   -- fresh type variables, which we then use to unify with the type of
   -- 'e'.  This lets 'e' have whatever sizes it wants, but the overall
@@ -1249,7 +1271,7 @@ checkExp (LetPat pat e body _ loc) =
       return $ LetPat pat' e' body' (Info body_t, Info retext) loc
 
 checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body NoInfo loc) =
-  sequentially (checkBinding (Just name, maybe_retdecl, tparams, params, e, loc)) $
+  sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
   \(tparams', params', maybe_retdecl', rettype, _, e') closure -> do
 
     closure' <- lexicalClosure params' closure
@@ -1393,7 +1415,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) =
           return (Nothing, ret)
 
     checkGlobalAliases params' body_t loc
-    verifyFunctionParams params'
+    verifyFunctionParams Nothing params'
 
     closure' <- lexicalClosure params'' closure
 
@@ -2250,7 +2272,7 @@ checkFunDef :: (Name, Maybe UncheckedTypeExp,
 checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
   fmap fst $ runTermTypeM $ do
   (tparams', params', maybe_retdecl', rettype', retext, body') <-
-    checkBinding (Just fname, maybe_retdecl, tparams, params, body, loc)
+    checkBinding (fname, maybe_retdecl, tparams, params, body, loc)
 
   -- Since this is a top-level function, we also resolve overloaded
   -- types, using either defaults or complaining about ambiguities.
@@ -2341,7 +2363,7 @@ inferredReturnType loc params t =
   inferReturnUniqueness params t
   where hidden = hiddenParamNames params
 
-checkBinding :: (Maybe Name, Maybe UncheckedTypeExp,
+checkBinding :: (Name, Maybe UncheckedTypeExp,
                  [UncheckedTypeParam], [UncheckedPattern],
                  UncheckedExp, SrcLoc)
              -> TermTypeM ([TypeParam], [Pattern], Maybe (TypeExp VName),
@@ -2378,11 +2400,10 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
             body_t' <- inferredReturnType loc params'' body_t
             return (Nothing, body_t')
 
-    verifyFunctionParams params''
+    verifyFunctionParams (Just fname) params''
 
     (tparams'', params''', rettype'', retext) <-
-      letGeneralise (fromMaybe (nameFromString "lambda") fname)
-      loc tparams' params'' rettype
+      letGeneralise fname loc tparams' params'' rettype
 
     checkGlobalAliases params'' body_t loc
 
@@ -2509,19 +2530,20 @@ nothingMustBeUnique loc = check
 -- These restrictions apply to all functions (anonymous or otherwise).
 -- Top-level functions have further restrictions that are checked
 -- during let-generalisation.
-verifyFunctionParams :: [Pattern] -> TermTypeM ()
-verifyFunctionParams params =
+verifyFunctionParams :: Maybe Name -> [Pattern] -> TermTypeM ()
+verifyFunctionParams fname params =
+  onFailure (CheckingParams fname) $
   verifyParams (mconcat (map patternNames params)) =<< mapM updateTypes params
   where
     verifyParams forbidden (p:ps)
       | d:_ <- S.toList $ patternDimNames p `S.intersection` forbidden =
-          typeError p mempty $
-          unlines [ "Parameter " ++ quote (pretty p) ++
-                    " refers to size " ++ quote (prettyName d) ++ ","
-                  , "which will not be accessible to the caller, possibly because it is nested in a tuple or record."
-                  , ""
-                  , "Consider ascribing an explicit type that does not reference "
-                    ++ quote (prettyName d) ++ "."]
+          typeError p mempty $ pretty $
+          text "Parameter" <+> pquote (ppr p) <+/>
+          text "refers to size" <+> pquote (pprName d) <> comma <+/>
+          textwrap "which will not be accessible to the caller" <> comma <+/>
+          textwrap "possibly because it is nested in a tuple or record." <+/>
+          textwrap "Consider ascribing an explicit type that does not reference " <>
+          pquote (pprName d) <> ppr "."
       | otherwise = verifyParams forbidden' ps
       where forbidden' =
               case patternParam p of
@@ -2572,13 +2594,13 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           return $ Just $ Left $ TypeParamDim k $ srclocOf usage
         closeOver (k, ParamType l loc) =
           return $ Just $ Left $ TypeParamType l k loc
-        closeOver (k, UnknowableSize sloc _)
+        closeOver (k, UnknowableSize _ _)
           | k `S.member` param_sizes = do
               notes <- dimNotes defloc $ NamedDim $ qualName k
               typeError defloc notes $ pretty $
                 text "Unknowable size " <> pquote (pprName k) <+>
-                text "produced at " <> text (locStrRel defloc sloc) <+>
-                text "imposes constraint on type of " <> pquote (pprName defname) <>
+                text "imposes constraint on type of " <> pquote
+                (pprName defname) <>
                 text ", which is inferred as:" </>
                 indent 2 (ppr t)
           | k `S.member` produced_sizes =
@@ -2589,7 +2611,8 @@ closeOverTypes defname defloc tparams paramts ret substs = do
 letGeneralise :: Name -> SrcLoc
               -> [TypeParam] -> [Pattern] -> StructType
               -> TermTypeM ([TypeParam], [Pattern], StructType, [VName])
-letGeneralise defname defloc tparams params rettype = do
+letGeneralise defname defloc tparams params rettype =
+  onFailure (CheckingLetGeneralise defname) $ do
   now_substs <- getConstraints
 
   -- Candidates for let-generalisation are those type variables that
@@ -2647,7 +2670,8 @@ checkFunBody params body maybe_rettype loc = do
                       body_t
 
       let usage = mkUsage (srclocOf body) "return type annotation"
-      expect usage rettype_withdims $ toStruct body_t'
+      onFailure CheckingReturn $
+        expect usage rettype_withdims $ toStruct body_t'
 
       -- We also have to make sure that uniqueness matches.  This is done
       -- explicitly, because uniqueness is ignored by unification.
