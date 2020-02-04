@@ -33,10 +33,6 @@ let drop [n] 't (i: i32) (x: [n]t) = x[i:]
 let split [n] 't (i: i32) (xs: [n]t): ([i]t, []t) =
   (xs[:i] :> [i]t, xs[i:])
 
--- | Split an array at two given positions.
-let split2 [n] 't (i: i32) (j: i32) (xs: [n]t): ([i]t, []t, []t) =
-  (xs[:i] :> [i]t, xs[i:j], xs[j:])
-
 -- | Return the elements of the array in reverse order.
 let reverse [n] 't (x: [n]t): [n]t = x[::-1] :> [n]t
 
@@ -47,14 +43,16 @@ let (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = intrinsics.concat (xs, ys)
 -- | An old-fashioned way of saying `++`.
 let concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = xs ++ ys
 
+-- | Concatenation where the result has a predetermined size.  If the
+-- provided size is wrong, the function will fail with a run-time
+-- error.
+let concat_to 't (n: i32) (xs: []t) (ys: []t): *[]t = xs ++ ys :> [n]t
+
 -- | Rotate an array some number of elements to the left.  A negative
 -- rotation amount is also supported.
 --
 -- For example, if `b==rotate r a`, then `b[x+r] = a[x]`.
 let rotate [n] 't (r: i32) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> [n]t
-
--- | Replace an element of the array with a new value.
-let update [n] 't (xs: *[n]t) (i: i32) (x: t): *[n]t = xs with [i] = x
 
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
@@ -73,6 +71,11 @@ let copy 't (a: t): *t =
 -- | Combines the outer two dimensions of an array.
 let flatten [n][m] 't (xs: [n][m]t): []t =
   intrinsics.flatten xs
+
+-- | Like `flatten`@term, but where the final size is known.  Fails at
+-- runtime if the provided size is wrong.
+let flatten_to [n][m] 't (l: i32) (xs: [n][m]t): [l]t =
+  flatten xs :> [l]t
 
 -- | Combines the outer three dimensions of an array.
 let flatten_3d [n][m][l] 't (xs: [n][m][l]t): []t =
@@ -94,23 +97,8 @@ let unflatten_3d [p] 't (n: i32) (m: i32) (l: i32) (xs: [p]t): [n][m][l]t =
 let unflatten_4d [p] 't (n: i32) (m: i32) (l: i32) (k: i32) (xs: [p]t): [n][m][l][k]t =
   unflatten n m (unflatten_3d (n*m) l k xs)
 
-let intersperse [n] 't (x: t) (xs: [n]t): *[]t =
-  map (\i -> if i % 2 == 1 && i != 2*n then x
-             else unsafe xs[i/2])
-      (iota (i32.max (2*n-1) 0))
-
-let intercalate [n] [m] 't (x: [m]t) (xs: [n][m]t): []t =
-  unsafe flatten (intersperse x xs)
-
 let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
   intrinsics.transpose a :> [m][n]t
-
-let steps (start: i32) (num_steps: i32) (step: i32): [num_steps]i32 =
-  map (start+) (map (step*) (iota num_steps))
-
-let range (start: i32) (end: i32) (step: i32): []i32 =
-  let w = (end-start)/step
-  in steps start w step
 
 -- | True if all of the input elements are true.  Produces true on an
 -- empty array.
@@ -119,9 +107,6 @@ let and: []bool -> bool = all id
 -- | True if any of the input elements are true.  Produces false on an
 -- empty array.
 let or: []bool -> bool = any id
-
-let pick [n] 't (flags: [n]bool) (xs: [n]t) (ys: [n]t): *[n]t =
-  map3 (\flag x y -> if flag then x else y) flags xs ys
 
 -- | Perform a *sequential* left-fold of an array.
 let foldl [n] 'a 'b (f: a -> b -> a) (acc: a) (bs: [n]b): a =
