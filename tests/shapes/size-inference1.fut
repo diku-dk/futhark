@@ -1,6 +1,6 @@
 -- Inference of return size (which then causes a type error).
 -- ==
--- error: `10` and `l` do not match
+-- error: "10" and "l" do not match
 
 let get_at xs indices = map (\i -> xs[i]) indices
 

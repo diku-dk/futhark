@@ -1,5 +1,5 @@
 -- ==
--- error: `arr`
+-- error: "arr"
 
 type^ arr = [2]i32
 

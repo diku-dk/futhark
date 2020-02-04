@@ -140,34 +140,35 @@ newFutharkiState count maybe_file = runExceptT $ do
 
     Nothing -> do
       -- Load the builtins through the type checker.
-      (_, imports, src) <- badOnLeft =<< runExceptT (readLibrary [])
+      (_, imports, src) <- badOnLeft show =<< runExceptT (readLibrary [])
       -- Then into the interpreter.
-      ienv <- foldM (\ctx -> badOnLeft <=< runInterpreter' . I.interpretImport ctx)
+      ienv <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx)
               I.initialCtx $ map (fmap fileProg) imports
 
       -- Then make the prelude available in the type checker.
-      (tenv, d, src') <- badOnLeft $ T.checkDec imports src T.initialEnv
+      (tenv, d, src') <- badOnLeft T.prettyTypeError $ T.checkDec imports src T.initialEnv
                          (T.mkInitialImport ".") $ mkOpen "/futlib/prelude"
       -- Then in the interpreter.
-      ienv' <- badOnLeft =<< runInterpreter' (I.interpretDec ienv d)
+      ienv' <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv d)
       return (imports, src', tenv, ienv')
 
     Just file -> do
       (ws, imports, src) <-
-        badOnLeft =<< liftIO (runExceptT (readProgram file)
-                              `Haskeline.catch` \(err::IOException) ->
-                                 return (Left (ExternalError (T.pack $ show err))))
+        badOnLeft show =<<
+        liftIO (runExceptT (readProgram file)
+                 `Haskeline.catch` \(err::IOException) ->
+                   return (Left (ExternalError (T.pack $ show err))))
       liftIO $ hPrint stderr ws
 
       let imp = T.mkInitialImport "."
-      ienv1 <- foldM (\ctx -> badOnLeft <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
+      ienv1 <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
                map (fmap fileProg) imports
-      (tenv1, d1, src') <- badOnLeft $ T.checkDec imports src T.initialEnv imp $
+      (tenv1, d1, src') <- badOnLeft T.prettyTypeError $ T.checkDec imports src T.initialEnv imp $
                            mkOpen "/futlib/prelude"
-      (tenv2, d2, src'') <- badOnLeft $ T.checkDec imports src' tenv1 imp $
+      (tenv2, d2, src'') <- badOnLeft T.prettyTypeError $ T.checkDec imports src' tenv1 imp $
                             mkOpen $ toPOSIX $ dropExtension file
-      ienv2 <- badOnLeft =<< runInterpreter' (I.interpretDec ienv1 d1)
-      ienv3 <- badOnLeft =<< runInterpreter' (I.interpretDec ienv2 d2)
+      ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
+      ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
       return (imports, src'', tenv2, ienv3)
 
   return FutharkiState { futharkiImports = imports
@@ -178,9 +179,9 @@ newFutharkiState count maybe_file = runExceptT $ do
                        , futharkiSkipBreaks = mempty
                        , futharkiLoaded = maybe_file
                        }
-  where badOnLeft :: Show err => Either err a -> ExceptT String IO a
-        badOnLeft (Right x) = return x
-        badOnLeft (Left err) = throwError $ show err
+  where badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
+        badOnLeft _ (Right x) = return x
+        badOnLeft p (Left err) = throwError $ p err
 
 getPrompt :: FutharkiM String
 getPrompt = do
@@ -254,7 +255,7 @@ onDec d = do
     Left e -> liftIO $ print e
     Right (_, imports',  src') ->
       case T.checkDec imports' src' tenv cur_import d of
-        Left e -> liftIO $ print e
+        Left e -> liftIO $ putStrLn $ T.prettyTypeError e
         Right (tenv', d', src'') -> do
           let new_imports = filter ((`notElem` map fst imports) . fst) imports'
           int_r <- runInterpreter $ do
@@ -272,15 +273,14 @@ onDec d = do
 onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
-  case showErr (T.checkExp imports src tenv e) of
+  case either (Left . T.prettyTypeError) Right $
+       T.checkExp imports src tenv e of
     Left err -> liftIO $ putStrLn err
     Right (_, e') -> do
       r <- runInterpreter $ I.interpretExp ienv e'
       case r of
         Left err -> liftIO $ print err
         Right v -> liftIO $ putStrLn $ pretty v
-    where showErr :: Show a => Either a b -> Either String b
-          showErr = either (Left . show) Right
 
 prettyBreaking :: Breaking -> String
 prettyBreaking b =
@@ -346,9 +346,9 @@ loadCommand file = do
     (True, Nothing) -> liftIO $ T.putStrLn "No file specified and no file previously loaded."
     (False, _) -> throwError $ Load $ T.unpack file
 
-genTypeCommand :: (Show err1, Show err2) =>
-                  (String -> T.Text -> Either err1 a)
-               -> (Imports -> VNameSource -> T.Env -> a -> Either err2 b)
+genTypeCommand :: Show err =>
+                  (String -> T.Text -> Either err a)
+               -> (Imports -> VNameSource -> T.Env -> a -> Either T.TypeError b)
                -> (b -> String)
                -> Command
 genTypeCommand f g h e = do
@@ -360,7 +360,7 @@ genTypeCommand f g h e = do
       src <- gets futharkiNameSource
       (tenv, _) <- gets futharkiEnv
       case g imports src tenv e' of
-        Left err -> liftIO $ print err
+        Left err -> liftIO $ putStrLn $ T.prettyTypeError err
         Right x -> liftIO $ putStrLn $ h x
 
 typeCommand :: Command

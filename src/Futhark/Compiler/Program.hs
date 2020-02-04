@@ -96,7 +96,7 @@ handleFile steps include file_contents file_name = do
 
   case E.checkProg imports src include $ prependRoots roots prog of
     Left err ->
-      externalError $ T.pack $ show err
+      externalError $ T.pack $ E.prettyTypeError err
     Right (m, ws, src') ->
       modify $ \s ->
         s { alreadyImported = (includeToString include,m) : imports

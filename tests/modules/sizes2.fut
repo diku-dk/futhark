@@ -1,5 +1,5 @@
 -- ==
--- error: Dimensions `n`
+-- error: Dimensions "n"
 
 module type withvec_mt = {
   val n : i32

@@ -1,5 +1,5 @@
 -- ==
--- error: `k`
+-- error: "k"
 
 type^ f = (k: i32) -> [k]i32 -> i32
 

@@ -1,6 +1,6 @@
 -- Respect sizes based on named parameters.
 -- ==
--- error: `n`
+-- error: "n"
 
 let ap (f: (n: i32) -> [n]i32) (k: i32) : [k]i32 =
   f k

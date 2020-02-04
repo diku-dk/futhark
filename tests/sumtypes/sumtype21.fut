@@ -1,6 +1,6 @@
 -- Sumtype aliasing.
 -- ==
--- error: Variable `xs` previously consumed
+-- error: Variable "xs" previously consumed
 
 type^ sum = #foo ([]i32) | #bar ([]i32)
 

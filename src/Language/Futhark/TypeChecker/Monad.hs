@@ -80,7 +80,6 @@ import Language.Futhark.Traversals
 import Language.Futhark.Warnings
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
-import Futhark.Util.Pretty (prettyOneLine)
 
 -- | A note with extra information regarding a type error.
 newtype Note = Note String
@@ -103,20 +102,16 @@ prettyNotes (Notes notes) =
 aNote :: String -> Notes
 aNote = Notes . pure . Note
 
--- | Information about an error during type checking.  The 'Show'
--- instance for this type produces a human-readable description.
-data TypeError = TypeError SrcLoc Notes String
-
-instance Show TypeError where
-  show (TypeError pos notes msg) =
-    "Error at " ++ locStr pos ++ ":\n" ++ msg ++ prettyNotes notes
+-- | Information about an error during type checking.
+data TypeError = TypeError SrcLoc (Maybe String) Notes String
 
 prettyTypeErrorNoLoc :: TypeError -> String
-prettyTypeErrorNoLoc (TypeError _ notes msg) =
-  msg ++ prettyNotes notes
+prettyTypeErrorNoLoc (TypeError _ during notes msg) =
+  maybe "" (<>"\n\n") during <>
+  msg <> prettyNotes notes
 
 prettyTypeError :: TypeError -> String
-prettyTypeError e@(TypeError loc _ _) =
+prettyTypeError e@(TypeError loc _ _ _) =
   "Error at " ++ locStr loc ++ ":\n" ++ prettyTypeErrorNoLoc e
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
@@ -201,9 +196,9 @@ lookupImport loc file = do
   my_path <- asks contextImportName
   let canonical_import = includeToString $ mkImportFrom my_path file loc
   case M.lookup canonical_import imports of
-    Nothing    -> throwError $ TypeError loc mempty $
-                  unlines ["Unknown import \"" ++ canonical_import ++ "\"",
-                           "Known: " ++ intercalate ", " (M.keys imports)]
+    Nothing    -> typeError loc mempty $ intercalate "\n"
+                  ["Unknown import \"" ++ canonical_import ++ "\"",
+                   "Known: " ++ intercalate ", " (M.keys imports)]
     Just scope -> return (canonical_import, scope)
 
 localEnv :: Env -> TypeM a -> TypeM a
@@ -217,7 +212,6 @@ localEnv env = local $ \ctx ->
 data BreadCrumb = MatchingTypes StructType StructType
                 | MatchingFields Name
                 | Matching String
-                | Applying (Maybe (QualName VName)) Exp
 
 instance Show BreadCrumb where
   show (MatchingTypes t1 t2) =
@@ -228,12 +222,6 @@ instance Show BreadCrumb where
     "When matching types of record field " ++ quote (pretty field) ++ "."
   show (Matching s) =
     s
-  show (Applying (Just fname) e) =
-    "When checking application of " <> quote (pretty fname) <> " to argument\n" <>
-    "  " <> shorten (prettyOneLine e)
-  show (Applying Nothing e) =
-    "When checking application of function to argument\n" <>
-    "  " <> shorten (prettyOneLine e)
 
 -- | Tracking breadcrumbs to give a kind of "stack trace" in errors.
 class Monad m => MonadBreadCrumbs m where
@@ -249,7 +237,7 @@ typeError loc notes s = do
   bc <- getBreadCrumbs
   let bc' | null bc = ""
           | otherwise = "\n" ++ intercalate "\n" (map show bc)
-  throwError $ TypeError (srclocOf loc) notes (s ++ bc')
+  throwError $ TypeError (srclocOf loc) Nothing notes (s ++ bc')
 
 class (MonadError TypeError m, MonadBreadCrumbs m) =>
       MonadTypeChecker m where
@@ -273,7 +261,7 @@ class (MonadError TypeError m, MonadBreadCrumbs m) =>
     case t of
       Scalar (Prim (Signed Int32)) -> return v'
       _ -> typeError loc mempty $
-           "Dimension declaration " ++ pretty v ++ " should be of type `i32`."
+           "Dimension declaration " ++ pretty v ++ " should be of type i32."
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
