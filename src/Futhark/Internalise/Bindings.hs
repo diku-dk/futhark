@@ -129,6 +129,11 @@ flattenPattern = flattenPattern'
           new_name <- newVName $ baseString v
           return [((E.Ident v (Info t) loc, new_name),
                    t `E.setAliases` ())]
+        -- XXX: treat empty tuples and records as bool.
+        flattenPattern' (E.TuplePattern [] loc) =
+          flattenPattern' (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc)
+        flattenPattern' (E.RecordPattern [] loc) =
+          flattenPattern' (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc)
         flattenPattern' (E.TuplePattern pats _) =
           concat <$> mapM flattenPattern' pats
         flattenPattern' (E.RecordPattern fs loc) =

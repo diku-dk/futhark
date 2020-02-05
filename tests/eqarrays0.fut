@@ -13,4 +13,5 @@
 -- input { [1,2] [3,4] }
 -- output { false }
 
-let main (xs: []i32) (ys: []i32) = xs == ys
+let main [n][m] (xs: [n]i32) (ys: [m]i32) =
+  n == m && xs == (ys :> [n]i32)

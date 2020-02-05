@@ -24,6 +24,11 @@
 --
 -- for any `x`.
 
+-- Implementation note: many of these definitions contain dynamically
+-- checked size casts.  These will be removed by the compiler, but are
+-- necessary for the type checker, as the 'intrinsics' functions are
+-- not size-dependently typed.
+
 import "zip"
 
 -- | Apply the given function to each element of an array.
@@ -32,7 +37,7 @@ import "zip"
 --
 -- **Span:** *O(1)*
 let map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
-  intrinsics.map (f, as)
+  intrinsics.map (f, as) :> *[n]x
 
 -- | Apply the given function to each element of a single array.
 --
@@ -84,7 +89,7 @@ let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let reduce 'a (op: a -> a -> a) (ne: a) (as: []a): a =
+let reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
   intrinsics.reduce (op, ne, as)
 
 -- | As `reduce`, but the operator must also be commutative.  This is
@@ -95,7 +100,7 @@ let reduce 'a (op: a -> a -> a) (ne: a) (as: []a): a =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let reduce_comm 'a (op: a -> a -> a) (ne: a) (as: []a): a =
+let reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
   intrinsics.reduce_comm (op, ne, as)
 
 -- | `reduce_by_index dest f ne is as` returns `dest`, but with each
@@ -114,7 +119,7 @@ let reduce_comm 'a (op: a -> a -> a) (ne: a) (as: []a): a =
 -- In practice, the *O(n)* behaviour only occurs if *m* is also very
 -- large.
 let reduce_by_index 'a [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i32) (as : [n]a) : *[m]a =
-  intrinsics.hist (1, dest, f, ne, is, as)
+  intrinsics.hist (1, dest, f, ne, is, as) :> *[m]a
 
 -- | Inclusive prefix scan.  Has the same caveats with respect to
 -- associativity as `reduce`.
@@ -123,7 +128,7 @@ let reduce_by_index 'a [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [
 --
 -- **Span:** *O(log(n))*
 let scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
-  intrinsics.scan (op, ne, as)
+  intrinsics.scan (op, ne, as) :> *[n]a
 
 -- | Remove all those elements of `as` that do not satisfy the
 -- predicate `p`.
@@ -131,7 +136,7 @@ let scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let filter 'a (p: a -> bool) (as: []a): *[]a =
+let filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
   let (as', is) = intrinsics.partition (1, \x -> if p x then 0 else 1, as)
   in as'[:is[0]]
 
@@ -171,7 +176,7 @@ let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let reduce_stream 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b =
+let reduce_stream [n] 'a 'b (op: b -> b -> b) (f: (k: i32) -> [k]a -> b) (as: [n]a): b =
   intrinsics.reduce_stream (op, f, as)
 
 -- | As `reduce_stream`@term, but the chunks do not necessarily
@@ -181,7 +186,7 @@ let reduce_stream 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let reduce_stream_per 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b =
+let reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i32) -> [k]a -> b) (as: [n]a): b =
   intrinsics.reduce_stream_per (op, f, as)
 
 -- | Similar to `reduce_stream`@term, except that each chunk must produce
@@ -191,8 +196,8 @@ let reduce_stream_per 'a 'b (op: b -> b -> b) (f: i32 -> []a -> b) (as: []a): b 
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let map_stream 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
-  intrinsics.map_stream (f, as)
+let map_stream [n] 'a 'b (f: (k: i32) -> [k]a -> [k]b) (as: [n]a): *[n]b =
+  intrinsics.map_stream (f, as) :> *[n]b
 
 -- | Similar to `map_stream`@term, but the chunks do not necessarily
 -- correspond to subsequences of the original array (they may be
@@ -201,8 +206,8 @@ let map_stream 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let map_stream_per 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
-  intrinsics.map_stream_per (f, as)
+let map_stream_per [n] 'a 'b (f: (k: i32) -> [k]a -> [k]b) (as: [n]a): *[n]b =
+  intrinsics.map_stream_per (f, as) :> *[n]b
 
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.
@@ -210,7 +215,7 @@ let map_stream_per 'a 'b (f: i32 -> []a -> []b) (as: []a): *[]b =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let all 'a (f: a -> bool) (as: []a): bool =
+let all [n] 'a (f: a -> bool) (as: [n]a): bool =
   reduce (&&) true (map f as)
 
 -- | Return `true` if the given function returns `true` for any
@@ -219,7 +224,7 @@ let all 'a (f: a -> bool) (as: []a): bool =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let any 'a (f: a -> bool) (as: []a): bool =
+let any [n] 'a (f: a -> bool) (as: [n]a): bool =
   reduce (||) false (map f as)
 
 -- | The `scatter as is vs` expression calculates the equivalent of
@@ -248,4 +253,4 @@ let any 'a (f: a -> bool) (as: []a): bool =
 --
 -- **Span:** *O(1)*
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
-  intrinsics.scatter (dest, is, vs)
+  intrinsics.scatter (dest, is, vs) :> *[m]t

@@ -12,7 +12,7 @@
 -- output { 5 }
 
 -- The two relations must describe a transitive relation.
-let lss 't (pred1: t -> bool) (pred2: t -> t -> bool) (xs: []t) =
+let lss [n] 't (pred1: t -> bool) (pred2: t -> t -> bool) (xs: [n]t) =
   let max = i32.max
 
   let redOp (lssx, lisx, lcsx, tlx, firstx, lastx)

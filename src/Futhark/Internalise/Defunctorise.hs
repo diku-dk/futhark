@@ -230,14 +230,14 @@ transformExp :: Exp -> TransformM Exp
 transformExp = transformNames
 
 transformValBind :: ValBind -> TransformM ()
-transformValBind (ValBind entry name tdecl (Info t) tparams params e doc loc) = do
+transformValBind (ValBind entry name tdecl (Info (t, retext)) tparams params e doc loc) = do
   name' <- transformName name
   tdecl' <- traverse transformTypeExp tdecl
   t' <- transformStructType t
   e' <- transformExp e
   tparams' <- traverse transformNames tparams
   params' <- traverse transformNames params
-  emit $ ValDec $ ValBind entry name' tdecl' (Info t') tparams' params' e' doc loc
+  emit $ ValDec $ ValBind entry name' tdecl' (Info (t', retext)) tparams' params' e' doc loc
 
 transformTypeDecl :: TypeDecl -> TransformM TypeDecl
 transformTypeDecl (TypeDecl dt (Info et)) =

@@ -181,11 +181,10 @@ refineEnv loc tset env tname ps t
                               TypeSub $ TypeAbbr l cur_ps t),
                               (v, TypeSub $ TypeAbbr l ps t)])
                 env)
-      else throwError $ TypeError loc $ "Cannot refine a type having " <>
+      else typeError loc mempty $ "Cannot refine a type having " <>
            tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
   | otherwise =
-      throwError $ TypeError loc $
-      pretty tname ++ " is not an abstract type in the module type."
+      typeError loc mempty $ pretty tname ++ " is not an abstract type in the module type."
   where tpMsg [] = "no type parameters"
         tpMsg xs = "type parameters " <> unwords (map pretty xs)
 
@@ -222,7 +221,11 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
     case findTypeDef (fmap baseName name) mod of
       Just (name', TypeAbbr mod_l ps t)
         | mod_l > name_l ->
-            mismatchedLiftedness name_l (map qualLeaf $ M.keys mod_abs)
+            mismatchedLiftedness name_l
+            (map qualLeaf $ M.keys mod_abs) (qualLeaf name) (mod_l, ps, t)
+        | name_l < SizeLifted,
+          emptyDims t ->
+            anonymousSizes (map qualLeaf $ M.keys mod_abs)
             (qualLeaf name) (mod_l, ps, t)
         | Just (abs_name, _) <- M.lookup (fmap baseName name) abs_mapping ->
             return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
@@ -231,13 +234,24 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
       _ ->
         missingType loc $ fmap baseName name
   where mismatchedLiftedness name_l abs name mod_t =
-          Left $ TypeError loc $
+          Left $ TypeError loc Nothing mempty $
           unlines ["Module defines",
                    sindent $ ppTypeAbbr abs name mod_t,
                    "but module type requires " ++ what ++ "."]
           where what = case name_l of Unlifted -> "a non-lifted type"
                                       SizeLifted -> "a size-lifted type"
                                       Lifted -> "a lifted type"
+
+        anonymousSizes abs name mod_t =
+          Left $ TypeError loc Nothing mempty $
+          unlines ["Module defines",
+                   sindent $ ppTypeAbbr abs name mod_t,
+                   "which contains anonymous sizes, but module type requires non-lifted type."]
+
+        emptyDims :: StructType -> Bool
+        emptyDims = isNothing . traverseDims onDim
+          where onDim PosImmediate AnyDim = Nothing
+                onDim _ d = Just d
 
 resolveMTyNames :: MTy -> MTy
                 -> M.Map VName (QualName VName)
@@ -275,17 +289,17 @@ resolveMTyNames = resolveMTyNames'
 
 missingType :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingType loc name =
-  Left $ TypeError loc $
+  Left $ TypeError loc Nothing mempty $
   "Module does not define a type named " ++ pretty name ++ "."
 
 missingVal :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingVal loc name =
-  Left $ TypeError loc $
+  Left $ TypeError loc Nothing mempty $
   "Module does not define a value named " ++ pretty name ++ "."
 
 missingMod :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingMod loc name =
-  Left $ TypeError loc $
+  Left $ TypeError loc Nothing mempty $
   "Module does not define a module named " ++ pretty name ++ "."
 
 mismatchedType :: SrcLoc
@@ -295,11 +309,11 @@ mismatchedType :: SrcLoc
                -> (Liftedness, [TypeParam], StructType)
                -> Either TypeError b
 mismatchedType loc abs name spec_t env_t =
-  Left $ TypeError loc $
-  unlines ["Module defines",
-           sindent $ ppTypeAbbr abs name env_t,
-           "but module type requires",
-           sindent $ ppTypeAbbr abs name spec_t]
+  Left $ TypeError loc Nothing mempty $ intercalate "\n"
+  ["Module defines",
+   sindent $ ppTypeAbbr abs name env_t,
+   "but module type requires",
+   sindent $ ppTypeAbbr abs name spec_t]
 
 sindent :: String -> String
 sindent = intercalate "\n" . map ("  "++) . lines
@@ -330,10 +344,12 @@ matchMTys orig_mty orig_mty_sig =
                -> Either TypeError (M.Map VName VName)
 
     matchMTys' _ (MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
-      Left $ TypeError loc "Cannot match parametric module with non-parametric module type."
+      Left $ TypeError loc Nothing mempty
+      "Cannot match parametric module with non-parametric module type."
 
     matchMTys' _ (MTy _ ModEnv{}) (MTy _ ModFun{}) loc =
-      Left $ TypeError loc "Cannot match non-parametric module with paramatric module type."
+      Left $ TypeError loc Nothing mempty
+      "Cannot match non-parametric module with paramatric module type."
 
     matchMTys' old_abs_subst_to_type (MTy mod_abs mod) (MTy sig_abs sig) loc = do
       -- Check that abstract types in 'sig' have an implementation in
@@ -350,9 +366,11 @@ matchMTys orig_mty orig_mty_sig =
     matchMods :: TypeSubs -> Mod -> Mod -> SrcLoc
               -> Either TypeError (M.Map VName VName)
     matchMods _ ModEnv{} ModFun{} loc =
-      Left $ TypeError loc "Cannot match non-parametric module with parametric module type."
+      Left $ TypeError loc Nothing mempty
+      "Cannot match non-parametric module with parametric module type."
     matchMods _ ModFun{} ModEnv{} loc =
-      Left $ TypeError loc "Cannot match parametric module with non-parametric module type."
+      Left $ TypeError loc Nothing mempty
+      "Cannot match parametric module with non-parametric module type."
 
     matchMods abs_subst_to_type (ModEnv mod) (ModEnv sig) loc =
       matchEnvs abs_subst_to_type mod sig loc
@@ -440,7 +458,7 @@ matchMTys orig_mty orig_mty_sig =
       case matchValBinding loc spec_v v of
         Nothing -> return (spec_name, name)
         Just problem ->
-          Left $ TypeError loc $ pretty $
+          Left $ TypeError loc Nothing mempty $ pretty $
           text "Module type specifies" </>
           indent 2 (ppValBind spec_name spec_v) </>
           text "but module provides" </>
@@ -449,11 +467,12 @@ matchMTys orig_mty orig_mty_sig =
 
     matchValBinding :: SrcLoc -> BoundV -> BoundV -> Maybe (Maybe String)
     matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
-      case doUnification loc tps (removeShapeAnnotations orig_spec_t) (removeShapeAnnotations orig_t) of
-        Left (TypeError _ err) -> Just $ Just err
+      case doUnification loc tps (toStruct orig_spec_t) (toStruct orig_t) of
+        Left err -> Just $ Just $ prettyTypeErrorNoLoc err
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
-        Right t | t `subtypeOf` removeShapeAnnotations orig_spec_t -> Nothing
+        Right t | removeShapeAnnotations t `subtypeOf`
+                  removeShapeAnnotations orig_spec_t -> Nothing
                 | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =

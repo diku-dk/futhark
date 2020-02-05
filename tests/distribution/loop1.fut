@@ -17,7 +17,7 @@
 let main [n][m][k] (a: [n][m][k]i32): ([n][k]i32,[n]i32) =
   let acc = replicate k 0
   let accnum = 1 in
-  unzip(map (\(a_r: [m][k]i32): ([k]i32,i32)  ->
+  unzip(map (\a_r ->
         loop((acc,accnum)) for i < m do
           (map2 (+) acc (a_r[i]),
            accnum + accnum)
@@ -28,7 +28,7 @@ let main_distributed [n][m][k] (a: [n][m][k]i32): ([n][k]i32,[n]i32) =
   let acc_expanded = replicate n (replicate k 0)
   let accnum_expanded = replicate n 1 in
   loop((acc_expanded,accnum_expanded)) for i < m do
-    unzip(map3 (\(acc: [k]i32) (accnum: i32) (a_r: [m][k]i32): ([k]i32,i32)  ->
+    unzip(map3 (\acc accnum a_r  ->
                     (map2 (+) acc (a_r[i]),
                      accnum * accnum)
                  ) (acc_expanded) (accnum_expanded) a)

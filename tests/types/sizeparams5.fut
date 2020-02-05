@@ -5,4 +5,4 @@
 
 type ints [n] = [n]i32
 
-let main(n: i32): ints [3] = iota n
+let main (n: i32) = iota n :> ints [3]

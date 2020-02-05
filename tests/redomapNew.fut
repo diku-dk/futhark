@@ -22,13 +22,13 @@
 -- }
 
 let main(arr: []i32): ([]i32,[][][]i32) =
-  let vs = map (\(a: i32): []i32  ->
+  let vs = map (\(a: i32) ->
                   map (\(x: i32): i32  -> 2*x*a
                      ) (iota(3) )
               ) arr
   in (reduce (\a b -> map2 (+) a b) (
              replicate 3 0) vs,
-      map (\(r: []i32): [][]i32  ->
+      map (\(r: []i32)  ->
              transpose (replicate 5 r)) vs)
 
 

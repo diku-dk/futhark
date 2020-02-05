@@ -18,7 +18,7 @@
 let brownianBridgeDates [num_dates]
                         (bb_inds: [3][num_dates]i32)
                         (bb_data: [3][num_dates]f64)
-                        (gauss: [num_dates]f64): []f64 =
+                        (gauss: [num_dates]f64): [num_dates]f64 =
     let bi = bb_inds[0]
     let li = bb_inds[1]
     let ri = bb_inds[2]
@@ -58,7 +58,7 @@ let brownianBridge [num_dates]
                 bb_inds: [3][num_dates]i32,
                 bb_data: [3][num_dates]f64,
                  gaussian_arr: []f64
-            ): [][]f64 =
+            ) =
     let gauss2d  = unflatten num_dates num_und gaussian_arr
     let gauss2dT = transpose gauss2d in
       transpose (
@@ -69,8 +69,8 @@ let main [num_dates] (num_und: i32)
                      (bb_inds: [3][num_dates]i32)
                      (arr_usz: []f64): [][]f64 =
   let n = num_dates*num_und
-  let arr    = arr_usz : [n]f64
-  let bb_data= map (\(row: []i32): []f64  ->
+  let arr    = arr_usz :> [n]f64
+  let bb_data= map (\(row: []i32)  ->
                         map r64 row
                   ) (bb_inds )
   let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )

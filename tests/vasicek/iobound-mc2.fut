@@ -32,13 +32,13 @@ let seqRedSumQ [n] (lastr: f32, ws: [n]f32): f32 =
 let mc1step(wps: []f32): f32 =
   seqRedSumP(r0(), wps)
 
-let mc1(wpss: [][]f32): []f32 =
+let mc1 [n] (wpss: [n][]f32): [n]f32 =
   map mc1step wpss
 
 let mc2step (wqs: []f32) (r1: f32): f32 =
   seqRedSumQ(r1, wqs)
 
-let mc2sim [tn] (arg: ([tn][]f32, f32)): f32 =
+let mc2sim [tn][k] (arg: ([tn][k]f32, f32)): f32 =
   let ( wqss, r1 ) = arg
   let sum_r = map2 mc2step wqss (replicate tn r1) in
   mean(sum_r)

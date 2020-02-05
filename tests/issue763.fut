@@ -21,7 +21,7 @@ let square(v: vector): f64 =
 	dotprod(v,v)
 
 let init_matrix 't (nx: i32)(ny: i32)(x: t): [nx][ny]t =
-	map( \(_):[]t ->
+	map( \(_) ->
 		map( \(_):t ->
 			x
 		) (0..<ny)
