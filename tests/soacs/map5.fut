@@ -16,7 +16,7 @@ let inner(a: [][](i32,i32)): []i32 =
         x+y) a
 
 let main(a1: [][]i32) (a2: [][]i32): []i32 =
-  inner(map (\(r: ([]i32,[]i32)): [](i32,i32)  ->
+  inner(map (\(r: ([]i32,[]i32)) ->
               let (r1,r2) = r in
               zip r1 r2) (
             zip a1 a2))

@@ -30,18 +30,18 @@ let take [n] 't (i: i32) (x: [n]t): [i]t = x[0:i]
 let drop [n] 't (i: i32) (x: [n]t) = x[i:]
 
 -- | Split an array at a given position.
-let split 't (n: i32) (xs: []t): ([n]t, []t) =
-  (xs[:n], xs[n:])
+let split [n] 't (i: i32) (xs: [n]t): ([i]t, []t) =
+  (xs[:i] :> [i]t, xs[i:])
 
 -- | Return the elements of the array in reverse order.
-let reverse [n] 't (x: [n]t): [n]t = x[::-1]
+let reverse [n] 't (x: [n]t): [n]t = x[::-1] :> [n]t
 
 -- | Concatenate two arrays.  Warning: never try to perform a reduction
 -- with this operator; it will not work.
-let (++) 't (xs: []t) (ys: []t): *[]t = intrinsics.concat (xs, ys)
+let (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = intrinsics.concat (xs, ys)
 
 -- | An old-fashioned way of saying `++`.
-let concat 't (xs: []t) (ys: []t): *[]t = xs ++ ys
+let concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = xs ++ ys
 
 -- | Concatenation where the result has a predetermined size.  If the
 -- provided size is wrong, the function will fail with a run-time
@@ -52,17 +52,17 @@ let concat_to 't (n: i32) (xs: []t) (ys: []t): *[]t = xs ++ ys :> [n]t
 -- rotation amount is also supported.
 --
 -- For example, if `b==rotate r a`, then `b[x+r] = a[x]`.
-let rotate 't (r: i32) (xs: []t) = intrinsics.rotate (r, xs)
+let rotate [n] 't (r: i32) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> [n]t
 
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
 let iota (n: i32): *[n]i32 =
-  i32.iota n
+  i32.iota n :> [n]i32
 
 -- | Construct an array of the given length containing the given
 -- value.
 let replicate 't (n: i32) (x: t): *[n]t =
-  i32.replicate n x
+  i32.replicate n x :> [n]t
 
 -- | Copy a value.  The result will not alias anything.
 let copy 't (a: t): *t =
@@ -86,19 +86,19 @@ let flatten_4d [n][m][l][k] 't (xs: [n][m][l][k]t): []t =
   flatten (flatten_3d xs)
 
 -- | Splits the outer dimension of an array in two.
-let unflatten 't (n: i32) (m: i32) (xs: []t): [n][m]t =
-  intrinsics.unflatten (n, m, xs)
+let unflatten [p] 't (n: i32) (m: i32) (xs: [p]t): [n][m]t =
+  intrinsics.unflatten (n, m, xs) :> [n][m]t
 
 -- | Splits the outer dimension of an array in three.
-let unflatten_3d 't (n: i32) (m: i32) (l: i32) (xs: []t): [n][m][l]t =
+let unflatten_3d [p] 't (n: i32) (m: i32) (l: i32) (xs: [p]t): [n][m][l]t =
   unflatten n m (unflatten (n*m) l xs)
 
 -- | Splits the outer dimension of an array in four.
-let unflatten_4d 't (n: i32) (m: i32) (l: i32) (k: i32) (xs: []t): [n][m][l][k]t =
+let unflatten_4d [p] 't (n: i32) (m: i32) (l: i32) (k: i32) (xs: [p]t): [n][m][l][k]t =
   unflatten n m (unflatten_3d (n*m) l k xs)
 
 let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
-  intrinsics.transpose a
+  intrinsics.transpose a :> [m][n]t
 
 -- | True if all of the input elements are true.  Produces true on an
 -- empty array.
@@ -109,11 +109,11 @@ let and: []bool -> bool = all id
 let or: []bool -> bool = any id
 
 -- | Perform a *sequential* left-fold of an array.
-let foldl 'a 'b (f: a -> b -> a) (acc: a) (bs: []b): a =
+let foldl [n] 'a 'b (f: a -> b -> a) (acc: a) (bs: [n]b): a =
   loop acc for b in bs do f acc b
 
 -- | Perform a *sequential* right-fold of an array.
-let foldr 'a 'b (f: b -> a -> a) (acc: a) (bs: []b): a =
+let foldr [n] 'a 'b (f: b -> a -> a) (acc: a) (bs: [n]b): a =
   foldl (flip f) acc (reverse bs)
 
 -- | Create a value for each point in a one-dimensional index space.

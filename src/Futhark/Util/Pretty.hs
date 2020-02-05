@@ -12,6 +12,7 @@ module Futhark.Util.Pretty
        , oneLine
        , annot
        , nestedBlock
+       , textwrap
        )
        where
 
@@ -53,6 +54,10 @@ apply = parens . commasep . map align
 -- | Make sure that the given document is printed on just a single line.
 oneLine :: PP.Doc -> PP.Doc
 oneLine s = PP.text $ PP.displayS (PP.renderCompact s) ""
+
+-- | Like 'text', but splits the string into words and permits line breaks between all of them.
+textwrap :: String -> Doc
+textwrap = folddoc (<+/>) . map text . words
 
 -- | Stack and prepend a list of 'Doc's to another 'Doc', separated by
 -- a linebreak.  If the list is empty, the second 'Doc' will be

@@ -6,4 +6,4 @@
 
 type ints [n] = [n]i32
 
-let main [n] (a: ints [n]) (b: ints [n]) = concat a b
+let main [n][m] (a: ints [n]) (b: ints [m]) = concat (a :> ints [n]) (b :> ints [n])

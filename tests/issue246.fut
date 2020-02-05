@@ -10,16 +10,16 @@ let dim_2 't [d0] [d1] (i: i32) (x: [d0][d1]t): i32 =
   then d1
   else d0
 
-let take_arrint (l: i32) (x: [][]i32): [][]i32 =
+let take_arrint [k] (l: i32) (x: [][k]i32): [][]i32 =
   if (0 <= l)
   then if (l <= length x)
   then let (v1, _) = split (l) (x) in
   v1
-  else concat (x) (replicate ((i32.abs (l) - length x)) (replicate (dim_2 1 x) (0)))
+  else concat (x) (replicate ((i32.abs (l) - length x)) (replicate (dim_2 1 x) (0) :> [k]i32))
   else if (0 <= (l + length x))
   then let (_, v2) = split ((l + length x)) (x) in
   v2
-  else concat (replicate ((i32.abs (l) - length x)) (replicate (dim_2 1 x) (0))) (x)
+  else concat (replicate ((i32.abs (l) - length x)) (replicate (dim_2 1 x) (0) :> [k]i32)) (x)
 let reshape_int (l: i32) (x: []i32): []i32 =
   let roundUp = ((l + (length x - 1)) / length x) in
   let extend = flatten (replicate (roundUp) (x)) in

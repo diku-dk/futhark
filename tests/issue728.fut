@@ -1,6 +1,7 @@
-let expand_with_flags 'a 'b
+let expand_with_flags [n] 'a 'b
+                      (b: b)
                       (sz: a -> i32) (get: a -> i32 -> b)
-                      (arr:[]a) : ([]b, []bool)  =
+                      (arr:[n]a) : ([]b, []bool)  =
   ([], [])
 
 type^ csr 't = {row_off: []i32, col_idx: []i32, vals: []t}
@@ -8,8 +9,8 @@ type^ csr 't = {row_off: []i32, col_idx: []i32, vals: []t}
 let expand_reduce 'a 'b [n]
                   (sz: a -> i32) (get: a -> i32 -> b)
                   (f: b -> b -> b) (ne:b)
-                  (arr:[n]a) : [n]b =
-  let (vals, flags) = expand_with_flags sz get arr
+                  (arr:[n]a) : []b =
+  let (vals, flags) = expand_with_flags ne sz get arr
   in []
 
 let smvm ({row_off,col_idx,vals} : csr i32) (v:[]i32) =

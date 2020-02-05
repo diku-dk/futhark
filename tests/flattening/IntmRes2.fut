@@ -18,13 +18,13 @@
 --    [[32, 31, 30],
 --     [35, 34, 33]]]
 -- }
-let addToRow (xs: []i32, y: i32): []i32 =
+let addToRow [n] (xs: [n]i32, y: i32): [n]i32 =
   map (\(x: i32): i32  -> x+y) xs
 
 let main (xsss: [][][]i32) (cs: []i32) (y: i32): [][][]i32 =
-  map  (\(xss: [][]i32, c: i32): [][]i32  ->
+  map  (\(xss: [][]i32, c: i32) ->
          let y' = y * c + c in
-         map (\(xs: []i32): []i32  ->
+         map (\(xs: []i32) ->
                addToRow(xs,y')
             ) xss
       ) (zip  xsss cs)

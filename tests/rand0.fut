@@ -22,7 +22,7 @@ let hash(x: i32): i32 =
   let x = ((x >> 16) ^ x) in
   x
 
-let rand_array(n: i32, lower: i32, upper: i32): [n]i32 =
+let rand_array (n: i32) (lower: i32) (upper: i32): [n]i32 =
   map (\(i: i32): i32  ->
         -- We hash i+n to ensure that a random length-n array is not a
         -- prefix of a random length-(n+m) array.
@@ -30,4 +30,4 @@ let rand_array(n: i32, lower: i32, upper: i32): [n]i32 =
       iota(n))
 
 let main (x: i32) (lower: i32) (upper: i32): []i32 =
-  rand_array(x, lower, upper)
+  rand_array x lower upper

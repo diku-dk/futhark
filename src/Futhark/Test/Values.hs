@@ -497,8 +497,7 @@ compareValues1 got expected = maybeHead $ compareValues got expected
 
 compareValue :: Int -> Value -> Value -> [Mismatch]
 compareValue i got_v expected_v
-  | product (valueShape got_v) == 0 && product (valueShape expected_v) == 0
-    || valueShape got_v == valueShape expected_v =
+  | valueShape got_v == valueShape expected_v =
     case (got_v, expected_v) of
       (Int8Value _ got_vs, Int8Value _ expected_vs) ->
         compareNum 1 got_vs expected_vs
