@@ -294,7 +294,7 @@ let mean [n] (xs: [n]f64) : f64 =
 module R = S2.Reduce { type t = i32
                        let ne = 0i32
                        let op (x:i32) (y:i32) = x i32.+ y
-                       let f (v : [2]f64) : t =
+                       let f (v : [S2.D]f64) : t =
                          let x = v[0]
                          let y = v[1]
                          in i32.bool(x*x+y*y < 1f64) }

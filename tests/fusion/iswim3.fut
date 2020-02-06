@@ -28,7 +28,7 @@ let blackScholes [num_und][num_dates]
                 bb_arr: [num_dates][num_und]f64
            ): [num_dates][num_und]f64 =
     let noises = correlateDeltas(md_c, bb_arr) in
-        scan (\(x: []f64) (y: []f64): []f64  -> map2 (*) x y
+        scan (\(x: []f64) (y: []f64)  -> map2 (*) x y
             ) (md_starts) noises
 
 

@@ -4,7 +4,7 @@
 let predict (a:[10]f64) : i32 =
   let (m,i) = reduce (\(a,i) (b,j) -> if a > b then (a,i) else (b,j))
                        (a[9],9)
-                       (zip (a[:8]) (iota 9))
+                       (zip (a[:8]) (iota 9 :> [8]i32))
   in i
 
 let main : i32 =

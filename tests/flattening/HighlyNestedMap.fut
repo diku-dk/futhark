@@ -25,13 +25,13 @@
 --     [[19, 17, 15],
 --      [19, 17, 15]]]]
 -- }
-let add1 (xs: []i32, ys: []i32): []i32 =
+let add1 [n] (xs: [n]i32, ys: [n]i32): [n]i32 =
   map2 (+) xs ys
 
-let add2 (xs: [][]i32, ys: [][]i32): [][]i32 =
+let add2 [n][m] (xs: [n][m]i32, ys: [n][m]i32): [n][m]i32 =
   map  add1 (zip  xs ys)
 
-let add3 (xs: [][][]i32, ys: [][][]i32): [][][]i32 =
+let add3 [n][m][l] (xs: [n][m][l]i32, ys: [n][m][l]i32): [n][m][l]i32 =
   map  add2 (zip  xs ys)
 
 let add4 (xs: [][][][]i32, ys: [][][][]i32): [][][][]i32 =

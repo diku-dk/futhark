@@ -14,12 +14,16 @@ module Language.Futhark.TypeChecker.Monad
   , localEnv
 
   , TypeError(..)
+  , prettyTypeError, prettyTypeErrorNoLoc
   , unexpectedType
   , undefinedType
   , unappliedFunctor
   , unknownVariableError
   , underscoreUse
   , functionIsNotValue
+  , Notes
+  , prettyNotes
+  , aNote
 
   , BreadCrumb(..)
   , MonadBreadCrumbs(..)
@@ -77,51 +81,74 @@ import Language.Futhark.Warnings
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
 
--- | Information about an error during type checking.  The 'Show'
--- instance for this type produces a human-readable description.
-data TypeError = TypeError SrcLoc String
+-- | A note with extra information regarding a type error.
+newtype Note = Note String
 
-unexpectedType :: MonadTypeChecker m => SrcLoc -> TypeBase () () -> [TypeBase () ()] -> m a
+newtype Notes = Notes [Note]
+  deriving (Semigroup, Monoid)
+
+prettyNote :: Note -> String
+prettyNote (Note msg) =
+  header ++ intercalate "\n" (pad $ lines msg)
+  where header = "Note: "
+        padding = map (const ' ') header
+        pad [] = []
+        pad (x:xs) = x : map (padding++) xs
+
+prettyNotes :: Notes -> String
+prettyNotes (Notes notes) =
+  concatMap (("\n\n"++) . prettyNote) notes
+
+aNote :: String -> Notes
+aNote = Notes . pure . Note
+
+-- | Information about an error during type checking.
+data TypeError = TypeError SrcLoc (Maybe String) Notes String
+
+prettyTypeErrorNoLoc :: TypeError -> String
+prettyTypeErrorNoLoc (TypeError _ during notes msg) =
+  maybe "" (<>"\n\n") during <>
+  msg <> prettyNotes notes
+
+prettyTypeError :: TypeError -> String
+prettyTypeError e@(TypeError loc _ _ _) =
+  "Error at " ++ locStr loc ++ ":\n" ++ prettyTypeErrorNoLoc e
+
+unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =
-  throwError $ TypeError loc $
+  typeError loc mempty $
   "Type of expression at " ++ locStr loc ++
   "cannot have any type - possibly a bug in the type checker."
 unexpectedType loc t ts =
-  throwError $ TypeError loc $
+  typeError loc mempty $
   "Type of expression at " ++ locStr loc ++ " must be one of " ++
   intercalate ", " (map pretty ts) ++ ", but is " ++
   pretty t ++ "."
 
 undefinedType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
 undefinedType loc name =
-  throwError $ TypeError loc $
-  "Unknown type " ++ pretty name ++ "."
+  typeError loc mempty $ "Unknown type " ++ pretty name ++ "."
 
 functionIsNotValue :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
 functionIsNotValue loc name =
-  throwError $ TypeError loc $
+  typeError loc mempty$
   "Attempt to use function " ++ pretty name ++ " as value at " ++ locStr loc ++ "."
 
 unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
 unappliedFunctor loc =
-  throwError $ TypeError loc "Cannot have parametric module here."
+  typeError loc mempty "Cannot have parametric module here."
 
 unknownVariableError :: MonadTypeChecker m =>
                         Namespace -> QualName Name -> SrcLoc -> m a
 unknownVariableError space name loc =
-  throwError $ TypeError loc $
+  typeError loc mempty $
   "Unknown " ++ ppSpace space ++ " " ++ quote (pretty name)
 
 underscoreUse :: MonadTypeChecker m =>
                  SrcLoc -> QualName Name -> m a
 underscoreUse loc name =
-  throwError $ TypeError loc $
-  "Use of " ++ quote (pretty name) ++
+  typeError loc mempty $ "Use of " ++ quote (pretty name) ++
   ": variables prefixed with underscore may not be accessed."
-
-instance Show TypeError where
-  show (TypeError pos msg) =
-    "Error at " ++ locStr pos ++ ":\n" ++ msg
 
 type ImportTable = M.Map String Env
 
@@ -132,7 +159,7 @@ data Context = Context { contextEnv :: Env
 
 -- | The type checker runs in this monad.
 newtype TypeM a = TypeM (RWST
-                         Context -- Reader
+                         Context            -- Reader
                          Warnings           -- Writer
                          VNameSource        -- State
                          (Except TypeError) -- Inner monad
@@ -169,9 +196,9 @@ lookupImport loc file = do
   my_path <- asks contextImportName
   let canonical_import = includeToString $ mkImportFrom my_path file loc
   case M.lookup canonical_import imports of
-    Nothing    -> throwError $ TypeError loc $
-                  unlines ["Unknown import \"" ++ canonical_import ++ "\"",
-                           "Known: " ++ intercalate ", " (M.keys imports)]
+    Nothing    -> typeError loc mempty $ intercalate "\n"
+                  ["Unknown import \"" ++ canonical_import ++ "\"",
+                   "Known: " ++ intercalate ", " (M.keys imports)]
     Just scope -> return (canonical_import, scope)
 
 localEnv :: Env -> TypeM a -> TypeM a
@@ -182,8 +209,9 @@ localEnv env = local $ \ctx ->
 -- | A piece of information that describes what process the type
 -- checker currently performing.  This is used to give better error
 -- messages.
-data BreadCrumb = MatchingTypes (TypeBase () ()) (TypeBase () ())
+data BreadCrumb = MatchingTypes StructType StructType
                 | MatchingFields Name
+                | Matching String
 
 instance Show BreadCrumb where
   show (MatchingTypes t1 t2) =
@@ -192,6 +220,8 @@ instance Show BreadCrumb where
     where indent = intercalate "\n" . map ("  "++) . lines
   show (MatchingFields field) =
     "When matching types of record field " ++ quote (pretty field) ++ "."
+  show (Matching s) =
+    s
 
 -- | Tracking breadcrumbs to give a kind of "stack trace" in errors.
 class Monad m => MonadBreadCrumbs m where
@@ -202,14 +232,15 @@ class Monad m => MonadBreadCrumbs m where
   getBreadCrumbs = return []
 
 typeError :: (Located loc, MonadError TypeError m, MonadBreadCrumbs m) =>
-             loc -> String -> m a
-typeError loc s = do
+             loc -> Notes -> String -> m a
+typeError loc notes s = do
   bc <- getBreadCrumbs
   let bc' | null bc = ""
-          | otherwise = "\n" ++ unlines (map show bc)
-  throwError $ TypeError (srclocOf loc) $ s ++ bc'
+          | otherwise = "\n" ++ intercalate "\n" (map show bc)
+  throwError $ TypeError (srclocOf loc) Nothing notes (s ++ bc')
 
-class MonadError TypeError m => MonadTypeChecker m where
+class (MonadError TypeError m, MonadBreadCrumbs m) =>
+      MonadTypeChecker m where
   warn :: Located loc => loc -> String -> m ()
 
   newName :: VName -> m VName
@@ -229,8 +260,8 @@ class MonadError TypeError m => MonadTypeChecker m where
     (v', t) <- lookupVar loc v
     case t of
       Scalar (Prim (Signed Int32)) -> return v'
-      _ -> throwError $ TypeError loc $
-           "Dimension declaration " ++ pretty v ++ " should be of type `i32`."
+      _ -> typeError loc mempty $
+           "Dimension declaration " ++ pretty v ++ " should be of type i32."
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
@@ -240,6 +271,10 @@ bindSpaced names body = do
   names' <- mapM (newID . snd) names
   let mapping = M.fromList (zip names $ map qualName names')
   bindNameMap mapping body
+
+instance MonadBreadCrumbs TypeM where
+  breadCrumb _ m = m
+  getBreadCrumbs = pure mempty
 
 instance MonadTypeChecker TypeM where
   warn loc problem = tell $ singleWarning (srclocOf loc) problem
@@ -283,7 +318,7 @@ instance MonadTypeChecker TypeM where
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise ->
             case getType t of
-              Left{} -> throwError $ TypeError loc $
+              Left{} -> typeError loc mempty $
                         "Attempt to use function " ++ baseString name ++ " as value."
               Right t' -> return (qn', fromStruct $
                                        qualifyTypeVars outer_env mempty qs t')

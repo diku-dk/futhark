@@ -12,7 +12,7 @@ module Language.Futhark.TypeChecker.Types
   , typeParamToArg
 
   , typeExpUses
-  , checkShapeParamUses
+  , checkSizeParamUses
 
   , TypeSub(..)
   , TypeSubs
@@ -24,8 +24,8 @@ module Language.Futhark.TypeChecker.Types
   )
 where
 
+import Control.Monad.Identity
 import Control.Monad.Reader
-import Control.Monad.Except
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List
@@ -35,6 +35,7 @@ import qualified Data.Map.Strict as M
 
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad
+import Language.Futhark.Traversals
 
 -- | @unifyTypes uf t1 t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
@@ -98,14 +99,11 @@ subuniqueOf Nonunique Unique = False
 subuniqueOf _ _              = True
 
 checkTypeDecl :: MonadTypeChecker m =>
-                 [TypeParam]
-              -> TypeDeclBase NoInfo Name
+                 TypeDeclBase NoInfo Name
               -> m (TypeDeclBase Info VName, Liftedness)
-checkTypeDecl tps (TypeDecl t NoInfo) = do
+checkTypeDecl (TypeDecl t NoInfo) = do
   checkForDuplicateNamesInType t
   (t', st, l) <- checkTypeExp t
-  let (pts, ret) = unfoldFunType st
-  checkShapeParamUses tps $ pts ++ [ret]
   return (TypeDecl t' $ Info st, l)
 
 checkTypeExp :: MonadTypeChecker m =>
@@ -115,7 +113,7 @@ checkTypeExp (TEVar name loc) = do
   (name', ps, t, l) <- lookupType loc name
   case ps of
     [] -> return (TEVar name' loc, t, l)
-    _  -> throwError $ TypeError loc $
+    _  -> typeError loc mempty $
           "Type constructor " ++ quote (unwords (pretty name : map pretty ps)) ++
           " used without any arguments."
 checkTypeExp (TETuple ts loc) = do
@@ -125,7 +123,7 @@ checkTypeExp t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
   unless (sort field_names == sort (nub field_names)) $
-    throwError $ TypeError loc $ "Duplicate record fields in " ++ pretty t
+    typeError loc mempty $ "Duplicate record fields in " ++ pretty t
 
   fs_ts_ls <- traverse checkTypeExp $ M.fromList fs
   let fs' = fmap (\(x,_,_) -> x) fs_ts_ls
@@ -140,10 +138,10 @@ checkTypeExp (TEArray t d loc) = do
   case (l, arrayOf st (ShapeDecl [d'']) Nonunique) of
     (Unlifted, st') -> return (TEArray t' d' loc, st', Unlifted)
     (SizeLifted, _) ->
-      throwError $ TypeError loc $
+      typeError loc mempty $
       "Cannot create array with elements of size-lifted type " ++ quote (pretty t) ++ " (might cause irregular array)."
     (Lifted, _) ->
-      throwError $ TypeError loc $
+      typeError loc mempty $
       "Cannot create array with elements of lifted type " ++ quote (pretty t) ++ " (might contain function)."
   where checkDimExp DimExpAny =
           return (DimExpAny, AnyDim)
@@ -182,7 +180,7 @@ checkTypeExp ote@TEApply{} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
   (tname', ps, t, l) <- lookupType tloc tname
   if length ps /= length targs
-  then throwError $ TypeError tloc $
+  then typeError tloc mempty $
        "Type constructor " ++ quote (pretty tname) ++ " requires " ++ show (length ps) ++
        " arguments, but provided " ++ show (length targs) ++ "."
   else do
@@ -196,7 +194,7 @@ checkTypeExp ote@TEApply{} = do
         rootAndArgs (TEVar qn loc) = return (qn, loc, [])
         rootAndArgs (TEApply op arg _) = do (op', loc, args) <- rootAndArgs op
                                             return (op', loc, args++[arg])
-        rootAndArgs te' = throwError $ TypeError (srclocOf te') $
+        rootAndArgs te' = typeError (srclocOf te') mempty $
                           "Type '" ++ pretty te' ++ "' is not a type constructor."
 
         checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpNamed v dloc) loc) = do
@@ -216,16 +214,16 @@ checkTypeExp ote@TEApply{} = do
                   M.singleton pv $ TypeSub $ TypeAbbr l [] st)
 
         checkArgApply p a =
-          throwError $ TypeError tloc $ "Type argument " ++ pretty a ++
+          typeError tloc mempty $ "Type argument " ++ pretty a ++
           " not valid for a type parameter " ++ pretty p
 
 checkTypeExp t@(TESum cs loc) = do
   let constructors = map fst cs
   unless (sort constructors == sort (nub constructors)) $
-    throwError $ TypeError loc $ "Duplicate constructors in " ++ pretty t
+    typeError loc mempty $ "Duplicate constructors in " ++ pretty t
 
   unless (length constructors <= 256) $
-    throwError $ TypeError loc "Sum types must have 256 or fewer constructors."
+    typeError loc mempty "Sum types must have 256 or fewer constructors."
 
   cs_ts_ls <- (traverse . traverse) checkTypeExp $ M.fromList cs
   let cs'  = (fmap . fmap) (\(x,_,_) -> x) cs_ts_ls
@@ -253,7 +251,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
           already <- gets $ M.lookup v
           case already of
             Just prev_loc ->
-              lift $ throwError $ TypeError loc $
+              lift $ typeError loc mempty $
               "Name " ++ quote (pretty v) ++ " also bound at " ++ locStr prev_loc
             Nothing ->
               modify $ M.insert v loc
@@ -268,7 +266,7 @@ checkForDuplicateNamesInType :: MonadTypeChecker m =>
 checkForDuplicateNamesInType = check mempty
   where check seen (TEArrow (Just v) t1 t2 loc)
           | Just prev_loc <- M.lookup v seen =
-              throwError $ TypeError loc $
+              typeError loc mempty $
               "Name " ++ quote (pretty v) ++ " also bound at " ++ locStr prev_loc
           | otherwise =
               check seen' t1 >> check seen' t2
@@ -288,34 +286,33 @@ checkForDuplicateNamesInType = check mempty
 
 -- | Ensure that every shape parameter is used in positive position at
 -- least once before being used in negative position.
-checkShapeParamUses :: MonadTypeChecker m =>
-                       [TypeParam] -> [StructType] -> m ()
-checkShapeParamUses tps ts = do
-  uses <- foldM onType mempty ts
+checkSizeParamUses :: MonadTypeChecker m =>
+                      [TypeParam] -> [StructType] -> m ()
+checkSizeParamUses tps ts = do
+  let uses = foldl' onType mempty ts
+  mapM_ (checkUsage uses) tps
   mapM_ (checkIfUsed uses) tps
   where onDim pos (NamedDim d) =
           modify $ M.insertWith min (qualLeaf d) pos
         onDim _ _ = return ()
 
-        onType uses t = do
-          let uses' = execState (traverseDims onDim t) uses
-          mapM_ (checkUsage uses') tps
-          return uses'
+        onType uses t =
+          execState (traverseDims onDim t) uses
 
         checkUsage uses (TypeParamDim pv loc)
           | Just pos <- M.lookup pv uses,
             pos `elem` [PosParam, PosReturn] =
-              throwError $ TypeError loc $
-                "Shape parameter " ++ quote (prettyName pv) ++
-                " must first be used in" ++
-                " a positive position (non-functional parameter)."
+              typeError loc mempty $
+                "Size parameter " ++ quote (prettyName pv) ++
+                " must be used in" ++
+                " a non-functional parameter (constructivity restriction)."
         checkUsage _ _ = return ()
 
         checkIfUsed uses (TypeParamDim pv loc)
           | M.member pv uses = return ()
           | otherwise =
-              throwError $ TypeError loc $ "Size parameter " ++
-              quote (prettyName pv) ++ " unused."
+              typeError loc mempty $ "Size parameter " ++
+              quote (prettyName pv) ++ " unused in parameters."
         checkIfUsed _ _ = return ()
 
 checkTypeParams :: MonadTypeChecker m =>
@@ -332,7 +329,7 @@ checkTypeParams ps m =
           seen <- gets $ M.lookup (ns,v)
           case seen of
             Just prev ->
-              throwError $ TypeError loc $
+              lift $ typeError loc mempty $
               "Type parameter " ++ quote (pretty v) ++
               " previously defined at " ++ locStr prev ++ "."
             Nothing -> do
@@ -349,7 +346,7 @@ typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
   TypeArgDim (NamedDim $ qualName v) ploc
 typeParamToArg (TypeParamType _ v ploc) =
-  TypeArgType (Scalar (TypeVar () Nonunique (typeName v) [])) ploc
+  TypeArgType (Scalar $ TypeVar () Nonunique (typeName v) []) ploc
 
 -- | Return the shapes used in a given type expression in positive and negative
 -- position, respectively.
@@ -428,45 +425,59 @@ applyType ps t args =
 -- substitution (but which is certainly an overloaded primitive
 -- type!).  The latter is used to remove aliases from types that are
 -- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst t | PrimSubst
+data Subst t = Subst t | PrimSubst | SizeSubst (DimDecl VName)
+  deriving (Show)
 
 instance Functor Subst where
   fmap f (Subst t) = Subst $ f t
   fmap _ PrimSubst = PrimSubst
+  fmap _ (SizeSubst v) = SizeSubst v
 
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
 class Substitutable a where
-  applySubst :: (VName -> Maybe (Subst (TypeBase () ()))) -> a -> a
-
-instance Substitutable (TypeBase () ()) where
-  applySubst = substTypesAny
-
-instance Substitutable (TypeBase () Aliasing) where
-  applySubst = substTypesAny . (fmap (fmap fromStruct).)
+  applySubst :: (VName -> Maybe (Subst StructType)) -> a -> a
 
 instance Substitutable (TypeBase (DimDecl VName) ()) where
-  applySubst = substTypesAny . (fmap (fmap vacuousShapeAnnotations).)
+  applySubst = substTypesAny
 
 instance Substitutable (TypeBase (DimDecl VName) Aliasing) where
-  applySubst = substTypesAny . (fmap (fmap (vacuousShapeAnnotations . fromStruct)).)
+  applySubst = substTypesAny . (fmap (fmap fromStruct).)
+
+instance Substitutable (DimDecl VName) where
+  applySubst f (NamedDim (QualName _ v))
+    | Just (SizeSubst d) <- f v = d
+  applySubst _ d = d
+
+instance Substitutable d => Substitutable (ShapeDecl d) where
+  applySubst f = fmap $ applySubst f
+
+instance Substitutable Pattern where
+  applySubst f = runIdentity . astMap mapper
+    where mapper = ASTMapper { mapOnExp = return
+                             , mapOnName = return
+                             , mapOnQualName = return
+                             , mapOnStructType = return . applySubst f
+                             , mapOnPatternType = return . applySubst f
+                             }
 
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
-substTypesAny :: (ArrayDim dim, Monoid as) =>
-                 (VName -> Maybe (Subst (TypeBase dim as)))
-              -> TypeBase dim as -> TypeBase dim as
+substTypesAny :: Monoid as =>
+                 (VName -> Maybe (Subst (TypeBase (DimDecl VName) as)))
+              -> TypeBase (DimDecl VName) as -> TypeBase (DimDecl VName) as
 substTypesAny lookupSubst ot = case ot of
   Array als u et shape ->
-    arrayOf (substTypesAny lookupSubst' (Scalar et)) shape u `setAliases` als
+    arrayOf (substTypesAny lookupSubst' (Scalar et))
+    (applySubst lookupSubst' shape) u `setAliases` als
   Scalar (Prim t) -> Scalar $ Prim t
   -- We only substitute for a type variable with no arguments, since
   -- type parameters cannot have higher kind.
   Scalar (TypeVar als u v targs) ->
     case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
-      Just (Subst t) -> t `setUniqueness` u `addAliases` (<>als)
+      Just (Subst t) -> substTypesAny lookupSubst $ t `setUniqueness` u `addAliases` (<>als)
       Just PrimSubst -> Scalar $ TypeVar mempty u v $ map subsTypeArg targs
-      Nothing -> Scalar $ TypeVar als u v $ map subsTypeArg targs
+      _ -> Scalar $ TypeVar als u v $ map subsTypeArg targs
   Scalar (Record ts) -> Scalar $ Record $ fmap (substTypesAny lookupSubst) ts
   Scalar (Arrow als v t1 t2) ->
     Scalar $ Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
@@ -475,6 +486,7 @@ substTypesAny lookupSubst ot = case ot of
 
   where subsTypeArg (TypeArgType t loc) =
           TypeArgType (substTypesAny lookupSubst' t) loc
-        subsTypeArg t = t
+        subsTypeArg (TypeArgDim v loc) =
+          TypeArgDim (applySubst lookupSubst' v) loc
 
         lookupSubst' = fmap (fmap $ second (const ())) . lookupSubst

@@ -3,8 +3,8 @@
 -- input { 1 1 } output { [0] }
 -- input { 1 2 } error:
 
-module PM(P: { type vec [n] val mk: i32 -> vec [] }) = {
- let can_be_bad (n: i32) (x: i32): P.vec [n] = P.mk x
+module PM(P: { type vec [n] val mk: (n: i32) -> vec [n] }) = {
+ let can_be_bad (n: i32) (x: i32) = P.mk x :> P.vec [n]
 }
 
 module intmat = PM {

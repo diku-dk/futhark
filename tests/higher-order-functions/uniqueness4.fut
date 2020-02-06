@@ -1,6 +1,6 @@
 -- A partially applied function whose closure has been consumed.
 -- ==
--- error: `QUUX` previously consumed
+-- error: "QUUX" previously consumed
 
 let const x _ = x[0]
 

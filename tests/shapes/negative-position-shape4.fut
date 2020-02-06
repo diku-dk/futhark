@@ -1,6 +1,6 @@
 -- No hiding negative positions through type abbreviations!
 -- ==
--- error: Shape parameter `n` must first be used
+-- error: Size parameter "n" must be used
 
 type^ ft [n] = i32 -> [n]i32
 

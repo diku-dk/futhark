@@ -25,7 +25,7 @@ let all_neighbours [n][m] (world: [n][m]bool): [n][m]i32 =
 
 let iteration [n][m] (board: [n][m]bool): [n][m]bool =
   let lives = all_neighbours(board) in
-  map2 (\(lives_r: []i32) (board_r: []bool): []bool  ->
+  map2 (\(lives_r: []i32) (board_r: []bool)  ->
             map2 (\(neighbors: i32) (alive: bool): bool  ->
                       if neighbors < 2
                       then false
@@ -35,8 +35,8 @@ let iteration [n][m] (board: [n][m]bool): [n][m]bool =
                     lives_r board_r)
            lives board
 
-let life (iterations: i32) (board: [][]bool): [][]bool =
+let life (iterations: i32) (board: [][]bool) =
   loop board for _i < iterations do iteration board
 
-let main (iterations: i32) (board: [][][]bool): [][][]bool =
+let main (iterations: i32) (board: [][][]bool) =
   map (life iterations) board
