@@ -858,7 +858,6 @@ bindingParams tps orig_ps m = do
           -- prevents unused-name warnings for otherwise unused
           -- dimensions.
           mapM_ observe $ mapMaybe typeParamIdent tps'
-
           m tps' $ reverse ps'
 
     descend [] orig_ps
