@@ -2,7 +2,7 @@
 -- the same size.
 -- ==
 -- input { [1] [2] } output { [1] [2] }
--- input { [1] [2,3] } error:
+-- compiled input { [1] [2,3] } error:
 
 let pair 't (x: t) (y: t) = (x, y)
 

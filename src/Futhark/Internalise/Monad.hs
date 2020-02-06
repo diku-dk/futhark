@@ -15,6 +15,7 @@ module Futhark.Internalise.Monad
   , lookupFunction
   , lookupFunction'
   , lookupConst
+  , topLevelSizes
 
   , bindFunction
   , bindConstant
@@ -60,7 +61,10 @@ type FunInfo = (Name, ConstParams, Closure,
 
 type FunTable = M.Map VName FunInfo
 
-type ConstInfo = (Name, ConstParams, [(SubExp,Type)] -> Maybe [DeclExtType])
+type ConstInfo = (Name, ConstParams,
+                  [(SubExp,Type)] -> Maybe [DeclExtType],
+                  [SubExp] -> InternaliseM (),
+                  Names)
 
 type ConstTable = M.Map VName ConstInfo
 
@@ -78,6 +82,7 @@ data InternaliseState = InternaliseState {
     stateNameSource :: VNameSource
   , stateFunTable :: FunTable
   , stateConstTable :: ConstTable
+  , stateTopLevelSizes :: Names
   }
 
 newtype InternaliseResult = InternaliseResult [FunDef SOACS]
@@ -130,6 +135,7 @@ runInternaliseM safe (InternaliseM m) =
           InternaliseState { stateNameSource = src
                            , stateFunTable = mempty
                            , stateConstTable = mempty
+                           , stateTopLevelSizes = mempty
                            }
 
 substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
@@ -156,6 +162,13 @@ bindFunction fname info =
 bindConstant :: VName -> ConstInfo -> InternaliseM ()
 bindConstant cname info =
   modify $ \s -> s { stateConstTable = M.insert cname info $ stateConstTable s }
+
+-- | Size names implicitly created by existential top-level constant
+-- definitions.  These need special treatment because such a thing
+-- does not exist in the core language.
+topLevelSizes :: InternaliseM Names
+topLevelSizes = gets $ foldMap sizes . stateConstTable
+  where sizes (_, _, _, _, x) = x
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

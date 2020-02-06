@@ -418,8 +418,12 @@ postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
       letBindNames_ [us] $ BasicOp $ Index everyone slice
 
     if poststms == mempty
-      then return poststms_res
-      else fmap (map Var) $ protectOutOfBounds "postlude" in_bounds res_ts $ do
+      then do -- The privstms may still be necessary for the result.
+      addPrivStms slice privstms
+      return poststms_res
+
+      else
+      fmap (map Var) $ protectOutOfBounds "postlude" in_bounds res_ts $ do
       addPrivStms slice privstms
       addStms poststms
       return poststms_res

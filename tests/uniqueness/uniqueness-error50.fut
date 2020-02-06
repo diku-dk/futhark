@@ -1,6 +1,6 @@
 -- The result of a loop can have aliases.
 -- ==
--- error: `chunk`
+-- error: "chunk"
 
 let vecadd [m] (xs: [m]i32) (ys: [m]i32): [m]i32 =
   ys

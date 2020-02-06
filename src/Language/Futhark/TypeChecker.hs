@@ -10,6 +10,7 @@ module Language.Futhark.TypeChecker
   , checkDec
   , checkModExp
   , TypeError
+  , prettyTypeError
   , Warnings
   , initialEnv
   )
@@ -23,6 +24,7 @@ import Data.Maybe
 import Data.Either
 import Data.Ord
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Prelude hiding (abs, mod)
 
@@ -33,6 +35,7 @@ import Language.Futhark.TypeChecker.Monad
 import Language.Futhark.TypeChecker.Modules
 import Language.Futhark.TypeChecker.Terms
 import Language.Futhark.TypeChecker.Types
+import Futhark.Util.Pretty hiding (space)
 
 --- The main checker
 
@@ -126,10 +129,10 @@ checkProgM (Prog doc decs) = do
 
 dupDefinitionError :: MonadTypeChecker m =>
                       Namespace -> Name -> SrcLoc -> SrcLoc -> m a
-dupDefinitionError space name pos1 pos2 =
-  throwError $ TypeError pos1 $
+dupDefinitionError space name loc1 loc2 =
+  typeError loc1 mempty $
   "Duplicate definition of " ++ ppSpace space ++ " " ++
-  nameToString name ++ ".  Previously defined at " ++ locStr pos2
+  nameToString name ++ ".  Previously defined at " ++ locStr loc2
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
@@ -188,11 +191,11 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     name' <- checkName Term name loc
     (tparams', vtype') <-
       checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
-        (vtype', _) <- checkTypeDecl tparams' vtype
+        (vtype', _) <- checkTypeDecl vtype
         return (tparams', vtype')
 
     when (emptyDimParam $ unInfo $ expandedType vtype') $
-      throwError $ TypeError loc $
+      typeError loc mempty $
       "All function parameters must have non-anonymous sizes.\n" ++
       "Hint: add size parameters to " ++ quote (prettyName name') ++ "."
 
@@ -273,7 +276,7 @@ checkSigExp (SigSpecs specs loc) = do
 checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
   checkTypeParams ps $ \ps' -> do
-    (td', _) <- bindingTypeParams ps' $ checkTypeDecl ps' td
+    (td', _) <- bindingTypeParams ps' $ checkTypeDecl td
     (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' $ unInfo $ expandedType td'
     return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
@@ -322,7 +325,7 @@ checkOneModExp (ModVar v loc) = do
   (v', env) <- lookupMod loc v
   when (baseName (qualLeaf v') == nameFromString "intrinsics" &&
         baseTag (qualLeaf v') <= maxIntrinsicTag) $
-    throwError $ TypeError loc "The 'intrinsics' module may not be used in module expressions."
+    typeError loc mempty "The 'intrinsics' module may not be used in module expressions."
   return (MTy mempty env, ModVar v' loc)
 checkOneModExp (ModImport name NoInfo loc) = do
   (name', env) <- lookupImport loc name
@@ -336,7 +339,7 @@ checkOneModExp (ModApply f e NoInfo NoInfo loc) = do
       (mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
       return (mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
     _ ->
-      throwError $ TypeError loc "Cannot apply non-parametric module."
+      typeError loc mempty "Cannot apply non-parametric module."
 checkOneModExp (ModAscript me se NoInfo loc) = do
   (me_mod, me') <- checkOneModExp me
   (se_mty, se') <- checkSigExp se
@@ -446,24 +449,31 @@ checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
 checkTypeBind (TypeBind name l tps td doc loc) =
   checkTypeParams tps $ \tps' -> do
-    (td', l') <- bindingTypeParams tps' $ checkTypeDecl tps' td
+    (td', l') <- bindingTypeParams tps' $ checkTypeDecl td
+
+    let used_dims = typeDimNames $ unInfo $ expandedType td'
+    case filter ((`S.notMember` used_dims) . typeParamName) $
+         filter isSizeParam tps' of
+      [] -> return ()
+      tp:_ -> typeError loc mempty $ pretty $
+              text "Size parameter" <+> ppr tp <+>
+              text "unused."
 
     case (l, l') of
       (_, Lifted)
         | l < Lifted ->
-          throwError $ TypeError loc $
+          typeError loc mempty $
           "Non-lifted type abbreviations may not contain functions.\n" ++
           "Hint: consider using 'type^'."
       (_, SizeLifted)
         | l < SizeLifted ->
-          throwError $ TypeError loc $
+          typeError loc mempty $
           "Non-size-lifted type abbreviations may not contain size-lifted types.\n" ++
           "Hint: consider using 'type~'."
       (Unlifted, _)
         | emptyDimParam $ unInfo $ expandedType td' ->
-            warn loc $
+            typeError loc mempty $
             "Non-lifted type abbreviations may not use anonymous sizes in their definition.\n" ++
-            "This will become an error in a future version of the compiler!\n" ++
             "Hint: use 'type~' or add size parameters to " ++
             quote (prettyName name) ++ "."
       _ -> return ()
@@ -479,7 +489,7 @@ checkTypeBind (TypeBind name l tps td doc loc) =
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
-  (fname', tparams', params', maybe_tdecl', rettype, body') <-
+  (fname', tparams', params', maybe_tdecl', rettype, retext, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let (rettype_params, rettype') = unfoldFunType rettype
@@ -488,12 +498,12 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
   case entry' of
     Just _
       | any isTypeParam tparams' ->
-          throwError $ TypeError loc "Entry point functions may not be polymorphic."
+          typeError loc mempty "Entry point functions may not be polymorphic."
 
       | any (not . patternOrderZero) params'
         || any (not . orderZero) rettype_params
         || not (orderZero rettype') ->
-          throwError $ TypeError loc "Entry point functions may not be higher-order."
+          typeError loc mempty "Entry point functions may not be higher-order."
 
       | p : _ <- filter nastyParameter params' ->
           warn loc $ "Entry point parameter\n\n  " <>
@@ -512,7 +522,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                  , envNameMap =
                      M.singleton (Term, fname) $ qualName fname'
                  },
-           ValBind entry' fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
+           ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc loc)
 
 nastyType :: Monoid als => TypeBase dim als -> Bool
 nastyType (Scalar Prim{}) = False

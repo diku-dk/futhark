@@ -207,7 +207,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
        let V = map (\i -> if i >= s then 0u32
 			  else DM.m[j-1,i] << (32u32-u32.i32(i+1))
 		   ) (iota L) in
-       (loop (i,V) = (s, V) while i < L do
+       (loop (i,V : *[L]u32) = (s, V) while i < L do
           let v = V[i-s]
 	  let vi0 = v ^ (v >> (u32.i32(s)))
 	  let (_,vi) =
@@ -281,7 +281,7 @@ let mean [n] (xs: [n]f64) : f64 =
 module R = S2.Reduce { type t = f64
                        let ne = 0f64
  		       let op (x:f64) (y:f64) = x f64.+ y
-		       let f (v : [2]f64) : f64 =
+		       let f (v : [S2.D]f64) : f64 =
                          let x = v[0]
 		 	 let y = v[1]
 			 in f64.bool(x*x+y*y < 1f64) }

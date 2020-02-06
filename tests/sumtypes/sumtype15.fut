@@ -1,6 +1,5 @@
 -- Lists as payloads
 -- ==
--- tags { disable }
 -- input { }
 -- output { [1, 6] }
 

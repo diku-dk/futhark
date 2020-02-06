@@ -8,9 +8,9 @@
 -- }
 -- structure { /Screma 1 }
 let main(input1: [][]i32) (input2: [][]i32): [][]i32 =
-  let input = map(\(r1: []i32, r2: []i32): [](i32,i32)  ->
+  let input = map(\(r1: []i32, r2: []i32)  ->
                     zip r1 r2) (zip input1 input2)
-  let x = scan(\(a: [](i32,i32)) (b: [](i32,i32)): [](i32,i32)  ->
+  let x = scan(\(a: [](i32,i32)) (b: [](i32,i32))  ->
                  let (a1, a2) = unzip(a)
                  let (b1, b2) = unzip(b) in
                  map(\(quad: (i32,i32,i32,i32)): (i32,i32)  ->
@@ -18,4 +18,4 @@ let main(input1: [][]i32) (input2: [][]i32): [][]i32 =
                        (a1x+b1x,a2x+b2x))
                      (zip4 a1 a2 b1 b2))
                (zip (replicate 3 0) (replicate 3 0)) input in
-  map (\(r: [](i32,i32)): []i32  -> map (\(x,y) -> x+y) r) x
+  map (\(r: [](i32,i32)) -> map (\(x,y) -> x+y) r) x
