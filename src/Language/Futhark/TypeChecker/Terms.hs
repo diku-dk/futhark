@@ -858,10 +858,8 @@ bindingParams tps orig_ps m = do
           -- prevents unused-name warnings for otherwise unused
           -- dimensions.
           mapM_ observe $ mapMaybe typeParamIdent tps'
-          let ps'' = reverse ps'
-          checkShapeParamUses tps' $ map patternStructType ps''
 
-          m tps' ps''
+          m tps' $ reverse ps'
 
     descend [] orig_ps
 
@@ -2590,17 +2588,17 @@ closeOverTypes defname defloc tparams paramts ret substs = do
               return Nothing
         closeOver (k, NoConstraint l usage) =
           return $ Just $ Left $ TypeParamType l k $ srclocOf usage
-        closeOver (k, Size Nothing usage) =
-          return $ Just $ Left $ TypeParamDim k $ srclocOf usage
         closeOver (k, ParamType l loc) =
           return $ Just $ Left $ TypeParamType l k loc
+        closeOver (k, Size Nothing usage) =
+          return $ Just $ Left $ TypeParamDim k $ srclocOf usage
         closeOver (k, UnknowableSize _ _)
           | k `S.member` param_sizes = do
               notes <- dimNotes defloc $ NamedDim $ qualName k
               typeError defloc notes $ pretty $
-                text "Unknowable size " <> pquote (pprName k) <+>
-                text "imposes constraint on type of " <> pquote
-                (pprName defname) <>
+                text "Unknowable size" <+> pquote (pprName k) <+>
+                text "imposes constraint on type of" <+>
+                pquote (pprName defname) <>
                 text ", which is inferred as:" </>
                 indent 2 (ppr t)
           | k `S.member` produced_sizes =
@@ -2640,6 +2638,20 @@ letGeneralise defname defloc tparams params rettype =
     (map patternStructType params) rettype new_substs
 
   rettype'' <- updateTypes rettype'
+
+  -- The inference might produce types that would not be valid if
+  -- typed in by hand.
+  let t = foldFunType (map patternStructType params) rettype''
+      (paramts, _) = unfoldFunType t
+  checkSizeParamUses tparams' paramts
+    `catchError` \(TypeError _ _ notes msg) -> do
+    let ctx = pretty $
+              pquote (pprName defname) <+>
+              text "inferred to have invalid type:" </>
+              indent 2 (text "val" <+> pprName defname <+>
+                        spread (map ppr tparams') <+> colon <+>
+                        align (ppr t))
+    throwError $ TypeError defloc (Just ctx) notes msg
 
   -- We keep those type variables that were not closed over by
   -- let-generalisation.

@@ -12,7 +12,7 @@ module Language.Futhark.TypeChecker.Types
   , typeParamToArg
 
   , typeExpUses
-  , checkShapeParamUses
+  , checkSizeParamUses
 
   , TypeSub(..)
   , TypeSubs
@@ -106,7 +106,7 @@ checkTypeDecl tps (TypeDecl t NoInfo) = do
   checkForDuplicateNamesInType t
   (t', st, l) <- checkTypeExp t
   let (pts, ret) = unfoldFunType st
-  checkShapeParamUses tps $ pts ++ [ret]
+  checkSizeParamUses tps $ pts ++ [ret]
   return (TypeDecl t' $ Info st, l)
 
 checkTypeExp :: MonadTypeChecker m =>
@@ -289,19 +289,18 @@ checkForDuplicateNamesInType = check mempty
 
 -- | Ensure that every shape parameter is used in positive position at
 -- least once before being used in negative position.
-checkShapeParamUses :: MonadTypeChecker m =>
-                       [TypeParam] -> [StructType] -> m ()
-checkShapeParamUses tps ts = do
-  uses <- foldM onType mempty ts
+checkSizeParamUses :: MonadTypeChecker m =>
+                      [TypeParam] -> [StructType] -> m ()
+checkSizeParamUses tps ts = do
+  let uses = foldl' onType mempty ts
+  mapM_ (checkUsage uses) tps
   mapM_ (checkIfUsed uses) tps
   where onDim pos (NamedDim d) =
           modify $ M.insertWith min (qualLeaf d) pos
         onDim _ _ = return ()
 
-        onType uses t = do
-          let uses' = execState (traverseDims onDim t) uses
-          mapM_ (checkUsage uses') tps
-          return uses'
+        onType uses t =
+          execState (traverseDims onDim t) uses
 
         checkUsage uses (TypeParamDim pv loc)
           | Just pos <- M.lookup pv uses,
@@ -309,14 +308,14 @@ checkShapeParamUses tps ts = do
               typeError loc mempty $
                 "Shape parameter " ++ quote (prettyName pv) ++
                 " must first be used in" ++
-                " a positive position (non-functional parameter)."
+                " a non-functional parameter (positivity restriction)."
         checkUsage _ _ = return ()
 
         checkIfUsed uses (TypeParamDim pv loc)
           | M.member pv uses = return ()
           | otherwise =
               typeError loc mempty $ "Size parameter " ++
-              quote (prettyName pv) ++ " unused."
+              quote (prettyName pv) ++ " unused in parameters."
         checkIfUsed _ _ = return ()
 
 checkTypeParams :: MonadTypeChecker m =>
