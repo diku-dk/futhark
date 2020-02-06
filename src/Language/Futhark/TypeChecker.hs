@@ -189,7 +189,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     name' <- checkName Term name loc
     (tparams', vtype') <-
       checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
-        (vtype', _) <- checkTypeDecl tparams' vtype
+        (vtype', _) <- checkTypeDecl vtype
         return (tparams', vtype')
 
     when (emptyDimParam $ unInfo $ expandedType vtype') $
@@ -274,7 +274,7 @@ checkSigExp (SigSpecs specs loc) = do
 checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
   checkTypeParams ps $ \ps' -> do
-    (td', _) <- bindingTypeParams ps' $ checkTypeDecl ps' td
+    (td', _) <- bindingTypeParams ps' $ checkTypeDecl td
     (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' $ unInfo $ expandedType td'
     return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
@@ -447,7 +447,7 @@ checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
 checkTypeBind (TypeBind name l tps td doc loc) =
   checkTypeParams tps $ \tps' -> do
-    (td', l') <- bindingTypeParams tps' $ checkTypeDecl tps' td
+    (td', l') <- bindingTypeParams tps' $ checkTypeDecl td
 
     case (l, l') of
       (_, Lifted)
