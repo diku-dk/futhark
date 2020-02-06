@@ -518,7 +518,7 @@ checkIntrinsic space qn@(QualName _ name) loc
 -- every size in the type.
 checkTypeDecl :: TypeDeclBase NoInfo Name -> TermTypeM (TypeDeclBase Info VName)
 checkTypeDecl tdecl = do
-  (tdecl', _) <- Types.checkTypeDecl [] tdecl
+  (tdecl', _) <- Types.checkTypeDecl tdecl
   mapM_ observeDim $ nestedDims $ unInfo $ expandedType tdecl'
   return tdecl'
   where observeDim (NamedDim v) =

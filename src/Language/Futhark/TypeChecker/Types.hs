@@ -99,14 +99,11 @@ subuniqueOf Nonunique Unique = False
 subuniqueOf _ _              = True
 
 checkTypeDecl :: MonadTypeChecker m =>
-                 [TypeParam]
-              -> TypeDeclBase NoInfo Name
+                 TypeDeclBase NoInfo Name
               -> m (TypeDeclBase Info VName, Liftedness)
-checkTypeDecl tps (TypeDecl t NoInfo) = do
+checkTypeDecl (TypeDecl t NoInfo) = do
   checkForDuplicateNamesInType t
   (t', st, l) <- checkTypeExp t
-  let (pts, ret) = unfoldFunType st
-  checkSizeParamUses tps $ pts ++ [ret]
   return (TypeDecl t' $ Info st, l)
 
 checkTypeExp :: MonadTypeChecker m =>
