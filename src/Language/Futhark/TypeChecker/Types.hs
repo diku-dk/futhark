@@ -303,7 +303,7 @@ checkSizeParamUses tps ts = do
           | Just pos <- M.lookup pv uses,
             pos `elem` [PosParam, PosReturn] =
               typeError loc mempty $
-                "Shape parameter " ++ quote (prettyName pv) ++
+                "Size parameter " ++ quote (prettyName pv) ++
                 " must be used in" ++
                 " a non-functional parameter (constructivity restriction)."
         checkUsage _ _ = return ()
