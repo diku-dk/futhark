@@ -24,6 +24,7 @@ import Data.Maybe
 import Data.Either
 import Data.Ord
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Prelude hiding (abs, mod)
 
@@ -34,6 +35,7 @@ import Language.Futhark.TypeChecker.Monad
 import Language.Futhark.TypeChecker.Modules
 import Language.Futhark.TypeChecker.Terms
 import Language.Futhark.TypeChecker.Types
+import Futhark.Util.Pretty hiding (space)
 
 --- The main checker
 
@@ -448,6 +450,14 @@ checkTypeBind :: TypeBindBase NoInfo Name
 checkTypeBind (TypeBind name l tps td doc loc) =
   checkTypeParams tps $ \tps' -> do
     (td', l') <- bindingTypeParams tps' $ checkTypeDecl td
+
+    let used_dims = typeDimNames $ unInfo $ expandedType td'
+    case filter ((`S.notMember` used_dims) . typeParamName) $
+         filter isSizeParam tps' of
+      [] -> return ()
+      tp:_ -> typeError loc mempty $ pretty $
+              text "Size parameter" <+> ppr tp <+>
+              text "unused."
 
     case (l, l') of
       (_, Lifted)
