@@ -363,7 +363,7 @@ arrays.  Fully lifted types cannot be returned from conditional or
 loop expressions.
 
 A type abbreviation can have zero or more parameters.  A type
-parameter enclosed with square brackets is a *shape parameter*, and
+parameter enclosed with square brackets is a *size parameter*, and
 can be used in the definition as an array dimension size, or as a
 dimension argument to other type abbreviations.  When passing an
 argument for a shape parameter, it must be enclosed in square
@@ -373,9 +373,10 @@ brackets.  Example::
 
   let x: two_intvecs [2] = (iota 2, replicate 2 0)
 
-Shape parameters work much like shape declarations for arrays.  Like
+Size parameters work much like shape declarations for arrays.  Like
 shape declarations, they can be elided via square brackets containing
-nothing.
+nothing.  All size parameters must be used in the definition of the
+type abbreviation.
 
 A type parameter prefixed with a single quote is a *type parameter*.
 It is in scope as a type in the definition of the type abbreviation.
@@ -958,9 +959,7 @@ Further, *type parameters* are divided into *non-lifted* (bound with
 an apostrophe, e.g. ``'t``), *size-lifted* (``'~t``), and *fully
 lifted* (``'^t``).  Only fully lifted type parameters may be
 instantiated with a functional type.  Within a function, a lifted type
-parameter is treated as a functional type.  All abstract types
-declared in modules (see `Module System`_) are considered non-lifted,
-and may not be functional.
+parameter is treated as a functional type.
 
 See also `In-place updates`_ for details on how uniqueness types
 interact with higher-order functions.
@@ -1142,8 +1141,8 @@ Only expression-level type annotations give rise to run-time checks.
 Despite their similar syntax, parameter and return type annotations
 must be valid at compile-time, or type checking will fail.
 
-Restrictions due to constructivity
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Constructivity restriction
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Conceptually, size parameters are assigned their value by reading the
 sizes of concrete values passed along as parameters.  This means that
@@ -1157,6 +1156,10 @@ Similarly, this is also an error, because ``n`` is not used as the
 size of an array value::
 
   let f [n] (g: [n]i32 -> [n]i32) = ...
+
+However, the following is permitted::
+
+  let f [n] (g: [n]i32 -> [n]i32) (arr: [n]i32) = ...
 
 Array literals
 ..............
@@ -1198,6 +1201,27 @@ the following::
 
 Then we can construct an array of values of type ``m.t`` without
 worrying about constructing an irregular array.
+
+Interactions with higher-order functions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When a higher-order function takes a functional argument whose return
+type is a non-lifted type parameter, any instantiation of that type
+parameter must have a non-anonymous size.  If the return type is a
+lifted type parameter, then the instiation may contain anonymous
+sizes.  This is why the type of ``map`` guarantees regular arrays::
+
+  val map [n] 'a 'b : (a -> b) -> [n]a -> [n]b
+
+The type parameter ``b`` can only be replaced with a type that has
+known sizes, which means they must be the same for every application
+of the function.  In contrast, this is the type of the pipeline
+operator::
+
+  val (|>) '^a -> '^b : a -> (a -> b) -> b
+
+The provided function can return something with an anonymous size
+(such as ``filter``).
 
 .. _in-place-updates:
 

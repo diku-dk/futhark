@@ -304,8 +304,8 @@ checkSizeParamUses tps ts = do
             pos `elem` [PosParam, PosReturn] =
               typeError loc mempty $
                 "Shape parameter " ++ quote (prettyName pv) ++
-                " must first be used in" ++
-                " a non-functional parameter (positivity restriction)."
+                " must be used in" ++
+                " a non-functional parameter (constructivity restriction)."
         checkUsage _ _ = return ()
 
         checkIfUsed uses (TypeParamDim pv loc)
