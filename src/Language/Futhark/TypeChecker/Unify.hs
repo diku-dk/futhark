@@ -762,8 +762,8 @@ unifyMostCommon :: MonadUnify m =>
 unifyMostCommon usage t1 t2 = do
   -- We are ignoring the dimensions here, because any mismatches
   -- should be turned into fresh size variables.
-  unify usage (toStruct (anyDimShapeAnnotations t1))
-              (toStruct (anyDimShapeAnnotations t2))
+  unify usage (toStruct (anySizes t1))
+              (toStruct (anySizes t2))
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
   let rsrc = RigidCond (toStruct t1') (toStruct t2')

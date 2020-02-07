@@ -63,9 +63,9 @@ module Language.Futhark.Attributes
   , setAliases
   , addAliases
   , setUniqueness
-  , removeShapeAnnotations
-  , vacuousShapeAnnotations
-  , anyDimShapeAnnotations
+  , noSizes
+  , addSizes
+  , anySizes
   , traverseDims
   , DimPos(..)
   , tupleRecord
@@ -158,22 +158,16 @@ nestedDims t =
         notV (Named v) = (/=NamedDim (qualName v))
 
 -- | Change the shape of a type to be just the 'Rank'.
-removeShapeAnnotations :: TypeBase (DimDecl vn) as -> TypeBase () as
-removeShapeAnnotations = modifyShapeAnnotations $ const ()
+noSizes :: TypeBase (DimDecl vn) as -> TypeBase () as
+noSizes = first $ const ()
 
 -- | Add size annotations that are all 'AnyDim'.
-vacuousShapeAnnotations :: TypeBase () as -> TypeBase (DimDecl vn) as
-vacuousShapeAnnotations = modifyShapeAnnotations $ const AnyDim
+addSizes :: TypeBase () as -> TypeBase (DimDecl vn) as
+addSizes = first $ const AnyDim
 
 -- | Change all size annotations to be 'AnyDim'.
-anyDimShapeAnnotations :: TypeBase (DimDecl vn) as -> TypeBase (DimDecl vn) as
-anyDimShapeAnnotations = modifyShapeAnnotations $ const AnyDim
-
--- | Change the size annotations of a type.
-modifyShapeAnnotations :: (oldshape -> newshape)
-                       -> TypeBase oldshape as
-                       -> TypeBase newshape as
-modifyShapeAnnotations = first
+anySizes :: TypeBase (DimDecl vn) as -> TypeBase (DimDecl vn) as
+anySizes = first $ const AnyDim
 
 -- | Where does this dimension occur?
 data DimPos
@@ -241,7 +235,7 @@ diet (Scalar Sum{})                     = Observe
 -- information, and no embedded names.
 toStructural :: TypeBase dim as
              -> TypeBase () ()
-toStructural = flip setAliases () . modifyShapeAnnotations (const ())
+toStructural = flip setAliases () . first (const ())
 
 -- | Remove aliasing information from a type.
 toStruct :: TypeBase dim as
@@ -448,7 +442,7 @@ rank n = ShapeDecl $ replicate n AnyDim
 -- reference the bound variables, and turn any dimensions that name
 -- them into AnyDim instead.
 unscopeType :: S.Set VName -> PatternType -> PatternType
-unscopeType bound_here t = modifyShapeAnnotations onDim $ t `addAliases` S.map unbind
+unscopeType bound_here t = first onDim $ t `addAliases` S.map unbind
   where unbind (AliasBound v) | v `S.member` bound_here = AliasFree v
         unbind a = a
         onDim (NamedDim qn) | qualLeaf qn `S.member` bound_here = AnyDim
