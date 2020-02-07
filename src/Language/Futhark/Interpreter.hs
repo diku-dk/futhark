@@ -34,7 +34,7 @@ import qualified Data.List.NonEmpty as NE
 import Data.Monoid hiding (Sum)
 import Data.Loc
 
-import Language.Futhark hiding (Value)
+import Language.Futhark hiding (Value, matchDims)
 import qualified Language.Futhark as F
 import Futhark.Representation.Primitive (intValue, floatValue)
 import qualified Futhark.Representation.Primitive as P
