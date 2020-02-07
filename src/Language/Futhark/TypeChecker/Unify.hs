@@ -29,7 +29,6 @@ module Language.Futhark.TypeChecker.Unify
   , unify
   , expect
   , unifyMostCommon
-  , matchDims
   , anyDimOnMismatch
   , doUnification
   )
@@ -741,30 +740,6 @@ mustHaveField usage l t = do
             pretty (toStructural t) ++ "."
     _ -> do unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type'
             return l_type
-
-matchDims :: (Monoid as, Monad m) =>
-             (d -> d -> m d)
-          -> TypeBase d as -> TypeBase d as
-          -> m (TypeBase d as)
-matchDims onDims t1 t2 =
-  case (t1, t2) of
-    (Array als1 u1 et1 shape1, Array als2 u2 et2 shape2) ->
-      flip setAliases (als1<>als2) <$>
-      (arrayOf <$>
-       matchDims onDims (Scalar et1) (Scalar et2) <*>
-       onShapes shape1 shape2 <*> pure (min u1 u2))
-    (Scalar (Record f1), Scalar (Record f2)) ->
-      Scalar . Record <$> traverse (uncurry (matchDims onDims)) (M.intersectionWith (,) f1 f2)
-    (Scalar (TypeVar als1 u v targs1),
-     Scalar (TypeVar als2 _ _ targs2)) ->
-      Scalar . TypeVar (als1 <> als2) u v <$> zipWithM matchTypeArg targs1 targs2
-    _ -> return t1
-
-  where matchTypeArg ta@TypeArgType{} _ = return ta
-        matchTypeArg a _ = return a
-
-        onShapes shape1 shape2 =
-          ShapeDecl <$> zipWithM onDims (shapeDims shape1) (shapeDims shape2)
 
 -- | Replace dimension mismatches with AnyDim.  Where one of the types
 -- contains an AnyDim dimension, the corresponding dimension in the

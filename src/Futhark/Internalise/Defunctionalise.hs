@@ -1,15 +1,18 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
 module Futhark.Internalise.Defunctionalise
   ( transformProg ) where
 
 import qualified Control.Arrow as Arrow
+import           Control.Monad.State
 import           Control.Monad.RWS hiding (Sum)
 import           Data.Bifunctor
 import           Data.Foldable
 import           Data.List
 import qualified Data.List.NonEmpty as NE
 import           Data.Loc
+import           Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
@@ -129,6 +132,13 @@ arraySizes (Array _ _ t shape) =
 
 patternArraySizes :: Pattern -> S.Set VName
 patternArraySizes = arraySizes . patternStructType
+
+dimMapping :: PatternType -> PatternType -> M.Map VName VName
+dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
+  where f (NamedDim d1) (NamedDim d2) = do
+          modify $ M.insert (qualLeaf d1) (qualLeaf d2)
+          return $ NamedDim d1
+        f d _ = return d
 
 defuncFun :: [TypeParam] -> [Pattern] -> Exp -> (Aliasing, StructType) -> SrcLoc
           -> DefM (Exp, StaticVal)
@@ -265,12 +275,18 @@ defuncExp (Coerce e0 tydecl t loc)
                                return (Coerce e0' tydecl t loc, sv)
   | otherwise = defuncExp e0
 
-defuncExp (LetPat pat e1 e2 (_, retext) loc) = do
+defuncExp (LetPat pat e1 e2 (Info t, retext) loc) = do
   (e1', sv1) <- defuncExp e1
   let env  = matchPatternSV pat sv1
       pat' = updatePattern pat sv1
   (e2', sv2) <- localEnv env $ defuncExp e2
-  return (LetPat pat' e1' e2' (Info $ typeOf e2', retext) loc, sv2)
+  -- To maintain any sizes going out of scope, we need to compute the
+  -- old size substitution induced by retext and also apply it to the
+  -- newly computed body type.
+  let mapping = dimMapping (typeOf e2) t
+      subst v = fromMaybe v $ M.lookup v mapping
+      t' = first (fmap subst) $ typeOf e2'
+  return (LetPat pat' e1' e2' (Info t', retext) loc, sv2)
 
 -- Local functions are handled by rewriting them to lambdas, so that
 -- the same machinery can be re-used.
