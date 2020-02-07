@@ -985,7 +985,7 @@ defuncValBind (ValBind entry@Just{} name _ (Info (rettype, retext)) tparams para
 
 defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ _) = do
   (tparams', params', body', sv) <- defuncLet tparams params body rettype
-  let rettype' = anyDimShapeAnnotations $ toStruct $ typeOf body'
+  let rettype' = anySizes $ toStruct $ typeOf body'
   return ( valbind { valBindRetDecl    = retdecl
                    , valBindRetType    = Info (combineTypeShapes rettype rettype',
                                                retext)

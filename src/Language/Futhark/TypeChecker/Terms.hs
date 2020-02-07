@@ -985,7 +985,7 @@ checkAscript loc decl e shapef = do
   -- explicitly, because uniqueness is ignored by unification.
   t' <- normTypeFully t
   decl_t' <- normTypeFully $ unInfo $ expandedType decl'
-  unless (t' `subtypeOf` anyDimShapeAnnotations decl_t') $
+  unless (t' `subtypeOf` anySizes decl_t') $
     typeError loc mempty $ "Type " ++ quote (pretty t') ++ " is not a subtype of " ++
     quote (pretty decl_t') ++ "."
 
@@ -1144,7 +1144,7 @@ checkExp (Coerce e decl _ loc) = onFailure CheckingAscription $ do
   -- type must still match.  Eventually we will throw away those sizes
   -- (they will end up being unified with various sizes in 'e', which
   -- is fine).
-  (decl', e') <- checkAscript loc decl e anyDimShapeAnnotations
+  (decl', e') <- checkAscript loc decl e anySizes
 
   -- Now we instantiate the declared type again, but this time we keep
   -- around the sizes as existentials.  This is the result of the
@@ -1361,8 +1361,8 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   let usage = mkUsage loc "record update"
   r <- foldM (flip $ mustHaveField usage) a fields
   ve_t <- expType ve'
-  unify usage (anyDimShapeAnnotations $ toStruct r)
-              (anyDimShapeAnnotations $ toStruct ve_t)
+  unify usage (anySizes $ toStruct r)
+              (anySizes $ toStruct ve_t)
   maybe_a' <- onRecordField (const ve_t) fields <$> expTypeFully src'
   case maybe_a' of
     Just a' -> return $ RecordUpdate src' fields ve' (Info a') loc
@@ -1512,7 +1512,7 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
 
   (merge_t, new_dims) <-
     instantiateEmptyArrayDims loc "loop" Nonrigid . -- dim handling (1)
-    anyDimShapeAnnotations .
+    anySizes .
     (`setAliases` mempty) =<< expTypeFully mergeexp'
 
   -- dim handling (2)
@@ -1522,8 +1522,8 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
         -- We are ignoring the dimensions here, because any mismatches
         -- should be turned into fresh size variables.
         unify (mkUsage (srclocOf loopbody) "matching loop body to loop pattern")
-          (toStruct (anyDimShapeAnnotations pat_t))
-          (toStruct (anyDimShapeAnnotations loopbody_t))
+          (toStruct (anySizes pat_t))
+          (toStruct (anySizes loopbody_t))
         pat_t' <- normTypeFully pat_t
         loopbody_t' <- normTypeFully loopbody_t
 
@@ -1999,7 +1999,7 @@ unmatched hole orig_ps
                then PatternConstr c (Info t) [] noLoc
                else PatternParens (PatternConstr c (Info t) wildCS noLoc) noLoc
         buildBool t b =
-          PatternLit (Literal (BoolValue b) noLoc) (Info (vacuousShapeAnnotations t)) noLoc
+          PatternLit (Literal (BoolValue b) noLoc) (Info (addSizes t)) noLoc
         buildId t n =
           -- The VName tag here will never be used since the value
           -- exists exclusively for printing warnings.
@@ -2688,7 +2688,7 @@ checkFunBody params body maybe_rettype loc = do
       -- explicitly, because uniqueness is ignored by unification.
       rettype' <- normTypeFully rettype
       body_t'' <- normTypeFully rettype -- Substs may have changed.
-      unless (body_t'' `subtypeOf` anyDimShapeAnnotations rettype') $
+      unless (body_t'' `subtypeOf` anySizes rettype') $
         typeError (srclocOf body) mempty $ pretty $
         text "Body type" </> indent 2 (ppr body_t'') </>
         text "is not a subtype of annotated type" </>

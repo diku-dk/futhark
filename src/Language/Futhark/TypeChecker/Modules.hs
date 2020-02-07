@@ -471,8 +471,8 @@ matchMTys orig_mty orig_mty_sig =
         Left err -> Just $ Just $ prettyTypeErrorNoLoc err
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
-        Right t | removeShapeAnnotations t `subtypeOf`
-                  removeShapeAnnotations orig_spec_t -> Nothing
+        Right t | noSizes t `subtypeOf`
+                  noSizes orig_spec_t -> Nothing
                 | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =
