@@ -24,10 +24,11 @@ documented in this page.
 COMMANDS
 ========
 
-futhark check PROGRAM
----------------------
+futhark check [-w] PROGRAM
+--------------------------
 
-Check whether a Futhark program type checks.
+Check whether a Futhark program type checks.  With ``-w``, no warnings
+are printed.
 
 futhark datacmp FILE_A FILE_B
 -----------------------------

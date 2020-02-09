@@ -27,6 +27,7 @@ import qualified Futhark.CLI.CSharp as CSharp
 import qualified Futhark.CLI.CSOpenCL as CSOpenCL
 import qualified Futhark.CLI.Test as Test
 import qualified Futhark.CLI.Bench as Bench
+import qualified Futhark.CLI.Check as Check
 import qualified Futhark.CLI.Dataset as Dataset
 import qualified Futhark.CLI.Datacmp as Datacmp
 import qualified Futhark.CLI.Pkg as Pkg
@@ -66,7 +67,7 @@ commands = sortOn fst
            , ("doc", (Doc.main, "Generate documentation for Futhark code."))
            , ("pkg", (Pkg.main, "Manage local packages."))
 
-           , ("check", (Misc.mainCheck, "Type check a program."))
+           , ("check", (Check.main, "Type check a program."))
            , ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files."))
            , ("autotune", (Autotune.main, "Autotune threshold parameters."))
            , ("query", (Query.main, "Query semantic information about program."))
