@@ -120,7 +120,7 @@ newCompilerConfig x = CompilerConfig { compilerOutput = Nothing
                                      , compilerMode = ToExecutable
                                      , compilerWerror = False
                                      , compilerSafe = False
-                                     , compilerWarn = False
+                                     , compilerWarn = True
                                      , compilerConfig = x
                                      }
 
