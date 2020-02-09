@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Added `concat_to` and `flatten_to` functions to prelude.
 
+  * Added `indices` function to the prelude.
+
 ### Removed
 
 ### Changed
