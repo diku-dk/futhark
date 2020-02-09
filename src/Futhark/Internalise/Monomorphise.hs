@@ -463,19 +463,10 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
 
   body' <- updateExpTypes (`M.lookup` substs') body
   body'' <- withRecordReplacements (mconcat rrs) $ transformExp body'
-  body''' <- astMap noMoreSumTypes body''
-  params''' <- astMap noMoreSumTypes params''
   name' <- if null tparams then return name else newName name
-  return (name', toValBinding t_shape_params name' params''' (rettype', retext) body''')
+  return (name', toValBinding t_shape_params name' params'' (rettype', retext) body'')
 
   where shape_params = filter (not . isTypeParam) tparams
-
-        noMoreSumTypes = ASTMapper { mapOnExp         = pure
-                                   , mapOnName        = pure
-                                   , mapOnQualName    = pure
-                                   , mapOnStructType  = pure
-                                   , mapOnPatternType = pure
-                                   }
 
         updateExpTypes substs = astMap $ mapper substs
         mapper substs = ASTMapper { mapOnExp         = astMap $ mapper substs
