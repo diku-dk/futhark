@@ -60,6 +60,9 @@ OPTIONS
 -V
   Print version information on standard output and exit.
 
+-W
+  Do not print any warnings.
+
 --Werror
   Treat warnings as errors.
 

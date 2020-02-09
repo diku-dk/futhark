@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Added `indices` function to the prelude.
 
+  * `futhark check` and all compilers now take a `-w` option for
+    disabling warnings.
+
 ### Removed
 
 ### Changed

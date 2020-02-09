@@ -75,6 +75,9 @@ commandLineOptions =
   , Option [] ["executable"]
     (NoArg $ Right $ \config -> config { compilerMode = ToExecutable })
     "Generate an executable instead of a library (set by default)."
+  , Option "w" []
+    (NoArg $ Right $ \config -> config { compilerWarn = False })
+    "Disable all warnings."
   , Option [] ["Werror"]
     (NoArg $ Right $ \config -> config { compilerWerror = True })
     "Treat warnings as errors."
@@ -103,6 +106,7 @@ data CompilerConfig cfg =
                  , compilerMode :: CompilerMode
                  , compilerWerror :: Bool
                  , compilerSafe :: Bool
+                 , compilerWarn :: Bool
                  , compilerConfig :: cfg
                  }
 
@@ -116,6 +120,7 @@ newCompilerConfig x = CompilerConfig { compilerOutput = Nothing
                                      , compilerMode = ToExecutable
                                      , compilerWerror = False
                                      , compilerSafe = False
+                                     , compilerWarn = False
                                      , compilerConfig = x
                                      }
 
@@ -128,4 +133,5 @@ futharkConfig config =
   newFutharkConfig { futharkVerbose = compilerVerbose config
                    , futharkWerror = compilerWerror config
                    , futharkSafe = compilerSafe config
+                   , futharkWarn = compilerWarn config
                    }

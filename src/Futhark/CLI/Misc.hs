@@ -1,8 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 -- Various small subcommands that are too simple to deserve their own file.
 module Futhark.CLI.Misc
-  ( mainCheck
-  , mainImports
+  ( mainImports
   , mainDataget
   )
 where
@@ -18,14 +17,6 @@ import System.Exit
 import Futhark.Compiler
 import Futhark.Util.Options
 import Futhark.Test
-
-mainCheck :: String -> [String] -> IO ()
-mainCheck = mainWithOptions () [] "program" $ \args () ->
-  case args of
-    [file] -> Just $ do
-      (warnings, _, _) <- readProgramOrDie file
-      liftIO $ hPutStr stderr $ show warnings
-    _ -> Nothing
 
 mainImports :: String -> [String] -> IO ()
 mainImports = mainWithOptions () [] "program" $ \args () ->
