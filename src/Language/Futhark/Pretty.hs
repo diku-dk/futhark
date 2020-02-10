@@ -208,7 +208,12 @@ letBody body          = text "in" <+> align (ppr body)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   ppr = pprPrec (-1)
-  pprPrec _ (Var name _ _) = ppr name
+  pprPrec _ (Var name t _) = ppr name <> inst
+    where inst = case unAnnot t of
+                   Just t'
+                     | isEnvVarSet "FUTHARK_COMPILER_DEBUGGING" False ->
+                         text "@" <> parens (align $ ppr t')
+                   _ -> mempty
   pprPrec _ (Parens e _) = align $ parens $ ppr e
   pprPrec _ (QualParens (v, _) e _) = ppr v <> text "." <> align (parens $ ppr e)
   pprPrec p (Ascript e t _) =
