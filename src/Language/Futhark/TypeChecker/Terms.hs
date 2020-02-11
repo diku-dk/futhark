@@ -2062,6 +2062,19 @@ checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, 
   (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
   argtype' <- normTypeFully argtype
 
+  -- Check whether this would produce an impossible return type.
+  let (_, tp2_paramdims, _) = dimUses $ toStruct tp2'
+  case filter (`S.member` tp2_paramdims) ext of
+    [] -> return ()
+    ext_paramdims -> do
+      let onDim (NamedDim qn)
+            | qualLeaf qn `elem` ext_paramdims = AnyDim
+          onDim d = d
+      typeError loc mempty $ pretty $
+        text "Anonymous size would appear in function parameter of return type:" </>
+        indent 2 (ppr (first onDim tp2')) </>
+        textwrap "This is usually because a higher-order function is used with functional arguments that return anonymous sizes, which are then used as parameters of other function arguments."
+
   occur [observation as loc]
 
   checkOccurences dflow
@@ -2549,8 +2562,8 @@ verifyFunctionParams fname params =
 
     verifyParams _ [] = return ()
 
--- Returns a pair of the sizes of the immediate type produced, as well
--- as the sizes of parameter types.
+-- Returns the sizes of the immediate type produced,
+-- the sizes of parameter types, and the sizes of return types.
 dimUses :: StructType -> (Names, Names, Names)
 dimUses = execWriter . traverseDims f
   where f PosImmediate (NamedDim v) = tell (S.singleton (qualLeaf v), mempty, mempty)
