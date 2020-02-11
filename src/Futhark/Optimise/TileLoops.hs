@@ -19,6 +19,7 @@ import Futhark.Representation.Kernels
 import Futhark.Transform.Rename
 import Futhark.Pass
 import Futhark.Tools
+import Futhark.Optimise.TileLoops.BlkRegTiling
 
 tileLoops :: Pass Kernels Kernels
 tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
@@ -38,11 +39,15 @@ optimiseBody (Body () bnds res) = localScope (scopeOf bnds) $
   Body () <$> (mconcat <$> mapM optimiseStm (stmsToList bnds)) <*> pure res
 
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
-optimiseStm (Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody)))) = do
-  (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
-  return $ host_stms <>
-    oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
-  where initial_variance = M.map mempty $ scopeOfSegSpace space
+optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody)))) = do
+ res_mmm_tiling <- mmmTiling2D stm
+ case res_mmm_tiling of
+  Just (extra_bnds, stmt') -> return $ extra_bnds <> oneStm stmt'
+  Nothing -> do
+   (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
+   return $ host_stms <>
+     oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
+ where initial_variance = M.map mempty $ scopeOfSegSpace space
 
 optimiseStm (Let pat aux e) =
   pure <$> (Let pat aux <$> mapExpM optimise e)
