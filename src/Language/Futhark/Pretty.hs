@@ -134,7 +134,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
           fs' = map ppField $ M.toList fs
   pprPrec p (Arrow _ (Named v) t1 t2) =
     parensIf (p > 1) $
-    parens (pprName v <> colon <+> ppr t1) <+/> text "->" <+> pprPrec 1 t2
+    parens (pprName v <> colon <+> align (ppr t1)) <+/> text "->" <+> pprPrec 1 t2
   pprPrec p (Arrow _ Unnamed t1 t2) =
     parensIf (p > 1) $ pprPrec 2 t1 <+/> text "->" <+> pprPrec 1 t2
   pprPrec p (Sum cs) =
@@ -248,7 +248,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
   pprPrec p (Apply f arg _ _ _) =
-    parensIf (p >= 10) $ ppr f <+> pprPrec 10 arg
+    parensIf (p >= 10) $ ppr f <+/> pprPrec 10 arg
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec p (LetPat pat e body _ _) =
     parensIf (p /= -1) $ align $
