@@ -733,8 +733,9 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
         replace _ _ ve' _ = return ve'
 
 internaliseExp desc (E.Unsafe e _) =
-  local (\env -> env { envDoBoundsChecks = False }) $
-  internaliseExp desc e
+  local mkUnsafe $ internaliseExp desc e
+  where mkUnsafe env | envSafe env = env
+                     | otherwise = env { envDoBoundsChecks = False }
 
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
@@ -1783,8 +1784,7 @@ bindExtSizes ret retext ses = do
 
 askSafety :: InternaliseM Safety
 askSafety = do check <- asks envDoBoundsChecks
-               safe <- asks envSafe
-               return $ if check || safe then I.Safe else I.Unsafe
+               return $ if check then I.Safe else I.Unsafe
 
 -- Implement partitioning using maps, scans and writes.
 partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], [I.SubExp])
