@@ -134,7 +134,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
           fs' = map ppField $ M.toList fs
   pprPrec p (Arrow _ (Named v) t1 t2) =
     parensIf (p > 1) $
-    parens (pprName v <> colon <+> ppr t1) <+/> text "->" <+> pprPrec 1 t2
+    parens (pprName v <> colon <+> align (ppr t1)) <+/> text "->" <+> pprPrec 1 t2
   pprPrec p (Arrow _ Unnamed t1 t2) =
     parensIf (p > 1) $ pprPrec 2 t1 <+/> text "->" <+> pprPrec 1 t2
   pprPrec p (Sum cs) =
@@ -208,7 +208,12 @@ letBody body          = text "in" <+> align (ppr body)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   ppr = pprPrec (-1)
-  pprPrec _ (Var name _ _) = ppr name
+  pprPrec _ (Var name t _) = ppr name <> inst
+    where inst = case unAnnot t of
+                   Just t'
+                     | isEnvVarSet "FUTHARK_COMPILER_DEBUGGING" False ->
+                         text "@" <> parens (align $ ppr t')
+                   _ -> mempty
   pprPrec _ (Parens e _) = align $ parens $ ppr e
   pprPrec _ (QualParens (v, _) e _) = ppr v <> text "." <> align (parens $ ppr e)
   pprPrec p (Ascript e t _) =
@@ -243,7 +248,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
   pprPrec p (Apply f arg _ _ _) =
-    parensIf (p >= 10) $ ppr f <+> pprPrec 10 arg
+    parensIf (p >= 10) $ ppr f <+/> pprPrec 10 arg
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec p (LetPat pat e body _ _) =
     parensIf (p /= -1) $ align $

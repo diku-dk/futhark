@@ -58,7 +58,7 @@ is a double-precision float.
 
 .. productionlist::
    int_type: "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
-   float_type: "f8" | "f16" | "f32" | "f64"
+   float_type: "f32" | "f64"
 
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Futhark now type-checks size annotations using a size-dependent
+    type system.
+
   * `reduce_by_index` may be somewhat faster for complex operators on
     histograms that barely fit in local memory.
 
@@ -16,6 +19,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     nested in `map`.  These are now properly parallelised.
 
   * Added `concat_to` and `flatten_to` functions to prelude.
+
+  * Added `indices` function to the prelude.
+
+  * `futhark check` and all compilers now take a `-w` option for
+    disabling warnings.
+
+  * `futhark bench` now accepts `--pass-compiler-option`.
 
 ### Removed
 

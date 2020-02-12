@@ -17,7 +17,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Loc
 
-import Language.Futhark as E
+import Language.Futhark as E hiding (matchDims)
 import qualified Futhark.Representation.SOACS as I
 import Futhark.MonadFreshNames
 import Futhark.Internalise.Monad

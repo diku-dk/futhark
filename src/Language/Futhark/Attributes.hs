@@ -63,9 +63,9 @@ module Language.Futhark.Attributes
   , setAliases
   , addAliases
   , setUniqueness
-  , removeShapeAnnotations
-  , vacuousShapeAnnotations
-  , anyDimShapeAnnotations
+  , noSizes
+  , addSizes
+  , anySizes
   , traverseDims
   , DimPos(..)
   , tupleRecord
@@ -78,6 +78,7 @@ module Language.Futhark.Attributes
   , isTypeParam
   , isSizeParam
   , combineTypeShapes
+  , matchDims
   , unscopeType
   , onRecordField
 
@@ -157,22 +158,16 @@ nestedDims t =
         notV (Named v) = (/=NamedDim (qualName v))
 
 -- | Change the shape of a type to be just the 'Rank'.
-removeShapeAnnotations :: TypeBase (DimDecl vn) as -> TypeBase () as
-removeShapeAnnotations = modifyShapeAnnotations $ const ()
+noSizes :: TypeBase (DimDecl vn) as -> TypeBase () as
+noSizes = first $ const ()
 
 -- | Add size annotations that are all 'AnyDim'.
-vacuousShapeAnnotations :: TypeBase () as -> TypeBase (DimDecl vn) as
-vacuousShapeAnnotations = modifyShapeAnnotations $ const AnyDim
+addSizes :: TypeBase () as -> TypeBase (DimDecl vn) as
+addSizes = first $ const AnyDim
 
 -- | Change all size annotations to be 'AnyDim'.
-anyDimShapeAnnotations :: TypeBase (DimDecl vn) as -> TypeBase (DimDecl vn) as
-anyDimShapeAnnotations = modifyShapeAnnotations $ const AnyDim
-
--- | Change the size annotations of a type.
-modifyShapeAnnotations :: (oldshape -> newshape)
-                       -> TypeBase oldshape as
-                       -> TypeBase newshape as
-modifyShapeAnnotations = first
+anySizes :: TypeBase (DimDecl vn) as -> TypeBase (DimDecl vn) as
+anySizes = first $ const AnyDim
 
 -- | Where does this dimension occur?
 data DimPos
@@ -240,7 +235,7 @@ diet (Scalar Sum{})                     = Observe
 -- information, and no embedded names.
 toStructural :: TypeBase dim as
              -> TypeBase () ()
-toStructural = flip setAliases () . modifyShapeAnnotations (const ())
+toStructural = flip setAliases () . first (const ())
 
 -- | Remove aliasing information from a type.
 toStruct :: TypeBase dim as
@@ -358,6 +353,33 @@ combineTypeShapes (Array als1 u1 et1 shape1) (Array als2 _u2 et2 shape2)
       (als1<>als2) new_shape u1
 combineTypeShapes _ new_tp = new_tp
 
+-- | Match the dimensions of otherwise assumed-equal types.
+matchDims :: (Monoid as, Monad m) =>
+             (d -> d -> m d)
+          -> TypeBase d as -> TypeBase d as
+          -> m (TypeBase d as)
+matchDims onDims t1 t2 =
+  case (t1, t2) of
+    (Array als1 u1 et1 shape1, Array als2 u2 et2 shape2) ->
+      flip setAliases (als1<>als2) <$>
+      (arrayOf <$>
+       matchDims onDims (Scalar et1) (Scalar et2) <*>
+       onShapes shape1 shape2 <*> pure (min u1 u2))
+    (Scalar (Record f1), Scalar (Record f2)) ->
+      Scalar . Record <$>
+      traverse (uncurry (matchDims onDims)) (M.intersectionWith (,) f1 f2)
+    (Scalar (TypeVar als1 u v targs1),
+     Scalar (TypeVar als2 _ _ targs2)) ->
+      Scalar . TypeVar (als1 <> als2) u v <$> zipWithM matchTypeArg targs1 targs2
+    _ -> return t1
+
+  where matchTypeArg ta@TypeArgType{} _ = return ta
+        matchTypeArg a _ = return a
+
+        onShapes shape1 shape2 =
+          ShapeDecl <$> zipWithM onDims (shapeDims shape1) (shapeDims shape2)
+
+
 -- | Set the uniqueness attribute of a type.  If the type is a record
 -- or sum type, the uniqueness of its components will be modified.
 setUniqueness :: TypeBase dim as -> Uniqueness -> TypeBase dim as
@@ -420,7 +442,7 @@ rank n = ShapeDecl $ replicate n AnyDim
 -- reference the bound variables, and turn any dimensions that name
 -- them into AnyDim instead.
 unscopeType :: S.Set VName -> PatternType -> PatternType
-unscopeType bound_here t = modifyShapeAnnotations onDim $ t `addAliases` S.map unbind
+unscopeType bound_here t = first onDim $ t `addAliases` S.map unbind
   where unbind (AliasBound v) | v `S.member` bound_here = AliasFree v
         unbind a = a
         onDim (NamedDim qn) | qualLeaf qn `S.member` bound_here = AnyDim
