@@ -215,6 +215,7 @@ data CompileOptions =
   CompileOptions
   { compFuthark :: String
   , compBackend :: String
+  , compOptions :: [String]
   }
 
 progNotFound :: String -> String
@@ -239,7 +240,9 @@ prepareBenchmarkProgram concurrency opts program cases = do
 
     Right () -> do
       (futcode, _, futerr) <- liftIO $ readProcessWithExitCode futhark
-                              [compBackend opts, program, "-o", binaryName program] ""
+                              ([compBackend opts, program, "-o", binaryName program] <>
+                               compOptions opts)
+                              ""
 
       case futcode of
         ExitSuccess     -> return $ Right ()

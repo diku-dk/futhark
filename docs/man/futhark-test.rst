@@ -160,7 +160,11 @@ OPTIONS
   Pass an option to benchmark programs that are being run.  For
   example, we might want to run OpenCL programs on a specific device::
 
-    futhark-bench prog.fut --backend=opencl --pass-option=-dHawaii
+    futhark test prog.fut --backend=opencl --pass-option=-dHawaii
+
+--pass-compiler-option=opt
+
+  Pass an extra option to the compiler when compiling the programs.
 
 --runner=program
 
