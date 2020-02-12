@@ -293,6 +293,9 @@ commandLineOptions =
   , Option [] ["ast"]
     (NoArg $ Right $ \opts -> opts { futharkPrintAST = True })
     "Output ASTs instead of prettyprinted programs."
+  , Option [] ["safe"]
+    (NoArg $ Right $ changeFutharkConfig $ \opts -> opts { futharkSafe = True })
+    "Ignore 'unsafe'."
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineAndRemoveDeadFunctions []
