@@ -13,8 +13,9 @@ import Data.Word
 import qualified Data.Vector.Unboxed.Mutable as UMVec
 import qualified Data.Vector.Unboxed as UVec
 import Data.Vector.Generic (freeze)
-
 import System.Console.GetOpt
+import System.Exit
+import System.IO
 import System.Random
 
 import Language.Futhark.Syntax hiding
@@ -32,7 +33,8 @@ main = mainWithOptions initialDataOptions commandLineOptions "options..." f
           | null $ optOrders config = Just $ do
               maybe_vs <- readValues <$> BS.getContents
               case maybe_vs of
-                Nothing -> error "Malformed data on standard input."
+                Nothing -> do hPutStrLn stderr "Malformed data on standard input."
+                              exitFailure
                 Just vs ->
                   case format config of
                     Text -> mapM_ (putStrLn . pretty) vs
@@ -66,7 +68,8 @@ commandLineOptions = [
                 [(n', "")] ->
                   Right $ \config -> config { optSeed = n' }
                 _ ->
-                  Left $ error $ "'" ++ n ++ "' is not an integer.")
+                  Left $ do hPutStrLn stderr $ "'" ++ n ++ "' is not an integer."
+                            exitFailure)
      "SEED")
     "The seed to use when initialising the RNG."
   , Option "g" ["generate"]
@@ -79,7 +82,8 @@ commandLineOptions = [
                              [g (optRange config) (format config)]
                          }
                 Left err ->
-                  Left $ error err)
+                  Left $ do hPutStrLn stderr err
+                            exitFailure)
      "TYPE")
     "Generate a random value of this type."
   , Option [] ["text"]
@@ -116,7 +120,9 @@ setRangeOption tname set =
                 Right $ \config ->
                 config { optRange = set (lower', upper') $ optRange config }
               _ ->
-                Left $ error $ "Invalid bounds: " ++ b
+                Left $ do
+                hPutStrLn stderr $ "Invalid bounds for " ++ tname ++ ": " ++ b
+                exitFailure
             )
    "MIN:MAX") $
   "Range of " ++ tname ++ " values."

@@ -49,6 +49,9 @@ OPTIONS
   error, the result of the last successful compiler step will be
   printed to standard error.
 
+-W
+  Do not print any warnings.
+
 -V
   Print version information on standard output and exit.
 

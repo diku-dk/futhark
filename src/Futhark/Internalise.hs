@@ -174,7 +174,7 @@ generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info (rettype, _)) _ param
   let tparams = map (`E.TypeParamDim` noLoc) $ S.toList $
                 mconcat $ map E.patternDimNames params_fresh
   bindingParams tparams params_fresh $ \_ shapeparams params' -> do
-    (entry_rettype, _) <- internaliseEntryReturnType $ anyDimShapeAnnotations rettype
+    (entry_rettype, _) <- internaliseEntryReturnType $ anySizes rettype
     let (e_paramts, e_rettype) = E.unfoldFunType ftype
         entry' = entryPoint (zip3 params e_paramts params') (retdecl, e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
@@ -230,7 +230,7 @@ entryPoint params (retdecl, eret, crets) =
         entryPointType (te, t, ts) =
           [I.TypeOpaque desc $ length ts]
           where desc = maybe (pretty t') typeExpOpaqueName te
-                t' = removeShapeAnnotations t `E.setUniqueness` Nonunique
+                t' = noSizes t `E.setUniqueness` Nonunique
 
         -- | We remove dimension arguments such that we hopefully end
         -- up with a simpler type name for the entry point.  The
@@ -733,8 +733,9 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
         replace _ _ ve' _ = return ve'
 
 internaliseExp desc (E.Unsafe e _) =
-  local (\env -> env { envDoBoundsChecks = False }) $
-  internaliseExp desc e
+  local mkUnsafe $ internaliseExp desc e
+  where mkUnsafe env | envSafe env = env
+                     | otherwise = env { envDoBoundsChecks = False }
 
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
@@ -1783,8 +1784,7 @@ bindExtSizes ret retext ses = do
 
 askSafety :: InternaliseM Safety
 askSafety = do check <- asks envDoBoundsChecks
-               safe <- asks envSafe
-               return $ if check || safe then I.Safe else I.Unsafe
+               return $ if check then I.Safe else I.Unsafe
 
 -- Implement partitioning using maps, scans and writes.
 partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], [I.SubExp])

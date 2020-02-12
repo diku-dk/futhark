@@ -59,6 +59,11 @@ let rotate [n] 't (r: i32) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> [n]t
 let iota (n: i32): *[n]i32 =
   i32.iota n :> [n]i32
 
+-- | Construct an array comprising valid indexes into some other
+-- array, starting at 0.
+let indices [n] 't (_: [n]t) : *[n]i32 =
+  iota n
+
 -- | Construct an array of the given length containing the given
 -- value.
 let replicate 't (n: i32) (x: t): *[n]t =

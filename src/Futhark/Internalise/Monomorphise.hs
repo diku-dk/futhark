@@ -463,19 +463,10 @@ monomorphizeBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
 
   body' <- updateExpTypes (`M.lookup` substs') body
   body'' <- withRecordReplacements (mconcat rrs) $ transformExp body'
-  body''' <- astMap noMoreSumTypes body''
-  params''' <- astMap noMoreSumTypes params''
   name' <- if null tparams then return name else newName name
-  return (name', toValBinding t_shape_params name' params''' (rettype', retext) body''')
+  return (name', toValBinding t_shape_params name' params'' (rettype', retext) body'')
 
   where shape_params = filter (not . isTypeParam) tparams
-
-        noMoreSumTypes = ASTMapper { mapOnExp         = pure
-                                   , mapOnName        = pure
-                                   , mapOnQualName    = pure
-                                   , mapOnStructType  = pure
-                                   , mapOnPatternType = pure
-                                   }
 
         updateExpTypes substs = astMap $ mapper substs
         mapper substs = ASTMapper { mapOnExp         = astMap $ mapper substs
@@ -534,7 +525,7 @@ typeSubstsM loc orig_t1 orig_t2 =
           unless exists $ do
             t' <- if pos
                   then bitraverse onDim pure t
-                  else pure $ vacuousShapeAnnotations t
+                  else pure $ addSizes t
             modify $ M.insert v t'
 
         onDim () = do d <- lift $ lift $ newVName "d"
@@ -581,13 +572,13 @@ removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats
 removeTypeVariablesInType :: TypeBase () () -> MonoM (TypeBase () ())
 removeTypeVariablesInType t = do
   subs <- asks $ M.map TypeSub . envTypeBindings
-  return $ removeShapeAnnotations $ substituteTypes subs $ vacuousShapeAnnotations t
+  return $ noSizes $ substituteTypes subs $ addSizes t
 
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   valbind' <- toPolyBinding <$> removeTypeVariables (isJust (valBindEntryPoint valbind)) valbind
   when (isJust $ valBindEntryPoint valbind) $ do
-    t <- removeTypeVariablesInType $ removeShapeAnnotations $ foldFunType
+    t <- removeTypeVariablesInType $ noSizes $ foldFunType
          (map patternStructType (valBindParams valbind)) $
          fst $ unInfo $ valBindRetType valbind
     (name, valbind'') <- monomorphizeBinding True valbind' t
