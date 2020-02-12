@@ -728,9 +728,9 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
 slugMaxLocalMemPasses :: SegHistSlug -> Int
 slugMaxLocalMemPasses slug =
   case slugAtomicUpdate slug of
-    AtomicPrim _ -> 2 --1
-    AtomicCAS _  -> 4 --2
-    AtomicLocking _ -> 4
+    AtomicPrim _ -> 2
+    AtomicCAS _  -> 4
+    AtomicLocking _ -> 5
 
 localMemoryCase :: [PatElem ExplicitMemory]
                 -> Imp.Exp
